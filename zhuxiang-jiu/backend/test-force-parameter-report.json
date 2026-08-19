@@ -1,0 +1,142 @@
+﻿{
+    "testSuite":  "-Force Parameter (Source Analysis)",
+    "timestamp":  "2026-08-20 02:00:10",
+    "total":  22,
+    "passed":  22,
+    "failed":  0,
+    "success":  true,
+    "results":  [
+                    {
+                        "Id":  "TC01",
+                        "Name":  "git-ops.ps1 param has [switch]$Force",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC02",
+                        "Name":  "github-push.ps1 param has [switch]$Force",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC03",
+                        "Name":  "git-ops.ps1 Do-Push passes -Force",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC04",
+                        "Name":  "git-ops.ps1 Do-Sync passes -Force",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC05",
+                        "Name":  "push args include --force-with-lease",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC06",
+                        "Name":  "DryRun args include --force-with-lease",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC07",
+                        "Name":  "shows Force mode warning",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC08",
+                        "Name":  "Force mode is conditional on $Force",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC09",
+                        "Name":  "DryRun output uses dryRunArgs array",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC10",
+                        "Name":  "DryRun base command is \u0027git push\u0027 (without lease)",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC11",
+                        "Name":  "Force warning appears before DryRun exit",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC12",
+                        "Name":  "Force mode guarded by if($Force)",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC13",
+                        "Name":  "lease addition guarded by if($Force)",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC14",
+                        "Name":  "Do-Push delegates -Force to github-push.ps1",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC15",
+                        "Name":  "help links -Force to --force-with-lease",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC16",
+                        "Name":  "rejected handler guards Force (no escalation)",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC17",
+                        "Name":  "Force rejection uses break (no --force fallback)",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC18",
+                        "Name":  "interactive --force is separate from -Force",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC19",
+                        "Name":  "lease rejection provides guidance",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC20",
+                        "Name":  "help documents -Force option",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC21",
+                        "Name":  "help has -Force example",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    },
+                    {
+                        "Id":  "TC22",
+                        "Name":  "github-push.ps1 header documents -Force",
+                        "Status":  "PASS",
+                        "Detail":  ""
+                    }
+                ]
+}

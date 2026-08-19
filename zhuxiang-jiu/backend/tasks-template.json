@@ -1,0 +1,276 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Git: Push (Interactive)",
+      "detail": "Push to GitHub with PAT guidance",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","push"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Push (Configured)",
+      "detail": "Push with pre-configured user/repo",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","push","-GitHubUser","ccvcc","-RepoName","zhuxiang-jiu","-UseHttps"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Push (Dry Run)",
+      "detail": "Simulate push without network call",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","push","-GitHubUser","ccvcc","-RepoName","zhuxiang-jiu","-DryRun"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Push (SSH)",
+      "detail": "Push via SSH protocol",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","push","-GitHubUser","ccvcc","-RepoName","zhuxiang-jiu","-UseSsh"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Push (Force with Lease)",
+      "detail": "Force push using --force-with-lease (safer than --force, refuses if remote has new commits)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","push","-GitHubUser","ccvcc","-RepoName","zhuxiang-jiu","-UseHttps","-Force"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Pull (Rebase)",
+      "detail": "Pull latest from origin with rebase",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","pull"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Pull (Merge)",
+      "detail": "Pull latest with merge commit",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","pull","-UseMerge"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Fetch All",
+      "detail": "Fetch all branches from origin (prune deleted)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","fetch"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Sync (Fetch+Pull+Push)",
+      "detail": "Full sync: fetch + pull rebase + push",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","sync","-GitHubUser","ccvcc","-RepoName","zhuxiang-jiu","-UseHttps"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Branch List",
+      "detail": "List all branches (local + remote + tracking)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","branch"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Stash Save",
+      "detail": "Stash uncommitted changes",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","stash","-StashAction","save"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Stash Pop",
+      "detail": "Apply and drop latest stash",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","stash","-StashAction","pop"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Stash List",
+      "detail": "List all stashes",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","stash","-StashAction","list"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Stash Drop",
+      "detail": "Drop latest stash",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","stash","-StashAction","drop"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Stash Apply",
+      "detail": "Apply latest stash (keep in stash list)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","stash","-StashAction","apply"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Diff (Unstaged)",
+      "detail": "Show unstaged changes",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","diff","-DiffMode","unstaged"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Diff (Staged)",
+      "detail": "Show staged changes (ready to commit)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","diff","-DiffMode","staged"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Diff (Stat)",
+      "detail": "Show diff summary (files changed, insertions, deletions)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","diff","-DiffMode","stat"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Diff (Name Only)",
+      "detail": "Show changed file names only",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","diff","-DiffMode","name-only"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Status",
+      "detail": "Show working tree status",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","status"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Log (Recent 10)",
+      "detail": "Show recent 10 commits with graph",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","log","-LogCount","10"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Log (Recent 20)",
+      "detail": "Show recent 20 commits with graph",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","log","-LogCount","20"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Git: Help",
+      "detail": "Show git-ops.ps1 usage and available actions",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/git-ops.ps1","-Action","help"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Test: Git Push Error Handling",
+      "detail": "Run 37 error handling assertions (8 groups)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/test-git-push-errors.ps1"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Test: Python Unit Tests (pytest)",
+      "detail": "Run 21 FastAPI unit tests with coverage",
+      "type": "shell",
+      "command": "pytest",
+      "args": ["${workspaceFolder}/zhuxiang-jiu/backend/test_risk_control.py","-v","--cov=${workspaceFolder}/zhuxiang-jiu/backend/main","--cov-report=term-missing"],
+      "options": { "cwd": "${workspaceFolder}/zhuxiang-jiu/backend" },
+      "group": "test",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "CI: Local Simulation",
+      "detail": "Simulate GitHub Actions CI pipeline locally (5 jobs)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/ci-local-sim.ps1"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Test: Windows Version Check (52 assertions)",
+      "detail": "Verify Win10/11 compatibility detection logic",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile","-ExecutionPolicy","Bypass","-File","${workspaceFolder}/zhuxiang-jiu/backend/test-version-check.ps1"],
+      "group": "test",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "focus": true, "panel": "shared", "clear": true }
+    }
+  ]
+}
