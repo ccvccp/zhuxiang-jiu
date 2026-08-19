@@ -1,0 +1,70 @@
+#!/bin/sh
+# ============================================================
+# pre-commit · Git 提交前 CI 检查脚本 (bash 版, 跨平台)
+# ------------------------------------------------------------
+# 用法: 安装 git 后运行 ./scripts/install-hooks.ps1 自动配置
+#   或手动复制到 .git/hooks/pre-commit 并 chmod +x
+# 跳过: git commit --no-verify
+# Windows 用户推荐用 pre-commit.ps1
+# ============================================================
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(dirname "$(dirname "$0")")")"
+
+echo "🚀 [pre-commit] CI 检查启动..."
+
+# ---------- 1. 获取暂存的 JS 文件 ----------
+STAGED_FILES=$(git diff --cached --name-only --diff-filter ACM 2>/dev/null | grep '\.js$' | grep 'zhuxiang-jiu/js' || true)
+
+if [ -z "$STAGED_FILES" ]; then
+    echo "✅ 无 zhuxiang-jiu JS 变更, 跳过 CI"
+    exit 0
+fi
+
+echo "🚀 检测到 JS 文件变更:"
+echo "$STAGED_FILES" | sed 's/^/   /'
+
+# ---------- 2. 轻量级静态检查 ----------
+ERRORS=0
+for f in $STAGED_FILES; do
+    FULL_PATH="$REPO_ROOT/$f"
+    if [ ! -f "$FULL_PATH" ]; then continue; fi
+
+    # 括号匹配
+    OPENS=$(grep -o '(' "$FULL_PATH" | wc -l)
+    CLOSES=$(grep -o ')' "$FULL_PATH" | wc -l)
+    if [ "$OPENS" -ne "$CLOSES" ]; then
+        echo "❌ $f: 括号不匹配 ( $OPENS vs ) $CLOSES"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # 花括号匹配
+    B_OPENS=$(grep -o '{' "$FULL_PATH" | wc -l)
+    B_CLOSES=$(grep -o '}' "$FULL_PATH" | wc -l)
+    if [ "$B_OPENS" -ne "$B_CLOSES" ]; then
+        echo "❌ $f: 花括号不匹配 { $B_OPENS vs } $B_CLOSES"
+        ERRORS=$((ERRORS + 1))
+    fi
+done
+
+if [ $ERRORS -gt 0 ]; then
+    echo "❌ 静态检查失败, 提交已阻止"
+    exit 1
+fi
+
+echo "✅ 静态检查通过(括号/花括号匹配)"
+
+# ---------- 3. 提示运行 CI 流水线 ----------
+echo ""
+echo "🚀 请在浏览器运行 CI 流水线确认:"
+echo "   http://localhost:8080/module-test.html → 🚀 CI流水线按钮"
+echo "   确认 185/185 PASS (100.0%)"
+echo ""
+read -p "CI 流水线是否已通过 185/185? (Y/n) " response
+if [ "$response" = "n" ] || [ "$response" = "N" ]; then
+    echo "❌ CI 未通过, 提交已阻止"
+    exit 1
+fi
+
+echo "✅ CI 检查通过, 允许提交"
+exit 0
