@@ -5,66 +5,200 @@
 # 用法: 安装 git 后运行 ./scripts/install-hooks.ps1 自动配置
 #   或手动复制到 .git/hooks/pre-commit 并 chmod +x
 # 跳过: git commit --no-verify
-# Windows 用户推荐用 pre-commit.ps1
+# 日志: .git/hooks/pre-commit.log (追加模式, 供审计)
 # ============================================================
 set -e
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(dirname "$(dirname "$0")")")"
+LOG_FILE="$REPO_ROOT/.git/hooks/pre-commit.log"
 
-echo "🚀 [pre-commit] CI 检查启动..."
+# ---------- 日志函数 ----------
+# 输出到控制台 + 追加到日志文件
+log() {
+    msg="$1"
+    echo "$msg"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $msg" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+# 仅写日志文件(不输出到控制台)
+log_only() {
+    msg="$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $msg" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+log "============================================================"
+log "🚀 [pre-commit] CI 检查启动"
+log "   仓库: $REPO_ROOT"
+log "   分支: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
+log "   时间: $(date '+%Y-%m-%d %H:%M:%S')"
+log "============================================================"
 
 # ---------- 1. 获取暂存的 JS 文件 ----------
 STAGED_FILES=$(git diff --cached --name-only --diff-filter ACM 2>/dev/null | grep '\.js$' | grep 'zhuxiang-jiu/js' || true)
 
+FILE_COUNT=$(echo "$STAGED_FILES" | grep -c '.' 2>/dev/null || echo 0)
+
 if [ -z "$STAGED_FILES" ]; then
-    echo "✅ 无 zhuxiang-jiu JS 变更, 跳过 CI"
+    log "📋 暂存文件扫描: 0 个 zhuxiang-jiu/js/*.js 文件"
+    log "✅ 无 zhuxiang-jiu JS 变更, 跳过 CI"
+    log "------------------------------------------------------------"
+    log "📊 决策: SKIP (无 JS 变更) | 文件数: 0 | 检查数: 0 | 错误数: 0"
+    log "============================================================"
     exit 0
 fi
 
-echo "🚀 检测到 JS 文件变更:"
-echo "$STAGED_FILES" | sed 's/^/   /'
+log "📋 暂存文件扫描: $FILE_COUNT 个 zhuxiang-jiu/js/*.js 文件"
+log "🚀 检测到 JS 文件变更:"
+echo "$STAGED_FILES" | while read -r line; do
+    log "   - $line"
+done
 
-# ---------- 2. 轻量级静态检查 ----------
+# ---------- 2. 静态检查 (awk 单次遍历, 字符串/注释感知) ----------
+log ""
+log "🔍 开始静态检查 (括号()/花括号{}/方括号[], 跳过字符串和注释)..."
 ERRORS=0
+CHECKS_TOTAL=0
+CHECKS_PASS=0
+CHECKS_FAIL=0
+
+# awk 单次遍历: 状态机跳过字符串/注释, 计数 3 类括号
+# -v sq="'": 传入单引号字符, 避免 awk 脚本内引号转义问题
+run_bracket_check() {
+    awk -v sq="'" '
+    BEGIN { in_str=0; in_block=0; str_ch=""; po=pc=bo=bc=so=sc=0 }
+    {
+        line = $0
+        i = 1
+        n = length(line)
+        while (i <= n) {
+            c = substr(line, i, 1)
+            nc = (i < n) ? substr(line, i+1, 1) : ""
+            if (in_block) {
+                if (c == "*" && nc == "/") { in_block=0; i+=2; continue }
+                i++; continue
+            }
+            if (in_str) {
+                if (c == "\\") { i+=2; continue }
+                if (c == str_ch) { in_str=0 }
+                i++; continue
+            }
+            if (c == "/" && nc == "/") { break }
+            if (c == "/" && nc == "*") { in_block=1; i+=2; continue }
+            if (c == sq || c == "\"" || c == "`") { in_str=1; str_ch=c; i++; continue }
+            if (c == "(") po++
+            else if (c == ")") pc++
+            else if (c == "{") bo++
+            else if (c == "}") bc++
+            else if (c == "[") so++
+            else if (c == "]") sc++
+            i++
+        }
+        if (in_str) in_str=0
+    }
+    END { printf "%d %d %d %d %d %d\n", po, pc, bo, bc, so, sc }
+    ' "$1" 2>/dev/null
+}
+
 for f in $STAGED_FILES; do
     FULL_PATH="$REPO_ROOT/$f"
-    if [ ! -f "$FULL_PATH" ]; then continue; fi
-
-    # 括号匹配
-    OPENS=$(grep -o '(' "$FULL_PATH" | wc -l)
-    CLOSES=$(grep -o ')' "$FULL_PATH" | wc -l)
-    if [ "$OPENS" -ne "$CLOSES" ]; then
-        echo "❌ $f: 括号不匹配 ( $OPENS vs ) $CLOSES"
-        ERRORS=$((ERRORS + 1))
+    if [ ! -f "$FULL_PATH" ]; then
+        log "   ⚠️  文件不存在, 跳过: $f"
+        log_only "   SKIP: $f (file not found)"
+        continue
     fi
 
-    # 花括号匹配
-    B_OPENS=$(grep -o '{' "$FULL_PATH" | wc -l)
-    B_CLOSES=$(grep -o '}' "$FULL_PATH" | wc -l)
+    LINE_COUNT=$(wc -l < "$FULL_PATH" 2>/dev/null || echo 0)
+    CHAR_COUNT=$(wc -c < "$FULL_PATH" 2>/dev/null || echo 0)
+    log ""
+    log "   📄 $f"
+    log "      行数: $LINE_COUNT | 字节数: $CHAR_COUNT"
+
+    # awk 单次遍历获取 6 个计数
+    COUNTS=$(run_bracket_check "$FULL_PATH")
+    OPENS=$(echo "$COUNTS" | cut -d' ' -f1)
+    CLOSES=$(echo "$COUNTS" | cut -d' ' -f2)
+    B_OPENS=$(echo "$COUNTS" | cut -d' ' -f3)
+    B_CLOSES=$(echo "$COUNTS" | cut -d' ' -f4)
+    S_OPENS=$(echo "$COUNTS" | cut -d' ' -f5)
+    S_CLOSES=$(echo "$COUNTS" | cut -d' ' -f6)
+
+    # 括号 ()
+    CHECKS_TOTAL=$((CHECKS_TOTAL + 1))
+    if [ "$OPENS" -ne "$CLOSES" ]; then
+        DIFF=$((OPENS - CLOSES))
+        log "      ❌ [FAIL] 括号 () : ( $OPENS vs ) $CLOSES | 差值: $DIFF"
+        log_only "      FAIL paren: $f (=$OPENS )=$CLOSES diff=$DIFF"
+        ERRORS=$((ERRORS + 1)); CHECKS_FAIL=$((CHECKS_FAIL + 1))
+    else
+        log "      ✅ [PASS] 括号 () : ( $OPENS vs ) $CLOSES"
+        log_only "      PASS paren: $f (=$OPENS )=$CLOSES"
+        CHECKS_PASS=$((CHECKS_PASS + 1))
+    fi
+
+    # 花括号 {}
+    CHECKS_TOTAL=$((CHECKS_TOTAL + 1))
     if [ "$B_OPENS" -ne "$B_CLOSES" ]; then
-        echo "❌ $f: 花括号不匹配 { $B_OPENS vs } $B_CLOSES"
-        ERRORS=$((ERRORS + 1))
+        DIFF=$((B_OPENS - B_CLOSES))
+        log "      ❌ [FAIL] 花括号 {} : { $B_OPENS vs } $B_CLOSES | 差值: $DIFF"
+        log_only "      FAIL brace: $f {=$B_OPENS }=$B_CLOSES diff=$DIFF"
+        ERRORS=$((ERRORS + 1)); CHECKS_FAIL=$((CHECKS_FAIL + 1))
+    else
+        log "      ✅ [PASS] 花括号 {} : { $B_OPENS vs } $B_CLOSES"
+        log_only "      PASS brace: $f {=$B_OPENS }=$B_CLOSES"
+        CHECKS_PASS=$((CHECKS_PASS + 1))
+    fi
+
+    # 方括号 []
+    CHECKS_TOTAL=$((CHECKS_TOTAL + 1))
+    if [ "$S_OPENS" -ne "$S_CLOSES" ]; then
+        DIFF=$((S_OPENS - S_CLOSES))
+        log "      ❌ [FAIL] 方括号 [] : [ $S_OPENS vs ] $S_CLOSES | 差值: $DIFF"
+        log_only "      FAIL bracket: $f [=$S_OPENS ]=$S_CLOSES diff=$DIFF"
+        ERRORS=$((ERRORS + 1)); CHECKS_FAIL=$((CHECKS_FAIL + 1))
+    else
+        log "      ✅ [PASS] 方括号 [] : [ $S_OPENS vs ] $S_CLOSES"
+        log_only "      PASS bracket: $f [=$S_OPENS ]=$S_CLOSES"
+        CHECKS_PASS=$((CHECKS_PASS + 1))
     fi
 done
 
+log ""
+log "📊 静态检查汇总: 总检查 $CHECKS_TOTAL | 通过 $CHECKS_PASS | 失败 $CHECKS_FAIL | 涉及文件 $FILE_COUNT"
+
 if [ $ERRORS -gt 0 ]; then
-    echo "❌ 静态检查失败, 提交已阻止"
+    log "❌ 静态检查失败, 提交已阻止 ($ERRORS 个错误)"
+    log "------------------------------------------------------------"
+    log "📊 决策: BLOCK (静态检查失败) | 文件数: $FILE_COUNT | 检查数: $CHECKS_TOTAL | 通过: $CHECKS_PASS | 失败: $CHECKS_FAIL | 错误数: $ERRORS"
+    log "============================================================"
     exit 1
 fi
 
-echo "✅ 静态检查通过(括号/花括号匹配)"
+log "✅ 静态检查通过 (括号/花括号均匹配)"
 
 # ---------- 3. 提示运行 CI 流水线 ----------
-echo ""
-echo "🚀 请在浏览器运行 CI 流水线确认:"
-echo "   http://localhost:8080/module-test.html → 🚀 CI流水线按钮"
-echo "   确认 185/185 PASS (100.0%)"
-echo ""
+log ""
+log "🚀 请在浏览器运行 CI 流水线确认:"
+log "   http://localhost:8080/module-test.html → 🚀 CI流水线按钮"
+log "   确认 185/185 PASS (100.0%)"
+
 read -p "CI 流水线是否已通过 185/185? (Y/n) " response || true
+log_only "   CI response: '$response'"
+
 if [ "$response" = "n" ] || [ "$response" = "N" ]; then
-    echo "❌ CI 未通过, 提交已阻止"
+    log "❌ CI 未通过 (用户输入: '$response'), 提交已阻止"
+    log "------------------------------------------------------------"
+    log "📊 决策: BLOCK (CI 未确认) | 文件数: $FILE_COUNT | 检查数: $CHECKS_TOTAL | 通过: $CHECKS_PASS | 失败: $CHECKS_FAIL | 响应: '$response'"
+    log "============================================================"
     exit 1
 fi
 
-echo "✅ CI 检查通过, 允许提交"
+RESP_DESC="pass(非n)"
+if [ -z "$response" ]; then
+    RESP_DESC="EOF/empty(自动通过)"
+fi
+
+log "✅ CI 检查通过, 允许提交"
+log "------------------------------------------------------------"
+log "📊 决策: PASS | 文件数: $FILE_COUNT | 检查数: $CHECKS_TOTAL | 通过: $CHECKS_PASS | 失败: $CHECKS_FAIL | CI响应: $RESP_DESC"
+log "============================================================"
 exit 0
