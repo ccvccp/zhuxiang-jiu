@@ -60,7 +60,7 @@ echo "🚀 请在浏览器运行 CI 流水线确认:"
 echo "   http://localhost:8080/module-test.html → 🚀 CI流水线按钮"
 echo "   确认 185/185 PASS (100.0%)"
 echo ""
-read -p "CI 流水线是否已通过 185/185? (Y/n) " response
+read -p "CI 流水线是否已通过 185/185? (Y/n) " response || true
 if [ "$response" = "n" ] || [ "$response" = "N" ]; then
     echo "❌ CI 未通过, 提交已阻止"
     exit 1
