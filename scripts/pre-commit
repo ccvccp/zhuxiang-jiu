@@ -61,11 +61,12 @@ CHECKS_TOTAL=0
 CHECKS_PASS=0
 CHECKS_FAIL=0
 
-# awk 单次遍历: 状态机跳过字符串/注释, 计数 3 类括号
+# awk 单次遍历: 状态机跳过字符串/注释/正则字面量, 计数 3 类括号
 # -v sq="'": 传入单引号字符, 避免 awk 脚本内引号转义问题
+# 增强版: 识别正则字面量 /\(/ /\{n\}/ 等, 避免假阳性
 run_bracket_check() {
     awk -v sq="'" '
-    BEGIN { in_str=0; in_block=0; str_ch=""; po=pc=bo=bc=so=sc=0 }
+    BEGIN { in_str=0; in_block=0; in_re=0; in_class=0; str_ch=""; prev=""; po=pc=bo=bc=so=sc=0 }
     {
         line = $0
         i = 1
@@ -77,23 +78,42 @@ run_bracket_check() {
                 if (c == "*" && nc == "/") { in_block=0; i+=2; continue }
                 i++; continue
             }
+            if (in_re) {
+                if (in_class) {
+                    if (c == "\\") { i+=2; continue }
+                    if (c == "]") { in_class=0 }
+                    i++; continue
+                }
+                if (c == "\\") { i+=2; continue }
+                if (c == "[") { in_class=1; i++; continue }
+                if (c == "]") { i++; continue }
+                if (c == "/") { in_re=0; prev="/"; i++; continue }
+                i++; continue
+            }
             if (in_str) {
                 if (c == "\\") { i+=2; continue }
-                if (c == str_ch) { in_str=0 }
+                if (c == str_ch) { in_str=0; prev=str_ch }
                 i++; continue
             }
             if (c == "/" && nc == "/") { break }
             if (c == "/" && nc == "*") { in_block=1; i+=2; continue }
+            if (c == "/") {
+                is_re = (prev == "=" || prev == "(" || prev == "," || prev == "!" || prev == "&" || prev == "|" || prev == "^" || prev == "~" || prev == "?" || prev == ":" || prev == "+" || prev == "-" || prev == "*" || prev == "%" || prev == "<" || prev == ">" || prev == ";" || prev == "{" || prev == "[" || prev == "\"" || prev == "")
+                if (is_re) { in_re=1; prev="/"; i++; continue }
+                prev="/"; i++; continue
+            }
             if (c == sq || c == "\"" || c == "`") { in_str=1; str_ch=c; i++; continue }
-            if (c == "(") po++
-            else if (c == ")") pc++
-            else if (c == "{") bo++
-            else if (c == "}") bc++
-            else if (c == "[") so++
-            else if (c == "]") sc++
+            if (c == "(") { po++; prev=c }
+            else if (c == ")") { pc++; prev=c }
+            else if (c == "{") { bo++; prev=c }
+            else if (c == "}") { bc++; prev=c }
+            else if (c == "[") { so++; prev=c }
+            else if (c == "]") { sc++; prev=c }
+            else if (c == " " || c == "\t" || c == "\r" || c == "\n") { }
+            else { prev=c }
             i++
         }
-        if (in_str) in_str=0
+        if (in_str && str_ch != "`") in_str=0
     }
     END { printf "%d %d %d %d %d %d\n", po, pc, bo, bc, so, sc }
     ' "$1" 2>/dev/null

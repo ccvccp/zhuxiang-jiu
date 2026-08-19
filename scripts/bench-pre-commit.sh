@@ -52,11 +52,11 @@ check_old() {
     echo "$OPENS $CLOSES $B_OPENS $B_CLOSES"
 }
 
-# ---------- NEW: awk-based check ----------
+# ---------- NEW: awk-based check (enhanced with regex literal support) ----------
 check_new() {
     f="$1"
     awk -v sq="$SQ" '
-    BEGIN { in_str=0; in_block=0; str_ch=""; po=pc=bo=bc=so=sc=0 }
+    BEGIN { in_str=0; in_block=0; in_re=0; in_class=0; str_ch=""; prev=""; po=pc=bo=bc=so=sc=0 }
     {
         line = $0
         i = 1
@@ -68,23 +68,42 @@ check_new() {
                 if (c == "*" && nc == "/") { in_block=0; i+=2; continue }
                 i++; continue
             }
+            if (in_re) {
+                if (in_class) {
+                    if (c == "\\") { i+=2; continue }
+                    if (c == "]") { in_class=0 }
+                    i++; continue
+                }
+                if (c == "\\") { i+=2; continue }
+                if (c == "[") { in_class=1; i++; continue }
+                if (c == "]") { i++; continue }
+                if (c == "/") { in_re=0; prev="/"; i++; continue }
+                i++; continue
+            }
             if (in_str) {
                 if (c == "\\") { i+=2; continue }
-                if (c == str_ch) { in_str=0 }
+                if (c == str_ch) { in_str=0; prev=str_ch }
                 i++; continue
             }
             if (c == "/" && nc == "/") { break }
             if (c == "/" && nc == "*") { in_block=1; i+=2; continue }
+            if (c == "/") {
+                is_re = (prev == "=" || prev == "(" || prev == "," || prev == "!" || prev == "&" || prev == "|" || prev == "^" || prev == "~" || prev == "?" || prev == ":" || prev == "+" || prev == "-" || prev == "*" || prev == "%" || prev == "<" || prev == ">" || prev == ";" || prev == "{" || prev == "[" || prev == "\"" || prev == "")
+                if (is_re) { in_re=1; prev="/"; i++; continue }
+                prev="/"; i++; continue
+            }
             if (c == sq || c == "\"" || c == "`") { in_str=1; str_ch=c; i++; continue }
-            if (c == "(") po++
-            else if (c == ")") pc++
-            else if (c == "{") bo++
-            else if (c == "}") bc++
-            else if (c == "[") so++
-            else if (c == "]") sc++
+            if (c == "(") { po++; prev=c }
+            else if (c == ")") { pc++; prev=c }
+            else if (c == "{") { bo++; prev=c }
+            else if (c == "}") { bc++; prev=c }
+            else if (c == "[") { so++; prev=c }
+            else if (c == "]") { sc++; prev=c }
+            else if (c == " " || c == "\t" || c == "\r" || c == "\n") { }
+            else { prev=c }
             i++
         }
-        if (in_str) in_str=0
+        if (in_str && str_ch != "`") in_str=0
     }
     END { printf "%d %d %d %d %d %d\n", po, pc, bo, bc, so, sc }
     ' "$f" 2>/dev/null
