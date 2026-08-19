@@ -1,37 +1,32 @@
-# Dependencies
-node_modules/
-package-lock.json
-yarn.lock
-
-# Portable tools
-nodejs/
-nodejs-portable.zip
-nodejs-path.txt
-
-# Build output
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+build/
 dist/
-.taro/
-taro-app/.taro/
+*.egg-info/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+test-results*.xml
+test-version-check-report.json
 
-# Lock & temp files
-*.log
-*.lock
-*.tmp
-*.bak
-
-# Editor / IDE
+# IDE
 .vscode/
 .idea/
 *.swp
+*.swo
 
-# OS files
+# OS
 Thumbs.db
-.DESKTOP_*
+.DS_Store
 
-# Environment / secrets
-.env
-.env.local
-*.local
-
-# Trae toolhost snapshots
-*.snapshot.ps1
+# Docker
+*.pid
