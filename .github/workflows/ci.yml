@@ -264,12 +264,54 @@ jobs:
           retention-days: 30
 
   # ============================================================
-  # Job 7: Summary (cross-platform consistency check)
+  # Job 8: Concurrency Probe (asyncio.Lock regression baseline)
+  # 验证 deduct/restock/upgrade 三个端点的 asyncio.Lock 在真并发下生效:
+  #   - 超卖防护 / lost-update 防护 / 共享锁 / 无死锁
+  # 探针脚本: probe_concurrency.py (httpx.AsyncClient + ASGITransport + asyncio.gather)
+  # ============================================================
+  concurrency-probe:
+    name: Concurrency Probe (Linux)
+    runs-on: ubuntu-latest
+    needs: python-tests
+    defaults:
+      run:
+        working-directory: zhuxiang-jiu/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: zhuxiang-jiu/backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run concurrency probe (asyncio.Lock regression)
+        run: |
+          python probe_concurrency.py 2>&1 | tee probe-output.log
+
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: concurrency-probe-log
+          path: zhuxiang-jiu/backend/probe-output.log
+          retention-days: 30
+
+  # ============================================================
+  # Job 9: Summary (cross-platform consistency check)
   # ============================================================
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [ps-version-check, python-tests, python-tests-windows, docker-build-test, force-param-test-windows, force-param-test-linux]
+    needs: [ps-version-check, python-tests, python-tests-windows, docker-build-test, force-param-test-windows, force-param-test-linux, concurrency-probe]
     if: always()
 
     steps:
@@ -285,6 +327,7 @@ jobs:
           echo "| Docker Build+Test | ${{ needs.docker-build-test.result }} | Linux |" >> $GITHUB_STEP_SUMMARY
           echo "| Force Param Tests | ${{ needs.force-param-test-windows.result }} | Windows |" >> $GITHUB_STEP_SUMMARY
           echo "| Force Param Tests | ${{ needs.force-param-test-linux.result }} | Linux |" >> $GITHUB_STEP_SUMMARY
+          echo "| Concurrency Probe | ${{ needs.concurrency-probe.result }} | Linux |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Fail if any required job failed
@@ -293,7 +336,8 @@ jobs:
                 "${{ needs.python-tests-windows.result }}" != "success" || \
                 "${{ needs.docker-build-test.result }}" != "success" || \
                 "${{ needs.force-param-test-windows.result }}" != "success" || \
-                "${{ needs.force-param-test-linux.result }}" != "success" ]]; then
+                "${{ needs.force-param-test-linux.result }}" != "success" || \
+                "${{ needs.concurrency-probe.result }}" != "success" ]]; then
             echo "One or more jobs failed!"
             exit 1
           fi

@@ -62,15 +62,44 @@ app = FastAPI(
         {"name": "执行层", "description": "角色决策助理(Copilot→Agent)"},
         {"name": "反馈层", "description": "反馈闭环·复盘优化"},
         {"name": "系统", "description": "健康检查·模式切换"},
+        {"name": "代理商服务", "description": "代理商升级/降级/区域认领"},
+        {"name": "交易服务", "description": "订单结算提交"},
+        {"name": "供应链服务", "description": "库存扣减/回补"},
+        {"name": "仓储服务", "description": "入库/出库/盘点/库位优化/预测"},
     ],
 )
 
+import asyncio
+import os
+
+
+# ============================================================
+#  并发安全: per-key asyncio.Lock(对齐前端 Mutex FIFO 模式)
+#  锁键: stock:{productId}(库存扣减/回补) / agent:{agentId}(代理商升级)
+#  asyncio.Lock 本身是 FIFO 公平锁; async with 保证异常也释放
+# ============================================================
+
+_locks = {}
+
+
+def _get_lock(key: str):
+    """获取或创建 per-key 锁。单事件循环下无 await,创建竞态安全。"""
+    if key not in _locks:
+        _locks[key] = asyncio.Lock()
+    return _locks[key]
+
+# CORS 白名单:开发环境允许 localhost,生产环境通过环境变量配置
+_CORS_ORIGINS = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:8080,http://localhost:3000,http://127.0.0.1:8080,http://127.0.0.1:3000",
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Role"],
 )
 
 API_BASE = "/api/decision"
@@ -548,9 +577,284 @@ async def general_exception_handler(request, exc: Exception):
 
 
 # ============================================================
+#  跨模块业务路由(对接前端 5 个服务)
+#  - /api/agent          代理商升级/降级(对应 main.js AgentUpgradeClient)
+#  - /api/checkout       订单结算提交(对应 checkout-service.js)
+#  - /api/inventory      库存扣减/回补(对应 inventory-service.js)
+#  - /api/warehouse      仓储入库/出库/盘点/库位/预测(对应 warehouse-service.js)
+#  - /api/agent-shipping 代理商区域认领(对应 agent-shipping-service.js)
+# ============================================================
+
+from pydantic import BaseModel as PydBaseModel, Field
+from typing import List as TypingList, Any as TypingAny
+
+
+class _GenericRequest(PydBaseModel):
+    """通用请求体(允许任意字段透传,Mock 模式不做严格校验)"""
+    class Config:
+        extra = "allow"
+
+
+class AgentUpgradeRequest(PydBaseModel):
+    agentId: TypingAny = Field(..., description="代理商ID")
+    fromLevel: str = Field("D", description="当前等级 D/C/B/A/S")
+    toLevel: str = Field("C", description="目标等级")
+    payAmount: float = Field(0, ge=0, description="支付金额")
+    class Config:
+        extra = "allow"
+
+
+class AgentDowngradeRequest(PydBaseModel):
+    agentId: TypingAny
+    fromLevel: str
+    reason: str = "考核未达标"
+
+
+class CheckoutSubmitRequest(PydBaseModel):
+    items: TypingList[TypingAny] = Field(default_factory=list)
+    consignee: TypingAny = None
+    payment: TypingAny = None
+    class Config:
+        extra = "allow"
+
+
+class InventoryRequest(PydBaseModel):
+    productId: TypingAny
+    quantity: int = Field(default=1, ge=0)
+    class Config:
+        extra = "allow"
+
+
+class WarehouseRequest(PydBaseModel):
+    warehouseId: TypingAny = None
+    productId: TypingAny = None
+    class Config:
+        extra = "allow"
+
+
+class AgentShippingClaimRequest(PydBaseModel):
+    agentId: TypingAny
+    region: str
+
+
+# ---------- 内存态 Mock 存储(演示用,生产环境替换为数据库) ----------
+_mock_store = {
+    "agents": {
+        1: {"id": 1, "name": "泰安市级代理商", "level": "C", "wallet": 50000},
+        2: {"id": 2, "name": "济南核心代理商", "level": "B", "wallet": 120000},
+    },
+    "inventory": {
+        "ZX42-2026L07": {"stock": 500, "reserved": 0},
+        "ZX42-2026L05": {"stock": 300, "reserved": 0},
+    },
+    "warehouse": {
+        "slots": {"A1": "ZX42-2026L07", "A2": "ZX42-2026L05", "B1": None},
+        "inbound_log": [],
+        "outbound_log": [],
+    },
+    "orders": [],
+    "shipping_claims": {},
+}
+
+
+@app.post("/api/agent/upgrade", tags=["代理商服务"])
+async def agent_upgrade(req: AgentUpgradeRequest):
+    """代理商升级(对应前端 main.js AgentUpgradeClient.liveUpgrade)"""
+    # 并发安全: per-key 锁保护 wallet 累积(RMW), 对齐前端 agent:{agentId}
+    async with _get_lock(f"agent:{req.agentId}"):
+        agent = _mock_store["agents"].get(req.agentId)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"代理商 {req.agentId} 不存在")
+        old_level = agent["level"]
+        agent["level"] = req.toLevel
+        agent["wallet"] = agent.get("wallet", 0) + req.payAmount
+        return {
+            "success": True,
+            "agentId": req.agentId,
+            "fromLevel": old_level,
+            "toLevel": req.toLevel,
+            "wallet": agent["wallet"],
+            "logs": [
+                {"step": "升级", "level": "INFO", "msg": f"{old_level}→{req.toLevel}"},
+                {"step": "钱包", "level": "INFO", "msg": f"充值 ¥{req.payAmount}"},
+            ],
+        }
+
+
+@app.post("/api/agent/downgrade", tags=["代理商服务"])
+async def agent_downgrade(req: AgentDowngradeRequest):
+    """代理商降级(对应前端 main.js AgentUpgradeClient.liveDowngrade)"""
+    agent = _mock_store["agents"].get(req.agentId)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"代理商 {req.agentId} 不存在")
+    old_level = agent["level"]
+    new_level = {"S": "A", "A": "B", "B": "C", "C": "D", "D": "D"}.get(old_level, "D")
+    agent["level"] = new_level
+    return {
+        "success": True,
+        "agentId": req.agentId,
+        "fromLevel": old_level,
+        "toLevel": new_level,
+        "reason": req.reason,
+        "logs": [{"step": "降级", "level": "WARN", "msg": f"{old_level}→{new_level}, 原因: {req.reason}"}],
+    }
+
+
+@app.post("/api/checkout/submit", tags=["交易服务"])
+async def checkout_submit(req: CheckoutSubmitRequest):
+    """订单结算提交(对应前端 checkout-service.js liveSubmit)"""
+    order_id = f"ZX{int(datetime.now().timestamp() * 1000) % 1000000:06d}"
+    order = {
+        "orderId": order_id,
+        "items": req.items,
+        "consignee": req.consignee,
+        "payment": req.payment,
+        "status": "pending",
+        "createdAt": _ts(),
+    }
+    _mock_store["orders"].append(order)
+    return {
+        "success": True,
+        "orderId": order_id,
+        "status": "pending",
+        "message": f"订单 {order_id} 创建成功",
+    }
+
+
+@app.post("/api/inventory/deduct", tags=["供应链服务"])
+async def inventory_deduct(req: InventoryRequest):
+    """库存扣减(对应前端 inventory-service.js liveDeduct)"""
+    # 并发安全: per-key 锁保护 check-then-act + RMW, 防止超卖, 对齐前端 stock:{productId}
+    async with _get_lock(f"stock:{req.productId}"):
+        product = _mock_store["inventory"].get(str(req.productId))
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品 {req.productId} 不存在")
+        if product["stock"] < req.quantity:
+            return {"success": False, "error": f"库存不足: 当前 {product['stock']}, 需要 {req.quantity}"}
+        product["stock"] -= req.quantity
+        return {
+            "success": True,
+            "productId": req.productId,
+            "stockAfter": product["stock"],
+            "txId": f"TX{int(datetime.now().timestamp() * 1000) % 1000000:06d}",
+        }
+
+
+@app.post("/api/inventory/restock", tags=["供应链服务"])
+async def inventory_restock(req: InventoryRequest):
+    """库存回补(对应前端 inventory-service.js liveRestock)"""
+    # 并发安全: per-key 锁保护 stock 累积(RMW), 与 deduct 共享锁键, 对齐前端 stock:{productId}
+    async with _get_lock(f"stock:{req.productId}"):
+        product = _mock_store["inventory"].get(str(req.productId))
+        if not product:
+            raise HTTPException(status_code=404, detail=f"产品 {req.productId} 不存在")
+        product["stock"] += req.quantity
+        return {
+            "success": True,
+            "productId": req.productId,
+            "stockAfter": product["stock"],
+            "txId": f"TX{int(datetime.now().timestamp() * 1000) % 1000000:06d}",
+        }
+
+
+@app.post("/api/warehouse/inbound", tags=["仓储服务"])
+async def warehouse_inbound(req: WarehouseRequest):
+    """AI智能入库(对应前端 warehouse-service.js inbound)"""
+    log = {"action": "inbound", "productId": req.productId, "time": _ts(), "slot": "A1"}
+    _mock_store["warehouse"]["inbound_log"].append(log)
+    return {
+        "success": True,
+        "productId": req.productId,
+        "slot": "A1",
+        "message": "视觉验货通过,自动码垛完成,库位 A1 已分配",
+    }
+
+
+@app.post("/api/warehouse/outbound", tags=["仓储服务"])
+async def warehouse_outbound(req: WarehouseRequest):
+    """AI智能出库(对应前端 warehouse-service.js outbound)"""
+    log = {"action": "outbound", "productId": req.productId, "time": _ts()}
+    _mock_store["warehouse"]["outbound_log"].append(log)
+    return {
+        "success": True,
+        "productId": req.productId,
+        "message": "波次拣选完成,路径优化 30% 提升,自动分拣完成",
+    }
+
+
+@app.post("/api/warehouse/stocktake", tags=["仓储服务"])
+async def warehouse_stocktake(req: WarehouseRequest):
+    """AI智能盘点(对应前端 warehouse-service.js stocktake)"""
+    slots = _mock_store["warehouse"]["slots"]
+    total = len(slots)
+    occupied = sum(1 for v in slots.values() if v is not None)
+    return {
+        "success": True,
+        "totalSlots": total,
+        "occupiedSlots": occupied,
+        "emptySlots": total - occupied,
+        "accuracy": 0.98,
+        "message": "无人机+视觉AI盘点完成,准确率 98%",
+    }
+
+
+@app.post("/api/warehouse/slot-optimize", tags=["仓储服务"])
+async def warehouse_slot_optimize(req: WarehouseRequest):
+    """AI智能库位优化(对应前端 warehouse-service.js slotOptimize)"""
+    return {
+        "success": True,
+        "optimized": True,
+        "utilizationBefore": 0.65,
+        "utilizationAfter": 0.85,
+        "improvement": "30%",
+        "message": "ABC分类+冷热区+高频前置,库位利用率提升 30%",
+    }
+
+
+@app.get("/api/warehouse/forecast", tags=["仓储服务"])
+async def warehouse_forecast(productId: str = None):
+    """AI智能库存预测(对应前端 warehouse-service.js forecast)"""
+    return {
+        "success": True,
+        "productId": productId or "ZX42-2026L07",
+        "forecast7d": [120, 135, 128, 142, 150, 145, 138],
+        "seasonality": "上升期",
+        "accuracy": 0.89,
+        "message": "季节性+趋势+OEM排程驱动,预测准确率 89%",
+    }
+
+
+@app.post("/api/agent-shipping/claim", tags=["代理商服务"])
+async def agent_shipping_claim(req: AgentShippingClaimRequest):
+    """代理商区域认领(对应前端 agent-shipping-service.js liveClaim)"""
+    agent = _mock_store["agents"].get(req.agentId)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"代理商 {req.agentId} 不存在")
+    existing = _mock_store["shipping_claims"].get(req.region)
+    if existing and existing != req.agentId:
+        raise HTTPException(status_code=409, detail=f"区域 {req.region} 已被代理商 {existing} 认领")
+    _mock_store["shipping_claims"][req.region] = req.agentId
+    return {
+        "success": True,
+        "agentId": req.agentId,
+        "region": req.region,
+        "agentName": agent["name"],
+        "message": f"{agent['name']} 已认领 {req.region} 区域",
+    }
+
+
+@app.get("/api/agent-shipping/claims", tags=["代理商服务"])
+async def agent_shipping_list_claims():
+    """查询所有区域认领记录"""
+    return {"success": True, "claims": _mock_store["shipping_claims"]}
+
+
+# ============================================================
 #  启动入口
 # ============================================================
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    _port = int(os.environ.get("PORT", "8000"))
+    _host = os.environ.get("HOST", "0.0.0.0")
+    uvicorn.run(app, host=_host, port=_port)
