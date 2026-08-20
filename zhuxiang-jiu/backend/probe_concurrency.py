@@ -16,7 +16,7 @@ import time
 
 import httpx
 
-from main import app, _mock_store, _locks
+from main import app, _mock_store, _async_locks
 
 PRODUCT = "ZX42-2026L07"
 AGENT_ID = 1
@@ -28,7 +28,7 @@ AGENT_ID = 1
 
 def _reset_state():
     """重置锁(新事件循环需新锁,否则跨循环报错)"""
-    _locks.clear()
+    _async_locks.clear()
 
 
 def _make_client() -> httpx.AsyncClient:
