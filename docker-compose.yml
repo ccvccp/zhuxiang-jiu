@@ -6,11 +6,18 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - LOCK_MODE=redis
+      - STORE_MODE=redis
       - PORT=8000
       - HOST=0.0.0.0
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+    # 启动前先 seed Redis(幂等, 可重复执行)
+    # seed 失败不阻塞启动(后端重启时会再试)
+    command: >
+      sh -c "python scripts/seed_redis.py || echo '[WARN] seed failed, continuing...';
+             uvicorn main:app --host 0.0.0.0 --port 8000"
 
   redis:
     image: redis:7-alpine
@@ -20,6 +27,13 @@ services:
       - redis-data:/data
     restart: unless-stopped
     command: redis-server --appendonly yes
+    # 健康检查:backend 依赖此条件才启动
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
 
 volumes:
   redis-data:

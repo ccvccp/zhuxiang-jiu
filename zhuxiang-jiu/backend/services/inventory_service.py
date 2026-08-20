@@ -29,13 +29,13 @@ class InventoryService:
             KeyError: 产品不存在
         """
         async with get_lock(f"stock:{product_id}"):
-            product = self.inventory_repo.get(product_id)
+            product = await self.inventory_repo.get(product_id)
             if not product:
                 raise KeyError(f"产品 {product_id} 不存在")
             if product["stock"] < quantity:
                 return {"success": False,
                         "error": f"库存不足: 当前 {product['stock']}, 需要 {quantity}"}
-            stock_after = self.inventory_repo.deduct(product_id, quantity)
+            stock_after = await self.inventory_repo.deduct(product_id, quantity)
             return {
                 "success": True,
                 "productId": product_id,
@@ -50,10 +50,10 @@ class InventoryService:
             KeyError: 产品不存在
         """
         async with get_lock(f"stock:{product_id}"):
-            product = self.inventory_repo.get(product_id)
+            product = await self.inventory_repo.get(product_id)
             if not product:
                 raise KeyError(f"产品 {product_id} 不存在")
-            stock_after = self.inventory_repo.restock(product_id, quantity)
+            stock_after = await self.inventory_repo.restock(product_id, quantity)
             return {
                 "success": True,
                 "productId": product_id,

@@ -3,8 +3,8 @@
 锁键: stock:{productId}(库存扣减/回补) / agent:{agentId}(代理商升级)
 
 双模式设计(环境变量 LOCK_MODE 切换):
-    asyncio (默认): 单进程 asyncio.Lock(开发/测试/单 worker)
-    redis:          跨进程 redis.asyncio.Lock(生产/多 worker)
+    asyncio:        单进程 asyncio.Lock(开发/测试/单 worker, 需显式设置)
+    redis (默认):    跨进程 redis.asyncio.Lock(生产/多 worker, 开箱即用)
 
 接口一致: get_lock(key) -> AsyncContextManager
 端点代码零改动: async with get_lock(...) 不变
@@ -14,7 +14,7 @@ import asyncio
 import os
 from typing import AsyncContextManager
 
-LOCK_MODE = os.environ.get("LOCK_MODE", "asyncio")  # asyncio | redis
+LOCK_MODE = os.environ.get("LOCK_MODE", "redis")  # asyncio | redis(默认 redis: 多 worker 安全)
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 _LOCK_TTL = 10.0            # 锁 TTL(秒), 超时自动释放防死锁
 _LOCK_BLOCK_TIMEOUT = 30.0  # 等待获取锁的最长时间

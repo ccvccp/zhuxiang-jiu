@@ -20,11 +20,11 @@ class AgentService:
             KeyError: 代理商不存在
         """
         async with get_lock(f"agent:{agent_id}"):
-            agent = self.agent_repo.get(agent_id)
+            agent = await self.agent_repo.get(agent_id)
             if not agent:
                 raise KeyError(f"代理商 {agent_id} 不存在")
-            old_level = self.agent_repo.update_level(agent_id, to_level)
-            new_wallet = self.agent_repo.add_wallet(agent_id, pay_amount)
+            old_level = await self.agent_repo.update_level(agent_id, to_level)
+            new_wallet = await self.agent_repo.add_wallet(agent_id, pay_amount)
             return {
                 "success": True,
                 "agentId": agent_id,
@@ -44,11 +44,11 @@ class AgentService:
             KeyError: 代理商不存在
         """
         # 降级只读改 level,不涉及 wallet RMW;无锁即可
-        agent = self.agent_repo.get(agent_id)
+        agent = await self.agent_repo.get(agent_id)
         if not agent:
             raise KeyError(f"代理商 {agent_id} 不存在")
-        old_level = self.agent_repo.get_level(agent_id)
-        new_level = self.agent_repo.downgrade_level(agent_id)
+        old_level = await self.agent_repo.get_level(agent_id)
+        new_level = await self.agent_repo.downgrade_level(agent_id)
         return {
             "success": True,
             "agentId": agent_id,

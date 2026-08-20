@@ -16,20 +16,20 @@ class ShippingClaimService:
         self.agent_repo = agent_repo
         self.shipping_repo = shipping_repo
 
-    def claim(self, agent_id, region: str) -> dict:
+    async def claim(self, agent_id, region: str) -> dict:
         """代理商区域认领
 
         Raises:
             KeyError: 代理商不存在
             ValueError: 区域已被其他代理商认领
         """
-        agent = self.agent_repo.get(agent_id)
+        agent = await self.agent_repo.get(agent_id)
         if not agent:
             raise KeyError(f"代理商 {agent_id} 不存在")
-        existing = self.shipping_repo.get_claim(region)
+        existing = await self.shipping_repo.get_claim(region)
         if existing is not None and existing != agent_id:
             raise ValueError(f"区域 {region} 已被代理商 {existing} 认领")
-        self.shipping_repo.set_claim(region, agent_id)
+        await self.shipping_repo.set_claim(region, agent_id)
         return {
             "success": True,
             "agentId": agent_id,
@@ -38,6 +38,7 @@ class ShippingClaimService:
             "message": f"{agent.get('name', f'代理商{agent_id}')} 已认领 {region} 区域",
         }
 
-    def list_claims(self) -> dict:
+    async def list_claims(self) -> dict:
         """列出所有区域认领记录"""
-        return {"success": True, "claims": self.shipping_repo.list_all()}
+        claims = await self.shipping_repo.list_all()
+        return {"success": True, "claims": claims}

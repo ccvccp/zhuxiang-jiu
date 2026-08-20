@@ -11,10 +11,10 @@ class WarehouseService:
     def __init__(self, warehouse_repo: WarehouseRepository = WarehouseRepository()):
         self.warehouse_repo = warehouse_repo
 
-    def inbound(self, product_id) -> dict:
+    async def inbound(self, product_id) -> dict:
         """AI智能入库"""
         log = {"action": "inbound", "productId": product_id, "time": ts(), "slot": "A1"}
-        self.warehouse_repo.append_inbound_log(log)
+        await self.warehouse_repo.append_inbound_log(log)
         return {
             "success": True,
             "productId": product_id,
@@ -22,19 +22,19 @@ class WarehouseService:
             "message": "视觉验货通过,自动码垛完成,库位 A1 已分配",
         }
 
-    def outbound(self, product_id) -> dict:
+    async def outbound(self, product_id) -> dict:
         """AI智能出库"""
         log = {"action": "outbound", "productId": product_id, "time": ts()}
-        self.warehouse_repo.append_outbound_log(log)
+        await self.warehouse_repo.append_outbound_log(log)
         return {
             "success": True,
             "productId": product_id,
             "message": "波次拣选完成,路径优化 30% 提升,自动分拣完成",
         }
 
-    def stocktake(self) -> dict:
+    async def stocktake(self) -> dict:
         """AI智能盘点(基于实际库位统计)"""
-        slots = self.warehouse_repo.get_slots()
+        slots = await self.warehouse_repo.get_slots()
         total = len(slots)
         occupied = sum(1 for v in slots.values() if v is not None)
         return {

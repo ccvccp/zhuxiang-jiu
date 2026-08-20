@@ -130,7 +130,7 @@ async def agent_downgrade(req: AgentDowngradeRequest):
 @router.post("/api/checkout/submit", tags=["交易服务"])
 async def checkout_submit(req: CheckoutSubmitRequest):
     """订单结算提交(对应前端 checkout-service.js liveSubmit)"""
-    return _checkout_service.submit(req.items, req.consignee, req.payment)
+    return await _checkout_service.submit(req.items, req.consignee, req.payment)
 
 
 # ============================================================
@@ -162,19 +162,19 @@ async def inventory_restock(req: InventoryRequest):
 @router.post("/api/warehouse/inbound", tags=["仓储服务"])
 async def warehouse_inbound(req: WarehouseRequest):
     """AI智能入库(对应前端 warehouse-service.js inbound)"""
-    return _warehouse_service.inbound(req.productId)
+    return await _warehouse_service.inbound(req.productId)
 
 
 @router.post("/api/warehouse/outbound", tags=["仓储服务"])
 async def warehouse_outbound(req: WarehouseRequest):
     """AI智能出库(对应前端 warehouse-service.js outbound)"""
-    return _warehouse_service.outbound(req.productId)
+    return await _warehouse_service.outbound(req.productId)
 
 
 @router.post("/api/warehouse/stocktake", tags=["仓储服务"])
 async def warehouse_stocktake(req: WarehouseRequest):
     """AI智能盘点(对应前端 warehouse-service.js stocktake)"""
-    return _warehouse_service.stocktake()
+    return await _warehouse_service.stocktake()
 
 
 @router.post("/api/warehouse/slot-optimize", tags=["仓储服务"])
@@ -197,7 +197,7 @@ async def warehouse_forecast(productId: str = None):
 async def agent_shipping_claim(req: AgentShippingClaimRequest):
     """代理商区域认领(对应前端 agent-shipping-service.js liveClaim)"""
     try:
-        return _shipping_service.claim(req.agentId, req.region)
+        return await _shipping_service.claim(req.agentId, req.region)
     except KeyError as e:
         raise _map_key_error(e) from e
     except ValueError as e:
@@ -207,7 +207,7 @@ async def agent_shipping_claim(req: AgentShippingClaimRequest):
 @router.get("/api/agent-shipping/claims", tags=["代理商服务"])
 async def agent_shipping_list_claims():
     """查询所有区域认领记录"""
-    return _shipping_service.list_claims()
+    return await _shipping_service.list_claims()
 
 
 def register_business_routes(app):
