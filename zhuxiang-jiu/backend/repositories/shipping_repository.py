@@ -8,9 +8,12 @@ key: region(区域字符串)
 value: agent_id
 """
 
+import logging
 from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
+
+logger = logging.getLogger(__name__)
 
 
 class ShippingClaimRepository:
@@ -61,7 +64,16 @@ class ShippingClaimRepository:
 
     async def _redis_get_claim(self, region: str):
         client = await get_redis_client()
-        return await client.hget(_k("shipping_claims"), region)
+        value = await client.hget(_k("shipping_claims"), region)
+        if value is None:
+            logger.debug("redis_get_claim_miss region=%s", region)
+            return None
+        # Redis Hash 值恒为 str, 数字型 agent_id 还原为 int 以对齐内存模式
+        converted = int(value) if value.isdigit() else value
+        logger.debug("redis_get_claim region=%s raw=%r type=%s -> %r type=%s%s",
+                     region, value, "str", converted, type(converted).__name__,
+                     " (int还原)" if value.isdigit() else " (非数字,原样)")
+        return converted
 
     async def _redis_is_claimed(self, region: str) -> bool:
         client = await get_redis_client()
@@ -73,4 +85,10 @@ class ShippingClaimRepository:
 
     async def _redis_list_all(self) -> dict:
         client = await get_redis_client()
-        return await client.hgetall(_k("shipping_claims"))
+        claims = await client.hgetall(_k("shipping_claims"))
+        # 数字型 agent_id 还原为 int, 与内存模式保持类型一致
+        result = {k: int(v) if v and v.isdigit() else v for k, v in claims.items()}
+        converted_n = sum(1 for v in claims.values() if v and v.isdigit())
+        logger.debug("redis_list_all total=%d converted_to_int=%d raw=%r",
+                     len(result), converted_n, claims)
+        return result

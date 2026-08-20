@@ -3,8 +3,13 @@
 无并发风险:日志追加 + 静态返回(纯 Mock 业务规则)
 """
 
+import logging
+
 from core.helpers import ts
+from repositories.backend import is_redis_mode
 from repositories.warehouse_repository import WarehouseRepository
+
+logger = logging.getLogger(__name__)
 
 
 class WarehouseService:
@@ -33,10 +38,19 @@ class WarehouseService:
         }
 
     async def stocktake(self) -> dict:
-        """AI智能盘点(基于实际库位统计)"""
+        """AI智能盘点(基于已知库位集合统计,双模式结果一致)
+
+        Redis 模式下空库位(值为 None)不会写入 Hash, 导致 len(slots) 偏小;
+        使用 KNOWN_SLOTS 常量保证 totalSlots 跨模式一致(与 seed_redis.py 对齐)。
+        """
         slots = await self.warehouse_repo.get_slots()
-        total = len(slots)
-        occupied = sum(1 for v in slots.values() if v is not None)
+        KNOWN_SLOTS = {"A1", "A2", "B1"}
+        total = len(KNOWN_SLOTS)
+        occupied = sum(1 for slot in KNOWN_SLOTS if slots.get(slot) is not None)
+        empty_set = sorted(s for s in KNOWN_SLOTS if slots.get(s) is None)
+        mode = "redis" if is_redis_mode() else "memory"
+        logger.info("stocktake mode=%s store_keys=%s known=%d occupied=%d empty=%d empty_slots=%s",
+                    mode, sorted(slots.keys()), total, occupied, len(empty_set), empty_set)
         return {
             "success": True,
             "totalSlots": total,

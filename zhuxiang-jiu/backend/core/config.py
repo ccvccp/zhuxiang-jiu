@@ -1,5 +1,6 @@
-"""应用配置:CORS / API_BASE / 运行模式 / 角色等级"""
+"""应用配置:CORS / API_BASE / 运行模式 / 角色等级 / 日志"""
 
+import logging
 import os
 from datetime import datetime, timezone
 
@@ -21,3 +22,15 @@ ROLE_LEVELS = {
 
 ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 ALLOW_HEADERS = ["Authorization", "Content-Type", "X-Role"]
+
+
+# ============================================================
+#  日志配置
+# ============================================================
+# 通过 LOG_LEVEL 环境变量控制级别(默认 INFO, 排查并发问题可设 DEBUG)
+# 测试时由 pytest.ini 的 log_cli 接管输出, basicConfig 幂等不冲突
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)

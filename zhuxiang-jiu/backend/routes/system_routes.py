@@ -6,15 +6,20 @@
     POST /api/decision/mode/switch    切换 Mock/Live 模式(admin)
 """
 
+import logging
+
 from fastapi import APIRouter, Depends
 
 from core.auth import require_role
 from core.config import API_BASE, APP_MODE
 from core.helpers import ok, uptime
+from core.locks import get_lock
 from models import (
     BaseSuccessResponse, HealthDetails, ModeDetails,
     ModeSwitchRequest, ModeSwitchDetails,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -45,12 +50,19 @@ async def switch_mode(
     req: ModeSwitchRequest,
     role: str = Depends(require_role("admin")),
 ):
-    APP_MODE["mode"] = req.mode
-    APP_MODE["api_base"] = req.apiBase or API_BASE
-    details = ModeSwitchDetails(mode=APP_MODE["mode"], apiBase=APP_MODE["api_base"])
-    return ok("mode-switch", details.model_dump(by_alias=True),
-              logs=[{"stage": "系统-模式切换", "message": f"切换至 {req.mode} 模式",
-                     "data": {"apiBase": APP_MODE["api_base"]}}])
+    prev_mode = APP_MODE["mode"]
+    logger.info("switch_mode_start from=%s to=%s apiBase=%r",
+                prev_mode, req.mode, req.apiBase)
+    async with get_lock("decision:mode"):
+        logger.debug("switch_mode_lock_acquired key=decision:mode")
+        APP_MODE["mode"] = req.mode
+        APP_MODE["api_base"] = req.apiBase or API_BASE
+        logger.info("switch_mode_done prev=%s cur=%s apiBase=%s",
+                    prev_mode, APP_MODE["mode"], APP_MODE["api_base"])
+        details = ModeSwitchDetails(mode=APP_MODE["mode"], apiBase=APP_MODE["api_base"])
+        return ok("mode-switch", details.model_dump(by_alias=True),
+                  logs=[{"stage": "系统-模式切换", "message": f"切换至 {req.mode} 模式",
+                         "data": {"apiBase": APP_MODE["api_base"]}}])
 
 
 def register_system_routes(app):
