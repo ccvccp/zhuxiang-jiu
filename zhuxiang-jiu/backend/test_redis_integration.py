@@ -11,13 +11,19 @@
     - 已执行 seed_redis.py 初始化数据
 
 运行方式:
-    # 仅运行 Redis 集成测试
-    $env:LOCK_MODE = "redis"
-    $env:STORE_MODE = "redis"
+    # 仅运行 Redis 集成测试(无需手动设环境变量, autouse fixture 自动切换)
     py -m pytest test_redis_integration.py -m redis -v
 
     # 跳过 Redis 测试(无 Redis 环境时)
     py -m pytest -m "not redis"
+
+    # 全量运行(内存测试 + Redis 测试自动隔离)
+    py -m pytest
+
+设计:
+    - 不在模块顶层设置环境变量(避免污染同进程其他内存测试)
+    - autouse fixture 用 monkeypatch 在每个测试运行时设 redis 模式
+    - is_redis_mode() 动态读取环境变量, 测试结束自动恢复
 
 CI 集成:
     .github/workflows/ci.yml 中的 redis-integration-tests job 自动运行
@@ -30,19 +36,12 @@ from pathlib import Path
 
 import pytest
 
-# ============================================================
-# 环境变量设置(必须在 import repositories/backend 之前)
-# ============================================================
-
-# 强制 Redis 模式(覆盖 conftest.py 的 asyncio 设置)
-# 这样 Repository 会走 Redis 后端
-os.environ["LOCK_MODE"] = "redis"
-os.environ["STORE_MODE"] = "redis"
-os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:6379/0")
-
 # 路径设置
 BACKEND_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(BACKEND_DIR))
+
+# Redis 连接地址(与 backend.py 默认值一致)
+_REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 
 
 # ============================================================
@@ -53,7 +52,7 @@ def _redis_available() -> bool:
     """检查 Redis 服务是否可用"""
     try:
         import redis
-        client = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+        client = redis.from_url(_REDIS_URL, decode_responses=True)
         client.ping()
         client.close()
         return True
@@ -66,7 +65,7 @@ pytestmark = [
     pytest.mark.redis,
     pytest.mark.skipif(
         not _redis_available(),
-        reason=f"Redis 服务不可用: {os.environ.get('REDIS_URL')}",
+        reason=f"Redis 服务不可用: {_REDIS_URL}",
     ),
     pytest.mark.asyncio,
 ]
@@ -76,11 +75,23 @@ pytestmark = [
 # Fixtures
 # ============================================================
 
+@pytest.fixture(autouse=True)
+def _force_redis_mode(monkeypatch):
+    """强制 Redis 模式(仅对本文件的测试生效, 测试结束自动恢复)
+
+    用 monkeypatch 设环境变量, 避免 conftest.py 的 asyncio 设置影响。
+    配合 backend.is_redis_mode() 的动态读取, 实现测试隔离。
+    """
+    monkeypatch.setenv("LOCK_MODE", "redis")
+    monkeypatch.setenv("STORE_MODE", "redis")
+    monkeypatch.setenv("REDIS_URL", _REDIS_URL)
+
+
 @pytest.fixture
 async def redis_client():
     """Redis 客户端 fixture(测试结束自动关闭)"""
     import redis.asyncio as redis
-    client = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    client = redis.from_url(_REDIS_URL, decode_responses=True)
     try:
         yield client
     finally:
@@ -185,10 +196,10 @@ class TestSeedData:
     async def test_seed_warehouse_slots_readable(self, seeded_redis, warehouse_repo):
         """seed 写入的库位映射可被 Repository 读取"""
         slots = await warehouse_repo.get_slots()
-        # A1/A2 有值, B1 不存在(None)
+        # A1/A2 有值, B1 不存在(空库位不在初始数据中)
         assert slots.get("A1") == "ZX42-2026L07"
         assert slots.get("A2") == "ZX42-2026L05"
-        assert "B1" not in slots  # B1 未写入, 表示空库位
+        assert "B1" not in slots  # 空库位不写入, 与内存模式一致
 
     async def test_seed_list_all_agents(self, seeded_redis, agent_repo):
         """list_all 返回所有代理商"""

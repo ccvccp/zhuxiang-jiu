@@ -77,10 +77,8 @@ SEED_DATA = {
         "ZX42-2026L05": {"stock": 300, "reserved": 0},
     },
     "warehouse_slots": {
-        # None 值的库位(B1)不写入 Redis, 读取时 hgetall 不包含即为空
         "A1": "ZX42-2026L07",
         "A2": "ZX42-2026L05",
-        # B1: None  → 跳过
     },
 }
 
@@ -201,7 +199,7 @@ async def seed() -> int:
 
         # 4. 写入仓储库位
         slots_n = await seed_warehouse_slots(client)
-        print(f"[OK] 仓储库位写入: {slots_n} 个(空库位 B1 跳过)")
+        print(f"[OK] 仓储库位写入: {slots_n} 个")
 
         # 5. 空列表/空 Hash 不需要写入(inbound_log/outbound_log/orders/shipping_claims)
         print("[INFO] inbound_log/outbound_log/orders/shipping_claims: 初始为空, 不写入")

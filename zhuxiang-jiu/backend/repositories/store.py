@@ -21,7 +21,7 @@ _mock_store: dict = {
         "ZX42-2026L05": {"stock": 300, "reserved": 0},
     },
     "warehouse": {
-        "slots": {"A1": "ZX42-2026L07", "A2": "ZX42-2026L05", "B1": None},
+        "slots": {"A1": "ZX42-2026L07", "A2": "ZX42-2026L05"},
         "inbound_log": [],
         "outbound_log": [],
     },
@@ -46,7 +46,7 @@ def reset_store() -> dict:
             "ZX42-2026L05": {"stock": 300, "reserved": 0},
         },
         "warehouse": {
-            "slots": {"A1": "ZX42-2026L07", "A2": "ZX42-2026L05", "B1": None},
+            "slots": {"A1": "ZX42-2026L07", "A2": "ZX42-2026L05"},
             "inbound_log": [],
             "outbound_log": [],
         },

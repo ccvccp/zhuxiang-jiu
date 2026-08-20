@@ -14,13 +14,11 @@
 
 import os
 
-# STORE_MODE 优先级: STORE_MODE > LOCK_MODE > asyncio
-# 这样 LOCK_MODE=redis 时存储也自动切到 Redis, 单一开关控制两者
-STORE_MODE = os.environ.get(
-    "STORE_MODE",
-    os.environ.get("LOCK_MODE", "asyncio"),
-)
+# REDIS_URL 在导入时读取(连接配置, 运行时不变)
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
+
+# NOTE: STORE_MODE 不再在模块级冻结, 改由 is_redis_mode() 动态读取
+# 这样测试 fixture 可在运行时切换模式, 避免导入顺序污染
 
 # Redis Key 前缀(避免与其他服务冲突)
 KEY_PREFIX = "zhuxiang:"
@@ -43,8 +41,13 @@ async def get_redis_client():
 
 
 def is_redis_mode() -> bool:
-    """当前是否为 Redis 存储模式"""
-    return STORE_MODE == "redis"
+    """当前是否为 Redis 存储模式(动态读取环境变量)
+
+    STORE_MODE 优先级: STORE_MODE > LOCK_MODE > asyncio
+    每次调用实时读取, 避免 conftest.py 与 redis 测试的导入顺序污染。
+    """
+    mode = os.environ.get("STORE_MODE", os.environ.get("LOCK_MODE", "asyncio"))
+    return mode == "redis"
 
 
 def get_in_memory_store() -> dict:
