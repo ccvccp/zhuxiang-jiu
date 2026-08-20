@@ -18,6 +18,14 @@ services:
     command: >
       sh -c "python scripts/seed_redis.py || echo '[WARN] seed failed, continuing...';
              uvicorn main:app --host 0.0.0.0 --port 8000"
+    # 健康检查: FastAPI /api/decision/health 端点(无需认证)
+    # 依赖容器内 curl; Dockerfile 已安装
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/decision/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   redis:
     image: redis:7-alpine

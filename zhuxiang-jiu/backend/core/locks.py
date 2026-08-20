@@ -14,13 +14,20 @@ import asyncio
 import os
 from typing import AsyncContextManager
 
-LOCK_MODE = os.environ.get("LOCK_MODE", "redis")  # asyncio | redis(默认 redis: 多 worker 安全)
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 _LOCK_TTL = 10.0            # 锁 TTL(秒), 超时自动释放防死锁
 _LOCK_BLOCK_TIMEOUT = 30.0  # 等待获取锁的最长时间
 
 _async_locks: dict[str, asyncio.Lock] = {}
 _redis_client = None
+
+
+def _get_lock_mode() -> str:
+    """动态读取 LOCK_MODE(运行时可变, 与 repositories.backend.is_redis_mode() 对齐)
+
+    NOTE: 不再在模块级冻结, 避免测试 monkeypatch.setenv 后锁模式与存储模式不一致。
+    """
+    return os.environ.get("LOCK_MODE", "redis")
 
 
 async def _get_redis_client():
@@ -62,16 +69,16 @@ class _RedisLockWrapper:
 
 
 def get_lock(key: str) -> AsyncContextManager:
-    """获取锁: 双模式切换
+    """获取锁: 双模式切换(动态读取 LOCK_MODE)
 
-    LOCK_MODE=asyncio (默认): 单进程 asyncio.Lock
+    LOCK_MODE=asyncio: 单进程 asyncio.Lock
         - 速度快, 无外部依赖
         - 仅单进程有效, 多 worker 下失效(已由方案 A 探针暴露)
-    LOCK_MODE=redis:          跨进程 redis.asyncio.Lock
+    LOCK_MODE=redis (默认): 跨进程 redis.asyncio.Lock
         - 多 worker 下跨进程互斥
         - 需 Redis 服务, watchdog 自动续期
     """
-    if LOCK_MODE == "redis":
+    if _get_lock_mode() == "redis":
         return _RedisLockWrapper(key)
     # 单进程 asyncio.Lock(保留原逻辑)
     if key not in _async_locks:

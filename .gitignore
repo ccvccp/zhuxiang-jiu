@@ -30,3 +30,21 @@ Thumbs.db
 
 # Docker
 *.pid
+
+# Python 临时依赖(本地探针/测试用,不应提交)
+.deps/
+
+# Node 依赖
+node_modules/
+
+# 敏感配置
+.env
+.env.*
+!.env.example
+
+# 运行日志(探针输出等)
+*.log
+
+# CI 产物
+convention-report.json
+ci/convention-report.json
