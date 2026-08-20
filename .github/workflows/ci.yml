@@ -354,6 +354,67 @@ jobs:
           retention-days: 30
 
   # ============================================================
+  # Job 8b-redis: Concurrency Probe Shipping Redis (multi-process, distributed lock)
+  # 验证 shipping:claim:{region} Redis 分布式锁在多进程下跨进程互斥 + 状态一致性
+  # 对比 Job 8b(asyncio 单进程): 此 job 需 Redis 服务 + STORE_MODE=redis
+  # 探针脚本: probe_shipping_claim_concurrency_multiworker.py
+  #   - 启动 2 个独立 uvicorn 进程(端口 8765/8766)模拟多 worker
+  #   - 场景1: 5 agent 跨进程并发认领同区域 → 1 成功 + 4 冲突 + Redis 状态一致
+  #   - 场景2: 同 agent 跨进程幂等认领 → 全部成功 + Redis 状态一致
+  # ============================================================
+  concurrency-probe-shipping-redis:
+    name: Concurrency Probe Shipping Redis (Linux)
+    runs-on: ubuntu-latest
+    needs: python-tests
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      LOCK_MODE: redis
+      STORE_MODE: redis
+      REDIS_URL: redis://127.0.0.1:6379/0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r zhuxiang-jiu/backend/requirements.txt
+
+      - name: Verify Redis connectivity
+        run: |
+          python -c "import redis; r = redis.from_url('redis://127.0.0.1:6379/0'); print('Redis PING:', r.ping())"
+
+      - name: Run shipping claim multi-process probe (Redis distributed lock)
+        working-directory: zhuxiang-jiu/backend
+        run: |
+          python probe_shipping_claim_concurrency_multiworker.py 2>&1 | tee probe-shipping-redis-output.log
+
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: concurrency-probe-shipping-redis-log
+          path: zhuxiang-jiu/backend/probe-shipping-redis-output.log
+          retention-days: 30
+
+  # ============================================================
   # Job 8c: Concurrency Probe Redis (multi-process, distributed lock)
   # 验证 Redis 分布式锁在多进程下跨进程互斥
   # 对比 Job 8(asyncio 单进程): 8c 需 Redis 服务 + LOCK_MODE=redis
@@ -477,7 +538,7 @@ jobs:
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [ps-version-check, python-tests, python-tests-windows, docker-build-test, force-param-test-windows, force-param-test-linux, concurrency-probe, concurrency-probe-shipping, concurrency-probe-redis, redis-integration-tests]
+    needs: [ps-version-check, python-tests, python-tests-windows, docker-build-test, force-param-test-windows, force-param-test-linux, concurrency-probe, concurrency-probe-shipping, concurrency-probe-shipping-redis, concurrency-probe-redis, redis-integration-tests]
     if: always()
 
     steps:
@@ -495,6 +556,7 @@ jobs:
           echo "| Force Param Tests | ${{ needs.force-param-test-linux.result }} | Linux |" >> $GITHUB_STEP_SUMMARY
           echo "| Concurrency Probe | ${{ needs.concurrency-probe.result }} | Linux |" >> $GITHUB_STEP_SUMMARY
           echo "| Concurrency Probe Shipping | ${{ needs.concurrency-probe-shipping.result }} | Linux |" >> $GITHUB_STEP_SUMMARY
+          echo "| Concurrency Probe Shipping Redis | ${{ needs.concurrency-probe-shipping-redis.result }} | Linux |" >> $GITHUB_STEP_SUMMARY
           echo "| Concurrency Probe Redis | ${{ needs.concurrency-probe-redis.result }} | Linux |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -507,6 +569,7 @@ jobs:
                 "${{ needs.force-param-test-linux.result }}" != "success" || \
                 "${{ needs.concurrency-probe.result }}" != "success" || \
                 "${{ needs.concurrency-probe-shipping.result }}" != "success" || \
+                "${{ needs.concurrency-probe-shipping-redis.result }}" != "success" || \
                 "${{ needs.concurrency-probe-redis.result }}" != "success" ]]; then
             echo "One or more jobs failed!"
             exit 1
