@@ -14,6 +14,7 @@ from routes.system_routes import register_system_routes
 from routes.business_routes import register_business_routes
 from routes.member_routes import register_member_routes
 from routes.order_routes import register_order_routes
+from routes.product_routes import register_product_routes
 
 __all__ = [
     "register_decision_routes",
@@ -21,4 +22,5 @@ __all__ = [
     "register_business_routes",
     "register_member_routes",
     "register_order_routes",
+    "register_product_routes",
 ]

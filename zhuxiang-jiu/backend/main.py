@@ -32,6 +32,7 @@ from routes import (
     register_system_routes,
     register_member_routes,
     register_order_routes,
+    register_product_routes,
 )
 
 
@@ -63,6 +64,7 @@ app = FastAPI(
         {"name": "仓储服务", "description": "入库/出库/盘点/库位优化/预测"},
         {"name": "会员服务", "description": "注册/登录/资料/等级/积分/收货地址"},
         {"name": "订单服务", "description": "订单创建/查询/状态流转/售后退款/评价/超时"},
+        {"name": "产品展示", "description": "分类导航/产品列表/搜索/详情/热销/主推/评价"},
     ],
 )
 
@@ -85,6 +87,7 @@ register_system_routes(app)
 register_business_routes(app)
 register_member_routes(app)
 register_order_routes(app)
+register_product_routes(app)
 
 
 # ============================================================

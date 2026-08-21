@@ -17,6 +17,9 @@ Key 命名规范(对齐 repositories/backend.py 的 _k 函数):
     zhuxiang:warehouse:outbound_log   List(出库日志, 初始为空)
     zhuxiang:orders                  List(订单, 初始为空)
     zhuxiang:shipping_claims         Hash(区域认领, 初始为空)
+    zhuxiang:product:{productId}     Hash(产品主信息, 嵌套字段序列化为 JSON)
+    zhuxiang:product:categories      List(产品分类树, 每元素为 JSON)
+    zhuxiang:product:reviews:{pid}   List(产品评价, 每元素为 JSON)
 
 运行:
     # 默认连接本地 Redis
@@ -38,6 +41,7 @@ Key 命名规范(对齐 repositories/backend.py 的 _k 函数):
 """
 
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
@@ -63,6 +67,13 @@ def _k(entity: str, *parts) -> str:
     return KEY_PREFIX + entity + ":" + ":".join(str(p) for p in parts)
 
 
+# 局部导入: 产品 / 评价 / 分类 / 库存数据源(与 store.py 复用同一份数据, 避免重复维护)
+from repositories.product_repository import (  # noqa: E402
+    _initial_products, _initial_reviews, PRODUCT_CATEGORIES,
+)
+from repositories.store import _build_initial_inventory  # noqa: E402
+
+
 # ============================================================
 # 初始数据(与 repositories/store.py 的 _mock_store 完全一致)
 # ============================================================
@@ -72,10 +83,7 @@ SEED_DATA = {
         1: {"id": 1, "name": "泰安市级代理商", "level": "C", "wallet": 50000},
         2: {"id": 2, "name": "济南核心代理商", "level": "B", "wallet": 120000},
     },
-    "inventory": {
-        "ZX42-2026L07": {"stock": 500, "reserved": 0},
-        "ZX42-2026L05": {"stock": 300, "reserved": 0},
-    },
+    "inventory": _build_initial_inventory(),
     "warehouse_slots": {
         "A1": "ZX42-2026L07",
         "A2": "ZX42-2026L05",
@@ -180,7 +188,6 @@ async def seed_members(client) -> int:
 
 async def seed_member_addresses(client) -> int:
     """写入收货地址(Hash, field=addrId, value=JSON)"""
-    import json
     count = 0
     for member_id, addrs in SEED_DATA["member_addresses"].items():
         if not addrs:
@@ -188,6 +195,75 @@ async def seed_member_addresses(client) -> int:
         mapping = {addr_id: json.dumps(addr, ensure_ascii=False) for addr_id, addr in addrs.items()}
         await client.hset(_k("member", "addresses", member_id), mapping=mapping)
         count += len(addrs)
+    return count
+
+
+def _serialize_product(product: dict) -> dict:
+    """将产品 dict 序列化为 Redis Hash 兼容的 mapping
+
+    注意: 此函数必须与 ProductRepository._serialize_product 逻辑保持一致,
+    否则 seed 写入的数据 Repository 读取时会反序列化失败。
+    嵌套结构(tags/scenes/attributes/images)序列化为 JSON 字符串,
+    bool 转 0/1, 其余按原类型(str/int/float)存储。
+    """
+    json_fields = ("tags", "scenes", "attributes", "images")
+    result = {}
+    for k, v in product.items():
+        if v is None:
+            continue
+        if k in json_fields:
+            result[k] = json.dumps(v, ensure_ascii=False)
+        elif isinstance(v, bool):
+            result[k] = 1 if v else 0
+        elif isinstance(v, (int, float)):
+            result[k] = v
+        else:
+            result[k] = str(v)
+    return result
+
+
+async def seed_products(client) -> int:
+    """写入产品主信息(Hash, 11 款产品)
+
+    Key: zhuxiang:product:{product_id}
+    嵌套字段(tags/scenes/attributes/images)以 JSON 字符串存储,
+    由 ProductRepository._deserialize_product 读取时还原。
+    """
+    count = 0
+    for product in _initial_products():
+        mapping = _serialize_product(product)
+        await client.hset(_k("product", product["product_id"]), mapping=mapping)
+        count += 1
+    return count
+
+
+async def seed_product_categories(client) -> int:
+    """写入产品分类树(List, 5 个顶级分类)
+
+    Key: zhuxiang:product:categories
+    每个元素为分类项的 JSON 字符串, 由 ProductRepository._redis_get_categories 读取。
+    """
+    items = [json.dumps(c, ensure_ascii=False) for c in PRODUCT_CATEGORIES]
+    # 先清空再写入(避免重复执行时追加)
+    await client.delete(_k("product", "categories"))
+    if items:
+        await client.rpush(_k("product", "categories"), *items)
+    return len(items)
+
+
+async def seed_product_reviews(client) -> int:
+    """写入产品评价(List, 每款产品一个 List)
+
+    Key: zhuxiang:product:reviews:{product_id}
+    每个元素为评价的 JSON 字符串, 由 ProductRepository._redis_get_reviews 读取。
+    """
+    count = 0
+    for product_id, reviews in _initial_reviews().items():
+        if not reviews:
+            continue
+        items = [json.dumps(r, ensure_ascii=False) for r in reviews]
+        await client.rpush(_k("product", "reviews", product_id), *items)
+        count += len(reviews)
     return count
 
 
@@ -208,6 +284,19 @@ async def verify_seed(client) -> dict:
     member1_phone_idx = await client.get(_k("member", "phone", "13800000001"))
     addrs_count = await client.hlen(_k("member", "addresses", 1))
 
+    # 产品验证(排除 categories / reviews:* 键)
+    product_keys = [
+        k for k in (await client.keys(_k("product", "*")))
+        if not k.endswith(":product:categories") and ":reviews:" not in k
+    ]
+    categories_count = await client.llen(_k("product", "categories"))
+    sample_product = await client.hgetall(_k("product", "ZX42-2026L07"))
+    reviews_keys = [
+        k for k in (await client.keys(_k("product", "reviews", "*")))
+        if ":reviews:" in k
+    ]
+    sample_reviews_count = await client.llen(_k("product", "reviews", "ZX42-2026L07"))
+
     return {
         "agents_count": len(agents),
         "inventory_count": len(inventory),
@@ -219,6 +308,11 @@ async def verify_seed(client) -> dict:
         "sample_member_1": member1,
         "member1_phone_index": member1_phone_idx,
         "member1_addresses_count": addrs_count,
+        "products_count": len(product_keys),
+        "categories_count": categories_count,
+        "sample_product_ZX42-2026L07": sample_product,
+        "product_reviews_keys_count": len(reviews_keys),
+        "sample_reviews_ZX42-2026L07_count": sample_reviews_count,
     }
 
 
@@ -273,6 +367,18 @@ async def seed() -> int:
         addrs_n = await seed_member_addresses(client)
         print(f"[OK] 收货地址写入: {addrs_n} 条")
 
+        # 4d. 写入产品主信息(11 款产品)
+        products_n = await seed_products(client)
+        print(f"[OK] 产品写入: {products_n} 条")
+
+        # 4e. 写入产品分类树(5 个顶级分类)
+        cats_n = await seed_product_categories(client)
+        print(f"[OK] 产品分类树写入: {cats_n} 个分类")
+
+        # 4f. 写入产品评价(种子评价)
+        reviews_n = await seed_product_reviews(client)
+        print(f"[OK] 产品评价写入: {reviews_n} 条")
+
         # 5. 空列表/空 Hash 不需要写入(inbound_log/outbound_log/orders/shipping_claims)
         print("[INFO] inbound_log/outbound_log/orders/shipping_claims: 初始为空, 不写入")
 
@@ -296,6 +402,9 @@ async def seed() -> int:
         print("     (默认 LOCK_MODE=redis, STORE_MODE=redis)")
         print("  2. 验证接口: curl http://localhost:8000/api/decision/health")
         print("  3. 验证数据: curl http://localhost:8000/api/warehouse/stocktake")
+        print("  4. 验证产品: curl http://localhost:8000/api/product/categories")
+        print("     curl http://localhost:8000/api/product/list")
+        print("     curl http://localhost:8000/api/product/ZX42-2026L07")
         return 0
 
     finally:
