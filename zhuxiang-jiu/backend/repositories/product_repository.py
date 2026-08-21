@@ -28,6 +28,49 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
+# 评价状态机常量
+# ============================================================
+
+REVIEW_STATUS_PUBLISHED = "published"          # 已发布(默认)
+REVIEW_STATUS_PENDING_REVIEW = "pending_review"  # 待审核
+REVIEW_STATUS_HIDDEN = "hidden"                 # 已隐藏
+REVIEW_STATUS_REJECTED = "rejected"              # 审核拒绝
+
+REVIEW_STATUS_NAMES = {
+    REVIEW_STATUS_PUBLISHED: "已发布",
+    REVIEW_STATUS_PENDING_REVIEW: "待审核",
+    REVIEW_STATUS_HIDDEN: "已隐藏",
+    REVIEW_STATUS_REJECTED: "审核拒绝",
+}
+
+# 举报状态机常量
+REPORT_STATUS_PENDING = "pending"               # 待处理
+REPORT_STATUS_CONFIRMED = "confirmed"           # 举报成立
+REPORT_STATUS_REJECTED = "rejected"             # 举报驳回
+REPORT_STATUS_RESOLVED = "resolved"             # 已处理
+
+REPORT_STATUS_NAMES = {
+    REPORT_STATUS_PENDING: "待处理",
+    REPORT_STATUS_CONFIRMED: "举报成立",
+    REPORT_STATUS_REJECTED: "举报驳回",
+    REPORT_STATUS_RESOLVED: "已处理",
+}
+
+# 举报原因类型
+REPORT_REASON_AD = "ad"                         # 广告推广
+REPORT_REASON_ABUSE = "abuse"                    # 辱骂攻击
+REPORT_REASON_PORN = "porn"                     # 色情低俗
+REPORT_REASON_OTHER = "other"                    # 其他
+
+REPORT_REASON_NAMES = {
+    REPORT_REASON_AD: "广告推广",
+    REPORT_REASON_ABUSE: "辱骂攻击",
+    REPORT_REASON_PORN: "色情低俗",
+    REPORT_REASON_OTHER: "其他",
+}
+
+
+# ============================================================
 # 分类树(静态元数据, 与产品线对齐)
 # ============================================================
 
@@ -482,6 +525,14 @@ class ProductRepository:
         review["review_id"] = review_id
         review.setdefault("created_at", _now_iso())
         review["product_id"] = product_id
+        # P0 扩展字段(向后兼容: 现有评价无此字段时使用默认值)
+        review.setdefault("order_id", "")
+        review.setdefault("images", [])
+        review.setdefault("status", REVIEW_STATUS_PUBLISHED)
+        review.setdefault("is_anonymous", False)
+        review.setdefault("reply_count", 0)
+        review.setdefault("like_count", 0)
+        review.setdefault("updated_at", "")
 
         if is_redis_mode():
             await self._redis_add_review(product_id, review)
@@ -505,6 +556,221 @@ class ProductRepository:
             await self._redis_update_rating_fields(product_id, avg, count)
         else:
             self._mem_update_rating_fields(product_id, avg, count)
+
+    # ============================================================
+    # 评价扩展(P0): 单条查询/修改/删除/按订单查询
+    # ============================================================
+
+    async def get_review(self, product_id: str, review_id: str) -> Optional[dict]:
+        """查询单条评价(返回 None 表示不存在)"""
+        if is_redis_mode():
+            reviews = await self._redis_get_reviews(product_id)
+        else:
+            reviews = self._mem_get_reviews(product_id)
+        for r in reviews:
+            if r.get("review_id") == review_id:
+                return r
+        return None
+
+    async def update_review(self, product_id: str, review_id: str,
+                            fields: dict) -> Optional[dict]:
+        """更新评价字段(返回更新后的评价, None 表示不存在)
+
+        注意: rating 变更时需调用方触发 _update_rating_stats
+        """
+        if is_redis_mode():
+            return await self._redis_update_review(product_id, review_id, fields)
+        return self._mem_update_review(product_id, review_id, fields)
+
+    async def delete_review(self, product_id: str, review_id: str) -> bool:
+        """删除评价(返回是否删除成功)"""
+        if is_redis_mode():
+            return await self._redis_delete_review(product_id, review_id)
+        return self._mem_delete_review(product_id, review_id)
+
+    async def get_review_by_order(self, order_id: str,
+                                  product_id: str = None) -> Optional[dict]:
+        """按订单号查询评价(可选限定 product_id)
+
+        Returns:
+            评价 dict 或 None(未评价)
+        """
+        # 遍历评价查找 order_id 匹配项
+        if product_id:
+            # 指定了 product_id, 直接查该产品评价
+            if is_redis_mode():
+                reviews = await self._redis_get_reviews(product_id)
+            else:
+                reviews = self._mem_get_reviews(product_id)
+            for r in reviews:
+                if r.get("order_id") == order_id:
+                    return r
+            return None
+        # 未指定 product_id, 遍历所有产品评价
+        if is_redis_mode():
+            all_products = await self._redis_list_all()
+        else:
+            all_products = self._mem_list_all()
+        for p in all_products:
+            pid = p.get("product_id")
+            if not pid:
+                continue
+            if is_redis_mode():
+                reviews = await self._redis_get_reviews(pid)
+            else:
+                reviews = self._mem_get_reviews(pid)
+            for r in reviews:
+                if r.get("order_id") == order_id:
+                    return r
+        return None
+
+    async def list_reviews_by_member(self, member_id: str,
+                                      limit: int = 50) -> list:
+        """按会员查询评价历史"""
+        if is_redis_mode():
+            all_products = await self._redis_list_all()
+        else:
+            all_products = self._mem_list_all()
+        result = []
+        for p in all_products:
+            pid = p.get("product_id")
+            if not pid:
+                continue
+            if is_redis_mode():
+                reviews = await self._redis_get_reviews(pid)
+            else:
+                reviews = self._mem_get_reviews(pid)
+            for r in reviews:
+                if str(r.get("member_id", "")) == str(member_id):
+                    r = dict(r)
+                    r["product_id"] = pid
+                    result.append(r)
+        # 按时间倒序
+        result.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        return result[:limit]
+
+    # ============================================================
+    # 评价回复(P0)
+    # ============================================================
+
+    async def add_reply(self, review_id: str, reply: dict) -> dict:
+        """新增评价回复(注入 reply_id/created_at)"""
+        import time, random
+        reply_id = f"rp_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+        reply = dict(reply)
+        reply["reply_id"] = reply_id
+        reply.setdefault("created_at", _now_iso())
+        reply["review_id"] = review_id
+
+        if is_redis_mode():
+            await self._redis_add_reply(review_id, reply)
+        else:
+            self._mem_add_reply(review_id, reply)
+        return reply
+
+    async def get_replies(self, review_id: str) -> list:
+        """查询评价回复列表(按时间正序)"""
+        if is_redis_mode():
+            return await self._redis_get_replies(review_id)
+        return self._mem_get_replies(review_id)
+
+    async def delete_reply(self, review_id: str, reply_id: str) -> bool:
+        """删除单条回复(返回是否删除成功)"""
+        if is_redis_mode():
+            return await self._redis_delete_reply(review_id, reply_id)
+        return self._mem_delete_reply(review_id, reply_id)
+
+    # ============================================================
+    # 评价点赞(P1)
+    # ============================================================
+
+    async def add_like(self, review_id: str, member_id: str) -> bool:
+        """点赞(已点赞返回 False, 首次点赞返回 True)"""
+        if is_redis_mode():
+            added = await self._redis_add_like(review_id, member_id)
+        else:
+            added = self._mem_add_like(review_id, member_id)
+        if added:
+            await self._increment_review_like_count(review_id, 1)
+        return added
+
+    async def remove_like(self, review_id: str, member_id: str) -> bool:
+        """取消点赞(已点赞返回 True, 未点赞返回 False)"""
+        if is_redis_mode():
+            removed = await self._redis_remove_like(review_id, member_id)
+        else:
+            removed = self._mem_remove_like(review_id, member_id)
+        if removed:
+            await self._increment_review_like_count(review_id, -1)
+        return removed
+
+    async def is_liked(self, review_id: str, member_id: str) -> bool:
+        """是否已点赞"""
+        if is_redis_mode():
+            return await self._redis_is_liked(review_id, member_id)
+        return self._mem_is_liked(review_id, member_id)
+
+    async def get_like_count(self, review_id: str) -> int:
+        """点赞数"""
+        if is_redis_mode():
+            return await self._redis_get_like_count(review_id)
+        return self._mem_get_like_count(review_id)
+
+    async def _increment_review_like_count(self, review_id: str, delta: int):
+        """更新评价的 like_count 字段(需遍历找到对应评价)"""
+        if is_redis_mode():
+            await self._redis_increment_like_count(review_id, delta)
+        else:
+            self._mem_increment_like_count(review_id, delta)
+
+    # ============================================================
+    # 评价举报(P1)
+    # ============================================================
+
+    async def create_report(self, report: dict) -> dict:
+        """创建举报(注入 report_id/created_at/status)"""
+        import time, random
+        report_id = f"rpt_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+        report = dict(report)
+        report["report_id"] = report_id
+        report.setdefault("created_at", _now_iso())
+        report.setdefault("status", REPORT_STATUS_PENDING)
+        report.setdefault("handler_id", "")
+        report.setdefault("handle_remark", "")
+        report.setdefault("handled_at", "")
+
+        if is_redis_mode():
+            await self._redis_create_report(report_id, report)
+        else:
+            self._mem_create_report(report_id, report)
+        return report
+
+    async def get_report(self, report_id: str) -> Optional[dict]:
+        """查询单条举报"""
+        if is_redis_mode():
+            return await self._redis_get_report(report_id)
+        return self._mem_get_report(report_id)
+
+    async def list_reports(self, status: str = None,
+                           limit: int = 50) -> list:
+        """举报列表(可按状态筛选)"""
+        if is_redis_mode():
+            return await self._redis_list_reports(status, limit)
+        return self._mem_list_reports(status, limit)
+
+    async def update_report(self, report_id: str, fields: dict) -> Optional[dict]:
+        """更新举报字段"""
+        if is_redis_mode():
+            return await self._redis_update_report(report_id, fields)
+        return self._mem_update_report(report_id, fields)
+
+    async def get_report_by_review_reporter(self, review_id: str,
+                                            reporter_id: str) -> Optional[dict]:
+        """查询用户是否已举报某评价(防重复举报)"""
+        if is_redis_mode():
+            return await self._redis_get_report_by_review_reporter(
+                review_id, reporter_id)
+        return self._mem_get_report_by_review_reporter(review_id, reporter_id)
 
     # ============================================================
     # 筛选/排序辅助
@@ -564,11 +830,17 @@ class ProductRepository:
     # ============================================================
 
     def _ensure_store(self):
-        """确保 store 包含 products / product_reviews 键"""
+        """确保 store 包含 products / product_reviews / review_replies / review_likes / review_reports 键"""
         if "products" not in self.store:
             self.store["products"] = {}
         if "product_reviews" not in self.store:
             self.store["product_reviews"] = {}
+        if "review_replies" not in self.store:
+            self.store["review_replies"] = {}
+        if "review_likes" not in self.store:
+            self.store["review_likes"] = {}
+        if "review_reports" not in self.store:
+            self.store["review_reports"] = {}
 
     def _mem_get_by_id(self, product_id: str) -> Optional[dict]:
         self._ensure_store()
@@ -602,6 +874,137 @@ class ProductRepository:
             "categories": copy.deepcopy(PRODUCT_CATEGORIES),
             "count": len(PRODUCT_CATEGORIES),
         }
+
+    # ---------- 评价扩展(内存) ----------
+
+    def _mem_update_review(self, product_id: str, review_id: str,
+                           fields: dict) -> Optional[dict]:
+        """更新评价字段(内存模式)"""
+        self._ensure_store()
+        reviews = self.store["product_reviews"].get(product_id, [])
+        for r in reviews:
+            if r.get("review_id") == review_id:
+                r.update(fields)
+                return r
+        return None
+
+    def _mem_delete_review(self, product_id: str, review_id: str) -> bool:
+        """删除评价(内存模式)"""
+        self._ensure_store()
+        reviews = self.store["product_reviews"].get(product_id, [])
+        for i, r in enumerate(reviews):
+            if r.get("review_id") == review_id:
+                reviews.pop(i)
+                return True
+        return False
+
+    # ---------- 评价回复(内存) ----------
+
+    def _mem_add_reply(self, review_id: str, reply: dict) -> None:
+        """新增回复(内存模式)"""
+        self._ensure_store()
+        if review_id not in self.store["review_replies"]:
+            self.store["review_replies"][review_id] = []
+        self.store["review_replies"][review_id].append(reply)
+
+    def _mem_get_replies(self, review_id: str) -> list:
+        """查询回复列表(内存模式, 按时间正序)"""
+        self._ensure_store()
+        replies = list(self.store["review_replies"].get(review_id, []))
+        replies.sort(key=lambda r: r.get("created_at", ""))
+        return replies
+
+    def _mem_delete_reply(self, review_id: str, reply_id: str) -> bool:
+        """删除回复(内存模式)"""
+        self._ensure_store()
+        replies = self.store["review_replies"].get(review_id, [])
+        for i, r in enumerate(replies):
+            if r.get("reply_id") == reply_id:
+                replies.pop(i)
+                return True
+        return False
+
+    # ---------- 评价点赞(内存) ----------
+
+    def _mem_add_like(self, review_id: str, member_id: str) -> bool:
+        """点赞(内存模式, Set 语义)"""
+        self._ensure_store()
+        if review_id not in self.store["review_likes"]:
+            self.store["review_likes"][review_id] = set()
+        if member_id in self.store["review_likes"][review_id]:
+            return False
+        self.store["review_likes"][review_id].add(member_id)
+        return True
+
+    def _mem_remove_like(self, review_id: str, member_id: str) -> bool:
+        """取消点赞(内存模式)"""
+        self._ensure_store()
+        likes = self.store["review_likes"].get(review_id, set())
+        if member_id not in likes:
+            return False
+        likes.discard(member_id)
+        return True
+
+    def _mem_is_liked(self, review_id: str, member_id: str) -> bool:
+        """是否已点赞(内存模式)"""
+        self._ensure_store()
+        return member_id in self.store["review_likes"].get(review_id, set())
+
+    def _mem_get_like_count(self, review_id: str) -> int:
+        """点赞数(内存模式)"""
+        self._ensure_store()
+        return len(self.store["review_likes"].get(review_id, set()))
+
+    def _mem_increment_like_count(self, review_id: str, delta: int):
+        """更新评价的 like_count 字段(内存模式, 遍历所有产品评价)"""
+        self._ensure_store()
+        for product_id, reviews in self.store["product_reviews"].items():
+            for r in reviews:
+                if r.get("review_id") == review_id:
+                    current = r.get("like_count", 0)
+                    r["like_count"] = max(0, current + delta)
+                    return
+
+    # ---------- 评价举报(内存) ----------
+
+    def _mem_create_report(self, report_id: str, report: dict) -> None:
+        """创建举报(内存模式)"""
+        self._ensure_store()
+        self.store["review_reports"][report_id] = report
+
+    def _mem_get_report(self, report_id: str) -> Optional[dict]:
+        """查询举报(内存模式)"""
+        self._ensure_store()
+        return self.store["review_reports"].get(report_id)
+
+    def _mem_list_reports(self, status: str = None,
+                          limit: int = 50) -> list:
+        """举报列表(内存模式, 按时间倒序)"""
+        self._ensure_store()
+        reports = list(self.store["review_reports"].values())
+        if status:
+            reports = [r for r in reports if r.get("status") == status]
+        reports.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        return reports[:limit]
+
+    def _mem_update_report(self, report_id: str,
+                           fields: dict) -> Optional[dict]:
+        """更新举报(内存模式)"""
+        self._ensure_store()
+        report = self.store["review_reports"].get(report_id)
+        if not report:
+            return None
+        report.update(fields)
+        return report
+
+    def _mem_get_report_by_review_reporter(self, review_id: str,
+                                            reporter_id: str) -> Optional[dict]:
+        """查询用户是否已举报某评价(内存模式)"""
+        self._ensure_store()
+        for r in self.store["review_reports"].values():
+            if r.get("review_id") == review_id and r.get("reporter_id") == reporter_id:
+                return r
+        return None
 
     # ============================================================
     # Redis 后端
@@ -671,6 +1074,200 @@ class ProductRepository:
             "rating_avg": avg,
             "rating_count": count,
         })
+
+    # ---------- 评价扩展(Redis) ----------
+
+    async def _redis_update_review(self, product_id: str, review_id: str,
+                                   fields: dict) -> Optional[dict]:
+        """更新评价字段(Redis 模式, List 需读取→修改→写回)"""
+        client = await get_redis_client()
+        key = _k("product", "reviews", product_id)
+        items = await client.lrange(key, 0, -1)
+        for i, raw in enumerate(items):
+            try:
+                review = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if review.get("review_id") == review_id:
+                review.update(fields)
+                await client.lset(key, i, json.dumps(review, ensure_ascii=False))
+                return review
+        return None
+
+    async def _redis_delete_review(self, product_id: str, review_id: str) -> bool:
+        """删除评价(Redis 模式, List 需读取→删除→重写)"""
+        client = await get_redis_client()
+        key = _k("product", "reviews", product_id)
+        items = await client.lrange(key, 0, -1)
+        for i, raw in enumerate(items):
+            try:
+                review = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if review.get("review_id") == review_id:
+                # 用占位值替换后删除(redis lrem 按值删除)
+                await client.lset(key, i, "__DELETED__")
+                await client.lrem(key, 1, "__DELETED__")
+                return True
+        return False
+
+    # ---------- 评价回复(Redis) ----------
+
+    async def _redis_add_reply(self, review_id: str, reply: dict) -> None:
+        """新增回复(Redis 模式, List rpush)"""
+        client = await get_redis_client()
+        await client.rpush(_k("product", "review", "replies", review_id),
+                          json.dumps(reply, ensure_ascii=False))
+
+    async def _redis_get_replies(self, review_id: str) -> list:
+        """查询回复列表(Redis 模式, List lrange 按时间正序)"""
+        client = await get_redis_client()
+        items = await client.lrange(
+            _k("product", "review", "replies", review_id), 0, -1)
+        replies = []
+        for raw in items:
+            try:
+                replies.append(json.loads(raw))
+            except (TypeError, ValueError):
+                continue
+        return replies
+
+    async def _redis_delete_reply(self, review_id: str, reply_id: str) -> bool:
+        """删除回复(Redis 模式, List lset + lrem)"""
+        client = await get_redis_client()
+        key = _k("product", "review", "replies", review_id)
+        items = await client.lrange(key, 0, -1)
+        for i, raw in enumerate(items):
+            try:
+                reply = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if reply.get("reply_id") == reply_id:
+                await client.lset(key, i, "__DELETED__")
+                await client.lrem(key, 1, "__DELETED__")
+                return True
+        return False
+
+    # ---------- 评价点赞(Redis) ----------
+
+    async def _redis_add_like(self, review_id: str, member_id: str) -> bool:
+        """点赞(Redis 模式, Set sadd 返回新增数)"""
+        client = await get_redis_client()
+        added = await client.sadd(
+            _k("product", "review", "likes", review_id), member_id)
+        return added > 0
+
+    async def _redis_remove_like(self, review_id: str, member_id: str) -> bool:
+        """取消点赞(Redis 模式, Set srem 返回移除数)"""
+        client = await get_redis_client()
+        removed = await client.srem(
+            _k("product", "review", "likes", review_id), member_id)
+        return removed > 0
+
+    async def _redis_is_liked(self, review_id: str, member_id: str) -> bool:
+        """是否已点赞(Redis 模式, Set sismember)"""
+        client = await get_redis_client()
+        return await client.sismember(
+            _k("product", "review", "likes", review_id), member_id)
+
+    async def _redis_get_like_count(self, review_id: str) -> int:
+        """点赞数(Redis 模式, Set scard)"""
+        client = await get_redis_client()
+        return await client.scard(_k("product", "review", "likes", review_id))
+
+    async def _redis_increment_like_count(self, review_id: str, delta: int):
+        """更新评价 like_count 字段(Redis 模式, 遍历产品 List 修改)"""
+        client = await get_redis_client()
+        # 遍历所有产品评价列表, 找到对应 review_id 并更新 like_count
+        keys = await client.keys(_k("product", "reviews", "*"))
+        for key in keys:
+            if key.endswith(":product:reviews") or ":review:" in key:
+                continue
+            items = await client.lrange(key, 0, -1)
+            for i, raw in enumerate(items):
+                try:
+                    review = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if review.get("review_id") == review_id:
+                    current = review.get("like_count", 0)
+                    review["like_count"] = max(0, current + delta)
+                    await client.lset(
+                        key, i, json.dumps(review, ensure_ascii=False))
+                    return
+
+    # ---------- 评价举报(Redis) ----------
+
+    async def _redis_create_report(self, report_id: str, report: dict) -> None:
+        """创建举报(Redis 模式, String(JSON))"""
+        client = await get_redis_client()
+        await client.set(_k("product", "review", "report", report_id),
+                        json.dumps(report, ensure_ascii=False))
+
+    async def _redis_get_report(self, report_id: str) -> Optional[dict]:
+        """查询举报(Redis 模式)"""
+        client = await get_redis_client()
+        raw = await client.get(_k("product", "review", "report", report_id))
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+
+    async def _redis_list_reports(self, status: str = None,
+                                 limit: int = 50) -> list:
+        """举报列表(Redis 模式, 遍历 report:* 键)"""
+        client = await get_redis_client()
+        keys = await client.keys(_k("product", "review", "report", "*"))
+        reports = []
+        for key in keys:
+            raw = await client.get(key)
+            if not raw:
+                continue
+            try:
+                report = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if status and report.get("status") != status:
+                continue
+            reports.append(report)
+        reports.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        return reports[:limit]
+
+    async def _redis_update_report(self, report_id: str,
+                                  fields: dict) -> Optional[dict]:
+        """更新举报(Redis 模式, 读取→修改→写回)"""
+        client = await get_redis_client()
+        key = _k("product", "review", "report", report_id)
+        raw = await client.get(key)
+        if not raw:
+            return None
+        try:
+            report = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        report.update(fields)
+        await client.set(key, json.dumps(report, ensure_ascii=False))
+        return report
+
+    async def _redis_get_report_by_review_reporter(self, review_id: str,
+                                                   reporter_id: str) -> Optional[dict]:
+        """查询用户是否已举报某评价(Redis 模式, 遍历 report:* 键)"""
+        client = await get_redis_client()
+        keys = await client.keys(_k("product", "review", "report", "*"))
+        for key in keys:
+            raw = await client.get(key)
+            if not raw:
+                continue
+            try:
+                report = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if (report.get("review_id") == review_id
+                    and report.get("reporter_id") == reporter_id):
+                return report
+        return None
 
     # ============================================================
     # 序列化辅助(Redis Hash 要求 value 为 str/int/float)

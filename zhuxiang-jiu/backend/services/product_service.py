@@ -23,7 +23,15 @@ from typing import Optional
 
 from core.helpers import ts
 from core.locks import get_lock
-from repositories.product_repository import ProductRepository
+from repositories.product_repository import (
+    ProductRepository,
+    REVIEW_STATUS_PUBLISHED, REVIEW_STATUS_PENDING_REVIEW, REVIEW_STATUS_HIDDEN,
+    REVIEW_STATUS_REJECTED, REVIEW_STATUS_NAMES,
+    REPORT_STATUS_PENDING, REPORT_STATUS_CONFIRMED, REPORT_STATUS_REJECTED,
+    REPORT_STATUS_RESOLVED, REPORT_STATUS_NAMES,
+    REPORT_REASON_AD, REPORT_REASON_ABUSE, REPORT_REASON_PORN,
+    REPORT_REASON_OTHER, REPORT_REASON_NAMES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +323,442 @@ class ProductService:
                      "msg": f"已重算产品评分"},
                 ],
             }
+
+    # ============================================================
+    # 评价扩展(P0): 详情/修改/删除/按订单查询/会员历史
+    # ============================================================
+
+    async def get_review_detail(self, product_id: str, review_id: str) -> dict:
+        """评价详情(含回复列表)
+
+        Raises:
+            KeyError: 产品或评价不存在
+        """
+        product = await self.product_repo.get_by_id(product_id)
+        if not product:
+            raise KeyError(f"产品 {product_id} 不存在")
+        review = await self.product_repo.get_review(product_id, review_id)
+        if not review:
+            raise KeyError(f"评价 {review_id} 不存在")
+        # 注入回复列表
+        replies = await self.product_repo.get_replies(review_id)
+        review = dict(review)
+        review["replies"] = replies
+        return {
+            "success": True,
+            "productId": product_id,
+            "productName": product["name"],
+            "review": review,
+            "logs": [{"step": "评价详情", "level": "INFO",
+                      "msg": f"评价 {review_id}, 回复 {len(replies)} 条"}],
+        }
+
+    async def update_review(self, product_id: str, review_id: str,
+                            member_id: str, rating: int = None,
+                            content: str = None, images: list = None,
+                            is_admin: bool = False) -> dict:
+        """修改评价(仅本人或管理员)
+
+        Raises:
+            KeyError: 产品/评价不存在
+            ValueError: 非本人修改 / 内容为空 / 评分越界
+        """
+        product = await self.product_repo.get_by_id(product_id)
+        if not product:
+            raise KeyError(f"产品 {product_id} 不存在")
+        review = await self.product_repo.get_review(product_id, review_id)
+        if not review:
+            raise KeyError(f"评价 {review_id} 不存在")
+        # 权限校验: 仅本人或管理员可修改
+        if not is_admin and str(review.get("member_id", "")) != str(member_id):
+            raise ValueError("无权修改他人评价")
+
+        fields = {}
+        if rating is not None:
+            if not isinstance(rating, int) or not (1 <= rating <= 5):
+                raise ValueError("评分必须为 1-5 的整数")
+            fields["rating"] = rating
+        if content is not None:
+            content = content.strip()
+            if not content:
+                raise ValueError("评价内容不能为空")
+            if len(content) > 500:
+                raise ValueError("评价内容不超过 500 字")
+            fields["content"] = content
+        if images is not None:
+            if len(images) > 9:
+                raise ValueError("评价图片不超过 9 张")
+            fields["images"] = images
+        fields["updated_at"] = ts()
+
+        async with get_lock(f"product:review:{review_id}"):
+            updated = await self.product_repo.update_review(
+                product_id, review_id, fields)
+            # rating 变更需重算产品评分
+            if rating is not None:
+                await self.product_repo._update_rating_stats(product_id)
+
+        logger.info("review_updated product=%s review=%s member=%s",
+                    product_id, review_id, member_id)
+        return {
+            "success": True,
+            "productId": product_id,
+            "reviewId": review_id,
+            "review": updated,
+            "logs": [{"step": "评价修改", "level": "INFO",
+                      "msg": f"评价 {review_id} 已修改"}],
+        }
+
+    async def delete_review(self, product_id: str, review_id: str,
+                            member_id: str, is_admin: bool = False) -> dict:
+        """删除评价(仅本人或管理员)
+
+        Raises:
+            KeyError: 产品/评价不存在
+            ValueError: 无权删除他人评价
+        """
+        product = await self.product_repo.get_by_id(product_id)
+        if not product:
+            raise KeyError(f"产品 {product_id} 不存在")
+        review = await self.product_repo.get_review(product_id, review_id)
+        if not review:
+            raise KeyError(f"评价 {review_id} 不存在")
+        if not is_admin and str(review.get("member_id", "")) != str(member_id):
+            raise ValueError("无权删除他人评价")
+
+        async with get_lock(f"product:review:{review_id}"):
+            await self.product_repo.delete_review(product_id, review_id)
+            # 重算产品评分
+            await self.product_repo._update_rating_stats(product_id)
+
+        logger.info("review_deleted product=%s review=%s member=%s",
+                    product_id, review_id, member_id)
+        return {
+            "success": True,
+            "productId": product_id,
+            "reviewId": review_id,
+            "logs": [{"step": "评价删除", "level": "INFO",
+                      "msg": f"评价 {review_id} 已删除"}],
+        }
+
+    async def get_review_by_order(self, order_id: str,
+                                  product_id: str = None) -> dict:
+        """按订单号查询评价(判断是否已评价)
+
+        Raises:
+            KeyError: 订单未评价
+        """
+        review = await self.product_repo.get_review_by_order(order_id, product_id)
+        if not review:
+            raise KeyError(f"订单 {order_id} 未找到评价")
+        # 注入回复列表
+        replies = await self.product_repo.get_replies(review.get("review_id", ""))
+        review = dict(review)
+        review["replies"] = replies
+        return {
+            "success": True,
+            "orderId": order_id,
+            "review": review,
+            "logs": [{"step": "按订单查评价", "level": "INFO",
+                      "msg": f"订单 {order_id} 已评价"}],
+        }
+
+    async def list_my_reviews(self, member_id: str, limit: int = 50) -> dict:
+        """会员评价历史"""
+        reviews = await self.product_repo.list_reviews_by_member(member_id, limit)
+        return {
+            "success": True,
+            "memberId": member_id,
+            "total": len(reviews),
+            "reviews": reviews,
+            "logs": [{"step": "会员评价历史", "level": "INFO",
+                      "msg": f"共 {len(reviews)} 条评价"}],
+        }
+
+    # ============================================================
+    # 评价回复(P0)
+    # ============================================================
+
+    async def add_reply(self, product_id: str, review_id: str,
+                        replier_id: str, replier_role: str,
+                        replier_name: str, content: str,
+                        parent_reply_id: str = "") -> dict:
+        """提交评价回复(商家/管理员)
+
+        Raises:
+            KeyError: 产品/评价不存在
+            ValueError: 内容为空 / 角色非法
+        """
+        valid_roles = {"merchant", "admin"}
+        if replier_role not in valid_roles:
+            raise ValueError(f"回复角色非法: {replier_role}")
+        content = content.strip()
+        if not content:
+            raise ValueError("回复内容不能为空")
+        if len(content) > 500:
+            raise ValueError("回复内容不超过 500 字")
+
+        product = await self.product_repo.get_by_id(product_id)
+        if not product:
+            raise KeyError(f"产品 {product_id} 不存在")
+        review = await self.product_repo.get_review(product_id, review_id)
+        if not review:
+            raise KeyError(f"评价 {review_id} 不存在")
+
+        async with get_lock(f"product:review:{review_id}"):
+            reply_data = {
+                "replier_id": replier_id,
+                "replier_role": replier_role,
+                "replier_name": replier_name,
+                "content": content,
+                "parent_reply_id": parent_reply_id,
+            }
+            saved = await self.product_repo.add_reply(review_id, reply_data)
+            # 更新评价的 reply_count
+            current_count = review.get("reply_count", 0)
+            await self.product_repo.update_review(
+                product_id, review_id, {"reply_count": current_count + 1})
+
+        logger.info("reply_added review=%s replier=%s role=%s",
+                    review_id, replier_id, replier_role)
+        return {
+            "success": True,
+            "reviewId": review_id,
+            "reply": saved,
+            "logs": [{"step": "评价回复", "level": "INFO",
+                      "msg": f"回复已提交(回复ID: {saved['reply_id']})"}],
+        }
+
+    async def list_replies(self, product_id: str, review_id: str) -> dict:
+        """评价回复列表
+
+        Raises:
+            KeyError: 产品/评价不存在
+        """
+        product = await self.product_repo.get_by_id(product_id)
+        if not product:
+            raise KeyError(f"产品 {product_id} 不存在")
+        review = await self.product_repo.get_review(product_id, review_id)
+        if not review:
+            raise KeyError(f"评价 {review_id} 不存在")
+        replies = await self.product_repo.get_replies(review_id)
+        return {
+            "success": True,
+            "reviewId": review_id,
+            "total": len(replies),
+            "replies": replies,
+            "logs": [{"step": "回复列表", "level": "INFO",
+                      "msg": f"共 {len(replies)} 条回复"}],
+        }
+
+    # ============================================================
+    # 评价点赞(P1)
+    # ============================================================
+
+    async def like_review(self, review_id: str, member_id: str) -> dict:
+        """点赞评价
+
+        Raises:
+            ValueError: 重复点赞
+        """
+        async with get_lock(f"product:review:like:{review_id}"):
+            added = await self.product_repo.add_like(review_id, member_id)
+            if not added:
+                raise ValueError("已点赞过该评价")
+        logger.info("review_liked review=%s member=%s", review_id, member_id)
+        like_count = await self.product_repo.get_like_count(review_id)
+        return {
+            "success": True,
+            "reviewId": review_id,
+            "liked": True,
+            "likeCount": like_count,
+            "logs": [{"step": "点赞", "level": "INFO",
+                      "msg": f"已点赞评价 {review_id}"}],
+        }
+
+    async def unlike_review(self, review_id: str, member_id: str) -> dict:
+        """取消点赞
+
+        Raises:
+            ValueError: 未点赞
+        """
+        async with get_lock(f"product:review:like:{review_id}"):
+            removed = await self.product_repo.remove_like(review_id, member_id)
+            if not removed:
+                raise ValueError("未点赞该评价, 无法取消")
+        logger.info("review_unliked review=%s member=%s", review_id, member_id)
+        like_count = await self.product_repo.get_like_count(review_id)
+        return {
+            "success": True,
+            "reviewId": review_id,
+            "liked": False,
+            "likeCount": like_count,
+            "logs": [{"step": "取消点赞", "level": "INFO",
+                      "msg": f"已取消点赞评价 {review_id}"}],
+        }
+
+    # ============================================================
+    # 评价举报(P1)
+    # ============================================================
+
+    async def report_review(self, review_id: str, reporter_id: str,
+                            reason: str, description: str = "") -> dict:
+        """举报评价
+
+        Raises:
+            ValueError: 重复举报 / 举报原因非法
+        """
+        valid_reasons = {
+            REPORT_REASON_AD, REPORT_REASON_ABUSE,
+            REPORT_REASON_PORN, REPORT_REASON_OTHER,
+        }
+        if reason not in valid_reasons:
+            raise ValueError(f"举报原因非法: {reason}")
+        description = description.strip()
+        if len(description) > 500:
+            raise ValueError("举报描述不超过 500 字")
+
+        # 防重复举报
+        existing = await self.product_repo.get_report_by_review_reporter(
+            review_id, reporter_id)
+        if existing:
+            raise ValueError("已举报过该评价, 请勿重复举报")
+
+        report_data = {
+            "review_id": review_id,
+            "reporter_id": reporter_id,
+            "reason": reason,
+            "description": description,
+        }
+        saved = await self.product_repo.create_report(report_data)
+        logger.info("review_reported review=%s reporter=%s reason=%s",
+                    review_id, reporter_id, reason)
+        return {
+            "success": True,
+            "report": saved,
+            "logs": [{"step": "评价举报", "level": "INFO",
+                      "msg": f"举报已提交(举报ID: {saved['report_id']})"}],
+        }
+
+    async def list_reports(self, status: str = None, limit: int = 50) -> dict:
+        """举报列表(管理员)
+
+        Raises:
+            ValueError: 状态非法
+        """
+        if status and status not in REPORT_STATUS_NAMES:
+            raise ValueError(f"举报状态非法: {status}")
+        reports = await self.product_repo.list_reports(status, limit)
+        return {
+            "success": True,
+            "total": len(reports),
+            "reports": reports,
+            "logs": [{"step": "举报列表", "level": "INFO",
+                      "msg": f"共 {len(reports)} 条举报"}],
+        }
+
+    async def handle_report(self, report_id: str, handler_id: str,
+                            action: str, remark: str = "") -> dict:
+        """处理举报(管理员)
+
+        Args:
+            action: confirmed(举报成立) / rejected(驳回)
+        Raises:
+            KeyError: 举报不存在
+            ValueError: 状态非法 / 已处理
+        """
+        report = await self.product_repo.get_report(report_id)
+        if not report:
+            raise KeyError(f"举报 {report_id} 不存在")
+        if report.get("status") != REPORT_STATUS_PENDING:
+            raise ValueError(f"举报已处理, 当前状态: {report.get('status')}")
+
+        valid_actions = {"confirmed", "rejected"}
+        if action not in valid_actions:
+            raise ValueError(f"处理动作非法: {action}")
+        remark = remark.strip()
+        if len(remark) > 500:
+            raise ValueError("处理备注不超过 500 字")
+
+        # 举报成立: 更新举报状态 + 隐藏对应评价
+        if action == "confirmed":
+            new_status = REPORT_STATUS_CONFIRMED
+            review_id = report.get("review_id", "")
+            if review_id:
+                # 隐藏评价(遍历查找, 需在评价锁保护下)
+                async with get_lock(f"product:review:{review_id}"):
+                    await self._hide_review_internal(review_id)
+        else:
+            new_status = REPORT_STATUS_REJECTED
+
+        fields = {
+            "status": new_status,
+            "handler_id": handler_id,
+            "handle_remark": remark,
+            "handled_at": ts(),
+        }
+        updated = await self.product_repo.update_report(report_id, fields)
+
+        logger.info("report_handled report=%s action=%s handler=%s",
+                    report_id, action, handler_id)
+        return {
+            "success": True,
+            "report": updated,
+            "logs": [{"step": "举报处理", "level": "INFO",
+                      "msg": f"举报 {report_id} 已处理: {REPORT_STATUS_NAMES.get(new_status, new_status)}"}],
+        }
+
+    async def hide_review(self, product_id: str, review_id: str,
+                          is_hide: bool = True) -> dict:
+        """管理员隐藏/恢复评价
+
+        Raises:
+            KeyError: 产品/评价不存在
+        """
+        product = await self.product_repo.get_by_id(product_id)
+        if not product:
+            raise KeyError(f"产品 {product_id} 不存在")
+        review = await self.product_repo.get_review(product_id, review_id)
+        if not review:
+            raise KeyError(f"评价 {review_id} 不存在")
+
+        new_status = REVIEW_STATUS_HIDDEN if is_hide else REVIEW_STATUS_PUBLISHED
+        async with get_lock(f"product:review:{review_id}"):
+            await self.product_repo.update_review(
+                product_id, review_id, {"status": new_status})
+        action = "隐藏" if is_hide else "恢复"
+        logger.info("review_%s product=%s review=%s",
+                    "hidden" if is_hide else "restored", product_id, review_id)
+        return {
+            "success": True,
+            "productId": product_id,
+            "reviewId": review_id,
+            "status": new_status,
+            "logs": [{"step": f"评价{action}", "level": "INFO",
+                      "msg": f"评价 {review_id} 已{action}"}],
+        }
+
+    async def _hide_review_internal(self, review_id: str):
+        """内部方法: 隐藏评价(遍历查找, 不加锁, 由调用方加锁)"""
+        # 遍历所有产品评价, 找到对应 review_id 并更新状态
+        if hasattr(self.product_repo, 'is_redis_mode'):
+            is_redis = self.product_repo.is_redis_mode
+        else:
+            from repositories.backend import is_redis_mode
+            is_redis = is_redis_mode
+        if is_redis():
+            all_products = await self.product_repo._redis_list_all()
+        else:
+            all_products = self.product_repo._mem_list_all()
+        for p in all_products:
+            pid = p.get("product_id")
+            if not pid:
+                continue
+            review = await self.product_repo.get_review(pid, review_id)
+            if review:
+                await self.product_repo.update_review(
+                    pid, review_id, {"status": REVIEW_STATUS_HIDDEN})
+                return
 
     # ============================================================
     # 排序辅助
