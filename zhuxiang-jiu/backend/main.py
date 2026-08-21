@@ -40,6 +40,7 @@ from routes import (
     register_logistics_routes,
     register_groupbuy_routes,
     register_citystore_routes,
+    register_points_routes,
 )
 
 
@@ -108,6 +109,7 @@ register_payment_routes(app)
 register_logistics_routes(app)
 register_groupbuy_routes(app)
 register_citystore_routes(app)
+register_points_routes(app)
 
 
 # ============================================================

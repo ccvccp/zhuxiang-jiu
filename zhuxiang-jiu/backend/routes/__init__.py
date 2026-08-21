@@ -22,6 +22,7 @@ from routes.payment_routes import register_payment_routes
 from routes.logistics_routes import register_logistics_routes
 from routes.groupbuy_routes import register_groupbuy_routes
 from routes.citystore_routes import register_citystore_routes
+from routes.points_routes import register_points_routes
 
 __all__ = [
     "register_decision_routes",
@@ -37,4 +38,5 @@ __all__ = [
     "register_logistics_routes",
     "register_groupbuy_routes",
     "register_citystore_routes",
+    "register_points_routes",
 ]
