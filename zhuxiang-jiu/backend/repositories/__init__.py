@@ -19,6 +19,7 @@ from repositories.inventory_repository import InventoryRepository
 from repositories.warehouse_repository import WarehouseRepository
 from repositories.order_repository import OrderRepository
 from repositories.shipping_repository import ShippingClaimRepository
+from repositories.member_repository import MemberRepository
 
 __all__ = [
     "_mock_store",
@@ -28,4 +29,5 @@ __all__ = [
     "WarehouseRepository",
     "OrderRepository",
     "ShippingClaimRepository",
+    "MemberRepository",
 ]

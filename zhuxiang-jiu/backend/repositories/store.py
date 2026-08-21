@@ -11,6 +11,14 @@
       方案 B 锁仅保证跨进程互斥,不解决存储分裂
 """
 
+
+def _hash_member_pwd(password: str) -> str:
+    """会员密码哈希(Mock, 与 member_service._hash_password 一致)"""
+    import hashlib
+    salt = "zhuxiang_member_salt_v1"
+    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+
+
 _mock_store: dict = {
     "agents": {
         1: {"id": 1, "name": "泰安市级代理商", "level": "C", "wallet": 50000},
@@ -26,7 +34,29 @@ _mock_store: dict = {
         "outbound_log": [],
     },
     "orders": [],
+    "orders_v2": {},
     "shipping_claims": {},
+    # 会员模块(MemberRepository 自管理 seq, 此处仅初始数据)
+    "members": {
+        1: {
+            "id": 1, "phone": "13800000001", "password": _hash_member_pwd("test123456"),
+            "nickname": "测试会员小竹", "avatar": "", "gender": 1,
+            "level": 1, "growth_value": 0, "points": 100,
+            "status": 1, "reg_source": "phone",
+            "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
+        },
+    },
+    "member_addresses": {
+        1: {
+            "addr_seed_001": {
+                "id": "addr_seed_001", "user_id": 1, "name": "张三",
+                "phone": "13800000001", "province": "山东省", "city": "泰安市",
+                "district": "泰山区", "detail": "竹香路 1 号", "is_default": 1,
+                "created_at": "2026-08-21T00:00:00+00:00",
+            },
+        },
+    },
+    "_member_seq": 1,
 }
 
 
@@ -51,7 +81,28 @@ def reset_store() -> dict:
             "outbound_log": [],
         },
         "orders": [],
+    "orders_v2": {},
         "shipping_claims": {},
+        "members": {
+            1: {
+                "id": 1, "phone": "13800000001", "password": _hash_member_pwd("test123456"),
+                "nickname": "测试会员小竹", "avatar": "", "gender": 1,
+                "level": 1, "growth_value": 0, "points": 100,
+                "status": 1, "reg_source": "phone",
+                "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
+            },
+        },
+        "member_addresses": {
+            1: {
+                "addr_seed_001": {
+                    "id": "addr_seed_001", "user_id": 1, "name": "张三",
+                    "phone": "13800000001", "province": "山东省", "city": "泰安市",
+                    "district": "泰山区", "detail": "竹香路 1 号", "is_default": 1,
+                    "created_at": "2026-08-21T00:00:00+00:00",
+                },
+            },
+        },
+        "_member_seq": 1,
     }
     _mock_store.clear()
     _mock_store.update(copy.deepcopy(initial))

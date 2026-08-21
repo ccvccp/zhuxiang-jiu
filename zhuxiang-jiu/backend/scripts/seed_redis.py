@@ -80,6 +80,25 @@ SEED_DATA = {
         "A1": "ZX42-2026L07",
         "A2": "ZX42-2026L05",
     },
+    "members": {
+        1: {
+            "id": 1, "phone": "13800000001", "password": "mock_hashed_password_placeholder",
+            "nickname": "测试会员小竹", "avatar": "", "gender": 1,
+            "level": 1, "growth_value": 0, "points": 100,
+            "status": 1, "reg_source": "phone",
+            "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
+        },
+    },
+    "member_addresses": {
+        1: {
+            "addr_seed_001": {
+                "id": "addr_seed_001", "user_id": 1, "name": "张三",
+                "phone": "13800000001", "province": "山东省", "city": "泰安市",
+                "district": "泰山区", "detail": "竹香路 1 号", "is_default": 1,
+                "created_at": "2026-08-21T00:00:00+00:00",
+            },
+        },
+    },
 }
 
 
@@ -139,6 +158,39 @@ async def seed_warehouse_slots(client) -> int:
     return len(slots)
 
 
+async def seed_members(client) -> int:
+    """写入会员数据(Hash) + 手机号索引(String) + ID 序列"""
+    import hashlib
+    count = 0
+    for member_id, data in SEED_DATA["members"].items():
+        # 计算与 member_service 一致的密码哈希(seed 中用占位符, 此处真实计算)
+        password = "test123456"  # 与 store.py 初始数据密码一致
+        salt = "zhuxiang_member_salt_v1"
+        hashed = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+        data["password"] = hashed
+
+        await client.hset(_k("member", member_id), mapping=data)
+        # 手机号唯一索引
+        await client.set(_k("member", "phone", data["phone"]), member_id)
+        count += 1
+    # ID 序列(确保新注册的 ID > 已有最大 ID)
+    await client.set(_k("member", "seq"), count)
+    return count
+
+
+async def seed_member_addresses(client) -> int:
+    """写入收货地址(Hash, field=addrId, value=JSON)"""
+    import json
+    count = 0
+    for member_id, addrs in SEED_DATA["member_addresses"].items():
+        if not addrs:
+            continue
+        mapping = {addr_id: json.dumps(addr, ensure_ascii=False) for addr_id, addr in addrs.items()}
+        await client.hset(_k("member", "addresses", member_id), mapping=mapping)
+        count += len(addrs)
+    return count
+
+
 async def verify_seed(client) -> dict:
     """验证写入结果,返回各实体的记录数"""
     agents = await client.keys(_k("agent", "*"))
@@ -149,12 +201,24 @@ async def verify_seed(client) -> dict:
     agent1 = await client.hgetall(_k("agent", 1))
     inv1 = await client.hgetall(_k("inventory", "ZX42-2026L07"))
 
+    # 会员验证
+    members = await client.keys(_k("member", "*"))
+    member_seq = await client.get(_k("member", "seq"))
+    member1 = await client.hgetall(_k("member", 1))
+    member1_phone_idx = await client.get(_k("member", "phone", "13800000001"))
+    addrs_count = await client.hlen(_k("member", "addresses", 1))
+
     return {
         "agents_count": len(agents),
         "inventory_count": len(inventory),
         "slots_count": slots_count,
         "sample_agent_1": agent1,
         "sample_inventory_ZX42-2026L07": inv1,
+        "members_count": len(members),
+        "member_seq": member_seq,
+        "sample_member_1": member1,
+        "member1_phone_index": member1_phone_idx,
+        "member1_addresses_count": addrs_count,
     }
 
 
@@ -200,6 +264,14 @@ async def seed() -> int:
         # 4. 写入仓储库位
         slots_n = await seed_warehouse_slots(client)
         print(f"[OK] 仓储库位写入: {slots_n} 个")
+
+        # 4b. 写入会员数据
+        members_n = await seed_members(client)
+        print(f"[OK] 会员写入: {members_n} 条(含手机号索引 + ID 序列)")
+
+        # 4c. 写入收货地址
+        addrs_n = await seed_member_addresses(client)
+        print(f"[OK] 收货地址写入: {addrs_n} 条")
 
         # 5. 空列表/空 Hash 不需要写入(inbound_log/outbound_log/orders/shipping_claims)
         print("[INFO] inbound_log/outbound_log/orders/shipping_claims: 初始为空, 不写入")

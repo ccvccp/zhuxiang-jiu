@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#355c44">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="竹香酒">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="format-detection" content="telephone=no">
+    <title>新闻详情 - 竹香酒</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="header"></div>
+
+    <div class="container">
+        <div class="breadcrumb" id="breadcrumb">
+            <a href="index.html">首页</a><span>/</span>
+            <a href="news.html">网站新闻</a><span>/</span>
+            <span id="crumbTitle">新闻详情</span>
+        </div>
+
+        <div class="news-article" id="newsArticle"></div>
+
+        <!-- 上一篇/下一篇 -->
+        <div style="background:#fff;border-radius:16px;padding:24px;box-shadow:var(--shadow-sm);display:flex;justify-content:space-between;gap:20px;" id="prevNext"></div>
+
+        <!-- 相关新闻 -->
+        <section class="section">
+            <div class="section-title">
+                <h2>相关<span>推荐</span></h2>
+                <div class="deco-line"></div>
+            </div>
+            <div class="news-grid" id="relatedNews"></div>
+        </section>
+    </div>
+
+    <div id="footer"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/main.js"></script>
+    <script>
+        initPage('news');
+
+        const newsId = parseInt(getQueryParam('id')) || 1;
+        const news = NEWS.find(n => n.id === newsId) || NEWS[0];
+        const idx = NEWS.findIndex(n => n.id === news.id);
+        const prev = idx > 0 ? NEWS[idx - 1] : null;
+        const next = idx < NEWS.length - 1 ? NEWS[idx + 1] : null;
+
+        document.getElementById('crumbTitle').textContent = news.category;
+        document.title = `${news.title} - 竹香酒`;
+
+        // 渲染新闻正文
+        const contentHtml = news.content.map(p => `<p>${p}</p>`).join('');
+        document.getElementById('newsArticle').innerHTML = `
+            <div class="news-article-content">
+                <h1>${news.title}</h1>
+                <div class="news-article-meta">
+                    <span>📅 ${news.date}</span>
+                    <span>✍️ ${news.author}</span>
+                    <span>📁 ${news.category}</span>
+                    <span>👁 ${news.views} 阅读</span>
+                </div>
+                <div style="height:240px;background:linear-gradient(135deg,var(--color-primary-light),var(--color-primary-dark));border-radius:12px;margin-bottom:24px;display:flex;align-items:center;justify-content:center;font-size:80px;color:rgba(255,255,255,0.6);">
+                    ${news.icon}
+                </div>
+                ${contentHtml}
+                <div style="background:var(--color-bg);padding:20px;border-radius:8px;margin-top:30px;border-left:4px solid var(--color-primary);">
+                    <p style="margin:0;color:var(--color-text-light);font-size:13px;">
+                        🌿 山东瑞麒酒业 · 全竹发酵 · 竹酒首创<br>
+                        如需了解更多产品信息，请<a href="products.html" style="color:var(--color-primary);font-weight:bold;">点击这里</a>浏览竹奕全系产品。
+                    </p>
+                </div>
+                <div class="news-article-footer">
+                    <span style="color:var(--color-text-light);font-size:13px;">声明：本文为山东瑞麒酒业原创内容，转载请注明出处。</span>
+                    <div>
+                        <a href="#" style="color:var(--color-text-light);margin-right:16px;">💬 分享</a>
+                        <a href="service.html" style="color:var(--color-primary);">联系客服 →</a>
+                    </div>
+                </div>
+            </div>`;
+
+        // 上一篇/下一篇
+        document.getElementById('prevNext').innerHTML = `
+            <div style="flex:1;">
+                ${prev ? `<div style="font-size:12px;color:var(--color-text-light);margin-bottom:4px;">上一篇</div>
+                <a href="news-detail.html?id=${prev.id}" style="font-size:14px;">${prev.title}</a>` : '<span style="color:var(--color-text-light);font-size:13px;">已经是第一篇了</span>'}
+            </div>
+            <div style="flex:1;text-align:right;">
+                ${next ? `<div style="font-size:12px;color:var(--color-text-light);margin-bottom:4px;">下一篇</div>
+                <a href="news-detail.html?id=${next.id}" style="font-size:14px;">${next.title}</a>` : '<span style="color:var(--color-text-light);font-size:13px;">已经是最后一篇了</span>'}
+            </div>`;
+
+        // 相关新闻（取其他新闻中前3条）
+        const related = NEWS.filter(n => n.id !== news.id).slice(0, 3);
+        document.getElementById('relatedNews').innerHTML = related.map(n => `
+            <div class="news-card" onclick="location.href='news-detail.html?id=${n.id}'">
+                <div class="news-img" data-icon="${n.icon}">
+                    <span class="news-category">${n.category}</span>
+                </div>
+                <div class="news-info">
+                    <div class="news-date">📅 ${n.date} · 👁 ${n.views}</div>
+                    <div class="news-title">${n.title}</div>
+                    <div class="news-desc">${n.desc}</div>
+                </div>
+            </div>`).join('');
+    </script>
+</body>
+</html>

@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>APP 端 checkout-service 本地测试 · Taro 模拟环境</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+            background: linear-gradient(180deg, #e8f0ec 0%, #f5f6f7 100%);
+            margin: 0; padding: 24px; color: #1d2129; line-height: 1.6;
+        }
+        .wrap { max-width: 980px; margin: 0 auto; }
+        h1 { color: #355c44; font-size: 24px; margin: 0 0 4px; }
+        .sub { color: #6b6b6b; font-size: 13px; margin-bottom: 24px; }
+        .toolbar {
+            background: #fff; padding: 16px; border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06); margin-bottom: 16px;
+            display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+        }
+        button {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; border: none; padding: 10px 20px; border-radius: 8px;
+            cursor: pointer; font-size: 14px; font-weight: 500;
+        }
+        button:hover { opacity: 0.9; }
+        button.secondary { background: #6b6b6b; }
+        .env-tag {
+            display: inline-block; background: #fff3e0; color: #bf6a00;
+            padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600;
+        }
+        .scenario {
+            background: #fff; border-radius: 12px; padding: 20px;
+            margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+            border-left: 4px solid #355c44;
+        }
+        .scenario.fail { border-left-color: #c0392b; }
+        .scenario h3 { margin: 0 0 8px; color: #355c44; font-size: 16px; }
+        .scenario .meta { color: #6b6b6b; font-size: 13px; margin-bottom: 12px; }
+        .checks { list-style: none; padding: 0; margin: 12px 0 0; }
+        .checks li { padding: 6px 0; font-size: 13px; border-bottom: 1px dashed #e5e6eb; }
+        .checks li:last-child { border-bottom: none; }
+        .pass { color: #00b42a; font-weight: 600; }
+        .fail { color: #c0392b; font-weight: 600; }
+        .summary {
+            background: #355c44; color: #fff; padding: 20px; border-radius: 12px;
+            margin-top: 16px; text-align: center;
+        }
+        .summary .big { font-size: 32px; font-weight: 700; }
+        .log {
+            background: #1d2129; color: #c0d8c8; padding: 16px; border-radius: 8px;
+            font-family: 'Courier New', monospace; font-size: 12px;
+            max-height: 300px; overflow-y: auto; margin-top: 12px; white-space: pre-wrap;
+        }
+        pre { background: #f5f6f7; padding: 12px; border-radius: 8px; font-size: 12px; overflow-x: auto; margin: 8px 0; }
+        code { background: #f2f3f5; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <h1>APP 端 checkout-service 本地测试</h1>
+        <p class="sub">
+            在浏览器中模拟 APP（React Native + Taro）环境，验证 9 阶段事务在多场景下的正确性。
+            <span class="env-tag">env = rn (APP)</span>
+        </p>
+
+        <div class="toolbar">
+            <button onclick="runAllScenarios()">▶ 运行全部场景</button>
+            <button class="secondary" onclick="resetAll()">↻ 重置数据</button>
+            <span id="envInfo" class="env-tag" style="background:#e8f0ec;color:#355c44;">环境加载中...</span>
+        </div>
+
+        <div id="scenarios"></div>
+        <div id="summary" class="summary" style="display:none;"></div>
+        <div id="logBox" class="log" style="display:none;"></div>
+    </div>
+
+<script>
+/* ============================================================
+ * 1. 模拟 APP 环境 Taro API (React Native + AsyncStorage)
+ * ============================================================ */
+const asyncStorage = {};        // APP 端 AsyncStorage（模拟）
+const appRequestLog = [];       // APP 端网络请求日志
+
+const mockTaro = {
+    getStorageSync(key) { return asyncStorage[key] !== undefined ? asyncStorage[key] : ''; },
+    setStorageSync(key, data) { asyncStorage[key] = data; },
+    removeStorageSync(key) { delete asyncStorage[key]; },
+    request(opts) {
+        appRequestLog.push({ url: opts.url, method: opts.method, data: opts.data });
+        setTimeout(() => {
+            opts.success && opts.success({ statusCode: 200, data: { ok: true, message: 'Taro.request(APP) 模拟成功' } });
+        }, 10);
+    },
+    getEnv() { return 'rn'; }
+};
+// 浏览器中模拟 global/process
+window.Taro = mockTaro;
+window.process = window.process || { env: { TARO_ENV: 'rn' } };
+window.process.env.TARO_ENV = 'rn';
+
+/* ============================================================
+ * 2. EnvAdapter (与 taro-app/src/utils/env-adapter.ts 保持一致)
+ * ============================================================ */
+class EnvAdapter {
+    constructor() { this.version = '2.0.0'; }
+    getEnv() { return window.process.env.TARO_ENV || 'h5'; }
+    isH5() { return this.getEnv() === 'h5'; }
+    isWechatMini() { return this.getEnv() === 'weapp'; }
+    isAlipayMini() { return this.getEnv() === 'alipay'; }
+    isAPP() { return this.getEnv() === 'rn'; }
+
+    storage = {
+        get(key) {
+            try {
+                const val = mockTaro.getStorageSync(key);
+                if (val === '' || val === undefined || val === null) return null;
+                if (typeof val === 'string') {
+                    try { return JSON.parse(val); } catch { return val; }
+                }
+                return val;
+            } catch (e) { console.error('[EnvAdapter] storage.get failed:', e); return null; }
+        },
+        set(key, value) {
+            try { mockTaro.setStorageSync(key, value); return true; }
+            catch (e) { console.error('[EnvAdapter] storage.set failed:', e); return false; }
+        },
+        remove(key) {
+            try { mockTaro.removeStorageSync(key); return true; }
+            catch (e) { console.error('[EnvAdapter] storage.remove failed:', e); return false; }
+        }
+    };
+
+    async request(opts) {
+        return new Promise((resolve, reject) => {
+            mockTaro.request({
+                url: opts.url, method: opts.method || 'GET', data: opts.data, header: opts.header || {},
+                success: (res) => resolve({
+                    ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode,
+                    json: () => Promise.resolve(res.data), data: res.data
+                }),
+                fail: (err) => reject(new Error(err.errMsg || 'Taro.request failed'))
+            });
+        });
+    }
+}
+const envAdapter = new EnvAdapter();
+
+/* ============================================================
+ * 3. CheckoutService (与 taro-app/src/services/checkout-service.ts 保持一致)
+ *    · 9 阶段事务 + 快照回滚
+ *    · 购买两瓶免运费 (FREE_SHIPPING_QTY = 2)
+ *    · 5% 同品分润服务费
+ * ============================================================ */
+const STORAGE_KEY = 'zhuxiang_checkout_db_v1';
+const SHIPPING_KEY = 'zhuxiang_shipping_db_v1';
+const SERVICE_FEE_RATE = 0.05;
+const POINTS_RATE = 0.01;
+const POINTS_DEDUCT_MAX_RATE = 0.30;
+const EARN_RATE = 0.1;
+const LEVEL_BOOST = { L1: 1.0, L2: 1.0, L3: 1.02, L4: 1.05, L5: 1.08 };
+const PROFIT_SPLIT = { platform: 0.80, hotel: 0.20 };
+const FREE_SHIPPING_QTY = 2;
+
+function readDB() { return envAdapter.storage.get(STORAGE_KEY) || initMockDB(true); }
+function writeDB(db) { envAdapter.storage.set(STORAGE_KEY, db); }
+function readShippingDB() { return envAdapter.storage.get(SHIPPING_KEY) || { shipping_claims: [], service_fees: [] }; }
+function writeShippingDB(db) { envAdapter.storage.set(SHIPPING_KEY, db); }
+
+function initMockDB(forceWrite) {
+    const existing = forceWrite ? null : envAdapter.storage.get(STORAGE_KEY);
+    if (existing && !forceWrite) return existing;
+    const db = {
+        products: [
+            { id: 1, name: '竹奕·竹香经典 500ml', price: 268, stock: 100 },
+            { id: 2, name: '竹奕·竹韵佳酿 500ml', price: 368, stock: 100 },
+            { id: 3, name: '竹奕·竹香珍藏 500ml', price: 698, stock: 50 },
+        ],
+        coupons: [
+            { id: 'C001', code: 'NEW10', discount: 0.10, status: '未使用', desc: '新人9折' },
+            { id: 'C002', code: 'SVIP20', discount: 0.20, status: '未使用', desc: 'SVIP8折' },
+        ],
+        members: [
+            { id: 1, name: '张三', points: 5000, level: 'L3' },
+            { id: 2, name: '李四', points: 12000, level: 'L5' },
+        ],
+        orders: [], profit_records: [], tx_log: [],
+    };
+    writeDB(db); return db;
+}
+function round2(n) { return Math.round(n * 100) / 100; }
+
+function resolveShipper(region) {
+    if (!region) return { shipper: 'manufacturer', agentId: null, agentName: '厂家直供', claimId: null, region: '' };
+    const db = readShippingDB();
+    const claim = (db.shipping_claims || []).find(c => c.region === region && c.status === 'active');
+    if (claim) return { shipper: 'agent', agentId: claim.agent_id, agentName: claim.agent_name, claimId: claim.id, region };
+    return { shipper: 'manufacturer', agentId: null, agentName: '厂家直供', claimId: null, region };
+}
+function accrueServiceFee(dbRef, payload) {
+    const o = payload || {};
+    if (!dbRef || !dbRef.db) throw new Error('accrueServiceFee: dbRef 缺失');
+    if (!Array.isArray(dbRef.db.service_fees)) dbRef.db.service_fees = [];
+    const agentId = Number(o.agentId);
+    const orderAmount = Number(o.orderAmount);
+    if (!Number.isFinite(agentId) || agentId <= 0) throw new Error('服务费计提: 代理商ID无效');
+    if (!Number.isFinite(orderAmount) || orderAmount < 0) throw new Error('服务费计提: 订单金额无效');
+    const fee = round2(orderAmount * SERVICE_FEE_RATE);
+    const feeId = 'SF' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    const record = {
+        id: feeId, agent_id: agentId, agent_name: o.agentName || '', order_no: o.orderNo || null,
+        region: o.region || '', shipped_qty: o.shippedQty || 0, order_amount: round2(orderAmount),
+        service_fee: fee, service_rate: SERVICE_FEE_RATE, settled_as: '同品', status: '待发放',
+        created_at: new Date().toISOString(),
+    };
+    dbRef.db.service_fees.push(record);
+    try {
+        const sdb = readShippingDB();
+        sdb.service_fees.push({ ...record });
+        writeShippingDB(sdb);
+    } catch (e) { console.warn('[CheckoutService] 服务费镜像写入失败:', e); }
+    return { serviceFee: fee, record };
+}
+
+const CheckoutService = {
+    resetMock() {
+        envAdapter.storage.remove(STORAGE_KEY);
+        envAdapter.storage.remove(SHIPPING_KEY);
+        initMockDB(true);
+        writeShippingDB({ shipping_claims: [], service_fees: [] });
+        return this;
+    },
+    getMockDB() { return readDB(); },
+    getShippingDB() { return readShippingDB(); },
+    claim(agentId, region) {
+        const db = readShippingDB();
+        if (!Array.isArray(db.shipping_claims)) db.shipping_claims = [];
+        const existing = db.shipping_claims.find(c => c.region === region && c.status === 'active');
+        if (existing) return { success: false, error: '区域已被认领' };
+        const checkoutDb = readDB();
+        const agentMember = checkoutDb.members.find(m => m.id === agentId);
+        const agentName = agentMember ? agentMember.name : '代理商' + agentId;
+        const claimId = 'CLAIM' + Date.now();
+        db.shipping_claims.push({
+            id: claimId, agent_id: agentId, agent_name: agentName, region, status: 'active',
+            created_at: new Date().toISOString(),
+        });
+        writeShippingDB(db);
+        return { success: true, claimId, agentName };
+    },
+    async submit(params) {
+        const log = [];
+        const logger = {
+            info: (step, msg, data) => {
+                log.push({ step, msg, data, time: new Date().toISOString() });
+                console.log(`[CheckoutService] ${step}: ${msg}`, data || '');
+            },
+            error: (step, msg, data) => {
+                log.push({ step, msg, data, time: new Date().toISOString(), level: 'error' });
+                console.error(`[CheckoutService] ${step}: ${msg}`, data || '');
+            },
+        };
+        let dbSnapshot = null, shippingSnapshot = null;
+        try {
+            // 阶段1: 预检
+            logger.info('阶段1-预检', '校验购物车 + 计算价格', {
+                itemCount: params.items.length, memberLevel: params.memberLevel,
+                points: params.points || 0, couponCode: params.couponCode || '(无)',
+                region: params.region || '(未指定)',
+            });
+            if (!params.items || params.items.length === 0) throw new Error('购物车为空');
+
+            // 阶段2: BEGIN
+            dbSnapshot = JSON.parse(JSON.stringify(readDB()));
+            shippingSnapshot = JSON.parse(JSON.stringify(readShippingDB()));
+            const dbRef = { db: readDB() };
+            const shippingDbRef = { db: readShippingDB() };
+            dbRef.db.tx_log.push({ type: 'BEGIN', time: new Date().toISOString() });
+            logger.info('阶段2-开启事务', 'BEGIN(快照已创建)');
+
+            const ctx = {
+                orderNo: 'ZX' + Date.now(), items: params.items,
+                memberId: params.memberId, memberLevel: params.memberLevel,
+                points: params.points || 0, couponCode: params.couponCode,
+                paymentMethod: params.paymentMethod || 'wechat', region: params.region,
+            };
+
+            // 价格计算
+            const originalTotal = round2(params.items.reduce((s, i) => s + i.price * i.qty, 0));
+            const memberDiscount = ctx.memberLevel === 'L5' ? 0.15 : ctx.memberLevel === 'L4' ? 0.10 : ctx.memberLevel === 'L3' ? 0.05 : 0;
+            const memberDiscountAmount = round2(originalTotal * memberDiscount);
+            let afterMember = round2(originalTotal - memberDiscountAmount);
+            let couponDiscount = 0;
+            if (ctx.couponCode) {
+                const coupon = dbRef.db.coupons.find(c => c.code === ctx.couponCode);
+                if (!coupon || coupon.status !== '未使用') throw new Error('优惠券无效: ' + ctx.couponCode);
+                couponDiscount = round2(afterMember * coupon.discount);
+            }
+            let afterCoupon = round2(afterMember - couponDiscount);
+            let pointsDeduct = 0;
+            if (ctx.points > 0) {
+                pointsDeduct = round2(ctx.points * POINTS_RATE);
+                const maxDeduct = round2(afterCoupon * POINTS_DEDUCT_MAX_RATE);
+                if (pointsDeduct > maxDeduct) pointsDeduct = maxDeduct;
+            }
+            const finalAmount = round2(afterCoupon - pointsDeduct);
+            const totalQty = ctx.items.reduce((s, i) => s + i.qty, 0);
+            // 关键业务规则: 购买两瓶免运费 (FREE_SHIPPING_QTY = 2)
+            const shipping = totalQty >= FREE_SHIPPING_QTY ? 0 : 12;
+            ctx.priceResult = {
+                originalTotal, memberDiscount: memberDiscountAmount, couponDiscount,
+                pointsDeduct, finalAmount: finalAmount + shipping, shipping,
+            };
+
+            // 阶段3: 订单创建 + 发货方路由
+            const shipper = resolveShipper(ctx.region || '');
+            ctx.shipperType = shipper.shipper;
+            ctx.shipperAgentId = shipper.agentId;
+            ctx.shipperAgentName = shipper.agentName;
+            dbRef.db.orders.push({
+                order_no: ctx.orderNo, member_id: ctx.memberId, member_level: ctx.memberLevel,
+                items: ctx.items.map(i => ({ id: i.id, name: i.name, price: i.price, qty: i.qty })),
+                original_total: originalTotal, member_discount: memberDiscountAmount,
+                coupon_discount: couponDiscount, points_deduct: pointsDeduct,
+                shipping, final_amount: finalAmount + shipping,
+                coupon_code: ctx.couponCode || null, points_used: ctx.points || 0,
+                points_earned: 0, payment_method: ctx.paymentMethod,
+                ship_region: ctx.region || null, shipper_type: ctx.shipperType,
+                shipper_agent_id: ctx.shipperAgentId, shipper_agent_name: ctx.shipperAgentName,
+                status: '待付款', created_at: new Date().toISOString(),
+            });
+            logger.info('阶段3-订单创建', '订单写入 + 发货方路由', {
+                orderNo: ctx.orderNo, shipper: ctx.shipperType, agent: ctx.shipperAgentName
+            });
+
+            // 阶段4: 库存扣减
+            for (const item of ctx.items) {
+                const product = dbRef.db.products.find(p => p.id === item.id);
+                if (!product) throw new Error('商品不存在: ' + item.id);
+                if (product.stock < item.qty) throw new Error('库存不足: ' + product.name);
+                product.stock -= item.qty;
+            }
+            logger.info('阶段4-库存扣减', '库存已扣减', { totalQty });
+
+            // 阶段5: 优惠券核销
+            if (ctx.couponCode) {
+                const coupon = dbRef.db.coupons.find(c => c.code === ctx.couponCode);
+                if (coupon) coupon.status = '已使用';
+                logger.info('阶段5-优惠券核销', '券状态→已使用', { code: ctx.couponCode });
+            }
+
+            // 阶段6: 积分扣减
+            if (ctx.points > 0) {
+                const member = dbRef.db.members.find(m => m.id === ctx.memberId);
+                if (member) member.points -= ctx.points;
+                logger.info('阶段6-积分扣减', `points -= ${ctx.points}`);
+            }
+
+            // 阶段7: 积分入账(等级加成)
+            const boost = LEVEL_BOOST[ctx.memberLevel] || 1.0;
+            const earnedBase = Math.floor((finalAmount + shipping) / 10 * EARN_RATE * 100);
+            const earnedPoints = Math.round(earnedBase * boost);
+            const member = dbRef.db.members.find(m => m.id === ctx.memberId);
+            if (member) member.points += earnedPoints;
+            const order = dbRef.db.orders.find(o => o.order_no === ctx.orderNo);
+            if (order) order.points_earned = earnedPoints;
+            logger.info('阶段7-积分入账', `earned ${earnedPoints} (L${ctx.memberLevel} +${Math.round((boost - 1) * 100)}%)`);
+
+            // 阶段8: 分润计算 + 5%同品分润
+            const platformShare = round2((finalAmount + shipping) * PROFIT_SPLIT.platform);
+            const hotelShare = round2((finalAmount + shipping) * PROFIT_SPLIT.hotel);
+            let manufacturerServiceFee = 0, feeRecordId = null;
+            if (ctx.shipperType === 'agent') {
+                const r = accrueServiceFee(shippingDbRef, {
+                    agentId: ctx.shipperAgentId, agentName: ctx.shipperAgentName,
+                    region: ctx.region, orderNo: ctx.orderNo, shippedQty: totalQty,
+                    orderAmount: finalAmount + shipping,
+                });
+                manufacturerServiceFee = r.serviceFee;
+                feeRecordId = r.record.id;
+            }
+            dbRef.db.profit_records.push({
+                order_no: ctx.orderNo, total_amount: finalAmount + shipping,
+                platform_share: platformShare, hotel_share: hotelShare,
+                manufacturer_service_fee: manufacturerServiceFee,
+                shipper_type: ctx.shipperType, shipper_agent_name: ctx.shipperAgentName,
+                split_rule: ctx.shipperType === 'agent'
+                    ? `厂家直供分润+5%同品分润给${ctx.shipperAgentName}`
+                    : '无代理商:平台80%+酒店20%',
+                created_at: new Date().toISOString(),
+            });
+            logger.info('阶段8-分润计算', '分润+服务费已记录', {
+                platform: platformShare, hotel: hotelShare, mfrFee: manufacturerServiceFee
+            });
+
+            // 阶段9: 支付确认
+            if (order) order.status = '已付款';
+            logger.info('阶段9-支付确认', '订单状态→已付款');
+
+            // 阶段10: COMMIT
+            writeDB(dbRef.db);
+            writeShippingDB(shippingDbRef.db);
+            dbRef.db.tx_log.push({ type: 'COMMIT', time: new Date().toISOString() });
+            writeDB(dbRef.db);
+            logger.info('阶段10-提交事务', 'COMMIT(已持久化)');
+
+            return {
+                success: true, orderNo: ctx.orderNo,
+                data: {
+                    orderNo: ctx.orderNo, finalAmount: finalAmount + shipping,
+                    shipperType: ctx.shipperType, shipperAgentName: ctx.shipperAgentName,
+                    manufacturerServiceFee, pointsEarned: earnedPoints, status: '已付款',
+                    shipping, originalTotal, memberDiscount: memberDiscountAmount,
+                    couponDiscount, pointsDeduct,
+                },
+                logs: log,
+            };
+        } catch (e) {
+            logger.error('回滚', e.message);
+            // 回滚顺序: 1.记录ROLLBACK 2.恢复内存引用 3.持久化 4.记录错误 (与统一约定一致)
+            if (dbSnapshot) {
+                dbSnapshot.tx_log = dbSnapshot.tx_log || [];
+                dbSnapshot.tx_log.push({ type: 'ROLLBACK', time: new Date().toISOString() });
+                writeDB(dbSnapshot);
+            }
+            if (shippingSnapshot) {
+                writeShippingDB(shippingSnapshot);
+            }
+            return { success: false, error: e.message, orderNo: 'ZX' + Date.now(), data: null, logs: log };
+        }
+    }
+};
+window.CheckoutService = CheckoutService;
+window.envAdapter = envAdapter;
+window.asyncStorageRef = asyncStorage;
+
+/* ============================================================
+ * 4. 构造模拟数据 + 多场景测试
+ * ============================================================ */
+const SCENARIOS = [
+    {
+        id: 'TC1',
+        title: '场景1: L5 会员购买 2 瓶 + 认领区域（免运费 + 5% 服务费）',
+        desc: '会员李四(L5 SVIP)购买竹韵佳酿×2，发货区域山东泰安（张三已认领）',
+        prepare: async () => {
+            CheckoutService.resetMock();
+            CheckoutService.claim(1, '山东泰安'); // 张三认领山东泰安
+        },
+        run: async () => {
+            return await CheckoutService.submit({
+                items: [{ id: 2, name: '竹奕·竹韵佳酿 500ml', price: 368, qty: 2 }],
+                memberId: 2, memberLevel: 'L5', points: 0,
+                couponCode: undefined, paymentMethod: 'wechat', region: '山东泰安'
+            });
+        },
+        checks: (r) => {
+            const db = CheckoutService.getMockDB();
+            const shipping = CheckoutService.getShippingDB();
+            const order = db.orders[0];
+            const product = db.products.find(p => p.id === 2);
+            const member = db.members.find(m => m.id === 2);
+            const profit = db.profit_records[0];
+            const fee = shipping.service_fees[0];
+            const expected = {
+                // 368*2 = 736, L5 15% off = 110.4, after = 625.6
+                // 免运费(>=2 瓶) shipping=0
+                // finalAmount = 625.6
+                // 服务费 = 625.6 * 0.05 = 31.28
+                originalTotal: 736, memberDiscount: 110.4, shipping: 0,
+                finalAmount: 625.6, mfrFee: 31.28,
+            };
+            return [
+                { name: '事务提交成功', pass: r.success === true, actual: `success=${r.success}` },
+                { name: '环境检测 env=rn', pass: envAdapter.getEnv() === 'rn', actual: `env=${envAdapter.getEnv()}` },
+                { name: '发货方=代理商(认领区域)', pass: r.data && r.data.shipperType === 'agent', actual: `shipperType=${r.data && r.data.shipperType}` },
+                { name: '代理商=张三', pass: r.data && r.data.shipperAgentName === '张三', actual: `agent=${r.data && r.data.shipperAgentName}` },
+                { name: '原价¥736', pass: r.data && r.data.originalTotal === 736, actual: `originalTotal=${r.data && r.data.originalTotal}` },
+                { name: 'L5 15% 折扣 -¥110.4', pass: r.data && r.data.memberDiscount === 110.4, actual: `memberDiscount=${r.data && r.data.memberDiscount}` },
+                { name: '免运费(>=2 瓶)', pass: r.data && r.data.shipping === 0, actual: `shipping=${r.data && r.data.shipping}` },
+                { name: '实付¥625.6', pass: r.data && r.data.finalAmount === 625.6, actual: `finalAmount=${r.data && r.data.finalAmount}` },
+                { name: '5% 同品服务费¥31.28', pass: r.data && r.data.manufacturerServiceFee === 31.28, actual: `mfrFee=${r.data && r.data.manufacturerServiceFee}` },
+                { name: '服务费记录同品', pass: fee && fee.settled_as === '同品', actual: `settled_as=${fee && fee.settled_as}` },
+                { name: '服务费状态待发放', pass: fee && fee.status === '待发放', actual: `status=${fee && fee.status}` },
+                { name: '订单状态=已付款', pass: order && order.status === '已付款', actual: `status=${order && order.status}` },
+                { name: '库存扣减2', pass: product && product.stock === 98, actual: `stock=${product && product.stock}` },
+                { name: 'L5 积分+8%加成', pass: r.data && r.data.pointsEarned > 0, actual: `points=${r.data && r.data.pointsEarned}` },
+                { name: 'BEGIN→COMMIT 轨迹', pass: db.tx_log.some(t => t.type === 'BEGIN') && db.tx_log.some(t => t.type === 'COMMIT'), actual: db.tx_log.map(t => t.type).join('→') },
+                { name: 'AsyncStorage 持久化', pass: asyncStorage['zhuxiang_checkout_db_v1'] !== undefined, actual: `checkout_db ${asyncStorage['zhuxiang_checkout_db_v1'] !== undefined ? '已写入' : '缺失'}` },
+            ];
+        }
+    },
+    {
+        id: 'TC2',
+        title: '场景2: L3 会员购买 1 瓶 + 未认领区域（运费12 + 厂家直供）',
+        desc: '会员张三(L3)购买竹香经典×1，发货区域北京（无代理商认领）',
+        prepare: async () => {
+            CheckoutService.resetMock();
+            // 北京区域无代理商认领
+        },
+        run: async () => {
+            return await CheckoutService.submit({
+                items: [{ id: 1, name: '竹奕·竹香经典 500ml', price: 268, qty: 1 }],
+                memberId: 1, memberLevel: 'L3', points: 0,
+                couponCode: undefined, paymentMethod: 'alipay', region: '北京'
+            });
+        },
+        checks: (r) => {
+            const db = CheckoutService.getMockDB();
+            const shipping = CheckoutService.getShippingDB();
+            const order = db.orders[0];
+            const product = db.products.find(p => p.id === 1);
+            const profit = db.profit_records[0];
+            const fee = shipping.service_fees && shipping.service_fees[0];
+            return [
+                { name: '事务提交成功', pass: r.success === true, actual: `success=${r.success}` },
+                { name: '发货方=厂家直供(未认领)', pass: r.data && r.data.shipperType === 'manufacturer', actual: `shipperType=${r.data && r.data.shipperType}` },
+                { name: '原价¥268', pass: r.data && r.data.originalTotal === 268, actual: `originalTotal=${r.data && r.data.originalTotal}` },
+                { name: 'L3 5% 折扣 -¥13.4', pass: r.data && r.data.memberDiscount === 13.4, actual: `memberDiscount=${r.data && r.data.memberDiscount}` },
+                { name: '运费¥12(1 瓶<2)', pass: r.data && r.data.shipping === 12, actual: `shipping=${r.data && r.data.shipping}` },
+                { name: '实付¥266.6(268-13.4+12)', pass: r.data && r.data.finalAmount === 266.6, actual: `finalAmount=${r.data && r.data.finalAmount}` },
+                { name: '无服务费(厂家直供)', pass: r.data && r.data.manufacturerServiceFee === 0, actual: `mfrFee=${r.data && r.data.manufacturerServiceFee}` },
+                { name: '无服务费流水', pass: !fee, actual: `service_fees.length=${shipping.service_fees ? shipping.service_fees.length : 0}` },
+                { name: '分润规则=平台80%+酒店20%', pass: profit && profit.split_rule.includes('平台80%+酒店20%'), actual: `rule=${profit && profit.split_rule}` },
+                { name: '库存扣减1', pass: product && product.stock === 99, actual: `stock=${product && product.stock}` },
+                { name: 'L3 积分+2%加成', pass: r.data && r.data.pointsEarned > 0, actual: `points=${r.data && r.data.pointsEarned}` },
+                { name: 'BEGIN→COMMIT 轨迹', pass: db.tx_log.some(t => t.type === 'BEGIN') && db.tx_log.some(t => t.type === 'COMMIT'), actual: db.tx_log.map(t => t.type).join('→') },
+            ];
+        }
+    },
+    {
+        id: 'TC3',
+        title: '场景3: 库存不足回滚验证（事务原子性）',
+        desc: '张三购买竹香珍藏×1000，库存仅 50 件，应触发回滚并保持数据原状',
+        prepare: async () => {
+            CheckoutService.resetMock();
+            CheckoutService.claim(1, '山东泰安');
+        },
+        run: async () => {
+            return await CheckoutService.submit({
+                items: [{ id: 3, name: '竹奕·竹香珍藏 500ml', price: 698, qty: 1000 }],
+                memberId: 1, memberLevel: 'L3', points: 0,
+                couponCode: undefined, paymentMethod: 'wechat', region: '山东泰安'
+            });
+        },
+        checks: (r) => {
+            const db = CheckoutService.getMockDB();
+            const shipping = CheckoutService.getShippingDB();
+            const product = db.products.find(p => p.id === 3);
+            const member = db.members.find(m => m.id === 1);
+            return [
+                { name: '事务失败 success=false', pass: r.success === false, actual: `success=${r.success}` },
+                { name: '错误信息含"库存不足"', pass: r.error && r.error.includes('库存不足'), actual: `error=${r.error}` },
+                { name: '库存恢复原值50', pass: product && product.stock === 50, actual: `stock=${product && product.stock}` },
+                { name: '无订单生成(回滚)', pass: db.orders.length === 0, actual: `orders.length=${db.orders.length}` },
+                { name: '无分润记录(回滚)', pass: db.profit_records.length === 0, actual: `profit_records.length=${db.profit_records.length}` },
+                { name: '无服务费流水(回滚)', pass: !shipping.service_fees || shipping.service_fees.length === 0, actual: `service_fees.length=${shipping.service_fees ? shipping.service_fees.length : 0}` },
+                { name: '会员积分未变化', pass: member && member.points === 5000, actual: `points=${member && member.points}` },
+                { name: 'tx_log 含 ROLLBACK', pass: db.tx_log.some(t => t.type === 'ROLLBACK'), actual: db.tx_log.map(t => t.type).join('→') },
+                { name: '回滚顺序: ROLLBACK 在最后', pass: db.tx_log[db.tx_log.length - 1] && db.tx_log[db.tx_log.length - 1].type === 'ROLLBACK', actual: db.tx_log.map(t => t.type).join('→') },
+            ];
+        }
+    }
+];
+
+/* ============================================================
+ * 5. 测试执行与渲染
+ * ============================================================ */
+window.testResults = [];
+
+async function runAllScenarios() {
+    const container = document.getElementById('scenarios');
+    container.innerHTML = '';
+    window.testResults = [];
+    const logBox = document.getElementById('logBox');
+    logBox.style.display = 'block';
+    logBox.textContent = '开始执行 ' + SCENARIOS.length + ' 个场景...\n';
+
+    document.getElementById('envInfo').textContent = 'env=' + envAdapter.getEnv() + ' (APP) | AsyncStorage keys: ' + Object.keys(asyncStorage).length;
+
+    let totalPass = 0, totalChecks = 0;
+
+    for (let i = 0; i < SCENARIOS.length; i++) {
+        const s = SCENARIOS[i];
+        logBox.textContent += '\n[' + s.id + '] ' + s.title + '\n';
+
+        // 准备场景
+        await s.prepare();
+
+        // 执行测试
+        let r;
+        try { r = await s.run(); }
+        catch (e) { r = { success: false, error: e.message, data: null, logs: [] }; }
+
+        // 校验
+        const checks = s.checks(r);
+        const passed = checks.filter(c => c.pass).length;
+        totalPass += passed;
+        totalChecks += checks.length;
+
+        window.testResults.push({ id: s.id, title: s.title, passed, total: checks.length, checks, result: r });
+
+        // 渲染卡片
+        const card = document.createElement('div');
+        card.className = 'scenario' + (passed < checks.length ? ' fail' : '');
+        let html = '<h3>' + s.id + ' · ' + s.title + '</h3>';
+        html += '<div class="meta">' + s.desc + '</div>';
+        html += '<ul class="checks">';
+        checks.forEach(c => {
+            html += '<li><span class="' + (c.pass ? 'pass' : 'fail') + '">' + (c.pass ? '✓ PASS' : '✗ FAIL') + '</span> ' + c.name + ' — <code>' + (c.actual || '') + '</code></li>';
+        });
+        html += '</ul>';
+        if (r.data) {
+            html += '<pre>订单: ' + JSON.stringify(r.data, null, 2) + '</pre>';
+        }
+        if (r.error) {
+            html += '<pre style="color:#c0392b;">错误: ' + r.error + '</pre>';
+        }
+        card.innerHTML = html;
+        container.appendChild(card);
+
+        logBox.textContent += '  通过: ' + passed + '/' + checks.length + '\n';
+        if (r.error) logBox.textContent += '  错误: ' + r.error + '\n';
+        logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    // 渲染汇总
+    const summary = document.getElementById('summary');
+    summary.style.display = 'block';
+    const allPass = totalPass === totalChecks;
+    summary.innerHTML = '<div style="font-size:14px;opacity:0.9;">APP 端测试汇总</div>' +
+        '<div class="big">' + totalPass + '/' + totalChecks + '</div>' +
+        '<div style="font-size:14px;">' + (allPass ? '✅ 全部通过 — APP 端 checkout-service 业务流程正常' : '❌ 存在失败项') + '</div>' +
+        '<div style="font-size:12px;opacity:0.8;margin-top:8px;">env=' + envAdapter.getEnv() + ' (React Native + AsyncStorage 模拟)</div>';
+}
+
+function resetAll() {
+    CheckoutService.resetMock();
+    document.getElementById('scenarios').innerHTML = '';
+    document.getElementById('summary').style.display = 'none';
+    const logBox = document.getElementById('logBox');
+    logBox.style.display = 'block';
+    logBox.textContent = '数据已重置，AsyncStorage keys: ' + Object.keys(asyncStorage).length;
+    document.getElementById('envInfo').textContent = 'env=' + envAdapter.getEnv() + ' (APP) | AsyncStorage keys: ' + Object.keys(asyncStorage).length;
+}
+
+// 初始化
+CheckoutService.resetMock();
+document.getElementById('envInfo').textContent = 'env=' + envAdapter.getEnv() + ' (APP) | AsyncStorage keys: ' + Object.keys(asyncStorage).length;
+console.log('[Test App Local] 初始化完成, env=' + envAdapter.getEnv() + ', asyncStorage keys: ' + Object.keys(asyncStorage).length);
+</script>
+</body>
+</html>

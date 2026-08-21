@@ -12,9 +12,13 @@
 from routes.decision_routes import register_decision_routes
 from routes.system_routes import register_system_routes
 from routes.business_routes import register_business_routes
+from routes.member_routes import register_member_routes
+from routes.order_routes import register_order_routes
 
 __all__ = [
     "register_decision_routes",
     "register_system_routes",
     "register_business_routes",
+    "register_member_routes",
+    "register_order_routes",
 ]

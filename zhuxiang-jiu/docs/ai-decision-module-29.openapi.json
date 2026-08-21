@@ -1,0 +1,1208 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AI决策筹划模块（模块29·AI大脑中枢）API",
+    "description": "6层架构(感知→知识→决策→编排→执行→反馈)·双维服务角色与模块·核心原则: 模型提动作,规则定执行(先Copilot后Agent)\n\n参照: Microsoft Copilot / 阿里AI中台 / Gartner超自动化 / KPMG全栈AI / 腾讯AI×数据中台",
+    "version": "1.0.0",
+    "contact": {
+      "name": "竹香酒官网技术团队",
+      "url": "https://github.com/zhuxiang-jiu"
+    },
+    "license": {
+      "name": "Proprietary"
+    }
+  },
+  "externalDocs": {
+    "description": "详细API接口文档",
+    "url": "docs/AI决策筹划模块29_API接口文档.md"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8766/api/decision",
+      "description": "Mock 模式(本地开发)"
+    },
+    {
+      "url": "https://api.zhuxiang-jiu.com/api/decision",
+      "description": "Live 模式(生产环境)"
+    }
+  ],
+  "tags": [
+    { "name": "感知层", "description": "数据采集·事件流·实时指标(28模块)" },
+    { "name": "知识层", "description": "AI智能知识中枢: RAG+组织记忆+语义图谱" },
+    { "name": "决策层", "description": "策略筹划·预测推演·治理决策·风控决策" },
+    { "name": "编排层", "description": "跨域工作流编排·能力路由·插件池" },
+    { "name": "执行层", "description": "角色决策助理(Copilot→Agent)" },
+    { "name": "反馈层", "description": "反馈闭环·复盘优化" },
+    { "name": "系统", "description": "健康检查·模式切换" }
+  ],
+  "security": [
+    {
+      "BearerAuth": [],
+      "RoleHeader": []
+    }
+  ],
+  "paths": {
+    "/data-ingest": {
+      "post": {
+        "tags": ["感知层"],
+        "summary": "数据采集注入",
+        "description": "从28个业务模块采集数据,注入感知层。支持批量推送指标、事件、日志。\n\n**角色**: admin\n**层级**: 感知层",
+        "operationId": "dataIngest",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DataIngestRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "采集成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DataIngestResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/knowledge/query": {
+      "get": {
+        "tags": ["知识层"],
+        "summary": "知识中枢查询",
+        "description": "基于RAG+组织记忆+语义图谱,返回可验证的业务上下文。知识召回率93%。\n\n**角色**: 全角色(访客只读)\n**层级**: 知识层",
+        "operationId": "knowledgeQuery",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "自然语言查询",
+            "schema": { "type": "string" },
+            "example": "会员L3留存消费标准"
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "知识范围",
+            "schema": {
+              "type": "string",
+              "enum": ["business", "technical", "compliance", "history"],
+              "default": "business"
+            }
+          },
+          {
+            "name": "topK",
+            "in": "query",
+            "required": false,
+            "description": "召回条数",
+            "schema": { "type": "integer", "default": 5, "minimum": 1, "maximum": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "查询成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/KnowledgeQueryResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/knowledge/ingest": {
+      "post": {
+        "tags": ["知识层"],
+        "summary": "知识注入",
+        "description": "向知识中枢注入新知识(组织记忆、规则、经验教训)。\n\n**角色**: admin\n**层级**: 知识层",
+        "operationId": "knowledgeIngest",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/KnowledgeIngestRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "注入成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/KnowledgeIngestResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/strategy-plan": {
+      "post": {
+        "tags": ["决策层"],
+        "summary": "策略筹划",
+        "description": "目标分解+资源评估+路径规划+What-if推演。筹划效率提升60%。\n\n**角色**: member+\n**层级**: 决策层",
+        "operationId": "strategyPlan",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/StrategyPlanRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "筹划成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StrategyPlanResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/forecast-simulate": {
+      "post": {
+        "tags": ["决策层"],
+        "summary": "预测推演",
+        "description": "季节性+趋势+容量预测+蒙特卡洛模拟。预测准确率90%。\n\n**角色**: member+\n**层级**: 决策层",
+        "operationId": "forecastSimulate",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ForecastSimulateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "推演成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ForecastSimulateResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/governance": {
+      "post": {
+        "tags": ["决策层"],
+        "summary": "治理决策",
+        "description": "模型提动作+规则定执行+权限校验+区块链追溯。治理合规率100%。\n\n**角色**: admin\n**层级**: 决策层",
+        "operationId": "governance",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/GovernanceRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "治理决策完成",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GovernanceResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": {
+            "description": "规则校验未通过(模型提议被规则拒绝)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": {
+                  "success": false,
+                  "error": "DECISION_006: 规则校验未通过",
+                  "errorCode": "DECISION_006"
+                }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/risk-control": {
+      "post": {
+        "tags": ["决策层"],
+        "summary": "风控决策",
+        "description": "异常检测+合规校验+风险预警+自动熔断。风控覆盖率96%。\n\n**角色**: admin\n**层级**: 决策层",
+        "operationId": "riskControl",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RiskControlRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "风控检查完成",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RiskControlResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": {
+            "description": "风控拦截(高风险交易被熔断)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": {
+                  "success": false,
+                  "error": "DECISION_007: 风控拦截-高风险交易被熔断",
+                  "errorCode": "DECISION_007"
+                }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/orchestrate": {
+      "post": {
+        "tags": ["编排层"],
+        "summary": "编排调度",
+        "description": "28模块跨域工作流编排+任务分解+依赖管理。编排成功率95%。\n\n**角色**: agent+\n**层级**: 编排层\n**并发安全**: Mutex锁 `decision:orchestrate:{workflowId}`",
+        "operationId": "orchestrate",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OrchestrateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "编排成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OrchestrateResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/capability-route": {
+      "post": {
+        "tags": ["编排层"],
+        "summary": "能力路由",
+        "description": "原子能力插件池(120个)+动态组合(≥20种)+按需调度。能力复用率78%。\n\n**角色**: store_owner+\n**层级**: 编排层",
+        "operationId": "capabilityRoute",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CapabilityRouteRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "路由成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CapabilityRouteResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": {
+            "description": "预算不足(延迟/成本超出budget)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": {
+                  "success": false,
+                  "error": "DECISION_008: 预算不足",
+                  "errorCode": "DECISION_008"
+                }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/role-copilot": {
+      "post": {
+        "tags": ["执行层"],
+        "summary": "角色决策助理",
+        "description": "为5类角色(会员/代理商/访客/网店主/管理员)提供Copilot式决策支持。决策准确率92%。先Copilot后Agent。\n\n**角色**: 全角色(按角色身份返回不同建议)\n**层级**: 执行层",
+        "operationId": "roleCopilot",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RoleCopilotRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "决策建议成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RoleCopilotResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/feedback-loop": {
+      "post": {
+        "tags": ["反馈层"],
+        "summary": "反馈闭环",
+        "description": "数据采集→效果评估→模型迭代→插件升级。闭环延迟<24h。\n\n**角色**: agent+\n**层级**: 反馈层",
+        "operationId": "feedbackLoop",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/FeedbackLoopRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "反馈处理成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/FeedbackLoopResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/retrospective": {
+      "post": {
+        "tags": ["反馈层"],
+        "summary": "复盘优化",
+        "description": "事后分析+根因定位+经验沉淀+策略优化。复盘覆盖率85%。\n\n**角色**: store_owner+\n**层级**: 反馈层",
+        "operationId": "retrospective",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RetrospectiveRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "复盘成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RetrospectiveResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["系统"],
+        "summary": "健康检查",
+        "description": "返回模块29运行状态。",
+        "operationId": "health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "健康状态",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mode": {
+      "get": {
+        "tags": ["系统"],
+        "summary": "查询运行模式",
+        "description": "查询当前运行模式(Mock/Live)。",
+        "operationId": "getMode",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "responses": {
+          "200": {
+            "description": "模式信息",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModeResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/mode/switch": {
+      "post": {
+        "tags": ["系统"],
+        "summary": "切换运行模式",
+        "description": "切换Mock ↔ Live模式。并发安全: Mutex锁 `decision:mode`。",
+        "operationId": "switchMode",
+        "security": [{ "BearerAuth": [], "RoleHeader": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ModeSwitchRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "切换成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModeSwitchResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT Bearer token 认证"
+      },
+      "RoleHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Role",
+        "description": "角色标识: member|agent|guest|store_owner|admin"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "参数缺失或格式错误",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "success": false, "error": "DECISION_001: 参数缺失", "errorCode": "DECISION_001" }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "未认证(token缺失或过期)",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "success": false, "error": "DECISION_002: 未认证", "errorCode": "DECISION_002" }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "角色权限不足",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "success": false, "error": "DECISION_003: 权限不足", "errorCode": "DECISION_003" }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "查询的知识/模块不存在",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "success": false, "error": "DECISION_004: 不存在", "errorCode": "DECISION_004" }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "工作流冲突(已存在相同workflowId)",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "success": false, "error": "DECISION_005: 工作流冲突", "errorCode": "DECISION_005" }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "限流触发(请求频率超限)",
+        "headers": {
+          "X-RateLimit-Limit": { "schema": { "type": "integer" }, "description": "QPS上限" },
+          "X-RateLimit-Remaining": { "schema": { "type": "integer" }, "description": "剩余可用次数" },
+          "Retry-After": { "schema": { "type": "integer" }, "description": "重试等待秒数" }
+        },
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "success": false, "error": "DECISION_009: 限流触发", "errorCode": "DECISION_009" }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "内部错误(AI推理失败/模型不可用)",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "success": false, "error": "DECISION_010: 内部错误", "errorCode": "DECISION_010" }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "插件池不可用/模型服务宕机",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "success": false, "error": "DECISION_013: 插件池不可用", "errorCode": "DECISION_013" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": false, "description": "操作是否成功" },
+          "error": { "type": "string", "description": "错误原因描述" },
+          "errorCode": { "type": "string", "description": "错误码", "enum": ["DECISION_001","DECISION_002","DECISION_003","DECISION_004","DECISION_005","DECISION_006","DECISION_007","DECISION_008","DECISION_009","DECISION_010","DECISION_011","DECISION_012","DECISION_013","DECISION_014"] },
+          "failedStage": { "type": "string", "description": "失败阶段(事务失败时存在)" },
+          "logs": { "type": "array", "items": { "$ref": "#/components/schemas/LogEntry" } }
+        },
+        "required": ["success", "error"]
+      },
+      "LogEntry": {
+        "type": "object",
+        "properties": {
+          "stage": { "type": "string", "description": "执行阶段" },
+          "message": { "type": "string", "description": "日志消息" },
+          "data": { "type": "object", "description": "附加数据" }
+        }
+      },
+      "DataIngestRequest": {
+        "type": "object",
+        "required": ["source", "dataType", "payload"],
+        "properties": {
+          "source": { "type": "string", "description": "数据来源,格式 module:{id}", "example": "module:04" },
+          "dataType": { "type": "string", "enum": ["metrics", "events", "logs", "alerts"], "description": "数据类型" },
+          "payload": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": { "type": "string" },
+                "value": { "type": "number" },
+                "timestamp": { "type": "string", "format": "date-time" }
+              }
+            }
+          },
+          "realtime": { "type": "boolean", "default": false }
+        }
+      },
+      "DataIngestResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "data-ingest" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "ingestedCount": { "type": "integer", "example": 2 },
+                  "source": { "type": "string", "example": "module:04" },
+                  "bufferState": { "type": "string", "example": "healthy" },
+                  "processedAt": { "type": "string", "format": "date-time" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "KnowledgeQueryResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "knowledge-query" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "query": { "type": "string", "example": "会员L3留存消费标准" },
+                  "recallRate": { "type": "string", "example": "93%" },
+                  "results": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "content": { "type": "string" },
+                        "source": { "type": "string" },
+                        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "tags": { "type": "array", "items": { "type": "string" } }
+                      }
+                    }
+                  },
+                  "context": {
+                    "type": "object",
+                    "properties": {
+                      "semanticGraph": { "type": "string" },
+                      "orgMemory": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "KnowledgeIngestRequest": {
+        "type": "object",
+        "required": ["category", "title", "content"],
+        "properties": {
+          "category": { "type": "string", "enum": ["rule", "lesson_learned", "constraint", "red_line"] },
+          "title": { "type": "string" },
+          "content": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "source": { "type": "string" }
+        }
+      },
+      "KnowledgeIngestResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "knowledge-ingest" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "knowledgeId": { "type": "string", "example": "KN-20260819-001" },
+                  "category": { "type": "string" },
+                  "indexed": { "type": "boolean" },
+                  "graphUpdated": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "StrategyPlanRequest": {
+        "type": "object",
+        "required": ["role", "goal", "constraints"],
+        "properties": {
+          "role": { "type": "string", "enum": ["member", "agent", "guest", "store_owner", "admin"] },
+          "goal": { "type": "string", "example": "月销售额提升至¥10000" },
+          "constraints": {
+            "type": "object",
+            "properties": {
+              "budget": { "type": "number" },
+              "timeframe": { "type": "string" },
+              "riskTolerance": { "type": "string", "enum": ["low", "medium", "high"] }
+            }
+          },
+          "whatIfScenarios": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "params": { "type": "object" }
+              }
+            }
+          }
+        }
+      },
+      "StrategyPlanResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "strategy-plan" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "goalDecomposed": { "type": "array", "items": { "type": "object" } },
+                  "resourceAssessment": { "type": "object" },
+                  "recommendedPath": { "type": "string" },
+                  "whatIfResults": { "type": "array", "items": { "type": "object" } },
+                  "planningEfficiency": { "type": "string", "example": "60%" },
+                  "needsApproval": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ForecastSimulateRequest": {
+        "type": "object",
+        "required": ["target", "timeframe"],
+        "properties": {
+          "target": { "type": "string", "enum": ["sales_volume", "inventory", "capacity", "churn"] },
+          "timeframe": { "type": "string", "enum": ["next_7d", "next_30d", "next_90d"] },
+          "method": { "type": "string", "enum": ["monte_carlo", "lstm", "arima"], "default": "monte_carlo" },
+          "iterations": { "type": "integer", "default": 10000, "minimum": 100, "maximum": 100000 },
+          "factors": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "ForecastSimulateResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "forecast-simulate" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "target": { "type": "string" },
+                  "forecast": {
+                    "type": "object",
+                    "properties": {
+                      "p50": { "type": "number" },
+                      "p75": { "type": "number" },
+                      "p95": { "type": "number" },
+                      "confidenceInterval": { "type": "array", "items": { "type": "number" } }
+                    }
+                  },
+                  "accuracy": { "type": "string", "example": "90%" },
+                  "factorsWeight": { "type": "object" },
+                  "method": { "type": "string" },
+                  "iterations": { "type": "integer" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "GovernanceRequest": {
+        "type": "object",
+        "required": ["proposedAction"],
+        "properties": {
+          "proposedAction": {
+            "type": "object",
+            "required": ["action", "target"],
+            "properties": {
+              "action": { "type": "string", "example": "adjust_price" },
+              "target": { "type": "string", "example": "product:ZX-001" },
+              "params": { "type": "object" }
+            }
+          },
+          "ruleCheck": { "type": "boolean", "default": true },
+          "requireApproval": { "type": "string", "enum": ["auto", "manual"], "default": "auto" }
+        }
+      },
+      "GovernanceResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "governance" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "action": { "type": "string" },
+                  "ruleCheckResult": {
+                    "type": "object",
+                    "properties": {
+                      "passed": { "type": "boolean" },
+                      "violations": { "type": "array", "items": { "type": "string" } },
+                      "checkedRules": { "type": "integer" }
+                    }
+                  },
+                  "permissionGranted": { "type": "boolean" },
+                  "executionMode": { "type": "string" },
+                  "blockchainNotarize": {
+                    "type": "object",
+                    "properties": {
+                      "hash": { "type": "string" },
+                      "type": { "type": "string" }
+                    }
+                  },
+                  "complianceRate": { "type": "string", "example": "100%" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RiskControlRequest": {
+        "type": "object",
+        "required": ["checkType", "target"],
+        "properties": {
+          "checkType": { "type": "string", "enum": ["transaction_anomaly", "compliance", "fraud", "abuse"] },
+          "target": { "type": "object" },
+          "thresholds": { "type": "object" },
+          "autoCircuitBreak": { "type": "boolean", "default": true }
+        }
+      },
+      "RiskControlResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "risk-control" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "riskLevel": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                  "anomalies": { "type": "array", "items": { "type": "object" } },
+                  "circuitBreaker": { "type": "string", "enum": ["standby", "tripped", "open"] },
+                  "recommendation": { "type": "string" },
+                  "coverage": { "type": "string", "example": "96%" },
+                  "action": { "type": "string" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "OrchestrateRequest": {
+        "type": "object",
+        "required": ["workflow", "modules", "context"],
+        "properties": {
+          "workflow": { "type": "string", "example": "order_to_delivery" },
+          "modules": { "type": "array", "items": { "type": "string" }, "example": ["04", "05", "06", "28"] },
+          "context": { "type": "object" },
+          "decompose": { "type": "boolean", "default": true },
+          "parallel": { "type": "boolean", "default": true }
+        }
+      },
+      "OrchestrateResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "orchestrate" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "workflow": { "type": "string" },
+                  "tasks": { "type": "array", "items": { "type": "object" } },
+                  "parallelGroups": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+                  "successRate": { "type": "string", "example": "95%" },
+                  "duration": { "type": "string", "example": "1.2s" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CapabilityRouteRequest": {
+        "type": "object",
+        "required": ["requiredCapabilities", "task"],
+        "properties": {
+          "requiredCapabilities": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["nlp", "vision", "decision_reasoning", "multimodal"] }
+          },
+          "task": { "type": "string" },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "maxLatency": { "type": "integer", "description": "最大延迟(ms)" },
+              "maxCost": { "type": "number", "description": "最大成本(元)" }
+            }
+          },
+          "preferPlugins": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "CapabilityRouteResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "capability-route" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "selectedPlugins": { "type": "array", "items": { "type": "object" } },
+                  "composition": { "type": "string" },
+                  "totalLatency": { "type": "string" },
+                  "totalCost": { "type": "string" },
+                  "reuseRate": { "type": "string", "example": "78%" },
+                  "pluginPool": { "type": "integer", "example": 120 }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RoleCopilotRequest": {
+        "type": "object",
+        "required": ["role", "intent"],
+        "properties": {
+          "role": { "type": "string", "enum": ["member", "agent", "guest", "store_owner", "admin"] },
+          "level": { "type": "string", "description": "角色等级(L1-L5/D-S)", "example": "L3" },
+          "intent": { "type": "string", "example": "选购竹香酒" },
+          "context": { "type": "object" },
+          "mode": { "type": "string", "enum": ["copilot", "agent"], "default": "copilot" }
+        }
+      },
+      "RoleCopilotResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "role-copilot" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "role": { "type": "string" },
+                  "recommendations": { "type": "array", "items": { "type": "object" } },
+                  "decisionAccuracy": { "type": "string", "example": "92%" },
+                  "executionMode": { "type": "string" },
+                  "needsUserConfirm": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "FeedbackLoopRequest": {
+        "type": "object",
+        "required": ["actionId", "outcome"],
+        "properties": {
+          "actionId": { "type": "string" },
+          "outcome": {
+            "type": "object",
+            "properties": {
+              "delivered": { "type": "boolean" },
+              "clicked": { "type": "boolean" },
+              "ordered": { "type": "boolean" },
+              "complained": { "type": "boolean" }
+            }
+          },
+          "cost": { "type": "number" },
+          "reflowMetrics": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "FeedbackLoopResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "feedback-loop" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "actionId": { "type": "string" },
+                  "evaluation": { "type": "object" },
+                  "modelUpdate": { "type": "object" },
+                  "feedbackLatency": { "type": "string", "example": "<24h" },
+                  "blockchainNotarize": { "type": "object" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RetrospectiveRequest": {
+        "type": "object",
+        "required": ["event", "period"],
+        "properties": {
+          "event": { "type": "string" },
+          "period": { "type": "string", "example": "2026-08-01/2026-08-31" },
+          "scope": { "type": "array", "items": { "type": "string" } },
+          "depth": { "type": "string", "enum": ["summary", "root_cause"], "default": "summary" }
+        }
+      },
+      "RetrospectiveResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "retrospective" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "event": { "type": "string" },
+                  "analysis": { "type": "object" },
+                  "lessonsLearned": { "type": "array", "items": { "type": "object" } },
+                  "strategyOptimization": { "type": "string" },
+                  "coverage": { "type": "string", "example": "85%" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "HealthResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "health" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "string", "example": "healthy" },
+                  "module": { "type": "string", "example": "AI决策筹划模块(29)" },
+                  "aiRate": { "type": "string", "example": "95%" },
+                  "layers": { "type": "string", "example": "感知→知识→决策→编排→执行→反馈" },
+                  "pluginPool": { "type": "integer", "example": 120 },
+                  "uptime": { "type": "string" },
+                  "mockMode": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ModeResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "mode" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "mode": { "type": "string", "enum": ["mock", "live"] },
+                  "apiBase": { "type": "string" },
+                  "endpoints": { "type": "integer", "example": 15 },
+                  "aiCapabilities": { "type": "integer", "example": 10 }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ModeSwitchRequest": {
+        "type": "object",
+        "required": ["mode"],
+        "properties": {
+          "mode": { "type": "string", "enum": ["mock", "live"] },
+          "apiBase": { "type": "string", "description": "Live模式的后端地址" }
+        }
+      },
+      "ModeSwitchResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/BaseSuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "operation": { "type": "string", "example": "mode-switch" },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "mode": { "type": "string" },
+                  "apiBase": { "type": "string" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "BaseSuccessResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "operation": { "type": "string" },
+          "details": { "type": "object" },
+          "logs": { "type": "array", "items": { "$ref": "#/components/schemas/LogEntry" } },
+          "asyncOps": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["success"]
+      }
+    }
+  }
+}

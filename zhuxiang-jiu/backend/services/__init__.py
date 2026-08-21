@@ -13,6 +13,8 @@ from services.checkout_service import CheckoutService
 from services.inventory_service import InventoryService
 from services.warehouse_service import WarehouseService
 from services.shipping_service import ShippingClaimService
+from services.member_service import MemberService
+from services.order_service import OrderService
 
 __all__ = [
     "AgentService",
@@ -20,4 +22,6 @@ __all__ = [
     "InventoryService",
     "WarehouseService",
     "ShippingClaimService",
+    "MemberService",
+    "OrderService",
 ]

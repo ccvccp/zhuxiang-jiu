@@ -30,6 +30,8 @@ from routes import (
     register_business_routes,
     register_decision_routes,
     register_system_routes,
+    register_member_routes,
+    register_order_routes,
 )
 
 
@@ -59,6 +61,8 @@ app = FastAPI(
         {"name": "交易服务", "description": "订单结算提交"},
         {"name": "供应链服务", "description": "库存扣减/回补"},
         {"name": "仓储服务", "description": "入库/出库/盘点/库位优化/预测"},
+        {"name": "会员服务", "description": "注册/登录/资料/等级/积分/收货地址"},
+        {"name": "订单服务", "description": "订单创建/查询/状态流转/售后退款/评价/超时"},
     ],
 )
 
@@ -79,6 +83,8 @@ register_exception_handlers(app)
 register_decision_routes(app)
 register_system_routes(app)
 register_business_routes(app)
+register_member_routes(app)
+register_order_routes(app)
 
 
 # ============================================================

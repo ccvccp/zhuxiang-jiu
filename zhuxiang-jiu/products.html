@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#355c44">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="竹香酒">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="format-detection" content="telephone=no">
+    <title>酒类介绍 - 竹香酒 · 竹奕系列</title>
+    <meta name="description" content="竹奕酒全系产品介绍，独创竹香型，经典系列、珍藏系列、年份系列、礼盒系列等，翠竹酿造，匠心之选。">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="header"></div>
+
+    <div class="page-banner">
+        <div class="container">
+            <h1>酒类介绍</h1>
+            <p>福来就喝竹奕酒，天赐鸿运随心走！</p>
+            <p style="margin-top:10px;font-size:12px;color:rgba(255,255,255,0.75);letter-spacing:1px;">⚠️ 过量饮酒有害健康 · 未成年人禁止购买和饮用酒类</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="index.html">首页</a><span>/</span>酒类介绍
+        </div>
+
+        <div class="products-layout">
+            <!-- 侧边栏：分类筛选 -->
+            <aside class="sidebar">
+                <h3>🌿 产品分类</h3>
+                <div class="filter-group">
+                    <h4>香型</h4>
+                    <ul class="filter-list" id="categoryFilter">
+                        <li class="active" data-cat="all">全部产品（竹香型）</li>
+                        <li data-cat="竹香型">竹香型（全系主打）</li>
+                    </ul>
+                </div>
+                <div class="filter-group">
+                    <h4>系列</h4>
+                    <ul class="filter-list" id="seriesFilter">
+                        <li class="active" data-series="all">全部系列</li>
+                        <li data-series="竹香系列">竹香系列（主打）</li>
+                        <li data-series="经典系列">经典系列</li>
+                        <li data-series="珍藏系列">珍藏系列</li>
+                        <li data-series="年份系列">年份系列</li>
+                        <li data-series="礼盒系列">礼盒系列</li>
+                        <li data-series="便携系列">便携系列</li>
+                        <li data-series="典藏系列">典藏系列</li>
+                    </ul>
+                </div>
+                <div class="filter-group">
+                    <h4>价格区间</h4>
+                    <ul class="filter-list" id="priceFilter">
+                        <li class="active" data-price="all">全部价格</li>
+                        <li data-price="0-200">¥200 以下</li>
+                        <li data-price="200-500">¥200 - ¥500</li>
+                        <li data-price="500-1000">¥500 - ¥1000</li>
+                        <li data-price="1000-99999">¥1000 以上</li>
+                    </ul>
+                </div>
+            </aside>
+
+            <!-- 主内容区 -->
+            <main class="products-main">
+                <div class="toolbar">
+                    <div class="sort-tabs">
+                        <a href="#" class="active" data-sort="default">综合</a>
+                        <a href="#" data-sort="price-asc">价格 ↑</a>
+                        <a href="#" data-sort="price-desc">价格 ↓</a>
+                        <a href="#" data-sort="new">新品优先</a>
+                    </div>
+                    <div style="font-size:13px;color:var(--color-text-light);">
+                        共 <span id="productCount" style="color:var(--color-primary);font-weight:bold;">0</span> 款产品
+                    </div>
+                </div>
+                <div class="product-grid" id="productList"></div>
+            </main>
+        </div>
+    </div>
+
+    <div id="footer"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/main.js"></script>
+    <script>
+        initPage('products');
+
+        let filterState = { cat: 'all', series: 'all', price: 'all', sort: 'default' };
+
+        function renderList() {
+            let list = PRODUCTS.filter(p => {
+                if (filterState.cat !== 'all' && p.category !== filterState.cat) return false;
+                if (filterState.series !== 'all' && p.series !== filterState.series) return false;
+                if (filterState.price !== 'all') {
+                    const [min, max] = filterState.price.split('-').map(Number);
+                    if (p.price < min || p.price > max) return false;
+                }
+                // 搜索关键字
+                const kw = getQueryParam('keyword');
+                if (kw && !p.name.includes(kw) && !p.desc.includes(kw)) return false;
+                return true;
+            });
+
+            // 排序
+            if (filterState.sort === 'price-asc') list.sort((a, b) => a.price - b.price);
+            else if (filterState.sort === 'price-desc') list.sort((a, b) => b.price - a.price);
+            else if (filterState.sort === 'new') list.sort((a, b) => (b.tag === '新品' ? 1 : 0) - (a.tag === '新品' ? 1 : 0));
+
+            document.getElementById('productCount').textContent = list.length;
+            document.getElementById('productList').innerHTML = list.length
+                ? list.map(renderProductCard).join('')
+                : '<div style="grid-column:1/-1;text-align:center;padding:60px;color:var(--color-text-light);">暂无符合条件的产品 🌿</div>';
+        }
+
+        // 绑定筛选事件
+        function bindFilter(selector, key) {
+            document.querySelectorAll(`${selector} li`).forEach(li => {
+                li.addEventListener('click', () => {
+                    document.querySelectorAll(`${selector} li`).forEach(x => x.classList.remove('active'));
+                    li.classList.add('active');
+                    filterState[key] = li.dataset[key === 'cat' ? 'cat' : key === 'series' ? 'series' : 'price'];
+                    renderList();
+                });
+            });
+        }
+        bindFilter('#categoryFilter', 'cat');
+        bindFilter('#seriesFilter', 'series');
+        bindFilter('#priceFilter', 'price');
+
+        document.querySelectorAll('.sort-tabs a').forEach(a => {
+            a.addEventListener('click', e => {
+                e.preventDefault();
+                document.querySelectorAll('.sort-tabs a').forEach(x => x.classList.remove('active'));
+                a.classList.add('active');
+                filterState.sort = a.dataset.sort;
+                renderList();
+            });
+        });
+
+        renderList();
+    </script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $spacing-lg;
+  // 给底部固定按钮栏留位置：128rpx 主体 + 安全区动态扩展
+  padding-bottom: calc(200rpx + constant(safe-area-inset-bottom));
+  padding-bottom: calc(200rpx + env(safe-area-inset-bottom));
+}
+
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-sm 0;
+}
+
+.rowLabel {
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+}
+
+.rowValue {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.priceHighlight {
+  color: $color-primary;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+}
+
+.shipperTag {
+  display: inline-block;
+  padding: 4rpx $spacing-sm;
+  border-radius: $radius-xs;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+
+  &.agent {
+    background: rgba(53, 92, 68, 0.1);
+    color: $color-primary;
+  }
+
+  &.manufacturer {
+    background: rgba(133, 144, 156, 0.15);
+    color: $color-text-tertiary;
+  }
+}
+
+.submitButton {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  // 128rpx 主体高度 + iPhone X+ 底部安全区动态扩展
+  // 兼容老版 iOS (iOS 11.0-11.2 使用 constant())
+  height: calc(128rpx + constant(safe-area-inset-bottom));
+  height: calc(128rpx + env(safe-area-inset-bottom));
+  // 内容垂直对齐在主体区域内（避开安全区）
+  padding: 0 $spacing-lg;
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+  background: $color-bg-card;
+  box-shadow: $shadow-float;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  // 多端兼容：z-index 提到最上层，避免被滚动列表遮挡
+  z-index: 100;
+}
+
+.payButton {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  height: $button-height-lg;
+  padding: 0 $spacing-xl;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  @include button-reset;
+}
+
+.resultBox {
+  text-align: center;
+  padding: $spacing-xl 0;
+}
+
+.resultIcon {
+  font-size: 80rpx;
+  margin-bottom: $spacing-md;
+}
+
+.resultTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  color: $color-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.resultDesc {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.logBox {
+  background: $color-bg-hover;
+  border-radius: $radius-sm;
+  padding: $spacing-md;
+  margin-top: $spacing-md;
+}
+
+.logItem {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.agreeRow {
+  display: flex;
+  align-items: flex-start;
+  padding: $spacing-sm 0;
+  gap: $spacing-xs;
+}
+
+.agreeText {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+  flex: 1;
+}
+
+.link {
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+}

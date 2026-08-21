@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#355c44">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="竹香酒">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="format-detection" content="telephone=no">
+    <title>订单结算 - 竹香酒</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="header"></div>
+
+    <div class="page-banner">
+        <div class="container">
+            <h1>订单结算</h1>
+            <p>确认信息 · 完成支付</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="index.html">首页</a><span>/</span>
+            <a href="cart.html">购物车</a><span>/</span>订单结算
+        </div>
+
+        <div class="checkout-layout">
+            <!-- 收货地址 -->
+            <div class="checkout-section">
+                <h3>📍 收货地址</h3>
+                <div class="address-list">
+                    <div class="address-item active">
+                        <div class="name">张先生 <span style="font-size:12px;color:var(--color-accent);">[默认]</span></div>
+                        <div class="phone">📱 138****8888</div>
+                        <div class="addr">山东省泰安市泰山区泰山大街 88号山东瑞麒酒业大厦</div>
+                    </div>
+                    <div class="address-item">
+                        <div class="name">李女士</div>
+                        <div class="phone">📱 139****6666</div>
+                        <div class="addr">北京市朝阳区建国路 88号 SOHO现代城 A座 1205室</div>
+                    </div>
+                </div>
+                <div style="margin-top:16px;">
+                    <a href="#" style="color:var(--color-primary);font-size:13px;">+ 添加新地址</a>
+                </div>
+            </div>
+
+            <!-- 商品清单 -->
+            <div class="checkout-section">
+                <h3>📦 商品清单</h3>
+                <div id="orderItems"></div>
+            </div>
+
+            <!-- 支付方式 -->
+            <div class="checkout-section">
+                <h3>💳 支付方式</h3>
+                <div class="payment-methods">
+                    <div class="payment-method active">
+                        <span class="icon">💚</span>
+                        <div>
+                            <div style="font-weight:bold;">微信支付</div>
+                            <div style="font-size:12px;color:var(--color-text-light);">推荐使用</div>
+                        </div>
+                    </div>
+                    <div class="payment-method">
+                        <span class="icon">💙</span>
+                        <div>
+                            <div style="font-weight:bold;">支付宝</div>
+                            <div style="font-size:12px;color:var(--color-text-light);">快捷支付</div>
+                        </div>
+                    </div>
+                    <div class="payment-method">
+                        <span class="icon">🏦</span>
+                        <div>
+                            <div style="font-weight:bold;">银行转账</div>
+                            <div style="font-size:12px;color:var(--color-text-light);">对公账户</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 配送方式 -->
+            <div class="checkout-section">
+                <h3>🚚 配送方式</h3>
+                <div class="payment-methods">
+                    <div class="payment-method active">
+                        <span class="icon">📦</span>
+                        <div>
+                            <div style="font-weight:bold;">顺丰快递</div>
+                            <div style="font-size:12px;color:var(--color-text-light);">次日达 · 免费</div>
+                        </div>
+                    </div>
+                    <div class="payment-method">
+                        <span class="icon">🚚</span>
+                        <div>
+                            <div style="font-weight:bold;">京东物流</div>
+                            <div style="font-size:12px;color:var(--color-text-light);">次日达 · 免费</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 订单备注 -->
+            <div class="checkout-section">
+                <h3>📝 订单备注</h3>
+                <textarea class="form-control" placeholder="如有特殊要求请在此备注（如发票抬头、送礼卡片等）"></textarea>
+            </div>
+
+            <!-- 提交订单 -->
+            <div class="checkout-section">
+                <div class="checkout-submit">
+                    <div style="text-align:right;">
+                        <div style="font-size:13px;color:var(--color-text-light);margin-bottom:4px;">
+                            商品原价：¥<span id="originalAmount">0</span>
+                        </div>
+                        <div style="font-size:13px;color:var(--color-text-light);margin-bottom:4px;" id="discountDetail">
+                            优惠明细：—
+                        </div>
+                        <div style="font-size:13px;color:var(--color-text-light);margin-bottom:4px;">
+                            运费：<span style="color:var(--color-primary);" id="shippingText">免运费</span>
+                        </div>
+                        <div style="font-size:16px;">
+                            应付总额：<span style="color:var(--color-danger);font-size:28px;font-weight:bold;">¥<span id="payAmount">0</span></span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-lg" onclick="submitOrder()">提交订单</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="footer"></div>
+
+    <!-- 环境适配层(混合架构核心: 统一 H5/小程序/APP 的存储与网络接口) -->
+    <script src="js/env-adapter.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/order-pricing.js"></script>
+    <script src="js/toolkit/upgrade-logger.js"></script>
+    <script src="js/toolkit/transaction-template.js"></script>
+    <script src="js/inventory-service.js"></script>
+    <!-- 代理商区域发货认领服务: checkout 内部按 region 调用 resolveShipper/accrueServiceFee -->
+    <script src="js/agent-shipping-service.js"></script>
+    <script src="js/checkout-service.js"></script>
+    <script src="js/main.js"></script>
+    <script>
+        initPage('shop');
+
+        // 初始化订单结算 Mock 数据库
+        CheckoutService.init();
+        // 初始化代理商发货认领 Mock 数据库(供 checkout 内部 resolveShipper/accrueServiceFee 使用)
+        if (typeof AgentShippingService !== 'undefined') {
+            AgentShippingService.init();
+        }
+
+        // 从收货地址解析区域(与 agent-shipping-service mock 认领区域对齐: 山东泰安/山东济南/北京 等)
+        // 直辖市(北京/上海/天津/重庆)→ 取市名; 普通省市 → 去掉"省/市"后拼接
+        function parseRegionFromAddress(addr) {
+            if (!addr || typeof addr !== 'string') return '';
+            const municipalities = ['北京', '上海', '天津', '重庆'];
+            for (const m of municipalities) {
+                if (addr.indexOf(m) === 0) return m;
+            }
+            const m = addr.match(/^(.+?省)(.+?市)/);
+            if (m) return m[1].replace(/省$/, '') + m[2].replace(/市$/, '');
+            return addr.slice(0, 2);
+        }
+
+        // 获取当前选中地址的文本(从 .address-item.active .addr 读取)
+        function getSelectedRegion() {
+            const active = document.querySelector('.address-item.active .addr');
+            if (!active) return '';
+            return parseRegionFromAddress(active.textContent.trim());
+        }
+
+        const items = Cart.get();
+
+        if (items.length === 0) {
+            location.href = 'cart.html';
+        }
+
+        // 渲染订单商品
+        document.getElementById('orderItems').innerHTML = items.map(item => `
+            <div class="cart-item" style="grid-template-columns:60px 2fr 1fr 1fr 1fr;">
+                <div></div>
+                <div class="cart-product">
+                    <img src="" alt="${item.name}" onerror="this.style.background='linear-gradient(180deg,var(--color-primary-light),var(--color-primary-dark))'">
+                    <div class="cart-product-info">
+                        <h4>${item.name}</h4>
+                        <p>竹奕酒 · 正品保证</p>
+                    </div>
+                </div>
+                <div class="cart-price">¥${item.price}</div>
+                <div style="font-size:14px;">× ${item.qty}</div>
+                <div class="cart-price">¥${item.price * item.qty}</div>
+            </div>`).join('');
+
+        // 使用AI折扣叠加计算引擎计算价格
+        // 合并购物车商品为单个产品进行计算（简化版：取第一件商品作为主商品）
+        const mainProduct = items.length > 0
+            ? { name: items[0].name, price: items[0].price }
+            : { name: '竹香经典', price: 268 };
+        const totalQty = items.reduce((sum, i) => sum + i.qty, 0);
+
+        // 默认零售订单（P3叠加），模拟L5 SVIP会员 + 5000积分
+        const priceResult = calculateOrderPrice({
+            product: mainProduct,
+            quantity: totalQty,
+            orderType: 'retail',
+            memberLevel: 'L5',
+            points: 5000,
+            couponValue: 0,
+        });
+
+        // 渲染价格明细
+        document.getElementById('originalAmount').textContent = priceResult.originalTotal.toFixed(2);
+        document.getElementById('payAmount').textContent = priceResult.finalAmount.toFixed(2);
+
+        // 优惠明细
+        if (priceResult.totalDiscount > 0) {
+            const d = priceResult.discountDetail;
+            const parts = [];
+            if (d.md) parts.push(`会员折扣-¥${d.md}`);
+            if (d.ra) parts.push(`满减-¥${d.ra}`);
+            if (d.ca) parts.push(`优惠券-¥${d.ca}`);
+            if (d.pa) parts.push(`积分抵扣-¥${d.pa}`);
+            document.getElementById('discountDetail').innerHTML =
+                `<span style="color:var(--color-primary);">优惠明细：${parts.join(' · ')} = -¥${priceResult.totalDiscount}</span>`;
+        } else {
+            document.getElementById('discountDetail').textContent = '优惠明细：无优惠';
+        }
+
+        // 运费
+        const shippingText = priceResult.shipping === 0 ? '免运费' : `¥${priceResult.shipping}`;
+        document.getElementById('shippingText').textContent = shippingText;
+
+        // 地址选择
+        document.querySelectorAll('.address-item').forEach(a => {
+            a.addEventListener('click', () => {
+                document.querySelectorAll('.address-item').forEach(x => x.classList.remove('active'));
+                a.classList.add('active');
+            });
+        });
+
+        // 支付方式选择
+        document.querySelectorAll('.payment-methods').forEach(group => {
+            group.querySelectorAll('.payment-method').forEach(m => {
+                m.addEventListener('click', () => {
+                    group.querySelectorAll('.payment-method').forEach(x => x.classList.remove('active'));
+                    m.classList.add('active');
+                });
+            });
+        });
+
+        // 提交订单(基于工具包的 9 阶段事务流程)
+        // ★ 区域发货路由: 从选中收货地址解析 region 传入,
+        //   checkout 内部按认领状态决定发货方(已认领→代理商+厂家5%同品分润;未认领→厂家直供)
+        async function submitOrder() {
+            const btn = document.querySelector('.btn-primary');
+            if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
+
+            try {
+                const region = getSelectedRegion();
+                const result = await CheckoutService.submit({
+                    items: items,
+                    memberLevel: 'L5',
+                    points: 5000,
+                    paymentMethod: 'wechat',
+                    region: region, // ★ 用于发货方路由与厂家5%同品分润计提
+                });
+
+                if (result.success) {
+                    const d = result.details;
+                    Cart.clear();
+                    // 发货方展示: 认领区域→代理商;未认领→厂家直供
+                    const shipperLine = d.shipperType === 'agent'
+                        ? `代理商·${d.shipperAgentName} (负责发货+售后)`
+                        : '厂家直供';
+                    const feeLine = d.manufacturerServiceFee > 0
+                        ? `厂家服务费：¥${d.manufacturerServiceFee.toFixed(2)} (按订单5%同品分润,待发放)`
+                        : '';
+                    alert(`✅ 订单提交成功！
+
+订单编号：${result.orderNo}
+商品原价：¥${d.originalTotal.toFixed(2)}
+优惠金额：-¥${d.totalDiscount.toFixed(2)}
+运费：${d.shipping === 0 ? '免运费' : '¥' + d.shipping}
+积分抵扣：-¥${(d.pointsUsed * 0.01).toFixed(2)} (使用${d.pointsUsed}竹叶)
+积分入账：+${d.pointsEarned} 竹叶
+应付金额：¥${d.finalAmount.toFixed(2)}
+
+收货区域：${d.region || '(未指定)'}
+发货方：${shipperLine}
+${feeLine}
+
+事务流程已全部完成(9阶段+异步任务)。`);
+                    setTimeout(() => { location.href = 'index.html'; }, 100);
+                } else {
+                    alert(`❌ 订单提交失败！
+
+错误：${result.error}
+${result.failedStage ? '失败阶段：' + result.failedStage : ''}
+
+事务已自动回滚,数据保持原样。`);
+                }
+            } catch (e) {
+                alert('订单提交异常: ' + e.message);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '提交订单'; }
+            }
+        }
+    </script>
+</body>
+</html>

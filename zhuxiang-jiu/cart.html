@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#355c44">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="竹香酒">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="format-detection" content="telephone=no">
+    <title>购物车 - 竹香酒</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="header"></div>
+
+    <div class="page-banner">
+        <div class="container">
+            <h1>🛒 我的购物车</h1>
+            <p>竹奕佳酿 · 即刻带回家</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="index.html">首页</a><span>/</span>购物车
+        </div>
+
+        <div class="cart-layout" id="cartLayout"></div>
+    </div>
+
+    <div id="footer"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/order-pricing.js"></script>
+    <script src="js/main.js"></script>
+    <script>
+        initPage('shop');
+
+        function renderCart() {
+            const items = Cart.get();
+            const layout = document.getElementById('cartLayout');
+
+            if (items.length === 0) {
+                layout.innerHTML = `
+                    <div style="background:#fff;border-radius:16px;padding:80px 20px;text-align:center;box-shadow:var(--shadow-sm);">
+                        <div style="font-size:80px;margin-bottom:20px;opacity:0.3;">🛒</div>
+                        <h3 style="margin-bottom:12px;color:var(--color-text);">购物车还是空的</h3>
+                        <p style="color:var(--color-text-light);margin-bottom:24px;">去看看竹奕佳酿，挑选您的心仪之选</p>
+                        <a href="products.html" class="btn btn-primary btn-lg">去逛逛 →</a>
+                    </div>`;
+                return;
+            }
+
+            const rowsHtml = items.map(item => `
+                <div class="cart-item">
+                    <div></div>
+                    <div class="cart-product">
+                        <img src="" alt="${item.name}" onerror="this.style.background='linear-gradient(180deg,var(--color-primary-light),var(--color-primary-dark))'">
+                        <div class="cart-product-info">
+                            <h4>${item.name}</h4>
+                            <p>竹奕酒 · 正品保证</p>
+                        </div>
+                    </div>
+                    <div class="cart-price">¥${item.price}</div>
+                    <div>
+                        <div class="cart-qty">
+                            <button onclick="updateItemQty(${item.id}, ${item.qty - 1})">−</button>
+                            <input type="text" value="${item.qty}" readonly>
+                            <button onclick="updateItemQty(${item.id}, ${item.qty + 1})">+</button>
+                        </div>
+                    </div>
+                    <div class="cart-price">¥${item.price * item.qty}</div>
+                    <div class="cart-remove" onclick="removeItem(${item.id})" title="删除">✕</div>
+                </div>`).join('');
+
+            const totalQty = Cart.count();
+            const totalPrice = Cart.total();
+
+            // 预估优惠（SVIP L5 + 5000积分）
+            const mainProduct = items.length > 0
+                ? { name: items[0].name, price: items[0].price }
+                : { name: '竹香经典', price: 268 };
+            const estResult = calculateOrderPrice({
+                product: mainProduct,
+                quantity: totalQty,
+                orderType: 'retail',
+                memberLevel: 'L5',
+                points: 5000,
+                couponValue: 0,
+            });
+            const estDiscount = estResult.totalDiscount;
+            const estFinal = estResult.finalAmount;
+
+            layout.innerHTML = `
+                <div class="cart-table">
+                    <div class="cart-header">
+                        <div></div>
+                        <div>商品信息</div>
+                        <div>单价</div>
+                        <div>数量</div>
+                        <div>小计</div>
+                        <div>操作</div>
+                    </div>
+                    ${rowsHtml}
+                </div>
+                <div class="cart-footer">
+                    <div>
+                        <a href="products.html" style="color:var(--color-primary);font-size:14px;">← 继续购物</a>
+                        <span style="margin-left:20px;color:var(--color-text-light);font-size:13px;cursor:pointer;" onclick="clearCart()">🗑 清空购物车</span>
+                    </div>
+                    <div class="cart-summary">
+                        <div style="font-size:13px;color:var(--color-text-light);text-decoration:line-through;margin-bottom:4px;">
+                            原价：¥${totalPrice.toFixed(2)}
+                        </div>
+                        <div style="font-size:13px;color:var(--color-primary);margin-bottom:4px;">
+                            SVIP预估优惠：-¥${estDiscount.toFixed(2)}
+                        </div>
+                        <div class="total">共 <strong style="color:var(--color-primary);">${totalQty}</strong> 件，预估实付：</div>
+                        <div class="total-price">¥${estFinal.toFixed(2)}</div>
+                        <a href="checkout.html" class="btn btn-primary btn-lg">去结算 →</a>
+                    </div>
+                </div>`;
+        }
+
+        function updateItemQty(id, qty) {
+            if (qty < 1) {
+                if (confirm('确定要删除该商品吗？')) Cart.remove(id);
+            } else {
+                Cart.updateQty(id, qty);
+            }
+            renderCart();
+        }
+
+        function removeItem(id) {
+            if (confirm('确定要删除该商品吗？')) {
+                Cart.remove(id);
+                renderCart();
+            }
+        }
+
+        function clearCart() {
+            if (confirm('确定要清空购物车吗？')) {
+                Cart.clear();
+                renderCart();
+            }
+        }
+
+        renderCart();
+    </script>
+</body>
+</html>

@@ -1,0 +1,139 @@
+// ============================================
+// 多端兼容性样式 (Compatibility)
+// 适用：H5 / 微信小程序 / 支付宝小程序 / 抖音小程序 / APP(RN)
+// 适配：iOS (iPhone X+) / Android 主流机型
+// ============================================
+
+// 1. 全局盒模型：统一为 border-box，避免多端 padding 计算差异
+page,
+view,
+scroll-view,
+swiper,
+swiper-item,
+text,
+image,
+button,
+input,
+textarea,
+form,
+label,
+navigator {
+  box-sizing: border-box;
+}
+
+// 2. iOS H5 端 - 禁用原生点击高亮（灰色半透明背景）
+/* #ifdef H5 */
+view,
+text,
+button,
+input,
+textarea,
+navigator,
+image {
+  -webkit-tap-highlight-color: transparent;
+}
+
+// iOS H5 平滑滚动
+scroll-view,
+page {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; // 防止滚动穿透
+}
+
+// 文字大小自动调整禁用（防止横竖屏切换文字大小变化）
+page,
+text {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+// 触摸交互优化：去除 300ms 点击延迟（viewport 已设置 user-scalable=no，配合 touch-action）
+button,
+[onclick],
+navigator,
+view {
+  touch-action: manipulation;
+}
+
+// 表单元素原生样式重置（iOS Safari 圆角和阴影问题）
+input,
+textarea,
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+button {
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+}
+/* #endif */
+
+// 3. 多端 - 全局长按禁止（防止图片/文字长按弹出系统菜单）
+/* #ifdef H5 || WEAPP */
+image,
+text {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* #endif */
+
+// 4. 安卓 - 输入框光标问题修复
+/* #ifdef H5 */
+input,
+textarea {
+  line-height: normal;
+}
+/* #endif */
+
+// 5. iOS 安全区 Mixin（直接使用 env/constant，避免 SCSS 变量插值导致 calc 失效）
+@mixin safe-area-top {
+  padding-top: constant(safe-area-inset-top);
+  padding-top: env(safe-area-inset-top);
+}
+
+@mixin safe-area-bottom {
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@mixin safe-area-inset {
+  padding-top: constant(safe-area-inset-top);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: constant(safe-area-inset-left);
+  padding-left: env(safe-area-inset-left);
+  padding-right: constant(safe-area-inset-right);
+  padding-right: env(safe-area-inset-right);
+}
+
+// 6. 固定定位元素的安全区适配（如底部固定按钮栏）
+// 用法：@include fixed-bottom-safe; 然后覆盖 padding/bottom 等具体值
+@mixin fixed-bottom-safe {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+// 8. 防止 H5 长按选择文字（保留 input/textarea 可选）
+/* #ifdef H5 */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* #endif */

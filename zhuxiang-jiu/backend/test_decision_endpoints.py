@@ -20,9 +20,13 @@ AI决策筹划模块(模块29) 11 个 decision 端点单元测试
         --cov=main --cov=models --cov-report=term-missing
 """
 
+import asyncio
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from main import app
+from models import DecisionErrorCode
 
 client = TestClient(app)
 
@@ -1200,6 +1204,22 @@ class TestCrossCutting:
         # 应该是 422 而非 500(参数解析失败)
         assert response.status_code in (400, 422)
 
+    def test_general_exception_handler_triggers_500(self):
+        """触发 500 兜底处理器: 直接调用 general_exception_handler 验证响应"""
+        from core.errors import general_exception_handler
+        from fastapi.responses import JSONResponse
+
+        exc = RuntimeError("模拟内部错误")
+        response = asyncio.run(general_exception_handler(request=None, exc=exc))
+
+        assert isinstance(response, JSONResponse)
+        assert response.status_code == 500
+        body = json.loads(response.body.decode("utf-8"))
+        assert body["success"] is False
+        assert "DECISION_010" in body["error"]
+        assert "模拟内部错误" in body["error"]
+        assert body["errorCode"] == DecisionErrorCode.e010.value
+
 
 # ============================================================
 #  系统端点: health / mode / mode/switch
@@ -1235,6 +1255,39 @@ class TestSystemEndpoints:
         """get_mode: member 403"""
         response = client.get("/api/decision/mode", headers=MEMBER_HEADERS)
         assert_forbidden(response)
+
+    def test_get_mode_guest_forbidden(self):
+        """get_mode: guest 403(对应 curl 验证场景)"""
+        response = client.get("/api/decision/mode", headers=GUEST_HEADERS)
+        assert_forbidden(response)
+
+    def test_get_mode_no_header_defaults_guest_forbidden(self):
+        """get_mode: 无 X-Role 头 → 默认 guest → 403"""
+        response = client.get("/api/decision/mode")
+        assert_forbidden(response)
+
+    @pytest.mark.parametrize(
+        "role_header,expected_status",
+        [
+            ("admin", 200),
+            ("store_owner", 403),
+            ("agent", 403),
+            ("member", 403),
+            ("guest", 403),
+            (None, 403),
+        ],
+        ids=["admin-pass", "store_owner-403", "agent-403",
+             "member-403", "guest-403", "no-header-403"],
+    )
+    def test_mode_access_role_matrix(self, role_header, expected_status):
+        """权限矩阵: 仅 admin 可访问 /mode,其余角色(含默认 guest)均 403"""
+        headers = {"X-Role": role_header} if role_header else {}
+        response = client.get("/api/decision/mode", headers=headers)
+        if expected_status == 200:
+            data = assert_success(response, "mode")
+            assert data["details"]["mode"] == "mock"
+        else:
+            assert_forbidden(response)
 
     def test_switch_mode_to_live(self):
         """switch_mode: 切换至 live 模式"""
@@ -1278,3 +1331,71 @@ class TestSystemEndpoints:
                               json={"mode": "invalid"},
                               headers=ADMIN_HEADERS)
         assert_unprocessable(response)
+
+
+# ============================================================
+#  main.py 启动入口测试
+#  覆盖 if __name__ == "__main__" 块(行 88-93)
+# ============================================================
+
+class TestMainEntryPoint:
+    """main.py 启动入口测试
+
+    通过 exec 执行 main.py 源码并设置 __name__ == "__main__",
+    同时 monkeypatch uvicorn.run 拦截实际启动,验证环境变量解析和调用参数。
+    """
+
+    def test_main_entry_default_host_port(self, monkeypatch):
+        """启动入口: 默认 host=0.0.0.0, port=8000"""
+        import sys
+        from types import ModuleType
+
+        # 拦截 uvicorn.run
+        calls = []
+        fake_uvicorn = ModuleType("uvicorn")
+        fake_uvicorn.run = lambda app, host, port: calls.append(
+            {"host": host, "port": port}
+        )
+        monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
+
+        # 清除 PORT/HOST 环境变量,使用默认值
+        monkeypatch.delenv("PORT", raising=False)
+        monkeypatch.delenv("HOST", raising=False)
+
+        # exec main.py 源码,设置 __name__ == "__main__"
+        import main
+        with open(main.__file__, encoding="utf-8") as f:
+            source = f.read()
+        exec(compile(source, main.__file__, "exec"),
+             {"__name__": "__main__", "__file__": main.__file__})
+
+        # 验证 uvicorn.run 被调用,使用默认参数
+        assert len(calls) == 1
+        assert calls[0]["host"] == "0.0.0.0"
+        assert calls[0]["port"] == 8000
+
+    def test_main_entry_custom_host_port(self, monkeypatch):
+        """启动入口: 自定义 PORT=9999, HOST=127.0.0.1"""
+        import sys
+        from types import ModuleType
+
+        calls = []
+        fake_uvicorn = ModuleType("uvicorn")
+        fake_uvicorn.run = lambda app, host, port: calls.append(
+            {"host": host, "port": port}
+        )
+        monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
+
+        # 设置自定义环境变量
+        monkeypatch.setenv("PORT", "9999")
+        monkeypatch.setenv("HOST", "127.0.0.1")
+
+        import main
+        with open(main.__file__, encoding="utf-8") as f:
+            source = f.read()
+        exec(compile(source, main.__file__, "exec"),
+             {"__name__": "__main__", "__file__": main.__file__})
+
+        assert len(calls) == 1
+        assert calls[0]["host"] == "127.0.0.1"
+        assert calls[0]["port"] == 9999

@@ -1,0 +1,88 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #e8f0ec 0%, $color-bg-page 100%);
+  padding-bottom: $spacing-xl;
+}
+
+.header {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  padding: $spacing-xl $spacing-lg;
+  color: $color-text-white;
+}
+
+.brandTitle {
+  font-size: $font-size-xxl;
+  font-weight: $font-weight-bold;
+  margin-bottom: $spacing-xs;
+}
+
+.brandDesc {
+  font-size: $font-size-sm;
+  opacity: 0.9;
+  line-height: $line-height-loose;
+}
+
+.warning {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+  margin-top: $spacing-sm;
+}
+
+.productList {
+  padding: $spacing-lg;
+}
+
+.productCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all $transition-base;
+
+  &:active {
+    transform: scale(0.98);
+    box-shadow: $shadow-card-hover;
+  }
+}
+
+.productInfo {
+  flex: 1;
+}
+
+.productName {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-xs;
+  @include text-ellipsis;
+}
+
+.productPrice {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.productStock {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+}
+
+.buyButton {
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  padding: 0 $spacing-lg;
+  height: $button-height-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  white-space: nowrap;
+  @include button-reset;
+}

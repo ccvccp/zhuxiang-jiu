@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#355c44">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="竹香酒">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="format-detection" content="telephone=no">
+    <title>竹奕酒 · 全竹发酵 竹酒首创 - 山东瑞麒酒业官方网站</title>
+    <meta name="description" content="竹香酒官方商城，竹奕酒全系竹香型，翠竹酿造工艺，独创竹香风格，正品保证，全国配送。">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="header"></div>
+
+    <!-- 主视觉 Banner -->
+    <section class="hero">
+        <div class="hero-bg"></div>
+        <div class="hero-bamboo"></div>
+        <div class="container hero-content">
+            <span class="brand-tag">🌿 竹香典范 · 匠心传承 · 竹酒首创</span>
+            <h1>竹奕酒<small>匠心淬炼 · 自然沁香 · 天赐好品</small></h1>
+            <p class="hero-slogan">福来就喝竹奕酒，天赐鸿运随心走！</p>
+            <p>首创全竹发酵，创新定义中国竹香酒。取武夷山新鲜楠竹笋及全竹为原料，汲取徂徕山"竹溪六逸"富硒泉水，融汇现代生物科技与千年古法，滴滴醇香，醒酒快、无酒气、不头疼。</p>
+            <div class="hero-buttons">
+                <a href="products.html" class="btn btn-gold btn-lg">探索竹奕系列</a>
+                <a href="news.html" class="btn btn-outline btn-lg" style="color:#fff;border-color:#fff;">品牌故事</a>
+            </div>
+            <!-- 酒类广告合规：健康警示语 -->
+            <p style="margin-top:24px;color:rgba(255,255,255,0.75);font-size:12px;letter-spacing:1px;">⚠️ 过量饮酒有害健康 · 未成年人禁止购买和饮用酒类 · 饮酒后请勿驾车</p>
+        </div>
+    </section>
+
+    <!-- 服务入口 -->
+    <section class="section">
+        <div class="container">
+            <div class="service-entries" id="serviceEntries"></div>
+        </div>
+    </section>
+
+    <!-- 热销产品推荐 -->
+    <section class="section" style="background:#fff;">
+        <div class="container">
+            <div class="section-title">
+                <h2>竹<span>奕</span>佳酿</h2>
+                <p>匠心酿造 · 品质之选</p>
+                <div class="deco-line"></div>
+            </div>
+            <div class="product-grid" id="hotProducts"></div>
+            <div style="text-align:center;margin-top:40px;">
+                <a href="products.html" class="btn btn-outline btn-lg">查看全部产品 →</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- 品牌故事 -->
+    <section class="brand-story">
+        <div class="container">
+            <div class="brand-story-inner">
+                <div class="brand-story-img"></div>
+                <div class="brand-story-text">
+                    <h2>匠心淬炼 · <span>自然沁香</span></h2>
+                    <p>竹奕酒，源自<strong>山东瑞麒酒业有限公司</strong>。我们立足泰山脚下，承袭千年古法酿造工艺，更融汇现代生物科技精粹。</p>
+                    <p><strong>水之源：</strong>甄选山东"竹溪六逸"徂徕山富硒泉水，滴滴甘甜，滋养酒魂。</p>
+                    <p><strong>竹之韵：</strong>取材武夷山周围新鲜楠竹笋及全竹为原料，集天地灵气。</p>
+                    <p><strong>技之精：</strong>历经多轮发酵、蒸馏，方得这滴滴醇香。酒体晶莹剔透，竹香突出，优雅细腻，回味悠长。每一口皆是大自然的福报，每一瓶都是科技与匠心的见证。</p>
+                    <p>"我不是普通的酒，我是竹子的灵魂升华。"——竹奕酒，不仅是一杯酒，更是一份君子之风，一份对高雅生活的追求。</p>
+                    <div class="brand-features" id="brandFeatures"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 新闻动态 -->
+    <section class="section">
+        <div class="container">
+            <div class="section-title">
+                <h2>新闻<span>动态</span></h2>
+                <p>了解竹香酒最新资讯</p>
+                <div class="deco-line"></div>
+            </div>
+            <div class="news-grid" id="latestNews"></div>
+            <div style="text-align:center;margin-top:40px;">
+                <a href="news.html" class="btn btn-outline btn-lg">查看更多新闻 →</a>
+            </div>
+        </div>
+    </section>
+
+    <div id="footer"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/main.js"></script>
+    <script>
+        initPage('home');
+
+        // 服务入口
+        document.getElementById('serviceEntries').innerHTML = SERVICE_ENTRIES.map(s => `
+            <div class="service-entry" onclick="location.href='service.html'">
+                <div class="icon">${s.icon}</div>
+                <h3>${s.title}</h3>
+                <p>${s.desc}</p>
+            </div>`).join('');
+
+        // 主打产品推荐（竹香型优先，取前4个）
+        const featured = PRODUCTS.filter(p => p.tag === '主打').concat(PRODUCTS.filter(p => p.tag !== '主打'));
+        document.getElementById('hotProducts').innerHTML = featured.slice(0, 4).map(renderProductCard).join('');
+
+        // 品牌特色
+        document.getElementById('brandFeatures').innerHTML = BRAND_FEATURES.map(f => `
+            <div class="brand-feature">
+                <div class="icon">${f.icon}</div>
+                <div>
+                    <h4>${f.title}</h4>
+                    <p>${f.desc}</p>
+                </div>
+            </div>`).join('');
+
+        // 最新新闻（取前3条）
+        document.getElementById('latestNews').innerHTML = NEWS.slice(0, 3).map(n => `
+            <div class="news-card" onclick="location.href='news-detail.html?id=${n.id}'">
+                <div class="news-img" data-icon="${n.icon}">
+                    <span class="news-category">${n.category}</span>
+                </div>
+                <div class="news-info">
+                    <div class="news-date">📅 ${n.date} · 👁 ${n.views}</div>
+                    <div class="news-title">${n.title}</div>
+                    <div class="news-desc">${n.desc}</div>
+                </div>
+            </div>`).join('');
+    </script>
+</body>
+</html>

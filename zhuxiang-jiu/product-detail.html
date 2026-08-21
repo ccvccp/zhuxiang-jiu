@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#355c44">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="竹香酒">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="format-detection" content="telephone=no">
+    <title>产品详情 - 竹香酒 · 竹奕系列</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="header"></div>
+
+    <div class="container">
+        <div class="breadcrumb" id="breadcrumb">
+            <a href="index.html">首页</a><span>/</span>
+            <a href="products.html">酒类介绍</a><span>/</span>
+            <span id="crumbName">产品详情</span>
+        </div>
+
+        <div class="product-detail" id="productDetail"></div>
+
+        <!-- 产品详情描述 -->
+        <section class="section" style="background:#fff;border-radius:16px;padding:40px;margin-bottom:30px;">
+            <div class="section-title">
+                <h2>产品<span>详情</span></h2>
+                <div class="deco-line"></div>
+            </div>
+            <div id="productDesc" style="max-width:800px;margin:0 auto;line-height:2;color:var(--color-text);"></div>
+        </section>
+
+        <!-- 相关推荐 -->
+        <section class="section">
+            <div class="section-title">
+                <h2>相关<span>推荐</span></h2>
+                <div class="deco-line"></div>
+            </div>
+            <div class="product-grid" id="relatedProducts"></div>
+        </section>
+    </div>
+
+    <div id="footer"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/main.js"></script>
+    <script>
+        initPage('products');
+
+        const productId = parseInt(getQueryParam('id')) || 1;
+        const product = PRODUCTS.find(p => p.id === productId) || PRODUCTS[0];
+
+        document.getElementById('crumbName').textContent = product.name;
+        document.title = `${product.name} - 竹香酒`;
+
+        // 渲染产品详情
+        document.getElementById('productDetail').innerHTML = `
+            <div>
+                <div class="product-gallery">
+                    <div class="bottle"></div>
+                </div>
+                <div class="gallery-thumbs">
+                    <div class="thumb active">🍶</div>
+                    <div class="thumb">📦</div>
+                    <div class="thumb">🌿</div>
+                    <div class="thumb">📋</div>
+                </div>
+            </div>
+            <div class="product-info-detail">
+                <h1>${product.name}</h1>
+                <p class="product-subtitle">${product.desc}</p>
+                <div class="product-meta">
+                    <div class="product-meta-row"><label>香型：</label><span>${product.category}</span></div>
+                    <div class="product-meta-row"><label>系列：</label><span>${product.series}</span></div>
+                    <div class="product-meta-row"><label>酒精度：</label><span>${product.alcohol}</span></div>
+                    <div class="product-meta-row"><label>净含量：</label><span>${product.volume}</span></div>
+                    <div class="product-meta-row"><label>产地：</label><span>${product.origin}</span></div>
+                </div>
+                <div class="product-price-box">
+                    <span class="price-now">¥${product.price}</span>
+                    <span class="price-original">原价 ¥${product.originalPrice}</span>
+                </div>
+                <div class="spec-selector">
+                    <h4>规格选择</h4>
+                    <div class="spec-options">
+                        <div class="spec active">${product.volume}</div>
+                        <div class="spec">竹编礼盒装</div>
+                        <div class="spec">整箱6瓶</div>
+                    </div>
+                </div>
+                <div class="quantity-selector">
+                    <h4>数量</h4>
+                    <div class="qty-control">
+                        <button onclick="changeQty(-1)">−</button>
+                        <input type="text" id="qtyInput" value="1" readonly>
+                        <button onclick="changeQty(1)">+</button>
+                    </div>
+                </div>
+                <div class="product-actions">
+                    <button class="btn btn-outline" onclick="Cart.add(${product.id}, parseInt(document.getElementById('qtyInput').value))">加入购物车</button>
+                    <button class="btn btn-primary" onclick="buyNow(${product.id})">立即购买</button>
+                </div>
+                <div class="product-services">
+                    <span>正品保证</span>
+                    <span>全国配送</span>
+                    <span>破损包赔</span>
+                    <span>7×24客服</span>
+                    <span>发票支持</span>
+                </div>
+            </div>`;
+
+        // 渲染产品描述
+        document.getElementById('productDesc').innerHTML = `
+            <h3 style="text-align:center;margin-bottom:8px;color:var(--color-primary-dark);">🌿 全竹发酵 · 匠心之作</h3>
+            <p style="text-align:center;margin-bottom:24px;color:var(--color-accent);font-size:18px;font-weight:bold;letter-spacing:1px;">福来就喝竹奕酒，天赐鸿运随心走！</p>
+            <p><strong>${product.name}</strong>，源自${product.origin}，是${product.series}中的精品之作。由山东瑞麒酒业有限公司出品，首创全竹发酵工艺，创新定义中国竹香酒。</p>
+            <p>${product.desc}</p>
+            <p>取武夷山新鲜楠竹笋及全竹为原料，汲取徂徕山"竹溪六逸"富硒泉水，联合十余家科研机构独创生物发酵技术，将竹材转化为葡萄糖、木糖、甘露糖及多种多糖，再由专用酿酒酵母转化，最终成就竹奕酒。</p>
+            <h4 style="margin:24px 0 12px;color:var(--color-primary-dark);">【健康密码】</h4>
+            <p>🌿 <strong>竹叶黄酮(AOB)：</strong>药食同源天然提取物，已被国家批准为新食品原料，融入酒体。</p>
+            <p>🔬 <strong>有益成分：</strong>自然转化出丁香醇、β-紫罗兰酮、γ-癸内酯等多种有益物质。</p>
+            <p>🏆 <strong>权威背书：</strong>经第三方检测机构全方位检测，各项指标远超国家白酒标准。</p>
+            <p>🍃 <strong>饮后体验：</strong>醒酒快、身上无酒气、不头疼，清心怡神，懂你的身体。</p>
+            <h4 style="margin:24px 0 12px;color:var(--color-primary-dark);">【四大必买理由】</h4>
+            <p>① 🌿 <strong>原料革命：</strong>武夷山全竹入酒 + 徂徕山富硒泉水，天然健康基底。</p>
+            <p>② 🔬 <strong>科技赋能：</strong>生物转化工艺，富含竹叶黄酮(AOB)等有益微量元素。</p>
+            <p>③ 🍃 <strong>极致体验：</strong>醒酒快、无酒气、不头疼，商务应酬两不误。</p>
+            <p>④ 🏆 <strong>品质承诺：</strong>第三方检测远超国标，晶莹剔透，竹香幽雅。</p>
+            <h4 style="margin:24px 0 12px;color:var(--color-primary-dark);">【品鉴笔记】</h4>
+            <p>外观：无色透明，挂杯均匀，酒花丰富细腻。</p>
+            <p>香气：清雅馥郁，带有独特的竹香风格，层次分明。</p>
+            <p>口感：入口绵柔，醇厚丰满，诸味协调，回味悠长。</p>
+            <h4 style="margin:24px 0 12px;color:var(--color-primary-dark);">【适饮场景】</h4>
+            <p>商务宴请：醒酒快、无酒气，下午开会、晚上应酬两不误。</p>
+            <p>高端礼赠："竹报平安"寓意吉祥，君子之礼，送得体面。</p>
+            <p>老友小聚：畅饮不头疼，尽兴更尽兴。</p>
+            <p style="text-align:center;margin-top:32px;color:var(--color-text-light);font-size:13px;">
+                ⚠️ 过量饮酒有害健康 · 未成年人禁止饮酒 · 饮酒后请勿驾车 · 孕妇请勿饮酒
+            </p>`;
+
+        // 相关推荐（同系列的其他产品）
+        const related = PRODUCTS.filter(p => p.id !== product.id && (p.series === product.series || p.category === product.category)).slice(0, 4);
+        document.getElementById('relatedProducts').innerHTML = related.map(renderProductCard).join('');
+
+        // 数量增减
+        function changeQty(delta) {
+            const input = document.getElementById('qtyInput');
+            const val = Math.max(1, parseInt(input.value) + delta);
+            input.value = val;
+        }
+
+        // 立即购买
+        function buyNow(pid) {
+            Cart.add(pid, parseInt(document.getElementById('qtyInput').value));
+            setTimeout(() => location.href = 'cart.html', 500);
+        }
+
+        // 规格选择
+        document.querySelectorAll('.spec-options .spec').forEach(s => {
+            s.addEventListener('click', () => {
+                document.querySelectorAll('.spec-options .spec').forEach(x => x.classList.remove('active'));
+                s.classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

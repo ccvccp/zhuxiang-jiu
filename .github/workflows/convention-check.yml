@@ -1,0 +1,174 @@
+# 事务服务约定检查 · CI 流水线 (完整版)
+# ============================================================
+# 把《事务工具包-预检与失败阶段策略.md》维护清单固化为可执行门禁
+# 静态检查 (C1-C7) + 运行时回归 (C8) 双 Job 分离,FAIL 阻断合并
+#
+# Job 结构:
+#   static-check        : C1-C7 静态源码分析 (零外部依赖, ~10s)
+#   runtime-regression  : C8 运行时回归 (puppeteer + 系统 chromium, ~30s)
+#                         依赖 static-check 通过后才执行 (省 CI 配额)
+#
+# 触发: push(main/master) / pull_request / 手动 workflow_dispatch
+# 路径过滤: 仅 js/** + *.html + ci/** + workflow 自身变更才触发
+# ============================================================
+
+name: convention-check
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'zhuxiang-jiu/js/**'
+      - 'zhuxiang-jiu/*.html'
+      - 'ci/**'
+      - '.github/workflows/convention-check.yml'
+  pull_request:
+    paths:
+      - 'zhuxiang-jiu/js/**'
+      - 'zhuxiang-jiu/*.html'
+      - 'ci/**'
+      - '.github/workflows/convention-check.yml'
+  workflow_dispatch: {}  # 支持手动触发(可在 Actions 页面选择分支运行)
+
+# 最小权限原则
+permissions:
+  contents: read       # 检出代码
+  pull-requests: write # PR 评论(可选,用于贴检查结果)
+
+# 同分支新提交取消旧运行,省 CI 配额
+concurrency:
+  group: convention-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================
+  # Job 1: 静态约定检查 (C1-C7)
+  #   零外部依赖,仅用 Node 内置模块
+  #   检查预检无业务判断/阶段用throw/共享核心无嵌套事务/基于工具包等
+  # ============================================================
+  static-check:
+    name: 静态约定检查 (C1-C7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 运行静态约定检查
+        id: check
+        run: node ci/run-convention-check.cjs
+
+      - name: 输出检查摘要到 Job Summary
+        if: always()
+        run: |
+          echo "## 静态约定检查 (C1-C7)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f ci/convention-report.json ]; then
+            node -e "
+              const r = require('./ci/convention-report.json');
+              const emoji = r.success ? '✅' : '❌';
+              console.log('| 指标 | 值 |');
+              console.log('|------|----|');
+              console.log('| 总检查项 | ' + r.total + ' |');
+              console.log('| PASS | ' + r.pass + ' |');
+              console.log('| WARN | ' + r.warn + ' |');
+              console.log('| FAIL | ' + r.fail + ' |');
+              console.log('| 结果 | ' + emoji + ' ' + (r.success ? '通过' : '失败') + ' |');
+            " >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 上传检查报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: convention-static-report
+          path: ci/convention-report.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ============================================================
+  # Job 2: 运行时回归测试 (C8)
+  #   依赖 static-check 通过后才执行,省 CI 配额
+  #   使用 puppeteer-core + 系统 chromium 加载 module-test.html
+  #   执行各服务注册的 runFn (含 runAgentShippingRegression 8用例)
+  # ============================================================
+  runtime-regression:
+    name: 运行时回归 (C8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: static-check  # 静态检查通过后才跑运行时
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 缓存 puppeteer-core
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-puppeteer-core-${{ runner.os }}-${{ hashFiles('ci/run-regression-headless.cjs') }}
+          restore-keys: |
+            npm-puppeteer-core-${{ runner.os }}-
+
+      - name: 安装 Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser
+          echo "chromium 路径: $(which chromium-browser || which chromium || which google-chrome)"
+          # 写入环境变量供脚本读取
+          echo "CHROME_BIN=$(which chromium-browser || which chromium || which google-chrome)" >> $GITHUB_ENV
+
+      - name: 安装 puppeteer-core
+        run: npm install puppeteer-core@latest --no-save
+
+      - name: 运行运行时回归测试
+        run: node ci/run-regression-headless.cjs
+
+      - name: 输出回归摘要到 Job Summary
+        if: always()
+        run: |
+          echo "## 运行时回归测试 (C8)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f ci/regression-report.json ]; then
+            node -e "
+              const r = require('./ci/regression-report.json');
+              const emoji = r.success ? '✅' : '❌';
+              console.log('| 指标 | 值 |');
+              console.log('|------|----|');
+              console.log('| 总检查项 | ' + r.total + ' |');
+              console.log('| PASS | ' + r.pass + ' |');
+              console.log('| WARN | ' + r.warn + ' |');
+              console.log('| FAIL | ' + r.fail + ' |');
+              console.log('| 结果 | ' + emoji + ' ' + (r.success ? '通过' : '失败') + ' |');
+              if (r.shippingRegression) {
+                console.log('');
+                console.log('### 发货认领回归详情');
+                console.log('');
+                console.log('| 用例 | 状态 | 时长 |');
+                console.log('|------|------|------|');
+                r.shippingRegression.results.forEach(t => {
+                  console.log('| ' + t.name + ' | ' + (t.status === 'PASS' ? '✅' : '❌') + ' | ' + t.duration + 'ms |');
+                });
+                console.log('');
+                console.log('汇总: ' + r.shippingRegression.passed + '/' + r.shippingRegression.total + ' PASS (' + r.shippingRegression.passRate + ')');
+              }
+            " >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 上传回归报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: convention-runtime-report
+          path: ci/regression-report.json
+          if-no-files-found: warn
+          retention-days: 30

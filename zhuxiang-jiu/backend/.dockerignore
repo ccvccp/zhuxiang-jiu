@@ -1,0 +1,36 @@
+# Python 缓存(不进镜像, 减小体积)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+test-results*.xml
+
+# 测试依赖清单(测试依赖不进生产镜像)
+requirements-dev.txt
+
+# 测试用例(可选, 看是否需要镜像内测试)
+test_*.py
+probe_*.py
+conftest.py
+pytest.ini
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+
+# 临时文件
+*.log
+*.bak
+*.orig
+*.tmp

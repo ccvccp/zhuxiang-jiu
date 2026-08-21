@@ -9,15 +9,29 @@ services:
       - STORE_MODE=redis
       - PORT=8000
       - HOST=0.0.0.0
+      # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # 内存限制: 给 backend 充足空间(pip install + uvicorn 启动峰值约 400MB)
+    # mem_limit: 容器内存硬上限(cgroup)
+    # memswap_limit: 内存 + swap 上限(允许借用 swap 缓冲峰值)
+    # mem_reservation: 软预留(Linux 内核压力下尽量保证)
+    mem_limit: 1g
+    memswap_limit: 2g
+    mem_reservation: 512m
+    # 允许 OOM killer 杀死本容器(false=不禁用 OOM kill,即内存超限时本容器会被杀)
+    oom_kill_disable: false
     # 启动前先 seed Redis(幂等, 可重复执行)
     # seed 失败不阻塞启动(后端重启时会再试)
+    # 显式 cd /app 确保工作目录正确(Dockerfile 的 WORKDIR 会被某些场景覆盖)
+    # 显式 exec 替换 sh 进程,让 uvicorn 成为 PID 1 接收 SIGTERM
     command: >
-      sh -c "python scripts/seed_redis.py || echo '[WARN] seed failed, continuing...';
-             uvicorn main:app --host 0.0.0.0 --port 8000"
+      sh -c "cd /app &&
+             python scripts/seed_redis.py || echo '[WARN] seed failed, continuing...';
+             cd /app &&
+             exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 --no-access-log"
     # 健康检查: FastAPI /api/decision/health 端点(无需认证)
     # 依赖容器内 curl; Dockerfile 已安装
     healthcheck:
@@ -25,7 +39,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
