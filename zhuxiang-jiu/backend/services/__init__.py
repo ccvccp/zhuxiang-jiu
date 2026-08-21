@@ -18,6 +18,7 @@ from services.order_service import OrderService
 from services.product_service import ProductService
 from services.finance_service import FinanceService
 from services.wallet_service import WalletService
+from services.payment_service import PaymentService
 
 __all__ = [
     "AgentService",
@@ -30,4 +31,5 @@ __all__ = [
     "ProductService",
     "FinanceService",
     "WalletService",
+    "PaymentService",
 ]

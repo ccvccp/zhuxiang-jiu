@@ -18,6 +18,7 @@ from routes.product_routes import register_product_routes
 from routes.finance_routes import register_finance_routes
 from routes.agent_routes import register_agent_routes
 from routes.wallet_routes import register_wallet_routes
+from routes.payment_routes import register_payment_routes
 
 __all__ = [
     "register_decision_routes",
@@ -29,4 +30,5 @@ __all__ = [
     "register_finance_routes",
     "register_agent_routes",
     "register_wallet_routes",
+    "register_payment_routes",
 ]

@@ -36,6 +36,7 @@ from routes import (
     register_finance_routes,
     register_agent_routes,
     register_wallet_routes,
+    register_payment_routes,
 )
 
 
@@ -70,6 +71,7 @@ app = FastAPI(
         {"name": "产品展示", "description": "分类导航/产品列表/搜索/详情/热销/主推/评价"},
         {"name": "财务管理", "description": "凭证/发票/税务/对账/付款/财务报表"},
         {"name": "钱包盈利", "description": "钱包开通/充值/提现/消费返利/收益/定期/奖品"},
+        {"name": "收款管理", "description": "支付/退款/付款/回调/幂等/对账"},
     ],
 )
 
@@ -96,6 +98,7 @@ register_product_routes(app)
 register_finance_routes(app)
 register_agent_routes(app)
 register_wallet_routes(app)
+register_payment_routes(app)
 
 
 # ============================================================
