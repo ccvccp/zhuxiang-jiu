@@ -107,6 +107,59 @@ PAYOUT_ACTIVE_STATUSES = {
 }
 
 
+# 对账状态(P1)
+RECON_STATUS_PENDING = "pending"            # 待对账
+RECON_STATUS_MATCHED = "matched"            # 已对平
+RECON_STATUS_DIFF = "diff"                  # 存在差异
+RECON_STATUS_INVESTIGATING = "investigating" # 调查中
+RECON_STATUS_RESOLVED = "resolved"          # 已处理(终态)
+
+RECON_STATUS_NAMES = {
+    RECON_STATUS_PENDING: "待对账",
+    RECON_STATUS_MATCHED: "已对平",
+    RECON_STATUS_DIFF: "存在差异",
+    RECON_STATUS_INVESTIGATING: "调查中",
+    RECON_STATUS_RESOLVED: "已处理",
+}
+
+# 对账类型
+MATCH_TYPE_FULL = "full"        # 完全对平
+MATCH_TYPE_PARTIAL = "partial"  # 部分对平(有差异但已处理)
+MATCH_TYPE_MISMATCH = "mismatch" # 完全不匹配
+
+# 差异类型
+DIFF_TYPE_AMOUNT_MISMATCH = "amount_mismatch"  # 金额不一致
+DIFF_TYPE_PLATFORM_ONLY = "platform_only"      # 平台有/渠道无
+DIFF_TYPE_CHANNEL_ONLY = "channel_only"        # 渠道有/平台无
+
+# 差异处理建议
+HANDLE_SUGGEST_REFUND = "refund"        # 退款(平台多收)
+HANDLE_SUGGEST_SUPPLEMENT = "supplement" # 补单(平台少收)
+HANDLE_SUGGEST_IGNORE = "ignore"        # 忽略(误差范围内)
+
+
+# 渠道状态(P1)
+CHANNEL_STATUS_ACTIVE = "active"             # 启用
+CHANNEL_STATUS_MAINTENANCE = "maintenance"   # 维护中
+CHANNEL_STATUS_DISABLED = "disabled"          # 停用
+
+CHANNEL_STATUS_NAMES = {
+    CHANNEL_STATUS_ACTIVE: "启用",
+    CHANNEL_STATUS_MAINTENANCE: "维护中",
+    CHANNEL_STATUS_DISABLED: "停用",
+}
+
+# 渠道类型
+CHANNEL_TYPE_THIRD_PARTY = "third_party"  # 第三方支付(微信/支付宝)
+CHANNEL_TYPE_BANK = "bank"                # 银行直连
+CHANNEL_TYPE_AGGREGATE = "aggregate"       # 聚合支付
+
+# 费率类型
+FEE_TYPE_FIXED = "fixed"     # 固定手续费
+FEE_TYPE_RATIO = "ratio"     # 比例手续费
+FEE_TYPE_MIXED = "mixed"     # 混合(比例 + 固定)
+
+
 class PaymentRepository:
     """收款数据访问(双模式)"""
 
@@ -974,6 +1027,609 @@ class PaymentRepository:
         return p["retryCount"]
 
     # ============================================================
+    # 对账记录(payment_reconciliation, P1)
+    # ============================================================
+
+    async def create_recon(self, recon: dict) -> dict:
+        """创建对账批次(含日期/渠道索引 + diff_pending 集合)
+
+        Raises:
+            ValueError: reconNo 已存在
+        """
+        if is_redis_mode():
+            return await self._redis_create_recon(recon)
+        return self._mem_create_recon(recon)
+
+    async def get_recon(self, recon_no: str) -> Optional[dict]:
+        """按对账批次号查询"""
+        if is_redis_mode():
+            return await self._redis_get_recon(recon_no)
+        return self._mem_get_recon(recon_no)
+
+    async def update_recon_fields(self, recon_no: str, fields: dict) -> dict:
+        """部分字段更新
+
+        Raises:
+            KeyError: 对账记录不存在
+        """
+        if is_redis_mode():
+            return await self._redis_update_recon_fields(recon_no, fields)
+        return self._mem_update_recon_fields(recon_no, fields)
+
+    async def update_recon_status(self, recon_no: str, status: str,
+                                    extra: dict = None) -> dict:
+        """更新对账状态(状态机: pending → matched/diff → investigating → resolved)
+
+        - diff 状态自动加入 diff_pending 集合
+        - resolved 状态自动从 diff_pending 移除
+
+        Raises:
+            KeyError: 对账记录不存在
+        """
+        fields = {"status": status,
+                   "statusName": RECON_STATUS_NAMES.get(status, status)}
+        if extra:
+            fields.update(extra)
+        return await self.update_recon_fields(recon_no, fields)
+
+    async def list_recons(self, recon_date: str = None, channel: str = None,
+                            status: str = None, limit: int = 50) -> list[dict]:
+        """列出对账记录(可按 date/channel/status 筛选)"""
+        if is_redis_mode():
+            return await self._redis_list_recons(recon_date, channel, status, limit)
+        return self._mem_list_recons(recon_date, channel, status, limit)
+
+    async def list_pending_diffs(self, limit: int = 100) -> list[dict]:
+        """列出待处理差异(管理端查询, status ∈ {diff, investigating})"""
+        if is_redis_mode():
+            return await self._redis_list_pending_diffs(limit)
+        return self._mem_list_pending_diffs(limit)
+
+    async def add_diff_detail(self, recon_no: str, diff_detail: dict) -> dict:
+        """添加差异明细到 diffDetails 数组(并累加 diffCount)
+
+        Raises:
+            KeyError: 对账记录不存在
+        """
+        if is_redis_mode():
+            return await self._redis_add_diff_detail(recon_no, diff_detail)
+        return self._mem_add_diff_detail(recon_no, diff_detail)
+
+    async def acquire_recon_lock(self, recon_date: str, channel: str,
+                                    ttl_seconds: int = 3600) -> bool:
+        """获取对账锁(防止并发对账同一日同一渠道, TTL 1h)
+
+        Returns:
+            True 表示获取成功(可对账), False 表示正在对账中
+        """
+        if is_redis_mode():
+            return await self._redis_acquire_recon_lock(recon_date, channel, ttl_seconds)
+        return self._mem_acquire_recon_lock(recon_date, channel)
+
+    # ---------- 对账记录: 内存模式 ----------
+
+    def _mem_create_recon(self, recon: dict) -> dict:
+        self._ensure_store()
+        if "payment_reconciliation" not in self.store:
+            self.store["payment_reconciliation"] = {}
+        table = self.store["payment_reconciliation"]
+        recon_no = recon["reconNo"]
+        if recon_no in table:
+            raise ValueError(f"对账批次 {recon_no} 已存在")
+        # 确保 diffDetails 为 list
+        recon.setdefault("diffDetails", [])
+        recon.setdefault("diffCount", 0)
+        recon.setdefault("diffAmount", 0.0)
+        table[recon_no] = recon
+        # 维护索引
+        date_idx = f"_payment_recon_index:{recon['reconDate']}"
+        self.store.setdefault(date_idx, set()).add(recon_no)
+        chan_idx = f"_payment_recon_index:{recon['channel']}"
+        self.store.setdefault(chan_idx, set()).add(recon_no)
+        return recon
+
+    def _mem_get_recon(self, recon_no: str) -> Optional[dict]:
+        self._ensure_store()
+        table = self.store.get("payment_reconciliation", {})
+        return table.get(recon_no)
+
+    def _mem_update_recon_fields(self, recon_no: str, fields: dict) -> dict:
+        self._ensure_store()
+        table = self.store.get("payment_reconciliation", {})
+        if recon_no not in table:
+            raise KeyError(recon_no)
+        table[recon_no].update(fields)
+        # 维护 diff_pending 集合
+        new_status = fields.get("status")
+        if new_status:
+            pending_set = self.store.setdefault("_payment_recon_diff_pending", set())
+            if new_status in (RECON_STATUS_DIFF, RECON_STATUS_INVESTIGATING):
+                pending_set.add(recon_no)
+            elif new_status in (RECON_STATUS_MATCHED, RECON_STATUS_RESOLVED):
+                pending_set.discard(recon_no)
+        return table[recon_no]
+
+    def _mem_list_recons(self, recon_date, channel, status, limit):
+        self._ensure_store()
+        table = self.store.get("payment_reconciliation", {})
+        # 优先用索引加速
+        if recon_date:
+            idx = self.store.get(f"_payment_recon_index:{recon_date}", set())
+            items = [table[k] for k in idx if k in table]
+        elif channel:
+            idx = self.store.get(f"_payment_recon_index:{channel}", set())
+            items = [table[k] for k in idx if k in table]
+        else:
+            items = list(table.values())
+        if status:
+            items = [r for r in items if r.get("status") == status]
+        return items[:limit]
+
+    def _mem_list_pending_diffs(self, limit):
+        self._ensure_store()
+        pending = self.store.get("_payment_recon_diff_pending", set())
+        table = self.store.get("payment_reconciliation", {})
+        return [table[k] for k in pending if k in table][:limit]
+
+    def _mem_add_diff_detail(self, recon_no, diff_detail):
+        self._ensure_store()
+        table = self.store.get("payment_reconciliation", {})
+        if recon_no not in table:
+            raise KeyError(recon_no)
+        recon = table[recon_no]
+        recon.setdefault("diffDetails", []).append(diff_detail)
+        recon["diffCount"] = len(recon["diffDetails"])
+        # 累加差异金额(正数平台多/负数渠道多)
+        recon["diffAmount"] = round(
+            float(recon.get("diffAmount", 0)) + float(diff_detail.get("diffAmount", 0)), 2)
+        return recon
+
+    def _mem_acquire_recon_lock(self, recon_date, channel):
+        self._ensure_store()
+        locks = self.store.setdefault("_payment_recon_locks", {})
+        key = f"{recon_date}:{channel}"
+        if key in locks:
+            return False
+        locks[key] = True
+        return True
+
+    # ---------- 对账记录: Redis 模式 ----------
+
+    async def _redis_create_recon(self, recon: dict) -> dict:
+        client = await get_redis_client()
+        recon_no = recon["reconNo"]
+        key = _k("payment", "recon", recon_no)
+        if await client.exists(key):
+            raise ValueError(f"对账批次 {recon_no} 已存在")
+        recon.setdefault("diffDetails", [])
+        recon.setdefault("diffCount", 0)
+        recon.setdefault("diffAmount", 0.0)
+        await client.set(key, json.dumps(recon, ensure_ascii=False))
+        # 索引
+        await client.sadd(_k("payment", "recon", "index:date", recon["reconDate"]), recon_no)
+        await client.sadd(_k("payment", "recon", "index:channel", recon["channel"]), recon_no)
+        return recon
+
+    async def _redis_get_recon(self, recon_no):
+        client = await get_redis_client()
+        data = await client.get(_k("payment", "recon", recon_no))
+        return json.loads(data) if data else None
+
+    async def _redis_update_recon_fields(self, recon_no, fields):
+        client = await get_redis_client()
+        key = _k("payment", "recon", recon_no)
+        data = await client.get(key)
+        if not data:
+            raise KeyError(recon_no)
+        recon = json.loads(data)
+        recon.update(fields)
+        await client.set(key, json.dumps(recon, ensure_ascii=False))
+        new_status = fields.get("status")
+        if new_status:
+            pending_key = _k("payment", "recon", "diff:pending")
+            if new_status in (RECON_STATUS_DIFF, RECON_STATUS_INVESTIGATING):
+                await client.sadd(pending_key, recon_no)
+            elif new_status in (RECON_STATUS_MATCHED, RECON_STATUS_RESOLVED):
+                await client.srem(pending_key, recon_no)
+        return recon
+
+    async def _redis_list_recons(self, recon_date, channel, status, limit):
+        client = await get_redis_client()
+        if recon_date:
+            idx_key = _k("payment", "recon", "index:date", recon_date)
+            keys = await client.smembers(idx_key)
+            pipe = client.pipeline()
+            for k in keys:
+                await pipe.get(_k("payment", "recon", k))
+            datas = await pipe.execute()
+            items = [json.loads(d) for d in datas if d]
+        elif channel:
+            idx_key = _k("payment", "recon", "index:channel", channel)
+            keys = await client.smembers(idx_key)
+            pipe = client.pipeline()
+            for k in keys:
+                await pipe.get(_k("payment", "recon", k))
+            datas = await pipe.execute()
+            items = [json.loads(d) for d in datas if d]
+        else:
+            items = []
+            async for key in client.scan_iter(match=_k("payment", "recon", "*")):
+                # 排除索引和锁键
+                if "index:" in key or "diff:pending" in key or ":lock:" in key:
+                    continue
+                data = await client.get(key)
+                if data:
+                    items.append(json.loads(data))
+        if status:
+            items = [r for r in items if r.get("status") == status]
+        return items[:limit]
+
+    async def _redis_list_pending_diffs(self, limit):
+        client = await get_redis_client()
+        pending_key = _k("payment", "recon", "diff:pending")
+        keys = await client.smembers(pending_key)
+        pipe = client.pipeline()
+        for k in keys:
+            await pipe.get(_k("payment", "recon", k))
+        datas = await pipe.execute()
+        return [json.loads(d) for d in datas if d][:limit]
+
+    async def _redis_add_diff_detail(self, recon_no, diff_detail):
+        client = await get_redis_client()
+        key = _k("payment", "recon", recon_no)
+        data = await client.get(key)
+        if not data:
+            raise KeyError(recon_no)
+        recon = json.loads(data)
+        recon.setdefault("diffDetails", []).append(diff_detail)
+        recon["diffCount"] = len(recon["diffDetails"])
+        recon["diffAmount"] = round(
+            float(recon.get("diffAmount", 0)) + float(diff_detail.get("diffAmount", 0)), 2)
+        await client.set(key, json.dumps(recon, ensure_ascii=False))
+        return recon
+
+    async def _redis_acquire_recon_lock(self, recon_date, channel, ttl):
+        client = await get_redis_client()
+        key = _k("payment", "recon", "lock", recon_date, channel)
+        # SETNX + TTL
+        ok = await client.set(key, 1, nx=True, ex=ttl)
+        return bool(ok)
+
+    # ============================================================
+    # 渠道配置(payment_channels, P1)
+    # ============================================================
+
+    async def create_channel(self, channel: dict) -> dict:
+        """创建渠道配置
+
+        Raises:
+            ValueError: channelCode 已存在
+        """
+        if is_redis_mode():
+            return await self._redis_create_channel(channel)
+        return self._mem_create_channel(channel)
+
+    async def get_channel(self, channel_code: str) -> Optional[dict]:
+        """按渠道编码查询"""
+        if is_redis_mode():
+            return await self._redis_get_channel(channel_code)
+        return self._mem_get_channel(channel_code)
+
+    async def update_channel_fields(self, channel_code: str, fields: dict) -> dict:
+        """部分字段更新
+
+        Raises:
+            KeyError: 渠道不存在
+        """
+        if is_redis_mode():
+            return await self._redis_update_channel_fields(channel_code, fields)
+        return self._mem_update_channel_fields(channel_code, fields)
+
+    async def update_channel_status(self, channel_code: str, status: str) -> dict:
+        """更新渠道状态(启停)
+
+        Raises:
+            KeyError: 渠道不存在
+            ValueError: 状态非法
+        """
+        if status not in CHANNEL_STATUS_NAMES:
+            raise ValueError(f"渠道状态非法: {status}")
+        fields = {"status": status,
+                   "statusName": CHANNEL_STATUS_NAMES[status]}
+        return await self.update_channel_fields(channel_code, fields)
+
+    async def list_channels(self, status: str = None,
+                              channel_type: str = None, limit: int = 50) -> list[dict]:
+        """列出渠道配置(可按 status/type 筛选)"""
+        if is_redis_mode():
+            return await self._redis_list_channels(status, channel_type, limit)
+        return self._mem_list_channels(status, channel_type, limit)
+
+    async def list_active_channels(self) -> list[dict]:
+        """列出启用的渠道(高频查询, 用于支付下单时选择渠道)"""
+        return await self.list_channels(status=CHANNEL_STATUS_ACTIVE, limit=100)
+
+    async def check_limit(self, channel_code: str, amount: float) -> dict:
+        """限额校验(单笔 + 单日累计 + 单月累计)
+
+        Returns:
+            {"passed": bool, "reason": str, "dailyAmount": float, "monthlyAmount": float}
+
+        Raises:
+            KeyError: 渠道不存在
+        """
+        if is_redis_mode():
+            return await self._redis_check_limit(channel_code, amount)
+        return self._mem_check_limit(channel_code, amount)
+
+    async def add_transaction_amount(self, channel_code: str, amount: float) -> dict:
+        """累计交易额(支付成功后调用, HINCRBYFLOAT 原子操作)
+
+        Returns:
+            {"dailyAmount": float, "dailyCount": int, "monthlyAmount": float}
+
+        Raises:
+            KeyError: 渠道不存在
+        """
+        if is_redis_mode():
+            return await self._redis_add_transaction_amount(channel_code, amount)
+        return self._mem_add_transaction_amount(channel_code, amount)
+
+    async def reset_daily_stats(self) -> int:
+        """重置所有渠道的日累计统计(每日 00:00 定时任务)
+
+        Returns:
+            重置的渠道数量
+        """
+        if is_redis_mode():
+            return await self._redis_reset_daily_stats()
+        return self._mem_reset_daily_stats()
+
+    async def reset_monthly_stats(self) -> int:
+        """重置所有渠道的月累计统计(每月 1 日定时任务)"""
+        if is_redis_mode():
+            return await self._redis_reset_monthly_stats()
+        return self._mem_reset_monthly_stats()
+
+    # ---------- 渠道配置: 内存模式 ----------
+
+    def _mem_create_channel(self, channel: dict) -> dict:
+        self._ensure_store()
+        if "payment_channels" not in self.store:
+            self.store["payment_channels"] = {}
+        table = self.store["payment_channels"]
+        code = channel["channelCode"]
+        if code in table:
+            raise ValueError(f"渠道 {code} 已存在")
+        # 默认值
+        channel.setdefault("dailyAmount", 0.0)
+        channel.setdefault("dailyCount", 0)
+        channel.setdefault("monthlyAmount", 0.0)
+        channel.setdefault("status", CHANNEL_STATUS_ACTIVE)
+        channel.setdefault("statusName", CHANNEL_STATUS_NAMES[CHANNEL_STATUS_ACTIVE])
+        table[code] = channel
+        # 状态索引
+        status_idx = f"_payment_channel_index:{channel['status']}"
+        self.store.setdefault(status_idx, set()).add(code)
+        return channel
+
+    def _mem_get_channel(self, channel_code):
+        self._ensure_store()
+        table = self.store.get("payment_channels", {})
+        ch = table.get(channel_code)
+        if ch:
+            return self._deserialize_channel(ch)
+        return None
+
+    def _mem_update_channel_fields(self, channel_code, fields):
+        self._ensure_store()
+        table = self.store.get("payment_channels", {})
+        if channel_code not in table:
+            raise KeyError(channel_code)
+        old_status = table[channel_code].get("status")
+        table[channel_code].update(fields)
+        new_status = fields.get("status")
+        if new_status and new_status != old_status:
+            old_idx = self.store.get(f"_payment_channel_index:{old_status}", set())
+            old_idx.discard(channel_code)
+            new_idx = self.store.setdefault(f"_payment_channel_index:{new_status}", set())
+            new_idx.add(channel_code)
+        return self._deserialize_channel(table[channel_code])
+
+    def _mem_list_channels(self, status, channel_type, limit):
+        self._ensure_store()
+        table = self.store.get("payment_channels", {})
+        items = list(table.values())
+        if status:
+            items = [c for c in items if c.get("status") == status]
+        if channel_type:
+            items = [c for c in items if c.get("channelType") == channel_type]
+        return [self._deserialize_channel(c) for c in items[:limit]]
+
+    def _mem_check_limit(self, channel_code, amount):
+        self._ensure_store()
+        table = self.store.get("payment_channels", {})
+        if channel_code not in table:
+            raise KeyError(channel_code)
+        ch = table[channel_code]
+        # 单笔限额
+        if amount < float(ch.get("minAmount", 0)):
+            return {"passed": False, "reason": f"金额 {amount} 低于单笔最小 {ch['minAmount']}"}
+        if amount > float(ch.get("maxAmount", float('inf'))):
+            return {"passed": False, "reason": f"金额 {amount} 超过单笔最大 {ch['maxAmount']}"}
+        # 单日累计
+        daily = float(ch.get("dailyAmount", 0))
+        if daily + amount > float(ch.get("dailyLimit", float('inf'))):
+            return {"passed": False,
+                     "reason": f"单日累计 {daily+amount} 超过限额 {ch['dailyLimit']}"}
+        # 单月累计
+        monthly = float(ch.get("monthlyAmount", 0))
+        if monthly + amount > float(ch.get("monthlyLimit", float('inf'))):
+            return {"passed": False,
+                     "reason": f"单月累计 {monthly+amount} 超过限额 {ch['monthlyLimit']}"}
+        return {"passed": True, "reason": "",
+                 "dailyAmount": daily, "monthlyAmount": monthly}
+
+    def _mem_add_transaction_amount(self, channel_code, amount):
+        self._ensure_store()
+        table = self.store.get("payment_channels", {})
+        if channel_code not in table:
+            raise KeyError(channel_code)
+        ch = table[channel_code]
+        ch["dailyAmount"] = round(float(ch.get("dailyAmount", 0)) + amount, 2)
+        ch["dailyCount"] = int(ch.get("dailyCount", 0)) + 1
+        ch["monthlyAmount"] = round(float(ch.get("monthlyAmount", 0)) + amount, 2)
+        return {"dailyAmount": ch["dailyAmount"],
+                 "dailyCount": ch["dailyCount"],
+                 "monthlyAmount": ch["monthlyAmount"]}
+
+    def _mem_reset_daily_stats(self):
+        self._ensure_store()
+        table = self.store.get("payment_channels", {})
+        count = 0
+        for ch in table.values():
+            ch["dailyAmount"] = 0.0
+            ch["dailyCount"] = 0
+            count += 1
+        return count
+
+    def _mem_reset_monthly_stats(self):
+        self._ensure_store()
+        table = self.store.get("payment_channels", {})
+        count = 0
+        for ch in table.values():
+            ch["monthlyAmount"] = 0.0
+            ch["dailyAmount"] = 0.0
+            ch["dailyCount"] = 0
+            count += 1
+        return count
+
+    # ---------- 渠道配置: Redis 模式 ----------
+
+    async def _redis_create_channel(self, channel: dict) -> dict:
+        client = await get_redis_client()
+        code = channel["channelCode"]
+        key = _k("payment", "channel", code)
+        if await client.exists(key):
+            raise ValueError(f"渠道 {code} 已存在")
+        channel.setdefault("dailyAmount", 0.0)
+        channel.setdefault("dailyCount", 0)
+        channel.setdefault("monthlyAmount", 0.0)
+        channel.setdefault("status", CHANNEL_STATUS_ACTIVE)
+        channel.setdefault("statusName", CHANNEL_STATUS_NAMES[CHANNEL_STATUS_ACTIVE])
+        await client.hset(key, mapping=self._serialize_hash(channel))
+        await client.sadd(_k("payment", "channel", "index:status", channel["status"]), code)
+        return channel
+
+    async def _redis_get_channel(self, channel_code):
+        client = await get_redis_client()
+        data = await client.hgetall(_k("payment", "channel", channel_code))
+        if not data:
+            return None
+        return self._deserialize_channel(data)
+
+    async def _redis_update_channel_fields(self, channel_code, fields):
+        client = await get_redis_client()
+        key = _k("payment", "channel", channel_code)
+        if not await client.exists(key):
+            raise KeyError(channel_code)
+        old_status = await client.hget(key, "status")
+        # 金额字段单独 HINCRBYFLOAT(避免读-改-写竞态)
+        amount_fields = {"dailyAmount", "monthlyAmount"}
+        normal_fields = {k: v for k, v in fields.items() if k not in amount_fields}
+        if normal_fields:
+            await client.hset(key, mapping=self._serialize_hash(normal_fields))
+        for af in amount_fields:
+            if af in fields:
+                await client.hincrbyfloat(key, af, float(fields[af]))
+        new_status = fields.get("status")
+        if new_status and new_status != old_status:
+            await client.srem(_k("payment", "channel", "index:status", old_status), channel_code)
+            await client.sadd(_k("payment", "channel", "index:status", new_status), channel_code)
+        data = await client.hgetall(key)
+        return self._deserialize_channel(data)
+
+    async def _redis_list_channels(self, status, channel_type, limit):
+        client = await get_redis_client()
+        items = []
+        if status:
+            idx_key = _k("payment", "channel", "index:status", status)
+            codes = await client.smembers(idx_key)
+            pipe = client.pipeline()
+            for c in codes:
+                await pipe.hgetall(_k("payment", "channel", c))
+            datas = await pipe.execute()
+            items = [self._deserialize_channel(d) for d in datas if d]
+        else:
+            async for key in client.scan_iter(match=_k("payment", "channel:*")):
+                if "index:" in key:
+                    continue
+                data = await client.hgetall(key)
+                if data:
+                    items.append(self._deserialize_channel(data))
+        if channel_type:
+            items = [c for c in items if c.get("channelType") == channel_type]
+        return items[:limit]
+
+    async def _redis_check_limit(self, channel_code, amount):
+        client = await get_redis_client()
+        key = _k("payment", "channel", channel_code)
+        if not await client.exists(key):
+            raise KeyError(channel_code)
+        min_a = float(await client.hget(key, "minAmount") or 0)
+        max_a = float(await client.hget(key, "maxAmount") or float('inf'))
+        daily_limit = float(await client.hget(key, "dailyLimit") or float('inf'))
+        monthly_limit = float(await client.hget(key, "monthlyLimit") or float('inf'))
+        daily = float(await client.hget(key, "dailyAmount") or 0)
+        monthly = float(await client.hget(key, "monthlyAmount") or 0)
+        if amount < min_a:
+            return {"passed": False, "reason": f"金额 {amount} 低于单笔最小 {min_a}"}
+        if amount > max_a:
+            return {"passed": False, "reason": f"金额 {amount} 超过单笔最大 {max_a}"}
+        if daily + amount > daily_limit:
+            return {"passed": False, "reason": f"单日累计 {daily+amount} 超过限额 {daily_limit}"}
+        if monthly + amount > monthly_limit:
+            return {"passed": False, "reason": f"单月累计 {monthly+amount} 超过限额 {monthly_limit}"}
+        return {"passed": True, "reason": "", "dailyAmount": daily, "monthlyAmount": monthly}
+
+    async def _redis_add_transaction_amount(self, channel_code, amount):
+        client = await get_redis_client()
+        key = _k("payment", "channel", channel_code)
+        if not await client.exists(key):
+            raise KeyError(channel_code)
+        pipe = client.pipeline()
+        await pipe.hincrbyfloat(key, "dailyAmount", amount)
+        await pipe.hincrby(key, "dailyCount", 1)
+        await pipe.hincrbyfloat(key, "monthlyAmount", amount)
+        results = await pipe.execute()
+        return {"dailyAmount": float(results[0]),
+                 "dailyCount": int(results[1]),
+                 "monthlyAmount": float(results[2])}
+
+    async def _redis_reset_daily_stats(self):
+        client = await get_redis_client()
+        count = 0
+        async for key in client.scan_iter(match=_k("payment", "channel:*")):
+            if "index:" in key:
+                continue
+            await client.hset(key, "dailyAmount", 0.0)
+            await client.hset(key, "dailyCount", 0)
+            count += 1
+        return count
+
+    async def _redis_reset_monthly_stats(self):
+        client = await get_redis_client()
+        count = 0
+        async for key in client.scan_iter(match=_k("payment", "channel:*")):
+            if "index:" in key:
+                continue
+            await client.hset(key, "monthlyAmount", 0.0)
+            await client.hset(key, "dailyAmount", 0.0)
+            await client.hset(key, "dailyCount", 0)
+            count += 1
+        return count
+
+    # ============================================================
     # 序列化辅助(Redis Hash 要求 value 为 str/int/float)
     # ============================================================
 
@@ -1024,4 +1680,46 @@ class PaymentRepository:
         for k in amount_fields:
             if k in result:
                 result[k] = _to_number(result[k])
+        return result
+
+    def _deserialize_channel(self, data: dict) -> dict:
+        """将 Redis hgetall 返回的渠道配置 dict 反序列化
+
+        - 金额字段还原为 float
+        - 计数字段还原为 int
+        - JSON 字段(list/dict) 还原为原生类型
+        """
+        def _to_number(v):
+            if v is None:
+                return None
+            try:
+                if "." in str(v):
+                    return float(v)
+                return int(v)
+            except (TypeError, ValueError):
+                return v
+
+        result = dict(data)
+        # 金额字段
+        amount_fields = {
+            "feeRate", "fixedFee", "minAmount", "maxAmount",
+            "dailyLimit", "monthlyLimit",
+            "dailyAmount", "monthlyAmount",
+        }
+        for k in amount_fields:
+            if k in result:
+                result[k] = _to_number(result[k])
+        # 计数字段
+        count_fields = {"dailyCount", "retryMax", "timeout"}
+        for k in count_fields:
+            if k in result:
+                result[k] = _to_number(result[k])
+        # JSON 字段(supportedMethods, supportedScenes 等)
+        json_fields = {"supportedMethods", "supportedScenes"}
+        for k in json_fields:
+            if k in result and isinstance(result[k], str):
+                try:
+                    result[k] = json.loads(result[k])
+                except (TypeError, ValueError):
+                    pass
         return result
