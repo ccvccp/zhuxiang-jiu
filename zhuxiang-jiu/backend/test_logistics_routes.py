@@ -415,6 +415,197 @@ class TestTrackCallback(unittest.IsolatedAsyncioTestCase):
 
 
 # ============================================================
+# 3.1 物流轨迹回调 - 异常状态分支补充
+# ============================================================
+
+class TestTrackCallbackEdgeCases(unittest.IsolatedAsyncioTestCase):
+    """物流轨迹回调异常状态分支测试
+
+    覆盖 add_track_callback 的三类异常分支:
+        A. update_status 抛 ValueError(状态机非法流转) → 仍记录轨迹(logger.warning 路径)
+        B. unified_status 不在 valid_statuses → 直接仅记录轨迹
+        C. 参数边界(track_time 自动填充/operator 透传/多次累积)
+    """
+
+    async def asyncSetUp(self):
+        _reset_store()
+        self.svc = LogisticsService()
+        self.order = await _create_order(self.svc)
+        self.waybill_no = self.order["waybillNo"]
+
+    async def test_06_callback_duplicate_status_logs_only(self):
+        """相同状态重复回调(booked → booked)触发 ValueError, 轨迹仍记录"""
+        # 先流转到 booked
+        await self.svc.update_status(self.waybill_no, ORDER_STATUS_BOOKED)
+        # 再次回调 booked(状态机不允许 booked → booked)
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "ACCEPT", ORDER_STATUS_BOOKED, "重复下单回调", "北京",
+        )
+        # 轨迹已添加
+        self.assertEqual(track["unifiedStatus"], ORDER_STATUS_BOOKED)
+        self.assertEqual(track["description"], "重复下单回调")
+        # 订单状态未变(仍是 booked)
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_BOOKED)
+
+    async def test_07_callback_after_signed_terminal(self):
+        """signed 终态后回调 picked(非法流转, 轨迹记录但状态不变)"""
+        await _flow_to_signed(self.svc, self.waybill_no)
+        # signed → picked 非法(终态不可流转)
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "PICK", ORDER_STATUS_PICKED, "终态后回调", "上海",
+        )
+        self.assertEqual(track["unifiedStatus"], ORDER_STATUS_PICKED)
+        # 订单状态仍是 signed
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_SIGNED)
+
+    async def test_08_callback_after_signed_same_status(self):
+        """signed 终态后重复回调 signed(重复签收, 轨迹记录但状态不变)"""
+        await _flow_to_signed(self.svc, self.waybill_no)
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "SIGN", ORDER_STATUS_SIGNED, "重复签收回调", "上海",
+        )
+        self.assertEqual(track["unifiedStatus"], ORDER_STATUS_SIGNED)
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_SIGNED)
+
+    async def test_09_callback_after_returned_terminal(self):
+        """returned 终态后回调 booked(非法流转, 轨迹记录但状态不变)"""
+        # 流转到 returned: pending → booked → failed → returned
+        await self.svc.update_status(self.waybill_no, ORDER_STATUS_BOOKED)
+        await self.svc.update_status(self.waybill_no, ORDER_STATUS_FAILED)
+        await self.svc.close_failed_order(self.waybill_no, "地址错误")
+        # returned 终态后回调 booked(非法)
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "ACCEPT", ORDER_STATUS_BOOKED, "退回后回调", "北京",
+        )
+        self.assertEqual(track["unifiedStatus"], ORDER_STATUS_BOOKED)
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_RETURNED)
+
+    async def test_10_callback_failed_from_pending(self):
+        """pending → failed(合法流转, 状态更新 + 轨迹记录)"""
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "FAIL", ORDER_STATUS_FAILED, "下单失败", "北京",
+        )
+        self.assertEqual(track["unifiedStatus"], ORDER_STATUS_FAILED)
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_FAILED)
+
+    async def test_11_callback_failed_from_booked(self):
+        """booked → failed(合法流转, 状态更新 + 轨迹记录)"""
+        await self.svc.update_status(self.waybill_no, ORDER_STATUS_BOOKED)
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "FAIL", ORDER_STATUS_FAILED, "揽收失败", "北京",
+        )
+        self.assertEqual(track["unifiedStatus"], ORDER_STATUS_FAILED)
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_FAILED)
+
+    async def test_12_callback_unknown_unified_status(self):
+        """未知 unified_status(不在 valid_statuses)仅记录轨迹, 状态不变"""
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "UNKNOWN", "unknown_status", "未知状态回调", "北京",
+        )
+        self.assertEqual(track["unifiedStatus"], "unknown_status")
+        self.assertEqual(track["trackStatus"], "UNKNOWN")
+        # 订单状态未变(仍是 pending)
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_PENDING)
+
+    async def test_13_callback_pending_status_only_logs(self):
+        """pending 状态(不在 valid_statuses)仅记录轨迹, 状态不变"""
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "INIT", ORDER_STATUS_PENDING, "初始化回调", "北京",
+        )
+        self.assertEqual(track["unifiedStatus"], ORDER_STATUS_PENDING)
+        # 订单状态仍是 pending(未变化)
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_PENDING)
+
+    async def test_14_callback_auto_fill_track_time(self):
+        """未指定 track_time 时自动填充当前时间"""
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "ACCEPT", ORDER_STATUS_BOOKED, "已下单", "北京",
+        )
+        # track_time 应为非空字符串(由 ts() 生成)
+        self.assertTrue(track["trackTime"])
+        self.assertIsInstance(track["trackTime"], str)
+
+    async def test_15_callback_custom_operator(self):
+        """自定义 operator 字段透传"""
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "ACCEPT", ORDER_STATUS_BOOKED, "已下单", "北京",
+            operator="SF-API",
+        )
+        self.assertEqual(track["operator"], "SF-API")
+
+    async def test_16_callback_custom_track_time(self):
+        """自定义 track_time 字段透传"""
+        custom_time = "2026-08-22 10:00:00"
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "INIT", ORDER_STATUS_PENDING, "初始化", "北京",
+            track_time=custom_time,
+        )
+        self.assertEqual(track["trackTime"], custom_time)
+
+    async def test_17_callback_multiple_accumulate(self):
+        """多次回调累积轨迹(数量正确, 最新在前)"""
+        for i in range(3):
+            await self.svc.add_track_callback(
+                self.waybill_no, f"STAGE{i}", ORDER_STATUS_PENDING,
+                f"轨迹{i}", "北京",
+            )
+        tracks = await self.svc.list_tracks(self.waybill_no)
+        self.assertEqual(len(tracks), 3)
+        # 最新在前(倒序)
+        self.assertEqual(tracks[0]["description"], "轨迹2")
+        self.assertEqual(tracks[-1]["description"], "轨迹0")
+
+    async def test_18_callback_returned_track_fields_complete(self):
+        """回调返回轨迹字段完整性(仅记录轨迹分支)"""
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "INIT", ORDER_STATUS_PENDING, "初始化", "北京",
+            operator="carrier",
+        )
+        # 校验轨迹字段完整性
+        for field in ["waybillNo", "trackStatus", "unifiedStatus",
+                      "description", "location", "operator", "trackTime"]:
+            self.assertIn(field, track, f"轨迹缺少字段: {field}")
+        self.assertEqual(track["waybillNo"], self.waybill_no)
+        self.assertEqual(track["location"], "北京")
+
+    async def test_19_callback_returned_from_failed(self):
+        """failed → returned(合法流转, 通过回调触发)"""
+        # 准备: pending → booked → failed
+        await self.svc.update_status(self.waybill_no, ORDER_STATUS_BOOKED)
+        await self.svc.update_status(self.waybill_no, ORDER_STATUS_FAILED)
+        # 通过回调触发 failed → returned
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "RETURN", ORDER_STATUS_RETURNED, "退回仓库", "北京",
+        )
+        self.assertEqual(track["unifiedStatus"], ORDER_STATUS_RETURNED)
+        # 订单状态已更新为 returned
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_RETURNED)
+
+    async def test_20_callback_retry_from_failed(self):
+        """failed → delivering(合法重投, 通过回调触发)"""
+        # 准备: pending → booked → failed
+        await self.svc.update_status(self.waybill_no, ORDER_STATUS_BOOKED)
+        await self.svc.update_status(self.waybill_no, ORDER_STATUS_FAILED)
+        # 通过回调触发 failed → delivering(重投)
+        track = await self.svc.add_track_callback(
+            self.waybill_no, "REDELIVER", ORDER_STATUS_DELIVERING, "重新派送", "上海",
+        )
+        self.assertEqual(track["unifiedStatus"], ORDER_STATUS_DELIVERING)
+        # 订单状态已更新为 delivering
+        order = await self.svc.get_order(self.waybill_no)
+        self.assertEqual(order["status"], ORDER_STATUS_DELIVERING)
+
+
+# ============================================================
 # 4. 月结对账(覆盖 6 个接口对应业务方法)
 # ============================================================
 
@@ -702,6 +893,7 @@ if __name__ == "__main__":
         TestCreateOrder,
         TestStatusFlow,
         TestTrackCallback,
+        TestTrackCallbackEdgeCases,
         TestSettlement,
         TestFeeCalculation,
     ]
