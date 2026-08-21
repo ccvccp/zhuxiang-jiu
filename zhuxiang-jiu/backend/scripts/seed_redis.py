@@ -267,6 +267,130 @@ async def seed_product_reviews(client) -> int:
     return count
 
 
+# ============================================================
+# 财务管理模块 seed(凭证/发票/申报/付款/对账)
+# ============================================================
+
+# 财务 seed 数据(与 repositories/store.py 的 _build_initial_finance 完全一致)
+# 使用同一份函数避免数据重复维护
+from repositories.store import _build_initial_finance as _build_finance_seed  # noqa: E402
+
+
+def _serialize_finance_hash(data: dict) -> dict:
+    """将财务 dict 序列化为 Redis Hash 兼容的 mapping
+
+    与 FinanceRepository._serialize_hash 逻辑一致:
+        None 跳过, bool→0/1, list/dict→JSON, 其余原样。
+    """
+    result = {}
+    for k, v in data.items():
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            result[k] = 1 if v else 0
+        elif isinstance(v, (list, dict)):
+            result[k] = json.dumps(v, ensure_ascii=False)
+        elif isinstance(v, (int, float)):
+            result[k] = v
+        else:
+            result[k] = str(v)
+    return result
+
+
+async def seed_finance_vouchers(client) -> int:
+    """写入财务凭证(Hash + 分录 List + 账期索引 Set)
+
+    Key 设计:
+        zhuxiang:finance:voucher:{voucherNo}        Hash(主信息)
+        zhuxiang:finance:voucher:entries:{voucherNo} List(分录 JSON)
+        zhuxiang:finance:voucher:index:{period}     Set(账期索引)
+    """
+    finance = _build_finance_seed()
+    vouchers = finance["finance_vouchers"]
+    count = 0
+    for voucher_no, voucher in vouchers.items():
+        entries = voucher.get("entries", [])
+        main = {k: v for k, v in voucher.items() if k != "entries"}
+        await client.hset(_k("finance", "voucher", voucher_no),
+                          mapping=_serialize_finance_hash(main))
+        entries_key = _k("finance", "voucher", "entries", voucher_no)
+        await client.delete(entries_key)
+        for entry in entries:
+            await client.rpush(entries_key, json.dumps(entry, ensure_ascii=False))
+        period = voucher.get("period", "")
+        await client.sadd(_k("finance", "voucher", "index", period), voucher_no)
+        count += 1
+    return count
+
+
+async def seed_finance_invoices(client) -> int:
+    """写入发票(Hash + 账期索引 Set)"""
+    finance = _build_finance_seed()
+    invoices = finance["finance_invoices"]
+    count = 0
+    for invoice_no, invoice in invoices.items():
+        await client.hset(_k("finance", "invoice", invoice_no),
+                          mapping=_serialize_finance_hash(invoice))
+        period = invoice.get("period", "")
+        await client.sadd(_k("finance", "invoice", "index", period), invoice_no)
+        count += 1
+    return count
+
+
+async def seed_finance_tax_declarations(client) -> int:
+    """写入税务申报(Hash + 账期索引 Set)"""
+    finance = _build_finance_seed()
+    decls = finance["finance_tax_declarations"]
+    count = 0
+    for decl_no, decl in decls.items():
+        await client.hset(_k("finance", "tax", decl_no),
+                          mapping=_serialize_finance_hash(decl))
+        period = decl.get("period", "")
+        await client.sadd(_k("finance", "tax", "index", period), decl_no)
+        count += 1
+    return count
+
+
+async def seed_finance_payments(client) -> int:
+    """写入付款(Hash + 类型索引 Set)"""
+    finance = _build_finance_seed()
+    payments = finance["finance_payments"]
+    count = 0
+    for payment_no, payment in payments.items():
+        await client.hset(_k("finance", "payment", payment_no),
+                          mapping=_serialize_finance_hash(payment))
+        ptype = payment.get("type", "")
+        await client.sadd(_k("finance", "payment", "index", ptype), payment_no)
+        count += 1
+    return count
+
+
+async def seed_finance_reconciliations(client) -> int:
+    """写入对账记录(Hash, 主键 date+type 唯一)"""
+    finance = _build_finance_seed()
+    recs = finance["finance_reconciliations"]
+    count = 0
+    for _recon_id, recon in recs.items():
+        date = recon["date"]
+        recon_type = recon["type"]
+        await client.hset(_k("finance", "recon", date, recon_type),
+                          mapping=_serialize_finance_hash(recon))
+        count += 1
+    return count
+
+
+async def seed_finance_seqs(client) -> int:
+    """写入财务序列号计数器(对应各实体的初始序号)"""
+    finance = _build_finance_seed()
+    seq = finance["_finance_seq"]
+    count = 0
+    for kind_prefix, value in seq.items():
+        kind, prefix = kind_prefix.split(":", 1)
+        await client.set(_k("finance", f"{kind}:seq", prefix), value)
+        count += 1
+    return count
+
+
 async def verify_seed(client) -> dict:
     """验证写入结果,返回各实体的记录数"""
     agents = await client.keys(_k("agent", "*"))
@@ -297,6 +421,31 @@ async def verify_seed(client) -> dict:
     ]
     sample_reviews_count = await client.llen(_k("product", "reviews", "ZX42-2026L07"))
 
+    # 财务验证
+    voucher_keys = [
+        k for k in (await client.keys(_k("finance", "voucher", "*")))
+        if ":index:" not in k and ":entries:" not in k
+        and not k.endswith(":voucher:seq")
+    ]
+    invoice_keys = [
+        k for k in (await client.keys(_k("finance", "invoice", "*")))
+        if ":index:" not in k and not k.endswith(":invoice:seq")
+    ]
+    tax_keys = [
+        k for k in (await client.keys(_k("finance", "tax", "*")))
+        if ":index:" not in k and not k.endswith(":tax:seq")
+    ]
+    payment_keys = [
+        k for k in (await client.keys(_k("finance", "payment", "*")))
+        if ":index:" not in k and not k.endswith(":payment:seq")
+    ]
+    recon_keys = await client.keys(_k("finance", "recon", "*"))
+    sample_voucher = await client.hgetall(_k("finance", "voucher", "FZ20260820001"))
+    sample_invoice = await client.hgetall(_k("finance", "invoice", "FP20260820001"))
+    sample_tax = await client.hgetall(_k("finance", "tax", "SB202608001"))
+    sample_payment = await client.hgetall(_k("finance", "payment", "FK20260820001"))
+    sample_recon = await client.hgetall(_k("finance", "recon", "2026-08-19", "daily"))
+
     return {
         "agents_count": len(agents),
         "inventory_count": len(inventory),
@@ -313,6 +462,16 @@ async def verify_seed(client) -> dict:
         "sample_product_ZX42-2026L07": sample_product,
         "product_reviews_keys_count": len(reviews_keys),
         "sample_reviews_ZX42-2026L07_count": sample_reviews_count,
+        "finance_vouchers_count": len(voucher_keys),
+        "finance_invoices_count": len(invoice_keys),
+        "finance_tax_count": len(tax_keys),
+        "finance_payments_count": len(payment_keys),
+        "finance_reconciliations_count": len(recon_keys),
+        "sample_finance_voucher_FZ20260820001": sample_voucher,
+        "sample_finance_invoice_FP20260820001": sample_invoice,
+        "sample_finance_tax_SB202608001": sample_tax,
+        "sample_finance_payment_FK20260820001": sample_payment,
+        "sample_finance_recon_2026-08-19_daily": sample_recon,
     }
 
 
@@ -379,6 +538,20 @@ async def seed() -> int:
         reviews_n = await seed_product_reviews(client)
         print(f"[OK] 产品评价写入: {reviews_n} 条")
 
+        # 4g. 写入财务管理模块(凭证/发票/申报/付款/对账 + 序列号)
+        vouchers_n = await seed_finance_vouchers(client)
+        print(f"[OK] 财务凭证写入: {vouchers_n} 条(含分录 List + 账期索引)")
+        invoices_n = await seed_finance_invoices(client)
+        print(f"[OK] 财务发票写入: {invoices_n} 条")
+        taxes_n = await seed_finance_tax_declarations(client)
+        print(f"[OK] 税务申报写入: {taxes_n} 条")
+        payments_n = await seed_finance_payments(client)
+        print(f"[OK] 付款记录写入: {payments_n} 条")
+        recs_n = await seed_finance_reconciliations(client)
+        print(f"[OK] 对账记录写入: {recs_n} 条")
+        seqs_n = await seed_finance_seqs(client)
+        print(f"[OK] 财务序列号计数器写入: {seqs_n} 个")
+
         # 5. 空列表/空 Hash 不需要写入(inbound_log/outbound_log/orders/shipping_claims)
         print("[INFO] inbound_log/outbound_log/orders/shipping_claims: 初始为空, 不写入")
 
@@ -405,6 +578,7 @@ async def seed() -> int:
         print("  4. 验证产品: curl http://localhost:8000/api/product/categories")
         print("     curl http://localhost:8000/api/product/list")
         print("     curl http://localhost:8000/api/product/ZX42-2026L07")
+        print("  5. 验证财务: curl -H 'X-Role: admin' http://localhost:8000/api/finance/voucher/list")
         return 0
 
     finally:

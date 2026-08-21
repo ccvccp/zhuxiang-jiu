@@ -37,6 +37,226 @@ def _build_initial_product_reviews() -> dict:
     return copy.deepcopy(_initial_reviews())
 
 
+def _build_initial_finance() -> dict:
+    """构建财务模块初始数据(凭证/发票/申报/付款/对账 各若干示例)
+
+    与 FinanceRepository._ensure_store() 中维护的 5 个 dict 键对齐:
+        finance_vouchers / finance_invoices / finance_tax_declarations
+        finance_payments / finance_reconciliations
+    同时初始化序列号计数器与索引(_finance_seq / _finance_*_index)。
+    """
+    now = "2026-08-20T08:00:00+00:00"
+    # 示例凭证(1 笔收入 + 1 笔退款红字,均 posted)
+    vouchers = {
+        "FZ20260820001": {
+            "voucherNo": "FZ20260820001",
+            "period": "202608",
+            "date": "2026-08-20",
+            "type": "income",
+            "source": "order",
+            "sourceId": "RT20260820001",
+            "memberId": 1,
+            "status": "posted",
+            "amount": 536.00,
+            "amountWithoutTax": 474.34,
+            "taxAmount": 61.66,
+            "consumptionTaxAmount": 95.87,
+            "entries": [
+                {"direction": "debit", "subject": "银行存款", "amount": 536.00,
+                 "summary": "收 wechat RT20260820001"},
+                {"direction": "credit", "subject": "主营业务收入", "amount": 474.34,
+                 "summary": "销售商品 RT20260820001"},
+                {"direction": "credit", "subject": "应交税费-应交增值税(销项税额)",
+                 "amount": 61.66, "summary": "销项税 RT20260820001"},
+            ],
+            "auditedBy": "admin",
+            "postedBy": "admin",
+            "auditedAt": now,
+            "postedAt": now,
+            "createdAt": now,
+            "updatedAt": now,
+        },
+    }
+    # 示例发票
+    invoices = {
+        "FP20260820001": {
+            "invoiceNo": "FP20260820001",
+            "orderId": "RT20260820001",
+            "memberId": 1,
+            "titleType": "personal",
+            "title": "测试会员小竹",
+            "taxNo": "",
+            "type": "normal",
+            "status": "issued",
+            "amount": 536.00,
+            "amountWithoutTax": 474.34,
+            "taxAmount": 61.66,
+            "period": "202608",
+            "date": "2026-08-20",
+            "issuedBy": 1,
+            "issuedAt": now,
+            "redOriginalNo": "",
+            "redReason": "",
+            "createdAt": now,
+            "updatedAt": now,
+        },
+    }
+    # 示例税务申报(2 个待申报 + 1 个已申报)
+    tax_declarations = {
+        "SB202608001": {
+            "declarationNo": "SB202608001",
+            "taxType": "vat",
+            "taxTypeName": "增值税",
+            "period": "202608",
+            "status": "pending",
+            "payableAmount": 61.66,
+            "paidAmount": 0,
+            "detail": {"vat": {"payable": 61.66, "rate": 0.13}},
+            "declaredBy": "",
+            "declaredAt": "",
+            "paidBy": "",
+            "paidAt": "",
+            "createdAt": now,
+            "updatedAt": now,
+        },
+        "SB202608002": {
+            "declarationNo": "SB202608002",
+            "taxType": "consumption",
+            "taxTypeName": "消费税",
+            "period": "202608",
+            "status": "declared",
+            "payableAmount": 95.87,
+            "paidAmount": 0,
+            "detail": {"consumptionTax": {"total": 95.87}},
+            "declaredBy": "admin",
+            "declaredAt": now,
+            "paidBy": "",
+            "paidAt": "",
+            "createdAt": now,
+            "updatedAt": now,
+        },
+        "SB202608003": {
+            "declarationNo": "SB202608003",
+            "taxType": "surtax",
+            "taxTypeName": "附加税",
+            "period": "202608",
+            "status": "paid",
+            "payableAmount": 11.03,
+            "paidAmount": 11.03,
+            "detail": {"surtax": {"total": 11.03}},
+            "declaredBy": "admin",
+            "declaredAt": now,
+            "paidBy": "admin",
+            "paidAt": now,
+            "createdAt": now,
+            "updatedAt": now,
+        },
+    }
+    # 示例付款(2 笔: 1 笔一级已批准, 1 笔二级审批中)
+    payments = {
+        "FK20260820001": {
+            "paymentNo": "FK20260820001",
+            "type": "supplier",
+            "payee": "竹香原料供应商",
+            "amount": 5000.00,
+            "description": "8月原料采购",
+            "status": "approved",
+            "requiredLevel": 1,
+            "currentLevel": 1,
+            "approvals": [
+                {"level": 1, "approver": "主管", "decision": "approve",
+                 "reason": "", "at": now},
+            ],
+            "appliedAt": now,
+            "paidAt": "",
+            "rejectedBy": "",
+            "rejectedAt": "",
+            "rejectReason": "",
+            "createdAt": now,
+            "updatedAt": now,
+        },
+        "FK20260820002": {
+            "paymentNo": "FK20260820002",
+            "type": "logistics",
+            "payee": "顺丰速运",
+            "amount": 50000.00,
+            "description": "8月物流运费",
+            "status": "approving",
+            "requiredLevel": 2,
+            "currentLevel": 1,
+            "approvals": [
+                {"level": 1, "approver": "主管", "decision": "approve",
+                 "reason": "", "at": now},
+            ],
+            "appliedAt": now,
+            "paidAt": "",
+            "rejectedBy": "",
+            "rejectedAt": "",
+            "rejectReason": "",
+            "createdAt": now,
+            "updatedAt": now,
+        },
+    }
+    # 示例对账记录(1 笔一致, 1 笔差异已处理)
+    reconciliations = {
+        "2026-08-19:daily": {
+            "reconId": "2026-08-19:daily",
+            "date": "2026-08-19",
+            "type": "daily",
+            "status": "matched",
+            "orderSide": {"count": 3, "amount": 1500.00},
+            "paySide": {"count": 3, "amount": 1500.00},
+            "bankSide": {"count": 3, "amount": 1500.00},
+            "diffAmount": 0,
+            "differences": [],
+            "resolvedBy": "",
+            "resolvedAt": "",
+            "resolveNote": "",
+            "createdAt": now,
+            "updatedAt": now,
+        },
+        "2026-08-18:daily": {
+            "reconId": "2026-08-18:daily",
+            "date": "2026-08-18",
+            "type": "daily",
+            "status": "resolved",
+            "orderSide": {"count": 2, "amount": 1000.00},
+            "paySide": {"count": 2, "amount": 1000.00},
+            "bankSide": {"count": 1, "amount": 800.00},
+            "diffAmount": 200.00,
+            "differences": [
+                {"side": "pay-vs-bank", "amount": 200.00,
+                 "desc": "支付渠道与银行不一致"},
+            ],
+            "resolvedBy": "财务-王五",
+            "resolvedAt": now,
+            "resolveNote": "银行T+1到账延迟",
+            "createdAt": now,
+            "updatedAt": now,
+        },
+    }
+    return {
+        "finance_vouchers": vouchers,
+        "finance_invoices": invoices,
+        "finance_tax_declarations": tax_declarations,
+        "finance_payments": payments,
+        "finance_reconciliations": reconciliations,
+        "_finance_seq": {
+            "voucher:FZ20260820": 1,
+            "invoice:FP20260820": 1,
+            "tax:SB202608": 3,
+            "payment:FK20260820": 2,
+        },
+        "_finance_voucher_index": {"202608": {"FZ20260820001"}},
+        "_finance_invoice_index": {"202608": {"FP20260820001"}},
+        "_finance_tax_index": {"202608": {"SB202608001", "SB202608002", "SB202608003"}},
+        "_finance_payment_index": {
+            "supplier": {"FK20260820001"},
+            "logistics": {"FK20260820002"},
+        },
+    }
+
+
 def _build_initial_inventory() -> dict:
     """构建库存初始数据(11 款产品)
 
@@ -96,6 +316,8 @@ _mock_store: dict = {
     # 产品展示模块(11 款产品 + 评价)
     "products": _build_initial_products(),
     "product_reviews": _build_initial_product_reviews(),
+    # 财务管理模块: 内存模式由 FinanceRepository._ensure_store() 懒创建空结构,
+    # 生产 Redis 模式由 scripts/seed_redis.py 调用 _build_initial_finance() 灌注
 }
 
 
@@ -142,6 +364,7 @@ def reset_store() -> dict:
         # 产品展示模块(11 款产品 + 评价)
         "products": _build_initial_products(),
         "product_reviews": _build_initial_product_reviews(),
+        # 财务管理模块: 内存模式由 FinanceRepository._ensure_store() 懒创建空结构
     }
     _mock_store.clear()
     _mock_store.update(copy.deepcopy(initial))
