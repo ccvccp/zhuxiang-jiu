@@ -73,6 +73,7 @@ from repositories.product_repository import (  # noqa: E402
 )
 from repositories.store import (  # noqa: E402
     _build_initial_inventory, _build_initial_agents,
+    _build_initial_agent_rebates, _build_initial_agent_risks,
 )
 
 
@@ -419,6 +420,88 @@ async def seed_finance_seqs(client) -> int:
     return count
 
 
+# ============================================================
+# 代理商返利/风控模块 seed
+# ============================================================
+
+def _serialize_agent_rebate(rebate: dict) -> dict:
+    """将返利记录 dict 序列化为 Redis Hash 兼容的 mapping
+
+    与 AgentRepository._serialize_rebate 逻辑一致。
+    """
+    result = {}
+    for k, v in rebate.items():
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            result[k] = 1 if v else 0
+        elif isinstance(v, (int, float)):
+            result[k] = v
+        else:
+            result[k] = str(v)
+    return result
+
+
+def _serialize_agent_risk(risk: dict) -> dict:
+    """将风控记录 dict 序列化为 Redis Hash 兼容的 mapping
+
+    与 AgentRepository._serialize_risk 逻辑一致:
+        嵌套结构(indicators/alerts)→JSON, bool→0/1, 其余原样。
+    """
+    json_fields = ("indicators", "alerts")
+    result = {}
+    for k, v in risk.items():
+        if v is None:
+            continue
+        if k in json_fields:
+            result[k] = json.dumps(v, ensure_ascii=False)
+        elif isinstance(v, bool):
+            result[k] = 1 if v else 0
+        elif isinstance(v, (int, float)):
+            result[k] = v
+        else:
+            result[k] = str(v)
+    return result
+
+
+async def seed_agent_rebates(client) -> int:
+    """写入代理商返利记录(Hash + 代理商索引 Set)
+
+    Key 设计:
+        zhuxiang:agent_rebate:{rebateId}        Hash(返利记录)
+        zhuxiang:agent_rebate:index:{agentId}   Set(该代理商的返利记录 ID 集合)
+    """
+    rebates = _build_initial_agent_rebates()
+    count = 0
+    for rebate_id, rebate in rebates.items():
+        await client.hset(_k("agent_rebate", rebate_id),
+                          mapping=_serialize_agent_rebate(rebate))
+        agent_id = rebate.get("agentId")
+        if agent_id is not None:
+            await client.sadd(_k("agent_rebate", "index", agent_id), rebate_id)
+        count += 1
+    return count
+
+
+async def seed_agent_risks(client) -> int:
+    """写入代理商风控记录(Hash + 代理商索引 Set)
+
+    Key 设计:
+        zhuxiang:agent_risk:{riskId}           Hash(风控记录)
+        zhuxiang:agent_risk:index:{agentId}    Set(该代理商的风控记录 ID 集合)
+    """
+    risks = _build_initial_agent_risks()
+    count = 0
+    for risk_id, risk in risks.items():
+        await client.hset(_k("agent_risk", risk_id),
+                          mapping=_serialize_agent_risk(risk))
+        agent_id = risk.get("agentId")
+        if agent_id is not None:
+            await client.sadd(_k("agent_risk", "index", agent_id), risk_id)
+        count += 1
+    return count
+
+
 async def verify_seed(client) -> dict:
     """验证写入结果,返回各实体的记录数"""
     agents = [
@@ -479,6 +562,18 @@ async def verify_seed(client) -> dict:
     sample_payment = await client.hgetall(_k("finance", "payment", "FK20260820001"))
     sample_recon = await client.hgetall(_k("finance", "recon", "2026-08-19", "daily"))
 
+    # 返利/风控验证
+    rebate_keys = [
+        k for k in (await client.keys(_k("agent_rebate", "*")))
+        if ":index:" not in k
+    ]
+    risk_keys = [
+        k for k in (await client.keys(_k("agent_risk", "*")))
+        if ":index:" not in k
+    ]
+    sample_rebate = await client.hgetall(_k("agent_rebate", "RB20260701001"))
+    sample_risk = await client.hgetall(_k("agent_risk", "RK20260701001"))
+
     return {
         "agents_count": len(agents),
         "inventory_count": len(inventory),
@@ -507,6 +602,10 @@ async def verify_seed(client) -> dict:
         "sample_finance_tax_SB202608001": sample_tax,
         "sample_finance_payment_FK20260820001": sample_payment,
         "sample_finance_recon_2026-08-19_daily": sample_recon,
+        "agent_rebates_count": len(rebate_keys),
+        "agent_risks_count": len(risk_keys),
+        "sample_agent_rebate_RB20260701001": sample_rebate,
+        "sample_agent_risk_RK20260701001": sample_risk,
     }
 
 
@@ -586,6 +685,14 @@ async def seed() -> int:
         print(f"[OK] 对账记录写入: {recs_n} 条")
         seqs_n = await seed_finance_seqs(client)
         print(f"[OK] 财务序列号计数器写入: {seqs_n} 个")
+
+        # 4h. 写入代理商返利记录
+        rebates_n = await seed_agent_rebates(client)
+        print(f"[OK] 代理商返利记录写入: {rebates_n} 条(含代理商索引)")
+
+        # 4i. 写入代理商风控记录
+        risks_n = await seed_agent_risks(client)
+        print(f"[OK] 代理商风控记录写入: {risks_n} 条(含代理商索引)")
 
         # 5. 空列表/空 Hash 不需要写入(inbound_log/outbound_log/orders/shipping_claims)
         print("[INFO] inbound_log/outbound_log/orders/shipping_claims: 初始为空, 不写入")

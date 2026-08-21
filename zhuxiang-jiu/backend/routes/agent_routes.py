@@ -63,6 +63,15 @@ class AgentPurchaseRequest(PydBaseModel):
     items: List[PurchaseItem] = Field(..., min_length=1)
 
 
+class RebateCalcRequest(PydBaseModel):
+    purchaseAmount: float = Field(..., ge=0, description="月度进货额(元)")
+    period: Optional[str] = Field(None, description="账期 YYYY-MM, 默认当前月")
+
+
+class RebateWithdrawRequest(PydBaseModel):
+    rebateId: str = Field(..., description="返利记录 ID")
+
+
 # ============================================================
 #  鉴权与异常映射辅助
 # ============================================================
@@ -171,6 +180,21 @@ async def agent_list(
                                        page=page, page_size=page_size)
 
 
+@router.get("/api/agent/rebate/tiers", tags=["代理商服务"])
+async def agent_rebate_tiers():
+    """返利档位说明(T0-T3 规则, 超额累进制)"""
+    return await _service.get_rebate_tiers()
+
+
+@router.get("/api/agent/risk/alerts", tags=["代理商服务"])
+async def agent_risk_alerts(
+    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+):
+    """窜货预警列表(admin, 跨区域销售检测)"""
+    _require_admin(x_role)
+    return await _service.risk_alerts()
+
+
 @router.get("/api/agent/{agent_id}", tags=["代理商服务"])
 async def agent_detail(agent_id: int):
     """代理商详情"""
@@ -255,6 +279,117 @@ async def agent_purchase_detail(
         raise HTTPException(status_code=403, detail="仅可查询自身进货明细")
     try:
         return await _service.get_purchase_detail(agent_id, purchase_id)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+
+
+# ============================================================
+#  返利结算管理(4 端点, 需 X-Agent-Id 自身)
+# ============================================================
+
+@router.post("/api/agent/{agent_id}/rebate/calc", tags=["代理商服务"])
+async def agent_rebate_calc(
+    agent_id: int,
+    req: RebateCalcRequest,
+    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+):
+    """返利计算(超额累进制, 基于月度进货额; 需 X-Agent-Id 自身)
+
+    生成返利记录(status=pending), 等待提现。
+    """
+    requester = _require_agent_id(x_agent_id)
+    if requester != agent_id:
+        raise HTTPException(status_code=403, detail="仅可计算自身代理商返利")
+    try:
+        return await _service.rebate_calc(
+            agent_id, req.purchaseAmount, period=req.period)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.get("/api/agent/{agent_id}/rebates", tags=["代理商服务"])
+async def agent_rebates(
+    agent_id: int,
+    page: int = Query(1, ge=1, description="页码(从 1 起)"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    status: Optional[str] = Query(default=None,
+        description="状态筛选 pending/withdrawn"),
+    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+):
+    """返利记录列表(分页; 需 X-Agent-Id 自身)"""
+    requester = _require_agent_id(x_agent_id)
+    if requester != agent_id:
+        raise HTTPException(status_code=403, detail="仅可查询自身返利记录")
+    try:
+        return await _service.list_rebates(
+            agent_id, page=page, page_size=page_size, status=status)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+
+
+@router.post("/api/agent/{agent_id}/rebate/withdraw", tags=["代理商服务"])
+async def agent_rebate_withdraw(
+    agent_id: int,
+    req: RebateWithdrawRequest,
+    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+):
+    """返利提现(转入钱包; 需 X-Agent-Id 自身)"""
+    requester = _require_agent_id(x_agent_id)
+    if requester != agent_id:
+        raise HTTPException(status_code=403, detail="仅可提现自身代理商返利")
+    try:
+        return await _service.rebate_withdraw(agent_id, req.rebateId)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.get("/api/agent/{agent_id}/rebate/summary", tags=["代理商服务"])
+async def agent_rebate_summary(
+    agent_id: int,
+    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+):
+    """返利汇总(本年累计/本月/可提现; 需 X-Agent-Id 自身)"""
+    requester = _require_agent_id(x_agent_id)
+    if requester != agent_id:
+        raise HTTPException(status_code=403, detail="仅可查询自身返利汇总")
+    try:
+        return await _service.rebate_summary(agent_id)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+
+
+# ============================================================
+#  风控管理(2 端点)
+# ============================================================
+
+@router.get("/api/agent/{agent_id}/risk/report", tags=["代理商服务"])
+async def agent_risk_report(
+    agent_id: int,
+    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+):
+    """风控报告(信用评分 + 异常指标; 需 X-Agent-Id 自身)"""
+    requester = _require_agent_id(x_agent_id)
+    if requester != agent_id:
+        raise HTTPException(status_code=403, detail="仅可查询自身风控报告")
+    try:
+        return await _service.risk_report(agent_id)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+
+
+@router.post("/api/agent/{agent_id}/risk/assess", tags=["代理商服务"])
+async def agent_risk_assess(
+    agent_id: int,
+    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+):
+    """信用评级(基于进货/退货/付款记录; admin)"""
+    _require_admin(x_role)
+    try:
+        return await _service.risk_assess(agent_id)
     except KeyError as e:
         raise _map_key_error(e) from e
 

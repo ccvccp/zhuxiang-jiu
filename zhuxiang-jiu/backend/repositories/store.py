@@ -288,6 +288,7 @@ def _build_initial_agents() -> dict:
         - agent 2: level="B", wallet=120000
     扩展字段: status/contact_name/contact_phone/region/address/
               created_at/updated_at/total_sales/total_purchases
+    风控扩展: agent 2 的 sales_region 与授权 region 不一致(窜货预警测试)
     """
     now = "2026-08-21T00:00:00+00:00"
     return {
@@ -306,6 +307,55 @@ def _build_initial_agents() -> dict:
             "address": "济南市历下区竹香大厦 5 层",
             "created_at": now, "updated_at": now,
             "total_sales": 0.0, "total_purchases": 0.0,
+            # 实际销售区域与授权区域不一致 → 窜货预警
+            "sales_region": "山东省德州市",
+        },
+    }
+
+
+def _build_initial_agent_rebates() -> dict:
+    """构建代理商返利初始数据(agent 1: 2026-07 月度返利, T1 档)
+
+    返利计算(超额累进制):
+        30 万进货额 = 0-20万(0%) + 20-30万(15%) = 0 + 10万×15% = 15000
+    """
+    return {
+        "RB20260701001": {
+            "rebateId": "RB20260701001",
+            "agentId": 1,
+            "period": "2026-07",
+            "tier": "T1",
+            "purchaseAmount": 300000.0,
+            "rebateRate": 0.15,
+            "rebateAmount": 15000.0,
+            "status": "pending",
+            "withdrawnAt": "",
+            "createdAt": "2026-08-21T00:00:00+00:00",
+        },
+    }
+
+
+def _build_initial_agent_risks() -> dict:
+    """构建代理商风控初始数据(agent 1: 信用评级记录)
+
+    agent 1 无进货记录 → 信用分 60(基础分), 风险等级 medium
+    """
+    return {
+        "RK20260701001": {
+            "riskId": "RK20260701001",
+            "agentId": 1,
+            "type": "assessment",
+            "creditScore": 60.0,
+            "riskLevel": "medium",
+            "indicators": {
+                "purchaseCount": 0,
+                "totalPurchases": 0.0,
+                "returnRate": 0.0,
+                "paymentDelayRate": 0.0,
+                "purchaseStability": 0.0,
+            },
+            "alerts": [],
+            "createdAt": "2026-08-21T00:00:00+00:00",
         },
     }
 
@@ -317,6 +367,10 @@ _mock_store: dict = {
     "agent_purchases": {},
     "_agent_seq": 2,            # 已有最大代理商 ID(新增档案从 3 起)
     "_agent_apply_seq": 0,      # 申请单自增序列
+    # 代理商返利记录(返利结算模块)
+    "agent_rebates": _build_initial_agent_rebates(),
+    # 代理商风控记录(风控管理模块)
+    "agent_risks": _build_initial_agent_risks(),
     "inventory": _build_initial_inventory(),
     "warehouse": {
         "slots": {"A1": "ZX42-2026L07", "A2": "ZX42-2026L05"},
@@ -368,6 +422,10 @@ def reset_store() -> dict:
         "agent_purchases": {},
         "_agent_seq": 2,
         "_agent_apply_seq": 0,
+        # 代理商返利记录(返利结算模块)
+        "agent_rebates": _build_initial_agent_rebates(),
+        # 代理商风控记录(风控管理模块)
+        "agent_risks": _build_initial_agent_risks(),
         "inventory": _build_initial_inventory(),
         "warehouse": {
             "slots": {"A1": "ZX42-2026L07", "A2": "ZX42-2026L05"},

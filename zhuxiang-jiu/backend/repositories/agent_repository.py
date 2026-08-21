@@ -288,15 +288,85 @@ class AgentRepository:
         return f"AP{datetime.now().strftime('%Y%m%d%H%M%S')}{random.randint(1000, 9999)}"
 
     # ============================================================
+    # 扩展接口: 返利记录 / 风控记录
+    # ============================================================
+
+    # ---------- 返利记录 ----------
+
+    async def save_rebate(self, rebate_data: dict) -> dict:
+        """新增/覆盖返利记录(同时维护代理商返利索引)"""
+        if is_redis_mode():
+            return await self._redis_save_rebate(rebate_data)
+        return self._mem_save_rebate(rebate_data)
+
+    async def get_rebate(self, rebate_id) -> Optional[dict]:
+        """按 ID 查询返利记录,不存在返回 None"""
+        if is_redis_mode():
+            return await self._redis_get_rebate(rebate_id)
+        return self._mem_get_rebate(rebate_id)
+
+    async def list_rebates_by_agent(self, agent_id, status: str = None) -> list[dict]:
+        """按代理商 ID 查询返利记录(按创建时间倒序, 可按状态筛选)"""
+        if is_redis_mode():
+            return await self._redis_list_rebates_by_agent(agent_id, status)
+        return self._mem_list_rebates_by_agent(agent_id, status)
+
+    async def update_rebate_fields(self, rebate_id, fields: dict) -> dict:
+        """部分字段更新,返回更新后的完整记录
+
+        Raises:
+            KeyError: 返利记录不存在
+        """
+        if is_redis_mode():
+            return await self._redis_update_rebate_fields(rebate_id, fields)
+        return self._mem_update_rebate_fields(rebate_id, fields)
+
+    async def next_rebate_id(self) -> str:
+        """生成下一个返利单号: RB + 时间戳 + 随机数"""
+        import random
+        from datetime import datetime
+        return f"RB{datetime.now().strftime('%Y%m%d%H%M%S')}{random.randint(1000, 9999)}"
+
+    # ---------- 风控记录 ----------
+
+    async def save_risk(self, risk_data: dict) -> dict:
+        """新增/覆盖风控记录(同时维护代理商风控索引)"""
+        if is_redis_mode():
+            return await self._redis_save_risk(risk_data)
+        return self._mem_save_risk(risk_data)
+
+    async def get_risk(self, risk_id) -> Optional[dict]:
+        """按 ID 查询风控记录,不存在返回 None"""
+        if is_redis_mode():
+            return await self._redis_get_risk(risk_id)
+        return self._mem_get_risk(risk_id)
+
+    async def list_risks_by_agent(self, agent_id, risk_type: str = None) -> list[dict]:
+        """按代理商 ID 查询风控记录(按创建时间倒序, 可按类型筛选)"""
+        if is_redis_mode():
+            return await self._redis_list_risks_by_agent(agent_id, risk_type)
+        return self._mem_list_risks_by_agent(agent_id, risk_type)
+
+    async def next_risk_id(self) -> str:
+        """生成下一个风控单号: RK + 时间戳 + 随机数"""
+        import random
+        from datetime import datetime
+        return f"RK{datetime.now().strftime('%Y%m%d%H%M%S')}{random.randint(1000, 9999)}"
+
+    # ============================================================
     # 扩展接口 - 内存后端
     # ============================================================
 
     def _ensure_agent_store(self):
-        """确保 store 包含代理商扩展键(申请/进货/序列)"""
+        """确保 store 包含代理商扩展键(申请/进货/返利/风控/序列)"""
         if "agent_applications" not in self.store:
             self.store["agent_applications"] = {}
         if "agent_purchases" not in self.store:
             self.store["agent_purchases"] = {}
+        if "agent_rebates" not in self.store:
+            self.store["agent_rebates"] = {}
+        if "agent_risks" not in self.store:
+            self.store["agent_risks"] = {}
         if "_agent_seq" not in self.store:
             # 初始化为已有最大代理商 ID(避免新 ID 与现有冲突)
             existing = self.store.get("agents", {})
@@ -365,6 +435,56 @@ class AgentRepository:
         result = [p for p in self.store["agent_purchases"].values()
                   if p.get("agentId") == agent_id]
         result.sort(key=lambda p: p.get("created_at", ""), reverse=True)
+        return result
+
+    # ---------- 返利记录(内存) ----------
+
+    def _mem_save_rebate(self, rebate_data: dict) -> dict:
+        self._ensure_agent_store()
+        rebate_id = rebate_data["rebateId"]
+        self.store["agent_rebates"][rebate_id] = rebate_data
+        return rebate_data
+
+    def _mem_get_rebate(self, rebate_id) -> Optional[dict]:
+        self._ensure_agent_store()
+        return self.store["agent_rebates"].get(rebate_id)
+
+    def _mem_list_rebates_by_agent(self, agent_id, status: str = None) -> list[dict]:
+        self._ensure_agent_store()
+        result = [r for r in self.store["agent_rebates"].values()
+                  if r.get("agentId") == agent_id]
+        if status:
+            result = [r for r in result if r.get("status") == status]
+        result.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+        return result
+
+    def _mem_update_rebate_fields(self, rebate_id, fields: dict) -> dict:
+        self._ensure_agent_store()
+        rebate = self.store["agent_rebates"].get(rebate_id)
+        if not rebate:
+            raise KeyError(rebate_id)
+        rebate.update(fields)
+        return rebate
+
+    # ---------- 风控记录(内存) ----------
+
+    def _mem_save_risk(self, risk_data: dict) -> dict:
+        self._ensure_agent_store()
+        risk_id = risk_data["riskId"]
+        self.store["agent_risks"][risk_id] = risk_data
+        return risk_data
+
+    def _mem_get_risk(self, risk_id) -> Optional[dict]:
+        self._ensure_agent_store()
+        return self.store["agent_risks"].get(risk_id)
+
+    def _mem_list_risks_by_agent(self, agent_id, risk_type: str = None) -> list[dict]:
+        self._ensure_agent_store()
+        result = [r for r in self.store["agent_risks"].values()
+                  if r.get("agentId") == agent_id]
+        if risk_type:
+            result = [r for r in result if r.get("type") == risk_type]
+        result.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
         return result
 
     # ============================================================
@@ -459,6 +579,79 @@ class AgentRepository:
         result.sort(key=lambda p: p.get("created_at", ""), reverse=True)
         return result
 
+    # ---------- 返利记录(Redis) ----------
+
+    async def _redis_save_rebate(self, rebate_data: dict) -> dict:
+        client = await get_redis_client()
+        rebate_id = rebate_data["rebateId"]
+        await client.hset(_k("agent_rebate", rebate_id),
+                          mapping=self._serialize_rebate(rebate_data))
+        agent_id = rebate_data.get("agentId")
+        if agent_id is not None:
+            await client.sadd(_k("agent_rebate", "index", agent_id), rebate_id)
+        return rebate_data
+
+    async def _redis_get_rebate(self, rebate_id) -> Optional[dict]:
+        client = await get_redis_client()
+        data = await client.hgetall(_k("agent_rebate", rebate_id))
+        if not data:
+            return None
+        return self._deserialize_rebate(data)
+
+    async def _redis_list_rebates_by_agent(self, agent_id, status: str = None) -> list[dict]:
+        client = await get_redis_client()
+        rebate_ids = await client.smembers(_k("agent_rebate", "index", agent_id))
+        result = []
+        for rid in rebate_ids:
+            data = await client.hgetall(_k("agent_rebate", rid))
+            if data:
+                result.append(self._deserialize_rebate(data))
+        if status:
+            result = [r for r in result if r.get("status") == status]
+        result.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+        return result
+
+    async def _redis_update_rebate_fields(self, rebate_id, fields: dict) -> dict:
+        client = await get_redis_client()
+        key = _k("agent_rebate", rebate_id)
+        if not await client.exists(key):
+            raise KeyError(rebate_id)
+        await client.hset(key, mapping=self._serialize_rebate(fields))
+        data = await client.hgetall(key)
+        return self._deserialize_rebate(data)
+
+    # ---------- 风控记录(Redis) ----------
+
+    async def _redis_save_risk(self, risk_data: dict) -> dict:
+        client = await get_redis_client()
+        risk_id = risk_data["riskId"]
+        await client.hset(_k("agent_risk", risk_id),
+                          mapping=self._serialize_risk(risk_data))
+        agent_id = risk_data.get("agentId")
+        if agent_id is not None:
+            await client.sadd(_k("agent_risk", "index", agent_id), risk_id)
+        return risk_data
+
+    async def _redis_get_risk(self, risk_id) -> Optional[dict]:
+        client = await get_redis_client()
+        data = await client.hgetall(_k("agent_risk", risk_id))
+        if not data:
+            return None
+        return self._deserialize_risk(data)
+
+    async def _redis_list_risks_by_agent(self, agent_id, risk_type: str = None) -> list[dict]:
+        client = await get_redis_client()
+        risk_ids = await client.smembers(_k("agent_risk", "index", agent_id))
+        result = []
+        for rid in risk_ids:
+            data = await client.hgetall(_k("agent_risk", rid))
+            if data:
+                result.append(self._deserialize_risk(data))
+        if risk_type:
+            result = [r for r in result if r.get("type") == risk_type]
+        result.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+        return result
+
     # ============================================================
     # 序列化辅助(Redis Hash 要求 value 为 str/int/float)
     # ============================================================
@@ -524,4 +717,93 @@ class AgentRepository:
         result = dict(data)
         if "applyId" in result:
             result["applyId"] = _to_int(result["applyId"])
+        return result
+
+    # ---------- 返利记录序列化 ----------
+
+    def _serialize_rebate(self, rebate: dict) -> dict:
+        """将返利记录 dict 序列化为 Redis Hash 兼容的 mapping(全转标量)"""
+        result = {}
+        for k, v in rebate.items():
+            if v is None:
+                continue
+            if isinstance(v, bool):
+                result[k] = 1 if v else 0
+            elif isinstance(v, (int, float)):
+                result[k] = v
+            else:
+                result[k] = str(v)
+        return result
+
+    def _deserialize_rebate(self, data: dict) -> dict:
+        """将 Redis hgetall 返回的返利记录 dict 反序列化(类型还原)"""
+        def _to_int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return v
+
+        def _to_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return v
+
+        result = dict(data)
+        if "agentId" in result:
+            result["agentId"] = _to_int(result["agentId"])
+        for k in ("purchaseAmount", "rebateRate", "rebateAmount"):
+            if k in result:
+                result[k] = _to_float(result[k])
+        return result
+
+    # ---------- 风控记录序列化 ----------
+
+    def _serialize_risk(self, risk: dict) -> dict:
+        """将风控记录 dict 序列化为 Redis Hash 兼容的 mapping
+
+        嵌套结构(indicators/alerts)序列化为 JSON 字符串,
+        bool 转 0/1, 其余按原类型存储。
+        """
+        json_fields = ("indicators", "alerts")
+        result = {}
+        for k, v in risk.items():
+            if v is None:
+                continue
+            if k in json_fields:
+                result[k] = json.dumps(v, ensure_ascii=False)
+            elif isinstance(v, bool):
+                result[k] = 1 if v else 0
+            elif isinstance(v, (int, float)):
+                result[k] = v
+            else:
+                result[k] = str(v)
+        return result
+
+    def _deserialize_risk(self, data: dict) -> dict:
+        """将 Redis hgetall 返回的风控记录 dict 反序列化(类型还原)"""
+        def _to_int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return v
+
+        def _to_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return v
+
+        result = dict(data)
+        if "agentId" in result:
+            result["agentId"] = _to_int(result["agentId"])
+        if "creditScore" in result:
+            result["creditScore"] = _to_float(result["creditScore"])
+        # 嵌套结构 JSON 还原
+        for k in ("indicators", "alerts"):
+            if k in result and isinstance(result[k], str):
+                try:
+                    result[k] = json.loads(result[k])
+                except (TypeError, ValueError):
+                    pass
         return result

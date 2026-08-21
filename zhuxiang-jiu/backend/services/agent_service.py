@@ -11,6 +11,7 @@
 
 import logging
 from datetime import datetime
+from typing import Optional
 
 from core.helpers import ts
 from core.locks import get_lock
@@ -54,6 +55,82 @@ STATUS_TERMINATED = "terminated"
 STATUS_NAMES = {
     STATUS_ACTIVE: "正常", STATUS_SUSPENDED: "暂停", STATUS_TERMINATED: "终止",
 }
+
+
+# ============================================================
+# 返利档位体系(超额累进制, 基于月度进货额)
+# ============================================================
+
+# 档位 / 名称 / 下限 / 上限 / 边际返利率(超额部分适用)
+REBATE_TIERS = [
+    {"tier": "T0", "name": "未达门槛", "min": 0,        "max": 200000,   "rate": 0.0},
+    {"tier": "T1", "name": "基础档",   "min": 200000,   "max": 500000,   "rate": 0.15},
+    {"tier": "T2", "name": "进阶档",   "min": 500000,   "max": 1000000,  "rate": 0.25},
+    {"tier": "T3", "name": "核心档",   "min": 1000000,  "max": float("inf"), "rate": 0.30},
+]
+
+# 风控等级
+RISK_LEVEL_LOW = "low"
+RISK_LEVEL_MEDIUM = "medium"
+RISK_LEVEL_HIGH = "high"
+
+RISK_LEVEL_NAMES = {
+    RISK_LEVEL_LOW: "低风险", RISK_LEVEL_MEDIUM: "中风险", RISK_LEVEL_HIGH: "高风险",
+}
+
+
+def _calc_rebate(amount: float) -> tuple:
+    """超额累进计算返利(类似个税计算)
+
+    示例(60万):
+        0-20万: 0%       → 0
+        20-50万: 15%     → 30万×15% = 45000
+        50-60万: 25%     → 10万×25% = 25000
+        合计: 70000, 档位 T2
+
+    Returns:
+        (rebateAmount, tier, tierRate)
+    """
+    rebate = 0.0
+    tier = "T0"
+    tier_rate = 0.0
+    for t in REBATE_TIERS:
+        if amount >= t["min"]:
+            taxable = min(amount, t["max"]) - t["min"]
+            rebate += taxable * t["rate"]
+            tier = t["tier"]
+            tier_rate = t["rate"]
+        else:
+            break
+    return round(rebate, 2), tier, tier_rate
+
+
+def _calc_credit_score(purchase_count: int, total_purchases: float,
+                       return_rate: float = 0.0,
+                       payment_delay_rate: float = 0.0) -> tuple:
+    """信用评分计算(0-100)
+
+    规则:
+        基础分 60 + 进货频次分(最高 20, 每次进货 +2) +
+        进货额分(最高 20, 每 10 万 +1) - 退货扣分(退货率×100) - 延迟扣分(延迟率×50)
+
+    Returns:
+        (creditScore, riskLevel)
+    """
+    base_score = 60
+    freq_score = min(purchase_count * 2, 20)
+    amount_score = min(total_purchases / 100000, 20)
+    return_penalty = return_rate * 100
+    delay_penalty = payment_delay_rate * 50
+    credit_score = base_score + freq_score + amount_score - return_penalty - delay_penalty
+    credit_score = max(0, min(100, round(credit_score, 1)))
+    if credit_score >= 80:
+        risk_level = RISK_LEVEL_LOW
+    elif credit_score >= 60:
+        risk_level = RISK_LEVEL_MEDIUM
+    else:
+        risk_level = RISK_LEVEL_HIGH
+    return credit_score, risk_level
 
 
 class AgentService:
@@ -501,3 +578,390 @@ class AgentService:
         if purchase.get("agentId") != agent_id:
             raise KeyError(f"进货记录 {purchase_id} 不属于代理商 {agent_id}")
         return {"success": True, "purchase": purchase, "logs": []}
+
+    # ============================================================
+    #  返利结算管理
+    # ============================================================
+
+    async def rebate_calc(self, agent_id, purchase_amount: float,
+                           period: str = None) -> dict:
+        """返利计算(超额累进制, 基于月度进货额)
+
+        生成返利记录(status=pending), 等待提现。
+
+        Raises:
+            KeyError: 代理商不存在
+            ValueError: 进货额非法
+        """
+        if purchase_amount < 0:
+            raise ValueError("进货额不能为负数")
+        if not period:
+            from datetime import datetime, timezone, timedelta
+            now_sh = datetime.now(timezone(timedelta(hours=8)))
+            period = now_sh.strftime("%Y-%m")
+
+        async with get_lock(f"agent:{agent_id}"):
+            agent = await self.agent_repo.get(agent_id)
+            if not agent:
+                raise KeyError(f"代理商 {agent_id} 不存在")
+
+            rebate_amount, tier, tier_rate = _calc_rebate(purchase_amount)
+            rebate_id = await self.agent_repo.next_rebate_id()
+            now = ts()
+            rebate_data = {
+                "rebateId": rebate_id,
+                "agentId": agent_id,
+                "period": period,
+                "tier": tier,
+                "purchaseAmount": round(purchase_amount, 2),
+                "rebateRate": tier_rate,
+                "rebateAmount": rebate_amount,
+                "status": "pending",
+                "withdrawnAt": "",
+                "createdAt": now,
+            }
+            await self.agent_repo.save_rebate(rebate_data)
+            logs = [{"step": "返利计算", "level": "INFO",
+                     "msg": f"进货额 ¥{purchase_amount:.2f}, 档位 {tier}, 返利 ¥{rebate_amount:.2f}"}]
+            if tier == "T0":
+                logs.append({"step": "未达门槛", "level": "WARN",
+                             "msg": "进货额未达 20 万门槛, 返利 0 元"})
+            logger.info("agent_rebate_calc agent_id=%r tier=%s amount=%.2f rebate=%.2f",
+                        agent_id, tier, purchase_amount, rebate_amount)
+            return {
+                "success": True,
+                "agentId": agent_id,
+                "rebateId": rebate_id,
+                "period": period,
+                "tier": tier,
+                "purchaseAmount": round(purchase_amount, 2),
+                "rebateRate": tier_rate,
+                "rebateAmount": rebate_amount,
+                "status": "pending",
+                "logs": logs,
+            }
+
+    async def list_rebates(self, agent_id, page: int = 1,
+                            page_size: int = 20, status: str = None) -> dict:
+        """返利记录列表(分页, 可按状态筛选)
+
+        Raises:
+            KeyError: 代理商不存在
+        """
+        agent = await self.agent_repo.get(agent_id)
+        if not agent:
+            raise KeyError(f"代理商 {agent_id} 不存在")
+        rebates = await self.agent_repo.list_rebates_by_agent(agent_id, status)
+        total = len(rebates)
+        page = max(1, page)
+        page_size = max(1, min(page_size, 100))
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_items = rebates[start:end]
+        return {
+            "success": True,
+            "agentId": agent_id,
+            "count": total,
+            "page": page,
+            "pageSize": page_size,
+            "rebates": page_items,
+            "logs": [],
+        }
+
+    async def rebate_withdraw(self, agent_id, rebate_id) -> dict:
+        """返利提现(转入钱包)
+
+        将 pending 返利转入代理商钱包, 状态改为 withdrawn。
+
+        Raises:
+            KeyError: 代理商/返利记录不存在 / 返利记录不属于该代理商
+            ValueError: 返利记录已提现
+        """
+        async with get_lock(f"agent:{agent_id}"):
+            agent = await self.agent_repo.get(agent_id)
+            if not agent:
+                raise KeyError(f"代理商 {agent_id} 不存在")
+            rebate = await self.agent_repo.get_rebate(rebate_id)
+            if not rebate:
+                raise KeyError(f"返利记录 {rebate_id} 不存在")
+            if rebate.get("agentId") != agent_id:
+                raise KeyError(f"返利记录 {rebate_id} 不属于代理商 {agent_id}")
+            if rebate.get("status") != "pending":
+                raise ValueError(
+                    f"返利记录 {rebate_id} 已提现(当前状态: {rebate.get('status')})")
+
+            amount = float(rebate.get("rebateAmount", 0))
+            new_wallet = await self.agent_repo.add_wallet(agent_id, amount)
+            now = ts()
+            await self.agent_repo.update_rebate_fields(rebate_id, {
+                "status": "withdrawn",
+                "withdrawnAt": now,
+            })
+            logs = [{"step": "返利提现", "level": "INFO",
+                     "msg": f"返利 ¥{amount:.2f} 转入钱包, 余额 ¥{new_wallet:.2f}"}]
+            logger.info("agent_rebate_withdraw agent_id=%r rebate_id=%s amount=%.2f",
+                        agent_id, rebate_id, amount)
+            return {
+                "success": True,
+                "agentId": agent_id,
+                "rebateId": rebate_id,
+                "amount": amount,
+                "wallet": new_wallet,
+                "status": "withdrawn",
+                "logs": logs,
+            }
+
+    async def rebate_summary(self, agent_id) -> dict:
+        """返利汇总(本年累计/本月/可提现/已提现)
+
+        Raises:
+            KeyError: 代理商不存在
+        """
+        agent = await self.agent_repo.get(agent_id)
+        if not agent:
+            raise KeyError(f"代理商 {agent_id} 不存在")
+        rebates = await self.agent_repo.list_rebates_by_agent(agent_id)
+
+        from datetime import datetime, timezone, timedelta
+        now_sh = datetime.now(timezone(timedelta(hours=8)))
+        current_year = now_sh.strftime("%Y")
+        current_month = now_sh.strftime("%Y-%m")
+
+        year_total = 0.0
+        month_total = 0.0
+        withdrawable = 0.0
+        withdrawn_total = 0.0
+        for r in rebates:
+            period = r.get("period", "")
+            amount = float(r.get("rebateAmount", 0))
+            if period.startswith(current_year):
+                year_total += amount
+            if period == current_month:
+                month_total += amount
+            if r.get("status") == "pending":
+                withdrawable += amount
+            elif r.get("status") == "withdrawn":
+                withdrawn_total += amount
+
+        return {
+            "success": True,
+            "agentId": agent_id,
+            "yearTotal": round(year_total, 2),
+            "monthTotal": round(month_total, 2),
+            "withdrawable": round(withdrawable, 2),
+            "withdrawnTotal": round(withdrawn_total, 2),
+            "totalCount": len(rebates),
+            "logs": [],
+        }
+
+    async def get_rebate_tiers(self) -> dict:
+        """返利档位说明(T0-T3 规则, 超额累进制)"""
+        tiers = []
+        for t in REBATE_TIERS:
+            min_wan = int(t["min"] / 10000)
+            if t["max"] == float("inf"):
+                range_str = f"{min_wan}万以上"
+                max_val = None
+            else:
+                max_wan = int(t["max"] / 10000)
+                range_str = f"{min_wan}-{max_wan}万"
+                max_val = t["max"]
+            tiers.append({
+                "tier": t["tier"],
+                "name": t["name"],
+                "range": range_str,
+                "min": t["min"],
+                "max": max_val,
+                "rate": t["rate"],
+                "desc": f"月度进货额 {range_str}, 超额部分返利率 {t['rate']*100:.0f}%",
+            })
+        return {
+            "success": True,
+            "tiers": tiers,
+            "calcMode": "超额累进制(类似个税计算, 分段计税累加)",
+            "logs": [],
+        }
+
+    # ============================================================
+    #  风控管理
+    # ============================================================
+
+    async def risk_report(self, agent_id) -> dict:
+        """风控报告(信用评分 + 异常指标 + 预警)
+
+        优先返回最近一次评级记录, 若无则实时计算。
+
+        Raises:
+            KeyError: 代理商不存在
+        """
+        agent = await self.agent_repo.get(agent_id)
+        if not agent:
+            raise KeyError(f"代理商 {agent_id} 不存在")
+
+        # 获取该代理商的风控记录(按时间倒序, 取最新评级)
+        risks = await self.agent_repo.list_risks_by_agent(agent_id)
+        latest_assessment = None
+        agent_alerts = []
+        for r in risks:
+            if r.get("type") == "assessment" and latest_assessment is None:
+                latest_assessment = r
+            if r.get("type") == "alert":
+                agent_alerts.append(r)
+
+        if latest_assessment:
+            credit_score = float(latest_assessment.get("creditScore", 0))
+            risk_level = latest_assessment.get("riskLevel", RISK_LEVEL_MEDIUM)
+            indicators = latest_assessment.get("indicators", {})
+            latest_risk_id = latest_assessment.get("riskId")
+        else:
+            # 无评级记录, 实时计算
+            purchases = await self.agent_repo.list_purchases_by_agent(agent_id)
+            purchase_count = len(purchases)
+            total_purchases = float(agent.get("total_purchases", 0))
+            return_rate = float(agent.get("return_rate", 0.0))
+            payment_delay_rate = float(agent.get("payment_delay_rate", 0.0))
+            credit_score, risk_level = _calc_credit_score(
+                purchase_count, total_purchases, return_rate, payment_delay_rate)
+            indicators = {
+                "purchaseCount": purchase_count,
+                "totalPurchases": round(total_purchases, 2),
+                "returnRate": return_rate,
+                "paymentDelayRate": payment_delay_rate,
+                "purchaseStability": round(min(purchase_count / 10, 1.0), 2),
+            }
+            latest_risk_id = None
+
+        # 跨区域销售检测(实时)
+        cross_region_alert = self._detect_cross_region(agent)
+
+        # 合并预警(alert 记录 + 实时检测)
+        all_alerts = list(agent_alerts)
+        if cross_region_alert and not any(
+            a.get("alertType") == "cross_region" or a.get("type") == "cross_region"
+            for a in all_alerts
+        ):
+            all_alerts.append(cross_region_alert)
+
+        return {
+            "success": True,
+            "agentId": agent_id,
+            "agentName": agent.get("name", ""),
+            "creditScore": credit_score,
+            "riskLevel": risk_level,
+            "riskLevelName": RISK_LEVEL_NAMES.get(risk_level, "中风险"),
+            "indicators": indicators,
+            "alerts": all_alerts,
+            "latestAssessmentId": latest_risk_id,
+            "logs": [],
+        }
+
+    async def risk_alerts(self) -> dict:
+        """窜货预警列表(admin, 跨区域销售检测)
+
+        扫描所有代理商, 检测实际销售区域与授权区域是否匹配。
+        """
+        agents = await self.agent_repo.list_all()
+        alerts = []
+        for agent in agents:
+            alert = self._detect_cross_region(agent)
+            if alert:
+                alerts.append({
+                    "agentId": agent.get("id"),
+                    "agentName": agent.get("name", ""),
+                    **alert,
+                })
+        return {
+            "success": True,
+            "count": len(alerts),
+            "alerts": alerts,
+            "logs": [],
+        }
+
+    async def risk_assess(self, agent_id) -> dict:
+        """信用评级(基于进货/退货/付款记录)
+
+        计算信用评分(0-100)并保存评级记录, 同时检测窜货预警。
+
+        Raises:
+            KeyError: 代理商不存在
+        """
+        async with get_lock(f"agent:{agent_id}"):
+            agent = await self.agent_repo.get(agent_id)
+            if not agent:
+                raise KeyError(f"代理商 {agent_id} 不存在")
+
+            # 基于进货记录评估
+            purchases = await self.agent_repo.list_purchases_by_agent(agent_id)
+            purchase_count = len(purchases)
+            total_purchases = float(agent.get("total_purchases", 0))
+            return_rate = float(agent.get("return_rate", 0.0))
+            payment_delay_rate = float(agent.get("payment_delay_rate", 0.0))
+
+            credit_score, risk_level = _calc_credit_score(
+                purchase_count, total_purchases, return_rate, payment_delay_rate)
+            stability = round(min(purchase_count / 10, 1.0), 2)
+
+            # 窜货预警检测
+            alerts = []
+            cross_alert = self._detect_cross_region(agent)
+            if cross_alert:
+                alerts.append(cross_alert)
+
+            # 保存评级记录
+            risk_id = await self.agent_repo.next_risk_id()
+            now = ts()
+            risk_data = {
+                "riskId": risk_id,
+                "agentId": agent_id,
+                "type": "assessment",
+                "creditScore": credit_score,
+                "riskLevel": risk_level,
+                "indicators": {
+                    "purchaseCount": purchase_count,
+                    "totalPurchases": round(total_purchases, 2),
+                    "returnRate": return_rate,
+                    "paymentDelayRate": payment_delay_rate,
+                    "purchaseStability": stability,
+                },
+                "alerts": alerts,
+                "createdAt": now,
+            }
+            await self.agent_repo.save_risk(risk_data)
+
+            logs = [{"step": "信用评级", "level": "INFO",
+                     "msg": f"信用分 {credit_score}, 风险等级 {risk_level}"}]
+            if alerts:
+                logs.append({"step": "窜货预警", "level": "WARN",
+                             "msg": f"检测到 {len(alerts)} 条预警"})
+            logger.info("agent_risk_assess agent_id=%r score=%s level=%s",
+                        agent_id, credit_score, risk_level)
+            return {
+                "success": True,
+                "agentId": agent_id,
+                "riskId": risk_id,
+                "creditScore": credit_score,
+                "riskLevel": risk_level,
+                "riskLevelName": RISK_LEVEL_NAMES.get(risk_level, "中风险"),
+                "indicators": risk_data["indicators"],
+                "alerts": alerts,
+                "logs": logs,
+            }
+
+    def _detect_cross_region(self, agent: dict) -> Optional[dict]:
+        """检测跨区域销售(窜货预警)
+
+        比对代理商实际销售区域(sales_region)与授权区域(region),
+        不一致则返回预警信息。
+        """
+        authorized_region = agent.get("region", "")
+        sales_region = agent.get("sales_region", "")
+        if sales_region and authorized_region and sales_region != authorized_region:
+            return {
+                "type": "cross_region",
+                "alertType": "cross_region",
+                "level": "high",
+                "desc": f"销售区域({sales_region})与授权区域({authorized_region})不匹配",
+                "authorizedRegion": authorized_region,
+                "detectedRegion": sales_region,
+            }
+        return None
