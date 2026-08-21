@@ -254,13 +254,8 @@ async def list_pays(
         raise _map_key_error(e) from e
 
 
-@router.get("/api/payment/{pay_no}", tags=["收款管理"])
-async def get_pay(pay_no: str):
-    """查询支付订单详情"""
-    try:
-        return await _service.get_pay(pay_no)
-    except KeyError as e:
-        raise _map_key_error(e) from e
+# 注: GET /api/payment/{pay_no} 已移至文件末尾, 避免捕获后续静态路径
+#      (payouts/reconciliations/channels 等同段数 GET 路由)
 
 
 @router.post("/api/payment/{pay_no}/start", tags=["收款管理"])
@@ -727,6 +722,19 @@ async def update_channel(
         raise _map_key_error(e) from e
     except ValueError as e:
         raise _map_value_error(e) from e
+
+
+# ============================================================
+# 支付订单详情(动态路径, 必须在所有静态 GET 路由之后)
+# ============================================================
+
+@router.get("/api/payment/{pay_no}", tags=["收款管理"])
+async def get_pay(pay_no: str):
+    """查询支付订单详情"""
+    try:
+        return await _service.get_pay(pay_no)
+    except KeyError as e:
+        raise _map_key_error(e) from e
 
 
 # ============================================================
