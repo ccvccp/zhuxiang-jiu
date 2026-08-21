@@ -474,10 +474,15 @@ class PaymentRepository:
     def _mem_list_orders(self, user_id, status: str = None,
                          scene_type: str = None, limit: int = 50) -> list[dict]:
         self._ensure_store()
-        index_set = self.store.get("_payment_order_user_index", {}).get(user_id, set())
+        table = self.store.get("payment_orders", {})
+        # user_id=None 时返回所有用户的订单(对账场景)
+        if user_id is not None:
+            index_set = self.store.get("_payment_order_user_index", {}).get(user_id, set())
+            candidates = [table.get(pn) for pn in index_set if pn in table]
+        else:
+            candidates = list(table.values())
         result = []
-        for pn in index_set:
-            o = self.store["payment_orders"].get(pn)
+        for o in candidates:
             if not o:
                 continue
             if status and o.get("status") != status:
@@ -1126,6 +1131,10 @@ class PaymentRepository:
         self.store.setdefault(date_idx, set()).add(recon_no)
         chan_idx = f"_payment_recon_index:{recon['channel']}"
         self.store.setdefault(chan_idx, set()).add(recon_no)
+        # 维护 diff_pending 集合(创建时若状态为 diff/investigating)
+        status = recon.get("status")
+        if status in (RECON_STATUS_DIFF, RECON_STATUS_INVESTIGATING):
+            self.store.setdefault("_payment_recon_diff_pending", set()).add(recon_no)
         return recon
 
     def _mem_get_recon(self, recon_no: str) -> Optional[dict]:
@@ -1208,6 +1217,10 @@ class PaymentRepository:
         # 索引
         await client.sadd(_k("payment", "recon", "index:date", recon["reconDate"]), recon_no)
         await client.sadd(_k("payment", "recon", "index:channel", recon["channel"]), recon_no)
+        # 维护 diff_pending 集合(创建时若状态为 diff/investigating)
+        status = recon.get("status")
+        if status in (RECON_STATUS_DIFF, RECON_STATUS_INVESTIGATING):
+            await client.sadd(_k("payment", "recon", "diff:pending"), recon_no)
         return recon
 
     async def _redis_get_recon(self, recon_no):

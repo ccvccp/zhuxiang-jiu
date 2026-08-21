@@ -42,6 +42,18 @@ from repositories.payment_repository import (
     PAYOUT_STATUS_APPROVED, PAYOUT_STATUS_PAYING,
     PAYOUT_STATUS_PAID, PAYOUT_STATUS_FAILED,
     PAYOUT_STATUS_REJECTED, PAYOUT_STATUS_CANCELLED,
+    # 对账状态(P1)
+    RECON_STATUS_PENDING, RECON_STATUS_MATCHED, RECON_STATUS_DIFF,
+    RECON_STATUS_INVESTIGATING, RECON_STATUS_RESOLVED,
+    RECON_STATUS_NAMES,
+    MATCH_TYPE_FULL, MATCH_TYPE_PARTIAL, MATCH_TYPE_MISMATCH,
+    DIFF_TYPE_AMOUNT_MISMATCH, DIFF_TYPE_PLATFORM_ONLY, DIFF_TYPE_CHANNEL_ONLY,
+    HANDLE_SUGGEST_REFUND, HANDLE_SUGGEST_SUPPLEMENT, HANDLE_SUGGEST_IGNORE,
+    # 渠道状态(P1)
+    CHANNEL_STATUS_ACTIVE, CHANNEL_STATUS_MAINTENANCE, CHANNEL_STATUS_DISABLED,
+    CHANNEL_STATUS_NAMES,
+    CHANNEL_TYPE_THIRD_PARTY, CHANNEL_TYPE_BANK, CHANNEL_TYPE_AGGREGATE,
+    FEE_TYPE_FIXED, FEE_TYPE_RATIO, FEE_TYPE_MIXED,
 )
 
 logger = logging.getLogger(__name__)
@@ -1071,6 +1083,387 @@ class PaymentService:
                 for p in payouts
             ],
         }
+
+    # ============================================================
+    # 对账记录(P1)
+    # ============================================================
+
+    async def start_reconciliation(self, recon_date: str, channel: str,
+                                     operator: str = "system") -> dict:
+        """启动日终对账(获取锁 + 创建批次 + 比对流水 + 生成差异)
+
+        流程:
+            1. 获取对账锁(防并发对账同一日同一渠道)
+            2. 创建对账批次(pending)
+            3. 查询平台当日 paid 支付单
+            4. 模拟拉取渠道流水(实际由渠道提供对账文件)
+            5. 逐笔比对(按 channelTradeNo 匹配)
+            6. 生成差异明细 + 更新状态(matched/diff)
+
+        Raises:
+            ValueError: 该日该渠道已对账或正在对账中
+        """
+        recon_no = f"RECON{recon_date.replace('-', '')}{channel.upper()}"
+
+        # 1. 获取对账锁
+        ok = await self.repo.acquire_recon_lock(recon_date, channel)
+        if not ok:
+            raise ValueError(f"{recon_date} 渠道 {channel} 已在对账中或已对账")
+
+        # 2. 创建对账批次
+        recon = await self.repo.create_recon({
+            "reconNo": recon_no,
+            "reconDate": recon_date,
+            "channel": channel,
+            "status": RECON_STATUS_PENDING,
+            "statusName": RECON_STATUS_NAMES[RECON_STATUS_PENDING],
+            "platformCount": 0,
+            "platformAmount": 0.0,
+            "channelCount": 0,
+            "channelAmount": 0.0,
+            "matchType": MATCH_TYPE_FULL,
+            "diffCount": 0,
+            "diffAmount": 0.0,
+            "diffDetails": [],
+            "reconFile": f"/recon/{channel}/{recon_date.replace('-', '')}.csv",
+            "startedAt": ts(),
+            "operator": operator,
+            "remark": "日终自动对账",
+            "createdAt": ts(),
+            "updatedAt": ts(),
+        })
+
+        # 3. 查询平台当日已支付订单(按渠道筛选)
+        platform_pays = await self.repo.list_orders(
+            user_id=None, status=PAY_STATUS_PAID, limit=10000)
+        # 过滤当日 + 指定渠道(实际应由 repo 按 date/channel 查询,此处简化)
+        platform_items = {}
+        platform_total = 0.0
+        for p in platform_pays:
+            if p.get("payChannel") != channel:
+                continue
+            ctn = p.get("channelTradeNo")
+            if not ctn:
+                continue
+            platform_items[ctn] = p
+            platform_total += float(p.get("actualAmount", 0))
+
+        # 4. 模拟拉取渠道流水(实际应解析渠道对账文件)
+        # 此处用平台数据模拟"完全对平"场景,差异场景由调用方注入
+        channel_items = dict(platform_items)
+        channel_total = platform_total
+
+        # 5. 逐笔比对
+        diff_details = []
+        all_ctns = set(platform_items.keys()) | set(channel_items.keys())
+        for ctn in all_ctns:
+            p_pay = platform_items.get(ctn)
+            c_pay = channel_items.get(ctn)
+            if p_pay and not c_pay:
+                # 平台有/渠道无
+                diff_details.append({
+                    "payNo": p_pay.get("payNo"),
+                    "channelTradeNo": ctn,
+                    "type": DIFF_TYPE_PLATFORM_ONLY,
+                    "platformAmount": float(p_pay.get("actualAmount", 0)),
+                    "channelAmount": 0.0,
+                    "diffAmount": float(p_pay.get("actualAmount", 0)),
+                    "handleSuggestion": HANDLE_SUGGEST_SUPPLEMENT,
+                })
+            elif c_pay and not p_pay:
+                # 渠道有/平台无
+                diff_details.append({
+                    "payNo": "",
+                    "channelTradeNo": ctn,
+                    "type": DIFF_TYPE_CHANNEL_ONLY,
+                    "platformAmount": 0.0,
+                    "channelAmount": float(c_pay.get("actualAmount", 0)),
+                    "diffAmount": -float(c_pay.get("actualAmount", 0)),
+                    "handleSuggestion": HANDLE_SUGGEST_REFUND,
+                })
+            else:
+                # 双方都有,比对金额
+                p_amt = float(p_pay.get("actualAmount", 0))
+                c_amt = float(c_pay.get("actualAmount", 0))
+                if abs(p_amt - c_amt) > 0.01:
+                    diff_details.append({
+                        "payNo": p_pay.get("payNo"),
+                        "channelTradeNo": ctn,
+                        "type": DIFF_TYPE_AMOUNT_MISMATCH,
+                        "platformAmount": p_amt,
+                        "channelAmount": c_amt,
+                        "diffAmount": round(p_amt - c_amt, 2),
+                        "handleSuggestion": HANDLE_SUGGEST_REFUND if p_amt > c_amt else HANDLE_SUGGEST_SUPPLEMENT,
+                    })
+
+        # 6. 更新对账状态
+        diff_amount = round(sum(d["diffAmount"] for d in diff_details), 2)
+        if not diff_details:
+            # 完全对平
+            await self.repo.update_recon_status(recon_no, RECON_STATUS_MATCHED, extra={
+                "platformCount": len(platform_items),
+                "platformAmount": round(platform_total, 2),
+                "channelCount": len(channel_items),
+                "channelAmount": round(channel_total, 2),
+                "matchType": MATCH_TYPE_FULL,
+                "finishedAt": ts(),
+                "updatedAt": ts(),
+            })
+        else:
+            # 存在差异
+            await self.repo.update_recon_status(recon_no, RECON_STATUS_DIFF, extra={
+                "platformCount": len(platform_items),
+                "platformAmount": round(platform_total, 2),
+                "channelCount": len(channel_items),
+                "channelAmount": round(channel_total, 2),
+                "matchType": MATCH_TYPE_PARTIAL if len(diff_details) < len(all_ctns) else MATCH_TYPE_MISMATCH,
+                "diffCount": len(diff_details),
+                "diffAmount": diff_amount,
+                "finishedAt": ts(),
+                "updatedAt": ts(),
+            })
+            # 添加差异明细
+            for d in diff_details:
+                await self.repo.add_diff_detail(recon_no, d)
+
+        result = await self.repo.get_recon(recon_no)
+        logger.info(f"对账完成: {recon_no} 状态={result['status']} 差异={len(diff_details)}笔")
+        return result
+
+    async def get_reconciliation(self, recon_no: str) -> dict:
+        """查询对账详情
+
+        Raises:
+            KeyError: 对账记录不存在
+        """
+        recon = await self.repo.get_recon(recon_no)
+        if not recon:
+            raise KeyError(f"对账记录 {recon_no} 不存在")
+        return recon
+
+    async def list_reconciliations(self, recon_date: str = None, channel: str = None,
+                                     status: str = None, limit: int = 50) -> dict:
+        """对账记录列表"""
+        items = await self.repo.list_recons(recon_date, channel, status, limit)
+        return {
+            "success": True,
+            "count": len(items),
+            "items": items,
+        }
+
+    async def list_pending_diffs(self, limit: int = 100) -> dict:
+        """待处理差异列表(管理端查询)"""
+        items = await self.repo.list_pending_diffs(limit)
+        return {
+            "success": True,
+            "count": len(items),
+            "items": items,
+        }
+
+    async def investigate_diff(self, recon_no: str, operator: str,
+                                  remark: str = "") -> dict:
+        """介入调查(diff → investigating)
+
+        Raises:
+            KeyError: 对账记录不存在
+            ValueError: 状态非法(非 diff 状态不可调查)
+        """
+        recon = await self.repo.get_recon(recon_no)
+        if not recon:
+            raise KeyError(f"对账记录 {recon_no} 不存在")
+        if recon["status"] != RECON_STATUS_DIFF:
+            raise ValueError(f"对账记录状态为 {recon['status']}, 不可介入调查")
+        return await self.repo.update_recon_status(recon_no, RECON_STATUS_INVESTIGATING, extra={
+            "operator": operator,
+            "remark": remark or "介入调查",
+            "updatedAt": ts(),
+        })
+
+    async def resolve_reconciliation(self, recon_no: str, operator: str,
+                                       remark: str = "") -> dict:
+        """处理完成(investigating → resolved)
+
+        Raises:
+            KeyError: 对账记录不存在
+            ValueError: 状态非法(非 investigating 状态不可处理完成)
+        """
+        recon = await self.repo.get_recon(recon_no)
+        if not recon:
+            raise KeyError(f"对账记录 {recon_no} 不存在")
+        if recon["status"] != RECON_STATUS_INVESTIGATING:
+            raise ValueError(f"对账记录状态为 {recon['status']}, 不可处理完成")
+        return await self.repo.update_recon_status(recon_no, RECON_STATUS_RESOLVED, extra={
+            "operator": operator,
+            "remark": remark or "已处理完成",
+            "updatedAt": ts(),
+        })
+
+    # ============================================================
+    # 渠道配置(P1)
+    # ============================================================
+
+    async def create_channel(self, channel_code: str, channel_name: str,
+                                channel_type: str, supported_methods: list,
+                                supported_scenes: list, merchant_id: str,
+                                fee_rate: float, fee_type: str = FEE_TYPE_RATIO,
+                                fixed_fee: float = 0.0, settle_cycle: str = "T+1",
+                                min_amount: float = 0.01, max_amount: float = 50000.0,
+                                daily_limit: float = 500000.0,
+                                monthly_limit: float = 5000000.0,
+                                retry_max: int = 8, timeout: int = 1800,
+                                remark: str = "") -> dict:
+        """创建渠道配置
+
+        Raises:
+            ValueError: 渠道编码已存在 / 参数非法
+        """
+        # 参数校验
+        if channel_type not in {CHANNEL_TYPE_THIRD_PARTY, CHANNEL_TYPE_BANK, CHANNEL_TYPE_AGGREGATE}:
+            raise ValueError(f"渠道类型非法: {channel_type}")
+        if fee_type not in {FEE_TYPE_FIXED, FEE_TYPE_RATIO, FEE_TYPE_MIXED}:
+            raise ValueError(f"费率类型非法: {fee_type}")
+        if fee_rate < 0 or fee_rate > 1:
+            raise ValueError(f"费率 {fee_rate} 超出范围(0-1)")
+        if min_amount > max_amount:
+            raise ValueError(f"单笔最小 {min_amount} 大于最大 {max_amount}")
+        if daily_limit > monthly_limit:
+            raise ValueError(f"单日限额 {daily_limit} 大于单月 {monthly_limit}")
+
+        return await self.repo.create_channel({
+            "channelCode": channel_code,
+            "channelName": channel_name,
+            "channelType": channel_type,
+            "status": CHANNEL_STATUS_ACTIVE,
+            "statusName": CHANNEL_STATUS_NAMES[CHANNEL_STATUS_ACTIVE],
+            "supportedMethods": supported_methods,
+            "supportedScenes": supported_scenes,
+            "merchantId": merchant_id,
+            "appId": "",
+            "apiEndpoint": "",
+            "notifyUrl": "",
+            "signType": "RSA2",
+            "signKey": "",
+            "certPath": "",
+            "feeRate": fee_rate,
+            "feeType": fee_type,
+            "fixedFee": fixed_fee,
+            "settleCycle": settle_cycle,
+            "minAmount": min_amount,
+            "maxAmount": max_amount,
+            "dailyLimit": daily_limit,
+            "monthlyLimit": monthly_limit,
+            "dailyAmount": 0.0,
+            "dailyCount": 0,
+            "monthlyAmount": 0.0,
+            "retryMax": retry_max,
+            "timeout": timeout,
+            "remark": remark,
+            "createdAt": ts(),
+            "updatedAt": ts(),
+        })
+
+    async def get_channel(self, channel_code: str) -> dict:
+        """查询渠道配置
+
+        Raises:
+            KeyError: 渠道不存在
+        """
+        ch = await self.repo.get_channel(channel_code)
+        if not ch:
+            raise KeyError(f"渠道 {channel_code} 不存在")
+        return ch
+
+    async def update_channel(self, channel_code: str, fields: dict) -> dict:
+        """更新渠道配置(部分字段)
+
+        Raises:
+            KeyError: 渠道不存在
+            ValueError: 参数非法
+        """
+        # 费率校验
+        if "feeRate" in fields:
+            rate = float(fields["feeRate"])
+            if rate < 0 or rate > 1:
+                raise ValueError(f"费率 {rate} 超出范围(0-1)")
+        # 限额校验
+        if "minAmount" in fields and "maxAmount" in fields:
+            if float(fields["minAmount"]) > float(fields["maxAmount"]):
+                raise ValueError("单笔最小大于最大")
+        fields["updatedAt"] = ts()
+        return await self.repo.update_channel_fields(channel_code, fields)
+
+    async def toggle_channel_status(self, channel_code: str, status: str,
+                                      operator: str = "admin") -> dict:
+        """启停渠道
+
+        Raises:
+            KeyError: 渠道不存在
+            ValueError: 状态非法
+        """
+        ch = await self.repo.get_channel(channel_code)
+        if not ch:
+            raise KeyError(f"渠道 {channel_code} 不存在")
+        if ch["status"] == status:
+            raise ValueError(f"渠道已是 {CHANNEL_STATUS_NAMES[status]} 状态")
+        result = await self.repo.update_channel_status(channel_code, status)
+        logger.info(f"渠道 {channel_code} 状态变更为 {status}, 操作人={operator}")
+        return result
+
+    async def list_channels(self, status: str = None,
+                               channel_type: str = None, limit: int = 50) -> dict:
+        """渠道列表"""
+        items = await self.repo.list_channels(status, channel_type, limit)
+        return {
+            "success": True,
+            "count": len(items),
+            "items": items,
+        }
+
+    async def list_active_channels(self) -> dict:
+        """启用的渠道列表(支付下单时选择渠道)"""
+        items = await self.repo.list_active_channels()
+        return {
+            "success": True,
+            "count": len(items),
+            "items": items,
+        }
+
+    async def check_channel_limit(self, channel_code: str, amount: float) -> dict:
+        """限额校验(创建支付时调用)
+
+        Returns:
+            {"passed": bool, "reason": str}
+
+        Raises:
+            KeyError: 渠道不存在
+            ValueError: 渠道未启用
+        """
+        ch = await self.repo.get_channel(channel_code)
+        if not ch:
+            raise KeyError(f"渠道 {channel_code} 不存在")
+        if ch["status"] != CHANNEL_STATUS_ACTIVE:
+            raise ValueError(f"渠道 {channel_code} 当前状态为 {ch['statusName']}, 不可用")
+        return await self.repo.check_limit(channel_code, amount)
+
+    async def record_channel_transaction(self, channel_code: str, amount: float) -> dict:
+        """累计渠道交易额(支付成功后调用)
+
+        Raises:
+            KeyError: 渠道不存在
+        """
+        return await self.repo.add_transaction_amount(channel_code, amount)
+
+    async def reset_daily_stats(self) -> dict:
+        """重置所有渠道日累计(每日 00:00 定时任务)"""
+        count = await self.repo.reset_daily_stats()
+        logger.info(f"日累计统计已重置, 渠道数={count}")
+        return {"success": True, "count": count}
+
+    async def reset_monthly_stats(self) -> dict:
+        """重置所有渠道月累计(每月 1 日定时任务)"""
+        count = await self.repo.reset_monthly_stats()
+        logger.info(f"月累计统计已重置, 渠道数={count}")
+        return {"success": True, "count": count}
 
 
 # ============================================================
