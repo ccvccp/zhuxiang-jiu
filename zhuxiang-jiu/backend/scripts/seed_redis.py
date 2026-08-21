@@ -71,7 +71,9 @@ def _k(entity: str, *parts) -> str:
 from repositories.product_repository import (  # noqa: E402
     _initial_products, _initial_reviews, PRODUCT_CATEGORIES,
 )
-from repositories.store import _build_initial_inventory  # noqa: E402
+from repositories.store import (  # noqa: E402
+    _build_initial_inventory, _build_initial_agents,
+)
 
 
 # ============================================================
@@ -79,10 +81,7 @@ from repositories.store import _build_initial_inventory  # noqa: E402
 # ============================================================
 
 SEED_DATA = {
-    "agents": {
-        1: {"id": 1, "name": "泰安市级代理商", "level": "C", "wallet": 50000},
-        2: {"id": 2, "name": "济南核心代理商", "level": "B", "wallet": 120000},
-    },
+    "agents": _build_initial_agents(),
     "inventory": _build_initial_inventory(),
     "warehouse_slots": {
         "A1": "ZX42-2026L07",
@@ -126,19 +125,48 @@ async def clear_existing_data(client) -> int:
     return deleted
 
 
+def _serialize_agent(agent: dict) -> dict:
+    """将代理商 dict 序列化为 Redis Hash 兼容的 mapping
+
+    与 AgentRepository._serialize_agent 逻辑一致:
+        None 跳过, bool→0/1, int/float 原样, 其余转 str。
+    """
+    result = {}
+    for k, v in agent.items():
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            result[k] = 1 if v else 0
+        elif isinstance(v, (int, float)):
+            result[k] = v
+        else:
+            result[k] = str(v)
+    return result
+
+
 async def seed_agents(client) -> int:
-    """写入代理商数据(Hash)"""
+    """写入代理商数据(Hash, 含扩展档案字段) + 代理商 ID 序列
+
+    Key: zhuxiang:agent:{agentId}            Hash(代理商主信息)
+         zhuxiang:agent:seq                  String(自增序列, 初始化为已有最大 ID)
+         zhuxiang:agent_apply:seq            String(申请单自增序列, 初始化为 0)
+    """
     count = 0
+    max_id = 0
     for agent_id, data in SEED_DATA["agents"].items():
         # HSET mapping 要求所有 value 为 str/bytes/int/float
         # wallet 是 float, Redis 会自动转 str 存储, 读取时 Repository 做类型转换
-        await client.hset(_k("agent", agent_id), mapping={
-            "id": data["id"],
-            "name": data["name"],
-            "level": data["level"],
-            "wallet": data["wallet"],
-        })
+        await client.hset(_k("agent", agent_id), mapping=_serialize_agent(data))
         count += 1
+        try:
+            if int(agent_id) > max_id:
+                max_id = int(agent_id)
+        except (TypeError, ValueError):
+            pass
+    # 代理商 ID 序列(确保 audit 通过新建的代理商 ID > 已有最大 ID)
+    await client.set(_k("agent", "seq"), max_id)
+    # 申请单自增序列(初始 0)
+    await client.set(_k("agent_apply", "seq"), 0)
     return count
 
 
@@ -393,12 +421,17 @@ async def seed_finance_seqs(client) -> int:
 
 async def verify_seed(client) -> dict:
     """验证写入结果,返回各实体的记录数"""
-    agents = await client.keys(_k("agent", "*"))
+    agents = [
+        k for k in (await client.keys(_k("agent", "*")))
+        if not k.endswith(":agent:seq")
+    ]
     inventory = await client.keys(_k("inventory", "*"))
     slots_count = await client.hlen(_k("warehouse", "slots"))
 
-    # 抽样验证代理商 1 的数据
+    # 抽样验证代理商 1 的数据(含扩展档案字段)
     agent1 = await client.hgetall(_k("agent", 1))
+    agent_seq = await client.get(_k("agent", "seq"))
+    apply_seq = await client.get(_k("agent_apply", "seq"))
     inv1 = await client.hgetall(_k("inventory", "ZX42-2026L07"))
 
     # 会员验证
@@ -451,6 +484,8 @@ async def verify_seed(client) -> dict:
         "inventory_count": len(inventory),
         "slots_count": slots_count,
         "sample_agent_1": agent1,
+        "agent_seq": agent_seq,
+        "agent_apply_seq": apply_seq,
         "sample_inventory_ZX42-2026L07": inv1,
         "members_count": len(members),
         "member_seq": member_seq,

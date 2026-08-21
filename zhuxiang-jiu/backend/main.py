@@ -34,6 +34,7 @@ from routes import (
     register_order_routes,
     register_product_routes,
     register_finance_routes,
+    register_agent_routes,
 )
 
 
@@ -91,6 +92,7 @@ register_member_routes(app)
 register_order_routes(app)
 register_product_routes(app)
 register_finance_routes(app)
+register_agent_routes(app)
 
 
 # ============================================================

@@ -1,12 +1,18 @@
 """代理商 Repository
 
 双模式(内存/Redis)透明切换:
-    - 内存模式: 直接操作 _mock_store["agents"] 字典
-    - Redis 模式: Hash 存储 zhuxiang:agent:{id}
+    - 内存模式: 直接操作 _mock_store["agents"] / ["agent_applications"] / ["agent_purchases"]
+    - Redis 模式:
+        * 代理商主信息: Hash  zhuxiang:agent:{agentId}
+        * 自增序列:     String zhuxiang:agent:seq / zhuxiang:agent_apply:seq
+        * 申请记录:     Hash  zhuxiang:agent_apply:{applyId}
+        * 进货记录:     String(JSON) zhuxiang:agent_purchase:{purchaseId}
+        * 进货索引:     Set   zhuxiang:agent_purchase:index:{agentId}
 
 锁键: agent:{agentId}(并发安全由 services 层负责)
 """
 
+import json
 from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
@@ -135,36 +141,24 @@ class AgentRepository:
         data = await client.hgetall(_k("agent", agent_id))
         if not data:
             return None
-        return {
-            "id": int(data["id"]),
-            "name": data["name"],
-            "level": data["level"],
-            "wallet": float(data["wallet"]),
-        }
+        return self._deserialize_agent(data)
 
     async def _redis_list_all(self) -> list[dict]:
         client = await get_redis_client()
         keys = await client.keys(_k("agent", "*"))
         result = []
         for key in keys:
+            # 排除 seq 序列(String 键, hgetall 返回空)
+            if key.endswith(":agent:seq"):
+                continue
             data = await client.hgetall(key)
             if data:
-                result.append({
-                    "id": int(data["id"]),
-                    "name": data["name"],
-                    "level": data["level"],
-                    "wallet": float(data["wallet"]),
-                })
+                result.append(self._deserialize_agent(data))
         return result
 
     async def _redis_save(self, agent_id, agent_data: dict) -> dict:
         client = await get_redis_client()
-        await client.hset(_k("agent", agent_id), mapping={
-            "id": agent_data["id"],
-            "name": agent_data["name"],
-            "level": agent_data["level"],
-            "wallet": agent_data["wallet"],
-        })
+        await client.hset(_k("agent", agent_id), mapping=self._serialize_agent(agent_data))
         return agent_data
 
     async def _redis_update_level(self, agent_id, new_level: str) -> str:
@@ -209,3 +203,325 @@ class AgentRepository:
         if not await client.exists(key):
             raise KeyError(agent_id)
         return await client.hget(key, "level") or "D"
+
+    # ============================================================
+    # 扩展接口: 字段更新 / ID 生成 / 申请记录 / 进货记录
+    # ============================================================
+
+    async def update_fields(self, agent_id, fields: dict) -> dict:
+        """部分字段更新,返回更新后的完整记录
+
+        Raises:
+            KeyError: 代理商不存在
+        """
+        if is_redis_mode():
+            return await self._redis_update_fields(agent_id, fields)
+        return self._mem_update_fields(agent_id, fields)
+
+    async def next_agent_id(self) -> int:
+        """生成下一个代理商 ID(自增序列)"""
+        if is_redis_mode():
+            return await self._redis_next_agent_id()
+        return self._mem_next_agent_id()
+
+    # ---------- 申请记录 ----------
+
+    async def save_apply(self, apply_data: dict) -> dict:
+        """新增/覆盖申请记录(applyId 由调用方通过 next_apply_id 生成)"""
+        if is_redis_mode():
+            return await self._redis_save_apply(apply_data)
+        return self._mem_save_apply(apply_data)
+
+    async def get_apply(self, apply_id) -> Optional[dict]:
+        """按 ID 查询申请记录,不存在返回 None"""
+        if is_redis_mode():
+            return await self._redis_get_apply(apply_id)
+        return self._mem_get_apply(apply_id)
+
+    async def list_applies(self, status: str = None) -> list[dict]:
+        """列出所有申请记录(可按状态筛选)"""
+        if is_redis_mode():
+            return await self._redis_list_applies(status)
+        return self._mem_list_applies(status)
+
+    async def update_apply_status(self, apply_id, status: str,
+                                  audit_remark: str = "") -> dict:
+        """更新申请状态,返回更新后的完整记录
+
+        Raises:
+            KeyError: 申请不存在
+        """
+        if is_redis_mode():
+            return await self._redis_update_apply_status(apply_id, status, audit_remark)
+        return self._mem_update_apply_status(apply_id, status, audit_remark)
+
+    async def next_apply_id(self) -> int:
+        """生成下一个申请 ID(自增序列)"""
+        if is_redis_mode():
+            return await self._redis_next_apply_id()
+        return self._mem_next_apply_id()
+
+    # ---------- 进货记录 ----------
+
+    async def save_purchase(self, purchase_data: dict) -> dict:
+        """新增/覆盖进货记录(同时维护代理商进货索引)"""
+        if is_redis_mode():
+            return await self._redis_save_purchase(purchase_data)
+        return self._mem_save_purchase(purchase_data)
+
+    async def get_purchase(self, purchase_id) -> Optional[dict]:
+        """按 ID 查询进货记录,不存在返回 None"""
+        if is_redis_mode():
+            return await self._redis_get_purchase(purchase_id)
+        return self._mem_get_purchase(purchase_id)
+
+    async def list_purchases_by_agent(self, agent_id) -> list[dict]:
+        """按代理商 ID 查询进货记录(按创建时间倒序)"""
+        if is_redis_mode():
+            return await self._redis_list_purchases_by_agent(agent_id)
+        return self._mem_list_purchases_by_agent(agent_id)
+
+    async def next_purchase_id(self) -> str:
+        """生成下一个进货单号: AP + 时间戳 + 随机数"""
+        import random
+        from datetime import datetime
+        return f"AP{datetime.now().strftime('%Y%m%d%H%M%S')}{random.randint(1000, 9999)}"
+
+    # ============================================================
+    # 扩展接口 - 内存后端
+    # ============================================================
+
+    def _ensure_agent_store(self):
+        """确保 store 包含代理商扩展键(申请/进货/序列)"""
+        if "agent_applications" not in self.store:
+            self.store["agent_applications"] = {}
+        if "agent_purchases" not in self.store:
+            self.store["agent_purchases"] = {}
+        if "_agent_seq" not in self.store:
+            # 初始化为已有最大代理商 ID(避免新 ID 与现有冲突)
+            existing = self.store.get("agents", {})
+            self.store["_agent_seq"] = max(existing.keys(), default=0)
+        if "_agent_apply_seq" not in self.store:
+            self.store["_agent_apply_seq"] = 0
+
+    def _mem_update_fields(self, agent_id, fields: dict) -> dict:
+        agent = self.store["agents"].get(agent_id)
+        if not agent:
+            raise KeyError(agent_id)
+        agent.update(fields)
+        return agent
+
+    def _mem_next_agent_id(self) -> int:
+        self._ensure_agent_store()
+        self.store["_agent_seq"] += 1
+        return self.store["_agent_seq"]
+
+    def _mem_save_apply(self, apply_data: dict) -> dict:
+        self._ensure_agent_store()
+        apply_id = apply_data["applyId"]
+        self.store["agent_applications"][apply_id] = apply_data
+        return apply_data
+
+    def _mem_get_apply(self, apply_id) -> Optional[dict]:
+        self._ensure_agent_store()
+        return self.store["agent_applications"].get(apply_id)
+
+    def _mem_list_applies(self, status: str = None) -> list[dict]:
+        self._ensure_agent_store()
+        apps = list(self.store["agent_applications"].values())
+        if status:
+            apps = [a for a in apps if a.get("status") == status]
+        apps.sort(key=lambda a: a.get("created_at", ""), reverse=True)
+        return apps
+
+    def _mem_update_apply_status(self, apply_id, status: str,
+                                 audit_remark: str = "") -> dict:
+        self._ensure_agent_store()
+        app = self.store["agent_applications"].get(apply_id)
+        if not app:
+            raise KeyError(apply_id)
+        app["status"] = status
+        if audit_remark:
+            app["audit_remark"] = audit_remark
+        return app
+
+    def _mem_next_apply_id(self) -> int:
+        self._ensure_agent_store()
+        self.store["_agent_apply_seq"] += 1
+        return self.store["_agent_apply_seq"]
+
+    def _mem_save_purchase(self, purchase_data: dict) -> dict:
+        self._ensure_agent_store()
+        purchase_id = purchase_data["purchaseId"]
+        self.store["agent_purchases"][purchase_id] = purchase_data
+        return purchase_data
+
+    def _mem_get_purchase(self, purchase_id) -> Optional[dict]:
+        self._ensure_agent_store()
+        return self.store["agent_purchases"].get(purchase_id)
+
+    def _mem_list_purchases_by_agent(self, agent_id) -> list[dict]:
+        self._ensure_agent_store()
+        result = [p for p in self.store["agent_purchases"].values()
+                  if p.get("agentId") == agent_id]
+        result.sort(key=lambda p: p.get("created_at", ""), reverse=True)
+        return result
+
+    # ============================================================
+    # 扩展接口 - Redis 后端
+    # ============================================================
+
+    async def _redis_update_fields(self, agent_id, fields: dict) -> dict:
+        client = await get_redis_client()
+        key = _k("agent", agent_id)
+        if not await client.exists(key):
+            raise KeyError(agent_id)
+        await client.hset(key, mapping=self._serialize_agent(fields))
+        data = await client.hgetall(key)
+        return self._deserialize_agent(data)
+
+    async def _redis_next_agent_id(self) -> int:
+        client = await get_redis_client()
+        return await client.incr(_k("agent", "seq"))
+
+    async def _redis_save_apply(self, apply_data: dict) -> dict:
+        client = await get_redis_client()
+        apply_id = apply_data["applyId"]
+        await client.hset(_k("agent_apply", apply_id),
+                          mapping=self._serialize_apply(apply_data))
+        return apply_data
+
+    async def _redis_get_apply(self, apply_id) -> Optional[dict]:
+        client = await get_redis_client()
+        data = await client.hgetall(_k("agent_apply", apply_id))
+        if not data:
+            return None
+        return self._deserialize_apply(data)
+
+    async def _redis_list_applies(self, status: str = None) -> list[dict]:
+        client = await get_redis_client()
+        keys = await client.keys(_k("agent_apply", "*"))
+        result = []
+        for key in keys:
+            if key.endswith(":agent_apply:seq"):
+                continue
+            data = await client.hgetall(key)
+            if data:
+                result.append(self._deserialize_apply(data))
+        if status:
+            result = [a for a in result if a.get("status") == status]
+        result.sort(key=lambda a: a.get("created_at", ""), reverse=True)
+        return result
+
+    async def _redis_update_apply_status(self, apply_id, status: str,
+                                         audit_remark: str = "") -> dict:
+        client = await get_redis_client()
+        key = _k("agent_apply", apply_id)
+        if not await client.exists(key):
+            raise KeyError(apply_id)
+        mapping = {"status": status}
+        if audit_remark:
+            mapping["audit_remark"] = audit_remark
+        await client.hset(key, mapping=mapping)
+        data = await client.hgetall(key)
+        return self._deserialize_apply(data)
+
+    async def _redis_next_apply_id(self) -> int:
+        client = await get_redis_client()
+        return await client.incr(_k("agent_apply", "seq"))
+
+    async def _redis_save_purchase(self, purchase_data: dict) -> dict:
+        client = await get_redis_client()
+        purchase_id = purchase_data["purchaseId"]
+        await client.set(_k("agent_purchase", purchase_id),
+                         json.dumps(purchase_data, ensure_ascii=False))
+        # 维护代理商进货索引(Set)
+        agent_id = purchase_data.get("agentId")
+        if agent_id is not None:
+            await client.sadd(_k("agent_purchase", "index", agent_id), purchase_id)
+        return purchase_data
+
+    async def _redis_get_purchase(self, purchase_id) -> Optional[dict]:
+        client = await get_redis_client()
+        raw = await client.get(_k("agent_purchase", purchase_id))
+        if not raw:
+            return None
+        return json.loads(raw)
+
+    async def _redis_list_purchases_by_agent(self, agent_id) -> list[dict]:
+        client = await get_redis_client()
+        purchase_ids = await client.smembers(_k("agent_purchase", "index", agent_id))
+        result = []
+        for pid in purchase_ids:
+            raw = await client.get(_k("agent_purchase", pid))
+            if raw:
+                result.append(json.loads(raw))
+        result.sort(key=lambda p: p.get("created_at", ""), reverse=True)
+        return result
+
+    # ============================================================
+    # 序列化辅助(Redis Hash 要求 value 为 str/int/float)
+    # ============================================================
+
+    def _serialize_agent(self, agent: dict) -> dict:
+        """将代理商 dict 序列化为 Redis Hash 兼容的 mapping(全转 str/int/float)"""
+        result = {}
+        for k, v in agent.items():
+            if v is None:
+                continue
+            if isinstance(v, bool):
+                result[k] = 1 if v else 0
+            elif isinstance(v, (int, float)):
+                result[k] = v
+            else:
+                result[k] = str(v)
+        return result
+
+    def _deserialize_agent(self, data: dict) -> dict:
+        """将 Redis hgetall 返回的 dict 反序列化(类型还原)"""
+        def _to_int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return v
+
+        def _to_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return v
+
+        result = dict(data)
+        if "id" in result:
+            result["id"] = _to_int(result["id"])
+        for k in ("wallet", "total_sales", "total_purchases"):
+            if k in result:
+                result[k] = _to_float(result[k])
+        return result
+
+    def _serialize_apply(self, apply: dict) -> dict:
+        """将申请记录 dict 序列化为 Redis Hash 兼容的 mapping(字段全为标量)"""
+        result = {}
+        for k, v in apply.items():
+            if v is None:
+                continue
+            if isinstance(v, bool):
+                result[k] = 1 if v else 0
+            elif isinstance(v, (int, float)):
+                result[k] = v
+            else:
+                result[k] = str(v)
+        return result
+
+    def _deserialize_apply(self, data: dict) -> dict:
+        """将 Redis hgetall 返回的申请记录 dict 反序列化(类型还原)"""
+        def _to_int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return v
+
+        result = dict(data)
+        if "applyId" in result:
+            result["applyId"] = _to_int(result["applyId"])
+        return result

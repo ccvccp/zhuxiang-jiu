@@ -21,7 +21,7 @@ ROLE_LEVELS = {
 }
 
 ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-ALLOW_HEADERS = ["Authorization", "Content-Type", "X-Role", "X-Member-Id"]
+ALLOW_HEADERS = ["Authorization", "Content-Type", "X-Role", "X-Member-Id", "X-Agent-Id"]
 
 
 # ============================================================

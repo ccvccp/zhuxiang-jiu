@@ -278,11 +278,45 @@ def _build_initial_inventory() -> dict:
     }
 
 
+def _build_initial_agents() -> dict:
+    """构建 2 个代理商初始数据(扩展档案字段)
+
+    保持 id/level/wallet 与既有测试约束一致(test_list_all_returns_all_agents
+    断言恰好 2 个代理商 ids={1,2}; test_get_level_existing_agent 断言
+    agent1 level="C"; test_get_wallet_existing_agent 断言 agent1 wallet=50000):
+        - agent 1: level="C", wallet=50000
+        - agent 2: level="B", wallet=120000
+    扩展字段: status/contact_name/contact_phone/region/address/
+              created_at/updated_at/total_sales/total_purchases
+    """
+    now = "2026-08-21T00:00:00+00:00"
+    return {
+        1: {
+            "id": 1, "name": "泰安市级代理商", "level": "C", "wallet": 50000,
+            "status": "active", "contact_name": "王经理",
+            "contact_phone": "13800001001", "region": "山东省泰安市",
+            "address": "泰安市泰山区竹香路 1 号",
+            "created_at": now, "updated_at": now,
+            "total_sales": 0.0, "total_purchases": 0.0,
+        },
+        2: {
+            "id": 2, "name": "济南核心代理商", "level": "B", "wallet": 120000,
+            "status": "active", "contact_name": "李总",
+            "contact_phone": "13800001002", "region": "山东省济南市",
+            "address": "济南市历下区竹香大厦 5 层",
+            "created_at": now, "updated_at": now,
+            "total_sales": 0.0, "total_purchases": 0.0,
+        },
+    }
+
+
 _mock_store: dict = {
-    "agents": {
-        1: {"id": 1, "name": "泰安市级代理商", "level": "C", "wallet": 50000},
-        2: {"id": 2, "name": "济南核心代理商", "level": "B", "wallet": 120000},
-    },
+    "agents": _build_initial_agents(),
+    # 代理商扩展存储(申请记录 / 进货记录 / 自增序列)
+    "agent_applications": {},
+    "agent_purchases": {},
+    "_agent_seq": 2,            # 已有最大代理商 ID(新增档案从 3 起)
+    "_agent_apply_seq": 0,      # 申请单自增序列
     "inventory": _build_initial_inventory(),
     "warehouse": {
         "slots": {"A1": "ZX42-2026L07", "A2": "ZX42-2026L05"},
@@ -328,10 +362,12 @@ def reset_store() -> dict:
     """
     import copy
     initial = {
-        "agents": {
-            1: {"id": 1, "name": "泰安市级代理商", "level": "C", "wallet": 50000},
-            2: {"id": 2, "name": "济南核心代理商", "level": "B", "wallet": 120000},
-        },
+        "agents": _build_initial_agents(),
+        # 代理商扩展存储(申请记录 / 进货记录 / 自增序列)
+        "agent_applications": {},
+        "agent_purchases": {},
+        "_agent_seq": 2,
+        "_agent_apply_seq": 0,
         "inventory": _build_initial_inventory(),
         "warehouse": {
             "slots": {"A1": "ZX42-2026L07", "A2": "ZX42-2026L05"},
