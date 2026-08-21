@@ -1,9 +1,10 @@
-"""收款管理模块路由(20 端点)
+"""收款管理模块路由(20 + 12 = 32 端点)
 
 鉴权:
     - 用户端(9 接口): X-Member-Id 头标识会员(创建支付/查询/发起支付/关闭/退款申请/撤回/退款列表)
-    - 管理端(8 接口): X-Role: admin 头(退款审批/待审核列表/付款审批/执行打款/打款回调/付款查询)
+    - 管理端(17 接口): X-Role: admin 头(退款/付款审批 + P1 对账/渠道管理)
     - 渠道回调(3 接口): 支付/退款/打款回调(由渠道调用, 鉴权由签名/Token 保证, 此处简化)
+    - 公开(3 接口): 启用的渠道列表/渠道详情/对账批次查询(P1)
 
 异常映射(遵循项目约定):
     - KeyError   → 404(资源不存在)
@@ -15,6 +16,8 @@
     - 退款(5):        create / audit / callback / cancel / list + pending-list
     - 付款(8):        create / audit / execute / callback / retry / detail / list / pending-list
     - 付款失败(1):    fail(管理端标记打款失败)
+    - 对账记录(6):    start / detail / list / pending-diffs / investigate / resolve
+    - 渠道配置(6):    create / detail / list / active-list / toggle / update
 
 注:
     1. 路由声明顺序 — 静态 GET 路径(list/pending-list 等)必须声明在
@@ -23,7 +26,7 @@
        保持 payment_service 单一职责。
 """
 
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -140,6 +143,71 @@ class PayoutCallbackRequest(PydBaseModel):
     success: bool = Field(True, description="是否成功")
     failReason: str = Field("", description="失败原因(success=false 时填)")
     callbackContent: dict = Field(default_factory=dict, description="回调原始数据")
+
+
+# ---- P1: 对账记录 ----
+
+class StartReconciliationRequest(PydBaseModel):
+    reconDate: str = Field(..., description="对账日期 YYYY-MM-DD")
+    channel: str = Field(..., description="对账渠道(对应渠道编码 channelCode)")
+    operator: str = Field("system", description="操作人")
+
+
+class InvestigateDiffRequest(PydBaseModel):
+    operator: str = Field("admin", description="操作人")
+    remark: str = Field("", description="调查备注")
+
+
+class ResolveReconciliationRequest(PydBaseModel):
+    operator: str = Field("admin", description="操作人")
+    resolution: str = Field(..., description="处理方式 refund/supplement/ignore")
+    remark: str = Field("", description="处理备注")
+
+
+# ---- P1: 渠道配置 ----
+
+class CreateChannelRequest(PydBaseModel):
+    channelCode: str = Field(..., description="渠道编码(如 wechat/alipay/unionpay)")
+    channelName: str = Field(..., description="渠道名称")
+    channelType: str = Field("third_party", description="渠道类型 third_party/bank/aggregate")
+    supportedMethods: List[str] = Field(default_factory=lambda: ["jsapi", "native", "h5"], description="支持的支付方式")
+    supportedScenes: List[str] = Field(default_factory=lambda: ["order_pay", "wallet_deposit"], description="支持的业务场景")
+    merchantId: str = Field(..., description="商户号")
+    feeRate: float = Field(0.006, ge=0, le=1, description="手续费率")
+    feeType: str = Field("ratio", description="费率类型 fixed/ratio/mixed")
+    fixedFee: float = Field(0, ge=0, description="固定手续费(feeType=fixed/mixed 时生效)")
+    settleCycle: str = Field("T+1", description="结算周期 T+0/T+1/T+7")
+    minAmount: float = Field(0.01, gt=0, description="单笔最小金额")
+    maxAmount: float = Field(50000, gt=0, description="单笔最大金额")
+    dailyLimit: float = Field(500000, gt=0, description="单日累计限额")
+    monthlyLimit: float = Field(5000000, gt=0, description="单月累计限额")
+    retryMax: int = Field(8, ge=0, le=20, description="最大重试次数")
+    timeout: int = Field(1800, ge=60, description="超时秒数")
+    remark: str = Field("", description="备注")
+
+
+class UpdateChannelRequest(PydBaseModel):
+    """更新字段名须对齐 Repository 字段(channelCode/feeRate/maxAmount 等驼峰命名)"""
+    channelName: Optional[str] = None
+    feeRate: Optional[float] = Field(None, ge=0, le=1)
+    feeType: Optional[str] = None
+    fixedFee: Optional[float] = Field(None, ge=0)
+    settleCycle: Optional[str] = None
+    minAmount: Optional[float] = Field(None, gt=0)
+    maxAmount: Optional[float] = Field(None, gt=0)
+    dailyLimit: Optional[float] = Field(None, gt=0)
+    monthlyLimit: Optional[float] = Field(None, gt=0)
+    retryMax: Optional[int] = Field(None, ge=0, le=20)
+    timeout: Optional[int] = Field(None, ge=60)
+    remark: Optional[str] = None
+
+    class Config:
+        extra = "allow"
+
+
+class ToggleChannelRequest(PydBaseModel):
+    status: str = Field(..., description="目标状态 active/maintenance/disabled")
+    operator: str = Field("admin", description="操作人")
 
 
 # ============================================================
@@ -449,6 +517,212 @@ async def payout_callback(
             payout_no, req.channelPayoutNo, req.callbackContent,
             req.success, req.failReason,
         )
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+# ============================================================
+# 4. 对账记录(6 端点, 管理端 + 公开查询)
+# 注: 静态 GET 路径(list/pending)声明在参数路径 {recon_no} 之前
+# ============================================================
+
+@router.post("/api/payment/reconciliation/start", tags=["收款管理"])
+async def start_reconciliation(
+    req: StartReconciliationRequest,
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+):
+    """启动日终对账(管理端)"""
+    _require_admin(x_role)
+    try:
+        return await _service.start_reconciliation(req.reconDate, req.channel, req.operator)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.get("/api/payment/reconciliations", tags=["收款管理"])
+async def list_reconciliations(
+    date: Optional[str] = Query(None, description="按日期筛选 YYYY-MM-DD"),
+    channel: Optional[str] = Query(None, description="按渠道筛选"),
+    status: Optional[str] = Query(None, description="按状态筛选 pending/matched/diff/investigating/resolved"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """对账批次列表(支持筛选)"""
+    try:
+        return await _service.list_reconciliations(date=date, channel=channel, status=status, limit=limit)
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.get("/api/payment/reconciliations/pending", tags=["收款管理"])
+async def list_pending_diffs(
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """待处理差异列表(管理端)"""
+    _require_admin(x_role)
+    try:
+        return await _service.list_pending_diffs(limit=limit)
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.get("/api/payment/reconciliation/{recon_no}", tags=["收款管理"])
+async def get_reconciliation(recon_no: str):
+    """查询对账批次详情"""
+    try:
+        return await _service.get_reconciliation(recon_no)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/payment/reconciliation/{recon_no}/investigate", tags=["收款管理"])
+async def investigate_diff(
+    recon_no: str,
+    req: InvestigateDiffRequest,
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+):
+    """介入调查差异(管理端, diff → investigating)"""
+    _require_admin(x_role)
+    try:
+        return await _service.investigate_diff(recon_no, req.operator, req.remark)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/payment/reconciliation/{recon_no}/resolve", tags=["收款管理"])
+async def resolve_reconciliation(
+    recon_no: str,
+    req: ResolveReconciliationRequest,
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+):
+    """处理完成(管理端, investigating → resolved)
+
+    注: service 层 resolve_reconciliation(recon_no, operator, remark) 未单独
+        接收 resolution 参数, 此处将处理方式合并到 remark 前缀便于审计。
+    """
+    _require_admin(x_role)
+    try:
+        merged_remark = f"[{req.resolution}] {req.remark}".strip()
+        return await _service.resolve_reconciliation(
+            recon_no, req.operator, merged_remark
+        )
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+# ============================================================
+# 5. 渠道配置(6 端点, 管理端 + 公开)
+# 注: 静态 GET 路径(channels/active)声明在参数路径 {code} 之前
+# ============================================================
+
+@router.post("/api/payment/channel", tags=["收款管理"])
+async def create_channel(
+    req: CreateChannelRequest,
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+):
+    """创建渠道配置(管理端)"""
+    _require_admin(x_role)
+    try:
+        return await _service.create_channel(
+            channel_code=req.channelCode,
+            channel_name=req.channelName,
+            channel_type=req.channelType,
+            supported_methods=req.supportedMethods,
+            supported_scenes=req.supportedScenes,
+            merchant_id=req.merchantId,
+            fee_rate=req.feeRate,
+            fee_type=req.feeType,
+            fixed_fee=req.fixedFee,
+            settle_cycle=req.settleCycle,
+            min_amount=req.minAmount,
+            max_amount=req.maxAmount,
+            daily_limit=req.dailyLimit,
+            monthly_limit=req.monthlyLimit,
+            retry_max=req.retryMax,
+            timeout=req.timeout,
+            remark=req.remark,
+        )
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.get("/api/payment/channels", tags=["收款管理"])
+async def list_channels(
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+    status: Optional[str] = Query(None, description="按状态筛选 active/maintenance/disabled"),
+):
+    """渠道列表(管理端可查全部, 含禁用)"""
+    _require_admin(x_role)
+    try:
+        return await _service.list_channels(status=status)
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.get("/api/payment/channels/active", tags=["收款管理"])
+async def list_active_channels():
+    """启用的渠道列表(公开, 供客户端收银台选择)"""
+    try:
+        return await _service.list_active_channels()
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.get("/api/payment/channel/{code}", tags=["收款管理"])
+async def get_channel(code: str):
+    """查询渠道详情(公开)"""
+    try:
+        return await _service.get_channel(code)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/payment/channel/{code}/toggle", tags=["收款管理"])
+async def toggle_channel_status(
+    code: str,
+    req: ToggleChannelRequest,
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+):
+    """启停渠道(管理端)"""
+    _require_admin(x_role)
+    try:
+        return await _service.toggle_channel_status(code, req.status, req.operator)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/payment/channel/{code}/update", tags=["收款管理"])
+async def update_channel(
+    code: str,
+    req: UpdateChannelRequest,
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+):
+    """更新渠道配置(管理端)
+
+    注: 字段名须对齐 Repository 字段(驼峰命名), service 层 update_channel
+        接收 fields dict 直接透传给 repo.update_channel_fields。
+    """
+    _require_admin(x_role)
+    try:
+        # 仅传递非 None 字段(已对齐 Repository 驼峰命名)
+        fields = {k: v for k, v in req.model_dump().items() if v is not None}
+        return await _service.update_channel(code, fields)
     except KeyError as e:
         raise _map_key_error(e) from e
     except ValueError as e:
