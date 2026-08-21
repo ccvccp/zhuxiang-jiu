@@ -38,6 +38,8 @@ from routes import (
     register_wallet_routes,
     register_payment_routes,
     register_logistics_routes,
+    register_groupbuy_routes,
+    register_citystore_routes,
 )
 
 
@@ -74,6 +76,8 @@ app = FastAPI(
         {"name": "钱包盈利", "description": "钱包开通/充值/提现/消费返利/收益/定期/奖品"},
         {"name": "收款管理", "description": "支付/退款/付款/回调/幂等/对账"},
         {"name": "物流接口管理", "description": "物流下单/轨迹追踪/月结对账/状态机"},
+        {"name": "团购模块", "description": "SVIP团购/阶梯折扣/申请审核/状态流转"},
+        {"name": "市级网店模块", "description": "SVIP开店/城市独占/月度考核/三档折扣/状态机"},
     ],
 )
 
@@ -102,6 +106,8 @@ register_agent_routes(app)
 register_wallet_routes(app)
 register_payment_routes(app)
 register_logistics_routes(app)
+register_groupbuy_routes(app)
+register_citystore_routes(app)
 
 
 # ============================================================
