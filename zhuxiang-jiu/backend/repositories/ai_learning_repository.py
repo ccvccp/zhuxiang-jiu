@@ -299,6 +299,113 @@ class AiLearningRepository:
             self.store["ai_learning_scheduler_stats"] = stats
 
     # ============================================================
+    # 决策阻断审计与统计(v7.8)
+    # ============================================================
+
+    ENFORCEMENT_AUDIT_MAX = 1000   # 每评分器审计封顶(防内存/Redis 膨胀)
+    BURST_WINDOW_SECONDS = 3600    # 熔断滑动窗口: 1 小时
+
+    async def add_enforcement_audit(self, scorer_id: str, record: dict) -> None:
+        """追加阻断决策审计记录(新→旧, 封顶截断)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("ai_learning", "enforcement", "audit", scorer_id)
+            pipe = client.pipeline()
+            pipe.lpush(key, json.dumps(record, ensure_ascii=False))
+            pipe.ltrim(key, 0, self.ENFORCEMENT_AUDIT_MAX - 1)
+            await pipe.execute()
+        else:
+            self._ensure_store()
+            audits = self.store["ai_learning_enforcement_audit"].setdefault(
+                scorer_id, [])
+            audits.insert(0, record)
+            del audits[self.ENFORCEMENT_AUDIT_MAX:]
+
+    async def list_enforcement_audit(self, scorer_id: str,
+                                     limit: int = 50) -> list[dict]:
+        """列出阻断决策审计(新→旧)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.lrange(
+                _k("ai_learning", "enforcement", "audit", scorer_id),
+                0, max(0, limit - 1) if limit else -1)
+            return [json.loads(x) for x in raw]
+        self._ensure_store()
+        audits = self.store["ai_learning_enforcement_audit"].get(scorer_id, [])
+        return audits[:limit] if limit else list(audits)
+
+    async def incr_enforcement_stats(self, scorer_id: str,
+                                     *fields: str) -> None:
+        """累加阻断统计计数器(fields: total/blocked/reviews/degraded)"""
+        if not fields:
+            return
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline()
+            key = _k("ai_learning", "enforcement", "stats", scorer_id)
+            for field in fields:
+                pipe.hincrby(key, field, 1)
+            await pipe.execute()
+        else:
+            self._ensure_store()
+            stats = self.store["ai_learning_enforcement_stats"].setdefault(
+                scorer_id, {})
+            for field in fields:
+                stats[field] = int(stats.get(field, 0)) + 1
+
+    async def get_enforcement_stats(self, scorer_id: str) -> dict:
+        """读取阻断统计计数器(无记录返回全 0)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.hgetall(
+                _k("ai_learning", "enforcement", "stats", scorer_id))
+            return {k: int(v) for k, v in raw.items()}
+        self._ensure_store()
+        return dict(self.store["ai_learning_enforcement_stats"].get(
+            scorer_id, {}))
+
+    def _burst_window_start(self) -> int:
+        """当前熔断窗口起点(epoch 秒)"""
+        import time
+        return int(time.time()) // self.BURST_WINDOW_SECONDS
+
+    async def incr_burst_window(self, scorer_id: str, field: str) -> None:
+        """累加熔断滑动窗口计数(field: total/blocked)"""
+        ws = self._burst_window_start()
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("ai_learning", "enforcement", "burst",
+                     scorer_id, field, str(ws))
+            pipe = client.pipeline()
+            pipe.incr(key)
+            pipe.expire(key, self.BURST_WINDOW_SECONDS * 2)
+            await pipe.execute()
+        else:
+            self._ensure_store()
+            windows = self.store["ai_learning_enforcement_windows"]
+            key = (scorer_id, field, ws)
+            windows[key] = int(windows.get(key, 0)) + 1
+            # 顺手清理过期窗口(仅同评分器, 避免无限增长)
+            stale = [k for k in windows
+                     if k[0] == scorer_id and k[2] < ws]
+            for k in stale:
+                windows.pop(k, None)
+
+    async def get_burst_window(self, scorer_id: str,
+                               field: str) -> int:
+        """读取当前熔断窗口计数"""
+        ws = self._burst_window_start()
+        if is_redis_mode():
+            client = await get_redis_client()
+            value = await client.get(_k(
+                "ai_learning", "enforcement", "burst",
+                scorer_id, field, str(ws)))
+            return int(value or 0)
+        self._ensure_store()
+        return int(self.store["ai_learning_enforcement_windows"].get(
+            (scorer_id, field, ws), 0))
+
+    # ============================================================
     # 内存模式辅助
     # ============================================================
 
@@ -310,4 +417,7 @@ class AiLearningRepository:
             self.store["ai_learning_configs"] = {}       # scorerId → config
             self.store["ai_drift_stats"] = {}            # scorerId → stats
             self.store["ai_learning_snapshots"] = {}     # (scorerId, businessKey) → snapshot
+            self.store["ai_learning_enforcement_audit"] = {}   # scorerId → [record]
+            self.store["ai_learning_enforcement_stats"] = {}   # scorerId → {field: count}
+            self.store["ai_learning_enforcement_windows"] = {} # (scorerId, field, ws) → count
             self.store["_ai_learning_feedback_seq"] = 0

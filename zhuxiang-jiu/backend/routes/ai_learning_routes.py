@@ -1,4 +1,4 @@
-"""AI 自学习层路由(11 管理端端点, v7.6 新增 report)
+"""AI 自学习层路由(13 管理端端点, v7.8 新增 enforcement 概览/审计)
 
 为 14 个 AI 评分器的自学习闭环暴露管理接口:
 
@@ -19,6 +19,8 @@
     GET  /api/ai-learning/drift/{scorerId}    漂移统计(EMA vs 基线)
     PUT  /api/ai-learning/config/{scorerId}   更新学习配置(eta/护栏等)
     GET  /api/ai-learning/report/{scorerId}   学习效果报表(v7.6: 版本正确率曲线)
+    GET  /api/ai-learning/enforcement/{scorerId}/overview  阻断概览(v7.8: 模式/统计/熔断)
+    GET  /api/ai-learning/enforcement/{scorerId}/audit     阻断决策审计(v7.8)
 
 异常映射(项目约定):
     KeyError → 404(未知评分器) / ValueError → 409(业务冲突) / 其余 → 500
@@ -218,6 +220,39 @@ async def update_config(scorer_id: str, data: LearningConfigRequest,
     try:
         return await svc.update_learning_config(
             scorer_id, data.model_dump(exclude_none=True))
+    except Exception as exc:
+        _handle(exc)
+
+
+# ============================================================
+# 决策阻断(v7.8): 审计/统计只读端点
+# ============================================================
+
+@router.get("/api/ai-learning/enforcement/{scorer_id}/overview", tags=["AI自学习层"])
+async def enforcement_overview(scorer_id: str,
+                               x_role: Optional[str] = Header(None, alias="X-Role")):
+    """阻断运行概览: 当前模式/累计统计/熔断窗口/保护参数"""
+    _require_admin(x_role)
+    try:
+        svc._require_scorer(scorer_id)   # 未知评分器 → 404
+        from services import ai_enforcement
+        return await ai_enforcement.enforcement_overview(scorer_id)
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/ai-learning/enforcement/{scorer_id}/audit", tags=["AI自学习层"])
+async def enforcement_audit(scorer_id: str, limit: int = 50,
+                            x_role: Optional[str] = Header(None, alias="X-Role")):
+    """阻断决策审计记录(新→旧, 默认 50 条, 0=全部)"""
+    _require_admin(x_role)
+    try:
+        svc._require_scorer(scorer_id)
+        from repositories.ai_learning_repository import AiLearningRepository
+        records = await AiLearningRepository().list_enforcement_audit(
+            scorer_id, limit=max(0, limit))
+        return {"success": True, "scorerId": scorer_id,
+                "count": len(records), "records": records}
     except Exception as exc:
         _handle(exc)
 
