@@ -19,6 +19,7 @@
 """
 
 from datetime import datetime, timezone
+import logging
 from typing import Optional
 
 from core.locks import get_lock
@@ -41,6 +42,9 @@ from repositories.citystore_repository import (
     # 函数
     calc_discount,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class CityStoreService:
@@ -232,6 +236,12 @@ class CityStoreService:
         """
         nearby_stores = []
 
+        logger.info(
+            "[下单入口决策] 收到请求: cityCode=%r, adcode=%r, cityName=%r, "
+            "provinceName=%r, longitude=%r, latitude=%r, memberId=%r, radiusKm=%s",
+            city_code, adcode, city_name, province_name,
+            longitude, latitude, member_id, nearby_radius_km)
+
         # ---------- 1. 城市判定(按优先级) ----------
         # 输入归一化(strip + 空串视为未提供, 抵御前端脏数据)
         city_code = (str(city_code).strip() or None) if city_code else None
@@ -239,13 +249,23 @@ class CityStoreService:
         city_name = (str(city_name).strip() or None) if city_name else None
         province_name = (str(province_name).strip() or None) if province_name else None
 
+        logger.info(
+            "[下单入口决策] 归一化后有效输入: cityCode=%r, adcode=%r, cityName=%r, "
+            "provinceName=%r", city_code, adcode, city_name, province_name)
+
         resolved = None       # (city_code, city_name, province_name, source)
         if city_code:
             resolved = (city_code, city_name or "", province_name or "", "cityCode")
+            logger.info("[下单入口决策] 城市判定走 cityCode 路径: %s", city_code)
         elif adcode:
-            resolved = (self._adcode_to_city_code(adcode), "", "", "adcode")
+            city_code_converted = self._adcode_to_city_code(adcode)
+            resolved = (city_code_converted, "", "", "adcode")
+            logger.info("[下单入口决策] 城市判定走 adcode 路径: %s → 市级码 %s",
+                        adcode, city_code_converted)
         elif city_name:
             resolved = ("", city_name, province_name or "", "cityName")
+            logger.info("[下单入口决策] 城市判定走 cityName 路径: %r (省份=%r)",
+                        city_name, province_name)
 
         # 经纬度: 查附近门店推断城市(附带 nearbyStores 返回)
         if resolved is None and longitude is not None and latitude is not None:
@@ -256,31 +276,69 @@ class CityStoreService:
             if nearby_stores:
                 nearest = nearby_stores[0]
                 resolved = ("", nearest.get("city", ""), "", "location")
+                logger.info(
+                    "[下单入口决策] 城市判定走经纬度路径: (%s, %s) 半径%skm 内"
+                    "找到 %d 家门店, 最近=%s(%.2fkm), 推断城市=%r",
+                    longitude, latitude, nearby_radius_km, len(nearby_stores),
+                    nearest.get("storeName", ""), nearest.get("distanceKm", -1),
+                    nearest.get("city", ""))
+            else:
+                logger.info(
+                    "[下单入口决策] 经纬度路径: (%s, %s) 半径 %skm 内无门店, "
+                    "无法推断城市", longitude, latitude, nearby_radius_km)
+        elif resolved is None and (longitude is None) != (latitude is None):
+            logger.warning(
+                "[下单入口决策] 经纬度半缺(longitude=%r, latitude=%r), "
+                "跳过定位路径", longitude, latitude)
 
         # 会员默认收货地址兜底
         if resolved is None and member_id is not None:
             resolved = await self._resolve_city_from_default_address(member_id)
+            if resolved:
+                logger.info(
+                    "[下单入口决策] 城市判定走会员默认地址兜底: memberId=%s → "
+                    "cityCode=%r, cityName=%r", member_id, resolved[0], resolved[1])
+            else:
+                logger.info(
+                    "[下单入口决策] 会员默认地址兜底失败: memberId=%s 无可用地址"
+                    "(无地址或地址缺 adcode/city)", member_id)
 
         # ---------- 2. 无城市信息 → 本站入口 ----------
         if resolved is None:
+            logger.info(
+                "[下单入口决策] 所有城市判定路径均未命中 → 本站入口"
+                "(原因: 未获取到位置信息)")
             return self._entry_site(reason="未获取到位置信息, 已为你展示本站下单入口")
 
         r_code, r_name, r_province, source = resolved
+        logger.info(
+            "[下单入口决策] 城市判定完成: cityCode=%r, cityName=%r, "
+            "provinceName=%r, 来源=%s", r_code, r_name, r_province, source)
 
         # ---------- 3. 匹配市级网店 ----------
         store = None
         if r_code:
             store = await self.repo.get_by_city(r_code)
+            logger.info(
+                "[下单入口决策] 按市级码 %s 匹配市店: %s",
+                r_code, store.get("storeName", "") if store else "未匹配")
         if store is None and r_name:
             # 城市名匹配(规范化去"市"后缀比对)
             all_stores = await self.repo.list_stores(limit=500)
             store = self._match_store_by_name(all_stores, r_name, r_province)
+            logger.info(
+                "[下单入口决策] 按城市名 %r 匹配市店: %s (共检索 %d 家市店)",
+                r_name, store.get("storeName", "") if store else "未匹配",
+                len(all_stores))
 
         # ---------- 4. 决策 ----------
         if store is None:
             city_info = self._city_info(r_code, r_name, r_province,
                                         next((s for s in nearby_stores), None))
             city_label = (city_info or {}).get("cityName") or r_code
+            logger.info(
+                "[下单入口决策] 城市 %r (来源=%s) 无市级网店 → 本站入口",
+                city_label, source)
             result = self._entry_site(
                 reason=f"所在城市{city_label}暂无市级网店, 已为你展示本站下单入口")
             result["city"] = city_info
@@ -297,6 +355,11 @@ class CityStoreService:
         }
 
         if store["status"] in self.ORDERABLE_STORE_STATUSES:
+            logger.info(
+                "[下单入口决策] 命中市店「%s」(storeCode=%s, 状态=%s, 折扣=%s) "
+                "→ 市级网店下单入口 (来源=%s)",
+                store.get("storeName", ""), store.get("storeCode", ""),
+                store_detail["statusName"], store.get("currentDiscount"), source)
             return {
                 "entry": "citystore",
                 "reason": f"所在城市有市级网店「{store.get('storeName', '')}」"
@@ -315,6 +378,11 @@ class CityStoreService:
             }
 
         # 有市店但不可下单(待审核/暂停/已取消)
+        logger.info(
+            "[下单入口决策] 命中市店「%s」(storeCode=%s) 但状态为「%s」不可下单 "
+            "→ 本站入口 (来源=%s)",
+            store.get("storeName", ""), store.get("storeCode", ""),
+            store_detail["statusName"], source)
         return {
             "entry": "site",
             "reason": f"所在城市市级网店「{store.get('storeName', '')}」"
