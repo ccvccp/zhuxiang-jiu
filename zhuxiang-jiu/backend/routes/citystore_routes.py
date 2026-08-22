@@ -1,9 +1,9 @@
-"""市级网店模块路由(12 端点)
+"""市级网店模块路由(13 端点)
 
 鉴权:
     - 用户端(7 接口): X-Member-Id 头标识当前会员(申请/查询/订单关联)
     - 管理端(5 接口): X-Role: admin 头(审核/状态流转/考核/待审核列表/统计)
-    - 公开(1 接口): 可用城市查询
+    - 公开(2 接口): 可用城市查询 / 下单入口决策(市级网店优先原则)
 
 异常映射(遵循项目约定):
     - KeyError → 404(资源不存在)
@@ -17,6 +17,7 @@
     - 月度考核(3):   assessment-run / assessment-get / assessment-list
     - 订单关联(2):   orders-add / orders-list
     - 管理端(2):     pending / stats
+    - 入口决策(1):   order-entry/decide(地图定位→市店入口/本站入口)
 """
 
 from typing import Any, List, Optional
@@ -211,6 +212,46 @@ async def get_stats(
     try:
         result = await _service.get_stats()
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+class OrderEntryDecideRequest(PydBaseModel):
+    """下单入口决策请求(市级网店优先原则)"""
+    cityCode: Optional[str] = Field(None, description="地级市行政区划码(如 110100)")
+    adcode: Optional[str] = Field(None, description="区县级码(如 110105, 自动转市级)")
+    cityName: Optional[str] = Field(None, description="城市名(如 北京市)")
+    provinceName: Optional[str] = Field(None, description="省份名(配合城市名)")
+    longitude: Optional[float] = Field(None, ge=-180, le=180, description="经度")
+    latitude: Optional[float] = Field(None, ge=-90, le=90, description="纬度")
+    nearbyRadiusKm: float = Field(50.0, ge=1, le=500,
+                                  description="附近门店搜索半径(km)")
+
+
+@router.post("/api/citystore/order-entry/decide", tags=["市级网店模块"])
+async def decide_order_entry(
+    data: OrderEntryDecideRequest,
+    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
+):
+    """下单入口决策(市级网店优先原则)
+
+    根据地图位置判定: 所在城市有营业中的市级网店 → 返回市店下单入口
+    (含 storeCode/折扣), 无市店或市店未营业 → 返回本站下单入口。
+    城市判定优先级: cityCode > adcode > cityName > 经纬度附近门店 > 默认收货地址。
+    """
+    try:
+        member_id = int(x_member_id) if x_member_id else None
+        result = await _service.decide_order_entry(
+            city_code=data.cityCode,
+            adcode=data.adcode,
+            city_name=data.cityName,
+            province_name=data.provinceName,
+            longitude=data.longitude,
+            latitude=data.latitude,
+            member_id=member_id,
+            nearby_radius_km=data.nearbyRadiusKm,
+        )
+        return {"success": True, **result}
     except Exception as e:
         _handle(e)
 

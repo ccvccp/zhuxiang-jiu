@@ -184,6 +184,220 @@ class CityStoreService:
         ]
 
     # ============================================================
+    # 下单入口决策(市级网店优先原则)
+    # ============================================================
+
+    # 可下单的市店状态(运营中/预警: 预警仅考核警示仍在营业)
+    ORDERABLE_STORE_STATUSES = {STORE_STATUS_OPERATING, STORE_STATUS_WARNING}
+
+    async def decide_order_entry(
+        self,
+        city_code: str = None,
+        adcode: str = None,
+        city_name: str = None,
+        province_name: str = None,
+        longitude: float = None,
+        latitude: float = None,
+        member_id: int = None,
+        nearby_radius_km: float = 50.0,
+    ) -> dict:
+        """下单入口决策: 所在城市有营业中的市级网店 → 市店入口, 否则 → 本站入口
+
+        市级网店优先原则。城市判定优先级:
+            1. cityCode(地级市行政区划码, 精确)
+            2. adcode(区县级码, 截前4位+"00" 转市级码)
+            3. cityName(城市名匹配市店表)
+            4. longitude+latitude(附近 loc_stores 门店推断城市, 限 radius_km 内)
+            5. memberId 默认收货地址的 city/adcode
+            6. 全部缺失 → 本站入口(未获取到位置)
+
+        Args:
+            city_code: 地级市行政区划码(如 "110100")
+            adcode: 区县级行政区划码(如 "110105" → 自动转 "110100")
+            city_name: 城市名(如 "北京市")
+            province_name: 省份名(配合城市名兜底)
+            longitude/latitude: 地图定位经纬度
+            member_id: 会员ID(取默认收货地址兜底)
+            nearby_radius_km: 经纬度模式附近门店搜索半径(km)
+
+        Returns:
+            {
+                entry: "citystore" | "site",
+                reason: 决策原因,
+                city: {...} | null,
+                store: {...} | null,   # entry=citystore 时市店详情(含折扣)
+                orderEntry: {type, url, params},
+                nearbyStores: [...],   # 经纬度模式附带
+            }
+        """
+        nearby_stores = []
+
+        # ---------- 1. 城市判定(按优先级) ----------
+        resolved = None       # (city_code, city_name, province_name, source)
+        if city_code:
+            resolved = (str(city_code), city_name or "", province_name or "", "cityCode")
+        elif adcode:
+            resolved = (self._adcode_to_city_code(str(adcode)), "", "", "adcode")
+        elif city_name:
+            resolved = ("", str(city_name), province_name or "", "cityName")
+
+        # 经纬度: 查附近门店推断城市(附带 nearbyStores 返回)
+        if resolved is None and longitude is not None and latitude is not None:
+            from repositories.location_repository import LocationRepository
+            loc_repo = LocationRepository()
+            nearby_stores = await loc_repo.list_nearby_stores(
+                longitude, latitude, radius_km=nearby_radius_km, limit=10)
+            if nearby_stores:
+                nearest = nearby_stores[0]
+                resolved = ("", nearest.get("city", ""), "", "location")
+
+        # 会员默认收货地址兜底
+        if resolved is None and member_id is not None:
+            resolved = await self._resolve_city_from_default_address(member_id)
+
+        # ---------- 2. 无城市信息 → 本站入口 ----------
+        if resolved is None:
+            return self._entry_site(reason="未获取到位置信息, 已为你展示本站下单入口")
+
+        r_code, r_name, r_province, source = resolved
+
+        # ---------- 3. 匹配市级网店 ----------
+        store = None
+        if r_code:
+            store = await self.repo.get_by_city(r_code)
+        if store is None and r_name:
+            # 城市名匹配(规范化去"市"后缀比对)
+            all_stores = await self.repo.list_stores(limit=500)
+            store = self._match_store_by_name(all_stores, r_name, r_province)
+
+        # ---------- 4. 决策 ----------
+        if store is None:
+            city_info = self._city_info(r_code, r_name, r_province,
+                                        next((s for s in nearby_stores), None))
+            result = self._entry_site(
+                reason=f"所在城市{(city_info or {}).get('cityName') or ''}"
+                       "暂无市级网店, 已为你展示本站下单入口")
+            result["city"] = city_info
+            result["citySource"] = source
+            return result
+
+        store_detail = dict(store)
+        store_detail["statusName"] = STORE_STATUS_NAMES.get(store["status"], "")
+        city_info = {
+            "cityCode": store.get("cityCode", ""),
+            "cityName": store.get("cityName", ""),
+            "provinceCode": store.get("provinceCode", ""),
+            "provinceName": store.get("provinceName", ""),
+        }
+
+        if store["status"] in self.ORDERABLE_STORE_STATUSES:
+            return {
+                "entry": "citystore",
+                "reason": f"所在城市有市级网店「{store.get('storeName', '')}」"
+                          f"({store_detail['statusName']}), 已为你展示市级网店下单入口",
+                "city": city_info,
+                "citySource": source,
+                "store": store_detail,
+                "orderEntry": {
+                    "type": "citystore",
+                    "url": "/api/citystore/order",
+                    "params": {"storeCode": store.get("storeCode", "")},
+                    "storeCode": store.get("storeCode", ""),
+                    "currentDiscount": store.get("currentDiscount"),
+                },
+                "nearbyStores": nearby_stores,
+            }
+
+        # 有市店但不可下单(待审核/暂停/已取消)
+        return {
+            "entry": "site",
+            "reason": f"所在城市市级网店「{store.get('storeName', '')}」"
+                      f"当前状态为「{store_detail['statusName']}」, "
+                      "暂不可下单, 已为你展示本站下单入口",
+            "city": city_info,
+            "citySource": source,
+            "store": store_detail,
+            "orderEntry": {
+                "type": "site",
+                "url": "/api/order/create",
+                "params": {},
+            },
+            "nearbyStores": nearby_stores,
+        }
+
+    @staticmethod
+    def _adcode_to_city_code(adcode: str) -> str:
+        """区县级码转地级市码: 前4位+"00"(110105 → 110100)"""
+        adcode = adcode.strip()
+        if len(adcode) < 4 or not adcode[:4].isdigit():
+            return adcode
+        return adcode[:4] + "00"
+
+    async def _resolve_city_from_default_address(self, member_id: int):
+        """取会员默认收货地址解析城市(无默认取最新一条)"""
+        from repositories.location_repository import LocationRepository
+        loc_repo = LocationRepository()
+        addresses = await loc_repo.list_addresses(member_id)
+        if not addresses:
+            return None
+        address = next((a for a in addresses if a.get("isDefault")), addresses[-1])
+        adcode = address.get("adcode")
+        if adcode:
+            return (self._adcode_to_city_code(str(adcode)), "", "", "defaultAddress")
+        if address.get("city"):
+            return ("", str(address["city"]), address.get("province", ""),
+                    "defaultAddress")
+        return None
+
+    @staticmethod
+    def _match_store_by_name(stores: list[dict], city_name: str,
+                             province_name: str = None) -> Optional[dict]:
+        """按城市名匹配市店(去"市"后缀宽松比对; 省份一致优先)"""
+        def normalize(name: str) -> str:
+            return (name or "").strip().rstrip("市")
+
+        target = normalize(city_name)
+        if not target:
+            return None
+        candidates = []
+        for s in stores:
+            if normalize(s.get("cityName", "")) == target:
+                if province_name and normalize(s.get("provinceName", "")) == \
+                        normalize(province_name):
+                    return s  # 省市都一致, 直接命中
+                candidates.append(s)
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _entry_site(reason: str) -> dict:
+        """本站下单入口"""
+        return {
+            "entry": "site",
+            "reason": reason,
+            "city": None,
+            "store": None,
+            "orderEntry": {
+                "type": "site",
+                "url": "/api/order/create",
+                "params": {},
+            },
+            "nearbyStores": [],
+        }
+
+    @staticmethod
+    def _city_info(city_code: str, city_name: str, province_name: str,
+                   nearby_store: dict = None) -> Optional[dict]:
+        """构造城市信息(取值自参数或附近门店)"""
+        if not any((city_code, city_name)):
+            return None
+        return {
+            "cityCode": city_code or "",
+            "cityName": city_name or (nearby_store or {}).get("city", ""),
+            "provinceCode": "",
+            "provinceName": province_name or (nearby_store or {}).get("province", ""),
+        }
+
+    # ============================================================
     # 审核流程
     # ============================================================
 
