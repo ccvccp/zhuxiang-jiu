@@ -1,9 +1,9 @@
-"""AI 语义评分层测试(Service 层 + HTTP 层, 30 项)
+"""AI 语义评分层测试(Service 层 + HTTP 层, 39 项)
 
 覆盖 5 个评分器:
     OrderRiskScorer(6) / PaymentRoutingScorer(6) / LogisticsRoutingScorer(7)
     TrafficAntiFraudScorer(4) / PromotionAntiFraudScorer(4)
-    + HTTP 层(3): 403 鉴权 / 200 正常调用 / 422 参数校验
+    + HTTP 层(12): 全部 5 端点的 403 鉴权 / 200 正常调用 / 422 参数校验 / 409 业务冲突
 
 在宿主机运行(需已安装 fastapi + httpx):
     cd D:\\网站架构设计\\zhuxiang-jiu\\backend
@@ -325,6 +325,66 @@ async def main():
     record("32_http_logistics_routing_success",
            resp.status_code == 200 and body.get("recommendation", {}).get("carrier") == "YT",
            f"status={resp.status_code}, recommendation={body.get('recommendation')}")
+
+    # ========================================================
+    # 7. HTTP 层补充: traffic / promotion 端点 + payment 409
+    # ========================================================
+    resp = client.post("/api/ai-scoring/traffic-antifraud",
+                       json={"promoterId": 1, "recentCount": 1})
+    record("33_http_traffic_requires_admin_role",
+           resp.status_code == 403, f"status={resp.status_code}")
+
+    resp = client.post("/api/ai-scoring/traffic-antifraud",
+                       headers={"X-Role": "admin"},
+                       json={"promoterId": 1, "recentCount": 3,
+                             "avgIntervalSeconds": 3600, "newAccountRatio": 0.1,
+                             "nightRatio": 0.05, "conversionRate": 0.3,
+                             "uniqueSources": 6, "totalRecords": 100,
+                             "effectiveRecords": 70, "fraudCount": 0})
+    body = resp.json()
+    record("34_http_traffic_antifraud_success",
+           resp.status_code == 200 and body.get("success") is True
+           and body.get("scorer") == "traffic_antifraud"
+           and body.get("action") == "pass" and len(body.get("factors", [])) == 7,
+           f"status={resp.status_code}, action={body.get('action')}")
+
+    resp = client.post("/api/ai-scoring/traffic-antifraud",
+                       headers={"X-Role": "admin"},
+                       json={"promoterId": 2, "newAccountRatio": 1.5})
+    record("35_http_traffic_ratio_over_1_422",
+           resp.status_code == 422, f"status={resp.status_code}(Pydantic le=1 拦截)")
+
+    resp = client.post("/api/ai-scoring/promotion-antifraud",
+                       json={"promoterId": 11, "relationCount": 1})
+    record("36_http_promotion_requires_admin_role",
+           resp.status_code == 403, f"status={resp.status_code}")
+
+    resp = client.post("/api/ai-scoring/promotion-antifraud",
+                       headers={"X-Role": "admin"},
+                       json={"promoterId": 11, "relationCount": 120,
+                             "avgBindToRewardHours": 120,
+                             "inactiveInviteeRatio": 0.1, "nightBindRatio": 0.05,
+                             "fastestHundredDays": 30, "selfLoopSuspect": False,
+                             "revokedCount": 0, "appealCount": 0})
+    body = resp.json()
+    record("37_http_promotion_antifraud_success",
+           resp.status_code == 200 and body.get("success") is True
+           and body.get("scorer") == "promotion_antifraud"
+           and body.get("action") == "pay" and len(body.get("factors", [])) == 6,
+           f"status={resp.status_code}, action={body.get('action')}")
+
+    resp = client.post("/api/ai-scoring/promotion-antifraud",
+                       headers={"X-Role": "admin"},
+                       json={"promoterId": 12, "selfLoopSuspect": True,
+                             "avgBindToRewardHours": -3})
+    record("38_http_promotion_negative_hours_422",
+           resp.status_code == 422, f"status={resp.status_code}(Pydantic ge=0 拦截)")
+
+    resp = client.post("/api/ai-scoring/payment-routing",
+                       headers={"X-Role": "admin"},
+                       json={"amount": 100.0, "sceneType": "vip_pay"})
+    record("39_http_payment_invalid_scene_409",
+           resp.status_code == 409, f"status={resp.status_code}(ValueError→409)")
 
     # ========================================================
     # 汇总
