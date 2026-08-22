@@ -85,6 +85,43 @@ function Query-PromMetric {
 }
 
 # ============================================================
+# 辅助函数: Redis 密码读取 (含异常兜底)
+# 优先级: 环境变量 > .env 文件 > 默认值
+# ============================================================
+
+function Get-RedisPassword {
+    $password = $null
+
+    # 1. 环境变量(空字符串/纯空白/null 均视为未设置)
+    if ($env:REDIS_PASSWORD) {
+        $password = $env:REDIS_PASSWORD.Trim()
+    }
+
+    # 2. .env 文件(读取异常时静默降级, 不中断脚本)
+    if (-not $password) {
+        $envFile = Join-Path $PSScriptRoot "..\..\..\.env"
+        try {
+            if (Test-Path $envFile -ErrorAction SilentlyContinue) {
+                $envContent = Get-Content $envFile -Encoding UTF8 -ErrorAction Stop
+                $redisLine = $envContent | Where-Object { $_ -match "^REDIS_PASSWORD=" } | Select-Object -First 1
+                if ($redisLine) {
+                    $password = ($redisLine -replace "^\s*REDIS_PASSWORD=", "").Trim()
+                }
+            }
+        } catch {
+            # .env 读取失败(权限/编码/占用等), 降级默认值
+            Write-Host "  [WARN] .env 文件读取失败, 使用默认密码: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    # 3. 默认密码
+    if (-not $password) {
+        $password = "zhuxiang123"
+    }
+    return $password
+}
+
+# ============================================================
 # 主流程
 # ============================================================
 
@@ -95,22 +132,7 @@ Write-Host " 时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # Redis 密码 (与 docker-compose.monitoring.yml 中的 REDIS_PASSWORD 一致)
-$RedisPassword = $env:REDIS_PASSWORD
-if (-not $RedisPassword) {
-    # 读取 .env 文件
-    $envFile = Join-Path $PSScriptRoot "..\..\..\.env"
-    if (Test-Path $envFile) {
-        $envContent = Get-Content $envFile -Encoding UTF8
-        $redisLine = $envContent | Where-Object { $_ -match "^REDIS_PASSWORD=" }
-        if ($redisLine) {
-            $RedisPassword = $redisLine -replace "REDIS_PASSWORD=", ""
-        }
-    }
-    # 默认密码
-    if (-not $RedisPassword) {
-        $RedisPassword = "zhuxiang123"
-    }
-}
+$RedisPassword = Get-RedisPassword
 
 # ============================================================
 # 1. Redis 直连验证

@@ -538,6 +538,87 @@ if ($mockDbsizeRaw -match "(\d+)") {
 Assert-Equals "test_15_dbsize_parse" "5" $keyCount
 
 # ============================================================
+# 测试 16: Redis 密码读取异常场景
+# 复刻 verify-metrics.ps1 中 Get-RedisPassword 的兜底逻辑,
+# 通过可注入的 .env 读取器模拟异常/边界输入
+# ============================================================
+
+Write-Host ""
+Write-Host "========== 16. Redis 密码读取异常场景验证 ==========" -ForegroundColor Cyan
+
+# 复刻真实脚本逻辑(与 Get-RedisPassword 保持一致), .env 读取行为可注入
+function Get-RedisPasswordForTest {
+    param([scriptblock]$ReadEnvFile = $null)
+    $password = $null
+    if ($env:REDIS_PASSWORD) {
+        $password = $env:REDIS_PASSWORD.Trim()
+    }
+    if (-not $password) {
+        try {
+            if ($ReadEnvFile) {
+                $envContent = & $ReadEnvFile
+                $redisLine = $envContent | Where-Object { $_ -match "^REDIS_PASSWORD=" } | Select-Object -First 1
+                if ($redisLine) {
+                    $password = ($redisLine -replace "^\s*REDIS_PASSWORD=", "").Trim()
+                }
+            }
+        } catch {
+            # .env 读取失败, 静默降级默认值(不中断)
+        }
+    }
+    if (-not $password) {
+        $password = "zhuxiang123"
+    }
+    return $password
+}
+
+# 场景 1: 环境变量为空字符串(非 null) → 应回退默认值
+$env:REDIS_PASSWORD = ""
+$result = Get-RedisPasswordForTest
+Assert-Equals "test_16_empty_string_env_falls_back_to_default" "zhuxiang123" $result
+
+# 场景 2: 环境变量仅含空格 → trim 后为空, 回退默认值
+$env:REDIS_PASSWORD = "   "
+$result = Get-RedisPasswordForTest
+Assert-Equals "test_16_whitespace_env_falls_back_to_default" "zhuxiang123" $result
+
+# 场景 3: 环境变量含首尾空格 → trim 后返回有效值
+$env:REDIS_PASSWORD = "  pass123  "
+$result = Get-RedisPasswordForTest
+Assert-Equals "test_16_env_value_trimmed" "pass123" $result
+
+# 场景 4: .env 读取抛异常(权限拒绝/文件占用) → 不中断, 回退默认值
+$env:REDIS_PASSWORD = $null
+$threw = $false
+try {
+    $result = Get-RedisPasswordForTest -ReadEnvFile { throw [System.UnauthorizedAccessException]::new("Access to .env is denied") }
+} catch {
+    $threw = $true
+}
+Assert-True "test_16_env_file_exception_does_not_crash" (-not $threw) "exception swallowed"
+Assert-Equals "test_16_env_file_exception_falls_back_to_default" "zhuxiang123" $result
+
+# 场景 5: .env 存在但 REDIS_PASSWORD 值为空 → 回退默认值
+$result = Get-RedisPasswordForTest -ReadEnvFile { @("REDIS_HOST=redis", "REDIS_PASSWORD=", "REDIS_PORT=6379") }
+Assert-Equals "test_16_env_file_empty_value_falls_back_to_default" "zhuxiang123" $result
+
+# 场景 6: .env 值含首尾空格 → trim 后返回有效值
+$result = Get-RedisPasswordForTest -ReadEnvFile { @("REDIS_PASSWORD=  secret456  ") }
+Assert-Equals "test_16_env_file_value_trimmed" "secret456" $result
+
+# 场景 7: .env 无 REDIS_PASSWORD 行 → 回退默认值
+$result = Get-RedisPasswordForTest -ReadEnvFile { @("REDIS_HOST=redis", "REDIS_PORT=6379") }
+Assert-Equals "test_16_env_file_missing_key_falls_back_to_default" "zhuxiang123" $result
+
+# 场景 8: 环境变量优先级高于 .env(.env 提供不同值仍被忽略)
+$env:REDIS_PASSWORD = "env_wins"
+$result = Get-RedisPasswordForTest -ReadEnvFile { @("REDIS_PASSWORD=env_file_loses") }
+Assert-Equals "test_16_env_var_takes_precedence_over_env_file" "env_wins" $result
+
+# 清理环境变量
+Remove-Item Env:\REDIS_PASSWORD -ErrorAction SilentlyContinue
+
+# ============================================================
 # 汇总报告
 # ============================================================
 
