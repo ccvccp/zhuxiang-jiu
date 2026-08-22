@@ -66,6 +66,8 @@ from routes import (
     register_auth_routes,
     # 推广码矩阵模块
     register_promotion_routes,
+    # 限时秒杀模块
+    register_flashsale_routes,
 )
 
 
@@ -179,6 +181,7 @@ register_monitor_routes(app)
 register_maintenance_routes(app)
 register_auth_routes(app)
 register_promotion_routes(app)
+register_flashsale_routes(app)
 
 
 # ============================================================
