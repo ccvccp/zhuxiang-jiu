@@ -1,0 +1,235 @@
+name: AI Scoring & Flash Sale Tests
+
+# AI 语义评分层(三批 14 评分器) + 限时秒杀模块 专用测试流水线
+#
+# 覆盖内容:
+#   Job 1  ai-scoring-tests       三批评分层测试(39+51+25=115 项, asyncio 模式)
+#   Job 2  flashsale-tests        秒杀模块测试(42+59=101 项, asyncio 模式)
+#   Job 3  flashsale-redis-tests  秒杀 Redis 集成测试(13 项, 分布式锁+双模式存储)
+#   Job 4  test-summary           汇总门禁(任一失败则 CI 失败)
+#
+# 说明:
+#   - 评分层/秒杀测试脚本为独立脚本风格(非 pytest 用例), 脚本内自设
+#     LOCK_MODE/STORE_MODE=asyncio, 失败时退出码非 0
+#   - Redis 集成测试沿用 pytest + marker=redis 惯例(与 test_redis_integration.py
+#     的 CI job 同构), Redis 不可用时自动 skip
+#   - 所有 run 步骤显式 set -o pipefail, 防止 `python xx | tee` 管道掩码失败退出码
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'zhuxiang-jiu/backend/**'
+      - '.github/workflows/ai-scoring-flashsale-tests.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'zhuxiang-jiu/backend/**'
+      - '.github/workflows/ai-scoring-flashsale-tests.yml'
+  workflow_dispatch:
+
+env:
+  PYTHONDONTWRITEBYTECODE: 1
+  PYTHONUNBUFFERED: 1
+
+jobs:
+  # ============================================================
+  # Job 1: AI 语义评分层测试(三批 14 评分器, 115 项)
+  #   第一批 39 项(订单风控/支付路由/物流路由/流量防作弊/推广码防作弊)
+  #   第二批 51 项(会员画像/积分防薅/内容审核/提现风控/团购资格/后台操作/合同条款/财务异常)
+  #   第三批 25 项(认证风控: 8因子4级决策+硬约束拦截)
+  # ============================================================
+  ai-scoring-tests:
+    name: AI Scoring Tests (115)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zhuxiang-jiu/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: zhuxiang-jiu/backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run batch 1 scoring tests (39 items)
+        run: |
+          set -o pipefail
+          python test_ai_scoring_routes.py 2>&1 | tee ai-scoring-batch1.log
+
+      - name: Run batch 2 scoring tests (51 items)
+        run: |
+          set -o pipefail
+          python test_ai_scoring_ext_routes.py 2>&1 | tee ai-scoring-batch2.log
+
+      - name: Run batch 3 scoring tests (25 items)
+        run: |
+          set -o pipefail
+          python test_ai_scoring_auth_routes.py 2>&1 | tee ai-scoring-batch3.log
+
+      - name: Print scoring test summary
+        if: always()
+        run: |
+          echo "## AI Scoring Tests Summary"
+          grep -h "总计" ai-scoring-batch1.log ai-scoring-batch2.log ai-scoring-batch3.log || true
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-scoring-test-logs
+          path: zhuxiang-jiu/backend/ai-scoring-batch*.log
+          retention-days: 30
+
+  # ============================================================
+  # Job 2: 限时秒杀模块测试(101 项, asyncio 单进程模式)
+  #   Service 层 42 项(状态机/幂等/限购/超时回补/场次联动/并发防超卖)
+  #   HTTP 层 59 项(TestClient 全栈: 15 接口/鉴权/异常映射/10并发抢5库存)
+  # ============================================================
+  flashsale-tests:
+    name: Flash Sale Tests (101)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zhuxiang-jiu/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: zhuxiang-jiu/backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run flash sale service tests (42 items)
+        run: |
+          set -o pipefail
+          python test_flashsale_routes.py 2>&1 | tee flashsale-service.log
+
+      - name: Run flash sale HTTP tests (59 items)
+        run: |
+          set -o pipefail
+          python test_flashsale_http.py 2>&1 | tee flashsale-http.log
+
+      - name: Print flash sale test summary
+        if: always()
+        run: |
+          echo "## Flash Sale Tests Summary"
+          grep -h "总计" flashsale-service.log flashsale-http.log || true
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashsale-test-logs
+          path: |
+            zhuxiang-jiu/backend/flashsale-service.log
+            zhuxiang-jiu/backend/flashsale-http.log
+          retention-days: 30
+
+  # ============================================================
+  # Job 3: 秒杀 Redis 集成测试(13 项, 分布式锁 + 双模式存储)
+  #   验证 Redis Hash 序列化往返 / INCR 序列号 / 锁内防超卖(10并发抢5)
+  #   / 幂等 / 新实例持久化 / 参数单例
+  # 对齐现有 redis-integration-tests job 结构(Redis service + marker 过滤)
+  # ============================================================
+  flashsale-redis-tests:
+    name: Flash Sale Redis Tests (13)
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      LOCK_MODE: redis
+      STORE_MODE: redis
+      REDIS_URL: redis://127.0.0.1:6379/0
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: zhuxiang-jiu/backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r zhuxiang-jiu/backend/requirements.txt
+
+      - name: Verify Redis connectivity
+        run: |
+          python -c "import redis; r = redis.from_url('redis://127.0.0.1:6379/0'); print('Redis PING:', r.ping())"
+
+      - name: Run flash sale Redis integration tests
+        working-directory: zhuxiang-jiu/backend
+        run: |
+          set -o pipefail
+          python -m pytest test_flashsale_redis_integration.py -m redis -v --tb=short 2>&1 | tee flashsale-redis.log
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashsale-redis-test-logs
+          path: zhuxiang-jiu/backend/flashsale-redis.log
+          retention-days: 30
+
+  # ============================================================
+  # Job 4: Summary(汇总门禁, 任一 job 失败则 CI 失败)
+  # ============================================================
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [ai-scoring-tests, flashsale-tests, flashsale-redis-tests]
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          echo "## AI Scoring & Flash Sale Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Items | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| AI Scoring Tests (batch1+2+3) | 115 | ${{ needs.ai-scoring-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Flash Sale Tests (service+http) | 101 | ${{ needs.flashsale-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Flash Sale Redis Integration | 13 | ${{ needs.flashsale-redis-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.ai-scoring-tests.result }}" != "success" || \
+                "${{ needs.flashsale-tests.result }}" != "success" || \
+                "${{ needs.flashsale-redis-tests.result }}" != "success" ]]; then
+            echo "One or more test jobs failed!"
+            exit 1
+          fi
+          echo "All AI scoring & flash sale tests passed!"
