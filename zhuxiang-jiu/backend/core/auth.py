@@ -199,3 +199,63 @@ def decode_token(token: str, expected_type: Optional[str] = None,
 def remaining_ttl(payload: dict) -> int:
     """Token 剩余有效秒数(用于黑名单 TTL)"""
     return max(0, int(payload.get("exp", 0)) - int(time.time()))
+
+
+# ============================================================
+# 决策模块角色守卫(兼容层)
+# ============================================================
+# 说明:
+#     决策筹划模块(29)的路由依赖 get_current_role / require_role
+#     (基于 X-Role 头的 5 级角色体系: guest/member/store_owner/agent/admin)。
+#     用户认证模块重构时这两个函数曾被移除, 此处恢复,
+#     保证 routes/decision_routes.py 的导入不破坏(路由文件不可修改约定)。
+#
+#     与 JWT 认证的关系: 两者并行 ——
+#     - get_current_role/require_role: 决策模块自己的角色守卫(Mock 模式)
+#     - JWTAuthMiddleware:             全局登录态(注入 x-role 头)
+#     compat 模式下中间件放行 X-Role 头, 二者互不干扰。
+#
+#     用 try/except 导入 fastapi: 无 fastapi 的纯标准库测试环境
+#     (如 JWT/密码哈希单元测试)仍可导入本模块。
+
+try:
+    from typing import Annotated, Optional
+
+    from fastapi import Depends, Header, HTTPException, status
+
+    def get_current_role(
+        x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+        authorization: Annotated[Optional[str], Header()] = None,
+    ) -> str:
+        """从请求头提取角色, Mock 模式不校验 token"""
+        from core.config import ROLE_LEVELS
+
+        if x_role and x_role in ROLE_LEVELS:
+            return x_role
+        # Mock 模式: 未提供角色默认 guest
+        return "guest"
+
+    def require_role(min_role: str):
+        """角色权限守卫工厂, 返回依赖函数"""
+        from core.config import ROLE_LEVELS
+        from models import DecisionErrorCode
+
+        min_level = ROLE_LEVELS.get(min_role, 0)
+
+        def _check(role: str = Depends(get_current_role)) -> str:
+            if ROLE_LEVELS.get(role, 0) < min_level:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "success": False,
+                        "error": "DECISION_003: 角色权限不足",
+                        "errorCode": DecisionErrorCode.e003.value,
+                    },
+                )
+            return role
+
+        return _check
+
+except ImportError:  # 无 fastapi 环境: 决策模块路由不可用, JWT/密码功能不受影响
+    pass
+
