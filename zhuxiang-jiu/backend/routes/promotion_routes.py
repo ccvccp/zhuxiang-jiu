@@ -16,6 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
 
+from services import ai_feedback_hooks as ai_hooks
 from services.promotion_service import PromotionService
 
 
@@ -340,6 +341,8 @@ async def admin_grant_reward(
     try:
         result = await _service.admin_grant_reward(
             data.memberId, data.rewardType, data.amount, data.detail)
+        # v7.6 自动反馈: 奖励发放 → 防作弊观察评分+配对(正常发放期望 pay)
+        await ai_hooks.on_promotion_reward(f"grant:{data.memberId}")
         return result
     except Exception as exc:
         _handle(exc)

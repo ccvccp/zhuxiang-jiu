@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from core.auth import AuthError, TokenExpiredError
+from services import ai_feedback_hooks as ai_hooks
 from services.auth_service import AuthService, ROLE_ADMIN
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,8 @@ async def login(data: LoginRequest):
     """密码登录(返回 JWT 双令牌)"""
     try:
         result = await _service.login(phone=data.phone, password=data.password)
+        # v7.6 自动反馈: 登录成功 → 认证风控观察评分+配对(凭证有效期望 allow)
+        await ai_hooks.on_login_success(data.phone)
         return result
     except Exception as exc:
         _handle_auth_error(exc)

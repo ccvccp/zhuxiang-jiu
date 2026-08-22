@@ -25,6 +25,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
 
+from services import ai_feedback_hooks as ai_hooks
 from services.wallet_service import (
     WalletService,
     CURRENT_ANNUAL_RATE,
@@ -237,9 +238,13 @@ async def approve_withdrawal(
     """审核提现单(admin; approved 等待打款, rejected 释放冻结)"""
     _require_admin(x_role)
     try:
-        return await _service.approve_withdrawal(
+        result = await _service.approve_withdrawal(
             withdraw_no, req.decision, req.auditor, req.auditRemark,
         )
+        # v7.6 自动反馈: 提现终态 → 自动配对反馈(通过期望 low 风险)
+        await ai_hooks.on_withdraw_settled(
+            withdraw_no, str(req.decision).lower() == "approved")
+        return result
     except KeyError as e:
         raise _map_key_error(e) from e
     except ValueError as e:

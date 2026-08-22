@@ -1,8 +1,8 @@
-"""AI 自学习层路由(10 管理端端点)
+"""AI 自学习层路由(11 管理端端点, v7.6 新增 report)
 
 为 14 个 AI 评分器的自学习闭环暴露管理接口:
 
-    反馈标注 → 在线学习 → 冠军/挑战者评估 → 晋升/回滚 → 漂移监控
+    反馈标注 → 在线学习 → 冠军/挑战者评估 → 晋升/回滚 → 漂移监控 → 效果报表
 
 鉴权:
     - 全部为管理端能力: X-Role: admin 头(与 AI 评分层管理端约定一致)
@@ -18,6 +18,7 @@
     POST /api/ai-learning/reset/{scorerId}    重置为默认权重
     GET  /api/ai-learning/drift/{scorerId}    漂移统计(EMA vs 基线)
     PUT  /api/ai-learning/config/{scorerId}   更新学习配置(eta/护栏等)
+    GET  /api/ai-learning/report/{scorerId}   学习效果报表(v7.6: 版本正确率曲线)
 
 异常映射(项目约定):
     KeyError → 404(未知评分器) / ValueError → 409(业务冲突) / 其余 → 500
@@ -194,6 +195,17 @@ async def get_drift(scorer_id: str,
     _require_admin(x_role)
     try:
         return await svc.get_drift_view(scorer_id)
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/ai-learning/report/{scorer_id}", tags=["AI自学习层"])
+async def get_report(scorer_id: str,
+                     x_role: Optional[str] = Header(None, alias="X-Role")):
+    """学习效果报表: 按权重版本聚合正确率 + 版本演进曲线 + 近期趋势"""
+    _require_admin(x_role)
+    try:
+        return await svc.learning_report(scorer_id)
     except Exception as exc:
         _handle(exc)
 

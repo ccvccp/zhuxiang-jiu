@@ -361,6 +361,7 @@ async def submit_feedback(payload: dict) -> dict:
                      "contribution": float(f.get("contribution") or 0)}
                     for f in factors],
         "note": str(payload.get("note") or ""),
+        "source": str(payload.get("source") or "manual"),
         "status": "pending", "createdAt": ts(),
     }
     repo = AiLearningRepository()
@@ -734,6 +735,14 @@ async def overview() -> dict:
         config = {**DEFAULT_LEARNING_CONFIG, **(await repo.get_config(scorer_id) or {})}
         drift = await repo.get_drift(scorer_id) or {}
         pending = await repo.count_feedback(scorer_id, status="pending")
+        feedback = await repo.list_feedback(scorer_id, limit=0)
+        # 近 24h 自动反馈数(v7.6 自动闭环健康度指标)
+        auto_24h = 0
+        cutoff = time.time() - 24 * 3600
+        for fb in feedback:
+            if fb.get("source") == "auto" and fb.get("createdAt", "") >= \
+                    time.strftime("%Y-%m-%dT%H:%M", time.gmtime(cutoff)):
+                auto_24h += 1
         scorers.append({
             "scorerId": scorer_id, "label": meta["label"],
             "module": meta["module"], "batch": meta["batch"],
@@ -742,10 +751,100 @@ async def overview() -> dict:
             "challengerVersion": challenger.get("version"),
             "pendingFeedback": pending,
             "totalFeedback": await repo.count_feedback(scorer_id),
+            "autoFeedback24h": auto_24h,
             "driftScore": drift.get("driftScore", 0.0),
             "driftLevel": drift.get("driftLevel", "low"),
             "autoApply": config["auto_apply"],
             "learnableThreshold": DECISION_THRESHOLDS.get(scorer_id) is not None,
         })
+    scheduler_stats = await repo.get_scheduler_stats() or {}
     return {"success": True, "scorerCount": len(scorers),
-            "scorers": scorers, "generatedAt": ts()}
+            "scorers": scorers,
+            "scheduler": {
+                "runs": scheduler_stats.get("runs", 0),
+                "lastRunAt": scheduler_stats.get("lastRunAt"),
+                "lastLearnedScorers": scheduler_stats.get("lastLearnedScorers", 0),
+            },
+            "generatedAt": ts()}
+
+
+async def learning_report(scorer_id: str) -> dict:
+    """学习效果报表: 按权重版本聚合反馈正确率 + 版本演进曲线
+
+    Returns:
+        {versions: [{version, feedbackCount, correctRate}], curve: [...],
+         recentTrend: {last10CorrectRate, previous10CorrectRate}}
+    """
+    _require_scorer(scorer_id)
+    repo = AiLearningRepository()
+    feedback = await repo.list_feedback(scorer_id, limit=0)
+
+    # 按权重版本聚合(正确率随版本演进是核心观测指标)
+    by_version: dict[str, dict] = {}
+    for fb in feedback:
+        version = str(fb.get("weightVersion") or "v1")
+        bucket = by_version.setdefault(
+            version, {"version": version, "feedbackCount": 0, "correct": 0})
+        bucket["feedbackCount"] += 1
+        if fb.get("correct"):
+            bucket["correct"] += 1
+    versions = [
+        {"version": v["version"], "feedbackCount": v["feedbackCount"],
+         "correctRate": round(v["correct"] / v["feedbackCount"], 4)
+         if v["feedbackCount"] else None,
+         "incorrectCount": v["feedbackCount"] - v["correct"]}
+        for v in by_version.values()
+    ]
+    versions.sort(key=lambda x: _version_number(x["version"]))
+
+    # 近期趋势(最近 10 条 vs 之前 10 条)
+    ordered = list(feedback)
+    last10 = ordered[-10:]
+    prev10 = ordered[-20:-10]
+    rate = lambda chunk: (round(sum(1 for f in chunk if f.get("correct"))
+                                 / len(chunk), 4) if chunk else None)
+    recent_trend = {
+        "last10CorrectRate": rate(last10),
+        "previous10CorrectRate": rate(prev10),
+        "last10Size": len(last10), "previous10Size": len(prev10),
+    }
+
+    # 版本演进曲线(历史 + 在役, 各版本评估指标)
+    profile = await repo.get_profile(scorer_id) or {}
+    curve = []
+    for rec in await repo.list_history(scorer_id, limit=50):
+        curve.append({
+            "version": rec.get("version"), "source": rec.get("source"),
+            "parentVersion": rec.get("parentVersion"),
+            "createdAt": rec.get("createdAt"),
+            "stats": rec.get("stats") or {},
+            "role": "retired",
+        })
+    for role in ("challenger", "champion"):
+        rec = profile.get(role)
+        if rec:
+            curve.append({
+                "version": rec.get("version"), "source": rec.get("source"),
+                "parentVersion": rec.get("parentVersion"),
+                "createdAt": rec.get("createdAt"),
+                "stats": rec.get("stats") or {},
+                "role": role,
+            })
+    curve.sort(key=lambda x: _version_number(x["version"]))
+
+    # 自动 vs 手动反馈占比
+    auto_count = sum(1 for fb in feedback if fb.get("source") == "auto")
+    drift = await repo.get_drift(scorer_id) or {}
+    return {
+        "success": True, "scorerId": scorer_id,
+        "label": SCORER_REGISTRY[scorer_id]["label"],
+        "totalFeedback": len(feedback),
+        "autoFeedback": auto_count,
+        "manualFeedback": len(feedback) - auto_count,
+        "versions": versions,
+        "recentTrend": recent_trend,
+        "curve": curve,
+        "drift": {"driftScore": drift.get("driftScore", 0.0),
+                  "driftLevel": drift.get("driftLevel", "low")},
+        "generatedAt": ts(),
+    }

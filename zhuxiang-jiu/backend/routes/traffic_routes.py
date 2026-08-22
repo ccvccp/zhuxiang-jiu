@@ -19,6 +19,7 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
 
+from services import ai_feedback_hooks as ai_hooks
 from services.traffic_service import TrafficService
 
 
@@ -237,6 +238,9 @@ async def calculate_commission(
             order_amount=data.orderAmount,
             user_id=data.userId,
         )
+        # v7.6 自动反馈: 佣金计算 → 防作弊观察评分+配对(正常计佣期望 pass)
+        await ai_hooks.on_traffic_commission(
+            f"{data.promoterId}:{data.orderId}")
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

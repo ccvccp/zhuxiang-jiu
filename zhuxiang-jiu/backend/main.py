@@ -197,13 +197,28 @@ register_ai_learning_routes(app)
 
 
 # ============================================================
-#  生命周期管理: shutdown 时关闭 Redis 连接
+# 生命周期管理: startup 启动自学习调度器, shutdown 清理资源
 # ============================================================
+
+@app.on_event("startup")
+async def _on_startup():
+    """启动 AI 自学习定时调度器(v7.6)
+
+    周期扫描全部评分器, 待学习反馈攒够 min_feedback 时自动执行
+    Hedge 学习(默认 6 小时一轮; AI_LEARNING_AUTO=off 可关闭)。
+    """
+    from services.ai_learning_scheduler import start_scheduler
+    started = start_scheduler()
+    logger.info("AI 自学习调度器: %s",
+                "已启动" if started else "未启用(AI_LEARNING_AUTO=off)")
+
 
 @app.on_event("shutdown")
 async def _on_shutdown():
-    """应用关闭时清理资源(Redis 连接), 避免连接泄漏"""
-    logger.info("应用关闭中, 清理 Redis 连接...")
+    """应用关闭时清理资源(调度任务/Redis 连接), 避免泄漏"""
+    logger.info("应用关闭中, 清理调度任务与 Redis 连接...")
+    from services.ai_learning_scheduler import stop_scheduler
+    stop_scheduler()
     await close_redis_client()
     logger.info("清理完成")
 

@@ -205,6 +205,100 @@ class AiLearningRepository:
             self.store["ai_drift_stats"][scorer_id] = stats
 
     # ============================================================
+    # 决策快照暂存(v7.6 自动反馈闭环)
+    # ============================================================
+
+    SNAPSHOT_TTL_SECONDS = 7 * 24 * 3600  # 7 天, 过期未配对视为无效信号
+
+    async def save_decision_snapshot(self, scorer_id: str, business_key: str,
+                                     snapshot: dict) -> None:
+        """暂存评分决策快照(等待业务终态事件配对)
+
+        snapshot: {scorerId, businessKey, decision, score, factors,
+                   weightVersion, createdAt}
+        """
+        snapshot = dict(snapshot)
+        snapshot["scorerId"] = scorer_id
+        snapshot["businessKey"] = business_key
+        snapshot["createdAt"] = ts()
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("ai_learning", "snapshot", scorer_id, business_key),
+                json.dumps(snapshot, ensure_ascii=False),
+                ex=self.SNAPSHOT_TTL_SECONDS)
+        else:
+            self._ensure_store()
+            self.store["ai_learning_snapshots"][(scorer_id, business_key)] = snapshot
+
+    async def get_decision_snapshot(self, scorer_id: str,
+                                     business_key: str) -> Optional[dict]:
+        """读取决策快照(过期返回 None, 内存模式顺带惰性清理)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(
+                _k("ai_learning", "snapshot", scorer_id, business_key))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        snapshots = self.store["ai_learning_snapshots"]
+        snapshot = snapshots.get((scorer_id, business_key))
+        if snapshot is None:
+            return None
+        try:
+            from datetime import datetime, timedelta, timezone
+            created = datetime.fromisoformat(snapshot["createdAt"])
+            if datetime.now(timezone.utc) - created > timedelta(
+                    seconds=self.SNAPSHOT_TTL_SECONDS):
+                snapshots.pop((scorer_id, business_key), None)
+                return None
+        except (KeyError, ValueError):
+            return None
+        return snapshot
+
+    async def consume_decision_snapshot(self, scorer_id: str,
+                                         business_key: str) -> Optional[dict]:
+        """取出并删除决策快照(天然去重: 同一业务键只能配对一次)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("ai_learning", "snapshot", scorer_id, business_key)
+            data = await client.getdel(key)
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store["ai_learning_snapshots"].pop(
+            (scorer_id, business_key), None)
+
+    async def count_snapshots(self, scorer_id: str) -> int:
+        """统计未配对快照数(监控用, 内存模式含过期项)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("ai_learning", "snapshot", scorer_id, "*"))
+            return len(keys)
+        self._ensure_store()
+        return sum(1 for sid, _ in self.store["ai_learning_snapshots"]
+                   if sid == scorer_id)
+
+    # ============================================================
+    # 调度统计(v7.6 定时学习)
+    # ============================================================
+
+    async def get_scheduler_stats(self) -> Optional[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(_k("ai_learning", "scheduler", "stats"))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store.get("ai_learning_scheduler_stats")
+
+    async def save_scheduler_stats(self, stats: dict) -> None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("ai_learning", "scheduler", "stats"),
+                             json.dumps(stats, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["ai_learning_scheduler_stats"] = stats
+
+    # ============================================================
     # 内存模式辅助
     # ============================================================
 
@@ -215,4 +309,5 @@ class AiLearningRepository:
             self.store["ai_learning_history"] = {}       # scorerId → [version, ...]
             self.store["ai_learning_configs"] = {}       # scorerId → config
             self.store["ai_drift_stats"] = {}            # scorerId → stats
+            self.store["ai_learning_snapshots"] = {}     # (scorerId, businessKey) → snapshot
             self.store["_ai_learning_feedback_seq"] = 0
