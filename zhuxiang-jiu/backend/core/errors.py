@@ -28,10 +28,12 @@ async def general_exception_handler(request: Request, exc: Exception):
     统一返回 500, 不向客户端泄露内部堆栈(安全),
     仅在服务端日志记录完整 traceback(可追溯)。
     """
+    path = request.url.path if request else ""
+    method = request.method if request else ""
     logger.error(
         "未捕获异常 path=%s method=%s: %s\n%s",
-        request.url.path,
-        request.method,
+        path,
+        method,
         exc,
         traceback.format_exc(),
     )
@@ -39,8 +41,9 @@ async def general_exception_handler(request: Request, exc: Exception):
         status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "success": False,
-            "error": "内部服务器错误",
-            "path": request.url.path,
+            "error": f"DECISION_010: {exc}",
+            "errorCode": "DECISION_010",
+            "path": path,
         },
     )
 

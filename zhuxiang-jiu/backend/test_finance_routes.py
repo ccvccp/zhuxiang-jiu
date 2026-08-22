@@ -19,8 +19,12 @@ HTTP 客户端: httpx.AsyncClient + ASGITransport(直连 ASGI app, 走完整 Fas
 
 import pytest
 import httpx
+from datetime import datetime, timezone
 
 from main import app
+
+# 动态当天日期(UTC, 与 ts() 一致)
+TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 from repositories.store import _mock_store, reset_store
 from core.locks import _async_locks
 
@@ -891,7 +895,7 @@ class TestReconList:
     async def test_list_success(self, client):
         order_id = await _create_paid_order(client)
         await client.post(
-            "/api/finance/recon/daily/2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/recon/daily/{TODAY}", headers=ADMIN_HEADERS,
         )
         resp = await client.get("/api/finance/recon/list", headers=ADMIN_HEADERS)
         assert resp.status_code == 200
@@ -899,10 +903,10 @@ class TestReconList:
 
     async def test_list_filter_by_date(self, client):
         await client.post(
-            "/api/finance/recon/daily/2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/recon/daily/{TODAY}", headers=ADMIN_HEADERS,
         )
         resp = await client.get(
-            "/api/finance/recon/list?date=2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/recon/list?date={TODAY}", headers=ADMIN_HEADERS,
         )
         assert resp.json()["count"] == 1
         resp2 = await client.get(
@@ -925,7 +929,7 @@ class TestReconDaily:
     async def test_daily_success(self, client):
         order_id = await _create_paid_order(client)
         resp = await client.post(
-            "/api/finance/recon/daily/2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/recon/daily/{TODAY}", headers=ADMIN_HEADERS,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -943,22 +947,22 @@ class TestReconDaily:
 
     async def test_daily_no_admin(self, client):
         resp = await client.post(
-            "/api/finance/recon/daily/2026-08-21", headers=MEMBER_HEADERS,
+            f"/api/finance/recon/daily/{TODAY}", headers=MEMBER_HEADERS,
         )
         assert resp.status_code == 403
 
     async def test_daily_idempotent(self, client):
         """重复对账应覆盖原记录"""
         await client.post(
-            "/api/finance/recon/daily/2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/recon/daily/{TODAY}", headers=ADMIN_HEADERS,
         )
         resp = await client.post(
-            "/api/finance/recon/daily/2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/recon/daily/{TODAY}", headers=ADMIN_HEADERS,
         )
         assert resp.status_code == 200
         # 列表只有一条
         list_resp = await client.get(
-            "/api/finance/recon/list?date=2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/recon/list?date={TODAY}", headers=ADMIN_HEADERS,
         )
         assert list_resp.json()["count"] == 1
 
@@ -976,8 +980,8 @@ class TestReconResolve:
         _tz = timezone(timedelta(hours=8))
         now = datetime.now(_tz).isoformat()
         recon = {
-            "reconId": "2026-08-21:daily",
-            "date": "2026-08-21",
+            "reconId": f"{TODAY}:daily",
+            "date": TODAY,
             "type": "daily",
             "status": "diff",
             "orderSide": {"count": 5, "amount": 1000.00},
@@ -994,12 +998,12 @@ class TestReconResolve:
             "updatedAt": now,
         }
         _mock_store.setdefault("finance_reconciliations", {})
-        _mock_store["finance_reconciliations"]["2026-08-21:daily"] = recon
+        _mock_store["finance_reconciliations"][f"{TODAY}:daily"] = recon
 
     async def test_resolve_success(self, client):
         await self._make_diff_recon(client)
         resp = await client.post(
-            "/api/finance/recon/2026-08-21:daily/resolve",
+            f"/api/finance/recon/{TODAY}:daily/resolve",
             json={"reason": "银行T+1到账延迟", "handler": "财务-李四"},
             headers=ADMIN_HEADERS,
         )
@@ -1011,10 +1015,10 @@ class TestReconResolve:
     async def test_resolve_no_diff(self, client):
         # 一致的对账记录不可处理
         await client.post(
-            "/api/finance/recon/daily/2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/recon/daily/{TODAY}", headers=ADMIN_HEADERS,
         )
         resp = await client.post(
-            "/api/finance/recon/2026-08-21:daily/resolve",
+            f"/api/finance/recon/{TODAY}:daily/resolve",
             json={"reason": "x", "handler": "x"},
             headers=ADMIN_HEADERS,
         )
@@ -1023,12 +1027,12 @@ class TestReconResolve:
     async def test_resolve_already_resolved(self, client):
         await self._make_diff_recon(client)
         await client.post(
-            "/api/finance/recon/2026-08-21:daily/resolve",
+            f"/api/finance/recon/{TODAY}:daily/resolve",
             json={"reason": "x", "handler": "x"},
             headers=ADMIN_HEADERS,
         )
         resp = await client.post(
-            "/api/finance/recon/2026-08-21:daily/resolve",
+            f"/api/finance/recon/{TODAY}:daily/resolve",
             json={"reason": "y", "handler": "y"},
             headers=ADMIN_HEADERS,
         )
@@ -1352,7 +1356,7 @@ class TestManagementReport:
     async def test_management_success(self, client):
         order_id = await _create_paid_order(client)
         resp = await client.get(
-            "/api/finance/report/management/2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/report/management/{TODAY}", headers=ADMIN_HEADERS,
         )
         assert resp.status_code == 200
         report = resp.json()["report"]
@@ -1361,7 +1365,7 @@ class TestManagementReport:
 
     async def test_management_no_admin(self, client):
         resp = await client.get(
-            "/api/finance/report/management/2026-08-21", headers=MEMBER_HEADERS,
+            f"/api/finance/report/management/{TODAY}", headers=MEMBER_HEADERS,
         )
         assert resp.status_code == 403
 
@@ -1369,7 +1373,7 @@ class TestManagementReport:
         """管理报表结构: sales/finance/balance"""
         await _create_paid_order(client)
         resp = await client.get(
-            "/api/finance/report/management/2026-08-21", headers=ADMIN_HEADERS,
+            f"/api/finance/report/management/{TODAY}", headers=ADMIN_HEADERS,
         )
         report = resp.json()["report"]
         for key in ("sales", "finance", "balance"):

@@ -1353,7 +1353,7 @@ class TestMainEntryPoint:
         # 拦截 uvicorn.run
         calls = []
         fake_uvicorn = ModuleType("uvicorn")
-        fake_uvicorn.run = lambda app, host, port: calls.append(
+        fake_uvicorn.run = lambda app, host, port, **kwargs: calls.append(
             {"host": host, "port": port}
         )
         monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
@@ -1381,7 +1381,7 @@ class TestMainEntryPoint:
 
         calls = []
         fake_uvicorn = ModuleType("uvicorn")
-        fake_uvicorn.run = lambda app, host, port: calls.append(
+        fake_uvicorn.run = lambda app, host, port, **kwargs: calls.append(
             {"host": host, "port": port}
         )
         monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
