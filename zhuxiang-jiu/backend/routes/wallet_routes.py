@@ -186,22 +186,21 @@ async def wallet_withdraw(
     req: WithdrawRequest,
     x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
 ):
-    """提现申请(< ¥5000 自动通过; ¥5000-¥50000 一级审核; > ¥50000 二级审核)"""
+    """提现申请(< ¥5000 自动通过; ¥5000-¥50000 一级审核; > ¥50000 二级审核)
+
+    v7.8 AI 决策门: AI_ENFORCE_MODE=enforce 时高风险提现被拦截(409),
+    中风险强制人工审核; observe/shadow 模式不改变业务行为。
+    """
     member_id = _require_member_id(x_member_id)
     try:
-        result = await _service.withdraw(
+        # v7.8 决策门(前置): 评分→阻断409/强制人工, 单号与创建复用
+        from services.ai_enforcement_withdraw import enforce_withdrawal
+        gate = await enforce_withdrawal(member_id, req.amount)
+        return await _service.withdraw(
             member_id, req.amount, req.payChannel, req.bankAccount,
+            withdraw_no=gate["withdrawNo"],
+            force_review=gate["reviewRequired"],
         )
-        # v7.6 自动反馈: 提现风控评分+快照(等待审批终态配对)
-        # v7.8 输入富化: 传入 member_id 启用真实画像; 余额传「提现前」
-        withdraw_no = str(result.get("withdrawNo") or "")
-        if withdraw_no:
-            balance_before = float(req.amount or 0) \
-                + float(result.get("balanceAfter") or 0)
-            await ai_hooks.on_withdraw_requested(
-                withdraw_no, float(req.amount or 0), balance_before,
-                member_id=member_id)
-        return result
     except KeyError as e:
         raise _map_key_error(e) from e
     except ValueError as e:
