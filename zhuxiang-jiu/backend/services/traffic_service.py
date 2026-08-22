@@ -42,6 +42,14 @@ from repositories.traffic_repository import (
     LEAD_STATUS_INVALID, LEAD_EFFECTIVE_TRUE, LEAD_EFFECTIVE_FALSE,
     # 佣金状态
     COMMISSION_PENDING, COMMISSION_SETTLED, COMMISSION_WITHDRAWN,
+    # 博主(KOL)相关
+    INFLUENCER_LEVEL_S, INFLUENCER_LEVEL_A, INFLUENCER_LEVEL_B, INFLUENCER_LEVEL_C,
+    INFLUENCER_LEVEL_COMMISSION_RATE,
+    INFLUENCER_STATUS_COOPERATING, INFLUENCER_STATUS_SUSPENDED, INFLUENCER_STATUS_ENDED,
+    PROMO_CODE_ACTIVE, PROMO_CODE_EXPIRED,
+    # 平台常量
+    SOURCE_DOUYIN, SOURCE_KUAISHOU, SOURCE_WECHAT,
+    SOURCE_XIAOHONGSHU, SOURCE_BILIBILI,
 )
 
 
@@ -586,3 +594,265 @@ class TrafficService:
             "totalPendingCommission": round(total_pending, 2),
             "statsAt": ts(),
         }
+
+    # ============================================================
+    # 11. 博主(KOL)管理
+    # ============================================================
+
+    # 支持的平台
+    SUPPORTED_PLATFORMS = {
+        SOURCE_DOUYIN, SOURCE_KUAISHOU, SOURCE_WECHAT,
+        SOURCE_XIAOHONGSHU, SOURCE_BILIBILI,
+    }
+
+    async def create_influencer(self, user_id: int, name: str,
+                                 level: str = INFLUENCER_LEVEL_C,
+                                 avatar: str = "",
+                                 commission_rate: float = None,
+                                 contract_start: str = "",
+                                 contract_end: str = "") -> dict:
+        """创建博主(返回博主记录)"""
+        if level not in INFLUENCER_LEVEL_COMMISSION_RATE:
+            raise ValueError(f"非法博主等级: {level}")
+
+        if commission_rate is None:
+            commission_rate = INFLUENCER_LEVEL_COMMISSION_RATE[level]
+        if not (0 < commission_rate <= 0.30):
+            raise ValueError(f"佣金比例超出范围(0~0.30): {commission_rate}")
+
+        lock_key = f"traffic:influencer:create:{user_id}"
+        async with get_lock(lock_key):
+            influencer = {
+                "userId": user_id,
+                "name": name,
+                "avatar": avatar,
+                "level": level,
+                "commissionRate": commission_rate,
+                "contractStart": contract_start,
+                "contractEnd": contract_end,
+            }
+            inf_id = await self.repo.create_influencer(influencer)
+            influencer["id"] = inf_id
+            return influencer
+
+    async def get_influencer(self, influencer_id: int) -> dict:
+        """查询博主详情(含平台列表+推广码列表)"""
+        inf = await self.repo.get_influencer(influencer_id)
+        if inf is None:
+            raise KeyError(f"博主不存在(influencerId={influencer_id})")
+
+        platforms = await self.repo.list_influencer_platforms(influencer_id)
+        codes = await self.repo.list_influencer_codes(influencer_id)
+        inf["platforms"] = platforms
+        inf["promoCodes"] = codes
+        return inf
+
+    async def list_influencers(self, status: str = None,
+                                 level: str = None,
+                                 limit: int = 100) -> list[dict]:
+        """博主列表(按等级/状态筛选,按GMV排序)"""
+        return await self.repo.list_influencers(status=status, level=level, limit=limit)
+
+    # ============================================================
+    # 12. 博主平台账号关联
+    # ============================================================
+
+    async def add_influencer_platform(self, influencer_id: int,
+                                        platform: str,
+                                        platform_uid: str,
+                                        platform_name: str = "",
+                                        profile_url: str = "",
+                                        follower_count: int = 0,
+                                        verified: bool = False) -> dict:
+        """为博主关联平台账号(唯一约束: 博主+平台)"""
+        if platform not in self.SUPPORTED_PLATFORMS:
+            raise ValueError(f"不支持的平台: {platform}, 支持: {self.SUPPORTED_PLATFORMS}")
+
+        lock_key = f"traffic:inf_platform:{influencer_id}:{platform}"
+        async with get_lock(lock_key):
+            inf = await self.repo.get_influencer(influencer_id)
+            if inf is None:
+                raise KeyError(f"博主不存在(influencerId={influencer_id})")
+
+            if inf.get("status") != INFLUENCER_STATUS_COOPERATING:
+                raise ValueError(f"博主非合作中状态(当前: {inf.get('status')})")
+
+            existing = await self.repo.get_influencer_platform_by_inf_platform(
+                influencer_id, platform
+            )
+            if existing is not None:
+                raise ValueError(f"博主已关联该平台(platform={platform})")
+
+            platform_data = {
+                "influencerId": influencer_id,
+                "platform": platform,
+                "platformUid": platform_uid,
+                "platformName": platform_name,
+                "profileUrl": profile_url,
+                "followerCount": follower_count,
+                "verified": verified,
+            }
+            plat_id = await self.repo.add_influencer_platform(platform_data)
+            platform_data["id"] = plat_id
+            return platform_data
+
+    async def sync_influencer_platform(self, platform_id: int,
+                                         follower_count: int = None,
+                                         verified: bool = None) -> dict:
+        """同步平台数据(粉丝数/认证状态)"""
+        lock_key = f"traffic:inf_platform_sync:{platform_id}"
+        async with get_lock(lock_key):
+            p = await self.repo.get_influencer_platform(platform_id)
+            if p is None:
+                raise KeyError(f"平台账号不存在(platformId={platform_id})")
+
+            updates = {}
+            if follower_count is not None:
+                if follower_count < 0:
+                    raise ValueError("粉丝数不能为负")
+                updates["followerCount"] = follower_count
+            if verified is not None:
+                updates["verified"] = verified
+
+            await self.repo.update_influencer_platform(platform_id, updates)
+            p.update(updates)
+            return p
+
+    # ============================================================
+    # 13. 博主推广码
+    # ============================================================
+
+    async def create_influencer_promo_code(self, influencer_id: int,
+                                             platform: str,
+                                             expires_at: str = "") -> dict:
+        """为博主生成专属推广码(按平台区分)"""
+        if platform not in self.SUPPORTED_PLATFORMS:
+            raise ValueError(f"不支持的平台: {platform}")
+
+        lock_key = f"traffic:inf_code:{influencer_id}:{platform}"
+        async with get_lock(lock_key):
+            inf = await self.repo.get_influencer(influencer_id)
+            if inf is None:
+                raise KeyError(f"博主不存在(influencerId={influencer_id})")
+
+            existing = await self.repo.get_influencer_platform_by_inf_platform(
+                influencer_id, platform
+            )
+            if existing is None:
+                raise ValueError(f"博主未关联该平台(platform={platform}), 请先关联")
+
+            # 生成推广码: KOL{influencerId}_{PLATFORM}_{random}
+            import uuid
+            short_uuid = uuid.uuid4().hex[:8].upper()
+            promo_code = f"KOL{influencer_id}_{platform}_{short_uuid}"
+            promo_link = f"https://zhuxiang-jiu.com/r/{promo_code}"
+
+            code_data = {
+                "influencerId": influencer_id,
+                "platform": platform,
+                "promoCode": promo_code,
+                "promoLink": promo_link,
+                "expiresAt": expires_at,
+            }
+            code_id = await self.repo.add_influencer_code(code_data)
+            code_data["id"] = code_id
+            return code_data
+
+    async def get_influencer_attribution(self, influencer_id: int) -> dict:
+        """查询博主归因数据(各平台流量/订单/GMV)"""
+        inf = await self.repo.get_influencer(influencer_id)
+        if inf is None:
+            raise KeyError(f"博主不存在(influencerId={influencer_id})")
+
+        platforms = await self.repo.list_influencer_platforms(influencer_id)
+        codes = await self.repo.list_influencer_codes(influencer_id)
+
+        # 按平台汇总推广码数据
+        platform_attribution = {}
+        for code in codes:
+            plat = code.get("platform")
+            if plat not in platform_attribution:
+                platform_attribution[plat] = {
+                    "platform": plat,
+                    "clickCount": 0,
+                    "leadCount": 0,
+                    "orderCount": 0,
+                    "gmv": 0.0,
+                    "codeCount": 0,
+                }
+            pa = platform_attribution[plat]
+            pa["clickCount"] += code.get("clickCount", 0)
+            pa["leadCount"] += code.get("leadCount", 0)
+            pa["orderCount"] += code.get("orderCount", 0)
+            pa["gmv"] = round(pa["gmv"] + code.get("gmv", 0), 2)
+            pa["codeCount"] += 1
+
+        # 合并平台粉丝数
+        for pa in platform_attribution.values():
+            for p in platforms:
+                if p.get("platform") == pa["platform"]:
+                    pa["followerCount"] = p.get("followerCount", 0)
+                    pa["verified"] = p.get("verified", False)
+                    break
+
+        return {
+            "influencerId": influencer_id,
+            "name": inf.get("name"),
+            "level": inf.get("level"),
+            "totalTraffic": inf.get("totalTraffic", 0),
+            "totalOrders": inf.get("totalOrders", 0),
+            "totalGmv": inf.get("totalGmv", 0),
+            "platformCount": len(platforms),
+            "codeCount": len(codes),
+            "platformAttribution": list(platform_attribution.values()),
+            "queriedAt": ts(),
+        }
+
+    async def attribute_traffic(self, promo_code: str,
+                                  is_click: bool = False,
+                                  is_lead: bool = False,
+                                  order_amount: float = 0) -> dict:
+        """流量归因(通过推广码追溯到博主)"""
+        code = await self.repo.get_influencer_code_by_code(promo_code)
+        if code is None:
+            raise KeyError(f"推广码不存在(promoCode={promo_code})")
+
+        if code.get("status") != PROMO_CODE_ACTIVE:
+            raise ValueError(f"推广码已失效(status={code.get('status')})")
+
+        influencer_id = code.get("influencerId")
+        code_id = code["id"]
+
+        lock_key = f"traffic:attribute:{code_id}"
+        async with get_lock(lock_key):
+            click_delta = 1 if is_click else 0
+            lead_delta = 1 if is_lead else 0
+            order_delta = 1 if order_amount > 0 else 0
+
+            # 更新推广码统计
+            await self.repo.update_influencer_code_stats(
+                code_id,
+                click_delta=click_delta,
+                lead_delta=lead_delta,
+                order_delta=order_delta,
+                gmv_delta=order_amount,
+            )
+
+            # 更新博主累计统计
+            await self.repo.update_influencer_stats(
+                influencer_id,
+                traffic_delta=click_delta + lead_delta,
+                order_delta=order_delta,
+                gmv_delta=order_amount,
+            )
+
+            return {
+                "promoCode": promo_code,
+                "influencerId": influencer_id,
+                "platform": code.get("platform"),
+                "attributed": True,
+                "click": is_click,
+                "lead": is_lead,
+                "orderAmount": order_amount,
+                "attributedAt": ts(),
+            }

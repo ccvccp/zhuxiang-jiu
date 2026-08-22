@@ -316,6 +316,192 @@ async def get_admin_stats(
         _handle(e)
 
 
+# ============================================================
+# 博主(KOL)管理接口
+# ============================================================
+
+class CreateInfluencerRequest(PydBaseModel):
+    userId: int = Field(..., description="关联用户ID")
+    name: str = Field(..., min_length=1, max_length=50, description="博主名称")
+    level: str = Field("C", description="博主等级: S/A/B/C")
+    avatar: str = Field("", description="头像URL")
+    commissionRate: Optional[float] = Field(None, gt=0, le=0.30, description="佣金比例(0~0.30)")
+    contractStart: str = Field("", description="合作开始日期")
+    contractEnd: str = Field("", description="合作结束日期")
+
+
+class AddInfluencerPlatformRequest(PydBaseModel):
+    platform: str = Field(..., description="平台: douyin/kuaishou/wechat/xiaohongshu/bilibili")
+    platformUid: str = Field(..., description="平台账号ID")
+    platformName: str = Field("", description="平台昵称")
+    profileUrl: str = Field("", description="主页链接")
+    followerCount: int = Field(0, ge=0, description="粉丝数")
+    verified: bool = Field(False, description="是否认证")
+
+
+class CreatePromoCodeRequest(PydBaseModel):
+    platform: str = Field(..., description="来源平台")
+    expiresAt: str = Field("", description="过期时间")
+
+
+class SyncPlatformRequest(PydBaseModel):
+    followerCount: Optional[int] = Field(None, ge=0, description="新粉丝数")
+    verified: Optional[bool] = Field(None, description="认证状态")
+
+
+class AttributeTrafficRequest(PydBaseModel):
+    promoCode: str = Field(..., description="博主推广码")
+    isClick: bool = Field(False, description="是否点击事件")
+    isLead: bool = Field(False, description="是否注册事件")
+    orderAmount: float = Field(0, ge=0, description="订单金额(下单事件)")
+
+
+@router.post("/api/traffic/influencer/create", tags=["流量管理模块"])
+async def create_influencer(
+    data: CreateInfluencerRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """创建博主(管理员)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.create_influencer(
+            user_id=data.userId,
+            name=data.name,
+            level=data.level,
+            avatar=data.avatar,
+            commission_rate=data.commissionRate,
+            contract_start=data.contractStart,
+            contract_end=data.contractEnd,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/traffic/influencer/list", tags=["流量管理模块"])
+async def list_influencers(
+    status: Optional[str] = Query(None, description="合作状态: cooperating/suspended/ended"),
+    level: Optional[str] = Query(None, description="博主等级: S/A/B/C"),
+    limit: int = Query(100, ge=1, le=500, description="返回数量"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """博主列表(按等级/状态筛选)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.list_influencers(status=status, level=level, limit=limit)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/traffic/influencer/{influencer_id}", tags=["流量管理模块"])
+async def get_influencer(
+    influencer_id: int,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """查询博主详情(含平台+推广码)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.get_influencer(influencer_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/traffic/influencer/{influencer_id}/platform", tags=["流量管理模块"])
+async def add_influencer_platform(
+    influencer_id: int,
+    data: AddInfluencerPlatformRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """为博主关联平台账号(唯一约束: 博主+平台)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.add_influencer_platform(
+            influencer_id=influencer_id,
+            platform=data.platform,
+            platform_uid=data.platformUid,
+            platform_name=data.platformName,
+            profile_url=data.profileUrl,
+            follower_count=data.followerCount,
+            verified=data.verified,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/traffic/influencer/platform/{platform_id}/sync", tags=["流量管理模块"])
+async def sync_influencer_platform(
+    platform_id: int,
+    data: SyncPlatformRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """同步平台数据(粉丝数/认证状态)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.sync_influencer_platform(
+            platform_id=platform_id,
+            follower_count=data.followerCount,
+            verified=data.verified,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/traffic/influencer/{influencer_id}/promo-code", tags=["流量管理模块"])
+async def create_influencer_promo_code(
+    influencer_id: int,
+    data: CreatePromoCodeRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """为博主生成专属推广码(按平台区分)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.create_influencer_promo_code(
+            influencer_id=influencer_id,
+            platform=data.platform,
+            expires_at=data.expiresAt,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/traffic/influencer/{influencer_id}/attribution", tags=["流量管理模块"])
+async def get_influencer_attribution(
+    influencer_id: int,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """查询博主归因数据(各平台流量/订单/GMV)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.get_influencer_attribution(influencer_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/traffic/influencer/attribute", tags=["流量管理模块"])
+async def attribute_traffic(
+    data: AttributeTrafficRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """流量归因(通过推广码追溯到博主, 可点击/注册/下单事件)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.attribute_traffic(
+            promo_code=data.promoCode,
+            is_click=data.isClick,
+            is_lead=data.isLead,
+            order_amount=data.orderAmount,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 def register_traffic_routes(app):
     """注册流量管理模块路由"""
     app.include_router(router)

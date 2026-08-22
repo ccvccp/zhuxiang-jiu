@@ -113,6 +113,34 @@ COMMISSION_SETTLED = "settled"        # 已结算
 COMMISSION_WITHDRAWN = "withdrawn"     # 已提现
 
 
+# ============================================================
+# 博主(KOL)相关常量
+# ============================================================
+
+# 博主等级
+INFLUENCER_LEVEL_S = "S"            # S级(头部,100万+粉丝)
+INFLUENCER_LEVEL_A = "A"            # A级(腰部,50万+)
+INFLUENCER_LEVEL_B = "B"            # B级(中腰部,10万+)
+INFLUENCER_LEVEL_C = "C"            # C级(尾部,1万+)
+
+# 博主等级默认佣金比例
+INFLUENCER_LEVEL_COMMISSION_RATE = {
+    INFLUENCER_LEVEL_S: 0.20,        # 20%
+    INFLUENCER_LEVEL_A: 0.15,        # 15%
+    INFLUENCER_LEVEL_B: 0.12,        # 12%
+    INFLUENCER_LEVEL_C: 0.10,        # 10%
+}
+
+# 博主合作状态
+INFLUENCER_STATUS_COOPERATING = "cooperating"  # 合作中
+INFLUENCER_STATUS_SUSPENDED = "suspended"      # 暂停合作
+INFLUENCER_STATUS_ENDED = "ended"              # 合作结束
+
+# 推广码状态
+PROMO_CODE_ACTIVE = "active"        # 生效中
+PROMO_CODE_EXPIRED = "expired"      # 已过期
+
+
 class TrafficRepository:
     """流量管理数据访问层"""
 
@@ -142,6 +170,21 @@ class TrafficRepository:
         if is_redis_mode():
             return await self._redis_next_id("traffic_source")
         return self._mem_next_id("_traffic_source_seq")
+
+    async def next_influencer_id(self) -> int:
+        if is_redis_mode():
+            return await self._redis_next_id("traffic_influencer")
+        return self._mem_next_id("_traffic_influencer_seq")
+
+    async def next_influencer_platform_id(self) -> int:
+        if is_redis_mode():
+            return await self._redis_next_id("traffic_influencer_platform")
+        return self._mem_next_id("_traffic_influencer_platform_seq")
+
+    async def next_influencer_code_id(self) -> int:
+        if is_redis_mode():
+            return await self._redis_next_id("traffic_influencer_code")
+        return self._mem_next_id("_traffic_influencer_code_seq")
 
     def _mem_next_id(self, seq_key: str) -> int:
         self._ensure_store()
@@ -259,6 +302,153 @@ class TrafficRepository:
         return self._mem_list_commissions(promoter_id, status, limit)
 
     # ============================================================
+    # 博主(KOL) CRUD
+    # ============================================================
+
+    async def create_influencer(self, influencer: dict) -> int:
+        """新增博主(返回博主ID)"""
+        inf_id = await self.next_influencer_id()
+        influencer["id"] = inf_id
+        now = datetime.utcnow().isoformat()
+        if "createdAt" not in influencer:
+            influencer["createdAt"] = now
+        if "totalTraffic" not in influencer:
+            influencer["totalTraffic"] = 0
+        if "totalOrders" not in influencer:
+            influencer["totalOrders"] = 0
+        if "totalGmv" not in influencer:
+            influencer["totalGmv"] = 0.0
+        if "status" not in influencer:
+            influencer["status"] = INFLUENCER_STATUS_COOPERATING
+        if is_redis_mode():
+            await self._redis_save_influencer(influencer)
+        else:
+            self._mem_save_influencer(influencer)
+        return inf_id
+
+    async def get_influencer(self, influencer_id: int) -> Optional[dict]:
+        if is_redis_mode():
+            return await self._redis_get_influencer(influencer_id)
+        return self._mem_get_influencer(influencer_id)
+
+    async def save_influencer(self, influencer: dict) -> None:
+        if is_redis_mode():
+            await self._redis_save_influencer(influencer)
+        else:
+            self._mem_save_influencer(influencer)
+
+    async def list_influencers(self, status: str = None, level: str = None,
+                               limit: int = 100) -> list[dict]:
+        if is_redis_mode():
+            return await self._redis_list_influencers(status, level, limit)
+        return self._mem_list_influencers(status, level, limit)
+
+    async def update_influencer_stats(self, influencer_id: int,
+                                      traffic_delta: int = 0,
+                                      order_delta: int = 0,
+                                      gmv_delta: float = 0) -> None:
+        if is_redis_mode():
+            await self._redis_update_influencer_stats(influencer_id, traffic_delta,
+                                                       order_delta, gmv_delta)
+        else:
+            self._mem_update_influencer_stats(influencer_id, traffic_delta,
+                                                order_delta, gmv_delta)
+
+    # ============================================================
+    # 博主平台账号 CRUD
+    # ============================================================
+
+    async def add_influencer_platform(self, platform: dict) -> int:
+        """新增博主平台账号(返回平台ID)"""
+        plat_id = await self.next_influencer_platform_id()
+        platform["id"] = plat_id
+        now = datetime.utcnow().isoformat()
+        if "createdAt" not in platform:
+            platform["createdAt"] = now
+        if "syncedAt" not in platform:
+            platform["syncedAt"] = now
+        if "verified" not in platform:
+            platform["verified"] = False
+        if is_redis_mode():
+            await self._redis_add_influencer_platform(platform)
+        else:
+            self._mem_add_influencer_platform(platform)
+        return plat_id
+
+    async def get_influencer_platform(self, platform_id: int) -> Optional[dict]:
+        if is_redis_mode():
+            return await self._redis_get_influencer_platform(platform_id)
+        return self._mem_get_influencer_platform(platform_id)
+
+    async def list_influencer_platforms(self, influencer_id: int) -> list[dict]:
+        if is_redis_mode():
+            return await self._redis_list_influencer_platforms(influencer_id)
+        return self._mem_list_influencer_platforms(influencer_id)
+
+    async def get_influencer_platform_by_inf_platform(self, influencer_id: int,
+                                                       platform: str) -> Optional[dict]:
+        """按博主ID+平台查询(唯一约束: 博主+平台)"""
+        if is_redis_mode():
+            return await self._redis_get_influencer_platform_by_inf_platform(influencer_id, platform)
+        return self._mem_get_influencer_platform_by_inf_platform(influencer_id, platform)
+
+    async def update_influencer_platform(self, platform_id: int, updates: dict) -> None:
+        if is_redis_mode():
+            await self._redis_update_influencer_platform(platform_id, updates)
+        else:
+            self._mem_update_influencer_platform(platform_id, updates)
+
+    # ============================================================
+    # 博主推广码 CRUD
+    # ============================================================
+
+    async def add_influencer_code(self, code: dict) -> int:
+        """新增推广码(返回推广码ID)"""
+        code_id = await self.next_influencer_code_id()
+        code["id"] = code_id
+        now = datetime.utcnow().isoformat()
+        if "createdAt" not in code:
+            code["createdAt"] = now
+        if "clickCount" not in code:
+            code["clickCount"] = 0
+        if "leadCount" not in code:
+            code["leadCount"] = 0
+        if "orderCount" not in code:
+            code["orderCount"] = 0
+        if "gmv" not in code:
+            code["gmv"] = 0.0
+        if "status" not in code:
+            code["status"] = PROMO_CODE_ACTIVE
+        if is_redis_mode():
+            await self._redis_add_influencer_code(code)
+        else:
+            self._mem_add_influencer_code(code)
+        return code_id
+
+    async def get_influencer_code_by_code(self, promo_code: str) -> Optional[dict]:
+        """按推广码字符串查询"""
+        if is_redis_mode():
+            return await self._redis_get_influencer_code_by_code(promo_code)
+        return self._mem_get_influencer_code_by_code(promo_code)
+
+    async def list_influencer_codes(self, influencer_id: int) -> list[dict]:
+        if is_redis_mode():
+            return await self._redis_list_influencer_codes(influencer_id)
+        return self._mem_list_influencer_codes(influencer_id)
+
+    async def update_influencer_code_stats(self, code_id: int,
+                                            click_delta: int = 0,
+                                            lead_delta: int = 0,
+                                            order_delta: int = 0,
+                                            gmv_delta: float = 0) -> None:
+        if is_redis_mode():
+            await self._redis_update_influencer_code_stats(code_id, click_delta,
+                                                            lead_delta, order_delta, gmv_delta)
+        else:
+            self._mem_update_influencer_code_stats(code_id, click_delta,
+                                                     lead_delta, order_delta, gmv_delta)
+
+    # ============================================================
     # 内存模式实现
     # ============================================================
 
@@ -272,6 +462,16 @@ class TrafficRepository:
             self.store["traffic_leads_by_promoter"] = {}         # promoterId → [leadId, ...]
             self.store["traffic_commissions"] = {}               # commissionId → commission
             self.store["traffic_commissions_by_promoter"] = {}   # promoterId → [commissionId, ...]
+            # 博主(KOL)相关存储
+            self.store["traffic_influencers"] = {}               # influencerId → influencer
+            self.store["traffic_influencer_platforms"] = {}      # platformId → platform
+            self.store["traffic_influencer_platforms_by_inf"] = {}  # influencerId → [platformId, ...]
+            self.store["traffic_influencer_codes"] = {}         # codeId → promoCode
+            self.store["traffic_influencer_codes_by_inf"] = {}   # influencerId → [codeId, ...]
+            self.store["traffic_influencer_codes_by_code"] = {} # promoCode → codeId
+            self.store["_traffic_influencer_seq"] = 0
+            self.store["_traffic_influencer_platform_seq"] = 0
+            self.store["_traffic_influencer_code_seq"] = 0
             self.store["_promoter_seq"] = 0
             self.store["_traffic_lead_seq"] = 0
             self.store["_traffic_commission_seq"] = 0
@@ -400,6 +600,120 @@ class TrafficRepository:
             commissions = [c for c in commissions if c.get("status") == status]
         commissions.sort(key=lambda c: c.get("createdAt", ""), reverse=True)
         return commissions[:limit]
+
+    # --- 博主(KOL) ---
+
+    def _mem_get_influencer(self, influencer_id: int) -> Optional[dict]:
+        self._ensure_store()
+        return self.store["traffic_influencers"].get(influencer_id)
+
+    def _mem_save_influencer(self, influencer: dict) -> None:
+        self._ensure_store()
+        influencer_id = influencer["id"]
+        influencer["updatedAt"] = datetime.utcnow().isoformat()
+        self.store["traffic_influencers"][influencer_id] = influencer
+
+    def _mem_list_influencers(self, status: str = None, level: str = None,
+                              limit: int = 100) -> list[dict]:
+        self._ensure_store()
+        influencers = list(self.store["traffic_influencers"].values())
+        if status:
+            influencers = [i for i in influencers if i.get("status") == status]
+        if level:
+            influencers = [i for i in influencers if i.get("level") == level]
+        influencers.sort(key=lambda i: i.get("totalGmv", 0), reverse=True)
+        return influencers[:limit]
+
+    def _mem_update_influencer_stats(self, influencer_id: int,
+                                     traffic_delta: int = 0,
+                                     order_delta: int = 0,
+                                     gmv_delta: float = 0) -> None:
+        self._ensure_store()
+        inf = self.store["traffic_influencers"].get(influencer_id)
+        if inf:
+            inf["totalTraffic"] = inf.get("totalTraffic", 0) + traffic_delta
+            inf["totalOrders"] = inf.get("totalOrders", 0) + order_delta
+            inf["totalGmv"] = round(inf.get("totalGmv", 0) + gmv_delta, 2)
+            inf["updatedAt"] = datetime.utcnow().isoformat()
+
+    # --- 博主平台账号 ---
+
+    def _mem_get_influencer_platform(self, platform_id: int) -> Optional[dict]:
+        self._ensure_store()
+        return self.store["traffic_influencer_platforms"].get(platform_id)
+
+    def _mem_add_influencer_platform(self, platform: dict) -> None:
+        self._ensure_store()
+        platform_id = platform["id"]
+        influencer_id = platform.get("influencerId")
+        self.store["traffic_influencer_platforms"][platform_id] = platform
+        if influencer_id:
+            if influencer_id not in self.store["traffic_influencer_platforms_by_inf"]:
+                self.store["traffic_influencer_platforms_by_inf"][influencer_id] = []
+            self.store["traffic_influencer_platforms_by_inf"][influencer_id].append(platform_id)
+
+    def _mem_list_influencer_platforms(self, influencer_id: int) -> list[dict]:
+        self._ensure_store()
+        platform_ids = self.store["traffic_influencer_platforms_by_inf"].get(influencer_id, [])
+        return [self.store["traffic_influencer_platforms"][pid] for pid in platform_ids
+                if pid in self.store["traffic_influencer_platforms"]]
+
+    def _mem_get_influencer_platform_by_inf_platform(self, influencer_id: int,
+                                                      platform: str) -> Optional[dict]:
+        self._ensure_store()
+        for p in self._mem_list_influencer_platforms(influencer_id):
+            if p.get("platform") == platform:
+                return p
+        return None
+
+    def _mem_update_influencer_platform(self, platform_id: int,
+                                         updates: dict) -> None:
+        self._ensure_store()
+        p = self.store["traffic_influencer_platforms"].get(platform_id)
+        if p:
+            p.update(updates)
+            p["syncedAt"] = datetime.utcnow().isoformat()
+
+    # --- 博主推广码 ---
+
+    def _mem_add_influencer_code(self, code: dict) -> None:
+        self._ensure_store()
+        code_id = code["id"]
+        influencer_id = code.get("influencerId")
+        self.store["traffic_influencer_codes"][code_id] = code
+        if influencer_id:
+            if influencer_id not in self.store["traffic_influencer_codes_by_inf"]:
+                self.store["traffic_influencer_codes_by_inf"][influencer_id] = []
+            self.store["traffic_influencer_codes_by_inf"][influencer_id].append(code_id)
+        if "promoCode" in code:
+            self.store["traffic_influencer_codes_by_code"][code["promoCode"]] = code_id
+
+    def _mem_get_influencer_code_by_code(self, promo_code: str) -> Optional[dict]:
+        self._ensure_store()
+        code_id = self.store["traffic_influencer_codes_by_code"].get(promo_code)
+        if code_id is None:
+            return None
+        return self.store["traffic_influencer_codes"].get(code_id)
+
+    def _mem_list_influencer_codes(self, influencer_id: int) -> list[dict]:
+        self._ensure_store()
+        code_ids = self.store["traffic_influencer_codes_by_inf"].get(influencer_id, [])
+        return [self.store["traffic_influencer_codes"][cid] for cid in code_ids
+                if cid in self.store["traffic_influencer_codes"]]
+
+    def _mem_update_influencer_code_stats(self, code_id: int,
+                                           click_delta: int = 0,
+                                           lead_delta: int = 0,
+                                           order_delta: int = 0,
+                                           gmv_delta: float = 0) -> None:
+        self._ensure_store()
+        code = self.store["traffic_influencer_codes"].get(code_id)
+        if code:
+            code["clickCount"] = code.get("clickCount", 0) + click_delta
+            code["leadCount"] = code.get("leadCount", 0) + lead_delta
+            code["orderCount"] = code.get("orderCount", 0) + order_delta
+            code["gmv"] = round(code.get("gmv", 0) + gmv_delta, 2)
+            code["updatedAt"] = datetime.utcnow().isoformat()
 
     # ============================================================
     # Redis 模式实现
@@ -556,3 +870,140 @@ class TrafficRepository:
                 commissions.append(c)
         commissions.sort(key=lambda c: c.get("createdAt", ""), reverse=True)
         return commissions[:limit]
+
+    # --- 博主(KOL) Redis 实现 ---
+
+    async def _redis_get_influencer(self, influencer_id: int) -> Optional[dict]:
+        client = await get_redis_client()
+        data = await client.get(_k("traffic", "influencer", influencer_id))
+        return json.loads(data) if data else None
+
+    async def _redis_save_influencer(self, influencer: dict) -> None:
+        client = await get_redis_client()
+        influencer_id = influencer["id"]
+        influencer["updatedAt"] = datetime.utcnow().isoformat()
+        await client.set(_k("traffic", "influencer", influencer_id),
+                         json.dumps(influencer, ensure_ascii=False))
+
+    async def _redis_list_influencers(self, status: str = None, level: str = None,
+                                       limit: int = 100) -> list[dict]:
+        client = await get_redis_client()
+        keys = await client.keys(_k("traffic", "influencer", "*"))
+        influencers = []
+        for key in keys:
+            if "influencer_platform" in key or "influencer_code" in key:
+                continue
+            data = await client.get(key)
+            if data:
+                i = json.loads(data)
+                if status and i.get("status") != status:
+                    continue
+                if level and i.get("level") != level:
+                    continue
+                influencers.append(i)
+        influencers.sort(key=lambda i: i.get("totalGmv", 0), reverse=True)
+        return influencers[:limit]
+
+    async def _redis_update_influencer_stats(self, influencer_id: int,
+                                              traffic_delta: int = 0,
+                                              order_delta: int = 0,
+                                              gmv_delta: float = 0) -> None:
+        inf = await self._redis_get_influencer(influencer_id)
+        if inf:
+            inf["totalTraffic"] = inf.get("totalTraffic", 0) + traffic_delta
+            inf["totalOrders"] = inf.get("totalOrders", 0) + order_delta
+            inf["totalGmv"] = round(inf.get("totalGmv", 0) + gmv_delta, 2)
+            inf["updatedAt"] = datetime.utcnow().isoformat()
+            await self._redis_save_influencer(inf)
+
+    # --- 博主平台账号 Redis 实现 ---
+
+    async def _redis_add_influencer_platform(self, platform: dict) -> None:
+        client = await get_redis_client()
+        platform_id = platform["id"]
+        influencer_id = platform.get("influencerId")
+        await client.set(_k("traffic", "influencer_platform", platform_id),
+                         json.dumps(platform, ensure_ascii=False))
+        if influencer_id:
+            await client.lpush(_k("traffic", "inf_platforms_by_inf", influencer_id), platform_id)
+
+    async def _redis_get_influencer_platform(self, platform_id: int) -> Optional[dict]:
+        client = await get_redis_client()
+        data = await client.get(_k("traffic", "influencer_platform", platform_id))
+        return json.loads(data) if data else None
+
+    async def _redis_list_influencer_platforms(self, influencer_id: int) -> list[dict]:
+        client = await get_redis_client()
+        platform_ids = await client.lrange(_k("traffic", "inf_platforms_by_inf", influencer_id), 0, -1)
+        platforms = []
+        for pid in platform_ids:
+            data = await client.get(_k("traffic", "influencer_platform", pid))
+            if data:
+                platforms.append(json.loads(data))
+        return platforms
+
+    async def _redis_get_influencer_platform_by_inf_platform(self, influencer_id: int,
+                                                                platform: str) -> Optional[dict]:
+        platforms = await self._redis_list_influencer_platforms(influencer_id)
+        for p in platforms:
+            if p.get("platform") == platform:
+                return p
+        return None
+
+    async def _redis_update_influencer_platform(self, platform_id: int, updates: dict) -> None:
+        client = await get_redis_client()
+        data = await client.get(_k("traffic", "influencer_platform", platform_id))
+        if data:
+            p = json.loads(data)
+            p.update(updates)
+            p["syncedAt"] = datetime.utcnow().isoformat()
+            await client.set(_k("traffic", "influencer_platform", platform_id),
+                             json.dumps(p, ensure_ascii=False))
+
+    # --- 博主推广码 Redis 实现 ---
+
+    async def _redis_add_influencer_code(self, code: dict) -> None:
+        client = await get_redis_client()
+        code_id = code["id"]
+        influencer_id = code.get("influencerId")
+        await client.set(_k("traffic", "influencer_code", code_id),
+                         json.dumps(code, ensure_ascii=False))
+        if influencer_id:
+            await client.lpush(_k("traffic", "inf_codes_by_inf", influencer_id), code_id)
+        if "promoCode" in code:
+            await client.set(_k("traffic", "inf_code_by_code", code["promoCode"]), code_id)
+
+    async def _redis_get_influencer_code_by_code(self, promo_code: str) -> Optional[dict]:
+        client = await get_redis_client()
+        code_id = await client.get(_k("traffic", "inf_code_by_code", promo_code))
+        if not code_id:
+            return None
+        data = await client.get(_k("traffic", "influencer_code", code_id))
+        return json.loads(data) if data else None
+
+    async def _redis_list_influencer_codes(self, influencer_id: int) -> list[dict]:
+        client = await get_redis_client()
+        code_ids = await client.lrange(_k("traffic", "inf_codes_by_inf", influencer_id), 0, -1)
+        codes = []
+        for cid in code_ids:
+            data = await client.get(_k("traffic", "influencer_code", cid))
+            if data:
+                codes.append(json.loads(data))
+        return codes
+
+    async def _redis_update_influencer_code_stats(self, code_id: int,
+                                                   click_delta: int = 0,
+                                                   lead_delta: int = 0,
+                                                   order_delta: int = 0,
+                                                   gmv_delta: float = 0) -> None:
+        client = await get_redis_client()
+        data = await client.get(_k("traffic", "influencer_code", code_id))
+        if data:
+            code = json.loads(data)
+            code["clickCount"] = code.get("clickCount", 0) + click_delta
+            code["leadCount"] = code.get("leadCount", 0) + lead_delta
+            code["orderCount"] = code.get("orderCount", 0) + order_delta
+            code["gmv"] = round(code.get("gmv", 0) + gmv_delta, 2)
+            code["updatedAt"] = datetime.utcnow().isoformat()
+            await client.set(_k("traffic", "influencer_code", code_id),
+                             json.dumps(code, ensure_ascii=False))
