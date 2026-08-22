@@ -39,6 +39,8 @@ from services.compliance_service import ComplianceService
 from services.location_service import LocationService
 from services.admin_service import AdminService
 from services.venue_service import VenueService
+from services.maintenance_service import MaintenanceService
+from services.monitor_service import MonitorService
 
 __all__ = [
     # 已有(15)
@@ -72,4 +74,6 @@ __all__ = [
     "LocationService",
     "AdminService",
     "VenueService",
+    "MonitorService",
+    "MaintenanceService",
 ]

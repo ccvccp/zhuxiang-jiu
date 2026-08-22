@@ -39,6 +39,8 @@ from routes.compliance_routes import register_compliance_routes
 from routes.location_routes import register_location_routes
 from routes.admin_routes import register_admin_routes
 from routes.venue_routes import register_venue_routes
+from routes.maintenance_routes import register_maintenance_routes
+from routes.monitor_routes import register_monitor_routes
 
 __all__ = [
     # 已有(15)
@@ -71,4 +73,6 @@ __all__ = [
     "register_location_routes",
     "register_admin_routes",
     "register_venue_routes",
+    "register_monitor_routes",
+    "register_maintenance_routes",
 ]

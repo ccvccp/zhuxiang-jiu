@@ -56,6 +56,8 @@ from routes import (
     register_location_routes,
     register_admin_routes,
     register_venue_routes,
+    register_monitor_routes,
+    register_maintenance_routes,
 )
 
 
@@ -109,6 +111,8 @@ app = FastAPI(
         {"name": "位置地图模块", "description": "LBS定位/附近搜索/地理围栏"},
         {"name": "后台管理模块", "description": "管理员/角色权限/操作日志/系统配置"},
         {"name": "酒店酒吧模块", "description": "合作商/场地/铺货/分级/佣金结算"},
+        {"name": "AI智能监控模块", "description": "监控指标采集/告警/故障/仪表盘/健康检查"},
+        {"name": "AI智能维护模块", "description": "维护任务/健康检查/故障自愈/性能优化/一键巡检"},
     ],
 )
 
@@ -155,6 +159,8 @@ register_compliance_routes(app)
 register_location_routes(app)
 register_admin_routes(app)
 register_venue_routes(app)
+register_monitor_routes(app)
+register_maintenance_routes(app)
 
 
 # ============================================================
