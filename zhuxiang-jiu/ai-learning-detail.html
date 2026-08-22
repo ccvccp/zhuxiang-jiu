@@ -119,6 +119,55 @@
         .dash-footer { padding: 20px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
         .dash-footer code { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 3px; padding: 1px 6px; font-size: 11px; }
 
+        /* ========= 管理操作面板 ========= */
+        .admin-hint { padding: 10px 16px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.7; }
+        .admin-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px 4px; }
+        .admin-bar label { font-size: 13px; color: var(--color-text-light); }
+        .admin-bar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 300px; background: #fff;
+        }
+        .admin-sum { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--color-text-light); }
+        .admin-sum.ok { color: #2e8b57; }
+        .admin-sum.bad { color: var(--color-danger); font-weight: 600; }
+        .admin-status { padding: 6px 16px 14px; font-size: 13px; min-height: 20px; }
+        .admin-status.ok { color: #2e8b57; }
+        .admin-status.err { color: var(--color-danger); }
+        .dash-btn.danger { background: var(--color-danger); }
+        .dash-btn.danger:hover { background: #a93226; }
+        .dash-btn.danger-ghost { background: #fff; color: var(--color-danger); border: 1px solid var(--color-danger); }
+        .dash-btn.danger-ghost:hover { background: #fdf3f2; }
+        .winput {
+            width: 92px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 5px 8px; font-size: 13px; font-family: Consolas, monospace;
+            text-align: right; background: #fff;
+        }
+        .winput.bad { border-color: var(--color-danger); background: #fdf3f2; }
+        .winput:focus { outline: none; border-color: var(--color-primary); }
+        .grange { font-size: 11px; color: var(--color-text-light); font-family: Consolas, monospace; }
+
+        /* ========= 确认弹窗 ========= */
+        .modal-mask {
+            position: fixed; inset: 0; background: rgba(28, 36, 32, 0.55);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1000; padding: 16px;
+        }
+        .modal-mask[hidden] { display: none; }
+        .modal-box {
+            background: #fff; border-radius: var(--radius-md);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+            max-width: 600px; width: 100%; max-height: 82vh; overflow: auto;
+        }
+        .modal-head {
+            padding: 14px 18px; border-bottom: 1px solid var(--color-border);
+            font-weight: 700; color: var(--color-primary-dark);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .modal-close { cursor: pointer; border: none; background: none; font-size: 20px; color: #999; line-height: 1; }
+        .modal-close:hover { color: var(--color-text); }
+        .modal-body { padding: 14px 18px; font-size: 13px; line-height: 1.8; color: var(--color-text); }
+        .modal-foot { padding: 12px 18px 16px; display: flex; gap: 10px; justify-content: flex-end; }
+
         @media (max-width: 640px) {
             .wbar-item { grid-template-columns: 92px 1fr; }
             .dash-toolbar input[type="text"] { width: 100%; }
@@ -201,12 +250,53 @@
             </div>
         </section>
 
+        <!-- 管理操作 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">管理操作<small>人工覆盖权重 / 重置为默认 · 即时生效</small></div>
+                <div class="admin-hint">
+                    覆盖校验(与后端一致): 权重全为正 · 总和在默认值 ±10% 内 · 各因子在护栏区间内。
+                    应用后生成新冠军版本, 旧冠军退役入历史, 挑战者清除; 重置恢复默认权重(历史保留供审计)。
+                </div>
+                <div class="tbl-wrap" id="adminTable"><div class="chart-empty">加载中…</div></div>
+                <div class="admin-bar">
+                    <label for="overrideReason">覆盖原因</label>
+                    <input type="text" id="overrideReason" maxlength="200" placeholder="例如: 风控运营调整 credit 因子权重">
+                    <span class="admin-sum" id="adminSum">—</span>
+                </div>
+                <div class="admin-bar" style="padding-top:4px;">
+                    <button class="dash-btn ghost" onclick="fillChampionWeights()">恢复冠军值</button>
+                    <button class="dash-btn danger" onclick="applyOverride()">应用覆盖</button>
+                </div>
+                <div class="admin-bar" style="padding-top:10px;border-top:1px dashed var(--color-border);margin-top:6px;">
+                    <span class="admin-sum">危险操作:</span>
+                    <button class="dash-btn danger-ghost" onclick="confirmReset()">重置为默认权重</button>
+                </div>
+                <div class="admin-status" id="adminStatus"></div>
+            </div>
+        </section>
+
         <!-- 页脚 -->
         <footer class="dash-footer">
-            <div>数据来源：<code>GET /api/ai-learning/weights/{scorerId}</code> · <code>GET /api/ai-learning/history/{scorerId}</code> · <code>GET /api/ai-learning/drift/{scorerId}</code>。权重人工覆盖/晋升/重置等管理操作见 v7.7 阶段 4。</div>
+            <div>数据来源：<code>GET /api/ai-learning/weights/{scorerId}</code> · <code>GET /api/ai-learning/history/{scorerId}</code> · <code>GET /api/ai-learning/drift/{scorerId}</code>。管理操作：<code>PUT /weights</code> · <code>POST /reset</code>。挑战者晋升/学习配置编辑见后续阶段。</div>
             <div>鉴权：compat 模式以 <code>X-Role: admin</code> 兼容头访问。曲线为纯 SVG 手绘，无外部依赖。</div>
         </footer>
     </main>
+
+    <!-- 确认弹窗 -->
+    <div class="modal-mask" id="confirmModal" hidden>
+        <div class="modal-box">
+            <div class="modal-head">
+                <span id="modalTitle">确认</span>
+                <button class="modal-close" onclick="closeModal()" aria-label="关闭">×</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-foot">
+                <button class="dash-btn ghost" onclick="closeModal()">取消</button>
+                <button class="dash-btn danger" onclick="modalConfirm()">确认执行</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         'use strict';
@@ -234,12 +324,19 @@
         function verNum(v) { var m = /^v(\d+)$/.exec(String(v || '')); return m ? +m[1] : 0; }
         function fmtTime(s) { return s ? String(s).replace('T', ' ') : '—'; }
 
-        async function fetchJson(url) {
-            var res = await fetch(url, { headers: { 'X-Role': 'admin' } });
+        async function fetchJson(url, opts) {
+            var init = { headers: { 'X-Role': 'admin' } };
+            if (opts && opts.method) {
+                init.method = opts.method;
+                init.headers['Content-Type'] = 'application/json';
+                init.body = JSON.stringify(opts.body || {});
+            }
+            var res = await fetch(url, init);
             var body = null;
             try { body = await res.json(); } catch (e) { /* 非 JSON 错误体 */ }
             if (!res.ok) {
-                var msg = body && (body.error || body.message) ? ' · ' + (body.error || body.message) : '';
+                var msg = body && (body.error || body.message || body.detail)
+                    ? ' · ' + (body.error || body.message || body.detail) : '';
                 throw new Error('HTTP ' + res.status + msg);
             }
             return body;
@@ -264,6 +361,7 @@
                 state.weights = d;
                 renderSummary();
                 renderWeightBars();
+                renderAdminPanel();
             } catch (err) {
                 showError('权重档案加载失败：' + err.message);
                 document.getElementById('wbarList').innerHTML =
@@ -527,6 +625,176 @@
                 ' · 挑战者 <b class="v-challenger">' + esc(challV || '无') + '</b>(不入历史表)</div>';
         }
 
+        /* ========= 管理操作面板 ========= */
+        var admin = { busy: false, defaults: {}, champWeights: {}, guardrail: 2.0, targetSum: 1.0 };
+        var modalConfirmCb = null;
+
+        function renderAdminPanel() {
+            var w = state.weights;
+            if (!w) return;
+            var defaults = w.defaults || {};
+            var champ = (w.champion || {}).weights || {};
+            var guardrail = (w.config || {}).guardrail || 2.0;
+            var names = Object.keys(defaults);
+            if (!names.length) {
+                document.getElementById('adminTable').innerHTML =
+                    '<div class="chart-empty" style="padding:12px 0 18px;">该评分器无可学习因子, 无权重可管理</div>';
+                return;
+            }
+            admin.defaults = defaults;
+            admin.champWeights = champ;
+            admin.guardrail = guardrail;
+            admin.targetSum = names.reduce(function (s, n) { return s + (defaults[n] || 0); }, 0);
+
+            var rows = names.map(function (n) {
+                var d = defaults[n] || 0;
+                var cur = champ[n] != null ? champ[n] : d;
+                return '<tr>' +
+                    '<td class="mono">' + esc(n) + '</td>' +
+                    '<td class="num">' + (+d).toFixed(3) + '</td>' +
+                    '<td class="num">' + (+cur).toFixed(3) + '</td>' +
+                    '<td class="grange">' + (d / guardrail).toFixed(3) + ' ~ ' + (d * guardrail).toFixed(3) + '</td>' +
+                    '<td><input class="winput" type="number" step="0.001" min="0" data-factor="' + esc(n) + '" value="' + (+cur).toFixed(4) + '"></td>' +
+                    '</tr>';
+            }).join('');
+            document.getElementById('adminTable').innerHTML =
+                '<table class="tbl"><thead><tr><th>因子</th><th style="text-align:right">默认</th>' +
+                '<th style="text-align:right">当前冠军</th><th>护栏区间(×' + guardrail + ')</th><th>新权重</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>';
+            updateAdminSum();
+        }
+
+        function updateAdminSum() {
+            var inputs = document.querySelectorAll('#adminTable .winput');
+            var sum = 0, factorOk = true;
+            var values = {};
+            inputs.forEach(function (el) {
+                var n = el.getAttribute('data-factor');
+                var v = parseFloat(el.value);
+                var d = admin.defaults[n] || 0;
+                var ok = !isNaN(v) && v > 0
+                    && v >= d / admin.guardrail - 1e-9
+                    && v <= d * admin.guardrail + 1e-9;
+                el.classList.toggle('bad', !ok);
+                if (!ok) factorOk = false;
+                values[n] = isNaN(v) ? 0 : v;
+                sum += isNaN(v) ? 0 : v;
+            });
+            var sumOk = Math.abs(sum - admin.targetSum) <= admin.targetSum * 0.10;
+            var el = document.getElementById('adminSum');
+            el.textContent = '总和 ' + sum.toFixed(3) + ' / 目标 ' + admin.targetSum.toFixed(3)
+                + (sumOk ? '' : ' · 偏离超10%');
+            el.className = 'admin-sum ' + ((sumOk && factorOk) ? 'ok' : 'bad');
+            return { weights: values, sum: sum, sumOk: sumOk, factorOk: factorOk };
+        }
+
+        function fillChampionWeights() {
+            document.querySelectorAll('#adminTable .winput').forEach(function (el) {
+                var n = el.getAttribute('data-factor');
+                var cur = admin.champWeights[n] != null ? admin.champWeights[n] : (admin.defaults[n] || 0);
+                el.value = (+cur).toFixed(4);
+                el.classList.remove('bad');
+            });
+            updateAdminSum();
+            setAdminStatus('', '');
+        }
+
+        function setAdminStatus(kind, msg) {
+            var el = document.getElementById('adminStatus');
+            el.className = 'admin-status ' + (kind || '');
+            el.textContent = msg || '';
+        }
+
+        async function applyOverride() {
+            if (admin.busy) return;
+            var check = updateAdminSum();
+            if (!check.factorOk) { setAdminStatus('err', '存在非法权重(需为正且在护栏区间内), 请修正标红项'); return; }
+            if (!check.sumOk) { setAdminStatus('err', '权重总和偏离默认值超过 10%, 请调整'); return; }
+            var reason = document.getElementById('overrideReason').value.trim();
+            if (!reason) { setAdminStatus('err', '请填写覆盖原因(审计要求)'); return; }
+
+            /* 确认弹窗: 因子级 新旧对比 */
+            var rows = Object.keys(admin.defaults).map(function (n) {
+                var oldV = admin.champWeights[n] != null ? admin.champWeights[n] : admin.defaults[n];
+                var newV = check.weights[n];
+                var delta = newV - oldV;
+                var cls = Math.abs(delta) < 1e-4 ? 'dev-zero' : (delta > 0 ? 'dev-pos' : 'dev-neg');
+                var arrow = Math.abs(delta) < 1e-4 ? '·' : (delta > 0 ? '↑' : '↓');
+                return '<tr><td class="mono">' + esc(n) + '</td>' +
+                    '<td class="num">' + (+oldV).toFixed(4) + '</td>' +
+                    '<td class="num"><b>' + (+newV).toFixed(4) + '</b></td>' +
+                    '<td class="num ' + cls + '">' + arrow + ' ' + (delta >= 0 ? '+' : '') + delta.toFixed(4) + '</td></tr>';
+            }).join('');
+            showConfirm('确认应用人工覆盖权重？',
+                '<p>冠军 <b>' + esc((state.weights.champion || {}).version || 'v1') + '</b> 将退役入历史, 以下新权重立即生效:</p>' +
+                '<table class="tbl"><thead><tr><th>因子</th><th style="text-align:right">当前</th>' +
+                '<th style="text-align:right">新值</th><th style="text-align:right">变化</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>' +
+                '<p style="margin:10px 0 0;">原因: ' + esc(reason) + '</p>',
+                function () { doOverride(check.weights, reason); });
+        }
+
+        async function doOverride(weights, reason) {
+            admin.busy = true;
+            setAdminStatus('', '提交中…');
+            try {
+                var res = await fetchJson(
+                    api('weights/' + encodeURIComponent(state.scorerId)),
+                    { method: 'PUT', body: { weights: weights, reason: reason } });
+                setAdminStatus('ok', '已应用人工覆盖: ' + res.previousVersion + ' → ' + res.newVersion
+                    + ' (总和已归一化为 ' + admin.targetSum.toFixed(3) + ')');
+                document.getElementById('overrideReason').value = '';
+                loadAll();
+            } catch (err) {
+                setAdminStatus('err', '覆盖失败: ' + err.message);
+            } finally {
+                admin.busy = false;
+            }
+        }
+
+        function confirmReset() {
+            if (admin.busy) return;
+            var champV = (state.weights && state.weights.champion || {}).version || 'v1';
+            showConfirm('确认重置为默认权重？',
+                '<p>当前冠军 <b>' + esc(champV) + '</b> 将退役入历史, 挑战者(若有)将清除。</p>' +
+                '<p>重置会生成新版本(来源=重置)并恢复全部默认权重; 历史保留供审计, 此操作不可撤销。</p>',
+                doReset);
+        }
+
+        async function doReset() {
+            admin.busy = true;
+            setAdminStatus('', '提交中…');
+            try {
+                var res = await fetchJson(
+                    api('reset/' + encodeURIComponent(state.scorerId)),
+                    { method: 'POST', body: {} });
+                setAdminStatus('ok', '已重置为默认权重: ' + res.previousVersion + ' → ' + res.newVersion);
+                document.getElementById('overrideReason').value = '';
+                loadAll();
+            } catch (err) {
+                setAdminStatus('err', '重置失败: ' + err.message);
+            } finally {
+                admin.busy = false;
+            }
+        }
+
+        /* ========= 确认弹窗 ========= */
+        function showConfirm(title, bodyHtml, cb) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalBody').innerHTML = bodyHtml;
+            modalConfirmCb = cb;
+            document.getElementById('confirmModal').hidden = false;
+        }
+        function closeModal() {
+            document.getElementById('confirmModal').hidden = true;
+            modalConfirmCb = null;
+        }
+        async function modalConfirm() {
+            var cb = modalConfirmCb;
+            closeModal();
+            if (cb) await cb();
+        }
+
         /* ========= 工具栏 ========= */
         function saveApiBase() {
             var v = document.getElementById('apiBase').value.trim().replace(/\/+$/, '');
@@ -542,6 +810,12 @@
         /* ========= 初始化 ========= */
         (function init() {
             document.getElementById('apiBase').value = state.apiBase;
+            /* 权重输入实时校验(事件委托) */
+            document.getElementById('adminTable').addEventListener('input', function (e) {
+                if (e.target && e.target.classList && e.target.classList.contains('winput')) {
+                    updateAdminSum();
+                }
+            });
             loadAll();
         })();
     </script>
