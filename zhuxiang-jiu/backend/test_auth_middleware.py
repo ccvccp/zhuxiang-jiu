@@ -429,12 +429,27 @@ class TestStrictMode:
 
 class TestPurity:
     async def run(self):
-        # test 27: 模块零第三方依赖(不导入 fastapi/starlette)
-        import core.auth_middleware as m
-        loaded = {name for name in sys.modules
-                  if name.split(".")[0] in ("fastapi", "starlette")}
+        # test 27: 模块零第三方依赖(子进程隔离验证)
+        #   注: 不能直接查当前进程 sys.modules —— 与其他 import fastapi 的
+        #   测试文件同处一个 pytest 会话时会误报
+        import subprocess
+        code = (
+            "import sys, os; "
+            "os.environ['LOCK_MODE']='asyncio'; "
+            "os.environ['STORE_MODE']='asyncio'; "
+            "import core.auth_middleware; "
+            "print(','.join(m for m in sys.modules "
+            "if m.split('.')[0] in ('fastapi','starlette')))"
+        )
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True, text=True, cwd=backend_dir,
+        )
         record("test_27_no_fastapi_dependency",
-               not loaded, f"已加载第三方模块: {loaded}")
+               proc.returncode == 0 and not proc.stdout.strip(),
+               f"rc={proc.returncode}, loaded={proc.stdout.strip()!r}, "
+               f"err={proc.stderr.strip()[:120]}")
 
         # test 28: 401 响应为合法 JSON 且含 detail 字段(与 FastAPI 异常格式一致)
         mw, mock = build_middleware()
