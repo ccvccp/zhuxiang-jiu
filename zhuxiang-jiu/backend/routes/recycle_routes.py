@@ -1,17 +1,21 @@
-"""老酒兑换及回收模块路由(12 端点)
+"""老酒兑换及回收模块路由(20 端点)
 
 鉴权:
     - 用户端: X-Member-Id 头标识当前会员(估价/申请/查询)
     - 管理端: X-Role: admin 头(审核/状态流转/完成/库存/统计)
 
 端点分布:
-    - 估价(2):     submit-valuation / get-valuation
-    - 申请(3):     submit-application / review-application / list-applications
-    - 兑换(2):     exchange-new-wine / complete-exchange
-    - 回收(1):     recycle-for-cash
-    - 查询(2):     exchanges / inventory
-    - 管理(1):     transition-status
-    - 统计(1):     stats
+    - 老酒估价(2):     submit-valuation / get-valuation
+    - 老酒申请(3):     submit-application / review-application / list-applications
+    - 老酒兑换(2):     exchange-new-wine / complete-exchange
+    - 老酒回收(1):     recycle-for-cash
+    - 查询(2):          exchanges / inventory
+    - 管理(1):          transition-status
+    - 统计(1):          stats
+    - 新酒估价(1):      submit-new-wine-valuation
+    - 议价(5):          get-negotiation / list-negotiations / user-propose / ai-counter / accept
+    - 议价拒绝(1):      reject-negotiation
+    - 新酒回收(1):      complete-new-wine-recycle
 """
 
 from typing import Any, List, Optional
@@ -21,9 +25,12 @@ from pydantic import BaseModel as PydBaseModel, Field
 
 from services.recycle_service import RecycleService
 from repositories.recycle_repository import (
-    TYPE_EXCHANGE, TYPE_RECYCLE,
+    TYPE_EXCHANGE, TYPE_RECYCLE, TYPE_NEW_WINE_RECYCLE,
     GRADE_A, GRADE_B, GRADE_C, GRADE_D,
     STATUS_PENDING, STATUS_VALUED, STATUS_APPROVED, STATUS_REJECTED,
+    WINE_AGE_CURRENT, WINE_AGE_ONE_YEAR, WINE_AGE_TWO_YEARS, WINE_AGE_THREE_YEARS,
+    NEG_STATUS_PENDING, NEG_STATUS_USER_PROPOSED, NEG_STATUS_AI_COUNTER,
+    NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED,
 )
 
 
@@ -104,6 +111,44 @@ class RecycleRequest(PydBaseModel):
 class TransitionRequest(PydBaseModel):
     newStatus: str = Field(..., description="目标状态")
     operator: str = Field("admin", description="操作人")
+
+
+# ============================================================
+# 新酒议价回收请求模型
+# ============================================================
+
+class NewWineValuationRequest(PydBaseModel):
+    userId: int = Field(..., description="会员ID")
+    productId: str = Field(..., description="新酒产品ID")
+    purchasePrice: float = Field(..., gt=0, description="购买原价")
+    purchaseDate: str = Field(..., description="购买日期(YYYY-MM-DD)")
+    conditionGrade: str = Field(GRADE_A, description="品质分级(A/B/C/D)")
+    bottleCount: int = Field(1, ge=1, le=3, description="回收数量(1-3瓶)")
+
+
+class UserProposeRequest(PydBaseModel):
+    proposedPrice: float = Field(..., gt=0, description="用户出价")
+    reason: str = Field("", description="出价理由")
+
+
+class AICounterRequest(PydBaseModel):
+    counterPrice: float = Field(..., gt=0, description="AI反价")
+    aiReason: str = Field("", description="反价理由")
+
+
+class AcceptNegotiationRequest(PydBaseModel):
+    acceptedBy: str = Field("user", description="接受方(user/ai)")
+    finalPrice: Optional[float] = Field(None, gt=0, description="最终价格(默认取当前价)")
+
+
+class RejectNegotiationRequest(PydBaseModel):
+    rejectedBy: str = Field("user", description="拒绝方(user/ai)")
+    reason: str = Field("", description="拒绝理由")
+
+
+class NewWineRecycleRequest(PydBaseModel):
+    payoutMethod: str = Field(..., description="打款方式")
+    payoutAccount: str = Field(..., description="收款账户")
 
 
 # ============================================================
@@ -319,6 +364,150 @@ async def get_stats(
         _require_admin(x_role)
     try:
         result = await _service.get_stats(user_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 新酒议价回收接口(8 个)
+# ============================================================
+
+@router.post("/api/recycle/new-wine/valuation", tags=["老酒兑换回收模块"])
+async def submit_new_wine_valuation(
+    data: NewWineValuationRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """提交新酒估价(自动创建议价记录, 当年/1年/2年/3年酒分类)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.submit_new_wine_valuation(
+            user_id=data.userId,
+            product_id=data.productId,
+            purchase_price=data.purchasePrice,
+            purchase_date=data.purchaseDate,
+            condition_grade=data.conditionGrade,
+            bottle_count=data.bottleCount,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/negotiation/{neg_id}", tags=["老酒兑换回收模块"])
+async def get_negotiation(neg_id: int):
+    """查询议价记录"""
+    try:
+        result = await _service.get_negotiation(neg_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/negotiations", tags=["老酒兑换回收模块"])
+async def list_negotiations(
+    user_id: int = Query(None, description="会员ID筛选"),
+    status: str = Query(None, description="议价状态筛选"),
+    limit: int = Query(50, ge=1, le=500, description="查询条数"),
+):
+    """查询议价记录列表"""
+    try:
+        result = await _service.list_negotiations(user_id, status, limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/negotiation/{neg_id}/propose", tags=["老酒兑换回收模块"])
+async def user_propose_price(
+    neg_id: int,
+    data: UserProposeRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """用户出价(第N轮议价)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.user_propose_price(
+            neg_id=neg_id,
+            proposed_price=data.proposedPrice,
+            reason=data.reason,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/negotiation/{neg_id}/counter", tags=["老酒兑换回收模块"])
+async def ai_counter_price(
+    neg_id: int,
+    data: AICounterRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """AI反价(AI第N轮议价)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.ai_counter_price(
+            neg_id=neg_id,
+            counter_price=data.counterPrice,
+            ai_reason=data.aiReason,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/negotiation/{neg_id}/accept", tags=["老酒兑换回收模块"])
+async def accept_negotiation(
+    neg_id: int,
+    data: AcceptNegotiationRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """接受议价(议价成功)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.accept_negotiation(
+            neg_id=neg_id,
+            accepted_by=data.acceptedBy,
+            final_price=data.finalPrice,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/negotiation/{neg_id}/reject", tags=["老酒兑换回收模块"])
+async def reject_negotiation(
+    neg_id: int,
+    data: RejectNegotiationRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """拒绝议价(议价失败)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.reject_negotiation(
+            neg_id=neg_id,
+            rejected_by=data.rejectedBy,
+            reason=data.reason,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/new-wine/{neg_id}/recycle", tags=["老酒兑换回收模块"])
+async def complete_new_wine_recycle(
+    neg_id: int,
+    data: NewWineRecycleRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """完成新酒议价回收(议价成功后执行, 老酒入库+折现)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.complete_new_wine_recycle(
+            neg_id=neg_id,
+            payout_method=data.payoutMethod,
+            payout_account=data.payoutAccount,
+        )
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

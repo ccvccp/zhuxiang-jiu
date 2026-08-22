@@ -1,20 +1,24 @@
 """老酒兑换及回收模块端到端测试(Service 层, 无需 Docker/fastapi)
 
-直接调用 RecycleService 方法, 模拟 12 个 HTTP 接口的业务逻辑。
+直接调用 RecycleService 方法, 模拟 20 个 HTTP 接口的业务逻辑。
 使用 asyncio 内存模式(LOCK_MODE=asyncio, STORE_MODE=asyncio)。
 
 运行:
     $env:LOCK_MODE="asyncio"; $env:STORE_MODE="asyncio"
     python test_recycle_routes.py
 
-覆盖 12 个接口对应的业务方法:
-    1. 估价(2):     submit_valuation / get_valuation
-    2. 申请(3):     submit_application / review_application / list_applications
-    3. 兑换(2):     exchange_new_wine / complete_exchange
-    4. 回收(1):     recycle_for_cash
-    5. 查询(2):     list_exchanges / get_inventory
-    6. 状态(1):     transition_status
-    7. 统计(1):     get_stats
+覆盖 20 个接口对应的业务方法:
+    1. 老酒估价(2):     submit_valuation / get_valuation
+    2. 老酒申请(3):     submit_application / review_application / list_applications
+    3. 老酒兑换(2):     exchange_new_wine / complete_exchange
+    4. 老酒回收(1):     recycle_for_cash
+    5. 查询(2):          list_exchanges / get_inventory
+    6. 状态(1):          transition_status
+    7. 统计(1):          get_stats
+    8. 新酒估价(1):      submit_new_wine_valuation
+    9. 议价(5):          get_negotiation / list_negotiations / user_propose / ai_counter / accept
+    10. 议价拒绝(1):     reject_negotiation
+    11. 新酒回收(1):     complete_new_wine_recycle
 """
 
 import asyncio
@@ -29,12 +33,18 @@ os.environ["STORE_MODE"] = "asyncio"
 from services.recycle_service import RecycleService
 from repositories.recycle_repository import (
     RecycleRepository,
-    TYPE_EXCHANGE, TYPE_RECYCLE,
+    TYPE_EXCHANGE, TYPE_RECYCLE, TYPE_NEW_WINE_RECYCLE,
     GRADE_A, GRADE_B, GRADE_C, GRADE_D,
     STATUS_PENDING, STATUS_VALUING, STATUS_VALUED, STATUS_REVIEWING,
     STATUS_APPROVED, STATUS_REJECTED, STATUS_RECYCLING, STATUS_EXCHANGING,
     STATUS_COMPLETED, STATUS_CANCELLED,
     STATUS_TRANSITIONS,
+    WINE_AGE_CURRENT, WINE_AGE_ONE_YEAR, WINE_AGE_TWO_YEARS, WINE_AGE_THREE_YEARS,
+    WINE_AGE_CATEGORY_MAP, WINE_AGE_CATEGORY_NAMES, NEW_WINE_DISCOUNT_RATES,
+    NEG_STATUS_PENDING, NEG_STATUS_USER_PROPOSED, NEG_STATUS_AI_COUNTER,
+    NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED,
+    MAX_NEGOTIATION_ROUNDS,
+    NEGOTIATION_COEFFICIENT_MIN, NEGOTIATION_COEFFICIENT_MAX,
 )
 from repositories.store import _mock_store, reset_store as _reset_store_impl
 
@@ -72,6 +82,12 @@ NEW_PRODUCT_ID = "ZX53-2026Z01"
 
 def _old_purchase_date(years_ago: int) -> str:
     """生成N年前的购买日期"""
+    d = date.today() - timedelta(days=365 * years_ago + 10)
+    return d.isoformat()
+
+
+def _new_purchase_date(years_ago: int) -> str:
+    """生成N年前的购买日期(新酒用, 确保酒龄精确)"""
     d = date.today() - timedelta(days=365 * years_ago + 10)
     return d.isoformat()
 
@@ -534,12 +550,280 @@ class TestEdgeCases:
 
 
 # ============================================================
+# 新酒议价回收测试(当年/1年/2年/3年酒)
+# ============================================================
+
+class TestNewWineValuation:
+    """新酒估价测试"""
+
+    async def run(self, svc):
+        # test 45: 当年酒估价(0年, 9折)
+        neg = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(0), GRADE_A, 1
+        )
+        record("test_45_current_wine_valuation",
+               neg["wineAgeCategory"] == WINE_AGE_CURRENT,
+               f"expected {WINE_AGE_CURRENT}, got {neg['wineAgeCategory']}")
+
+        # test 46: 当年酒AI基准价(1000 × 90% × 1.0 = 900)
+        record("test_46_current_wine_base_price",
+               neg["aiBasePrice"] == 900.0,
+               f"expected 900.0, got {neg['aiBasePrice']}")
+
+        # test 47: 1年酒估价(85折)
+        neg1 = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(1), GRADE_A, 1
+        )
+        record("test_47_one_year_wine",
+               neg1["wineAgeCategory"] == WINE_AGE_ONE_YEAR and neg1["aiBasePrice"] == 850.0,
+               f"expected {WINE_AGE_ONE_YEAR}/850.0, got {neg1['wineAgeCategory']}/{neg1['aiBasePrice']}")
+
+        # test 48: 2年酒估价(8折)
+        neg2 = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(2), GRADE_A, 1
+        )
+        record("test_48_two_years_wine",
+               neg2["wineAgeCategory"] == WINE_AGE_TWO_YEARS and neg2["aiBasePrice"] == 800.0,
+               f"expected {WINE_AGE_TWO_YEARS}/800.0, got {neg2['wineAgeCategory']}/{neg2['aiBasePrice']}")
+
+        # test 49: 3年酒估价(75折)
+        neg3 = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(3), GRADE_A, 1
+        )
+        record("test_49_three_years_wine",
+               neg3["wineAgeCategory"] == WINE_AGE_THREE_YEARS and neg3["aiBasePrice"] == 750.0,
+               f"expected {WINE_AGE_THREE_YEARS}/750.0, got {neg3['wineAgeCategory']}/{neg3['aiBasePrice']}")
+
+        # test 50: 品质B级影响(当年酒: 1000 × 90% × 95% = 855)
+        neg_b = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(0), GRADE_B, 1
+        )
+        record("test_50_grade_b_coefficient",
+               neg_b["aiBasePrice"] == 855.0,
+               f"expected 855.0, got {neg_b['aiBasePrice']}")
+
+        # test 51: 多瓶回收(2瓶当年酒: 900 × 2 = 1800)
+        neg_multi = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(0), GRADE_A, 2
+        )
+        record("test_51_multi_bottles",
+               neg_multi["bottleCount"] == 2,
+               f"expected 2, got {neg_multi['bottleCount']}")
+
+        # test 52: 酒龄超过3年拒绝
+        try:
+            await svc.submit_new_wine_valuation(
+                USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(4), GRADE_A, 1
+            )
+            record("test_52_over_age_reject", False, "应抛出ValueError")
+        except ValueError:
+            record("test_52_over_age_reject", True)
+
+        # test 53: 议价初始状态
+        record("test_53_initial_status",
+               neg["status"] == NEG_STATUS_PENDING,
+               f"expected {NEG_STATUS_PENDING}, got {neg['status']}")
+
+
+class TestNegotiation:
+    """议价流程测试"""
+
+    async def run(self, svc):
+        # 准备: 创建议价记录(当年酒, AI基准价900)
+        neg = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(0), GRADE_A, 1
+        )
+        neg_id = neg["id"]
+        ai_base = neg["aiBasePrice"]  # 900.0
+
+        # test 54: 用户出价(系数1.05, 价格945)
+        proposed = round(ai_base * 1.05, 2)  # 945
+        result = await svc.user_propose_price(neg_id, proposed, "品质良好")
+        record("test_54_user_propose",
+               result["status"] == NEG_STATUS_USER_PROPOSED and result["currentPrice"] == proposed,
+               f"expected {NEG_STATUS_USER_PROPOSED}/{proposed}, got {result['status']}/{result['currentPrice']}")
+
+        # test 55: 轮次递增(第1轮)
+        record("test_55_round_increment",
+               result["negotiationRound"] == 1,
+               f"expected 1, got {result['negotiationRound']}")
+
+        # test 56: AI反价(系数1.02, 价格918)
+        counter = round(ai_base * 1.02, 2)  # 918
+        result = await svc.ai_counter_price(neg_id, counter, "市场参考价")
+        record("test_56_ai_counter",
+               result["status"] == NEG_STATUS_AI_COUNTER and result["currentPrice"] == counter,
+               f"expected {NEG_STATUS_AI_COUNTER}/{counter}, got {result['status']}/{result['currentPrice']}")
+
+        # test 57: 接受议价(取当前价918)
+        result = await svc.accept_negotiation(neg_id, "user")
+        record("test_57_accept_negotiation",
+               result["status"] == NEG_STATUS_ACCEPTED and result["finalPrice"] == counter,
+               f"expected {NEG_STATUS_ACCEPTED}/{counter}, got {result['status']}/{result['finalPrice']}")
+
+        # test 58: 查询议价记录
+        neg_data = await svc.get_negotiation(neg_id)
+        record("test_58_get_negotiation",
+               neg_data["id"] == neg_id,
+               f"expected {neg_id}, got {neg_data['id']}")
+
+        # test 59: 议价历史记录(初始1条 + 用户出价 + AI反价 + 接受 = 4条)
+        record("test_59_negotiation_history",
+               len(neg_data["history"]) == 4,
+               f"expected 4 history entries, got {len(neg_data['history'])}")
+
+
+class TestNegotiationEdgeCases:
+    """议价边界场景测试"""
+
+    async def run(self, svc):
+        # test 60: 系数超范围(0.85 < 0.90)
+        neg = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(0), GRADE_A, 1
+        )
+        ai_base = neg["aiBasePrice"]  # 900
+        too_low = round(ai_base * 0.85, 2)  # 765, 系数0.85 < 0.90
+        try:
+            await svc.user_propose_price(neg["id"], too_low)
+            record("test_60_coefficient_too_low", False, "应抛出ValueError")
+        except ValueError:
+            record("test_60_coefficient_too_low", True)
+
+        # test 61: 系数超范围(1.15 > 1.10)
+        too_high = round(ai_base * 1.15, 2)  # 1035, 系数1.15 > 1.10
+        try:
+            await svc.user_propose_price(neg["id"], too_high)
+            record("test_61_coefficient_too_high", False, "应抛出ValueError")
+        except ValueError:
+            record("test_61_coefficient_too_high", True)
+
+        # test 62: 状态非法(AI反价时状态须为user_proposed)
+        try:
+            await svc.ai_counter_price(neg["id"], ai_base * 1.0)
+            record("test_62_ai_counter_wrong_status", False, "应抛出ValueError")
+        except ValueError:
+            record("test_62_ai_counter_wrong_status", True)
+
+        # test 63: 查询不存在的议价记录
+        try:
+            await svc.get_negotiation(99999)
+            record("test_63_negotiation_not_found", False, "应抛出KeyError")
+        except KeyError:
+            record("test_63_negotiation_not_found", True)
+
+        # test 64: 议价轮次超限(最多3轮)
+        neg2 = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_2, 1000.0, _new_purchase_date(1), GRADE_A, 1
+        )
+        ai_base2 = neg2["aiBasePrice"]
+        # 执行3轮议价
+        for i in range(3):
+            await svc.user_propose_price(neg2["id"], round(ai_base2 * 1.05, 2))
+            await svc.ai_counter_price(neg2["id"], round(ai_base2 * 1.02, 2))
+        # 第4轮应失败
+        try:
+            await svc.user_propose_price(neg2["id"], round(ai_base2 * 1.05, 2))
+            record("test_64_round_exceeded", False, "应抛出ValueError")
+        except ValueError:
+            record("test_64_round_exceeded", True)
+
+        # test 65: 拒绝议价
+        neg3 = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(0), GRADE_A, 1
+        )
+        result = await svc.reject_negotiation(neg3["id"], "user", "价格不合适")
+        record("test_65_reject_negotiation",
+               result["status"] == NEG_STATUS_REJECTED,
+               f"expected {NEG_STATUS_REJECTED}, got {result['status']}")
+
+        # test 66: 已拒绝的议价不能接受
+        try:
+            await svc.accept_negotiation(neg3["id"], "user")
+            record("test_66_accept_after_reject", False, "应抛出ValueError")
+        except ValueError:
+            record("test_66_accept_after_reject", True)
+
+        # test 67: 列表查询议价记录
+        negs = await svc.list_negotiations(user_id=USER_ID_1)
+        record("test_67_list_negotiations",
+               len(negs) >= 3,
+               f"expected >=3, got {len(negs)}")
+
+
+class TestNewWineRecycle:
+    """新酒回收完成测试"""
+
+    async def run(self, svc):
+        # 准备: 议价成功(3年酒, 原价1000, 75折, AI基准750, 议价765)
+        neg = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(3), GRADE_A, 2  # 2瓶
+        )
+        ai_base = neg["aiBasePrice"]  # 750.0
+        proposed = round(ai_base * 1.02, 2)  # 765
+        await svc.user_propose_price(neg["id"], proposed)
+        await svc.accept_negotiation(neg["id"], "ai", proposed)
+
+        # test 68: 完成新酒回收
+        result = await svc.complete_new_wine_recycle(neg["id"], "wechat", "***8888")
+        record("test_68_complete_new_wine_recycle",
+               result["type"] == TYPE_NEW_WINE_RECYCLE and result["status"] == STATUS_COMPLETED,
+               f"expected {TYPE_NEW_WINE_RECYCLE}/{STATUS_COMPLETED}, got {result['type']}/{result['status']}")
+
+        # test 69: 回收总价(765 × 2瓶 = 1530)
+        record("test_69_total_value",
+               result["oldWineTotalValue"] == 1530.0,
+               f"expected 1530.0, got {result['oldWineTotalValue']}")
+
+        # test 70: 折现金额(1530 × 80% = 1224)
+        record("test_70_cash_amount",
+               result["cashAmount"] == 1224.0,
+               f"expected 1224.0, got {result['cashAmount']}")
+
+        # test 71: 个税计算(1224 > 800, 个税 = (1224-800)×20% = 84.8)
+        record("test_71_tax_amount",
+               result["taxAmount"] == 84.8,
+               f"expected 84.8, got {result['taxAmount']}")
+
+        # test 72: 实付金额(1224 - 84.8 = 1139.2)
+        record("test_72_actual_payout",
+               result["actualPayout"] == 1139.2,
+               f"expected 1139.2, got {result['actualPayout']}")
+
+        # test 73: 瓶数记录
+        record("test_73_bottle_count",
+               result["bottleCount"] == 2,
+               f"expected 2, got {result['bottleCount']}")
+
+        # test 74: 新酒分类记录
+        record("test_74_wine_age_category",
+               result["wineAgeCategory"] == WINE_AGE_THREE_YEARS,
+               f"expected {WINE_AGE_THREE_YEARS}, got {result['wineAgeCategory']}")
+
+        # test 75: 未接受的议价不能回收
+        neg2 = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(0), GRADE_A, 1
+        )
+        try:
+            await svc.complete_new_wine_recycle(neg2["id"], "wechat", "***")
+            record("test_75_recycle_not_accepted", False, "应抛出ValueError")
+        except ValueError:
+            record("test_75_recycle_not_accepted", True)
+
+        # test 76: 库存入库验证
+        inventory = await svc.get_inventory(PRODUCT_ID_1)
+        stock = inventory.get(PRODUCT_ID_1, {}).get("stock", 0)
+        record("test_76_inventory_updated",
+               stock >= 2,
+               f"expected >=2, got {stock}")
+
+
+# ============================================================
 # 测试运行
 # ============================================================
 
 async def main():
     print("=" * 60)
-    print("老酒兑换及回收模块端到端测试")
+    print("老酒兑换及回收模块端到端测试(含新酒议价回收)")
     print("=" * 60)
     print()
 
@@ -552,6 +836,10 @@ async def main():
         TestTransition,
         TestQueryStats,
         TestEdgeCases,
+        TestNewWineValuation,
+        TestNegotiation,
+        TestNegotiationEdgeCases,
+        TestNewWineRecycle,
     ]
 
     for cls in test_classes:

@@ -1,15 +1,17 @@
 """老酒兑换及回收模块数据访问层(双模式: 内存 + Redis)
 
 表清单:
-    recycle_applications: 回收申请表(用户提交的老酒兑换/回收申请)
-    recycle_valuations:   回收估价表(AI智能估值结果)
-    recycle_exchanges:    兑换记录表(兑换新酒/折现回收交易记录)
+    recycle_applications:  回收申请表(用户提交的老酒兑换/回收申请)
+    recycle_valuations:    回收估价表(AI智能估值结果)
+    recycle_exchanges:      兑换记录表(兑换新酒/折现回收交易记录)
+    recycle_negotiations:   新酒议价记录表(新酒回收议价全过程)
 
 设计对齐:
     - 双模式存储: is_redis_mode() 切换内存字典/Redis Hash
     - 申请单号: 内存计数器 / Redis INCR 生成 HS+时间戳
     - 状态流转: 申请→估价→审核→回收→兑换
     - 品质分级: A/B/C/D 四级(影响价值95%-100%)
+    - 新酒议价: 当年/1年/2年/3年酒分类, 支持多轮议价(最多3轮)
 """
 
 import json
@@ -37,6 +39,67 @@ STATUS_CANCELLED = "cancelled"      # 已取消
 # 业务类型
 TYPE_EXCHANGE = "exchange"          # 兑换新酒
 TYPE_RECYCLE = "recycle"            # 折现回收
+TYPE_NEW_WINE_RECYCLE = "new_wine_recycle"  # 新酒议价回收
+
+# ============================================================
+# 新酒分类(未达到3年的酒)
+# ============================================================
+
+WINE_AGE_CURRENT = "current"          # 当年酒(0年)
+WINE_AGE_ONE_YEAR = "one_year"        # 1年酒
+WINE_AGE_TWO_YEARS = "two_years"      # 2年酒
+WINE_AGE_THREE_YEARS = "three_years"  # 3年酒(边界)
+
+# 新酒年份分类映射(酒龄 → 分类)
+WINE_AGE_CATEGORY_MAP = {
+    0: WINE_AGE_CURRENT,
+    1: WINE_AGE_ONE_YEAR,
+    2: WINE_AGE_TWO_YEARS,
+    3: WINE_AGE_THREE_YEARS,
+}
+
+# 新酒回收折扣率(未满3年的酒折价回收)
+NEW_WINE_DISCOUNT_RATES = {
+    WINE_AGE_CURRENT: 0.90,       # 当年酒: 9折
+    WINE_AGE_ONE_YEAR: 0.85,     # 1年酒: 85折
+    WINE_AGE_TWO_YEARS: 0.80,    # 2年酒: 8折
+    WINE_AGE_THREE_YEARS: 0.75,  # 3年酒: 75折(或走老酒增值路径)
+}
+
+# 新酒分类中文名
+WINE_AGE_CATEGORY_NAMES = {
+    WINE_AGE_CURRENT: "当年酒",
+    WINE_AGE_ONE_YEAR: "1年酒",
+    WINE_AGE_TWO_YEARS: "2年酒",
+    WINE_AGE_THREE_YEARS: "3年酒",
+}
+
+# ============================================================
+# 议价状态流转
+# ============================================================
+
+NEG_STATUS_PENDING = "pending"              # 待议价(AI已估价,等用户响应)
+NEG_STATUS_USER_PROPOSED = "user_proposed"  # 用户已出价
+NEG_STATUS_AI_COUNTER = "ai_counter"        # AI已反价
+NEG_STATUS_ACCEPTED = "accepted"            # 已接受(议价成功)
+NEG_STATUS_REJECTED = "rejected"            # 已拒绝(议价失败)
+NEG_STATUS_EXPIRED = "expired"              # 已过期
+
+# 议价状态流转图
+NEG_STATUS_TRANSITIONS = {
+    NEG_STATUS_PENDING: [NEG_STATUS_USER_PROPOSED, NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED, NEG_STATUS_EXPIRED],
+    NEG_STATUS_USER_PROPOSED: [NEG_STATUS_AI_COUNTER, NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED],
+    NEG_STATUS_AI_COUNTER: [NEG_STATUS_USER_PROPOSED, NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED],
+    NEG_STATUS_ACCEPTED: [],
+    NEG_STATUS_REJECTED: [],
+    NEG_STATUS_EXPIRED: [],
+}
+
+# 议价最大轮次
+MAX_NEGOTIATION_ROUNDS = 3
+# 议价系数范围(0.9~1.1)
+NEGOTIATION_COEFFICIENT_MIN = 0.90
+NEGOTIATION_COEFFICIENT_MAX = 1.10
 
 # 品质分级(影响价值系数)
 GRADE_A = "A"   # 全新 100%
@@ -94,6 +157,12 @@ class RecycleRepository:
         if is_redis_mode():
             return await self._redis_next_id("recycle_exchange")
         return self._mem_next_id("_recycle_exchange_seq")
+
+    async def next_negotiation_id(self) -> int:
+        """生成议价记录ID"""
+        if is_redis_mode():
+            return await self._redis_next_id("recycle_negotiation")
+        return self._mem_next_id("_recycle_negotiation_seq")
 
     def _mem_next_id(self, seq_key: str) -> int:
         self._ensure_store()
@@ -251,6 +320,49 @@ class RecycleRepository:
         return self._mem_update_inventory(product_id, delta)
 
     # ============================================================
+    # 新酒议价记录表 CRUD
+    # ============================================================
+
+    async def create_negotiation(self, negotiation: dict) -> int:
+        """新增议价记录(返回议价ID)"""
+        neg_id = await self.next_negotiation_id()
+        negotiation["id"] = neg_id
+        now = datetime.utcnow().isoformat()
+        if "createdAt" not in negotiation:
+            negotiation["createdAt"] = now
+        if "updatedAt" not in negotiation:
+            negotiation["updatedAt"] = now
+        if "status" not in negotiation:
+            negotiation["status"] = NEG_STATUS_PENDING
+        if "negotiationNo" not in negotiation:
+            negotiation["negotiationNo"] = f"YJ{now.replace('-', '').replace('T', '')[:14]}{neg_id:04d}"
+        if is_redis_mode():
+            await self._redis_create_negotiation(negotiation)
+        else:
+            self._mem_create_negotiation(negotiation)
+        return neg_id
+
+    async def get_negotiation(self, neg_id: int) -> Optional[dict]:
+        """按ID查询议价记录"""
+        if is_redis_mode():
+            return await self._redis_get_negotiation(neg_id)
+        return self._mem_get_negotiation(neg_id)
+
+    async def update_negotiation(self, neg_id: int, updates: dict) -> None:
+        """更新议价记录(部分字段)"""
+        if is_redis_mode():
+            await self._redis_update_negotiation(neg_id, updates)
+        else:
+            self._mem_update_negotiation(neg_id, updates)
+
+    async def list_negotiations(self, user_id: int = None, status: str = None,
+                                 limit: int = 50) -> list[dict]:
+        """查询议价记录列表(支持筛选)"""
+        if is_redis_mode():
+            return await self._redis_list_negotiations(user_id, status, limit)
+        return self._mem_list_negotiations(user_id, status, limit)
+
+    # ============================================================
     # 内存模式实现
     # ============================================================
 
@@ -266,9 +378,12 @@ class RecycleRepository:
             self.store["recycle_exchanges"] = {}                # id → exchange
             self.store["recycle_exchanges_by_user"] = {}        # userId → [exId, ...]
             self.store["recycle_inventory"] = {}                 # productId → {stock, ...}
+            self.store["recycle_negotiations"] = {}             # id → negotiation
+            self.store["recycle_negotiations_by_user"] = {}     # userId → [negId, ...]
             self.store["_recycle_application_seq"] = 0
             self.store["_recycle_valuation_seq"] = 0
             self.store["_recycle_exchange_seq"] = 0
+            self.store["_recycle_negotiation_seq"] = 0
 
     # --- 回收申请 ---
 
@@ -399,6 +514,40 @@ class RecycleRepository:
         current["stock"] = current.get("stock", 0) + delta
         self.store["recycle_inventory"][product_id] = current
         return {product_id: current}
+
+    # --- 议价记录(内存) ---
+
+    def _mem_create_negotiation(self, negotiation: dict) -> None:
+        self._ensure_store()
+        neg_id = negotiation["id"]
+        user_id = negotiation.get("userId")
+        self.store["recycle_negotiations"][neg_id] = negotiation
+        if user_id is not None:
+            self.store["recycle_negotiations_by_user"].setdefault(user_id, []).append(neg_id)
+
+    def _mem_get_negotiation(self, neg_id: int) -> Optional[dict]:
+        self._ensure_store()
+        return self.store["recycle_negotiations"].get(neg_id)
+
+    def _mem_update_negotiation(self, neg_id: int, updates: dict) -> None:
+        self._ensure_store()
+        neg = self.store["recycle_negotiations"].get(neg_id)
+        if neg:
+            neg.update(updates)
+
+    def _mem_list_negotiations(self, user_id: int = None, status: str = None,
+                                 limit: int = 50) -> list[dict]:
+        self._ensure_store()
+        if user_id is not None:
+            ids = self.store["recycle_negotiations_by_user"].get(user_id, [])
+            negs = [self.store["recycle_negotiations"][nid] for nid in ids
+                    if nid in self.store["recycle_negotiations"]]
+        else:
+            negs = list(self.store["recycle_negotiations"].values())
+        if status:
+            negs = [n for n in negs if n.get("status") == status]
+        negs.sort(key=lambda n: n.get("createdAt", ""), reverse=True)
+        return negs[:limit]
 
     # ============================================================
     # Redis 模式实现
@@ -590,3 +739,54 @@ class RecycleRepository:
         await client.hset(_k("recycle", "inventory"), product_id,
                           json.dumps(current, ensure_ascii=False))
         return {product_id: current}
+
+    # --- 议价记录(Redis) ---
+
+    async def _redis_create_negotiation(self, negotiation: dict) -> None:
+        client = await get_redis_client()
+        neg_id = negotiation["id"]
+        user_id = negotiation.get("userId")
+        await client.set(_k("recycle", "negotiation", neg_id),
+                         json.dumps(negotiation, ensure_ascii=False))
+        if user_id is not None:
+            await client.lpush(_k("recycle", "negotiations_by_user", user_id), neg_id)
+
+    async def _redis_get_negotiation(self, neg_id: int) -> Optional[dict]:
+        client = await get_redis_client()
+        data = await client.get(_k("recycle", "negotiation", neg_id))
+        if not data:
+            return None
+        return json.loads(data)
+
+    async def _redis_update_negotiation(self, neg_id: int, updates: dict) -> None:
+        client = await get_redis_client()
+        data = await client.get(_k("recycle", "negotiation", neg_id))
+        if data:
+            neg = json.loads(data)
+            neg.update(updates)
+            await client.set(_k("recycle", "negotiation", neg_id),
+                             json.dumps(neg, ensure_ascii=False))
+
+    async def _redis_list_negotiations(self, user_id: int = None, status: str = None,
+                                         limit: int = 50) -> list[dict]:
+        client = await get_redis_client()
+        if user_id is not None:
+            ids = await client.lrange(_k("recycle", "negotiations_by_user", user_id), 0, -1)
+            negs = []
+            for nid in ids:
+                data = await client.get(_k("recycle", "negotiation", nid))
+                if data:
+                    negs.append(json.loads(data))
+        else:
+            negs = []
+            keys = await client.keys(_k("recycle", "negotiation", "*"))
+            for key in keys:
+                if "negotiations_by_user" in key:
+                    continue
+                data = await client.get(key)
+                if data:
+                    negs.append(json.loads(data))
+        if status:
+            negs = [n for n in negs if n.get("status") == status]
+        negs.sort(key=lambda n: n.get("createdAt", ""), reverse=True)
+        return negs[:limit]
