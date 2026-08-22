@@ -22,12 +22,20 @@
     - 全 async(项目约定); 异常约定: ValueError → 409(输入非法)
     - 置信度 = 输入字段完整度(缺失字段越多置信度越低, 下限 0.3)
     - 复用第一批的评分原语(_clamp/_factor/_risk_level/_confidence)
+
+v7.5 自学习接入(最小侵入):
+    - WEIGHTS 类属性保留为「默认权重」(回退基线)
+    - 评分时经 load_effective_weights 读取自学习层冠军权重(缓存+回退默认)
+    - 输出增加 weightVersion 字段, 支持反馈闭环追溯
 """
 
 import logging
 from datetime import datetime, timezone
 
 from core.helpers import ts
+from services.ai_learning_service import (
+    get_active_weight_version, load_effective_weights,
+)
 from services.ai_scoring_service import (
     LEVEL_HIGH, LEVEL_LOW, LEVEL_MEDIUM,
     _clamp, _confidence, _factor, _now_hour, _risk_level,
@@ -78,36 +86,37 @@ class MemberProfileScorer:
         if consumption < 0:
             raise ValueError("月消费金额不能为负")
 
+        w = await load_effective_weights("member_profile", self.WEIGHTS)
         f = {}
         # 资料完整度: 已填字段占比 × 100
         filled = int(ctx.get("profileFieldCount") or 0)
         total = int(ctx.get("profileFieldTotal") or 8)
         ratio = (filled / total) if total > 0 else 0.0
         f["profile"] = _factor("profile", "资料完整度", _clamp(ratio * 100),
-                               self.WEIGHTS["profile"], f"资料 {filled}/{total}")
+                               w["profile"], f"资料 {filled}/{total}")
         # 账户年龄: ≥365 天满分, 线性
         days = float(ctx.get("accountAgeDays") or 0)
         f["account_age"] = _factor("account_age", "账户年龄", _clamp(days / 3.65),
-                                   self.WEIGHTS["account_age"], f"注册 {days:.0f} 天")
+                                   w["account_age"], f"注册 {days:.0f} 天")
         # 活跃度: 月登录 ≥20 次满分
         logins = int(ctx.get("monthlyLogins") or 0)
         f["activity"] = _factor("activity", "月活跃度", _clamp(logins * 5),
-                                self.WEIGHTS["activity"], f"月登录 {logins} 次")
+                                w["activity"], f"月登录 {logins} 次")
         # 消费能力: 月消费 ≥5000 满分, 线性
         f["consumption"] = _factor("consumption", "消费能力", _clamp(consumption / 50),
-                                   self.WEIGHTS["consumption"], f"月消费 ¥{consumption:,.0f}")
+                                   w["consumption"], f"月消费 ¥{consumption:,.0f}")
         # 复购率: 越高越好
         repurchase = float(ctx.get("repurchaseRate") or 0)
         f["repurchase"] = _factor("repurchase", "复购率", _clamp(repurchase * 100),
-                                  self.WEIGHTS["repurchase"], f"复购率 {repurchase:.0%}")
+                                  w["repurchase"], f"复购率 {repurchase:.0%}")
         # 退款率: 逆向因子(≥30% 零分)
         refund = float(ctx.get("refundRate") or 0)
         f["refund"] = _factor("refund", "退款率", _clamp(100 - refund * 333),
-                              self.WEIGHTS["refund"], f"退款率 {refund:.0%}")
+                              w["refund"], f"退款率 {refund:.0%}")
         # 竹信分: ≥700 满分, 线性
         credit = float(ctx.get("bambooScore") if ctx.get("bambooScore") is not None else 600)
         f["credit"] = _factor("credit", "会员信用", _clamp(credit / 7),
-                              self.WEIGHTS["credit"], f"竹信分 {credit:.0f}")
+                              w["credit"], f"竹信分 {credit:.0f}")
 
         value = round(sum(x["contribution"] for x in f.values()), 1)
         if value >= 70:
@@ -170,39 +179,40 @@ class PointsRiskScorer:
         if today_earned < 0:
             raise ValueError("当日积分获取量不能为负")
 
+        w = await load_effective_weights("points_risk", self.WEIGHTS)
         f = {}
         # 获取爆发: 当日获取/上限, ≥1 倍满分
         cap = float(ctx.get("dailyEarnCap") or 200)
         cap = cap if cap > 0 else 200.0
         f["earn_burst"] = _factor("earn_burst", "获取爆发",
                                   _clamp(today_earned / cap * 100),
-                                  self.WEIGHTS["earn_burst"],
+                                  w["earn_burst"],
                                   f"当日获取 {today_earned:.0f} 分/上限 {cap:.0f} 分")
         # 兑换频率: 当日兑换 ≥5 次满分
         redeems = int(ctx.get("dailyRedeemCount") or 0)
         f["redeem_frequency"] = _factor("redeem_frequency", "兑换频率",
                                         _clamp(redeems * 20),
-                                        self.WEIGHTS["redeem_frequency"],
+                                        w["redeem_frequency"],
                                         f"当日兑换 {redeems} 次")
         # 渠道集中度: 单渠道占比 ≥80% 满分
         concentration = float(ctx.get("singleChannelRatio") or 0)
         f["channel_concentration"] = _factor(
             "channel_concentration", "渠道集中度", _clamp(concentration * 125),
-            self.WEIGHTS["channel_concentration"], f"单渠道占比 {concentration:.0%}")
+            w["channel_concentration"], f"单渠道占比 {concentration:.0%}")
         # 小号关联: 同设备账号 ≥3 个满分(1=仅本人 零风险)
         devices = int(ctx.get("sameDeviceAccounts") or 1)
         f["device_accounts"] = _factor(
             "device_accounts", "小号关联", _clamp((devices - 1) * 50),
-            self.WEIGHTS["device_accounts"], f"同设备 {devices} 个账号")
+            w["device_accounts"], f"同设备 {devices} 个账号")
         # 历史违规: 每次 25 分
         violations = int(ctx.get("violationCount") or 0)
         f["violations"] = _factor("violations", "历史违规", _clamp(violations * 25),
-                                  self.WEIGHTS["violations"], f"违规 {violations} 次")
+                                  w["violations"], f"违规 {violations} 次")
         # 凌晨操作: ≥40% 满分
         night = float(ctx.get("nightActionRatio") or 0)
         f["night_activity"] = _factor("night_activity", "凌晨操作",
                                       _clamp(night * 250),
-                                      self.WEIGHTS["night_activity"],
+                                      w["night_activity"],
                                       f"凌晨占比 {night:.0%}")
 
         risk = round(sum(x["contribution"] for x in f.values()), 1)
@@ -212,6 +222,7 @@ class PointsRiskScorer:
 
         result = {
             "success": True, "scorer": "points_risk", "module": "03会员积分",
+            "weightVersion": get_active_weight_version("points_risk"),
             "score": risk, "level": level, "levelName": {"low": "低风险",
             "medium": "中风险", "high": "高风险"}[level],
             "action": action, "factors": list(f.values()),
@@ -274,38 +285,39 @@ class MessageContentScorer:
         # 发送时间(缺省取当前小时)
         hour = int(ctx.get("sendHour") if ctx.get("sendHour") is not None else _now_hour())
 
+        w = await load_effective_weights("message_content", self.WEIGHTS)
         f = {}
         # 敏感词: 每次 33 分
         f["sensitive_words"] = _factor(
             "sensitive_words", "敏感词", _clamp(hit_count * 33),
-            self.WEIGHTS["sensitive_words"],
+            w["sensitive_words"],
             f"命中 {hit_count} 处" + (f"({','.join(hit_words[:3])})" if hit_words else ""))
         # 链接堆砌: ≥3 条满分
         links = int(ctx.get("linkCount") if ctx.get("linkCount") is not None
                     else content.count("http"))
         f["link_spam"] = _factor("link_spam", "链接堆砌", _clamp(links * 40),
-                                 self.WEIGHTS["link_spam"], f"外链 {links} 条")
+                                 w["link_spam"], f"外链 {links} 条")
         # 重复内容: ≥60% 满分
         duplicate = float(ctx.get("duplicateRatio") or 0)
         f["duplicate_content"] = _factor("duplicate_content", "重复内容",
                                          _clamp(duplicate * 166),
-                                         self.WEIGHTS["duplicate_content"],
+                                         w["duplicate_content"],
                                          f"重复度 {duplicate:.0%}")
         # 发送频率: 当小时 ≥10 条满分
         sends = int(ctx.get("hourlySendCount") or 0)
         f["send_frequency"] = _factor("send_frequency", "发送频率",
                                       _clamp(sends * 10),
-                                      self.WEIGHTS["send_frequency"],
+                                      w["send_frequency"],
                                       f"当小时 {sends} 条")
         # 长度异常: 空白或超 2000 字
         length = len(content)
         length_score = 100 if (length < 5 or length > 2000) else 0
         f["length_anomaly"] = _factor("length_anomaly", "长度异常", length_score,
-                                      self.WEIGHTS["length_anomaly"], f"长度 {length} 字")
+                                      w["length_anomaly"], f"长度 {length} 字")
         # 凌晨发送: 0-6 点满分
         night_score = 100 if 0 <= hour < 6 else 0
         f["night_send"] = _factor("night_send", "发送时段", night_score,
-                                  self.WEIGHTS["night_send"], f"{hour} 点发送")
+                                  w["night_send"], f"{hour} 点发送")
 
         risk = round(sum(x["contribution"] for x in f.values()), 1)
         level = _risk_level(risk, medium_at=30.0, high_at=60.0)
@@ -314,6 +326,7 @@ class MessageContentScorer:
 
         result = {
             "success": True, "scorer": "message_content", "module": "08信息管理",
+            "weightVersion": get_active_weight_version("message_content"),
             "score": risk, "level": level, "levelName": {"low": "低风险",
             "medium": "中风险", "high": "高风险"}[level],
             "action": action, "factors": list(f.values()),
@@ -369,33 +382,34 @@ class WithdrawRiskScorer:
         if amount > balance:
             raise ValueError("提现金额超过可用余额")
 
+        w = await load_effective_weights("withdraw_risk", self.WEIGHTS)
         f = {}
         # 提现占比: 一次性提取全部余额风险高(盗号/跑路信号), 线性
         ratio = amount / balance if balance > 0 else 1.0
         f["amount_ratio"] = _factor("amount_ratio", "提现占比",
                                     _clamp(ratio * 100),
-                                    self.WEIGHTS["amount_ratio"],
+                                    w["amount_ratio"],
                                     f"提取余额的 {ratio:.0%}")
         # 提现频率: 当月 ≥5 次满分
         count = int(ctx.get("monthlyWithdrawCount") or 0)
         f["frequency"] = _factor("frequency", "提现频率", _clamp(count * 20),
-                                 self.WEIGHTS["frequency"], f"当月 {count} 次")
+                                 w["frequency"], f"当月 {count} 次")
         # 账户年龄: <7 天满分, ≥90 天零分
         days = float(ctx.get("accountAgeDays") or 0)
         f["account_age"] = _factor(
             "account_age", "账户年龄", _clamp(max(0.0, (90 - days) / 90 * 100)),
-            self.WEIGHTS["account_age"], f"开户 {days:.0f} 天")
+            w["account_age"], f"开户 {days:.0f} 天")
         # 收益来源异常: ≥50% 满分
         abnormal = float(ctx.get("abnormalIncomeRatio") or 0)
         f["income_anomaly"] = _factor("income_anomaly", "收益来源异常",
                                       _clamp(abnormal * 200),
-                                      self.WEIGHTS["income_anomaly"],
+                                      w["income_anomaly"],
                                       f"异常收益占比 {abnormal:.0%}")
         # 历史驳回: 每次 30 分
         rejects = int(ctx.get("rejectedCount") or 0)
         f["history_rejects"] = _factor("history_rejects", "历史驳回",
                                        _clamp(rejects * 30),
-                                       self.WEIGHTS["history_rejects"],
+                                       w["history_rejects"],
                                        f"驳回 {rejects} 次")
         # 账户状态: 冻结满分; 未实名 +60; 正常 0
         status_score = 0.0
@@ -407,7 +421,7 @@ class WithdrawRiskScorer:
             status_score = 60.0
             flags.append("未实名")
         f["status_flags"] = _factor("status_flags", "账户状态", status_score,
-                                    self.WEIGHTS["status_flags"],
+                                    w["status_flags"],
                                     "异常状态: " + ("、".join(flags) if flags else "无"))
 
         risk = round(sum(x["contribution"] for x in f.values()), 1)
@@ -420,6 +434,7 @@ class WithdrawRiskScorer:
 
         result = {
             "success": True, "scorer": "withdraw_risk", "module": "12钱包盈利",
+            "weightVersion": get_active_weight_version("withdraw_risk"),
             "score": risk, "level": level, "levelName": {"low": "低风险",
             "medium": "中风险", "high": "高风险"}[level],
             "action": action, "factors": list(f.values()),
@@ -470,34 +485,35 @@ class GroupbuyQualifyScorer:
         if quantity < 1:
             raise ValueError("团购数量至少为 1 件")
 
+        w = await load_effective_weights("groupbuy_qualify", self.WEIGHTS)
         f = {}
         # 资质材料: 5 项齐全满分, 线性
         docs = int(ctx.get("qualificationDocs") or 0)
         f["qualification_docs"] = _factor(
             "qualification_docs", "资质材料", _clamp(docs * 20),
-            self.WEIGHTS["qualification_docs"], f"已提交 {docs}/5 项")
+            w["qualification_docs"], f"已提交 {docs}/5 项")
         # 采购历史: 年采购 ≥5 万满分, 线性
         purchase = float(ctx.get("annualPurchaseAmount") or 0)
         f["purchase_history"] = _factor("purchase_history", "采购历史",
                                         _clamp(purchase / 500),
-                                        self.WEIGHTS["purchase_history"],
+                                        w["purchase_history"],
                                         f"年采购 ¥{purchase:,.0f}")
         # 付款信用: 按期付款率
         on_time = float(ctx.get("onTimePaymentRatio") or 0)
         f["payment_credit"] = _factor("payment_credit", "付款信用",
                                       _clamp(on_time * 100),
-                                      self.WEIGHTS["payment_credit"],
+                                      w["payment_credit"],
                                       f"按期付款率 {on_time:.0%}")
         # 履约记录: 每次违约扣 40
         violations = int(ctx.get("violationCount") or 0)
         f["fulfillment"] = _factor("fulfillment", "履约记录",
                                    _clamp(100 - violations * 40),
-                                   self.WEIGHTS["fulfillment"],
+                                   w["fulfillment"],
                                    f"违约 {violations} 次")
         # 需求规模: ≥50 件满分, 线性
         f["demand_match"] = _factor("demand_match", "需求规模",
                                     _clamp(quantity * 2),
-                                    self.WEIGHTS["demand_match"],
+                                    w["demand_match"],
                                     f"意向 {quantity} 件")
 
         qualify = round(sum(x["contribution"] for x in f.values()), 1)
@@ -512,6 +528,7 @@ class GroupbuyQualifyScorer:
 
         result = {
             "success": True, "scorer": "groupbuy_qualify", "module": "14团购模块",
+            "weightVersion": get_active_weight_version("groupbuy_qualify"),
             "score": qualify, "tier": tier,
             "tierName": {"T3": "T3 核心档", "T2": "T2 进阶档", "T1": "T1 基础档",
                          "rejected": "不予通过"}[tier],
@@ -572,11 +589,12 @@ class AdminOperationScorer:
         hour = int(ctx.get("operationHour") if ctx.get("operationHour") is not None
                    else _now_hour())
 
+        w = await load_effective_weights("admin_operation", self.WEIGHTS)
         f = {}
         # 操作敏感级: 查映射表
         base = self.SENSITIVITY[op_type]
         f["sensitivity"] = _factor("sensitivity", "操作敏感级", base,
-                                   self.WEIGHTS["sensitivity"],
+                                   w["sensitivity"],
                                    f"操作类型 {op_type}")
         # 非常规时段: 0-6 点满分, 周末 50
         if 0 <= hour < 6:
@@ -586,18 +604,18 @@ class AdminOperationScorer:
         else:
             off_score, off_detail = 0.0, "工作时间"
         f["off_hours"] = _factor("off_hours", "操作时段", off_score,
-                                 self.WEIGHTS["off_hours"], off_detail)
+                                 w["off_hours"], off_detail)
         # 操作频率: 近 10 分钟 ≥10 次满分
         burst = int(ctx.get("operationsLast10Min") or 0)
         f["frequency_burst"] = _factor("frequency_burst", "操作频率",
                                        _clamp(burst * 10),
-                                       self.WEIGHTS["frequency_burst"],
+                                       w["frequency_burst"],
                                        f"近 10 分钟 {burst} 次")
         # 越权嫌疑: 操作自身账号满分(如给自己提权/重置自己密码)
         self_op = bool(ctx.get("operatesOnSelf"))
         f["permission_gap"] = _factor("permission_gap", "越权嫌疑",
                                       100.0 if self_op else 0.0,
-                                      self.WEIGHTS["permission_gap"],
+                                      w["permission_gap"],
                                       "操作对象为自身账号" if self_op else "操作对象为他人/资源")
         # 复核缺失: 敏感操作无第二人复核满分
         has_reviewer = ctx.get("hasSecondReviewer")
@@ -608,7 +626,7 @@ class AdminOperationScorer:
         else:
             review_score, review_detail = 100.0, "敏感操作无复核"
         f["pending_review"] = _factor("pending_review", "复核状态", review_score,
-                                      self.WEIGHTS["pending_review"], review_detail)
+                                      w["pending_review"], review_detail)
 
         risk = round(sum(x["contribution"] for x in f.values()), 1)
         level = _risk_level(risk, medium_at=30.0, high_at=60.0)
@@ -617,6 +635,7 @@ class AdminOperationScorer:
 
         result = {
             "success": True, "scorer": "admin_operation", "module": "17后台管理",
+            "weightVersion": get_active_weight_version("admin_operation"),
             "score": risk, "level": level, "levelName": {"low": "低风险",
             "medium": "中风险", "high": "高风险"}[level],
             "action": action, "factors": list(f.values()),
@@ -668,22 +687,23 @@ class AgreementRiskScorer:
         if penalty < 0:
             raise ValueError("违约金比例不能为负")
 
+        w = await load_effective_weights("agreement_risk", self.WEIGHTS)
         f = {}
         # 免责密度: ≥3 条满分
         exemptions = int(ctx.get("exemptionClauseCount") or 0)
         f["exemption_density"] = _factor(
             "exemption_density", "免责密度", _clamp(exemptions * 33),
-            self.WEIGHTS["exemption_density"], f"免责条款 {exemptions} 条")
+            w["exemption_density"], f"免责条款 {exemptions} 条")
         # 违约金异常: >30% 满分, 线性
         f["penalty_anomaly"] = _factor("penalty_anomaly", "违约金",
                                        _clamp(penalty * 333),
-                                       self.WEIGHTS["penalty_anomaly"],
+                                       w["penalty_anomaly"],
                                        f"违约金占比 {penalty:.0%}")
         # 单方权利条款: ≥2 条满分
         unilateral = int(ctx.get("unilateralClauseCount") or 0)
         f["unilateral_clauses"] = _factor("unilateral_clauses", "单方条款",
                                           _clamp(unilateral * 50),
-                                          self.WEIGHTS["unilateral_clauses"],
+                                          w["unilateral_clauses"],
                                           f"单方权利条款 {unilateral} 条")
         # 管辖条款: 单方远地管辖满分, 仲裁 30, 标准法院 0
         jurisdiction = str(ctx.get("jurisdictionType") or "court_standard")
@@ -693,7 +713,7 @@ class AgreementRiskScorer:
         jur_name = {"unilateral_far": "单方远地管辖", "arbitration": "仲裁管辖",
                     "court_standard": "标准法院管辖"}.get(jurisdiction, "未明确管辖")
         f["jurisdiction_risk"] = _factor("jurisdiction_risk", "管辖条款",
-                                         jur_score, self.WEIGHTS["jurisdiction_risk"],
+                                         jur_score, w["jurisdiction_risk"],
                                          jur_name)
         # 关键条款缺失: 显式清单优先, 否则对照 presentKeyClauses 自动求差集
         missing = ctx.get("missingKeyClauses")
@@ -703,7 +723,7 @@ class AgreementRiskScorer:
         missing = list(missing or [])
         f["missing_clauses"] = _factor("missing_clauses", "条款缺失",
                                        _clamp(len(missing) * 20),
-                                       self.WEIGHTS["missing_clauses"],
+                                       w["missing_clauses"],
                                        f"缺失 {len(missing)} 项")
 
         risk = round(sum(x["contribution"] for x in f.values()), 1)
@@ -726,6 +746,7 @@ class AgreementRiskScorer:
 
         result = {
             "success": True, "scorer": "agreement_risk", "module": "18条款规则合同",
+            "weightVersion": get_active_weight_version("agreement_risk"),
             "score": risk, "level": level, "levelName": {"low": "低风险",
             "medium": "中风险", "high": "高风险"}[level],
             "action": {"low": "标准用印流程", "medium": "法务复核后用印",
@@ -778,6 +799,7 @@ class FinanceAnomalyScorer:
         if amount < 0:
             raise ValueError("记账金额不能为负")
 
+        w = await load_effective_weights("finance_anomaly", self.WEIGHTS)
         f = {}
         # 金额偏离: |金额-均值|/均值 ≥3 倍满分, 线性
         avg = float(ctx.get("accountAverageAmount") or 0)
@@ -788,7 +810,7 @@ class FinanceAnomalyScorer:
             deviation, dev_detail = 0.5, "科目无历史均值(按中等风险计)"
         f["amount_deviation"] = _factor("amount_deviation", "金额偏离",
                                         _clamp(deviation * 33),
-                                        self.WEIGHTS["amount_deviation"], dev_detail)
+                                        w["amount_deviation"], dev_detail)
         # 摘要匹配: 匹配分越高风险越低(逆向)
         match = ctx.get("summaryMatchScore")
         if match is None:
@@ -797,7 +819,7 @@ class FinanceAnomalyScorer:
             match = _clamp(float(match))
             match_score, match_detail = _clamp(100 - match), f"匹配分 {match:.0f}"
         f["summary_mismatch"] = _factor("summary_mismatch", "摘要匹配",
-                                        match_score, self.WEIGHTS["summary_mismatch"],
+                                        match_score, w["summary_mismatch"],
                                         match_detail)
         # 记账时段: 凌晨满分, 周末 50
         hour = int(ctx.get("entryHour") if ctx.get("entryHour") is not None
@@ -809,7 +831,7 @@ class FinanceAnomalyScorer:
         else:
             hour_score, hour_detail = 0.0, "工作时间"
         f["off_hours"] = _factor("off_hours", "记账时段", hour_score,
-                                 self.WEIGHTS["off_hours"], hour_detail)
+                                 w["off_hours"], hour_detail)
         # 频率突增: 当日凭证数/日均 ≥3 倍满分
         today = float(ctx.get("entriesToday") or 0)
         daily_avg = float(ctx.get("dailyAverageEntries") or 0)
@@ -820,12 +842,12 @@ class FinanceAnomalyScorer:
             spike, spike_detail = 0.0, "无日均基线"
         f["frequency_spike"] = _factor("frequency_spike", "频率突增",
                                        _clamp(spike * 33),
-                                       self.WEIGHTS["frequency_spike"], spike_detail)
+                                       w["frequency_spike"], spike_detail)
         # 借贷平衡: 差额 >0 满分(直接不合格)
         unbalance = float(ctx.get("unbalanceAmount") or 0)
         f["balance_deviation"] = _factor("balance_deviation", "借贷平衡",
                                          100.0 if unbalance > 0 else 0.0,
-                                         self.WEIGHTS["balance_deviation"],
+                                         w["balance_deviation"],
                                          f"不平衡差额 ¥{unbalance:,.2f}")
 
         anomaly = round(sum(x["contribution"] for x in f.values()), 1)
@@ -838,6 +860,7 @@ class FinanceAnomalyScorer:
 
         result = {
             "success": True, "scorer": "finance_anomaly", "module": "19财务管理",
+            "weightVersion": get_active_weight_version("finance_anomaly"),
             "score": anomaly, "level": level, "levelName": {"low": "正常",
             "medium": "关注", "high": "告警"}[level],
             "action": action, "factors": list(f.values()),

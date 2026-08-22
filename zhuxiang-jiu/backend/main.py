@@ -74,6 +74,8 @@ from routes import (
     register_ai_scoring_ext_routes,
     # AI 语义评分层·第三批(v7.4)
     register_ai_scoring_auth_routes,
+    # AI 自学习层(v7.5)
+    register_ai_learning_routes,
 )
 
 
@@ -191,6 +193,7 @@ register_flashsale_routes(app)
 register_ai_scoring_routes(app)
 register_ai_scoring_ext_routes(app)
 register_ai_scoring_auth_routes(app)
+register_ai_learning_routes(app)
 
 
 # ============================================================

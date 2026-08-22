@@ -53,6 +53,8 @@ from routes.ai_scoring_routes import register_ai_scoring_routes
 from routes.ai_scoring_ext_routes import register_ai_scoring_ext_routes
 # AI 语义评分层·第三批(v7.4: 用户认证混合模式 AI 登录风控)
 from routes.ai_scoring_auth_routes import register_ai_scoring_auth_routes
+# AI 自学习层(v7.5: Hedge 在线学习 + 冠军/挑战者 + 漂移监控)
+from routes.ai_learning_routes import register_ai_learning_routes
 
 __all__ = [
     # 已有(15)
@@ -93,4 +95,5 @@ __all__ = [
     "register_ai_scoring_routes",
     "register_ai_scoring_ext_routes",
     "register_ai_scoring_auth_routes",
+    "register_ai_learning_routes",
 ]
