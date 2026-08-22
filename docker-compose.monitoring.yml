@@ -1,0 +1,193 @@
+# ============================================================
+# 本地 Docker Compose 快速启动脚本
+# 用途: 拉起 Redis + Prometheus 监控栈, 用于验证 ha-monitor-check 脚本
+# 版本: v1.0
+# 生成时间: 2026-08-22
+# ============================================================
+
+version: '3.8'
+
+services:
+  # ============================================================
+  # Redis 主节点 (单机模式, 用于本地验证)
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command:
+      - redis-server
+      - --appendonly yes
+      - --maxmemory 256mb
+      - --maxmemory-policy allkeys-lru
+      - --requirepass ${REDIS_PASSWORD:-zhuxiang123}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - zhuxiang-net
+
+  # ============================================================
+  # Redis Exporter (Redis 指标采集)
+  # ============================================================
+  redis-exporter:
+    image: redis_exporter:1.55-alpine
+    container_name: redis-exporter
+    command:
+      - --redis.addr=redis:6379
+      - --redis.password=${REDIS_PASSWORD:-zhuxiang123}
+      - --redis.export-missing-keys=false
+      - --check-key-groups="zhuxiang:*,lock:*"
+      - --log-format=json
+    ports:
+      - "9121:9121"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - zhuxiang-net
+
+  # ============================================================
+  # Node Exporter (主机指标采集)
+  # ============================================================
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+    networks:
+      - zhuxiang-net
+
+  # ============================================================
+  # cAdvisor (容器指标采集)
+  # ============================================================
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: cadvisor
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    restart: unless-stopped
+    networks:
+      - zhuxiang-net
+
+  # ============================================================
+  # Prometheus (指标存储 + 查询)
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - redis-exporter
+      - node-exporter
+      - cadvisor
+    restart: unless-stopped
+    networks:
+      - zhuxiang-net
+
+  # ============================================================
+  # Alertmanager (告警路由)
+  # ============================================================
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    restart: unless-stopped
+    networks:
+      - zhuxiang-net
+
+  # ============================================================
+  # Grafana (可视化面板)
+  # ============================================================
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - zhuxiang-net
+
+  # ============================================================
+  # Backend 应用 (竹香酒后端, 用于接口验证)
+  # ============================================================
+  backend:
+    build:
+      context: ./zhuxiang-jiu/backend
+      dockerfile: Dockerfile
+    container_name: backend
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - LOCK_MODE=redis
+      - STORE_MODE=redis
+      - PYTHONPATH=/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - zhuxiang-net
+
+# ============================================================
+# 数据卷
+# ============================================================
+volumes:
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+# ============================================================
+# 网络
+# ============================================================
+networks:
+  zhuxiang-net:
+    driver: bridge
