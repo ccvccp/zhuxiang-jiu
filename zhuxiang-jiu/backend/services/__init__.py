@@ -8,6 +8,7 @@
         ValueError(message) → 路由层映射为 409(资源冲突)
     - 并发安全: 涉及 RMW 的操作(per-key 锁)由 service 负责
 """
+# 已有模块(15)
 from services.agent_service import AgentService
 from services.checkout_service import CheckoutService
 from services.inventory_service import InventoryService
@@ -23,8 +24,24 @@ from services.logistics_service import LogisticsService
 from services.groupbuy_service import GroupBuyService
 from services.citystore_service import CityStoreService
 from services.points_service import PointsService
+# 新增模块(14)
+from services.credit_service import CreditService
+from services.activity_service import ActivityService
+from services.traffic_service import TrafficService
+from services.message_service import MessageService
+from services.chat_service import ChatService
+from services.ad_service import AdService
+from services.cooperation_service import CooperationService
+from services.agreement_service import AgreementService
+from services.recycle_service import RecycleService
+from services.trace_service import TraceService
+from services.compliance_service import ComplianceService
+from services.location_service import LocationService
+from services.admin_service import AdminService
+from services.venue_service import VenueService
 
 __all__ = [
+    # 已有(15)
     "AgentService",
     "CheckoutService",
     "InventoryService",
@@ -40,4 +57,19 @@ __all__ = [
     "GroupBuyService",
     "CityStoreService",
     "PointsService",
+    # 新增(14)
+    "CreditService",
+    "ActivityService",
+    "TrafficService",
+    "MessageService",
+    "ChatService",
+    "AdService",
+    "CooperationService",
+    "AgreementService",
+    "RecycleService",
+    "TraceService",
+    "ComplianceService",
+    "LocationService",
+    "AdminService",
+    "VenueService",
 ]

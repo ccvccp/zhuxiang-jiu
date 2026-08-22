@@ -41,6 +41,21 @@ from routes import (
     register_groupbuy_routes,
     register_citystore_routes,
     register_points_routes,
+    # 新增14模块
+    register_credit_routes,
+    register_activity_routes,
+    register_traffic_routes,
+    register_message_routes,
+    register_chat_routes,
+    register_ad_routes,
+    register_cooperation_routes,
+    register_agreement_routes,
+    register_recycle_routes,
+    register_trace_routes,
+    register_compliance_routes,
+    register_location_routes,
+    register_admin_routes,
+    register_venue_routes,
 )
 
 
@@ -79,6 +94,21 @@ app = FastAPI(
         {"name": "物流接口管理", "description": "物流下单/轨迹追踪/月结对账/状态机"},
         {"name": "团购模块", "description": "SVIP团购/阶梯折扣/申请审核/状态流转"},
         {"name": "市级网店模块", "description": "SVIP开店/城市独占/月度考核/三档折扣/状态机"},
+        {"name": "会员积分模块", "description": "签到/消费返分/积分抵现/过期处理"},
+        {"name": "信用管理模块", "description": "竹信分/5级信用等级/先享后付额度"},
+        {"name": "活动管理模块", "description": "8类活动/报名/擂台赛/状态机"},
+        {"name": "流量管理模块", "description": "多平台引流/推广员裂变/佣金计算"},
+        {"name": "信息管理模块", "description": "站内信/短信/邮件/模板/批量推送"},
+        {"name": "AI客服模块", "description": "AI会话/人工转接/知识库/满意度"},
+        {"name": "广告管理模块", "description": "广告CRUD/广告位/投放策略/审核"},
+        {"name": "合作接口模块", "description": "合作申请/审核/协议/分级/状态流转"},
+        {"name": "条款协议模块", "description": "条款版本/用户同意/角色协议"},
+        {"name": "老酒兑换模块", "description": "估价/回收/兑换新酒/状态流转"},
+        {"name": "双码追溯模块", "description": "箱码/生命码/扫码追溯/防窜货"},
+        {"name": "合规监控模块", "description": "规则管理/违规检测/预警/处罚/申诉"},
+        {"name": "位置地图模块", "description": "LBS定位/附近搜索/地理围栏"},
+        {"name": "后台管理模块", "description": "管理员/角色权限/操作日志/系统配置"},
+        {"name": "酒店酒吧模块", "description": "合作商/场地/铺货/分级/佣金结算"},
     ],
 )
 
@@ -110,6 +140,21 @@ register_logistics_routes(app)
 register_groupbuy_routes(app)
 register_citystore_routes(app)
 register_points_routes(app)
+# 新增14模块
+register_credit_routes(app)
+register_activity_routes(app)
+register_traffic_routes(app)
+register_message_routes(app)
+register_chat_routes(app)
+register_ad_routes(app)
+register_cooperation_routes(app)
+register_agreement_routes(app)
+register_recycle_routes(app)
+register_trace_routes(app)
+register_compliance_routes(app)
+register_location_routes(app)
+register_admin_routes(app)
+register_venue_routes(app)
 
 
 # ============================================================

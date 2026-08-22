@@ -9,6 +9,7 @@
     每个 *_routes.py 暴露 register_xxx_routes(app) 函数,
     main.py 在应用初始化时调用。
 """
+# 已有模块(15)
 from routes.decision_routes import register_decision_routes
 from routes.system_routes import register_system_routes
 from routes.business_routes import register_business_routes
@@ -23,8 +24,24 @@ from routes.logistics_routes import register_logistics_routes
 from routes.groupbuy_routes import register_groupbuy_routes
 from routes.citystore_routes import register_citystore_routes
 from routes.points_routes import register_points_routes
+# 新增模块(14)
+from routes.credit_routes import register_credit_routes
+from routes.activity_routes import register_activity_routes
+from routes.traffic_routes import register_traffic_routes
+from routes.message_routes import register_message_routes
+from routes.chat_routes import register_chat_routes
+from routes.ad_routes import register_ad_routes
+from routes.cooperation_routes import register_cooperation_routes
+from routes.agreement_routes import register_agreement_routes
+from routes.recycle_routes import register_recycle_routes
+from routes.trace_routes import register_trace_routes
+from routes.compliance_routes import register_compliance_routes
+from routes.location_routes import register_location_routes
+from routes.admin_routes import register_admin_routes
+from routes.venue_routes import register_venue_routes
 
 __all__ = [
+    # 已有(15)
     "register_decision_routes",
     "register_system_routes",
     "register_business_routes",
@@ -39,4 +56,19 @@ __all__ = [
     "register_groupbuy_routes",
     "register_citystore_routes",
     "register_points_routes",
+    # 新增(14)
+    "register_credit_routes",
+    "register_activity_routes",
+    "register_traffic_routes",
+    "register_message_routes",
+    "register_chat_routes",
+    "register_ad_routes",
+    "register_cooperation_routes",
+    "register_agreement_routes",
+    "register_recycle_routes",
+    "register_trace_routes",
+    "register_compliance_routes",
+    "register_location_routes",
+    "register_admin_routes",
+    "register_venue_routes",
 ]
