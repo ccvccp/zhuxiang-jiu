@@ -303,6 +303,17 @@ async def pay_callback(req: PayCallbackRequest):
 # 2. 退款(5 端点 + 1 pending 列表 = 6)
 # ============================================================
 
+# 静态路由必须在动态路由之前, 避免 {pay_no} 捕获静态路径段
+@router.get("/api/payment/refunds/pending", tags=["收款管理"])
+async def list_pending_refunds(
+    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    limit: int = Query(100, ge=1, le=500),
+):
+    """待审核退款列表(admin)"""
+    _require_admin(x_role)
+    return await _service.list_pending_refunds(limit)
+
+
 @router.post("/api/payment/{pay_no}/refund", tags=["收款管理"])
 async def create_refund(
     pay_no: str,
@@ -375,16 +386,6 @@ async def refund_callback(req: RefundCallbackRequest):
         raise _map_key_error(e) from e
     except ValueError as e:
         raise _map_value_error(e) from e
-
-
-@router.get("/api/payment/refunds/pending", tags=["收款管理"])
-async def list_pending_refunds(
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
-    limit: int = Query(100, ge=1, le=500),
-):
-    """待审核退款列表(admin)"""
-    _require_admin(x_role)
-    return await _service.list_pending_refunds(limit)
 
 
 # ============================================================
