@@ -235,17 +235,15 @@ _ORDER_OUTCOME_CORRECT = {
 
 
 async def on_order_created(order_id: str, member_id: str,
-                           items: list[dict]) -> None:
-    """订单创建 → 订单风控评分(观察模式) + 快照"""
+                           items: list[dict],
+                           address: Optional[dict] = None,
+                           remark: str = "") -> None:
+    """订单创建 → 订单风控评分(v7.8 输入富化: 真实信用/行为画像) + 快照"""
     try:
-        amount = sum(float(i.get("unitPrice") or 0) * int(i.get("quantity") or 1)
-                     for i in (items or []))
-        await score_and_snapshot("order_risk", f"order:{order_id}", {
-            "bambooScore": 750,          # 中性默认, 后续接入会员服务富化
-            "registerHours": 720,
-            "orderAmount": round(amount, 2),
-            "historyOrders": 10,
-        })
+        from services.ai_context_enricher import enrich_order_risk
+        ctx = await enrich_order_risk(member_id, items,
+                                      address=address, remark=remark)
+        await score_and_snapshot("order_risk", f"order:{order_id}", ctx)
     except Exception as exc:  # noqa: BLE001
         logger.warning("on_order_created 挂钩失败(order=%s): %s", order_id, exc)
 
@@ -318,12 +316,12 @@ async def on_shipped(order_id: str, carrier: str) -> None:
 
 
 async def on_points_earned(member_id: str, points: float) -> None:
-    """积分发放 → 积分防薅羊毛评分 + 立即配对(正常发放期望 low)"""
+    """积分发放 → 积分防薅羊毛评分(v7.8 富化: 当日获取爆发聚合流水) + 立即配对"""
     try:
+        from services.ai_context_enricher import enrich_points_risk
+        ctx = await enrich_points_risk(member_id, points)
         business_key = f"points:{member_id}:{ts()}"
-        result = await score_and_snapshot("points_risk", business_key, {
-            "todayEarned": float(points or 0), "sameDeviceAccounts": 1,
-        })
+        result = await score_and_snapshot("points_risk", business_key, ctx)
         if result is not None:
             decision = _extract_decision("points_risk", result)
             await record_outcome("points_risk", business_key, "earned",
@@ -334,12 +332,19 @@ async def on_points_earned(member_id: str, points: float) -> None:
 
 
 async def on_withdraw_requested(withdraw_no: str, amount: float,
-                                balance: float) -> None:
-    """提现申请 → 提现风控评分 + 快照(等待审批终态)"""
+                                balance: float,
+                                member_id=None) -> None:
+    """提现申请 → 提现风控评分(v7.8 富化: 提现频率/驳回/账户状态) + 快照
+
+    Args:
+        balance: 提现前可用余额; member_id 提供时启用画像富化(缺省中性输入)
+    """
     try:
-        await score_and_snapshot("withdraw_risk", f"withdraw:{withdraw_no}", {
-            "amount": float(amount or 0), "balance": float(balance or 0),
-        })
+        ctx = {"amount": float(amount or 0), "balance": float(balance or 0)}
+        if member_id is not None:
+            from services.ai_context_enricher import enrich_withdraw_risk
+            ctx = await enrich_withdraw_risk(member_id, amount, balance)
+        await score_and_snapshot("withdraw_risk", f"withdraw:{withdraw_no}", ctx)
     except Exception as exc:  # noqa: BLE001
         logger.warning("on_withdraw_requested 挂钩失败(%s): %s",
                        withdraw_no, exc)

@@ -189,9 +189,19 @@ async def wallet_withdraw(
     """提现申请(< ¥5000 自动通过; ¥5000-¥50000 一级审核; > ¥50000 二级审核)"""
     member_id = _require_member_id(x_member_id)
     try:
-        return await _service.withdraw(
+        result = await _service.withdraw(
             member_id, req.amount, req.payChannel, req.bankAccount,
         )
+        # v7.6 自动反馈: 提现风控评分+快照(等待审批终态配对)
+        # v7.8 输入富化: 传入 member_id 启用真实画像; 余额传「提现前」
+        withdraw_no = str(result.get("withdrawNo") or "")
+        if withdraw_no:
+            balance_before = float(req.amount or 0) \
+                + float(result.get("balanceAfter") or 0)
+            await ai_hooks.on_withdraw_requested(
+                withdraw_no, float(req.amount or 0), balance_before,
+                member_id=member_id)
+        return result
     except KeyError as e:
         raise _map_key_error(e) from e
     except ValueError as e:

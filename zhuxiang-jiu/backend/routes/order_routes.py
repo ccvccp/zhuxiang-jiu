@@ -76,11 +76,14 @@ async def create_order(
             remark=body.get("remark", ""),
         )
         # v7.6 自动反馈: 订单风控观察评分 + 决策快照(不阻断业务)
+        # v7.8 输入富化: 传入地址/备注, 信用与行为画像由富化层查询
         order_id = (result.get("details") or {}).get("orderId") \
             or result.get("orderId") or ""
         if order_id:
-            await ai_hooks.on_order_created(order_id, member_id,
-                                            body.get("items", []))
+            await ai_hooks.on_order_created(
+                order_id, member_id, body.get("items", []),
+                address=body.get("address"),
+                remark=str(body.get("remark") or ""))
         return result
     except Exception as e:
         raise _handle(e)
