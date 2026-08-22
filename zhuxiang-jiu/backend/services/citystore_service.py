@@ -280,7 +280,7 @@ class CityStoreService:
                     "[下单入口决策] 城市判定走经纬度路径: (%s, %s) 半径%skm 内"
                     "找到 %d 家门店, 最近=%s(%.2fkm), 推断城市=%r",
                     longitude, latitude, nearby_radius_km, len(nearby_stores),
-                    nearest.get("storeName", ""), nearest.get("distanceKm", -1),
+                    nearest.get("storeName", ""), nearest.get("distance", -1.0),
                     nearest.get("city", ""))
             else:
                 logger.info(
