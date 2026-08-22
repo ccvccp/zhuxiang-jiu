@@ -101,6 +101,19 @@
         .drift-dot.medium { background: #e67e22; }
         .drift-dot.high { background: var(--color-danger); }
 
+        /* 决策阻断面板(v7.8) */
+        .badge.mode-observe { background: #f0f0f0; color: #666; }
+        .badge.mode-shadow { background: #eef2fb; color: #3b5998; border-color: rgba(59, 89, 152, 0.3); }
+        .badge.mode-enforce { background: #fdeaea; color: #c0392b; border-color: rgba(192, 57, 43, 0.35); }
+        .enf-burst { display: flex; align-items: center; gap: 10px; padding: 10px 16px 0; font-size: 12px; color: var(--color-text-light); }
+        .enf-burst .bar { flex: 1; max-width: 260px; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden; }
+        .enf-burst .bar i { display: block; height: 100%; background: linear-gradient(90deg, #2e8b57, #e67e22, #c0392b); }
+        .enf-note { padding: 8px 16px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.7; }
+        .tbl .a-blocked { color: #c0392b; font-weight: 700; }
+        .tbl .a-review { color: #a06b00; font-weight: 600; }
+        .tbl .a-pass { color: #2e8b57; }
+        .tbl .deg-true { color: #e67e22; font-weight: 600; }
+
         /* 通用表格 */
         .tbl-wrap { padding: 8px 16px 16px; overflow-x: auto; }
         table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -180,7 +193,7 @@
     <header class="dash-banner">
         <div class="container">
             <h1>AI 自学习驾驶舱 · 评分器详情</h1>
-            <p id="bannerSub">v7.7 · 权重演进 / 版本历史 / 漂移监控</p>
+            <p id="bannerSub">v7.8 · 权重演进 / 版本历史 / 漂移监控 / 决策阻断</p>
             <a class="back-link" href="ai-learning-dashboard.html">← 返回总览</a>
         </div>
     </header>
@@ -242,6 +255,17 @@
             </div>
         </section>
 
+        <!-- 决策阻断(v7.8) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">决策阻断<small id="enfModeNote">observe / shadow / enforce 三级模式</small></div>
+                <div class="drift-summary" id="enfSummary"><div class="chart-empty">加载中…</div></div>
+                <div class="enf-burst" id="enfBurst"></div>
+                <div class="enf-note" id="enfNote"></div>
+                <div class="tbl-wrap" id="enfTable"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
         <!-- 版本历史 -->
         <section class="dash-section">
             <div class="dash-card">
@@ -278,7 +302,7 @@
 
         <!-- 页脚 -->
         <footer class="dash-footer">
-            <div>数据来源：<code>GET /api/ai-learning/weights/{scorerId}</code> · <code>GET /api/ai-learning/history/{scorerId}</code> · <code>GET /api/ai-learning/drift/{scorerId}</code>。管理操作：<code>PUT /weights</code> · <code>POST /reset</code>。学习效果报表（正确率演进/评估指标曲线）见 <a href="ai-learning-report.html?scorerId=" id="footerReportLink" style="color:var(--color-primary);">报表页</a>。</div>
+            <div>数据来源：<code>GET /api/ai-learning/weights/{scorerId}</code> · <code>GET /api/ai-learning/history/{scorerId}</code> · <code>GET /api/ai-learning/drift/{scorerId}</code> · <code>GET /enforcement/{scorerId}/overview|audit</code>。管理操作：<code>PUT /weights</code> · <code>POST /reset</code>。学习效果报表（正确率演进/评估指标曲线）见 <a href="ai-learning-report.html?scorerId=" id="footerReportLink" style="color:var(--color-primary);">报表页</a>。</div>
             <div>鉴权：compat 模式以 <code>X-Role: admin</code> 兼容头访问。曲线为纯 SVG 手绘，无外部依赖。</div>
         </footer>
     </main>
@@ -307,6 +331,7 @@
             apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
             scorerId: new URLSearchParams(location.search).get('scorerId') || '',
             weights: null, history: null, drift: null,
+            enf: null, enfAudit: null,
         };
 
         var SRC_LABEL = { default: '默认', learning: '学习', manual: '人工', reset: '重置' };
@@ -353,6 +378,7 @@
             loadWeights();
             loadHistory();
             loadDrift();
+            loadEnforcement();
             document.getElementById('lastUpdate').textContent = '最后刷新 ' + new Date().toLocaleTimeString('zh-CN');
         }
 
@@ -395,6 +421,28 @@
             } catch (err) {
                 document.getElementById('driftSummary').innerHTML =
                     '<div class="card-error">漂移统计加载失败：' + esc(err.message) + '</div>';
+            }
+        }
+
+        async function loadEnforcement() {
+            try {
+                var d = await fetchJson(api('enforcement/' + encodeURIComponent(state.scorerId) + '/overview'));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.enf = d;
+                renderEnforcement();
+            } catch (err) {
+                document.getElementById('enfSummary').innerHTML =
+                    '<div class="card-error">阻断概览加载失败：' + esc(err.message) + '</div>';
+                document.getElementById('enfTable').innerHTML = '';
+            }
+            try {
+                var a = await fetchJson(api('enforcement/' + encodeURIComponent(state.scorerId) + '/audit?limit=20'));
+                if (!a || !a.success) throw new Error('响应格式异常');
+                state.enfAudit = a.records || [];
+                renderEnfAudit();
+            } catch (err) {
+                document.getElementById('enfTable').innerHTML =
+                    '<div class="card-error">审计记录加载失败：' + esc(err.message) + '</div>';
             }
         }
 
@@ -592,6 +640,68 @@
                 '<th style="text-align:right">EMA 分数</th><th style="text-align:right">相对偏差</th></tr></thead>' +
                 '<tbody>' + rows + '</tbody></table>' +
                 '<div style="font-size:11px;color:#6b6b6b;padding-top:8px;">最近反馈: ' + esc(fmtTime(d.lastFeedbackAt)) + '</div>';
+        }
+
+        /* ========= 决策阻断面板(v7.8) ========= */
+        var MODE_LABEL = { observe: '观察', shadow: '影子', enforce: '执行' };
+
+        function renderEnforcement() {
+            var e = state.enf || {};
+            var mode = e.mode || 'observe';
+            var s = e.stats || {};
+            var p = e.protections || {};
+            document.getElementById('enfModeNote').textContent =
+                '当前模式: ' + (MODE_LABEL[mode] || mode);
+
+            document.getElementById('enfSummary').innerHTML =
+                '<div class="cell"><b><span class="badge mode-' + esc(mode) + '">' + esc(MODE_LABEL[mode] || mode) + '</span></b><span>运行模式</span></div>' +
+                '<div class="cell"><b>' + (s.total || 0) + '</b><span>累计决策</span></div>' +
+                '<div class="cell"><b style="color:#c0392b;">' + (s.blocked || 0) + '</b><span>真实阻断</span></div>' +
+                '<div class="cell"><b style="color:#a06b00;">' + (s.reviews || 0) + '</b><span>强制人工</span></div>' +
+                '<div class="cell"><b style="color:#e67e22;">' + (s.degraded || 0) + '</b><span>保护降级</span></div>' +
+                '<div class="cell"><b>' + pct(s.blockRate) + '</b><span>阻断率</span></div>';
+
+            var b = e.burstWindow || {};
+            var ratio = b.total ? Math.min(1, (b.blocked || 0) / b.total) : 0;
+            document.getElementById('enfBurst').innerHTML =
+                '<span>熔断窗口(' + Math.round((b.seconds || 3600) / 60) + '分钟):</span>' +
+                '<div class="bar"><i style="width:' + (ratio * 100).toFixed(0) + '%;"></i></div>' +
+                '<span>' + (b.blocked || 0) + '/' + (b.total || 0) +
+                ' (阈值 ' + (p.burstMaxBlockRatio != null ? (p.burstMaxBlockRatio * 100).toFixed(0) + '%' : '30%') + ')</span>';
+
+            document.getElementById('enfNote').innerHTML =
+                '四重误杀保护: 冷启动(反馈 &lt; ' + esc(p.coldStartMinFeedback || 50) + ' 条降级) · ' +
+                '正确率(&lt; ' + (p.accuracyMinRatio != null ? (p.accuracyMinRatio * 100).toFixed(0) + '%' : '70%') + ' 降级) · ' +
+                '阻断率熔断(窗口内 &gt; ' + (p.burstMaxBlockRatio != null ? (p.burstMaxBlockRatio * 100).toFixed(0) + '%' : '30%') + ' 降级) · ' +
+                'fail-open(评分异常放行)。模式由环境变量 AI_ENFORCE_MODE / AI_ENFORCE_SCOPES 控制。';
+        }
+
+        function renderEnfAudit() {
+            var recs = state.enfAudit || [];
+            var box = document.getElementById('enfTable');
+            if (!recs.length) {
+                box.innerHTML = '<div class="chart-empty" style="padding:12px 0 18px;">暂无决策审计记录(shadow/enforce 模式运行后产生)</div>';
+                return;
+            }
+            var rows = recs.map(function (r) {
+                var act = r.blocked ? '<span class="a-blocked">已阻断</span>'
+                    : r.reviewRequired ? '<span class="a-review">强制人工</span>'
+                    : '<span class="a-pass">放行</span>';
+                var deg = r.degraded
+                    ? '<span class="deg-true">降级 ' + esc(r.degradeReason || '') + '</span>' : '—';
+                return '<tr><td class="mono">' + esc(fmtTime(r.decidedAt)) + '</td>' +
+                    '<td class="mono">' + esc(r.businessKey || '') + '</td>' +
+                    '<td>' + esc(MODE_LABEL[r.effectiveMode] || r.effectiveMode || '—') + '</td>' +
+                    '<td>' + act + '</td>' +
+                    '<td class="num">' + (r.score != null ? r.score : '—') + '</td>' +
+                    '<td class="mono">' + esc(r.weightVersion || '—') + '</td>' +
+                    '<td>' + deg + '</td></tr>';
+            }).join('');
+            box.innerHTML =
+                '<table class="tbl"><thead><tr><th>决策时间</th><th>业务键</th><th>生效模式</th>' +
+                '<th>处置</th><th style="text-align:right">评分</th><th>权重版本</th><th>降级原因</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>' +
+                '<div style="font-size:11px;color:#6b6b6b;padding-top:8px;">最近 ' + recs.length + ' 条决策审计(新→旧)</div>';
         }
 
         /* ========= 版本历史表 ========= */

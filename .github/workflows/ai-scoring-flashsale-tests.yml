@@ -34,15 +34,18 @@ env:
 
 jobs:
   # ============================================================
-  # Job 1: AI 语义评分层测试(三批 14 评分器 115 项 + 自学习层 40 项 + 自动反馈挂钩层 30 项)
+  # Job 1: AI 语义评分层测试(三批 14 评分器 115 项 + 自学习层 40 项 + 自动反馈挂钩层 30 项 + 决策阻断 49 项)
   #   第一批 39 项(订单风控/支付路由/物流路由/流量防作弊/推广码防作弊)
   #   第二批 51 项(会员画像/积分防薅/内容审核/提现风控/团购资格/后台操作/合同条款/财务异常)
   #   第三批 25 项(认证风控: 8因子4级决策+硬约束拦截)
   #   自学习层 40 项(Hedge在线学习/冠军挑战者/护栏约束/漂移监控/HTTP全栈)
   #   自动反馈挂钩层 30 项(业务事件→决策快照→自动反馈→定时学习→学习报表)
+  #   决策阻断引擎 23 项(v7.8: 三级模式/决策门/四重误杀保护/审计统计)
+  #   输入富化层 16 项(v7.8: 三域真实画像/中性回退/HTTP接线)
+  #   提现决策门集成 10 项(v7.8: 首域真实拦截/零副作用/强制人工)
   # ============================================================
   ai-scoring-tests:
-    name: AI Scoring Tests (185)
+    name: AI Scoring Tests (234)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -89,11 +92,26 @@ jobs:
           set -o pipefail
           python test_ai_feedback_hooks.py 2>&1 | tee ai-feedback-hooks.log
 
+      - name: Run AI enforcement engine tests (23 items)
+        run: |
+          set -o pipefail
+          python test_ai_enforcement.py 2>&1 | tee ai-enforcement.log
+
+      - name: Run AI context enricher tests (16 items)
+        run: |
+          set -o pipefail
+          python test_ai_context_enricher.py 2>&1 | tee ai-context-enricher.log
+
+      - name: Run AI withdrawal gate tests (10 items)
+        run: |
+          set -o pipefail
+          python test_ai_enforcement_withdraw.py 2>&1 | tee ai-enforcement-withdraw.log
+
       - name: Print scoring test summary
         if: always()
         run: |
           echo "## AI Scoring Tests Summary"
-          grep -h "总计" ai-scoring-batch1.log ai-scoring-batch2.log ai-scoring-batch3.log ai-learning.log ai-feedback-hooks.log || true
+          grep -h "总计" ai-scoring-batch1.log ai-scoring-batch2.log ai-scoring-batch3.log ai-learning.log ai-feedback-hooks.log ai-enforcement.log ai-context-enricher.log ai-enforcement-withdraw.log || true
 
       - name: Upload test logs
         if: always()
@@ -104,6 +122,9 @@ jobs:
             zhuxiang-jiu/backend/ai-scoring-batch*.log
             zhuxiang-jiu/backend/ai-learning.log
             zhuxiang-jiu/backend/ai-feedback-hooks.log
+            zhuxiang-jiu/backend/ai-enforcement.log
+            zhuxiang-jiu/backend/ai-context-enricher.log
+            zhuxiang-jiu/backend/ai-enforcement-withdraw.log
           retention-days: 30
 
   # ============================================================
@@ -236,7 +257,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Items | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| AI Scoring Tests (batch1+2+3+learning+hooks) | 185 | ${{ needs.ai-scoring-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AI Scoring Tests (batch1+2+3+learning+hooks+enforcement) | 234 | ${{ needs.ai-scoring-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Flash Sale Tests (service+http) | 101 | ${{ needs.flashsale-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Flash Sale Redis Integration | 13 | ${{ needs.flashsale-redis-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
