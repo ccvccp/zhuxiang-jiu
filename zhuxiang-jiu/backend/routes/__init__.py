@@ -49,6 +49,8 @@ from routes.flashsale_routes import register_flashsale_routes
 from routes.promotion_routes import register_promotion_routes
 # AI 语义评分层(v7.2: 5 个高落差模块补齐 AI 语义)
 from routes.ai_scoring_routes import register_ai_scoring_routes
+# AI 语义评分层·第二批(v7.3: 剩余 8 个 B 级模块补齐 AI 语义)
+from routes.ai_scoring_ext_routes import register_ai_scoring_ext_routes
 
 __all__ = [
     # 已有(15)
@@ -87,4 +89,5 @@ __all__ = [
     "register_promotion_routes",
     "register_flashsale_routes",
     "register_ai_scoring_routes",
+    "register_ai_scoring_ext_routes",
 ]
