@@ -1,4 +1,4 @@
-﻿# ============================================================
+﻿﻿﻿# ============================================================
 # 本地监控栈一键启动脚本 (PowerShell)
 # 用途: 快速拉起 Redis + Prometheus + Grafana 监控栈
 # 用法:
@@ -221,7 +221,8 @@ function Show-Status {
     Write-Host "  cAdvisor:        http://localhost:8080" -ForegroundColor Cyan
     Write-Host "  Prometheus:      http://localhost:9090" -ForegroundColor Cyan
     Write-Host "  Alertmanager:    http://localhost:9093" -ForegroundColor Cyan
-    Write-Host "  Grafana:         http://localhost:3000 (admin / ${GRAFANA_PASSWORD})" -ForegroundColor Cyan
+    $grafanaPwd = if ($env:GRAFANA_PASSWORD) { $env:GRAFANA_PASSWORD } else { "admin" }
+    Write-Host "  Grafana:         http://localhost:3000 (admin / $grafanaPwd)" -ForegroundColor Cyan
 }
 
 # ============================================================
@@ -242,7 +243,7 @@ function Show-Logs {
 function Invoke-Verify {
     Write-Header "执行验证脚本"
     
-    $verifyScript = "zhuxiang-jiu/backend/scripts/ha-monitor-check.ps1"
+    $verifyScript = Join-Path $ProjectRoot "zhuxiang-jiu\backend\scripts\ha-monitor-check.ps1"
     if (Test-Path $verifyScript) {
         Write-Step "执行 ha-monitor-check.ps1..."
         & powershell -ExecutionPolicy Bypass -File $verifyScript
