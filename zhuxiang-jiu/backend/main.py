@@ -24,6 +24,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from core.auth_middleware import JWTAuthMiddleware
 from core.config import ALLOW_HEADERS, ALLOW_METHODS, CORS_ORIGINS
 from core.errors import register_exception_handlers
 from core.helpers import uptime
@@ -127,6 +128,11 @@ app = FastAPI(
 # ============================================================
 #  中间件 + 异常处理 + 路由注册
 # ============================================================
+
+# JWT 认证中间件(内层: 校验 Token 并注入身份头)
+# 注意: 先于 CORS 添加, 使 CORS 位于外层(预检请求由 CORS 直接响应,
+# 认证错误响应也会带上 CORS 头)
+app.add_middleware(JWTAuthMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
