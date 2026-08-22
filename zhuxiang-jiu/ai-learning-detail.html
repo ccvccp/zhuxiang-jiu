@@ -278,7 +278,7 @@
 
         <!-- 页脚 -->
         <footer class="dash-footer">
-            <div>数据来源：<code>GET /api/ai-learning/weights/{scorerId}</code> · <code>GET /api/ai-learning/history/{scorerId}</code> · <code>GET /api/ai-learning/drift/{scorerId}</code>。管理操作：<code>PUT /weights</code> · <code>POST /reset</code>。挑战者晋升/学习配置编辑见后续阶段。</div>
+            <div>数据来源：<code>GET /api/ai-learning/weights/{scorerId}</code> · <code>GET /api/ai-learning/history/{scorerId}</code> · <code>GET /api/ai-learning/drift/{scorerId}</code>。管理操作：<code>PUT /weights</code> · <code>POST /reset</code>。学习效果报表（正确率演进/评估指标曲线）见 <a href="ai-learning-report.html?scorerId=" id="footerReportLink" style="color:var(--color-primary);">报表页</a>。</div>
             <div>鉴权：compat 模式以 <code>X-Role: admin</code> 兼容头访问。曲线为纯 SVG 手绘，无外部依赖。</div>
         </footer>
     </main>
@@ -348,6 +348,8 @@
                 showError('缺少 scorerId 参数。请从总览页卡片进入，或手动追加 ?scorerId=order_risk');
                 return;
             }
+            document.getElementById('footerReportLink').href =
+                'ai-learning-report.html?scorerId=' + encodeURIComponent(state.scorerId);
             loadWeights();
             loadHistory();
             loadDrift();

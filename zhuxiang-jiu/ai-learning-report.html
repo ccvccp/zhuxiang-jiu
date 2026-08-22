@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 自学习驾驶舱 · 学习报表</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 报表页专属样式(与详情页同风格) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 30px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 22px; margin: 0; }
+        .dash-banner p { margin: 6px 0 0; opacity: 0.9; font-size: 13px; }
+        .dash-banner .back-link { color: #fff; font-size: 13px; opacity: 0.85; text-decoration: none; display: inline-block; margin-top: 10px; }
+        .dash-banner .back-link:hover { opacity: 1; text-decoration: underline; }
+        .dash-banner .nav-links { margin-top: 10px; display: flex; gap: 16px; justify-content: center; }
+
+        .dash-section { padding: 16px 0 4px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+        .card-title { font-size: 15px; font-weight: 700; color: var(--color-primary-dark); padding: 14px 16px 0; }
+        .card-title small { font-weight: 400; color: var(--color-text-light); margin-left: 8px; }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 摘要头卡 */
+        .sum-card { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+        .sum-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        .sum-head h2 { margin: 0; font-size: 19px; }
+        .sum-sub { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+        .sum-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.module { background: rgba(74, 124, 89, 0.08); color: var(--color-primary-dark); border-color: rgba(74, 124, 89, 0.25); }
+        .badge.version { background: #e8f4ec; color: #2e8b57; }
+        .badge.src-default { background: #f0f0f0; color: #666; }
+        .badge.src-learning { background: #e8f4ec; color: #2e8b57; }
+        .badge.src-manual { background: #eef2fb; color: #3b5998; }
+        .badge.src-reset { background: #fdf3e3; color: #a06b00; }
+        .drift-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+        .drift-dot.low { background: #2e8b57; }
+        .drift-dot.medium { background: #e67e22; }
+        .drift-dot.high { background: var(--color-danger); }
+
+        /* 统计卡 */
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+        .stat-cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 12px 8px; text-align: center; }
+        .stat-cell b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+        .stat-cell span { font-size: 11px; color: var(--color-text-light); }
+        .stat-cell .up { color: #2e8b57; }
+        .stat-cell .down { color: var(--color-danger); }
+        .stat-cell .flat { color: #999; }
+
+        /* auto/manual 占比条 */
+        .ratio-bar { height: 14px; border-radius: 999px; overflow: hidden; display: flex; background: var(--color-bg); }
+        .ratio-bar .auto { background: var(--color-primary); }
+        .ratio-bar .manual { background: #b9c4bd; }
+        .ratio-legend { display: flex; gap: 16px; font-size: 12px; color: var(--color-text-light); padding-top: 8px; }
+        .ratio-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+        /* 图表 */
+        .chart-wrap { padding: 8px 16px 16px; }
+        .chart-legend { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
+        .chart-legend .lg { display: flex; align-items: center; gap: 5px; font-size: 11px; font-family: Consolas, monospace; color: var(--color-text-light); background: var(--color-bg); border-radius: 999px; padding: 2px 10px; }
+        .chart-legend .sw { width: 12px; height: 3px; border-radius: 2px; }
+        .chart-empty { text-align: center; color: var(--color-text-light); padding: 26px 0; font-size: 13px; }
+        .card-error { color: var(--color-danger); font-size: 13px; padding: 0 16px 14px; }
+
+        /* 表格 */
+        .tbl-wrap { padding: 8px 16px 16px; overflow-x: auto; }
+        table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .tbl th, .tbl td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .tbl th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .tbl td.mono { font-family: Consolas, monospace; font-size: 12px; }
+        .tbl .v-champion { color: var(--color-primary-dark); font-weight: 700; }
+        .tbl .v-challenger { color: var(--color-accent); font-weight: 700; }
+        .rate-good { color: #2e8b57; font-weight: 600; }
+        .rate-mid { color: #a06b00; font-weight: 600; }
+        .rate-bad { color: var(--color-danger); font-weight: 600; }
+
+        .dash-footer { padding: 20px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .dash-footer code { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 3px; padding: 1px 6px; font-size: 11px; }
+
+        @media (max-width: 640px) {
+            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container">
+            <h1>AI 自学习驾驶舱 · 学习报表</h1>
+            <p id="bannerSub">v7.7 · 正确率演进 / 评估指标 / 反馈构成</p>
+            <div class="nav-links">
+                <a class="back-link" href="ai-learning-dashboard.html">← 返回总览</a>
+                <a class="back-link" href="#" id="navDetail">评分器详情 →</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏 -->
+        <section class="dash-section">
+            <div class="dash-card dash-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="dash-btn ghost" onclick="saveApiBase()">保存</button>
+                <button class="dash-btn" onclick="loadReport()">刷新</button>
+                <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="dash-error" id="errorBanner"></div>
+        </section>
+
+        <!-- 摘要头卡 -->
+        <section class="dash-section">
+            <div class="dash-card sum-card">
+                <div class="sum-head">
+                    <h2 id="sumLabel">—</h2>
+                    <span class="badge version" id="sumFeedback">—</span>
+                </div>
+                <div class="sum-sub" id="sumId">—</div>
+                <div class="sum-chips" id="sumChips"></div>
+            </div>
+        </section>
+
+        <!-- 统计卡 -->
+        <section class="dash-section">
+            <div class="stat-grid" id="statGrid"></div>
+        </section>
+
+        <!-- 反馈构成 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">反馈构成<small>自动闭环(v7.6) vs 手动标注</small></div>
+                <div style="padding:14px 16px 16px;">
+                    <div class="ratio-bar" id="ratioBar"></div>
+                    <div class="ratio-legend" id="ratioLegend"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 正确率演进 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">正确率演进<small>各权重版本的反馈正确率(0~100%)</small></div>
+                <div class="chart-legend">
+                    <span class="lg"><span class="sw" style="background:#4a7c59;"></span>正确率</span>
+                    <span class="lg" style="color:#2e8b57;">▲ 冠军(生效)</span>
+                    <span class="lg" style="color:#c9a961;">△ 挑战者</span>
+                </div>
+                <div class="chart-wrap" id="accChart"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
+        <!-- 评估指标演进 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">评估指标演进<small>学习产出的对齐度(Hedge)与回放一致率</small></div>
+                <div class="chart-legend">
+                    <span class="lg"><span class="sw" style="background:#3b5998;"></span>rewardAlignment 对齐度</span>
+                    <span class="lg"><span class="sw" style="background:#c9a961;"></span>accuracy 一致率</span>
+                </div>
+                <div class="chart-wrap" id="metricsChart"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
+        <!-- 版本明细表 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">版本明细<small id="verCount">反馈聚合 × 版本档案合并</small></div>
+                <div class="tbl-wrap" id="verTable"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
+        <!-- 页脚 -->
+        <footer class="dash-footer">
+            <div>数据来源：<code>GET /api/ai-learning/report/{scorerId}</code>(单次拉取, 页内全部区块共用)。正确率=该版本决策被真实结果验证为正确的比例; 对齐度/一致率为学习周期回放评估产出, 仅学习产出版本有值。</div>
+            <div>鉴权：compat 模式以 <code>X-Role: admin</code> 兼容头访问。图表为纯 SVG 手绘，无外部依赖。</div>
+        </footer>
+    </main>
+
+    <script>
+        'use strict';
+
+        /* ========= 全局状态 ========= */
+        var API_BASE_KEY = 'aiLearningDash.apiBase';   /* 与总览/详情页共享 */
+        var state = {
+            apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+            scorerId: new URLSearchParams(location.search).get('scorerId') || '',
+            report: null,
+        };
+
+        var SRC_LABEL = { default: '默认', learning: '学习', manual: '人工', reset: '重置' };
+        var ROLE_LABEL = { champion: '冠军(生效)', challenger: '挑战者', retired: '退役' };
+
+        /* ========= 工具函数 ========= */
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function pct(v) { return (v == null || isNaN(v)) ? '—' : (v * 100).toFixed(1) + '%'; }
+        function verNum(v) { var m = /^v(\d+)$/.exec(String(v || '')); return m ? +m[1] : 0; }
+        function fmtTime(s) { return s ? String(s).replace('T', ' ') : '—'; }
+        function rateCls(v) {
+            if (v == null || isNaN(v)) return '';
+            return v >= 0.8 ? 'rate-good' : (v >= 0.6 ? 'rate-mid' : 'rate-bad');
+        }
+
+        async function fetchJson(url) {
+            var res = await fetch(url, { headers: { 'X-Role': 'admin' } });
+            var body = null;
+            try { body = await res.json(); } catch (e) { /* 非 JSON 错误体 */ }
+            if (!res.ok) {
+                var msg = body && (body.error || body.message || body.detail)
+                    ? ' · ' + (body.error || body.message || body.detail) : '';
+                throw new Error('HTTP ' + res.status + msg);
+            }
+            return body;
+        }
+        function api(path) { return state.apiBase + '/api/ai-learning/' + path; }
+
+        /* ========= 数据加载 ========= */
+        function loadReport() {
+            if (!state.scorerId) {
+                showError('缺少 scorerId 参数。请从总览页报表入口进入，或手动追加 ?scorerId=order_risk');
+                return;
+            }
+            document.getElementById('navDetail').href =
+                'ai-learning-detail.html?scorerId=' + encodeURIComponent(state.scorerId);
+            loadReportData();
+        }
+
+        async function loadReportData() {
+            try {
+                var d = await fetchJson(api('report/' + encodeURIComponent(state.scorerId)));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.report = d;
+                renderAll();
+                document.getElementById('lastUpdate').textContent =
+                    '最后刷新 ' + new Date().toLocaleTimeString('zh-CN');
+            } catch (err) {
+                showError('报表加载失败：' + err.message);
+            }
+        }
+
+        /* ========= 渲染总入口 ========= */
+        function renderAll() {
+            var r = state.report;
+            document.getElementById('bannerSub').textContent =
+                'v7.7 · 正确率演进 / 评估指标 / 反馈构成 · 生成于 ' + fmtTime(r.generatedAt);
+            renderSummary();
+            renderStats();
+            renderRatio();
+            renderAccuracyChart();
+            renderMetricsChart();
+            renderVerTable();
+        }
+
+        function renderSummary() {
+            var r = state.report;
+            document.getElementById('sumLabel').textContent = r.label || r.scorerId;
+            document.getElementById('sumId').textContent = r.scorerId;
+            document.getElementById('sumFeedback').textContent = '反馈总量 ' + r.totalFeedback;
+            var d = r.drift || {};
+            var lv = d.driftLevel || 'low';
+            var lvLabel = { low: '正常', medium: '关注', high: '告警' }[lv] || lv;
+            document.getElementById('sumChips').innerHTML =
+                '<span class="badge module">' + esc(r.label || '') + '</span>' +
+                '<span class="badge version"><span class="drift-dot ' + esc(lv) + '"></span>漂移 ' + lvLabel + ' · ' + pct(d.driftScore) + '</span>' +
+                '<span class="badge src-learning">自动反馈 ' + r.autoFeedback + '</span>' +
+                '<span class="badge src-manual">手动反馈 ' + r.manualFeedback + '</span>';
+        }
+
+        function renderStats() {
+            var r = state.report;
+            var t = r.recentTrend || {};
+            var trendHtml = '—';
+            if (t.last10CorrectRate != null) {
+                var cls = 'flat', arrow = '→ 持平';
+                if (t.previous10CorrectRate != null) {
+                    if (t.last10CorrectRate > t.previous10CorrectRate) { cls = 'up'; arrow = '↑ 上升'; }
+                    else if (t.last10CorrectRate < t.previous10CorrectRate) { cls = 'down'; arrow = '↓ 下降'; }
+                }
+                trendHtml = '<b class="' + cls + '">' + pct(t.last10CorrectRate) + '</b>' +
+                    (t.previous10CorrectRate != null
+                        ? '<br><span style="font-size:11px;">前10条 ' + pct(t.previous10CorrectRate) + ' ' + arrow + '</span>'
+                        : '');
+            }
+            document.getElementById('statGrid').innerHTML =
+                '<div class="stat-cell"><b>' + r.totalFeedback + '</b><span>反馈总量</span></div>' +
+                '<div class="stat-cell"><b>' + r.autoFeedback + '</b><span>自动反馈(闭环)</span></div>' +
+                '<div class="stat-cell"><b>' + r.manualFeedback + '</b><span>手动反馈</span></div>' +
+                '<div class="stat-cell">' + trendHtml + '<span>近期正确率(最近' + (t.last10Size || 0) + '条)</span></div>' +
+                '<div class="stat-cell"><b>' + ((r.versions || []).length) + '</b><span>有反馈的版本数</span></div>';
+        }
+
+        function renderRatio() {
+            var r = state.report;
+            var total = r.totalFeedback || 0;
+            var autoPct = total ? (r.autoFeedback / total * 100) : 0;
+            var manualPct = total ? (r.manualFeedback / total * 100) : 0;
+            document.getElementById('ratioBar').innerHTML =
+                '<span class="auto" style="width:' + autoPct.toFixed(1) + '%;"></span>' +
+                '<span class="manual" style="width:' + manualPct.toFixed(1) + '%;"></span>';
+            document.getElementById('ratioLegend').innerHTML =
+                '<span><span class="sw" style="background:var(--color-primary);"></span>自动反馈(v7.6 业务闭环) ' +
+                r.autoFeedback + ' (' + autoPct.toFixed(1) + '%)</span>' +
+                '<span><span class="sw" style="background:#b9c4bd;"></span>手动反馈(管理员标注) ' +
+                r.manualFeedback + ' (' + manualPct.toFixed(1) + '%)</span>' +
+                (total === 0 ? '<span style="color:#999;">暂无反馈</span>' : '');
+        }
+
+        /* ========= 合并版本数据(反馈聚合 × 版本档案) ========= */
+        function mergedVersions() {
+            /* curve: 全部版本(含角色/来源/评估指标); versions: 有反馈的版本聚合 */
+            var r = state.report;
+            var fbByVer = {};
+            (r.versions || []).forEach(function (v) { fbByVer[v.version] = v; });
+            var rows = (r.curve || []).map(function (c) {
+                var fb = fbByVer[c.version] || { feedbackCount: 0, incorrectCount: 0, correctRate: null };
+                return {
+                    version: c.version, role: c.role, source: c.source || 'default',
+                    createdAt: c.createdAt, stats: c.stats || {},
+                    feedbackCount: fb.feedbackCount, incorrectCount: fb.incorrectCount,
+                    correctRate: fb.correctRate,
+                };
+            });
+            /* curve 未含但确有反馈的版本(理论少见, 兜底) */
+            var inCurve = {};
+            (r.curve || []).forEach(function (c) { inCurve[c.version] = 1; });
+            (r.versions || []).forEach(function (v) {
+                if (!inCurve[v.version]) {
+                    rows.push({
+                        version: v.version, role: 'retired', source: 'unknown',
+                        createdAt: null, stats: {},
+                        feedbackCount: v.feedbackCount, incorrectCount: v.incorrectCount,
+                        correctRate: v.correctRate,
+                    });
+                }
+            });
+            rows.sort(function (a, b) { return verNum(a.version) - verNum(b.version); });
+            return rows;
+        }
+
+        /* ========= 正确率演进图(纯 SVG) ========= */
+        function renderAccuracyChart() {
+            var wrap = document.getElementById('accChart');
+            var rows = mergedVersions();
+            if (!rows.length) {
+                wrap.innerHTML = '<div class="chart-empty">暂无版本数据</div>';
+                return;
+            }
+            var W = 760, H = 300, padL = 46, padR = 18, padT = 18, padB = 36;
+            var n = rows.length;
+            var maxX = Math.max(n - 1, 1);
+
+            function X(i) { return padL + (W - padL - padR) * (n === 1 ? 0.5 : i / maxX); }
+            function Y(v) { return padT + (H - padT - padB) * (1 - v); }   /* v: 0~1 */
+
+            var svg = ['<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block;" role="img">'];
+
+            /* 横向网格 + Y 轴刻度(0/25/50/75/100%) */
+            [0, 0.25, 0.5, 0.75, 1].forEach(function (g) {
+                var y = Y(g).toFixed(1);
+                svg.push('<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="' + (g === 0.5 ? '#cfd8d1' : '#e5e0d5') + '" stroke-width="1"' + (g === 0.5 ? ' stroke-dasharray="4 4"' : '') + '/>');
+                svg.push('<text x="' + (padL - 6) + '" y="' + (+y + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="#6b6b6b">' + (g * 100) + '%</text>');
+            });
+
+            /* X 轴版本刻度 + 角色标记 */
+            rows.forEach(function (r, i) {
+                var x = X(i).toFixed(1);
+                svg.push('<line x1="' + x + '" y1="' + padT + '" x2="' + x + '" y2="' + (H - padB) + '" stroke="#f0ede4" stroke-width="1"/>');
+                svg.push('<text x="' + x + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="#6b6b6b">' + esc(r.version) + '</text>');
+                if (r.role === 'champion') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#2e8b57">▲</text>');
+                if (r.role === 'challenger') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#c9a961">△</text>');
+            });
+
+            /* 折线(正确率为 null 的版本断开, 形成虚线间隙) */
+            var seg = [], dots = [], labels = [];
+            var flushSeg = function () {
+                if (seg.length >= 2) {
+                    svg.push('<polyline points="' + seg.join(' ') + '" fill="none" stroke="#4a7c59" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>');
+                }
+                seg = [];
+            };
+            rows.forEach(function (r, i) {
+                if (r.correctRate == null) { flushSeg(); return; }
+                var x = X(i).toFixed(1), y = Y(r.correctRate).toFixed(1);
+                seg.push(x + ',' + y);
+                dots.push('<circle cx="' + x + '" cy="' + y + '" r="3.4" fill="#4a7c59"><title>' +
+                    esc(r.version) + ' 正确率 ' + pct(r.correctRate) + ' · 反馈 ' + r.feedbackCount + ' 条 · 错误 ' + r.incorrectCount + '</title></circle>');
+                labels.push('<text x="' + x + '" y="' + (+y - 8).toFixed(1) + '" text-anchor="middle" font-size="10" fill="#2e8b57" font-weight="600">' + (r.correctRate * 100).toFixed(0) + '%</text>');
+            });
+            flushSeg();
+            svg.push(dots.join(''));
+            svg.push(labels.join(''));
+            svg.push('</svg>');
+            wrap.innerHTML = svg.join('');
+        }
+
+        /* ========= 评估指标演进图(纯 SVG) ========= */
+        function renderMetricsChart() {
+            var wrap = document.getElementById('metricsChart');
+            var rows = mergedVersions().filter(function (r) {
+                var s = r.stats || {};
+                return s.rewardAlignment != null || s.accuracy != null;
+            });
+            if (!rows.length) {
+                wrap.innerHTML = '<div class="chart-empty">暂无评估指标(学习产出版本后此处出现曲线)</div>';
+                return;
+            }
+            var W = 760, H = 300, padL = 46, padR = 18, padT = 18, padB = 36;
+            var n = rows.length;
+            var maxX = Math.max(n - 1, 1);
+
+            function X(i) { return padL + (W - padL - padR) * (n === 1 ? 0.5 : i / maxX); }
+            function Y(v) { return padT + (H - padT - padB) * (1 - v); }
+
+            var svg = ['<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block;" role="img">'];
+            [0, 0.25, 0.5, 0.75, 1].forEach(function (g) {
+                var y = Y(g).toFixed(1);
+                svg.push('<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="' + (g === 0.5 ? '#cfd8d1' : '#e5e0d5') + '" stroke-width="1"' + (g === 0.5 ? ' stroke-dasharray="4 4"' : '') + '/>');
+                svg.push('<text x="' + (padL - 6) + '" y="' + (+y + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="#6b6b6b">' + (g * 100) + '%</text>');
+            });
+            rows.forEach(function (r, i) {
+                var x = X(i).toFixed(1);
+                svg.push('<line x1="' + x + '" y1="' + padT + '" x2="' + x + '" y2="' + (H - padB) + '" stroke="#f0ede4" stroke-width="1"/>');
+                svg.push('<text x="' + x + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="#6b6b6b">' + esc(r.version) + '</text>');
+                if (r.role === 'champion') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#2e8b57">▲</text>');
+                if (r.role === 'challenger') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#c9a961">△</text>');
+            });
+
+            /* 两条序列: 对齐度(蓝) + 一致率(金), 任一为 null 断开 */
+            var SERIES = [
+                { key: 'rewardAlignment', color: '#3b5998', label: '对齐度' },
+                { key: 'accuracy', color: '#c9a961', label: '一致率' },
+            ];
+            SERIES.forEach(function (s) {
+                var seg = [], dots = [];
+                var flush = function () {
+                    if (seg.length >= 2) {
+                        svg.push('<polyline points="' + seg.join(' ') + '" fill="none" stroke="' + s.color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>');
+                    }
+                    seg = [];
+                };
+                rows.forEach(function (r, i) {
+                    var v = (r.stats || {})[s.key];
+                    if (v == null) { flush(); return; }
+                    var x = X(i).toFixed(1), y = Y(v).toFixed(1);
+                    seg.push(x + ',' + y);
+                    dots.push('<circle cx="' + x + '" cy="' + y + '" r="3.2" fill="' + s.color + '"><title>' +
+                        esc(r.version) + ' ' + s.label + ' ' + (+v).toFixed(3) + '</title></circle>');
+                });
+                flush();
+                svg.push(dots.join(''));
+            });
+            svg.push('</svg>');
+            wrap.innerHTML = svg.join('');
+        }
+
+        /* ========= 版本明细表 ========= */
+        function renderVerTable() {
+            var rows = mergedVersions();
+            document.getElementById('verCount').textContent =
+                '共 ' + rows.length + ' 个版本(新→旧)';
+            var box = document.getElementById('verTable');
+            if (!rows.length) {
+                box.innerHTML = '<div class="chart-empty" style="padding:12px 0 18px;">暂无版本数据</div>';
+                return;
+            }
+            var html = rows.slice().reverse().map(function (r) {
+                var src = r.source || 'default';
+                var s = r.stats || {};
+                var roleCls = r.role === 'champion' ? 'v-champion' : (r.role === 'challenger' ? 'v-challenger' : '');
+                return '<tr>' +
+                    '<td class="mono ' + roleCls + '">' + esc(r.version) + '</td>' +
+                    '<td>' + esc(ROLE_LABEL[r.role] || r.role || '—') + '</td>' +
+                    '<td><span class="badge src-' + esc(src) + '">' + esc(SRC_LABEL[src] || src) + '</span></td>' +
+                    '<td class="num">' + r.feedbackCount + '</td>' +
+                    '<td class="num">' + r.incorrectCount + '</td>' +
+                    '<td class="num ' + rateCls(r.correctRate) + '">' + pct(r.correctRate) + '</td>' +
+                    '<td class="num">' + (s.rewardAlignment != null ? (+s.rewardAlignment).toFixed(3) : '—') + '</td>' +
+                    '<td class="num">' + (s.accuracy != null ? pct(s.accuracy) : '—') + '</td>' +
+                    '<td class="num">' + (s.samples != null ? s.samples : '—') + '</td>' +
+                    '<td class="mono">' + esc(fmtTime(r.createdAt)) + '</td></tr>';
+            }).join('');
+            box.innerHTML =
+                '<table class="tbl"><thead><tr><th>版本</th><th>角色</th><th>来源</th>' +
+                '<th style="text-align:right">反馈数</th><th style="text-align:right">错误数</th>' +
+                '<th style="text-align:right">正确率</th><th style="text-align:right">对齐度</th>' +
+                '<th style="text-align:right">一致率</th><th style="text-align:right">评估样本</th>' +
+                '<th>创建时间</th></tr></thead><tbody>' + html + '</tbody></table>';
+        }
+
+        /* ========= 工具栏 ========= */
+        function saveApiBase() {
+            var v = document.getElementById('apiBase').value.trim().replace(/\/+$/, '');
+            if (!/^https?:\/\/.+/.test(v)) { showError('后端地址需以 http:// 或 https:// 开头'); return; }
+            state.apiBase = v;
+            localStorage.setItem(API_BASE_KEY, v);
+            hideError();
+            loadReportData();
+        }
+        function showError(msg) { var el = document.getElementById('errorBanner'); el.textContent = msg; el.style.display = 'block'; }
+        function hideError() { document.getElementById('errorBanner').style.display = 'none'; }
+
+        /* ========= 初始化 ========= */
+        (function init() {
+            document.getElementById('apiBase').value = state.apiBase;
+            loadReport();
+        })();
+    </script>
+</body>
+</html>

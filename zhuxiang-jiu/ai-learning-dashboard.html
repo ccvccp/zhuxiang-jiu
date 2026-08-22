@@ -496,7 +496,7 @@
                 '<table><thead><tr><th>权重版本</th><th style="text-align:right">反馈数</th>' +
                 '<th style="text-align:right">错误数</th><th style="text-align:right">正确率</th></tr></thead>' +
                 '<tbody>' + rows + '</tbody></table>' +
-                '<div style="margin-top:10px;font-size:12px;color:#6b6b6b;">版本演进曲线可视化见 v7.7 阶段 3。</div>';
+                '<div style="margin-top:10px;font-size:12px;"><a href="ai-learning-report.html?scorerId=' + encodeURIComponent(r.scorerId) + '" style="color:var(--color-primary);">查看完整报表(正确率演进曲线/评估指标) →</a></div>';
         }
 
         function closeReport() {
