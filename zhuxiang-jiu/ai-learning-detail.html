@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 自学习驾驶舱 · 评分器详情</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 详情页专属样式(与总览页同风格) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 30px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 22px; margin: 0; }
+        .dash-banner p { margin: 6px 0 0; opacity: 0.9; font-size: 13px; }
+        .dash-banner .back-link { color: #fff; font-size: 13px; opacity: 0.85; text-decoration: none; display: inline-block; margin-top: 10px; }
+        .dash-banner .back-link:hover { opacity: 1; text-decoration: underline; }
+
+        .dash-section { padding: 16px 0 4px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+        .card-title { font-size: 15px; font-weight: 700; color: var(--color-primary-dark); padding: 14px 16px 0; }
+        .card-title small { font-weight: 400; color: var(--color-text-light); margin-left: 8px; }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 摘要头卡 */
+        .sum-card { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+        .sum-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        .sum-head h2 { margin: 0; font-size: 19px; }
+        .sum-sub { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+        .sum-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.module { background: rgba(74, 124, 89, 0.08); color: var(--color-primary-dark); border-color: rgba(74, 124, 89, 0.25); }
+        .badge.version { background: #e8f4ec; color: #2e8b57; }
+        .badge.src-default { background: #f0f0f0; color: #666; }
+        .badge.src-learning { background: #e8f4ec; color: #2e8b57; }
+        .badge.src-manual { background: #eef2fb; color: #3b5998; }
+        .badge.src-reset { background: #fdf3e3; color: #a06b00; }
+        .badge.auto-apply { background: #e8f4ec; color: #2e8b57; border-color: rgba(46, 139, 87, 0.35); }
+        .badge.auto-off { background: #f4f4f4; color: #999; }
+        .cfg-chip { font-size: 12px; color: var(--color-text-light); background: var(--color-bg); border-radius: 999px; padding: 3px 12px; }
+        .cfg-chip b { color: var(--color-text); }
+
+        /* 权重对比条 */
+        .wbar-list { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+        .wbar-item { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: center; }
+        .wbar-name { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text); text-align: right; overflow: hidden; text-overflow: ellipsis; }
+        .wbar-track { display: flex; flex-direction: column; gap: 3px; }
+        .wbar-line { display: flex; align-items: center; gap: 6px; }
+        .wbar-line .tag { font-size: 10px; width: 30px; color: var(--color-text-light); flex-shrink: 0; }
+        .wbar-bg { flex: 1; height: 9px; background: var(--color-bg); border-radius: 999px; overflow: hidden; }
+        .wbar-fill { height: 100%; border-radius: 999px; }
+        .wbar-fill.default { background: #b9c4bd; }
+        .wbar-fill.champion { background: var(--color-primary); }
+        .wbar-fill.challenger { background: var(--color-accent); }
+        .wbar-val { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--color-text-light); width: 42px; flex-shrink: 0; }
+        .wbar-legend { display: flex; gap: 14px; padding: 0 16px 10px; font-size: 11px; color: var(--color-text-light); }
+        .wbar-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+        /* 演进曲线 */
+        .chart-wrap { padding: 8px 16px 16px; }
+        .chart-legend { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
+        .chart-legend .lg { display: flex; align-items: center; gap: 5px; font-size: 11px; font-family: Consolas, monospace; color: var(--color-text-light); background: var(--color-bg); border-radius: 999px; padding: 2px 10px; }
+        .chart-legend .sw { width: 12px; height: 3px; border-radius: 2px; }
+        .chart-empty { text-align: center; color: var(--color-text-light); padding: 26px 0; font-size: 13px; }
+
+        /* 漂移监控 */
+        .drift-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; padding: 12px 16px; }
+        .drift-summary .cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 10px 6px; text-align: center; }
+        .drift-summary .cell b { display: block; font-size: 16px; }
+        .drift-summary .cell span { font-size: 11px; color: var(--color-text-light); }
+        .drift-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -0px; }
+        .drift-dot.low { background: #2e8b57; }
+        .drift-dot.medium { background: #e67e22; }
+        .drift-dot.high { background: var(--color-danger); }
+
+        /* 通用表格 */
+        .tbl-wrap { padding: 8px 16px 16px; overflow-x: auto; }
+        table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .tbl th, .tbl td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .tbl th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .tbl td.mono { font-family: Consolas, monospace; font-size: 12px; }
+        .tbl .v-champion { color: var(--color-primary-dark); font-weight: 700; }
+        .tbl .v-challenger { color: var(--color-accent); font-weight: 700; }
+        .dev-pos { color: #c0392b; font-weight: 600; }
+        .dev-neg { color: #3b5998; font-weight: 600; }
+        .dev-zero { color: #999; }
+
+        .card-error { color: var(--color-danger); font-size: 13px; padding: 0 16px 14px; }
+
+        .dash-footer { padding: 20px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .dash-footer code { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 3px; padding: 1px 6px; font-size: 11px; }
+
+        @media (max-width: 640px) {
+            .wbar-item { grid-template-columns: 92px 1fr; }
+            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container">
+            <h1>AI 自学习驾驶舱 · 评分器详情</h1>
+            <p id="bannerSub">v7.7 · 权重演进 / 版本历史 / 漂移监控</p>
+            <a class="back-link" href="ai-learning-dashboard.html">← 返回总览</a>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏 -->
+        <section class="dash-section">
+            <div class="dash-card dash-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="dash-btn ghost" onclick="saveApiBase()">保存</button>
+                <button class="dash-btn" id="btnRefresh" onclick="loadAll()">刷新</button>
+                <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="dash-error" id="errorBanner"></div>
+        </section>
+
+        <!-- 摘要头卡 -->
+        <section class="dash-section">
+            <div class="dash-card sum-card" id="sumCard">
+                <div class="sum-head">
+                    <h2 id="sumLabel">—</h2>
+                    <span class="badge version" id="sumVersion">—</span>
+                </div>
+                <div class="sum-sub" id="sumId">—</div>
+                <div class="sum-chips" id="sumChips"></div>
+                <div class="sum-chips" id="sumCfg"></div>
+            </div>
+        </section>
+
+        <!-- 权重对比 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">权重对比<small>默认 vs 冠军(生效) vs 挑战者(影子)</small></div>
+                <div class="wbar-legend">
+                    <span><span class="sw" style="background:#b9c4bd;"></span>默认</span>
+                    <span><span class="sw" style="background:var(--color-primary);"></span>冠军(生效)</span>
+                    <span><span class="sw" style="background:var(--color-accent);"></span>挑战者</span>
+                </div>
+                <div class="wbar-list" id="wbarList"></div>
+            </div>
+        </section>
+
+        <!-- 权重演进曲线 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">权重演进曲线<small>各因子权重随版本变化(历史 + 在役)</small></div>
+                <div class="chart-legend" id="chartLegend"></div>
+                <div class="chart-wrap" id="chartWrap"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
+        <!-- 漂移监控 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">漂移监控<small>因子分数 EMA 相对首条反馈基线的偏差</small></div>
+                <div class="drift-summary" id="driftSummary"></div>
+                <div class="tbl-wrap" id="driftTable"></div>
+            </div>
+        </section>
+
+        <!-- 版本历史 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">版本历史<small id="historyCount">审计与回滚参考</small></div>
+                <div class="tbl-wrap" id="historyTable"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
+        <!-- 页脚 -->
+        <footer class="dash-footer">
+            <div>数据来源：<code>GET /api/ai-learning/weights/{scorerId}</code> · <code>GET /api/ai-learning/history/{scorerId}</code> · <code>GET /api/ai-learning/drift/{scorerId}</code>。权重人工覆盖/晋升/重置等管理操作见 v7.7 阶段 4。</div>
+            <div>鉴权：compat 模式以 <code>X-Role: admin</code> 兼容头访问。曲线为纯 SVG 手绘，无外部依赖。</div>
+        </footer>
+    </main>
+
+    <script>
+        'use strict';
+
+        /* ========= 全局状态 ========= */
+        var API_BASE_KEY = 'aiLearningDash.apiBase';   /* 与总览页共享 */
+        var state = {
+            apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+            scorerId: new URLSearchParams(location.search).get('scorerId') || '',
+            weights: null, history: null, drift: null,
+        };
+
+        var SRC_LABEL = { default: '默认', learning: '学习', manual: '人工', reset: '重置' };
+        var DRIFT_LABEL = { low: '正常', medium: '关注', high: '告警' };
+        var PALETTE = ['#4a7c59', '#c9a961', '#3b5998', '#c0392b', '#8e44ad',
+                       '#16a085', '#d35400', '#2c3e50', '#7f8c8d', '#2980b9'];
+
+        /* ========= 工具函数 ========= */
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function pct(v) { return (v == null || isNaN(v)) ? '--' : (v * 100).toFixed(1) + '%'; }
+        function verNum(v) { var m = /^v(\d+)$/.exec(String(v || '')); return m ? +m[1] : 0; }
+        function fmtTime(s) { return s ? String(s).replace('T', ' ') : '—'; }
+
+        async function fetchJson(url) {
+            var res = await fetch(url, { headers: { 'X-Role': 'admin' } });
+            var body = null;
+            try { body = await res.json(); } catch (e) { /* 非 JSON 错误体 */ }
+            if (!res.ok) {
+                var msg = body && (body.error || body.message) ? ' · ' + (body.error || body.message) : '';
+                throw new Error('HTTP ' + res.status + msg);
+            }
+            return body;
+        }
+
+        /* ========= 数据加载(三段独立, 局部失败不影响其他区块) ========= */
+        function loadAll() {
+            if (!state.scorerId) {
+                showError('缺少 scorerId 参数。请从总览页卡片进入，或手动追加 ?scorerId=order_risk');
+                return;
+            }
+            loadWeights();
+            loadHistory();
+            loadDrift();
+            document.getElementById('lastUpdate').textContent = '最后刷新 ' + new Date().toLocaleTimeString('zh-CN');
+        }
+
+        async function loadWeights() {
+            try {
+                var d = await fetchJson(api('weights/' + encodeURIComponent(state.scorerId)));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.weights = d;
+                renderSummary();
+                renderWeightBars();
+            } catch (err) {
+                showError('权重档案加载失败：' + err.message);
+                document.getElementById('wbarList').innerHTML =
+                    '<div class="card-error">' + esc(err.message) + '</div>';
+            }
+        }
+
+        async function loadHistory() {
+            var box = document.getElementById('historyTable');
+            try {
+                var d = await fetchJson(api('history/' + encodeURIComponent(state.scorerId)));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.history = d;
+                renderHistoryTable();
+                renderEvolutionChart();
+            } catch (err) {
+                box.innerHTML = '<div class="card-error">版本历史加载失败：' + esc(err.message) + '</div>';
+                document.getElementById('chartWrap').innerHTML =
+                    '<div class="chart-empty">曲线不可用(历史加载失败)</div>';
+            }
+        }
+
+        async function loadDrift() {
+            try {
+                var d = await fetchJson(api('drift/' + encodeURIComponent(state.scorerId)));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.drift = d.drift || {};
+                renderDrift();
+            } catch (err) {
+                document.getElementById('driftSummary').innerHTML =
+                    '<div class="card-error">漂移统计加载失败：' + esc(err.message) + '</div>';
+            }
+        }
+
+        function api(path) { return state.apiBase + '/api/ai-learning/' + path; }
+
+        /* ========= 摘要头卡 ========= */
+        function renderSummary() {
+            var w = state.weights;
+            document.getElementById('sumLabel').textContent = w.label || w.scorerId;
+            document.getElementById('sumId').textContent = w.scorerId;
+            document.getElementById('bannerSub').textContent =
+                (w.module || '') + ' · v7.7 权重演进 / 版本历史 / 漂移监控';
+
+            var ver = document.getElementById('sumVersion');
+            ver.textContent = '生效 ' + (w.activeVersion || 'v1');
+
+            var champ = w.champion || {};
+            var src = champ.source || 'default';
+            document.getElementById('sumChips').innerHTML =
+                '<span class="badge module">' + esc(w.module || '') + '</span>' +
+                '<span class="badge src-' + esc(src) + '">冠军来源: ' + esc(SRC_LABEL[src] || src) + '</span>' +
+                (w.challenger ? '<span class="badge version">挑战者 ' + esc(w.challenger.version) + ' 待评估</span>'
+                              : '<span class="badge auto-off">无挑战者</span>');
+
+            var c = w.config || {};
+            document.getElementById('sumCfg').innerHTML =
+                '<span class="cfg-chip">学习率 eta <b>' + esc(c.eta) + '</b></span>' +
+                '<span class="cfg-chip">最小反馈 min_feedback <b>' + esc(c.min_feedback) + '</b></span>' +
+                '<span class="cfg-chip">护栏 guardrail <b>' + esc(c.guardrail) + 'x</b></span>' +
+                (c.auto_apply ? '<span class="badge auto-apply">自动晋升 开</span>'
+                              : '<span class="badge auto-off">自动晋升 关</span>');
+        }
+
+        /* ========= 权重对比条 ========= */
+        function renderWeightBars() {
+            var w = state.weights;
+            var defaults = w.defaults || {};
+            var champ = (w.champion || {}).weights || {};
+            var chall = (w.challenger || {}).weights || null;
+            var names = Object.keys(defaults);
+            var maxW = 0;
+            names.forEach(function (n) {
+                maxW = Math.max(maxW, defaults[n] || 0, champ[n] || 0, chall ? (chall[n] || 0) : 0);
+            });
+            maxW = maxW || 1;
+
+            function line(tag, cls, val) {
+                var widthPct = Math.max((val / maxW) * 100, val > 0 ? 1.5 : 0);
+                return '<div class="wbar-line">' +
+                    '<span class="tag">' + tag + '</span>' +
+                    '<span class="wbar-bg"><span class="wbar-fill ' + cls + '" style="width:' + widthPct.toFixed(1) + '%;"></span></span>' +
+                    '<span class="wbar-val">' + (val != null ? (+val).toFixed(3) : '—') + '</span></div>';
+            }
+
+            document.getElementById('wbarList').innerHTML = names.map(function (n) {
+                return '<div class="wbar-item">' +
+                    '<div class="wbar-name" title="' + esc(n) + '">' + esc(n) + '</div>' +
+                    '<div class="wbar-track">' +
+                        line('默认', 'default', defaults[n]) +
+                        line('冠军', 'champion', champ[n] != null ? champ[n] : defaults[n]) +
+                        (chall ? line('挑战', 'challenger', chall[n]) : '') +
+                    '</div></div>';
+            }).join('');
+        }
+
+        /* ========= 权重演进曲线(纯 SVG 手绘) ========= */
+        function orderedRecords() {
+            /* 历史(旧→新) + 挑战者 + 冠军, 按版本号排序去重 */
+            var recs = [];
+            var seen = {};
+            var push = function (r) {
+                if (r && r.version && !seen[r.version]) { seen[r.version] = 1; recs.push(r); }
+            };
+            (state.history && state.history.history || []).forEach(push);
+            if (state.weights && state.weights.challenger) push(state.weights.challenger);
+            if (state.weights && state.weights.champion) push(state.weights.champion);
+            recs.sort(function (a, b) { return verNum(a.version) - verNum(b.version); });
+            return recs;
+        }
+
+        function renderEvolutionChart() {
+            var wrap = document.getElementById('chartWrap');
+            var legend = document.getElementById('chartLegend');
+            var recs = orderedRecords();
+            if (!recs.length || !state.weights) {
+                wrap.innerHTML = '<div class="chart-empty">暂无版本数据</div>';
+                legend.innerHTML = '';
+                return;
+            }
+            var defaults = state.weights.defaults || {};
+            var factors = Object.keys(defaults);
+            if (!factors.length) {
+                wrap.innerHTML = '<div class="chart-empty">该评分器无可学习因子</div>';
+                return;
+            }
+
+            /* 画布与边距 */
+            var W = 760, H = 320, padL = 46, padR = 18, padT = 16, padB = 36;
+            var n = recs.length;
+            var maxX = Math.max(n - 1, 1);
+            var maxW = 0.0001;
+            recs.forEach(function (r) {
+                var ws = r.weights || {};
+                factors.forEach(function (f) { if (ws[f] > maxW) maxW = ws[f]; });
+            });
+            var maxY = maxW * 1.15;
+
+            function X(i) { return padL + (W - padL - padR) * (n === 1 ? 0.5 : i / maxX); }
+            function Y(v) { return padT + (H - padT - padB) * (1 - v / maxY); }
+
+            var svg = ['<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block;" role="img">'];
+
+            /* 横向网格 + Y 轴刻度 */
+            for (var g = 0; g <= 4; g++) {
+                var val = maxY * g / 4;
+                var y = Y(val);
+                svg.push('<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="#e5e0d5" stroke-width="1"/>');
+                svg.push('<text x="' + (padL - 6) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="#6b6b6b">' + val.toFixed(2) + '</text>');
+            }
+            /* X 轴版本刻度 + 纵向网格 */
+            recs.forEach(function (r, i) {
+                var x = X(i).toFixed(1);
+                svg.push('<line x1="' + x + '" y1="' + padT + '" x2="' + x + '" y2="' + (H - padB) + '" stroke="#f0ede4" stroke-width="1"/>');
+                svg.push('<text x="' + x + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="#6b6b6b">' + esc(r.version) + '</text>');
+                /* 在役版本标记: 冠军=实心三角, 挑战者=空心 */
+                var role = '';
+                if (state.weights.champion && r.version === state.weights.champion.version) role = 'champ';
+                else if (state.weights.challenger && r.version === state.weights.challenger.version) role = 'chall';
+                if (role === 'champ') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#2e8b57">▲</text>');
+                if (role === 'chall') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#c9a961">△</text>');
+            });
+
+            /* 各因子折线 */
+            factors.forEach(function (f, idx) {
+                var color = PALETTE[idx % PALETTE.length];
+                var pts = [], dots = [];
+                recs.forEach(function (r, i) {
+                    var v = (r.weights || {})[f];
+                    if (v != null) {
+                        pts.push(X(i).toFixed(1) + ',' + Y(v).toFixed(1));
+                        dots.push('<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.6" fill="' + color + '"><title>' + esc(f) + ' ' + esc(r.version) + ' = ' + (+v).toFixed(3) + '</title></circle>');
+                    }
+                });
+                if (pts.length) {
+                    svg.push('<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>');
+                    svg.push(dots.join(''));
+                }
+            });
+            svg.push('</svg>');
+            wrap.innerHTML = svg.join('');
+
+            /* 图例 */
+            legend.innerHTML = factors.map(function (f, idx) {
+                var color = PALETTE[idx % PALETTE.length];
+                return '<span class="lg"><span class="sw" style="background:' + color + ';"></span>' + esc(f) + '</span>';
+            }).join('') +
+            '<span class="lg" style="color:#2e8b57;">▲ 冠军(生效)</span>' +
+            '<span class="lg" style="color:#c9a961;">△ 挑战者</span>';
+        }
+
+        /* ========= 漂移监控 ========= */
+        function renderDrift() {
+            var d = state.drift || {};
+            var lv = d.driftLevel || 'low';
+            var count = d.count || 0;
+
+            document.getElementById('driftSummary').innerHTML =
+                '<div class="cell"><b><span class="drift-dot ' + esc(lv) + '"></span>' + esc(DRIFT_LABEL[lv] || lv) + '</b><span>漂移等级</span></div>' +
+                '<div class="cell"><b>' + pct(d.driftScore) + '</b><span>平均相对偏差</span></div>' +
+                '<div class="cell"><b>' + count + '</b><span>反馈样本数</span></div>' +
+                '<div class="cell"><b>' + (d.baselineScore != null ? d.baselineScore : '—') + '</b><span>基线分数</span></div>' +
+                '<div class="cell"><b>' + (d.emaScore != null ? d.emaScore : '—') + '</b><span>EMA 分数</span></div>';
+
+            var base = d.baselineFactors || {};
+            var ema = d.emaFactors || {};
+            var names = Object.keys(base);
+            var box = document.getElementById('driftTable');
+            if (!names.length) {
+                box.innerHTML = '<div class="chart-empty" style="padding:12px 0 18px;">暂无反馈, 未建立漂移基线</div>';
+                return;
+            }
+            var rows = names.map(function (n) {
+                var b = base[n], e = ema[n] != null ? ema[n] : b;
+                var dev = (e - b) / Math.max(Math.abs(b), 10);
+                var devPct = (dev * 100).toFixed(1) + '%';
+                var cls = Math.abs(dev) < 0.005 ? 'dev-zero' : (dev > 0 ? 'dev-pos' : 'dev-neg');
+                var arrow = Math.abs(dev) < 0.005 ? '·' : (dev > 0 ? '↑' : '↓');
+                return '<tr><td class="mono">' + esc(n) + '</td>' +
+                    '<td class="num">' + b + '</td>' +
+                    '<td class="num">' + e + '</td>' +
+                    '<td class="num ' + cls + '">' + arrow + ' ' + devPct + '</td></tr>';
+            }).join('');
+            box.innerHTML =
+                '<table class="tbl"><thead><tr><th>因子</th><th style="text-align:right">基线分数</th>' +
+                '<th style="text-align:right">EMA 分数</th><th style="text-align:right">相对偏差</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>' +
+                '<div style="font-size:11px;color:#6b6b6b;padding-top:8px;">最近反馈: ' + esc(fmtTime(d.lastFeedbackAt)) + '</div>';
+        }
+
+        /* ========= 版本历史表 ========= */
+        function renderHistoryTable() {
+            var h = state.history;
+            var recs = (h.history || []).slice().sort(function (a, b) { return verNum(b.version) - verNum(a.version); });
+            document.getElementById('historyCount').textContent =
+                '共 ' + recs.length + ' 个退役版本(审计与回滚参考)';
+            var box = document.getElementById('historyTable');
+            if (!recs.length) {
+                box.innerHTML = '<div class="chart-empty" style="padding:12px 0 18px;">暂无退役版本(冠军 v1 起步, 学习/覆盖后旧版本入档)</div>';
+                return;
+            }
+            var champV = h.champion, challV = h.challenger;
+            var rows = recs.map(function (r) {
+                var src = r.source || 'default';
+                var stats = r.stats || {};
+                var metrics = [];
+                if (stats.rewardAlignment != null) metrics.push('对齐度 ' + (+stats.rewardAlignment).toFixed(3));
+                if (stats.accuracy != null) metrics.push('一致率 ' + pct(stats.accuracy));
+                return '<tr>' +
+                    '<td class="mono">' + esc(r.version) + '</td>' +
+                    '<td><span class="badge src-' + esc(src) + '">' + esc(SRC_LABEL[src] || src) + '</span></td>' +
+                    '<td class="mono">' + esc(r.parentVersion || '—') + '</td>' +
+                    '<td>' + (metrics.length ? esc(metrics.join(' · ')) : '<span style="color:#999;">—</span>') + '</td>' +
+                    '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="' + esc(r.note || '') + '">' + esc(r.note || '—') + '</td>' +
+                    '<td class="mono">' + esc(fmtTime(r.createdAt)) + '</td></tr>';
+            }).join('');
+            box.innerHTML =
+                '<table class="tbl"><thead><tr><th>版本</th><th>来源</th><th>父版本</th>' +
+                '<th>评估指标</th><th>备注</th><th>创建时间</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+                '<div style="font-size:11px;color:#6b6b6b;padding-top:8px;">在役: 冠军 <b class="v-champion">' + esc(champV || '—') + '</b>' +
+                ' · 挑战者 <b class="v-challenger">' + esc(challV || '无') + '</b>(不入历史表)</div>';
+        }
+
+        /* ========= 工具栏 ========= */
+        function saveApiBase() {
+            var v = document.getElementById('apiBase').value.trim().replace(/\/+$/, '');
+            if (!/^https?:\/\/.+/.test(v)) { showError('后端地址需以 http:// 或 https:// 开头'); return; }
+            state.apiBase = v;
+            localStorage.setItem(API_BASE_KEY, v);
+            hideError();
+            loadAll();
+        }
+        function showError(msg) { var el = document.getElementById('errorBanner'); el.textContent = msg; el.style.display = 'block'; }
+        function hideError() { document.getElementById('errorBanner').style.display = 'none'; }
+
+        /* ========= 初始化 ========= */
+        (function init() {
+            document.getElementById('apiBase').value = state.apiBase;
+            loadAll();
+        })();
+    </script>
+</body>
+</html>

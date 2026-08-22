@@ -135,6 +135,7 @@
             padding: 5px 12px; font-size: 12px; cursor: pointer; transition: var(--transition);
         }
         .scorer-card .foot .btn-report:hover { background: rgba(74, 124, 89, 0.08); }
+        .scorer-card .foot .btn-detail { display: inline-block; text-decoration: none; line-height: normal; }
 
         /* 空态 */
         .dash-empty { text-align: center; color: var(--color-text-light); padding: 48px 0; font-size: 14px; }
@@ -435,6 +436,7 @@
                         (s.autoApply
                             ? '<span class="badge auto-apply">自动晋升 开</span>'
                             : '<span class="badge auto-off">自动晋升 关</span>') +
+                        '<a class="btn-report btn-detail" href="ai-learning-detail.html?scorerId=' + encodeURIComponent(s.scorerId) + '">详情</a>' +
                         '<button class="btn-report" data-sid="' + esc(s.scorerId) + '">学习报表</button>' +
                       '</div>' +
                     '</div>'
