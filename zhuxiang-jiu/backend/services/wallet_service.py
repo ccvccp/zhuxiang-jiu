@@ -382,6 +382,129 @@ class WalletService:
             }
 
     # ============================================================
+    # P0: 奖励余额(推广奖励, 只可购物不可提现)
+    # ============================================================
+
+    async def deposit_reward(self, user_id, amount: float,
+                             description: str = "推广奖励") -> dict:
+        """奖励余额入账: 计入 rewardBalance, 不可提现、不可转赠
+
+        用途: 推广码矩阵奖励等营销激励, 仅可在本站购买产品时核销。
+
+        Raises:
+            KeyError: 钱包未开通
+            ValueError: 金额非法
+        """
+        if amount <= 0:
+            raise ValueError("奖励金额必须大于 0")
+
+        async with get_lock(f"wallet:{user_id}"):
+            account = await self.wallet_repo.get_account(user_id)
+            if not account:
+                raise KeyError(f"用户 {user_id} 未开通钱包")
+            if account.get("status") != STATUS_ACTIVE:
+                raise ValueError("钱包状态异常, 无法发放奖励")
+
+            new_reward = await self.wallet_repo.add_reward_balance(user_id, amount)
+            tx_no = await self.wallet_repo.next_tx_no()
+            await self.wallet_repo.save_transaction({
+                "txNo": tx_no,
+                "userId": user_id,
+                "type": "reward",
+                "direction": "IN",
+                "amount": amount,
+                "balanceAfter": new_reward,
+                "payChannel": "",
+                "orderId": "",
+                "depositNo": "",
+                "withdrawNo": "",
+                "status": "success",
+                "description": f"{description} ¥{amount:.2f}(仅限购物,不可提现)",
+                "createdAt": ts(),
+            })
+            logger.info("wallet_reward_deposit user_id=%r amount=%.2f tx=%s",
+                        user_id, amount, tx_no)
+            return {
+                "success": True,
+                "userId": user_id,
+                "txNo": tx_no,
+                "amount": amount,
+                "rewardBalanceAfter": new_reward,
+                "note": "奖励余额仅可购买本站产品,不可提现",
+            }
+
+    async def pay_with_reward(self, user_id, amount: float,
+                              order_id: str = "",
+                              description: str = "奖励余额购物") -> dict:
+        """奖励余额购买本站产品: 核销 rewardBalance
+
+        与活期余额无关; 提现接口(withdraw)仅操作 balance, 奖励余额天然不可提现。
+
+        Raises:
+            KeyError: 钱包未开通
+            ValueError: 金额非法 / 奖励余额不足 / 钱包冻结
+        """
+        if amount <= 0:
+            raise ValueError("支付金额必须大于 0")
+
+        async with get_lock(f"wallet:{user_id}"):
+            account = await self.wallet_repo.get_account(user_id)
+            if not account:
+                raise KeyError(f"用户 {user_id} 未开通钱包")
+            if account.get("status") != STATUS_ACTIVE:
+                raise ValueError("钱包状态异常, 无法支付")
+
+            reward = float(account.get("rewardBalance", 0))
+            if reward < amount:
+                raise ValueError(
+                    f"奖励余额不足: 当前 ¥{reward:.2f}, 需 ¥{amount:.2f}")
+
+            new_reward = await self.wallet_repo.add_reward_balance(
+                user_id, -amount)
+            tx_no = await self.wallet_repo.next_tx_no()
+            await self.wallet_repo.save_transaction({
+                "txNo": tx_no,
+                "userId": user_id,
+                "type": "reward_pay",
+                "direction": "OUT",
+                "amount": amount,
+                "balanceAfter": new_reward,
+                "payChannel": "reward",
+                "orderId": order_id,
+                "depositNo": "",
+                "withdrawNo": "",
+                "status": "success",
+                "description": f"{description} ¥{amount:.2f}",
+                "createdAt": ts(),
+            })
+            logger.info("wallet_reward_pay user_id=%r amount=%.2f tx=%s order=%s",
+                        user_id, amount, tx_no, order_id)
+            return {
+                "success": True,
+                "userId": user_id,
+                "txNo": tx_no,
+                "orderId": order_id,
+                "amount": amount,
+                "rewardBalanceAfter": new_reward,
+            }
+
+    async def get_reward_balance(self, user_id) -> dict:
+        """查询奖励余额与活期余额对比
+
+        Raises:
+            KeyError: 钱包未开通
+        """
+        account = await self.wallet_repo.get_account(user_id)
+        if not account:
+            raise KeyError(f"用户 {user_id} 未开通钱包")
+        return {
+            "userId": user_id,
+            "balance": float(account.get("balance", 0)),
+            "rewardBalance": float(account.get("rewardBalance", 0)),
+            "note": "rewardBalance 仅可购买本站产品,不可提现",
+        }
+
+    # ============================================================
     # P0: 提现
     # ============================================================
 

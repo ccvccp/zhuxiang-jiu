@@ -43,6 +43,8 @@ from routes.maintenance_routes import register_maintenance_routes
 from routes.monitor_routes import register_monitor_routes
 # 用户认证模块
 from routes.auth_routes import register_auth_routes
+# 推广码矩阵模块
+from routes.promotion_routes import register_promotion_routes
 
 __all__ = [
     # 已有(15)
@@ -78,4 +80,5 @@ __all__ = [
     "register_monitor_routes",
     "register_maintenance_routes",
     "register_auth_routes",
+    "register_promotion_routes",
 ]

@@ -190,10 +190,42 @@ class WalletRepository:
 
         Raises:
             KeyError: 钱包账户不存在
+            ValueError: 冻结金额不足
         """
         if is_redis_mode():
             return await self._redis_add_frozen(user_id, amount)
         return self._mem_add_frozen(user_id, amount)
+
+    async def add_reward_balance(self, user_id, amount: float) -> float:
+        """奖励余额累加(推广等奖励入账, 只可购物不可提现, amount 可正可负)
+
+        与活期 balance 完全隔离: 提现只操作 balance/frozenAmount。
+
+        Raises:
+            KeyError: 钱包账户不存在
+            ValueError: 奖励余额不足(amount < 0 时)
+        """
+        if is_redis_mode():
+            return await self._redis_add_reward_balance(user_id, amount)
+        return self._mem_add_reward_balance(user_id, amount)
+
+    async def get_reward_balance(self, user_id) -> float:
+        """查询奖励余额(不可提现)
+
+        Raises:
+            KeyError: 钱包账户不存在
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("wallet", user_id)
+            if not await client.exists(key):
+                raise KeyError(user_id)
+            return float(await client.hget(key, "rewardBalance") or 0)
+        self._ensure_store()
+        account = self.store["wallets"].get(user_id)
+        if not account:
+            raise KeyError(user_id)
+        return float(account.get("rewardBalance", 0))
 
     async def reduce_frozen(self, user_id, amount: float) -> float:
         """冻结金额扣减(提现完成/拒绝时释放, amount >= 0), 返回新冻结金额
@@ -454,6 +486,19 @@ class WalletRepository:
         if not account:
             raise KeyError(user_id)
         return float(account.get("balance", 0))
+
+    def _mem_add_reward_balance(self, user_id, amount: float) -> float:
+        """奖励余额累加(内存模式, 只可购物不可提现)"""
+        self._ensure_store()
+        account = self.store["wallets"].get(user_id)
+        if not account:
+            raise KeyError(user_id)
+        current = float(account.get("rewardBalance", 0))
+        new_balance = round(current + amount, 2)
+        if new_balance < 0:
+            raise ValueError(f"奖励余额不足: 当前 {current}, 需扣除 {-amount}")
+        account["rewardBalance"] = new_balance
+        return new_balance
 
     def _mem_add_frozen(self, user_id, amount: float) -> float:
         self._ensure_store()
@@ -775,6 +820,20 @@ class WalletRepository:
         if not await client.exists(key):
             raise KeyError(user_id)
         return float(await client.hget(key, "balance") or 0)
+
+    async def _redis_add_reward_balance(self, user_id, amount: float) -> float:
+        """奖励余额累加(Redis HINCRBYFLOAT 原子操作, 只可购物不可提现)"""
+        client = await get_redis_client()
+        key = _k("wallet", user_id)
+        if not await client.exists(key):
+            raise KeyError(user_id)
+        if amount < 0:
+            current = float(await client.hget(key, "rewardBalance") or 0)
+            if current + amount < 0:
+                raise ValueError(
+                    f"奖励余额不足: 当前 {current}, 需扣除 {-amount}")
+        new_balance = await client.hincrbyfloat(key, "rewardBalance", amount)
+        return round(new_balance, 2)
 
     async def _redis_add_frozen(self, user_id, amount: float) -> float:
         client = await get_redis_client()

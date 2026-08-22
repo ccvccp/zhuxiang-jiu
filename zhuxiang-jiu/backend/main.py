@@ -64,6 +64,8 @@ from routes import (
     register_maintenance_routes,
     # 用户认证模块
     register_auth_routes,
+    # 推广码矩阵模块
+    register_promotion_routes,
 )
 
 
@@ -121,6 +123,7 @@ app = FastAPI(
         {"name": "酒店酒吧模块", "description": "合作商/场地/铺货/分级/佣金结算"},
         {"name": "AI智能监控模块", "description": "监控指标采集/告警/故障/仪表盘/健康检查"},
         {"name": "AI智能维护模块", "description": "维护任务/健康检查/故障自愈/性能优化/一键巡检"},
+        {"name": "推广码矩阵模块", "description": "专属推广码/矩阵绑定/两级奖励/奖励余额购物/领酒发货"},
     ],
 )
 
@@ -175,6 +178,7 @@ register_venue_routes(app)
 register_monitor_routes(app)
 register_maintenance_routes(app)
 register_auth_routes(app)
+register_promotion_routes(app)
 
 
 # ============================================================
