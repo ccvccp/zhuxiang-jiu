@@ -295,6 +295,7 @@ jobs:
 
       - name: Run concurrency probe (asyncio.Lock regression)
         run: |
+          set -o pipefail
           python probe_concurrency.py 2>&1 | tee probe-output.log
 
       - name: Upload probe output
@@ -343,6 +344,7 @@ jobs:
           LOCK_MODE: asyncio
           STORE_MODE: asyncio
         run: |
+          set -o pipefail
           python probe_shipping_claim_concurrency.py 2>&1 | tee probe-shipping-output.log
 
       - name: Upload probe output
@@ -404,6 +406,7 @@ jobs:
       - name: Run shipping claim multi-process probe (Redis distributed lock)
         working-directory: zhuxiang-jiu/backend
         run: |
+          set -o pipefail
           python probe_shipping_claim_concurrency_multiworker.py 2>&1 | tee probe-shipping-redis-output.log
 
       - name: Upload probe output
@@ -460,6 +463,7 @@ jobs:
       - name: Run multi-process probe (Redis distributed lock)
         working-directory: zhuxiang-jiu/backend
         run: |
+          set -o pipefail
           python probe_concurrency_multiworker.py 2>&1 | tee probe-redis-output.log
 
       - name: Upload probe output
@@ -522,6 +526,7 @@ jobs:
       - name: Run Redis integration tests
         working-directory: zhuxiang-jiu/backend
         run: |
+          set -o pipefail
           python -m pytest test_redis_integration.py -m redis -v --tb=short 2>&1 | tee redis-integration-output.log
 
       - name: Upload test output
