@@ -68,6 +68,8 @@ from routes import (
     register_promotion_routes,
     # 限时秒杀模块
     register_flashsale_routes,
+    # AI 语义评分层(v7.2)
+    register_ai_scoring_routes,
 )
 
 
@@ -182,6 +184,7 @@ register_maintenance_routes(app)
 register_auth_routes(app)
 register_promotion_routes(app)
 register_flashsale_routes(app)
+register_ai_scoring_routes(app)
 
 
 # ============================================================
