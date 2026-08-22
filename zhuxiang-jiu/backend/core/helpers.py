@@ -1,5 +1,7 @@
 """辅助函数:时间戳 / 区块链哈希 / 成功响应构造 / 运行时长"""
 
+import os
+import uuid
 from datetime import datetime, timezone
 
 from core.config import START_TIME
@@ -11,8 +13,12 @@ def ts() -> str:
 
 
 def bc_hash() -> str:
-    """区块链存证哈希(Mock)"""
-    return "0x" + format(int(datetime.now().timestamp() * 1000), "x")
+    """区块链存证哈希(Mock)
+
+    使用 uuid4 生成全局唯一标识, 避免基于 timestamp 的哈希在
+    高并发场景下的冲突风险(同一毫秒内多次调用会产生相同哈希)。
+    """
+    return "0x" + uuid.uuid4().hex
 
 
 def ok(operation: str, details: dict, logs: list[dict] | None = None,

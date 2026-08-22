@@ -18,6 +18,7 @@ AI决策筹划模块(模块29·AI大脑中枢) FastAPI 后端入口
     from main import app, _mock_store  # 测试仍可直接修改状态
 """
 
+import logging
 import os
 
 from fastapi import FastAPI
@@ -25,6 +26,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import ALLOW_HEADERS, ALLOW_METHODS, CORS_ORIGINS
 from core.errors import register_exception_handlers
+from core.helpers import uptime
+from core.locks import close_redis_client, _get_lock_mode
 from repositories.store import _mock_store  # 重新导出,兼容测试 `from main import _mock_store`
 from routes import (
     register_business_routes,
@@ -64,6 +67,8 @@ from routes import (
 # ============================================================
 #  FastAPI 应用初始化
 # ============================================================
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="AI决策筹划模块（模块29·AI大脑中枢）API",
@@ -164,6 +169,37 @@ register_maintenance_routes(app)
 
 
 # ============================================================
+#  生命周期管理: shutdown 时关闭 Redis 连接
+# ============================================================
+
+@app.on_event("shutdown")
+async def _on_shutdown():
+    """应用关闭时清理资源(Redis 连接), 避免连接泄漏"""
+    logger.info("应用关闭中, 清理 Redis 连接...")
+    await close_redis_client()
+    logger.info("清理完成")
+
+
+# ============================================================
+#  全局健康检查端点(不依赖任何业务模块, 供 Docker/K8s 探针使用)
+# ============================================================
+
+@app.get("/api/health", tags=["系统"])
+async def health_check():
+    """全局健康检查
+
+    返回应用运行状态、运行时长和锁模式, 供容器编排系统探针使用。
+    不依赖任何业务模块, 即使业务层异常也能响应。
+    """
+    return {
+        "success": True,
+        "status": "healthy",
+        "uptime": uptime(),
+        "lockMode": _get_lock_mode(),
+    }
+
+
+# ============================================================
 #  启动入口
 # ============================================================
 
@@ -172,4 +208,11 @@ if __name__ == "__main__":
 
     _port = int(os.environ.get("PORT", "8000"))
     _host = os.environ.get("HOST", "0.0.0.0")
-    uvicorn.run(app, host=_host, port=_port)
+    _workers = int(os.environ.get("WORKERS", "1"))
+    uvicorn.run(
+        "main:app",
+        host=_host,
+        port=_port,
+        workers=_workers,
+        access_log=os.environ.get("ACCESS_LOG", "false").lower() == "true",
+    )

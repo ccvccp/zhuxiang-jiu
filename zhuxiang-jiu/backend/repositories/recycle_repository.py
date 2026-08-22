@@ -14,6 +14,7 @@
     - 新酒议价: 当年/1年/2年/3年酒分类, 支持多轮议价(最多3轮)
 """
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Optional
@@ -133,6 +134,9 @@ STATUS_TRANSITIONS = {
 class RecycleRepository:
     """老酒兑换回收数据访问层"""
 
+    # 内存模式下的序列号生成锁(类级共享, 保证 ID 自增原子性)
+    _seq_lock = asyncio.Lock()
+
     def __init__(self, store: dict = None):
         self.store = store if store is not None else get_in_memory_store()
 
@@ -144,31 +148,38 @@ class RecycleRepository:
         """生成回收申请ID"""
         if is_redis_mode():
             return await self._redis_next_id("recycle_application")
-        return self._mem_next_id("_recycle_application_seq")
+        return await self._mem_next_id("_recycle_application_seq")
 
     async def next_valuation_id(self) -> int:
         """生成估价ID"""
         if is_redis_mode():
             return await self._redis_next_id("recycle_valuation")
-        return self._mem_next_id("_recycle_valuation_seq")
+        return await self._mem_next_id("_recycle_valuation_seq")
 
     async def next_exchange_id(self) -> int:
         """生成兑换记录ID"""
         if is_redis_mode():
             return await self._redis_next_id("recycle_exchange")
-        return self._mem_next_id("_recycle_exchange_seq")
+        return await self._mem_next_id("_recycle_exchange_seq")
 
     async def next_negotiation_id(self) -> int:
         """生成议价记录ID"""
         if is_redis_mode():
             return await self._redis_next_id("recycle_negotiation")
-        return self._mem_next_id("_recycle_negotiation_seq")
+        return await self._mem_next_id("_recycle_negotiation_seq")
 
-    def _mem_next_id(self, seq_key: str) -> int:
-        self._ensure_store()
-        seq = self.store.get(seq_key, 0) + 1
-        self.store[seq_key] = seq
-        return seq
+    async def _mem_next_id(self, seq_key: str) -> int:
+        """内存模式序列号自增(原子操作)
+
+        使用类级 asyncio.Lock 保护 read-modify-write, 避免并发
+        申请时不同用户产生重复 ID(service 层按 user_id 加锁, 无法
+        跨用户互斥 ID 生成)。
+        """
+        async with self._seq_lock:
+            self._ensure_store()
+            seq = self.store.get(seq_key, 0) + 1
+            self.store[seq_key] = seq
+            return seq
 
     async def _redis_next_id(self, entity: str) -> int:
         client = await get_redis_client()

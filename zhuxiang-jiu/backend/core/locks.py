@@ -11,12 +11,16 @@
 """
 
 import asyncio
+import logging
 import os
 from typing import AsyncContextManager
+
+logger = logging.getLogger(__name__)
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 _LOCK_TTL = 10.0            # 锁 TTL(秒), 超时自动释放防死锁
 _LOCK_BLOCK_TIMEOUT = 30.0  # 等待获取锁的最长时间
+_ASYNC_LOCKS_MAX_SIZE = 512  # asyncio 锁缓存上限, 防止无界增长导致内存泄漏
 
 _async_locks: dict[str, asyncio.Lock] = {}
 _redis_client = None
@@ -37,6 +41,18 @@ async def _get_redis_client():
         import redis.asyncio as redis
         _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     return _redis_client
+
+
+async def close_redis_client():
+    """关闭 Redis 连接(应用 shutdown 时调用, 避免连接泄漏)"""
+    global _redis_client
+    if _redis_client is not None:
+        try:
+            await _redis_client.aclose()
+        except Exception as e:
+            logger.warning("关闭 Redis 连接失败: %s", e)
+        finally:
+            _redis_client = None
 
 
 class _RedisLockWrapper:
@@ -63,8 +79,12 @@ class _RedisLockWrapper:
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        if self._lock and self._lock.owned():
-            await self._lock.release()
+        if self._lock is not None:
+            try:
+                if self._lock.owned():
+                    await self._lock.release()
+            except Exception as e:
+                logger.warning("释放 Redis 锁失败(key=%s): %s", self.key, e)
         return False
 
 
@@ -74,13 +94,30 @@ def get_lock(key: str) -> AsyncContextManager:
     LOCK_MODE=asyncio: 单进程 asyncio.Lock
         - 速度快, 无外部依赖
         - 仅单进程有效, 多 worker 下失效(已由方案 A 探针暴露)
+        - 锁缓存有上限(_ASYNC_LOCKS_MAX_SIZE), 超限时清理无竞争的锁防止内存泄漏
     LOCK_MODE=redis (默认): 跨进程 redis.asyncio.Lock
         - 多 worker 下跨进程互斥
         - 需 Redis 服务, watchdog 自动续期
     """
     if _get_lock_mode() == "redis":
         return _RedisLockWrapper(key)
-    # 单进程 asyncio.Lock(保留原逻辑)
+    # 单进程 asyncio.Lock
     if key not in _async_locks:
+        # 锁缓存超限时, 清理未被持有的锁(LRU-like 策略)
+        if len(_async_locks) >= _ASYNC_LOCKS_MAX_SIZE:
+            _cleanup_async_locks()
         _async_locks[key] = asyncio.Lock()
     return _async_locks[key]
+
+
+def _cleanup_async_locks():
+    """清理未被持有的 asyncio 锁, 防止内存泄漏
+
+    当锁缓存达到上限时, 遍历所有锁, 移除当前未被持有的锁。
+    被持有的锁(locked=True)保留, 避免影响正在执行的临界区。
+    """
+    to_remove = [k for k, lock in _async_locks.items() if not lock.locked()]
+    for k in to_remove:
+        del _async_locks[k]
+    if to_remove:
+        logger.debug("清理 asyncio 锁缓存: 移除 %d 个未持有的锁", len(to_remove))
