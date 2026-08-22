@@ -61,6 +61,8 @@ from routes import (
     register_venue_routes,
     register_monitor_routes,
     register_maintenance_routes,
+    # 用户认证模块
+    register_auth_routes,
 )
 
 
@@ -166,6 +168,7 @@ register_admin_routes(app)
 register_venue_routes(app)
 register_monitor_routes(app)
 register_maintenance_routes(app)
+register_auth_routes(app)
 
 
 # ============================================================
