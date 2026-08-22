@@ -240,7 +240,10 @@ async def decide_order_entry(
     城市判定优先级: cityCode > adcode > cityName > 经纬度附近门店 > 默认收货地址。
     """
     try:
-        member_id = int(x_member_id) if x_member_id else None
+        try:
+            member_id = int(x_member_id) if x_member_id else None
+        except (TypeError, ValueError):
+            member_id = None  # 非数字头视为未登录(仅失去地址兜底, 不影响决策)
         result = await _service.decide_order_entry(
             city_code=data.cityCode,
             adcode=data.adcode,

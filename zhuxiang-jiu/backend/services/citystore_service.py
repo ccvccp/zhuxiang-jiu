@@ -233,13 +233,19 @@ class CityStoreService:
         nearby_stores = []
 
         # ---------- 1. 城市判定(按优先级) ----------
+        # 输入归一化(strip + 空串视为未提供, 抵御前端脏数据)
+        city_code = (str(city_code).strip() or None) if city_code else None
+        adcode = (str(adcode).strip() or None) if adcode else None
+        city_name = (str(city_name).strip() or None) if city_name else None
+        province_name = (str(province_name).strip() or None) if province_name else None
+
         resolved = None       # (city_code, city_name, province_name, source)
         if city_code:
-            resolved = (str(city_code), city_name or "", province_name or "", "cityCode")
+            resolved = (city_code, city_name or "", province_name or "", "cityCode")
         elif adcode:
-            resolved = (self._adcode_to_city_code(str(adcode)), "", "", "adcode")
+            resolved = (self._adcode_to_city_code(adcode), "", "", "adcode")
         elif city_name:
-            resolved = ("", str(city_name), province_name or "", "cityName")
+            resolved = ("", city_name, province_name or "", "cityName")
 
         # 经纬度: 查附近门店推断城市(附带 nearbyStores 返回)
         if resolved is None and longitude is not None and latitude is not None:
@@ -274,9 +280,9 @@ class CityStoreService:
         if store is None:
             city_info = self._city_info(r_code, r_name, r_province,
                                         next((s for s in nearby_stores), None))
+            city_label = (city_info or {}).get("cityName") or r_code
             result = self._entry_site(
-                reason=f"所在城市{(city_info or {}).get('cityName') or ''}"
-                       "暂无市级网店, 已为你展示本站下单入口")
+                reason=f"所在城市{city_label}暂无市级网店, 已为你展示本站下单入口")
             result["city"] = city_info
             result["citySource"] = source
             return result
