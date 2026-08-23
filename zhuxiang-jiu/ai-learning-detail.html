@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 自学习驾驶舱 · 评分器详情</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 详情页专属样式(与总览页同风格) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 30px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 22px; margin: 0; }
+        .dash-banner p { margin: 6px 0 0; opacity: 0.9; font-size: 13px; }
+        .dash-banner .back-link { color: #fff; font-size: 13px; opacity: 0.85; text-decoration: none; display: inline-block; margin-top: 10px; }
+        .dash-banner .back-link:hover { opacity: 1; text-decoration: underline; }
+
+        .dash-section { padding: 16px 0 4px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+        .card-title { font-size: 15px; font-weight: 700; color: var(--color-primary-dark); padding: 14px 16px 0; }
+        .card-title small { font-weight: 400; color: var(--color-text-light); margin-left: 8px; }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 摘要头卡 */
+        .sum-card { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+        .sum-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        .sum-head h2 { margin: 0; font-size: 19px; }
+        .sum-sub { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+        .sum-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.module { background: rgba(74, 124, 89, 0.08); color: var(--color-primary-dark); border-color: rgba(74, 124, 89, 0.25); }
+        .badge.version { background: #e8f4ec; color: #2e8b57; }
+        .badge.src-default { background: #f0f0f0; color: #666; }
+        .badge.src-learning { background: #e8f4ec; color: #2e8b57; }
+        .badge.src-manual { background: #eef2fb; color: #3b5998; }
+        .badge.src-reset { background: #fdf3e3; color: #a06b00; }
+        .badge.auto-apply { background: #e8f4ec; color: #2e8b57; border-color: rgba(46, 139, 87, 0.35); }
+        .badge.auto-off { background: #f4f4f4; color: #999; }
+        .cfg-chip { font-size: 12px; color: var(--color-text-light); background: var(--color-bg); border-radius: 999px; padding: 3px 12px; }
+        .cfg-chip b { color: var(--color-text); }
+
+        /* 权重对比条 */
+        .wbar-list { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+        .wbar-item { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: center; }
+        .wbar-name { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text); text-align: right; overflow: hidden; text-overflow: ellipsis; }
+        .wbar-track { display: flex; flex-direction: column; gap: 3px; }
+        .wbar-line { display: flex; align-items: center; gap: 6px; }
+        .wbar-line .tag { font-size: 10px; width: 30px; color: var(--color-text-light); flex-shrink: 0; }
+        .wbar-bg { flex: 1; height: 9px; background: var(--color-bg); border-radius: 999px; overflow: hidden; }
+        .wbar-fill { height: 100%; border-radius: 999px; }
+        .wbar-fill.default { background: #b9c4bd; }
+        .wbar-fill.champion { background: var(--color-primary); }
+        .wbar-fill.challenger { background: var(--color-accent); }
+        .wbar-val { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--color-text-light); width: 42px; flex-shrink: 0; }
+        .wbar-legend { display: flex; gap: 14px; padding: 0 16px 10px; font-size: 11px; color: var(--color-text-light); }
+        .wbar-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+        /* 演进曲线 */
+        .chart-wrap { padding: 8px 16px 16px; }
+        .chart-legend { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
+        .chart-legend .lg { display: flex; align-items: center; gap: 5px; font-size: 11px; font-family: Consolas, monospace; color: var(--color-text-light); background: var(--color-bg); border-radius: 999px; padding: 2px 10px; }
+        .chart-legend .sw { width: 12px; height: 3px; border-radius: 2px; }
+        .chart-empty { text-align: center; color: var(--color-text-light); padding: 26px 0; font-size: 13px; }
+
+        /* 漂移监控 */
+        .drift-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; padding: 12px 16px; }
+        .drift-summary .cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 10px 6px; text-align: center; }
+        .drift-summary .cell b { display: block; font-size: 16px; }
+        .drift-summary .cell span { font-size: 11px; color: var(--color-text-light); }
+        .drift-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -0px; }
+        .drift-dot.low { background: #2e8b57; }
+        .drift-dot.medium { background: #e67e22; }
+        .drift-dot.high { background: var(--color-danger); }
+
+        /* 决策阻断面板(v7.8) */
+        .badge.mode-observe { background: #f0f0f0; color: #666; }
+        .badge.mode-shadow { background: #eef2fb; color: #3b5998; border-color: rgba(59, 89, 152, 0.3); }
+        .badge.mode-enforce { background: #fdeaea; color: #c0392b; border-color: rgba(192, 57, 43, 0.35); }
+        .enf-burst { display: flex; align-items: center; gap: 10px; padding: 10px 16px 0; font-size: 12px; color: var(--color-text-light); }
+        .enf-burst .bar { flex: 1; max-width: 260px; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden; }
+        .enf-burst .bar i { display: block; height: 100%; background: linear-gradient(90deg, #2e8b57, #e67e22, #c0392b); }
+        .enf-note { padding: 8px 16px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.7; }
+        .tbl .a-blocked { color: #c0392b; font-weight: 700; }
+        .tbl .a-review { color: #a06b00; font-weight: 600; }
+        .tbl .a-pass { color: #2e8b57; }
+        .tbl .deg-true { color: #e67e22; font-weight: 600; }
+
+        /* 通用表格 */
+        .tbl-wrap { padding: 8px 16px 16px; overflow-x: auto; }
+        table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .tbl th, .tbl td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .tbl th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .tbl td.mono { font-family: Consolas, monospace; font-size: 12px; }
+        .tbl .v-champion { color: var(--color-primary-dark); font-weight: 700; }
+        .tbl .v-challenger { color: var(--color-accent); font-weight: 700; }
+        .dev-pos { color: #c0392b; font-weight: 600; }
+        .dev-neg { color: #3b5998; font-weight: 600; }
+        .dev-zero { color: #999; }
+
+        .card-error { color: var(--color-danger); font-size: 13px; padding: 0 16px 14px; }
+
+        .dash-footer { padding: 20px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .dash-footer code { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 3px; padding: 1px 6px; font-size: 11px; }
+
+        /* ========= 管理操作面板 ========= */
+        .admin-hint { padding: 10px 16px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.7; }
+        .admin-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px 4px; }
+        .admin-bar label { font-size: 13px; color: var(--color-text-light); }
+        .admin-bar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 300px; background: #fff;
+        }
+        .admin-sum { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--color-text-light); }
+        .admin-sum.ok { color: #2e8b57; }
+        .admin-sum.bad { color: var(--color-danger); font-weight: 600; }
+        .admin-status { padding: 6px 16px 14px; font-size: 13px; min-height: 20px; }
+        .admin-status.ok { color: #2e8b57; }
+        .admin-status.err { color: var(--color-danger); }
+        .dash-btn.danger { background: var(--color-danger); }
+        .dash-btn.danger:hover { background: #a93226; }
+        .dash-btn.danger-ghost { background: #fff; color: var(--color-danger); border: 1px solid var(--color-danger); }
+        .dash-btn.danger-ghost:hover { background: #fdf3f2; }
+        .winput {
+            width: 92px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 5px 8px; font-size: 13px; font-family: Consolas, monospace;
+            text-align: right; background: #fff;
+        }
+        .winput.bad { border-color: var(--color-danger); background: #fdf3f2; }
+        .winput:focus { outline: none; border-color: var(--color-primary); }
+        .grange { font-size: 11px; color: var(--color-text-light); font-family: Consolas, monospace; }
+
+        /* ========= 确认弹窗 ========= */
+        .modal-mask {
+            position: fixed; inset: 0; background: rgba(28, 36, 32, 0.55);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1000; padding: 16px;
+        }
+        .modal-mask[hidden] { display: none; }
+        .modal-box {
+            background: #fff; border-radius: var(--radius-md);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+            max-width: 600px; width: 100%; max-height: 82vh; overflow: auto;
+        }
+        .modal-head {
+            padding: 14px 18px; border-bottom: 1px solid var(--color-border);
+            font-weight: 700; color: var(--color-primary-dark);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .modal-close { cursor: pointer; border: none; background: none; font-size: 20px; color: #999; line-height: 1; }
+        .modal-close:hover { color: var(--color-text); }
+        .modal-body { padding: 14px 18px; font-size: 13px; line-height: 1.8; color: var(--color-text); }
+        .modal-foot { padding: 12px 18px 16px; display: flex; gap: 10px; justify-content: flex-end; }
+
+        @media (max-width: 640px) {
+            .wbar-item { grid-template-columns: 92px 1fr; }
+            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container">
+            <h1>AI 自学习驾驶舱 · 评分器详情</h1>
+            <p id="bannerSub">v7.8 · 权重演进 / 版本历史 / 漂移监控 / 决策阻断</p>
+            <a class="back-link" href="ai-learning-dashboard.html">← 返回总览</a>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏 -->
+        <section class="dash-section">
+            <div class="dash-card dash-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="dash-btn ghost" onclick="saveApiBase()">保存</button>
+                <button class="dash-btn" id="btnRefresh" onclick="loadAll()">刷新</button>
+                <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="dash-error" id="errorBanner"></div>
+        </section>
+
+        <!-- 摘要头卡 -->
+        <section class="dash-section">
+            <div class="dash-card sum-card" id="sumCard">
+                <div class="sum-head">
+                    <h2 id="sumLabel">—</h2>
+                    <span class="badge version" id="sumVersion">—</span>
+                </div>
+                <div class="sum-sub" id="sumId">—</div>
+                <div class="sum-chips" id="sumChips"></div>
+                <div class="sum-chips" id="sumCfg"></div>
+            </div>
+        </section>
+
+        <!-- 权重对比 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">权重对比<small>默认 vs 冠军(生效) vs 挑战者(影子)</small></div>
+                <div class="wbar-legend">
+                    <span><span class="sw" style="background:#b9c4bd;"></span>默认</span>
+                    <span><span class="sw" style="background:var(--color-primary);"></span>冠军(生效)</span>
+                    <span><span class="sw" style="background:var(--color-accent);"></span>挑战者</span>
+                </div>
+                <div class="wbar-list" id="wbarList"></div>
+            </div>
+        </section>
+
+        <!-- 权重演进曲线 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">权重演进曲线<small>各因子权重随版本变化(历史 + 在役)</small></div>
+                <div class="chart-legend" id="chartLegend"></div>
+                <div class="chart-wrap" id="chartWrap"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
+        <!-- 漂移监控 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">漂移监控<small>因子分数 EMA 相对首条反馈基线的偏差</small></div>
+                <div class="drift-summary" id="driftSummary"></div>
+                <div class="tbl-wrap" id="driftTable"></div>
+            </div>
+        </section>
+
+        <!-- 案例知识库(v7.9) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">案例知识库<small id="kbNote">学习后反馈归档 · RAG 检索缓冲 · 经验回放</small></div>
+                <div class="drift-summary" id="kbSummary"><div class="chart-empty">加载中…</div></div>
+                <div class="tbl-wrap" id="kbTable"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
+        <!-- 决策阻断(v7.8) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">决策阻断<small id="enfModeNote">observe / shadow / enforce 三级模式</small></div>
+                <div class="drift-summary" id="enfSummary"><div class="chart-empty">加载中…</div></div>
+                <div class="enf-burst" id="enfBurst"></div>
+                <div class="enf-note" id="enfNote"></div>
+                <div class="tbl-wrap" id="enfTable"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
+        <!-- 版本历史 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">版本历史<small id="historyCount">审计与回滚参考</small></div>
+                <div class="tbl-wrap" id="historyTable"><div class="chart-empty">加载中…</div></div>
+            </div>
+        </section>
+
+        <!-- 管理操作 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-title">管理操作<small>人工覆盖权重 / 重置为默认 · 即时生效</small></div>
+                <div class="admin-hint">
+                    覆盖校验(与后端一致): 权重全为正 · 总和在默认值 ±10% 内 · 各因子在护栏区间内。
+                    应用后生成新冠军版本, 旧冠军退役入历史, 挑战者清除; 重置恢复默认权重(历史保留供审计)。
+                </div>
+                <div class="tbl-wrap" id="adminTable"><div class="chart-empty">加载中…</div></div>
+                <div class="admin-bar">
+                    <label for="overrideReason">覆盖原因</label>
+                    <input type="text" id="overrideReason" maxlength="200" placeholder="例如: 风控运营调整 credit 因子权重">
+                    <span class="admin-sum" id="adminSum">—</span>
+                </div>
+                <div class="admin-bar" style="padding-top:4px;">
+                    <button class="dash-btn ghost" onclick="fillChampionWeights()">恢复冠军值</button>
+                    <button class="dash-btn danger" onclick="applyOverride()">应用覆盖</button>
+                </div>
+                <div class="admin-bar" style="padding-top:10px;border-top:1px dashed var(--color-border);margin-top:6px;">
+                    <span class="admin-sum">危险操作:</span>
+                    <button class="dash-btn danger-ghost" onclick="confirmReset()">重置为默认权重</button>
+                </div>
+                <div class="admin-status" id="adminStatus"></div>
+            </div>
+        </section>
+
+        <!-- 页脚 -->
+        <footer class="dash-footer">
+            <div>数据来源：<code>GET /api/ai-learning/weights/{scorerId}</code> · <code>GET /api/ai-learning/history/{scorerId}</code> · <code>GET /api/ai-learning/drift/{scorerId}</code> · <code>GET /kb/{scorerId}</code> · <code>GET /enforcement/{scorerId}/overview|audit</code>。管理操作：<code>PUT /weights</code> · <code>POST /reset</code>。学习效果报表（正确率演进/评估指标曲线）见 <a href="ai-learning-report.html?scorerId=" id="footerReportLink" style="color:var(--color-primary);">报表页</a>。</div>
+            <div>鉴权：compat 模式以 <code>X-Role: admin</code> 兼容头访问。曲线为纯 SVG 手绘，无外部依赖。</div>
+        </footer>
+    </main>
+
+    <!-- 确认弹窗 -->
+    <div class="modal-mask" id="confirmModal" hidden>
+        <div class="modal-box">
+            <div class="modal-head">
+                <span id="modalTitle">确认</span>
+                <button class="modal-close" onclick="closeModal()" aria-label="关闭">×</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-foot">
+                <button class="dash-btn ghost" onclick="closeModal()">取消</button>
+                <button class="dash-btn danger" onclick="modalConfirm()">确认执行</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        /* ========= 全局状态 ========= */
+        var API_BASE_KEY = 'aiLearningDash.apiBase';   /* 与总览页共享 */
+        var state = {
+            apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+            scorerId: new URLSearchParams(location.search).get('scorerId') || '',
+            weights: null, history: null, drift: null,
+            enf: null, enfAudit: null,
+        };
+
+        var SRC_LABEL = { default: '默认', learning: '学习', manual: '人工', reset: '重置' };
+        var DRIFT_LABEL = { low: '正常', medium: '关注', high: '告警' };
+        var PALETTE = ['#4a7c59', '#c9a961', '#3b5998', '#c0392b', '#8e44ad',
+                       '#16a085', '#d35400', '#2c3e50', '#7f8c8d', '#2980b9'];
+
+        /* ========= 工具函数 ========= */
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function pct(v) { return (v == null || isNaN(v)) ? '--' : (v * 100).toFixed(1) + '%'; }
+        function verNum(v) { var m = /^v(\d+)$/.exec(String(v || '')); return m ? +m[1] : 0; }
+        function fmtTime(s) { return s ? String(s).replace('T', ' ') : '—'; }
+
+        async function fetchJson(url, opts) {
+            var init = { headers: { 'X-Role': 'admin' } };
+            if (opts && opts.method) {
+                init.method = opts.method;
+                init.headers['Content-Type'] = 'application/json';
+                init.body = JSON.stringify(opts.body || {});
+            }
+            var res = await fetch(url, init);
+            var body = null;
+            try { body = await res.json(); } catch (e) { /* 非 JSON 错误体 */ }
+            if (!res.ok) {
+                var msg = body && (body.error || body.message || body.detail)
+                    ? ' · ' + (body.error || body.message || body.detail) : '';
+                throw new Error('HTTP ' + res.status + msg);
+            }
+            return body;
+        }
+
+        /* ========= 数据加载(三段独立, 局部失败不影响其他区块) ========= */
+        function loadAll() {
+            if (!state.scorerId) {
+                showError('缺少 scorerId 参数。请从总览页卡片进入，或手动追加 ?scorerId=order_risk');
+                return;
+            }
+            document.getElementById('footerReportLink').href =
+                'ai-learning-report.html?scorerId=' + encodeURIComponent(state.scorerId);
+            loadWeights();
+            loadHistory();
+            loadDrift();
+            loadKb();
+            loadEnforcement();
+            document.getElementById('lastUpdate').textContent = '最后刷新 ' + new Date().toLocaleTimeString('zh-CN');
+        }
+
+        async function loadWeights() {
+            try {
+                var d = await fetchJson(api('weights/' + encodeURIComponent(state.scorerId)));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.weights = d;
+                renderSummary();
+                renderWeightBars();
+                renderAdminPanel();
+                if (state.kb) renderKb();   // 回放芯片依赖学习配置
+            } catch (err) {
+                showError('权重档案加载失败：' + err.message);
+                document.getElementById('wbarList').innerHTML =
+                    '<div class="card-error">' + esc(err.message) + '</div>';
+            }
+        }
+
+        async function loadHistory() {
+            var box = document.getElementById('historyTable');
+            try {
+                var d = await fetchJson(api('history/' + encodeURIComponent(state.scorerId)));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.history = d;
+                renderHistoryTable();
+                renderEvolutionChart();
+            } catch (err) {
+                box.innerHTML = '<div class="card-error">版本历史加载失败：' + esc(err.message) + '</div>';
+                document.getElementById('chartWrap').innerHTML =
+                    '<div class="chart-empty">曲线不可用(历史加载失败)</div>';
+            }
+        }
+
+        async function loadDrift() {
+            try {
+                var d = await fetchJson(api('drift/' + encodeURIComponent(state.scorerId)));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.drift = d.drift || {};
+                renderDrift();
+            } catch (err) {
+                document.getElementById('driftSummary').innerHTML =
+                    '<div class="card-error">漂移统计加载失败：' + esc(err.message) + '</div>';
+            }
+        }
+
+        async function loadKb() {
+            try {
+                var d = await fetchJson(api('kb/' + encodeURIComponent(state.scorerId) + '?limit=20'));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.kb = d;
+                renderKb();
+            } catch (err) {
+                document.getElementById('kbSummary').innerHTML =
+                    '<div class="card-error">知识库加载失败：' + esc(err.message) + '</div>';
+                document.getElementById('kbTable').innerHTML = '';
+            }
+        }
+
+        async function loadEnforcement() {
+            try {
+                var d = await fetchJson(api('enforcement/' + encodeURIComponent(state.scorerId) + '/overview'));
+                if (!d || !d.success) throw new Error('响应格式异常');
+                state.enf = d;
+                renderEnforcement();
+            } catch (err) {
+                document.getElementById('enfSummary').innerHTML =
+                    '<div class="card-error">阻断概览加载失败：' + esc(err.message) + '</div>';
+                document.getElementById('enfTable').innerHTML = '';
+            }
+            try {
+                var a = await fetchJson(api('enforcement/' + encodeURIComponent(state.scorerId) + '/audit?limit=20'));
+                if (!a || !a.success) throw new Error('响应格式异常');
+                state.enfAudit = a.records || [];
+                renderEnfAudit();
+            } catch (err) {
+                document.getElementById('enfTable').innerHTML =
+                    '<div class="card-error">审计记录加载失败：' + esc(err.message) + '</div>';
+            }
+        }
+
+        function api(path) { return state.apiBase + '/api/ai-learning/' + path; }
+
+        /* ========= 摘要头卡 ========= */
+        function renderSummary() {
+            var w = state.weights;
+            document.getElementById('sumLabel').textContent = w.label || w.scorerId;
+            document.getElementById('sumId').textContent = w.scorerId;
+            document.getElementById('bannerSub').textContent =
+                (w.module || '') + ' · v7.7 权重演进 / 版本历史 / 漂移监控';
+
+            var ver = document.getElementById('sumVersion');
+            ver.textContent = '生效 ' + (w.activeVersion || 'v1');
+
+            var champ = w.champion || {};
+            var src = champ.source || 'default';
+            document.getElementById('sumChips').innerHTML =
+                '<span class="badge module">' + esc(w.module || '') + '</span>' +
+                '<span class="badge src-' + esc(src) + '">冠军来源: ' + esc(SRC_LABEL[src] || src) + '</span>' +
+                (w.challenger ? '<span class="badge version">挑战者 ' + esc(w.challenger.version) + ' 待评估</span>'
+                              : '<span class="badge auto-off">无挑战者</span>');
+
+            var c = w.config || {};
+            document.getElementById('sumCfg').innerHTML =
+                '<span class="cfg-chip">学习率 eta <b>' + esc(c.eta) + '</b></span>' +
+                '<span class="cfg-chip">最小反馈 min_feedback <b>' + esc(c.min_feedback) + '</b></span>' +
+                '<span class="cfg-chip">护栏 guardrail <b>' + esc(c.guardrail) + 'x</b></span>' +
+                (c.auto_apply ? '<span class="badge auto-apply">自动晋升 开</span>'
+                              : '<span class="badge auto-off">自动晋升 关</span>');
+        }
+
+        /* ========= 权重对比条 ========= */
+        function renderWeightBars() {
+            var w = state.weights;
+            var defaults = w.defaults || {};
+            var champ = (w.champion || {}).weights || {};
+            var chall = (w.challenger || {}).weights || null;
+            var names = Object.keys(defaults);
+            var maxW = 0;
+            names.forEach(function (n) {
+                maxW = Math.max(maxW, defaults[n] || 0, champ[n] || 0, chall ? (chall[n] || 0) : 0);
+            });
+            maxW = maxW || 1;
+
+            function line(tag, cls, val) {
+                var widthPct = Math.max((val / maxW) * 100, val > 0 ? 1.5 : 0);
+                return '<div class="wbar-line">' +
+                    '<span class="tag">' + tag + '</span>' +
+                    '<span class="wbar-bg"><span class="wbar-fill ' + cls + '" style="width:' + widthPct.toFixed(1) + '%;"></span></span>' +
+                    '<span class="wbar-val">' + (val != null ? (+val).toFixed(3) : '—') + '</span></div>';
+            }
+
+            document.getElementById('wbarList').innerHTML = names.map(function (n) {
+                return '<div class="wbar-item">' +
+                    '<div class="wbar-name" title="' + esc(n) + '">' + esc(n) + '</div>' +
+                    '<div class="wbar-track">' +
+                        line('默认', 'default', defaults[n]) +
+                        line('冠军', 'champion', champ[n] != null ? champ[n] : defaults[n]) +
+                        (chall ? line('挑战', 'challenger', chall[n]) : '') +
+                    '</div></div>';
+            }).join('');
+        }
+
+        /* ========= 权重演进曲线(纯 SVG 手绘) ========= */
+        function orderedRecords() {
+            /* 历史(旧→新) + 挑战者 + 冠军, 按版本号排序去重 */
+            var recs = [];
+            var seen = {};
+            var push = function (r) {
+                if (r && r.version && !seen[r.version]) { seen[r.version] = 1; recs.push(r); }
+            };
+            (state.history && state.history.history || []).forEach(push);
+            if (state.weights && state.weights.challenger) push(state.weights.challenger);
+            if (state.weights && state.weights.champion) push(state.weights.champion);
+            recs.sort(function (a, b) { return verNum(a.version) - verNum(b.version); });
+            return recs;
+        }
+
+        function renderEvolutionChart() {
+            var wrap = document.getElementById('chartWrap');
+            var legend = document.getElementById('chartLegend');
+            var recs = orderedRecords();
+            if (!recs.length || !state.weights) {
+                wrap.innerHTML = '<div class="chart-empty">暂无版本数据</div>';
+                legend.innerHTML = '';
+                return;
+            }
+            var defaults = state.weights.defaults || {};
+            var factors = Object.keys(defaults);
+            if (!factors.length) {
+                wrap.innerHTML = '<div class="chart-empty">该评分器无可学习因子</div>';
+                return;
+            }
+
+            /* 画布与边距 */
+            var W = 760, H = 320, padL = 46, padR = 18, padT = 16, padB = 36;
+            var n = recs.length;
+            var maxX = Math.max(n - 1, 1);
+            var maxW = 0.0001;
+            recs.forEach(function (r) {
+                var ws = r.weights || {};
+                factors.forEach(function (f) { if (ws[f] > maxW) maxW = ws[f]; });
+            });
+            var maxY = maxW * 1.15;
+
+            function X(i) { return padL + (W - padL - padR) * (n === 1 ? 0.5 : i / maxX); }
+            function Y(v) { return padT + (H - padT - padB) * (1 - v / maxY); }
+
+            var svg = ['<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block;" role="img">'];
+
+            /* 横向网格 + Y 轴刻度 */
+            for (var g = 0; g <= 4; g++) {
+                var val = maxY * g / 4;
+                var y = Y(val);
+                svg.push('<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="#e5e0d5" stroke-width="1"/>');
+                svg.push('<text x="' + (padL - 6) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end" font-size="10" fill="#6b6b6b">' + val.toFixed(2) + '</text>');
+            }
+            /* X 轴版本刻度 + 纵向网格 */
+            recs.forEach(function (r, i) {
+                var x = X(i).toFixed(1);
+                svg.push('<line x1="' + x + '" y1="' + padT + '" x2="' + x + '" y2="' + (H - padB) + '" stroke="#f0ede4" stroke-width="1"/>');
+                svg.push('<text x="' + x + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="#6b6b6b">' + esc(r.version) + '</text>');
+                /* 在役版本标记: 冠军=实心三角, 挑战者=空心 */
+                var role = '';
+                if (state.weights.champion && r.version === state.weights.champion.version) role = 'champ';
+                else if (state.weights.challenger && r.version === state.weights.challenger.version) role = 'chall';
+                if (role === 'champ') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#2e8b57">▲</text>');
+                if (role === 'chall') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#c9a961">△</text>');
+            });
+
+            /* 各因子折线 */
+            factors.forEach(function (f, idx) {
+                var color = PALETTE[idx % PALETTE.length];
+                var pts = [], dots = [];
+                recs.forEach(function (r, i) {
+                    var v = (r.weights || {})[f];
+                    if (v != null) {
+                        pts.push(X(i).toFixed(1) + ',' + Y(v).toFixed(1));
+                        dots.push('<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="2.6" fill="' + color + '"><title>' + esc(f) + ' ' + esc(r.version) + ' = ' + (+v).toFixed(3) + '</title></circle>');
+                    }
+                });
+                if (pts.length) {
+                    svg.push('<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>');
+                    svg.push(dots.join(''));
+                }
+            });
+            svg.push('</svg>');
+            wrap.innerHTML = svg.join('');
+
+            /* 图例 */
+            legend.innerHTML = factors.map(function (f, idx) {
+                var color = PALETTE[idx % PALETTE.length];
+                return '<span class="lg"><span class="sw" style="background:' + color + ';"></span>' + esc(f) + '</span>';
+            }).join('') +
+            '<span class="lg" style="color:#2e8b57;">▲ 冠军(生效)</span>' +
+            '<span class="lg" style="color:#c9a961;">△ 挑战者</span>';
+        }
+
+        /* ========= 漂移监控 ========= */
+        function renderDrift() {
+            var d = state.drift || {};
+            var lv = d.driftLevel || 'low';
+            var count = d.count || 0;
+
+            document.getElementById('driftSummary').innerHTML =
+                '<div class="cell"><b><span class="drift-dot ' + esc(lv) + '"></span>' + esc(DRIFT_LABEL[lv] || lv) + '</b><span>漂移等级</span></div>' +
+                '<div class="cell"><b>' + pct(d.driftScore) + '</b><span>平均相对偏差</span></div>' +
+                '<div class="cell"><b>' + count + '</b><span>反馈样本数</span></div>' +
+                '<div class="cell"><b>' + (d.baselineScore != null ? d.baselineScore : '—') + '</b><span>基线分数</span></div>' +
+                '<div class="cell"><b>' + (d.emaScore != null ? d.emaScore : '—') + '</b><span>EMA 分数</span></div>';
+
+            var base = d.baselineFactors || {};
+            var ema = d.emaFactors || {};
+            var names = Object.keys(base);
+            var box = document.getElementById('driftTable');
+            if (!names.length) {
+                box.innerHTML = '<div class="chart-empty" style="padding:12px 0 18px;">暂无反馈, 未建立漂移基线</div>';
+                return;
+            }
+            var rows = names.map(function (n) {
+                var b = base[n], e = ema[n] != null ? ema[n] : b;
+                var dev = (e - b) / Math.max(Math.abs(b), 10);
+                var devPct = (dev * 100).toFixed(1) + '%';
+                var cls = Math.abs(dev) < 0.005 ? 'dev-zero' : (dev > 0 ? 'dev-pos' : 'dev-neg');
+                var arrow = Math.abs(dev) < 0.005 ? '·' : (dev > 0 ? '↑' : '↓');
+                return '<tr><td class="mono">' + esc(n) + '</td>' +
+                    '<td class="num">' + b + '</td>' +
+                    '<td class="num">' + e + '</td>' +
+                    '<td class="num ' + cls + '">' + arrow + ' ' + devPct + '</td></tr>';
+            }).join('');
+            box.innerHTML =
+                '<table class="tbl"><thead><tr><th>因子</th><th style="text-align:right">基线分数</th>' +
+                '<th style="text-align:right">EMA 分数</th><th style="text-align:right">相对偏差</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>' +
+                '<div style="font-size:11px;color:#6b6b6b;padding-top:8px;">最近反馈: ' + esc(fmtTime(d.lastFeedbackAt)) + '</div>';
+        }
+
+        /* ========= 案例知识库面板(v7.9) ========= */
+        function renderKb() {
+            var k = state.kb || {};
+            var total = k.totalCases || 0;
+            var cap = k.maxCasesPerScorer || 2000;
+            var cfg = (state.weights && state.weights.config) || {};
+            var replayOn = cfg.replay === true || cfg.replay === 'true';
+
+            document.getElementById('kbSummary').innerHTML =
+                '<div class="cell"><b>' + (k.enabled ? '开启' : '关闭') + '</b><span>知识库开关(AI_KB)</span></div>' +
+                '<div class="cell"><b>' + total + ' / ' + cap + '</b><span>案例数 / 封顶</span></div>' +
+                '<div class="cell"><b>' + (k.labeledInView || 0) + '</b><span>视图中已标注</span></div>' +
+                '<div class="cell"><b>' + (replayOn ? '开启' : '关闭') + '</b><span>经验回放(replay)</span></div>' +
+                '<div class="cell"><b>' + esc(cfg.replay_sample != null ? cfg.replay_sample : 50) + '</b><span>回放采样数</span></div>';
+
+            var cases = k.cases || [];
+            var box = document.getElementById('kbTable');
+            if (!cases.length) {
+                box.innerHTML = '<div class="chart-empty" style="padding:12px 0 18px;">暂无案例(学习周期触发后, 已学习反馈自动归档为知识案例)</div>';
+                return;
+            }
+            var rows = cases.map(function (c) {
+                var corr = c.correct;
+                var corrHtml = corr === true
+                    ? '<span style="color:#2e7d32;">✓ 正确</span>'
+                    : (corr === false ? '<span style="color:#c62828;">✗ 错误</span>'
+                                      : '<span style="color:#9e9e9e;">未标注</span>');
+                var fCount = Object.keys(c.factors || {}).length;
+                return '<tr><td class="mono">#' + esc(c.caseId) + '</td>' +
+                    '<td>' + esc(fmtTime(c.archivedAt)) + '</td>' +
+                    '<td class="mono">' + esc(c.businessKey || '—') + '</td>' +
+                    '<td>' + esc(c.source === 'auto' ? '自动' : (c.source || '手动')) + '</td>' +
+                    '<td class="mono">' + esc(c.action || '—') + ' → ' + esc(c.actualAction || '—') + '</td>' +
+                    '<td>' + corrHtml + '</td>' +
+                    '<td class="num">' + (c.scoreAtDecision != null ? c.scoreAtDecision : '—') + '</td>' +
+                    '<td class="num">' + fCount + '</td></tr>';
+            }).join('');
+            box.innerHTML =
+                '<table class="tbl"><thead><tr><th>案例</th><th>归档时间</th><th>业务键</th>' +
+                '<th>来源</th><th>决策 → 终态</th><th>正确性</th>' +
+                '<th style="text-align:right">决策分</th><th style="text-align:right">因子数</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>' +
+                '<div style="font-size:11px;color:#6b6b6b;padding-top:8px;">展示最近 ' + cases.length + ' 条(共 ' + total +
+                ' 条)。检索增强: 评分时对这些案例做 top-k 余弦检索, 相似区域错误率 ≥50% 时 enforce 模式升级人工复核。</div>';
+        }
+
+        /* ========= 决策阻断面板(v7.8) ========= */
+        var MODE_LABEL = { observe: '观察', shadow: '影子', enforce: '执行' };
+
+        function renderEnforcement() {
+            var e = state.enf || {};
+            var mode = e.mode || 'observe';
+            var s = e.stats || {};
+            var p = e.protections || {};
+            document.getElementById('enfModeNote').textContent =
+                '当前模式: ' + (MODE_LABEL[mode] || mode);
+
+            document.getElementById('enfSummary').innerHTML =
+                '<div class="cell"><b><span class="badge mode-' + esc(mode) + '">' + esc(MODE_LABEL[mode] || mode) + '</span></b><span>运行模式</span></div>' +
+                '<div class="cell"><b>' + (s.total || 0) + '</b><span>累计决策</span></div>' +
+                '<div class="cell"><b style="color:#c0392b;">' + (s.blocked || 0) + '</b><span>真实阻断</span></div>' +
+                '<div class="cell"><b style="color:#a06b00;">' + (s.reviews || 0) + '</b><span>强制人工</span></div>' +
+                '<div class="cell"><b style="color:#e67e22;">' + (s.degraded || 0) + '</b><span>保护降级</span></div>' +
+                '<div class="cell"><b>' + pct(s.blockRate) + '</b><span>阻断率</span></div>';
+
+            var b = e.burstWindow || {};
+            var ratio = b.total ? Math.min(1, (b.blocked || 0) / b.total) : 0;
+            document.getElementById('enfBurst').innerHTML =
+                '<span>熔断窗口(' + Math.round((b.seconds || 3600) / 60) + '分钟):</span>' +
+                '<div class="bar"><i style="width:' + (ratio * 100).toFixed(0) + '%;"></i></div>' +
+                '<span>' + (b.blocked || 0) + '/' + (b.total || 0) +
+                ' (阈值 ' + (p.burstMaxBlockRatio != null ? (p.burstMaxBlockRatio * 100).toFixed(0) + '%' : '30%') + ')</span>';
+
+            document.getElementById('enfNote').innerHTML =
+                '四重误杀保护: 冷启动(反馈 &lt; ' + esc(p.coldStartMinFeedback || 50) + ' 条降级) · ' +
+                '正确率(&lt; ' + (p.accuracyMinRatio != null ? (p.accuracyMinRatio * 100).toFixed(0) + '%' : '70%') + ' 降级) · ' +
+                '阻断率熔断(窗口内 &gt; ' + (p.burstMaxBlockRatio != null ? (p.burstMaxBlockRatio * 100).toFixed(0) + '%' : '30%') + ' 降级) · ' +
+                'fail-open(评分异常放行)。模式由环境变量 AI_ENFORCE_MODE / AI_ENFORCE_SCOPES 控制。';
+        }
+
+        function renderEnfAudit() {
+            var recs = state.enfAudit || [];
+            var box = document.getElementById('enfTable');
+            if (!recs.length) {
+                box.innerHTML = '<div class="chart-empty" style="padding:12px 0 18px;">暂无决策审计记录(shadow/enforce 模式运行后产生)</div>';
+                return;
+            }
+            var rows = recs.map(function (r) {
+                var act = r.blocked ? '<span class="a-blocked">已阻断</span>'
+                    : r.reviewRequired ? '<span class="a-review">强制人工</span>'
+                    : '<span class="a-pass">放行</span>';
+                var deg = r.degraded
+                    ? '<span class="deg-true">降级 ' + esc(r.degradeReason || '') + '</span>' : '—';
+                return '<tr><td class="mono">' + esc(fmtTime(r.decidedAt)) + '</td>' +
+                    '<td class="mono">' + esc(r.businessKey || '') + '</td>' +
+                    '<td>' + esc(MODE_LABEL[r.effectiveMode] || r.effectiveMode || '—') + '</td>' +
+                    '<td>' + act + '</td>' +
+                    '<td class="num">' + (r.score != null ? r.score : '—') + '</td>' +
+                    '<td class="mono">' + esc(r.weightVersion || '—') + '</td>' +
+                    '<td>' + deg + '</td></tr>';
+            }).join('');
+            box.innerHTML =
+                '<table class="tbl"><thead><tr><th>决策时间</th><th>业务键</th><th>生效模式</th>' +
+                '<th>处置</th><th style="text-align:right">评分</th><th>权重版本</th><th>降级原因</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>' +
+                '<div style="font-size:11px;color:#6b6b6b;padding-top:8px;">最近 ' + recs.length + ' 条决策审计(新→旧)</div>';
+        }
+
+        /* ========= 版本历史表 ========= */
+        function renderHistoryTable() {
+            var h = state.history;
+            var recs = (h.history || []).slice().sort(function (a, b) { return verNum(b.version) - verNum(a.version); });
+            document.getElementById('historyCount').textContent =
+                '共 ' + recs.length + ' 个退役版本(审计与回滚参考)';
+            var box = document.getElementById('historyTable');
+            if (!recs.length) {
+                box.innerHTML = '<div class="chart-empty" style="padding:12px 0 18px;">暂无退役版本(冠军 v1 起步, 学习/覆盖后旧版本入档)</div>';
+                return;
+            }
+            var champV = h.champion, challV = h.challenger;
+            var rows = recs.map(function (r) {
+                var src = r.source || 'default';
+                var stats = r.stats || {};
+                var metrics = [];
+                if (stats.rewardAlignment != null) metrics.push('对齐度 ' + (+stats.rewardAlignment).toFixed(3));
+                if (stats.accuracy != null) metrics.push('一致率 ' + pct(stats.accuracy));
+                return '<tr>' +
+                    '<td class="mono">' + esc(r.version) + '</td>' +
+                    '<td><span class="badge src-' + esc(src) + '">' + esc(SRC_LABEL[src] || src) + '</span></td>' +
+                    '<td class="mono">' + esc(r.parentVersion || '—') + '</td>' +
+                    '<td>' + (metrics.length ? esc(metrics.join(' · ')) : '<span style="color:#999;">—</span>') + '</td>' +
+                    '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="' + esc(r.note || '') + '">' + esc(r.note || '—') + '</td>' +
+                    '<td class="mono">' + esc(fmtTime(r.createdAt)) + '</td></tr>';
+            }).join('');
+            box.innerHTML =
+                '<table class="tbl"><thead><tr><th>版本</th><th>来源</th><th>父版本</th>' +
+                '<th>评估指标</th><th>备注</th><th>创建时间</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+                '<div style="font-size:11px;color:#6b6b6b;padding-top:8px;">在役: 冠军 <b class="v-champion">' + esc(champV || '—') + '</b>' +
+                ' · 挑战者 <b class="v-challenger">' + esc(challV || '无') + '</b>(不入历史表)</div>';
+        }
+
+        /* ========= 管理操作面板 ========= */
+        var admin = { busy: false, defaults: {}, champWeights: {}, guardrail: 2.0, targetSum: 1.0 };
+        var modalConfirmCb = null;
+
+        function renderAdminPanel() {
+            var w = state.weights;
+            if (!w) return;
+            var defaults = w.defaults || {};
+            var champ = (w.champion || {}).weights || {};
+            var guardrail = (w.config || {}).guardrail || 2.0;
+            var names = Object.keys(defaults);
+            if (!names.length) {
+                document.getElementById('adminTable').innerHTML =
+                    '<div class="chart-empty" style="padding:12px 0 18px;">该评分器无可学习因子, 无权重可管理</div>';
+                return;
+            }
+            admin.defaults = defaults;
+            admin.champWeights = champ;
+            admin.guardrail = guardrail;
+            admin.targetSum = names.reduce(function (s, n) { return s + (defaults[n] || 0); }, 0);
+
+            var rows = names.map(function (n) {
+                var d = defaults[n] || 0;
+                var cur = champ[n] != null ? champ[n] : d;
+                return '<tr>' +
+                    '<td class="mono">' + esc(n) + '</td>' +
+                    '<td class="num">' + (+d).toFixed(3) + '</td>' +
+                    '<td class="num">' + (+cur).toFixed(3) + '</td>' +
+                    '<td class="grange">' + (d / guardrail).toFixed(3) + ' ~ ' + (d * guardrail).toFixed(3) + '</td>' +
+                    '<td><input class="winput" type="number" step="0.001" min="0" data-factor="' + esc(n) + '" value="' + (+cur).toFixed(4) + '"></td>' +
+                    '</tr>';
+            }).join('');
+            document.getElementById('adminTable').innerHTML =
+                '<table class="tbl"><thead><tr><th>因子</th><th style="text-align:right">默认</th>' +
+                '<th style="text-align:right">当前冠军</th><th>护栏区间(×' + guardrail + ')</th><th>新权重</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>';
+            updateAdminSum();
+        }
+
+        function updateAdminSum() {
+            var inputs = document.querySelectorAll('#adminTable .winput');
+            var sum = 0, factorOk = true;
+            var values = {};
+            inputs.forEach(function (el) {
+                var n = el.getAttribute('data-factor');
+                var v = parseFloat(el.value);
+                var d = admin.defaults[n] || 0;
+                var ok = !isNaN(v) && v > 0
+                    && v >= d / admin.guardrail - 1e-9
+                    && v <= d * admin.guardrail + 1e-9;
+                el.classList.toggle('bad', !ok);
+                if (!ok) factorOk = false;
+                values[n] = isNaN(v) ? 0 : v;
+                sum += isNaN(v) ? 0 : v;
+            });
+            var sumOk = Math.abs(sum - admin.targetSum) <= admin.targetSum * 0.10;
+            var el = document.getElementById('adminSum');
+            el.textContent = '总和 ' + sum.toFixed(3) + ' / 目标 ' + admin.targetSum.toFixed(3)
+                + (sumOk ? '' : ' · 偏离超10%');
+            el.className = 'admin-sum ' + ((sumOk && factorOk) ? 'ok' : 'bad');
+            return { weights: values, sum: sum, sumOk: sumOk, factorOk: factorOk };
+        }
+
+        function fillChampionWeights() {
+            document.querySelectorAll('#adminTable .winput').forEach(function (el) {
+                var n = el.getAttribute('data-factor');
+                var cur = admin.champWeights[n] != null ? admin.champWeights[n] : (admin.defaults[n] || 0);
+                el.value = (+cur).toFixed(4);
+                el.classList.remove('bad');
+            });
+            updateAdminSum();
+            setAdminStatus('', '');
+        }
+
+        function setAdminStatus(kind, msg) {
+            var el = document.getElementById('adminStatus');
+            el.className = 'admin-status ' + (kind || '');
+            el.textContent = msg || '';
+        }
+
+        async function applyOverride() {
+            if (admin.busy) return;
+            var check = updateAdminSum();
+            if (!check.factorOk) { setAdminStatus('err', '存在非法权重(需为正且在护栏区间内), 请修正标红项'); return; }
+            if (!check.sumOk) { setAdminStatus('err', '权重总和偏离默认值超过 10%, 请调整'); return; }
+            var reason = document.getElementById('overrideReason').value.trim();
+            if (!reason) { setAdminStatus('err', '请填写覆盖原因(审计要求)'); return; }
+
+            /* 确认弹窗: 因子级 新旧对比 */
+            var rows = Object.keys(admin.defaults).map(function (n) {
+                var oldV = admin.champWeights[n] != null ? admin.champWeights[n] : admin.defaults[n];
+                var newV = check.weights[n];
+                var delta = newV - oldV;
+                var cls = Math.abs(delta) < 1e-4 ? 'dev-zero' : (delta > 0 ? 'dev-pos' : 'dev-neg');
+                var arrow = Math.abs(delta) < 1e-4 ? '·' : (delta > 0 ? '↑' : '↓');
+                return '<tr><td class="mono">' + esc(n) + '</td>' +
+                    '<td class="num">' + (+oldV).toFixed(4) + '</td>' +
+                    '<td class="num"><b>' + (+newV).toFixed(4) + '</b></td>' +
+                    '<td class="num ' + cls + '">' + arrow + ' ' + (delta >= 0 ? '+' : '') + delta.toFixed(4) + '</td></tr>';
+            }).join('');
+            showConfirm('确认应用人工覆盖权重？',
+                '<p>冠军 <b>' + esc((state.weights.champion || {}).version || 'v1') + '</b> 将退役入历史, 以下新权重立即生效:</p>' +
+                '<table class="tbl"><thead><tr><th>因子</th><th style="text-align:right">当前</th>' +
+                '<th style="text-align:right">新值</th><th style="text-align:right">变化</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>' +
+                '<p style="margin:10px 0 0;">原因: ' + esc(reason) + '</p>',
+                function () { doOverride(check.weights, reason); });
+        }
+
+        async function doOverride(weights, reason) {
+            admin.busy = true;
+            setAdminStatus('', '提交中…');
+            try {
+                var res = await fetchJson(
+                    api('weights/' + encodeURIComponent(state.scorerId)),
+                    { method: 'PUT', body: { weights: weights, reason: reason } });
+                setAdminStatus('ok', '已应用人工覆盖: ' + res.previousVersion + ' → ' + res.newVersion
+                    + ' (总和已归一化为 ' + admin.targetSum.toFixed(3) + ')');
+                document.getElementById('overrideReason').value = '';
+                loadAll();
+            } catch (err) {
+                setAdminStatus('err', '覆盖失败: ' + err.message);
+            } finally {
+                admin.busy = false;
+            }
+        }
+
+        function confirmReset() {
+            if (admin.busy) return;
+            var champV = (state.weights && state.weights.champion || {}).version || 'v1';
+            showConfirm('确认重置为默认权重？',
+                '<p>当前冠军 <b>' + esc(champV) + '</b> 将退役入历史, 挑战者(若有)将清除。</p>' +
+                '<p>重置会生成新版本(来源=重置)并恢复全部默认权重; 历史保留供审计, 此操作不可撤销。</p>',
+                doReset);
+        }
+
+        async function doReset() {
+            admin.busy = true;
+            setAdminStatus('', '提交中…');
+            try {
+                var res = await fetchJson(
+                    api('reset/' + encodeURIComponent(state.scorerId)),
+                    { method: 'POST', body: {} });
+                setAdminStatus('ok', '已重置为默认权重: ' + res.previousVersion + ' → ' + res.newVersion);
+                document.getElementById('overrideReason').value = '';
+                loadAll();
+            } catch (err) {
+                setAdminStatus('err', '重置失败: ' + err.message);
+            } finally {
+                admin.busy = false;
+            }
+        }
+
+        /* ========= 确认弹窗 ========= */
+        function showConfirm(title, bodyHtml, cb) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalBody').innerHTML = bodyHtml;
+            modalConfirmCb = cb;
+            document.getElementById('confirmModal').hidden = false;
+        }
+        function closeModal() {
+            document.getElementById('confirmModal').hidden = true;
+            modalConfirmCb = null;
+        }
+        async function modalConfirm() {
+            var cb = modalConfirmCb;
+            closeModal();
+            if (cb) await cb();
+        }
+
+        /* ========= 工具栏 ========= */
+        function saveApiBase() {
+            var v = document.getElementById('apiBase').value.trim().replace(/\/+$/, '');
+            if (!/^https?:\/\/.+/.test(v)) { showError('后端地址需以 http:// 或 https:// 开头'); return; }
+            state.apiBase = v;
+            localStorage.setItem(API_BASE_KEY, v);
+            hideError();
+            loadAll();
+        }
+        function showError(msg) { var el = document.getElementById('errorBanner'); el.textContent = msg; el.style.display = 'block'; }
+        function hideError() { document.getElementById('errorBanner').style.display = 'none'; }
+
+        /* ========= 初始化 ========= */
+        (function init() {
+            document.getElementById('apiBase').value = state.apiBase;
+            /* 权重输入实时校验(事件委托) */
+            document.getElementById('adminTable').addEventListener('input', function (e) {
+                if (e.target && e.target.classList && e.target.classList.contains('winput')) {
+                    updateAdminSum();
+                }
+            });
+            loadAll();
+        })();
+    </script>
+</body>
+</html>

@@ -24,6 +24,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
 
+from services import ai_feedback_hooks as ai_hooks
 from services.points_service import PointsService
 
 
@@ -113,6 +114,9 @@ async def signin(
     _require_member_id(x_member_id)
     try:
         result = await _service.signin(data.userId)
+        # v7.6 自动反馈: 积分发放 → 防薅羊毛观察评分+配对(正常发放期望 low)
+        await ai_hooks.on_points_earned(
+            str(data.userId), float(result.get("pointsEarned") or 0))
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

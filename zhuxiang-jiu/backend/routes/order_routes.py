@@ -12,6 +12,7 @@
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
+from services import ai_feedback_hooks as ai_hooks
 from services.order_service import OrderService, STATUS_CN
 
 
@@ -74,6 +75,15 @@ async def create_order(
             use_points=int(body.get("usePoints", 0)),
             remark=body.get("remark", ""),
         )
+        # v7.6 自动反馈: 订单风控观察评分 + 决策快照(不阻断业务)
+        # v7.8 输入富化: 传入地址/备注, 信用与行为画像由富化层查询
+        order_id = (result.get("details") or {}).get("orderId") \
+            or result.get("orderId") or ""
+        if order_id:
+            await ai_hooks.on_order_created(
+                order_id, member_id, body.get("items", []),
+                address=body.get("address"),
+                remark=str(body.get("remark") or ""))
         return result
     except Exception as e:
         raise _handle(e)
@@ -139,7 +149,15 @@ async def pay_order(
     _require_member(x_member_id)
     payment_method = (body or {}).get("method", "wechat")
     try:
-        return await _service.pay(order_id, payment_method)
+        result = await _service.pay(order_id, payment_method)
+        # v7.6 自动反馈: 支付路由观察评分(推荐渠道 vs 实际渠道)
+        try:
+            order = await _service.get_by_id(order_id)
+            amount = (order.get("priceDetail") or {}).get("actualAmount") or 0
+            await ai_hooks.on_payment(order_id, payment_method, amount)
+        except Exception:  # noqa: BLE001 - 观察挂钩不影响业务
+            pass
+        return result
     except Exception as e:
         raise _handle(e)
 
@@ -179,11 +197,13 @@ async def review_order(
     x_member_id: str = Header(default="", alias="X-Member-Id"),
 ):
     """评价订单 RECEIVED → COMPLETED"""
-    _require_member(x_member_id)
     rating = int(body.get("rating", 0))
     content = body.get("content", "")
     try:
-        return await _service.review(order_id, rating, content)
+        result = await _service.review(order_id, rating, content)
+        # v7.6 自动反馈: 订单顺利完成(风控决策正确性信号)
+        await ai_hooks.on_order_outcome(order_id, "completed")
+        return result
     except Exception as e:
         raise _handle(e)
 
@@ -248,7 +268,10 @@ async def ship_order(
     if not carrier or not waybill_no:
         raise HTTPException(status_code=400, detail="carrier 和 waybillNo 不能为空")
     try:
-        return await _service.ship(order_id, carrier, waybill_no)
+        result = await _service.ship(order_id, carrier, waybill_no)
+        # v7.6 自动反馈: 物流路由观察评分(推荐承运商 vs 实际承运商)
+        await ai_hooks.on_shipped(order_id, carrier)
+        return result
     except Exception as e:
         raise _handle(e)
 
@@ -261,7 +284,10 @@ async def refund_order(
     """退款 RETURNING → REFUNDED(管理员)"""
     _require_admin(x_role)
     try:
-        return await _service.refund(order_id)
+        result = await _service.refund(order_id)
+        # v7.6 自动反馈: 退款完成(风控误放行信号)
+        await ai_hooks.on_order_outcome(order_id, "refunded")
+        return result
     except Exception as e:
         raise _handle(e)
 
