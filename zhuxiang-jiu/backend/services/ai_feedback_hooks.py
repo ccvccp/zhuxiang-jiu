@@ -152,14 +152,26 @@ async def snapshot_decision(scorer_id: str, business_key: str,
                   or 0)
     try:
         repo = AiLearningRepository()
-        await repo.save_decision_snapshot(scorer_id, business_key, {
+        snapshot = {
             "decision": decision,
             "score": score,
             "factors": factors,
             "weightVersion": score_result.get("weightVersion", "v1"),
             "actualAction": None,   # 路由类: 实际使用的通道/承运商
             "meta": {},
-        })
+        }
+        # v7.9 知识增强: 检索 top-k 相似案例证据块(火后不管, 失败不存)
+        try:
+            from services.ai_knowledge_service import (
+                augment_with_knowledge,
+            )
+            knowledge = await augment_with_knowledge(
+                scorer_id, factors, score)
+            if knowledge:
+                snapshot["knowledge"] = knowledge
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("快照知识增强跳过(scorer=%s): %s", scorer_id, exc)
+        await repo.save_decision_snapshot(scorer_id, business_key, snapshot)
         return True
     except Exception as exc:  # noqa: BLE001
         logger.warning("决策快照暂存失败(scorer=%s key=%s): %s",

@@ -103,8 +103,10 @@ async def _setup():
         })
 
     # 积分流水: 今日 +50/+30/-20, 昨日 +99
+    # (当日两条正流水均用 now: 聚合只按日期过滤, 用相对时刻在 UTC 午夜
+    #  后第一小时会跨界误判 —— now-1h 属昨日, 修复边界 flake)
     points_repo = PointsRepository()
-    for points, created in ((50, now), (30, now - timedelta(hours=1)),
+    for points, created in ((50, now), (30, now),
                             (-20, now), (99, now - timedelta(days=1))):
         await points_repo.add_log({
             "userId": 9001, "source": "signin", "type": "earn",

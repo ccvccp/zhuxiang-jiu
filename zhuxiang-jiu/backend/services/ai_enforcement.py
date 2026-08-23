@@ -182,7 +182,8 @@ async def enforce_decision(scorer_id: str, business_key: str,
 
     # ---- shadow / enforce: 运行决策门 ----
     from services.ai_feedback_hooks import (
-        _extract_decision, _invoke_scorer, snapshot_decision,
+        _extract_decision, _factors_from_result, _invoke_scorer,
+        snapshot_decision,
     )
     try:
         result = await _invoke_scorer(scorer_id, ctx)
@@ -229,6 +230,28 @@ async def enforce_decision(scorer_id: str, business_key: str,
     review_required = (effective_mode == "enforce"
                        and action in REVIEW_ACTIONS)
 
+    # v7.9 知识增强: 检索 top-k 相似案例证据(火后不管, 只审计+加严)
+    knowledge = None
+    try:
+        from services.ai_knowledge_service import (
+            augment_with_knowledge, should_escalate_review,
+        )
+        knowledge = await augment_with_knowledge(
+            scorer_id, _factors_from_result(scorer_id, result) or [], score)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("决策门知识增强跳过(scorer=%s): %s", scorer_id, exc)
+
+    # 证据驱动复核升级(只加严: pass → 人工复核; 永不 blocked/降级)
+    kb_escalated = False
+    if (effective_mode == "enforce" and not blocked
+            and should_escalate_review(knowledge)):
+        review_required = True
+        kb_escalated = True
+        logger.info("知识证据升级人工复核(scorer=%s key=%s wrongRate=%s "
+                    "evidence=%s)", scorer_id, business_key,
+                    knowledge.get("wrongRate"),
+                    knowledge.get("evidenceCount"))
+
     record = {
         "scorerId": scorer_id, "businessKey": business_key,
         "mode": mode, "action": action, "effectiveMode": effective_mode,
@@ -236,8 +259,18 @@ async def enforce_decision(scorer_id: str, business_key: str,
         "degraded": degrade_reason is not None,
         "degradeReason": degrade_reason,
         "score": score, "weightVersion": weight_version,
-        "note": "", "decidedAt": _now(),
+        "note": ("kb_evidence:相似案例错误率 "
+                 f"{knowledge.get('wrongRate')}" if kb_escalated else ""),
+        "decidedAt": _now(),
     }
+    if knowledge:
+        record["knowledge"] = {
+            "evidenceCount": knowledge.get("evidenceCount"),
+            "wrongRate": knowledge.get("wrongRate"),
+            "avgSimilarity": knowledge.get("avgSimilarity"),
+            "calibratedScore": knowledge.get("calibratedScore"),
+            "regionUnreliable": knowledge.get("regionUnreliable"),
+        }
 
     # 决策快照(复用 v7.6: 终态事件配对自动反馈)
     try:
