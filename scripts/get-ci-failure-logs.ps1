@@ -17,7 +17,7 @@
 #   文件:   ci-failure-report.md(与脚本同目录, 可直接整个发给别人分析)
 
 param(
-    [string]$Repo = "ccvcc/zhuxiang-jiu",
+    [string]$Repo = "zhuxiang-jiu-dev/zhuxiang-jiu",
     [string]$Workflow = "",
     [int]$Limit = 3,
     [int64]$RunId = 0,
