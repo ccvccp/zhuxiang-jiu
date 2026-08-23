@@ -508,6 +508,19 @@ async def run_learning_cycle(scorer_id: str) -> dict:
         await repo.mark_feedback_learned(scorer_id, learned_ids)
         invalidate_weight_cache(scorer_id)
 
+        # v7.9 知识库: 学习后的反馈归档为案例(经验回放缓冲, 火后不管)
+        try:
+            from repositories.ai_knowledge_repository import (
+                AiKnowledgeRepository,
+            )
+            archived = await AiKnowledgeRepository().archive_feedback(
+                scorer_id, pending)
+            if archived:
+                logger.info("ai_kb_archive scorer=%s cases=%s",
+                            scorer_id, archived)
+        except Exception as exc:  # noqa: BLE001 - 归档失败不影响学习
+            logger.warning("知识案例归档失败(scorer=%s): %s", scorer_id, exc)
+
     delta = {k: round(new_weights[k] - champion["weights"].get(k, 0), 4)
              for k in new_weights}
     result = {
