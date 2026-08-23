@@ -257,6 +257,36 @@ async def enforcement_audit(scorer_id: str, limit: int = 50,
         _handle(exc)
 
 
+@router.get("/api/ai-learning/kb/{scorer_id}", tags=["AI自学习层"])
+async def kb_cases(scorer_id: str, limit: int = 50,
+                   x_role: Optional[str] = Header(None, alias="X-Role")):
+    """案例知识库: 案例列表(新→旧, 默认 50 条, 0=全部) + 库存统计
+
+    v7.9 知识库只读端点: 学习后反馈归档的案例(经验回放缓冲),
+    供驾驶舱展示与 RAG 检索效果核对。
+    """
+    _require_admin(x_role)
+    try:
+        svc._require_scorer(scorer_id)
+        from repositories.ai_knowledge_repository import (
+            AiKnowledgeRepository, kb_enabled,
+        )
+        repo = AiKnowledgeRepository()
+        cases = await repo.list_cases(scorer_id, limit=max(0, limit))
+        total = await repo.count_cases(scorer_id)
+        labeled = sum(1 for c in cases if c.get("correct") is not None)
+        return {
+            "success": True, "scorerId": scorer_id,
+            "enabled": kb_enabled(),
+            "count": len(cases), "totalCases": total,
+            "labeledInView": labeled,
+            "maxCasesPerScorer": repo.KB_MAX_CASES,
+            "cases": cases,
+        }
+    except Exception as exc:
+        _handle(exc)
+
+
 def register_ai_learning_routes(app) -> None:
     """注册 AI 自学习层路由"""
     app.include_router(router)

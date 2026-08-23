@@ -45,7 +45,7 @@ jobs:
   #   提现决策门集成 10 项(v7.8: 首域真实拦截/零副作用/强制人工)
   # ============================================================
   ai-scoring-tests:
-    name: AI Scoring Tests (234)
+    name: AI Scoring Tests (266)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -107,11 +107,21 @@ jobs:
           set -o pipefail
           python test_ai_enforcement_withdraw.py 2>&1 | tee ai-enforcement-withdraw.log
 
+      - name: Run AI knowledge base tests (18 items)
+        run: |
+          set -o pipefail
+          python test_ai_knowledge_base.py 2>&1 | tee ai-knowledge-base.log
+
+      - name: Run AI knowledge service tests (14 items)
+        run: |
+          set -o pipefail
+          python test_ai_knowledge_service.py 2>&1 | tee ai-knowledge-service.log
+
       - name: Print scoring test summary
         if: always()
         run: |
           echo "## AI Scoring Tests Summary"
-          grep -h "总计" ai-scoring-batch1.log ai-scoring-batch2.log ai-scoring-batch3.log ai-learning.log ai-feedback-hooks.log ai-enforcement.log ai-context-enricher.log ai-enforcement-withdraw.log || true
+          grep -h "总计" ai-scoring-batch1.log ai-scoring-batch2.log ai-scoring-batch3.log ai-learning.log ai-feedback-hooks.log ai-enforcement.log ai-context-enricher.log ai-enforcement-withdraw.log ai-knowledge-base.log ai-knowledge-service.log || true
 
       - name: Upload test logs
         if: always()
@@ -125,6 +135,8 @@ jobs:
             zhuxiang-jiu/backend/ai-enforcement.log
             zhuxiang-jiu/backend/ai-context-enricher.log
             zhuxiang-jiu/backend/ai-enforcement-withdraw.log
+            zhuxiang-jiu/backend/ai-knowledge-base.log
+            zhuxiang-jiu/backend/ai-knowledge-service.log
           retention-days: 30
 
   # ============================================================
@@ -257,7 +269,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Items | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| AI Scoring Tests (batch1+2+3+learning+hooks+enforcement) | 234 | ${{ needs.ai-scoring-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AI Scoring Tests (batch1+2+3+learning+hooks+enforcement+knowledge) | 266 | ${{ needs.ai-scoring-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Flash Sale Tests (service+http) | 101 | ${{ needs.flashsale-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Flash Sale Redis Integration | 13 | ${{ needs.flashsale-redis-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
