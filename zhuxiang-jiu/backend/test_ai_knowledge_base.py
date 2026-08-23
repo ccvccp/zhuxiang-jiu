@@ -209,6 +209,84 @@ async def main():
            f"cases={[c.get('factors') for c in kb_cases]}")
 
     # ========================================================
+    # 7. 经验回放学习(v7.9 阶段 3)
+    # ========================================================
+    from services.ai_learning_service import update_learning_config
+
+    cfg = await update_learning_config("order_risk",
+                                       {"replay": True,
+                                        "replay_sample": 20})
+    record("15_replay_config_accepted",
+           cfg.get("success") and cfg["config"]["replay"] is True
+           and cfg["config"]["replay_sample"] == 20,
+           f"cfg={cfg.get('config')}")
+
+    try:
+        await update_learning_config("order_risk", {"replay_sample": 0})
+        bad_rejected = False
+    except ValueError:
+        bad_rejected = True
+    record("16_replay_config_validated", bad_rejected,
+           "replay_sample=0 应被拒绝")
+
+    # 回放关闭(默认): 学习周期 replayedFrom == 0
+    await update_learning_config("traffic_antifraud",
+                                 {"min_feedback": 1, "replay": False})
+    await submit_feedback({
+        "scorerId": "traffic_antifraud",
+        "factors": [{"name": "burst", "score": 50,
+                     "weight": 0.2, "contribution": 10}],
+        "scoreAtDecision": 50.0, "actualAction": "review",
+        "expectedAction": "review", "correct": True,
+        "source": "auto", "note": "kb-replay-off",
+    })
+    res_off = await run_learning_cycle("traffic_antifraud")
+    record("17_replay_off_by_default",
+           res_off.get("replayedFrom") == 0,
+           f"replayedFrom={res_off.get('replayedFrom')}")
+
+    # 回放开启: 知识库标注案例混入样本 + 权重效果(抑制过拟合)
+    # P 反馈: credit=100 且正确(会推高 credit 权重)
+    # 回放案例: credit=100 且错误(3 条, 推低 credit 权重)
+    async def _submit_credit_pending():
+        await submit_feedback({
+            "scorerId": "order_risk",
+            "factors": [{"name": "credit", "score": 100,
+                         "weight": 0.2, "contribution": 100}],
+            "scoreAtDecision": 20.0, "actualAction": "pass",
+            "expectedAction": "pass", "correct": True,
+            "source": "auto", "note": "kb-replay",
+        })
+
+    await update_learning_config("order_risk",
+                                 {"min_feedback": 1, "replay": False,
+                                  "auto_apply": False})
+    await _submit_credit_pending()
+    res_a = await run_learning_cycle("order_risk")
+    d1 = res_a["weightDelta"]["credit"]
+
+    # 种子回放案例(3 条标注错误 + 1 条未标注应跳过)
+    for i in range(4):
+        await kb.add_case("order_risk", {
+            "factors": {"credit": 100.0},
+            "scoreAtDecision": 80.0, "action": "pass",
+            "actualAction": "block",
+            "correct": None if i == 3 else False,
+            "source": "auto", "businessKey": f"kb-rp{i}",
+        })
+    await update_learning_config("order_risk", {"replay": True})
+    await _submit_credit_pending()
+    res_b = await run_learning_cycle("order_risk")
+    d2 = res_b["weightDelta"]["credit"]
+    record("18_replay_blends_history_into_update",
+           # 计数含历史测试归档(3)+本轮前序学习归档(1)+新种子(3, 未标注跳过)
+           res_b.get("replayedFrom") >= 3
+           and res_b.get("learnedFrom") == 1
+           and d2 < d1,                            # 反向经验抑制权重攀升
+           f"replayedFrom={res_b.get('replayedFrom')}, "
+           f"d_no_replay={d1}, d_with_replay={d2}")
+
+    # ========================================================
     # 汇总
     # ========================================================
     print("\n".join(RESULTS))

@@ -96,6 +96,11 @@ DEFAULT_LEARNING_CONFIG = {
     "min_feedback": 10,   # 触发一轮学习所需最小待学习反馈数
     "auto_apply": False,  # 学习结果评估更优时是否自动晋升为冠军
     "guardrail": 2.0,     # 权重护栏: 相对默认值允许的最大倍数(下限为 1/guardrail)
+    # v7.9 经验回放(参照强化学习 Replay Buffer, 默认关闭保证零影响):
+    # 开启后每轮学习把知识库近期案例混入 Hedge 更新样本,
+    # 与最新反馈混合训练, 防止在线学习对最近批次过拟合(灾难性遗忘)
+    "replay": False,
+    "replay_sample": 50,  # 每轮回放的近期案例数上限
 }
 
 DRIFT_ALPHA = 0.1          # 漂移 EMA 平滑系数
@@ -454,6 +459,41 @@ def _challenger_better(champion_metrics: dict, challenger_metrics: dict) -> bool
     return True
 
 
+async def _sample_replay(scorer_id: str, limit: int) -> list[dict]:
+    """从案例知识库采样经验回放记录(转换为 Hedge 更新格式)
+
+    案例因子 {name: score} → [{name, score, contribution: score}],
+    与路由类快照的合成约定一致(contribution = 因子分)。
+    未标注(correct=None)的案例不参与回放(reward 语义不明确)。
+    采样失败返回空列表(回放是增强手段, 不阻塞学习)。
+    """
+    try:
+        from repositories.ai_knowledge_repository import (
+            AiKnowledgeRepository,
+        )
+        cases = await AiKnowledgeRepository().list_cases(
+            scorer_id, limit=limit)
+        records = []
+        for case in cases:
+            if case.get("correct") is None:
+                continue
+            factors = [{"name": name, "score": val,
+                        "contribution": val}
+                       for name, val in (case.get("factors") or {}).items()]
+            if not factors:
+                continue
+            records.append({
+                "factors": factors,
+                "correct": bool(case["correct"]),
+                "actualAction": case.get("actualAction"),
+                "source": "replay",
+            })
+        return records
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("经验回放采样失败(scorer=%s): %s", scorer_id, exc)
+        return []
+
+
 async def run_learning_cycle(scorer_id: str) -> dict:
     """执行一轮在线学习: 待学习反馈 → Hedge 更新 → 挑战者/自动晋升
 
@@ -474,8 +514,16 @@ async def run_learning_cycle(scorer_id: str) -> dict:
 
         champion = profile["champion"]
         defaults = default_weights(scorer_id)
+
+        # v7.9 经验回放: 知识库近期案例混入 Hedge 更新样本(防过拟合)
+        replay_records: list[dict] = []
+        if config.get("replay"):
+            replay_records = await _sample_replay(
+                scorer_id, int(config.get("replay_sample") or 50))
+
+        update_sample = pending + replay_records
         new_weights = _hedge_update(
-            champion["weights"], defaults, pending,
+            champion["weights"], defaults, update_sample,
             config["eta"], config["guardrail"])
 
         # 回放评估(用全部近期反馈, 含已学习部分)
@@ -526,6 +574,7 @@ async def run_learning_cycle(scorer_id: str) -> dict:
     result = {
         "success": True, "scorerId": scorer_id,
         "learnedFrom": len(pending),
+        "replayedFrom": len(replay_records),
         "parentVersion": champion["version"],
         "newVersion": new_version,
         "newStatus": "champion" if promoted else "challenger",
@@ -716,9 +765,10 @@ async def get_drift_view(scorer_id: str) -> dict:
 
 
 async def update_learning_config(scorer_id: str, updates: dict) -> dict:
-    """更新学习配置(eta/min_feedback/auto_apply/guardrail)"""
+    """更新学习配置(eta/min_feedback/auto_apply/guardrail/replay)"""
     _require_scorer(scorer_id)
-    allowed = {"eta", "min_feedback", "auto_apply", "guardrail"}
+    allowed = {"eta", "min_feedback", "auto_apply", "guardrail",
+               "replay", "replay_sample"}
     invalid = set(updates) - allowed
     if invalid:
         raise ValueError(f"不支持的配置项: {sorted(invalid)}")
@@ -731,6 +781,10 @@ async def update_learning_config(scorer_id: str, updates: dict) -> dict:
         raise ValueError("min_feedback 必须在 [1, 1000] 区间")
     if not (1.1 <= config["guardrail"] <= 10):
         raise ValueError("guardrail 必须在 [1.1, 10] 区间")
+    if not isinstance(config["replay"], bool):
+        raise ValueError("replay 必须为布尔值")
+    if not (1 <= config["replay_sample"] <= 1000):
+        raise ValueError("replay_sample 必须在 [1, 1000] 区间")
     await repo.save_config(scorer_id, config)
     logger.info("ai_learning_config_updated scorer=%s updates=%s",
                 scorer_id, updates)
