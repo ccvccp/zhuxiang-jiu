@@ -634,7 +634,7 @@ async def seed() -> int:
             print(f"[ERROR] Redis 连接失败: {e}")
             print(f"        请确认 Redis 服务已启动: {REDIS_URL}")
             return 1
-        print(f"[OK] Redis 连接成功")
+        print("[OK] Redis 连接成功")
 
         # 1. 清空旧数据
         deleted = await clear_existing_data(client)

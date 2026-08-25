@@ -83,7 +83,7 @@ class AdminService:
             # 账号状态校验
             status = user.get("status", ADMIN_STATUS_NORMAL)
             if status == ADMIN_STATUS_DISABLED:
-                raise ValueError(f"账号已停用, 联系超管启用")
+                raise ValueError("账号已停用, 联系超管启用")
             if status == ADMIN_STATUS_LOCKED:
                 lock_until = user.get("lockUntil")
                 if lock_until:

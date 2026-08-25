@@ -216,7 +216,7 @@ class RecycleService:
         if purchase_price <= 0:
             raise ValueError("购买原价必须大于0")
         if condition_grade not in GRADE_COEFFICIENTS:
-            raise ValueError(f"品质分级无效(须为A/B/C/D)")
+            raise ValueError("品质分级无效(须为A/B/C/D)")
 
         wine_age = self.calculate_wine_age(purchase_date)
         if wine_age < MIN_WINE_AGE_YEARS:
@@ -789,7 +789,7 @@ class RecycleService:
         if purchase_price <= 0:
             raise ValueError("购买原价必须大于0")
         if condition_grade not in GRADE_COEFFICIENTS:
-            raise ValueError(f"品质分级无效(须为A/B/C/D)")
+            raise ValueError("品质分级无效(须为A/B/C/D)")
         if bottle_count < 1 or bottle_count > SINGLE_RECYCLE_MAX_BOTTLES:
             raise ValueError(f"回收数量须在1-{SINGLE_RECYCLE_MAX_BOTTLES}瓶之间")
 

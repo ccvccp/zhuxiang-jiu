@@ -72,8 +72,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # 必须装 requirements-dev.txt: pytest/pytest-asyncio/pytest-cov/httpx 都在此
+          # 必须装 requirements-dev.txt: pytest/pytest-asyncio/pytest-cov/httpx/ruff 都在此
           pip install -r requirements-dev.txt
+
+      - name: Run ruff lint check (quality gate)
+        run: ruff check .
 
       - name: Run pytest with coverage
         run: |

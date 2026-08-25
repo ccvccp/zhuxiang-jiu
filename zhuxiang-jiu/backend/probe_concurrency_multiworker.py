@@ -223,7 +223,7 @@ async def probe_mixed_shared_lock_mp(n=50) -> bool:
             timeout=15.0
         )
     except asyncio.TimeoutError:
-        print(f"[3.共享锁 MP] X 超时! 100 请求未在 15s 完成")
+        print("[3.共享锁 MP] X 超时! 100 请求未在 15s 完成")
         return False  # 超时 = 失败, CI 应捕获
 
     elapsed = time.perf_counter() - start
@@ -256,7 +256,7 @@ async def probe_deadlock_mp(n=100, timeout=15.0) -> bool:
     elapsed = time.perf_counter() - start
     success = sum(1 for r in responses if r.json().get("success") is True)
     print(f"[4.死锁 MP] {n} 并发完成 ({elapsed:.2f}s), 成功 {success}/{n}")
-    print(f"  OK 无死锁")
+    print("  OK 无死锁")
     return True
 
 
@@ -266,9 +266,9 @@ async def probe_deadlock_mp(n=100, timeout=15.0) -> bool:
 
 async def main():
     print("=" * 72)
-    print(f"  多进程并发探针: 验证锁在多进程下的行为")
+    print("  多进程并发探针: 验证锁在多进程下的行为")
     print(f"  方式: 启动 {len(PORTS)} 个独立 uvicorn 进程(端口 {PORTS})")
-    print(f"        httpx 轮询访问 + asyncio.gather 并发")
+    print("        httpx 轮询访问 + asyncio.gather 并发")
     print(f"  锁模式: LOCK_MODE={LOCK_MODE}" + (f" REDIS_URL={REDIS_URL}" if LOCK_MODE == "redis" else ""))
     print("=" * 72)
     if LOCK_MODE == "redis":
@@ -310,7 +310,7 @@ async def main():
         print(f"  X {failed} 个场景失败, exit 1(CI 阻断)")
         sys.exit(1)
     else:
-        print(f"  OK 全部场景通过, exit 0")
+        print("  OK 全部场景通过, exit 0")
         sys.exit(0)
 
 

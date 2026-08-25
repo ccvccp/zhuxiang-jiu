@@ -88,7 +88,7 @@ def version_weights(version: str) -> dict:
 def version_record(version: str, parent: str, hours_ago: float) -> dict:
     source = "default" if version == "v1" else "learning"
     note = ("初始默认权重" if version == "v1"
-            else f"learned from 5 feedback (demo seed)")
+            else "learned from 5 feedback (demo seed)")
     return {
         "version": version,
         "weights": version_weights(version),
@@ -172,14 +172,14 @@ def main() -> None:
 
     client.set(keys["profile"], json.dumps(
         {"champion": v4, "challenger": None}, ensure_ascii=False))
-    print(f"[OK] 档案写入: 冠军 v4(source=learning), 无挑战者")
+    print("[OK] 档案写入: 冠军 v4(source=learning), 无挑战者")
 
     # 历史列表: 新→旧 [v3, v2, v1](对齐 add_history 的 lpush 语义)
     client.rpush(keys["history"],
                  json.dumps(v3, ensure_ascii=False),
                  json.dumps(v2, ensure_ascii=False),
                  json.dumps(v1, ensure_ascii=False))
-    print(f"[OK] 历史写入: v3, v2, v1(退役, 审计用)")
+    print("[OK] 历史写入: v3, v2, v1(退役, 审计用)")
 
     # 3. 反馈: v1×5(3对) → v2×5(4对) → v3×5(5对), 全部 learned + auto
     correct_plan = {  # 正确率爬坡 60% → 80% → 100%

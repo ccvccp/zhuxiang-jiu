@@ -26,8 +26,7 @@ from core.helpers import ts
 from repositories.traffic_repository import (
     TrafficRepository,
     # 流量来源
-    SOURCE_DOUYIN, SOURCE_KUAISHOU, SOURCE_WECHAT,
-    SOURCE_XIAOHONGSHU, SOURCE_BILIBILI, SOURCE_TAOBAO, SOURCE_DIRECT,
+    SOURCE_TAOBAO, SOURCE_DIRECT,
     # 引流方式
     MEDIUM_VIDEO, MEDIUM_LIVE, MEDIUM_SHARE, MEDIUM_AD,
     # 推广员等级

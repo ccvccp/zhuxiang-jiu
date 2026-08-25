@@ -156,7 +156,7 @@ async def probe_conflict_sequence(n=5, region="conflict_region"):
         gaps = [lock_times[i+1] - lock_times[i] for i in range(len(lock_times)-1)]
         print(f"\n  锁序列化: {len(lock_times)} 次 lock_acquired, 相邻间隔={gaps}")
         assert all(g >= 0 for g in gaps), "X lock_acquired 时间未递增(锁未序列化)"
-        print(f"  OK 锁已序列化(时间戳严格递增)")
+        print("  OK 锁已序列化(时间戳严格递增)")
 
 
 # ============================================================

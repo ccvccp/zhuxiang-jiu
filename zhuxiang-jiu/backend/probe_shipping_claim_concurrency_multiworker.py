@@ -265,7 +265,7 @@ async def probe_cross_process_conflict(n=5, region="mp_conflict_region") -> bool
     # 断言 2: Redis 状态一致性
     winner_id = ok[0].json().get("agentId")
     if not await verify_redis_state(region, winner_id):
-        print(f"  X Redis 状态不一致: 跨进程数据分裂")
+        print("  X Redis 状态不一致: 跨进程数据分裂")
         return False
     print(f"  OK Redis 状态一致: {region} -> agent_id={winner_id}")
 
@@ -314,7 +314,7 @@ async def probe_cross_process_idempotent(n=3, agent_id=1, region="mp_idempotent_
 
     # 断言 2: Redis 状态一致性
     if not await verify_redis_state(region, agent_id):
-        print(f"  X Redis 状态不一致: 跨进程数据分裂")
+        print("  X Redis 状态不一致: 跨进程数据分裂")
         return False
     print(f"  OK Redis 状态一致: {region} -> agent_id={agent_id}")
 
@@ -329,7 +329,7 @@ async def main():
     print("=" * 72)
     print("  多进程并发认领探针: 验证 Redis 分布式锁的跨进程互斥")
     print(f"  方式: 启动 {len(PORTS)} 个独立 uvicorn 进程(端口 {PORTS})")
-    print(f"        httpx 轮询访问 + asyncio.gather 并发")
+    print("        httpx 轮询访问 + asyncio.gather 并发")
     print(f"  锁模式: LOCK_MODE={LOCK_MODE}  存储模式: STORE_MODE={STORE_MODE}")
     print(f"  Redis: {REDIS_URL}")
     print("=" * 72)
@@ -381,8 +381,8 @@ async def main():
         print(f"  X {failed} 个场景失败, exit 1(CI 阻断)")
         sys.exit(1)
     else:
-        print(f"  OK 全部场景通过, exit 0")
-        print(f"  验证项: Redis 分布式锁 shipping:claim:{{region}} 跨进程互斥 + 状态一致性")
+        print("  OK 全部场景通过, exit 0")
+        print("  验证项: Redis 分布式锁 shipping:claim:{region} 跨进程互斥 + 状态一致性")
         sys.exit(0)
 
 

@@ -302,7 +302,7 @@ class TestProductList:
 
     def test_list_stock_injected(self):
         """列表项注入实时库存: ZX42-2026L07 stock=500"""
-        resp = client.get(f"/api/product/list?series=经典系列&alcohol=42")
+        resp = client.get("/api/product/list?series=经典系列&alcohol=42")
         p = resp.json()["products"][0]
         assert p["stock"] == 500
 

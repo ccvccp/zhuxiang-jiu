@@ -136,7 +136,7 @@ async def strategy_plan(
         needsApproval=False,
     )
     return ok("strategy-plan", details.model_dump(by_alias=True),
-              logs=[{"stage": "决策层-策略筹划", "message": f"目标分解+What-if推演完成",
+              logs=[{"stage": "决策层-策略筹划", "message": "目标分解+What-if推演完成",
                      "data": {"scenarios": len(what_if_results)}}])
 
 

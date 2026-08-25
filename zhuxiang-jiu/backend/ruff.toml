@@ -1,0 +1,40 @@
+# ruff 配置: 聚焦真实代码质量问题(语法错误 + pyflakes)
+# 不强制代码风格(项目无统一风格, 避免噪音)
+# CI 质量门禁: ruff check . 退出码 0 = 通过
+
+target-version = "py312"
+line-length = 120  # 宽松, 仅警告不强制修正
+
+# 第三方依赖 + 工具目录(顶层数组, 必须在 [lint] 表之前)
+exclude = [
+    ".lint_libs",
+    ".deps",
+    "site-packages",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    "htmlcov",
+    "dist",
+    "build",
+    ".eggs",
+]
+
+[lint]
+# E9 = 语法错误(IndentationError/SyntaxError 等)
+# F = pyflakes:
+#   F821 未定义变量
+#   F811 重定义
+# CI 门禁只阻断"明确的错误"(语法/未定义/重定义)
+# 以下设为 warning 不阻断(需人工判断, 有误判风险):
+#   F401 未使用导入(模块级导入常作为公开API被外部import)
+#   F841 未使用局部变量(可能是只关心副作用的有意赋值)
+select = ["E9", "F"]
+ignore = ["F401", "F841"]
+
+[lint.per-file-ignores]
+# 测试文件允许未使用导入(常量导入是测试风格, 不阻断)
+"test_*.py" = ["F401"]
+# conftest.py 的 fixture 可能被其他文件引用
+"conftest.py" = ["F401"]
+# *_smoke.py 冒烟测试允许未使用导入
+"*_smoke.py" = ["F401"]

@@ -114,7 +114,7 @@ class TestAddressManage:
         # test 2: 区块链存证生成
         record("test_02_evidence_generated",
                result.get("evidenceHash") is not None,
-               f"expected evidence hash")
+               "expected evidence hash")
 
         # test 3: 新增第二个地址(非默认)
         result2 = await svc.add_address(
@@ -125,7 +125,7 @@ class TestAddressManage:
         )
         record("test_03_add_second_address",
                result2["id"] > 0 and result2["isDefault"] is False,
-               f"expected id>0/default=False")
+               "expected id>0/default=False")
 
         # test 4: 地址列表(默认排前)
         addresses = await svc.list_addresses(USER_ID_1)
@@ -272,13 +272,13 @@ class TestNearbyStores:
         stores = await svc.list_stores(city="泰安市")
         record("test_21_list_by_city",
                all(s["city"] == "泰安市" for s in stores) and len(stores) >= 1,
-               f"expected all 泰安市")
+               "expected all 泰安市")
 
         # test 22: 门店列表(按类型筛选)
         stores = await svc.list_stores(store_type=STORE_TYPE_FLAGSHIP)
         record("test_22_list_by_type",
                all(s["storeType"] == STORE_TYPE_FLAGSHIP for s in stores),
-               f"expected all flagship")
+               "expected all flagship")
 
 
 class TestAgentLocations:
@@ -303,19 +303,19 @@ class TestAgentLocations:
         agents = await svc.list_agent_locations(province="山东省")
         record("test_23_list_by_province",
                all(a["province"] == "山东省" for a in agents) and len(agents) >= 2,
-               f"expected all 山东省")
+               "expected all 山东省")
 
         # test 24: 代理商列表(按等级筛选)
         agents = await svc.list_agent_locations(agent_level=AGENT_LEVEL_DIAMOND)
         record("test_24_list_by_level",
                all(a["agentLevel"] == AGENT_LEVEL_DIAMOND for a in agents) and len(agents) >= 1,
-               f"expected all diamond")
+               "expected all diamond")
 
         # test 25: 附近代理商(泰安坐标, 100km半径)
         agents = await svc.list_nearby_agents(TAI_AN_LNG, TAI_AN_LAT, 100.0)
         record("test_25_nearby_agents",
                len(agents) >= 2 and agents[0]["distance"] <= agents[1]["distance"],
-               f"expected >=2/sorted")
+               "expected >=2/sorted")
 
         # test 26: 泰安代理商距离最近
         record("test_26_nearest_agent",
@@ -360,7 +360,7 @@ class TestShipmentTrack:
         # test 31: 区块链存证生成
         record("test_31_evidence_generated",
                result.get("evidenceHash") is not None,
-               f"expected evidence hash")
+               "expected evidence hash")
 
         # test 32: 按运单号查询轨迹
         track_id = result["id"]
@@ -464,7 +464,7 @@ class TestDeliveryZone:
         zones = await svc.list_delivery_zones(zone_type=ZONE_TYPE_NATIONAL)
         record("test_43_filter_by_type",
                all(z["zoneType"] == ZONE_TYPE_NATIONAL for z in zones),
-               f"expected all national")
+               "expected all national")
 
 
 class TestBlockchainEvidence:
@@ -507,7 +507,7 @@ class TestBlockchainEvidence:
         evidences = await svc.list_evidence(evidence_type=EVIDENCE_TYPE_ADDRESS)
         record("test_49_list_by_type",
                all(e["evidenceType"] == EVIDENCE_TYPE_ADDRESS for e in evidences) and len(evidences) >= 1,
-               f"expected all address")
+               "expected all address")
 
         # test 50: 查询存证详情
         evidence_id = result["id"]

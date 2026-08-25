@@ -319,7 +319,7 @@ class ProductService:
                     {"step": "评价提交", "level": "INFO",
                      "msg": f"{saved['rating']} 星评价已提交(评价ID: {saved['review_id']})"},
                     {"step": "评分更新", "level": "INFO",
-                     "msg": f"已重算产品评分"},
+                     "msg": "已重算产品评分"},
                 ],
             }
 

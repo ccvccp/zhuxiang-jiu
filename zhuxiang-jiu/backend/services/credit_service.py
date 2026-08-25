@@ -971,8 +971,8 @@ class CreditService:
             "tax": round(cash_tax, 2),
             "netValue": round(cash_value - cash_tax, 2),
             "supplementCash": 0.0,
-            "reason": (f"现金灵活+钱包即时到账"
-                       + (f"+超¥800部分扣20%个税" if cash_tax > 0 else "+无税收")
+            "reason": ("现金灵活+钱包即时到账"
+                       + ("+超¥800部分扣20%个税" if cash_tax > 0 else "+无税收")
                        + f"+季度上限¥{cash_cap:.0f}"),
         })
 

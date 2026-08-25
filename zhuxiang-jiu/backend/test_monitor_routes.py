@@ -193,13 +193,13 @@ class TestMetricCollect:
         metrics = await svc.list_metrics(metric_type=METRIC_TYPE_BUSINESS)
         record("test_12_list_by_metric_type",
                all(m["metricType"] == METRIC_TYPE_BUSINESS for m in metrics),
-               f"expected all business")
+               "expected all business")
 
         # test 13: 列表查询(按来源筛选)
         metrics = await svc.list_metrics(source=SOURCE_DB_1)
         record("test_13_list_by_source",
                all(m["source"] == SOURCE_DB_1 for m in metrics),
-               f"expected all db-master-1")
+               "expected all db-master-1")
 
 
 class TestAlertManagement:
@@ -353,7 +353,7 @@ class TestAlertManagement:
         pending_alerts = await svc.list_alerts(alert_status=ALERT_STATUS_PENDING)
         record("test_29_list_by_status",
                all(a["alertStatus"] == ALERT_STATUS_PENDING for a in pending_alerts),
-               f"expected all pending")
+               "expected all pending")
 
         # test 30: 列表查询(按级别筛选)
         fatal_alerts = await svc.list_alerts(alert_level=ALERT_LEVEL_FATAL)
@@ -366,7 +366,7 @@ class TestAlertManagement:
         business_alerts = await svc.list_alerts(alert_type=ALERT_TYPE_BUSINESS)
         record("test_31_list_by_type",
                all(a["alertType"] == ALERT_TYPE_BUSINESS for a in business_alerts),
-               f"expected all business")
+               "expected all business")
 
         # test 32: 查询告警详情
         detail = await svc.get_alert(alert_id)
@@ -472,7 +472,7 @@ class TestIncidentManagement:
                f"expected root cause set, got {inv_result.get('rootCause')}")
         record("test_42b_timeline_has_investigate",
                any(item.get("event") == "开始调查" for item in inv_result.get("timeline", [])),
-               f"expected 开始调查 in timeline")
+               "expected 开始调查 in timeline")
 
         # test 43: 处置故障(investigating → mitigating)
         mit_result = await svc.mitigate_incident(incident_id, "测试运维",
@@ -560,7 +560,7 @@ class TestIncidentManagement:
         record("test_52_list_by_type",
                all(i["incidentType"] == INCIDENT_TYPE_SECURITY
                    for i in security_incidents),
-               f"expected all security")
+               "expected all security")
 
         # test 53: 列表查询(按状态筛选)
         postmortem_incidents = await svc.list_incidents(
@@ -569,7 +569,7 @@ class TestIncidentManagement:
                all(i["incidentStatus"] == INCIDENT_STATUS_POSTMORTEM
                    for i in postmortem_incidents)
                and len(postmortem_incidents) >= 1,
-               f"expected all postmortem")
+               "expected all postmortem")
 
         # test 54: 查询故障详情
         detail = await svc.get_incident(incident_id)

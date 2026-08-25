@@ -370,7 +370,7 @@ class TestStatsReport:
         record("test_38_report_recent_changes",
                isinstance(report["recentChanges"], list)
                and len(report["recentChanges"]) > 0,
-               f"recentChanges 应为非空列表")
+               "recentChanges 应为非空列表")
 
         # test 39: 报告权益匹配等级
         record("test_39_report_benefits_match",

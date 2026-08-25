@@ -656,7 +656,7 @@ class WalletService:
                 else:
                     # 批准: 冻结保持, 等待打款
                     new_status = "approved"
-                    log_msg = f"提现已批准, 等待打款"
+                    log_msg = "提现已批准, 等待打款"
 
                 await self.wallet_repo.update_withdrawal_fields(withdraw_no, {
                     "status": new_status,

@@ -357,7 +357,7 @@ class CooperationService:
         if partner is None:
             raise KeyError(f"合作方不存在(id={partner_id})")
         if partner["status"] == PARTNER_STATUS_TERMINATED:
-            raise ValueError(f"合作方已终止, 不可创建协议")
+            raise ValueError("合作方已终止, 不可创建协议")
 
         contract_id = await self.repo.next_contract_id()
         contract_no = f"CT{int(datetime.utcnow().timestamp())}{contract_id:06d}"

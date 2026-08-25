@@ -722,7 +722,7 @@ class AgentService:
             raise KeyError(f"代理商 {agent_id} 不存在")
         rebates = await self.agent_repo.list_rebates_by_agent(agent_id)
 
-        from datetime import datetime, timezone, timedelta
+        from datetime import timezone, timedelta
         now_sh = datetime.now(timezone(timedelta(hours=8)))
         current_year = now_sh.strftime("%Y")
         current_month = now_sh.strftime("%Y-%m")

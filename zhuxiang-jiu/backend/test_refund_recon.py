@@ -546,7 +546,7 @@ class TestReconciliation:
         await svc.start_reconciliation(
             recon_date="2026-08-27", channel="wechat",
         )
-        recon_no = f"RECON20260827WECHAT"
+        recon_no = "RECON20260827WECHAT"
         result = await svc.get_reconciliation(recon_no)
         assert result["reconNo"] == recon_no
         assert result["status"] == RECON_STATUS_MATCHED
@@ -577,7 +577,7 @@ class TestReconciliation:
         await svc.start_reconciliation(
             recon_date="2026-08-29", channel="wechat",
         )
-        recon_no = f"RECON20260829WECHAT"
+        recon_no = "RECON20260829WECHAT"
         with pytest.raises(ValueError, match="不可介入调查"):
             await svc.investigate_diff(recon_no, operator="admin")
 

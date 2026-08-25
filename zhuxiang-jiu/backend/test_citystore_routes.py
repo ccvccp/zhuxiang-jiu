@@ -388,7 +388,7 @@ class TestCityStoreStatusFlow:
                f"状态错误: {result.get('status')}")
         record("test_27_close_date_set",
                result.get("closeDate") is not None,
-               f"closeDate 未设置")
+               "closeDate 未设置")
 
         # test 28: 已取消为终态(不可流转)
         try:

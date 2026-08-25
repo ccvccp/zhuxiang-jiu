@@ -9,3 +9,5 @@ pytest-asyncio==0.24.0
 #       lua_max_executor_time=5 对齐
 fakeredis>=2.20.0
 lupa>=2.0
+# ruff: Python linter(CI 质量门禁, 规则见 ruff.toml)
+ruff>=0.6.0

@@ -233,7 +233,7 @@ class ActivityService:
                 raise KeyError(f"报名记录不存在(activityId={activity_id}, userId={user_id})")
 
             if reg.get("status") == REG_STATUS_CANCELLED:
-                raise ValueError(f"报名已取消, 无需重复操作")
+                raise ValueError("报名已取消, 无需重复操作")
 
             await self.repo.update_registration_status(reg["id"], REG_STATUS_CANCELLED)
             reg["status"] = REG_STATUS_CANCELLED

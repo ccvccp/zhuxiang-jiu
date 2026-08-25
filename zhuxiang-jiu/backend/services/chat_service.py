@@ -312,9 +312,9 @@ class ChatService:
             if session is None:
                 raise KeyError(f"会话不存在(sessionId={session_id})")
             if session["status"] == SESSION_STATUS_ENDED:
-                raise ValueError(f"会话已关闭, 无法转人工")
+                raise ValueError("会话已关闭, 无法转人工")
             if session["status"] == SESSION_STATUS_HUMAN:
-                raise ValueError(f"会话已处于人工对话中")
+                raise ValueError("会话已处于人工对话中")
 
             await self._do_transfer(session, reason=reason)
             return {
@@ -342,7 +342,7 @@ class ChatService:
             if session is None:
                 raise KeyError(f"会话不存在(sessionId={session_id})")
             if session["status"] == SESSION_STATUS_ENDED:
-                raise ValueError(f"会话已关闭")
+                raise ValueError("会话已关闭")
 
             session["status"] = SESSION_STATUS_ENDED
             session["endedAt"] = ts()
@@ -385,9 +385,9 @@ class ChatService:
             if session is None:
                 raise KeyError(f"会话不存在(sessionId={session_id})")
             if session["status"] != SESSION_STATUS_ENDED:
-                raise ValueError(f"会话未关闭, 无法评价")
+                raise ValueError("会话未关闭, 无法评价")
             if session.get("satisfaction", 0) > 0:
-                raise ValueError(f"会话已评价, 不可重复评价")
+                raise ValueError("会话已评价, 不可重复评价")
 
             session["satisfaction"] = satisfaction
             await self.repo.save_session(session)

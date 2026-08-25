@@ -213,13 +213,13 @@ class TestMaintenanceTask:
         backups = await svc.list_tasks(task_type=TASK_TYPE_BACKUP)
         record("test_15_list_by_type",
                all(t["taskType"] == TASK_TYPE_BACKUP for t in backups) and len(backups) >= 1,
-               f"expected all backup")
+               "expected all backup")
 
         # test 16: 列表查询(按任务状态筛选)
         successes = await svc.list_tasks(task_status=TASK_STATUS_SUCCESS)
         record("test_16_list_by_status",
                all(t["taskStatus"] == TASK_STATUS_SUCCESS for t in successes),
-               f"expected all success")
+               "expected all success")
 
         # test 17: 创建定时任务
         result4 = await svc.create_task(
@@ -231,7 +231,7 @@ class TestMaintenanceTask:
         )
         record("test_17_scheduled_task",
                result4["triggerType"] == TRIGGER_SCHEDULED and result4["schedule"] == "0 2 * * *",
-               f"expected scheduled/cron")
+               "expected scheduled/cron")
 
 
 class TestHealthCheck:
@@ -357,13 +357,13 @@ class TestHealthCheck:
         checks = await svc.list_health_checks(service_name=SERVICE_NAME_ORDER)
         record("test_31_list_by_service",
                all(c["serviceName"] == SERVICE_NAME_ORDER for c in checks) and len(checks) >= 1,
-               f"expected all order-service")
+               "expected all order-service")
 
         # test 32: 列表查询(按健康状态筛选)
         unhealthy_list = await svc.list_health_checks(health_status=HEALTH_UNHEALTHY)
         record("test_32_list_by_status",
                all(c["healthStatus"] == HEALTH_UNHEALTHY for c in unhealthy_list),
-               f"expected all unhealthy")
+               "expected all unhealthy")
 
 
 class TestRecovery:
@@ -400,7 +400,7 @@ class TestRecovery:
         # test 36: 诊断结果保存
         record("test_36_diagnose_result_saved",
                diag_result["diagnoseResult"]["rootCause"] == "缓存池配置过小",
-               f"expected 缓存池配置过小")
+               "expected 缓存池配置过小")
 
         # test 37: 执行恢复(diagnosing → recovering → recovered)
         rec_result = await svc.attempt_recovery(
@@ -415,7 +415,7 @@ class TestRecovery:
         # test 38: 恢复时间记录
         record("test_38_recovered_at_recorded",
                rec_result["recoveredAt"] != "",
-               f"expected non-empty recoveredAt")
+               "expected non-empty recoveredAt")
 
         # test 39: 重复诊断已恢复记录(状态非法)
         try:
@@ -450,7 +450,7 @@ class TestRecovery:
         # test 42: 失败时无恢复时间
         record("test_42_failed_no_recovered_at",
                failed_result["recoveredAt"] == "",
-               f"expected empty recoveredAt")
+               "expected empty recoveredAt")
 
         # test 43: 人工级别直接进入 manual_required
         result3 = await svc.detect_fault(
@@ -502,13 +502,13 @@ class TestRecovery:
         oom_list = await svc.list_recoveries(fault_type=FAULT_TYPE_OOM)
         record("test_49_list_by_fault_type",
                all(r["faultType"] == FAULT_TYPE_OOM for r in oom_list) and len(oom_list) >= 1,
-               f"expected all OOM")
+               "expected all OOM")
 
         # test 50: 列表查询(按自愈状态筛选)
         recovered_list = await svc.list_recoveries(recovery_status=RECOVERY_STATUS_RECOVERED)
         record("test_50_list_by_status",
                all(r["recoveryStatus"] == RECOVERY_STATUS_RECOVERED for r in recovered_list),
-               f"expected all recovered")
+               "expected all recovered")
 
 
 class TestOptimization:
@@ -557,7 +557,7 @@ class TestOptimization:
         # test 56: 实际收益保存
         record("test_56_actual_benefit_saved",
                exec_result["actualBenefit"]["querySpeedup"] == "12x",
-               f"expected 12x")
+               "expected 12x")
 
         # test 57: 重复批准已完成优化(状态非法)
         try:
@@ -654,13 +654,13 @@ class TestOptimization:
         index_opts = await svc.list_optimizations(optimization_type=OPT_TYPE_INDEX)
         record("test_68_list_by_type",
                all(o["optimizationType"] == OPT_TYPE_INDEX for o in index_opts) and len(index_opts) >= 1,
-               f"expected all index")
+               "expected all index")
 
         # test 69: 列表查询(按优化状态筛选)
         completed_opts = await svc.list_optimizations(optimization_status=OPTIMIZATION_STATUS_COMPLETED)
         record("test_69_list_by_status",
                all(o["optimizationStatus"] == OPTIMIZATION_STATUS_COMPLETED for o in completed_opts),
-               f"expected all completed")
+               "expected all completed")
 
 
 class TestInspectAll:
@@ -691,7 +691,7 @@ class TestInspectAll:
         # test 74: 巡检时间记录
         record("test_74_inspected_at",
                result["inspectedAt"] != "",
-               f"expected non-empty inspectedAt")
+               "expected non-empty inspectedAt")
 
         # test 75: 自定义服务列表巡检
         custom_result = await svc.inspect_all(services=[

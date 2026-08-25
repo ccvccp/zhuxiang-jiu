@@ -173,7 +173,7 @@ class TestBehaviorMonitor:
         monitors = await svc.list_behavior_monitors(risk_level=RISK_LEVEL_HIGH)
         record("test_11_list_by_risk_level",
                all(m["riskLevel"] == RISK_LEVEL_HIGH for m in monitors),
-               f"expected all high risk")
+               "expected all high risk")
 
 
 class TestTermsMonitor:
@@ -193,7 +193,7 @@ class TestTermsMonitor:
         # test 13: 区块链存证生成
         record("test_13_evidence_generated",
                result.get("evidenceHash") is not None,
-               f"expected evidence hash")
+               "expected evidence hash")
 
         # test 14: 风险条款识别(高风险)
         result = await svc.monitor_terms(
@@ -249,7 +249,7 @@ class TestLegalKnowledge:
         results = await svc.search_legal_knowledge(law_category=LAW_CATEGORY_CIVIL)
         record("test_20_search_by_category",
                all(r["lawCategory"] == LAW_CATEGORY_CIVIL for r in results),
-               f"expected all civil")
+               "expected all civil")
 
         # test 21: 空检索条件
         try:
@@ -344,7 +344,7 @@ class TestRiskWarning:
         warnings = await svc.list_risk_warnings(risk_type=RISK_TYPE_FRAUD)
         record("test_32_list_by_risk_type",
                all(w["riskType"] == RISK_TYPE_FRAUD for w in warnings) and len(warnings) >= 1,
-               f"expected all fraud")
+               "expected all fraud")
 
 
 class TestRegulatoryReport:
@@ -368,7 +368,7 @@ class TestRegulatoryReport:
         # test 35: 区块链存证生成
         record("test_35_evidence_generated",
                result.get("evidenceHash") is not None,
-               f"expected evidence hash")
+               "expected evidence hash")
 
         # test 36: 可疑交易报送
         result = await svc.submit_regulatory_report(
@@ -437,7 +437,7 @@ class TestBlockchainEvidence:
         verify_result = await svc.verify_evidence_by_hash(evidence_hash)
         record("test_44_verify_by_hash",
                verify_result["verified"] is True and verify_result["evidenceHash"] == evidence_hash,
-               f"expected verified True")
+               "expected verified True")
 
         # test 45: 验证不存在的哈希
         try:
@@ -457,7 +457,7 @@ class TestBlockchainEvidence:
         evidences = await svc.list_blockchain_evidence(evidence_type=EVIDENCE_TYPE_COMPLIANCE)
         record("test_47_list_by_type",
                all(e["evidenceType"] == EVIDENCE_TYPE_COMPLIANCE for e in evidences) and len(evidences) >= 1,
-               f"expected all compliance")
+               "expected all compliance")
 
         # test 48: 查询存证详情
         evidence_id = result["id"]
@@ -499,7 +499,7 @@ class TestAnalysisReport:
         reports = await svc.list_analysis_reports(analysis_period=PERIOD_DAILY)
         record("test_52_list_by_period",
                all(r["analysisPeriod"] == PERIOD_DAILY for r in reports) and len(reports) >= 1,
-               f"expected all daily")
+               "expected all daily")
 
         # test 53: 查询分析报告详情
         report_id = result["id"]
@@ -535,7 +535,7 @@ class TestOptimization:
         optimizations = await svc.list_optimizations(optimization_type="规则优化")
         record("test_56_list_optimizations",
                all(o["optimizationType"] == "规则优化" for o in optimizations) and len(optimizations) >= 1,
-               f"expected all 规则优化")
+               "expected all 规则优化")
 
 
 class TestStats:
