@@ -175,7 +175,7 @@ const CheckoutPage: React.FC = () => {
           <Text className={styles.rowValue}>食品经营许可证(含酒类)</Text>
         </View>
         <View className={styles.agreeRow}>
-          <Checkbox checked={agreed} onClick={() => setAgreed(!agreed)} color="#355c44" />
+          <Checkbox value="agreed" checked={agreed} onClick={() => setAgreed(!agreed)} color="#355c44" />
           <Text className={styles.agreeText}>
             我已阅读并同意
             <Text onClick={() => Taro.navigateTo({ url: '/pages/privacy/index' })} className={styles.link}>《隐私政策》</Text>
