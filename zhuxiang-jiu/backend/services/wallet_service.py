@@ -510,13 +510,20 @@ class WalletService:
 
     async def withdraw(self, user_id, amount: float,
                         pay_channel: str = "bank",
-                        bank_account: str = "") -> dict:
+                        bank_account: str = "",
+                        withdraw_no: str = "",
+                        force_review: bool = False) -> dict:
         """提现申请: 活期余额冻结, 待审核
 
         规则:
             - amount < ¥5000: 自动通过(待打款)
             - ¥5000 ≤ amount ≤ ¥50000: 人工一级审核
             - amount > ¥50000: 人工二级审核
+            - force_review=True(v7.8 AI 决策门): 跳过自动通过, 强制人工审核
+
+        Args:
+            withdraw_no: v7.8 决策门预生成的提现单号(缺省内部生成)
+            force_review: AI reviewRequired 决策 → 单子生而 pending
 
         Raises:
             KeyError: 钱包未开通
@@ -542,10 +549,11 @@ class WalletService:
             await self.wallet_repo.add_balance(user_id, -amount)
             await self.wallet_repo.add_frozen(user_id, amount)
 
-            # 2. 生成提现单
-            withdraw_no = await self.wallet_repo.next_withdraw_no()
-            # 自动通过判定
-            if amount < WITHDRAW_AUTO_APPROVE_THRESHOLD:
+            # 2. 生成提现单(决策门预生成则复用, 保证快照配对键一致)
+            if not withdraw_no:
+                withdraw_no = await self.wallet_repo.next_withdraw_no()
+            # 自动通过判定(AI 强制人工时跳过)
+            if amount < WITHDRAW_AUTO_APPROVE_THRESHOLD and not force_review:
                 status = "approved"
                 auditor = "AI风控"
             else:
@@ -566,7 +574,9 @@ class WalletService:
                 "bankAccount": _mask_bank_account(bank_account),
                 "status": status,
                 "auditor": auditor,
-                "auditRemark": "自动通过" if status == "approved" else "",
+                "auditRemark": ("自动通过" if status == "approved"
+                                else "AI风控: 强制人工审核" if force_review
+                                else ""),
                 "payTime": "",
                 "createdAt": ts(),
                 "updatedAt": ts(),

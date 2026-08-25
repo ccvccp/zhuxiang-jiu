@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 自学习驾驶舱 · 总览</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 总览页专属样式(复用 style.css 主题变量) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff;
+            padding: 36px 0;
+            text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 错误横幅 */
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 全局统计卡 */
+        .dash-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+        .dash-stat { padding: 16px; text-align: center; }
+        .dash-stat .stat-value { font-size: 26px; font-weight: 700; color: var(--color-primary-dark); }
+        .dash-stat .stat-label { font-size: 12px; color: var(--color-text-light); margin-top: 4px; }
+        .dash-stat.warn .stat-value { color: var(--color-danger); }
+        .dash-stat.gold .stat-value { color: var(--color-accent); }
+
+        /* 调度器状态条 */
+        .dash-scheduler {
+            display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 12px 16px;
+            font-size: 13px; color: var(--color-text); align-items: center;
+        }
+        .dash-scheduler .k { color: var(--color-text-light); margin-right: 4px; }
+        .dash-live-dot {
+            display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+            background: #2e8b57; margin-right: 6px; vertical-align: middle;
+        }
+        .dash-live-dot.off { background: #999; }
+
+        /* 筛选栏 */
+        .dash-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; }
+        .chip {
+            border: 1px solid var(--color-border); background: #fff; color: var(--color-text-light);
+            border-radius: 999px; padding: 5px 14px; font-size: 12px; cursor: pointer; transition: var(--transition);
+        }
+        .chip.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+        .dash-filters select, .dash-filters input[type="search"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .dash-filters input[type="search"] { width: 200px; }
+        .dash-filters .count { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 评分器卡片墙 */
+        .dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+        .scorer-card { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+        .scorer-card .head { display: flex; align-items: flex-start; gap: 8px; }
+        .scorer-card .head h3 { margin: 0; font-size: 15px; flex: 1; }
+        .scorer-card .sid { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.module { background: rgba(74, 124, 89, 0.08); color: var(--color-primary-dark); border-color: rgba(74, 124, 89, 0.25); }
+        .badge.batch { background: rgba(201, 169, 97, 0.12); color: #8a6d2f; border-color: rgba(201, 169, 97, 0.4); }
+        .badge.src-default { background: #f0f0f0; color: #666; }
+        .badge.src-learning { background: #e8f4ec; color: #2e8b57; }
+        .badge.src-manual { background: #eef2fb; color: #3b5998; }
+        .badge.src-reset { background: #fdf3e3; color: #a06b00; }
+        .badge.auto-apply { background: #e8f4ec; color: #2e8b57; border-color: rgba(46, 139, 87, 0.35); }
+        .badge.auto-off { background: #f4f4f4; color: #999; }
+
+        .scorer-rows { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+        .scorer-rows .row { display: flex; justify-content: space-between; align-items: center; }
+        .scorer-rows .row .k { color: var(--color-text-light); }
+        .scorer-rows .row .v { font-weight: 600; }
+        .v.champion { color: var(--color-primary-dark); }
+        .v.challenger { color: var(--color-accent); }
+
+        .mini-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 2px; }
+        .mini-stats .cell {
+            background: var(--color-bg); border-radius: var(--radius-sm);
+            padding: 8px 4px; text-align: center;
+        }
+        .mini-stats .cell b { display: block; font-size: 17px; color: var(--color-text); }
+        .mini-stats .cell span { font-size: 11px; color: var(--color-text-light); }
+
+        .drift-line { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+        .drift-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .drift-dot.low { background: #2e8b57; }
+        .drift-dot.medium { background: #e67e22; }
+        .drift-dot.high { background: var(--color-danger); }
+        .drift-line .lv { font-weight: 600; }
+        .drift-line .lv.low { color: #2e8b57; }
+        .drift-line .lv.medium { color: #e67e22; }
+        .drift-line .lv.high { color: var(--color-danger); }
+        .drift-line .score { color: var(--color-text-light); font-size: 12px; }
+
+        .scorer-card .foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 4px; }
+        .scorer-card .foot .btn-report {
+            margin-left: auto; border: 1px solid var(--color-primary); background: #fff;
+            color: var(--color-primary); border-radius: var(--radius-sm);
+            padding: 5px 12px; font-size: 12px; cursor: pointer; transition: var(--transition);
+        }
+        .scorer-card .foot .btn-report:hover { background: rgba(74, 124, 89, 0.08); }
+        .scorer-card .foot .btn-detail { display: inline-block; text-decoration: none; line-height: normal; }
+
+        /* 空态 */
+        .dash-empty { text-align: center; color: var(--color-text-light); padding: 48px 0; font-size: 14px; }
+
+        /* 报表弹窗 */
+        .modal-mask {
+            display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+            z-index: 100; align-items: center; justify-content: center; padding: 20px;
+        }
+        .modal-mask.show { display: flex; }
+        .modal-box {
+            background: #fff; border-radius: var(--radius-lg); max-width: 720px; width: 100%;
+            max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow-lg); padding: 22px 24px;
+        }
+        .modal-box h2 { margin: 0 0 4px; font-size: 18px; color: var(--color-primary-dark); }
+        .modal-box .sub { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); margin-bottom: 14px; }
+        .modal-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 14px; }
+        .modal-summary .cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 10px 6px; text-align: center; }
+        .modal-summary .cell b { display: block; font-size: 18px; }
+        .modal-summary .cell span { font-size: 11px; color: var(--color-text-light); }
+        .modal-trend { font-size: 13px; margin-bottom: 14px; color: var(--color-text); }
+        .modal-trend .up { color: #2e8b57; font-weight: 700; }
+        .modal-trend .down { color: var(--color-danger); font-weight: 700; }
+        .modal-trend .flat { color: var(--color-text-light); font-weight: 700; }
+        .modal-box table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .modal-box th, .modal-box td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--color-border); }
+        .modal-box th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .modal-box td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .modal-close { margin-top: 16px; text-align: right; }
+        .modal-loading { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 13px; }
+
+        /* 页脚说明 */
+        .dash-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .dash-footer code {
+            background: var(--color-bg); border: 1px solid var(--color-border);
+            border-radius: 3px; padding: 1px 6px; font-size: 11px;
+        }
+
+        @media (max-width: 640px) {
+            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container">
+            <h1>AI 自学习驾驶舱 · 总览</h1>
+            <p>v7.7 · 全部评分器的冠军版本 / 挑战者 / 反馈量 / 漂移状态一屏尽览</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏: API 地址 / 刷新 / 自动刷新 -->
+        <section class="dash-section">
+            <div class="dash-card dash-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="dash-btn ghost" id="btnSaveApi" onclick="saveApiBase()">保存</button>
+                <button class="dash-btn" id="btnRefresh" onclick="loadOverview()">刷新</button>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()"> 自动刷新(30s)
+                </label>
+                <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="dash-error" id="errorBanner"></div>
+        </section>
+
+        <!-- 全局统计 -->
+        <section class="dash-section">
+            <div class="dash-stats">
+                <div class="dash-card dash-stat">
+                    <div class="stat-value" id="statScorers">--</div>
+                    <div class="stat-label">评分器总数</div>
+                </div>
+                <div class="dash-card dash-stat">
+                    <div class="stat-value" id="statFeedback">--</div>
+                    <div class="stat-label">反馈总量</div>
+                </div>
+                <div class="dash-card dash-stat gold">
+                    <div class="stat-value" id="statAuto24h">--</div>
+                    <div class="stat-label">24h 自动反馈</div>
+                </div>
+                <div class="dash-card dash-stat">
+                    <div class="stat-value" id="statChallengers">--</div>
+                    <div class="stat-label">挑战者待命</div>
+                </div>
+                <div class="dash-card dash-stat warn">
+                    <div class="stat-value" id="statDriftWarn">--</div>
+                    <div class="stat-label">漂移预警(中/高)</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 调度器状态 -->
+        <section class="dash-section">
+            <div class="dash-card dash-scheduler" id="schedulerBar">
+                <span><span class="dash-live-dot" id="schedDot"></span>定时学习调度器加载中…</span>
+            </div>
+        </section>
+
+        <!-- 筛选栏 -->
+        <section class="dash-section">
+            <div class="dash-card dash-filters">
+                <span class="chip active" data-batch="all" onclick="setBatchFilter(this)">全部批次</span>
+                <span class="chip" data-batch="第一批" onclick="setBatchFilter(this)">第一批</span>
+                <span class="chip" data-batch="第二批" onclick="setBatchFilter(this)">第二批</span>
+                <span class="chip" data-batch="第三批" onclick="setBatchFilter(this)">第三批</span>
+                <select id="driftFilter" onchange="renderCards()">
+                    <option value="all">全部漂移等级</option>
+                    <option value="low">正常(low)</option>
+                    <option value="medium">关注(medium)</option>
+                    <option value="high">告警(high)</option>
+                </select>
+                <input type="search" id="searchBox" placeholder="搜索名称/ID/模块…" oninput="renderCards()">
+                <span class="count" id="filterCount"></span>
+            </div>
+        </section>
+
+        <!-- 评分器卡片墙 -->
+        <section class="dash-section">
+            <div class="dash-grid" id="scorerGrid"></div>
+            <div class="dash-empty" id="emptyState" style="display:none;">没有符合筛选条件的评分器</div>
+        </section>
+
+        <!-- 页脚说明 -->
+        <footer class="dash-footer">
+            <div>鉴权说明：默认 <code>AUTH_MODE=compat</code> 下本页以 <code>X-Role: admin</code> 兼容头直连管理端点；<code>strict</code> 模式需先登录获取 JWT 并改造请求头。</div>
+            <div>数据来源：<code>GET /api/ai-learning/overview</code> 与 <code>GET /api/ai-learning/report/{scorerId}</code>（v7.5/v7.6 后端已就绪）。本页为 v7.7 阶段 1（总览），权重曲线与人工管理操作见后续阶段。</div>
+        </footer>
+    </main>
+
+    <!-- 学习报表弹窗 -->
+    <div class="modal-mask" id="reportModal" onclick="closeReport(event)">
+        <div class="modal-box" onclick="event.stopPropagation()">
+            <div id="reportContent"><div class="modal-loading">报表加载中…</div></div>
+            <div class="modal-close">
+                <button class="dash-btn ghost" onclick="closeReport()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        /* ========= 全局状态 ========= */
+        var API_BASE_KEY = 'aiLearningDash.apiBase';
+        var state = {
+            apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+            data: null,          // overview 响应
+            batch: 'all',        // 批次筛选
+            autoTimer: null,     // 自动刷新句柄
+            AUTO_MS: 30000,
+        };
+
+        /* 来源徽章中文映射(冠军权重来源) */
+        var SRC_LABEL = { default: '默认', learning: '学习', manual: '人工', reset: '重置' };
+        var DRIFT_LABEL = { low: '正常', medium: '关注', high: '告警' };
+
+        /* HTML 转义(防注入, 统一出口) */
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+
+        /* 百分比格式化(0~1 → xx.x%, 空值 → --) */
+        function pct(v) {
+            return (v == null || isNaN(v)) ? '--' : (v * 100).toFixed(1) + '%';
+        }
+
+        /* ========= API ========= */
+        function apiHeaders() { return { 'X-Role': 'admin' }; }
+
+        async function fetchJson(url) {
+            var res = await fetch(url, { headers: apiHeaders() });
+            var body = null;
+            try { body = await res.json(); } catch (e) { /* 非 JSON 错误体 */ }
+            if (!res.ok) {
+                var msg = body && (body.error || body.message) ? ' · ' + (body.error || body.message) : '';
+                throw new Error('HTTP ' + res.status + msg);
+            }
+            return body;
+        }
+
+        async function loadOverview() {
+            var btn = document.getElementById('btnRefresh');
+            btn.disabled = true; btn.textContent = '刷新中…';
+            try {
+                var data = await fetchJson(state.apiBase + '/api/ai-learning/overview');
+                if (!data || !data.success) throw new Error('响应格式异常');
+                state.data = data;
+                hideError();
+                renderAll();
+            } catch (err) {
+                showError('总览加载失败：' + err.message + '（请确认后端已启动且地址正确）');
+            } finally {
+                btn.disabled = false; btn.textContent = '刷新';
+                document.getElementById('lastUpdate').textContent = '最后刷新 ' + new Date().toLocaleTimeString('zh-CN');
+            }
+        }
+
+        /* ========= 渲染 ========= */
+        function renderAll() {
+            renderStats();
+            renderScheduler();
+            renderCards();
+        }
+
+        function renderStats() {
+            var d = state.data;
+            var scorers = d.scorers || [];
+            var sum = function (fn) { return scorers.reduce(function (a, s) { return a + (fn(s) || 0); }, 0); };
+            document.getElementById('statScorers').textContent = d.scorerCount;
+            document.getElementById('statFeedback').textContent = sum(function (s) { return s.totalFeedback; });
+            document.getElementById('statAuto24h').textContent = sum(function (s) { return s.autoFeedback24h; });
+            document.getElementById('statChallengers').textContent =
+                scorers.filter(function (s) { return !!s.challengerVersion; }).length;
+            document.getElementById('statDriftWarn').textContent =
+                scorers.filter(function (s) { return s.driftLevel !== 'low'; }).length;
+        }
+
+        function renderScheduler() {
+            var s = (state.data && state.data.scheduler) || {};
+            var runs = s.runs || 0;
+            var lastRun = s.lastRunAt ? String(s.lastRunAt).replace('T', ' ') : '尚未运行';
+            var bar = document.getElementById('schedulerBar');
+            bar.innerHTML =
+                '<span><span class="dash-live-dot' + (runs > 0 ? '' : ' off') + '"></span>' +
+                '定时学习调度器：已运行 <b>' + runs + '</b> 轮</span>' +
+                '<span><span class="k">上轮时间</span><b>' + esc(lastRun) + '</b></span>' +
+                '<span><span class="k">上轮学习评分器</span><b>' + (s.lastLearnedScorers || 0) + '</b> 个</span>' +
+                '<span><span class="k">数据生成于</span>' + esc(String(state.data.generatedAt || '').replace('T', ' ')) + '</span>';
+        }
+
+        /* 批次筛选 */
+        function setBatchFilter(chipEl) {
+            state.batch = chipEl.getAttribute('data-batch');
+            document.querySelectorAll('.dash-filters .chip').forEach(function (c) {
+                c.classList.toggle('active', c === chipEl);
+            });
+            renderCards();
+        }
+
+        function filteredScorers() {
+            var d = state.data;
+            if (!d) return [];
+            var q = (document.getElementById('searchBox').value || '').trim().toLowerCase();
+            var drift = document.getElementById('driftFilter').value;
+            return (d.scorers || []).filter(function (s) {
+                if (state.batch !== 'all' && s.batch !== state.batch) return false;
+                if (drift !== 'all' && s.driftLevel !== drift) return false;
+                if (q) {
+                    var hay = (s.label + ' ' + s.scorerId + ' ' + s.module).toLowerCase();
+                    if (hay.indexOf(q) < 0) return false;
+                }
+                return true;
+            });
+        }
+
+        function renderCards() {
+            var grid = document.getElementById('scorerGrid');
+            var list = filteredScorers();
+            document.getElementById('filterCount').textContent =
+                '显示 ' + list.length + ' / ' + ((state.data && state.data.scorerCount) || 0) + ' 个评分器';
+            document.getElementById('emptyState').style.display = list.length ? 'none' : 'block';
+
+            grid.innerHTML = list.map(function (s) {
+                var lv = s.driftLevel || 'low';
+                var src = s.championSource || 'default';
+                return (
+                    '<div class="dash-card scorer-card">' +
+                      '<div class="head">' +
+                        '<h3>' + esc(s.label) + '</h3>' +
+                        '<span class="badge module">' + esc(s.module) + '</span>' +
+                        '<span class="badge batch">' + esc(s.batch) + '</span>' +
+                      '</div>' +
+                      '<div class="sid">' + esc(s.scorerId) + '</div>' +
+                      '<div class="scorer-rows">' +
+                        '<div class="row"><span class="k">冠军权重</span>' +
+                          '<span class="v champion">' + esc(s.championVersion) +
+                          ' <span class="badge src-' + esc(src) + '">' + esc(SRC_LABEL[src] || src) + '</span></span></div>' +
+                        '<div class="row"><span class="k">挑战者</span>' +
+                          '<span class="v challenger">' + (s.challengerVersion ? esc(s.challengerVersion) : '—') + '</span></div>' +
+                      '</div>' +
+                      '<div class="mini-stats">' +
+                        '<div class="cell"><b>' + s.pendingFeedback + '</b><span>待学习反馈</span></div>' +
+                        '<div class="cell"><b>' + s.totalFeedback + '</b><span>累计反馈</span></div>' +
+                        '<div class="cell"><b>' + s.autoFeedback24h + '</b><span>24h 自动</span></div>' +
+                      '</div>' +
+                      '<div class="drift-line">' +
+                        '<span class="drift-dot ' + esc(lv) + '"></span>' +
+                        '<span class="lv ' + esc(lv) + '">' + esc(DRIFT_LABEL[lv] || lv) + '</span>' +
+                        '<span class="score">相对偏差 ' + pct(s.driftScore) + '</span>' +
+                      '</div>' +
+                      '<div class="foot">' +
+                        (s.autoApply
+                            ? '<span class="badge auto-apply">自动晋升 开</span>'
+                            : '<span class="badge auto-off">自动晋升 关</span>') +
+                        '<a class="btn-report btn-detail" href="ai-learning-detail.html?scorerId=' + encodeURIComponent(s.scorerId) + '">详情</a>' +
+                        '<button class="btn-report" data-sid="' + esc(s.scorerId) + '">学习报表</button>' +
+                      '</div>' +
+                    '</div>'
+                );
+            }).join('');
+        }
+
+        /* ========= 学习报表弹窗 ========= */
+        async function openReport(scorerId) {
+            var modal = document.getElementById('reportModal');
+            var box = document.getElementById('reportContent');
+            modal.classList.add('show');
+            box.innerHTML = '<div class="modal-loading">报表加载中(' + esc(scorerId) + ')…</div>';
+            try {
+                var r = await fetchJson(state.apiBase + '/api/ai-learning/report/' + encodeURIComponent(scorerId));
+                renderReport(r);
+            } catch (err) {
+                box.innerHTML = '<div class="modal-loading">报表加载失败：' + esc(err.message) + '</div>';
+            }
+        }
+
+        function renderReport(r) {
+            var box = document.getElementById('reportContent');
+            var t = r.recentTrend || {};
+            /* 近期趋势: 最近10条 vs 之前10条 正确率对比 */
+            var trendHtml = '暂无趋势数据(反馈不足)';
+            if (t.last10CorrectRate != null) {
+                var cls = 'flat', arrow = '持平';
+                if (t.previous10CorrectRate != null) {
+                    if (t.last10CorrectRate > t.previous10CorrectRate) { cls = 'up'; arrow = '上升'; }
+                    else if (t.last10CorrectRate < t.previous10CorrectRate) { cls = 'down'; arrow = '下降'; }
+                }
+                trendHtml = '最近 10 条正确率 <b class="' + cls + '">' + pct(t.last10CorrectRate) + '</b>' +
+                    (t.previous10CorrectRate != null
+                        ? '（前 10 条 ' + pct(t.previous10CorrectRate) + ' · <b class="' + cls + '">' + arrow + '</b>）'
+                        : '');
+            }
+            var versions = r.versions || [];
+            var rows = versions.map(function (v) {
+                return '<tr><td>' + esc(v.version) + '</td>' +
+                    '<td class="num">' + v.feedbackCount + '</td>' +
+                    '<td class="num">' + v.incorrectCount + '</td>' +
+                    '<td class="num">' + pct(v.correctRate) + '</td></tr>';
+            }).join('');
+            if (!rows) rows = '<tr><td colspan="4" style="text-align:center;color:#999;">暂无反馈数据</td></tr>';
+
+            box.innerHTML =
+                '<h2>' + esc(r.label) + ' · 学习效果报表</h2>' +
+                '<div class="sub">' + esc(r.scorerId) + ' · 生成于 ' + esc(String(r.generatedAt || '').replace('T', ' ')) + '</div>' +
+                '<div class="modal-summary">' +
+                  '<div class="cell"><b>' + r.totalFeedback + '</b><span>反馈总量</span></div>' +
+                  '<div class="cell"><b>' + r.autoFeedback + '</b><span>自动反馈</span></div>' +
+                  '<div class="cell"><b>' + r.manualFeedback + '</b><span>手动反馈</span></div>' +
+                  '<div class="cell"><b>' + pct(r.drift && r.drift.driftScore) + '</b><span>漂移偏差</span></div>' +
+                '</div>' +
+                '<div class="modal-trend">近期趋势：' + trendHtml + '</div>' +
+                '<table><thead><tr><th>权重版本</th><th style="text-align:right">反馈数</th>' +
+                '<th style="text-align:right">错误数</th><th style="text-align:right">正确率</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody></table>' +
+                '<div style="margin-top:10px;font-size:12px;"><a href="ai-learning-report.html?scorerId=' + encodeURIComponent(r.scorerId) + '" style="color:var(--color-primary);">查看完整报表(正确率演进曲线/评估指标) →</a></div>';
+        }
+
+        function closeReport() {
+            document.getElementById('reportModal').classList.remove('show');
+        }
+
+        /* 卡片「学习报表」按钮事件委托(避免行内 JS 引号转义问题) */
+        document.getElementById('scorerGrid').addEventListener('click', function (evt) {
+            var btn = evt.target.closest ? evt.target.closest('.btn-report') : null;
+            if (btn && btn.dataset.sid) openReport(btn.dataset.sid);
+        });
+
+        /* ========= 工具栏 ========= */
+        function saveApiBase() {
+            var v = document.getElementById('apiBase').value.trim().replace(/\/+$/, '');
+            if (!/^https?:\/\/.+/.test(v)) { showError('后端地址需以 http:// 或 https:// 开头'); return; }
+            state.apiBase = v;
+            localStorage.setItem(API_BASE_KEY, v);
+            hideError();
+            loadOverview();
+        }
+
+        function toggleAutoRefresh() {
+            stopAutoRefresh();
+            if (document.getElementById('autoRefresh').checked) {
+                state.autoTimer = setInterval(loadOverview, state.AUTO_MS);
+            }
+        }
+        function stopAutoRefresh() {
+            if (state.autoTimer) { clearInterval(state.autoTimer); state.autoTimer = null; }
+        }
+
+        function showError(msg) { var el = document.getElementById('errorBanner'); el.textContent = msg; el.style.display = 'block'; }
+        function hideError() { document.getElementById('errorBanner').style.display = 'none'; }
+
+        /* ========= 初始化 ========= */
+        (function init() {
+            document.getElementById('apiBase').value = state.apiBase;
+            loadOverview();
+            toggleAutoRefresh();
+        })();
+    </script>
+</body>
+</html>

@@ -265,7 +265,9 @@ class LogisticsService:
             )
 
             # 生成运单号(实际由物流商返回, 此处模拟)
-            waybill_no = f"{carrier}{ts().replace('-', '').replace(':', '').replace(' ', '')}{order_id[-4:]}"
+            # 加入随机后缀确保唯一性(避免同毫秒同订单生成相同运单号)
+            import secrets
+            waybill_no = f"{carrier}{ts().replace('-', '').replace(':', '').replace(' ', '')}{order_id[-4:]}{secrets.token_hex(3)}"
 
             order_data = {
                 "waybillNo": waybill_no,

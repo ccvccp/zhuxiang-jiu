@@ -108,10 +108,11 @@ class OrderRepository:
     # ============================================================
 
     def _ensure_store(self):
-        """确保 store 包含 orders_v2 键(扩展版存储)"""
+        """确保 store 包含 orders_v2 和 orders 键(扩展版 + 向后兼容)"""
         if "orders_v2" not in self.store:
             self.store["orders_v2"] = {}
-        # 向后兼容: 旧 orders list 保留(CheckoutService 用)
+        if "orders" not in self.store:  # 向后兼容: 旧 orders list
+            self.store["orders"] = []
 
     def _mem_create(self, order: dict) -> str:
         self._ensure_store()

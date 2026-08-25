@@ -199,14 +199,17 @@ class LogisticsRepository:
 
     def __init__(self, store: dict = None):
         self.store = store if store is not None else get_in_memory_store()
-        # 初始化内存存储键
+        self._track_seq = 0  # 轨迹ID自增序列(内存模式)
+        self._ensure_store()
+
+    def _ensure_store(self):
+        """确保 store 包含 logistics 相关键(reset_store 后重新初始化)"""
         self.store.setdefault("logistics_orders", {})
         self.store.setdefault("logistics_tracks", {})
         self.store.setdefault("logistics_settlement", {})
         self.store.setdefault("logistics_settle_pending", set())  # 待对账集合
         self.store.setdefault("logistics_order_index_orderid", {})  # orderId → waybillNo
         self.store.setdefault("logistics_track_index_waybill", {})  # waybillNo → [trackId]
-        self._track_seq = 0  # 轨迹ID自增序列(内存模式)
 
     # ============================================================
     # 1. 物流订单(logistics_orders)
@@ -242,6 +245,7 @@ class LogisticsRepository:
             if old and old != status:
                 await client.srem(_k("logistics:order:index:status", old), waybill_no)
         else:
+            self._ensure_store()
             self.store["logistics_orders"][waybill_no] = dict(order)
             # 维护 orderId 索引
             if order.get("orderId"):
@@ -256,6 +260,7 @@ class LogisticsRepository:
             client = await get_redis_client()
             data = await client.hgetall(_k("logistics:order", waybill_no))
             return _deserialize_order(data)
+        self._ensure_store()
         order = self.store["logistics_orders"].get(waybill_no)
         return dict(order) if order else None
 
