@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
-from repositories.product_repository import ProductRepository
 
 
 # ============================================================

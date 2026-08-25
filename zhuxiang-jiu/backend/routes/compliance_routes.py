@@ -15,18 +15,14 @@
     - 统计(1):        stats
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.compliance_service import ComplianceService
 from repositories.compliance_repository import (
-    RISK_LEVEL_LOW, RISK_LEVEL_MEDIUM, RISK_LEVEL_HIGH, RISK_LEVEL_EXTREME,
-    REPORT_STATUS_PENDING, REPORT_STATUS_SUBMITTED, REPORT_STATUS_ACCEPTED,
-    EVIDENCE_TYPE_COMPLIANCE, EVIDENCE_TYPE_RISK, EVIDENCE_TYPE_DISPOSAL, EVIDENCE_TYPE_REGULATORY,
-    REPORT_TYPE_LARGE_AMOUNT, REPORT_TYPE_SUSPICIOUS, REPORT_TYPE_REGULAR, REPORT_TYPE_INQUIRY,
-    PERIOD_DAILY, PERIOD_WEEKLY, PERIOD_MONTHLY,
+    RISK_LEVEL_LOW,
 )
 
 

@@ -5,7 +5,7 @@
 """
 
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from core.auth import get_current_role, require_role
 from core.config import API_BASE

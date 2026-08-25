@@ -18,19 +18,14 @@
     - 新酒回收(1):      complete-new-wine-recycle
 """
 
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.recycle_service import RecycleService
 from repositories.recycle_repository import (
-    TYPE_EXCHANGE, TYPE_RECYCLE, TYPE_NEW_WINE_RECYCLE,
-    GRADE_A, GRADE_B, GRADE_C, GRADE_D,
-    STATUS_PENDING, STATUS_VALUED, STATUS_APPROVED, STATUS_REJECTED,
-    WINE_AGE_CURRENT, WINE_AGE_ONE_YEAR, WINE_AGE_TWO_YEARS, WINE_AGE_THREE_YEARS,
-    NEG_STATUS_PENDING, NEG_STATUS_USER_PROPOSED, NEG_STATUS_AI_COUNTER,
-    NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED,
+    GRADE_A,
 )
 
 

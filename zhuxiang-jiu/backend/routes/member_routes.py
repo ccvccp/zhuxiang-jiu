@@ -25,7 +25,7 @@
     ValueError → 409(业务冲突: 手机号已注册/密码错误/积分不足等)
 """
 
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel as PydBaseModel, Field

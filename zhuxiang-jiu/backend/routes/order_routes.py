@@ -13,7 +13,7 @@
 from fastapi import APIRouter, Header, HTTPException, Query
 
 from services import ai_feedback_hooks as ai_hooks
-from services.order_service import OrderService, STATUS_CN
+from services.order_service import OrderService
 
 
 router = APIRouter(prefix="/api/order", tags=["订单服务"])

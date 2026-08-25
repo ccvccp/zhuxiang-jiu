@@ -283,7 +283,8 @@ class MessageRepository:
         else:
             # 默认排除已删除
             messages = [m for m in messages if m.get("status") != MSG_STATUS_DELETED]
-        messages.sort(key=lambda m: m.get("createdAt", ""), reverse=True)
+        # createdAt 相同时按 id 倒序兜底(避免时间戳精度不足导致顺序错乱)
+        messages.sort(key=lambda m: (m.get("createdAt", ""), m.get("id", 0)), reverse=True)
         return messages[:limit]
 
     def _mem_list_all_messages(self, channel: str = None, category: str = None,
@@ -453,7 +454,8 @@ class MessageRepository:
                 elif m.get("status") == MSG_STATUS_DELETED:
                     continue
                 messages.append(m)
-        messages.sort(key=lambda m: m.get("createdAt", ""), reverse=True)
+        # createdAt 相同时按 id 倒序兜底(避免时间戳精度不足导致顺序错乱)
+        messages.sort(key=lambda m: (m.get("createdAt", ""), m.get("id", 0)), reverse=True)
         return messages[:limit]
 
     async def _redis_list_all_messages(self, channel: str = None, category: str = None,

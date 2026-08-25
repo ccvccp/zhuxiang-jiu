@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from core.auth import (
     AuthError, TokenExpiredError,
     create_token_pair, decode_token, hash_password, verify_password,
-    is_legacy_password_hash, remaining_ttl,
+    is_legacy_password_hash,
 )
 from core.locks import get_lock
 from repositories.auth_repository import AuthRepository

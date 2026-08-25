@@ -13,7 +13,7 @@
     - 存证(1):       evidence
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -21,19 +21,7 @@ from pydantic import BaseModel as PydBaseModel, Field
 from services.location_service import LocationService
 from repositories.location_repository import (
     # 门店类型
-    STORE_TYPE_FLAGSHIP, STORE_TYPE_EXPERIENCE, STORE_TYPE_EXCLUSIVE,
-    STORE_STATUS_OPEN, STORE_STATUS_CLOSED,
-    # 代理商等级
-    AGENT_LEVEL_DIAMOND, AGENT_LEVEL_GOLD, AGENT_LEVEL_SILVER,
-    # 物流状态
-    SHIPMENT_STATUS_IN_TRANSIT, SHIPMENT_STATUS_DELIVERING, SHIPMENT_STATUS_SIGNED,
-    # 配送范围类型
-    ZONE_TYPE_NATIONAL, ZONE_TYPE_CITY, ZONE_TYPE_SELF, ZONE_TYPE_REMOTE,
-    # 存证类型
-    EVIDENCE_TYPE_ADDRESS, EVIDENCE_TYPE_LOCATION, EVIDENCE_TYPE_LOGISTICS,
-    EVIDENCE_TYPE_DELIVERY, EVIDENCE_TYPE_HEATMAP, EVIDENCE_TYPE_SITE,
-    # 常量
-    MAX_ADDRESSES_PER_USER,
+    STORE_STATUS_OPEN,
 )
 
 

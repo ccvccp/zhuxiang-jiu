@@ -14,17 +14,14 @@
     - 统计(1):     stats
 """
 
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.trace_service import TraceService
 from repositories.trace_repository import (
-    CODE_TYPE_BOX, CODE_TYPE_LIFE,
-    BOX_STATUS_PENDING, BOX_STATUS_BOUND,
-    LIFE_STATUS_PENDING, LIFE_STATUS_ACTIVE,
-    SCAN_TYPE_ACTIVATE, SCAN_TYPE_QUERY, SCAN_TYPE_TRANSFER,
+    SCAN_TYPE_QUERY,
 )
 
 

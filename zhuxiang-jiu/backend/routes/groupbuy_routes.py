@@ -20,7 +20,7 @@
     - 管理端(2):    pending / stats
 """
 
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -28,17 +28,7 @@ from pydantic import BaseModel as PydBaseModel, Field
 from services.groupbuy_service import GroupBuyService
 from repositories.groupbuy_repository import (
     # 订单状态
-    ORDER_STATUS_PENDING, ORDER_STATUS_APPROVED, ORDER_STATUS_PAYING,
-    ORDER_STATUS_IN_PRODUCTION, ORDER_STATUS_SHIPPED, ORDER_STATUS_COMPLETED,
-    ORDER_STATUS_CANCELLED, ORDER_STATUS_REJECTED,
-    ORDER_STATUS_NAMES, ORDER_STATUS_FLOW,
-    # 审核结果
-    AUDIT_RESULT_APPROVED, AUDIT_RESULT_REJECTED,
-    AUDIT_LEVEL_STAFF, AUDIT_LEVEL_SUPERVISOR,
-    AUDIT_LEVEL_DIRECTOR, AUDIT_LEVEL_GENERAL_MANAGER,
-    # 团购类型
-    GROUP_TYPE_ENTERPRISE, GROUP_TYPE_WEDDING, GROUP_TYPE_FESTIVAL, GROUP_TYPE_CUSTOM,
-    GROUP_TYPE_NAMES, SUPPORTED_GROUP_TYPES,
+    AUDIT_LEVEL_STAFF,
 )
 
 

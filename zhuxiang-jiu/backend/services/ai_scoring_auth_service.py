@@ -26,7 +26,7 @@ import logging
 
 from core.helpers import ts
 from services.ai_scoring_service import (
-    _clamp, _confidence, _factor, _now_hour, _risk_level,
+    _clamp, _confidence, _factor, _now_hour,
 )
 
 logger = logging.getLogger(__name__)

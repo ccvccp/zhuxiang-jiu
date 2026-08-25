@@ -20,7 +20,7 @@
     - 入口决策(1):   order-entry/decide(地图定位→市店入口/本站入口)
 """
 
-from typing import Any, List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -28,16 +28,7 @@ from pydantic import BaseModel as PydBaseModel, Field
 from services.citystore_service import CityStoreService
 from repositories.citystore_repository import (
     # 网店状态
-    STORE_STATUS_PENDING, STORE_STATUS_OPERATING, STORE_STATUS_WARNING,
-    STORE_STATUS_SUSPENDED, STORE_STATUS_CANCELLED,
-    STORE_STATUS_NAMES, STORE_STATUS_FLOW,
-    # 考核资格状态
-    QUAL_STATUS_NORMAL, QUAL_STATUS_WARNING, QUAL_STATUS_YELLOW_CARD, QUAL_STATUS_CANCELLED,
-    # 阶梯折扣
-    DISCOUNT_EXCELLENT, DISCOUNT_QUALIFIED, DISCOUNT_UNQUALIFIED,
-    PURCHASE_TARGET, SALES_TARGET,
-    # 销售渠道
-    CHANNEL_LIVE, CHANNEL_MINIPROGRAM, CHANNEL_COMMUNITY, CHANNEL_H5, CHANNEL_DOUYIN,
+    CHANNEL_MINIPROGRAM,
 )
 
 

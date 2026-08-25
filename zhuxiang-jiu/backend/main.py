@@ -29,7 +29,7 @@ from core.config import ALLOW_HEADERS, ALLOW_METHODS, CORS_ORIGINS
 from core.errors import register_exception_handlers
 from core.helpers import uptime
 from core.locks import close_redis_client, _get_lock_mode
-from repositories.store import _mock_store  # 重新导出,兼容测试 `from main import _mock_store`
+from repositories.store import _mock_store  # noqa: F401  重新导出,兼容测试 `from main import _mock_store`
 from routes import (
     register_business_routes,
     register_decision_routes,

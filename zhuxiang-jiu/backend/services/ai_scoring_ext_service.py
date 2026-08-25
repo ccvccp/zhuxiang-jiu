@@ -28,7 +28,6 @@ import logging
 
 from core.helpers import ts
 from services.ai_scoring_service import (
-    LEVEL_HIGH, LEVEL_LOW, LEVEL_MEDIUM,
     _clamp, _confidence, _factor, _now_hour, _risk_level,
 )
 

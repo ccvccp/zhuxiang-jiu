@@ -19,7 +19,6 @@
 
 from datetime import datetime
 
-from core.locks import get_lock
 from core.helpers import ts
 from repositories.message_repository import (
     MessageRepository,
@@ -31,15 +30,11 @@ from repositories.message_repository import (
     CATEGORY_ACTIVITY, CATEGORY_COUPON, CATEGORY_MEMBER,
     CATEGORY_OLD_WINE, CATEGORY_CONTENT, CATEGORY_SECURITY, CATEGORY_SERVICE,
     # 消息状态
-    MSG_STATUS_UNREAD, MSG_STATUS_READ, MSG_STATUS_DELETED,
-    # 模板状态
-    TEMPLATE_DRAFT, TEMPLATE_PENDING, TEMPLATE_APPROVED, TEMPLATE_DISABLED,
+    MSG_STATUS_UNREAD, MSG_STATUS_READ, TEMPLATE_DRAFT, TEMPLATE_APPROVED, TEMPLATE_DISABLED,
     # 模板优先级
     PRIORITY_P0, PRIORITY_P1, PRIORITY_P2, PRIORITY_P3,
     # 推送任务状态
-    TASK_PENDING, TASK_SENDING, TASK_COMPLETED, TASK_CANCELLED,
-    # 推送记录状态
-    RECORD_PENDING, RECORD_SENT, RECORD_DELIVERED, RECORD_READ, RECORD_FAILED,
+    RECORD_SENT,
 )
 
 

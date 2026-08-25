@@ -18,7 +18,7 @@
     - 统计(1):  管理端统计
 """
 
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field

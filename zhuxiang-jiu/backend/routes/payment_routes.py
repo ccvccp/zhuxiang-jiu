@@ -26,7 +26,7 @@
        保持 payment_service 单一职责。
 """
 
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
