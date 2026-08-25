@@ -364,7 +364,7 @@ class TestMemberAddresses:
         # 旧地址应不再是默认
         resp = client.get("/api/member/addresses", headers={"X-Member-Id": "1"})
         addrs = resp.json()["addresses"]
-        old = [a for a in addrs if a["name"] == "张三"][0]
+        old = next(a for a in addrs if a["name"] == "张三")
         assert old["is_default"] == 0
 
     def test_add_address_missing_field(self):

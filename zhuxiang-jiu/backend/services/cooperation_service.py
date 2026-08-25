@@ -216,10 +216,7 @@ class CooperationService:
             score = max(0, 100 - len(issues) * 20)
             # 缺少资质文件为严重违规, 直接驳回(不论评分)
             has_critical = any(i["type"] == "missing_qualification" for i in issues)
-            if has_critical:
-                result = "reject"
-            else:
-                result = "pass" if score >= AI_REVIEW_PASS_SCORE else "reject"
+            result = "reject" if has_critical else "pass" if score >= AI_REVIEW_PASS_SCORE else "reject"
             new_status = APP_STATUS_APPROVED if result == "pass" else APP_STATUS_REJECTED
 
             # 更新申请状态

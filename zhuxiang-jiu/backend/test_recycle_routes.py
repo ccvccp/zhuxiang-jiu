@@ -214,7 +214,7 @@ class TestApplication:
 
         # test 13: 超单次兑换瓶数限制(6 > 5)
         vals = []
-        for i in range(6):
+        for _i in range(6):
             v = await svc.submit_valuation(
                 USER_ID_2, PRODUCT_ID_1, 1000.0, _old_purchase_date(3), GRADE_A, 1, True
             )
@@ -717,7 +717,7 @@ class TestNegotiationEdgeCases:
         )
         ai_base2 = neg2["aiBasePrice"]
         # 执行3轮议价
-        for i in range(3):
+        for _i in range(3):
             await svc.user_propose_price(neg2["id"], round(ai_base2 * 1.05, 2))
             await svc.ai_counter_price(neg2["id"], round(ai_base2 * 1.02, 2))
         # 第4轮应失败

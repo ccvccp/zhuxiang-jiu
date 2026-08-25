@@ -741,10 +741,7 @@ class RecycleRepository:
     async def _redis_update_inventory(self, product_id: str, delta: int) -> dict:
         client = await get_redis_client()
         data = await client.hget(_k("recycle", "inventory"), product_id)
-        if data:
-            current = json.loads(data)
-        else:
-            current = {"stock": 0, "reserved": 0}
+        current = json.loads(data) if data else {"stock": 0, "reserved": 0}
         current["stock"] = current.get("stock", 0) + delta
         await client.hset(_k("recycle", "inventory"), product_id,
                           json.dumps(current, ensure_ascii=False))

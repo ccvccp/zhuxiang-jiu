@@ -19,6 +19,7 @@
     - ValueError → 409(业务冲突: 推广码已存在/封禁/重复引流)
 """
 
+from typing import ClassVar
 from datetime import datetime
 
 from core.locks import get_lock
@@ -589,7 +590,7 @@ class TrafficService:
     # ============================================================
 
     # 支持的平台
-    SUPPORTED_PLATFORMS = {
+    SUPPORTED_PLATFORMS: ClassVar[set] = {
         SOURCE_DOUYIN, SOURCE_KUAISHOU, SOURCE_WECHAT,
         SOURCE_XIAOHONGSHU, SOURCE_BILIBILI,
     }

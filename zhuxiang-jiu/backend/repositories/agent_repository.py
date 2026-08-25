@@ -12,6 +12,7 @@
 锁键: agent:{agentId}(并发安全由 services 层负责)
 """
 
+import contextlib
 import json
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
@@ -801,8 +802,6 @@ class AgentRepository:
         # 嵌套结构 JSON 还原
         for k in ("indicators", "alerts"):
             if k in result and isinstance(result[k], str):
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     result[k] = json.loads(result[k])
-                except (TypeError, ValueError):
-                    pass
         return result

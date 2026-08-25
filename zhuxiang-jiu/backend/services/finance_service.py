@@ -1324,7 +1324,7 @@ class FinanceService:
             # 判定下一状态
             if level < required:
                 # 还有更高级别待审批
-                new_status = PAYMENT_APPROVING if level == 1 else PAYMENT_APPROVING
+                new_status = PAYMENT_APPROVING
                 logs_msg = f"第 {level} 级审批通过, 待第 {level + 1} 级审批"
             else:
                 # 最后一级通过

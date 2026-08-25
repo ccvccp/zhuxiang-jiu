@@ -18,6 +18,7 @@
     - ValueError → 409(业务冲突: 状态非法/参数非法/重复申请等)
 """
 
+import contextlib
 import json
 from datetime import datetime, UTC
 
@@ -196,7 +197,7 @@ class GroupBuyService:
                             detail_items: list[dict]) -> list[dict]:
         """构建凑单建议(未达门槛时推荐加量到下一阶梯)"""
         suggestions = []
-        for tier, min_amt, max_amt, discount in TIER_DEFINITIONS:
+        for tier, min_amt, _max_amt, discount in TIER_DEFINITIONS:
             if original_total < min_amt:
                 diff = min_amt - original_total
                 # 估算需要增加的瓶数(以最便宜产品为参考)
@@ -389,10 +390,8 @@ class GroupBuyService:
         result = dict(order)
         for field in ("customNeeds", "invoiceInfo", "addresses"):
             if result.get(field) and isinstance(result[field], str):
-                try:
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
                     result[field] = json.loads(result[field])
-                except (json.JSONDecodeError, TypeError):
-                    pass
         result["items"] = items
         result["audits"] = audits
         result["statusName"] = ORDER_STATUS_NAMES.get(order["status"], "")

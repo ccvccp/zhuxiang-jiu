@@ -1382,9 +1382,8 @@ class PaymentService:
             if rate < 0 or rate > 1:
                 raise ValueError(f"费率 {rate} 超出范围(0-1)")
         # 限额校验
-        if "minAmount" in fields and "maxAmount" in fields:
-            if float(fields["minAmount"]) > float(fields["maxAmount"]):
-                raise ValueError("单笔最小大于最大")
+        if "minAmount" in fields and "maxAmount" in fields and float(fields["minAmount"]) > float(fields["maxAmount"]):
+            raise ValueError("单笔最小大于最大")
         fields["updatedAt"] = ts()
         return await self.repo.update_channel_fields(channel_code, fields)
 

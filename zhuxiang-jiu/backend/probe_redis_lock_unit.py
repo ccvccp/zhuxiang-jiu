@@ -137,10 +137,9 @@ async def test_different_keys_no_mutex():
     lock_b = main._get_lock("test:keyB")
 
     # 同时持有两个不同键的锁
-    async with lock_a:
-        async with lock_b:
-            assert lock_a._lock.owned(), "keyA 锁应持有"
-            assert lock_b._lock.owned(), "keyB 锁应持有"
+    async with lock_a, lock_b:
+        assert lock_a._lock.owned(), "keyA 锁应持有"
+        assert lock_b._lock.owned(), "keyB 锁应持有"
     print("[4.不同键] 不同锁键不互斥 OK")
 
 

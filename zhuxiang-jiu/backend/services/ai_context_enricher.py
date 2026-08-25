@@ -212,9 +212,7 @@ async def enrich_withdraw_risk(member_id, amount: float,
             return True
         credit = await CreditRepository().get_score(
             _normalize_uid(member_id))
-        if credit and str(credit.get("status") or "") in ("frozen", "blacklist"):
-            return True
-        return False
+        return credit and str(credit.get("status") or "") in ("frozen", "blacklist")
     frozen = await _safe(_frozen, fallback=False, label="frozen_check")
     ctx["accountFrozen"] = bool(frozen)
 

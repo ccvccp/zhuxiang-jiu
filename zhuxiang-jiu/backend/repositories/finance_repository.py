@@ -27,6 +27,7 @@ Redis Key 设计:
     finance:payment:seq                String(INCR 付款序列)
 """
 
+import contextlib
 import json
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
@@ -666,10 +667,8 @@ class FinanceRepository:
         decl = self._deserialize_hash(data)
         # detail 是嵌套结构, JSON 还原
         if "detail" in decl and isinstance(decl["detail"], str):
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 decl["detail"] = json.loads(decl["detail"])
-            except (TypeError, ValueError):
-                pass
         return decl
 
     async def _redis_update_tax_fields(self, decl_no: str, fields: dict) -> dict:
@@ -680,10 +679,8 @@ class FinanceRepository:
         await client.hset(key, mapping=self._serialize_hash(fields))
         decl = self._deserialize_hash(await client.hgetall(key))
         if "detail" in decl and isinstance(decl["detail"], str):
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 decl["detail"] = json.loads(decl["detail"])
-            except (TypeError, ValueError):
-                pass
         return decl
 
     async def _redis_list_tax_declarations(self, tax_type: str = None, period: str = None,
@@ -702,10 +699,8 @@ class FinanceRepository:
                 continue
             decl = self._deserialize_hash(data)
             if "detail" in decl and isinstance(decl["detail"], str):
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     decl["detail"] = json.loads(decl["detail"])
-                except (TypeError, ValueError):
-                    pass
             if tax_type and decl.get("taxType") != tax_type:
                 continue
             if status and decl.get("status") != status:
@@ -732,10 +727,8 @@ class FinanceRepository:
             return None
         payment = self._deserialize_hash(data)
         if "approvals" in payment and isinstance(payment["approvals"], str):
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 payment["approvals"] = json.loads(payment["approvals"])
-            except (TypeError, ValueError):
-                pass
         return payment
 
     async def _redis_update_payment_fields(self, payment_no: str, fields: dict) -> dict:
@@ -746,10 +739,8 @@ class FinanceRepository:
         await client.hset(key, mapping=self._serialize_hash(fields))
         payment = self._deserialize_hash(await client.hgetall(key))
         if "approvals" in payment and isinstance(payment["approvals"], str):
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 payment["approvals"] = json.loads(payment["approvals"])
-            except (TypeError, ValueError):
-                pass
         return payment
 
     async def _redis_list_payments(self, payment_type: str = None,
@@ -768,10 +759,8 @@ class FinanceRepository:
                 continue
             pmt = self._deserialize_hash(data)
             if "approvals" in pmt and isinstance(pmt["approvals"], str):
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     pmt["approvals"] = json.loads(pmt["approvals"])
-                except (TypeError, ValueError):
-                    pass
             if status and pmt.get("status") != status:
                 continue
             result.append(pmt)
@@ -796,10 +785,8 @@ class FinanceRepository:
         recon = self._deserialize_hash(data)
         for k in ("orderSide", "paySide", "bankSide", "differences"):
             if k in recon and isinstance(recon[k], str):
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     recon[k] = json.loads(recon[k])
-                except (TypeError, ValueError):
-                    pass
         return recon
 
     async def _redis_update_recon_fields(self, date: str, recon_type: str, fields: dict) -> dict:
@@ -811,10 +798,8 @@ class FinanceRepository:
         recon = self._deserialize_hash(await client.hgetall(key))
         for k in ("orderSide", "paySide", "bankSide", "differences"):
             if k in recon and isinstance(recon[k], str):
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     recon[k] = json.loads(recon[k])
-                except (TypeError, ValueError):
-                    pass
         return recon
 
     async def _redis_list_reconciliations(self, date: str = None, recon_type: str = None,
@@ -839,10 +824,8 @@ class FinanceRepository:
                 continue
             for k in ("orderSide", "paySide", "bankSide", "differences"):
                 if k in recon and isinstance(recon[k], str):
-                    try:
+                    with contextlib.suppress(TypeError, ValueError):
                         recon[k] = json.loads(recon[k])
-                    except (TypeError, ValueError):
-                        pass
             result.append(recon)
         result.sort(key=lambda x: (x.get("date", ""), x.get("type", "")), reverse=True)
         return result

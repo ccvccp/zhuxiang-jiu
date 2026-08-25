@@ -122,7 +122,7 @@ def _calc_sf_base_fee(service_type: str, weight: float) -> float:
         基础运费
     """
     # 按重量档位查找(从低到高)
-    for (svc, max_weight), fee in sorted(
+    for (_svc, max_weight), fee in sorted(
         [(k, v) for k, v in SF_BASE_FEE_TABLE.items() if k[0] == service_type],
         key=lambda x: x[0][1]
     ):

@@ -23,6 +23,7 @@
 """
 
 import logging
+from typing import ClassVar
 
 from core.helpers import ts
 from services.ai_scoring_service import (
@@ -50,7 +51,7 @@ class AuthRiskScorer:
     8 因子加权 → 风险分(0-100, 越高越危险) → 4级决策动作
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "failed_attempts": 0.20,     # 近期失败次数(撞库/暴破信号)
         "geo_velocity": 0.15,        # 地理速度(不可能行程)
         "device_match": 0.20,        # 新设备
@@ -60,11 +61,11 @@ class AuthRiskScorer:
         "password_strength": 0.10,   # 密码强度
         "behavior_deviation": 0.10,  # 行为偏离度
     }
-    IP_RISK_SCORES = {"clean": 0.0, "proxy": 40.0, "vpn": 60.0,
+    IP_RISK_SCORES: ClassVar[dict] = {"clean": 0.0, "proxy": 40.0, "vpn": 60.0,
                       "tor": 90.0, "blacklist": 100.0}
-    PASSWORD_SCORES = {"strong": 0.0, "medium": 20.0, "weak": 60.0,
+    PASSWORD_SCORES: ClassVar[dict] = {"strong": 0.0, "medium": 20.0, "weak": 60.0,
                        "breached": 100.0}
-    REQUIRED = ["failedAttempts", "newDevice", "ipRiskType"]
+    REQUIRED: ClassVar[list] = ["failedAttempts", "newDevice", "ipRiskType"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口

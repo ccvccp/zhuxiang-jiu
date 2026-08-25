@@ -28,6 +28,7 @@ Redis Key 设计:
     payment:payout:index:source:{sid} Set(按来源单据索引)
 """
 
+import contextlib
 import json
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
@@ -1730,8 +1731,6 @@ class PaymentRepository:
         json_fields = {"supportedMethods", "supportedScenes"}
         for k in json_fields:
             if k in result and isinstance(result[k], str):
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     result[k] = json.loads(result[k])
-                except (TypeError, ValueError):
-                    pass
         return result

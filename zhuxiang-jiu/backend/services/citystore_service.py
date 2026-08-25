@@ -19,6 +19,7 @@
 """
 
 import logging
+from typing import ClassVar
 
 from core.locks import get_lock
 from core.helpers import ts
@@ -186,7 +187,7 @@ class CityStoreService:
     # ============================================================
 
     # 可下单的市店状态(运营中/预警: 预警仅考核警示仍在营业)
-    ORDERABLE_STORE_STATUSES = {STORE_STATUS_OPERATING, STORE_STATUS_WARNING}
+    ORDERABLE_STORE_STATUSES: ClassVar[set] = {STORE_STATUS_OPERATING, STORE_STATUS_WARNING}
 
     async def decide_order_entry(
         self,

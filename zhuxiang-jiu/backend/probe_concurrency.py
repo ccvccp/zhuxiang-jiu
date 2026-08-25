@@ -128,7 +128,7 @@ async def probe_deadlock(n=100, timeout=10.0):
         start = time.perf_counter()
         try:
             responses = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             elapsed = time.perf_counter() - start
             print(f"[4.死锁] X 超时! {n} 并发未在 {timeout}s 内完成 (耗时 {elapsed:.2f}s), 疑似死锁")
             return

@@ -137,9 +137,8 @@ class OrderRepository:
         self._ensure_store()
         result = []
         for order in self.store["orders_v2"].values():
-            if order.get("memberId") == member_id:
-                if status is None or order.get("status") == status:
-                    result.append(order)
+            if order.get("memberId") == member_id and (status is None or order.get("status") == status):
+                result.append(order)
         # 按创建时间倒序
         result.sort(key=lambda o: o.get("createdAt", ""), reverse=True)
         return result

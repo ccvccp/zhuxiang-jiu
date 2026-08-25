@@ -345,9 +345,8 @@ class RecycleService:
                     )
 
             # 兑换新酒需指定新酒
-            if app_type == TYPE_EXCHANGE:
-                if not new_product_id or not new_product_price:
-                    raise ValueError("兑换新酒须指定新酒产品及价格")
+            if app_type == TYPE_EXCHANGE and (not new_product_id or not new_product_price):
+                raise ValueError("兑换新酒须指定新酒产品及价格")
 
             application = {
                 "userId": user_id,
@@ -554,10 +553,7 @@ class RecycleService:
 
             cash_amount = app.get("cashValue", 0)
             # 个税计算: 超¥800部分 × 20%
-            if cash_amount > TAX_THRESHOLD:
-                tax_amount = round((cash_amount - TAX_THRESHOLD) * TAX_RATE, 2)
-            else:
-                tax_amount = 0.0
+            tax_amount = round((cash_amount - TAX_THRESHOLD) * TAX_RATE, 2) if cash_amount > TAX_THRESHOLD else 0.0
             actual_payout = round(cash_amount - tax_amount, 2)
 
             exchange = {
@@ -1098,10 +1094,7 @@ class RecycleService:
             total_cash = round(final_price * bottle_count * CASH_RATE, 2)
 
             # 个税计算
-            if total_cash > TAX_THRESHOLD:
-                tax_amount = round((total_cash - TAX_THRESHOLD) * TAX_RATE, 2)
-            else:
-                tax_amount = 0.0
+            tax_amount = round((total_cash - TAX_THRESHOLD) * TAX_RATE, 2) if total_cash > TAX_THRESHOLD else 0.0
             actual_payout = round(total_cash - tax_amount, 2)
 
             exchange = {

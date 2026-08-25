@@ -315,10 +315,9 @@ class GroupBuyRepository:
             if o.get("userId") != user_id:
                 continue
             apply_time = o.get("applyTime", "")
-            if apply_time and apply_time[:4] == year_str:
+            if apply_time and apply_time[:4] == year_str and o.get("status") not in (ORDER_STATUS_CANCELLED, ORDER_STATUS_REJECTED):
                 # 仅统计非取消/驳回的订单
-                if o.get("status") not in (ORDER_STATUS_CANCELLED, ORDER_STATUS_REJECTED):
-                    total += float(o.get("groupPrice", 0))
+                total += float(o.get("groupPrice", 0))
         return total
 
     def _mem_save_items(self, order_no: str, items: list[dict]) -> None:
@@ -400,9 +399,8 @@ class GroupBuyRepository:
         year_str = str(year)
         for o in orders:
             apply_time = o.get("applyTime", "")
-            if apply_time and apply_time[:4] == year_str:
-                if o.get("status") not in (ORDER_STATUS_CANCELLED, ORDER_STATUS_REJECTED):
-                    total += float(o.get("groupPrice", 0))
+            if apply_time and apply_time[:4] == year_str and o.get("status") not in (ORDER_STATUS_CANCELLED, ORDER_STATUS_REJECTED):
+                total += float(o.get("groupPrice", 0))
         return total
 
     async def _redis_save_items(self, order_no: str, items: list[dict]) -> None:

@@ -310,7 +310,7 @@ class TestMatrixRewards:
 
 class TestRewardPurchase:
     async def run(self, ctx):
-        a_id, code, product = ctx
+        a_id, _code, product = ctx
         svc = PromotionService()
         wallet_svc = WalletService()
 

@@ -932,7 +932,7 @@ class CreditService:
             plans.append({
                 "planNo": 1,
                 "type": best["category"],
-                "itemId": [k for k, v in EXCHANGE_CATALOG.items() if v is best][0],
+                "itemId": next(k for k, v in EXCHANGE_CATALOG.items() if v is best),
                 "itemName": best["name"],
                 "points": best["points"],
                 "value": best["value"],
@@ -984,7 +984,7 @@ class CreditService:
             plans.append({
                 "planNo": 3,
                 "type": target["category"],
-                "itemId": [k for k, v in EXCHANGE_CATALOG.items() if v is target][0],
+                "itemId": next(k for k, v in EXCHANGE_CATALOG.items() if v is target),
                 "itemName": target["name"],
                 "points": target["points"],
                 "value": target["value"],
@@ -1056,9 +1056,8 @@ class CreditService:
             score = account.get("bambooScore", 0)
 
             # B端额度仅限B端角色
-            if account_type == PAYLATER_ACCOUNT_B:
-                if account.get("roleType", ROLE_MEMBER) not in B_ROLE_TYPES:
-                    raise ValueError("B端额度仅限代理商/合作方/分销商/定制客户使用")
+            if account_type == PAYLATER_ACCOUNT_B and account.get("roleType", ROLE_MEMBER) not in B_ROLE_TYPES:
+                raise ValueError("B端额度仅限代理商/合作方/分销商/定制客户使用")
 
             # 额度与上限(文档4.3.1)
             if account_type == PAYLATER_ACCOUNT_MEMBER:

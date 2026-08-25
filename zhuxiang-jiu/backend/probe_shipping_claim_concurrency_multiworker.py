@@ -242,7 +242,7 @@ async def probe_cross_process_conflict(n=5, region="mp_conflict_region") -> bool
     start = time.perf_counter()
     try:
         responses = await asyncio.wait_for(asyncio.gather(*tasks), timeout=15.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         elapsed = time.perf_counter() - start
         print(f"  X 超时! {n} 并发认领未完成 ({elapsed:.2f}s) → 死锁?")
         return False
@@ -295,7 +295,7 @@ async def probe_cross_process_idempotent(n=3, agent_id=1, region="mp_idempotent_
     start = time.perf_counter()
     try:
         responses = await asyncio.wait_for(asyncio.gather(*tasks), timeout=15.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         elapsed = time.perf_counter() - start
         print(f"  X 超时! {n} 并发幂等认领未完成 ({elapsed:.2f}s) → 死锁?")
         return False

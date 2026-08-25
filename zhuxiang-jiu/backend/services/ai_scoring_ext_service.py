@@ -25,6 +25,7 @@
 """
 
 import logging
+from typing import ClassVar
 
 from core.helpers import ts
 from services.ai_scoring_service import (
@@ -46,7 +47,7 @@ class MemberProfileScorer:
     7 因子加权 → 价值分(0-100, 越高越有价值) → 3级分层 + 运营动作
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "profile": 0.10,       # 资料完整度
         "account_age": 0.10,   # 账户年龄
         "activity": 0.15,      # 月活跃度
@@ -55,7 +56,7 @@ class MemberProfileScorer:
         "refund": 0.15,        # 退款率(逆向因子)
         "credit": 0.15,        # 竹信分
     }
-    REQUIRED = ["monthlyLogins", "monthlyConsumption", "bambooScore"]
+    REQUIRED: ClassVar[list] = ["monthlyLogins", "monthlyConsumption", "bambooScore"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口
@@ -139,7 +140,7 @@ class PointsRiskScorer:
     6 因子加权 → 风险分(0-100, 越高越危险) → 3级风险 + 处置动作
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "earn_burst": 0.25,       # 当日获取爆发
         "redeem_frequency": 0.15, # 兑换频率
         "channel_concentration": 0.15,  # 获取渠道集中度
@@ -147,7 +148,7 @@ class PointsRiskScorer:
         "violations": 0.15,       # 历史违规
         "night_activity": 0.10,   # 凌晨操作占比
     }
-    REQUIRED = ["todayEarned", "sameDeviceAccounts"]
+    REQUIRED: ClassVar[list] = ["todayEarned", "sameDeviceAccounts"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口
@@ -231,7 +232,7 @@ class MessageContentScorer:
     6 因子加权 → 风险分(0-100, 越高越危险) → 3级风险 + 审核动作
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "sensitive_words": 0.30,  # 敏感词命中
         "link_spam": 0.15,        # 链接堆砌
         "duplicate_content": 0.15,  # 重复内容
@@ -241,7 +242,7 @@ class MessageContentScorer:
     }
     SENSITIVE_WORDS = ("代开发票", "博彩", "贷款包过", "添加微信", "兼职日结",
                        "刷单", "返现", "高利贷", "股票内幕")
-    REQUIRED = ["content"]
+    REQUIRED: ClassVar[list] = ["content"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口
@@ -334,7 +335,7 @@ class WithdrawRiskScorer:
     对齐 wallet_service 双阈值惯例(自动打款/人工审核/冻结上报)。
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "amount_ratio": 0.20,      # 提现占比
         "frequency": 0.15,         # 提现频率
         "account_age": 0.15,       # 账户年龄
@@ -342,7 +343,7 @@ class WithdrawRiskScorer:
         "history_rejects": 0.15,   # 历史驳回
         "status_flags": 0.15,      # 账户状态
     }
-    REQUIRED = ["amount", "balance"]
+    REQUIRED: ClassVar[list] = ["amount", "balance"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口
@@ -440,14 +441,14 @@ class GroupbuyQualifyScorer:
     对齐 groupbuy_service 团购类型与 SVIP 资格校验惯例。
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "qualification_docs": 0.25,  # 资质材料
         "purchase_history": 0.20,    # 采购历史
         "payment_credit": 0.20,      # 付款信用
         "fulfillment": 0.20,         # 履约记录
         "demand_match": 0.15,        # 需求规模
     }
-    REQUIRED = ["qualificationDocs", "annualPurchaseAmount"]
+    REQUIRED: ClassVar[list] = ["qualificationDocs", "annualPurchaseAmount"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口
@@ -533,7 +534,7 @@ class AdminOperationScorer:
     对齐 admin_service 审计日志 action 类型(reset_password/assign_permissions/delete 等)。
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "sensitivity": 0.30,      # 操作敏感级
         "off_hours": 0.15,        # 非常规时段
         "frequency_burst": 0.15,  # 操作频率
@@ -541,12 +542,12 @@ class AdminOperationScorer:
         "pending_review": 0.15,   # 复核缺失
     }
     # 操作敏感级映射(对齐 admin_service 审计 action)
-    SENSITIVITY = {
+    SENSITIVITY: ClassVar[dict] = {
         "delete": 100, "reset_password": 100, "assign_permissions": 100,
         "update": 60, "update_price": 80, "refund": 80,
         "create": 30, "read": 10, "login": 10, "login_success": 10,
     }
-    REQUIRED = ["operationType"]
+    REQUIRED: ClassVar[list] = ["operationType"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口
@@ -636,7 +637,7 @@ class AgreementRiskScorer:
     5 因子加权 → 风险分(0-100, 越高越危险) → 3级风险 + 修订建议
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "exemption_density": 0.25,  # 免责条款密度
         "penalty_anomaly": 0.20,    # 违约金异常
         "unilateral_clauses": 0.20, # 单方权利条款
@@ -644,7 +645,7 @@ class AgreementRiskScorer:
         "missing_clauses": 0.20,    # 关键条款缺失
     }
     KEY_CLAUSES = ("交付条款", "付款条款", "违约责任", "争议解决", "保密条款")
-    REQUIRED = ["exemptionClauseCount", "penaltyRatio"]
+    REQUIRED: ClassVar[list] = ["exemptionClauseCount", "penaltyRatio"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口
@@ -748,14 +749,14 @@ class FinanceAnomalyScorer:
     对齐 finance_service 凭证审核(audit_voucher)与试算平衡惯例。
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "amount_deviation": 0.25,   # 金额偏离
         "summary_mismatch": 0.20,   # 摘要匹配度
         "off_hours": 0.15,          # 记账时段
         "frequency_spike": 0.20,    # 频率突增
         "balance_deviation": 0.20,  # 借贷不平衡
     }
-    REQUIRED = ["amount", "accountAverageAmount"]
+    REQUIRED: ClassVar[list] = ["amount", "accountAverageAmount"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口

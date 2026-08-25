@@ -27,7 +27,7 @@ def _require_member(x_member_id: str) -> int:
     try:
         return int(x_member_id)
     except ValueError:
-        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字")
+        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字") from None
 
 
 def _require_admin(x_role: str):
@@ -86,7 +86,7 @@ async def create_order(
                 remark=str(body.get("remark") or ""))
         return result
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/price/preview")
@@ -104,7 +104,7 @@ async def preview_price(
         )
         return result
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.get("/my")
@@ -117,7 +117,7 @@ async def my_orders(
     try:
         return await _service.get_my_orders(member_id, status)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.get("/statuses")
@@ -136,7 +136,7 @@ async def get_order(
     try:
         return await _service.get_by_id(order_id)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/pay")
@@ -159,7 +159,7 @@ async def pay_order(
             pass
         return result
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/cancel")
@@ -174,7 +174,7 @@ async def cancel_order(
     try:
         return await _service.cancel(order_id, reason)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/confirm")
@@ -187,7 +187,7 @@ async def confirm_order(
     try:
         return await _service.confirm(order_id)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/review")
@@ -205,7 +205,7 @@ async def review_order(
         await ai_hooks.on_order_outcome(order_id, "completed")
         return result
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/return")
@@ -222,7 +222,7 @@ async def apply_return(
     try:
         return await _service.apply_return(order_id, reason)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.delete("/{order_id}")
@@ -235,7 +235,7 @@ async def delete_order(
     try:
         return await _service.delete(order_id)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 # ============================================================
@@ -252,7 +252,7 @@ async def admin_list_orders(
     try:
         return await _service.list_all(status)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/ship")
@@ -273,7 +273,7 @@ async def ship_order(
         await ai_hooks.on_shipped(order_id, carrier)
         return result
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/refund")
@@ -289,7 +289,7 @@ async def refund_order(
         await ai_hooks.on_order_outcome(order_id, "refunded")
         return result
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/timeout/close")
@@ -302,7 +302,7 @@ async def timeout_close(
     try:
         return await _service.timeout_close(order_id)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/timeout/confirm")
@@ -315,7 +315,7 @@ async def timeout_confirm(
     try:
         return await _service.timeout_confirm(order_id)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/{order_id}/timeout/complete")
@@ -328,7 +328,7 @@ async def timeout_complete(
     try:
         return await _service.timeout_complete(order_id)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 def register_order_routes(app):

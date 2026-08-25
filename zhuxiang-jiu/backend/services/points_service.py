@@ -108,10 +108,7 @@ class PointsService:
             # 计算连续天数
             yesterday = today - timedelta(days=1)
             last_signin = await self.repo.get_signin(user_id, yesterday)
-            if last_signin:
-                continuous_days = last_signin.get("continuousDays", 0) + 1
-            else:
-                continuous_days = 1
+            continuous_days = last_signin.get("continuousDays", 0) + 1 if last_signin else 1
 
             # 计算获得积分
             bonus_days = min(continuous_days - 1, SIGNIN_BONUS_CAP - 1)

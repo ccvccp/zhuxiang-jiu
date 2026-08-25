@@ -27,10 +27,12 @@ exclude = [
 #   F811 重定义
 #   F841 未使用局部变量
 # UP = pyupgrade: 现代化语法(Optional[X]→X|None, List→list, StrEnum 等)
+# B = bugbear: 常见 bug 模式(B904 raise缺from, B007 未使用循环变量)
+# SIM = 简化(SIM105 suppress, SIM102 合并if, SIM108 三元, SIM117 with合并)
+# RUF012 = 可变类默认值
+# RUF015 = 不必要的可迭代分配
 # RUF100 = 无用的 noqa 注释
-# SIM117 = 可合并的 with 语句
-# CI 门禁阻断"明确的错误"(语法/未定义/重定义/未使用/旧语法)
-select = ["E9", "F", "UP", "RUF100", "SIM117"]
+select = ["E9", "F", "UP", "B", "SIM", "RUF012", "RUF015", "RUF100"]
 
 [lint.per-file-ignores]
 # 测试文件允许未使用导入(常量导入是测试风格, 不阻断)
@@ -39,3 +41,7 @@ select = ["E9", "F", "UP", "RUF100", "SIM117"]
 "conftest.py" = ["F401"]
 # *_smoke.py 冒烟测试允许未使用导入
 "*_smoke.py" = ["F401"]
+# routes 的 FastAPI Depends() 是标准模式, B008 误报
+"routes/*.py" = ["B008"]
+# services 的 Repository() 构造默认值是项目模式, B008 误报
+"services/*.py" = ["B008"]

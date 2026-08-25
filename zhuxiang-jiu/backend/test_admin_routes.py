@@ -27,6 +27,7 @@
 """
 
 import asyncio
+import contextlib
 import os
 import sys
 from datetime import datetime
@@ -119,11 +120,9 @@ class TestLogin:
         # test 4: 连续失败5次锁定
         # 先重置 store 让超管恢复
         reset_store()
-        for i in range(LOGIN_FAIL_LIMIT - 1):
-            try:
+        for _i in range(LOGIN_FAIL_LIMIT - 1):
+            with contextlib.suppress(ValueError):
                 await svc.login(SUPER_ADMIN_USERNAME, "wrong")
-            except ValueError:
-                pass
         # 第5次失败应触发锁定
         try:
             await svc.login(SUPER_ADMIN_USERNAME, "wrong")

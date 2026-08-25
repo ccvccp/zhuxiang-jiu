@@ -154,7 +154,7 @@ async def login_token(phone, password):
 
 class TestPathPolicy:
     async def run(self):
-        mw, mock = build_middleware()
+        mw, _mock = build_middleware()
 
         # test 1: 公开精确路径(登录接口, POST 无 token 放行)
         status, _, reached = await invoke(
@@ -183,7 +183,7 @@ class TestPathPolicy:
                f"reached={reached}")
 
         # test 5: OPTIONS 预检请求放行(CORS 处理)
-        status, _, reached = await invoke(
+        _status, _, reached = await invoke(
             mw, make_scope("OPTIONS", "/api/order/my"))
         record("test_05_options_preflight_passes",
                reached, f"reached={reached}")
@@ -215,7 +215,7 @@ class TestJwtInjection:
 
         # test 8: 有效 token → 注入 x-member-id / x-role
         mw, mock = build_middleware()
-        status, _, reached = await invoke(
+        _status, _, reached = await invoke(
             mw, make_scope("GET", "/api/order/my",
                            headers={"Authorization": f"Bearer {token}"}))
         headers = _scope_headers(mock.last_scope)
@@ -226,7 +226,7 @@ class TestJwtInjection:
 
         # test 9: 伪造头覆盖(X-Member-Id/X-Role 被 JWT 声明替换)
         mw, mock = build_middleware()
-        status, _, reached = await invoke(
+        _status, _, reached = await invoke(
             mw, make_scope("GET", "/api/order/my",
                            headers={
                                "Authorization": f"Bearer {token}",
@@ -249,7 +249,7 @@ class TestJwtInjection:
         _mock_store["members"][1]["role"] = "admin"
         admin_token = await login_token("13800000001", "test123456")
         mw, mock = build_middleware()
-        status, _, reached = await invoke(
+        _status, _, reached = await invoke(
             mw, make_scope("GET", "/api/order/admin/list",
                            headers={"Authorization": f"Bearer {admin_token}"}))
         headers = _scope_headers(mock.last_scope)
@@ -260,7 +260,7 @@ class TestJwtInjection:
 
         # test 12: token 角色与存储不一致时以存储为准(角色变更即时生效)
         mw, mock = build_middleware()
-        status, _, reached = await invoke(
+        _status, _, reached = await invoke(
             mw, make_scope("GET", "/api/order/my",
                            headers={"Authorization": f"Bearer {admin_token}"}))
         headers = _scope_headers(mock.last_scope)
@@ -270,7 +270,7 @@ class TestJwtInjection:
 
         # test 13: compat 模式无 token 时旧头原样透传(不移除)
         mw, mock = build_middleware()
-        status, _, reached = await invoke(
+        _status, _, reached = await invoke(
             mw, make_scope("GET", "/api/member/profile",
                            headers={"X-Member-Id": "1", "X-Role": "admin"}))
         headers = _scope_headers(mock.last_scope)
@@ -287,7 +287,7 @@ class TestJwtInjection:
 class TestInvalidToken:
     async def run(self):
         reset_store()
-        mw, mock = build_middleware()
+        mw, _mock = build_middleware()
         protected = "/api/order/my"
 
         # test 14: 乱码 token → 401, 不到达内层
@@ -377,7 +377,7 @@ class TestStrictMode:
         token = await login_token("13800000001", "test123456")
         try:
             os.environ["AUTH_MODE"] = "strict"
-            mw, mock = build_middleware()
+            mw, _mock = build_middleware()
 
             # test 22: 无 token 受保护路径 → 401, 不到达内层
             status, body, reached = await invoke(
@@ -414,7 +414,7 @@ class TestStrictMode:
             os.environ["AUTH_MODE"] = "compat"
 
         # test 26: 恢复 compat 后旧头重新生效
-        mw, mock = build_middleware()
+        mw, _mock = build_middleware()
         status, _, reached = await invoke(
             mw, make_scope("GET", "/api/member/profile",
                            headers={"X-Member-Id": "1"}))
@@ -452,8 +452,8 @@ class TestPurity:
                f"err={proc.stderr.strip()[:120]}")
 
         # test 28: 401 响应为合法 JSON 且含 detail 字段(与 FastAPI 异常格式一致)
-        mw, mock = build_middleware()
-        status, body, reached = await invoke(
+        mw, _mock = build_middleware()
+        status, body, _reached = await invoke(
             mw, make_scope("GET", "/api/order/my",
                            headers={"Authorization": "Bearer bad.token"}))
         record("test_28_error_response_json_format",

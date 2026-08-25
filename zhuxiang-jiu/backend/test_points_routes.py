@@ -451,7 +451,7 @@ async def main():
         await instance.run(svc)
         print()
         # 输出当前测试类的结果
-        for r in RESULTS[-len(instance.run.__code__.co_consts):]:
+        for _r in RESULTS[-len(instance.run.__code__.co_consts):]:
             pass
         # 简单输出已记录结果
 

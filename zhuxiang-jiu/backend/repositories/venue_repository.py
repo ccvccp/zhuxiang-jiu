@@ -363,9 +363,8 @@ class VenueRepository:
         if venue is None:
             return False
         pid = venue.get("partnerId")
-        if pid is not None and pid in self.store["venues_by_partner"]:
-            if venue_id in self.store["venues_by_partner"][pid]:
-                self.store["venues_by_partner"][pid].remove(venue_id)
+        if pid is not None and pid in self.store["venues_by_partner"] and venue_id in self.store["venues_by_partner"][pid]:
+            self.store["venues_by_partner"][pid].remove(venue_id)
         return True
 
     # --- 铺货记录 ---

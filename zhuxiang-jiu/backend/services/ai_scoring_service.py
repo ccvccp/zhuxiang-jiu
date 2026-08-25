@@ -19,6 +19,7 @@
 """
 
 import logging
+from typing import ClassVar
 from datetime import datetime, UTC
 
 from core.helpers import ts
@@ -71,7 +72,7 @@ class OrderRiskScorer:
     8 因子加权 → 风险分(0-100, 越高越危险) → 3级风险 + 处置动作
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "credit": 0.20,        # 会员竹信分
         "register_age": 0.15,  # 注册时长
         "amount": 0.15,        # 大额异常
@@ -82,7 +83,7 @@ class OrderRiskScorer:
         "time_pattern": 0.05,  # 下单时段
     }
     RISK_WORDS = ("刷单", "代刷", "返现", "刷单返", "薅羊毛", "黄牛")
-    REQUIRED = ["bambooScore", "registerHours", "orderAmount", "historyOrders"]
+    REQUIRED: ClassVar[list] = ["bambooScore", "registerHours", "orderAmount", "historyOrders"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口
@@ -197,7 +198,7 @@ class PaymentRoutingScorer:
     5 因子/渠道 → 适配分(0-100, 越高越优) → 排序推荐
     """
 
-    WEIGHTS = {"availability": 0.30, "limit_fit": 0.25, "cost": 0.20,
+    WEIGHTS: ClassVar[dict] = {"availability": 0.30, "limit_fit": 0.25, "cost": 0.20,
                "scene_fit": 0.15, "capacity": 0.10}
 
     async def score(self, ctx: dict) -> dict:
@@ -424,7 +425,7 @@ class TrafficAntiFraudScorer:
     7 因子加权 → 作弊分(0-100) → 3级风险 + 处置动作
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "burst": 0.20,            # 短时爆发
         "new_account": 0.20,      # 新账号占比
         "promoter_history": 0.15, # 历史作弊
@@ -433,7 +434,7 @@ class TrafficAntiFraudScorer:
         "night": 0.10,            # 凌晨占比
         "effective_rate": 0.05,   # 有效率过低
     }
-    REQUIRED = ["recentCount", "totalRecords", "newAccountRatio"]
+    REQUIRED: ClassVar[list] = ["recentCount", "totalRecords", "newAccountRatio"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口
@@ -518,7 +519,7 @@ class PromotionAntiFraudScorer:
     6 因子加权 → 作弊分(0-100) → 3级风险 + 奖励处置动作
     """
 
-    WEIGHTS = {
+    WEIGHTS: ClassVar[dict] = {
         "loop_suspect": 0.20,   # 疑似环/自绑
         "bind_speed": 0.20,     # 绑定到领奖速度
         "zombie": 0.20,         # 僵尸下级占比
@@ -526,7 +527,7 @@ class PromotionAntiFraudScorer:
         "history": 0.15,        # 历史撤销/申诉
         "night": 0.10,          # 凌晨绑定占比
     }
-    REQUIRED = ["relationCount", "avgBindToRewardHours", "inactiveInviteeRatio"]
+    REQUIRED: ClassVar[list] = ["relationCount", "avgBindToRewardHours", "inactiveInviteeRatio"]
 
     async def score(self, ctx: dict) -> dict:
         """评分入口

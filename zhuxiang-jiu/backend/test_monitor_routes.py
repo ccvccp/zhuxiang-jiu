@@ -170,7 +170,7 @@ class TestMetricCollect:
             record("test_08_invalid_metric_type", True)
 
         # test 09: 查询指标详情
-        record_id = result["id"] if "id" in result else 1
+        record_id = result.get("id", 1)
         detail = await svc.get_metric(record_id)
         record("test_09_get_metric_detail",
                detail["id"] == record_id,

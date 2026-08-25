@@ -89,7 +89,7 @@ def _require_agent_id(x_agent_id: str) -> int:
     try:
         return int(x_agent_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="X-Agent-Id 须为数字")
+        raise HTTPException(status_code=401, detail="X-Agent-Id 须为数字") from None
 
 
 def _map_key_error(exc: KeyError) -> HTTPException:

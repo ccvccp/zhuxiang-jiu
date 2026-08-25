@@ -57,7 +57,7 @@ def _require_member_id(x_member_id: str | None) -> int:
     try:
         return int(x_member_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="X-Member-Id 格式不正确")
+        raise HTTPException(status_code=401, detail="X-Member-Id 格式不正确") from None
 
 
 def _require_admin(x_role: str | None):

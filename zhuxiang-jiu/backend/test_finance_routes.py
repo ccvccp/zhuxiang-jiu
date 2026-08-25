@@ -316,7 +316,7 @@ class TestVoucherAutoFromRefund:
         credit = sum(e["amount"] for e in voucher["entries"] if e["direction"] == "credit")
         assert abs(debit - credit) < 0.01
         # 银行存款在贷方
-        bank_entry = [e for e in voucher["entries"] if e["subject"] == "银行存款"][0]
+        bank_entry = next(e for e in voucher["entries"] if e["subject"] == "银行存款")
         assert bank_entry["direction"] == "credit"
 
     async def test_refund_auto_not_refunded(self, client):

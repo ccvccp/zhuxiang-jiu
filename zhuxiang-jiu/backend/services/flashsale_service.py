@@ -95,7 +95,7 @@ class FlashSaleService:
             start = parse_iso(start_time)
             end = parse_iso(end_time)
         except (ValueError, TypeError):
-            raise ValueError("时间格式非法, 请使用 ISO8601(如 2026-08-22T20:00:00+08:00)")
+            raise ValueError("时间格式非法, 请使用 ISO8601(如 2026-08-22T20:00:00+08:00)") from None
         if end <= start:
             raise ValueError("结束时间必须晚于开始时间")
         if end <= datetime.now(UTC):
@@ -505,7 +505,7 @@ class FlashSaleService:
             try:
                 value = int(value)
             except (TypeError, ValueError):
-                raise ValueError(f"{key} 必须为非负整数")
+                raise ValueError(f"{key} 必须为非负整数") from None
             if value < 0:
                 raise ValueError(f"{key} 必须为非负整数")
             if key == "maxQuantityPerOrder" and value < 1:

@@ -46,7 +46,7 @@ def _require_member(x_member_id: str) -> int:
     try:
         return int(x_member_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字")
+        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字") from None
 
 
 def _map_key_error(exc: KeyError) -> HTTPException:
@@ -90,7 +90,7 @@ async def list_vouchers(
             period=period, voucher_type=type, source=source, status=status,
         )
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.get("/api/finance/voucher/{voucher_no}", tags=["财务管理"])
@@ -103,7 +103,7 @@ async def get_voucher(
     try:
         return await _service.get_voucher(voucher_no)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/voucher/auto/order/{order_id}", tags=["财务管理"])
@@ -119,7 +119,7 @@ async def auto_voucher_from_order(
     try:
         return await _service.auto_voucher_from_order(order_id)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/voucher/auto/refund/{order_id}", tags=["财务管理"])
@@ -132,7 +132,7 @@ async def auto_voucher_from_refund(
     try:
         return await _service.auto_voucher_from_refund(order_id)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/voucher/audit/{voucher_no}", tags=["财务管理"])
@@ -145,7 +145,7 @@ async def audit_voucher(
     try:
         return await _service.audit_voucher(voucher_no)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/voucher/closing", tags=["财务管理"])
@@ -161,7 +161,7 @@ async def month_end_closing(
     try:
         return await _service.month_end_closing(period)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 # ============================================================
@@ -182,7 +182,7 @@ async def list_invoices(
             status=status, invoice_type=type, period=period,
         )
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.get("/api/finance/invoice/{invoice_no}", tags=["财务管理"])
@@ -195,7 +195,7 @@ async def get_invoice(
     try:
         return await _service.get_invoice(invoice_no)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/invoice/issue", tags=["财务管理"])
@@ -228,7 +228,7 @@ async def issue_invoice(
             amount=body.get("amount"),
         )
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/invoice/red/{invoice_no}", tags=["财务管理"])
@@ -243,7 +243,7 @@ async def red_invoice(
     try:
         return await _service.red_invoice(invoice_no, reason)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 # ============================================================
@@ -264,7 +264,7 @@ async def list_tax_declarations(
             tax_type=taxType, period=period, status=status,
         )
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.get("/api/finance/tax/{declaration_no}", tags=["财务管理"])
@@ -277,7 +277,7 @@ async def get_tax_declaration(
     try:
         return await _service.get_tax_declaration(declaration_no)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/tax/calc/{period}", tags=["财务管理"])
@@ -290,7 +290,7 @@ async def calc_tax(
     try:
         return await _service.calc_tax(period)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/tax/declare/{declaration_no}", tags=["财务管理"])
@@ -303,7 +303,7 @@ async def declare_tax(
     try:
         return await _service.declare_tax(declaration_no)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 # ============================================================
@@ -324,7 +324,7 @@ async def list_reconciliations(
             date=date, recon_type=type, status=status,
         )
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/recon/daily/{date}", tags=["财务管理"])
@@ -337,7 +337,7 @@ async def daily_reconciliation(
     try:
         return await _service.daily_reconciliation(date)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/recon/{recon_id}/resolve", tags=["财务管理"])
@@ -353,7 +353,7 @@ async def resolve_reconciliation(
     try:
         return await _service.resolve_reconciliation(recon_id, reason, handler)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 # ============================================================
@@ -371,7 +371,7 @@ async def list_payments(
     try:
         return await _service.list_payments(payment_type=type, status=status)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/payment/apply", tags=["财务管理"])
@@ -389,7 +389,7 @@ async def apply_payment(
             description=body.get("description", ""),
         )
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.post("/api/finance/payment/{payment_no}/approve", tags=["财务管理"])
@@ -410,7 +410,7 @@ async def approve_payment(
             approver=approver, decision=decision, reason=reason,
         )
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 # ============================================================
@@ -427,7 +427,7 @@ async def profit_statement(
     try:
         return await _service.profit_statement(period)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 @router.get("/api/finance/report/management/{date}", tags=["财务管理"])
@@ -440,7 +440,7 @@ async def management_report(
     try:
         return await _service.management_report(date)
     except Exception as e:
-        raise _handle(e)
+        raise _handle(e) from e
 
 
 # ============================================================

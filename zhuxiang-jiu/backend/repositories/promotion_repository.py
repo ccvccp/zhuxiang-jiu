@@ -67,7 +67,7 @@ class PromotionRepository:
         for key in ("promotion_codes", "promotion_relations",
                     "promotion_rewards", "promotion_wine_claims",
                     "promotion_settings"):
-            self.store.setdefault(key, {} if key == "promotion_settings" else {})
+            self.store.setdefault(key, {})
 
     # ============================================================
     # 序列号生成

@@ -95,7 +95,7 @@ def _require_member_id(x_member_id: str | None) -> int:
     try:
         return int(x_member_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="X-Member-Id 格式不正确")
+        raise HTTPException(status_code=401, detail="X-Member-Id 格式不正确") from None
 
 
 def _require_admin(x_role: str | None):
@@ -111,7 +111,7 @@ def _safe_int(value: str | None, *, field: str) -> int | None:
     try:
         return int(value)
     except ValueError:
-        raise HTTPException(status_code=409, detail=f"{field} 须为整数")
+        raise HTTPException(status_code=409, detail=f"{field} 须为整数") from None
 
 
 def _safe_float(value: str | None, *, field: str) -> float | None:
@@ -121,7 +121,7 @@ def _safe_float(value: str | None, *, field: str) -> float | None:
     try:
         return float(value)
     except ValueError:
-        raise HTTPException(status_code=409, detail=f"{field} 须为数字")
+        raise HTTPException(status_code=409, detail=f"{field} 须为数字") from None
 
 
 # ============================================================

@@ -136,13 +136,13 @@ class TestAddressManage:
         # test 5: 设为默认(清除旧默认)
         await svc.set_default_address(result2["id"], USER_ID_1)
         addresses = await svc.list_addresses(USER_ID_1)
-        default_addr = [a for a in addresses if a["isDefault"]][0]
+        default_addr = next(a for a in addresses if a["isDefault"])
         record("test_05_set_default",
                default_addr["id"] == result2["id"],
                f"expected id={result2['id']}, got {default_addr['id']}")
 
         # test 6: 旧默认被清除
-        old_default = [a for a in addresses if a["id"] == result["id"]][0]
+        old_default = next(a for a in addresses if a["id"] == result["id"])
         record("test_06_old_default_cleared",
                old_default["isDefault"] is False,
                f"expected False, got {old_default['isDefault']}")

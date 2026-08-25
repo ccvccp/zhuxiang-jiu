@@ -29,7 +29,7 @@ os.environ["AUTH_MODE"] = "compat"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from services.ai_learning_service import (  # noqa: E402
+from services.ai_learning_service import (
     default_weights, get_active_weight_version, get_weights_view,
     reset_weights, run_learning_cycle, submit_feedback,
     update_learning_config,

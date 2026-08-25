@@ -160,7 +160,7 @@ async def probe_deduct_oversell_mp(n=100) -> bool:
     start = time.perf_counter()
     try:
         await asyncio.wait_for(asyncio.gather(*deduct_tasks), timeout=15.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         elapsed = time.perf_counter() - start
         print(f"[1.超卖 MP] X 超时! {n} 并发 deduct 未完成 ({elapsed:.2f}s)")
         return False
@@ -187,7 +187,7 @@ async def probe_upgrade_lost_update_mp(n=100) -> bool:
     start = time.perf_counter()
     try:
         await asyncio.wait_for(asyncio.gather(*upgrade_tasks), timeout=15.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         elapsed = time.perf_counter() - start
         print(f"[2.丢失更新 MP] X 超时! {n} 并发 upgrade 未完成 ({elapsed:.2f}s)")
         return False
@@ -222,7 +222,7 @@ async def probe_mixed_shared_lock_mp(n=50) -> bool:
             asyncio.gather(*deduct_tasks, *restock_tasks),
             timeout=15.0
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         print("[3.共享锁 MP] X 超时! 100 请求未在 15s 完成")
         return False  # 超时 = 失败, CI 应捕获
 
@@ -249,7 +249,7 @@ async def probe_deadlock_mp(n=100, timeout=15.0) -> bool:
     start = time.perf_counter()
     try:
         responses = await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         elapsed = time.perf_counter() - start
         print(f"[4.死锁 MP] X 超时! {n} 并发未在 {timeout}s 完成 ({elapsed:.2f}s)")
         return False  # 死锁 = 失败

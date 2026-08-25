@@ -17,6 +17,7 @@
 锁键: product:{product_id}(评价写入等 RMW 操作, 由 services 层负责)
 """
 
+import contextlib
 import json
 import logging
 
@@ -958,7 +959,7 @@ class ProductRepository:
     def _mem_increment_like_count(self, review_id: str, delta: int):
         """更新评价的 like_count 字段(内存模式, 遍历所有产品评价)"""
         self._ensure_store()
-        for product_id, reviews in self.store["product_reviews"].items():
+        for _product_id, reviews in self.store["product_reviews"].items():
             for r in reviews:
                 if r.get("review_id") == review_id:
                     current = r.get("like_count", 0)
@@ -1311,10 +1312,8 @@ class ProductRepository:
         # 还原 JSON 嵌套字段
         for k in ("tags", "scenes", "attributes", "images"):
             if k in result and isinstance(result[k], str):
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     result[k] = json.loads(result[k])
-                except (TypeError, ValueError):
-                    pass
         # 类型还原
         for k in ("alcohol", "sales_monthly", "sales_total", "rating_count"):
             if k in result:
