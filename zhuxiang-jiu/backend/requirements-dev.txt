@@ -4,3 +4,8 @@ pytest==8.3.0
 httpx==0.27.0
 pytest-cov==5.0.0
 pytest-asyncio==0.24.0
+# fakeredis: Redis 集成测试在无 Redis 环境下的回退后端(fakeredis_plugin.py 依赖)
+# lupa: fakeredis 的 Lua 脚本支持(分布式锁 EVALSHA 需要),与 fakeredis_plugin 中
+#       lua_max_executor_time=5 对齐
+fakeredis>=2.20.0
+lupa>=2.0

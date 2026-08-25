@@ -67,12 +67,13 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: zhuxiang-jiu/backend/requirements.txt
+          cache-dependency-path: zhuxiang-jiu/backend/requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # 必须装 requirements-dev.txt: pytest/pytest-asyncio/pytest-cov/httpx 都在此
+          pip install -r requirements-dev.txt
 
       - name: Run pytest with coverage
         run: |
@@ -114,12 +115,13 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: zhuxiang-jiu/backend/requirements.txt
+          cache-dependency-path: zhuxiang-jiu/backend/requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # 必须装 requirements-dev.txt: pytest/pytest-asyncio/pytest-cov/httpx 都在此
+          pip install -r requirements-dev.txt
 
       - name: Run pytest
         shell: pwsh
@@ -163,8 +165,13 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run tests in container
+        # Dockerfile 只装生产依赖(requirements.txt), 容器内无 pytest。
+        # 挂载 requirements-dev.txt 进容器临时安装测试依赖后跑 pytest。
         run: |
-          docker run --rm zhuxiang-decision-api:ci-test pytest -v --junitxml=/tmp/test-results-docker.xml
+          docker run --rm \
+            -v $PWD/requirements-dev.txt:/tmp/requirements-dev.txt:ro \
+            zhuxiang-decision-api:ci-test \
+            sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && pytest -v --junitxml=/tmp/test-results-docker.xml"
 
       - name: Extract test results from container
         if: always()
@@ -286,12 +293,13 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: zhuxiang-jiu/backend/requirements.txt
+          cache-dependency-path: zhuxiang-jiu/backend/requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # probe_concurrency.py 用 httpx.ASGITransport 直驱 FastAPI, 需 httpx
+          pip install -r requirements-dev.txt
 
       - name: Run concurrency probe (asyncio.Lock regression)
         run: |
@@ -331,12 +339,13 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: zhuxiang-jiu/backend/requirements.txt
+          cache-dependency-path: zhuxiang-jiu/backend/requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # probe_shipping_claim_concurrency.py 用 httpx.ASGITransport, 需 httpx
+          pip install -r requirements-dev.txt
 
       - name: Run shipping claim concurrency probe (asyncio regression)
         env:
@@ -397,7 +406,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r zhuxiang-jiu/backend/requirements.txt
+          # 装 requirements-dev.txt: pytest/pytest-asyncio/httpx(probe 脚本用 ASGITransport)
+          pip install -r zhuxiang-jiu/backend/requirements-dev.txt
 
       - name: Verify Redis connectivity
         run: |
@@ -454,7 +464,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r zhuxiang-jiu/backend/requirements.txt
+          # 装 requirements-dev.txt: pytest/pytest-asyncio/httpx(probe 脚本用 ASGITransport)
+          pip install -r zhuxiang-jiu/backend/requirements-dev.txt
 
       - name: Verify Redis connectivity
         run: |
@@ -512,7 +523,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r zhuxiang-jiu/backend/requirements.txt
+          # 装 requirements-dev.txt: pytest/pytest-asyncio/httpx(probe 脚本用 ASGITransport)
+          pip install -r zhuxiang-jiu/backend/requirements-dev.txt
 
       - name: Verify Redis connectivity
         run: |

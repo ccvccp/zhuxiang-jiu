@@ -63,10 +63,11 @@ def _iso(dt: datetime) -> str:
 
 
 async def _mk_user(days_old: float, balance: float,
-                   withdrawals: list = None) -> str:
+                   withdrawals: list = None) -> int:
     """构造测试用户: 会员 + 活跃钱包 + 可选提现历史(分钟前)
 
     withdrawals: [(status, minutes_ago), ...]
+    返回: 会员ID(int, 对齐路由 _require_member_id 返回类型)
     """
     now = datetime.now(timezone.utc)
     _phone_seq[0] += 1
@@ -79,21 +80,22 @@ async def _mk_user(days_old: float, balance: float,
         "last_login_at": _iso(now),
     })
     mid = member["id"]
-    # 钱包以字符串键存储(对齐路由 X-Member-Id 传参形态)
-    await WalletRepository().open_account(str(mid), {
+    # 钱包以 int 键存储(对齐路由 _require_member_id 返回 int 的形态;
+    # HTTP 层 X-Member-Id 头会被路由 int() 转换, 键类型必须一致才能命中)
+    await WalletRepository().open_account(mid, {
         "status": "active", "balance": float(balance), "frozenAmount": 0.0,
         "createdAt": ts(), "updatedAt": ts(),
     })
     repo = WalletRepository()
     for i, (status, minutes_ago) in enumerate(withdrawals or [], start=1):
         await repo.save_withdrawal({
-            "withdrawNo": f"WD-T{mid}-{i}", "userId": str(mid),
+            "withdrawNo": f"WD-T{mid}-{i}", "userId": mid,
             "amount": 100.0, "fee": 0.0, "actualAmount": 100.0,
             "source": "current", "status": status,
             "createdAt": _iso(now - timedelta(minutes=minutes_ago)),
             "updatedAt": ts(),
         })
-    return str(mid)
+    return mid
 
 
 async def _seed_feedback(total: int, correct: int) -> None:
@@ -282,7 +284,8 @@ async def main():
 
     if TestClient is not None:
         client = TestClient(app)
-        headers = {"X-Member-Id": clean}
+        # HTTP 头值必须是 str(httpx 要求), 路由 _require_member_id 会 int() 转回
+        headers = {"X-Member-Id": str(clean)}
         # observe: 200
         resp = client.post("/api/wallet/withdraw",
                            json={"amount": 100, "payChannel": "bank",
@@ -299,12 +302,14 @@ async def main():
             resp = client.post("/api/wallet/withdraw",
                                json={"amount": 1000, "payChannel": "bank",
                                      "bankAccount": "6222021234567890"},
-                               headers={"X-Member-Id": risky})
+                               headers={"X-Member-Id": str(risky)})
+            # core.errors 全局异常处理把 ValueError 映射为:
+            # {"success": False, "error": "<原 ValueError 消息>"}
+            body = resp.json()
+            err = str(body.get("error") or body.get("detail") or body.get("message") or "")
             record("10_http_enforce_high_risk_returns_409",
-                   resp.status_code == 409
-                   and "风控拦截" in str(resp.json().get("detail") or ""),
-                   f"code={resp.status_code}, "
-                   f"detail={resp.json().get('detail')}")
+                   resp.status_code == 409 and "风控拦截" in err,
+                   f"code={resp.status_code}, body={body}")
         finally:
             os.environ.pop("AI_ENFORCE_MODE")
             os.environ.pop("AI_ENFORCE_SCOPES")

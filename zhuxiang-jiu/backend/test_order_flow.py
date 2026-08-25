@@ -22,17 +22,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import app, _mock_store
-from repositories.store import _build_initial_inventory
+from repositories.store import reset_store
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def _reset_inventory():
-    """每个测试前重置库存到初始值(避免测试间状态污染)"""
-    _mock_store["inventory"] = _build_initial_inventory()
+def _reset_store_state():
+    """每个测试前重置 _mock_store 到初始状态(避免测试间状态污染)"""
+    reset_store()
     yield
-    _mock_store["inventory"] = _build_initial_inventory()
+    reset_store()
 
 
 # ============================================================

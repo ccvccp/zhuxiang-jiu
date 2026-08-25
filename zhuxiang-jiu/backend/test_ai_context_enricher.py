@@ -247,7 +247,8 @@ async def main():
         from services.wallet_service import WalletService
         ws = WalletService(wallet_repo=WalletRepository(),
                            member_repo=member_repo)
-        await ws.open_account(mid)
+        # WalletService 的开通方法名为 open(非 open_account)
+        await ws.open(mid)
         await WalletRepository().add_balance(mid, 10000.0)
         resp = client.post(
             "/api/wallet/withdraw",
