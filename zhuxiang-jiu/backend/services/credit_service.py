@@ -27,7 +27,6 @@ v8.0 等级规则引擎(文档4.1, 替代旧的即时映射):
 """
 
 from datetime import datetime, timedelta
-from typing import Optional
 
 from core.locks import get_lock
 from core.helpers import ts

@@ -19,8 +19,7 @@
     - ValueError → 409(业务冲突: 重复激活/已回收/已冻结等)
 """
 
-from datetime import datetime, date
-from typing import Optional
+from datetime import date
 
 from core.locks import get_lock
 from core.helpers import ts, bc_hash

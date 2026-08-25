@@ -18,7 +18,6 @@
     - ValueError → 409(业务冲突: 资格不符/城市被占/状态非法等)
 """
 
-from datetime import datetime, timezone
 import logging
 from typing import Optional
 

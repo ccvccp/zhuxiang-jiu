@@ -22,10 +22,9 @@
 """
 
 from datetime import datetime
-from typing import Optional
 
 from core.locks import get_lock
-from core.helpers import ts, bc_hash
+from core.helpers import bc_hash
 from repositories.venue_repository import (
     VenueRepository,
     PARTNER_TYPES, PARTNER_LEVELS, PARTNER_STATUSES, PARTNER_TRANSITIONS,

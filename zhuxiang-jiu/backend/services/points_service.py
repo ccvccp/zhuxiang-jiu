@@ -20,11 +20,9 @@
     - ValueError → 409(业务冲突: 重复签到/积分不足/超上限等)
 """
 
-from datetime import datetime, date, timedelta, timezone
-from typing import Optional
+from datetime import datetime, date, timedelta
 
 from core.locks import get_lock
-from core.helpers import ts
 from repositories.points_repository import (
     PointsRepository,
     # 流水类型

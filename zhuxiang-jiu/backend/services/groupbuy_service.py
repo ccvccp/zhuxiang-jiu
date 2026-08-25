@@ -20,7 +20,6 @@
 
 import json
 from datetime import datetime, timezone
-from typing import Optional
 
 from core.locks import get_lock
 from core.helpers import ts

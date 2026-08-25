@@ -21,7 +21,6 @@
     - ValueError → 409(状态非法/参数无效)
 """
 
-from typing import Optional
 
 from core.locks import get_lock
 from core.helpers import ts, bc_hash

@@ -19,10 +19,8 @@
 """
 
 from datetime import datetime
-from typing import Optional
 
 from core.locks import get_lock
-from core.helpers import ts
 from repositories.activity_repository import (
     ActivityRepository,
     # 活动类型

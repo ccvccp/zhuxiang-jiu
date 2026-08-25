@@ -20,7 +20,6 @@
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from core.helpers import ts
 from core.locks import get_lock

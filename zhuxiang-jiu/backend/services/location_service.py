@@ -17,7 +17,6 @@
     - ValueError → 409(地址超限/状态非法)
 """
 
-from typing import Optional
 
 from core.locks import get_lock
 from core.helpers import ts, bc_hash

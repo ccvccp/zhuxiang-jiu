@@ -20,10 +20,8 @@
 """
 
 from datetime import datetime, timedelta
-from typing import Optional
 
 from core.locks import get_lock
-from core.helpers import ts
 from repositories.admin_repository import (
     AdminRepository,
     _hash_admin_pwd,

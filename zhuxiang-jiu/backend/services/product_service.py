@@ -19,7 +19,6 @@
 """
 
 import logging
-from typing import Optional
 
 from core.helpers import ts
 from core.locks import get_lock

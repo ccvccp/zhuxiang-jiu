@@ -19,8 +19,7 @@
     - core.locks.get_lock(分布式锁)
 """
 
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
 from core.helpers import ts
 from core.locks import get_lock

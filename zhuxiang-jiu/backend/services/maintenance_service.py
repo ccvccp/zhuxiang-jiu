@@ -19,7 +19,6 @@
     - ValueError → 409(状态非法/参数无效/状态流转违规)
 """
 
-from typing import Optional
 
 from core.locks import get_lock
 from core.helpers import ts

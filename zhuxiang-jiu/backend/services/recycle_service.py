@@ -23,8 +23,7 @@
     - ValueError → 409(业务冲突: 重复申请/状态非法/超限额等)
 """
 
-from datetime import datetime, date, timedelta
-from typing import Optional
+from datetime import date
 
 from core.locks import get_lock
 from core.helpers import ts, bc_hash

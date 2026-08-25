@@ -25,7 +25,6 @@
 """
 
 import logging
-from datetime import datetime, timezone
 
 from core.helpers import ts
 from services.ai_scoring_service import (
