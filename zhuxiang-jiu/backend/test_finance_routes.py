@@ -893,7 +893,7 @@ class TestReconList:
     """对账列表(3): 成功/筛选/空"""
 
     async def test_list_success(self, client):
-        order_id = await _create_paid_order(client)
+        await _create_paid_order(client)
         await client.post(
             f"/api/finance/recon/daily/{TODAY}", headers=ADMIN_HEADERS,
         )
@@ -927,7 +927,7 @@ class TestReconDaily:
     """日终对账(4): 成功(三方一致)/无订单/非admin/重复对账"""
 
     async def test_daily_success(self, client):
-        order_id = await _create_paid_order(client)
+        await _create_paid_order(client)
         resp = await client.post(
             f"/api/finance/recon/daily/{TODAY}", headers=ADMIN_HEADERS,
         )
@@ -1354,7 +1354,7 @@ class TestManagementReport:
     """管理报表(3): 成功/非admin/结构完整"""
 
     async def test_management_success(self, client):
-        order_id = await _create_paid_order(client)
+        await _create_paid_order(client)
         resp = await client.get(
             f"/api/finance/report/management/{TODAY}", headers=ADMIN_HEADERS,
         )

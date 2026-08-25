@@ -427,7 +427,7 @@ async def run_e2e():
     r = await svc.transfer_to_regular(user_id, 5000.0, 12)
     dp_no3 = r["depositNo"]
     yesterday_str = (datetime.now() - timedelta(days=1)).isoformat()
-    await repo.update_deposit_fields(dp_no3, {"endDate": yesterday})
+    await repo.update_deposit_fields(dp_no3, {"endDate": yesterday_str})
     r = await svc.settle_deposit(user_id, dp_no3)
     rw_no2 = r["rewardNo"]
     # 修改奖品过期时间为过去

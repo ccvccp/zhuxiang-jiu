@@ -429,7 +429,7 @@ class TestAttribution:
 
         # test 36: 博主累计统计已更新(traffic=2, orders=1, gmv=500)
         record("test_36_influencer_stats_updated",
-               inf_detail_total := detail["totalTraffic"] == 2
+               detail["totalTraffic"] == 2
                and detail["totalOrders"] == 1
                and detail["totalGmv"] == 500.00,
                f"got traffic={detail['totalTraffic']}, orders={detail['totalOrders']}, "

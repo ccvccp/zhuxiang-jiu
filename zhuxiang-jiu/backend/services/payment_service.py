@@ -1110,7 +1110,7 @@ class PaymentService:
             raise ValueError(f"{recon_date} 渠道 {channel} 已在对账中或已对账")
 
         # 2. 创建对账批次
-        recon = await self.repo.create_recon({
+        await self.repo.create_recon({
             "reconNo": recon_no,
             "reconDate": recon_date,
             "channel": channel,

@@ -473,7 +473,7 @@ class TestOperationLogs:
         role = await svc.create_role(role_code="AUDIT_ROLE",
                                        role_name="审计员",
                                        operator_id=SUPER_ADMIN_ID)
-        user = await svc.create_user(username="audit_user",
+        await svc.create_user(username="audit_user",
                                        password=TEST_PASSWORD,
                                        role_ids=[role["id"]],
                                        operator_id=SUPER_ADMIN_ID)

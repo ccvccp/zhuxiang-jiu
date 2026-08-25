@@ -457,7 +457,7 @@ class LogisticsService:
         }
         if unified_status in valid_statuses:
             try:
-                updated = await self.update_status(
+                await self.update_status(
                     waybill_no, unified_status, operator,
                     description, location
                 )

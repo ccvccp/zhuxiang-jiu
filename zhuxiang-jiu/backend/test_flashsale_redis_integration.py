@@ -122,7 +122,7 @@ class TestFlashRepoRedis:
 
     async def test_session_roundtrip(self, svc):
         """场次写入 Redis 后读回, 字段与类型完整"""
-        session = await svc.flash_repo.save_session({
+        await svc.flash_repo.save_session({
             "sessionId": "FST-RT-001", "name": "往返测试", "status": "draft",
             "startTime": "2026-08-22T10:00:00+00:00",
             "endTime": "2026-08-22T12:00:00+00:00",
@@ -136,7 +136,7 @@ class TestFlashRepoRedis:
 
     async def test_container_field_json_roundtrip(self, svc):
         """容器字段(list/dict)经 JSON 编解码不丢失"""
-        item = await svc.flash_repo.save_item({
+        await svc.flash_repo.save_item({
             "itemId": "FIT-RT-001", "sessionId": "FST-RT-001",
             "productId": "P10001", "flashPrice": 99.0,
             "flashStock": 5, "soldCount": 2, "limitPerMember": 1,

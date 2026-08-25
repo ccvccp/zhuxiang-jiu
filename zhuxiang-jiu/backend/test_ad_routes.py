@@ -654,7 +654,7 @@ class TestOverviewStats:
             ad_type=AD_TYPE_IMAGE, position=SLOT_HOME_BANNER,
             title=TITLE_COMPLIANT,
         )
-        ad2 = await svc.create_ad(
+        await svc.create_ad(
             advertiser_name="竹香酒业", name="总览广告2",
             ad_type=AD_TYPE_VIDEO, position=SLOT_FEED,
             title=TITLE_COMPLIANT,

@@ -230,7 +230,7 @@ class TestMarkRead:
 
     async def run(self, svc):
         msg1 = await svc.send_message(USER_ID_1, CHANNEL_INMAIL, "消息1", "内容1", CATEGORY_SYSTEM)
-        msg2 = await svc.send_message(USER_ID_1, CHANNEL_INMAIL, "消息2", "内容2", CATEGORY_SYSTEM)
+        await svc.send_message(USER_ID_1, CHANNEL_INMAIL, "消息2", "内容2", CATEGORY_SYSTEM)
 
         # test 17: 标记单条已读
         result = await svc.mark_read(msg1["id"])

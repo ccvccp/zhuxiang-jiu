@@ -319,7 +319,6 @@ class MemberService:
             growth_add = int(amount)  # 每元 1 成长值
             points_add = int(amount) * POINTS_PER_YUAN  # 每元 1 积分
 
-            old_growth = member.get("growth_value", 0)
             old_level = member.get("level", 1)
 
             new_growth = await self.member_repo.add_growth(member_id, growth_add)

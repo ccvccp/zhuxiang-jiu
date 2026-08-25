@@ -302,7 +302,6 @@ class TestActivate:
         # 准备: 生成生命码
         life_result = await svc.generate_life_codes(PRODUCT_ID_1, BATCH_NO_1, 1)
         life_code = life_result["lifeCodes"][0]["lifeCode"]
-        life_id = life_result["lifeCodes"][0]["id"]
 
         # test 28: 首次激活成功
         result = await svc.activate_life_code(

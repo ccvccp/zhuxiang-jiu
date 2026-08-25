@@ -226,7 +226,7 @@ class TestNearbyStores:
             "竹香路1号", TAI_AN_LNG, TAI_AN_LAT,
             phone="0538-8888888", open_hours="09:00-18:00"
         )
-        store2 = await svc.add_store(
+        await svc.add_store(
             STORE_NAME_2, STORE_TYPE_EXPERIENCE,
             "山东省", "济南市", "历下区",
             "经十路9999号", JINAN_LNG, JINAN_LAT,
@@ -292,7 +292,7 @@ class TestAgentLocations:
             TAI_AN_LNG, TAI_AN_LAT,
             contact_name="王经理", contact_phone="0538-8888888"
         )
-        agent2 = await svc.add_agent_location(
+        await svc.add_agent_location(
             2002, AGENT_NAME_2, AGENT_LEVEL_GOLD,
             "山东省", "济南市", "经十路9999号",
             JINAN_LNG, JINAN_LAT,

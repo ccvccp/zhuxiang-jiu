@@ -313,7 +313,6 @@ class TestRewardPurchase:
         a_id, code, product = ctx
         svc = PromotionService()
         wallet_svc = WalletService()
-        member_repo = MemberRepository()
 
         # A 当前奖励余额 10 元
         # test 24: 奖励余额购买成功(取价格<=10的产品或先补发)

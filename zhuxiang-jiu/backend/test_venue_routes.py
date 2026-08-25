@@ -185,11 +185,11 @@ class TestPartnerQuery:
             partner_type=PARTNER_TYPE_HOTEL, partner_name="酒店1",
             credit_code="Q001",
         )
-        p2 = await svc.apply_partner(
+        await svc.apply_partner(
             partner_type=PARTNER_TYPE_BAR, partner_name="酒吧1",
             credit_code="Q002",
         )
-        p3 = await svc.apply_partner(
+        await svc.apply_partner(
             partner_type=PARTNER_TYPE_CLUB, partner_name="会所1",
             credit_code="Q003",
         )
@@ -905,15 +905,15 @@ class TestStats:
 
     async def run(self, svc):
         # 准备: 创建3个不同类型合作商(2酒店+1酒吧)
-        p1 = await svc.apply_partner(
+        await svc.apply_partner(
             partner_type=PARTNER_TYPE_HOTEL,
             partner_name="统计酒店1", credit_code="STAT001",
         )
-        p2 = await svc.apply_partner(
+        await svc.apply_partner(
             partner_type=PARTNER_TYPE_HOTEL,
             partner_name="统计酒店2", credit_code="STAT002",
         )
-        p3 = await svc.apply_partner(
+        await svc.apply_partner(
             partner_type=PARTNER_TYPE_BAR,
             partner_name="统计酒吧1", credit_code="STAT003",
         )

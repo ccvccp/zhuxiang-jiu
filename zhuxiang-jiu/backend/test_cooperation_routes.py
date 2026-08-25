@@ -529,7 +529,7 @@ class TestPartnerList:
         await svc.review_application(app1["id"])
         await svc.sign_application(app1["id"])
 
-        app2 = await svc.create_application(
+        await svc.create_application(
             partner_name=PARTNER_NAME_2, partner_type=PARTNER_TYPE_DEALER,
             app_type=APP_TYPE_NEW, business_scope="经销",
             estimated_amount=50000, contact_phone=PHONE,
@@ -582,7 +582,7 @@ class TestOverviewStats:
         await svc.review_application(app1["id"])
         await svc.sign_application(app1["id"])
 
-        app2 = await svc.create_application(
+        await svc.create_application(
             partner_name="统计合作方B", partner_type=PARTNER_TYPE_DEALER,
             app_type=APP_TYPE_NEW, business_scope="统计",
             estimated_amount=50000, contact_phone=PHONE,

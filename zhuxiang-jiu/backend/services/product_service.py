@@ -158,7 +158,7 @@ class ProductService:
         total = len(sorted_results)
         start = (page - 1) * page_size
         end = start + page_size
-        page_items = sorted_results[start:start + page_size]
+        page_items = sorted_results[start:end]
         total_pages = (total + page_size - 1) // page_size
 
         return {
@@ -800,7 +800,6 @@ class ProductService:
         """综合得分: 销量×0.3 + 评分×0.3 + 转化率×0.2 + 新品×0.2"""
         sales = product.get("sales_monthly", 0)
         rating = product.get("rating_avg", 0)
-        sales_total = product.get("sales_total", 0)
         rating_count = product.get("rating_count", 0)
         created = product.get("created_at", "")
 

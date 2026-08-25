@@ -599,7 +599,7 @@ class MaintenanceService:
                 check_config={"auto": True},
             )
             # 执行检查
-            result = await self.run_health_check(
+            await self.run_health_check(
                 health["id"],
                 health_status=svc["status"],
                 check_result={"auto": True, "service": svc["name"]},

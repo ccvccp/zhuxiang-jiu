@@ -1228,7 +1228,7 @@ class TestCheckoutSupplementary:
     def test_payment_passthrough(self):
         """payment 字段应原样存入订单"""
         payment = {"method": "alipay", "amount": 99.9}
-        r = client.post("/api/checkout/submit", json={
+        client.post("/api/checkout/submit", json={
             "items": [], "payment": payment,
         })
         last_order = _mock_store["orders"][-1]
@@ -1240,7 +1240,7 @@ class TestCheckoutSupplementary:
             {"productId": "ZX42-2026L07", "quantity": 3, "price": 599},
             {"productId": "ZX42-2026L05", "quantity": 1, "price": 299},
         ]
-        r = client.post("/api/checkout/submit", json={"items": items})
+        client.post("/api/checkout/submit", json={"items": items})
         last_order = _mock_store["orders"][-1]
         assert last_order["items"] == items
 
@@ -1255,7 +1255,6 @@ class TestCheckoutSupplementary:
 
     def test_order_stored_with_created_at(self):
         """订单存入 _mock_store 时应包含 createdAt 时间戳"""
-        before = len(_mock_store["orders"])
         client.post("/api/checkout/submit", json={"items": [{"x": 1}]})
         last_order = _mock_store["orders"][-1]
         assert "createdAt" in last_order
@@ -1325,7 +1324,6 @@ class TestWarehouseInboundSupplementary:
 
     def test_log_entry_structure(self):
         """入库日志条目结构: action/productId/time/slot"""
-        before = len(_mock_store["warehouse"]["inbound_log"])
         client.post("/api/warehouse/inbound", json={"productId": "ZX42-2026L07"})
         log = _mock_store["warehouse"]["inbound_log"][-1]
         assert log["action"] == "inbound"

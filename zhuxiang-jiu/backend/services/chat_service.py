@@ -208,7 +208,6 @@ class ChatService:
             4. 未命中 → 兜底回复, 未解决计数+1
         """
         session_id = session["sessionId"]
-        user_content_lower = (user_content or "").lower()
 
         # 1. 用户主动转人工
         if any(kw in user_content for kw in TRANSFER_KEYWORDS):
