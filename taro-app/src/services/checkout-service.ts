@@ -7,7 +7,6 @@
  * ============================================================
  */
 
-import Taro from '@tarojs/taro';
 import EnvAdapter from '@/utils/env-adapter';
 
 const STORAGE_KEY = 'zhuxiang_checkout_db_v1';
@@ -348,7 +347,6 @@ export const CheckoutService = {
       const platformShare = round2((finalAmount + shipping) * PROFIT_SPLIT.platform);
       const hotelShare = round2((finalAmount + shipping) * PROFIT_SPLIT.hotel);
       let manufacturerServiceFee = 0;
-      let feeRecordId: string | null = null;
 
       if (ctx.shipperType === 'agent') {
         const r = accrueServiceFee(shippingDbRef, {
@@ -360,7 +358,6 @@ export const CheckoutService = {
           orderAmount: finalAmount + shipping,
         });
         manufacturerServiceFee = r.serviceFee;
-        feeRecordId = r.record.id;
       }
 
       dbRef.db.profit_records.push({
