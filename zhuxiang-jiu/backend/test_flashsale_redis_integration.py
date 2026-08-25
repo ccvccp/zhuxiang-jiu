@@ -24,7 +24,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 
 import pytest
@@ -92,7 +92,7 @@ def member_repo():
 async def _mk_member(member_repo, phone: str, hours_old: float = 100,
                      level: int = 3) -> dict:
     """创建测试会员(注册时间可调)"""
-    created = datetime.now(timezone.utc) - timedelta(hours=hours_old)
+    created = datetime.now(UTC) - timedelta(hours=hours_old)
     return await member_repo.create({
         "phone": phone, "nickname": f"测试{phone[-4:]}",
         "password": "x" * 64, "status": 1, "role": "member",
@@ -104,8 +104,8 @@ async def _mk_member(member_repo, phone: str, hours_old: float = 100,
 async def _mk_active_session(service, flash_stock: int = 5,
                              limit: int = 1) -> tuple:
     """创建进行中场次+商品(开始于 1 小时前, 结束于 1 小时后)"""
-    start = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    end = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    start = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    end = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
     session = await service.create_session("Redis集成测试场", start, end)
     item = await service.add_item(session["sessionId"], "P10001",
                                   flash_price=99.0, flash_stock=flash_stock,

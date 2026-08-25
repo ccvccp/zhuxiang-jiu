@@ -14,7 +14,6 @@
     - 管理端(5): 裂变关系/流量来源管理/流量分发/管理端统计/佣金计算
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -31,13 +30,13 @@ _service = TrafficService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
@@ -329,7 +328,7 @@ class CreateInfluencerRequest(PydBaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="博主名称")
     level: str = Field("C", description="博主等级: S/A/B/C")
     avatar: str = Field("", description="头像URL")
-    commissionRate: Optional[float] = Field(None, gt=0, le=0.30, description="佣金比例(0~0.30)")
+    commissionRate: float | None = Field(None, gt=0, le=0.30, description="佣金比例(0~0.30)")
     contractStart: str = Field("", description="合作开始日期")
     contractEnd: str = Field("", description="合作结束日期")
 
@@ -349,8 +348,8 @@ class CreatePromoCodeRequest(PydBaseModel):
 
 
 class SyncPlatformRequest(PydBaseModel):
-    followerCount: Optional[int] = Field(None, ge=0, description="新粉丝数")
-    verified: Optional[bool] = Field(None, description="认证状态")
+    followerCount: int | None = Field(None, ge=0, description="新粉丝数")
+    verified: bool | None = Field(None, description="认证状态")
 
 
 class AttributeTrafficRequest(PydBaseModel):
@@ -384,8 +383,8 @@ async def create_influencer(
 
 @router.get("/api/traffic/influencer/list", tags=["流量管理模块"])
 async def list_influencers(
-    status: Optional[str] = Query(None, description="合作状态: cooperating/suspended/ended"),
-    level: Optional[str] = Query(None, description="博主等级: S/A/B/C"),
+    status: str | None = Query(None, description="合作状态: cooperating/suspended/ended"),
+    level: str | None = Query(None, description="博主等级: S/A/B/C"),
     limit: int = Query(100, ge=1, le=500, description="返回数量"),
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):

@@ -12,7 +12,6 @@
 """
 
 import json
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -49,7 +48,7 @@ class OrderRepository:
     # 扩展接口
     # ============================================================
 
-    async def get_by_id(self, order_id: str) -> Optional[dict]:
+    async def get_by_id(self, order_id: str) -> dict | None:
         """按订单 ID 查询"""
         if is_redis_mode():
             return await self._redis_get_by_id(order_id)
@@ -130,7 +129,7 @@ class OrderRepository:
         self._ensure_store()
         return list(self.store["orders_v2"].values())
 
-    def _mem_get_by_id(self, order_id: str) -> Optional[dict]:
+    def _mem_get_by_id(self, order_id: str) -> dict | None:
         self._ensure_store()
         return self.store["orders_v2"].get(order_id)
 
@@ -212,7 +211,7 @@ class OrderRepository:
                 result.append(json.loads(raw))
         return result
 
-    async def _redis_get_by_id(self, order_id: str) -> Optional[dict]:
+    async def _redis_get_by_id(self, order_id: str) -> dict | None:
         client = await get_redis_client()
         raw = await client.get(_k("order", order_id))
         if not raw:

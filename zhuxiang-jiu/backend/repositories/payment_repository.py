@@ -29,7 +29,6 @@ Redis Key 设计:
 """
 
 import json
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -217,13 +216,13 @@ class PaymentRepository:
             return await self._redis_save_order(order)
         return self._mem_save_order(order)
 
-    async def get_order(self, pay_no: str) -> Optional[dict]:
+    async def get_order(self, pay_no: str) -> dict | None:
         """按支付单号查询"""
         if is_redis_mode():
             return await self._redis_get_order(pay_no)
         return self._mem_get_order(pay_no)
 
-    async def get_by_channel_trade_no(self, channel_trade_no: str) -> Optional[dict]:
+    async def get_by_channel_trade_no(self, channel_trade_no: str) -> dict | None:
         """按渠道交易号查询(回调幂等校验用)
 
         渠道回调时, 渠道只传 channel_trade_no, 需反向定位支付单
@@ -247,7 +246,7 @@ class PaymentRepository:
         return self._mem_list_by_order(order_id, order_type, limit)
 
     async def find_active_by_order(self, order_id: str,
-                                    order_type: str = None) -> Optional[dict]:
+                                    order_type: str = None) -> dict | None:
         """查找订单的活跃支付单(非 closed/refunded 状态)
 
         用于创建支付时的幂等校验: 同一订单同一类型只能有一个未关闭支付单
@@ -311,7 +310,7 @@ class PaymentRepository:
             return await self._redis_save_refund(refund)
         return self._mem_save_refund(refund)
 
-    async def get_refund(self, refund_no: str) -> Optional[dict]:
+    async def get_refund(self, refund_no: str) -> dict | None:
         """按退款单号查询"""
         if is_redis_mode():
             return await self._redis_get_refund(refund_no)
@@ -362,7 +361,7 @@ class PaymentRepository:
             return await self._redis_save_payout(payout)
         return self._mem_save_payout(payout)
 
-    async def get_payout(self, payout_no: str) -> Optional[dict]:
+    async def get_payout(self, payout_no: str) -> dict | None:
         """按付款单号查询"""
         if is_redis_mode():
             return await self._redis_get_payout(payout_no)
@@ -382,7 +381,7 @@ class PaymentRepository:
         return self._mem_list_pending_payouts(limit)
 
     async def find_by_source(self, source_id: str,
-                              payout_type: str = None) -> Optional[dict]:
+                              payout_type: str = None) -> dict | None:
         """按来源单据查询付款记录(幂等校验: 同一来源只能创建一个付款单)
 
         例如: wallet_withdraw 提现单号 → payout.sourceId
@@ -460,11 +459,11 @@ class PaymentRepository:
             self.store["_payment_channel_trade_index"][ctn] = pay_no
         return order
 
-    def _mem_get_order(self, pay_no: str) -> Optional[dict]:
+    def _mem_get_order(self, pay_no: str) -> dict | None:
         self._ensure_store()
         return self.store["payment_orders"].get(pay_no)
 
-    def _mem_get_by_channel_trade_no(self, channel_trade_no: str) -> Optional[dict]:
+    def _mem_get_by_channel_trade_no(self, channel_trade_no: str) -> dict | None:
         self._ensure_store()
         pay_no = self.store["_payment_channel_trade_index"].get(channel_trade_no)
         if not pay_no:
@@ -509,7 +508,7 @@ class PaymentRepository:
         return result[:limit]
 
     def _mem_find_active_by_order(self, order_id: str,
-                                   order_type: str = None) -> Optional[dict]:
+                                   order_type: str = None) -> dict | None:
         """查找订单的活跃支付单(非 closed/refunded 状态)"""
         self._ensure_store()
         index_set = self.store.get("_payment_order_orderid_index", {}).get(order_id, set())
@@ -570,7 +569,7 @@ class PaymentRepository:
             self.store.setdefault("_payment_refund_pending", set()).add(refund_no)
         return refund
 
-    def _mem_get_refund(self, refund_no: str) -> Optional[dict]:
+    def _mem_get_refund(self, refund_no: str) -> dict | None:
         self._ensure_store()
         return self.store["payment_refunds"].get(refund_no)
 
@@ -645,7 +644,7 @@ class PaymentRepository:
             self.store.setdefault("_payment_payout_pending", set()).add(payout_no)
         return payout
 
-    def _mem_get_payout(self, payout_no: str) -> Optional[dict]:
+    def _mem_get_payout(self, payout_no: str) -> dict | None:
         self._ensure_store()
         return self.store["payment_payouts"].get(payout_no)
 
@@ -672,7 +671,7 @@ class PaymentRepository:
         return result[:limit]
 
     def _mem_find_by_source(self, source_id: str,
-                             payout_type: str = None) -> Optional[dict]:
+                             payout_type: str = None) -> dict | None:
         self._ensure_store()
         index_set = self.store.get("_payment_payout_source_index", {}).get(source_id, set())
         for pn in index_set:
@@ -742,14 +741,14 @@ class PaymentRepository:
             await client.set(_k("payment", "ctn", ctn), pay_no)
         return order
 
-    async def _redis_get_order(self, pay_no: str) -> Optional[dict]:
+    async def _redis_get_order(self, pay_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("payment", "order", pay_no))
         if not data:
             return None
         return self._deserialize_order(data)
 
-    async def _redis_get_by_channel_trade_no(self, channel_trade_no: str) -> Optional[dict]:
+    async def _redis_get_by_channel_trade_no(self, channel_trade_no: str) -> dict | None:
         client = await get_redis_client()
         pay_no = await client.get(_k("payment", "ctn", channel_trade_no))
         if not pay_no:
@@ -791,7 +790,7 @@ class PaymentRepository:
         return result[:limit]
 
     async def _redis_find_active_by_order(self, order_id: str,
-                                           order_type: str = None) -> Optional[dict]:
+                                           order_type: str = None) -> dict | None:
         client = await get_redis_client()
         pay_nos = await client.smembers(_k("payment", "order", "index", "order", order_id))
         for pn in pay_nos:
@@ -850,7 +849,7 @@ class PaymentRepository:
             await client.sadd(_k("payment", "refund", "pending"), refund_no)
         return refund
 
-    async def _redis_get_refund(self, refund_no: str) -> Optional[dict]:
+    async def _redis_get_refund(self, refund_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("payment", "refund", refund_no))
         if not data:
@@ -937,7 +936,7 @@ class PaymentRepository:
             await client.sadd(_k("payment", "payout", "pending"), payout_no)
         return payout
 
-    async def _redis_get_payout(self, payout_no: str) -> Optional[dict]:
+    async def _redis_get_payout(self, payout_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("payment", "payout", payout_no))
         if not data:
@@ -983,7 +982,7 @@ class PaymentRepository:
         return result[:limit]
 
     async def _redis_find_by_source(self, source_id: str,
-                                    payout_type: str = None) -> Optional[dict]:
+                                    payout_type: str = None) -> dict | None:
         client = await get_redis_client()
         payout_nos = await client.smembers(_k("payment", "payout", "index", "source", source_id))
         for pn in payout_nos:
@@ -1045,7 +1044,7 @@ class PaymentRepository:
             return await self._redis_create_recon(recon)
         return self._mem_create_recon(recon)
 
-    async def get_recon(self, recon_no: str) -> Optional[dict]:
+    async def get_recon(self, recon_no: str) -> dict | None:
         """按对账批次号查询"""
         if is_redis_mode():
             return await self._redis_get_recon(recon_no)
@@ -1137,7 +1136,7 @@ class PaymentRepository:
             self.store.setdefault("_payment_recon_diff_pending", set()).add(recon_no)
         return recon
 
-    def _mem_get_recon(self, recon_no: str) -> Optional[dict]:
+    def _mem_get_recon(self, recon_no: str) -> dict | None:
         self._ensure_store()
         table = self.store.get("payment_reconciliation", {})
         return table.get(recon_no)
@@ -1322,7 +1321,7 @@ class PaymentRepository:
             return await self._redis_create_channel(channel)
         return self._mem_create_channel(channel)
 
-    async def get_channel(self, channel_code: str) -> Optional[dict]:
+    async def get_channel(self, channel_code: str) -> dict | None:
         """按渠道编码查询"""
         if is_redis_mode():
             return await self._redis_get_channel(channel_code)

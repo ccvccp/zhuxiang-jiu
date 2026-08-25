@@ -11,7 +11,6 @@
     - 权限校验 → 401(未登录) / 403(无权操作)
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -28,7 +27,7 @@ _service = PromotionService()
 # 鉴权与异常映射辅助(对齐 points/citystore 风格)
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> int:
+def _require_member_id(x_member_id: str | None) -> int:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
@@ -38,7 +37,7 @@ def _require_member_id(x_member_id: Optional[str]) -> int:
         raise HTTPException(status_code=401, detail="X-Member-Id 头须为会员ID数字")
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -83,16 +82,16 @@ class RewardPurchaseRequest(PydBaseModel):
 
 
 class UpdateSettingsRequest(PydBaseModel):
-    enabled: Optional[bool] = Field(None, description="模块总开关")
-    level1Threshold: Optional[int] = Field(None, ge=1, description="一级奖励人数阈值")
-    level1RewardAmount: Optional[float] = Field(None, ge=0,
+    enabled: bool | None = Field(None, description="模块总开关")
+    level1Threshold: int | None = Field(None, ge=1, description="一级奖励人数阈值")
+    level1RewardAmount: float | None = Field(None, ge=0,
                                                 description="一级奖励金额(元/轮)")
-    level2SubPromoterCount: Optional[int] = Field(None, ge=1,
+    level2SubPromoterCount: int | None = Field(None, ge=1,
                                                   description="二级达标所需下线数")
-    level2SubThreshold: Optional[int] = Field(None, ge=1,
+    level2SubThreshold: int | None = Field(None, ge=1,
                                               description="每个下线需推广人数")
-    wineMinPrice: Optional[float] = Field(None, ge=0, description="奖励酒最低价")
-    eligibleProductIds: Optional[list] = Field(
+    wineMinPrice: float | None = Field(None, ge=0, description="奖励酒最低价")
+    eligibleProductIds: list | None = Field(
         None, description="活动酒池产品ID数组(null=自动按价格筛选)")
 
 
@@ -110,7 +109,7 @@ class GrantRewardRequest(PydBaseModel):
 @router.post("/api/promotion/code/claim", tags=["推广码矩阵模块"])
 async def claim_promo_code(
     data: ClaimCodeRequest,
-    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
 ):
     """领取专属推广码(ZXBJ 竹奕标识, 同渠道幂等, 附各平台分享文案)"""
     member_id = _require_member_id(x_member_id)
@@ -123,7 +122,7 @@ async def claim_promo_code(
 
 @router.get("/api/promotion/my/codes", tags=["推广码矩阵模块"])
 async def list_my_codes(
-    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
 ):
     """我的推广码列表(各渠道)"""
     member_id = _require_member_id(x_member_id)
@@ -157,7 +156,7 @@ async def bind_promo_code(data: BindCodeRequest):
 
 @router.get("/api/promotion/my/stats", tags=["推广码矩阵模块"])
 async def get_my_stats(
-    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
 ):
     """我的推广统计: 下线数/达标下线数/奖励余额(不可提现)/可领酒资格"""
     member_id = _require_member_id(x_member_id)
@@ -170,7 +169,7 @@ async def get_my_stats(
 
 @router.get("/api/promotion/my/team", tags=["推广码矩阵模块"])
 async def list_my_team(
-    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
 ):
     """我的下线列表(含各自推广数, 判定裂变达标进度)"""
     member_id = _require_member_id(x_member_id)
@@ -183,7 +182,7 @@ async def list_my_team(
 
 @router.get("/api/promotion/my/rewards", tags=["推广码矩阵模块"])
 async def list_my_rewards(
-    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
 ):
     """我的奖励记录(钱包轮次 + 领酒资格)"""
     member_id = _require_member_id(x_member_id)
@@ -211,7 +210,7 @@ async def list_eligible_products():
 @router.post("/api/promotion/wine/claim", tags=["推广码矩阵模块"])
 async def claim_wine(
     data: ClaimWineRequest,
-    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
 ):
     """领取奖励酒: 核销领酒资格, 从活动池选 1 瓶(200元以上竹奕酒)"""
     member_id = _require_member_id(x_member_id)
@@ -230,7 +229,7 @@ async def claim_wine(
 @router.post("/api/promotion/reward/purchase", tags=["推广码矩阵模块"])
 async def reward_purchase(
     data: RewardPurchaseRequest,
-    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
 ):
     """奖励余额购买本站产品(奖励余额唯一出口, 不可提现)"""
     member_id = _require_member_id(x_member_id)
@@ -248,7 +247,7 @@ async def reward_purchase(
 
 @router.get("/api/promotion/admin/settings", tags=["推广码矩阵模块"])
 async def admin_get_settings(
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """读取推广参数配置(阈值/奖励金额/酒池等)"""
     _require_admin(x_role)
@@ -262,7 +261,7 @@ async def admin_get_settings(
 @router.put("/api/promotion/admin/settings", tags=["推广码矩阵模块"])
 async def admin_update_settings(
     data: UpdateSettingsRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """修改推广参数配置(新绑定即时按新参数计算奖励)"""
     _require_admin(x_role)
@@ -280,7 +279,7 @@ async def admin_update_settings(
 
 @router.get("/api/promotion/admin/relations", tags=["推广码矩阵模块"])
 async def admin_list_relations(
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
     inviterMemberId: int = Query(None, description="按上级筛选"),
     status: str = Query(None, description="valid/invalid"),
     limit: int = Query(200, ge=1, le=1000),
@@ -297,7 +296,7 @@ async def admin_list_relations(
 
 @router.get("/api/promotion/admin/rewards", tags=["推广码矩阵模块"])
 async def admin_list_rewards(
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
     memberId: int = Query(None, description="按会员筛选"),
     rewardType: str = Query(None, description="wallet/wine_qualify"),
     status: str = Query(None, description="issued/used"),
@@ -316,7 +315,7 @@ async def admin_list_rewards(
 
 @router.get("/api/promotion/admin/wine-claims", tags=["推广码矩阵模块"])
 async def admin_list_wine_claims(
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
     memberId: int = Query(None, description="按会员筛选"),
     status: str = Query(None, description="pending_shipped/shipped/done"),
     limit: int = Query(200, ge=1, le=1000),
@@ -334,7 +333,7 @@ async def admin_list_wine_claims(
 @router.post("/api/promotion/admin/rewards/grant", tags=["推广码矩阵模块"])
 async def admin_grant_reward(
     data: GrantRewardRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """手动补发奖励(钱包奖励余额或领酒资格, 客诉补偿等场景)"""
     _require_admin(x_role)
@@ -351,7 +350,7 @@ async def admin_grant_reward(
 @router.post("/api/promotion/admin/codes/{code}/revoke", tags=["推广码矩阵模块"])
 async def admin_revoke_code(
     code: str,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """撤销推广码(撤销后不可再绑定, 已建立关系不受影响)"""
     _require_admin(x_role)
@@ -365,7 +364,7 @@ async def admin_revoke_code(
              tags=["推广码矩阵模块"])
 async def admin_invalidate_relation(
     invitee_id: int,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """作废/恢复绑定关系(作废后不计入上级业绩, 再调用一次恢复)"""
     _require_admin(x_role)
@@ -379,7 +378,7 @@ async def admin_invalidate_relation(
             tags=["推广码矩阵模块"])
 async def admin_ship_wine(
     claim_id: int,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """领酒发货流转: 待发货 → 已发货 → 已完成"""
     _require_admin(x_role)

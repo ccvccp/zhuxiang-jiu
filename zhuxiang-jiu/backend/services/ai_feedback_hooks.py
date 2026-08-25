@@ -21,7 +21,6 @@
 """
 
 import logging
-from typing import Optional
 
 from core.helpers import ts
 from repositories.ai_learning_repository import AiLearningRepository
@@ -44,7 +43,7 @@ def hooks_enabled() -> bool:
     return os.environ.get("AI_FEEDBACK_HOOKS", "on").strip().lower() != "off"
 
 
-async def _invoke_scorer(scorer_id: str, ctx: dict) -> Optional[dict]:
+async def _invoke_scorer(scorer_id: str, ctx: dict) -> dict | None:
     """按注册表调用评分器(懒加载避免循环导入), 失败返回 None"""
     try:
         if scorer_id.startswith("logistics_routing:"):
@@ -73,12 +72,12 @@ async def _invoke_scorer(scorer_id: str, ctx: dict) -> Optional[dict]:
             cls = {"points_risk": PointsRiskScorer,
                    "withdraw_risk": WithdrawRiskScorer}[scorer_id]
             return await cls().score(ctx)
-    except Exception as exc:  # noqa: BLE001 - 挂钩失败不影响业务
+    except Exception as exc:
         logger.warning("挂钩评分失败(scorer=%s): %s", scorer_id, exc)
     return None
 
 
-def _extract_decision(scorer_id: str, score_result: dict) -> Optional[str]:
+def _extract_decision(scorer_id: str, score_result: dict) -> str | None:
     """从评分结果提取决策动作(阈值类→动作, 路由类→推荐编码)"""
     if not isinstance(score_result, dict):
         return None
@@ -98,7 +97,7 @@ def _to_snake(name: str) -> str:
 
 
 def _factors_from_result(scorer_id: str,
-                         score_result: dict) -> Optional[list]:
+                         score_result: dict) -> list | None:
     """提取因子快照
 
     阈值类评分器: 顶层 factors 列表直接可用。
@@ -169,19 +168,19 @@ async def snapshot_decision(scorer_id: str, business_key: str,
                 scorer_id, factors, score)
             if knowledge:
                 snapshot["knowledge"] = knowledge
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("快照知识增强跳过(scorer=%s): %s", scorer_id, exc)
         await repo.save_decision_snapshot(scorer_id, business_key, snapshot)
         return True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("决策快照暂存失败(scorer=%s key=%s): %s",
                        scorer_id, business_key, exc)
         return False
 
 
 async def record_outcome(scorer_id: str, business_key: str,
-                         outcome: str, *, correct: Optional[bool] = None,
-                         note: str = "") -> Optional[dict]:
+                         outcome: str, *, correct: bool | None = None,
+                         note: str = "") -> dict | None:
     """业务终态事件 → 消费快照 → 自动反馈
 
     correct 未提供时按「决策 == 期望终态」推导:
@@ -210,14 +209,14 @@ async def record_outcome(scorer_id: str, business_key: str,
         else:
             payload["expectedAction"] = snapshot.get("decision")
         return await submit_feedback(payload)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("自动反馈配对失败(scorer=%s key=%s): %s",
                        scorer_id, business_key, exc)
         return None
 
 
 async def score_and_snapshot(scorer_id: str, business_key: str,
-                             ctx: dict) -> Optional[dict]:
+                             ctx: dict) -> dict | None:
     """评分 + 快照一步完成(决策点调用), 返回评分结果"""
     if not hooks_enabled():
         return None
@@ -248,7 +247,7 @@ _ORDER_OUTCOME_CORRECT = {
 
 async def on_order_created(order_id: str, member_id: str,
                            items: list[dict],
-                           address: Optional[dict] = None,
+                           address: dict | None = None,
                            remark: str = "") -> None:
     """订单创建 → 订单风控评分(v7.8 输入富化: 真实信用/行为画像) + 快照"""
     try:
@@ -256,7 +255,7 @@ async def on_order_created(order_id: str, member_id: str,
         ctx = await enrich_order_risk(member_id, items,
                                       address=address, remark=remark)
         await score_and_snapshot("order_risk", f"order:{order_id}", ctx)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_order_created 挂钩失败(order=%s): %s", order_id, exc)
 
 
@@ -270,7 +269,7 @@ async def on_order_outcome(order_id: str, outcome: str) -> None:
         correct = _ORDER_OUTCOME_CORRECT.get((decision, outcome))
         await record_outcome("order_risk", f"order:{order_id}", outcome,
                              correct=correct, note=f"order {outcome}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_order_outcome 挂钩失败(order=%s): %s", order_id, exc)
 
 
@@ -289,7 +288,7 @@ async def on_login_success(phone: str) -> None:
             await record_outcome("auth_risk", business_key, "logged_in",
                                  correct=(decision == "allow"),
                                  note=f"login {phone}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_login_success 挂钩失败: %s", exc)
 
 
@@ -306,7 +305,7 @@ async def on_payment(order_id: str, method: str, amount: float) -> None:
                                  str(method or ""),
                                  correct=(recommended == method),
                                  note=f"pay {method} vs {recommended}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_payment 挂钩失败(order=%s): %s", order_id, exc)
 
 
@@ -323,7 +322,7 @@ async def on_shipped(order_id: str, carrier: str) -> None:
                                  str(carrier or ""),
                                  correct=(recommended == carrier),
                                  note=f"ship {carrier} vs {recommended}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_shipped 挂钩失败(order=%s): %s", order_id, exc)
 
 
@@ -339,7 +338,7 @@ async def on_points_earned(member_id: str, points: float) -> None:
             await record_outcome("points_risk", business_key, "earned",
                                  correct=(decision == "low"),
                                  note=f"points +{points}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_points_earned 挂钩失败: %s", exc)
 
 
@@ -357,7 +356,7 @@ async def on_withdraw_requested(withdraw_no: str, amount: float,
             from services.ai_context_enricher import enrich_withdraw_risk
             ctx = await enrich_withdraw_risk(member_id, amount, balance)
         await score_and_snapshot("withdraw_risk", f"withdraw:{withdraw_no}", ctx)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_withdraw_requested 挂钩失败(%s): %s",
                        withdraw_no, exc)
 
@@ -376,7 +375,7 @@ async def on_withdraw_settled(withdraw_no: str, approved: bool) -> None:
                              "approved" if approved else "rejected",
                              correct=correct,
                              note=f"withdraw {'approved' if approved else 'rejected'}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_withdraw_settled 挂钩失败(%s): %s",
                        withdraw_no, exc)
 
@@ -395,7 +394,7 @@ async def on_promotion_reward(biz_no: str, relation_count: int = 5) -> None:
             await record_outcome("promotion_antifraud", business_key, "paid",
                                  correct=(decision == "pay"),
                                  note=f"promo reward {biz_no}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_promotion_reward 挂钩失败: %s", exc)
 
 
@@ -412,5 +411,5 @@ async def on_traffic_commission(biz_no: str, total_records: int = 100) -> None:
             await record_outcome("traffic_antifraud", business_key, "settled",
                                  correct=(decision == "pass"),
                                  note=f"commission {biz_no}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("on_traffic_commission 挂钩失败: %s", exc)

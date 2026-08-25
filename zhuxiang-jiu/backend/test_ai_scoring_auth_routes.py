@@ -45,7 +45,7 @@ async def _expect_value_error(name, coro):
         record(name, False, "未抛出 ValueError")
     except ValueError:
         record(name, True)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         record(name, False, f"异常类型错误: {type(exc).__name__}: {exc}")
 
 

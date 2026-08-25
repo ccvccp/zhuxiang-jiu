@@ -30,7 +30,6 @@ Redis Key 设计:
 """
 
 import json
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -136,7 +135,7 @@ class WalletRepository:
             return await self._redis_open_account(user_id, account_data)
         return self._mem_open_account(user_id, account_data)
 
-    async def get_account(self, user_id) -> Optional[dict]:
+    async def get_account(self, user_id) -> dict | None:
         """按 user_id 查询钱包账户, 不存在返回 None"""
         if is_redis_mode():
             return await self._redis_get_account(user_id)
@@ -268,7 +267,7 @@ class WalletRepository:
             return await self._redis_save_transaction(tx)
         return self._mem_save_transaction(tx)
 
-    async def get_transaction(self, tx_no: str) -> Optional[dict]:
+    async def get_transaction(self, tx_no: str) -> dict | None:
         """按交易编号查询"""
         if is_redis_mode():
             return await self._redis_get_transaction(tx_no)
@@ -301,7 +300,7 @@ class WalletRepository:
             return await self._redis_save_withdrawal(withdraw)
         return self._mem_save_withdrawal(withdraw)
 
-    async def get_withdrawal(self, withdraw_no: str) -> Optional[dict]:
+    async def get_withdrawal(self, withdraw_no: str) -> dict | None:
         """按提现编号查询"""
         if is_redis_mode():
             return await self._redis_get_withdrawal(withdraw_no)
@@ -343,7 +342,7 @@ class WalletRepository:
             return await self._redis_save_deposit(deposit)
         return self._mem_save_deposit(deposit)
 
-    async def get_deposit(self, deposit_no: str) -> Optional[dict]:
+    async def get_deposit(self, deposit_no: str) -> dict | None:
         """按定期编号查询"""
         if is_redis_mode():
             return await self._redis_get_deposit(deposit_no)
@@ -376,7 +375,7 @@ class WalletRepository:
             return await self._redis_save_reward(reward)
         return self._mem_save_reward(reward)
 
-    async def get_reward(self, reward_no: str) -> Optional[dict]:
+    async def get_reward(self, reward_no: str) -> dict | None:
         """按奖品编号查询"""
         if is_redis_mode():
             return await self._redis_get_reward(reward_no)
@@ -442,7 +441,7 @@ class WalletRepository:
         self.store["wallets"][user_id] = account_data
         return account_data
 
-    def _mem_get_account(self, user_id) -> Optional[dict]:
+    def _mem_get_account(self, user_id) -> dict | None:
         self._ensure_store()
         return self.store["wallets"].get(user_id)
 
@@ -550,7 +549,7 @@ class WalletRepository:
         index_set.setdefault(user_id, set()).add(tx_no)
         return tx
 
-    def _mem_get_transaction(self, tx_no: str) -> Optional[dict]:
+    def _mem_get_transaction(self, tx_no: str) -> dict | None:
         self._ensure_store()
         return self.store["wallet_transactions"].get(tx_no)
 
@@ -594,7 +593,7 @@ class WalletRepository:
             self.store.setdefault("_wallet_withdraw_pending", set()).add(withdraw_no)
         return withdraw
 
-    def _mem_get_withdrawal(self, withdraw_no: str) -> Optional[dict]:
+    def _mem_get_withdrawal(self, withdraw_no: str) -> dict | None:
         self._ensure_store()
         return self.store["wallet_withdrawals"].get(withdraw_no)
 
@@ -652,7 +651,7 @@ class WalletRepository:
         index_set.setdefault(user_id, set()).add(deposit_no)
         return deposit
 
-    def _mem_get_deposit(self, deposit_no: str) -> Optional[dict]:
+    def _mem_get_deposit(self, deposit_no: str) -> dict | None:
         self._ensure_store()
         return self.store["wallet_deposits"].get(deposit_no)
 
@@ -694,7 +693,7 @@ class WalletRepository:
             self.store.setdefault("_wallet_reward_claimable", set()).add(reward_no)
         return reward
 
-    def _mem_get_reward(self, reward_no: str) -> Optional[dict]:
+    def _mem_get_reward(self, reward_no: str) -> dict | None:
         self._ensure_store()
         return self.store["wallet_rewards"].get(reward_no)
 
@@ -760,7 +759,7 @@ class WalletRepository:
         await client.sadd(_k("wallet", "index"), user_id)
         return account_data
 
-    async def _redis_get_account(self, user_id) -> Optional[dict]:
+    async def _redis_get_account(self, user_id) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("wallet", user_id))
         if not data:
@@ -883,7 +882,7 @@ class WalletRepository:
         await client.sadd(_k("wallet", "tx", "index", user_id), tx_no)
         return tx
 
-    async def _redis_get_transaction(self, tx_no: str) -> Optional[dict]:
+    async def _redis_get_transaction(self, tx_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("wallet", "tx", tx_no))
         if not data:
@@ -935,7 +934,7 @@ class WalletRepository:
             await client.sadd(_k("wallet", "withdraw", "pending"), withdraw_no)
         return withdraw
 
-    async def _redis_get_withdrawal(self, withdraw_no: str) -> Optional[dict]:
+    async def _redis_get_withdrawal(self, withdraw_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("wallet", "withdraw", withdraw_no))
         if not data:
@@ -1002,7 +1001,7 @@ class WalletRepository:
         await client.sadd(_k("wallet", "deposit", "index", user_id), deposit_no)
         return deposit
 
-    async def _redis_get_deposit(self, deposit_no: str) -> Optional[dict]:
+    async def _redis_get_deposit(self, deposit_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("wallet", "deposit", deposit_no))
         if not data:
@@ -1049,7 +1048,7 @@ class WalletRepository:
             await client.sadd(_k("wallet", "reward", "claimable"), reward_no)
         return reward
 
-    async def _redis_get_reward(self, reward_no: str) -> Optional[dict]:
+    async def _redis_get_reward(self, reward_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("wallet", "reward", reward_no))
         if not data:

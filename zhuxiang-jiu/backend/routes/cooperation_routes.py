@@ -17,7 +17,6 @@
     - 统计(1):  管理端统计
 """
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -33,13 +32,13 @@ _service = CooperationService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
@@ -76,14 +75,14 @@ class CreateApplicationRequest(PydBaseModel):
     contactName: str = Field("", description="联系人")
     contactPhone: str = Field("", description="联系电话")
     contactEmail: str = Field("", description="联系邮箱")
-    qualificationFiles: List[str] = Field(default_factory=list, description="资质文件URL列表")
-    deliveryDate: Optional[str] = None
+    qualificationFiles: list[str] = Field(default_factory=list, description="资质文件URL列表")
+    deliveryDate: str | None = None
 
 
 class SignRequest(PydBaseModel):
     contractTitle: str = Field("", description="协议标题")
-    startDate: Optional[str] = None
-    endDate: Optional[str] = None
+    startDate: str | None = None
+    endDate: str | None = None
     depositAmount: float = Field(0, ge=0, description="保证金金额")
 
 
@@ -92,17 +91,17 @@ class CreateContractRequest(PydBaseModel):
     title: str = Field(..., description="协议标题")
     content: str = Field("", description="协议内容")
     amount: float = Field(0, ge=0, description="合作金额")
-    startDate: Optional[str] = None
-    endDate: Optional[str] = None
+    startDate: str | None = None
+    endDate: str | None = None
     depositAmount: float = Field(0, ge=0, description="保证金金额")
 
 
 class UpdatePartnerRequest(PydBaseModel):
-    contactName: Optional[str] = None
-    contactPhone: Optional[str] = None
-    contactEmail: Optional[str] = None
-    level: Optional[str] = None
-    status: Optional[str] = None
+    contactName: str | None = None
+    contactPhone: str | None = None
+    contactEmail: str | None = None
+    level: str | None = None
+    status: str | None = None
 
 
 class TerminateContractRequest(PydBaseModel):

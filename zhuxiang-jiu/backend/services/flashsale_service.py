@@ -10,8 +10,7 @@
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timedelta, UTC
 
 from core.locks import get_lock
 from repositories.flashsale_repository import (
@@ -40,7 +39,7 @@ _SETTING_FIELDS = ("enabled", "minRegisterHours", "minMemberLevel",
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class FlashSaleService:
@@ -60,7 +59,7 @@ class FlashSaleService:
         status = session.get("status", "")
         if status in (SESSION_STATUS_DRAFT, SESSION_STATUS_CANCELLED):
             return status
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start = parse_iso(session["startTime"])
         end = parse_iso(session["endTime"])
         if now < start:
@@ -99,7 +98,7 @@ class FlashSaleService:
             raise ValueError("时间格式非法, 请使用 ISO8601(如 2026-08-22T20:00:00+08:00)")
         if end <= start:
             raise ValueError("结束时间必须晚于开始时间")
-        if end <= datetime.now(timezone.utc):
+        if end <= datetime.now(UTC):
             raise ValueError("结束时间必须晚于当前时间")
 
         session_id = await self.flash_repo.next_session_id()
@@ -297,7 +296,7 @@ class FlashSaleService:
             if not created_at:
                 raise ValueError("会员注册时间缺失, 无法参与秒杀")
             reg = parse_iso(created_at)
-            if datetime.now(timezone.utc) - reg < timedelta(hours=min_hours):
+            if datetime.now(UTC) - reg < timedelta(hours=min_hours):
                 raise ValueError(f"注册满 {min_hours} 小时后方可参与秒杀")
 
         min_level = int(settings.get("minMemberLevel", 0))
@@ -384,7 +383,7 @@ class FlashSaleService:
     async def my_orders(self, member_id: int) -> list[dict]:
         return await self.flash_repo.list_orders_by_member(member_id)
 
-    async def get_order(self, order_no: str, member_id: Optional[int] = None,
+    async def get_order(self, order_no: str, member_id: int | None = None,
                         is_admin: bool = False) -> dict:
         """订单详情(本人或管理员可查)
 
@@ -400,7 +399,7 @@ class FlashSaleService:
             raise ValueError("无权查看他人订单")
         return dict(order)
 
-    async def pay_order(self, order_no: str, member_id: Optional[int] = None,
+    async def pay_order(self, order_no: str, member_id: int | None = None,
                         is_admin: bool = False) -> dict:
         """模拟支付成功(pending→paid)
 
@@ -423,7 +422,7 @@ class FlashSaleService:
         logger.info("flash_order_paid order=%s", order_no)
         return dict(order)
 
-    async def cancel_order(self, order_no: str, member_id: Optional[int] = None,
+    async def cancel_order(self, order_no: str, member_id: int | None = None,
                            is_admin: bool = False) -> dict:
         """主动取消订单: 锁内回补库存
 
@@ -470,7 +469,7 @@ class FlashSaleService:
         """批量取消超时未支付订单(回补库存); 供定时任务/管理端触发"""
         settings = await self.flash_repo.get_settings()
         expire_minutes = int(settings.get("orderExpireMinutes", 15))
-        threshold = datetime.now(timezone.utc) - timedelta(minutes=expire_minutes)
+        threshold = datetime.now(UTC) - timedelta(minutes=expire_minutes)
         cancelled = []
         for order in await self.flash_repo.list_pending_orders():
             if parse_iso(order.get("createdAt", _now_iso())) < threshold:

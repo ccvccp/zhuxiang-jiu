@@ -22,8 +22,8 @@ os.environ["STORE_MODE"] = "asyncio"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from repositories.store import _mock_store  # noqa: E402
-from repositories.logistics_repository import (  # noqa: E402
+from repositories.store import _mock_store
+from repositories.logistics_repository import (
     ORDER_STATUS_PENDING, ORDER_STATUS_BOOKED, ORDER_STATUS_PICKED,
     ORDER_STATUS_TRANSPORTING, ORDER_STATUS_DELIVERING, ORDER_STATUS_SIGNED,
     ORDER_STATUS_FAILED, ORDER_STATUS_RETURNED,
@@ -32,7 +32,7 @@ from repositories.logistics_repository import (  # noqa: E402
     SETTLE_STATUS_RESOLVED,
     CARRIER_SF, CARRIER_JD, CARRIER_LLL,
 )
-from services.logistics_service import (  # noqa: E402
+from services.logistics_service import (
     LogisticsService,
     _calc_insured_fee, _calc_package_fee, _calc_sf_base_fee,
     _calc_total_fee, _gen_settle_no,

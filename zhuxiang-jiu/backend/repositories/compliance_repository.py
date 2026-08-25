@@ -19,7 +19,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -140,7 +139,7 @@ class ComplianceRepository:
             self._mem_create("compliance_behavior_monitors", record_id, record)
         return record_id
 
-    async def get_behavior_monitor(self, record_id: int) -> Optional[dict]:
+    async def get_behavior_monitor(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("compliance", "behavior", record_id)
         return self._mem_get("compliance_behavior_monitors", record_id)
@@ -178,7 +177,7 @@ class ComplianceRepository:
             self._mem_create("compliance_terms_monitors", record_id, record)
         return record_id
 
-    async def get_terms_monitor(self, record_id: int) -> Optional[dict]:
+    async def get_terms_monitor(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("compliance", "terms", record_id)
         return self._mem_get("compliance_terms_monitors", record_id)
@@ -214,7 +213,7 @@ class ComplianceRepository:
             self._mem_create("compliance_legal_knowledge", record_id, record)
         return record_id
 
-    async def get_legal_knowledge(self, record_id: int) -> Optional[dict]:
+    async def get_legal_knowledge(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("compliance", "legal", record_id)
         return self._mem_get("compliance_legal_knowledge", record_id)
@@ -262,7 +261,7 @@ class ComplianceRepository:
             self._mem_create("compliance_risk_warnings", record_id, record)
         return record_id
 
-    async def get_risk_warning(self, record_id: int) -> Optional[dict]:
+    async def get_risk_warning(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("compliance", "risk", record_id)
         return self._mem_get("compliance_risk_warnings", record_id)
@@ -300,7 +299,7 @@ class ComplianceRepository:
             self._mem_create("compliance_regulatory_reports", record_id, record)
         return record_id
 
-    async def get_regulatory_report(self, record_id: int) -> Optional[dict]:
+    async def get_regulatory_report(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("compliance", "report", record_id)
         return self._mem_get("compliance_regulatory_reports", record_id)
@@ -338,7 +337,7 @@ class ComplianceRepository:
             self._mem_create("compliance_blockchain_evidence", record_id, record)
         return record_id
 
-    async def get_blockchain_evidence(self, record_id: int) -> Optional[dict]:
+    async def get_blockchain_evidence(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("compliance", "evidence", record_id)
         return self._mem_get("compliance_blockchain_evidence", record_id)
@@ -351,7 +350,7 @@ class ComplianceRepository:
         return self._mem_list_single("compliance_blockchain_evidence",
                                       evidence_type, "evidenceType", limit)
 
-    async def get_evidence_by_hash(self, evidence_hash: str) -> Optional[dict]:
+    async def get_evidence_by_hash(self, evidence_hash: str) -> dict | None:
         """按哈希查询存证"""
         if is_redis_mode():
             client = await get_redis_client()
@@ -387,7 +386,7 @@ class ComplianceRepository:
             self._mem_create("compliance_analysis_reports", record_id, record)
         return record_id
 
-    async def get_analysis_report(self, record_id: int) -> Optional[dict]:
+    async def get_analysis_report(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("compliance", "analysis", record_id)
         return self._mem_get("compliance_analysis_reports", record_id)
@@ -422,7 +421,7 @@ class ComplianceRepository:
             self._mem_create("compliance_optimizations", record_id, record)
         return record_id
 
-    async def get_optimization(self, record_id: int) -> Optional[dict]:
+    async def get_optimization(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("compliance", "optimization", record_id)
         return self._mem_get("compliance_optimizations", record_id)
@@ -469,7 +468,7 @@ class ComplianceRepository:
         self._ensure_store()
         self.store[table][record_id] = record
 
-    def _mem_get(self, table: str, record_id: int) -> Optional[dict]:
+    def _mem_get(self, table: str, record_id: int) -> dict | None:
         self._ensure_store()
         return self.store[table].get(record_id)
 
@@ -519,7 +518,7 @@ class ComplianceRepository:
             await client.set(_k(module, "evidence_hash", evidence_hash), record_id)
 
     async def _redis_get(self, module: str, entity: str,
-                           record_id: int) -> Optional[dict]:
+                           record_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k(module, entity, record_id))
         if not data:

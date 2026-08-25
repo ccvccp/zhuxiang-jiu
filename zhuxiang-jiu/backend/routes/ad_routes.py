@@ -18,7 +18,6 @@
     - 统计(1):  管理端统计
 """
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -34,13 +33,13 @@ _service = AdService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
@@ -78,25 +77,25 @@ class CreateAdRequest(PydBaseModel):
     targetUrl: str = Field("", description="目标链接")
     imageUrl: str = Field("", description="图片URL")
     videoUrl: str = Field("", description="视频URL")
-    startTime: Optional[str] = None
-    endTime: Optional[str] = None
+    startTime: str | None = None
+    endTime: str | None = None
     budget: float = Field(0, ge=0, description="总预算")
     dailyBudget: float = Field(0, ge=0, description="日预算")
     targetRules: dict = Field(default_factory=dict, description="定向规则")
 
 
 class UpdateAdRequest(PydBaseModel):
-    name: Optional[str] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
-    targetUrl: Optional[str] = None
-    imageUrl: Optional[str] = None
-    videoUrl: Optional[str] = None
-    startTime: Optional[str] = None
-    endTime: Optional[str] = None
-    budget: Optional[float] = Field(None, ge=0)
-    dailyBudget: Optional[float] = Field(None, ge=0)
-    targetRules: Optional[dict] = None
+    name: str | None = None
+    title: str | None = None
+    description: str | None = None
+    targetUrl: str | None = None
+    imageUrl: str | None = None
+    videoUrl: str | None = None
+    startTime: str | None = None
+    endTime: str | None = None
+    budget: float | None = Field(None, ge=0)
+    dailyBudget: float | None = Field(None, ge=0)
+    targetRules: dict | None = None
 
 
 class CreateSlotRequest(PydBaseModel):
@@ -104,17 +103,17 @@ class CreateSlotRequest(PydBaseModel):
     name: str = Field(..., description="广告位名称")
     position: str = Field(..., description="位置描述")
     size: str = Field(..., description="尺寸(如 1920×600)")
-    supportedTypes: List[str] = Field(default_factory=list, description="支持的广告类型")
+    supportedTypes: list[str] = Field(default_factory=list, description="支持的广告类型")
     dailyEstimateImpressions: int = Field(0, ge=0, description="日预估曝光")
 
 
 class UpdateSlotRequest(PydBaseModel):
-    name: Optional[str] = None
-    position: Optional[str] = None
-    size: Optional[str] = None
-    supportedTypes: Optional[List[str]] = None
-    dailyEstimateImpressions: Optional[int] = Field(None, ge=0)
-    status: Optional[str] = None
+    name: str | None = None
+    position: str | None = None
+    size: str | None = None
+    supportedTypes: list[str] | None = None
+    dailyEstimateImpressions: int | None = Field(None, ge=0)
+    status: str | None = None
 
 
 class RecordRequest(PydBaseModel):

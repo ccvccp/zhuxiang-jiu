@@ -13,8 +13,7 @@
 """
 
 import json
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -55,14 +54,14 @@ DEFAULT_SETTINGS = {
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def parse_iso(value: str) -> datetime:
     """解析 ISO8601 时间; 无时区视为 UTC"""
     dt = datetime.fromisoformat(str(value))
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -85,13 +84,13 @@ class FlashSaleRepository:
     # ============================================================
 
     async def next_session_id(self) -> str:
-        return f"FS{datetime.now(timezone.utc).strftime('%Y%m%d')}-{await self._next_seq('session')}"
+        return f"FS{datetime.now(UTC).strftime('%Y%m%d')}-{await self._next_seq('session')}"
 
     async def next_item_id(self) -> str:
-        return f"FI{datetime.now(timezone.utc).strftime('%Y%m%d')}-{await self._next_seq('item')}"
+        return f"FI{datetime.now(UTC).strftime('%Y%m%d')}-{await self._next_seq('item')}"
 
     async def next_order_no(self) -> str:
-        return f"FO{datetime.now(timezone.utc).strftime('%Y%m%d')}-{await self._next_seq('order')}"
+        return f"FO{datetime.now(UTC).strftime('%Y%m%d')}-{await self._next_seq('order')}"
 
     def _mem_next_id(self, seq_key: str) -> int:
         self._ensure_store()
@@ -120,7 +119,7 @@ class FlashSaleRepository:
         self.store["flash_sessions"][session["sessionId"]] = session
         return session
 
-    async def get_session(self, session_id: str) -> Optional[dict]:
+    async def get_session(self, session_id: str) -> dict | None:
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.hgetall(_k("flash", "session", session_id))
@@ -171,7 +170,7 @@ class FlashSaleRepository:
         self.store["flash_items"][item["itemId"]] = item
         return item
 
-    async def get_item(self, item_id: str) -> Optional[dict]:
+    async def get_item(self, item_id: str) -> dict | None:
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.hgetall(_k("flash", "item", item_id))
@@ -224,7 +223,7 @@ class FlashSaleRepository:
         self.store["flash_orders"][order["orderNo"]] = order
         return order
 
-    async def get_order(self, order_no: str) -> Optional[dict]:
+    async def get_order(self, order_no: str) -> dict | None:
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.hgetall(_k("flash", "order", order_no))

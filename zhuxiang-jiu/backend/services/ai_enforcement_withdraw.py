@@ -63,7 +63,7 @@ async def enforce_withdrawal(user_id, amount: float) -> dict:
     try:
         account = await repo.get_account(user_id)
         balance = float((account or {}).get("balance") or 0)
-    except Exception as exc:  # noqa: BLE001 - 余额查询失败不阻断决策
+    except Exception as exc:
         logger.warning("决策门余额查询失败(user=%r): %s", user_id, exc)
     if balance <= 0:
         balance = float(amount or 0)

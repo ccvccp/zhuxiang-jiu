@@ -18,7 +18,6 @@
     - 新酒回收(1):      complete-new-wine-recycle
 """
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -37,14 +36,14 @@ _service = RecycleService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -79,11 +78,11 @@ class ValuationRequest(PydBaseModel):
 class ApplicationRequest(PydBaseModel):
     userId: int = Field(..., description="会员ID")
     type: str = Field(..., description="业务类型(exchange/recycle)")
-    valuationIds: List[int] = Field(..., min_items=1, description="估价记录ID数组")
-    newProductId: Optional[str] = Field(None, description="新酒产品ID(兑换时必填)")
-    newProductPrice: Optional[float] = Field(None, gt=0, description="新酒价格(兑换时必填)")
-    payoutMethod: Optional[str] = Field(None, description="打款方式(回收时填写)")
-    payoutAccount: Optional[str] = Field(None, description="收款账户(回收时填写)")
+    valuationIds: list[int] = Field(..., min_items=1, description="估价记录ID数组")
+    newProductId: str | None = Field(None, description="新酒产品ID(兑换时必填)")
+    newProductPrice: float | None = Field(None, gt=0, description="新酒价格(兑换时必填)")
+    payoutMethod: str | None = Field(None, description="打款方式(回收时填写)")
+    payoutAccount: str | None = Field(None, description="收款账户(回收时填写)")
 
 
 class ReviewRequest(PydBaseModel):
@@ -133,7 +132,7 @@ class AICounterRequest(PydBaseModel):
 
 class AcceptNegotiationRequest(PydBaseModel):
     acceptedBy: str = Field("user", description="接受方(user/ai)")
-    finalPrice: Optional[float] = Field(None, gt=0, description="最终价格(默认取当前价)")
+    finalPrice: float | None = Field(None, gt=0, description="最终价格(默认取当前价)")
 
 
 class RejectNegotiationRequest(PydBaseModel):

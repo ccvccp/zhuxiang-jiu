@@ -20,7 +20,7 @@
 import hashlib
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from core.locks import get_lock
 from repositories.member_repository import MemberRepository
@@ -79,7 +79,7 @@ def _calc_level(growth_value: int) -> int:
 
 def _now_iso() -> str:
     """ISO8601 UTC 时间戳"""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class MemberService:

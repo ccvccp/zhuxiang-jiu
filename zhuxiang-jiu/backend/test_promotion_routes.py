@@ -66,7 +66,7 @@ async def _expect_value_error(coro, keyword=""):
         return False, ""
     except ValueError as exc:
         return (not keyword or keyword in str(exc)), str(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"非ValueError: {type(exc).__name__}: {exc}"
 
 
@@ -76,7 +76,7 @@ async def _expect_key_error(coro):
         return False, ""
     except KeyError:
         return True, ""
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"非KeyError: {type(exc).__name__}: {exc}"
 
 

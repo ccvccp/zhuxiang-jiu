@@ -18,7 +18,6 @@
     - 统计(1):  管理端统计
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -34,13 +33,13 @@ _service = AgreementService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
@@ -79,15 +78,15 @@ class CreateAgreementRequest(PydBaseModel):
 
 
 class UpdateAgreementRequest(PydBaseModel):
-    name: Optional[str] = None
-    content: Optional[str] = None
-    legalBasis: Optional[str] = None
-    changeLog: Optional[str] = None
-    applicableRole: Optional[str] = None
+    name: str | None = None
+    content: str | None = None
+    legalBasis: str | None = None
+    changeLog: str | None = None
+    applicableRole: str | None = None
 
 
 class PublishRequest(PydBaseModel):
-    effectiveDate: Optional[str] = None
+    effectiveDate: str | None = None
 
 
 class NewVersionRequest(PydBaseModel):
@@ -108,8 +107,8 @@ class CreateProtocolRequest(PydBaseModel):
 
 
 class UpdateProtocolRequest(PydBaseModel):
-    required: Optional[bool] = None
-    status: Optional[str] = None
+    required: bool | None = None
+    status: str | None = None
 
 
 # ============================================================

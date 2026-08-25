@@ -11,7 +11,6 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 from core.helpers import ts
 from core.locks import get_lock
@@ -947,7 +946,7 @@ class AgentService:
                 "logs": logs,
             }
 
-    def _detect_cross_region(self, agent: dict) -> Optional[dict]:
+    def _detect_cross_region(self, agent: dict) -> dict | None:
         """检测跨区域销售(窜货预警)
 
         比对代理商实际销售区域(sales_region)与授权区域(region),

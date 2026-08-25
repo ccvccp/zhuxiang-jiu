@@ -14,7 +14,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -107,13 +106,13 @@ class TraceRepository:
             self._mem_create_box_code(box)
         return box_id
 
-    async def get_box_code(self, box_id: int) -> Optional[dict]:
+    async def get_box_code(self, box_id: int) -> dict | None:
         """按ID查询箱码"""
         if is_redis_mode():
             return await self._redis_get_box_code(box_id)
         return self._mem_get_box_code(box_id)
 
-    async def get_box_by_code(self, box_code: str) -> Optional[dict]:
+    async def get_box_by_code(self, box_code: str) -> dict | None:
         """按箱码字符串查询"""
         if is_redis_mode():
             return await self._redis_get_box_by_code(box_code)
@@ -152,13 +151,13 @@ class TraceRepository:
             self._mem_create_life_code(life)
         return life_id
 
-    async def get_life_code(self, life_id: int) -> Optional[dict]:
+    async def get_life_code(self, life_id: int) -> dict | None:
         """按ID查询生命码"""
         if is_redis_mode():
             return await self._redis_get_life_code(life_id)
         return self._mem_get_life_code(life_id)
 
-    async def get_life_by_code(self, life_code: str) -> Optional[dict]:
+    async def get_life_by_code(self, life_code: str) -> dict | None:
         """按生命码字符串查询"""
         if is_redis_mode():
             return await self._redis_get_life_by_code(life_code)
@@ -194,7 +193,7 @@ class TraceRepository:
             self._mem_add_scan_log(scan)
         return scan_id
 
-    async def get_scan_log(self, scan_id: int) -> Optional[dict]:
+    async def get_scan_log(self, scan_id: int) -> dict | None:
         """按ID查询扫码记录"""
         if is_redis_mode():
             return await self._redis_get_scan_log(scan_id)
@@ -236,11 +235,11 @@ class TraceRepository:
         if box_code:
             self.store["trace_box_by_code"][box_code] = box_id
 
-    def _mem_get_box_code(self, box_id: int) -> Optional[dict]:
+    def _mem_get_box_code(self, box_id: int) -> dict | None:
         self._ensure_store()
         return self.store["trace_box_codes"].get(box_id)
 
-    def _mem_get_box_by_code(self, box_code: str) -> Optional[dict]:
+    def _mem_get_box_by_code(self, box_code: str) -> dict | None:
         self._ensure_store()
         box_id = self.store["trace_box_by_code"].get(box_code)
         if box_id is None:
@@ -277,11 +276,11 @@ class TraceRepository:
         if user_id is not None:
             self.store["trace_life_by_user"].setdefault(user_id, []).append(life_id)
 
-    def _mem_get_life_code(self, life_id: int) -> Optional[dict]:
+    def _mem_get_life_code(self, life_id: int) -> dict | None:
         self._ensure_store()
         return self.store["trace_life_codes"].get(life_id)
 
-    def _mem_get_life_by_code(self, life_code: str) -> Optional[dict]:
+    def _mem_get_life_by_code(self, life_code: str) -> dict | None:
         self._ensure_store()
         life_id = self.store["trace_life_by_code"].get(life_code)
         if life_id is None:
@@ -330,7 +329,7 @@ class TraceRepository:
         if user_id is not None:
             self.store["trace_scan_by_user"].setdefault(user_id, []).append(scan_id)
 
-    def _mem_get_scan_log(self, scan_id: int) -> Optional[dict]:
+    def _mem_get_scan_log(self, scan_id: int) -> dict | None:
         self._ensure_store()
         return self.store["trace_scan_logs"].get(scan_id)
 
@@ -368,14 +367,14 @@ class TraceRepository:
         if batch_no:
             await client.lpush(_k("trace", "boxes_by_batch", batch_no), box_id)
 
-    async def _redis_get_box_code(self, box_id: int) -> Optional[dict]:
+    async def _redis_get_box_code(self, box_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("trace", "box", box_id))
         if not data:
             return None
         return json.loads(data)
 
-    async def _redis_get_box_by_code(self, box_code: str) -> Optional[dict]:
+    async def _redis_get_box_by_code(self, box_code: str) -> dict | None:
         client = await get_redis_client()
         box_id = await client.get(_k("trace", "box_code", box_code))
         if not box_id:
@@ -429,14 +428,14 @@ class TraceRepository:
         if user_id is not None:
             await client.lpush(_k("trace", "lifes_by_user", user_id), life_id)
 
-    async def _redis_get_life_code(self, life_id: int) -> Optional[dict]:
+    async def _redis_get_life_code(self, life_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("trace", "life", life_id))
         if not data:
             return None
         return json.loads(data)
 
-    async def _redis_get_life_by_code(self, life_code: str) -> Optional[dict]:
+    async def _redis_get_life_by_code(self, life_code: str) -> dict | None:
         client = await get_redis_client()
         life_id = await client.get(_k("trace", "life_code", life_code))
         if not life_id:
@@ -498,7 +497,7 @@ class TraceRepository:
         if user_id is not None:
             await client.lpush(_k("trace", "scans_by_user", user_id), scan_id)
 
-    async def _redis_get_scan_log(self, scan_id: int) -> Optional[dict]:
+    async def _redis_get_scan_log(self, scan_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("trace", "scan", scan_id))
         if not data:

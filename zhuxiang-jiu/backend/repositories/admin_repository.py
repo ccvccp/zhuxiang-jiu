@@ -15,7 +15,6 @@
 import hashlib
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -101,13 +100,13 @@ class AdminRepository:
     # 管理员 CRUD
     # ============================================================
 
-    async def get_user(self, user_id: int) -> Optional[dict]:
+    async def get_user(self, user_id: int) -> dict | None:
         """按ID查询管理员"""
         if is_redis_mode():
             return await self._redis_get_user(user_id)
         return self._mem_get_user(user_id)
 
-    async def get_user_by_username(self, username: str) -> Optional[dict]:
+    async def get_user_by_username(self, username: str) -> dict | None:
         """按用户名查询管理员(登录用)"""
         if is_redis_mode():
             return await self._redis_get_user_by_username(username)
@@ -136,13 +135,13 @@ class AdminRepository:
     # 角色 CRUD
     # ============================================================
 
-    async def get_role(self, role_id: int) -> Optional[dict]:
+    async def get_role(self, role_id: int) -> dict | None:
         """按ID查询角色"""
         if is_redis_mode():
             return await self._redis_get_role(role_id)
         return self._mem_get_role(role_id)
 
-    async def get_role_by_code(self, role_code: str) -> Optional[dict]:
+    async def get_role_by_code(self, role_code: str) -> dict | None:
         """按角色编码查询角色"""
         if is_redis_mode():
             return await self._redis_get_role_by_code(role_code)
@@ -221,7 +220,7 @@ class AdminRepository:
             self._mem_add_log(log)
         return log_id
 
-    async def get_log(self, log_id: int) -> Optional[dict]:
+    async def get_log(self, log_id: int) -> dict | None:
         """按ID查询操作日志"""
         if is_redis_mode():
             return await self._redis_get_log(log_id)
@@ -252,7 +251,7 @@ class AdminRepository:
     # 系统配置 CRUD
     # ============================================================
 
-    async def get_config(self, config_key: str) -> Optional[dict]:
+    async def get_config(self, config_key: str) -> dict | None:
         """按 key 查询系统配置"""
         if is_redis_mode():
             return await self._redis_get_config(config_key)
@@ -356,11 +355,11 @@ class AdminRepository:
 
     # --- 管理员 ---
 
-    def _mem_get_user(self, user_id: int) -> Optional[dict]:
+    def _mem_get_user(self, user_id: int) -> dict | None:
         self._ensure_store()
         return self.store["admin_users"].get(user_id)
 
-    def _mem_get_user_by_username(self, username: str) -> Optional[dict]:
+    def _mem_get_user_by_username(self, username: str) -> dict | None:
         self._ensure_store()
         uid = self.store["admin_users_by_username"].get(username)
         if uid is None:
@@ -395,11 +394,11 @@ class AdminRepository:
 
     # --- 角色 ---
 
-    def _mem_get_role(self, role_id: int) -> Optional[dict]:
+    def _mem_get_role(self, role_id: int) -> dict | None:
         self._ensure_store()
         return self.store["admin_roles"].get(role_id)
 
-    def _mem_get_role_by_code(self, role_code: str) -> Optional[dict]:
+    def _mem_get_role_by_code(self, role_code: str) -> dict | None:
         self._ensure_store()
         rid = self.store["admin_roles_by_code"].get(role_code)
         if rid is None:
@@ -460,7 +459,7 @@ class AdminRepository:
         # 维护链头哈希
         self.store["_admin_log_last_hash"] = log.get("currentHash", "")
 
-    def _mem_get_log(self, log_id: int) -> Optional[dict]:
+    def _mem_get_log(self, log_id: int) -> dict | None:
         self._ensure_store()
         return self.store["admin_operation_logs"].get(log_id)
 
@@ -479,7 +478,7 @@ class AdminRepository:
 
     # --- 系统配置 ---
 
-    def _mem_get_config(self, config_key: str) -> Optional[dict]:
+    def _mem_get_config(self, config_key: str) -> dict | None:
         self._ensure_store()
         return self.store["system_configs"].get(config_key)
 
@@ -549,14 +548,14 @@ class AdminRepository:
 
     # --- 管理员 ---
 
-    async def _redis_get_user(self, user_id: int) -> Optional[dict]:
+    async def _redis_get_user(self, user_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("admin", "user", user_id))
         if not data:
             return None
         return json.loads(data)
 
-    async def _redis_get_user_by_username(self, username: str) -> Optional[dict]:
+    async def _redis_get_user_by_username(self, username: str) -> dict | None:
         client = await get_redis_client()
         uid = await client.hget(_k("admin", "user", "username_index"), username)
         if not uid:
@@ -606,14 +605,14 @@ class AdminRepository:
 
     # --- 角色 ---
 
-    async def _redis_get_role(self, role_id: int) -> Optional[dict]:
+    async def _redis_get_role(self, role_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("admin", "role", role_id))
         if not data:
             return None
         return json.loads(data)
 
-    async def _redis_get_role_by_code(self, role_code: str) -> Optional[dict]:
+    async def _redis_get_role_by_code(self, role_code: str) -> dict | None:
         client = await get_redis_client()
         rid = await client.hget(_k("admin", "role", "code_index"), role_code)
         if not rid:
@@ -696,7 +695,7 @@ class AdminRepository:
         # 维护链头哈希
         await client.set(_k("admin", "log", "last_hash"), log.get("currentHash", ""))
 
-    async def _redis_get_log(self, log_id: int) -> Optional[dict]:
+    async def _redis_get_log(self, log_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("admin", "log", log_id))
         if not data:
@@ -721,7 +720,7 @@ class AdminRepository:
 
     # --- 系统配置 ---
 
-    async def _redis_get_config(self, config_key: str) -> Optional[dict]:
+    async def _redis_get_config(self, config_key: str) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("admin", "config", config_key))
         if not data:

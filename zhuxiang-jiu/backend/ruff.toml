@@ -26,9 +26,11 @@ exclude = [
 #   F821 未定义变量
 #   F811 重定义
 #   F841 未使用局部变量
-# CI 门禁阻断"明确的错误"(语法/未定义/重定义/未使用导入/未使用变量)
-# F401/F841 曾因误判风险设为 warning, 经全量清理后已恢复强制
-select = ["E9", "F"]
+# UP = pyupgrade: 现代化语法(Optional[X]→X|None, List→list, StrEnum 等)
+# RUF100 = 无用的 noqa 注释
+# SIM117 = 可合并的 with 语句
+# CI 门禁阻断"明确的错误"(语法/未定义/重定义/未使用/旧语法)
+select = ["E9", "F", "UP", "RUF100", "SIM117"]
 
 [lint.per-file-ignores]
 # 测试文件允许未使用导入(常量导入是测试风格, 不阻断)

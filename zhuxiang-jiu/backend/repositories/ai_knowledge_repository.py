@@ -28,7 +28,6 @@
 import json
 import math
 import os
-from typing import Optional
 
 from core.helpers import ts
 from repositories.backend import (
@@ -68,7 +67,7 @@ class AiKnowledgeRepository:
     # ============================================================
 
     @staticmethod
-    def _case_from_feedback(fb: dict) -> Optional[dict]:
+    def _case_from_feedback(fb: dict) -> dict | None:
         """反馈记录 → 知识案例(无因子快照的反馈无法检索, 跳过)"""
         factors = {}
         for f in (fb.get("factors") or []):

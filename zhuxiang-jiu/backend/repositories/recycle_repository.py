@@ -17,7 +17,6 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -208,13 +207,13 @@ class RecycleRepository:
             self._mem_create_application(application)
         return app_id
 
-    async def get_application(self, app_id: int) -> Optional[dict]:
+    async def get_application(self, app_id: int) -> dict | None:
         """按ID查询回收申请"""
         if is_redis_mode():
             return await self._redis_get_application(app_id)
         return self._mem_get_application(app_id)
 
-    async def get_application_by_no(self, app_no: str) -> Optional[dict]:
+    async def get_application_by_no(self, app_no: str) -> dict | None:
         """按申请单号查询"""
         if is_redis_mode():
             return await self._redis_get_application_by_no(app_no)
@@ -257,13 +256,13 @@ class RecycleRepository:
             self._mem_add_valuation(valuation)
         return val_id
 
-    async def get_valuation(self, val_id: int) -> Optional[dict]:
+    async def get_valuation(self, val_id: int) -> dict | None:
         """按ID查询估价"""
         if is_redis_mode():
             return await self._redis_get_valuation(val_id)
         return self._mem_get_valuation(val_id)
 
-    async def get_valuation_by_application(self, app_id: int) -> Optional[dict]:
+    async def get_valuation_by_application(self, app_id: int) -> dict | None:
         """按申请ID查询最新估价"""
         if is_redis_mode():
             return await self._redis_get_valuation_by_application(app_id)
@@ -294,7 +293,7 @@ class RecycleRepository:
             self._mem_add_exchange(exchange)
         return ex_id
 
-    async def get_exchange(self, ex_id: int) -> Optional[dict]:
+    async def get_exchange(self, ex_id: int) -> dict | None:
         """按ID查询兑换记录"""
         if is_redis_mode():
             return await self._redis_get_exchange(ex_id)
@@ -353,7 +352,7 @@ class RecycleRepository:
             self._mem_create_negotiation(negotiation)
         return neg_id
 
-    async def get_negotiation(self, neg_id: int) -> Optional[dict]:
+    async def get_negotiation(self, neg_id: int) -> dict | None:
         """按ID查询议价记录"""
         if is_redis_mode():
             return await self._redis_get_negotiation(neg_id)
@@ -409,11 +408,11 @@ class RecycleRepository:
         if app_no:
             self.store["recycle_applications_by_no"][app_no] = app_id
 
-    def _mem_get_application(self, app_id: int) -> Optional[dict]:
+    def _mem_get_application(self, app_id: int) -> dict | None:
         self._ensure_store()
         return self.store["recycle_applications"].get(app_id)
 
-    def _mem_get_application_by_no(self, app_no: str) -> Optional[dict]:
+    def _mem_get_application_by_no(self, app_no: str) -> dict | None:
         self._ensure_store()
         app_id = self.store["recycle_applications_by_no"].get(app_no)
         if app_id is None:
@@ -455,11 +454,11 @@ class RecycleRepository:
         if user_id is not None:
             self.store["recycle_valuations_by_user"].setdefault(user_id, []).append(val_id)
 
-    def _mem_get_valuation(self, val_id: int) -> Optional[dict]:
+    def _mem_get_valuation(self, val_id: int) -> dict | None:
         self._ensure_store()
         return self.store["recycle_valuations"].get(val_id)
 
-    def _mem_get_valuation_by_application(self, app_id: int) -> Optional[dict]:
+    def _mem_get_valuation_by_application(self, app_id: int) -> dict | None:
         self._ensure_store()
         val_id = self.store["recycle_valuations_by_app"].get(app_id)
         if val_id is None:
@@ -487,7 +486,7 @@ class RecycleRepository:
         if user_id is not None:
             self.store["recycle_exchanges_by_user"].setdefault(user_id, []).append(ex_id)
 
-    def _mem_get_exchange(self, ex_id: int) -> Optional[dict]:
+    def _mem_get_exchange(self, ex_id: int) -> dict | None:
         self._ensure_store()
         return self.store["recycle_exchanges"].get(ex_id)
 
@@ -536,7 +535,7 @@ class RecycleRepository:
         if user_id is not None:
             self.store["recycle_negotiations_by_user"].setdefault(user_id, []).append(neg_id)
 
-    def _mem_get_negotiation(self, neg_id: int) -> Optional[dict]:
+    def _mem_get_negotiation(self, neg_id: int) -> dict | None:
         self._ensure_store()
         return self.store["recycle_negotiations"].get(neg_id)
 
@@ -576,14 +575,14 @@ class RecycleRepository:
         if app_no:
             await client.set(_k("recycle", "application_no", app_no), app_id)
 
-    async def _redis_get_application(self, app_id: int) -> Optional[dict]:
+    async def _redis_get_application(self, app_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("recycle", "application", app_id))
         if not data:
             return None
         return json.loads(data)
 
-    async def _redis_get_application_by_no(self, app_no: str) -> Optional[dict]:
+    async def _redis_get_application_by_no(self, app_no: str) -> dict | None:
         client = await get_redis_client()
         app_id = await client.get(_k("recycle", "application_no", app_no))
         if not app_id:
@@ -640,14 +639,14 @@ class RecycleRepository:
         if user_id is not None:
             await client.lpush(_k("recycle", "valuations_by_user", user_id), val_id)
 
-    async def _redis_get_valuation(self, val_id: int) -> Optional[dict]:
+    async def _redis_get_valuation(self, val_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("recycle", "valuation", val_id))
         if not data:
             return None
         return json.loads(data)
 
-    async def _redis_get_valuation_by_application(self, app_id: int) -> Optional[dict]:
+    async def _redis_get_valuation_by_application(self, app_id: int) -> dict | None:
         client = await get_redis_client()
         val_id = await client.get(_k("recycle", "valuation_by_app", app_id))
         if not val_id:
@@ -687,7 +686,7 @@ class RecycleRepository:
         if user_id is not None:
             await client.lpush(_k("recycle", "exchanges_by_user", user_id), ex_id)
 
-    async def _redis_get_exchange(self, ex_id: int) -> Optional[dict]:
+    async def _redis_get_exchange(self, ex_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("recycle", "exchange", ex_id))
         if not data:
@@ -762,7 +761,7 @@ class RecycleRepository:
         if user_id is not None:
             await client.lpush(_k("recycle", "negotiations_by_user", user_id), neg_id)
 
-    async def _redis_get_negotiation(self, neg_id: int) -> Optional[dict]:
+    async def _redis_get_negotiation(self, neg_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("recycle", "negotiation", neg_id))
         if not data:

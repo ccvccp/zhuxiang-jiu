@@ -19,7 +19,7 @@
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from core.locks import get_lock
 from core.helpers import ts
@@ -328,11 +328,10 @@ class GroupBuyService:
                 raise ValueError(
                     f"定制团购金额未达门槛: 当前 ¥{original_total:.2f}, 需 ≥ ¥{MIN_AMOUNT_CUSTOM:.2f}"
                 )
-        else:
-            if original_total < MIN_AMOUNT:
-                raise ValueError(
-                    f"团购金额未达门槛: 当前 ¥{original_total:.2f}, 需 ≥ ¥{MIN_AMOUNT:.2f}"
-                )
+        elif original_total < MIN_AMOUNT:
+            raise ValueError(
+                f"团购金额未达门槛: 当前 ¥{original_total:.2f}, 需 ≥ ¥{MIN_AMOUNT:.2f}"
+            )
 
         # 数量校验
         if total_quantity < MIN_QUANTITY:
@@ -348,7 +347,7 @@ class GroupBuyService:
 
     async def _check_frequency(self, user_id: int) -> None:
         """频次限制检查(月度 ≤ 4 次)"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start_date = now.strftime("%Y-%m-01")
         # 月末
         if now.month == 12:
@@ -366,7 +365,7 @@ class GroupBuyService:
 
     async def _check_annual_limit(self, user_id: int, new_amount: float) -> None:
         """年度限额校验"""
-        year = datetime.now(timezone.utc).year
+        year = datetime.now(UTC).year
         used = await self.repo.sum_user_annual_amount(user_id, year)
         if used + new_amount > ANNUAL_LIMIT:
             raise ValueError(

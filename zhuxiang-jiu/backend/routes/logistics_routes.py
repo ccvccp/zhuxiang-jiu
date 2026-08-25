@@ -22,7 +22,6 @@
     - 状态机查询(1): status-flow
 """
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -46,14 +45,14 @@ _service = LogisticsService()
 # 鉴权与异常映射辅助(对齐 wallet/payment 风格)
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -92,8 +91,8 @@ class ContactInfo(PydBaseModel):
 
 
 class ReceiverInfo(ContactInfo):
-    province: Optional[str] = Field(None, description="省份")
-    city: Optional[str] = Field(None, description="城市")
+    province: str | None = Field(None, description="省份")
+    city: str | None = Field(None, description="城市")
 
 
 class CreateOrderRequest(PydBaseModel):
@@ -115,12 +114,12 @@ class CreateOrderRequest(PydBaseModel):
 class UpdateStatusRequest(PydBaseModel):
     status: str = Field(..., description="新状态")
     operator: str = Field("system", description="操作人")
-    trackDesc: Optional[str] = Field(None, description="轨迹描述")
-    trackLocation: Optional[str] = Field(None, description="轨迹所在城市")
-    signerName: Optional[str] = Field(None, description="签收人(签收时)")
-    signType: Optional[str] = Field("self", description="签收方式 self/agent/station")
-    signPhoto: Optional[str] = Field(None, description="签收照片URL")
-    signLocation: Optional[str] = Field(None, description="签收GPS")
+    trackDesc: str | None = Field(None, description="轨迹描述")
+    trackLocation: str | None = Field(None, description="轨迹所在城市")
+    signerName: str | None = Field(None, description="签收人(签收时)")
+    signType: str | None = Field("self", description="签收方式 self/agent/station")
+    signPhoto: str | None = Field(None, description="签收照片URL")
+    signLocation: str | None = Field(None, description="签收GPS")
 
 
 class CloseFailedRequest(PydBaseModel):
@@ -134,13 +133,13 @@ class TrackCallbackRequest(PydBaseModel):
     description: str = Field(..., description="轨迹描述")
     location: str = Field("", description="所在城市")
     operator: str = Field("carrier", description="操作人")
-    trackTime: Optional[str] = Field(None, description="轨迹时间")
+    trackTime: str | None = Field(None, description="轨迹时间")
 
 
 class StartSettlementRequest(PydBaseModel):
     period: str = Field(..., description="账期 YYYY-MM")
     carrier: str = Field(..., description="物流商编码")
-    channelOrders: Optional[List[dict]] = Field(
+    channelOrders: list[dict] | None = Field(
         None, description="物流商对账明细 [{waybillNo, totalFee}]"
     )
 
@@ -214,11 +213,11 @@ async def get_order_by_order_id(order_id: str):
 
 @router.get("/api/logistics/orders", tags=["物流接口管理"])
 async def list_logistics_orders(
-    carrier: Optional[str] = Query(None, description="物流商筛选"),
-    status: Optional[str] = Query(None, description="状态筛选"),
-    order_type: Optional[str] = Query(None, description="订单类型筛选"),
+    carrier: str | None = Query(None, description="物流商筛选"),
+    status: str | None = Query(None, description="状态筛选"),
+    order_type: str | None = Query(None, description="订单类型筛选"),
     limit: int = Query(50, ge=1, le=200, description="返回条数上限"),
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """物流订单列表(管理端)"""
     _require_admin(x_role)
@@ -234,7 +233,7 @@ async def list_logistics_orders(
 async def update_logistics_status(
     waybill_no: str,
     data: UpdateStatusRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """更新物流订单状态(管理端, 状态机校验 + 自动轨迹)"""
     _require_admin(x_role)
@@ -264,7 +263,7 @@ async def update_logistics_status(
 async def close_failed_order(
     waybill_no: str,
     data: CloseFailedRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """关闭失败的运单(管理端, failed → returned)"""
     _require_admin(x_role)
@@ -320,7 +319,7 @@ async def track_callback(data: TrackCallbackRequest):
 @router.post("/api/logistics/settlement/start", tags=["物流接口管理"])
 async def start_settlement(
     data: StartSettlementRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """启动月结对账(管理端)"""
     _require_admin(x_role)
@@ -347,9 +346,9 @@ async def get_settlement(settle_no: str):
 
 @router.get("/api/logistics/settlements", tags=["物流接口管理"])
 async def list_settlements(
-    carrier: Optional[str] = Query(None, description="物流商筛选"),
-    period: Optional[str] = Query(None, description="账期筛选"),
-    status: Optional[str] = Query(None, description="状态筛选"),
+    carrier: str | None = Query(None, description="物流商筛选"),
+    period: str | None = Query(None, description="账期筛选"),
+    status: str | None = Query(None, description="状态筛选"),
     limit: int = Query(50, ge=1, le=200),
 ):
     """结算单列表(公开)"""
@@ -360,7 +359,7 @@ async def list_settlements(
 @router.get("/api/logistics/settlements/pending", tags=["物流接口管理"])
 async def list_pending_settlements(
     limit: int = Query(50, ge=1, le=200),
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """待处理结算单列表(管理端)"""
     _require_admin(x_role)
@@ -371,7 +370,7 @@ async def list_pending_settlements(
 @router.post("/api/logistics/settlement/{settle_no}/investigate", tags=["物流接口管理"])
 async def investigate_diff(
     settle_no: str,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """介入调查差异(管理端, diff → investigating)"""
     _require_admin(x_role)
@@ -386,7 +385,7 @@ async def investigate_diff(
 async def resolve_settlement(
     settle_no: str,
     data: ResolveRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """处理完毕(管理端, investigating → resolved)"""
     _require_admin(x_role)
@@ -404,7 +403,7 @@ async def resolve_settlement(
 @router.post("/api/logistics/settlement/{settle_no}/confirm", tags=["物流接口管理"])
 async def confirm_settlement(
     settle_no: str,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """确认结算单(管理端, reconciling/resolved → confirmed)"""
     _require_admin(x_role)
@@ -418,7 +417,7 @@ async def confirm_settlement(
 @router.post("/api/logistics/settlement/{settle_no}/pay", tags=["物流接口管理"])
 async def pay_settlement(
     settle_no: str,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """付款(管理端, confirmed → paid)"""
     _require_admin(x_role)

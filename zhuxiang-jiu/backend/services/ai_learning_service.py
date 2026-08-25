@@ -35,7 +35,6 @@
 import logging
 import math
 import time
-from typing import Optional
 
 from core.helpers import ts
 from core.locks import get_lock
@@ -168,7 +167,7 @@ def _normalize_weights(weights: dict, target_sum: float) -> dict:
     return result
 
 
-def _action_for_score(scorer_id: str, score: float) -> Optional[str]:
+def _action_for_score(scorer_id: str, score: float) -> str | None:
     """按评分器阈值表把加权分映射为动作(路由类评分器返回 None)"""
     for threshold, action in DECISION_THRESHOLDS.get(scorer_id, []):
         if score >= threshold:
@@ -206,7 +205,7 @@ async def load_effective_weights(scorer_id: str, defaults: dict,
         if isinstance(raw, dict) and set(raw) == set(defaults):
             weights = {k: float(v) for k, v in raw.items()}
             version = champion.get("version", "v1")
-    except Exception as exc:  # noqa: BLE001 - 学习层异常不阻塞评分
+    except Exception as exc:
         logger.warning("读取权重档案失败(scorer=%s), 回退默认权重: %s",
                        scorer_id, exc)
     if weights is None:
@@ -222,7 +221,7 @@ def get_active_weight_version(scorer_id: str) -> str:
     return _weight_version_cache.get(scorer_id, "v1")
 
 
-def invalidate_weight_cache(scorer_id: Optional[str] = None) -> None:
+def invalidate_weight_cache(scorer_id: str | None = None) -> None:
     """失效权重缓存(权重更新/晋升/重置后调用, 立即生效)"""
     if scorer_id is None:
         _weight_cache.clear()
@@ -287,7 +286,7 @@ async def _get_config(scorer_id: str, repo: AiLearningRepository) -> dict:
 # 反馈提交 + 漂移监控
 # ============================================================
 
-def _update_drift(stats: Optional[dict], factors: list[dict],
+def _update_drift(stats: dict | None, factors: list[dict],
                   score: float) -> dict:
     """按因子分数 EMA 更新漂移统计(首条反馈建立基线)"""
     alpha = DRIFT_ALPHA
@@ -378,7 +377,7 @@ async def submit_feedback(payload: dict) -> dict:
         drift = _update_drift(await repo.get_drift(scorer_id),
                               record["factors"], record["scoreAtDecision"])
         await repo.save_drift(scorer_id, drift)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("更新漂移统计失败(scorer=%s): %s", scorer_id, exc)
 
     logger.info("ai_learning_feedback scorer=%s id=%s correct=%s",
@@ -489,7 +488,7 @@ async def _sample_replay(scorer_id: str, limit: int) -> list[dict]:
                 "source": "replay",
             })
         return records
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("经验回放采样失败(scorer=%s): %s", scorer_id, exc)
         return []
 
@@ -566,7 +565,7 @@ async def run_learning_cycle(scorer_id: str) -> dict:
             if archived:
                 logger.info("ai_kb_archive scorer=%s cases=%s",
                             scorer_id, archived)
-        except Exception as exc:  # noqa: BLE001 - 归档失败不影响学习
+        except Exception as exc:
             logger.warning("知识案例归档失败(scorer=%s): %s", scorer_id, exc)
 
     delta = {k: round(new_weights[k] - champion["weights"].get(k, 0), 4)

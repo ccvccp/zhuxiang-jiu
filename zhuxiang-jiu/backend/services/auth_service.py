@@ -18,7 +18,7 @@
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from core.auth import (
     AuthError, TokenExpiredError,
@@ -40,7 +40,7 @@ _PHONE_PATTERN = re.compile(r"^1[3-9]\d{9}$")
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class AuthService:

@@ -19,7 +19,6 @@
 import json
 import math
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -153,7 +152,7 @@ class LocationRepository:
             self._mem_add_to_list("loc_addresses_by_user", address.get("userId"), address_id)
         return address_id
 
-    async def get_address(self, address_id: int) -> Optional[dict]:
+    async def get_address(self, address_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("loc", "address", address_id)
         return self._mem_get("loc_addresses", address_id)
@@ -224,7 +223,7 @@ class LocationRepository:
             self._mem_create("loc_stores", store_id, store)
         return store_id
 
-    async def get_store(self, store_id: int) -> Optional[dict]:
+    async def get_store(self, store_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("loc", "store", store_id)
         return self._mem_get("loc_stores", store_id)
@@ -280,7 +279,7 @@ class LocationRepository:
             self._mem_create("loc_agent_locations", agent_id, agent)
         return agent_id
 
-    async def get_agent_location(self, agent_id: int) -> Optional[dict]:
+    async def get_agent_location(self, agent_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("loc", "agent", agent_id)
         return self._mem_get("loc_agent_locations", agent_id)
@@ -345,12 +344,12 @@ class LocationRepository:
                 self.store["loc_tracks_by_shipment"][track["shipmentId"]] = track_id
         return track_id
 
-    async def get_shipment_track(self, track_id: int) -> Optional[dict]:
+    async def get_shipment_track(self, track_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("loc", "track", track_id)
         return self._mem_get("loc_shipment_tracks", track_id)
 
-    async def get_track_by_shipment(self, shipment_id: str) -> Optional[dict]:
+    async def get_track_by_shipment(self, shipment_id: str) -> dict | None:
         """按运单号查询轨迹"""
         if is_redis_mode():
             client = await get_redis_client()
@@ -402,7 +401,7 @@ class LocationRepository:
             self._mem_create("loc_delivery_zones", zone_id, zone)
         return zone_id
 
-    async def get_delivery_zone(self, zone_id: int) -> Optional[dict]:
+    async def get_delivery_zone(self, zone_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("loc", "zone", zone_id)
         return self._mem_get("loc_delivery_zones", zone_id)
@@ -465,12 +464,12 @@ class LocationRepository:
                 self.store["loc_evidence_by_hash"][evidence["evidenceHash"]] = evidence_id
         return evidence_id
 
-    async def get_evidence(self, evidence_id: int) -> Optional[dict]:
+    async def get_evidence(self, evidence_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("loc", "evidence", evidence_id)
         return self._mem_get("loc_evidence", evidence_id)
 
-    async def get_evidence_by_hash(self, evidence_hash: str) -> Optional[dict]:
+    async def get_evidence_by_hash(self, evidence_hash: str) -> dict | None:
         """按哈希查询存证"""
         if is_redis_mode():
             client = await get_redis_client()
@@ -522,7 +521,7 @@ class LocationRepository:
         self._ensure_store()
         self.store[table][record_id] = record
 
-    def _mem_get(self, table: str, record_id: int) -> Optional[dict]:
+    def _mem_get(self, table: str, record_id: int) -> dict | None:
         self._ensure_store()
         return self.store[table].get(record_id)
 
@@ -551,7 +550,7 @@ class LocationRepository:
                          json.dumps(record, ensure_ascii=False))
 
     async def _redis_get(self, module: str, entity: str,
-                           record_id: int) -> Optional[dict]:
+                           record_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k(module, entity, record_id))
         if not data:

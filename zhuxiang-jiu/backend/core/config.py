@@ -2,7 +2,7 @@
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 # CORS 白名单(开发环境允许 localhost,生产环境通过环境变量配置)
 CORS_ORIGINS = os.environ.get(
@@ -11,7 +11,7 @@ CORS_ORIGINS = os.environ.get(
 ).split(",")
 
 API_BASE = "/api/decision"
-START_TIME = datetime.now(timezone.utc)
+START_TIME = datetime.now(UTC)
 APP_MODE = {"mode": "mock", "api_base": API_BASE}
 
 # 角色等级(数字越大权限越高)

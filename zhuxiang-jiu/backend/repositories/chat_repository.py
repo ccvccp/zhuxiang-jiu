@@ -12,7 +12,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -142,7 +141,7 @@ class ChatRepository:
     # 会话 CRUD
     # ============================================================
 
-    async def get_session(self, session_id: str) -> Optional[dict]:
+    async def get_session(self, session_id: str) -> dict | None:
         """查询会话"""
         if is_redis_mode():
             return await self._redis_get_session(session_id)
@@ -184,7 +183,7 @@ class ChatRepository:
             self._mem_add_message(message)
         return message_id
 
-    async def get_message(self, message_id: int) -> Optional[dict]:
+    async def get_message(self, message_id: int) -> dict | None:
         """按ID查询消息"""
         if is_redis_mode():
             return await self._redis_get_message(message_id)
@@ -222,7 +221,7 @@ class ChatRepository:
             self._mem_add_knowledge(knowledge)
         return knowledge_id
 
-    async def get_knowledge(self, knowledge_id: int) -> Optional[dict]:
+    async def get_knowledge(self, knowledge_id: int) -> dict | None:
         """按ID查询知识库条目"""
         if is_redis_mode():
             return await self._redis_get_knowledge(knowledge_id)
@@ -277,7 +276,7 @@ class ChatRepository:
 
     # --- 会话 ---
 
-    def _mem_get_session(self, session_id: str) -> Optional[dict]:
+    def _mem_get_session(self, session_id: str) -> dict | None:
         self._ensure_store()
         return self.store["chat_sessions"].get(session_id)
 
@@ -323,7 +322,7 @@ class ChatRepository:
             self.store["chat_messages_by_session"][session_id] = []
         self.store["chat_messages_by_session"][session_id].append(message_id)
 
-    def _mem_get_message(self, message_id: int) -> Optional[dict]:
+    def _mem_get_message(self, message_id: int) -> dict | None:
         self._ensure_store()
         return self.store["chat_messages"].get(message_id)
 
@@ -354,7 +353,7 @@ class ChatRepository:
         self._ensure_store()
         self.store["chat_knowledge"][knowledge["id"]] = knowledge
 
-    def _mem_get_knowledge(self, knowledge_id: int) -> Optional[dict]:
+    def _mem_get_knowledge(self, knowledge_id: int) -> dict | None:
         self._ensure_store()
         return self.store["chat_knowledge"].get(knowledge_id)
 
@@ -406,7 +405,7 @@ class ChatRepository:
 
     # --- 会话 ---
 
-    async def _redis_get_session(self, session_id: str) -> Optional[dict]:
+    async def _redis_get_session(self, session_id: str) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("chat", "session", session_id))
         if not data:
@@ -461,7 +460,7 @@ class ChatRepository:
                          json.dumps(message, ensure_ascii=False))
         await client.lpush(_k("chat", "messages_by_session", session_id), message_id)
 
-    async def _redis_get_message(self, message_id: int) -> Optional[dict]:
+    async def _redis_get_message(self, message_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("chat", "message", message_id))
         if not data:
@@ -506,7 +505,7 @@ class ChatRepository:
                          json.dumps(knowledge, ensure_ascii=False))
         await client.lpush(_k("chat", "knowledge_list"), knowledge_id)
 
-    async def _redis_get_knowledge(self, knowledge_id: int) -> Optional[dict]:
+    async def _redis_get_knowledge(self, knowledge_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("chat", "knowledge", knowledge_id))
         if not data:

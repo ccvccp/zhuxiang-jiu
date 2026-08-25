@@ -13,7 +13,6 @@
 """
 
 import json
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -26,7 +25,7 @@ class AgentRepository:
         # Redis 模式下忽略 store, 走 Redis 客户端
         self.store = store if store is not None else get_in_memory_store()
 
-    async def get(self, agent_id) -> Optional[dict]:
+    async def get(self, agent_id) -> dict | None:
         """按 ID 查询代理商,不存在返回 None"""
         if is_redis_mode():
             return await self._redis_get(agent_id)
@@ -88,7 +87,7 @@ class AgentRepository:
 
     # ---------- 内存后端(原逻辑, 保持不变) ----------
 
-    def _mem_get(self, agent_id) -> Optional[dict]:
+    def _mem_get(self, agent_id) -> dict | None:
         return self.store["agents"].get(agent_id)
 
     def _mem_list_all(self) -> list[dict]:
@@ -136,7 +135,7 @@ class AgentRepository:
 
     # ---------- Redis 后端 ----------
 
-    async def _redis_get(self, agent_id) -> Optional[dict]:
+    async def _redis_get(self, agent_id) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("agent", agent_id))
         if not data:
@@ -232,7 +231,7 @@ class AgentRepository:
             return await self._redis_save_apply(apply_data)
         return self._mem_save_apply(apply_data)
 
-    async def get_apply(self, apply_id) -> Optional[dict]:
+    async def get_apply(self, apply_id) -> dict | None:
         """按 ID 查询申请记录,不存在返回 None"""
         if is_redis_mode():
             return await self._redis_get_apply(apply_id)
@@ -269,7 +268,7 @@ class AgentRepository:
             return await self._redis_save_purchase(purchase_data)
         return self._mem_save_purchase(purchase_data)
 
-    async def get_purchase(self, purchase_id) -> Optional[dict]:
+    async def get_purchase(self, purchase_id) -> dict | None:
         """按 ID 查询进货记录,不存在返回 None"""
         if is_redis_mode():
             return await self._redis_get_purchase(purchase_id)
@@ -299,7 +298,7 @@ class AgentRepository:
             return await self._redis_save_rebate(rebate_data)
         return self._mem_save_rebate(rebate_data)
 
-    async def get_rebate(self, rebate_id) -> Optional[dict]:
+    async def get_rebate(self, rebate_id) -> dict | None:
         """按 ID 查询返利记录,不存在返回 None"""
         if is_redis_mode():
             return await self._redis_get_rebate(rebate_id)
@@ -335,7 +334,7 @@ class AgentRepository:
             return await self._redis_save_risk(risk_data)
         return self._mem_save_risk(risk_data)
 
-    async def get_risk(self, risk_id) -> Optional[dict]:
+    async def get_risk(self, risk_id) -> dict | None:
         """按 ID 查询风控记录,不存在返回 None"""
         if is_redis_mode():
             return await self._redis_get_risk(risk_id)
@@ -392,7 +391,7 @@ class AgentRepository:
         self.store["agent_applications"][apply_id] = apply_data
         return apply_data
 
-    def _mem_get_apply(self, apply_id) -> Optional[dict]:
+    def _mem_get_apply(self, apply_id) -> dict | None:
         self._ensure_agent_store()
         return self.store["agent_applications"].get(apply_id)
 
@@ -426,7 +425,7 @@ class AgentRepository:
         self.store["agent_purchases"][purchase_id] = purchase_data
         return purchase_data
 
-    def _mem_get_purchase(self, purchase_id) -> Optional[dict]:
+    def _mem_get_purchase(self, purchase_id) -> dict | None:
         self._ensure_agent_store()
         return self.store["agent_purchases"].get(purchase_id)
 
@@ -445,7 +444,7 @@ class AgentRepository:
         self.store["agent_rebates"][rebate_id] = rebate_data
         return rebate_data
 
-    def _mem_get_rebate(self, rebate_id) -> Optional[dict]:
+    def _mem_get_rebate(self, rebate_id) -> dict | None:
         self._ensure_agent_store()
         return self.store["agent_rebates"].get(rebate_id)
 
@@ -474,7 +473,7 @@ class AgentRepository:
         self.store["agent_risks"][risk_id] = risk_data
         return risk_data
 
-    def _mem_get_risk(self, risk_id) -> Optional[dict]:
+    def _mem_get_risk(self, risk_id) -> dict | None:
         self._ensure_agent_store()
         return self.store["agent_risks"].get(risk_id)
 
@@ -511,7 +510,7 @@ class AgentRepository:
                           mapping=self._serialize_apply(apply_data))
         return apply_data
 
-    async def _redis_get_apply(self, apply_id) -> Optional[dict]:
+    async def _redis_get_apply(self, apply_id) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("agent_apply", apply_id))
         if not data:
@@ -561,7 +560,7 @@ class AgentRepository:
             await client.sadd(_k("agent_purchase", "index", agent_id), purchase_id)
         return purchase_data
 
-    async def _redis_get_purchase(self, purchase_id) -> Optional[dict]:
+    async def _redis_get_purchase(self, purchase_id) -> dict | None:
         client = await get_redis_client()
         raw = await client.get(_k("agent_purchase", purchase_id))
         if not raw:
@@ -591,7 +590,7 @@ class AgentRepository:
             await client.sadd(_k("agent_rebate", "index", agent_id), rebate_id)
         return rebate_data
 
-    async def _redis_get_rebate(self, rebate_id) -> Optional[dict]:
+    async def _redis_get_rebate(self, rebate_id) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("agent_rebate", rebate_id))
         if not data:
@@ -632,7 +631,7 @@ class AgentRepository:
             await client.sadd(_k("agent_risk", "index", agent_id), risk_id)
         return risk_data
 
-    async def _redis_get_risk(self, risk_id) -> Optional[dict]:
+    async def _redis_get_risk(self, risk_id) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("agent_risk", risk_id))
         if not data:

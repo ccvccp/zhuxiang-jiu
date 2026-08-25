@@ -19,7 +19,6 @@
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from core.helpers import ts
 from core.locks import get_lock
@@ -159,7 +158,7 @@ def _calc_regular_interest(amount: float, period: int) -> tuple:
     return interest, rate
 
 
-def _match_reward(amount: float, period: int) -> Optional[tuple]:
+def _match_reward(amount: float, period: int) -> tuple | None:
     """匹配奖品档位(金额 ≥ 档位金额 + 存期匹配)
 
     Returns:

@@ -7,7 +7,6 @@
 锁键: stock:{productId}(deduct/restock 共享, 由 services 层负责)
 """
 
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -18,7 +17,7 @@ class InventoryRepository:
     def __init__(self, store: dict = None):
         self.store = store if store is not None else get_in_memory_store()
 
-    async def get(self, product_id) -> Optional[dict]:
+    async def get(self, product_id) -> dict | None:
         """按 product_id 查询库存"""
         if is_redis_mode():
             return await self._redis_get(product_id)
@@ -59,7 +58,7 @@ class InventoryRepository:
 
     # ---------- 内存后端(原逻辑, 保持不变) ----------
 
-    def _mem_get(self, product_id) -> Optional[dict]:
+    def _mem_get(self, product_id) -> dict | None:
         return self.store["inventory"].get(str(product_id))
 
     def _mem_get_stock(self, product_id) -> int:
@@ -93,7 +92,7 @@ class InventoryRepository:
 
     # ---------- Redis 后端 ----------
 
-    async def _redis_get(self, product_id) -> Optional[dict]:
+    async def _redis_get(self, product_id) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("inventory", product_id))
         if not data:

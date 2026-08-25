@@ -12,7 +12,6 @@
 """
 
 import json
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -183,7 +182,7 @@ class GroupBuyRepository:
         else:
             self._mem_save_order(order)
 
-    async def get_order(self, order_no: str) -> Optional[dict]:
+    async def get_order(self, order_no: str) -> dict | None:
         """按订单号查询团购订单"""
         if is_redis_mode():
             return await self._redis_get_order(order_no)
@@ -273,7 +272,7 @@ class GroupBuyRepository:
                 self.store["_groupbuy_user_index"][user_id] = set()
             self.store["_groupbuy_user_index"][user_id].add(order_no)
 
-    def _mem_get_order(self, order_no: str) -> Optional[dict]:
+    def _mem_get_order(self, order_no: str) -> dict | None:
         self._ensure_store()
         return self.store["group_buy_orders"].get(order_no)
 
@@ -354,7 +353,7 @@ class GroupBuyRepository:
         if user_id is not None:
             await client.sadd(_k("groupbuy", "user_index", str(user_id)), order_no)
 
-    async def _redis_get_order(self, order_no: str) -> Optional[dict]:
+    async def _redis_get_order(self, order_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hget(_k("groupbuy", "orders"), order_no)
         if not data:

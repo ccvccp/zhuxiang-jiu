@@ -13,7 +13,6 @@
 在密码校验通过后调用, 也可由风控系统独立调用。
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel as PydBaseModel, Field
@@ -29,7 +28,7 @@ _auth_scorer = AuthRiskScorer()
 # 鉴权与异常映射(对齐项目约定)
 # ============================================================
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
@@ -46,15 +45,15 @@ def _handle(exc: Exception):
 # ============================================================
 
 class AuthRiskRequest(PydBaseModel):
-    failedAttempts: Optional[int] = Field(None, ge=0, description="近1小时登录失败次数")
-    distanceKm: Optional[float] = Field(None, ge=0, description="与上次登录地距离(公里)")
-    hoursSinceLastLogin: Optional[float] = Field(None, ge=0, description="距上次登录小时数")
-    newDevice: Optional[bool] = Field(None, description="是否新设备")
-    ipRiskType: Optional[str] = Field(None, description="IP 信誉(clean/proxy/vpn/tor/blacklist)")
-    loginHour: Optional[int] = Field(None, ge=0, le=23, description="登录小时(0-23)")
-    accountAgeDays: Optional[float] = Field(None, ge=0, description="账户年龄(天)")
-    passwordStatus: Optional[str] = Field(None, description="密码状态(strong/medium/weak/breached)")
-    behaviorDeviationScore: Optional[float] = Field(None, ge=0, le=100, description="行为偏离度(0-100)")
+    failedAttempts: int | None = Field(None, ge=0, description="近1小时登录失败次数")
+    distanceKm: float | None = Field(None, ge=0, description="与上次登录地距离(公里)")
+    hoursSinceLastLogin: float | None = Field(None, ge=0, description="距上次登录小时数")
+    newDevice: bool | None = Field(None, description="是否新设备")
+    ipRiskType: str | None = Field(None, description="IP 信誉(clean/proxy/vpn/tor/blacklist)")
+    loginHour: int | None = Field(None, ge=0, le=23, description="登录小时(0-23)")
+    accountAgeDays: float | None = Field(None, ge=0, description="账户年龄(天)")
+    passwordStatus: str | None = Field(None, description="密码状态(strong/medium/weak/breached)")
+    behaviorDeviationScore: float | None = Field(None, ge=0, le=100, description="行为偏离度(0-100)")
 
 
 # ============================================================
@@ -63,7 +62,7 @@ class AuthRiskRequest(PydBaseModel):
 
 @router.post("/api/ai-scoring/auth-risk", tags=["AI语义评分层"])
 async def score_auth_risk(data: AuthRiskRequest,
-                          x_role: Optional[str] = Header(None, alias="X-Role")):
+                          x_role: str | None = Header(None, alias="X-Role")):
     """认证风控评分(模块30): 8因子 → 风险分 → allow/step_up/challenge/block
 
     黑名单 IP / 已泄露密码命中硬约束时无论总分直接拦截(hardBlocked=true)。

@@ -14,7 +14,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -129,7 +128,7 @@ class MessageRepository:
             self._mem_add_message(message)
         return message_id
 
-    async def get_message(self, message_id: int) -> Optional[dict]:
+    async def get_message(self, message_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_message(message_id)
         return self._mem_get_message(message_id)
@@ -163,12 +162,12 @@ class MessageRepository:
     # 消息模板 CRUD
     # ============================================================
 
-    async def get_template(self, template_id: int) -> Optional[dict]:
+    async def get_template(self, template_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_template(template_id)
         return self._mem_get_template(template_id)
 
-    async def get_template_by_no(self, template_no: str) -> Optional[dict]:
+    async def get_template_by_no(self, template_no: str) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_template_by_no(template_no)
         return self._mem_get_template_by_no(template_no)
@@ -254,7 +253,7 @@ class MessageRepository:
                 self.store["messages_by_user"][user_id] = []
             self.store["messages_by_user"][user_id].append(message_id)
 
-    def _mem_get_message(self, message_id: int) -> Optional[dict]:
+    def _mem_get_message(self, message_id: int) -> dict | None:
         self._ensure_store()
         return self.store["messages"].get(message_id)
 
@@ -307,11 +306,11 @@ class MessageRepository:
 
     # --- 模板 ---
 
-    def _mem_get_template(self, template_id: int) -> Optional[dict]:
+    def _mem_get_template(self, template_id: int) -> dict | None:
         self._ensure_store()
         return self.store["message_templates"].get(template_id)
 
-    def _mem_get_template_by_no(self, template_no: str) -> Optional[dict]:
+    def _mem_get_template_by_no(self, template_no: str) -> dict | None:
         self._ensure_store()
         template_id = self.store["message_templates_by_no"].get(template_no)
         if template_id is None:
@@ -417,7 +416,7 @@ class MessageRepository:
         if user_id:
             await client.lpush(_k("message", "by_user", user_id), message_id)
 
-    async def _redis_get_message(self, message_id: int) -> Optional[dict]:
+    async def _redis_get_message(self, message_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("message", "item", message_id))
         return json.loads(data) if data else None
@@ -479,12 +478,12 @@ class MessageRepository:
         messages = await self._redis_list_messages(user_id, limit=10000)
         return sum(1 for m in messages if m.get("status") == MSG_STATUS_UNREAD)
 
-    async def _redis_get_template(self, template_id: int) -> Optional[dict]:
+    async def _redis_get_template(self, template_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("message", "template", template_id))
         return json.loads(data) if data else None
 
-    async def _redis_get_template_by_no(self, template_no: str) -> Optional[dict]:
+    async def _redis_get_template_by_no(self, template_no: str) -> dict | None:
         client = await get_redis_client()
         template_id = await client.get(_k("message", "template_by_no", template_no))
         if not template_id:

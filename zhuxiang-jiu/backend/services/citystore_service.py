@@ -19,7 +19,6 @@
 """
 
 import logging
-from typing import Optional
 
 from core.locks import get_lock
 from core.helpers import ts
@@ -420,7 +419,7 @@ class CityStoreService:
 
     @staticmethod
     def _match_store_by_name(stores: list[dict], city_name: str,
-                             province_name: str = None) -> Optional[dict]:
+                             province_name: str = None) -> dict | None:
         """按城市名匹配市店(去"市"后缀宽松比对; 省份一致优先)"""
         def normalize(name: str) -> str:
             return (name or "").strip().rstrip("市")
@@ -455,7 +454,7 @@ class CityStoreService:
 
     @staticmethod
     def _city_info(city_code: str, city_name: str, province_name: str,
-                   nearby_store: dict = None) -> Optional[dict]:
+                   nearby_store: dict = None) -> dict | None:
         """构造城市信息(取值自参数或附近门店)"""
         if not any((city_code, city_name)):
             return None

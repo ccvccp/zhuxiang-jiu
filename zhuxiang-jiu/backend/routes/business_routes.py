@@ -11,7 +11,7 @@
     ValueError → 409(资源冲突,如区域已被认领)
 """
 
-from typing import Any, List
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel as PydBaseModel, Field
@@ -50,7 +50,7 @@ class AgentDowngradeRequest(PydBaseModel):
 
 
 class CheckoutSubmitRequest(PydBaseModel):
-    items: List[Any] = Field(default_factory=list)
+    items: list[Any] = Field(default_factory=list)
     consignee: Any = None
     payment: Any = None
     class Config:

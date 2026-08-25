@@ -16,7 +16,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -270,7 +269,7 @@ class CreditRepository:
     # 信用分账户 CRUD
     # ============================================================
 
-    async def get_score(self, user_id: int) -> Optional[dict]:
+    async def get_score(self, user_id: int) -> dict | None:
         """查询信用分账户(不存在返回None)"""
         if is_redis_mode():
             return await self._redis_get_score(user_id)
@@ -343,7 +342,7 @@ class CreditRepository:
             self._mem_add_log(log)
         return log_id
 
-    async def get_log(self, log_id: int) -> Optional[dict]:
+    async def get_log(self, log_id: int) -> dict | None:
         """按ID查询流水"""
         if is_redis_mode():
             return await self._redis_get_log(log_id)
@@ -390,7 +389,7 @@ class CreditRepository:
             self._mem_add_paylater_order(order)
         return order_id
 
-    async def get_paylater_order(self, order_id: int) -> Optional[dict]:
+    async def get_paylater_order(self, order_id: int) -> dict | None:
         """按ID查询先享后付订单"""
         if is_redis_mode():
             return await self._redis_get_paylater_order(order_id)
@@ -433,7 +432,7 @@ class CreditRepository:
         return settlement_id
 
     async def get_settlement(self, user_id: int, year: int,
-                             quarter: int) -> Optional[dict]:
+                             quarter: int) -> dict | None:
         """查询某用户某季度的结算记录(幂等检查用)"""
         if is_redis_mode():
             return await self._redis_get_settlement(user_id, year, quarter)
@@ -498,7 +497,7 @@ class CreditRepository:
 
     # --- 账户 ---
 
-    def _mem_get_score(self, user_id: int) -> Optional[dict]:
+    def _mem_get_score(self, user_id: int) -> dict | None:
         self._ensure_store()
         return self.store["credit_scores"].get(user_id)
 
@@ -531,7 +530,7 @@ class CreditRepository:
             self.store["credit_logs_by_user"][user_id] = []
         self.store["credit_logs_by_user"][user_id].append(log_id)
 
-    def _mem_get_log(self, log_id: int) -> Optional[dict]:
+    def _mem_get_log(self, log_id: int) -> dict | None:
         self._ensure_store()
         return self.store["credit_logs"].get(log_id)
 
@@ -560,7 +559,7 @@ class CreditRepository:
         self._ensure_store()
         self.store["credit_paylater_orders"][order["orderId"]] = order
 
-    def _mem_get_paylater_order(self, order_id: int) -> Optional[dict]:
+    def _mem_get_paylater_order(self, order_id: int) -> dict | None:
         self._ensure_store()
         return self.store["credit_paylater_orders"].get(order_id)
 
@@ -585,7 +584,7 @@ class CreditRepository:
         self.store["credit_settlements_by_user"].setdefault(user_id, []).append(settlement_id)
 
     def _mem_get_settlement(self, user_id: int, year: int,
-                            quarter: int) -> Optional[dict]:
+                            quarter: int) -> dict | None:
         self._ensure_store()
         for sid in self.store["credit_settlements_by_user"].get(user_id, []):
             s = self.store["credit_quarterly_settlements"].get(sid)
@@ -625,7 +624,7 @@ class CreditRepository:
     # Redis 模式实现
     # ============================================================
 
-    async def _redis_get_score(self, user_id: int) -> Optional[dict]:
+    async def _redis_get_score(self, user_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("credit", "score", user_id))
         if not data:
@@ -665,7 +664,7 @@ class CreditRepository:
                          json.dumps(log, ensure_ascii=False))
         await client.lpush(_k("credit", "logs_by_user", user_id), log_id)
 
-    async def _redis_get_log(self, log_id: int) -> Optional[dict]:
+    async def _redis_get_log(self, log_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("credit", "log", log_id))
         if not data:
@@ -698,7 +697,7 @@ class CreditRepository:
         if bump:
             await client.lpush(_k("credit", "paylater_orders_by_user", user_id), order_id)
 
-    async def _redis_get_paylater_order(self, order_id: int) -> Optional[dict]:
+    async def _redis_get_paylater_order(self, order_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("credit", "paylater_order", order_id))
         if not data:
@@ -735,7 +734,7 @@ class CreditRepository:
         await client.lpush(_k("credit", "settlements_by_user", user_id), settlement_id)
 
     async def _redis_get_settlement(self, user_id: int, year: int,
-                                    quarter: int) -> Optional[dict]:
+                                    quarter: int) -> dict | None:
         client = await get_redis_client()
         settlement_id = await client.get(_k("credit", "settlement_idx",
                                             user_id, year, quarter))

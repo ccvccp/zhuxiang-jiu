@@ -19,12 +19,12 @@
 """
 
 import json
-from typing import Optional
 
 from core.helpers import ts
 from repositories.backend import (
     _k, get_in_memory_store, get_redis_client, is_redis_mode,
 )
+from datetime import UTC
 
 
 class AiLearningRepository:
@@ -120,7 +120,7 @@ class AiLearningRepository:
     # 权重档案(冠军/挑战者)与版本历史
     # ============================================================
 
-    async def get_profile(self, scorer_id: str) -> Optional[dict]:
+    async def get_profile(self, scorer_id: str) -> dict | None:
         """读取权重档案: {champion: 版本记录|None, challenger: 版本记录|None}"""
         if is_redis_mode():
             client = await get_redis_client()
@@ -166,7 +166,7 @@ class AiLearningRepository:
     # 学习配置
     # ============================================================
 
-    async def get_config(self, scorer_id: str) -> Optional[dict]:
+    async def get_config(self, scorer_id: str) -> dict | None:
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.get(_k("ai_learning", "config", scorer_id))
@@ -187,7 +187,7 @@ class AiLearningRepository:
     # 漂移统计
     # ============================================================
 
-    async def get_drift(self, scorer_id: str) -> Optional[dict]:
+    async def get_drift(self, scorer_id: str) -> dict | None:
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.get(_k("ai_learning", "drift", scorer_id))
@@ -232,7 +232,7 @@ class AiLearningRepository:
             self.store["ai_learning_snapshots"][(scorer_id, business_key)] = snapshot
 
     async def get_decision_snapshot(self, scorer_id: str,
-                                     business_key: str) -> Optional[dict]:
+                                     business_key: str) -> dict | None:
         """读取决策快照(过期返回 None, 内存模式顺带惰性清理)"""
         if is_redis_mode():
             client = await get_redis_client()
@@ -245,9 +245,9 @@ class AiLearningRepository:
         if snapshot is None:
             return None
         try:
-            from datetime import datetime, timedelta, timezone
+            from datetime import datetime, timedelta
             created = datetime.fromisoformat(snapshot["createdAt"])
-            if datetime.now(timezone.utc) - created > timedelta(
+            if datetime.now(UTC) - created > timedelta(
                     seconds=self.SNAPSHOT_TTL_SECONDS):
                 snapshots.pop((scorer_id, business_key), None)
                 return None
@@ -256,7 +256,7 @@ class AiLearningRepository:
         return snapshot
 
     async def consume_decision_snapshot(self, scorer_id: str,
-                                         business_key: str) -> Optional[dict]:
+                                         business_key: str) -> dict | None:
         """取出并删除决策快照(天然去重: 同一业务键只能配对一次)"""
         if is_redis_mode():
             client = await get_redis_client()
@@ -281,7 +281,7 @@ class AiLearningRepository:
     # 调度统计(v7.6 定时学习)
     # ============================================================
 
-    async def get_scheduler_stats(self) -> Optional[dict]:
+    async def get_scheduler_stats(self) -> dict | None:
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.get(_k("ai_learning", "scheduler", "stats"))

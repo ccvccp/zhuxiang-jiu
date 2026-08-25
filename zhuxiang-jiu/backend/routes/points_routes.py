@@ -19,7 +19,6 @@
     - 查询(3):     account / logs / stats
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -36,14 +35,14 @@ _service = PointsService()
 # 鉴权与异常映射辅助(对齐 citystore/payment 风格)
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")

@@ -155,7 +155,7 @@ async def pay_order(
             order = await _service.get_by_id(order_id)
             amount = (order.get("priceDetail") or {}).get("actualAmount") or 0
             await ai_hooks.on_payment(order_id, payment_method, amount)
-        except Exception:  # noqa: BLE001 - 观察挂钩不影响业务
+        except Exception:
             pass
         return result
     except Exception as e:

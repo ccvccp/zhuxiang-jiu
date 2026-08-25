@@ -25,7 +25,6 @@ import os
 import secrets
 import time
 import uuid
-from typing import Optional
 
 # ============================================================
 # 配置(运行时读取, 不在模块级冻结)
@@ -104,7 +103,7 @@ def _get_secret() -> str:
 
 
 def create_token(member_id, role: str = "member", token_type: str = "access",
-                 ttl: Optional[int] = None, secret: Optional[str] = None) -> str:
+                 ttl: int | None = None, secret: str | None = None) -> str:
     """签发 JWT
 
     Args:
@@ -135,7 +134,7 @@ def create_token(member_id, role: str = "member", token_type: str = "access",
 
 
 def create_token_pair(member_id, role: str = "member",
-                      secret: Optional[str] = None) -> dict:
+                      secret: str | None = None) -> dict:
     """签发 access + refresh 双令牌"""
     return {
         "accessToken": create_token(member_id, role, "access", secret=secret),
@@ -145,8 +144,8 @@ def create_token_pair(member_id, role: str = "member",
     }
 
 
-def decode_token(token: str, expected_type: Optional[str] = None,
-                 secret: Optional[str] = None) -> dict:
+def decode_token(token: str, expected_type: str | None = None,
+                 secret: str | None = None) -> dict:
     """校验并解码 JWT
 
     Returns:
@@ -219,13 +218,13 @@ def remaining_ttl(payload: dict) -> int:
 #     (如 JWT/密码哈希单元测试)仍可导入本模块。
 
 try:
-    from typing import Annotated, Optional
+    from typing import Annotated
 
     from fastapi import Depends, Header, HTTPException, status
 
     def get_current_role(
-        x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
-        authorization: Annotated[Optional[str], Header()] = None,
+        x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+        authorization: Annotated[str | None, Header()] = None,
     ) -> str:
         """从请求头提取角色, Mock 模式不校验 token"""
         from core.config import ROLE_LEVELS

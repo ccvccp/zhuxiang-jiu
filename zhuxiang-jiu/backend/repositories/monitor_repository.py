@@ -16,7 +16,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -120,7 +119,7 @@ class MonitorRepository:
             self._mem_create("monitor_metrics", record_id, record)
         return record_id
 
-    async def get_metric(self, record_id: int) -> Optional[dict]:
+    async def get_metric(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("monitor", "metrics", record_id)
         return self._mem_get("monitor_metrics", record_id)
@@ -169,7 +168,7 @@ class MonitorRepository:
             self._mem_create("monitor_alerts", record_id, record)
         return record_id
 
-    async def get_alert(self, record_id: int) -> Optional[dict]:
+    async def get_alert(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("monitor", "alerts", record_id)
         return self._mem_get("monitor_alerts", record_id)
@@ -218,7 +217,7 @@ class MonitorRepository:
             self._mem_create("monitor_dashboards", record_id, record)
         return record_id
 
-    async def get_dashboard(self, record_id: int) -> Optional[dict]:
+    async def get_dashboard(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("monitor", "dashboards", record_id)
         return self._mem_get("monitor_dashboards", record_id)
@@ -263,7 +262,7 @@ class MonitorRepository:
             self._mem_create("monitor_incidents", record_id, record)
         return record_id
 
-    async def get_incident(self, record_id: int) -> Optional[dict]:
+    async def get_incident(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("monitor", "incidents", record_id)
         return self._mem_get("monitor_incidents", record_id)
@@ -312,7 +311,7 @@ class MonitorRepository:
         self._ensure_store()
         self.store[table][record_id] = record
 
-    def _mem_get(self, table: str, record_id: int) -> Optional[dict]:
+    def _mem_get(self, table: str, record_id: int) -> dict | None:
         self._ensure_store()
         return self.store[table].get(record_id)
 
@@ -339,7 +338,7 @@ class MonitorRepository:
                          json.dumps(record, ensure_ascii=False))
 
     async def _redis_get(self, module: str, entity: str,
-                           record_id: int) -> Optional[dict]:
+                           record_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k(module, entity, record_id))
         if not data:

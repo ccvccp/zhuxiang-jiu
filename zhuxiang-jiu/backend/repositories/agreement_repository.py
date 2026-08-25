@@ -14,7 +14,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -89,7 +88,7 @@ class AgreementRepository:
     # 条款 CRUD
     # ============================================================
 
-    async def get_agreement(self, agreement_id: int) -> Optional[dict]:
+    async def get_agreement(self, agreement_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_agreement(agreement_id)
         return self._mem_get_agreement(agreement_id)
@@ -106,7 +105,7 @@ class AgreementRepository:
             return await self._redis_list_agreements(status, atype, role, limit)
         return self._mem_list_agreements(status, atype, role, limit)
 
-    async def find_by_no(self, agreement_no: str) -> Optional[dict]:
+    async def find_by_no(self, agreement_no: str) -> dict | None:
         """按编号查找条款"""
         agreements = await self.list_agreements(limit=10000)
         for a in agreements:
@@ -137,7 +136,7 @@ class AgreementRepository:
             return await self._redis_list_consents(user_id, agreement_id, limit)
         return self._mem_list_consents(user_id, agreement_id, limit)
 
-    async def find_consent(self, user_id: int, agreement_id: int) -> Optional[dict]:
+    async def find_consent(self, user_id: int, agreement_id: int) -> dict | None:
         """查询用户对某条款的最新同意记录"""
         consents = await self.list_consents(user_id=user_id,
                                              agreement_id=agreement_id, limit=1)
@@ -147,7 +146,7 @@ class AgreementRepository:
     # 角色协议 CRUD
     # ============================================================
 
-    async def get_protocol(self, protocol_id: int) -> Optional[dict]:
+    async def get_protocol(self, protocol_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_protocol(protocol_id)
         return self._mem_get_protocol(protocol_id)
@@ -164,7 +163,7 @@ class AgreementRepository:
             return await self._redis_list_protocols(role, status, limit)
         return self._mem_list_protocols(role, status, limit)
 
-    async def find_protocol(self, role: str, agreement_id: int) -> Optional[dict]:
+    async def find_protocol(self, role: str, agreement_id: int) -> dict | None:
         """查询角色-条款关联(去重)"""
         protocols = await self.list_protocols(role=role, limit=10000)
         for p in protocols:
@@ -190,7 +189,7 @@ class AgreementRepository:
 
     # --- 条款 ---
 
-    def _mem_get_agreement(self, agreement_id: int) -> Optional[dict]:
+    def _mem_get_agreement(self, agreement_id: int) -> dict | None:
         self._ensure_store()
         return self.store["agreements"].get(agreement_id)
 
@@ -240,7 +239,7 @@ class AgreementRepository:
 
     # --- 角色协议 ---
 
-    def _mem_get_protocol(self, protocol_id: int) -> Optional[dict]:
+    def _mem_get_protocol(self, protocol_id: int) -> dict | None:
         self._ensure_store()
         return self.store["role_protocols"].get(protocol_id)
 
@@ -265,7 +264,7 @@ class AgreementRepository:
 
     # --- 条款 ---
 
-    async def _redis_get_agreement(self, agreement_id: int) -> Optional[dict]:
+    async def _redis_get_agreement(self, agreement_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("agreement", "agreement", agreement_id))
         if not data:
@@ -336,7 +335,7 @@ class AgreementRepository:
 
     # --- 角色协议 ---
 
-    async def _redis_get_protocol(self, protocol_id: int) -> Optional[dict]:
+    async def _redis_get_protocol(self, protocol_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.hget(_k("agreement", "protocols"), protocol_id)
         if not data:

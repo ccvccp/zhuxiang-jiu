@@ -28,7 +28,6 @@ Redis Key 设计:
 """
 
 import json
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -131,7 +130,7 @@ class FinanceRepository:
             return await self._redis_save_voucher(voucher)
         return self._mem_save_voucher(voucher)
 
-    async def get_voucher(self, voucher_no: str) -> Optional[dict]:
+    async def get_voucher(self, voucher_no: str) -> dict | None:
         """按凭证号查询凭证(含分录)"""
         if is_redis_mode():
             return await self._redis_get_voucher(voucher_no)
@@ -174,7 +173,7 @@ class FinanceRepository:
             return await self._redis_save_invoice(invoice)
         return self._mem_save_invoice(invoice)
 
-    async def get_invoice(self, invoice_no: str) -> Optional[dict]:
+    async def get_invoice(self, invoice_no: str) -> dict | None:
         """按发票号查询"""
         if is_redis_mode():
             return await self._redis_get_invoice(invoice_no)
@@ -207,7 +206,7 @@ class FinanceRepository:
             return await self._redis_save_tax_declaration(decl)
         return self._mem_save_tax_declaration(decl)
 
-    async def get_tax_declaration(self, decl_no: str) -> Optional[dict]:
+    async def get_tax_declaration(self, decl_no: str) -> dict | None:
         """按申报号查询"""
         if is_redis_mode():
             return await self._redis_get_tax_declaration(decl_no)
@@ -240,7 +239,7 @@ class FinanceRepository:
             return await self._redis_save_payment(payment)
         return self._mem_save_payment(payment)
 
-    async def get_payment(self, payment_no: str) -> Optional[dict]:
+    async def get_payment(self, payment_no: str) -> dict | None:
         """按付款编号查询"""
         if is_redis_mode():
             return await self._redis_get_payment(payment_no)
@@ -273,7 +272,7 @@ class FinanceRepository:
             return await self._redis_save_reconciliation(recon)
         return self._mem_save_reconciliation(recon)
 
-    async def get_reconciliation(self, date: str, recon_type: str) -> Optional[dict]:
+    async def get_reconciliation(self, date: str, recon_type: str) -> dict | None:
         """按日期+类型查询对账记录"""
         if is_redis_mode():
             return await self._redis_get_reconciliation(date, recon_type)
@@ -327,7 +326,7 @@ class FinanceRepository:
         index_set.setdefault(period, set()).add(voucher_no)
         return voucher
 
-    def _mem_get_voucher(self, voucher_no: str) -> Optional[dict]:
+    def _mem_get_voucher(self, voucher_no: str) -> dict | None:
         self._ensure_store()
         return self.store["finance_vouchers"].get(voucher_no)
 
@@ -376,7 +375,7 @@ class FinanceRepository:
         index_set.setdefault(period, set()).add(invoice_no)
         return invoice
 
-    def _mem_get_invoice(self, invoice_no: str) -> Optional[dict]:
+    def _mem_get_invoice(self, invoice_no: str) -> dict | None:
         self._ensure_store()
         return self.store["finance_invoices"].get(invoice_no)
 
@@ -414,7 +413,7 @@ class FinanceRepository:
         index_set.setdefault(period, set()).add(decl_no)
         return decl
 
-    def _mem_get_tax_declaration(self, decl_no: str) -> Optional[dict]:
+    def _mem_get_tax_declaration(self, decl_no: str) -> dict | None:
         self._ensure_store()
         return self.store["finance_tax_declarations"].get(decl_no)
 
@@ -452,7 +451,7 @@ class FinanceRepository:
         index_set.setdefault(ptype, set()).add(payment_no)
         return payment
 
-    def _mem_get_payment(self, payment_no: str) -> Optional[dict]:
+    def _mem_get_payment(self, payment_no: str) -> dict | None:
         self._ensure_store()
         return self.store["finance_payments"].get(payment_no)
 
@@ -487,7 +486,7 @@ class FinanceRepository:
         self.store["finance_reconciliations"][key] = recon
         return recon
 
-    def _mem_get_reconciliation(self, date: str, recon_type: str) -> Optional[dict]:
+    def _mem_get_reconciliation(self, date: str, recon_type: str) -> dict | None:
         self._ensure_store()
         return self.store["finance_reconciliations"].get(f"{date}:{recon_type}")
 
@@ -540,7 +539,7 @@ class FinanceRepository:
         voucher["entries"] = entries
         return voucher
 
-    async def _redis_get_voucher(self, voucher_no: str) -> Optional[dict]:
+    async def _redis_get_voucher(self, voucher_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("finance", "voucher", voucher_no))
         if not data:
@@ -610,7 +609,7 @@ class FinanceRepository:
         await client.sadd(_k("finance", "invoice", "index", period), invoice_no)
         return invoice
 
-    async def _redis_get_invoice(self, invoice_no: str) -> Optional[dict]:
+    async def _redis_get_invoice(self, invoice_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("finance", "invoice", invoice_no))
         if not data:
@@ -659,7 +658,7 @@ class FinanceRepository:
         await client.sadd(_k("finance", "tax", "index", period), decl_no)
         return decl
 
-    async def _redis_get_tax_declaration(self, decl_no: str) -> Optional[dict]:
+    async def _redis_get_tax_declaration(self, decl_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("finance", "tax", decl_no))
         if not data:
@@ -726,7 +725,7 @@ class FinanceRepository:
         await client.sadd(_k("finance", "payment", "index", ptype), payment_no)
         return payment
 
-    async def _redis_get_payment(self, payment_no: str) -> Optional[dict]:
+    async def _redis_get_payment(self, payment_no: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("finance", "payment", payment_no))
         if not data:
@@ -789,7 +788,7 @@ class FinanceRepository:
                           mapping=self._serialize_hash(recon))
         return recon
 
-    async def _redis_get_reconciliation(self, date: str, recon_type: str) -> Optional[dict]:
+    async def _redis_get_reconciliation(self, date: str, recon_type: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("finance", "recon", date, recon_type))
         if not data:

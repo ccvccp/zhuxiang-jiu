@@ -20,7 +20,6 @@
 
 import json
 import logging
-from typing import Optional
 
 from core.helpers import ts
 from repositories.backend import (
@@ -254,7 +253,7 @@ class LogisticsRepository:
         logger.info(f"保存物流订单 waybillNo={waybill_no} status={order.get('status')}")
         return dict(order)
 
-    async def get_order(self, waybill_no: str) -> Optional[dict]:
+    async def get_order(self, waybill_no: str) -> dict | None:
         """查询物流订单"""
         if is_redis_mode():
             client = await get_redis_client()
@@ -264,7 +263,7 @@ class LogisticsRepository:
         order = self.store["logistics_orders"].get(waybill_no)
         return dict(order) if order else None
 
-    async def find_by_order(self, order_id: str) -> Optional[dict]:
+    async def find_by_order(self, order_id: str) -> dict | None:
         """按订单号查询物流单(返回最新一条)
 
         用于防重复下单: 同一 orderId 只能有一个未关闭运单
@@ -444,7 +443,7 @@ class LogisticsRepository:
         logger.info(f"创建结算单 settleNo={settle_no} carrier={settle.get('carrier')} period={settle.get('period')}")
         return dict(settle)
 
-    async def get_settlement(self, settle_no: str) -> Optional[dict]:
+    async def get_settlement(self, settle_no: str) -> dict | None:
         """查询结算单"""
         if is_redis_mode():
             client = await get_redis_client()

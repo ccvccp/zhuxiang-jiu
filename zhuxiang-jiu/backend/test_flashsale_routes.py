@@ -19,7 +19,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 # 确保使用内存模式
 os.environ["LOCK_MODE"] = "asyncio"
@@ -62,7 +62,7 @@ async def _expect_value_error(coro, keyword=""):
         return False, ""
     except ValueError as exc:
         return (not keyword or keyword in str(exc)), str(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"非ValueError: {type(exc).__name__}: {exc}"
 
 
@@ -74,7 +74,7 @@ async def _expect_key_error(coro, keyword=""):
     except KeyError as exc:
         msg = str(exc)
         return (not keyword or keyword in msg), msg
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"非KeyError: {type(exc).__name__}: {exc}"
 
 
@@ -83,7 +83,7 @@ async def _mk_member(member_repo, phone, level=3, created_at=None):
         "phone": phone, "nickname": f"会员{phone[-4:]}",
         "password": "x" * 64, "status": 1, "role": "member",
         "level": level, "growth_value": 600, "points": 0,
-        "created_at": created_at or _iso(datetime.now(timezone.utc)),
+        "created_at": created_at or _iso(datetime.now(UTC)),
     })
 
 
@@ -91,7 +91,7 @@ async def _mk_active_session(svc: FlashSaleService, name="晚8点秒杀",
                              product_id="ZX42-2026B01",
                              flash_price=58.0, flash_stock=5, limit=2):
     """建一个进行中的场次+1个秒杀商品(默认产品原价88)"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     session = await svc.create_session(
         name, _iso(now - timedelta(minutes=10)), _iso(now + timedelta(hours=2)))
     item = await svc.add_item(session["sessionId"], product_id,
@@ -106,7 +106,7 @@ async def _mk_active_session(svc: FlashSaleService, name="晚8点秒杀",
 
 class TestSessionManage:
     async def run(self, svc):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # test 1: 创建场次(草稿)
         s = await svc.create_session("晚8点整点秒杀",
@@ -170,7 +170,7 @@ class TestSessionQuery:
                f"got {it.get('remainingStock')}/{it.get('progressPercent')}")
 
         # test 9: 未开始场次
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         future = await svc.create_session(
             "明晚秒杀", _iso(now + timedelta(hours=24)), _iso(now + timedelta(hours=26)))
         await svc.add_item(future["sessionId"], "ZX52-2026X01", 298.0, 10, 1)
@@ -242,7 +242,7 @@ class TestPurchase:
         record("test_14_stock_exhausted", raised, msg)
 
         # test 15: 场次未开始 → 拒绝
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         future = await svc.create_session(
             "未来场", _iso(now + timedelta(hours=1)), _iso(now + timedelta(hours=2)))
         fi = await svc.add_item(future["sessionId"], "ZX42-2026B01", 48.0, 10, 2)
@@ -344,7 +344,7 @@ class TestExpireCancel:
 
         # 把 o1 的 createdAt 改到 20 分钟前(内存态直改, 测试契约)
         _mock_store["flash_orders"][o1["orderNo"]]["createdAt"] = _iso(
-            datetime.now(timezone.utc) - timedelta(minutes=20))
+            datetime.now(UTC) - timedelta(minutes=20))
 
         # test 25: 超时批量取消: 只取消 o1, 保留 o2, 库存回补
         result = await svc.cancel_expired_orders()
@@ -465,7 +465,7 @@ class TestAdminOps:
                f"sessions={stats.get('sessionCount')}")
 
         # test 35: 已结束场次不可取消
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ended = await svc.create_session(
             "已结束场", _iso(now + timedelta(hours=1)), _iso(now + timedelta(hours=2)))
         repo = FlashSaleRepository()

@@ -15,7 +15,7 @@
     - 统计(1):        stats
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -34,7 +34,7 @@ _service = ComplianceService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -59,9 +59,9 @@ def _handle(exc: Exception):
 class BehaviorMonitorRequest(PydBaseModel):
     moduleName: str = Field(..., description="监控模块名称")
     behaviorType: str = Field(..., description="行为类型")
-    behaviorData: Dict[str, Any] = Field(default_factory=dict, description="行为数据")
-    complianceCheck: Dict[str, Any] = Field(default_factory=dict, description="合规自检")
-    anomalyIdentify: Dict[str, Any] = Field(default_factory=dict, description="异常识别")
+    behaviorData: dict[str, Any] = Field(default_factory=dict, description="行为数据")
+    complianceCheck: dict[str, Any] = Field(default_factory=dict, description="合规自检")
+    anomalyIdentify: dict[str, Any] = Field(default_factory=dict, description="异常识别")
     riskLevel: str = Field(RISK_LEVEL_LOW, description="风险等级")
     aiAutomationRate: float = Field(90.0, description="AI自动化率")
 
@@ -70,10 +70,10 @@ class TermsMonitorRequest(PydBaseModel):
     termsType: str = Field(..., description="条款类型")
     termsName: str = Field(..., description="条款名称")
     termsContent: str = Field("", description="条款内容")
-    legalityReview: Dict[str, Any] = Field(default_factory=dict, description="合法性审查")
-    complianceReview: Dict[str, Any] = Field(default_factory=dict, description="合规审查")
-    validityVerify: Dict[str, Any] = Field(default_factory=dict, description="有效性验证")
-    riskTermsIdentify: Dict[str, Any] = Field(default_factory=dict, description="风险条款识别")
+    legalityReview: dict[str, Any] = Field(default_factory=dict, description="合法性审查")
+    complianceReview: dict[str, Any] = Field(default_factory=dict, description="合规审查")
+    validityVerify: dict[str, Any] = Field(default_factory=dict, description="有效性验证")
+    riskTermsIdentify: dict[str, Any] = Field(default_factory=dict, description="风险条款识别")
     riskLevel: str = Field(RISK_LEVEL_LOW, description="风险等级")
     aiAutomationRate: float = Field(85.0, description="AI自动化率")
 
@@ -90,16 +90,16 @@ class LegalKnowledgeRequest(PydBaseModel):
 class RiskWarningRequest(PydBaseModel):
     riskType: str = Field(..., description="风险类型")
     riskSource: str = Field(..., description="风险来源")
-    riskIdentify: Dict[str, Any] = Field(default_factory=dict, description="风险识别")
+    riskIdentify: dict[str, Any] = Field(default_factory=dict, description="风险识别")
     riskScore: float = Field(0.0, description="风险评分")
-    riskLevel: Optional[str] = Field(None, description="风险等级(为空则自动分级)")
+    riskLevel: str | None = Field(None, description="风险等级(为空则自动分级)")
     aiAutomationRate: float = Field(95.0, description="AI自动化率")
 
 
 class RegulatoryReportRequest(PydBaseModel):
     reportType: str = Field(..., description="报送类型")
     reportTarget: str = Field(..., description="报送对象")
-    reportData: Dict[str, Any] = Field(default_factory=dict, description="报送数据")
+    reportData: dict[str, Any] = Field(default_factory=dict, description="报送数据")
     aiAutomationRate: float = Field(90.0, description="AI自动化率")
 
 
@@ -111,19 +111,19 @@ class BlockchainEvidenceRequest(PydBaseModel):
 
 class AnalysisReportRequest(PydBaseModel):
     analysisPeriod: str = Field(..., description="分析周期(daily/weekly/monthly)")
-    effectAnalysis: Dict[str, Any] = Field(default_factory=dict, description="效果分析")
-    roiEvaluation: Dict[str, Any] = Field(default_factory=dict, description="ROI评估")
-    trendPrediction: Dict[str, Any] = Field(default_factory=dict, description="趋势预测")
-    experienceRetention: Dict[str, Any] = Field(default_factory=dict, description="经验沉淀")
+    effectAnalysis: dict[str, Any] = Field(default_factory=dict, description="效果分析")
+    roiEvaluation: dict[str, Any] = Field(default_factory=dict, description="ROI评估")
+    trendPrediction: dict[str, Any] = Field(default_factory=dict, description="趋势预测")
+    experienceRetention: dict[str, Any] = Field(default_factory=dict, description="经验沉淀")
     aiAutomationRate: float = Field(85.0, description="AI自动化率")
 
 
 class OptimizationRequest(PydBaseModel):
     optimizationType: str = Field(..., description="优化类型")
-    ruleOptimize: Dict[str, Any] = Field(default_factory=dict, description="规则优化")
-    knowledgeUpdate: Dict[str, Any] = Field(default_factory=dict, description="知识更新")
-    experienceRetention: Dict[str, Any] = Field(default_factory=dict, description="经验沉淀")
-    continuousImprove: Dict[str, Any] = Field(default_factory=dict, description="持续改进")
+    ruleOptimize: dict[str, Any] = Field(default_factory=dict, description="规则优化")
+    knowledgeUpdate: dict[str, Any] = Field(default_factory=dict, description="知识更新")
+    experienceRetention: dict[str, Any] = Field(default_factory=dict, description="经验沉淀")
+    continuousImprove: dict[str, Any] = Field(default_factory=dict, description="持续改进")
     aiAutomationRate: float = Field(85.0, description="AI自动化率")
 
 

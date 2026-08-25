@@ -14,7 +14,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -123,7 +122,7 @@ class ActivityRepository:
     # 活动 CRUD
     # ============================================================
 
-    async def get_activity(self, activity_id: int) -> Optional[dict]:
+    async def get_activity(self, activity_id: int) -> dict | None:
         """按ID查询活动"""
         if is_redis_mode():
             return await self._redis_get_activity(activity_id)
@@ -163,7 +162,7 @@ class ActivityRepository:
             self._mem_add_registration(reg)
         return reg_id
 
-    async def get_registration(self, activity_id: int, user_id: int) -> Optional[dict]:
+    async def get_registration(self, activity_id: int, user_id: int) -> dict | None:
         """按 (activity_id, user_id) 查询报名记录(幂等防重)"""
         if is_redis_mode():
             return await self._redis_get_registration(activity_id, user_id)
@@ -238,7 +237,7 @@ class ActivityRepository:
 
     # --- 活动 ---
 
-    def _mem_get_activity(self, activity_id: int) -> Optional[dict]:
+    def _mem_get_activity(self, activity_id: int) -> dict | None:
         self._ensure_store()
         return self.store["activities"].get(activity_id)
 
@@ -272,7 +271,7 @@ class ActivityRepository:
             self.store["activity_registrations_by_activity"][activity_id] = {}
         self.store["activity_registrations_by_activity"][activity_id][user_id] = reg_id
 
-    def _mem_get_registration(self, activity_id: int, user_id: int) -> Optional[dict]:
+    def _mem_get_registration(self, activity_id: int, user_id: int) -> dict | None:
         self._ensure_store()
         reg_map = self.store["activity_registrations_by_activity"].get(activity_id, {})
         reg_id = reg_map.get(user_id)
@@ -333,7 +332,7 @@ class ActivityRepository:
     # Redis 模式实现
     # ============================================================
 
-    async def _redis_get_activity(self, activity_id: int) -> Optional[dict]:
+    async def _redis_get_activity(self, activity_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("activity", "item", activity_id))
         if not data:
@@ -375,7 +374,7 @@ class ActivityRepository:
                           user_id, reg_id)
         await client.lpush(_k("activity", "reg_list", activity_id), reg_id)
 
-    async def _redis_get_registration(self, activity_id: int, user_id: int) -> Optional[dict]:
+    async def _redis_get_registration(self, activity_id: int, user_id: int) -> dict | None:
         client = await get_redis_client()
         reg_id = await client.hget(_k("activity", "regs_by_activity", activity_id), user_id)
         if not reg_id:

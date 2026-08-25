@@ -13,7 +13,7 @@
 import asyncio
 import logging
 import os
-from typing import AsyncContextManager
+from contextlib import AbstractAsyncContextManager
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class _RedisLockWrapper:
         return False
 
 
-def get_lock(key: str) -> AsyncContextManager:
+def get_lock(key: str) -> AbstractAsyncContextManager:
     """获取锁: 双模式切换(动态读取 LOCK_MODE)
 
     LOCK_MODE=asyncio: 单进程 asyncio.Lock

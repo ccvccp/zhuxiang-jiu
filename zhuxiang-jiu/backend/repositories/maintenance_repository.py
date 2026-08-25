@@ -18,7 +18,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -145,7 +144,7 @@ class MaintenanceRepository:
             self._mem_create("maintenance_tasks", record_id, record)
         return record_id
 
-    async def get_task(self, record_id: int) -> Optional[dict]:
+    async def get_task(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("task", record_id)
         return self._mem_get("maintenance_tasks", record_id)
@@ -183,7 +182,7 @@ class MaintenanceRepository:
             self._mem_create("maintenance_health", record_id, record)
         return record_id
 
-    async def get_health(self, record_id: int) -> Optional[dict]:
+    async def get_health(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("health", record_id)
         return self._mem_get("maintenance_health", record_id)
@@ -223,7 +222,7 @@ class MaintenanceRepository:
             self._mem_create("maintenance_recovery", record_id, record)
         return record_id
 
-    async def get_recovery(self, record_id: int) -> Optional[dict]:
+    async def get_recovery(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("recovery", record_id)
         return self._mem_get("maintenance_recovery", record_id)
@@ -261,7 +260,7 @@ class MaintenanceRepository:
             self._mem_create("maintenance_optimization", record_id, record)
         return record_id
 
-    async def get_optimization(self, record_id: int) -> Optional[dict]:
+    async def get_optimization(self, record_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get("optimization", record_id)
         return self._mem_get("maintenance_optimization", record_id)
@@ -303,7 +302,7 @@ class MaintenanceRepository:
         self._ensure_store()
         self.store[table][record_id] = record
 
-    def _mem_get(self, table: str, record_id: int) -> Optional[dict]:
+    def _mem_get(self, table: str, record_id: int) -> dict | None:
         self._ensure_store()
         return self.store[table].get(record_id)
 
@@ -335,7 +334,7 @@ class MaintenanceRepository:
                          json.dumps(record, ensure_ascii=False))
 
     async def _redis_get(self, entity: str,
-                           record_id: int) -> Optional[dict]:
+                           record_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("maintenance", entity, record_id))
         if not data:

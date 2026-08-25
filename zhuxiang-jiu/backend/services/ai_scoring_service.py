@@ -19,7 +19,7 @@
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from core.helpers import ts
 
@@ -33,7 +33,7 @@ LEVEL_NAMES = {LEVEL_LOW: "低风险", LEVEL_MEDIUM: "中风险", LEVEL_HIGH: "�
 
 
 def _now_hour() -> int:
-    return datetime.now(timezone.utc).hour
+    return datetime.now(UTC).hour
 
 
 def _clamp(value, lo=0.0, hi=100.0) -> float:

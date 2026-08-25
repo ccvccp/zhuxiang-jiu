@@ -21,15 +21,15 @@ os.environ["STORE_MODE"] = "asyncio"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.helpers import ts  # noqa: E402
-from repositories.payment_repository import (  # noqa: E402
+from core.helpers import ts
+from repositories.payment_repository import (
     CHANNEL_STATUS_ACTIVE, CHANNEL_STATUS_DISABLED, CHANNEL_STATUS_MAINTENANCE,
     CHANNEL_TYPE_THIRD_PARTY, FEE_TYPE_RATIO,
     RECON_STATUS_DIFF, RECON_STATUS_INVESTIGATING, RECON_STATUS_MATCHED,
     RECON_STATUS_RESOLVED,
 )
-from repositories.store import _mock_store  # noqa: E402
-from services.payment_service import PaymentService  # noqa: E402
+from repositories.store import _mock_store
+from services.payment_service import PaymentService
 
 
 def _reset_store():

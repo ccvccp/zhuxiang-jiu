@@ -29,7 +29,6 @@
 
 import logging
 import os
-from typing import Optional
 
 from repositories.ai_knowledge_repository import (
     AiKnowledgeRepository, kb_enabled,
@@ -55,7 +54,7 @@ def _cfg_int(key: str, default: int) -> int:
 
 
 async def augment_with_knowledge(scorer_id: str, factors: list,
-                                 score: float) -> Optional[dict]:
+                                 score: float) -> dict | None:
     """检索增强: 因子向量 → top-k 邻居证据 + 校准分 + 区域可靠性
 
     Args:
@@ -140,12 +139,12 @@ async def augment_with_knowledge(scorer_id: str, factors: list,
             } for n in neighbors],
             "modelVersion": MODEL_VERSION,
         }
-    except Exception as exc:  # noqa: BLE001 - 增强失败不影响评分
+    except Exception as exc:
         logger.warning("知识增强失败(scorer=%s): %s", scorer_id, exc)
         return None
 
 
-def should_escalate_review(knowledge: Optional[dict]) -> bool:
+def should_escalate_review(knowledge: dict | None) -> bool:
     """证据驱动的复核升级判定(只加严不放宽)
 
     规则: 区域不可靠(相似案例错误率 ≥ 50% 且证据数达标) → True。

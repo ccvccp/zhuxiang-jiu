@@ -26,7 +26,6 @@
     KeyError → 404(未知评分器) / ValueError → 409(业务冲突) / 其余 → 500
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel as PydBaseModel, Field
@@ -40,7 +39,7 @@ router = APIRouter()
 # 鉴权与异常映射(对齐项目约定)
 # ============================================================
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
@@ -62,8 +61,8 @@ class FeedbackFactorInput(PydBaseModel):
     """因子快照(与评分结果 factors 元素对齐)"""
     name: str = Field(..., description="因子名")
     score: float = Field(..., ge=0, le=100, description="因子分")
-    weight: Optional[float] = Field(None, ge=0, description="决策时权重")
-    contribution: Optional[float] = Field(None, description="风险贡献(score×weight)")
+    weight: float | None = Field(None, ge=0, description="决策时权重")
+    contribution: float | None = Field(None, description="风险贡献(score×weight)")
 
 
 class FeedbackRequest(PydBaseModel):
@@ -73,26 +72,26 @@ class FeedbackRequest(PydBaseModel):
                                                description="决策时因子快照")
     scoreAtDecision: float = Field(..., ge=0, le=100, description="决策时总分")
     actualAction: str = Field(..., description="模型实际动作(如 block)")
-    expectedAction: Optional[str] = Field(
+    expectedAction: str | None = Field(
         None, description="期望动作(人工复核结论), 与 correct 二选一")
-    correct: Optional[bool] = Field(None, description="模型决策是否正确")
-    note: Optional[str] = Field(None, max_length=500, description="备注")
-    weightVersion: Optional[str] = Field(None, description="决策时权重版本")
+    correct: bool | None = Field(None, description="模型决策是否正确")
+    note: str | None = Field(None, max_length=500, description="备注")
+    weightVersion: str | None = Field(None, description="决策时权重版本")
 
 
 class WeightsOverrideRequest(PydBaseModel):
     """人工覆盖权重"""
     weights: dict[str, float] = Field(..., description="因子→权重(需与默认因子集一致)")
-    reason: Optional[str] = Field(None, max_length=200, description="覆盖原因")
+    reason: str | None = Field(None, max_length=200, description="覆盖原因")
 
 
 class LearningConfigRequest(PydBaseModel):
     """学习配置更新"""
-    eta: Optional[float] = Field(None, gt=0, le=5, description="Hedge 学习率")
-    min_feedback: Optional[int] = Field(None, ge=1, le=1000,
+    eta: float | None = Field(None, gt=0, le=5, description="Hedge 学习率")
+    min_feedback: int | None = Field(None, ge=1, le=1000,
                                         description="触发学习的最小待学习反馈数")
-    auto_apply: Optional[bool] = Field(None, description="评估更优时自动晋升")
-    guardrail: Optional[float] = Field(None, ge=1.1, le=10,
+    auto_apply: bool | None = Field(None, description="评估更优时自动晋升")
+    guardrail: float | None = Field(None, ge=1.1, le=10,
                                        description="权重护栏倍数")
 
 
@@ -101,7 +100,7 @@ class LearningConfigRequest(PydBaseModel):
 # ============================================================
 
 @router.get("/api/ai-learning/overview", tags=["AI自学习层"])
-async def learning_overview(x_role: Optional[str] = Header(None, alias="X-Role")):
+async def learning_overview(x_role: str | None = Header(None, alias="X-Role")):
     """自学习状态总览: 全部评分器的冠军版本/挑战者/反馈量/漂移"""
     _require_admin(x_role)
     try:
@@ -112,7 +111,7 @@ async def learning_overview(x_role: Optional[str] = Header(None, alias="X-Role")
 
 @router.get("/api/ai-learning/weights/{scorer_id}", tags=["AI自学习层"])
 async def get_weights(scorer_id: str,
-                      x_role: Optional[str] = Header(None, alias="X-Role")):
+                      x_role: str | None = Header(None, alias="X-Role")):
     """查看权重档案: 冠军/挑战者/默认权重/学习配置/决策阈值"""
     _require_admin(x_role)
     try:
@@ -123,7 +122,7 @@ async def get_weights(scorer_id: str,
 
 @router.put("/api/ai-learning/weights/{scorer_id}", tags=["AI自学习层"])
 async def override_weights(scorer_id: str, data: WeightsOverrideRequest,
-                           x_role: Optional[str] = Header(None, alias="X-Role")):
+                           x_role: str | None = Header(None, alias="X-Role")):
     """人工覆盖权重(立即生效为新冠军, 旧版本入历史)"""
     _require_admin(x_role)
     try:
@@ -135,7 +134,7 @@ async def override_weights(scorer_id: str, data: WeightsOverrideRequest,
 
 @router.post("/api/ai-learning/feedback", tags=["AI自学习层"])
 async def submit_feedback(data: FeedbackRequest,
-                          x_role: Optional[str] = Header(None, alias="X-Role")):
+                          x_role: str | None = Header(None, alias="X-Role")):
     """提交决策反馈(真实结果标注), 同时更新漂移统计"""
     _require_admin(x_role)
     try:
@@ -148,7 +147,7 @@ async def submit_feedback(data: FeedbackRequest,
 
 @router.post("/api/ai-learning/learn/{scorer_id}", tags=["AI自学习层"])
 async def run_learning(scorer_id: str,
-                       x_role: Optional[str] = Header(None, alias="X-Role")):
+                       x_role: str | None = Header(None, alias="X-Role")):
     """触发一轮 Hedge 在线学习(待学习反馈 → 新挑战者/自动晋升)"""
     _require_admin(x_role)
     try:
@@ -159,7 +158,7 @@ async def run_learning(scorer_id: str,
 
 @router.get("/api/ai-learning/history/{scorer_id}", tags=["AI自学习层"])
 async def get_history(scorer_id: str,
-                      x_role: Optional[str] = Header(None, alias="X-Role")):
+                      x_role: str | None = Header(None, alias="X-Role")):
     """查看权重版本历史(审计与回滚参考)"""
     _require_admin(x_role)
     try:
@@ -170,7 +169,7 @@ async def get_history(scorer_id: str,
 
 @router.post("/api/ai-learning/promote/{scorer_id}", tags=["AI自学习层"])
 async def promote(scorer_id: str,
-                  x_role: Optional[str] = Header(None, alias="X-Role")):
+                  x_role: str | None = Header(None, alias="X-Role")):
     """晋升挑战者为冠军(人工决策通道)"""
     _require_admin(x_role)
     try:
@@ -181,7 +180,7 @@ async def promote(scorer_id: str,
 
 @router.post("/api/ai-learning/reset/{scorer_id}", tags=["AI自学习层"])
 async def reset(scorer_id: str,
-                x_role: Optional[str] = Header(None, alias="X-Role")):
+                x_role: str | None = Header(None, alias="X-Role")):
     """重置为默认权重(清除挑战者, 历史保留)"""
     _require_admin(x_role)
     try:
@@ -192,7 +191,7 @@ async def reset(scorer_id: str,
 
 @router.get("/api/ai-learning/drift/{scorer_id}", tags=["AI自学习层"])
 async def get_drift(scorer_id: str,
-                    x_role: Optional[str] = Header(None, alias="X-Role")):
+                    x_role: str | None = Header(None, alias="X-Role")):
     """查看漂移统计(因子分数 EMA 相对基线的偏离)"""
     _require_admin(x_role)
     try:
@@ -203,7 +202,7 @@ async def get_drift(scorer_id: str,
 
 @router.get("/api/ai-learning/report/{scorer_id}", tags=["AI自学习层"])
 async def get_report(scorer_id: str,
-                     x_role: Optional[str] = Header(None, alias="X-Role")):
+                     x_role: str | None = Header(None, alias="X-Role")):
     """学习效果报表: 按权重版本聚合正确率 + 版本演进曲线 + 近期趋势"""
     _require_admin(x_role)
     try:
@@ -214,7 +213,7 @@ async def get_report(scorer_id: str,
 
 @router.put("/api/ai-learning/config/{scorer_id}", tags=["AI自学习层"])
 async def update_config(scorer_id: str, data: LearningConfigRequest,
-                        x_role: Optional[str] = Header(None, alias="X-Role")):
+                        x_role: str | None = Header(None, alias="X-Role")):
     """更新学习配置(学习率/最小反馈数/自动晋升/护栏)"""
     _require_admin(x_role)
     try:
@@ -230,7 +229,7 @@ async def update_config(scorer_id: str, data: LearningConfigRequest,
 
 @router.get("/api/ai-learning/enforcement/{scorer_id}/overview", tags=["AI自学习层"])
 async def enforcement_overview(scorer_id: str,
-                               x_role: Optional[str] = Header(None, alias="X-Role")):
+                               x_role: str | None = Header(None, alias="X-Role")):
     """阻断运行概览: 当前模式/累计统计/熔断窗口/保护参数"""
     _require_admin(x_role)
     try:
@@ -243,7 +242,7 @@ async def enforcement_overview(scorer_id: str,
 
 @router.get("/api/ai-learning/enforcement/{scorer_id}/audit", tags=["AI自学习层"])
 async def enforcement_audit(scorer_id: str, limit: int = 50,
-                            x_role: Optional[str] = Header(None, alias="X-Role")):
+                            x_role: str | None = Header(None, alias="X-Role")):
     """阻断决策审计记录(新→旧, 默认 50 条, 0=全部)"""
     _require_admin(x_role)
     try:
@@ -259,7 +258,7 @@ async def enforcement_audit(scorer_id: str, limit: int = 50,
 
 @router.get("/api/ai-learning/kb/{scorer_id}", tags=["AI自学习层"])
 async def kb_cases(scorer_id: str, limit: int = 50,
-                   x_role: Optional[str] = Header(None, alias="X-Role")):
+                   x_role: str | None = Header(None, alias="X-Role")):
     """案例知识库: 案例列表(新→旧, 默认 50 条, 0=全部) + 库存统计
 
     v7.9 知识库只读端点: 学习后反馈归档的案例(经验回放缓冲),

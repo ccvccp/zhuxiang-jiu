@@ -20,7 +20,6 @@
     - 入口决策(1):   order-entry/decide(地图定位→市店入口/本站入口)
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -40,14 +39,14 @@ _service = CityStoreService()
 # 鉴权与异常映射辅助(对齐 wallet/payment 风格)
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -164,7 +163,7 @@ async def list_available_cities(
 @router.get("/api/citystore/list", tags=["市级网店模块"])
 async def list_stores(
     x_member_id: str = Header(None, alias="X-Member-Id"),
-    status: Optional[int] = Query(None, description="按状态筛选: 0待审核 1运营 2预警 3暂停 4取消"),
+    status: int | None = Query(None, description="按状态筛选: 0待审核 1运营 2预警 3暂停 4取消"),
     limit: int = Query(50, ge=1, le=200, description="返回数量"),
 ):
     """我的网店列表"""
@@ -209,12 +208,12 @@ async def get_stats(
 
 class OrderEntryDecideRequest(PydBaseModel):
     """下单入口决策请求(市级网店优先原则)"""
-    cityCode: Optional[str] = Field(None, description="地级市行政区划码(如 110100)")
-    adcode: Optional[str] = Field(None, description="区县级码(如 110105, 自动转市级)")
-    cityName: Optional[str] = Field(None, description="城市名(如 北京市)")
-    provinceName: Optional[str] = Field(None, description="省份名(配合城市名)")
-    longitude: Optional[float] = Field(None, ge=-180, le=180, description="经度")
-    latitude: Optional[float] = Field(None, ge=-90, le=90, description="纬度")
+    cityCode: str | None = Field(None, description="地级市行政区划码(如 110100)")
+    adcode: str | None = Field(None, description="区县级码(如 110105, 自动转市级)")
+    cityName: str | None = Field(None, description="城市名(如 北京市)")
+    provinceName: str | None = Field(None, description="省份名(配合城市名)")
+    longitude: float | None = Field(None, ge=-180, le=180, description="经度")
+    latitude: float | None = Field(None, ge=-90, le=90, description="纬度")
     nearbyRadiusKm: float = Field(50.0, ge=1, le=500,
                                   description="附近门店搜索半径(km)")
 
@@ -222,7 +221,7 @@ class OrderEntryDecideRequest(PydBaseModel):
 @router.post("/api/citystore/order-entry/decide", tags=["市级网店模块"])
 async def decide_order_entry(
     data: OrderEntryDecideRequest,
-    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
 ):
     """下单入口决策(市级网店优先原则)
 
@@ -380,7 +379,7 @@ async def add_order(
 async def list_orders(
     store_code: str,
     x_member_id: str = Header(None, alias="X-Member-Id"),
-    month: Optional[str] = Query(None, description="按月份筛选(YYYY-MM)"),
+    month: str | None = Query(None, description="按月份筛选(YYYY-MM)"),
 ):
     """查询网店订单"""
     _require_member_id(x_member_id)

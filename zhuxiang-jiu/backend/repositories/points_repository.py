@@ -14,7 +14,6 @@
 
 import json
 from datetime import datetime, date
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -88,7 +87,7 @@ class PointsRepository:
     # 积分账户 CRUD
     # ============================================================
 
-    async def get_account(self, user_id: int) -> Optional[dict]:
+    async def get_account(self, user_id: int) -> dict | None:
         """查询积分账户(不存在返回None)"""
         if is_redis_mode():
             return await self._redis_get_account(user_id)
@@ -140,7 +139,7 @@ class PointsRepository:
             self._mem_add_log(log)
         return log_id
 
-    async def get_log(self, log_id: int) -> Optional[dict]:
+    async def get_log(self, log_id: int) -> dict | None:
         """按ID查询流水"""
         if is_redis_mode():
             return await self._redis_get_log(log_id)
@@ -170,14 +169,14 @@ class PointsRepository:
             return await self._redis_add_signin(signin)
         return self._mem_add_signin(signin)
 
-    async def get_signin(self, user_id: int, sign_date: date) -> Optional[dict]:
+    async def get_signin(self, user_id: int, sign_date: date) -> dict | None:
         """按用户+日期查询签到记录(幂等校验)"""
         date_str = sign_date.isoformat() if isinstance(sign_date, date) else sign_date
         if is_redis_mode():
             return await self._redis_get_signin(user_id, date_str)
         return self._mem_get_signin(user_id, date_str)
 
-    async def get_last_signin(self, user_id: int) -> Optional[dict]:
+    async def get_last_signin(self, user_id: int) -> dict | None:
         """查询用户最近一次签到记录"""
         if is_redis_mode():
             return await self._redis_get_last_signin(user_id)
@@ -249,7 +248,7 @@ class PointsRepository:
 
     # --- 账户 ---
 
-    def _mem_get_account(self, user_id: int) -> Optional[dict]:
+    def _mem_get_account(self, user_id: int) -> dict | None:
         self._ensure_store()
         return self.store["points_accounts"].get(user_id)
 
@@ -271,7 +270,7 @@ class PointsRepository:
             self.store["points_logs_by_user"][user_id] = []
         self.store["points_logs_by_user"][user_id].append(log_id)
 
-    def _mem_get_log(self, log_id: int) -> Optional[dict]:
+    def _mem_get_log(self, log_id: int) -> dict | None:
         self._ensure_store()
         return self.store["points_logs"].get(log_id)
 
@@ -310,11 +309,11 @@ class PointsRepository:
         self.store["points_signins"][user_id][date_str] = signin
         return seq
 
-    def _mem_get_signin(self, user_id: int, date_str: str) -> Optional[dict]:
+    def _mem_get_signin(self, user_id: int, date_str: str) -> dict | None:
         self._ensure_store()
         return self.store["points_signins"].get(user_id, {}).get(date_str)
 
-    def _mem_get_last_signin(self, user_id: int) -> Optional[dict]:
+    def _mem_get_last_signin(self, user_id: int) -> dict | None:
         self._ensure_store()
         signins = self.store["points_signins"].get(user_id, {})
         if not signins:
@@ -388,7 +387,7 @@ class PointsRepository:
 
     # --- 账户 ---
 
-    async def _redis_get_account(self, user_id: int) -> Optional[dict]:
+    async def _redis_get_account(self, user_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("points", "account", user_id))
         if not data:
@@ -413,7 +412,7 @@ class PointsRepository:
                          json.dumps(log, ensure_ascii=False))
         await client.lpush(_k("points", "logs_by_user", user_id), log_id)
 
-    async def _redis_get_log(self, log_id: int) -> Optional[dict]:
+    async def _redis_get_log(self, log_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("points", "log", log_id))
         if not data:
@@ -459,14 +458,14 @@ class PointsRepository:
         await client.lpush(_k("points", "signin_list", user_id), date_str)
         return seq
 
-    async def _redis_get_signin(self, user_id: int, date_str: str) -> Optional[dict]:
+    async def _redis_get_signin(self, user_id: int, date_str: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hget(_k("points", "signins", user_id), date_str)
         if not data:
             return None
         return json.loads(data)
 
-    async def _redis_get_last_signin(self, user_id: int) -> Optional[dict]:
+    async def _redis_get_last_signin(self, user_id: int) -> dict | None:
         client = await get_redis_client()
         date_strs = await client.lrange(_k("points", "signin_list", user_id), 0, 0)
         if not date_strs:

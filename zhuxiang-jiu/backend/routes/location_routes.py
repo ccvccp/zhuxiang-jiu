@@ -13,7 +13,6 @@
     - 存证(1):       evidence
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -33,7 +32,7 @@ _service = LocationService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> int:
+def _require_member_id(x_member_id: str | None) -> int:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
@@ -43,7 +42,7 @@ def _require_member_id(x_member_id: Optional[str]) -> int:
         raise HTTPException(status_code=401, detail="X-Member-Id 必须为数字")
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -72,24 +71,24 @@ class AddAddressRequest(PydBaseModel):
     city: str = Field(..., description="市")
     district: str = Field(..., description="区")
     detailAddress: str = Field(..., description="详细地址")
-    longitude: Optional[float] = Field(None, description="经度")
-    latitude: Optional[float] = Field(None, description="纬度")
-    adcode: Optional[str] = Field(None, description="行政区划编码")
-    label: Optional[str] = Field(None, description="标签(家/公司/学校)")
+    longitude: float | None = Field(None, description="经度")
+    latitude: float | None = Field(None, description="纬度")
+    adcode: str | None = Field(None, description="行政区划编码")
+    label: str | None = Field(None, description="标签(家/公司/学校)")
     isDefault: bool = Field(False, description="是否默认")
 
 
 class UpdateAddressRequest(PydBaseModel):
-    receiverName: Optional[str] = None
-    receiverPhone: Optional[str] = None
-    province: Optional[str] = None
-    city: Optional[str] = None
-    district: Optional[str] = None
-    detailAddress: Optional[str] = None
-    longitude: Optional[float] = None
-    latitude: Optional[float] = None
-    adcode: Optional[str] = None
-    label: Optional[str] = None
+    receiverName: str | None = None
+    receiverPhone: str | None = None
+    province: str | None = None
+    city: str | None = None
+    district: str | None = None
+    detailAddress: str | None = None
+    longitude: float | None = None
+    latitude: float | None = None
+    adcode: str | None = None
+    label: str | None = None
 
 
 class AddStoreRequest(PydBaseModel):
@@ -101,9 +100,9 @@ class AddStoreRequest(PydBaseModel):
     address: str = Field(..., description="详细地址")
     longitude: float = Field(..., description="经度")
     latitude: float = Field(..., description="纬度")
-    phone: Optional[str] = None
-    openHours: Optional[str] = None
-    services: Optional[str] = None
+    phone: str | None = None
+    openHours: str | None = None
+    services: str | None = None
     status: str = Field(STORE_STATUS_OPEN, description="营业状态")
 
 
@@ -116,8 +115,8 @@ class AddAgentLocationRequest(PydBaseModel):
     address: str = Field(..., description="详细地址")
     longitude: float = Field(..., description="经度")
     latitude: float = Field(..., description="纬度")
-    contactName: Optional[str] = None
-    contactPhone: Optional[str] = None
+    contactName: str | None = None
+    contactPhone: str | None = None
 
 
 class CreateTrackRequest(PydBaseModel):
@@ -129,30 +128,30 @@ class CreateTrackRequest(PydBaseModel):
     originLat: float = Field(..., description="发货地纬度")
     destLng: float = Field(..., description="收货地经度")
     destLat: float = Field(..., description="收货地纬度")
-    currentLng: Optional[float] = None
-    currentLat: Optional[float] = None
-    currentAddress: Optional[str] = None
-    eta: Optional[str] = None
+    currentLng: float | None = None
+    currentLat: float | None = None
+    currentAddress: str | None = None
+    eta: str | None = None
 
 
 class UpdateTrackRequest(PydBaseModel):
-    currentLng: Optional[float] = None
-    currentLat: Optional[float] = None
-    currentAddress: Optional[str] = None
-    status: Optional[str] = None
-    eta: Optional[str] = None
+    currentLng: float | None = None
+    currentLat: float | None = None
+    currentAddress: str | None = None
+    status: str | None = None
+    eta: str | None = None
 
 
 class AddDeliveryZoneRequest(PydBaseModel):
     zoneName: str = Field(..., description="范围名称")
     zoneType: str = Field(..., description="范围类型")
-    centerLng: Optional[float] = None
-    centerLat: Optional[float] = None
+    centerLng: float | None = None
+    centerLat: float | None = None
     radius: float = Field(0, description="半径(km)")
-    polygon: Optional[str] = None
+    polygon: str | None = None
     shippingFee: float = Field(0, description="运费")
     freeThreshold: float = Field(0, description="包邮门槛")
-    deliveryTime: Optional[str] = None
+    deliveryTime: str | None = None
 
 
 class CheckDeliveryRequest(PydBaseModel):

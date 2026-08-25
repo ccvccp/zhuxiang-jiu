@@ -19,7 +19,6 @@
 """
 
 import logging
-from typing import Optional
 
 from core.helpers import ts
 from core.locks import get_lock
@@ -310,7 +309,7 @@ class LogisticsService:
             raise KeyError(f"运单 {waybill_no} 不存在")
         return order
 
-    async def get_order_by_order_id(self, order_id: str) -> Optional[dict]:
+    async def get_order_by_order_id(self, order_id: str) -> dict | None:
         """按订单号查询物流单(可能不存在)"""
         return await self.repo.find_by_order(order_id)
 

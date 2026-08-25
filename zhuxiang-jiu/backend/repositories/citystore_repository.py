@@ -12,7 +12,6 @@
 """
 
 import json
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -146,19 +145,19 @@ class CityStoreRepository:
         else:
             self._mem_save_store(store)
 
-    async def get_store(self, store_code: str) -> Optional[dict]:
+    async def get_store(self, store_code: str) -> dict | None:
         """按网店编号查询"""
         if is_redis_mode():
             return await self._redis_get_store(store_code)
         return self._mem_get_store(store_code)
 
-    async def get_by_city(self, city_code: str) -> Optional[dict]:
+    async def get_by_city(self, city_code: str) -> dict | None:
         """按城市码查询(一城一店校验)"""
         if is_redis_mode():
             return await self._redis_get_by_city(city_code)
         return self._mem_get_by_city(city_code)
 
-    async def get_by_member(self, member_id: int) -> Optional[dict]:
+    async def get_by_member(self, member_id: int) -> dict | None:
         """按会员ID查询(防止重复开店)"""
         if is_redis_mode():
             return await self._redis_get_by_member(member_id)
@@ -188,7 +187,7 @@ class CityStoreRepository:
         else:
             self._mem_save_assessment(assessment)
 
-    async def get_assessment(self, store_code: str, month: str) -> Optional[dict]:
+    async def get_assessment(self, store_code: str, month: str) -> dict | None:
         """按网店+月份查询考核"""
         if is_redis_mode():
             return await self._redis_get_assessment(store_code, month)
@@ -255,11 +254,11 @@ class CityStoreRepository:
         if member_id is not None:
             self.store["_citystore_member_index"][member_id] = store_code
 
-    def _mem_get_store(self, store_code: str) -> Optional[dict]:
+    def _mem_get_store(self, store_code: str) -> dict | None:
         self._ensure_store()
         return self.store["city_stores"].get(store_code)
 
-    def _mem_get_by_city(self, city_code: str) -> Optional[dict]:
+    def _mem_get_by_city(self, city_code: str) -> dict | None:
         self._ensure_store()
         store_code = self.store["_citystore_city_index"].get(city_code)
         if not store_code:
@@ -270,7 +269,7 @@ class CityStoreRepository:
             return None
         return store
 
-    def _mem_get_by_member(self, member_id: int) -> Optional[dict]:
+    def _mem_get_by_member(self, member_id: int) -> dict | None:
         self._ensure_store()
         store_code = self.store["_citystore_member_index"].get(member_id)
         if not store_code:
@@ -308,7 +307,7 @@ class CityStoreRepository:
             self.store["city_store_assessments"][store_code] = {}
         self.store["city_store_assessments"][store_code][month] = assessment
 
-    def _mem_get_assessment(self, store_code: str, month: str) -> Optional[dict]:
+    def _mem_get_assessment(self, store_code: str, month: str) -> dict | None:
         self._ensure_store()
         return self.store["city_store_assessments"].get(store_code, {}).get(month)
 
@@ -359,14 +358,14 @@ class CityStoreRepository:
         if member_id is not None:
             await client.hset(_k("citystore", "member_index"), str(member_id), store_code)
 
-    async def _redis_get_store(self, store_code: str) -> Optional[dict]:
+    async def _redis_get_store(self, store_code: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hget(_k("citystore", "stores"), store_code)
         if not data:
             return None
         return json.loads(data)
 
-    async def _redis_get_by_city(self, city_code: str) -> Optional[dict]:
+    async def _redis_get_by_city(self, city_code: str) -> dict | None:
         client = await get_redis_client()
         store_code = await client.hget(_k("citystore", "city_index"), city_code)
         if not store_code:
@@ -376,7 +375,7 @@ class CityStoreRepository:
             return None
         return store
 
-    async def _redis_get_by_member(self, member_id: int) -> Optional[dict]:
+    async def _redis_get_by_member(self, member_id: int) -> dict | None:
         client = await get_redis_client()
         store_code = await client.hget(_k("citystore", "member_index"), str(member_id))
         if not store_code:
@@ -414,7 +413,7 @@ class CityStoreRepository:
         key = _k("citystore", "assessment", store_code)
         await client.hset(key, month, json.dumps(assessment, ensure_ascii=False))
 
-    async def _redis_get_assessment(self, store_code: str, month: str) -> Optional[dict]:
+    async def _redis_get_assessment(self, store_code: str, month: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hget(_k("citystore", "assessment", store_code), month)
         if not data:

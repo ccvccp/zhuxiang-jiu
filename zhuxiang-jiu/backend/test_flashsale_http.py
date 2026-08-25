@@ -17,7 +17,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 # 必须在导入 main 之前设置(内存模式 + 认证兼容模式)
 os.environ["LOCK_MODE"] = "asyncio"
@@ -75,7 +75,7 @@ def _mk_members() -> dict:
                 "phone": f"13966{idx:06d}", "nickname": f"秒杀测试{key}",
                 "password": "x" * 64, "status": 1, "role": "member",
                 "level": level, "growth_value": 600, "points": 0,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             })
             mapping[key] = m["id"]
         return mapping
@@ -89,8 +89,8 @@ def main():
 
     reset_store()
     M = _mk_members()
-    now = datetime.now(timezone.utc)
-    iso = lambda dt: dt.isoformat()  # noqa: E731
+    now = datetime.now(UTC)
+    iso = lambda dt: dt.isoformat()
 
     # --------------------------------------------------------
     # 1. 管理端参数配置
@@ -456,7 +456,7 @@ def main():
     # 6. 超时未支付批量取消(回补库存)
     # --------------------------------------------------------
     # 直接将 D 的再购订单创建时间回拨 30 分钟(超过超时阈值 20 分钟)
-    backdate = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+    backdate = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
     _mock_store["flash_orders"][order_d2["orderNo"]]["createdAt"] = backdate
 
     r = client.post("/api/flash/admin/orders/expire-cancel", headers=ADMIN)

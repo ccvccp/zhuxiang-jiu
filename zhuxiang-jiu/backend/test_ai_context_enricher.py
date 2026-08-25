@@ -19,7 +19,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
@@ -64,7 +64,7 @@ async def _setup():
     _mock_store.pop("members", None)
     _mock_store["_member_seq"] = 9000
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # 会员: 2 小时前注册(真实 created_at)
     member_repo = MemberRepository()
     await member_repo.create({
@@ -151,7 +151,7 @@ async def main():
            f"cancels={ctx.get('historyCancels')}")
     record("05_current_order_elements",
            ctx["orderAmount"] == 536.0 and ctx["totalQuantity"] == 2
-           and ctx["orderHour"] == datetime.now(timezone.utc).hour,
+           and ctx["orderHour"] == datetime.now(UTC).hour,
            f"amount={ctx.get('orderAmount')}, qty={ctx.get('totalQuantity')}, "
            f"hour={ctx.get('orderHour')}")
 

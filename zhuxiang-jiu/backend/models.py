@@ -5,8 +5,8 @@ AI决策筹划模块(模块29·AI大脑中枢) Pydantic 模型定义
 """
 
 from datetime import datetime
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -18,13 +18,13 @@ from pydantic import BaseModel, Field
 class LogEntry(BaseModel):
     stage: str = Field(..., description="执行阶段")
     message: str = Field(..., description="日志消息")
-    data: Optional[dict[str, Any]] = Field(None, description="附加数据")
+    data: dict[str, Any] | None = Field(None, description="附加数据")
 
 
 class BaseSuccessResponse(BaseModel):
     success: bool = True
-    operation: Optional[str] = None
-    details: Optional[dict[str, Any]] = None
+    operation: str | None = None
+    details: dict[str, Any] | None = None
     logs: list[LogEntry] = Field(default_factory=list)
     asyncOps: list[str] = Field(default_factory=list, alias="asyncOps")
 
@@ -32,12 +32,12 @@ class BaseSuccessResponse(BaseModel):
 class ErrorResponse(BaseModel):
     success: bool = False
     error: str
-    errorCode: Optional[str] = Field(None, alias="errorCode")
-    failedStage: Optional[str] = Field(None, alias="failedStage")
+    errorCode: str | None = Field(None, alias="errorCode")
+    failedStage: str | None = Field(None, alias="failedStage")
     logs: list[LogEntry] = Field(default_factory=list)
 
 
-class RoleEnum(str, Enum):
+class RoleEnum(StrEnum):
     member = "member"
     agent = "agent"
     guest = "guest"
@@ -45,7 +45,7 @@ class RoleEnum(str, Enum):
     admin = "admin"
 
 
-class DecisionErrorCode(str, Enum):
+class DecisionErrorCode(StrEnum):
     e001 = "DECISION_001"
     e002 = "DECISION_002"
     e003 = "DECISION_003"
@@ -98,15 +98,15 @@ class KnowledgeResult(BaseModel):
 
 
 class KnowledgeContext(BaseModel):
-    semanticGraph: Optional[str] = None
-    orgMemory: Optional[str] = None
+    semanticGraph: str | None = None
+    orgMemory: str | None = None
 
 
 class KnowledgeQueryDetails(BaseModel):
     query: str
     recallRate: str = "93%"
     results: list[KnowledgeResult] = Field(default_factory=list)
-    context: Optional[KnowledgeContext] = None
+    context: KnowledgeContext | None = None
 
 
 class KnowledgeIngestRequest(BaseModel):
@@ -114,7 +114,7 @@ class KnowledgeIngestRequest(BaseModel):
     title: str
     content: str
     tags: list[str] = Field(default_factory=list)
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class KnowledgeIngestDetails(BaseModel):
@@ -129,9 +129,9 @@ class KnowledgeIngestDetails(BaseModel):
 # ============================================================
 
 class StrategyConstraints(BaseModel):
-    budget: Optional[float] = None
-    timeframe: Optional[str] = None
-    riskTolerance: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    budget: float | None = None
+    timeframe: str | None = None
+    riskTolerance: str | None = Field(None, pattern="^(low|medium|high)$")
 
 
 class WhatIfScenario(BaseModel):
@@ -182,7 +182,7 @@ class ForecastSimulateDetails(BaseModel):
 class ProposedAction(BaseModel):
     action: str
     target: str
-    params: Optional[dict[str, Any]] = None
+    params: dict[str, Any] | None = None
 
 
 class GovernanceRequest(BaseModel):
@@ -207,14 +207,14 @@ class GovernanceDetails(BaseModel):
     ruleCheckResult: RuleCheckResult
     permissionGranted: bool
     executionMode: str
-    blockchainNotarize: Optional[BlockchainNotarize] = None
+    blockchainNotarize: BlockchainNotarize | None = None
     complianceRate: str = "100%"
 
 
 class RiskControlRequest(BaseModel):
     checkType: str = Field(..., pattern="^(transaction_anomaly|compliance|fraud|abuse)$")
     target: dict[str, Any]
-    thresholds: Optional[dict[str, Any]] = None
+    thresholds: dict[str, Any] | None = None
     autoCircuitBreak: bool = True
 
 
@@ -250,7 +250,7 @@ class OrchestrateDetails(BaseModel):
 class CapabilityRouteRequest(BaseModel):
     requiredCapabilities: list[str]
     task: str
-    budget: Optional[dict[str, Any]] = None
+    budget: dict[str, Any] | None = None
     preferPlugins: list[str] = Field(default_factory=list)
 
 
@@ -269,9 +269,9 @@ class CapabilityRouteDetails(BaseModel):
 
 class RoleCopilotRequest(BaseModel):
     role: RoleEnum
-    level: Optional[str] = None
+    level: str | None = None
     intent: str
-    context: Optional[dict[str, Any]] = None
+    context: dict[str, Any] | None = None
     mode: str = Field("copilot", pattern="^(copilot|agent)$")
 
 
@@ -297,7 +297,7 @@ class FeedbackOutcome(BaseModel):
 class FeedbackLoopRequest(BaseModel):
     actionId: str
     outcome: FeedbackOutcome
-    cost: Optional[float] = None
+    cost: float | None = None
     reflowMetrics: list[str] = Field(default_factory=list)
 
 
@@ -306,7 +306,7 @@ class FeedbackLoopDetails(BaseModel):
     evaluation: dict[str, Any]
     modelUpdate: dict[str, Any]
     feedbackLatency: str = "<24h"
-    blockchainNotarize: Optional[BlockchainNotarize] = None
+    blockchainNotarize: BlockchainNotarize | None = None
 
 
 class RetrospectiveRequest(BaseModel):
@@ -347,7 +347,7 @@ class ModeDetails(BaseModel):
 
 class ModeSwitchRequest(BaseModel):
     mode: str = Field(..., pattern="^(mock|live)$")
-    apiBase: Optional[str] = None
+    apiBase: str | None = None
 
 
 class ModeSwitchDetails(BaseModel):

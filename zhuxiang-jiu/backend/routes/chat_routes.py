@@ -18,7 +18,6 @@
     - 评价(1):  满意度评价
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -34,14 +33,14 @@ _service = ChatService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -73,7 +72,7 @@ def _handle(exc: Exception):
 class CreateSessionRequest(PydBaseModel):
     userId: int = Field(..., description="会员ID")
     sessionType: str = Field("presale", description="会话类型: presale/aftersale/old_wine/custom")
-    guestPhone: Optional[str] = Field(None, description="游客手机号(游客咨询时)")
+    guestPhone: str | None = Field(None, description="游客手机号(游客咨询时)")
 
 
 class SendMessageRequest(PydBaseModel):
@@ -81,8 +80,8 @@ class SendMessageRequest(PydBaseModel):
     senderId: int = Field(..., description="发送方ID")
     messageType: str = Field("text", description="消息类型: text/image/video/voice/file/card/button")
     content: str = Field(..., description="消息内容")
-    mediaUrl: Optional[str] = Field(None, description="多媒体URL")
-    mediaThumb: Optional[str] = Field(None, description="缩略图URL")
+    mediaUrl: str | None = Field(None, description="多媒体URL")
+    mediaThumb: str | None = Field(None, description="缩略图URL")
     mediaSize: int = Field(0, description="文件大小")
     duration: int = Field(0, description="语音/视频时长")
 
@@ -105,12 +104,12 @@ class KnowledgeRequest(PydBaseModel):
 
 
 class KnowledgeUpdateRequest(PydBaseModel):
-    question: Optional[str] = None
-    answer: Optional[str] = None
-    keywords: Optional[str] = None
-    intent: Optional[str] = None
-    confidenceThreshold: Optional[float] = Field(None, ge=0, le=1)
-    status: Optional[str] = None
+    question: str | None = None
+    answer: str | None = None
+    keywords: str | None = None
+    intent: str | None = None
+    confidenceThreshold: float | None = Field(None, ge=0, le=1)
+    status: str | None = None
 
 
 # ============================================================

@@ -19,12 +19,12 @@ HTTP 客户端: httpx.AsyncClient + ASGITransport(直连 ASGI app, 走完整 Fas
 
 import pytest
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 from main import app
 
 # 动态当天日期(UTC, 与 ts() 一致)
-TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+TODAY = datetime.now(UTC).strftime("%Y-%m-%d")
 from repositories.store import _mock_store, reset_store
 from core.locks import _async_locks
 
@@ -976,7 +976,7 @@ class TestReconResolve:
 
     async def _make_diff_recon(self, client):
         """构造有差异的对账记录(直接写 _mock_store)"""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
         _tz = timezone(timedelta(hours=8))
         now = datetime.now(_tz).isoformat()
         recon = {

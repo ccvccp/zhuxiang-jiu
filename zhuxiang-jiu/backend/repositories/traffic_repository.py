@@ -14,7 +14,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -200,7 +199,7 @@ class TrafficRepository:
     # 流量来源 CRUD
     # ============================================================
 
-    async def get_source(self, source_id: int) -> Optional[dict]:
+    async def get_source(self, source_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_source(source_id)
         return self._mem_get_source(source_id)
@@ -216,7 +215,7 @@ class TrafficRepository:
             return await self._redis_list_sources(limit)
         return self._mem_list_sources(limit)
 
-    async def get_source_by_code(self, code: str) -> Optional[dict]:
+    async def get_source_by_code(self, code: str) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_source_by_code(code)
         return self._mem_get_source_by_code(code)
@@ -225,12 +224,12 @@ class TrafficRepository:
     # 推广员 CRUD
     # ============================================================
 
-    async def get_promoter(self, promoter_id: int) -> Optional[dict]:
+    async def get_promoter(self, promoter_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_promoter(promoter_id)
         return self._mem_get_promoter(promoter_id)
 
-    async def get_promoter_by_code(self, promoter_code: str) -> Optional[dict]:
+    async def get_promoter_by_code(self, promoter_code: str) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_promoter_by_code(promoter_code)
         return self._mem_get_promoter_by_code(promoter_code)
@@ -262,7 +261,7 @@ class TrafficRepository:
             self._mem_add_lead(lead)
         return lead_id
 
-    async def get_lead(self, lead_id: int) -> Optional[dict]:
+    async def get_lead(self, lead_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_lead(lead_id)
         return self._mem_get_lead(lead_id)
@@ -326,7 +325,7 @@ class TrafficRepository:
             self._mem_save_influencer(influencer)
         return inf_id
 
-    async def get_influencer(self, influencer_id: int) -> Optional[dict]:
+    async def get_influencer(self, influencer_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_influencer(influencer_id)
         return self._mem_get_influencer(influencer_id)
@@ -375,7 +374,7 @@ class TrafficRepository:
             self._mem_add_influencer_platform(platform)
         return plat_id
 
-    async def get_influencer_platform(self, platform_id: int) -> Optional[dict]:
+    async def get_influencer_platform(self, platform_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_influencer_platform(platform_id)
         return self._mem_get_influencer_platform(platform_id)
@@ -386,7 +385,7 @@ class TrafficRepository:
         return self._mem_list_influencer_platforms(influencer_id)
 
     async def get_influencer_platform_by_inf_platform(self, influencer_id: int,
-                                                       platform: str) -> Optional[dict]:
+                                                       platform: str) -> dict | None:
         """按博主ID+平台查询(唯一约束: 博主+平台)"""
         if is_redis_mode():
             return await self._redis_get_influencer_platform_by_inf_platform(influencer_id, platform)
@@ -425,7 +424,7 @@ class TrafficRepository:
             self._mem_add_influencer_code(code)
         return code_id
 
-    async def get_influencer_code_by_code(self, promo_code: str) -> Optional[dict]:
+    async def get_influencer_code_by_code(self, promo_code: str) -> dict | None:
         """按推广码字符串查询"""
         if is_redis_mode():
             return await self._redis_get_influencer_code_by_code(promo_code)
@@ -479,7 +478,7 @@ class TrafficRepository:
 
     # --- 流量来源 ---
 
-    def _mem_get_source(self, source_id: int) -> Optional[dict]:
+    def _mem_get_source(self, source_id: int) -> dict | None:
         self._ensure_store()
         return self.store["traffic_sources"].get(source_id)
 
@@ -497,7 +496,7 @@ class TrafficRepository:
         sources.sort(key=lambda s: s.get("createdAt", ""), reverse=True)
         return sources[:limit]
 
-    def _mem_get_source_by_code(self, code: str) -> Optional[dict]:
+    def _mem_get_source_by_code(self, code: str) -> dict | None:
         self._ensure_store()
         source_id = self.store["traffic_sources_by_code"].get(code)
         if source_id is None:
@@ -506,11 +505,11 @@ class TrafficRepository:
 
     # --- 推广员 ---
 
-    def _mem_get_promoter(self, promoter_id: int) -> Optional[dict]:
+    def _mem_get_promoter(self, promoter_id: int) -> dict | None:
         self._ensure_store()
         return self.store["promoters"].get(promoter_id)
 
-    def _mem_get_promoter_by_code(self, promoter_code: str) -> Optional[dict]:
+    def _mem_get_promoter_by_code(self, promoter_code: str) -> dict | None:
         self._ensure_store()
         promoter_id = self.store["promoters_by_code"].get(promoter_code)
         if promoter_id is None:
@@ -548,7 +547,7 @@ class TrafficRepository:
                 self.store["traffic_leads_by_promoter"][promoter_id] = []
             self.store["traffic_leads_by_promoter"][promoter_id].append(lead_id)
 
-    def _mem_get_lead(self, lead_id: int) -> Optional[dict]:
+    def _mem_get_lead(self, lead_id: int) -> dict | None:
         self._ensure_store()
         return self.store["traffic_leads"].get(lead_id)
 
@@ -603,7 +602,7 @@ class TrafficRepository:
 
     # --- 博主(KOL) ---
 
-    def _mem_get_influencer(self, influencer_id: int) -> Optional[dict]:
+    def _mem_get_influencer(self, influencer_id: int) -> dict | None:
         self._ensure_store()
         return self.store["traffic_influencers"].get(influencer_id)
 
@@ -638,7 +637,7 @@ class TrafficRepository:
 
     # --- 博主平台账号 ---
 
-    def _mem_get_influencer_platform(self, platform_id: int) -> Optional[dict]:
+    def _mem_get_influencer_platform(self, platform_id: int) -> dict | None:
         self._ensure_store()
         return self.store["traffic_influencer_platforms"].get(platform_id)
 
@@ -659,7 +658,7 @@ class TrafficRepository:
                 if pid in self.store["traffic_influencer_platforms"]]
 
     def _mem_get_influencer_platform_by_inf_platform(self, influencer_id: int,
-                                                      platform: str) -> Optional[dict]:
+                                                      platform: str) -> dict | None:
         self._ensure_store()
         for p in self._mem_list_influencer_platforms(influencer_id):
             if p.get("platform") == platform:
@@ -688,7 +687,7 @@ class TrafficRepository:
         if "promoCode" in code:
             self.store["traffic_influencer_codes_by_code"][code["promoCode"]] = code_id
 
-    def _mem_get_influencer_code_by_code(self, promo_code: str) -> Optional[dict]:
+    def _mem_get_influencer_code_by_code(self, promo_code: str) -> dict | None:
         self._ensure_store()
         code_id = self.store["traffic_influencer_codes_by_code"].get(promo_code)
         if code_id is None:
@@ -719,7 +718,7 @@ class TrafficRepository:
     # Redis 模式实现
     # ============================================================
 
-    async def _redis_get_source(self, source_id: int) -> Optional[dict]:
+    async def _redis_get_source(self, source_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("traffic", "source", source_id))
         return json.loads(data) if data else None
@@ -746,7 +745,7 @@ class TrafficRepository:
         sources.sort(key=lambda s: s.get("createdAt", ""), reverse=True)
         return sources[:limit]
 
-    async def _redis_get_source_by_code(self, code: str) -> Optional[dict]:
+    async def _redis_get_source_by_code(self, code: str) -> dict | None:
         client = await get_redis_client()
         source_id = await client.get(_k("traffic", "source_by_code", code))
         if not source_id:
@@ -754,12 +753,12 @@ class TrafficRepository:
         data = await client.get(_k("traffic", "source", source_id))
         return json.loads(data) if data else None
 
-    async def _redis_get_promoter(self, promoter_id: int) -> Optional[dict]:
+    async def _redis_get_promoter(self, promoter_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("traffic", "promoter", promoter_id))
         return json.loads(data) if data else None
 
-    async def _redis_get_promoter_by_code(self, promoter_code: str) -> Optional[dict]:
+    async def _redis_get_promoter_by_code(self, promoter_code: str) -> dict | None:
         client = await get_redis_client()
         promoter_id = await client.get(_k("traffic", "promoter_by_code", promoter_code))
         if not promoter_id:
@@ -805,7 +804,7 @@ class TrafficRepository:
         if promoter_id:
             await client.lpush(_k("traffic", "leads_by_promoter", promoter_id), lead_id)
 
-    async def _redis_get_lead(self, lead_id: int) -> Optional[dict]:
+    async def _redis_get_lead(self, lead_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("traffic", "lead", lead_id))
         return json.loads(data) if data else None
@@ -873,7 +872,7 @@ class TrafficRepository:
 
     # --- 博主(KOL) Redis 实现 ---
 
-    async def _redis_get_influencer(self, influencer_id: int) -> Optional[dict]:
+    async def _redis_get_influencer(self, influencer_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("traffic", "influencer", influencer_id))
         return json.loads(data) if data else None
@@ -927,7 +926,7 @@ class TrafficRepository:
         if influencer_id:
             await client.lpush(_k("traffic", "inf_platforms_by_inf", influencer_id), platform_id)
 
-    async def _redis_get_influencer_platform(self, platform_id: int) -> Optional[dict]:
+    async def _redis_get_influencer_platform(self, platform_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("traffic", "influencer_platform", platform_id))
         return json.loads(data) if data else None
@@ -943,7 +942,7 @@ class TrafficRepository:
         return platforms
 
     async def _redis_get_influencer_platform_by_inf_platform(self, influencer_id: int,
-                                                                platform: str) -> Optional[dict]:
+                                                                platform: str) -> dict | None:
         platforms = await self._redis_list_influencer_platforms(influencer_id)
         for p in platforms:
             if p.get("platform") == platform:
@@ -973,7 +972,7 @@ class TrafficRepository:
         if "promoCode" in code:
             await client.set(_k("traffic", "inf_code_by_code", code["promoCode"]), code_id)
 
-    async def _redis_get_influencer_code_by_code(self, promo_code: str) -> Optional[dict]:
+    async def _redis_get_influencer_code_by_code(self, promo_code: str) -> dict | None:
         client = await get_redis_client()
         code_id = await client.get(_k("traffic", "inf_code_by_code", promo_code))
         if not code_id:

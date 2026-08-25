@@ -36,7 +36,6 @@
 
 import logging
 import time
-from typing import Optional
 
 from repositories.ai_learning_repository import AiLearningRepository
 
@@ -59,7 +58,7 @@ BLOCK_ACTIONS = {"block", "high", "hold"}
 REVIEW_ACTIONS = {"review", "medium", "challenge"}
 
 # 正确率进程内缓存: scorerId → (计算时间, 正确率/None)
-_accuracy_cache: dict[str, tuple[float, Optional[float]]] = {}
+_accuracy_cache: dict[str, tuple[float, float | None]] = {}
 
 
 # ============================================================
@@ -92,7 +91,7 @@ def enforcement_mode(scorer_id: str) -> str:
 # 四重保护检查
 # ============================================================
 
-async def _recent_accuracy(scorer_id: str) -> Optional[float]:
+async def _recent_accuracy(scorer_id: str) -> float | None:
     """已标注反馈的正确率(None = 无已标注样本), 60s 进程内缓存"""
     cached = _accuracy_cache.get(scorer_id)
     now = time.time()
@@ -107,12 +106,12 @@ async def _recent_accuracy(scorer_id: str) -> Optional[float]:
             accuracy = sum(1 for f in labeled if f.get("correct")) / len(labeled)
         _accuracy_cache[scorer_id] = (now, accuracy)
         return accuracy
-    except Exception as exc:  # noqa: BLE001 - 统计失败按未知处理
+    except Exception as exc:
         logger.warning("正确率统计失败(scorer=%s): %s", scorer_id, exc)
         return None
 
 
-async def _protection_check(scorer_id: str) -> tuple[bool, Optional[str]]:
+async def _protection_check(scorer_id: str) -> tuple[bool, str | None]:
     """enforce 模式保护检查, 返回 (是否放行执行, 降级原因)"""
     repo = AiLearningRepository()
     # 1. 冷启动门槛
@@ -175,7 +174,7 @@ async def enforce_decision(scorer_id: str, business_key: str,
         try:
             from services.ai_feedback_hooks import score_and_snapshot
             await score_and_snapshot(scorer_id, business_key, ctx)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("观察模式评分失败(scorer=%s): %s", scorer_id, exc)
         return _pass_result(scorer_id, business_key, "observe",
                             "观察模式: 决策不生效")
@@ -187,7 +186,7 @@ async def enforce_decision(scorer_id: str, business_key: str,
     )
     try:
         result = await _invoke_scorer(scorer_id, ctx)
-    except Exception as exc:  # noqa: BLE001 - 保护4: fail-open
+    except Exception as exc:
         logger.warning("决策门评分异常, fail-open 放行(scorer=%s): %s",
                        scorer_id, exc)
         record = _pass_result(scorer_id, business_key, mode,
@@ -213,7 +212,7 @@ async def enforce_decision(scorer_id: str, business_key: str,
 
     # enforce 保护检查(shadow 不检查, 保持影子纯度)
     effective_mode = mode
-    degrade_reason: Optional[str] = None
+    degrade_reason: str | None = None
     if mode == "enforce":
         try:
             allowed, reason = await _protection_check(scorer_id)
@@ -222,7 +221,7 @@ async def enforce_decision(scorer_id: str, business_key: str,
                 degrade_reason = reason
                 logger.warning("enforce 自动降级 shadow(scorer=%s): %s",
                                scorer_id, reason)
-        except Exception as exc:  # noqa: BLE001 - 保护检查失败不阻断业务
+        except Exception as exc:
             logger.warning("保护检查异常(scorer=%s): %s", scorer_id, exc)
 
     blocked = (effective_mode == "enforce"
@@ -238,7 +237,7 @@ async def enforce_decision(scorer_id: str, business_key: str,
         )
         knowledge = await augment_with_knowledge(
             scorer_id, _factors_from_result(scorer_id, result) or [], score)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("决策门知识增强跳过(scorer=%s): %s", scorer_id, exc)
 
     # 证据驱动复核升级(只加严: pass → 人工复核; 永不 blocked/降级)
@@ -275,7 +274,7 @@ async def enforce_decision(scorer_id: str, business_key: str,
     # 决策快照(复用 v7.6: 终态事件配对自动反馈)
     try:
         await snapshot_decision(scorer_id, business_key, result)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("决策快照失败(scorer=%s key=%s): %s",
                        scorer_id, business_key, exc)
 
@@ -307,7 +306,7 @@ async def _audit_and_stats(record: dict, *, scored: bool) -> None:
             await repo.incr_burst_window(scorer_id, "total")
             if record.get("blocked"):
                 await repo.incr_burst_window(scorer_id, "blocked")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("阻断审计/统计失败(scorer=%s): %s",
                        record.get("scorerId"), exc)
 

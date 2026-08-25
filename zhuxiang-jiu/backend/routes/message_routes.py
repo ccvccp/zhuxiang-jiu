@@ -14,7 +14,6 @@
     - 管理端(5): 消息模板CRUD/推送记录/消息统计/管理端群发
 """
 
-from typing import Optional, List
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -30,13 +29,13 @@ _service = MessageService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
@@ -108,7 +107,7 @@ class UpdateTemplateRequest(PydBaseModel):
 
 
 class BatchSendRequest(PydBaseModel):
-    userIds: List[int] = Field(..., description="目标用户ID列表")
+    userIds: list[int] = Field(..., description="目标用户ID列表")
     channel: str = Field(..., description="消息渠道")
     title: str = Field(..., description="消息标题")
     content: str = Field(..., description="消息内容")

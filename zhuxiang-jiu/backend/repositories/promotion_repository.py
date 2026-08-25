@@ -14,8 +14,7 @@
 """
 
 import json
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -51,7 +50,7 @@ DEFAULT_SETTINGS = {
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class PromotionRepository:
@@ -115,7 +114,7 @@ class PromotionRepository:
         self.store["promotion_codes"][code_record["code"]] = code_record
         return code_record
 
-    async def get_code(self, code: str) -> Optional[dict]:
+    async def get_code(self, code: str) -> dict | None:
         """按推广码查询"""
         if is_redis_mode():
             client = await get_redis_client()
@@ -145,7 +144,7 @@ class PromotionRepository:
              if c.get("ownerMemberId") == owner_member_id),
             key=lambda x: x.get("createdAt", ""))
 
-    async def find_active_code(self, owner_member_id: int, channel: str) -> Optional[dict]:
+    async def find_active_code(self, owner_member_id: int, channel: str) -> dict | None:
         """查找会员在指定渠道的生效码(幂等领取)"""
         codes = await self.list_codes_by_owner(owner_member_id)
         for c in codes:
@@ -195,7 +194,7 @@ class PromotionRepository:
         self.store["promotion_relations"][relation["inviteeMemberId"]] = relation
         return relation
 
-    async def get_relation(self, invitee_member_id: int) -> Optional[dict]:
+    async def get_relation(self, invitee_member_id: int) -> dict | None:
         """查询被邀请人的绑定关系(判定是否已绑定)"""
         if is_redis_mode():
             client = await get_redis_client()
@@ -384,7 +383,7 @@ class PromotionRepository:
         self.store["promotion_wine_claims"][claim["claimId"]] = claim
         return claim
 
-    async def get_wine_claim(self, claim_id: int) -> Optional[dict]:
+    async def get_wine_claim(self, claim_id: int) -> dict | None:
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.hgetall(

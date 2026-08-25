@@ -19,7 +19,7 @@
     - ValueError → 409(参数/业务冲突)
 """
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -47,26 +47,26 @@ class ReviewCreateRequest(PydBaseModel):
 
 
 class ReviewUpdateRequest(PydBaseModel):
-    rating: Optional[int] = Field(None, ge=1, le=5, description="评分 1-5(可选)")
-    content: Optional[str] = Field(None, min_length=1, max_length=500, description="评价内容(可选)")
-    images: Optional[list[str]] = Field(None, description="评价图片URL列表(≤9张)")
+    rating: int | None = Field(None, ge=1, le=5, description="评分 1-5(可选)")
+    content: str | None = Field(None, min_length=1, max_length=500, description="评价内容(可选)")
+    images: list[str] | None = Field(None, description="评价图片URL列表(≤9张)")
 
 
 class ReplyCreateRequest(PydBaseModel):
     content: str = Field(..., min_length=1, max_length=500, description="回复内容(1-500 字)")
     replierRole: str = Field("admin", description="回复角色 merchant/admin")
     replierName: str = Field("", description="回复人名称")
-    parentReplyId: Optional[str] = Field("", description="父回复ID(多轮对话)")
+    parentReplyId: str | None = Field("", description="父回复ID(多轮对话)")
 
 
 class ReportCreateRequest(PydBaseModel):
     reason: str = Field(..., description="举报原因 ad/abuse/porn/other")
-    description: Optional[str] = Field("", max_length=500, description="举报描述(≤500 字)")
+    description: str | None = Field("", max_length=500, description="举报描述(≤500 字)")
 
 
 class HandleReportRequest(PydBaseModel):
     action: str = Field(..., description="处理动作 confirmed/rejected")
-    remark: Optional[str] = Field("", max_length=500, description="处理备注")
+    remark: str | None = Field("", max_length=500, description="处理备注")
 
 
 class HideReviewRequest(PydBaseModel):
@@ -88,7 +88,7 @@ def _map_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc))
 
 
-def _require_member_id(x_member_id: Optional[str]) -> int:
+def _require_member_id(x_member_id: str | None) -> int:
     """从 X-Member-Id 头提取会员ID, 缺失/格式错误返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
@@ -98,13 +98,13 @@ def _require_member_id(x_member_id: Optional[str]) -> int:
         raise HTTPException(status_code=401, detail="X-Member-Id 格式不正确")
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
 
-def _safe_int(value: Optional[str], *, field: str) -> Optional[int]:
+def _safe_int(value: str | None, *, field: str) -> int | None:
     """安全转换查询参数为 int, 非法时抛 409"""
     if value is None or value == "":
         return None
@@ -114,7 +114,7 @@ def _safe_int(value: Optional[str], *, field: str) -> Optional[int]:
         raise HTTPException(status_code=409, detail=f"{field} 须为整数")
 
 
-def _safe_float(value: Optional[str], *, field: str) -> Optional[float]:
+def _safe_float(value: str | None, *, field: str) -> float | None:
     """安全转换查询参数为 float, 非法时抛 409"""
     if value is None or value == "":
         return None
@@ -151,8 +151,8 @@ async def get_review_by_order(order_id: str):
 
 @router.get("/reviews/reports")
 async def list_reports(
-    status: Optional[str] = Query(None, description="状态筛选 pending/confirmed/rejected"),
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    status: str | None = Query(None, description="状态筛选 pending/confirmed/rejected"),
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """举报列表(管理员)"""
     _require_admin(x_role)
@@ -166,8 +166,8 @@ async def list_reports(
 async def handle_report(
     report_id: str,
     req: HandleReportRequest,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """处理举报(管理员)"""
     _require_admin(x_role)
@@ -190,13 +190,13 @@ async def handle_report(
 
 @router.get("/list")
 async def list_products(
-    category: Optional[str] = Query(default=None, description="分类(兼容字段, 等同 series)"),
-    series: Optional[str] = Query(default=None, description="系列(经典/珍藏/年份/礼盒/便携/典藏/竹香)"),
-    alcohol: Optional[str] = Query(default=None, description="度数(42/45/50/52/53)"),
-    volume: Optional[str] = Query(default=None, description="容量(250ml/500ml/500ml×2/750ml)"),
-    price_min: Optional[str] = Query(default=None, description="价格下限(元)"),
-    price_max: Optional[str] = Query(default=None, description="价格上限(元)"),
-    scene: Optional[str] = Query(default=None, description="场景(商务宴请/高端礼赠/老友小聚/收藏投资/团购定制)"),
+    category: str | None = Query(default=None, description="分类(兼容字段, 等同 series)"),
+    series: str | None = Query(default=None, description="系列(经典/珍藏/年份/礼盒/便携/典藏/竹香)"),
+    alcohol: str | None = Query(default=None, description="度数(42/45/50/52/53)"),
+    volume: str | None = Query(default=None, description="容量(250ml/500ml/500ml×2/750ml)"),
+    price_min: str | None = Query(default=None, description="价格下限(元)"),
+    price_max: str | None = Query(default=None, description="价格上限(元)"),
+    scene: str | None = Query(default=None, description="场景(商务宴请/高端礼赠/老友小聚/收藏投资/团购定制)"),
     sort: str = Query(default="comprehensive",
                       description="排序(comprehensive/sales/price_asc/price_desc/new/rating)"),
     page: int = Query(default=DEFAULT_PAGE, ge=1, description="页码(从 1 开始)"),
@@ -319,7 +319,7 @@ async def list_reviews(
 async def create_review(
     product_id: str,
     req: ReviewCreateRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """提交评价(需 X-Member-Id 头, rating 1-5, content 1-500 字)"""
     member_id = _require_member_id(x_member_id)
@@ -365,8 +365,8 @@ async def update_review(
     product_id: str,
     review_id: str,
     req: ReviewUpdateRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """修改评价(仅本人或管理员)"""
     member_id = _require_member_id(x_member_id)
@@ -391,8 +391,8 @@ async def update_review(
 async def delete_review(
     product_id: str,
     review_id: str,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """删除评价(仅本人或管理员)"""
     member_id = _require_member_id(x_member_id)
@@ -417,8 +417,8 @@ async def create_reply(
     product_id: str,
     review_id: str,
     req: ReplyCreateRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """提交评价回复(商家/管理员)"""
     _require_admin(x_role)
@@ -453,7 +453,7 @@ async def list_replies(product_id: str, review_id: str):
 async def like_review(
     product_id: str,
     review_id: str,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """点赞评价"""
     member_id = _require_member_id(x_member_id)
@@ -467,7 +467,7 @@ async def like_review(
 async def unlike_review(
     product_id: str,
     review_id: str,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """取消点赞"""
     member_id = _require_member_id(x_member_id)
@@ -484,7 +484,7 @@ async def report_review(
     product_id: str,
     review_id: str,
     req: ReportCreateRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """举报评价"""
     member_id = _require_member_id(x_member_id)
@@ -506,7 +506,7 @@ async def hide_review(
     product_id: str,
     review_id: str,
     req: HideReviewRequest,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """管理员隐藏/恢复评价"""
     _require_admin(x_role)

@@ -893,7 +893,7 @@ class TestBackendHelpers:
     async def test_get_redis_client_singleton(self, monkeypatch):
         """get_redis_client: 多次调用返回同一实例(单例)"""
         monkeypatch.setenv("STORE_MODE", "redis")
-        import repositories.backend as backend
+        from repositories import backend
         backend._redis_client = None  # 重置单例
         client1 = await backend.get_redis_client()
         client2 = await backend.get_redis_client()

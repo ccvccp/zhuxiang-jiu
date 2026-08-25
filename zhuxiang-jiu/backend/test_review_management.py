@@ -21,14 +21,14 @@ os.environ["STORE_MODE"] = "asyncio"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from services.product_service import ProductService  # noqa: E402
-from repositories.product_repository import (  # noqa: E402
+from services.product_service import ProductService
+from repositories.product_repository import (
     ProductRepository,
     REVIEW_STATUS_PUBLISHED, REVIEW_STATUS_HIDDEN,
     REPORT_STATUS_PENDING, REPORT_STATUS_CONFIRMED, REPORT_STATUS_REJECTED,
     REPORT_REASON_AD, REPORT_REASON_ABUSE, REPORT_REASON_OTHER,
 )
-from repositories.store import _mock_store  # noqa: E402
+from repositories.store import _mock_store
 
 # 测试用产品 ID(使用初始数据中的产品)
 PID_CLASSIC_42 = "ZX42-2026L07"

@@ -14,7 +14,6 @@
     - 统计(1):     stats
 """
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -33,14 +32,14 @@ _service = TraceService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -66,14 +65,14 @@ class GenerateBoxRequest(PydBaseModel):
     productId: str = Field(..., description="产品ID")
     batchNo: str = Field(..., description="批次号")
     count: int = Field(..., ge=1, le=1000, description="生成数量(1-1000)")
-    agentId: Optional[int] = Field(None, description="代理商ID")
-    agentRegion: Optional[str] = Field(None, description="代理区域")
+    agentId: int | None = Field(None, description="代理商ID")
+    agentRegion: str | None = Field(None, description="代理区域")
 
 
 class BindBoxRequest(PydBaseModel):
     boxId: int = Field(..., description="箱码ID")
-    lifeCodeIds: List[int] = Field(..., min_items=1, description="生命码ID数组")
-    agentId: Optional[int] = Field(None, description="代理商ID")
+    lifeCodeIds: list[int] = Field(..., min_items=1, description="生命码ID数组")
+    agentId: int | None = Field(None, description="代理商ID")
 
 
 class GenerateLifeRequest(PydBaseModel):
@@ -93,24 +92,24 @@ class BindLifeRequest(PydBaseModel):
 class ActivateRequest(PydBaseModel):
     lifeCode: str = Field(..., description="生命码")
     userId: int = Field(..., description="激活用户ID")
-    userPhone: Optional[str] = Field(None, description="手机号")
-    userName: Optional[str] = Field(None, description="持有人姓名")
-    longitude: Optional[float] = Field(None, description="经度")
-    latitude: Optional[float] = Field(None, description="纬度")
-    province: Optional[str] = Field(None, description="省")
-    city: Optional[str] = Field(None, description="市")
-    district: Optional[str] = Field(None, description="区")
+    userPhone: str | None = Field(None, description="手机号")
+    userName: str | None = Field(None, description="持有人姓名")
+    longitude: float | None = Field(None, description="经度")
+    latitude: float | None = Field(None, description="纬度")
+    province: str | None = Field(None, description="省")
+    city: str | None = Field(None, description="市")
+    district: str | None = Field(None, description="区")
     purchaseChannel: str = Field("online", description="购买渠道")
     purchasePrice: float = Field(0, description="购买价格")
 
 
 class ScanTraceRequest(PydBaseModel):
     code: str = Field(..., description="箱码/生命码")
-    userId: Optional[int] = Field(None, description="扫码人ID")
-    longitude: Optional[float] = Field(None, description="经度")
-    latitude: Optional[float] = Field(None, description="纬度")
-    province: Optional[str] = Field(None, description="省")
-    city: Optional[str] = Field(None, description="市")
+    userId: int | None = Field(None, description="扫码人ID")
+    longitude: float | None = Field(None, description="经度")
+    latitude: float | None = Field(None, description="纬度")
+    province: str | None = Field(None, description="省")
+    city: str | None = Field(None, description="市")
     scanType: str = Field(SCAN_TYPE_QUERY, description="扫码类型")
 
 
@@ -118,20 +117,20 @@ class AntiChannelRequest(PydBaseModel):
     lifeCode: str = Field(..., description="生命码")
     longitude: float = Field(..., description="经度")
     latitude: float = Field(..., description="纬度")
-    province: Optional[str] = Field(None, description="省")
-    city: Optional[str] = Field(None, description="市")
+    province: str | None = Field(None, description="省")
+    city: str | None = Field(None, description="市")
 
 
 class TransferRequest(PydBaseModel):
     lifeCode: str = Field(..., description="生命码")
     fromUserId: int = Field(..., description="转让人ID")
     toUserId: int = Field(..., description="受让人ID")
-    toName: Optional[str] = Field(None, description="受让人姓名")
+    toName: str | None = Field(None, description="受让人姓名")
     transferType: str = Field("gift", description="转让类型(gift/trade/inherit)")
-    longitude: Optional[float] = Field(None, description="经度")
-    latitude: Optional[float] = Field(None, description="纬度")
-    province: Optional[str] = Field(None, description="省")
-    city: Optional[str] = Field(None, description="市")
+    longitude: float | None = Field(None, description="经度")
+    latitude: float | None = Field(None, description="纬度")
+    province: str | None = Field(None, description="省")
+    city: str | None = Field(None, description="市")
 
 
 # ============================================================

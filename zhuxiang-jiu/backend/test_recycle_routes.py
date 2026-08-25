@@ -323,7 +323,7 @@ class TestExchange:
                f"expected diff<0/points>0, got {result['priceDiff']}/{result['pointsConverted']}")
 
         # test 22: 差额转积分正确(250元 × 10 = 2500竹叶)
-        expected_points = int(250 * 10)
+        expected_points = 250 * 10
         record("test_22_points_conversion",
                result["pointsConverted"] == expected_points,
                f"expected {expected_points}, got {result['pointsConverted']}")

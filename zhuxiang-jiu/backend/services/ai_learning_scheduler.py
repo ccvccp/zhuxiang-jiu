@@ -74,7 +74,7 @@ async def run_scheduled_learning() -> dict:
         except ValueError:
             # 反馈数在读取与学习之间被并发消费 → 本轮跳过, 下轮再学
             continue
-        except Exception as exc:  # noqa: BLE001 - 单评分器失败不阻塞调度
+        except Exception as exc:
             logger.warning("调度学习失败(scorer=%s): %s", scorer_id, exc)
 
     stats = await repo.get_scheduler_stats() or {"runs": 0}
@@ -97,7 +97,7 @@ async def _scheduler_loop() -> None:
         await asyncio.sleep(interval)
         try:
             await run_scheduled_learning()
-        except Exception as exc:  # noqa: BLE001 - 循环永不退出
+        except Exception as exc:
             logger.warning("调度扫描异常(继续运行): %s", exc)
 
 

@@ -20,8 +20,7 @@ v7.6 的领域挂钩为「零侵入」全部使用硬编码中性输入(如 bamb
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +38,14 @@ _NEUTRAL = {
 }
 
 
-def _parse_iso(value) -> Optional[datetime]:
+def _parse_iso(value) -> datetime | None:
     """ISO 时间字符串解析(失败返回 None)"""
     if not value or not isinstance(value, str):
         return None
     try:
         dt = datetime.fromisoformat(value)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except ValueError:
         return None
@@ -57,7 +56,7 @@ def _hours_since(created) -> float:
     dt = _parse_iso(created)
     if dt is None:
         return _NEUTRAL["registerHours"]
-    return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds() / 3600)
+    return max(0.0, (datetime.now(UTC) - dt).total_seconds() / 3600)
 
 
 def _days_since(created) -> float:
@@ -65,7 +64,7 @@ def _days_since(created) -> float:
     dt = _parse_iso(created)
     if dt is None:
         return _NEUTRAL["accountAgeDays"]
-    return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds() / 86400)
+    return max(0.0, (datetime.now(UTC) - dt).total_seconds() / 86400)
 
 
 def _normalize_uid(member_id):
@@ -80,7 +79,7 @@ async def _safe(coro_factory, *, fallback=None, label: str = ""):
     """安全执行异步查询: 失败返回 fallback + 日志(火后不管)"""
     try:
         return await coro_factory()
-    except Exception as exc:  # noqa: BLE001 - 富化失败不影响业务
+    except Exception as exc:
         logger.warning("输入富化查询失败(%s): %s", label or "unknown", exc)
         return fallback
 
@@ -90,7 +89,7 @@ async def _safe(coro_factory, *, fallback=None, label: str = ""):
 # ============================================================
 
 async def enrich_order_risk(member_id, items: list,
-                            address: Optional[dict] = None,
+                            address: dict | None = None,
                             remark: str = "") -> dict:
     """订单风控评分输入: 会员信用画像 + 历史交易行为 + 本单要素
 
@@ -107,7 +106,7 @@ async def enrich_order_risk(member_id, items: list,
         for i in (items or [])), 2)
     ctx["totalQuantity"] = sum(int(i.get("quantity") or 1) for i in (items or []))
     ctx["remark"] = str(remark or "")
-    ctx["orderHour"] = datetime.now(timezone.utc).hour
+    ctx["orderHour"] = datetime.now(UTC).hour
 
     # 地址完整性: 关键字段全部非空才算完整(缺省中性=完整)
     if isinstance(address, dict) and address:
@@ -187,7 +186,7 @@ async def enrich_withdraw_risk(member_id, amount: float,
     result = await _safe(_withdrawals, fallback=None, label="withdrawals")
     if result is not None:
         all_wd, rejected = result
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ctx["monthlyWithdrawCount"] = sum(
             1 for w in all_wd
             if (dt := _parse_iso(w.get("createdAt")))
@@ -243,7 +242,7 @@ async def enrich_points_risk(member_id, points_now: float) -> dict:
         from repositories.points_repository import PointsRepository
         logs = await PointsRepository().list_logs(
             _normalize_uid(member_id), limit=_LIST_ALL) or []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return sum(float(l.get("points") or 0)
                    for l in logs
                    if float(l.get("points") or 0) > 0

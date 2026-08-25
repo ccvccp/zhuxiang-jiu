@@ -12,7 +12,6 @@
 
 import logging
 import secrets
-from typing import Optional
 
 from core.locks import get_lock
 from repositories.promotion_repository import (
@@ -21,6 +20,7 @@ from repositories.promotion_repository import (
 from repositories.member_repository import MemberRepository
 from repositories.product_repository import ProductRepository
 from services.wallet_service import WalletService
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -384,7 +384,7 @@ class PromotionService:
                 result.append(self._brief_product(p))
         return result
 
-    async def _get_eligible_product(self, product_id: str) -> Optional[dict]:
+    async def _get_eligible_product(self, product_id: str) -> dict | None:
         """校验产品在活动池且价格达标, 返回产品或 None"""
         settings = await self.promo_repo.get_settings()
         min_price = float(settings.get("wineMinPrice", 200))
@@ -612,5 +612,5 @@ class PromotionService:
 
     @staticmethod
     def _now() -> str:
-        from datetime import datetime, timezone
-        return datetime.now(timezone.utc).isoformat()
+        from datetime import datetime
+        return datetime.now(UTC).isoformat()

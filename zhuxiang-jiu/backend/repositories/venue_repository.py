@@ -13,7 +13,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -124,7 +123,7 @@ class VenueRepository:
     # 合作商 CRUD
     # ============================================================
 
-    async def get_partner(self, partner_id: int) -> Optional[dict]:
+    async def get_partner(self, partner_id: int) -> dict | None:
         """按ID查询合作商"""
         if is_redis_mode():
             return await self._redis_get_partner(partner_id)
@@ -171,7 +170,7 @@ class VenueRepository:
     # 场地 CRUD
     # ============================================================
 
-    async def get_venue(self, venue_id: int) -> Optional[dict]:
+    async def get_venue(self, venue_id: int) -> dict | None:
         """按ID查询场地"""
         if is_redis_mode():
             return await self._redis_get_venue(venue_id)
@@ -201,7 +200,7 @@ class VenueRepository:
     # 铺货记录 CRUD
     # ============================================================
 
-    async def get_stocking(self, stocking_id: int) -> Optional[dict]:
+    async def get_stocking(self, stocking_id: int) -> dict | None:
         """按ID查询铺货记录"""
         if is_redis_mode():
             return await self._redis_get_stocking(stocking_id)
@@ -259,7 +258,7 @@ class VenueRepository:
 
     # --- 合作商 ---
 
-    def _mem_get_partner(self, partner_id: int) -> Optional[dict]:
+    def _mem_get_partner(self, partner_id: int) -> dict | None:
         self._ensure_store()
         return self.store["venue_partners"].get(partner_id)
 
@@ -326,7 +325,7 @@ class VenueRepository:
 
     # --- 场地 ---
 
-    def _mem_get_venue(self, venue_id: int) -> Optional[dict]:
+    def _mem_get_venue(self, venue_id: int) -> dict | None:
         self._ensure_store()
         return self.store["venues"].get(venue_id)
 
@@ -371,7 +370,7 @@ class VenueRepository:
 
     # --- 铺货记录 ---
 
-    def _mem_get_stocking(self, stocking_id: int) -> Optional[dict]:
+    def _mem_get_stocking(self, stocking_id: int) -> dict | None:
         self._ensure_store()
         return self.store["venue_stockings"].get(stocking_id)
 
@@ -462,7 +461,7 @@ class VenueRepository:
 
     # --- 合作商 ---
 
-    async def _redis_get_partner(self, partner_id: int) -> Optional[dict]:
+    async def _redis_get_partner(self, partner_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("venue", "partner", partner_id))
         if not data:
@@ -546,7 +545,7 @@ class VenueRepository:
 
     # --- 场地 ---
 
-    async def _redis_get_venue(self, venue_id: int) -> Optional[dict]:
+    async def _redis_get_venue(self, venue_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("venue", "venue", venue_id))
         if not data:
@@ -600,7 +599,7 @@ class VenueRepository:
 
     # --- 铺货记录 ---
 
-    async def _redis_get_stocking(self, stocking_id: int) -> Optional[dict]:
+    async def _redis_get_stocking(self, stocking_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("venue", "stocking", stocking_id))
         if not data:

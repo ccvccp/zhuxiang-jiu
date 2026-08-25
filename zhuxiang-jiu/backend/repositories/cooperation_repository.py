@@ -13,7 +13,6 @@
 """
 
 import json
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -104,7 +103,7 @@ class CooperationRepository:
     # 合作方 CRUD
     # ============================================================
 
-    async def get_partner(self, partner_id: int) -> Optional[dict]:
+    async def get_partner(self, partner_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_partner(partner_id)
         return self._mem_get_partner(partner_id)
@@ -121,7 +120,7 @@ class CooperationRepository:
             return await self._redis_list_partners(status, level, limit)
         return self._mem_list_partners(status, level, limit)
 
-    async def find_partner_by_name(self, name: str) -> Optional[dict]:
+    async def find_partner_by_name(self, name: str) -> dict | None:
         """按名称查找合作方(去重)"""
         partners = await self.list_partners(limit=10000)
         for p in partners:
@@ -133,7 +132,7 @@ class CooperationRepository:
     # 合作申请 CRUD
     # ============================================================
 
-    async def get_application(self, application_id: int) -> Optional[dict]:
+    async def get_application(self, application_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_application(application_id)
         return self._mem_get_application(application_id)
@@ -155,7 +154,7 @@ class CooperationRepository:
     # 合作协议 CRUD
     # ============================================================
 
-    async def get_contract(self, contract_id: int) -> Optional[dict]:
+    async def get_contract(self, contract_id: int) -> dict | None:
         if is_redis_mode():
             return await self._redis_get_contract(contract_id)
         return self._mem_get_contract(contract_id)
@@ -191,7 +190,7 @@ class CooperationRepository:
 
     # --- 合作方 ---
 
-    def _mem_get_partner(self, partner_id: int) -> Optional[dict]:
+    def _mem_get_partner(self, partner_id: int) -> dict | None:
         self._ensure_store()
         return self.store["cooperation_partners"].get(partner_id)
 
@@ -212,7 +211,7 @@ class CooperationRepository:
 
     # --- 合作申请 ---
 
-    def _mem_get_application(self, application_id: int) -> Optional[dict]:
+    def _mem_get_application(self, application_id: int) -> dict | None:
         self._ensure_store()
         return self.store["cooperation_applications"].get(application_id)
 
@@ -234,7 +233,7 @@ class CooperationRepository:
 
     # --- 合作协议 ---
 
-    def _mem_get_contract(self, contract_id: int) -> Optional[dict]:
+    def _mem_get_contract(self, contract_id: int) -> dict | None:
         self._ensure_store()
         return self.store["cooperation_contracts"].get(contract_id)
 
@@ -260,7 +259,7 @@ class CooperationRepository:
 
     # --- 合作方 ---
 
-    async def _redis_get_partner(self, partner_id: int) -> Optional[dict]:
+    async def _redis_get_partner(self, partner_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("cooperation", "partner", partner_id))
         if not data:
@@ -291,7 +290,7 @@ class CooperationRepository:
 
     # --- 合作申请 ---
 
-    async def _redis_get_application(self, application_id: int) -> Optional[dict]:
+    async def _redis_get_application(self, application_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("cooperation", "application", application_id))
         if not data:
@@ -323,7 +322,7 @@ class CooperationRepository:
 
     # --- 合作协议 ---
 
-    async def _redis_get_contract(self, contract_id: int) -> Optional[dict]:
+    async def _redis_get_contract(self, contract_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("cooperation", "contract", contract_id))
         if not data:

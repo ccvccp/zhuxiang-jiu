@@ -19,10 +19,10 @@
 
 import json
 import logging
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 from repositories.inventory_repository import InventoryRepository
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -375,7 +375,7 @@ class ProductRepository:
 
     # ---------- 产品主表 ----------
 
-    async def get_by_id(self, product_id: str) -> Optional[dict]:
+    async def get_by_id(self, product_id: str) -> dict | None:
         """按 ID 查询产品(注入实时库存), 不存在返回 None"""
         if is_redis_mode():
             product = await self._redis_get_by_id(product_id)
@@ -561,7 +561,7 @@ class ProductRepository:
     # 评价扩展(P0): 单条查询/修改/删除/按订单查询
     # ============================================================
 
-    async def get_review(self, product_id: str, review_id: str) -> Optional[dict]:
+    async def get_review(self, product_id: str, review_id: str) -> dict | None:
         """查询单条评价(返回 None 表示不存在)"""
         if is_redis_mode():
             reviews = await self._redis_get_reviews(product_id)
@@ -573,7 +573,7 @@ class ProductRepository:
         return None
 
     async def update_review(self, product_id: str, review_id: str,
-                            fields: dict) -> Optional[dict]:
+                            fields: dict) -> dict | None:
         """更新评价字段(返回更新后的评价, None 表示不存在)
 
         注意: rating 变更时需调用方触发 _update_rating_stats
@@ -589,7 +589,7 @@ class ProductRepository:
         return self._mem_delete_review(product_id, review_id)
 
     async def get_review_by_order(self, order_id: str,
-                                  product_id: str = None) -> Optional[dict]:
+                                  product_id: str = None) -> dict | None:
         """按订单号查询评价(可选限定 product_id)
 
         Returns:
@@ -745,7 +745,7 @@ class ProductRepository:
             self._mem_create_report(report_id, report)
         return report
 
-    async def get_report(self, report_id: str) -> Optional[dict]:
+    async def get_report(self, report_id: str) -> dict | None:
         """查询单条举报"""
         if is_redis_mode():
             return await self._redis_get_report(report_id)
@@ -758,14 +758,14 @@ class ProductRepository:
             return await self._redis_list_reports(status, limit)
         return self._mem_list_reports(status, limit)
 
-    async def update_report(self, report_id: str, fields: dict) -> Optional[dict]:
+    async def update_report(self, report_id: str, fields: dict) -> dict | None:
         """更新举报字段"""
         if is_redis_mode():
             return await self._redis_update_report(report_id, fields)
         return self._mem_update_report(report_id, fields)
 
     async def get_report_by_review_reporter(self, review_id: str,
-                                            reporter_id: str) -> Optional[dict]:
+                                            reporter_id: str) -> dict | None:
         """查询用户是否已举报某评价(防重复举报)"""
         if is_redis_mode():
             return await self._redis_get_report_by_review_reporter(
@@ -842,7 +842,7 @@ class ProductRepository:
         if "review_reports" not in self.store:
             self.store["review_reports"] = {}
 
-    def _mem_get_by_id(self, product_id: str) -> Optional[dict]:
+    def _mem_get_by_id(self, product_id: str) -> dict | None:
         self._ensure_store()
         return self.store["products"].get(product_id)
 
@@ -878,7 +878,7 @@ class ProductRepository:
     # ---------- 评价扩展(内存) ----------
 
     def _mem_update_review(self, product_id: str, review_id: str,
-                           fields: dict) -> Optional[dict]:
+                           fields: dict) -> dict | None:
         """更新评价字段(内存模式)"""
         self._ensure_store()
         reviews = self.store["product_reviews"].get(product_id, [])
@@ -972,7 +972,7 @@ class ProductRepository:
         self._ensure_store()
         self.store["review_reports"][report_id] = report
 
-    def _mem_get_report(self, report_id: str) -> Optional[dict]:
+    def _mem_get_report(self, report_id: str) -> dict | None:
         """查询举报(内存模式)"""
         self._ensure_store()
         return self.store["review_reports"].get(report_id)
@@ -988,7 +988,7 @@ class ProductRepository:
         return reports[:limit]
 
     def _mem_update_report(self, report_id: str,
-                           fields: dict) -> Optional[dict]:
+                           fields: dict) -> dict | None:
         """更新举报(内存模式)"""
         self._ensure_store()
         report = self.store["review_reports"].get(report_id)
@@ -998,7 +998,7 @@ class ProductRepository:
         return report
 
     def _mem_get_report_by_review_reporter(self, review_id: str,
-                                            reporter_id: str) -> Optional[dict]:
+                                            reporter_id: str) -> dict | None:
         """查询用户是否已举报某评价(内存模式)"""
         self._ensure_store()
         for r in self.store["review_reports"].values():
@@ -1010,7 +1010,7 @@ class ProductRepository:
     # Redis 后端
     # ============================================================
 
-    async def _redis_get_by_id(self, product_id: str) -> Optional[dict]:
+    async def _redis_get_by_id(self, product_id: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("product", product_id))
         if not data:
@@ -1078,7 +1078,7 @@ class ProductRepository:
     # ---------- 评价扩展(Redis) ----------
 
     async def _redis_update_review(self, product_id: str, review_id: str,
-                                   fields: dict) -> Optional[dict]:
+                                   fields: dict) -> dict | None:
         """更新评价字段(Redis 模式, List 需读取→修改→写回)"""
         client = await get_redis_client()
         key = _k("product", "reviews", product_id)
@@ -1204,7 +1204,7 @@ class ProductRepository:
         await client.set(_k("product", "review", "report", report_id),
                         json.dumps(report, ensure_ascii=False))
 
-    async def _redis_get_report(self, report_id: str) -> Optional[dict]:
+    async def _redis_get_report(self, report_id: str) -> dict | None:
         """查询举报(Redis 模式)"""
         client = await get_redis_client()
         raw = await client.get(_k("product", "review", "report", report_id))
@@ -1236,7 +1236,7 @@ class ProductRepository:
         return reports[:limit]
 
     async def _redis_update_report(self, report_id: str,
-                                  fields: dict) -> Optional[dict]:
+                                  fields: dict) -> dict | None:
         """更新举报(Redis 模式, 读取→修改→写回)"""
         client = await get_redis_client()
         key = _k("product", "review", "report", report_id)
@@ -1252,7 +1252,7 @@ class ProductRepository:
         return report
 
     async def _redis_get_report_by_review_reporter(self, review_id: str,
-                                                   reporter_id: str) -> Optional[dict]:
+                                                   reporter_id: str) -> dict | None:
         """查询用户是否已举报某评价(Redis 模式, 遍历 report:* 键)"""
         client = await get_redis_client()
         keys = await client.keys(_k("product", "review", "report", "*"))
@@ -1331,5 +1331,5 @@ class ProductRepository:
 
 def _now_iso() -> str:
     """ISO8601 UTC 时间戳"""
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    return datetime.now(UTC).isoformat()

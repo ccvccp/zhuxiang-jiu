@@ -18,7 +18,7 @@
       声明在参数化路径 /api/agent/{agentId} 之前, 避免被参数路由吞掉。
 """
 
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -47,9 +47,9 @@ class AgentAuditRequest(PydBaseModel):
 
 
 class AgentUpdateRequest(PydBaseModel):
-    contactName: Optional[str] = None
-    contactPhone: Optional[str] = None
-    address: Optional[str] = None
+    contactName: str | None = None
+    contactPhone: str | None = None
+    address: str | None = None
     class Config:
         extra = "allow"
 
@@ -60,12 +60,12 @@ class PurchaseItem(PydBaseModel):
 
 
 class AgentPurchaseRequest(PydBaseModel):
-    items: List[PurchaseItem] = Field(..., min_length=1)
+    items: list[PurchaseItem] = Field(..., min_length=1)
 
 
 class RebateCalcRequest(PydBaseModel):
     purchaseAmount: float = Field(..., ge=0, description="月度进货额(元)")
-    period: Optional[str] = Field(None, description="账期 YYYY-MM, 默认当前月")
+    period: str | None = Field(None, description="账期 YYYY-MM, 默认当前月")
 
 
 class RebateWithdrawRequest(PydBaseModel):
@@ -134,7 +134,7 @@ async def agent_apply(req: AgentApplyRequest):
 async def agent_audit(
     apply_id: int,
     req: AgentAuditRequest,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """审核申请(admin; 通过则创建代理商档案, 拒绝则记录备注)"""
     _require_admin(x_role)
@@ -148,9 +148,9 @@ async def agent_audit(
 
 @router.get("/api/agent/applications", tags=["代理商服务"])
 async def agent_applications(
-    status: Optional[str] = Query(default=None,
+    status: str | None = Query(default=None,
         description="状态筛选 pending/approved/rejected"),
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """申请列表(admin, 支持状态筛选)"""
     _require_admin(x_role)
@@ -169,8 +169,8 @@ async def agent_levels():
 
 @router.get("/api/agent/list", tags=["代理商服务"])
 async def agent_list(
-    level: Optional[str] = Query(default=None, description="等级筛选 S/A/B/C/D"),
-    status: Optional[str] = Query(default=None,
+    level: str | None = Query(default=None, description="等级筛选 S/A/B/C/D"),
+    status: str | None = Query(default=None,
         description="状态筛选 active/suspended/terminated"),
     page: int = Query(1, ge=1, description="页码(从 1 起)"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
@@ -188,7 +188,7 @@ async def agent_rebate_tiers():
 
 @router.get("/api/agent/risk/alerts", tags=["代理商服务"])
 async def agent_risk_alerts(
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """窜货预警列表(admin, 跨区域销售检测)"""
     _require_admin(x_role)
@@ -208,7 +208,7 @@ async def agent_detail(agent_id: int):
 async def agent_update(
     agent_id: int,
     req: AgentUpdateRequest,
-    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+    x_agent_id: Annotated[str | None, Header(alias="X-Agent-Id")] = None,
 ):
     """更新代理商资料(联系人/电话/地址; 需 X-Agent-Id 自身)"""
     requester = _require_agent_id(x_agent_id)
@@ -235,7 +235,7 @@ async def agent_update(
 async def agent_purchase(
     agent_id: int,
     req: AgentPurchaseRequest,
-    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+    x_agent_id: Annotated[str | None, Header(alias="X-Agent-Id")] = None,
 ):
     """进货下单(关联产品+库存, 扣减代理商钱包; 需 X-Agent-Id 自身)"""
     requester = _require_agent_id(x_agent_id)
@@ -255,7 +255,7 @@ async def agent_purchases(
     agent_id: int,
     page: int = Query(1, ge=1, description="页码(从 1 起)"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
-    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+    x_agent_id: Annotated[str | None, Header(alias="X-Agent-Id")] = None,
 ):
     """进货记录(分页; 需 X-Agent-Id 自身)"""
     requester = _require_agent_id(x_agent_id)
@@ -271,7 +271,7 @@ async def agent_purchases(
 async def agent_purchase_detail(
     agent_id: int,
     purchase_id: str,
-    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+    x_agent_id: Annotated[str | None, Header(alias="X-Agent-Id")] = None,
 ):
     """进货明细(需 X-Agent-Id 自身; 越权访问返回 404)"""
     requester = _require_agent_id(x_agent_id)
@@ -291,7 +291,7 @@ async def agent_purchase_detail(
 async def agent_rebate_calc(
     agent_id: int,
     req: RebateCalcRequest,
-    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+    x_agent_id: Annotated[str | None, Header(alias="X-Agent-Id")] = None,
 ):
     """返利计算(超额累进制, 基于月度进货额; 需 X-Agent-Id 自身)
 
@@ -314,9 +314,9 @@ async def agent_rebates(
     agent_id: int,
     page: int = Query(1, ge=1, description="页码(从 1 起)"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
-    status: Optional[str] = Query(default=None,
+    status: str | None = Query(default=None,
         description="状态筛选 pending/withdrawn"),
-    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+    x_agent_id: Annotated[str | None, Header(alias="X-Agent-Id")] = None,
 ):
     """返利记录列表(分页; 需 X-Agent-Id 自身)"""
     requester = _require_agent_id(x_agent_id)
@@ -333,7 +333,7 @@ async def agent_rebates(
 async def agent_rebate_withdraw(
     agent_id: int,
     req: RebateWithdrawRequest,
-    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+    x_agent_id: Annotated[str | None, Header(alias="X-Agent-Id")] = None,
 ):
     """返利提现(转入钱包; 需 X-Agent-Id 自身)"""
     requester = _require_agent_id(x_agent_id)
@@ -350,7 +350,7 @@ async def agent_rebate_withdraw(
 @router.get("/api/agent/{agent_id}/rebate/summary", tags=["代理商服务"])
 async def agent_rebate_summary(
     agent_id: int,
-    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+    x_agent_id: Annotated[str | None, Header(alias="X-Agent-Id")] = None,
 ):
     """返利汇总(本年累计/本月/可提现; 需 X-Agent-Id 自身)"""
     requester = _require_agent_id(x_agent_id)
@@ -369,7 +369,7 @@ async def agent_rebate_summary(
 @router.get("/api/agent/{agent_id}/risk/report", tags=["代理商服务"])
 async def agent_risk_report(
     agent_id: int,
-    x_agent_id: Annotated[Optional[str], Header(alias="X-Agent-Id")] = None,
+    x_agent_id: Annotated[str | None, Header(alias="X-Agent-Id")] = None,
 ):
     """风控报告(信用评分 + 异常指标; 需 X-Agent-Id 自身)"""
     requester = _require_agent_id(x_agent_id)
@@ -384,7 +384,7 @@ async def agent_risk_report(
 @router.post("/api/agent/{agent_id}/risk/assess", tags=["代理商服务"])
 async def agent_risk_assess(
     agent_id: int,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """信用评级(基于进货/退货/付款记录; admin)"""
     _require_admin(x_role)

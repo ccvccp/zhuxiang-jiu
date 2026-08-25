@@ -23,7 +23,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
@@ -69,7 +69,7 @@ async def _mk_user(days_old: float, balance: float,
     withdrawals: [(status, minutes_ago), ...]
     返回: 会员ID(int, 对齐路由 _require_member_id 返回类型)
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _phone_seq[0] += 1
     member = await MemberRepository().create({
         "phone": f"1380000{_phone_seq[0]}", "password": "x",

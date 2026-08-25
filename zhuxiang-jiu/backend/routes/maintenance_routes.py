@@ -14,7 +14,7 @@
 路由顺序: 静态路径优先于动态路径注册。
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -34,7 +34,7 @@ _service = MaintenanceService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -61,14 +61,14 @@ class TaskCreateRequest(PydBaseModel):
     taskType: str = Field(..., description="任务类型(backup/cleanup/optimize/inspect/restart/scale)")
     target: str = Field(..., description="维护目标")
     triggerType: str = Field(TRIGGER_MANUAL, description="触发类型(manual/scheduled)")
-    params: Dict[str, Any] = Field(default_factory=dict, description="任务参数")
+    params: dict[str, Any] = Field(default_factory=dict, description="任务参数")
     schedule: str = Field("", description="调度表达式")
     aiAutomationRate: float = Field(90.0, description="AI自动化率")
 
 
 class TaskUpdateRequest(PydBaseModel):
     action: str = Field(..., description="动作(execute/cancel)")
-    result: Dict[str, Any] = Field(default_factory=dict, description="执行结果")
+    result: dict[str, Any] = Field(default_factory=dict, description="执行结果")
     errorMessage: str = Field("", description="错误信息")
 
 
@@ -76,9 +76,9 @@ class HealthCheckRequest(PydBaseModel):
     checkName: str = Field(..., description="检查项名称")
     serviceName: str = Field(..., description="服务名称")
     checkType: str = Field(..., description="检查类型(http/tcp/resource/custom)")
-    checkConfig: Dict[str, Any] = Field(default_factory=dict, description="检查配置")
-    threshold: Dict[str, Any] = Field(default_factory=dict, description="阈值配置")
-    healthStatus: Optional[str] = Field(None, description="健康状态(执行时指定)")
+    checkConfig: dict[str, Any] = Field(default_factory=dict, description="检查配置")
+    threshold: dict[str, Any] = Field(default_factory=dict, description="阈值配置")
+    healthStatus: str | None = Field(None, description="健康状态(执行时指定)")
     responseTime: int = Field(0, description="响应时间(毫秒)")
 
 
@@ -94,8 +94,8 @@ class OptimizationRequest(PydBaseModel):
     optimizationType: str = Field(..., description="优化类型")
     target: str = Field(..., description="优化目标")
     proposal: str = Field(..., description="优化建议")
-    expectedBenefit: Dict[str, Any] = Field(default_factory=dict, description="预期收益")
-    executionPlan: Dict[str, Any] = Field(default_factory=dict, description="执行计划")
+    expectedBenefit: dict[str, Any] = Field(default_factory=dict, description="预期收益")
+    executionPlan: dict[str, Any] = Field(default_factory=dict, description="执行计划")
     aiAutomationRate: float = Field(85.0, description="AI自动化率")
 
 

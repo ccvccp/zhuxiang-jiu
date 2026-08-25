@@ -20,7 +20,7 @@
     - 奖品履约(2):  ship-reward / sign-reward
 """
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -50,7 +50,7 @@ _service = WalletService()
 # 鉴权与异常映射辅助(对齐 member/finance 风格)
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> int:
+def _require_member_id(x_member_id: str | None) -> int:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
@@ -60,7 +60,7 @@ def _require_member_id(x_member_id: Optional[str]) -> int:
         raise HTTPException(status_code=401, detail="X-Member-Id 格式不正确")
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -138,7 +138,7 @@ class ShipRewardRequest(PydBaseModel):
 
 @router.post("/api/wallet/open", tags=["钱包盈利"])
 async def wallet_open(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """开通钱包(前置: 会员等级 ≥ L2, 成长值 ≥ 500)"""
     member_id = _require_member_id(x_member_id)
@@ -152,7 +152,7 @@ async def wallet_open(
 
 @router.get("/api/wallet/info", tags=["钱包盈利"])
 async def wallet_info(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """钱包首页(余额 + 资产 + 累计收益 + 待领奖品数)"""
     member_id = _require_member_id(x_member_id)
@@ -169,7 +169,7 @@ async def wallet_info(
 @router.post("/api/wallet/deposit", tags=["钱包盈利"])
 async def wallet_deposit(
     req: DepositRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """充值(资金进入活期钱包, 最低 ¥100)"""
     member_id = _require_member_id(x_member_id)
@@ -184,7 +184,7 @@ async def wallet_deposit(
 @router.post("/api/wallet/withdraw", tags=["钱包盈利"])
 async def wallet_withdraw(
     req: WithdrawRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """提现申请(< ¥5000 自动通过; ¥5000-¥50000 一级审核; > ¥50000 二级审核)
 
@@ -210,7 +210,7 @@ async def wallet_withdraw(
 @router.get("/api/wallet/withdrawal/{withdraw_no}", tags=["钱包盈利"])
 async def withdrawal_detail(
     withdraw_no: str,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """提现单详情(仅可查询本人提现单)"""
     member_id = _require_member_id(x_member_id)
@@ -227,7 +227,7 @@ async def withdrawal_detail(
 @router.get("/api/wallet/withdrawals/pending", tags=["钱包盈利"])
 async def pending_withdrawals(
     limit: int = Query(100, ge=1, le=500, description="返回条数上限"),
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """待审核提现列表(admin, 审批工作台)"""
     _require_admin(x_role)
@@ -242,7 +242,7 @@ async def pending_withdrawals(
 async def approve_withdrawal(
     withdraw_no: str,
     req: ApproveWithdrawalRequest,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """审核提现单(admin; approved 等待打款, rejected 释放冻结)"""
     _require_admin(x_role)
@@ -263,7 +263,7 @@ async def approve_withdrawal(
 @router.post("/api/wallet/withdrawal/{withdraw_no}/paid", tags=["钱包盈利"])
 async def mark_withdrawal_paid(
     withdraw_no: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """标记提现已打款(admin; 释放冻结, 累计提现累加)"""
     _require_admin(x_role)
@@ -282,7 +282,7 @@ async def mark_withdrawal_paid(
 @router.post("/api/wallet/pay", tags=["钱包盈利"])
 async def wallet_pay(
     req: PayRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """钱包消费支付(扣减余额 + 1% 返利即时入账, 单笔返利上限 ¥100)"""
     member_id = _require_member_id(x_member_id)
@@ -297,7 +297,7 @@ async def wallet_pay(
 @router.post("/api/wallet/refund", tags=["钱包盈利"])
 async def wallet_refund(
     req: RefundRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """订单退款(资金退回钱包余额)"""
     member_id = _require_member_id(x_member_id)
@@ -311,12 +311,12 @@ async def wallet_refund(
 
 @router.get("/api/wallet/transactions", tags=["钱包盈利"])
 async def wallet_transactions(
-    type: Optional[str] = Query(
+    type: str | None = Query(
         default=None,
         description="交易类型筛选: deposit/withdraw/consume/refund/interest/rebate/transfer_regular",
     ),
     limit: int = Query(50, ge=1, le=500, description="返回条数上限"),
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """交易明细(可按类型筛选, 默认最新 50 条)"""
     member_id = _require_member_id(x_member_id)
@@ -332,7 +332,7 @@ async def wallet_transactions(
 
 @router.get("/api/wallet/interest/daily", tags=["钱包盈利"])
 async def daily_interest(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """当日活期营销补贴预估(年化 3%, 日计补贴 = balance × 3% / 365)"""
     member_id = _require_member_id(x_member_id)
@@ -344,7 +344,7 @@ async def daily_interest(
 
 @router.post("/api/wallet/interest/settle-monthly", tags=["钱包盈利"])
 async def settle_monthly_interest(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """月度营销补贴入账(将 pending_interest 入账到 balance)"""
     member_id = _require_member_id(x_member_id)
@@ -406,7 +406,7 @@ async def interest_rules():
 @router.post("/api/wallet/transfer-regular", tags=["钱包盈利"])
 async def transfer_to_regular(
     req: TransferRegularRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """活期转定期(扣减余额 + 创建定期记录 + LPR 合规校验)"""
     member_id = _require_member_id(x_member_id)
@@ -420,12 +420,12 @@ async def transfer_to_regular(
 
 @router.get("/api/wallet/deposits", tags=["钱包盈利"])
 async def list_deposits(
-    status: Optional[str] = Query(
+    status: str | None = Query(
         default=None,
         description="状态筛选: active/matured/settled/early_settled",
     ),
     limit: int = Query(50, ge=1, le=500, description="返回条数上限"),
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """用户定期列表(可按状态筛选)"""
     member_id = _require_member_id(x_member_id)
@@ -438,7 +438,7 @@ async def list_deposits(
 @router.post("/api/wallet/deposit/{deposit_no}/settle", tags=["钱包盈利"])
 async def settle_deposit(
     deposit_no: str,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """定期到期取出(本金 + 营销补贴入账, 奖品转可领取)"""
     member_id = _require_member_id(x_member_id)
@@ -453,7 +453,7 @@ async def settle_deposit(
 @router.post("/api/wallet/deposit/{deposit_no}/early-settle", tags=["钱包盈利"])
 async def early_settle_deposit(
     deposit_no: str,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """定期提前取出(收 1% 手续费, 损失营销补贴 + 奖品)"""
     member_id = _require_member_id(x_member_id)
@@ -471,12 +471,12 @@ async def early_settle_deposit(
 
 @router.get("/api/wallet/rewards", tags=["钱包盈利"])
 async def list_rewards(
-    status: Optional[str] = Query(
+    status: str | None = Query(
         default=None,
         description="状态筛选: claimable/claimed/shipped/signed/expired",
     ),
     limit: int = Query(50, ge=1, le=500, description="返回条数上限"),
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """用户奖品列表(可按状态筛选)"""
     member_id = _require_member_id(x_member_id)
@@ -490,7 +490,7 @@ async def list_rewards(
 async def claim_reward(
     reward_no: str,
     req: ClaimRewardRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """领取奖品(状态: claimable → claimed, 等待发货)"""
     member_id = _require_member_id(x_member_id)
@@ -510,7 +510,7 @@ async def claim_reward(
 async def ship_reward(
     reward_no: str,
     req: ShipRewardRequest,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """奖品发货(admin; 状态: claimed → shipped)"""
     _require_admin(x_role)
@@ -525,7 +525,7 @@ async def ship_reward(
 @router.post("/api/wallet/reward/{reward_no}/sign", tags=["钱包盈利"])
 async def sign_reward(
     reward_no: str,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """奖品签收(状态: shipped → signed)"""
     _require_member_id(x_member_id)

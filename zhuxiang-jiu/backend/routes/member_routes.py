@@ -25,7 +25,7 @@
     ValueError → 409(业务冲突: 手机号已注册/密码错误/积分不足等)
 """
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel as PydBaseModel, Field
@@ -47,7 +47,7 @@ class _GenericRequest(PydBaseModel):
 class RegisterRequest(PydBaseModel):
     phone: str = Field(..., description="手机号(11 位)")
     password: str = Field(..., min_length=6, description="密码(至少 6 位)")
-    nickname: Optional[str] = Field(None, description="昵称(可选)")
+    nickname: str | None = Field(None, description="昵称(可选)")
     reg_source: str = Field("phone", description="注册来源")
 
 
@@ -57,9 +57,9 @@ class LoginRequest(PydBaseModel):
 
 
 class ProfileUpdateRequest(PydBaseModel):
-    nickname: Optional[str] = None
-    avatar: Optional[str] = None
-    gender: Optional[int] = Field(None, ge=0, le=2)
+    nickname: str | None = None
+    avatar: str | None = None
+    gender: int | None = Field(None, ge=0, le=2)
     class Config:
         extra = "allow"
 
@@ -92,13 +92,13 @@ class AddressRequest(PydBaseModel):
 
 
 class AddressUpdateRequest(PydBaseModel):
-    name: Optional[str] = None
-    phone: Optional[str] = None
-    province: Optional[str] = None
-    city: Optional[str] = None
-    district: Optional[str] = None
-    detail: Optional[str] = None
-    is_default: Optional[int] = Field(None, ge=0, le=1)
+    name: str | None = None
+    phone: str | None = None
+    province: str | None = None
+    city: str | None = None
+    district: str | None = None
+    detail: str | None = None
+    is_default: int | None = Field(None, ge=0, le=1)
     class Config:
         extra = "allow"
 
@@ -125,7 +125,7 @@ def _map_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc))
 
 
-def _require_member_id(x_member_id: Optional[str]) -> int:
+def _require_member_id(x_member_id: str | None) -> int:
     """从 X-Member-Id 头提取会员ID,缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
@@ -163,7 +163,7 @@ async def member_login(req: LoginRequest):
 
 @router.post("/api/member/login/bonus", tags=["会员服务"])
 async def member_login_bonus(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """每日登录奖励(+5 积分)"""
     member_id = _require_member_id(x_member_id)
@@ -179,7 +179,7 @@ async def member_login_bonus(
 
 @router.get("/api/member/profile", tags=["会员服务"])
 async def get_profile(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """获取个人信息(脱敏,不返回密码)"""
     member_id = _require_member_id(x_member_id)
@@ -192,7 +192,7 @@ async def get_profile(
 @router.put("/api/member/profile", tags=["会员服务"])
 async def update_profile(
     req: ProfileUpdateRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """修改个人信息(允许: nickname/avatar/gender)"""
     member_id = _require_member_id(x_member_id)
@@ -207,7 +207,7 @@ async def update_profile(
 @router.put("/api/member/password", tags=["会员服务"])
 async def change_password(
     req: PasswordChangeRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """修改密码"""
     member_id = _require_member_id(x_member_id)
@@ -227,7 +227,7 @@ async def change_password(
 
 @router.get("/api/member/level", tags=["会员服务"])
 async def get_level(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """查询等级信息(含成长值/下一级所需)"""
     member_id = _require_member_id(x_member_id)
@@ -240,7 +240,7 @@ async def get_level(
 @router.post("/api/member/consume", tags=["会员服务"])
 async def member_consume(
     req: ConsumeRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """消费(成长值+1/元, 积分+1/元, 自动升级)"""
     member_id = _require_member_id(x_member_id)
@@ -258,7 +258,7 @@ async def member_consume(
 
 @router.get("/api/member/points", tags=["会员服务"])
 async def get_points(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """查询积分(100 竹叶 = ¥1)"""
     member_id = _require_member_id(x_member_id)
@@ -271,7 +271,7 @@ async def get_points(
 @router.post("/api/member/points/deduct", tags=["会员服务"])
 async def deduct_points(
     req: PointsDeductRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """积分抵扣(100 竹叶 = ¥1, 抵扣上限订单 30%)"""
     member_id = _require_member_id(x_member_id)
@@ -289,7 +289,7 @@ async def deduct_points(
 
 @router.get("/api/member/addresses", tags=["会员服务"])
 async def list_addresses(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """地址列表"""
     member_id = _require_member_id(x_member_id)
@@ -302,7 +302,7 @@ async def list_addresses(
 @router.post("/api/member/addresses", tags=["会员服务"])
 async def add_address(
     req: AddressRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """新增地址"""
     member_id = _require_member_id(x_member_id)
@@ -321,7 +321,7 @@ async def add_address(
 async def update_address(
     address_id: str,
     req: AddressUpdateRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """修改地址"""
     member_id = _require_member_id(x_member_id)
@@ -338,7 +338,7 @@ async def update_address(
 @router.delete("/api/member/addresses/{address_id}", tags=["会员服务"])
 async def delete_address(
     address_id: str,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """删除地址"""
     member_id = _require_member_id(x_member_id)

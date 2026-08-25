@@ -13,7 +13,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -112,7 +111,7 @@ class AdRepository:
     # 广告 CRUD
     # ============================================================
 
-    async def get_ad(self, ad_id: int) -> Optional[dict]:
+    async def get_ad(self, ad_id: int) -> dict | None:
         """查询广告"""
         if is_redis_mode():
             return await self._redis_get_ad(ad_id)
@@ -136,7 +135,7 @@ class AdRepository:
     # 广告位 CRUD
     # ============================================================
 
-    async def get_slot(self, slot_code: str) -> Optional[dict]:
+    async def get_slot(self, slot_code: str) -> dict | None:
         """查询广告位"""
         if is_redis_mode():
             return await self._redis_get_slot(slot_code)
@@ -178,7 +177,7 @@ class AdRepository:
             self._mem_add_placement(placement)
         return placement_id
 
-    async def get_placement(self, placement_id: int) -> Optional[dict]:
+    async def get_placement(self, placement_id: int) -> dict | None:
         """查询投放记录"""
         if is_redis_mode():
             return await self._redis_get_placement(placement_id)
@@ -280,7 +279,7 @@ class AdRepository:
 
     # --- 广告 ---
 
-    def _mem_get_ad(self, ad_id: int) -> Optional[dict]:
+    def _mem_get_ad(self, ad_id: int) -> dict | None:
         self._ensure_store()
         return self.store["ads"].get(ad_id)
 
@@ -303,7 +302,7 @@ class AdRepository:
 
     # --- 广告位 ---
 
-    def _mem_get_slot(self, slot_code: str) -> Optional[dict]:
+    def _mem_get_slot(self, slot_code: str) -> dict | None:
         self._ensure_store()
         return self.store["ad_slots"].get(slot_code)
 
@@ -334,7 +333,7 @@ class AdRepository:
             self.store["ad_placements_by_ad"][ad_id] = []
         self.store["ad_placements_by_ad"][ad_id].append(pid)
 
-    def _mem_get_placement(self, placement_id: int) -> Optional[dict]:
+    def _mem_get_placement(self, placement_id: int) -> dict | None:
         self._ensure_store()
         return self.store["ad_placements"].get(placement_id)
 
@@ -408,7 +407,7 @@ class AdRepository:
 
     # --- 广告 ---
 
-    async def _redis_get_ad(self, ad_id: int) -> Optional[dict]:
+    async def _redis_get_ad(self, ad_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("ad", "ad", ad_id))
         if not data:
@@ -441,7 +440,7 @@ class AdRepository:
 
     # --- 广告位 ---
 
-    async def _redis_get_slot(self, slot_code: str) -> Optional[dict]:
+    async def _redis_get_slot(self, slot_code: str) -> dict | None:
         client = await get_redis_client()
         data = await client.hget(_k("ad", "slots"), slot_code)
         if not data:
@@ -476,7 +475,7 @@ class AdRepository:
                          json.dumps(placement, ensure_ascii=False))
         await client.lpush(_k("ad", "placements_by_ad", ad_id), pid)
 
-    async def _redis_get_placement(self, placement_id: int) -> Optional[dict]:
+    async def _redis_get_placement(self, placement_id: int) -> dict | None:
         client = await get_redis_client()
         data = await client.get(_k("ad", "placement", placement_id))
         if not data:

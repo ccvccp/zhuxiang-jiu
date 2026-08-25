@@ -12,7 +12,6 @@
 """
 
 import json
-from typing import Optional
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -27,13 +26,13 @@ class MemberRepository:
 
     # ---------- 会员主表 ----------
 
-    async def get_by_id(self, member_id) -> Optional[dict]:
+    async def get_by_id(self, member_id) -> dict | None:
         """按 ID 查询会员,不存在返回 None"""
         if is_redis_mode():
             return await self._redis_get_by_id(member_id)
         return self._mem_get_by_id(member_id)
 
-    async def get_by_phone(self, phone: str) -> Optional[dict]:
+    async def get_by_phone(self, phone: str) -> dict | None:
         """按手机号查询会员,不存在返回 None"""
         if is_redis_mode():
             return await self._redis_get_by_phone(phone)
@@ -140,7 +139,7 @@ class MemberRepository:
             return await self._redis_list_addresses(member_id)
         return self._mem_list_addresses(member_id)
 
-    async def get_address(self, member_id, address_id) -> Optional[dict]:
+    async def get_address(self, member_id, address_id) -> dict | None:
         """查询单个地址,不存在返回 None"""
         if is_redis_mode():
             return await self._redis_get_address(member_id, address_id)
@@ -182,11 +181,11 @@ class MemberRepository:
         if "_member_seq" not in self.store:
             self.store["_member_seq"] = 0
 
-    def _mem_get_by_id(self, member_id) -> Optional[dict]:
+    def _mem_get_by_id(self, member_id) -> dict | None:
         self._ensure_members_store()
         return self.store["members"].get(member_id)
 
-    def _mem_get_by_phone(self, phone: str) -> Optional[dict]:
+    def _mem_get_by_phone(self, phone: str) -> dict | None:
         self._ensure_members_store()
         for m in self.store["members"].values():
             if m.get("phone") == phone:
@@ -279,7 +278,7 @@ class MemberRepository:
         addr_map = self.store["member_addresses"].get(member_id, {})
         return list(addr_map.values())
 
-    def _mem_get_address(self, member_id, address_id) -> Optional[dict]:
+    def _mem_get_address(self, member_id, address_id) -> dict | None:
         self._ensure_members_store()
         addr_map = self.store["member_addresses"].get(member_id, {})
         return addr_map.get(address_id)
@@ -311,14 +310,14 @@ class MemberRepository:
     # Redis 后端
     # ============================================================
 
-    async def _redis_get_by_id(self, member_id) -> Optional[dict]:
+    async def _redis_get_by_id(self, member_id) -> dict | None:
         client = await get_redis_client()
         data = await client.hgetall(_k("member", member_id))
         if not data:
             return None
         return self._deserialize_member(data)
 
-    async def _redis_get_by_phone(self, phone: str) -> Optional[dict]:
+    async def _redis_get_by_phone(self, phone: str) -> dict | None:
         client = await get_redis_client()
         member_id = await client.get(_k("member", "phone", phone))
         if not member_id:
@@ -436,7 +435,7 @@ class MemberRepository:
             result.append(json.loads(addr_json))
         return result
 
-    async def _redis_get_address(self, member_id, address_id) -> Optional[dict]:
+    async def _redis_get_address(self, member_id, address_id) -> dict | None:
         client = await get_redis_client()
         addr_json = await client.hget(_k("member", "addresses", member_id), address_id)
         if not addr_json:

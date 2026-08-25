@@ -18,7 +18,7 @@
     - 财务报表: 2 个(profit/management)
 """
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
@@ -77,11 +77,11 @@ def _handle(exc):
 
 @router.get("/api/finance/voucher/list", tags=["财务管理"])
 async def list_vouchers(
-    period: Optional[str] = Query(default=None, description="账期 YYYYMM 或 YYYY-MM"),
-    type: Optional[str] = Query(default=None, description="凭证类型 income/refund"),
-    source: Optional[str] = Query(default=None, description="来源 order/refund"),
-    status: Optional[str] = Query(default=None, description="状态 draft/audited/posted"),
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    period: str | None = Query(default=None, description="账期 YYYYMM 或 YYYY-MM"),
+    type: str | None = Query(default=None, description="凭证类型 income/refund"),
+    source: str | None = Query(default=None, description="来源 order/refund"),
+    status: str | None = Query(default=None, description="状态 draft/audited/posted"),
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """凭证列表(可按 period/type/source/status 筛选)"""
     _require_admin(x_role)
@@ -96,7 +96,7 @@ async def list_vouchers(
 @router.get("/api/finance/voucher/{voucher_no}", tags=["财务管理"])
 async def get_voucher(
     voucher_no: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """凭证详情(含分录)"""
     _require_admin(x_role)
@@ -109,7 +109,7 @@ async def get_voucher(
 @router.post("/api/finance/voucher/auto/order/{order_id}", tags=["财务管理"])
 async def auto_voucher_from_order(
     order_id: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """按订单自动生成收入凭证
 
@@ -125,7 +125,7 @@ async def auto_voucher_from_order(
 @router.post("/api/finance/voucher/auto/refund/{order_id}", tags=["财务管理"])
 async def auto_voucher_from_refund(
     order_id: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """按退款自动生成红字凭证(借贷反转)"""
     _require_admin(x_role)
@@ -138,7 +138,7 @@ async def auto_voucher_from_refund(
 @router.post("/api/finance/voucher/audit/{voucher_no}", tags=["财务管理"])
 async def audit_voucher(
     voucher_no: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """凭证审核(草稿→已审核→已过账)"""
     _require_admin(x_role)
@@ -151,7 +151,7 @@ async def audit_voucher(
 @router.post("/api/finance/voucher/closing", tags=["财务管理"])
 async def month_end_closing(
     body: dict,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """月末结账(period 参数)"""
     _require_admin(x_role)
@@ -170,10 +170,10 @@ async def month_end_closing(
 
 @router.get("/api/finance/invoice/list", tags=["财务管理"])
 async def list_invoices(
-    status: Optional[str] = Query(default=None, description="状态 issued/red/void"),
-    type: Optional[str] = Query(default=None, description="发票类型 normal/red"),
-    period: Optional[str] = Query(default=None, description="账期"),
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    status: str | None = Query(default=None, description="状态 issued/red/void"),
+    type: str | None = Query(default=None, description="发票类型 normal/red"),
+    period: str | None = Query(default=None, description="账期"),
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """发票列表"""
     _require_admin(x_role)
@@ -188,7 +188,7 @@ async def list_invoices(
 @router.get("/api/finance/invoice/{invoice_no}", tags=["财务管理"])
 async def get_invoice(
     invoice_no: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """发票详情"""
     _require_admin(x_role)
@@ -201,7 +201,7 @@ async def get_invoice(
 @router.post("/api/finance/invoice/issue", tags=["财务管理"])
 async def issue_invoice(
     body: dict,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """开具发票(X-Member-Id, orderId+抬头信息)
 
@@ -235,7 +235,7 @@ async def issue_invoice(
 async def red_invoice(
     invoice_no: str,
     body: dict = None,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """红字冲红(admin)"""
     _require_admin(x_role)
@@ -252,10 +252,10 @@ async def red_invoice(
 
 @router.get("/api/finance/tax/list", tags=["财务管理"])
 async def list_tax_declarations(
-    taxType: Optional[str] = Query(default=None, description="税种 vat/consumption/surtax/income"),
-    period: Optional[str] = Query(default=None, description="账期"),
-    status: Optional[str] = Query(default=None, description="状态 pending/declared/paid"),
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    taxType: str | None = Query(default=None, description="税种 vat/consumption/surtax/income"),
+    period: str | None = Query(default=None, description="账期"),
+    status: str | None = Query(default=None, description="状态 pending/declared/paid"),
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """税务申报记录列表"""
     _require_admin(x_role)
@@ -270,7 +270,7 @@ async def list_tax_declarations(
 @router.get("/api/finance/tax/{declaration_no}", tags=["财务管理"])
 async def get_tax_declaration(
     declaration_no: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """税务申报详情"""
     _require_admin(x_role)
@@ -283,7 +283,7 @@ async def get_tax_declaration(
 @router.post("/api/finance/tax/calc/{period}", tags=["财务管理"])
 async def calc_tax(
     period: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """税额计算(按账期计算各税种)"""
     _require_admin(x_role)
@@ -296,7 +296,7 @@ async def calc_tax(
 @router.post("/api/finance/tax/declare/{declaration_no}", tags=["财务管理"])
 async def declare_tax(
     declaration_no: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """提交申报(待申报→已申报→已缴款)"""
     _require_admin(x_role)
@@ -312,10 +312,10 @@ async def declare_tax(
 
 @router.get("/api/finance/recon/list", tags=["财务管理"])
 async def list_reconciliations(
-    date: Optional[str] = Query(default=None, description="日期 YYYY-MM-DD"),
-    type: Optional[str] = Query(default=None, description="对账类型 daily"),
-    status: Optional[str] = Query(default=None, description="状态 matched/diff/resolved"),
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    date: str | None = Query(default=None, description="日期 YYYY-MM-DD"),
+    type: str | None = Query(default=None, description="对账类型 daily"),
+    status: str | None = Query(default=None, description="状态 matched/diff/resolved"),
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """对账记录列表"""
     _require_admin(x_role)
@@ -330,7 +330,7 @@ async def list_reconciliations(
 @router.post("/api/finance/recon/daily/{date}", tags=["财务管理"])
 async def daily_reconciliation(
     date: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """执行日终对账(三方对账: 订单+支付+银行)"""
     _require_admin(x_role)
@@ -344,7 +344,7 @@ async def daily_reconciliation(
 async def resolve_reconciliation(
     recon_id: str,
     body: dict,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """差异处理(reason+handler)"""
     _require_admin(x_role)
@@ -362,9 +362,9 @@ async def resolve_reconciliation(
 
 @router.get("/api/finance/payment/list", tags=["财务管理"])
 async def list_payments(
-    type: Optional[str] = Query(default=None, description="付款类型"),
-    status: Optional[str] = Query(default=None, description="状态 pending/approving/approved/paid/rejected"),
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    type: str | None = Query(default=None, description="付款类型"),
+    status: str | None = Query(default=None, description="状态 pending/approving/approved/paid/rejected"),
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """付款记录列表"""
     _require_admin(x_role)
@@ -377,7 +377,7 @@ async def list_payments(
 @router.post("/api/finance/payment/apply", tags=["财务管理"])
 async def apply_payment(
     body: dict,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """发起付款(type/payee/amount/description)"""
     _require_admin(x_role)
@@ -396,7 +396,7 @@ async def apply_payment(
 async def approve_payment(
     payment_no: str,
     body: dict,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """审批付款(level: 1/2/3, decision: approve/reject)"""
     _require_admin(x_role)
@@ -420,7 +420,7 @@ async def approve_payment(
 @router.get("/api/finance/report/profit/{period}", tags=["财务管理"])
 async def profit_statement(
     period: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """利润表(收入-成本-税金-费用=利润)"""
     _require_admin(x_role)
@@ -433,7 +433,7 @@ async def profit_statement(
 @router.get("/api/finance/report/management/{date}", tags=["财务管理"])
 async def management_report(
     date: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """管理报表(日度)"""
     _require_admin(x_role)

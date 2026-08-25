@@ -17,7 +17,6 @@
     - 管理端(8):     sessions(建)/items/publish/cancel/settings(2)/stats/expire-cancel
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel as PydBaseModel, Field
@@ -33,7 +32,7 @@ _service = FlashSaleService()
 # 鉴权与异常映射辅助(对齐 groupbuy/wallet 风格)
 # ============================================================
 
-def _member_id_or_none(x_member_id: Optional[str]) -> Optional[int]:
+def _member_id_or_none(x_member_id: str | None) -> int | None:
     """从 X-Member-Id 头提取会员ID(可为空, 游客浏览场景); 非数字视为未登录"""
     if not x_member_id:
         return None
@@ -43,7 +42,7 @@ def _member_id_or_none(x_member_id: Optional[str]) -> Optional[int]:
         return None
 
 
-def _require_member_id(x_member_id: Optional[str]) -> int:
+def _require_member_id(x_member_id: str | None) -> int:
     """必须登录, 缺失返回 401"""
     member_id = _member_id_or_none(x_member_id)
     if member_id is None:
@@ -51,7 +50,7 @@ def _require_member_id(x_member_id: Optional[str]) -> int:
     return member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -107,11 +106,11 @@ class PurchaseRequest(PydBaseModel):
 
 
 class SettingsRequest(PydBaseModel):
-    enabled: Optional[bool] = Field(None, description="秒杀总开关")
-    minRegisterHours: Optional[int] = Field(None, ge=0, description="注册时长要求(小时)")
-    minMemberLevel: Optional[int] = Field(None, ge=0, description="会员等级要求")
-    orderExpireMinutes: Optional[int] = Field(None, ge=1, description="订单超时分钟")
-    maxQuantityPerOrder: Optional[int] = Field(None, ge=1, description="单笔最大数量")
+    enabled: bool | None = Field(None, description="秒杀总开关")
+    minRegisterHours: int | None = Field(None, ge=0, description="注册时长要求(小时)")
+    minMemberLevel: int | None = Field(None, ge=0, description="会员等级要求")
+    orderExpireMinutes: int | None = Field(None, ge=1, description="订单超时分钟")
+    maxQuantityPerOrder: int | None = Field(None, ge=1, description="单笔最大数量")
 
 
 # ============================================================
@@ -144,7 +143,7 @@ async def get_session_detail(session_id: str):
 
 @router.post("/api/flash/order", tags=["限时秒杀模块"])
 async def purchase(data: PurchaseRequest,
-                   x_member_id: Optional[str] = Header(None, alias="X-Member-Id")):
+                   x_member_id: str | None = Header(None, alias="X-Member-Id")):
     """抢购下单(锁内: 幂等/限购/库存原子判定)"""
     member_id = _require_member_id(x_member_id)
     try:
@@ -156,7 +155,7 @@ async def purchase(data: PurchaseRequest,
 
 
 @router.get("/api/flash/my/orders", tags=["限时秒杀模块"])
-async def my_orders(x_member_id: Optional[str] = Header(None, alias="X-Member-Id")):
+async def my_orders(x_member_id: str | None = Header(None, alias="X-Member-Id")):
     """我的秒杀订单(倒序)"""
     member_id = _require_member_id(x_member_id)
     try:
@@ -168,8 +167,8 @@ async def my_orders(x_member_id: Optional[str] = Header(None, alias="X-Member-Id
 
 @router.get("/api/flash/orders/{order_no}", tags=["限时秒杀模块"])
 async def get_order(order_no: str,
-                    x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
-                    x_role: Optional[str] = Header(None, alias="X-Role")):
+                    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+                    x_role: str | None = Header(None, alias="X-Role")):
     """订单详情(本人或管理员)"""
     member_id = _member_id_or_none(x_member_id)
     is_admin = x_role == "admin"
@@ -183,7 +182,7 @@ async def get_order(order_no: str,
 
 @router.post("/api/flash/orders/{order_no}/pay", tags=["限时秒杀模块"])
 async def pay_order(order_no: str,
-                    x_member_id: Optional[str] = Header(None, alias="X-Member-Id")):
+                    x_member_id: str | None = Header(None, alias="X-Member-Id")):
     """模拟支付成功(对接支付网关后替换为回调)"""
     member_id = _require_member_id(x_member_id)
     try:
@@ -195,8 +194,8 @@ async def pay_order(order_no: str,
 
 @router.post("/api/flash/orders/{order_no}/cancel", tags=["限时秒杀模块"])
 async def cancel_order(order_no: str,
-                       x_member_id: Optional[str] = Header(None, alias="X-Member-Id"),
-                       x_role: Optional[str] = Header(None, alias="X-Role")):
+                       x_member_id: str | None = Header(None, alias="X-Member-Id"),
+                       x_role: str | None = Header(None, alias="X-Role")):
     """取消订单(本人或管理员, 锁内回补库存)"""
     member_id = _member_id_or_none(x_member_id)
     is_admin = x_role == "admin"
@@ -216,7 +215,7 @@ async def cancel_order(order_no: str,
 
 @router.post("/api/flash/admin/sessions", tags=["限时秒杀模块"])
 async def create_session(data: CreateSessionRequest,
-                         x_role: Optional[str] = Header(None, alias="X-Role")):
+                         x_role: str | None = Header(None, alias="X-Role")):
     """创建秒杀场次(草稿)"""
     _require_admin(x_role)
     try:
@@ -229,7 +228,7 @@ async def create_session(data: CreateSessionRequest,
 
 @router.post("/api/flash/admin/sessions/{session_id}/items", tags=["限时秒杀模块"])
 async def add_item(session_id: str, data: AddItemRequest,
-                   x_role: Optional[str] = Header(None, alias="X-Role")):
+                   x_role: str | None = Header(None, alias="X-Role")):
     """添加秒杀商品(仅草稿场次)"""
     _require_admin(x_role)
     try:
@@ -243,7 +242,7 @@ async def add_item(session_id: str, data: AddItemRequest,
 
 @router.post("/api/flash/admin/sessions/{session_id}/publish", tags=["限时秒杀模块"])
 async def publish_session(session_id: str,
-                          x_role: Optional[str] = Header(None, alias="X-Role")):
+                          x_role: str | None = Header(None, alias="X-Role")):
     """发布场次"""
     _require_admin(x_role)
     try:
@@ -255,7 +254,7 @@ async def publish_session(session_id: str,
 
 @router.post("/api/flash/admin/sessions/{session_id}/cancel", tags=["限时秒杀模块"])
 async def cancel_session(session_id: str,
-                         x_role: Optional[str] = Header(None, alias="X-Role")):
+                         x_role: str | None = Header(None, alias="X-Role")):
     """取消场次(联动取消待支付订单并回补库存)"""
     _require_admin(x_role)
     try:
@@ -270,7 +269,7 @@ async def cancel_session(session_id: str,
 # ============================================================
 
 @router.get("/api/flash/admin/settings", tags=["限时秒杀模块"])
-async def get_settings(x_role: Optional[str] = Header(None, alias="X-Role")):
+async def get_settings(x_role: str | None = Header(None, alias="X-Role")):
     """查询秒杀参数"""
     _require_admin(x_role)
     try:
@@ -281,7 +280,7 @@ async def get_settings(x_role: Optional[str] = Header(None, alias="X-Role")):
 
 @router.post("/api/flash/admin/settings", tags=["限时秒杀模块"])
 async def update_settings(data: SettingsRequest,
-                          x_role: Optional[str] = Header(None, alias="X-Role")):
+                          x_role: str | None = Header(None, alias="X-Role")):
     """修改秒杀参数(白名单字段, 即时生效)"""
     _require_admin(x_role)
     try:
@@ -293,7 +292,7 @@ async def update_settings(data: SettingsRequest,
 
 
 @router.get("/api/flash/admin/stats", tags=["限时秒杀模块"])
-async def stats(x_role: Optional[str] = Header(None, alias="X-Role")):
+async def stats(x_role: str | None = Header(None, alias="X-Role")):
     """全局销售统计(按场次聚合)"""
     _require_admin(x_role)
     try:
@@ -304,7 +303,7 @@ async def stats(x_role: Optional[str] = Header(None, alias="X-Role")):
 
 @router.post("/api/flash/admin/orders/expire-cancel", tags=["限时秒杀模块"])
 async def cancel_expired_orders(
-        x_role: Optional[str] = Header(None, alias="X-Role")):
+        x_role: str | None = Header(None, alias="X-Role")):
     """批量取消超时未支付订单(回补库存); 供定时任务触发"""
     _require_admin(x_role)
     try:

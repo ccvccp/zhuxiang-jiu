@@ -15,7 +15,6 @@
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -37,7 +36,7 @@ _service = AuthService()
 class RegisterRequest(BaseModel):
     phone: str = Field(..., min_length=11, max_length=11, description="手机号(11位)")
     password: str = Field(..., min_length=6, max_length=64, description="密码(至少6位)")
-    nickname: Optional[str] = Field(None, max_length=50, description="昵称(可选)")
+    nickname: str | None = Field(None, max_length=50, description="昵称(可选)")
 
 
 class LoginRequest(BaseModel):
@@ -50,7 +49,7 @@ class RefreshRequest(BaseModel):
 
 
 class LogoutRequest(BaseModel):
-    refreshToken: Optional[str] = Field(None, description="刷新令牌(可选,一并吊销)")
+    refreshToken: str | None = Field(None, description="刷新令牌(可选,一并吊销)")
 
 
 class ChangePasswordRequest(BaseModel):
@@ -82,7 +81,7 @@ def _handle_auth_error(exc: Exception):
     raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
-def _extract_bearer_token(authorization: Optional[str]) -> str:
+def _extract_bearer_token(authorization: str | None) -> str:
     """从 Authorization 头提取 Bearer Token"""
     if not authorization:
         raise HTTPException(status_code=401, detail="未登录: 请提供 Authorization: Bearer <token>")
@@ -93,7 +92,7 @@ def _extract_bearer_token(authorization: Optional[str]) -> str:
 
 
 async def get_current_member(
-    authorization: Optional[str] = Header(None, alias="Authorization"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ) -> dict:
     """FastAPI 依赖: 校验 access token 并返回当前会员
 
@@ -118,7 +117,7 @@ async def require_admin(
     return current_member
 
 
-def _get_token_from_current(member: dict, authorization: Optional[str]) -> str:
+def _get_token_from_current(member: dict, authorization: str | None) -> str:
     """从已鉴权上下文取回原始 token(改密/登出需 jti)"""
     return _extract_bearer_token(authorization)
 
@@ -166,7 +165,7 @@ async def refresh(data: RefreshRequest):
 @router.post("/api/auth/logout", tags=["用户认证模块"])
 async def logout(
     data: LogoutRequest,
-    authorization: Optional[str] = Header(None, alias="Authorization"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     """登出(吊销 access + refresh)"""
     token = _extract_bearer_token(authorization)
@@ -191,7 +190,7 @@ async def me(current_member: dict = Depends(get_current_member)):
 async def change_password(
     data: ChangePasswordRequest,
     current_member: dict = Depends(get_current_member),
-    authorization: Optional[str] = Header(None, alias="Authorization"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     """修改密码(级联吊销全部设备令牌, 返回新令牌对)"""
     token = _get_token_from_current(current_member, authorization)
@@ -214,7 +213,7 @@ async def change_password(
 async def set_role(
     data: SetRoleRequest,
     admin: dict = Depends(require_admin),
-    authorization: Optional[str] = Header(None, alias="Authorization"),
+    authorization: str | None = Header(None, alias="Authorization"),
 ):
     """设置会员角色(管理员专用)"""
     token = _get_token_from_current(admin, authorization)

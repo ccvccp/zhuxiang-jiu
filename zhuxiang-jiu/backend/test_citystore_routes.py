@@ -31,7 +31,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 # 确保使用内存模式
 os.environ["LOCK_MODE"] = "asyncio"
@@ -81,7 +81,7 @@ def reset_store():
 
 def current_month() -> str:
     """当前 UTC 月份(YYYY-MM), 与 ts() 对齐"""
-    return datetime.now(timezone.utc).strftime("%Y-%m")
+    return datetime.now(UTC).strftime("%Y-%m")
 
 
 # ============================================================

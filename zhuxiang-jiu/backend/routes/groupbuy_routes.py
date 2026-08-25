@@ -20,7 +20,6 @@
     - 管理端(2):    pending / stats
 """
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -40,14 +39,14 @@ _service = GroupBuyService()
 # 鉴权与异常映射辅助(对齐 wallet/payment 风格)
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return x_member_id
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -85,7 +84,7 @@ class CalcItem(PydBaseModel):
 
 
 class CalcRequest(PydBaseModel):
-    items: List[CalcItem] = Field(..., description="产品列表")
+    items: list[CalcItem] = Field(..., description="产品列表")
 
 
 class ApplyItem(CalcItem):
@@ -96,11 +95,11 @@ class ApplyRequest(PydBaseModel):
     userId: int = Field(..., description="用户ID")
     userLevel: int = Field(..., description="会员等级(5 = SVIP)")
     groupType: str = Field(..., description="团购类型: enterprise/wedding/festival/custom")
-    items: List[ApplyItem] = Field(..., description="产品列表")
+    items: list[ApplyItem] = Field(..., description="产品列表")
     purpose: str = Field("", description="用途说明")
-    customNeeds: Optional[dict] = Field(None, description="定制需求(JSON)")
-    invoiceInfo: Optional[dict] = Field(None, description="发票信息(JSON)")
-    addresses: Optional[list] = Field(None, description="收货地址(JSON 数组)")
+    customNeeds: dict | None = Field(None, description="定制需求(JSON)")
+    invoiceInfo: dict | None = Field(None, description="发票信息(JSON)")
+    addresses: list | None = Field(None, description="收货地址(JSON 数组)")
 
 
 class AuditRequest(PydBaseModel):
@@ -184,7 +183,7 @@ async def apply(
 @router.get("/api/groupbuy/list", tags=["团购模块"])
 async def list_orders(
     x_member_id: str = Header(None, alias="X-Member-Id"),
-    status: Optional[str] = Query(None, description="按状态筛选"),
+    status: str | None = Query(None, description="按状态筛选"),
     limit: int = Query(50, ge=1, le=200, description="返回数量"),
 ):
     """我的团购订单列表"""

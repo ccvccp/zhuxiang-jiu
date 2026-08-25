@@ -26,7 +26,7 @@
        保持 payment_service 单一职责。
 """
 
-from typing import Annotated, List, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -42,14 +42,14 @@ _service = PaymentService()
 # 鉴权与异常映射辅助(对齐 wallet/finance 风格)
 # ============================================================
 
-def _require_member_id(x_member_id: Optional[str]) -> str:
+def _require_member_id(x_member_id: str | None) -> str:
     """从 X-Member-Id 头提取会员ID, 缺失返回 401"""
     if not x_member_id:
         raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
     return str(x_member_id)
 
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -94,7 +94,7 @@ class CreatePayRequest(PydBaseModel):
 
 class PayCallbackRequest(PydBaseModel):
     channelTradeNo: str = Field(..., description="渠道交易号")
-    payNo: Optional[str] = Field(None, description="支付单号(可选, 缺失则按渠道交易号反查)")
+    payNo: str | None = Field(None, description="支付单号(可选, 缺失则按渠道交易号反查)")
     callbackContent: dict = Field(default_factory=dict, description="回调原始数据")
 
 
@@ -170,8 +170,8 @@ class CreateChannelRequest(PydBaseModel):
     channelCode: str = Field(..., description="渠道编码(如 wechat/alipay/unionpay)")
     channelName: str = Field(..., description="渠道名称")
     channelType: str = Field("third_party", description="渠道类型 third_party/bank/aggregate")
-    supportedMethods: List[str] = Field(default_factory=lambda: ["jsapi", "native", "h5"], description="支持的支付方式")
-    supportedScenes: List[str] = Field(default_factory=lambda: ["order_pay", "wallet_deposit"], description="支持的业务场景")
+    supportedMethods: list[str] = Field(default_factory=lambda: ["jsapi", "native", "h5"], description="支持的支付方式")
+    supportedScenes: list[str] = Field(default_factory=lambda: ["order_pay", "wallet_deposit"], description="支持的业务场景")
     merchantId: str = Field(..., description="商户号")
     feeRate: float = Field(0.006, ge=0, le=1, description="手续费率")
     feeType: str = Field("ratio", description="费率类型 fixed/ratio/mixed")
@@ -188,18 +188,18 @@ class CreateChannelRequest(PydBaseModel):
 
 class UpdateChannelRequest(PydBaseModel):
     """更新字段名须对齐 Repository 字段(channelCode/feeRate/maxAmount 等驼峰命名)"""
-    channelName: Optional[str] = None
-    feeRate: Optional[float] = Field(None, ge=0, le=1)
-    feeType: Optional[str] = None
-    fixedFee: Optional[float] = Field(None, ge=0)
-    settleCycle: Optional[str] = None
-    minAmount: Optional[float] = Field(None, gt=0)
-    maxAmount: Optional[float] = Field(None, gt=0)
-    dailyLimit: Optional[float] = Field(None, gt=0)
-    monthlyLimit: Optional[float] = Field(None, gt=0)
-    retryMax: Optional[int] = Field(None, ge=0, le=20)
-    timeout: Optional[int] = Field(None, ge=60)
-    remark: Optional[str] = None
+    channelName: str | None = None
+    feeRate: float | None = Field(None, ge=0, le=1)
+    feeType: str | None = None
+    fixedFee: float | None = Field(None, ge=0)
+    settleCycle: str | None = None
+    minAmount: float | None = Field(None, gt=0)
+    maxAmount: float | None = Field(None, gt=0)
+    dailyLimit: float | None = Field(None, gt=0)
+    monthlyLimit: float | None = Field(None, gt=0)
+    retryMax: int | None = Field(None, ge=0, le=20)
+    timeout: int | None = Field(None, ge=60)
+    remark: str | None = None
 
     class Config:
         extra = "allow"
@@ -217,7 +217,7 @@ class ToggleChannelRequest(PydBaseModel):
 @router.post("/api/payment/pay", tags=["收款管理"])
 async def create_pay(
     req: CreatePayRequest,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """创建支付订单(幂等: 同一订单只能有一个活跃支付单)"""
     user_id = _require_member_id(x_member_id)
@@ -241,9 +241,9 @@ async def create_pay(
 
 @router.get("/api/payment/pays", tags=["收款管理"])
 async def list_pays(
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
-    status: Optional[str] = Query(None, description="状态筛选"),
-    sceneType: Optional[str] = Query(None, description="场景筛选"),
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
+    status: str | None = Query(None, description="状态筛选"),
+    sceneType: str | None = Query(None, description="场景筛选"),
     limit: int = Query(50, ge=1, le=200, description="返回数量"),
 ):
     """列出用户支付订单"""
@@ -306,7 +306,7 @@ async def pay_callback(req: PayCallbackRequest):
 # 静态路由必须在动态路由之前, 避免 {pay_no} 捕获静态路径段
 @router.get("/api/payment/refunds/pending", tags=["收款管理"])
 async def list_pending_refunds(
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
     limit: int = Query(100, ge=1, le=500),
 ):
     """待审核退款列表(admin)"""
@@ -333,7 +333,7 @@ async def create_refund(
 @router.get("/api/payment/{pay_no}/refunds", tags=["收款管理"])
 async def list_refunds(
     pay_no: str,
-    status: Optional[str] = Query(None, description="状态筛选"),
+    status: str | None = Query(None, description="状态筛选"),
     limit: int = Query(50, ge=1, le=200),
 ):
     """列出支付单关联的退款记录"""
@@ -347,7 +347,7 @@ async def list_refunds(
 async def audit_refund(
     refund_no: str,
     req: AuditRefundRequest,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """审核退款(admin; 待审核 → 审核通过/拒绝)"""
     _require_admin(x_role)
@@ -363,7 +363,7 @@ async def audit_refund(
 @router.post("/api/payment/refund/{refund_no}/cancel", tags=["收款管理"])
 async def cancel_refund(
     refund_no: str,
-    x_member_id: Annotated[Optional[str], Header(alias="X-Member-Id")] = None,
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
     """撤回退款申请(用户; 待审核 → 已撤回)"""
     _require_member_id(x_member_id)
@@ -395,7 +395,7 @@ async def refund_callback(req: RefundCallbackRequest):
 @router.post("/api/payment/payout", tags=["收款管理"])
 async def create_payout(
     req: CreatePayoutRequest,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """创建付款单(admin; 幂等: 同来源只能创建一个付款单)"""
     _require_admin(x_role)
@@ -419,9 +419,9 @@ async def create_payout(
 
 @router.get("/api/payment/payouts", tags=["收款管理"])
 async def list_payouts(
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
-    payoutType: Optional[str] = Query(None, description="付款类型筛选"),
-    status: Optional[str] = Query(None, description="状态筛选"),
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+    payoutType: str | None = Query(None, description="付款类型筛选"),
+    status: str | None = Query(None, description="状态筛选"),
     limit: int = Query(50, ge=1, le=200),
 ):
     """列出付款记录(admin)"""
@@ -431,7 +431,7 @@ async def list_payouts(
 
 @router.get("/api/payment/payouts/pending", tags=["收款管理"])
 async def list_pending_payouts(
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
     limit: int = Query(100, ge=1, le=500),
 ):
     """待审核付款列表(admin)"""
@@ -442,7 +442,7 @@ async def list_pending_payouts(
 @router.get("/api/payment/payout/{payout_no}", tags=["收款管理"])
 async def get_payout(
     payout_no: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """查询付款详情(admin)"""
     _require_admin(x_role)
@@ -456,7 +456,7 @@ async def get_payout(
 async def audit_payout(
     payout_no: str,
     req: AuditPayoutRequest,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """审核付款(admin; 待审核 → 审核通过/拒绝)"""
     _require_admin(x_role)
@@ -472,7 +472,7 @@ async def audit_payout(
 @router.post("/api/payment/payout/{payout_no}/execute", tags=["收款管理"])
 async def execute_payout(
     payout_no: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """执行打款(admin; 审核通过 → 打款中)"""
     _require_admin(x_role)
@@ -487,7 +487,7 @@ async def execute_payout(
 @router.post("/api/payment/payout/{payout_no}/retry", tags=["收款管理"])
 async def retry_payout(
     payout_no: str,
-    x_role: Annotated[Optional[str], Header(alias="X-Role")] = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """重试打款(admin; 失败 → 打款中)"""
     _require_admin(x_role)
@@ -527,7 +527,7 @@ async def payout_callback(
 @router.post("/api/payment/reconciliation/start", tags=["收款管理"])
 async def start_reconciliation(
     req: StartReconciliationRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """启动日终对账(管理端)"""
     _require_admin(x_role)
@@ -541,9 +541,9 @@ async def start_reconciliation(
 
 @router.get("/api/payment/reconciliations", tags=["收款管理"])
 async def list_reconciliations(
-    date: Optional[str] = Query(None, description="按日期筛选 YYYY-MM-DD"),
-    channel: Optional[str] = Query(None, description="按渠道筛选"),
-    status: Optional[str] = Query(None, description="按状态筛选 pending/matched/diff/investigating/resolved"),
+    date: str | None = Query(None, description="按日期筛选 YYYY-MM-DD"),
+    channel: str | None = Query(None, description="按渠道筛选"),
+    status: str | None = Query(None, description="按状态筛选 pending/matched/diff/investigating/resolved"),
     limit: int = Query(20, ge=1, le=100),
 ):
     """对账批次列表(支持筛选)"""
@@ -555,7 +555,7 @@ async def list_reconciliations(
 
 @router.get("/api/payment/reconciliations/pending", tags=["收款管理"])
 async def list_pending_diffs(
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
     limit: int = Query(20, ge=1, le=100),
 ):
     """待处理差异列表(管理端)"""
@@ -581,7 +581,7 @@ async def get_reconciliation(recon_no: str):
 async def investigate_diff(
     recon_no: str,
     req: InvestigateDiffRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """介入调查差异(管理端, diff → investigating)"""
     _require_admin(x_role)
@@ -597,7 +597,7 @@ async def investigate_diff(
 async def resolve_reconciliation(
     recon_no: str,
     req: ResolveReconciliationRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """处理完成(管理端, investigating → resolved)
 
@@ -624,7 +624,7 @@ async def resolve_reconciliation(
 @router.post("/api/payment/channel", tags=["收款管理"])
 async def create_channel(
     req: CreateChannelRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """创建渠道配置(管理端)"""
     _require_admin(x_role)
@@ -656,8 +656,8 @@ async def create_channel(
 
 @router.get("/api/payment/channels", tags=["收款管理"])
 async def list_channels(
-    x_role: Optional[str] = Header(None, alias="X-Role"),
-    status: Optional[str] = Query(None, description="按状态筛选 active/maintenance/disabled"),
+    x_role: str | None = Header(None, alias="X-Role"),
+    status: str | None = Query(None, description="按状态筛选 active/maintenance/disabled"),
 ):
     """渠道列表(管理端可查全部, 含禁用)"""
     _require_admin(x_role)
@@ -691,7 +691,7 @@ async def get_channel(code: str):
 async def toggle_channel_status(
     code: str,
     req: ToggleChannelRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """启停渠道(管理端)"""
     _require_admin(x_role)
@@ -707,7 +707,7 @@ async def toggle_channel_status(
 async def update_channel(
     code: str,
     req: UpdateChannelRequest,
-    x_role: Optional[str] = Header(None, alias="X-Role"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
     """更新渠道配置(管理端)
 

@@ -14,7 +14,7 @@
 注: 静态路径(/health, /stats)先于动态路径注册(项目约定)
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
@@ -30,7 +30,7 @@ _service = MonitorService()
 # 鉴权与异常映射辅助
 # ============================================================
 
-def _require_admin(x_role: Optional[str]):
+def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
@@ -58,8 +58,8 @@ class MetricCollectRequest(PydBaseModel):
     metricValue: float = Field(..., description="指标数值")
     source: str = Field(..., description="采集来源")
     metricUnit: str = Field("", description="单位")
-    tags: Dict[str, Any] = Field(default_factory=dict, description="标签")
-    threshold: Dict[str, Any] = Field(default_factory=dict, description="阈值配置")
+    tags: dict[str, Any] = Field(default_factory=dict, description="标签")
+    threshold: dict[str, Any] = Field(default_factory=dict, description="阈值配置")
     aiAutomationRate: float = Field(95.0, description="AI自动化率")
 
 
@@ -68,11 +68,11 @@ class AlertCreateRequest(PydBaseModel):
     alertType: str = Field(..., description="告警类型")
     alertLevel: str = Field(..., description="告警级别(info/warning/critical/fatal)")
     source: str = Field(..., description="告警来源")
-    metricId: Optional[int] = Field(None, description="关联指标ID")
-    threshold: Dict[str, Any] = Field(default_factory=dict, description="触发阈值")
+    metricId: int | None = Field(None, description="关联指标ID")
+    threshold: dict[str, Any] = Field(default_factory=dict, description="触发阈值")
     currentValue: float = Field(0.0, description="当前值")
     description: str = Field("", description="告警描述")
-    notification: Dict[str, Any] = Field(default_factory=dict, description="通知配置")
+    notification: dict[str, Any] = Field(default_factory=dict, description="通知配置")
     aiAutomationRate: float = Field(95.0, description="AI自动化率")
 
 
@@ -87,8 +87,8 @@ class IncidentCreateRequest(PydBaseModel):
     incidentType: str = Field(..., description="故障类型")
     incidentLevel: str = Field(..., description="故障级别(P0/P1/P2/P3)")
     source: str = Field(..., description="故障来源")
-    impact: Dict[str, Any] = Field(default_factory=dict, description="影响范围")
-    alertIds: List[int] = Field(default_factory=list, description="关联告警ID列表")
+    impact: dict[str, Any] = Field(default_factory=dict, description="影响范围")
+    alertIds: list[int] = Field(default_factory=list, description="关联告警ID列表")
     assignee: str = Field("", description="责任人")
     aiAutomationRate: float = Field(85.0, description="AI自动化率")
 
@@ -108,9 +108,9 @@ class DashboardCreateRequest(PydBaseModel):
     dashboardType: str = Field(...,
                                 description="仪表盘类型(system/business/incident/custom)")
     owner: str = Field("admin", description="所属用户")
-    widgets: List[Dict[str, Any]] = Field(default_factory=list, description="组件配置")
-    layout: Dict[str, Any] = Field(default_factory=dict, description="布局配置")
-    filters: Dict[str, Any] = Field(default_factory=dict, description="全局过滤器")
+    widgets: list[dict[str, Any]] = Field(default_factory=list, description="组件配置")
+    layout: dict[str, Any] = Field(default_factory=dict, description="布局配置")
+    filters: dict[str, Any] = Field(default_factory=dict, description="全局过滤器")
     refreshInterval: int = Field(30, description="刷新间隔(秒)")
     isShared: bool = Field(False, description="是否共享")
     aiAutomationRate: float = Field(85.0, description="AI自动化率")
