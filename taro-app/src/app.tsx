@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import Taro, { useDidShow, useDidHide, useLaunch } from '@tarojs/taro';
 // 全局样式
 import './app.scss';

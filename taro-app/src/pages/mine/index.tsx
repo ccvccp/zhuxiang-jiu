@@ -3,6 +3,8 @@ import { View, Button, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
+import { MemberAPI } from '@/api/member';
+import { OrderAPI } from '@/api/order';
 
 // 会员等级映射(显示用)
 const LEVEL_NAME: Record<string, string> = {
@@ -28,11 +30,45 @@ const MinePage: React.FC = () => {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    const db = CheckoutService.getMockDB();
-    // 取李四(L5钻石会员)作为当前登录用户
-    const m = (db.members || []).find((x: any) => x.id === 2) || db.members?.[0];
-    setMember(m);
-    setOrders(db.orders || []);
+    (async () => {
+      // 优先调真实后端 API 获取会员信息
+      try {
+        const m = await MemberAPI.profile();
+        setMember({
+          id: m.id,
+          name: m.name,
+          points: m.points,
+          level: m.level,
+        });
+      } catch (e) {
+        console.warn('[mine] 会员API失败,降级 mock:', e);
+        const db = CheckoutService.getMockDB();
+        const m = (db.members || []).find((x: any) => x.id === 2) || db.members?.[0];
+        setMember(m);
+      }
+
+      // 优先调真实后端 API 获取订单列表
+      try {
+        const res = await OrderAPI.myOrders();
+        const orderList = (res.orders || res || []).map((o: any) => ({
+          order_no: o.orderId || o.order_id || o.order_no || '',
+          status: o.status || '待付款',
+          items: (o.items || []).map((i: any) => ({
+            name: i.productName || i.name || '',
+            qty: i.quantity || i.qty || 1,
+          })),
+          shipper_type: o.shipperType || o.shipper_type || 'manufacturer',
+          shipper_agent_name: o.shipperAgentName || o.shipper_agent_name || '',
+          final_amount: (o.priceDetail || {}).actualAmount || o.final_amount || 0,
+          points_earned: (o.priceDetail || {}).pointsEarned || o.points_earned || 0,
+        }));
+        setOrders(orderList);
+      } catch (e) {
+        console.warn('[mine] 订单API失败,降级 mock:', e);
+        const db = CheckoutService.getMockDB();
+        setOrders(db.orders || []);
+      }
+    })();
   }, [refreshKey]);
 
   const handleClearData = () => {

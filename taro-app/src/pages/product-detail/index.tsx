@@ -3,23 +3,54 @@ import { View, Text, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
+import { ProductAPI, ProductVO } from '@/api/product';
+
+// 兜底: API 失败时用 mock 数据
+function loadMockProduct(id: string): ProductVO & { description?: string } | null {
+  const db = CheckoutService.getMockDB();
+  const p = (db.products || []).find((x: any) => String(x.id) === id);
+  if (!p) return null;
+  return {
+    id: String(p.id),
+    name: p.name,
+    price: p.price,
+    stock: p.stock,
+    spec: p.spec || '500ml',
+    abv: p.abv || '42%vol',
+    category: p.category || '经典',
+    description: p.description || '',
+  };
+}
 
 const ProductDetailPage: React.FC = () => {
   const router = useRouter();
-  const [product, setProduct] = useState<any>(null);
+  const [product, setProduct] = useState<ProductVO & { description?: string } | null>(null);
   const [qty, setQty] = useState(1);
+  const [loading, setLoading] = useState(true);
 
-  const productId = Number(router.params.id || '0');
+  const productId = router.params.id || '0';
 
   useEffect(() => {
-    const db = CheckoutService.getMockDB();
-    const p = (db.products || []).find((x: any) => x.id === productId);
-    if (p) {
-      setProduct(p);
-    } else {
-      Taro.showToast({ title: '商品不存在', icon: 'none' });
-      setTimeout(() => Taro.navigateBack(), 1500);
-    }
+    (async () => {
+      setLoading(true);
+      try {
+        // 优先调真实后端 API
+        const detail = await ProductAPI.detail(productId);
+        setProduct(detail);
+      } catch (e) {
+        console.warn('[product-detail] API 调用失败,降级 mock:', e);
+        // 降级 mock 数据
+        const mock = loadMockProduct(productId);
+        if (mock) {
+          setProduct(mock);
+        } else {
+          Taro.showToast({ title: '商品不存在', icon: 'none' });
+          setTimeout(() => Taro.navigateBack(), 1500);
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [productId]);
 
   const handleQtyMinus = () => setQty(q => Math.max(1, q - 1));
@@ -27,8 +58,7 @@ const ProductDetailPage: React.FC = () => {
 
   const handleBuyNow = () => {
     if (!product) return;
-    // 代理商认领山东泰安(测试用,与首页一致)
-    CheckoutService.claim(1, '山东泰安');
+    // 跳转结算页,传递商品信息(id/name/price/qty)
     Taro.navigateTo({
       url: `/pages/checkout/index?productId=${product.id}&productName=${encodeURIComponent(product.name)}&price=${product.price}&qty=${qty}`
     });
@@ -38,7 +68,7 @@ const ProductDetailPage: React.FC = () => {
     Taro.showToast({ title: '客服功能开发中', icon: 'none' });
   };
 
-  if (!product) {
+  if (loading || !product) {
     return (
       <View className={styles.page}>
         <View className={styles.loading}>
@@ -86,21 +116,23 @@ const ProductDetailPage: React.FC = () => {
               <View className={styles.specValue}>{product.abv}</View>
             </View>
             <View className={styles.specItem}>
-              <View className={styles.specLabel}>产地</View>
-              <View className={styles.specValue}>{product.origin}</View>
-            </View>
-            <View className={styles.specItem}>
               <View className={styles.specLabel}>分类</View>
               <View className={styles.specValue}>{product.category}</View>
+            </View>
+            <View className={styles.specItem}>
+              <View className={styles.specLabel}>编号</View>
+              <View className={styles.specValue}>{product.id}</View>
             </View>
           </View>
         </View>
 
         {/* 商品描述 */}
-        <View className={styles.descSection}>
-          <View className={styles.sectionTitle}>商品介绍</View>
-          <View className={styles.descText}>{product.description}</View>
-        </View>
+        {product.description && (
+          <View className={styles.descSection}>
+            <View className={styles.sectionTitle}>商品介绍</View>
+            <View className={styles.descText}>{product.description}</View>
+          </View>
+        )}
 
         {/* 温馨提示 */}
         <View className={styles.tipSection}>

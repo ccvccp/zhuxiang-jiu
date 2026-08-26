@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { View, Text, ScrollView } from '@tarojs/components';
+import { View, ScrollView } from '@tarojs/components';
 import styles from './privacy.module.scss';
 
 const PrivacyPage: React.FC = () => {

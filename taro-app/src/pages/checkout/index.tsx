@@ -3,6 +3,7 @@ import { View, Text, Checkbox } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
+import { OrderAPI } from '@/api/order';
 
 // 姓名脱敏(张三→张*, 李四→李*) — 《个人信息保护法》第51条安全保护
 function maskName(name: string): string {
@@ -34,6 +35,43 @@ const CheckoutPage: React.FC = () => {
     }
     setSubmitting(true);
     try {
+      // 优先调真实后端 OrderAPI.create
+      try {
+        const apiRes = await OrderAPI.create({
+          items: [{
+            productId: String(productId),
+            productName: productName,
+            quantity: qty,
+            unitPrice: price,
+          }],
+          usePoints: 0,
+          remark: '小程序下单',
+        });
+        // 后端返回成功
+        if (apiRes.success !== false) {
+          const orderData = apiRes.details || apiRes;
+          setResult({
+            success: true,
+            orderNo: orderData.orderId || orderData.order_no || '',
+            data: {
+              orderNo: orderData.orderId || orderData.order_no || '',
+              finalAmount: (orderData.priceDetail || {}).actualAmount || price * qty,
+              shipperType: 'manufacturer',
+              shipperAgentName: '厂家直供',
+              manufacturerServiceFee: 0,
+              pointsEarned: (orderData.priceDetail || {}).pointsEarned || 0,
+              status: '待付款',
+            },
+            logs: [],
+          });
+          Taro.showToast({ title: '下单成功', icon: 'success' });
+          return;
+        }
+        throw new Error(apiRes.detail || '后端下单失败');
+      } catch (apiErr: any) {
+        console.warn('[Checkout] 后端API失败,降级 mock:', apiErr.message);
+      }
+      // 降级 mock CheckoutService
       const res = await CheckoutService.submit({
         items: [{ id: productId, name: productName, price, qty }],
         memberId: 2, // 李四(L5)

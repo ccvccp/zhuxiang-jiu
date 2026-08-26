@@ -3,43 +3,58 @@ import { View, Text, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
+import { ProductAPI, ProductVO } from '@/api/product';
 
-// 商品分类映射(按名称关键词推断)
-function classify(name: string): string {
-  if (name.includes('珍藏')) return '珍藏';
-  if (name.includes('佳酿')) return '佳酿';
-  return '经典';
-}
-
-// 解析规格(如 "竹奕·竹香经典 500ml" → "500ml")
-function parseSpec(name: string): string {
-  const m = name.match(/(\d+ml)/i);
-  return m ? m[1] : '500ml';
+// 兜底: API 失败时用 mock 数据(保证页面可用)
+function loadMockProducts(): ProductVO[] {
+  const db = CheckoutService.getMockDB();
+  return (db.products || []).map((p: any) => ({
+    id: String(p.id),
+    name: p.name,
+    price: p.price,
+    stock: p.stock,
+    spec: p.spec || '500ml',
+    abv: p.abv || '42%vol',
+    category: p.category || '经典',
+  }));
 }
 
 const ProductsPage: React.FC = () => {
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<ProductVO[]>([]);
   const [activeCategory, setActiveCategory] = useState('全部');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const db = CheckoutService.getMockDB();
-    setProducts(db.products || []);
+    (async () => {
+      setLoading(true);
+      try {
+        // 优先调真实后端 API
+        const res = await ProductAPI.list({ page: 1, page_size: 50 });
+        setProducts(res.products);
+      } catch (e) {
+        console.warn('[products] API 调用失败,降级 mock:', e);
+        // 降级 mock 数据
+        setProducts(loadMockProducts());
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   // 分类列表(动态生成)
   const categories = useMemo(() => {
     const set = new Set<string>();
-    products.forEach(p => set.add(classify(p.name)));
+    products.forEach(p => set.add(p.category));
     return ['全部', ...Array.from(set)];
   }, [products]);
 
   // 过滤后的商品
   const filtered = useMemo(() => {
     if (activeCategory === '全部') return products;
-    return products.filter(p => classify(p.name) === activeCategory);
+    return products.filter(p => p.category === activeCategory);
   }, [products, activeCategory]);
 
-  const handleBuy = (product: any) => {
+  const handleBuy = (product: ProductVO) => {
     // 跳转商品详情页
     Taro.navigateTo({
       url: `/pages/product-detail/index?id=${product.id}`
@@ -68,7 +83,12 @@ const ProductsPage: React.FC = () => {
 
       {/* 商品列表 */}
       <ScrollView className={styles.productList} scrollY>
-        {filtered.length === 0 ? (
+        {loading ? (
+          <View className={styles.empty}>
+            <View className={styles.emptyIcon}>⏳</View>
+            <View className={styles.emptyText}>加载中...</View>
+          </View>
+        ) : filtered.length === 0 ? (
           <View className={styles.empty}>
             <View className={styles.emptyIcon}>🍶</View>
             <View className={styles.emptyText}>暂无该分类商品</View>
@@ -78,12 +98,12 @@ const ProductsPage: React.FC = () => {
             <View key={p.id} className={styles.productCard} onClick={() => handleBuy(p)}>
               <View className={styles.productThumb}>
                 <View className={styles.productEmoji}>🍶</View>
-                <View className={styles.specTag}>{parseSpec(p.name)}</View>
+                <View className={styles.specTag}>{p.spec}</View>
               </View>
               <View className={styles.productInfo}>
                 <View className={styles.productName}>{p.name}</View>
                 <View className={styles.productMeta}>
-                  <View className={styles.categoryTag}>{classify(p.name)}</View>
+                  <View className={styles.categoryTag}>{p.category}</View>
                   <View className={styles.productStock}>
                     {p.stock > 10 ? `库存 ${p.stock} 瓶` : `仅剩 ${p.stock} 瓶`}
                   </View>
