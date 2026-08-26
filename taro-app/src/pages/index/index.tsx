@@ -121,7 +121,7 @@ const IndexPage: React.FC = () => {
         Taro.switchTab({ url: '/pages/mine/index' });
         break;
       case 'orders':
-        Taro.switchTab({ url: '/pages/mine/index' });
+        Taro.navigateTo({ url: '/pages/orders/index' });
         break;
       case 'service':
         Taro.showToast({ title: `客服热线: ${SERVICE_PHONE}`, icon: 'none' });

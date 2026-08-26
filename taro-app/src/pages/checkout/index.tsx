@@ -104,6 +104,14 @@ const CheckoutPage: React.FC = () => {
             <View className={styles.resultIcon}>✓</View>
             <View className={styles.resultTitle}>下单成功</View>
             <View className={styles.resultDesc}>订单号: {d.orderNo}</View>
+            <View className={styles.resultActions}>
+              <View
+                className={styles.viewOrderBtn}
+                onClick={() => Taro.navigateTo({ url: '/pages/orders/index' })}
+              >
+                查看我的订单
+              </View>
+            </View>
           </View>
         </View>
         <View className={styles.card}>

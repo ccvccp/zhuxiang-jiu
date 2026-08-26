@@ -73,6 +73,11 @@ const MinePage: React.FC = () => {
   };
 
   const handleViewOrder = (order: any) => {
+    // 真实后端订单 → 跳转订单详情页; mock 订单 → 弹窗展示
+    if (order.isApiOrder && order.order_no) {
+      Taro.navigateTo({ url: `/pages/order-detail/index?id=${order.order_no}` });
+      return;
+    }
     Taro.showModal({
       title: `订单 ${order.order_no}`,
       content: `商品: ${(order.items || []).map((i: any) => i.name).join(', ')}\n实付: ¥${order.final_amount}\n状态: ${order.status}\n发货方: ${order.shipper_type === 'agent' ? '代理商:' + (order.shipper_agent_name || '') : '厂家直供'}\n积分入账: +${order.points_earned || 0}`,
@@ -150,7 +155,9 @@ const MinePage: React.FC = () => {
           <View className={styles.sectionHeader}>
             <View className={styles.sectionTitle}>我的订单</View>
             {orders.length > 0 && (
-              <View className={styles.orderCount}>共 {orders.length} 单</View>
+              <View className={styles.orderCount} onClick={() => Taro.navigateTo({ url: '/pages/orders/index' })}>
+                共 {orders.length} 单 · 全部订单 ›
+              </View>
             )}
           </View>
           {orders.length === 0 ? (

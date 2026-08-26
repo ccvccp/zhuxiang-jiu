@@ -1,0 +1,226 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $spacing-lg;
+  padding-bottom: $spacing-xl;
+}
+
+// ============================================
+// 状态筛选 tab(横向滚动)
+// ============================================
+.tabs {
+  display: flex;
+  white-space: nowrap;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: 8rpx;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.tab {
+  display: inline-block;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  padding: $spacing-sm 32rpx;
+  border-radius: $radius-sm;
+  margin-right: 8rpx;
+}
+
+.tabActive {
+  background: $color-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-semibold;
+}
+
+// ============================================
+// 订单卡片
+// ============================================
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: $spacing-md;
+  border-bottom: 2rpx solid rgba(0, 0, 0, 0.04);
+}
+
+.orderNo {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: $spacing-sm;
+}
+
+.badge {
+  font-size: $font-size-xs;
+  padding: 4rpx 16rpx;
+  border-radius: 999rpx;
+  flex-shrink: 0;
+}
+
+.pending {
+  background: rgba(230, 162, 60, 0.12);
+  color: #e6a23c;
+}
+
+.paid {
+  background: rgba(64, 158, 255, 0.12);
+  color: #409eff;
+}
+
+.shipped {
+  background: rgba(103, 194, 58, 0.12);
+  color: #67c23a;
+}
+
+.received {
+  background: rgba(114, 46, 209, 0.12);
+  color: #722ed1;
+}
+
+.completed {
+  background: rgba(53, 92, 68, 0.10);
+  color: $color-primary;
+}
+
+.cancelled {
+  background: rgba(144, 147, 153, 0.12);
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 商品行
+// ============================================
+.items {
+  padding: $spacing-md 0;
+}
+
+.itemRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8rpx 0;
+}
+
+.itemName {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: $spacing-md;
+}
+
+.itemRight {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.itemPrice {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  margin-right: $spacing-sm;
+}
+
+.itemQty {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 卡片底: 金额 + 操作
+// ============================================
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: $spacing-md;
+  border-top: 2rpx solid rgba(0, 0, 0, 0.04);
+}
+
+.amount {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.amountNum {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-error;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+}
+
+.primaryBtn {
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: 999rpx;
+  padding: 10rpx 32rpx;
+  margin-left: $spacing-sm;
+  font-weight: $font-weight-semibold;
+}
+
+.ghostBtn {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: rgba(144, 147, 153, 0.12);
+  border-radius: 999rpx;
+  padding: 10rpx 32rpx;
+}
+
+.cardTime {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-sm;
+}
+
+// ============================================
+// 空状态 / 底部说明
+// ============================================
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: $spacing-xl 0;
+}
+
+.emptyIcon {
+  font-size: 96rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.emptyText {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.note {
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-sm;
+}

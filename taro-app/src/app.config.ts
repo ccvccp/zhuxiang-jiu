@@ -5,6 +5,8 @@ export default defineAppConfig({
     'pages/product-detail/index',
     'pages/mine/index',
     'pages/checkout/index',
+    'pages/orders/index',
+    'pages/order-detail/index',
     'pages/promotion/index',
     'pages/activity/index',
     'pages/privacy/index',

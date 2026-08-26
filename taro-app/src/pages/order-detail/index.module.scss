@@ -1,0 +1,363 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $spacing-lg;
+  padding-bottom: 160rpx;
+}
+
+// ============================================
+// 状态头部
+// ============================================
+.statusCard {
+  display: flex;
+  align-items: center;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  color: $color-text-white;
+  margin-bottom: $spacing-md;
+}
+
+.statusIcon {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 52rpx;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+}
+
+.statusName {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  margin-bottom: 8rpx;
+}
+
+.statusTip {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+}
+
+// ============================================
+// 通用卡片
+// ============================================
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.cardTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+  padding-left: 16rpx;
+  border-left: 6rpx solid $color-primary;
+}
+
+// ============================================
+// 收货信息
+// ============================================
+.addrRow {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8rpx;
+}
+
+.addrName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-right: $spacing-md;
+}
+
+.addrPhone {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.addrDetail {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: 1.6;
+}
+
+.remark {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-sm;
+}
+
+// ============================================
+// 商品清单
+// ============================================
+.itemRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-sm 0;
+}
+
+.itemIcon {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: $radius-sm;
+  background: rgba(53, 92, 68, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40rpx;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+}
+
+.itemInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.itemName {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+}
+
+.itemQty {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  flex-shrink: 0;
+}
+
+// ============================================
+// 价格明细
+// ============================================
+.priceRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8rpx 0;
+}
+
+.priceLabel {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.priceValue {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.priceDiscount {
+  font-size: $font-size-sm;
+  color: $color-error;
+}
+
+.priceTotal {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-md;
+  border-top: 2rpx solid rgba(0, 0, 0, 0.06);
+}
+
+.priceTotalValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-error;
+}
+
+// ============================================
+// 时间线
+// ============================================
+.timeline {
+  padding-left: 8rpx;
+}
+
+.timelineItem {
+  display: flex;
+  position: relative;
+  padding-bottom: $spacing-lg;
+}
+
+.timelineItem:last-child {
+  padding-bottom: 0;
+}
+
+.timelineDot {
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background: rgba(144, 147, 153, 0.4);
+  margin-top: 10rpx;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.timelineDotActive {
+  background: $color-primary;
+}
+
+.timelineLine {
+  position: absolute;
+  left: 7rpx;
+  top: 26rpx;
+  bottom: 0;
+  width: 2rpx;
+  background: rgba(144, 147, 153, 0.25);
+}
+
+.timelineBody {
+  flex: 1;
+}
+
+.timelineAction {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.timelineTime {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+}
+
+// ============================================
+// 评价表单
+// ============================================
+.stars {
+  display: flex;
+  align-items: center;
+  margin-bottom: $spacing-md;
+}
+
+.star {
+  font-size: 56rpx;
+  color: rgba(230, 162, 60, 0.25);
+  margin-right: 12rpx;
+}
+
+.starActive {
+  color: #e6a23c;
+}
+
+.ratingText {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  margin-left: $spacing-sm;
+}
+
+.reviewInput {
+  margin-bottom: $spacing-md;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 140rpx;
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  padding: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  box-sizing: border-box;
+}
+
+.reviewSubmit {
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-white;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: 999rpx;
+  padding: 16rpx 0;
+  font-weight: $font-weight-semibold;
+}
+
+// ============================================
+// 订单信息
+// ============================================
+.infoRow {
+  display: flex;
+  justify-content: space-between;
+  padding: 8rpx 0;
+}
+
+.infoLabel {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.infoValue {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+// ============================================
+// 底部操作栏(固定)
+// ============================================
+.footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  background: $color-bg-card;
+  padding: $spacing-md $spacing-lg;
+  padding-bottom: calc($spacing-md + env(safe-area-inset-bottom));
+  box-shadow: 0 -4rpx 16rpx rgba(0, 0, 0, 0.06);
+}
+
+.primaryBtn {
+  font-size: $font-size-sm;
+  color: $color-text-white;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: 999rpx;
+  padding: 14rpx 40rpx;
+  margin-left: $spacing-sm;
+  font-weight: $font-weight-semibold;
+}
+
+.ghostBtn {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: rgba(144, 147, 153, 0.12);
+  border-radius: 999rpx;
+  padding: 14rpx 40rpx;
+}
+
+// ============================================
+// 空状态
+// ============================================
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: $spacing-xl 0;
+}
+
+.emptyIcon {
+  font-size: 96rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.emptyText {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}

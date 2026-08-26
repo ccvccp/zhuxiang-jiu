@@ -121,6 +121,19 @@
   color: $color-text-tertiary;
 }
 
+.resultActions {
+  margin-top: $spacing-lg;
+}
+
+.viewOrderBtn {
+  font-size: $font-size-sm;
+  color: $color-text-white;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: 999rpx;
+  padding: 14rpx 48rpx;
+  font-weight: $font-weight-semibold;
+}
+
 .logBox {
   background: $color-bg-hover;
   border-radius: $radius-sm;
