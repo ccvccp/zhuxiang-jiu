@@ -3,7 +3,7 @@
   "cloudfunctionRoot": "cloudfunctions/",
   "projectname": "taro_template",
   "description": "taro_template",
-  "appid": "touristappid",
+  "appid": "wxafcff83a4c2a2b7f",
   "setting": {
     "urlCheck": true,
     "es6": false,

@@ -3,38 +3,272 @@
 .page {
   min-height: 100vh;
   background: $color-bg-page;
+}
+
+.scrollView {
+  height: 100vh;
+}
+
+// 会员卡
+.memberCard {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  margin: $spacing-lg;
+  border-radius: $radius-lg;
   padding: $spacing-lg;
-  padding-bottom: $spacing-xl;
+  color: $color-text-white;
+  box-shadow: $shadow-card;
 }
 
-.title {
-  font-size: $font-size-xxl;
-  font-weight: $font-weight-bold;
-  color: $color-primary;
-  text-align: center;
-  margin-bottom: $spacing-md;
-}
-
-.desc {
-  font-size: $font-size-md;
-  color: $color-text-tertiary;
-  text-align: center;
+.memberHeader {
+  display: flex;
+  align-items: center;
   margin-bottom: $spacing-lg;
-  line-height: $line-height-loose;
 }
 
+.avatar {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-right: $spacing-md;
+  border: 2rpx solid rgba(255, 255, 255, 0.4);
+}
+
+.memberInfo {
+  flex: 1;
+}
+
+.memberName {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: $spacing-xs;
+}
+
+.levelBadge {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 4rpx $spacing-md;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  border: 1rpx solid rgba(255, 255, 255, 0.3);
+}
+
+// 会员统计
+.memberStats {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: $radius-md;
+  padding: $spacing-md 0;
+}
+
+.statItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.statValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: 4rpx;
+}
+
+.statLabel {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+}
+
+.statDivider {
+  width: 2rpx;
+  height: 48rpx;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+// 成长进度条
+.progressBox {
+  margin-top: $spacing-md;
+}
+
+.progressBar {
+  height: 12rpx;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: $radius-round;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffd700 0%, #ffa500 100%);
+  border-radius: $radius-round;
+  transition: width $transition-slow;
+}
+
+.progressText {
+  font-size: $font-size-xs;
+  opacity: 0.9;
+  margin-top: $spacing-xs;
+  text-align: center;
+}
+
+.maxLevelTip {
+  font-size: $font-size-sm;
+  text-align: center;
+  margin-top: $spacing-sm;
+  opacity: 0.9;
+  background: rgba(255, 215, 0, 0.2);
+  padding: $spacing-xs;
+  border-radius: $radius-sm;
+}
+
+// 通用 section
 .section {
   background: $color-bg-card;
-  border-radius: $radius-md;
+  margin: 0 $spacing-lg $spacing-md;
+  border-radius: $radius-lg;
   padding: $spacing-lg;
   box-shadow: $shadow-card;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-md;
 }
 
 .sectionTitle {
   font-size: $font-size-lg;
   font-weight: $font-weight-semibold;
   color: $color-text-primary;
+}
+
+.orderCount {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+// 订单列表
+.orderList {
+  display: flex;
+  flex-direction: column;
+}
+
+.orderCard {
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-md;
   margin-bottom: $spacing-sm;
+  transition: all $transition-base;
+
+  &:active {
+    transform: scale(0.98);
+    background: rgba(53, 92, 68, 0.05);
+  }
+}
+
+.orderTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-sm;
+}
+
+.orderNo {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.orderStatus {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.orderItems {
+  margin-bottom: $spacing-sm;
+}
+
+.orderItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4rpx 0;
+}
+
+.itemName {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  flex: 1;
+  @include text-ellipsis;
+  margin-right: $spacing-sm;
+}
+
+.itemQty {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.orderBottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: $spacing-sm;
+  border-top: 2rpx solid rgba(0, 0, 0, 0.05);
+}
+
+.orderShipper {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.orderAmount {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+// 空订单
+.emptyOrders {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: $spacing-xl 0;
+}
+
+.emptyIcon {
+  font-size: 96rpx;
+  margin-bottom: $spacing-sm;
+  opacity: 0.5;
+}
+
+.emptyText {
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-lg;
+}
+
+.goShoppingBtn {
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  height: $button-height-sm;
+  font-size: $font-size-md;
+  padding: 0 $spacing-xl;
+  @include button-reset;
+}
+
+// 个人信息管理
+.privacyDesc {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+  margin-bottom: $spacing-md;
 }
 
 .dangerButton {
@@ -43,7 +277,20 @@
   color: #e74c3c;
   border: 2rpx solid #e74c3c;
   border-radius: $radius-button;
-  height: $button-height-lg;
+  height: $button-height-md;
   font-size: $font-size-md;
-  margin-top: $spacing-md;
+  @include button-reset;
+
+  &:active {
+    background: rgba(231, 76, 60, 0.08);
+  }
+}
+
+// 加载中
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
 }
