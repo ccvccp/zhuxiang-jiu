@@ -16,7 +16,7 @@ export interface MemberVO {
 export const MemberAPI = {
   /** 获取个人信息 */
   async profile(): Promise<MemberVO> {
-    const res = await request<any>('/api/member/profile');
+    const res = await request<any>({ url: '/api/member/profile' });
     const m = res.member || res;
     return {
       id: String(m.id || m.member_id || ''),
@@ -31,7 +31,7 @@ export const MemberAPI = {
 
   /** 查询等级 */
   async level(): Promise<any> {
-    return await request<any>('/api/member/level');
+    return await request<any>({ url: '/api/member/level' });
   },
 
   /** 查询积分 */

@@ -52,7 +52,7 @@ export const ProductAPI = {
     query.push(`page_size=${params?.page_size || 20}`);
     const qs = query.length ? `?${query.join('&')}` : '';
 
-    const res = await request<any>(`/api/product/list${qs}`);
+    const res = await request<any>({ url: `/api/product/list${qs}` });
     return {
       products: (res.products || []).map(mapProduct),
       total: res.total || 0,
@@ -63,7 +63,7 @@ export const ProductAPI = {
 
   /** 商品详情 */
   async detail(productId: string): Promise<ProductVO & { description?: string }> {
-    const res = await request<any>(`/api/product/${productId}`);
+    const res = await request<any>({ url: `/api/product/${productId}` });
     const mapped = mapProduct(res.product || res);
     return {
       ...mapped,
@@ -73,7 +73,7 @@ export const ProductAPI = {
 
   /** 分类导航 */
   async categories(): Promise<any> {
-    return await request<any>('/api/product/categories');
+    return await request<any>({ url: '/api/product/categories' });
   },
 
   /** 热销推荐 */

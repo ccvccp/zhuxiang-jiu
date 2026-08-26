@@ -33,12 +33,12 @@ export const OrderAPI = {
   /** 我的订单(可按状态筛选) */
   async myOrders(status?: string): Promise<any> {
     const qs = status ? `?status=${status}` : '';
-    return await request<any>(`/api/order/my${qs}`);
+    return await request<any>({ url: `/api/order/my${qs}` });
   },
 
   /** 订单详情 */
   async detail(orderId: string): Promise<any> {
-    return await request<any>(`/api/order/${orderId}`);
+    return await request<any>({ url: `/api/order/${orderId}` });
   },
 
   /** 支付订单 */
