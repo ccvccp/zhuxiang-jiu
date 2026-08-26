@@ -1,0 +1,418 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $spacing-lg;
+  padding-bottom: $spacing-xl;
+}
+
+// ============================================
+// 收益概览卡
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  color: $color-text-white;
+  margin-bottom: $spacing-md;
+}
+
+.heroTitle {
+  font-size: $font-size-md;
+  opacity: 0.9;
+  margin-bottom: $spacing-sm;
+}
+
+.balanceRow {
+  margin-bottom: $spacing-lg;
+}
+
+.balance {
+  font-size: 64rpx;
+  font-weight: $font-weight-bold;
+  line-height: $line-height-tight;
+}
+
+.balanceNote {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+  margin-top: calc($spacing-xs / 2);
+}
+
+.heroStats {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: $radius-md;
+  padding: $spacing-md 0;
+}
+
+.heroStatItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.heroStatValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: 4rpx;
+}
+
+.heroStatLabel {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+}
+
+.heroStatDivider {
+  width: 2rpx;
+  height: 48rpx;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+// ============================================
+// 通用 Section
+// ============================================
+.section {
+  margin-bottom: $spacing-md;
+}
+
+.sectionTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+// ============================================
+// 推广码
+// ============================================
+.codeCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  box-shadow: $shadow-card;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.codeValue {
+  font-size: 56rpx;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+  letter-spacing: 4rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.codeDesc {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-lg;
+}
+
+.codeActions {
+  display: flex;
+  width: 100%;
+}
+
+.codeBtn {
+  flex: 1;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  height: $button-height-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  margin-right: $spacing-sm;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.codeBtnGhost {
+  flex: 1;
+  background: transparent;
+  color: $color-primary;
+  border: 2rpx solid $color-primary;
+  border-radius: $radius-button;
+  height: $button-height-sm;
+  font-size: $font-size-md;
+  @include button-reset;
+
+  &:active {
+    background: rgba($color-primary, 0.06);
+  }
+}
+
+.claimCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  box-shadow: $shadow-card;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.claimDesc {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+  margin-bottom: $spacing-lg;
+  text-align: center;
+}
+
+.claimBtn {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  height: $button-height-md;
+  padding: 0 $spacing-xl;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 奖励进度
+// ============================================
+.progressCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  box-shadow: $shadow-card;
+}
+
+.progressItem {
+  margin-bottom: $spacing-md;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.progressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-sm;
+}
+
+.progressName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.progressValue {
+  font-size: $font-size-sm;
+  color: $color-primary;
+  font-weight: $font-weight-semibold;
+}
+
+.progressBar {
+  height: 12rpx;
+  background: $color-bg-hover;
+  border-radius: $radius-round;
+  overflow: hidden;
+  margin-bottom: $spacing-sm;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, $color-primary-light 0%, $color-primary 100%);
+  border-radius: $radius-round;
+}
+
+.progressDesc {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-normal;
+}
+
+// ============================================
+// 团队列表
+// ============================================
+.teamList {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+}
+
+.teamItem {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md $spacing-lg;
+  border-bottom: 2rpx solid $color-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.teamAvatar {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: rgba($color-primary, 0.1);
+  color: $color-primary;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+}
+
+.teamInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.teamName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  margin-bottom: 4rpx;
+  @include text-ellipsis;
+}
+
+.teamMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.teamStatus {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba($color-primary, 0.08);
+  padding: 4rpx 16rpx;
+  border-radius: $radius-round;
+  flex-shrink: 0;
+  margin-left: $spacing-sm;
+}
+
+// ============================================
+// 奖励记录
+// ============================================
+.rewardList {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+}
+
+.rewardItem {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md $spacing-lg;
+  border-bottom: 2rpx solid $color-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.rewardIcon {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: $radius-sm;
+  background: rgba($color-warning, 0.12);
+  font-size: 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+}
+
+.rewardInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.rewardName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  margin-bottom: 4rpx;
+}
+
+.rewardMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.rewardRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  margin-left: $spacing-sm;
+}
+
+.rewardAmount {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+  margin-bottom: 4rpx;
+}
+
+.rewardStatus {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 玩法说明
+// ============================================
+.rulesCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  box-shadow: $shadow-card;
+}
+
+.ruleItem {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+  margin-bottom: $spacing-xs;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+// ============================================
+// 空状态
+// ============================================
+.empty {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-xl 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: $shadow-card;
+}
+
+.emptyIcon {
+  font-size: 72rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.emptyText {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}

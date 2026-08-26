@@ -53,8 +53,8 @@ export async function request<T = any>(options: RequestOptions): Promise<T> {
       return res.data as T;
     }
 
-    // 业务错误
-    const errMsg = (res.data && res.data.detail) || `请求失败(${res.statusCode})`;
+    // 业务错误(兼容 detail / error 两种后端错误格式)
+    const errMsg = (res.data && (res.data.detail || res.data.error)) || `请求失败(${res.statusCode})`;
     Taro.showToast({ title: errMsg, icon: 'none' });
     throw new Error(errMsg);
   } catch (e: any) {

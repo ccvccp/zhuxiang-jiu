@@ -112,10 +112,10 @@ const IndexPage: React.FC = () => {
         Taro.showToast({ title: '充值功能开发中', icon: 'none' });
         break;
       case 'activity':
-        Taro.showToast({ title: '活动中心开发中', icon: 'none' });
+        Taro.navigateTo({ url: '/pages/activity/index' });
         break;
       case 'promotion':
-        Taro.showToast({ title: '推广中心开发中', icon: 'none' });
+        Taro.navigateTo({ url: '/pages/promotion/index' });
         break;
       case 'member':
         Taro.switchTab({ url: '/pages/mine/index' });

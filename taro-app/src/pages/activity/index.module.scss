@@ -1,0 +1,241 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $spacing-lg;
+  padding-bottom: $spacing-xl;
+}
+
+// ============================================
+// 概览头部
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  color: $color-text-white;
+  margin-bottom: $spacing-md;
+}
+
+.heroTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: 4rpx;
+}
+
+.heroDesc {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+  margin-bottom: $spacing-lg;
+}
+
+.heroStats {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: $radius-md;
+  padding: $spacing-md 0;
+}
+
+.heroStatItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.heroStatValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: 4rpx;
+}
+
+.heroStatLabel {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+}
+
+.heroStatDivider {
+  width: 2rpx;
+  height: 48rpx;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+// ============================================
+// 状态筛选 tab
+// ============================================
+.tabs {
+  display: flex;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: 8rpx;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  padding: $spacing-sm 0;
+  border-radius: $radius-sm;
+}
+
+.tabActive {
+  background: $color-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-semibold;
+}
+
+// ============================================
+// 活动卡片
+// ============================================
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+}
+
+.cardIcon {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: $radius-sm;
+  background: rgba(53, 92, 68, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 44rpx;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+}
+
+.cardTitleWrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.cardTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  line-height: $line-height-tight;
+}
+
+.cardTime {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: 8rpx;
+}
+
+.badge {
+  font-size: $font-size-xs;
+  padding: 6rpx 16rpx;
+  border-radius: 999rpx;
+  margin-left: $spacing-sm;
+  flex-shrink: 0;
+}
+
+.registering {
+  background: rgba(230, 162, 60, 0.12);
+  color: #e6a23c;
+}
+
+.ongoing {
+  background: rgba(103, 194, 58, 0.12);
+  color: #67c23a;
+}
+
+.ended {
+  background: rgba(144, 147, 153, 0.12);
+  color: $color-text-tertiary;
+}
+
+.cardDesc {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  margin-top: $spacing-md;
+  line-height: 1.6;
+}
+
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 2rpx solid rgba(0, 0, 0, 0.04);
+}
+
+.regCount {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.regCountNum {
+  color: $color-primary;
+  font-weight: $font-weight-semibold;
+  font-size: $font-size-md;
+}
+
+.regMark {
+  color: #67c23a;
+  font-size: $font-size-xs;
+}
+
+.regBtn {
+  font-size: $font-size-sm;
+  color: $color-text-white;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: 999rpx;
+  padding: 12rpx 36rpx;
+  font-weight: $font-weight-semibold;
+}
+
+.cancelBtn {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: rgba(144, 147, 153, 0.12);
+  border-radius: 999rpx;
+  padding: 12rpx 36rpx;
+}
+
+// ============================================
+// 空状态 / 底部说明
+// ============================================
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: $spacing-xl 0;
+}
+
+.emptyIcon {
+  font-size: 96rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.emptyText {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.note {
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-sm;
+}
