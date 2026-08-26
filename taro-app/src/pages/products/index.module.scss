@@ -2,22 +2,202 @@
 
 .page {
   min-height: 100vh;
-  background: $color-bg-page;
+  background: linear-gradient(180deg, #e8f0ec 0%, $color-bg-page 100%);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: $spacing-xl;
+}
+
+// 顶部品牌头
+.header {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  padding: $spacing-lg $spacing-lg $spacing-xl;
+  color: $color-text-white;
 }
 
 .title {
   font-size: $font-size-xxl;
   font-weight: $font-weight-bold;
-  color: $color-primary;
-  margin-bottom: $spacing-md;
+  margin-bottom: $spacing-xs;
 }
 
-.desc {
+.subtitle {
+  font-size: $font-size-sm;
+  opacity: 0.9;
+  line-height: $line-height-loose;
+}
+
+// 分类筛选栏
+.categoryBar {
+  white-space: nowrap;
+  background: $color-bg-card;
+  padding: $spacing-md $spacing-lg;
+  box-shadow: $shadow-float;
+}
+
+.categoryItem {
+  display: inline-block;
+  padding: $spacing-xs $spacing-md;
+  margin-right: $spacing-sm;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  background: $color-bg-page;
+  border-radius: $radius-round;
+  transition: all $transition-base;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.categoryActive {
+  background: $color-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-medium;
+}
+
+// 商品列表
+.productList {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// 商品卡片
+.productCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  display: flex;
+  align-items: stretch;
+  transition: all $transition-base;
+
+  &:active {
+    transform: scale(0.98);
+    box-shadow: $shadow-card-hover;
+  }
+}
+
+// 缩略图区
+.productThumb {
+  flex-shrink: 0;
+  width: 180rpx;
+  height: 180rpx;
+  border-radius: $radius-md;
+  background: linear-gradient(135deg, #f0ebe3 0%, #e8e0d3 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-right: $spacing-md;
+  position: relative;
+}
+
+.productEmoji {
+  font-size: 72rpx;
+  line-height: 1;
+}
+
+.specTag {
+  position: absolute;
+  bottom: $spacing-xs;
+  background: rgba(53, 92, 68, 0.85);
+  color: $color-text-white;
+  font-size: $font-size-xs;
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-round;
+}
+
+// 商品信息
+.productInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.productName {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  line-height: $line-height-tight;
+  @include text-ellipsis-multi(2);
+}
+
+.productMeta {
+  display: flex;
+  align-items: center;
+  margin-top: $spacing-xs;
+}
+
+.categoryTag {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba(53, 92, 68, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+  margin-right: $spacing-sm;
+}
+
+.productStock {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 价格与按钮行
+.productBottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-top: $spacing-sm;
+}
+
+.productPrice {
+  display: flex;
+  align-items: baseline;
+  color: $color-primary;
+}
+
+.priceSymbol {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.priceValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-left: 2rpx;
+}
+
+.buyButton {
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  padding: 0 $spacing-lg;
+  height: $button-height-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  white-space: nowrap;
+  @include button-reset;
+}
+
+// 空状态
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xl * 2 $spacing-lg;
+}
+
+.emptyIcon {
+  font-size: 96rpx;
+  margin-bottom: $spacing-md;
+  opacity: 0.5;
+}
+
+.emptyText {
   font-size: $font-size-md;
   color: $color-text-tertiary;
 }
