@@ -58,9 +58,24 @@ function initMockDB(forceWrite?: boolean) {
 
   const db = {
     products: [
-      { id: 1, name: '竹奕·竹香经典 500ml', price: 268, stock: 100 },
-      { id: 2, name: '竹奕·竹韵佳酿 500ml', price: 368, stock: 100 },
-      { id: 3, name: '竹奕·竹香珍藏 500ml', price: 698, stock: 50 },
+      {
+        id: 1, name: '竹奕·竹香经典 500ml', price: 268, stock: 100,
+        spec: '500ml', abv: '42%vol', origin: '山东泰安',
+        category: '经典',
+        description: '竹香经典系列，精选泰山脚下优质竹汁与高粱酒基，采用古法浸提工艺，竹香清雅、入口绵柔。适合日常品鉴与朋友小聚。',
+      },
+      {
+        id: 2, name: '竹奕·竹韵佳酿 500ml', price: 368, stock: 100,
+        spec: '500ml', abv: '45%vol', origin: '山东泰安',
+        category: '佳酿',
+        description: '竹韵佳酿系列，三年陈酿基酒搭配深山老竹提取液，色泽琥珀、回味悠长。商务宴请与礼赠佳品。',
+      },
+      {
+        id: 3, name: '竹奕·竹香珍藏 500ml', price: 698, stock: 50,
+        spec: '500ml', abv: '48%vol', origin: '山东泰安',
+        category: '珍藏',
+        description: '竹香珍藏系列，十年陈酿基酒与特级竹露精心调制，限量发售。瓶身采用景德镇青花瓷，礼盒包装，收藏与高端礼赠之选。',
+      },
     ],
     coupons: [
       { id: 'C001', code: 'NEW10', discount: 0.10, status: '未使用', desc: '新人9折' },

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView } from '@tarojs/components';
+import { View, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
@@ -15,12 +15,9 @@ const IndexPage: React.FC = () => {
   }, []);
 
   const handleBuy = (product: any) => {
-    // 代理商认领山东泰安(测试用)
-    CheckoutService.claim(1, '山东泰安');
-
-    // 跳转结算页,传递商品信息
+    // 跳转商品详情页
     Taro.navigateTo({
-      url: `/pages/checkout/index?productId=${product.id}&productName=${encodeURIComponent(product.name)}&price=${product.price}`
+      url: `/pages/product-detail/index?id=${product.id}`
     });
   };
 

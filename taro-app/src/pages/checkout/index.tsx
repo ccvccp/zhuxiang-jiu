@@ -19,7 +19,7 @@ const CheckoutPage: React.FC = () => {
   const productId = Number(router.params.productId || '0');
   const productName = decodeURIComponent(router.params.productName || '竹香酒');
   const price = Number(router.params.price || '0');
-  const qty = 1;
+  const qty = Number(router.params.qty || '1') || 1;
 
   // 价格估算(L5会员)
   const originalTotal = price * qty;

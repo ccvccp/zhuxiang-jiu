@@ -40,10 +40,9 @@ const ProductsPage: React.FC = () => {
   }, [products, activeCategory]);
 
   const handleBuy = (product: any) => {
-    // 代理商认领山东泰安(测试用,与首页一致)
-    CheckoutService.claim(1, '山东泰安');
+    // 跳转商品详情页
     Taro.navigateTo({
-      url: `/pages/checkout/index?productId=${product.id}&productName=${encodeURIComponent(product.name)}&price=${product.price}`
+      url: `/pages/product-detail/index?id=${product.id}`
     });
   };
 

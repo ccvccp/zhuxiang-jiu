@@ -1,0 +1,269 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.scrollView {
+  flex: 1;
+  height: 0;
+}
+
+// 商品大图区
+.heroBox {
+  position: relative;
+  height: 600rpx;
+  background: linear-gradient(135deg, #f5f0e8 0%, #e8e0d3 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.heroEmoji {
+  font-size: 240rpx;
+  line-height: 1;
+}
+
+.heroTag {
+  position: absolute;
+  top: $spacing-lg;
+  right: $spacing-lg;
+  background: $color-primary;
+  color: $color-text-white;
+  font-size: $font-size-xs;
+  padding: 4rpx $spacing-md;
+  border-radius: $radius-round;
+}
+
+// 价格区
+.priceSection {
+  background: $color-bg-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-sm;
+}
+
+.priceRow {
+  display: flex;
+  align-items: baseline;
+  color: $color-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.priceSymbol {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+}
+
+.priceValue {
+  font-size: $font-size-xxl;
+  font-weight: $font-weight-bold;
+  margin-right: $spacing-md;
+}
+
+.specBadge {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+.productName {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  line-height: $line-height-tight;
+  margin-bottom: $spacing-xs;
+}
+
+.stockInfo {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+// 规格参数
+.specSection {
+  background: $color-bg-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-sm;
+}
+
+.sectionTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+  padding-left: $spacing-sm;
+  border-left: 6rpx solid $color-primary;
+}
+
+.specGrid {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.specItem {
+  width: 50%;
+  display: flex;
+  align-items: center;
+  padding: $spacing-sm 0;
+}
+
+.specLabel {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  width: 120rpx;
+}
+
+.specValue {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  flex: 1;
+}
+
+// 商品描述
+.descSection {
+  background: $color-bg-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-sm;
+}
+
+.descText {
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+  text-align: justify;
+}
+
+// 温馨提示
+.tipSection {
+  background: $color-bg-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-sm;
+}
+
+.tipList {
+  display: flex;
+  flex-direction: column;
+}
+
+.tipItem {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+  padding: 4rpx 0;
+}
+
+// 底部占位
+.bottomSpacer {
+  height: 140rpx;
+}
+
+// 底部操作栏
+.actionBar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 100rpx;
+  background: $color-bg-card;
+  box-shadow: 0 -2rpx 12rpx rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  padding: 0 $spacing-lg;
+  @include fixed-bottom-safe-area;
+}
+
+.actionIcon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-right: $spacing-md;
+  width: 80rpx;
+}
+
+.iconEmoji {
+  font-size: 36rpx;
+  line-height: 1;
+}
+
+.iconText {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+}
+
+// 数量选择
+.qtyBox {
+  display: flex;
+  align-items: center;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  margin-right: $spacing-md;
+}
+
+.qtyBtn {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-xl;
+  color: $color-primary;
+  font-weight: $font-weight-bold;
+
+  &:active {
+    background: rgba(0, 0, 0, 0.05);
+  }
+}
+
+.qtyValue {
+  min-width: 64rpx;
+  text-align: center;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+// 立即购买按钮
+.buyBtn {
+  flex: 1;
+  height: 72rpx;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// 加载态
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+}
+
+.loadingIcon {
+  font-size: 120rpx;
+  margin-bottom: $spacing-md;
+  opacity: 0.5;
+}
+
+.loadingText {
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
