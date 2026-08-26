@@ -30,7 +30,7 @@
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 try:
     import redis
@@ -68,7 +68,7 @@ VERSION_STATS = {
 
 def ts(delta_hours: float = 0.0) -> str:
     """UTC ISO 时间戳(对齐 core.helpers.ts), 可前移若干小时"""
-    t = datetime.now(timezone.utc) - timedelta(hours=delta_hours)
+    t = datetime.now(UTC) - timedelta(hours=delta_hours)
     return t.isoformat()
 
 

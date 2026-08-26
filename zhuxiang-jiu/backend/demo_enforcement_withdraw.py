@@ -21,7 +21,7 @@ import asyncio
 import json
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 # 环境须在导入 app 前设置(演示跑独立内存态, 与其他进程互不影响)
 os.environ["LOCK_MODE"] = "asyncio"
@@ -52,7 +52,7 @@ def _iso(dt: datetime) -> str:
 async def _mk_user(days_old: float, balance: float,
                    withdrawals: list) -> str:
     """构造演示用户: 会员 + 活跃钱包 + 提现历史 [(status, minutes_ago), ...]"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     member = await MemberRepository().create({
         "phone": _phone(), "password": "demo-pass", "nickname": "演示用户",
         "level": 2, "growth_value": 600, "points": 100, "status": 1,
@@ -95,7 +95,7 @@ async def _seed_feedback() -> None:
 def _fmt(resp) -> str:
     try:
         return json.dumps(resp.json(), ensure_ascii=False)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return resp.text[:200]
 
 

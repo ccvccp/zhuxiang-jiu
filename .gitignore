@@ -104,3 +104,31 @@ docs/*-diff-report.txt
 # ============================================================
 .pai/
 *.pai.lock
+
+# ============================================================
+#  微信开发者工具 / Taro 构建沙箱绕过临时目录
+#  (本地 IDE User Data 重定向 + 沙箱写绕过目录,体积大不应提交)
+# ============================================================
+wechat_devtools_installer.exe
+wechat-devtools-data/
+wechat-devtools-home/
+taro-app/.home/
+taro-app/.swc/
+
+# ============================================================
+#  排障临时输出文件(根目录补充,与上面 *.log 互补)
+# ============================================================
+/backend-errors.txt
+/backend-log.txt
+/backend-startup.txt
+/docker-check.txt
+/docker-check-2.txt
+/docker-desktop-log.txt
+/vm-init-log.txt
+/wsl-bootstrap.txt
+/wsl-list-2.txt
+
+# ============================================================
+#  Coverage JSON 报告(backend 临时产物,与 .coverage / coverage.xml 互补)
+# ============================================================
+zhuxiang-jiu/backend/coverage*.json

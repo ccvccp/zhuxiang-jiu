@@ -68,10 +68,10 @@ def _k(entity: str, *parts) -> str:
 
 
 # 局部导入: 产品 / 评价 / 分类 / 库存数据源(与 store.py 复用同一份数据, 避免重复维护)
-from repositories.product_repository import (  # noqa: E402
+from repositories.product_repository import (
     _initial_products, _initial_reviews, PRODUCT_CATEGORIES,
 )
-from repositories.store import (  # noqa: E402
+from repositories.store import (
     _build_initial_inventory, _build_initial_agents,
     _build_initial_agent_rebates, _build_initial_agent_risks,
 )
@@ -302,7 +302,7 @@ async def seed_product_reviews(client) -> int:
 
 # 财务 seed 数据(与 repositories/store.py 的 _build_initial_finance 完全一致)
 # 使用同一份函数避免数据重复维护
-from repositories.store import _build_initial_finance as _build_finance_seed  # noqa: E402
+from repositories.store import _build_initial_finance as _build_finance_seed
 
 
 def _serialize_finance_hash(data: dict) -> dict:
