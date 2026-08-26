@@ -156,7 +156,7 @@ const IndexPage: React.FC = () => {
         <View className={styles.warning}>过量饮酒有害健康</View>
       </View>
 
-      <ScrollView scrollY className={styles.body}>
+      <View className={styles.body}>
         {/* 公告条 */}
         <View className={styles.noticeBar}>
           <Text className={styles.noticeIcon}>📢</Text>
@@ -289,7 +289,7 @@ const IndexPage: React.FC = () => {
             ))}
           </View>
         </View>
-      </ScrollView>
+      </View>
     </View>
   );
 };

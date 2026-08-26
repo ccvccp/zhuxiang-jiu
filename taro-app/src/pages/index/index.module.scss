@@ -32,9 +32,8 @@
   margin-top: $spacing-sm;
 }
 
-// 主体滚动容器
+// 主体内容(页面级自然滚动)
 .body {
-  flex: 1;
   padding: 0 $spacing-lg $spacing-lg;
 }
 
@@ -65,11 +64,11 @@
 }
 
 // ============================================
-// 功能金刚区(8 宫格)
+// 功能金刚区(8 宫格, flex 两行四列)
 // ============================================
 .quickGrid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   background: $color-bg-card;
   border-radius: $radius-md;
   padding: $spacing-md $spacing-sm;
@@ -78,6 +77,8 @@
 }
 
 .quickItem {
+  width: 25%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -243,21 +244,27 @@
 }
 
 // ============================================
-// 团购阶梯
+// 团购阶梯(flex 四列)
 // ============================================
 .tierRow {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: $spacing-sm;
+  display: flex;
+  align-items: stretch;
 }
 
 .tierCard {
+  flex: 1;
   background: $color-bg-card;
   border-radius: $radius-md;
   padding: $spacing-sm $spacing-xs;
   text-align: center;
   box-shadow: $shadow-card;
   border: 2rpx solid transparent;
+  margin-right: $spacing-sm;
+  box-sizing: border-box;
+
+  &:last-child {
+    margin-right: 0;
+  }
 
   &:nth-child(1) { border-color: #ffe0a3; }
   &:nth-child(2) { border-color: #ffd27a; }
