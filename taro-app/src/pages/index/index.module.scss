@@ -4,6 +4,8 @@
   min-height: 100vh;
   background: linear-gradient(180deg, #e8f0ec 0%, $color-bg-page 100%);
   padding-bottom: $spacing-xl;
+  display: flex;
+  flex-direction: column;
 }
 
 .header {
@@ -30,10 +32,332 @@
   margin-top: $spacing-sm;
 }
 
-.productList {
-  padding: $spacing-lg;
+// 主体滚动容器
+.body {
+  flex: 1;
+  padding: 0 $spacing-lg $spacing-lg;
 }
 
+// ============================================
+// 公告条
+// ============================================
+.noticeBar {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  margin-top: -$spacing-sm;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.noticeIcon {
+  font-size: $font-size-md;
+  margin-right: $spacing-sm;
+}
+
+.noticeText {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  @include text-ellipsis;
+}
+
+// ============================================
+// 功能金刚区(8 宫格)
+// ============================================
+.quickGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md $spacing-sm;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.quickItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: $spacing-sm 0;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.quickIcon {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba($color-primary, 0.1) 0%, rgba($color-primary, 0.05) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40rpx;
+  margin-bottom: $spacing-xs;
+}
+
+.quickLabel {
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+  line-height: $line-height-tight;
+}
+
+// ============================================
+// 签到卡片
+// ============================================
+.signinCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, #fff8e7 0%, #ffe9c4 100%);
+  border-radius: $radius-md;
+  padding: $spacing-md $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.signinLeft {
+  flex: 1;
+}
+
+.signinTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: #8b5a00;
+  margin-bottom: calc($spacing-xs / 2);
+}
+
+.signinDesc {
+  font-size: $font-size-sm;
+  color: #a87415;
+  margin-bottom: $spacing-xs;
+}
+
+.signinPoints {
+  font-size: $font-size-xs;
+  color: #6b4500;
+  opacity: 0.85;
+}
+
+.signinBtn {
+  background: linear-gradient(135deg, #f6a623 0%, #e67e22 100%);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  padding: 0 $spacing-lg;
+  height: $button-height-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  white-space: nowrap;
+  @include button-reset;
+
+  &.signed {
+    background: #d1d5da;
+  }
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 通用 Section
+// ============================================
+.section {
+  background: transparent;
+  margin-bottom: $spacing-md;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 $spacing-xs;
+  margin-bottom: $spacing-sm;
+}
+
+.sectionTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.sectionMore {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+// ============================================
+// 活动横幅(横向滚动)
+// ============================================
+.activityScroll {
+  white-space: nowrap;
+  @include scroll-x-container;
+}
+
+.activityCard {
+  display: inline-block;
+  width: 480rpx;
+  vertical-align: top;
+  white-space: normal;
+  background: linear-gradient(135deg, #355c44 0%, #4a7a5c 100%);
+  color: $color-text-white;
+  border-radius: $radius-md;
+  padding: $spacing-md $spacing-lg;
+  margin-right: $spacing-md;
+
+  &:last-child {
+    margin-right: 0;
+  }
+}
+
+.activityName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  margin-bottom: $spacing-xs;
+  @include text-ellipsis;
+}
+
+.activityDesc {
+  font-size: $font-size-sm;
+  opacity: 0.92;
+  line-height: $line-height-normal;
+  margin-bottom: $spacing-sm;
+  @include text-ellipsis-multi(2);
+}
+
+.activityBadge {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.22);
+  color: $color-text-white;
+  font-size: $font-size-xs;
+  padding: 4rpx 16rpx;
+  border-radius: $radius-round;
+}
+
+// ============================================
+// 团购阶梯
+// ============================================
+.tierRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: $spacing-sm;
+}
+
+.tierCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-xs;
+  text-align: center;
+  box-shadow: $shadow-card;
+  border: 2rpx solid transparent;
+
+  &:nth-child(1) { border-color: #ffe0a3; }
+  &:nth-child(2) { border-color: #ffd27a; }
+  &:nth-child(3) { border-color: #fbbf24; }
+  &:nth-child(4) { border-color: #f59e0b; }
+}
+
+.tierName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.tierDiscount {
+  font-size: $font-size-sm;
+  color: $color-warning;
+  font-weight: $font-weight-semibold;
+  margin: calc($spacing-xs / 2) 0;
+}
+
+.tierAmount {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 热销推荐(横向滚动)
+// ============================================
+.hotScroll {
+  white-space: nowrap;
+  @include scroll-x-container;
+}
+
+.hotCard {
+  display: inline-block;
+  width: 220rpx;
+  vertical-align: top;
+  white-space: normal;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md $spacing-sm;
+  margin-right: $spacing-sm;
+  box-shadow: $shadow-card;
+
+  &:last-child {
+    margin-right: 0;
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+.hotThumb {
+  width: 100%;
+  height: 180rpx;
+  background: linear-gradient(135deg, rgba($color-primary, 0.08) 0%, rgba($color-primary, 0.03) 100%);
+  border-radius: $radius-sm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 80rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.hotName {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+  margin-bottom: 4rpx;
+  @include text-ellipsis-multi(2);
+  line-height: $line-height-tight;
+  height: 64rpx;
+}
+
+.hotSpec {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-xs;
+}
+
+.hotPrice {
+  display: flex;
+  align-items: baseline;
+  color: $color-primary;
+}
+
+.hotSymbol {
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+}
+
+.hotValue {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+}
+
+// ============================================
+// 商品列表(原有)
+// ============================================
 .productCard {
   background: $color-bg-card;
   border-radius: $radius-md;

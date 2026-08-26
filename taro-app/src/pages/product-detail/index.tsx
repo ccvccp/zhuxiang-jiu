@@ -4,6 +4,7 @@ import Taro, { useRouter } from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { ProductAPI, ProductVO } from '@/api/product';
+import { PRODUCT_DEFAULTS, SERVICE_PHONE } from '@/config';
 
 // 兜底: API 失败时用 mock 数据
 function loadMockProduct(id: string): ProductVO & { description?: string } | null {
@@ -15,9 +16,9 @@ function loadMockProduct(id: string): ProductVO & { description?: string } | nul
     name: p.name,
     price: p.price,
     stock: p.stock,
-    spec: p.spec || '500ml',
-    abv: p.abv || '42%vol',
-    category: p.category || '经典',
+    spec: p.spec || PRODUCT_DEFAULTS.spec,
+    abv: p.abv || PRODUCT_DEFAULTS.abv,
+    category: p.category || PRODUCT_DEFAULTS.category,
     description: p.description || '',
   };
 }
@@ -65,7 +66,7 @@ const ProductDetailPage: React.FC = () => {
   };
 
   const handleContact = () => {
-    Taro.showToast({ title: '客服功能开发中', icon: 'none' });
+    Taro.showToast({ title: `客服热线: ${SERVICE_PHONE}`, icon: 'none' });
   };
 
   if (loading || !product) {

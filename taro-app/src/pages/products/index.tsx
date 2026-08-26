@@ -4,6 +4,7 @@ import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { ProductAPI, ProductVO } from '@/api/product';
+import { PRODUCT_DEFAULTS } from '@/config';
 
 // 兜底: API 失败时用 mock 数据(保证页面可用)
 function loadMockProducts(): ProductVO[] {
@@ -13,9 +14,9 @@ function loadMockProducts(): ProductVO[] {
     name: p.name,
     price: p.price,
     stock: p.stock,
-    spec: p.spec || '500ml',
-    abv: p.abv || '42%vol',
-    category: p.category || '经典',
+    spec: p.spec || PRODUCT_DEFAULTS.spec,
+    abv: p.abv || PRODUCT_DEFAULTS.abv,
+    category: p.category || PRODUCT_DEFAULTS.category,
   }));
 }
 

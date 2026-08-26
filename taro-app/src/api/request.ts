@@ -1,5 +1,5 @@
 /**
- * API 请求封装 · 对接后端 FastAPI (http://127.0.0.1:8000)
+ * API 请求封装 · 对接后端 FastAPI
  * ============================================================
  * 微信小程序真机预览: 需在开发者工具 "详情 → 本地设置" 勾选
  *   "不校验合法域名、web-view（业务域名）、TLS 版本以及 HTTPS 证书"
@@ -7,16 +7,12 @@
  * 后端字段结构(与 mock 不同, 需在各自 api 文件做映射):
  *   product: product_id / name / price / stock / alcohol / volume / series / subtitle
  *   order:   order_id / status / items / priceDetail
+ *
+ * 地址与会员身份统一在 src/config/index.ts 管理
  */
 
 import Taro from '@tarojs/taro';
-
-// 后端基地址(开发环境)
-// H5 预览用 127.0.0.1, 真机预览用电脑局域网 IP(192.168.0.106)
-export const API_BASE = 'http://192.168.0.106:8000';
-
-// 当前登录会员(测试用: 李四, member_id=2, L5钻石会员)
-export const CURRENT_MEMBER_ID = '2';
+import { API_BASE, CURRENT_MEMBER_ID } from '@/config';
 
 interface RequestOptions {
   url: string;

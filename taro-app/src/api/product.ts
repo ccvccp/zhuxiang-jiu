@@ -3,6 +3,7 @@
  * 字段映射: 后端 product → 前端 ProductVO
  */
 import { request } from './request';
+import { PRODUCT_DEFAULTS } from '@/config';
 
 export interface ProductVO {
   id: string;
@@ -28,9 +29,9 @@ function mapProduct(p: any): ProductVO {
     originalPrice: p.original_price,
     memberPrice: p.member_price,
     stock: p.stock,
-    spec: p.volume || '500ml',
-    abv: p.alcohol ? `${p.alcohol}%vol` : '42%vol',
-    category: p.series || '经典',
+    spec: p.volume || PRODUCT_DEFAULTS.spec,
+    abv: p.alcohol ? `${p.alcohol}%vol` : PRODUCT_DEFAULTS.abv,
+    category: p.series || PRODUCT_DEFAULTS.category,
     subtitle: p.subtitle,
     brand: p.brand,
     salesMonthly: p.sales_monthly,

@@ -5,24 +5,7 @@ import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { MemberAPI } from '@/api/member';
 import { OrderAPI } from '@/api/order';
-
-// 会员等级映射(显示用)
-const LEVEL_NAME: Record<string, string> = {
-  L1: '普通会员', L2: '银卡会员', L3: '金卡会员', L4: '铂金会员', L5: '钻石会员',
-};
-
-// 下一等级所需成长值(简化估算)
-const NEXT_LEVEL_POINTS: Record<string, number> = {
-  L1: 1000, L2: 3000, L3: 6000, L4: 10000, L5: 10000,
-};
-
-// 订单状态颜色
-function statusColor(status: string): string {
-  if (status === '已付款') return '#27ae60';
-  if (status === '待付款') return '#e67e22';
-  if (status === '已取消') return '#95a5a6';
-  return '#355c44';
-}
+import { LEVEL_NAME, NEXT_LEVEL_POINTS, statusColor, DANGER_COLOR } from '@/config';
 
 const MinePage: React.FC = () => {
   const [member, setMember] = useState<any>(null);
@@ -75,7 +58,7 @@ const MinePage: React.FC = () => {
     Taro.showModal({
       title: '删除我的数据',
       content: '根据《个人信息保护法》第47条，您有权删除个人信息。此操作将清除所有订单、积分、会员数据，不可恢复。确认删除？',
-      confirmColor: '#e74c3c',
+      confirmColor: DANGER_COLOR,
       success: (res) => {
         if (res.confirm) {
           CheckoutService.resetMock();

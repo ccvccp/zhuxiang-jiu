@@ -169,7 +169,7 @@
 
   &:active {
     transform: scale(0.98);
-    background: rgba(53, 92, 68, 0.05);
+    background: rgba($color-primary, 0.05);
   }
 }
 
@@ -274,15 +274,15 @@
 .dangerButton {
   width: 100%;
   background: transparent;
-  color: #e74c3c;
-  border: 2rpx solid #e74c3c;
+  color: $color-error;
+  border: 2rpx solid $color-error;
   border-radius: $radius-button;
   height: $button-height-md;
   font-size: $font-size-md;
   @include button-reset;
 
   &:active {
-    background: rgba(231, 76, 60, 0.08);
+    background: rgba($color-error, 0.08);
   }
 }
 

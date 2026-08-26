@@ -101,7 +101,7 @@
 .specTag {
   position: absolute;
   bottom: $spacing-xs;
-  background: rgba(53, 92, 68, 0.85);
+  background: rgba($color-primary, 0.85);
   color: $color-text-white;
   font-size: $font-size-xs;
   padding: 2rpx $spacing-sm;
@@ -134,7 +134,7 @@
 .categoryTag {
   font-size: $font-size-xs;
   color: $color-primary;
-  background: rgba(53, 92, 68, 0.1);
+  background: rgba($color-primary, 0.1);
   padding: 2rpx $spacing-sm;
   border-radius: $radius-xs;
   margin-right: $spacing-sm;

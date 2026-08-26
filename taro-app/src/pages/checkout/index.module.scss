@@ -56,7 +56,7 @@
   font-weight: $font-weight-medium;
 
   &.agent {
-    background: rgba(53, 92, 68, 0.1);
+    background: rgba($color-primary, 0.1);
     color: $color-primary;
   }
 
