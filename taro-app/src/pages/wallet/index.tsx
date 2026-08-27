@@ -1,5 +1,5 @@
 /**
- * 钱包 · 余额/充值/提现/流水/补贴预估
+ * 钱包 · 余额/充值/提现/流水/收益预估
  * 数据来源: 后端 /api/wallet/*
  * 开通条件: 会员等级 ≥ L2(成长值 ≥ 500), 未开通时引导开通
  */
@@ -15,7 +15,7 @@ const TX_TABS = [
   { key: 'deposit', label: '充值' },
   { key: 'withdraw', label: '提现' },
   { key: 'consume', label: '消费' },
-  { key: 'interest', label: '补贴' },
+  { key: 'interest', label: '收益' },
   { key: 'rebate', label: '返利' },
 ];
 
@@ -160,7 +160,7 @@ const WalletPage: React.FC = () => {
           <View className={styles.openIcon}>💰</View>
           <View className={styles.openTitle}>开通竹香钱包</View>
           <View className={styles.openDesc}>
-            存入余额享活期营销补贴(年化 3%),消费自动返利 1%
+            存入余额享年化 3% 活期收益,消费自动返利 1%
           </View>
           <View className={styles.openRule}>开通条件: 会员等级 ≥ L2(成长值 ≥ 500)</View>
           <View className={styles.openBtn} onClick={handleOpen}>
@@ -198,7 +198,7 @@ const WalletPage: React.FC = () => {
           <View className={styles.heroStatDivider} />
           <View className={styles.heroStatItem}>
             <View className={styles.heroStatValue}>{(info?.pendingInterest ?? 0).toFixed(2)}</View>
-            <View className={styles.heroStatLabel}>待结补贴</View>
+            <View className={styles.heroStatLabel}>待结收益</View>
           </View>
         </View>
         <View className={styles.heroActions}>
@@ -213,7 +213,7 @@ const WalletPage: React.FC = () => {
         <View className={styles.statsCard}>
           <View className={styles.statsItem}>
             <View className={styles.statsValue}>{(info?.totalInterest ?? 0).toFixed(2)}</View>
-            <View className={styles.statsLabel}>营销补贴</View>
+            <View className={styles.statsLabel}>余额收益</View>
           </View>
           <View className={styles.statsItem}>
             <View className={styles.statsValue}>{(info?.totalRebate ?? 0).toFixed(2)}</View>
@@ -280,7 +280,7 @@ const WalletPage: React.FC = () => {
 
       {/* 规则说明 */}
       <View className={styles.note}>
-        活期补贴年化 3% 按月入账 · 消费返利 1%(单笔上限 ¥100) · 提现 ≥ ¥5000 需人工审核
+        活期收益年化 3% 按月入账 · 消费返利 1%(单笔上限 ¥100) · 提现 ≥ ¥5000 需人工审核
       </View>
 
       {/* 充值弹层 */}
@@ -288,7 +288,7 @@ const WalletPage: React.FC = () => {
         <View className={styles.mask} onClick={() => setShowDeposit(false)}>
           <View className={styles.sheet} onClick={(e) => e.stopPropagation()}>
             <View className={styles.sheetTitle}>钱包充值</View>
-            <View className={styles.sheetDesc}>充值进入活期余额,可消费/可提现,享年化 3% 补贴</View>
+            <View className={styles.sheetDesc}>充值进入活期余额,可消费/可提现,享年化 3% 收益</View>
             <View className={styles.quickRow}>
               {QUICK_AMOUNTS.map(a => (
                 <View

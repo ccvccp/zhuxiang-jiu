@@ -238,14 +238,14 @@ async def run_e2e():
     # ============================================================
     print("\n========== 5. 收益计算(3 接口) ==========")
 
-    # 5.1 日补贴预估
-    print("[Test 5.1] 日补贴预估")
+    # 5.1 日收益预估
+    print("[Test 5.1] 日收益预估")
     r = await svc.calc_daily_interest(user_id)
-    check("日补贴成功", r["success"] is True)
-    check("日补贴 > 0", r["dailyInterest"] > 0)
+    check("日收益成功", r["success"] is True)
+    check("日收益 > 0", r["dailyInterest"] > 0)
     bal = (await svc.get_info(user_id))["currentBalance"]
     expected_daily = round(bal * CURRENT_ANNUAL_RATE / 365, 2)
-    check("日补贴公式", r["dailyInterest"] == expected_daily,
+    check("日收益公式", r["dailyInterest"] == expected_daily,
           f"actual={r.get('dailyInterest')}, expected={expected_daily}")
 
     # 5.2 月度结付(无待入账应 ValueError)
@@ -282,7 +282,7 @@ async def run_e2e():
     r = await svc.transfer_to_regular(user_id, 5000.0, 12)
     check("转定期成功", r["success"] is True)
     check("定期编号", r["depositNo"].startswith("DP"))
-    check("12 月补贴 150", r["expectedInterest"] == 150.0,
+    check("12 月收益 150", r["expectedInterest"] == 150.0,
           f"actual={r.get('expectedInterest')}")
     check("年化 3%", r["annualRate"] == 0.03)
     check("奖品匹配", "竹香经典" in r.get("rewardName", ""))
@@ -311,7 +311,7 @@ async def run_e2e():
     check("提前取出成功", r["success"] is True)
     check("手续费 50(5000×1%)", r["fee"] == 50.0, f"actual={r.get('fee')}")
     check("到账 4950", r["actualAmount"] == 4950.0, f"actual={r.get('actualAmount')}")
-    check("损失补贴", r["lossInterest"] == 150.0)
+    check("损失收益", r["lossInterest"] == 150.0)
     check("损失奖品", r["lossReward"] is True)
 
     # ============================================================
@@ -335,7 +335,7 @@ async def run_e2e():
     r = await svc.settle_deposit(user_id, dp_no2)
     check("到期取出成功", r["success"] is True)
     check("本金 5000", r["amount"] == 5000.0)
-    check("补贴 150", r["interest"] == 150.0)
+    check("收益 150", r["interest"] == 150.0)
     check("奖品编号", r["rewardNo"] != "" and r["rewardNo"].startswith("RW"))
     check("奖品名称", "竹香经典" in r["rewardName"])
     rw_no = r["rewardNo"]
@@ -448,12 +448,12 @@ async def run_e2e():
     print(f"  累计充值: ¥{r['totalDeposit']:.2f}")
     print(f"  累计提现: ¥{r['totalWithdraw']:.2f}")
     print(f"  累计返利: ¥{r['totalRebate']:.2f}")
-    print(f"  累计补贴: ¥{r['totalInterest']:.2f}")
+    print(f"  累计收益: ¥{r['totalInterest']:.2f}")
     print(f"  累计奖品: ¥{r['totalReward']:.2f}")
     check("最终状态 success", r["success"] is True)
     check("累计返利 > 0", r["totalRebate"] > 0)
     check("累计充值 > 0", r["totalDeposit"] > 0)
-    check("累计补贴 > 0", r["totalInterest"] > 0)
+    check("累计收益 > 0", r["totalInterest"] > 0)
     check("累计奖品 > 0", r["totalReward"] > 0)
 
     # ============================================================

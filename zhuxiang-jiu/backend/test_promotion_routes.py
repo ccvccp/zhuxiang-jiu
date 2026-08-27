@@ -19,6 +19,7 @@
 import asyncio
 import os
 import sys
+from datetime import UTC, datetime, timedelta
 
 # 确保使用内存模式
 os.environ["LOCK_MODE"] = "asyncio"
@@ -50,12 +51,14 @@ def reset_store():
     _reset_store_impl()
 
 
-async def _mk_member(member_repo, phone, nickname=""):
+async def _mk_member(member_repo, phone, nickname="", created_at=None):
+    """创建测试会员(默认注册时间=现在, 即'新人'; created_at 可指定为过去)"""
     return await member_repo.create({
         "phone": phone, "nickname": nickname or f"会员{phone[-4:]}",
         "password": "x" * 64, "status": 1, "role": "member",
         # growth_value >= 500 才能满足钱包开户的会员等级要求
         "level": 3, "growth_value": 600, "points": 0,
+        "created_at": created_at or datetime.now(UTC).isoformat(),
     })
 
 
@@ -187,6 +190,26 @@ class TestBindRelation:
         codes = await svc.list_my_codes(a_id)
         record("test_13_bound_count",
                codes[0].get("boundCount") == 1, f"codes={codes}")
+
+        # test 13b: 新人注册原则 —— 老会员(注册超24h)绑定成功但不计业绩
+        old = await _mk_member(
+            member_repo, "13900000005", "老会员E",
+            created_at=(datetime.now(UTC) - timedelta(days=2)).isoformat())
+        r_old = await svc.bind_relation(code, old["id"])
+        stats = await svc.get_my_stats(a_id)
+        record("test_13b_old_member_not_counted",
+               r_old["success"] and r_old["counted"] is False
+               and stats["directCount"] == 1,
+               f"result={r_old}, directCount={stats['directCount']}")
+
+        # test 13c: 新人注册原则 —— 新注册会员(24h内)绑定计业绩
+        fresh = await _mk_member(member_repo, "13900000006", "新人F")
+        r_new = await svc.bind_relation(code, fresh["id"])
+        stats = await svc.get_my_stats(a_id)
+        record("test_13c_new_member_counted",
+               r_new["success"] and r_new["counted"] is True
+               and stats["directCount"] == 2,
+               f"result={r_new}, directCount={stats['directCount']}")
 
 
 # ============================================================

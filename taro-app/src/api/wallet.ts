@@ -9,13 +9,13 @@ export interface WalletInfoVO {
   userId: string;
   status: string;            // active/frozen
   statusName: string;        // 正常/冻结
-  totalAssets: number;       // 总资产 = 活期 + 定期 + 待结补贴
+  totalAssets: number;       // 总资产 = 活期 + 定期 + 待结收益
   currentBalance: number;    // 活期余额(可消费/可提现)
   regularTotal: number;      // 定期总额
-  pendingInterest: number;   // 待结补贴
+  pendingInterest: number;   // 待结收益
   totalDeposit: number;      // 累计充值
   totalWithdraw: number;     // 累计提现
-  totalInterest: number;     // 累计补贴
+  totalInterest: number;     // 累计收益
   totalReward: number;       // 累计奖励
   totalRebate: number;       // 累计返利
   claimableRewardCount: number; // 可领奖品数
@@ -40,7 +40,7 @@ export const TX_TYPE_NAME: Record<string, string> = {
   withdraw: '提现',
   consume: '消费',
   refund: '退款',
-  interest: '补贴',
+  interest: '收益',
   rebate: '返利',
   transfer_regular: '定期转入',
 };
@@ -114,7 +114,7 @@ export const WalletAPI = {
     return (res.transactions || []).map(mapTx);
   },
 
-  /** 当日补贴预估 */
+  /** 当日收益预估 */
   async dailyInterest(): Promise<{ daily: number; monthly: number; yearly: number }> {
     const res = await request<any>({ url: '/api/wallet/interest/daily' });
     return {

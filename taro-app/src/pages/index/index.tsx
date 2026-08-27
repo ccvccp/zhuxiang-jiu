@@ -35,15 +35,15 @@ const MOCK_ACTIVITIES: ActivityVO[] = [
     name: '中秋团圆团购专场',
     type: 'groupbuy',
     status: 'ongoing',
-    description: '企业团购满 5 万享 8 折',
+    description: '组团团购满 5 万享 8 折',
   },
 ];
 
 // 功能金刚区配置
 const QUICK_ENTRIES = [
   { key: 'signin', icon: '✅', label: '每日签到' },
-  { key: 'groupbuy', icon: '🛒', label: '企业团购' },
-  { key: 'recharge', icon: '💰', label: '余额充值' },
+  { key: 'groupbuy', icon: '🛒', label: '组团团购' },
+  { key: 'recharge', icon: '💰', label: '余额赚钱' },
   { key: 'activity', icon: '🎁', label: '活动中心' },
   { key: 'promotion', icon: '🤝', label: '扫码赚钱' },
   { key: 'member', icon: '👑', label: '会员权益' },
@@ -217,7 +217,7 @@ const IndexPage: React.FC = () => {
         {tiers.length > 0 && (
           <View className={styles.section}>
             <View className={styles.sectionHeader}>
-              <Text className={styles.sectionTitle}>企业团购 · 阶梯折扣</Text>
+              <Text className={styles.sectionTitle}>组团团购 · 阶梯折扣</Text>
               <Text className={styles.sectionMore} onClick={goProducts}>选品 ›</Text>
             </View>
             <View className={styles.tierRow}>

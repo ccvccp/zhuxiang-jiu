@@ -313,7 +313,7 @@ const PromotionPage: React.FC = () => {
         <View className={styles.sectionTitle}>玩法说明</View>
         <View className={styles.rulesCard}>
           <View className={styles.ruleItem}>1. 领取专属推广二维码,保存或分享至微信/抖音等平台</View>
-          <View className={styles.ruleItem}>2. 好友扫码识别推广码,注册绑定成为你的下线</View>
+          <View className={styles.ruleItem}>2. 好友扫码识别推广码,注册绑定成为你的下线(仅新注册用户计入奖励)</View>
           <View className={styles.ruleItem}>
             3. 直推满 {stats.level1Threshold} 人:每轮获得 ¥{stats.level1RewardAmount} 购物现金奖励
           </View>

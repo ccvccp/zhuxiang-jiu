@@ -6,8 +6,8 @@
     - 定期结清: 嵌套 wallet:deposit:{depositNo} 锁(防重复结清)
     - 奖品领取: 嵌套 wallet:reward:{rewardNo} 锁(防重复领取)
 
-收益规则(营销补贴, 非借贷利息):
-    - 活期: 年化 3%, 日计补贴 = balance × 3% / 365, 按月入账
+收益规则(余额收益, 非借贷利息):
+    - 活期: 年化 3%, 日计收益 = balance × 3% / 365, 按月入账
     - 定期: 按档位(3/6/12/24 月), 到期一次性发放 + 奖品
     - 消费返利: 钱包支付额外 1% 返现, 单笔上限 ¥100, 即时入账
     - LPR 合规: 综合收益率 ≤ LPR × 4(≈13.8%), 超限自动降档
@@ -99,7 +99,7 @@ REBATE_MAX_PER_ORDER = 100.0  # 单笔返利上限 ¥100
 CURRENT_ANNUAL_RATE = 0.03    # 活期年化 3%
 DAYS_PER_YEAR = 365
 
-# 定期档位: {存期月: (最低存入, 年化补贴率, 奖品资格)}
+# 定期档位: {存期月: (最低存入, 年化收益率, 奖品资格)}
 DEPOSIT_TIERS = {
     3:  {"min": 1000.0,  "rate": 0.030, "hasReward": False},
     6:  {"min": 2000.0,  "rate": 0.050, "hasReward": True},
@@ -130,17 +130,17 @@ LPR_CEILING = LPR_RATE * 4        # 法定上限 ≈ 13.8%
 
 
 def _calc_daily_interest(balance: float) -> float:
-    """活期日计补贴: balance × 年化 3% / 365
+    """活期日计收益: balance × 年化 3% / 365
 
     Returns:
-        日补贴金额(向下取整到分)
+        日收益金额(向下取整到分)
     """
     daily = balance * CURRENT_ANNUAL_RATE / DAYS_PER_YEAR
     return round(daily, 2)
 
 
 def _calc_regular_interest(amount: float, period: int) -> tuple:
-    """定期营销补贴计算
+    """定期余额收益计算
 
     Args:
         amount: 预付款金额
@@ -897,13 +897,13 @@ class WalletService:
         }
 
     # ============================================================
-    # P0: 收益计算(日计补贴 + 月结付)
+    # P0: 收益计算(日计收益 + 月结付)
     # ============================================================
 
     async def calc_daily_interest(self, user_id) -> dict:
-        """计算当日活期营销补贴(不入账, 仅预估)
+        """计算当日活期余额收益(不入账, 仅预估)
 
-        公式: 日补贴 = balance × 3% / 365
+        公式: 日收益 = balance × 3% / 365
 
         Raises:
             KeyError: 钱包未开通
@@ -926,7 +926,7 @@ class WalletService:
             "monthlyEstimate": monthly,
             "yearlyEstimate": yearly,
             "logs": [{"step": "收益预估", "level": "INFO",
-                      "msg": f"日补贴 ¥{daily:.2f}(年化 3%)"}],
+                      "msg": f"日收益 ¥{daily:.2f}(年化 3%)"}],
         }
 
     async def settle_monthly_interest(self, user_id) -> dict:
@@ -946,7 +946,7 @@ class WalletService:
 
             pending = float(account.get("pendingInterest", 0))
             if pending <= 0:
-                raise ValueError("无待入账营销补贴")
+                raise ValueError("无待入账余额收益")
 
             # 1. 入账到余额
             new_balance = await self.wallet_repo.add_balance(user_id, pending)
@@ -970,7 +970,7 @@ class WalletService:
                 "depositNo": "",
                 "withdrawNo": "",
                 "status": "success",
-                "description": f"月度营销补贴入账 ¥{pending:.2f}",
+                "description": f"月度余额收益入账 ¥{pending:.2f}",
                 "createdAt": ts(),
             })
 
@@ -983,7 +983,7 @@ class WalletService:
                 "amount": pending,
                 "balanceAfter": new_balance,
                 "logs": [{"step": "月度结付", "level": "INFO",
-                          "msg": f"营销补贴 ¥{pending:.2f} 已入账"}],
+                          "msg": f"余额收益 ¥{pending:.2f} 已入账"}],
             }
 
     # ============================================================
@@ -1036,7 +1036,7 @@ class WalletService:
             if balance < amount:
                 raise ValueError(f"余额不足: 当前 ¥{balance:.2f}, 需 ¥{amount:.2f}")
 
-            # 1. 计算预计营销补贴
+            # 1. 计算预计余额收益
             interest, annual_rate = _calc_regular_interest(amount, period)
             # 2. 匹配奖品
             reward_match = _match_reward(amount, period)
@@ -1045,7 +1045,7 @@ class WalletService:
             # 3. LPR 合规校验
             compliance = _check_lpr_compliance(amount, interest, reward_value)
             if not compliance["compliant"]:
-                # 降档处理: 仅保留营销补贴, 取消奖品
+                # 降档处理: 仅保留余额收益, 取消奖品
                 reward_name = ""
                 reward_value = 0.0
                 compliance["action"] = "degraded"
@@ -1098,8 +1098,8 @@ class WalletService:
             logs = [
                 {"step": "转定期", "level": "INFO",
                  "msg": f"¥{amount:.2f} → {period} 个月定期"},
-                {"step": "预计补贴", "level": "INFO",
-                 "msg": f"营销补贴 ¥{interest:.2f}(年化 {annual_rate*100:.1f}%)"},
+                {"step": "预计收益", "level": "INFO",
+                 "msg": f"余额收益 ¥{interest:.2f}(年化 {annual_rate*100:.1f}%)"},
             ]
             if reward_name:
                 logs.append({"step": "奖品", "level": "INFO",
@@ -1132,7 +1132,7 @@ class WalletService:
     # ============================================================
 
     async def settle_deposit(self, user_id, deposit_no) -> dict:
-        """定期到期取出: 本金 + 营销补贴入账, 奖品转为可领取
+        """定期到期取出: 本金 + 余额收益入账, 奖品转为可领取
 
         前置条件: status=active 或 matured
 
@@ -1158,7 +1158,7 @@ class WalletService:
             interest = float(deposit["expectedInterest"])
 
             async with get_lock(f"wallet:{user_id}"):
-                # 1. 本金 + 营销补贴入账
+                # 1. 本金 + 余额收益入账
                 new_balance = await self.wallet_repo.add_balance(user_id, amount + interest)
                 # 2. 累计收益累加
                 account = await self.wallet_repo.get_account(user_id)
@@ -1217,13 +1217,13 @@ class WalletService:
                     "depositNo": deposit_no,
                     "withdrawNo": "",
                     "status": "success",
-                    "description": f"定期到期取出 ¥{amount:.2f} + 补贴 ¥{interest:.2f}",
+                    "description": f"定期到期取出 ¥{amount:.2f} + 收益 ¥{interest:.2f}",
                     "createdAt": ts(),
                 })
 
             logs = [
                 {"step": "定期到期", "level": "INFO",
-                 "msg": f"本金 ¥{amount:.2f} + 补贴 ¥{interest:.2f} 已入账"},
+                 "msg": f"本金 ¥{amount:.2f} + 收益 ¥{interest:.2f} 已入账"},
             ]
             if reward_no:
                 logs.append({"step": "奖品可领", "level": "INFO",
@@ -1246,11 +1246,11 @@ class WalletService:
             }
 
     async def early_settle_deposit(self, user_id, deposit_no) -> dict:
-        """定期提前取出: 损失营销补贴 + 奖品, 收 1% 手续费
+        """定期提前取出: 损失余额收益 + 奖品, 收 1% 手续费
 
         规则:
             - 本金全额返还
-            - 营销补贴清零(损失)
+            - 余额收益清零(损失)
             - 奖品作废(损失)
             - 收 1% 手续费(从本金扣除)
 
@@ -1284,7 +1284,7 @@ class WalletService:
                 await self.wallet_repo.update_deposit_fields(deposit_no, {
                     "status": "early_settled",
                     "settledAt": ts(),
-                    "settledInterest": 0.0,  # 提前取出无补贴
+                    "settledInterest": 0.0,  # 提前取出无收益
                     "updatedAt": ts(),
                 })
 
@@ -1331,8 +1331,8 @@ class WalletService:
             logs = [
                 {"step": "提前取出", "level": "WARN",
                  "msg": f"本金 ¥{amount:.2f}, 手续费 ¥{fee:.2f}, 到账 ¥{actual:.2f}"},
-                {"step": "损失营销补贴", "level": "WARN",
-                 "msg": f"损失补贴 ¥{expected_interest:.2f}"},
+                {"step": "损失余额收益", "level": "WARN",
+                 "msg": f"损失收益 ¥{expected_interest:.2f}"},
             ]
             if reward_value > 0:
                 logs.append({"step": "损失奖品", "level": "WARN",

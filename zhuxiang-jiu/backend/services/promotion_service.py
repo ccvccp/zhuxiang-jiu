@@ -20,7 +20,7 @@ from repositories.promotion_repository import (
 from repositories.member_repository import MemberRepository
 from repositories.product_repository import ProductRepository
 from services.wallet_service import WalletService
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,9 @@ class PromotionService:
     async def bind_relation(self, code: str, invitee_member_id: int) -> dict:
         """新用户绑定推广码, 建立矩阵关系并触发上级奖励检查
 
+        新人注册原则: 仅"新注册会员"(注册后 24 小时内)的绑定计入推广业绩
+        并触发奖励; 老会员绑定成功但不计业绩(关系 status=invalid)、不触发奖励。
+
         Raises:
             KeyError: 会员不存在
             ValueError: 推广码无效/重复绑定/自绑/成环
@@ -154,31 +157,55 @@ class PromotionService:
             # 祖先链防环: 沿 inviter 向上遍历, 若遇 invitee 则成环
             await self._assert_no_cycle(inviter_id, invitee_member_id)
 
+            # 新人注册原则: 仅新注册会员(24h内)绑定计入业绩并触发奖励
+            is_new = self._is_new_member(invitee)
+
             relation = {
                 "inviteeMemberId": invitee_member_id,
                 "inviterMemberId": inviter_id,
                 "code": code_record["code"],
                 "channel": code_record.get("channel", "direct"),
-                "status": "valid",
+                "status": "valid" if is_new else "invalid",
                 "createdAt": self._now(),
             }
             await self.promo_repo.save_relation(relation)
             await self.promo_repo.incr_code_bound(code_record["code"])
 
-            # 触发上级奖励检查(直推达标 → 上线裂变达标), 最多上溯 2 级
-            triggered = [inviter_id]
-            parent = await self.promo_repo.get_relation(inviter_id)
-            if parent and parent.get("status") == "valid":
-                triggered.append(parent["inviterMemberId"])
-            for member_id in triggered:
-                await self._check_rewards(member_id)
+            if is_new:
+                # 触发上级奖励检查(直推达标 → 上线裂变达标), 最多上溯 2 级
+                triggered = [inviter_id]
+                parent = await self.promo_repo.get_relation(inviter_id)
+                if parent and parent.get("status") == "valid":
+                    triggered.append(parent["inviterMemberId"])
+                for member_id in triggered:
+                    await self._check_rewards(member_id)
 
             return {
                 "success": True,
                 "inviteeMemberId": invitee_member_id,
                 "inviterMemberId": inviter_id,
                 "code": code_record["code"],
+                "counted": is_new,
+                "countedNote": "" if is_new
+                else "老会员绑定不计入推广业绩(新人注册原则)",
             }
+
+    _NEW_MEMBER_WINDOW = timedelta(hours=24)
+
+    @classmethod
+    def _is_new_member(cls, invitee: dict) -> bool:
+        """新人注册原则: 注册后 24 小时内视为新人(无注册时间的旧数据不计)"""
+        created = invitee.get("created_at") or invitee.get("createdAt")
+        if not created:
+            return False
+        try:
+            created_dt = datetime.fromisoformat(
+                str(created).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        now = datetime.now(created_dt.tzinfo) if created_dt.tzinfo \
+            else datetime.now()
+        return (now - created_dt) <= cls._NEW_MEMBER_WINDOW
 
     async def _assert_no_cycle(self, inviter_id: int, invitee_member_id: int,
                                max_depth: int = 50):

@@ -183,7 +183,7 @@ const MODULES = [
             { name: '存款领酒', expected: '存款→领酒+收益+奖品', status: 'pending' },
             { name: '收益率限制', expected: '≤13.8%（LPR 4倍规则）', status: 'pending' },
             { name: '法律合规', expected: '反洗钱法+个人信息保护法+民间借贷LPR4倍', status: 'pending' },
-            { name: '资金性质', expected: '会员预付（非吸储）+营销补贴（非利息）', status: 'pending' },
+            { name: '资金性质', expected: '会员预付（非吸储）+余额收益（非利息）', status: 'pending' },
             { name: '银行存管', expected: '银行存管+资金隔离（非资金池）', status: 'pending' },
             { name: '3张AI合规表', expected: 'wallet_ai_legal_compliance/consumer_protection/aml_monitor', status: 'pending' }
         ],

@@ -334,7 +334,7 @@ async def wallet_transactions(
 async def daily_interest(
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """当日活期营销补贴预估(年化 3%, 日计补贴 = balance × 3% / 365)"""
+    """当日活期余额收益预估(年化 3%, 日计收益 = balance × 3% / 365)"""
     member_id = _require_member_id(x_member_id)
     try:
         return await _service.calc_daily_interest(member_id)
@@ -346,7 +346,7 @@ async def daily_interest(
 async def settle_monthly_interest(
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """月度营销补贴入账(将 pending_interest 入账到 balance)"""
+    """月度余额收益入账(将 pending_interest 入账到 balance)"""
     member_id = _require_member_id(x_member_id)
     try:
         return await _service.settle_monthly_interest(member_id)
@@ -440,7 +440,7 @@ async def settle_deposit(
     deposit_no: str,
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """定期到期取出(本金 + 营销补贴入账, 奖品转可领取)"""
+    """定期到期取出(本金 + 余额收益入账, 奖品转可领取)"""
     member_id = _require_member_id(x_member_id)
     try:
         return await _service.settle_deposit(member_id, deposit_no)
@@ -455,7 +455,7 @@ async def early_settle_deposit(
     deposit_no: str,
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """定期提前取出(收 1% 手续费, 损失营销补贴 + 奖品)"""
+    """定期提前取出(收 1% 手续费, 损失余额收益 + 奖品)"""
     member_id = _require_member_id(x_member_id)
     try:
         return await _service.early_settle_deposit(member_id, deposit_no)
