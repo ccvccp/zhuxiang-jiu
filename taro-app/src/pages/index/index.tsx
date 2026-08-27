@@ -46,6 +46,7 @@ const QUICK_ENTRIES = [
   { key: 'recharge', icon: '💰', label: '余额赚钱' },
   { key: 'activity', icon: '🎁', label: '活动中心' },
   { key: 'promotion', icon: '🤝', label: '扫码赚钱' },
+  { key: 'pocket', icon: '📌', label: '顺手赚钱' },
   { key: 'member', icon: '👑', label: '会员权益' },
   { key: 'orders', icon: '📦', label: '我的订单' },
   { key: 'service', icon: '🎧', label: '在线客服' },
@@ -116,6 +117,9 @@ const IndexPage: React.FC = () => {
         break;
       case 'promotion':
         Taro.navigateTo({ url: '/pages/promotion/index' });
+        break;
+      case 'pocket':
+        Taro.navigateTo({ url: '/pages/pocket/index' });
         break;
       case 'member':
         Taro.switchTab({ url: '/pages/mine/index' });
