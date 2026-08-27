@@ -262,6 +262,7 @@ const TracePunchPage: React.FC = () => {
   }, [tab, isAdmin, loadAdmin]);
 
   const handleUnblock = (batchNo: string) => {
+    // editable/placeholderText 为微信原生扩展, Taro 类型未收录, 断言处理
     Taro.showModal({
       title: `解除阻断 ${batchNo}`,
       editable: true,
@@ -269,7 +270,8 @@ const TracePunchPage: React.FC = () => {
       success: async (res) => {
         if (!res.confirm) return;
         try {
-          await TraceProdAPI.adminUnblock(batchNo, res.content || '');
+          const reason = ((res as any).content as string) || '';
+          await TraceProdAPI.adminUnblock(batchNo, reason);
           Taro.showToast({ title: '已解除阻断', icon: 'success' });
           loadAdmin();
           loadData(true);
@@ -277,7 +279,7 @@ const TracePunchPage: React.FC = () => {
           Taro.showToast({ title: e.message || '解除失败', icon: 'none' });
         }
       },
-    });
+    } as any);
   };
 
   // ============ 渲染 ============
