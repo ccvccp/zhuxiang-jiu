@@ -11,6 +11,7 @@ export interface MemberVO {
   points: number;
   growth?: number;
   avatar?: string;
+  role?: string;
 }
 
 export const MemberAPI = {
@@ -31,6 +32,7 @@ export const MemberAPI = {
       points: m.points || 0,
       growth: m.growth,
       avatar: m.avatar,
+      role: m.role || 'member',
     };
   },
 

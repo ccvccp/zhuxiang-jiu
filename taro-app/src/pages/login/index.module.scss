@@ -118,3 +118,40 @@
   color: $color-text-tertiary;
   margin-top: $spacing-lg;
 }
+
+// ============================================
+// 体验账号快捷填充
+// ============================================
+.testAccounts {
+  margin-top: $spacing-lg;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.testAccountsTitle {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  margin-bottom: $spacing-sm;
+}
+
+.testAccountRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-sm 0;
+
+  &:active {
+    opacity: 0.6;
+  }
+}
+
+.testAccountName {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.testAccountPhone {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}

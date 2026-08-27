@@ -53,6 +53,10 @@ from routes.ai_scoring_routes import register_ai_scoring_routes
 from routes.ai_scoring_ext_routes import register_ai_scoring_ext_routes
 # AI 语义评分层·第三批(v7.4: 用户认证混合模式 AI 登录风控)
 from routes.ai_scoring_auth_routes import register_ai_scoring_auth_routes
+# 顺手赚钱模块
+from routes.pocket_routes import register_pocket_routes
+# 网站图标智能管理模块
+from routes.site_theme_routes import register_site_theme_routes
 
 __all__ = [
     # 已有(15)
@@ -93,4 +97,6 @@ __all__ = [
     "register_ai_scoring_routes",
     "register_ai_scoring_ext_routes",
     "register_ai_scoring_auth_routes",
+    "register_pocket_routes",
+    "register_site_theme_routes",
 ]

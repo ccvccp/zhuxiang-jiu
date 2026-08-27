@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import Taro, { useDidShow, useDidHide, useLaunch } from '@tarojs/taro';
+import { applyActiveTheme } from '@/services/theme-service';
 // 全局样式
 import './app.scss';
 
@@ -52,6 +53,8 @@ function App(props) {
   // 小程序 onLaunch
   useLaunch(() => {
     initSystemInfo();
+    // 主题运行时引擎: 拉取激活主题并应用到导航栏/tabBar(失败静默降级)
+    applyActiveTheme();
   });
 
   // 对应 onShow

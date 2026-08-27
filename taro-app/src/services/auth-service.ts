@@ -16,6 +16,7 @@ export interface AuthSession {
   memberId: string;
   phone: string;
   nickname: string;
+  role?: string;
   accessToken?: string;
   refreshToken?: string;
   loggedAt?: string;

@@ -9,6 +9,7 @@ export interface AuthResult {
   memberId: string;
   phone: string;
   nickname: string;
+  role?: string;
   accessToken?: string;
   refreshToken?: string;
 }
@@ -58,6 +59,7 @@ function saveSession(res: any): AuthResult {
     memberId: String(res.memberId || ''),
     phone: res.phone || '',
     nickname: res.nickname || '会员',
+    role: res.role || 'member',
     accessToken: res.accessToken,
     refreshToken: res.refreshToken,
   };
@@ -66,6 +68,7 @@ function saveSession(res: any): AuthResult {
       memberId: result.memberId,
       phone: result.phone,
       nickname: result.nickname,
+      role: result.role,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
     });

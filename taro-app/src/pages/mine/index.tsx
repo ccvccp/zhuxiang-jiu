@@ -48,6 +48,7 @@ const MinePage: React.FC = () => {
           name: m.name,
           points: m.points,
           level: m.level,
+          role: (m as any).role || 'member',
         });
       } catch (e) {
         console.warn('[mine] 会员API失败,降级 mock:', e);
@@ -236,6 +237,21 @@ const MinePage: React.FC = () => {
             </View>
           )}
         </View>
+
+        {/* 管理员入口(仅 admin 可见) */}
+        {member?.role === 'admin' && (
+          <View className={styles.section}>
+            <View className={styles.sectionTitle}>站点管理</View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/theme-admin/index' })}>
+              <View className={styles.adminEntryIcon}>🎨</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>主题智能管理</View>
+                <View className={styles.adminEntryDesc}>网站颜色 / 图标 · AI 把关 · 审计回滚</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
+          </View>
+        )}
 
         {/* 个人信息管理 */}
         <View className={styles.section}>

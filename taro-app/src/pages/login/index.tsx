@@ -59,6 +59,13 @@ const LoginPage: React.FC = () => {
     }
   };
 
+  // 测试账号快捷填充
+  const fillAccount = (testPhone: string, testPwd: string) => {
+    setPhone(testPhone);
+    setPassword(testPwd);
+    Taro.showToast({ title: '已填充, 点击登录', icon: 'none' });
+  };
+
   return (
     <View className={styles.page}>
       {/* 品牌头 */}
@@ -145,6 +152,20 @@ const LoginPage: React.FC = () => {
             ? '还没有账号?点击上方「注册」创建'
             : '注册即代表同意《用户协议》与《隐私政策》'}
         </View>
+
+        {mode === 'login' && (
+          <View className={styles.testAccounts}>
+            <View className={styles.testAccountsTitle}>体验账号(点击快捷填充)</View>
+            <View className={styles.testAccountRow} onClick={() => fillAccount('13800000001', 'test123456')}>
+              <View className={styles.testAccountName}>👤 普通会员</View>
+              <View className={styles.testAccountPhone}>13800000001</View>
+            </View>
+            <View className={styles.testAccountRow} onClick={() => fillAccount('13800000002', 'test123456')}>
+              <View className={styles.testAccountName}>👑 站点管理员</View>
+              <View className={styles.testAccountPhone}>13800000002</View>
+            </View>
+          </View>
+        )}
       </View>
     </View>
   );

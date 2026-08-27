@@ -12,6 +12,7 @@ export default defineAppConfig({
     'pages/activity/index',
     'pages/wallet/index',
     'pages/login/index',
+    'pages/theme-admin/index',
     'pages/privacy/index',
     'pages/agreement/index'
   ],

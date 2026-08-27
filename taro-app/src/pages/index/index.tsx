@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView } from '@tarojs/components';
+import { View, Text, ScrollView, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { ProductAPI, ProductVO } from '@/api/product';
 import { PromotionAPI, ActivityVO, GroupBuyTier } from '@/api/promotion';
 import { MemberAPI } from '@/api/member';
+import { applyActiveTheme, getQuickGridIcon } from '@/services/theme-service';
 import {
   SERVICE_PHONE,
   SIGN_IN_REWARD_POINTS,
@@ -46,7 +47,7 @@ const QUICK_ENTRIES = [
   { key: 'recharge', icon: '💰', label: '余额赚钱' },
   { key: 'activity', icon: '🎁', label: '活动中心' },
   { key: 'promotion', icon: '🤝', label: '扫码赚钱' },
-  { key: 'pocket', icon: '📌', label: '顺手赚钱' },
+  { key: 'pocket', icon: '🤲', label: '顺手赚钱' },
   { key: 'member', icon: '👑', label: '会员权益' },
   { key: 'orders', icon: '📦', label: '我的订单' },
   { key: 'service', icon: '🎧', label: '在线客服' },
@@ -60,6 +61,8 @@ const IndexPage: React.FC = () => {
   const [noticeIdx, setNoticeIdx] = useState(0);
   const [points, setPoints] = useState<number>(0);
   const [signedInToday, setSignedInToday] = useState(false);
+  // 主题图标覆盖就绪标记(拉取到主题后触发重渲染)
+  const [, setThemeTick] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -84,6 +87,9 @@ const IndexPage: React.FC = () => {
       const today = new Date().toISOString().slice(0, 10);
       const lastSign = Taro.getStorageSync(SIGN_IN_STORAGE_KEY) as string;
       if (lastSign === today) setSignedInToday(true);
+
+      // 主题图标覆盖: 主题拉取完成后强制刷新金刚区图标
+      applyActiveTheme().then(() => setThemeTick(t => t + 1));
     })();
 
     // 公告轮播
@@ -169,16 +175,25 @@ const IndexPage: React.FC = () => {
 
         {/* 功能金刚区 */}
         <View className={styles.quickGrid}>
-          {QUICK_ENTRIES.map(item => (
-            <View
-              key={item.key}
-              className={styles.quickItem}
-              onClick={() => handleQuickEntry(item.key)}
-            >
-              <View className={styles.quickIcon}>{item.icon}</View>
-              <View className={styles.quickLabel}>{item.label}</View>
-            </View>
-          ))}
+          {QUICK_ENTRIES.map(item => {
+            const iconVal = getQuickGridIcon(item.key, item.icon);
+            const isImg = typeof iconVal === 'string'
+              && (iconVal.startsWith('data:image/') || iconVal.startsWith('http'));
+            return (
+              <View
+                key={item.key}
+                className={styles.quickItem}
+                onClick={() => handleQuickEntry(item.key)}
+              >
+                <View className={styles.quickIcon}>
+                  {isImg
+                    ? <Image src={iconVal} className={styles.quickIconImg} mode='aspectFit' />
+                    : iconVal}
+                </View>
+                <View className={styles.quickLabel}>{item.label}</View>
+              </View>
+            );
+          })}
         </View>
 
         {/* 签到卡片 */}

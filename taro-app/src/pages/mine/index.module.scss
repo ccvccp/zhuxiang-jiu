@@ -1,5 +1,42 @@
 @use '@/styles/variables.scss' as *;
 
+// ============================================
+// 管理员入口
+// ============================================
+.adminEntry {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  padding: $spacing-md 0;
+}
+
+.adminEntryIcon {
+  font-size: 48rpx;
+}
+
+.adminEntryInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.adminEntryName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: 4rpx;
+}
+
+.adminEntryDesc {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.adminEntryArrow {
+  font-size: 40rpx;
+  color: $color-text-secondary;
+}
+
 .page {
   min-height: 100vh;
   background: $color-bg-page;

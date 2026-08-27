@@ -68,6 +68,8 @@ from routes import (
     register_promotion_routes,
     # 顺手赚钱模块
     register_pocket_routes,
+    # 网站图标智能管理模块
+    register_site_theme_routes,
     # 限时秒杀模块
     register_flashsale_routes,
     # AI 语义评分层(v7.2)
@@ -192,6 +194,7 @@ register_maintenance_routes(app)
 register_auth_routes(app)
 register_promotion_routes(app)
 register_pocket_routes(app)
+register_site_theme_routes(app)
 register_flashsale_routes(app)
 register_ai_scoring_routes(app)
 register_ai_scoring_ext_routes(app)

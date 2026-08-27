@@ -1,0 +1,624 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $spacing-lg;
+  padding-bottom: $spacing-xl;
+}
+
+.loading {
+  text-align: center;
+  color: $color-text-secondary;
+  padding: $spacing-xl 0;
+}
+
+// ============================================
+// 无权限占位
+// ============================================
+.noPerm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 160rpx $spacing-lg;
+}
+
+.noPermIcon {
+  font-size: 88rpx;
+  margin-bottom: $spacing-md;
+}
+
+.noPermTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.noPermDesc {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  text-align: center;
+  line-height: 1.8;
+}
+
+// ============================================
+// 标题栏
+// ============================================
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  color: $color-text-white;
+  margin-bottom: $spacing-md;
+}
+
+.headerTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: 4rpx;
+}
+
+.headerDesc {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+}
+
+.recommendBtn {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: $radius-round;
+  font-size: $font-size-sm;
+  padding: 10rpx 24rpx;
+}
+
+// ============================================
+// 区块
+// ============================================
+.section {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.sectionTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.empty {
+  text-align: center;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  padding: $spacing-lg 0;
+}
+
+// ============================================
+// 主题卡片
+// ============================================
+.themeCard {
+  border: 2rpx solid $color-border;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.themeActive {
+  border-color: $color-primary;
+  background: rgba(53, 92, 68, 0.04);
+}
+
+.themeTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-sm;
+}
+
+.themeName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.themeDesc {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  margin-bottom: $spacing-sm;
+}
+
+.statusTag {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: $color-bg-page;
+  border-radius: $radius-round;
+  padding: 4rpx 16rpx;
+}
+
+.statusActive {
+  color: $color-text-white;
+  background: $color-primary;
+}
+
+.colorRow {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: $spacing-md;
+}
+
+.colorChip {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: $radius-md;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.aiBadge {
+  margin-left: auto;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba(53, 92, 68, 0.08);
+  border-radius: $radius-round;
+  padding: 6rpx 18rpx;
+}
+
+.themeActions {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.opBtn {
+  flex: 1;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  border: 2rpx solid $color-border;
+  border-radius: $radius-round;
+  padding: 12rpx 0;
+}
+
+.opPrimary {
+  color: $color-text-white;
+  background: $color-primary;
+  border-color: $color-primary;
+}
+
+// ============================================
+// 变更审计
+// ============================================
+.logItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-md 0;
+  border-bottom: 2rpx solid $color-border;
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+}
+
+.logLeft {
+  display: flex;
+  flex-direction: column;
+}
+
+.logAction {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: 4rpx;
+}
+
+.logMeta {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.rollbackBtn {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  border: 2rpx solid $color-primary;
+  border-radius: $radius-round;
+  padding: 8rpx 24rpx;
+}
+
+// ============================================
+// 管理说明
+// ============================================
+.rulesCard {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.ruleItem {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+}
+
+// ============================================
+// 主题编辑器
+// ============================================
+.sectionHeaderRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-md;
+}
+
+.sectionHeaderRow .sectionTitle {
+  margin-bottom: 0;
+}
+
+.createBtn {
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  background: $color-primary;
+  border-radius: $radius-round;
+  padding: 8rpx 24rpx;
+}
+
+.editorLabel {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin: $spacing-md 0 $spacing-sm;
+}
+
+.tplRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.tplChip {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  border: 2rpx solid $color-border;
+  border-radius: $radius-round;
+  padding: 8rpx 20rpx;
+}
+
+.tplChipActive {
+  border-color: $color-primary;
+  background: rgba(53, 92, 68, 0.06);
+}
+
+.tplDot {
+  width: 24rpx;
+  height: 24rpx;
+  border-radius: 50%;
+}
+
+.tplName {
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+}
+
+.input {
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: 16rpx 20rpx;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.swatchRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.swatch {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: $radius-md;
+  border: 4rpx solid transparent;
+}
+
+.swatchActive {
+  border-color: $color-primary;
+  box-shadow: 0 0 0 4rpx rgba(53, 92, 68, 0.2);
+}
+
+.gridIconList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.gridIconItem {
+  width: 200rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-sm;
+}
+
+.gridIconTop {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.gridIconEmoji {
+  font-size: 48rpx;
+  padding: 4rpx;
+}
+
+.gridIconOverridden {
+  background: rgba(53, 92, 68, 0.12);
+  border-radius: $radius-sm;
+}
+
+.gridIconReset {
+  font-size: 20rpx;
+  color: $color-primary;
+  border: 2rpx solid $color-primary;
+  border-radius: $radius-round;
+  padding: 2rpx 12rpx;
+}
+
+.gridIconLabel {
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+  margin-top: 8rpx;
+}
+
+.gridIconHint {
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 100rpx;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: 16rpx 20rpx;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.iconPreviewRow {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: $spacing-md;
+}
+
+.iconPreviewChip {
+  font-size: 36rpx;
+}
+
+.iconPreviewMore {
+  margin-left: auto;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 图标选择器
+// ============================================
+.pickerCurrent {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  font-weight: normal;
+}
+
+.pickerGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-bottom: $spacing-sm;
+  max-height: 400rpx;
+  overflow-y: auto;
+}
+
+.pickerCell {
+  width: 88rpx;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 44rpx;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 2rpx solid transparent;
+}
+
+.pickerCellActive {
+  border-color: $color-primary;
+  background: rgba(53, 92, 68, 0.1);
+}
+
+.customRow {
+  display: flex;
+  gap: 16rpx;
+  align-items: center;
+  margin-bottom: $spacing-sm;
+}
+
+.customInput {
+  flex: 1;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: 16rpx 20rpx;
+  font-size: $font-size-md;
+}
+
+.customApplyBtn {
+  font-size: $font-size-sm;
+  color: $color-text-white;
+  background: $color-primary;
+  border-radius: $radius-round;
+  padding: 14rpx 32rpx;
+}
+
+.pickerActions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: $spacing-sm;
+}
+
+.pickerResetBtn {
+  flex: 1;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  border: 2rpx solid $color-border;
+  border-radius: $radius-round;
+  padding: 18rpx 0;
+}
+
+.pickerActions .submitBtn {
+  flex: 1;
+  margin-top: 0;
+}
+
+.pickerImg {
+  width: 64rpx;
+  height: 64rpx;
+}
+
+.uploadBtn {
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-primary;
+  border: 2rpx dashed $color-primary;
+  border-radius: $radius-md;
+  padding: 20rpx 0;
+  margin-bottom: $spacing-sm;
+
+  &:active {
+    opacity: 0.6;
+  }
+}
+
+.gridIconImg {
+  width: 56rpx;
+  height: 56rpx;
+}
+
+.iconPreviewImg {
+  width: 44rpx;
+  height: 44rpx;
+}
+
+.iconLibDesc {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-sm;
+  line-height: 1.6;
+}
+
+// ============================================
+// AI 体检弹层
+// ============================================
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  display: flex;
+  align-items: flex-end;
+}
+
+.sheet {
+  width: 100%;
+  background: $color-bg-card;
+  border-radius: $radius-lg $radius-lg 0 0;
+  padding: $spacing-lg;
+  padding-bottom: calc(#{$spacing-lg} + env(safe-area-inset-bottom));
+  max-height: 75vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.sheetTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.passTag {
+  font-size: $font-size-xs;
+  color: #2e8b57;
+}
+
+.failTag {
+  font-size: $font-size-xs;
+  color: #d4380d;
+}
+
+.factorItem {
+  margin-bottom: $spacing-md;
+}
+
+.factorRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8rpx;
+}
+
+.factorLabel {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.factorScore {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.factorBar {
+  height: 12rpx;
+  background: $color-bg-page;
+  border-radius: $radius-round;
+  overflow: hidden;
+  margin-bottom: 8rpx;
+}
+
+.factorFill {
+  height: 100%;
+  background: linear-gradient(90deg, $color-primary-light, $color-primary);
+  border-radius: $radius-round;
+}
+
+.factorDetail {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.6;
+}
+
+.submitBtn {
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-white;
+  background: $color-primary;
+  border-radius: $radius-round;
+  padding: 18rpx 0;
+  margin-top: $spacing-sm;
+}
