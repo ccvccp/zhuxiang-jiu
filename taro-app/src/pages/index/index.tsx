@@ -45,7 +45,7 @@ const QUICK_ENTRIES = [
   { key: 'groupbuy', icon: '🛒', label: '企业团购' },
   { key: 'recharge', icon: '💰', label: '余额充值' },
   { key: 'activity', icon: '🎁', label: '活动中心' },
-  { key: 'promotion', icon: '🤝', label: '推广赚钱' },
+  { key: 'promotion', icon: '🤝', label: '扫码赚钱' },
   { key: 'member', icon: '👑', label: '会员权益' },
   { key: 'orders', icon: '📦', label: '我的订单' },
   { key: 'service', icon: '🎧', label: '在线客服' },
