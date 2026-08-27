@@ -88,41 +88,47 @@ const LoginPage: React.FC = () => {
 
         <View className={styles.formItem}>
           <Text className={styles.label}>手机号</Text>
-          <Input
-            className={styles.input}
-            type='number'
-            maxlength={11}
-            value={phone}
-            placeholder='请输入 11 位手机号'
-            onInput={(e) => setPhone(e.detail.value)}
-          />
+          <View className={styles.inputWrap}>
+            <Input
+              className={styles.input}
+              type='number'
+              maxlength={11}
+              value={phone}
+              placeholder='请输入 11 位手机号'
+              onInput={(e) => setPhone(e.detail.value)}
+            />
+          </View>
         </View>
 
         {mode === 'register' ? (
           <View className={styles.formItem}>
             <Text className={styles.label}>昵称(选填)</Text>
-            <Input
-              className={styles.input}
-              type='text'
-              maxlength={20}
-              value={nickname}
-              placeholder='给自己起个名字'
-              onInput={(e) => setNickname(e.detail.value)}
-            />
+            <View className={styles.inputWrap}>
+              <Input
+                className={styles.input}
+                type='text'
+                maxlength={20}
+                value={nickname}
+                placeholder='给自己起个名字'
+                onInput={(e) => setNickname(e.detail.value)}
+              />
+            </View>
           </View>
         ) : null}
 
         <View className={styles.formItem}>
           <Text className={styles.label}>密码</Text>
-          <Input
-            className={styles.input}
-            type='text'
-            password
-            maxlength={64}
-            value={password}
-            placeholder={mode === 'register' ? '设置密码(至少 6 位)' : '请输入密码'}
-            onInput={(e) => setPassword(e.detail.value)}
-          />
+          <View className={styles.inputWrap}>
+            <Input
+              className={styles.input}
+              type='text'
+              password
+              maxlength={64}
+              value={password}
+              placeholder={mode === 'register' ? '设置密码(至少 6 位)' : '请输入密码'}
+              onInput={(e) => setPassword(e.detail.value)}
+            />
+          </View>
         </View>
 
         <View
