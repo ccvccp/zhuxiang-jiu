@@ -1,11 +1,11 @@
 """推广码矩阵获利模块业务逻辑层
 
 核心规则(参数可在管理端动态调整):
-    一级(直推奖): 每直接推广满 level1Threshold(默认100)人
-        → 发放 level1RewardAmount(默认¥50)钱包奖励余额(仅可购物不可提现)
-    二级(裂变奖): 直推下线中每有 level2SubPromoterCount(默认50)人
-        各自完成推广 level2SubThreshold(默认100)人
-        → 可领取 1 瓶 wineMinPrice(默认¥200)以上的竹奕酒
+    一级(直推奖): 每直接推广满 level1Threshold(默认10)人
+        → 发放 level1RewardAmount(默认¥20)钱包奖励余额(可叠加, 仅可购物不可提现)
+    二级(裂变奖): 直推下线中每有 level2SubPromoterCount(默认6)人
+        各自完成推广 level2SubThreshold(默认5)人
+        → 发放 level2RewardAmount(默认¥15)钱包奖励余额(仅可购物不可提现)
 
 防刷: 一人仅可绑定一次 / 禁自绑 / 祖先链防环 / 撤销码失效 / 无效关系不计业绩
 """
@@ -204,8 +204,8 @@ class PromotionService:
                 return
 
             # ---------- 一级: 直推奖(每满 N 人发一轮钱包奖励) ----------
-            l1_threshold = int(settings.get("level1Threshold", 100))
-            l1_amount = float(settings.get("level1RewardAmount", 50))
+            l1_threshold = int(settings.get("level1Threshold", 10))
+            l1_amount = float(settings.get("level1RewardAmount", 20))
             team = await self.promo_repo.list_team(member_id)
             n1 = len(team)
             c1 = await self.promo_repo.count_rewards(member_id, "wallet")
@@ -228,32 +228,38 @@ class PromotionService:
                 logger.info("promo_l1_reward member=%s cycle=%s amount=%.2f",
                             member_id, cycle, l1_amount)
 
-            # ---------- 二级: 裂变奖(每 M 个达标下线发一轮领酒资格) ----------
-            l2_count = int(settings.get("level2SubPromoterCount", 50))
-            l2_threshold = int(settings.get("level2SubThreshold", 100))
+            # ---------- 二级: 裂变奖(每 M 个达标下线发一轮钱包现金) ----------
+            l2_count = int(settings.get("level2SubPromoterCount", 6))
+            l2_threshold = int(settings.get("level2SubThreshold", 5))
+            l2_amount = float(settings.get("level2RewardAmount", 15))
             qualified = 0
             for relation in team:
                 sub_team = await self.promo_repo.list_team(
                     relation["inviteeMemberId"])
                 if len(sub_team) >= l2_threshold:
                     qualified += 1
-            c2 = await self.promo_repo.count_rewards(member_id, "wine_qualify")
-            if l2_count > 0 and l2_threshold > 0 and qualified >= l2_count * (c2 + 1):
+            c2 = await self.promo_repo.count_rewards(member_id, "wallet_l2")
+            if (l2_count > 0 and l2_threshold > 0 and l2_amount > 0
+                    and qualified >= l2_count * (c2 + 1)):
                 cycle = c2 + 1
                 reward = {
                     "rewardId": await self.promo_repo.next_reward_id(),
                     "memberId": member_id,
-                    "rewardType": "wine_qualify",
+                    "rewardType": "wallet_l2",
                     "cycle": cycle,
-                    "amount": 0,
+                    "amount": l2_amount,
                     "status": "issued",
                     "detail": (f"{l2_count}个下线各推广满{l2_threshold}人"
                                f"第{cycle}轮"),
                     "createdAt": self._now(),
                 }
                 await self.promo_repo.save_reward(reward)
-                logger.info("promo_l2_reward member=%s cycle=%s qualified=%s",
-                            member_id, cycle, qualified)
+                await self.wallet_service.deposit_reward(
+                    member_id, l2_amount,
+                    description=f"推广矩阵奖励(裂变第{cycle}轮)")
+                logger.info("promo_l2_reward member=%s cycle=%s qualified=%s "
+                            "amount=%.2f", member_id, cycle, qualified,
+                            l2_amount)
 
     # ============================================================
     # 用户端: 推广统计/团队/奖励
@@ -284,11 +290,13 @@ class PromotionService:
         return {
             "memberId": member_id,
             "directCount": len(team),
-            "level1Threshold": int(settings.get("level1Threshold", 100)),
-            "level1RewardAmount": float(settings.get("level1RewardAmount", 50)),
+            "level1Threshold": int(settings.get("level1Threshold", 10)),
+            "level1RewardAmount": float(settings.get("level1RewardAmount", 20)),
             "qualifiedSubCount": qualified,
             "level2SubPromoterCount": l2_count,
             "level2SubThreshold": l2_threshold,
+            "level2RewardAmount": float(
+                settings.get("level2RewardAmount", 15)),
             "wineMinPrice": float(settings.get("wineMinPrice", 200)),
             "rewardBalance": wallet_reward,
             "rewardBalanceNote": "仅可购买本站产品,不可提现",
@@ -457,7 +465,7 @@ class PromotionService:
         """
         allowed = ("enabled", "level1Threshold", "level1RewardAmount",
                    "level2SubPromoterCount", "level2SubThreshold",
-                   "wineMinPrice", "eligibleProductIds")
+                   "level2RewardAmount", "wineMinPrice", "eligibleProductIds")
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             raise ValueError(f"无可更新字段, 支持: {', '.join(allowed)}")
@@ -482,6 +490,11 @@ class PromotionService:
             if v < 1:
                 raise ValueError("下线推广阈值须 ≥ 1")
             updates["level2SubThreshold"] = v
+        if "level2RewardAmount" in updates:
+            v = float(updates["level2RewardAmount"])
+            if v < 0:
+                raise ValueError("二级奖励金额须 ≥ 0")
+            updates["level2RewardAmount"] = round(v, 2)
         if "wineMinPrice" in updates:
             v = float(updates["wineMinPrice"])
             if v < 0:

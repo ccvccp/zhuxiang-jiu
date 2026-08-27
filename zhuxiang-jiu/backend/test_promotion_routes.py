@@ -200,10 +200,11 @@ class TestMatrixRewards:
         member_repo = MemberRepository()
         reset_store()
 
-        # 小参数: 直推满2人发10元; 2个下线各推满2人可领酒
+        # 小参数: 直推满2人发10元; 2个下线各推满2人发二级现金12元
         await svc.update_settings({
             "level1Threshold": 2, "level1RewardAmount": 10.0,
             "level2SubPromoterCount": 2, "level2SubThreshold": 2,
+            "level2RewardAmount": 12.0,
         }, admin="tester")
 
         a = await _mk_member(member_repo, "13900000001", "推广人A")
@@ -233,28 +234,35 @@ class TestMatrixRewards:
                len(txs) == 1 and "不可提现" in txs[0]["description"],
                f"tx={txs[0]['description'] if txs else None}")
 
-        # test 16: 再绑第3人不重复发(阈值2, 已发1轮, 需4人才发第2轮)
+        # test 16: 再绑第3人不重复发(阈值2, 已发1轮, 需4人才发第2轮);
+        #          绑第4人 → 叠加发放第2轮(10+10=20元, 奖励可叠加)
         x = await _mk_member(member_repo, "13900000013", "下线X")
         await svc.bind_relation(code, x["id"])
         info = await wallet_svc.get_reward_balance(a_id)
         record("test_16_no_premature_second_cycle",
                abs(info["rewardBalance"] - 10.0) < 0.001,
                f"rewardBalance={info['rewardBalance']}")
+        x2 = await _mk_member(member_repo, "13900000014", "下线X2")
+        await svc.bind_relation(code, x2["id"])
+        info = await wallet_svc.get_reward_balance(a_id)
+        record("test_16b_l1_reward_stacks",
+               abs(info["rewardBalance"] - 20.0) < 0.001,
+               f"rewardBalance={info['rewardBalance']}")
 
-        # B1 推满 2 人(B1 得奖励; A 的 qualified=1 不发酒)
+        # B1 推满 2 人(B1 得奖励; A 的 qualified=1 不发二级现金)
         code_b1 = (await svc.claim_promo_code(b1["id"], "douyin"))["code"]
         c1 = await _mk_member(member_repo, "13900000021", "C1")
         c2 = await _mk_member(member_repo, "13900000022", "C2")
         await svc.bind_relation(code_b1, c1["id"])
         await svc.bind_relation(code_b1, c2["id"])
         rewards_a = await svc.list_my_rewards(a_id)
-        wine_before = [r for r in rewards_a if r["rewardType"] == "wine_qualify"]
+        l2_before = [r for r in rewards_a if r["rewardType"] == "wallet_l2"]
 
-        # test 17: 仅1个达标下线时不发酒资格
-        record("test_17_no_wine_until_threshold",
-               len(wine_before) == 0, f"wine={wine_before}")
+        # test 17: 仅1个达标下线时不发二级现金
+        record("test_17_no_l2_until_threshold",
+               len(l2_before) == 0, f"l2={l2_before}")
 
-        # B2 也推满 2 人 → A 的 qualified=2 → 发领酒资格
+        # B2 也推满 2 人 → A 的 qualified=2 → 发二级现金 12 元
         code_b2 = (await svc.claim_promo_code(b2["id"], "kuaishou"))["code"]
         c3 = await _mk_member(member_repo, "13900000023", "C3")
         c4 = await _mk_member(member_repo, "13900000024", "C4")
@@ -262,12 +270,15 @@ class TestMatrixRewards:
         await svc.bind_relation(code_b2, c4["id"])
 
         rewards_a = await svc.list_my_rewards(a_id)
-        wine_rewards = [r for r in rewards_a if r["rewardType"] == "wine_qualify"]
+        l2_rewards = [r for r in rewards_a if r["rewardType"] == "wallet_l2"]
+        info_after_l2 = await wallet_svc.get_reward_balance(a_id)
 
-        # test 18: 2个达标下线 → 领酒资格
-        record("test_18_wine_qualify_issued",
-               len(wine_rewards) == 1 and wine_rewards[0]["status"] == "issued",
-               f"wine={wine_rewards}")
+        # test 18: 2个达标下线 → 二级现金奖励(两轮一级10+10 + 二级12 = 32元)
+        record("test_18_l2_reward_issued",
+               len(l2_rewards) == 1 and l2_rewards[0]["status"] == "issued"
+               and abs(l2_rewards[0]["amount"] - 12.0) < 0.001
+               and abs(info_after_l2["rewardBalance"] - 32.0) < 0.001,
+               f"l2={l2_rewards}, balance={info_after_l2['rewardBalance']}")
 
         # test 19: B2 也获得一级奖励(直推满2人)
         info_b2 = await wallet_svc.get_reward_balance(b2["id"])
@@ -281,8 +292,9 @@ class TestMatrixRewards:
                len(pool) >= 1 and all(p["price"] >= 200 for p in pool),
                f"pool={[(p['productId'], p['price']) for p in pool]}")
 
-        # test 21: 领酒成功(选池内第一款)
+        # test 21: 领酒成功(先手动补发领酒资格, 二级奖励已改为现金)
         product = pool[0]
+        await svc.admin_grant_reward(a_id, "wine_qualify", 0, "测试补发资格")
         claim = await svc.claim_wine(a_id, product["productId"],
                                      "北京市朝阳区XX路1号竹香酒业大厦")
         record("test_21_claim_wine_success",
@@ -366,13 +378,14 @@ class TestSettings:
         svc = PromotionService()
         reset_store()
 
-        # test 29: 默认参数(100人/50元/50达标/100推广/200元)
+        # test 29: 默认参数(10人/20元/6达标/5推广/15元/200元)
         s = await svc.get_settings()
         record("test_29_default_settings",
-               s["level1Threshold"] == 100
-               and abs(s["level1RewardAmount"] - 50.0) < 0.001
-               and s["level2SubPromoterCount"] == 50
-               and s["level2SubThreshold"] == 100
+               s["level1Threshold"] == 10
+               and abs(s["level1RewardAmount"] - 20.0) < 0.001
+               and s["level2SubPromoterCount"] == 6
+               and s["level2SubThreshold"] == 5
+               and abs(s["level2RewardAmount"] - 15.0) < 0.001
                and abs(s["wineMinPrice"] - 200.0) < 0.001,
                f"settings={s}")
 

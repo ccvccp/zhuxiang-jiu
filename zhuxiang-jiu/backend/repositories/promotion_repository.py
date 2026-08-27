@@ -38,10 +38,11 @@ CHANNELS = (
 # 默认参数(管理端可修改)
 DEFAULT_SETTINGS = {
     "enabled": True,
-    "level1Threshold": 100,       # 一级奖励人数阈值
-    "level1RewardAmount": 50.0,   # 一级奖励金额(元/轮)
-    "level2SubPromoterCount": 50, # 二级达标所需下线数
-    "level2SubThreshold": 100,    # 每个下线需完成的推广人数
+    "level1Threshold": 10,        # 一级奖励人数阈值
+    "level1RewardAmount": 20.0,   # 一级奖励金额(元/轮, 可叠加)
+    "level2SubPromoterCount": 6,  # 二级达标所需下线数
+    "level2SubThreshold": 5,      # 每个下线需完成的推广人数
+    "level2RewardAmount": 15.0,   # 二级奖励金额(元/轮)
     "wineMinPrice": 200.0,        # 奖励酒最低价
     "eligibleProductIds": None,   # 活动酒池(None=自动取价格>=wineMinPrice的产品)
     "updatedAt": "",

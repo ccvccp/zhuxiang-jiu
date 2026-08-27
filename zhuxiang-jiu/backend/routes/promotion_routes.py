@@ -90,6 +90,8 @@ class UpdateSettingsRequest(PydBaseModel):
                                                   description="二级达标所需下线数")
     level2SubThreshold: int | None = Field(None, ge=1,
                                               description="每个下线需推广人数")
+    level2RewardAmount: float | None = Field(None, ge=0,
+                                               description="二级奖励金额(元/轮)")
     wineMinPrice: float | None = Field(None, ge=0, description="奖励酒最低价")
     eligibleProductIds: list | None = Field(
         None, description="活动酒池产品ID数组(null=自动按价格筛选)")

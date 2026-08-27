@@ -87,7 +87,7 @@
 }
 
 // ============================================
-// 推广码
+// 推广二维码
 // ============================================
 .codeCard {
   background: $color-bg-card;
@@ -99,18 +99,43 @@
   align-items: center;
 }
 
+.qrWrap {
+  background: $color-bg-card;
+  border: 2rpx solid $color-divider;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.qrCanvas {
+  width: 320rpx;
+  height: 320rpx;
+  display: block;
+}
+
 .codeValue {
-  font-size: 56rpx;
+  font-size: 40rpx;
   font-weight: $font-weight-bold;
   color: $color-primary;
   letter-spacing: 4rpx;
-  margin-bottom: $spacing-sm;
+  margin-bottom: $spacing-xs;
 }
 
 .codeDesc {
   font-size: $font-size-sm;
   color: $color-text-tertiary;
   margin-bottom: $spacing-lg;
+}
+
+.shareTipLink {
+  margin-top: $spacing-md;
+  font-size: $font-size-sm;
+  color: $color-primary;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.7;
+  }
 }
 
 .codeActions {
