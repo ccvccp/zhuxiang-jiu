@@ -24,11 +24,34 @@ from core.locks import get_lock
 from repositories.trace_prod_repository import (
     TraceProdRepository, RESULT_PASS, RESULT_BLOCK,
     ANOMALY_SKIP, ANOMALY_BACKFLOW, ANOMALY_DWELL, ANOMALY_QC_BLOCKED,
+    QR_PAYLOAD_PREFIX,
 )
 from repositories.member_repository import MemberRepository
 from services.perm_service import PermService
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+# P2: AI 质检结论语义审核(规则引擎 B 级, 预留大模型升级)
+# ============================================================
+
+# 明确结论关键词(注: 不含"异常", 因"无异常"为合格表述; B 级规则引擎限制)
+_QC_PASS_KEYWORDS = ("合格", "通过", "达标", "符合", "ok", "OK")
+_QC_FAIL_KEYWORDS = ("不合格", "不通过", "不达标", "超标")
+# 模糊表述词(扣分)
+_QC_VAGUE_KEYWORDS = ("大概", "差不多", "可能", "应该", "疑似", "左右",
+                      "估计", "貌似", "约")
+# 关键指标缺失检测: 工段码 → 结论中应含的指标词
+_QC_REQUIRED_METRICS = {
+    "STG-BLEND": ("酒度",),
+    "STG-PACK": ("包装", "标签"),
+}
+# AI 审核评分: 结论明确40 + 无模糊词30 + 指标齐全20 + 表述规范10
+_QC_SCORE_BASE = 100
+_QC_VAGUE_PENALTY = 15      # 每个模糊词
+_QC_METRIC_PENALTY = 20     # 每个缺失指标
+_QC_SHORT_PENALTY = 20      # 结论过短(<4字)
+_QC_PASS_THRESHOLD = 60     # 低于此分拒绝打卡
 
 
 def _now() -> datetime:
@@ -77,6 +100,102 @@ class TraceProdService:
         if not batch:
             raise KeyError(f"批次不存在: {batch_no}")
         return batch
+
+    # ============================================================
+    # P2: 工段码印刷载荷 / 参数模板校验 / AI 质检语义审核
+    # ============================================================
+
+    def stage_qr_payload(self, stage: dict) -> dict:
+        """工段二维码印刷载荷(格式: ZXBJ-TRACE:{code}:v{n})"""
+        return {
+            "stageCode": stage["code"],
+            "payload": f"{QR_PAYLOAD_PREFIX}:{stage['code']}:v1",
+            "printTitle": f"竹香酒·{stage['name']}工段打卡码",
+            "printHint": "责任人扫码打卡 · 权限自动校验 · 打卡即签名",
+        }
+
+    @staticmethod
+    def parse_stage_payload(payload: str) -> str | None:
+        """解析扫码内容 → 工段码(非本格式返回 None)"""
+        parts = (payload or "").strip().split(":")
+        if len(parts) >= 2 and parts[0] == QR_PAYLOAD_PREFIX:
+            return parts[1]
+        return None
+
+    @staticmethod
+    def _validate_params(stage: dict, params: dict) -> None:
+        """按工段参数模板校验必填项
+
+        Raises:
+            ValueError: 缺失必填工艺参数
+        """
+        template = stage.get("paramsTemplate") or []
+        missing = [t["label"] for t in template
+                   if t.get("required")
+                   and not str((params or {}).get(t["key"], "")).strip()]
+        if missing:
+            raise ValueError(
+                f"缺失必填工艺参数: {'、'.join(missing)}")
+
+    def ai_review_qc(self, stage: dict, conclusion: str) -> dict:
+        """AI 质检结论语义审核(规则引擎 B 级)
+
+        审核维度: 明确结论(不合格即阻断) / 模糊表述 / 关键指标齐全 /
+        表述规范(长度); 输出 0-100 评分 + 修正建议。
+
+        Returns:
+            {verdict: pass|fail|reject, score, flags, suggestions}
+        """
+        text = (conclusion or "").strip()
+        flags = []
+        suggestions = []
+        score = _QC_SCORE_BASE
+
+        # 0. 空结论(非关卡不会走到这; 关卡前置已拦截)
+        if not text:
+            return {"verdict": "reject", "score": 0,
+                    "flags": ["结论为空"],
+                    "suggestions": ["必须填写质检结论"]}
+
+        # 1. 明确结论判定(无结论词直接拒绝; "复检合格"类豁免 fail)
+        has_fail = any(k in text for k in _QC_FAIL_KEYWORDS)
+        has_pass = any(k in text for k in _QC_PASS_KEYWORDS)
+        if not has_fail and not has_pass:
+            flags.append("无明确结论词(合格/不合格)")
+            suggestions.append("结论须明确含「合格」或「不合格」")
+            score -= 40
+
+        # 2. 模糊表述
+        vague_found = [w for w in _QC_VAGUE_KEYWORDS if w in text]
+        if vague_found:
+            flags.append(f"模糊表述: {'、'.join(vague_found)}")
+            suggestions.append("质检数据须为实测确定值, 禁用推测表述")
+            score -= _QC_VAGUE_PENALTY * len(vague_found)
+
+        # 3. 关键指标齐全
+        for metric in _QC_REQUIRED_METRICS.get(stage["code"], ()):
+            if metric not in text:
+                flags.append(f"缺少关键指标: {metric}")
+                suggestions.append(f"结论应包含「{metric}」实测数据")
+                score -= _QC_METRIC_PENALTY
+
+        # 4. 表述规范
+        if len(text) < 4:
+            flags.append("结论过短(<4字)")
+            suggestions.append("应包含指标数值与判定, 如「酒度52.1 合格」")
+            score -= _QC_SHORT_PENALTY
+
+        score = max(0, min(100, score))
+        # 判定: 不合格关键词 → fail(阻断); 无结论词或分数不足 → reject;
+        # 否则 pass
+        if has_fail and not ("复检" in text and "合格" in text):
+            verdict = "fail"
+        elif not has_pass or score < _QC_PASS_THRESHOLD:
+            verdict = "reject"
+        else:
+            verdict = "pass"
+        return {"verdict": verdict, "score": score, "flags": flags,
+                "suggestions": suggestions}
 
     # ============================================================
     # 工段定义 / 责任人候选
@@ -208,6 +327,19 @@ class TraceProdService:
                 raise ValueError(
                     f"「{stage['name']}」为质检关卡, 必须填写质检结论")
 
+            # 3.5 P2: 工艺参数模板必填校验
+            self._validate_params(stage, params or {})
+
+            # 3.6 P2: AI 质检结论语义审核(质检关卡)
+            ai_review = None
+            if stage.get("isQcGate"):
+                ai_review = self.ai_review_qc(stage, qc_conclusion)
+                if ai_review["verdict"] == "reject":
+                    raise ValueError(
+                        "AI 质检结论审核未通过: "
+                        + "; ".join(ai_review["flags"]) +
+                        " | 建议: " + "; ".join(ai_review["suggestions"]))
+
             # 4. AI 流转异常检测
             anomalies = []
             last = await self.repo.last_punch(batch_no)
@@ -226,9 +358,11 @@ class TraceProdService:
                             > threshold * 3600:
                         anomalies.append(ANOMALY_DWELL)
 
-            # 5. 打卡结果(质检关卡可 block 阻断)
+            # 5. 打卡结果(AI 审核判 fail 或结论为不合格 → 阻断)
             result = RESULT_PASS
             if stage.get("isQcGate") and qc_conclusion.strip() == "不合格":
+                result = RESULT_BLOCK
+            if ai_review and ai_review["verdict"] == "fail":
                 result = RESULT_BLOCK
 
             # 6. 链式哈希落库(prev 取全量最后一条, 与 verify_chain 一致)
@@ -245,6 +379,7 @@ class TraceProdService:
                 "result": result,
                 "qcConclusion": qc_conclusion.strip()[:200],
                 "params": params or {}, "anomalies": anomalies,
+                "aiQcReview": ai_review,
                 "punchedAt": now_iso,
             }
             punch["blockHash"] = self.repo.compute_hash(prev_hash, punch)

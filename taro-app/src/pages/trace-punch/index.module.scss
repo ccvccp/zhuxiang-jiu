@@ -138,6 +138,41 @@
   padding: 12rpx 0;
 }
 
+// ============================================
+// 管理驾驶舱(P3)
+// ============================================
+.statGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.statCell {
+  flex: 1;
+  min-width: 160rpx;
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  padding: $spacing-sm $spacing-xs;
+  text-align: center;
+}
+
+.statNum {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+  line-height: 1.2;
+}
+
+.statDanger {
+  color: $color-error;
+}
+
+.statLabel {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+}
+
 .btnRow {
   display: flex;
   gap: $spacing-sm;
@@ -331,3 +366,39 @@
 
 .progressDone { background: $color-success; }
 .progressCur { background: $color-warning; }
+
+// ============================================
+// 工段码印刷卡(P2)
+// ============================================
+.qrCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 2rpx dashed $color-border;
+  border-radius: $radius-md;
+  padding: $spacing-lg $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.qrCanvas {
+  width: 240rpx;
+  height: 240rpx;
+  background: $color-text-white;
+}
+
+.qrPayload {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+  font-family: monospace;
+}
+
+.aiReviewScore {
+  display: inline-block;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba(53, 92, 68, 0.08);
+  border-radius: $radius-xs;
+  padding: 2rpx 12rpx;
+  margin-left: 8rpx;
+}

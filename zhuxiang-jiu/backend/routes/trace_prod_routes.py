@@ -85,8 +85,19 @@ class UpdateStageRequest(PydBaseModel):
 
 @router.get("/api/trace-prod/stages", tags=["产品溯源管理"])
 async def list_stages(member: dict = Depends(get_current_member)):
-    """工段定义列表(7 工段, 附责任人候选=环节权限持有者)"""
+    """工段定义列表(7 工段, 附责任人候选=环节权限持有者+参数模板)"""
     return {"stages": await _service.list_stages()}
+
+
+@router.get("/api/trace-prod/stages/qr", tags=["产品溯源管理"])
+async def stages_qr(member: dict = Depends(get_current_member)):
+    """工段二维码印刷载荷(P2: 格式 ZXBJ-TRACE:{code}:v1, 供印刷张贴)"""
+    stages = await _service.list_stages()
+    return {"items": [
+        {**_service.stage_qr_payload(s),
+         "seq": s["seq"], "desc": s["desc"],
+         "paramsTemplate": s.get("paramsTemplate", [])}
+        for s in stages]}
 
 
 @router.post("/api/trace-prod/batches", tags=["产品溯源管理"])
@@ -159,7 +170,7 @@ async def release_batch(batch_no: str,
 
 
 # ============================================================
-# 公开端(2 接口, C 端消费)
+# 公开端(3 接口, C 端消费)
 # ============================================================
 
 @router.get("/api/trace-prod/public/{batch_no}", tags=["产品溯源管理"])
@@ -167,6 +178,16 @@ async def public_trace(batch_no: str):
     """公开生产溯源时间线(责任人脱敏, 消费者扫码用)"""
     try:
         return await _service.public_trace(batch_no)
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/trace-prod/public/health/{batch_no}",
+            tags=["产品溯源管理"])
+async def public_health(batch_no: str):
+    """公开 AI 溯源健康度评分(P3: 消费者溯源页独立卡片)"""
+    try:
+        return await _service.trace_health(batch_no)
     except Exception as exc:
         _handle(exc)
 

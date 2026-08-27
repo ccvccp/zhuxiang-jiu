@@ -258,6 +258,14 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/trace-view/index' })}>
+              <View className={styles.adminEntryIcon}>🔍</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>溯源验真</View>
+                <View className={styles.adminEntryDesc}>免登录 · 批次号/扫瓶码 · 全链时间线 · AI 健康度</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
           </View>
         )}
 

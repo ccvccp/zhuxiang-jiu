@@ -153,7 +153,7 @@ async def main():
     record("test_07_unsigned_duty_blocked", ok, msg)
 
     p1 = await svc.punch(brewer, "STG-BREW", "ZX52-2026L08",
-                         params={"窖池": "3号", "酒度": "52.2"})
+                         params={"窖池号": "3号", "酒度": "52.2"})
     record("test_08_normal_punch",
            p1["result"] == "pass" and p1["anomalies"] == []
            and len(p1["blockHash"]) == 64,
@@ -175,7 +175,9 @@ async def main():
     print("\n========== 4. 顺序流转 ==========")
 
     # 跳工段: 直接到灌装(seq4, 当前seq1) → skip_stage 异常但仍留痕
-    p_skip = await svc.punch(storer, "STG-FILL", "ZX52-2026L08")
+    p_skip = await svc.punch(storer, "STG-FILL", "ZX52-2026L08",
+                             params={"灌装线": "1号线",
+                                     "实际灌装量": "5000"})
     record("test_10_skip_stage_anomaly",
            p_skip["result"] == "pass"
            and "skip_stage" in p_skip["anomalies"],
@@ -183,15 +185,17 @@ async def main():
 
     # 时间倒流: 回打储藏(seq2, 当前已到4) → time_backflow
     p_back = await svc.punch(storer, "STG-STOR", "ZX52-2026L08",
-                             params={"坛号": "T-102"})
+                             params={"容器号": "T-102"})
     record("test_11_backflow_anomaly",
            "time_backflow" in p_back["anomalies"],
            f"anomalies={p_back['anomalies']}")
 
     # 新批次走干净全链
     b2 = await svc.create_batch(brewer, "ZX42-2026L09", 2, 3000)
-    await svc.punch(brewer, "STG-BREW", "ZX42-2026L09")
-    await svc.punch(storer, "STG-STOR", "ZX42-2026L09")
+    await svc.punch(brewer, "STG-BREW", "ZX42-2026L09",
+                    params={"窖池号": "1号", "酒度": "42.1"})
+    await svc.punch(storer, "STG-STOR", "ZX42-2026L09",
+                    params={"容器号": "T-201"})
     record("test_12_clean_sequential",
            (await repo.get_batch("ZX42-2026L09"))["currentStageSeq"]
            == 2,
@@ -211,7 +215,8 @@ async def main():
 
     # 不合格 → block 阻断
     p_qc_block = await svc.punch(brewer, "STG-BLEND", "ZX42-2026L09",
-                                 qc_conclusion="不合格")
+                                 params={"酒度": "48.2"},
+                                 qc_conclusion="酒度48.2 不合格")
     b2_now = await repo.get_batch("ZX42-2026L09")
     record("test_14_qc_fail_blocks_batch",
            p_qc_block["result"] == "block"
@@ -229,7 +234,8 @@ async def main():
     # 超管解锁 → 重打质检合格
     await svc.admin_unblock(SUPER, "ZX42-2026L09", "复检通过")
     p_qc_pass = await svc.punch(brewer, "STG-BLEND", "ZX42-2026L09",
-                                qc_conclusion="复检合格 52.1°")
+                                params={"酒度": "42.1"},
+                                qc_conclusion="复检酒度42.1 合格")
     record("test_16_unblock_and_repass",
            p_qc_pass["result"] == "pass"
            and (await repo.get_batch("ZX42-2026L09"))["status"]
@@ -249,13 +255,14 @@ async def main():
 
     # 走完 4-7 工段
     await svc.punch(storer, "STG-FILL", "ZX42-2026L09",
-                    params={"灌装线": "2号线"})
+                    params={"灌装线": "2号线", "实际灌装量": "3000"})
     await svc.punch(storer, "STG-PACK", "ZX42-2026L09",
-                    qc_conclusion="包装合格")
+                    params={"装箱规格": "6"},
+                    qc_conclusion="标签包装合格")
     await svc.punch(storer, "STG-WARE", "ZX42-2026L09",
                     params={"库位": "A-01"})
     await svc.punch(shipper, "STG-OUT", "ZX42-2026L09",
-                    params={"运单": "SF-888"})
+                    params={"运单号": "SF-888"})
 
     # 未绑瓶码拦截
     ok, msg = await _expect(ValueError,

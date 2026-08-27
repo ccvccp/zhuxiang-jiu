@@ -18,39 +18,70 @@ from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_
 
 
 # ============================================================
-# 工段定义种子(7 工段, 顺序流转)
+# 工段定义种子(7 工段, 顺序流转, P2: 含工艺参数模板)
+# paramsTemplate: {key, label, unit, required} 列表(打卡表单动态渲染+必填校验)
 # ============================================================
 
 SEED_STAGES = [
     {"stageId": 1, "code": "STG-BREW", "name": "工艺酿酒",
      "seq": 1, "permStage": "production", "permLevel": "operate",
      "isQcGate": False, "maxDwellHours": 0,
-     "desc": "投料/发酵/蒸馏, 记录窖池号与酒度"},
+     "desc": "投料/发酵/蒸馏, 记录窖池号与酒度",
+     "paramsTemplate": [
+         {"key": "窖池号", "label": "窖池号", "unit": "", "required": True},
+         {"key": "酒度", "label": "原酒酒度", "unit": "%vol", "required": True},
+         {"key": "粮食品种", "label": "粮食品种", "unit": "", "required": False},
+     ]},
     {"stageId": 2, "code": "STG-STOR", "name": "原酒储藏",
      "seq": 2, "permStage": "storage", "permLevel": "operate",
      "isQcGate": False, "maxDwellHours": 24 * 30,
-     "desc": "陶坛/不锈钢罐储藏, 记录坛号与储藏期"},
+     "desc": "陶坛/不锈钢罐储藏, 记录坛号与储藏期",
+     "paramsTemplate": [
+         {"key": "容器号", "label": "坛/罐号", "unit": "", "required": True},
+         {"key": "储藏方式", "label": "储藏方式", "unit": "", "required": False},
+     ]},
     {"stageId": 3, "code": "STG-BLEND", "name": "产品调配检测",
      "seq": 3, "permStage": "production", "permLevel": "operate",
      "isQcGate": True, "maxDwellHours": 72,
-     "desc": "勾调+理化/感官检测, 质检关卡(须结论)"},
+     "desc": "勾调+理化/感官检测, 质检关卡(须结论)",
+     "paramsTemplate": [
+         {"key": "酒度", "label": "成品酒度", "unit": "%vol", "required": True},
+         {"key": "勾调比例", "label": "勾调比例", "unit": "", "required": False},
+     ]},
     {"stageId": 4, "code": "STG-FILL", "name": "灌装",
      "seq": 4, "permStage": "storage", "permLevel": "operate",
      "isQcGate": False, "maxDwellHours": 48,
-     "desc": "洗瓶/灌装/压盖, 记录灌装线号"},
+     "desc": "洗瓶/灌装/压盖, 记录灌装线号",
+     "paramsTemplate": [
+         {"key": "灌装线", "label": "灌装线号", "unit": "号线", "required": True},
+         {"key": "实际灌装量", "label": "实际灌装量", "unit": "瓶", "required": True},
+     ]},
     {"stageId": 5, "code": "STG-PACK", "name": "包装质检",
      "seq": 5, "permStage": "storage", "permLevel": "operate",
      "isQcGate": True, "maxDwellHours": 48,
-     "desc": "贴标/装箱+包装质检, 质检关卡(须结论)"},
+     "desc": "贴标/装箱+包装质检, 质检关卡(须结论)",
+     "paramsTemplate": [
+         {"key": "装箱规格", "label": "装箱规格", "unit": "瓶/箱", "required": True},
+     ]},
     {"stageId": 6, "code": "STG-WARE", "name": "仓库",
      "seq": 6, "permStage": "storage", "permLevel": "operate",
      "isQcGate": False, "maxDwellHours": 24 * 90,
-     "desc": "成品入库上架, 记录库位"},
+     "desc": "成品入库上架, 记录库位",
+     "paramsTemplate": [
+         {"key": "库位", "label": "库位", "unit": "", "required": True},
+     ]},
     {"stageId": 7, "code": "STG-OUT", "name": "出库",
      "seq": 7, "permStage": "logistics", "permLevel": "operate",
      "isQcGate": False, "maxDwellHours": 72,
-     "desc": "出库发运, 绑定瓶码后放行"},
+     "desc": "出库发运, 绑定瓶码后放行",
+     "paramsTemplate": [
+         {"key": "运单号", "label": "运单号", "unit": "", "required": True},
+         {"key": "物流商", "label": "物流商", "unit": "", "required": False},
+     ]},
 ]
+
+# 工段二维码印刷载荷前缀(扫码 → 小程序溯源页自动识别工段)
+QR_PAYLOAD_PREFIX = "ZXBJ-TRACE"
 
 # 打卡结果
 RESULT_PASS = "pass"

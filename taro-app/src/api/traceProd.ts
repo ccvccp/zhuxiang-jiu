@@ -6,6 +6,13 @@ import { request } from './request';
 import { getSession } from '@/services/auth-service';
 
 /** 工段定义 */
+export interface ParamTemplateItem {
+  key: string;
+  label: string;
+  unit: string;
+  required: boolean;
+}
+
 export interface TraceStageVO {
   stageId: number;
   code: string;            // STG-BREW 等(工段二维码内容)
@@ -16,7 +23,19 @@ export interface TraceStageVO {
   isQcGate: boolean;       // 质检关卡
   maxDwellHours: number;
   desc: string;
+  paramsTemplate: ParamTemplateItem[];
   responsibleCandidates: Array<{ memberId: number; nickname: string }>;
+}
+
+/** 工段码印刷载荷 */
+export interface StageQrVO {
+  stageCode: string;
+  payload: string;         // ZXBJ-TRACE:{code}:v1
+  printTitle: string;
+  printHint: string;
+  seq: number;
+  desc: string;
+  paramsTemplate: ParamTemplateItem[];
 }
 
 /** 生产批次 */
@@ -44,6 +63,10 @@ export interface StagePunchVO {
   qcConclusion: string;
   params: Record<string, any>;
   anomalies: string[];
+  aiQcReview?: {
+    verdict: string; score: number;
+    flags: string[]; suggestions: string[];
+  };
   punchedAt: string;
   responsible?: string;
   responsibleMasked?: string;
@@ -95,7 +118,24 @@ export const TraceProdAPI = {
       isQcGate: !!s.isQcGate,
       maxDwellHours: Number(s.maxDwellHours || 0),
       desc: s.desc || '',
+      paramsTemplate: s.paramsTemplate || [],
       responsibleCandidates: s.responsibleCandidates || [],
+    }));
+  },
+
+  /** 工段码印刷载荷(P2: 供印刷张贴) */
+  async stagesQr(): Promise<StageQrVO[]> {
+    const res = await request<any>({
+      url: '/api/trace-prod/stages/qr', headers: authHeaders(),
+    });
+    return (res.items || []).map((i: any): StageQrVO => ({
+      stageCode: i.stageCode || '',
+      payload: i.payload || '',
+      printTitle: i.printTitle || '',
+      printHint: i.printHint || '',
+      seq: Number(i.seq || 0),
+      desc: i.desc || '',
+      paramsTemplate: i.paramsTemplate || [],
     }));
   },
 
@@ -188,6 +228,23 @@ export const TraceProdAPI = {
         },
         anomalyCount: 0,
       },
+    };
+  },
+
+  /** 公开 AI 健康度评分(消费者, 无需登录) */
+  async publicHealth(batchNo: string): Promise<TraceHealthVO> {
+    const res = await request<any>({
+      url: `/api/trace-prod/public/health/${encodeURIComponent(batchNo)}`,
+    });
+    return {
+      score: Number(res.score || 0),
+      factors: {
+        chainCompleteness: Number(res.factors?.chainCompleteness || 0),
+        noAnomaly: Number(res.factors?.noAnomaly || 0),
+        timeliness: Number(res.factors?.timeliness || 0),
+        qcComplete: Number(res.factors?.qcComplete || 0),
+      },
+      anomalyCount: Number(res.anomalyCount || 0),
     };
   },
 
