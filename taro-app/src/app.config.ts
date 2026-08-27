@@ -9,6 +9,7 @@ export default defineAppConfig({
     'pages/order-detail/index',
     'pages/promotion/index',
     'pages/activity/index',
+    'pages/wallet/index',
     'pages/privacy/index',
     'pages/agreement/index'
   ],

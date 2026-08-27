@@ -1,0 +1,439 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $spacing-lg;
+  padding-bottom: $spacing-xl;
+}
+
+// ============================================
+// 未开通卡片
+// ============================================
+.openCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  padding: $spacing-xl $spacing-lg;
+  box-shadow: $shadow-card;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 120rpx;
+}
+
+.openIcon {
+  font-size: 120rpx;
+  margin-bottom: $spacing-md;
+}
+
+.openTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.openDesc {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  text-align: center;
+  margin-bottom: $spacing-sm;
+}
+
+.openRule {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-lg;
+}
+
+.openBtn {
+  font-size: $font-size-md;
+  color: $color-text-white;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: 999rpx;
+  padding: 16rpx 96rpx;
+  font-weight: $font-weight-semibold;
+}
+
+// ============================================
+// 余额卡片
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  color: $color-text-white;
+  margin-bottom: $spacing-md;
+}
+
+.heroTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: $spacing-lg;
+}
+
+.heroLabel {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+  margin-bottom: 8rpx;
+}
+
+.heroAmount {
+  font-size: 72rpx;
+  font-weight: $font-weight-bold;
+  line-height: $line-height-tight;
+}
+
+.heroStatus {
+  font-size: $font-size-xs;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999rpx;
+  padding: 6rpx 20rpx;
+}
+
+.heroStats {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: $radius-md;
+  padding: $spacing-md 0;
+  margin-bottom: $spacing-lg;
+}
+
+.heroStatItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.heroStatValue {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  margin-bottom: 4rpx;
+}
+
+.heroStatLabel {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+}
+
+.heroStatDivider {
+  width: 2rpx;
+  height: 48rpx;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.heroActions {
+  display: flex;
+  justify-content: center;
+}
+
+.heroBtn {
+  font-size: $font-size-sm;
+  color: $color-primary;
+  background: $color-text-white;
+  border-radius: 999rpx;
+  padding: 14rpx 72rpx;
+  font-weight: $font-weight-semibold;
+  margin-right: $spacing-md;
+}
+
+.heroBtnGhost {
+  font-size: $font-size-sm;
+  color: $color-text-white;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999rpx;
+  padding: 14rpx 72rpx;
+  font-weight: $font-weight-semibold;
+}
+
+// ============================================
+// 通用 Section
+// ============================================
+.section {
+  margin-bottom: $spacing-md;
+}
+
+.sectionTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+// 累计收益
+.statsCard {
+  display: flex;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-lg 0;
+  box-shadow: $shadow-card;
+}
+
+.statsItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.statsValue {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+  margin-bottom: 4rpx;
+}
+
+.statsLabel {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 交易流水
+// ============================================
+.txTabs {
+  display: flex;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: 8rpx;
+  margin-bottom: $spacing-sm;
+  box-shadow: $shadow-card;
+}
+
+.txTab {
+  flex: 1;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  padding: 10rpx 0;
+  border-radius: $radius-sm;
+}
+
+.txTabActive {
+  background: $color-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-semibold;
+}
+
+.txList {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: 0 $spacing-lg;
+  box-shadow: $shadow-card;
+}
+
+.txItem {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md 0;
+  border-bottom: 2rpx solid rgba(0, 0, 0, 0.04);
+}
+
+.txItem:last-child {
+  border-bottom: none;
+}
+
+.txIcon {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36rpx;
+  font-weight: $font-weight-bold;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+}
+
+.txIn {
+  background: rgba(103, 194, 58, 0.12);
+  color: #67c23a;
+}
+
+.txOut {
+  background: rgba(230, 162, 60, 0.12);
+  color: #e6a23c;
+}
+
+.txInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.txName {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  font-weight: $font-weight-semibold;
+}
+
+.txDesc {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  margin-top: 4rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.txTime {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+}
+
+.txRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  margin-left: $spacing-sm;
+}
+
+.txAmount {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+}
+
+.txAmountIn {
+  color: #67c23a;
+}
+
+.txAmountOut {
+  color: $color-text-primary;
+}
+
+.txBalance {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+}
+
+// ============================================
+// 弹层(充值/提现)
+// ============================================
+.mask {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+}
+
+.sheet {
+  width: 100%;
+  background: $color-bg-card;
+  border-radius: $radius-lg $radius-lg 0 0;
+  padding: $spacing-lg;
+  padding-bottom: calc($spacing-lg + env(safe-area-inset-bottom));
+}
+
+.sheetTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  text-align: center;
+  margin-bottom: $spacing-sm;
+}
+
+.sheetDesc {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  text-align: center;
+  margin-bottom: $spacing-lg;
+}
+
+.quickRow {
+  display: flex;
+  margin-bottom: $spacing-md;
+}
+
+.quickItem {
+  flex: 1;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  padding: $spacing-sm 0;
+  margin-right: $spacing-sm;
+  border: 2rpx solid transparent;
+}
+
+.quickItem:last-child {
+  margin-right: 0;
+}
+
+.quickItemActive {
+  border-color: $color-primary;
+  color: $color-primary;
+  font-weight: $font-weight-semibold;
+}
+
+.inputRow {
+  display: flex;
+  align-items: center;
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  padding: $spacing-md $spacing-md;
+  margin-bottom: $spacing-lg;
+}
+
+.inputPrefix {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-right: $spacing-sm;
+}
+
+.amountInput {
+  flex: 1;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.sheetBtn {
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-white;
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: 999rpx;
+  padding: 18rpx 0;
+  font-weight: $font-weight-semibold;
+}
+
+// ============================================
+// 空状态 / 说明
+// ============================================
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: $spacing-xl 0;
+}
+
+.emptyIcon {
+  font-size: 96rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.emptyText {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.note {
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-sm;
+  line-height: 1.8;
+}

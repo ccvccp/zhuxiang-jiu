@@ -109,7 +109,7 @@ const IndexPage: React.FC = () => {
         Taro.showToast({ title: `团购咨询客服: ${SERVICE_PHONE}`, icon: 'none' });
         break;
       case 'recharge':
-        Taro.showToast({ title: '充值功能开发中', icon: 'none' });
+        Taro.navigateTo({ url: '/pages/wallet/index' });
         break;
       case 'activity':
         Taro.navigateTo({ url: '/pages/activity/index' });
