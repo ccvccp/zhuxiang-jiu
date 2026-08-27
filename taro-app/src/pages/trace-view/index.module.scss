@@ -70,6 +70,24 @@
   padding: 16rpx 0;
 }
 
+// ============ P4: 流通信息卡 ============
+.circCode {
+  font-size: $font-size-sm;
+  color: $color-primary;
+  font-family: monospace;
+  background: rgba(53, 92, 68, 0.06);
+  border-radius: $radius-xs;
+  padding: 10rpx 16rpx;
+  margin-bottom: $spacing-xs;
+  word-break: break-all;
+}
+
+.circMeta {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.8;
+}
+
 // ============ 批次概要 ============
 .section {
   background: $color-bg-card;

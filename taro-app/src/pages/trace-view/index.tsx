@@ -27,6 +27,19 @@ const ANOMALY_NAME: Record<string, string> = {
   skip_stage: '跳工段', time_backflow: '时间倒流',
   dwell_overdue: '超时滞留', qc_blocked: '质检阻断强闯',
 };
+// P4: 流通码前缀(瓶码 BLC / 箱顶码 TBC / 箱底码 BBC)
+const CIRCULATION_PREFIXES = ['BLC-', 'TBC-', 'BBC-'];
+const LIFE_STATUS_NAME: Record<string, string> = {
+  pending: '待激活', active: '已激活', transferred: '已转让',
+  recycled: '已回收', frozen: '已冻结',
+};
+const BOX_STATUS_NAME: Record<string, string> = {
+  pending: '待绑定', bound: '已绑定', opened: '已开箱',
+  recycled: '已回收',
+};
+
+const isCirculationCode = (s: string) =>
+  CIRCULATION_PREFIXES.some(p => s.startsWith(p));
 
 const TraceViewPage: React.FC = () => {
   const [batchNo, setBatchNo] = useState('');
@@ -36,12 +49,15 @@ const TraceViewPage: React.FC = () => {
   const doQuery = async (no: string) => {
     const target = no.trim();
     if (!target) {
-      Taro.showToast({ title: '请输入批次号', icon: 'none' });
+      Taro.showToast({ title: '请输入批次号或瓶身码', icon: 'none' });
       return;
     }
     setLoading(true);
     try {
-      const res = await TraceProdAPI.publicTrace(target);
+      // P4: 瓶码/箱码 → 流通贯通查询; 其余按批次号查询
+      const res = isCirculationCode(target)
+        ? await TraceProdAPI.publicTraceByCode(target)
+        : await TraceProdAPI.publicTrace(target);
       setResult(res);
     } catch (e: any) {
       setResult(null);
@@ -83,7 +99,7 @@ const TraceViewPage: React.FC = () => {
       <View className={styles.searchCard}>
         <Input
           className={styles.input}
-          placeholder='输入瓶身/箱体批次号(如 ZX52-2026L08)'
+          placeholder='扫码/输入瓶身码(BLC)或批次号(如 ZX52-2026L08)'
           value={batchNo}
           onInput={e => setBatchNo(e.detail.value)}
         />
@@ -97,6 +113,33 @@ const TraceViewPage: React.FC = () => {
 
       {result && (
         <>
+          {/* P4: 流通信息卡(扫瓶码/箱码时展示) */}
+          {result.codeType && (
+            <View className={styles.section}>
+              <View className={styles.sectionTitle}>
+                {result.codeType === 'life' ? '🍾 瓶身码验真' : '📦 箱码验真'}
+              </View>
+              <View className={styles.circCode}>{result.code}</View>
+              {result.codeType === 'life' ? (
+                <View className={styles.circMeta}>
+                  流通状态: {LIFE_STATUS_NAME[result.lifeStatus || '']
+                    || result.lifeStatus || '-'}
+                  {result.firstActivationDate
+                    ? ` · 首次激活: ${result.firstActivationDate}` : ''}
+                  {'\n'}
+                  {result.prodReleased
+                    ? '✓ 该瓶出自已放行生产批次' : '⚠ 生产批次尚未出库放行'}
+                </View>
+              ) : (
+                <View className={styles.circMeta}>
+                  箱状态: {BOX_STATUS_NAME[result.boxStatus || '']
+                    || result.boxStatus || '-'}
+                  {result.agentRegion ? ` · 代理区域: ${result.agentRegion}` : ''}
+                </View>
+              )}
+            </View>
+          )}
+
           {/* 批次概要 */}
           <View className={styles.section}>
             <View className={styles.batchHead}>

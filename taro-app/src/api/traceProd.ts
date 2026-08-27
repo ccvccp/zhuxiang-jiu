@@ -94,6 +94,15 @@ export interface PublicTraceVO {
   timeline: StagePunchVO[];
   chainValid: boolean;
   health: TraceHealthVO;
+  /** P4 流通贯通字段(扫瓶码/箱码时返回) */
+  code?: string;
+  codeType?: string;         // life(瓶码) / box(箱码)
+  lifeStatus?: string;       // pending/active/transferred/recycled/frozen
+  firstActivationDate?: string;
+  prodBound?: boolean;
+  prodReleased?: boolean;
+  boxStatus?: string;
+  agentRegion?: string;
 }
 
 const authHeaders = (): Record<string, string> => {
@@ -228,6 +237,35 @@ export const TraceProdAPI = {
         },
         anomalyCount: 0,
       },
+    };
+  },
+
+  /** 扫瓶码/箱码查生产溯源(P4: 流通贯通, 消费者无需登录) */
+  async publicTraceByCode(code: string): Promise<PublicTraceVO> {
+    const res = await request<any>({
+      url: `/api/trace-prod/public/code/${encodeURIComponent(code)}`,
+    });
+    return {
+      batchNo: res.batchNo || '', productId: Number(res.productId || 0),
+      plannedQty: Number(res.plannedQty || 0),
+      status: res.status || '',
+      currentStageSeq: Number(res.currentStageSeq || 0),
+      timeline: res.timeline || [], chainValid: !!res.chainValid,
+      health: res.health || {
+        score: 0,
+        factors: {
+          chainCompleteness: 0, noAnomaly: 0,
+          timeliness: 0, qcComplete: 0,
+        },
+        anomalyCount: 0,
+      },
+      code: res.code || code,
+      codeType: res.codeType || '',
+      lifeStatus: res.lifeStatus || '',
+      firstActivationDate: res.firstActivationDate || '',
+      prodBound: !!res.prodBound, prodReleased: !!res.prodReleased,
+      boxStatus: res.boxStatus || '',
+      agentRegion: res.agentRegion || '',
     };
   },
 

@@ -270,10 +270,14 @@ async def main():
                             "瓶码")
     record("test_18_release_no_codes_blocked", ok, msg)
 
-    # 绑码+放行
+    # 绑码+放行(P4: 瓶码须先在流通码系统生成, 逐码强校验)
+    from services.trace_service import TraceService
+    trace_svc = TraceService()
+    gen = await trace_svc.generate_life_codes(
+        "42", "ZX42-2026L09", 2, product_name="竹香酒42度")
+    real_codes = [l["lifeCode"] for l in gen["lifeCodes"]]
     bind = await svc.bind_life_codes(storer, "ZX42-2026L09",
-                                     ["BLC-42-L09-0001",
-                                      "BLC-42-L09-0002"])
+                                     real_codes)
     released = await svc.release_batch(shipper, "ZX42-2026L09")
     record("test_19_bind_codes_and_release",
            len(bind["lifeCodes"]) == 2

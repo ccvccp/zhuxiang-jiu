@@ -1,4 +1,4 @@
-"""双码追溯管理模块路由(12 端点)
+"""双码追溯管理模块路由(13 端点)
 
 鉴权:
     - 用户端: X-Member-Id 头(扫码激活/转让/查询)
@@ -7,7 +7,7 @@
 端点分布:
     - 箱码(3):     generate-box / bind-box / query-box
     - 生命码(3):    generate-life / bind-life / query-life
-    - 扫码(2):     scan-trace / trace-chain
+    - 扫码(3):     activate / scan-trace / trace-chain
     - 防窜(1):     anti-channel
     - 记录(1):     scan-logs
     - 管理(1):     transition-status(预留)
@@ -235,6 +235,32 @@ async def get_life_code(life_id: int):
 
 
 # --- 扫码追溯 ---
+
+@router.post("/api/trace/activate", tags=["双码追溯模块"])
+async def activate_life_code(
+    data: ActivateRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """扫码激活生命码(P4: 消费者首扫激活, 首启日期为老酒回收唯一基准)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.activate_life_code(
+            life_code=data.lifeCode,
+            user_id=data.userId,
+            user_phone=data.userPhone,
+            user_name=data.userName,
+            longitude=data.longitude,
+            latitude=data.latitude,
+            province=data.province,
+            city=data.city,
+            district=data.district,
+            purchase_channel=data.purchaseChannel,
+            purchase_price=data.purchasePrice,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
 
 @router.post("/api/trace/scan", tags=["双码追溯模块"])
 async def scan_trace(

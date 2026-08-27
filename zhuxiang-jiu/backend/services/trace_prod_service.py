@@ -28,6 +28,9 @@ from repositories.trace_prod_repository import (
 )
 from repositories.member_repository import MemberRepository
 from services.perm_service import PermService
+from repositories.trace_repository import (
+    TraceRepository, LIFE_STATUS_PENDING,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +75,13 @@ class TraceProdService:
 
     def __init__(self, repo: TraceProdRepository = None,
                  member_repo: MemberRepository = None,
-                 perm_service: PermService = None):
+                 perm_service: PermService = None,
+                 trace_repo: TraceRepository = None):
         self.repo = repo or TraceProdRepository()
         self.member_repo = member_repo or MemberRepository()
         self.perm = perm_service or PermService()
+        # P4: 流通码仓库(瓶码/箱码贯通)
+        self.trace_repo = trace_repo or TraceRepository()
 
     # ============================================================
     # 内部辅助
@@ -499,17 +505,76 @@ class TraceProdService:
                 "anomalyCount": anomaly_count}
 
     # ============================================================
+    # P4: 流通贯通(瓶码/箱码 → 生产溯源)
+    # ============================================================
+
+    async def public_trace_by_code(self, code: str) -> dict:
+        """消费者扫瓶码/箱码 → 生产溯源全链(公开, 无需登录)
+
+        解析顺序: 生命码(BLC) → 箱码(TBC/BBC), 命中后按其 batchNo
+        串联生产溯源时间线 + AI 健康度, 并附带流通状态。
+
+        Raises:
+            KeyError: 码不存在或对应批次不存在
+        """
+        life = await self.trace_repo.get_life_by_code(code)
+        if life is not None:
+            result = await self.public_trace(life["batchNo"])
+            result.update({
+                "code": code, "codeType": "life",
+                "lifeStatus": life.get("status"),
+                "firstActivationDate": life.get("firstActivationDate"),
+                "prodBound": bool(life.get("prodBound")),
+                "prodReleased": bool(life.get("prodReleased")),
+            })
+            return result
+        box = await self.trace_repo.get_box_by_code(code)
+        if box is not None:
+            result = await self.public_trace(box["batchNo"])
+            result.update({
+                "code": code, "codeType": "box",
+                "boxStatus": box.get("status"),
+                "agentRegion": box.get("agentRegion"),
+            })
+            return result
+        raise KeyError(f"流通码不存在({code})")
+
+    # ============================================================
     # 瓶码绑定 / 出库放行
     # ============================================================
 
     async def bind_life_codes(self, operator_id: int, batch_no: str,
                               life_codes: list[str]) -> dict:
-        """出库前绑定瓶码(仓储环节权限; 衔接 trace 流通码模块)"""
+        """出库前绑定瓶码(仓储环节权限; P4: 与 trace 流通码模块贯通)
+
+        P4 逐码强校验:
+            - 瓶码须已在流通码系统生成(BLC 格式)
+            - 瓶码批次号须与本生产批次一致
+            - 瓶码状态须为 pending(未激活/未回收/未冻结)
+        校验通过后回写瓶码 prodBound 标记, 实现"批次↔瓶码"双向可查。
+        """
         await self._assert_stage_permission(operator_id, "storage",
                                             "operate")
         batch = await self._require_batch(batch_no)
         if not life_codes:
             raise ValueError("瓶码列表不能为空")
+        now_iso = _now().isoformat()
+        for code in life_codes:
+            life = await self.trace_repo.get_life_by_code(code)
+            if life is None:
+                raise ValueError(
+                    f"瓶码未在流通码系统生成, 不可绑定: {code}")
+            if life.get("batchNo") != batch_no:
+                raise ValueError(
+                    f"瓶码批次不匹配: {code}(属批次 "
+                    f"{life.get('batchNo')})")
+            if life.get("status") != LIFE_STATUS_PENDING:
+                raise ValueError(
+                    f"瓶码状态不可绑定({life.get('status')}): {code}")
+            # 回写贯通标记(流通侧可知已绑定生产批次)
+            await self.trace_repo.update_life_code(life["id"], {
+                "prodBound": True, "prodBoundAt": now_iso,
+                "prodBatchNo": batch_no})
         merged = list(dict.fromkeys(
             (batch.get("lifeCodes") or []) + life_codes))
         await self.repo.update_batch(batch_no, {"lifeCodes": merged})
@@ -519,7 +584,10 @@ class TraceProdService:
 
     async def release_batch(self, operator_id: int,
                             batch_no: str) -> dict:
-        """出库放行(物流环节权限; 须 7 工段全完成)"""
+        """出库放行(物流环节权限; 须 7 工段全完成)
+
+        P4: 放行后回写瓶码 prodReleased 标记, 流通侧可感知已出库。
+        """
         await self._assert_stage_permission(operator_id, "logistics",
                                             "operate")
         batch = await self._require_batch(batch_no)
@@ -529,9 +597,16 @@ class TraceProdService:
                 f"不可出库放行")
         if not batch.get("lifeCodes"):
             raise ValueError("尚未绑定瓶码, 不可出库放行")
+        now_iso = _now().isoformat()
         updated = await self.repo.update_batch(batch_no, {
-            "status": "released", "releasedAt": _now().isoformat(),
+            "status": "released", "releasedAt": now_iso,
             "releasedBy": operator_id})
+        # P4: 瓶码贯通回写(出库后流通侧可激活)
+        for code in batch["lifeCodes"]:
+            life = await self.trace_repo.get_life_by_code(code)
+            if life is not None:
+                await self.trace_repo.update_life_code(life["id"], {
+                    "prodReleased": True, "prodReleasedAt": now_iso})
         await self._log("batch_release", batch_no,
                         {"by": operator_id})
         return updated
