@@ -18,11 +18,16 @@ export const MemberAPI = {
   async profile(): Promise<MemberVO> {
     const res = await request<any>({ url: '/api/member/profile' });
     const m = res.profile || res.member || res;
+    // 后端 level 为数字(1-5), 统一归一化为 'L1'-'L5' 字符串
+    const rawLevel = m.level;
+    const level = typeof rawLevel === 'number'
+      ? `L${rawLevel}`
+      : (rawLevel || 'L1');
     return {
       id: String(m.id || m.member_id || ''),
       name: m.nickname || m.name || '会员',
       phone: m.phone,
-      level: m.level || 'L1',
+      level,
       points: m.points || 0,
       growth: m.growth,
       avatar: m.avatar,

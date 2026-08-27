@@ -127,9 +127,12 @@ const MinePage: React.FC = () => {
     );
   }
 
-  const levelName = LEVEL_NAME[member.level] || '普通会员';
-  const nextPoints = NEXT_LEVEL_POINTS[member.level] || 10000;
-  const progress = member.level === 'L5' ? 100 : Math.min(100, Math.round((member.points / nextPoints) * 100));
+  const levelKey = String(member.level || 'L1').toUpperCase().startsWith('L')
+    ? String(member.level).toUpperCase()
+    : `L${member.level}`;
+  const levelName = LEVEL_NAME[levelKey] || '普通会员';
+  const nextPoints = NEXT_LEVEL_POINTS[levelKey] || 10000;
+  const progress = levelKey === 'L5' ? 100 : Math.min(100, Math.round((member.points / nextPoints) * 100));
 
   return (
     <View className={styles.page}>
@@ -169,21 +172,21 @@ const MinePage: React.FC = () => {
             </View>
             <View className={styles.statDivider} />
             <View className={styles.statItem}>
-              <View className={styles.statValue}>{member.level}</View>
+              <View className={styles.statValue}>{levelKey}</View>
               <View className={styles.statLabel}>等级</View>
             </View>
           </View>
-          {member.level !== 'L5' && (
+          {levelKey !== 'L5' && (
             <View className={styles.progressBox}>
               <View className={styles.progressBar}>
                 <View className={styles.progressFill} style={{ width: `${progress}%` }} />
               </View>
               <View className={styles.progressText}>
-                距{LEVEL_NAME['L' + (Number(member.level.slice(1)) + 1)] || '下一等级'}还差 {nextPoints - member.points} 积分
+                距{LEVEL_NAME['L' + (Number(levelKey.slice(1)) + 1)] || '下一等级'}还差 {nextPoints - member.points} 积分
               </View>
             </View>
           )}
-          {member.level === 'L5' && (
+          {levelKey === 'L5' && (
             <View className={styles.maxLevelTip}>已达最高等级</View>
           )}
         </View>
