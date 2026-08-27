@@ -12,7 +12,8 @@
  */
 
 import Taro from '@tarojs/taro';
-import { API_BASE, CURRENT_MEMBER_ID } from '@/config';
+import { API_BASE } from '@/config';
+import { getMemberId, getSession, requireLogin } from '@/services/auth-service';
 
 interface RequestOptions {
   url: string;
@@ -33,9 +34,12 @@ interface RequestOptions {
 export async function request<T = any>(options: RequestOptions): Promise<T> {
   const { url, method = 'GET', data, headers = {} } = options;
 
+  // 会员身份动态注入(登录后为真实会员 ID, 未登录为空)
+  const session = getSession();
   const header: Record<string, string> = {
     'Content-Type': 'application/json',
-    'X-Member-Id': CURRENT_MEMBER_ID,
+    'X-Member-Id': getMemberId(),
+    ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
     ...headers,
   };
 
@@ -51,6 +55,13 @@ export async function request<T = any>(options: RequestOptions): Promise<T> {
     // HTTP 状态码处理
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return res.data as T;
+    }
+
+    // 401 未登录 → 跳转登录页
+    if (res.statusCode === 401) {
+      Taro.showToast({ title: '请先登录', icon: 'none' });
+      requireLogin();
+      throw new Error('未登录');
     }
 
     // 业务错误(兼容 detail / error 两种后端错误格式)

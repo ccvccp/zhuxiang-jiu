@@ -6,7 +6,7 @@
  * - 推广统计/团队/奖励/推广码: /api/promotion/*
  */
 import { request } from './request';
-import { CURRENT_MEMBER_ID } from '@/config';
+import { getMemberId } from '@/services/auth-service';
 
 // 活动类型
 export interface ActivityVO {
@@ -253,7 +253,7 @@ export const ActivityAPI = {
     await request<any>({
       url: '/api/activity/register',
       method: 'POST',
-      data: { activityId: Number(activityId), userId: Number(CURRENT_MEMBER_ID) },
+      data: { activityId: Number(activityId), userId: Number(getMemberId()) },
     });
   },
 
@@ -262,7 +262,7 @@ export const ActivityAPI = {
     await request<any>({
       url: '/api/activity/cancel',
       method: 'POST',
-      data: { activityId: Number(activityId), userId: Number(CURRENT_MEMBER_ID) },
+      data: { activityId: Number(activityId), userId: Number(getMemberId()) },
     });
   },
 };

@@ -10,6 +10,7 @@ export default defineAppConfig({
     'pages/promotion/index',
     'pages/activity/index',
     'pages/wallet/index',
+    'pages/login/index',
     'pages/privacy/index',
     'pages/agreement/index'
   ],

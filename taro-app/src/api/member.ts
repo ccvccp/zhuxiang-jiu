@@ -17,7 +17,7 @@ export const MemberAPI = {
   /** 获取个人信息 */
   async profile(): Promise<MemberVO> {
     const res = await request<any>({ url: '/api/member/profile' });
-    const m = res.member || res;
+    const m = res.profile || res.member || res;
     return {
       id: String(m.id || m.member_id || ''),
       name: m.nickname || m.name || '会员',

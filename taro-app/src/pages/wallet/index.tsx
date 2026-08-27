@@ -4,7 +4,7 @@
  * 开通条件: 会员等级 ≥ L2(成长值 ≥ 500), 未开通时引导开通
  */
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text } from '@tarojs/components';
+import { View, Text, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import { WalletAPI, WalletInfoVO, WalletTxVO, TX_TYPE_NAME } from '@/api/wallet';
@@ -302,7 +302,7 @@ const WalletPage: React.FC = () => {
             </View>
             <View className={styles.inputRow}>
               <Text className={styles.inputPrefix}>¥</Text>
-              <input
+              <Input
                 className={styles.amountInput}
                 type='digit'
                 value={depAmount}
@@ -327,7 +327,7 @@ const WalletPage: React.FC = () => {
             </View>
             <View className={styles.inputRow}>
               <Text className={styles.inputPrefix}>¥</Text>
-              <input
+              <Input
                 className={styles.amountInput}
                 type='digit'
                 value={wdAmount}

@@ -8,7 +8,7 @@ import { View, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import { PromotionAPI, ActivityAPI, ActivityVO } from '@/api/promotion';
-import { CURRENT_MEMBER_ID } from '@/config';
+import { getMemberId } from '@/services/auth-service';
 
 // 状态筛选 tab
 const STATUS_TABS = [
@@ -39,16 +39,16 @@ const TYPE_ICON: Record<string, string> = {
   presale: '📅',
 };
 
-// 报名状态本地存储 key(按会员隔离)
-const REG_STORAGE_KEY = `activity_reg_${CURRENT_MEMBER_ID}`;
+// 报名状态本地存储 key(按会员隔离, 登录后动态取)
+const regStorageKey = (): string => `activity_reg_${getMemberId() || 'guest'}`;
 
 const loadRegisteredIds = (): Set<string> => {
-  const list = Taro.getStorageSync(REG_STORAGE_KEY) as string[] || [];
+  const list = Taro.getStorageSync(regStorageKey()) as string[] || [];
   return new Set(list.filter(id => id && !id.startsWith('mock-')));
 };
 
 const saveRegisteredIds = (ids: Set<string>) => {
-  Taro.setStorageSync(REG_STORAGE_KEY, Array.from(ids));
+  Taro.setStorageSync(regStorageKey(), Array.from(ids));
 };
 
 const formatTime = (t?: string): string => {

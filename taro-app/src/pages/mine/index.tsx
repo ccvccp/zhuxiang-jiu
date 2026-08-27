@@ -5,6 +5,8 @@ import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { MemberAPI } from '@/api/member';
 import { OrderAPI } from '@/api/order';
+import { AuthAPI } from '@/api/auth';
+import { clearSession, isLoggedIn } from '@/services/auth-service';
 import { LEVEL_NAME, NEXT_LEVEL_POINTS, statusColor, DANGER_COLOR } from '@/config';
 
 const MinePage: React.FC = () => {
@@ -12,8 +14,32 @@ const MinePage: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // 退出登录
+  const handleLogout = () => {
+    Taro.showModal({
+      title: '退出登录',
+      content: '确定退出当前账号吗?',
+      success: async (res) => {
+        if (!res.confirm) return;
+        await AuthAPI.logout();
+        clearSession();
+        Taro.showToast({ title: '已退出登录', icon: 'success' });
+        setTimeout(() => {
+          setRefreshKey(k => k + 1);
+          Taro.navigateTo({ url: '/pages/login/index' });
+        }, 800);
+      },
+    });
+  };
+
   useEffect(() => {
     (async () => {
+      // 未登录 → 展示登录引导(不打真实 API)
+      if (!isLoggedIn()) {
+        setMember({ guest: true, name: '未登录', points: 0, level: 'L1' });
+        setOrders([]);
+        return;
+      }
       // 优先调真实后端 API 获取会员信息
       try {
         const m = await MemberAPI.profile();
@@ -115,9 +141,21 @@ const MinePage: React.FC = () => {
             <View className={styles.memberInfo}>
               <View className={styles.memberName}>{member.name}</View>
               <View className={styles.memberLevel}>
-                <View className={styles.levelBadge}>{levelName}</View>
+                {member.guest ? (
+                  <View
+                    className={styles.levelBadge}
+                    onClick={() => Taro.navigateTo({ url: '/pages/login/index' })}
+                  >
+                    点我登录 ›
+                  </View>
+                ) : (
+                  <View className={styles.levelBadge}>{levelName}</View>
+                )}
               </View>
             </View>
+            {!member.guest ? (
+              <View className={styles.logoutBtn} onClick={handleLogout}>退出</View>
+            ) : null}
           </View>
           <View className={styles.memberStats}>
             <View className={styles.statItem}>
