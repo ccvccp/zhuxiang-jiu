@@ -1,0 +1,333 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $spacing-md $spacing-lg $spacing-xl;
+}
+
+.header {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  color: $color-text-white;
+  margin-bottom: $spacing-md;
+}
+
+.headerTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: 4rpx;
+}
+
+.headerDesc {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+  line-height: 1.6;
+}
+
+.tabs {
+  display: flex;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: 8rpx;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  padding: 14rpx 0;
+  border-radius: $radius-sm;
+}
+
+.tabActive {
+  background: $color-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-semibold;
+}
+
+.section {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.sectionTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.empty {
+  text-align: center;
+  color: $color-text-tertiary;
+  font-size: $font-size-sm;
+  padding: $spacing-lg 0;
+  line-height: 1.8;
+}
+
+.scanBtn {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: $radius-lg;
+  padding: $spacing-lg 0;
+  text-align: center;
+  color: $color-text-white;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  margin-bottom: $spacing-md;
+}
+
+.scanIcon {
+  font-size: 64rpx;
+  margin-bottom: 8rpx;
+}
+
+// 工段卡
+.stageCard {
+  border: 1rpx solid $color-border;
+  border-radius: $radius-sm;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.stageHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-xs;
+}
+
+.stageName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.tag {
+  font-size: $font-size-xs;
+  border-radius: $radius-round;
+  padding: 4rpx 16rpx;
+}
+
+.tagActive { background: rgba(0, 180, 42, 0.12); color: $color-success; }
+.tagQc { background: rgba(255, 125, 0, 0.14); color: $color-warning; }
+.tagBlocked { background: rgba(245, 63, 63, 0.12); color: $color-error; }
+.tagReleased { background: rgba(22, 93, 255, 0.1); color: $color-info; }
+.tagWarn { background: rgba(255, 125, 0, 0.14); color: $color-warning; }
+
+.stageMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.8;
+}
+
+.punchBtn {
+  margin-top: $spacing-xs;
+  background: $color-primary;
+  color: $color-text-white;
+  font-size: $font-size-sm;
+  text-align: center;
+  border-radius: $radius-button;
+  padding: 12rpx 0;
+}
+
+.btnRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.primaryBtn {
+  flex: 1;
+  background: $color-primary;
+  color: $color-text-white;
+  font-size: $font-size-sm;
+  text-align: center;
+  border-radius: $radius-button;
+  padding: 14rpx 0;
+}
+
+.ghostBtn {
+  flex: 1;
+  background: $color-bg-page;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  text-align: center;
+  border-radius: $radius-button;
+  padding: 14rpx 0;
+}
+
+.dangerBtn {
+  background: rgba(245, 63, 63, 0.1);
+  color: $color-error;
+}
+
+.input {
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  padding: $spacing-sm;
+  font-size: $font-size-sm;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: $spacing-sm;
+  min-height: 72rpx;
+}
+
+.textarea {
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  padding: $spacing-sm;
+  font-size: $font-size-sm;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: $spacing-sm;
+  min-height: 100rpx;
+}
+
+// 批次卡
+.batchCard {
+  border: 1rpx solid $color-border;
+  border-radius: $radius-sm;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.batchHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-xs;
+}
+
+.batchNo {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.batchMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.8;
+}
+
+// 溯源时间线(打卡历史/公开查询共用)
+.timeline {
+  margin-top: $spacing-xs;
+}
+
+.tlItem {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.tlDot {
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: 50%;
+  background: $color-success;
+  color: $color-text-white;
+  font-size: 20rpx;
+  text-align: center;
+  line-height: 32rpx;
+  flex-shrink: 0;
+  margin-top: 4rpx;
+}
+
+.tlDotBlock { background: $color-error; }
+.tlDotPending { background: $color-text-disabled; }
+
+.tlBody { flex: 1; }
+
+.tlHead {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.tlStage {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.tlState {
+  font-size: $font-size-xs;
+}
+
+.tlMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.7;
+  margin-top: 2rpx;
+}
+
+.anomalyTag {
+  display: inline-block;
+  font-size: $font-size-xs;
+  color: $color-error;
+  background: rgba(245, 63, 63, 0.08);
+  border-radius: $radius-xs;
+  padding: 2rpx 12rpx;
+  margin-right: 8rpx;
+}
+
+// 健康度卡
+.healthCard {
+  display: flex;
+  align-items: center;
+  gap: $spacing-lg;
+  background: rgba(53, 92, 68, 0.06);
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.healthScore {
+  font-size: 64rpx;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.healthLabel {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.healthFactors {
+  flex: 1;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.9;
+}
+
+.chainValid {
+  font-size: $font-size-xs;
+  margin-left: auto;
+}
+
+// 进度条
+.progressRow {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  margin: $spacing-xs 0;
+}
+
+.progressCell {
+  flex: 1;
+  height: 12rpx;
+  border-radius: $radius-round;
+  background: $color-bg-hover;
+}
+
+.progressDone { background: $color-success; }
+.progressCur { background: $color-warning; }

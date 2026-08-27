@@ -59,6 +59,8 @@ from routes.pocket_routes import register_pocket_routes
 from routes.site_theme_routes import register_site_theme_routes
 # 权限AI智能管理模块
 from routes.perm_routes import register_perm_routes
+# 产品溯源管理模块
+from routes.trace_prod_routes import register_trace_prod_routes
 
 __all__ = [
     # 已有(15)
@@ -102,4 +104,5 @@ __all__ = [
     "register_pocket_routes",
     "register_site_theme_routes",
     "register_perm_routes",
+    "register_trace_prod_routes",
 ]

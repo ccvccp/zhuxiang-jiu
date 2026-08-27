@@ -14,6 +14,7 @@ export default defineAppConfig({
     'pages/login/index',
     'pages/theme-admin/index',
     'pages/perm-center/index',
+    'pages/trace-punch/index',
     'pages/privacy/index',
     'pages/agreement/index'
   ],
