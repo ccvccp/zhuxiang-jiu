@@ -47,6 +47,9 @@ export interface ApprovalStepVO {
   auto: boolean;
   autoNote?: string;
   rejected?: boolean;
+  delegatedFrom?: number;  // P2: 代批时的原审批人
+  escalated?: boolean;     // P2: 超时升级标记
+  escalatedNote?: string;
 }
 
 /** 权限申请单 */
@@ -107,6 +110,28 @@ export interface PermScoreVO {
   executed: string[];
   aiReport: string;
   createdAt: string;
+}
+
+/** 代理审批委托 */
+export interface PermDelegateVO {
+  delegateId: number;
+  delegatorId: number;     // 委托人
+  delegateToId: number;    // 代理人
+  status: string;          // active/cancelled
+  counterpartNickname?: string;
+  createdAt: string;
+}
+
+/** AI 角色配置推荐结果 */
+export interface RoleRecommendVO {
+  position: string;
+  matchedStages: string[];
+  rank: string;
+  recommendedLevels: string[];
+  nodeCodes: string[];
+  sensitivity: string;
+  reasons: string[];
+  sodConflicts: string[];
 }
 
 const authHeaders = (): Record<string, string> => {
@@ -354,5 +379,68 @@ export const PermAPI = {
       executed: s.executed || [], aiReport: s.aiReport || '',
       createdAt: s.createdAt || '',
     }));
+  },
+
+  // ================= P2: 代理审批 + 超时升级 + AI 推荐 =================
+
+  /** 我的代理委托(我设的 + 受托我的) */
+  async myDelegates(): Promise<{
+    mine: PermDelegateVO[]; entrusted: PermDelegateVO[];
+  }> {
+    const res = await request<any>({
+      url: '/api/perm/my/delegates', headers: authHeaders(),
+    });
+    const map = (arr: any[]): PermDelegateVO[] =>
+      (arr || []).map((d: any): PermDelegateVO => ({
+        delegateId: Number(d.delegateId || 0),
+        delegatorId: Number(d.delegatorId || 0),
+        delegateToId: Number(d.delegateToId || 0),
+        status: d.status || '',
+        counterpartNickname: d.counterpartNickname || '',
+        createdAt: d.createdAt || '',
+      }));
+    return { mine: map(res.mine), entrusted: map(res.entrusted) };
+  },
+
+  /** 设置代理审批人(覆盖式) */
+  async setDelegate(delegateToId: number): Promise<PermDelegateVO> {
+    return await request<any>({
+      url: '/api/perm/my/delegates', method: 'POST',
+      headers: authHeaders(), data: { delegateToId },
+    });
+  },
+
+  /** 取消我的代理委托 */
+  async cancelDelegate(): Promise<PermDelegateVO> {
+    return await request<any>({
+      url: '/api/perm/my/delegates', method: 'DELETE',
+      headers: authHeaders(),
+    });
+  },
+
+  /** 超时升级批量扫描(超管) */
+  async escalationSweep(): Promise<{ escalated: number[]; count: number }> {
+    return await request<any>({
+      url: '/api/perm/admin/escalation-sweep', method: 'POST',
+      headers: authHeaders(),
+    });
+  },
+
+  /** AI 角色配置推荐(超管) */
+  async recommendRole(position: string): Promise<RoleRecommendVO> {
+    const res = await request<any>({
+      url: `/api/perm/admin/recommend?position=${encodeURIComponent(position)}`,
+      headers: authHeaders(),
+    });
+    return {
+      position: res.position || position,
+      matchedStages: res.matchedStages || [],
+      rank: res.rank || '',
+      recommendedLevels: res.recommendedLevels || [],
+      nodeCodes: res.nodeCodes || [],
+      sensitivity: res.sensitivity || '',
+      reasons: res.reasons || [],
+      sodConflicts: res.sodConflicts || [],
+    };
   },
 };

@@ -10,6 +10,7 @@ import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import {
   PermAPI, PermNodeVO, PermGrantVO, PermRequestVO, PermLogVO, PermScoreVO,
+  PermDelegateVO, RoleRecommendVO,
 } from '@/api/perm';
 import { getSession } from '@/services/auth-service';
 
@@ -34,6 +35,8 @@ const ACTION_NAME: Record<string, string> = {
   deny_access: '越权拦截', role_create: '创建角色',
   use: '权限使用', risk_escalation: '越权升级冻结',
   risk_review: '风险复核', assessment_run: '信用考核',
+  delegate_set: '设置代理', delegate_cancel: '取消代理',
+  approval_timeout_escalate: '审批超时升级',
 };
 
 const REWARD_NAME: Record<string, string> = {
@@ -62,6 +65,13 @@ const PermCenterPage: React.FC = () => {
     pendingReview: PermLogVO[];
   } | null>(null);
   const [adminScoreList, setAdminScoreList] = useState<PermScoreVO[]>([]);
+  const [delegates, setDelegates] = useState<{
+    mine: PermDelegateVO[]; entrusted: PermDelegateVO[];
+  }>({ mine: [], entrusted: [] });
+  const [delegateIdInput, setDelegateIdInput] = useState('');
+  const [recommendPos, setRecommendPos] = useState('');
+  const [recommendResult, setRecommendResult] =
+    useState<RoleRecommendVO | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async (silent = false) => {
@@ -75,6 +85,7 @@ const PermCenterPage: React.FC = () => {
       setMine(r.mine);
       setToApprove(r.toApprove);
       setMyScoreList(await PermAPI.myScores());
+      setDelegates(await PermAPI.myDelegates());
       if (role === 'admin') {
         const [ag, lg, rs, as_] = await Promise.all([
           PermAPI.adminGrants(), PermAPI.adminLogs(30),
@@ -265,6 +276,65 @@ const PermCenterPage: React.FC = () => {
     });
   };
 
+  // ============ P2: 委托设置 / 超时升级扫描 / AI 推荐 ============
+  const handleSetDelegate = async () => {
+    const to = parseInt(delegateIdInput, 10);
+    if (!to) {
+      Taro.showToast({ title: '请填写代理人会员ID', icon: 'none' });
+      return;
+    }
+    try {
+      await PermAPI.setDelegate(to);
+      Taro.showToast({ title: '代理委托已设置', icon: 'success' });
+      setDelegateIdInput('');
+      refresh();
+    } catch (e: any) {
+      Taro.showToast({ title: e.message || '设置失败', icon: 'none' });
+    }
+  };
+
+  const handleCancelDelegate = () => {
+    Taro.showModal({
+      title: '取消代理委托',
+      content: '确认取消后, 代理人将无法再代您审批',
+      success: async (res) => {
+        if (!res.confirm) return;
+        try {
+          await PermAPI.cancelDelegate();
+          Taro.showToast({ title: '已取消', icon: 'success' });
+          refresh();
+        } catch (e: any) {
+          Taro.showToast({ title: e.message || '取消失败', icon: 'none' });
+        }
+      },
+    });
+  };
+
+  const handleEscalationSweep = async () => {
+    try {
+      const r = await PermAPI.escalationSweep();
+      Taro.showToast({
+        title: r.count > 0 ? `已升级 ${r.count} 单` : '无超时积压',
+        icon: 'success',
+      });
+      refresh();
+    } catch (e: any) {
+      Taro.showToast({ title: e.message || '扫描失败', icon: 'none' });
+    }
+  };
+
+  const handleRecommend = async () => {
+    if (!recommendPos.trim()) {
+      Taro.showToast({ title: '请输入岗位名称', icon: 'none' });
+      return;
+    }
+    try {
+      setRecommendResult(await PermAPI.recommendRole(recommendPos.trim()));
+    } catch (e: any) {
+      Taro.showToast({ title: e.message || '推荐失败', icon: 'none' });
+    }
+  };
+
   // ============ 渲染辅助 ============
   const renderTimeline = (req: PermRequestVO) => {
     const currentStep = req.approvals.findIndex(s => !s.approvedBy);
@@ -291,8 +361,17 @@ const PermCenterPage: React.FC = () => {
                     ? (step.auto ? ' 自动通过' : ' 已同意')
                     : current ? ' 待审批' : ' 等待中'}
                 </Text>
+                {step.delegatedFrom ? (
+                  <Text className={styles.stepState}> 代(原审批人 {step.delegatedFrom})</Text>
+                ) : null}
+                {step.escalated && !done ? (
+                  <Text className={`${styles.stepState} ${styles.riskHigh}`}> ⏫已升级</Text>
+                ) : null}
                 {step.opinion ? (
                   <View className={styles.stepOpinion}>意见: {step.opinion}</View>
+                ) : null}
+                {step.escalatedNote ? (
+                  <View className={styles.stepOpinion}>⏫ {step.escalatedNote}</View>
                 ) : null}
               </View>
             </View>
@@ -487,6 +566,7 @@ const PermCenterPage: React.FC = () => {
 
       {/* ============ 待我审批 ============ */}
       {tab === 'approve' && !loading && (
+        <>
         <View className={styles.section}>
           <View className={styles.sectionTitle}>待我审批({toApprove.length})</View>
           {toApprove.length === 0 && (
@@ -518,6 +598,56 @@ const PermCenterPage: React.FC = () => {
             </View>
           ))}
         </View>
+
+        {/* P2: 代理审批委托设置 */}
+        <View className={styles.section}>
+          <View className={styles.sectionTitle}>代理审批委托</View>
+          {delegates.mine.length > 0 ? (
+            delegates.mine.map(d => (
+              <View className={styles.reqCard} key={d.delegateId}>
+                <View className={styles.reqHead}>
+                  <Text className={styles.grantName}>
+                    我的代理人: {d.counterpartNickname || `会员${d.delegateToId}`}
+                  </Text>
+                  <Text className={`${styles.tag} ${styles.tagActive}`}>生效中</Text>
+                </View>
+                <View className={styles.btnRow}>
+                  <View
+                    className={`${styles.ghostBtn} ${styles.dangerBtn}`}
+                    onClick={handleCancelDelegate}
+                  >取消委托</View>
+                </View>
+              </View>
+            ))
+          ) : (
+            <>
+              <View className={styles.reqMeta}>
+                休假/外出时可设代理人代为审批, 审批记录将标注「代」
+              </View>
+              <View className={styles.assignRow}>
+                <Input
+                  className={styles.assignInput}
+                  type='number'
+                  placeholder='代理人会员ID'
+                  value={delegateIdInput}
+                  onInput={e => setDelegateIdInput(e.detail.value)}
+                />
+              </View>
+              <View className={styles.btnRow}>
+                <View className={styles.primaryBtn} onClick={handleSetDelegate}>
+                  设置代理人(覆盖式)
+                </View>
+              </View>
+            </>
+          )}
+          {delegates.entrusted.length > 0 && (
+            <View className={styles.reqMeta}>
+              受托代批: {delegates.entrusted.map(d =>
+                `${d.counterpartNickname || `会员${d.delegatorId}`} 的审批`).join('、')}
+            </View>
+          )}
+        </View>
+        </>
       )}
 
       {/* ============ 信用分 ============ */}
@@ -597,6 +727,51 @@ const PermCenterPage: React.FC = () => {
                 月度考核
               </View>
             </View>
+          </View>
+
+          {/* P2: 超时升级扫描 */}
+          <View className={styles.section}>
+            <View className={styles.sectionTitle}>审批超时升级</View>
+            <View className={styles.reqMeta}>
+              当前级审批人 48 小时未处理, 自动把上一级候选(末级为超管)追加为可批人
+            </View>
+            <View className={styles.btnRow}>
+              <View className={styles.primaryBtn} onClick={handleEscalationSweep}>
+                立即扫描超时积压
+              </View>
+            </View>
+          </View>
+
+          {/* P2: AI 角色配置推荐 */}
+          <View className={styles.section}>
+            <View className={styles.sectionTitle}>AI 角色配置推荐</View>
+            <View className={styles.assignRow}>
+              <Input
+                className={styles.assignInput}
+                placeholder='岗位名称(如 酿造车间主管)'
+                value={recommendPos}
+                onInput={e => setRecommendPos(e.detail.value)}
+              />
+            </View>
+            <View className={styles.btnRow}>
+              <View className={styles.primaryBtn} onClick={handleRecommend}>
+                AI 推荐权限组合
+              </View>
+            </View>
+            {recommendResult && (
+              <View className={styles.selectedNode}>
+                <View className={styles.selectedNodeName}>
+                  {recommendResult.position}
+                </View>
+                <View className={styles.selectedNodeMeta}>
+                  职级: {recommendResult.rank} · 建议: {recommendResult.nodeCodes.length} 项权限 ·
+                  敏感级: {SENS_NAME[recommendResult.sensitivity] || recommendResult.sensitivity}
+                </View>
+                {recommendResult.reasons.map((r, i) => (
+                  <View className={styles.dutyItem} key={i}>· {r}</View>
+                ))}
+              </View>
+            )}
           </View>
 
           {/* AI 风险监控面板 */}

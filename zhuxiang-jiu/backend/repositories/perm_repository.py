@@ -7,6 +7,7 @@
     perm_requests     权限申请单(逐级审批链, currentStep 逐级推进)
     perm_audit_logs   AI 监控审计日志(全部权限行为留痕)
     perm_duty_scores  权责信用分考核记录(P1: 月度考核+奖惩执行)
+    perm_delegates    代理审批委托(P2: 审批人设置代理人)
 
 设计对齐:
     - 双模式存储: is_redis_mode() 切换内存字典/Redis Hash
@@ -120,7 +121,7 @@ _INT_FIELDS = ("nodeId", "roleId", "grantId", "requestId", "logId",
                "currentStep", "createdBy", "riskScore",
                "scoreId", "creditScore", "complianceScore", "dutyScore",
                "approvalScore", "reportScore", "rewardAmount",
-               "rewardPoints")
+               "rewardPoints", "delegateId", "delegatorId", "delegateToId")
 
 
 def _now_iso() -> str:
@@ -140,7 +141,8 @@ class PermRepository:
 
     def _ensure_store(self):
         for key in ("perm_nodes", "perm_roles", "perm_grants",
-                    "perm_requests", "perm_audit_logs", "perm_duty_scores"):
+                    "perm_requests", "perm_audit_logs", "perm_duty_scores",
+                    "perm_delegates"):
             self.store.setdefault(key, {})
         # 首次初始化权限树种子(28 权限点)
         if not self.store["perm_nodes"]:
@@ -351,4 +353,32 @@ class PermRepository:
                 continue
             result.append(s)
         return sorted(result, key=lambda x: x.get("scoreId", 0),
+                      reverse=True)[:limit]
+
+    # ============================================================
+    # 代理审批委托(P2)
+    # ============================================================
+
+    async def save_delegate(self, delegate: dict) -> dict:
+        return await self._save("perm_delegates",
+                                delegate["delegateId"], delegate)
+
+    async def get_delegate(self, delegate_id: int) -> dict | None:
+        return await self._get("perm_delegates", delegate_id)
+
+    async def list_delegates(self, delegator_id: int = None,
+                             delegate_to_id: int = None,
+                             status: str = None,
+                             limit: int = 200) -> list[dict]:
+        delegates = await self._list("perm_delegates", limit=limit)
+        result = []
+        for d in delegates:
+            if delegator_id is not None and d.get("delegatorId") != delegator_id:
+                continue
+            if delegate_to_id is not None and d.get("delegateToId") != delegate_to_id:
+                continue
+            if status and d.get("status") != status:
+                continue
+            result.append(d)
+        return sorted(result, key=lambda x: x.get("delegateId", 0),
                       reverse=True)[:limit]

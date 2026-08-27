@@ -28,7 +28,7 @@ import logging
 from datetime import datetime, timedelta, UTC
 
 from core.locks import get_lock
-from repositories.perm_repository import PermRepository
+from repositories.perm_repository import PermRepository, STAGES
 from repositories.member_repository import MemberRepository
 from services.perm_service import PermService
 
@@ -522,6 +522,113 @@ class PermAiService:
         """我的考核记录(近 N 期)"""
         return await self.repo.list_scores(member_id=member_id,
                                            limit=limit)
+
+    # ============================================================
+    # P2: AI 角色配置推荐(岗位关键词 → 权限组合)
+    # ============================================================
+
+    # 岗位关键词 → 环节匹配表(权重降序)
+    _POSITION_KEYWORDS = {
+        "purchase": ["采购", "供应商", "原料", "原粮", "高粱", "包材"],
+        "production": ["酿造", "酿酒", "生产", "制曲", "发酵", "工艺",
+                       "车间", "勾调"],
+        "storage": ["仓储", "仓库", "库管", "灌装", "盘点", "出入库",
+                    "保管"],
+        "logistics": ["物流", "配送", "运输", "发货", "司机", "运单",
+                      "快递"],
+        "sales": ["销售", "业务", "订单", "客服", "导购", "门店", "团购",
+                  "市场", "推广"],
+        "aftersale": ["售后", "退换", "退货", "投诉", "工单", "维权"],
+        "finance": ["财务", "会计", "出纳", "收付款", "结算", "对账",
+                    "审计", "成本"],
+    }
+
+    # 岗位职级 → 建议操作级
+    _RANK_LEVELS = {
+        "专员": ["view", "operate"],
+        "主管": ["view", "operate", "approve"],
+        "总监": ["view", "operate", "approve", "manage"],
+        "经理": ["view", "operate", "approve", "manage"],
+    }
+
+    async def recommend_role(self, position: str) -> dict:
+        """AI 角色配置推荐: 岗位名称 → 环节匹配 + 职级定级 → 权限码组合
+
+        规则引擎(B级):
+            1. 岗位关键词 → 命中生产环节(多环节按命中数排序)
+            2. 岗位职级词(专员/主管/经理/总监) → 建议操作级上限
+            3. 组合权限码, 输出 SoD 冲突检查 + 推荐理由
+
+        Raises:
+            ValueError: 岗位名称为空
+        """
+        position = (position or "").strip()
+        if not position:
+            raise ValueError("岗位名称不能为空")
+
+        # 1. 环节匹配
+        stage_hits: dict[str, int] = {}
+        for stage, keywords in self._POSITION_KEYWORDS.items():
+            hits = sum(1 for kw in keywords if kw in position)
+            if hits:
+                stage_hits[stage] = hits
+        stages_matched = sorted(stage_hits, key=stage_hits.get,
+                                reverse=True)
+        reasons = []
+        if stages_matched:
+            names = "/".join(STAGES.get(s, s) for s in stages_matched)
+            reasons.append(f"岗位关键词命中生产环节: {names}")
+        else:
+            reasons.append("未命中明确环节, 建议从「查看」级起步按需增配")
+
+        # 2. 职级定级
+        rank = next((r for r in self._RANK_LEVELS if r in position), None)
+        levels = self._RANK_LEVELS.get(rank, ["view", "operate"])
+        if rank:
+            reasons.append(f"识别职级「{rank}」→ 建议操作级上限: "
+                           f"{'/'.join(levels)}")
+        else:
+            reasons.append("未识别职级词(专员/主管/经理/总监), "
+                           "默认建议 查看/操作 两级")
+
+        # 3. 组合权限码(命中环节 × 建议级)
+        nodes = await self.repo._list("perm_nodes", limit=500)
+        node_codes = []
+        sensitivity = "normal"
+        for stage in stages_matched or []:
+            for lv in levels:
+                for n in nodes:
+                    if n.get("stage") == stage and n.get("level") == lv:
+                        node_codes.append(n["code"])
+                        sensitivity = (sensitivity if sensitivity == "core"
+                                       else n.get("sensitivity", "normal"))
+        if not node_codes:
+            # 兜底: 全环节查看级(最小权限起步)
+            node_codes = [n["code"] for n in nodes
+                          if n.get("level") == "view"]
+            reasons.append("兜底方案: 全环节「查看」级最小权限起步")
+
+        # 4. SoD 冲突自检
+        code_set = set(node_codes)
+        conflicts = []
+        for n in nodes:
+            if n["code"] in code_set:
+                for c in (n.get("conflictWith") or []):
+                    if c in code_set:
+                        conflicts.append(f"{n['name']} ↔ 互斥")
+        if conflicts:
+            reasons.append(f"⚠️ SoD 冲突提示: {conflicts}, 请二选一")
+
+        return {
+            "position": position,
+            "matchedStages": stages_matched,
+            "rank": rank or "未识别",
+            "recommendedLevels": levels,
+            "nodeCodes": node_codes,
+            "sensitivity": sensitivity,
+            "reasons": reasons,
+            "sodConflicts": conflicts,
+        }
 
     async def admin_list_scores(self, admin_id: int,
                                 period: str = None) -> list[dict]:

@@ -98,6 +98,10 @@ class RunAssessmentRequest(PydBaseModel):
     force: bool = Field(False, description="重跑本期(覆盖幂等)")
 
 
+class SetDelegateRequest(PydBaseModel):
+    delegateToId: int = Field(..., ge=1, description="代理人会员ID")
+
+
 # ============================================================
 # 全员端(登录即可, 7 接口)
 # ============================================================
@@ -206,6 +210,39 @@ async def my_scores(member: dict = Depends(get_current_member)):
     """我的权责信用分+考核报告(近 12 期)"""
     try:
         return {"scores": await _ai_service.my_scores(_member_id(member))}
+    except Exception as exc:
+        _handle(exc)
+
+
+# ============================================================
+# 全员端 P2(代理审批委托, 3 接口)
+# ============================================================
+
+@router.get("/api/perm/my/delegates", tags=["权限AI智能管理"])
+async def my_delegates(member: dict = Depends(get_current_member)):
+    """我的代理委托(我设的代理人 + 受托我代批的)"""
+    try:
+        return await _service.my_delegates(_member_id(member))
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/perm/my/delegates", tags=["权限AI智能管理"])
+async def set_delegate(data: SetDelegateRequest,
+                       member: dict = Depends(get_current_member)):
+    """设置代理审批人(覆盖式, 每人同时仅 1 个生效代理人)"""
+    try:
+        return await _service.set_delegate(
+            _member_id(member), data.delegateToId)
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.delete("/api/perm/my/delegates", tags=["权限AI智能管理"])
+async def cancel_delegate(member: dict = Depends(get_current_member)):
+    """取消我的代理委托"""
+    try:
+        return await _service.cancel_delegate(_member_id(member))
     except Exception as exc:
         _handle(exc)
 
@@ -327,6 +364,33 @@ async def admin_list_scores(
     try:
         return {"scores": await _ai_service.admin_list_scores(
             _member_id(admin), period=period)}
+    except Exception as exc:
+        _handle(exc)
+
+
+# ============================================================
+# 超管端 P2(超时升级扫描 + AI 角色推荐, 2 接口)
+# ============================================================
+
+@router.post("/api/perm/admin/escalation-sweep",
+             tags=["权限AI智能管理"])
+async def escalation_sweep(admin: dict = Depends(require_admin)):
+    """批量超时升级扫描(48h 未批的申请单追加上一级候选审批人)"""
+    try:
+        return await _service.escalation_sweep(_member_id(admin))
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/perm/admin/recommend", tags=["权限AI智能管理"])
+async def recommend_role(
+    position: str = Query(..., min_length=1, max_length=50,
+                          description="岗位名称(如 酿造车间主管)"),
+    admin: dict = Depends(require_admin),
+):
+    """AI 角色配置推荐(岗位关键词→环节匹配 + 职级定级→权限码组合)"""
+    try:
+        return await _ai_service.recommend_role(position)
     except Exception as exc:
         _handle(exc)
 

@@ -12,6 +12,9 @@
     - 限时回收: 权限带有效期(normal/important 默认 30 天, core 默认 7 天),
       访问时惰性过期 + 手动清扫接口
     - SoD 职责分离: 互斥权限对(如 收付款操作↔收款审核)直授/申请双向预检
+    - P2 超时升级: 当前级审批人 48h 未处理 → 该级追加上一级候选审批人
+      (末级追加超管), 候选人任一可批, 链上标注 escalated
+    - P2 代理审批: 审批人可设代理人, 代理人可代批(标注 delegatedFrom)
 
 异常约定:
     - KeyError   → 404(权限点/授权/申请单不存在)
@@ -32,6 +35,9 @@ ROLE_ADMIN = "admin"
 
 # 申请期限上限(天): 一般/重要 90, 核心 30
 _MAX_DAYS = {"normal": 90, "important": 90, "core": 30}
+
+# P2: 审批超时升级时限(小时)
+APPROVAL_TIMEOUT_HOURS = 48
 
 
 def _now() -> datetime:
@@ -438,9 +444,14 @@ class PermService:
         return req
 
     async def list_requests(self, member_id: int) -> dict:
-        """我的申请 + 待我审批(按身份聚合)"""
+        """我的申请 + 待我审批(按身份聚合, P2: 含受托代批的单)"""
         mine = await self.repo.list_requests(applicant_id=member_id)
         supers = await self._get_super_admin_ids()
+        # P2: 我代理的委托人(生效中) → 其待审批单我也可批
+        my_principals = [
+            d["delegatorId"] for d in await self.repo.list_delegates(
+                delegate_to_id=member_id, status="active")
+        ]
         to_approve = []
         for r in await self.repo.list_requests(status="pending"):
             step = self._current_step(r)
@@ -448,14 +459,18 @@ class PermService:
             if step >= len(chain):
                 continue
             eligible = chain[step].get("approverIds") or []
-            if member_id in eligible or member_id in supers:
+            if (member_id in eligible or member_id in supers
+                    or any(p in eligible for p in my_principals)):
                 to_approve.append(r)
         to_approve.sort(key=lambda x: x.get("requestId", 0))
         return {"mine": mine, "toApprove": to_approve}
 
     async def approve_request(self, operator_id: int, request_id: int,
                               action: str, opinion: str = "") -> dict:
-        """审批(同意/驳回): 仅当前级候选审批人或超管可操作
+        """审批(同意/驳回): 当前级候选审批人或其代理人或超管可操作
+
+        P2 代理审批: operator 为候选审批人生效委托的代理人时允许代批,
+        链上标注 delegatedFrom(原审批人)。
 
         Raises:
             KeyError: 申请单不存在
@@ -470,23 +485,40 @@ class PermService:
             if req["status"] != "pending":
                 raise ValueError(f"申请单状态({req['status']})不可审批")
 
+            # P2: 懒惰超时升级(48h 未批追加上一级候选)
+            req = await self._maybe_escalate(req)
+
             chain = req.get("approvals") or []
             step = self._current_step(req)
             if step >= len(chain):
                 raise ValueError("审批链已走完, 状态异常")
             is_super = await self._is_super_admin(operator_id)
             eligible = chain[step].get("approverIds") or []
+
+            # P2: 代理人判定(委托生效中 → 可代批)
+            delegated_from = None
             if operator_id not in eligible and not is_super:
-                raise ValueError(
-                    f"非当前级({chain[step]['role']})候选审批人, 越级审批被拒绝")
+                for candid in eligible:
+                    if await self._is_active_delegate(
+                            delegator_id=candid, delegate_to=operator_id):
+                        delegated_from = candid
+                        break
+                if delegated_from is None:
+                    raise ValueError(
+                        f"非当前级({chain[step]['role']})候选审批人, "
+                        f"越级审批被拒绝")
 
             now_iso = _now().isoformat()
+            decided_note = {}
+            if delegated_from is not None:
+                decided_note = {"delegatedFrom": delegated_from}
             if action == "reject":
                 chain[step].update({
                     "approvedBy": operator_id,
                     "opinion": opinion[:200] or "驳回",
                     "decidedAt": now_iso,
                     "rejected": True,
+                    **decided_note,
                 })
                 req.update({"status": "rejected", "decidedAt": now_iso,
                             "approvals": chain})
@@ -494,7 +526,8 @@ class PermService:
                 await self._log(operator_id, "apply_reject",
                                 req["nodeCode"],
                                 detail={"requestId": request_id,
-                                        "step": step + 1})
+                                        "step": step + 1,
+                                        **decided_note})
                 return req
 
             # 同意: 落本级结论
@@ -502,11 +535,13 @@ class PermService:
                 "approvedBy": operator_id,
                 "opinion": opinion[:200],
                 "decidedAt": now_iso,
+                **decided_note,
             })
             await self._log(operator_id, "apply_approve",
                             req["nodeCode"],
                             detail={"requestId": request_id,
-                                    "step": step + 1})
+                                    "step": step + 1,
+                                    **decided_note})
             # 是否全部通过
             if self._current_step({"approvals": chain}) >= len(chain):
                 # 终审通过 → 生成授权(限时, 待签责任书)
@@ -608,6 +643,170 @@ class PermService:
         return {"allowed": True, "via": "grant",
                 "grantId": grant["grantId"],
                 "nodeName": node["name"]}
+
+    # ============================================================
+    # P2: 代理审批(委托管理)
+    # ============================================================
+
+    async def _is_active_delegate(self, delegator_id: int,
+                                  delegate_to: int) -> bool:
+        """delegate_to 是否为 delegator_id 的生效代理人"""
+        if delegator_id == delegate_to:
+            return False
+        delegates = await self.repo.list_delegates(
+            delegator_id=delegator_id, delegate_to_id=delegate_to,
+            status="active")
+        return len(delegates) > 0
+
+    async def set_delegate(self, delegator_id: int, delegate_to: int) -> dict:
+        """设置代理审批人(每人同时仅 1 个生效代理人, 覆盖式)
+
+        Raises:
+            KeyError: 代理人会员不存在
+            ValueError: 代理人不能是本人/已是别人的生效代理人(防代理环)
+        """
+        if delegator_id == delegate_to:
+            raise ValueError("代理人不能是本人")
+        target = await self.member_repo.get_by_id(delegate_to)
+        if not target:
+            raise KeyError(f"代理人会员不存在(id={delegate_to})")
+        # 防代理环: 代理人不能已委托给本人或本人已委托的链路
+        existing_of_target = await self.repo.list_delegates(
+            delegator_id=delegate_to, status="active")
+        if existing_of_target:
+            raise ValueError(
+                f"会员 {delegate_to} 已设有自己的代理人, 不可再接受委托(防代理环)")
+        async with get_lock(f"perm:delegate:{delegator_id}"):
+            # 覆盖旧委托(撤销旧的, 建新的)
+            for old in await self.repo.list_delegates(
+                    delegator_id=delegator_id, status="active"):
+                await self.repo.save_delegate({
+                    **old, "status": "cancelled",
+                    "cancelledAt": _now().isoformat()})
+            delegate_id = await self.repo.next_id("delegate")
+            record = {
+                "delegateId": delegate_id,
+                "delegatorId": delegator_id,
+                "delegateToId": delegate_to,
+                "status": "active",
+                "createdAt": _now().isoformat(),
+                "cancelledAt": "",
+            }
+            await self.repo.save_delegate(record)
+        await self._log(delegator_id, "delegate_set", "",
+                        detail={"delegateTo": delegate_to})
+        return record
+
+    async def cancel_delegate(self, delegator_id: int) -> dict:
+        """取消我的代理委托
+
+        Raises:
+            ValueError: 无生效委托
+        """
+        actives = await self.repo.list_delegates(
+            delegator_id=delegator_id, status="active")
+        if not actives:
+            raise ValueError("无生效的代理委托")
+        record = actives[0]
+        updated = await self.repo.save_delegate({
+            **record, "status": "cancelled",
+            "cancelledAt": _now().isoformat()})
+        await self._log(delegator_id, "delegate_cancel", "",
+                        detail={"delegateId": record["delegateId"]})
+        return updated
+
+    async def my_delegates(self, member_id: int) -> dict:
+        """我的委托(我设的代理人) + 我受托的(别人委托我代批的)"""
+        members = {m["id"]: m for m
+                   in await self.member_repo.list_all()}
+        mine = await self.repo.list_delegates(
+            delegator_id=member_id, status="active")
+        entrusted = await self.repo.list_delegates(
+            delegate_to_id=member_id, status="active")
+        for d in mine:
+            m = members.get(d.get("delegateToId"))
+            d["counterpartNickname"] = m.get("nickname", "") if m else ""
+        for d in entrusted:
+            m = members.get(d.get("delegatorId"))
+            d["counterpartNickname"] = m.get("nickname", "") if m else ""
+        return {"mine": mine, "entrusted": entrusted}
+
+    # ============================================================
+    # P2: 审批超时升级(48h 未批 → 追加上一级候选)
+    # ============================================================
+
+    def _step_deadline(self, req: dict, step_idx: int) -> datetime | None:
+        """当前级起算时间: 上一级结论时间(或首级取申请创建时间)+48h"""
+        chain = req.get("approvals") or []
+        if step_idx <= 0:
+            base = _parse_iso(req.get("createdAt", ""))
+        else:
+            base = _parse_iso(chain[step_idx - 1].get("decidedAt", "")) \
+                or _parse_iso(req.get("createdAt", ""))
+        if not base:
+            return None
+        return base + timedelta(hours=APPROVAL_TIMEOUT_HOURS)
+
+    async def _maybe_escalate(self, req: dict) -> dict:
+        """懒惰超时升级: 当前级超时未批 → 追加上一级候选审批人
+
+        升级规则: 第 N 级超时 → 把第 N+1 级候选(末级则超管)追加进
+        第 N 级 approverIds, 标注 escalated; 幂等(已升级不重复)。
+        """
+        if req.get("status") != "pending":
+            return req
+        chain = req.get("approvals") or []
+        step = self._current_step(req)
+        if step >= len(chain) or chain[step].get("escalated"):
+            return req
+        deadline = self._step_deadline(req, step)
+        if not deadline or _now() < deadline:
+            return req
+        # 升级候选: 下一级候选人; 末级 → 超管
+        supers = await self._get_super_admin_ids()
+        if step + 1 < len(chain):
+            extra = [i for i in (chain[step + 1].get("approverIds") or [])
+                     if i not in (chain[step].get("approverIds") or [])]
+        else:
+            extra = [i for i in supers
+                     if i not in (chain[step].get("approverIds") or [])]
+        if not extra:
+            # 无可追加候选(如末级已是超管单候选人), 标记已尝试防重复扫描
+            chain[step]["escalated"] = True
+            chain[step]["escalatedNote"] = "无可升级候选"
+            req["approvals"] = chain
+            return await self.repo.save_request(req)
+        chain[step].update({
+            "approverIds": (chain[step].get("approverIds") or []) + extra,
+            "escalated": True,
+            "escalatedAt": _now().isoformat(),
+            "escalatedNote": f"超时未批, 已升级追加 {len(extra)} 名候选审批人",
+        })
+        req["approvals"] = chain
+        updated = await self.repo.save_request(req)
+        log_by = (supers[0] if supers else req["applicantId"])
+        await self._log(log_by, "approval_timeout_escalate",
+                        req.get("nodeCode", ""),
+                        detail={"requestId": req.get("requestId"),
+                                "step": step + 1, "added": extra})
+        return updated
+
+    async def escalation_sweep(self, operator_id: int = 0) -> dict:
+        """批量超时升级扫描(管理端触发; 审批时亦有懒惰升级)"""
+        escalated = []
+        for r in await self.repo.list_requests(status="pending"):
+            before = bool((r.get("approvals") or []) and
+                          r["approvals"][self._current_step(r)].get(
+                              "escalated"))
+            after = await self._maybe_escalate(r)
+            step = self._current_step(after)
+            chain = after.get("approvals") or []
+            if (step < len(chain) and chain[step].get("escalated")
+                    and not before):
+                escalated.append(after["requestId"])
+        logger.info("perm_escalation_sweep escalated=%d by=%r",
+                    len(escalated), operator_id)
+        return {"escalated": escalated, "count": len(escalated)}
 
     # ============================================================
     # 到期回收 / 管理端查询
