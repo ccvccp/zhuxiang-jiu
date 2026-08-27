@@ -578,6 +578,12 @@ class PermService:
             await self._log(member_id, "deny_access", node_code,
                             risk_level="low",
                             detail={"reason": "no_grant"})
+            # P1: 越权 1h ≥3 次升级冻结(延迟导入避免循环依赖)
+            from services.perm_ai_service import PermAiService
+            await PermAiService(perm_repo=self.repo,
+                                member_repo=self.member_repo,
+                                perm_service=self).escalate_denials(
+                member_id, node_code)
             raise PermissionError(f"无权限「{node['name']}」, 请先申请")
 
         grant = active[0]
@@ -591,6 +597,12 @@ class PermService:
             await self._log(member_id, "deny_access", node_code,
                             risk_level="medium",
                             detail={"reason": "duty_unsigned"})
+            # P1: 越权 1h ≥3 次升级冻结
+            from services.perm_ai_service import PermAiService
+            await PermAiService(perm_repo=self.repo,
+                                member_repo=self.member_repo,
+                                perm_service=self).escalate_denials(
+                member_id, node_code)
             raise PermissionError(
                 f"权限「{node['name']}」未签署责任书, 签署后方可行使")
         return {"allowed": True, "via": "grant",

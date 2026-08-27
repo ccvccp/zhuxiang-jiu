@@ -82,7 +82,30 @@ export interface PermLogVO {
   action: string;
   nodeCode: string;
   riskLevel: string;
+  riskScore?: number;
   detail: Record<string, any>;
+  handled?: string;
+  reviewed?: boolean;
+  reviewAction?: string;
+  createdAt: string;
+}
+
+/** 权责信用分考核记录 */
+export interface PermScoreVO {
+  scoreId: number;
+  memberId: number;
+  memberNickname?: string;
+  period: string;
+  creditScore: number;
+  complianceScore: number;
+  dutyScore: number;
+  approvalScore: number;
+  reportScore: number;
+  rewardType: string;      // bonus/none/demote/freeze
+  rewardAmount: number;
+  rewardPoints: number;
+  executed: string[];
+  aiReport: string;
   createdAt: string;
 }
 
@@ -238,5 +261,98 @@ export const PermAPI = {
       url: '/api/perm/admin/expire-sweep',
       method: 'POST', headers: authHeaders(),
     });
+  },
+
+  // ================= P1: AI 监控 + 信用分 =================
+
+  /** 记录权限使用(AI 风险评分 4 级处置) */
+  async recordUse(nodeCode: string, bulkCount = 0): Promise<{
+    recorded: boolean; riskScore: number; riskLevel: string;
+    handled: string; factors: string[];
+  }> {
+    return await request<any>({
+      url: '/api/perm/use', method: 'POST', headers: authHeaders(),
+      data: { nodeCode, bulkCount },
+    });
+  },
+
+  /** 我的权责信用分(近 12 期) */
+  async myScores(): Promise<PermScoreVO[]> {
+    const res = await request<any>({
+      url: '/api/perm/my/scores', headers: authHeaders(),
+    });
+    return (res.scores || []).map((s: any): PermScoreVO => ({
+      scoreId: Number(s.scoreId || 0), memberId: Number(s.memberId || 0),
+      period: s.period || '',
+      creditScore: Number(s.creditScore || 0),
+      complianceScore: Number(s.complianceScore || 0),
+      dutyScore: Number(s.dutyScore || 0),
+      approvalScore: Number(s.approvalScore || 0),
+      reportScore: Number(s.reportScore || 0),
+      rewardType: s.rewardType || 'none',
+      rewardAmount: Number(s.rewardAmount || 0),
+      rewardPoints: Number(s.rewardPoints || 0),
+      executed: s.executed || [], aiReport: s.aiReport || '',
+      createdAt: s.createdAt || '',
+    }));
+  },
+
+  /** AI 风险概览(超管) */
+  async riskSummary(): Promise<{
+    totalEvents: number;
+    byLevel: Record<string, number>;
+    pendingReview: PermLogVO[];
+  }> {
+    const res = await request<any>({
+      url: '/api/perm/admin/risk-summary', headers: authHeaders(),
+    });
+    return {
+      totalEvents: Number(res.totalEvents || 0),
+      byLevel: res.byLevel || {},
+      pendingReview: res.pendingReview || [],
+    };
+  },
+
+  /** 高危风险复核(超管: unfreeze/revoke) */
+  async riskReview(logId: number, action: 'unfreeze' | 'revoke',
+                   opinion = ''): Promise<{ success: boolean }> {
+    return await request<any>({
+      url: `/api/perm/admin/risk-review/${logId}`,
+      method: 'POST', headers: authHeaders(),
+      data: { action, opinion },
+    });
+  },
+
+  /** 触发月度考核(超管) */
+  async runAssessment(period?: string,
+                      force = false): Promise<{ period: string; assessed: number }> {
+    return await request<any>({
+      url: '/api/perm/admin/scores/run', method: 'POST',
+      headers: authHeaders(),
+      data: { period: period || null, force },
+    });
+  },
+
+  /** 全部考核记录(超管) */
+  async adminScores(period?: string): Promise<PermScoreVO[]> {
+    const url = period
+      ? `/api/perm/admin/scores?period=${period}`
+      : '/api/perm/admin/scores';
+    const res = await request<any>({ url, headers: authHeaders() });
+    return (res.scores || []).map((s: any): PermScoreVO => ({
+      scoreId: Number(s.scoreId || 0), memberId: Number(s.memberId || 0),
+      memberNickname: s.memberNickname || '',
+      period: s.period || '',
+      creditScore: Number(s.creditScore || 0),
+      complianceScore: Number(s.complianceScore || 0),
+      dutyScore: Number(s.dutyScore || 0),
+      approvalScore: Number(s.approvalScore || 0),
+      reportScore: Number(s.reportScore || 0),
+      rewardType: s.rewardType || 'none',
+      rewardAmount: Number(s.rewardAmount || 0),
+      rewardPoints: Number(s.rewardPoints || 0),
+      executed: s.executed || [], aiReport: s.aiReport || '',
+      createdAt: s.createdAt || '',
+    }));
   },
 };

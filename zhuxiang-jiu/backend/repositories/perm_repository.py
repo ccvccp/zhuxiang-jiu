@@ -6,6 +6,7 @@
     perm_grants       授权实例(assign 超管直授 / apply 申请审批, 限时+责任书)
     perm_requests     权限申请单(逐级审批链, currentStep 逐级推进)
     perm_audit_logs   AI 监控审计日志(全部权限行为留痕)
+    perm_duty_scores  权责信用分考核记录(P1: 月度考核+奖惩执行)
 
 设计对齐:
     - 双模式存储: is_redis_mode() 切换内存字典/Redis Hash
@@ -116,7 +117,10 @@ _SEED_NODES = _build_seed_nodes()
 
 _INT_FIELDS = ("nodeId", "roleId", "grantId", "requestId", "logId",
                "memberId", "grantedBy", "applicantId", "durationDays",
-               "currentStep", "createdBy", "riskScore")
+               "currentStep", "createdBy", "riskScore",
+               "scoreId", "creditScore", "complianceScore", "dutyScore",
+               "approvalScore", "reportScore", "rewardAmount",
+               "rewardPoints")
 
 
 def _now_iso() -> str:
@@ -136,7 +140,7 @@ class PermRepository:
 
     def _ensure_store(self):
         for key in ("perm_nodes", "perm_roles", "perm_grants",
-                    "perm_requests", "perm_audit_logs"):
+                    "perm_requests", "perm_audit_logs", "perm_duty_scores"):
             self.store.setdefault(key, {})
         # 首次初始化权限树种子(28 权限点)
         if not self.store["perm_nodes"]:
@@ -314,10 +318,37 @@ class PermRepository:
     async def save_log(self, log: dict) -> dict:
         return await self._save("perm_audit_logs", log["logId"], log)
 
+    async def get_log(self, log_id: int) -> dict | None:
+        return await self._get("perm_audit_logs", log_id)
+
+    async def update_log(self, log_id: int, fields: dict) -> dict:
+        return await self._update("perm_audit_logs", log_id, fields)
+
     async def list_logs(self, member_id: int = None,
                         limit: int = 100) -> list[dict]:
         logs = await self._list("perm_audit_logs", limit=1000)
         result = [l for l in logs
                   if (member_id is None or l.get("memberId") == member_id)]
         return sorted(result, key=lambda x: x.get("logId", 0),
+                      reverse=True)[:limit]
+
+    # ============================================================
+    # 权责信用分考核记录(P1)
+    # ============================================================
+
+    async def save_score(self, score: dict) -> dict:
+        return await self._save("perm_duty_scores", score["scoreId"], score)
+
+    async def list_scores(self, member_id: int = None,
+                          period: str = None,
+                          limit: int = 200) -> list[dict]:
+        scores = await self._list("perm_duty_scores", limit=limit)
+        result = []
+        for s in scores:
+            if member_id is not None and s.get("memberId") != member_id:
+                continue
+            if period and s.get("period") != period:
+                continue
+            result.append(s)
+        return sorted(result, key=lambda x: x.get("scoreId", 0),
                       reverse=True)[:limit]

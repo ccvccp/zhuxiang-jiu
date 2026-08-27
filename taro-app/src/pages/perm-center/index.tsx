@@ -9,7 +9,7 @@ import { View, Text, Textarea, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import {
-  PermAPI, PermNodeVO, PermGrantVO, PermRequestVO, PermLogVO,
+  PermAPI, PermNodeVO, PermGrantVO, PermRequestVO, PermLogVO, PermScoreVO,
 } from '@/api/perm';
 import { getSession } from '@/services/auth-service';
 
@@ -32,9 +32,15 @@ const ACTION_NAME: Record<string, string> = {
   apply_submit: '提交申请', apply_approve: '同意申请',
   apply_reject: '驳回申请', apply_cancel: '撤回申请',
   deny_access: '越权拦截', role_create: '创建角色',
+  use: '权限使用', risk_escalation: '越权升级冻结',
+  risk_review: '风险复核', assessment_run: '信用考核',
 };
 
-type TabKey = 'grants' | 'apply' | 'mine' | 'approve' | 'admin';
+const REWARD_NAME: Record<string, string> = {
+  bonus: '奖励', none: '无', demote: '降权', freeze: '冻结追责',
+};
+
+type TabKey = 'grants' | 'apply' | 'mine' | 'approve' | 'scores' | 'admin';
 
 const PermCenterPage: React.FC = () => {
   const [role, setRole] = useState('');
@@ -50,6 +56,12 @@ const PermCenterPage: React.FC = () => {
   const [assignNode, setAssignNode] = useState<PermNodeVO | null>(null);
   const [adminGrants, setAdminGrants] = useState<PermGrantVO[]>([]);
   const [logs, setLogs] = useState<PermLogVO[]>([]);
+  const [myScoreList, setMyScoreList] = useState<PermScoreVO[]>([]);
+  const [riskSum, setRiskSum] = useState<{
+    totalEvents: number; byLevel: Record<string, number>;
+    pendingReview: PermLogVO[];
+  } | null>(null);
+  const [adminScoreList, setAdminScoreList] = useState<PermScoreVO[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async (silent = false) => {
@@ -62,12 +74,16 @@ const PermCenterPage: React.FC = () => {
       setStages(s);
       setMine(r.mine);
       setToApprove(r.toApprove);
+      setMyScoreList(await PermAPI.myScores());
       if (role === 'admin') {
-        const [ag, lg] = await Promise.all([
+        const [ag, lg, rs, as_] = await Promise.all([
           PermAPI.adminGrants(), PermAPI.adminLogs(30),
+          PermAPI.riskSummary(), PermAPI.adminScores(),
         ]);
         setAdminGrants(ag);
         setLogs(lg);
+        setRiskSum(rs);
+        setAdminScoreList(as_);
       }
     } catch (e: any) {
       Taro.showToast({ title: e.message || '加载失败', icon: 'none' });
@@ -208,6 +224,47 @@ const PermCenterPage: React.FC = () => {
     }
   };
 
+  // ============ P1: 风险复核 / 月度考核 ============
+  const handleRiskReview = (log: PermLogVO,
+                            action: 'unfreeze' | 'revoke') => {
+    Taro.showModal({
+      title: action === 'unfreeze' ? '复核通过 · 解除冻结'
+        : '维持吊销 · 全权限收回',
+      content: `会员 ${log.memberId} · ${ACTION_NAME[log.action] || log.action}`
+        + `${log.nodeCode ? ` · ${log.nodeCode}` : ''}\n`
+        + `风险级: ${log.riskLevel}`,
+      success: async (res) => {
+        if (!res.confirm) return;
+        try {
+          await PermAPI.riskReview(log.logId, action, '小程序复核');
+          Taro.showToast({ title: '复核完成', icon: 'success' });
+          refresh();
+        } catch (e: any) {
+          Taro.showToast({ title: e.message || '复核失败', icon: 'none' });
+        }
+      },
+    });
+  };
+
+  const handleRunAssessment = () => {
+    Taro.showModal({
+      title: '触发月度权责考核',
+      content: '将按信用分自动执行奖惩:\n≥90分 奖金¥200+500竹叶\n80-89分 奖金¥100+200竹叶\n40-59分 核心权限降权\n<40分 全权限冻结追责',
+      success: async (res) => {
+        if (!res.confirm) return;
+        try {
+          const r = await PermAPI.runAssessment(undefined, true);
+          Taro.showToast({
+            title: `已考核 ${r.assessed} 人`, icon: 'success',
+          });
+          refresh();
+        } catch (e: any) {
+          Taro.showToast({ title: e.message || '考核失败', icon: 'none' });
+        }
+      },
+    });
+  };
+
   // ============ 渲染辅助 ============
   const renderTimeline = (req: PermRequestVO) => {
     const currentStep = req.approvals.findIndex(s => !s.approvedBy);
@@ -252,6 +309,7 @@ const PermCenterPage: React.FC = () => {
     { key: 'apply', label: '申请权限' },
     { key: 'mine', label: '我的申请' },
     { key: 'approve', label: '待我审批', badge: toApprove.length },
+    { key: 'scores', label: '信用分' },
   ];
   if (role === 'admin') {
     tabs.push({ key: 'admin', label: '超管工作台' });
@@ -462,6 +520,47 @@ const PermCenterPage: React.FC = () => {
         </View>
       )}
 
+      {/* ============ 信用分 ============ */}
+      {tab === 'scores' && !loading && (
+        <View className={styles.section}>
+          <View className={styles.sectionTitle}>
+            权责信用分({myScoreList.length} 期)
+          </View>
+          {myScoreList.length === 0 && (
+            <View className={styles.empty}>
+              暂无考核记录{'\n'}每月按合规率/履责度/审批尽责度自动计分{'\n'}
+              ≥90分有奖金, &lt;40分权限冻结
+            </View>
+          )}
+          {myScoreList.map(s => (
+            <View className={styles.reqCard} key={s.scoreId}>
+              <View className={styles.reqHead}>
+                <Text className={styles.grantName}>{s.period} 期</Text>
+                <Text className={`${styles.tag} ${
+                  s.creditScore >= 90 ? styles.tagActive
+                    : s.creditScore >= 60 ? styles.tagWarn
+                      : styles.tagRevoked
+                }`}>
+                  {s.creditScore} 分 · {REWARD_NAME[s.rewardType]}
+                </Text>
+              </View>
+              <View className={styles.reqMeta}>
+                合规 {s.complianceScore}/40 · 履责 {s.dutyScore}/30 ·
+                审批 {s.approvalScore}/20 · 基础 {s.reportScore}/10
+              </View>
+              {s.rewardType === 'bonus' && (
+                <View className={styles.reqReason}>
+                  奖励: ¥{s.rewardAmount} 入钱包收益 + {s.rewardPoints} 竹叶
+                </View>
+              )}
+              {(s.executed || []).map((e, i) => (
+                <View className={styles.stepOpinion} key={i}>· {e}</View>
+              ))}
+            </View>
+          ))}
+        </View>
+      )}
+
       {/* ============ 超管工作台 ============ */}
       {tab === 'admin' && role === 'admin' && !loading && (
         <>
@@ -494,7 +593,82 @@ const PermCenterPage: React.FC = () => {
               <View className={styles.ghostBtn} onClick={handleSweep}>
                 回收到期权限
               </View>
+              <View className={styles.ghostBtn} onClick={handleRunAssessment}>
+                月度考核
+              </View>
             </View>
+          </View>
+
+          {/* AI 风险监控面板 */}
+          <View className={styles.section}>
+            <View className={styles.sectionTitle}>AI 风险监控</View>
+            {riskSum && (
+              <View className={styles.reqMeta}>
+                事件总数 {riskSum.totalEvents} · 低 {riskSum.byLevel.low || 0} ·
+                中 {riskSum.byLevel.medium || 0} ·
+                高 {riskSum.byLevel.high || 0} ·
+                极高 {riskSum.byLevel.extreme || 0}
+              </View>
+            )}
+            {(riskSum?.pendingReview || []).length === 0 && (
+              <View className={styles.empty}>暂无待复核的高危事件</View>
+            )}
+            {(riskSum?.pendingReview || []).map(l => (
+              <View className={styles.reqCard} key={l.logId}>
+                <View className={styles.reqHead}>
+                  <Text className={styles.grantName}>
+                    会员 {l.memberId} · {ACTION_NAME[l.action] || l.action}
+                  </Text>
+                  <Text className={`${styles.tag} ${
+                    l.riskLevel === 'extreme' ? styles.tagRevoked
+                      : styles.tagWarn
+                  }`}>
+                    {l.riskLevel === 'extreme' ? '极高' : '高危'}
+                  </Text>
+                </View>
+                <View className={styles.reqMeta}>
+                  {l.nodeCode || '-'} · 已处置: {l.handled || 'none'}
+                </View>
+                <View className={styles.btnRow}>
+                  <View
+                    className={styles.primaryBtn}
+                    onClick={() => handleRiskReview(l, 'unfreeze')}
+                  >复核通过·解冻</View>
+                  <View
+                    className={`${styles.ghostBtn} ${styles.dangerBtn}`}
+                    onClick={() => handleRiskReview(l, 'revoke')}
+                  >维持吊销</View>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* 考核记录 */}
+          <View className={styles.section}>
+            <View className={styles.sectionTitle}>
+              考核记录({adminScoreList.length})
+            </View>
+            {adminScoreList.length === 0 && (
+              <View className={styles.empty}>
+                暂无考核记录, 点击上方「月度考核」触发
+              </View>
+            )}
+            {adminScoreList.map(s => (
+              <View className={styles.logItem} key={s.scoreId}>
+                <View>
+                  <View className={styles.logAction}>
+                    {s.memberNickname || `会员${s.memberId}`} ·
+                    {s.period} 期 · {REWARD_NAME[s.rewardType]}
+                  </View>
+                  <View className={styles.logMeta}>{s.aiReport}</View>
+                </View>
+                <View className={`${
+                  s.creditScore >= 90 ? styles.riskLow
+                    : s.creditScore >= 60 ? styles.riskMedium
+                      : styles.riskHigh
+                }`}>{s.creditScore}分</View>
+              </View>
+            ))}
           </View>
 
           <View className={styles.section}>

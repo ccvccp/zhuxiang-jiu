@@ -16,10 +16,12 @@ from pydantic import BaseModel as PydBaseModel, Field
 
 from routes.auth_routes import get_current_member, require_admin
 from services.perm_service import PermService
+from services.perm_ai_service import PermAiService
 
 
 router = APIRouter()
 _service = PermService()
+_ai_service = PermAiService()
 
 
 def _member_id(member: dict) -> int:
@@ -78,6 +80,22 @@ class ApproveRequestRequest(PydBaseModel):
 
 class CheckPermissionRequest(PydBaseModel):
     nodeCode: str = Field(..., description="权限码(校验本人是否持有)")
+
+
+class RecordUseRequest(PydBaseModel):
+    nodeCode: str = Field(..., description="使用的权限码")
+    bulkCount: int = Field(0, ge=0, le=100000,
+                           description="批量操作条数(导出/查询, >100 触发风控)")
+
+
+class RiskReviewRequest(PydBaseModel):
+    action: str = Field(..., description="unfreeze(解冻)/revoke(维持吊销)")
+    opinion: str = Field("", max_length=200, description="复核意见")
+
+
+class RunAssessmentRequest(PydBaseModel):
+    period: str | None = Field(None, description="考核周期(YYYY-MM, 默认当月)")
+    force: bool = Field(False, description="重跑本期(覆盖幂等)")
 
 
 # ============================================================
@@ -172,6 +190,26 @@ async def check_permission(data: CheckPermissionRequest,
         _handle(exc)
 
 
+@router.post("/api/perm/use", tags=["权限AI智能管理"])
+async def record_use(data: RecordUseRequest,
+                     member: dict = Depends(get_current_member)):
+    """记录权限使用(P1 AI 监控: 异常时段/频率/批量导出 → 风险评分 4 级处置)"""
+    try:
+        return await _ai_service.record_use(
+            _member_id(member), data.nodeCode, data.bulkCount)
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/perm/my/scores", tags=["权限AI智能管理"])
+async def my_scores(member: dict = Depends(get_current_member)):
+    """我的权责信用分+考核报告(近 12 期)"""
+    try:
+        return {"scores": await _ai_service.my_scores(_member_id(member))}
+    except Exception as exc:
+        _handle(exc)
+
+
 # ============================================================
 # 超管端(JWT + role=admin, 5 接口)
 # ============================================================
@@ -240,6 +278,55 @@ async def expire_sweep(admin: dict = Depends(require_admin)):
     """手动触发到期回收(访问时亦有惰性过期)"""
     try:
         return await _service.expire_sweep(_member_id(admin))
+    except Exception as exc:
+        _handle(exc)
+
+
+# ============================================================
+# 超管端 P1(AI 监控 + 信用分考核, 4 接口)
+# ============================================================
+
+@router.get("/api/perm/admin/risk-summary", tags=["权限AI智能管理"])
+async def risk_summary(admin: dict = Depends(require_admin)):
+    """AI 风险概览(各级事件统计 + 待复核列表)"""
+    try:
+        return await _ai_service.risk_summary(_member_id(admin))
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/perm/admin/risk-review/{log_id}",
+             tags=["权限AI智能管理"])
+async def risk_review(log_id: int, data: RiskReviewRequest,
+                      admin: dict = Depends(require_admin)):
+    """高危风险事件复核(解冻/维持吊销)"""
+    try:
+        return await _ai_service.review_risk(
+            _member_id(admin), log_id, data.action, data.opinion)
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/perm/admin/scores/run", tags=["权限AI智能管理"])
+async def run_assessment(data: RunAssessmentRequest,
+                         admin: dict = Depends(require_admin)):
+    """触发月度权责信用分考核(自动执行奖惩: 奖金入钱包/积分/降权/冻结)"""
+    try:
+        return await _ai_service.run_assessment(
+            _member_id(admin), period=data.period, force=data.force)
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/perm/admin/scores", tags=["权限AI智能管理"])
+async def admin_list_scores(
+    period: str | None = Query(None, description="按周期过滤(YYYY-MM)"),
+    admin: dict = Depends(require_admin),
+):
+    """全部考核记录(仅超管, 附会员昵称)"""
+    try:
+        return {"scores": await _ai_service.admin_list_scores(
+            _member_id(admin), period=period)}
     except Exception as exc:
         _handle(exc)
 
