@@ -1,0 +1,381 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $spacing-md $spacing-lg $spacing-xl;
+}
+
+// ============================================
+// 头部
+// ============================================
+.header {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  color: $color-text-white;
+  margin-bottom: $spacing-md;
+}
+
+.headerTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: 4rpx;
+}
+
+.headerDesc {
+  font-size: $font-size-xs;
+  opacity: 0.85;
+  line-height: 1.6;
+}
+
+// ============================================
+// Tab 切换
+// ============================================
+.tabs {
+  display: flex;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: 8rpx;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  padding: 14rpx 0;
+  border-radius: $radius-sm;
+}
+
+.tabActive {
+  background: $color-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-semibold;
+}
+
+// ============================================
+// 区块与卡片
+// ============================================
+.section {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.sectionTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.empty {
+  text-align: center;
+  color: $color-text-tertiary;
+  font-size: $font-size-sm;
+  padding: $spacing-lg 0;
+  line-height: 1.8;
+}
+
+// 权限卡片
+.grantCard {
+  border: 1rpx solid $color-border;
+  border-radius: $radius-sm;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.grantHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-xs;
+}
+
+.grantName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.tag {
+  font-size: $font-size-xs;
+  border-radius: $radius-round;
+  padding: 4rpx 16rpx;
+}
+
+.tagActive { background: rgba(0, 180, 42, 0.12); color: $color-success; }
+.tagExpired { background: rgba(134, 144, 156, 0.15); color: $color-text-tertiary; }
+.tagRevoked { background: rgba(245, 63, 63, 0.12); color: $color-error; }
+.tagWarn { background: rgba(255, 125, 0, 0.14); color: $color-warning; }
+
+.grantMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.8;
+}
+
+.grantDuties {
+  margin-top: $spacing-xs;
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  padding: $spacing-sm;
+}
+
+.dutyTitle {
+  font-size: $font-size-xs;
+  color: $color-warning;
+  font-weight: $font-weight-semibold;
+  margin-bottom: 4rpx;
+}
+
+.dutyItem {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+}
+
+// 按钮
+.btnRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.primaryBtn {
+  flex: 1;
+  background: $color-primary;
+  color: $color-text-white;
+  font-size: $font-size-sm;
+  text-align: center;
+  border-radius: $radius-button;
+  padding: 14rpx 0;
+}
+
+.ghostBtn {
+  flex: 1;
+  background: $color-bg-page;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  text-align: center;
+  border-radius: $radius-button;
+  padding: 14rpx 0;
+}
+
+.dangerBtn {
+  background: rgba(245, 63, 63, 0.1);
+  color: $color-error;
+}
+
+// ============================================
+// 申请表单
+// ============================================
+.stageGroup {
+  margin-bottom: $spacing-md;
+}
+
+.stageName {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-primary;
+  margin-bottom: $spacing-xs;
+}
+
+.nodeGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+}
+
+.nodeChip {
+  font-size: $font-size-xs;
+  border: 1rpx solid $color-border;
+  color: $color-text-secondary;
+  border-radius: $radius-round;
+  padding: 8rpx 20rpx;
+}
+
+.nodeChipActive {
+  border-color: $color-primary;
+  background: rgba(53, 92, 68, 0.08);
+  color: $color-primary;
+  font-weight: $font-weight-semibold;
+}
+
+.selectedNode {
+  background: rgba(53, 92, 68, 0.06);
+  border-radius: $radius-sm;
+  padding: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.selectedNodeName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-primary;
+  margin-bottom: 4rpx;
+}
+
+.selectedNodeMeta {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.8;
+}
+
+.input {
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  padding: $spacing-sm;
+  font-size: $font-size-sm;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: $spacing-sm;
+  min-height: 120rpx;
+}
+
+.durationRow {
+  display: flex;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+}
+
+.durationChip {
+  flex: 1;
+  text-align: center;
+  font-size: $font-size-xs;
+  border: 1rpx solid $color-border;
+  border-radius: $radius-button;
+  padding: 10rpx 0;
+  color: $color-text-secondary;
+}
+
+.durationChipActive {
+  border-color: $color-primary;
+  background: rgba(53, 92, 68, 0.08);
+  color: $color-primary;
+  font-weight: $font-weight-semibold;
+}
+
+// ============================================
+// 审批链时间线
+// ============================================
+.timeline {
+  margin-top: $spacing-xs;
+}
+
+.step {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.stepDot {
+  width: 28rpx;
+  height: 28rpx;
+  border-radius: 50%;
+  background: $color-text-disabled;
+  color: $color-text-white;
+  font-size: 20rpx;
+  text-align: center;
+  line-height: 28rpx;
+  flex-shrink: 0;
+  margin-top: 4rpx;
+}
+
+.stepDotDone { background: $color-success; }
+.stepDotCur { background: $color-warning; }
+.stepDotReject { background: $color-error; }
+
+.stepBody { flex: 1; }
+
+.stepRole {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.stepState {
+  font-size: $font-size-xs;
+  margin-left: 12rpx;
+}
+
+.stepOpinion {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.7;
+  margin-top: 2rpx;
+}
+
+// 申请单卡片
+.reqCard {
+  border: 1rpx solid $color-border;
+  border-radius: $radius-sm;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.reqHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-xs;
+}
+
+.reqReason {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+  margin-bottom: $spacing-xs;
+}
+
+.reqMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.7;
+}
+
+// 超管分配表单
+.assignRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.assignInput {
+  flex: 1;
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  padding: $spacing-sm;
+  font-size: $font-size-sm;
+  min-height: 72rpx;
+}
+
+// 审计日志
+.logItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-sm 0;
+  border-bottom: 1rpx solid $color-divider;
+}
+
+.logItem:last-child { border-bottom: none; }
+
+.logAction {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.logMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.riskLow { color: $color-success; }
+.riskMedium { color: $color-warning; }
+.riskHigh { color: $color-error; }

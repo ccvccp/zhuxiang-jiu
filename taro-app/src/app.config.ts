@@ -13,6 +13,7 @@ export default defineAppConfig({
     'pages/wallet/index',
     'pages/login/index',
     'pages/theme-admin/index',
+    'pages/perm-center/index',
     'pages/privacy/index',
     'pages/agreement/index'
   ],

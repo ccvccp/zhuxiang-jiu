@@ -238,6 +238,21 @@ const MinePage: React.FC = () => {
           )}
         </View>
 
+        {/* 权限中心(登录即可见: 申请权限/审批/责任书) */}
+        {member && (
+          <View className={styles.section}>
+            <View className={styles.sectionTitle}>工作台</View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/perm-center/index' })}>
+              <View className={styles.adminEntryIcon}>🔐</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>权限中心</View>
+                <View className={styles.adminEntryDesc}>申请审批 · 权责共存 · 限时回收 · 审计留痕</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
+          </View>
+        )}
+
         {/* 管理员入口(仅 admin 可见) */}
         {member?.role === 'admin' && (
           <View className={styles.section}>

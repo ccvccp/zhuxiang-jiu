@@ -57,6 +57,8 @@ from routes.ai_scoring_auth_routes import register_ai_scoring_auth_routes
 from routes.pocket_routes import register_pocket_routes
 # 网站图标智能管理模块
 from routes.site_theme_routes import register_site_theme_routes
+# 权限AI智能管理模块
+from routes.perm_routes import register_perm_routes
 
 __all__ = [
     # 已有(15)
@@ -99,4 +101,5 @@ __all__ = [
     "register_ai_scoring_auth_routes",
     "register_pocket_routes",
     "register_site_theme_routes",
+    "register_perm_routes",
 ]
