@@ -55,6 +55,7 @@ export interface PromotionStatsVO {
   level1RewardAmount: number;   // 一级奖励金额(元/轮)
   level2SubPromoterCount: number; // 二级达标所需下线数
   level2SubThreshold: number;   // 每个下线需推广人数
+  level2RewardAmount: number;   // 二级奖励金额(元/轮)
   wineMinPrice: number;         // 奖励酒最低价
   rewardBalance: number;        // 奖励余额(仅可购本站产品)
   wineQualifyAvailable: number; // 可领酒资格数
