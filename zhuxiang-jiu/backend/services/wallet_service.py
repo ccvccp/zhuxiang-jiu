@@ -108,7 +108,7 @@ DEPOSIT_TIERS = {
 }
 
 # 奖品阶梯: (最低金额, 存期月, 奖品名称, 奖品价值)
-# 按金额升序匹配第一个满足条件的档位
+# 匹配规则: 同存期内取金额门槛最高的满足档(见 _match_reward)
 REWARD_TIERS = [
     (2000,  6,  "翠竹小酌 250ml × 1",                   88.0),
     (3000,  6,  "翠竹小酌 250ml × 1 + 50 优惠券",         138.0),
@@ -159,15 +159,24 @@ def _calc_regular_interest(amount: float, period: int) -> tuple:
 
 
 def _match_reward(amount: float, period: int) -> tuple | None:
-    """匹配奖品档位(金额 ≥ 档位金额 + 存期匹配)
+    """匹配奖品档位(金额 ≥ 档位金额 + 存期匹配, 同存期取最高满足档)
+
+    修复: 原实现返回 REWARD_TIERS 顺序中第一个满足项, 因列表按金额
+    升序排列, 大额存单(如 ¥50000/24月)永远命中低档位(如 ¥10000/24月
+    档), 无法匹配末尾更高档位——与设计文档 3.3.2 奖品阶梯矛盾。
+    现改为同存期内遍历全部满足档位, 取金额门槛最高(即最优)的一档。
 
     Returns:
         (reward_name, reward_value) 或 None
     """
+    best = None
+    best_min_amount = -1
     for min_amount, req_period, name, value in REWARD_TIERS:
-        if amount >= min_amount and period == req_period:
-            return name, value
-    return None
+        if period == req_period and amount >= min_amount \
+                and min_amount >= best_min_amount:
+            best = (name, value)
+            best_min_amount = min_amount
+    return best
 
 
 def _check_lpr_compliance(amount: float, interest: float,
