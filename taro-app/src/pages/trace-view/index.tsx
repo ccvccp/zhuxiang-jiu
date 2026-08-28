@@ -91,7 +91,8 @@ const TraceViewPage: React.FC = () => {
       <View className={styles.header}>
         <View className={styles.headerTitle}>🔍 竹香酒溯源</View>
         <View className={styles.headerDesc}>
-          从一粒粮到一瓶酒 · 全流程工段留痕{'\n'}
+          一根鲜竹(笋) · 泰山姊妹山徂徕山{'\n'}
+          国家森林公园一滴富硒水 · 鲜竹酝香成美酒{'\n'}
           链式哈希防篡改 · 责任人实名背书
         </View>
       </View>
