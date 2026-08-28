@@ -13,7 +13,9 @@
 
 import Taro from '@tarojs/taro';
 import { API_BASE } from '@/config';
-import { getMemberId, getSession, requireLogin } from '@/services/auth-service';
+import {
+  clearSession, getMemberId, getSession, refreshSession, requireLogin,
+} from '@/services/auth-service';
 
 interface RequestOptions {
   url: string;
@@ -32,6 +34,13 @@ interface RequestOptions {
  *   request({ url: '/api/order/create', method: 'POST', data })  // POST
  */
 export async function request<T = any>(options: RequestOptions): Promise<T> {
+  return requestWithRetry(options, false);
+}
+
+/** _isRetry: 防止刷新后仍 401 的无限循环(仅重试一次) */
+async function requestWithRetry<T = any>(
+  options: RequestOptions, _isRetry: boolean,
+): Promise<T> {
   const { url, method = 'GET', data, headers = {} } = options;
 
   // 会员身份动态注入(登录后为真实会员 ID, 未登录为空)
@@ -57,11 +66,18 @@ export async function request<T = any>(options: RequestOptions): Promise<T> {
       return res.data as T;
     }
 
-    // 401 未登录 → 跳转登录页
+    // 401: 令牌过期 → 尝试静默刷新后重试一次; 刷新失败/未登录 → 清会话跳登录
     if (res.statusCode === 401) {
-      Taro.showToast({ title: '请先登录', icon: 'none' });
-      requireLogin();
-      throw new Error('未登录');
+      if (!_isRetry) {
+        const refreshed = await refreshSession();
+        if (refreshed?.accessToken) {
+          return requestWithRetry<T>(options, true);
+        }
+      }
+      clearSession();
+      Taro.showToast({ title: '登录已过期, 请重新登录', icon: 'none' });
+      requireLogin(); // 会话已清空 → 必定跳转登录页
+      throw new Error('登录已过期');
     }
 
     // 业务错误(兼容 detail / error 两种后端错误格式)

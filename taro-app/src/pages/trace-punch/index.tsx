@@ -5,7 +5,7 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, Input, Textarea, Canvas } from '@tarojs/components';
-import Taro from '@tarojs/taro';
+import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
 import { qrMatrix, renderQrMatrix } from '@/utils/qrcode';
 import {
@@ -85,6 +85,13 @@ const TracePunchPage: React.FC = () => {
   }, []);
 
   useEffect(() => { loadData(); }, []);
+
+  // 登录返回后自动重试(未登录打开本页 → 401 跳登录 → 返回时数据为空)
+  useDidShow(() => {
+    if (!loading && stages.length === 0) {
+      loadData(true);
+    }
+  });
 
   // ============ 扫码打卡 ============
   const handleScan = () => {
@@ -433,6 +440,11 @@ const TracePunchPage: React.FC = () => {
             <View className={styles.sectionTitle}>
               7 工段(手动选择)
             </View>
+            {stages.length === 0 && (
+              <View className={styles.empty}>
+                工段数据未加载{'\n'}可能登录已过期或网络异常{'\n'}如未自动跳转登录, 请重新进入本页
+              </View>
+            )}
             {stages.map(s => (
               <View className={styles.stageCard} key={s.code}>
                 <View className={styles.stageHead}>
@@ -483,6 +495,18 @@ const TracePunchPage: React.FC = () => {
               责任人扫码 → 权限自动校验 → 打卡即签名
             </View>
           </View>
+          {stageQrs.length === 0 && (
+            <View className={styles.section}>
+              <View className={styles.empty}>
+                工段码数据未加载{'\n'}可能登录已过期或网络异常
+              </View>
+              <View className={styles.btnRow}>
+                <View className={styles.primaryBtn} onClick={() => loadData()}>
+                  重新加载
+                </View>
+              </View>
+            </View>
+          )}
           {stageQrs.map(q => (
             <View className={styles.section} key={q.stageCode}>
               <View className={styles.stageHead}>

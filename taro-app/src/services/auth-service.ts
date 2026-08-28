@@ -7,6 +7,7 @@
  *   - 退出登录 → clearSession() 清空
  */
 import Taro from '@tarojs/taro';
+import { API_BASE } from '@/config';
 
 // 会话存储 key
 const AUTH_STORAGE_KEY = 'auth_session';
@@ -69,4 +70,45 @@ export function requireLogin(): boolean {
     });
   }
   return false;
+}
+
+// ---------- 令牌自动刷新(401 时调用, 并发去重) ----------
+let refreshing: Promise<AuthSession | null> | null = null;
+
+/**
+ * 用 refreshToken 换新令牌(后端轮换机制: 旧 refresh 立即吊销)
+ * 成功 → 更新会话并返回; 失败/无 refreshToken → 返回 null
+ */
+export async function refreshSession(): Promise<AuthSession | null> {
+  const session = getSession();
+  if (!session?.refreshToken) return null;
+  if (!refreshing) {
+    refreshing = (async () => {
+      try {
+        const res = await Taro.request({
+          url: `${API_BASE}/api/auth/refresh`,
+          method: 'POST',
+          data: { refreshToken: session.refreshToken },
+          header: { 'Content-Type': 'application/json' },
+          timeout: 10000,
+        });
+        if (res.statusCode >= 200 && res.statusCode < 300
+          && res.data?.accessToken) {
+          const next: AuthSession = {
+            ...session,
+            accessToken: res.data.accessToken,
+            refreshToken: res.data.refreshToken || session.refreshToken,
+          };
+          setSession(next);
+          return next;
+        }
+        return null;
+      } catch (_) {
+        return null;
+      } finally {
+        refreshing = null;
+      }
+    })();
+  }
+  return refreshing;
 }
