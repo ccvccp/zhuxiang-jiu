@@ -1,8 +1,8 @@
-"""会员积分管理模块路由(10 端点)
+"""会员积分管理模块路由(11 端点)
 
 鉴权:
     - 用户端(7 接口): X-Member-Id 头标识当前会员(签到/返分/抵扣/退款/查询)
-    - 管理端(1 接口): X-Role: admin 头(过期扫描)
+    - 管理端(2 接口): X-Role: admin 头(过期扫描/遗留积分迁移)
     - 公开(2 接口): 账户/流水/将过期/统计查询(仅读)
 
 异常映射(遵循项目约定):
@@ -17,6 +17,7 @@
     - 退款(1):     refund
     - 过期(2):     expire-run / expiring
     - 查询(3):     account / logs / stats
+    - 迁移(1):     admin/migrate-legacy(遗留 member.points 一次性入账)
 """
 
 
@@ -96,6 +97,10 @@ class RefundRequest(PydBaseModel):
     userId: int = Field(..., description="会员ID")
     orderId: str = Field(..., description="订单号")
     refundPoints: int = Field(..., gt=0, description="扣回积分数")
+
+
+class MigrateLegacyRequest(PydBaseModel):
+    memberId: int = Field(..., description="会员ID")
 
 
 # ============================================================
@@ -260,6 +265,38 @@ async def get_stats(
     """积分统计(按来源统计+签到统计)"""
     try:
         result = await _service.get_stats(user_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# --- 遗留积分迁移(P1-19: member.points → 积分账本, 一次性) ---
+
+@router.post("/api/points/admin/migrate-legacy", tags=["会员积分模块"])
+async def migrate_legacy_points(
+    data: MigrateLegacyRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """member 表遗留积分一次性迁移到积分账本(管理员, P1-19)
+
+    流程: 读 member.points → 积分账本入账(source=credit, 幂等) → 清零 member.points
+    重复调用安全(已迁移则跳过且不再清零)。
+    """
+    _require_admin(x_role)
+    from repositories.member_repository import MemberRepository
+
+    member_repo = MemberRepository()
+    try:
+        member = await member_repo.get_by_id(data.memberId)
+        if not member:
+            raise KeyError(f"会员 {data.memberId} 不存在")
+        legacy_points = int(member.get("points", 0) or 0)
+        result = await _service.migrate_legacy_points(data.memberId,
+                                                      legacy_points)
+        # 迁移成功才清零, 防止未入账先清零
+        if result.get("migrated"):
+            await member_repo.update_fields(data.memberId, {"points": 0})
+        result["memberId"] = data.memberId
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

@@ -21,6 +21,8 @@
 
 from datetime import date
 
+import logging
+
 from core.locks import get_lock
 from core.helpers import ts, bc_hash
 from repositories.trace_repository import (
@@ -56,6 +58,8 @@ TRANSFER_TYPE_INHERIT = "inherit"  # 继承
 # 防窜货: 跨区激活判定
 ANTI_CHANNEL_CROSS_PROVINCE = "cross_province"
 ANTI_CHANNEL_CROSS_CITY = "cross_city"
+
+logger = logging.getLogger("trace_service")
 
 
 class TraceService:
@@ -417,7 +421,7 @@ class TraceService:
               建立"订单-批次"关联(AI智能管理模块工人分润自动取数依据)
 
         Returns:
-            激活结果(含激活日期)
+            激活结果(含激活日期/奖励积分)
 
         Raises:
             KeyError: 生命码不存在
@@ -475,6 +479,10 @@ class TraceService:
             life["status"] = LIFE_STATUS_ACTIVE
             life["firstActivationDate"] = activation_date
             life["userId"] = user_id
+
+            # 激活奖励真实发放(P1-18: 调用积分模块入账, best-effort 不阻断激活主流程)
+            reward_result = await self._grant_activation_reward(
+                user_id, life_code)
             return {
                 "lifeCode": life_code,
                 "lifeId": life["id"],
@@ -482,8 +490,41 @@ class TraceService:
                 "firstActivationDate": activation_date,
                 "userId": user_id,
                 "rewardPoints": ACTIVATION_REWARD_POINTS,
+                "rewardGranted": reward_result.get("granted", False),
+                "rewardLogId": reward_result.get("logId"),
+                "pointsBalance": reward_result.get("balance"),
                 "scanId": scan_id,
             }
+
+    async def _grant_activation_reward(self, user_id: int,
+                                        life_code: str) -> dict:
+        """发放生命码激活奖励积分(P1-18)
+
+        best-effort: 积分服务异常时仅告警不回滚激活(激活状态已落库,
+        重试激活会 409, 不存在重复发分风险; 失败补发走对账)。
+        """
+        if not user_id:
+            return {"granted": False}
+        try:
+            from services.points_service import PointsService
+            from repositories.points_repository import SOURCE_ACTIVATION
+
+            result = await PointsService().earn_points(
+                user_id=user_id,
+                points=ACTIVATION_REWARD_POINTS,
+                source=SOURCE_ACTIVATION,
+                ref_id=life_code,
+                ref_desc=f"生命码激活奖励({life_code})",
+            )
+            return {
+                "granted": True,
+                "logId": result.get("logId"),
+                "balance": result.get("balance"),
+            }
+        except Exception as exc:
+            logger.warning("activation_reward_grant_failed code=%s user=%s "
+                           "err=%s", life_code, user_id, exc)
+            return {"granted": False}
 
     async def scan_trace(self, code: str, user_id: int = None,
                           longitude: float = None, latitude: float = None,

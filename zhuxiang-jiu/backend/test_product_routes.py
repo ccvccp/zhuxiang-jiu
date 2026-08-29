@@ -671,6 +671,26 @@ class TestReviewFixRegressionRoutes:
         assert by_order.status_code == 200
         assert by_order.json()["review"]["order_id"] == "ORD_RT_001"
 
+    def test_list_my_reviews_exposed(self):
+        """P1-15: 我的评价历史端点暴露(提交评价 → /reviews/mine 可查)"""
+        client.post(f"/api/product/{PID_CLASSIC_42}/reviews",
+                    json={"rating": 5, "content": "我的评价历史测试"},
+                    headers={"X-Member-Id": "1"})
+        resp = client.get("/api/product/reviews/mine",
+                          headers={"X-Member-Id": "1"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["memberId"] == "1"
+        assert data["total"] >= 1
+        assert any(r["content"] == "我的评价历史测试"
+                   for r in data["reviews"])
+
+    def test_list_my_reviews_no_auth(self):
+        """P1-15: 未登录查询我的评价: 401"""
+        resp = client.get("/api/product/reviews/mine")
+        assert resp.status_code == 401
+
     def test_create_review_duplicate_order(self):
         """同订单同产品重复评价: 409"""
         body = {"rating": 5, "content": "第一次", "orderId": "ORD_RT_002"}

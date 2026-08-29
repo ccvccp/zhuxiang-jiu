@@ -33,6 +33,16 @@ def _reset_member_store():
     yield
 
 
+def _migrate_legacy_points(member_id=1) -> dict:
+    """P1-20: 迁移 member.points 遗留积分到积分账本(会员1 初始 100)"""
+    resp = client.post(
+        "/api/points/admin/migrate-legacy",
+        json={"memberId": member_id}, headers={"X-Role": "admin"},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]
+
+
 # ============================================================
 #  注册: /api/member/register
 # ============================================================
@@ -176,7 +186,8 @@ class TestMemberLogin:
         assert "禁用" in resp.json()["error"]
 
     def test_login_bonus(self):
-        """每日登录奖励: +5 积分"""
+        """每日登录奖励: +5 积分(P1-20: 走积分账本, 先迁移遗留 100)"""
+        _migrate_legacy_points()
         resp = client.post("/api/member/login/bonus", headers={"X-Member-Id": "1"})
         assert resp.status_code == 200
         data = resp.json()
@@ -275,7 +286,8 @@ class TestMemberLevel:
         assert resp.status_code == 200
         data = resp.json()
         assert data["growthValue"] == 500
-        assert data["points"] == 600  # 100 初始 + 500 消费
+        # P1-20: 积分走积分账本, ¥500 × 1.5 × 1.0(L1) = 750
+        assert data["points"] == 750
         assert data["fromLevel"] == 1
         assert data["toLevel"] == 2
         assert data["leveledUp"] is True
@@ -323,7 +335,8 @@ class TestMemberLevel:
 
 class TestMemberPoints:
     def test_get_points_success(self):
-        """查询积分"""
+        """查询积分(P1-20: 读积分账本, 先迁移遗留 100)"""
+        _migrate_legacy_points()
         resp = client.get("/api/member/points", headers={"X-Member-Id": "1"})
         assert resp.status_code == 200
         data = resp.json()
@@ -331,7 +344,8 @@ class TestMemberPoints:
         assert data["pointsValue"] == 1.0  # 100 积分 = ¥1
 
     def test_deduct_points_success(self):
-        """积分抵扣"""
+        """积分抵扣(P1-20: 代理积分模块, FIFO 消耗)"""
+        _migrate_legacy_points()
         resp = client.post("/api/member/points/deduct", json={"points": 100},
                            headers={"X-Member-Id": "1"})
         assert resp.status_code == 200
@@ -342,6 +356,7 @@ class TestMemberPoints:
 
     def test_deduct_points_insufficient(self):
         """积分不足: 409"""
+        _migrate_legacy_points()
         resp = client.post("/api/member/points/deduct", json={"points": 1000},
                            headers={"X-Member-Id": "1"})
         assert resp.status_code == 409
@@ -363,6 +378,7 @@ class TestMemberPoints:
 
     def test_deduct_within_limit(self):
         """抵扣在 30% 上限内: 成功"""
+        _migrate_legacy_points()
         resp = client.post("/api/member/points/deduct",
                            json={"points": 100, "order_amount": 1000},
                            headers={"X-Member-Id": "1"})

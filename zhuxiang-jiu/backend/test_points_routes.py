@@ -76,6 +76,8 @@ def reset_store():
 USER_ID_1 = 1001
 USER_ID_2 = 1002
 USER_ID_3 = 1003
+USER_ID_4 = 1004
+USER_ID_5 = 1005
 
 # 会员等级
 LEVEL_NORMAL = 1     # 普通会员(1.0×)
@@ -114,7 +116,7 @@ class TestSignin:
         records = await svc.get_signin_records(USER_ID_1)
         record("test_03_signin_records", len(records) == 1, f"expected 1, got {len(records)}")
 
-        # test 4: 连续签到(模拟昨日签到)
+        # test 4: 连续签到第2天(分段递增: 第1-6天+10/天)
         repo = svc.repo
         yesterday = (date.today() - timedelta(days=1)).isoformat()
         await repo.add_signin({
@@ -127,8 +129,38 @@ class TestSignin:
         # 今日签到
         result = await svc.signin(USER_ID_2)
         record("test_04_continuous_signin",
-               result["continuousDays"] == 2 and result["pointsEarned"] == 15,
-               f"expected 2/15, got {result['continuousDays']}/{result['pointsEarned']}")
+               result["continuousDays"] == 2 and result["pointsEarned"] == 10,
+               f"expected 2/10, got {result['continuousDays']}/{result['pointsEarned']}")
+
+        # test 4b: 连续签到第7天宝箱(+50, D-5 新算法)
+        await repo.add_signin({
+            "userId": USER_ID_4,
+            "signDate": yesterday,
+            "continuousDays": 6,
+            "pointsEarned": 10,
+            "isBonus": 0,
+        })
+        result = await svc.signin(USER_ID_4)
+        record("test_04b_day7_bonus_box",
+               result["continuousDays"] == 7 and result["pointsEarned"] == 50
+               and result["isBonus"] is True,
+               f"expected 7/50/bonus, got {result['continuousDays']}/"
+               f"{result['pointsEarned']}/{result['isBonus']}")
+
+        # test 4c: 连续签到第30天大宝箱(+200, D-5 新算法)
+        await repo.add_signin({
+            "userId": USER_ID_5,
+            "signDate": yesterday,
+            "continuousDays": 29,
+            "pointsEarned": 25,
+            "isBonus": 0,
+        })
+        result = await svc.signin(USER_ID_5)
+        record("test_04c_day30_grand_box",
+               result["continuousDays"] == 30 and result["pointsEarned"] == 200
+               and result["isBonus"] is True,
+               f"expected 30/200/bonus, got {result['continuousDays']}/"
+               f"{result['pointsEarned']}/{result['isBonus']}")
 
         # test 5: 账户余额正确(首次10 + 连续15 = 25)
         account = await svc.get_account(USER_ID_1)
@@ -166,6 +198,15 @@ class TestEarnOrderPoints:
         record("test_08_svip_multiplier",
                result["earnedPoints"] == 450 and result["multiplier"] == 3.0,
                f"expected 450/3.0, got {result['earnedPoints']}/{result['multiplier']}")
+
+        # test 8b: 单笔订单上限截断(¥10000 × 1.5 × 3.0 = 45000 → 截断5000, D-5)
+        result = await svc.earn_order_points(
+            USER_ID_5, ORDER_ID_2, 10000.0, LEVEL_SVIP
+        )
+        record("test_08b_per_order_cap",
+               result["earnedPoints"] == 5000 and result["cappedByOrder"] is True,
+               f"expected 5000/capped, got {result['earnedPoints']}/"
+               f"{result.get('cappedByOrder')}")
 
         # test 9: 账户余额增加
         account = await svc.get_account(USER_ID_1)

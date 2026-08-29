@@ -1,8 +1,8 @@
-"""广告管理模块路由(12 端点)
+"""广告管理模块路由(17 端点)
 
 鉴权:
-    - 用户端(2 接口): 曝光/点击/转化记录(X-Member-Id)
-    - 管理端(10 接口): X-Role: admin 头(广告/广告位/审核/统计)
+    - 用户端(3 接口): 曝光/点击/转化记录(X-Member-Id)
+    - 管理端(14 接口): X-Role: admin 头(广告/广告位/审核/统计)
 
 异常映射:
     - KeyError → 404(广告/广告位不存在)
@@ -10,10 +10,10 @@
     - 权限校验 → 403(无权操作)
 
 端点分布:
-    - 广告(5):  创建/列表/详情/更新/上下线
-    - 广告位(2): 创建/列表(详情/更新/删除由 service 提供)
+    - 广告(6):  创建/列表/详情/更新/上线/下线
+    - 广告位(4): 创建/列表/更新/删除
     - 投放(1):  投放记录查询
-    - 效果(2):  曝光点击/广告统计
+    - 效果(4):  曝光/点击/转化记录/广告统计
     - 审核(1):  广告审核
     - 统计(1):  管理端统计
 """
@@ -273,6 +273,23 @@ async def record_click(
     try:
         count = data.count if data else 1
         result = await _service.record_click(ad_id, count)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/ads/{ad_id}/conversion", tags=["广告管理模块"])
+async def record_conversion(
+    ad_id: int,
+    data: RecordRequest = None,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """记录转化(P1-16: service 已实现, 补齐路由打通 CVR/ROI 链路)"""
+    _require_member_id(x_member_id)
+    try:
+        count = data.count if data else 1
+        revenue = data.revenue if data else 0
+        result = await _service.record_conversion(ad_id, count, revenue)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

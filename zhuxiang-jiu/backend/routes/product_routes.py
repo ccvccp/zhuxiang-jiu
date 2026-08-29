@@ -159,6 +159,21 @@ async def get_review_by_order(order_id: str):
         raise _map_value_error(e) from e
 
 
+@router.get("/reviews/mine")
+async def list_my_reviews(
+    limit: int = Query(50, ge=1, le=200, description="查询条数"),
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
+):
+    """我的评价历史(P1-15: service 已实现, 补齐路由暴露)"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        return await _service.list_my_reviews(str(member_id), limit)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
 @router.get("/reviews/reports")
 async def list_reports(
     status: str | None = Query(None, description="状态筛选 pending/confirmed/rejected"),

@@ -448,6 +448,26 @@ class TestActivate:
                result["rewardPoints"] == ACTIVATION_REWARD_POINTS,
                f"expected {ACTIVATION_REWARD_POINTS}, got {result['rewardPoints']}")
 
+        # test 30b: 激活奖励真实发放(P1-18: 调用积分模块入账)
+        record("test_30b_reward_actually_granted",
+               result["rewardGranted"] is True and result["rewardLogId"]
+               and result["pointsBalance"] >= ACTIVATION_REWARD_POINTS,
+               f"granted={result.get('rewardGranted')}, "
+               f"logId={result.get('rewardLogId')}, "
+               f"balance={result.get('pointsBalance')}")
+
+        # test 30c: 积分账户有对应流水(source=activation)
+        from services.points_service import PointsService
+        from repositories.points_repository import SOURCE_ACTIVATION
+        logs = await PointsService().list_logs(
+            USER_ID_1, source=SOURCE_ACTIVATION)
+        record("test_30c_reward_log_in_points",
+               len(logs) == 1 and logs[0]["points"] == ACTIVATION_REWARD_POINTS
+               and logs[0]["refId"] == life_code,
+               f"expected 1 log/{ACTIVATION_REWARD_POINTS}/{life_code}, "
+               f"got {len(logs)}/{logs[0]['points'] if logs else 0}/"
+               f"{logs[0].get('refId') if logs else None}")
+
         # test 31: 重复激活(冲突)
         try:
             await svc.activate_life_code(life_code, USER_ID_1)

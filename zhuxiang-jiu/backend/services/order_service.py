@@ -20,6 +20,7 @@
 """
 
 from datetime import datetime
+import logging
 
 from core.helpers import ts
 from core.locks import get_lock
@@ -27,6 +28,10 @@ from core.age_gate import is_adult, MINOR_REJECT_MSG, AGE_CONFIRM_REQUIRED_MSG
 from repositories.inventory_repository import InventoryRepository
 from repositories.member_repository import MemberRepository
 from repositories.order_repository import OrderRepository
+from repositories.points_repository import SOURCE_REFUND, SOURCE_REVIEW
+from services.points_service import PointsService
+
+logger = logging.getLogger("order_service")
 
 
 # ============================================================
@@ -255,18 +260,25 @@ class OrderService:
             logs.append({"step": "价格计算", "level": "INFO",
                          "msg": f"商品 ¥{price_detail['goodsTotal']}, 实付 ¥{price_detail['actualAmount']}"})
 
-            # 4. 积分抵扣(冻结)
+            # 5. 生成订单号(先于积分抵扣, 抵扣流水需引用订单号)
+            order_id = _gen_order_id()
+            logs.append({"step": "创建订单", "level": "INFO", "msg": f"订单号 {order_id}"})
+
+            # 4. 积分抵扣(P1-19: 统一走积分模块账本, 含 100 起用/整数倍/30% 上限校验)
             if use_points > 0:
                 if use_points % POINTS_PER_YUAN != 0:
                     raise ValueError(f"积分须为 {POINTS_PER_YUAN} 的整数倍")
-                left_points = await self.member_repo.add_points(member_id, -use_points)
+                # 抵扣上限基准 = 会员折后+券后金额(与 _calc_price 口径一致)
+                deduct_base = (price_detail["goodsTotal"]
+                               + price_detail["memberDiscount"]
+                               + price_detail["couponDiscount"])
+                deduct_result = await PointsService().deduct_points(
+                    user_id=member_id, order_id=order_id,
+                    order_amount=deduct_base, deduct_points=use_points)
                 points_value = use_points / POINTS_PER_YUAN
                 logs.append({"step": "积分抵扣", "level": "INFO",
-                              "msg": f"扣除 {use_points} 竹叶(¥{points_value:.2f}), 剩余 {left_points}"})
-
-            # 5. 生成订单号
-            order_id = _gen_order_id()
-            logs.append({"step": "创建订单", "level": "INFO", "msg": f"订单号 {order_id}"})
+                              "msg": f"扣除 {use_points} 竹叶(¥{points_value:.2f}), "
+                                     f"剩余 {deduct_result.get('balance')}"})
 
             # 6. 保存订单
             now = ts()
@@ -384,18 +396,30 @@ class OrderService:
             now = ts()
             actual_amount = order["priceDetail"]["actualAmount"]
 
-            # 会员消费(增加成长值 + 积分)
-            # 成长值 = 实付金额(整数), 积分 = 实付金额(整数)
+            # 会员消费(成长值走 member 表, 返分走积分模块账本 P1-19)
+            # 成长值 = 实付金额(整数); 返分 = 实付 × 1.5 × 等级倍数(D-5 决策口径)
             consume_amount = int(actual_amount)
+            earned_points = 0
             if consume_amount > 0:
                 member = await self.member_repo.get_by_id(order["memberId"])
                 if member:
                     new_growth = await self.member_repo.add_growth(
                         order["memberId"], consume_amount)
-                    new_points = await self.member_repo.add_points(
-                        order["memberId"], consume_amount)
+                    # 消费返分 best-effort: 触达日/月/单笔上限不阻断支付主流程
+                    try:
+                        earn_result = await PointsService().earn_order_points(
+                            user_id=order["memberId"], order_id=order_id,
+                            order_amount=actual_amount,
+                            member_level=member.get("level", 1))
+                        earned_points = earn_result.get("earnedPoints", 0)
+                    except ValueError as exc:
+                        logger.warning("order_earn_points_skipped order=%s "
+                                       "err=%s", order_id, exc)
+                        logs.append({"step": "返分受限", "level": "WARN",
+                                     "msg": f"消费返分未发放: {exc}"})
                     logs.append({"step": "会员消费", "level": "INFO",
-                                 "msg": f"+{consume_amount} 成长值(累计 {new_growth}), +{consume_amount} 积分(累计 {new_points})"})
+                                 "msg": f"+{consume_amount} 成长值(累计 {new_growth}), "
+                                        f"+{earned_points} 竹叶"})
 
             # 更新订单
             order["status"] = PAID
@@ -404,7 +428,7 @@ class OrderService:
                 "tradeNo": _gen_trade_no(),
                 "paidAt": now,
             }
-            order["consumedPoints"] = consume_amount
+            order["consumedPoints"] = earned_points
             order["timeline"].append({"status": PAID, "time": now, "action": "支付成功"})
             order["updatedAt"] = now
             await self.order_repo.save(order_id, order)
@@ -416,7 +440,7 @@ class OrderService:
                 "status": PAID,
                 "statusName": STATUS_CN[PAID],
                 "payment": order["payment"],
-                "consumedPoints": consume_amount,
+                "consumedPoints": earned_points,
                 "logs": logs,
             }
 
@@ -443,13 +467,16 @@ class OrderService:
                 logs.append({"step": "释放库存", "level": "INFO",
                              "msg": f"{pid} +{qty}, 剩余 {new_stock}"})
 
-            # 退还冻结积分
+            # 退还冻结积分(P1-19: 积分模块账本)
             used_points = order.get("usedPoints", 0)
             if used_points > 0:
-                left_points = await self.member_repo.add_points(
-                    order["memberId"], used_points)
+                refund_result = await PointsService().earn_points(
+                    user_id=order["memberId"], points=used_points,
+                    source=SOURCE_REFUND, ref_id=order_id,
+                    ref_desc=f"取消订单退还抵扣积分({used_points}竹叶)")
                 logs.append({"step": "退还积分", "level": "INFO",
-                             "msg": f"+{used_points} 竹叶, 剩余 {left_points}"})
+                             "msg": f"+{used_points} 竹叶, "
+                                    f"剩余 {refund_result.get('balance')}"})
 
             order["status"] = CANCELLED
             order["timeline"].append({"status": CANCELLED, "time": now,
@@ -546,12 +573,15 @@ class OrderService:
             logs = []
             now = ts()
 
-            # 评价返积分(5星返100, 4星返50, 其他返20)
+            # 评价返积分(5星返100, 4星返50, 其他返20; P1-19: 积分模块账本)
             reward_points = {5: 100, 4: 50}.get(rating, 20)
-            left_points = await self.member_repo.add_points(
-                order["memberId"], reward_points)
+            earn_result = await PointsService().earn_points(
+                user_id=order["memberId"], points=reward_points,
+                source=SOURCE_REVIEW, ref_id=order_id,
+                ref_desc=f"订单评价返分({rating}星)")
             logs.append({"step": "评价奖励", "level": "INFO",
-                         "msg": f"+{reward_points} 竹叶(累计 {left_points})"})
+                         "msg": f"+{reward_points} 竹叶"
+                                f"(余额 {earn_result.get('balance')})"})
 
             order["status"] = COMPLETED
             order["review"] = {
@@ -707,27 +737,30 @@ class OrderService:
                 logs.append({"step": "退货入库", "level": "INFO",
                              "msg": f"{pid} +{qty}, 剩余 {new_stock}"})
 
-            # 扣回消费赠送的积分
+            # 扣回消费赠送的积分(P1-19: 积分模块账本, 不足扣到 0)
             consumed_points = order.get("consumedPoints", 0)
             if consumed_points > 0:
-                # 扣回时可能积分不足, 用 try 兜底(允许扣成负数? 不, add_points 会抛 ValueError)
-                # 退款应强制扣回, 用 deduct 逻辑
                 try:
-                    left_points = await self.member_repo.add_points(
-                        order["memberId"], -consumed_points)
+                    clawback = await PointsService().refund_points(
+                        user_id=order["memberId"], order_id=order_id,
+                        refund_points=consumed_points)
                     logs.append({"step": "扣回积分", "level": "WARN",
-                                 "msg": f"-{consumed_points} 竹叶(累计 {left_points})"})
-                except ValueError:
+                                 "msg": f"-{clawback.get('actualRefund', consumed_points)} "
+                                        f"竹叶(余额 {clawback.get('remainingPoints')})"})
+                except ValueError as exc:
                     logs.append({"step": "扣回积分", "level": "ERROR",
-                                 "msg": f"积分不足扣回 {consumed_points}, 跳过"})
+                                 "msg": f"积分扣回异常: {exc}, 跳过"})
 
-            # 退还抵扣积分
+            # 退还抵扣积分(P1-19: 积分模块账本)
             used_points = order.get("usedPoints", 0)
             if used_points > 0:
-                left_points = await self.member_repo.add_points(
-                    order["memberId"], used_points)
+                refund_result = await PointsService().earn_points(
+                    user_id=order["memberId"], points=used_points,
+                    source=SOURCE_REFUND, ref_id=order_id,
+                    ref_desc=f"退款退还抵扣积分({used_points}竹叶)")
                 logs.append({"step": "退还抵扣积分", "level": "INFO",
-                             "msg": f"+{used_points} 竹叶(累计 {left_points})"})
+                             "msg": f"+{used_points} 竹叶, "
+                                    f"剩余 {refund_result.get('balance')}"})
 
             order["status"] = REFUNDED
             order["refund"]["refundedAt"] = now
@@ -790,13 +823,16 @@ class OrderService:
                 logs.append({"step": "释放库存", "level": "INFO",
                              "msg": f"{pid} +{qty}, 剩余 {new_stock}"})
 
-            # 退还冻结积分
+            # 退还冻结积分(P1-19: 积分模块账本)
             used_points = order.get("usedPoints", 0)
             if used_points > 0:
-                left_points = await self.member_repo.add_points(
-                    order["memberId"], used_points)
+                refund_result = await PointsService().earn_points(
+                    user_id=order["memberId"], points=used_points,
+                    source=SOURCE_REFUND, ref_id=order_id,
+                    ref_desc=f"超时关闭退还抵扣积分({used_points}竹叶)")
                 logs.append({"step": "退还积分", "level": "INFO",
-                             "msg": f"+{used_points} 竹叶, 剩余 {left_points}"})
+                             "msg": f"+{used_points} 竹叶, "
+                                    f"剩余 {refund_result.get('balance')}"})
 
             order["status"] = CLOSED
             order["timeline"].append({"status": CLOSED, "time": now,
@@ -856,12 +892,15 @@ class OrderService:
             logs = []
             now = ts()
 
-            # 默认五星评价, 返还 100 积分
+            # 默认五星评价, 返还 100 积分(P1-19: 积分模块账本)
             reward_points = 100
-            left_points = await self.member_repo.add_points(
-                order["memberId"], reward_points)
+            earn_result = await PointsService().earn_points(
+                user_id=order["memberId"], points=reward_points,
+                source=SOURCE_REVIEW, ref_id=order_id,
+                ref_desc="订单超时自动完成返分(默认五星)")
             logs.append({"step": "评价奖励", "level": "INFO",
-                         "msg": f"+{reward_points} 竹叶(累计 {left_points})"})
+                         "msg": f"+{reward_points} 竹叶"
+                                f"(余额 {earn_result.get('balance')})"})
 
             order["status"] = COMPLETED
             order["review"] = {

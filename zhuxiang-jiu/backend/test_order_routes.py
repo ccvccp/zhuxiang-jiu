@@ -91,6 +91,23 @@ async def _create(client, member_id=1, use_points=0, items=None):
     return resp.json()["orderId"]
 
 
+async def _points_balance(client, user_id=1) -> int:
+    """查询积分模块账本余额(P1-19: 订单积分统一走积分账本)"""
+    resp = await client.get(f"/api/points/account/{user_id}")
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]["totalPoints"]
+
+
+async def _migrate_legacy_points(client, member_id=1) -> dict:
+    """管理端迁移 member.points 遗留积分到积分账本(P1-19)"""
+    resp = await client.post(
+        "/api/points/admin/migrate-legacy",
+        json={"memberId": member_id}, headers=ADMIN_HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]
+
+
 async def _pay(client, order_id):
     resp = await client.post(
         f"/api/order/{order_id}/pay", json={}, headers=MEMBER_HEADERS,
@@ -439,11 +456,14 @@ class TestOrderPay:
         data = resp.json()
         assert data["success"] is True
         assert data["status"] == "PAID"
-        assert data["consumedPoints"] == 536
+        # P1-19: 返分走积分账本, ¥536 × 1.5 × 1.0(L1) = 804
+        assert data["consumedPoints"] == 804
         assert data["payment"]["method"] == "wechat"
-        # 会员成长值 +536, 积分 100+536=636
+        # 成长值仍走 member 表 +536; member.points 不再变动(遗留字段)
         assert _mock_store["members"][1]["growth_value"] == 536
-        assert _mock_store["members"][1]["points"] == 636
+        assert _mock_store["members"][1]["points"] == 100
+        # 积分账本余额 = 804(消费返分)
+        assert await _points_balance(client) == 804
 
     async def test_pay_wrong_status(self, client):
         order_id = await _create(client)
@@ -485,10 +505,14 @@ class TestOrderCancel:
         assert data["statusName"] == "已取消"
 
     async def test_cancel_releases_stock_and_refunds_points(self, client):
-        # 用 100 积分下单 → 库存 -2, 积分 -100; 取消后双双恢复
+        # P1-19: 先迁移 member.points=100 遗留积分到积分账本
+        migration = await _migrate_legacy_points(client)
+        assert migration["migrated"] is True
+        assert _mock_store["members"][1]["points"] == 0  # 迁移后清零
+        # 用 100 积分下单 → 库存 -2, 积分账本 -100; 取消后双双恢复
         order_id = await _create(client, use_points=100)
         assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 498
-        assert _mock_store["members"][1]["points"] == 0
+        assert await _points_balance(client) == 0
         resp = await client.post(
             f"/api/order/{order_id}/cancel",
             json={"reason": "用户取消"}, headers=MEMBER_HEADERS,
@@ -496,8 +520,21 @@ class TestOrderCancel:
         assert resp.status_code == 200
         # 库存回补 498 → 500
         assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
-        # 积分退还 0 → 100
-        assert _mock_store["members"][1]["points"] == 100
+        # 积分账本退还 0 → 100(走积分模块, 不回写 member 表)
+        assert await _points_balance(client) == 100
+        assert _mock_store["members"][1]["points"] == 0
+
+    async def test_cancel_migrate_legacy_idempotent(self, client):
+        """P1-19: 遗留积分迁移幂等(重复迁移跳过且不再清零)"""
+        first = await _migrate_legacy_points(client)
+        assert first["migrated"] is True
+        # 迁移后再给 member.points 充值, 重复迁移应跳过(already_migrated)
+        _mock_store["members"][1]["points"] = 50
+        second = await _migrate_legacy_points(client)
+        assert second["migrated"] is False
+        assert second["reason"] == "already_migrated"
+        assert _mock_store["members"][1]["points"] == 50  # 未清零
+        assert await _points_balance(client) == 100
 
     async def test_cancel_wrong_status(self, client):
         order_id = await _create(client)
@@ -593,8 +630,9 @@ class TestOrderReview:
         data = resp.json()
         assert data["status"] == "COMPLETED"
         assert data["rewardPoints"] == 100  # 5 星返 100
-        # 积分 636(支付后) + 100(评价奖励) = 736
-        assert _mock_store["members"][1]["points"] == 736
+        # P1-19: 积分账本 804(支付返分) + 100(评价奖励) = 904; member.points 不变
+        assert await _points_balance(client) == 904
+        assert _mock_store["members"][1]["points"] == 100
 
     async def test_review_invalid_rating(self, client):
         order_id = await _create(client)
@@ -652,9 +690,9 @@ class TestOrderRefund:
     async def test_refund_success(self, client):
         order_id = await _create(client)
         await _to_returning(client, order_id)
-        # 退款前: 库存 498(下单扣 2), 积分 736(支付+536, 评价+100)
+        # 退款前: 库存 498(下单扣 2), 积分账本 904(支付返 804 + 评价 100)
         assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 498
-        assert _mock_store["members"][1]["points"] == 736
+        assert await _points_balance(client) == 904
         resp = await client.post(
             f"/api/order/{order_id}/refund", headers=ADMIN_HEADERS,
         )
@@ -664,8 +702,8 @@ class TestOrderRefund:
         assert data["refundedAmount"] == 536.0
         # 库存回滚 498 → 500
         assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
-        # 积分扣回 consumedPoints=536: 736 - 536 = 200
-        assert _mock_store["members"][1]["points"] == 200
+        # P1-19: 积分账本扣回 consumedPoints=804: 904 - 804 = 100
+        assert await _points_balance(client) == 100
 
     async def test_refund_wrong_status(self, client):
         order_id = await _create(client)  # PENDING, 非 RETURNING
@@ -948,6 +986,7 @@ class TestOrderFullFlow:
         )
         assert r.json()["status"] == "REFUNDED"
 
-        # 库存回滚 + 积分扣回
+        # 库存回滚 + 积分账本扣回(P1-19: 904 - 804 = 100, member.points 不变)
         assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
-        assert _mock_store["members"][1]["points"] == 200
+        assert await _points_balance(client) == 100
+        assert _mock_store["members"][1]["points"] == 100

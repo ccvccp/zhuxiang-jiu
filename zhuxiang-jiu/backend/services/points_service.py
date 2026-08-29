@@ -26,7 +26,8 @@ from core.locks import get_lock
 from repositories.points_repository import (
     PointsRepository,
     # 流水类型
-    LOG_TYPE_EARN, LOG_TYPE_SPEND, SOURCE_CHECKIN, SOURCE_ORDER, SOURCE_REFUND, SOURCE_EXPIRE, SOURCE_DEDUCT,
+    LOG_TYPE_EARN, LOG_TYPE_SPEND, SOURCE_CHECKIN, SOURCE_ORDER, SOURCE_REFUND,
+    SOURCE_EXPIRE, SOURCE_DEDUCT, SOURCE_CREDIT, SOURCE_REVIEW,
     # 流水状态
     LOG_STATUS_AVAILABLE, LOG_STATUS_EXPIRED, LOG_STATUS_CONSUMED,
     # 过期批次状态
@@ -44,16 +45,38 @@ POINTS_PER_YUAN = 100
 MAX_DEDUCT_RATIO = 0.30
 # 积分有效期: 24个月
 EXPIRE_MONTHS = 24
-# 签到基础积分
-SIGNIN_BASE_POINTS = 10
-# 连续签到每日递增
-SIGNIN_DAILY_BONUS = 5
-# 连续签到上限天数(超过不再递增)
-SIGNIN_BONUS_CAP = 7
-# 签到宝箱奖励(第7/14/21/28天)
-SIGNIN_BONUS_DAYS = {7, 14, 21, 28}
-SIGNIN_BONUS_POINTS = 50
-# 消费返分比例: 每消费¥1返1.5竹叶
+# 签到分段递增+宝箱(设计文档 3.2.2, 2026-08-29 决策 D-5 以文档为准):
+# 第1-6天+10/天 | 第7天宝箱+50 | 第8-13天+15/天 | 第14天宝箱+80
+# 第15-20天+20/天 | 第21天宝箱+100 | 第22-29天+25/天 | 第30天大宝箱+200
+# (第30天专属优惠券待优惠券系统落地后接入, 见排期 P1)
+SIGNIN_TIERS = (
+    (6, 10),     # 第1-6天
+    (7, 50),     # 第7天 宝箱
+    (13, 15),    # 第8-13天
+    (14, 80),    # 第14天 宝箱
+    (20, 20),    # 第15-20天
+    (21, 100),   # 第21天 宝箱
+    (29, 25),    # 第22-29天
+    (30, 200),   # 第30天 大宝箱
+)
+SIGNIN_BONUS_DAYS = {7, 14, 21, 30}
+# 连签超过30天后: 维持+25/天, 无宝箱
+SIGNIN_POINTS_AFTER_30 = 25
+
+
+def calculate_signin_points(continuous_days: int) -> tuple[int, bool]:
+    """按连签天数计算签到积分(分段递增+宝箱)
+
+    Returns:
+        (获得积分, 是否宝箱日)
+    """
+    for boundary, points in SIGNIN_TIERS:
+        if continuous_days <= boundary:
+            return points, continuous_days in SIGNIN_BONUS_DAYS
+    return SIGNIN_POINTS_AFTER_30, False
+
+
+# 消费返分比例: 每消费¥1返1.5竹叶(2026-08-29 决策 D-5 以代码为准)
 EARN_RATE_PER_YUAN = 1.5
 # 等级加成倍数
 LEVEL_MULTIPLIERS = {
@@ -63,10 +86,12 @@ LEVEL_MULTIPLIERS = {
     4: 2.0,   # 白金
     5: 3.0,   # SVIP
 }
-# 每日获取上限
-DAILY_EARN_LIMIT = 500
-# 每月获取上限
-MONTHLY_EARN_LIMIT = 5000
+# 每日获取上限(2026-08-29 决策 D-5 以文档为准)
+DAILY_EARN_LIMIT = 10000
+# 每月获取上限(2026-08-29 决策 D-5 以文档为准)
+MONTHLY_EARN_LIMIT = 50000
+# 单笔订单返分上限(文档 4.3 防大额刷分)
+PER_ORDER_EARN_LIMIT = 5000
 # 最低抵扣单位
 MIN_DEDUCT_POINTS = 100
 
@@ -82,12 +107,14 @@ class PointsService:
     # ============================================================
 
     async def signin(self, user_id: int) -> dict:
-        """每日签到(含连续签到+宝箱奖励+幂等防重)
+        """每日签到(分段递增+宝箱奖励+幂等防重)
 
-        规则:
-            - 基础积分: 10 竹叶
-            - 连续递增: 第N天额外 +5×min(N-1, 6) 竹叶
-            - 宝箱奖励: 第7/14/21/28天额外 +50 竹叶
+        规则(设计文档 3.2.2, 决策 D-5 以文档为准):
+            - 第1-6天 +10/天, 第7天宝箱+50
+            - 第8-13天 +15/天, 第14天宝箱+80
+            - 第15-20天 +20/天, 第21天宝箱+100
+            - 第22-29天 +25/天, 第30天大宝箱+200
+            - 超过30天维持 +25/天
 
         Returns:
             签到结果(含获得积分/连续天数/是否宝箱)
@@ -110,12 +137,8 @@ class PointsService:
             last_signin = await self.repo.get_signin(user_id, yesterday)
             continuous_days = last_signin.get("continuousDays", 0) + 1 if last_signin else 1
 
-            # 计算获得积分
-            bonus_days = min(continuous_days - 1, SIGNIN_BONUS_CAP - 1)
-            points_earned = SIGNIN_BASE_POINTS + SIGNIN_DAILY_BONUS * bonus_days
-            is_bonus = continuous_days in SIGNIN_BONUS_DAYS
-            if is_bonus:
-                points_earned += SIGNIN_BONUS_POINTS
+            # 计算获得积分(分段递增+宝箱)
+            points_earned, is_bonus = calculate_signin_points(continuous_days)
 
             # 写入签到记录
             signin_record = {
@@ -143,7 +166,7 @@ class PointsService:
                 "continuousDays": continuous_days,
                 "pointsEarned": points_earned,
                 "isBonus": is_bonus,
-                "bonusPoints": SIGNIN_BONUS_POINTS if is_bonus else 0,
+                "bonusPoints": points_earned if is_bonus else 0,
             }
 
     async def get_signin_records(self, user_id: int, limit: int = 30) -> list[dict]:
@@ -158,11 +181,12 @@ class PointsService:
                                  order_amount: float, member_level: int = 1) -> dict:
         """订单完成消费返分
 
-        规则:
+        规则(决策 D-5: 返分率以代码为准, 上限以文档为准):
             - 基础返分: order_amount × 1.5
             - 等级加成: × 等级倍数
-            - 每日上限: 500 竹叶
-            - 每月上限: 5000 竹叶
+            - 单笔上限: 5000 竹叶(超出截断)
+            - 每日上限: 10000 竹叶
+            - 每月上限: 50000 竹叶
 
         Returns:
             返分结果(含获得积分/加成倍数)
@@ -182,6 +206,11 @@ class PointsService:
 
             if earned_points <= 0:
                 raise ValueError("订单金额不足, 无法获得积分")
+
+            # 单笔订单上限(超出截断, 防大额刷分)
+            capped_by_order = earned_points > PER_ORDER_EARN_LIMIT
+            if capped_by_order:
+                earned_points = PER_ORDER_EARN_LIMIT
 
             # 检查每日/每月上限
             today = date.today()
@@ -207,7 +236,8 @@ class PointsService:
                 points=earned_points,
                 source=SOURCE_ORDER,
                 ref_id=order_id,
-                ref_desc=f"订单消费返分(¥{order_amount:.2f} × {EARN_RATE_PER_YUAN} × {multiplier})",
+                ref_desc=f"订单消费返分(¥{order_amount:.2f} × {EARN_RATE_PER_YUAN} × {multiplier})"
+                        + (f", 单笔上限截断至{PER_ORDER_EARN_LIMIT}" if capped_by_order else ""),
             )
 
             return {
@@ -218,6 +248,7 @@ class PointsService:
                 "basePoints": base_points,
                 "multiplier": multiplier,
                 "earnedPoints": earned_points,
+                "cappedByOrder": capped_by_order,
             }
 
     # ============================================================
@@ -258,7 +289,8 @@ class PointsService:
         async with get_lock(lock_key):
             account = await self.repo.get_account(user_id)
             if account is None:
-                raise KeyError(f"积分账户不存在(userId={user_id})")
+                # 无账户视为余额 0(与"积分不足"同语义, 统一 409)
+                raise ValueError(f"积分不足(可用0, 需{deduct_points})")
 
             available = account.get("totalPoints", 0)
             if available < deduct_points:
@@ -447,6 +479,68 @@ class PointsService:
     # ============================================================
     # 6. 查询统计
     # ============================================================
+
+    async def earn_points(self, user_id: int, points: int, source: str,
+                          ref_id: str = None, ref_desc: str = "") -> dict:
+        """通用积分发放(供跨模块调用: 生命码激活奖励等)
+
+        与 earn_order_points 不同, 本方法不设上限校验(调用方负责额度控制),
+        幂等性由调用方业务锁保证(如生命码激活锁)。
+
+        Returns:
+            发放结果(含流水ID/最新余额)
+        """
+        if points <= 0:
+            raise ValueError("发放积分须为正数")
+        async with get_lock(f"points:account:{user_id}"):
+            log_id = await self._earn_points(
+                user_id=user_id,
+                points=points,
+                source=source,
+                ref_id=ref_id,
+                ref_desc=ref_desc,
+            )
+            account = await self.repo.get_account(user_id)
+            return {
+                "logId": log_id,
+                "points": points,
+                "balance": account.get("totalPoints", 0) if account else points,
+            }
+
+    async def migrate_legacy_points(self, member_id: int,
+                                    legacy_points: int) -> dict:
+        """member 表遗留积分一次性迁移到积分账本(P1-19)
+
+        幂等: 以 source=credit + refId=legacy:{member_id} 流水为迁移标记,
+        已迁移过则跳过, 重复调用安全。
+
+        Returns:
+            迁移结果(migrated=False 时含原因)
+        """
+        if legacy_points <= 0:
+            return {"migrated": False, "reason": "no_legacy_points",
+                    "legacyPoints": legacy_points}
+        marker = f"legacy:{member_id}"
+        async with get_lock(f"points:account:{member_id}"):
+            existing = await self.repo.list_logs(
+                member_id, source=SOURCE_CREDIT, limit=100)
+            if any(l.get("refId") == marker for l in existing):
+                return {"migrated": False, "reason": "already_migrated",
+                        "legacyPoints": legacy_points}
+            log_id = await self._earn_points(
+                user_id=member_id,
+                points=legacy_points,
+                source=SOURCE_CREDIT,
+                ref_id=marker,
+                ref_desc="历史积分一次性迁移(member.points → 积分账本, P1-19)",
+            )
+            return {
+                "migrated": True,
+                "logId": log_id,
+                "legacyPoints": legacy_points,
+                "balance": (await self.repo.get_account(member_id)
+                            or {}).get("totalPoints", legacy_points),
+            }
 
     async def get_account(self, user_id: int) -> dict:
         """查询积分账户(不存在则创建)"""

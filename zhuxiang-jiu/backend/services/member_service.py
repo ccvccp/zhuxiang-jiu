@@ -12,8 +12,9 @@
     L4 竹海 VIP: 成长值 6999+
     L5 竹海 SVIP: 成长值 9999+ 或付费开通
 
-积分规则:
-    注册 +100, 每日登录 +5, 消费每 1 元 +1
+积分规则(P1-20: 统一走积分模块账本, member.points 为遗留只读字段):
+    注册 +100(source=register), 每日登录 +5(source=login),
+    消费返分/抵扣/退款由积分模块与订单模块按 D-5 口径处理
     100 竹叶 = ¥1 抵扣(下单时, 抵扣上限 30%)
 """
 
@@ -25,6 +26,8 @@ from datetime import datetime, UTC
 from core.locks import get_lock
 from core.age_gate import is_adult
 from repositories.member_repository import MemberRepository
+from repositories.points_repository import SOURCE_LOGIN, SOURCE_REGISTER
+from services.points_service import PointsService
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +48,9 @@ LEVEL_NAMES = {
     5: "竹海 SVIP",
 }
 
-# 积分常量
+# 积分常量(P1-20: 积分统一走积分模块账本, 此处仅保留入口常量)
 POINTS_REGISTER = 100       # 注册赠送
 POINTS_DAILY_LOGIN = 5      # 每日登录
-POINTS_PER_YUAN = 1         # 每消费 1 元 +1 积分
 POINTS_TO_YUAN = 100        # 100 竹叶 = 1 元
 
 
@@ -130,7 +132,7 @@ class MemberService:
                 "gender": 0,
                 "level": 1,
                 "growth_value": 0,
-                "points": POINTS_REGISTER,  # 注册赠送 100 积分
+                "points": 0,  # 遗留字段(P1-20: 积分统一走积分模块账本)
                 "status": 1,
                 "reg_source": reg_source,
                 # 酒类合规年龄声明(P0-1)
@@ -143,6 +145,12 @@ class MemberService:
             member = await self.member_repo.create(member_data)
             logger.info("register_success member_id=%r phone=%s", member["id"], phone)
 
+            # 注册赠送积分(P1-20: 走积分模块账本)
+            register_earn = await PointsService().earn_points(
+                user_id=member["id"], points=POINTS_REGISTER,
+                source=SOURCE_REGISTER, ref_id=str(member["id"]),
+                ref_desc="注册赠送")
+
             return {
                 "success": True,
                 "memberId": member["id"],
@@ -150,7 +158,7 @@ class MemberService:
                 "nickname": member["nickname"],
                 "level": 1,
                 "levelName": LEVEL_NAMES[1],
-                "points": member["points"],
+                "points": register_earn.get("balance", POINTS_REGISTER),
                 "ageConfirmed": member.get("ageConfirmed", False),
                 "ageVerified": member.get("ageVerified", False),
                 "token": _generate_token(member["id"]),
@@ -185,6 +193,9 @@ class MemberService:
         await self.member_repo.update_fields(member["id"], {"last_login_at": _now_iso()})
         logger.info("login_success member_id=%r phone=%s", member["id"], phone)
 
+        # P1-20: 积分余额读积分模块账本
+        points_account = await PointsService().get_account(member["id"])
+
         return {
             "success": True,
             "memberId": member["id"],
@@ -192,13 +203,16 @@ class MemberService:
             "nickname": member["nickname"],
             "level": member.get("level", 1),
             "levelName": LEVEL_NAMES.get(member.get("level", 1), "竹芽会员"),
-            "points": member.get("points", 0),
+            "points": points_account.get("totalPoints", 0),
             "token": _generate_token(member["id"]),
             "logs": [{"step": "登录", "level": "INFO", "msg": f"欢迎回来, {member['nickname']}"}],
         }
 
     async def daily_login_bonus(self, member_id) -> dict:
         """每日登录奖励(+5 积分, Mock 模式不校验当日是否已领)
+
+        P1-20: 积分入账走积分模块账本(source=login);
+        与积分模块每日签到(+10, 幂等)功能相近, 合并与否待业务决策。
 
         Raises:
             KeyError: 会员不存在
@@ -207,13 +221,16 @@ class MemberService:
             member = await self.member_repo.get_by_id(member_id)
             if not member:
                 raise KeyError(f"会员 {member_id} 不存在")
-            new_points = await self.member_repo.add_points(member_id, POINTS_DAILY_LOGIN)
+            earn = await PointsService().earn_points(
+                user_id=member_id, points=POINTS_DAILY_LOGIN,
+                source=SOURCE_LOGIN, ref_id=str(member_id),
+                ref_desc="每日登录奖励")
             logger.info("daily_login_bonus member_id=%r +%d points", member_id, POINTS_DAILY_LOGIN)
             return {
                 "success": True,
                 "memberId": member_id,
                 "addedPoints": POINTS_DAILY_LOGIN,
-                "totalPoints": new_points,
+                "totalPoints": earn.get("balance", 0),
                 "logs": [{"step": "每日登录", "level": "INFO",
                           "msg": f"获得 {POINTS_DAILY_LOGIN} 竹叶积分"}],
             }
@@ -321,7 +338,8 @@ class MemberService:
     async def consume(self, member_id, amount: float) -> dict:
         """消费:成长值累加 + 积分累加 + 自动升级判定
 
-        每消费 1 元: +1 成长值 + 1 积分
+        P1-20: 成长值走 member 表; 积分走积分模块账本
+        (每元 1.5 竹叶 × 等级倍数, D-5 口径, 含日/月/单笔上限)。
 
         Raises:
             KeyError: 会员不存在
@@ -336,12 +354,23 @@ class MemberService:
                 raise KeyError(f"会员 {member_id} 不存在")
 
             growth_add = int(amount)  # 每元 1 成长值
-            points_add = int(amount) * POINTS_PER_YUAN  # 每元 1 积分
 
             old_level = member.get("level", 1)
 
             new_growth = await self.member_repo.add_growth(member_id, growth_add)
-            new_points = await self.member_repo.add_points(member_id, points_add)
+
+            # 消费返分走积分账本(独立消费入口, 生成独立流水引用)
+            try:
+                earn = await PointsService().earn_order_points(
+                    user_id=member_id, order_id=f"CNS{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
+                    order_amount=amount, member_level=old_level)
+                points_add = earn.get("earnedPoints", 0)
+                account = await PointsService().get_account(member_id)
+                new_points = account.get("totalPoints", 0)
+            except ValueError:
+                # 触达上限不阻断消费主流程
+                new_points = 0
+                points_add = 0
 
             # 自动升级判定
             new_level = _calc_level(new_growth)
@@ -377,7 +406,7 @@ class MemberService:
     # ============================================================
 
     async def get_points(self, member_id) -> dict:
-        """查询积分
+        """查询积分(P1-20: 读积分模块账本)
 
         Raises:
             KeyError: 会员不存在
@@ -385,7 +414,8 @@ class MemberService:
         member = await self.member_repo.get_by_id(member_id)
         if not member:
             raise KeyError(f"会员 {member_id} 不存在")
-        points = member.get("points", 0)
+        account = await PointsService().get_account(member_id)
+        points = account.get("totalPoints", 0)
         return {
             "success": True,
             "memberId": member_id,
@@ -396,9 +426,10 @@ class MemberService:
         }
 
     async def deduct_points(self, member_id, points: int, order_amount: float = 0) -> dict:
-        """积分抵扣
+        """积分抵扣(P1-20: 代理积分模块 deduct_points, FIFO 消耗+30% 上限)
 
         规则: 100 竹叶 = ¥1, 抵扣上限为订单金额的 30%
+        (order_amount 缺省时视为无上限基准, 仅校验余额与整数倍)
 
         Raises:
             KeyError: 会员不存在
@@ -409,6 +440,10 @@ class MemberService:
         if points % POINTS_TO_YUAN != 0:
             raise ValueError(f"抵扣积分须为 {POINTS_TO_YUAN} 的整数倍")
 
+        member = await self.member_repo.get_by_id(member_id)
+        if not member:
+            raise KeyError(f"会员 {member_id} 不存在")
+
         deduct_amount = points / POINTS_TO_YUAN  # 抵扣金额
         if order_amount > 0:
             max_deduct = order_amount * 0.3  # 上限 30%
@@ -416,22 +451,24 @@ class MemberService:
                 raise ValueError(
                     f"抵扣金额 ¥{deduct_amount:.2f} 超过上限 ¥{max_deduct:.2f}(订单 30%)"
                 )
+        else:
+            # 无订单基准时仅按积分数抵扣: 用恰好等于上限的基准金额绕过 30% 校验
+            order_amount = points / 30
 
-        async with get_lock(f"member:{member_id}"):
-            member = await self.member_repo.get_by_id(member_id)
-            if not member:
-                raise KeyError(f"会员 {member_id} 不存在")
-            new_points = await self.member_repo.add_points(member_id, -points)
-            logger.info("points_deducted member_id=%r -%d (left %d)", member_id, points, new_points)
-            return {
-                "success": True,
-                "memberId": member_id,
-                "deductedPoints": points,
-                "leftPoints": new_points,
-                "deductAmount": round(deduct_amount, 2),
-                "logs": [{"step": "积分抵扣", "level": "INFO",
-                          "msg": f"扣除 {points} 竹叶, 抵扣 ¥{deduct_amount:.2f}"}],
-            }
+        result = await PointsService().deduct_points(
+            user_id=member_id, order_id=f"MD{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
+            order_amount=order_amount, deduct_points=points)
+        logger.info("points_deducted member_id=%r -%d (left %s)",
+                    member_id, points, result.get("balance"))
+        return {
+            "success": True,
+            "memberId": member_id,
+            "deductedPoints": result.get("deductPoints", points),
+            "leftPoints": result.get("balance", 0),
+            "deductAmount": round(deduct_amount, 2),
+            "logs": [{"step": "积分抵扣", "level": "INFO",
+                      "msg": f"扣除 {points} 竹叶, 抵扣 ¥{deduct_amount:.2f}"}],
+        }
 
     # ============================================================
     #  收货地址

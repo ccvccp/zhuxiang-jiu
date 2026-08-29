@@ -217,13 +217,29 @@ register_ai_scoring_auth_routes(app)
 
 
 # ============================================================
-#  生命周期管理: shutdown 时关闭 Redis 连接
+# 生命周期管理: startup 启动后台调度 / shutdown 时关闭 Redis 连接
 # ============================================================
+
+@app.on_event("startup")
+async def _on_startup():
+    """应用启动时拉起后台调度任务(幂等, 环境开关可控)"""
+    # AI 自学习调度(v7.6, AI_LEARNING_AUTO=off 可关闭)
+    from services.ai_learning_scheduler import start_scheduler as start_ai_learning
+    start_ai_learning()
+    # 订单超时自动处理(P1-13, ORDER_TIMEOUT_AUTO=off 可关闭)
+    from services.order_timeout_scheduler import start_scheduler as start_order_timeout
+    start_order_timeout()
+
 
 @app.on_event("shutdown")
 async def _on_shutdown():
     """应用关闭时清理资源(Redis 连接), 避免连接泄漏"""
     logger.info("应用关闭中, 清理 Redis 连接...")
+    # 停止后台调度任务
+    from services.ai_learning_scheduler import stop_scheduler as stop_ai_learning
+    from services.order_timeout_scheduler import stop_scheduler as stop_order_timeout
+    stop_ai_learning()
+    stop_order_timeout()
     await close_redis_client()
     logger.info("清理完成")
 
