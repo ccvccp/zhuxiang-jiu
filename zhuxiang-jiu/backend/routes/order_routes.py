@@ -280,14 +280,51 @@ async def ship_order(
 @router.post("/{order_id}/refund")
 async def refund_order(
     order_id: str,
+    body: dict = None,
     x_role: str = Header(default="", alias="X-Role"),
+    x_admin_id: str = Header(default="", alias="X-Admin-Id"),
 ):
-    """退款 RETURNING → REFUNDED(管理员)"""
+    """退款(审核通过)RETURNING → REFUNDED(管理员, P0-7)
+
+    Body(可选): {"auditor": "admin", "auditRemark": "同意全额退款"}
+    须先由用户 POST /{order_id}/return 发起申请(创建 pending 审核记录)。
+    """
     _require_admin(x_role)
+    body = body or {}
     try:
-        result = await _service.refund(order_id)
+        result = await _service.refund(
+            order_id,
+            auditor=body.get("auditor") or x_admin_id or "admin",
+            audit_remark=body.get("auditRemark", ""),
+        )
         # v7.6 自动反馈: 退款完成(风控误放行信号)
         await ai_hooks.on_order_outcome(order_id, "refunded")
+        return result
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/{order_id}/refund/audit")
+async def audit_refund(
+    order_id: str,
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+    x_admin_id: str = Header(default="", alias="X-Admin-Id"),
+):
+    """售后退款审核(P0-7: 管理员, 同意执行退款 / 拒绝回退 COMPLETED)
+
+    Body: {"approve": true/false, "auditRemark": "原因"}
+    """
+    _require_admin(x_role)
+    try:
+        result = await _service.audit_refund(
+            order_id,
+            approve=bool(body.get("approve", False)),
+            auditor=body.get("auditor") or x_admin_id or "admin",
+            audit_remark=body.get("auditRemark", ""),
+        )
+        if result.get("status") == "REFUNDED":
+            await ai_hooks.on_order_outcome(order_id, "refunded")
         return result
     except Exception as e:
         raise _handle(e) from e

@@ -580,7 +580,11 @@ class OrderService:
     # ============================================================
 
     async def apply_return(self, order_id: str, reason: str) -> dict:
-        """申请退货 COMPLETED → RETURNING"""
+        """申请退货 COMPLETED → RETURNING(进入退款审核流, P0-7)
+
+        对齐设计文档 9.2 售后流程与 order_aftersales 表:
+            申请(待审核 pending) → 管理员审核(同意→REFUNDED / 拒绝→回退 COMPLETED)
+        """
         async with get_lock(f"order:{order_id}"):
             order = await self.order_repo.get_by_id(order_id)
             if not order:
@@ -593,8 +597,16 @@ class OrderService:
             now = ts()
             order["status"] = RETURNING
             order["refund"]["reason"] = reason
+            # 售后审核记录(对齐文档 order_aftersales: 待审核/已同意/已拒绝)
+            order["refund"]["audit"] = {
+                "status": "pending",
+                "auditor": "",
+                "auditRemark": "",
+                "appliedAt": now,
+                "auditedAt": "",
+            }
             order["timeline"].append({"status": RETURNING, "time": now,
-                                      "action": f"申请退货: {reason}"})
+                                      "action": f"申请退货(待审核): {reason}"})
             order["updatedAt"] = now
             await self.order_repo.save(order_id, order)
 
@@ -603,12 +615,70 @@ class OrderService:
                 "orderId": order_id,
                 "status": RETURNING,
                 "statusName": STATUS_CN[RETURNING],
+                "auditStatus": "pending",
                 "logs": [{"step": "申请退货", "level": "WARN",
-                          "msg": f"原因: {reason}"}],
+                          "msg": f"原因: {reason}(进入退款审核流)"}],
             }
 
-    async def refund(self, order_id: str) -> dict:
-        """退款 RETURNING → REFUNDED(库存回滚 + 积分扣回)"""
+    async def audit_refund(self, order_id: str, approve: bool,
+                            auditor: str = "", audit_remark: str = "") -> dict:
+        """售后退款审核(P0-7: 管理员审核, 同意→执行退款 / 拒绝→回退)
+
+        对齐文档 9.2 Step2:
+            - 同意 → 进入退款执行(原路退回语义, 复用 refund 内部逻辑)
+            - 拒绝 → 说明原因, 订单回退 COMPLETED
+        """
+        if approve:
+            return await self.refund(order_id, auditor=auditor,
+                                     audit_remark=audit_remark)
+
+        async with get_lock(f"order:{order_id}"):
+            order = await self.order_repo.get_by_id(order_id)
+            if not order:
+                raise KeyError(f"订单 {order_id} 不存在")
+            if order["status"] != RETURNING:
+                raise ValueError(
+                    f"订单状态异常: 仅 {RETURNING} 可审核, 当前 {order['status']}"
+                )
+            audit = order["refund"].get("audit") or {}
+            if audit.get("status") != "pending":
+                raise ValueError(
+                    f"退款申请已审核过(status={audit.get('status')}), 不可重复审核")
+
+            now = ts()
+            audit.update({
+                "status": "rejected",
+                "auditor": auditor,
+                "auditRemark": audit_remark,
+                "auditedAt": now,
+            })
+            order["refund"]["audit"] = audit
+            # 拒绝后订单回退完成态(售后入口关闭前可再次申请)
+            order["status"] = COMPLETED
+            order["timeline"].append({"status": COMPLETED, "time": now,
+                                      "action": f"退款审核拒绝: {audit_remark}"})
+            order["updatedAt"] = now
+            await self.order_repo.save(order_id, order)
+
+            return {
+                "success": True,
+                "orderId": order_id,
+                "status": COMPLETED,
+                "statusName": STATUS_CN[COMPLETED],
+                "auditStatus": "rejected",
+                "auditor": auditor,
+                "auditRemark": audit_remark,
+                "logs": [{"step": "退款审核", "level": "WARN",
+                          "msg": f"已拒绝: {audit_remark}"}],
+            }
+
+    async def refund(self, order_id: str, auditor: str = "",
+                     audit_remark: str = "") -> dict:
+        """退款审核通过并执行 RETURNING → REFUNDED(库存回滚 + 积分扣回)
+
+        P0-7: refund 不再是无审核的直接执行——须存在 pending 审核申请
+        (apply_return 创建), 审核通过即执行; 执行记录含审核人/备注。
+        """
         async with get_lock(f"order:{order_id}"):
             order = await self.order_repo.get_by_id(order_id)
             if not order:
@@ -617,6 +687,12 @@ class OrderService:
                 raise ValueError(
                     f"订单状态异常: 仅 {RETURNING} 可退款, 当前 {order['status']}"
                 )
+            audit = order["refund"].get("audit") or {}
+            if audit.get("status") == "rejected":
+                raise ValueError("退款申请已被拒绝, 不可执行退款")
+            if audit and audit.get("status") != "pending":
+                raise ValueError(
+                    f"退款已执行过(audit={audit.get('status')}), 不可重复退款")
 
             logs = []
             now = ts()
@@ -656,8 +732,18 @@ class OrderService:
             order["status"] = REFUNDED
             order["refund"]["refundedAt"] = now
             order["refund"]["refundedAmount"] = refund_amount
+            # 审核通过记录(P0-7)
+            if audit:
+                audit.update({
+                    "status": "approved",
+                    "auditor": auditor,
+                    "auditRemark": audit_remark,
+                    "auditedAt": now,
+                })
+                order["refund"]["audit"] = audit
             order["timeline"].append({"status": REFUNDED, "time": now,
-                                      "action": f"退款 ¥{refund_amount:.2f}"})
+                                      "action": f"退款 ¥{refund_amount:.2f}"
+                                      f"(审核通过, 审核人: {auditor or 'admin'})"})
             order["updatedAt"] = now
             await self.order_repo.save(order_id, order)
             logs.append({"step": "退款完成", "level": "WARN",
@@ -669,6 +755,8 @@ class OrderService:
                 "status": REFUNDED,
                 "statusName": STATUS_CN[REFUNDED],
                 "refundedAmount": refund_amount,
+                "auditStatus": "approved" if audit else "",
+                "auditor": auditor,
                 "logs": logs,
             }
 

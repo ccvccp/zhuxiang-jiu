@@ -676,6 +676,123 @@ class TestOrderRefund:
 
 
 # ============================================================
+# 10b. 售后退款审核流(P0-7): apply(申请)→audit(同意/拒绝)
+# ============================================================
+
+class TestRefundAuditFlow:
+    """退款审核流: 申请产生 pending 记录 / 同意执行退款 / 拒绝回退 / 防重复"""
+
+    async def test_apply_return_creates_pending_audit(self, client):
+        """用户申请退货 → 产生 pending 审核记录"""
+        order_id = await _create(client)
+        await _to_completed(client, order_id)
+        resp = await client.post(
+            f"/api/order/{order_id}/return",
+            json={"reason": "质量问题"}, headers=MEMBER_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["auditStatus"] == "pending"
+        # 审核记录落库
+        order = _mock_store["orders_v2"][order_id] \
+            if order_id in _mock_store.get("orders_v2", {}) \
+            else next(o for o in _mock_store["orders"]
+                      if o["orderId"] == order_id)
+        assert order["refund"]["audit"]["status"] == "pending"
+
+    async def test_audit_approve_executes_refund(self, client):
+        """审核同意 → 执行退款(REFUNDED + approved 记录含审核人)"""
+        order_id = await _create(client)
+        await _to_completed(client, order_id)
+        await client.post(
+            f"/api/order/{order_id}/return",
+            json={"reason": "质量问题"}, headers=MEMBER_HEADERS,
+        )
+        resp = await client.post(
+            f"/api/order/{order_id}/refund/audit",
+            json={"approve": True, "auditRemark": "同意全额退款"},
+            headers={**ADMIN_HEADERS, "X-Admin-Id": "2"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["status"] == "REFUNDED"
+        assert data["auditStatus"] == "approved"
+        # 库存回滚
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
+
+    async def test_audit_reject_rolls_back(self, client):
+        """审核拒绝 → 订单回退 COMPLETED, 记录拒绝原因"""
+        order_id = await _create(client)
+        await _to_completed(client, order_id)
+        await client.post(
+            f"/api/order/{order_id}/return",
+            json={"reason": "不想要了"}, headers=MEMBER_HEADERS,
+        )
+        resp = await client.post(
+            f"/api/order/{order_id}/refund/audit",
+            json={"approve": False, "auditRemark": "超出售后窗口"},
+            headers=ADMIN_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "COMPLETED"
+        assert data["auditStatus"] == "rejected"
+        assert data["auditRemark"] == "超出售后窗口"
+        # 拒绝后不可再直接 refund
+        resp2 = await client.post(
+            f"/api/order/{order_id}/refund", headers=ADMIN_HEADERS,
+        )
+        assert resp2.status_code == 409
+
+    async def test_rejected_order_can_reapply(self, client):
+        """拒绝回退 COMPLETED 后可再次申请(新 pending)"""
+        order_id = await _create(client)
+        await _to_completed(client, order_id)
+        await client.post(
+            f"/api/order/{order_id}/return",
+            json={"reason": "不想要了"}, headers=MEMBER_HEADERS,
+        )
+        await client.post(
+            f"/api/order/{order_id}/refund/audit",
+            json={"approve": False, "auditRemark": "证据不足"},
+            headers=ADMIN_HEADERS,
+        )
+        resp = await client.post(
+            f"/api/order/{order_id}/return",
+            json={"reason": "补充凭证再申请"}, headers=MEMBER_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["auditStatus"] == "pending"
+
+    async def test_refund_after_refused_audit_blocked(self, client):
+        """拒绝后的订单直接 refund → 409(拒绝即终态该次申请)"""
+        order_id = await _create(client)
+        await _to_completed(client, order_id)
+        await client.post(
+            f"/api/order/{order_id}/return",
+            json={"reason": "x"}, headers=MEMBER_HEADERS,
+        )
+        await client.post(
+            f"/api/order/{order_id}/refund/audit",
+            json={"approve": False, "auditRemark": "拒绝"},
+            headers=ADMIN_HEADERS,
+        )
+        # 回退 COMPLETED 后 refund 必然因状态不符 409
+        resp = await client.post(
+            f"/api/order/{order_id}/refund", headers=ADMIN_HEADERS,
+        )
+        assert resp.status_code == 409
+
+    async def test_audit_requires_admin(self, client):
+        """审核端点需要管理员权限: 无头 → 403"""
+        order_id = await _create(client)
+        resp = await client.post(
+            f"/api/order/{order_id}/refund/audit",
+            json={"approve": True},
+        )
+        assert resp.status_code == 403
+
+
+# ============================================================
 # 11. 超时自动处理 (admin)
 # ============================================================
 
