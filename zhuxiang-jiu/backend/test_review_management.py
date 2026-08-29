@@ -527,6 +527,123 @@ class TestReviewHide(unittest.IsolatedAsyncioTestCase):
                 PID_CLASSIC_42, "rv_not_exist", is_hide=True)
 
 
+class TestReviewFixRegression(unittest.IsolatedAsyncioTestCase):
+    """评价模块 3 处断裂修复的回归测试(2026-08-29)
+
+    修复①: hidden 评价不出现在公开列表/详情, 不参与评分统计
+    修复②: add_review 支持 orderId/images/isAnonymous, 同订单同产品防重复
+    (修复③ merchant 回复鉴权属路由层, 见 test_product_routes.py)
+    """
+
+    async def asyncSetUp(self):
+        _reset_store()
+        self.svc = ProductService()
+
+    # ---------- 修复①: hidden 过滤读路径 ----------
+
+    async def test_46_hidden_not_in_public_list(self):
+        """隐藏评价不出现在公开列表"""
+        created = await _create_review(self.svc, member_id=100)
+        review_id = created["reviewId"]
+        before = await self.svc.list_reviews(PID_CLASSIC_42, page=1, page_size=50)
+        await self.svc.hide_review(PID_CLASSIC_42, review_id, is_hide=True)
+        after = await self.svc.list_reviews(PID_CLASSIC_42, page=1, page_size=50)
+        self.assertEqual(after["total"], before["total"] - 1)
+        ids = [r["review_id"] for r in after["reviews"]]
+        self.assertNotIn(review_id, ids)
+
+    async def test_47_hidden_detail_404(self):
+        """隐藏评价详情 → KeyError(对外不可见)"""
+        created = await _create_review(self.svc, member_id=100)
+        review_id = created["reviewId"]
+        await self.svc.hide_review(PID_CLASSIC_42, review_id, is_hide=True)
+        with self.assertRaises(KeyError):
+            await self.svc.get_review_detail(PID_CLASSIC_42, review_id)
+
+    async def test_48_hidden_excluded_from_rating_stats(self):
+        """隐藏评价不参与评分统计(隐藏后 rating_avg/count 重算)"""
+        # 种子 2 条(5星+4星); 新增 1 星评价后 count=3
+        created = await _create_review(self.svc, member_id=100, rating=1,
+                                       content="差评")
+        review_id = created["reviewId"]
+        product = await self.svc.product_repo.get_by_id(PID_CLASSIC_42)
+        self.assertEqual(product["rating_count"], 3)
+        # 隐藏 1 星评价后统计回落到 2 条(5+4)/2=4.5
+        await self.svc.hide_review(PID_CLASSIC_42, review_id, is_hide=True)
+        product = await self.svc.product_repo.get_by_id(PID_CLASSIC_42)
+        self.assertEqual(product["rating_count"], 2)
+        self.assertAlmostEqual(product["rating_avg"], 4.5)
+
+    async def test_49_restore_recalc_stats(self):
+        """恢复隐藏评价后统计回升"""
+        created = await _create_review(self.svc, member_id=100, rating=1,
+                                       content="差评")
+        review_id = created["reviewId"]
+        await self.svc.hide_review(PID_CLASSIC_42, review_id, is_hide=True)
+        await self.svc.hide_review(PID_CLASSIC_42, review_id, is_hide=False)
+        product = await self.svc.product_repo.get_by_id(PID_CLASSIC_42)
+        self.assertEqual(product["rating_count"], 3)
+
+    # ---------- 修复②: order_id 闭环 ----------
+
+    async def test_50_add_review_with_order_id(self):
+        """提交评价携带 orderId → by-order 直接可查(无需 repo 补写)"""
+        result = await self.svc.add_review(
+            PID_CLASSIC_42, member_id=100, member_nickname="测试会员100",
+            rating=5, content="好酒!", order_id="ORD_FIX_001")
+        self.assertTrue(result["success"])
+        found = await self.svc.get_review_by_order("ORD_FIX_001")
+        self.assertEqual(found["review"]["rating"], 5)
+        self.assertEqual(found["review"]["order_id"], "ORD_FIX_001")
+
+    async def test_51_duplicate_order_review_rejected(self):
+        """同订单同产品重复评价 → ValueError"""
+        await self.svc.add_review(
+            PID_CLASSIC_42, member_id=100, member_nickname="测试会员100",
+            rating=5, content="第一次", order_id="ORD_FIX_002")
+        with self.assertRaises(ValueError):
+            await self.svc.add_review(
+                PID_CLASSIC_42, member_id=100, member_nickname="测试会员100",
+                rating=4, content="第二次", order_id="ORD_FIX_002")
+
+    async def test_52_same_order_different_product_allowed(self):
+        """同订单不同产品可分别评价"""
+        await self.svc.add_review(
+            PID_CLASSIC_42, member_id=100, member_nickname="测试会员100",
+            rating=5, content="A 产品", order_id="ORD_FIX_003")
+        result = await self.svc.add_review(
+            "ZX45-2026L05", member_id=100, member_nickname="测试会员100",
+            rating=4, content="B 产品", order_id="ORD_FIX_003")
+        self.assertTrue(result["success"])
+
+    async def test_53_add_review_with_images(self):
+        """提交评价携带 images(≤9 张)"""
+        images = ["http://img1.jpg", "http://img2.jpg"]
+        result = await self.svc.add_review(
+            PID_CLASSIC_42, member_id=100, member_nickname="测试会员100",
+            rating=5, content="带图评价", images=images)
+        review = await self.svc.product_repo.get_review(
+            PID_CLASSIC_42, result["reviewId"])
+        self.assertEqual(review["images"], images)
+
+    async def test_54_add_review_too_many_images(self):
+        """图片超过 9 张 → ValueError"""
+        with self.assertRaises(ValueError):
+            await self.svc.add_review(
+                PID_CLASSIC_42, member_id=100, member_nickname="测试会员100",
+                rating=5, content="超图", images=["x"] * 10)
+
+    async def test_55_add_review_anonymous(self):
+        """匿名评价昵称脱敏为「匿名用户」"""
+        result = await self.svc.add_review(
+            PID_CLASSIC_42, member_id=100, member_nickname="张三",
+            rating=5, content="匿名说真话", is_anonymous=True)
+        review = await self.svc.product_repo.get_review(
+            PID_CLASSIC_42, result["reviewId"])
+        self.assertEqual(review["member_nickname"], "匿名用户")
+        self.assertTrue(review["is_anonymous"])
+
+
 # ============================================================
 # 测试运行
 # ============================================================
@@ -535,7 +652,7 @@ test_classes = [
     TestReviewDetail, TestReviewUpdate, TestReviewDelete,
     TestReviewByOrder, TestMyReviews, TestReviewReply,
     TestReviewLike, TestReviewReport, TestReportList,
-    TestReportHandle, TestReviewHide,
+    TestReportHandle, TestReviewHide, TestReviewFixRegression,
 ]
 
 

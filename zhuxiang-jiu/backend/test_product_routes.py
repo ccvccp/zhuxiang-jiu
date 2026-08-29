@@ -654,6 +654,103 @@ class TestProductReviewCreate:
 
 
 # ============================================================
+#  评价模块修复回归(2026-08-29): order_id 闭环 + merchant 回复鉴权
+# ============================================================
+
+class TestReviewFixRegressionRoutes:
+    """路由级回归(6)"""
+
+    def test_create_review_with_order_id(self):
+        """提交评价携带 orderId → by-order 端点直接可查"""
+        resp = client.post(f"/api/product/{PID_CLASSIC_42}/reviews",
+                           json={"rating": 5, "content": "订单评价",
+                                 "orderId": "ORD_RT_001"},
+                           headers={"X-Member-Id": "1"})
+        assert resp.status_code == 200
+        by_order = client.get("/api/product/reviews/by-order/ORD_RT_001")
+        assert by_order.status_code == 200
+        assert by_order.json()["review"]["order_id"] == "ORD_RT_001"
+
+    def test_create_review_duplicate_order(self):
+        """同订单同产品重复评价: 409"""
+        body = {"rating": 5, "content": "第一次", "orderId": "ORD_RT_002"}
+        client.post(f"/api/product/{PID_CLASSIC_42}/reviews", json=body,
+                    headers={"X-Member-Id": "1"})
+        resp = client.post(f"/api/product/{PID_CLASSIC_42}/reviews",
+                           json={"rating": 4, "content": "第二次",
+                                 "orderId": "ORD_RT_002"},
+                           headers={"X-Member-Id": "1"})
+        assert resp.status_code == 409
+
+    def test_create_review_anonymous_and_images(self):
+        """匿名评价 + 图片参数可传入"""
+        resp = client.post(f"/api/product/{PID_CLASSIC_42}/reviews",
+                           json={"rating": 5, "content": "匿名带图",
+                                 "images": ["http://img1.jpg"],
+                                 "isAnonymous": True},
+                           headers={"X-Member-Id": "1"})
+        assert resp.status_code == 200
+        review_id = resp.json()["reviewId"]
+        reviews = _mock_store["product_reviews"][PID_CLASSIC_42]
+        review = next(r for r in reviews if r["review_id"] == review_id)
+        assert review["is_anonymous"] is True
+        assert review["member_nickname"] == "匿名用户"
+        assert review["images"] == ["http://img1.jpg"]
+
+    def test_reply_by_merchant_allowed(self):
+        """商家(X-Role: merchant)回复评价: 200(修复③)"""
+        create = client.post(f"/api/product/{PID_CLASSIC_42}/reviews",
+                             json={"rating": 5, "content": "求商家回复"},
+                             headers={"X-Member-Id": "1"})
+        review_id = create.json()["reviewId"]
+        resp = client.post(
+            f"/api/product/{PID_CLASSIC_42}/reviews/{review_id}/replies",
+            json={"content": "感谢惠顾!", "replierRole": "merchant",
+                  "replierName": "竹香酒庄"},
+            headers={"X-Role": "merchant"})
+        assert resp.status_code == 200
+        assert resp.json()["reply"]["replier_role"] == "merchant"
+
+    def test_reply_by_admin_allowed(self):
+        """管理员回复评价: 200"""
+        create = client.post(f"/api/product/{PID_CLASSIC_42}/reviews",
+                             json={"rating": 5, "content": "求回复"},
+                             headers={"X-Member-Id": "1"})
+        review_id = create.json()["reviewId"]
+        resp = client.post(
+            f"/api/product/{PID_CLASSIC_42}/reviews/{review_id}/replies",
+            json={"content": "已收到", "replierRole": "admin"},
+            headers={"X-Role": "admin"})
+        assert resp.status_code == 200
+
+    def test_reply_no_role_forbidden(self):
+        """无角色回复评价: 403"""
+        create = client.post(f"/api/product/{PID_CLASSIC_42}/reviews",
+                             json={"rating": 5, "content": "求回复"},
+                             headers={"X-Member-Id": "1"})
+        review_id = create.json()["reviewId"]
+        resp = client.post(
+            f"/api/product/{PID_CLASSIC_42}/reviews/{review_id}/replies",
+            json={"content": "冒充回复", "replierRole": "merchant"})
+        assert resp.status_code == 403
+
+    def test_hidden_review_not_in_public_list(self):
+        """隐藏评价不出现在公开列表(修复①)"""
+        create = client.post(f"/api/product/{PID_CLASSIC_42}/reviews",
+                             json={"rating": 1, "content": "差评"},
+                             headers={"X-Member-Id": "1"})
+        review_id = create.json()["reviewId"]
+        before = client.get(f"/api/product/{PID_CLASSIC_42}/reviews").json()
+        hide = client.put(
+            f"/api/product/{PID_CLASSIC_42}/reviews/{review_id}/hide",
+            json={"isHide": True}, headers={"X-Role": "admin"})
+        assert hide.status_code == 200
+        after = client.get(f"/api/product/{PID_CLASSIC_42}/reviews").json()
+        assert after["total"] == before["total"] - 1
+        assert review_id not in [r["review_id"] for r in after["reviews"]]
+
+
+# ============================================================
 #  集成场景: 跨端点联动
 # ============================================================
 

@@ -498,6 +498,9 @@ class ProductRepository:
             reviews = await self._redis_get_reviews(product_id)
         else:
             reviews = self._mem_get_reviews(product_id)
+        # 公开列表仅展示已发布评价(hidden 不对外可见)
+        reviews = [r for r in reviews
+                   if r.get("status") != REVIEW_STATUS_HIDDEN]
         # 按时间倒序
         reviews.sort(key=lambda r: r.get("created_at", ""), reverse=True)
         total = len(reviews)
@@ -544,11 +547,16 @@ class ProductRepository:
         return review
 
     async def _update_rating_stats(self, product_id: str) -> None:
-        """根据当前评价列表重算并更新产品 rating_avg/rating_count"""
+        """根据当前评价列表重算并更新产品 rating_avg/rating_count
+
+        hidden 评价不参与公开评分统计。
+        """
         if is_redis_mode():
             reviews = await self._redis_get_reviews(product_id)
         else:
             reviews = self._mem_get_reviews(product_id)
+        reviews = [r for r in reviews
+                   if r.get("status") != REVIEW_STATUS_HIDDEN]
         count = len(reviews)
         if count == 0:
             return

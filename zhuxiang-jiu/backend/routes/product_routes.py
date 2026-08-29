@@ -42,8 +42,9 @@ _service = ProductService()
 class ReviewCreateRequest(PydBaseModel):
     rating: int = Field(..., ge=1, le=5, description="评分 1-5")
     content: str = Field(..., min_length=1, max_length=500, description="评价内容(1-500 字)")
-    class Config:
-        extra = "allow"
+    orderId: str | None = Field("", description="订单号(可选, 用于订单评价闭环)")
+    images: list[str] | None = Field(None, description="评价图片URL列表(≤9张)")
+    isAnonymous: bool = Field(False, description="是否匿名评价")
 
 
 class ReviewUpdateRequest(PydBaseModel):
@@ -102,6 +103,15 @@ def _require_admin(x_role: str | None):
     """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
+
+
+def _require_reply_role(x_role: str | None):
+    """校验评价回复角色(商家/管理员), 失败返回 403
+
+    与 service 层 add_reply 的角色白名单(merchant/admin)保持一致。
+    """
+    if x_role not in ("admin", "merchant"):
+        raise HTTPException(status_code=403, detail="需要商家或管理员权限")
 
 
 def _safe_int(value: str | None, *, field: str) -> int | None:
@@ -321,7 +331,11 @@ async def create_review(
     req: ReviewCreateRequest,
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """提交评价(需 X-Member-Id 头, rating 1-5, content 1-500 字)"""
+    """提交评价(需 X-Member-Id 头, rating 1-5, content 1-500 字)
+
+    可选: orderId(订单评价闭环, 同订单同产品仅可评价一次)/
+    images(≤9张)/isAnonymous(匿名)
+    """
     member_id = _require_member_id(x_member_id)
     try:
         return await _service.add_review(
@@ -330,6 +344,9 @@ async def create_review(
             member_nickname="",  # Mock 模式暂不查会员资料, service 内兜底
             rating=req.rating,
             content=req.content,
+            order_id=req.orderId or "",
+            images=req.images,
+            is_anonymous=req.isAnonymous,
         )
     except KeyError as e:
         raise _map_key_error(e) from e
@@ -421,12 +438,12 @@ async def create_reply(
     x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
     """提交评价回复(商家/管理员)"""
-    _require_admin(x_role)
+    _require_reply_role(x_role)
     try:
         return await _service.add_reply(
             product_id=product_id,
             review_id=review_id,
-            replier_id=x_member_id or "admin",
+            replier_id=x_member_id or x_role,
             replier_role=req.replierRole,
             replier_name=req.replierName,
             content=req.content,

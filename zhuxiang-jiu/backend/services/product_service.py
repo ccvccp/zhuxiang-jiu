@@ -286,25 +286,42 @@ class ProductService:
 
     async def add_review(self, product_id: str, member_id,
                          member_nickname: str, rating: int,
-                         content: str) -> dict:
+                         content: str, order_id: str = "",
+                         images: list = None,
+                         is_anonymous: bool = False) -> dict:
         """提交评价(注入 review_id/created_at, 同步更新产品评分)
+
+        订单评价闭环: 携带 order_id 时, 同订单同产品仅可评价一次。
 
         Raises:
             KeyError: 产品不存在
-            ValueError: 评分越界 / 内容为空
+            ValueError: 评分越界 / 内容为空 / 图片超限 / 订单已评价
         """
         if not content or not content.strip():
             raise ValueError("评价内容不能为空")
         content = content.strip()
         if len(content) > 500:
             raise ValueError("评价内容不超过 500 字")
+        if images and len(images) > 9:
+            raise ValueError("评价图片不超过 9 张")
 
         async with get_lock(f"product:reviews:{product_id}"):
+            # 防重复评价: 同订单同产品仅可评价一次
+            if order_id:
+                existing = await self.product_repo.get_review_by_order(
+                    order_id, product_id)
+                if existing:
+                    raise ValueError(
+                        f"订单 {order_id} 的该产品已评价, 不可重复评价")
             review_data = {
                 "member_id": member_id,
-                "member_nickname": member_nickname or f"会员{member_id}",
+                "member_nickname": ("匿名用户" if is_anonymous
+                                    else (member_nickname or f"会员{member_id}")),
                 "rating": int(rating),
                 "content": content,
+                "order_id": order_id or "",
+                "images": images or [],
+                "is_anonymous": bool(is_anonymous),
             }
             saved = await self.product_repo.add_review(product_id, review_data)
             logger.info("review_added product=%s member=%r rating=%d",
@@ -338,6 +355,9 @@ class ProductService:
         review = await self.product_repo.get_review(product_id, review_id)
         if not review:
             raise KeyError(f"评价 {review_id} 不存在")
+        # hidden 评价不对外展示(公开读路径)
+        if review.get("status") == REVIEW_STATUS_HIDDEN:
+            raise KeyError(f"评价 {review_id} 不存在或已隐藏")
         # 注入回复列表
         replies = await self.product_repo.get_replies(review_id)
         review = dict(review)
@@ -724,6 +744,8 @@ class ProductService:
         async with get_lock(f"product:review:{review_id}"):
             await self.product_repo.update_review(
                 product_id, review_id, {"status": new_status})
+            # hidden 不参与公开评分, 隐藏/恢复后重算
+            await self.product_repo._update_rating_stats(product_id)
         action = "隐藏" if is_hide else "恢复"
         logger.info("review_%s product=%s review=%s",
                     "hidden" if is_hide else "restored", product_id, review_id)
@@ -756,6 +778,8 @@ class ProductService:
             if review:
                 await self.product_repo.update_review(
                     pid, review_id, {"status": REVIEW_STATUS_HIDDEN})
+                # hidden 不参与公开评分, 隐藏后重算
+                await self.product_repo._update_rating_stats(pid)
                 return
 
     # ============================================================
