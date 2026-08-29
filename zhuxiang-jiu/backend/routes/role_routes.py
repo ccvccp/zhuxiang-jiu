@@ -1,12 +1,14 @@
-"""AI智能管理模块路由(角色经济中枢, 18 端点)
+"""AI智能管理模块路由(角色经济中枢, 25 端点)
 
 鉴权(对齐 ticket_routes 风格):
     - 用户端(8): X-Member-Id 头(目录/认领/契约/收益/信用事件)
-    - 管理端(9): X-Role 头, 仅 admin
-    - 内部/结算(1): service-profit/settle(X-Role: admin/cs_staff)
+    - 管理端(14): X-Role 头, 仅 admin(目录维护/审批/契约动作/总账/风控/
+      追回/重试/试用sweep/记账/工人分润)
+    - 结算(2): service-profit/settle 与 clawback 查询(X-Role: admin/cs_staff)
+    - 内部(1): dispatch 调度中枢(X-Role: admin/cs_staff)
 
 异常映射(遵循项目约定):
-    - KeyError → 404(目录/申请/契约/工单不存在)
+    - KeyError → 404(目录/申请/契约/工单/批次不存在)
     - ValueError → 409(状态非法/重复认领/已结算等)
     - 权限校验 → 401(未登录) / 403(无权操作)
 
@@ -15,7 +17,10 @@
     - 认领(3):   claim / my claims / admin claims+review
     - 契约(4):   sign / my contracts / terminate / admin action
     - 收益(4):   my earnings / my credit-events / admin ledger / risk-summary
-    - 结算(2):   settle(幂等) / retry(重试入账)
+    - 客服分润(4): settle(幂等) / retry / reverse(退款追回) / clawback查询
+    - 契约治理(1): probation-sweep(试用期满自动转正)
+    - 统一记账(1): ledger/record(外部模块回写, P1)
+    - 工人分润(2): worker-profit settle/preview(P1, 生命码联动)
     - 派单(1):   dispatch(调度中枢测试入口)
     - 事件(1):   credit event 发布(内部)
 """
@@ -112,6 +117,25 @@ class ReverseProfitRequest(PydBaseModel):
     ticketNo: str = Field(..., description="工单号")
     reason: str = Field("订单退款", max_length=200, description="追回原因")
     operator: str = Field("admin", max_length=50, description="操作人")
+
+
+class RecordLedgerRequest(PydBaseModel):
+    ledgerNo: str = Field(..., max_length=120, description="流水号(幂等键, 如 VEN-1-xxx-agent)")
+    sourceModule: str = Field(..., max_length=50, description="来源模块(venue/agent/traffic等)")
+    roleCode: str = Field(..., max_length=50, description="角色编码(partner/agent/promoter/platform等)")
+    userId: int = Field(..., description="收益方用户ID(平台份额传0)")
+    basis: str = Field(..., description="口径: sale_price/diff_profit/purchase_amount")
+    base: float = Field(..., ge=0, description="计算基数")
+    rate: float = Field(..., ge=0, le=1, description="费率/比例")
+    amount: float = Field(..., ge=0, description="分润金额")
+    refNo: str = Field("", max_length=100, description="关联单号(合作商ID/账期/订单号等)")
+    note: str = Field("", max_length=200, description="备注")
+
+
+class WorkerProfitSettleRequest(PydBaseModel):
+    batchNo: str = Field(..., max_length=50, description="生产批次号(须已放行)")
+    orderAmount: float = Field(..., gt=0, description="关联订单实际销售价格")
+    qualityGrade: str = Field("pass", description="质量等级: pass/premium/accident")
 
 
 class DispatchRequest(PydBaseModel):
@@ -440,6 +464,59 @@ async def admin_probation_sweep(
     _require_admin(x_role)
     try:
         result = await _service.admin_probation_sweep()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/role/ledger/record", tags=["AI智能管理模块"])
+async def record_ledger(
+    data: RecordLedgerRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """统一分润总账记账(服务间调用/手工补账, 幂等: 同流水号不重复记账)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.record_external_settlement(
+            ledger_no=data.ledgerNo, source_module=data.sourceModule,
+            role_code=data.roleCode, user_id=data.userId, basis=data.basis,
+            base=data.base, rate=data.rate, amount=data.amount,
+            ref_no=data.refNo, note=data.note)
+        return {"success": True, "data": result["ledger"],
+                "created": result["created"]}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/role/worker-profit/settle", tags=["AI智能管理模块"])
+async def settle_worker_profit(
+    data: WorkerProfitSettleRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """生产工人分润结算(P1: 批次维度幂等; 工人取各工段生命码打卡留痕责任人)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.settle_worker_profit(
+            batch_no=data.batchNo, order_amount=data.orderAmount,
+            quality_grade=data.qualityGrade)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/role/worker-profit/preview/{batch_no}", tags=["AI智能管理模块"])
+async def preview_worker_profit(
+    batch_no: str,
+    x_role: str = Header(None, alias="X-Role"),
+    orderAmount: float = Query(..., gt=0, description="订单实际销售价格"),
+    qualityGrade: str = Query("pass", description="质量等级: pass/premium/accident"),
+):
+    """工人分润预演(只读, 不写账不入钱包)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.preview_worker_profit(
+            batch_no=batch_no, order_amount=orderAmount,
+            quality_grade=qualityGrade)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

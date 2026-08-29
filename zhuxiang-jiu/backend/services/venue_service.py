@@ -23,6 +23,8 @@
 
 from datetime import datetime
 
+import logging
+
 from core.locks import get_lock
 from core.helpers import bc_hash
 from repositories.venue_repository import (
@@ -50,6 +52,9 @@ SHARE_AGENT = 0.20
 SHARE_PARTNER = 0.20
 # 无代理: 本站 80% / 酒店 20%
 SHARE_PLATFORM_NO_AGENT = 0.80
+
+
+logger = logging.getLogger(__name__)
 
 
 class VenueService:
@@ -628,6 +633,8 @@ class VenueService:
             total_profit = sum(s.get("profitDiff", 0) for s in stockings)
             # 代理判定(铺货记录含 agentId 即有代理)
             has_agent = any(s.get("agentId") for s in stockings)
+            agent_id = next((s.get("agentId") for s in stockings
+                             if s.get("agentId")), None)
             if has_agent:
                 platform_share = total_profit * SHARE_PLATFORM_WITH_AGENT
                 agent_share = total_profit * SHARE_AGENT
@@ -644,7 +651,8 @@ class VenueService:
                 await self.repo.update_stocking_status(
                     s["id"], STOCKING_STATUS_OFFLINE)
 
-            return {
+            settle_date = datetime.utcnow().isoformat()
+            result = {
                 "partnerId": partner_id,
                 "partnerLevel": level,
                 "stockingsCount": len(stockings),
@@ -656,9 +664,51 @@ class VenueService:
                 "hasAgent": has_agent,
                 "tastingQty": tasting_qty,
                 "tastingRate": tasting_rate,
-                "settleDate": datetime.utcnow().isoformat(),
+                "settleDate": settle_date,
                 "blockchainHash": bc_hash(),
             }
+
+            # 统一分润总账记账(P1: AI智能管理模块, D-7 diff_profit 轨道)
+            # 记账失败不阻断结算主流程(旁路对账)
+            try:
+                from services.role_service import RoleService
+                from repositories.role_repository import (
+                    ROLE_PARTNER, ROLE_AGENT, ROLE_PLATFORM,
+                    PROFIT_BASIS_DIFF_PROFIT,
+                )
+                role_svc = RoleService()
+                ledger_prefix = f"VEN-{partner_id}-{settle_date}"
+                await role_svc.record_external_settlement(
+                    ledger_no=f"{ledger_prefix}-platform",
+                    source_module="venue", role_code=ROLE_PLATFORM,
+                    user_id=0, basis=PROFIT_BASIS_DIFF_PROFIT,
+                    base=total_profit, rate=(
+                        0.60 if has_agent else 0.80),
+                    amount=round(platform_share, 2), ref_no=str(partner_id),
+                    note=f"合作商结算本站份额(差价利润)")
+                await role_svc.record_external_settlement(
+                    ledger_no=f"{ledger_prefix}-partner",
+                    source_module="venue", role_code=ROLE_PARTNER,
+                    user_id=partner_id, basis=PROFIT_BASIS_DIFF_PROFIT,
+                    base=total_profit, rate=0.20,
+                    amount=round(partner_share, 2), ref_no=str(partner_id),
+                    note=f"合作商结算份额(差价利润)")
+                if has_agent and agent_share > 0:
+                    await role_svc.record_external_settlement(
+                        ledger_no=f"{ledger_prefix}-agent",
+                        source_module="venue", role_code=ROLE_AGENT,
+                        user_id=agent_id or 0,
+                        basis=PROFIT_BASIS_DIFF_PROFIT,
+                        base=total_profit, rate=0.20,
+                        amount=round(agent_share, 2), ref_no=str(partner_id),
+                        note="合作商结算代理份额(差价利润)")
+                result["ledgerRecorded"] = True
+            except Exception as e:
+                logger.warning("venue_ledger_record_failed partner=%r: %s",
+                              partner_id, e)
+                result["ledgerRecorded"] = False
+
+            return result
 
     # ============================================================
     # 8. 合作统计

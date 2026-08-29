@@ -31,7 +31,7 @@ from core.helpers import ts
 from repositories.role_repository import (
     RoleRepository,
     # 角色
-    ROLE_CUSTOMER_SERVICE,
+    ROLE_CUSTOMER_SERVICE, ROLE_PRODUCTION_WORKER, ROLE_PLATFORM,
     # 契约状态
     CONTRACT_STATUS_PROBATION, CONTRACT_STATUS_ACTIVE,
     CONTRACT_STATUS_SUSPENDED, CONTRACT_STATUS_TERMINATED,
@@ -39,24 +39,30 @@ from repositories.role_repository import (
     # 认领状态
     CLAIM_STATUS_PENDING, CLAIM_STATUS_APPROVED, CLAIM_STATUS_REJECTED,
     # 分润口径
-    PROFIT_BASIS_SALE_PRICE,
+    PROFIT_BASIS_SALE_PRICE, PROFIT_BASIS_PURCHASE_AMOUNT,
     LEDGER_STATUS_PENDING, LEDGER_STATUS_SETTLED, LEDGER_STATUS_REVERSED,
     # 服务分润参数(D-8)
     SERVICE_PROFIT_RATE, SATISFACTION_COEFF, CREDIT_LEVEL_COEFF,
     TIMELINESS_SLA_OK, TIMELINESS_OVERDUE, TIMELINESS_ESCALATED,
     SINGLE_CAP, MONTHLY_CAP, PROBATION_RATE, PROBATION_DAYS,
     CONTRACT_VALID_DAYS, CLAWBACK_FREEZE_THRESHOLD,
+    # 工人分润(P1)
+    STAGE_PROFIT_RATES, WORKER_QUALITY_COEFF, WORKER_LEDGER_PREFIX,
     # 派单
     DISPATCH_WEIGHTS, SKILL_BASE, DEFAULT_SATISFACTION, LOAD_CAPACITY,
     # 信用行为
     BEHAVIOR_CS_SATISFACTION_GOOD, BEHAVIOR_CS_SATISFACTION_BAD,
     BEHAVIOR_CS_SLA_OVERDUE, BEHAVIOR_CS_ESCALATED,
     BEHAVIOR_CLAIM_APPROVED, BEHAVIOR_DELTAS,
+    BEHAVIOR_WORKER_QUALITY_PREMIUM, BEHAVIOR_WORKER_QUALITY_ACCIDENT,
 )
 from services.ticket_service import TicketService, SLA_HOURS
 from services.credit_service import CreditService
 from services.wallet_service import WalletService
 from repositories.credit_repository import level_from_score
+from repositories.trace_prod_repository import (
+    TraceProdRepository, RESULT_PASS,
+)
 from repositories.ticket_repository import (
     PRIORITY_MEDIUM, SOURCE_AI, TICKET_STATUS_PROCESSING,
     TICKET_STATUS_RESOLVED,
@@ -78,6 +84,7 @@ class RoleService:
         self.ticket_service = TicketService()
         self.credit_service = CreditService()
         self.wallet_service = WalletService()
+        self.trace_prod_repo = TraceProdRepository()
 
     # ============================================================
     # 1. 角色目录
@@ -788,6 +795,247 @@ class RoleService:
         }
 
     # ============================================================
+    # 5.2 统一分润总账记账(P1: D-7 口径对齐)
+    # ============================================================
+
+    async def record_external_settlement(self, ledger_no: str,
+                                         source_module: str, role_code: str,
+                                         user_id: int, basis: str,
+                                         base: float, rate: float,
+                                         amount: float, ref_no: str = "",
+                                         note: str = "") -> dict:
+        """外部模块结算回写统一总账(venue/agent/traffic 等)
+
+        规则(设计文档§4.4):
+            - 计算层仍由各业务模块负责, 本方法只做记账与对账统一
+            - 幂等: 同 ledgerNo 已存在 → 直接返回既有流水, 不重复记账
+            - 资金流由来源模块自身处理(venue不落钱包/agent写代理钱包/
+              traffic累计待提现), 故本流水 status 直接为 settled
+
+        Returns:
+            {ledger, created(bool)}
+        """
+        existing = await self.repo.get_ledger(ledger_no)
+        if existing is not None:
+            return {"ledger": existing, "created": False}
+        ledger = {
+            "ledgerNo": ledger_no,
+            "ticketNo": "",
+            "orderId": "",
+            "refNo": ref_no,
+            "roleCode": role_code,
+            "userId": user_id,
+            "basis": basis,
+            "base": round(base, 2),
+            "rate": rate,
+            "coefficients": {},
+            "rawAmount": round(amount, 2),
+            "amount": round(amount, 2),
+            "payable": round(amount, 2),
+            "clawbackDeducted": 0.0,
+            "clawbackAfter": 0.0,
+            "deferredAmount": 0.0,
+            "capped": False,
+            "status": LEDGER_STATUS_SETTLED,
+            "sourceModule": source_module,
+            "walletTxNo": "",
+            "walletError": "",
+            "note": note,
+            "createdAt": ts(),
+            "settledAt": ts(),
+        }
+        await self.repo.create_ledger(ledger)
+        return {"ledger": ledger, "created": True}
+
+    # ============================================================
+    # 5.3 生产工人分润(P1: 设计文档5.4, 生命码联动)
+    # ============================================================
+
+    async def settle_worker_profit(self, batch_no: str,
+                                   order_amount: float,
+                                   quality_grade: str = "pass") -> dict:
+        """批次订单生产工人分润结算(幂等: 每批次仅一次)
+
+        公式(设计文档5.4):
+            工人环节分润 = 订单实际销售价格 × 环节分润率(合计≤15%子池)
+                         × 质量系数(pass 1.0 / premium 1.2 / accident 0)
+
+        规则:
+            - 批次须已放行(released, 7工段完成+瓶码绑定)
+            - 工人取每工段最后一条 pass 打卡的 memberId(生命码生产链留痕)
+            - accident: 全员零分润 + 信用-15; premium: ×1.2 + 信用+5
+            - 入账: 钱包奖励余额(未开通→pending可重试) + 总账(sale_price轨道)
+
+        Raises:
+            KeyError: 批次不存在
+            ValueError: 参数非法/批次未放行/无打卡记录/已结算
+        """
+        async with get_lock(f"role:worker-settle:{batch_no}"):
+            shares, batch, quality_coeff = await self._calc_worker_shares(
+                batch_no, order_amount, quality_grade)
+            # 幂等: 批次维度一次结算
+            prefix = f"{WORKER_LEDGER_PREFIX}{batch_no}-"
+            if await self.repo.ledger_exists_prefix(prefix):
+                raise ValueError(f"该批次工人分润已结算(batchNo={batch_no})")
+
+            now = ts()
+            results = []
+            for share in shares:
+                ledger_no = f"{prefix}{share['stageCode']}"
+                amount = share["amount"]
+                ledger = {
+                    "ledgerNo": ledger_no,
+                    "ticketNo": "",
+                    "orderId": "",
+                    "refNo": batch_no,
+                    "roleCode": ROLE_PRODUCTION_WORKER,
+                    "userId": share["workerId"],
+                    "basis": PROFIT_BASIS_SALE_PRICE,
+                    "base": order_amount,
+                    "rate": share["rate"],
+                    "coefficients": {
+                        "stageCode": share["stageCode"],
+                        "qualityGrade": quality_grade,
+                        "qualityCoeff": quality_coeff,
+                    },
+                    "rawAmount": amount,
+                    "amount": amount,
+                    "payable": amount,
+                    "clawbackDeducted": 0.0,
+                    "clawbackAfter": 0.0,
+                    "deferredAmount": 0.0,
+                    "capped": False,
+                    "status": LEDGER_STATUS_PENDING,
+                    "sourceModule": "role",
+                    "walletTxNo": "",
+                    "walletError": "",
+                    "createdAt": now,
+                    "settledAt": "",
+                }
+                await self.repo.create_ledger(ledger)
+                # 入钱包(奖励余额); 零分润直接闭环
+                if amount > 0:
+                    try:
+                        wallet_result = await (
+                            self.wallet_service.deposit_reward(
+                                share["workerId"], amount,
+                                description=f"生产分润({batch_no}/"
+                                            f"{share['stageName']})"))
+                        await self.repo.update_ledger(ledger_no, {
+                            "status": LEDGER_STATUS_SETTLED,
+                            "walletTxNo": wallet_result.get("txNo", ""),
+                            "settledAt": ts()})
+                        ledger["status"] = LEDGER_STATUS_SETTLED
+                        ledger["walletTxNo"] = wallet_result.get("txNo", "")
+                    except Exception as e:
+                        await self.repo.update_ledger(ledger_no,
+                                                      {"walletError": str(e)})
+                        ledger["walletError"] = str(e)
+                else:
+                    await self.repo.update_ledger(ledger_no, {
+                        "status": LEDGER_STATUS_SETTLED, "settledAt": ts()})
+                    ledger["status"] = LEDGER_STATUS_SETTLED
+                results.append(ledger)
+
+            # 信用事件(优质加分/质量事故扣分, 按工人去重: 责的对价)
+            behavior = None
+            if quality_grade == "premium":
+                behavior = BEHAVIOR_WORKER_QUALITY_PREMIUM
+            elif quality_grade == "accident":
+                behavior = BEHAVIOR_WORKER_QUALITY_ACCIDENT
+            if behavior:
+                for worker_id in {s["workerId"] for s in shares}:
+                    await self.publish_credit_event(
+                        worker_id, ROLE_PRODUCTION_WORKER,
+                        behavior, "role", batch_no)
+
+            return {
+                "batchNo": batch_no,
+                "orderId": batch.get("batchNo", ""),
+                "orderAmount": order_amount,
+                "qualityGrade": quality_grade,
+                "qualityCoeff": quality_coeff,
+                "workersCount": len({s["workerId"] for s in shares}),
+                "stagesCount": len(shares),
+                "totalAmount": round(sum(s["amount"] for s in shares), 2),
+                "shares": shares,
+                "ledgers": results,
+            }
+
+    async def preview_worker_profit(self, batch_no: str,
+                                     order_amount: float,
+                                     quality_grade: str = "pass") -> dict:
+        """工人分润预演(只读, 不写账不入钱包)
+
+        Raises:
+            KeyError: 批次不存在
+            ValueError: 参数非法/批次未放行/无打卡记录
+        """
+        shares, batch, quality_coeff = await self._calc_worker_shares(
+            batch_no, order_amount, quality_grade)
+        return {
+            "batchNo": batch_no,
+            "orderAmount": order_amount,
+            "qualityGrade": quality_grade,
+            "qualityCoeff": quality_coeff,
+            "batchStatus": batch.get("status"),
+            "workersCount": len({s["workerId"] for s in shares}),
+            "stagesCount": len(shares),
+            "totalAmount": round(sum(s["amount"] for s in shares), 2),
+            "shares": shares,
+        }
+
+    async def _calc_worker_shares(self, batch_no: str, order_amount: float,
+                                  quality_grade: str) -> tuple:
+        """工人份额计算(内部): (shares, batch, quality_coeff)
+
+        Raises:
+            KeyError: 批次不存在
+            ValueError: 参数非法/批次未放行/无打卡记录
+        """
+        if order_amount is None or order_amount <= 0:
+            raise ValueError("订单实际销售价格必须大于 0")
+        if quality_grade not in WORKER_QUALITY_COEFF:
+            raise ValueError(
+                f"质量等级无效(须为{'/'.join(WORKER_QUALITY_COEFF)})")
+        quality_coeff = WORKER_QUALITY_COEFF[quality_grade]
+
+        batch = await self.trace_prod_repo.get_batch(batch_no)
+        if batch is None:
+            raise KeyError(f"生产批次不存在(batchNo={batch_no})")
+        if batch.get("status") != "released":
+            raise ValueError(
+                f"批次未放行(当前{batch.get('status')}, 须 released; "
+                f"7工段完成且瓶码绑定后方可分润)")
+
+        punches = await self.trace_prod_repo.list_punches(batch_no=batch_no)
+        if not punches:
+            raise ValueError(f"批次无生产打卡记录(batchNo={batch_no})")
+
+        # 每工段取最后一条 pass 打卡的责任人
+        last_pass = {}
+        for p in sorted(punches, key=lambda x: x.get("punchedAt", "")):
+            if p.get("result") == RESULT_PASS:
+                last_pass[p.get("stageCode")] = p
+
+        shares = []
+        for stage_code, rate in STAGE_PROFIT_RATES.items():
+            punch = last_pass.get(stage_code)
+            if punch is None:
+                continue
+            stage = await self.trace_prod_repo.get_stage_by_code(stage_code)
+            shares.append({
+                "stageCode": stage_code,
+                "stageName": stage.get("name", stage_code) if stage else stage_code,
+                "workerId": punch.get("memberId"),
+                "rate": rate,
+                "amount": round(order_amount * rate * quality_coeff, 2),
+            })
+        if not shares:
+            raise ValueError("批次打卡记录均未命中有效工段, 无法计算份额")
+        return shares, batch, quality_coeff
+
+    # ============================================================
     # 6. 信用行为总线
     # ============================================================
 
@@ -876,12 +1124,16 @@ class RoleService:
                 1 for c in claims if c.get("status") == CLAIM_STATUS_PENDING),
             "negativeCreditEvents": sum(
                 1 for e in events if e.get("delta", 0) < 0),
-            "basisSplit": {
-                "sale_price": sum(1 for l in ledgers
-                                  if l.get("basis") == PROFIT_BASIS_SALE_PRICE),
-                "diff_profit": sum(1 for l in ledgers
-                                   if l.get("basis") == "diff_profit"),
-            },
+            "basisSplit": self._basis_split(ledgers),
             "caps": {"single": SINGLE_CAP, "monthly": MONTHLY_CAP,
                      "clawbackFreeze": CLAWBACK_FREEZE_THRESHOLD},
         }
+
+    @staticmethod
+    def _basis_split(ledgers: list[dict]) -> dict:
+        """按口径动态统计流水分布(D-7 三轨道: sale_price/diff_profit/purchase_amount)"""
+        split = {}
+        for l in ledgers:
+            basis = l.get("basis", "unknown")
+            split[basis] = split.get(basis, 0) + 1
+        return split

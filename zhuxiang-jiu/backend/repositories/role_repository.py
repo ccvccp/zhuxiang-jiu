@@ -60,6 +60,10 @@ CLAIM_STATUSES = (CLAIM_STATUS_PENDING, CLAIM_STATUS_APPROVED,
 
 PROFIT_BASIS_SALE_PRICE = "sale_price"      # 实际销售价格×60% 新口径
 PROFIT_BASIS_DIFF_PROFIT = "diff_profit"    # 差价利润60/20/20 旧口径
+PROFIT_BASIS_PURCHASE_AMOUNT = "purchase_amount"  # 进货额返利(代理商超额累进)
+
+# 平台角色标记(总账中本站留存份额的记账方)
+ROLE_PLATFORM = "platform"
 
 # 分润总账状态
 LEDGER_STATUS_PENDING = "pending"   # 待入账(钱包未开通等)
@@ -99,6 +103,31 @@ CONTRACT_VALID_DAYS = 365
 CLAWBACK_FREEZE_THRESHOLD = 500.0
 
 # ============================================================
+# 生产工人分润(P1: 设计文档5.4)
+# ============================================================
+
+# 工段分润率(基于订单实际销售价格, 合计 = 15% 生产与质量子池上限)
+STAGE_PROFIT_RATES = {
+    "STG-BREW": 0.030,   # 工艺酿酒
+    "STG-STOR": 0.015,   # 原酒储藏
+    "STG-BLEND": 0.030,  # 产品调配检测(质检关卡)
+    "STG-FILL": 0.025,   # 灌装
+    "STG-PACK": 0.020,   # 包装质检(质检关卡)
+    "STG-WARE": 0.015,   # 仓库
+    "STG-OUT": 0.015,    # 出库
+}
+
+# 质量系数(设计文档5.4: 抽检合格1.0/优质1.2/质量事故0并追回)
+WORKER_QUALITY_COEFF = {
+    "pass": 1.0,
+    "premium": 1.2,
+    "accident": 0.0,
+}
+
+# 工人分润总账流水号前缀(幂等键: WRK-{batchNo}-{stageCode})
+WORKER_LEDGER_PREFIX = "WRK-"
+
+# ============================================================
 # 派单权重(AI服务调度中枢)
 # ============================================================
 
@@ -120,6 +149,8 @@ BEHAVIOR_CS_SATISFACTION_BAD = "cs_satisfaction_bad"     # 满意度≤3星 -5
 BEHAVIOR_CS_SLA_OVERDUE = "cs_sla_overdue"                # SLA超时 -10
 BEHAVIOR_CS_ESCALATED = "cs_escalated"                    # 工单被升级 -15
 BEHAVIOR_CLAIM_APPROVED = "claim_approved"                # 认领通过 +3
+BEHAVIOR_WORKER_QUALITY_PREMIUM = "worker_quality_premium"  # 优质批次 +5
+BEHAVIOR_WORKER_QUALITY_ACCIDENT = "worker_quality_accident"  # 质量事故 -15
 
 BEHAVIOR_DELTAS = {
     BEHAVIOR_CS_SATISFACTION_GOOD: 5,
@@ -127,6 +158,8 @@ BEHAVIOR_DELTAS = {
     BEHAVIOR_CS_SLA_OVERDUE: -10,
     BEHAVIOR_CS_ESCALATED: -15,
     BEHAVIOR_CLAIM_APPROVED: 3,
+    BEHAVIOR_WORKER_QUALITY_PREMIUM: 5,
+    BEHAVIOR_WORKER_QUALITY_ACCIDENT: -15,
 }
 
 # ============================================================
@@ -500,6 +533,16 @@ class RoleRepository:
             if l.get("status") == LEDGER_STATUS_SETTLED
             and l.get("createdAt", "").startswith(month_prefix)
         ), 2)
+
+    async def ledger_exists_prefix(self, prefix: str) -> bool:
+        """是否存在指定前缀的总账流水(工人批次结算幂等用)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("role", "ledger", f"{prefix}*"))
+            return bool(keys)
+        self._ensure_store()
+        return any(no.startswith(prefix)
+                   for no in self.store["profit_ledger"])
 
     # ============================================================
     # 信用行为总线事件

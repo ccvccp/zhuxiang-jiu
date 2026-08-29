@@ -63,6 +63,8 @@ from routes.perm_routes import register_perm_routes
 from routes.trace_prod_routes import register_trace_prod_routes
 # 客服工单模块
 from routes.ticket_routes import register_ticket_routes
+# AI智能管理模块(角色经济中枢)
+from routes.role_routes import register_role_routes
 
 __all__ = [
     # 已有(15)

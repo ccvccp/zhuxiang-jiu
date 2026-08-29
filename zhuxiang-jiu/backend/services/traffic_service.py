@@ -22,6 +22,8 @@
 from typing import ClassVar
 from datetime import datetime
 
+import logging
+
 from core.locks import get_lock
 from core.helpers import ts
 from repositories.traffic_repository import (
@@ -41,6 +43,9 @@ from repositories.traffic_repository import (
     INFLUENCER_STATUS_COOPERATING, PROMO_CODE_ACTIVE, SOURCE_DOUYIN, SOURCE_KUAISHOU, SOURCE_WECHAT,
     SOURCE_XIAOHONGSHU, SOURCE_BILIBILI,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class TrafficService:
@@ -314,7 +319,7 @@ class TrafficService:
             )
             await self.repo.save_promoter(promoter)
 
-            return {
+            result = {
                 "commissionId": commission_id,
                 "promoterId": promoter_id,
                 "orderId": order_id,
@@ -324,6 +329,27 @@ class TrafficService:
                 "commission": commission,
                 "status": COMMISSION_PENDING,
             }
+
+            # 统一分润总账记账(P1: AI智能管理模块, sale_price 轨道;
+            # 记账失败不阻断佣金计算主流程)
+            try:
+                from services.role_service import RoleService
+                from repositories.role_repository import (
+                    ROLE_PROMOTER, PROFIT_BASIS_SALE_PRICE,
+                )
+                record = await RoleService().record_external_settlement(
+                    ledger_no=f"TRF-{commission_id}",
+                    source_module="traffic", role_code=ROLE_PROMOTER,
+                    user_id=promoter_id, basis=PROFIT_BASIS_SALE_PRICE,
+                    base=order_amount, rate=rate,
+                    amount=commission, ref_no=order_id,
+                    note="推广佣金(订单金额×等级比例)")
+                result["ledgerRecorded"] = record.get("created", False)
+            except Exception as e:
+                logger.warning("traffic_ledger_record_failed promoter=%r: %s",
+                               promoter_id, e)
+                result["ledgerRecorded"] = False
+            return result
 
     # ============================================================
     # 6. 推广员等级查询与升级

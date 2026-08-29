@@ -627,7 +627,7 @@ class AgentService:
                              "msg": "进货额未达 20 万门槛, 返利 0 元"})
             logger.info("agent_rebate_calc agent_id=%r tier=%s amount=%.2f rebate=%.2f",
                         agent_id, tier, purchase_amount, rebate_amount)
-            return {
+            result = {
                 "success": True,
                 "agentId": agent_id,
                 "rebateId": rebate_id,
@@ -639,6 +639,28 @@ class AgentService:
                 "status": "pending",
                 "logs": logs,
             }
+
+            # 统一分润总账记账(P1: AI智能管理模块, 进货额返利轨道;
+            # T0 未达门槛返利 0, 不产生噪音流水; 记账失败不阻断主流程)
+            if rebate_amount > 0:
+                try:
+                    from services.role_service import RoleService
+                    from repositories.role_repository import (
+                        ROLE_AGENT, PROFIT_BASIS_PURCHASE_AMOUNT,
+                    )
+                    record = await RoleService().record_external_settlement(
+                        ledger_no=f"AGT-{rebate_id}",
+                        source_module="agent", role_code=ROLE_AGENT,
+                        user_id=agent_id, basis=PROFIT_BASIS_PURCHASE_AMOUNT,
+                        base=purchase_amount, rate=tier_rate,
+                        amount=rebate_amount, ref_no=period,
+                        note=f"代理商超额累进返利({tier})")
+                    result["ledgerRecorded"] = record.get("created", False)
+                except Exception as e:
+                    logger.warning("agent_ledger_record_failed agent=%r: %s",
+                                   agent_id, e)
+                    result["ledgerRecorded"] = False
+            return result
 
     async def list_rebates(self, agent_id, page: int = 1,
                             page_size: int = 20, status: str = None) -> dict:

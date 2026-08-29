@@ -35,13 +35,15 @@ from services.wallet_service import WalletService
 from services.chat_service import ChatService
 from repositories.role_repository import (
     RoleRepository,
-    ROLE_CUSTOMER_SERVICE, ROLE_AGENT,
+    ROLE_CUSTOMER_SERVICE, ROLE_AGENT, ROLE_PARTNER, ROLE_PROMOTER,
+    ROLE_PRODUCTION_WORKER, ROLE_PLATFORM,
     CONTRACT_STATUS_PROBATION, CONTRACT_STATUS_ACTIVE,
     CONTRACT_STATUS_SUSPENDED, CONTRACT_STATUS_TERMINATED,
     CLAIM_STATUS_PENDING, CLAIM_STATUS_APPROVED, CLAIM_STATUS_REJECTED,
     LEDGER_STATUS_PENDING, LEDGER_STATUS_SETTLED, LEDGER_STATUS_REVERSED,
     SINGLE_CAP, MONTHLY_CAP, SERVICE_PROFIT_RATE,
-    CLAWBACK_FREEZE_THRESHOLD,
+    CLAWBACK_FREEZE_THRESHOLD, STAGE_PROFIT_RATES,
+    WORKER_LEDGER_PREFIX,
 )
 from repositories.ticket_repository import (
     SOURCE_AI, TICKET_STATUS_PROCESSING, TICKET_STATUS_RESOLVED,
@@ -762,6 +764,275 @@ class TestProbationSweep:
 
 
 # ============================================================
+# 11. 统一分润总账接入(P1: venue/agent/traffic 回写)
+# ============================================================
+
+class TestLedgerIntegration:
+
+    async def run(self):
+        reset_store()
+        svc = RoleService()
+
+        # 11.1 venue 结算 → 3 条 diff_profit 流水(平台/合作商/代理)
+        from services.venue_service import VenueService
+        from repositories.venue_repository import VenueRepository
+        venue_repo = VenueRepository()
+        await venue_repo.save_partner({
+            "id": 11, "partnerType": "hotel", "partnerName": "测试酒店",
+            "creditCode": "TEST11", "partnerLevel": "A",
+            "status": "active", "agentId": 77,
+        })
+        await venue_repo.save_stocking({
+            "id": 1101, "partnerId": 11, "venueId": 1,
+            "productId": "P1", "productName": "竹香经典",
+            "quantity": 100, "svipPrice": 852.0, "retailPrice": 1000.0,
+            "profitDiff": 14800.0, "supplyMode": "agent", "agentId": 77,
+            "status": "active",
+        })
+        settle = await VenueService().settle_commission(partner_id=11)
+        record("总账-venue结算回写标记", settle.get("ledgerRecorded") is True)
+        # 有代理: 14800 → 本站60%=8880 / 代理20%=2960 / 酒店20%=2960
+        record("总账-venue份额计算(60/20/20)",
+               abs(settle["platformShare"] - 8880) < 0.01
+               and abs(settle["agentShare"] - 2960) < 0.01
+               and abs(settle["partnerShare"] - 2960) < 0.01)
+
+        ledgers = await svc.repo.list_ledgers(limit=1000)
+        venue_entries = [l for l in ledgers
+                        if l.get("sourceModule") == "venue"]
+        role_codes = {l["roleCode"] for l in venue_entries}
+        record("总账-venue三角色流水(平台/合作商/代理)",
+               len(venue_entries) == 3
+               and role_codes == {ROLE_PARTNER, ROLE_AGENT, ROLE_PLATFORM},
+               f"实际{len(venue_entries)}条/{role_codes}")
+        record("总账-venue口径diff_profit(D-7旧轨道)",
+               all(l["basis"] == "diff_profit" for l in venue_entries))
+        partner_entry = next(l for l in venue_entries
+                             if l["roleCode"] == ROLE_PARTNER)
+        record("总账-venue合作商份额金额(2960)",
+               abs(partner_entry["amount"] - 2960) < 0.01
+               and partner_entry["userId"] == 11)
+        agent_entry = next(l for l in venue_entries
+                          if l["roleCode"] == ROLE_AGENT)
+        record("总账-venue代理userId取自铺货(77)",
+               agent_entry["userId"] == 77)
+
+        # 11.2 agent 返利 → purchase_amount 轨道
+        from services.agent_service import AgentService
+        from repositories.agent_repository import AgentRepository
+        await AgentRepository().save(21, {
+            "agentId": 21, "agentName": "测试代理商", "agentLevel": "B",
+            "wallet": 0.0,
+        })
+        rebate = await AgentService().rebate_calc(21, 600000)
+        # 60万: 30万×15% + 10万×25% = 70000
+        record("总账-agent返利计算(60万→70000, T2)",
+               rebate["rebateAmount"] == 70000 and rebate["tier"] == "T2")
+        record("总账-agent回写标记",
+               rebate.get("ledgerRecorded") is True)
+        agent_ledger = await svc.repo.get_ledger(f"AGT-{rebate['rebateId']}")
+        record("总账-agent流水存在(purchase_amount轨道)",
+               agent_ledger is not None
+               and agent_ledger["basis"] == "purchase_amount"
+               and agent_ledger["amount"] == 70000
+               and agent_ledger["userId"] == 21)
+
+        # T0 未达门槛 → 不产生噪音流水
+        rebate_t0 = await AgentService().rebate_calc(21, 100000)
+        record("总账-agent未达门槛无流水",
+               rebate_t0["rebateAmount"] == 0
+               and "ledgerRecorded" not in rebate_t0)
+
+        # 11.3 traffic 佣金 → sale_price 轨道
+        from services.traffic_service import TrafficService
+        promoter = await TrafficService().create_promoter(
+            user_id=31, name="测试推广员")
+        commission = await TrafficService().calculate_commission(
+            promoter_id=promoter["id"], order_id="ORD-TRF-1",
+            order_amount=1000, user_id=99)
+        # 见习5%: 1000×5% = 50
+        record("总账-traffic佣金计算(1000×5%=50)",
+               commission["commission"] == 50
+               and commission.get("ledgerRecorded") is True)
+        traffic_ledger = await svc.repo.get_ledger(
+            f"TRF-{commission['commissionId']}")
+        record("总账-traffic流水存在(sale_price轨道)",
+               traffic_ledger is not None
+               and traffic_ledger["basis"] == "sale_price"
+               and traffic_ledger["amount"] == 50
+               and traffic_ledger["userId"] == promoter["id"])
+
+        # 11.4 记账幂等
+        again = await svc.record_external_settlement(
+            ledger_no=f"TRF-{commission['commissionId']}",
+            source_module="traffic", role_code=ROLE_PROMOTER,
+            user_id=promoter["id"], basis="sale_price",
+            base=1000, rate=0.05, amount=50)
+        record("总账-重复记账幂等(不新增)", again["created"] is False)
+
+        # 11.5 风控汇总口径三轨道分布
+        summary = await svc.get_risk_summary()
+        record("总账-风控汇总三轨道分布",
+               summary["basisSplit"].get("diff_profit") == 3
+               and summary["basisSplit"].get("purchase_amount") == 1
+               and summary["basisSplit"].get("sale_price") == 1,
+               f"实际{summary['basisSplit']}")
+
+
+# ============================================================
+# 12. 生产工人分润(P1: 生命码打卡留痕联动)
+# ============================================================
+
+# 测试工人: 3001 负责工段1-3, 3002 负责工段4-5, 3003 负责工段6-7
+WORKER_A, WORKER_B, WORKER_C = 3001, 3002, 3003
+_STAGE_WORKERS = {
+    "STG-BREW": WORKER_A, "STG-STOR": WORKER_A, "STG-BLEND": WORKER_A,
+    "STG-FILL": WORKER_B, "STG-PACK": WORKER_B,
+    "STG-WARE": WORKER_C, "STG-OUT": WORKER_C,
+}
+
+
+async def _setup_released_batch(batch_no: str) -> None:
+    """构造已放行批次 + 7工段打卡留痕(直接写仓储, 绕过权限校验)"""
+    from repositories.trace_prod_repository import (
+        TraceProdRepository, RESULT_PASS, SEED_STAGES,
+    )
+    trace_repo = TraceProdRepository()
+    batch_id = await trace_repo.next_id("batch")
+    await trace_repo.save_batch({
+        "batchId": batch_id, "batchNo": batch_no, "productId": 1,
+        "plannedQty": 100, "currentStageSeq": 7,
+        "status": "released", "lifeCodes": [],
+        "createdBy": 1, "createdAt": "2026-08-29T00:00:00+00:00",
+        "releasedAt": "2026-08-29T10:00:00+00:00", "releasedBy": 1,
+    })
+    for i, stage in enumerate(SEED_STAGES, 1):
+        punch_id = await trace_repo.next_id("punch")
+        await trace_repo.save_punch({
+            "punchId": punch_id, "batchNo": batch_no,
+            "stageCode": stage["code"], "stageName": stage["name"],
+            "stageSeq": stage["seq"],
+            "memberId": _STAGE_WORKERS[stage["code"]],
+            "result": RESULT_PASS, "qcConclusion": "合格",
+            "params": {}, "anomalies": [], "aiQcReview": None,
+            "punchedAt": f"2026-08-28T0{i}:00:00+00:00",
+            "blockHash": "test-hash",
+        })
+
+
+class TestWorkerProfit:
+
+    async def run(self):
+        reset_store()
+        svc = RoleService()
+        credit = CreditService()
+        wallet = WalletService()
+
+        for wid in (WORKER_A, WORKER_B, WORKER_C):
+            await _setup_member(wid, growth=600)
+            await wallet.open(wid)
+        await _setup_released_batch("B-20260829-01")
+
+        # 12.1 预演(只读, 不写账)
+        preview = await svc.preview_worker_profit("B-20260829-01", 10000)
+        record("工人-预演总份额(10000×15%=1500)",
+               abs(preview["totalAmount"] - 1500) < 0.01
+               and preview["workersCount"] == 3,
+               f"实际{preview['totalAmount']}")
+        shares_by_worker = {}
+        for s in preview["shares"]:
+            shares_by_worker[s["workerId"]] = round(
+                shares_by_worker.get(s["workerId"], 0) + s["amount"], 2)
+        record("工人-预演按人聚合(A7.5%/B4.5%/C3%)",
+               abs(shares_by_worker[WORKER_A] - 750) < 0.01
+               and abs(shares_by_worker[WORKER_B] - 450) < 0.01
+               and abs(shares_by_worker[WORKER_C] - 300) < 0.01,
+               f"实际{shares_by_worker}")
+        record("工人-预演不落账",
+               not await svc.repo.ledger_exists_prefix(
+                   f"{WORKER_LEDGER_PREFIX}B-20260829-01-"))
+
+        # 12.2 结算(pass: 全员全额, 钱包入账+总账+无信用事件)
+        result = await svc.settle_worker_profit("B-20260829-01", 10000)
+        record("工人-结算总额1500(3工人7工段)",
+               abs(result["totalAmount"] - 1500) < 0.01
+               and result["workersCount"] == 3)
+        record("工人-总账7条流水(每工段一条)",
+               all(l["status"] == LEDGER_STATUS_SETTLED
+                   for l in result["ledgers"]) and len(result["ledgers"]) == 7)
+        record("工人-总账口径sale_price+角色production_worker",
+               all(l["basis"] == "sale_price"
+                   and l["roleCode"] == ROLE_PRODUCTION_WORKER
+                   for l in result["ledgers"]))
+        reward_a = await wallet.get_reward_balance(WORKER_A)
+        record("工人-钱包到账(工人A=750)",
+               abs(reward_a.get("rewardBalance", 0) - 750) < 0.01,
+               f"实际{reward_a.get('rewardBalance')}")
+        # pass 不产生信用事件
+        events = await svc.repo.list_events(role_code=ROLE_PRODUCTION_WORKER)
+        record("工人-合格结算无信用事件", len(events) == 0)
+
+        # 12.3 幂等: 批次维度一次结算
+        try:
+            await svc.settle_worker_profit("B-20260829-01", 10000)
+            record("工人-重复结算拒绝", False, "未抛出异常")
+        except ValueError:
+            record("工人-重复结算拒绝", True)
+
+        # 12.4 premium: ×1.2 + 信用+5
+        await _setup_released_batch("B-20260829-02")
+        result_p = await svc.settle_worker_profit(
+            "B-20260829-02", 10000, quality_grade="premium")
+        record("工人-优质批次×1.2(总额1800)",
+               abs(result_p["totalAmount"] - 1800) < 0.01,
+               f"实际{result_p['totalAmount']}")
+        score_a = (await credit.get_score(WORKER_A))["bambooScore"]
+        record("工人-优质信用加分(350+5=355)", score_a == 355,
+               f"实际{score_a}")
+
+        # 12.5 accident: 零分润 + 信用-15
+        await _setup_released_batch("B-20260829-03")
+        result_acc = await svc.settle_worker_profit(
+            "B-20260829-03", 10000, quality_grade="accident")
+        record("工人-事故批次零分润",
+               result_acc["totalAmount"] == 0
+               and all(s["amount"] == 0 for s in result_acc["shares"]))
+        score_a2 = (await credit.get_score(WORKER_A))["bambooScore"]
+        record("工人-事故信用扣分(355-15=340)", score_a2 == 340,
+               f"实际{score_a2}")
+
+        # 12.6 未放行批次拒绝
+        from repositories.trace_prod_repository import TraceProdRepository
+        trace_repo = TraceProdRepository()
+        await trace_repo.save_batch({
+            "batchId": 99, "batchNo": "B-NOT-RELEASED", "productId": 1,
+            "plannedQty": 10, "currentStageSeq": 3,
+            "status": "producing", "lifeCodes": [],
+            "createdBy": 1, "createdAt": "2026-08-29T00:00:00+00:00",
+        })
+        try:
+            await svc.settle_worker_profit("B-NOT-RELEASED", 10000)
+            record("工人-未放行批次拒绝", False, "未抛出异常")
+        except ValueError:
+            record("工人-未放行批次拒绝", True)
+
+        # 12.7 批次不存在 → 404
+        try:
+            await svc.settle_worker_profit("B-NOT-EXIST", 10000)
+            record("工人-批次不存在拒绝", False, "未抛出异常")
+        except KeyError:
+            record("工人-批次不存在拒绝", True)
+
+        # 12.8 质量等级非法拒绝
+        try:
+            await svc.settle_worker_profit("B-20260829-01", 10000,
+                                           quality_grade="bad")
+            record("工人-非法质量等级拒绝", False, "未抛出异常")
+        except ValueError:
+            record("工人-非法质量等级拒绝", True)
+
+
+# ============================================================
 # 主入口
 # ============================================================
 
@@ -777,9 +1048,11 @@ async def main():
         ("退款追回负账", TestClawback),
         ("月度封顶溢出记账", TestDeferredPool),
         ("试用期自动转正sweep", TestProbationSweep),
+        ("统一分润总账接入", TestLedgerIntegration),
+        ("生产工人分润", TestWorkerProfit),
     ]
     print("=" * 62)
-    print("AI智能管理模块(角色经济中枢) P0 端到端测试")
+    print("AI智能管理模块(角色经济中枢) P0+P1 端到端测试")
     print("=" * 62)
     for name, cls in test_classes:
         print(f"\n[{name}]")
