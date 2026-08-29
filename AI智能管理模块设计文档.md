@@ -1,6 +1,8 @@
 # AI智能管理模块设计文档
 
-> 版本：v1.1　日期：2026-08-29　定位：全站角色经济中枢（承接33号权限AI智能管理模块，向上统辖角色全生命周期）
+> 版本：v1.2　日期：2026-08-29　定位：全站角色经济中枢（承接33号权限AI智能管理模块，向上统辖角色全生命周期）
+>
+> v1.2 变更：P0+P1 决策与实现状态全量同步——决策项闭环报告交叉引用（§12新增）；数据模型补 role_clawbacks 负账表与口径字段（§6）；API 从设计稿18端点更新为实际25端点（§7）；闭环验证证据落档（§10）。
 >
 > v1.1 变更：D-7/D-8/D-9 三项决策全部闭环（见附录），服务分润参数定为初版基线。
 >
@@ -220,40 +222,50 @@
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
-| role_catalog | roleCode/roleName/claimConditions/quota/profitTemplateId/status | 角色目录 |
-| role_contracts | contractNo/userId/roleCode/status(probation/active/suspended/terminated)/profitTemplateVersion/signedAt/expireAt | 契约实例（签约时联动perm授权+责任书） |
-| service_dispatch_records | dispatchId/sessionId/ticketNo/orderId/assigneeId/scoreDetail(信用/技能/负载/满意度四项)/mode(dispatch/grab) | 派单记录（分润依据链） |
-| profit_ledger | ledgerNo/orderId/roleCode/userId/base/rate/coefficients/amount/status(pending/confirmed/settled/reversed)/sourceModule | 统一分润总账 |
-| credit_events | eventId/userId/roleCode/behaviorCode/delta/sourceModule/ts | 信用行为总线事件 |
-| role_claims | claimId/userId/roleCode/aiPrecheck/approvalChain/status | 认领申请（复用perm审批链） |
+| role_catalog | roleCode/roleName/claimConditions/creditThreshold/quota/profitDesc/dutyTerms/status | 角色目录（7角色种子） |
+| role_claims | claimId/userId/roleCode/aiPrecheck(passed/reasons/bambooScore)/status(pending/approved/rejected)/reviewer | 认领申请（AI预审：信用门槛/配额/重复拦截） |
+| role_contracts | contractNo/userId/roleCode/status(probation/active/suspended/terminated)/dutyTerms/profitTerms/profitTemplateVersion/signedAt/probationEndsAt/expireAt | 权责利三合一契约实例（条款版本快照） |
+| service_dispatch_records | dispatchId/sessionId/ticketNo/assigneeId/scoreDetail(信用/技能/负载/满意度四维)/mode(dispatch/grab) | 派单记录（分润依据链） |
+| profit_ledger | ledgerNo/ticketNo/refNo/roleCode/userId/**basis(sale_price/diff_profit/purchase_amount)**/base/rate/coefficients/amount/payable/clawbackDeducted/deferredAmount/status(pending/settled/reversed)/sourceModule | 统一分润总账（D-7 三轨道） |
+| credit_events | eventId/userId/roleCode/behaviorCode/delta/sourceModule/refId/ts | 信用行为总线事件（分发竹信分引擎） |
+| **role_clawbacks** | userId:roleCode → 负账余额 | 退款追回负账（D-8.1：抵扣+冻结接单） |
 
-所有表沿用现有存储模式（内存dict/Redis Hash，键前缀`zhuxiang:`，写操作加`lock:`分布式锁）。
+所有表沿用现有存储模式（内存dict/Redis Hash，键前缀`zhuxiang:`，写操作加`lock:`分布式锁：派单`role:dispatch:{sessionId}`、结算`role:settle:{ticketNo}`、工人结算`role:worker-settle:{batchNo}`、签约`role:sign:{claimId}`）。
 
 ---
 
-## 7. API设计（初版18个）
+## 7. API设计（已实现 25 个端点）
 
-**用户端（JWT）**：
+**用户端（X-Member-Id，8个）**：
 - `GET /api/role/catalog` 角色目录（含认领条件与收益说明）
-- `POST /api/role/claim` 提交认领申请
-- `GET /api/role/my/contracts` 我的契约列表
-- `POST /api/role/contracts/{id}/sign` 签署契约（三合一）
-- `POST /api/role/contracts/{id}/renew` / `terminate` 续约/退出
+- `POST /api/role/claim` 提交认领申请（AI预审）
+- `GET /api/role/my/claims` 我的认领申请
+- `POST /api/role/contracts/sign` 签署契约（三合一，签约即试用）
+- `GET /api/role/my/contracts` 我的契约列表（含试用期到期标记）
+- `POST /api/role/my/contracts/{id}/terminate` 主动退出
 - `GET /api/role/my/earnings` 我的分润流水（含系数明细）
 - `GET /api/role/my/credit-events` 我的信用行为记录
 
-**管理端（X-Role: admin）**：
+**管理端（X-Role: admin，14个）**：
 - `POST /api/role/admin/catalog` 维护角色目录
-- `GET /api/role/admin/claims` / `POST /api/role/admin/claims/{id}/approve|reject`
-- `GET /api/role/admin/contracts` 契约管理（冻结/清退）
-- `GET /api/role/admin/ledger` 分润总账查询（按模块/角色/状态筛选）
-- `POST /api/role/admin/settle/run` 手动触发结算批次
-- `GET /api/role/admin/risk-summary` AI风控汇总（异常分润/信用异动/套利检测）
+- `GET /api/role/admin/claims` + `POST /api/role/admin/claims/{id}/review` 认领审批
+- `GET /api/role/admin/contracts` + `POST /api/role/admin/contracts/{id}/action`（activate/suspend/terminate）
+- `GET /api/role/admin/ledger` 分润总账查询（按用户/角色/**口径**/状态筛选）
+- `GET /api/role/admin/risk-summary` AI风控汇总（总账/契约/负账/溢出池/口径分布）
+- `POST /api/role/service-profit/reverse` 退款追回（D-8.1）
+- `POST /api/role/service-profit/retry` pending流水重试入账
+- `POST /api/role/admin/probation-sweep` 试用期满自动转正扫描（D-8.4）
+- `POST /api/role/ledger/record` 统一记账（外部模块回写，幂等；P1）
+- `POST /api/role/worker-profit/settle` 工人分润结算（P1，批次幂等）
+- `GET /api/role/worker-profit/preview/{batch_no}` 工人分润预演（P1，只读）
 
-**内部接口（服务间调用）**：
-- `POST /api/role/dispatch` 派单请求（chat转人工时调用）
-- `POST /api/role/credit/event` 信用行为事件发布
-- `POST /api/role/ledger/record` 分润记账（各业务模块结算后回写总账）
+**客服/内部（X-Role: admin/cs_staff，3个）**：
+- `POST /api/role/service-profit/settle` 工单满意度确认后即时结算（幂等）
+- `GET /api/role/service-profit/clawback/{user_id}` 负账余额与冻结状态查询
+- `POST /api/role/dispatch` 派单调度入口（chat转人工内部调用）
+- `POST /api/role/credit/event` 信用行为事件发布（服务间）
+
+> 端点规划差异说明：设计稿的 `contracts/{id}/renew`（续约）与 `admin/settle/run`（手动结算批次）未在 P0/P1 实现——续约由到期复审流程覆盖（P2），结算批次由 ticket 确认钩子与三模块旁路记账替代；实际新增了设计稿未列的 reverse/retry/clawback/probation-sweep/worker-profit 等治理端点。
 
 ---
 
@@ -281,12 +293,21 @@
 - **客服工作台增强**：接单队列（派单/抢单）、本次服务预估分润实时显示、满意度与信用分看板；
 - **管理后台**：角色目录管理、认领审批、分润总账对账、AI风控大盘。
 
-## 10. 测试与验收
+## 10. 测试与验收（已执行）
 
-- 核心闭环E2E：会员下单→AI会话→转人工→派单→服务→确认+评分→分润结算→钱包入账→信用变更→下次派单权重变化（全链路断言）；
-- 对等性测试：差评/超时/升级场景分润为零且信用扣减；
-- 防套利测试：同人自导、高频刷单、异常金额；
-- 并发测试：派单原子性（锁`role:dispatch:{sessionId}`）、结算幂等（ledgerNo去重）。
+**测试入口**：`backend/test_role_routes.py`（asyncio 内存模式，LOCK_MODE/STORE_MODE=asyncio）
+
+| 验收项 | 结果 | 说明 |
+|---|---|---|
+| 核心闭环E2E | ✅ | 会员下单→AI会话→"转人工"→自动建source=ai工单→派单高信用客服→服务→5星确认→分润¥33.12入钱包→信用+5→下次派单权重变化（全链路断言） |
+| 对等性测试 | ✅ | 2星零分润+信用-5；超时分润减半；被升级分润取消 |
+| 防套利测试 | ✅ | 同人自导拒绝；负账超¥500冻结派单；单笔/月度双封顶 |
+| 并发测试 | ✅ | 派单锁`role:dispatch:{sessionId}`；结算幂等（ledgerNo去重）；工人结算批次幂等（前缀判重） |
+| P1总账接入 | ✅ | venue三角色流水/agent进货额轨道/traffic佣金轨道/重复记账幂等/三轨道分布汇总 |
+| P1工人分润 | ✅ | 预演只读、7工段份额、premium×1.2、accident零分润、未放行拒绝 |
+| 回归验证 | ✅ | chat 56 / ticket 38 / credit 117 / venue 79 / agent 48 / traffic 48 / payout 48 无破坏；`import main` 验证通过 |
+
+**累计**：93项E2E全通过（P0 63项 + P1 30项）。
 
 ## 11. 开发分期
 
@@ -294,15 +315,31 @@
 |---|---|
 | P0 | 角色目录+契约引擎+客服服务分润闭环（含chat转人工改造：自动建工单+真实派单）+信用总线桥接（竹信分/权责信用分） | ✅ 已实现（2026-08-29，46项E2E测试通过） |
 | P1 | 生产工人分润+生命码联动、统一分润总账、代理/酒店/推广模块总账接入、D-7口径对齐 | ✅ 已实现（2026-08-29，累计93项E2E+四模块回归223项通过） |
-| P2 | AI监管大脑（满意度预测/异常检测/动态系数调优）、抢单模式、季度联合结算 |
+| P2 | AI监管大脑（满意度预测/异常检测/动态系数调优）、抢单模式、季度联合结算 | 待启动 |
 
 ---
 
-## 附：本设计依赖的前置决策项
+## 12. 实现交付摘要
+
+| 交付项 | 内容 | 提交 |
+|---|---|---|
+| P0 主提交 | role模块四文件 + chat/ticket断链修复 + D-9前端4处口径同步（13文件，+3190行） | `eabaae8` |
+| 钩子修复 | pre-commit状态机v2（嵌套模板字符串级联误报修复） | `a886da5` |
+| P1 提交 | 统一总账三模块接入 + 工人分润 + P0遗留routes import补回（10文件，+795行） | `5ae4564` |
+
+**决策闭环报告**：P0 范围内 8 项决策（D-7/D-8/D-9 及细化子项）的"问题→结论→落地→验证"全过程记录，见 [AI智能管理模块P0决策闭环报告.md](AI智能管理模块P0决策闭环报告.md)。
+
+**实现中形成的两条关键设计修正**（均已落码并留档）：
+1. **信用系数即时映射**：分润系数按 `level_from_score(当前竹信分)` 计算，不用 `creditLevel` 字段（v8.0持续天数评估结果有时滞），见 §5.3 实现说明；
+2. **工人信用事件按人去重**：同一工人多工段打卡，质量奖惩只计一次（premium +5 / accident -15 均按 workerId 去重），避免多工段者倍数奖惩。
+
+---
+
+## 附：决策项闭环总表（P0 范围 8 项，全部确认并落地）
 
 | 编号 | 内容 | 状态 |
 |---|---|---|
-| D-7 | 分润基数口径：双轨制——合作商既有协议维持"差价利润60/20/20"旧口径，过程服务角色采用"实际销售价格×60%"新口径子池，profit_ledger双轨道记账（basis=diff_profit / sale_price） | ✅ 已确认（2026-08-29） |
+| D-7 | 分润基数口径：三轨道——合作商既有协议维持"差价利润60/20/20"（diff_profit），过程服务角色采用"实际销售价格×60%"子池（sale_price），代理商返利以月度进货额为基数（purchase_amount），对账分轨道核算 | ✅ 已确认+P1落地（2026-08-29） |
 | D-8 | 客服服务分润参数：基础分润率1%；满意度系数断崖式（5星2.0/4星1.2/≤3星0）；信用系数L5=1.3/L4=1.15/L3=1.0/L2=0.8/L1=0；时效系数SLA内1.2/超时0.5/被升级0；满意度确认后即时结算；单笔封顶¥50、月度封顶¥3000（超出滚入季度考核奖励池）；退款等额追回 | ✅ 已确认（2026-08-29） |
 | D-8.1 | 退款追回机制：订单退款→流水置reversed（幂等）；追回额记入负账（role_clawbacks）；下月（及以后）结算先抵扣负账（payable=应得−抵扣）再入钱包；负账累计>¥500冻结接单（派单候选剔除） | ✅ 已实现（2026-08-29细化） |
 | D-8.2 | 月度封顶溢出：超月度额度部分记 deferredAmount 滚入季度考核奖励池（风控汇总统计 deferredPoolTotal），不丢弃 | ✅ 已实现（2026-08-29细化） |
