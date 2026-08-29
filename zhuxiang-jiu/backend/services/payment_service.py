@@ -26,6 +26,7 @@ import logging
 
 from core.helpers import ts
 from core.locks import get_lock
+from core.age_gate import AGE_CONFIRM_REQUIRED_MSG
 from repositories.payment_repository import (
     PaymentRepository,
     # 支付状态
@@ -103,8 +104,20 @@ SUPPORTED_CHANNELS = {"wechat", "alipay", "unionpay", "bank", "aggregate"}
 # 支持的支付方式(按渠道细分)
 SUPPORTED_METHODS = {"native", "jsapi", "h5", "page", "transfer"}
 
-# 场景类型(与已有模块联动)
-SUPPORTED_SCENES = {"order_pay", "wallet_deposit", "agent_purchase"}
+# 场景类型(与已有模块联动; guest_order_pay 为游客扫码付免登录场景)
+SUPPORTED_SCENES = {"order_pay", "wallet_deposit", "agent_purchase",
+                    "guest_order_pay"}
+
+# 游客扫码付规则(设计文档 2.7.3/2.7.8: P0 一期核心)
+GUEST_SCENE = "guest_order_pay"
+# 游客单笔金额上限(≤ ¥5,000)
+GUEST_MAX_SINGLE_AMOUNT = 5000.0
+# 游客支付单超时(15 分钟, 区别于登录单 30 分钟)
+GUEST_EXPIRE_SECONDS = 15 * 60
+# 游客仅扫码付/拉起(不支持 transfer/page)
+GUEST_ALLOWED_METHODS = {"native", "jsapi", "h5"}
+# 游客仅零售标品(团购需 SVIP / 定制需登录 / 钱包充值需登录)
+GUEST_ALLOWED_ORDER_TYPE = "retail"
 
 # 退款审核金额阈值(≥ 此值需人工审核, < 此值自动通过)
 REFUND_AUTO_APPROVE_THRESHOLD = 1000.0
@@ -148,23 +161,35 @@ class PaymentService:
                           pay_method: str = "jsapi",
                           scene_type: str = "order_pay",
                           discount_amount: float = 0.0,
-                          points_amount: float = 0.0) -> dict:
+                          points_amount: float = 0.0,
+                          guest_phone: str = None,
+                          age_confirmed: bool = False) -> dict:
         """创建支付订单(幂等: 同一订单只能有一个活跃支付单)
 
         Args:
-            user_id: 用户ID
+            user_id: 用户ID(游客场景传 "guest")
             order_id: 关联订单号
             order_type: 订单类型 retail/groupbuy/custom/wallet_deposit
             total_amount: 订单总金额
             pay_channel: 支付渠道 wechat/alipay/...
             pay_method: 支付方式 native/jsapi/h5/page/transfer
-            scene_type: 场景 order_pay/wallet_deposit/agent_purchase
+            scene_type: 场景 order_pay/wallet_deposit/agent_purchase/guest_order_pay
             discount_amount: 优惠抵扣
             points_amount: 积分抵扣
+            guest_phone: 游客手机号(游客场景必填)
+            age_confirmed: 已满18周岁声明(游客场景必填, 酒类合规)
+
+        游客扫码付规则(设计文档 2.7.3/2.7.8, P0 一期):
+            - 手机号必填(11 位) + 年龄声明必填(酒类合规)
+            - 单笔 ≤ ¥5,000; 待付款 15 分钟超时
+            - 仅零售标品 + 扫码付(native/jsapi/h5)
+            - 不支持优惠/积分抵扣(仅全额)
 
         Raises:
-            ValueError: 参数非法 / 已有活跃支付单
+            ValueError: 参数非法 / 已有活跃支付单 / 游客规则校验失败
         """
+        is_guest = scene_type == GUEST_SCENE
+
         # 参数校验
         if total_amount < MIN_PAY_AMOUNT:
             raise ValueError(f"支付金额须 ≥ ¥{MIN_PAY_AMOUNT}")
@@ -176,6 +201,31 @@ class PaymentService:
             raise ValueError(f"场景类型非法: {scene_type}")
         if discount_amount < 0 or points_amount < 0:
             raise ValueError("优惠/积分抵扣不能为负")
+
+        # 游客扫码付规则校验(P0-3)
+        if is_guest:
+            if not guest_phone or len(str(guest_phone)) != 11 \
+                    or not str(guest_phone).isdigit():
+                raise ValueError("游客支付须提供 11 位手机号(订单关联+物流+售后)")
+            if not age_confirmed:
+                raise ValueError(AGE_CONFIRM_REQUIRED_MSG)
+            if order_type != GUEST_ALLOWED_ORDER_TYPE:
+                raise ValueError(
+                    f"游客仅支持零售标品支付(团购/定制/钱包充值需登录), "
+                    f"当前订单类型: {order_type}")
+            if total_amount > GUEST_MAX_SINGLE_AMOUNT:
+                raise ValueError(
+                    f"游客单笔支付上限 ¥{GUEST_MAX_SINGLE_AMOUNT:,.0f}"
+                    f"(当前 ¥{total_amount:,.2f}), 大额购买请注册后下单")
+            if pay_method not in GUEST_ALLOWED_METHODS:
+                raise ValueError(
+                    f"游客仅支持扫码付/拉起支付({'/'.join(sorted(GUEST_ALLOWED_METHODS))}), "
+                    f"当前: {pay_method}")
+            if discount_amount > 0 or points_amount > 0:
+                raise ValueError("游客支付不支持优惠/积分抵扣(仅全额支付)")
+            # 游客场景无登录身份
+            user_id = "guest"
+
         actual_amount = round(total_amount - discount_amount - points_amount, 2)
         if actual_amount < MIN_PAY_AMOUNT:
             raise ValueError(f"实付金额须 ≥ ¥{MIN_PAY_AMOUNT}")
@@ -190,11 +240,12 @@ class PaymentService:
                 )
             # 创建支付单
             pay_no = await self.repo.next_pay_no()
-            # 超时时间(ISO8601)
+            # 超时时间(ISO8601; 游客单 15 分钟, 登录单 30 分钟)
             from datetime import datetime, timezone, timedelta
             tz = timezone(timedelta(hours=8))
+            expire_seconds = GUEST_EXPIRE_SECONDS if is_guest else PAY_EXPIRE_SECONDS
             expire_time = (datetime.now(tz) +
-                           timedelta(seconds=PAY_EXPIRE_SECONDS)).isoformat()
+                           timedelta(seconds=expire_seconds)).isoformat()
             order_data = {
                 "payNo": pay_no,
                 "orderId": order_id,
@@ -215,6 +266,9 @@ class PaymentService:
                 "callbackContent": "",
                 "sceneType": scene_type,
                 "failReason": "",
+                # 游客扫码付标识(设计文档 2.7.8: is_guest_order/guest_phone)
+                "isGuest": is_guest,
+                "guestPhone": str(guest_phone) if is_guest else "",
                 "createdAt": ts(),
                 "updatedAt": ts(),
             }
@@ -233,6 +287,8 @@ class PaymentService:
                 "status": PAY_STATUS_PENDING,
                 "statusName": PAY_STATUS_NAMES[PAY_STATUS_PENDING],
                 "expireTime": expire_time,
+                "isGuest": is_guest,
+                "guestPhone": order_data["guestPhone"],
                 "createdAt": order_data["createdAt"],
             }
 

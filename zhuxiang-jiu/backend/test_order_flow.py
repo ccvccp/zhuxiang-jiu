@@ -344,7 +344,7 @@ class TestPaymentOps:
         assert resp.status_code in (200, 404)
 
     def test_create_payment_missing_member_id(self):
-        """缺失 X-Member-Id: 401/403"""
+        """缺失 X-Member-Id: 401/403(非游客场景仍强制登录)"""
         order_resp = _submit_checkout()
         order_id = order_resp.json()["orderId"]
         resp = client.post("/api/payment/pay", json={
@@ -352,6 +352,49 @@ class TestPaymentOps:
             "totalAmount": 398.0, "payChannel": "wechat",
         })
         assert resp.status_code in (400, 401, 403, 422)
+
+    def test_guest_payment_without_login(self):
+        """游客扫码付(P0-3): guest_order_pay 免登录创建支付单"""
+        order_resp = _submit_checkout()
+        order_id = order_resp.json()["orderId"]
+        resp = client.post("/api/payment/pay", json={
+            "orderId": order_id, "orderType": "retail",
+            "totalAmount": 398.0, "payChannel": "wechat",
+            "payMethod": "native", "sceneType": "guest_order_pay",
+            "guestPhone": "13900001111", "ageConfirmed": True,
+        })
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["success"] is True
+        assert data["isGuest"] is True
+        assert data["guestPhone"] == "13900001111"
+        assert data["actualAmount"] == 398.0
+
+    def test_guest_payment_missing_age_confirm(self):
+        """游客扫码付: 缺年龄声明 → 409(酒类合规 P0-1 联动)"""
+        order_resp = _submit_checkout()
+        order_id = order_resp.json()["orderId"]
+        resp = client.post("/api/payment/pay", json={
+            "orderId": order_id, "orderType": "retail",
+            "totalAmount": 398.0, "payChannel": "wechat",
+            "payMethod": "native", "sceneType": "guest_order_pay",
+            "guestPhone": "13900001111",
+        })
+        assert resp.status_code == 409
+        assert "18" in resp.json()["error"]
+
+    def test_guest_payment_over_limit(self):
+        """游客扫码付: 单笔超 ¥5,000 上限 → 409"""
+        order_resp = _submit_checkout()
+        order_id = order_resp.json()["orderId"]
+        resp = client.post("/api/payment/pay", json={
+            "orderId": order_id, "orderType": "retail",
+            "totalAmount": 5000.01, "payChannel": "wechat",
+            "payMethod": "native", "sceneType": "guest_order_pay",
+            "guestPhone": "13900001111", "ageConfirmed": True,
+        })
+        assert resp.status_code == 409
+        assert "上限" in resp.json()["error"]
 
     def test_create_payment_missing_order_id(self):
         """缺失 orderId: 422"""

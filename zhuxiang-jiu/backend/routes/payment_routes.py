@@ -87,9 +87,11 @@ class CreatePayRequest(PydBaseModel):
     totalAmount: float = Field(..., gt=0, description="订单总金额")
     payChannel: str = Field("alipay", description="支付渠道 wechat/alipay/unionpay/bank/aggregate")
     payMethod: str = Field("jsapi", description="支付方式 native/jsapi/h5/page/transfer")
-    sceneType: str = Field("order_pay", description="场景 order_pay/wallet_deposit/agent_purchase")
+    sceneType: str = Field("order_pay", description="场景 order_pay/wallet_deposit/agent_purchase/guest_order_pay(游客免登录)")
     discountAmount: float = Field(0, ge=0, description="优惠抵扣")
     pointsAmount: float = Field(0, ge=0, description="积分抵扣")
+    guestPhone: str | None = Field(None, description="游客手机号(游客场景必填, 11位)")
+    ageConfirmed: bool = Field(False, description="已满18周岁声明(游客场景必填, 酒类合规)")
 
 
 class PayCallbackRequest(PydBaseModel):
@@ -219,8 +221,16 @@ async def create_pay(
     req: CreatePayRequest,
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """创建支付订单(幂等: 同一订单只能有一个活跃支付单)"""
-    user_id = _require_member_id(x_member_id)
+    """创建支付订单(幂等: 同一订单只能有一个活跃支付单)
+
+    游客扫码付(P0-3): sceneType=guest_order_pay 时免登录(不校验 X-Member-Id),
+    须携带 guestPhone(11位)+ageConfirmed=true; 单笔 ≤ ¥5,000, 仅零售全额扫码付。
+    """
+    # 游客场景免登录(文档 2.7.1: 免登录临时单, 降低购物门槛)
+    if req.sceneType == "guest_order_pay":
+        user_id = "guest"
+    else:
+        user_id = _require_member_id(x_member_id)
     try:
         return await _service.create_pay(
             user_id=user_id,
@@ -232,6 +242,8 @@ async def create_pay(
             scene_type=req.sceneType,
             discount_amount=req.discountAmount,
             points_amount=req.pointsAmount,
+            guest_phone=req.guestPhone,
+            age_confirmed=req.ageConfirmed,
         )
     except KeyError as e:
         raise _map_key_error(e) from e

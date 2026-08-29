@@ -125,6 +125,111 @@ async def run_e2e():
     except ValueError:
         check("渠道非法失败", True)
 
+    # 1.4b 游客扫码付(P0-3, 设计文档 2.7)
+    print("  --- create_pay: 游客扫码付(guest_order_pay) ---")
+
+    # 游客正常创建(免登录临时单)
+    r = await svc.create_pay(
+        user_id="guest", order_id="GUEST_ORD_001", order_type="retail",
+        total_amount=398.00, pay_channel="wechat", pay_method="native",
+        scene_type="guest_order_pay",
+        guest_phone="13900001111", age_confirmed=True,
+    )
+    check("游客支付创建成功", r["success"] and r["payNo"].startswith("PAY"))
+    check("游客单 isGuest 标记", r.get("isGuest") is True)
+    check("游客单 guestPhone 落库", r.get("guestPhone") == "13900001111")
+    check("游客单全额无抵扣", r["actualAmount"] == 398.00)
+    guest_pay_no = r["payNo"]
+
+    # 游客单笔上限 ¥5,000(边界: 5000 允许 / 5000.01 拒绝)
+    r = await svc.create_pay(
+        user_id="guest", order_id="GUEST_ORD_002", order_type="retail",
+        total_amount=5000.00, pay_channel="alipay", pay_method="h5",
+        scene_type="guest_order_pay",
+        guest_phone="13900001111", age_confirmed=True,
+    )
+    check("游客单笔 5000 边界允许", r["success"])
+    try:
+        await svc.create_pay(
+            user_id="guest", order_id="GUEST_ORD_003", order_type="retail",
+            total_amount=5000.01, pay_channel="alipay", pay_method="h5",
+            scene_type="guest_order_pay",
+            guest_phone="13900001111", age_confirmed=True,
+        )
+        check("游客超单笔上限应失败", False)
+    except ValueError as e:
+        check("游客超单笔上限失败", "上限" in str(e))
+
+    # 游客手机号必填
+    try:
+        await svc.create_pay(
+            user_id="guest", order_id="GUEST_ORD_004", order_type="retail",
+            total_amount=100.00, pay_channel="wechat", pay_method="native",
+            scene_type="guest_order_pay", age_confirmed=True,
+        )
+        check("游客缺手机号应失败", False)
+    except ValueError as e:
+        check("游客缺手机号失败", "手机号" in str(e))
+
+    # 年龄声明必填(酒类合规 P0-1 联动)
+    try:
+        await svc.create_pay(
+            user_id="guest", order_id="GUEST_ORD_005", order_type="retail",
+            total_amount=100.00, pay_channel="wechat", pay_method="native",
+            scene_type="guest_order_pay", guest_phone="13900001111",
+        )
+        check("游客缺年龄声明应失败", False)
+    except ValueError as e:
+        check("游客缺年龄声明失败", "18" in str(e))
+
+    # 仅零售标品(团购/定制/钱包充值需登录)
+    try:
+        await svc.create_pay(
+            user_id="guest", order_id="GUEST_ORD_006", order_type="groupbuy",
+            total_amount=100.00, pay_channel="wechat", pay_method="native",
+            scene_type="guest_order_pay",
+            guest_phone="13900001111", age_confirmed=True,
+        )
+        check("游客团购支付应失败", False)
+    except ValueError as e:
+        check("游客团购支付失败", "零售" in str(e))
+
+    # 不支持优惠/积分抵扣
+    try:
+        await svc.create_pay(
+            user_id="guest", order_id="GUEST_ORD_007", order_type="retail",
+            total_amount=100.00, pay_channel="wechat", pay_method="native",
+            scene_type="guest_order_pay", discount_amount=10.00,
+            guest_phone="13900001111", age_confirmed=True,
+        )
+        check("游客优惠抵扣应失败", False)
+    except ValueError as e:
+        check("游客优惠抵扣失败", "抵扣" in str(e))
+
+    # 仅扫码付方式(transfer 拒绝)
+    try:
+        await svc.create_pay(
+            user_id="guest", order_id="GUEST_ORD_008", order_type="retail",
+            total_amount=100.00, pay_channel="bank", pay_method="transfer",
+            scene_type="guest_order_pay",
+            guest_phone="13900001111", age_confirmed=True,
+        )
+        check("游客 transfer 支付应失败", False)
+    except ValueError as e:
+        check("游客 transfer 支付失败", "扫码" in str(e))
+
+    # 游客单 15 分钟超时(区别于登录单 30 分钟)
+    r = await svc.get_pay(guest_pay_no)
+    check("游客单超时字段存在", bool(r.get("expireTime")))
+
+    # 登录单不受 guest 规则影响(带抵扣正常, 独立 user 避免污染 1.6 列表计数)
+    r = await svc.create_pay(
+        user_id="9002", order_id="ORD20260821010", order_type="retail",
+        total_amount=8000.00, pay_channel="alipay", pay_method="jsapi",
+        scene_type="order_pay", discount_amount=100.00,
+    )
+    check("登录单超5000带抵扣正常", r["success"] and r.get("isGuest") is False)
+
     # 1.5 查询支付详情
     print("  --- get_pay: 查询支付详情 ---")
     r = await svc.get_pay(pay_no)
