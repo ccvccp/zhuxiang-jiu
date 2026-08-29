@@ -41,6 +41,8 @@ from repositories.admin_repository import (
 
 # 密码最小长度(对齐设计文档: ≥12位)
 PASSWORD_MIN_LENGTH = 12
+# 种子超管默认密码(首登强制改密, 生产环境必须修改)
+DEFAULT_SUPER_PASSWORD = "admin123"
 # 默认数据范围
 DEFAULT_DATA_SCOPE = "all"
 # 默认角色编码前缀
@@ -167,6 +169,9 @@ class AdminService:
             roles = await self.repo.get_user_roles(user["id"])
 
             # 创建会话(30分钟滑动过期)
+            # 仍在使用默认密码 → 会话标记"须改密"(除改密/登出外接口受限)
+            using_default_pwd = _verify_admin_pwd(
+                password, _hash_admin_pwd(DEFAULT_SUPER_PASSWORD))
             token = secrets.token_urlsafe(32)
             now_dt = datetime.utcnow()
             session = {
@@ -176,6 +181,7 @@ class AdminService:
                 "roleCodes": [r.get("roleCode") for r in roles],
                 "ip": ip,
                 "device": device,
+                "mustChangePassword": using_default_pwd,
                 "createdAt": now_dt.isoformat(),
                 "lastActiveAt": now_dt.isoformat(),
                 "expiresAt": (now_dt +
@@ -213,6 +219,7 @@ class AdminService:
                 "permissions": permissions,
                 "sessionToken": token,
                 "sessionExpiresAt": session["expiresAt"],
+                "mustChangePassword": using_default_pwd,
                 "lastLoginAt": user["lastLoginAt"],
             }
 
@@ -244,6 +251,14 @@ class AdminService:
                                  ).isoformat()
         await self.repo.save_session(session)
         return session
+
+    async def clear_must_change_password(self, token: str) -> None:
+        """清除会话的"须改密"标记(改密成功后调用)"""
+        session = await self.repo.get_session(token)
+        if session is None:
+            return
+        session.pop("mustChangePassword", None)
+        await self.repo.save_session(session)
 
     async def logout(self, token: str, operator_id: int = 0) -> dict:
         """登出(销毁会话)

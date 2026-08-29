@@ -33,6 +33,10 @@ from repositories.chat_repository import (
     # 知识库
     KNOW_STATUS_ENABLED,
 )
+# 会话级敏感词过滤复用风控评分模块词库(信息内容审核, 避免重复维护)
+from services.ai_scoring_ext_service import MessageContentScorer
+
+SENSITIVE_WORDS = MessageContentScorer.SENSITIVE_WORDS
 
 
 # ============================================================
@@ -126,6 +130,7 @@ class ChatService:
         """发送消息(用户消息触发AI自动回复)
 
         规则:
+            - 敏感词过滤: 消息内容命中敏感词库 → 拒绝发送(P0 内容合规)
             - 用户消息: 写入用户消息, AI检索知识库自动回复
               - 命中知识库: 回复答案, 置信度0.85
               - 未命中: 回复兜底文案, 置信度0.3, unresolved_count+1
@@ -137,8 +142,14 @@ class ChatService:
 
         Raises:
             KeyError: 会话不存在
-            ValueError: 会话已关闭
+            ValueError: 会话已关闭 / 含敏感词
         """
+        # 敏感词过滤(写入前拦截, 复用风控评分模块词库)
+        if content:
+            hit = next((w for w in SENSITIVE_WORDS if w in content), None)
+            if hit:
+                raise ValueError("消息包含敏感词, 发送被拒绝(请修改后重发)")
+
         lock_key = f"chat:session:{session_id}"
 
         async with get_lock(lock_key):

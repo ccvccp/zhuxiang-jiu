@@ -41,6 +41,7 @@ _service = AdminService()
 async def _require_admin(
     x_role: str | None,
     x_admin_token: str | None = None,
+    allow_password_change: bool = False,
 ) -> dict | None:
     """校验管理员权限(会话 Token 优先, 兼容旧 X-Role 头)
 
@@ -48,16 +49,24 @@ async def _require_admin(
         - strict: 仅 X-Admin-Token 有效会话可访问
         - compat(默认): 有效会话 或 旧 X-Role: admin 头均可访问
 
+    首登强制改密: 会话带 mustChangePassword 标记(默认密码未修改)时,
+    仅放行改密端点(allow_password_change=True), 其余接口 403。
+
     Returns:
         有效会话 dict(含 userId); 旧头兼容模式返回 None
 
     Raises:
-        HTTPException: 401(会话无效/过期) 或 403(无权限)
+        HTTPException: 401(会话无效/过期) 或 403(无权限/须先改密)
     """
     # 会话 Token 优先
     if x_admin_token:
         session = await _service.verify_session(x_admin_token)
         if session is not None:
+            if session.get("mustChangePassword") and not allow_password_change:
+                raise HTTPException(
+                    status_code=403,
+                    detail="首次登录请先修改默认密码(POST /api/admin/users/"
+                           "{user_id}/reset-password)")
             return session
         raise HTTPException(status_code=401, detail="会话无效或已过期, 请重新登录")
     # 兼容旧头(AUTH_MODE=strict 时拒绝)
@@ -279,8 +288,15 @@ async def reset_password(
     x_admin_token: str = Header(None, alias="X-Admin-Token"),
     x_admin_id: str = Header(None, alias="X-Admin-Id"),
 ):
-    """密码重置(超管重置任意管理员密码, 新密码须满足复杂度)"""
-    session = await _require_admin(x_role, x_admin_token)
+    """密码重置(超管重置任意管理员密码, 新密码须满足复杂度)
+
+    首登强制改密: 会话带 mustChangePassword 标记时仅可重置本人密码。
+    """
+    session = await _require_admin(x_role, x_admin_token,
+                                    allow_password_change=True)
+    if session and session.get("mustChangePassword") and user_id != session.get("userId"):
+        raise HTTPException(
+            status_code=403, detail="首次登录须先修改本人密码")
     operator_fallback = session.get("userId", 0) if session else 0
     operator_id = _get_operator_id(x_admin_id) or operator_fallback
     try:
@@ -288,6 +304,9 @@ async def reset_password(
             user_id=user_id, new_password=data.newPassword,
             operator_id=operator_id,
         )
+        # 改密成功后解除会话"须改密"限制
+        if session and session.get("mustChangePassword"):
+            await _service.clear_must_change_password(x_admin_token)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

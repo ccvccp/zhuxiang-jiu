@@ -33,7 +33,7 @@ from repositories.compliance_repository import (
     # 存证类型
     EVIDENCE_TYPE_COMPLIANCE, EVIDENCE_TYPE_RISK, EVIDENCE_TYPE_DISPOSAL, EVIDENCE_TYPE_REGULATORY,
     # 处置方式
-    DISPOSAL_WARN, DISPOSAL_LIMIT, DISPOSAL_BLOCK, REPORT_TYPE_LARGE_AMOUNT, REPORT_TYPE_SUSPICIOUS, REPORT_TYPE_REGULAR, REPORT_TYPE_INQUIRY,
+    DISPOSAL_WARN, DISPOSAL_LIMIT, DISPOSAL_BLOCK, DISPOSAL_REPORT, REPORT_TYPE_LARGE_AMOUNT, REPORT_TYPE_SUSPICIOUS, REPORT_TYPE_REGULAR, REPORT_TYPE_INQUIRY,
     # 分析周期
     PERIOD_DAILY, PERIOD_WEEKLY, PERIOD_MONTHLY,
 )
@@ -64,9 +64,15 @@ def _score_to_level(score: float) -> str:
 
 
 def _level_to_disposal(risk_level: str) -> str:
-    """风险等级→处置方式"""
+    """风险等级→处置方式(对齐设计文档分级处置)
+
+    - 极高(extreme): 上报监管+人工复核(不能仅系统自动拦截)
+    - 高(high): 拦截
+    - 中(medium): 限制+警告
+    - 低(low): 警告
+    """
     disposal_map = {
-        RISK_LEVEL_EXTREME: DISPOSAL_BLOCK,
+        RISK_LEVEL_EXTREME: DISPOSAL_REPORT,
         RISK_LEVEL_HIGH: DISPOSAL_BLOCK,
         RISK_LEVEL_MEDIUM: DISPOSAL_LIMIT,
         RISK_LEVEL_LOW: DISPOSAL_WARN,
@@ -118,6 +124,7 @@ class ComplianceService:
                 "anomalyIdentify": anomaly_identify or {"detected": False},
                 "riskLevel": risk_level,
                 "disposal": disposal,
+                "needManualReview": risk_level == RISK_LEVEL_EXTREME,
                 "aiAutomationRate": ai_automation_rate,
                 "createdAt": ts(),
             }
@@ -320,6 +327,7 @@ class ComplianceService:
                 "riskPreposition": {"disposal": disposal},
                 "riskLevel": risk_level,
                 "riskScore": risk_score,
+                "needManualReview": risk_level == RISK_LEVEL_EXTREME,
                 "aiAutomationRate": ai_automation_rate,
                 "createdAt": ts(),
             }
@@ -348,6 +356,7 @@ class ComplianceService:
                 "riskLevel": risk_level,
                 "riskScore": risk_score,
                 "disposal": disposal,
+                "needManualReview": risk_level == RISK_LEVEL_EXTREME,
                 "evidenceId": evidence_id,
                 "evidenceHash": evidence_hash,
             }

@@ -46,6 +46,32 @@ MIN_AMOUNT = 1000
 MIN_QUALIFICATION_FILES = 1
 
 
+# ============================================================
+# 保证金阶梯规则(设计文档 3.1.2: 按定制金额 15%-30% 阶梯)
+# ============================================================
+
+# (金额下限, 保证金比例): ≥50万→15%, 20-50万→20%, 5-20万→25%, 1-5万→30%
+DEPOSIT_RATE_TIERS = (
+    (500000, 0.15),
+    (200000, 0.20),
+    (50000, 0.25),
+    (10000, 0.30),
+)
+
+
+def calculate_deposit_rate(amount: float) -> float:
+    """按合作金额查询保证金阶梯比例(15%-30%)"""
+    for threshold, rate in DEPOSIT_RATE_TIERS:
+        if amount >= threshold:
+            return rate
+    return DEPOSIT_RATE_TIERS[-1][1]
+
+
+def calculate_deposit_amount(amount: float) -> float:
+    """按合作金额计算保证金金额(阶梯比例×金额)"""
+    return round(amount * calculate_deposit_rate(amount), 2)
+
+
 class CooperationService:
     """合作接口管理业务逻辑(双模式存储, 锁保护 RMW)"""
 
@@ -258,13 +284,16 @@ class CooperationService:
 
         规则:
             - 申请状态必须为 approved
+            - 保证金阶梯(设计文档3.1.2):
+              · 未指定(=0): 按申请金额自动计算(15%-30%阶梯)
+              · 指定: 不得低于阶梯标准金额(防低收)
             - 创建合作协议(status=active)
             - 激活合作方(status=active)
             - 申请状态 → signed
 
         Raises:
             KeyError: 申请不存在
-            ValueError: 状态不允许签约
+            ValueError: 状态不允许签约 / 保证金低于阶梯标准
         """
         lock_key = f"cooperation:app:{application_id}"
         async with get_lock(lock_key):
@@ -274,6 +303,19 @@ class CooperationService:
             if app["status"] != APP_STATUS_APPROVED:
                 raise ValueError(
                     f"当前状态({app['status']})不允许签约, 仅审核通过可签约"
+                )
+
+            # 保证金阶梯校验/自动计算
+            estimated_amount = app.get("estimatedAmount", 0)
+            deposit_required = calculate_deposit_amount(estimated_amount)
+            deposit_rate = calculate_deposit_rate(estimated_amount)
+            if deposit_amount <= 0:
+                deposit_amount = deposit_required
+            elif deposit_amount < deposit_required:
+                raise ValueError(
+                    f"保证金({deposit_amount})低于阶梯标准"
+                    f"(合作金额{estimated_amount}×{deposit_rate:.0%}"
+                    f"={deposit_required})" 
                 )
 
             # 创建协议
@@ -322,6 +364,8 @@ class CooperationService:
                 "contractId": contract_id,
                 "contractNo": contract_no,
                 "partnerStatus": PARTNER_STATUS_ACTIVE,
+                "depositAmount": deposit_amount,
+                "depositRate": deposit_rate,
                 "signedAt": now,
             }
 
@@ -335,15 +379,30 @@ class CooperationService:
                                 deposit_amount: float = 0) -> dict:
         """独立创建合作协议
 
+        保证金阶梯(设计文档3.1.2):
+            - 未指定(=0): 按协议金额自动计算(15%-30%阶梯)
+            - 指定: 不得低于阶梯标准金额(防低收)
+
         Raises:
             KeyError: 合作方不存在
-            ValueError: 合作方已终止
+            ValueError: 合作方已终止 / 保证金低于阶梯标准
         """
         partner = await self.repo.get_partner(partner_id)
         if partner is None:
             raise KeyError(f"合作方不存在(id={partner_id})")
         if partner["status"] == PARTNER_STATUS_TERMINATED:
             raise ValueError("合作方已终止, 不可创建协议")
+
+        # 保证金阶梯校验/自动计算
+        deposit_required = calculate_deposit_amount(amount)
+        deposit_rate = calculate_deposit_rate(amount)
+        if deposit_amount <= 0:
+            deposit_amount = deposit_required
+        elif deposit_amount < deposit_required:
+            raise ValueError(
+                f"保证金({deposit_amount})低于阶梯标准"
+                f"(协议金额{amount}×{deposit_rate:.0%}={deposit_required})"
+            )
 
         contract_id = await self.repo.next_contract_id()
         contract_no = f"CT{int(datetime.utcnow().timestamp())}{contract_id:06d}"

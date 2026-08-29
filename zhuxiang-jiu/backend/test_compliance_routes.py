@@ -37,7 +37,7 @@ from repositories.compliance_repository import (
     # 存证类型
     EVIDENCE_TYPE_COMPLIANCE, EVIDENCE_TYPE_RISK, EVIDENCE_TYPE_DISPOSAL, EVIDENCE_TYPE_REGULATORY,
     # 处置方式
-    DISPOSAL_WARN, DISPOSAL_LIMIT, DISPOSAL_BLOCK,
+    DISPOSAL_WARN, DISPOSAL_LIMIT, DISPOSAL_BLOCK, DISPOSAL_REPORT,
     # 报送类型
     REPORT_TYPE_LARGE_AMOUNT, REPORT_TYPE_SUSPICIOUS, REPORT_TYPE_REGULAR, REPORT_TYPE_INQUIRY,
     # 分析周期
@@ -321,10 +321,12 @@ class TestRiskWarning:
                result["riskLevel"] == RISK_LEVEL_EXTREME,
                f"expected {RISK_LEVEL_EXTREME}, got {result['riskLevel']}")
 
-        # test 29: 高风险处置方式(block)
+        # test 29: 极高风险处置方式(report 上报+人工复核, 2026-08-29 P0-14 对齐文档)
         record("test_29_high_risk_disposal",
-               result["disposal"] == DISPOSAL_BLOCK,
-               f"expected {DISPOSAL_BLOCK}, got {result['disposal']}")
+               result["disposal"] == DISPOSAL_REPORT
+               and result.get("needManualReview") is True,
+               f"expected {DISPOSAL_REPORT}+manualReview, "
+               f"got {result['disposal']}")
 
         # test 30: 风险类型为空
         try:
