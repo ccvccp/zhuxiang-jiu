@@ -61,6 +61,8 @@ from routes.site_theme_routes import register_site_theme_routes
 from routes.perm_routes import register_perm_routes
 # 产品溯源管理模块
 from routes.trace_prod_routes import register_trace_prod_routes
+# 客服工单模块
+from routes.ticket_routes import register_ticket_routes
 
 __all__ = [
     # 已有(15)
@@ -105,4 +107,5 @@ __all__ = [
     "register_site_theme_routes",
     "register_perm_routes",
     "register_trace_prod_routes",
+    "register_ticket_routes",
 ]
