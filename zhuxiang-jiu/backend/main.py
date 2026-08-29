@@ -78,6 +78,8 @@ from routes import (
     register_ticket_routes,
     # AI智能管理模块(角色经济中枢)
     register_role_routes,
+    # AI智能自动引流模块
+    register_attract_routes,
     # 限时秒杀模块
     register_flashsale_routes,
     # AI 语义评分层(v7.2)
@@ -207,6 +209,7 @@ register_perm_routes(app)
 register_trace_prod_routes(app)
 register_ticket_routes(app)
 register_role_routes(app)
+register_attract_routes(app)
 register_flashsale_routes(app)
 register_ai_scoring_routes(app)
 register_ai_scoring_ext_routes(app)
