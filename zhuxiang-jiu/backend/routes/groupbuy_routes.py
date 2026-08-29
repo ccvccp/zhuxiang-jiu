@@ -199,6 +199,37 @@ async def list_orders(
         _handle(e)
 
 
+# ------------------------------------------------------------
+# 管理端静态路由(必须置于 /{order_no} 动态路由之前, 避免遮蔽)
+# ------------------------------------------------------------
+
+@router.get("/api/groupbuy/pending", tags=["团购模块"])
+async def list_pending_orders(
+    x_role: str = Header(None, alias="X-Role"),
+    limit: int = Query(50, ge=1, le=200, description="返回数量"),
+):
+    """待审核订单列表(管理端)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.list_pending_orders(limit=limit)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/groupbuy/stats", tags=["团购模块"])
+async def get_stats(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """团购统计(管理端)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.get_stats()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/groupbuy/{order_no}", tags=["团购模块"])
 async def get_order_detail(
     order_no: str,
@@ -248,37 +279,6 @@ async def cancel_order(
             user_id=data.userId,
             reason=data.reason,
         )
-        return {"success": True, "data": result}
-    except Exception as e:
-        _handle(e)
-
-
-# ============================================================
-# 管理端接口(2 个)
-# ============================================================
-
-@router.get("/api/groupbuy/pending", tags=["团购模块"])
-async def list_pending_orders(
-    x_role: str = Header(None, alias="X-Role"),
-    limit: int = Query(50, ge=1, le=200, description="返回数量"),
-):
-    """待审核订单列表(管理端)"""
-    _require_admin(x_role)
-    try:
-        result = await _service.list_pending_orders(limit=limit)
-        return {"success": True, "data": result}
-    except Exception as e:
-        _handle(e)
-
-
-@router.get("/api/groupbuy/stats", tags=["团购模块"])
-async def get_stats(
-    x_role: str = Header(None, alias="X-Role"),
-):
-    """团购统计(管理端)"""
-    _require_admin(x_role)
-    try:
-        result = await _service.get_stats()
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
