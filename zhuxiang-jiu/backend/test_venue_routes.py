@@ -823,14 +823,16 @@ class TestSettle:
             quantity=5, svip_price=SVIP_PRICE, retail_price=RETAIL_PRICE,
         )
 
-        # test 66: S级结算(平台3% + 合作商2%)
+        # test 66: S级结算(D-4 决策后: 无代理 → 本站80%/酒店20%)
         result = await svc.settle_commission(pid)
-        # 总利润 2340, 平台 2340×3%=70.2, 合作商 2340×2%=46.8
+        # 总利润 2340, 本站 2340×80%=1872, 酒店 2340×20%=468, 代理 0
         record("test_66_settle_s_level",
                result["partnerLevel"] == PARTNER_LEVEL_S and
                result["totalProfitDiff"] == 2340.0 and
-               result["platformShare"] == 70.2 and
-               result["partnerShare"] == 46.8,
+               result["platformShare"] == 1872.0 and
+               result["partnerShare"] == 468.0 and
+               result["agentShare"] == 0.0 and
+               result["hasAgent"] is False,
                f"unexpected: {result}")
 
         # test 67: 品鉴酒数量(S级3% = 15×0.03 = 0 → 取整0)
@@ -867,7 +869,7 @@ class TestSettle:
         except KeyError:
             record("test_70_settle_nonexistent", True)
 
-        # test 71: B级结算(平台2% + 合作商0%)
+        # test 71: B级结算(D-4 决策后: 无代理 → 本站80%/酒店20%)
         partner3 = await svc.apply_partner(
             partner_type=PARTNER_TYPE_CLUB,
             partner_name="B级结算会所", credit_code="SETTLE003",
@@ -886,17 +888,47 @@ class TestSettle:
             product_id=PRODUCT_ID, product_name=PRODUCT_NAME,
             quantity=10, svip_price=SVIP_PRICE, retail_price=RETAIL_PRICE,
         )
-        # 利润 1560, 平台 1560×2%=31.2, 合作商 0
+        # 利润 1560, 本站 1560×80%=1248, 酒店 1560×20%=312
         result = await svc.settle_commission(partner3["id"])
         record("test_71_settle_b_level",
                result["partnerLevel"] == PARTNER_LEVEL_B and
-               result["platformShare"] == 31.2 and
-               result["partnerShare"] == 0.0,
+               result["platformShare"] == 1248.0 and
+               result["partnerShare"] == 312.0 and
+               result["agentShare"] == 0.0,
                f"unexpected: {result}")
 
         # test 72: 区块链哈希生成
         record("test_72_settle_blockchain_hash",
                bool(result.get("blockchainHash")),
+               f"unexpected: {result}")
+
+        # test 72b: 有代理结算(铺货带 agentId → 本站60%/代理20%/酒店20%)
+        partner4 = await svc.apply_partner(
+            partner_type=PARTNER_TYPE_HOTEL,
+            partner_name="代理供货酒店", credit_code="SETTLE004",
+        )
+        await svc.transition(partner4["id"], PARTNER_STATUS_REVIEWING)
+        await svc.audit_partner(partner4["id"], action="approve",
+                                  contract_start="x", contract_end="y",
+                                  partner_level=PARTNER_LEVEL_A)
+        await svc.transition(partner4["id"], PARTNER_STATUS_ACTIVE)
+        venue4 = await svc.create_venue(
+            partner_id=partner4["id"], venue_name="大堂",
+            venue_type="hall", address="1F",
+        )
+        await svc.add_stocking(
+            partner_id=partner4["id"], venue_id=venue4["id"],
+            product_id=PRODUCT_ID, product_name=PRODUCT_NAME,
+            quantity=10, svip_price=SVIP_PRICE, retail_price=RETAIL_PRICE,
+            supply_mode="agent", agent_id=88,
+        )
+        # 利润 1560: 本站 1560×60%=936, 代理 1560×20%=312, 酒店 1560×20%=312
+        result = await svc.settle_commission(partner4["id"])
+        record("test_72b_settle_with_agent",
+               result["platformShare"] == 936.0 and
+               result["agentShare"] == 312.0 and
+               result["partnerShare"] == 312.0 and
+               result["hasAgent"] is True,
                f"unexpected: {result}")
 
 

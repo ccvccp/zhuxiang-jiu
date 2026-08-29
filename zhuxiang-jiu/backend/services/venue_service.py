@@ -35,9 +35,21 @@ from repositories.venue_repository import (
     PARTNER_STATUS_REJECTED,
     SUPPLY_MODE_AGENT, SUPPLY_MODE_DIRECT, SUPPLY_MODES,
     STOCKING_STATUS_ACTIVE, STOCKING_STATUS_SOLDOUT, STOCKING_STATUS_OFFLINE,
-    LEVEL_TASTING_RATES, LEVEL_PLATFORM_SHARE, LEVEL_PARTNER_SHARE,
+    LEVEL_TASTING_RATES,
     LEVEL_MONTHLY_QTY_THRESHOLD,
 )
+
+
+# ============================================================
+# 多级分润比例(设计文档 5.3.1, 2026-08-29 决策 D-4 以文档为准)
+# ============================================================
+
+# 有代理: 本站 60% / 代理 20% / 酒店 20%
+SHARE_PLATFORM_WITH_AGENT = 0.60
+SHARE_AGENT = 0.20
+SHARE_PARTNER = 0.20
+# 无代理: 本站 80% / 酒店 20%
+SHARE_PLATFORM_NO_AGENT = 0.80
 
 
 class VenueService:
@@ -572,16 +584,18 @@ class VenueService:
 
     async def settle_commission(self, partner_id: int,
                                    stockings_ids: list = None) -> dict:
-        """合作商佣金结算(基于等级的差价利润分润)
+        """合作商多级分润结算(基于差价利润, 2026-08-29 决策 D-4 以文档 5.3.1 为准)
 
         规则:
-            - 平台分润 = 差价利润 × 等级平台分润比例
-            - 合作商分润 = 差价利润 × 等级合作商分润比例
+            - 有代理: 本站 60% / 代理 20% / 酒店 20%
+            - 无代理: 本站 80% / 酒店 20%
+            - 代理判定: 铺货记录携带 agentId(代理供货模式)
+            - 品鉴酒成本由本站承担(数量按等级比例分配)
             - 仅结算 active 状态的铺货记录
 
         Returns:
             {partnerId, partnerLevel, totalProfitDiff, platformShare,
-             partnerShare, stockingsCount, settleDate}
+             agentShare, partnerShare, hasAgent, stockingsCount, settleDate}
 
         Raises:
             KeyError: 合作商不存在
@@ -597,8 +611,6 @@ class VenueService:
         lock_key = f"venue:settle:{partner_id}"
         async with get_lock(lock_key):
             level = partner.get("partnerLevel", PARTNER_LEVEL_D)
-            platform_rate = LEVEL_PLATFORM_SHARE.get(level, 0.0)
-            partner_rate = LEVEL_PARTNER_SHARE.get(level, 0.0)
             tasting_rate = LEVEL_TASTING_RATES.get(level, 0.0)
 
             # 取铺货记录(全部或指定)
@@ -614,9 +626,16 @@ class VenueService:
                     status=STOCKING_STATUS_ACTIVE, limit=10000)
 
             total_profit = sum(s.get("profitDiff", 0) for s in stockings)
-            platform_share = total_profit * platform_rate
-            partner_share = total_profit * partner_rate
-            # 品鉴酒数量(免费分配)
+            # 代理判定(铺货记录含 agentId 即有代理)
+            has_agent = any(s.get("agentId") for s in stockings)
+            if has_agent:
+                platform_share = total_profit * SHARE_PLATFORM_WITH_AGENT
+                agent_share = total_profit * SHARE_AGENT
+            else:
+                platform_share = total_profit * SHARE_PLATFORM_NO_AGENT
+                agent_share = 0.0
+            partner_share = total_profit * SHARE_PARTNER
+            # 品鉴酒数量(免费分配, 成本本站承担)
             total_qty = sum(s.get("quantity", 0) for s in stockings)
             tasting_qty = int(total_qty * tasting_rate)
 
@@ -632,7 +651,9 @@ class VenueService:
                 "totalQuantity": total_qty,
                 "totalProfitDiff": round(total_profit, 2),
                 "platformShare": round(platform_share, 2),
+                "agentShare": round(agent_share, 2),
                 "partnerShare": round(partner_share, 2),
+                "hasAgent": has_agent,
                 "tastingQty": tasting_qty,
                 "tastingRate": tasting_rate,
                 "settleDate": datetime.utcnow().isoformat(),
