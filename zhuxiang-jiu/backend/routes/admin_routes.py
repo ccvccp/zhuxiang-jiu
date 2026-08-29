@@ -42,6 +42,7 @@ async def _require_admin(
     x_role: str | None,
     x_admin_token: str | None = None,
     allow_password_change: bool = False,
+    allow_two_factor: bool = False,
 ) -> dict | None:
     """校验管理员权限(会话 Token 优先, 兼容旧 X-Role 头)
 
@@ -52,16 +53,23 @@ async def _require_admin(
     首登强制改密: 会话带 mustChangePassword 标记(默认密码未修改)时,
     仅放行改密端点(allow_password_change=True), 其余接口 403。
 
+    2FA 待验证(P0-5): 会话带 pendingTwoFactor 标记(密码已过、动态口令
+    未验证)时, 仅放行 2FA 验证端点(allow_two_factor=True), 其余 403。
+
     Returns:
         有效会话 dict(含 userId); 旧头兼容模式返回 None
 
     Raises:
-        HTTPException: 401(会话无效/过期) 或 403(无权限/须先改密)
+        HTTPException: 401(会话无效/过期) 或 403(无权限/须先改密/须先2FA)
     """
     # 会话 Token 优先
     if x_admin_token:
         session = await _service.verify_session(x_admin_token)
         if session is not None:
+            if session.get("pendingTwoFactor") and not allow_two_factor:
+                raise HTTPException(
+                    status_code=403,
+                    detail="双因素验证未完成(POST /api/admin/2fa/verify)")
             if session.get("mustChangePassword") and not allow_password_change:
                 raise HTTPException(
                     status_code=403,
@@ -117,6 +125,11 @@ class LoginRequest(PydBaseModel):
     password: str = Field(..., description="密码")
     ip: str = Field("", description="登录IP")
     device: str = Field("", description="设备信息")
+    totpCode: str | None = Field(None, description="2FA 动态口令(已开启双因素的管理员必填, 6位数字)")
+
+
+class TwoFactorCodeRequest(PydBaseModel):
+    totpCode: str = Field(..., description="2FA 动态口令(6位数字)")
 
 
 class CreateUserRequest(PydBaseModel):
@@ -177,8 +190,61 @@ async def login(data: LoginRequest):
     try:
         result = await _service.login(
             username=data.username, password=data.password,
-            ip=data.ip, device=data.device,
+            ip=data.ip, device=data.device, totp_code=data.totpCode,
         )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 1b. 2FA 双因素(TOTP, P0-5: 高危角色强制)
+# ============================================================
+
+@router.post("/api/admin/2fa/setup", tags=["后台管理模块"])
+async def setup_two_factor(
+    x_role: str | None = Header(default=None, alias="X-Role"),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+    x_admin_id: str | None = Header(default=None, alias="X-Admin-Id"),
+):
+    """生成 2FA 密钥(返回 secret + otpauth URI, 未启用状态)
+
+    流程: setup(扫码绑定) → enable(提交验证码开启) → 登录须携带 totpCode
+    """
+    session = await _require_admin(x_role, x_admin_token)
+    user_id = session["userId"] if session else _get_operator_id(x_admin_id)
+    try:
+        result = await _service.setup_2fa(user_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/admin/2fa/enable", tags=["后台管理模块"])
+async def enable_two_factor(
+    data: TwoFactorCodeRequest,
+    x_role: str | None = Header(default=None, alias="X-Role"),
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+    x_admin_id: str | None = Header(default=None, alias="X-Admin-Id"),
+):
+    """开启 2FA(验证 setup 绑定的动态口令, 开启后登录强制双因素)"""
+    session = await _require_admin(x_role, x_admin_token)
+    user_id = session["userId"] if session else _get_operator_id(x_admin_id)
+    try:
+        result = await _service.enable_2fa(user_id, data.totpCode)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/admin/2fa/verify", tags=["后台管理模块"])
+async def verify_two_factor(
+    data: TwoFactorCodeRequest,
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+):
+    """登录二次验证(密码通过后提交动态口令, 清除 pendingTwoFactor 完成登录)"""
+    try:
+        result = await _service.verify_2fa_login(x_admin_token, data.totpCode)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

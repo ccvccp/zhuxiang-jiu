@@ -24,6 +24,9 @@ import secrets
 from datetime import datetime, timedelta
 
 from core.locks import get_lock
+from core.totp import (
+    generate_secret, verify_totp, provisioning_uri,
+)
 from repositories.admin_repository import (
     AdminRepository,
     _hash_admin_pwd,
@@ -79,8 +82,9 @@ class AdminService:
     # ============================================================
 
     async def login(self, username: str, password: str,
-                     ip: str = "", device: str = "") -> dict:
-        """管理员登录(密码校验 + 失败锁定)
+                     ip: str = "", device: str = "",
+                     totp_code: str = None) -> dict:
+        """管理员登录(密码校验 + 失败锁定 + 2FA 双因素)
 
         规则:
             - 用户名不存在 → 404
@@ -88,13 +92,16 @@ class AdminService:
             - 账号锁定(连续失败5次/30分钟) → 409
             - 密码错误 → 409, 累计 failCount, 满5次锁定
             - 成功 → 重置 failCount, 记录登录信息, 写入日志
+            - 2FA(P0-5): 已开启双因素的管理员须携带 totpCode;
+              未携带 → 返回 twoFactorRequired 会话(pendingTwoFactor,
+              仅放行 2FA 验证端点); 携带但错误 → 409
 
         Returns:
-            登录结果(含管理员信息 + 权限列表)
+            登录结果(含管理员信息 + 权限列表; 待 2FA 时不返回权限)
 
         Raises:
             KeyError: 管理员不存在
-            ValueError: 账号停用/锁定/密码错误
+            ValueError: 账号停用/锁定/密码错误/动态口令错误
         """
         lock_key = f"admin:login:{username}"
 
@@ -168,6 +175,45 @@ class AdminService:
             permissions = await self.repo.get_user_permissions(user["id"])
             roles = await self.repo.get_user_roles(user["id"])
 
+            # 2FA 双因素(P0-5): 已开启的管理员须通过 TOTP 验证
+            # - 未携带验证码 → 创建 pendingTwoFactor 中间会话(不放行权限)
+            # - 携带但错误 → 409(同样计入失败语义, 由调用方处理)
+            two_factor_enabled = bool(user.get("twoFactorEnabled"))
+            if two_factor_enabled:
+                if not totp_code:
+                    pending_session = self._build_session(
+                        user, roles, ip, device,
+                        using_default_pwd=False, pending_two_factor=True)
+                    await self.repo.save_session(pending_session)
+                    await self.repo.add_log({
+                        "userId": user["id"],
+                        "userName": user.get("realName") or user["username"],
+                        "roleCode": ",".join(r.get("roleCode", "")
+                                               for r in roles) if roles else "",
+                        "module": "auth",
+                        "action": "login_2fa_pending",
+                        "resourceType": "admin_user",
+                        "resourceId": str(user["id"]),
+                        "resourceName": user["username"],
+                        "beforeData": None,
+                        "afterData": {"ip": ip, "device": device},
+                        "ip": ip,
+                        "device": device,
+                        "requestId": "",
+                        "remark": "密码通过, 等待双因素验证",
+                    })
+                    return {
+                        "userId": user["id"],
+                        "username": user["username"],
+                        "twoFactorRequired": True,
+                        "sessionToken": pending_session["token"],
+                        "sessionExpiresAt": pending_session["expiresAt"],
+                        "hint": "已开启双因素认证, 请携带 totpCode 完成"
+                                "二次验证(POST /api/admin/2fa/verify)",
+                    }
+                if not verify_totp(user.get("totpSecret", ""), totp_code):
+                    raise ValueError("动态口令错误或已过期")
+
             # 创建会话(30分钟滑动过期)
             # 仍在使用默认密码 → 会话标记"须改密"(除改密/登出外接口受限)
             using_default_pwd = _verify_admin_pwd(
@@ -222,6 +268,128 @@ class AdminService:
                 "mustChangePassword": using_default_pwd,
                 "lastLoginAt": user["lastLoginAt"],
             }
+
+    # ============================================================
+    # 1b. 2FA 双因素(TOTP, P0-5: 高危角色强制)
+    # ============================================================
+
+    def _build_session(self, user: dict, roles: list, ip: str, device: str,
+                       using_default_pwd: bool = False,
+                       pending_two_factor: bool = False) -> dict:
+        """构造会话 dict(登录/pendingTwoFactor 复用)"""
+        now_dt = datetime.utcnow()
+        return {
+            "token": secrets.token_urlsafe(32),
+            "userId": user["id"],
+            "username": user["username"],
+            "roleCodes": [r.get("roleCode") for r in roles],
+            "ip": ip,
+            "device": device,
+            "mustChangePassword": using_default_pwd,
+            "pendingTwoFactor": pending_two_factor,
+            "createdAt": now_dt.isoformat(),
+            "lastActiveAt": now_dt.isoformat(),
+            "expiresAt": (now_dt +
+                           timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+                           ).isoformat(),
+        }
+
+    async def setup_2fa(self, user_id: int) -> dict:
+        """生成 2FA 密钥(未启用状态, 供验证器 App 扫码绑定)
+
+        规则:
+            - 已开启的管理员重复 setup → 409(避免覆盖在用密钥)
+            - 返回 secret + otpauth URI(二维码内容)
+
+        Raises:
+            KeyError: 管理员不存在
+            ValueError: 双因素已开启
+        """
+        async with get_lock(f"admin:user:{user_id}"):
+            user = await self.repo.get_user(user_id)
+            if user is None:
+                raise KeyError(f"管理员不存在(userId={user_id})")
+            if user.get("twoFactorEnabled"):
+                raise ValueError("双因素认证已开启, 无需重新绑定")
+            secret = generate_secret()
+            user["totpSecret"] = secret
+            user["twoFactorEnabled"] = False
+            user["updatedAt"] = datetime.utcnow().isoformat()
+            await self.repo.save_user(user)
+            return {
+                "userId": user_id,
+                "totpSecret": secret,
+                "otpauthUri": provisioning_uri(secret, user["username"]),
+                "enabled": False,
+                "hint": "请用验证器 App 扫码绑定, 再调用 "
+                        "POST /api/admin/2fa/enable 提交验证码完成开启",
+            }
+
+    async def enable_2fa(self, user_id: int, totp_code: str) -> dict:
+        """开启 2FA(验证 setup 生成的密钥绑定的验证码)
+
+        Raises:
+            KeyError: 管理员不存在
+            ValueError: 未 setup / 验证码错误
+        """
+        async with get_lock(f"admin:user:{user_id}"):
+            user = await self.repo.get_user(user_id)
+            if user is None:
+                raise KeyError(f"管理员不存在(userId={user_id})")
+            if not user.get("totpSecret"):
+                raise ValueError("请先调用 POST /api/admin/2fa/setup 绑定密钥")
+            if user.get("twoFactorEnabled"):
+                raise ValueError("双因素认证已开启")
+            if not verify_totp(user["totpSecret"], totp_code):
+                raise ValueError("动态口令错误或已过期")
+            user["twoFactorEnabled"] = True
+            user["updatedAt"] = datetime.utcnow().isoformat()
+            await self.repo.save_user(user)
+            return {"userId": user_id, "twoFactorEnabled": True}
+
+    async def verify_2fa_login(self, token: str, totp_code: str) -> dict:
+        """完成登录二次验证(清除会话 pendingTwoFactor 标记)
+
+        Raises:
+            KeyError: 会话不存在/非待验证状态
+            ValueError: 动态口令错误
+        """
+        session = await self.repo.get_session(token)
+        if session is None or not session.get("pendingTwoFactor"):
+            raise KeyError("会话不存在或不在双因素待验证状态")
+        user = await self.repo.get_user(session["userId"])
+        if user is None or not verify_totp(user.get("totpSecret", ""),
+                                           totp_code):
+            raise ValueError("动态口令错误或已过期")
+        session.pop("pendingTwoFactor", None)
+        await self.repo.save_session(session)
+        # 回填完整会话字段(pending 会话与正常会话结构一致, 仅移除标记)
+        await self.repo.add_log({
+            "userId": user["id"],
+            "userName": user.get("realName") or user["username"],
+            "roleCode": ",".join(session.get("roleCodes") or []),
+            "module": "auth",
+            "action": "login_2fa_verified",
+            "resourceType": "admin_user",
+            "resourceId": str(user["id"]),
+            "resourceName": user["username"],
+            "beforeData": None,
+            "afterData": {"ip": session.get("ip", ""),
+                          "device": session.get("device", "")},
+            "ip": session.get("ip", ""),
+            "device": session.get("device", ""),
+            "requestId": "",
+            "remark": "双因素验证通过, 登录成功",
+        })
+        permissions = await self.repo.get_user_permissions(user["id"])
+        return {
+            "userId": user["id"],
+            "username": user["username"],
+            "roleCodes": session.get("roleCodes", []),
+            "permissions": permissions,
+            "sessionToken": token,
+            "twoFactorVerified": True,
+        }
 
     async def verify_session(self, token: str) -> dict | None:
         """校验会话有效性(30分钟无操作过期, 滑动续期)

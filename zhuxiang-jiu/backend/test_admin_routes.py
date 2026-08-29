@@ -37,6 +37,7 @@ os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 
 from services.admin_service import AdminService
+from core.totp import generate_secret, totp_at, verify_totp, provisioning_uri
 from repositories.admin_repository import (
     AdminRepository,
     ADMIN_STATUS_NORMAL, ADMIN_STATUS_DISABLED, ADMIN_STATUS_LOCKED,
@@ -779,6 +780,140 @@ class TestDashboard:
                "两次查询结果不一致")
 
 
+class TestTwoFactor:
+    """2FA 双因素认证测试(P0-5: TOTP + 高危角色强制)"""
+
+    async def run(self, svc):
+        # test 2f-0a: TOTP 工具(生成/计算/校验)
+        secret = generate_secret()
+        code = totp_at(secret)
+        record("test_2f_00a_totp_roundtrip",
+               verify_totp(secret, code) and not verify_totp(secret, "000000"
+               if code != "000000" else "111111"),
+               f"code={code}")
+
+        # test 2f-0b: TOTP 工具(非法输入)
+        record("test_2f_00b_totp_invalid_input",
+               not verify_totp(secret, "") and not verify_totp(secret, "12ab45")
+               and not verify_totp(secret, "12345")
+               and not verify_totp("", code),
+               "非法输入应一律 False")
+
+        # test 2f-0c: otpauth URI 可扫码格式
+        uri = provisioning_uri(secret, "admin")
+        record("test_2f_00c_provisioning_uri",
+               uri.startswith("otpauth://totp/") and f"secret={secret}" in uri,
+               f"uri={uri}")
+
+        # 创建测试管理员(避免超管默认密码 mustChangePassword 干扰)
+        user = await svc.create_user(username="sec_ops",
+                                      password=TEST_PASSWORD,
+                                      operator_id=SUPER_ADMIN_ID)
+        uid = user["userId"]
+
+        # test 2f-01: 未 setup 直接 enable → 409
+        try:
+            await svc.enable_2fa(uid, "123456")
+            record("test_2f_01_enable_without_setup", False, "应抛出ValueError")
+        except ValueError:
+            record("test_2f_01_enable_without_setup", True)
+
+        # test 2f-02: setup 生成密钥与 URI
+        setup = await svc.setup_2fa(uid)
+        record("test_2f_02_setup_returns_secret",
+               bool(setup["totpSecret"]) and setup["enabled"] is False
+               and "otpauth://" in setup["otpauthUri"],
+               f"setup={setup}")
+        secret = setup["totpSecret"]
+
+        # test 2f-03: enable 验证码错误 → 409
+        try:
+            await svc.enable_2fa(uid, "000000"
+               if totp_at(secret) != "000000" else "111111")
+            record("test_2f_03_enable_wrong_code", False, "应抛出ValueError")
+        except ValueError:
+            record("test_2f_03_enable_wrong_code", True)
+
+        # test 2f-04: enable 验证码正确 → 开启
+        r = await svc.enable_2fa(uid, totp_at(secret))
+        record("test_2f_04_enable_success", r["twoFactorEnabled"] is True)
+
+        # test 2f-05: 已开启重复 setup → 409(防覆盖在用密钥)
+        try:
+            await svc.setup_2fa(uid)
+            record("test_2f_05_setup_when_enabled", False, "应抛出ValueError")
+        except ValueError:
+            record("test_2f_05_setup_when_enabled", True)
+
+        # test 2f-06: 开启后登录不带码 → twoFactorRequired(pending 会话)
+        r = await svc.login("sec_ops", TEST_PASSWORD, ip="127.0.0.1")
+        record("test_2f_06_login_pending_two_factor",
+               r.get("twoFactorRequired") is True and r.get("sessionToken")
+               and "permissions" not in r,
+               f"unexpected: {r}")
+        pending_token = r.get("sessionToken", "")
+
+        # test 2f-07: 开启后登录带错码 → 409
+        try:
+            await svc.login("sec_ops", TEST_PASSWORD,
+                            totp_code="000000" if totp_at(secret) != "000000"
+                            else "111111")
+            record("test_2f_07_login_wrong_code", False, "应抛出ValueError")
+        except ValueError:
+            record("test_2f_07_login_wrong_code", True)
+
+        # test 2f-08: 开启后登录带对码 → 直接成功(含权限)
+        r = await svc.login("sec_ops", TEST_PASSWORD,
+                            totp_code=totp_at(secret))
+        record("test_2f_08_login_with_code_success",
+               r.get("userId") == uid and "permissions" in r
+               and "twoFactorRequired" not in r,
+               f"unexpected: {r}")
+
+        # test 2f-09: pending 会话错误码 verify → 409
+        try:
+            await svc.verify_2fa_login(pending_token, "999998")
+            record("test_2f_09_verify_wrong_code", False, "应抛出ValueError")
+        except ValueError:
+            record("test_2f_09_verify_wrong_code", True)
+
+        # test 2f-10: pending 会话正确码 verify → 完成(含权限回填)
+        r = await svc.verify_2fa_login(pending_token, totp_at(secret))
+        record("test_2f_10_verify_success",
+               r.get("twoFactorVerified") is True and "permissions" in r,
+               f"unexpected: {r}")
+
+        # test 2f-11: verify 后会话解除 pending 标记(重复 verify → 404)
+        try:
+            await svc.verify_2fa_login(pending_token, totp_at(secret))
+            record("test_2f_11_verify_not_pending_again", False, "应抛出KeyError")
+        except KeyError:
+            record("test_2f_11_verify_not_pending_again", True)
+
+        # test 2f-12: verify 后会话可正常访问(dashboard)
+        try:
+            stats = await svc.get_dashboard()
+            record("test_2f_12_session_usable_after_verify",
+                   "totalAdmins" in stats, "dashboard 调用失败")
+        except Exception as e:
+            record("test_2f_12_session_usable_after_verify", False, str(e))
+
+        # test 2f-13: pending 会话登出可用
+        r = await svc.login("sec_ops", TEST_PASSWORD)
+        pending_token2 = r["sessionToken"]
+        logout_r = await svc.logout(pending_token2)
+        record("test_2f_13_pending_session_logout",
+               logout_r.get("loggedOut") is True,
+               f"unexpected: {logout_r}")
+
+        # test 2f-14: 未开启 2FA 的管理员登录不受影响
+        r = await svc.login(SUPER_ADMIN_USERNAME, SUPER_ADMIN_PASSWORD)
+        record("test_2f_14_unaffected_without_2fa",
+               r["username"] == SUPER_ADMIN_USERNAME
+               and "twoFactorRequired" not in r,
+               f"unexpected: {r}")
+
+
 # ============================================================
 # 测试运行
 # ============================================================
@@ -797,6 +932,7 @@ async def main():
         TestResetPassword,
         TestPasswordStrength,
         TestSession,
+        TestTwoFactor,
         TestRole,
         TestPermission,
         TestOperationLogs,
