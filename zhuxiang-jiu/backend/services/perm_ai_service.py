@@ -26,6 +26,7 @@ AI 监控引擎(行为风控, 规则引擎 B 级):
 
 import logging
 from datetime import datetime, timedelta, UTC
+from typing import ClassVar
 
 from core.locks import get_lock
 from repositories.perm_repository import PermRepository, STAGES
@@ -453,7 +454,7 @@ class PermAiService:
                     frozen.append(g["grantId"])
                 executed["executed"].append(
                     f"全部权限冻结({len(frozen)}项), 已通知超管追责")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("perm_reward_execute_failed member=%r: %s",
                            member_id, exc)
             executed["executed"].append(f"奖惩执行异常: {exc}")
@@ -528,7 +529,7 @@ class PermAiService:
     # ============================================================
 
     # 岗位关键词 → 环节匹配表(权重降序)
-    _POSITION_KEYWORDS = {
+    _POSITION_KEYWORDS: ClassVar[dict[str, list[str]]] = {
         "purchase": ["采购", "供应商", "原料", "原粮", "高粱", "包材"],
         "production": ["酿造", "酿酒", "生产", "制曲", "发酵", "工艺",
                        "车间", "勾调"],
@@ -544,7 +545,7 @@ class PermAiService:
     }
 
     # 岗位职级 → 建议操作级
-    _RANK_LEVELS = {
+    _RANK_LEVELS: ClassVar[dict[str, list[str]]] = {
         "专员": ["view", "operate"],
         "主管": ["view", "operate", "approve"],
         "总监": ["view", "operate", "approve", "manage"],

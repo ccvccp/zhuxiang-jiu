@@ -16,7 +16,7 @@
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from core.locks import get_lock
 from repositories.pocket_repository import (

@@ -19,7 +19,7 @@
     - ValueError → 409(状态非法/类型非法/越权确认等)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 from core.locks import get_lock
 from core.helpers import ts
@@ -66,7 +66,7 @@ STATUS_TRANSITIONS = {
 
 def _utcnow() -> datetime:
     """当前 UTC 时间(与 core.helpers.ts() 同为 offset-aware)"""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class TicketService:
@@ -363,11 +363,11 @@ class TicketService:
             ticket = await self._get_or_404(ticket_no)
             if ticket["status"] == TICKET_STATUS_CLOSED:
                 raise ValueError("工单已关闭")
-            if ticket["status"] != TICKET_STATUS_RESOLVED:
-                # 未走完确认流程的强制关闭: 须超48h
-                if not self._over_48h(ticket):
-                    raise ValueError(
-                        "仅已解决工单可关闭(未解决须满48小时方可强制关闭)")
+            # 未走完确认流程的强制关闭: 须超48h
+            if (ticket["status"] != TICKET_STATUS_RESOLVED
+                    and not self._over_48h(ticket)):
+                raise ValueError(
+                    "仅已解决工单可关闭(未解决须满48小时方可强制关闭)")
             updates = {
                 "status": TICKET_STATUS_CLOSED,
                 "closedAt": ts(),

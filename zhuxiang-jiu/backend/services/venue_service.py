@@ -685,14 +685,14 @@ class VenueService:
                     base=total_profit, rate=(
                         0.60 if has_agent else 0.80),
                     amount=round(platform_share, 2), ref_no=str(partner_id),
-                    note=f"合作商结算本站份额(差价利润)")
+                    note="合作商结算本站份额(差价利润)")
                 await role_svc.record_external_settlement(
                     ledger_no=f"{ledger_prefix}-partner",
                     source_module="venue", role_code=ROLE_PARTNER,
                     user_id=partner_id, basis=PROFIT_BASIS_DIFF_PROFIT,
                     base=total_profit, rate=0.20,
                     amount=round(partner_share, 2), ref_no=str(partner_id),
-                    note=f"合作商结算份额(差价利润)")
+                    note="合作商结算份额(差价利润)")
                 if has_agent and agent_share > 0:
                     await role_svc.record_external_settlement(
                         ledger_no=f"{ledger_prefix}-agent",

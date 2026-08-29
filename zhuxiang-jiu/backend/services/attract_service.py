@@ -24,13 +24,13 @@
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from core.locks import get_lock
 from repositories.attract_repository import (
     AttractRepository,
     # 平台/角度
-    PLATFORMS, ANGLES,
+    ANGLES,
     PLATFORM_XIAOHONGSHU, PLATFORM_DOUYIN, PLATFORM_MOMENTS, PLATFORM_SEO,
     # 选题/内容状态
     TOPIC_SOURCE_MANUAL, TOPIC_SOURCE_AI_ROI,
@@ -46,10 +46,9 @@ from repositories.attract_repository import (
     # ROI
     RATE_FLOOR, RATE_CEIL, REBALANCE_STEP, ROI_MIN_SAMPLE,
     # AI-SEO / AB(P1)
-    SITE_BASE_URL, KEYWORD_STATUS_ACTIVE, KEYWORD_STATUS_PAUSED,
-    AB_VERSION_A, AB_VERSION_B,
+    SITE_BASE_URL, KEYWORD_STATUS_ACTIVE, AB_VERSION_A, AB_VERSION_B,
     # 裂变插件(P2)
-    FISSION_STATUS_DRAFT, FISSION_STATUS_ONGOING, FISSION_STATUS_ENDED,
+    FISSION_STATUS_ONGOING, FISSION_STATUS_ENDED,
     FISSION_DEFAULT_INVITE_TARGET, FISSION_DEFAULT_REWARD_AMOUNT,
     FISSION_DEFAULT_REWARD_POINTS,
     POSTER_SCENE_INVITE, POSTER_SCENE_PROMOTE,
@@ -59,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class AttractService:
@@ -585,10 +584,8 @@ class AttractService:
             # 均值含全部有转化的渠道(样本不足渠道 ROI 计 0),
             # 避免单渠道时 roi==avg 永不调整
             sample_rows = [r for r in rows if r["registered"] >= ROI_MIN_SAMPLE]
-            if sample_rows:
-                avg_roi = sum(r["roi"] for r in rows) / len(rows)
-            else:
-                avg_roi = 0.0
+            avg_roi = (sum(r["roi"] for r in rows) / len(rows)
+                       if sample_rows else 0.0)
 
             adjusted, skipped = [], []
             for row in rows:

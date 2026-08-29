@@ -227,10 +227,8 @@ async def create_pay(
     须携带 guestPhone(11位)+ageConfirmed=true; 单笔 ≤ ¥5,000, 仅零售全额扫码付。
     """
     # 游客场景免登录(文档 2.7.1: 免登录临时单, 降低购物门槛)
-    if req.sceneType == "guest_order_pay":
-        user_id = "guest"
-    else:
-        user_id = _require_member_id(x_member_id)
+    user_id = ("guest" if req.sceneType == "guest_order_pay"
+               else _require_member_id(x_member_id))
     try:
         return await _service.create_pay(
             user_id=user_id,

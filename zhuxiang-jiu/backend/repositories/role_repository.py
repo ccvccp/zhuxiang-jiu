@@ -15,7 +15,7 @@
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, UTC
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -710,7 +710,7 @@ class RoleRepository:
             self.store["_role_event_seq"] = 0
             self.store["_role_alert_seq"] = 0
             # 种子目录(仅内存模式需要; Redis 模式由部署脚本/管理端写入)
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             for role in ROLE_CATALOG_SEED:
                 role = dict(role)
                 role["createdAt"] = now
@@ -728,7 +728,7 @@ class RoleRepository:
             existing = await self.get_catalog_role(role["roleCode"])
             if existing is None:
                 role = dict(role)
-                role["createdAt"] = datetime.now(timezone.utc).isoformat()
+                role["createdAt"] = datetime.now(UTC).isoformat()
                 role["updatedAt"] = role["createdAt"]
                 await self.upsert_catalog_role(role)
                 count += 1

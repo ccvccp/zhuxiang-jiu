@@ -26,7 +26,7 @@ import logging
 from datetime import datetime, timedelta, UTC
 
 from core.locks import get_lock
-from repositories.perm_repository import PermRepository, STAGES, LEVELS
+from repositories.perm_repository import PermRepository, STAGES
 from repositories.member_repository import MemberRepository
 
 logger = logging.getLogger(__name__)

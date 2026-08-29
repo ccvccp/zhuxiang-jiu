@@ -24,23 +24,20 @@
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 from core.locks import get_lock
 from core.helpers import ts
 from repositories.role_repository import (
     RoleRepository,
     # 角色
-    ROLE_CUSTOMER_SERVICE, ROLE_PRODUCTION_WORKER, ROLE_PLATFORM,
-    # 契约状态
-    CONTRACT_STATUS_PROBATION, CONTRACT_STATUS_ACTIVE,
+    ROLE_CUSTOMER_SERVICE, ROLE_PRODUCTION_WORKER, CONTRACT_STATUS_PROBATION, CONTRACT_STATUS_ACTIVE,
     CONTRACT_STATUS_SUSPENDED, CONTRACT_STATUS_TERMINATED,
     DISPATCHABLE_STATUSES,
     # 认领状态
     CLAIM_STATUS_PENDING, CLAIM_STATUS_APPROVED, CLAIM_STATUS_REJECTED,
     # 分润口径
-    PROFIT_BASIS_SALE_PRICE, PROFIT_BASIS_PURCHASE_AMOUNT,
-    LEDGER_STATUS_PENDING, LEDGER_STATUS_SETTLED, LEDGER_STATUS_REVERSED,
+    PROFIT_BASIS_SALE_PRICE, LEDGER_STATUS_PENDING, LEDGER_STATUS_SETTLED, LEDGER_STATUS_REVERSED,
     # 服务分润参数(D-8)
     SERVICE_PROFIT_RATE, SATISFACTION_COEFF, CREDIT_LEVEL_COEFF,
     TIMELINESS_SLA_OK, TIMELINESS_OVERDUE, TIMELINESS_ESCALATED,
@@ -78,7 +75,7 @@ logger = logging.getLogger(__name__)
 
 def _utcnow() -> datetime:
     """当前 UTC 时间(与 core.helpers.ts() 同为 offset-aware)"""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class RoleService:
@@ -334,7 +331,7 @@ class RoleService:
             updates = {"status": CONTRACT_STATUS_TERMINATED,
                        "terminatedAt": ts()}
         else:
-            raise ValueError(f"动作无效(须为activate/suspend/terminate)")
+            raise ValueError("动作无效(须为activate/suspend/terminate)")
         await self.repo.update_contract(contract_id, updates)
         contract.update(updates)
         return contract
@@ -502,10 +499,8 @@ class RoleService:
                   if t.get("handlerId") == user_id
                   and t.get("satisfaction")
                   and t.get("resolvedAt", "") >= since]
-        if recent:
-            sat_score = sum(t["satisfaction"] for t in recent) / len(recent) / 5.0
-        else:
-            sat_score = DEFAULT_SATISFACTION
+        sat_score = (sum(t["satisfaction"] for t in recent) / len(recent) / 5.0
+                     if recent else DEFAULT_SATISFACTION)
         total = (credit_score * DISPATCH_WEIGHTS["credit"]
                  + skill_score * DISPATCH_WEIGHTS["skill"]
                  + load_score * DISPATCH_WEIGHTS["load"]
@@ -592,10 +587,8 @@ class RoleService:
             credit_level = level_from_score(bamboo_score)
             credit_coeff = CREDIT_LEVEL_COEFF.get(credit_level, 0.0)
             # 时效系数
-            if ticket.get("escalated"):
-                timeliness = TIMELINESS_ESCALATED
-            else:
-                timeliness = self._calc_timeliness(ticket)
+            timeliness = (TIMELINESS_ESCALATED if ticket.get("escalated")
+                          else self._calc_timeliness(ticket))
             # 试用期系数
             contract = await self.repo.get_active_contract(
                 handler_id, ROLE_CUSTOMER_SERVICE)

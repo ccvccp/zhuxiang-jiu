@@ -21,6 +21,8 @@
 """
 
 
+import contextlib
+
 from core.locks import get_lock
 from core.helpers import ts
 from repositories.chat_repository import (
@@ -498,10 +500,8 @@ class ChatService:
 
         best-effort: 失败不阻断对话主流程。
         """
-        try:
+        with contextlib.suppress(Exception):
             await self.knowledge_svc.record_gap(user_content, session_id)
-        except Exception:
-            pass
 
     # ============================================================
     # 7. 知识库 CRUD

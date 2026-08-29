@@ -56,10 +56,7 @@ def _normalize_ip_list(raw) -> list:
     """IP 白名单字段规范化(支持 list/逗号分隔字符串 → 去空白 str list)"""
     if not raw:
         return []
-    if isinstance(raw, str):
-        items = raw.split(",")
-    else:
-        items = list(raw)
+    items = raw.split(",") if isinstance(raw, str) else list(raw)
     return [str(x).strip() for x in items if str(x).strip()]
 
 

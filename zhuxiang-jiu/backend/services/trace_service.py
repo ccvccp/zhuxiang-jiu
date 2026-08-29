@@ -220,7 +220,6 @@ class TraceService:
 
             # 开箱位置 vs 代理区域(跨区预警, 对齐防窜检测规则)
             agent_region = box.get("agentRegion")
-            agent_province = box.get("agentProvince")
             agent_city = box.get("agentCity")
             is_cross = False
             risk_level = "low"

@@ -17,7 +17,7 @@
 import json
 import secrets
 import string
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
@@ -152,7 +152,7 @@ POSTER_SCENE_PROMOTE = "promote"       # 推广海报(内容+码)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def classify_code(code: str) -> str:

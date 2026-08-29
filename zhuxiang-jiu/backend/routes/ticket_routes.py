@@ -22,9 +22,7 @@ from pydantic import BaseModel as PydBaseModel, Field
 
 from services.ticket_service import TicketService
 from repositories.ticket_repository import (
-    TICKET_TYPE_PRESALE, TICKET_TYPE_COMPLAINT,
     PRIORITY_MEDIUM, SOURCE_USER,
-    TICKET_STATUS_PENDING,
 )
 
 
