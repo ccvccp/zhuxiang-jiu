@@ -29,6 +29,8 @@ os.environ["STORE_MODE"] = "asyncio"
 from services.attract_service import AttractService
 from services.traffic_service import TrafficService
 from services.promotion_service import PromotionService
+from services.wallet_service import WalletService
+from repositories.member_repository import MemberRepository
 from repositories.attract_repository import (
     AttractRepository,
     PLATFORM_XIAOHONGSHU, PLATFORM_DOUYIN, PLATFORM_MOMENTS, PLATFORM_SEO,
@@ -37,7 +39,6 @@ from repositories.attract_repository import (
     LANDING_REGISTER, LANDING_PRODUCT, LANDING_ACTIVITY,
     COMPLIANCE_PASS_SCORE,
 )
-from repositories.member_repository import MemberRepository
 
 # 测试结果收集
 PASS = 0
@@ -492,6 +493,160 @@ class TestNotifyPublish:
 
 
 # ============================================================
+# 9. 裂变活动插件(P2: 任务宝 + 海报)
+# ============================================================
+
+class TestFission:
+
+    async def run(self):
+        reset_store()
+        svc = AttractService()
+        wallet = WalletService()
+        # 造会员(含成长值≥500以满足钱包开通条件)
+        repo = MemberRepository()
+        for uid in (PROMOTER_USER_ID, NEW_MEMBER_ID):
+            m = await repo.create({
+                "id": uid, "nickname": f"裂变{uid}",
+                "phone": f"1360000{uid:04d}", "password": "test123456"})
+            await repo.save(uid, {**m, "growth_value": 600})
+        await wallet.open(PROMOTER_USER_ID)
+
+        # 创建任务宝(邀请2人得 ¥20+100竹叶)
+        fission = await svc.create_fission(
+            title="中秋裂变季", invite_target=2,
+            reward_amount=20.0, reward_points=100)
+        record("裂变-创建任务宝",
+               fission["fissionId"] > 0
+               and fission["inviteTarget"] == 2
+               and fission["status"] == "ongoing")
+
+        try:
+            await svc.create_fission("", 5)
+            record("裂变-空标题拒绝", False, "未抛出异常")
+        except ValueError:
+            record("裂变-空标题拒绝", True)
+
+        # 进度查询(初始化0)
+        progress = await svc.get_fission_progress(
+            fission["fissionId"], PROMOTER_USER_ID)
+        record("裂变-进度初始化(0/2)",
+               progress["invited"] == 0
+               and progress["rewardGranted"] is False)
+
+        # 邀请计数来源: 归因表(经ZXBJ码注册)——造2个被邀请注册
+        zxbj_code = await _claim_promotion_code()
+        invitee_ids = [9101, 9102]
+        repo = MemberRepository()
+        for uid in invitee_ids:
+            m = await repo.create({
+                "id": uid, "nickname": f"被邀{uid}",
+                "phone": f"1370000{uid:04d}", "password": "test123456"})
+            await repo.save(uid, m)
+            click = await svc.resolve_click(zxbj_code)
+            await svc.attach_registration(click["clickId"], uid)
+
+        # 刷新进度(2/2达标 → 自动发奖)
+        refreshed = await svc.refresh_fission_progress(
+            fission["fissionId"], PROMOTER_USER_ID)
+        record("裂变-达标发奖(2/2)",
+               refreshed["invited"] == 2
+               and refreshed["rewardGranted"] is True,
+               f"实际{refreshed}")
+        record("裂变-发奖双通道",
+               set(refreshed.get("grantedChannels", [])) >= {"wallet"})
+
+        # 钱包到账
+        reward = await wallet.get_reward_balance(PROMOTER_USER_ID)
+        record("裂变-钱包奖励到账(¥20)",
+               abs(reward.get("rewardBalance", 0) - 20.0) < 0.01,
+               f"实际{reward.get('rewardBalance')}")
+
+        # 幂等: 重复刷新不重复发奖
+        again = await svc.refresh_fission_progress(
+            fission["fissionId"], PROMOTER_USER_ID)
+        reward2 = await wallet.get_reward_balance(PROMOTER_USER_ID)
+        record("裂变-重复刷新幂等",
+               again["rewardGranted"] is True
+               and abs(reward2.get("rewardBalance", 0) - 20.0) < 0.01)
+
+        # 未达标者不发
+        progress_other = await svc.refresh_fission_progress(
+            fission["fissionId"], NEW_MEMBER_ID)
+        record("裂变-未达标不发奖",
+               progress_other["rewardGranted"] is False)
+
+        # 结束活动
+        ended = await svc.end_fission(fission["fissionId"])
+        record("裂变-结束活动",
+               ended["status"] == "ended")
+        try:
+            await svc.get_fission_progress(
+                fission["fissionId"], PROMOTER_USER_ID)
+            record("裂变-结束后进度拒绝", False, "未抛出异常")
+        except ValueError:
+            record("裂变-结束后进度拒绝", True)
+        try:
+            await svc.end_fission(fission["fissionId"])
+            record("裂变-重复结束拒绝", False, "未抛出异常")
+        except ValueError:
+            record("裂变-重复结束拒绝", True)
+
+
+class TestPoster:
+
+    async def run(self):
+        reset_store()
+        svc = AttractService()
+        await _setup_members()
+
+        # invite 场景海报
+        fission = await svc.create_fission(title="裂变海报测试",
+                                           invite_target=3)
+        poster = await svc.create_poster(
+            user_id=PROMOTER_USER_ID, scene="invite",
+            fission_id=fission["fissionId"])
+        record("海报-invite场景生成",
+               poster["scene"] == "invite"
+               and poster["qrCode"].startswith("ZXBJ-")
+               and poster["qrTarget"] == f"/r/{poster['qrCode']}",
+               f"实际{poster}")
+        record("海报-含进度文案",
+               "0/3" in poster["subtext"],
+               f"实际{poster['subtext']}")
+
+        # promote 场景海报
+        topic = await svc.create_topic(title="海报内容", angle="culture",
+                                       keywords="竹香型白酒")
+        contents = await svc.generate_contents(topic["topicId"])
+        ok = contents[0]
+        await svc.review_content(ok["contentId"], approved=True)
+        published = await svc.publish_content(ok["contentId"])
+        poster2 = await svc.create_poster(
+            user_id=PROMOTER_USER_ID, scene="promote",
+            content_id=published["contentId"])
+        record("海报-promote场景生成",
+               poster2["scene"] == "promote"
+               and poster2["headline"] != "")
+
+        # 参数校验
+        try:
+            await svc.create_poster(PROMOTER_USER_ID, "invite")
+            record("海报-invite缺活动拒绝", False, "未抛出异常")
+        except ValueError:
+            record("海报-invite缺活动拒绝", True)
+        try:
+            await svc.create_poster(PROMOTER_USER_ID, "bad_scene")
+            record("海报-非法场景拒绝", False, "未抛出异常")
+        except ValueError:
+            record("海报-非法场景拒绝", True)
+
+        # 列表
+        posters = await svc.list_posters(user_id=PROMOTER_USER_ID)
+        record("海报-我的列表(2张)",
+               len(posters) == 2, f"实际{len(posters)}")
+
+
+# ============================================================
 # 主入口
 # ============================================================
 
@@ -505,9 +660,11 @@ async def main():
         ("AI-SEO", TestSeo),
         ("AB落地页", TestAbPage),
         ("分发通知", TestNotifyPublish),
+        ("裂变任务宝", TestFission),
+        ("裂变海报", TestPoster),
     ]
     print("=" * 62)
-    print("AI智能自动引流模块 P0+P1 端到端测试")
+    print("AI智能自动引流模块 P0+P1+P2 端到端测试")
     print("=" * 62)
     for name, cls in test_classes:
         print(f"\n[{name}]")

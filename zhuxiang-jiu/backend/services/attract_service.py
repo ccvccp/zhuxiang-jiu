@@ -48,6 +48,11 @@ from repositories.attract_repository import (
     # AI-SEO / AB(P1)
     SITE_BASE_URL, KEYWORD_STATUS_ACTIVE, KEYWORD_STATUS_PAUSED,
     AB_VERSION_A, AB_VERSION_B,
+    # 裂变插件(P2)
+    FISSION_STATUS_DRAFT, FISSION_STATUS_ONGOING, FISSION_STATUS_ENDED,
+    FISSION_DEFAULT_INVITE_TARGET, FISSION_DEFAULT_REWARD_AMOUNT,
+    FISSION_DEFAULT_REWARD_POINTS,
+    POSTER_SCENE_INVITE, POSTER_SCENE_PROMOTE,
 )
 
 logger = logging.getLogger(__name__)
@@ -860,3 +865,247 @@ class AttractService:
             # TODO(P1+): 接入大模型API后替换(请求/缓存/降级到rule)
             logger.info("attract_llm_provider_not_ready_fallback_rule")
         return self.generate_content_bodies(topic)
+
+    # ============================================================
+    # 10. 裂变活动插件(P2: 设计文档§8——海报+任务宝)
+    # ============================================================
+
+    async def create_fission(self, title: str,
+                              invite_target: int = FISSION_DEFAULT_INVITE_TARGET,
+                              reward_amount: float = FISSION_DEFAULT_REWARD_AMOUNT,
+                              reward_points: int = FISSION_DEFAULT_REWARD_POINTS,
+                              start_time: str = "", end_time: str = "") -> dict:
+        """创建任务宝裂变活动(邀请N人得奖励)
+
+        奖励双通道: 钱包奖励余额(reward_amount) + 竹叶积分(reward_points),
+        达标自动发放(复用 promotion 发奖范式)。
+
+        Raises:
+            ValueError: 参数非法
+        """
+        if not title or not title.strip():
+            raise ValueError("活动标题不能为空")
+        if invite_target < 1:
+            raise ValueError("邀请目标须≥1人")
+        if reward_amount < 0 or reward_points < 0:
+            raise ValueError("奖励须为非负")
+        fission_id = await self.repo.next_id("fission")
+        fission = {
+            "fissionId": fission_id,
+            "title": title.strip(),
+            "inviteTarget": invite_target,
+            "rewardAmount": round(reward_amount, 2),
+            "rewardPoints": reward_points,
+            "startTime": start_time,
+            "endTime": end_time,
+            "status": FISSION_STATUS_ONGOING,
+            "createdAt": _now_iso(),
+        }
+        return await self.repo.save_fission(fission)
+
+    async def end_fission(self, fission_id: int) -> dict:
+        """结束裂变活动(ongoing → ended, 停止计数与发奖)
+
+        Raises:
+            KeyError: 活动不存在
+            ValueError: 状态非法
+        """
+        fission = await self.repo.get_fission(fission_id)
+        if fission is None:
+            raise KeyError(f"裂变活动不存在(fissionId={fission_id})")
+        if fission["status"] != FISSION_STATUS_ONGOING:
+            raise ValueError(
+                f"活动状态非法(当前{fission['status']}, 须为{FISSION_STATUS_ONGOING})")
+        fission.update({"status": FISSION_STATUS_ENDED,
+                        "endedAt": _now_iso()})
+        await self.repo.save_fission(fission)
+        return fission
+
+    async def list_fissions(self, status: str = None) -> list[dict]:
+        return await self.repo.list_fissions(status=status)
+
+    async def get_fission_progress(self, fission_id: int,
+                                     user_id: int) -> dict:
+        """查询会员在某裂变活动的任务进度(无则初始化0进度)
+
+        Raises:
+            KeyError: 活动不存在
+            ValueError: 活动已结束
+        """
+        fission = await self.repo.get_fission(fission_id)
+        if fission is None:
+            raise KeyError(f"裂变活动不存在(fissionId={fission_id})")
+        if fission["status"] != FISSION_STATUS_ONGOING:
+            raise ValueError(
+                f"活动已结束(当前{fission['status']})")
+        rows = await self.repo.list_fission_progress(
+            fission_id=fission_id, user_id=user_id, limit=1)
+        if rows:
+            return rows[0]
+        progress_id = await self.repo.next_id("progress")
+        progress = {
+            "progressId": progress_id,
+            "fissionId": fission_id,
+            "userId": user_id,
+            "invited": 0,
+            "rewardGranted": False,
+            "grantedAt": "",
+            "createdAt": _now_iso(),
+        }
+        return await self.repo.save_fission_progress(progress)
+
+    async def _count_fission_invite(self, fission_id: int,
+                                     inviter_id: int) -> int:
+        """统计邀请人达成数: 经本模块归因表(点击→注册)中
+        promoterId=邀请人 且活动进行期内注册的人数"""
+        fission = await self.repo.get_fission(fission_id)
+        if fission is None:
+            return 0
+        attrs = await self.repo.list_attributions(
+            promoter_id=inviter_id, limit=100000)
+        # 活动时间窗(为空则不限)
+        start, end = fission.get("startTime", ""), fission.get("endTime", "")
+        count = 0
+        for a in attrs:
+            at = a.get("registeredAt", "")
+            if start and at < start:
+                continue
+            if end and at > end:
+                continue
+            count += 1
+        return count
+
+    async def refresh_fission_progress(self, fission_id: int,
+                                        user_id: int) -> dict:
+        """刷新任务进度并检查达标发奖(幂等: 已发奖不重复)
+
+        邀请计数来源: 归因表中 promoterId=user_id 的注册数(活动期内),
+        即经短链/ZXBJ码完成"点击→注册"的真人邀请。
+
+        Raises:
+            KeyError: 活动不存在
+            ValueError: 活动已结束
+        """
+        progress = await self.get_fission_progress(fission_id, user_id)
+        if progress.get("rewardGranted"):
+            return progress   # 幂等: 已发奖
+        invited = await self._count_fission_invite(fission_id, user_id)
+        progress["invited"] = invited
+
+        fission = await self.repo.get_fission(fission_id)
+        if invited >= fission["inviteTarget"]:
+            # 达标 → 双通道发奖(复用 promotion 范式: best-effort)
+            granted = []
+            if fission["rewardAmount"] > 0:
+                try:
+                    from services.wallet_service import WalletService
+                    await WalletService().deposit_reward(
+                        user_id, fission["rewardAmount"],
+                        description=f"裂变任务宝({fission['title']})")
+                    granted.append("wallet")
+                except Exception as e:
+                    logger.warning(
+                        "fission_reward_wallet_failed user=%s: %s",
+                        user_id, e)
+            if fission["rewardPoints"] > 0:
+                try:
+                    from services.points_service import PointsService
+                    await PointsService().earn_points(
+                        user_id=user_id, points=fission["rewardPoints"],
+                        source="fission",
+                        ref_id=str(fission_id),
+                        ref_desc=f"裂变任务宝({fission['title']})")
+                    granted.append("points")
+                except Exception as e:
+                    logger.warning(
+                        "fission_reward_points_failed user=%s: %s",
+                        user_id, e)
+            if granted:
+                progress.update({"rewardGranted": True,
+                                 "grantedAt": _now_iso(),
+                                 "grantedChannels": granted})
+        return await self.repo.save_fission_progress(progress)
+
+    # ============================================================
+    # 11. 裂变海报(P2: 文本卡片载体, 前端 canvas 渲染)
+    # ============================================================
+
+    async def create_poster(self, user_id: int, scene: str,
+                             fission_id: int = 0,
+                             content_id: int = 0) -> dict:
+        """生成裂变海报记录(文本卡片: 标题/文案/二维码内容)
+
+        scene:
+            - invite: 任务宝邀请海报(含进度与专属码)
+            - promote: 推广海报(内容+会员码)
+
+        二维码内容由前端用 /r/{code} 短链渲染。
+
+        Raises:
+            ValueError: 参数非法
+        """
+        member_name = f"会员{user_id}"
+        qr_code = ""
+        headline, subtext = "", ""
+
+        if scene == POSTER_SCENE_INVITE:
+            if not fission_id:
+                raise ValueError("任务宝海报须指定 fissionId")
+            fission = await self.repo.get_fission(fission_id)
+            if fission is None:
+                raise KeyError(f"裂变活动不存在(fissionId={fission_id})")
+            progress = await self.get_fission_progress(fission_id, user_id)
+            # 邀请海报用会员矩阵码(注册归因后计邀请)
+            try:
+                from services.promotion_service import PromotionService
+                code_result = await PromotionService().claim_promo_code(
+                    member_id=user_id, channel="wechat_miniprogram")
+                qr_code = code_result["code"]
+            except Exception as e:
+                logger.warning("poster_claim_code_failed user=%s: %s",
+                               user_id, e)
+            headline = fission["title"]
+            subtext = (f"我已邀请 {progress['invited']}/"
+                       f"{fission['inviteTarget']} 人, "
+                       f"扫码帮我助攻, 你也有好礼!")
+        elif scene == POSTER_SCENE_PROMOTE:
+            if not content_id:
+                raise ValueError("推广海报须指定 contentId")
+            content = await self.repo.get_content(content_id)
+            if content is None:
+                raise KeyError(f"内容不存在(contentId={content_id})")
+            try:
+                from services.promotion_service import PromotionService
+                code_result = await PromotionService().claim_promo_code(
+                    member_id=user_id, channel="wechat_miniprogram")
+                qr_code = code_result["code"]
+            except Exception as e:
+                logger.warning("poster_claim_code_failed user=%s: %s",
+                               user_id, e)
+            headline = content.get("hashtags", "#竹香型白酒").strip("#")
+            subtext = (content.get("body", "")[:60] + "…"
+                       if len(content.get("body", "")) > 60
+                       else content.get("body", ""))
+        else:
+            raise ValueError(
+                f"海报场景无效(须为{POSTER_SCENE_INVITE}/{POSTER_SCENE_PROMOTE})")
+
+        poster_id = await self.repo.next_id("poster")
+        poster = {
+            "posterId": poster_id,
+            "userId": user_id,
+            "scene": scene,
+            "fissionId": fission_id,
+            "contentId": content_id,
+            "memberName": member_name,
+            "headline": headline,
+            "subtext": subtext,
+            "qrCode": qr_code,
+            "qrTarget": f"/r/{qr_code}" if qr_code else "",
+            "createdAt": _now_iso(),
+        }
+        return await self.repo.save_poster(poster)
+
+    async def list_posters(self, user_id: int = None,
+                            scene: str = None) -> list[dict]:
+        return await self.repo.list_posters(user_id=user_id, scene=scene)

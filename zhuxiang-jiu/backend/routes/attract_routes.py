@@ -1,13 +1,14 @@
-"""AI智能自动引流模块路由(P0+P1, 30 端点)
+"""AI智能自动引流模块路由(P0+P1+P2, 37 端点)
 
 鉴权:
     - 公开(5): /r/{code} 短链跳转 / attach 归并 / attach-order 回写 /
       /sitemap.xml / /robots.txt
-    - 管理端(25): X-Role: admin(内容工厂/短码/点击流/报表/ROI引擎/
-      SEO关键词与长文/AB落地页/分发通知)
+    - 管理端(27): X-Role: admin(内容工厂/短码/点击流/报表/ROI引擎/
+      SEO/AB/通知/裂变管理与刷新)
+    - 用户端(5): X-Member-Id(任务宝进度/海报生成与列表)
 
 异常映射(遵循项目约定):
-    - KeyError → 404(选题/内容/点击/短码/关键词不存在)
+    - KeyError → 404(选题/内容/点击/短码/关键词/活动不存在)
     - ValueError → 409(状态非法/合规分不足/已归并等)
 
 端点分布:
@@ -21,6 +22,8 @@
     - SEO(5):    keywords增查 / article生成 / sitemap.xml / robots.txt(P1)
     - AB(3):     page配置 / report报表 / pages列表(P1)
     - 通知(1):   notify/publish(P1)
+    - 裂变(5):   fission创建/列表/结束/进度查询/进度刷新发奖(P2)
+    - 海报(2):   poster生成 / posters列表(P2)
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -109,6 +112,26 @@ class AbPageRequest(PydBaseModel):
 class NotifyPublishRequest(PydBaseModel):
     contentId: int = Field(..., description="内容ID")
     memberIds: list = Field(..., min_length=1, description="通知会员ID列表")
+
+
+class FissionRequest(PydBaseModel):
+    title: str = Field(..., min_length=1, max_length=100, description="活动标题")
+    inviteTarget: int = Field(5, ge=1, le=1000, description="邀请目标人数")
+    rewardAmount: float = Field(20.0, ge=0, le=10000, description="达标奖励(钱包奖励余额)")
+    rewardPoints: int = Field(100, ge=0, le=100000, description="达标积分(竹叶)")
+    startTime: str = Field("", max_length=30, description="活动开始(ISO, 空不限)")
+    endTime: str = Field("", max_length=30, description="活动结束(ISO, 空不限)")
+
+
+class FissionProgressRequest(PydBaseModel):
+    fissionId: int = Field(..., description="裂变活动ID")
+    userId: int = Field(..., description="会员ID")
+
+
+class PosterRequest(PydBaseModel):
+    scene: str = Field(..., description="场景: invite(任务宝)/promote(推广)")
+    fissionId: int = Field(0, description="裂变活动ID(invite场景必填)")
+    contentId: int = Field(0, description="内容ID(promote场景必填)")
 
 
 # ============================================================
@@ -577,5 +600,119 @@ async def notify_publish(
         result = await _service.notify_publish(
             content_id=data.contentId, member_ids=data.memberIds)
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P2: 裂变活动插件(任务宝 + 海报)
+# ============================================================
+
+@router.post("/api/attract/fission", tags=["AI自动引流模块"])
+async def create_fission(
+    data: FissionRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """创建任务宝裂变活动(邀请N人得双通道奖励)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.create_fission(
+            title=data.title, invite_target=data.inviteTarget,
+            reward_amount=data.rewardAmount,
+            reward_points=data.rewardPoints,
+            start_time=data.startTime, end_time=data.endTime)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/attract/fissions", tags=["AI自动引流模块"])
+async def list_fissions(
+    x_role: str = Header(None, alias="X-Role"),
+    status: str = Query(None, description="状态筛选 ongoing/ended"),
+):
+    """裂变活动列表"""
+    _require_admin(x_role)
+    try:
+        result = await _service.list_fissions(status=status)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/attract/fission/end", tags=["AI自动引流模块"])
+async def end_fission(
+    data: FissionProgressRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """结束裂变活动(停止计数与发奖)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.end_fission(fission_id=data.fissionId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/attract/fission/progress", tags=["AI自动引流模块"])
+async def get_fission_progress(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    fissionId: int = Query(..., description="裂变活动ID"),
+):
+    """我的任务宝进度(只读初始化, X-Member-Id 鉴权)"""
+    if not x_member_id:
+        raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
+    try:
+        result = await _service.get_fission_progress(
+            fission_id=fissionId, user_id=int(x_member_id))
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/attract/fission/refresh", tags=["AI自动引流模块"])
+async def refresh_fission_progress(
+    data: FissionProgressRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """刷新任务进度并检查达标发奖(幂等; 邀请计数来自归因表注册数)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.refresh_fission_progress(
+            fission_id=data.fissionId, user_id=data.userId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/attract/poster", tags=["AI自动引流模块"])
+async def create_poster(
+    data: PosterRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """生成裂变海报(文本卡片: 标题/文案/二维码内容, 前端canvas渲染)"""
+    if not x_member_id:
+        raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
+    try:
+        result = await _service.create_poster(
+            user_id=int(x_member_id), scene=data.scene,
+            fission_id=data.fissionId, content_id=data.contentId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/attract/posters", tags=["AI自动引流模块"])
+async def list_posters(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    scene: str = Query(None, description="场景筛选 invite/promote"),
+):
+    """我的海报列表"""
+    if not x_member_id:
+        raise HTTPException(status_code=401, detail="未登录: 请提供 X-Member-Id 头")
+    try:
+        result = await _service.list_posters(user_id=int(x_member_id),
+                                             scene=scene)
+        return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)

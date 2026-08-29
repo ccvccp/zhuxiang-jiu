@@ -130,6 +130,26 @@ AB_VERSION_A = "A"
 AB_VERSION_B = "B"
 AB_DEFAULT_WEIGHT = 50   # 版本A默认权重%(B=100-A)
 
+# ============================================================
+# 裂变活动插件(P2: 设计文档§8, 海报+任务宝)
+# ============================================================
+
+# 裂变活动状态
+FISSION_STATUS_DRAFT = "draft"          # 草稿(未开始)
+FISSION_STATUS_ONGOING = "ongoing"      # 进行中
+FISSION_STATUS_ENDED = "ended"          # 已结束
+FISSION_STATUSES = (FISSION_STATUS_DRAFT, FISSION_STATUS_ONGOING,
+                    FISSION_STATUS_ENDED)
+
+# 任务宝默认配置(创建时可覆盖)
+FISSION_DEFAULT_INVITE_TARGET = 5      # 邀请目标人数
+FISSION_DEFAULT_REWARD_AMOUNT = 20.0   # 达标奖励(钱包奖励余额)
+FISSION_DEFAULT_REWARD_POINTS = 100    # 达标积分(竹叶)
+
+# 海报载体(P2: 文本卡片式, 图片渲染由前端 canvas 完成)
+POSTER_SCENE_INVITE = "invite"         # 邀请海报(任务宝)
+POSTER_SCENE_PROMOTE = "promote"       # 推广海报(内容+码)
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -489,6 +509,61 @@ class AttractRepository:
                       reverse=True)[:limit]
 
     # ============================================================
+    # 裂变活动插件(P2: 活动/参与进度/海报)
+    # ============================================================
+
+    async def save_fission(self, fission: dict) -> dict:
+        return await self._save("attract_fissions",
+                                fission["fissionId"], fission)
+
+    async def get_fission(self, fission_id: int) -> dict | None:
+        return await self._get("attract_fissions", fission_id)
+
+    async def list_fissions(self, status: str = None,
+                             limit: int = 200) -> list[dict]:
+        fissions = await self._list("attract_fissions", limit * 5)
+        if status:
+            fissions = [f for f in fissions
+                        if f.get("status") == status]
+        return sorted(fissions, key=lambda f: f.get("createdAt", ""),
+                      reverse=True)[:limit]
+
+    async def save_fission_progress(self, progress: dict) -> dict:
+        return await self._save("attract_fission_progress",
+                                progress["progressId"], progress)
+
+    async def get_fission_progress(self, progress_id: int) -> dict | None:
+        return await self._get("attract_fission_progress", progress_id)
+
+    async def list_fission_progress(self, fission_id: int = None,
+                                     user_id: int = None,
+                                     limit: int = 1000) -> list[dict]:
+        rows = await self._list("attract_fission_progress", limit * 5)
+        if fission_id is not None:
+            rows = [r for r in rows if r.get("fissionId") == fission_id]
+        if user_id is not None:
+            rows = [r for r in rows if r.get("userId") == user_id]
+        return sorted(rows, key=lambda r: r.get("createdAt", ""),
+                      reverse=True)[:limit]
+
+    async def save_poster(self, poster: dict) -> dict:
+        return await self._save("attract_posters",
+                                poster["posterId"], poster)
+
+    async def get_poster(self, poster_id: int) -> dict | None:
+        return await self._get("attract_posters", poster_id)
+
+    async def list_posters(self, user_id: int = None, scene: str = None,
+                            limit: int = 200) -> list[dict]:
+        posters = await self._list("attract_posters", limit * 5)
+        if user_id is not None:
+            posters = [p for p in posters if p.get("userId") == user_id]
+        if scene:
+            posters = [p for p in posters if p.get("scene") == scene]
+        return sorted(posters, key=lambda p: p.get("createdAt", ""),
+                      reverse=True)[:limit]
+
+    # ============================================================
     # 通用存储(内存/Redis)
     # ============================================================
 
@@ -539,7 +614,13 @@ class AttractRepository:
             self.store["attract_channel_budgets"] = {}
             self.store["attract_seo_keywords"] = {}   # P1: SEO关键词
             self.store["attract_ab_pages"] = {}        # P1: AB落地页
+            self.store["attract_fissions"] = {}         # P2: 裂变活动
+            self.store["attract_fission_progress"] = {}  # P2: 任务宝进度
+            self.store["attract_posters"] = {}          # P2: 裂变海报
             self.store["_attract_topic_seq"] = 0
             self.store["_attract_content_seq"] = 0
             self.store["_attract_click_seq"] = 0
             self.store["_attract_keyword_seq"] = 0
+            self.store["_attract_fission_seq"] = 0
+            self.store["_attract_progress_seq"] = 0
+            self.store["_attract_poster_seq"] = 0
