@@ -48,7 +48,7 @@ async def main():
     stale = await svc.create_entry(question="过期促销规则",
                                     answer="2025 春节满 999 减 100。")
     await svc.review_entry(stale["id"], approve=True, reviewer_id=1)
-    stale_pub = await svc.publish_entry(stale["id"], publisher_id=1)
+    await svc.publish_entry(stale["id"], publisher_id=1)
     entry_full = await svc.repo.get_entry(stale["id"])
     entry_full["publishedAt"] = "2025-01-01T00:00:00"
     entry_full["hitCount"], entry_full["missCount"] = 0, 10

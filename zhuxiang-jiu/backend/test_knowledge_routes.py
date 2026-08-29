@@ -257,7 +257,7 @@ async def main():
     # ============================================================
     reset_store()
     chat = ChatService()
-    legacy = await chat.create_knowledge(
+    await chat.create_knowledge(
         category="faq", question="发货后多久能到",
         answer="默认快递 3-5 个工作日送达, 偏远地区顺延 2 天。",
         keywords="物流 发货 到货")
@@ -475,11 +475,6 @@ async def main():
     record("质量-扫描刷新全量条目", sweep["refreshed"] >= 1)
     record("质量-低分陈旧条目降级退役",
            stale["id"] in sweep["retired"], f"实际{sweep}")
-    try:
-        await svc.get_entry(stale["id"])
-        retired_state = True
-    except KeyError:
-        retired_state = False
     after_sweep = await svc.repo.get_entry(stale["id"])
     record("质量-退役条目仍可查但不可检索",
            after_sweep is not None
