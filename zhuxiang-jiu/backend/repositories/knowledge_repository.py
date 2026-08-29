@@ -3,6 +3,9 @@
 表清单:
     knowledge_entries(知识条目) + knowledge_versions(版本历史)
     + knowledge_gaps(知识缺口队列)
+    + knowledge_teach_sessions(对话式教学会话, P1)
+    + knowledge_documents(上传文档, P1)
+    + knowledge_crawl_sources(全网抓取种子源, P1)
 
 设计对齐:
     - 双模式存储: is_redis_mode() 切换内存字典/Redis(对齐 chat/attract 仓储)
@@ -38,6 +41,7 @@ SOURCE_MANUAL = "manual"            # 管理员手工录入
 SOURCE_CHAT_TEACHING = "chat_teaching"  # 对话式教学(P1)
 SOURCE_DOCUMENT = "document"        # 文档上传解析(P1)
 SOURCE_CRAWL = "crawl"              # 全网抓取(P1)
+SOURCE_MEDIA = "media"              # 图片/视频多模态资料(P1, D-14)
 SOURCE_MIGRATION = "migration"      # 旧 chat FAQ 迁移
 
 GAP_STATUS_OPEN = "open"            # 待补知识
@@ -334,6 +338,154 @@ class KnowledgeRepository:
         return gaps[:limit]
 
     # ============================================================
+    # 教学会话(P1: 对话式教学)
+    # ============================================================
+
+    async def next_teach_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(_k("knowledge", "teach", "seq")))
+        self._ensure_store()
+        self.store["_knowledge_teach_seq"] += 1
+        return self.store["_knowledge_teach_seq"]
+
+    async def save_teach_session(self, session: dict) -> None:
+        """新增/覆盖保存教学会话"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("knowledge", "teach", session["id"]),
+                             json.dumps(session, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["knowledge_teach_sessions"][session["id"]] = session
+
+    async def get_teach_session(self, session_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("knowledge", "teach", session_id))
+            return json.loads(raw) if raw else None
+        self._ensure_store()
+        return self.store["knowledge_teach_sessions"].get(session_id)
+
+    async def list_teach_sessions(self, limit: int = 50) -> list[dict]:
+        """教学会话列表(按创建时间倒序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("knowledge", "teach", "*"))
+            sessions = []
+            for key in keys:
+                if key.endswith(":seq"):
+                    continue
+                raw = await client.get(key)
+                if raw:
+                    sessions.append(json.loads(raw))
+        else:
+            self._ensure_store()
+            sessions = list(
+                self.store["knowledge_teach_sessions"].values())
+        sessions.sort(key=lambda s: s.get("createdAt") or "",
+                      reverse=True)
+        return sessions[:limit]
+
+    # ============================================================
+    # 文档(P1: 上传解析分块)
+    # ============================================================
+
+    async def next_document_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(_k("knowledge", "doc", "seq")))
+        self._ensure_store()
+        self.store["_knowledge_doc_seq"] += 1
+        return self.store["_knowledge_doc_seq"]
+
+    async def save_document(self, doc: dict) -> None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("knowledge", "doc", doc["id"]),
+                             json.dumps(doc, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["knowledge_documents"][doc["id"]] = doc
+
+    async def get_document(self, doc_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("knowledge", "doc", doc_id))
+            return json.loads(raw) if raw else None
+        self._ensure_store()
+        return self.store["knowledge_documents"].get(doc_id)
+
+    async def list_documents(self, limit: int = 50) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("knowledge", "doc", "*"))
+            docs = []
+            for key in keys:
+                if key.endswith(":seq"):
+                    continue
+                raw = await client.get(key)
+                if raw:
+                    docs.append(json.loads(raw))
+        else:
+            self._ensure_store()
+            docs = list(self.store["knowledge_documents"].values())
+        docs.sort(key=lambda d: d.get("createdAt") or "", reverse=True)
+        return docs[:limit]
+
+    # ============================================================
+    # 抓取种子源(P1: 全网抓取, D-15 白名单制)
+    # ============================================================
+
+    async def next_crawl_source_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(
+                _k("knowledge", "crawl", "source", "seq")))
+        self._ensure_store()
+        self.store["_knowledge_crawl_seq"] += 1
+        return self.store["_knowledge_crawl_seq"]
+
+    async def save_crawl_source(self, source: dict) -> None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("knowledge", "crawl", "source", source["id"]),
+                json.dumps(source, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["knowledge_crawl_sources"][source["id"]] = source
+
+    async def get_crawl_source(self, source_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("knowledge", "crawl", "source", source_id))
+            return json.loads(raw) if raw else None
+        self._ensure_store()
+        return self.store["knowledge_crawl_sources"].get(source_id)
+
+    async def list_crawl_sources(self, limit: int = 50) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("knowledge", "crawl", "source", "*"))
+            sources = []
+            for key in keys:
+                if key.endswith(":seq"):
+                    continue
+                raw = await client.get(key)
+                if raw:
+                    sources.append(json.loads(raw))
+        else:
+            self._ensure_store()
+            sources = list(
+                self.store["knowledge_crawl_sources"].values())
+        sources.sort(key=lambda s: s.get("createdAt") or "",
+                     reverse=True)
+        return sources[:limit]
+
+    # ============================================================
     # 统计
     # ============================================================
 
@@ -369,13 +521,22 @@ class KnowledgeRepository:
     # ============================================================
 
     def _ensure_store(self) -> None:
-        """确保内存存储包含知识模块的键(懒初始化)"""
-        if "knowledge_entries" not in self.store:
-            self.store["knowledge_entries"] = {}
-            self.store["knowledge_versions"] = {}
-            self.store["knowledge_gaps"] = {}
-            self.store["_knowledge_seq"] = 0
-            self.store["_knowledge_gap_seq"] = 0
+        """确保内存存储包含知识模块的键(幂等, 逐键补齐)"""
+        defaults = {
+            "knowledge_entries": {},
+            "knowledge_versions": {},
+            "knowledge_gaps": {},
+            "knowledge_teach_sessions": {},
+            "knowledge_documents": {},
+            "knowledge_crawl_sources": {},
+            "_knowledge_seq": 0,
+            "_knowledge_gap_seq": 0,
+            "_knowledge_teach_seq": 0,
+            "_knowledge_doc_seq": 0,
+            "_knowledge_crawl_seq": 0,
+        }
+        for key, value in defaults.items():
+            self.store.setdefault(key, value)
 
 
 def gap_hash(norm_question: str) -> str:

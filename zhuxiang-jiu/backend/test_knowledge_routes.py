@@ -302,7 +302,153 @@ async def main():
         record("退役-重复退役拒绝", True)
 
     # ============================================================
-    # 5. 统计
+    # 6. P1 三源接入: 教学 / 文档 / 多模态 / 抓取
+    # ============================================================
+    # 6.1 对话式教学
+    # (第4节 reset_store 清空了品牌种子, 幂等补种后再验证教学)
+    await svc.seed_brand_knowledge()
+    session = await svc.create_teach_session(topic="竹香酒酿造工艺")
+    record("教学-创建会话", session["status"] == "open"
+           and session["taughtCount"] == 0)
+
+    ask_hit = await svc.teach_ask(session["id"],
+                                   "竹香酒是怎么酿造的")
+    record("教学-提问命中品牌基准",
+           ask_hit["found"] and "专有菌群" in ask_hit["answer"],
+           f"实际{ask_hit}")
+
+    ask_miss = await svc.teach_ask(session["id"],
+                                    "竹香酒瓶子是什么颜色")
+    record("教学-提问未命中返回提示",
+           not ask_miss["found"] and "hint" in ask_miss)
+
+    gap_before = await svc.record_gap("竹香酒的瓶是什么颜色",
+                                       session_id="CS9")
+    taught = await svc.teach_submit(
+        session["id"], question="竹香酒的瓶子是什么颜色",
+        answer="竹香酒瓶身为竹节造型青瓷瓶, 寓意竹韵天成。")
+    record("教学-提交入库(chat_teaching, pending)",
+           taught["source"] == "chat_teaching"
+           and taught["status"] == ENTRY_STATUS_PENDING)
+    record("教学-自动闭环匹配缺口",
+           gap_before["id"] in (taught.get("resolvedGapIds") or []),
+           f"实际{taught.get('resolvedGapIds')}")
+
+    sessions = await svc.list_teach_sessions()
+    record("教学-会话列表含教学统计",
+           any(s["taughtCount"] >= 1 for s in sessions))
+
+    # 6.2 文档上传解析分块
+    doc = await svc.ingest_document(
+        title="竹香酒品鉴指南",
+        content=("竹香酒品鉴三步法。\n\n"
+                 "观色: 将酒倒入透明酒杯, 竹香酒呈微黄透亮, "
+                 "挂杯均匀说明酒体醇厚。\n\n"
+                 "闻香: 轻摇酒杯, 先闻竹叶清香, 再闻谷物发酵的"
+                 "醇香, 层次分明者为上品。\n\n"
+                 "品味: 入口绵柔, 中段回甘, 尾韵带竹香, "
+                 "空杯留香持久。"))
+    record("文档-分块入库(4块pending: 首行导语+三步法)",
+           doc["totalChunks"] == 4 and doc["ingested"] == 4
+           and doc["skipped"] == 0, f"实际{doc}")
+    docs = await svc.list_documents()
+    record("文档-列表含统计", any(d["id"] == doc["id"] for d in docs))
+
+    doc_dup = await svc.ingest_document(
+        title="竹香酒品鉴指南",
+        content=("观色: 将酒倒入透明酒杯, 竹香酒呈微黄透亮, "
+                 "挂杯均匀说明酒体醇厚。"))
+    record("文档-重复块幂等跳过",
+           doc_dup["ingested"] == 0 and doc_dup["skipped"] >= 1,
+           f"实际{doc_dup}")
+
+    try:
+        await svc.ingest_document(title="", content="x")
+        record("文档-空标题拒绝", False, "未抛出异常")
+    except ValueError:
+        record("文档-空标题拒绝", True)
+
+    # 6.3 多模态
+    img = await svc.ingest_image(
+        title="徂徕山竹海实景",
+        description="国家级森林公园徂徕山万亩竹海, 竹香酒水源地。",
+        url="https://example.com/zhulaishan.jpg", tags="水源 竹海")
+    record("图片-描述入库(source=media)",
+           not img["skipped"] and img["entryId"] > 0, f"实际{img}")
+
+    video = await svc.ingest_video(
+        title="竹香酒酿造工艺纪录片", url="https://example.com/doc.mp4",
+        segments=[
+            {"timecode": "00:00", "desc": "竹海选竹与竹材处理",
+             "keywords": "选竹 竹材"},
+            {"timecode": "03:20", "desc": "专有菌群接种与发酵控制",
+             "keywords": "菌群 发酵"},
+            {"timecode": "08:45", "desc": "徂徕山泉水引入与配比",
+             "keywords": "泉水 配比"},
+        ])
+    record("视频-时间轴分段入库(3段)",
+           video["totalSegments"] == 3 and video["ingested"] == 3,
+           f"实际{video}")
+    # 治理流水线: 视频分段条目审核+发布后才可被检索
+    for eid in video["entryIds"]:
+        await svc.review_entry(eid, approve=True, reviewer_id=1)
+        await svc.publish_entry(eid, publisher_id=1)
+    video_hit = await svc.search("纪录片里菌群接种在几分几秒")
+    record("视频-检索命中含时间码引用",
+           len(video_hit) >= 1 and "03:20" in video_hit[0]["answer"],
+           f"实际{video_hit[:1]}")
+
+    # 6.4 全网抓取(D-15)
+    src = await svc.add_crawl_source(
+        name="竹文化资讯站", url="https://example.com/bamboo-culture",
+        topics=["bamboo", "bamboo_culture"])
+    record("抓取-添加种子源", src["status"] == "active"
+           and set(src["topics"]) == {"bamboo", "bamboo_culture"})
+
+    try:
+        await svc.add_crawl_source("x", "https://x", topics=["fashion"])
+        record("抓取-非法主题域拒绝", False, "未抛出异常")
+    except ValueError:
+        record("抓取-非法主题域拒绝", True)
+
+    ok = await svc.crawl_ingest(
+        src["id"], title="竹与文人",
+        content=("苏东坡有言: 宁可食无肉, 不可居无竹。"
+                 "竹文化在中国文人心中象征气节与雅士风骨。"))
+    record("抓取-域内内容入库(命中bamboo_culture)",
+           "bamboo_culture" in ok["hitDomains"] and ok["ingested"] >= 1,
+           f"实际{ok}")
+
+    try:
+        await svc.crawl_ingest(
+            src["id"], title="股市行情",
+            content="今日股市大涨, 科技股领涨, 成交额破万亿。")
+        record("抓取-域外内容拒绝", False, "未抛出异常")
+    except ValueError as e:
+        record("抓取-域外内容拒绝", "主题域" in str(e))
+
+    try:
+        await svc.crawl_ingest(
+            src["id"], title="竹沥神效",
+            content="竹沥配伍可治愈百病, 根治咳嗽, 疗效确切。")
+        record("抓取-医药疗效断言拒绝", False, "未抛出异常")
+    except ValueError as e:
+        record("抓取-医药疗效断言拒绝", "疗效断言" in str(e))
+
+    med_ok = await svc.crawl_ingest(
+        src["id"], title="本草纲目竹叶条目",
+        content="《本草纲目》记载: 竹叶味辛甘, 性寒, "
+                "主胸中痰热, 咳逆上气。")
+    record("抓取-典籍引用放行(标注出处)",
+           med_ok["ingested"] >= 1, f"实际{med_ok}")
+
+    sources = await svc.list_crawl_sources()
+    record("抓取-种子源统计(入库/拒绝)",
+           any(s["id"] == src["id"] and s["ingestedTotal"] >= 2
+               and s["rejectedTotal"] >= 2 for s in sources))
+
+    # ============================================================
+    # 7. 统计
     # ============================================================
     stats = await svc.stats()
     record("统计-看板字段齐全",

@@ -23,6 +23,7 @@
 """
 
 import logging
+import re
 from datetime import datetime
 
 from core.locks import get_lock
@@ -32,6 +33,7 @@ from repositories.knowledge_repository import (
     ENTRY_STATUS_PUBLISHED, ENTRY_STATUS_REJECTED, ENTRY_STATUS_RETIRED,
     EDITABLE_STATUSES,
     SOURCE_MANUAL, SOURCE_MIGRATION,
+    SOURCE_CHAT_TEACHING, SOURCE_DOCUMENT, SOURCE_CRAWL, SOURCE_MEDIA,
     GAP_STATUS_OPEN, GAP_STATUS_RESOLVED, GAP_STATUS_IGNORED,
     build_vector, cosine, tokenize, _norm_text,
 )
@@ -101,6 +103,104 @@ def brand_taboo_error(question: str, answer: str) -> str | None:
         return None
     return (f"品牌表述禁忌: {BRAND_CORRECT_DESC}, "
             "禁止以浸泡/泡制/配制酒断言式表述本网产品")
+
+# ============================================================
+# P1 三源接入: 主题域(D-15) / 分块器 / 文档与多模态
+# ============================================================
+
+# 五大主题域(D-15 决策): 相关性过滤依据
+TOPIC_DOMAINS = {
+    "wine": ("酒文化", ("酿造", "工艺", "发酵", "蒸馏", "品鉴",
+                          "收藏", "白酒", "酒文化", "窖藏", "年份",
+                          "酒类政策", "白酒市场")),
+    "bamboo": ("竹子相关", ("竹材", "竹产业", "竹工艺", "竹制品",
+                              "竹纤维", "竹林", "竹笋", "竹茎",
+                              "竹叶")),
+    "bamboo_culture": ("竹文化", ("竹诗词", "竹美学", "竹文化",
+                                    "文人", "雅士", "竹林七贤",
+                                    "气节", "竹下")),
+    "bamboo_med": ("竹医药", ("竹叶提取物", "竹茹", "竹沥",
+                                "本草纲目", "药典", "竹黄",
+                                "竹叶黄酮", "药用", "中药大辞典",
+                                "中华本草")),
+    "brand": ("品牌文化", ("竹香酒", "竹奕酒", "徂徕山",
+                            "富硒", "专有菌群", "古法酿制")),
+}
+
+# 医药类疗效断言禁用词(竹医药域加严, D-15)
+MEDICAL_CLAIM_WORDS = ("治愈", "根治", "包治", "疗效确切",
+                       "抗癌", "降三高", "包好", "神药")
+
+# 文档分块参数
+CHUNK_MAX_LEN = 500        # 单块最大字符数
+CHUNK_QUESTION_MAX = 40   # 自动生成问题截断长度
+
+
+def topic_filter(content: str) -> tuple[bool, list[str]]:
+    """主题域相关性过滤(D-15)
+
+    Returns:
+        (通过与否, 命中的主题域列表)
+    """
+    hit = [domain for domain, (_, words) in TOPIC_DOMAINS.items()
+           if any(w in content for w in words)]
+    return (len(hit) > 0, hit)
+
+
+def medical_claim_error(content: str) -> str | None:
+    """竹医药域疗效断言检查(D-15 加严)"""
+    _, med_words = TOPIC_DOMAINS["bamboo_med"]
+    is_med = any(w in content for w in med_words)
+    if is_med and any(w in content for w in MEDICAL_CLAIM_WORDS):
+        return ("医药内容疗效断言违规(D-15): 典籍/文献可引用, "
+                "禁止治愈/根治类断言")
+    return None
+
+
+def split_chunks(text: str, max_len: int = CHUNK_MAX_LEN) -> list[str]:
+    """文档分块: 按空行分段, 超长段按句号二次切分"""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text or "")
+             if p.strip()]
+    chunks = []
+    for para in paras:
+        if len(para) <= max_len:
+            chunks.append(para)
+            continue
+        cur = ""
+        for sent in re.split(r"(?<=[。！？!?])", para):
+            if cur and len(cur) + len(sent) > max_len:
+                chunks.append(cur)
+                cur = sent
+            else:
+                cur += sent
+        if cur:
+            chunks.append(cur)
+    return chunks
+
+
+def make_question(title: str, chunk: str, idx: int, total: int) -> str:
+    """从文档块生成知识条目问题
+
+    优先取块内首个问句; 否则标题+块首截断。
+    """
+    m = re.search(r"[^。！？!?\n]*[？?]", chunk)
+    if m:
+        q = m.group().strip()
+        if 5 <= len(q) <= CHUNK_QUESTION_MAX + 20:
+            return q
+    head = re.sub(r"\s+", " ", chunk)[:CHUNK_QUESTION_MAX]
+    return f"{title}({idx}/{total}): {head}"
+
+
+def extract_html_text(html: str) -> str:
+    """HTML → 纯文本(去 script/style/标签)"""
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ",
+                  html or "", flags=re.S | re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"\s{2,}", "\n", text)
+    return text.strip()
+
 
 # 检索默认参数
 DEFAULT_TOP_K = 5
@@ -569,7 +669,366 @@ class KnowledgeService:
         return result
 
     # ============================================================
-    # 5. 统计
+    # 6. P1 三源接入: 对话式教学 / 文档分块 / 多模态 / 全网抓取
+    # ============================================================
+
+    async def _ingest_entry(self, question: str, answer: str,
+                             keywords: str, category: str,
+                             source: str) -> dict:
+        """ingestion 内部入库(批量模式): 单条失败跳过不中断
+
+        Returns:
+            {"entryId": int|0, "skipped": bool, "reason": str}
+        """
+        try:
+            entry = await self.create_entry(
+                question=question, answer=answer, keywords=keywords,
+                category=category, source=source)
+            return {"entryId": entry["id"], "skipped": False,
+                    "reason": ""}
+        except ValueError as exc:
+            return {"entryId": 0, "skipped": True, "reason": str(exc)}
+
+    # ---------- 6.1 对话式教学 ----------
+
+    async def create_teach_session(self, topic: str,
+                                    created_by: int = 0) -> dict:
+        """创建教学会话
+
+        Raises:
+            ValueError: 主题为空
+        """
+        topic = (topic or "").strip()
+        if not topic:
+            raise ValueError("教学主题不能为空")
+        session_id = await self.repo.next_teach_id()
+        session = {
+            "id": session_id,
+            "topic": topic,
+            "status": "open",
+            "taughtCount": 0, "askedCount": 0,
+            "messages": [],
+            "createdBy": created_by,
+            "createdAt": datetime.utcnow().isoformat(),
+        }
+        await self.repo.save_teach_session(session)
+        return session
+
+    async def teach_ask(self, session_id: int,
+                        question: str) -> dict:
+        """教学会话中提问: 检索已有知识作答
+
+        未命中时返回教学提示(教学机会), 不记录缺口(教学会话
+        的缺口由 teach 提交闭环)。
+
+        Raises:
+            KeyError: 会话不存在
+            ValueError: 会话已关闭/问题为空
+        """
+        async with get_lock(f"knowledge:teach:{session_id}"):
+            session = await self.repo.get_teach_session(session_id)
+            if session is None:
+                raise KeyError(f"教学会话不存在(id={session_id})")
+            if session["status"] != "open":
+                raise ValueError("教学会话已关闭")
+            question = (question or "").strip()
+            if not question:
+                raise ValueError("问题不能为空")
+            session["askedCount"] += 1
+            hits = await self.search(question, top_k=1,
+                                      record_hit=False)
+            if hits:
+                session["messages"].append({
+                    "role": "module", "content": hits[0]["answer"],
+                    "entryId": hits[0]["entryId"],
+                    "at": datetime.utcnow().isoformat()})
+                await self.repo.save_teach_session(session)
+                return {"found": True, "answer": hits[0]["answer"],
+                        "entryId": hits[0]["entryId"],
+                        "similarity": hits[0]["similarity"]}
+            session["messages"].append({
+                "role": "module", "content": "暂无答案, 请通过教学提交补充。",
+                "entryId": 0, "at": datetime.utcnow().isoformat()})
+            await self.repo.save_teach_session(session)
+            return {"found": False, "answer": "",
+                    "hint": "暂无答案, 请调用教学提交接口补充该知识"}
+
+    async def teach_submit(self, session_id: int, question: str,
+                            answer: str, keywords: str = "",
+                            category: str = "faq") -> dict:
+        """教学提交: Q+A 入库(source=chat_teaching, pending),
+        并自动 resolve 匹配的开放知识缺口(教学飞轮闭环)。
+
+        Raises:
+            KeyError: 会话不存在
+            ValueError: 会话已关闭/参数非法/违禁词/重复知识
+        """
+        async with get_lock(f"knowledge:teach:{session_id}"):
+            session = await self.repo.get_teach_session(session_id)
+            if session is None:
+                raise KeyError(f"教学会话不存在(id={session_id})")
+            if session["status"] != "open":
+                raise ValueError("教学会话已关闭")
+            question = (question or "").strip()
+            answer = (answer or "").strip()
+            if not question or not answer:
+                raise ValueError("问题与答案不能为空")
+            entry = await self.create_entry(
+                question=question, answer=answer, keywords=keywords,
+                category=category, source=SOURCE_CHAT_TEACHING)
+            session["taughtCount"] += 1
+            session["messages"].append({
+                "role": "taught", "content": question,
+                "entryId": entry["id"],
+                "at": datetime.utcnow().isoformat()})
+            await self.repo.save_teach_session(session)
+        # 自动 resolve 匹配的开放缺口(锁外 best-effort)
+        resolved_gaps = []
+        try:
+            new_vec = tokenize(question)
+            for gap in await self.repo.list_gaps(
+                    status=GAP_STATUS_OPEN, limit=100):
+                if cosine(new_vec, tokenize(
+                        gap.get("question") or "")) >= 0.5:
+                    resolved = await self.resolve_gap(
+                        gap["id"], action="resolve",
+                        entry_id=entry["id"])
+                    resolved_gaps.append(resolved["id"])
+        except Exception as exc:
+            logger.warning("教学自动闭环缺口失败: %s", exc)
+        entry["resolvedGapIds"] = resolved_gaps
+        return entry
+
+    async def list_teach_sessions(self,
+                                   limit: int = 50) -> list[dict]:
+        """教学会话列表"""
+        return await self.repo.list_teach_sessions(limit=limit)
+
+    # ---------- 6.2 文档上传解析分块 ----------
+
+    async def ingest_document(self, title: str, content: str,
+                               fmt: str = "text",
+                               category: str = "faq") -> dict:
+        """文档上传解析分块入库(source=document, 批量 pending)
+
+        分块规则: 空行分段 + 超长按句切; 每块生成一条候选条目;
+        重复/违规块跳过不中断。
+
+        Raises:
+            ValueError: 标题/内容为空
+        """
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("文档标题不能为空")
+        if not (content or "").strip():
+            raise ValueError("文档内容不能为空")
+        chunks = split_chunks(content)
+        doc_id = await self.repo.next_document_id()
+        ingested, skipped, reasons = 0, 0, {}
+        entry_ids = []
+        for i, chunk in enumerate(chunks, start=1):
+            result = await self._ingest_entry(
+                question=make_question(title, chunk, i, len(chunks)),
+                answer=chunk, keywords=title, category=category,
+                source=SOURCE_DOCUMENT)
+            if result["skipped"]:
+                skipped += 1
+                reasons[result["reason"][:40]] = \
+                    reasons.get(result["reason"][:40], 0) + 1
+            else:
+                ingested += 1
+                entry_ids.append(result["entryId"])
+        doc = {
+            "id": doc_id, "title": title, "format": fmt,
+            "category": category,
+            "totalChunks": len(chunks), "ingested": ingested,
+            "skipped": skipped, "skipReasons": reasons,
+            "entryIds": entry_ids,
+            "createdAt": datetime.utcnow().isoformat(),
+        }
+        await self.repo.save_document(doc)
+        return doc
+
+    async def list_documents(self, limit: int = 50) -> list[dict]:
+        """文档列表(含分块入库统计)"""
+        return await self.repo.list_documents(limit=limit)
+
+    # ---------- 6.3 多模态资料(D-14 rule 轨) ----------
+
+    async def ingest_image(self, title: str, description: str,
+                            url: str, tags: str = "") -> dict:
+        """图片描述入库(D-14): rule 轨管理员配描述, llm 轨 P2
+
+        Raises:
+            ValueError: 参数非法
+        """
+        title = (title or "").strip()
+        description = (description or "").strip()
+        if not title or not description:
+            raise ValueError("图片标题与描述不能为空")
+        answer = f"{description}(图片: {url})"
+        return await self._ingest_entry(
+            question=f"图片: {title}", answer=answer,
+            keywords=f"{title} {tags}".strip(),
+            category="media", source=SOURCE_MEDIA)
+
+    async def ingest_video(self, title: str, url: str,
+                           segments: list[dict]) -> dict:
+        """视频时间轴入库(D-14): 分段=检索单元, 一段一条
+
+        Args:
+            segments: [{"timecode": "03:20", "desc": "...",
+                        "keywords": "..."}]
+
+        Raises:
+            ValueError: 参数非法/无有效分段
+        """
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("视频标题不能为空")
+        if not url or not (url or "").strip():
+            raise ValueError("视频地址不能为空")
+        valid = [s for s in (segments or [])
+                 if (s.get("desc") or "").strip()]
+        if not valid:
+            raise ValueError("视频分段不能为空(至少一段含描述)")
+        ingested, skipped = 0, 0
+        entry_ids = []
+        for seg in valid:
+            timecode = (seg.get("timecode") or "").strip()
+            desc = (seg.get("desc") or "").strip()
+            answer = (f"(视频 {timecode} 起) {desc}。"
+                      f"视频链接: {url}")
+            result = await self._ingest_entry(
+                question=f"{title}: {desc[:30]}",
+                answer=answer,
+                keywords=f"{title} {seg.get('keywords') or ''}",
+                category="media", source=SOURCE_MEDIA)
+            if result["skipped"]:
+                skipped += 1
+            else:
+                ingested += 1
+                entry_ids.append(result["entryId"])
+        return {"title": title, "url": url,
+                "totalSegments": len(valid), "ingested": ingested,
+                "skipped": skipped, "entryIds": entry_ids}
+
+    # ---------- 6.4 全网抓取(D-15) ----------
+
+    async def add_crawl_source(self, name: str, url: str,
+                                topics: list[str]) -> dict:
+        """添加抓取种子源(白名单制)
+
+        Raises:
+            ValueError: 参数非法/主题域非法
+        """
+        name = (name or "").strip()
+        url = (url or "").strip()
+        if not name or not url:
+            raise ValueError("种子源名称与地址不能为空")
+        invalid = [t for t in (topics or [])
+                   if t not in TOPIC_DOMAINS]
+        if invalid:
+            raise ValueError(
+                f"非法主题域({invalid}), 合法: "
+                f"{list(TOPIC_DOMAINS.keys())}")
+        if not topics:
+            raise ValueError("须指定至少一个主题域")
+        source_id = await self.repo.next_crawl_source_id()
+        source = {
+            "id": source_id, "name": name, "url": url,
+            "topics": topics, "status": "active",
+            "ingestedTotal": 0, "rejectedTotal": 0,
+            "lastRunAt": "",
+            "createdAt": datetime.utcnow().isoformat(),
+        }
+        await self.repo.save_crawl_source(source)
+        return source
+
+    async def list_crawl_sources(self,
+                                  limit: int = 50) -> list[dict]:
+        """种子源列表"""
+        return await self.repo.list_crawl_sources(limit=limit)
+
+    async def crawl_ingest(self, source_id: int, title: str,
+                            content: str) -> dict:
+        """抓取内容入库: 主题域过滤 → 医药加严 → 分块 → 批量 pending
+
+        管理员粘贴网页正文(或 crawl/run 拉取后调用)。
+
+        Raises:
+            KeyError: 种子源不存在
+            ValueError: 源停用/标题内容为空/主题域外/疗效断言
+        """
+        source = await self.repo.get_crawl_source(source_id)
+        if source is None:
+            raise KeyError(f"种子源不存在(id={source_id})")
+        if source["status"] != "active":
+            raise ValueError("种子源已停用")
+        title = (title or "").strip()
+        if not title or not (content or "").strip():
+            raise ValueError("标题与内容不能为空")
+        passed, hit_domains = topic_filter(content)
+        if not passed:
+            source["rejectedTotal"] += 1
+            await self.repo.save_crawl_source(source)
+            raise ValueError(
+                "内容未命中任何主题域(D-15), 拒绝入库")
+        med_error = medical_claim_error(content)
+        if med_error:
+            source["rejectedTotal"] += 1
+            await self.repo.save_crawl_source(source)
+            raise ValueError(med_error)
+        chunks = split_chunks(content)
+        ingested, skipped = 0, 0
+        entry_ids = []
+        for i, chunk in enumerate(chunks, start=1):
+            result = await self._ingest_entry(
+                question=make_question(title, chunk, i, len(chunks)),
+                answer=chunk, keywords=" ".join(
+                    TOPIC_DOMAINS[d][0] for d in hit_domains),
+                category="crawl", source=SOURCE_CRAWL)
+            if result["skipped"]:
+                skipped += 1
+            else:
+                ingested += 1
+                entry_ids.append(result["entryId"])
+        source["ingestedTotal"] += ingested
+        source["rejectedTotal"] += skipped
+        source["lastRunAt"] = datetime.utcnow().isoformat()
+        await self.repo.save_crawl_source(source)
+        return {"sourceId": source_id, "title": title,
+                "hitDomains": hit_domains,
+                "totalChunks": len(chunks), "ingested": ingested,
+                "skipped": skipped, "entryIds": entry_ids}
+
+    async def crawl_run(self, source_id: int) -> dict:
+        """执行抓取(provider=rule): urllib 拉取 URL → 提取正文 →
+        走 crawl_ingest 流程。llm 轨 P2 接入。
+
+        Raises:
+            KeyError: 种子源不存在
+            ValueError: 拉取失败/内容不合规
+        """
+        source = await self.repo.get_crawl_source(source_id)
+        if source is None:
+            raise KeyError(f"种子源不存在(id={source_id})")
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                source["url"],
+                headers={"User-Agent": "ZhuxiangKnowledgeBot/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read().decode("utf-8", errors="ignore")
+        except Exception as exc:
+            raise ValueError(f"抓取失败({source['url']}): {exc}") \
+                from None
+        title = source["name"]
+        content = extract_html_text(raw)
+        return await self.crawl_ingest(source_id, title, content)
+
+    # ============================================================
+    # 7. 统计
     # ============================================================
 
     async def stats(self) -> dict:

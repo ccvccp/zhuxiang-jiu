@@ -1,12 +1,14 @@
-"""AI智能知识库训练模块路由(P0: 知识底座, 14 端点)
+"""AI智能知识库训练模块路由(P0+P1: 知识底座+三源接入, 26 端点)
 
 鉴权:
-    - 管理端(13): X-Role: admin 头(条目治理/缺口处置/迁移/种子/统计)
+    - 管理端(25): X-Role: admin 头(条目治理/缺口处置/迁移/种子/统计/
+      教学会话/文档/多模态/抓取源管理)
     - 公开(1): 检索测试(供联调与消费方验证)
 
 异常映射(遵循项目约定):
-    - KeyError → 404(条目/缺口不存在)
-    - ValueError → 409(状态非法/违禁词/品牌表述禁忌/重复知识等)
+    - KeyError → 404(条目/缺口/会话/文档/种子源不存在)
+    - ValueError → 409(状态非法/违禁词/品牌表述禁忌/重复知识/
+      主题域外/疗效断言等)
     - 权限校验 → 403(无权操作)
 
 端点分布:
@@ -17,6 +19,11 @@
     - 种子(1):   品牌基准知识种子(D-17, 幂等)
     - 统计(1):   治理看板
     - 检索(1):   统一检索测试(公开)
+    - 教学(3):   会话创建 / 提问 / 教学提交(P1)
+    - 教学列表(1): 教学会话列表(P1)
+    - 文档(2):   上传解析分块 / 文档列表(P1)
+    - 多模态(2): 图片描述入库 / 视频时间轴入库(P1, D-14)
+    - 抓取(4):   种子源添加 / 列表 / 内容接入 / 执行抓取(P1, D-15)
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -97,6 +104,63 @@ class SearchRequest(PydBaseModel):
     query: str = Field(..., min_length=1, description="检索问题")
     category: str = Field(None, description="分类过滤")
     topK: int = Field(5, ge=1, le=20, description="返回条数")
+
+
+# ---- P1 三源接入 ----
+
+class CreateTeachSessionRequest(PydBaseModel):
+    topic: str = Field(..., min_length=1, description="教学主题")
+
+
+class TeachAskRequest(PydBaseModel):
+    question: str = Field(..., min_length=1, description="提问内容")
+
+
+class TeachSubmitRequest(PydBaseModel):
+    question: str = Field(..., min_length=1, description="标准问题")
+    answer: str = Field(..., min_length=1, description="标准答案")
+    keywords: str = Field("", description="关键词")
+    category: str = Field("faq", description="分类")
+
+
+class IngestDocumentRequest(PydBaseModel):
+    title: str = Field(..., min_length=1, description="文档标题")
+    content: str = Field(..., min_length=1, description="文档正文(txt/md/csv/json 文本)")
+    format: str = Field("text", description="格式: text/md/csv/json")
+    category: str = Field("faq", description="知识分类")
+
+
+class IngestImageRequest(PydBaseModel):
+    title: str = Field(..., min_length=1, description="图片标题")
+    description: str = Field(..., min_length=1, description="图片描述(rule 轨管理员配置)")
+    url: str = Field("", description="图片地址")
+    tags: str = Field("", description="标签(空格分隔)")
+
+
+class VideoSegmentItem(PydBaseModel):
+    timecode: str = Field("", description="时间点(如 03:20)")
+    desc: str = Field(..., min_length=1, description="分段描述")
+    keywords: str = Field("", description="分段关键词")
+
+
+class IngestVideoRequest(PydBaseModel):
+    title: str = Field(..., min_length=1, description="视频标题")
+    url: str = Field(..., min_length=1, description="视频地址")
+    segments: list[VideoSegmentItem] = Field(..., min_length=1,
+                                              description="分段时间轴(rule 轨)")
+
+
+class AddCrawlSourceRequest(PydBaseModel):
+    name: str = Field(..., min_length=1, description="种子源名称")
+    url: str = Field(..., min_length=1, description="种子源地址")
+    topics: list[str] = Field(..., min_length=1,
+                               description="主题域: wine/bamboo/bamboo_culture/bamboo_med/brand")
+
+
+class CrawlIngestRequest(PydBaseModel):
+    sourceId: int = Field(..., description="种子源ID")
+    title: str = Field(..., min_length=1, description="内容标题")
+    content: str = Field(..., min_length=1, description="网页正文(粘贴)")
 
 
 # ============================================================
@@ -344,6 +408,210 @@ async def search(
                 "data": await _service.search(
                     query=data.query, category=data.category,
                     top_k=data.topK, record_hit=False)}
+    except Exception as exc:
+        _handle(exc)
+
+
+# ============================================================
+# P1 三源接入: 教学(4)
+# ============================================================
+
+@router.post("/api/knowledge/teach/sessions", tags=["AI智能知识库训练模块"])
+async def create_teach_session(
+    data: CreateTeachSessionRequest,
+    x_role: str = Header(None, alias="X-Role"),
+    x_admin_id: int = Header(0, alias="X-Admin-Id"),
+):
+    """创建教学会话(对话式教学, P1)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.create_teach_session(
+                    topic=data.topic, created_by=x_admin_id)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/knowledge/teach/sessions", tags=["AI智能知识库训练模块"])
+async def list_teach_sessions(
+    limit: int = Query(50, ge=1, le=200),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """教学会话列表"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.list_teach_sessions(limit=limit)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/teach/sessions/{session_id}/ask",
+             tags=["AI智能知识库训练模块"])
+async def teach_ask(
+    session_id: int,
+    data: TeachAskRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """教学会话提问(检索已有知识作答; 未命中返回教学提示)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.teach_ask(
+                    session_id, question=data.question)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/teach/sessions/{session_id}/teach",
+             tags=["AI智能知识库训练模块"])
+async def teach_submit(
+    session_id: int,
+    data: TeachSubmitRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """教学提交(Q+A 入库 pending + 自动闭环匹配知识缺口)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.teach_submit(
+                    session_id, question=data.question,
+                    answer=data.answer, keywords=data.keywords,
+                    category=data.category)}
+    except Exception as exc:
+        _handle(exc)
+
+
+# ============================================================
+# 文档(2)
+# ============================================================
+
+@router.post("/api/knowledge/documents", tags=["AI智能知识库训练模块"])
+async def ingest_document(
+    data: IngestDocumentRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """文档上传解析分块入库(空行分段+超长句切, 批量 pending)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.ingest_document(
+                    title=data.title, content=data.content,
+                    fmt=data.format, category=data.category)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/knowledge/documents", tags=["AI智能知识库训练模块"])
+async def list_documents(
+    limit: int = Query(50, ge=1, le=200),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """文档列表(含分块入库统计)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.list_documents(limit=limit)}
+    except Exception as exc:
+        _handle(exc)
+
+
+# ============================================================
+# 多模态(2, D-14 rule 轨)
+# ============================================================
+
+@router.post("/api/knowledge/media/image", tags=["AI智能知识库训练模块"])
+async def ingest_image(
+    data: IngestImageRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """图片描述入库(rule 轨: 管理员配描述; llm 轨 P2 视觉大模型)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.ingest_image(
+                    title=data.title, description=data.description,
+                    url=data.url, tags=data.tags)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/media/video", tags=["AI智能知识库训练模块"])
+async def ingest_video(
+    data: IngestVideoRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """视频时间轴入库(分段=检索单元, 支持回答引用时间点; llm 轨 P2)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.ingest_video(
+                    title=data.title, url=data.url,
+                    segments=[s.model_dump() for s in data.segments])}
+    except Exception as exc:
+        _handle(exc)
+
+
+# ============================================================
+# 全网抓取(4, D-15 白名单制)
+# ============================================================
+
+@router.post("/api/knowledge/crawl/sources", tags=["AI智能知识库训练模块"])
+async def add_crawl_source(
+    data: AddCrawlSourceRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """添加抓取种子源(白名单制, 绑定主题域)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.add_crawl_source(
+                    name=data.name, url=data.url, topics=data.topics)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/knowledge/crawl/sources", tags=["AI智能知识库训练模块"])
+async def list_crawl_sources(
+    limit: int = Query(50, ge=1, le=200),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """种子源列表(含入库/拒绝统计)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.list_crawl_sources(limit=limit)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/crawl/ingest", tags=["AI智能知识库训练模块"])
+async def crawl_ingest(
+    data: CrawlIngestRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """抓取内容接入(粘贴正文): 主题域过滤→医药加严→分块→批量 pending"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.crawl_ingest(
+                    source_id=data.sourceId, title=data.title,
+                    content=data.content)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/crawl/run", tags=["AI智能知识库训练模块"])
+async def crawl_run(
+    data: CrawlIngestRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """执行抓取(rule 轨: urllib 拉取 URL→提取正文→接入流程; llm 轨 P2)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.crawl_run(
+                    source_id=data.sourceId)}
     except Exception as exc:
         _handle(exc)
 
