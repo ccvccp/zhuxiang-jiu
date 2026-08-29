@@ -39,6 +39,8 @@ CONFIG_STATUS_DISABLED = "disabled"
 LOGIN_FAIL_LIMIT = 5
 # 锁定时长(分钟)
 LOGIN_LOCK_MINUTES = 30
+# 会话无操作超时(分钟, 滑动续期)
+SESSION_TIMEOUT_MINUTES = 30
 
 
 def _hash_admin_pwd(password: str) -> str:
@@ -198,6 +200,40 @@ class AdminRepository:
         return sorted([p for p in perms if p])
 
     # ============================================================
+    # 管理员会话 CRUD(30分钟滑动过期)
+    # ============================================================
+
+    async def save_session(self, session: dict) -> None:
+        """保存/刷新会话(token 主键)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            # Redis TTL 略大于业务超时, 过期清理兜底
+            await client.set(_k("admin", "session", session["token"]),
+                             json.dumps(session, ensure_ascii=False),
+                             ex=SESSION_TIMEOUT_MINUTES * 60 + 60)
+        else:
+            self._ensure_store()
+            self.store["admin_sessions"][session["token"]] = session
+
+    async def get_session(self, token: str) -> dict | None:
+        """查询会话(不校验过期, 由 service 层判断)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(_k("admin", "session", token))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store["admin_sessions"].get(token)
+
+    async def delete_session(self, token: str) -> bool:
+        """删除会话(登出), 返回是否删除成功"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            deleted = await client.delete(_k("admin", "session", token))
+            return bool(deleted)
+        self._ensure_store()
+        return self.store["admin_sessions"].pop(token, None) is not None
+
+    # ============================================================
     # 操作日志 CRUD
     # ============================================================
 
@@ -300,6 +336,7 @@ class AdminRepository:
             self.store["admin_user_roles"] = {}            # userId → [roleId, ...]
             self.store["admin_operation_logs"] = {}        # logId → log
             self.store["admin_logs_seq_list"] = []         # 按时序的 logId 列表
+            self.store["admin_sessions"] = {}              # token → session
             self.store["system_configs"] = {}              # configKey → config
             self.store["_admin_user_seq"] = 0
             self.store["_admin_role_seq"] = 0

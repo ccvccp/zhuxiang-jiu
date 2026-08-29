@@ -19,6 +19,8 @@
     - ValueError → 409(业务冲突: 用户名重复/状态非法等)
 """
 
+import re
+import secrets
 from datetime import datetime, timedelta
 
 from core.locks import get_lock
@@ -29,6 +31,7 @@ from repositories.admin_repository import (
     ADMIN_STATUS_NORMAL, ADMIN_STATUS_DISABLED, ADMIN_STATUS_LOCKED,
     ROLE_STATUS_ACTIVE, ROLE_STATUS_DISABLED,
     CONFIG_STATUS_ACTIVE, LOGIN_FAIL_LIMIT, LOGIN_LOCK_MINUTES,
+    SESSION_TIMEOUT_MINUTES,
 )
 
 
@@ -36,12 +39,31 @@ from repositories.admin_repository import (
 # 业务常量
 # ============================================================
 
-# 密码最小长度
-PASSWORD_MIN_LENGTH = 6
+# 密码最小长度(对齐设计文档: ≥12位)
+PASSWORD_MIN_LENGTH = 12
 # 默认数据范围
 DEFAULT_DATA_SCOPE = "all"
 # 默认角色编码前缀
 ROLE_CODE_PREFIX = ""
+
+
+def validate_password_strength(password: str) -> None:
+    """密码复杂度校验(对齐设计文档: ≥12位+大写+小写+数字+特殊字符)
+
+    Raises:
+        ValueError: 不满足复杂度要求
+    """
+    if not isinstance(password, str) or len(password) < PASSWORD_MIN_LENGTH:
+        raise ValueError(
+            f"密码长度需≥{PASSWORD_MIN_LENGTH}位(须含大写字母+小写字母+数字+特殊字符)")
+    if not re.search(r"[A-Z]", password):
+        raise ValueError("密码须包含大写字母")
+    if not re.search(r"[a-z]", password):
+        raise ValueError("密码须包含小写字母")
+    if not re.search(r"\d", password):
+        raise ValueError("密码须包含数字")
+    if not re.search(r"[^A-Za-z0-9]", password):
+        raise ValueError("密码须包含特殊字符")
 
 
 class AdminService:
@@ -144,6 +166,24 @@ class AdminService:
             permissions = await self.repo.get_user_permissions(user["id"])
             roles = await self.repo.get_user_roles(user["id"])
 
+            # 创建会话(30分钟滑动过期)
+            token = secrets.token_urlsafe(32)
+            now_dt = datetime.utcnow()
+            session = {
+                "token": token,
+                "userId": user["id"],
+                "username": user["username"],
+                "roleCodes": [r.get("roleCode") for r in roles],
+                "ip": ip,
+                "device": device,
+                "createdAt": now_dt.isoformat(),
+                "lastActiveAt": now_dt.isoformat(),
+                "expiresAt": (now_dt +
+                               timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+                               ).isoformat(),
+            }
+            await self.repo.save_session(session)
+
             # 写入登录日志
             await self.repo.add_log({
                 "userId": user["id"],
@@ -171,8 +211,66 @@ class AdminService:
                 "position": user.get("position", ""),
                 "roleCodes": [r.get("roleCode") for r in roles],
                 "permissions": permissions,
+                "sessionToken": token,
+                "sessionExpiresAt": session["expiresAt"],
                 "lastLoginAt": user["lastLoginAt"],
             }
+
+    async def verify_session(self, token: str) -> dict | None:
+        """校验会话有效性(30分钟无操作过期, 滑动续期)
+
+        Returns:
+            有效: 会话信息(含 userId/username/roleCodes)
+            无效/过期: None(调用方按未登录处理)
+        """
+        if not token:
+            return None
+        session = await self.repo.get_session(token)
+        if session is None:
+            return None
+        # 过期判断(无操作超过 SESSION_TIMEOUT_MINUTES)
+        try:
+            expires_at = datetime.fromisoformat(session.get("expiresAt", ""))
+            if datetime.utcnow() >= expires_at:
+                await self.repo.delete_session(token)
+                return None
+        except (ValueError, TypeError):
+            return None
+        # 滑动续期: 刷新最后活跃时间与过期时间
+        now_dt = datetime.utcnow()
+        session["lastActiveAt"] = now_dt.isoformat()
+        session["expiresAt"] = (now_dt +
+                                 timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+                                 ).isoformat()
+        await self.repo.save_session(session)
+        return session
+
+    async def logout(self, token: str, operator_id: int = 0) -> dict:
+        """登出(销毁会话)
+
+        Raises:
+            ValueError: 会话不存在或已过期
+        """
+        deleted = await self.repo.delete_session(token)
+        if not deleted:
+            raise ValueError("会话不存在或已过期")
+        await self.repo.add_log({
+            "userId": operator_id,
+            "userName": "",
+            "roleCode": "",
+            "module": "auth",
+            "action": "logout",
+            "resourceType": "admin_user",
+            "resourceId": str(operator_id),
+            "resourceName": "",
+            "beforeData": None,
+            "afterData": None,
+            "ip": "",
+            "device": "",
+            "requestId": "",
+            "remark": "登出",
+        })
+        return {"loggedOut": True}
 
     def _lock_remain_minutes(self, lock_until_iso: str) -> int:
         """计算锁定剩余分钟"""
@@ -197,7 +295,7 @@ class AdminService:
 
         规则:
             - 用户名唯一(已存在 → 409)
-            - 密码长度 >= 6
+            - 密码复杂度: ≥12位+大写+小写+数字+特殊字符
             - 角色 ID 必须存在
             - 默认状态正常
 
@@ -205,10 +303,9 @@ class AdminService:
             新管理员(不含密码哈希)
 
         Raises:
-            ValueError: 用户名重复/密码过短/角色不存在
+            ValueError: 用户名重复/密码复杂度不足/角色不存在
         """
-        if len(password) < PASSWORD_MIN_LENGTH:
-            raise ValueError(f"密码长度需≥{PASSWORD_MIN_LENGTH}")
+        validate_password_strength(password)
 
         lock_key = f"admin:user:username:{username}"
         async with get_lock(lock_key):
@@ -360,10 +457,9 @@ class AdminService:
 
         Raises:
             KeyError: 管理员不存在
-            ValueError: 密码过短
+            ValueError: 密码复杂度不足
         """
-        if len(new_password) < PASSWORD_MIN_LENGTH:
-            raise ValueError(f"密码长度需≥{PASSWORD_MIN_LENGTH}")
+        validate_password_strength(new_password)
 
         lock_key = f"admin:user:{user_id}"
         async with get_lock(lock_key):

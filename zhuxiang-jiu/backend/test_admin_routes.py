@@ -76,9 +76,9 @@ SUPER_ADMIN_USERNAME = "admin"
 SUPER_ADMIN_PASSWORD = "admin123"
 SUPER_ADMIN_ID = 1
 
-# 测试用新账号
+# 测试用新账号(密码满足复杂度: ≥12位+大写+小写+数字+特殊字符)
 TEST_USERNAME = "ops_manager"
-TEST_PASSWORD = "Ops@2026"
+TEST_PASSWORD = "Ops@2026#Secure"
 TEST_EMPLOYEE_NO = "EMP0101"
 
 # 测试角色
@@ -323,7 +323,7 @@ class TestResetPassword:
                                        operator_id=SUPER_ADMIN_ID)
 
         # test 23: 重置密码后旧密码失效
-        await svc.reset_password(user["userId"], "NewPwd@2026",
+        await svc.reset_password(user["userId"], "NewPwd@2026#Go",
                                    operator_id=SUPER_ADMIN_ID)
         # 旧密码登录失败
         try:
@@ -334,7 +334,7 @@ class TestResetPassword:
 
         # test 24: 新密码可登录
         try:
-            login_result = await svc.login(user["username"], "NewPwd@2026")
+            login_result = await svc.login(user["username"], "NewPwd@2026#Go")
             record("test_24_new_password_works",
                    login_result["userId"] == user["userId"],
                    "登录失败")
@@ -354,6 +354,140 @@ class TestResetPassword:
         record("test_26_reset_password_writes_log",
                any(l["action"] == "reset_password" for l in logs),
                f"unexpected: {logs}")
+
+        # test 26b: 新密码缺少特殊字符(409, 复杂度校验)
+        try:
+            await svc.reset_password(user["userId"], "NewPwd2026Secure",
+                                        operator_id=SUPER_ADMIN_ID)
+            record("test_26b_password_needs_special_char", False, "应抛出ValueError")
+        except ValueError:
+            record("test_26b_password_needs_special_char", True)
+
+        # test 26c: 新密码长度不足12位(409)
+        try:
+            await svc.reset_password(user["userId"], "Ab1@xyz",
+                                        operator_id=SUPER_ADMIN_ID)
+            record("test_26c_password_needs_12_chars", False, "应抛出ValueError")
+        except ValueError:
+            record("test_26c_password_needs_12_chars", True)
+
+
+class TestPasswordStrength:
+    """密码复杂度校验测试(≥12位+大写+小写+数字+特殊字符)"""
+
+    async def run(self, svc):
+        # 全大写无小写
+        try:
+            await svc.create_user(username="all_upper_user",
+                                     password="ABCDEFG12345!@")
+            record("test_ps_01_needs_lowercase", False, "应抛出ValueError")
+        except ValueError:
+            record("test_ps_01_needs_lowercase", True)
+
+        # 全小写无大写
+        try:
+            await svc.create_user(username="all_lower_user",
+                                     password="abcdefg12345!@")
+            record("test_ps_02_needs_uppercase", False, "应抛出ValueError")
+        except ValueError:
+            record("test_ps_02_needs_uppercase", True)
+
+        # 无数字
+        try:
+            await svc.create_user(username="no_digit_user",
+                                     password="Abcdefghijk!@")
+            record("test_ps_03_needs_digit", False, "应抛出ValueError")
+        except ValueError:
+            record("test_ps_03_needs_digit", True)
+
+        # 无特殊字符
+        try:
+            await svc.create_user(username="no_special_user",
+                                     password="Abcdefg12345")
+            record("test_ps_04_needs_special_char", False, "应抛出ValueError")
+        except ValueError:
+            record("test_ps_04_needs_special_char", True)
+
+        # 合法强密码
+        result = await svc.create_user(username="strong_pwd_user",
+                                         password="Str0ng@Pass2026!")
+        record("test_ps_05_strong_password_ok",
+               result.get("username") == "strong_pwd_user",
+               f"unexpected: {result}")
+
+
+class TestSession:
+    """会话Token机制测试(30分钟滑动过期 + 登出)"""
+
+    async def run(self, svc):
+        # 登录返回会话Token
+        login_result = await svc.login(SUPER_ADMIN_USERNAME,
+                                         SUPER_ADMIN_PASSWORD,
+                                         ip="127.0.0.1", device="PC-Test")
+        token = login_result.get("sessionToken")
+        record("test_ss_01_login_returns_token",
+               bool(token) and bool(login_result.get("sessionExpiresAt")),
+               "login 未返回 sessionToken/sessionExpiresAt")
+
+        # 有效会话可校验
+        session = await svc.verify_session(token)
+        record("test_ss_02_verify_valid_session",
+               session is not None and session["userId"] == SUPER_ADMIN_ID,
+               f"unexpected: {session}")
+
+        # 滑动续期: 再次校验过期时间被刷新
+        session2 = await svc.verify_session(token)
+        record("test_ss_03_sliding_renewal",
+               session2["expiresAt"] >= session["expiresAt"],
+               "expiresAt 未刷新")
+
+        # 伪造Token校验失败
+        fake = await svc.verify_session("fake-token-abc")
+        record("test_ss_04_invalid_token_rejected", fake is None,
+               f"unexpected: {fake}")
+
+        # 登出销毁会话
+        logout_result = await svc.logout(token, operator_id=SUPER_ADMIN_ID)
+        record("test_ss_05_logout_success",
+               logout_result.get("loggedOut") is True,
+               f"unexpected: {logout_result}")
+
+        # 登出后原Token失效
+        after = await svc.verify_session(token)
+        record("test_ss_06_token_invalid_after_logout", after is None,
+               f"unexpected: {after}")
+
+        # 重复登出 → ValueError
+        try:
+            await svc.logout(token)
+            record("test_ss_07_double_logout_rejected", False, "应抛出ValueError")
+        except ValueError:
+            record("test_ss_07_double_logout_rejected", True)
+
+        # 会话过期判定: 手动构造已过期会话
+        from datetime import datetime, timedelta as _td
+        from repositories.admin_repository import SESSION_TIMEOUT_MINUTES
+        expired_session = {
+            "token": "expired-token-xyz",
+            "userId": SUPER_ADMIN_ID,
+            "username": SUPER_ADMIN_USERNAME,
+            "roleCodes": ["SUPER"],
+            "ip": "", "device": "",
+            "createdAt": (datetime.utcnow() - _td(hours=2)).isoformat(),
+            "lastActiveAt": (datetime.utcnow() - _td(hours=1)).isoformat(),
+            "expiresAt": (datetime.utcnow() - _td(minutes=1)).isoformat(),
+        }
+        await svc.repo.save_session(expired_session)
+        expired_check = await svc.verify_session("expired-token-xyz")
+        record("test_ss_08_expired_session_rejected", expired_check is None,
+               f"unexpected: {expired_check}")
+
+        # 过期会话被清理(登出时提示不存在)
+        try:
+            await svc.logout("expired-token-xyz")
+            record("test_ss_09_expired_session_cleaned", False, "应抛出ValueError")
+        except ValueError:
+            record("test_ss_09_expired_session_cleaned", True)
 
 
 class TestRole:
@@ -661,6 +795,8 @@ async def main():
         TestUserQuery,
         TestUpdateUser,
         TestResetPassword,
+        TestPasswordStrength,
+        TestSession,
         TestRole,
         TestPermission,
         TestOperationLogs,
