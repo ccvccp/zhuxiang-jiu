@@ -74,6 +74,7 @@ async def create_order(
             address=body.get("address", {}),
             use_points=int(body.get("usePoints", 0)),
             remark=body.get("remark", ""),
+            age_confirmed=bool(body.get("ageConfirmed", False)),
         )
         # v7.6 自动反馈: 订单风控观察评分 + 决策快照(不阻断业务)
         # v7.8 输入富化: 传入地址/备注, 信用与行为画像由富化层查询

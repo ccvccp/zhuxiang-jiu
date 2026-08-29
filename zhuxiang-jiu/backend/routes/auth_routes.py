@@ -134,6 +134,8 @@ async def register(data: RegisterRequest):
             phone=data.phone,
             password=data.password,
             nickname=data.nickname,
+            birthdate=data.birthdate,
+            age_confirmed=data.ageConfirmed,
         )
         return result
     except Exception as exc:

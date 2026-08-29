@@ -23,6 +23,7 @@ from datetime import datetime
 
 from core.helpers import ts
 from core.locks import get_lock
+from core.age_gate import is_adult, MINOR_REJECT_MSG, AGE_CONFIRM_REQUIRED_MSG
 from repositories.inventory_repository import InventoryRepository
 from repositories.member_repository import MemberRepository
 from repositories.order_repository import OrderRepository
@@ -175,20 +176,26 @@ class OrderService:
     # ============================================================
 
     async def create(self, member_id, items: list, address: dict,
-                     use_points: int = 0, remark: str = "") -> dict:
+                     use_points: int = 0, remark: str = "",
+                     age_confirmed: bool = False) -> dict:
         """创建订单
 
         流程:
-            1. 校验会员
+            1. 校验会员(含酒类合规年龄门)
             2. 校验商品 & 库存(预扣)
             3. 价格计算
             4. 积分抵扣(冻结)
             5. 生成订单号
             6. 保存订单
 
+        酒类合规年龄门(P0-1):
+            - 会员出生日期未成年 → 硬拦截
+            - 会员无成年声明(ageVerified/ageConfirmed)且请求未带 ageConfirmed → 拒绝
+            - 首次声明后回写会员标记, 后续下单免重复确认
+
         Raises:
             KeyError: 会员不存在
-            ValueError: 商品不存在/库存不足/积分不足
+            ValueError: 商品不存在/库存不足/积分不足/年龄校验失败
         """
         async with get_lock(f"member:{member_id}"):
             # 1. 校验会员
@@ -200,6 +207,19 @@ class OrderService:
 
             logs = []
             member_level = member["level"]
+
+            # 酒类合规年龄门(P0-1)
+            member_birthdate = member.get("birthdate") or ""
+            if member_birthdate and not is_adult(member_birthdate):
+                raise ValueError(MINOR_REJECT_MSG)
+            if not (member.get("ageVerified") or member.get("ageConfirmed")):
+                if not age_confirmed:
+                    raise ValueError(AGE_CONFIRM_REQUIRED_MSG)
+                # 首次下单声明: 回写会员成年标记(后续免确认)
+                await self.member_repo.update_fields(
+                    member_id, {"ageConfirmed": True})
+                logs.append({"step": "年龄声明", "level": "INFO",
+                             "msg": "已确认年满18周岁(酒类合规)"})
 
             # 2. 校验商品 & 预扣库存
             resolved_items = []

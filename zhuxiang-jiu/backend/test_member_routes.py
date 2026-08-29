@@ -93,6 +93,46 @@ class TestMemberRegister:
         assert member_id in _mock_store["members"]
         assert _mock_store["members"][member_id]["phone"] == "13900000000"
 
+    # ---------- 酒类合规年龄验证(P0-1) ----------
+
+    def test_register_minor_rejected(self):
+        """未满18周岁出生日期 → 409 拒绝注册"""
+        resp = client.post("/api/member/register", json={
+            "phone": "13900000000", "password": "abc123456",
+            "birthdate": "2015-01-01",
+        })
+        assert resp.status_code == 409
+        assert "18" in resp.json()["error"]
+
+    def test_register_bad_birthdate_format(self):
+        """出生日期格式非法 → 409"""
+        resp = client.post("/api/member/register", json={
+            "phone": "13900000000", "password": "abc123456",
+            "birthdate": "1990/01/01",
+        })
+        assert resp.status_code == 409
+
+    def test_register_adult_birthdate_verified(self):
+        """成年出生日期 → 注册成功且 ageVerified=true"""
+        resp = client.post("/api/member/register", json={
+            "phone": "13900000000", "password": "abc123456",
+            "birthdate": "1990-01-01",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ageVerified"] is True
+        assert data["ageConfirmed"] is False
+
+    def test_register_age_confirmed_persisted(self):
+        """ageConfirmed 声明落库(供下单年龄门复用)"""
+        resp = client.post("/api/member/register", json={
+            "phone": "13900000000", "password": "abc123456",
+            "ageConfirmed": True,
+        })
+        assert resp.status_code == 200
+        member_id = resp.json()["memberId"]
+        assert _mock_store["members"][member_id]["ageConfirmed"] is True
+
 
 # ============================================================
 #  登录: /api/member/login

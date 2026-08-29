@@ -26,6 +26,7 @@ from core.auth import (
     is_legacy_password_hash,
 )
 from core.locks import get_lock
+from core.age_gate import is_adult
 from repositories.auth_repository import AuthRepository
 from repositories.member_repository import MemberRepository
 
@@ -54,11 +55,16 @@ class AuthService:
     # ============================================================
 
     async def register(self, phone: str, password: str, nickname: str = None,
-                       role: str = ROLE_MEMBER) -> dict:
+                       role: str = ROLE_MEMBER, birthdate: str = None,
+                       age_confirmed: bool = False) -> dict:
         """手机号注册(PBKDF2 哈希 + JWT 双令牌)
 
+        酒类合规(P0-1):
+            - birthdate 提供时硬校验(未满 18 周岁拒绝注册)
+            - ageConfirmed 为成年声明标记, 落库供下单年龄门复用
+
         Raises:
-            ValueError: 手机号/密码格式非法, 手机号已注册, 角色非法
+            ValueError: 手机号/密码格式非法, 手机号已注册, 角色非法, 未满 18 周岁
         """
         if not phone or not _PHONE_PATTERN.match(phone):
             raise ValueError("手机号格式不正确(需 1 开头 11 位有效手机号)")
@@ -66,6 +72,13 @@ class AuthService:
             raise ValueError("密码长度至少 6 位")
         if role not in VALID_ROLES:
             raise ValueError(f"角色非法(须为 {'/'.join(VALID_ROLES)})")
+
+        # 酒类合规: 出生日期硬校验(格式非法/未成年均拒绝)
+        age_verified = False
+        if birthdate:
+            if not is_adult(birthdate):
+                raise ValueError("未满18周岁, 不能注册酒类商品销售平台")
+            age_verified = True
 
         async with get_lock(f"member:phone:{phone}"):
             existing = await self.member_repo.get_by_phone(phone)
@@ -84,6 +97,10 @@ class AuthService:
                 "status": 1,
                 "reg_source": "phone",
                 "role": role,
+                # 酒类合规年龄声明(P0-1)
+                "ageConfirmed": bool(age_confirmed),
+                "birthdate": birthdate or "",
+                "ageVerified": age_verified,
                 "created_at": _now_iso(),
                 "last_login_at": _now_iso(),
             }

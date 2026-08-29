@@ -49,6 +49,8 @@ class RegisterRequest(PydBaseModel):
     password: str = Field(..., min_length=6, description="密码(至少 6 位)")
     nickname: str | None = Field(None, description="昵称(可选)")
     reg_source: str = Field("phone", description="注册来源")
+    birthdate: str | None = Field(None, description="出生日期 YYYY-MM-DD(酒类合规, 未满18周岁拒绝注册)")
+    ageConfirmed: bool = Field(False, description="已满18周岁声明(酒类合规)")
 
 
 class LoginRequest(PydBaseModel):
@@ -144,7 +146,8 @@ async def member_register(req: RegisterRequest):
     """手机号注册(赠送 100 竹叶积分)"""
     try:
         return await _member_service.register(
-            req.phone, req.password, req.nickname, req.reg_source
+            req.phone, req.password, req.nickname, req.reg_source,
+            birthdate=req.birthdate, age_confirmed=req.ageConfirmed,
         )
     except ValueError as e:
         raise _map_value_error(e) from e

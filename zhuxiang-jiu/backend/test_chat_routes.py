@@ -115,6 +115,16 @@ class TestCreateSession:
                len(sessions) == 2,
                f"expected 2, got {len(sessions)}")
 
+        # test 5b: 酒类合规(P0-1) ageConfirmed 声明落库(声明式留痕)
+        result3 = await svc.create_session(USER_ID_1, age_confirmed=True)
+        record("test_05b_age_confirmed_recorded",
+               result3.get("ageConfirmed") is True,
+               f"expected True, got {result3.get('ageConfirmed')}")
+        result4 = await svc.create_session(USER_ID_1)
+        record("test_05b_age_confirmed_default_false",
+               result4.get("ageConfirmed") is False,
+               f"expected False, got {result4.get('ageConfirmed')}")
+
 
 class TestSendMessageAIReply:
     """消息收发与AI回复测试"""

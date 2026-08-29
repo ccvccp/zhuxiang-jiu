@@ -387,6 +387,7 @@ _mock_store: dict = {
             "nickname": "测试会员小竹", "avatar": "", "gender": 1,
             "level": 1, "growth_value": 0, "points": 100,
             "status": 1, "reg_source": "phone", "role": "member",
+            "ageConfirmed": True, "birthdate": "1990-01-01", "ageVerified": True,
             "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
         },
         2: {
@@ -394,6 +395,7 @@ _mock_store: dict = {
             "nickname": "站点管理员", "avatar": "", "gender": 1,
             "level": 3, "growth_value": 600, "points": 100,
             "status": 1, "reg_source": "phone", "role": "admin",
+            "ageConfirmed": True, "birthdate": "1988-06-15", "ageVerified": True,
             "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
         },
     },
@@ -448,6 +450,7 @@ def reset_store() -> dict:
                 "nickname": "测试会员小竹", "avatar": "", "gender": 1,
                 "level": 1, "growth_value": 0, "points": 100,
                 "status": 1, "reg_source": "phone", "role": "member",
+                "ageConfirmed": True, "birthdate": "1990-01-01", "ageVerified": True,
                 "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
             },
             2: {
@@ -455,6 +458,7 @@ def reset_store() -> dict:
                 "nickname": "站点管理员", "avatar": "", "gender": 1,
                 "level": 3, "growth_value": 600, "points": 100,
                 "status": 1, "reg_source": "phone", "role": "admin",
+                "ageConfirmed": True, "birthdate": "1988-06-15", "ageVerified": True,
                 "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
             },
         },

@@ -211,6 +211,29 @@ class TestRegister:
         record("test_20_token_usable_after_register",
                member["memberId"] == result["memberId"] and member["phone"] == "13900000003")
 
+        # test 20b: 酒类合规(P0-1) 未满18周岁出生日期 → 拒绝注册
+        try:
+            await svc.register("13900000004", "pass123456",
+                               birthdate="2015-01-01")
+            record("test_20b_minor_rejected", False, "no exception")
+        except ValueError:
+            record("test_20b_minor_rejected", True)
+
+        # test 20c: 酒类合规 出生日期格式非法 → 拒绝注册
+        try:
+            await svc.register("13900000005", "pass123456",
+                               birthdate="1990/01/01")
+            record("test_20b_bad_birthdate_rejected", False, "no exception")
+        except ValueError:
+            record("test_20b_bad_birthdate_rejected", True)
+
+        # test 20d: 酒类合规 成年出生日期+ageConfirmed 声明 → 注册成功
+        result = await svc.register("13900000006", "pass123456",
+                                    birthdate="1992-05-20",
+                                    age_confirmed=True)
+        record("test_20b_adult_register_ok", result["success"],
+               f"result={result.get('success')}")
+
 
 # ============================================================
 # 4. 登录(含旧哈希自动升级)

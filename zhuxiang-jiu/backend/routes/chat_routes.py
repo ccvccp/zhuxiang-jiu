@@ -73,6 +73,7 @@ class CreateSessionRequest(PydBaseModel):
     userId: int = Field(..., description="会员ID")
     sessionType: str = Field("presale", description="会话类型: presale/aftersale/old_wine/custom")
     guestPhone: str | None = Field(None, description="游客手机号(游客咨询时)")
+    ageConfirmed: bool = Field(False, description="已满18周岁声明(酒类合规 P0-1)")
 
 
 class SendMessageRequest(PydBaseModel):
@@ -128,6 +129,7 @@ async def create_session(
             user_id=data.userId,
             session_type=data.sessionType,
             guest_phone=data.guestPhone,
+            age_confirmed=data.ageConfirmed,
         )
         return {"success": True, "data": result}
     except Exception as e:

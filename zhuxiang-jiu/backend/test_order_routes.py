@@ -237,6 +237,74 @@ class TestOrderCreate:
         assert resp.status_code == 401
 
 
+class TestOrderAgeGate:
+    """酒类合规年龄门(P0-1): 未声明拒绝 / 首次声明放行并回写 / 未成年硬拦截"""
+
+    async def _register_fresh_member(self, client):
+        """注册无成年声明的新会员(注册不传 birthdate/ageConfirmed)"""
+        reg = await client.post("/api/member/register", json={
+            "phone": "13900000000", "password": "abc123456",
+        })
+        assert reg.status_code == 200, reg.text
+        return reg.json()["memberId"]
+
+    async def test_age_confirm_required(self, client):
+        """新会员下单未带 ageConfirmed → 409 要求成年声明"""
+        member_id = await self._register_fresh_member(client)
+        resp = await client.post(
+            "/api/order/create",
+            json={"items": ITEMS, "address": ADDRESS,
+                  "usePoints": 0, "remark": ""},
+            headers={"X-Member-Id": str(member_id)},
+        )
+        assert resp.status_code == 409
+        assert "18" in resp.json()["error"]
+
+    async def test_age_confirmed_first_order(self, client):
+        """首次下单带 ageConfirmed=true → 成功且回写会员标记"""
+        member_id = await self._register_fresh_member(client)
+        resp = await client.post(
+            "/api/order/create",
+            json={"items": ITEMS, "address": ADDRESS,
+                  "usePoints": 0, "remark": "", "ageConfirmed": True},
+            headers={"X-Member-Id": str(member_id)},
+        )
+        assert resp.status_code == 200, resp.text
+        assert _mock_store["members"][member_id]["ageConfirmed"] is True
+
+    async def test_age_confirmed_persisted_second_order(self, client):
+        """首次声明后二次下单免重复确认"""
+        member_id = await self._register_fresh_member(client)
+        first = await client.post(
+            "/api/order/create",
+            json={"items": ITEMS, "address": ADDRESS,
+                  "usePoints": 0, "remark": "", "ageConfirmed": True},
+            headers={"X-Member-Id": str(member_id)},
+        )
+        assert first.status_code == 200
+        second = await client.post(
+            "/api/order/create",
+            json={"items": ITEMS, "address": ADDRESS,
+                  "usePoints": 0, "remark": ""},
+            headers={"X-Member-Id": str(member_id)},
+        )
+        assert second.status_code == 200
+
+    async def test_minor_member_blocked(self, client):
+        """会员出生日期未成年 → 硬拦截(即使曾声明)"""
+        _mock_store["members"][1]["birthdate"] = "2012-01-01"
+        _mock_store["members"][1]["ageVerified"] = True
+        _mock_store["members"][1]["ageConfirmed"] = True
+        resp = await client.post(
+            "/api/order/create",
+            json={"items": ITEMS, "address": ADDRESS,
+                  "usePoints": 0, "remark": ""},
+            headers=MEMBER_HEADERS,
+        )
+        assert resp.status_code == 409
+        assert "未成年人" in resp.json()["error"]
+
+
 # ============================================================
 # 2. 价格试算: POST /api/order/price/preview
 # ============================================================

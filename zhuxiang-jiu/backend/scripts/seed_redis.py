@@ -94,6 +94,7 @@ SEED_DATA = {
             "nickname": "测试会员小竹", "avatar": "", "gender": 1,
             "level": 1, "growth_value": 0, "points": 100,
             "status": 1, "reg_source": "phone",
+            "ageConfirmed": 1, "birthdate": "1990-01-01", "ageVerified": 1,
             "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
         },
     },

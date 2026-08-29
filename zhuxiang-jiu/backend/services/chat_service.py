@@ -71,13 +71,15 @@ class ChatService:
     # ============================================================
 
     async def create_session(self, user_id: int, session_type: str = SESSION_TYPE_PRESALE,
-                              guest_phone: str = None) -> dict:
+                              guest_phone: str = None,
+                              age_confirmed: bool = False) -> dict:
         """创建会话(AI优先接待)
 
         规则:
             - 新会话状态=ai_chatting(AI优先接待)
             - AI置信度初始 0.9
             - 生成唯一 sessionId
+            - 酒类合规(P0-1): 记录已满18周岁声明(咨询不构成销售, 声明式留痕)
 
         Returns:
             会话信息
@@ -88,6 +90,7 @@ class ChatService:
             "sessionId": session_id,
             "userId": user_id,
             "guestPhone": guest_phone,
+            "ageConfirmed": bool(age_confirmed),
             "customerServiceId": None,
             "sessionType": session_type,
             "status": SESSION_STATUS_AI,

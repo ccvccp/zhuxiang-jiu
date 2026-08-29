@@ -23,6 +23,7 @@ import secrets
 from datetime import datetime, UTC
 
 from core.locks import get_lock
+from core.age_gate import is_adult
 from repositories.member_repository import MemberRepository
 
 logger = logging.getLogger(__name__)
@@ -91,17 +92,29 @@ class MemberService:
     # ============================================================
 
     async def register(self, phone: str, password: str, nickname: str = None,
-                       reg_source: str = "phone") -> dict:
+                       reg_source: str = "phone", birthdate: str = None,
+                       age_confirmed: bool = False) -> dict:
         """手机号注册
 
+        酒类合规(P0-1):
+            - birthdate 提供时硬校验(未满 18 周岁拒绝注册)
+            - ageConfirmed 为成年声明标记, 落库供下单年龄门复用
+
         Raises:
-            ValueError: 手机号已注册 / 参数非法
+            ValueError: 手机号已注册 / 参数非法 / 未满 18 周岁
         """
         # 参数校验
         if not phone or len(phone) != 11:
             raise ValueError("手机号格式不正确(需 11 位)")
         if not password or len(password) < 6:
             raise ValueError("密码长度至少 6 位")
+
+        # 酒类合规: 出生日期硬校验(格式非法/未成年均拒绝)
+        age_verified = False
+        if birthdate:
+            if not is_adult(birthdate):
+                raise ValueError("未满18周岁, 不能注册酒类商品销售平台")
+            age_verified = True
 
         # 并发注册同一手机号的互斥锁
         async with get_lock(f"member:phone:{phone}"):
@@ -120,6 +133,10 @@ class MemberService:
                 "points": POINTS_REGISTER,  # 注册赠送 100 积分
                 "status": 1,
                 "reg_source": reg_source,
+                # 酒类合规年龄声明(P0-1)
+                "ageConfirmed": bool(age_confirmed),
+                "birthdate": birthdate or "",
+                "ageVerified": age_verified,
                 "created_at": _now_iso(),
                 "last_login_at": "",
             }
@@ -134,6 +151,8 @@ class MemberService:
                 "level": 1,
                 "levelName": LEVEL_NAMES[1],
                 "points": member["points"],
+                "ageConfirmed": member.get("ageConfirmed", False),
+                "ageVerified": member.get("ageVerified", False),
                 "token": _generate_token(member["id"]),
                 "logs": [
                     {"step": "注册", "level": "INFO", "msg": f"手机号 {phone} 注册成功"},
