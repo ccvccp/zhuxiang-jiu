@@ -69,10 +69,11 @@ class ValuationRequest(PydBaseModel):
     userId: int = Field(..., description="会员ID")
     productId: str = Field(..., description="老酒产品ID")
     purchasePrice: float = Field(..., gt=0, description="购买原价")
-    purchaseDate: str = Field(..., description="购买日期(YYYY-MM-DD)")
+    purchaseDate: str = Field(..., description="购买日期(YYYY-MM-DD, 携带lifeCode时以生命码激活日为酒龄基准)")
     conditionGrade: str = Field(GRADE_A, description="品质分级(A/B/C/D)")
     memberLevel: int = Field(1, ge=1, le=5, description="会员等级(1-5)")
     forExchange: bool = Field(True, description="是否用于兑换(影响等级加成)")
+    lifeCode: str | None = Field(None, description="瓶级生命码(可选, 携带时校验激活状态并锁定酒龄基准)")
 
 
 class ApplicationRequest(PydBaseModel):
@@ -156,7 +157,13 @@ async def submit_valuation(
     data: ValuationRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """提交老酒估价(增值率+品质分级+折现)"""
+    """提交老酒估价(增值率+品质分级+折现)
+
+    携带 lifeCode 时(瓶级回收, 文档3.3):
+    - 生命码须已激活(未激活不参与回收, 已回收已终止)
+    - 酒龄基准切换为生命码首次激活日(防虚报购买日期)
+    - 同一生命码仅可估价一次(防重复回收)
+    """
     _require_member_id(x_member_id)
     try:
         result = await _service.submit_valuation(
@@ -167,6 +174,7 @@ async def submit_valuation(
             condition_grade=data.conditionGrade,
             member_level=data.memberLevel,
             for_exchange=data.forExchange,
+            life_code=data.lifeCode,
         )
         return {"success": True, "data": result}
     except Exception as e:

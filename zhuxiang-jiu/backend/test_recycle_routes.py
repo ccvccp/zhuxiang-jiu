@@ -31,6 +31,10 @@ os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 
 from services.recycle_service import RecycleService
+from services.trace_service import TraceService
+from repositories.trace_repository import (
+    LIFE_STATUS_ACTIVE, LIFE_STATUS_RECYCLED,
+)
 from repositories.recycle_repository import (
     RecycleRepository,
     TYPE_EXCHANGE, TYPE_RECYCLE, TYPE_NEW_WINE_RECYCLE,
@@ -95,6 +99,103 @@ def _new_purchase_date(years_ago: int) -> str:
 # ============================================================
 # 测试用例
 # ============================================================
+
+class TestLifeCodeValuation:
+    """瓶级回收判定测试(箱码文档3.3: 生命码激活后独立参与回收)"""
+
+    async def run(self, svc):
+        trace = TraceService()
+
+        # 准备: 生成并激活生命码, 将首次激活日改写为4年前(模拟历史激活)
+        life_result = await trace.generate_life_codes(PRODUCT_ID_1, "B-LC-01", 1)
+        life_code = life_result["lifeCodes"][0]["lifeCode"]
+        life_id = life_result["lifeCodes"][0]["id"]
+        await trace.activate_life_code(life_code, USER_ID_1)
+        await trace.repo.update_life_code(life_id, {
+            "firstActivationDate": _old_purchase_date(4),
+        })
+
+        # test: 携带已激活生命码正常估价(酒龄基准切换为激活日)
+        result = await svc.submit_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _old_purchase_date(1),
+            GRADE_A, 1, True, life_code=life_code,
+        )
+        record("test_lc_01_valuation_with_life_code",
+               result["wineAge"] == 4
+               and result["purchaseDate"] == _old_purchase_date(4)
+               and result["lifeCode"] == life_code,
+               f"wineAge={result['wineAge']}, purchaseDate={result['purchaseDate']}")
+
+        # test: 估价记录含回收资格标记
+        record("test_lc_02_recycle_eligible_flag",
+               result["recycleEligible"] is True,
+               f"expected True, got {result.get('recycleEligible')}")
+
+        # test: 同一生命码重复估价被拒(防重复回收)
+        try:
+            await svc.submit_valuation(
+                USER_ID_1, PRODUCT_ID_1, 1000.0, _old_purchase_date(4),
+                GRADE_A, 1, True, life_code=life_code,
+            )
+            record("test_lc_03_duplicate_life_code_rejected", False, "应抛出ValueError")
+        except ValueError:
+            record("test_lc_03_duplicate_life_code_rejected", True)
+
+        # test: 未激活生命码不参与回收
+        pending_result = await trace.generate_life_codes(PRODUCT_ID_1, "B-LC-02", 1)
+        pending_code = pending_result["lifeCodes"][0]["lifeCode"]
+        try:
+            await svc.submit_valuation(
+                USER_ID_1, PRODUCT_ID_1, 1000.0, _old_purchase_date(4),
+                GRADE_A, 1, True, life_code=pending_code,
+            )
+            record("test_lc_04_pending_life_code_rejected", False, "应抛出ValueError")
+        except ValueError:
+            record("test_lc_04_pending_life_code_rejected", True)
+
+        # test: 已回收生命码终止回收流程
+        recycled_result = await trace.generate_life_codes(PRODUCT_ID_1, "B-LC-03", 1)
+        recycled_code = recycled_result["lifeCodes"][0]["lifeCode"]
+        recycled_id = recycled_result["lifeCodes"][0]["id"]
+        await trace.activate_life_code(recycled_code, USER_ID_1)
+        await trace.repo.update_life_code(recycled_id, {
+            "status": LIFE_STATUS_RECYCLED,
+        })
+        try:
+            await svc.submit_valuation(
+                USER_ID_1, PRODUCT_ID_1, 1000.0, _old_purchase_date(4),
+                GRADE_A, 1, True, life_code=recycled_code,
+            )
+            record("test_lc_05_recycled_life_code_rejected", False, "应抛出ValueError")
+        except ValueError:
+            record("test_lc_05_recycled_life_code_rejected", True)
+
+        # test: 不存在的生命码 → KeyError
+        try:
+            await svc.submit_valuation(
+                USER_ID_1, PRODUCT_ID_1, 1000.0, _old_purchase_date(4),
+                GRADE_A, 1, True, life_code="BLC-NOT-EXIST",
+            )
+            record("test_lc_06_nonexistent_life_code", False, "应抛出KeyError")
+        except KeyError:
+            record("test_lc_06_nonexistent_life_code", True)
+
+        # test: 激活日不足3年 → 酒龄校验以激活日为准
+        young_result = await trace.generate_life_codes(PRODUCT_ID_1, "B-LC-04", 1)
+        young_code = young_result["lifeCodes"][0]["lifeCode"]
+        young_id = young_result["lifeCodes"][0]["id"]
+        await trace.activate_life_code(young_code, USER_ID_1)
+        # 激活日=今天, 但购买日期报称4年前 → 以激活日为准拒绝
+        try:
+            await svc.submit_valuation(
+                USER_ID_1, PRODUCT_ID_1, 1000.0, _old_purchase_date(4),
+                GRADE_A, 1, True, life_code=young_code,
+            )
+            record("test_lc_07_activation_date_as_age_base", False, "应抛出ValueError")
+        except ValueError as e:
+            record("test_lc_07_activation_date_as_age_base",
+                   "酒龄未满3年" in str(e), f"unexpected: {e}")
+
 
 class TestValuation:
     """老酒估价测试"""
@@ -829,6 +930,7 @@ async def main():
 
     test_classes = [
         TestValuation,
+        TestLifeCodeValuation,
         TestApplication,
         TestReview,
         TestExchange,

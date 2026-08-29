@@ -45,6 +45,12 @@ from repositories.recycle_repository import (
     NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED, MAX_NEGOTIATION_ROUNDS,
     NEGOTIATION_COEFFICIENT_MIN, NEGOTIATION_COEFFICIENT_MAX,
 )
+from repositories.trace_repository import (
+    TraceRepository,
+    # 生命码状态(瓶级回收判定, 文档3.3)
+    LIFE_STATUS_ACTIVE, LIFE_STATUS_TRANSFERRED,
+    LIFE_STATUS_RECYCLED,
+)
 
 
 # ============================================================
@@ -90,8 +96,10 @@ RECYCLE_REWARD_POINTS = 30
 class RecycleService:
     """老酒兑换回收业务逻辑(双模式存储, 锁保护 RMW)"""
 
-    def __init__(self, repo: RecycleRepository = RecycleRepository()):
+    def __init__(self, repo: RecycleRepository = RecycleRepository(),
+                 trace_repo: TraceRepository = TraceRepository()):
         self.repo = repo
+        self.trace_repo = trace_repo  # 双码追溯(瓶级回收判定, 文档3.3)
 
     # ============================================================
     # 1. 增值率计算(AI智能估值核心)
@@ -196,24 +204,54 @@ class RecycleService:
                                 purchase_price: float, purchase_date: str,
                                 condition_grade: str = GRADE_A,
                                 member_level: int = 1,
-                                for_exchange: bool = True) -> dict:
+                                for_exchange: bool = True,
+                                life_code: str = None) -> dict:
         """提交老酒估价
 
         规则:
             - 酒龄 < 3 年不可估价
             - 计算增值率+老酒价值+折现金额
             - 写入估价记录
+            - 携带 lifeCode 时(瓶级回收, 箱码文档3.3):
+                · 生命码须已激活(未激活不参与回收, 已回收已终止)
+                · 酒龄基准切换为生命码首次激活日(防虚报购买日期)
+                · 同一生命码仅可估价一次(防重复回收)
+                · 瓶级回收独立参与, 不受箱顶码开箱影响(保障终端权益)
 
         Returns:
             估价结果
 
         Raises:
-            ValueError: 酒龄不足/参数无效
+            KeyError: 生命码不存在
+            ValueError: 酒龄不足/参数无效/生命码状态非法/重复估价
         """
         if purchase_price <= 0:
             raise ValueError("购买原价必须大于0")
         if condition_grade not in GRADE_COEFFICIENTS:
             raise ValueError("品质分级无效(须为A/B/C/D)")
+
+        # 瓶级回收判定: 校验生命码状态并锁定酒龄基准(文档3.3)
+        recycle_eligible = True
+        if life_code:
+            life = await self.trace_repo.get_life_by_code(life_code)
+            if life is None:
+                raise KeyError(f"生命码不存在(lifeCode={life_code})")
+            life_status = life.get("status")
+            if life_status == LIFE_STATUS_RECYCLED:
+                raise ValueError("生命码已回收(回收流程已终止)")
+            if life_status not in (LIFE_STATUS_ACTIVE, LIFE_STATUS_TRANSFERRED):
+                raise ValueError(
+                    f"生命码未激活(当前{life_status}), 未激活不参与回收")
+            # 防重复回收: 同一生命码仅可估价一次
+            existing = await self.repo.list_valuations(limit=10000)
+            for v in existing:
+                if v.get("lifeCode") == life_code:
+                    raise ValueError(
+                        f"生命码 {life_code} 已提交过估价(不可重复回收)")
+            # 酒龄基准切换为首次激活日(转让不重置)
+            activation_date = life.get("firstActivationDate")
+            if activation_date:
+                purchase_date = activation_date
 
         wine_age = self.calculate_wine_age(purchase_date)
         if wine_age < MIN_WINE_AGE_YEARS:
@@ -236,6 +274,8 @@ class RecycleService:
                 "conditionGrade": condition_grade,
                 "memberLevel": member_level,
                 "forExchange": 1 if for_exchange else 0,
+                "lifeCode": life_code or "",
+                "recycleEligible": recycle_eligible,
                 "appreciationRate": valuation_result["appreciationRate"],
                 "baseValue": valuation_result["baseValue"],
                 "conditionCoefficient": valuation_result["conditionCoefficient"],
