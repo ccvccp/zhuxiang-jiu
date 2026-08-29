@@ -1033,6 +1033,283 @@ class TestWorkerProfit:
 
 
 # ============================================================
+# 13. AI监管大脑(P2: 满意度预测/异常分润/信用异动)
+# ============================================================
+
+class TestAIBrain:
+
+    async def run(self):
+        reset_store()
+        svc = RoleService()
+        chat = ChatService()
+        credit = CreditService()
+
+        # 13.1 满意度预测: 纯函数
+        calm = svc.predict_session_satisfaction(
+            {"unresolvedCount": 0}, [])
+        record("AI-平静会话风险低(<60, 无需干预)",
+               calm["riskScore"] == 0 and calm["intervention"] is False
+               and calm["predictedScore"] == 5)
+        angry = svc.predict_session_satisfaction(
+            {"unresolvedCount": 2},
+            [{"senderType": "user", "content": "太慢了我要投诉, 垃圾服务"}])
+        # 2词×20 + 2×15 = 70 ≥ 60
+        record("AI-负向情绪+未解决会话高风险(≥60, 干预)",
+               angry["riskScore"] >= 60 and angry["intervention"] is True
+               and "负向情绪词" in str(angry["factors"]))
+
+        # 13.2 满意度风险扫描(真实会话, emotionScore回写)
+        session = await chat.create_session(user_id=MEMBER_ID)
+        session_id = session["sessionId"]
+        from repositories.chat_repository import (
+            SESSION_STATUS_HUMAN, SENDER_SYSTEM, MESSAGE_TYPE_TEXT,
+        )
+        session["status"] = SESSION_STATUS_HUMAN
+        session["customerServiceId"] = CS_USER_ID
+        session["unresolvedCount"] = 3   # 3×15=45
+        await chat.repo.save_session(session)
+        # 写一条含负向词的用户消息(投诉+垃圾=2词×20=40, 合计85≥60)
+        await chat.repo.add_message({
+            "sessionId": session_id, "senderType": "user",
+            "senderId": MEMBER_ID, "messageType": MESSAGE_TYPE_TEXT,
+            "content": "我要投诉, 垃圾服务", "mediaUrl": None,
+            "mediaThumb": None, "mediaSize": 0, "duration": 0,
+            "aiConfidence": None, "isRead": False, "readAt": None,
+        })
+        scan = await svc.scan_satisfaction_risk()
+        record("AI-扫描覆盖进行中会话(1场)",
+               scan["scanned"] == 1, f"实际{scan['scanned']}")
+        record("AI-高风险会话进入干预名单",
+               scan["atRisk"] == 1 and len(scan["alerts"]) == 1)
+        updated = await chat.get_session(session_id)
+        record("AI-emotionScore空壳字段已激活(>0)",
+               updated.get("emotionScore", 0) > 0)
+        alerts = await svc.list_alerts(alert_type="satisfaction_risk")
+        record("AI-预警落库且open", len(alerts) == 1
+               and alerts[0]["status"] == "open")
+
+        # 13.3 信用异动扫描(先签约后扣分, 7天-100 → 冻结+预警)
+        await credit.adjust_score(CS_USER_ID, 400, reason="造数",
+                                  operator="admin")
+        await _make_customer_service(svc, CS_USER_ID)
+        for _ in range(4):   # 4次-30 = -120
+            await credit.adjust_score(CS_USER_ID, -30, reason="服务差评",
+                                      operator="role_module")
+        drop_scan = await svc.scan_credit_drop()
+        record("AI-信用大幅下滑检出(1人)", drop_scan["dropped"] == 1)
+        contracts = await svc.list_contracts(
+            role_code=ROLE_CUSTOMER_SERVICE, status="suspended")
+        record("AI-异动客服契约被冻结(待人工复核)",
+               any(c["userId"] == CS_USER_ID for c in contracts))
+        drop_alerts = await svc.list_alerts(alert_type="credit_drop")
+        record("AI-异动预警落库", len(drop_alerts) == 1
+               and drop_alerts[0]["detail"]["delta"] <= -100)
+
+        # 13.4 预警处置
+        resolved = await svc.resolve_alert(
+            drop_alerts[0]["id"], operator="admin", resolution="复核完毕")
+        record("AI-预警处置(open→resolved)",
+               resolved["status"] == "resolved"
+               and resolved["resolvedBy"] == "admin")
+        try:
+            await svc.resolve_alert(drop_alerts[0]["id"])
+            record("AI-重复处置拒绝", False, "未抛出异常")
+        except ValueError:
+            record("AI-重复处置拒绝", True)
+
+
+class TestProfitAnomalyScan:
+
+    async def run(self):
+        reset_store()
+        svc = RoleService()
+        credit = CreditService()
+        wallet = WalletService()
+        ticket_svc = TicketService()
+
+        await _setup_member(CS_USER_ID, growth=600)
+        await _setup_member(MEMBER_ID, growth=600)
+        await credit.adjust_score(CS_USER_ID, 400, reason="造数",
+                                  operator="admin")
+        contract = await _make_customer_service(svc, CS_USER_ID)
+        await svc.admin_contract_action(contract["id"], "activate")
+        await wallet.open(CS_USER_ID)
+
+        # a) 金额离群: 3笔小额(400元4星≈6.62)+1笔大额(10万5星触顶50)
+        for i in range(3):
+            tno = await _resolved_ticket(
+                ticket_svc, MEMBER_ID, CS_USER_ID,
+                order_id=f"ORD-A{i}", satisfaction=4)
+            ledger = await svc.settle_service_profit(tno, order_amount=400)
+        tno_big = await _resolved_ticket(
+            ticket_svc, MEMBER_ID, CS_USER_ID, order_id="ORD-ABIG",
+            satisfaction=5)
+        ledger_big = await svc.settle_service_profit(tno_big,
+                                                      order_amount=100000)
+        # 大额触顶50 vs 小额peer均值6.62 → 50 > 6.62×5 且 >30
+        scan = await svc.scan_profit_anomaly()
+        kinds = {a["kind"] for a in scan["anomalies"]}
+        record("异常-金额离群检出(50 vs peer均值6.62)",
+               "amount_outlier" in kinds,
+               f"kinds={kinds}")
+
+        # b) 同人高频: 同一会员当月5笔 → pair_frequency
+        for i in range(5 - 1):   # 已有4笔, 再补1笔达到5
+            tno = await _resolved_ticket(
+                ticket_svc, MEMBER_ID, CS_USER_ID,
+                order_id=f"ORD-AF{i}", satisfaction=4)
+            await svc.settle_service_profit(tno, order_amount=800)
+        scan2 = await svc.scan_profit_anomaly()
+        kinds2 = {a["kind"] for a in scan2["anomalies"]}
+        record("异常-同人高频检出(同会员≥5笔/月)",
+               "pair_frequency" in kinds2, f"kinds={kinds2}")
+
+        anomaly_alerts = await svc.list_alerts(alert_type="profit_anomaly")
+        record("异常-预警落库(≥2条)", len(anomaly_alerts) >= 2)
+
+
+# ============================================================
+# 14. 抢单模式(P2)
+# ============================================================
+
+class TestGrabMode:
+
+    async def run(self):
+        reset_store()
+        svc = RoleService()
+        credit = CreditService()
+        ticket_svc = TicketService()
+
+        await credit.adjust_score(CS_USER_ID, 400, reason="造数",
+                                  operator="admin")
+        await credit.adjust_score(CS_USER_ID_2, 50, reason="造数",
+                                  operator="admin")
+        await _make_customer_service(svc, CS_USER_ID)
+        await _make_customer_service(svc, CS_USER_ID_2)
+
+        # 建一张待分配工单
+        ticket = await ticket_svc.create_ticket(
+            user_id=MEMBER_ID, ticket_type="presale", priority="medium",
+            description="抢单测试", source="user")
+        ticket_no = ticket["ticketNo"]
+
+        pool = await svc.list_grabbable_tickets()
+        record("抢单-工单池含待分配单",
+               any(t["ticketNo"] == ticket_no for t in pool))
+
+        # 14.1 无契约者拒绝
+        try:
+            await svc.grab_ticket(ticket_no, 9999)
+            record("抢单-无契约拒绝", False, "未抛出异常")
+        except ValueError:
+            record("抢单-无契约拒绝", True)
+
+        # 14.2 有效客服抢单成功
+        grab = await svc.grab_ticket(ticket_no, CS_USER_ID)
+        record("抢单-成功(mode=grab留痕)",
+               grab["mode"] == "grab" and grab["assigneeId"] == CS_USER_ID)
+        grabbed = await ticket_svc.repo.get_ticket(ticket_no)
+        record("抢单-工单状态流转(处理中)",
+               grabbed["status"] == "processing"
+               and grabbed["handlerId"] == CS_USER_ID)
+
+        # 14.3 防双抢: 第二人再抢拒绝
+        try:
+            await svc.grab_ticket(ticket_no, CS_USER_ID_2)
+            record("抢单-双抢拒绝", False, "未抛出异常")
+        except ValueError:
+            record("抢单-双抢拒绝", True)
+
+        # 14.4 负账冻结者拒绝
+        await _setup_member(CS_USER_ID_2, growth=600)
+        wallet2 = WalletService()
+        await wallet2.open(CS_USER_ID_2)
+        tno2 = await _resolved_ticket(
+            ticket_svc, MEMBER_ID, CS_USER_ID_2, order_id="ORD-G2",
+            satisfaction=5)
+        await svc.settle_service_profit(tno2, order_amount=1200)
+        await svc.reverse_service_profit(tno2, reason="造负账")
+        await svc.repo.adjust_clawback(
+            CS_USER_ID_2, ROLE_CUSTOMER_SERVICE, 600)  # 负账>500
+        ticket2 = await ticket_svc.create_ticket(
+            user_id=MEMBER_ID, ticket_type="presale", priority="medium",
+            description="抢单测试2", source="user")
+        try:
+            await svc.grab_ticket(ticket2["ticketNo"], CS_USER_ID_2)
+            record("抢单-负账冻结者拒绝", False, "未抛出异常")
+        except ValueError:
+            record("抢单-负账冻结者拒绝", True)
+
+
+# ============================================================
+# 15. 季度联合结算(P2: 溢出池发放)
+# ============================================================
+
+class TestQuarterlyJointSettle:
+
+    async def run(self):
+        reset_store()
+        svc = RoleService()
+        credit = CreditService()
+        wallet = WalletService()
+        ticket_svc = TicketService()
+
+        await _setup_member(CS_USER_ID, growth=600)
+        await _setup_member(MEMBER_ID, growth=600)
+        await credit.adjust_score(CS_USER_ID, 400, reason="造数",
+                                  operator="admin")
+        contract = await _make_customer_service(svc, CS_USER_ID)
+        await svc.admin_contract_action(contract["id"], "activate")
+        await wallet.open(CS_USER_ID)
+
+        # 造溢出: 手工注入2990已结算 → 本笔33.12溢出23.12
+        from core.helpers import ts as _ts
+        await svc.repo.create_ledger({
+            "ledgerNo": "SVC-MOCK-QJS", "ticketNo": "GDMOCKQJS",
+            "orderId": "", "roleCode": ROLE_CUSTOMER_SERVICE,
+            "userId": CS_USER_ID, "basis": "sale_price", "base": 0,
+            "rate": SERVICE_PROFIT_RATE, "coefficients": {},
+            "rawAmount": 2990, "amount": 2990, "payable": 2990,
+            "clawbackDeducted": 0, "clawbackAfter": 0,
+            "deferredAmount": 0, "capped": False,
+            "status": LEDGER_STATUS_SETTLED, "sourceModule": "test",
+            "walletTxNo": "", "walletError": "", "createdAt": _ts(),
+            "settledAt": _ts(),
+        })
+        tno = await _resolved_ticket(
+            ticket_svc, MEMBER_ID, CS_USER_ID, order_id="ORD-QJS",
+            satisfaction=5)
+        ledger = await svc.settle_service_profit(tno, order_amount=1200)
+        # 月度剩余10 → 本笔发10, 溢出23.12
+        record("季结-前置(发10+溢出23.12)",
+               abs(ledger["amount"] - 10) < 0.01
+               and abs(ledger["deferredAmount"] - 23.12) < 0.01)
+
+        # 季度联合结算
+        now = datetime.now(timezone.utc)
+        result = await svc.quarterly_joint_settle(
+            now.year, (now.month - 1) // 3 + 1)
+        record("季结-1名成员获发(23.12)",
+               result["members"] == 1
+               and abs(result["totalPaid"] - 23.12) < 0.01,
+               f"实际{result}")
+
+        reward = await wallet.get_reward_balance(CS_USER_ID)
+        # 钱包: 结算10 + 季结溢出23.12 = 33.12
+        record("季结-钱包累计到账(10+23.12=33.12)",
+               abs(reward.get("rewardBalance", 0) - 33.12) < 0.01,
+               f"实际{reward.get('rewardBalance')}")
+
+        # 幂等: 重跑不重复发放
+        result2 = await svc.quarterly_joint_settle(
+            now.year, (now.month - 1) // 3 + 1)
+        reward2 = await wallet.get_reward_balance(CS_USER_ID)
+        record("季结-重跑幂等(不重复发放)",
+               result2["totalPaid"] == 0
+               and abs(reward2.get("rewardBalance", 0) - 33.12) < 0.01)
+
+
+# ============================================================
 # 主入口
 # ============================================================
 
@@ -1050,9 +1327,13 @@ async def main():
         ("试用期自动转正sweep", TestProbationSweep),
         ("统一分润总账接入", TestLedgerIntegration),
         ("生产工人分润", TestWorkerProfit),
+        ("AI监管大脑", TestAIBrain),
+        ("异常分润检测", TestProfitAnomalyScan),
+        ("抢单模式", TestGrabMode),
+        ("季度联合结算", TestQuarterlyJointSettle),
     ]
     print("=" * 62)
-    print("AI智能管理模块(角色经济中枢) P0+P1 端到端测试")
+    print("AI智能管理模块(角色经济中枢) P0+P1+P2 端到端测试")
     print("=" * 62)
     for name, cls in test_classes:
         print(f"\n[{name}]")

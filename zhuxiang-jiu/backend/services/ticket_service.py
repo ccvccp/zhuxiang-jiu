@@ -225,6 +225,25 @@ class TicketService:
             log_action="assign",
             log_detail=f"分配客服({handler_name or handler_id})")
 
+    async def assign_ticket_locked(self, ticket_no: str, handler_id: int,
+                                    handler_name: str = "") -> dict:
+        """锁内直改版分配(调用方须已持有 ticket:transition:{ticket_no} 锁)
+
+        供抢单等已持锁场景使用, 避免不可重入锁死锁。
+        """
+        ticket = await self._get_or_404(ticket_no)
+        if TICKET_STATUS_PROCESSING not in STATUS_TRANSITIONS.get(
+                ticket["status"], set()):
+            raise ValueError(
+                f"工单状态流转非法({ticket['status']} → "
+                f"{TICKET_STATUS_PROCESSING})")
+        updates = {"status": TICKET_STATUS_PROCESSING,
+                   "handlerId": handler_id, "handlerName": handler_name,
+                   "assignedAt": ts(), "updatedAt": ts()}
+        await self.repo.update_ticket(ticket_no, updates)
+        ticket.update(updates)
+        return self._public(ticket)
+
     async def reply_ticket(self, ticket_no: str, replier_id,
                             replier_role: str, content: str) -> dict:
         """工单回复/处理记录(客服回复+用户补充)

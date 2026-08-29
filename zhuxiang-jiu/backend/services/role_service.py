@@ -48,6 +48,11 @@ from repositories.role_repository import (
     CONTRACT_VALID_DAYS, CLAWBACK_FREEZE_THRESHOLD,
     # 工人分润(P1)
     STAGE_PROFIT_RATES, WORKER_QUALITY_COEFF, WORKER_LEDGER_PREFIX,
+    # AI监管大脑(P2)
+    SATISFACTION_RISK_THRESHOLD, NEGATIVE_EMOTION_KEYWORDS,
+    ANOMALY_AMOUNT_MULTIPLIER, ANOMALY_PAIR_MONTHLY_LIMIT,
+    CREDIT_DROP_WINDOW_DAYS, CREDIT_DROP_THRESHOLD,
+    ALERT_STATUS_OPEN, ALERT_STATUS_RESOLVED,
     # 派单
     DISPATCH_WEIGHTS, SKILL_BASE, DEFAULT_SATISFACTION, LOAD_CAPACITY,
     # 信用行为
@@ -1034,6 +1039,417 @@ class RoleService:
         if not shares:
             raise ValueError("批次打卡记录均未命中有效工段, 无法计算份额")
         return shares, batch, quality_coeff
+
+    # ============================================================
+    # 5.5 AI监管大脑(P2: 设计文档§4.6)
+    # ============================================================
+
+    async def _create_alert(self, alert_type: str, subject_id: int,
+                            severity: str, detail: dict) -> dict:
+        """落一条监管预警(内部)"""
+        alert_id = await self.repo.next_id("alert")
+        alert = {
+            "id": alert_id,
+            "alertType": alert_type,   # satisfaction_risk/profit_anomaly/credit_drop
+            "severity": severity,       # high/medium/low
+            "subjectId": subject_id,    # 客服userId/会员userId
+            "detail": detail,
+            "status": ALERT_STATUS_OPEN,
+            "resolvedBy": "",
+            "resolution": "",
+            "resolvedAt": "",
+            "createdAt": ts(),
+        }
+        await self.repo.create_alert(alert)
+        logger.info("role_alert_created type=%s subject=%r severity=%s",
+                    alert_type, subject_id, severity)
+        return alert
+
+    # --- 1) 满意度预测: 进行中人工会话风险评分 ---
+
+    def predict_session_satisfaction(self, session: dict,
+                                     messages: list[dict] | None = None) -> dict:
+        """会话满意度预测(规则引擎 B 级: 情绪+交互特征 → 风险分)
+
+        特征:
+            - 情绪负向关键词(每命中一词 +20 风险)
+            - unresolvedCount(每未解决 +15)
+            - AI置信度低于 0.5 的 AI 回复占比(占比×30)
+            - 用户消息数 > 10 的长会话 +10(拉锯迹象)
+
+        Returns:
+            {riskScore(0-100), predictedScore(1-5), factors, intervention(bool)}
+        """
+        risk = 0.0
+        factors = []
+        # 情绪: 扫描会话内用户消息文本
+        if messages:
+            negative_hits = 0
+            for m in messages:
+                if m.get("senderType") != "user":
+                    continue
+                content = m.get("content") or ""
+                hits = sum(1 for kw in NEGATIVE_EMOTION_KEYWORDS
+                           if kw in content)
+                if hits:
+                    negative_hits += hits
+            if negative_hits:
+                risk += min(60, negative_hits * 20)
+                factors.append(f"负向情绪词×{negative_hits}")
+        unresolved = session.get("unresolvedCount", 0)
+        if unresolved:
+            risk += unresolved * 15
+            factors.append(f"未解决{unresolved}次")
+        # AI 低置信度占比(仅 AI 态会话有意义, 消息级置信度)
+        if messages:
+            ai_msgs = [m for m in messages
+                       if m.get("senderType") == "ai"
+                       and m.get("aiConfidence") is not None]
+            if ai_msgs:
+                low = sum(1 for m in ai_msgs
+                          if m["aiConfidence"] < 0.5)
+                ratio = low / len(ai_msgs)
+                if ratio > 0:
+                    risk += ratio * 30
+                    factors.append(f"低置信回复占比{ratio:.0%}")
+        user_msgs = sum(1 for m in (messages or [])
+                        if m.get("senderType") == "user")
+        if user_msgs > 10:
+            risk += 10
+            factors.append(f"长会话{user_msgs}条")
+        risk = round(min(risk, 100.0), 1)
+        # 风险分 → 预测满意度(粗映射: 0风险≈5星, 100风险≈1星)
+        predicted = max(1, min(5, round(5 - risk / 25)))
+        return {
+            "riskScore": risk,
+            "predictedScore": predicted,
+            "factors": factors,
+            "intervention": risk >= SATISFACTION_RISK_THRESHOLD,
+        }
+
+    async def scan_satisfaction_risk(self) -> dict:
+        """扫描进行中人工会话, 高风险者生成干预预警
+
+        Returns:
+            {scanned, atRisk, alerts}
+        """
+        from repositories.chat_repository import (
+            ChatRepository, SESSION_STATUS_HUMAN,
+        )
+        chat_repo = ChatRepository()
+        sessions = await chat_repo.list_all_sessions(
+            status=SESSION_STATUS_HUMAN, limit=10000)
+        alerts, at_risk = [], []
+        for session in sessions:
+            messages = await chat_repo.list_messages(session["sessionId"],
+                                                     limit=200)
+            prediction = self.predict_session_satisfaction(session, messages)
+            # 回写会话 emotionScore(空壳字段激活, 0-100 风险语义)
+            session["emotionScore"] = prediction["riskScore"]
+            await chat_repo.save_session(session)
+            if prediction["intervention"]:
+                at_risk.append({
+                    "sessionId": session["sessionId"],
+                    "userId": session.get("userId"),
+                    "customerServiceId": session.get("customerServiceId"),
+                    **prediction,
+                })
+                alerts.append(await self._create_alert(
+                    "satisfaction_risk", session.get("customerServiceId") or 0,
+                    severity="high",
+                    detail={
+                        "sessionId": session["sessionId"],
+                        "sessionUserId": session.get("userId"),
+                        **prediction,
+                    }))
+        return {"scanned": len(sessions), "atRisk": len(at_risk),
+                "alerts": alerts}
+
+    # --- 2) 异常分润检测 ---
+
+    async def scan_profit_anomaly(self) -> dict:
+        """扫描已结算服务分润的离群与高频同人模式
+
+        规则:
+            - 金额离群: 单笔 > 该客服均值×5 且 >¥30(排除小额噪音)
+            - 同人高频: 同一客服-同一会员 当月结算 ≥5 笔(防刷嫌疑)
+            - 顶格频发: 当月触顶(capped)流水 ≥3 笔(封顶规避嫌疑)
+
+        Returns:
+            {scanned, anomalies, alerts}
+        """
+        ledgers = await self.repo.list_ledgers(
+            role_code=ROLE_CUSTOMER_SERVICE, limit=100000)
+        settled = [l for l in ledgers
+                   if l.get("status") == LEDGER_STATUS_SETTLED]
+        month_prefix = ts()[:7]
+        month_settled = [l for l in settled
+                         if l.get("createdAt", "").startswith(month_prefix)]
+
+        anomalies = []
+
+        async def _add_anomaly(kind: str, subject_id: int, severity: str,
+                               detail: dict):
+            anomalies.append({"kind": kind, "userId": subject_id, **detail})
+            await self._create_alert("profit_anomaly", subject_id,
+                                     severity=severity,
+                                     detail={"kind": kind, **detail})
+
+        # a) 金额离群(leave-one-out: 以该客服其余笔均值×5为基准,
+        #    避免本笔自身抬高基准导致漏检)
+        for l in month_settled:
+            peers = [x.get("amount", 0) for x in month_settled
+                     if x["userId"] == l["userId"]
+                     and x["ledgerNo"] != l["ledgerNo"]]
+            if len(peers) < 3:
+                continue   # 样本不足
+            avg = sum(peers) / len(peers)
+            amount = l.get("amount", 0)
+            if avg > 0 and amount > avg * ANOMALY_AMOUNT_MULTIPLIER \
+                    and amount > 30:
+                await _add_anomaly(
+                    "amount_outlier", l["userId"], "medium",
+                    {"ledgerNo": l["ledgerNo"], "amount": amount,
+                     "peerAvg": round(avg, 2)})
+
+        # b) 同人高频(基于工单来源: ticket 记录 userId/handlerId)
+        pair_count = {}
+        ticket_svc = TicketService()
+        for l in month_settled:
+            ticket_no = l.get("ticketNo")
+            if not ticket_no:
+                continue
+            ticket = await ticket_svc.repo.get_ticket(ticket_no)
+            if ticket is None:
+                continue
+            pair = (l["userId"], ticket.get("userId"))
+            pair_count[pair] = pair_count.get(pair, 0) + 1
+        for (cs_id, member_id), count in pair_count.items():
+            if count >= ANOMALY_PAIR_MONTHLY_LIMIT:
+                await _add_anomaly(
+                    "pair_frequency", cs_id, "high",
+                    {"memberUserId": member_id, "monthCount": count})
+
+        # c) 顶格频发
+        capped = [l for l in month_settled if l.get("capped")]
+        by_cs_capped = {}
+        for l in capped:
+            by_cs_capped[l["userId"]] = by_cs_capped.get(l["userId"], 0) + 1
+        for uid, count in by_cs_capped.items():
+            if count >= 3:
+                await _add_anomaly(
+                    "frequent_capped", uid, "medium",
+                    {"monthCappedCount": count})
+
+        return {"scanned": len(settled), "anomalies": anomalies,
+                "alertCount": len(anomalies)}
+
+    # --- 3) 信用异动预警 ---
+
+    async def scan_credit_drop(self) -> dict:
+        """扫描客服竹信分短期大幅下滑(7天内 -100 及以上)
+
+        处置: 冻结接单(负账方式不可用, 改契约 suspend) + 生成预警待人工复核
+
+        Returns:
+            {scanned, dropped, alerts}
+        """
+        contracts = await self.repo.list_contracts(
+            role_code=ROLE_CUSTOMER_SERVICE,
+            statuses=DISPATCHABLE_STATUSES, limit=100000)
+        window_start = (_utcnow()
+                        - timedelta(days=CREDIT_DROP_WINDOW_DAYS)).isoformat()
+        dropped, alerts = [], []
+        for contract in contracts:
+            user_id = contract["userId"]
+            logs = await self.credit_service.repo.list_logs_between(
+                user_id, window_start, _utcnow().isoformat())
+            # 只累计负向流水: "下滑量"语义——大幅下滑不应被同期正向加分抵消
+            negative_sum = sum(l.get("delta", 0) for l in logs
+                               if l.get("delta", 0) < 0)
+            if negative_sum <= -CREDIT_DROP_THRESHOLD:
+                info = {
+                    "userId": user_id,
+                    "windowDays": CREDIT_DROP_WINDOW_DAYS,
+                    "delta": negative_sum,
+                    "scoreAfter": (await
+                                   self.credit_service.get_score(user_id)
+                                   ).get("bambooScore"),
+                }
+                dropped.append(info)
+                # 冻结接单: 契约置 suspended(人工复核后 activate 恢复)
+                await self.repo.update_contract(contract["id"], {
+                    "status": CONTRACT_STATUS_SUSPENDED,
+                    "suspendedBy": "ai_credit_drop",
+                    "suspendedAt": ts(),
+                })
+                alerts.append(await self._create_alert(
+                    "credit_drop", user_id, severity="high", detail=info))
+        return {"scanned": len(contracts), "dropped": len(dropped),
+                "alerts": alerts}
+
+    # --- 预警处置 ---
+
+    async def resolve_alert(self, alert_id: int, operator: str = "admin",
+                            resolution: str = "") -> dict:
+        """处置预警(open → resolved)
+
+        Raises:
+            KeyError: 预警不存在
+            ValueError: 状态非法
+        """
+        alert = await self.repo.get_alert(alert_id)
+        if alert is None:
+            raise KeyError(f"预警不存在(alertId={alert_id})")
+        if alert["status"] != ALERT_STATUS_OPEN:
+            raise ValueError(
+                f"预警状态非法(当前{alert['status']}, 须为{ALERT_STATUS_OPEN})")
+        updates = {
+            "status": ALERT_STATUS_RESOLVED,
+            "resolvedBy": operator,
+            "resolution": resolution,
+            "resolvedAt": ts(),
+        }
+        await self.repo.update_alert(alert_id, updates)
+        alert.update(updates)
+        return alert
+
+    async def list_alerts(self, alert_type: str = None,
+                          status: str = None) -> list[dict]:
+        """预警列表(管理端)"""
+        return await self.repo.list_alerts(alert_type=alert_type,
+                                           status=status)
+
+    # ============================================================
+    # 5.6 抢单模式(P2: 认领制在微观层面的体现)
+    # ============================================================
+
+    async def grab_ticket(self, ticket_no: str, cs_user_id: int) -> dict:
+        """客服抢单(待分配工单池, 先到先得; 锁内校验防双抢)
+
+        规则:
+            - 工单须为 pending(待分配)状态
+            - 抢单者须持有效客服契约(试用/转正) 且 未被负账冻结
+            - 锁 ticket:transition:{ticket_no} 内原子完成(与派单互斥)
+
+        Raises:
+            KeyError: 工单不存在
+            ValueError: 状态非法/无资格/已被抢
+        """
+        async with get_lock(f"ticket:transition:{ticket_no}"):
+            ticket = await self.ticket_service.repo.get_ticket(ticket_no)
+            if ticket is None:
+                raise KeyError(f"工单不存在(ticketNo={ticket_no})")
+            if ticket["status"] != "pending":
+                raise ValueError(
+                    f"工单不可抢(当前{ticket['status']}, 须为 pending)")
+            # 资格: 有效契约 + 负账未冻结
+            contract = await self.repo.get_active_contract(
+                cs_user_id, ROLE_CUSTOMER_SERVICE)
+            if contract is None:
+                raise ValueError("无有效人工客服契约, 不可抢单")
+            clawback = await self.repo.get_clawback(
+                cs_user_id, ROLE_CUSTOMER_SERVICE)
+            if clawback > CLAWBACK_FREEZE_THRESHOLD:
+                raise ValueError("负账超阈已冻结接单, 不可抢单")
+            # 锁内直改(已持 ticket:transition 锁, 不可再经 assign_ticket
+            # 二次获取同一不可重入锁 → 死锁)
+            await self.ticket_service.assign_ticket_locked(
+                ticket_no, cs_user_id, "抢单")
+            # 抢单留痕(派单记录 mode=grab)
+            dispatch_id = await self.repo.next_id("dispatch")
+            await self.repo.create_dispatch({
+                "id": dispatch_id,
+                "sessionId": "",
+                "ticketNo": ticket_no,
+                "orderId": ticket.get("orderId", ""),
+                "assigneeId": cs_user_id,
+                "scoreDetail": None,
+                "mode": "grab",
+                "createdAt": ts(),
+            })
+            return {"ticketNo": ticket_no, "assigneeId": cs_user_id,
+                    "mode": "grab", "dispatchId": dispatch_id}
+
+    async def list_grabbable_tickets(self) -> list[dict]:
+        """待抢单工单池(pending 状态工单列表)"""
+        return await self.ticket_service.list_tickets(status="pending")
+
+    # ============================================================
+    # 5.7 季度联合结算(P2: 月度溢出池 + 权责考核奖池合并发放)
+    # ============================================================
+
+    async def quarterly_joint_settle(self, year: int, quarter: int,
+                                     operator: str = "admin") -> dict:
+        """季度联合结算: 每客服的月度封顶溢出额合并一次性入账
+
+        规则(设计文档5.3"超出部分滚入季度考核奖励池"):
+            - 统计该季度各客服全部流水的 deferredAmount 总和
+            - 额度>0 且当前持有有效契约 → 入钱包奖励余额
+            - 幂等: ledgerNo=QJS-{userId}-{year}Q{quarter} 去重
+            - 入账后原流水标记 deferredSettled(防重复统计)
+
+        Returns:
+            {year, quarter, members, totalPaid, details}
+        """
+        # 季度时间范围(本地月份)
+        start_month = (quarter - 1) * 3 + 1
+        month_prefixes = tuple(
+            f"{year}-{m:02d}" for m in range(start_month, start_month + 3))
+        ledgers = await self.repo.list_ledgers(limit=100000)
+        quarter_ledgers = [l for l in ledgers
+                           if l.get("createdAt", "")[:7] in month_prefixes]
+
+        by_user = {}
+        for l in quarter_ledgers:
+            if (l.get("roleCode") == ROLE_CUSTOMER_SERVICE
+                    and l.get("deferredAmount", 0) > 0
+                    and not l.get("deferredSettled")):
+                by_user[l["userId"]] = round(
+                    by_user.get(l["userId"], 0) + l["deferredAmount"], 2)
+
+        details, total_paid = [], 0.0
+        for user_id, amount in by_user.items():
+            ledger_no = f"QJS-{user_id}-{year}Q{quarter}"
+            if await self.repo.get_ledger(ledger_no) is not None:
+                continue  # 幂等: 该客服本季已发
+            try:
+                wallet_result = await self.wallet_service.deposit_reward(
+                    user_id, amount,
+                    description=f"季度联合结算({year}Q{quarter}溢出池)")
+                await self.repo.create_ledger({
+                    "ledgerNo": ledger_no,
+                    "ticketNo": "", "orderId": "",
+                    "refNo": f"{year}Q{quarter}",
+                    "roleCode": ROLE_CUSTOMER_SERVICE,
+                    "userId": user_id,
+                    "basis": PROFIT_BASIS_SALE_PRICE,
+                    "base": 0, "rate": 0, "coefficients": {
+                        "source": "monthly_cap_overflow"},
+                    "rawAmount": amount, "amount": amount, "payable": amount,
+                    "clawbackDeducted": 0.0, "clawbackAfter": 0.0,
+                    "deferredAmount": 0.0, "capped": False,
+                    "status": LEDGER_STATUS_SETTLED,
+                    "sourceModule": "role",
+                    "walletTxNo": wallet_result.get("txNo", ""),
+                    "walletError": "", "note": "季度溢出池联合发放",
+                    "createdAt": ts(), "settledAt": ts(),
+                })
+                # 标记源流水已发放
+                for l in quarter_ledgers:
+                    if (l["userId"] == user_id
+                            and l.get("deferredAmount", 0) > 0):
+                        await self.repo.update_ledger(
+                            l["ledgerNo"], {"deferredSettled": True})
+                total_paid += amount
+                details.append({"userId": user_id, "amount": amount,
+                                "status": "paid"})
+            except Exception as e:
+                details.append({"userId": user_id, "amount": amount,
+                                "status": "pending", "error": str(e)})
+        return {"year": year, "quarter": quarter,
+                "members": len(details), "totalPaid": round(total_paid, 2),
+                "details": details}
 
     # ============================================================
     # 6. 信用行为总线

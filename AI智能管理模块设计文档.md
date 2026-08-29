@@ -122,7 +122,7 @@
 ```
 
 - **转接联动（P0必做）**：chat会话触发转人工时——①自动创建`source=ai`工单；②调用本中枢派单（替代硬编码）；③会话、工单、订单三方关联（分润依据链）。
-- **抢单模式**：无可用客服时进入工单池，客服可抢单（认领制在微观层面的体现）。
+- **抢单模式（P2已实现）**：无可用客服时工单留在待分配池（`GET /api/role/grab/tickets`），客服可抢单（`POST /api/role/grab/ticket`，先到先得）：锁内防双抢、资格校验（有效契约+负账未冻结）、抢单留痕（派单记录 mode=grab）——认领制在微观层面的体现。
 - **服务-订单关联**：工单/会话可绑定订单号，作为"本次服务内容的销售额"的数据基础。
 
 ### 4.4 子系统四：分润结算引擎
@@ -141,10 +141,13 @@
 
 ### 4.6 子系统六：AI监管大脑
 
-- 满意度预测（会话情绪+响应时长→预测评分，提前干预低分服务）；
-- 异常分润检测（金额离群、频率离群、关联异常）；
-- 信用异动预警（短期大幅下滑→冻结接单+人工复核）；
-- 与24号合规合法智能监控模块联动（敏感词、违规行为）。
+> ✅ **P2 已实现（2026-08-29）**，端点 `/api/role/ai-brain/*`（3扫描+预警列表+处置）：
+
+- **满意度预测**（`scan/satisfaction`）：扫描进行中人工会话，规则引擎评分（负向情绪词×20 + 未解决×15 + 低置信回复占比×30 + 长会话+10，≥60 触发干预预警），风险分回写会话 `emotionScore`（激活原空壳字段）；
+- **异常分润检测**（`scan/anomaly`）：三类模式——金额离群（leave-one-out：单笔>同客服其余笔均值×5 且>¥30）、同人高频（同客服-同会员当月≥5笔）、顶格频发（当月触顶流水≥3笔）；
+- **信用异动预警**（`scan/credit-drop`）：7天窗口内**负向流水**累计≥100（下滑量语义，正向加分不抵消）→ 契约自动置 suspended 冻结接单 + 预警待人工复核（复核后 `activate` 恢复）；
+- 预警统一落 `role_alerts` 表（type/severity/subject/detail/status），处置 `open→resolved` 留痕；
+- 与24号合规合法智能监控模块联动（敏感词、违规行为）——P2 复用其词库于情绪检测。
 
 ---
 
@@ -234,7 +237,7 @@
 
 ---
 
-## 7. API设计（已实现 25 个端点）
+## 7. API设计（已实现 32 个端点）
 
 **用户端（X-Member-Id，8个）**：
 - `GET /api/role/catalog` 角色目录（含认领条件与收益说明）
@@ -259,11 +262,23 @@
 - `POST /api/role/worker-profit/settle` 工人分润结算（P1，批次幂等）
 - `GET /api/role/worker-profit/preview/{batch_no}` 工人分润预演（P1，只读）
 
-**客服/内部（X-Role: admin/cs_staff，3个）**：
+**客服/内部（X-Role: admin/cs_staff，7个）**：
 - `POST /api/role/service-profit/settle` 工单满意度确认后即时结算（幂等）
 - `GET /api/role/service-profit/clawback/{user_id}` 负账余额与冻结状态查询
 - `POST /api/role/dispatch` 派单调度入口（chat转人工内部调用）
 - `POST /api/role/credit/event` 信用行为事件发布（服务间）
+- `GET /api/role/grab/tickets` 待抢单工单池（P2）
+- `POST /api/role/grab/ticket` 客服抢单（锁内防双抢，P2）
+
+**AI监管大脑（X-Role: admin，5个，P2）**：
+- `POST /api/role/ai-brain/scan/satisfaction` 满意度风险扫描（emotionScore激活）
+- `POST /api/role/ai-brain/scan/anomaly` 异常分润检测（金额离群/同人高频/顶格频发）
+- `POST /api/role/ai-brain/scan/credit-drop` 信用异动扫描（负向累计≥100→冻结+预警）
+- `GET /api/role/ai-brain/alerts` 预警列表（类型/状态筛选）
+- `POST /api/role/ai-brain/alerts/{id}/resolve` 预警处置（open→resolved）
+
+**季度结算（X-Role: admin，1个，P2）**：
+- `POST /api/role/quarterly-joint-settle` 季度联合结算（溢出池合并发放，幂等）
 
 > 端点规划差异说明：设计稿的 `contracts/{id}/renew`（续约）与 `admin/settle/run`（手动结算批次）未在 P0/P1 实现——续约由到期复审流程覆盖（P2），结算批次由 ticket 确认钩子与三模块旁路记账替代；实际新增了设计稿未列的 reverse/retry/clawback/probation-sweep/worker-profit 等治理端点。
 
@@ -315,7 +330,7 @@
 |---|---|
 | P0 | 角色目录+契约引擎+客服服务分润闭环（含chat转人工改造：自动建工单+真实派单）+信用总线桥接（竹信分/权责信用分） | ✅ 已实现（2026-08-29，46项E2E测试通过） |
 | P1 | 生产工人分润+生命码联动、统一分润总账、代理/酒店/推广模块总账接入、D-7口径对齐 | ✅ 已实现（2026-08-29，累计93项E2E+四模块回归223项通过） |
-| P2 | AI监管大脑（满意度预测/异常检测/动态系数调优）、抢单模式、季度联合结算 | 待启动 |
+| P2 | AI监管大脑（满意度预测/异常检测/动态系数调优）、抢单模式、季度联合结算 | ✅ 已实现（2026-08-29，累计117项E2E；动态系数调优留待运行数据积累后调参） |
 
 ---
 
@@ -326,6 +341,7 @@
 | P0 主提交 | role模块四文件 + chat/ticket断链修复 + D-9前端4处口径同步（13文件，+3190行） | `eabaae8` |
 | 钩子修复 | pre-commit状态机v2（嵌套模板字符串级联误报修复） | `a886da5` |
 | P1 提交 | 统一总账三模块接入 + 工人分润 + P0遗留routes import补回（10文件，+795行） | `5ae4564` |
+| P2 提交 | AI监管大脑（满意度预测/异常分润/信用异动+预警处置）+ 抢单模式 + 季度联合结算（32端点，117项E2E） | 本次 |
 
 **决策闭环报告**：P0 范围内 8 项决策（D-7/D-8/D-9 及细化子项）的"问题→结论→落地→验证"全过程记录，见 [AI智能管理模块P0决策闭环报告.md](AI智能管理模块P0决策闭环报告.md)。
 

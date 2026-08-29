@@ -1,14 +1,15 @@
-"""AI智能管理模块路由(角色经济中枢, 25 端点)
+"""AI智能管理模块路由(角色经济中枢, 32 端点)
 
 鉴权(对齐 ticket_routes 风格):
     - 用户端(8): X-Member-Id 头(目录/认领/契约/收益/信用事件)
-    - 管理端(14): X-Role 头, 仅 admin(目录维护/审批/契约动作/总账/风控/
-      追回/重试/试用sweep/记账/工人分润)
+    - 管理端(21): X-Role 头, 仅 admin(目录维护/审批/契约动作/总账/风控/
+      追回/重试/试用sweep/记账/工人分润/AI监管扫描/预警处置/季度联合结算)
+    - 客服(2): grab 抢单池/抢单(X-Role: admin/cs_staff)
     - 结算(2): service-profit/settle 与 clawback 查询(X-Role: admin/cs_staff)
     - 内部(1): dispatch 调度中枢(X-Role: admin/cs_staff)
 
 异常映射(遵循项目约定):
-    - KeyError → 404(目录/申请/契约/工单/批次不存在)
+    - KeyError → 404(目录/申请/契约/工单/批次/预警不存在)
     - ValueError → 409(状态非法/重复认领/已结算等)
     - 权限校验 → 401(未登录) / 403(无权操作)
 
@@ -21,6 +22,10 @@
     - 契约治理(1): probation-sweep(试用期满自动转正)
     - 统一记账(1): ledger/record(外部模块回写, P1)
     - 工人分润(2): worker-profit settle/preview(P1, 生命码联动)
+    - AI监管(5): 满意度风险扫描 / 异常分润检测 / 信用异动扫描 /
+      预警列表 / 预警处置(P2)
+    - 抢单(2):   grab tickets(工单池) / grab ticket(抢单)(P2)
+    - 季度结算(1): quarterly-joint-settle(溢出池联合发放)(P2)
     - 派单(1):   dispatch(调度中枢测试入口)
     - 事件(1):   credit event 发布(内部)
 """
@@ -136,6 +141,22 @@ class WorkerProfitSettleRequest(PydBaseModel):
     batchNo: str = Field(..., max_length=50, description="生产批次号(须已放行)")
     orderAmount: float = Field(..., gt=0, description="关联订单实际销售价格")
     qualityGrade: str = Field("pass", description="质量等级: pass/premium/accident")
+
+
+class GrabTicketRequest(PydBaseModel):
+    ticketNo: str = Field(..., max_length=30, description="工单号(须为pending状态)")
+    csUserId: int = Field(..., description="抢单客服用户ID")
+
+
+class QuarterlyJointSettleRequest(PydBaseModel):
+    year: int = Field(..., ge=2020, le=2100, description="年份")
+    quarter: int = Field(..., ge=1, le=4, description="季度 1-4")
+    operator: str = Field("admin", max_length=50, description="操作人")
+
+
+class ResolveAlertRequest(PydBaseModel):
+    operator: str = Field("admin", max_length=50, description="处置人")
+    resolution: str = Field("", max_length=500, description="处置说明")
 
 
 class DispatchRequest(PydBaseModel):
@@ -517,6 +538,129 @@ async def preview_worker_profit(
         result = await _service.preview_worker_profit(
             batch_no=batch_no, order_amount=orderAmount,
             quality_grade=qualityGrade)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# AI监管大脑(P2)
+# ============================================================
+
+@router.post("/api/role/ai-brain/scan/satisfaction", tags=["AI智能管理模块"])
+async def scan_satisfaction_risk(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """满意度风险扫描(进行中人工会话: 情绪+交互特征→风险分, 高风险生成干预预警)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.scan_satisfaction_risk()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/role/ai-brain/scan/anomaly", tags=["AI智能管理模块"])
+async def scan_profit_anomaly(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """异常分润检测(金额离群/同人高频/顶格频发, 生成预警)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.scan_profit_anomaly()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/role/ai-brain/scan/credit-drop", tags=["AI智能管理模块"])
+async def scan_credit_drop(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """信用异动扫描(7天下滑≥100→冻结接单+预警待人工复核)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.scan_credit_drop()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/role/ai-brain/alerts", tags=["AI智能管理模块"])
+async def list_alerts(
+    x_role: str = Header(None, alias="X-Role"),
+    alertType: str = Query(None, description="类型筛选 satisfaction_risk/profit_anomaly/credit_drop"),
+    status: str = Query(None, description="状态筛选 open/resolved"),
+):
+    """监管预警列表"""
+    _require_admin(x_role)
+    try:
+        result = await _service.list_alerts(alert_type=alertType,
+                                            status=status)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/role/ai-brain/alerts/{alert_id}/resolve", tags=["AI智能管理模块"])
+async def resolve_alert(
+    alert_id: int,
+    data: ResolveAlertRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """处置预警(open→resolved, 信用异动冻结者复核后可 activate 契约恢复接单)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.resolve_alert(
+            alert_id=alert_id, operator=data.operator,
+            resolution=data.resolution)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 抢单模式 + 季度联合结算(P2)
+# ============================================================
+
+@router.get("/api/role/grab/tickets", tags=["AI智能管理模块"])
+async def list_grabbable_tickets(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """待抢单工单池(pending 状态工单)"""
+    _require_staff(x_role)
+    try:
+        result = await _service.list_grabbable_tickets()
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/role/grab/ticket", tags=["AI智能管理模块"])
+async def grab_ticket(
+    data: GrabTicketRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """客服抢单(先到先得, 锁内防双抢; 须持有效契约且未被负账冻结)"""
+    _require_staff(x_role)
+    try:
+        result = await _service.grab_ticket(
+            ticket_no=data.ticketNo, cs_user_id=data.csUserId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/role/quarterly-joint-settle", tags=["AI智能管理模块"])
+async def quarterly_joint_settle(
+    data: QuarterlyJointSettleRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """季度联合结算(各客服月度封顶溢出额合并一次性入账, 幂等)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.quarterly_joint_settle(
+            year=data.year, quarter=data.quarter, operator=data.operator)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

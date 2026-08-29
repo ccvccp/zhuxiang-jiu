@@ -128,6 +128,28 @@ WORKER_QUALITY_COEFF = {
 WORKER_LEDGER_PREFIX = "WRK-"
 
 # ============================================================
+# AI监管大脑(P2: 设计文档§4.6)
+# ============================================================
+
+# 1) 满意度预测: 进行中人工会话风险评分(0-100, ≥阈值进入干预名单)
+SATISFACTION_RISK_THRESHOLD = 60
+# 情绪负向关键词(规则引擎 B 级, 命中每词扣分)
+NEGATIVE_EMOTION_KEYWORDS = (
+    "投诉", "骗", "垃圾", "差评", "退款", "退货", "假的", "不耐烦",
+    "等太久", "没人理", "垃圾服务", "骗人", "失望", "生气", "离谱",
+)
+# 2) 异常分润检测: 离群倍数(相对该客服均值)
+ANOMALY_AMOUNT_MULTIPLIER = 5.0
+# 同一客服-同一会员月度结算笔数上限(防刷)
+ANOMALY_PAIR_MONTHLY_LIMIT = 5
+# 3) 信用异动预警: 窗口天数与下滑阈值
+CREDIT_DROP_WINDOW_DAYS = 7
+CREDIT_DROP_THRESHOLD = 100
+# 预警状态
+ALERT_STATUS_OPEN = "open"       # 待处置
+ALERT_STATUS_RESOLVED = "resolved"  # 已处置
+
+# ============================================================
 # 派单权重(AI服务调度中枢)
 # ============================================================
 
@@ -545,6 +567,59 @@ class RoleRepository:
                    for no in self.store["profit_ledger"])
 
     # ============================================================
+    # AI监管预警(P2)
+    # ============================================================
+
+    async def create_alert(self, alert: dict) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("role", "alert", alert["id"]),
+                             json.dumps(alert, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["role_alerts"][alert["id"]] = alert
+        return alert["id"]
+
+    async def get_alert(self, alert_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(_k("role", "alert", alert_id))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store["role_alerts"].get(alert_id)
+
+    async def update_alert(self, alert_id: int, updates: dict) -> None:
+        alert = await self.get_alert(alert_id)
+        if alert is None:
+            return
+        alert.update(updates)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("role", "alert", alert_id),
+                             json.dumps(alert, ensure_ascii=False))
+
+    async def list_alerts(self, alert_type: str = None,
+                          status: str = None,
+                          limit: int = 200) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("role", "alert", "*"))
+            alerts = []
+            for key in keys:
+                data = await client.get(key)
+                if data:
+                    alerts.append(json.loads(data))
+        else:
+            self._ensure_store()
+            alerts = list(self.store["role_alerts"].values())
+        if alert_type:
+            alerts = [a for a in alerts if a.get("alertType") == alert_type]
+        if status:
+            alerts = [a for a in alerts if a.get("status") == status]
+        alerts.sort(key=lambda a: a.get("createdAt", ""), reverse=True)
+        return alerts[:limit]
+
+    # ============================================================
     # 信用行为总线事件
     # ============================================================
 
@@ -628,10 +703,12 @@ class RoleRepository:
             self.store["profit_ledger"] = {}
             self.store["credit_events"] = {}
             self.store["role_clawbacks"] = {}   # userId:roleCode → 负账余额
+            self.store["role_alerts"] = {}      # alertId → AI监管预警
             self.store["_role_claim_seq"] = 0
             self.store["_role_contract_seq"] = 0
             self.store["_role_dispatch_seq"] = 0
             self.store["_role_event_seq"] = 0
+            self.store["_role_alert_seq"] = 0
             # 种子目录(仅内存模式需要; Redis 模式由部署脚本/管理端写入)
             now = datetime.now(timezone.utc).isoformat()
             for role in ROLE_CATALOG_SEED:
