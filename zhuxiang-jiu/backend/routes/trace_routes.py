@@ -110,6 +110,7 @@ class ActivateRequest(PydBaseModel):
     district: str | None = Field(None, description="区")
     purchaseChannel: str = Field("online", description="购买渠道")
     purchasePrice: float = Field(0, description="购买价格")
+    orderId: str = Field("", max_length=50, description="关联订单号(可选, 激活回写→工人分润自动取数)")
 
 
 class ScanTraceRequest(PydBaseModel):
@@ -291,6 +292,7 @@ async def activate_life_code(
             district=data.district,
             purchase_channel=data.purchaseChannel,
             purchase_price=data.purchasePrice,
+            order_id=data.orderId,
         )
         return {"success": True, "data": result}
     except Exception as e:

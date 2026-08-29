@@ -1,9 +1,10 @@
-"""AI智能管理模块路由(角色经济中枢, 32 端点)
+"""AI智能管理模块路由(角色经济中枢, 34 端点)
 
 鉴权(对齐 ticket_routes 风格):
     - 用户端(8): X-Member-Id 头(目录/认领/契约/收益/信用事件)
-    - 管理端(21): X-Role 头, 仅 admin(目录维护/审批/契约动作/总账/风控/
-      追回/重试/试用sweep/记账/工人分润/AI监管扫描/预警处置/季度联合结算)
+    - 管理端(23): X-Role 头, 仅 admin(目录维护/审批/契约动作/总账/风控/
+      追回/重试/试用sweep/记账/工人分润含自动结算/AI监管扫描/预警处置/
+      季度联合结算)
     - 客服(2): grab 抢单池/抢单(X-Role: admin/cs_staff)
     - 结算(2): service-profit/settle 与 clawback 查询(X-Role: admin/cs_staff)
     - 内部(1): dispatch 调度中枢(X-Role: admin/cs_staff)
@@ -21,7 +22,8 @@
     - 客服分润(4): settle(幂等) / retry / reverse(退款追回) / clawback查询
     - 契约治理(1): probation-sweep(试用期满自动转正)
     - 统一记账(1): ledger/record(外部模块回写, P1)
-    - 工人分润(2): worker-profit settle/preview(P1, 生命码联动)
+    - 工人分润(4): settle / preview / settle-auto / preview-auto
+      (P1+订单-批次自动关联: 生命码激活回写 orderId)
     - AI监管(5): 满意度风险扫描 / 异常分润检测 / 信用异动扫描 /
       预警列表 / 预警处置(P2)
     - 抢单(2):   grab tickets(工单池) / grab ticket(抢单)(P2)
@@ -140,6 +142,11 @@ class RecordLedgerRequest(PydBaseModel):
 class WorkerProfitSettleRequest(PydBaseModel):
     batchNo: str = Field(..., max_length=50, description="生产批次号(须已放行)")
     orderAmount: float = Field(..., gt=0, description="关联订单实际销售价格")
+    qualityGrade: str = Field("pass", description="质量等级: pass/premium/accident")
+
+
+class WorkerProfitAutoRequest(PydBaseModel):
+    batchNo: str = Field(..., max_length=50, description="生产批次号(须已放行)")
     qualityGrade: str = Field("pass", description="质量等级: pass/premium/accident")
 
 
@@ -538,6 +545,37 @@ async def preview_worker_profit(
         result = await _service.preview_worker_profit(
             batch_no=batch_no, order_amount=orderAmount,
             quality_grade=qualityGrade)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/role/worker-profit/settle-auto", tags=["AI智能管理模块"])
+async def settle_worker_profit_auto(
+    data: WorkerProfitAutoRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """工人分润自动结算(订单额自动取数: 批次经激活生命码关联的订单实售价合计, 幂等)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.settle_worker_profit_auto(
+            batch_no=data.batchNo, quality_grade=data.qualityGrade)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/role/worker-profit/preview-auto/{batch_no}", tags=["AI智能管理模块"])
+async def preview_worker_profit_auto(
+    batch_no: str,
+    x_role: str = Header(None, alias="X-Role"),
+    qualityGrade: str = Query("pass", description="质量等级: pass/premium/accident"),
+):
+    """工人分润自动预演(订单额自动取数, 只读)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.preview_worker_profit_auto(
+            batch_no=batch_no, quality_grade=qualityGrade)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

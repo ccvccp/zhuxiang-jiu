@@ -404,7 +404,8 @@ class TraceService:
                                    province: str = None, city: str = None,
                                    district: str = None,
                                    purchase_channel: str = "online",
-                                   purchase_price: float = 0) -> dict:
+                                   purchase_price: float = 0,
+                                   order_id: str = "") -> dict:
         """扫码激活生命码
 
         核心规则:
@@ -412,9 +413,11 @@ class TraceService:
             - 一瓶一激活, 同一生命码只能激活一次
             - 激活后状态: 已激活(active)
             - 激活日期一经记录不可更改
+            - order_id(可选): 激活时携带订单号, 落码留痕 →
+              建立"订单-批次"关联(AI智能管理模块工人分润自动取数依据)
 
         Returns:
-            激活结果(含激活日期/奖励积分)
+            激活结果(含激活日期)
 
         Raises:
             KeyError: 生命码不存在
@@ -449,6 +452,7 @@ class TraceService:
                 "district": district,
                 "purchaseChannel": purchase_channel,
                 "purchasePrice": purchase_price,
+                "orderId": order_id or "",
                 "activatedAt": now,
             })
 

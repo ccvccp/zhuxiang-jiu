@@ -990,6 +990,91 @@ class RoleService:
             "shares": shares,
         }
 
+    # ============================================================
+    # 5.4.1 订单-批次自动关联(P2 收尾: 生命码激活回写 orderId)
+    # ============================================================
+
+    async def _resolve_batch_orders(self, batch_no: str) -> dict:
+        """解析批次关联订单(经激活生命码的 orderId 留痕聚合)
+
+        规则:
+            - 取该批次全部生命码中已激活(active)且携带 orderId 的记录
+            - 订单号去重(同一订单激活多瓶只计一次)
+            - 逐单查询订单实际销售价格(priceDetail.actualAmount)
+            - 任一订单不存在 → KeyError(数据完整性问题应显式暴露)
+
+        Returns:
+            {orders: [{orderId, amount}], totalAmount, lifeCodesCount,
+             activatedLinked}
+        """
+        from repositories.trace_repository import (
+            TraceRepository, LIFE_STATUS_ACTIVE,
+        )
+        life_codes = await TraceRepository().list_life_codes(
+            batch_no=batch_no, limit=100000)
+        order_ids = []
+        for life in life_codes:
+            oid = (life.get("orderId") or "").strip()
+            if (life.get("status") == LIFE_STATUS_ACTIVE and oid
+                    and oid not in order_ids):
+                order_ids.append(oid)
+        if not order_ids:
+            raise ValueError(
+                f"批次无已激活且关联订单的生命码(batchNo={batch_no}); "
+                f"请通过生命码激活携带 orderId 建立关联, "
+                f"或使用显式 orderAmount 结算")
+
+        from services.order_service import OrderService
+        orders = []
+        total = 0.0
+        for oid in order_ids:
+            order_result = await OrderService().get_by_id(oid)
+            amount = order_result["order"]["priceDetail"]["actualAmount"]
+            orders.append({"orderId": oid, "amount": round(amount, 2)})
+            total += amount
+        return {"orders": orders, "totalAmount": round(total, 2),
+                "lifeCodesCount": len(life_codes),
+                "activatedLinked": len(order_ids)}
+
+    async def settle_worker_profit_auto(self, batch_no: str,
+                                        quality_grade: str = "pass") -> dict:
+        """工人分润自动结算(订单额自动取数: 批次关联订单实售价合计)
+
+        订单-批次关联来源: 生命码激活时携带 orderId 落码留痕。
+        结算幂等规则同 settle_worker_profit(批次维度一次)。
+
+        Raises:
+            KeyError: 批次/订单不存在
+            ValueError: 无关联订单/批次未放行/已结算等
+        """
+        resolved = await self._resolve_batch_orders(batch_no)
+        result = await self.settle_worker_profit(
+            batch_no, resolved["totalAmount"], quality_grade)
+        result["autoResolved"] = {
+            "orders": resolved["orders"],
+            "ordersLinked": resolved["activatedLinked"],
+            "lifeCodesCount": resolved["lifeCodesCount"],
+        }
+        return result
+
+    async def preview_worker_profit_auto(self, batch_no: str,
+                                          quality_grade: str = "pass") -> dict:
+        """工人分润自动预演(订单额自动取数, 只读)
+
+        Raises:
+            KeyError: 批次/订单不存在
+            ValueError: 无关联订单等
+        """
+        resolved = await self._resolve_batch_orders(batch_no)
+        result = await self.preview_worker_profit(
+            batch_no, resolved["totalAmount"], quality_grade)
+        result["autoResolved"] = {
+            "orders": resolved["orders"],
+            "ordersLinked": resolved["activatedLinked"],
+            "lifeCodesCount": resolved["lifeCodesCount"],
+        }
+        return result
+
     async def _calc_worker_shares(self, batch_no: str, order_amount: float,
                                   quality_grade: str) -> tuple:
         """工人份额计算(内部): (shares, batch, quality_coeff)

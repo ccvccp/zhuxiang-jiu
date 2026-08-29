@@ -1310,6 +1310,104 @@ class TestQuarterlyJointSettle:
 
 
 # ============================================================
+# 16. 订单-批次自动关联(P2 收尾: 生命码激活回写 orderId → 自动取数)
+# ============================================================
+
+class TestWorkerAutoSettle:
+
+    async def run(self):
+        reset_store()
+        svc = RoleService()
+        wallet = WalletService()
+
+        for wid in (WORKER_A, WORKER_B, WORKER_C):
+            await _setup_member(wid, growth=600)
+            await wallet.open(wid)
+        await _setup_released_batch("B-AUTO-01")
+
+        # 生成生命码 + 直接落两张订单(实售价 3000/2000)
+        from services.trace_service import TraceService
+        from repositories.order_repository import OrderRepository
+        gen = await TraceService().generate_life_codes(
+            product_id="1", batch_no="B-AUTO-01", count=3)
+        life_codes = [l["lifeCode"] for l in gen["lifeCodes"]]
+        order_repo = OrderRepository()
+        await order_repo.create({
+            "orderId": "ORD-AUTO-1", "memberId": MEMBER_ID,
+            "status": "completed",
+            "priceDetail": {"actualAmount": 3000.0},
+            "items": [], "createdAt": "2026-08-29T00:00:00+00:00",
+        })
+        await order_repo.create({
+            "orderId": "ORD-AUTO-2", "memberId": MEMBER_ID,
+            "status": "completed",
+            "priceDetail": {"actualAmount": 2000.0},
+            "items": [], "createdAt": "2026-08-29T00:00:00+00:00",
+        })
+
+        # 无关联时拒绝
+        try:
+            await svc.settle_worker_profit_auto("B-AUTO-01")
+            record("自动-无关联订单拒绝", False, "未抛出异常")
+        except ValueError:
+            record("自动-无关联订单拒绝", True)
+
+        # 激活回写: 3 瓶 → ORD-1×2(去重) + ORD-2×1
+        trace = TraceService()
+        await trace.activate_life_code(life_codes[0], MEMBER_ID,
+                                        order_id="ORD-AUTO-1")
+        await trace.activate_life_code(life_codes[1], MEMBER_ID,
+                                        order_id="ORD-AUTO-1")
+        await trace.activate_life_code(life_codes[2], MEMBER_ID,
+                                        order_id="ORD-AUTO-2")
+
+        # 16.1 自动预演(3000+2000=5000 → 15%=750)
+        preview = await svc.preview_worker_profit_auto("B-AUTO-01")
+        record("自动-预演订单额去重聚合(5000)",
+               abs(preview["orderAmount"] - 5000) < 0.01
+               and preview["autoResolved"]["ordersLinked"] == 2,
+               f"实际{preview['orderAmount']}/"
+               f"{preview['autoResolved']['ordersLinked']}单")
+        record("自动-预演总份额(5000×15%=750)",
+               abs(preview["totalAmount"] - 750) < 0.01,
+               f"实际{preview['totalAmount']}")
+        record("自动-预演不落账",
+               not await svc.repo.ledger_exists_prefix(
+                   f"{WORKER_LEDGER_PREFIX}B-AUTO-01-"))
+
+        # 16.2 自动结算(3工人: A 750×7.5%=375...)
+        result = await svc.settle_worker_profit_auto("B-AUTO-01")
+        record("自动-结算总额750",
+               abs(result["totalAmount"] - 750) < 0.01)
+        record("自动-结算附关联明细(2单/3码)",
+               result["autoResolved"]["ordersLinked"] == 2
+               and result["autoResolved"]["lifeCodesCount"] == 3)
+        reward_a = await wallet.get_reward_balance(WORKER_A)
+        record("自动-工人A钱包到账(5000×7.5%=375)",
+               abs(reward_a.get("rewardBalance", 0) - 375) < 0.01,
+               f"实际{reward_a.get('rewardBalance')}")
+
+        # 16.3 幂等
+        try:
+            await svc.settle_worker_profit_auto("B-AUTO-01")
+            record("自动-重复结算拒绝", False, "未抛出异常")
+        except ValueError:
+            record("自动-重复结算拒绝", True)
+
+        # 16.4 关联订单不存在 → 404(数据完整性显式暴露)
+        await _setup_released_batch("B-AUTO-BROKEN")
+        gen2 = await TraceService().generate_life_codes(
+            product_id="1", batch_no="B-AUTO-BROKEN", count=1)
+        await trace.activate_life_code(gen2["lifeCodes"][0]["lifeCode"],
+                                        MEMBER_ID, order_id="ORD-NOT-EXIST")
+        try:
+            await svc.settle_worker_profit_auto("B-AUTO-BROKEN")
+            record("自动-关联订单不存在拒绝", False, "未抛出异常")
+        except KeyError:
+            record("自动-关联订单不存在拒绝", True)
+
+
+# ============================================================
 # 主入口
 # ============================================================
 
@@ -1331,6 +1429,7 @@ async def main():
         ("异常分润检测", TestProfitAnomalyScan),
         ("抢单模式", TestGrabMode),
         ("季度联合结算", TestQuarterlyJointSettle),
+        ("订单-批次自动关联", TestWorkerAutoSettle),
     ]
     print("=" * 62)
     print("AI智能管理模块(角色经济中枢) P0+P1+P2 端到端测试")
