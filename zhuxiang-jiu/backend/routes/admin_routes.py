@@ -152,6 +152,7 @@ class UpdateUserRequest(PydBaseModel):
     email: str = Field(None, description="邮箱")
     status: str = Field(None, description="状态(normal/disabled/locked)")
     expireDate: str = Field(None, description="有效期")
+    ipWhitelist: str | list[str] | None = Field(None, description="IP白名单(逗号分隔字符串或列表, 支持192.168.*前缀; 空=不限, P0-6)")
 
 
 class ResetPasswordRequest(PydBaseModel):
@@ -339,6 +340,7 @@ async def update_user(
             real_name=data.realName, department=data.department,
             position=data.position, phone=data.phone, email=data.email,
             status=data.status, expire_date=data.expireDate,
+            ip_whitelist=data.ipWhitelist,
             operator_id=operator_id,
         )
         return {"success": True, "data": result}

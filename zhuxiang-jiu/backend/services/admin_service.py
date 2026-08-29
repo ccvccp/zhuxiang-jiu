@@ -52,6 +52,31 @@ DEFAULT_DATA_SCOPE = "all"
 ROLE_CODE_PREFIX = ""
 
 
+def _normalize_ip_list(raw) -> list:
+    """IP 白名单字段规范化(支持 list/逗号分隔字符串 → 去空白 str list)"""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        items = raw.split(",")
+    else:
+        items = list(raw)
+    return [str(x).strip() for x in items if str(x).strip()]
+
+
+def _check_ip_whitelist(whitelist: list, ip: str) -> bool:
+    """IP 白名单校验(空白名单=不限; 支持 CIDR 简化前缀匹配如 192.168.*)"""
+    if not whitelist:
+        return True
+    if not ip:
+        return False
+    for allowed in whitelist:
+        if allowed == ip:
+            return True
+        if allowed.endswith("*") and ip.startswith(allowed[:-1]):
+            return True
+    return False
+
+
 def validate_password_strength(password: str) -> None:
     """密码复杂度校验(对齐设计文档: ≥12位+大写+小写+数字+特殊字符)
 
@@ -126,6 +151,29 @@ class AdminService:
                     user["failCount"] = 0
                     user["lockUntil"] = None
 
+            # IP 白名单校验(P0-6: 超管/财务等限制办公 IP)
+            whitelist = _normalize_ip_list(user.get("ipWhitelist"))
+            if not _check_ip_whitelist(whitelist, ip):
+                await self.repo.add_log({
+                    "userId": user["id"],
+                    "userName": user.get("realName") or user["username"],
+                    "roleCode": "",
+                    "module": "auth",
+                    "action": "login_ip_blocked",
+                    "resourceType": "admin_user",
+                    "resourceId": str(user["id"]),
+                    "resourceName": user["username"],
+                    "beforeData": None,
+                    "afterData": {"ip": ip, "whitelist": whitelist},
+                    "ip": ip,
+                    "device": device,
+                    "requestId": "",
+                    "remark": "IP 不在白名单, 登录被拒绝",
+                })
+                raise ValueError(
+                    f"当前IP({ip})不在白名单内, 禁止登录(白名单: "
+                    f"{','.join(whitelist)})")
+
             # 密码校验
             pwd_hash = user.get("passwordHash", "")
             if not _verify_admin_pwd(password, pwd_hash):
@@ -163,6 +211,28 @@ class AdminService:
                 raise ValueError(f"密码错误(失败{fail_count}/{LOGIN_FAIL_LIMIT})")
 
             # 登录成功
+            # 异地登录检测(P0-6: ip 与上次登录不同 → 告警日志;
+            # 已开启 2FA 的管理员异地登录天然经过动态口令二次验证)
+            prev_ip = user.get("lastLoginIp") or ""
+            remote_login_alert = bool(prev_ip and ip and prev_ip != ip)
+            if remote_login_alert:
+                await self.repo.add_log({
+                    "userId": user["id"],
+                    "userName": user.get("realName") or user["username"],
+                    "roleCode": "",
+                    "module": "auth",
+                    "action": "login_remote_alert",
+                    "resourceType": "admin_user",
+                    "resourceId": str(user["id"]),
+                    "resourceName": user["username"],
+                    "beforeData": {"lastLoginIp": prev_ip},
+                    "afterData": {"currentIp": ip},
+                    "ip": ip,
+                    "device": device,
+                    "requestId": "",
+                    "remark": f"异地登录告警(上次 {prev_ip} → 本次 {ip}), "
+                              f"请确认是本人操作",
+                })
             user["status"] = ADMIN_STATUS_NORMAL
             user["failCount"] = 0
             user["lockUntil"] = None
@@ -267,6 +337,11 @@ class AdminService:
                 "sessionExpiresAt": session["expiresAt"],
                 "mustChangePassword": using_default_pwd,
                 "lastLoginAt": user["lastLoginAt"],
+                # P0-6 异地登录告警(上次登录 IP 与本次不同)
+                "remoteLoginAlert": remote_login_alert,
+                "remoteLoginAlertMsg": (
+                    f"检测到异地登录(上次 {prev_ip} → 本次 {ip}), "
+                    f"请确认是本人操作" if remote_login_alert else ""),
             }
 
     # ============================================================
@@ -581,8 +656,12 @@ class AdminService:
                             department: str = None, position: str = None,
                             phone: str = None, email: str = None,
                             status: str = None, expire_date: str = None,
+                            ip_whitelist=None,
                             operator_id: int = 0) -> dict:
         """更新管理员(不含密码, 密码走 reset_password)
+
+        P0-6: ip_whitelist 支持 list/逗号分隔字符串(None=不修改,
+        []/""=清空白名单即不限 IP), 支持通配前缀如 192.168.*
 
         Raises:
             KeyError: 管理员不存在
@@ -612,6 +691,8 @@ class AdminService:
                 user["status"] = status
             if expire_date is not None:
                 user["expireDate"] = expire_date
+            if ip_whitelist is not None:
+                user["ipWhitelist"] = _normalize_ip_list(ip_whitelist)
             user["updatedAt"] = datetime.utcnow().isoformat()
             await self.repo.save_user(user)
 

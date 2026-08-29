@@ -914,6 +914,101 @@ class TestTwoFactor:
                f"unexpected: {r}")
 
 
+class TestIpSecurity:
+    """IP 白名单 + 异地登录告警测试(P0-6)"""
+
+    async def run(self, svc):
+        # 创建测试管理员(密码满足复杂度)
+        user = await svc.create_user(username="ip_ops",
+                                      password=TEST_PASSWORD,
+                                      operator_id=SUPER_ADMIN_ID)
+        uid = user["userId"]
+
+        # test ip-01: 无白名单(默认)任意 IP 可登录
+        r = await svc.login("ip_ops", TEST_PASSWORD, ip="1.2.3.4")
+        record("test_ip_01_no_whitelist_allows_any",
+               r.get("userId") == uid, f"unexpected: {r}")
+
+        # test ip-02: 设置白名单(update_user)后白名单内 IP 可登录
+        await svc.update_user(uid, ip_whitelist="10.0.0.1,10.0.0.2",
+                              operator_id=SUPER_ADMIN_ID)
+        r = await svc.login("ip_ops", TEST_PASSWORD, ip="10.0.0.1")
+        record("test_ip_02_whitelist_ip_allowed",
+               r.get("userId") == uid, f"unexpected: {r}")
+
+        # test ip-03: 白名单外 IP → 409 拒绝
+        try:
+            await svc.login("ip_ops", TEST_PASSWORD, ip="8.8.8.8")
+            record("test_ip_03_outside_whitelist_rejected", False, "应抛出ValueError")
+        except ValueError as e:
+            record("test_ip_03_outside_whitelist_rejected",
+                   "白名单" in str(e), f"msg={e}")
+
+        # test ip-04: 白名单外 IP 拒绝写告警日志(login_ip_blocked)
+        logs = await svc.list_logs(module="auth", limit=50)
+        record("test_ip_04_ip_blocked_writes_log",
+               any(l["action"] == "login_ip_blocked" for l in logs),
+               "未找到 login_ip_blocked 日志")
+
+        # test ip-05: 通配前缀白名单(10.0.*)匹配
+        await svc.update_user(uid, ip_whitelist="10.0.*",
+                              operator_id=SUPER_ADMIN_ID)
+        r = await svc.login("ip_ops", TEST_PASSWORD, ip="10.0.99.5")
+        record("test_ip_05_wildcard_prefix_matches",
+               r.get("userId") == uid, f"unexpected: {r}")
+
+        # test ip-06: list 形式白名单同样生效
+        await svc.update_user(uid, ip_whitelist=["192.168.1.10"],
+                              operator_id=SUPER_ADMIN_ID)
+        try:
+            await svc.login("ip_ops", TEST_PASSWORD, ip="10.0.0.1")
+            record("test_ip_06_list_whitelist_enforced", False, "应抛出ValueError")
+        except ValueError:
+            record("test_ip_06_list_whitelist_enforced", True)
+
+        # test ip-07: 清空白名单(传空)恢复不限 IP
+        await svc.update_user(uid, ip_whitelist="",
+                              operator_id=SUPER_ADMIN_ID)
+        r = await svc.login("ip_ops", TEST_PASSWORD, ip="8.8.8.8")
+        record("test_ip_07_empty_whitelist_unrestricted",
+               r.get("userId") == uid, f"unexpected: {r}")
+
+        # test ip-08: 有 lastLoginIp 后换 IP → remoteLoginAlert
+        r = await svc.login("ip_ops", TEST_PASSWORD, ip="100.1.1.1")
+        record("test_ip_08_remote_login_alert",
+               r.get("remoteLoginAlert") is True
+               and "异地登录" in r.get("remoteLoginAlertMsg", ""),
+               f"unexpected: {r.get('remoteLoginAlert')}")
+
+        # test ip-09: 同 IP 重复登录无告警
+        r = await svc.login("ip_ops", TEST_PASSWORD, ip="100.1.1.1")
+        record("test_ip_09_same_ip_no_alert",
+               r.get("remoteLoginAlert") is False,
+               f"unexpected: {r.get('remoteLoginAlert')}")
+
+        # test ip-10: 异地登录写告警日志(login_remote_alert)
+        await svc.login("ip_ops", TEST_PASSWORD, ip="100.1.1.2")
+        logs = await svc.list_logs(module="auth", limit=50)
+        record("test_ip_10_remote_alert_writes_log",
+               any(l["action"] == "login_remote_alert" for l in logs),
+               "未找到 login_remote_alert 日志")
+
+        # test ip-11: 首次登录(lastLoginIp 为空)不告警
+        user2 = await svc.create_user(username="ip_ops2",
+                                       password=TEST_PASSWORD,
+                                       operator_id=SUPER_ADMIN_ID)
+        r = await svc.login("ip_ops2", TEST_PASSWORD, ip="200.1.1.1")
+        record("test_ip_11_first_login_no_alert",
+               r.get("remoteLoginAlert") is False,
+               f"unexpected: {r.get('remoteLoginAlert')}")
+
+        # test ip-12: 超管未设置白名单登录不受影响
+        r = await svc.login(SUPER_ADMIN_USERNAME, SUPER_ADMIN_PASSWORD,
+                            ip="127.0.0.1")
+        record("test_ip_12_super_admin_unaffected",
+               r["username"] == SUPER_ADMIN_USERNAME, f"unexpected: {r}")
+
+
 # ============================================================
 # 测试运行
 # ============================================================
@@ -933,6 +1028,7 @@ async def main():
         TestPasswordStrength,
         TestSession,
         TestTwoFactor,
+        TestIpSecurity,
         TestRole,
         TestPermission,
         TestOperationLogs,
