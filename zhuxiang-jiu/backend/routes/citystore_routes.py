@@ -1,4 +1,4 @@
-"""市级网店模块路由(13 端点)
+"""市级网店模块路由(14 端点)
 
 鉴权:
     - 用户端(7 接口): X-Member-Id 头标识当前会员(申请/查询/订单关联)
@@ -17,6 +17,7 @@
     - 月度考核(3):   assessment-run / assessment-get / assessment-list
     - 订单关联(2):   orders-add / orders-list
     - 管理端(2):     pending / stats
+    - 城市(1):       可用城市查询
     - 入口决策(1):   order-entry/decide(地图定位→市店入口/本站入口)
 """
 

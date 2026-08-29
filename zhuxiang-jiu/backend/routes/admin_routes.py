@@ -1,4 +1,4 @@
-"""后台管理模块路由(13 端点)
+"""后台管理模块路由(17 端点)
 
 鉴权(会话机制, 30分钟滑动过期):
     - 登录成功返回 sessionToken, 后续请求携带 X-Admin-Token 头
@@ -12,7 +12,7 @@
     - 权限校验 → 401(未登录/会话过期) / 403(无权操作)
 
 端点分布:
-    - 认证(2):     login / logout
+    - 认证(5):     login / logout / 2fa-setup / 2fa-enable / 2fa-verify
     - 管理员(5):   create-user / list-users / get-user / update-user / reset-password
     - 角色(2):     create-role / list-roles
     - 权限(1):     assign-permissions

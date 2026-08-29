@@ -1,14 +1,21 @@
-"""产品溯源管理模块路由(14 端点)
+"""产品溯源管理模块路由(16 端点)
 
 鉴权(复用 auth_routes 依赖, 与 33 号权限模块联动):
     - 生产端(7): JWT 登录, 打卡/出库等在 service 层校验环节权限
-    - 公开端(2): 批次溯源时间线 / AI 健康度(C 端消费)
-    - 管理端(5): 超管(异常事件/审计/工段编辑/阻断解锁/统计)
+    - 公开端(3): 批次溯源时间线 / AI 健康度 / 溯源码查询(C 端消费)
+    - 管理端(6): 超管(异常事件/审计/工段编辑/阻断解锁/统计/打卡日志)
 
 异常映射:
     - KeyError → 404(工段/批次不存在)
     - ValueError → 409(参数/状态非法/质检结论缺失)
     - PermissionError → 403(无权限/未签责任书/质检阻断)
+
+端点分布:
+    - 工段(2):     stages 列表 / stages 二维码
+    - 批次(2):     批次创建 / 批次列表
+    - 生产(4):     punch 打卡 / chain 时间线 / bind-codes 绑码 / release 放行
+    - 公开(3):     溯源时间线 / AI 健康度 / 溯源码查询
+    - 管理(5):     anomalies / unblock / 工段编辑 / stats / punch-logs
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query

@@ -1,8 +1,8 @@
-"""AI智能管理模块路由(角色经济中枢, 34 端点)
+"""AI智能管理模块路由(角色经济中枢, 35 端点)
 
 鉴权(对齐 ticket_routes 风格):
     - 用户端(8): X-Member-Id 头(目录/认领/契约/收益/信用事件)
-    - 管理端(23): X-Role 头, 仅 admin(目录维护/审批/契约动作/总账/风控/
+    - 管理端(22): X-Role 头, 仅 admin(目录维护/审批/契约动作/总账/风控/
       追回/重试/试用sweep/记账/工人分润含自动结算/AI监管扫描/预警处置/
       季度联合结算)
     - 客服(2): grab 抢单池/抢单(X-Role: admin/cs_staff)
@@ -16,8 +16,8 @@
 
 端点分布:
     - 目录(2):   catalog / admin upsert
-    - 认领(3):   claim / my claims / admin claims+review
-    - 契约(4):   sign / my contracts / terminate / admin action
+    - 认领(4):   claim / my claims / admin claims / admin review
+    - 契约(5):   sign / my contracts / terminate / admin contracts / admin action
     - 收益(4):   my earnings / my credit-events / admin ledger / risk-summary
     - 客服分润(4): settle(幂等) / retry / reverse(退款追回) / clawback查询
     - 契约治理(1): probation-sweep(试用期满自动转正)

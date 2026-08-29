@@ -33,8 +33,6 @@ from repositories.agreement_repository import (
 
 # 初始版本号
 INITIAL_VERSION = "v1.0"
-# 版本递增步长
-VERSION_STEP = 0.1
 
 
 class AgreementService:

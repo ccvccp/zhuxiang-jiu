@@ -77,14 +77,6 @@ class CreateAgreementRequest(PydBaseModel):
     changeLog: str = Field("", description="变更说明")
 
 
-class UpdateAgreementRequest(PydBaseModel):
-    name: str | None = None
-    content: str | None = None
-    legalBasis: str | None = None
-    changeLog: str | None = None
-    applicableRole: str | None = None
-
-
 class PublishRequest(PydBaseModel):
     effectiveDate: str | None = None
 
@@ -104,11 +96,6 @@ class CreateProtocolRequest(PydBaseModel):
     role: str = Field(..., description="角色: user/member/agent/merchant")
     agreementId: int = Field(..., description="条款ID")
     required: bool = Field(True, description="是否必须同意")
-
-
-class UpdateProtocolRequest(PydBaseModel):
-    required: bool | None = None
-    status: str | None = None
 
 
 # ============================================================

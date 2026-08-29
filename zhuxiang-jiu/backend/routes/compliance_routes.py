@@ -1,4 +1,4 @@
-"""合规合法智能监控模块路由(12 端点)
+"""合规合法智能监控模块路由(16 端点)
 
 鉴权:
     - 管理端: X-Role: admin 头(全部接口需管理员权限)
@@ -6,10 +6,10 @@
 端点分布:
     - 行为监控(3):    behavior-monitor / behavior-list / behavior-detail
     - 条款监控(2):    terms-monitor / terms-list
-    - 法律知识(2):    legal-search / legal-detail
+    - 法律知识(2):    legal-add / legal-search
     - 风险预警(2):    risk-warning / risk-list
     - 监管报送(2):    regulatory-report / regulatory-accept
-    - 区块链存证(1):  blockchain-evidence
+    - 区块链存证(2):  blockchain-evidence / blockchain-verify
     - 分析报告(1):    analysis-report
     - 持续优化(1):    optimization-update
     - 统计(1):        stats

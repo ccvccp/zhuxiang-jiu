@@ -683,12 +683,6 @@ class ProductRepository:
             return await self._redis_get_replies(review_id)
         return self._mem_get_replies(review_id)
 
-    async def delete_reply(self, review_id: str, reply_id: str) -> bool:
-        """删除单条回复(返回是否删除成功)"""
-        if is_redis_mode():
-            return await self._redis_delete_reply(review_id, reply_id)
-        return self._mem_delete_reply(review_id, reply_id)
-
     # ============================================================
     # 评价点赞(P1)
     # ============================================================
@@ -712,12 +706,6 @@ class ProductRepository:
         if removed:
             await self._increment_review_like_count(review_id, -1)
         return removed
-
-    async def is_liked(self, review_id: str, member_id: str) -> bool:
-        """是否已点赞"""
-        if is_redis_mode():
-            return await self._redis_is_liked(review_id, member_id)
-        return self._mem_is_liked(review_id, member_id)
 
     async def get_like_count(self, review_id: str) -> int:
         """点赞数"""
@@ -923,16 +911,6 @@ class ProductRepository:
         replies.sort(key=lambda r: r.get("created_at", ""))
         return replies
 
-    def _mem_delete_reply(self, review_id: str, reply_id: str) -> bool:
-        """删除回复(内存模式)"""
-        self._ensure_store()
-        replies = self.store["review_replies"].get(review_id, [])
-        for i, r in enumerate(replies):
-            if r.get("reply_id") == reply_id:
-                replies.pop(i)
-                return True
-        return False
-
     # ---------- 评价点赞(内存) ----------
 
     def _mem_add_like(self, review_id: str, member_id: str) -> bool:
@@ -953,11 +931,6 @@ class ProductRepository:
             return False
         likes.discard(member_id)
         return True
-
-    def _mem_is_liked(self, review_id: str, member_id: str) -> bool:
-        """是否已点赞(内存模式)"""
-        self._ensure_store()
-        return member_id in self.store["review_likes"].get(review_id, set())
 
     def _mem_get_like_count(self, review_id: str) -> int:
         """点赞数(内存模式)"""
@@ -1141,22 +1114,6 @@ class ProductRepository:
                 continue
         return replies
 
-    async def _redis_delete_reply(self, review_id: str, reply_id: str) -> bool:
-        """删除回复(Redis 模式, List lset + lrem)"""
-        client = await get_redis_client()
-        key = _k("product", "review", "replies", review_id)
-        items = await client.lrange(key, 0, -1)
-        for i, raw in enumerate(items):
-            try:
-                reply = json.loads(raw)
-            except (TypeError, ValueError):
-                continue
-            if reply.get("reply_id") == reply_id:
-                await client.lset(key, i, "__DELETED__")
-                await client.lrem(key, 1, "__DELETED__")
-                return True
-        return False
-
     # ---------- 评价点赞(Redis) ----------
 
     async def _redis_add_like(self, review_id: str, member_id: str) -> bool:
@@ -1172,12 +1129,6 @@ class ProductRepository:
         removed = await client.srem(
             _k("product", "review", "likes", review_id), member_id)
         return removed > 0
-
-    async def _redis_is_liked(self, review_id: str, member_id: str) -> bool:
-        """是否已点赞(Redis 模式, Set sismember)"""
-        client = await get_redis_client()
-        return await client.sismember(
-            _k("product", "review", "likes", review_id), member_id)
 
     async def _redis_get_like_count(self, review_id: str) -> int:
         """点赞数(Redis 模式, Set scard)"""

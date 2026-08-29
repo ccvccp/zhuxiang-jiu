@@ -144,11 +144,6 @@ class AddStockingRequest(PydBaseModel):
     stockingsDate: str = Field("", description="铺货日期")
 
 
-class UpdateStockingStatusRequest(PydBaseModel):
-    status: str = Field(..., description="新状态: active/soldout/offline")
-    soldQty: int = Field(0, ge=0, description="追加已售数量")
-
-
 # ============================================================
 # P0 接口(12 个)
 # ============================================================

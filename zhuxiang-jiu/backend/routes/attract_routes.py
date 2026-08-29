@@ -1,9 +1,9 @@
-"""AI智能自动引流模块路由(P0+P1+P2, 37 端点)
+"""AI智能自动引流模块路由(P0+P1+P2, 36 端点)
 
 鉴权:
     - 公开(5): /r/{code} 短链跳转 / attach 归并 / attach-order 回写 /
       /sitemap.xml / /robots.txt
-    - 管理端(27): X-Role: admin(内容工厂/短码/点击流/报表/ROI引擎/
+    - 管理端(26): X-Role: admin(内容工厂/短码/点击流/报表/ROI引擎/
       SEO/AB/通知/裂变管理与刷新)
     - 用户端(5): X-Member-Id(任务宝进度/海报生成与列表)
 
@@ -13,7 +13,7 @@
 
 端点分布:
     - 选题(2):   topic / topics
-    - 内容(5):   generate / contents / contents/{id} / review / publish
+    - 内容(4):   generate / contents / review / publish
     - 短链(4):   短码创建 / /r/{code}跳转 / clicks / short-links
     - 归因(3):   attach(注册归并) / attach-order(下单回写) / attributions
     - 报表(3):   funnel / channel / content

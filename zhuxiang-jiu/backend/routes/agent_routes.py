@@ -1,9 +1,11 @@
-"""代理商管理路由(10 端点)
+"""代理商管理路由(18 端点)
 
-覆盖 3 个业务域:
+覆盖 5 个业务域:
     - 准入管理(3):  apply / audit / applications
     - 档案管理(4):  list / detail / update / levels
     - 进货管理(3):  purchase / purchases(list) / purchases(detail)
+    - 返利管理(5):  rebate-tiers / rebate-calc / rebates / rebate-withdraw / rebate-summary
+    - 风控管理(3):  risk-alerts / risk-report / risk-assess
 
 鉴权:
     - 管理端: X-Role: admin(audit / applications)
