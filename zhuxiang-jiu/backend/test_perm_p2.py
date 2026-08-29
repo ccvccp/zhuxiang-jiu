@@ -52,7 +52,7 @@ async def _expect(exc_type, coro, keyword=""):
         return False, ""
     except exc_type as exc:
         return (not keyword or keyword in str(exc)), str(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"非预期异常 {type(exc).__name__}: {exc}"
 
 
@@ -97,7 +97,7 @@ async def main():
            and d1["delegateToId"] == agent, f"d={d1}")
 
     # 覆盖式: manager 改委托给 other → 旧委托(agent)失效
-    d2 = await svc.set_delegate(manager, other)
+    await svc.set_delegate(manager, other)
     mine = await svc.my_delegates(manager)
     record("test_02_override_old_cancelled",
            len(mine["mine"]) == 1 and mine["mine"][0]["delegateToId"] == other,

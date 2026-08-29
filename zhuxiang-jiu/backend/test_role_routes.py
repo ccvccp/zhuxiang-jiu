@@ -21,7 +21,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 
 # 确保使用内存模式
@@ -736,7 +736,7 @@ class TestProbationSweep:
         record("sweep-未到期不动", result["total"] == 0)
 
         # 手工把两个契约改为已到期
-        past = (datetime.now(timezone.utc)
+        past = (datetime.now(UTC)
                 - timedelta(days=1)).isoformat()
         await role_repo.update_contract(
             contract1["id"], {"probationEndsAt": past})
@@ -1140,12 +1140,12 @@ class TestProfitAnomalyScan:
             tno = await _resolved_ticket(
                 ticket_svc, MEMBER_ID, CS_USER_ID,
                 order_id=f"ORD-A{i}", satisfaction=4)
-            ledger = await svc.settle_service_profit(tno, order_amount=400)
+            await svc.settle_service_profit(tno, order_amount=400)
         tno_big = await _resolved_ticket(
             ticket_svc, MEMBER_ID, CS_USER_ID, order_id="ORD-ABIG",
             satisfaction=5)
-        ledger_big = await svc.settle_service_profit(tno_big,
-                                                      order_amount=100000)
+        await svc.settle_service_profit(tno_big,
+                                        order_amount=100000)
         # 大额触顶50 vs 小额peer均值6.62 → 50 > 6.62×5 且 >30
         scan = await svc.scan_profit_anomaly()
         kinds = {a["kind"] for a in scan["anomalies"]}
@@ -1286,7 +1286,7 @@ class TestQuarterlyJointSettle:
                and abs(ledger["deferredAmount"] - 23.12) < 0.01)
 
         # 季度联合结算
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await svc.quarterly_joint_settle(
             now.year, (now.month - 1) // 3 + 1)
         record("季结-1名成员获发(23.12)",

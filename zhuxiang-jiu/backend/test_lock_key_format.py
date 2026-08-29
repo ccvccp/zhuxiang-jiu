@@ -23,7 +23,7 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 os.environ["LOCK_MODE"] = "redis"
 
-import core.locks as locks_mod  # noqa: E402
+import core.locks as locks_mod
 
 
 class FakeRedisLock:

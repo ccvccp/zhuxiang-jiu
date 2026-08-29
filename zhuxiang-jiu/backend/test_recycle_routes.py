@@ -183,7 +183,6 @@ class TestLifeCodeValuation:
         # test: 激活日不足3年 → 酒龄校验以激活日为准
         young_result = await trace.generate_life_codes(PRODUCT_ID_1, "B-LC-04", 1)
         young_code = young_result["lifeCodes"][0]["lifeCode"]
-        young_id = young_result["lifeCodes"][0]["id"]
         await trace.activate_life_code(young_code, USER_ID_1)
         # 激活日=今天, 但购买日期报称4年前 → 以激活日为准拒绝
         try:

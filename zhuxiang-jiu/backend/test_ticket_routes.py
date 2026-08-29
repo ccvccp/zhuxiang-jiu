@@ -25,12 +25,12 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 
 def _hours_ago(hours: float) -> str:
     """N小时前的 ISO 时间戳(与 core.helpers.ts() 同为 offset-aware)"""
-    return (datetime.now(timezone.utc)
+    return (datetime.now(UTC)
             - timedelta(hours=hours)).isoformat()
 
 # 确保使用内存模式
@@ -379,7 +379,7 @@ class TestListStats:
         # 准备: 1条全链路关闭 + 1条待分配 + 1条处理中
         await _create_full_flow_ticket(svc, USER_ID_1,
                                         TICKET_TYPE_PRESALE, PRIORITY_MEDIUM)
-        pending = await svc.create_ticket(
+        await svc.create_ticket(
             user_id=USER_ID_1, ticket_type=TICKET_TYPE_COMPLAINT,
             priority=PRIORITY_LOW, description="投诉")
         processing = await svc.create_ticket(

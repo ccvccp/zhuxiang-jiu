@@ -284,7 +284,7 @@ class TestRoiEngine:
 
         # 造两渠道: xiaohongshu 高ROI / taobao 零转化
         xhs_clicks = []
-        for i in range(3):
+        for _ in range(3):
             result = await svc.resolve_click("KOL1_douyin_AB12CD34",
                                              utm_source="xiaohongshu")
             xhs_clicks.append(result["clickId"])
@@ -292,7 +292,7 @@ class TestRoiEngine:
                                 utm_source="taobao")
         # 小红书3点击全部注册并下单
         for i, cid in enumerate(xhs_clicks):
-            attr = await svc.attach_registration(cid, 8000 + i)
+            await svc.attach_registration(cid, 8000 + i)
             await svc.attach_order(cid, f"ORD-R{i}",
                                    1000.0, commission=50.0)
 

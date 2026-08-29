@@ -53,7 +53,7 @@ async def _expect(exc_type, coro, keyword=""):
         return False, ""
     except exc_type as exc:
         return (not keyword or keyword in str(exc)), str(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"非预期异常 {type(exc).__name__}: {exc}"
 
 
@@ -208,13 +208,13 @@ async def main():
 
     # 灌申请+审批记录给 good(准时审批, 保证 approval 因子)
     applicant = await add_member("考核陪跑")
-    req = await svc.submit_request(applicant, "production.view",
-                                   "考核因子测试申请数据")
+    await svc.submit_request(applicant, "production.view",
+                             "考核因子测试申请数据")
     # good 需是审批人: 给 good 直授环节 manage → good 变环节主管
     g_good_mgr = await svc.assign_grant(SUPER, good, "production.manage")
     await svc.sign_duty(good, g_good_mgr["grantId"])
-    req = await svc.submit_request(applicant, "storage.view",
-                                   "考核因子测试申请数据二")
+    await svc.submit_request(applicant, "storage.view",
+                             "考核因子测试申请数据二")
     # storage 环节无主管 → 超管兜底; good 不是审批人, approval 因子=满分(未担任)
     run1 = await ai.run_assessment(SUPER)
     scores = {r["memberId"]: r for r in run1["results"]
@@ -233,7 +233,7 @@ async def main():
     try:
         info = await wallet.get_reward_balance(good)
         reward_bal = info.get("rewardBalance", 0)
-    except Exception:  # noqa: BLE001
+    except Exception:
         reward_bal = 0
     record("test_12_bonus_in_wallet",
            reward_bal >= 200, f"rewardBalance={reward_bal}")

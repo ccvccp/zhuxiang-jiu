@@ -466,7 +466,7 @@ class TestSession:
             record("test_ss_07_double_logout_rejected", True)
 
         # 会话过期判定: 手动构造已过期会话
-        from datetime import datetime, timedelta as _td
+        from datetime import timedelta as _td
         from repositories.admin_repository import SESSION_TIMEOUT_MINUTES
         expired_session = {
             "token": "expired-token-xyz",
@@ -994,9 +994,9 @@ class TestIpSecurity:
                "未找到 login_remote_alert 日志")
 
         # test ip-11: 首次登录(lastLoginIp 为空)不告警
-        user2 = await svc.create_user(username="ip_ops2",
-                                       password=TEST_PASSWORD,
-                                       operator_id=SUPER_ADMIN_ID)
+        await svc.create_user(username="ip_ops2",
+                              password=TEST_PASSWORD,
+                              operator_id=SUPER_ADMIN_ID)
         r = await svc.login("ip_ops2", TEST_PASSWORD, ip="200.1.1.1")
         record("test_ip_11_first_login_no_alert",
                r.get("remoteLoginAlert") is False,

@@ -54,7 +54,7 @@ async def _expect(exc_type, coro, keyword=""):
         return False, ""
     except exc_type as exc:
         return (not keyword or keyword in str(exc)), str(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"非预期异常 {type(exc).__name__}: {exc}"
 
 
@@ -191,7 +191,7 @@ async def main():
            f"anomalies={p_back['anomalies']}")
 
     # 新批次走干净全链
-    b2 = await svc.create_batch(brewer, "ZX42-2026L09", 2, 3000)
+    await svc.create_batch(brewer, "ZX42-2026L09", 2, 3000)
     await svc.punch(brewer, "STG-BREW", "ZX42-2026L09",
                     params={"窖池号": "1号", "酒度": "42.1"})
     await svc.punch(storer, "STG-STOR", "ZX42-2026L09",

@@ -53,7 +53,7 @@ async def _expect(exc_type, coro, keyword=""):
         return False, ""
     except exc_type as exc:
         return (not keyword or keyword in str(exc)), str(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"非预期异常 {type(exc).__name__}: {exc}"
 
 

@@ -53,7 +53,7 @@ async def _expect(exc_type, coro, keyword=""):
         return False, ""
     except exc_type as exc:
         return (not keyword or keyword in str(exc)), str(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, f"非预期异常 {type(exc).__name__}: {exc}"
 
 
@@ -268,8 +268,8 @@ async def main():
            req5["status"] == "cancelled", f"req={req5['status']}")
 
     # 4.6 重复申请拦截
-    req6 = await svc.submit_request(applicant, "sales.view",
-                                    "查看销售报表数据")
+    await svc.submit_request(applicant, "sales.view",
+                             "查看销售报表数据")
     ok, msg = await _expect(ValueError,
                             svc.submit_request(applicant, "sales.view",
                                                "再次申请销售报表"),
@@ -323,7 +323,7 @@ async def main():
            f"sweep={sweep}")
 
     g_rev = await svc.assign_grant(SUPER, staff, "sales.view")
-    revoked = await svc.revoke_grant(SUPER, g_rev["grantId"])
+    await svc.revoke_grant(SUPER, g_rev["grantId"])
     ok, msg = await _expect(PermissionError,
                             svc.check_permission(staff, "sales.view"))
     record("test_29_revoke_blocks", ok, msg)
