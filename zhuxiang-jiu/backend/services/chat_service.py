@@ -35,6 +35,8 @@ from repositories.chat_repository import (
 )
 # 会话级敏感词过滤复用风控评分模块词库(信息内容审核, 避免重复维护)
 from services.ai_scoring_ext_service import MessageContentScorer
+# 知识库训练模块(检索消费方: 新库优先, 旧FAQ兜底, 未命中回写缺口)
+from services.knowledge_service import KnowledgeService
 
 SENSITIVE_WORDS = MessageContentScorer.SENSITIVE_WORDS
 
@@ -65,6 +67,7 @@ class ChatService:
 
     def __init__(self, repo: ChatRepository = ChatRepository()):
         self.repo = repo
+        self.knowledge_svc = KnowledgeService()
 
     # ============================================================
     # 1. 创建会话
@@ -243,10 +246,9 @@ class ChatService:
             reply["messageId"] = message_id
             return reply
 
-        # 2. 知识库检索
-        matches = await self.repo.search_knowledge(user_content, limit=1)
-        if matches:
-            knowledge = matches[0]
+        # 2. 知识库检索(新知识库模块优先, 旧FAQ表兜底——迁移过渡期双轨)
+        knowledge = await self._search_knowledge(user_content)
+        if knowledge:
             session["unresolvedCount"] = 0
             await self.repo.save_session(session)
             content = knowledge.get("answer", "")
@@ -261,9 +263,10 @@ class ChatService:
                 "knowledgeId": knowledge.get("id"),
             }
         else:
-            # 未命中: 兜底回复 + 未解决计数+1
+            # 未命中: 兜底回复 + 未解决计数+1 + 记录知识缺口(飞轮)
             session["unresolvedCount"] = session.get("unresolvedCount", 0) + 1
             await self.repo.save_session(session)
+            await self._record_knowledge_gap(user_content, session_id)
             reply = {
                 "sessionId": session_id,
                 "senderType": SENDER_AI,
@@ -466,6 +469,39 @@ class ChatService:
                                    limit: int = 100) -> list[dict]:
         """管理端查询会话"""
         return await self.repo.list_all_sessions(status, session_type, limit)
+
+    # ============================================================
+    # 6.5 知识库检索消费方(新知识库模块优先, 旧FAQ兜底)
+    # ============================================================
+
+    async def _search_knowledge(self, user_content: str) -> dict | None:
+        """统一知识检索: 新知识库(published, 向量 top-k)优先,
+        旧 chat_knowledge(关键词匹配)兜底。
+
+        新库异常不阻断对话(best-effort 降级旧库)。
+        """
+        try:
+            matches = await self.knowledge_svc.search(
+                user_content, limit=1, record_hit=True)
+            if matches:
+                m = matches[0]
+                return {"id": m["entryId"], "answer": m["answer"]}
+        except Exception:
+            pass
+        # 旧 FAQ 兜底(迁移过渡期)
+        legacy = await self.repo.search_knowledge(user_content, limit=1)
+        return legacy[0] if legacy else None
+
+    async def _record_knowledge_gap(self, user_content: str,
+                                     session_id: str) -> None:
+        """记录知识缺口(chat 未命中 → 新知识库缺口队列, 驱动补知识)
+
+        best-effort: 失败不阻断对话主流程。
+        """
+        try:
+            await self.knowledge_svc.record_gap(user_content, session_id)
+        except Exception:
+            pass
 
     # ============================================================
     # 7. 知识库 CRUD

@@ -67,6 +67,8 @@ from routes.ticket_routes import register_ticket_routes
 from routes.role_routes import register_role_routes
 # AI智能自动引流模块
 from routes.attract_routes import register_attract_routes
+# AI智能知识库训练模块
+from routes.knowledge_routes import register_knowledge_routes
 
 __all__ = [
     # 已有(15)
@@ -114,4 +116,5 @@ __all__ = [
     "register_ticket_routes",
     "register_role_routes",
     "register_attract_routes",
+    "register_knowledge_routes",
 ]
