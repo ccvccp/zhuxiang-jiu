@@ -361,6 +361,137 @@ class TestLeadStatus:
 
 
 # ============================================================
+# 6. AI-SEO(P1)
+# ============================================================
+
+class TestSeo:
+
+    async def run(self):
+        reset_store()
+        svc = AttractService()
+
+        # 种子词加载(7个)
+        keywords = await svc.list_keywords()
+        record("SEO-种子词加载(7个)", len(keywords) == 7,
+               f"实际{len(keywords)}")
+
+        # 添加关键词(去重)
+        kw = await svc.add_keyword("企业定制酒", search_volume=1200)
+        record("SEO-关键词添加", kw["keywordId"] > 0
+               and kw["status"] == "active")
+        try:
+            await svc.add_keyword("企业定制酒")
+            record("SEO-重复关键词拒绝", False, "未抛出异常")
+        except ValueError:
+            record("SEO-重复关键词拒绝", True)
+
+        # 关键词生成长文
+        article = await svc.generate_seo_article(kw["keywordId"])
+        record("SEO-长文生成(含关键词+合规)",
+               "企业定制酒" in article["body"]
+               and article["complianceScore"] >= 70,
+               f"分数{article['complianceScore']}")
+        try:
+            await svc.generate_seo_article(9999)
+            record("SEO-关键词不存在拒绝", False, "未抛出异常")
+        except KeyError:
+            record("SEO-关键词不存在拒绝", True)
+
+        # sitemap/robots
+        sitemap = await svc.generate_sitemap()
+        record("SEO-sitemap含域名与基础页",
+               "zhuxiang-jiu.com" in sitemap
+               and "<urlset" in sitemap and "/products" in sitemap)
+        robots = await svc.generate_robots()
+        record("SEO-robots含允许与sitemap指引",
+               "User-agent: *" in robots and "Sitemap:" in robots)
+
+
+# ============================================================
+# 7. AB落地页(P1)
+# ============================================================
+
+class TestAbPage:
+
+    async def run(self):
+        reset_store()
+        svc = AttractService()
+
+        link = await svc.create_short_link(note="AB测试")
+
+        # 无AB配置时点击走默认活动页
+        r0 = await svc.resolve_click(link["code"])
+        record("AB-未配置走默认活动页",
+               r0["landingPath"] == "/pages/activity/index")
+
+        # 配置AB(70/30)
+        page = await svc.create_ab_page(
+            code=link["code"], path_a="/pages/activity/v1",
+            path_b="/pages/activity/v2", weight_a=70)
+        record("AB-配置成功(70/30)",
+               page["weightA"] == 70)
+
+        try:
+            await svc.create_ab_page("A-XXXXXX", "/a", "/b", 50)
+            record("AB-短码不存在拒绝", False, "未抛出异常")
+        except ValueError:
+            record("AB-短码不存在拒绝", True)
+
+        # 权重分流: 100次点击, A≈70/B≈30
+        version_counts = {"A": 0, "B": 0}
+        for _ in range(100):
+            r = await svc.resolve_click(link["code"])
+            version_counts[r.get("abVersion") or "?"] += 1
+        record("AB-按权重分流(A≈70)",
+               60 <= version_counts["A"] <= 80,
+               f"实际A={version_counts['A']}")
+        # 落地页与版本一致
+        r1 = await svc.resolve_click(link["code"])
+        expect_path = ("/pages/activity/v1" if r1["abVersion"] == "A"
+                       else "/pages/activity/v2")
+        record("AB-落地页与版本一致",
+               r1["landingPath"] == expect_path,
+               f"v={r1['abVersion']}, path={r1['landingPath']}")
+
+        # AB报表
+        report = await svc.ab_report(link["code"])
+        record("AB-报表含双版本点击数",
+               report["clicksA"] + report["clicksB"] >= 100,
+               f"A={report['clicksA']}, B={report['clicksB']}")
+        try:
+            await svc.ab_report("A-XXXXXX")
+            record("AB-无配置报表拒绝", False, "未抛出异常")
+        except ValueError:
+            record("AB-无配置报表拒绝", True)
+
+
+# ============================================================
+# 8. 分发通知(P1: best-effort)
+# ============================================================
+
+class TestNotifyPublish:
+
+    async def run(self):
+        reset_store()
+        svc = AttractService()
+        await _setup_members()
+
+        topic = await svc.create_topic(title="通知测试", angle="culture",
+                                       keywords="竹香型白酒")
+        contents = await svc.generate_contents(topic["topicId"])
+        ok = contents[0]
+        await svc.review_content(ok["contentId"], approved=True)
+        published = await svc.publish_content(ok["contentId"])
+
+        result = await svc.notify_publish(
+            content_id=published["contentId"],
+            member_ids=[NEW_MEMBER_ID, PROMOTER_USER_ID])
+        record("通知-站内信群发(2人成功)",
+               result.get("successCount") == 2,
+               f"实际{result}")
+
+
+# ============================================================
 # 主入口
 # ============================================================
 
@@ -371,9 +502,12 @@ async def main():
         ("注册归并三合一", TestAttachRegistration),
         ("渠道报表与ROI引擎", TestRoiEngine),
         ("lead状态推进", TestLeadStatus),
+        ("AI-SEO", TestSeo),
+        ("AB落地页", TestAbPage),
+        ("分发通知", TestNotifyPublish),
     ]
     print("=" * 62)
-    print("AI智能自动引流模块 P0 端到端测试")
+    print("AI智能自动引流模块 P0+P1 端到端测试")
     print("=" * 62)
     for name, cls in test_classes:
         print(f"\n[{name}]")

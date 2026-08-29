@@ -101,8 +101,34 @@ ROI_MIN_SAMPLE = 1
 # 初始渠道账本(基准系数 1.0)
 CHANNEL_SEEDS = (
     "douyin", "kuaishou", "wechat", "xiaohongshu",
-    "bilibili", "taobao", "direct",
+    "bilibili", "taobao", "direct", "seo",
 )
+
+# ============================================================
+# AI-SEO(P1: 关键词库 + sitemap/robots)
+# ============================================================
+
+# 站点域名(sitemap/短链拼接用, 可被环境变量覆盖)
+import os
+SITE_BASE_URL = os.environ.get("SITE_BASE_URL", "https://zhuxiang-jiu.com")
+
+# 关键词初始种子(竹香型白酒核心词)
+SEO_KEYWORD_SEEDS = (
+    "竹香型白酒", "竹香酒", "山东特产酒", "婚宴用酒推荐",
+    "送礼白酒推荐", "纯粮酿造白酒", "绵甜白酒",
+)
+
+# 关键词状态
+KEYWORD_STATUS_ACTIVE = "active"
+KEYWORD_STATUS_PAUSED = "paused"
+
+# ============================================================
+# AB 落地页(P1: 同一短链按权重分流)
+# ============================================================
+
+AB_VERSION_A = "A"
+AB_VERSION_B = "B"
+AB_DEFAULT_WEIGHT = 50   # 版本A默认权重%(B=100-A)
 
 
 def _now_iso() -> str:
@@ -404,6 +430,65 @@ class AttractRepository:
         }
 
     # ============================================================
+    # AI-SEO 关键词库(P1)
+    # ============================================================
+
+    async def save_keyword(self, keyword: dict) -> dict:
+        return await self._save("attract_seo_keywords",
+                                keyword["keywordId"], keyword)
+
+    async def get_keyword(self, keyword_id: int) -> dict | None:
+        return await self._get("attract_seo_keywords", keyword_id)
+
+    async def list_keywords(self, status: str = None,
+                             limit: int = 200) -> list[dict]:
+        keywords = await self._list("attract_seo_keywords", limit * 5)
+        if status:
+            keywords = [k for k in keywords
+                        if k.get("status") == status]
+        return sorted(keywords, key=lambda k: k.get("createdAt", ""),
+                      reverse=True)[:limit]
+
+    async def ensure_seo_seeds(self) -> int:
+        """初始化关键词种子(幂等, 返回新增数)"""
+        count = 0
+        for word in SEO_KEYWORD_SEEDS:
+            existing = await self._find_keyword_by_word(word)
+            if existing is None:
+                keyword_id = await self.next_id("keyword")
+                await self.save_keyword({
+                    "keywordId": keyword_id,
+                    "word": word,
+                    "searchVolume": 0,
+                    "status": KEYWORD_STATUS_ACTIVE,
+                    "createdAt": _now_iso(),
+                })
+                count += 1
+        return count
+
+    async def _find_keyword_by_word(self, word: str) -> dict | None:
+        keywords = await self._list("attract_seo_keywords", 1000)
+        for k in keywords:
+            if k.get("word") == word:
+                return k
+        return None
+
+    # ============================================================
+    # AB 落地页(P1)
+    # ============================================================
+
+    async def save_ab_page(self, page: dict) -> dict:
+        return await self._save("attract_ab_pages", page["code"], page)
+
+    async def get_ab_page(self, code: str) -> dict | None:
+        return await self._get("attract_ab_pages", code)
+
+    async def list_ab_pages(self, limit: int = 200) -> list[dict]:
+        pages = await self._list("attract_ab_pages", limit)
+        return sorted(pages, key=lambda p: p.get("createdAt", ""),
+                      reverse=True)[:limit]
+
+    # ============================================================
     # 通用存储(内存/Redis)
     # ============================================================
 
@@ -452,6 +537,9 @@ class AttractRepository:
             self.store["attract_clicks"] = {}
             self.store["attract_attributions"] = {}
             self.store["attract_channel_budgets"] = {}
+            self.store["attract_seo_keywords"] = {}   # P1: SEO关键词
+            self.store["attract_ab_pages"] = {}        # P1: AB落地页
             self.store["_attract_topic_seq"] = 0
             self.store["_attract_content_seq"] = 0
             self.store["_attract_click_seq"] = 0
+            self.store["_attract_keyword_seq"] = 0

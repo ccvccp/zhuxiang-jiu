@@ -1,11 +1,13 @@
-"""AI智能自动引流模块路由(P0, 21 端点)
+"""AI智能自动引流模块路由(P0+P1, 30 端点)
 
 鉴权:
-    - 公开(3): /r/{code} 短链跳转(无鉴权) / attach 注册归因上报 / attach-order
-    - 管理端(18): X-Role: admin(内容工厂/短码/点击流/报表/ROI引擎)
+    - 公开(5): /r/{code} 短链跳转 / attach 归并 / attach-order 回写 /
+      /sitemap.xml / /robots.txt
+    - 管理端(25): X-Role: admin(内容工厂/短码/点击流/报表/ROI引擎/
+      SEO关键词与长文/AB落地页/分发通知)
 
 异常映射(遵循项目约定):
-    - KeyError → 404(选题/内容/点击/短码不存在)
+    - KeyError → 404(选题/内容/点击/短码/关键词不存在)
     - ValueError → 409(状态非法/合规分不足/已归并等)
 
 端点分布:
@@ -15,7 +17,10 @@
     - 归因(3):   attach(注册归并) / attach-order(下单回写) / attributions
     - 报表(3):   funnel / channel / content
     - ROI(3):    rebalance / budgets / suggest-topics
-    - 联动(1):   traffic lead 状态推进(修复既有空白)
+    - 联动(1):   traffic lead 状态推进
+    - SEO(5):    keywords增查 / article生成 / sitemap.xml / robots.txt(P1)
+    - AB(3):     page配置 / report报表 / pages列表(P1)
+    - 通知(1):   notify/publish(P1)
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -87,6 +92,23 @@ class AttachOrderRequest(PydBaseModel):
 
 class LeadStatusRequest(PydBaseModel):
     status: str = Field(..., description="目标状态: registered/ordered/invalid")
+
+
+class KeywordRequest(PydBaseModel):
+    word: str = Field(..., min_length=1, max_length=50, description="关键词")
+    searchVolume: int = Field(0, ge=0, description="搜索量(可选)")
+
+
+class AbPageRequest(PydBaseModel):
+    code: str = Field(..., max_length=20, description="活动短码")
+    pathA: str = Field(..., max_length=200, description="版本A落地页路径")
+    pathB: str = Field(..., max_length=200, description="版本B落地页路径")
+    weightA: int = Field(50, ge=1, le=99, description="版本A权重%")
+
+
+class NotifyPublishRequest(PydBaseModel):
+    contentId: int = Field(..., description="内容ID")
+    memberIds: list = Field(..., min_length=1, description="通知会员ID列表")
 
 
 # ============================================================
@@ -428,3 +450,132 @@ async def update_lead_status(
 def register_attract_routes(app):
     """注册AI智能自动引流模块路由"""
     app.include_router(router)
+
+
+# ============================================================
+# P1: AI-SEO + AB落地页 + 分发通知
+# ============================================================
+
+@router.post("/api/attract/seo/keywords", tags=["AI自动引流模块"])
+async def add_keyword(
+    data: KeywordRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """添加SEO关键词(去重)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.add_keyword(
+            word=data.word, search_volume=data.searchVolume)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/attract/seo/keywords", tags=["AI自动引流模块"])
+async def list_keywords(
+    x_role: str = Header(None, alias="X-Role"),
+    status: str = Query(None, description="状态筛选 active/paused"),
+):
+    """关键词列表(含7个种子词)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.list_keywords(status=status)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/attract/seo/article/generate", tags=["AI自动引流模块"])
+async def generate_seo_article(
+    x_role: str = Header(None, alias="X-Role"),
+    keywordId: int = Query(..., description="关键词ID"),
+):
+    """按关键词生成SEO长文(入内容库待审核)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.generate_seo_article(
+            keyword_id=keywordId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/sitemap.xml", tags=["AI自动引流模块"])
+async def sitemap():
+    """sitemap.xml(公开: 已发布SEO文章+短链落地页)"""
+    try:
+        content = await _service.generate_sitemap()
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(content=content,
+                                  media_type="application/xml")
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/robots.txt", tags=["AI自动引流模块"])
+async def robots():
+    """robots.txt(公开: 全站允许+sitemap指引)"""
+    try:
+        content = await _service.generate_robots()
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(content=content, media_type="text/plain")
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/attract/ab/page", tags=["AI自动引流模块"])
+async def create_ab_page(
+    data: AbPageRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """为活动短码配置AB落地页(按权重分流)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.create_ab_page(
+            code=data.code, path_a=data.pathA, path_b=data.pathB,
+            weight_a=data.weightA)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/attract/ab/report/{code}", tags=["AI自动引流模块"])
+async def ab_report(
+    code: str,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """AB测试转化对比报表(点击/注册/CVR/胜出版本)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.ab_report(code)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/attract/ab/pages", tags=["AI自动引流模块"])
+async def list_ab_pages(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """AB落地页配置列表"""
+    _require_admin(x_role)
+    try:
+        result = await _service.repo.list_ab_pages()
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/attract/notify/publish", tags=["AI自动引流模块"])
+async def notify_publish(
+    data: NotifyPublishRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """内容发布后通知分发网络会员(站内信, best-effort)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.notify_publish(
+            content_id=data.contentId, member_ids=data.memberIds)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)

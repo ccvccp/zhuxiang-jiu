@@ -45,6 +45,9 @@ from repositories.attract_repository import (
     MISSING_DISCLAIMER_PENALTY, MISSING_AGE_PENALTY,
     # ROI
     RATE_FLOOR, RATE_CEIL, REBALANCE_STEP, ROI_MIN_SAMPLE,
+    # AI-SEO / AB(P1)
+    SITE_BASE_URL, KEYWORD_STATUS_ACTIVE, KEYWORD_STATUS_PAUSED,
+    AB_VERSION_A, AB_VERSION_B,
 )
 
 logger = logging.getLogger(__name__)
@@ -297,9 +300,12 @@ class AttractService:
                 CODE_TYPE_ACTIVITY: "direct",
             }.get(code_type, "direct")
 
-        # 落地页
-        if activity_link and activity_link.get("landingPath"):
-            landing = activity_link["landingPath"]
+        # 落地页(AB优先: 活动码配置了AB落地页则按权重分流, P1)
+        ab_version = None
+        if activity_link:
+            ab_landing, ab_version = await self.ab_landing_for_click(code)
+            landing = ab_landing or activity_link.get("landingPath") \
+                or landing_for_code_type(code_type)
         else:
             landing = landing_for_code_type(code_type)
 
@@ -320,6 +326,7 @@ class AttractService:
             "userAgent": (user_agent or "")[:200],
             "referer": (referer or "")[:200],
             "landingPath": landing,
+            "abVersion": ab_version or "",
             "promoterId": promoter_id,
             "influencerId": influencer_id,
             "at": _now_iso(),
@@ -328,7 +335,8 @@ class AttractService:
         logger.info("attract_click code=%s channel=%s clickId=%s",
                     code, channel, click_id)
         return {"clickId": click_id, "landingPath": landing,
-                "channel": channel, "codeType": code_type}
+                "channel": channel, "codeType": code_type,
+                "abVersion": ab_version or ""}
 
     async def _resolve_code_owner(self, code: str,
                                   code_type: str) -> tuple:
@@ -431,6 +439,7 @@ class AttractService:
                 "clickId": click_id,
                 "code": click.get("code", ""),
                 "channel": click.get("channel", ""),
+                "abVersion": click.get("abVersion", ""),
                 "promoterId": click.get("promoterId"),
                 "influencerId": click.get("influencerId"),
                 "memberId": member_id,
@@ -634,3 +643,220 @@ class AttractService:
                     source=TOPIC_SOURCE_AI_ROI)
                 suggestions.append(topic)
         return suggestions
+
+    # ============================================================
+    # 6. AI-SEO(P1: 设计文档§4.6)
+    # ============================================================
+
+    async def add_keyword(self, word: str,
+                           search_volume: int = 0) -> dict:
+        """添加SEO关键词(去重)
+
+        Raises:
+            ValueError: 词为空/已存在
+        """
+        word = (word or "").strip()
+        if not word:
+            raise ValueError("关键词不能为空")
+        if await self.repo._find_keyword_by_word(word) is not None:
+            raise ValueError(f"关键词已存在(word={word})")
+        keyword_id = await self.repo.next_id("keyword")
+        keyword = {
+            "keywordId": keyword_id,
+            "word": word,
+            "searchVolume": search_volume,
+            "status": KEYWORD_STATUS_ACTIVE,
+            "createdAt": _now_iso(),
+        }
+        return await self.repo.save_keyword(keyword)
+
+    async def list_keywords(self, status: str = None) -> list[dict]:
+        await self.repo.ensure_seo_seeds()
+        return await self.repo.list_keywords(status=status)
+
+    async def generate_seo_article(self, keyword_id: int) -> dict:
+        """按关键词生成SEO长文(生成即内容库 seo_article 平台变体)
+
+        Raises:
+            KeyError: 关键词不存在
+            ValueError: 关键词已暂停
+        """
+        keyword = await self.repo.get_keyword(keyword_id)
+        if keyword is None:
+            raise KeyError(f"关键词不存在(keywordId={keyword_id})")
+        if keyword.get("status") != KEYWORD_STATUS_ACTIVE:
+            raise ValueError("关键词已暂停, 不可生成")
+        # 复用内容工厂 SEO 模板(以关键词为题)
+        topic = {"title": f"{keyword['word']}选购指南",
+                 "keywords": keyword["word"], "angle": "culture"}
+        bodies = self.generate_content_bodies(topic)
+        score, violations = self.compliance_score(bodies[PLATFORM_SEO])
+        content_id = await self.repo.next_id("content")
+        content = {
+            "contentId": content_id,
+            "topicId": 0,   # 关键词直生成, 不挂选题
+            "platform": PLATFORM_SEO,
+            "body": bodies[PLATFORM_SEO],
+            "hashtags": f"#{keyword['word']}",
+            "keywordId": keyword_id,
+            "complianceScore": score,
+            "complianceViolations": violations,
+            "status": CONTENT_STATUS_PENDING,
+            "publishedTo": "",
+            "createdAt": _now_iso(),
+        }
+        return await self.repo.save_content(content)
+
+    async def generate_sitemap(self) -> str:
+        """输出 sitemap.xml(已发布内容页 + 落地页)"""
+        urls = [f"{SITE_BASE_URL}/", f"{SITE_BASE_URL}/products",
+                f"{SITE_BASE_URL}/about"]
+        contents = await self.repo.list_contents(
+            platform=PLATFORM_SEO, status="published", limit=1000)
+        for c in contents:
+            cid = c.get("contentId")
+            if cid:
+                urls.append(f"{SITE_BASE_URL}/article/{cid}")
+        links = await self.repo.list_short_links(active=True, limit=1000)
+        for l in links:
+            urls.append(f"{SITE_BASE_URL}/r/{l['code']}")
+        entries = "".join(
+            f"  <url><loc>{u}</loc><lastmod>"
+            f"{_now_iso()[:10]}</lastmod></url>\n" for u in urls)
+        return (f'<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+                f"{entries}</urlset>")
+
+    async def generate_robots(self) -> str:
+        """输出 robots.txt(全站允许 + sitemap指引)"""
+        return ("User-agent: *\n"
+                "Allow: /\n\n"
+                f"Sitemap: {SITE_BASE_URL}/sitemap.xml\n")
+
+    # ============================================================
+    # 7. AB 落地页(P1: 设计文档§4.2)
+    # ============================================================
+
+    async def create_ab_page(self, code: str, path_a: str, path_b: str,
+                               weight_a: int = 50) -> dict:
+        """为已有活动短码配置AB落地页(按权重分流)
+
+        Raises:
+            ValueError: 权重非法/短码不存在
+        """
+        if not (0 < weight_a < 100):
+            raise ValueError("版本A权重须在 1-99 之间")
+        link = await self.repo.get_short_link(code)
+        if link is None:
+            raise ValueError(f"活动短码不存在(code={code})")
+        page = {
+            "code": code,
+            "pathA": path_a,
+            "pathB": path_b,
+            "weightA": weight_a,
+            "clicksA": 0,
+            "clicksB": 0,
+            "registeredA": 0,
+            "registeredB": 0,
+            "createdAt": _now_iso(),
+        }
+        return await self.repo.save_ab_page(page)
+
+    def pick_ab_version(self, page: dict) -> str:
+        """按权重选择版本(确定性可测: 以 clicksA+clicksB 计数取模近似均分)"""
+        total = page.get("clicksA", 0) + page.get("clicksB", 0)
+        weight_a = page.get("weightA", 50)
+        # 轮转比例近似: 每100次中前 weightA 次给A
+        slot = total % 100
+        return AB_VERSION_A if slot < weight_a else AB_VERSION_B
+
+    async def ab_landing_for_click(self, code: str) -> tuple[str, str | None]:
+        """短链点击时选择落地页(有AB配置则按权重)
+
+        Returns:
+            (landingPath, version|None)
+        """
+        page = await self.repo.get_ab_page(code)
+        if page is None:
+            return "", None
+        version = self.pick_ab_version(page)
+        landing = (page["pathA"] if version == AB_VERSION_A
+                   else page["pathB"])
+        field = "clicksA" if version == AB_VERSION_A else "clicksB"
+        page[field] = page.get(field, 0) + 1
+        await self.repo.save_ab_page(page)
+        return landing, version
+
+    async def ab_report(self, code: str) -> dict:
+        """AB测试转化对比报表
+
+        Raises:
+            ValueError: 无AB配置
+        """
+        page = await self.repo.get_ab_page(code)
+        if page is None:
+            raise ValueError(f"短码无AB落地页配置(code={code})")
+        # 从归因表统计各版本注册
+        attrs = await self.repo.list_attributions(limit=100000)
+        reg_a = sum(1 for a in attrs
+                    if a.get("code") == code
+                    and a.get("abVersion") == AB_VERSION_A
+                    and a.get("memberId"))
+        reg_b = sum(1 for a in attrs
+                    if a.get("code") == code
+                    and a.get("abVersion") == AB_VERSION_B
+                    and a.get("memberId"))
+        cvr_a = round(reg_a / page["clicksA"], 4) if page["clicksA"] else 0.0
+        cvr_b = round(reg_b / page["clicksB"], 4) if page["clicksB"] else 0.0
+        winner = (AB_VERSION_A if cvr_a >= cvr_b else AB_VERSION_B) \
+            if (reg_a or reg_b) else ""
+        return {"code": code, **{k: page[k] for k in
+                                ("pathA", "pathB", "weightA",
+                                 "clicksA", "clicksB")},
+                "registeredA": reg_a, "registeredB": reg_b,
+                "cvrA": cvr_a, "cvrB": cvr_b, "winner": winner}
+
+    # ============================================================
+    # 8. message 分发提醒钩子(P1: best-effort)
+    # ============================================================
+
+    async def notify_publish(self, content_id: int,
+                               member_ids: list[int]) -> dict:
+        """内容发布后通知分发网络会员(站内信, best-effort)
+
+        复用 message.batch_send; 失败不阻断发布主流程。
+        """
+        try:
+            from services.message_service import MessageService
+            content = await self.repo.get_content(content_id)
+            title = "新推广素材已发布"
+            body = (f"平台{content['platform']}推广内容已发布, "
+                    f"复制文案发到你的圈子即可赚取推广奖励~ "
+                    f"内容编号{content_id}")
+            return await MessageService().batch_send(
+                user_ids=member_ids, channel="inmail",
+                title=title, content=body)
+        except Exception as e:
+            logger.warning("attract_notify_publish_failed content=%s: %s",
+                           content_id, e)
+            return {"successCount": 0, "failedCount": len(member_ids),
+                    "error": str(e)}
+
+    # ============================================================
+    # 9. 大模型 provider 抽象(P1: 设计文档 D-11 后续接入点)
+    # ============================================================
+
+    def generate_content_bodies_v2(self, topic: dict,
+                                    provider: str = "rule") -> dict:
+        """内容生成统一入口(provider 路由)
+
+        provider:
+            - rule(默认): 规则引擎B级(P0实现)
+            - llm(预留): 大模型API——接入时在此分支调用
+              provider_client.generate(topic, platform) 即可,
+              上层 generate_contents 无需改动。
+        """
+        if provider == "llm":
+            # TODO(P1+): 接入大模型API后替换(请求/缓存/降级到rule)
+            logger.info("attract_llm_provider_not_ready_fallback_rule")
+        return self.generate_content_bodies(topic)

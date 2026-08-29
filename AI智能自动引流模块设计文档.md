@@ -191,7 +191,7 @@
 | 阶段 | 内容 |
 |---|---|
 | P0 | 短链系统（/r/{code}+匿名点击）+ 注册归因三合一 + AI内容工厂（规则引擎）+ 归因总表与漏斗/渠道报表 + ROI再分配引擎 | ✅ 已实现（2026-08-29，36项E2E+promotion 45/traffic 48回归通过） |
-| P1 | AI-SEO（关键词/长文/sitemap/robots）+ AB落地页 + 大模型接口接入（替换规则引擎）+ message分发提醒 |
+| P1 | AI-SEO（关键词/长文/sitemap/robots）+ AB落地页 + message分发提醒 + provider抽象 | ✅ 已实现（2026-08-29，累计51项E2E；大模型API接入留 generate_content_bodies_v2 单点） |
 | P2 | 裂变活动插件（海报/任务宝）、广告预算控制（反哺ad模块）、自然搜索归因 |
 
 ---
