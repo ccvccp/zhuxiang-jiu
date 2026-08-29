@@ -137,7 +137,11 @@ async def confirm_ticket(
     data: ConfirmTicketRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """用户确认解决+满意度评价(待用户确认 → 已解决)"""
+    """用户确认解决+满意度评价(待用户确认 → 已解决)
+
+    确认后自动触发服务分润结算(AI智能管理模块 D-8:
+    满意度≥4星且关联订单才产生分润; 结算失败不影响确认结果)。
+    """
     member_id = _require_member_id(x_member_id)
     try:
         result = await _service.confirm_ticket(
@@ -145,6 +149,18 @@ async def confirm_ticket(
             user_id=member_id,
             satisfaction=data.satisfaction,
         )
+        # 服务分润结算钩子(满意度确认后即时结算, 幂等)
+        try:
+            from services.role_service import RoleService
+            settlement = await RoleService().settle_service_profit(ticket_no)
+            result["serviceProfit"] = {
+                "ledgerNo": settlement.get("ledgerNo"),
+                "amount": settlement.get("amount"),
+                "status": settlement.get("status"),
+            }
+        except Exception:
+            # 工单未关联订单/无客服等场景不结算, 不影响确认
+            pass
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

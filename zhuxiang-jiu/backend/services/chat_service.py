@@ -288,17 +288,41 @@ class ChatService:
         return reply
 
     async def _do_transfer(self, session: dict, reason: str = "") -> None:
-        """执行转人工(内部方法)"""
+        """执行转人工(内部方法)
+
+        对接 AI 智能管理模块服务调度中枢(设计文档 v1.1 §4.3):
+            1. 自动创建 source=ai 工单(修复 chat-ticket 断链)
+            2. 调度最优客服(信用×40%+技能×25%+负载×20%+满意度×15%)
+            3. 无可用客服时回退默认客服ID(保持兼容)
+        """
+        assigned_id = DEFAULT_CUSTOMER_SERVICE_ID
+        ticket_no = ""
+        try:
+            # 局部导入避免循环依赖(chat ← role ← ticket/credit/wallet)
+            from services.role_service import RoleService
+            dispatch = await RoleService().dispatch_customer_service(
+                session, reason=reason)
+            ticket_no = dispatch.get("ticketNo", "")
+            if dispatch.get("assigneeId"):
+                assigned_id = dispatch["assigneeId"]
+        except Exception:
+            # 调度中枢异常不影响转接主流程(回退默认客服)
+            pass
+
         session["status"] = SESSION_STATUS_HUMAN
-        session["customerServiceId"] = DEFAULT_CUSTOMER_SERVICE_ID
+        session["customerServiceId"] = assigned_id
+        session["ticketNo"] = ticket_no
         await self.repo.save_session(session)
         # 系统消息通知
+        notice = f"已为您转接人工客服(工号{assigned_id}), 请稍候。"
+        if ticket_no:
+            notice = f"已为您转接人工客服(工号{assigned_id}), 工单号{ticket_no}。"
         await self.repo.add_message({
             "sessionId": session["sessionId"],
             "senderType": SENDER_SYSTEM,
             "senderId": 0,
             "messageType": MESSAGE_TYPE_TEXT,
-            "content": f"已为您转接人工客服(工号{DEFAULT_CUSTOMER_SERVICE_ID}), 请稍候。",
+            "content": notice,
             "mediaUrl": None, "mediaThumb": None, "mediaSize": 0, "duration": 0,
             "aiConfidence": None, "isRead": False, "readAt": None,
         })
@@ -329,7 +353,8 @@ class ChatService:
             return {
                 "sessionId": session_id,
                 "status": SESSION_STATUS_HUMAN,
-                "customerServiceId": DEFAULT_CUSTOMER_SERVICE_ID,
+                "customerServiceId": session.get("customerServiceId"),
+                "ticketNo": session.get("ticketNo", ""),
                 "transferredAt": ts(),
             }
 

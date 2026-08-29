@@ -666,24 +666,25 @@ class AgentUpgradeService {
     }
 
     /**
-     * 超额累进返利计算
+     * 超额累进返利计算(T0-T3 边际累进, 与后端 agent_service.REBATE_TIERS 对齐, 决策 D-9 2026-08-29)
+     * <20万: 0 | 20-50万: 超出部分15% | 50-100万: 20-50万15%+超出25% | >100万: 再加超出部分30%
      */
     calculateRebate(monthlyPurchase, level) {
         const config = UPGRADE_CONFIG.LEVELS[level];
         if (!config) return 0;
 
-        const T1 = 250000, T2 = 500000, T3 = 1000000;
-        const R15 = 0.15, R20 = 0.20, R25 = 0.25, R30 = 0.30;
+        const T1 = 200000, T2 = 500000, T3 = 1000000;
+        const R15 = 0.15, R25 = 0.25, R30 = 0.30;
 
         let rebate = 0;
         if (monthlyPurchase < T1) {
             rebate = 0;
         } else if (monthlyPurchase < T2) {
-            rebate = monthlyPurchase * R15;
+            rebate = (monthlyPurchase - T1) * R15;
         } else if (monthlyPurchase < T3) {
-            rebate = T2 * R20 + (monthlyPurchase - T2) * R25;
+            rebate = (T2 - T1) * R15 + (monthlyPurchase - T2) * R25;
         } else {
-            rebate = T2 * R20 + (T3 - T2) * R25 + (monthlyPurchase - T3) * R30;
+            rebate = (T2 - T1) * R15 + (T3 - T2) * R25 + (monthlyPurchase - T3) * R30;
         }
         return Math.round(rebate * 100) / 100;
     }

@@ -108,4 +108,5 @@ __all__ = [
     "register_perm_routes",
     "register_trace_prod_routes",
     "register_ticket_routes",
+    "register_role_routes",
 ]

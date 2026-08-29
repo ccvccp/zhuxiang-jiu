@@ -378,13 +378,13 @@ const AgentUpgradeClient = (function () {
         return db;
     }
 
-    // ---------- 超额累进返利 ----------
+    // ---------- 超额累进返利(T0-T3 边际累进, 与后端 agent_service.REBATE_TIERS 对齐, 决策 D-9) ----------
     function calculateRebate(purchase) {
-        const T1 = 250000, T2 = 500000, T3 = 1000000;
+        const T1 = 200000, T2 = 500000, T3 = 1000000;
         if (purchase < T1) return 0;
-        if (purchase < T2) return Math.round(purchase * 0.15 * 100) / 100;
-        if (purchase < T3) return Math.round((T2 * 0.20 + (purchase - T2) * 0.25) * 100) / 100;
-        return Math.round((T2 * 0.20 + (T3 - T2) * 0.25 + (purchase - T3) * 0.30) * 100) / 100;
+        if (purchase < T2) return Math.round((purchase - T1) * 0.15 * 100) / 100;
+        if (purchase < T3) return Math.round(((T2 - T1) * 0.15 + (purchase - T2) * 0.25) * 100) / 100;
+        return Math.round(((T2 - T1) * 0.15 + (T3 - T2) * 0.25 + (purchase - T3) * 0.30) * 100) / 100;
     }
 
     // ---------- Mock: AI 风险评估 ----------

@@ -52,14 +52,13 @@ const PROFIT_CONFIG = {
         BELOW:     0.90,  // 月销<¥5,000
     },
 
-    // 代理商返利阶梯（超额累进，与设计文档§4.3完全对齐）
-    // ≤25万: 无返利 | 25-50万: 15%全额 | 50-100万: 前50万20%+超出25% | >100万: 前50万20%+50-100万25%+超出30%
+    // 代理商返利阶梯（T0-T3 超额累进，与后端 agent_service.REBATE_TIERS 对齐，决策 D-9 2026-08-29）
+    // <20万: 无返利 | 20-50万: 超出部分15% | 50-100万: 20-50万15%+超出25% | >100万: 20-50万15%+50-100万25%+超出30%
     AGENT_REBATE: {
-        TIER1_MAX: 250000,    // 25万门槛
+        TIER1_MAX: 200000,    // 20万门槛(后端 T0/T1 分界)
         TIER2_MAX: 500000,    // 50万
         TIER3_MAX: 1000000,   // 100万
         RATE_15: 0.15,
-        RATE_20: 0.20,
         RATE_25: 0.25,
         RATE_30: 0.30,
     },
@@ -265,14 +264,14 @@ function calculateCityStoreProfitSharing(product, quantity, discountTier = 'EXCE
     return result;
 }
 
-// ---------- 核心函数3：代理商返利计算（超额累进，与设计文档§4.3对齐）----------
+// ---------- 核心函数3：代理商返利计算（T0-T3 边际累进，与后端 agent_service 对齐，决策 D-9）----------
 /**
- * 计算代理商月度返利（超额累进制）
- * 阶梯规则：
- *   ≤¥25万: 无返利（未达门槛）
- *   ¥25-50万: 全额按15%返还
- *   ¥50-100万: 前50万按20% + 超出部分按25%
- *   >¥100万: 前50万按20% + 50-100万按25% + 超出100万按30%
+ * 计算代理商月度返利（超额累进制，类似个税：仅超出门槛部分适用对应边际税率）
+ * 阶梯规则（与后端 agent_service.REBATE_TIERS 一致）：
+ *   <¥20万: 无返利（未达门槛, T0）
+ *   ¥20-50万: 超出¥20万部分按15%（T1）
+ *   ¥50-100万: ¥20-50万部分按15% + 超出¥50万部分按25%（T2）
+ *   >¥100万: ¥20-50万部分按15% + ¥50-100万部分按25% + 超出¥100万部分按30%（T3）
  * @param {Number} monthlyPurchase - 月度进货额
  * @returns {Object} 返利结果
  */
@@ -280,7 +279,7 @@ function calculateAgentRebate(monthlyPurchase) {
     ProfitLog.clear();
     ProfitLog.input('代理商返利计算启动', {
         monthlyPurchase: monthlyPurchase,
-        note: '超额累进制，与设计文档§4.3完全对齐',
+        note: 'T0-T3超额累进(边际税率式)，与后端 agent_service.REBATE_TIERS 对齐(决策D-9)',
     });
 
     if (monthlyPurchase < 0) {
@@ -293,10 +292,10 @@ function calculateAgentRebate(monthlyPurchase) {
     let tierName = '';
     let detail = {};
 
-    // --- 超额累进计算（边界: 达到门槛即适用该档） ---
+    // --- T0-T3 边际累进计算(仅超出门槛部分适用对应边际税率) ---
     if (monthlyPurchase < R.TIER1_MAX) {
-        // <25万: 无返利
-        tierName = 'T0-未达门槛(<¥25万)';
+        // <20万: 无返利
+        tierName = 'T0-未达门槛(<¥20万)';
         rebate = 0;
         detail = { tier: 'T0', amount: 0, rate: 0 };
         ProfitLog.warn('Step1-门槛校验', {
@@ -306,41 +305,42 @@ function calculateAgentRebate(monthlyPurchase) {
         });
 
     } else if (monthlyPurchase < R.TIER2_MAX) {
-        // 25-50万: 全额15%（≥25万且<50万）
-        tierName = 'T1-基础档(¥25-50万)';
-        const rebate15 = Math.round(monthlyPurchase * R.RATE_15 * 100) / 100;
-        rebate = rebate15;
-        detail = { tier: 'T1', amount15: rebate15, rate15: R.RATE_15 };
-        ProfitLog.calc('Step1-T1基础返利(15%全额)', {
-            formula: `${monthlyPurchase} × ${R.RATE_15}`,
-            rebate15: rebate15,
+        // 20-50万: 超出¥20万部分按 15%
+        tierName = 'T1-基础档(¥20-50万)';
+        const taxable = monthlyPurchase - R.TIER1_MAX;
+        rebate = Math.round(taxable * R.RATE_15 * 100) / 100;
+        detail = { tier: 'T1', taxable15: taxable, amount15: rebate, rate15: R.RATE_15 };
+        ProfitLog.calc('Step1-T1基础返利(超出部分15%)', {
+            formula: `(${monthlyPurchase} - ${R.TIER1_MAX}) × ${R.RATE_15}`,
+            taxable: taxable,
+            rebate15: rebate,
         });
 
     } else if (monthlyPurchase < R.TIER3_MAX) {
-        // 50-100万: 前50万20% + 超出25%（≥50万且<100万）
+        // 50-100万: 20-50万部分15% + 超出50万部分25%
         tierName = 'T2-进阶档(¥50-100万)';
-        const rebate20 = Math.round(R.TIER2_MAX * R.RATE_20 * 100) / 100;
+        const rebate15 = Math.round((R.TIER2_MAX - R.TIER1_MAX) * R.RATE_15 * 100) / 100;
         const excessAmount = monthlyPurchase - R.TIER2_MAX;
         const rebate25 = Math.round(excessAmount * R.RATE_25 * 100) / 100;
-        rebate = Math.round((rebate20 + rebate25) * 100) / 100;
-        detail = { tier: 'T2', amount20: rebate20, amount25: rebate25, excess: excessAmount };
+        rebate = Math.round((rebate15 + rebate25) * 100) / 100;
+        detail = { tier: 'T2', amount15: rebate15, amount25: rebate25, excess: excessAmount };
         ProfitLog.calc('Step1-T2超额累进返利', {
-            part1: { formula: `${R.TIER2_MAX} × ${R.RATE_20}`, rebate20: rebate20 },
+            part1: { formula: `${R.TIER2_MAX - R.TIER1_MAX} × ${R.RATE_15}`, rebate15: rebate15 },
             part2: { formula: `${excessAmount} × ${R.RATE_25}`, rebate25: rebate25 },
             total: rebate,
         });
 
     } else {
-        // >100万: 前50万20% + 50-100万25% + 超出30%
+        // >100万: 20-50万部分15% + 50-100万部分25% + 超出100万部分30%
         tierName = 'T3-核心档(>¥100万)';
-        const rebate20 = Math.round(R.TIER2_MAX * R.RATE_20 * 100) / 100;
+        const rebate15 = Math.round((R.TIER2_MAX - R.TIER1_MAX) * R.RATE_15 * 100) / 100;
         const rebate25 = Math.round((R.TIER3_MAX - R.TIER2_MAX) * R.RATE_25 * 100) / 100;
         const excessAmount = monthlyPurchase - R.TIER3_MAX;
         const rebate30 = Math.round(excessAmount * R.RATE_30 * 100) / 100;
-        rebate = Math.round((rebate20 + rebate25 + rebate30) * 100) / 100;
-        detail = { tier: 'T3', amount20: rebate20, amount25: rebate25, amount30: rebate30, excess: excessAmount };
+        rebate = Math.round((rebate15 + rebate25 + rebate30) * 100) / 100;
+        detail = { tier: 'T3', amount15: rebate15, amount25: rebate25, amount30: rebate30, excess: excessAmount };
         ProfitLog.calc('Step1-T3超额累进返利', {
-            part1: { formula: `${R.TIER2_MAX} × ${R.RATE_20}`, rebate20: rebate20 },
+            part1: { formula: `${R.TIER2_MAX - R.TIER1_MAX} × ${R.RATE_15}`, rebate15: rebate15 },
             part2: { formula: `${R.TIER3_MAX - R.TIER2_MAX} × ${R.RATE_25}`, rebate25: rebate25 },
             part3: { formula: `${excessAmount} × ${R.RATE_30}`, rebate30: rebate30 },
             total: rebate,
