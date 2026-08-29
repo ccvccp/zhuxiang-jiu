@@ -18,7 +18,7 @@
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, UTC
 
 from core.helpers import ts
 from core.locks import get_lock
@@ -608,9 +608,20 @@ class WalletService:
                 "createdAt": ts(),
             })
 
+            # 4. 大额交易报送(P0-13: 单笔≥5万 或 日累计≥20万 →
+            #    联动合规模块自动报送央行/反洗钱中心, best-effort 不阻断提现)
+            regulatory_report = None
+            try:
+                regulatory_report = await self._report_large_withdraw(
+                    user_id, amount, withdraw_no)
+            except Exception as exc:
+                logger.warning(
+                    "large_withdraw_report_failed wd=%s amount=%.2f err=%s",
+                    withdraw_no, amount, exc)
+
             logger.info("wallet_withdraw user_id=%r amount=%.2f wd=%s status=%s",
                         user_id, amount, withdraw_no, status)
-            return {
+            result = {
                 "success": True,
                 "userId": user_id,
                 "withdrawNo": withdraw_no,
@@ -620,6 +631,7 @@ class WalletService:
                 "status": status,
                 "autoApproved": status == "approved",
                 "balanceAfter": balance - amount,
+                "regulatoryReport": regulatory_report,
                 "logs": [
                     {"step": "冻结", "level": "INFO",
                      "msg": f"冻结 ¥{amount:.2f}(待打款)"},
@@ -627,6 +639,67 @@ class WalletService:
                      "msg": f"提现单 {withdraw_no}, 状态: {status}"},
                 ],
             }
+            if regulatory_report:
+                result["logs"].append({
+                    "step": "大额报送", "level": "WARN",
+                    "msg": (f"已报送央行/反洗钱中心(报送单 "
+                            f"{regulatory_report.get('id', '')})")})
+            return result
+
+    async def _report_large_withdraw(self, user_id, amount: float,
+                                      withdraw_no: str) -> dict | None:
+        """大额提现报送联动(P0-13, 钱包盈利模块文档 10.7 反洗钱合规)
+
+        规则(对齐《金融机构大额交易和可疑交易报告管理办法》):
+            - 单笔 ≥ ¥50,000 → 自动报送央行
+            - 当日累计 ≥ ¥200,000 → 自动报送央行
+            - 报送失败不阻断提现主流程(调用方 best-effort 捕获)
+        """
+        # 延迟导入避免模块级循环依赖(services 包聚合导出)
+        from services.compliance_service import (
+            ComplianceService, LARGE_AMOUNT_SINGLE, LARGE_AMOUNT_DAILY,
+        )
+        from repositories.compliance_repository import REPORT_TYPE_LARGE_AMOUNT
+
+        # 日累计: 聚合当日该用户全部提现流水(含本次, 步骤 3 已落库)
+        today_prefix = datetime.now(UTC).date().isoformat()
+        daily_total = amount
+        try:
+            txs = await self.wallet_repo.list_transactions(
+                user_id, tx_type="withdraw", limit=500)
+            for tx in txs:
+                created = str(tx.get("createdAt", ""))
+                # ISO8601 UTC, 日期前缀匹配当日
+                if created.startswith(today_prefix):
+                    daily_total += float(tx.get("amount", 0))
+        except Exception as exc:
+            logger.warning("daily_withdraw_aggregation_failed err=%s", exc)
+            daily_total = amount
+
+        single_hit = amount >= LARGE_AMOUNT_SINGLE
+        daily_hit = daily_total >= LARGE_AMOUNT_DAILY
+        if not (single_hit or daily_hit):
+            return None
+
+        report_data = {
+            "bizType": "wallet_withdraw",
+            "withdrawNo": withdraw_no,
+            "userId": user_id,
+            "amount": amount,
+            "dailyTotal": round(daily_total, 2),
+            "trigger": ("single" if single_hit else "")
+                       + ("+daily" if daily_hit and single_hit else ""),
+            "legalBasis": "《金融机构大额交易和可疑交易报告管理办法》第2/3/4条",
+        }
+        report = await ComplianceService().submit_regulatory_report(
+            report_type=REPORT_TYPE_LARGE_AMOUNT,
+            report_target="中国人民银行反洗钱中心",
+            report_data=report_data,
+        )
+        logger.info("large_withdraw_reported wd=%s amount=%.2f daily=%.2f "
+                    "report=%s", withdraw_no, amount, daily_total,
+                    report.get("id"))
+        return report
 
     async def approve_withdrawal(self, withdraw_no, decision: str,
                                   auditor: str, audit_remark: str = "") -> dict:

@@ -208,6 +208,75 @@ async def run_e2e():
     check("自动通过打款", r["success"] is True and r["status"] == "paid")
 
     # ============================================================
+    # 3b. 大额提现报送(P0-13: 单笔≥5万/日累计≥20万 → 联动合规报送央行)
+    # ============================================================
+    print("\n========== 3b. 大额提现报送(P0-13) ==========")
+
+    # 3b.0 补充大额余额(4×5万)
+    for _i in range(4):
+        await svc.deposit(user_id, 50000.0, "bank")
+
+    # 3b.1 小额提现(1000 < 5万)不触发报送
+    print("[Test 3b.1] 小额提现不触发报送")
+    r = await svc.withdraw(user_id, 1000.0, "bank", "6222000112345678")
+    check("小额提现成功", r["success"] is True)
+    check("小额提现无报送", r.get("regulatoryReport") is None,
+          f"unexpected={r.get('regulatoryReport')}")
+    await svc.mark_withdrawal_paid(r["withdrawNo"])
+
+    # 3b.2 单笔大额提现(6万 ≥ 5万)触发报送
+    print("[Test 3b.2] 单笔大额提现(6万)触发报送")
+    r = await svc.withdraw(user_id, 60000.0, "bank", "6222000112345678")
+    check("大额提现成功", r["success"] is True)
+    report = r.get("regulatoryReport")
+    check("触发大额报送", report is not None, "regulatoryReport 为空")
+    if report:
+        check("报送类型 large_amount",
+              report.get("reportType") == "large_amount",
+              f"actual={report.get('reportType')}")
+        check("报送对象央行",
+              "反洗钱" in report.get("reportTarget", ""),
+              f"actual={report.get('reportTarget')}")
+        check("报送状态 submitted",
+              report.get("reportStatus") == "submitted",
+              f"actual={report.get('reportStatus')}")
+        check("报送存证哈希", bool(report.get("evidenceHash")))
+        check("报送单号存在", bool(report.get("id")))
+    check("报送日志追加",
+          any(log["step"] == "大额报送" for log in r.get("logs", [])),
+          "logs 中无大额报送步骤")
+    # 大额提现>5000 需人工审核后打款
+    await svc.approve_withdrawal(r["withdrawNo"], "approved", "admin", "大额已报送")
+    await svc.mark_withdrawal_paid(r["withdrawNo"])
+
+    # 3b.3 超大额提现(21万, 单笔+日累计双触发)
+    print("[Test 3b.3] 超大额提现(21万, single+daily)")
+    for _i in range(2):
+        await svc.deposit(user_id, 50000.0, "bank")
+    r = await svc.withdraw(user_id, 210000.0, "bank", "6222000112345678")
+    report = r.get("regulatoryReport")
+    check("超大额提现成功", r["success"] is True)
+    check("超大额触发报送", report is not None)
+    # 报送落库记录含日累计聚合数据(reportData.dailyTotal ≥ 20万)
+    reports_store = _mock_store.get("compliance_regulatory_reports", {})
+    big_report = next((rec for rec in reports_store.values()
+                       if (rec.get("reportData") or {}).get("withdrawNo")
+                       == r["withdrawNo"]), None)
+    check("报送记录落库", big_report is not None, "store 中未找到报送记录")
+    check("日累计聚合≥20万",
+          big_report is not None
+          and (big_report.get("reportData") or {}).get("dailyTotal", 0)
+          >= 200000,
+          f"dailyTotal={(big_report.get('reportData') or {}).get('dailyTotal') if big_report else None}")
+    check("法律依据留痕",
+          big_report is not None
+          and "报告管理办法" in str(
+              (big_report.get("reportData") or {}).get("legalBasis", "")),
+          "reportData.legalBasis 缺失")
+    await svc.approve_withdrawal(r["withdrawNo"], "approved", "admin", "超大额已报送")
+    await svc.mark_withdrawal_paid(r["withdrawNo"])
+
+    # ============================================================
     # 4. 消费退款(3 接口)
     # ============================================================
     print("\n========== 4. 消费退款(3 接口) ==========")
