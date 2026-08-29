@@ -64,9 +64,15 @@ CHECKS_FAIL=0
 # awk 单次遍历: 状态机跳过字符串/注释/正则字面量, 计数 3 类括号
 # -v sq="'": 传入单引号字符, 避免 awk 脚本内引号转义问题
 # 增强版: 识别正则字面量 /\(/ /\{n\}/ 等, 避免假阳性
+# v2 修复(2026-08-29, 教训见更新日志):
+#   1. 模板字符串支持 ${} 插值与嵌套反引号(in_tpl/interp/tpl_stack 栈),
+#      修复"内层模板反引号被误判为外层结束→状态错乱→HTML闭合标签</a>的/
+#      被误判为正则字面量"的级联误报(js/main.js 曾报 400 vs 399 假阳性)
+#   2. in_re/in_class 行尾强制复位(JS 正则字面量不能跨行),
+#      防止误入正则态后吞掉后续行的真实括号
 run_bracket_check() {
     awk -v sq="'" '
-    BEGIN { in_str=0; in_block=0; in_re=0; in_class=0; str_ch=""; prev=""; po=pc=bo=bc=so=sc=0 }
+    BEGIN { in_str=0; in_block=0; in_re=0; in_class=0; str_ch=""; prev=""; po=pc=bo=bc=so=sc=0; in_tpl=0; interp=0; tpl_stack="" }
     {
         line = $0
         i = 1
@@ -95,6 +101,24 @@ run_bracket_check() {
                 if (c == str_ch) { in_str=0; prev=str_ch }
                 i++; continue
             }
+            if (in_tpl) {
+                if (c == "\\") { i+=2; continue }
+                if (c == "`") {
+                    in_tpl=0
+                    if (tpl_stack != "") {
+                        interp = substr(tpl_stack, length(tpl_stack), 1) + 0
+                        tpl_stack = substr(tpl_stack, 1, length(tpl_stack)-1)
+                    }
+                    prev="`"; i++; continue
+                }
+                if (c == "$" && nc == "{") {
+                    bo++
+                    interp=1
+                    in_tpl=0
+                    prev="{"; i+=2; continue
+                }
+                i++; continue
+            }
             if (c == "/" && nc == "/") { break }
             if (c == "/" && nc == "*") { in_block=1; i+=2; continue }
             if (c == "/") {
@@ -102,18 +126,35 @@ run_bracket_check() {
                 if (is_re) { in_re=1; prev="/"; i++; continue }
                 prev="/"; i++; continue
             }
-            if (c == sq || c == "\"" || c == "`") { in_str=1; str_ch=c; i++; continue }
+            if (c == sq || c == "\"") { in_str=1; str_ch=c; i++; continue }
+            if (c == "`") {
+                if (interp > 0) { tpl_stack = tpl_stack interp }
+                in_tpl=1
+                prev="`"; i++; continue
+            }
             if (c == "(") { po++; prev=c }
             else if (c == ")") { pc++; prev=c }
-            else if (c == "{") { bo++; prev=c }
-            else if (c == "}") { bc++; prev=c }
+            else if (c == "{") {
+                bo++
+                if (interp > 0) { interp++ }
+                prev=c
+            }
+            else if (c == "}") {
+                bc++
+                if (interp > 0) {
+                    interp--
+                    if (interp == 0) { in_tpl=1 }
+                }
+                prev=c
+            }
             else if (c == "[") { so++; prev=c }
             else if (c == "]") { sc++; prev=c }
             else if (c == " " || c == "\t" || c == "\r" || c == "\n") { }
             else { prev=c }
             i++
         }
-        if (in_str && str_ch != "`") in_str=0
+        if (in_str) in_str=0
+        if (in_re) { in_re=0; in_class=0 }
     }
     END { printf "%d %d %d %d %d %d\n", po, pc, bo, bc, so, sc }
     ' "$1" 2>/dev/null
