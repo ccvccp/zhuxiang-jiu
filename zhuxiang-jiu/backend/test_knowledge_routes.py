@@ -214,6 +214,45 @@ async def main():
         record("缺口-resolve缺entryId拒绝", True)
 
     # ============================================================
+    # 3.5 品牌表述禁忌(D-17) + 品牌基准知识种子
+    # ============================================================
+    try:
+        await svc.create_entry(
+            question="竹香酒的工艺特点",
+            answer="竹香酒用竹叶浸泡基酒制成, 工艺简单, 口感清甜。")
+        record("品牌-断言式浸泡表述拒绝", False, "未抛出异常")
+    except ValueError as e:
+        record("品牌-断言式浸泡表述拒绝", "品牌表述禁忌" in str(e))
+
+    clarified = await svc.create_entry(
+        question="竹香酒属于配制酒吗",
+        answer="不属于。本网产品为竹笋、竹茎、竹叶与徂徕山富硒山泉水经"
+               "专有菌群古法酿制的发酵型酒, 并非浸泡或配制酒。")
+    record("品牌-澄清性表述放行(含否定词)",
+           clarified["status"] == ENTRY_STATUS_PENDING)
+
+    third_party = await svc.create_entry(
+        question="民间泡制蛇胆酒有什么风险",
+        answer="动物药酒泡制缺乏安全标准, 不建议自行尝试。")
+    record("品牌-第三方泡制知识不误伤", third_party["id"] > 0)
+
+    seed = await svc.seed_brand_knowledge()
+    record("种子-品牌基准知识入库(3条published)",
+           seed["seeded"] == 3 and seed["skipped"] == 0,
+           f"实际{seed}")
+    seed2 = await svc.seed_brand_knowledge()
+    record("种子-幂等(重复执行跳过)",
+           seed2["seeded"] == 0 and seed2["skipped"] == 3,
+           f"实际{seed2}")
+    hits = await svc.search("竹香酒怎么酿造的")
+    record("种子-酿造工艺可检索(专有菌群)",
+           len(hits) >= 1 and "专有菌群" in hits[0]["answer"],
+           f"实际{hits[:1]}")
+    hits2 = await svc.search("竹香酒是竹叶浸泡的吗")
+    record("种子-禁忌问题命中澄清条目",
+           len(hits2) >= 1 and "不是" in hits2[0]["answer"])
+
+    # ============================================================
     # 4. 旧 FAQ 迁移 + chat 双轨检索
     # ============================================================
     reset_store()

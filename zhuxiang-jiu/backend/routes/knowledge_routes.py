@@ -1,12 +1,12 @@
-"""AI智能知识库训练模块路由(P0: 知识底座, 13 端点)
+"""AI智能知识库训练模块路由(P0: 知识底座, 14 端点)
 
 鉴权:
-    - 管理端(12): X-Role: admin 头(条目治理/缺口处置/迁移/统计)
+    - 管理端(13): X-Role: admin 头(条目治理/缺口处置/迁移/种子/统计)
     - 公开(1): 检索测试(供联调与消费方验证)
 
 异常映射(遵循项目约定):
     - KeyError → 404(条目/缺口不存在)
-    - ValueError → 409(状态非法/违禁词/重复知识等)
+    - ValueError → 409(状态非法/违禁词/品牌表述禁忌/重复知识等)
     - 权限校验 → 403(无权操作)
 
 端点分布:
@@ -14,6 +14,7 @@
     - 治理(3):   审核 / 发布 / 退役
     - 缺口(2):   队列查询 / 处置
     - 迁移(1):   旧 chat FAQ 一次性迁移(幂等)
+    - 种子(1):   品牌基准知识种子(D-17, 幂等)
     - 统计(1):   治理看板
     - 检索(1):   统一检索测试(公开)
 """
@@ -296,6 +297,23 @@ async def migrate_chat_faq(
     try:
         return {"code": 0, "msg": "ok",
                 "data": await _service.migrate_chat_faq()}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/seed-brand", tags=["AI智能知识库训练模块"])
+async def seed_brand_knowledge(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """品牌基准知识种子(D-17, 幂等): 产品正确表述直接 published 入库
+
+    本网产品事实: 竹笋/竹茎/竹叶+徂徕山富硒山泉水+专有菌群古法酿制,
+    非浸泡/配制酒; 品牌禁忌表述由治理流水线拦截。
+    """
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.seed_brand_knowledge()}
     except Exception as exc:
         _handle(exc)
 
