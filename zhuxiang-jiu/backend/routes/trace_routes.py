@@ -1,16 +1,16 @@
-"""双码追溯管理模块路由(13 端点)
+"""双码追溯管理模块路由(14 端点)
 
 鉴权:
-    - 用户端: X-Member-Id 头(扫码激活/转让/查询)
+    - 用户端: X-Member-Id 头(扫码激活/转让/查询/开箱)
     - 管理端: X-Role: admin 头(生成箱码/生命码/绑定/统计)
 
 端点分布:
-    - 箱码(3):     generate-box / bind-box / query-box
+    - 箱码(4):     generate-box / bind-box / open-box / query-box
     - 生命码(3):    generate-life / bind-life / query-life
     - 扫码(3):     activate / scan-trace / trace-chain
     - 防窜(1):     anti-channel
+    - 转让(1):     transfer
     - 记录(1):     scan-logs
-    - 管理(1):     transition-status(预留)
     - 统计(1):     stats
 """
 
@@ -73,6 +73,15 @@ class BindBoxRequest(PydBaseModel):
     boxId: int = Field(..., description="箱码ID")
     lifeCodeIds: list[int] = Field(..., min_items=1, description="生命码ID数组")
     agentId: int | None = Field(None, description="代理商ID")
+
+
+class OpenBoxRequest(PydBaseModel):
+    boxCode: str = Field(..., description="箱顶码(TBC), 扫码开箱触发失效")
+    operatorId: int | None = Field(None, description="操作人ID(代理商/店员)")
+    longitude: float | None = Field(None, description="开箱经度")
+    latitude: float | None = Field(None, description="开箱纬度")
+    province: str | None = Field(None, description="开箱省")
+    city: str | None = Field(None, description="开箱市")
 
 
 class GenerateLifeRequest(PydBaseModel):
@@ -177,9 +186,35 @@ async def bind_box_code(
         _handle(e)
 
 
+@router.post("/api/trace/box/open", tags=["双码追溯模块"])
+async def open_box_code(
+    data: OpenBoxRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """扫描箱顶码开箱(开箱即失效·不可逆)
+
+    规则: 仅TBC箱顶码触发开箱; 仅已绑定箱码可开箱;
+    开箱后不参与3年增值回收; 箱底码永久有效;
+    箱内生命码可逐瓶激活(不受影响)。
+    """
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.open_box_code(
+            box_code=data.boxCode,
+            operator_id=data.operatorId,
+            longitude=data.longitude,
+            latitude=data.latitude,
+            province=data.province,
+            city=data.city,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/trace/box/{box_id}", tags=["双码追溯模块"])
 async def get_box_code(box_id: int):
-    """查询箱码"""
+    """查询箱码(含回收资格判定)"""
     try:
         result = await _service.get_box_code(box_id)
         return {"success": True, "data": result}

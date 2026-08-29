@@ -47,6 +47,7 @@ SCAN_TYPE_ACTIVATE = "activate"       # 激活
 SCAN_TYPE_VERIFY = "verify"           # 验证
 SCAN_TYPE_TRANSFER = "transfer"       # 转让
 SCAN_TYPE_QUERY = "query"            # 查询
+SCAN_TYPE_OPEN = "open"              # 开箱(箱顶码失效事件)
 
 
 class TraceRepository:

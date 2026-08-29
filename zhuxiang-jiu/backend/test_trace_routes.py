@@ -7,8 +7,8 @@
     $env:LOCK_MODE="asyncio"; $env:STORE_MODE="asyncio"
     python test_trace_routes.py
 
-覆盖 12 个接口对应的业务方法:
-    1. 箱码(3):     generate_box_codes / bind_box_code / get_box_code
+覆盖 14 个接口对应的业务方法:
+    1. 箱码(4):     generate_box_codes / bind_box_code / open_box_code / get_box_code
     2. 生命码(3):    generate_life_codes / bind_life_to_box / get_life_code
     3. 扫码(2):     scan_trace / get_trace_chain
     4. 防窜(1):     detect_anti_channel
@@ -34,8 +34,9 @@ from repositories.trace_repository import (
     BOX_CODE_TOP, BOX_CODE_BOTTOM,
     LIFE_STATUS_PENDING, LIFE_STATUS_ACTIVE, LIFE_STATUS_TRANSFERRED,
     LIFE_STATUS_RECYCLED, LIFE_STATUS_FROZEN,
-    BOX_STATUS_PENDING, BOX_STATUS_BOUND,
+    BOX_STATUS_PENDING, BOX_STATUS_BOUND, BOX_STATUS_OPENED,
     SCAN_TYPE_ACTIVATE, SCAN_TYPE_VERIFY, SCAN_TYPE_TRANSFER, SCAN_TYPE_QUERY,
+    SCAN_TYPE_OPEN,
 )
 from repositories.store import _mock_store, reset_store as _reset_store_impl
 
@@ -197,6 +198,129 @@ class TestBoxBind:
             record("test_15_get_nonexistent_box", False, "应抛出KeyError")
         except KeyError:
             record("test_15_get_nonexistent_box", True)
+
+
+class TestBoxOpen:
+    """箱顶码开箱失效机制测试(文档3.1/3.2核心规则)"""
+
+    async def run(self, svc):
+        # 准备: 生成箱码(绑定代理商区域) + 生命码 + 绑定
+        box_result = await svc.generate_box_codes(
+            PRODUCT_ID_1, BATCH_NO_1, 1, AGENT_ID_1, AGENT_REGION_1
+        )
+        box = box_result["boxes"][0]
+        box_id = box["id"]
+        top_code = box["boxCode"]
+        bottom_code = box["boxBottomCode"]
+        life_result = await svc.generate_life_codes(PRODUCT_ID_1, BATCH_NO_1, 2)
+        life_ids = [l["id"] for l in life_result["lifeCodes"]]
+        await svc.bind_box_code(box_id, life_ids, agent_id=AGENT_ID_1)
+
+        # test: 未开箱时查询, 回收资格为 True(双码完好)
+        query = await svc.get_box_code(box_id)
+        record("test_open_01_recycle_eligible_before_open",
+               query["recycleEligible"] is True,
+               f"expected True, got {query.get('recycleEligible')}")
+
+        # test: 未绑定(pending)的箱码不可开箱
+        pending_result = await svc.generate_box_codes(PRODUCT_ID_1, BATCH_NO_2, 1)
+        pending_top = pending_result["boxes"][0]["boxCode"]
+        try:
+            await svc.open_box_code(pending_top, operator_id=AGENT_ID_1)
+            record("test_open_02_pending_box_rejected", False, "应抛出ValueError")
+        except ValueError:
+            record("test_open_02_pending_box_rejected", True)
+
+        # test: 箱底码(BBC)不触发开箱失效
+        try:
+            await svc.open_box_code(bottom_code, operator_id=AGENT_ID_1)
+            record("test_open_03_bottom_code_rejected", False, "应抛出ValueError")
+        except ValueError:
+            record("test_open_03_bottom_code_rejected", True)
+
+        # test: 正常开箱(同省同市 → 无跨区预警)
+        result = await svc.open_box_code(
+            top_code, operator_id=AGENT_ID_1,
+            longitude=117.0, latitude=36.0,
+            province=AGENT_REGION_1, city=AGENT_CITY_1,
+        )
+        record("test_open_04_open_success",
+               result["status"] == BOX_STATUS_OPENED,
+               f"expected {BOX_STATUS_OPENED}, got {result['status']}")
+
+        # test: 开箱结果双码状态(顶码失效/底码有效)
+        record("test_open_05_dual_code_status",
+               result["topCodeValid"] is False and result["bottomCodeValid"] is True,
+               f"top={result['topCodeValid']}, bottom={result['bottomCodeValid']}")
+
+        # test: 开箱后回收资格为 False(不参与3年增值回收)
+        record("test_open_06_recycle_ineligible_after_open",
+               result["recycleEligible"] is False,
+               f"expected False, got {result['recycleEligible']}")
+
+        # test: 本区域开箱无跨区预警
+        record("test_open_07_no_cross_region",
+               result["isCrossRegion"] is False and result["riskLevel"] == "low",
+               f"cross={result['isCrossRegion']}, risk={result['riskLevel']}")
+
+        # test: 开箱记录写入扫码日志(scanType=open)
+        logs = await svc.list_scan_logs(code=top_code, scan_type=SCAN_TYPE_OPEN)
+        record("test_open_08_scan_log_recorded",
+               len(logs) == 1 and logs[0].get("code") == top_code,
+               f"expected 1 open log, got {len(logs)}")
+
+        # test: 开箱后箱状态持久化为 opened
+        query = await svc.get_box_code(box_id)
+        record("test_open_09_status_persisted",
+               query["status"] == BOX_STATUS_OPENED
+               and query["recycleEligible"] is False,
+               f"status={query.get('status')}, eligible={query.get('recycleEligible')}")
+
+        # test: 重复开箱被拒(不可逆)
+        try:
+            await svc.open_box_code(top_code, operator_id=AGENT_ID_1)
+            record("test_open_10_reopen_rejected", False, "应抛出ValueError")
+        except ValueError:
+            record("test_open_10_reopen_rejected", True)
+
+        # test: 开箱后箱内生命码仍可正常激活(不受箱顶码失效影响)
+        life_code = life_result["lifeCodes"][0]["lifeCode"]
+        activate = await svc.activate_life_code(life_code, USER_ID_1)
+        record("test_open_11_life_code_still_activatable",
+               activate["status"] == LIFE_STATUS_ACTIVE,
+               f"expected active, got {activate['status']}")
+
+        # test: 不存在的箱码 → KeyError
+        try:
+            await svc.open_box_code("TBC-NOT-EXIST", operator_id=AGENT_ID_1)
+            record("test_open_12_nonexistent_box", False, "应抛出KeyError")
+        except KeyError:
+            record("test_open_12_nonexistent_box", True)
+
+        # test: 跨省开箱 → 跨区预警(high)
+        cross_result = await svc.generate_box_codes(
+            PRODUCT_ID_2, BATCH_NO_2, 1, AGENT_ID_1, AGENT_REGION_1
+        )
+        cross_box = cross_result["boxes"][0]
+        cross_lifes = await svc.generate_life_codes(PRODUCT_ID_2, BATCH_NO_2, 1)
+        await svc.bind_box_code(
+            cross_box["id"], [l["id"] for l in cross_lifes["lifeCodes"]],
+            agent_id=AGENT_ID_1)
+        cross_open = await svc.open_box_code(
+            cross_box["boxCode"], operator_id=AGENT_ID_1,
+            province="广东省", city="深圳市",
+        )
+        record("test_open_13_cross_province_warning",
+               cross_open["isCrossRegion"] is True
+               and cross_open["riskLevel"] == "high",
+               f"cross={cross_open['isCrossRegion']}, risk={cross_open['riskLevel']}")
+
+        # test: 开箱事件计入统计(boxStatusCount.opened)
+        stats = await svc.get_stats(batch_no=BATCH_NO_1)
+        opened_count = stats["boxStatusCount"].get(BOX_STATUS_OPENED, 0)
+        record("test_open_14_stats_opened_count",
+               opened_count == 1,
+               f"expected opened=1, got {opened_count}")
 
 
 class TestLifeGenerate:
@@ -654,6 +778,7 @@ async def main():
     test_classes = [
         TestBoxGenerate,
         TestBoxBind,
+        TestBoxOpen,
         TestLifeGenerate,
         TestLifeBind,
         TestActivate,

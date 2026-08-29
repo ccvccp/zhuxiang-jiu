@@ -31,7 +31,10 @@ from repositories.trace_repository import (
     LIFE_STATUS_PENDING, LIFE_STATUS_ACTIVE, LIFE_STATUS_TRANSFERRED,
     LIFE_STATUS_RECYCLED, LIFE_STATUS_FROZEN,
     # 箱码状态
-    BOX_STATUS_PENDING, BOX_STATUS_BOUND, SCAN_TYPE_ACTIVATE, SCAN_TYPE_TRANSFER, SCAN_TYPE_QUERY,
+    BOX_STATUS_PENDING, BOX_STATUS_BOUND, BOX_STATUS_OPENED,
+    BOX_STATUS_RECYCLED,
+    # 扫码类型
+    SCAN_TYPE_ACTIVATE, SCAN_TYPE_TRANSFER, SCAN_TYPE_QUERY, SCAN_TYPE_OPEN,
 )
 
 
@@ -152,11 +155,13 @@ class TraceService:
             return box
 
     async def get_box_code(self, box_id: int) -> dict:
-        """查询箱码"""
+        """查询箱码(含回收资格判定: 双码完好为回收必要条件)"""
         box = await self.repo.get_box_code(box_id)
         if box is None:
             raise KeyError(f"箱码不存在(boxId={box_id})")
-        return box
+        result = dict(box)
+        result["recycleEligible"] = self._recycle_eligible(box)
+        return result
 
     async def get_box_by_code(self, box_code: str) -> dict:
         """按箱码字符串查询"""
@@ -169,6 +174,121 @@ class TraceService:
                               limit: int = 50) -> list[dict]:
         """查询箱码列表"""
         return await self.repo.list_box_codes(batch_no, status, limit)
+
+    async def open_box_code(self, box_code: str, operator_id: int = None,
+                             longitude: float = None, latitude: float = None,
+                             province: str = None, city: str = None) -> dict:
+        """扫描箱顶码开箱(开箱即失效, 不可逆)
+
+        核心规则(箱码设计文档 3.1/3.2):
+            - 仅箱顶码(TBC)触发开箱失效, 箱底码(BBC)开箱不失效
+            - 仅已绑定(bound)的箱码可开箱
+            - 开箱后箱状态: 已开箱(opened), 不可恢复(不可逆)
+            - 记录开箱位置, 与代理区域比对(跨区预警)
+            - 开箱后箱体不参与3年增值回收(双码完好为回收必要条件)
+            - 箱内瓶级生命码可逐瓶激活(不受箱顶码失效影响)
+
+        Returns:
+            开箱结果(含双码状态/回收资格/跨区标记/提示)
+
+        Raises:
+            KeyError: 箱码不存在
+            ValueError: 箱底码不可开箱 / 状态非法 / 重复开箱
+        """
+        if box_code.startswith(BOX_BOTTOM_PREFIX):
+            raise ValueError(
+                "箱底码(BBC)开箱不失效, 仅箱顶码(TBC)可触发开箱失效")
+
+        lock_key = f"trace:open:{box_code}"
+        async with get_lock(lock_key):
+            box = await self.repo.get_box_by_code(box_code)
+            if box is None:
+                raise KeyError(f"箱码不存在(boxCode={box_code})")
+
+            status = box.get("status")
+            if status == BOX_STATUS_OPENED:
+                raise ValueError("箱顶码已开箱失效(不可逆, 不可重复开箱)")
+            if status == BOX_STATUS_RECYCLED:
+                raise ValueError("箱码已回收(不可开箱)")
+            if status != BOX_STATUS_BOUND:
+                raise ValueError(
+                    f"箱码状态非法(当前{status}, 须为{BOX_STATUS_BOUND}后方可开箱)")
+
+            # 开箱位置 vs 代理区域(跨区预警, 对齐防窜检测规则)
+            agent_region = box.get("agentRegion")
+            agent_province = box.get("agentProvince")
+            agent_city = box.get("agentCity")
+            is_cross = False
+            risk_level = "low"
+            warning_type = None
+            if agent_region and province and province != agent_region:
+                is_cross = True
+                risk_level = "high"
+                warning_type = ANTI_CHANNEL_CROSS_PROVINCE
+            elif agent_city and city and city != agent_city:
+                is_cross = True
+                risk_level = "medium"
+                warning_type = ANTI_CHANNEL_CROSS_CITY
+
+            now = ts()
+            await self.repo.update_box_code(box["id"], {
+                "status": BOX_STATUS_OPENED,
+                "openedAt": now,
+                "operatorId": operator_id,
+                "openProvince": province,
+                "openCity": city,
+                "openLongitude": longitude,
+                "openLatitude": latitude,
+                "isCrossRegion": is_cross,
+            })
+
+            # 开箱记录(写入扫码日志, scanType=open, 对齐 box_opened_logs 字段)
+            scan_id = await self.repo.add_scan_log({
+                "code": box_code,
+                "codeType": CODE_TYPE_BOX,
+                "userId": operator_id,
+                "scanType": SCAN_TYPE_OPEN,
+                "longitude": longitude,
+                "latitude": latitude,
+                "province": province,
+                "city": city,
+                "isCrossRegion": is_cross,
+                "riskLevel": risk_level,
+                "warningType": warning_type,
+                "blockHash": bc_hash(),
+                "createdAt": now,
+            })
+
+            return {
+                "boxId": box["id"],
+                "boxCode": box_code,                        # 箱顶码: 已失效
+                "boxBottomCode": box.get("boxBottomCode"),  # 箱底码: 永久有效
+                "status": BOX_STATUS_OPENED,
+                "topCodeValid": False,      # 箱顶码失效(不可逆)
+                "bottomCodeValid": True,    # 箱底码永久有效(至回收终止)
+                "recycleEligible": False,   # 开箱后不参与3年增值回收
+                "openedAt": now,
+                "operatorId": operator_id,
+                "openProvince": province,
+                "openCity": city,
+                "isCrossRegion": is_cross,
+                "riskLevel": risk_level,
+                "warningType": warning_type,
+                "scanId": scan_id,
+                "tips": [
+                    "箱顶码已失效, 箱体不参与3年增值回收",
+                    "箱底码仍有效, 继续用于库存管理和追溯",
+                    "箱内瓶级生命码可逐瓶激活(不受箱顶码失效影响)",
+                ],
+            }
+
+    @staticmethod
+    def _recycle_eligible(box: dict) -> bool:
+        """双码完好为老酒回收必要条件(文档 3.3)
+
+        箱顶码未开箱 + 箱体未回收 → 双码完好, 具备回收资格。
+        """
+        return box.get("status") not in (BOX_STATUS_OPENED, BOX_STATUS_RECYCLED)
 
     # ============================================================
     # 2. 生命码生成/绑定
