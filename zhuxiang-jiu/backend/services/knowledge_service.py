@@ -28,7 +28,7 @@ from datetime import datetime
 
 from core.locks import get_lock
 from repositories.knowledge_repository import (
-    KnowledgeRepository,
+    KnowledgeRepository, SEARCH_SCAN_LIMIT,
     ENTRY_STATUS_PENDING, ENTRY_STATUS_APPROVED,
     ENTRY_STATUS_PUBLISHED, ENTRY_STATUS_REJECTED, ENTRY_STATUS_RETIRED,
     EDITABLE_STATUSES,
@@ -1028,7 +1028,239 @@ class KnowledgeService:
         return await self.crawl_ingest(source_id, title, content)
 
     # ============================================================
-    # 7. 统计
+    # 7. P2 智能进化: 质量淘汰 / 缺口摘要 / 渐进信任 / 分发建议
+    # ============================================================
+
+    # ---------- 7.1 质量分与淘汰 ----------
+
+    def compute_quality_score(self, entry: dict) -> float:
+        """知识质量分(0-100): 命中率×40% + 新鲜度×30% + 来源可信度×30%
+
+        - 命中率: hitCount/(hitCount+missCount), 零调用给 50(中性)
+        - 新鲜度: 90 天线性衰减(publishedAt 起算)
+        - 来源可信度: migration/brand 种子 90 > manual 75 >
+          chat_teaching 65 > document/crawl 55 > media 50
+        """
+        hits = int(entry.get("hitCount", 0))
+        total = hits + int(entry.get("missCount", 0))
+        hit_rate = (hits / total) if total else 0.5
+        published = entry.get("publishedAt") or entry.get("updatedAt") or ""
+        try:
+            age_days = max(0.0, (datetime.utcnow()
+                                 - datetime.fromisoformat(published)).days)
+        except (ValueError, TypeError):
+            age_days = 45.0
+        freshness = max(0.0, 1 - age_days / 90)
+        source_trust = {"migration": 0.9, "manual": 0.75,
+                        "chat_teaching": 0.65, "document": 0.55,
+                        "crawl": 0.55, "media": 0.5}.get(
+            entry.get("source"), 0.5)
+        return round((hit_rate * 0.4 + freshness * 0.3
+                      + source_trust * 0.3) * 100, 1)
+
+    async def quality_sweep(self) -> dict:
+        """质量淘汰扫描: 重算全量质量分, 低分 published 条目降级 retired
+
+        规则(P2 设计):
+            - qualityScore < 30 且 发布超 60 天 → 降级退役(知识过时)
+            - 其余仅刷新分数(报表可见, 不动状态)
+        全局限跑锁防多实例重复。
+        """
+        async with get_lock("knowledge:quality:sweep"):
+            entries = await self.repo.list_entries(
+                status=ENTRY_STATUS_PUBLISHED, limit=SEARCH_SCAN_LIMIT)
+            retired, refreshed = [], 0
+            for e in entries:
+                score = self.compute_quality_score(e)
+                e["qualityScore"] = score
+                refreshed += 1
+                published = e.get("publishedAt") or ""
+                try:
+                    age_days = (datetime.utcnow()
+                                - datetime.fromisoformat(published)).days
+                except (ValueError, TypeError):
+                    age_days = 0
+                if score < 30 and age_days > 60:
+                    await self.repo.transition_status(
+                        e["id"], ENTRY_STATUS_PUBLISHED,
+                        ENTRY_STATUS_RETIRED)
+                    e["status"] = ENTRY_STATUS_RETIRED
+                    retired.append(e["id"])
+                await self.repo.save_entry(e)
+            result = {"refreshed": refreshed, "retired": retired,
+                      "retiredCount": len(retired),
+                      "sweptAt": datetime.utcnow().isoformat()}
+            logger.info("知识质量淘汰扫描: %s", result)
+            return result
+
+    async def quality_report(self) -> dict:
+        """质量报表: 高价值/低分/待关注三档清单"""
+        entries = await self.repo.list_entries(
+            status=ENTRY_STATUS_PUBLISHED, limit=SEARCH_SCAN_LIMIT)
+        scored = []
+        for e in entries:
+            e["qualityScore"] = self.compute_quality_score(e)
+            scored.append(_public(e))
+        scored.sort(key=lambda x: x["qualityScore"], reverse=True)
+        high = [e for e in scored if e["qualityScore"] >= 70]
+        low = [e for e in scored if e["qualityScore"] < 40]
+        return {
+            "total": len(scored),
+            "avgScore": round(sum(e["qualityScore"] for e in scored)
+                              / len(scored), 1) if scored else 0,
+            "highValue": [{"id": e["id"], "question": e["question"],
+                           "qualityScore": e["qualityScore"],
+                           "hitCount": e["hitCount"]}
+                          for e in high[:20]],
+            "lowScore": [{"id": e["id"], "question": e["question"],
+                          "qualityScore": e["qualityScore"],
+                          "publishedAt": e["publishedAt"]}
+                         for e in low[:20]],
+            "byCategory": self._count_by(scored, "category"),
+        }
+
+    @staticmethod
+    def _count_by(items: list[dict], key: str) -> dict:
+        out: dict[str, int] = {}
+        for i in items:
+            k = str(i.get(key) or "-")
+            out[k] = out.get(k, 0) + 1
+        return out
+
+    # ---------- 7.2 缺口摘要 ----------
+
+    async def gaps_summary(self) -> dict:
+        """缺口摘要: 高频缺口聚合 + 主题域归属, 驱动优先补知识"""
+        gaps = await self.repo.list_gaps(status=GAP_STATUS_OPEN,
+                                         limit=200)
+        enriched = []
+        for g in gaps:
+            _, domains = topic_filter(g.get("question") or "")
+            enriched.append({
+                "id": g["id"], "question": g["question"],
+                "askCount": g["askCount"],
+                "lastAskedAt": g["lastAskedAt"],
+                "hitDomains": domains})
+        enriched.sort(key=lambda x: -x["askCount"])
+        urgent = [g for g in enriched if g["askCount"] >= 3]
+        return {
+            "openCount": len(enriched),
+            "urgentCount": len(urgent),
+            "topGaps": enriched[:20],
+            "byDomain": self._count_by(
+                [{"d": d} for g in enriched for d in g["hitDomains"]], "d"),
+        }
+
+    # ---------- 7.3 渐进信任自动过审(D-16) ----------
+
+    AUTO_APPROVE_MIN_QUALITY = 65      # 来源平均质量分阈值(零调用新条目
+    AUTO_APPROVE_MIN_STREAK = 5         # 上限=0.5×40+30+trust×30, 教学来源 68.5)
+
+    async def auto_approve_run(self) -> dict:
+        """渐进信任自动过审(D-16): 高可信来源的 pending 条目自动审核通过
+
+        条件(全部满足):
+            - 来源(migration 除外)近 5 条已全部人工审核通过
+            - 该来源历史条目平均质量分 ≥70
+            - 条目自身合规分 ≥80(高于人工线 70)
+        满足即自动 approve(仍需人工发布, 保留发布权)。
+        """
+        async with get_lock("knowledge:auto-approve:run"):
+            # 1. 统计各来源的审核通过率与质量分
+            all_entries = await self.repo.list_entries(limit=SEARCH_SCAN_LIMIT)
+            source_stats: dict[str, dict] = {}
+            for e in all_entries:
+                src = e.get("source")
+                if not src or src == SOURCE_MIGRATION:
+                    continue
+                st = source_stats.setdefault(
+                    src, {"reviewed": 0, "approved": 0,
+                          "qualitySum": 0.0, "qualityN": 0,
+                          "recentApprovals": []})
+                if e["status"] in (ENTRY_STATUS_APPROVED,
+                                   ENTRY_STATUS_PUBLISHED,
+                                   ENTRY_STATUS_RETIRED):
+                    st["reviewed"] += 1
+                    if e["status"] != ENTRY_STATUS_RETIRED \
+                            or e.get("reviewedBy"):
+                        st["approved"] += 1
+                        st["recentApprovals"].append(
+                            e.get("updatedAt") or "")
+                if e["status"] == ENTRY_STATUS_PUBLISHED:
+                    # 重算质量分: 既有条目 qualityScore 可能仍是
+                    # 创建时的初始值(未经过 sweep), 现算保证口径一致
+                    st["qualitySum"] += self.compute_quality_score(e)
+                    st["qualityN"] += 1
+            # 2. 逐 pending 判定
+            auto_approved = []
+            for e in all_entries:
+                if e["status"] != ENTRY_STATUS_PENDING:
+                    continue
+                src = e.get("source")
+                st = source_stats.get(src) if src else None
+                if not st or st["reviewed"] < self.AUTO_APPROVE_MIN_STREAK:
+                    continue
+                avg_q = (st["qualitySum"] / st["qualityN"]
+                         if st["qualityN"] else 0)
+                if avg_q < self.AUTO_APPROVE_MIN_QUALITY:
+                    continue
+                if int(e.get("complianceScore", 0)) < 80:
+                    continue
+                e["status"] = ENTRY_STATUS_APPROVED
+                e["reviewedBy"] = 0  # 0=自动过审标识
+                e["updatedAt"] = datetime.utcnow().isoformat()
+                await self.repo.transition_status(
+                    e["id"], ENTRY_STATUS_PENDING,
+                    ENTRY_STATUS_APPROVED)
+                await self.repo.save_entry(e)
+                auto_approved.append(
+                    {"id": e["id"], "question": e["question"][:20],
+                     "source": src})
+            result = {"autoApproved": auto_approved,
+                      "autoApprovedCount": len(auto_approved),
+                      "ranAt": datetime.utcnow().isoformat()}
+            logger.info("渐进信任自动过审: %s", result)
+            return result
+
+    # ---------- 7.4 跨模块分发建议 ----------
+
+    async def distribution_suggest(self, consumer: str,
+                                    limit: int = 10) -> list[dict]:
+        """跨模块知识分发建议: 供 product/attract/chat 等消费方拉取
+
+        筛选: 高质量分(≥60) + 高命中 published 条目, 按
+        消费方主题偏好加权(product→产品类, attract→品牌文化类)。
+        """
+        consumer_topics = {
+            "product": ("product", "faq"),
+            "attract": ("brand", "bamboo_culture", "wine"),
+            "chat": ("faq", "order", "policy", "compliance"),
+        }.get(consumer)
+        if consumer_topics is None:
+            raise ValueError(
+                f"非法消费方({consumer}), "
+                f"合法: {list(('product', 'attract', 'chat'))}")
+        entries = await self.repo.list_entries(
+            status=ENTRY_STATUS_PUBLISHED, limit=SEARCH_SCAN_LIMIT)
+        scored = []
+        for e in entries:
+            score = self.compute_quality_score(e)
+            if score < 60:
+                continue
+            if consumer_topics and e.get("category") \
+                    and e["category"] not in consumer_topics:
+                score *= 0.5   # 域外降权不排除
+            scored.append({
+                "entryId": e["id"], "question": e["question"],
+                "answer": e["answer"], "category": e["category"],
+                "qualityScore": score,
+                "hitCount": int(e.get("hitCount", 0))})
+        scored.sort(key=lambda x: (-x["qualityScore"],
+                                   -x["hitCount"]))
+        return scored[:limit]
+
+    # ============================================================
+    # 8. 统计
     # ============================================================
 
     async def stats(self) -> dict:

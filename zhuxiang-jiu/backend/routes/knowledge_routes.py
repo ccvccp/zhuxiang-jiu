@@ -1,14 +1,14 @@
-"""AI智能知识库训练模块路由(P0+P1: 知识底座+三源接入, 26 端点)
+"""AI智能知识库训练模块路由(P0+P1+P2: 知识底座+三源接入+智能进化, 32 端点)
 
 鉴权:
-    - 管理端(25): X-Role: admin 头(条目治理/缺口处置/迁移/种子/统计/
-      教学会话/文档/多模态/抓取源管理)
+    - 管理端(31): X-Role: admin 头(条目治理/缺口处置/迁移/种子/统计/
+      教学会话/文档/多模态/抓取源管理/质量进化)
     - 公开(1): 检索测试(供联调与消费方验证)
 
 异常映射(遵循项目约定):
     - KeyError → 404(条目/缺口/会话/文档/种子源不存在)
     - ValueError → 409(状态非法/违禁词/品牌表述禁忌/重复知识/
-      主题域外/疗效断言等)
+      主题域外/疗效断言/非法消费方等)
     - 权限校验 → 403(无权操作)
 
 端点分布:
@@ -24,6 +24,10 @@
     - 文档(2):   上传解析分块 / 文档列表(P1)
     - 多模态(2): 图片描述入库 / 视频时间轴入库(P1, D-14)
     - 抓取(4):   种子源添加 / 列表 / 内容接入 / 执行抓取(P1, D-15)
+    - 质量(2):   淘汰扫描 / 质量报表(P2)
+    - 缺口摘要(1): 高频缺口聚合(P2)
+    - 自动过审(1): 渐进信任执行(P2, D-16)
+    - 分发(1):   跨模块知识分发建议(P2)
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -614,6 +618,94 @@ async def crawl_run(
                     source_id=data.sourceId)}
     except Exception as exc:
         _handle(exc)
+
+
+# ============================================================
+# P2 智能进化: 质量(2) + 缺口摘要(1) + 自动过审(1) + 分发(1)
+# ============================================================
+
+@router.post("/api/knowledge/quality/sweep", tags=["AI智能知识库训练模块"])
+async def quality_sweep(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """质量淘汰扫描: 重算质量分, 低分+陈旧(分<30且超60天)降级退役"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.quality_sweep()}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/knowledge/quality/report", tags=["AI智能知识库训练模块"])
+async def quality_report(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """质量报表: 高价值/低分清单+均分+分类分布"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.quality_report()}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/knowledge/gaps/summary", tags=["AI智能知识库训练模块"])
+async def gaps_summary(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """缺口摘要: 高频缺口聚合+主题域归属, 驱动优先补知识"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.gaps_summary()}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/auto-approve/run", tags=["AI智能知识库训练模块"])
+async def auto_approve_run(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """渐进信任自动过审(D-16): 高可信来源 pending 条目自动 approve"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.auto_approve_run()}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/knowledge/distribution/suggest",
+            tags=["AI智能知识库训练模块"])
+async def distribution_suggest(
+    consumer: str = Query(..., description="消费方: product/attract/chat"),
+    limit: int = Query(10, ge=1, le=50),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """跨模块知识分发建议: 高质量分 published 条目按消费方偏好加权"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.distribution_suggest(
+                    consumer=consumer, limit=limit)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/knowledge/quality/status", tags=["AI智能知识库训练模块"])
+async def quality_scheduler_status(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """质量进化调度器状态(运行中/周期/开关)"""
+    _require_admin(x_role)
+    from services.knowledge_quality_scheduler import (
+        scheduler_enabled, scheduler_interval_seconds, scheduler_running)
+    return {"code": 0, "msg": "ok", "data": {
+        "enabled": scheduler_enabled(),
+        "running": scheduler_running(),
+        "intervalSeconds": scheduler_interval_seconds(),
+    }}
 
 
 def register_knowledge_routes(app) -> None:

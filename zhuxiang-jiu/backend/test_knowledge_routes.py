@@ -448,7 +448,101 @@ async def main():
                and s["rejectedTotal"] >= 2 for s in sources))
 
     # ============================================================
-    # 7. 统计
+    # 8. P2 智能进化: 质量/缺口摘要/自动过审/分发
+    # ============================================================
+    # 8.1 质量分与报表
+    report = await svc.quality_report()
+    record("质量-报表字段齐全",
+           all(k in report for k in (
+               "total", "avgScore", "highValue", "lowScore",
+               "byCategory")))
+    record("质量-品牌种子为高价值条目",
+           len(report["highValue"]) >= 1
+           and any("酿造" in h["question"] or "原料" in h["question"]
+                   for h in report["highValue"]),
+           f"实际{report['highValue'][:3]}")
+
+    # 8.2 质量淘汰(低分+陈旧→退役)
+    # 构造一条立即过时的条目: 手动改成陈旧+低质量分
+    stale = await _publish(svc, "过期活动规则说明",
+                            "2025 年春节活动满 999 减 100。")
+    entry_full = await svc.repo.get_entry(stale["id"])
+    entry_full["publishedAt"] = "2025-01-01T00:00:00"   # 8 个月前
+    entry_full["hitCount"] = 0
+    entry_full["missCount"] = 10                        # 命中率 0
+    await svc.repo.save_entry(entry_full)
+    sweep = await svc.quality_sweep()
+    record("质量-扫描刷新全量条目", sweep["refreshed"] >= 1)
+    record("质量-低分陈旧条目降级退役",
+           stale["id"] in sweep["retired"], f"实际{sweep}")
+    try:
+        await svc.get_entry(stale["id"])
+        retired_state = True
+    except KeyError:
+        retired_state = False
+    after_sweep = await svc.repo.get_entry(stale["id"])
+    record("质量-退役条目仍可查但不可检索",
+           after_sweep is not None
+           and after_sweep["status"] == "retired"
+           and len(await svc.search("春节活动满减", top_k=5,
+                                    record_hit=False)) == 0)
+
+    # 8.3 缺口摘要
+    summary = await svc.gaps_summary()
+    record("缺口摘要-字段齐全",
+           all(k in summary for k in (
+               "openCount", "urgentCount", "topGaps", "byDomain")))
+    record("缺口摘要-高频缺口排序",
+           all(summary["topGaps"][i]["askCount"]
+               >= summary["topGaps"][i + 1]["askCount"]
+               for i in range(len(summary["topGaps"]) - 1)))
+
+    # 8.4 渐进信任自动过审(D-16)
+    # 无历史来源(新 source) 不触发
+    fresh_pending = await svc.create_entry(
+        question="竹香酒适合搭配什么菜", answer="清蒸鱼/白灼虾等清淡菜式。")
+    auto1 = await svc.auto_approve_run()
+    record("自动过审-来源无信任历史不触发",
+           all(a["id"] != fresh_pending["id"]
+               for a in auto1["autoApproved"]))
+
+    # 同一来源(chat_teaching)积累 5 条已发布高质条目 → 第 6 条自动过审
+    ts_ = await svc.create_teach_session(topic="批量教学")
+    for i in range(5):
+        await svc.teach_submit(
+            ts_["id"], question=f"竹文化知识点第{i}条",
+            answer=f"竹文化内容第{i}条, 竹在文人心中象征气节。",
+            category="faq")
+    # 逐条人工审核+发布, 建立来源信任
+    taught_entries = await svc.list_entries(
+        status=ENTRY_STATUS_PENDING, limit=20)
+    for e in taught_entries:
+        if e["source"] == "chat_teaching":
+            await svc.review_entry(e["id"], approve=True, reviewer_id=1)
+            await svc.publish_entry(e["id"], publisher_id=1)
+    # 新提交一条 → 自动过审候选
+    await svc.teach_submit(
+        ts_["id"], question="竹文化知识点第六条",
+        answer="竹文化内容第六条, 竹报平安寓意吉祥。",
+        category="faq")
+    auto2 = await svc.auto_approve_run()
+    record("自动过审-高可信来源第6条自动approve",
+           any("第六条" in a["question"] for a in auto2["autoApproved"]),
+           f"实际{auto2}")
+
+    # 8.5 跨模块分发建议
+    dist = await svc.distribution_suggest(consumer="attract", limit=5)
+    record("分发-attract消费方可获取高质量建议",
+           len(dist) >= 1 and all(d["qualityScore"] > 0 for d in dist),
+           f"实际{dist[:2]}")
+    try:
+        await svc.distribution_suggest(consumer="finance")
+        record("分发-非法消费方拒绝", False, "未抛出异常")
+    except ValueError:
+        record("分发-非法消费方拒绝", True)
+
+    # ============================================================
+    # 9. 统计(最终)
     # ============================================================
     stats = await svc.stats()
     record("统计-看板字段齐全",

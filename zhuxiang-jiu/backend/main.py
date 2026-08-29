@@ -232,6 +232,10 @@ async def _on_startup():
     # 订单超时自动处理(P1-13, ORDER_TIMEOUT_AUTO=off 可关闭)
     from services.order_timeout_scheduler import start_scheduler as start_order_timeout
     start_order_timeout()
+    # 知识库质量进化调度(P2, KNOWLEDGE_QUALITY_AUTO=off 可关闭)
+    from services.knowledge_quality_scheduler import (
+        start_scheduler as start_knowledge_quality)
+    start_knowledge_quality()
 
 
 @app.on_event("shutdown")
@@ -243,6 +247,10 @@ async def _on_shutdown():
     from services.order_timeout_scheduler import stop_scheduler as stop_order_timeout
     stop_ai_learning()
     stop_order_timeout()
+    # 知识库质量进化调度
+    from services.knowledge_quality_scheduler import (
+        stop_scheduler as stop_knowledge_quality)
+    stop_knowledge_quality()
     await close_redis_client()
     logger.info("清理完成")
 
