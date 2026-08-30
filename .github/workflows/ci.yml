@@ -178,27 +178,28 @@ jobs:
         # 失败时把日志尾部写入 GITHUB_STEP_SUMMARY(run 摘要页可直接查看)
         run: |
           set -o pipefail
-          if ! docker run --rm \
+          docker run --rm \
             -v $PWD/requirements-dev.txt:/tmp/requirements-dev.txt:ro \
             -v $PWD/conftest.py:/app/conftest.py:ro \
             -v $PWD/pytest.ini:/app/pytest.ini:ro \
             -v $PWD/test_:/app/test_ \
             zhuxiang-decision-api:ci-test \
             sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && cd /app && pytest test_ -v --junitxml=/tmp/test-results-docker.xml" \
-            | tee docker-test-output.log; then
-            # 失败摘要双通道: step summary + error 注解(注解在 job 页直接可见)
-            {
-              echo "## Docker 容器测试失败摘要(日志尾部)"
-              echo '```'
-              tail -n 80 docker-test-output.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            # 无条件把日志尾部作为注解输出(注解文本在 run/job 页可见, 免日志权限)
-            tail -n 12 docker-test-output.log | while IFS= read -r line; do
-              [ -n "$line" ] && echo "::error::${line:0:240}"
-            done
-            exit 1
-          fi
+            | tee docker-test-output.log
+
+      - name: Emit failure digest (annotations + summary)
+        if: failure()
+        run: |
+          {
+            echo "## Docker 容器测试失败摘要(日志尾部)"
+            echo '```'
+            tail -n 80 docker-test-output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          tail -n 12 docker-test-output.log | while IFS= read -r line; do
+            [ -n "$line" ] && echo "::error::${line:0:240}"
+          done
+          exit 0
 
       - name: Extract test results from container
         if: always()
@@ -564,30 +565,30 @@ jobs:
 
       - name: Run Redis integration tests
         working-directory: zhuxiang-jiu/backend
-        # 失败时把失败用例与日志尾部写入 GITHUB_STEP_SUMMARY(run 摘要页可直接查看)
         run: |
           set -o pipefail
-          if ! python -m pytest test_redis_integration.py -m redis -v --tb=short 2>&1 | tee redis-integration-output.log; then
-            # 失败摘要双通道: step summary + error 注解(注解在 job 页直接可见)
-            {
-              echo "## Redis 集成测试失败摘要"
-              echo "### 失败用例"
-              echo '```'
-              grep -E "^FAILED|^ERROR" redis-integration-output.log | head -n 30
-              echo '```'
-              echo "### 日志尾部"
-              echo '```'
-              tail -n 80 redis-integration-output.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            # 失败用例 + 日志尾部作为注解输出(注解文本在 run/job 页可见, 免日志权限)
-            { grep -E "^FAILED|^ERROR" redis-integration-output.log | head -n 8
-              tail -n 8 redis-integration-output.log; } \
-              | while IFS= read -r line; do
-              [ -n "$line" ] && echo "::error::${line:0:240}"
-            done
-            exit 1
-          fi
+          python -m pytest test_redis_integration.py -m redis -v --tb=short 2>&1 | tee redis-integration-output.log
+
+      - name: Emit failure digest (annotations + summary)
+        if: failure()
+        working-directory: zhuxiang-jiu/backend
+        run: |
+          {
+            echo "## Redis 集成测试失败摘要"
+            echo "### 失败用例"
+            echo '```'
+            grep -E "^FAILED|^ERROR" redis-integration-output.log | head -n 30
+            echo '```'
+            echo "### 日志尾部"
+            echo '```'
+            tail -n 80 redis-integration-output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          { grep -E "^FAILED|^ERROR" redis-integration-output.log | head -n 8
+            tail -n 8 redis-integration-output.log; } | while IFS= read -r line; do
+            [ -n "$line" ] && echo "::error::${line:0:240}"
+          done
+          exit 0
 
       - name: Upload test output
         if: always()
