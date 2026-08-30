@@ -175,14 +175,25 @@ jobs:
         # Dockerfile 只装生产依赖(requirements.txt), 容器内无 pytest。
         # 挂载 requirements-dev.txt 与测试文件进容器临时安装后跑 pytest。
         # (镜像只 COPY 源码不含 test_*.py, 测试文件经挂载注入)
+        # 失败时把日志尾部写入 GITHUB_STEP_SUMMARY(run 摘要页可直接查看)
         run: |
-          docker run --rm \
+          set -o pipefail
+          if ! docker run --rm \
             -v $PWD/requirements-dev.txt:/tmp/requirements-dev.txt:ro \
             -v $PWD/conftest.py:/app/conftest.py:ro \
             -v $PWD/pytest.ini:/app/pytest.ini:ro \
             -v $PWD/test_:/app/test_ \
             zhuxiang-decision-api:ci-test \
-            sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && cd /app && pytest test_ -v --junitxml=/tmp/test-results-docker.xml"
+            sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && cd /app && pytest test_ -v --junitxml=/tmp/test-results-docker.xml" \
+            | tee docker-test-output.log; then
+            {
+              echo "## Docker 容器测试失败摘要(日志尾部)"
+              echo '```'
+              tail -n 80 docker-test-output.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: Extract test results from container
         if: always()
@@ -548,9 +559,23 @@ jobs:
 
       - name: Run Redis integration tests
         working-directory: zhuxiang-jiu/backend
+        # 失败时把失败用例与日志尾部写入 GITHUB_STEP_SUMMARY(run 摘要页可直接查看)
         run: |
           set -o pipefail
-          python -m pytest test_redis_integration.py -m redis -v --tb=short 2>&1 | tee redis-integration-output.log
+          if ! python -m pytest test_redis_integration.py -m redis -v --tb=short 2>&1 | tee redis-integration-output.log; then
+            {
+              echo "## Redis 集成测试失败摘要"
+              echo "### 失败用例"
+              echo '```'
+              grep -E "^FAILED|^ERROR" redis-integration-output.log | head -n 30
+              echo '```'
+              echo "### 日志尾部"
+              echo '```'
+              tail -n 80 redis-integration-output.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: Upload test output
         if: always()
