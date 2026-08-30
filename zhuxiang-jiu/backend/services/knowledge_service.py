@@ -218,9 +218,9 @@ def compliance_score(question: str, answer: str) -> int:
 
 
 def _public(entry: dict) -> dict:
-    """对外投影: 剥离内部 vector 字段"""
-    out = {k: v for k, v in entry.items() if k != "vector"}
-    return out
+    """对外投影: 剥离内部字段(vector/_indexed_tokens)"""
+    return {k: v for k, v in entry.items()
+            if k not in ("vector", "_indexed_tokens")}
 
 
 class KnowledgeService:
@@ -497,7 +497,23 @@ class KnowledgeService:
         return out
 
     # ============================================================
-    # 2.5 RAG 问答层(P3.1, D-18): 置信分级路由 + 融合生成 + 引用溯源
+    # 2.5 倒排索引运维(P3 检索升级)
+    # ============================================================
+
+    async def rebuild_search_index(self) -> dict:
+        """重建检索倒排索引(存量 Redis 数据升级后执行一次, 幂等)
+
+        内存模式 store 随进程重建天然一致; Redis 模式存量条目无
+        _indexed_tokens, 索引未就绪时检索自动回退全量扫描——
+        本方法显式重建以启用索引加速。
+        """
+        async with get_lock("knowledge:inv:rebuild"):
+            result = await self.repo.rebuild_inverted_index()
+            logger.info("检索倒排索引重建: %s", result)
+            return result
+
+    # ============================================================
+    # 2.6 RAG 问答层(P3.1, D-18): 置信分级路由 + 融合生成 + 引用溯源
     # ============================================================
 
     RAG_TOP_K = 3                    # 召回条数

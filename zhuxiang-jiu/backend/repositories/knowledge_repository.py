@@ -148,7 +148,12 @@ class KnowledgeRepository:
     # ============================================================
 
     async def save_entry(self, entry: dict) -> None:
-        """新增/覆盖保存条目(含向量, 内部使用)"""
+        """新增/覆盖保存条目(含向量, 内部使用)
+
+        同步倒排索引(token→entry_id, 仅 published 入索引),
+        _indexed_tokens 随条目持久化以支持精确移除。
+        """
+        await self._sync_inverted_index(entry)
         if is_redis_mode():
             client = await get_redis_client()
             await client.set(_k("knowledge", "entry", entry["id"]),
@@ -207,6 +212,119 @@ class KnowledgeRepository:
                               entry_id)
 
     # ============================================================
+    # 倒排索引(P3 检索升级: token → entry_id, 突破全量扫描瓶颈)
+    # ============================================================
+
+    async def _sync_inverted_index(self, entry: dict) -> None:
+        """同步单条目的倒排索引成员(published 入索引, 其余移除)
+
+        行为无损依据: 余弦>0 必有共同 token, 索引召回等价全量扫描。
+        _indexed_tokens 记录上次索引的 token 集, 支持精确增删
+        (published 条目 vector 不可变, 该机制防御手动改 vector 场景)。
+        """
+        old_tokens = set(entry.get("_indexed_tokens") or [])
+        new_tokens = (set((entry.get("vector") or {}).keys())
+                      if entry.get("status") == ENTRY_STATUS_PUBLISHED
+                      else set())
+        entry_id = entry["id"]
+        to_remove = old_tokens - new_tokens
+        to_add = new_tokens - old_tokens
+        was_indexed, now_indexed = bool(old_tokens), bool(new_tokens)
+        if is_redis_mode():
+            if to_remove or to_add:
+                client = await get_redis_client()
+                for tok in to_remove:
+                    await client.srem(_k("knowledge", "inv", tok), entry_id)
+                for tok in to_add:
+                    await client.sadd(_k("knowledge", "inv", tok), entry_id)
+            if was_indexed != now_indexed:
+                client = await get_redis_client()
+                delta = 1 if now_indexed else -1
+                await client.incrby(
+                    _k("knowledge", "inv", "meta"), delta)
+        else:
+            self._ensure_store()
+            inverted = self.store["knowledge_inverted"]
+            for tok in to_remove:
+                members = inverted.get(tok)
+                if members is not None:
+                    members.discard(entry_id)
+            for tok in to_add:
+                inverted.setdefault(tok, set()).add(entry_id)
+            if was_indexed != now_indexed:
+                self.store["_knowledge_inv_count"] += (
+                    1 if now_indexed else -1)
+        entry["_indexed_tokens"] = sorted(new_tokens)
+
+    async def _inverted_ready(self) -> bool:
+        """倒排索引是否就绪(索引条目数 == published 条目数)
+
+        存量数据未重建时返回 False, 调用方回退全量扫描(兼容旧部署)。
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            published = int(await client.scard(
+                _k("knowledge", "entry", "index", ENTRY_STATUS_PUBLISHED)))
+            if published == 0:
+                return True     # 无 published 条目, 索引天然一致
+            indexed = int(await client.get(
+                _k("knowledge", "inv", "meta")) or 0)
+            return indexed == published
+        self._ensure_store()
+        published = sum(1 for e in self.store["knowledge_entries"].values()
+                        if e.get("status") == ENTRY_STATUS_PUBLISHED)
+        return self.store["_knowledge_inv_count"] == published
+
+    async def _inverted_candidates(self, tokens) -> list[int]:
+        """倒排召回: 与 query 有共同 token 的条目 ID 并集"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids: set[int] = set()
+            for tok in tokens:
+                ids.update(int(i) for i in await client.smembers(
+                    _k("knowledge", "inv", tok)))
+            return list(ids)
+        self._ensure_store()
+        inverted = self.store["knowledge_inverted"]
+        ids = set()
+        for tok in tokens:
+            ids.update(inverted.get(tok) or ())
+        return list(ids)
+
+    async def rebuild_inverted_index(self) -> dict:
+        """重建倒排索引(存量数据迁移/索引损坏时调用, 幂等)
+
+        清空全部 token 索引后按当前 published 条目全量重建,
+        并将 _indexed_tokens 持久化到条目。
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            for key in await scan_keys(client, _k("knowledge", "inv", "*")):
+                if not key.endswith(":inv:meta"):
+                    await client.delete(key)
+            await client.set(_k("knowledge", "inv", "meta"), 0)
+            ids = await client.smembers(_k(
+                "knowledge", "entry", "index", ENTRY_STATUS_PUBLISHED))
+            entries = []
+            for eid in ids:
+                raw = await client.get(_k("knowledge", "entry", int(eid)))
+                if raw:
+                    entries.append(json.loads(raw))
+        else:
+            self._ensure_store()
+            self.store["knowledge_inverted"] = {}
+            self.store["_knowledge_inv_count"] = 0
+            entries = [e for e in
+                       self.store["knowledge_entries"].values()
+                       if e.get("status") == ENTRY_STATUS_PUBLISHED]
+        for e in entries:
+            e["_indexed_tokens"] = []   # 清空旧标记, 强制全量重建
+            await self._sync_inverted_index(e)
+            await self.save_entry(e)    # 持久化 _indexed_tokens(索引幂等)
+        result = {"rebuilt": len(entries), "rebuiltAt": _now()}
+        return result
+
+    # ============================================================
     # 版本历史
     # ============================================================
 
@@ -238,15 +356,37 @@ class KnowledgeRepository:
     async def search_published(self, query_vec: dict[str, int],
                                category: str = None,
                                top_k: int = 5) -> list[tuple[dict, float]]:
-        """扫描已发布条目, 返回 (条目, 相似度) top-k"""
-        entries = await self.list_entries(status=ENTRY_STATUS_PUBLISHED,
-                                          category=category,
-                                          limit=SEARCH_SCAN_LIMIT)
-        scored = []
-        for e in entries:
-            sim = cosine(query_vec, e.get("vector") or {})
-            if sim > 0:
-                scored.append((e, sim))
+        """检索已发布条目, 返回 (条目, 相似度) top-k
+
+        P3 检索升级: 倒排索引召回(仅加载与 query 有共同 token 的条目),
+        替代全量扫描——行为无损(余弦>0 必有共同 token), 候选集不再受
+        SEARCH_SCAN_LIMIT 截断。索引未就绪(存量数据未重建)时回退全量。
+        """
+        if not query_vec:
+            return []
+        scored: list[tuple[dict, float]] = []
+        if await self._inverted_ready():
+            # 倒排召回: 只加载候选条目
+            candidates = await self._inverted_candidates(query_vec.keys())
+            for eid in candidates:
+                entry = await self.get_entry(eid)
+                if entry is None or \
+                        entry.get("status") != ENTRY_STATUS_PUBLISHED:
+                    continue
+                if category and entry.get("category") != category:
+                    continue
+                sim = cosine(query_vec, entry.get("vector") or {})
+                if sim > 0:
+                    scored.append((entry, sim))
+        else:
+            # 回退: 全量扫描(存量 Redis 数据未执行 rebuild)
+            entries = await self.list_entries(
+                status=ENTRY_STATUS_PUBLISHED, category=category,
+                limit=SEARCH_SCAN_LIMIT)
+            for e in entries:
+                sim = cosine(query_vec, e.get("vector") or {})
+                if sim > 0:
+                    scored.append((e, sim))
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
 
@@ -558,6 +698,9 @@ class KnowledgeRepository:
             "knowledge_teach_sessions": {},
             "knowledge_documents": {},
             "knowledge_crawl_sources": {},
+            # 倒排索引(P3 检索升级): token → set(entry_id)
+            "knowledge_inverted": {},
+            "_knowledge_inv_count": 0,
             "_knowledge_seq": 0,
             "_knowledge_gap_seq": 0,
             "_knowledge_teach_seq": 0,

@@ -1,8 +1,8 @@
-"""AI智能知识库训练模块路由(P0+P1+P2+P3.1: 知识底座+三源接入+智能进化+RAG问答, 33 端点)
+"""AI智能知识库训练模块路由(P0+P1+P2+P3: 知识底座+三源接入+智能进化+RAG问答+检索索引, 34 端点)
 
 鉴权:
-    - 管理端(31): X-Role: admin 头(条目治理/缺口处置/迁移/种子/统计/
-      教学会话/文档/多模态/抓取源管理/质量进化)
+    - 管理端(32): X-Role: admin 头(条目治理/缺口处置/迁移/种子/统计/
+      教学会话/文档/多模态/抓取源管理/质量进化/索引重建)
     - 公开(2): 检索测试(供联调与消费方验证) / RAG 问答(终端用户)
 
 异常映射(遵循项目约定):
@@ -20,6 +20,7 @@
     - 统计(1):   治理看板
     - 检索(1):   统一检索测试(公开)
     - RAG问答(1): 置信分级路由问答(公开, P3.1 D-18)
+    - 索引(1):   检索倒排索引重建(P3 检索升级)
     - 教学(3):   会话创建 / 提问 / 教学提交(P1)
     - 教学列表(1): 教学会话列表(P1)
     - 文档(2):   上传解析分块 / 文档列表(P1)
@@ -434,6 +435,20 @@ async def ask(
         return {"code": 0, "msg": "ok",
                 "data": await _service.rag_answer(
                     question=data.question, provider=data.provider)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/search/rebuild-index",
+            tags=["AI智能知识库训练模块"])
+async def rebuild_search_index(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """重建检索倒排索引(P3 检索升级; 存量 Redis 数据升级后执行一次, 幂等)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.rebuild_search_index()}
     except Exception as exc:
         _handle(exc)
 

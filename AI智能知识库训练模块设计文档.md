@@ -1,7 +1,7 @@
-# AI智能知识库训练模块设计文档 v1.3
+# AI智能知识库训练模块设计文档 v1.4
 
-> **版本**: v1.3（P0+P1+P2+P2.5+P3.1+P3.2 已实现，P3.3 规划中）
-> **状态**: 五期开发完成（P0~P2.5 + P3.1 RAG 核心 + P3.2 chat 接线），LLM 轨预留
+> **版本**: v1.4（P0+P1+P2+P2.5+P3.1+P3.2+P3 检索升级 已实现，P3.3 规划中）
+> **状态**: 六期开发完成（P0~P2.5 + P3.1 RAG 核心 + P3.2 chat 接线 + P3 检索倒排索引），LLM 轨预留
 > **定位**: 站点统一知识底座——通过对话教学、文档/图片/视频上传、全网抓取三源持续训练，经治理流水线（合规筛查/相似去重/人工审核/自动过审）沉淀为可检索、可进化、可分发的知识资产，供 chat/product/attract 等模块消费。
 
 ---
@@ -58,13 +58,14 @@ vector(内部字段, 对外投影剥离), version,
 createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 ```
 
-### 2.3 检索向量
+### 2.3 检索向量与倒排索引
 
 - `tokenize`: 字符 2-gram 分词（中文友好，"竹香酒多少钱" → {竹香:1, 香酒:1, ...}）
 - `build_vector`: question 为主 + keywords 加权 ×2
 - `cosine`: 稀疏向量余弦相似度
-- `SEARCH_SCAN_LIMIT=2000`: 检索扫描上限（P3 突破点）
-- `scan_keys()`: SCAN 增量游标迭代（P2.5 替代 KEYS，避免大库阻塞）
+- **倒排索引（P3 检索升级）**: token → entry_id（内存 dict[str, set] / Redis Set `zhuxiang:knowledge:inv:{token}`），仅 published 条目入索引；`save_entry` 时经 `_indexed_tokens`（随条目持久化）精确增删同步；`meta` 计数键跟踪索引条目数用于就绪判定（indexed == published）；索引未就绪（存量 Redis 数据）时 `search_published` 自动回退全量扫描，`POST /api/knowledge/search/rebuild-index`（管理端）显式重建
+- 行为无损依据: 余弦>0 必有共同 token，索引召回与全量扫描等价
+- `SEARCH_SCAN_LIMIT=2000`: 仅回退路径的规模保护（索引路径候选集不受限）
 
 ---
 
@@ -192,7 +193,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 | 文件 | 规模 | 覆盖 |
 |---|---|---|
-| test_knowledge_routes.py | 88 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取 + P2 全部 6 项 + P2.5 修复 7 项（hit 计数/miss 边界/增量扫描/连胜打断/通知+幂等）+ P3.1 RAG 8 项（三态/融合去重/引用/计数/llm 回退/参数校验） |
+| test_knowledge_routes.py | 98 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取 + P2 全部 6 项 + P2.5 修复 7 项（hit 计数/miss 边界/增量扫描/连胜打断/通知+幂等）+ P3.1 RAG 8 项（三态/融合去重/引用/计数/llm 回退/参数校验）+ P3 检索索引 8 项（就绪判定/批量召回/retired 移出/rebuild 幂等/投影剥离/2100 条突破截断/候选收敛） |
 | test_knowledge_quality_scheduler.py | 10 断言 | 单轮扫描/淘汰/保留/开关/周期下限/启动幂等/停止 |
 
 ---
@@ -202,7 +203,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | 方向 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
 | **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎（详见第九章 D-18 设计） | 高 | **P3.1 核心已实施，P3.2 chat 接线待实施** |
-| **检索升级** | 倒排+BM25 或 Embedding 语义向量（provider 双轨：rule 轨 2-gram / llm 轨 Embedding），突破 2000 条扫描瓶颈 | 高 | 待排期 |
+| **检索升级** | **倒排索引（已实施）**：token→entry_id（Redis Set `zhuxiang:knowledge:inv:{token}`），仅加载与 query 有共同 token 的候选条目，替代全量扫描——行为无损（余弦>0 必有共同 token），突破 SEARCH_SCAN_LIMIT=2000 截断；rebuild 端点支持存量迁移；Embedding 语义向量（provider 双轨）后续可选 | 高 | **倒排索引已实施**，Embedding 待排期 |
 | **LLM 轨落地** | 图片视觉理解（视觉大模型自动生成描述）、视频抽帧+ASR 自动时间轴、抓取内容智能清洗（D-14 既有规划） | 中 | 待排期 |
 | **消费方扩展** | product/attract 实际拉取链路（当前仅有 distribution_suggest 建议无消费） | 中 | 待排期 |
 
@@ -218,6 +219,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | P2.5 数据闭环 | 2026-08-30 | chat 检索接线修复 / missCount 埋点 / KEYS→SCAN / sweep 增量化 / 连胜判定修正 / 缺口通知飞轮 |
 | P3.1 RAG 核心 | 2026-08-30 | rag_answer（置信分级路由 direct≥0.50 实测校准 / synthesized≥0.25 / unsolved）+ rule 轨融合生成 + 引用溯源 + 计数联动 + POST /api/knowledge/ask 公开端点（33 端点） |
 | P3.2 chat 接线 | 2026-08-30 | chat 消费 rag_answer（RAG 优先/旧 FAQ 兜底），回复透出 citations + ragMode，aiConfidence 动态化（RAG 相似度/legacy 固定 0.85） |
+| P3 检索升级 | 2026-08-30 | 倒排索引（token→entry_id，`inv:{token}` Set + meta 计数），save_entry 同步/索引就绪判定/存量回退全量/rebuild 端点（34 端点），突破 2000 条截断 |
 
 ---
 

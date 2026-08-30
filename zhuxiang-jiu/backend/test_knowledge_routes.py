@@ -28,7 +28,7 @@ from services.knowledge_service import KnowledgeService
 from services.chat_service import ChatService
 from repositories.knowledge_repository import (
     ENTRY_STATUS_PENDING, ENTRY_STATUS_PUBLISHED, ENTRY_STATUS_REJECTED,
-    KnowledgeRepository,
+    KnowledgeRepository, tokenize,
 )
 
 # 测试结果收集
@@ -697,6 +697,109 @@ async def main():
         record("RAG-空问题拒绝", False, "未抛出异常")
     except ValueError:
         record("RAG-空问题拒绝", True)
+
+    # ============================================================
+    # 8.8 P3 检索升级: 倒排索引(召回等价 + 索引同步 + rebuild 幂等)
+    # ============================================================
+
+    # 索引就绪判定: 索引条目数 == published 条目数
+    record("索引-就绪判定一致",
+           await svc.repo._inverted_ready() is True,
+           "published 计数与索引计数不一致")
+
+    # 批量发布 30 条(问题差异化避免相似去重), 验证索引召回
+    _idx_topics = ("竹之七德", "竹报平安典故", "竹刻艺术流派", "竹简历史",
+                   "竹纸制作工艺", "竹编技法", "竹林生态价值", "竹笋营养",
+                   "竹茹入药记载", "竹沥传统制法", "竹黄工艺", "竹纤维应用",
+                   "竹节寓意", "竹影美学", "竹马童趣", "竹屋营造",
+                   "竹帘工艺", "竹扇文化", "竹筏航运", "竹笛音律",
+                   "竹雕技法", "竹胶板材", "竹醋液用途", "竹炭吸附",
+                   "竹荪种植", "竹鼠养殖争议", "竹筷卫生标准", "竹地板保养",
+                   "竹盐制作", "竹筒饭做法")
+    for i, topic in enumerate(_idx_topics):
+        await _publish(svc, f"索引测试: {topic}的介绍",
+                       f"{topic}相关内容, 属于竹文化知识领域。",
+                       category="faq")
+    # 任取一个 query: 索引召回结果应命中目标条目
+    hits_idx = await svc.search(f"索引测试: {_idx_topics[15]}的介绍",
+                                top_k=3, record_hit=False)
+    record("索引-批量条目可召回",
+           len(hits_idx) >= 1
+           and any(_idx_topics[15] in h["question"] for h in hits_idx),
+           f"实际{[h['question'] for h in hits_idx]}")
+    # 与全量扫描等价(索引就绪时召回必含全部共同 token 条目)
+    record("索引-就绪判定仍一致",
+           await svc.repo._inverted_ready() is True)
+
+    # retired 条目移出索引(计数同步; 传 2-gram token)
+    _idx_tokens = tokenize("索引测试").keys()
+    idx_before = await svc.repo._inverted_candidates(_idx_tokens)
+    retire_target = hits_idx[0]["entryId"]
+    await svc.retire_entry(retire_target)
+    idx_after = await svc.repo._inverted_candidates(_idx_tokens)
+    record("索引-retired移出索引",
+           retire_target not in idx_after
+           and len(idx_after) == len(idx_before) - 1
+           and await svc.repo._inverted_ready() is True,
+           f"before={len(idx_before)}, after={len(idx_after)}")
+    # retired 不可检索(已有同类断言, 此处针对索引路径)
+    record("索引-retired条目不可检索",
+           all(h["entryId"] != retire_target
+               for h in await svc.search(
+                   f"索引测试: {_idx_topics[15]}的介绍",
+                   top_k=5, record_hit=False)))
+
+    # rebuild 幂等: 重建后检索行为不变
+    rebuild1 = await svc.rebuild_search_index()
+    rebuild2 = await svc.rebuild_search_index()
+    record("索引-rebuild幂等",
+           rebuild1["rebuilt"] == rebuild2["rebuilt"]
+           and await svc.repo._inverted_ready() is True,
+           f"r1={rebuild1}, r2={rebuild2}")
+    # 对外投影剥离内部字段
+    entry_pub = await svc.get_entry(hits_idx[0]["entryId"])
+    record("索引-投影剥离内部字段",
+           "vector" not in entry_pub and "_indexed_tokens" not in entry_pub,
+           f"字段{list(entry_pub.keys())}")
+
+    # 突破 2000 条截断: repo 直插 2100 条 published(绕过 service 去重,
+    # 老实现 list_entries 按 createdAt 取前 2000, 最老条目不可检索)
+    from datetime import datetime as _dt, timedelta as _td
+    from repositories.knowledge_repository import build_vector
+    _base = _dt(2020, 1, 1)
+    _oldest_id = None
+    for i in range(2100):
+        _eid = await svc.repo.next_entry_id()
+        if i == 0:
+            _oldest_id = _eid
+        svc.repo.store["knowledge_entries"][_eid] = {
+            "id": _eid, "question": f"压测古早条目{i}号: 竹简文献溯源",
+            "answer": f"古早知识{i}号内容。",
+            "keywords": "", "category": "faq",
+            "source": "manual", "status": ENTRY_STATUS_PUBLISHED,
+            "vector": build_vector(f"压测古早条目{i}号: 竹简文献溯源"),
+            "createdAt": (_base + _td(minutes=i)).isoformat(),
+            "publishedAt": (_base + _td(minutes=i)).isoformat(),
+        }
+        # 走 save_entry 同步索引(内存模式)
+        await svc.repo.save_entry(
+            svc.repo.store["knowledge_entries"][_eid])
+    record("索引-就绪判定(2100条)",
+           await svc.repo._inverted_ready() is True)
+    # 最老条目(老实现会被 2000 截断丢弃)仍可检索命中
+    _oldest = await svc.repo.get_entry(_oldest_id)
+    _hits_old = await svc.search("压测古早条目0号: 竹简文献溯源",
+                                 top_k=1, record_hit=False)
+    record("索引-突破2000条截断(最老条目可检索)",
+           len(_hits_old) == 1 and _hits_old[0]["entryId"] == _oldest_id,
+           f"实际{[h['entryId'] for h in _hits_old]}, 目标={_oldest_id}")
+    # 索引候选只含命中 token 的条目(稀有词远小于全量 2100+;
+    # 压测条目共享"竹简"词不适用, 用独立词验证)
+    _cand = await svc.repo._inverted_candidates(
+        tokenize("竹之七德").keys())
+    record("索引-候选集远小于全量",
+           0 < len(_cand) < 2100,
+           f"候选={len(_cand)}")
 
     # ============================================================
     # 9. 统计(最终)
