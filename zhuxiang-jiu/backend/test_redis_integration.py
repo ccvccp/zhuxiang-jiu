@@ -94,6 +94,27 @@ def _force_redis_mode(monkeypatch):
     monkeypatch.setenv("REDIS_URL", _REDIS_URL)
 
 
+@pytest.fixture(autouse=True)
+async def _reset_shared_redis_clients():
+    """每个测试后重置共享 Redis 客户端单例(跨事件循环隔离)
+
+    pytest-asyncio 默认每个测试一个新事件循环; repositories.backend 与
+    core.locks 的模块级单例客户端会把连接绑定到首个使用它的循环,
+    循环关闭后连接池残留死连接 → 后续测试 RuntimeError: Event loop is closed。
+    测试后置空单例, 下个测试在自己的循环上重建连接。
+    """
+    yield
+    import contextlib
+    import repositories.backend as _backend
+    import core.locks as _locks
+    for mod in (_backend, _locks):
+        client = getattr(mod, "_redis_client", None)
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.aclose()
+        mod._redis_client = None
+
+
 @pytest.fixture
 async def redis_client():
     """Redis 客户端 fixture(测试结束自动关闭)"""

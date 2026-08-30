@@ -178,14 +178,15 @@ jobs:
         # 失败时把日志尾部写入 GITHUB_STEP_SUMMARY(run 摘要页可直接查看)
         run: |
           set -o pipefail
+          # 挂载整个 backend 源目录(含 test_*.py/conftest.py/pytest.ini, 镜像只 COPY 源码不含测试),
+          # PYTHONPATH=/app 使 pytest 导入镜像内已安装的源码, 兼顾镜像验证与测试执行
           docker run --rm \
+            -e PYTHONPATH=/app \
+            -v $PWD:/src:ro \
             -v $PWD/requirements-dev.txt:/tmp/requirements-dev.txt:ro \
-            -v $PWD/conftest.py:/app/conftest.py:ro \
-            -v $PWD/pytest.ini:/app/pytest.ini:ro \
-            -v $PWD/test_:/app/test_ \
             zhuxiang-decision-api:ci-test \
-            sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && cd /app && pytest test_ -v --junitxml=/tmp/test-results-docker.xml" \
-            | tee docker-test-output.log
+            sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && cd /src && pytest test_*.py -v --junitxml=/tmp/test-results-docker.xml" \
+            2>&1 | tee docker-test-output.log
 
       - name: Emit failure digest (annotations + summary)
         if: failure()
