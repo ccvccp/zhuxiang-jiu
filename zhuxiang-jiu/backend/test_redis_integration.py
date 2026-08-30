@@ -5,12 +5,14 @@
     2. Repository 双模式在 Redis 模式下 CRUD 正常
     3. 跨进程并发下数据一致(无超卖/无丢失更新)
     4. Redis 持久化:重启后数据仍在
-    5. 扩展: 5 个 Repository 的 Redis 分支边界/异常路径全覆盖
+    5. 扩展: 6 个 Repository 的 Redis 分支边界/异常路径全覆盖
        - AgentRepository: KeyError 路径 / 类型一致性 / 全降级链(S→A→B→C→D)
        - InventoryRepository: get None / 精确扣减 / 回补不存在 / 类型透明
        - WarehouseRepository: 空库位 / 出库计数 / 基线对比 / 返回值一致
        - OrderRepository: 空列表 / 顺序保持 / orderId 返回 / 深拷贝隔离
        - ShippingClaimRepository: None / 非数字 ID / 覆盖 / int 还原
+       - SupplyChainRepository(P5.3): List/Hash/全量域三组原语读写往返
+         + 四件套服务层 Redis 关键路径回归(inventory/shipping/warehouse/checkout)
     6. backend.py 辅助函数: _k key 格式 / is_redis_mode 优先级 / 单例
 
 运行前提:
@@ -921,3 +923,188 @@ class TestBackendHelpers:
         assert client1 is client2
         # 不关闭共享 client, 避免影响后续测试
         backend._redis_client = None
+
+
+# ============================================================
+# 扩展测试: SupplyChainRepository(P5.3 供应链四件套 Redis 集成)
+# ============================================================
+
+@pytest.fixture
+async def sc_seeded_redis(redis_client):
+    """供应链数据域 seed fixture(清空 → 灌注供应链域)"""
+    sys.path.insert(0, str(BACKEND_DIR / "scripts"))
+    from seed_redis import clear_existing_data, seed_supply_chain
+
+    await clear_existing_data(redis_client)
+    await seed_supply_chain(redis_client)
+    yield redis_client
+
+
+@pytest.fixture
+def sc_repo():
+    """SupplyChainRepository(Redis 模式)"""
+    from repositories.supply_chain_repository import SupplyChainRepository
+    return SupplyChainRepository()
+
+
+class TestSupplyChainRepositoryRedis:
+    """SupplyChainRepository 三组原语 Redis 读写往返(List/Hash/全量域)"""
+
+    # ---------- List 域 ----------
+
+    async def test_list_append_and_read_roundtrip(self, sc_seeded_redis, sc_repo):
+        """List 域: append → list_all 读写往返(JSON 序列化透明)"""
+        record = {"id": "IF-001", "product_id": "ZX42-2026L07",
+                  "type": "出库", "qty": 5, "reason": "测试"}
+        await sc_repo.append("inventory_logs", record)
+        logs = await sc_repo.list_all("inventory_logs")
+        assert len(logs) == 1
+        assert logs[0] == record   # dict 完整往返
+
+    async def test_list_remove_last(self, sc_seeded_redis, sc_repo):
+        """List 域: remove_last 弹出末尾记录(事务补偿用)"""
+        await sc_repo.append("stock_movements", {"id": "SM-1", "qty": 1})
+        await sc_repo.append("stock_movements", {"id": "SM-2", "qty": 2})
+        popped = await sc_repo.remove_last("stock_movements")
+        assert popped == {"id": "SM-2", "qty": 2}
+        assert len(await sc_repo.list_all("stock_movements")) == 1
+
+    async def test_list_remove_last_empty(self, sc_seeded_redis, sc_repo):
+        """List 域: 空列表 remove_last 返回 None"""
+        assert await sc_repo.remove_last("checkout_orders") is None
+
+    async def test_list_invalid_domain_rejected(self, sc_seeded_redis, sc_repo):
+        """List 域: 非法域名 ValueError"""
+        with pytest.raises(ValueError):
+            await sc_repo.append("no_such_domain", {})
+        with pytest.raises(ValueError):
+            await sc_repo.list_all("no_such_domain")
+
+    # ---------- Hash 域 ----------
+
+    async def test_hash_seed_readable(self, sc_seeded_redis, sc_repo):
+        """Hash 域: seed 灌注的优惠券/积分可读取(dict/标量类型还原)"""
+        coupon = await sc_repo.hget("checkout_coupons", "NEW10")
+        assert coupon is not None
+        assert coupon["status"] == "未使用"
+        assert coupon["discount"] == 0.10
+        points = await sc_repo.hget_int("checkout_points", "L3")
+        assert points == 5000
+
+    async def test_hash_set_get_del_roundtrip(self, sc_seeded_redis, sc_repo):
+        """Hash 域: hset → hget → hdel 完整往返"""
+        detail = {"claimId": "SC-1", "agentId": 1, "status": "已认领"}
+        await sc_repo.hset("shipping_claim_details", "taian", detail)
+        got = await sc_repo.hget("shipping_claim_details", "taian")
+        assert got == detail
+        await sc_repo.hdel("shipping_claim_details", "taian")
+        assert await sc_repo.hget("shipping_claim_details", "taian") is None
+
+    async def test_hash_getall(self, sc_seeded_redis, sc_repo):
+        """Hash 域: hgetall 全量读取(含 JSON 解析)"""
+        await sc_repo.hset("shipping_claim_details", "a", {"x": 1})
+        await sc_repo.hset("shipping_claim_details", "b", {"y": 2})
+        all_claims = await sc_repo.hgetall("shipping_claim_details")
+        assert all_claims == {"a": {"x": 1}, "b": {"y": 2}}
+
+    async def test_hash_get_int_default(self, sc_seeded_redis, sc_repo):
+        """Hash 域: hget_int 缺失键返回 default"""
+        assert await sc_repo.hget_int("checkout_points", "L9", 42) == 42
+
+    async def test_hash_invalid_domain_rejected(self, sc_seeded_redis, sc_repo):
+        """Hash 域: 非法域名 ValueError"""
+        with pytest.raises(ValueError):
+            await sc_repo.hget("no_such_domain", "k")
+
+    # ---------- 全量域 ----------
+
+    async def test_full_domain_seed_readable(self, sc_seeded_redis, sc_repo):
+        """全量域: seed 灌注的仓库主数据可读取(条数与字段)"""
+        warehouses = await sc_repo.load("supply_warehouses")
+        assert len(warehouses) == 4
+        assert warehouses[0]["warehouse_name"] == "山东泰安工厂仓"
+        locations = await sc_repo.load("warehouse_locations")
+        assert len(locations) == 180   # 3区×5排×4列×3层
+        stock = await sc_repo.load("warehouse_stock")
+        assert len(stock) == 14        # 仓1 全部 11 款 + 仓2 三款
+        # 抽样: 仓1 的 ZX42-2026L07 库存 500
+        s = next(x for x in stock
+                if x["warehouse_id"] == 1 and x["product_id"] == "ZX42-2026L07")
+        assert s["stock_qty"] == 500
+
+    async def test_full_domain_save_roundtrip(self, sc_seeded_redis, sc_repo):
+        """全量域: load → 修改 → save 整体回写往返"""
+        stock = await sc_repo.load("warehouse_stock")
+        target = next(x for x in stock
+                      if x["warehouse_id"] == 1 and x["product_id"] == "ZX42-2026L07")
+        target["stock_qty"] = 777
+        await sc_repo.save("warehouse_stock", stock)
+        reloaded = await sc_repo.load("warehouse_stock")
+        s = next(x for x in reloaded
+                 if x["warehouse_id"] == 1 and x["product_id"] == "ZX42-2026L07")
+        assert s["stock_qty"] == 777
+        assert len(reloaded) == 14    # 其余记录不受影响
+
+    async def test_full_domain_invalid_rejected(self, sc_seeded_redis, sc_repo):
+        """全量域: 非法域名 ValueError"""
+        with pytest.raises(ValueError):
+            await sc_repo.load("no_such_domain")
+
+
+class TestSupplyChainServiceRedis:
+    """服务层四件套在 Redis 模式下的关键路径回归(P5.3)"""
+
+    async def test_inventory_deduct_lines_redis(self, sc_seeded_redis):
+        """inventory: 多行扣减 Redis 路径(库存+流水+预警)"""
+        from services.inventory_service import InventoryService
+        svc = InventoryService()
+        result = await svc.deduct_lines(
+            [{"id": "ZX42-2026L07", "name": "竹香经典", "qty": 5}],
+            reason="Redis 回归", ref_no="RR-001")
+        assert result["success"] is True
+        assert result["details"]["lines"][0]["after"] == 495
+        # 流水经 List 域落库
+        logs = await svc.sc_repo.list_all("inventory_logs")
+        assert len(logs) == 1
+        assert logs[0]["ref_no"] == "RR-001"
+
+    async def test_shipping_claim_release_redis(self, sc_seeded_redis):
+        """shipping: 认领→释放状态机 Redis 路径(Hash 域读写)"""
+        from services.shipping_service import ShippingClaimService
+        svc = ShippingClaimService()
+        r1 = await svc.claim(1, "taian")
+        assert r1["success"] is True
+        assert r1["details"]["status"] == "已认领"
+        r2 = await svc.release(1, "taian")
+        assert r2["success"] is True
+        assert r2["details"]["status"] == "已退出"
+
+    async def test_warehouse_outbound_redis(self, sc_seeded_redis):
+        """warehouse: 出库 Redis 路径(全量域读改写)"""
+        from services.warehouse_service import WarehouseService
+        svc = WarehouseService()
+        result = await svc.outbound([{"id": "ZX42-2026L07", "qty": 100}])
+        assert result["success"] is True
+        assert result["details"]["lines"][0]["after"] == 400
+        # 出库单经 List 域落库
+        orders = await svc.sc_repo.list_all("outbound_orders")
+        assert len(orders) == 1
+        assert orders[0]["total_qty"] == 100
+
+    async def test_checkout_submit_redis(self, sc_seeded_redis):
+        """checkout: 9 阶段事务 Redis 路径(库存扣减+订单落库)"""
+        from services.checkout_service import CheckoutService
+        svc = CheckoutService()
+        result = await svc.submit(
+            [{"id": "ZX42-2026L05", "name": "竹韵佳酿", "price": 299, "qty": 1}],
+            member_level="L3")
+        assert result["success"] is True
+        # 库存 300 → 299
+        from repositories.inventory_repository import InventoryRepository
+        inv = await InventoryRepository().get("ZX42-2026L05")
+        assert inv["stock"] == 299
+        # 订单+分润经 List 域落库
+        orders = await svc.sc_repo.list_all("checkout_orders")
+        assert len(orders) == 1
+        profits = await svc.sc_repo.list_all("profit_records")
+        assert len(profits) == 1

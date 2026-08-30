@@ -484,6 +484,87 @@ async def seed_agent_rebates(client) -> int:
     return count
 
 
+# ============================================================
+# 供应链四件套 seed(P5.3: 对齐 store.py _build_initial_supply_chain)
+# ============================================================
+
+# 复用同一份数据源(与内存初始态完全一致, 避免重复维护)
+from repositories.store import _build_initial_supply_chain
+
+
+async def seed_supply_chain(client) -> dict:
+    """写入供应链四件套 19 个数据域(P5.3)
+
+    Key 设计(对齐 supply_chain_repository 的 _k("sc", domain)):
+        Hash 域(3):  zhuxiang:sc:checkout_coupons         Hash(field=code, value=JSON)
+                     zhuxiang:sc:checkout_points          Hash(field=level, value=JSON 标量)
+                     zhuxiang:sc:shipping_claim_details   Hash(field=region, value=JSON; 初始为空不写)
+        全量域(3):   zhuxiang:sc:supply_warehouses       List(每元素 JSON)
+                     zhuxiang:sc:warehouse_locations      List(每元素 JSON)
+                     zhuxiang:sc:warehouse_stock          List(每元素 JSON)
+        List 域(13): zhuxiang:sc:{domain}                List(初始为空不写,
+                     运行时 append 触发懒创建)
+    """
+    sc = _build_initial_supply_chain()
+    counts = {"hash": 0, "full": 0}
+
+    # ---- Hash 域: checkout_coupons / checkout_points ----
+    coupons = sc["checkout_coupons"]
+    if coupons:
+        mapping = {code: json.dumps(c, ensure_ascii=False)
+                   for code, c in coupons.items()}
+        await client.hset(_k("sc", "checkout_coupons"), mapping=mapping)
+        counts["hash"] += len(coupons)
+    points = sc["checkout_points"]
+    if points:
+        mapping = {level: json.dumps(v) for level, v in points.items()}
+        await client.hset(_k("sc", "checkout_points"), mapping=mapping)
+        counts["hash"] += len(points)
+    # shipping_claim_details 初始为空, 不写(懒创建)
+
+    # ---- 全量域: 仓库主表/库位/仓储库存(逐条 JSON List) ----
+    for domain in ("supply_warehouses", "warehouse_locations",
+                   "warehouse_stock"):
+        records = sc[domain]
+        if not records:
+            continue
+        key = _k("sc", domain)
+        await client.delete(key)   # 幂等: 先清再写
+        items = [json.dumps(r, ensure_ascii=False) for r in records]
+        await client.rpush(key, *items)
+        counts["full"] += len(records)
+
+    # ---- List 域(13 个, 初始为空不写, 运行时懒创建) ----
+    # inventory_logs / stock_alerts / checkout_orders / profit_records /
+    # service_fees / inbound_orders / outbound_orders / stock_movements /
+    # stocktaking_records / loss_records / transfer_orders /
+    # cross_dock_records / environment_monitoring
+    return counts
+
+
+async def verify_supply_chain_seed(client) -> dict:
+    """验证供应链 seed 写入结果"""
+    coupons_n = await client.hlen(_k("sc", "checkout_coupons"))
+    points_n = await client.hlen(_k("sc", "checkout_points"))
+    claims_n = await client.hlen(_k("sc", "shipping_claim_details"))
+    warehouses_n = await client.llen(_k("sc", "supply_warehouses"))
+    locations_n = await client.llen(_k("sc", "warehouse_locations"))
+    stock_n = await client.llen(_k("sc", "warehouse_stock"))
+    # 抽样: 优惠券 NEW10 与积分 L3、仓库 1
+    coupon_new10 = await client.hget(_k("sc", "checkout_coupons"), "NEW10")
+    points_l3 = await client.hget(_k("sc", "checkout_points"), "L3")
+    return {
+        "sc_coupons_count": coupons_n,
+        "sc_points_count": points_n,
+        "sc_claim_details_count": claims_n,
+        "sc_warehouses_count": warehouses_n,
+        "sc_locations_count": locations_n,
+        "sc_warehouse_stock_count": stock_n,
+        "sc_sample_coupon_NEW10": json.loads(coupon_new10) if coupon_new10 else None,
+        "sc_sample_points_L3": points_l3,
+    }
+
+
 async def seed_agent_risks(client) -> int:
     """写入代理商风控记录(Hash + 代理商索引 Set)
 
@@ -575,6 +656,9 @@ async def verify_seed(client) -> dict:
     sample_rebate = await client.hgetall(_k("agent_rebate", "RB20260701001"))
     sample_risk = await client.hgetall(_k("agent_risk", "RK20260701001"))
 
+    # 供应链四件套验证(P5.3)
+    sc_verify = await verify_supply_chain_seed(client)
+
     return {
         "agents_count": len(agents),
         "inventory_count": len(inventory),
@@ -607,6 +691,7 @@ async def verify_seed(client) -> dict:
         "agent_risks_count": len(risk_keys),
         "sample_agent_rebate_RB20260701001": sample_rebate,
         "sample_agent_risk_RK20260701001": sample_risk,
+        **{("supply_chain_" + k): v for k, v in sc_verify.items()},
     }
 
 
