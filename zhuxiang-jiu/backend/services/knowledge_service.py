@@ -25,6 +25,7 @@
 import json
 import logging
 import re
+import time
 from datetime import datetime
 
 from core.locks import get_lock
@@ -224,6 +225,16 @@ def _public(entry: dict) -> dict:
             if k not in ("vector", "_indexed_tokens", "embedding")}
 
 
+# P4.2 检索缓存实例(模块级单例: 进程内共享, 测试经 reset 缓存隔离)
+_CACHES: dict[str, dict] = {"embed": {}, "result": {}}
+
+
+def _reset_knowledge_caches() -> None:
+    """清空 RAG 检索缓存(测试隔离用)"""
+    _CACHES["embed"].clear()
+    _CACHES["result"].clear()
+
+
 class KnowledgeService:
     """AI智能知识库训练业务逻辑层"""
 
@@ -238,14 +249,39 @@ class KnowledgeService:
     def _query_embedding(query: str) -> list[float] | None:
         """查询语义向量(embedding 模式关/向量化失败返回 None→2-gram)
 
-        每次检索一次 embed 调用; repo 层无网络依赖, 由本层
-        统一负责 provider 调用(与 llm 轨 _rag_llm_synthesize 同范式)。
+        P4.2 检索缓存: 同一问题 5 分钟内复用向量(问题重述高度
+        重复, embed 是检索链路最贵的一跳); 缓存命中打点
+        rag_cache_hits{layer="embedding"}。条目变更不做主动
+        失效(向量只依赖 query 文本, 与条目无关, 天然安全)。
         """
+        from core.metrics import rag_cache_hits_total
+        cache = _CACHES["embed"]
+        cached = cache.get(query)
+        if cached is not None and cached[0] > time.time():
+            rag_cache_hits_total.inc({"layer": "embedding", "hit": "yes"})
+            return cached[1]
         from services.llm_client import embedding_enabled, provider_client
         if not embedding_enabled():
             return None
         vecs = provider_client.embed([query])
-        return vecs[0] if vecs else None
+        if not vecs:
+            rag_cache_hits_total.inc({"layer": "embedding", "hit": "no"})
+            return None
+        cache[query] = (time.time() + KnowledgeService._EMBED_CACHE_TTL,
+                        vecs[0])
+        # 简单容量控制: 超限丢弃最旧一半(保序 dict)
+        if len(cache) > KnowledgeService._EMBED_CACHE_MAX:
+            for k in list(cache)[:len(cache) // 2]:
+                cache.pop(k, None)
+        return vecs[0]
+
+    # P4.2 检索缓存参数(缓存实例为模块级 _CACHES)
+    _EMBED_CACHE_TTL = 300          # 查询向量缓存 5 分钟
+    _EMBED_CACHE_MAX = 1000        # 向量缓存容量上限(条)
+    # RAG 结果缓存: 60 秒内同问题同轨直接复用(chat 高频重复问);
+    # 计数联动(hit/miss)同样只发生一次——缓存命中视为首次结果的延伸
+    _RESULT_CACHE_TTL = 60
+    _RESULT_CACHE_MAX = 500
 
     # P3.7 重排候选数(召回池放大后取重排后 top_k)
     RERANK_POOL_K = 10
@@ -278,13 +314,14 @@ class KnowledgeService:
         return out
 
     async def _save_entry(self, entry: dict) -> None:
-        """保存条目(含 P3.5 语义向量注入)
+        """保存条目(含 P3.5 语义向量注入 + P4.2 结果缓存失效)
 
         published 条目在 embedding 模式开且尚未持有向量时注入
         (question 文本向量化); pending 等未发布条目跳过——仅在
         publish 流转后再经下次保存/rebuild 回填, 避免候选池
         无谓 embed 成本。失败不阻断保存(条目无 embedding,
         检索时该条目走 2-gram 路径或不参与语义路径)。
+        任何条目保存即失效 RAG 结果缓存(知识内容可能已变)。
         """
         if (entry.get("status") == ENTRY_STATUS_PUBLISHED
                 and not entry.get("embedding")):
@@ -294,6 +331,7 @@ class KnowledgeService:
                 vecs = provider_client.embed([entry["question"]])
                 if vecs:
                     entry["embedding"] = [round(v, 6) for v in vecs[0]]
+        _CACHES["result"].clear()   # P4.2 条目变更失效
         await self.repo.save_entry(entry)
 
     # ============================================================
@@ -701,6 +739,10 @@ class KnowledgeService:
         向量余弦), embed 失败自动回退 2-gram; 阈值沿用
         (语义相似度分布偏高, 生产实测后可另行校准)。
 
+        P4.2 结果缓存: 60 秒内同问题同轨直接复用(chat 高频
+        重复问场景降低检索+合成成本); 命中打点 rag_cache_hits
+        {layer="result"}; 条目保存时全量失效(知识变更即时生效)。
+
         Raises:
             ValueError: 问题为空
         """
@@ -709,6 +751,25 @@ class KnowledgeService:
             raise ValueError("问题不能为空")
         if provider not in ("rule", "llm"):
             raise ValueError(f"非法 provider({provider}), 须为 rule/llm")
+        # P4.2 结果缓存命中: 复用未过期结果(引用溯源结构一并缓存)
+        from core.metrics import rag_cache_hits_total
+        cache = _CACHES["result"]
+        key = f"{question}|{provider}"
+        cached = cache.get(key)
+        if cached is not None and cached[0] > time.time():
+            rag_cache_hits_total.inc({"layer": "result", "hit": "yes"})
+            return cached[1]
+        result = await self._rag_answer_uncached(question, provider)
+        cache[key] = (time.time() + KnowledgeService._RESULT_CACHE_TTL,
+                      result)
+        if len(cache) > KnowledgeService._RESULT_CACHE_MAX:
+            for k in list(cache)[:len(cache) // 2]:
+                cache.pop(k, None)
+        return result
+
+    async def _rag_answer_uncached(self, question: str,
+                                    provider: str) -> dict:
+        """RAG 问答主链路(rag_answer 的无缓存实现)"""
         # top-k 召回(不过滤阈值, 由分级路由判定; P3.7 重排精排)
         query_vec = tokenize(question)
         results = await self.repo.search_published(

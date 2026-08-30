@@ -169,36 +169,39 @@ class LLMProviderClient:
         """
         if not llm_enabled():
             return None
-        api_key = os.environ["LLM_API_KEY"].strip()
-        base_url = os.environ.get(
-            "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
-        ).rstrip("/")
-        model = os.environ.get("LLM_MODEL", "glm-4-flash")
-        payload = json.dumps({
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": temperature,
-        }, ensure_ascii=False).encode("utf-8")
-        request = urllib.request.Request(
-            f"{base_url}/chat/completions", data=payload,
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {api_key}"},
-            method="POST")
-        try:
-            with urllib.request.urlopen(request, timeout=_TIMEOUT) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-            content = (body.get("choices") or [{}])[0].get(
-                "message", {}).get("content")
-            if not content or not str(content).strip():
-                logger.warning("llm_chat_empty_response model=%s", model)
+        from core.metrics import llm_timer
+        with llm_timer("chat"):
+            api_key = os.environ["LLM_API_KEY"].strip()
+            base_url = os.environ.get(
+                "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
+            ).rstrip("/")
+            model = os.environ.get("LLM_MODEL", "glm-4-flash")
+            payload = json.dumps({
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": temperature,
+            }, ensure_ascii=False).encode("utf-8")
+            request = urllib.request.Request(
+                f"{base_url}/chat/completions", data=payload,
+                headers={"Content-Type": "application/json",
+                         "Authorization": f"Bearer {api_key}"},
+                method="POST")
+            try:
+                with urllib.request.urlopen(
+                        request, timeout=_TIMEOUT) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                content = (body.get("choices") or [{}])[0].get(
+                    "message", {}).get("content")
+                if not content or not str(content).strip():
+                    logger.warning("llm_chat_empty_response model=%s", model)
+                    return None
+                return str(content).strip()
+            except Exception as exc:
+                logger.warning("llm_chat_failed(回退rule): %s", exc)
                 return None
-            return str(content).strip()
-        except Exception as exc:
-            logger.warning("llm_chat_failed(回退rule): %s", exc)
-            return None
 
     def embed(self, texts: list[str]) -> list[list[float]] | None:
         """批量文本向量化(P3.5), 失败/未配置返回 None(调用方回退 2-gram)
@@ -212,6 +215,7 @@ class LLMProviderClient:
         """
         if not embedding_enabled() or not texts:
             return None
+        from core.metrics import llm_timer
         api_key = os.environ["LLM_API_KEY"].strip()
         base_url = os.environ.get(
             "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
@@ -222,29 +226,30 @@ class LLMProviderClient:
             batch = [t for t in texts[start:start + EMBED_BATCH_SIZE] if t]
             if not batch:
                 continue
-            payload = json.dumps({"model": model, "input": batch},
-                                 ensure_ascii=False).encode("utf-8")
-            request = urllib.request.Request(
-                f"{base_url}/embeddings", data=payload,
-                headers={"Content-Type": "application/json",
-                         "Authorization": f"Bearer {api_key}"},
-                method="POST")
-            try:
-                with urllib.request.urlopen(
-                        request, timeout=_TIMEOUT) as resp:
-                    body = json.loads(resp.read().decode("utf-8"))
-                data = body.get("data") or []
-                data.sort(key=lambda d: d.get("index", 0))
-                batch_vecs = [d.get("embedding") for d in data]
-                if len(batch_vecs) != len(batch) or any(
-                        not v for v in batch_vecs):
-                    logger.warning(
-                        "llm_embed_count_mismatch model=%s", model)
+            with llm_timer("embed"):
+                payload = json.dumps({"model": model, "input": batch},
+                                     ensure_ascii=False).encode("utf-8")
+                request = urllib.request.Request(
+                    f"{base_url}/embeddings", data=payload,
+                    headers={"Content-Type": "application/json",
+                             "Authorization": f"Bearer {api_key}"},
+                    method="POST")
+                try:
+                    with urllib.request.urlopen(
+                            request, timeout=_TIMEOUT) as resp:
+                        body = json.loads(resp.read().decode("utf-8"))
+                    data = body.get("data") or []
+                    data.sort(key=lambda d: d.get("index", 0))
+                    batch_vecs = [d.get("embedding") for d in data]
+                    if len(batch_vecs) != len(batch) or any(
+                            not v for v in batch_vecs):
+                        logger.warning(
+                            "llm_embed_count_mismatch model=%s", model)
+                        return None
+                    vectors.extend(batch_vecs)
+                except Exception as exc:
+                    logger.warning("llm_embed_failed(回退2-gram): %s", exc)
                     return None
-                vectors.extend(batch_vecs)
-            except Exception as exc:
-                logger.warning("llm_embed_failed(回退2-gram): %s", exc)
-                return None
         return vectors or None
 
     def vision(self, prompt: str, url: str,
@@ -265,6 +270,7 @@ class LLMProviderClient:
         """
         if not media_llm_enabled() or not (url or "").strip():
             return None
+        from core.metrics import llm_timer
         api_key = os.environ["LLM_API_KEY"].strip()
         base_url = os.environ.get(
             "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
@@ -287,9 +293,10 @@ class LLMProviderClient:
                      "Authorization": f"Bearer {api_key}"},
             method="POST")
         try:
-            with urllib.request.urlopen(
-                    request, timeout=_VISION_TIMEOUT) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+            with llm_timer("vision"):
+                with urllib.request.urlopen(
+                        request, timeout=_VISION_TIMEOUT) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
             content = (body.get("choices") or [{}])[0].get(
                 "message", {}).get("content")
             if not content or not str(content).strip():
@@ -317,6 +324,7 @@ class LLMProviderClient:
         if not llm_enabled():
             return None
         import uuid
+        from core.metrics import llm_timer
         model = os.environ.get("ASR_MODEL", "glm-asr-2512")
         api_key = os.environ["LLM_API_KEY"].strip()
         base_url = os.environ.get(
@@ -352,9 +360,10 @@ class LLMProviderClient:
                      "Authorization": f"Bearer {api_key}"},
             method="POST")
         try:
-            with urllib.request.urlopen(
-                    request, timeout=_TIMEOUT) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
+            with llm_timer("transcribe"):
+                with urllib.request.urlopen(
+                        request, timeout=_TIMEOUT) as resp:
+                    result = json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
             logger.warning("llm_asr_failed(跳过): %s", exc)
             return None
@@ -383,6 +392,7 @@ class LLMProviderClient:
         """
         if not rerank_enabled() or not documents:
             return None
+        from core.metrics import llm_timer
         api_key = os.environ["LLM_API_KEY"].strip()
         base_url = os.environ.get(
             "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
@@ -398,9 +408,10 @@ class LLMProviderClient:
                      "Authorization": f"Bearer {api_key}"},
             method="POST")
         try:
-            with urllib.request.urlopen(
-                    request, timeout=_TIMEOUT) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+            with llm_timer("rerank"):
+                with urllib.request.urlopen(
+                        request, timeout=_TIMEOUT) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
             logger.warning("llm_rerank_failed(保持原序): %s", exc)
             return None

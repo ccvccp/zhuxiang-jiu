@@ -50,6 +50,9 @@ def record(name, passed, detail=""):
 def reset_store():
     from repositories.store import reset_store as _reset
     _reset()
+    # P4.2: 清 RAG 检索缓存(模块级单例, 跨用例隔离)
+    from services.knowledge_service import _reset_knowledge_caches
+    _reset_knowledge_caches()
 
 
 async def _publish(svc: KnowledgeService, question: str, answer: str,
@@ -950,6 +953,9 @@ async def main():
            f"llm={rag_llm_ok['citations']}, rule={rule_synth['citations']}")
 
     # llm 轨 mock 异常(请求失败)回退 rule
+    # (P4.2: 先清结果缓存, 避免命中上方 llm 成功用例的缓存)
+    from services.knowledge_service import _reset_knowledge_caches
+    _reset_knowledge_caches()
     _llm_mod.provider_client.chat = lambda s, u, temperature=0.3: None
     try:
         rag_llm_fail = await svc.rag_answer(
@@ -971,6 +977,61 @@ async def main():
         record("RAG-空问题拒绝", False, "未抛出异常")
     except ValueError:
         record("RAG-空问题拒绝", True)
+
+    # ============================================================
+    # 8.7.1 P4.2 检索缓存: 结果缓存命中 / 条目变更失效 / 向量缓存复用
+    # ============================================================
+    from core.metrics import rag_cache_hits_total, reset_metrics
+    reset_metrics()
+
+    # 结果缓存: 同问题两次调用, 第二次命中缓存(hit 只计一次)
+    _c_entry = await _publish(svc, "缓存测试竹香酒保质期多久",
+                              "未开封避光保存可达五年。")
+    _c_q = "缓存测试竹香酒保质期多久"
+    _r1 = await svc.rag_answer(_c_q)
+    _hits1 = (await svc.repo.get_entry(_c_entry["id"]))["hitCount"]
+    _r2 = await svc.rag_answer(_c_q)
+    _hits2 = (await svc.repo.get_entry(_c_entry["id"]))["hitCount"]
+    record("缓存-结果缓存命中(hit只计一次)",
+           _r1 == _r2 and _hits2 == _hits1,
+           f"hits {_hits1}->{_hits2}")
+
+    # 条目变更(发布新知识)→ 结果缓存全量失效, 重新计算再计 hit
+    await _publish(svc, "缓存失效验证条目竹香酒",
+                   "新发布条目触发缓存失效。")
+    _r4 = await svc.rag_answer(_c_q)
+    _hits4 = (await svc.repo.get_entry(_c_entry["id"]))["hitCount"]
+    record("缓存-条目变更失效结果缓存",
+           _r4["answer"] == _r1["answer"] and _hits4 == _hits1 + 1,
+           f"hits {_hits2}->{_hits4}")
+
+    # 向量缓存: 同查询两次, embed 只调一次(embedding 层命中)
+    os.environ["LLM_API_KEY"] = "test-key"
+    os.environ["KNOWLEDGE_EMBEDDING"] = "on"
+    import services.llm_client as _llm_c_mod
+    _orig_embed_c = _llm_c_mod.provider_client.embed
+    _embed_n = {"n": 0}
+
+    def _embed_count(texts):
+        _embed_n["n"] += 1
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+    _llm_c_mod.provider_client.embed = _embed_count
+    await svc.search("缓存向量测试查询", record_hit=False)
+    await svc.search("缓存向量测试查询", record_hit=False)
+    record("缓存-查询向量缓存复用(embed只调一次)",
+           _embed_n["n"] == 1,
+           f"calls={_embed_n['n']}")
+    _llm_c_mod.provider_client.embed = _orig_embed_c
+    os.environ.pop("KNOWLEDGE_EMBEDDING", None)
+    os.environ.pop("LLM_API_KEY", None)
+
+    # 缓存命中打点: rag_cache_hits_total 覆盖 result 与 embedding 两层
+    _c_snap = rag_cache_hits_total.snapshot()
+    record("缓存-命中打点rag_cache_hits",
+           _c_snap.get(("result", "yes"), 0) >= 1
+           and _c_snap.get(("embedding", "yes"), 0) >= 1,
+           f"实际{_c_snap}")
 
     # ============================================================
     # 8.8 P3 检索升级: 倒排索引(召回等价 + 索引同步 + rebuild 幂等)
@@ -1143,6 +1204,9 @@ async def main():
            f"实际mode={rag_emb['mode']}, conf={rag_emb['confidence']}")
 
     # 8.9.3 embed 失败(mock 返回 None)自动回退 2-gram 路径
+    # (P4.2: 先清查询向量缓存, 避免命中上方语义用例的缓存)
+    from services.knowledge_service import _reset_knowledge_caches
+    _reset_knowledge_caches()
     _llm_mod.provider_client.embed = lambda texts: None
     hits_fb = await svc.search(_query, top_k=3, record_hit=False)
     record("EMB-embed失败回退2-gram(召回A非B)",

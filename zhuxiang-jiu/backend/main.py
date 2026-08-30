@@ -20,8 +20,9 @@ AI决策筹划模块(模块29·AI大脑中枢) FastAPI 后端入口
 
 import logging
 import os
+import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.auth_middleware import JWTAuthMiddleware
@@ -278,6 +279,48 @@ async def health_check():
         "uptime": uptime(),
         "lockMode": _get_lock_mode(),
     }
+
+
+# ============================================================
+#  P4.2 应用级指标: /metrics(Prometheus 文本格式) + HTTP 埋点中间件
+# ============================================================
+
+@app.get("/metrics", tags=["系统"])
+async def metrics_endpoint():
+    """应用指标暴露(Prometheus 文本格式, 纯标准库采集)
+
+    指标: HTTP(QPS/延迟/状态码) + LLM(调用成功率/延迟/回退)
+    + RAG 缓存命中。供既有 Prometheus 栈(见 docker-compose.monitoring)
+    抓取: job 配置 targets 指向本端点即可, 无需额外 exporter。
+    """
+    from core.metrics import metrics_text
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(metrics_text(), media_type="text/plain")
+
+
+@app.middleware("http")
+async def _http_metrics_middleware(request: Request, call_next):
+    """HTTP 请求埋点: 计数(QPS/状态码) + 延迟直方图
+
+    /metrics 自身不埋点(避免抓取行为污染业务指标)。
+    """
+    from core.metrics import (http_request_duration,
+                              http_requests_total)
+    path = request.url.path
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        if path != "/metrics":
+            http_requests_total.inc({"path": path, "code": 500})
+            http_request_duration.observe(
+                time.perf_counter() - start)
+        raise
+    if path != "/metrics":
+        http_requests_total.inc(
+            {"path": path, "code": response.status_code})
+        http_request_duration.observe(time.perf_counter() - start)
+    return response
 
 
 # ============================================================
