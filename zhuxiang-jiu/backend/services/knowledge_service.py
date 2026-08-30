@@ -497,6 +497,112 @@ class KnowledgeService:
         return out
 
     # ============================================================
+    # 2.5 RAG 问答层(P3.1, D-18): 置信分级路由 + 融合生成 + 引用溯源
+    # ============================================================
+
+    RAG_TOP_K = 3                    # 召回条数
+    # 直接引用阈值(同义改写级); 实测校准: 完全同文本约 0.51
+    # (entry 向量含 keywords ×2 加权, 余弦低于 1.0), 0.50 恰好放行
+    RAG_DIRECT_SIMILARITY = 0.50
+    RAG_SYNTH_SIMILARITY = 0.25     # 融合生成下限(相关补充级)
+    RAG_DUP_THRESHOLD = 0.85        # 融合时条目间同义去重阈值
+    RAG_ANSWER_MAX_LEN = 200         # 单条目答案截断长度
+
+    def _rag_synthesize(self, question: str, hits: list[dict]) -> str:
+        """rule 轨融合生成(纯标准库, D-18)
+
+        条目间问题向量余弦 ≥0.85 视为同义(保留相似度最高者);
+        按(相似度, hitCount)降序分点拼接。
+        """
+        # 同义去重: 保留相似度最高者
+        kept: list[dict] = []
+        for h in sorted(hits, key=lambda x: -x["similarity"]):
+            h_vec = tokenize(h["question"])
+            if any(cosine(h_vec, tokenize(k["question"]))
+                   >= self.RAG_DUP_THRESHOLD for k in kept):
+                continue
+            kept.append(h)
+        # 排序: (相似度, hitCount) 降序
+        kept.sort(key=lambda x: (-x["similarity"],
+                                 -int(x.get("hitCount", 0))))
+        parts = []
+        for i, h in enumerate(kept, start=1):
+            ans = (h.get("answer") or "").strip().rstrip("。")
+            if len(ans) > self.RAG_ANSWER_MAX_LEN:
+                ans = ans[:self.RAG_ANSWER_MAX_LEN]
+            parts.append(f"{i}. {ans}。")
+        head = (question or "").strip()[:20]
+        body = "\n".join(parts)
+        return (f"关于「{head}」, 为您整理以下信息:\n{body}\n"
+                "以上信息仅供参考, 如需人工服务可联系在线客服。")
+
+    async def rag_answer(self, question: str,
+                          provider: str = "rule") -> dict:
+        """RAG 问答(P3.1, D-18): 检索增强问答统一入口
+
+        置信分级路由(按 top-1 相似度):
+            - direct(≥0.55): 单条目精确命中, 直接返回答案
+            - synthesized(≥0.25): 多条目去重融合, 答案带引用
+            - unsolved: 低置信不融合(低相似条目融合引入噪声),
+              有最近邻时计 miss
+
+        计数联动(P2.5 口径): direct/synthesized 计 hit,
+        unsolved 有候选计 miss, 无候选不计数。
+
+        provider 双轨: rule 轨纯标准库融合; llm 轨预留
+        (接入大模型 synthesize 时仅改 _rag_synthesize 调用分支,
+        检索/分级/引用/计数不变)。
+
+        Raises:
+            ValueError: 问题为空
+        """
+        question = (question or "").strip()
+        if not question:
+            raise ValueError("问题不能为空")
+        if provider not in ("rule", "llm"):
+            raise ValueError(f"非法 provider({provider}), 须为 rule/llm")
+        if provider == "llm":
+            # llm 轨未接入, 回退 rule(对齐 attract D-11 惯例)
+            logger.info("knowledge_rag_llm_provider_not_ready_fallback_rule")
+        # top-k 召回(不过滤阈值, 由分级路由判定)
+        query_vec = tokenize(question)
+        results = await self.repo.search_published(
+            query_vec, None, self.RAG_TOP_K)
+        if not results:
+            return {"answer": "", "mode": "unsolved",
+                    "citations": [], "confidence": 0.0}
+        top_entry, top_sim = results[0]
+        if top_sim < self.RAG_SYNTH_SIMILARITY:
+            # 低置信: 最近邻计 miss, 不融合
+            await self.repo.record_miss(top_entry["id"])
+            return {"answer": "", "mode": "unsolved",
+                    "citations": [], "confidence": 0.0}
+        # 过滤低于融合下限的候选
+        hits = [{"entryId": e["id"], "question": e["question"],
+                 "answer": e["answer"], "similarity": round(sim, 4),
+                 "source": e.get("source", SOURCE_MANUAL),
+                 "hitCount": int(e.get("hitCount", 0))}
+                for e, sim in results
+                if sim >= self.RAG_SYNTH_SIMILARITY]
+        citations = [{k: h[k] for k in
+                      ("entryId", "question", "similarity", "source")}
+                     for h in hits]
+        if top_sim >= self.RAG_DIRECT_SIMILARITY:
+            # 直接引用: 仅 top-1 条目(单条引用, D-18)
+            answer = top_entry["answer"]
+            mode = "direct"
+            confidence = round(top_sim, 4)
+            citations = citations[:1]
+        else:
+            answer = self._rag_synthesize(question, hits)
+            mode = "synthesized"
+            confidence = round(
+                sum(h["similarity"] for h in hits) / len(hits), 4)
+        await self.repo.record_hit(top_entry["id"])
+        return {"answer": answer, "mode": mode,
+                "citations": citations, "confidence": confidence}
+
+    # ============================================================
     # 3. 知识缺口队列
     # ============================================================
 

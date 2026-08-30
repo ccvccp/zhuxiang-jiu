@@ -1,7 +1,7 @@
-# AI智能知识库训练模块设计文档 v1.1
+# AI智能知识库训练模块设计文档 v1.2
 
-> **版本**: v1.1（P0+P1+P2+P2.5 已实现，P3 规划中）
-> **状态**: 三期开发完成，数据闭环修复完成
+> **版本**: v1.2（P0+P1+P2+P2.5+P3.1 已实现，P3.2/P3.3 规划中）
+> **状态**: 四期开发完成（P0~P2.5 + P3.1 RAG 核心），chat 接线待实施
 > **定位**: 站点统一知识底座——通过对话教学、文档/图片/视频上传、全网抓取三源持续训练，经治理流水线（合规筛查/相似去重/人工审核/自动过审）沉淀为可检索、可进化、可分发的知识资产，供 chat/product/attract 等模块消费。
 
 ---
@@ -192,7 +192,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 | 文件 | 规模 | 覆盖 |
 |---|---|---|
-| test_knowledge_routes.py | 80 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取 + P2 全部 6 项 + P2.5 修复 7 项（hit 计数/miss 边界/增量扫描/连胜打断/通知+幂等） |
+| test_knowledge_routes.py | 88 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取 + P2 全部 6 项 + P2.5 修复 7 项（hit 计数/miss 边界/增量扫描/连胜打断/通知+幂等）+ P3.1 RAG 8 项（三态/融合去重/引用/计数/llm 回退/参数校验） |
 | test_knowledge_quality_scheduler.py | 10 断言 | 单轮扫描/淘汰/保留/开关/周期下限/启动幂等/停止 |
 
 ---
@@ -201,7 +201,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 | 方向 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎（详见第九章 D-18 设计） | 高 | **已设计，待实施** |
+| **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎（详见第九章 D-18 设计） | 高 | **P3.1 核心已实施，P3.2 chat 接线待实施** |
 | **检索升级** | 倒排+BM25 或 Embedding 语义向量（provider 双轨：rule 轨 2-gram / llm 轨 Embedding），突破 2000 条扫描瓶颈 | 高 | 待排期 |
 | **LLM 轨落地** | 图片视觉理解（视觉大模型自动生成描述）、视频抽帧+ASR 自动时间轴、抓取内容智能清洗（D-14 既有规划） | 中 | 待排期 |
 | **消费方扩展** | product/attract 实际拉取链路（当前仅有 distribution_suggest 建议无消费） | 中 | 待排期 |
@@ -216,6 +216,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | P1 三源接入 | 2026-08-30 | 对话教学 + 文档分块 + 多模态 rule 轨 + 白名单抓取（12 端点，D-14/D-15） |
 | P2 智能进化 | 2026-08-30 | 质量淘汰/缺口摘要/渐进信任/分发建议/后台调度器（6 端点，D-16） |
 | P2.5 数据闭环 | 2026-08-30 | chat 检索接线修复 / missCount 埋点 / KEYS→SCAN / sweep 增量化 / 连胜判定修正 / 缺口通知飞轮 |
+| P3.1 RAG 核心 | 2026-08-30 | rag_answer（置信分级路由 direct≥0.50 实测校准 / synthesized≥0.25 / unsolved）+ rule 轨融合生成 + 引用溯源 + 计数联动 + POST /api/knowledge/ask 公开端点（33 端点） |
 
 ---
 
@@ -229,10 +230,10 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 单一阈值（现状 min_similarity=0.10）无法区分"该直接引用"与"该融合补充"。RAG 入口按 top-1 相似度分三级路由：
 
 ```
-                        ┌─ top1 ≥ 0.55 ──> direct（直接引用）
+                        ┌─ top1 ≥ 0.50 ──> direct（直接引用）
                         │   单条目精确命中，返回该条目答案 + 单条引用
  top-k 召回(k=3) ──> ───┤
-                        ├─ 0.25 ≤ top1 < 0.55 ──> synthesized（融合生成）
+                        ├─ 0.25 ≤ top1 < 0.50 ──> synthesized（融合生成）
                         │   多条目去重后融合，答案带 [n] 引用标注
                         │   （仅 1 条时退化为单条引用式融合）
                         │
@@ -242,7 +243,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
                         └─ 无候选(余弦=0) ──> unsolved（无最近邻，不计 miss）
 ```
 
-**阈值依据**: 2-gram 余弦下，同义改写通常 ≥0.55，相关补充 0.25~0.55，弱相关 <0.25；实施时以测试校准微调。
+**阈值校准（实施实测）**: entry 向量含 keywords ×2 加权，完全同文本余弦约 0.51（低于 1.0），direct 阈值由设计值 0.55 校准为 **0.50**（恰好放行同文本命中，且测试验证改写问题落 synthesized）。
 
 ### 9.2 rule 轨融合生成算法（纯标准库）
 
@@ -314,10 +315,10 @@ chat 的转人工判定（unresolvedCount）逻辑不变。
 
 ### 9.7 实施排期
 
-| 阶段 | 内容 | 交付物 |
+| 阶段 | 内容 | 状态 |
 |---|---|---|
-| **P3.1 RAG 核心** | rag_answer（分级路由+rule 轨融合+计数联动）+ /ask 端点 + 测试（direct/synthesized/unsolved 三态、去重、引用、计数、llm 轨回退 rule） | knowledge_service + routes + 测试 |
-| **P3.2 chat 接线** | chat_service 消费 rag_answer，回复带 citations + 动态置信度，chat 测试回归 | chat_service + 测试 |
+| **P3.1 RAG 核心** | rag_answer（分级路由+rule 轨融合+计数联动）+ /ask 端点 + 测试（direct/synthesized/unsolved 三态、去重、引用、计数、llm 轨回退 rule） | **✅ 已实施** |
+| **P3.2 chat 接线** | chat_service 消费 rag_answer，回复带 citations + 动态置信度，chat 测试回归 | 待实施 |
 | **P3.3 LLM 轨（预留）** | provider="llm" 接入大模型 synthesize，引用携带与幻觉治理 | 接入时实施 |
 
 ### 9.8 边界与约束

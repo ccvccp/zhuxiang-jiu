@@ -623,6 +623,82 @@ async def main():
            f"第二次实际{n2}")
 
     # ============================================================
+    # 8.7 P3.1 RAG 问答层(D-18): 三态路由 / 融合去重 / 引用 / 计数
+    # ============================================================
+
+    # 精确问题 → direct(直接引用)
+    rag_direct = await svc.rag_answer("竹香酒是怎么酿造的")
+    record("RAG-精确问题direct模式",
+           rag_direct["mode"] == "direct"
+           and rag_direct["confidence"] >= 0.5
+           and len(rag_direct["citations"]) == 1
+           and "竹笋" in rag_direct["answer"],
+           f"实际{rag_direct}")
+
+    # 相关问题(改写) → synthesized(融合生成, 带引用)
+    rag_synth = await svc.rag_answer("竹香酒的酿造原料和工艺是什么")
+    record("RAG-相关改写问题synthesized模式",
+           rag_synth["mode"] == "synthesized"
+           and rag_synth["citations"]
+           and "为您整理" in rag_synth["answer"]
+           and rag_synth["confidence"] > 0,
+           f"实际mode={rag_synth['mode']}, "
+           f"conf={rag_synth['confidence']}")
+
+    # 无关问题 → unsolved(低置信不融合)
+    rag_unsolved = await svc.rag_answer("今天股市行情怎么样")
+    record("RAG-无关问题unsolved模式",
+           rag_unsolved["mode"] == "unsolved"
+           and rag_unsolved["confidence"] == 0.0
+           and rag_unsolved["citations"] == []
+           and rag_unsolved["answer"] == "",
+           f"实际{rag_unsolved}")
+
+    # 融合去重: 同义条目只保留相似度最高者
+    e1 = await _publish(svc, "竹香酒保存方法说明",
+                        "竹香酒应存放于阴凉避光处, 直立放置。")
+    dup_entry = await svc.repo.get_entry(e1["id"])
+    dup_entry["question"] = "竹香酒的保存方法是啥"
+    dup_entry["vector"] = __import__(
+        "repositories.knowledge_repository", fromlist=["build_vector"]
+    ).build_vector(dup_entry["question"], dup_entry.get("keywords", ""))
+    await svc.repo.save_entry(dup_entry)
+    rag_dup = await svc.rag_answer("竹香酒怎么保存比较好")
+    same_count = sum(1 for c in rag_dup["citations"]
+                     if "保存" in c["question"])
+    record("RAG-同义条目融合去重",
+           rag_dup["mode"] in ("direct", "synthesized")
+           and same_count <= 1,
+           f"模式{rag_dup['mode']}, 同义引用数{same_count}, "
+           f"引用{[c['question'] for c in rag_dup['citations']]}")
+
+    # 计数联动: direct/synthesized 计 hit, unsolved 计 miss
+    if rag_synth["citations"]:
+        cit_id = rag_synth["citations"][0]["entryId"]
+        entry_cit = await svc.repo.get_entry(cit_id)
+        record("RAG-answered计入hitCount",
+               int(entry_cit.get("hitCount", 0)) >= 1,
+               f"hitCount={entry_cit.get('hitCount')}")
+    # llm 轨未接入自动回退 rule
+    rag_llm = await svc.rag_answer("竹香酒是怎么酿造的", provider="llm")
+    record("RAG-llm轨未接入回退rule",
+           rag_llm["mode"] == rag_direct["mode"]
+           and rag_llm["answer"] == rag_direct["answer"],
+           f"实际mode={rag_llm['mode']}")
+    # 非法 provider 拒绝
+    try:
+        await svc.rag_answer("x", provider="gpt")
+        record("RAG-非法provider拒绝", False, "未抛出异常")
+    except ValueError:
+        record("RAG-非法provider拒绝", True)
+    # 空问题拒绝
+    try:
+        await svc.rag_answer("  ")
+        record("RAG-空问题拒绝", False, "未抛出异常")
+    except ValueError:
+        record("RAG-空问题拒绝", True)
+
+    # ============================================================
     # 9. 统计(最终)
     # ============================================================
     stats = await svc.stats()

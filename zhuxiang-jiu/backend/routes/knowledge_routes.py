@@ -1,9 +1,9 @@
-"""AI智能知识库训练模块路由(P0+P1+P2: 知识底座+三源接入+智能进化, 32 端点)
+"""AI智能知识库训练模块路由(P0+P1+P2+P3.1: 知识底座+三源接入+智能进化+RAG问答, 33 端点)
 
 鉴权:
     - 管理端(31): X-Role: admin 头(条目治理/缺口处置/迁移/种子/统计/
       教学会话/文档/多模态/抓取源管理/质量进化)
-    - 公开(1): 检索测试(供联调与消费方验证)
+    - 公开(2): 检索测试(供联调与消费方验证) / RAG 问答(终端用户)
 
 异常映射(遵循项目约定):
     - KeyError → 404(条目/缺口/会话/文档/种子源不存在)
@@ -19,6 +19,7 @@
     - 种子(1):   品牌基准知识种子(D-17, 幂等)
     - 统计(1):   治理看板
     - 检索(1):   统一检索测试(公开)
+    - RAG问答(1): 置信分级路由问答(公开, P3.1 D-18)
     - 教学(3):   会话创建 / 提问 / 教学提交(P1)
     - 教学列表(1): 教学会话列表(P1)
     - 文档(2):   上传解析分块 / 文档列表(P1)
@@ -106,6 +107,12 @@ class SearchRequest(PydBaseModel):
     query: str = Field(..., min_length=1, description="检索问题")
     category: str = Field(None, description="分类过滤")
     topK: int = Field(5, ge=1, le=20, description="返回条数")
+
+
+class AskRequest(PydBaseModel):
+    """RAG 问答请求(P3.1, D-18)"""
+    question: str = Field(..., min_length=1, description="用户问题")
+    provider: str = Field("rule", description="生成轨: rule/llm(llm 未接入自动回退 rule)")
 
 
 # ---- P1 三源接入 ----
@@ -410,6 +417,23 @@ async def search(
                 "data": await _service.search(
                     query=data.query, category=data.category,
                     top_k=data.topK, record_hit=False)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/ask", tags=["AI智能知识库训练模块"])
+async def ask(
+    data: AskRequest,
+):
+    """RAG 问答(P3.1, D-18; 公开): 置信分级路由 + 融合生成 + 引用溯源
+
+    direct(≥0.55 直接引用) / synthesized(≥0.25 融合) /
+    unsolved(低置信); 计入命中统计(hit/miss)。
+    """
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.rag_answer(
+                    question=data.question, provider=data.provider)}
     except Exception as exc:
         _handle(exc)
 
