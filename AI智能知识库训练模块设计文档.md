@@ -212,6 +212,19 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 ---
 
+## 7.5 P4 规划（生产化阶段，2026-08-30 与用户对齐）
+
+> **背景**：知识库后端能力（P0~P3.7）已完备，但盘点发现四个生产化断点——本阶段从"能力建设"转向"生产落地"。四项全选，按依赖顺序实施：P4.1 部署加固 → P4.2 监控缓存 → P4.3 前端接线 → P4.4 供应链。
+
+| 方向 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **P4.1 部署加固** | LLM 14 个环境变量（LLM_API_KEY/BASE_URL/MODEL/TIMEOUT/ENABLED/VISION_TIMEOUT、EMBEDDING_MODEL/KNOWLEDGE_EMBEDDING、KNOWLEDGE_MEDIA_LLM/VISION_MODEL、KNOWLEDGE_CRAWL_LLM、ASR_MODEL、KNOWLEDGE_RERANK/RERANK_MODEL）纳入 docker-compose backend 环境（默认关，密钥经 .env 注入不落盘）+ 启动时开关状态日志（哪些轨生效/回退一目了然）；功能开关默认 off 保持零成本，上线按需逐轨开启 | 高 | 待实施 |
+| **P4.2 监控与缓存** | 应用级 /metrics 暴露（QPS/延迟/错误率 + LLM 调用成功率/回退次数/各轨开关状态，纯标准库计数器，不引入 prometheus_client）+ RAG 检索缓存层（同问题 embedding 缓存 + 检索结果 TTL 缓存，降低重复问答成本） | 高 | 待实施 |
+| **P4.3 前端接线** | 知识库管理后台页面（条目审核/发布/缺口处理/统计看板/三源接入操作入口，接既有 34 端点）+ 商城客服聊天窗接 RAG（chat 模块前端化，透出 citations/ragMode/置信度）——让 P0~P3.7 成果有用户入口 | 高 | 待实施 |
+| **P4.4 供应链补齐** | checkout/inventory/shipping/warehouse 四件套后端对齐前端已验证的事务能力（库存扣减预留/发货状态机/入库上架/出库核销，含并发锁与测试）——消除前端已实现、后端空心化的倒挂 | 中 | 待实施 |
+
+---
+
 ## 八、迭代历史
 
 | 阶段 | 日期 | 内容 |
