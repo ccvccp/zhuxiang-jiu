@@ -10,9 +10,17 @@
   4. 死锁检测: 100 并发必须在 10s 内全部完成
 
 运行: py probe_concurrency.py
+
+环境: 脚本自含 asyncio 单进程模式设定(探针验证 asyncio.Lock 回归,
+不依赖 Redis; CI 该 job 无 env, 默认 redis 模式会连不上 Redis)
 """
 import asyncio
+import os
 import time
+
+# 必须在 import main 之前设定(锁工厂与存储工厂动态读取)
+os.environ.setdefault("LOCK_MODE", "asyncio")
+os.environ.setdefault("STORE_MODE", "asyncio")
 
 import httpx
 

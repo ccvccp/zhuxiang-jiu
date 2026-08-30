@@ -163,18 +163,26 @@ jobs:
           context: zhuxiang-jiu/backend
           file: zhuxiang-jiu/backend/Dockerfile
           push: false
+          # load: true 将 buildx 构建结果载入本地 docker daemon,
+          # 否则镜像只存在于 BuildKit 缓存, 后续 docker run 找不到镜像
+          # 会尝试从 Docker Hub 拉取 → exit 125(该 job 自创建即失效)
+          load: true
           tags: zhuxiang-decision-api:ci-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Run tests in container
         # Dockerfile 只装生产依赖(requirements.txt), 容器内无 pytest。
-        # 挂载 requirements-dev.txt 进容器临时安装测试依赖后跑 pytest。
+        # 挂载 requirements-dev.txt 与测试文件进容器临时安装后跑 pytest。
+        # (镜像只 COPY 源码不含 test_*.py, 测试文件经挂载注入)
         run: |
           docker run --rm \
             -v $PWD/requirements-dev.txt:/tmp/requirements-dev.txt:ro \
+            -v $PWD/conftest.py:/app/conftest.py:ro \
+            -v $PWD/pytest.ini:/app/pytest.ini:ro \
+            -v $PWD/test_:/app/test_ \
             zhuxiang-decision-api:ci-test \
-            sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && pytest -v --junitxml=/tmp/test-results-docker.xml"
+            sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && cd /app && pytest test_ -v --junitxml=/tmp/test-results-docker.xml"
 
       - name: Extract test results from container
         if: always()
