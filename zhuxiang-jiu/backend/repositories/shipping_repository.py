@@ -39,6 +39,12 @@ class ShippingClaimRepository:
             return await self._redis_set_claim(region, agent_id)
         return self._mem_set_claim(region, agent_id)
 
+    async def remove_claim(self, region: str) -> None:
+        """移除区域认领(release 释放用, 区域可再被认领)"""
+        if is_redis_mode():
+            return await self._redis_remove_claim(region)
+        return self._mem_remove_claim(region)
+
     async def list_all(self) -> dict:
         """列出所有认领记录(返回副本避免外部修改)"""
         if is_redis_mode():
@@ -55,6 +61,9 @@ class ShippingClaimRepository:
 
     def _mem_set_claim(self, region: str, agent_id) -> None:
         self.store["shipping_claims"][region] = agent_id
+
+    def _mem_remove_claim(self, region: str) -> None:
+        self.store["shipping_claims"].pop(region, None)
 
     def _mem_list_all(self) -> dict:
         return dict(self.store["shipping_claims"])
@@ -81,6 +90,10 @@ class ShippingClaimRepository:
     async def _redis_set_claim(self, region: str, agent_id) -> None:
         client = await get_redis_client()
         await client.hset(_k("shipping_claims"), region, agent_id)
+
+    async def _redis_remove_claim(self, region: str) -> None:
+        client = await get_redis_client()
+        await client.hdel(_k("shipping_claims"), region)
 
     async def _redis_list_all(self) -> dict:
         client = await get_redis_client()

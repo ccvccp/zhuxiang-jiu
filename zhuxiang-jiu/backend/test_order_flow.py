@@ -200,14 +200,14 @@ class TestCheckoutSubmit:
     """订单结算端点测试"""
 
     def test_checkout_success(self):
-        """正常下单: 创建订单"""
+        """正常下单: 创建订单(P4.4 事务结算)"""
         resp = _submit_checkout()
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
         assert data["orderId"].startswith("ZX")
         assert len(data["orderId"]) >= 6
-        assert data["status"] == "pending"
+        assert data["status"] == "已付款"
 
     def test_checkout_order_id_unique(self):
         """连续下单: 订单ID唯一"""
@@ -218,12 +218,14 @@ class TestCheckoutSubmit:
         assert len(ids) == 5
 
     def test_checkout_empty_items(self):
-        """空商品列表: 仍可下单(允许空订单)"""
+        """空商品列表: preflight 中止(P4.4 契约)"""
         resp = client.post("/api/checkout/submit", json={
             "items": [], "consignee": None, "payment": None,
         })
         assert resp.status_code == 200
-        assert resp.json()["success"] is True
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error"] == "购物车为空"
 
     def test_checkout_consignee_passthrough(self):
         """收货人信息透传"""
@@ -270,21 +272,26 @@ class TestInventoryOps:
         assert resp.json()["stockAfter"] == 520
 
     def test_deduct_product_not_found(self):
-        """产品不存在: 404"""
+        """产品不存在: 事务失败(200 + success=False, P4.4 契约)"""
         resp = _deduct_inventory(product_id="NOT-EXIST")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "商品不存在" in data["error"]
 
     def test_restock_product_not_found(self):
-        """回补不存在产品: 404"""
+        """回补不存在产品: 事务失败"""
         resp = client.post("/api/inventory/restock", json={
             "productId": "NOT-EXIST", "quantity": 1,
         })
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
 
     def test_deduct_missing_product_id(self):
-        """缺失 productId: 422"""
+        """缺失 productId/items: preflight 中止(空清单)"""
         resp = client.post("/api/inventory/deduct", json={"quantity": 1})
-        assert resp.status_code == 422
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
 
     def test_deduct_then_restock_consistency(self):
         """扣减→回补数据一致性"""
@@ -296,10 +303,12 @@ class TestInventoryOps:
         assert resp.json()["stockAfter"] == 480
 
     def test_deduct_zero_quantity(self):
-        """扣减0: 不变更库存"""
+        """扣减0: 拒绝(多行契约 qty 必须>0), 库存不变"""
         resp = _deduct_inventory(quantity=0)
         assert resp.status_code == 200
-        assert resp.json()["stockAfter"] == 500
+        data = resp.json()
+        assert data["success"] is False
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
 
 
 # ============================================================
@@ -512,15 +521,16 @@ class TestOrderFlowE2E:
         detail_resp = client.get("/api/product/ZX42-2026L07")
         assert detail_resp.status_code == 200
 
-        # 4. 提交订单结算
+        # 4. 提交订单结算(P4.4: 事务内已扣库存)
         checkout_resp = _submit_checkout()
         assert checkout_resp.status_code == 200
+        assert checkout_resp.json()["success"] is True
         order_id = checkout_resp.json()["orderId"]
 
-        # 5. 库存扣减
+        # 5. 库存扣减(结算已扣 2, 再扣 2 → 496)
         deduct_resp = _deduct_inventory()
         assert deduct_resp.status_code == 200
-        assert deduct_resp.json()["stockAfter"] == 498  # 500-2
+        assert deduct_resp.json()["stockAfter"] == 496  # 500-2(结算)-2(扣减)
 
         # 6. 创建支付订单
         pay_resp = _create_payment(order_id, member_id=str(member_id))
@@ -555,9 +565,12 @@ class TestOrderFlowE2E:
         assert pay_resp.status_code in (400, 401, 403, 422)
 
     def test_order_flow_with_invalid_product(self):
-        """使用不存在的产品下单: 结算仍可成功(无校验),库存扣减失败"""
+        """使用不存在的产品下单: 结算事务失败(阶段4库存校验),库存扣减也失败"""
         checkout_resp = _submit_checkout(product_id="NOT-EXIST")
         assert checkout_resp.status_code == 200
-        # 库存扣减应失败
+        # P4.4: 结算事务在阶段4校验商品存在性, 失败回滚
+        assert checkout_resp.json()["success"] is False
+        # 库存扣减同样失败(事务失败)
         deduct_resp = _deduct_inventory(product_id="NOT-EXIST")
-        assert deduct_resp.status_code == 404
+        assert deduct_resp.status_code == 200
+        assert deduct_resp.json()["success"] is False

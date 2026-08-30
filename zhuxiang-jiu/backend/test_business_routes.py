@@ -215,49 +215,126 @@ class TestAgentDowngrade:
 # ============================================================
 
 class TestCheckoutSubmit:
-    """订单结算提交端点测试"""
+    """订单结算端点测试(P4.4 9 阶段事务契约)"""
+
+    def setup_method(self):
+        """每个测试前重置数据, 保证隔离"""
+        from repositories.store import reset_store
+        reset_store()
 
     def test_submit_success(self):
-        """正常下单"""
+        """正常下单: 9 阶段事务全过"""
         response = client.post("/api/checkout/submit", json={
-            "items": [
-                {"productId": "ZX42-2026L07", "quantity": 2, "price": 599},
-            ],
-            "consignee": {"name": "张三", "phone": "13800001111", "address": "济南市"},
-            "payment": {"method": "wechat", "amount": 1198},
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典", "price": 599, "qty": 2}],
+            "memberLevel": "L3",
+            "points": 100,
+            "paymentMethod": "wechat",
+            "region": "taian",
         })
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["orderId"].startswith("ZX")
-        assert data["status"] == "pending"
-        assert "创建成功" in data["message"]
+        assert data["orderNo"].startswith("ZX")
+        d = data["details"]
+        # 价格计算: 1198 → L3 92 折=1102.16 → 满1000减80 → 积分抵1 → 运费0(2瓶免)
+        assert d["originalTotal"] == 1198
+        assert d["finalAmount"] == round(1198 * 0.92 - 80 - 1.0, 2)
+        assert d["pointsUsed"] == 100
+        assert d["shipperType"] == "manufacturer"   # 未认领区域 → 厂家直供
+        assert data["asyncOps"] == ["order_notify", "blockchain_notarize"]
+        # 兼容字段
+        assert data["orderId"] == data["orderNo"]
+        assert data["status"] == "已付款"
 
-    def test_submit_empty_items(self):
-        """空订单(允许创建,前端应拦截)"""
-        response = client.post("/api/checkout/submit", json={
-            "items": [],
-            "consignee": None,
-            "payment": None,
-        })
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-
-    def test_submit_order_id_format(self):
-        """订单号格式验证: ZX + 6位数字"""
+    def test_submit_empty_items_aborts(self):
+        """空购物车: preflight 中止(对齐前端契约)"""
         response = client.post("/api/checkout/submit", json={"items": []})
+        assert response.status_code == 200
         data = response.json()
-        order_id = data["orderId"]
-        assert order_id.startswith("ZX")
-        assert len(order_id) == 8  # ZX + 6 digits
+        assert data["success"] is False
+        assert data["error"] == "购物车为空"
+        assert "failedStage" not in data   # 中止未开启事务
 
-    def test_submit_order_stored(self):
-        """订单应存入 mock_store"""
-        before = len(_mock_store["orders"])
-        client.post("/api/checkout/submit", json={"items": [{"test": True}]})
-        after = len(_mock_store["orders"])
-        assert after == before + 1
+    def test_submit_insufficient_stock_rolls_back(self):
+        """库存不足: 阶段4失败回滚, 库存不变"""
+        response = client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典",
+                       "price": 599, "qty": 99999}],
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert data["failedStage"] == "阶段4-库存扣减"
+        assert "库存不足" in data["error"]
+        # 库存未被污染
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
+
+    def test_submit_invalid_coupon_rolls_back(self):
+        """无效优惠券: 阶段5失败, 已扣库存恢复"""
+        response = client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典",
+                       "price": 599, "qty": 1}],
+            "couponCode": "NO_SUCH_CODE",
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert data["failedStage"] == "阶段5-优惠券核销"
+        # 补偿回滚: 库存恢复
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
+        # 订单未落库
+        assert _mock_store["checkout_orders"] == []
+
+    def test_submit_insufficient_points_rolls_back(self):
+        """积分不足: 阶段6失败, 库存/订单全量回滚"""
+        response = client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典",
+                       "price": 599, "qty": 1}],
+            "memberLevel": "L1", "points": 99999,
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert data["failedStage"] == "阶段6-积分扣减"
+        assert "积分不足" in data["error"]
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
+        assert _mock_store["checkout_points"]["L1"] == 1000
+
+    def test_submit_success_persists_all(self):
+        """成功下单: 订单/分润/库存扣减/积分变动全落库"""
+        before = _mock_store["inventory"]["ZX42-2026L07"]["stock"]
+        response = client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典",
+                       "price": 599, "qty": 2}],
+            "memberLevel": "L3",
+        })
+        assert response.json()["success"] is True
+        # 库存扣减
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == before - 2
+        # 订单 + 分润记录落库
+        order = _mock_store["checkout_orders"][-1]
+        assert order["status"] == "已付款"
+        assert order["points_used"] == 0
+        profit = _mock_store["profit_records"][-1]
+        assert profit["platform_share"] == round(order["final_amount"] * 0.8, 2)
+        assert profit["hotel_share"] == round(order["final_amount"] * 0.2, 2)
+
+    def test_submit_with_agent_shipper_accrues_fee(self):
+        """已认领区域下单: 发货方为代理商 + 5% 服务费计提"""
+        # agent 1 认领 region
+        client.post("/api/agent-shipping/claim", json={"agentId": 1, "region": "taian"})
+        response = client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典",
+                       "price": 599, "qty": 2}],
+            "region": "taian",
+        })
+        data = response.json()
+        assert data["success"] is True
+        assert data["details"]["shipperType"] == "agent"
+        assert data["details"]["shipperAgentName"] == "泰安市级代理商"
+        final = data["details"]["finalAmount"]
+        assert data["details"]["manufacturerServiceFee"] == round(final * 0.05, 2)
+        # 服务费记录落库
+        fee = _mock_store["service_fees"][-1]
+        assert fee["service_rate"] == 0.05
+        assert fee["status"] == "待发放"
 
 
 # ============================================================
@@ -265,87 +342,129 @@ class TestCheckoutSubmit:
 # ============================================================
 
 class TestInventoryDeduct:
-    """库存扣减端点测试"""
+    """库存扣减端点测试(P4.4 多行事务契约)"""
 
-    def test_deduct_success(self):
-        """正常扣减: 2 件"""
-        # 先确保有库存
-        _mock_store["inventory"]["ZX42-2026L07"]["stock"] = 500
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
+
+    def test_deduct_success_single_line(self):
+        """单行扣减: 多行契约 + 兼容字段"""
         response = client.post("/api/inventory/deduct", json={
-            "productId": "ZX42-2026L07",
-            "quantity": 2,
+            "items": [{"id": "ZX42-2026L07", "qty": 2}],
         })
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
+        assert data["operation"] == "deduct"
+        assert data["details"]["totalQty"] == 2
+        assert data["details"]["lines"][0]["after"] == 498
+        assert data["details"]["alertsTriggered"] == 0
+        assert data["asyncOps"] == ["inventory_notify", "blockchain_notarize"]
+        # 单行兼容字段
+        assert data["productId"] == "ZX42-2026L07"
         assert data["stockAfter"] == 498
         assert data["txId"].startswith("TX")
 
+    def test_deduct_legacy_single_product(self):
+        """旧单品契约兼容: productId/quantity"""
+        response = client.post("/api/inventory/deduct", json={
+            "productId": "ZX42-2026L07", "quantity": 2,
+        })
+        data = response.json()
+        assert data["success"] is True
+        assert data["stockAfter"] == 498
+
+    def test_deduct_multi_line_with_flow_and_alert(self):
+        """多行扣减: 流水落库 + 低库存预警"""
+        _mock_store["inventory"]["ZX53-2026N20"]["stock"] = 12
+        response = client.post("/api/inventory/deduct", json={
+            "items": [
+                {"id": "ZX42-2026L07", "name": "竹香经典", "qty": 1},
+                {"id": "ZX53-2026N20", "name": "年份珍藏", "qty": 5},
+            ],
+            "reason": "订单出库", "refNo": "ZX_TEST_001",
+        })
+        data = response.json()
+        assert data["success"] is True
+        assert data["details"]["totalQty"] == 6
+        # 预警: 12-5=7 ∈ (0,10]
+        assert data["details"]["alertsTriggered"] == 1
+        # 流水落库(2 行出库)
+        flows = _mock_store["inventory_logs"]
+        assert len(flows) == 2
+        assert flows[0]["type"] == "出库"
+        assert flows[0]["ref_no"] == "ZX_TEST_001"
+        # 预警记录落库
+        assert _mock_store["stock_alerts"][-1]["stock"] == 7
+
     def test_deduct_insufficient_stock(self):
-        """库存不足: 返回 success=False"""
+        """库存不足: 事务失败, 库存不变"""
         _mock_store["inventory"]["ZX42-2026L07"]["stock"] = 5
         response = client.post("/api/inventory/deduct", json={
-            "productId": "ZX42-2026L07",
-            "quantity": 10,
+            "productId": "ZX42-2026L07", "quantity": 10,
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert "库存不足" in data["error"]
+        assert data["failedStage"] == "阶段3-库存扣减"
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 5
+
+    def test_deduct_partial_failure_rolls_back(self):
+        """多行部分失败: 已扣行补偿恢复"""
+        response = client.post("/api/inventory/deduct", json={
+            "items": [
+                {"id": "ZX42-2026L07", "qty": 10},
+                {"id": "NO_SUCH_PRODUCT", "qty": 1},
+            ],
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert "商品不存在" in data["error"]
+        # 第一行已扣但整体回滚
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
+        assert _mock_store["inventory_logs"] == []
+
+    def test_deduct_product_not_found(self):
+        """产品不存在(单品): 事务失败(200 + success=False)"""
+        response = client.post("/api/inventory/deduct", json={
+            "productId": "NOT-EXIST", "quantity": 1,
         })
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is False
-        assert "库存不足" in data["error"]
+        assert "商品不存在" in data["error"]
 
-    def test_deduct_product_not_found(self):
-        """产品不存在: 404"""
-        response = client.post("/api/inventory/deduct", json={
-            "productId": "NOT-EXIST",
-            "quantity": 1,
-        })
-        assert response.status_code == 404
-
-    def test_deduct_exact_stock(self):
-        """扣减数=库存数(刚好清零)"""
+    def test_deduct_exact_stock_to_zero(self):
+        """扣减数=库存数(刚好清零, 不触发预警)"""
         _mock_store["inventory"]["ZX42-2026L05"]["stock"] = 10
         response = client.post("/api/inventory/deduct", json={
-            "productId": "ZX42-2026L05",
-            "quantity": 10,
+            "productId": "ZX42-2026L05", "quantity": 10,
         })
         data = response.json()
         assert data["success"] is True
         assert data["stockAfter"] == 0
+        assert data["details"]["alertsTriggered"] == 0   # 0 不触发(前端语义)
 
-    def test_deduct_zero_quantity(self):
-        """扣减 0 件(应成功,库存不变)"""
-        _mock_store["inventory"]["ZX42-2026L07"]["stock"] = 100
+    def test_deduct_zero_quantity_rejected(self):
+        """qty=0 拒绝(多行契约必须>0)"""
         response = client.post("/api/inventory/deduct", json={
-            "productId": "ZX42-2026L07",
-            "quantity": 0,
+            "items": [{"id": "ZX42-2026L07", "qty": 0}],
         })
         data = response.json()
-        assert data["success"] is True
-        assert data["stockAfter"] == 100
+        assert data["success"] is False
+        assert "必须>0" in data["error"]
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
 
-    def test_deduct_negative_quantity_blocked(self):
-        """扣减负数: Pydantic 校验拦截(ge=0,与 restock 对称)"""
+    def test_deduct_negative_quantity_rejected(self):
+        """负数数量拒绝(不再走 Pydantic 422, 事务校验拒绝)"""
         _mock_store["inventory"]["ZX42-2026L07"]["stock"] = 100
         response = client.post("/api/inventory/deduct", json={
-            "productId": "ZX42-2026L07",
-            "quantity": -10,
+            "productId": "ZX42-2026L07", "quantity": -10,
         })
-        # 1. HTTP 状态码:422 Unprocessable Entity(Pydantic 校验失败)
-        assert response.status_code == 422
-        # 2. 响应体为 FastAPI 标准 422 格式 {"detail": [...]}
-        body = response.json()
-        assert "detail" in body
-        assert isinstance(body["detail"], list)
-        assert len(body["detail"]) > 0
-        # 3. 错误应定位到 quantity 字段(ge=0 约束触发)
-        detail_str = str(body["detail"])
-        assert "quantity" in detail_str
-        # 4. 错误信息应体现非负约束(ge=0,greater_than_equal)
-        assert "greater" in detail_str.lower()
-        # 5. 副作用验证:库存不应被修改
+        data = response.json()
+        assert data["success"] is False
         assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 100
-        # 6. Content-Type 应为 JSON
-        assert "application/json" in response.headers.get("content-type", "")
 
 
 # ============================================================
@@ -353,47 +472,47 @@ class TestInventoryDeduct:
 # ============================================================
 
 class TestInventoryRestock:
-    """库存回补端点测试"""
+    """库存回补端点测试(P4.4 多行契约)"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
 
     def test_restock_success(self):
-        """正常回补: +50"""
-        _mock_store["inventory"]["ZX42-2026L07"]["stock"] = 100
+        """正常回补: +50(多行契约 + 单行兼容字段)"""
         response = client.post("/api/inventory/restock", json={
-            "productId": "ZX42-2026L07",
-            "quantity": 50,
+            "items": [{"id": "ZX42-2026L07", "qty": 50}],
+            "reason": "退货回仓", "refNo": "RT_TEST_001",
         })
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["stockAfter"] == 150
+        assert data["operation"] == "restock"
+        assert data["details"]["totalQty"] == 50
+        assert data["details"]["reason"] == "退货回仓"
+        assert data["stockAfter"] == 550
         assert data["txId"].startswith("TX")
+        # 流水落库(入库)
+        assert _mock_store["inventory_logs"][-1]["type"] == "入库"
 
     def test_restock_product_not_found(self):
-        """产品不存在: 404"""
+        """产品不存在: 事务失败"""
         response = client.post("/api/inventory/restock", json={
-            "productId": "NOT-EXIST",
-            "quantity": 10,
+            "productId": "NOT-EXIST", "quantity": 10,
         })
-        assert response.status_code == 404
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert "商品不存在" in data["error"]
 
-    def test_restock_zero(self):
-        """回补 0 件(库存不变)"""
-        _mock_store["inventory"]["ZX42-2026L07"]["stock"] = 50
+    def test_restock_negative_rejected(self):
+        """回补负数: 事务校验拒绝"""
         response = client.post("/api/inventory/restock", json={
-            "productId": "ZX42-2026L07",
-            "quantity": 0,
+            "productId": "ZX42-2026L07", "quantity": -10,
         })
         data = response.json()
-        assert data["success"] is True
-        assert data["stockAfter"] == 50
-
-    def test_restock_negative_blocked(self):
-        """回补负数: Pydantic 校验拦截(ge=0)"""
-        response = client.post("/api/inventory/restock", json={
-            "productId": "ZX42-2026L07",
-            "quantity": -10,
-        })
-        assert response.status_code == 422  # Pydantic Field(ge=0) validation
+        assert data["success"] is False
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 500
 
 
 # ============================================================
@@ -401,24 +520,73 @@ class TestInventoryRestock:
 # ============================================================
 
 class TestWarehouseInbound:
-    """AI智能入库端点测试"""
+    """AI智能入库端点测试(P4.4 契约: 多行+库位分配+单据流水)"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
 
     def test_inbound_success(self):
         response = client.post("/api/warehouse/inbound", json={
-            "warehouseId": "WH001",
-            "productId": "ZX42-2026L07",
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典", "qty": 10}],
+            "warehouseId": 1,
         })
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["slot"] == "A1"
-        assert "视觉验货" in data["message"]
+        assert data["operation"] == "inbound"
+        assert data["details"]["totalQty"] == 10
+        line = data["details"]["lines"][0]
+        assert line["before"] == 500 and line["after"] == 510
+        assert line["aiVerified"] is True
+        assert data["details"]["aiVerificationRate"] == 0.96
+        assert data["asyncOps"] == ["inbound_order", "stock_movement",
+                                    "blockchain_notarize"]
 
-    def test_inbound_logs_stored(self):
-        before = len(_mock_store["warehouse"]["inbound_log"])
-        client.post("/api/warehouse/inbound", json={"productId": "ZX42-2026L05"})
-        after = len(_mock_store["warehouse"]["inbound_log"])
-        assert after == before + 1
+    def test_inbound_new_product_allocates_slot(self):
+        """新商品入库: 自动分配空闲库位"""
+        response = client.post("/api/warehouse/inbound", json={
+            "items": [{"id": "NEW-PRODUCT-999", "qty": 5}],
+            "warehouseId": 1,
+        })
+        data = response.json()
+        assert data["success"] is True
+        line = data["details"]["lines"][0]
+        assert line["before"] == 0 and line["after"] == 5
+        assert line["location"] is not None   # 分配了库位
+        # 库位占用 + 库存记录落库
+        stocks = [s for s in _mock_store["warehouse_stock"]
+                  if s["product_id"] == "NEW-PRODUCT-999"]
+        assert len(stocks) == 1 and stocks[0]["stock_qty"] == 5
+        assert stocks[0]["ai_stock_status"] == "low"   # 5 <= 20
+
+    def test_inbound_persists_order_and_flow(self):
+        """入库单+库存流水攒批落库"""
+        before_orders = len(_mock_store["inbound_orders"])
+        before_flows = len(_mock_store["stock_movements"])
+        client.post("/api/warehouse/inbound", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 3}],
+        })
+        assert len(_mock_store["inbound_orders"]) == before_orders + 1
+        assert len(_mock_store["stock_movements"]) == before_flows + 1
+        assert _mock_store["stock_movements"][-1]["movement_type"] == "inbound"
+
+    def test_inbound_invalid_warehouse(self):
+        """仓库不存在: 事务失败"""
+        response = client.post("/api/warehouse/inbound", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 1}],
+            "warehouseId": 999,
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert "仓库不存在" in data["error"]
+
+    def test_inbound_empty_items(self):
+        """空清单: preflight 中止"""
+        response = client.post("/api/warehouse/inbound", json={"items": []})
+        data = response.json()
+        assert data["success"] is False
+        assert "清单为空" in data["error"]
 
 
 # ============================================================
@@ -426,23 +594,46 @@ class TestWarehouseInbound:
 # ============================================================
 
 class TestWarehouseOutbound:
-    """AI智能出库端点测试"""
+    """AI智能出库端点测试(P4.4 契约)"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
 
     def test_outbound_success(self):
         response = client.post("/api/warehouse/outbound", json={
-            "warehouseId": "WH001",
-            "productId": "ZX42-2026L07",
+            "items": [{"id": "ZX42-2026L07", "qty": 100}],
+            "warehouseId": 1,
         })
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert "波次拣选" in data["message"]
+        assert data["operation"] == "outbound"
+        assert data["details"]["totalQty"] == 100
+        assert data["details"]["lines"][0]["wavePicked"] is True
+        assert data["details"]["pickingEfficiencyGain"] == 0.50
 
-    def test_outbound_logs_stored(self):
-        before = len(_mock_store["warehouse"]["outbound_log"])
-        client.post("/api/warehouse/outbound", json={"productId": "ZX42-2026L05"})
-        after = len(_mock_store["warehouse"]["outbound_log"])
-        assert after == before + 1
+    def test_outbound_insufficient_rolls_back(self):
+        """出库不足: 事务回滚, 库存不变"""
+        response = client.post("/api/warehouse/outbound", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 600}],
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert "库存不足" in data["error"]
+        stocks = [s for s in _mock_store["warehouse_stock"]
+                  if s["warehouse_id"] == 1 and s["product_id"] == "ZX42-2026L07"]
+        assert stocks[0]["stock_qty"] == 500
+        assert _mock_store["outbound_orders"] == []
+
+    def test_outbound_stock_not_found(self):
+        """库存记录不存在: 事务失败"""
+        response = client.post("/api/warehouse/outbound", json={
+            "items": [{"id": "NO_SUCH_STOCK", "qty": 1}],
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert "库存记录不存在" in data["error"]
 
 
 # ============================================================
@@ -450,25 +641,43 @@ class TestWarehouseOutbound:
 # ============================================================
 
 class TestWarehouseStocktake:
-    """AI智能盘点端点测试"""
+    """AI智能盘点端点测试(P4.4 契约: 实盘覆盖+盈亏汇总)"""
 
-    def test_stocktake_success(self):
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
+
+    def test_stocktake_surplus_and_deficit(self):
+        """盘盈+盘亏: 差异汇总与库存覆盖"""
         response = client.post("/api/warehouse/stocktake", json={
-            "warehouseId": "WH001",
+            "items": [
+                {"id": "ZX42-2026L07", "name": "竹香经典", "actualQty": 505},
+                {"id": "ZX42-2026L05", "name": "竹韵佳酿", "actualQty": 290},
+            ],
+            "warehouseId": 1, "method": "drone_ai",
         })
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["totalSlots"] >= 0
-        assert data["occupiedSlots"] >= 0
-        assert data["emptySlots"] == data["totalSlots"] - data["occupiedSlots"]
-        assert data["accuracy"] == 0.98
+        d = data["details"]
+        assert d["surplusQty"] == 5      # 505 - 500
+        assert d["deficitQty"] == 10     # 300 - 290
+        assert d["aiAccuracy"] == 0.98
+        types = {line["diffType"] for line in d["diffLines"]}
+        assert types == {"surplus", "deficit"}
+        # 库存被实盘值覆盖
+        stocks = {s["product_id"]: s["stock_qty"]
+                  for s in _mock_store["warehouse_stock"] if s["warehouse_id"] == 1}
+        assert stocks["ZX42-2026L07"] == 505
+        assert stocks["ZX42-2026L05"] == 290
+        # 盘点记录落库
+        assert _mock_store["stocktaking_records"][-1]["surplus_qty"] == 5
 
-    def test_stocktake_empty_request(self):
-        """空请求体(字段都有默认值)"""
-        response = client.post("/api/warehouse/stocktake", json={})
-        assert response.status_code == 200
-        assert response.json()["success"] is True
+    def test_stocktake_empty_items(self):
+        """空清单: 中止"""
+        response = client.post("/api/warehouse/stocktake", json={"items": []})
+        data = response.json()
+        assert data["success"] is False
 
 
 # ============================================================
@@ -476,18 +685,28 @@ class TestWarehouseStocktake:
 # ============================================================
 
 class TestWarehouseSlotOptimize:
-    """AI智能库位优化端点测试"""
+    """AI智能库位优化端点测试(P4.4 契约: ABC 重排)"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
 
     def test_slot_optimize_success(self):
         response = client.post("/api/warehouse/slot-optimize", json={
-            "warehouseId": "WH001",
+            "warehouseId": 1,
         })
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["optimized"] is True
-        assert data["utilizationAfter"] > data["utilizationBefore"]
-        assert data["improvement"] == "30%"
+        d = data["details"]
+        assert d["optimizationGain"] == 0.30
+        assert len(d["relocatedItems"]) > 0
+        # 分区计数总和 = 重排商品数
+        assert d["hotZoneCount"] + d["warmZoneCount"] + d["coldZoneCount"] \
+            == len(d["relocatedItems"])
+        # 重排记录含新旧库位
+        first = d["relocatedItems"][0]
+        assert "oldLocId" in first and "newLocId" in first
 
 
 # ============================================================
@@ -495,31 +714,230 @@ class TestWarehouseSlotOptimize:
 # ============================================================
 
 class TestWarehouseForecast:
-    """AI智能库存预测端点测试"""
+    """AI智能库存预测端点测试(P4.4 契约)"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
 
     def test_forecast_default(self):
-        """无 productId: 返回默认产品预测"""
+        """默认产品: ZX42-2026L07"""
         response = client.get("/api/warehouse/forecast")
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["productId"] == "ZX42-2026L07"
-        assert len(data["forecast7d"]) == 7
-        assert data["accuracy"] == 0.89
+        d = data["details"]
+        assert d["productId"] == "ZX42-2026L07"
+        assert d["currentQty"] == 500
+        assert d["aiModel"] == "LSTM"
+        assert d["aiAccuracy"] == 0.89
+        # daysOfSupply = currentQty / dailyConsumption(17 = round(500/30))
+        assert d["daysOfSupply"] == round(500 / 17, 1)
 
     def test_forecast_with_product(self):
         """指定 productId"""
         response = client.get("/api/warehouse/forecast?productId=ZX42-2026L05")
         data = response.json()
-        assert data["productId"] == "ZX42-2026L05"
+        assert data["details"]["productId"] == "ZX42-2026L05"
+        assert data["details"]["currentQty"] == 300
 
-    def test_forecast_data_validity(self):
-        """预测数据有效性: 7 天,数值为正"""
-        response = client.get("/api/warehouse/forecast")
-        forecast = response.json()["forecast7d"]
-        assert len(forecast) == 7
-        for val in forecast:
-            assert val > 0
+    def test_forecast_not_found(self):
+        """库存记录不存在"""
+        response = client.get("/api/warehouse/forecast?productId=NO_SUCH")
+        data = response.json()
+        assert data["success"] is False
+        assert "库存记录不存在" in data["error"]
+
+
+# ============================================================
+#  仓储服务: 新增 5 端点(multi-transfer/loss/cross-dock/safety-stock/env-monitor)
+# ============================================================
+
+class TestWarehouseMultiTransfer:
+    """AI智能多仓调拨端点测试"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
+
+    def test_transfer_success(self):
+        """仓1→仓2 调拨: 源减目标增+双向流水"""
+        response = client.post("/api/warehouse/multi-transfer", json={
+            "items": [{"id": "ZX42-2026B01", "name": "口粮酒", "qty": 20}],
+            "fromWarehouseId": 1, "toWarehouseId": 2,
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["operation"] == "multiTransfer"
+        d = data["details"]
+        assert d["totalQty"] == 20
+        assert d["transferTimeliness"] == 0.92
+        line = d["transferLines"][0]
+        assert line["fromBefore"] == 800 and line["fromAfter"] == 780
+        assert line["toBefore"] == 30 and line["toAfter"] == 50
+        # 双向流水落库
+        flows = _mock_store["stock_movements"][-2:]
+        assert {f["movement_type"] for f in flows} == {"transfer_out", "transfer_in"}
+        assert _mock_store["transfer_orders"][-1]["total_qty"] == 20
+
+    def test_transfer_same_warehouse_rejected(self):
+        """源=目标仓: 中止"""
+        response = client.post("/api/warehouse/multi-transfer", json={
+            "items": [{"id": "ZX42-2026B01", "qty": 1}],
+            "fromWarehouseId": 1, "toWarehouseId": 1,
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert "不能相同" in data["error"]
+
+    def test_transfer_insufficient_rolls_back(self):
+        """源仓不足: 事务回滚"""
+        response = client.post("/api/warehouse/multi-transfer", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 600}],
+            "fromWarehouseId": 1, "toWarehouseId": 2,
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert "源仓库存不足" in data["error"]
+        assert _mock_store["transfer_orders"] == []
+
+
+class TestWarehouseLoss:
+    """AI智能损耗管理端点测试"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
+
+    def test_loss_success(self):
+        response = client.post("/api/warehouse/loss", json={
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典",
+                       "qty": 5, "rootCause": "运输破损"}],
+            "warehouseId": 1, "lossType": "breakage",
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        d = data["details"]
+        assert d["totalLossQty"] == 5
+        assert d["lossReduction"] == 0.20
+        assert d["lossLines"][0]["rootCause"] == "运输破损"
+        # 库存扣减 + 损耗记录落库
+        stocks = [s for s in _mock_store["warehouse_stock"]
+                  if s["warehouse_id"] == 1 and s["product_id"] == "ZX42-2026L07"]
+        assert stocks[0]["stock_qty"] == 495
+        assert _mock_store["loss_records"][-1]["loss_type"] == "breakage"
+
+    def test_loss_invalid_type_rejected(self):
+        """非法损耗类型: 中止"""
+        response = client.post("/api/warehouse/loss", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 1}],
+            "lossType": "theft",
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert "非法损耗类型" in data["error"]
+
+    def test_loss_insufficient_rolls_back(self):
+        response = client.post("/api/warehouse/loss", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 99999}],
+        })
+        data = response.json()
+        assert data["success"] is False
+        assert _mock_store["loss_records"] == []
+
+
+class TestWarehouseCrossDock:
+    """AI智能仓配一体(越库)端点测试"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
+
+    def test_cross_dock_success(self):
+        """越库: 库存不变, 仅流水"""
+        before_stock = {s["product_id"]: s["stock_qty"]
+                        for s in _mock_store["warehouse_stock"]}
+        response = client.post("/api/warehouse/cross-dock", json={
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典", "qty": 30}],
+            "warehouseId": 1, "carrierId": "SF-001",
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        d = data["details"]
+        assert d["totalQty"] == 30
+        assert d["crossDockRate"] == 0.40
+        assert d["crossDockLines"][0]["crossDocked"] is True
+        # 库存不变
+        after_stock = {s["product_id"]: s["stock_qty"]
+                       for s in _mock_store["warehouse_stock"]}
+        assert before_stock == after_stock
+        # 流水落库(不动库存)
+        assert _mock_store["stock_movements"][-1]["movement_type"] == "cross_dock"
+        assert _mock_store["cross_dock_records"][-1]["carrier_id"] == "SF-001"
+
+
+class TestWarehouseSafetyStock:
+    """AI智能安全库存端点测试"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
+
+    def test_safety_stock_success(self):
+        response = client.get("/api/warehouse/safety-stock?productId=ZX42-2026L07")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        d = data["details"]
+        assert d["currentQty"] == 500
+        assert d["avgDailyDemand"] == 17        # round(500/30)
+        assert d["leadTime"] == 7
+        assert d["serviceLevel"] == "95%"
+        # 再订货点 = 安全库存 + 日均 × 提前期
+        assert d["reorderPoint"] == d["aiRecommendedSafety"] + 17 * 7
+        # 副作用: AI 推荐安全库存回写
+        stocks = [s for s in _mock_store["warehouse_stock"]
+                  if s["product_id"] == "ZX42-2026L07"]
+        assert stocks[0]["ai_recommended_safety"] == d["aiRecommendedSafety"]
+
+    def test_safety_stock_not_found(self):
+        response = client.get("/api/warehouse/safety-stock?productId=NO_SUCH")
+        data = response.json()
+        assert data["success"] is False
+
+
+class TestWarehouseEnvMonitor:
+    """AI智能温湿度监控端点测试"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
+
+    def test_env_monitor_success(self):
+        response = client.get("/api/warehouse/env-monitor?warehouseId=1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        d = data["details"]
+        assert d["warehouseName"] == "山东泰安工厂仓"
+        assert d["tempRange"] == [5, 35]
+        assert d["humidityRange"] == [40, 80]
+        assert d["aiAnomalyDetection"] == 0.95
+        assert isinstance(d["hasAnomaly"], bool)
+        assert len(d["agedStocks"]) > 0
+        # 副作用: 监控记录追加
+        assert len(_mock_store["environment_monitoring"]) == 1
+
+    def test_env_monitor_anomaly_consistency(self):
+        """异常标志与温湿度区间一致"""
+        response = client.get("/api/warehouse/env-monitor?warehouseId=1")
+        d = response.json()["details"]
+        in_temp = d["tempRange"][0] <= d["temp"] <= d["tempRange"][1]
+        in_hum = d["humidityRange"][0] <= d["humidity"] <= d["humidityRange"][1]
+        assert d["hasAnomaly"] == (not in_temp or not in_hum)
 
 
 # ============================================================
@@ -631,19 +1049,26 @@ class TestIntegration:
         assert r2.json()["toLevel"] == "D"
 
     def test_warehouse_full_flow(self):
-        """仓储全流程: 入库→盘点→出库→预测"""
-        # 入库
-        r1 = client.post("/api/warehouse/inbound", json={"productId": "ZX42-2026L07"})
+        """仓储全流程: 入库→出库→盘点→预测(新契约)"""
+        # 入库 +50
+        r1 = client.post("/api/warehouse/inbound", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 50}]})
         assert r1.json()["success"] is True
-        # 盘点
-        r2 = client.post("/api/warehouse/stocktake", json={})
+        assert r1.json()["details"]["lines"][0]["after"] == 550
+        # 出库 -100
+        r2 = client.post("/api/warehouse/outbound", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 100}]})
         assert r2.json()["success"] is True
-        # 出库
-        r3 = client.post("/api/warehouse/outbound", json={"productId": "ZX42-2026L07"})
+        assert r2.json()["details"]["lines"][0]["after"] == 450
+        # 盘点(实盘 460 → 盘盈 10)
+        r3 = client.post("/api/warehouse/stocktake", json={
+            "items": [{"id": "ZX42-2026L07", "actualQty": 460}]})
         assert r3.json()["success"] is True
-        # 预测
+        assert r3.json()["details"]["surplusQty"] == 10
+        # 预测(基于覆盖后库存 460)
         r4 = client.get("/api/warehouse/forecast?productId=ZX42-2026L07")
         assert r4.json()["success"] is True
+        assert r4.json()["details"]["currentQty"] == 460
 
     def test_upgrade_persistence_multi_step(self):
         """连续升级持久化: D→C→B→A→S,wallet 累积 + 失败注入不污染状态"""
@@ -699,9 +1124,9 @@ class TestIntegration:
         r1 = client.post("/api/inventory/deduct", json={"productId": "ZX42-2026L07", "quantity": 30})
         assert r1.json()["stockAfter"] == 70
         assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 70  # 持久化
-        # 失败1: 负数(422), 库存不变
+        # 失败1: 负数(事务校验拒绝), 库存不变
         r2 = client.post("/api/inventory/deduct", json={"productId": "ZX42-2026L07", "quantity": -5})
-        assert r2.status_code == 422
+        assert r2.json()["success"] is False
         assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 70  # 回滚
         # 失败2: 库存不足(success=False), 库存不变
         r3 = client.post("/api/inventory/deduct", json={"productId": "ZX42-2026L07", "quantity": 999})
@@ -761,12 +1186,15 @@ class TestRequestValidation:
 
     # ---- /api/inventory/deduct ----
     def test_deduct_missing_product_id(self):
-        """deduct 缺 productId: 422"""
+        """deduct 缺 productId/items: preflight 中止(空清单)"""
         response = client.post("/api/inventory/deduct", json={"quantity": 1})
-        assert response.status_code == 422
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert "清单为空" in data["error"]
 
     def test_deduct_wrong_quantity_type(self):
-        """deduct quantity 传字符串: 422"""
+        """deduct quantity 传字符串: Pydantic 422"""
         response = client.post("/api/inventory/deduct", json={
             "productId": "ZX42-2026L07", "quantity": "many",
         })
@@ -774,9 +1202,12 @@ class TestRequestValidation:
 
     # ---- /api/inventory/restock ----
     def test_restock_missing_product_id(self):
-        """restock 缺 productId: 422"""
+        """restock 缺 productId/items: preflight 中止"""
         response = client.post("/api/inventory/restock", json={"quantity": 1})
-        assert response.status_code == 422
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert "清单为空" in data["error"]
 
     # ---- /api/agent-shipping/claim ----
     def test_claim_missing_agent_id(self):
@@ -896,13 +1327,17 @@ class TestBoundaryValues:
         assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 100
 
     def test_restock_huge_quantity(self):
-        """回补超大数量: 应成功"""
+        """回补超大数量(>9999): 事务校验拒绝(防误操作)"""
         _mock_store["inventory"]["ZX42-2026L07"]["stock"] = 0
         r = client.post("/api/inventory/restock", json={
             "productId": "ZX42-2026L07", "quantity": 2**31,
         })
         assert r.status_code == 200
-        assert r.json()["stockAfter"] == 2**31
+        data = r.json()
+        assert data["success"] is False
+        assert "超限" in data["error"]
+        # 库存不变
+        assert _mock_store["inventory"]["ZX42-2026L07"]["stock"] == 0
 
     def test_claim_empty_string_region(self):
         """空字符串 region: Pydantic 应放行(服务层可能拒绝)"""
@@ -974,17 +1409,17 @@ class TestResponseConsistency:
         assert "success" in r.json()
 
     def test_error_responses_use_error_field(self):
-        """所有 4xx 错误响应使用 error 字段(自定义异常处理器统一格式)"""
-        # 404 错误: {"success": False, "error": "..."}
+        """错误响应使用 error 字段(4xx 自定义格式 / 事务失败 200+success=False)"""
+        # 事务失败(200 + success=False + error, 对齐前端契约)
         r = client.post("/api/inventory/deduct", json={
             "productId": "NOT-EXIST", "quantity": 1,
         })
-        assert r.status_code == 404
+        assert r.status_code == 200
         body = r.json()
         assert body["success"] is False
         assert "error" in body
 
-        # 409 错误
+        # 409 错误(agent-shipping 保留 4xx 映射)
         _mock_store["shipping_claims"]["err_region"] = 1
         r = client.post("/api/agent-shipping/claim", json={
             "agentId": 2, "region": "err_region",
@@ -1000,7 +1435,7 @@ class TestResponseConsistency:
         assert "detail" in r.json()
 
     def test_tx_id_format_consistency(self):
-        """库存操作 txId 格式统一: TX 前缀"""
+        """库存操作 txId 格式统一: TX 前缀(单行兼容字段)"""
         _mock_store["inventory"]["ZX42-2026L07"]["stock"] = 100
         r1 = client.post("/api/inventory/deduct", json={
             "productId": "ZX42-2026L07", "quantity": 1,
@@ -1013,12 +1448,13 @@ class TestResponseConsistency:
         assert r2.json()["txId"].startswith("TX")
 
     def test_order_id_format_consistency(self):
-        """订单号格式统一: ZX 前缀 + 6 位数字"""
-        r = client.post("/api/checkout/submit", json={"items": []})
+        """订单号格式统一: ZX 前缀(时间戳)"""
+        r = client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "price": 599, "qty": 1}],
+        })
         order_id = r.json()["orderId"]
         assert order_id.startswith("ZX")
-        # ZX + 6 位数字 = 8 字符
-        assert len(order_id) == 8
+        assert len(order_id) > 8   # ZX + 毫秒时间戳 + 序号
 
 
 # ============================================================
@@ -1203,299 +1639,122 @@ class TestAgentRepositoryMemory:
 # ============================================================
 
 class TestCheckoutSupplementary:
-    """订单结算端点补充测试(对照 agent/inventory 的覆盖深度)"""
+    """订单结算端点补充测试(P4.4 新契约: 透传/唯一性/持久化)"""
+
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
 
     def test_response_structure_complete(self):
         """成功响应必须包含全部契约字段"""
         r = client.post("/api/checkout/submit", json={
-            "items": [{"productId": "P1", "quantity": 1}],
+            "items": [{"id": "ZX42-2026L07", "price": 599, "qty": 1}],
         })
         data = r.json()
-        required = {"success", "orderId", "status", "message"}
+        required = {"success", "orderNo", "details", "logs", "asyncOps",
+                    "orderId", "status", "message"}
         assert required.issubset(data.keys()), f"缺少字段: {required - data.keys()}"
 
-    def test_consignee_passthrough(self):
-        """consignee 字段应原样存入订单"""
+    def test_consignee_payment_passthrough(self):
+        """consignee/payment 字段应原样存入订单"""
         consignee = {"name": "李四", "phone": "13900002222", "address": "泰安市"}
-        r = client.post("/api/checkout/submit", json={
-            "items": [], "consignee": consignee,
-        })
-        assert r.status_code == 200
-        # 从 _mock_store 回查订单
-        last_order = _mock_store["orders"][-1]
-        assert last_order["consignee"] == consignee
-
-    def test_payment_passthrough(self):
-        """payment 字段应原样存入订单"""
-        payment = {"method": "alipay", "amount": 99.9}
+        payment = {"method": "alipay", "amount": 584.0}
         client.post("/api/checkout/submit", json={
-            "items": [], "payment": payment,
+            "items": [{"id": "ZX42-2026L07", "price": 599, "qty": 1}],
+            "consignee": consignee, "payment": payment,
         })
-        last_order = _mock_store["orders"][-1]
+        last_order = _mock_store["checkout_orders"][-1]
+        assert last_order["consignee"] == consignee
         assert last_order["payment"] == payment
 
-    def test_items_passthrough(self):
-        """items 列表应原样存入订单"""
-        items = [
-            {"productId": "ZX42-2026L07", "quantity": 3, "price": 599},
-            {"productId": "ZX42-2026L05", "quantity": 1, "price": 299},
-        ]
-        client.post("/api/checkout/submit", json={"items": items})
-        last_order = _mock_store["orders"][-1]
-        assert last_order["items"] == items
-
     def test_order_id_uniqueness_consecutive(self):
-        """连续下单: 订单号应基于时间戳动态生成(至少 2 个不同)"""
+        """连续下单: 订单号唯一"""
         ids = set()
-        for _ in range(5):
-            r = client.post("/api/checkout/submit", json={"items": []})
-            ids.add(r.json()["orderId"])
-        # 时间戳精度为毫秒, 连续 5 次请求至少应产生 2 个不同 ID
-        assert len(ids) >= 2, "订单号应动态生成, 不应全部相同"
+        for _ in range(3):
+            r = client.post("/api/checkout/submit", json={
+                "items": [{"id": "ZX42-2026L07", "price": 599, "qty": 1}]})
+            ids.add(r.json()["orderNo"])
+        assert len(ids) == 3
 
     def test_order_stored_with_created_at(self):
-        """订单存入 _mock_store 时应包含 createdAt 时间戳"""
-        client.post("/api/checkout/submit", json={"items": [{"x": 1}]})
-        last_order = _mock_store["orders"][-1]
-        assert "createdAt" in last_order
-        assert last_order["createdAt"]  # 非空
-
-    def test_order_status_always_pending(self):
-        """新建订单状态始终为 pending"""
-        r = client.post("/api/checkout/submit", json={"items": []})
-        assert r.json()["status"] == "pending"
-        assert _mock_store["orders"][-1]["status"] == "pending"
-
-    def test_large_items_list(self):
-        """大订单(100 件商品): 应成功"""
-        items = [{"productId": f"P{i}", "quantity": 1} for i in range(100)]
-        r = client.post("/api/checkout/submit", json={"items": items})
-        assert r.status_code == 200
-        assert r.json()["success"] is True
-        assert len(_mock_store["orders"][-1]["items"]) == 100
-
-    def test_special_chars_in_consignee(self):
-        """consignee 含特殊字符: 不应 500"""
-        r = client.post("/api/checkout/submit", json={
-            "items": [],
-            "consignee": {"name": "<script>alert(1)</script>", "address": "北京' OR 1=1"},
-        })
-        assert r.status_code == 200
-        assert r.json()["success"] is True
+        """订单落库应包含 created_at 时间戳"""
+        client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "price": 599, "qty": 1}]})
+        last_order = _mock_store["checkout_orders"][-1]
+        assert last_order["created_at"]
+        assert last_order["paid_at"]
 
     def test_null_consignee_and_payment(self):
         """consignee/payment 显式传 null: 应成功(字段可选)"""
         r = client.post("/api/checkout/submit", json={
-            "items": [], "consignee": None, "payment": None,
+            "items": [{"id": "ZX42-2026L07", "price": 599, "qty": 1}],
+            "consignee": None, "payment": None,
         })
         assert r.status_code == 200
         assert r.json()["success"] is True
-
-    def test_message_contains_order_id(self):
-        """message 字段应包含订单号"""
-        r = client.post("/api/checkout/submit", json={"items": []})
-        data = r.json()
-        assert data["orderId"] in data["message"]
 
 
 # ============================================================
 #  Warehouse 端点补充测试: 响应结构 / 边界值 / 持久化 / 一致性
 # ============================================================
 
-class TestWarehouseInboundSupplementary:
-    """AI智能入库端点补充测试"""
+class TestWarehouseSupplementary:
+    """仓储端点补充测试(P4.4 新契约: 响应结构/透传/空体)"""
 
-    def test_response_structure_complete(self):
-        """成功响应必须包含全部契约字段"""
-        r = client.post("/api/warehouse/inbound", json={"productId": "ZX42-2026L07"})
-        data = r.json()
-        required = {"success", "productId", "slot", "message"}
-        assert required.issubset(data.keys())
+    def setup_method(self):
+        from repositories.store import reset_store
+        reset_store()
 
-    def test_product_id_passthrough(self):
-        """productId 应原样回显"""
-        r = client.post("/api/warehouse/inbound", json={"productId": "CUSTOM-PID-001"})
-        assert r.json()["productId"] == "CUSTOM-PID-001"
-
-    def test_slot_always_a1(self):
-        """Mock 模式下 slot 始终分配 A1"""
-        r = client.post("/api/warehouse/inbound", json={"productId": "ZX42-2026L05"})
-        assert r.json()["slot"] == "A1"
-
-    def test_log_entry_structure(self):
-        """入库日志条目结构: action/productId/time/slot"""
-        client.post("/api/warehouse/inbound", json={"productId": "ZX42-2026L07"})
-        log = _mock_store["warehouse"]["inbound_log"][-1]
-        assert log["action"] == "inbound"
-        assert log["productId"] == "ZX42-2026L07"
-        assert "time" in log
-        assert log["slot"] == "A1"
-
-    def test_empty_body_uses_defaults(self):
-        """空请求体: 字段均有默认值, 应成功"""
-        r = client.post("/api/warehouse/inbound", json={})
-        assert r.status_code == 200
-        assert r.json()["success"] is True
-
-    def test_special_chars_in_product_id(self):
-        """productId 含特殊字符: 不应 500"""
+    def test_inbound_response_structure(self):
+        """入库成功响应必须包含全部契约字段"""
         r = client.post("/api/warehouse/inbound", json={
-            "productId": "P<>&'\"",
-        })
-        assert r.status_code == 200
-        assert r.json()["productId"] == "P<>&'\""
-
-
-class TestWarehouseOutboundSupplementary:
-    """AI智能出库端点补充测试"""
-
-    def test_response_structure_complete(self):
-        """成功响应必须包含全部契约字段"""
-        r = client.post("/api/warehouse/outbound", json={"productId": "ZX42-2026L07"})
+            "items": [{"id": "ZX42-2026L07", "qty": 1}]})
         data = r.json()
-        required = {"success", "productId", "message"}
+        required = {"success", "operation", "details", "logs", "asyncOps"}
         assert required.issubset(data.keys())
+        assert {"totalQty", "lines", "aiVerificationRate",
+                "warehouseId"}.issubset(data["details"].keys())
 
-    def test_product_id_passthrough(self):
-        """productId 应原样回显"""
-        r = client.post("/api/warehouse/outbound", json={"productId": "OUT-001"})
-        assert r.json()["productId"] == "OUT-001"
+    def test_inbound_product_id_passthrough(self):
+        """productId 应原样出现在行明细"""
+        r = client.post("/api/warehouse/inbound", json={
+            "items": [{"id": "CUSTOM-PID-001", "qty": 1}]})
+        assert r.json()["details"]["lines"][0]["id"] == "CUSTOM-PID-001"
 
-    def test_log_entry_structure(self):
-        """出库日志条目结构: action/productId/time"""
-        client.post("/api/warehouse/outbound", json={"productId": "ZX42-2026L07"})
-        log = _mock_store["warehouse"]["outbound_log"][-1]
-        assert log["action"] == "outbound"
-        assert log["productId"] == "ZX42-2026L07"
-        assert "time" in log
+    def test_outbound_response_structure(self):
+        """出库成功响应契约字段"""
+        r = client.post("/api/warehouse/outbound", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 1}]})
+        data = r.json()
+        assert data["success"] is True
+        assert {"totalQty", "lines", "pickingEfficiencyGain",
+                "warehouseId"}.issubset(data["details"].keys())
 
-    def test_empty_body_uses_defaults(self):
+    def test_stocktake_match_line(self):
+        """盘点无差异行: diffType=match"""
+        r = client.post("/api/warehouse/stocktake", json={
+            "items": [{"id": "ZX42-2026L07", "actualQty": 500}]})
+        data = r.json()
+        assert data["details"]["diffLines"][0]["diffType"] == "match"
+        assert data["details"]["surplusQty"] == 0
+        assert data["details"]["deficitQty"] == 0
+
+    def test_slot_optimize_empty_body_succeeds(self):
         """空请求体: 应成功(字段可选)"""
-        r = client.post("/api/warehouse/outbound", json={})
+        r = client.post("/api/warehouse/slot-optimize", json={})
         assert r.status_code == 200
         assert r.json()["success"] is True
 
-    def test_message_contains_optimization(self):
-        """message 应包含路径优化信息"""
-        r = client.post("/api/warehouse/outbound", json={"productId": "X"})
-        assert "优化" in r.json()["message"]
+    def test_forecast_replenishment_logic(self):
+        """预测补货建议逻辑: daysOfSupply 与 replenishmentSuggested 一致"""
+        r = client.get("/api/warehouse/forecast?productId=ZX42-2026L07")
+        d = r.json()["details"]
+        assert d["replenishmentSuggested"] == (d["daysOfSupply"] < 7)
 
-
-class TestWarehouseStocktakeSupplementary:
-    """AI智能盘点端点补充测试"""
-
-    def test_response_structure_complete(self):
-        """成功响应必须包含全部契约字段"""
-        r = client.post("/api/warehouse/stocktake", json={})
-        data = r.json()
-        required = {"success", "totalSlots", "occupiedSlots",
-                    "emptySlots", "accuracy", "message"}
-        assert required.issubset(data.keys())
-
-    def test_slot_arithmetic_consistency(self):
-        """盘点算术一致性: total = occupied + empty"""
-        r = client.post("/api/warehouse/stocktake", json={})
-        data = r.json()
-        assert data["totalSlots"] == data["occupiedSlots"] + data["emptySlots"]
-
-    def test_accuracy_is_098(self):
-        """Mock 模式准确率固定 0.98"""
-        r = client.post("/api/warehouse/stocktake", json={})
-        assert r.json()["accuracy"] == 0.98
-
-    def test_total_slots_matches_known_slots(self):
-        """totalSlots 应等于已知库位数(A1/A2/B1 = 3)"""
-        r = client.post("/api/warehouse/stocktake", json={})
-        assert r.json()["totalSlots"] == 3
-
-    def test_message_contains_ai_keyword(self):
-        """message 应包含 AI/无人机 等关键词"""
-        r = client.post("/api/warehouse/stocktake", json={})
-        msg = r.json()["message"]
-        assert "AI" in msg or "无人机" in msg or "盘点" in msg
-
-
-class TestWarehouseSlotOptimizeSupplementary:
-    """AI智能库位优化端点补充测试"""
-
-    def test_response_structure_complete(self):
-        """成功响应必须包含全部契约字段"""
-        r = client.post("/api/warehouse/slot-optimize", json={})
-        data = r.json()
-        required = {"success", "optimized", "utilizationBefore",
-                    "utilizationAfter", "improvement", "message"}
-        assert required.issubset(data.keys())
-
-    def test_utilization_after_greater_than_before(self):
-        """优化后利用率应高于优化前"""
-        r = client.post("/api/warehouse/slot-optimize", json={})
-        data = r.json()
-        assert data["utilizationAfter"] > data["utilizationBefore"]
-
-    def test_improvement_percentage(self):
-        """提升幅度应为 30%"""
-        r = client.post("/api/warehouse/slot-optimize", json={})
-        assert r.json()["improvement"] == "30%"
-
-    def test_optimized_flag_true(self):
-        """optimized 标志应为 True"""
-        r = client.post("/api/warehouse/slot-optimize", json={})
-        assert r.json()["optimized"] is True
-
-    def test_empty_body_succeeds(self):
-        """空请求体: 应成功(字段可选)"""
-        r = client.post("/api/warehouse/slot-optimize", json={})
-        assert r.status_code == 200
-
-
-class TestWarehouseForecastSupplementary:
-    """AI智能库存预测端点补充测试"""
-
-    def test_response_structure_complete(self):
-        """成功响应必须包含全部契约字段"""
-        r = client.get("/api/warehouse/forecast")
-        data = r.json()
-        required = {"success", "productId", "forecast7d",
-                    "seasonality", "accuracy", "message"}
-        assert required.issubset(data.keys())
-
-    def test_forecast7d_length_is_7(self):
-        """forecast7d 数组长度固定为 7"""
-        r = client.get("/api/warehouse/forecast")
-        assert len(r.json()["forecast7d"]) == 7
-
-    def test_forecast_values_all_positive(self):
-        """7 天预测值均应为正数"""
-        r = client.get("/api/warehouse/forecast")
-        for val in r.json()["forecast7d"]:
-            assert val > 0
-
-    def test_accuracy_is_089(self):
-        """Mock 模式预测准确率固定 0.89"""
-        r = client.get("/api/warehouse/forecast")
-        assert r.json()["accuracy"] == 0.89
-
-    def test_default_product_id(self):
-        """无 productId 参数: 默认返回 ZX42-2026L07"""
-        r = client.get("/api/warehouse/forecast")
-        assert r.json()["productId"] == "ZX42-2026L07"
-
-    def test_custom_product_id_passthrough(self):
-        """指定 productId: 应原样回显"""
-        r = client.get("/api/warehouse/forecast?productId=CUSTOM-FORECAST")
-        assert r.json()["productId"] == "CUSTOM-FORECAST"
-
-    def test_seasonality_value(self):
-        """seasonality 字段应为非空字符串"""
-        r = client.get("/api/warehouse/forecast")
-        seasonality = r.json()["seasonality"]
-        assert isinstance(seasonality, str) and len(seasonality) > 0
-
-    def test_empty_product_id_query(self):
-        """productId 传空字符串: 不应 500"""
+    def test_forecast_empty_product_id_query(self):
+        """productId 传空字符串: 不应 500(回退默认产品)"""
         r = client.get("/api/warehouse/forecast?productId=")
         assert r.status_code == 200
-        # 空字符串会被视为 falsy, 返回默认 productId
         assert r.json()["success"] is True
 
 

@@ -360,6 +360,115 @@ def _build_initial_agent_risks() -> dict:
     }
 
 
+def _build_initial_supply_chain() -> dict:
+    """构建供应链四件套扩展数据域(P4.4: 对齐前端 mock 契约)
+
+    域清单(前端契约来源: js/checkout-service.js / inventory-service.js /
+    warehouse-service.js / agent-shipping-service.js 的 mock DB):
+        - inventory_logs / stock_alerts:  库存流水与低库存预警(inventory)
+        - checkout_coupons / points_accounts / checkout_orders /
+          profit_records / service_fees:  结算事务域(checkout)
+        - shipping_claim_details:         认领富记录(shipping, 活跃映射仍在
+                                          shipping_claims {region: agent_id})
+        - 仓储域: supply_warehouses / warehouse_locations / warehouse_stock /
+          inbound_orders / outbound_orders / stock_movements /
+          stocktaking_records / loss_records / transfer_orders /
+          cross_dock_records / environment_monitoring
+    """
+    now = "2026-08-30T00:00:00+00:00"
+    # 仓库主表(4 仓, 对齐前端 warehouse mock)
+    warehouses = [
+        {"id": 1, "warehouse_code": "WH-FACTORY-01", "warehouse_name": "山东泰安工厂仓",
+         "warehouse_type": "factory", "ai_warehouse_score": 92.5,
+         "ai_utilization_rate": 78.0, "ai_efficiency_score": 90.0, "status": "active"},
+        {"id": 2, "warehouse_code": "WH-REGION-01", "warehouse_name": "华东区域仓",
+         "warehouse_type": "regional", "ai_warehouse_score": 88.0,
+         "ai_utilization_rate": 65.0, "ai_efficiency_score": 85.0, "status": "active"},
+        {"id": 3, "warehouse_code": "WH-RETAIL-01", "warehouse_name": "上海零售仓",
+         "warehouse_type": "retail", "ai_warehouse_score": 85.0,
+         "ai_utilization_rate": 70.0, "ai_efficiency_score": 82.0, "status": "active"},
+        {"id": 4, "warehouse_code": "WH-AGING-01", "warehouse_name": "陈酿仓",
+         "warehouse_type": "aging", "ai_warehouse_score": 95.0,
+         "ai_utilization_rate": 60.0, "ai_efficiency_score": 88.0, "status": "active"},
+    ]
+    # 库位表(仓1: 3区×5排×4列×3层 = 180 库位, 对齐前端)
+    locations = []
+    loc_id = 1
+    for z in range(1, 4):
+        for r in range(1, 6):
+            for col in range(1, 5):
+                for f in range(1, 4):
+                    locations.append({
+                        "id": loc_id,
+                        "warehouse_id": 1,
+                        "location_code": f"A{z}-{r}-{col}-{f}",
+                        "zone_type": "hot" if z == 1 else ("warm" if z == 2 else "cold"),
+                        "abc_class": "A" if z == 1 else ("B" if z == 2 else "C"),
+                        "status": "empty",
+                    })
+                    loc_id += 1
+    # 仓储库存: 仓1 放全部 11 款(前 11 个库位), 仓2 放 3 款(供多仓调拨演示)
+    inv = _build_initial_inventory()
+    stock = []
+    for idx, pid in enumerate(inv):
+        stock.append({
+            "id": idx + 1, "warehouse_id": 1, "location_id": idx + 1,
+            "product_id": pid, "material_id": None,
+            "stock_qty": inv[pid]["stock"],
+            "ai_recommended_safety": 20, "ai_turnover_rate": 2.5,
+            "ai_stock_status": "sufficient" if inv[pid]["stock"] > 50 else "normal",
+            "abc_class": "A" if idx < 4 else ("B" if idx < 8 else "C"),
+            "batch_no": f"BLC-{pid}-150001",
+            "life_code_activated_at": "2026-07-01T00:00:00Z",
+        })
+        locations[idx]["status"] = "occupied"
+    for idx, (pid, qty) in enumerate([
+        ("ZX42-2026L07", 50), ("ZX42-2026B01", 30), ("ZX52-2026X01", 40),
+    ]):
+        stock.append({
+            "id": 12 + idx, "warehouse_id": 2, "location_id": None,
+            "product_id": pid, "material_id": None, "stock_qty": qty,
+            "ai_recommended_safety": 20, "ai_turnover_rate": 2.0,
+            "ai_stock_status": "normal", "abc_class": "B",
+            "batch_no": f"BLC-{pid}-160001",
+            "life_code_activated_at": "2026-08-01T00:00:00Z",
+        })
+    return {
+        # inventory 域
+        "inventory_logs": [],
+        "stock_alerts": [],
+        # checkout 域(优惠券/积分/订单/分润/服务费)
+        # 注意: 积分域键名用 checkout_points(不能叫 points_accounts,
+        # 与积分模块 points_repository 的惰性初始化探针键冲突)
+        "checkout_coupons": {
+            "NEW10": {"id": "C001", "code": "NEW10", "discount": 0.10,
+                       "status": "未使用", "desc": "新人9折"},
+            "SVIP20": {"id": "C002", "code": "SVIP20", "discount": 0.20,
+                        "status": "未使用", "desc": "SVIP8折"},
+        },
+        "checkout_points": {"L1": 1000, "L2": 2000, "L3": 5000,
+                             "L4": 8000, "L5": 12000},
+        "checkout_orders": [],
+        "profit_records": [],
+        "service_fees": [],
+        # shipping 域(认领富记录; 活跃映射沿用 shipping_claims {region: agent_id})
+        "shipping_claim_details": {},
+        # warehouse 域
+        "supply_warehouses": warehouses,
+        "warehouse_locations": locations,
+        "warehouse_stock": stock,
+        "inbound_orders": [],
+        "outbound_orders": [],
+        "stock_movements": [],
+        "stocktaking_records": [],
+        "loss_records": [],
+        "transfer_orders": [],
+        "cross_dock_records": [],
+        "environment_monitoring": [],
+        "_sc_init_marker": now,
+    }
+
+
 _mock_store: dict = {
     "agents": _build_initial_agents(),
     # 代理商扩展存储(申请记录 / 进货记录 / 自增序列)
@@ -413,6 +522,8 @@ _mock_store: dict = {
     # 产品展示模块(11 款产品 + 评价)
     "products": _build_initial_products(),
     "product_reviews": _build_initial_product_reviews(),
+    # 供应链四件套扩展域(P4.4)
+    **_build_initial_supply_chain(),
     # 财务管理模块: 内存模式由 FinanceRepository._ensure_store() 懒创建空结构,
     # 生产 Redis 模式由 scripts/seed_redis.py 调用 _build_initial_finance() 灌注
 }
@@ -476,6 +587,8 @@ def reset_store() -> dict:
         # 产品展示模块(11 款产品 + 评价)
         "products": _build_initial_products(),
         "product_reviews": _build_initial_product_reviews(),
+        # 供应链四件套扩展域(P4.4)
+        **_build_initial_supply_chain(),
         # 财务管理模块: 内存模式由 FinanceRepository._ensure_store() 懒创建空结构
     }
     _mock_store.clear()
