@@ -25,6 +25,10 @@ P3.5 embedding 语义向量(检索升级):
 抓取智能清洗(网页正文提炼):
     KNOWLEDGE_CRAWL_LLM  开关(默认 off, on 时 crawl/run 走 LLM 清洗)
 
+语音转写 ASR(P3.6 视频抽帧+ASR):
+    ASR_MODEL            转写模型名(默认 glm-asr-2512, 智谱;
+                         单文件 ≤25MB/≤30s, 由调用方分段)
+
 用法:
     from services.llm_client import provider_client
     text = provider_client.chat("system prompt", "user prompt")
@@ -239,6 +243,76 @@ class LLMProviderClient:
         except Exception as exc:
             logger.warning("llm_vision_failed(回退rule): %s", exc)
             return None
+
+    def transcribe(self, audio_path: str) -> str | None:
+        """语音转文本(GLM-ASR), multipart 上传本地音频文件
+
+        纯标准库手工构造 multipart/form-data(不引入 requests);
+        单文件限制 ≤25MB/≤30s 由调用方分段(对齐智谱约束);
+        失败/未配置返回 None(调用方回退/跳过)。
+
+        Args:
+            audio_path: 本地音频文件路径(wav/mp3)
+
+        Returns:
+            转写文本; 未配置 key、文件读取失败、请求失败、
+            响应异常、空转写均返回 None。
+        """
+        if not llm_enabled():
+            return None
+        import uuid
+        model = os.environ.get("ASR_MODEL", "glm-asr-2512")
+        api_key = os.environ["LLM_API_KEY"].strip()
+        base_url = os.environ.get(
+            "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
+        ).rstrip("/")
+        try:
+            with open(audio_path, "rb") as f:
+                audio = f.read()
+        except OSError as exc:
+            logger.warning("llm_asr_read_failed: %s", exc)
+            return None
+        if not audio:
+            return None
+        boundary = "zhuxiang" + uuid.uuid4().hex
+        fields = [("model", model), ("stream", "false")]
+        parts = []
+        for name, value in fields:
+            parts.append(
+                f"--{boundary}\r\nContent-Disposition: form-data; "
+                f'name="{name}"\r\n\r\n{value}\r\n'.encode())
+        fname = os.path.basename(audio_path) or "audio.wav"
+        parts.append(
+            (f"--{boundary}\r\nContent-Disposition: form-data; "
+             f'name="file"; filename="{fname}"\r\n'
+             f"Content-Type: audio/wav\r\n\r\n").encode())
+        parts.append(audio)
+        parts.append(f"\r\n--{boundary}--\r\n".encode())
+        body = b"".join(parts)
+        request = urllib.request.Request(
+            f"{base_url}/audio/transcriptions", data=body,
+            headers={"Content-Type":
+                     f"multipart/form-data; boundary={boundary}",
+                     "Authorization": f"Bearer {api_key}"},
+            method="POST")
+        try:
+            with urllib.request.urlopen(
+                    request, timeout=_TIMEOUT) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            logger.warning("llm_asr_failed(跳过): %s", exc)
+            return None
+        text = result.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+        # 分段响应兼容: [{"text": ...}, ...]
+        segments = result.get("segments") or []
+        joined = "".join(str(s.get("text") or "")
+                         for s in segments if isinstance(s, dict))
+        if joined.strip():
+            return joined.strip()
+        logger.warning("llm_asr_empty_response model=%s", model)
+        return None
 
 
 provider_client = LLMProviderClient()

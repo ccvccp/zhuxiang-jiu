@@ -1170,9 +1170,11 @@ class KnowledgeService:
 
         rule 轨: 管理员配 segments 时间轴(原行为, 必填);
         llm 轨: KNOWLEDGE_MEDIA_LLM=on 且 segments 为空时,
-        GLM-4V 视频理解自动生成时间轴(JSON 输出), 失败自动
-        回退 rule 轨(segments 也空则拒绝); 管理员已提供 segments
-        时视为精确人工标注, llm 轨不覆盖。
+        GLM-4V 视频理解自动生成时间轴(JSON 输出); 失败再走
+        P3.6 本地回退链(ffmpeg 抽帧→逐帧 GLM-4V + 音轨分段
+        →GLM-ASR 转写), 再失败回退 rule 轨(segments 也空则
+        拒绝); 管理员已提供 segments 时视为精确人工标注,
+        llm 轨不覆盖。
 
         Returns:
             聚合结果 + "provider": 实际生效轨
@@ -1192,6 +1194,11 @@ class KnowledgeService:
                  if (s.get("desc") or "").strip()]
         if provider == "llm" and not valid:
             auto = self._video_vision_segments(url)
+            if not auto:
+                # P3.6: GLM-4V 直接理解失败 → 本地抽帧+ASR 回退链
+                auto = self._video_local_analyze(url)
+                if auto:
+                    logger.info("knowledge_video_local_analyze_used")
             if auto:
                 valid = auto
             else:
@@ -1255,6 +1262,105 @@ class KnowledgeService:
                      "keywords": str(s.get("keywords") or "")}
                     for s in data if isinstance(s, dict)
                     and str(s.get("desc") or "").strip()]
+        return segments or None
+
+    # P3.6 本地视频处理参数
+    _VIDEO_LOCAL_MAX_BYTES = 50 * 1024 * 1024   # 下载上限 50MB
+    _VIDEO_FRAME_INTERVAL = 10                  # 抽帧间隔(秒)
+    _VIDEO_MAX_FRAMES = 6                       # 抽帧数上限(控成本)
+    _VIDEO_ASR_SEGMENT_SECS = 30                # ASR 分段(≤30s, 智谱约束)
+
+    @staticmethod
+    def _fmt_mmss(seconds: int) -> str:
+        """秒数 → 分:秒(如 03:20), 对齐时间轴格式"""
+        return f"{seconds // 60:02d}:{seconds % 60:02d}"
+
+    @staticmethod
+    def _video_local_analyze(url: str) -> list[dict] | None:
+        """P3.6: 视频本地抽帧+ASR 时间轴(ffmpeg + GLM-4V + GLM-ASR)
+
+        GLM-4V 直接视频理解失败后的本地化回退链:
+            1. urllib 下载视频到临时目录(≤50MB)
+            2. ffmpeg 抽关键帧(每 10s 一帧, 上限 6 帧) +
+               提音轨并按 30s 分段(对齐 GLM-ASR 单次约束)
+            3. 逐帧 GLM-4V 视觉描述 + 逐段 GLM-ASR 转写
+            4. 合成时间轴 segments(画面/语音分列)
+
+        本地无 ffmpeg / 下载失败 / 全部转写与描述为空 → None
+        (调用方继续回退 rule 轨人工时间轴)。
+        """
+        import os
+        import shutil
+        import subprocess
+        import tempfile
+        import urllib.request
+        from contextlib import suppress
+        from services.llm_client import media_llm_enabled, provider_client
+        if not media_llm_enabled():
+            return None
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            logger.info("knowledge_video_local_no_ffmpeg")
+            return None
+        try:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "ZhuxiangKnowledgeBot/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                # 读取上限+1 字节以识别超限
+                data = resp.read(
+                    KnowledgeService._VIDEO_LOCAL_MAX_BYTES + 1)
+        except Exception as exc:
+            logger.info("knowledge_video_local_download_failed: %s", exc)
+            return None
+        if not data or len(data) > KnowledgeService._VIDEO_LOCAL_MAX_BYTES:
+            logger.info("knowledge_video_local_size_exceeded")
+            return None
+        segments: list[dict] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            video_path = os.path.join(tmp, "video.mp4")
+            with open(video_path, "wb") as f:
+                f.write(data)
+            # 抽帧: 每 10s 一帧(frame_001.jpg 起始, 时间戳=(序号-1)*10)
+            with suppress(subprocess.SubprocessError, OSError):
+                subprocess.run(
+                    [ffmpeg, "-i", video_path, "-vf",
+                     f"fps=1/{KnowledgeService._VIDEO_FRAME_INTERVAL}",
+                     os.path.join(tmp, "frame_%03d.jpg")],
+                    check=True, capture_output=True, timeout=120)
+            frames = sorted(
+                f for f in os.listdir(tmp) if f.startswith("frame_"))
+            for fname in frames[:KnowledgeService._VIDEO_MAX_FRAMES]:
+                idx = int(fname.split("_")[1].split(".")[0])
+                ts = (idx - 1) * KnowledgeService._VIDEO_FRAME_INTERVAL
+                desc = provider_client.vision(
+                    f"这是视频第 {ts} 秒的画面, 请用一句话(30字内)"
+                    "客观描述可见内容。", os.path.join(tmp, fname),
+                    media_type="image")
+                if desc:
+                    segments.append({
+                        "timecode": KnowledgeService._fmt_mmss(ts),
+                        "desc": f"画面: {desc[:60]}",
+                        "keywords": ""})
+            # 音轨: 16k 单声道 wav 按 30s 分段转写
+            with suppress(subprocess.SubprocessError, OSError):
+                subprocess.run(
+                    [ffmpeg, "-i", video_path, "-vn", "-ac", "1",
+                     "-ar", "16000", "-f", "segment", "-segment_time",
+                     str(KnowledgeService._VIDEO_ASR_SEGMENT_SECS),
+                     os.path.join(tmp, "asr_%03d.wav")],
+                    check=True, capture_output=True, timeout=120)
+            asr_files = sorted(
+                f for f in os.listdir(tmp) if f.startswith("asr_"))
+            for fname in asr_files:
+                idx = int(fname.split("_")[1].split(".")[0])
+                ts = idx * KnowledgeService._VIDEO_ASR_SEGMENT_SECS
+                text = provider_client.transcribe(os.path.join(tmp, fname))
+                if text:
+                    segments.append({
+                        "timecode": KnowledgeService._fmt_mmss(ts),
+                        "desc": f"语音: {text[:80]}",
+                        "keywords": ""})
+        segments.sort(key=lambda s: s["timecode"])
         return segments or None
 
     # ---------- 6.4 全网抓取(D-15) ----------

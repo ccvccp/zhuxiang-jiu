@@ -477,8 +477,84 @@ async def main():
     except ValueError:
         record("媒体-非法provider拒绝", True)
 
+    # 6.3.2 P3.6 视频本地抽帧+ASR(ffmpeg+GLM-4V+GLM-ASR, mock 全链)
+    from unittest import mock as _mock6
+
+    _orig_transcribe = _llm_vision_mod.provider_client.transcribe
+
+    def _fake_ffmpeg_run(args, **kwargs):
+        # 模拟 ffmpeg: 按输出模板落帧文件与音频段
+        out = args[-1]
+        if "frame_" in out:
+            for n in ("001", "002"):
+                with open(out.replace("%03d", n), "wb") as f:
+                    f.write(b"\xff\xd8\xff\xe0JFIF")
+        elif "asr_" in out:
+            with open(out.replace("%03d", "000"), "wb") as f:
+                f.write(b"RIFFWAV")
+
+    def _fake_video_dl(req, timeout=30):
+        m = _mock6.MagicMock()
+        m.read.return_value = b"FAKEVIDEODATA"
+        m.__enter__.return_value = m
+        return m
+
+    # GLM-4V 直接视频理解失败(video 轨 None) → 本地链:
+    # 2 帧描述(frame_001→00:00, frame_002→00:10) + 1 段转写(00:00)
+    _llm_vision_mod.provider_client.vision = (
+        lambda p, u, media_type="image":
+        None if media_type == "video" else "竹林与酿酒作坊画面")
+    _llm_vision_mod.provider_client.transcribe = (
+        lambda path: "竹香酒采用竹笋竹茎竹叶古法酿制")
+    with _mock6.patch("shutil.which", return_value="ffmpeg"), \
+         _mock6.patch("subprocess.run", side_effect=_fake_ffmpeg_run), \
+         _mock6.patch("urllib.request.urlopen",
+                      side_effect=_fake_video_dl):
+        segs_local = KnowledgeService._video_local_analyze(
+            "https://x.com/doc.mp4")
+    record("P3.6-本地抽帧+ASR时间轴",
+           segs_local is not None and len(segs_local) == 3
+           and segs_local[0]["timecode"] == "00:00"
+           and any("画面" in s["desc"] for s in segs_local)
+           and any("语音" in s["desc"] and "古法酿制" in s["desc"]
+                   for s in segs_local),
+           f"实际{segs_local}")
+
+    # 无 ffmpeg → None(降级不抛错)
+    with _mock6.patch("shutil.which", return_value=None):
+        segs_noff = KnowledgeService._video_local_analyze(
+            "https://x.com/doc.mp4")
+    record("P3.6-无ffmpeg降级返回None", segs_noff is None)
+
+    # ingest_video 全链: GLM-4V video 失败 → 本地轨生效
+    with _mock6.patch("shutil.which", return_value="ffmpeg"), \
+         _mock6.patch("subprocess.run", side_effect=_fake_ffmpeg_run), \
+         _mock6.patch("urllib.request.urlopen",
+                      side_effect=_fake_video_dl):
+        vid_local = await svc.ingest_video(
+            title="本地分析纪录片", url="https://x.com/doc.mp4",
+            segments=None, provider="llm")
+    record("P3.6-ingest_video本地轨生效",
+           vid_local["provider"] == "llm"
+           and vid_local["totalSegments"] == 3
+           # 两帧 mock 描述相同 → 1 条被相似去重(治理流水线生效)
+           and vid_local["ingested"] == 2
+           and vid_local["skipped"] == 1,
+           f"实际{vid_local}")
+
+    # transcribe 真实方法: 未配置 key / 文件不存在 → None
+    _llm_vision_mod.provider_client.transcribe = _orig_transcribe
+    _saved_key = os.environ.pop("LLM_API_KEY")
+    record("P3.6-transcribe未配置key返回None",
+           _llm_vision_mod.provider_client.transcribe("x.wav") is None)
+    os.environ["LLM_API_KEY"] = _saved_key
+    record("P3.6-transcribe文件不存在返回None",
+           _llm_vision_mod.provider_client.transcribe(
+               "Z:/no/such/file.wav") is None)
+
     # 清理: 恢复 vision 与环境变量
     _llm_vision_mod.provider_client.vision = _orig_vision
+    _llm_vision_mod.provider_client.transcribe = _orig_transcribe
     os.environ.pop("KNOWLEDGE_MEDIA_LLM", None)
     os.environ.pop("LLM_API_KEY", None)
 
