@@ -18,6 +18,9 @@ $ErrorActionPreference = "Continue"
 
 $Root    = Split-Path -Parent $PSScriptRoot     # 仓库根(docker-compose.yml 所在)
 $Compose = Join-Path $Root "docker-compose.yml"
+# 显式项目名: 仓库目录名"网站架构设计"全中文, compose v2 从目录名派生项目名时
+# 清洗非法字符后为空 → "project name must not be empty" 报错, 必须显式指定
+$Project = "zhuxiang-jiu"
 
 $script:Pass = 0
 $script:Fail = 0
@@ -84,35 +87,35 @@ if (Test-Path $wslcfg) {
 
 # ---------- 3.2 compose 配置校验 ----------
 Step "3.2 docker compose config 校验"
-docker compose -f $Compose config --quiet
+docker compose -p $Project -f $Compose config --quiet
 if ($LASTEXITCODE -eq 0) { Ok "compose 配置合法(env_file 缺失不阻断)" } else { Bad "compose config 校验失败" }
 
 # ---------- 3.3 启动全栈 + healthcheck ----------
 Step "3.3 docker compose up -d + healthcheck"
 Write-Host "  构建并启动(首次构建较慢, 后续命中缓存)..."
-docker compose -f $Compose up -d --build 2>&1 | Select-Object -Last 4
+docker compose -p $Project -f $Compose up -d --build 2>&1 | Select-Object -Last 4
 if ($LASTEXITCODE -ne 0) { Bad "docker compose up 失败"; Pop-Location; exit 1 }
 
-$backendId = docker compose -f $Compose ps -q backend
+$backendId = docker compose -p $Project -f $Compose ps -q backend
 if (Wait-Health 150) { Ok "健康探测 200(/api/decision/health)" }
 else { Bad "150 秒内健康探测未通过" }
 $hc = docker inspect --format "{{.State.Health.Status}}" $backendId
 if ("$hc" -eq "healthy") { Ok "容器 healthcheck 状态: healthy" } else { Bad "容器 healthcheck 状态: $hc" }
-$redisPing = docker compose -f $Compose exec -T redis redis-cli ping
+$redisPing = docker compose -p $Project -f $Compose exec -T redis redis-cli ping
 if ("$redisPing".Trim() -eq "PONG") { Ok "Redis 容器 PONG" } else { Bad "Redis ping 异常: $redisPing" }
 
 # ---------- 3.4 容器内 seed ----------
 Step "3.4 容器内执行 seed_redis.py"
-$seedOut = docker compose -f $Compose exec -T backend python scripts/seed_redis.py 2>&1
+$seedOut = docker compose -p $Project -f $Compose exec -T backend python scripts/seed_redis.py 2>&1
 $seedOut | Select-Object -Last 10 | ForEach-Object { Write-Host "  $_" }
 if ($LASTEXITCODE -eq 0) { Ok "seed 脚本退出码 0" } else { Bad "seed 脚本执行失败" }
 
 # 供应链 19 域抽查(直接查 Redis 键)
-$wh   = docker compose -f $Compose exec -T redis redis-cli LLEN zhuxiang:sc:supply_warehouses
-$loc  = docker compose -f $Compose exec -T redis redis-cli LLEN zhuxiang:sc:warehouse_locations
-$stk  = docker compose -f $Compose exec -T redis redis-cli LLEN zhuxiang:sc:warehouse_stock
-$cpn  = docker compose -f $Compose exec -T redis redis-cli HLEN zhuxiang:sc:checkout_coupons
-$pts  = docker compose -f $Compose exec -T redis redis-cli HLEN zhuxiang:sc:checkout_points
+$wh   = docker compose -p $Project -f $Compose exec -T redis redis-cli LLEN zhuxiang:sc:supply_warehouses
+$loc  = docker compose -p $Project -f $Compose exec -T redis redis-cli LLEN zhuxiang:sc:warehouse_locations
+$stk  = docker compose -p $Project -f $Compose exec -T redis redis-cli LLEN zhuxiang:sc:warehouse_stock
+$cpn  = docker compose -p $Project -f $Compose exec -T redis redis-cli HLEN zhuxiang:sc:checkout_coupons
+$pts  = docker compose -p $Project -f $Compose exec -T redis redis-cli HLEN zhuxiang:sc:checkout_points
 if ("$wh".Trim() -eq "4" -and "$loc".Trim() -eq "180" -and "$stk".Trim() -eq "14" `
     -and "$cpn".Trim() -eq "2" -and "$pts".Trim() -eq "5") {
     Ok "供应链域: 4仓/180库位/14仓储库存/2券/5等级积分"
@@ -122,7 +125,7 @@ if ("$wh".Trim() -eq "4" -and "$loc".Trim() -eq "180" -and "$stk".Trim() -eq "14
 
 # ---------- 3.5 内存占用 ----------
 Step "3.5 backend 容器内存占用(限额 1g)"
-$stats = docker compose -f $Compose stats --no-stream --format "{{.Name}} {{.MemUsage}} {{.MemPerc}}"
+$stats = docker compose -p $Project -f $Compose stats --no-stream --format "{{.Name}} {{.MemUsage}} {{.MemPerc}}"
 $stats | ForEach-Object { Write-Host "  $_" }
 $memLine = "$stats" | Select-String "backend"
 if ($memLine -match "([0-9.]+)GiB") {
@@ -178,14 +181,14 @@ try {
 
 # ---------- 3.8 重启持久化 ----------
 Step "3.8 重启持久化验证(Redis AOF)"
-docker compose -f $Compose exec -T redis redis-cli SET prelaunch:persist-test ok | Out-Null
+docker compose -p $Project -f $Compose exec -T redis redis-cli SET prelaunch:persist-test ok | Out-Null
 Write-Host "  重启 backend + redis..."
-docker compose -f $Compose restart backend redis 2>&1 | Out-Null
+docker compose -p $Project -f $Compose restart backend redis 2>&1 | Out-Null
 if (Wait-Health 150) {
-    $v = docker compose -f $Compose exec -T redis redis-cli GET prelaunch:persist-test
+    $v = docker compose -p $Project -f $Compose exec -T redis redis-cli GET prelaunch:persist-test
     if ("$v".Trim() -eq "ok") { Ok "Redis AOF 持久化生效(测试键重启后仍在)" }
     else { Bad "测试键重启后丢失: $v" }
-    docker compose -f $Compose exec -T redis redis-cli DEL prelaunch:persist-test | Out-Null
+    docker compose -p $Project -f $Compose exec -T redis redis-cli DEL prelaunch:persist-test | Out-Null
     Write-Host "  注: backend 重启时重跑幂等 seed, 冒烟业务数据重置为初始态属设计行为"
 } else { Bad "重启后健康探测未恢复" }
 

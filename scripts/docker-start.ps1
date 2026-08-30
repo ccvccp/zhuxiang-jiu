@@ -1,5 +1,5 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# ==========================================================================
-# Docker Compose 启动脚本(构建 + 启动 + 日志查看)
+# docker compose -p zhuxiang-jiu 启动脚本(构建 + 启动 + 日志查看)
 # 项目: 醉象模块29 - FastAPI + Redis
 # 用法:
 #   .\scripts\docker-start.ps1           # 默认: 构建并启动, 然后查看日志
@@ -80,8 +80,8 @@ Write-Ok "Docker engine 运行中"
 
 # ---- 构建镜像 ----
 function Invoke-Build {
-    Write-Step "构建镜像(docker compose build)"
-    $buildOutput = docker compose build 2>&1
+    Write-Step "构建镜像(docker compose -p zhuxiang-jiu build)"
+    $buildOutput = docker compose -p zhuxiang-jiu build 2>&1
     # 正常时只显示关键进度行,减少噪声
     $buildOutput | ForEach-Object {
         if ($_ -match "DONE|ERROR|WARN|naming|exporting|=>") { Write-Host $_ }
@@ -97,8 +97,8 @@ function Invoke-Build {
 
 # ---- 启动服务 ----
 function Invoke-Up {
-    Write-Step "启动服务(docker compose up -d)"
-    docker compose up -d 2>&1 | ForEach-Object { Write-Host $_ }
+    Write-Step "启动服务(docker compose -p zhuxiang-jiu up -d)"
+    docker compose -p zhuxiang-jiu up -d 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) {
         Write-Err "启动失败"
         exit 1
@@ -110,26 +110,26 @@ function Invoke-Up {
 function Invoke-Logs {
     Write-Step "查看日志(实时, Ctrl+C 退出)"
     Write-Host "提示: 'redis' / 'backend' 标签区分服务`n" -ForegroundColor DarkGray
-    docker compose logs -f --tail=50
+    docker compose -p zhuxiang-jiu logs -f --tail=50
 }
 
 # ---- 停止并清理 ----
 function Invoke-Down {
-    Write-Step "停止并清理(docker compose down)"
-    docker compose down 2>&1 | ForEach-Object { Write-Host $_ }
+    Write-Step "停止并清理(docker compose -p zhuxiang-jiu down)"
+    docker compose -p zhuxiang-jiu down 2>&1 | ForEach-Object { Write-Host $_ }
     Write-Ok "已停止并清理"
 }
 
 # ---- 查看状态 + healthcheck ----
 function Invoke-Status {
     Write-Step "容器状态"
-    docker compose ps
+    docker compose -p zhuxiang-jiu ps
     Write-Host ""
 
     Write-Step "Healthcheck 状态"
     $services = @("redis", "backend")
     foreach ($svc in $services) {
-        $container = docker compose ps -q $svc 2>$null
+        $container = docker compose -p zhuxiang-jiu ps -q $svc 2>$null
         if (-not $container) {
             Write-Warn "$svc : 容器未运行"
             continue
@@ -147,8 +147,8 @@ function Invoke-Status {
 
 # ---- 重启 ----
 function Invoke-Restart {
-    Write-Step "重启服务(docker compose restart)"
-    docker compose restart 2>&1 | ForEach-Object { Write-Host $_ }
+    Write-Step "重启服务(docker compose -p zhuxiang-jiu restart)"
+    docker compose -p zhuxiang-jiu restart 2>&1 | ForEach-Object { Write-Host $_ }
     Write-Ok "已重启"
     Write-Host "等待 15 秒让 healthcheck 收敛..." -ForegroundColor DarkGray
     Start-Sleep -Seconds 15
@@ -158,7 +158,7 @@ function Invoke-Restart {
 # ---- 验证 healthcheck 端点 ----
 function Invoke-Verify {
     Write-Step "验证 healthcheck 端点"
-    $container = docker compose ps -q backend 2>$null
+    $container = docker compose -p zhuxiang-jiu ps -q backend 2>$null
     if (-not $container) {
         Write-Err "backend 容器未运行, 请先执行: .\scripts\docker-start.ps1 -Action up"
         exit 1
@@ -166,13 +166,13 @@ function Invoke-Verify {
     Write-Host "容器ID: $container`n" -ForegroundColor DarkGray
 
     Write-Host "[1/2] 容器内 curl(模拟 docker healthcheck)"
-    docker compose exec -T backend curl -fsS http://localhost:8000/api/decision/health 2>&1 | ForEach-Object { Write-Host $_ }
+    docker compose -p zhuxiang-jiu exec -T backend curl -fsS http://localhost:8000/api/decision/health 2>&1 | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -eq 0) {
         Write-Ok "容器内 healthcheck 通过(200)"
     } else {
         Write-Err "容器内 healthcheck 失败(可能 backend 尚未就绪, 等待 10s 后重试)"
         Start-Sleep -Seconds 10
-        docker compose exec -T backend curl -fsS http://localhost:8000/api/decision/health 2>&1 | ForEach-Object { Write-Host $_ }
+        docker compose -p zhuxiang-jiu exec -T backend curl -fsS http://localhost:8000/api/decision/health 2>&1 | ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "重试通过"
         } else {
