@@ -608,6 +608,17 @@ const InventoryService = (function () {
         return await r.json();
     }
 
+    // P5.1: getStock live 查询(GET 分支 EnvAdapter 直接填充 res.data)
+    async function liveGetStock(productId) {
+        const r = await EnvAdapter.request({
+            url: apiBase + '/stock?productId=' + encodeURIComponent(productId),
+            method: 'GET',
+        });
+        if (!r.ok) return null;   // 产品不存在等错误 → null(与 mock 语义一致)
+        const body = r.data;
+        return body && body.success ? body.stock : null;
+    }
+
     // ---------- 公共 API ----------
     return {
         CONFIG: CONFIG,
@@ -627,7 +638,12 @@ const InventoryService = (function () {
             return this;
         },
         getMockDB() { return readDB(); },
-        getStock: getStock,
+        // getStock 双模式(P5.1): mock 同步返回 number|null; live 返回 Promise<number|null>
+        // (mock 调用方无感; live 调用方需 await)
+        getStock(productId) {
+            if (mode === 'live') return liveGetStock(productId);
+            return getStock(productId);
+        },
         // 共享核心(供 checkout-service 等上层事务委托调用)
         applyDeduct: applyDeduct,
         applyRestock: applyRestock,

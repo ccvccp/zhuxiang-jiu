@@ -195,7 +195,50 @@ class ShippingClaimService:
                  f"厂家按 5% 计提服务费 ¥{fee} 给代理商 {payload.get('agentName')}")
         return {"serviceFee": fee, "record": record}
 
-    async def list_claims(self) -> dict:
-        """列出所有区域认领记录(旧契约保留)"""
-        claims = await self.shipping_repo.list_all()
-        return {"success": True, "claims": claims}
+    async def list_claims(self, detail: bool = False) -> dict:
+        """列出所有区域认领记录
+
+        detail=False(默认): {success, claims: {region: agent_id}} 旧契约(兼容保留)
+        detail=True: {success, claims: [富记录数组]} 对齐前端 mock 契约
+            (含已退出认领, 字段: claimId/agentId/agentName/region/status/serviceRate/
+             claimedAt/releasedAt/shippedQty/serviceFeeAccrued)
+        """
+        claims_map = await self.shipping_repo.list_all()
+        if not detail:
+            return {"success": True, "claims": claims_map}
+        details = await self.sc_repo.hgetall("shipping_claim_details")
+        records = list(details.values())
+        records.sort(key=lambda r: r.get("claimedAt") or "", reverse=True)
+        return {"success": True, "claims": records}
+
+    async def get_service_fee_settlement(self, agent_id) -> dict:
+        """按代理商聚合服务费结算统计(P5.1: 对齐前端 getServiceFeeSettlement mock 契约)
+
+        从 service_fees 域聚合该代理商的 待发放/已发放 统计。
+        """
+        fees = await self.sc_repo.list_all("service_fees")
+        mine = [f for f in fees if str(f.get("agent_id")) == str(agent_id)]
+        pending = [f for f in mine if f.get("status") == "待发放"]
+        settled = [f for f in mine if f.get("status") == "已发放"]
+
+        def _sum(records):
+            return round(sum(float(r.get("service_fee", 0)) for r in records), 2)
+
+        return {
+            "success": True,
+            "details": {
+                "agentId": agent_id,
+                "totalCount": len(mine),
+                "pendingCount": len(pending),
+                "pendingAmount": _sum(pending),
+                "settledAmount": _sum(settled),
+                "settledAs": "同品",
+            },
+            # ---- 兼容顶层字段(mock 契约直接返回平铺对象) ----
+            "agentId": agent_id,
+            "totalCount": len(mine),
+            "pendingCount": len(pending),
+            "pendingAmount": _sum(pending),
+            "settledAmount": _sum(settled),
+            "settledAs": "同品",
+        }

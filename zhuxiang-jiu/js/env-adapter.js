@@ -229,7 +229,20 @@
                 controller = new AbortController();
                 abortFn = function () { try { controller.abort(); } catch (e) { /* */ } };
             }
-            realPromise = fetch(url, {
+            // GET 请求: data 序列化为 query string 拼接 url(对齐小程序分支行为,
+            // 修复 warehouse forecast/safety-stock/env-monitor 等三 GET 端点 live 模式丢参)
+            let finalUrl = url;
+            if (method === 'GET' && data && typeof data === 'object'
+                    && Object.keys(data).length > 0) {
+                const qs = Object.keys(data)
+                    .filter(function (k) { return data[k] !== undefined && data[k] !== null; })
+                    .map(function (k) {
+                        return encodeURIComponent(k) + '=' + encodeURIComponent(data[k]);
+                    })
+                    .join('&');
+                if (qs) finalUrl = url + (url.indexOf('?') >= 0 ? '&' : '?') + qs;
+            }
+            realPromise = fetch(finalUrl, {
                 method: method,
                 headers: finalHeader,
                 body: method !== 'GET' ? (typeof data === 'string' ? data : JSON.stringify(data)) : undefined,

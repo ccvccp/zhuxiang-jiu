@@ -510,16 +510,29 @@ const AgentShippingService = (function () {
         };
     }
 
-    // ---------- Live: 调用后端 API ----------
-    async function liveClaim(agentId, region) {
+    // ---------- Live: 调用后端 API(P5.1) ----------
+    // 通用 live 请求: 非 2xx 时解析后端错误体{success:false, error},
+    // 保持与 mock 失败形状一致(调用方统一按 result.success 判断)
+    async function liveRequest(path, method, data) {
         const r = await EnvAdapter.request({
-            url: apiBase + '/claim',
-            method: 'POST',
-            data: { agentId: agentId, region: region },
+            url: apiBase + path,
+            method: method,
+            data: data,
             header: { 'Content-Type': 'application/json' },
         });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return await r.json();
+        if (!r.ok) {
+            try {
+                // GET 分支 EnvAdapter 直接填充 res.data; 非 GET 走 lazy json()
+                const body = method === 'GET' ? r.data : await r.json();
+                if (body && typeof body === 'object' && 'success' in body) return body;
+            } catch (e) { /* 非 JSON 错误体, 走 HTTP 错误 */ }
+            throw new Error('HTTP ' + r.status);
+        }
+        return method === 'GET' ? r.data : await r.json();
+    }
+
+    function liveError(e) {
+        return { success: false, error: e.message, logs: [{ step: '回滚', level: 'ERROR', msg: 'API调用失败: ' + e.message }] };
     }
 
     // ---------- 公共 API ----------
@@ -533,16 +546,71 @@ const AgentShippingService = (function () {
         getMode() { return mode; },
         resetMock() { EnvAdapter.storage.remove(STORAGE_KEY); initMockDB(true); return this; },
         getMockDB() { return readDB(); },
-        // 事务入口
-        claim,
-        release,
-        // 共享核心(供 checkout 在其事务内委托)
+        // 事务入口(mock/live 双模式: live 走后端事务, 响应形状一致)
+        async claim(agentId, region) {
+            if (mode === 'live') {
+                try { return await liveRequest('/claim', 'POST', { agentId: agentId, region: region }); }
+                catch (e) { return liveError(e); }
+            }
+            return await claim(agentId, region);
+        },
+        async release(agentId, region) {
+            if (mode === 'live') {
+                try { return await liveRequest('/release', 'POST', { agentId: agentId, region: region }); }
+                catch (e) { return liveError(e); }
+            }
+            return await release(agentId, region);
+        },
+        // 共享核心(供 checkout 在其事务内委托; live 模式下由后端事务内部完成, 前端不再调用)
         accrueServiceFee,
         // 只读查询
         resolveShipper,
-        listClaims,
-        listServiceFees,
-        getServiceFeeSettlement,
+        // listClaims 双模式: mock 同步返回数组; live 返回 Promise(富记录数组,
+        // 调用方需 await, 字段: claimId/agentId/agentName/region/status/serviceRate/claimedAt)
+        listClaims(statusFilter) {
+            if (mode === 'live') {
+                return liveRequest('/claims?detail=true', 'GET')
+                    .then(function (body) {
+                        const claims = (body && body.claims) || [];
+                        if (!statusFilter) return claims;
+                        return claims.filter(function (c) { return c.status === statusFilter; });
+                    })
+                    .catch(function (e) { return []; });
+            }
+            const claims = readDB().shipping_claims || [];
+            if (!statusFilter) return claims;
+            return claims.filter(c => c.status === statusFilter);
+        },
+        listServiceFees(db) {
+            const src = db || readDB();
+            return src.service_fees || [];
+        },
+        // getServiceFeeSettlement 双模式: mock 同步返回统计对象; live 返回 Promise
+        getServiceFeeSettlement(agentId) {
+            if (mode === 'live') {
+                return liveRequest('/settlement?agentId=' + encodeURIComponent(agentId), 'GET')
+                    .then(function (body) {
+                        if (body && body.success) {
+                            return body.details || body;   // 优先取 details, 兼容顶层平铺
+                        }
+                        return { agentId: agentId, totalCount: 0, pendingCount: 0,
+                                 pendingAmount: 0, settledAmount: 0, settledAs: '同品' };
+                    })
+                    .catch(function (e) { return null; });
+            }
+            const fees = (readDB().service_fees || []).filter(f => f.agent_id === agentId);
+            const pending = fees.filter(f => f.status === '待发放');
+            const settled = fees.filter(f => f.status === '已发放');
+            const sum = (arr) => round2(arr.reduce((s, f) => s + f.service_fee, 0));
+            return {
+                agentId: agentId,
+                totalCount: fees.length,
+                pendingCount: pending.length,
+                pendingAmount: sum(pending),
+                settledAmount: sum(settled),
+                settledAs: '同品',
+            };
+        },
     };
 })();
 

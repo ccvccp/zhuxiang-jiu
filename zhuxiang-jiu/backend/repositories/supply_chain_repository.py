@@ -122,6 +122,22 @@ class SupplyChainRepository:
         else:
             (self.store.get(domain) or {}).pop(key, None)
 
+    async def hgetall(self, domain: str) -> dict:
+        """Hash 域全量读取(P5.1: claims 富记录列表用)"""
+        if domain not in HASH_DOMAINS:
+            raise ValueError(f"非法 Hash 域({domain})")
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.hgetall(_k("sc", domain))
+            out = {}
+            for key, value in raw.items():
+                try:
+                    out[key] = json.loads(value)
+                except (TypeError, ValueError):
+                    out[key] = value   # 标量
+            return out
+        return dict(self.store.get(domain) or {})
+
     async def hget_int(self, domain: str, key: str, default: int = 0) -> int:
         """Hash 域取整数值(积分余额等, 缺失返回 default)"""
         v = await self.hget(domain, key)

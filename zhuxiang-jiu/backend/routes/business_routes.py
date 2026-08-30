@@ -195,6 +195,17 @@ async def inventory_restock(req: InventoryRequest):
         items, reason=req.reason or "库存回补", ref_no=req.refNo)
 
 
+@router.get("/api/inventory/stock", tags=["供应链服务"])
+async def inventory_stock(productId: str = None):
+    """库存查询(P5.1: 前端 getStock live 分支对接)"""
+    if not productId:
+        raise HTTPException(status_code=422, detail="productId 不能为空")
+    try:
+        return await _inventory_service.get_stock(productId)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+
+
 # ============================================================
 #  仓储服务
 # ============================================================
@@ -303,9 +314,17 @@ async def agent_shipping_release(req: AgentShippingClaimRequest):
 
 
 @router.get("/api/agent-shipping/claims", tags=["代理商服务"])
-async def agent_shipping_list_claims():
-    """查询所有区域认领记录"""
-    return await _shipping_service.list_claims()
+async def agent_shipping_list_claims(detail: bool = False):
+    """查询所有区域认领记录(detail=true 返回富记录数组, 前端 live listClaims 对接)"""
+    return await _shipping_service.list_claims(detail=detail)
+
+
+@router.get("/api/agent-shipping/settlement", tags=["代理商服务"])
+async def agent_shipping_settlement(agentId: str = None):
+    """服务费结算统计(P5.1: 按 agentId 聚合待发放/已发放, 前端 getServiceFeeSettlement 对接)"""
+    if not agentId:
+        raise HTTPException(status_code=422, detail="agentId 不能为空")
+    return await _shipping_service.get_service_fee_settlement(agentId)
 
 
 def register_business_routes(app):

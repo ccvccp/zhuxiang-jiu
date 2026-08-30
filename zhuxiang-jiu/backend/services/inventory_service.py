@@ -200,6 +200,22 @@ class InventoryService:
                             "reason": reason, "refNo": ref_no},
             }, log, ["inventory_notify"], lines)
 
+    async def get_stock(self, product_id) -> dict:
+        """库存查询(P5.1: 前端 getStock live 分支对接)
+
+        Raises:
+            KeyError: 产品不存在
+        """
+        product = await self.inventory_repo.get(product_id)
+        if not product:
+            raise KeyError(f"产品 {product_id} 不存在")
+        return {
+            "success": True,
+            "productId": product_id,
+            "stock": product["stock"],
+            "reserved": product.get("reserved", 0),
+        }
+
     # ============================================================
     # 旧单品方法(兼容保留: test_redis_integration 在用)
     # ============================================================

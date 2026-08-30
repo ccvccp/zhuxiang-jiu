@@ -243,3 +243,129 @@ class TestHttpConcurrent:
         r = client.post("/api/inventory/deduct", json={
             "items": [{"id": "ZX42-2026B01", "qty": 1}]})
         assert r.json()["success"] is False
+
+
+# ============================================================
+#  P5.1 新增端点: inventory/stock + shipping settlement/claims detail
+# ============================================================
+
+class TestInventoryStockEndpoint:
+    """GET /api/inventory/stock 端点测试(P5.1: 前端 getStock live 分支对接)"""
+
+    def setup_method(self):
+        _reset()
+
+    def test_stock_query_success(self):
+        """查询现有产品库存"""
+        r = client.get("/api/inventory/stock?productId=ZX42-2026L07")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["success"] is True
+        assert data["productId"] == "ZX42-2026L07"
+        assert data["stock"] == 500
+        assert data["reserved"] == 0
+
+    def test_stock_query_not_found(self):
+        """产品不存在: 404"""
+        r = client.get("/api/inventory/stock?productId=NOT-EXIST")
+        assert r.status_code == 404
+        assert r.json()["success"] is False
+
+    def test_stock_query_missing_param(self):
+        """缺 productId: 422"""
+        r = client.get("/api/inventory/stock")
+        assert r.status_code == 422
+
+    def test_stock_reflects_deduction(self):
+        """查询反映扣减后的库存"""
+        client.post("/api/inventory/deduct", json={
+            "items": [{"id": "ZX42-2026L07", "qty": 30}]})
+        r = client.get("/api/inventory/stock?productId=ZX42-2026L07")
+        assert r.json()["stock"] == 470
+
+
+class TestShippingSettlementEndpoint:
+    """GET /api/agent-shipping/settlement 端点测试(P5.1)"""
+
+    def setup_method(self):
+        _reset()
+
+    def test_settlement_empty(self):
+        """无服务费记录: 全零统计"""
+        r = client.get("/api/agent-shipping/settlement?agentId=1")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["success"] is True
+        assert data["totalCount"] == 0
+        assert data["pendingAmount"] == 0
+
+    def test_settlement_aggregates_fees(self):
+        """下单计提后聚合统计(认领区域下单 → 5% 服务费)"""
+        client.post("/api/agent-shipping/claim", json={"agentId": 1, "region": "taian"})
+        resp = client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典",
+                       "price": 599, "qty": 2}],
+            "region": "taian",
+        })
+        assert resp.json()["success"] is True
+        final = resp.json()["details"]["finalAmount"]
+        expected_fee = round(final * 0.05, 2)
+        # 结算统计
+        r = client.get("/api/agent-shipping/settlement?agentId=1")
+        data = r.json()
+        assert data["totalCount"] == 1
+        assert data["pendingCount"] == 1
+        assert data["pendingAmount"] == expected_fee
+        assert data["settledAmount"] == 0
+        assert data["settledAs"] == "同品"
+
+    def test_settlement_agent_isolation(self):
+        """不同代理商统计隔离"""
+        client.post("/api/agent-shipping/claim", json={"agentId": 1, "region": "taian"})
+        client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "price": 599, "qty": 1}],
+            "region": "taian",
+        })
+        r2 = client.get("/api/agent-shipping/settlement?agentId=2")
+        assert r2.json()["totalCount"] == 0
+
+    def test_settlement_missing_param(self):
+        """缺 agentId: 422"""
+        r = client.get("/api/agent-shipping/settlement")
+        assert r.status_code == 422
+
+
+class TestShippingClaimsDetailEndpoint:
+    """GET /api/agent-shipping/claims?detail=true 端点测试(P5.1)"""
+
+    def setup_method(self):
+        _reset()
+
+    def test_claims_detail_returns_rich_records(self):
+        """detail=true: 返回富记录数组(含已退出认领)"""
+        client.post("/api/agent-shipping/claim", json={"agentId": 1, "region": "taian"})
+        client.post("/api/agent-shipping/release", json={"agentId": 1, "region": "taian"})
+        client.post("/api/agent-shipping/claim", json={"agentId": 2, "region": "jinan"})
+        r = client.get("/api/agent-shipping/claims?detail=true")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["success"] is True
+        claims = data["claims"]
+        assert isinstance(claims, list)
+        assert len(claims) == 2   # 1 条已退出 + 1 条已认领
+        statuses = {c["region"]: c["status"] for c in claims}
+        assert statuses["taian"] == "已退出"
+        assert statuses["jinan"] == "已认领"
+        # 富记录字段
+        jinan = next(c for c in claims if c["region"] == "jinan")
+        assert jinan["agentName"] == "济南核心代理商"
+        assert jinan["claimId"]
+        assert jinan["serviceRate"] == 0.05
+
+    def test_claims_default_backward_compat(self):
+        """默认(无 detail): 保持旧契约 {region: agentId} 映射"""
+        client.post("/api/agent-shipping/claim", json={"agentId": 2, "region": "jinan"})
+        r = client.get("/api/agent-shipping/claims")
+        data = r.json()
+        assert isinstance(data["claims"], dict)
+        assert data["claims"]["jinan"] == 2
