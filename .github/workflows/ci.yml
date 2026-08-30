@@ -193,9 +193,9 @@ jobs:
               tail -n 80 docker-test-output.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E "^FAILED|^ERROR|ModuleNotFoundError|ImportError|PermissionError|OSError" \
-              docker-test-output.log | head -n 10 | while IFS= read -r line; do
-              echo "::error::${line:0:240}"
+            # 无条件把日志尾部作为注解输出(注解文本在 run/job 页可见, 免日志权限)
+            tail -n 12 docker-test-output.log | while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error::${line:0:240}"
             done
             exit 1
           fi
@@ -580,9 +580,11 @@ jobs:
               tail -n 80 redis-integration-output.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            grep -E "^FAILED|^ERROR" redis-integration-output.log | head -n 10 \
+            # 失败用例 + 日志尾部作为注解输出(注解文本在 run/job 页可见, 免日志权限)
+            { grep -E "^FAILED|^ERROR" redis-integration-output.log | head -n 8
+              tail -n 8 redis-integration-output.log; } \
               | while IFS= read -r line; do
-              echo "::error::${line:0:240}"
+              [ -n "$line" ] && echo "::error::${line:0:240}"
             done
             exit 1
           fi
