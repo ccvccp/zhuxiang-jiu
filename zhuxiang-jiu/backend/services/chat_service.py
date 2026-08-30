@@ -22,6 +22,7 @@
 
 
 import contextlib
+import os
 
 from core.locks import get_lock
 from core.helpers import ts
@@ -487,9 +488,17 @@ class ChatService:
         带引用溯源), 旧 chat_knowledge(关键词匹配)兜底。
 
         RAG unsolved 或新库异常不阻断对话(best-effort 降级旧库)。
+
+        P3.3 联动: KNOWLEDGE_CHAT_LLM=on 且 llm_client 可用时,
+        synthesized 态走大模型合成(未配置 key/失败自动回退 rule 轨,
+        行为与关闭开关一致); 默认 off 保持 rule 轨零成本。
         """
         try:
-            rag = await self.knowledge_svc.rag_answer(user_content)
+            provider = ("llm" if os.environ.get(
+                "KNOWLEDGE_CHAT_LLM", "off").strip().lower() == "on"
+                else "rule")
+            rag = await self.knowledge_svc.rag_answer(
+                user_content, provider=provider)
             if rag["mode"] != "unsolved" and rag["answer"]:
                 return {"id": rag["citations"][0]["entryId"],
                         "answer": rag["answer"],

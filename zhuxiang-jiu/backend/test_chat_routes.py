@@ -220,6 +220,44 @@ class TestSendMessageAIReply:
                f"got ragMode={ai_legacy.get('ragMode') if ai_legacy else None}, "
                f"citations={ai_legacy.get('citations') if ai_legacy else None}")
 
+        # ---- P3.3: chat 链路 llm 轨环境变量开关 ----
+        # test 11d: 开关默认 off → chat 走 rule 轨(零成本)
+        os.environ.pop("KNOWLEDGE_CHAT_LLM", None)
+        result_off = await svc.send_message(
+            session["sessionId"], SENDER_USER, USER_ID_1, "text", "竹香酒的酿造原料和工艺是什么"
+        )
+        ai_off = result_off["aiReply"]
+        record("test_11d_llm_switch_default_off",
+               ai_off is not None
+               and ai_off.get("ragMode") == "synthesized"
+               and "为您整理" in ai_off["content"],
+               f"got content={ai_off['content'][:30] if ai_off else None}")
+
+        # test 11e: 开关 on + mock 大模型 → chat 走 llm 合成
+        import services.llm_client as _llm_mod
+        import contextlib as _cl
+        _orig_chat = _llm_mod.provider_client.chat
+        _llm_mod.provider_client.chat = lambda s, u, temperature=0.3: (
+            "[1] 大模型合成答案: 以竹笋竹茎竹叶为原料古法酿制。")
+        with _cl.suppress(KeyError):
+            os.environ.pop("LLM_API_KEY")
+        os.environ["LLM_API_KEY"] = "test-key"
+        try:
+            os.environ["KNOWLEDGE_CHAT_LLM"] = "on"
+            result_on = await svc.send_message(
+                session["sessionId"], SENDER_USER, USER_ID_1, "text",
+                "竹香酒的酿造原料和工艺是什么")
+            ai_on = result_on["aiReply"]
+            record("test_11e_llm_switch_on_uses_llm",
+                   ai_on is not None
+                   and ai_on.get("ragMode") == "synthesized"
+                   and ai_on["content"].startswith("[1] 大模型合成答案"),
+                   f"got content={ai_on['content'][:30] if ai_on else None}")
+        finally:
+            os.environ.pop("KNOWLEDGE_CHAT_LLM", None)
+            os.environ.pop("LLM_API_KEY", None)
+            _llm_mod.provider_client.chat = _orig_chat
+
 
 class TestAutoTransfer:
     """自动转人工测试(3次未解决/主动转人工)"""

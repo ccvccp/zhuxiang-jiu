@@ -304,11 +304,12 @@ llm 轨（P3.3 已实施）: top-k 条目作为 context 喂给大模型生成，
 }                           #  ask 端点仅标记不重复记录——幂等约束)
 ```
 
-### 9.6 chat 模块接线（P3.2，已实施）
+### 9.6 chat 模块接线（P3.2，已实施；P3.3 llm 轨联动已实施）
 
 ```
 _search_knowledge 升级(已实施):
-  rag = await knowledge_svc.rag_answer(user_content)
+  provider = KNOWLEDGE_CHAT_LLM 环境变量开关(on→llm 轨, 默认 off→rule 轨)
+  rag = await knowledge_svc.rag_answer(user_content, provider=provider)
   → mode != unsolved: 返回 {answer(融合后), citations, confidence, ragMode}
   → unsolved: 走旧 FAQ 兜底 → 仍无 → 缺口飞轮(不变)
 
@@ -316,6 +317,10 @@ _search_knowledge 升级(已实施):
   aiConfidence 动态化: RAG 命中=相似度, 旧 FAQ 兜底=固定 0.85
   回复体透出 citations(前端可渲染"知识来源"角标) 与 ragMode
   (direct/synthesized/legacy, legacy=旧FAQ兜底)
+
+P3.3 联动(已实施): KNOWLEDGE_CHAT_LLM=on 时 synthesized 态走
+大模型合成; llm 轨不可用(key 失效/请求失败)自动回退 rule 轨,
+行为与开关关闭一致——生产默认零成本, 按需开启。
 ```
 
 chat 的转人工判定（unresolvedCount）逻辑不变。
