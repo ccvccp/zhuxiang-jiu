@@ -3,12 +3,37 @@ services:
     build: ./zhuxiang-jiu/backend
     ports:
       - "8000:8000"
+    env_file:
+      # P4.1 部署加固: LLM 密钥与功能开关经 .env 注入(不落盘, .gitignore 已忽略)
+      # 参见 .env.example; 功能开关默认 off, 上线按需逐轨开启
+      - path: .env
+        required: false
     environment:
       - REDIS_URL=redis://redis:6379/0
       - LOCK_MODE=redis
       - STORE_MODE=redis
       - PORT=8000
       - HOST=0.0.0.0
+      # ---- P4.1 LLM 配置(默认关闭; 覆盖 .env 同名项) ----
+      # 总开关与密钥: LLM_ENABLED/LLM_API_KEY/LLM_BASE_URL 经 .env 注入
+      - LLM_MODEL=${LLM_MODEL:-glm-4-flash}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-15}
+      - LLM_VISION_TIMEOUT=${LLM_VISION_TIMEOUT:-60}
+      # 各功能轨开关(默认 off; .env 中设 on 开启)
+      - KNOWLEDGE_CHAT_LLM=${KNOWLEDGE_CHAT_LLM:-off}
+      - KNOWLEDGE_EMBEDDING=${KNOWLEDGE_EMBEDDING:-off}
+      - KNOWLEDGE_MEDIA_LLM=${KNOWLEDGE_MEDIA_LLM:-off}
+      - KNOWLEDGE_CRAWL_LLM=${KNOWLEDGE_CRAWL_LLM:-off}
+      - KNOWLEDGE_RERANK=${KNOWLEDGE_RERANK:-off}
+      # 模型名(按需在 .env 覆盖)
+      - VISION_MODEL=${VISION_MODEL:-glm-4v-flash}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-embedding-3}
+      - ASR_MODEL=${ASR_MODEL:-glm-asr-2512}
+      - RERANK_MODEL=${RERANK_MODEL:-rerank}
+      # 后台调度开关(默认 off)
+      - AI_LEARNING_AUTO=${AI_LEARNING_AUTO:-off}
+      - ORDER_TIMEOUT_AUTO=${ORDER_TIMEOUT_AUTO:-off}
+      - KNOWLEDGE_QUALITY_AUTO=${KNOWLEDGE_QUALITY_AUTO:-off}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

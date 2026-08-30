@@ -118,6 +118,45 @@ def rerank_enabled() -> bool:
         "KNOWLEDGE_RERANK", "off").strip().lower() == "on"
 
 
+def log_feature_status() -> None:
+    """启动时输出各轨开关状态(P4.1 部署加固)
+
+    一目了然: 哪些 LLM 轨生效、哪些回退 rule——容器化部署
+    后环境变量遗漏/密钥未注入可即时发现, 不再静默降级。
+    """
+    key_set = bool(os.environ.get("LLM_API_KEY", "").strip())
+    master = "on" if llm_enabled() else "off"
+    logger.info("=" * 60)
+    logger.info("LLM 功能开关状态(P4.1):")
+    logger.info("  LLM_API_KEY       : %s",
+                "已配置" if key_set else "未配置(llm 轨全部关闭)")
+    logger.info("  LLM_ENABLED       : %s (总开关)", master)
+    if key_set:
+        tracks = [
+            ("RAG llm 合成", "KNOWLEDGE_CHAT_LLM",
+             os.environ.get("KNOWLEDGE_CHAT_LLM", "off")),
+            ("Embedding 语义检索", "KNOWLEDGE_EMBEDDING",
+             os.environ.get("KNOWLEDGE_EMBEDDING", "off")),
+            ("多模态视觉理解", "KNOWLEDGE_MEDIA_LLM",
+             os.environ.get("KNOWLEDGE_MEDIA_LLM", "off")),
+            ("抓取智能清洗", "KNOWLEDGE_CRAWL_LLM",
+             os.environ.get("KNOWLEDGE_CRAWL_LLM", "off")),
+            ("Rerank 重排", "KNOWLEDGE_RERANK",
+             os.environ.get("KNOWLEDGE_RERANK", "off")),
+        ]
+        for name, env, val in tracks:
+            effective = "on" if val.strip().lower() == "on" and \
+                master == "on" else "off(回退 rule)"
+            logger.info("  %-18s: %s (%s=%s)", name, effective, env, val)
+        logger.info("  模型: chat=%s vision=%s embed=%s asr=%s rerank=%s",
+                     os.environ.get("LLM_MODEL", "glm-4-flash"),
+                     os.environ.get("VISION_MODEL", "glm-4v-flash"),
+                     os.environ.get("EMBEDDING_MODEL", "embedding-3"),
+                     os.environ.get("ASR_MODEL", "glm-asr-2512"),
+                     os.environ.get("RERANK_MODEL", "rerank"))
+    logger.info("=" * 60)
+
+
 class LLMProviderClient:
     """OpenAI 兼容 /chat/completions 与 /embeddings 客户端(urllib, 纯标准库)"""
 

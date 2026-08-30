@@ -229,6 +229,9 @@ register_ai_learning_routes(app)
 @app.on_event("startup")
 async def _on_startup():
     """应用启动时拉起后台调度任务(幂等, 环境开关可控)"""
+    # P4.1 部署加固: LLM 各轨开关状态日志(密钥遗漏/静默回退即时可见)
+    from services.llm_client import log_feature_status
+    log_feature_status()
     # AI 自学习调度(v7.6, AI_LEARNING_AUTO=off 可关闭)
     from services.ai_learning_scheduler import start_scheduler as start_ai_learning
     start_ai_learning()
