@@ -22,6 +22,7 @@
     - ValueError → 409(状态非法/参数非法/违禁词/重复知识等)
 """
 
+import json
 import logging
 import re
 from datetime import datetime
@@ -1086,43 +1087,116 @@ class KnowledgeService:
         """文档列表(含分块入库统计)"""
         return await self.repo.list_documents(limit=limit)
 
-    # ---------- 6.3 多模态资料(D-14 rule 轨) ----------
+    # ---------- 6.3 多模态资料(D-14; llm 轨: 视觉大模型) ----------
+
+    # llm 轨图片理解 prompt(幻觉治理: 客观描述, 不推断品牌事实)
+    _IMAGE_VISION_PROMPT = (
+        "你是知识库图片理解助手。请用中文客观描述这张图片的关键内容"
+        "(场景/主体/可见文字/风格), 100字以内。只描述可见内容, "
+        "不得推断图片未展示的信息。")
+
+    # llm 轨视频理解 prompt(输出 JSON 时间轴, 供分段入库)
+    _VIDEO_VISION_PROMPT = (
+        "你是知识库视频理解助手。请观看视频并输出中文分段时间轴, "
+        "格式为 JSON 数组(不要其他文字): "
+        '[{"timecode": "分:秒(如 03:20)", "desc": "该段内容描述(50字内)", '
+        '"keywords": "关键词(空格分隔)"}], 3-8 段, '
+        "按时间顺序覆盖视频主要节点。")
 
     async def ingest_image(self, title: str, description: str,
-                            url: str, tags: str = "") -> dict:
-        """图片描述入库(D-14): rule 轨管理员配描述, llm 轨 P2
+                            url: str, tags: str = "",
+                            provider: str = "rule") -> dict:
+        """图片描述入库(D-14): provider 双轨
+
+        rule 轨: 管理员配 description(原行为);
+        llm 轨: KNOWLEDGE_MEDIA_LLM=on 且 url 可达时, GLM-4V
+        视觉理解自动生成描述(管理员 description 作提示补充),
+        失败自动回退 rule 轨——两者皆空才拒绝。
+
+        Returns:
+            {"entryId", "skipped", "reason", "provider": 实际生效轨,
+             "description": 生效描述}
 
         Raises:
             ValueError: 参数非法
         """
+        if provider not in ("rule", "llm"):
+            raise ValueError(f"非法 provider({provider}), 须为 rule/llm")
         title = (title or "").strip()
         description = (description or "").strip()
-        if not title or not description:
-            raise ValueError("图片标题与描述不能为空")
+        url = (url or "").strip()
+        effective = provider
+        if provider == "llm":
+            desc = self._image_vision_describe(title, description, url)
+            if desc is not None:
+                description = desc
+            else:
+                effective = "rule"   # 视觉理解失败 → 回退人工描述
+                logger.info("knowledge_media_llm_fallback_rule_image")
+        if not title:
+            raise ValueError("图片标题不能为空")
+        if not description:
+            raise ValueError("图片描述不能为空(llm 轨需提供图片地址)")
         answer = f"{description}(图片: {url})"
-        return await self._ingest_entry(
+        result = await self._ingest_entry(
             question=f"图片: {title}", answer=answer,
             keywords=f"{title} {tags}".strip(),
             category="media", source=SOURCE_MEDIA)
+        result["provider"] = effective
+        result["description"] = description
+        return result
+
+    @staticmethod
+    def _image_vision_describe(title: str, description: str,
+                               url: str) -> str | None:
+        """llm 轨图片视觉理解(GLM-4V), 失败返回 None(回退 rule)
+
+        管理员已提供的 description 作为提示补充(标题+简要提示
+        有助模型聚焦), 未提供则纯视觉描述。
+        """
+        from services.llm_client import (
+            media_llm_enabled, provider_client)
+        if not media_llm_enabled() or not (url or "").strip():
+            return None
+        prompt = KnowledgeService._IMAGE_VISION_PROMPT
+        if description:
+            prompt += f"\n图片标题: {title}\n管理员提示: {description}"
+        return provider_client.vision(prompt, url, media_type="image")
 
     async def ingest_video(self, title: str, url: str,
-                           segments: list[dict]) -> dict:
+                           segments: list[dict] = None,
+                           provider: str = "rule") -> dict:
         """视频时间轴入库(D-14): 分段=检索单元, 一段一条
 
-        Args:
-            segments: [{"timecode": "03:20", "desc": "...",
-                        "keywords": "..."}]
+        rule 轨: 管理员配 segments 时间轴(原行为, 必填);
+        llm 轨: KNOWLEDGE_MEDIA_LLM=on 且 segments 为空时,
+        GLM-4V 视频理解自动生成时间轴(JSON 输出), 失败自动
+        回退 rule 轨(segments 也空则拒绝); 管理员已提供 segments
+        时视为精确人工标注, llm 轨不覆盖。
+
+        Returns:
+            聚合结果 + "provider": 实际生效轨
 
         Raises:
             ValueError: 参数非法/无有效分段
         """
+        if provider not in ("rule", "llm"):
+            raise ValueError(f"非法 provider({provider}), 须为 rule/llm")
         title = (title or "").strip()
         if not title:
             raise ValueError("视频标题不能为空")
         if not url or not (url or "").strip():
             raise ValueError("视频地址不能为空")
+        effective = provider
         valid = [s for s in (segments or [])
                  if (s.get("desc") or "").strip()]
+        if provider == "llm" and not valid:
+            auto = self._video_vision_segments(url)
+            if auto:
+                valid = auto
+            else:
+                effective = "rule"
+                logger.info("knowledge_media_llm_fallback_rule_video")
         if not valid:
             raise ValueError("视频分段不能为空(至少一段含描述)")
         ingested, skipped = 0, 0
@@ -1144,7 +1218,44 @@ class KnowledgeService:
                 entry_ids.append(result["entryId"])
         return {"title": title, "url": url,
                 "totalSegments": len(valid), "ingested": ingested,
-                "skipped": skipped, "entryIds": entry_ids}
+                "skipped": skipped, "entryIds": entry_ids,
+                "provider": effective}
+
+    @staticmethod
+    def _video_vision_segments(url: str) -> list[dict] | None:
+        """llm 轨视频视觉理解自动时间轴, 失败/解析失败返回 None
+
+        GLM-4V 视频理解输出 JSON 数组(见 _VIDEO_VISION_PROMPT);
+        解析容错: 剥离 markdown 代码围栏, 逐段校验字段。
+        """
+        from services.llm_client import (
+            media_llm_enabled, provider_client)
+        if not media_llm_enabled():
+            return None
+        text = provider_client.vision(
+            KnowledgeService._VIDEO_VISION_PROMPT, url,
+            media_type="video")
+        if not text:
+            return None
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`")
+            cleaned = cleaned.split("\n", 1)[-1] if "\n" in cleaned \
+                else cleaned
+            cleaned = cleaned.rsplit("```", 1)[0].strip()
+        try:
+            data = json.loads(cleaned)
+        except ValueError:
+            logger.warning("knowledge_video_vision_parse_failed")
+            return None
+        if not isinstance(data, list):
+            return None
+        segments = [{"timecode": str(s.get("timecode") or ""),
+                     "desc": str(s.get("desc") or ""),
+                     "keywords": str(s.get("keywords") or "")}
+                    for s in data if isinstance(s, dict)
+                    and str(s.get("desc") or "").strip()]
+        return segments or None
 
     # ---------- 6.4 全网抓取(D-15) ----------
 

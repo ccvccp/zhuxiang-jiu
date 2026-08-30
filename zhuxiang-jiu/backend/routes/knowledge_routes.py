@@ -142,9 +142,10 @@ class IngestDocumentRequest(PydBaseModel):
 
 class IngestImageRequest(PydBaseModel):
     title: str = Field(..., min_length=1, description="图片标题")
-    description: str = Field(..., min_length=1, description="图片描述(rule 轨管理员配置)")
-    url: str = Field("", description="图片地址")
+    description: str = Field("", description="图片描述(rule 轨必填; llm 轨可空由视觉理解生成, 提供时作提示补充)")
+    url: str = Field("", description="图片地址(llm 轨视觉理解必需)")
     tags: str = Field("", description="标签(空格分隔)")
+    provider: str = Field("rule", description="理解轨道: rule(管理员配描述)/llm(GLM-4V 视觉理解)")
 
 
 class VideoSegmentItem(PydBaseModel):
@@ -156,8 +157,9 @@ class VideoSegmentItem(PydBaseModel):
 class IngestVideoRequest(PydBaseModel):
     title: str = Field(..., min_length=1, description="视频标题")
     url: str = Field(..., min_length=1, description="视频地址")
-    segments: list[VideoSegmentItem] = Field(..., min_length=1,
-                                              description="分段时间轴(rule 轨)")
+    segments: list[VideoSegmentItem] = Field(
+        None, description="分段时间轴(rule 轨必填; llm 轨可空由视频理解自动生成)")
+    provider: str = Field("rule", description="理解轨道: rule(管理员配时间轴)/llm(视频理解自动生成)")
 
 
 class AddCrawlSourceRequest(PydBaseModel):
@@ -558,7 +560,7 @@ async def list_documents(
 
 
 # ============================================================
-# 多模态(2, D-14 rule 轨)
+# 多模态(2, D-14; provider 双轨: rule 人工 / llm 视觉理解)
 # ============================================================
 
 @router.post("/api/knowledge/media/image", tags=["AI智能知识库训练模块"])
@@ -566,13 +568,14 @@ async def ingest_image(
     data: IngestImageRequest,
     x_role: str = Header(None, alias="X-Role"),
 ):
-    """图片描述入库(rule 轨: 管理员配描述; llm 轨 P2 视觉大模型)"""
+    """图片描述入库(provider 双轨: rule 管理员配描述; llm GLM-4V 视觉理解, 失败回退 rule)"""
     _require_admin(x_role)
     try:
         return {"code": 0, "msg": "ok",
                 "data": await _service.ingest_image(
                     title=data.title, description=data.description,
-                    url=data.url, tags=data.tags)}
+                    url=data.url, tags=data.tags,
+                    provider=data.provider)}
     except Exception as exc:
         _handle(exc)
 
@@ -582,13 +585,15 @@ async def ingest_video(
     data: IngestVideoRequest,
     x_role: str = Header(None, alias="X-Role"),
 ):
-    """视频时间轴入库(分段=检索单元, 支持回答引用时间点; llm 轨 P2)"""
+    """视频时间轴入库(分段=检索单元; provider 双轨: rule 管理员配时间轴; llm 视频理解自动生成, 失败回退 rule)"""
     _require_admin(x_role)
     try:
         return {"code": 0, "msg": "ok",
                 "data": await _service.ingest_video(
                     title=data.title, url=data.url,
-                    segments=[s.model_dump() for s in data.segments])}
+                    segments=[s.model_dump() for s in data.segments]
+                    if data.segments else None,
+                    provider=data.provider)}
     except Exception as exc:
         _handle(exc)
 

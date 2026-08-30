@@ -18,6 +18,10 @@ P3.5 embedding 语义向量(检索升级):
     KNOWLEDGE_EMBEDDING  开关(默认 off, on 时检索走语义路径)
     EMBEDDING_MODEL      向量模型名(默认 embedding-3, 智谱)
 
+多模态 LLM 视觉理解(图片 GLM-4V / 视频 GLM-4V-Plus):
+    KNOWLEDGE_MEDIA_LLM  开关(默认 off, on 时媒体入库走视觉理解)
+    VISION_MODEL         视觉模型名(默认 glm-4v-flash, 智谱)
+
 用法:
     from services.llm_client import provider_client
     text = provider_client.chat("system prompt", "user prompt")
@@ -25,6 +29,9 @@ P3.5 embedding 语义向量(检索升级):
         ...
     vecs = provider_client.embed(["文本1", "文本2"])
     if vecs is None:  # 未配置/失败 → 调用方回退 2-gram
+        ...
+    text = provider_client.vision("描述这张图", "https://.../a.jpg")
+    if text is None:  # 未配置/失败 → 调用方回退 rule(人工描述)
         ...
 """
 
@@ -36,6 +43,9 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "15"))
+
+# 视觉理解超时秒(图片/视频理解显著慢于纯文本, 单独放宽)
+_VISION_TIMEOUT = int(os.environ.get("LLM_VISION_TIMEOUT", "60"))
 
 # embedding 批量请求单批上限(对齐知识库 rebuild 回填的分批粒度)
 EMBED_BATCH_SIZE = 16
@@ -58,6 +68,18 @@ def embedding_enabled() -> bool:
         return False
     return os.environ.get(
         "KNOWLEDGE_EMBEDDING", "off").strip().lower() == "on"
+
+
+def media_llm_enabled() -> bool:
+    """多模态视觉理解开关(图片/视频入库 llm 轨)
+
+    KNOWLEDGE_MEDIA_LLM=on 且配置 API key 时开启;
+    LLM_ENABLED=off 总开关关闭时同样关闭。
+    """
+    if not llm_enabled():
+        return False
+    return os.environ.get(
+        "KNOWLEDGE_MEDIA_LLM", "off").strip().lower() == "on"
 
 
 class LLMProviderClient:
@@ -149,6 +171,59 @@ class LLMProviderClient:
                 logger.warning("llm_embed_failed(回退2-gram): %s", exc)
                 return None
         return vectors or None
+
+    def vision(self, prompt: str, url: str,
+               media_type: str = "image") -> str | None:
+        """多模态视觉理解(图片 GLM-4V / 视频 GLM-4V-Plus)
+
+        OpenAI 兼容 content 数组格式: text + image_url/video_url;
+        失败/未配置返回 None(调用方回退 rule 轨人工描述)。
+
+        Args:
+            prompt: 视觉理解指令(如"客观描述图片内容")
+            url: 媒体地址(http/https 公网可达)
+            media_type: "image" | "video"
+
+        Returns:
+            模型回复文本; 未配置 key、URL 为空、请求失败、
+            响应异常均返回 None。
+        """
+        if not media_llm_enabled() or not (url or "").strip():
+            return None
+        api_key = os.environ["LLM_API_KEY"].strip()
+        base_url = os.environ.get(
+            "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
+        ).rstrip("/")
+        model = os.environ.get("VISION_MODEL", "glm-4v-flash")
+        media_key = "image_url" if media_type == "image" else "video_url"
+        payload = json.dumps({
+            "model": model,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": media_key, media_key: {"url": url.strip()}},
+                ],
+            }],
+        }, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            f"{base_url}/chat/completions", data=payload,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {api_key}"},
+            method="POST")
+        try:
+            with urllib.request.urlopen(
+                    request, timeout=_VISION_TIMEOUT) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            content = (body.get("choices") or [{}])[0].get(
+                "message", {}).get("content")
+            if not content or not str(content).strip():
+                logger.warning("llm_vision_empty_response model=%s", model)
+                return None
+            return str(content).strip()
+        except Exception as exc:
+            logger.warning("llm_vision_failed(回退rule): %s", exc)
+            return None
 
 
 provider_client = LLMProviderClient()

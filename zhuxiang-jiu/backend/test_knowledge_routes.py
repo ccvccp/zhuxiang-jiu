@@ -398,6 +398,90 @@ async def main():
            len(video_hit) >= 1 and "03:20" in video_hit[0]["answer"],
            f"实际{video_hit[:1]}")
 
+    # 6.3.1 多模态 llm 轨(provider 双轨: 视觉理解 + 回退)
+    import services.llm_client as _llm_vision_mod
+    _orig_vision = _llm_vision_mod.provider_client.vision
+    _vision_calls = {"n": 0}
+
+    # 默认关: KNOWLEDGE_MEDIA_LLM 未开, provider=llm 也不调 vision(回退 rule)
+    os.environ.pop("KNOWLEDGE_MEDIA_LLM", None)
+    _llm_vision_mod.provider_client.vision = (
+        lambda p, u, media_type="image": _vision_calls.__setitem__(
+            "n", _vision_calls["n"] + 1) or "不应被调用")
+    img_off = await svc.ingest_image(
+        title="测试图", description="管理员描述", url="https://x.com/a.jpg",
+        provider="llm")
+    record("媒体-开关默认off不调vision(回退rule)",
+           _vision_calls["n"] == 0 and img_off["provider"] == "rule"
+           and img_off["description"] == "管理员描述",
+           f"calls={_vision_calls['n']}, 实际{img_off.get('provider')}")
+
+    # 开启 + mock: 图片视觉理解自动生成描述
+    os.environ["LLM_API_KEY"] = "test-key"
+    os.environ["KNOWLEDGE_MEDIA_LLM"] = "on"
+    _llm_vision_mod.provider_client.vision = (
+        lambda p, u, media_type="image":
+        "视觉描述: 竹林中的传统酿酒作坊, 匠人正在翻动酒曲。"
+        if media_type == "image" else None)
+    img_llm = await svc.ingest_image(
+        title="酿造作坊图", description="", url="https://x.com/gongfang.jpg",
+        provider="llm")
+    record("媒体-图片llm轨视觉理解生成描述",
+           img_llm["provider"] == "llm"
+           and img_llm["description"].startswith("视觉描述: 竹林")
+           and not img_llm["skipped"] and img_llm["entryId"] > 0,
+           f"实际{img_llm}")
+
+    # 开启 + vision 失败: 回退 rule 轨人工描述
+    _llm_vision_mod.provider_client.vision = (
+        lambda p, u, media_type="image": None)
+    img_fb = await svc.ingest_image(
+        title="回退图", description="人工兜底描述",
+        url="https://x.com/fb.jpg", provider="llm")
+    record("媒体-图片vision失败回退rule人工描述",
+           img_fb["provider"] == "rule"
+           and img_fb["description"] == "人工兜底描述",
+           f"实际{img_fb.get('provider')}")
+
+    # 开启 + mock: 视频理解自动生成时间轴(JSON 输出, 含代码围栏容错)
+    _llm_vision_mod.provider_client.vision = (
+        lambda p, u, media_type="video":
+        '```json\n[{"timecode": "01:00", "desc": "开篇竹海航拍", '
+        '"keywords": "竹海 航拍"}, {"timecode": "05:30", '
+        '"desc": "古法酿造工艺演示", "keywords": "古法 酿造"}]\n```'
+        if media_type == "video" else None)
+    vid_llm = await svc.ingest_video(
+        title="自动时间轴纪录片", url="https://x.com/auto.mp4",
+        segments=None, provider="llm")
+    record("媒体-视频llm轨自动生成时间轴",
+           vid_llm["provider"] == "llm"
+           and vid_llm["totalSegments"] == 2
+           and vid_llm["ingested"] == 2,
+           f"实际{vid_llm}")
+
+    # 开启 + 视频理解失败 + 无人工 segments: 报错(两者皆空)
+    _llm_vision_mod.provider_client.vision = (
+        lambda p, u, media_type="video": None)
+    try:
+        await svc.ingest_video(title="x", url="https://x.com/y.mp4",
+                                segments=None, provider="llm")
+        record("媒体-视频双轨皆空拒绝", False, "未抛出异常")
+    except ValueError:
+        record("媒体-视频双轨皆空拒绝", True)
+
+    # 非法 provider 拒绝
+    try:
+        await svc.ingest_image(title="x", description="y", url="",
+                               provider="gpt")
+        record("媒体-非法provider拒绝", False, "未抛出异常")
+    except ValueError:
+        record("媒体-非法provider拒绝", True)
+
+    # 清理: 恢复 vision 与环境变量
+    _llm_vision_mod.provider_client.vision = _orig_vision
+    os.environ.pop("KNOWLEDGE_MEDIA_LLM", None)
+    os.environ.pop("LLM_API_KEY", None)
+
     # 6.4 全网抓取(D-15)
     src = await svc.add_crawl_source(
         name="竹文化资讯站", url="https://example.com/bamboo-culture",
