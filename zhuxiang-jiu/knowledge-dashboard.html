@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 知识库训练台 · 运营总览</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 知识库运营台专属样式(复用 style.css 主题变量) ========= */
+        .kb-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .kb-banner h1 { font-size: 26px; margin: 0; }
+        .kb-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+
+        .kb-section { padding: 18px 0 6px; }
+        .kb-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+
+        /* 工具栏 */
+        .kb-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .kb-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .kb-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .kb-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .kb-btn:hover { background: var(--color-primary-dark); }
+        .kb-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .kb-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .kb-btn.danger { background: #c0392b; }
+        .kb-btn.danger:hover { background: #a93226; }
+        .kb-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .kb-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        .kb-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* Tab 导航 */
+        .kb-tabs { display: flex; gap: 4px; padding: 10px 16px 0; flex-wrap: wrap; }
+        .kb-tab {
+            border: 1px solid var(--color-border); border-bottom: none; background: var(--color-bg);
+            border-radius: var(--radius-sm) var(--radius-sm) 0 0; padding: 9px 20px;
+            font-size: 14px; cursor: pointer; color: var(--color-text-light); transition: var(--transition);
+        }
+        .kb-tab.active { background: #fff; color: var(--color-primary-dark); font-weight: 700; border-color: var(--color-primary); }
+        .kb-tab-body { padding: 16px; border-top: 1px solid var(--color-border); }
+        .kb-tab-panel { display: none; }
+        .kb-tab-panel.active { display: block; }
+
+        /* 统计卡 */
+        .kb-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+        .kb-stat { padding: 16px; text-align: center; }
+        .kb-stat .stat-value { font-size: 26px; font-weight: 700; color: var(--color-primary-dark); }
+        .kb-stat .stat-label { font-size: 12px; color: var(--color-text-light); margin-top: 4px; }
+        .kb-stat.warn .stat-value { color: var(--color-danger); }
+        .kb-stat.gold .stat-value { color: var(--color-accent); }
+
+        /* 调度器状态条 */
+        .kb-scheduler {
+            display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 12px 16px;
+            font-size: 13px; color: var(--color-text); align-items: center;
+        }
+        .kb-scheduler .k { color: var(--color-text-light); margin-right: 4px; }
+        .kb-live-dot {
+            display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+            background: #2e8b57; margin-right: 6px; vertical-align: middle;
+        }
+        .kb-live-dot.off { background: #999; }
+
+        /* 列表表格 */
+        .kb-table-wrap { overflow-x: auto; }
+        table.kb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .kb-table th, .kb-table td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--color-border); }
+        .kb-table th { color: var(--color-text-light); font-weight: 600; font-size: 12px; white-space: nowrap; }
+        .kb-table td.wrap { max-width: 320px; white-space: normal; word-break: break-all; }
+        .kb-table td.actions { white-space: nowrap; }
+        .kb-table .row-btn {
+            border: 1px solid var(--color-border); background: #fff; color: var(--color-text);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
+            cursor: pointer; margin-right: 4px; transition: var(--transition);
+        }
+        .kb-table .row-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+        .kb-table .row-btn.primary { border-color: var(--color-primary); color: var(--color-primary); }
+        .kb-table .row-btn.danger { border-color: #e74c3c; color: #e74c3c; }
+
+        /* 徽章 */
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.st-pending { background: #fdf3e3; color: #a06b00; border-color: rgba(160, 107, 0, 0.3); }
+        .badge.st-approved { background: #eef2fb; color: #3b5998; border-color: rgba(59, 89, 152, 0.3); }
+        .badge.st-published { background: #e8f4ec; color: #2e8b57; border-color: rgba(46, 139, 87, 0.3); }
+        .badge.st-rejected { background: #fdecea; color: #c0392b; border-color: rgba(192, 57, 43, 0.3); }
+        .badge.st-retired { background: #f4f4f4; color: #999; border-color: #ddd; }
+        .badge.gap-open { background: #fdf3e3; color: #a06b00; }
+        .badge.gap-resolved { background: #e8f4ec; color: #2e8b57; }
+        .badge.gap-ignored { background: #f4f4f4; color: #999; }
+
+        /* 筛选 chip */
+        .kb-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; }
+        .chip {
+            border: 1px solid var(--color-border); background: #fff; color: var(--color-text-light);
+            border-radius: 999px; padding: 5px 14px; font-size: 12px; cursor: pointer; transition: var(--transition);
+        }
+        .chip.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+        .kb-filters select, .kb-filters input[type="search"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .kb-filters .count { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 表单 */
+        .kb-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 14px; padding: 14px 16px; }
+        .kb-form .full { grid-column: 1 / -1; }
+        .kb-form label { font-size: 12px; color: var(--color-text-light); display: block; margin-bottom: 4px; }
+        .kb-form input, .kb-form select, .kb-form textarea {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 7px 10px; font-size: 13px; background: #fff; width: 100%; box-sizing: border-box;
+        }
+        .kb-form textarea { min-height: 64px; resize: vertical; }
+
+        .kb-empty { text-align: center; color: var(--color-text-light); padding: 48px 0; font-size: 14px; }
+
+        /* 弹窗 */
+        .modal-mask {
+            display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+            z-index: 100; align-items: center; justify-content: center; padding: 20px;
+        }
+        .modal-mask.show { display: flex; }
+        .modal-box {
+            background: #fff; border-radius: var(--radius-lg); max-width: 760px; width: 100%;
+            max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow-lg); padding: 22px 24px;
+        }
+        .modal-box h2 { margin: 0 0 4px; font-size: 18px; color: var(--color-primary-dark); }
+        .modal-box .sub { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); margin-bottom: 14px; }
+        .modal-close { margin-top: 16px; text-align: right; }
+        .modal-loading { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 13px; }
+
+        .kb-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .kb-footer code {
+            background: var(--color-bg); border: 1px solid var(--color-border);
+            border-radius: 3px; padding: 1px 6px; font-size: 11px;
+        }
+
+        @media (max-width: 640px) {
+            .kb-toolbar input[type="text"] { width: 100%; }
+            .kb-last-update { margin-left: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <header class="kb-banner">
+        <div class="container">
+            <h1>AI 知识库训练台 · 运营总览</h1>
+            <p>知识条目治理 · 缺口闭环 · 统计看板（三源接入与质量进化见 <a href="knowledge-sources.html" style="color:#ffd700;">接入台</a>）</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏 -->
+        <section class="kb-section">
+            <div class="kb-card kb-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="kb-btn ghost" id="btnSaveApi" onclick="saveApiBase()">保存</button>
+                <button class="kb-btn" id="btnRefresh" onclick="refreshAll()">刷新</button>
+                <span class="kb-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="kb-error" id="errorBanner"></div>
+        </section>
+
+        <!-- Tab 区 -->
+        <section class="kb-section">
+            <div class="kb-card">
+                <div class="kb-tabs">
+                    <div class="kb-tab active" data-tab="overview" onclick="switchTab('overview')">📊 总览</div>
+                    <div class="kb-tab" data-tab="entries" onclick="switchTab('entries')">📚 条目治理</div>
+                    <div class="kb-tab" data-tab="gaps" onclick="switchTab('gaps')">🕳️ 缺口队列</div>
+                </div>
+                <div class="kb-tab-body">
+                    <!-- ===== 总览 Tab ===== -->
+                    <div class="kb-tab-panel active" id="panel-overview">
+                        <div class="kb-stats" id="overviewStats"></div>
+                        <div class="kb-scheduler" id="schedBar" style="margin-top:12px;">
+                            <span>质量调度器状态加载中…</span>
+                        </div>
+                        <div class="kb-filters" style="border-top:1px solid var(--color-border);border-radius:0;">
+                            <button class="kb-btn ghost" onclick="runOps('migrate-chat', '迁移旧 chat FAQ')">迁移旧 FAQ</button>
+                            <button class="kb-btn ghost" onclick="runOps('seed-brand', '播种品牌基准知识')">播种品牌种子</button>
+                            <button class="kb-btn ghost" onclick="runOps('search/rebuild-index', '重建倒排索引')">重建检索索引</button>
+                        </div>
+                    </div>
+
+                    <!-- ===== 条目治理 Tab ===== -->
+                    <div class="kb-tab-panel" id="panel-entries">
+                        <!-- 创建条目 -->
+                        <details style="margin-bottom:12px;">
+                            <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--color-primary-dark);">➕ 新建知识条目（入候选池，经审核发布后生效）</summary>
+                            <div class="kb-form" id="createEntryForm">
+                                <div><label>问题 *</label><input type="text" id="ne-question" placeholder="如：竹香酒多少钱一瓶"></div>
+                                <div><label>分类</label>
+                                    <select id="ne-category"><option value="faq">faq</option><option value="product">product</option><option value="brand">brand</option><option value="policy">policy</option></select>
+                                </div>
+                                <div><label>关键词（空格分隔）</label><input type="text" id="ne-keywords" placeholder="价格 多少钱 售价"></div>
+                                <div class="full"><label>答案 *</label><textarea id="ne-answer" placeholder="合规、无违禁词断言的答案文本"></textarea></div>
+                                <div class="full"><button class="kb-btn" onclick="createEntry()">提交候选池</button></div>
+                            </div>
+                        </details>
+                        <div class="kb-filters" style="padding-top:0;">
+                            <span class="chip active" data-status="" onclick="setEntryFilter(this)">全部</span>
+                            <span class="chip" data-status="pending" onclick="setEntryFilter(this)">pending 候选</span>
+                            <span class="chip" data-status="approved" onclick="setEntryFilter(this)">approved 已审</span>
+                            <span class="chip" data-status="published" onclick="setEntryFilter(this)">published 已发布</span>
+                            <span class="chip" data-status="rejected" onclick="setEntryFilter(this)">rejected 已拒</span>
+                            <span class="chip" data-status="retired" onclick="setEntryFilter(this)">retired 已退役</span>
+                            <input type="search" id="entrySearch" placeholder="搜索问题…" oninput="renderEntries()">
+                            <span class="count" id="entryCount"></span>
+                        </div>
+                        <div class="kb-table-wrap">
+                            <table class="kb-table">
+                                <thead><tr><th>ID</th><th>问题</th><th>答案摘要</th><th>状态</th><th>来源</th><th>命中/miss</th><th>操作</th></tr></thead>
+                                <tbody id="entryRows"></tbody>
+                            </table>
+                        </div>
+                        <div class="kb-empty" id="entryEmpty" style="display:none;">没有符合条件的条目</div>
+                    </div>
+
+                    <!-- ===== 缺口队列 Tab ===== -->
+                    <div class="kb-tab-panel" id="panel-gaps">
+                        <div class="kb-filters">
+                            <span class="chip active" data-gst="open" onclick="setGapFilter(this)">open 待处理</span>
+                            <span class="chip" data-gst="resolved" onclick="setGapFilter(this)">resolved 已补</span>
+                            <span class="chip" data-gst="ignored" onclick="setGapFilter(this)">ignored 已忽略</span>
+                            <span class="count" id="gapCount"></span>
+                        </div>
+                        <div class="kb-table-wrap">
+                            <table class="kb-table">
+                                <thead><tr><th>ID</th><th>未命中问题</th><th>提问次数</th><th>状态</th><th>最近提问</th><th>操作</th></tr></thead>
+                                <tbody id="gapRows"></tbody>
+                            </table>
+                        </div>
+                        <div class="kb-empty" id="gapEmpty" style="display:none;">当前筛选下没有缺口</div>
+                        <div style="padding:14px 16px;border-top:1px solid var(--color-border);">
+                            <button class="kb-btn ghost" onclick="loadGapSummary()">查看高频缺口摘要</button>
+                            <div id="gapSummary" style="margin-top:10px;font-size:13px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="kb-footer">
+            <div>鉴权说明：默认 <code>AUTH_MODE=compat</code> 下本页以 <code>X-Role: admin</code> 兼容头直连管理端点；<code>strict</code> 模式需先登录获取 JWT 并改造请求头。</div>
+            <div>数据来源：<code>/api/knowledge/stats</code> · <code>/api/knowledge/entries</code> · <code>/api/knowledge/gaps</code>（P0~P3.7 后端 34 端点已就绪）。</div>
+        </footer>
+    </main>
+
+    <!-- 通用操作弹窗(版本历史/缺口处置/结果查看) -->
+    <div class="modal-mask" id="opModal" onclick="closeModal(event)">
+        <div class="modal-box" onclick="event.stopPropagation()">
+            <div id="modalContent"><div class="modal-loading">加载中…</div></div>
+            <div class="modal-close"><button class="kb-btn ghost" onclick="closeModal()">关闭</button></div>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        /* ========= 全局状态 ========= */
+        var API_BASE_KEY = 'knowledgeDash.apiBase';
+        var state = {
+            apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+            entries: [], gapList: [], entryStatus: '', gapStatus: 'open',
+            stats: null, sched: null,
+        };
+
+        var STATUS_LABEL = { pending: '候选', approved: '已审', published: '已发布', rejected: '已拒', retired: '已退役' };
+        var SOURCE_LABEL = { manual: '人工', chat_teaching: '教学', document: '文档', crawl: '抓取', media: '媒体', migration: '迁移' };
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function pct(v) { return (v == null || isNaN(v)) ? '--' : (v * 100).toFixed(1) + '%'; }
+        function fmtTime(s) { return String(s || '').replace('T', ' ').slice(0, 19); }
+
+        /* ========= API(知识库端点统一 {code,msg,data} 包装) ========= */
+        function apiHeaders() { return { 'X-Role': 'admin', 'X-Admin-Id': '1' }; }
+
+        async function apiJson(path, options) {
+            options = options || {};
+            var init = { method: options.method || 'GET', headers: Object.assign({ 'Content-Type': 'application/json' }, apiHeaders()) };
+            if (options.body) init.body = JSON.stringify(options.body);
+            var res = await fetch(state.apiBase + path, init);
+            var body = null;
+            try { body = await res.json(); } catch (e) { /* 非 JSON */ }
+            if (!res.ok) {
+                var msg = (body && (body.detail || body.msg)) ? (body.detail || body.msg) : ('HTTP ' + res.status);
+                throw new Error(msg);
+            }
+            if (body && typeof body === 'object' && 'code' in body && body.code !== 0) {
+                throw new Error(body.msg || body.message || ('业务错误 code=' + body.code));
+            }
+            return body ? body.data : body;
+        }
+
+        /* ========= Tab 切换 ========= */
+        function switchTab(name) {
+            document.querySelectorAll('.kb-tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
+            document.querySelectorAll('.kb-tab-panel').forEach(function (p) { p.classList.toggle('active', p.id === 'panel-' + name); });
+        }
+
+        /* ========= 总览 ========= */
+        async function loadOverview() {
+            try {
+                state.stats = await apiJson('/api/knowledge/stats');
+                hideError();
+            } catch (err) { showError('统计加载失败：' + err.message); return; }
+            try { state.sched = await apiJson('/api/knowledge/quality/status'); } catch (e) { state.sched = null; }
+
+            var s = state.stats || {};
+            var by = s.byStatus || {};
+            document.getElementById('overviewStats').innerHTML =
+                '<div class="kb-card kb-stat"><div class="stat-value">' + esc(s.totalEntries != null ? s.totalEntries : '--') + '</div><div class="stat-label">条目总数</div></div>' +
+                '<div class="kb-card kb-stat"><div class="stat-value">' + esc(by.published != null ? by.published : '--') + '</div><div class="stat-label">已发布</div></div>' +
+                '<div class="kb-card kb-stat gold"><div class="stat-value">' + esc(by.pending != null ? by.pending : 0) + '</div><div class="stat-label">待审候选</div></div>' +
+                '<div class="kb-card kb-stat"><div class="stat-value">' + pct(s.hitRate) + '</div><div class="stat-label">检索命中率</div></div>' +
+                '<div class="kb-card kb-stat warn"><div class="stat-value">' + esc(s.openGaps != null ? s.openGaps : '--') + '</div><div class="stat-label">待处理缺口</div></div>';
+
+            var sc = state.sched || {};
+            document.getElementById('schedBar').innerHTML =
+                '<span><span class="kb-live-dot' + (sc.enabled ? '' : ' off') + '"></span>质量调度器：' + (sc.enabled ? '运行中' : '未启用') + '</span>' +
+                '<span><span class="k">周期</span><b>' + (sc.intervalSeconds || '--') + '</b> 秒</span>' +
+                '<span><span class="k">当前状态</span>' + (sc.running ? '执行中' : '空闲') + '</span>' +
+                '<span><span class="k">原始数据</span><code style="font-size:11px;">' + esc(JSON.stringify(sc)) + '</code></span>';
+        }
+
+        /* 运维操作(迁移/种子/重建索引) */
+        async function runOps(path, label) {
+            if (!confirm('确认执行：' + label + '？（幂等操作，可重复执行）')) return;
+            try {
+                var r = await apiJson('/api/knowledge/' + path, { method: 'POST', body: {} });
+                showModal('<h2>' + esc(label) + ' 完成</h2><pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;background:var(--color-bg);padding:12px;border-radius:var(--radius-sm);">' + esc(JSON.stringify(r, null, 2)) + '</pre>');
+                refreshAll();
+            } catch (err) { showError(label + '失败：' + err.message); }
+        }
+
+        /* ========= 条目治理 ========= */
+        async function loadEntries() {
+            var q = state.entryStatus ? ('?status=' + state.entryStatus + '&limit=200') : '?limit=200';
+            try {
+                state.entries = (await apiJson('/api/knowledge/entries' + q)) || [];
+                hideError();
+            } catch (err) { showError('条目列表加载失败：' + err.message); return; }
+            renderEntries();
+        }
+
+        function setEntryFilter(chipEl) {
+            state.entryStatus = chipEl.dataset.status;
+            document.querySelectorAll('#panel-entries .chip').forEach(function (c) { c.classList.toggle('active', c === chipEl); });
+            loadEntries();
+        }
+
+        function renderEntries() {
+            var kw = (document.getElementById('entrySearch').value || '').trim().toLowerCase();
+            var list = state.entries.filter(function (e) { return !kw || String(e.question).toLowerCase().indexOf(kw) >= 0; });
+            document.getElementById('entryCount').textContent = '显示 ' + list.length + ' / ' + state.entries.length + ' 条';
+            document.getElementById('entryEmpty').style.display = list.length ? 'none' : 'block';
+
+            document.getElementById('entryRows').innerHTML = list.map(function (e) {
+                var st = e.status || '';
+                var ops = '';
+                if (st === 'pending') {
+                    ops += '<button class="row-btn primary" onclick="reviewEntry(' + e.id + ', true)">通过</button>';
+                    ops += '<button class="row-btn danger" onclick="reviewEntry(' + e.id + ', false)">拒绝</button>';
+                    ops += '<button class="row-btn" onclick="editEntry(' + e.id + ')">编辑</button>';
+                }
+                if (st === 'approved') ops += '<button class="row-btn primary" onclick="publishEntry(' + e.id + ')">发布</button>';
+                if (st === 'rejected') ops += '<button class="row-btn" onclick="editEntry(' + e.id + ')">编辑重提</button>';
+                if (st === 'published') ops += '<button class="row-btn danger" onclick="retireEntry(' + e.id + ')">退役</button>';
+                ops += '<button class="row-btn" onclick="showVersions(' + e.id + ')">版本</button>';
+                return (
+                    '<tr><td>' + e.id + '</td>' +
+                    '<td class="wrap">' + esc(e.question) + '</td>' +
+                    '<td class="wrap" style="color:var(--color-text-light);">' + esc(String(e.answer || '').slice(0, 60)) + (String(e.answer || '').length > 60 ? '…' : '') + '</td>' +
+                    '<td><span class="badge st-' + esc(st) + '">' + esc(STATUS_LABEL[st] || st) + '</span></td>' +
+                    '<td>' + esc(SOURCE_LABEL[e.source] || e.source || '--') + '</td>' +
+                    '<td>' + (e.hitCount || 0) + ' / ' + (e.missCount || 0) + '</td>' +
+                    '<td class="actions">' + ops + '</td></tr>'
+                );
+            }).join('');
+        }
+
+        async function createEntry() {
+            var body = {
+                question: document.getElementById('ne-question').value.trim(),
+                answer: document.getElementById('ne-answer').value.trim(),
+                category: document.getElementById('ne-category').value,
+                keywords: document.getElementById('ne-keywords').value.trim(),
+            };
+            if (!body.question || !body.answer) { showError('问题与答案均不能为空'); return; }
+            try {
+                await apiJson('/api/knowledge/entries', { method: 'POST', body: body });
+                hideError();
+                document.getElementById('ne-question').value = '';
+                document.getElementById('ne-answer').value = '';
+                document.getElementById('ne-keywords').value = '';
+                loadEntries();
+            } catch (err) { showError('创建失败：' + err.message); }
+        }
+
+        async function reviewEntry(id, approve) {
+            var reason = '';
+            if (!approve) { reason = prompt('拒绝原因：', '') || ''; if (reason === '__cancel__') return; }
+            try {
+                await apiJson('/api/knowledge/entries/' + id + '/review', { method: 'POST', body: { approve: approve, reason: reason } });
+                loadEntries();
+            } catch (err) { showError('审核失败：' + err.message); }
+        }
+
+        async function publishEntry(id) {
+            if (!confirm('确认发布条目 #' + id + '？发布后进入检索生效。')) return;
+            try {
+                await apiJson('/api/knowledge/entries/' + id + '/publish', { method: 'POST', body: {} });
+                loadEntries();
+            } catch (err) { showError('发布失败：' + err.message); }
+        }
+
+        async function retireEntry(id) {
+            if (!confirm('确认退役条目 #' + id + '？退役后检索不再命中（终态）。')) return;
+            try {
+                await apiJson('/api/knowledge/entries/' + id + '/retire', { method: 'POST', body: {} });
+                loadEntries();
+            } catch (err) { showError('退役失败：' + err.message); }
+        }
+
+        async function editEntry(id) {
+            try {
+                var e = await apiJson('/api/knowledge/entries/' + id);
+                showModal(
+                    '<h2>编辑条目 #' + id + '</h2>' +
+                    '<div class="sub">仅 pending / rejected 状态可编辑，保存后重过合规与去重检查</div>' +
+                    '<div class="kb-form">' +
+                    '<div class="full"><label>问题</label><input type="text" id="ee-question" value="' + esc(e.question) + '"></div>' +
+                    '<div class="full"><label>答案</label><textarea id="ee-answer">' + esc(e.answer) + '</textarea></div>' +
+                    '<div class="full"><label>关键词</label><input type="text" id="ee-keywords" value="' + esc(e.keywords || '') + '"></div>' +
+                    '<div class="full"><button class="kb-btn" onclick="saveEntry(' + id + ')">保存修改</button></div>' +
+                    '</div>'
+                );
+            } catch (err) { showError('条目加载失败：' + err.message); }
+        }
+
+        async function saveEntry(id) {
+            var body = {
+                question: document.getElementById('ee-question').value.trim(),
+                answer: document.getElementById('ee-answer').value.trim(),
+                keywords: document.getElementById('ee-keywords').value.trim(),
+            };
+            try {
+                await apiJson('/api/knowledge/entries/' + id, { method: 'PUT', body: body });
+                closeModal();
+                loadEntries();
+            } catch (err) { showError('保存失败：' + err.message); }
+        }
+
+        async function showVersions(id) {
+            try {
+                var vs = (await apiJson('/api/knowledge/entries/' + id + '/versions')) || [];
+                var rows = vs.map(function (v) {
+                    return '<tr><td>' + esc(v.version || v.versionNo || '--') + '</td>' +
+                        '<td class="wrap">' + esc(String(v.question || '').slice(0, 40)) + '</td>' +
+                        '<td>' + fmtTime(v.publishedAt || v.createdAt) + '</td></tr>';
+                }).join('') || '<tr><td colspan="3" style="text-align:center;color:#999;">暂无版本（发布时生成快照）</td></tr>';
+                showModal('<h2>条目 #' + id + ' 版本历史</h2>' +
+                    '<table class="kb-table"><thead><tr><th>版本</th><th>问题</th><th>发布时间</th></tr></thead><tbody>' + rows + '</tbody></table>');
+            } catch (err) { showModal('<h2>版本加载失败</h2><div class="modal-loading">' + esc(err.message) + '</div>'); }
+        }
+
+        /* ========= 缺口队列 ========= */
+        async function loadGaps() {
+            try {
+                state.gapList = (await apiJson('/api/knowledge/gaps?status=' + state.gapStatus + '&limit=200')) || [];
+                hideError();
+            } catch (err) { showError('缺口队列加载失败：' + err.message); return; }
+            renderGaps();
+        }
+
+        function setGapFilter(chipEl) {
+            state.gapStatus = chipEl.dataset.gst;
+            document.querySelectorAll('#panel-gaps .chip').forEach(function (c) { c.classList.toggle('active', c === chipEl); });
+            loadGaps();
+        }
+
+        function renderGaps() {
+            var list = state.gapList;
+            document.getElementById('gapCount').textContent = '共 ' + list.length + ' 条';
+            document.getElementById('gapEmpty').style.display = list.length ? 'none' : 'block';
+            document.getElementById('gapRows').innerHTML = list.map(function (g) {
+                var ops = '';
+                if (g.status === 'open') {
+                    ops += '<button class="row-btn primary" onclick="resolveGap(' + g.id + ')">补知识</button>';
+                    ops += '<button class="row-btn" onclick="ignoreGap(' + g.id + ')">忽略</button>';
+                }
+                return (
+                    '<tr><td>' + g.id + '</td>' +
+                    '<td class="wrap">' + esc(g.question) + '</td>' +
+                    '<td>' + (g.askCount || 0) + '</td>' +
+                    '<td><span class="badge gap-' + esc(g.status) + '">' + esc(g.status) + '</span></td>' +
+                    '<td>' + fmtTime(g.lastAskedAt || g.updatedAt) + '</td>' +
+                    '<td class="actions">' + ops + '</td></tr>'
+                );
+            }).join('');
+        }
+
+        async function resolveGap(id) {
+            var entryIdStr = prompt('关联的已发布条目 ID（补知识：先在条目治理创建并发布，再回填 ID）：', '');
+            if (entryIdStr === null) return;
+            var entryId = parseInt(entryIdStr, 10);
+            if (!entryId) { showError('请输入有效的条目 ID（数字）'); return; }
+            try {
+                await apiJson('/api/knowledge/gaps/' + id + '/resolve', { method: 'POST', body: { action: 'resolve', entryId: entryId } });
+                loadGaps();
+            } catch (err) { showError('处置失败：' + err.message); }
+        }
+
+        async function ignoreGap(id) {
+            if (!confirm('确认忽略缺口 #' + id + '？')) return;
+            try {
+                await apiJson('/api/knowledge/gaps/' + id + '/resolve', { method: 'POST', body: { action: 'ignore' } });
+                loadGaps();
+            } catch (err) { showError('忽略失败：' + err.message); }
+        }
+
+        async function loadGapSummary() {
+            try {
+                var s = await apiJson('/api/knowledge/gaps/summary');
+                showModal('<h2>高频缺口摘要</h2><pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;background:var(--color-bg);padding:12px;border-radius:var(--radius-sm);">' + esc(JSON.stringify(s, null, 2)) + '</pre>');
+            } catch (err) { showError('摘要加载失败：' + err.message); }
+        }
+
+        /* ========= 弹窗与工具 ========= */
+        function showModal(html) {
+            document.getElementById('modalContent').innerHTML = html;
+            document.getElementById('opModal').classList.add('show');
+        }
+        function closeModal(evt) {
+            if (evt && evt.target !== evt.currentTarget) return;
+            document.getElementById('opModal').classList.remove('show');
+        }
+        function showError(msg) { var el = document.getElementById('errorBanner'); el.textContent = msg; el.style.display = 'block'; }
+        function hideError() { document.getElementById('errorBanner').style.display = 'none'; }
+
+        function saveApiBase() {
+            var v = document.getElementById('apiBase').value.trim().replace(/\/+$/, '');
+            if (!/^https?:\/\/.+/.test(v)) { showError('后端地址需以 http:// 或 https:// 开头'); return; }
+            state.apiBase = v;
+            localStorage.setItem(API_BASE_KEY, v);
+            hideError();
+            refreshAll();
+        }
+
+        function refreshAll() {
+            loadOverview(); loadEntries(); loadGaps();
+            document.getElementById('lastUpdate').textContent = '最后刷新 ' + new Date().toLocaleTimeString('zh-CN');
+        }
+
+        (function init() {
+            document.getElementById('apiBase').value = state.apiBase;
+            refreshAll();
+        })();
+    </script>
+</body>
+</html>

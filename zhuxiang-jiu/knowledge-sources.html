@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 知识库训练台 · 三源接入</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 接入台专属样式(复用 style.css 主题变量) ========= */
+        .kb-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .kb-banner h1 { font-size: 26px; margin: 0; }
+        .kb-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+
+        .kb-section { padding: 18px 0 6px; }
+        .kb-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+
+        .kb-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .kb-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .kb-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .kb-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .kb-btn:hover { background: var(--color-primary-dark); }
+        .kb-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .kb-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .kb-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .kb-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        .kb-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        .kb-tabs { display: flex; gap: 4px; padding: 10px 16px 0; flex-wrap: wrap; }
+        .kb-tab {
+            border: 1px solid var(--color-border); border-bottom: none; background: var(--color-bg);
+            border-radius: var(--radius-sm) var(--radius-sm) 0 0; padding: 9px 20px;
+            font-size: 14px; cursor: pointer; color: var(--color-text-light); transition: var(--transition);
+        }
+        .kb-tab.active { background: #fff; color: var(--color-primary-dark); font-weight: 700; border-color: var(--color-primary); }
+        .kb-tab-body { padding: 16px; border-top: 1px solid var(--color-border); }
+        .kb-tab-panel { display: none; }
+        .kb-tab-panel.active { display: block; }
+
+        /* 表单 */
+        .kb-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 14px; padding: 14px 0; }
+        .kb-form .full { grid-column: 1 / -1; }
+        .kb-form label { font-size: 12px; color: var(--color-text-light); display: block; margin-bottom: 4px; }
+        .kb-form input, .kb-form select, .kb-form textarea {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 7px 10px; font-size: 13px; background: #fff; width: 100%; box-sizing: border-box;
+        }
+        .kb-form textarea { min-height: 96px; resize: vertical; font-family: inherit; }
+
+        /* 子分区标题 */
+        .sub-head {
+            font-size: 15px; font-weight: 700; color: var(--color-primary-dark);
+            margin: 18px 0 4px; padding-top: 14px; border-top: 1px dashed var(--color-border);
+        }
+        .sub-head:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+
+        /* 列表表格 */
+        .kb-table-wrap { overflow-x: auto; }
+        table.kb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .kb-table th, .kb-table td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--color-border); }
+        .kb-table th { color: var(--color-text-light); font-weight: 600; font-size: 12px; white-space: nowrap; }
+        .kb-table td.wrap { max-width: 320px; white-space: normal; word-break: break-all; }
+        .kb-table .row-btn {
+            border: 1px solid var(--color-border); background: #fff; color: var(--color-text);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
+            cursor: pointer; margin-right: 4px; transition: var(--transition);
+        }
+        .kb-table .row-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+        .kb-table .row-btn.primary { border-color: var(--color-primary); color: var(--color-primary); }
+
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.mode-direct { background: #e8f4ec; color: #2e8b57; border-color: rgba(46,139,87,0.3); }
+        .badge.mode-synthesized { background: #eef2fb; color: #3b5998; border-color: rgba(59,89,152,0.3); }
+        .badge.mode-legacy { background: #f4f4f4; color: #999; }
+        .badge.mode-unsolved { background: #fdecea; color: #c0392b; border-color: rgba(192,57,43,0.3); }
+
+        .kb-empty { text-align: center; color: var(--color-text-light); padding: 48px 0; font-size: 14px; }
+
+        /* RAG 检索测试结果 */
+        .rag-result {
+            background: var(--color-bg); border-radius: var(--radius-sm); padding: 14px;
+            font-size: 13px; margin-top: 10px; display: none;
+        }
+        .rag-result .answer { line-height: 1.7; white-space: pre-wrap; }
+        .rag-cites { margin-top: 10px; border-top: 1px dashed var(--color-border); padding-top: 10px; }
+        .rag-cites .cite {
+            display: flex; gap: 8px; align-items: baseline; padding: 4px 0; font-size: 12px;
+        }
+        .rag-cites .cite .no {
+            background: var(--color-primary); color: #fff; border-radius: 50%;
+            min-width: 18px; height: 18px; text-align: center; line-height: 18px; font-size: 11px; flex-shrink: 0;
+        }
+        .rag-cites .cite .sim { color: var(--color-text-light); margin-left: auto; }
+
+        /* 弹窗 */
+        .modal-mask {
+            display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+            z-index: 100; align-items: center; justify-content: center; padding: 20px;
+        }
+        .modal-mask.show { display: flex; }
+        .modal-box {
+            background: #fff; border-radius: var(--radius-lg); max-width: 760px; width: 100%;
+            max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow-lg); padding: 22px 24px;
+        }
+        .modal-box h2 { margin: 0 0 4px; font-size: 18px; color: var(--color-primary-dark); }
+        .modal-close { margin-top: 16px; text-align: right; }
+        .modal-loading { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 13px; }
+
+        /* 教学会话对话区 */
+        .teach-chat { background: var(--color-bg); border-radius: var(--radius-sm); padding: 12px; max-height: 300px; overflow-y: auto; margin-top: 10px; display: none; }
+        .teach-chat .msg { margin: 6px 0; font-size: 13px; }
+        .teach-chat .msg .who { font-weight: 700; margin-right: 6px; }
+        .teach-chat .msg.q .who { color: var(--color-primary-dark); }
+        .teach-chat .msg.a .who { color: #8a6d2f; }
+
+        .kb-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .kb-footer code {
+            background: var(--color-bg); border: 1px solid var(--color-border);
+            border-radius: 3px; padding: 1px 6px; font-size: 11px;
+        }
+
+        @media (max-width: 640px) {
+            .kb-toolbar input[type="text"] { width: 100%; }
+            .kb-last-update { margin-left: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <header class="kb-banner">
+        <div class="container">
+            <h1>AI 知识库训练台 · 三源接入</h1>
+            <p>教学接入 · 文档/媒体/抓取 · 质量进化 · RAG 检索测试（条目治理与缺口队列见 <a href="knowledge-dashboard.html" style="color:#ffd700;">运营台</a>）</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="kb-section">
+            <div class="kb-card kb-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="kb-btn ghost" onclick="saveApiBase()">保存</button>
+                <span class="kb-last-update" id="lastUpdate">就绪</span>
+            </div>
+            <div class="kb-error" id="errorBanner"></div>
+        </section>
+
+        <section class="kb-section">
+            <div class="kb-card">
+                <div class="kb-tabs">
+                    <div class="kb-tab active" data-tab="teach" onclick="switchTab('teach')">🎓 教学接入</div>
+                    <div class="kb-tab" data-tab="ingest" onclick="switchTab('ingest')">📄 文档·媒体·抓取</div>
+                    <div class="kb-tab" data-tab="quality" onclick="switchTab('quality')">⚙️ 质量进化</div>
+                    <div class="kb-tab" data-tab="rag" onclick="switchTab('rag')">🔍 RAG 检索测试</div>
+                </div>
+                <div class="kb-tab-body">
+
+                    <!-- ===== 教学接入 ===== -->
+                    <div class="kb-tab-panel active" id="panel-teach">
+                        <div class="kb-form">
+                            <div><label>教学主题（如：竹香酒酿造工艺）</label><input type="text" id="teach-topic" placeholder="新主题"></div>
+                            <div style="align-self:end;"><button class="kb-btn" onclick="createTeachSession()">创建教学会话</button></div>
+                        </div>
+                        <div class="kb-table-wrap">
+                            <table class="kb-table">
+                                <thead><tr><th>会话ID</th><th>主题</th><th>轮次</th><th>教学条目</th><th>创建时间</th><th>操作</th></tr></thead>
+                                <tbody id="teachRows"></tbody>
+                            </table>
+                        </div>
+                        <div class="kb-empty" id="teachEmpty" style="display:none;">暂无教学会话</div>
+
+                        <!-- 会话对话区 -->
+                        <div class="sub-head" id="teachChatHead" style="display:none;">教学会话对话</div>
+                        <div class="teach-chat" id="teachChat"></div>
+                        <div class="kb-form" id="teachInputRow" style="display:none;">
+                            <div><label>提问（检索已有知识作答）</label><input type="text" id="teach-q" placeholder="如：竹香酒是竹叶泡的吗？" onkeydown="if(event.key==='Enter')teachAsk()"></div>
+                            <div><label>教学答案（教知识库：问+答入库 pending）</label><input type="text" id="teach-a" placeholder="如：不是，是全竹发酵型"></div>
+                            <div style="align-self:end;display:flex;gap:8px;">
+                                <button class="kb-btn ghost" onclick="teachAsk()">提问</button>
+                                <button class="kb-btn" onclick="teachSubmit()">教学提交</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== 文档·媒体·抓取 ===== -->
+                    <div class="kb-tab-panel" id="panel-ingest">
+                        <!-- 文档分块 -->
+                        <div class="sub-head">📄 文档分块入库（空行分段 + 超长切分，批量 pending）</div>
+                        <div class="kb-form">
+                            <div><label>文档标题</label><input type="text" id="doc-title" placeholder="如：竹香酒工艺白皮书"></div>
+                            <div><label>格式</label>
+                                <select id="doc-format"><option value="text">text</option><option value="md">md</option><option value="csv">csv</option><option value="json">json</option></select>
+                            </div>
+                            <div><label>分类</label><input type="text" id="doc-category" value="faq"></div>
+                            <div class="full"><label>文档内容</label><textarea id="doc-content" placeholder="粘贴文档全文…"></textarea></div>
+                            <div class="full"><button class="kb-btn" onclick="ingestDocument()">提交分块入库</button>
+                                <button class="kb-btn ghost" onclick="loadDocuments()">刷新文档列表</button></div>
+                        </div>
+                        <div class="kb-table-wrap" id="docListWrap" style="display:none;">
+                            <table class="kb-table">
+                                <thead><tr><th>标题</th><th>分块数</th><th>入库</th><th>跳过</th><th>时间</th></tr></thead>
+                                <tbody id="docRows"></tbody>
+                            </table>
+                        </div>
+
+                        <!-- 图片 -->
+                        <div class="sub-head">🖼️ 图片描述入库（rule 人工描述 / llm GLM-4V 视觉理解）</div>
+                        <div class="kb-form">
+                            <div><label>标题</label><input type="text" id="img-title" placeholder="如：酿造作坊图"></div>
+                            <div><label>图片 URL</label><input type="text" id="img-url" placeholder="https://…"></div>
+                            <div><label>轨</label><select id="img-provider"><option value="rule">rule（人工描述）</option><option value="llm">llm（视觉理解）</option></select></div>
+                            <div class="full"><label>人工描述（rule 轨必填；llm 轨失败时兜底）</label><input type="text" id="img-desc" placeholder="图片内容描述"></div>
+                            <div class="full"><button class="kb-btn" onclick="ingestImage()">提交入库</button></div>
+                        </div>
+
+                        <!-- 视频 -->
+                        <div class="sub-head">🎬 视频时间轴入库（分段=检索单元）</div>
+                        <div class="kb-form">
+                            <div><label>标题</label><input type="text" id="vid-title" placeholder="如：竹香酒纪录片"></div>
+                            <div><label>视频 URL</label><input type="text" id="vid-url" placeholder="https://…mp4"></div>
+                            <div><label>轨</label><select id="vid-provider"><option value="rule">rule（人工分段）</option><option value="llm">llm（视频理解）</option></select></div>
+                            <div class="full"><label>时间轴分段（rule 轨必填，JSON 数组：[{"timecode":"01:00","desc":"竹海航拍","keywords":"竹海 航拍"}]）</label>
+                                <textarea id="vid-segments" placeholder='[{"timecode":"01:00","desc":"开篇竹海航拍","keywords":"竹海 航拍"}]'></textarea></div>
+                            <div class="full"><button class="kb-btn" onclick="ingestVideo()">提交入库</button></div>
+                        </div>
+
+                        <!-- 抓取 -->
+                        <div class="sub-head">🕸️ 抓取接入（种子源白名单 + 主题域过滤）</div>
+                        <div class="kb-form">
+                            <div><label>种子源名称</label><input type="text" id="crawl-name" placeholder="如：竹文化百科"></div>
+                            <div><label>种子源 URL</label><input type="text" id="crawl-url" placeholder="https://…"></div>
+                            <div><label>主题域</label>
+                                <select id="crawl-topics"><option value="wine">wine 酒文化</option><option value="bamboo">bamboo 竹子</option><option value="bamboo_culture">bamboo_culture 竹文化</option><option value="bamboo_med">bamboo_med 竹医药</option><option value="brand">brand 品牌</option></select>
+                            </div>
+                            <div style="align-self:end;"><button class="kb-btn ghost" onclick="addCrawlSource()">添加种子源</button></div>
+                        </div>
+                        <div class="kb-table-wrap" style="margin-top:10px;">
+                            <table class="kb-table">
+                                <thead><tr><th>ID</th><th>名称</th><th>URL</th><th>主题域</th><th>入库/拒绝</th><th>操作</th></tr></thead>
+                                <tbody id="crawlRows"></tbody>
+                            </table>
+                        </div>
+                        <div class="kb-empty" id="crawlEmpty" style="display:none;">暂无种子源</div>
+                        <div class="kb-form" style="border-top:1px dashed var(--color-border);margin-top:10px;">
+                            <div class="full"><label>粘贴抓取正文（经主题域过滤+分块入 pending）</label>
+                                <input type="text" id="crawl-ingest-src" placeholder="种子源 ID（数字）">
+                                <input type="text" id="crawl-ingest-title" placeholder="标题" style="margin-top:8px;">
+                                <textarea id="crawl-ingest-content" placeholder="正文内容…" style="margin-top:8px;"></textarea></div>
+                            <div class="full"><button class="kb-btn" onclick="crawlIngest()">内容接入</button></div>
+                        </div>
+                    </div>
+
+                    <!-- ===== 质量进化 ===== -->
+                    <div class="kb-tab-panel" id="panel-quality">
+                        <div class="kb-form" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));">
+                            <div style="align-self:end;"><button class="kb-btn" onclick="qualitySweep()">运行质量淘汰扫描</button></div>
+                            <div style="align-self:end;"><button class="kb-btn ghost" onclick="loadQualityReport()">查看质量报表</button></div>
+                            <div style="align-self:end;"><button class="kb-btn ghost" onclick="runAutoApprove()">运行渐进信任过审</button></div>
+                            <div style="align-self:end;"><button class="kb-btn ghost" onclick="loadDistribution()">查看分发建议</button></div>
+                        </div>
+                        <div class="kb-form">
+                            <div><label>分发建议消费方</label>
+                                <select id="dist-consumer"><option value="product">product 商品详情</option><option value="attract">attract 引流内容</option><option value="chat">chat 客服</option></select>
+                            </div>
+                        </div>
+                        <div id="qualityOutput" style="font-size:13px;"></div>
+                    </div>
+
+                    <!-- ===== RAG 检索测试 ===== -->
+                    <div class="kb-tab-panel" id="panel-rag">
+                        <div class="kb-form">
+                            <div><label>测试问题</label><input type="text" id="rag-q" placeholder="如：竹香酒是怎么酿造的" onkeydown="if(event.key==='Enter')ragAsk()"></div>
+                            <div><label>问答轨</label>
+                                <select id="rag-provider"><option value="rule">rule（模板融合）</option><option value="llm">llm（大模型合成）</option></select>
+                            </div>
+                            <div style="align-self:end;"><button class="kb-btn" onclick="ragAsk()">RAG 问答测试</button></div>
+                            <div><label>检索 top-k</label>
+                                <select id="rag-topk"><option>3</option><option>5</option><option>10</option></select>
+                            </div>
+                            <div><label>分类过滤</label><input type="text" id="rag-category" placeholder="留空=全部分类"></div>
+                            <div style="align-self:end;"><button class="kb-btn ghost" onclick="searchTest()">检索测试（不计命中）</button></div>
+                        </div>
+
+                        <div class="rag-result" id="ragResult">
+                            <div id="ragResultBody"></div>
+                        </div>
+
+                        <div class="rag-result" id="searchResult">
+                            <div id="searchResultBody"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="kb-footer">
+            <div>鉴权说明：默认 <code>AUTH_MODE=compat</code> 下本页以 <code>X-Role: admin</code> 兼容头直连管理端点；<code>strict</code> 模式需先登录获取 JWT 并改造请求头。</div>
+            <div>数据来源：<code>/api/knowledge/teach/*</code> · <code>/api/knowledge/documents|media/*</code> · <code>/api/knowledge/crawl/*</code> · <code>/api/knowledge/quality/*</code> · <code>/api/knowledge/search|ask</code>。</div>
+        </footer>
+    </main>
+
+    <!-- 通用弹窗 -->
+    <div class="modal-mask" id="opModal" onclick="closeModal(event)">
+        <div class="modal-box" onclick="event.stopPropagation()">
+            <div id="modalContent"><div class="modal-loading">加载中…</div></div>
+            <div class="modal-close"><button class="kb-btn ghost" onclick="closeModal()">关闭</button></div>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        var API_BASE_KEY = 'knowledgeSources.apiBase';
+        var state = {
+            apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+            teachSessions: [], activeTeach: null, teachLog: [],
+        };
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function pct(v) { return (v == null || isNaN(v)) ? '--' : (v * 100).toFixed(1) + '%'; }
+        function fmtTime(s) { return String(s || '').replace('T', ' ').slice(0, 19); }
+
+        /* ========= API ========= */
+        function apiHeaders() { return { 'X-Role': 'admin', 'X-Admin-Id': '1' }; }
+
+        async function apiJson(path, options) {
+            options = options || {};
+            var init = { method: options.method || 'GET', headers: Object.assign({ 'Content-Type': 'application/json' }, apiHeaders()) };
+            if (options.body) init.body = JSON.stringify(options.body);
+            var res = await fetch(state.apiBase + path, init);
+            var body = null;
+            try { body = await res.json(); } catch (e) { /* 非 JSON */ }
+            if (!res.ok) {
+                var msg = (body && (body.detail || body.msg)) ? (body.detail || body.msg) : ('HTTP ' + res.status);
+                throw new Error(msg);
+            }
+            if (body && typeof body === 'object' && 'code' in body && body.code !== 0) {
+                throw new Error(body.msg || body.message || ('业务错误 code=' + body.code));
+            }
+            return body ? body.data : body;
+        }
+
+        function switchTab(name) {
+            document.querySelectorAll('.kb-tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
+            document.querySelectorAll('.kb-tab-panel').forEach(function (p) { p.classList.toggle('active', p.id === 'panel-' + name); });
+        }
+
+        /* ========= 教学接入 ========= */
+        async function loadTeachSessions() {
+            try {
+                state.teachSessions = (await apiJson('/api/knowledge/teach/sessions?limit=50')) || [];
+                hideError();
+            } catch (err) { showError('教学会话加载失败：' + err.message); return; }
+            document.getElementById('teachEmpty').style.display = state.teachSessions.length ? 'none' : 'block';
+            document.getElementById('teachRows').innerHTML = state.teachSessions.map(function (s) {
+                return (
+                    '<tr><td>' + esc(s.sessionId || s.id) + '</td>' +
+                    '<td class="wrap">' + esc(s.topic) + '</td>' +
+                    '<td>' + (s.askedCount || 0) + '</td>' +
+                    '<td>' + (s.taughtCount || 0) + '</td>' +
+                    '<td>' + fmtTime(s.createdAt) + '</td>' +
+                    '<td class="actions"><button class="row-btn primary" onclick="openTeachChat(\'' + esc(String(s.sessionId || s.id)) + '\')">进入对话</button></td></tr>'
+                );
+            }).join('');
+        }
+
+        async function createTeachSession() {
+            var topic = document.getElementById('teach-topic').value.trim();
+            if (!topic) { showError('请填写教学主题'); return; }
+            try {
+                await apiJson('/api/knowledge/teach/sessions', { method: 'POST', body: { topic: topic } });
+                document.getElementById('teach-topic').value = '';
+                loadTeachSessions();
+            } catch (err) { showError('创建失败：' + err.message); }
+        }
+
+        function openTeachChat(sessionId) {
+            state.activeTeach = sessionId;
+            state.teachLog = [];
+            document.getElementById('teachChatHead').style.display = 'block';
+            document.getElementById('teachChat').style.display = 'block';
+            document.getElementById('teachInputRow').style.display = 'grid';
+            renderTeachLog();
+        }
+
+        function renderTeachLog() {
+            document.getElementById('teachChat').innerHTML = state.teachLog.map(function (m) {
+                return '<div class="msg ' + (m.q ? 'q' : 'a') + '"><span class="who">' + (m.q ? '问' : '答') + '</span>' + esc(m.text) + '</div>';
+            }).join('') || '<div style="color:var(--color-text-light);font-size:13px;">会话已打开，输入问题测试检索，或直接教学提交。</div>';
+        }
+
+        async function teachAsk() {
+            if (!state.activeTeach) { showError('请先在上方列表进入一个教学会话'); return; }
+            var q = document.getElementById('teach-q').value.trim();
+            if (!q) return;
+            state.teachLog.push({ q: true, text: q });
+            renderTeachLog();
+            document.getElementById('teach-q').value = '';
+            try {
+                var r = await apiJson('/api/knowledge/teach/sessions/' + encodeURIComponent(state.activeTeach) + '/ask', { method: 'POST', body: { question: q } });
+                state.teachLog.push({ q: false, text: r.answer || r.hint || JSON.stringify(r) });
+            } catch (err) { state.teachLog.push({ q: false, text: '提问失败：' + err.message }); }
+            renderTeachLog();
+        }
+
+        async function teachSubmit() {
+            if (!state.activeTeach) { showError('请先在上方列表进入一个教学会话'); return; }
+            var q = document.getElementById('teach-q').value.trim();
+            var a = document.getElementById('teach-a').value.trim();
+            if (!q || !a) { showError('教学提交需要问题与答案'); return; }
+            try {
+                var r = await apiJson('/api/knowledge/teach/sessions/' + encodeURIComponent(state.activeTeach) + '/teach',
+                    { method: 'POST', body: { question: q, answer: a } });
+                state.teachLog.push({ q: true, text: q });
+                state.teachLog.push({ q: false, text: '✅ 已教学入库（pending 待审）：' + JSON.stringify(r) });
+                document.getElementById('teach-q').value = '';
+                document.getElementById('teach-a').value = '';
+                loadTeachSessions();
+            } catch (err) { showError('教学提交失败：' + err.message); }
+            renderTeachLog();
+        }
+
+        /* ========= 文档 ========= */
+        async function ingestDocument() {
+            var body = {
+                title: document.getElementById('doc-title').value.trim(),
+                content: document.getElementById('doc-content').value,
+                format: document.getElementById('doc-format').value,
+                category: document.getElementById('doc-category').value.trim() || 'faq',
+            };
+            if (!body.title || !body.content.trim()) { showError('文档标题与内容不能为空'); return; }
+            try {
+                var r = await apiJson('/api/knowledge/documents', { method: 'POST', body: body });
+                showModal('<h2>文档分块入库完成</h2><pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;background:var(--color-bg);padding:12px;border-radius:var(--radius-sm);">' + esc(JSON.stringify(r, null, 2)) + '</pre>');
+                document.getElementById('doc-content').value = '';
+                loadDocuments();
+            } catch (err) { showError('文档入库失败：' + err.message); }
+        }
+
+        async function loadDocuments() {
+            try {
+                var docs = (await apiJson('/api/knowledge/documents?limit=50')) || [];
+                if (!docs.length) return;
+                document.getElementById('docListWrap').style.display = 'block';
+                document.getElementById('docRows').innerHTML = docs.map(function (d) {
+                    return '<tr><td class="wrap">' + esc(d.title) + '</td><td>' + (d.totalChunks || d.chunkCount || '--') + '</td>' +
+                        '<td>' + (d.ingested || d.ingestedCount || '--') + '</td><td>' + (d.skipped || d.skippedCount || 0) + '</td>' +
+                        '<td>' + fmtTime(d.createdAt) + '</td></tr>';
+                }).join('');
+            } catch (err) { showError('文档列表加载失败：' + err.message); }
+        }
+
+        /* ========= 媒体 ========= */
+        async function ingestImage() {
+            var body = {
+                title: document.getElementById('img-title').value.trim(),
+                url: document.getElementById('img-url').value.trim(),
+                description: document.getElementById('img-desc').value.trim(),
+                provider: document.getElementById('img-provider').value,
+            };
+            if (!body.title || !body.url) { showError('图片标题与 URL 必填'); return; }
+            if (body.provider === 'rule' && !body.description) { showError('rule 轨需要人工描述'); return; }
+            try {
+                var r = await apiJson('/api/knowledge/media/image', { method: 'POST', body: body });
+                showModal('<h2>图片入库完成</h2><pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;background:var(--color-bg);padding:12px;border-radius:var(--radius-sm);">' + esc(JSON.stringify(r, null, 2)) + '</pre>');
+            } catch (err) { showError('图片入库失败：' + err.message); }
+        }
+
+        async function ingestVideo() {
+            var segs = null;
+            var segStr = document.getElementById('vid-segments').value.trim();
+            if (segStr) {
+                try { segs = JSON.parse(segStr); } catch (e) { showError('时间轴分段不是合法 JSON'); return; }
+            }
+            var body = {
+                title: document.getElementById('vid-title').value.trim(),
+                url: document.getElementById('vid-url').value.trim(),
+                provider: document.getElementById('vid-provider').value,
+                segments: segs,
+            };
+            if (!body.title || !body.url) { showError('视频标题与 URL 必填'); return; }
+            if (body.provider === 'rule' && !segs) { showError('rule 轨需要时间轴分段'); return; }
+            try {
+                var r = await apiJson('/api/knowledge/media/video', { method: 'POST', body: body });
+                showModal('<h2>视频入库完成</h2><pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;background:var(--color-bg);padding:12px;border-radius:var(--radius-sm);">' + esc(JSON.stringify(r, null, 2)) + '</pre>');
+            } catch (err) { showError('视频入库失败：' + err.message); }
+        }
+
+        /* ========= 抓取 ========= */
+        async function loadCrawlSources() {
+            try {
+                var list = (await apiJson('/api/knowledge/crawl/sources')) || [];
+                hideError();
+            } catch (err) { showError('种子源加载失败：' + err.message); return; }
+            document.getElementById('crawlEmpty').style.display = list.length ? 'none' : 'block';
+            document.getElementById('crawlRows').innerHTML = list.map(function (s) {
+                return (
+                    '<tr><td>' + s.id + '</td><td class="wrap">' + esc(s.name) + '</td>' +
+                    '<td class="wrap">' + esc(s.url) + '</td><td>' + esc(s.topics || s.topic || '--') + '</td>' +
+                    '<td>' + (s.ingestedCount || s.ingested || 0) + ' / ' + (s.rejectedCount || s.rejected || 0) + '</td>' +
+                    '<td class="actions"><button class="row-btn primary" onclick="crawlRun(' + s.id + ')">抓取</button></td></tr>'
+                );
+            }).join('');
+        }
+
+        async function addCrawlSource() {
+            var body = {
+                name: document.getElementById('crawl-name').value.trim(),
+                url: document.getElementById('crawl-url').value.trim(),
+                topics: document.getElementById('crawl-topics').value,
+            };
+            if (!body.name || !body.url) { showError('种子源名称与 URL 必填'); return; }
+            try {
+                await apiJson('/api/knowledge/crawl/sources', { method: 'POST', body: body });
+                document.getElementById('crawl-name').value = '';
+                document.getElementById('crawl-url').value = '';
+                loadCrawlSources();
+            } catch (err) { showError('添加失败：' + err.message); }
+        }
+
+        async function crawlRun(sourceId) {
+            var provider = confirm('确定用 LLM 智能清洗轨抓取？（取消则用 rule 正则轨）') ? 'llm' : 'rule';
+            try {
+                var r = await apiJson('/api/knowledge/crawl/run', { method: 'POST', body: { sourceId: sourceId, provider: provider } });
+                showModal('<h2>抓取完成</h2><pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;background:var(--color-bg);padding:12px;border-radius:var(--radius-sm);">' + esc(JSON.stringify(r, null, 2)) + '</pre>');
+                loadCrawlSources();
+            } catch (err) { showError('抓取失败：' + err.message); }
+        }
+
+        async function crawlIngest() {
+            var srcStr = document.getElementById('crawl-ingest-src').value.trim();
+            var body = {
+                sourceId: parseInt(srcStr, 10),
+                title: document.getElementById('crawl-ingest-title').value.trim(),
+                content: document.getElementById('crawl-ingest-content').value,
+            };
+            if (!body.sourceId || !body.title || !body.content.trim()) { showError('种子源 ID、标题、正文均必填'); return; }
+            try {
+                var r = await apiJson('/api/knowledge/crawl/ingest', { method: 'POST', body: body });
+                showModal('<h2>内容接入完成</h2><pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;background:var(--color-bg);padding:12px;border-radius:var(--radius-sm);">' + esc(JSON.stringify(r, null, 2)) + '</pre>');
+                document.getElementById('crawl-ingest-content').value = '';
+                loadCrawlSources();
+            } catch (err) { showError('内容接入失败：' + err.message); }
+        }
+
+        /* ========= 质量进化 ========= */
+        async function qualitySweep() {
+            if (!confirm('运行质量淘汰扫描？（低分且陈旧条目将降级退役）')) return;
+            try {
+                var r = await apiJson('/api/knowledge/quality/sweep', { method: 'POST', body: {} });
+                showQuality('质量淘汰扫描完成', r);
+            } catch (err) { showError('扫描失败：' + err.message); }
+        }
+
+        async function loadQualityReport() {
+            try {
+                var r = await apiJson('/api/knowledge/quality/report');
+                showQuality('质量报表', r);
+            } catch (err) { showError('报表加载失败：' + err.message); }
+        }
+
+        async function runAutoApprove() {
+            if (!confirm('运行渐进信任自动过审？（高可信来源 pending 自动 approve）')) return;
+            try {
+                var r = await apiJson('/api/knowledge/auto-approve/run', { method: 'POST', body: {} });
+                showQuality('渐进信任自动过审完成', r);
+            } catch (err) { showError('过审运行失败：' + err.message); }
+        }
+
+        async function loadDistribution() {
+            var consumer = document.getElementById('dist-consumer').value;
+            try {
+                var r = await apiJson('/api/knowledge/distribution/suggest?consumer=' + consumer + '&limit=20');
+                showQuality('分发建议（consumer=' + consumer + '）', r);
+            } catch (err) { showError('分发建议加载失败：' + err.message); }
+        }
+
+        function showQuality(title, r) {
+            document.getElementById('qualityOutput').innerHTML =
+                '<div class="rag-result" style="display:block;"><h2 style="font-size:16px;color:var(--color-primary-dark);margin:0 0 8px;">' + esc(title) + '</h2>' +
+                '<pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;background:var(--color-bg);padding:12px;border-radius:var(--radius-sm);margin:0;">' + esc(JSON.stringify(r, null, 2)) + '</pre></div>';
+        }
+
+        /* ========= RAG 检索测试 ========= */
+        async function ragAsk() {
+            var q = document.getElementById('rag-q').value.trim();
+            if (!q) { showError('请输入测试问题'); return; }
+            var provider = document.getElementById('rag-provider').value;
+            try {
+                var r = await apiJson('/api/knowledge/ask', { method: 'POST', body: { question: q, provider: provider } });
+                hideError();
+                var mode = r.ragMode || r.mode || 'unsolved';
+                var modeLabel = { direct: 'direct 精确命中', synthesized: 'synthesized 融合', legacy: 'legacy 旧FAQ', unsolved: 'unsolved 未命中' }[mode] || mode;
+                var cites = (r.citations || []).map(function (c, i) {
+                    return '<div class="cite"><span class="no">' + (i + 1) + '</span>' +
+                        '<span>' + esc(c.question) + ' <span style="color:var(--color-text-light);">#' + c.entryId + ' · ' + esc(c.source || '') + '</span></span>' +
+                        '<span class="sim">' + pct(c.similarity) + '</span></div>';
+                }).join('');
+                document.getElementById('ragResult').style.display = 'block';
+                document.getElementById('ragResultBody').innerHTML =
+                    '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;">' +
+                    '<span class="badge mode-' + esc(mode) + '">' + esc(modeLabel) + '</span>' +
+                    '<span style="color:var(--color-text-light);font-size:12px;">置信度 ' + (r.confidence != null ? r.confidence : r.aiConfidence) + '</span>' +
+                    '<span style="color:var(--color-text-light);font-size:12px;">轨 ' + esc(provider) + '</span></div>' +
+                    '<div class="answer">' + esc(r.answer || '（无答案）') + '</div>' +
+                    (cites ? '<div class="rag-cites">' + cites + '</div>' : '');
+            } catch (err) { showError('RAG 问答失败：' + err.message); }
+        }
+
+        async function searchTest() {
+            var q = document.getElementById('rag-q').value.trim();
+            if (!q) { showError('请输入测试问题'); return; }
+            var body = {
+                query: q,
+                topK: parseInt(document.getElementById('rag-topk').value, 10) || 5,
+                category: document.getElementById('rag-category').value.trim() || null,
+            };
+            try {
+                var hits = (await apiJson('/api/knowledge/search', { method: 'POST', body: body })) || [];
+                hideError();
+                var rows = hits.map(function (h) {
+                    return '<div class="cite"><span class="no">' + h.entryId + '</span>' +
+                        '<span>' + esc(h.question) + '</span><span class="sim">' + pct(h.similarity) + '</span></div>';
+                }).join('');
+                document.getElementById('searchResult').style.display = 'block';
+                document.getElementById('searchResultBody').innerHTML =
+                    '<h2 style="font-size:15px;color:var(--color-primary-dark);margin:0 0 8px;">检索结果（' + hits.length + ' 条，不计命中统计）</h2>' +
+                    (rows || '<div style="color:var(--color-text-light);">无命中</div>');
+            } catch (err) { showError('检索失败：' + err.message); }
+        }
+
+        /* ========= 弹窗与工具 ========= */
+        function showModal(html) {
+            document.getElementById('modalContent').innerHTML = html;
+            document.getElementById('opModal').classList.add('show');
+        }
+        function closeModal(evt) {
+            if (evt && evt.target !== evt.currentTarget) return;
+            document.getElementById('opModal').classList.remove('show');
+        }
+        function showError(msg) { var el = document.getElementById('errorBanner'); el.textContent = msg; el.style.display = 'block'; }
+        function hideError() { document.getElementById('errorBanner').style.display = 'none'; }
+
+        function saveApiBase() {
+            var v = document.getElementById('apiBase').value.trim().replace(/\/+$/, '');
+            if (!/^https?:\/\/.+/.test(v)) { showError('后端地址需以 http:// 或 https:// 开头'); return; }
+            state.apiBase = v;
+            localStorage.setItem(API_BASE_KEY, v);
+            hideError();
+            initLoads();
+        }
+
+        function initLoads() {
+            loadTeachSessions(); loadDocuments(); loadCrawlSources();
+            document.getElementById('lastUpdate').textContent = '最后刷新 ' + new Date().toLocaleTimeString('zh-CN');
+        }
+
+        (function init() {
+            document.getElementById('apiBase').value = state.apiBase;
+            initLoads();
+        })();
+    </script>
+</body>
+</html>

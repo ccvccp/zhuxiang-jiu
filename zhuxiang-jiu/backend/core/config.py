@@ -4,10 +4,12 @@ import logging
 import os
 from datetime import datetime, UTC
 
-# CORS 白名单(开发环境允许 localhost,生产环境通过环境变量配置)
+# CORS 白名单(开发环境允许 localhost + file:// 直开 null origin,
+# 生产环境必须通过环境变量 CORS_ORIGINS 收紧为具体域名)
 CORS_ORIGINS = os.environ.get(
     "CORS_ORIGINS",
-    "http://localhost:8080,http://localhost:3000,http://127.0.0.1:8080,http://127.0.0.1:3000",
+    "http://localhost:8080,http://localhost:3000,"
+    "http://127.0.0.1:8080,http://127.0.0.1:3000,null",
 ).split(",")
 
 API_BASE = "/api/decision"
@@ -21,7 +23,8 @@ ROLE_LEVELS = {
 }
 
 ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-ALLOW_HEADERS = ["Authorization", "Content-Type", "X-Role", "X-Member-Id", "X-Agent-Id"]
+ALLOW_HEADERS = ["Authorization", "Content-Type", "X-Role", "X-Member-Id",
+                 "X-Agent-Id", "X-Admin-Id"]
 
 
 # ============================================================
