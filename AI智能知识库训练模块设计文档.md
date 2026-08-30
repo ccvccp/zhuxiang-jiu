@@ -1,0 +1,217 @@
+# AI智能知识库训练模块设计文档 v1.1
+
+> **版本**: v1.1（P0+P1+P2+P2.5 已实现，P3 规划中）
+> **状态**: 三期开发完成，数据闭环修复完成
+> **定位**: 站点统一知识底座——通过对话教学、文档/图片/视频上传、全网抓取三源持续训练，经治理流水线（合规筛查/相似去重/人工审核/自动过审）沉淀为可检索、可进化、可分发的知识资产，供 chat/product/attract 等模块消费。
+
+---
+
+## 一、模块定位与设计原则
+
+### 1.1 业务目标
+
+通过与模块对话，上传资料、图片、提问问题，使本站知识库具备强大的准确和服务能力；同时具备全网抓取和筛选有利于本站成长的知识的能力（参照 AI 大模型训练范式创新设计，适应本站需求）。
+
+### 1.2 设计原则
+
+| 原则 | 说明 |
+|---|---|
+| **独立模块，不合并** | 知识训练/治理/进化是独立领域，chat 等模块仅作消费方调用检索 API |
+| **AI智能优先 + 规则引擎兜底** | 合规筛查/品牌禁忌/医药加严为确定性规则；质量分/自动过审/分发为智能判定 |
+| **双模式存储** | 内存（开发/测试）/ Redis（生产）透明切换，`STORE_MODE` 控制 |
+| **纯标准库检索** | 字符 2-gram 稀疏向量 + 余弦相似度，中文友好，无外部 Embedding 依赖（P3 升级点） |
+| **治理优先** | 一切来源的知识必须经流水线（合规/去重/审核）方可 published 被检索 |
+
+### 1.3 对接模块（不合并）
+
+| 模块 | 关系 |
+|---|---|
+| chat | 检索消费方（新库优先，旧FAQ兜底）；未命中回写缺口 |
+| attract | 复用其违禁词库做合规筛查；分发建议消费方 |
+| message | 紧急缺口通知消费方（P2.5 落地） |
+
+---
+
+## 二、存储设计（repositories/knowledge_repository.py）
+
+### 2.1 实体与 Redis 键（前缀 `zhuxiang:knowledge:`）
+
+| 实体 | Redis 键 | 类型 | 说明 |
+|---|---|---|---|
+| 知识条目 entries | `entry:{id}` + `entry:index` + `entry:index:{status}` | string(JSON) + set | 治理流水线主实体 |
+| 版本快照 versions | `version:{id}` | list | 每次发布留痕，支持审计回溯 |
+| 知识缺口 gaps | `gap:{id}` + `gap:index` + `gap:index:{status}` | string + set | chat 未命中问题队列 |
+| 教学会话 teach_sessions | `teach:{id}` + `teach:seq` | string + incr | 对话式教学载体 |
+| 文档 documents | `doc:{id}` + `doc:seq` | string + incr | 上传文档元数据+分块统计 |
+| 抓取种子源 crawl_sources | `crawl:source:{id}` + `crawl:source:seq` | string + incr | 白名单抓取源 |
+
+序列号：`knowledge:seq` / `gap:seq`（Redis incr）。
+
+### 2.2 条目核心字段
+
+```
+id, question, answer, keywords, category,
+source(manual/chat_teaching/document/crawl/media/migration),
+status(pending/approved/published/rejected/retired),
+complianceScore, hitCount, missCount, qualityScore,
+vector(内部字段, 对外投影剥离), version,
+createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
+```
+
+### 2.3 检索向量
+
+- `tokenize`: 字符 2-gram 分词（中文友好，"竹香酒多少钱" → {竹香:1, 香酒:1, ...}）
+- `build_vector`: question 为主 + keywords 加权 ×2
+- `cosine`: 稀疏向量余弦相似度
+- `SEARCH_SCAN_LIMIT=2000`: 检索扫描上限（P3 突破点）
+- `scan_keys()`: SCAN 增量游标迭代（P2.5 替代 KEYS，避免大库阻塞）
+
+---
+
+## 三、核心流程
+
+### 3.1 治理流水线（P0）
+
+```
+创建(pending) ──审核──> approved ──发布──> published ──退役──> retired
+   │                        │                        │
+   └── 拒绝 ──> rejected    └── 版本快照留痕          └── 可查不可检索
+                    │
+                    └── 可编辑重提(回 pending)
+```
+
+**创建规则**（`create_entry`）:
+- question/answer 非空
+- 合规分 ≥70（复用 attract 违禁词库，100-30×命中数，违禁词直接拒绝入库）
+- 品牌表述禁忌检查（D-17）：品牌名与浸泡/泡制/配制酒**断言式共存**拒绝，否定词（并非/不是/而非…）视为澄清放行
+- 与既有条目（非 retired）相似度 <0.85（防重复，仅比 question 向量）
+
+**品牌基准（D-17）**: `BRAND_BASELINE_ENTRIES` 3 条种子（酿造工艺/原料/浸泡澄清），幂等 published 入库。
+> 本网产品事实：竹笋、竹茎、竹叶 + 国家级森林公园徂徕山富硒山泉水 + 专有菌群古法酿制（发酵型），**竹叶浸泡与基酒融合是本网大忌讳**。
+
+**迁移（D-13）**: 旧 chat FAQ 一次性幂等迁移（source=migration，直接 published 跳过审核，重复与品牌禁忌跳过，旧表保留只读）。
+
+### 3.2 统一检索（P0，消费方 API）
+
+`search(query, category, top_k=5, min_similarity=0.10, record_hit=True)`:
+- n-gram 向量余弦 top-k，低于 0.10 视为噪声不返回
+- **计数口径（P2.5）**: 命中 → top-1 计 hitCount；未命中但有最近邻候选（低于置信阈值）→ 最近邻计 missCount（质量分命中率的数据来源）；无候选 → 不计数
+- `record_hit=False` 供管理端测试检索（避免污染统计）
+
+### 3.3 知识缺口队列（P0）
+
+- `record_gap`: chat 未命中时调用，同问题（归一化文本）去重累计 askCount，全局锁保护
+- `resolve_gap`: resolve（关联新条目）/ ignore
+- **紧急缺口通知（P2.5）**: `notify_urgent_gaps()`——open 且 askCount≥3 且未提醒过（`urgentNotifiedAt` 幂等标记）的缺口，站内信（message.batch_send）通知全部启用状态管理员，接入质量调度器每轮扫描，best-effort 不阻断。**缺口→通知→教学 飞轮闭环**。
+
+### 3.4 三源接入（P1）
+
+| 源 | 入口 | 轨道 | 说明 |
+|---|---|---|---|
+| **对话式教学** | teach sessions + ask/submit | — | ask 检索已有知识作答（教学机会识别）；submit Q+A 入库(source=chat_teaching, pending) 并**自动 resolve 匹配的开放缺口**（余弦≥0.5） |
+| **文档** | ingest_document | — | 分块器（按空行分段，超长段按句号二次切分，单块≤500字），自动生成问题（优先块内问句，否则标题+块首截断），逐块 pending |
+| **图片** | ingest_image | rule（llm 轨 P3） | 管理员配描述（title+description+url+tags），一条 media 条目 |
+| **视频** | ingest_video | rule（llm 轨 P3） | 时间轴分段为检索单元（一段一条，含时间码引用），desc 必填 |
+| **全网抓取** | crawl sources + ingest/run | rule（llm 轨 P3） | 白名单制（种子源须指定主题域）；ingest=管理员粘贴正文；run=urllib 拉取 URL→提取正文→入库 |
+
+**主题域过滤（D-15，五大域）**: wine(酒文化) / bamboo(竹子相关) / bamboo_culture(竹文化) / bamboo_med(竹医药) / brand(品牌文化)。内容未命中任何域拒绝入库。
+
+**医药加严（D-15）**: 竹医药域内容禁用疗效断言词（治愈/根治/包治/疗效确切/抗癌/降三高/包好/神药）；典籍/文献可引用（标注出处放行）。
+
+### 3.5 智能进化（P2）
+
+**质量分**（`compute_quality_score`, 0-100）:
+```
+质量分 = 命中率×40% + 新鲜度×30% + 来源可信度×30%
+- 命中率: hitCount/(hitCount+missCount), 零调用给 50(中性)
+- 新鲜度: 90 天线性衰减(publishedAt 起算)
+- 来源可信度: migration 0.9 > manual 0.75 > chat_teaching 0.65 > document/crawl 0.55 > media 0.5
+```
+
+**质量淘汰**（`quality_sweep`）: qualityScore<30 且发布超 60 天 → 降级 retired（知识过时）；其余刷新分数。**增量写入（P2.5）**: 分数未变且不退役的条目跳过重写（skipped 统计），避免每轮全量 save_entry。
+
+**缺口摘要**（`gaps_summary`）: 高频缺口聚合（askCount 倒序）+ 主题域归属，驱动优先补知识。
+
+**渐进信任自动过审（D-16）**（`auto_approve_run`）:
+- 条件（全部满足）：来源（migration 除外）**最近 5 条审核决定全部通过**（P2.5 修正：按 updatedAt 倒序取最近 N 条，rejected 计入窗口并打断连胜）+ 来源历史条目平均质量分 ≥65 + 条目自身合规分 ≥80（高于人工线 70）
+- 满足自动 approve（reviewedBy=0 标识），**仍需人工发布（保留发布权）**
+
+**跨模块分发建议**（`distribution_suggest`）: 高质量分（≥60）+ 高命中 published 条目，按消费方主题偏好加权（product→产品类 / attract→品牌文化类 / chat→faq/order/policy/compliance），域外降权不排除。
+
+### 3.6 后台调度器（P2）
+
+`knowledge_quality_scheduler`（默认 6h 周期，全局限跑锁）:
+- 质量淘汰 sweep + 自动过审 + **紧急缺口通知（P2.5 接入）**
+- 环境开关: `KNOWLEDGE_QUALITY_AUTO=off` 关闭；`KNOWLEDGE_QUALITY_SCAN_INTERVAL=N`（下限 300s）
+
+### 3.7 chat 消费链路
+
+```
+用户提问 → chat_service._search_knowledge
+  → knowledge_svc.search(top_k=1, record_hit=True)   # 新库优先
+  → 未命中 → _record_knowledge_gap → 缺口队列
+  → 旧 chat_knowledge 关键词匹配兜底（迁移过渡期）
+```
+> P2.5 修复：此前调用参数 `limit=1` 与签名 `top_k` 不符，TypeError 被 best-effort 降级静默吞掉，新库检索从未生效。
+
+---
+
+## 四、API 端点（32 个 = 31 管理端 X-Role:admin + 1 公开）
+
+| 分组 | 端点 | 方法 |
+|---|---|---|
+| 条目(5) | /api/knowledge/entries；/api/knowledge/entries/{id}；/api/knowledge/entries/{id}/versions | POST/GET/GET/PUT/GET |
+| 治理(3) | /api/knowledge/entries/{id}/review；.../publish；.../retire | POST |
+| 缺口(2) | /api/knowledge/gaps；/api/knowledge/gaps/{id}/resolve | GET/POST |
+| 迁移/种子(2) | /api/knowledge/migrate-chat；/api/knowledge/seed-brand | POST |
+| 统计/检索(2) | /api/knowledge/stats；/api/knowledge/search（**公开**） | GET/POST |
+| 教学(4) | /api/knowledge/teach/sessions；.../{id}/ask；.../{id}/teach | POST/GET/POST/POST |
+| 文档(2) | /api/knowledge/documents | POST/GET |
+| 多模态(2) | /api/knowledge/media/image；/api/knowledge/media/video | POST |
+| 抓取(4) | /api/knowledge/crawl/sources；.../ingest；.../run | POST/GET/POST/POST |
+| P2(6) | /api/knowledge/quality/sweep；/quality/report；/gaps/summary；/auto-approve/run；/distribution/suggest；/quality/status | POST/GET/GET/POST/GET/GET |
+
+异常约定（项目统一）: KeyError → 404 / ValueError → 409 / 其余 → 500。
+
+---
+
+## 五、关键决策记录
+
+| 决策 | 内容 |
+|---|---|
+| D-13 | 旧 chat FAQ 一次性幂等迁移，旧表保留只读 |
+| D-14 | 多模态双轨：rule 轨（管理员配描述/时间轴）先行，llm 轨（视觉大模型/抽帧+ASR）预留 P3 |
+| D-15 | 抓取白名单制 + 五大主题域（酒文化/竹子相关/竹文化/竹医药/品牌文化）+ 医药疗效断言加严 |
+| D-16 | 渐进信任自动过审：连胜 5 条 + 平均质量分 + 合规分≥80，保留人工发布权 |
+| D-17 | 品牌基准知识与表述禁忌（浸泡/泡制/配制酒断言式表述拦截，否定词澄清放行） |
+
+---
+
+## 六、测试覆盖
+
+| 文件 | 规模 | 覆盖 |
+|---|---|---|
+| test_knowledge_routes.py | 80 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取 + P2 全部 6 项 + P2.5 修复 7 项（hit 计数/miss 边界/增量扫描/连胜打断/通知+幂等） |
+| test_knowledge_quality_scheduler.py | 10 断言 | 单轮扫描/淘汰/保留/开关/周期下限/启动幂等/停止 |
+
+---
+
+## 七、P3 规划（待排期）
+
+| 方向 | 内容 | 优先级 |
+|---|---|---|
+| **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎，从"FAQ 精确命中"升级为"知识融合问答"；与 chat 模块多轮对话管理衔接 | 高 |
+| **检索升级** | 倒排+BM25 或 Embedding 语义向量（provider 双轨：rule 轨 2-gram / llm 轨 Embedding），突破 2000 条扫描瓶颈 | 高 |
+| **LLM 轨落地** | 图片视觉理解（视觉大模型自动生成描述）、视频抽帧+ASR 自动时间轴、抓取内容智能清洗（D-14 既有规划） | 中 |
+| **消费方扩展** | product/attract 实际拉取链路（当前仅有 distribution_suggest 建议无消费） | 中 |
+
+---
+
+## 八、迭代历史
+
+| 阶段 | 日期 | 内容 |
+|---|---|---|
+| P0 知识底座 | 2026-08-30 | 治理流水线 + 统一检索 + 缺口队列 + FAQ 迁移（13 端点） |
+| P1 三源接入 | 2026-08-30 | 对话教学 + 文档分块 + 多模态 rule 轨 + 白名单抓取（12 端点，D-14/D-15） |
+| P2 智能进化 | 2026-08-30 | 质量淘汰/缺口摘要/渐进信任/分发建议/后台调度器（6 端点，D-16） |
+| P2.5 数据闭环 | 2026-08-30 | chat 检索接线修复 / missCount 埋点 / KEYS→SCAN / sweep 增量化 / 连胜判定修正 / 缺口通知飞轮 |
