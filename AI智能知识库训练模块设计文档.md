@@ -184,6 +184,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | D-15 | 抓取白名单制 + 五大主题域（酒文化/竹子相关/竹文化/竹医药/品牌文化）+ 医药疗效断言加严 |
 | D-16 | 渐进信任自动过审：连胜 5 条 + 平均质量分 + 合规分≥80，保留人工发布权 |
 | D-17 | 品牌基准知识与表述禁忌（浸泡/泡制/配制酒断言式表述拦截，否定词澄清放行） |
+| D-18 | RAG 问答层：置信分级路由（direct≥0.55 / synthesized≥0.25 / unsolved）+ rule 轨融合生成 + 引用溯源 + provider 双轨（详见第九章） |
 
 ---
 
@@ -196,14 +197,14 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 ---
 
-## 七、P3 规划（待排期）
+## 七、P3 规划
 
-| 方向 | 内容 | 优先级 |
-|---|---|---|
-| **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎，从"FAQ 精确命中"升级为"知识融合问答"；与 chat 模块多轮对话管理衔接 | 高 |
-| **检索升级** | 倒排+BM25 或 Embedding 语义向量（provider 双轨：rule 轨 2-gram / llm 轨 Embedding），突破 2000 条扫描瓶颈 | 高 |
-| **LLM 轨落地** | 图片视觉理解（视觉大模型自动生成描述）、视频抽帧+ASR 自动时间轴、抓取内容智能清洗（D-14 既有规划） | 中 |
-| **消费方扩展** | product/attract 实际拉取链路（当前仅有 distribution_suggest 建议无消费） | 中 |
+| 方向 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎（详见第九章 D-18 设计） | 高 | **已设计，待实施** |
+| **检索升级** | 倒排+BM25 或 Embedding 语义向量（provider 双轨：rule 轨 2-gram / llm 轨 Embedding），突破 2000 条扫描瓶颈 | 高 | 待排期 |
+| **LLM 轨落地** | 图片视觉理解（视觉大模型自动生成描述）、视频抽帧+ASR 自动时间轴、抓取内容智能清洗（D-14 既有规划） | 中 | 待排期 |
+| **消费方扩展** | product/attract 实际拉取链路（当前仅有 distribution_suggest 建议无消费） | 中 | 待排期 |
 
 ---
 
@@ -215,3 +216,113 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | P1 三源接入 | 2026-08-30 | 对话教学 + 文档分块 + 多模态 rule 轨 + 白名单抓取（12 端点，D-14/D-15） |
 | P2 智能进化 | 2026-08-30 | 质量淘汰/缺口摘要/渐进信任/分发建议/后台调度器（6 端点，D-16） |
 | P2.5 数据闭环 | 2026-08-30 | chat 检索接线修复 / missCount 埋点 / KEYS→SCAN / sweep 增量化 / 连胜判定修正 / 缺口通知飞轮 |
+
+---
+
+## 九、P3.1 RAG 问答层详细设计（D-18）
+
+> **决策编号**: D-18（2026-08-30 设计，待实施）
+> **目标**: 从"FAQ 精确命中"（top-1 答案直接返回）升级为"检索增强问答"（top-k 召回 + 置信分级路由 + 融合生成 + 引用溯源），对齐成熟 RAG 范式，纯标准库 rule 轨先行，llm 轨预留。
+
+### 9.1 核心机制：置信分级路由
+
+单一阈值（现状 min_similarity=0.10）无法区分"该直接引用"与"该融合补充"。RAG 入口按 top-1 相似度分三级路由：
+
+```
+                        ┌─ top1 ≥ 0.55 ──> direct（直接引用）
+                        │   单条目精确命中，返回该条目答案 + 单条引用
+ top-k 召回(k=3) ──> ───┤
+                        ├─ 0.25 ≤ top1 < 0.55 ──> synthesized（融合生成）
+                        │   多条目去重后融合，答案带 [n] 引用标注
+                        │   （仅 1 条时退化为单条引用式融合）
+                        │
+                        ├─ 0.10 ≤ top1 < 0.25 ──> unsolved（低置信）
+                        │   最近邻计 miss + 兜底回复（不融合——
+                        │   低相似条目融合反而引入噪声）
+                        └─ 无候选(余弦=0) ──> unsolved（无最近邻，不计 miss）
+```
+
+**阈值依据**: 2-gram 余弦下，同义改写通常 ≥0.55，相关补充 0.25~0.55，弱相关 <0.25；实施时以测试校准微调。
+
+### 9.2 rule 轨融合生成算法（纯标准库）
+
+```
+输入: question, hits(top-k 条目, 含相似度)
+1. 答案去重: 条目间问题向量余弦 ≥0.85 视为同义 → 保留相似度最高者
+2. 排序: 按(相似度, hitCount)降序
+3. 融合模板:
+   开场: "关于「{question[:20]}」，为您整理以下信息："
+   主体: 每条 "{n}. {answer}"（answer 截断 200 字，去尾部句号截断）
+   收尾: "以上信息仅供参考，如需人工服务可联系在线客服。"
+4. 引用溯源: citations = [{entryId, question, similarity, source}]
+```
+
+输出结构与 direct 共用：`{answer, mode, citations, confidence}`。
+
+### 9.3 provider 双轨（对齐 attract D-11 / 知识库 D-14 惯例）
+
+```python
+async def rag_answer(self, question: str, provider: str = "rule") -> dict:
+    # provider="llm" 预留: 接入大模型 synthesize 时仅改此分支,
+    # 检索/分级/引用溯源/计数联动不变(上层零改动)
+```
+
+llm 轨（P3.3 预留）: top-k 条目作为 context 喂给大模型生成，引用由条目元数据携带，模型输出须保留 [n] 标注（幻觉治理：引用外内容截断告警）。
+
+### 9.4 计数联动（沿用 P2.5 口径）
+
+| mode | 计数 |
+|---|---|
+| direct / synthesized | top-1 条目计 hit |
+| unsolved（有候选） | 最近邻计 miss |
+| unsolved（无候选） | 不计数 |
+
+`record_hit`/`record_miss` 复用既有 repository 方法，质量分命中率权重自然吃到 RAG 数据。
+
+### 9.5 API 设计
+
+**新增端点**: `POST /api/knowledge/ask`（**公开**，与 /search 同级——面向终端用户的问答统一入口）
+
+```
+请求: {"question": "...", "provider": "rule"(可选)}
+响应: {
+  "answer": "融合后的答案文本",
+  "mode": "direct|synthesized|unsolved",
+  "citations": [{"entryId": 1, "question": "...",
+                 "similarity": 0.62, "source": "manual"}],
+  "confidence": 0.85,        # direct: top1 相似度
+                            # synthesized: top-k 平均
+                            # unsolved: 0
+  "gapRecorded": false       # unsolved 时自动 record_gap(chat 链路已有,
+}                           #  ask 端点仅标记不重复记录——幂等约束)
+```
+
+### 9.6 chat 模块接线（P3.2）
+
+```
+_search_knowledge 升级:
+  rag = await knowledge_svc.rag_answer(user_content)
+  → mode != unsolved: 返回 {answer(融合后), citations}
+  → unsolved: 走旧 FAQ 兜底 → 仍无 → 缺口飞轮(不变)
+
+回复增强:
+  aiConfidence 动态化: rag confidence(替代固定常量)
+  回复体透出 citations(前端可渲染"知识来源"角标)
+```
+
+chat 的转人工判定（unresolvedCount）逻辑不变。
+
+### 9.7 实施排期
+
+| 阶段 | 内容 | 交付物 |
+|---|---|---|
+| **P3.1 RAG 核心** | rag_answer（分级路由+rule 轨融合+计数联动）+ /ask 端点 + 测试（direct/synthesized/unsolved 三态、去重、引用、计数、llm 轨回退 rule） | knowledge_service + routes + 测试 |
+| **P3.2 chat 接线** | chat_service 消费 rag_answer，回复带 citations + 动态置信度，chat 测试回归 | chat_service + 测试 |
+| **P3.3 LLM 轨（预留）** | provider="llm" 接入大模型 synthesize，引用携带与幻觉治理 | 接入时实施 |
+
+### 9.8 边界与约束
+
+- **检索瓶颈不变**: RAG 仍基于现有 2-gram 全量扫描（2000 条上限），检索升级（倒排/BM25/Embedding）为 P3 另一主线，两线正交可并行
+- **不引入多轮对话**: 会话上下文管理属 chat 模块职责（其设计文档第三期），本期单轮问答
+- **brand_taboo 合规兜底**: 融合答案拼接到条目答案原文，条目入库时已过品牌禁忌，RAG 层不重复校验（无新文本生成，rule 轨无幻觉；llm 轨接入时需增加输出侧校验）
+- **缺口幂等**: ask 端点 unsolved 时不直接 record_gap（chat 链路已记录），避免同问题双计数
