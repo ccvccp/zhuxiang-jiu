@@ -579,7 +579,7 @@ class KnowledgeService:
             vecs = provider_client.embed([e["question"] for e in batch])
             if not vecs or len(vecs) != len(batch):
                 continue
-            for e, v in zip(batch, vecs):
+            for e, v in zip(batch, vecs, strict=False):
                 e["embedding"] = [round(x, 6) for x in v]
                 await self._save_entry(e)
                 done += 1
