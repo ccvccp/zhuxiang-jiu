@@ -225,8 +225,10 @@ class TestFlashRepoRedis:
                 "totalAmount": 1.0, "status": "pending_payment",
                 "createdAt": f"2026-08-22T11:00:0{i}:00+00:00",
             })
+        # createdAt: FOT-M-003=00秒 / FOT-M-001=01秒 / FOT-M-002=02秒
+        # 倒序(新→旧) = 002 > 001 > 003
         orders = await svc.flash_repo.list_orders_by_member(88)
-        assert [o["orderNo"] for o in orders] == ["FOT-M-003", "FOT-M-002", "FOT-M-001"]
+        assert [o["orderNo"] for o in orders] == ["FOT-M-002", "FOT-M-001", "FOT-M-003"]
 
 
 # ============================================================
