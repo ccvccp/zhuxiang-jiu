@@ -96,6 +96,18 @@ def cosine(a: dict[str, int], b: dict[str, int]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def cosine_f(a: list[float], b: list[float]) -> float:
+    """稠密向量余弦相似度(P3.5 embedding 语义检索)"""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
 async def scan_keys(client, pattern: str) -> list[str]:
     """SCAN 增量迭代收集键(替代 KEYS, 避免大库全量阻塞)
 
@@ -353,18 +365,63 @@ class KnowledgeRepository:
     # 向量检索
     # ============================================================
 
+    async def _list_published_full(self,
+                                   category: str = None) -> list[dict]:
+        """P3.5: 全量 published 条目(语义检索候选, 不受截断)
+
+        语义路径需与查询 embedding 全量比对, 不同于 2-gram 倒排
+        召回——无共同 token 也可语义命中, 故不能走倒排候选集。
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.smembers(_k(
+                "knowledge", "entry", "index", ENTRY_STATUS_PUBLISHED))
+            entries = []
+            for eid in ids:
+                raw = await client.get(_k("knowledge", "entry", int(eid)))
+                if raw:
+                    entries.append(json.loads(raw))
+        else:
+            self._ensure_store()
+            entries = [e for e in
+                       self.store["knowledge_entries"].values()
+                       if e.get("status") == ENTRY_STATUS_PUBLISHED]
+        if category:
+            entries = [e for e in entries
+                       if e.get("category") == category]
+        return entries
+
     async def search_published(self, query_vec: dict[str, int],
                                category: str = None,
-                               top_k: int = 5) -> list[tuple[dict, float]]:
+                               top_k: int = 5,
+                               query_embedding: list[float] = None,
+                               ) -> list[tuple[dict, float]]:
         """检索已发布条目, 返回 (条目, 相似度) top-k
 
         P3 检索升级: 倒排索引召回(仅加载与 query 有共同 token 的条目),
         替代全量扫描——行为无损(余弦>0 必有共同 token), 候选集不再受
         SEARCH_SCAN_LIMIT 截断。索引未就绪(存量数据未重建)时回退全量。
+
+        P3.5 语义路径: query_embedding 提供时(服务层 embedding 模式
+        开且查询向量化成功), 与全部含 embedding 的 published 条目做
+        稠密余弦比对——无共同 token 也能语义命中。无 embedding 的
+        条目不参与语义路径(embed 失败/未回填, 由 rebuild 回填或
+        关闭开关回退 2-gram)。
         """
+        if query_embedding is not None:
+            scored: list[tuple[dict, float]] = []
+            for e in await self._list_published_full(category):
+                emb = e.get("embedding")
+                if not emb:
+                    continue
+                sim = cosine_f(query_embedding, emb)
+                if sim > 0:
+                    scored.append((e, sim))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            return scored[:top_k]
         if not query_vec:
             return []
-        scored: list[tuple[dict, float]] = []
+        scored = []
         if await self._inverted_ready():
             # 倒排召回: 只加载候选条目
             candidates = await self._inverted_candidates(query_vec.keys())

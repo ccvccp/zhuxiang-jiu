@@ -218,9 +218,9 @@ def compliance_score(question: str, answer: str) -> int:
 
 
 def _public(entry: dict) -> dict:
-    """对外投影: 剥离内部字段(vector/_indexed_tokens)"""
+    """对外投影: 剥离内部字段(vector/_indexed_tokens/embedding)"""
     return {k: v for k, v in entry.items()
-            if k not in ("vector", "_indexed_tokens")}
+            if k not in ("vector", "_indexed_tokens", "embedding")}
 
 
 class KnowledgeService:
@@ -228,6 +228,42 @@ class KnowledgeService:
 
     def __init__(self, repo: KnowledgeRepository = KnowledgeRepository()):
         self.repo = repo
+
+    # ============================================================
+    # 0.5 P3.5 embedding 语义向量(检索升级)
+    # ============================================================
+
+    @staticmethod
+    def _query_embedding(query: str) -> list[float] | None:
+        """查询语义向量(embedding 模式关/向量化失败返回 None→2-gram)
+
+        每次检索一次 embed 调用; repo 层无网络依赖, 由本层
+        统一负责 provider 调用(与 llm 轨 _rag_llm_synthesize 同范式)。
+        """
+        from services.llm_client import embedding_enabled, provider_client
+        if not embedding_enabled():
+            return None
+        vecs = provider_client.embed([query])
+        return vecs[0] if vecs else None
+
+    async def _save_entry(self, entry: dict) -> None:
+        """保存条目(含 P3.5 语义向量注入)
+
+        published 条目在 embedding 模式开且尚未持有向量时注入
+        (question 文本向量化); pending 等未发布条目跳过——仅在
+        publish 流转后再经下次保存/rebuild 回填, 避免候选池
+        无谓 embed 成本。失败不阻断保存(条目无 embedding,
+        检索时该条目走 2-gram 路径或不参与语义路径)。
+        """
+        if (entry.get("status") == ENTRY_STATUS_PUBLISHED
+                and not entry.get("embedding")):
+            from services.llm_client import (
+                embedding_enabled, provider_client)
+            if embedding_enabled():
+                vecs = provider_client.embed([entry["question"]])
+                if vecs:
+                    entry["embedding"] = [round(v, 6) for v in vecs[0]]
+        await self.repo.save_entry(entry)
 
     # ============================================================
     # 1. 治理流水线
@@ -287,7 +323,7 @@ class KnowledgeService:
             "publishedAt": "",
             "vector": vec,
         }
-        await self.repo.save_entry(entry)
+        await self._save_entry(entry)
         return _public(entry)
 
     async def get_entry(self, entry_id: int) -> dict:
@@ -355,7 +391,7 @@ class KnowledgeService:
                 "vector": vec,
                 "updatedAt": datetime.utcnow().isoformat(),
             })
-            await self.repo.save_entry(entry)
+            await self._save_entry(entry)
             return _public(entry)
 
     async def review_entry(self, entry_id: int, approve: bool,
@@ -386,7 +422,7 @@ class KnowledgeService:
             entry["updatedAt"] = datetime.utcnow().isoformat()
             await self.repo.transition_status(
                 entry_id, ENTRY_STATUS_PENDING, entry["status"])
-            await self.repo.save_entry(entry)
+            await self._save_entry(entry)
             return _public(entry)
 
     async def publish_entry(self, entry_id: int,
@@ -410,7 +446,7 @@ class KnowledgeService:
             entry["updatedAt"] = entry["publishedAt"]
             await self.repo.transition_status(
                 entry_id, ENTRY_STATUS_APPROVED, ENTRY_STATUS_PUBLISHED)
-            await self.repo.save_entry(entry)
+            await self._save_entry(entry)
             await self.repo.add_version(entry_id, {
                 "version": entry["version"],
                 "question": entry["question"],
@@ -440,7 +476,7 @@ class KnowledgeService:
             entry["updatedAt"] = datetime.utcnow().isoformat()
             await self.repo.transition_status(
                 entry_id, ENTRY_STATUS_PUBLISHED, ENTRY_STATUS_RETIRED)
-            await self.repo.save_entry(entry)
+            await self._save_entry(entry)
             return _public(entry)
 
     async def list_versions(self, entry_id: int) -> list[dict]:
@@ -462,18 +498,22 @@ class KnowledgeService:
                       top_k: int = DEFAULT_TOP_K,
                       min_similarity: float = MIN_SIMILARITY,
                       record_hit: bool = True) -> list[dict]:
-        """知识检索(n-gram 向量余弦 top-k)
+        """知识检索(n-gram 向量余弦 top-k; P3.5 embedding 模式走语义路径)
 
         供 chat_service / 其他模块消费; record_hit 控制是否计数
         (管理端测试检索传 False 避免污染统计)。
         计数口径: 命中 → top-1 计 hit; 未命中但有最近邻候选
         (低于置信阈值) → 最近邻计 miss(质量分命中率的数据来源)。
+        P3.5: KNOWLEDGE_EMBEDDING=on 时优先语义路径(embed 失败
+        自动回退 2-gram), 相似度为稠密向量余弦。
         """
         query = (query or "").strip()
         if not query:
             return []
         query_vec = tokenize(query)
-        results = await self.repo.search_published(query_vec, category, top_k)
+        results = await self.repo.search_published(
+            query_vec, category, top_k,
+            query_embedding=self._query_embedding(query))
         out = []
         for entry, sim in results:
             if sim < min_similarity:
@@ -506,11 +546,46 @@ class KnowledgeService:
         内存模式 store 随进程重建天然一致; Redis 模式存量条目无
         _indexed_tokens, 索引未就绪时检索自动回退全量扫描——
         本方法显式重建以启用索引加速。
+
+        P3.5: embedding 模式开时, 先为缺失语义向量的 published
+        条目批量回填(question 批量 embed), 再重建倒排索引——
+        存量数据启用语义检索的迁移入口(与倒排索引 rebuild 同范式)。
         """
         async with get_lock("knowledge:inv:rebuild"):
+            backfilled = await self._backfill_embeddings()
             result = await self.repo.rebuild_inverted_index()
+            if backfilled is not None:
+                result["embeddingBackfilled"] = backfilled
             logger.info("检索倒排索引重建: %s", result)
             return result
+
+    async def _backfill_embeddings(self) -> int | None:
+        """P3.5: 存量 published 条目语义向量回填(批量 embed)
+
+        embedding 模式关时返回 None(不参与 rebuild 结果);
+        批量分批请求(EMBED_BATCH_SIZE), 失败跳过该批不中断
+        (未回填条目不参与语义检索, 2-gram 路径不受影响)。
+        """
+        from services.llm_client import (
+            EMBED_BATCH_SIZE, embedding_enabled, provider_client)
+        if not embedding_enabled():
+            return None
+        entries = [e for e in await self.repo.list_entries(
+            status=ENTRY_STATUS_PUBLISHED, limit=SEARCH_SCAN_LIMIT)
+            if not e.get("embedding")]
+        done = 0
+        for start in range(0, len(entries), EMBED_BATCH_SIZE):
+            batch = entries[start:start + EMBED_BATCH_SIZE]
+            vecs = provider_client.embed([e["question"] for e in batch])
+            if not vecs or len(vecs) != len(batch):
+                continue
+            for e, v in zip(batch, vecs):
+                e["embedding"] = [round(x, 6) for x in v]
+                await self._save_entry(e)
+                done += 1
+        if done:
+            logger.info("语义向量回填完成: %s 条", done)
+        return done
 
     # ============================================================
     # 2.6 RAG 问答层(P3.1, D-18): 置信分级路由 + 融合生成 + 引用溯源
@@ -588,6 +663,10 @@ class KnowledgeService:
         未配置 key/请求失败自动回退 rule 轨——检索/分级/引用溯源/
         计数联动对两条轨道完全一致。
 
+        P3.5: embedding 模式开时检索走语义路径(相似度为稠密
+        向量余弦), embed 失败自动回退 2-gram; 阈值沿用
+        (语义相似度分布偏高, 生产实测后可另行校准)。
+
         Raises:
             ValueError: 问题为空
         """
@@ -599,7 +678,8 @@ class KnowledgeService:
         # top-k 召回(不过滤阈值, 由分级路由判定)
         query_vec = tokenize(question)
         results = await self.repo.search_published(
-            query_vec, None, self.RAG_TOP_K)
+            query_vec, None, self.RAG_TOP_K,
+            query_embedding=self._query_embedding(question))
         if not results:
             return {"answer": "", "mode": "unsolved",
                     "citations": [], "confidence": 0.0}
@@ -744,7 +824,7 @@ class KnowledgeService:
             "publishedAt": now,
             "vector": build_vector(question, keywords),
         }
-        await self.repo.save_entry(entry)
+        await self._save_entry(entry)
         await self.repo.add_version(entry_id, {
             "version": 1,
             "question": question,
@@ -1246,7 +1326,7 @@ class KnowledgeService:
                         ENTRY_STATUS_RETIRED)
                     e["status"] = ENTRY_STATUS_RETIRED
                     retired.append(e["id"])
-                await self.repo.save_entry(e)
+                await self._save_entry(e)
             result = {"refreshed": refreshed, "skipped": skipped,
                       "retired": retired,
                       "retiredCount": len(retired),
@@ -1439,7 +1519,7 @@ class KnowledgeService:
                 await self.repo.transition_status(
                     e["id"], ENTRY_STATUS_PENDING,
                     ENTRY_STATUS_APPROVED)
-                await self.repo.save_entry(e)
+                await self._save_entry(e)
                 auto_approved.append(
                     {"id": e["id"], "question": e["question"][:20],
                      "source": src})

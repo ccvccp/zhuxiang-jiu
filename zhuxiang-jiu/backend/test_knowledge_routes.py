@@ -834,6 +834,106 @@ async def main():
            f"候选={len(_cand)}")
 
     # ============================================================
+    # 8.9 P3.5 embedding 语义向量: 默认关 / 语义命中 / 失败回退 / 回填
+    # ============================================================
+    import services.llm_client as _llm_mod
+    _orig_embed = _llm_mod.provider_client.embed
+    _emb_calls = {"n": 0}
+
+    # 8.9.1 默认关: 检索不调 embed(走 2-gram, 零成本)
+    os.environ.pop("KNOWLEDGE_EMBEDDING", None)
+
+    def _embed_counter(texts):
+        _emb_calls["n"] += 1
+        return [[1.0, 0.0, 0.0] for _ in texts]
+
+    _llm_mod.provider_client.embed = _embed_counter
+    _h_off = await svc.search("竹香酒是怎么酿造的", record_hit=False)
+    record("EMB-默认关闭不调embed(走2-gram)",
+           _emb_calls["n"] == 0 and len(_h_off) >= 1,
+           f"calls={_emb_calls['n']}, hits={len(_h_off)}")
+
+    # 8.9.2 开启 + mock: 入库自动注入 + 语义命中(2-gram 无法召回的条目)
+    # 向量设计(R^3): 查询/B=[1,0,0](cos=1), A=[0,1,0](cos=0)
+    os.environ["LLM_API_KEY"] = "test-key"
+    os.environ["KNOWLEDGE_EMBEDDING"] = "on"
+    _Q, _A, _B = [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]
+
+    def _embed_map(texts):
+        _emb_calls["n"] += 1
+        out = []
+        for t in texts:
+            if "酿造用水水源" in t:
+                out.append(_Q)
+            elif "徂徕山泉水" in t:
+                out.append(_B)
+            elif "传统酿造流程" in t:
+                out.append(_A)
+            else:
+                out.append([0.3, 0.4, 0.5])
+        return out
+
+    _llm_mod.provider_client.embed = _embed_map
+    # 发布两条: A 与查询字面相近(2-gram 可召回), B 与查询字面无共同
+    # token(2-gram 完全无法召回)但语义向量与查询一致
+    _qa = "竹香酒的传统酿造流程说明"
+    _qb = "徂徕山泉水的水质特点介绍"
+    await _publish(svc, _qa, "竹香酒传统酿造流程内容。",
+                   keywords="酿造 流程")
+    await _publish(svc, _qb, "徂徕山泉水水质特点内容。",
+                   keywords="徂徕山 泉水 水质")
+    _query = "竹香酒的酿造用水水源是哪里"
+    hits_emb = await svc.search(_query, top_k=3, record_hit=False)
+    record("EMB-语义命中2-gram无法召回的条目",
+           len(hits_emb) >= 1 and hits_emb[0]["question"] == _qb
+           and hits_emb[0]["similarity"] == 1.0,
+           f"实际{[(h['question'], h['similarity']) for h in hits_emb]}")
+    # 入库自动注入: B 条目持久化持有语义向量
+    _raw_b = await svc.repo.get_entry(hits_emb[0]["entryId"])
+    record("EMB-发布时自动注入语义向量",
+           bool(_raw_b.get("embedding")))
+    # 语义路径 RAG: top-1 相似度 1.0 → direct 模式
+    rag_emb = await svc.rag_answer(_query)
+    record("EMB-RAG语义路径direct模式",
+           rag_emb["mode"] == "direct"
+           and rag_emb["confidence"] == 1.0
+           and rag_emb["answer"] == "徂徕山泉水水质特点内容。",
+           f"实际mode={rag_emb['mode']}, conf={rag_emb['confidence']}")
+
+    # 8.9.3 embed 失败(mock 返回 None)自动回退 2-gram 路径
+    _llm_mod.provider_client.embed = lambda texts: None
+    hits_fb = await svc.search(_query, top_k=3, record_hit=False)
+    record("EMB-embed失败回退2-gram(召回A非B)",
+           len(hits_fb) >= 1 and hits_fb[0]["question"] == _qa
+           and all(h["question"] != _qb for h in hits_fb),
+           f"实际{[h['question'] for h in hits_fb]}")
+
+    # 8.9.4 rebuild 回填: 存量条目(无语义向量)批量回填
+    _llm_mod.provider_client.embed = _embed_map
+    rebuild_emb = await svc.rebuild_search_index()
+    record("EMB-rebuild回填存量语义向量",
+           rebuild_emb.get("embeddingBackfilled", 0) >= 1
+           and await svc.repo._inverted_ready() is True,
+           f"实际{rebuild_emb}")
+    # 回填后旧条目(品牌种子)持有语义向量, 对外投影剥离
+    _seed_list = [e for e in await svc.repo.list_entries(
+        status=ENTRY_STATUS_PUBLISHED, limit=200)
+        if e["question"] == "竹香酒是怎么酿造的"]
+    _seed_raw = _seed_list[0]
+    _seed_pub = await svc.get_entry(_seed_raw["id"])
+    record("EMB-回填后条目持有向量且投影剥离",
+           bool(_seed_raw.get("embedding"))
+           and "embedding" not in _seed_pub
+           and "vector" not in _seed_pub,
+           f"id={_seed_raw['id']}, "
+           f"raw字段{[k for k in _seed_raw if 'emb' in k or k == 'vector']}")
+
+    # 清理: 恢复 embed 与环境变量(后续测试/进程不受影响)
+    _llm_mod.provider_client.embed = _orig_embed
+    os.environ.pop("KNOWLEDGE_EMBEDDING", None)
+    os.environ.pop("LLM_API_KEY", None)
+
+    # ============================================================
     # 9. 统计(最终)
     # ============================================================
     stats = await svc.stats()

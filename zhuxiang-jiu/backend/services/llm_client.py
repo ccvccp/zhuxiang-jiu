@@ -1,4 +1,4 @@
-"""LLM provider 客户端(P3.3: llm 轨统一接入点, 纯标准库)
+"""LLM provider 客户端(P3.3: llm 轨统一接入点; P3.5: embedding 统一接入点)
 
 设计对齐项目惯例(attract D-11 / knowledge D-14/D-18 的 llm 轨预留):
     - 纯标准库: urllib.request POST OpenAI 兼容 /chat/completions
@@ -8,16 +8,23 @@
       由各调用方按既有惯例回退 rule 轨并打 *_llm_*_fallback_rule 日志
 
 环境变量(对齐 AI_ 前缀动态读取惯例):
-    LLM_API_KEY    必填, 缺失即 llm 轨关闭(默认 "")
+    LLM_API_KEY    必填, 缺失即 llm/embedding 轨关闭(默认 "")
     LLM_BASE_URL   OpenAI 兼容端点(默认智谱)
     LLM_MODEL      模型名(默认 glm-4-flash)
     LLM_TIMEOUT    请求超时秒(默认 15, 对齐 crawl_run)
     LLM_ENABLED    总开关, off 强制走 rule(默认 on)
 
+P3.5 embedding 语义向量(检索升级):
+    KNOWLEDGE_EMBEDDING  开关(默认 off, on 时检索走语义路径)
+    EMBEDDING_MODEL      向量模型名(默认 embedding-3, 智谱)
+
 用法:
     from services.llm_client import provider_client
     text = provider_client.chat("system prompt", "user prompt")
     if text is None:  # 未配置/失败 → 调用方回退 rule
+        ...
+    vecs = provider_client.embed(["文本1", "文本2"])
+    if vecs is None:  # 未配置/失败 → 调用方回退 2-gram
         ...
 """
 
@@ -30,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "15"))
 
+# embedding 批量请求单批上限(对齐知识库 rebuild 回填的分批粒度)
+EMBED_BATCH_SIZE = 16
+
 
 def llm_enabled() -> bool:
     """llm 轨总开关(LLM_ENABLED=off 或未配置 API key 时关闭)"""
@@ -38,8 +48,20 @@ def llm_enabled() -> bool:
     return bool(os.environ.get("LLM_API_KEY", "").strip())
 
 
+def embedding_enabled() -> bool:
+    """embedding 语义检索开关(P3.5)
+
+    KNOWLEDGE_EMBEDDING=on 且配置 API key 时开启;
+    LLM_ENABLED=off 总开关关闭时同样关闭(llm/embedding 共用 key)。
+    """
+    if not llm_enabled():
+        return False
+    return os.environ.get(
+        "KNOWLEDGE_EMBEDDING", "off").strip().lower() == "on"
+
+
 class LLMProviderClient:
-    """OpenAI 兼容 /chat/completions 客户端(urllib, 纯标准库)"""
+    """OpenAI 兼容 /chat/completions 与 /embeddings 客户端(urllib, 纯标准库)"""
 
     def chat(self, system: str, user: str,
              temperature: float = 0.3) -> str | None:
@@ -80,6 +102,53 @@ class LLMProviderClient:
         except Exception as exc:
             logger.warning("llm_chat_failed(回退rule): %s", exc)
             return None
+
+    def embed(self, texts: list[str]) -> list[list[float]] | None:
+        """批量文本向量化(P3.5), 失败/未配置返回 None(调用方回退 2-gram)
+
+        单批上限 EMBED_BATCH_SIZE, 超出自动分批串行请求;
+        任一批失败整体返回 None(部分成功无意义, 全量回退)。
+
+        Returns:
+            与入参等长的向量列表; 未配置 key、请求失败、
+            响应异常、数量不匹配均返回 None。
+        """
+        if not embedding_enabled() or not texts:
+            return None
+        api_key = os.environ["LLM_API_KEY"].strip()
+        base_url = os.environ.get(
+            "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
+        ).rstrip("/")
+        model = os.environ.get("EMBEDDING_MODEL", "embedding-3")
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), EMBED_BATCH_SIZE):
+            batch = [t for t in texts[start:start + EMBED_BATCH_SIZE] if t]
+            if not batch:
+                continue
+            payload = json.dumps({"model": model, "input": batch},
+                                 ensure_ascii=False).encode("utf-8")
+            request = urllib.request.Request(
+                f"{base_url}/embeddings", data=payload,
+                headers={"Content-Type": "application/json",
+                         "Authorization": f"Bearer {api_key}"},
+                method="POST")
+            try:
+                with urllib.request.urlopen(
+                        request, timeout=_TIMEOUT) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                data = body.get("data") or []
+                data.sort(key=lambda d: d.get("index", 0))
+                batch_vecs = [d.get("embedding") for d in data]
+                if len(batch_vecs) != len(batch) or any(
+                        not v for v in batch_vecs):
+                    logger.warning(
+                        "llm_embed_count_mismatch model=%s", model)
+                    return None
+                vectors.extend(batch_vecs)
+            except Exception as exc:
+                logger.warning("llm_embed_failed(回退2-gram): %s", exc)
+                return None
+        return vectors or None
 
 
 provider_client = LLMProviderClient()
