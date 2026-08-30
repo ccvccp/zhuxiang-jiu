@@ -191,10 +191,13 @@
 <body>
     <!-- 页头横幅 -->
     <header class="dash-banner">
-        <div class="container">
-            <h1>AI 自学习驾驶舱 · 评分器详情</h1>
-            <p id="bannerSub">v7.8 · 权重演进 / 版本历史 / 漂移监控 / 决策阻断</p>
-            <a class="back-link" href="ai-learning-dashboard.html">← 返回总览</a>
+        <div class="container" style="display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+                <h1>AI 自学习驾驶舱 · 评分器详情</h1>
+                <p id="bannerSub">v7.8 · 权重演进 / 版本历史 / 漂移监控 / 决策阻断</p>
+                <a class="back-link" href="ai-learning-dashboard.html">← 返回总览</a>
+            </div>
+            <div id="authBadge" style="display:flex;align-items:center;"></div>
         </div>
     </header>
 
@@ -331,6 +334,7 @@
         </div>
     </div>
 
+    <script src="js/auth.js"></script>
     <script>
         'use strict';
 
@@ -358,14 +362,26 @@
         function verNum(v) { var m = /^v(\d+)$/.exec(String(v || '')); return m ? +m[1] : 0; }
         function fmtTime(s) { return s ? String(s).replace('T', ' ') : '—'; }
 
+        /* P5.2 鉴权: 登录后携带 Authorization Bearer 头; 未登录保留 compat 兼容头 */
+        function apiHeaders() {
+            var h = { 'X-Role': 'admin' };
+            var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+            return auth ? Object.assign(h, auth) : h;
+        }
+
         async function fetchJson(url, opts) {
-            var init = { headers: { 'X-Role': 'admin' } };
+            var init = { headers: apiHeaders() };
             if (opts && opts.method) {
                 init.method = opts.method;
                 init.headers['Content-Type'] = 'application/json';
                 init.body = JSON.stringify(opts.body || {});
             }
             var res = await fetch(url, init);
+            // 401: 会话失效 → 跳登录页
+            if (res.status === 401) {
+                if (typeof Auth !== 'undefined') { Auth.requireLogin(); }
+                throw new Error('登录已失效, 正在跳转登录页…');
+            }
             var body = null;
             try { body = await res.json(); } catch (e) { /* 非 JSON 错误体 */ }
             if (!res.ok) {
@@ -991,6 +1007,12 @@
 
         /* ========= 初始化 ========= */
         (function init() {
+            // P5.2: strict 模式下未登录跳登录页
+            if (typeof Auth !== 'undefined' && !Auth.isLoggedIn()
+                    && !Auth.requireLogin()) return;
+            if (typeof Auth !== 'undefined') {
+                Auth.mountBadge(document.getElementById('authBadge'));
+            }
             document.getElementById('apiBase').value = state.apiBase;
             /* 权重输入实时校验(事件委托) */
             document.getElementById('adminTable').addEventListener('input', function (e) {

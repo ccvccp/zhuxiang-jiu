@@ -183,9 +183,12 @@
 <body>
     <!-- 页头横幅 -->
     <header class="dash-banner">
-        <div class="container">
-            <h1>AI 自学习驾驶舱 · 总览</h1>
-            <p>v7.7 · 全部评分器的冠军版本 / 挑战者 / 反馈量 / 漂移状态一屏尽览</p>
+        <div class="container" style="display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+                <h1>AI 自学习驾驶舱 · 总览</h1>
+                <p>v7.7 · 全部评分器的冠军版本 / 挑战者 / 反馈量 / 漂移状态一屏尽览</p>
+            </div>
+            <div id="authBadge" style="display:flex;align-items:center;"></div>
         </div>
     </header>
 
@@ -279,6 +282,7 @@
         </div>
     </div>
 
+    <script src="js/auth.js"></script>
     <script>
         'use strict';
 
@@ -309,10 +313,20 @@
         }
 
         /* ========= API ========= */
-        function apiHeaders() { return { 'X-Role': 'admin' }; }
+        /* P5.2 鉴权: 登录后携带 Authorization Bearer 头; 未登录保留 compat 兼容头 */
+        function apiHeaders() {
+            var h = { 'X-Role': 'admin' };
+            var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+            return auth ? Object.assign(h, auth) : h;
+        }
 
         async function fetchJson(url) {
             var res = await fetch(url, { headers: apiHeaders() });
+            // 401: 会话失效 → 跳登录页
+            if (res.status === 401) {
+                if (typeof Auth !== 'undefined') { Auth.requireLogin(); }
+                throw new Error('登录已失效, 正在跳转登录页…');
+            }
             var body = null;
             try { body = await res.json(); } catch (e) { /* 非 JSON 错误体 */ }
             if (!res.ok) {
@@ -534,6 +548,12 @@
 
         /* ========= 初始化 ========= */
         (function init() {
+            // P5.2: strict 模式下未登录跳登录页
+            if (typeof Auth !== 'undefined' && !Auth.isLoggedIn()
+                    && !Auth.requireLogin()) return;
+            if (typeof Auth !== 'undefined') {
+                Auth.mountBadge(document.getElementById('authBadge'));
+            }
             document.getElementById('apiBase').value = state.apiBase;
             loadOverview();
             toggleAutoRefresh();
