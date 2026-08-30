@@ -97,11 +97,16 @@ class AttractService:
     async def list_topics(self, status: str = None) -> list[dict]:
         return await self.repo.list_topics(status=status)
 
-    def generate_content_bodies(self, topic: dict) -> dict:
+    def generate_content_bodies(self, topic: dict,
+                                knowledge: dict = None) -> dict:
         """规则引擎 B 级生成(D-11: 大模型接口抽象点)
 
         同一生成入口, 后续接大模型时仅替换本方法实现——
         generate_contents / publish 不感知生成器。
+
+        P3.4 知识注入: knowledge 为知识库检索 top-1 条目时,
+        detail 槽位采用知识答案(截断 80 字), 替换硬编码文案;
+        None 时保持原行为(知识不可用回退)。
 
         Returns:
             {platform: body} 四平台变体
@@ -114,11 +119,15 @@ class AttractService:
             "disclaimer": REQUIRED_DISCLAIMER,
             "age_tip": REQUIRED_AGE_TIP,
         }
+        detail = "竹香型工艺入口绵甜、落口回甘, 聚会小酌都合适"
+        if knowledge and knowledge.get("answer"):
+            # 知识答案截断(模板槽位为短句, 过长破坏排版)
+            detail = knowledge["answer"][:80]
         fill = {
             "kw": keywords, "angle_word": angle_word,
             "scene_word": scene_word,
             "hook": f"最近在挑{keywords}的看过来！",
-            "detail": "竹香型工艺入口绵甜、落口回甘, 聚会小酌都合适",
+            "detail": detail,
             "offer": "新客下单立减, 老客复购有礼",
             "link": "https://zhuxiang-jiu.com/r/{短链}",  # 发布时替换为分发短链
             **disclaimers,
@@ -130,8 +139,32 @@ class AttractService:
             bodies[platform] = tpl["body"].format(**fill)
         return bodies
 
+    async def _fetch_topic_knowledge(self, topic: dict) -> dict | None:
+        """P3.4: 选题知识拉取(知识库消费方扩展, best-effort)
+
+        按 keywords 检索 top-1, 相似度≥0.25 才采用(对齐 RAG
+        synthesized 下限——低置信素材注入反而引入噪声);
+        record_hit=False(生成行为不计知识命中, 计数口径归 chat);
+        知识库异常返回 None(回退硬编码文案)。
+        """
+        try:
+            from services.knowledge_service import KnowledgeService
+            keywords = (topic.get("keywords")
+                        or topic.get("title") or "").strip()
+            if not keywords:
+                return None
+            hits = await KnowledgeService().search(
+                keywords, top_k=1, min_similarity=0.25,
+                record_hit=False)
+            return hits[0] if hits else None
+        except Exception:
+            return None
+
     async def generate_contents(self, topic_id: int) -> list[dict]:
         """按选题生成四平台内容变体(待审核)
+
+        P3.4: 生成前拉取选题知识注入 detail 槽位, content
+        记录 knowledgeRefs 溯源(引用的知识条目 ID)。
 
         Raises:
             KeyError: 选题不存在
@@ -139,7 +172,10 @@ class AttractService:
         topic = await self.repo.get_topic(topic_id)
         if topic is None:
             raise KeyError(f"选题不存在(topicId={topic_id})")
-        bodies = self.generate_content_bodies(topic)
+        knowledge = await self._fetch_topic_knowledge(topic)
+        bodies = self.generate_content_bodies(topic, knowledge=knowledge)
+        knowledge_refs = ([knowledge["entryId"]]
+                           if knowledge and knowledge.get("entryId") else [])
         contents = []
         for platform, body in bodies.items():
             content_id = await self.repo.next_id("content")
@@ -153,6 +189,7 @@ class AttractService:
                 "hashtags": f"#{topic.get('keywords', '竹香型白酒')}",
                 "complianceScore": score,
                 "complianceViolations": violations,
+                "knowledgeRefs": knowledge_refs,
                 "status": CONTENT_STATUS_PENDING,
                 "publishedTo": "",
                 "createdAt": _now_iso(),

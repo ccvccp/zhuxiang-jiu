@@ -1,7 +1,7 @@
-# AI智能知识库训练模块设计文档 v1.5
+# AI智能知识库训练模块设计文档 v1.6
 
-> **版本**: v1.5（P0+P1+P2+P2.5+P3.1+P3.2+P3 检索升级+P3.3 LLM 轨 已实现）
-> **状态**: 七期开发完成（P0~P2.5 + P3.1 RAG + P3.2 chat 接线 + P3 检索倒排索引 + P3.3 LLM 轨 RAG synthesize）
+> **版本**: v1.6（P0+P1+P2+P2.5+P3.1+P3.2+P3 检索升级+P3.3 LLM 轨+P3.4 消费方扩展 已实现）
+> **状态**: 八期开发完成（P0~P2.5 + P3.1 RAG + P3.2 chat 接线 + P3 检索倒排索引 + P3.3 LLM 轨 RAG synthesize + P3.4 product/attract 消费方拉取）
 > **定位**: 站点统一知识底座——通过对话教学、文档/图片/视频上传、全网抓取三源持续训练，经治理流水线（合规筛查/相似去重/人工审核/自动过审）沉淀为可检索、可进化、可分发的知识资产，供 chat/product/attract 等模块消费。
 
 ---
@@ -27,7 +27,8 @@
 | 模块 | 关系 |
 |---|---|
 | chat | 检索消费方（新库优先，旧FAQ兜底）；未命中回写缺口 |
-| attract | 复用其违禁词库做合规筛查；分发建议消费方 |
+| product | 消费方（P3.4 落地）：详情页附加 knowledgeBackground（经 distribution_suggest 拉取高质量条目） |
+| attract | 复用其违禁词库做合规筛查；消费方（P3.4 落地）：内容生成注入知识素材 + knowledgeRefs 溯源 |
 | message | 紧急缺口通知消费方（P2.5 落地） |
 
 ---
@@ -195,6 +196,8 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 |---|---|---|
 | test_knowledge_routes.py | 101 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取 + P2 全部 6 项 + P2.5 修复 7 项（hit 计数/miss 边界/增量扫描/连胜打断/通知+幂等）+ P3.1 RAG 8 项（三态/融合去重/引用/计数/llm 回退/参数校验）+ P3 检索索引 8 项（就绪判定/批量召回/retired 移出/rebuild 幂等/投影剥离/2100 条突破截断/候选收敛）+ P3.3 LLM 轨 3 项（未配置 key 回退/mock 合成路径+引用一致/请求失败回退） |
 | test_knowledge_quality_scheduler.py | 10 断言 | 单轮扫描/淘汰/保留/开关/周期下限/启动幂等/停止 |
+| test_product_routes.py | 82 断言 | 产品 7 端点全量 + P3.4 知识背景 2 项（知识库空不阻断 / 品牌种子后附加 entryId/answer/qualityScore + 步骤日志） |
+| test_attract_routes.py | 71 断言 | 引流 21 接口全量 + P3.4 知识注入 3 项（未命中回退硬编码 / detail 槽位注入 / knowledgeRefs 溯源） |
 
 ---
 
@@ -202,10 +205,10 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 | 方向 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎（详见第九章 D-18 设计） | 高 | **P3.1 核心已实施，P3.2 chat 接线待实施** |
+| **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎（详见第九章 D-18 设计） | 高 | **P3.1 + P3.2 已实施** |
 | **检索升级** | **倒排索引（已实施）**：token→entry_id（Redis Set `zhuxiang:knowledge:inv:{token}`），仅加载与 query 有共同 token 的候选条目，替代全量扫描——行为无损（余弦>0 必有共同 token），突破 SEARCH_SCAN_LIMIT=2000 截断；rebuild 端点支持存量迁移；Embedding 语义向量（provider 双轨）后续可选 | 高 | **倒排索引已实施**，Embedding 待排期 |
 | **LLM 轨落地** | **RAG synthesize 已实施（P3.3）**：`services/llm_client.py`（urllib 纯标准库调 OpenAI 兼容 `/chat/completions`，智谱 GLM/DeepSeek/通义兼容），`rag_answer(provider="llm")` synthesized 分支以 top-k 为上下文大模型合成（幻觉治理：prompt 限定仅依据资料+引用标注）；未配置 key/失败自动回退 rule。图片视觉理解、视频抽帧+ASR、抓取智能清洗待排期 | 中 | **RAG synthesize ✅**，多模态/抓取 LLM 待排期 |
-| **消费方扩展** | product/attract 实际拉取链路（当前仅有 distribution_suggest 建议无消费） | 中 | 待排期 |
+| **消费方扩展** | **已实施（P3.4）**：product 详情页经 `distribution_suggest("product")` 拉取高质量知识附加 `knowledgeBackground` 字段（营销文案与品牌知识文本重叠低，按质量分拉取比按产品名检索更贴合语义）；attract 内容生成按选题 keywords 检索知识（sim≥0.25）注入 detail 槽位 + `knowledgeRefs` 溯源，未命中回退硬编码文案；均 best-effort（知识库异常不阻断主流程） | 中 | **已实施** |
 
 ---
 
@@ -221,6 +224,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | P3.2 chat 接线 | 2026-08-30 | chat 消费 rag_answer（RAG 优先/旧 FAQ 兜底），回复透出 citations + ragMode，aiConfidence 动态化（RAG 相似度/legacy 固定 0.85） |
 | P3 检索升级 | 2026-08-30 | 倒排索引（token→entry_id，`inv:{token}` Set + meta 计数），save_entry 同步/索引就绪判定/存量回退全量/rebuild 端点（34 端点），突破 2000 条截断 |
 | P3.3 LLM 轨 | 2026-08-30 | services/llm_client.py（urllib OpenAI 兼容端点，LLM_API_KEY/BASE_URL/MODEL/TIMEOUT/ENABLED 环境变量），RAG synthesized 分支大模型合成 + 幻觉治理 prompt + 自动回退 rule |
+| P3.4 消费方扩展 | 2026-08-30 | product 详情附加 knowledgeBackground（distribution_suggest 拉取，best-effort）；attract 生成链路知识注入 detail 槽位（sim≥0.25，截断 80 字）+ content 记录 knowledgeRefs 溯源（未命中回退硬编码，record_hit=False 计数口径归 chat） |
 
 ---
 

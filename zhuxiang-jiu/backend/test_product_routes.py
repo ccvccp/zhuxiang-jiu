@@ -514,6 +514,35 @@ class TestProductDetail:
         assert "详情" in steps
         assert "关联推荐" in steps
 
+    # ---- P3.4: 知识背景(知识库消费方拉取) ----
+
+    def test_detail_knowledge_background_empty_by_default(self):
+        """P3.4: 知识库为空 → knowledgeBackground=[] 不阻断详情"""
+        resp = client.get(f"/api/product/{PID_CLASSIC_42}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["knowledgeBackground"] == []
+
+    def test_detail_knowledge_background_with_brand_seed(self):
+        """P3.4: 品牌种子播种后详情附加知识背景(entryId/answer/qualityScore)"""
+        resp = client.post("/api/knowledge/seed-brand",
+                           headers={"X-Role": "admin"})
+        assert resp.status_code == 200
+        resp = client.get(f"/api/product/{PID_CLASSIC_42}")
+        assert resp.status_code == 200
+        kb = resp.json()["knowledgeBackground"]
+        assert len(kb) >= 1
+        for item in kb:
+            assert "entryId" in item
+            assert "question" in item
+            assert "answer" in item
+            # 品牌类知识对 product 消费方域外降权(×0.5)仍入选
+            assert item["qualityScore"] > 0
+        # 知识背景步骤日志(有附加时)
+        steps = [log["step"] for log in resp.json()["logs"]]
+        assert "知识背景" in steps
+
 
 # ============================================================
 #  评价列表: GET /api/product/{product_id}/reviews

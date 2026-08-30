@@ -226,6 +226,9 @@ class ProductService:
     async def get_detail(self, product_id: str) -> dict:
         """产品详情(含关联推荐 4 条)
 
+        P3.4 知识背景: 附加 knowledgeBackground 字段(知识库
+        消费方拉取, best-effort——知识库不可用不阻断详情)。
+
         Raises:
             KeyError: 产品不存在
         """
@@ -234,17 +237,41 @@ class ProductService:
             raise KeyError(f"产品 {product_id} 不存在")
 
         related = await self.product_repo.get_related(product_id, limit=4)
+        knowledge_background = await self._fetch_knowledge_background(product)
         return {
             "success": True,
             "product": self._to_detail(product),
             "related": [self._to_summary(p) for p in related],
+            "knowledgeBackground": knowledge_background,
             "logs": [
                 {"step": "详情", "level": "INFO",
                  "msg": f"产品 {product_id}: {product['name']}"},
                 {"step": "关联推荐", "level": "INFO",
                  "msg": f"返回 {len(related)} 款关联产品"},
-            ],
+            ] + ([{"step": "知识背景", "level": "INFO",
+                   "msg": f"附加 {len(knowledge_background)} 条知识背景"}]
+                 if knowledge_background else []),
         }
+
+    async def _fetch_knowledge_background(self, product: dict) -> list[dict]:
+        """P3.4: 产品知识背景拉取(知识库消费方扩展)
+
+        经 distribution_suggest(consumer="product") 拉取高质量
+        条目(质量分≥60, product/faq 主题加权)——产品元数据为
+        营销文案, 与品牌知识(工艺/原料)文本重叠低, 按质量分
+        拉取比按产品名检索更贴合"详情页知识背景"语义;
+        知识库异常返回空列表(best-effort 不阻断详情)。
+        """
+        try:
+            from services.knowledge_service import KnowledgeService
+            suggests = await KnowledgeService().distribution_suggest(
+                "product", limit=3)
+            return [{"entryId": s["entryId"], "question": s["question"],
+                     "answer": s["answer"], "category": s["category"],
+                     "qualityScore": s["qualityScore"]}
+                    for s in suggests]
+        except Exception:
+            return []
 
     # ============================================================
     # 评价

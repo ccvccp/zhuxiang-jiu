@@ -122,6 +122,28 @@ class TestContentFactory:
                    for c in contents),
                f"分数{[c['complianceScore'] for c in contents]}")
 
+        # P3.4: 知识注入 + 溯源(选题 keywords 未命中知识库 →
+        # 回退硬编码文案, knowledgeRefs 为空, 生成不阻断)
+        record("生成-知识未命中回退硬编码",
+               all(c["knowledgeRefs"] == [] for c in contents)
+               and all("竹香型工艺入口绵甜" in c["body"] for c in contents))
+
+        # P3.4: 品牌种子播种后, 选题 keywords 命中 → detail 槽位
+        # 注入知识答案 + knowledgeRefs 溯源
+        from services.knowledge_service import KnowledgeService
+        await KnowledgeService().seed_brand_knowledge()
+        topic_hit = await svc.create_topic(
+            title="竹香酒工艺推广", angle="culture",
+            keywords="竹香酒是怎么酿造的")
+        contents_hit = await svc.generate_contents(topic_hit["topicId"])
+        record("生成-知识注入detail槽位",
+               all("竹笋" in c["body"] for c in contents_hit),
+               f"body片段: {contents_hit[0]['body'][:60]}")
+        record("生成-知识Refs溯源",
+               all(c["knowledgeRefs"] and c["knowledgeRefs"][0] > 0
+                   for c in contents_hit),
+               f"refs: {contents_hit[0]['knowledgeRefs']}")
+
         # 违规文案不可通过审核
         content = contents[0]
         content["body"] = "全网最低价! 无警示文案"
