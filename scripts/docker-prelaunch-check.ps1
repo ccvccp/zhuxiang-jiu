@@ -81,8 +81,10 @@ if ($LASTEXITCODE -ne 0) {
 
 $wslcfg = Join-Path $env:USERPROFILE ".wslconfig"
 if (Test-Path $wslcfg) {
-    if ((Get-Content $wslcfg -Raw) -match "memory\s*=\s*8GB") { Ok "WSL2 内存配置 8GB" }
-    else { Bad ".wslconfig 存在但 memory 非 8GB" }
+    # 2026-08-30 实测调整: 物理内存 16GB 但 Windows+IDE 常驻约 9GB(可用仅 7GB),
+    # 8GB 上限时 vmmem 启动即内存不足, 降为 6GB(容器限额 1g+构建峰值 400MB 依然宽裕)
+    if ((Get-Content $wslcfg -Raw) -match "memory\s*=\s*([4-8])GB") { Ok "WSL2 内存配置 $($Matches[1])GB" }
+    else { Bad ".wslconfig 存在但 memory 配置缺失或不在 4-8GB 范围" }
 } else { Bad "未找到 $wslcfg" }
 
 # ---------- 3.2 compose 配置校验 ----------
