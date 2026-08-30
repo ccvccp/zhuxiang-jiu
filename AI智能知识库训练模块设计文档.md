@@ -243,6 +243,10 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | 抓取智能清洗 | 2026-08-30 | crawl_run provider 双轨（llm 轨在 extract_html_text 正则去标签基础上 LLM 语义级去噪提炼正文，输入截断 20000 字控成本，"无正文"哨兵出口；失败回退 rule）；KNOWLEDGE_CRAWL_LLM 开关（默认 off）；主题域过滤/医药加严/分块入库治理流程两轨完全一致；专用 CrawlRunRequest 模型；真实智谱 glm-4-flash 验证：导航/广告/版权噪声全去除、正文完整保留 |
 | P3.6 视频抽帧+ASR | 2026-08-30 | llm_client.transcribe()（GLM-ASR 手工 multipart 纯标准库，ASR_MODEL 默认 glm-asr-2512，text/segments 双响应兼容）；_video_local_analyze 本地回退链：视频下载（≤50MB）→ ffmpeg 抽帧（每 10s，上限 6 帧）+ 音轨 30s 分段 → 逐帧 GLM-4V + 逐段 ASR → "画面/语音"时间轴；无 ffmpeg/下载失败/空结果优雅降级 None→rule 轨；真实验证：Windows TTS 生成中文语音 → GLM-ASR 转写正确（"竹香酒采用竹笋竹茎竹叶为原料利用专有菌群古法酿制"） |
 | P3.7 Rerank 重排 | 2026-08-30 | llm_client.rerank()（智谱 /rerank 端点，query+documents 相关性打分，候选 ≤128 条/单条 4096 字符）；KNOWLEDGE_RERANK 开关（默认 off）+ RERANK_MODEL；search/rag_answer 召回池放大 RERANK_POOL_K=10 重排后取 top_k，相似度替换 relevance_score；rerank 关/失败保持原序零行为变化；真实智谱验证：相关条目（1.0000）显著高于无关条目（0.9966） |
+| P4.1 部署加固 | 2026-08-30 | docker-compose backend 补齐 LLM 全量环境变量（密钥经 env_file .env 注入）+ .env.example 模板 + llm_client.log_feature_status() 启动开关状态日志——容器化静默降级风险消除 |
+| P4.2 监控与缓存 | 2026-08-30 | core/metrics.py 纯标准库 Counter/Histogram + HTTP/LLM 五方法/RAG 缓存命中埋点 + GET /metrics Prometheus 文本格式；RAG 双缓存（查询向量 5min TTL + 结果 60s TTL 条目变更失效）；修复直方图双重累计虚高 |
+| P4.3 前端接线 | 2026-08-30 | knowledge-dashboard.html 运营台 + knowledge-sources.html 接入台（接 34 端点）+ js/chat-widget.js 客服聊天窗（透出 ragMode/aiConfidence/citations）；CORS 白名单补 null origin + X-Admin-Id 头 |
+| P4.4 供应链补齐 | 2026-08-30 | tx_utils 事务基础设施 + supply_chain_repository 双模式 18 域仓库；inventory 多行事务（流水/预警/补偿回滚）；checkout 9 阶段事务（发货方路由/券核销/积分双向/分润+5% 服务费，失败逆序补偿）；warehouse 10 端点全量（含新增调拨/损耗/越库/安全库存/温湿度）；shipping claim 富契约 + release 状态机 + 服务费计提；并发不变量测试（不超卖/库存守恒/事务零污染/一区一代理） |
 
 ---
 
