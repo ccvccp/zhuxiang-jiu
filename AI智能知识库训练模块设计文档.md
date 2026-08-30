@@ -335,11 +335,12 @@ chat 的转人工判定（unresolvedCount）逻辑不变。
 |---|---|---|
 | **P3.1 RAG 核心** | rag_answer（分级路由+rule 轨融合+计数联动）+ /ask 端点 + 测试（direct/synthesized/unsolved 三态、去重、引用、计数、llm 轨回退 rule） | **✅ 已实施** |
 | **P3.2 chat 接线** | chat_service 消费 rag_answer，回复带 citations + 动态置信度，chat 测试回归 | **✅ 已实施** |
-| **P3.3 LLM 轨（预留）** | provider="llm" 接入大模型 synthesize，引用携带与幻觉治理 | 接入时实施 |
+| **P3.3 LLM 轨** | provider="llm" 接入大模型 synthesize，引用携带与幻觉治理 + chat 链路 KNOWLEDGE_CHAT_LLM 开关联动 | **✅ 已实施** |
+| **P3.4 消费方扩展** | product 详情 knowledgeBackground + attract 生成链路知识注入与 knowledgeRefs 溯源，product/attract 测试回归 | **✅ 已实施** |
 
 ### 9.8 边界与约束
 
-- **检索瓶颈不变**: RAG 仍基于现有 2-gram 全量扫描（2000 条上限），检索升级（倒排/BM25/Embedding）为 P3 另一主线，两线正交可并行
+- **检索瓶颈已突破**: P3 倒排索引已实施（token→entry_id 候选召回，突破 2000 条全量扫描截断），Embedding 语义向量为后续可选升级，与 RAG 问答层两线正交可并行
 - **不引入多轮对话**: 会话上下文管理属 chat 模块职责（其设计文档第三期），本期单轮问答
 - **brand_taboo 合规兜底**: 融合答案拼接到条目答案原文，条目入库时已过品牌禁忌，RAG 层不重复校验（无新文本生成，rule 轨无幻觉；llm 轨接入时需增加输出侧校验）
 - **缺口幂等**: ask 端点 unsolved 时不直接 record_gap（chat 链路已记录），避免同问题双计数
