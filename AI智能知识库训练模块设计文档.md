@@ -225,6 +225,18 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 ---
 
+## 7.6 P5 规划（收尾闭环阶段，2026-08-30 与用户对齐）
+
+> **背景**：P4 收官后盘点发现三个遗留断点（均经代码级核实）：① 前端供应链四件套 live 模式残缺——agent-shipping 前端 `release`/`listClaims`/`getServiceFeeSettlement` 三方法仍走 mock（后端已有 release/claims 端点未接、settlement 端点缺失、`liveClaim` 为死代码）、warehouse 三个 GET 端点 H5 下 fetch 不拼 query 参数全部落默认值、inventory `getStock` 无 live 分支；② 全站无登录前端页面——`AUTH_MODE=strict` 下所有管理页 401/403 且无页面可获取 JWT，三个管理页页脚自述此断点；③ Redis 生产模式数据底座缺口——seed_redis.py 未覆盖 P4.4 新增的 19 个 `zhuxiang:sc:*` 域（Redis 模式下供应链初始数据为空），test_redis_integration.py 不覆盖 supply_chain_repository。三项全选，按依赖顺序实施：P5.1 前端 live 补全 → P5.2 统一鉴权登录 → P5.3 Redis 生产补齐。
+
+| 方向 | 内容 | 优先级 | 状态 |
+|---|---|---|---|
+| **P5.1 前端 live 补全** | 前端四件套 mock/live 双模式真正完整：① agent-shipping 前端补 live 分支——`release` 接后端 `POST /api/agent-shipping/release`、`listClaims` 接 `GET /api/agent-shipping/claims`、后端新增 `GET /api/agent-shipping/settlement` 端点（按 agentId 聚合 service_fees 的待发放/已发放统计）供 `getServiceFeeSettlement` 接入，清理 `liveClaim` 死代码改为 claim 的 live 实现；② 修复 env-adapter.js H5 fetch GET 分支丢参——data 序列化为 query string 拼接 url（对齐小程序分支行为），warehouse 三个 GET 端点（forecast/safety-stock/env-monitor）live 模式恢复传参能力；③ inventory `getStock` 补 live 分支 + 后端新增 `GET /api/inventory/stock` 查询端点；④ 四服务 live 模式浏览器端到端验证（setMode('live') 后全链路走后端） | 高 | 待实施 |
+| **P5.2 统一鉴权登录** | 补上鉴权最后一块拼图，`AUTH_MODE=strict` 下全站可用：① 新增登录前端页面（login.html，用户登录接 `POST /api/auth/login`、管理员登录接 `POST /api/admin/login`），JWT Token 存 localStorage + 统一 Token 管理工具（js/auth.js：getToken/isLoggedIn/logout/带过期检查）；② 三个知识库管理页 + AI 学习三页改造请求头——登录后携带 `Authorization: Bearer <token>`，未登录跳转登录页（compat 模式保持 X-Role 兼容头向后兼容）；③ 登录态 UI 透出（管理页头部显示当前用户 + 退出登录）；④ strict 模式端到端验证（登录→携 token 访问管理端点→退出后 401 跳转） | 高 | 待实施 |
+| **P5.3 Redis 生产补齐** | 生产化数据底座闭环：① seed_redis.py 补齐 P4.4 新增的 19 个供应链数据域灌注（checkout_coupons/checkout_points 种子数据 + supply_warehouses/warehouse_locations/warehouse_stock 主数据 + 各 List 域空结构初始化），对齐 store.py `_build_initial_supply_chain()` 内存初始态；② test_redis_integration.py 补 supply_chain_repository 集成测试（List/Hash/全量域三组原语的 Redis 读写往返 + 服务层四件套在 Redis 模式下的关键路径回归）；③ Docker 容器内真实联调验证（docker compose 起后端 + seed → 前端 live 模式全链路，P4.1 时因 Docker Desktop 未运行延后的容器验证一并补上） | 中 | 待实施 |
+
+---
+
 ## 八、迭代历史
 
 | 阶段 | 日期 | 内容 |
