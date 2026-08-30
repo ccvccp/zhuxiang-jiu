@@ -99,9 +99,8 @@ def test_llm_timer_ok_and_error():
     from core.metrics import llm_calls_total
     with llm_timer("chat"):
         pass
-    with pytest.raises(RuntimeError):
-        with llm_timer("embed"):
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError), llm_timer("embed"):
+        raise RuntimeError("boom")
     snap = llm_calls_total.snapshot()
     assert snap.get(("chat", "ok")) == 1
     assert snap.get(("embed", "error")) == 1

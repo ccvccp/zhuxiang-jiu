@@ -293,10 +293,9 @@ class LLMProviderClient:
                      "Authorization": f"Bearer {api_key}"},
             method="POST")
         try:
-            with llm_timer("vision"):
-                with urllib.request.urlopen(
-                        request, timeout=_VISION_TIMEOUT) as resp:
-                    body = json.loads(resp.read().decode("utf-8"))
+            with llm_timer("vision"), urllib.request.urlopen(
+                    request, timeout=_VISION_TIMEOUT) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
             content = (body.get("choices") or [{}])[0].get(
                 "message", {}).get("content")
             if not content or not str(content).strip():
@@ -360,10 +359,9 @@ class LLMProviderClient:
                      "Authorization": f"Bearer {api_key}"},
             method="POST")
         try:
-            with llm_timer("transcribe"):
-                with urllib.request.urlopen(
-                        request, timeout=_TIMEOUT) as resp:
-                    result = json.loads(resp.read().decode("utf-8"))
+            with llm_timer("transcribe"), urllib.request.urlopen(
+                    request, timeout=_TIMEOUT) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
             logger.warning("llm_asr_failed(跳过): %s", exc)
             return None
@@ -408,10 +406,9 @@ class LLMProviderClient:
                      "Authorization": f"Bearer {api_key}"},
             method="POST")
         try:
-            with llm_timer("rerank"):
-                with urllib.request.urlopen(
-                        request, timeout=_TIMEOUT) as resp:
-                    body = json.loads(resp.read().decode("utf-8"))
+            with llm_timer("rerank"), urllib.request.urlopen(
+                    request, timeout=_TIMEOUT) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
             logger.warning("llm_rerank_failed(保持原序): %s", exc)
             return None
