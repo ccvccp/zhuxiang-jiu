@@ -933,10 +933,15 @@ class TestBackendHelpers:
 async def sc_seeded_redis(redis_client):
     """供应链数据域 seed fixture(清空 → 灌注供应链域)"""
     sys.path.insert(0, str(BACKEND_DIR / "scripts"))
-    from seed_redis import clear_existing_data, seed_supply_chain
+    from seed_redis import (
+        clear_existing_data, seed_supply_chain, seed_agents, seed_inventory,
+    )
 
     await clear_existing_data(redis_client)
     await seed_supply_chain(redis_client)
+    # 服务层路径依赖普通域: inventory 扣减/checkout 库存 + shipping 认领代理商
+    await seed_agents(redis_client)
+    await seed_inventory(redis_client)
     yield redis_client
 
 
