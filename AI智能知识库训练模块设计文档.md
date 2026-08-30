@@ -342,6 +342,7 @@ chat 的转人工判定（unresolvedCount）逻辑不变。
 | **P3.3 LLM 轨** | provider="llm" 接入大模型 synthesize，引用携带与幻觉治理 + chat 链路 KNOWLEDGE_CHAT_LLM 开关联动 | **✅ 已实施** |
 | **P3.4 消费方扩展** | product 详情 knowledgeBackground + attract 生成链路知识注入与 knowledgeRefs 溯源，product/attract 测试回归 | **✅ 已实施** |
 | **P3.5 Embedding 语义向量** | llm_client.embed 批量向量化 + 入库注入/存量回填 + search/rag_answer 语义路径（回退 2-gram），真实智谱端到端验证 | **✅ 已实施** |
+| **P3.6 视频抽帧+ASR 本地化** | llm_client.transcribe（GLM-ASR 手工 multipart）+ _video_local_analyze 本地回退链（ffmpeg 抽帧+逐帧 GLM-4V+音轨分段 ASR），ingest_video 三级回退链，无 ffmpeg 优雅降级，真实 TTS→ASR 端到端验证 | **✅ 已实施** |
 
 ### 9.8 边界与约束
 
