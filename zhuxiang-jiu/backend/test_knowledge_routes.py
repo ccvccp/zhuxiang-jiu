@@ -716,9 +716,9 @@ async def main():
                    "竹雕技法", "竹胶板材", "竹醋液用途", "竹炭吸附",
                    "竹荪种植", "竹鼠养殖争议", "竹筷卫生标准", "竹地板保养",
                    "竹盐制作", "竹筒饭做法")
-    for i, topic in enumerate(_idx_topics):
-        await _publish(svc, f"索引测试: {topic}的介绍",
-                       f"{topic}相关内容, 属于竹文化知识领域。",
+    for _topic in _idx_topics:
+        await _publish(svc, f"索引测试: {_topic}的介绍",
+                       f"{_topic}相关内容, 属于竹文化知识领域。",
                        category="faq")
     # 任取一个 query: 索引召回结果应命中目标条目
     hits_idx = await svc.search(f"索引测试: {_idx_topics[15]}的介绍",
