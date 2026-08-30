@@ -70,6 +70,22 @@ Push-Location $Root
 
 # ---------- 3.1 Docker daemon + WSL2 配置 ----------
 Step "3.1 Docker Desktop / WSL2 内存配置"
+
+# 宿主机内存预检: Docker Desktop 启动弹窗 "not enough memory" 的根因是
+# 可用物理内存不足(需容纳: Docker 自身开销 ~0.5GB + WSL 虚拟机 4GB + Windows 余量 ~2GB)
+$osMem = Get-CimInstance Win32_OperatingSystem
+$freeGB = [math]::Round($osMem.FreePhysicalMemory / 1MB, 2)
+Write-Host "  当前可用物理内存: $freeGB GB"
+if ($freeGB -lt 5.5) {
+    Write-Host "  [警告] 可用内存不足 5.5GB, Docker Desktop 启动大概率报 not enough memory!" -ForegroundColor Yellow
+    Write-Host "  内存占用 TOP5(关闭非必要程序后重跑):" -ForegroundColor Yellow
+    Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 5 |
+        ForEach-Object { Write-Host ("    {0,-28} {1,6} MB" -f $_.Name, [math]::Round($_.WorkingSet64/1MB)) -ForegroundColor Yellow }
+    Write-Host "  提示: 关闭浏览器多余标签页/其他 IDE/聊天工具通常可释放 1-2GB" -ForegroundColor Yellow
+} else {
+    Ok "宿主机可用内存 $freeGB GB(≥5.5GB, 满足启动条件)"
+}
+
 docker info *> $null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  Docker daemon 未运行, 尝试启动 Docker Desktop(WSL2 引擎初始化约 1-3 分钟)..."
