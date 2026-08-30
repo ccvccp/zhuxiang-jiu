@@ -22,6 +22,9 @@ P3.5 embedding 语义向量(检索升级):
     KNOWLEDGE_MEDIA_LLM  开关(默认 off, on 时媒体入库走视觉理解)
     VISION_MODEL         视觉模型名(默认 glm-4v-flash, 智谱)
 
+抓取智能清洗(网页正文提炼):
+    KNOWLEDGE_CRAWL_LLM  开关(默认 off, on 时 crawl/run 走 LLM 清洗)
+
 用法:
     from services.llm_client import provider_client
     text = provider_client.chat("system prompt", "user prompt")
@@ -80,6 +83,18 @@ def media_llm_enabled() -> bool:
         return False
     return os.environ.get(
         "KNOWLEDGE_MEDIA_LLM", "off").strip().lower() == "on"
+
+
+def crawl_llm_enabled() -> bool:
+    """抓取智能清洗开关(crawl/run llm 轨)
+
+    KNOWLEDGE_CRAWL_LLM=on 且配置 API key 时开启;
+    LLM_ENABLED=off 总开关关闭时同样关闭。
+    """
+    if not llm_enabled():
+        return False
+    return os.environ.get(
+        "KNOWLEDGE_CRAWL_LLM", "off").strip().lower() == "on"
 
 
 class LLMProviderClient:

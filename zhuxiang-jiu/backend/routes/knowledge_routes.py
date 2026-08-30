@@ -175,6 +175,11 @@ class CrawlIngestRequest(PydBaseModel):
     content: str = Field(..., min_length=1, description="网页正文(粘贴)")
 
 
+class CrawlRunRequest(PydBaseModel):
+    sourceId: int = Field(..., description="种子源ID")
+    provider: str = Field("rule", description="清洗轨道: rule(正则提取正文)/llm(智能清洗, 失败回退 rule)")
+
+
 # ============================================================
 # 条目(5)
 # ============================================================
@@ -649,15 +654,15 @@ async def crawl_ingest(
 
 @router.post("/api/knowledge/crawl/run", tags=["AI智能知识库训练模块"])
 async def crawl_run(
-    data: CrawlIngestRequest,
+    data: CrawlRunRequest,
     x_role: str = Header(None, alias="X-Role"),
 ):
-    """执行抓取(rule 轨: urllib 拉取 URL→提取正文→接入流程; llm 轨 P2)"""
+    """执行抓取(provider 双轨: rule 正则提取正文; llm 智能清洗去噪, 失败回退 rule)"""
     _require_admin(x_role)
     try:
         return {"code": 0, "msg": "ok",
                 "data": await _service.crawl_run(
-                    source_id=data.sourceId)}
+                    source_id=data.sourceId, provider=data.provider)}
     except Exception as exc:
         _handle(exc)
 

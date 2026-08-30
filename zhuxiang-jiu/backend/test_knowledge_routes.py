@@ -531,6 +531,88 @@ async def main():
            any(s["id"] == src["id"] and s["ingestedTotal"] >= 2
                and s["rejectedTotal"] >= 2 for s in sources))
 
+    # 6.4.1 crawl/run 智能清洗(provider 双轨; mock 拉取与 LLM)
+    from unittest import mock as _mock
+
+    # 构造噪声网页: 导航/广告/版权 + 域内正文
+    _raw_html = (
+        "<html><body>首页 资讯 百科 联系我们 登录 注册<br>"
+        "广告: 高端白酒清仓特惠, 点击立抢!<br>"
+        "版权所有 © 2026 某资讯站 沪ICP备xxx号<br>"
+        "<p>竹文化专题: 竹在中国传统文化中象征气节与风骨, "
+        "历代文人以竹明志, 苏东坡云宁可食无肉不可居无竹。</p>"
+        "</body></html>")
+
+    def _fake_urlopen(req, timeout=15):
+        m = _mock.MagicMock()
+        m.read.return_value = _raw_html.encode("utf-8")
+        m.__enter__.return_value = m
+        return m
+
+    import services.llm_client as _llm_crawl_mod
+    _orig_crawl_chat = _llm_crawl_mod.provider_client.chat
+    _chat_calls = {"n": 0}
+
+    # 1) rule 轨: 正则提取(原行为), 不调 chat
+    os.environ.pop("KNOWLEDGE_CRAWL_LLM", None)
+    _llm_crawl_mod.provider_client.chat = (
+        lambda s, u, temperature=0.3: _chat_calls.__setitem__(
+            "n", _chat_calls["n"] + 1) or "不应被调用")
+    with _mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        run_rule = await svc.crawl_run(src["id"], provider="rule")
+    record("抓取-run-rule轨正则提取(不调chat)",
+           _chat_calls["n"] == 0 and run_rule["provider"] == "rule"
+           and run_rule["ingested"] >= 1,
+           f"calls={_chat_calls['n']}, 实际{run_rule.get('provider')}")
+
+    # 2) llm 轨 + 开关关: 回退 rule(不调 chat)
+    with _mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        run_off = await svc.crawl_run(src["id"], provider="llm")
+    record("抓取-run-开关默认off回退rule",
+           _chat_calls["n"] == 0 and run_off["provider"] == "rule",
+           f"calls={_chat_calls['n']}")
+
+    # 3) llm 轨 + 开关开 + mock 清洗: 噪声去除, 正文入库
+    os.environ["LLM_API_KEY"] = "test-key"
+    os.environ["KNOWLEDGE_CRAWL_LLM"] = "on"
+    _llm_crawl_mod.provider_client.chat = (
+        lambda s, u, temperature=0.3:
+        "竹文化专题: 竹在中国传统文化中象征气节与风骨, "
+        "历代文人以竹明志, 苏东坡云宁可食无肉不可居无竹。")
+    with _mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        run_llm = await svc.crawl_run(src["id"], provider="llm")
+    _clean_answer = (await svc.repo.get_entry(
+        run_llm["entryIds"][0]))["answer"]
+    record("抓取-run-llm轨智能清洗去噪",
+           run_llm["provider"] == "llm"
+           and run_llm["ingested"] >= 1
+           and "气节" in _clean_answer
+           and "广告" not in _clean_answer
+           and "版权所有" not in _clean_answer
+           and "登录" not in _clean_answer,
+           f"answer={_clean_answer[:60]}")
+
+    # 4) llm 轨 + chat 失败: 回退 rule 正则提取(内容与步骤1相同被去重)
+    _llm_crawl_mod.provider_client.chat = (
+        lambda s, u, temperature=0.3: None)
+    with _mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        run_fb = await svc.crawl_run(src["id"], provider="llm")
+    record("抓取-run-清洗失败回退rule",
+           run_fb["provider"] == "rule" and run_fb["totalChunks"] >= 1,
+           f"实际{run_fb.get('provider')}, chunks={run_fb.get('totalChunks')}")
+
+    # 5) 非法 provider 拒绝
+    try:
+        await svc.crawl_run(src["id"], provider="gpt")
+        record("抓取-run-非法provider拒绝", False, "未抛出异常")
+    except ValueError:
+        record("抓取-run-非法provider拒绝", True)
+
+    # 清理
+    _llm_crawl_mod.provider_client.chat = _orig_crawl_chat
+    os.environ.pop("KNOWLEDGE_CRAWL_LLM", None)
+    os.environ.pop("LLM_API_KEY", None)
+
     # ============================================================
     # 8. P2 智能进化: 质量/缺口摘要/自动过审/分发
     # ============================================================

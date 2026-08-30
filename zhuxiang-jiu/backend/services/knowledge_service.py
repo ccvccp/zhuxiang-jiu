@@ -1346,14 +1346,53 @@ class KnowledgeService:
                 "totalChunks": len(chunks), "ingested": ingested,
                 "skipped": skipped, "entryIds": entry_ids}
 
-    async def crawl_run(self, source_id: int) -> dict:
-        """执行抓取(provider=rule): urllib 拉取 URL → 提取正文 →
-        走 crawl_ingest 流程。llm 轨 P2 接入。
+    # llm 轨抓取清洗 prompt: 去噪保真(不改写事实)
+    _CRAWL_CLEAN_PROMPT = (
+        "你是网页正文提取助手。给定网页粗文本, 请提取其中的实质"
+        "正文内容(知识/资讯/介绍性段落), 去除导航菜单/广告/版权"
+        "声明/相关推荐/页脚等噪声。正文可能很短甚至只有一两句, "
+        "只要含实质内容就必须输出, 不得因短而放弃; 保留原始事实"
+        "表述, 不改写、不总结、不编造。仅当粗文本完全是噪声"
+        "(没有任何实质内容)时, 才只输出: 无正文")
+
+    # llm 轨清洗输入截断(控成本, 超长网页截前段)
+    _CRAWL_CLEAN_MAX_INPUT = 20000
+
+    @classmethod
+    def _crawl_llm_clean(cls, text: str) -> str | None:
+        """llm 轨抓取内容智能清洗, 失败返回 None(回退 rule 正则提取)
+
+        输入为 extract_html_text 已去标签的粗文本——LLM 负责
+        rule 轨做不到的语义级去噪(识别导航/广告/推荐位残留);
+        输入超长截断前段控成本。
+        """
+        from services.llm_client import (
+            crawl_llm_enabled, provider_client)
+        if not crawl_llm_enabled() or not (text or "").strip():
+            return None
+        user = text[:cls._CRAWL_CLEAN_MAX_INPUT]
+        out = provider_client.chat(cls._CRAWL_CLEAN_PROMPT, user)
+        if not out or out.strip().startswith("无正文"):
+            return None
+        return out.strip()
+
+    async def crawl_run(self, source_id: int,
+                        provider: str = "rule") -> dict:
+        """执行抓取(provider 双轨): urllib 拉取 URL → 提取正文 →
+        走 crawl_ingest 流程。
+
+        rule 轨: extract_html_text 正则去标签(原行为);
+        llm 轨: KNOWLEDGE_CRAWL_LLM=on 时在正则提取基础上
+        经 LLM 智能清洗(去导航/广告/噪声残留, 提炼连贯正文),
+        失败自动回退 rule 轨; 主题域过滤/医药加严/分块入库
+        治理流程对两条轨道完全一致。
 
         Raises:
             KeyError: 种子源不存在
-            ValueError: 拉取失败/内容不合规
+            ValueError: 拉取失败/内容不合规/provider 非法
         """
+        if provider not in ("rule", "llm"):
+            raise ValueError(f"非法 provider({provider}), 须为 rule/llm")
         source = await self.repo.get_crawl_source(source_id)
         if source is None:
             raise KeyError(f"种子源不存在(id={source_id})")
@@ -1369,7 +1408,17 @@ class KnowledgeService:
                 from None
         title = source["name"]
         content = extract_html_text(raw)
-        return await self.crawl_ingest(source_id, title, content)
+        effective = provider
+        if provider == "llm":
+            cleaned = self._crawl_llm_clean(content)
+            if cleaned:
+                content = cleaned
+            else:
+                effective = "rule"   # 清洗失败 → 回退正则提取
+                logger.info("knowledge_crawl_llm_fallback_rule_clean")
+        result = await self.crawl_ingest(source_id, title, content)
+        result["provider"] = effective
+        return result
 
     # ============================================================
     # 7. P2 智能进化: 质量淘汰 / 缺口摘要 / 渐进信任 / 分发建议
