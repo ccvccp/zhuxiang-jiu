@@ -484,7 +484,7 @@ class ChatService:
         """
         try:
             matches = await self.knowledge_svc.search(
-                user_content, limit=1, record_hit=True)
+                user_content, top_k=1, record_hit=True)
             if matches:
                 m = matches[0]
                 return {"id": m["entryId"], "answer": m["answer"]}

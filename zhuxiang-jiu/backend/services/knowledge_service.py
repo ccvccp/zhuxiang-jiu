@@ -466,6 +466,8 @@ class KnowledgeService:
 
         供 chat_service / 其他模块消费; record_hit 控制是否计数
         (管理端测试检索传 False 避免污染统计)。
+        计数口径: 命中 → top-1 计 hit; 未命中但有最近邻候选
+        (低于置信阈值) → 最近邻计 miss(质量分命中率的数据来源)。
         """
         query = (query or "").strip()
         if not query:
@@ -484,8 +486,14 @@ class KnowledgeService:
                 "source": entry.get("source", SOURCE_MANUAL),
                 "similarity": round(sim, 4),
             })
-        if out and record_hit:
-            await self.repo.record_hit(out[0]["entryId"])
+        if record_hit:
+            if out:
+                await self.repo.record_hit(out[0]["entryId"])
+            elif results:
+                # 有最近邻候选但相似度低于置信阈值 → 最近邻计 miss
+                # (P2.5 修复: missCount 此前无生产写入点, 命中率恒为
+                # 100%, 质量分"命中率×40%"权重失真)
+                await self.repo.record_miss(results[0][0]["id"])
         return out
 
     # ============================================================
@@ -1064,30 +1072,38 @@ class KnowledgeService:
         规则(P2 设计):
             - qualityScore < 30 且 发布超 60 天 → 降级退役(知识过时)
             - 其余仅刷新分数(报表可见, 不动状态)
+        增量写入(P2.5): 分数未变且不退役的条目跳过重写,
+        避免每轮全量 save_entry(分数随天数衰减, 同日内重复扫描零写入)。
         全局限跑锁防多实例重复。
         """
         async with get_lock("knowledge:quality:sweep"):
             entries = await self.repo.list_entries(
                 status=ENTRY_STATUS_PUBLISHED, limit=SEARCH_SCAN_LIMIT)
-            retired, refreshed = [], 0
+            retired, refreshed, skipped = [], 0, 0
             for e in entries:
+                old_score = e.get("qualityScore")
                 score = self.compute_quality_score(e)
-                e["qualityScore"] = score
-                refreshed += 1
                 published = e.get("publishedAt") or ""
                 try:
                     age_days = (datetime.utcnow()
                                 - datetime.fromisoformat(published)).days
                 except (ValueError, TypeError):
                     age_days = 0
-                if score < 30 and age_days > 60:
+                should_retire = score < 30 and age_days > 60
+                if not should_retire and old_score == score:
+                    skipped += 1          # 分数未变, 不重写
+                    continue
+                e["qualityScore"] = score
+                refreshed += 1
+                if should_retire:
                     await self.repo.transition_status(
                         e["id"], ENTRY_STATUS_PUBLISHED,
                         ENTRY_STATUS_RETIRED)
                     e["status"] = ENTRY_STATUS_RETIRED
                     retired.append(e["id"])
                 await self.repo.save_entry(e)
-            result = {"refreshed": refreshed, "retired": retired,
+            result = {"refreshed": refreshed, "skipped": skipped,
+                      "retired": retired,
                       "retiredCount": len(retired),
                       "sweptAt": datetime.utcnow().isoformat()}
             logger.info("知识质量淘汰扫描: %s", result)
@@ -1151,22 +1167,82 @@ class KnowledgeService:
                 [{"d": d} for g in enriched for d in g["hitDomains"]], "d"),
         }
 
+    GAP_URGENT_ASK_COUNT = 3   # 缺口紧急阈值(与 gaps_summary urgent 口径一致)
+
+    async def notify_urgent_gaps(self) -> dict:
+        """紧急缺口站内信提醒管理员(缺口→通知→教学 飞轮, best-effort)
+
+        P2.5 修复: 头注规划的"message 通知消费方"此前未落地。
+        - 紧急口径: open 且 askCount ≥ 3(与缺口摘要 urgent 一致)
+        - 幂等: 已提醒过的缺口(urgentNotifiedAt)不重复提醒
+        - 无管理员收件人/发送失败不抛异常(返回统计)
+        由质量调度器周期触发(也可手动调用)。
+        """
+        gaps = await self.repo.list_gaps(status=GAP_STATUS_OPEN, limit=200)
+        urgent = [g for g in gaps
+                  if int(g.get("askCount", 0)) >= self.GAP_URGENT_ASK_COUNT
+                  and not g.get("urgentNotifiedAt")]
+        now = datetime.utcnow().isoformat()
+        if not urgent:
+            return {"notified": 0, "gapIds": [], "sentAt": now}
+        # 收件人: 全部启用状态的管理员会员
+        from repositories.member_repository import MemberRepository
+        admins = [m["id"] for m in await MemberRepository().list_all()
+                  if m.get("role") == "admin"
+                  and int(m.get("status", 1)) == 1]
+        if not admins:
+            logger.warning("紧急缺口无管理员收件人, 跳过通知(gaps=%s)",
+                          [g["id"] for g in urgent])
+            return {"notified": 0, "gapIds": [], "sentAt": now,
+                    "error": "无管理员收件人"}
+        top = sorted(urgent, key=lambda g: -int(g.get("askCount", 0)))[:5]
+        lines = [f"- {g['question'][:30]}(被问 {g['askCount']} 次)"
+                 for g in top]
+        title = f"知识缺口待补充({len(urgent)} 个紧急)"
+        content = ("以下问题被多次提问但知识库未能命中, "
+                   "请通过对话教学或文档上传补充知识:\n"
+                   + "\n".join(lines))
+        try:
+            from services.message_service import MessageService
+            await MessageService().batch_send(
+                user_ids=admins, channel="inmail",
+                title=title, content=content)
+        except Exception as exc:
+            logger.warning("紧急缺口通知发送失败(不阻断): %s", exc)
+            return {"notified": 0, "gapIds": [], "sentAt": now,
+                    "error": str(exc)}
+        # 发送成功后标记, 幂等防重复提醒
+        for g in urgent:
+            g["urgentNotifiedAt"] = now
+            await self.repo.save_gap(g)
+        result = {"notified": len(urgent),
+                  "gapIds": [g["id"] for g in urgent],
+                  "recipients": len(admins), "sentAt": now}
+        logger.info("紧急缺口已通知管理员: %s", result)
+        return result
+
     # ---------- 7.3 渐进信任自动过审(D-16) ----------
 
     AUTO_APPROVE_MIN_QUALITY = 65      # 来源平均质量分阈值(零调用新条目
     AUTO_APPROVE_MIN_STREAK = 5         # 上限=0.5×40+30+trust×30, 教学来源 68.5)
+    # 已过审核决定的条目(approved/published/retired/rejected)
+    _REVIEWED_STATUSES = (ENTRY_STATUS_APPROVED, ENTRY_STATUS_PUBLISHED,
+                          ENTRY_STATUS_RETIRED, ENTRY_STATUS_REJECTED)
 
     async def auto_approve_run(self) -> dict:
         """渐进信任自动过审(D-16): 高可信来源的 pending 条目自动审核通过
 
         条件(全部满足):
-            - 来源(migration 除外)近 5 条已全部人工审核通过
+            - 来源(migration 除外)最近 5 条已过审核决定的条目全部人工通过
+              (rejected 计入窗口并打断连胜; P2.5 修正: 原实现为
+              "已审核总数≥5", 未按最近 N 条判定, recentApprovals
+              收集了但未使用)
             - 该来源历史条目平均质量分 ≥70
             - 条目自身合规分 ≥80(高于人工线 70)
         满足即自动 approve(仍需人工发布, 保留发布权)。
         """
         async with get_lock("knowledge:auto-approve:run"):
-            # 1. 统计各来源的审核通过率与质量分
+            # 1. 统计各来源的审核决定序列与质量分
             all_entries = await self.repo.list_entries(limit=SEARCH_SCAN_LIMIT)
             source_stats: dict[str, dict] = {}
             for e in all_entries:
@@ -1174,23 +1250,29 @@ class KnowledgeService:
                 if not src or src == SOURCE_MIGRATION:
                     continue
                 st = source_stats.setdefault(
-                    src, {"reviewed": 0, "approved": 0,
-                          "qualitySum": 0.0, "qualityN": 0,
-                          "recentApprovals": []})
-                if e["status"] in (ENTRY_STATUS_APPROVED,
-                                   ENTRY_STATUS_PUBLISHED,
-                                   ENTRY_STATUS_RETIRED):
-                    st["reviewed"] += 1
-                    if e["status"] != ENTRY_STATUS_RETIRED \
-                            or e.get("reviewedBy"):
-                        st["approved"] += 1
-                        st["recentApprovals"].append(
-                            e.get("updatedAt") or "")
+                    src, {"reviewed": [], "qualitySum": 0.0,
+                          "qualityN": 0})
+                if e["status"] in self._REVIEWED_STATUSES:
+                    # 已过审核决定: rejected 未通过, 其余(approved/
+                    # published/retired)视为已通过(retired 曾发布)
+                    st["reviewed"].append({
+                        "at": e.get("updatedAt") or e.get("createdAt")
+                        or "",
+                        "approved": e["status"] != ENTRY_STATUS_REJECTED})
                 if e["status"] == ENTRY_STATUS_PUBLISHED:
                     # 重算质量分: 既有条目 qualityScore 可能仍是
                     # 创建时的初始值(未经过 sweep), 现算保证口径一致
                     st["qualitySum"] += self.compute_quality_score(e)
                     st["qualityN"] += 1
+
+            def _streak_ok(st: dict) -> bool:
+                """最近 MIN_STREAK 条审核决定全部通过(连胜判定)"""
+                recent = sorted(st["reviewed"],
+                               key=lambda r: r["at"], reverse=True)
+                recent = recent[:self.AUTO_APPROVE_MIN_STREAK]
+                return (len(recent) >= self.AUTO_APPROVE_MIN_STREAK
+                        and all(r["approved"] for r in recent))
+
             # 2. 逐 pending 判定
             auto_approved = []
             for e in all_entries:
@@ -1198,7 +1280,7 @@ class KnowledgeService:
                     continue
                 src = e.get("source")
                 st = source_stats.get(src) if src else None
-                if not st or st["reviewed"] < self.AUTO_APPROVE_MIN_STREAK:
+                if not st or not _streak_ok(st):
                     continue
                 avg_q = (st["qualitySum"] / st["qualityN"]
                          if st["qualityN"] else 0)

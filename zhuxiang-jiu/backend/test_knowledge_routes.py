@@ -537,6 +537,92 @@ async def main():
         record("分发-非法消费方拒绝", True)
 
     # ============================================================
+    # 8.6 P2.5 数据闭环修复: miss 埋点 / 增量扫描 / 连胜过审 / 通知
+    # ============================================================
+
+    # 8.6.1 miss 埋点: 命中计 hit; 无最近邻不计 miss
+    miss_probe = await _publish(svc, "竹香酒有礼盒装吗",
+                                "竹香酒提供双瓶装礼盒。")
+    res = await svc.search("竹香酒有礼盒装可以买吗", top_k=1)
+    record("P25-相似问题命中检索",
+           len(res) >= 1, f"实际{res}")
+    if res:
+        top_id = res[0]["entryId"]
+        hit_probe = await svc.repo.get_entry(top_id)
+        hits_before = int(hit_probe.get("hitCount", 0))
+        await svc.search("竹香酒有礼盒装可以买吗", top_k=1)
+        hits_after = int((await svc.repo.get_entry(top_id))
+                         .get("hitCount", 0))
+        record("P25-命中检索计入hitCount",
+               hits_after == hits_before + 1,
+               f"before={hits_before}, after={hits_after}")
+    else:
+        record("P25-命中检索计入hitCount", False, "未命中无法验证")
+    # 完全无关问题: 无最近邻候选(余弦=0 被过滤) → 不计 miss
+    await svc.search("今天天气怎么样适合钓鱼吗", top_k=1)
+    entry_after = await svc.repo.get_entry(miss_probe["id"])
+    record("P25-无最近邻时不计miss",
+           int(entry_after.get("missCount", 0)) == 0,
+           f"missCount={entry_after.get('missCount')}")
+
+    # 8.6.2 质量扫描增量写入: 分数未变的条目第二轮跳过
+    sweep1 = await svc.quality_sweep()
+    sweep2 = await svc.quality_sweep()
+    record("P25-增量扫描第二轮零重写",
+           sweep1["refreshed"] >= 0 and sweep2["skipped"] >= 1
+           and sweep2["refreshed"] == 0,
+           f"first={sweep1['refreshed']}, second(refreshed="
+           f"{sweep2['refreshed']}, skipped={sweep2['skipped']})")
+
+    # 8.6.3 自动过审-最近N条连胜判定: 最新一条 rejected 打断连胜
+    ts2 = await svc.create_teach_session(topic="连胜打断测试")
+    for i in range(5):
+        await svc.teach_submit(
+            ts2["id"], question=f"连胜测试第{i}条",
+            answer=f"连胜测试内容第{i}条。", category="faq")
+    entries2 = await svc.list_entries(
+        status=ENTRY_STATUS_PENDING, limit=30)
+    streak_entries = [e for e in entries2
+                      if e["source"] == "chat_teaching"
+                      and "连胜测试" in e["question"]]
+    for e in streak_entries[:4]:
+        await svc.review_entry(e["id"], approve=True, reviewer_id=1)
+        await svc.publish_entry(e["id"], publisher_id=1)
+    # 第 5 条人工拒绝 → 打断连胜
+    await svc.review_entry(streak_entries[4]["id"], approve=False,
+                           reviewer_id=1)
+    # 再提交一条 pending 候选 → 连胜已被打断, 不应自动过审
+    await svc.teach_submit(
+        ts2["id"], question="连胜打断后的新条目",
+        answer="连胜被打断后不应自动过审。", category="faq")
+    auto3 = await svc.auto_approve_run()
+    still_pending = [e for e in await svc.list_entries(
+        status=ENTRY_STATUS_PENDING, limit=30)
+        if "连胜打断后" in e["question"]]
+    record("P25-连胜被rejected打断不自动过审",
+           len(still_pending) == 1
+           and all(a["id"] != still_pending[0]["id"]
+                   for a in auto3["autoApproved"]),
+           f"stillPending={len(still_pending)}, "
+           f"autoApproved={auto3['autoApproved']}")
+
+    # 8.6.4 紧急缺口通知管理员(缺口→通知→教学 飞轮)
+    notify_gap_question = "竹香酒可以用来做菜吗有什么菜谱"
+    for _ in range(3):
+        await svc.record_gap(notify_gap_question)
+    n1 = await svc.notify_urgent_gaps()
+    record("P25-紧急缺口通知管理员发送",
+           n1["notified"] >= 1 and n1.get("recipients", 0) >= 1,
+           f"实际{n1}")
+    # 幂等: 已提醒过的不重复提醒
+    n2 = await svc.notify_urgent_gaps()
+    notified_ids = set(n1["gapIds"])
+    record("P25-缺口通知幂等不重复",
+           n2["notified"] == 0
+           and not (set(n2["gapIds"]) & notified_ids),
+           f"第二次实际{n2}")
+
+    # ============================================================
     # 9. 统计(最终)
     # ============================================================
     stats = await svc.stats()

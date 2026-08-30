@@ -59,16 +59,23 @@ async def run_quality_scan() -> dict:
     svc = KnowledgeService()
     sweep = await svc.quality_sweep()
     auto_approve = await svc.auto_approve_run()
+    # 紧急缺口提醒管理员(缺口→通知→教学 飞轮, best-effort 不阻断)
+    notify = await svc.notify_urgent_gaps()
     result = {
         "scannedAt": ts(),
         "sweep": {"refreshed": sweep["refreshed"],
+                  "skipped": sweep.get("skipped", 0),
                   "retiredCount": sweep["retiredCount"]},
         "autoApprove": {"count": auto_approve["autoApprovedCount"]},
+        "urgentGapNotify": {"notified": notify.get("notified", 0)},
     }
-    if sweep["retiredCount"] or auto_approve["autoApprovedCount"]:
-        logger.info("knowledge_quality_scan retired=%d autoApproved=%d",
+    if (sweep["retiredCount"] or auto_approve["autoApprovedCount"]
+            or notify.get("notified")):
+        logger.info("knowledge_quality_scan retired=%d autoApproved=%d "
+                    "urgentNotified=%d",
                     sweep["retiredCount"],
-                    auto_approve["autoApprovedCount"])
+                    auto_approve["autoApprovedCount"],
+                    notify.get("notified", 0))
     return result
 
 

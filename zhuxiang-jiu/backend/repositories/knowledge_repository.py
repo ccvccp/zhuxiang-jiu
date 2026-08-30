@@ -96,6 +96,23 @@ def cosine(a: dict[str, int], b: dict[str, int]) -> float:
     return dot / (norm_a * norm_b)
 
 
+async def scan_keys(client, pattern: str) -> list[str]:
+    """SCAN 增量迭代收集键(替代 KEYS, 避免大库全量阻塞)
+
+    Redis KEYS 为 O(N) 全库阻塞命令, 生产环境禁用(教学会话/文档/
+    抓取源列表此前误用); SCAN 增量游标迭代, 单批 count=200。
+    """
+    keys: list[str] = []
+    cursor = 0
+    while True:
+        cursor, batch = await client.scan(cursor=cursor, match=pattern,
+                                           count=200)
+        keys.extend(batch)
+        if int(cursor) == 0:
+            break
+    return keys
+
+
 def _now() -> str:
     return datetime.utcnow().isoformat()
 
@@ -260,6 +277,18 @@ class KnowledgeRepository:
         entry["hitCount"] = int(entry.get("hitCount", 0)) + 1
         await self.save_entry(entry)
 
+    async def record_miss(self, entry_id: int) -> None:
+        """未命中计数+1(检索存在最近邻但相似度低于置信阈值)
+
+        质量分"命中率"权重的生产数据来源(P2.5 修复: 此前 missCount
+        无写入点, 命中率恒为 100%, 质量分失真)。
+        """
+        entry = await self.get_entry(entry_id)
+        if entry is None:
+            return
+        entry["missCount"] = int(entry.get("missCount", 0)) + 1
+        await self.save_entry(entry)
+
     # ============================================================
     # 知识缺口队列
     # ============================================================
@@ -371,7 +400,7 @@ class KnowledgeRepository:
         """教学会话列表(按创建时间倒序)"""
         if is_redis_mode():
             client = await get_redis_client()
-            keys = await client.keys(_k("knowledge", "teach", "*"))
+            keys = await scan_keys(client, _k("knowledge", "teach", "*"))
             sessions = []
             for key in keys:
                 if key.endswith(":seq"):
@@ -419,7 +448,7 @@ class KnowledgeRepository:
     async def list_documents(self, limit: int = 50) -> list[dict]:
         if is_redis_mode():
             client = await get_redis_client()
-            keys = await client.keys(_k("knowledge", "doc", "*"))
+            keys = await scan_keys(client, _k("knowledge", "doc", "*"))
             docs = []
             for key in keys:
                 if key.endswith(":seq"):
@@ -468,8 +497,8 @@ class KnowledgeRepository:
     async def list_crawl_sources(self, limit: int = 50) -> list[dict]:
         if is_redis_mode():
             client = await get_redis_client()
-            keys = await client.keys(
-                _k("knowledge", "crawl", "source", "*"))
+            keys = await scan_keys(
+                client, _k("knowledge", "crawl", "source", "*"))
             sources = []
             for key in keys:
                 if key.endswith(":seq"):
