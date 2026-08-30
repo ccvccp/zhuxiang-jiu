@@ -552,6 +552,24 @@ class KnowledgeService:
         return (f"关于「{head}」, 为您整理以下信息:\n{body}\n"
                 "以上信息仅供参考, 如需人工服务可联系在线客服。")
 
+    @staticmethod
+    def _rag_llm_synthesize(question: str, hits: list[dict]) -> str | None:
+        """llm 轨融合生成(P3.3): top-k 条目为上下文让大模型合成答案
+
+        幻觉治理: system prompt 限定仅依据给定资料回答, 不编造;
+        失败返回 None(调用方回退 rule 轨 _rag_synthesize)。
+        """
+        from services.llm_client import provider_client
+        context = "\n".join(
+            f"[{i}] 问题: {h['question']}\n    内容: {h['answer']}"
+            for i, h in enumerate(hits, start=1))
+        system = ("你是知识库问答助手。仅依据给定的编号资料回答用户问题, "
+                  "回答开头用 [编号] 标注引用的资料(如 [1]), "
+                  "不得编造资料以外的信息; 若资料不足以回答请如实说明。")
+        user = (f"参考资料:\n{context}\n\n用户问题: {question}\n"
+                "请用简洁中文回答(200字内), 引用标注保留 [编号]。")
+        return provider_client.chat(system, user)
+
     async def rag_answer(self, question: str,
                           provider: str = "rule") -> dict:
         """RAG 问答(P3.1, D-18): 检索增强问答统一入口
@@ -565,9 +583,10 @@ class KnowledgeService:
         计数联动(P2.5 口径): direct/synthesized 计 hit,
         unsolved 有候选计 miss, 无候选不计数。
 
-        provider 双轨: rule 轨纯标准库融合; llm 轨预留
-        (接入大模型 synthesize 时仅改 _rag_synthesize 调用分支,
-        检索/分级/引用/计数不变)。
+        provider 双轨(P3.3 已接入): rule 轨纯标准库融合;
+        llm 轨经 llm_client(OpenAI 兼容端点)以 top-k 为上下文合成,
+        未配置 key/请求失败自动回退 rule 轨——检索/分级/引用溯源/
+        计数联动对两条轨道完全一致。
 
         Raises:
             ValueError: 问题为空
@@ -577,9 +596,6 @@ class KnowledgeService:
             raise ValueError("问题不能为空")
         if provider not in ("rule", "llm"):
             raise ValueError(f"非法 provider({provider}), 须为 rule/llm")
-        if provider == "llm":
-            # llm 轨未接入, 回退 rule(对齐 attract D-11 惯例)
-            logger.info("knowledge_rag_llm_provider_not_ready_fallback_rule")
         # top-k 召回(不过滤阈值, 由分级路由判定)
         query_vec = tokenize(question)
         results = await self.repo.search_published(
@@ -610,8 +626,15 @@ class KnowledgeService:
             confidence = round(top_sim, 4)
             citations = citations[:1]
         else:
-            answer = self._rag_synthesize(question, hits)
             mode = "synthesized"
+            answer = None
+            if provider == "llm":
+                answer = self._rag_llm_synthesize(question, hits)
+                if answer is None:
+                    logger.info(
+                        "knowledge_rag_llm_fallback_rule_synthesize")
+            if answer is None:
+                answer = self._rag_synthesize(question, hits)
             confidence = round(
                 sum(h["similarity"] for h in hits) / len(hits), 4)
         await self.repo.record_hit(top_entry["id"])

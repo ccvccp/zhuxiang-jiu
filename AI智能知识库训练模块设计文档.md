@@ -1,7 +1,7 @@
-# AI智能知识库训练模块设计文档 v1.4
+# AI智能知识库训练模块设计文档 v1.5
 
-> **版本**: v1.4（P0+P1+P2+P2.5+P3.1+P3.2+P3 检索升级 已实现，P3.3 规划中）
-> **状态**: 六期开发完成（P0~P2.5 + P3.1 RAG 核心 + P3.2 chat 接线 + P3 检索倒排索引），LLM 轨预留
+> **版本**: v1.5（P0+P1+P2+P2.5+P3.1+P3.2+P3 检索升级+P3.3 LLM 轨 已实现）
+> **状态**: 七期开发完成（P0~P2.5 + P3.1 RAG + P3.2 chat 接线 + P3 检索倒排索引 + P3.3 LLM 轨 RAG synthesize）
 > **定位**: 站点统一知识底座——通过对话教学、文档/图片/视频上传、全网抓取三源持续训练，经治理流水线（合规筛查/相似去重/人工审核/自动过审）沉淀为可检索、可进化、可分发的知识资产，供 chat/product/attract 等模块消费。
 
 ---
@@ -193,7 +193,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 | 文件 | 规模 | 覆盖 |
 |---|---|---|
-| test_knowledge_routes.py | 98 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取 + P2 全部 6 项 + P2.5 修复 7 项（hit 计数/miss 边界/增量扫描/连胜打断/通知+幂等）+ P3.1 RAG 8 项（三态/融合去重/引用/计数/llm 回退/参数校验）+ P3 检索索引 8 项（就绪判定/批量召回/retired 移出/rebuild 幂等/投影剥离/2100 条突破截断/候选收敛） |
+| test_knowledge_routes.py | 101 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取 + P2 全部 6 项 + P2.5 修复 7 项（hit 计数/miss 边界/增量扫描/连胜打断/通知+幂等）+ P3.1 RAG 8 项（三态/融合去重/引用/计数/llm 回退/参数校验）+ P3 检索索引 8 项（就绪判定/批量召回/retired 移出/rebuild 幂等/投影剥离/2100 条突破截断/候选收敛）+ P3.3 LLM 轨 3 项（未配置 key 回退/mock 合成路径+引用一致/请求失败回退） |
 | test_knowledge_quality_scheduler.py | 10 断言 | 单轮扫描/淘汰/保留/开关/周期下限/启动幂等/停止 |
 
 ---
@@ -204,7 +204,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 |---|---|---|---|
 | **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎（详见第九章 D-18 设计） | 高 | **P3.1 核心已实施，P3.2 chat 接线待实施** |
 | **检索升级** | **倒排索引（已实施）**：token→entry_id（Redis Set `zhuxiang:knowledge:inv:{token}`），仅加载与 query 有共同 token 的候选条目，替代全量扫描——行为无损（余弦>0 必有共同 token），突破 SEARCH_SCAN_LIMIT=2000 截断；rebuild 端点支持存量迁移；Embedding 语义向量（provider 双轨）后续可选 | 高 | **倒排索引已实施**，Embedding 待排期 |
-| **LLM 轨落地** | 图片视觉理解（视觉大模型自动生成描述）、视频抽帧+ASR 自动时间轴、抓取内容智能清洗（D-14 既有规划） | 中 | 待排期 |
+| **LLM 轨落地** | **RAG synthesize 已实施（P3.3）**：`services/llm_client.py`（urllib 纯标准库调 OpenAI 兼容 `/chat/completions`，智谱 GLM/DeepSeek/通义兼容），`rag_answer(provider="llm")` synthesized 分支以 top-k 为上下文大模型合成（幻觉治理：prompt 限定仅依据资料+引用标注）；未配置 key/失败自动回退 rule。图片视觉理解、视频抽帧+ASR、抓取智能清洗待排期 | 中 | **RAG synthesize ✅**，多模态/抓取 LLM 待排期 |
 | **消费方扩展** | product/attract 实际拉取链路（当前仅有 distribution_suggest 建议无消费） | 中 | 待排期 |
 
 ---
@@ -220,6 +220,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | P3.1 RAG 核心 | 2026-08-30 | rag_answer（置信分级路由 direct≥0.50 实测校准 / synthesized≥0.25 / unsolved）+ rule 轨融合生成 + 引用溯源 + 计数联动 + POST /api/knowledge/ask 公开端点（33 端点） |
 | P3.2 chat 接线 | 2026-08-30 | chat 消费 rag_answer（RAG 优先/旧 FAQ 兜底），回复透出 citations + ragMode，aiConfidence 动态化（RAG 相似度/legacy 固定 0.85） |
 | P3 检索升级 | 2026-08-30 | 倒排索引（token→entry_id，`inv:{token}` Set + meta 计数），save_entry 同步/索引就绪判定/存量回退全量/rebuild 端点（34 端点），突破 2000 条截断 |
+| P3.3 LLM 轨 | 2026-08-30 | services/llm_client.py（urllib OpenAI 兼容端点，LLM_API_KEY/BASE_URL/MODEL/TIMEOUT/ENABLED 环境变量），RAG synthesized 分支大模型合成 + 幻觉治理 prompt + 自动回退 rule |
 
 ---
 
@@ -267,11 +268,13 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 ```python
 async def rag_answer(self, question: str, provider: str = "rule") -> dict:
-    # provider="llm" 预留: 接入大模型 synthesize 时仅改此分支,
-    # 检索/分级/引用溯源/计数联动不变(上层零改动)
+    # provider="llm"(P3.3 已接入): synthesized 分支经 llm_client
+    # 以 top-k 为上下文大模型合成(幻觉治理 prompt + [n] 引用标注);
+    # 未配置 key/请求失败自动回退 rule 轨 _rag_synthesize,
+    # 检索/分级/引用溯源/计数联动两条轨道完全一致
 ```
 
-llm 轨（P3.3 预留）: top-k 条目作为 context 喂给大模型生成，引用由条目元数据携带，模型输出须保留 [n] 标注（幻觉治理：引用外内容截断告警）。
+llm 轨（P3.3 已实施）: top-k 条目作为 context 喂给大模型生成，system prompt 限定仅依据给定资料回答+引用标注保留（幻觉治理）；`services/llm_client.py`（urllib 纯标准库，OpenAI 兼容 `/chat/completions`，环境变量 `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL`/`LLM_TIMEOUT`/`LLM_ENABLED`），未配置 key 或失败返回 None 由调用方回退 rule。
 
 ### 9.4 计数联动（沿用 P2.5 口径）
 

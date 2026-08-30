@@ -679,12 +679,44 @@ async def main():
         record("RAG-answered计入hitCount",
                int(entry_cit.get("hitCount", 0)) >= 1,
                f"hitCount={entry_cit.get('hitCount')}")
-    # llm 轨未接入自动回退 rule
+    # llm 轨未配置 key 自动回退 rule
     rag_llm = await svc.rag_answer("竹香酒是怎么酿造的", provider="llm")
-    record("RAG-llm轨未接入回退rule",
+    record("RAG-llm轨未配置key回退rule",
            rag_llm["mode"] == rag_direct["mode"]
            and rag_llm["answer"] == rag_direct["answer"],
            f"实际mode={rag_llm['mode']}")
+
+    # llm 轨 mock 成功路径: synthesized 分支用大模型合成, 引用/计数不变
+    import services.llm_client as _llm_mod
+    _orig_chat = _llm_mod.provider_client.chat
+    _llm_mod.provider_client.chat = lambda s, u, temperature=0.3: (
+        "[1] 本网竹香酒以竹笋竹茎竹叶与徂徕山泉水经专有菌群古法酿制。")
+    try:
+        rag_llm_ok = await svc.rag_answer(
+            "竹香酒的酿造原料和工艺是什么", provider="llm")
+    finally:
+        _llm_mod.provider_client.chat = _orig_chat
+    rule_synth = await svc.rag_answer("竹香酒的酿造原料和工艺是什么")
+    record("RAG-llm轨合成走大模型",
+           rag_llm_ok["mode"] == "synthesized"
+           and rag_llm_ok["answer"].startswith("[1]")
+           and rag_llm_ok["answer"] != rule_synth["answer"],
+           f"实际mode={rag_llm_ok['mode']}, "
+           f"answer={rag_llm_ok['answer'][:30]}")
+    record("RAG-llm轨引用与rule轨一致",
+           rag_llm_ok["citations"] == rule_synth["citations"],
+           f"llm={rag_llm_ok['citations']}, rule={rule_synth['citations']}")
+
+    # llm 轨 mock 异常(请求失败)回退 rule
+    _llm_mod.provider_client.chat = lambda s, u, temperature=0.3: None
+    try:
+        rag_llm_fail = await svc.rag_answer(
+            "竹香酒的酿造原料和工艺是什么", provider="llm")
+    finally:
+        _llm_mod.provider_client.chat = _orig_chat
+    record("RAG-llm轨请求失败回退rule",
+           rag_llm_fail["answer"] == rule_synth["answer"],
+           f"实际answer={rag_llm_fail['answer'][:30]}")
     # 非法 provider 拒绝
     try:
         await svc.rag_answer("x", provider="gpt")
