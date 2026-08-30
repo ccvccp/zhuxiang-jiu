@@ -26,6 +26,9 @@ import logging
 from typing import ClassVar
 
 from core.helpers import ts
+from services.ai_learning_service import (
+    get_active_weight_version, load_effective_weights,
+)
 from services.ai_scoring_service import (
     _clamp, _confidence, _factor, _now_hour,
 )
@@ -106,11 +109,14 @@ class AuthRiskScorer:
         hour = int(ctx.get("loginHour") if ctx.get("loginHour") is not None
                    else _now_hour())
 
+        # 自学习层生效权重(champion), 无档案/异常时回退类默认值
+        weights = await load_effective_weights("auth_risk", self.WEIGHTS)
+
         f = {}
         # 失败次数: 每次 10 分(≥10 次满分), 撞库/暴力破解信号
         f["failed_attempts"] = _factor("failed_attempts", "失败次数",
                                        _clamp(failed * 10),
-                                       self.WEIGHTS["failed_attempts"],
+                                       weights["failed_attempts"],
                                        f"近1小时失败 {failed:.0f} 次")
         # 地理速度: 速度 = 距离/时长, ≥900km/h(民航) 视为不可能行程满分
         if distance is None or hours is None:
@@ -123,7 +129,7 @@ class AuthRiskScorer:
             geo_score = _clamp(speed / 9)  # 900km/h → 100
             geo_detail = f"位移 {distance:.0f}km/{h:.1f}h(≈{speed:.0f}km/h)"
         f["geo_velocity"] = _factor("geo_velocity", "地理速度", geo_score,
-                                    self.WEIGHTS["geo_velocity"], geo_detail)
+                                    weights["geo_velocity"], geo_detail)
         # 新设备: 已知设备零风险, 新设备满分, 未知中性
         new_device = ctx.get("newDevice")
         if new_device is None:
@@ -133,7 +139,7 @@ class AuthRiskScorer:
         else:
             dev_score, dev_detail = 0.0, "常用设备"
         f["device_match"] = _factor("device_match", "设备匹配", dev_score,
-                                    self.WEIGHTS["device_match"], dev_detail)
+                                    weights["device_match"], dev_detail)
         # IP 信誉: 查映射表, 未知 30 中性
         if ip_risk is None:
             ip_score, ip_detail = 30.0, "IP 未检测"
@@ -141,16 +147,16 @@ class AuthRiskScorer:
             ip_score = self.IP_RISK_SCORES[ip_risk]
             ip_detail = f"IP 类型 {ip_risk}"
         f["ip_reputation"] = _factor("ip_reputation", "IP信誉", ip_score,
-                                     self.WEIGHTS["ip_reputation"], ip_detail)
+                                     weights["ip_reputation"], ip_detail)
         # 登录时段: 0-6 点满分
         night_score = 100.0 if 0 <= hour < 6 else 0.0
         f["time_pattern"] = _factor("time_pattern", "登录时段", night_score,
-                                    self.WEIGHTS["time_pattern"], f"{hour} 点登录")
+                                    weights["time_pattern"], f"{hour} 点登录")
         # 账户年龄: <7 天满分, ≥90 天零分(缺省按 365 中性)
         days = float(ctx["accountAgeDays"]) if ctx.get("accountAgeDays") is not None else 365.0
         f["account_age"] = _factor(
             "account_age", "账户年龄", _clamp(max(0.0, (90 - days) / 90 * 100)),
-            self.WEIGHTS["account_age"], f"账龄 {days:.0f} 天")
+            weights["account_age"], f"账龄 {days:.0f} 天")
         # 密码强度: 查映射表(breached=撞库库命中), 未知 30 中性
         if password_status is None:
             pwd_score, pwd_detail = 30.0, "密码强度未评估"
@@ -158,7 +164,7 @@ class AuthRiskScorer:
             pwd_score = self.PASSWORD_SCORES[password_status]
             pwd_detail = f"密码状态 {password_status}"
         f["password_strength"] = _factor("password_strength", "密码强度", pwd_score,
-                                         self.WEIGHTS["password_strength"], pwd_detail)
+                                         weights["password_strength"], pwd_detail)
         # 行为偏离度: 与历史登录习惯(设备+时段+地点)的偏离, 直接输入
         deviation = ctx.get("behaviorDeviationScore")
         if deviation is None:
@@ -167,7 +173,7 @@ class AuthRiskScorer:
             beh_score = _clamp(float(deviation))
             beh_detail = f"偏离度 {beh_score:.0f}"
         f["behavior_deviation"] = _factor("behavior_deviation", "行为偏离",
-                                          beh_score, self.WEIGHTS["behavior_deviation"],
+                                          beh_score, weights["behavior_deviation"],
                                           beh_detail)
 
         risk = round(sum(x["contribution"] for x in f.values()), 1)
@@ -203,6 +209,7 @@ class AuthRiskScorer:
             "success": True, "scorer": "auth_risk", "module": "30用户认证",
             "score": risk, "action": action, "actionName": ACTION_NAMES[action],
             "actionDetail": action_detail,
+            "weightVersion": get_active_weight_version("auth_risk"),
             "hardBlocked": hard_blocked,
             "hardBlockReasons": hard_reasons,
             "factors": list(f.values()),

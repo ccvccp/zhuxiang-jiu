@@ -287,8 +287,11 @@ class FlashSaleRepository:
             orders = []
             for no in nos:
                 data = await client.hgetall(_k("flash", "order", no))
-                if data and data.get("status") == ORDER_STATUS_PENDING:
-                    orders.append(self._from_redis(data))
+                if not data:
+                    continue
+                order = self._from_redis(data)
+                if order.get("status") == ORDER_STATUS_PENDING:
+                    orders.append(order)
         else:
             self._ensure_store()
             orders = [o for o in self.store["flash_orders"].values()
@@ -349,22 +352,21 @@ class FlashSaleRepository:
 
     @staticmethod
     def _to_redis(data: dict) -> dict:
-        """dict → Redis Hash mapping(容器类型转 JSON 字符串)"""
-        return {
-            k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
-            for k, v in data.items()
-        }
+        """dict → Redis Hash mapping(全部值 JSON 序列化)
+
+        统一 JSON 编码保证类型可完整还原:
+        int/float/bool/None/list/dict 往返不丢失(Redis Hash 原生仅支持
+        str/bytes/int/float, 直接写 bool 会抛 DataError, int 读回变 str)。
+        """
+        return {k: json.dumps(v, ensure_ascii=False) for k, v in data.items()}
 
     @staticmethod
     def _from_redis(data: dict) -> dict:
-        """Redis Hash mapping → dict(尝试 JSON 反序列化容器字段)"""
+        """Redis Hash mapping → dict(JSON 反序列化还原类型; 解析失败回退原值)"""
         result = {}
         for k, v in data.items():
-            if isinstance(v, str) and v[:1] in ("{", "["):
-                try:
-                    result[k] = json.loads(v)
-                    continue
-                except (json.JSONDecodeError, ValueError):
-                    pass
-            result[k] = v
+            try:
+                result[k] = json.loads(v)
+            except (TypeError, ValueError):
+                result[k] = v
         return result

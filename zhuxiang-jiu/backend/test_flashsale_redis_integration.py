@@ -72,20 +72,51 @@ def _force_redis_mode(monkeypatch):
     monkeypatch.setenv("REDIS_URL", _REDIS_URL)
 
 
+@pytest.fixture(autouse=True)
+async def _reset_shared_redis_clients():
+    """每个测试后重置共享 Redis 客户端单例(跨事件循环隔离)
+
+    pytest-asyncio 默认每个测试一个新事件循环; repositories.backend 与
+    core.locks 的模块级单例客户端会把连接绑定到首个使用它的循环,
+    循环关闭后连接池残留死连接 → 后续测试 RuntimeError: Event loop is closed。
+    测试后置空单例, 下个测试在自己的循环上重建连接。
+    """
+    yield
+    import contextlib
+    import repositories.backend as _backend
+    import core.locks as _locks
+    for mod in (_backend, _locks):
+        client = getattr(mod, "_redis_client", None)
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.aclose()
+        mod._redis_client = None
+
+
 @pytest.fixture
-def svc():
-    """秒杀服务实例(注入独立内存 store 仅用于 member/product, flash 数据走 Redis)"""
+async def seeded_products():
+    """播种产品主数据(add_item/purchase 校验产品必须存在, Redis 模式下产品走 Redis)"""
+    sys.path.insert(0, str(BACKEND_DIR / "scripts"))
+    import redis.asyncio as redis
+    from seed_redis import seed_products
+    client = redis.from_url(_REDIS_URL, decode_responses=True)
+    try:
+        await seed_products(client)
+    finally:
+        await client.aclose()
+
+
+@pytest.fixture
+async def svc(seeded_products):
+    """秒杀服务实例(Redis 模式下 member/product/flash 数据均走 Redis)"""
     from services.flashsale_service import FlashSaleService
-    from repositories.store import reset_store
-    reset_store()
     return FlashSaleService()
 
 
 @pytest.fixture
 def member_repo():
+    """会员 Repository(Redis 模式下数据走 Redis)"""
     from repositories.member_repository import MemberRepository
-    from repositories.store import reset_store
-    reset_store()
     return MemberRepository()
 
 
@@ -103,12 +134,15 @@ async def _mk_member(member_repo, phone: str, hours_old: float = 100,
 
 async def _mk_active_session(service, flash_stock: int = 5,
                              limit: int = 1) -> tuple:
-    """创建进行中场次+商品(开始于 1 小时前, 结束于 1 小时后)"""
+    """创建进行中场次+商品(开始于 1 小时前, 结束于 1 小时后)
+
+    产品用种子数据中的 ZX42-2026B01(原价 88), 秒杀价须低于原价。
+    """
     start = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     end = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
     session = await service.create_session("Redis集成测试场", start, end)
-    item = await service.add_item(session["sessionId"], "P10001",
-                                  flash_price=99.0, flash_stock=flash_stock,
+    item = await service.add_item(session["sessionId"], "ZX42-2026B01",
+                                  flash_price=58.0, flash_stock=flash_stock,
                                   limit_per_member=limit)
     await service.publish_session(session["sessionId"])
     return session, item
@@ -209,7 +243,7 @@ class TestFlashServiceRedis:
         order = await svc.purchase(member["id"], session["sessionId"],
                                    item["itemId"], 1)
         assert order["status"] == "pending_payment"
-        assert order["totalAmount"] == 99.0
+        assert order["totalAmount"] == 58.0
 
         paid = await svc.pay_order(order["orderNo"])
         assert paid["status"] == "paid"

@@ -23,6 +23,9 @@ from typing import ClassVar
 from datetime import datetime, UTC
 
 from core.helpers import ts
+from services.ai_learning_service import (
+    get_active_weight_version, load_effective_weights,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,48 +108,51 @@ class OrderRiskScorer:
         if amount < 0:
             raise ValueError("订单金额不能为负")
 
+        # 自学习层生效权重(champion), 无档案/异常时回退类默认值
+        weights = await load_effective_weights("order_risk", self.WEIGHTS)
+
         f = {}
         # 竹信分: <300 高风险, ≥700 零风险
         credit = float(ctx.get("bambooScore") if ctx.get("bambooScore") is not None else 600)
         f["credit"] = _factor("credit", "会员信用", _clamp((700 - credit) / 4),
-                              self.WEIGHTS["credit"], f"竹信分 {credit:.0f}")
+                              weights["credit"], f"竹信分 {credit:.0f}")
         # 注册时长: <24h 满风险, ≥720h(30天) 零风险
         hours = float(ctx.get("registerHours") or 0)
         f["register_age"] = _factor(
             "register_age", "注册时长", _clamp((720 - hours) / 7.2),
-            self.WEIGHTS["register_age"],
+            weights["register_age"],
             f"注册 {hours:.0f} 小时" + ("(新号)" if hours < 24 else ""))
         # 金额: ≥10000 满风险, 线性
         f["amount"] = _factor("amount", "订单金额", _clamp(amount / 100),
-                              self.WEIGHTS["amount"], f"金额 ¥{amount:,.2f}")
+                              weights["amount"], f"金额 ¥{amount:,.2f}")
         # 数量: ≥20 件满风险
         qty = int(ctx.get("totalQuantity") or 0)
         f["quantity"] = _factor("quantity", "购买数量", _clamp(qty * 5),
-                                self.WEIGHTS["quantity"], f"共 {qty} 件")
+                                weights["quantity"], f"共 {qty} 件")
         # 历史取消率
         hist = int(ctx.get("historyOrders") or 0)
         cancels = int(ctx.get("historyCancels") or 0)
         rate = (cancels / hist) if hist > 0 else 0.0
         f["cancel_rate"] = _factor("cancel_rate", "历史取消率", _clamp(rate * 150),
-                                   self.WEIGHTS["cancel_rate"],
+                                   weights["cancel_rate"],
                                    f"取消率 {rate:.0%}({cancels}/{hist})")
         # 地址完整性
         addr_ok = bool(ctx.get("addressComplete", True))
         f["address"] = _factor("address", "收货地址", 0 if addr_ok else 85,
-                               self.WEIGHTS["address"],
+                               weights["address"],
                                "完整" if addr_ok else "地址缺失关键字段")
         # 备注风险词
         remark = str(ctx.get("remark") or "")
         hit = [w for w in self.RISK_WORDS if w in remark]
         f["remark"] = _factor("remark", "备注风险词", 100 if hit else 0,
-                              self.WEIGHTS["remark"],
+                              weights["remark"],
                               f"命中 {hit}" if hit else "无风险词")
         # 下单时段(0-5 点凌晨)
         hour = int(ctx.get("orderHour", _now_hour()))
         night = hour < 6
         f["time_pattern"] = _factor("time_pattern", "下单时段",
                                     70 if night else 0,
-                                    self.WEIGHTS["time_pattern"],
+                                    weights["time_pattern"],
                                     f"{hour} 点" + ("(凌晨)" if night else ""))
 
         risk = sum(x["contribution"] for x in f.values())
@@ -154,6 +160,7 @@ class OrderRiskScorer:
         action = {"low": "pass", "medium": "review", "high": "block"}[level]
         result = {
             "success": True, "scorer": "order_risk", "modelVersion": MODEL_VERSION,
+            "weightVersion": get_active_weight_version("order_risk"),
             "score": round(risk, 1), "level": level, "levelName": LEVEL_NAMES[level],
             "action": action, "actionName": {"pass": "直接放行",
                                              "review": "人工复核",
@@ -347,8 +354,11 @@ class LogisticsRoutingScorer:
         budget = str(ctx.get("budget") or "balanced")
         if budget not in _BUDGET_WEIGHTS:
             budget = "balanced"
-        w_speed = _BUDGET_WEIGHTS[budget]["speed"]
-        w_cost = _BUDGET_WEIGHTS[budget]["cost"]
+        # 自学习层生效权重(按策略子键隔离: logistics_routing:speed/cost/balanced)
+        scorer_key = f"logistics_routing:{budget}"
+        weights = await load_effective_weights(scorer_key, _BUDGET_WEIGHTS[budget])
+        w_speed = weights["speed"]
+        w_cost = weights["cost"]
         w_rest = round(1.0 - w_speed - w_cost, 2)  # 其余 4 因子平分
         w_other = round(w_rest / 4, 3) if w_rest > 0 else 0.0
         express = str(ctx.get("serviceType") or "standard") == "express"
@@ -399,6 +409,7 @@ class LogisticsRoutingScorer:
 
         result = {
             "success": True, "scorer": "logistics_routing", "modelVersion": MODEL_VERSION,
+            "weightVersion": get_active_weight_version(scorer_key),
             "weight": weight, "budget": budget,
             "candidates": candidates,
             "recommendation": ({"carrier": best["carrier"],
@@ -451,44 +462,47 @@ class TrafficAntiFraudScorer:
                 fraudCount: int 推广员历史作弊次数
             }
         """
+        # 自学习层生效权重(champion), 无档案/异常时回退类默认值
+        weights = await load_effective_weights("traffic_antifraud", self.WEIGHTS)
+
         f = {}
         # ① 爆发: 近1小时 >20 条满风险; 间隔 <10s 也视为脚本
         recent = int(ctx.get("recentCount") or 0)
         interval = float(ctx.get("avgIntervalSeconds") or 999)
         burst = max(recent * 5, 100 if interval < 10 else 0)
-        f["burst"] = _factor("burst", "短时爆发", burst, self.WEIGHTS["burst"],
+        f["burst"] = _factor("burst", "短时爆发", burst, weights["burst"],
                              f"近1小时 {recent} 条, 平均间隔 {interval:.0f}s")
         # ② 新账号占比
         new_ratio = float(ctx.get("newAccountRatio") or 0)
         f["new_account"] = _factor("new_account", "新账号占比",
-                                   _clamp(new_ratio * 125), self.WEIGHTS["new_account"],
+                                   _clamp(new_ratio * 125), weights["new_account"],
                                    f"新账号占比 {new_ratio:.0%}")
         # ③ 历史作弊
         fraud_hist = int(ctx.get("fraudCount") or 0)
         f["promoter_history"] = _factor(
             "promoter_history", "历史作弊", _clamp(fraud_hist * 40),
-            self.WEIGHTS["promoter_history"], f"历史作弊 {fraud_hist} 次")
+            weights["promoter_history"], f"历史作弊 {fraud_hist} 次")
         # ④ 转化率异常(>0.9 视为刷量特征)
         conv = float(ctx.get("conversionRate") or 0)
         conv_score = _clamp((conv - 0.9) * 1000) if conv > 0.9 else 0
         f["conversion"] = _factor("conversion", "转化率异常", conv_score,
-                                  self.WEIGHTS["conversion"], f"转化率 {conv:.0%}")
+                                  weights["conversion"], f"转化率 {conv:.0%}")
         # ⑤ 来源集中度: 仅 1 个来源满风险, ≥5 个零风险
         sources = int(ctx.get("uniqueSources") or 0)
         src_score = _clamp((5 - sources) * 25) if sources > 0 else 0
         f["source"] = _factor("source", "来源集中度", src_score,
-                              self.WEIGHTS["source"], f"{sources} 个来源")
+                              weights["source"], f"{sources} 个来源")
         # ⑥ 凌晨占比
         night = float(ctx.get("nightRatio") or 0)
         f["night"] = _factor("night", "凌晨占比", _clamp(night * 120),
-                             self.WEIGHTS["night"], f"凌晨占比 {night:.0%}")
+                             weights["night"], f"凌晨占比 {night:.0%}")
         # ⑦ 有效率过低(<30% 视为垃圾流量)
         total = int(ctx.get("totalRecords") or 0)
         effective = int(ctx.get("effectiveRecords") or 0)
         eff_rate = (effective / total) if total > 0 else 1.0
         eff_score = _clamp((0.3 - eff_rate) * 200) if eff_rate < 0.3 else 0
         f["effective_rate"] = _factor("effective_rate", "有效率",
-                                      eff_score, self.WEIGHTS["effective_rate"],
+                                      eff_score, weights["effective_rate"],
                                       f"有效率 {eff_rate:.0%}")
 
         fraud = sum(x["contribution"] for x in f.values())
@@ -496,6 +510,7 @@ class TrafficAntiFraudScorer:
         action = {"low": "pass", "medium": "review", "high": "block"}[level]
         result = {
             "success": True, "scorer": "traffic_antifraud", "modelVersion": MODEL_VERSION,
+            "weightVersion": get_active_weight_version("traffic_antifraud"),
             "promoterId": ctx.get("promoterId"),
             "score": round(fraud, 1), "level": level, "levelName": LEVEL_NAMES[level],
             "action": action, "actionName": {"pass": "正常计入",

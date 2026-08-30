@@ -37,6 +37,10 @@ class RegisterRequest(BaseModel):
     phone: str = Field(..., min_length=11, max_length=11, description="手机号(11位)")
     password: str = Field(..., min_length=6, max_length=64, description="密码(至少6位)")
     nickname: str | None = Field(None, max_length=50, description="昵称(可选)")
+    birthdate: str | None = Field(
+        None, description="出生日期 ISO8601(可选, 提供时硬校验≥18周岁, 酒类合规)")
+    ageConfirmed: bool = Field(
+        False, description="成年声明(酒类合规, 落库供下单年龄门复用)")
 
 
 class LoginRequest(BaseModel):
