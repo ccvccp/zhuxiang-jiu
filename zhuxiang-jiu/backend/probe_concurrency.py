@@ -16,7 +16,9 @@ import time
 
 import httpx
 
-from main import app, _mock_store, _async_locks
+from main import app, _mock_store
+# 锁缓存已迁移至 core/locks(锁重构后 main 不再持有 _async_locks)
+from core.locks import _async_locks
 
 PRODUCT = "ZX42-2026L07"
 AGENT_ID = 1
