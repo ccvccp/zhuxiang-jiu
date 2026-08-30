@@ -29,6 +29,11 @@ P3.5 embedding 语义向量(检索升级):
     ASR_MODEL            转写模型名(默认 glm-asr-2512, 智谱;
                          单文件 ≤25MB/≤30s, 由调用方分段)
 
+检索重排 Rerank(P3.7):
+    KNOWLEDGE_RERANK     开关(默认 off, on 时检索结果经重排模型精排)
+    RERANK_MODEL         重排模型名(默认 rerank, 智谱;
+                         候选 ≤128 条/单条 ≤4096 字符)
+
 用法:
     from services.llm_client import provider_client
     text = provider_client.chat("system prompt", "user prompt")
@@ -99,6 +104,18 @@ def crawl_llm_enabled() -> bool:
         return False
     return os.environ.get(
         "KNOWLEDGE_CRAWL_LLM", "off").strip().lower() == "on"
+
+
+def rerank_enabled() -> bool:
+    """检索重排开关(P3.7)
+
+    KNOWLEDGE_RERANK=on 且配置 API key 时开启;
+    LLM_ENABLED=off 总开关关闭时同样关闭。
+    """
+    if not llm_enabled():
+        return False
+    return os.environ.get(
+        "KNOWLEDGE_RERANK", "off").strip().lower() == "on"
 
 
 class LLMProviderClient:
@@ -313,6 +330,51 @@ class LLMProviderClient:
             return joined.strip()
         logger.warning("llm_asr_empty_response model=%s", model)
         return None
+
+    def rerank(self, query: str,
+               documents: list[str]) -> list[tuple[int, float]] | None:
+        """检索重排(P3.7): query 与候选文本的相关性打分排序
+
+        返回 (原始下标, 相关性得分) 按得分降序; 候选超 128 条
+        截断(智谱约束), 失败/未配置返回 None(调用方保持原序)。
+
+        Returns:
+            [(index, relevance_score), ...] 降序; 未配置 key、
+            请求失败、响应异常、空结果均返回 None。
+        """
+        if not rerank_enabled() or not documents:
+            return None
+        api_key = os.environ["LLM_API_KEY"].strip()
+        base_url = os.environ.get(
+            "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
+        ).rstrip("/")
+        model = os.environ.get("RERANK_MODEL", "rerank")
+        docs = [d[:4096] for d in documents[:128]]
+        payload = json.dumps({"model": model, "query": query[:4096],
+                              "documents": docs, "top_n": len(docs)},
+                             ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            f"{base_url}/rerank", data=payload,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {api_key}"},
+            method="POST")
+        try:
+            with urllib.request.urlopen(
+                    request, timeout=_TIMEOUT) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            logger.warning("llm_rerank_failed(保持原序): %s", exc)
+            return None
+        results = body.get("results") or []
+        ranked = []
+        for r in results:
+            idx = r.get("index")
+            score = r.get("relevance_score")
+            if isinstance(idx, int) and 0 <= idx < len(docs) \
+                    and isinstance(score, (int, float)):
+                ranked.append((idx, float(score)))
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        return ranked or None
 
 
 provider_client = LLMProviderClient()

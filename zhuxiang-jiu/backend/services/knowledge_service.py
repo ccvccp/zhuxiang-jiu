@@ -247,6 +247,36 @@ class KnowledgeService:
         vecs = provider_client.embed([query])
         return vecs[0] if vecs else None
 
+    # P3.7 重排候选数(召回池放大后取重排后 top_k)
+    RERANK_POOL_K = 10
+
+    @classmethod
+    def _rerank_results(cls, query: str,
+                        results: list[tuple[dict, float]],
+                        top_k: int) -> list[tuple[dict, float]]:
+        """P3.7: 检索结果重排(rerank 模型精排)
+
+        召回池放大到 RERANK_POOL_K 再经 rerank 相关性打分取
+        top_k——2-gram/语义召回只管"找得到", 重排负责"排得准";
+        rerank 关/失败/结果异常保持原序(零行为变化)。
+
+        相似度替换: 重排后取 relevance_score 作为条目相似度
+        (RAG 分级阈值随语义分布, 生产可另行校准)。
+        """
+        from services.llm_client import provider_client, rerank_enabled
+        if not rerank_enabled() or len(results) <= 1:
+            return results[:top_k]
+        pool = results[:cls.RERANK_POOL_K]
+        docs = [f"{e['question']}\n{e['answer']}" for e, _ in pool]
+        ranked = provider_client.rerank(query, docs)
+        if not ranked:
+            return results[:top_k]
+        out = []
+        for idx, score in ranked[:top_k]:
+            entry, _ = pool[idx]
+            out.append((entry, score))
+        return out
+
     async def _save_entry(self, entry: dict) -> None:
         """保存条目(含 P3.5 语义向量注入)
 
@@ -512,9 +542,12 @@ class KnowledgeService:
         if not query:
             return []
         query_vec = tokenize(query)
+        # P3.7: 召回池放大重排(rerank 开启时池取 RERANK_POOL_K)
         results = await self.repo.search_published(
-            query_vec, category, top_k,
+            query_vec, category,
+            max(top_k, self.RERANK_POOL_K),
             query_embedding=self._query_embedding(query))
+        results = self._rerank_results(query, results, top_k)
         out = []
         for entry, sim in results:
             if sim < min_similarity:
@@ -676,11 +709,13 @@ class KnowledgeService:
             raise ValueError("问题不能为空")
         if provider not in ("rule", "llm"):
             raise ValueError(f"非法 provider({provider}), 须为 rule/llm")
-        # top-k 召回(不过滤阈值, 由分级路由判定)
+        # top-k 召回(不过滤阈值, 由分级路由判定; P3.7 重排精排)
         query_vec = tokenize(question)
         results = await self.repo.search_published(
-            query_vec, None, self.RAG_TOP_K,
+            query_vec, None,
+            max(self.RAG_TOP_K, self.RERANK_POOL_K),
             query_embedding=self._query_embedding(question))
+        results = self._rerank_results(question, results, self.RAG_TOP_K)
         if not results:
             return {"answer": "", "mode": "unsolved",
                     "citations": [], "confidence": 0.0}

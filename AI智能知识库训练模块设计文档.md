@@ -1,7 +1,7 @@
-# AI智能知识库训练模块设计文档 v2.0
+# AI智能知识库训练模块设计文档 v2.1
 
-> **版本**: v2.0（P0~P3.6 全部已实现：RAG/Embedding/多模态视觉/抓取清洗/视频抽帧+ASR）
-> **状态**: 十二期开发完成（P0~P2.5 + P3.1 RAG + P3.2 chat 接线 + P3 检索倒排索引 + P3.3 LLM 轨 + P3.4 消费方扩展 + P3.5 Embedding 语义检索 + 多模态 GLM-4V 视觉理解 + 抓取 LLM 智能清洗 + P3.6 视频抽帧+ASR 本地化）
+> **版本**: v2.1（P0~P3.7 全部已实现：RAG/Embedding/多模态视觉/抓取清洗/视频抽帧+ASR/Rerank 重排）
+> **状态**: 十三期开发完成（P0~P2.5 + P3.1 RAG + P3.2 chat 接线 + P3 检索倒排索引 + P3.3 LLM 轨 + P3.4 消费方扩展 + P3.5 Embedding 语义检索 + 多模态 GLM-4V 视觉理解 + 抓取 LLM 智能清洗 + P3.6 视频抽帧+ASR 本地化 + P3.7 Rerank 重排）
 > **定位**: 站点统一知识底座——通过对话教学、文档/图片/视频上传、全网抓取三源持续训练，经治理流水线（合规筛查/相似去重/人工审核/自动过审）沉淀为可检索、可进化、可分发的知识资产，供 chat/product/attract 等模块消费。
 
 ---
@@ -194,7 +194,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 
 | 文件 | 规模 | 覆盖 |
 |---|---|---|
-| test_knowledge_routes.py | 124 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取（含 crawl/run 智能清洗 5 项） + P2 全部 6 项 + P2.5 修复 7 项 + P3.1 RAG 8 项 + P3 检索索引 8 项 + P3.3 LLM 轨 3 项 + P3.5 Embedding 7 项 + 多模态 llm 轨 6 项 + P3.6 抽帧+ASR 5 项（本地抽帧+ASR 时间轴 / 无 ffmpeg 降级 / ingest_video 本地轨生效+治理去重 / transcribe 未配置 key / transcribe 文件不存在；ffmpeg/下载/视觉/转写四重 mock 全链） |
+| test_knowledge_routes.py | 129 断言 | P0 治理/检索/缺口/迁移/统计 + P1 教学/文档/多模态/抓取（含 crawl/run 智能清洗 5 项） + P2 全部 6 项 + P2.5 修复 7 项 + P3.1 RAG 8 项 + P3 检索索引 8 项 + P3.3 LLM 轨 3 项 + P3.5 Embedding 7 项 + 多模态 llm 轨 6 项 + P3.6 抽帧+ASR 5 项 + P3.7 Rerank 5 项（默认关不调 rerank / 重排次序反转生效 / 相似度取重排分 / rerank 失败回退原序 / RAG 重排路径生效） |
 | test_knowledge_quality_scheduler.py | 10 断言 | 单轮扫描/淘汰/保留/开关/周期下限/启动幂等/停止 |
 | test_product_routes.py | 82 断言 | 产品 7 端点全量 + P3.4 知识背景 2 项（知识库空不阻断 / 品牌种子后附加 entryId/answer/qualityScore + 步骤日志） |
 | test_attract_routes.py | 71 断言 | 引流 21 接口全量 + P3.4 知识注入 3 项（未命中回退硬编码 / detail 槽位注入 / knowledgeRefs 溯源） |
@@ -206,8 +206,8 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | 方向 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
 | **RAG 问答层** | 检索 top-k 融合生成答案 + 引用条目 ID 溯源，对接 chat 智能接待引擎（详见第九章 D-18 设计） | 高 | **P3.1 + P3.2 已实施** |
-| **检索升级** | **倒排索引 + Embedding 语义向量均已实施**：倒排索引（token→entry_id，Redis Set `zhuxiang:knowledge:inv:{token}`）突破 SEARCH_SCAN_LIMIT=2000 截断，仅加载共同 token 候选；**P3.5 Embedding 语义检索**（`KNOWLEDGE_EMBEDDING=on` 开启，默认 off）：`llm_client.embed()` 批量向量化（OpenAI 兼容 `/embeddings`，智谱 embedding-3），published 条目入库自动注入语义向量、rebuild-index 批量回填存量，检索时与全量含向量条目做稠密余弦——同义改写（字面无共同 token）也可命中；embed 失败/未回填自动回退 2-gram 路径 | 高 | **已实施** |
-| **LLM 轨落地** | **RAG synthesize + 多模态视觉理解 + 抓取智能清洗 + 视频抽帧+ASR 全部已实施**：`services/llm_client.py`（urllib 纯标准库，chat/vision/embed/transcribe 四方法），`rag_answer(provider="llm")` synthesized 分支大模型合成（幻觉治理 prompt）；**多模态 llm 轨**：`ingest_image(provider="llm")` GLM-4V 图片描述自动生成、`ingest_video(provider="llm")` GLM-4V 视频时间轴自动生成（`KNOWLEDGE_MEDIA_LLM` 开关）；**抓取 llm 轨**：`crawl_run(provider="llm")` LLM 语义级去噪（`KNOWLEDGE_CRAWL_LLM` 开关）；**P3.6 视频抽帧+ASR 本地化**：GLM-4V 直接视频理解失败后的本地回退链——ffmpeg 抽关键帧（每 10s 一帧，上限 6 帧）→ 逐帧 GLM-4V 描述 + 音轨按 30s 分段 → `llm_client.transcribe()`（GLM-ASR，手工 multipart 纯标准库）转写 → 合成"画面/语音"时间轴；本地无 ffmpeg/下载失败优雅降级回退 rule 轨（`ASR_MODEL` 环境变量） | 中 | **已全部实施** |
+| **检索升级** | **倒排索引 + Embedding 语义向量 + Rerank 重排均已实施**：倒排索引（token→entry_id，Redis Set `zhuxiang:knowledge:inv:{token}`）突破 SEARCH_SCAN_LIMIT=2000 截断，仅加载共同 token 候选；**P3.5 Embedding 语义检索**（`KNOWLEDGE_EMBEDDING=on` 开启，默认 off）：`llm_client.embed()` 批量向量化（OpenAI 兼容 `/embeddings`，智谱 embedding-3），published 条目入库自动注入语义向量、rebuild-index 批量回填存量，检索时与全量含向量条目做稠密余弦——同义改写（字面无共同 token）也可命中；embed 失败/未回填自动回退 2-gram 路径；**P3.7 Rerank 重排**（`KNOWLEDGE_RERANK=on` 开启，默认 off）：召回池放大到 RERANK_POOL_K=10 后经智谱 rerank 模型相关性打分取 top_k（`llm_client.rerank()`，/rerank 端点，候选 ≤128 条）——召回管"找得到"、重排管"排得准"，相似度替换为 relevance_score；rerank 关/失败保持原序零行为变化 | 高 | **已实施** |
+| **LLM 轨落地** | **RAG synthesize + 多模态视觉理解 + 抓取智能清洗 + 视频抽帧+ASR 全部已实施**：`services/llm_client.py`（urllib 纯标准库，chat/vision/embed/transcribe/rerank 五方法），`rag_answer(provider="llm")` synthesized 分支大模型合成（幻觉治理 prompt）；**多模态 llm 轨**：`ingest_image(provider="llm")` GLM-4V 图片描述自动生成、`ingest_video(provider="llm")` GLM-4V 视频时间轴自动生成（`KNOWLEDGE_MEDIA_LLM` 开关）；**抓取 llm 轨**：`crawl_run(provider="llm")` LLM 语义级去噪（`KNOWLEDGE_CRAWL_LLM` 开关）；**P3.6 视频抽帧+ASR 本地化**：GLM-4V 直接视频理解失败后的本地回退链——ffmpeg 抽关键帧（每 10s 一帧，上限 6 帧）→ 逐帧 GLM-4V 描述 + 音轨按 30s 分段 → `llm_client.transcribe()`（GLM-ASR，手工 multipart 纯标准库）转写 → 合成"画面/语音"时间轴；本地无 ffmpeg/下载失败优雅降级回退 rule 轨（`ASR_MODEL` 环境变量） | 中 | **已全部实施** |
 | **消费方扩展** | **已实施（P3.4）**：product 详情页经 `distribution_suggest("product")` 拉取高质量知识附加 `knowledgeBackground` 字段（营销文案与品牌知识文本重叠低，按质量分拉取比按产品名检索更贴合语义）；attract 内容生成按选题 keywords 检索知识（sim≥0.25）注入 detail 槽位 + `knowledgeRefs` 溯源，未命中回退硬编码文案；均 best-effort（知识库异常不阻断主流程） | 中 | **已实施** |
 
 ---
@@ -229,6 +229,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | 多模态 LLM 视觉理解 | 2026-08-30 | llm_client.vision()（OpenAI 兼容 content 数组 image_url/video_url，GLM-4V）；ingest_image/ingest_video provider 双轨（llm 轨 GLM-4V 自动生成图片描述/视频时间轴 JSON+围栏容错，失败回退 rule 人工输入）；KNOWLEDGE_MEDIA_LLM 开关（默认 off）+ VISION_MODEL/LLM_VISION_TIMEOUT；入库仍走治理流水线（违禁词/去重/pending 审核）；真实智谱 glm-4v-flash 验证图片描述自动生成 |
 | 抓取智能清洗 | 2026-08-30 | crawl_run provider 双轨（llm 轨在 extract_html_text 正则去标签基础上 LLM 语义级去噪提炼正文，输入截断 20000 字控成本，"无正文"哨兵出口；失败回退 rule）；KNOWLEDGE_CRAWL_LLM 开关（默认 off）；主题域过滤/医药加严/分块入库治理流程两轨完全一致；专用 CrawlRunRequest 模型；真实智谱 glm-4-flash 验证：导航/广告/版权噪声全去除、正文完整保留 |
 | P3.6 视频抽帧+ASR | 2026-08-30 | llm_client.transcribe()（GLM-ASR 手工 multipart 纯标准库，ASR_MODEL 默认 glm-asr-2512，text/segments 双响应兼容）；_video_local_analyze 本地回退链：视频下载（≤50MB）→ ffmpeg 抽帧（每 10s，上限 6 帧）+ 音轨 30s 分段 → 逐帧 GLM-4V + 逐段 ASR → "画面/语音"时间轴；无 ffmpeg/下载失败/空结果优雅降级 None→rule 轨；真实验证：Windows TTS 生成中文语音 → GLM-ASR 转写正确（"竹香酒采用竹笋竹茎竹叶为原料利用专有菌群古法酿制"） |
+| P3.7 Rerank 重排 | 2026-08-30 | llm_client.rerank()（智谱 /rerank 端点，query+documents 相关性打分，候选 ≤128 条/单条 4096 字符）；KNOWLEDGE_RERANK 开关（默认 off）+ RERANK_MODEL；search/rag_answer 召回池放大 RERANK_POOL_K=10 重排后取 top_k，相似度替换 relevance_score；rerank 关/失败保持原序零行为变化；真实智谱验证：相关条目（1.0000）显著高于无关条目（0.9966） |
 
 ---
 
@@ -343,6 +344,7 @@ chat 的转人工判定（unresolvedCount）逻辑不变。
 | **P3.4 消费方扩展** | product 详情 knowledgeBackground + attract 生成链路知识注入与 knowledgeRefs 溯源，product/attract 测试回归 | **✅ 已实施** |
 | **P3.5 Embedding 语义向量** | llm_client.embed 批量向量化 + 入库注入/存量回填 + search/rag_answer 语义路径（回退 2-gram），真实智谱端到端验证 | **✅ 已实施** |
 | **P3.6 视频抽帧+ASR 本地化** | llm_client.transcribe（GLM-ASR 手工 multipart）+ _video_local_analyze 本地回退链（ffmpeg 抽帧+逐帧 GLM-4V+音轨分段 ASR），ingest_video 三级回退链，无 ffmpeg 优雅降级，真实 TTS→ASR 端到端验证 | **✅ 已实施** |
+| **P3.7 Rerank 重排** | llm_client.rerank（智谱 /rerank 相关性打分）+ search/rag_answer 召回池放大重排，KNOWLEDGE_RERANK 开关默认 off，失败保持原序，真实智谱验证相关性区分 | **✅ 已实施** |
 
 ### 9.8 边界与约束
 

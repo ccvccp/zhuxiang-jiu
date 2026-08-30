@@ -1176,6 +1176,71 @@ async def main():
     os.environ.pop("LLM_API_KEY", None)
 
     # ============================================================
+    # 8.10 P3.7 Rerank 重排: 默认关 / 重排生效 / 失败回退原序
+    # ============================================================
+    _orig_rerank = _llm_mod.provider_client.rerank
+
+    # 8.10.1 默认关: 不调 rerank(零行为变化)
+    os.environ.pop("KNOWLEDGE_RERANK", None)
+    _rerank_calls = {"n": 0}
+
+    def _rerank_counter(query, documents):
+        _rerank_calls["n"] += 1
+        return [(0, 1.0)]
+
+    _llm_mod.provider_client.rerank = _rerank_counter
+    _h_rr_off = await svc.search("竹香酒是怎么酿造的", record_hit=False)
+    record("RR-默认关闭不调rerank",
+           _rerank_calls["n"] == 0 and len(_h_rr_off) >= 1,
+           f"calls={_rerank_calls['n']}")
+
+    # 8.10.2 开启 + mock 重排: 召回池第 2 位提为第 1(次序反转)
+    os.environ["LLM_API_KEY"] = "test-key"
+    os.environ["KNOWLEDGE_RERANK"] = "on"
+    # 发布两条候选: 召回分数低的 B 重排后置顶
+    await _publish(svc, "重排测试A问题原料", "重排测试A答案原料内容。",
+                   keywords="重排 原料")
+    await _publish(svc, "重排测试B工艺流程", "重排测试B工艺流程内容。",
+                   keywords="重排 工艺")
+
+    def _rerank_flip(query, documents):
+        # 反转前两条次序(模拟 rerank 认为召回第2更相关)
+        n = len(documents)
+        return [(i, 0.9 - i * 0.01) for i in range(n)][::-1][:n]
+
+    _llm_mod.provider_client.rerank = _rerank_flip
+    _h_rr = await svc.search("重排测试", top_k=2, record_hit=False)
+    # mock 后池内全量倒序 → 原第2位(召回次高者)升为第1
+    record("RR-重排生效(次序按相关性反转)",
+           len(_h_rr) == 2 and _h_rr[0]["entryId"] > _h_rr[1]["entryId"],
+           f"实际{[(h['entryId'], h['similarity']) for h in _h_rr]}")
+    # 相似度被 relevance_score 替换(池 10 条倒序 → top1=0.9-9*0.01)
+    record("RR-相似度取重排分",
+           0 < _h_rr[0]["similarity"] < 1
+           and _h_rr[0]["similarity"] != _h_rr[1]["similarity"],
+           f"实际sim={_h_rr[0]['similarity']}")
+
+    # 8.10.3 rerank 失败(mock None): 保持原序
+    _llm_mod.provider_client.rerank = lambda q, d: None
+    _h_rr_fb = await svc.search("重排测试", top_k=2, record_hit=False)
+    record("RR-rerank失败回退原序",
+           len(_h_rr_fb) == 2
+           and _h_rr_fb[0]["similarity"] != 0.9,
+           f"实际{[(h['entryId'], h['similarity']) for h in _h_rr_fb]}")
+
+    # 8.10.4 rag_answer 重排路径: mock 重排后 top-1 为高相关条目
+    _llm_mod.provider_client.rerank = _rerank_flip
+    _rag_rr = await svc.rag_answer("重排测试")
+    record("RR-RAG重排路径生效",
+           _rag_rr["mode"] in ("direct", "synthesized"),
+           f"实际mode={_rag_rr['mode']}")
+
+    # 清理
+    _llm_mod.provider_client.rerank = _orig_rerank
+    os.environ.pop("KNOWLEDGE_RERANK", None)
+    os.environ.pop("LLM_API_KEY", None)
+
+    # ============================================================
     # 9. 统计(最终)
     # ============================================================
     stats = await svc.stats()
