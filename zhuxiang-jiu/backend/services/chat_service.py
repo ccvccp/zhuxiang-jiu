@@ -248,21 +248,27 @@ class ChatService:
             reply["messageId"] = message_id
             return reply
 
-        # 2. 知识库检索(新知识库模块优先, 旧FAQ表兜底——迁移过渡期双轨)
+        # 2. 知识库检索(P3.2, D-18): RAG 问答优先, 旧FAQ表兜底——迁移过渡期双轨
         knowledge = await self._search_knowledge(user_content)
         if knowledge:
             session["unresolvedCount"] = 0
             await self.repo.save_session(session)
             content = knowledge.get("answer", "")
+            # P3.2: 置信度动态化(RAG 相似度, 旧 FAQ 回退固定值)
+            confidence = (knowledge.get("confidence")
+                          or AI_REPLY_CONFIDENCE)
             reply = {
                 "sessionId": session_id,
                 "senderType": SENDER_AI,
                 "senderId": 0,
                 "messageType": MESSAGE_TYPE_TEXT,
                 "content": content,
-                "aiConfidence": AI_REPLY_CONFIDENCE,
+                "aiConfidence": round(float(confidence), 4),
                 "transferred": False,
                 "knowledgeId": knowledge.get("id"),
+                # P3.2: RAG 引用溯源(旧 FAQ 兜底时为空列表)
+                "citations": knowledge.get("citations") or [],
+                "ragMode": knowledge.get("ragMode") or "legacy",
             }
         else:
             # 未命中: 兜底回复 + 未解决计数+1 + 记录知识缺口(飞轮)
@@ -477,17 +483,19 @@ class ChatService:
     # ============================================================
 
     async def _search_knowledge(self, user_content: str) -> dict | None:
-        """统一知识检索: 新知识库(published, 向量 top-k)优先,
-        旧 chat_knowledge(关键词匹配)兜底。
+        """统一知识检索(P3.2, D-18): RAG 问答优先(direct/synthesized
+        带引用溯源), 旧 chat_knowledge(关键词匹配)兜底。
 
-        新库异常不阻断对话(best-effort 降级旧库)。
+        RAG unsolved 或新库异常不阻断对话(best-effort 降级旧库)。
         """
         try:
-            matches = await self.knowledge_svc.search(
-                user_content, top_k=1, record_hit=True)
-            if matches:
-                m = matches[0]
-                return {"id": m["entryId"], "answer": m["answer"]}
+            rag = await self.knowledge_svc.rag_answer(user_content)
+            if rag["mode"] != "unsolved" and rag["answer"]:
+                return {"id": rag["citations"][0]["entryId"],
+                        "answer": rag["answer"],
+                        "citations": rag["citations"],
+                        "confidence": rag["confidence"],
+                        "ragMode": rag["mode"]}
         except Exception:
             pass
         # 旧 FAQ 兜底(迁移过渡期)

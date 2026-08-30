@@ -139,6 +139,10 @@ class TestSendMessageAIReply:
             intent="product_consult",
         )
 
+        # 预置新知识库品牌种子(P3.2: RAG 链路验证)
+        from services.knowledge_service import KnowledgeService
+        await KnowledgeService().seed_brand_knowledge()
+
         # test 6: 用户消息命中知识库
         session = await svc.create_session(USER_ID_1)
         result = await svc.send_message(
@@ -180,6 +184,41 @@ class TestSendMessageAIReply:
         record("test_11_unresolved_increment",
                session_updated["unresolvedCount"] == 1,
                f"expected 1, got {session_updated['unresolvedCount']}")
+
+        # ---- P3.2: RAG 问答链路(D-18) ----
+        # test 11a: RAG 命中(direct): 回复带引用溯源 + ragMode
+        result_rag = await svc.send_message(
+            session["sessionId"], SENDER_USER, USER_ID_1, "text", "竹香酒是怎么酿造的"
+        )
+        ai_rag = result_rag["aiReply"]
+        record("test_11a_rag_direct_reply_with_citations",
+               ai_rag is not None
+               and ai_rag.get("ragMode") == "direct"
+               and len(ai_rag.get("citations") or []) == 1
+               and ai_rag["citations"][0]["entryId"] > 0
+               and "竹笋" in ai_rag["content"],
+               f"got ragMode={ai_rag.get('ragMode') if ai_rag else None}, "
+               f"citations={ai_rag.get('citations') if ai_rag else None}")
+
+        # test 11b: RAG 置信度动态化(= top-1 相似度, 非固定 0.85)
+        record("test_11b_rag_confidence_dynamic",
+               ai_rag is not None
+               and abs(ai_rag["aiConfidence"] - 0.85) > 0.001
+               and 0 < ai_rag["aiConfidence"] < 1,
+               f"got {ai_rag['aiConfidence'] if ai_rag else None}")
+
+        # test 11c: 旧 FAQ 兜底命中: ragMode=legacy, citations 为空
+        result_legacy = await svc.send_message(
+            session["sessionId"], SENDER_USER, USER_ID_1, "text", "竹奕酒多少度多少钱"
+        )
+        ai_legacy = result_legacy["aiReply"]
+        record("test_11c_legacy_fallback_no_citations",
+               ai_legacy is not None
+               and "42度" in ai_legacy["content"]
+               and ai_legacy.get("ragMode") == "legacy"
+               and ai_legacy.get("citations") == [],
+               f"got ragMode={ai_legacy.get('ragMode') if ai_legacy else None}, "
+               f"citations={ai_legacy.get('citations') if ai_legacy else None}")
 
 
 class TestAutoTransfer:

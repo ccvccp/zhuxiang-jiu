@@ -1,7 +1,7 @@
-# AI智能知识库训练模块设计文档 v1.2
+# AI智能知识库训练模块设计文档 v1.3
 
-> **版本**: v1.2（P0+P1+P2+P2.5+P3.1 已实现，P3.2/P3.3 规划中）
-> **状态**: 四期开发完成（P0~P2.5 + P3.1 RAG 核心），chat 接线待实施
+> **版本**: v1.3（P0+P1+P2+P2.5+P3.1+P3.2 已实现，P3.3 规划中）
+> **状态**: 五期开发完成（P0~P2.5 + P3.1 RAG 核心 + P3.2 chat 接线），LLM 轨预留
 > **定位**: 站点统一知识底座——通过对话教学、文档/图片/视频上传、全网抓取三源持续训练，经治理流水线（合规筛查/相似去重/人工审核/自动过审）沉淀为可检索、可进化、可分发的知识资产，供 chat/product/attract 等模块消费。
 
 ---
@@ -217,6 +217,7 @@ createdBy, reviewedBy(0=自动过审), publishedAt, createdAt, updatedAt
 | P2 智能进化 | 2026-08-30 | 质量淘汰/缺口摘要/渐进信任/分发建议/后台调度器（6 端点，D-16） |
 | P2.5 数据闭环 | 2026-08-30 | chat 检索接线修复 / missCount 埋点 / KEYS→SCAN / sweep 增量化 / 连胜判定修正 / 缺口通知飞轮 |
 | P3.1 RAG 核心 | 2026-08-30 | rag_answer（置信分级路由 direct≥0.50 实测校准 / synthesized≥0.25 / unsolved）+ rule 轨融合生成 + 引用溯源 + 计数联动 + POST /api/knowledge/ask 公开端点（33 端点） |
+| P3.2 chat 接线 | 2026-08-30 | chat 消费 rag_answer（RAG 优先/旧 FAQ 兜底），回复透出 citations + ragMode，aiConfidence 动态化（RAG 相似度/legacy 固定 0.85） |
 
 ---
 
@@ -298,17 +299,18 @@ llm 轨（P3.3 预留）: top-k 条目作为 context 喂给大模型生成，引
 }                           #  ask 端点仅标记不重复记录——幂等约束)
 ```
 
-### 9.6 chat 模块接线（P3.2）
+### 9.6 chat 模块接线（P3.2，已实施）
 
 ```
-_search_knowledge 升级:
+_search_knowledge 升级(已实施):
   rag = await knowledge_svc.rag_answer(user_content)
-  → mode != unsolved: 返回 {answer(融合后), citations}
+  → mode != unsolved: 返回 {answer(融合后), citations, confidence, ragMode}
   → unsolved: 走旧 FAQ 兜底 → 仍无 → 缺口飞轮(不变)
 
-回复增强:
-  aiConfidence 动态化: rag confidence(替代固定常量)
-  回复体透出 citations(前端可渲染"知识来源"角标)
+回复增强(已实施):
+  aiConfidence 动态化: RAG 命中=相似度, 旧 FAQ 兜底=固定 0.85
+  回复体透出 citations(前端可渲染"知识来源"角标) 与 ragMode
+  (direct/synthesized/legacy, legacy=旧FAQ兜底)
 ```
 
 chat 的转人工判定（unresolvedCount）逻辑不变。
@@ -318,7 +320,7 @@ chat 的转人工判定（unresolvedCount）逻辑不变。
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | **P3.1 RAG 核心** | rag_answer（分级路由+rule 轨融合+计数联动）+ /ask 端点 + 测试（direct/synthesized/unsolved 三态、去重、引用、计数、llm 轨回退 rule） | **✅ 已实施** |
-| **P3.2 chat 接线** | chat_service 消费 rag_answer，回复带 citations + 动态置信度，chat 测试回归 | 待实施 |
+| **P3.2 chat 接线** | chat_service 消费 rag_answer，回复带 citations + 动态置信度，chat 测试回归 | **✅ 已实施** |
 | **P3.3 LLM 轨（预留）** | provider="llm" 接入大模型 synthesize，引用携带与幻觉治理 | 接入时实施 |
 
 ### 9.8 边界与约束
