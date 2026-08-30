@@ -183,6 +183,7 @@ jobs:
           docker run --rm \
             -e PYTHONPATH=/app \
             -v $PWD:/src:ro \
+            -v $PWD/requirements.txt:/tmp/requirements.txt:ro \
             -v $PWD/requirements-dev.txt:/tmp/requirements-dev.txt:ro \
             zhuxiang-decision-api:ci-test \
             sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && cd /src && pytest test_*.py -v --junitxml=/tmp/test-results-docker.xml" \

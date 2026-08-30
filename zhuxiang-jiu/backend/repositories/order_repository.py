@@ -189,7 +189,19 @@ class OrderRepository:
         member_id = order.get("memberId")
         if member_id is not None:
             await client.sadd(_k("order", "user", member_id), order_id)
+        # 插入顺序索引(List RPUSH, 对齐内存模式 dict 插入序语义)
+        await self._redis_index_add(client, order_id)
         return order_id
+
+    @staticmethod
+    async def _redis_index_add(client, order_id: str) -> None:
+        """维护插入顺序索引(去重后 RPUSH; 键名 orders:index 不落入
+        order:* 键空间, 免污染 count/list 的 KEYS 扫描)"""
+        if not order_id:
+            return
+        index_key = _k("orders", "index")
+        await client.lrem(index_key, 0, order_id)
+        await client.rpush(index_key, order_id)
 
     async def _redis_count(self) -> int:
         client = await get_redis_client()
@@ -200,12 +212,22 @@ class OrderRepository:
 
     async def _redis_list_all(self) -> list[dict]:
         client = await get_redis_client()
-        keys = await client.keys(_k("order", "*"))
+        # 优先走插入顺序索引(List, 与内存模式行为一致);
+        # 索引为空时回退 KEYS 扫描(兼容索引引入前的存量数据)
+        ids = await client.lrange(_k("orders", "index"), 0, -1)
+        if not ids:
+            keys = await client.keys(_k("order", "*"))
+            result = []
+            for key in keys:
+                if ":user:" in key:
+                    continue
+                raw = await client.get(key)
+                if raw:
+                    result.append(json.loads(raw))
+            return result
         result = []
-        for key in keys:
-            if ":user:" in key:
-                continue
-            raw = await client.get(key)
+        for oid in ids:
+            raw = await client.get(_k("order", oid))
             if raw:
                 result.append(json.loads(raw))
         return result
@@ -270,6 +292,7 @@ class OrderRepository:
         member_id = order_data.get("memberId")
         if member_id is not None:
             await client.sadd(_k("order", "user", member_id), order_id)
+        await self._redis_index_add(client, order_id)
         return order_data
 
     async def _redis_delete(self, order_id: str) -> None:
@@ -283,4 +306,6 @@ class OrderRepository:
         member_id = order.get("memberId")
         if member_id is not None:
             await client.srem(_k("order", "user", member_id), order_id)
+        # 删除插入顺序索引
+        await client.lrem(_k("orders", "index"), 0, order_id)
         await client.delete(key)
