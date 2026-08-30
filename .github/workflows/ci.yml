@@ -186,12 +186,17 @@ jobs:
             zhuxiang-decision-api:ci-test \
             sh -c "pip install --no-cache-dir -r /tmp/requirements-dev.txt && cd /app && pytest test_ -v --junitxml=/tmp/test-results-docker.xml" \
             | tee docker-test-output.log; then
+            # 失败摘要双通道: step summary + error 注解(注解在 job 页直接可见)
             {
               echo "## Docker 容器测试失败摘要(日志尾部)"
               echo '```'
               tail -n 80 docker-test-output.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
+            grep -E "^FAILED|^ERROR|ModuleNotFoundError|ImportError|PermissionError|OSError" \
+              docker-test-output.log | head -n 10 | while IFS= read -r line; do
+              echo "::error::${line:0:240}"
+            done
             exit 1
           fi
 
@@ -563,6 +568,7 @@ jobs:
         run: |
           set -o pipefail
           if ! python -m pytest test_redis_integration.py -m redis -v --tb=short 2>&1 | tee redis-integration-output.log; then
+            # 失败摘要双通道: step summary + error 注解(注解在 job 页直接可见)
             {
               echo "## Redis 集成测试失败摘要"
               echo "### 失败用例"
@@ -574,6 +580,10 @@ jobs:
               tail -n 80 redis-integration-output.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
+            grep -E "^FAILED|^ERROR" redis-integration-output.log | head -n 10 \
+              | while IFS= read -r line; do
+              echo "::error::${line:0:240}"
+            done
             exit 1
           fi
 
