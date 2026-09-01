@@ -112,6 +112,41 @@ class FoldRequest(PydBaseModel):
     reason: str = Field("", max_length=200)
 
 
+class CoverageRequest(PydBaseModel):
+    level: str = Field(..., description="范围层级: city/district/grid")
+    adcode: str = Field("", max_length=12, description="行政区划码(市/区县层)")
+    gridKeys: list = Field([], description="网格键列表(grid 层可选)")
+    centerLat: float = Field(None, ge=-90, le=90,
+                             description="中心纬度(grid 层可代替 gridKeys)")
+    centerLng: float = Field(None, ge=-180, le=180,
+                             description="中心经度")
+
+
+class GatheringRequest(PydBaseModel):
+    partySize: int = Field(..., ge=1, le=50, description="聚会人数")
+    wineProductId: int = Field(..., description="酒品ID(同盟在售)")
+    dishMerchantId: int = Field(..., description="配菜商户ID(好菜类目)")
+    venueMerchantId: int = Field(..., description="订境商户ID(好境类目)")
+    gatheringTime: str = Field("", max_length=30, description="聚会时间")
+
+
+class RedeemRequest(PydBaseModel):
+    code: str = Field(..., min_length=6, max_length=30,
+                      description="线下核销码")
+
+
+class CustomDemandRequest(PydBaseModel):
+    merchantId: int = Field(..., description="商户ID")
+    demandType: str = Field(...,
+                            description="定制类型: engraving/private_feast/sealing")
+    description: str = Field(..., min_length=1, max_length=1000)
+    budget: float = Field(0, ge=0, description="预算(可选)")
+
+
+class QuoteRequest(PydBaseModel):
+    quotedPrice: float = Field(..., gt=0, description="报价")
+
+
 # ============================================================
 # 入盟网关
 # ============================================================
@@ -556,3 +591,241 @@ async def report_category(
 def register_alliance_routes(app):
     """注册37号·AI智能网站同盟模块路由"""
     app.include_router(router)
+
+
+# ============================================================
+# P1: 地图引擎 GeoGrid(admin/公开)
+# ============================================================
+
+@router.post("/api/alliance/merchants/{merchant_id}/coverage",
+             tags=["AI智能网站同盟模块"])
+async def apply_coverage(
+    merchant_id: int,
+    data: CoverageRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """申请服务范围(密度上限仲裁: 同网格同类目<gridCap 优质优先)"""
+    _require_admin(x_role)
+    try:
+        from services.alliance_geo_service import AllianceGeoService
+        result = await AllianceGeoService().apply_coverage(
+            merchant_id=merchant_id, level=data.level,
+            adcode=data.adcode, grid_keys=data.gridKeys,
+            center_lat=data.centerLat, center_lng=data.centerLng)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/alliance/merchants/{merchant_id}/coverage",
+            tags=["AI智能网站同盟模块"])
+async def merchant_coverage(
+    merchant_id: int,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """商户服务范围查询"""
+    _require_admin(x_role)
+    try:
+        from services.alliance_geo_service import AllianceGeoService
+        result = await AllianceGeoService().merchant_coverage(merchant_id)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/alliance/geo/nearby", tags=["AI智能网站同盟模块"])
+async def nearby_merchants(
+    lat: float = Query(..., ge=-90, le=90, description="纬度"),
+    lng: float = Query(..., ge=-180, le=180, description="经度"),
+    category: str = Query(None, description="类目筛选"),
+    limit: int = Query(10, ge=1, le=50),
+):
+    """就近推荐商户(公开: 定位→网格→类目商户, 距离+评分排序)"""
+    try:
+        from services.alliance_geo_service import AllianceGeoService
+        result = await AllianceGeoService().nearby_merchants(
+            lat=lat, lng=lng, category=category, limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P1: 月度考核(admin)
+# ============================================================
+
+@router.post("/api/alliance/assessment/run", tags=["AI智能网站同盟模块"])
+async def run_assessment(
+    x_role: str = Header(None, alias="X-Role"),
+    month: str = Query(None, description="考核月份(YYYY-MM, 空=当月)"),
+    merchantId: int = Query(None, description="指定商户(空=全部 active)"),
+):
+    """执行月度考核(GMV/星级→S/A/B/C→连续C级暂停/清退)"""
+    _require_admin(x_role)
+    try:
+        from services.alliance_geo_service import AllianceAssessmentService
+        result = await AllianceAssessmentService().run_monthly(
+            month=month, merchant_id=merchantId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/alliance/merchants/{merchant_id}/assessment",
+            tags=["AI智能网站同盟模块"])
+async def merchant_assessment(
+    merchant_id: int,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """商户考核历史"""
+    _require_admin(x_role)
+    try:
+        from services.alliance_geo_service import AllianceAssessmentService
+        result = await AllianceAssessmentService(
+        ).merchant_assessment_history(merchant_id)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P2: 场景服务(酒友小聚/线下核销/定制)
+# ============================================================
+
+@router.post("/api/alliance/scenes/gathering",
+             tags=["AI智能网站同盟模块"])
+async def create_gathering(
+    data: GatheringRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """酒友小聚编排出单(选酒→配菜→订境, 一单三子单+核销码)"""
+    member_id = _require_member(x_member_id)
+    try:
+        from services.alliance_scene_service import AllianceSceneService
+        result = await AllianceSceneService().create_gathering(
+            user_id=member_id, party_size=data.partySize,
+            wine_product_id=data.wineProductId,
+            dish_merchant_id=data.dishMerchantId,
+            venue_merchant_id=data.venueMerchantId,
+            gathering_time=data.gatheringTime)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/alliance/scenes", tags=["AI智能网站同盟模块"])
+async def list_scenes(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    status: str = Query(None),
+):
+    """我的场景订单(一单三子单+核销码状态)"""
+    member_id = _require_member(x_member_id)
+    try:
+        from services.alliance_scene_service import AllianceSceneService
+        result = await AllianceSceneService().list_scenes(
+            user_id=member_id, status=status)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/alliance/redeem", tags=["AI智能网站同盟模块"])
+async def redeem(
+    data: RedeemRequest,
+):
+    """线下核销(到店扫码; 三子单立即结算分润, 幂等+72h有效)"""
+    try:
+        from services.alliance_scene_service import AllianceSceneService
+        result = await AllianceSceneService().redeem(data.code)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/alliance/custom-demands",
+             tags=["AI智能网站同盟模块"])
+async def create_custom_demand(
+    data: CustomDemandRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """提交定制需求(酒具刻字/私宴定制/封坛定制)"""
+    member_id = _require_member(x_member_id)
+    try:
+        from services.alliance_scene_service import AllianceSceneService
+        result = await AllianceSceneService().create_custom_demand(
+            user_id=member_id, merchant_id=data.merchantId,
+            demand_type=data.demandType, description=data.description,
+            budget=data.budget)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/alliance/custom-demands", tags=["AI智能网站同盟模块"])
+async def list_custom_demands(
+    x_role: str = Header(None, alias="X-Role"),
+    status: str = Query(None),
+    merchantId: int = Query(None),
+):
+    """定制需求列表(admin/商户侧)"""
+    _require_admin(x_role)
+    try:
+        from services.alliance_scene_service import AllianceSceneService
+        result = await AllianceSceneService().list_custom_demands(
+            merchant_id=merchantId, status=status)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/alliance/custom-demands/{demand_id}/quote",
+             tags=["AI智能网站同盟模块"])
+async def quote_custom_demand(
+    demand_id: int,
+    data: QuoteRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """商户报价(demand→quoted)"""
+    _require_admin(x_role)
+    try:
+        from services.alliance_scene_service import AllianceSceneService
+        result = await AllianceSceneService().quote_custom_demand(
+            demand_id, quoted_price=data.quotedPrice)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/alliance/custom-demands/{demand_id}/confirm",
+             tags=["AI智能网站同盟模块"])
+async def confirm_custom_demand(
+    demand_id: int,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """用户确认报价(quoted→confirmed; 须本人)"""
+    member_id = _require_member(x_member_id)
+    try:
+        from services.alliance_scene_service import AllianceSceneService
+        result = await AllianceSceneService().confirm_custom_demand(
+            demand_id, user_id=member_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/alliance/custom-demands/{demand_id}/advance",
+             tags=["AI智能网站同盟模块"])
+async def advance_custom_demand(
+    demand_id: int,
+    x_role: str = Header(None, alias="X-Role"),
+    target: str = Query(..., description="目标状态: producing/delivered/cancelled"),
+):
+    """推进定制(商户/管理侧)"""
+    _require_admin(x_role)
+    try:
+        from services.alliance_scene_service import AllianceSceneService
+        result = await AllianceSceneService().advance_custom_demand(
+            demand_id, target=target)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)

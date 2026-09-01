@@ -25,6 +25,7 @@
     - ValueError → 409(门槛不达/状态非法/资质缺失/库存不足/已结算等)
 """
 
+import json
 import logging
 from datetime import datetime, UTC, timedelta
 
@@ -416,6 +417,24 @@ class AllianceService:
                     "须提交简化溯源凭证(traceCredentials: 批次/产地/检疫/冷链等)")
             trace_info["credentials"] = provided
 
+        # P1: 简化溯源凭证上链存证(compliance blockchain_evidence,
+        # best-effort 失败不阻断上架; 类型用 compliance 白名单,
+        # 溯源凭证 JSON 序列化为 evidence_data 字符串)
+        evidence_hash = ""
+        if trace_info.get("credentials"):
+            try:
+                from services.compliance_service import ComplianceService
+                evidence_str = json.dumps(
+                    {"credentials": trace_info["credentials"],
+                     "category": category}, ensure_ascii=False)
+                evidence = await ComplianceService().add_blockchain_evidence(
+                    evidence_type="compliance",
+                    evidence_data=evidence_str)
+                evidence_hash = evidence.get("evidenceHash", "")
+                trace_info["evidenceHash"] = evidence_hash
+            except Exception as exc:
+                logger.warning("alliance_trace_evidence_failed: %s", exc)
+
         # 合规门禁
         banned = self._product_compliance_check(name, description or "")
         if banned:
@@ -757,6 +776,39 @@ class AllianceService:
             "createdAt": _now_iso(),
         }
         await self.repo.save_review(review)
+        # P1: AI 语义审评(alliance_review 评分器)——high 档自动折叠
+        try:
+            from services.ai_scoring_service import AllianceReviewScorer
+            merchant = await self.repo.get_merchant(order["merchantId"]) or {}
+            # 当日评价频次(该用户)
+            today_key = _now_iso()[:10]
+            reviewer_reviews = await self.repo.list_reviews(limit=10000)
+            today_count = sum(
+                1 for r in reviewer_reviews
+                if r.get("reviewerId") == reviewer_id
+                and (r.get("createdAt", "")[:10] == today_key))
+            ai_result = await AllianceReviewScorer().score({
+                "reviewId": review_id,
+                "merchantId": order["merchantId"],
+                "score": int(score),
+                "content": (content or ""),
+                "merchantRatingAvg": merchant.get("ratingAvg", 0.0)
+                or float(score),
+                "reviewerReviewsToday": today_count,
+            })
+            review["aiReview"] = {
+                "score": ai_result["score"],
+                "level": ai_result["level"],
+                "action": ai_result["action"],
+            }
+            if ai_result["action"] == "fold":
+                review.update({"folded": True,
+                               "foldReason": f"AI审评自动折叠"
+                               f"(违规分{ai_result['score']})",
+                               "foldedAt": _now_iso()})
+            await self.repo.save_review(review)
+        except Exception as exc:
+            logger.warning("alliance_review_ai_failed: %s", exc)
         # 星级聚合回写商户
         await self._refresh_merchant_rating(order["merchantId"])
         return review

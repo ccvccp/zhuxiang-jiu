@@ -152,6 +152,62 @@ SETTLEMENT_STATUS_REVERSED = "reversed"
 REVIEW_MIN_SCORE = 1
 REVIEW_MAX_SCORE = 5
 
+# ============================================================
+# P1: GeoGrid 地图引擎(设计文档 §2.2)
+# ============================================================
+
+# 网格粒度(度, ~5km): gridKey = floor(lat/0.05):floor(lng/0.05)
+GRID_SIZE = 0.05
+
+# 服务范围层级
+COVERAGE_LEVEL_CITY = "city"        # 市级(adcode 前 2 位为省, 前 4 位为市)
+COVERAGE_LEVEL_DISTRICT = "district"  # 区县(adcode 6 位)
+COVERAGE_LEVEL_GRID = "grid"        # 5km 网格
+COVERAGE_LEVELS = (COVERAGE_LEVEL_CITY, COVERAGE_LEVEL_DISTRICT,
+                   COVERAGE_LEVEL_GRID)
+
+# P1: 月度考核(设计文档 §2.6, 参照 citystore 范式)
+ASSESSMENT_PASS_GMV = 5000.0      # 月 GMV 达标线
+ASSESSMENT_PASS_RATING = 4.0      # 好评率口径: 平均星级达标线
+ASSESSMENT_GRADE_S, ASSESSMENT_GRADE_A = "S", "A"
+ASSESSMENT_GRADE_B, ASSESSMENT_GRADE_C = "B", "C"
+
+# ============================================================
+# P2: 场景服务(设计文档 §2.7)
+# ============================================================
+
+# 酒友小聚: 子单类型(选酒→配菜→订境)
+SCENE_ITEM_WINE = "wine"
+SCENE_ITEM_DISH = "dish"
+SCENE_ITEM_VENUE = "venue"
+SCENE_ITEM_TYPES = (SCENE_ITEM_WINE, SCENE_ITEM_DISH, SCENE_ITEM_VENUE)
+
+SCENE_STATUS_CREATED = "created"        # 编排完成(未支付口径)
+SCENE_STATUS_REDEEMED = "redeemed"      # 线下核销完成
+SCENE_STATUSES = (SCENE_STATUS_CREATED, SCENE_STATUS_REDEEMED)
+
+# 线下核销码有效期(小时)
+REDEEM_CODE_TTL_HOURS = 72
+
+# 定制服务状态机(设计文档 §2.7: demand→quoted→confirmed→producing→delivered)
+CUSTOM_STATUS_DEMAND = "demand"          # 需求提交
+CUSTOM_STATUS_QUOTED = "quoted"          # 商户报价
+CUSTOM_STATUS_CONFIRMED = "confirmed"    # 用户确认
+CUSTOM_STATUS_PRODUCING = "producing"    # 定制生产
+CUSTOM_STATUS_DELIVERED = "delivered"    # 已交付
+CUSTOM_STATUS_CANCELLED = "cancelled"    # 已取消
+CUSTOM_STATUSES = (CUSTOM_STATUS_DEMAND, CUSTOM_STATUS_QUOTED,
+                   CUSTOM_STATUS_CONFIRMED, CUSTOM_STATUS_PRODUCING,
+                   CUSTOM_STATUS_DELIVERED, CUSTOM_STATUS_CANCELLED)
+CUSTOM_TRANSITIONS = {
+    CUSTOM_STATUS_DEMAND: (CUSTOM_STATUS_QUOTED, CUSTOM_STATUS_CANCELLED),
+    CUSTOM_STATUS_QUOTED: (CUSTOM_STATUS_CONFIRMED, CUSTOM_STATUS_CANCELLED),
+    CUSTOM_STATUS_CONFIRMED: (CUSTOM_STATUS_PRODUCING, CUSTOM_STATUS_CANCELLED),
+    CUSTOM_STATUS_PRODUCING: (CUSTOM_STATUS_DELIVERED, CUSTOM_STATUS_CANCELLED),
+    CUSTOM_STATUS_DELIVERED: (),
+    CUSTOM_STATUS_CANCELLED: (),
+}
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -391,6 +447,105 @@ class AllianceRepository:
                       reverse=True)[:limit]
 
     # ============================================================
+    # P1: 服务范围(coverage)
+    # ============================================================
+
+    async def save_coverage(self, coverage: dict) -> dict:
+        return await self._save("alliance_coverage",
+                                coverage["coverageId"], coverage)
+
+    async def list_coverage(self, merchant_id: int = None,
+                            category: str = None,
+                            grid_key: str = None,
+                            limit: int = 1000) -> list[dict]:
+        rows = await self._list("alliance_coverage", limit)
+        if merchant_id is not None:
+            rows = [r for r in rows if r.get("merchantId") == merchant_id]
+        if category:
+            rows = [r for r in rows if r.get("category") == category]
+        if grid_key:
+            rows = [r for r in rows if grid_key in
+                    (r.get("gridKeys") or [])]
+        return sorted(rows, key=lambda r: r.get("coverageId", 0),
+                      reverse=True)[:limit]
+
+    # ============================================================
+    # P1: 月度考核
+    # ============================================================
+
+    async def save_assessment(self, assessment: dict) -> dict:
+        return await self._save("alliance_assessments",
+                                assessment["assessmentId"], assessment)
+
+    async def list_assessments(self, merchant_id: int = None,
+                               month: str = None,
+                               limit: int = 500) -> list[dict]:
+        rows = await self._list("alliance_assessments", limit * 5)
+        if merchant_id is not None:
+            rows = [r for r in rows if r.get("merchantId") == merchant_id]
+        if month:
+            rows = [r for r in rows if r.get("month") == month]
+        return sorted(rows, key=lambda r: r.get("assessmentId", 0),
+                      reverse=True)[:limit]
+
+    # ============================================================
+    # P2: 场景订单(酒友小聚)
+    # ============================================================
+
+    async def save_scene(self, scene: dict) -> dict:
+        return await self._save("alliance_scenes",
+                                scene["sceneId"], scene)
+
+    async def get_scene(self, scene_id: int) -> dict | None:
+        return await self._get("alliance_scenes", scene_id)
+
+    async def list_scenes(self, user_id: int = None,
+                          status: str = None,
+                          limit: int = 200) -> list[dict]:
+        scenes = await self._list("alliance_scenes", limit * 5)
+        if user_id is not None:
+            scenes = [s for s in scenes if s.get("userId") == user_id]
+        if status:
+            scenes = [s for s in scenes if s.get("status") == status]
+        return sorted(scenes, key=lambda s: s.get("sceneId", 0),
+                      reverse=True)[:limit]
+
+    # ============================================================
+    # P2: 线下核销码(String TTL 语义由 service 层维护)
+    # ============================================================
+
+    async def save_redeem_code(self, code: str, record: dict) -> dict:
+        return await self._save("alliance_redeem_codes", code, record)
+
+    async def get_redeem_code(self, code: str) -> dict | None:
+        return await self._get("alliance_redeem_codes", code)
+
+    # ============================================================
+    # P2: 定制服务
+    # ============================================================
+
+    async def save_custom_demand(self, demand: dict) -> dict:
+        return await self._save("alliance_custom_demands",
+                                demand["demandId"], demand)
+
+    async def get_custom_demand(self, demand_id: int) -> dict | None:
+        return await self._get("alliance_custom_demands", demand_id)
+
+    async def list_custom_demands(self, merchant_id: int = None,
+                                  user_id: int = None,
+                                  status: str = None,
+                                  limit: int = 200) -> list[dict]:
+        rows = await self._list("alliance_custom_demands", limit * 5)
+        if merchant_id is not None:
+            rows = [r for r in rows if r.get("merchantId") == merchant_id]
+        if user_id is not None:
+            rows = [r for r in rows if r.get("userId") == user_id]
+        if status:
+            rows = [r for r in rows if r.get("status") == status]
+        return sorted(rows, key=lambda r: r.get("demandId", 0),
+                      reverse=True)[:limit]
+
+    # ============================================================
     # 通用存储(内存/Redis)
     # ============================================================
 
@@ -447,8 +602,17 @@ class AllianceRepository:
             self.store["alliance_settlements"] = {}
             self.store["alliance_reviews"] = {}
             self.store["alliance_share_settings"] = {}   # 分润配置
+            self.store["alliance_coverage"] = {}          # P1: 服务范围
+            self.store["alliance_assessments"] = {}       # P1: 月度考核
+            self.store["alliance_scenes"] = {}            # P2: 场景订单
+            self.store["alliance_redeem_codes"] = {}      # P2: 核销码
+            self.store["alliance_custom_demands"] = {}    # P2: 定制服务
             self.store["_alliance_merchant_seq"] = 0
             self.store["_alliance_application_seq"] = 0
             self.store["_alliance_product_seq"] = 0
             self.store["_alliance_settlement_seq"] = 0
             self.store["_alliance_review_seq"] = 0
+            self.store["_alliance_coverage_seq"] = 0
+            self.store["_alliance_assessment_seq"] = 0
+            self.store["_alliance_scene_seq"] = 0
+            self.store["_alliance_custom_seq"] = 0

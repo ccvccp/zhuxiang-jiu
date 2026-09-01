@@ -730,3 +730,99 @@ class AllianceOnboardingScorer:
 
 
 SCORERS["alliance_onboarding"] = AllianceOnboardingScorer()
+
+
+# ============================================================
+# 7. 同盟评价语义审评(模块 37 P1: 恶意差评/刷好评识别)
+# ============================================================
+
+class AllianceReviewScorer:
+    """同盟评价审评: 恶意差评/刷好评识别(设计文档 §2.6)
+
+    5 因子加权 → 违规分(0-100, 越高越可疑) → 3级 → 处置动作
+    (low=正常展示 / medium=观察 / high=建议折叠)
+    """
+
+    WEIGHTS: ClassVar[dict] = {
+        "extreme_words": 0.25,    # 情绪极端词
+        "attack": 0.25,           # 人身攻击/辱骂
+        "ad_spam": 0.20,          # 广告刷评
+        "frequency": 0.15,        # 短时高频评价
+        "score_deviation": 0.15,  # 与商户均分严重偏离
+    }
+    EXTREME_WORDS = ("垃圾", "骗子", "黑店", "无语", "恶心", "再也不会来")
+    ATTACK_WORDS = ("傻", "蠢", "滚", "废物", "玩意", "货色", "东西吧")
+    AD_SPAM_WORDS = ("加微信", "加V", "低价出", "代购", "优惠券链接", "点击链接")
+    REQUIRED: ClassVar[list] = ["score", "content"]
+
+    async def score(self, ctx: dict) -> dict:
+        """评分入口
+
+        Args:
+            ctx: {
+                reviewId: int, merchantId: int,
+                score: int 星级(1-5),
+                content: str 评价文本,
+                merchantRatingAvg: float 商户当前均分(缺省取评价分),
+                reviewerReviewsToday: int 该用户当日评价数(缺省 0)
+            }
+        """
+        weights = await load_effective_weights("alliance_review",
+                                               self.WEIGHTS)
+        content = str(ctx.get("content") or "")
+        review_score = int(ctx.get("score") or 0)
+        f = {}
+        # ① 极端情绪词
+        extreme = [w for w in self.EXTREME_WORDS if w in content]
+        f["extreme_words"] = _factor(
+            "extreme_words", "极端情绪", _clamp(len(extreme) * 60),
+            weights["extreme_words"],
+            f"命中{extreme}" if extreme else "无")
+        # ② 人身攻击
+        attack = [w for w in self.ATTACK_WORDS if w in content]
+        f["attack"] = _factor(
+            "attack", "人身攻击", _clamp(len(attack) * 80),
+            weights["attack"], f"命中{attack}" if attack else "无")
+        # ③ 广告刷评
+        spam = [w for w in self.AD_SPAM_WORDS if w in content]
+        f["ad_spam"] = _factor(
+            "ad_spam", "广告刷评", _clamp(len(spam) * 90),
+            weights["ad_spam"], f"命中{spam}" if spam else "无")
+        # ④ 短时高频(≥5 条/日 满分)
+        today = int(ctx.get("reviewerReviewsToday") or 0)
+        f["frequency"] = _factor(
+            "frequency", "评价频率", _clamp(today * 20),
+            weights["frequency"], f"当日 {today} 条")
+        # ⑤ 与商户均分偏离(≥2 星差 记差评嫌疑; 全 5 星新号刷好评
+        # 由 frequency 因子承担, 此处只测负向偏离)
+        avg = float(ctx.get("merchantRatingAvg")
+                    if ctx.get("merchantRatingAvg") is not None
+                    else review_score)
+        deviation = max(0.0, avg - review_score)
+        f["score_deviation"] = _factor(
+            "score_deviation", "分值偏离", _clamp(deviation * 40),
+            weights["score_deviation"],
+            f"评分{review_score} vs 商户均分{avg:.1f}")
+
+        total = sum(x["contribution"] for x in f.values())
+        # 评价语义场景更敏感: 极端词命中即应折叠(单一极端词因子
+        # clamp 100×0.25=25, 叠加偏离即可过 45 线)
+        level = _risk_level(total, medium_at=30.0, high_at=45.0)
+        action = {"low": "show", "medium": "watch",
+                  "high": "fold"}[level]
+        return {
+            "success": True, "scorer": "alliance_review",
+            "modelVersion": MODEL_VERSION,
+            "reviewId": ctx.get("reviewId"),
+            "merchantId": ctx.get("merchantId"),
+            "score": round(total, 1), "level": level,
+            "levelName": LEVEL_NAMES[level],
+            "action": action,
+            "actionName": {"show": "正常展示", "watch": "观察",
+                           "fold": "建议折叠"}[action],
+            "confidence": _confidence(ctx, self.REQUIRED),
+            "factors": list(f.values()), "scoredAt": ts(),
+        }
+
+
+SCORERS["alliance_review"] = AllianceReviewScorer()
