@@ -125,7 +125,8 @@ _INT_FIELDS = ("nodeId", "roleId", "grantId", "requestId", "logId",
                "currentStep", "createdBy", "riskScore",
                "scoreId", "creditScore", "complianceScore", "dutyScore",
                "approvalScore", "reportScore", "rewardAmount",
-               "rewardPoints", "delegateId", "delegatorId", "delegateToId")
+               "rewardPoints", "delegateId", "delegatorId",
+               "delegateToId", "defaultDays")
 
 
 def _now_iso() -> str:
@@ -172,7 +173,13 @@ class PermRepository:
     def _serialize(record: dict) -> dict:
         out = {}
         for k, v in record.items():
-            if isinstance(v, (dict, list)):
+            if v is None:
+                # Redis hset 不接受 None(38号实机发现), 空串占位
+                out[k] = ""
+            elif isinstance(v, bool):
+                # Redis hset 不接受 bool(38号实机发现), 转 0/1
+                out[k] = 1 if v else 0
+            elif isinstance(v, (dict, list)):
                 out[k] = json.dumps(v, ensure_ascii=False)
             else:
                 out[k] = v
@@ -220,6 +227,11 @@ class PermRepository:
 
     async def _list(self, table: str, limit: int = 200) -> list[dict]:
         if is_redis_mode():
+            # 38号实机发现: Redis 模式 perm_nodes 从未种子化(_ensure_store
+            # 仅内存路径调用) → 权限树为空, 授权/审批全部不可用。
+            # 惰性种子: perm_nodes 首读为空时灌入 32 权限点。
+            if table == "perm_nodes":
+                await self._ensure_nodes_seeded_redis()
             client = await get_redis_client()
             keys = await client.keys(_k("perm", table, "*"))
             result = []
@@ -231,6 +243,18 @@ class PermRepository:
             self._ensure_store()
             result = list(self.store[table].values())
         return result[:limit]
+
+    async def _ensure_nodes_seeded_redis(self) -> None:
+        """Redis 模式权限树惰性种子(幂等: 已有数据不重灌)"""
+        if not is_redis_mode():
+            return
+        client = await get_redis_client()
+        keys = await client.keys(_k("perm", "perm_nodes", "*"))
+        if keys:
+            return
+        for nid, node in _SEED_NODES.items():
+            await client.hset(_k("perm", "perm_nodes", nid),
+                              mapping=self._serialize(node))
 
     async def _update(self, table: str, record_id, fields: dict) -> dict:
         record = await self._get(table, record_id)

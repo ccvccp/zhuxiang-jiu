@@ -84,7 +84,9 @@ AI_PASS_SCORE = 80.0     # ≥80 快车道(人工终审快速确认)
 AI_REVIEW_SCORE = 60.0   # 60-79 强制人工重点审; <60 拒
 
 _INT_FIELDS = ("versionId", "imageId", "auditId", "version",
-               "uploadedBy", "operator", "size")
+               "uploadedBy", "operator", "size",
+               "lastEditor", "lastSubstantiveEditor", "lastReviewer",
+               "destroyedBy")
 _FLOAT_FIELDS = ("score",)
 
 
@@ -133,7 +135,13 @@ class PdmRepository:
     def _serialize(record: dict) -> dict:
         out = {}
         for k, v in record.items():
-            if isinstance(v, (dict, list)):
+            if v is None:
+                # Redis hset 不接受 None(实机验收发现), 空串占位
+                out[k] = ""
+            elif isinstance(v, bool):
+                # Redis hset 不接受 bool(实机验收发现), 转 0/1
+                out[k] = 1 if v else 0
+            elif isinstance(v, (dict, list)):
                 out[k] = json.dumps(v, ensure_ascii=False)
             else:
                 out[k] = v
