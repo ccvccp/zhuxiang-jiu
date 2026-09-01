@@ -5,6 +5,7 @@
     依赖: css/style.css(主题变量, 不新建 css) / js/auth.js(登录态)
     后端: 36号 promo_routes(默认 http://localhost:8000, 请求头 X-Role: admin)
     P1 扩展: 受众画像库(编辑/三维匹配测试/站内画像回传) + 权威信源库(关键词过滤/新增/RAG 检索测试)
+    P2 扩展: 发布通道状态(mock/real 双轨) + 百度SEO推送与推送记录
 -->
 <html lang="zh-CN">
 <head>
@@ -226,6 +227,17 @@
         }
         .modal-foot { display: flex; gap: 10px; justify-content: flex-end; padding: 0 16px 16px; }
 
+        /* ========= P2: 发布通道与百度SEO扩展 ========= */
+        /* 顶部提示行(置于 card-head 下方: 去上边框, 加下边框与表格分隔) */
+        .note-bar.note-top { border-top: none; border-bottom: 1px solid var(--color-border); }
+        /* 提示行内行内代码(环境变量名) */
+        .note-bar code {
+            background: var(--color-bg); border-radius: 3px; padding: 1px 5px; font-size: 11px;
+        }
+        /* SEO 推送记录 URL 数量单元格(点击展开 URL 明细) */
+        .seo-urls { cursor: pointer; }
+        .seo-urls:hover { background: rgba(74, 124, 89, 0.06); }
+
         @media (max-width: 640px) {
             .dash-toolbar input[type="text"], .card-head input[type="text"],
             .tool-form input[type="text"] { width: 100%; }
@@ -241,7 +253,7 @@
         <div class="container" style="display:flex;align-items:center;gap:12px;">
             <div style="flex:1;">
                 <h1>AI 智能推广 · 内容工厂与发布中心</h1>
-                <p>36号模块 · GLM-5.3 Agent 四步链一源多态生成 / 三审合规闸门 / 黄金时段发布调度 / attract 归因报表 / 受众画像×权威信源(P1)</p>
+                <p>36号模块 · GLM-5.3 Agent 四步链一源多态生成 / 三审合规闸门 / 黄金时段发布调度 / attract 归因报表 / 受众画像×权威信源(P1) / 发布通道×百度SEO推送(P2)</p>
             </div>
             <a class="banner-link" href="ai-promo-radar.html">← 热点雷达大屏</a>
             <div id="authBadge" style="display:flex;align-items:center;"></div>
@@ -528,10 +540,75 @@
             </div>
         </section>
 
+        <!-- P2: 发布通道状态(mock/real 双轨) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>发布通道状态(mock / real 双轨)</b>
+                    <span class="scan-result" id="channelCount"></span>
+                </div>
+                <div class="note-bar note-top">
+                    real 模式需为对应平台配置 <code>PROMO_CHANNEL_{PLATFORM}_KEY</code> 环境变量(如 <code>PROMO_CHANNEL_DOUYIN_KEY</code>),
+                    未配置 Key 的平台在 real 总模式下自动回退 mock 模拟轨; 推送端点列截断显示, 悬浮查看全文。
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>平台</th><th>总模式</th><th>Key 配置</th><th>生效模式</th><th>推送端点</th>
+                            </tr>
+                        </thead>
+                        <tbody id="channelBody">
+                            <tr><td colspan="5" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    生效模式图例: <span class="badge green">real</span> 真实通道推送 ·
+                    <span class="badge yellow">mock_fallback</span> real 总模式下回退模拟 ·
+                    <span class="badge weak">mock</span> 总开关即为模拟轨。
+                </div>
+            </div>
+        </section>
+
+        <!-- P2: 百度SEO推送(收录加速) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>百度SEO推送(收录加速)</b>
+                    <div class="head-actions">
+                        <button class="dash-btn ghost" id="btnSeoPush" onclick="pushSeoUrls(false)">立即推送</button>
+                        <button class="dash-btn" id="btnSeoForce" onclick="pushSeoUrls(true)">强制重推</button>
+                    </div>
+                </div>
+                <div class="note-bar note-top">
+                    真实推送需配置 <code>BAIDU_PUSH_SITE</code> / <code>BAIDU_PUSH_TOKEN</code> 环境变量,
+                    未配置走模拟轨(全部受理); 「立即推送」仅提交当日未推送过的 URL, 「强制重推」忽略去重全量重推(需二次确认)。
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>推送ID</th><th>时间</th><th>模式</th><th>提交</th>
+                                <th>跳过</th><th>成功</th><th>失败</th><th>状态</th><th>错误</th><th>URL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="seoPushBody">
+                            <tr><td colspan="10" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    推送对象为已发布内容落地页 URL(attract 短码跳转页); 时间列为本地时间;
+                    错误列截断显示悬浮全文; 点击 URL 数量列展开 URL 明细, 悬浮可预览前 3 条。
+                </div>
+            </div>
+        </section>
+
         <!-- 页脚说明 -->
         <footer class="dash-footer">
             <div>鉴权说明：默认 <code>AUTH_MODE=compat</code> 下本页以 <code>X-Role: admin</code> 兼容头直连管理端点；<code>strict</code> 模式需先登录获取 JWT 并改造请求头。</div>
-            <div>数据来源：<code>GET /api/promo/radar/hotspots?status=engaged</code> · <code>POST /api/promo/contents/generate</code> · <code>GET /api/promo/contents</code> · <code>POST /api/promo/contents/{id}/review</code> · <code>POST /api/promo/contents/{id}/publish</code> · <code>GET /api/promo/publish/queue</code> · <code>POST /api/promo/publish/process</code> · <code>GET /api/promo/report/overview</code> · <code>GET /api/promo/report/platform</code> · <code>GET /api/promo/audience/profiles</code> · <code>PUT /api/promo/audience/profiles/{platform}</code> · <code>POST /api/promo/audience/match</code> · <code>GET /api/promo/audience/onsite</code> · <code>GET /api/promo/authority/sources</code> · <code>POST /api/promo/authority/sources</code> · <code>GET /api/promo/authority/search</code>。响应统一为 <code>{"success": true, "data": ...}</code>, 操作失败时横幅展示后端 <code>detail</code>。</div>
+            <div>数据来源：<code>GET /api/promo/radar/hotspots?status=engaged</code> · <code>POST /api/promo/contents/generate</code> · <code>GET /api/promo/contents</code> · <code>POST /api/promo/contents/{id}/review</code> · <code>POST /api/promo/contents/{id}/publish</code> · <code>GET /api/promo/publish/queue</code> · <code>POST /api/promo/publish/process</code> · <code>GET /api/promo/report/overview</code> · <code>GET /api/promo/report/platform</code> · <code>GET /api/promo/audience/profiles</code> · <code>PUT /api/promo/audience/profiles/{platform}</code> · <code>POST /api/promo/audience/match</code> · <code>GET /api/promo/audience/onsite</code> · <code>GET /api/promo/authority/sources</code> · <code>POST /api/promo/authority/sources</code> · <code>GET /api/promo/authority/search</code> · <code>GET /api/promo/channels/status</code> · <code>POST /api/promo/seo/push</code> · <code>GET /api/promo/seo/pushes</code>。响应统一为 <code>{"success": true, "data": ...}</code>, 操作失败时横幅展示后端 <code>detail</code>。</div>
             <div>流程：热点雷达页「跟进」热点 → 此处生成一源多态内容 → 三审(pending → approved) → 入发布队列(黄金时段) → 到期发布(模拟轨回执) → attract 短码归因出报表。热点发现与人工裁决请前往 <a href="ai-promo-radar.html" style="color:var(--color-primary);">热点雷达大屏</a>。</div>
         </footer>
     </main>

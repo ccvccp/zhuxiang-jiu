@@ -29,6 +29,17 @@
  *     展示标题 + 相似度百分比 + content 摘要
  *   - 30s 自动刷新仅重渲染表格数据, 不触碰任何表单输入值
  *
+ * P2: 发布通道与百度SEO看板
+ *   - 发布通道状态: GET /api/promo/channels/status 表格
+ *     (平台中文/总模式 mock灰·real蓝徽章/keyConfigured 已配置绿·未配置灰/
+ *     effectiveMode real绿·mock_fallback黄·mock灰/endpoint 截断悬浮全文)
+ *   - 百度SEO推送: 「立即推送」POST /api/promo/seo/push(常规当日去重);
+ *     「强制重推」confirm 确认后 POST /api/promo/seo/push?force=true 全量重推
+ *   - 推送记录: GET /api/promo/seo/pushes 表格
+ *     (pushId/createdAt 本地时间/mode 徽章/submitted/skipped/success/failed/
+ *     status ok绿·failed红/error 截断悬浮/urls 数量点击展开明细·悬浮预览前 3 条)
+ *   - 推送按钮操作后仅局部刷新推送记录表; 自动刷新保留展开态, 不清空任何状态
+ *
  * 鉴权: X-Role: admin 兼容头(与 ai-hub-dashboard 一致; strict 模式叠加 JWT)
  * 响应约定: 统一解包 {"success": true, "data": ...}; 失败时横幅展示后端 detail
  */
@@ -45,6 +56,9 @@ var state = {
     AUTO_MS: 30000,
     audienceProfiles: [],  // P1: 平台受众画像列表
     profilesSig: null,     // P1: 画像平台集合签名(无变化不重绘平台下拉, 保持选择; null=首次)
+    channels: [],          // P2: 发布通道状态列表
+    seoPushes: [],         // P2: 百度SEO推送记录列表
+    seoExpanded: {},       // P2: 推送记录 URL 明细展开: {pushId: true}
 };
 
 /* 中文标签映射 */
@@ -88,6 +102,16 @@ function truncate(text, max) {
     return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
+/* P2: ISO 时间 → 本地时间显示(百度SEO推送记录时间列; 不同于 fmtTime 的 UTC 直显) */
+function fmtLocalTime(iso) {
+    if (!iso) { return '--'; }
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) { return String(iso); }
+    var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+        + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
 /* ========= API ========= */
 /* 鉴权头: compat 模式 X-Role: admin; 已登录时叠加 Authorization Bearer */
 function apiHeaders() {
@@ -117,13 +141,13 @@ async function fetchJson(url, options) {
 }
 
 /* ========= 数据加载 ========= */
-/* 全量刷新: 热点下拉 + 内容列表 + 发布队列 + 报表 + P1画像/信源 并行(只重渲染表格数据, 不触碰表单输入) */
+/* 全量刷新: 热点下拉 + 内容列表 + 发布队列 + 报表 + P1画像/信源 + P2通道/SEO推送 并行(只重渲染表格数据, 不触碰表单输入) */
 async function refreshData() {
     var btn = document.getElementById('btnRefresh');
     btn.disabled = true; btn.textContent = '刷新中…';
     try {
         await Promise.all([loadEngagedHotspots(), loadContents(), loadQueue(), loadReports(),
-            loadAudienceProfiles(), loadAuthoritySources()]);
+            loadAudienceProfiles(), loadAuthoritySources(), loadChannels(), loadSeoPushes()]);
         hideBanner('errorBanner');
     } catch (err) {
         showBanner('errorBanner', '数据加载失败：' + err.message + '（请确认后端已启动且地址正确）');
@@ -712,6 +736,129 @@ function renderAuthoritySearch(list) {
     }).join('');
 }
 
+/* ============================================================ */
+/* P2: 发布通道与百度SEO推送                                      */
+/* ============================================================ */
+
+/* 发布通道状态表(总模式 + 各平台 Key 配置与实际生效模式) */
+async function loadChannels() {
+    state.channels = await fetchJson(state.apiBase + '/api/promo/channels/status');
+    renderChannels();
+}
+
+/* 通道表格: 平台中文/总模式/Key 配置/生效模式/端点(截断悬浮全文) */
+function renderChannels() {
+    var list = state.channels;
+    document.getElementById('channelCount').textContent = '共 ' + list.length + ' 个通道';
+    var tbody = document.getElementById('channelBody');
+    if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="dash-empty">暂无通道数据</td></tr>';
+        return;
+    }
+    tbody.innerHTML = list.map(function (ch) {
+        var endpoint = String(ch.endpoint || '--');
+        return '<tr>' +
+            '<td><b>' + esc(PLATFORM_LABEL[ch.platform] || ch.platform || '--') + '</b></td>' +
+            '<td>' + modeBadge(ch.mode) + '</td>' +
+            '<td>' + (ch.keyConfigured
+                ? '<span class="badge green">已配置</span>'
+                : '<span class="badge weak">未配置</span>') + '</td>' +
+            '<td>' + effectiveModeBadge(ch.effectiveMode) + '</td>' +
+            '<td style="white-space:normal;max-width:320px;" title="' + esc(endpoint) + '">'
+                + esc(truncate(endpoint, 46)) + '</td>' +
+        '</tr>';
+    }).join('');
+}
+
+/* 总模式/推送模式徽章: mock 灰 / real 蓝 */
+function modeBadge(mode) {
+    var m = String(mode || '');
+    return '<span class="badge ' + (m === 'real' ? 'blue' : 'weak') + '">' + esc(m || '--') + '</span>';
+}
+
+/* 生效模式徽章: real 绿 / mock_fallback 黄 / mock 灰 */
+function effectiveModeBadge(mode) {
+    var m = String(mode || '');
+    var cls = m === 'real' ? 'green' : (m === 'mock_fallback' ? 'yellow' : 'weak');
+    return '<span class="badge ' + cls + '">' + esc(m || '--') + '</span>';
+}
+
+/* 百度SEO推送记录表 */
+async function loadSeoPushes() {
+    state.seoPushes = await fetchJson(state.apiBase + '/api/promo/seo/pushes');
+    renderSeoPushes();
+}
+
+/* 推送记录表格: ID/时间(本地)/模式/提交/跳过/成功/失败/状态/错误(截断悬浮)/URL数(展开态由 seoExpanded 保持) */
+function renderSeoPushes() {
+    var tbody = document.getElementById('seoPushBody');
+    var list = state.seoPushes;
+    if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="10" class="dash-empty">暂无推送记录(点击「立即推送」提交站点 URL)</td></tr>';
+        return;
+    }
+    tbody.innerHTML = list.map(function (p) {
+        return renderSeoPushRow(p) + (state.seoExpanded[p.pushId] ? renderSeoUrlRow(p) : '');
+    }).join('');
+}
+
+/* 推送记录行 */
+function renderSeoPushRow(p) {
+    var urls = p.urls || [];
+    /* 悬浮预览前 3 条 URL, 超出提示总数 */
+    var hover = urls.slice(0, 3).join('\n') + (urls.length > 3 ? '\n…共 ' + urls.length + ' 条' : '');
+    var error = String(p.error || '');
+    var status = String(p.status || '');
+    return '<tr data-pid="' + p.pushId + '">' +
+        '<td class="cap-id">#' + p.pushId + '</td>' +
+        '<td style="white-space:nowrap;">' + esc(fmtLocalTime(p.createdAt)) + '</td>' +
+        '<td>' + modeBadge(p.mode) + '</td>' +
+        '<td class="num">' + (p.submitted != null ? p.submitted : '--') + '</td>' +
+        '<td class="num">' + (p.skipped != null ? p.skipped : '--') + '</td>' +
+        '<td class="num">' + (p.success != null ? p.success : '--') + '</td>' +
+        '<td class="num">' + (p.failed != null ? p.failed : '--') + '</td>' +
+        '<td><span class="badge ' + (status === 'ok' ? 'green' : (status === 'failed' ? 'red' : 'weak')) + '">'
+            + esc(status || '--') + '</span></td>' +
+        '<td style="white-space:normal;max-width:170px;" title="' + esc(error) + '">'
+            + (error ? esc(truncate(error, 24)) : '—') + '</td>' +
+        '<td class="cap-id seo-urls" title="' + esc(hover) + '">'
+            + '<span class="exp-arrow">' + (state.seoExpanded[p.pushId] ? '▾' : '▸') + '</span>'
+            + urls.length + ' 条</td>' +
+    '</tr>';
+}
+
+/* URL 明细展开行(复用内容列表 detail-row 结构) */
+function renderSeoUrlRow(p) {
+    var urls = p.urls || [];
+    return '<tr class="detail-row"><td colspan="10"><div class="detail-box">' +
+        '<div class="detail-body">' + (urls.length ? esc(urls.join('\n')) : '(无 URL)') + '</div>' +
+    '</div></td></tr>';
+}
+
+/* 百度SEO推送: force=false 常规(当日未推送 URL); force=true 强制全量重推(confirm 二次确认) */
+async function pushSeoUrls(force) {
+    if (force && !confirm('确认强制重推? 将忽略当日去重规则, 全量重新提交所有 URL。')) { return; }
+    var btn = document.getElementById(force ? 'btnSeoForce' : 'btnSeoPush');
+    var label = force ? '强制重推' : '立即推送';
+    btn.disabled = true; btn.textContent = '推送中…';
+    try {
+        var r = await fetchJson(
+            state.apiBase + '/api/promo/seo/push' + (force ? '?force=true' : ''),
+            { method: 'POST', body: JSON.stringify({}) });
+        var modeText = r && r.mode ? (r.mode === 'mock' ? '模拟轨' : r.mode) : '--';
+        showBanner('infoBanner', '百度SEO推送完成(' + modeText + '): 提交 '
+            + (r && r.submitted != null ? r.submitted : '--') + ' 条, 跳过 '
+            + (r && r.skipped != null ? r.skipped : '--') + ' 条, 成功 '
+            + (r && r.success != null ? r.success : '--') + ' 条, 失败 '
+            + (r && r.failed != null ? r.failed : '--') + ' 条');
+        await loadSeoPushes();   // 局部刷新推送记录表(不动其他区块)
+    } catch (err) {
+        showBanner('errorBanner', '百度SEO推送失败：' + err.message);
+    } finally {
+        btn.disabled = false; btn.textContent = label;
+    }
+}
+
 /* ========= 交互: 行展开/收起(事件委托, 按钮点击不触发) ========= */
 document.getElementById('contentBody').addEventListener('click', function (evt) {
     if (evt.target.closest('button')) { return; }
@@ -720,6 +867,18 @@ document.getElementById('contentBody').addEventListener('click', function (evt) 
     var cid = Number(tr.getAttribute('data-cid'));
     state.expanded[cid] = !state.expanded[cid];
     renderContents();
+});
+
+/* ========= P2: SEO 推送记录 URL 明细展开/收起(点击 URL 数量列, 事件委托) ========= */
+document.getElementById('seoPushBody').addEventListener('click', function (evt) {
+    if (evt.target.closest('button')) { return; }
+    var cell = evt.target.closest('td.seo-urls');
+    if (!cell) { return; }
+    var tr = cell.closest('tr[data-pid]');
+    if (!tr) { return; }
+    var pid = Number(tr.getAttribute('data-pid'));
+    state.seoExpanded[pid] = !state.seoExpanded[pid];
+    renderSeoPushes();
 });
 
 /* ========= 横幅/工具栏 ========= */
