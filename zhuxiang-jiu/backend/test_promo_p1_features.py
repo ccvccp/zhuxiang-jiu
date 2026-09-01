@@ -30,7 +30,8 @@ from services.promo_audience_service import PromoAudienceService
 from services.promo_authority_service import PromoAuthorityService
 from services.promo_agent_service import TRACK_RULE
 from repositories.promo_repository import (
-    PROMO_PLATFORM_DOUYIN, PROMO_PLATFORM_XHS,
+    PROMO_PLATFORMS, PROMO_PLATFORM_DOUYIN, PROMO_PLATFORM_XHS,
+    PROMO_PLATFORM_WEIBO, PROMO_PLATFORM_CHANNELS,
     REQUIRED_DISCLAIMER, REQUIRED_AGE_TIP,
 )
 
@@ -65,17 +66,18 @@ class TestAudienceProfiles:
 
         # 种子幂等
         added = await audience.ensure_profiles()
-        record("画像-种子初始化(3平台)", added == 3, f"实际{added}")
+        record("画像-种子初始化(5平台)", added == len(PROMO_PLATFORMS),
+               f"实际{added}")
         added_again = await audience.ensure_profiles()
         record("画像-种子幂等", added_again == 0, f"实际{added_again}")
 
         # 列表
         profiles = await audience.list_profiles()
-        record("画像-列表3平台", len(profiles) == 3, f"实际{len(profiles)}")
+        record("画像-列表全平台", len(profiles) == len(PROMO_PLATFORMS),
+               f"实际{len(profiles)}")
         platforms = {p["platform"] for p in profiles}
-        record("画像-平台覆盖",
-               platforms == {PROMO_PLATFORM_DOUYIN, PROMO_PLATFORM_XHS,
-                             "wechat_moments"})
+        record("画像-平台覆盖", platforms == set(PROMO_PLATFORMS),
+               f"实际{platforms}")
 
         # 更新
         updated = await audience.update_profile(

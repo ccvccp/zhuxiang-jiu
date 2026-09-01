@@ -50,7 +50,7 @@ var state = {
 /* 中文标签映射 */
 var CONTENT_STATUS_LABEL = { pending: '待审核', approved: '已通过', rejected: '已拒绝', queued: '已入队', published: '已发布' };
 var CONTENT_STATUS_BADGE = { pending: 'yellow', approved: 'green', rejected: 'red', queued: 'blue', published: 'gold' };
-var PLATFORM_LABEL = { baidu: '百度', douyin: '抖音', weibo: '微博', zhihu: '知乎', xiaohongshu: '小红书', wechat_moments: '微信朋友圈' };
+var PLATFORM_LABEL = { baidu: '百度', douyin: '抖音', weibo: '微博', zhihu: '知乎', xiaohongshu: '小红书', wechat_moments: '微信朋友圈', wechat_channels: '视频号' };
 /* P1: 信源类别 → 中文徽章(standard=国标/association=协会/media=媒体) */
 var AUTHORITY_CATEGORY_LABEL = { standard: '国标', association: '协会', media: '媒体' };
 var AUTHORITY_CATEGORY_BADGE = { standard: 'green', association: 'blue', media: 'gold' };

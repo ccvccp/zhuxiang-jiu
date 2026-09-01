@@ -71,14 +71,17 @@ RISK_BLOCK_WORDS = (
 )
 
 # ============================================================
-# 发布平台(复用 attract 平台体系)
+# 发布平台(复用 attract 平台体系; P1 扩展微博/视频号)
 # ============================================================
 
 PROMO_PLATFORM_DOUYIN = "douyin"
 PROMO_PLATFORM_XHS = "xiaohongshu"
 PROMO_PLATFORM_MOMENTS = "wechat_moments"
+PROMO_PLATFORM_WEIBO = "weibo"              # 微博(话题借势, P1)
+PROMO_PLATFORM_CHANNELS = "wechat_channels"  # 视频号(熟龄信任, P1)
 PROMO_PLATFORMS = (PROMO_PLATFORM_DOUYIN, PROMO_PLATFORM_XHS,
-                   PROMO_PLATFORM_MOMENTS)
+                   PROMO_PLATFORM_MOMENTS, PROMO_PLATFORM_WEIBO,
+                   PROMO_PLATFORM_CHANNELS)
 
 # 内容状态机(三审闸门 + 发布队列)
 CONTENT_STATUS_PENDING = "pending"      # 待人工审核(一审二审已过)
@@ -137,6 +140,8 @@ GOLDEN_WINDOWS = {
     PROMO_PLATFORM_DOUYIN: ((12, 13), (18, 22)),
     PROMO_PLATFORM_XHS: ((12, 14), (20, 23)),
     PROMO_PLATFORM_MOMENTS: ((19, 22),),
+    PROMO_PLATFORM_WEIBO: ((12, 14), (21, 23)),      # P1: 微博(午休+晚间热榜峰)
+    PROMO_PLATFORM_CHANNELS: ((18, 21),),            # P1: 视频号(晚饭后熟龄活跃)
 }
 
 # Agent 模型档位与三级降级(设计文档 §3.4)
@@ -177,6 +182,22 @@ DEFAULT_AUDIENCE_PROFILES = {
         "scenes": ("节庆送礼", "商务宴请", "老友重聚"),
         "productTones": ("高端礼盒", "陈酿", "收藏款"),
     },
+    PROMO_PLATFORM_WEIBO: {
+        "platform": PROMO_PLATFORM_WEIBO,
+        "audience": "18-40 话题互动人群",
+        "tone": "热点话题借势、互动感强、会玩梗",
+        "format": "#话题# + 正文≤140字 + 互动引导",
+        "scenes": ("节庆话题", "热点讨论", "抽奖转发"),
+        "productTones": ("年轻化", "高性价比", "颜值款"),
+    },
+    PROMO_PLATFORM_CHANNELS: {
+        "platform": PROMO_PLATFORM_CHANNELS,
+        "audience": "30+ 熟龄信任消费人群",
+        "tone": "信任、情怀、真实克制",
+        "format": "图文短句 + 封面文案(公众号生态)",
+        "scenes": ("节庆送礼", "家宴", "商务宴请"),
+        "productTones": ("高端礼盒", "陈酿", "礼盒"),
+    },
 }
 
 # 内容角度 → 平台亲和度(三维匹配第一维; 0-1)
@@ -192,6 +213,16 @@ ANGLE_PLATFORM_AFFINITY = {
     PROMO_PLATFORM_MOMENTS: {
         "节庆": 0.9, "送礼": 0.85, "商务": 0.85, "文化": 0.7,
         "婚宴": 0.6, "场景": 0.6, "日常": 0.5, "优惠": 0.6, "工艺": 0.5,
+    },
+    PROMO_PLATFORM_WEIBO: {
+        "热点": 0.95, "话题": 0.95, "节庆": 0.85, "日常": 0.8,
+        "文化": 0.7, "优惠": 0.75, "聚会": 0.7, "场景": 0.6,
+        "婚宴": 0.4, "送礼": 0.5, "工艺": 0.4,
+    },
+    PROMO_PLATFORM_CHANNELS: {
+        "节庆": 0.9, "送礼": 0.9, "家宴": 0.9, "商务": 0.85,
+        "文化": 0.75, "婚宴": 0.65, "场景": 0.6, "优惠": 0.55,
+        "日常": 0.5, "工艺": 0.55,
     },
 }
 

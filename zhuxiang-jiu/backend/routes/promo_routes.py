@@ -56,7 +56,9 @@ class ManualDecideRequest(PydBaseModel):
 
 class GenerateContentsRequest(PydBaseModel):
     hotspotId: int = Field(..., description="热点ID(须已跟进)")
-    platforms: list = Field(["douyin"], description="发布平台: douyin/xiaohongshu/wechat_moments")
+    platforms: list = Field(
+        ["douyin"],
+        description="发布平台: douyin/xiaohongshu/wechat_moments/weibo/wechat_channels")
 
 
 class ReviewRequest(PydBaseModel):

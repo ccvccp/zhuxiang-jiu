@@ -22,6 +22,7 @@ from datetime import datetime, UTC
 from repositories.promo_repository import (
     PROMO_LLM_MODEL, PROMO_LLM_FALLBACK_MODEL,
     PROMO_PLATFORM_DOUYIN, PROMO_PLATFORM_XHS, PROMO_PLATFORM_MOMENTS,
+    PROMO_PLATFORM_WEIBO, PROMO_PLATFORM_CHANNELS,
     REQUIRED_DISCLAIMER, REQUIRED_AGE_TIP,
 )
 
@@ -31,7 +32,7 @@ TRACK_PRIMARY = PROMO_LLM_MODEL          # glm-5.3
 TRACK_FALLBACK = PROMO_LLM_FALLBACK_MODEL   # glm-4-flash
 TRACK_RULE = "rule"                      # 规则模板轨
 
-# 平台受众画像(P0 内置; P1 抽成可配置画像库)
+# 平台受众画像(P0 内置兜底; P1 起生成时优先用画像库, 此处仅缺省回退)
 PLATFORM_PROFILES = {
     PROMO_PLATFORM_DOUYIN: {
         "audience": "18-35 大众娱乐人群",
@@ -47,6 +48,16 @@ PLATFORM_PROFILES = {
         "audience": "30+ 熟龄社交圈",
         "tone": "信任、情怀、简短",
         "format": "朋友圈文案(≤140字)",
+    },
+    PROMO_PLATFORM_WEIBO: {
+        "audience": "18-40 话题互动人群",
+        "tone": "热点话题借势、互动感强、会玩梗",
+        "format": "#话题# + 正文≤140字 + 互动引导",
+    },
+    PROMO_PLATFORM_CHANNELS: {
+        "audience": "30+ 熟龄信任消费人群",
+        "tone": "信任、情怀、真实克制",
+        "format": "图文短句 + 封面文案(公众号生态)",
     },
 }
 
@@ -74,6 +85,19 @@ _RULE_TEMPLATES = {
         "竹香型白酒, 入口绵甜落口回甘, 家宴礼赠都合适。\n"
         "👉 详情见主页链接\n"
         "（{disclaimer}，{age}+ 请适量饮用）"
+    ),
+    PROMO_PLATFORM_WEIBO: (
+        "#{title}# 话题冲上热搜, 聚会用酒安排上。\n"
+        "竹香型白酒, 竹香清雅入口绵甜, 家宴小聚都合适。\n"
+        "评论区聊聊你的聚会安排~ 转发抽一位酒友送品鉴装🎁\n"
+        "（{disclaimer}，{age}周岁以下请勿饮酒）"
+    ),
+    PROMO_PLATFORM_CHANNELS: (
+        "\"{title}\"引热议, 又到团圆聚会季。\n\n"
+        "竹香型白酒, 入口绵甜、落口回甘。\n"
+        "好酒不必贵, 家宴礼赠都拿得出手。\n\n"
+        "详情见主页, 欢迎评论区交流。\n"
+        "（{disclaimer}，{age}周岁以下请勿饮酒）"
     ),
 }
 
