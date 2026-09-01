@@ -232,12 +232,60 @@ async def change_password(
 async def get_level(
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """查询等级信息(含成长值/下一级所需)"""
+    """查询等级信息(含成长值/下一级所需/P1-4 保级进度)"""
     member_id = _require_member_id(x_member_id)
     try:
         return await _member_service.get_level(member_id)
     except KeyError as e:
         raise _map_key_error(e) from e
+
+
+# ============================================================
+#  P1-4 等级有效期/保级/降级(设计文档 4.4)
+# ============================================================
+
+@router.post("/api/member/level/expiry-check", tags=["会员服务"])
+async def level_expiry_check(
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """全量等级到期考核(admin; 定时任务亦可直调 service)
+
+    到期未达保级消费额自动降一级并重置周期; 单会员失败不中断批次。
+    """
+    if x_role != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return await _member_service.run_level_expiry_check()
+
+
+@router.post("/api/member/level/renew-svip", tags=["会员服务"])
+async def level_renew_svip(
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
+):
+    """L5 SVIP 付费续费保级(¥99/年, 开新 12 个月周期)
+
+    生产环境: 实际扣费由收款模块下单支付, 支付成功回调后触发本操作。
+    """
+    member_id = _require_member_id(x_member_id)
+    try:
+        return await _member_service.renew_svip(member_id)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/member/level/recover", tags=["会员服务"])
+async def level_recover(
+    x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
+):
+    """降级缓冲期恢复(降级后 30 天内补足原等级保级消费可恢复)"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        return await _member_service.recover_level(member_id)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
 
 
 @router.post("/api/member/consume", tags=["会员服务"])

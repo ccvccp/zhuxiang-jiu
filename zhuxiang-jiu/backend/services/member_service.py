@@ -53,6 +53,19 @@ POINTS_REGISTER = 100       # 注册赠送
 POINTS_DAILY_LOGIN = 5      # 每日登录
 POINTS_TO_YUAN = 100        # 100 竹叶 = 1 元
 
+# P1-4 等级有效期与保级规则(设计文档 4.4):
+#   等级有效期 12 个月(自升级日起算); 到期未达保级消费额自动降一级;
+#   L5 SVIP 特例: 支持付费续费保级(¥99/年), 无需达到保级消费额。
+LEVEL_VALID_MONTHS = 12                       # 等级有效期(月)
+LEVEL_RENEW_FEE = 99.0                        # L5 付费续费(元/年)
+KEEP_LEVEL_CONSUME = {                        # 保级消费额(元/周期)
+    1: 0,        # L1 无保级要求(基础等级不降)
+    2: 300,
+    3: 2000,
+    4: 6999,
+    5: 9999,
+}
+
 
 def _hash_password(password: str) -> str:
     """密码哈希(Mock: 非生产用, 生产环境应使用 bcrypt)"""
@@ -311,7 +324,7 @@ class MemberService:
     # ============================================================
 
     async def get_level(self, member_id) -> dict:
-        """查询等级信息
+        """查询等级信息(含 P1-4 保级进度)
 
         Raises:
             KeyError: 会员不存在
@@ -321,6 +334,7 @@ class MemberService:
             raise KeyError(f"会员 {member_id} 不存在")
         level = member.get("level", 1)
         growth = member.get("growth_value", 0)
+        progress = self._level_period_progress(member)
         return {
             "success": True,
             "memberId": member_id,
@@ -329,7 +343,234 @@ class MemberService:
             "growthValue": growth,
             "nextLevelGrowth": self._next_level_growth(growth),
             "thresholds": LEVEL_THRESHOLDS,
+            # P1-4 保级进度
+            "keepLevel": {
+                "periodConsume": progress["periodConsume"],
+                "requirement": progress["requirement"],
+                "remainingAmount": progress["remainingAmount"],
+                "progressPercent": progress["progressPercent"],
+                "levelUpdatedAt": progress["levelUpdatedAt"],
+                "expireAt": progress["expireAt"],
+                "daysRemaining": progress["daysRemaining"],
+                "renewable": level == 5,   # SVIP 付费续费特例
+                "renewFee": LEVEL_RENEW_FEE if level == 5 else 0,
+            },
         }
+
+    # ============================================================
+    #  P1-4 等级有效期/保级/降级(设计文档 4.4)
+    # ============================================================
+
+    @staticmethod
+    def _level_period_progress(member: dict) -> dict:
+        """计算会员当前等级周期的保级进度(纯计算, 不落库)"""
+        from datetime import timedelta
+        level = member.get("level", 1)
+        requirement = KEEP_LEVEL_CONSUME.get(level, 0)
+        period_consume = float(member.get("periodConsume", 0) or 0)
+        updated_raw = member.get("levelUpdatedAt", "")
+        # 兼容无记录的老会员: 以注册时间兜底, 无则视为永不过期(当前周期)
+        updated_at = None
+        if updated_raw:
+            try:
+                updated_at = datetime.fromisoformat(updated_raw)
+            except (ValueError, TypeError):
+                updated_at = None
+        expire_at = (updated_at + timedelta(days=LEVEL_VALID_MONTHS * 30)) \
+            if updated_at else None
+        days_remaining = None
+        if expire_at:
+            days_remaining = max(0, (expire_at - datetime.now(UTC)).days)
+        remaining = max(0.0, round(requirement - period_consume, 2))
+        percent = round(min(100.0, period_consume / requirement * 100), 1) \
+            if requirement > 0 else 100.0
+        return {
+            "periodConsume": round(period_consume, 2),
+            "requirement": requirement,
+            "remainingAmount": remaining,
+            "progressPercent": percent,
+            "levelUpdatedAt": updated_raw,
+            "expireAt": expire_at.isoformat() if expire_at else "",
+            "daysRemaining": days_remaining,
+        }
+
+    async def check_level_expiry(self, member_id) -> dict:
+        """单会员等级到期考核(P1-4 核心)
+
+        到期判定: levelUpdatedAt + 12 个月 < now
+        到期处理:
+            - L1: 不考核(基础等级不降)
+            - 周期消费 ≥ 保级消费额 → 保级成功, 新周期起算(周期消费清零)
+            - 未达标 → 自动降一级, 新周期按降级后等级起算
+              (降级缓冲: 降级后 30 天内补足消费可恢复, 见设计文档 智能降级AI层)
+
+        Raises:
+            KeyError: 会员不存在
+        """
+        from datetime import timedelta
+        async with get_lock(f"member:level:{member_id}"):
+            member = await self.member_repo.get_by_id(member_id)
+            if not member:
+                raise KeyError(f"会员 {member_id} 不存在")
+            level = member.get("level", 1)
+            if level <= 1:
+                return {"success": True, "memberId": member_id,
+                        "action": "skip", "reason": "L1 基础等级不参与保级考核"}
+
+            updated_raw = member.get("levelUpdatedAt", "")
+            if not updated_raw:
+                return {"success": True, "memberId": member_id,
+                        "action": "skip", "reason": "无等级周期记录(历史会员)"}
+            try:
+                updated_at = datetime.fromisoformat(updated_raw)
+            except (ValueError, TypeError):
+                return {"success": True, "memberId": member_id,
+                        "action": "skip", "reason": "等级周期记录格式异常"}
+
+            expire_at = updated_at + timedelta(days=LEVEL_VALID_MONTHS * 30)
+            if datetime.now(UTC) < expire_at:
+                progress = self._level_period_progress(member)
+                return {"success": True, "memberId": member_id,
+                        "action": "not_expired",
+                        "expireAt": expire_at.isoformat(),
+                        "daysRemaining": progress["daysRemaining"]}
+
+            # ---- 已到期: 保级考核 ----
+            requirement = KEEP_LEVEL_CONSUME.get(level, 0)
+            period_consume = float(member.get("periodConsume", 0) or 0)
+            now_iso = _now_iso()
+
+            if period_consume >= requirement:
+                # 保级成功: 新周期起算
+                await self.member_repo.update_fields(member_id, {
+                    "levelUpdatedAt": now_iso, "periodConsume": 0.0,
+                })
+                logger.info("level_keep member_id=%r level=%s consume=%.2f",
+                            member_id, level, period_consume)
+                return {"success": True, "memberId": member_id,
+                        "action": "kept", "level": level,
+                        "periodConsume": round(period_consume, 2),
+                        "requirement": requirement,
+                        "newPeriodStart": now_iso}
+
+            # 未达标: 自动降一级(等级按成长值阈值对齐, 不跨级)
+            new_level = max(1, level - 1)
+            await self.member_repo.update_level(member_id, new_level)
+            await self.member_repo.update_fields(member_id, {
+                "levelUpdatedAt": now_iso, "periodConsume": 0.0,
+                "levelDowngradedAt": now_iso,
+                "levelDowngradedFrom": level,
+            })
+            logger.info("level_downgrade member_id=%r %s->%s consume=%.2f req=%.2f",
+                        member_id, level, new_level, period_consume, requirement)
+            return {"success": True, "memberId": member_id,
+                    "action": "downgraded", "fromLevel": level,
+                    "toLevel": new_level, "periodConsume": round(period_consume, 2),
+                    "requirement": requirement,
+                    "newPeriodStart": now_iso,
+                    "recoveryHint": "降级后 30 天内补足保级消费可申请恢复"}
+
+    async def run_level_expiry_check(self) -> dict:
+        """全量等级到期考核(定时任务/管理端触发)
+
+        遍历 level≥2 的会员逐一考核; 单会员失败不中断批次。
+        """
+        members = await self.member_repo.list_all()
+        results, kept, downgraded, skipped, failed = [], 0, 0, 0, 0
+        for m in members:
+            if m.get("level", 1) < 2:
+                continue
+            try:
+                r = await self.check_level_expiry(m["id"])
+                action = r.get("action")
+                if action == "kept":
+                    kept += 1
+                elif action == "downgraded":
+                    downgraded += 1
+                else:
+                    skipped += 1
+                results.append(r)
+            except Exception as exc:  # noqa: BLE001 单会员失败不中断
+                failed += 1
+                results.append({"memberId": m.get("id"), "action": "error",
+                                "reason": str(exc)})
+        return {"success": True, "total": len(results), "kept": kept,
+                "downgraded": downgraded, "skipped": skipped,
+                "failed": failed, "results": results}
+
+    async def renew_svip(self, member_id) -> dict:
+        """L5 SVIP 付费续费保级(¥99/年, 设计文档 4.4 SVIP 特例)
+
+        续费即开新周期; 非 L5 调用 409。
+        实际扣费由收款模块下单支付, 本方法只做等级周期处理(测试/演示
+        直接调用; 生产应挂在支付回调成功后)。
+
+        Raises:
+            KeyError: 会员不存在
+            ValueError: 非 L5 会员
+        """
+        async with get_lock(f"member:level:{member_id}"):
+            member = await self.member_repo.get_by_id(member_id)
+            if not member:
+                raise KeyError(f"会员 {member_id} 不存在")
+            if member.get("level", 1) != 5:
+                raise ValueError("仅 L5 竹海 SVIP 支持付费续费保级")
+            now_iso = _now_iso()
+            await self.member_repo.update_fields(member_id, {
+                "levelUpdatedAt": now_iso, "periodConsume": 0.0,
+                "svipRenewedAt": now_iso,
+            })
+            logger.info("svip_renewed member_id=%r fee=%.2f", member_id,
+                        LEVEL_RENEW_FEE)
+            return {"success": True, "memberId": member_id,
+                    "level": 5, "levelName": LEVEL_NAMES[5],
+                    "renewFee": LEVEL_RENEW_FEE,
+                    "newPeriodStart": now_iso,
+                    "validMonths": LEVEL_VALID_MONTHS}
+
+    async def recover_level(self, member_id) -> dict:
+        """降级缓冲期恢复(降级后 30 天内补足消费可恢复, 设计文档 智能降级AI层)
+
+        判定: levelDowngradedAt 在 30 天内 且 periodConsume ≥ 原等级保级额。
+
+        Raises:
+            KeyError: 会员不存在
+            ValueError: 无降级记录/超缓冲期/消费未补足
+        """
+        from datetime import timedelta
+        async with get_lock(f"member:level:{member_id}"):
+            member = await self.member_repo.get_by_id(member_id)
+            if not member:
+                raise KeyError(f"会员 {member_id} 不存在")
+            downgraded_raw = member.get("levelDowngradedAt", "")
+            from_level = member.get("levelDowngradedFrom")
+            if not downgraded_raw or not from_level:
+                raise ValueError("无降级记录, 无需恢复")
+            downgraded_at = None
+            try:
+                downgraded_at = datetime.fromisoformat(downgraded_raw)
+            except (ValueError, TypeError):
+                raise ValueError("降级记录格式异常") from None
+            if datetime.now(UTC) - downgraded_at > timedelta(days=30):
+                raise ValueError("已超过 30 天降级缓冲期, 无法恢复"
+                                 "(可通过消费重新升级)")
+            requirement = KEEP_LEVEL_CONSUME.get(from_level, 0)
+            period_consume = float(member.get("periodConsume", 0) or 0)
+            if period_consume < requirement:
+                raise ValueError(
+                    f"补级消费未达标: 本周期 {period_consume:.2f}/{requirement} 元"
+                    f"(还差 {requirement - period_consume:.2f} 元)")
+            now_iso = _now_iso()
+            await self.member_repo.update_level(member_id, from_level)
+            await self.member_repo.update_fields(member_id, {
+                "levelUpdatedAt": now_iso, "periodConsume": 0.0,
+                "levelDowngradedAt": "", "levelDowngradedFrom": None,
+            })
+            logger.info("level_recovered member_id=%r ->%s", member_id, from_level)
+            return {"success": True, "memberId": member_id,
+                    "recoveredLevel": from_level,
+                    "levelName": LEVEL_NAMES.get(from_level, ""),
+                    "newPeriodStart": now_iso}
 
     # ============================================================
     #  消费(成长值 + 积分 + 自动升级)
@@ -381,12 +622,23 @@ class MemberService:
 
             if new_level > old_level:
                 await self.member_repo.update_level(member_id, new_level)
+                # P1-4: 升级日重置等级周期(有效期 12 个月自此起算, 周期消费清零)
+                await self.member_repo.update_fields(member_id, {
+                    "levelUpdatedAt": _now_iso(),
+                    "periodConsume": round(amount, 2),
+                })
                 logs.append({
                     "step": "等级提升", "level": "WARN",
                     "msg": f"{LEVEL_NAMES[old_level]} → {LEVEL_NAMES[new_level]} 🎉",
                 })
                 logger.info("level_up member_id=%r %s->%s growth=%d",
                             member_id, old_level, new_level, new_growth)
+            elif new_level == old_level and old_level >= 2:
+                # P1-4: 同级消费累计入保级周期(降级缓冲期内补消费同样计入)
+                period = float(member.get("periodConsume", 0) or 0)
+                await self.member_repo.update_fields(member_id, {
+                    "periodConsume": round(period + amount, 2),
+                })
 
             return {
                 "success": True,
