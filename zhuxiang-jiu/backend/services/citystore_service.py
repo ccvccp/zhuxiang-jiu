@@ -1,7 +1,8 @@
 """市级网店模块业务逻辑层
 
 核心业务:
-    - 开店申请(SVIP 资格校验 + 城市独占校验 + 资质校验)
+    - 开店申请(SVIP 资格校验 + 城市独占校验 + 资质校验
+      + 90 天冷静期校验(P1-11: 运营后被取消的网店 90 天内不可重申))
     - 审核流程(待审核 → 运营中/已取消)
     - 月度考核(进货/销售达标 + 连续不达标 + 折扣调整)
     - 状态流转(运营 → 预警/暂停 → 取消)
@@ -33,7 +34,7 @@ from repositories.citystore_repository import (
     QUAL_STATUS_NAMES,
     # 阶梯折扣
     DISCOUNT_UNQUALIFIED,
-    PURCHASE_TARGET, SALES_TARGET, MAX_CONSECUTIVE_BELOW,
+    PURCHASE_TARGET, SALES_TARGET, MAX_CONSECUTIVE_BELOW, COOLDOWN_DAYS,
     # 销售渠道
     CHANNEL_MINIPROGRAM, calc_discount,
 )
@@ -93,6 +94,9 @@ class CityStoreService:
             if existing:
                 raise ValueError("您已有一家网店, 不可重复开店")
 
+            # 3b. 90 天冷静期校验(P1-11, 设计文档 8.3)
+            await self._check_cooldown(member_id)
+
             # 4. 城市独占校验(一城一店)
             async with get_lock(f"citystore:city:{city_code}"):
                 city_store = await self.repo.get_by_city(city_code)
@@ -124,6 +128,37 @@ class CityStoreService:
                 }
                 await self.repo.save_store(store)
                 return await self.get_store_detail(store_code)
+
+    async def _check_cooldown(self, member_id: int) -> None:
+        """90 天冷静期校验(P1-11, 设计文档 8.3)
+
+        规则:
+            - 运营后被取消的网店(openDate+closeDate 均非空),
+              自 closeDate 起 90 天内不可重新申请
+            - 审核驳回(从未运营, openDate 为空)不触发冷静期
+              (驳回后重新提交申请+资质审核, 与文档表述一致)
+
+        Raises:
+            ValueError: 冷静期内(提示剩余天数)
+        """
+        from datetime import date
+
+        history = await self.repo.list_history_stores_by_member(member_id)
+        for store in history:
+            if store.get("status") != STORE_STATUS_CANCELLED:
+                continue
+            if not store.get("openDate") or not store.get("closeDate"):
+                continue  # 未运营即取消(审核驳回), 不触发
+            try:
+                closed = date.fromisoformat(str(store["closeDate"])[:10])
+            except ValueError:
+                continue  # 日期异常数据保守跳过
+            days = (date.today() - closed).days
+            if days < COOLDOWN_DAYS:
+                remain = COOLDOWN_DAYS - days
+                raise ValueError(
+                    f"网店资格取消后须 90 天冷静期方可重新申请"
+                    f"(自 {store['closeDate']} 起, 剩余 {remain} 天)")
 
     # ============================================================
     # 网店查询

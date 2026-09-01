@@ -82,6 +82,9 @@ PURCHASE_TARGET = 9000.0    # 进货达标线
 SALES_TARGET = 5000.0       # 销售达标线
 MAX_CONSECUTIVE_BELOW = 3   # 连续不达标上限(超过则取消资格)
 
+# 资格取消后冷静期天数(设计文档 8.3: 90 天内不可重新申请)
+COOLDOWN_DAYS = 90
+
 # 销售渠道
 CHANNEL_LIVE = 1            # 直播
 CHANNEL_MINIPROGRAM = 2     # 小程序
@@ -169,6 +172,24 @@ class CityStoreRepository:
         if is_redis_mode():
             return await self._redis_list_stores(member_id, status, limit)
         return self._mem_list_stores(member_id, status, limit)
+
+    async def list_history_stores_by_member(self, member_id: int) -> list[dict]:
+        """查询会员全部历史网店(含已取消, 冷静期校验用)
+
+        注意: member_index 单值索引会被新店覆盖, 须全量扫描过滤。
+        """
+        if is_redis_mode():
+            return await self._redis_list_history_stores_by_member(member_id)
+        self._ensure_store()
+        return [s for s in self.store["city_stores"].values()
+                if s.get("memberId") == member_id]
+
+    async def _redis_list_history_stores_by_member(
+            self, member_id: int) -> list[dict]:
+        client = await get_redis_client()
+        all_data = await client.hgetall(_k("citystore", "stores"))
+        return [json.loads(v) for v in all_data.values()
+                if json.loads(v).get("memberId") == member_id]
 
     async def list_occupied_cities(self) -> list[str]:
         """查询已被独占的城市码列表"""
