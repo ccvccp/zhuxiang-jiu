@@ -6,18 +6,23 @@
     - 状态流转(草稿→报名中→进行中→已结束→已取消)
     - 擂台赛排名(8类擂台赛/评分/排名更新)
     - 活动统计(报名数/预算使用等)
+    - 抽奖发奖(P1-12: 奖品池配置/抽奖执行/服务端概率计算/
+      中奖发奖分派/我的奖品/实物发货/签收确认)
 
 锁保护:
     - 创建活动: lock:activity:create:{type}  (生成活动ID串行)
     - 报名: lock:activity:reg:{activity_id}:{user_id}  (幂等防重)
     - 状态流转: lock:activity:status:{activity_id}  (状态原子切换)
     - 擂台赛: lock:activity:leaderboard:{activity_id}  (排名原子更新)
+    - 抽奖: lock:activity:lottery:{activity_id}:{user_id}  (日次数+中奖原子)
 
 异常约定:
     - KeyError → 404(活动不存在)
     - ValueError → 409(业务冲突: 重复报名/状态非法流转/已报名取消)
 """
 
+import json
+import logging
 from datetime import datetime
 
 from core.locks import get_lock
@@ -48,6 +53,8 @@ ARENA_NAMES = {
     ARENA_L07: "服务擂台赛",
     ARENA_L08: "传承擂台赛",
 }
+
+logger = logging.getLogger("activity_service")
 
 
 class ActivityService:
@@ -446,3 +453,332 @@ class ActivityService:
                 "auditor": auditor,
                 "reason": reason,
             }
+
+    # ============================================================
+    # 10. 抽奖发奖(P1-12, 设计文档 §3.3/§7.1/§7.3)
+    # ============================================================
+
+    # 每日抽奖次数上限(设计文档 §3.3.1 简化版: 每日免费 3 次)
+    DAILY_DRAW_LIMIT = 3
+    # 单奖价值上限(合规红线 §10.1: 单次一等奖 ≤¥5,000)
+    MAX_PRIZE_VALUE = 5000.0
+    # 概率总和上限(%)
+    MAX_TOTAL_PROBABILITY = 100.0
+
+    async def configure_prizes(self, activity_id: int,
+                                prizes: list[dict]) -> dict:
+        """配置抽奖奖品池(管理端)
+
+        每个奖品: {prizeName, prizeType, prizeValue, probability(%),
+                   dailyLimit, totalLimit}
+
+        校验:
+            - 活动须为 lottery 类型
+            - 概率总和 ≤ 100%
+            - 单奖价值 ≤ ¥5,000(合规红线)
+
+        Raises:
+            KeyError: 活动不存在
+            ValueError: 类型不符 / 概率非法 / 价值超限
+        """
+        from repositories.activity_repository import PRIZE_COUPON, PRIZE_POINTS
+        activity = await self.repo.get_activity(activity_id)
+        if activity is None:
+            raise KeyError(f"活动不存在(activityId={activity_id})")
+        if activity.get("type") != TYPE_LOTTERY:
+            raise ValueError("仅抽奖活动可配置奖品池")
+
+        if not prizes:
+            raise ValueError("奖品列表不能为空")
+
+        total_prob = 0.0
+        normalized = []
+        for i, p in enumerate(prizes):
+            prob = float(p.get("probability", 0))
+            value = float(p.get("prizeValue", 0))
+            total_limit = int(p.get("totalLimit", 0))
+            if prob < 0 or prob > 100:
+                raise ValueError(f"奖品{i + 1}概率非法(0-100)")
+            if value > self.MAX_PRIZE_VALUE:
+                raise ValueError(f"奖品{p.get('prizeName', i + 1)}价值超限"
+                                 f"(须 ≤ ¥{self.MAX_PRIZE_VALUE:.0f}, 合规红线)")
+            total_prob += prob
+            normalized.append({
+                "prizeId": i + 1,
+                "prizeName": p.get("prizeName", f"奖品{i + 1}"),
+                "prizeType": p.get("prizeType", PRIZE_COUPON),
+                "prizeValue": round(value, 2),
+                "probability": prob,
+                "dailyLimit": int(p.get("dailyLimit", 0)),
+                "totalLimit": total_limit,
+                "remaining": total_limit,
+                "issuedToday": 0,
+            })
+        if total_prob > self.MAX_TOTAL_PROBABILITY + 0.01:
+            raise ValueError(f"概率总和超限({total_prob}% > 100%)")
+
+        await self.repo.save_prizes(activity_id, normalized)
+        logger.info("activity_prizes_configured activity=%s prizes=%d "
+                    "total_prob=%.1f%%", activity_id, len(normalized),
+                    total_prob)
+        return {"activityId": activity_id,
+                "prizeCount": len(normalized),
+                "totalProbability": round(total_prob, 2),
+                "prizes": normalized}
+
+    async def get_prize_pool(self, activity_id: int) -> list[dict]:
+        """查询奖品池(概率公示, §3.3.3 合规要求)
+
+        Raises:
+            KeyError: 活动不存在
+        """
+        activity = await self.repo.get_activity(activity_id)
+        if activity is None:
+            raise KeyError(f"活动不存在(activityId={activity_id})")
+        return await self.repo.list_prizes(activity_id)
+
+    async def draw_lottery(self, activity_id: int, user_id: int) -> dict:
+        """抽奖执行(服务端概率计算, 前端仅展示, §3.3.3)
+
+        流程:
+            1. 校验: 活动为 lottery 且 ongoing / 每日次数未超(3 次)
+            2. 服务端概率计算: random() 落区间; remaining=0 的奖项概率归零
+               并按剩余奖项概率归一
+            3. 中奖: 落发奖记录 + 扣减 remaining + 累加 usedBudget
+               + 按奖品类型分派发放(§7.3)
+            4. 落抽奖记录(日次数统计)
+
+        Raises:
+            KeyError: 活动不存在
+            ValueError: 非抽奖活动 / 活动未进行中 / 次数用尽 / 无奖品池
+        """
+        import random
+        from datetime import datetime as _dt
+        from repositories.activity_repository import (
+            PRIZE_POINTS, PRIZE_COUPON, PRIZE_PRODUCT, PRIZE_CASH,
+            PRIZE_BENEFIT, PRIZE_BANQUET_WINE, PRIZE_MASCOT,
+            PRIZE_STATUS_PENDING, PRIZE_STATUS_ISSUED,
+        )
+
+        async with get_lock(f"activity:lottery:{activity_id}:{user_id}"):
+            activity = await self.repo.get_activity(activity_id)
+            if activity is None:
+                raise KeyError(f"活动不存在(activityId={activity_id})")
+            if activity.get("type") != TYPE_LOTTERY:
+                raise ValueError("非抽奖活动不允许抽奖")
+            if activity.get("status") != STATUS_ONGOING:
+                raise ValueError(f"活动状态不允许抽奖(当前: "
+                                 f"{activity.get('status')})")
+
+            today = _dt.utcnow().strftime("%Y-%m-%d")
+            drawn = await self.repo.count_today_draws(activity_id, user_id, today)
+            if drawn >= self.DAILY_DRAW_LIMIT:
+                raise ValueError(f"今日抽奖次数已用尽"
+                                 f"({self.DAILY_DRAW_LIMIT} 次/日)")
+
+            prizes = await self.repo.list_prizes(activity_id)
+            if not prizes:
+                raise ValueError("活动未配置奖品池")
+
+            # ---- 服务端概率计算 ----
+            available = [p for p in prizes if p.get("remaining", 0) > 0]
+            total_prob = sum(p["probability"] for p in available)
+            won = None
+            if available and total_prob > 0:
+                roll = random.uniform(0, total_prob)
+                cumulative = 0.0
+                for p in available:
+                    cumulative += p["probability"]
+                    if roll < cumulative:
+                        won = p
+                        break
+
+            # ---- 落抽奖记录 ----
+            now = datetime.utcnow().isoformat()
+            record_no = await self.repo.next_prize_record_no()
+            draw_result = {
+                "activityId": activity_id,
+                "userId": user_id,
+                "drawDate": today,
+                "drawnAt": now,
+                "won": won is not None,
+                "prizeName": won["prizeName"] if won else "",
+            }
+            await self.repo.add_lottery_record(draw_result)
+
+            if won is None:
+                return {"activityId": activity_id, "userId": user_id,
+                        "won": False, "prizeName": "",
+                        "drawsRemainingToday": self.DAILY_DRAW_LIMIT - drawn - 1,
+                        "msg": "谢谢参与"}
+
+            # ---- 中奖: 扣减/落记录/发放分派 ----
+            for p in prizes:
+                if p.get("prizeId") == won["prizeId"]:
+                    p["remaining"] = p.get("remaining", 0) - 1
+                    p["issuedToday"] = p.get("issuedToday", 0) + 1
+                    break
+            await self.repo.update_prizes(activity_id, prizes)
+
+            # 预算累加
+            activity["usedBudget"] = round(
+                float(activity.get("usedBudget", 0))
+                + float(won.get("prizeValue", 0)), 2)
+            await self.repo.save_activity(activity)
+
+            # 发放分派(§7.3): 积分/优惠券自动到账, 其余落待发放
+            auto_types = {PRIZE_POINTS, PRIZE_COUPON, PRIZE_BENEFIT}
+            status = (PRIZE_STATUS_ISSUED
+                      if won["prizeType"] in auto_types
+                      else PRIZE_STATUS_PENDING)
+            record = {
+                "recordNo": record_no,
+                "activityId": activity_id,
+                "activityNo": activity.get("activityNo", ""),
+                "userId": user_id,
+                "prizeId": won["prizeId"],
+                "prizeName": won["prizeName"],
+                "prizeType": won["prizeType"],
+                "prizeValue": won.get("prizeValue", 0),
+                "status": status,
+                "couponNo": "",
+                "pointsLogId": None,
+                "waybillNo": "",
+                "sentAt": "",
+                "receivedAt": "",
+                "createdAt": now,
+            }
+
+            if won["prizeType"] == PRIZE_POINTS:
+                # 积分自动到账(best-effort, 券额=prizeValue 视为积分值)
+                try:
+                    from services.points_service import PointsService
+                    points = int(won.get("prizeValue", 0))
+                    if points > 0:
+                        result = await PointsService().earn_points(
+                            user_id, points, source="lottery",
+                            ref_id=record_no,
+                            ref_desc=f"抽奖中奖: {won['prizeName']}")
+                        record["pointsLogId"] = result.get("logId")
+                except Exception as exc:
+                    logger.warning("lottery_points_issue_failed record=%s "
+                                   "err=%s", record_no, exc)
+            elif won["prizeType"] == PRIZE_COUPON:
+                # 优惠券: 券系统未落地, 落补偿券记录(对齐 P1-9 模式)
+                try:
+                    record["couponNo"] = await self._issue_lottery_coupon(
+                        user_id, record_no, won)
+                except Exception as exc:
+                    logger.warning("lottery_coupon_issue_failed record=%s "
+                                   "err=%s", record_no, exc)
+
+            await self.repo.add_prize_record(record)
+            logger.info("lottery_won activity=%s user=%s prize=%s(%s) "
+                        "record=%s status=%s", activity_id, user_id,
+                        won["prizeName"], won["prizeType"], record_no, status)
+
+            return {
+                "activityId": activity_id,
+                "userId": user_id,
+                "won": True,
+                "prizeName": won["prizeName"],
+                "prizeType": won["prizeType"],
+                "prizeValue": won.get("prizeValue", 0),
+                "recordNo": record_no,
+                "status": status,
+                "couponNo": record.get("couponNo", ""),
+                "drawsRemainingToday": self.DAILY_DRAW_LIMIT - drawn - 1,
+                "msg": f"恭喜中奖: {won['prizeName']}",
+            }
+
+    async def _issue_lottery_coupon(self, user_id: int, record_no: str,
+                                     prize: dict) -> str:
+        """发放抽奖优惠券(券系统未落地前的记录发放, 对齐 P1-9 模式)"""
+        import secrets
+        from repositories.backend import (
+            is_redis_mode, get_redis_client, get_in_memory_store, _k,
+        )
+        coupon_no = f"CP{secrets.token_hex(5).upper()}"
+        record = {
+            "couponNo": coupon_no,
+            "userId": user_id,
+            "recordNo": record_no,
+            "amount": float(prize.get("prizeValue", 0)),
+            "validDays": 30,
+            "source": "lottery",
+            "status": "issued",
+            "createdAt": datetime.utcnow().isoformat(),
+        }
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("activity", "lottery_coupons"),
+                              coupon_no, json.dumps(record, ensure_ascii=False))
+        else:
+            store = get_in_memory_store()
+            store.setdefault("activity_lottery_coupons", {})[coupon_no] = record
+        return coupon_no
+
+    async def list_my_prizes(self, user_id: int) -> dict:
+        """我的奖品(按状态分组)"""
+        records = await self.repo.list_prize_records_by_user(user_id)
+        grouped: dict = {}
+        for r in records:
+            grouped.setdefault(r.get("status", "unknown"), []).append(r)
+        return {"userId": user_id, "total": len(records), "prizes": records,
+                "byStatus": grouped}
+
+    async def deliver_prize(self, record_no: str, waybill_no: str,
+                             operator: str = "admin") -> dict:
+        """实物奖品发货登记(待发放 → 已发货)
+
+        Raises:
+            KeyError: 发奖记录不存在
+            ValueError: 状态非法 / 非邮寄类奖品
+        """
+        from repositories.activity_repository import (
+            PRIZE_PRODUCT, PRIZE_BANQUET_WINE, PRIZE_MASCOT,
+            PRIZE_STATUS_PENDING, PRIZE_STATUS_SHIPPED,
+        )
+        record = await self.repo.get_prize_record(record_no)
+        if record is None:
+            raise KeyError(f"发奖记录不存在(recordNo={record_no})")
+        if record.get("status") != PRIZE_STATUS_PENDING:
+            raise ValueError(f"记录状态不允许发货(当前: {record.get('status')})")
+        shippable = {PRIZE_PRODUCT, PRIZE_BANQUET_WINE, PRIZE_MASCOT}
+        if record.get("prizeType") not in shippable:
+            raise ValueError("非邮寄类奖品无需发货")
+        if not waybill_no:
+            raise ValueError("运单号不能为空")
+
+        updates = {"status": PRIZE_STATUS_SHIPPED, "waybillNo": waybill_no,
+                   "sentAt": datetime.utcnow().isoformat()}
+        await self.repo.update_prize_record(record_no, updates)
+        record.update(updates)
+        record["operator"] = operator
+        logger.info("lottery_prize_shipped record=%s waybill=%s",
+                    record_no, waybill_no)
+        return record
+
+    async def confirm_prize_received(self, record_no: str,
+                                      user_id: int) -> dict:
+        """用户签收确认(已发货 → 已签收)
+
+        Raises:
+            KeyError: 记录不存在
+            ValueError: 状态非法 / 越权确认
+        """
+        from repositories.activity_repository import (
+            PRIZE_STATUS_SHIPPED, PRIZE_STATUS_SIGNED,
+        )
+        record = await self.repo.get_prize_record(record_no)
+        if record is None:
+            raise KeyError(f"发奖记录不存在(recordNo={record_no})")
+        if record.get("userId") != user_id:
+            raise ValueError("仅中奖人可确认签收")
+        if record.get("status") != PRIZE_STATUS_SHIPPED:
+            raise ValueError(f"记录状态不允许签收(当前: {record.get('status')})")
+        updates = {"status": PRIZE_STATUS_SIGNED,
+                    "receivedAt": datetime.utcnow().isoformat()}
+        await self.repo.update_prize_record(record_no, updates)
+        record.update(updates)
+        return record

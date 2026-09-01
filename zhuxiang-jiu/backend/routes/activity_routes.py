@@ -1,17 +1,20 @@
-"""活动管理模块路由(12 端点)
+"""活动管理模块路由(18 端点)
 
 鉴权:
     - 用户端(6接口): X-Member-Id 头标识当前会员
     - 管理端(6接口): X-Role: admin 头(创建/状态流转/审核/管理端列表等)
+    - 抽奖发奖(6, P1-12): 奖品池配置/查询公示(公开)/抽奖/我的奖品/
+      实物发货登记(admin)/签收确认(中奖人)
 
 异常映射:
     - KeyError → 404(活动/报名不存在)
     - ValueError → 409(业务冲突)
     - 权限校验 → 401(未登录) / 403(无权操作)
 
-端点分布(12个):
+端点分布(18个):
     - 用户端(6): 查询列表/查询详情/报名/取消报名/擂台赛排名/活动统计
     - 管理端(6): 创建活动/活动状态流转/活动审核/管理端列表/提交擂台赛分数/查询报名列表
+    - 抽奖发奖(6): 配置奖品池/奖品池公示/抽奖执行/我的奖品/发货登记/签收确认
 """
 
 
@@ -304,6 +307,121 @@ async def audit_activity(
             auditor=data.auditor,
             reason=data.reason,
         )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 抽奖发奖(P1-12, 设计文档 §3.3/§7.3)
+# ============================================================
+
+class PrizeItemRequest(PydBaseModel):
+    """单个奖品配置"""
+    prizeName: str = Field(..., min_length=1, description="奖品名称")
+    prizeType: str = Field("coupon", description="奖品类型: coupon/points/product/cash/benefit/banquet_wine/mascot")
+    prizeValue: float = Field(0.0, ge=0, description="奖品价值(元/积分值)")
+    probability: float = Field(..., ge=0, le=100, description="中奖概率(%)")
+    dailyLimit: int = Field(0, ge=0, description="日限量(0=不限)")
+    totalLimit: int = Field(..., ge=1, description="总限量")
+
+
+class ConfigurePrizesRequest(PydBaseModel):
+    """配置奖品池(管理端)"""
+    prizes: list[PrizeItemRequest] = Field(..., min_items=1,
+                                           description="奖品列表")
+
+
+class DrawLotteryRequest(PydBaseModel):
+    """抽奖执行"""
+    activityId: int = Field(..., description="抽奖活动ID")
+    userId: int = Field(..., description="会员ID")
+
+
+class DeliverPrizeRequest(PydBaseModel):
+    """实物奖品发货登记"""
+    waybillNo: str = Field(..., min_length=1, description="物流运单号")
+
+
+@router.post("/api/activity/admin/prizes/{activity_id}", tags=["活动管理模块"])
+async def configure_prizes(
+    activity_id: int,
+    data: ConfigurePrizesRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """配置抽奖奖品池(管理端, 概率总和≤100%, 单奖≤¥5000 合规红线)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.configure_prizes(
+            activity_id, [p.dict() for p in data.prizes])
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/activity/lottery/{activity_id}/prizes", tags=["活动管理模块"])
+async def get_prize_pool(activity_id: int):
+    """查询奖品池(概率公示, 合规要求)"""
+    try:
+        result = await _service.get_prize_pool(activity_id)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/activity/lottery/draw", tags=["活动管理模块"])
+async def draw_lottery(
+    data: DrawLotteryRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """抽奖执行(服务端概率计算, 每日 3 次; 中奖自动发奖分派)"""
+    member_id = _require_member_id(x_member_id)
+    if str(member_id) != str(data.userId):
+        raise HTTPException(status_code=403, detail="仅本人可抽奖")
+    try:
+        result = await _service.draw_lottery(data.activityId, data.userId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/activity/prizes/mine", tags=["活动管理模块"])
+async def list_my_prizes(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """我的奖品(按状态分组: 待发放/已发放/已发货/已签收)"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        result = await _service.list_my_prizes(int(member_id))
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/activity/admin/prize/{record_no}/deliver", tags=["活动管理模块"])
+async def deliver_prize(
+    record_no: str,
+    data: DeliverPrizeRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """实物奖品发货登记(待发放 → 已发货)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.deliver_prize(record_no, data.waybillNo)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/activity/prize/{record_no}/confirm", tags=["活动管理模块"])
+async def confirm_prize_received(
+    record_no: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """用户签收确认(已发货 → 已签收, 仅中奖人)"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        result = await _service.confirm_prize_received(record_no, int(member_id))
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

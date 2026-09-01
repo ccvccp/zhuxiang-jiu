@@ -4,12 +4,17 @@
     activities            - 活动表(8类活动/状态机: 草稿→报名中→进行中→已结束)
     activity_registrations - 报名表(报名/取消/幂等防重)
     activity_leaderboards  - 擂台赛排名表(8类擂台赛/排名)
+    activity_prizes        - 抽奖奖品池(P1-12: 概率/日限量/总限量/剩余)
+    activity_lottery_records - 抽奖记录(P1-12: 日次数控制+中奖留痕)
+    activity_prize_records - 发奖记录(P1-12: 待发放/已发放/已签收状态机)
 
 设计对齐:
     - 双模式存储: is_redis_mode() 切换内存字典/Redis Hash
     - 活动: 按 id 主键, activity_no 唯一
     - 报名幂等: (activity_id, user_id) 唯一索引
     - 擂台赛排名: 按 activity_id + rank 索引
+    - 抽奖发奖(P1-12): 服务端概率计算, 奖品 remaining 原子扣减,
+      中奖落 prize_record, 按 prize_type 分派发放
 """
 
 import json
@@ -73,6 +78,13 @@ PRIZE_BENEFIT = "benefit"   # 权益
 PRIZE_BANQUET_WINE = "banquet_wine"  # 喜宴用酒
 PRIZE_MASCOT = "mascot"     # 吉祥物
 
+# 发奖记录状态(P1-12, 设计文档 §11 prize_records)
+PRIZE_STATUS_PENDING = "pending"   # 待发放(实物/邮寄类)
+PRIZE_STATUS_ISSUED = "issued"     # 已发放(积分/优惠券自动到账)
+PRIZE_STATUS_SHIPPED = "shipped"  # 已发货(实物填运单号)
+PRIZE_STATUS_SIGNED = "signed"    # 已签收
+PRIZE_STATUS_EXPIRED = "expired"  # 已过期
+
 
 def can_transition(from_status: str, to_status: str) -> bool:
     """状态机校验: 是否允许从 from_status 流转到 to_status"""
@@ -117,6 +129,145 @@ class ActivityRepository:
     async def _redis_next_id(self, entity: str) -> int:
         client = await get_redis_client()
         return await client.incr(_k("activity", entity, "seq"))
+
+    # ============================================================
+    # 抽奖发奖(P1-12: 奖品池/抽奖记录/发奖记录)
+    # ============================================================
+
+    async def next_prize_id(self) -> int:
+        """生成奖品ID"""
+        if is_redis_mode():
+            return await self._redis_next_id("activity_prize")
+        return self._mem_next_id("_activity_prize_seq")
+
+    async def next_prize_record_no(self) -> str:
+        """生成发奖记录号: JZ+日期+6位序号"""
+        seq = (await self._redis_next_id("activity_prize_record")
+               if is_redis_mode()
+               else self._mem_next_id("_activity_prize_record_seq"))
+        today = datetime.utcnow().strftime("%Y%m%d")
+        return f"JZ{today}{seq:06d}"
+
+    # --- 奖品池 ---
+
+    async def save_prizes(self, activity_id: int, prizes: list[dict]) -> None:
+        """保存奖品池(整组覆盖)"""
+        payload = json.dumps(prizes, ensure_ascii=False)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("activity", "prizes", activity_id), payload)
+        else:
+            self._ensure_store()
+            self.store.setdefault("activity_prizes_by_activity", {})[
+                activity_id] = prizes
+
+    async def list_prizes(self, activity_id: int) -> list[dict]:
+        """查询奖品池"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("activity", "prizes", activity_id))
+            return json.loads(raw) if raw else []
+        self._ensure_store()
+        return self.store.get("activity_prizes_by_activity", {}).get(
+            activity_id, [])
+
+    async def update_prizes(self, activity_id: int, prizes: list[dict]) -> None:
+        """更新奖品池(扣减 remaining 后整体回写)"""
+        await self.save_prizes(activity_id, prizes)
+
+    # --- 抽奖记录(日次数控制) ---
+
+    async def add_lottery_record(self, record: dict) -> None:
+        """新增抽奖记录(日次数统计+留痕)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(
+                _k("activity", "lottery", record["activityId"],
+                   record["userId"]), json.dumps(record, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store.setdefault("activity_lottery_records", {}).setdefault(
+                (record["activityId"], record["userId"]), []).append(record)
+
+    async def count_today_draws(self, activity_id: int, user_id: int,
+                                 today: str) -> int:
+        """统计用户当日抽奖次数(today=YYYY-MM-DD)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            records = await client.lrange(
+                _k("activity", "lottery", activity_id, user_id), 0, -1)
+            return sum(1 for r in records
+                       if json.loads(r).get("drawDate") == today)
+        self._ensure_store()
+        records = self.store.get("activity_lottery_records", {}).get(
+            (activity_id, user_id), [])
+        return sum(1 for r in records if r.get("drawDate") == today)
+
+    # --- 发奖记录 ---
+
+    async def add_prize_record(self, record: dict) -> None:
+        """新增发奖记录"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("activity", "prize_record",
+                                record["recordNo"]),
+                             json.dumps(record, ensure_ascii=False))
+            await client.lpush(_k("activity", "prize_records_by_user",
+                                   record["userId"]), record["recordNo"])
+        else:
+            self._ensure_store()
+            self.store.setdefault("activity_prize_records", {})[
+                record["recordNo"]] = record
+            self.store.setdefault("activity_prize_records_by_user", {}).setdefault(
+                record["userId"], []).append(record["recordNo"])
+
+    async def get_prize_record(self, record_no: str) -> dict | None:
+        """按记录号查询发奖记录"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("activity", "prize_record", record_no))
+            return json.loads(raw) if raw else None
+        self._ensure_store()
+        return self.store.get("activity_prize_records", {}).get(record_no)
+
+    async def update_prize_record(self, record_no: str,
+                                   updates: dict) -> None:
+        """更新发奖记录(发货登记等)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("activity", "prize_record", record_no))
+            if raw:
+                record = json.loads(raw)
+                record.update(updates)
+                await client.set(_k("activity", "prize_record", record_no),
+                                 json.dumps(record, ensure_ascii=False))
+            return
+        self._ensure_store()
+        record = self.store.get("activity_prize_records", {}).get(record_no)
+        if record:
+            record.update(updates)
+
+    async def list_prize_records_by_user(self, user_id: int,
+                                          limit: int = 100) -> list[dict]:
+        """查询用户全部发奖记录(我的奖品)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            nos = await client.lrange(
+                _k("activity", "prize_records_by_user", user_id), 0, limit - 1)
+            records = []
+            for no in nos:
+                raw = await client.get(_k("activity", "prize_record", no))
+                if raw:
+                    records.append(json.loads(raw))
+            records.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+            return records
+        self._ensure_store()
+        nos = self.store.get("activity_prize_records_by_user", {}).get(
+            user_id, [])
+        records = [self.store["activity_prize_records"][no] for no in nos
+                   if no in self.store.get("activity_prize_records", {})]
+        records.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+        return records[:limit]
 
     # ============================================================
     # 活动 CRUD
