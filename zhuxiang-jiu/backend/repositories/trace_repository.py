@@ -4,12 +4,17 @@
     box_codes:  箱码表(TBC箱顶码防拆 + BBC箱底码防窜)
     life_codes: 生命码表(BLC瓶级唯一码, 全生命周期追溯)
     scan_logs:  扫码记录表(激活/验证/转让/查询扫码记录)
+    agent_inbound_logs:  代理商箱级入库流水(P1-6, 扫箱底码 BBC 入库)
+    agent_outbound_logs: 代理商箱级出库流水(P1-6)
+    agent_stocktakes:    代理商盘点单(P1-6, 实盘 vs 系统差异)
 
 设计对齐:
     - 双模式存储: is_redis_mode() 切换内存字典/Redis Hash
     - 箱码: 一箱一码, 双码联动(TBC+BBC)
     - 生命码: 一瓶一码, BLC格式编码
     - 扫码记录: 按时间倒序, 支持按码/用户筛选
+    - 箱级库存(P1-6): 入库回写 box(inboundAt/inboundLocation),
+      出库回写 box(outboundAt/outboundTo), 看板按 agentId 聚合
 """
 
 import json
@@ -87,6 +92,172 @@ class TraceRepository:
     async def _redis_next_id(self, entity: str) -> int:
         client = await get_redis_client()
         return await client.incr(_k("trace", entity, "seq"))
+
+    # ============================================================
+    # 代理商箱级库存流水(P1-6)
+    # ============================================================
+
+    async def next_inbound_id(self) -> int:
+        """生成入库流水ID"""
+        if is_redis_mode():
+            return await self._redis_next_id("trace_agent_inbound")
+        return self._mem_next_id("_trace_agent_inbound_seq")
+
+    async def next_outbound_id(self) -> int:
+        """生成出库流水ID"""
+        if is_redis_mode():
+            return await self._redis_next_id("trace_agent_outbound")
+        return self._mem_next_id("_trace_agent_outbound_seq")
+
+    async def next_stocktake_id(self) -> int:
+        """生成盘点单ID"""
+        if is_redis_mode():
+            return await self._redis_next_id("trace_agent_stocktake")
+        return self._mem_next_id("_trace_agent_stocktake_seq")
+
+    async def add_inbound_log(self, log: dict) -> int:
+        """新增入库流水(返回ID)"""
+        log_id = await self.next_inbound_id()
+        log["id"] = log_id
+        log.setdefault("createdAt", datetime.utcnow().isoformat())
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("trace", "agent_inbound", log_id),
+                             json.dumps(log, ensure_ascii=False))
+            await client.lpush(_k("trace", "agent_inbounds_by_agent",
+                                  log.get("agentId")), log_id)
+        else:
+            self._ensure_store()
+            self.store.setdefault("trace_agent_inbound_logs", {})[log_id] = log
+            self.store.setdefault("trace_agent_inbound_by_agent", {}).setdefault(
+                str(log.get("agentId")), []).append(log_id)
+        return log_id
+
+    async def list_inbound_logs(self, agent_id=None, limit: int = 50) -> list[dict]:
+        """查询入库流水(按代理商过滤, 时间倒序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if agent_id is not None:
+                ids = await client.lrange(
+                    _k("trace", "agent_inbounds_by_agent", agent_id), 0, limit - 1)
+            else:
+                keys = await client.keys(_k("trace", "agent_inbound", "*"))
+                ids = [k.rsplit(":", 1)[-1] for k in keys]
+            logs = []
+            for lid in ids[:limit]:
+                raw = await client.get(_k("trace", "agent_inbound", lid))
+                if raw:
+                    logs.append(json.loads(raw))
+            logs.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+            return logs
+        self._ensure_store()
+        logs = list(self.store.get("trace_agent_inbound_logs", {}).values())
+        if agent_id is not None:
+            logs = [l for l in logs if str(l.get("agentId")) == str(agent_id)]
+        logs.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+        return logs[:limit]
+
+    async def add_outbound_log(self, log: dict) -> int:
+        """新增出库流水(返回ID)"""
+        log_id = await self.next_outbound_id()
+        log["id"] = log_id
+        log.setdefault("createdAt", datetime.utcnow().isoformat())
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("trace", "agent_outbound", log_id),
+                             json.dumps(log, ensure_ascii=False))
+            await client.lpush(_k("trace", "agent_outbounds_by_agent",
+                                  log.get("agentId")), log_id)
+        else:
+            self._ensure_store()
+            self.store.setdefault("trace_agent_outbound_logs", {})[log_id] = log
+            self.store.setdefault("trace_agent_outbound_by_agent", {}).setdefault(
+                str(log.get("agentId")), []).append(log_id)
+        return log_id
+
+    async def list_outbound_logs(self, agent_id=None, limit: int = 50) -> list[dict]:
+        """查询出库流水(按代理商过滤, 时间倒序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if agent_id is not None:
+                ids = await client.lrange(
+                    _k("trace", "agent_outbounds_by_agent", agent_id), 0, limit - 1)
+            else:
+                keys = await client.keys(_k("trace", "agent_outbound", "*"))
+                ids = [k.rsplit(":", 1)[-1] for k in keys]
+            logs = []
+            for lid in ids[:limit]:
+                raw = await client.get(_k("trace", "agent_outbound", lid))
+                if raw:
+                    logs.append(json.loads(raw))
+            logs.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+            return logs
+        self._ensure_store()
+        logs = list(self.store.get("trace_agent_outbound_logs", {}).values())
+        if agent_id is not None:
+            logs = [l for l in logs if str(l.get("agentId")) == str(agent_id)]
+        logs.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+        return logs[:limit]
+
+    async def save_stocktake(self, record: dict) -> int:
+        """保存盘点单(返回ID)"""
+        record_id = await self.next_stocktake_id()
+        record["id"] = record_id
+        record.setdefault("createdAt", datetime.utcnow().isoformat())
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("trace", "agent_stocktake", record_id),
+                             json.dumps(record, ensure_ascii=False))
+            await client.lpush(_k("trace", "agent_stocktakes_by_agent",
+                                  record.get("agentId")), record_id)
+        else:
+            self._ensure_store()
+            self.store.setdefault("trace_agent_stocktakes", {})[record_id] = record
+            self.store.setdefault("trace_agent_stocktake_by_agent", {}).setdefault(
+                str(record.get("agentId")), []).append(record_id)
+        return record_id
+
+    async def list_stocktakes(self, agent_id=None, limit: int = 20) -> list[dict]:
+        """查询盘点单(按代理商过滤, 时间倒序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if agent_id is not None:
+                ids = await client.lrange(
+                    _k("trace", "agent_stocktakes_by_agent", agent_id), 0, limit - 1)
+            else:
+                keys = await client.keys(_k("trace", "agent_stocktake", "*"))
+                ids = [k.rsplit(":", 1)[-1] for k in keys]
+            records = []
+            for rid in ids[:limit]:
+                raw = await client.get(_k("trace", "agent_stocktake", rid))
+                if raw:
+                    records.append(json.loads(raw))
+            records.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+            return records
+        self._ensure_store()
+        records = list(self.store.get("trace_agent_stocktakes", {}).values())
+        if agent_id is not None:
+            records = [r for r in records if str(r.get("agentId")) == str(agent_id)]
+        records.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+        return records[:limit]
+
+    async def list_boxes_by_agent(self, agent_id, limit: int = 10000) -> list[dict]:
+        """查询代理商名下全部箱码(库存看板聚合用)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("trace", "box", "*"))
+            boxes = []
+            for k in keys:
+                raw = await client.get(k)
+                if not raw:
+                    continue
+                box = json.loads(raw)
+                if str(box.get("agentId")) == str(agent_id):
+                    boxes.append(box)
+            return boxes[:limit]
+        self._ensure_store()
+        return [b for b in self.store["trace_box_codes"].values()
+                if str(b.get("agentId")) == str(agent_id)][:limit]
 
     # ============================================================
     # 箱码表 CRUD

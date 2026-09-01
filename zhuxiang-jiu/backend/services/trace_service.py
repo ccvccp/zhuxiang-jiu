@@ -787,3 +787,345 @@ class TraceService:
             "activeCount": active_count,
             "activationRate": activation_rate,
         }
+
+    # ============================================================
+    # 7. 代理商箱级库存(P1-6, 设计文档 4.1/4.2: 入库/出库/看板/盘点/预警)
+    # ============================================================
+
+    # 每箱瓶数(设计文档第六章 bottles_per_box INT DEFAULT 6)
+    BOTTLES_PER_BOX = 6
+    # 默认安全库存(箱), 低于此值触发库存不足预警
+    SAFETY_STOCK_BOXES = 10
+    # 默认积压阈值(天), 入库后超过此天数未出库未开箱触发积压预警
+    OVERSTOCK_DAYS = 90
+
+    async def agent_inbound(self, agent_id: int, box_codes: list[str],
+                             location: str = "", operator_id: int = None,
+                             purchase_id: str = "") -> dict:
+        """代理商扫箱底码(BBC)批量入库登记
+
+        规则(设计文档 4.2):
+            - 入库凭证为箱底码(BBC, 永久有效); 箱顶码(TBC)亦可受理(厂家直发场景)
+            - 箱码须已绑定(bound)且归属该代理商
+            - 已入库箱码重复扫幂等跳过
+            - 入库后箱状态不变(bound), 回写 inboundAt/inboundLocation
+            - 写入 agent_inbound_logs 流水
+
+        Raises:
+            KeyError: 箱码不存在
+            ValueError: 箱码未绑定 / 归属不符 / 已回收
+        """
+        if not box_codes:
+            raise ValueError("入库箱码列表不能为空")
+
+        results = []
+        async with get_lock(f"trace:agent_inbound:{agent_id}"):
+            for code in box_codes:
+                box = await self.repo.get_box_by_code(code)
+                if box is None:
+                    # 箱底码不在 by_code 索引(索引只挂 TBC), 尝试 BBC→TBC 换算
+                    if code.startswith(BOX_BOTTOM_PREFIX):
+                        tbc = code.replace(BOX_BOTTOM_PREFIX, BOX_TOP_PREFIX, 1)
+                        box = await self.repo.get_box_by_code(tbc)
+                    if box is None:
+                        results.append({"boxCode": code, "status": "rejected",
+                                        "reason": "箱码不存在"})
+                        continue
+
+                if box.get("status") == BOX_STATUS_RECYCLED:
+                    results.append({"boxCode": code, "status": "rejected",
+                                    "reason": "箱码已回收"})
+                    continue
+                if box.get("status") != BOX_STATUS_BOUND:
+                    results.append({"boxCode": code, "status": "rejected",
+                                    "reason": f"箱码未绑定(当前{box.get('status')})"})
+                    continue
+                if box.get("agentId") is None or \
+                        str(box.get("agentId")) != str(agent_id):
+                    results.append({"boxCode": code, "status": "rejected",
+                                    "reason": "箱码归属其他代理商"})
+                    continue
+                if box.get("inboundAt"):
+                    results.append({"boxCode": code, "status": "skipped",
+                                    "reason": "已入库(幂等跳过)"})
+                    continue
+
+                now = ts()
+                await self.repo.update_box_code(box["id"], {
+                    "inboundAt": now,
+                    "inboundLocation": location,
+                    "inboundOperatorId": operator_id,
+                })
+                log_id = await self.repo.add_inbound_log({
+                    "boxId": box["id"],
+                    "boxCode": box["boxCode"],
+                    "boxBottomCode": box.get("boxBottomCode"),
+                    "agentId": agent_id,
+                    "batchNo": box.get("batchNo"),
+                    "productId": box.get("productId"),
+                    "inboundDate": now,
+                    "inboundLocation": location,
+                    "purchaseId": purchase_id,
+                    "operatorId": operator_id,
+                })
+                results.append({"boxCode": box["boxCode"],
+                                "boxBottomCode": box.get("boxBottomCode"),
+                                "boxId": box["id"], "status": "inbound",
+                                "inboundDate": now, "logId": log_id})
+
+        inbound = sum(1 for r in results if r["status"] == "inbound")
+        skipped = sum(1 for r in results if r["status"] == "skipped")
+        rejected = sum(1 for r in results if r["status"] == "rejected")
+        logger.info("agent_inbound agent=%s total=%d inbound=%d skipped=%d "
+                    "rejected=%d", agent_id, len(results), inbound, skipped,
+                    rejected)
+        return {"agentId": agent_id, "total": len(results),
+                "inbound": inbound, "skipped": skipped, "rejected": rejected,
+                "results": results}
+
+    async def agent_outbound(self, agent_id: int, box_codes: list[str],
+                              target: str = "", reason: str = "sale") -> dict:
+        """代理商箱级出库登记(发货给门店/终端)
+
+        规则:
+            - 仅已入库且未出库的箱码可出库
+            - 已开箱(opened)的箱不参与出库(开箱即终端动销)
+            - 出库回写 box.outboundAt/outboundTarget, 写出库流水
+
+        Raises:
+            ValueError: 箱码列表为空
+        """
+        if not box_codes:
+            raise ValueError("出库箱码列表不能为空")
+
+        results = []
+        async with get_lock(f"trace:agent_outbound:{agent_id}"):
+            for code in box_codes:
+                box = await self.repo.get_box_by_code(code)
+                if box is None:
+                    if code.startswith(BOX_BOTTOM_PREFIX):
+                        tbc = code.replace(BOX_BOTTOM_PREFIX, BOX_TOP_PREFIX, 1)
+                        box = await self.repo.get_box_by_code(tbc)
+                if box is None:
+                    results.append({"boxCode": code, "status": "rejected",
+                                    "reason": "箱码不存在"})
+                    continue
+                if str(box.get("agentId")) != str(agent_id):
+                    results.append({"boxCode": code, "status": "rejected",
+                                    "reason": "箱码归属其他代理商"})
+                    continue
+                if not box.get("inboundAt"):
+                    results.append({"boxCode": code, "status": "rejected",
+                                    "reason": "箱码未入库, 不能出库"})
+                    continue
+                if box.get("outboundAt"):
+                    results.append({"boxCode": code, "status": "skipped",
+                                    "reason": "已出库(幂等跳过)"})
+                    continue
+                if box.get("status") == BOX_STATUS_OPENED:
+                    results.append({"boxCode": code, "status": "rejected",
+                                    "reason": "箱已开箱(终端动销, 不参与出库)"})
+                    continue
+
+                now = ts()
+                await self.repo.update_box_code(box["id"], {
+                    "outboundAt": now,
+                    "outboundTarget": target,
+                })
+                log_id = await self.repo.add_outbound_log({
+                    "boxId": box["id"],
+                    "boxCode": box["boxCode"],
+                    "agentId": agent_id,
+                    "batchNo": box.get("batchNo"),
+                    "outboundDate": now,
+                    "outboundTarget": target,
+                    "reason": reason,
+                })
+                results.append({"boxCode": box["boxCode"], "boxId": box["id"],
+                                "status": "outbound", "outboundDate": now,
+                                "logId": log_id})
+
+        outbound = sum(1 for r in results if r["status"] == "outbound")
+        logger.info("agent_outbound agent=%s total=%d outbound=%d",
+                    agent_id, len(results), outbound)
+        return {"agentId": agent_id, "total": len(results),
+                "outbound": outbound,
+                "skipped": sum(1 for r in results if r["status"] == "skipped"),
+                "rejected": sum(1 for r in results if r["status"] == "rejected"),
+                "results": results}
+
+    async def agent_inventory_dashboard(self, agent_id: int) -> dict:
+        """代理商库存看板(设计文档 4.1)
+
+        聚合维度:
+            - 箱级: 在库(已入库未出库)/已出库/未开箱/已开箱
+            - 瓶级: 按 bottles_per_box=6 折算, 待激活/已激活(扫生命码)
+            - 批次分布: 每批次在库箱数
+            - 防窜: 本区域开箱 vs 跨区开箱计数
+        """
+        boxes = await self.repo.list_boxes_by_agent(agent_id)
+        in_stock, outbound, opened, cross_region = [], 0, 0, 0
+        by_batch: dict = {}
+        life_ids: list = []
+        for b in boxes:
+            if b.get("inboundAt") and not b.get("outboundAt"):
+                in_stock.append(b)
+                batch = b.get("batchNo", "unknown")
+                by_batch[batch] = by_batch.get(batch, 0) + 1
+            if b.get("outboundAt"):
+                outbound += 1
+            if b.get("status") == BOX_STATUS_OPENED:
+                opened += 1
+                if b.get("isCrossRegion"):
+                    cross_region += 1
+            life_ids.extend(b.get("lifeCodeIds") or [])
+
+        # 瓶级统计(扫生命码状态)
+        pending_lifes = active_lifes = 0
+        for lid in life_ids:
+            life = await self.repo.get_life_code(lid)
+            if life is None:
+                continue
+            if life.get("status") == LIFE_STATUS_ACTIVE:
+                active_lifes += 1
+            elif life.get("status") == LIFE_STATUS_PENDING:
+                pending_lifes += 1
+
+        bottles_per_box = self.BOTTLES_PER_BOX
+        return {
+            "agentId": agent_id,
+            "boxes": {
+                "inStock": len(in_stock),
+                "outbound": outbound,
+                "unopened": sum(1 for b in boxes
+                                if b.get("status") != BOX_STATUS_OPENED),
+                "opened": opened,
+            },
+            "bottles": {
+                "perBox": bottles_per_box,
+                "inStockEquivalence": len(in_stock) * bottles_per_box,
+                "pendingActivation": pending_lifes,
+                "activated": active_lifes,
+            },
+            "batchDistribution": [
+                {"batchNo": k, "inStockBoxes": v} for k, v in
+                sorted(by_batch.items())],
+            "antiChannel": {
+                "localOpenings": opened - cross_region,
+                "crossRegionOpenings": cross_region,
+            },
+        }
+
+    async def agent_stocktake(self, agent_id: int, actual_box_codes: list[str],
+                               safety_stock: int = None) -> dict:
+        """代理商库存盘点(实盘箱码清单 vs 系统在库)
+
+        差异三类:
+            - 盘盈(surplus): 实盘有, 系统无在库记录
+            - 盘亏(loss): 系统在库, 实盘缺失
+            - 一致(matched)
+
+        盘点单落库存档(agent_stocktakes), 供审计追溯。
+        """
+        boxes = await self.repo.list_boxes_by_agent(agent_id)
+        system_in_stock = {b["boxCode"] for b in boxes
+                           if b.get("inboundAt") and not b.get("outboundAt")}
+        actual_set = set(actual_box_codes or [])
+        # BBC→TBC 归一(实盘可能扫箱底码)
+        normalized_actual = set()
+        for code in actual_set:
+            if code.startswith(BOX_BOTTOM_PREFIX):
+                code = code.replace(BOX_BOTTOM_PREFIX, BOX_TOP_PREFIX, 1)
+            normalized_actual.add(code)
+
+        matched = sorted(system_in_stock & normalized_actual)
+        surplus = sorted(normalized_actual - system_in_stock)
+        loss = sorted(system_in_stock - normalized_actual)
+
+        record = {
+            "agentId": agent_id,
+            "expectedCount": len(system_in_stock),
+            "actualCount": len(normalized_actual),
+            "matchedCount": len(matched),
+            "surplusCount": len(surplus),
+            "lossCount": len(loss),
+            "matched": matched,
+            "surplus": surplus,
+            "loss": loss,
+            "diffCount": len(surplus) + len(loss),
+            "safetyStock": safety_stock if safety_stock is not None
+                           else self.SAFETY_STOCK_BOXES,
+        }
+        record_id = await self.repo.save_stocktake(record)
+        record["id"] = record_id
+        logger.info("agent_stocktake agent=%s expected=%d actual=%d diff=%d",
+                    agent_id, record["expectedCount"], record["actualCount"],
+                    record["diffCount"])
+        return record
+
+    async def agent_inventory_warnings(self, agent_id: int,
+                                        safety_stock: int = None,
+                                        overstock_days: int = None) -> dict:
+        """代理商库存预警(设计文档 4.1 + 代理商管理文档预警中心)
+
+        三类预警(规则引擎版, AI 预测降 P2):
+            - lowStock:  在库箱数 < 安全库存(默认 10 箱)
+            - overstock: 已入库未出库未开箱且滞留超阈值(默认 90 天)
+            - nearExpiry: 箱龄接近 3 年回收期(满 3 年可加价 20% 回收,
+              临期 60 天提示; 以生成时间为基准估算)
+        """
+        safety = safety_stock if safety_stock is not None else self.SAFETY_STOCK_BOXES
+        over_days = overstock_days if overstock_days is not None else self.OVERSTOCK_DAYS
+
+        boxes = await self.repo.list_boxes_by_agent(agent_id)
+        in_stock = [b for b in boxes
+                    if b.get("inboundAt") and not b.get("outboundAt")]
+
+        warnings = []
+
+        # 1. 库存不足
+        if len(in_stock) < safety:
+            warnings.append({
+                "type": "lowStock",
+                "level": "high" if len(in_stock) < safety / 2 else "medium",
+                "message": f"在库 {len(in_stock)} 箱, 低于安全库存 {safety} 箱, 请及时补货",
+            })
+
+        # 2. 积压滞留 / 3. 临期回收
+        now = ts()
+        overstock, near_expiry = [], []
+        for b in in_stock:
+            inbound_at = b.get("inboundAt") or b.get("createdAt") or ""
+            if not inbound_at:
+                continue
+            try:
+                from datetime import datetime, timedelta
+                inbound_dt = datetime.fromisoformat(inbound_at)
+                age_days = (datetime.utcnow() - inbound_dt).days
+            except (ValueError, TypeError):
+                continue
+            if b.get("status") != BOX_STATUS_OPENED and age_days > over_days:
+                overstock.append({"boxCode": b["boxCode"],
+                                  "ageDays": age_days})
+            if age_days >= 3 * 365 - 60:
+                near_expiry.append({"boxCode": b["boxCode"],
+                                    "ageDays": age_days})
+
+        if overstock:
+            warnings.append({
+                "type": "overstock",
+                "level": "medium",
+                "message": f"{len(overstock)} 箱入库超 {over_days} 天未动销, 存在积压风险",
+                "boxes": overstock[:20],
+            })
+        if near_expiry:
+            warnings.append({
+                "type": "nearExpiry",
+                "level": "low",
+                "message": f"{len(near_expiry)} 箱临近 3 年回收期(可加价 20% 回收)",
+                "boxes": near_expiry[:20],
+            })
+
+        return {"agentId": agent_id, "warningCount": len(warnings),
+                "warnings": warnings,
+                "inStockBoxes": len(in_stock)}

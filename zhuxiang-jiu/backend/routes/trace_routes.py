@@ -1,8 +1,9 @@
-"""双码追溯管理模块路由(14 端点)
+"""双码追溯管理模块路由(19 端点)
 
 鉴权:
     - 用户端: X-Member-Id 头(扫码激活/转让/查询/开箱)
     - 管理端: X-Role: admin 头(生成箱码/生命码/绑定/统计)
+    - 代理商端: X-Agent-Id 头(箱级库存, 须与路径 agent_id 一致)
 
 端点分布:
     - 箱码(4):     generate-box / bind-box / open-box / query-box
@@ -12,6 +13,7 @@
     - 转让(1):     transfer
     - 记录(1):     scan-logs
     - 统计(1):     stats
+    - 代理商箱级库存(5, P1-6): inbound / outbound / inventory / stocktake / warnings
 """
 
 
@@ -407,6 +409,127 @@ async def get_stats(
     _require_admin(x_role)
     try:
         result = await _service.get_stats(batch_no)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 代理商箱级库存(P1-6: 入库/出库/看板/盘点/预警)
+# ============================================================
+
+def _require_agent(x_agent_id: str | None, agent_id: int):
+    """代理商自校验: X-Agent-Id 头须与目标 agent_id 一致(admin 放行)"""
+    if x_agent_id is None:
+        raise HTTPException(status_code=401, detail="未登录: 请提供 X-Agent-Id 头")
+    if str(x_agent_id) != str(agent_id):
+        raise HTTPException(status_code=403, detail="无权操作其他代理商的库存")
+
+
+class AgentInboundRequest(PydBaseModel):
+    boxCodes: list[str] = Field(..., min_items=1, max_items=200,
+                                description="箱码列表(TBC 箱顶码或 BBC 箱底码)")
+    location: str = Field("", description="入库位置(仓库地址)")
+    purchaseId: str = Field("", description="关联进货单号(打通 agent 进货断层)")
+    operatorId: int | None = Field(None, description="操作人ID")
+
+
+class AgentOutboundRequest(PydBaseModel):
+    boxCodes: list[str] = Field(..., min_items=1, max_items=200,
+                                description="出库箱码列表")
+    target: str = Field("", description="出库去向(门店/终端名称)")
+    reason: str = Field("sale", description="出库原因(sale/transfer/return)")
+
+
+class AgentStocktakeRequest(PydBaseModel):
+    actualBoxCodes: list[str] = Field(..., description="实盘箱码清单(TBC/BBC 均可)")
+    safetyStock: int | None = Field(None, ge=0, description="安全库存(箱, 缺省默认)")
+
+
+@router.post("/api/trace/agent/{agent_id}/inbound", tags=["双码追溯模块"])
+async def agent_inbound(
+    agent_id: int,
+    data: AgentInboundRequest,
+    x_agent_id: str = Header(None, alias="X-Agent-Id"),
+):
+    """代理商箱级入库(扫箱底码 BBC 批量入库, 设计文档 4.2)
+
+    校验: 箱码已绑定(bound)且归属该代理商; 重复入库幂等跳过。
+    """
+    _require_agent(x_agent_id, agent_id)
+    try:
+        result = await _service.agent_inbound(
+            agent_id, data.boxCodes,
+            location=data.location,
+            operator_id=data.operatorId,
+            purchase_id=data.purchaseId,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/trace/agent/{agent_id}/outbound", tags=["双码追溯模块"])
+async def agent_outbound(
+    agent_id: int,
+    data: AgentOutboundRequest,
+    x_agent_id: str = Header(None, alias="X-Agent-Id"),
+):
+    """代理商箱级出库(发货门店/终端, 仅已入库未出库箱可出)"""
+    _require_agent(x_agent_id, agent_id)
+    try:
+        result = await _service.agent_outbound(
+            agent_id, data.boxCodes,
+            target=data.target, reason=data.reason,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/trace/agent/{agent_id}/inventory", tags=["双码追溯模块"])
+async def agent_inventory(
+    agent_id: int,
+    x_agent_id: str = Header(None, alias="X-Agent-Id"),
+):
+    """代理商库存看板(箱级在库/出库/开箱 + 瓶级折算 + 批次分布 + 防窜统计)"""
+    _require_agent(x_agent_id, agent_id)
+    try:
+        result = await _service.agent_inventory_dashboard(agent_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/trace/agent/{agent_id}/stocktake", tags=["双码追溯模块"])
+async def agent_stocktake(
+    agent_id: int,
+    data: AgentStocktakeRequest,
+    x_agent_id: str = Header(None, alias="X-Agent-Id"),
+):
+    """代理商库存盘点(实盘箱码清单 vs 系统在库, 产出盘盈/盘亏差异单)"""
+    _require_agent(x_agent_id, agent_id)
+    try:
+        result = await _service.agent_stocktake(
+            agent_id, data.actualBoxCodes, safety_stock=data.safetyStock)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/trace/agent/{agent_id}/warnings", tags=["双码追溯模块"])
+async def agent_warnings(
+    agent_id: int,
+    safety_stock: int = Query(None, ge=0, description="安全库存阈值(箱)"),
+    overstock_days: int = Query(None, ge=1, description="积压阈值(天)"),
+    x_agent_id: str = Header(None, alias="X-Agent-Id"),
+):
+    """代理商库存预警(库存不足/积压滞留/临期回收 三类)"""
+    _require_agent(x_agent_id, agent_id)
+    try:
+        result = await _service.agent_inventory_warnings(
+            agent_id, safety_stock=safety_stock,
+            overstock_days=overstock_days)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
