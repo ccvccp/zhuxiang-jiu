@@ -234,6 +234,7 @@ class TestSendMessageAIReply:
                f"got content={ai_off['content'][:30] if ai_off else None}")
 
         # test 11e: 开关 on + mock 大模型 → chat 走 llm 合成
+        # (P1-8: 上一条 synthesized 答案置信度<0.5 已触发转人工, 此处用新会话)
         import services.llm_client as _llm_mod
         import contextlib as _cl
         _orig_chat = _llm_mod.provider_client.chat
@@ -244,8 +245,9 @@ class TestSendMessageAIReply:
         os.environ["LLM_API_KEY"] = "test-key"
         try:
             os.environ["KNOWLEDGE_CHAT_LLM"] = "on"
+            session_e = await svc.create_session(USER_ID_1)
             result_on = await svc.send_message(
-                session["sessionId"], SENDER_USER, USER_ID_1, "text",
+                session_e["sessionId"], SENDER_USER, USER_ID_1, "text",
                 "竹香酒的酿造原料和工艺是什么")
             ai_on = result_on["aiReply"]
             record("test_11e_llm_switch_on_uses_llm",

@@ -2,7 +2,9 @@
 
 核心业务:
     - 创建会话(AI优先接待, 置信度0.9)
-    - 发送消息(用户消息→AI自动回复+知识库检索+未解决3次转人工)
+    - 发送消息(用户消息→AI自动回复+知识库检索)
+    - 转人工触发引擎(P1-8, 设计文档 5.1 八条: 用户主动/投诉/退款/
+      复杂问题/情绪愤怒/置信度<0.5/3次未解决/VIP直通)
     - 人工转接(状态流转+客服分配)
     - 关闭会话(状态终结)
     - 知识库CRUD
@@ -22,6 +24,7 @@
 
 
 import contextlib
+import logging
 import os
 
 from core.locks import get_lock
@@ -43,6 +46,8 @@ from services.knowledge_service import KnowledgeService
 
 SENSITIVE_WORDS = MessageContentScorer.SENSITIVE_WORDS
 
+logger = logging.getLogger("chat_service")
+
 
 # ============================================================
 # AI 业务规则常量
@@ -54,10 +59,24 @@ AI_INITIAL_CONFIDENCE = 0.90
 AI_REPLY_CONFIDENCE = 0.85
 # AI 兜底回复置信度(未命中)
 AI_FALLBACK_CONFIDENCE = 0.30
+# 低置信转人工阈值(设计文档 5.1: 置信度<0.5 立即转人工)
+LOW_CONFIDENCE_THRESHOLD = 0.5
 # 连续未解决消息数(超过自动转人工)
 MAX_UNRESOLVED_COUNT = 3
 # 转人工关键词
 TRANSFER_KEYWORDS = ("转人工", "人工客服", "人工", "找客服", "转接人工")
+# 投诉关键词(设计文档 5.1: "投诉/差评/315" 优先转人工)
+COMPLAINT_KEYWORDS = ("投诉", "差评", "315", "工商投诉", "12315")
+# 退款/售后关键词(设计文档 5.1: 退款请求转售后)
+REFUND_KEYWORDS = ("退款", "退货", "换货", "售后", "退钱", "仅退款")
+# 复杂问题关键词(设计文档 5.1: 定制/团购/代理 转专属)
+COMPLEX_KEYWORDS = ("定制", "团购", "代理", "加盟", "贴牌", "企业采购")
+# VIP 会员等级阈值(L4/L5/SVIP 直接人工, 设计文档 5.1)
+VIP_MEMBER_LEVEL = 4
+# 情绪风险阈值(复用 role 满意度预测: riskScore>=60 干预)
+from repositories.role_repository import SATISFACTION_RISK_THRESHOLD  # noqa: E402
+# 情绪负向关键词(复用 role 词库: 情绪愤怒触发)
+from repositories.role_repository import NEGATIVE_EMOTION_KEYWORDS  # noqa: E402
 # 默认客服ID(简化: 轮询分配, 此处固定)
 DEFAULT_CUSTOMER_SERVICE_ID = 1
 
@@ -199,20 +218,105 @@ class ChatService:
             if session["status"] != SESSION_STATUS_AI:
                 return result
 
+            # VIP 直通人工(P1-8: L4/L5/SVIP 首条消息免 AI 接待)
+            await self._check_vip_trigger(session)
+            if session["status"] != SESSION_STATUS_AI:
+                result["transferred"] = True
+                result["transferTrigger"] = {
+                    "trigger": "vip", "reason": "VIP会员直通人工(L4/L5/SVIP)"}
+                return result
+
             ai_reply = await self._generate_ai_reply(session, content)
             result["aiReply"] = ai_reply
 
-            # 判定是否需要转人工
-            should_transfer = (
-                ai_reply["transferred"]
-                or session.get("unresolvedCount", 0) >= MAX_UNRESOLVED_COUNT
-            )
-
-            if should_transfer:
-                await self._do_transfer(session, reason="AI未解决/用户主动转人工")
+            # 转人工触发判定(P1-8, 设计文档 5.1 八条触发集中评估)
+            trigger = self._evaluate_transfer_triggers(session, content, ai_reply)
+            if trigger:
+                await self._do_transfer(session, reason=trigger["reason"])
                 result["transferred"] = True
+                result["transferTrigger"] = trigger
 
             return result
+
+    # ============================================================
+    # 转人工触发引擎(P1-8, 设计文档 5.1: 置信度/主动/情绪/投诉/退款/未解决/VIP/复杂)
+    # ============================================================
+
+    def _evaluate_transfer_triggers(self, session: dict, content: str,
+                                     ai_reply: dict) -> dict | None:
+        """集中评估转人工触发(须在锁内、AI 回复生成后调用)
+
+        触发规则(设计文档 5.1, 命中即转, 优先级从高到低):
+            1. 用户主动:  "转人工"等关键词(原有)
+            2. 投诉关键词: "投诉/差评/315"等 → 优先转人工
+            3. 退款请求:  "退款/退货/售后"等 → 转售后
+            4. 复杂问题:  "定制/团购/代理"等 → 转专属
+            5. 情绪愤怒:  负向情绪词命中 ≥3 → 情绪风险干预
+            6. 置信度<0.5: AI 回复置信度过低 → 立即转人工
+            7. 3次未解决: unresolvedCount>=3(原有)
+
+        VIP 用户(L4/L5)触发: 建会话时由 create_session 落 vipMember 标记,
+        首条用户消息即触发直通人工(见 _check_vip_trigger)。
+
+        Returns:
+            命中触发返回 {trigger, reason}; 未命中返回 None
+        """
+        # 1. 用户主动(原有, 最优先)
+        if any(kw in content for kw in TRANSFER_KEYWORDS):
+            return {"trigger": "user_request",
+                    "reason": "用户主动转人工"}
+        # 2. 投诉关键词
+        if any(kw in content for kw in COMPLAINT_KEYWORDS):
+            return {"trigger": "complaint",
+                    "reason": "投诉关键词触发(优先转人工)"}
+        # 3. 退款请求
+        if any(kw in content for kw in REFUND_KEYWORDS):
+            return {"trigger": "refund",
+                    "reason": "退款/售后咨询(转售后)"}
+        # 4. 复杂问题
+        if any(kw in content for kw in COMPLEX_KEYWORDS):
+            return {"trigger": "complex",
+                    "reason": "复杂问题咨询(定制/团购/代理, 转专属)"}
+        # 5. 情绪愤怒(负向词密集命中)
+        emotion_hits = sum(1 for kw in NEGATIVE_EMOTION_KEYWORDS if kw in content)
+        if emotion_hits >= 3:
+            return {"trigger": "emotion",
+                    "reason": f"情绪愤怒风险(负向词×{emotion_hits}, 优先转人工)"}
+        # 6. 置信度 < 0.5(仅 RAG 动态低置信答案; 兜底回复走 3 次未解决计数)
+        confidence = ai_reply.get("aiConfidence") if ai_reply else None
+        is_fallback = bool(ai_reply.get("fallback")) if ai_reply else False
+        if (confidence is not None and not is_fallback
+                and confidence < LOW_CONFIDENCE_THRESHOLD):
+            return {"trigger": "low_confidence",
+                    "reason": f"AI置信度过低({confidence:.2f}<0.5, 立即转人工)"}
+        # 7. 3 次未解决(原有)
+        if session.get("unresolvedCount", 0) >= MAX_UNRESOLVED_COUNT:
+            return {"trigger": "unresolved",
+                    "reason": "AI连续3次未解决, 自动转人工"}
+        return None
+
+    async def _check_vip_trigger(self, session: dict) -> None:
+        """VIP 用户直通人工(P1-8: L4/L5/SVIP 会员免 AI 接待)
+
+        建会话后首条用户消息时调用一次: 命中即转人工并标记 vipMember。
+        """
+        if session.get("vipChecked") or session.get("vipMember"):
+            return
+        session["vipChecked"] = True
+        user_id = session.get("userId")
+        if not user_id:
+            return
+        try:
+            from repositories.member_repository import MemberRepository
+            member = await MemberRepository().get_by_id(user_id)
+            level = member.get("level", 1) if member else 1
+        except Exception:
+            return
+        if level and int(level) >= VIP_MEMBER_LEVEL:
+            session["vipMember"] = True
+            await self._do_transfer(session, reason="VIP会员直通人工(L4/L5/SVIP)")
+            logger.info("chat_vip_direct_transfer session=%s user=%s level=%s",
+                        session.get("sessionId"), user_id, level)
 
     async def _generate_ai_reply(self, session: dict, user_content: str) -> dict:
         """AI生成回复(内部方法, 需在锁内调用)
@@ -284,6 +388,8 @@ class ChatService:
                 "content": FALLBACK_REPLY,
                 "aiConfidence": AI_FALLBACK_CONFIDENCE,
                 "transferred": False,
+                # 兜底=完全未理解, 走 3 次未解决计数而非立即低置信转人工
+                "fallback": True,
             }
 
         message_id = await self.repo.add_message({
