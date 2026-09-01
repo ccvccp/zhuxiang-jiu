@@ -82,9 +82,10 @@ def _payment_callback(pay_no, amount=398.0):
     })
 
 
-def _start_pay(pay_no):
-    """发起渠道支付(pending → paying)"""
-    return client.post(f"/api/payment/{pay_no}/start")
+def _start_pay(pay_no, member_id="1"):
+    """发起渠道支付(pending → paying; 归属会员头必带, 否则 401)"""
+    return client.post(f"/api/payment/{pay_no}/start",
+                       headers={"X-Member-Id": member_id})
 
 
 def _create_logistics(order_id, member_id="1", quantity=2):

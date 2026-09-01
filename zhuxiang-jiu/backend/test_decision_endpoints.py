@@ -632,27 +632,40 @@ class TestOrchestrate:
         }
 
     def test_agent_can_orchestrate(self):
-        """agent: 工作流编排成功"""
+        """agent: 工作流编排成功(v35 中枢真实路由: 无语义模块名 → fallback)"""
         response = client.post(self.URL, json=self._payload(),
                               headers=AGENT_HEADERS)
         data = assert_success(response, "orchestrate")
         details = data["details"]
         assert details["workflow"] == "sales_flow"
-        assert details["successRate"] == "95%"
-        assert details["duration"] == "1.2s"
+        # P1 真实化: module:01 等非语义文本路由不到能力 → 全 fallback
+        assert details["successRate"] == "0%"
+        assert details["duration"] == "<5ms"
         # 任务分解
         tasks = details["tasks"]
         assert len(tasks) == 3
         t1 = tasks[0]
         assert t1["id"] == "T1" and t1["module"] == "module:01"
         assert t1["depends"] == []  # 首任务无依赖
-        # 最后一个任务状态为 pending(模拟并行未完成)
-        assert tasks[-1]["status"] == "pending"
-        assert tasks[0]["status"] == "pass"
+        assert tasks[-1]["status"] == "fallback"
+        assert tasks[0]["status"] == "fallback"
+        assert tasks[0]["capability"] is None
         # 依赖链 T2 → T1
         assert tasks[1]["depends"] == ["T1"]
         # 并行组
         assert len(details["parallelGroups"]) == 3
+
+    def test_agent_orchestrate_semantic_routed(self):
+        """v35 真实化: 语义模块文本(查订单/转人工) → 能力命中 pass"""
+        response = client.post(self.URL,
+                              json=self._payload(
+                                  modules=["查订单", "转人工"]),
+                              headers=AGENT_HEADERS)
+        details = response.json()["details"]
+        assert details["successRate"] == "100%"
+        assert all(t["status"] == "pass" for t in details["tasks"])
+        assert details["tasks"][0]["capability"] == "order.query"
+        assert details["tasks"][1]["capability"] == "chat.human"
 
     def test_admin_can_orchestrate(self):
         """admin: 通过"""
@@ -661,13 +674,13 @@ class TestOrchestrate:
         assert response.status_code == 200
 
     def test_single_module(self):
-        """单模块编排"""
+        """单模块编排(非语义模块名 → fallback)"""
         response = client.post(self.URL,
                               json=self._payload(modules=["module:01"]),
                               headers=AGENT_HEADERS)
         details = response.json()["details"]
         assert len(details["tasks"]) == 1
-        assert details["tasks"][0]["status"] == "pending"
+        assert details["tasks"][0]["status"] == "fallback"
 
     def test_member_forbidden(self):
         """member: 403(agent+)"""
@@ -708,7 +721,8 @@ class TestCapabilityRoute:
     def _payload(self, caps=None, task="extract_intent"):
         return {
             "requiredCapabilities": (
-                ["nlp", "vision"] if caps is None else caps
+                # v35 真实化: 插件池为 hub 真实能力注册表(非硬编码 nlp/vision)
+                ["order.query", "chat.human"] if caps is None else caps
             ),
             "task": task,
             "budget": {"maxLatency": "500ms", "maxCost": "¥1.0"},
@@ -716,13 +730,13 @@ class TestCapabilityRoute:
         }
 
     def test_store_owner_can_route(self):
-        """store_owner: 能力路由成功"""
+        """store_owner: 能力路由成功(v35 真实能力注册表 8 插件池)"""
         response = client.post(self.URL, json=self._payload(),
                               headers=STORE_OWNER_HEADERS)
         data = assert_success(response, "capability-route")
         details = data["details"]
-        assert details["pluginPool"] == 120
-        assert details["reuseRate"] == "78%"
+        assert details["pluginPool"] == 8
+        assert details["reuseRate"] == "100%"
         assert len(details["selectedPlugins"]) == 2
         # 插件结构
         p0 = details["selectedPlugins"][0]
@@ -741,13 +755,14 @@ class TestCapabilityRoute:
 
     @pytest.mark.parametrize("caps,expected_count",
                              [
-                                 (["nlp"], 1),
-                                 (["nlp", "vision"], 2),
-                                 (["nlp", "vision", "decision_reasoning"], 3),
-                                 (["nlp", "vision", "decision_reasoning", "multimodal"], 4),
+                                 # v35 真实化: hub 真实能力注册表 id
+                                 (["order.query"], 1),
+                                 (["order.query", "chat.human"], 2),
+                                 (["order.query", "chat.human", "knowledge.rag"], 3),
+                                 (["order.query", "chat.human", "knowledge.rag", "hub.ops"], 4),
                              ],
-                             ids=["nlp-only", "nlp-vision", "nlp-vision-reason",
-                                  "all-four"])
+                             ids=["one-cap", "two-caps", "three-caps",
+                                  "four-caps"])
     def test_capability_combinations(self, caps, expected_count):
         """不同能力组合 → 不同插件数"""
         response = client.post(self.URL, json=self._payload(caps=caps),
@@ -758,7 +773,8 @@ class TestCapabilityRoute:
     def test_unknown_capability_filtered(self):
         """未知能力被过滤掉"""
         response = client.post(self.URL,
-                              json=self._payload(caps=["nlp", "unknown_cap"]),
+                              json=self._payload(
+                                  caps=["order.query", "unknown_cap"]),
                               headers=STORE_OWNER_HEADERS)
         details = response.json()["details"]
         assert len(details["selectedPlugins"]) == 1
