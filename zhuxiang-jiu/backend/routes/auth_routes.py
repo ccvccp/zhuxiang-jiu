@@ -6,6 +6,9 @@
 
 端点分布:
     - 公开(4):  register / login / refresh / logout
+    - 短信(3):  sms-send / sms-verify / login-sms(P1-1)
+    - 三方(5):  oauth-url / oauth-callback / bind-phone / bindings / unbind(P1-2)
+    - 实名(3):  realname-submit / realname-status / realname-list(P1-3, list 管理端)
     - 会员(2):  me / change-password
     - 管理(2):  set-role / blacklist-stats
 
@@ -104,6 +107,14 @@ class OAuthBindPhoneRequest(BaseModel):
 class OAuthUnbindRequest(BaseModel):
     """解绑三方账号(P1-2)"""
     platform: str = Field(..., description="平台 wechat/alipay/qq")
+
+
+class RealnameSubmitRequest(BaseModel):
+    """提交实名认证(P1-3, 姓名+身份证号)"""
+    realName: str = Field(..., min_length=2, max_length=30,
+                          description="真实姓名(2-30位中文或字母)")
+    idCard: str = Field(..., min_length=18, max_length=18,
+                         description="二代身份证号(18位, 本地校验位校验)")
 
 
 # ============================================================
@@ -291,6 +302,48 @@ async def oauth_unbind(
     token = _extract_bearer_token(authorization)
     try:
         return await _service.unbind(token, data.platform)
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+@router.post("/api/auth/realname/submit", tags=["用户认证模块"])
+async def realname_submit(
+    data: RealnameSubmitRequest,
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    """提交实名认证(姓名+身份证号, 设计文档 9.2)
+
+    本地校验(格式/校验位/年龄>=18) → 冒用检测(一人一证) → 第三方核验
+    (REALNAME_API_KEY 未配置走模拟通道) → 标记实名会员。
+    """
+    token = _extract_bearer_token(authorization)
+    try:
+        return await _service.submit_realname(
+            token, data.realName, data.idCard)
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+@router.get("/api/auth/realname/status", tags=["用户认证模块"])
+async def realname_status(
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    """查询本人实名状态(未实名 isRealname=false)"""
+    token = _extract_bearer_token(authorization)
+    try:
+        return await _service.get_realname_status(token)
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+@router.get("/api/auth/realname/list", tags=["用户认证模块"])
+async def realname_list(
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    """管理员查询全量实名记录(审计用, 身份证号脱敏展示)"""
+    token = _extract_bearer_token(authorization)
+    try:
+        return await _service.list_realname_records(token)
     except Exception as exc:
         _handle_auth_error(exc)
 

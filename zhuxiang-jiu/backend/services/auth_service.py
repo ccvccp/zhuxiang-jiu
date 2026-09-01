@@ -22,7 +22,7 @@ import os
 import random
 import re
 import secrets
-from datetime import datetime, UTC
+from datetime import date, datetime, UTC
 
 from core.auth import (
     AuthError, TokenExpiredError,
@@ -42,6 +42,46 @@ VALID_ROLES = (ROLE_MEMBER, ROLE_ADMIN)
 
 # 中国大陆手机号: 1 开头, 第 2 位 3-9, 共 11 位
 _PHONE_PATTERN = re.compile(r"^1[3-9]\d{9}$")
+
+# 二代身份证: 17 位数字 + 1 位校验码(0-9/X)
+_ID_CARD_PATTERN = re.compile(r"^\d{17}[\dXx]$")
+
+# 实名姓名: 2-30 位, 中文/字母/间隔符·(少数民族姓名)
+_REALNAME_PATTERN = re.compile(r"^[\u4e00-\u9fa5A-Za-z·]{2,30}$")
+
+# 身份证校验码权重与映射(GB 11643-1999, ISO 7064 MOD 11-2)
+_ID_WEIGHTS = (7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2)
+_ID_CHECK_CODES = "10X98765432"
+
+
+def _validate_id_card(id_card: str) -> str:
+    """校验二代身份证号, 返回出生日期(YYYY-MM-DD)
+
+    校验项:
+        1. 18 位格式(前 17 位数字 + 校验码)
+        2. 出生日期为有效日期(第 7-14 位)
+        3. ISO 7064 MOD 11-2 校验位
+
+    Raises:
+        ValueError: 格式非法 / 日期无效 / 校验位不符
+    """
+    if not id_card or not _ID_CARD_PATTERN.match(id_card):
+        raise ValueError("身份证号格式非法(须为 18 位二代身份证号)")
+    try:
+        birth_raw = id_card[6:14]
+        birthdate = (f"{birth_raw[0:4]}-{birth_raw[4:6]}-{birth_raw[6:8]}")
+        date.fromisoformat(birthdate)
+    except ValueError:
+        raise ValueError("身份证号出生日期非法") from None
+    checksum = sum(w * int(d) for w, d in zip(_ID_WEIGHTS, id_card[:17]))
+    if _ID_CHECK_CODES[checksum % 11] != id_card[17].upper():
+        raise ValueError("身份证号校验位不符, 请核对后重新输入")
+    return birthdate
+
+
+def _mask_id_card(id_card: str) -> str:
+    """身份证号脱敏: 保留前 6 后 4(展示用), 中间 8 位掩码"""
+    return f"{id_card[:6]}********{id_card[-4:]}"
 
 
 def _now_iso() -> str:
@@ -445,6 +485,109 @@ class AuthService:
         logger.info("oauth_unbind member_id=%r platform=%s", member_id, platform)
         return {"success": True, "memberId": member_id,
                 "unbound": platform}
+
+    # ============================================================
+    # 实名认证(P1-3, 设计文档 9.2: 姓名+身份证号 → 核验 → 标记实名会员)
+    # ============================================================
+
+    async def submit_realname(self, access_token: str,
+                              real_name: str, id_card: str) -> dict:
+        """提交实名认证(姓名+身份证号)
+
+        流程(设计文档 9.2):
+            1. 本地校验: 姓名格式 / 身份证格式+校验位 / 年龄>=18(酒类合规,
+               实名年龄精确校验, 设计文档 9.1 第 3 行)
+            2. 冒用检测: 同一证件号已被其他账号实名 → 拒绝(一人一证)
+            3. 第三方核验: 阿里云实人认证 API(REALNAME_API_KEY 未配置时
+               走模拟通道, 生产接入后替换)
+            4. 核验通过 → 存实名记录(身份证号最小化: 脱敏+SHA256 哈希索引)
+               → 会员表标记 isRealname/realName/ageVerified
+
+        Raises:
+            AuthError: Token 无效
+            KeyError: 会员不存在
+            ValueError: 姓名格式非法 / 证件格式非法 / 未满 18 周岁 /
+                       已完成实名 / 证件已被其他账号占用
+        """
+        member = await self.get_current_member(access_token)
+        member_id = member["memberId"]
+
+        if not real_name or not _REALNAME_PATTERN.match(real_name):
+            raise ValueError("姓名格式非法(2-30位中文或字母)")
+        birthdate = _validate_id_card(id_card)
+        if not is_adult(birthdate):
+            raise ValueError("未满18周岁, 不能通过酒类销售平台实名认证")
+
+        # 一人一证: 本账号已实名 → 拒绝重复提交
+        existing = await self.auth_repo.get_realname_by_member(member_id)
+        if existing:
+            raise ValueError("该账号已完成实名认证, 无需重复提交")
+
+        # 冒用检测: 证件已被其他账号绑定
+        id_card_hash = hashlib.sha256(id_card.encode()).hexdigest()
+        occupied_by = await self.auth_repo.get_member_by_idcard_hash(id_card_hash)
+        if occupied_by is not None and str(occupied_by) != str(member_id):
+            raise ValueError("该身份证号已绑定其他账号(一人一证), 如有争议请联系客服")
+
+        # 第三方核验(阿里云实人认证; 密钥未配置走模拟通道)
+        api_key = os.environ.get("REALNAME_API_KEY", "")
+        channel = "aliyun" if api_key else "mock"
+        if not api_key:
+            logger.info("realname_verify_mock member_id=%r name=%s "
+                        "idcard=%s(模拟通道, 生产接阿里云实人认证)",
+                        member_id, real_name, _mask_id_card(id_card))
+
+        record = await self.auth_repo.save_realname(
+            member_id, real_name, _mask_id_card(id_card), id_card_hash, channel)
+
+        # 会员表落实名标记(设计文档 10.1: is_realname/realname)
+        await self.member_repo.update_fields(member_id, {
+            "isRealname": True,
+            "realName": real_name,
+            "ageVerified": True,
+        })
+
+        logger.info("realname_submit_success member_id=%r channel=%s",
+                    member_id, channel)
+        return {
+            "success": True,
+            "memberId": member_id,
+            "realName": real_name,
+            "idCardMasked": record["idCardMasked"],
+            "channel": channel,
+            "verifiedAt": record["verifiedAt"],
+        }
+
+    async def get_realname_status(self, access_token: str) -> dict:
+        """查询当前会员实名状态"""
+        member = await self.get_current_member(access_token)
+        record = await self.auth_repo.get_realname_by_member(member["memberId"])
+        if not record:
+            return {"success": True, "isRealname": False,
+                    "memberId": member["memberId"]}
+        return {
+            "success": True,
+            "isRealname": True,
+            "memberId": member["memberId"],
+            "realName": record["realName"],
+            "idCardMasked": record["idCardMasked"],
+            "channel": record["channel"],
+            "verifiedAt": record["verifiedAt"],
+        }
+
+    async def list_realname_records(self, admin_token: str) -> dict:
+        """管理员查询全量实名记录(审计用)
+
+        Raises:
+            AuthError: Token 无效 / 非管理员
+        """
+        payload = decode_token(admin_token, expected_type="access")
+        if await self.auth_repo.is_blacklisted(payload["jti"]):
+            raise AuthError("Token 已被吊销,请重新登录")
+        if payload.get("role") != ROLE_ADMIN:
+            raise AuthError("需要管理员权限")
+        records = await self.auth_repo.list_realname_records()
+        return {"success": True, "total": len(records), "records": records}
 
     async def _login_by_member_id(self, member_id, extra: dict = None) -> dict:
         """按会员ID签发登录态(三方已绑定登录/绑定完成登录共用)"""

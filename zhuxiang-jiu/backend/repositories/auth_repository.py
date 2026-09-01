@@ -12,6 +12,11 @@
 过期自动清理:
     - Redis: 依赖 TTL 自动过期
     - 内存: 查询时惰性清理已到期条目
+
+扩展域:
+    - P1-1 短信验证码(频控+日计数)
+    - P1-2 三方绑定 / OAuth 临时票据
+    - P1-3 实名认证(一人一证, 身份证号最小化存储)
 """
 
 import json
@@ -273,6 +278,69 @@ class AuthRepository:
             await client.delete(_k("auth", "oauth", "ticket", ticket))
             return
         self.store.get("auth_oauth_tickets", {}).pop(ticket, None)
+
+    # ---------- 实名认证(P1-3, 设计文档 9.2/10.1/13.1: 一人一证+最小化采集) ----------
+
+    async def save_realname(self, member_id, real_name: str,
+                            id_card_masked: str, id_card_hash: str,
+                            channel: str) -> dict:
+        """保存实名认证记录(memberId 为主键, 一人一证不可重复)
+
+        存储最小化(设计文档 13.1: 身份证号不落全号):
+            - idCardMasked: 前 6 后 4(展示用)
+            - idCardHash:   SHA256(全号), 用于一证多号冒用检测的唯一索引
+
+        双模式:
+            - 内存: _mock_store["auth_realname"]  {memberId: record}
+                    _mock_store["auth_realname_idcard"]  {idCardHash: memberId}
+            - Redis: Hash  zhuxiang:auth:realname  (field=memberId, value=JSON)
+                     String zhuxiang:auth:realname:idcard:{hash} (值=memberId)
+        """
+        record = {
+            "memberId": member_id,
+            "realName": real_name,
+            "idCardMasked": id_card_masked,
+            "idCardHash": id_card_hash,
+            "channel": channel,
+            "verifiedAt": int(time.time()),
+        }
+        if is_redis_mode():
+            client = await get_redis_client()
+            async with client.pipeline(transaction=True) as pipe:
+                pipe.hset(_k("auth", "realname"), str(member_id),
+                         json.dumps(record, ensure_ascii=False))
+                pipe.set(_k("auth", "realname", "idcard", id_card_hash),
+                         str(member_id))
+                await pipe.execute()
+            return record
+        self.store.setdefault("auth_realname", {})[str(member_id)] = record
+        self.store.setdefault("auth_realname_idcard", {})[id_card_hash] = str(member_id)
+        return record
+
+    async def get_realname_by_member(self, member_id) -> dict | None:
+        """查询会员实名记录(未实名返回 None)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.hget(_k("auth", "realname"), str(member_id))
+            return json.loads(raw) if raw else None
+        return self.store.get("auth_realname", {}).get(str(member_id))
+
+    async def get_member_by_idcard_hash(self, id_card_hash: str):
+        """按证件哈希查绑定会员(冒用检测), 未占用返回 None"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.get(
+                _k("auth", "realname", "idcard", id_card_hash))
+        raw = self.store.get("auth_realname_idcard", {}).get(id_card_hash)
+        return str(raw) if raw is not None else None
+
+    async def list_realname_records(self) -> list[dict]:
+        """全量实名记录(管理端审计用)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k("auth", "realname"))
+            return [json.loads(v) for v in data.values()] if data else []
+        return list(self.store.get("auth_realname", {}).values())
 
     # ---------- Redis 实现 ----------
 
