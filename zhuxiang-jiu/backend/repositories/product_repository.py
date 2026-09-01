@@ -391,6 +391,27 @@ class ProductRepository:
         product["reserved"] = inv["reserved"] if inv else 0
         return product
 
+    async def save_product(self, product: dict,
+                           stock: int = None) -> dict:
+        """保存/覆盖商品主数据(38号PDM写路径; 消费端读路径不变)
+
+        Redis 模式先删后写(字段可能减少, 避免脏字段残留);
+        stock 提供 时同步写库存(创建场景)。
+        """
+        product_id = product["product_id"]
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("product", product_id)
+            await client.delete(key)
+            await client.hset(key,
+                              mapping=self._serialize_product(product))
+        else:
+            self._ensure_store()
+            self.store["products"][product_id] = product
+        if stock is not None:
+            await self.inventory_repo.set_stock(product_id, int(stock))
+        return product
+
     async def list_all(self) -> list[dict]:
         """列出所有产品(注入实时库存)"""
         if is_redis_mode():

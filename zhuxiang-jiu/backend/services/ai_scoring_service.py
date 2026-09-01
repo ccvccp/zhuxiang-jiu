@@ -826,3 +826,135 @@ class AllianceReviewScorer:
 
 
 SCORERS["alliance_review"] = AllianceReviewScorer()
+
+
+# ============================================================
+# 8. 商品上架预审(模块 38 P0: AI智能产品管理)
+# ============================================================
+
+class ProductGateScorer:
+    """商品上架预审评分: 上架闸门质量分(38号设计文档 §2.5)
+
+    5 因子加权 → 质量分(0-100, 越高越优) → 3级 → 上架处置动作
+    (≥80 快车道/60-79 人工重点审/<60 拒), 阈值对齐 37号入盟口径。
+
+    与风险类评分器方向相反: 高分=优质, action 语义为上架通道。
+    """
+
+    WEIGHTS: ClassVar[dict] = {
+        "compliance": 0.25,      # 合规词命中(酒类广告法§23 口径)
+        "completeness": 0.20,    # 信息完备度(必填字段)
+        "image_quality": 0.25,   # 图片质量(AI 审图报告分, P1 接 vision)
+        "price_sanity": 0.15,    # 价格合理性(同类目离群度)
+        "category_risk": 0.15,   # 品类风险(酒精度数加权)
+    }
+    # 一审硬规则词表(与 36号/37号共享口径, 本地副本保证确定性)
+    DRINKING_ACTION_WORDS = ("干杯", "一饮而尽", "不醉不归", "开怀畅饮",
+                             "贪杯", "拼酒", "灌酒", "喝到")
+    ABSOLUTE_WORDS = ("最好", "最佳", "第一", "顶级", "极品", "国宴",
+                      "专供", "特效", "保健", "养生")
+    REQUIRED_FIELDS = ("name", "price", "stock", "mainImage", "category")
+    REQUIRED: ClassVar[list] = ["name", "price"]
+
+    async def score(self, ctx: dict) -> dict:
+        """评分入口
+
+        Args:
+            ctx: {
+                productId: str 商品ID,
+                name: str 商品名, description: str 描述,
+                price: float 售价,
+                categoryMedian: float 同类目中位价(缺省取 price 中性),
+                alcohol: int 酒精度数(缺省 42 中性),
+                missingFields: int 必填缺项数(缺省按字段自动探测),
+                imageQuality: int 图片质量分 0-100(P0 由调用方给,
+                    主图缺省 0/有主图缺省 70 中性; P1 接 vision 报告),
+                imageCount: int 图片数(缺省按 mainImage 探测)
+            }
+        """
+        weights = await load_effective_weights("product_gate",
+                                               self.WEIGHTS)
+        f = {}
+        text = " ".join([str(ctx.get("name") or ""),
+                         str(ctx.get("description") or "")])
+        # ① 合规词: 饮酒动作×100 + 极限词×50, 命中即重扣
+        hits_drink = [w for w in self.DRINKING_ACTION_WORDS if w in text]
+        hits_abs = [w for w in self.ABSOLUTE_WORDS if w in text]
+        compliance = _clamp(100 - len(hits_drink) * 100
+                            - len(hits_abs) * 50)
+        f["compliance"] = _factor(
+            "compliance", "合规词", compliance, weights["compliance"],
+            f"饮酒动作{hits_drink} 极限词{hits_abs}" if
+            (hits_drink or hits_abs) else "无命中")
+        # ② 信息完备度: 必填字段缺项(显式 missingFields 优先)
+        missing = ctx.get("missingFields")
+        if missing is None:
+            missing = sum(1 for k in self.REQUIRED_FIELDS
+                          if not ctx.get(k))
+        missing = int(missing or 0)
+        f["completeness"] = _factor(
+            "completeness", "信息完备",
+            _clamp(100 - missing * 25), weights["completeness"],
+            f"缺项 {missing}/{len(self.REQUIRED_FIELDS)}")
+        # ③ 图片质量: P0 规则轨(imageQuality 缺省按主图探测)
+        quality = ctx.get("imageQuality")
+        if quality is None:
+            quality = 70 if ctx.get("mainImage") else 0
+        f["image_quality"] = _factor(
+            "image_quality", "图片质量", _clamp(float(quality)),
+            weights["image_quality"],
+            f"图片质量分 {float(quality):.0f}"
+            f"(P1 接 vision 审图报告)")
+        # ④ 价格合理性: 偏离同类目中位价 [0.5, 2] 区间外按倍数扣
+        price = float(ctx.get("price") or 0)
+        median = float(ctx.get("categoryMedian") or price or 1)
+        if price > 0 and median > 0:
+            ratio = price / median
+            if 0.5 <= ratio <= 2.0:
+                sanity = 100.0
+            else:
+                dev = (ratio / 2.0 if ratio > 2.0
+                       else 0.5 / max(ratio, 1e-6))
+                sanity = _clamp(100 - (dev - 1) * 100)
+        else:
+            sanity = 0.0
+        f["price_sanity"] = _factor(
+            "price_sanity", "价格合理", sanity, weights["price_sanity"],
+            f"售价 {price:.0f} vs 中位 {median:.0f}"
+            f"(比值 {price / median if median else 0:.2f})")
+        # ⑤ 品类风险: 酒精度 >40° 线性加权(53° → 70 分)
+        alcohol = int(ctx.get("alcohol") or 42)
+        risk = _clamp(100 - max(0, alcohol - 40) * 10) \
+            if ctx.get("alcohol") is not None else 100.0
+        f["category_risk"] = _factor(
+            "category_risk", "品类风险", risk, weights["category_risk"],
+            f"{alcohol}°" if ctx.get("alcohol") is not None else "未标注度数")
+
+        total = sum(x["contribution"] for x in f.values())
+        # 高分=优质: ≥80 快车道, 60-79 重点审, <60 拒(37号入盟口径)
+        if total >= 80:
+            level_key, action = LEVEL_HIGH, "fast_track"
+        elif total >= 60:
+            level_key, action = LEVEL_MEDIUM, "manual_review"
+        else:
+            level_key, action = LEVEL_LOW, "reject"
+        result = {
+            "success": True, "scorer": "product_gate",
+            "modelVersion": MODEL_VERSION,
+            "productId": ctx.get("productId"),
+            "score": round(total, 1), "level": level_key,
+            "levelName": {LEVEL_HIGH: "优质", LEVEL_MEDIUM: "待核",
+                          LEVEL_LOW: "不足"}[level_key],
+            "action": action,
+            "actionName": {"fast_track": "人工终审快车道",
+                           "manual_review": "人工重点审核",
+                           "reject": "预审拒绝"}[action],
+            "confidence": _confidence(ctx, self.REQUIRED),
+            "factors": list(f.values()), "scoredAt": ts(),
+        }
+        logger.info("ai_product_gate_scored product=%s score=%s action=%s",
+                    ctx.get("productId"), result["score"], action)
+        return result
+
+
+SCORERS["product_gate"] = ProductGateScorer()

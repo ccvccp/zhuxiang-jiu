@@ -89,11 +89,13 @@ async def main():
     print("\n========== 1. 权限树 ==========")
 
     nodes = await svc.list_nodes()
-    record("test_01_seed_28_nodes", len(nodes) == 28, f"got {len(nodes)}")
+    # 38号追加 product 域 4 权限点(28→32)
+    record("test_01_seed_28_nodes", len(nodes) == 32, f"got {len(nodes)}")
 
     view_node = next(n for n in nodes if n["code"] == "production.view")
     manage_node = next(n for n in nodes if n["code"] == "production.manage")
     fin_op = next(n for n in nodes if n["code"] == "finance.operate")
+    prod_op = next(n for n in nodes if n["code"] == "product.operate")
     record("test_02_sensitivity_rules",
            view_node["sensitivity"] == "normal"
            and manage_node["sensitivity"] == "core"
@@ -104,8 +106,11 @@ async def main():
 
     record("test_03_sod_matrix",
            "finance.approve" in fin_op["conflictWith"]
+           # 38号: product.operate 与 product.approve 互斥(编辑≠审核)
+           and "product.approve" in prod_op["conflictWith"]
            and len(view_node["duties"]) == 3,
-           f"conflict={fin_op['conflictWith']}")
+           f"conflict={fin_op['conflictWith']} "
+           f"prod_conflict={prod_op['conflictWith']}")
 
     # ========================================================
     # 2. 超管直授

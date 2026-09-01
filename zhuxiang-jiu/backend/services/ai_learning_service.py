@@ -74,6 +74,8 @@ SCORER_REGISTRY = {
     # ---- 第五批(37号网站同盟 P0/P1: 入盟预审+评价审评) ----
     "alliance_onboarding":         {"label": "同盟入驻预审评分", "module": "37网站同盟", "batch": 5},
     "alliance_review":             {"label": "同盟评价审评评分", "module": "37网站同盟", "batch": 5},
+    # ---- 第六批(38号AI智能产品管理 P0: 商品上架预审) ----
+    "product_gate":                {"label": "商品上架预审评分", "module": "38产品管理", "batch": 6},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -127,6 +129,10 @@ def default_weights(scorer_id: str) -> dict:
         # 37号网站同盟: 评价审评五因子
         from services.ai_scoring_service import AllianceReviewScorer
         return dict(AllianceReviewScorer.WEIGHTS)
+    if scorer_id == "product_gate":
+        # 38号产品管理: 上架预审五因子, 单一事实源在评分器类
+        from services.ai_scoring_service import ProductGateScorer
+        return dict(ProductGateScorer.WEIGHTS)
     if scorer_id.startswith("logistics_routing:"):
         from services.ai_scoring_service import _BUDGET_WEIGHTS
         budget = scorer_id.split(":", 1)[1]

@@ -31,6 +31,8 @@ STAGES = {
     "sales": "市场销售",
     "aftersale": "售后服务",
     "finance": "财务管理",
+    # 38号·AI智能产品管理(追加于末尾, 不影响既有 nodeId 1-28 编号)
+    "product": "产品管理",
 }
 
 LEVELS = {
@@ -64,14 +66,16 @@ _DUTIES_BY_LEVEL = {
     ],
 }
 
-# SoD 职责分离矩阵: 互斥权限对(收付款操作 与 收款审核 不可同人持有)
+# SoD 职责分离矩阵: 互斥权限对(收付款操作 与 收款审核 不可同人持有;
+# 38号: 商品编辑操作 与 商品审核 不可同人持有——编辑≠审核)
 _SOD_PAIRS = [
     ("finance.operate", "finance.approve"),
+    ("product.operate", "product.approve"),
 ]
 
 
 def _build_seed_nodes() -> dict[int, dict]:
-    """构建 28 个权限点种子(nodeId 1-28)"""
+    """构建权限点种子(nodeId 1-28 生产流程 + 29-32 product 域)"""
     nodes = {}
     node_id = 0
     for stage, stage_cn in STAGES.items():
