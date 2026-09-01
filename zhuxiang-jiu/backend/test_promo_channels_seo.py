@@ -297,12 +297,216 @@ class TestPublishReceiptIntegration:
                f"实际{receipt.get('publishId')}")
 
 
+class TestEndpointCalibration:
+    """P2 端点校准专项(2026-09-02 实测口径)
+
+    覆盖: 端点 _URL 环境变量覆盖 / 三认证风格请求构造(微博form/
+    微信query/开放平台header) / 回执 ID 字段别名 / 平台与百度
+    错误响应体真实报错保留(离线注入, 不依赖外网)。
+    """
+
+    async def run(self):
+        import io
+        import json
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+        from services import promo_channel_service as pcs
+
+        svc = PromoChannelService()
+        content = {"contentId": 11, "platform": "weibo",
+                   "title": "竹香晚风", "body": "今晚小聚",
+                   "hashtags": "#竹香酒#"}
+        captured = {}
+
+        class _FakeResp:
+            def __init__(self, body: bytes):
+                self._body = body
+
+            def read(self):
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        original_urlopen = urllib.request.urlopen
+
+        def _capture(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["data"] = req.data
+            captured["headers"] = {k.lower(): v
+                                   for k, v in req.header_items()}
+            return _FakeResp(captured.pop("response"))
+
+        # ---------- 端点 _URL 环境变量覆盖(免改码校准) ----------
+        os.environ["PROMO_CHANNEL_WEIBO_URL"] = (
+            "https://proxy.example.com/weibo/share")
+        try:
+            record("校准-端点URL环境变量覆盖",
+                   pcs.platform_endpoint("weibo").endswith(
+                       "/weibo/share"))
+            status = svc.channel_status()
+            weibo = next(s for s in status
+                         if s["platform"] == "weibo")
+            record("校准-channel_status展示覆盖端点",
+                   weibo["endpoint"].endswith("/weibo/share"),
+                   f"实际{weibo}")
+            record("校准-认证风格标注(微博form)",
+                   weibo.get("authStyle") == "form", f"实际{weibo}")
+        finally:
+            os.environ.pop("PROMO_CHANNEL_WEIBO_URL", None)
+        record("校准-未覆盖回落默认映射",
+               pcs.platform_endpoint("weibo")
+               == "https://api.weibo.com/2/statuses/share.json")
+
+        # ---------- 三认证风格请求构造 + 回执 ID 别名 ----------
+        os.environ["PROMO_CHANNEL_MODE"] = "real"
+        urllib.request.urlopen = _capture
+        try:
+            # 微博 form 风格 + idstr 别名
+            os.environ["PROMO_CHANNEL_WEIBO_KEY"] = "wb-token"
+            captured["response"] = json.dumps(
+                {"idstr": "WB-486", "id": 486}).encode()
+            receipt = await svc.publish_to_platform(content,
+                                                    {"heat": 100})
+            form = urllib.parse.parse_qs(
+                captured["data"].decode("utf-8"))
+            record("校准-微博form表单(access_token+status)",
+                   form.get("access_token") == ["wb-token"]
+                   and any("竹香晚风" in s
+                           for s in form.get("status", []))
+                   and captured["headers"].get(
+                       "content-type")
+                   == "application/x-www-form-urlencoded",
+                   f"实际{captured}")
+            record("校准-微博publishId取idstr别名",
+                   receipt["mode"] == CHANNEL_MODE_REAL
+                   and receipt["publishId"] == "WB-486",
+                   f"实际{receipt}")
+
+            # 微信系 query 风格 + publish_id
+            os.environ.pop("PROMO_CHANNEL_WEIBO_KEY", None)
+            os.environ["PROMO_CHANNEL_MOMENTS_KEY"] = "wx-token"
+            captured["response"] = json.dumps(
+                {"publish_id": "WX-7", "errcode": 0}).encode()
+            receipt2 = await svc.publish_to_platform(
+                {"contentId": 12, "platform": "wechat_moments",
+                 "title": "t", "body": "b"}, {"heat": 100})
+            record("校准-微信query鉴权(access_token参数)",
+                   "access_token=wx-token" in captured["url"]
+                   and captured["headers"].get(
+                       "content-type") == "application/json",
+                   f"实际{captured}")
+            record("校准-微信publishId取publish_id",
+                   receipt2["publishId"] == "WX-7",
+                   f"实际{receipt2}")
+
+            # 抖音 header 风格 + data.publish_id 嵌套
+            os.environ.pop("PROMO_CHANNEL_MOMENTS_KEY", None)
+            os.environ["PROMO_CHANNEL_DOUYIN_KEY"] = "dy-token"
+            captured["response"] = json.dumps(
+                {"data": {"publish_id": "DY-9"}}).encode()
+            receipt3 = await svc.publish_to_platform(
+                {"contentId": 13, "platform": "douyin",
+                 "title": "t", "body": "b"}, {"heat": 100})
+            record("校准-抖音header鉴权(access-token头)",
+                   captured["headers"].get("access-token")
+                   == "dy-token"
+                   and "access_token" not in captured["url"],
+                   f"实际{captured}")
+            record("校准-抖音publishId取data嵌套",
+                   receipt3["publishId"] == "DY-9",
+                   f"实际{receipt3}")
+
+            # 平台拒绝 → 响应体真实报错(微博实测 403 口径)
+            os.environ.pop("PROMO_CHANNEL_DOUYIN_KEY", None)
+            os.environ["PROMO_CHANNEL_WEIBO_KEY"] = "wb-token"
+
+            def _http_403(req, timeout=None):
+                raise urllib.error.HTTPError(
+                    req.full_url, 403, "Forbidden", {}, io.BytesIO(
+                        b'{"error":"auth by Null spi!",'
+                        b'"error_code":21301}'))
+            urllib.request.urlopen = _http_403
+            receipt4 = await svc.publish_to_platform(content,
+                                                     {"heat": 100})
+            record("校准-平台拒绝保留响应体报错(403实测口径)",
+                   receipt4["mode"] == CHANNEL_MODE_MOCK_FALLBACK
+                   and "auth by Null spi" in receipt4["error"]
+                   and "403" in receipt4["error"],
+                   f"实际{receipt4}")
+        finally:
+            urllib.request.urlopen = original_urlopen
+            for k in ("PROMO_CHANNEL_WEIBO_KEY",
+                      "PROMO_CHANNEL_MOMENTS_KEY",
+                      "PROMO_CHANNEL_DOUYIN_KEY"):
+                os.environ.pop(k, None)
+            os.environ["PROMO_CHANNEL_MODE"] = "mock"
+
+        # ---------- 百度错误响应体解析(实测口径) ----------
+        os.environ["BAIDU_PUSH_SITE"] = "zhuxiang-jiu.com"
+        os.environ["BAIDU_PUSH_TOKEN"] = "bad-token"
+        urls = ["https://zhuxiang-jiu.com/sitemap.xml"]
+        try:
+            # HTTP 400 + {"error":400,"message":"token invalid"}(实测)
+            def _baidu_400(req, timeout=None):
+                raise urllib.error.HTTPError(
+                    req.full_url, 400, "Bad Request", {}, io.BytesIO(
+                        b'{"error":400,"message":"token invalid"}'))
+            urllib.request.urlopen = _baidu_400
+            try:
+                result = await svc.baidu_push(urls)
+                record("校准-百度400保留token invalid报错",
+                       result["mode"] == CHANNEL_MODE_REAL
+                       and result["success"] == 0
+                       and "token invalid" in result["error"],
+                       f"实际{result}")
+            finally:
+                urllib.request.urlopen = original_urlopen
+
+            # HTTP 200 响应体携带 error 字段 → 推送被拒
+            def _baidu_200_error(req, timeout=None):
+                return _FakeResp(
+                    b'{"error":401,"message":"site mismatch"}')
+            urllib.request.urlopen = _baidu_200_error
+            try:
+                result2 = await svc.baidu_push(urls)
+                record("校准-百度200错误体被拒",
+                       result2["success"] == 0
+                       and result2["failed"] == 1
+                       and "site mismatch" in result2["error"],
+                       f"实际{result2}")
+            finally:
+                urllib.request.urlopen = original_urlopen
+
+            # HTTP 200 成功响应口径不变
+            def _baidu_ok(req, timeout=None):
+                return _FakeResp(b'{"success":1,"remain":2999}')
+            urllib.request.urlopen = _baidu_ok
+            try:
+                result3 = await svc.baidu_push(urls)
+                record("校准-百度成功口径不变",
+                       result3["success"] == 1
+                       and result3["remain"] == 2999
+                       and result3["failed"] == 0,
+                       f"实际{result3}")
+            finally:
+                urllib.request.urlopen = original_urlopen
+        finally:
+            os.environ.pop("BAIDU_PUSH_SITE", None)
+            os.environ.pop("BAIDU_PUSH_TOKEN", None)
+
+
 async def main():
     test_classes = [
         ("通道状态全景", TestChannelStatus),
         ("mock 回执确定性", TestMockReceipt),
         ("real 轨回退", TestRealFallback),
         ("real 轨成功", TestRealSuccess),
+        ("端点校准专项", TestEndpointCalibration),
         ("百度推送", TestBaiduPush),
         ("SEO 提交流程", TestSeoPushFlow),
         ("发布回执集成", TestPublishReceiptIntegration),

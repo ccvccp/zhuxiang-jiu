@@ -17,6 +17,7 @@
 import json
 import logging
 import os
+import urllib.error
 import urllib.request
 import urllib.parse
 from datetime import datetime, UTC
@@ -35,7 +36,32 @@ CHANNEL_MODE_MOCK = "mock"
 # 通道未配置/失败回退的 mock 回执标记(可观测降级)
 CHANNEL_MODE_MOCK_FALLBACK = "mock_fallback"
 
-# 真实平台开放 API 端点映射(资质就绪后按平台最新文档校准)
+# ============================================================
+# 平台认证风格(2026-09-02 实测校准)
+# ============================================================
+AUTH_STYLE_HEADER = "header"  # access-token 请求头(抖音/小红书开放平台惯例)
+AUTH_STYLE_QUERY = "query"    # access_token 查询参数(微信系惯例)
+AUTH_STYLE_FORM = "form"      # 表单字段 access_token+status(微博开放 API)
+
+PLATFORM_AUTH_STYLES = {
+    "douyin": AUTH_STYLE_HEADER,
+    "xiaohongshu": AUTH_STYLE_HEADER,
+    "wechat_moments": AUTH_STYLE_QUERY,
+    # 实测: POST share.json 无凭证返回 403 {"error":"auth by Null spi!"}
+    # 证明端点与协议正确, 配 access_token 表单字段即可用
+    "weibo": AUTH_STYLE_FORM,
+    "wechat_channels": AUTH_STYLE_QUERY,
+}
+
+# 真实平台开放 API 端点映射(默认值; 可经 PROMO_CHANNEL_{X}_URL 覆盖)
+# 实测备注(2026-09-02):
+#   - weibo: 真实有效(403 鉴权拦截, 协议正确)
+#   - baidu: 真实有效(400 {"error":400,"message":"token invalid"})
+#   - douyin: 官方无简单文本发布 API(返回 HTML 页面), 默认值为
+#     占位, 资质就绪后配 PROMO_CHANNEL_DOUYIN_URL 指向开放平台
+#     视频发布接口(OAuth 头鉴权)或自建代理
+#   - xiaohongshu/wechat_moments/wechat_channels: 无公开第三方发布
+#     API, 默认值为占位, 资质就绪后经 _URL 环境变量校准
 PLATFORM_API_ENDPOINTS = {
     "douyin": "https://open.douyin.com/api/promotion/v1/content/publish",
     "xiaohongshu": "https://edith.xiaohongshu.com/api/sns/web/v1/note/publish",
@@ -43,6 +69,9 @@ PLATFORM_API_ENDPOINTS = {
     "weibo": "https://api.weibo.com/2/statuses/share.json",
     "wechat_channels": "https://api.weixin.qq.com/cgi-bin/channels/publish",
 }
+
+# 各平台发布回执 ID 字段别名(响应解析兼容)
+PUBLISH_ID_ALIASES = ("publish_id", "idstr", "id", "note_id", "spu_id")
 
 # 百度普通收录推送端点(POST, body=URL 列表)
 BAIDU_PUSH_ENDPOINT = "http://data.zz.baidu.com/urls"
@@ -65,6 +94,62 @@ def channel_key(platform: str) -> str:
     if not env:
         return ""
     return os.environ.get(env, "").strip()
+
+
+def platform_endpoint(platform: str) -> str:
+    """平台发布端点解析(运行时动态读)
+
+    环境变量优先: 与凭证同名的 PROMO_CHANNEL_{X}_URL(如
+    PROMO_CHANNEL_WEIBO_URL), 资质就绪后免改代码即可校准端点或
+    切自建代理; 未配置回落代码内默认映射。
+    """
+    env = PROMO_CHANNEL_API_KEY_ENV.get(platform, "")
+    if env:
+        override = (os.environ.get(env[:-4] + "_URL", "")
+                    or "").strip()
+        if override:
+            return override
+    return PLATFORM_API_ENDPOINTS.get(platform, "")
+
+
+def _http_error_detail(exc: urllib.error.HTTPError) -> str:
+    """HTTPError 响应体细节提取(保留平台真实报错信息)
+
+    实测口径: 百度 400 → {"error":400,"message":"token invalid"};
+    微博 403 → {"error":"auth by Null spi!","error_code":21301}。
+    """
+    raw = ""
+    try:
+        raw = exc.read().decode("utf-8", errors="replace")[:200]
+    except Exception:
+        pass
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                for field in ("message", "error", "errmsg"):
+                    if parsed.get(field):
+                        return f"HTTP {exc.code} {parsed[field]}"
+        except Exception:
+            pass
+    return f"HTTP {exc.code} {raw or exc.reason}".strip()
+
+
+def _extract_publish_id(body) -> str:
+    """各平台发布回执 ID 提取(字段别名兼容)
+
+    weibo → idstr/id; 微信系 → publish_id; 小红书 → note_id;
+    抖音 → data.publish_id。
+    """
+    if not isinstance(body, dict):
+        return ""
+    data = (body.get("data") if isinstance(body.get("data"), dict)
+            else {})
+    for alias in PUBLISH_ID_ALIASES:
+        value = body.get(alias) or data.get(alias)
+        if value:
+            return str(value)
+    return ""
 
 
 def baidu_push_config() -> tuple[str, str]:
@@ -97,7 +182,8 @@ class PromoChannelService:
                 "mode": channel_mode(),
                 "keyConfigured": bool(key),
                 "effectiveMode": effective,
-                "endpoint": PLATFORM_API_ENDPOINTS.get(platform, ""),
+                "authStyle": PLATFORM_AUTH_STYLES.get(platform, ""),
+                "endpoint": platform_endpoint(platform),
             })
         return rows
 
@@ -137,29 +223,58 @@ class PromoChannelService:
 
     async def _publish_real(self, platform: str, key: str,
                             content: dict, mock_receipt: dict) -> dict:
-        """真实平台 API 发布(urllib POST, 平台开放端点)
+        """真实平台 API 发布(按平台认证风格构造请求, 2026-09-02 校准)
 
-        P2 适配器: 资质就绪后按平台文档校准请求/响应字段; 响应
-        解析失败视为失败(调用方回退 mock_fallback)。
+        认证风格(PLATFORM_AUTH_STYLES):
+            - form  (微博): 表单 access_token + status
+            - query (微信系): access_token 查询参数 + JSON body
+            - header(开放平台): access-token 请求头 + JSON body
+        响应解析按 PUBLISH_ID_ALIASES 兼容各平台字段; HTTP 错误
+        提取响应体真实报错(勿只抛 'HTTP Error 400')。
         """
-        payload = json.dumps({
-            "access_token": key,
-            "title": content.get("title", ""),
-            "content": content.get("body", ""),
-            "hashtags": content.get("hashtags", ""),
-        }, ensure_ascii=False).encode("utf-8")
-        endpoint = PLATFORM_API_ENDPOINTS.get(platform)
+        endpoint = platform_endpoint(platform)
         if not endpoint:
-            raise ValueError(f"平台无 API 端点映射({platform})")
+            raise ValueError(f"平台无 API 端点({platform}, 可配 "
+                             f"PROMO_CHANNEL_{platform.upper()}_URL)")
+        style = PLATFORM_AUTH_STYLES.get(platform, AUTH_STYLE_HEADER)
+        text = " ".join(x for x in (content.get("title", ""),
+                                    content.get("body", "")) if x)
+        if content.get("hashtags"):
+            text = f"{text} {content['hashtags']}".strip()
+        if style == AUTH_STYLE_FORM:
+            # 微博: 表单字段(share.json 实测校准)
+            data = urllib.parse.urlencode(
+                {"access_token": key,
+                 "status": text[:1000]}).encode("utf-8")
+            url = endpoint
+            headers = {"Content-Type":
+                       "application/x-www-form-urlencoded"}
+        elif style == AUTH_STYLE_QUERY:
+            # 微信系: access_token 查询参数 + JSON body
+            sep = "&" if "?" in endpoint else "?"
+            url = (f"{endpoint}{sep}access_token="
+                   f"{urllib.parse.quote(key)}")
+            data = self._json_payload(content)
+            headers = {"Content-Type": "application/json"}
+        else:
+            # 开放平台惯例: access-token 请求头 + JSON body
+            url = endpoint
+            data = self._json_payload(content)
+            headers = {"Content-Type": "application/json",
+                       "access-token": key}
         request = urllib.request.Request(
-            endpoint, data=payload,
-            headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(request, timeout=_HTTP_TIMEOUT) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        publish_id = str(body.get("publish_id")
-                         or body.get("data", {}).get("publish_id") or "")
+            url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request,
+                                        timeout=_HTTP_TIMEOUT) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise ValueError(
+                f"平台API拒绝({_http_error_detail(exc)})") from exc
+        publish_id = _extract_publish_id(body)
         if not publish_id:
-            raise ValueError(f"平台响应缺少 publish_id: {str(body)[:120]}")
+            raise ValueError(
+                f"平台响应缺少 publishId: {str(body)[:120]}")
         return {
             "mode": CHANNEL_MODE_REAL,
             "platform": platform,
@@ -167,6 +282,15 @@ class PromoChannelService:
             "exposureEstimate": mock_receipt["exposureEstimate"],
             "error": "",
         }
+
+    @staticmethod
+    def _json_payload(content: dict) -> bytes:
+        """JSON 请求体(微信系/开放平台通用字段)"""
+        return json.dumps({
+            "title": content.get("title", ""),
+            "content": content.get("body", ""),
+            "hashtags": content.get("hashtags", ""),
+        }, ensure_ascii=False).encode("utf-8")
 
     @staticmethod
     def _mock_receipt(platform: str, content: dict, heat: float) -> dict:
@@ -208,17 +332,36 @@ class PromoChannelService:
                     "urls": urls}
 
     async def _baidu_push_real(self, urls: list[str]) -> dict:
-        """百度 urls 主动推送(POST data.zz.baidu.com/urls)"""
+        """百度 urls 主动推送(POST data.zz.baidu.com/urls)
+
+        实测校准(2026-09-02): token 无效时返回 HTTP 400 + 响应体
+        {"error":400,"message":"token invalid"} —— 须读取响应体
+        保留真实报错, 勿只抛 'HTTP Error 400'。
+        """
         site, token = baidu_push_config()
         query = urllib.parse.urlencode({"site": site, "token": token})
         data = "\n".join(urls).encode("utf-8")
         request = urllib.request.Request(
             f"{BAIDU_PUSH_ENDPOINT}?{query}", data=data,
             headers={"Content-Type": "text/plain"}, method="POST")
-        with urllib.request.urlopen(request,
-                                    timeout=_HTTP_TIMEOUT) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        # 百度响应: {"success": n, "remain": n, "not_same_site": [...]}
+        try:
+            with urllib.request.urlopen(request,
+                                        timeout=_HTTP_TIMEOUT) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise ValueError(
+                f"百度推送被拒({_http_error_detail(exc)})") from exc
+        # 响应体携带 error 字段且无成功计数 → 推送被拒(实测口径)
+        if (isinstance(body, dict) and body.get("error")
+                and not body.get("success")):
+            return {
+                "mode": CHANNEL_MODE_REAL, "success": 0, "remain": 0,
+                "failed": len(urls),
+                "error": str(body.get("message")
+                             or body.get("error"))[:200],
+                "urls": urls,
+            }
+        # 百度成功响应: {"success": n, "remain": n, "not_same_site": [...]}
         return {
             "mode": CHANNEL_MODE_REAL,
             "success": int(body.get("success", 0)),
