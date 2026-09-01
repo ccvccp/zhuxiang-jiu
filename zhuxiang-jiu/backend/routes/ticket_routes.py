@@ -1,9 +1,9 @@
-"""客服工单模块路由(9 端点)
+"""客服工单模块路由(11 端点)
 
 鉴权:
     - 用户端(2): 创建工单/确认+满意度(X-Member-Id 头)
-    - 客服/管理端(7): 分配/回复/解决/关闭/列表/详情/统计(X-Role 头,
-      放行 admin 与 cs_staff, 对应权限码 ticket:view/ticket:reply)
+    - 客服/管理端(9): 分配/回复/解决/关闭/列表/详情/统计/补偿方案/补偿执行
+      (X-Role 头, 放行 admin 与 cs_staff, 对应权限码 ticket:view/ticket:reply)
 
 异常映射(遵循项目约定):
     - KeyError → 404(工单不存在)
@@ -14,6 +14,7 @@
     - 工单(4):   create / detail / list / stats
     - 流转(4):   assign / reply / resolve / close
     - 确认(1):   confirm(用户, 含满意度)
+    - 补偿(2):   compensation-propose / compensation-execute(P1-9 三级补偿)
 """
 
 
@@ -285,6 +286,57 @@ async def close_ticket(
             ticket_no=ticket_no,
             reason=data.reason,
         )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 投诉三级补偿(P1-9, 设计文档 5.3.3)
+# ============================================================
+
+class ProposeCompensationRequest(PydBaseModel):
+    """制定补偿方案(客服调查核实后)"""
+    level: str = Field(..., description="补偿分级: minor(轻微)/general(一般)/severe(严重)")
+    handlerId: str | int = Field(..., description="处理客服ID")
+    couponAmount: float | None = Field(
+        None, gt=0, le=1000, description="优惠券金额(缺省 ¥10)")
+    remark: str = Field("", max_length=500, description="方案备注")
+
+
+@router.post("/api/ticket/{ticket_no}/compensation/propose", tags=["客服工单模块"])
+async def propose_compensation(
+    ticket_no: str,
+    data: ProposeCompensationRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """制定投诉补偿方案(轻微→优惠券 / 一般→补发+优惠券 / 严重→退款+升级主管)
+
+    方案生成后工单转待用户确认; 用户确认(resolved)后调 execute 执行。
+    """
+    _require_staff(x_role)
+    try:
+        result = await _service.propose_compensation(
+            ticket_no=ticket_no,
+            level=data.level,
+            handler_id=data.handlerId,
+            coupon_amount=data.couponAmount,
+            remark=data.remark,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/ticket/{ticket_no}/compensation/execute", tags=["客服工单模块"])
+async def execute_compensation(
+    ticket_no: str,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """执行补偿方案(用户确认方案后: 发券/补发登记/退款分派)"""
+    _require_staff(x_role)
+    try:
+        result = await _service.execute_compensation(ticket_no=ticket_no)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

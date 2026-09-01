@@ -9,6 +9,8 @@
     - 超时升级(售后工单48h未解决 → 升级主管)
     - 用户确认+满意度(1-5星)
     - 工单统计(状态/类型/超时/SLA达标)
+    - 投诉三级补偿(P1-9, 设计文档 5.3.3: 轻微→优惠券 /
+      一般→补发+优惠券 / 严重→退款+升级主管介入)
 
 锁保护:
     - 创建: ticket:create:{user_id}   (工单号生成)
@@ -51,6 +53,34 @@ SLA_HOURS = {
 
 # 售后工单超时升级阈值(48小时未解决 → 升级主管, 文档行 783)
 ESCALATE_HOURS = 48
+
+# ============================================================
+# 投诉三级补偿(P1-9, 设计文档 5.3.3 投诉处理流程)
+# ============================================================
+
+# 补偿分级
+COMP_LEVEL_MINOR = "minor"      # 轻微问题
+COMP_LEVEL_GENERAL = "general"  # 一般问题
+COMP_LEVEL_SEVERE = "severe"    # 严重问题
+COMPENSATION_LEVELS = (COMP_LEVEL_MINOR, COMP_LEVEL_GENERAL, COMP_LEVEL_SEVERE)
+
+# 各级补偿方案(设计文档 5.3.3):
+#   轻微 → 优惠券补偿
+#   一般 → 补发 + 优惠券
+#   严重 → 退款 + 升级处理 + 主管介入
+COMPENSATION_PLANS = {
+    COMP_LEVEL_MINOR: {"coupon": True, "reship": False, "refund": False,
+                       "escalate": False},
+    COMP_LEVEL_GENERAL: {"coupon": True, "reship": True, "refund": False,
+                          "escalate": False},
+    COMP_LEVEL_SEVERE: {"coupon": True, "reship": False, "refund": True,
+                        "escalate": True},
+}
+
+# 补偿券金额(文档未定档, 对齐 AI 客服场景 ¥10 起步常量化)
+COMP_COUPON_AMOUNT = 10.0
+# 补偿券有效期(天)
+COMP_COUPON_VALID_DAYS = 30
 
 # 状态流转图
 STATUS_TRANSITIONS = {
@@ -415,7 +445,200 @@ class TicketService:
         return dict(ticket)
 
     # ============================================================
-    # 4. 工单统计
+    # 4. 投诉三级补偿(P1-9, 设计文档 5.3.3)
+    # ============================================================
+
+    async def propose_compensation(self, ticket_no: str, level: str,
+                                    handler_id, coupon_amount: float = None,
+                                    remark: str = "") -> dict:
+        """客服制定补偿方案(调查核实后, 用户确认前)
+
+        流程(设计文档 5.3.3):
+            - 轻微问题 → 优惠券补偿
+            - 一般问题 → 补发 + 优惠券
+            - 严重问题 → 退款 + 升级处理 + 主管介入(escalated=True)
+            - 方案生成后工单转待用户确认(wait_confirm), 用户确认后执行
+
+        Raises:
+            KeyError: 工单不存在
+            ValueError: 分级非法 / 非投诉工单 / 状态非法 /
+                       重复提案 / severe 缺订单号
+        """
+        if level not in COMPENSATION_LEVELS:
+            raise ValueError(f"补偿分级非法(须为 {'/'.join(COMPENSATION_LEVELS)})")
+
+        async with get_lock(f"ticket:transition:{ticket_no}"):
+            ticket = await self._get_or_404(ticket_no)
+            if ticket.get("type") != TICKET_TYPE_COMPLAINT:
+                raise ValueError("仅投诉工单可制定补偿方案")
+            if ticket.get("compensation", {}).get("status") == "proposed":
+                raise ValueError("补偿方案已制定, 请等待用户确认")
+            if ticket.get("compensation", {}).get("status") == "executed":
+                raise ValueError("补偿方案已执行, 不可重复提案")
+            if ticket["status"] != TICKET_STATUS_PROCESSING:
+                raise ValueError(
+                    f"工单状态非法(当前{ticket['status']}, "
+                    f"须为{TICKET_STATUS_PROCESSING}: 先分配客服处理)")
+
+            plan = COMPENSATION_PLANS[level]
+            # 严重级退款须关联订单
+            if plan["refund"] and not ticket.get("orderId"):
+                raise ValueError("退款补偿须关联订单(创建工单时提供 orderId)")
+
+            amount = round(float(
+                coupon_amount if coupon_amount is not None
+                else COMP_COUPON_AMOUNT), 2)
+            compensation = {
+                "level": level,
+                "planCoupon": plan["coupon"],
+                "planReship": plan["reship"],
+                "planRefund": plan["refund"],
+                "couponAmount": amount if plan["coupon"] else 0.0,
+                "couponValidDays": COMP_COUPON_VALID_DAYS,
+                "status": "proposed",
+                "remark": remark,
+                "proposedAt": ts(),
+                "proposedBy": handler_id,
+                "couponNo": "",
+                "reshipOrderId": "",
+                "refundNo": "",
+                "executedAt": "",
+            }
+
+            updates = {"compensation": compensation, "updatedAt": ts()}
+            # 严重级: 升级主管介入(复用现有 escalated 标记)
+            if plan["escalate"]:
+                updates["escalated"] = True
+            # 方案即解决方案的一部分 → 待用户确认
+            updates["status"] = TICKET_STATUS_WAIT_CONFIRM
+            updates["resolvedAt"] = ts()
+            await self.repo.update_ticket(ticket_no, updates)
+            ticket.update(updates)
+            return self._public(ticket)
+
+    async def execute_compensation(self, ticket_no: str,
+                                    operator: str = "admin") -> dict:
+        """执行补偿方案(用户确认方案后才执行, 设计文档 5.3.3)
+
+        执行分派:
+            - 优惠券: 发放补偿券(优惠券系统未落地, 先落补偿券记录
+              couponNo+金额+有效期, 券系统落地后迁移核销)
+            - 补发: 登记补发计划(reshipOrderId 由客服线下创建补发订单后回填,
+              或执行时自动生成补发单号)
+            - 退款: 复用收款模块 create_refund(partial) + audit_refund(approved)
+
+        Raises:
+            KeyError: 工单不存在
+            ValueError: 无补偿方案 / 未确认 / 已执行 / 退款链路失败
+        """
+        async with get_lock(f"ticket:transition:{ticket_no}"):
+            ticket = await self._get_or_404(ticket_no)
+            comp = ticket.get("compensation")
+            if not comp:
+                raise ValueError("该工单无补偿方案")
+            if comp.get("status") != "proposed":
+                raise ValueError(f"补偿方案状态非法(当前{comp.get('status')}, 须为 proposed)")
+            if ticket["status"] != TICKET_STATUS_RESOLVED:
+                raise ValueError(
+                    f"工单状态非法(当前{ticket['status']}, "
+                    f"须为{TICKET_STATUS_RESOLVED}: 用户确认方案后方可执行)")
+
+            # ---- 分派执行 ----
+            if comp.get("planCoupon"):
+                comp["couponNo"] = await self._issue_compensation_coupon(ticket, comp)
+            if comp.get("planReship"):
+                comp["reshipOrderId"] = await self._create_reship_order(ticket)
+            refund_result = None
+            if comp.get("planRefund"):
+                refund_result = await self._refund_via_payment(ticket, operator)
+
+            comp["status"] = "executed"
+            comp["executedAt"] = ts()
+            comp["executedBy"] = operator
+            if refund_result:
+                comp["refundNo"] = refund_result.get("refundNo", "")
+
+            await self.repo.update_ticket(ticket_no, {
+                "compensation": comp, "updatedAt": ts()})
+            ticket["compensation"] = comp
+
+            result = self._public(ticket)
+            result["compensationExecution"] = {
+                "couponNo": comp.get("couponNo"),
+                "reshipOrderId": comp.get("reshipOrderId"),
+                "refundNo": comp.get("refundNo"),
+                "refundResult": refund_result,
+            }
+            return result
+
+    async def _issue_compensation_coupon(self, ticket: dict,
+                                          comp: dict) -> str:
+        """发放补偿券(优惠券系统未落地前的补偿券记录)
+
+        生成补偿券号并落独立存储(ticket_compensation_coupons), 券系统
+        落地后迁移核销(排期 P1 呼应)。金额/有效期来自补偿方案。
+        """
+        from repositories.backend import is_redis_mode, get_redis_client, _k
+        import json as _json
+        import secrets
+
+        coupon_no = f"CP{secrets.token_hex(5).upper()}"
+        record = {
+            "couponNo": coupon_no,
+            "ticketNo": ticket["ticketNo"],
+            "userId": ticket.get("userId"),
+            "amount": comp.get("couponAmount", 0.0),
+            "validDays": comp.get("couponValidDays", COMP_COUPON_VALID_DAYS),
+            "source": "complaint_compensation",
+            "status": "issued",
+            "createdAt": ts(),
+        }
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("ticket", "compensation_coupons"),
+                             coupon_no, _json.dumps(record, ensure_ascii=False))
+        else:
+            from repositories.backend import get_in_memory_store
+            store = get_in_memory_store()
+            store.setdefault("ticket_compensation_coupons", {})[coupon_no] = record
+        return coupon_no
+
+    async def _create_reship_order(self, ticket: dict) -> str:
+        """登记补发计划(生成补发单号; 仓库线下履约后回填物流)"""
+        from datetime import datetime as _dt
+        return f"RS{_dt.utcnow().strftime('%Y%m%d%H%M%S')}{ticket['ticketNo'][-4:]}"
+
+    async def _refund_via_payment(self, ticket: dict, operator: str) -> dict:
+        """退款补偿(复用收款模块: 部分退款 + 审核通过)
+
+        链路: 工单 orderId → find_active_by_order 取支付单 →
+        create_refund(partial) → audit_refund(approved)
+        """
+        from repositories.payment_repository import PaymentRepository
+        from services.payment_service import PaymentService
+
+        order_id = ticket.get("orderId", "")
+        pay_order = await PaymentRepository().find_active_by_order(
+            order_id, "retail")
+        if not pay_order:
+            # 放宽类型匹配(工单 orderId 无类型强约束)
+            pay_order = await PaymentRepository().find_active_by_order(order_id)
+        if not pay_order:
+            raise ValueError(f"订单 {order_id} 无可退款的支付单, 无法执行退款补偿")
+
+        pay_no = pay_order["payNo"]
+        refund_amount = round(float(pay_order.get("actualAmount", 0)), 2)
+        payment_svc = PaymentService()
+        refund = await payment_svc.create_refund(
+            pay_no, refund_amount, f"投诉三级补偿(工单{ticket['ticketNo']})",
+            refund_type="full")
+        await payment_svc.audit_refund(
+            refund["refundNo"], "approved", auditor=operator,
+            audit_remark="投诉补偿退款")
+        return refund
+
+    # ============================================================
+    # 5. 工单统计
     # ============================================================
 
     async def get_stats(self) -> dict:
