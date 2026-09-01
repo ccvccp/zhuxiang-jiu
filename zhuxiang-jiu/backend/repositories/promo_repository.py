@@ -146,6 +146,120 @@ PROMO_LLM_FALLBACK_MODEL = "glm-4-flash"
 # 发布通道模式(mock 模拟轨 / real 真实平台 API, P2)
 PROMO_CHANNEL_MODE = os.environ.get("PROMO_CHANNEL_MODE", "mock")
 
+# ============================================================
+# P1: 受众画像库(设计文档 §3.3, admin 可配)
+# ============================================================
+
+# 默认平台画像种子(字段: audience 受众/tone 基调/format 格式约束/
+# scenes 擅长场景/productTones 亲和产品调性)
+DEFAULT_AUDIENCE_PROFILES = {
+    PROMO_PLATFORM_DOUYIN: {
+        "platform": PROMO_PLATFORM_DOUYIN,
+        "audience": "18-35 大众娱乐人群",
+        "tone": "快节奏、剧情钩子、口语化",
+        "format": "15-45s 短视频脚本(钩子-卖点-行动)",
+        "scenes": ("日常小酌", "朋友聚会", "国潮打卡"),
+        "productTones": ("口粮酒", "年轻化", "高性价比"),
+    },
+    PROMO_PLATFORM_XHS: {
+        "platform": PROMO_PLATFORM_XHS,
+        "audience": "20-40 女性种草人群",
+        "tone": "真实体验、生活美学、闺蜜分享",
+        "format": "标题≤20字 + 正文≤800字 + 标签",
+        "scenes": ("婚宴", "寿宴", "送礼", "家宴布置"),
+        "productTones": ("礼盒", "颜值款", "轻奢"),
+    },
+    PROMO_PLATFORM_MOMENTS: {
+        "platform": PROMO_PLATFORM_MOMENTS,
+        "audience": "30+ 熟龄社交圈",
+        "tone": "信任、情怀、简短",
+        "format": "朋友圈文案(≤140字)",
+        "scenes": ("节庆送礼", "商务宴请", "老友重聚"),
+        "productTones": ("高端礼盒", "陈酿", "收藏款"),
+    },
+}
+
+# 内容角度 → 平台亲和度(三维匹配第一维; 0-1)
+ANGLE_PLATFORM_AFFINITY = {
+    PROMO_PLATFORM_DOUYIN: {
+        "场景": 0.9, "日常": 0.9, "聚会": 0.9, "小酌": 0.85,
+        "婚宴": 0.4, "送礼": 0.4, "工艺": 0.5, "文化": 0.6, "优惠": 0.8,
+    },
+    PROMO_PLATFORM_XHS: {
+        "婚宴": 0.95, "送礼": 0.9, "家宴": 0.9, "场景": 0.85,
+        "文化": 0.7, "颜值": 0.9, "日常": 0.5, "工艺": 0.6, "优惠": 0.5,
+    },
+    PROMO_PLATFORM_MOMENTS: {
+        "节庆": 0.9, "送礼": 0.85, "商务": 0.85, "文化": 0.7,
+        "婚宴": 0.6, "场景": 0.6, "日常": 0.5, "优惠": 0.6, "工艺": 0.5,
+    },
+}
+
+# 产品调性(三维匹配第二维; 与画像 productTones 匹配)
+PRODUCT_TONES = ("口粮酒", "礼盒", "高端礼盒", "陈酿", "年轻化",
+                 "高性价比", "颜值款", "轻奢", "收藏款")
+
+# 三维匹配通过线(≥该分值判定为"适合投放")
+MATCH_PASS_SCORE = 0.6
+
+# ============================================================
+# P1: 权威信源库(设计文档 §3.4 权威导向, 仅可公开引用条目)
+# ============================================================
+
+# 信源类别(白名单)
+AUTHORITY_CATEGORY_STANDARD = "standard"      # 国家标准
+AUTHORITY_CATEGORY_ASSOCIATION = "association"  # 行业协会公开数据
+AUTHORITY_CATEGORY_MEDIA = "media"            # 权威媒体公开报道
+AUTHORITY_CATEGORIES = (AUTHORITY_CATEGORY_STANDARD,
+                        AUTHORITY_CATEGORY_ASSOCIATION,
+                        AUTHORITY_CATEGORY_MEDIA)
+
+# 权威信源种子: 只收录可公开引用条目, content 为可引用客观事实
+# (含标准编号/条款要点), allowedUsage 限定引用方式(广告法§9 红线)
+AUTHORITY_SOURCE_SEEDS = (
+    {
+        "title": "GB/T 10781.1—2021《白酒质量要求 第1部分:浓香型白酒》",
+        "category": AUTHORITY_CATEGORY_STANDARD,
+        "content": ("国家标准 GB/T 10781.1—2021 规定了浓香型白酒的"
+                    "术语和定义、产品分类、要求、检验方法等, "
+                    "适用于浓香型白酒的生产、检验与销售。"),
+        "allowedUsage": "仅可作客观事实引用(如\"符合 GB/T 10781.1 标准\"), 不得用于推荐背书",
+    },
+    {
+        "title": "GB/T 15109—2021《白酒工业术语》",
+        "category": AUTHORITY_CATEGORY_STANDARD,
+        "content": ("国家标准 GB/T 15109—2021 界定了白酒工业的基本术语,"
+                    "明确白酒以粮谷为主要原料, 以大曲、小曲或麸曲等为糖化"
+                    "发酵剂, 经蒸煮、糖化、发酵、蒸馏、陈酿、勾调而成。"),
+        "allowedUsage": "仅可作工艺客观事实引用, 不得用于推荐背书",
+    },
+    {
+        "title": "GB 2757《食品安全国家标准 蒸馏酒及其配制酒》",
+        "category": AUTHORITY_CATEGORY_STANDARD,
+        "content": ("强制性食品安全国家标准 GB 2757 规定了蒸馏酒及其配制酒的"
+                    "原料、感官、污染物限量、食品添加剂等食品安全要求, "
+                    "所有在售蒸馏酒须符合该标准。"),
+        "allowedUsage": "仅可作食品安全合规事实引用, 不得暗示官方推荐",
+    },
+    {
+        "title": "中国酒业协会公开行业数据",
+        "category": AUTHORITY_CATEGORY_ASSOCIATION,
+        "content": ("据中国酒业协会公开发布的行业数据, 白酒产业向优势产区、"
+                    "优势品牌集中, 消费结构持续升级, 具体数据以协会官方"
+                    "最新发布为准。"),
+        "allowedUsage": "仅可作趋势性客观表述, 引用具体数据须以协会官方最新发布为准",
+    },
+)
+
+# RAG 检索参数
+AUTHORITY_TOP_K = 3                 # 生成时注入引用池条数
+AUTHORITY_MIN_SIMILARITY = 0.05     # 2-gram 余弦召回下限(信源池小, 阈值低)
+# 溯源白名单短语(强制警示/年龄提示中的数字不作数字声明处理)
+PROVENANCE_WHITELIST_PHRASES = (
+    "18周岁以下请勿饮酒", "满18周岁请适量", "18+ 请适量饮用",
+    "过量饮酒有害健康", "未成年人禁止饮酒",
+)
+
 # 决策档位
 DECISION_AUTO_ENGAGE = "auto_engage"
 DECISION_MANUAL_QUEUE = "manual_queue"
@@ -388,6 +502,41 @@ class PromoRepository:
         return count
 
     # ============================================================
+    # P1: 受众画像库
+    # ============================================================
+
+    async def save_audience_profile(self, profile: dict) -> dict:
+        return await self._save("promo_audience_profiles",
+                                profile["platform"], profile)
+
+    async def get_audience_profile(self, platform: str) -> dict | None:
+        return await self._get("promo_audience_profiles", platform)
+
+    async def list_audience_profiles(self, limit: int = 50) -> list[dict]:
+        profiles = await self._list("promo_audience_profiles", limit)
+        return sorted(profiles, key=lambda p: p.get("platform", ""))
+
+    # ============================================================
+    # P1: 权威信源库
+    # ============================================================
+
+    async def save_authority_source(self, source: dict) -> dict:
+        return await self._save("promo_authority_sources",
+                                source["sourceId"], source)
+
+    async def get_authority_source(self, source_id: int) -> dict | None:
+        return await self._get("promo_authority_sources", source_id)
+
+    async def list_authority_sources(self, keyword: str = None,
+                                     limit: int = 200) -> list[dict]:
+        sources = await self._list("promo_authority_sources", limit)
+        if keyword:
+            kw = keyword.strip()
+            sources = [s for s in sources
+                       if kw in (s.get("title", "") + s.get("content", ""))]
+        return sorted(sources, key=lambda s: s.get("sourceId", 0))
+
+    # ============================================================
     # 通用存储(内存/Redis)
     # ============================================================
 
@@ -438,6 +587,9 @@ class PromoRepository:
             self.store["promo_dedupe"] = {}
             self.store["promo_cooldowns"] = {}
             self.store["promo_daily_caps"] = {}
+            self.store["promo_audience_profiles"] = {}     # P1: 受众画像库
+            self.store["promo_authority_sources"] = {}     # P1: 权威信源库
             self.store["_promo_hotspot_seq"] = 0
             self.store["_promo_decision_seq"] = 0
             self.store["_promo_content_seq"] = 0
+            self.store["_promo_authority_seq"] = 0

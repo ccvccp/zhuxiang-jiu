@@ -158,12 +158,14 @@ class PromoAgentService:
     # Step2 受众匹配(按平台)
     # ============================================================
 
-    def match_audience(self, platform: str, analysis: dict) -> tuple[dict, str]:
+    def match_audience(self, platform: str, analysis: dict,
+                       profile: dict = None) -> tuple[dict, str]:
         """Step2: 平台画像 + 分析结果 → 话术基调与禁忌
 
-        规则轨兜底: 直接使用内置平台画像。
+        P1: profile 来自受众画像库(admin 可配), 缺省回退内置画像。
+        规则轨兜底: 直接使用平台画像。
         """
-        profile = PLATFORM_PROFILES.get(platform, PLATFORM_PROFILES[
+        base = profile or PLATFORM_PROFILES.get(platform, PLATFORM_PROFILES[
             PROMO_PLATFORM_DOUYIN])
         system = (
             "你是社交媒体受众运营专家。基于平台画像给出内容话术建议。"
@@ -171,34 +173,50 @@ class PromoAgentService:
             '{"audience": "目标人群描述", "tone": "话术基调", '
             '"tabooWords": ["该平台避免的词"]}。'
         )
-        user = (f"平台: {platform}\n画像: {json.dumps(profile, ensure_ascii=False)}\n"
+        user = (f"平台: {platform}\n"
+                f"画像: {json.dumps(base, ensure_ascii=False, default=str)}\n"
                 f"内容角度: {analysis.get('angle', '')}\n"
                 f"产品聚焦: {analysis.get('focus', '')}")
         data, track = self._chat_json(system, user)
         if data is None:
-            data = {"audience": profile["audience"],
-                    "tone": profile["tone"],
+            data = {"audience": base.get("audience", ""),
+                    "tone": base.get("tone", ""),
                     "tabooWords": []}
         return data, track
 
     # ============================================================
-    # Step3 内容生成(按平台)
+    # Step3 内容生成(按平台, P1: 权威引用池注入)
     # ============================================================
 
     def generate_draft(self, hotspot: dict, platform: str,
-                       analysis: dict, audience: dict) -> tuple[dict, str]:
+                       analysis: dict, audience: dict,
+                       citations: list[dict] = None) -> tuple[dict, str]:
         """Step3: 全上下文 → 平台差异化内容草稿
 
+        P1: citations 为权威信源引用池(RAG top-k), prompt 限定
+        数字/标准编号只能出自引用池, 禁止编造数据。
         规则轨兜底: 平台模板填充(必含警示语/年龄提示, 保证合规可用)。
         """
         profile = PLATFORM_PROFILES.get(platform, {})
+        citation_block = ""
+        if citations:
+            lines = [
+                f"[{i}] {c.get('title', '')}: {c.get('content', '')}"
+                f" (引用方式: {c.get('allowedUsage', '')})"
+                for i, c in enumerate(citations, start=1)
+            ]
+            citation_block = ("权威引用池(正文引用的标准编号/数据必须且"
+                              "只能出自以下条目):\n"
+                              + "\n".join(lines) + "\n")
         system = (
             "你是白酒品牌的资深新媒体编辑, 擅长热点借势内容创作。"
             "严格遵守: 1)只依据给定热点信息, 不编造事实与数据; "
             "2)不得出现饮酒动作描写; 3)不得使用国家机关/权威机构名义作"
             "推荐证明; 4)不得暗示饮酒有消除紧张焦虑等功效; "
             f"5)文案必须原样包含 \"{REQUIRED_DISCLAIMER}\" 与 "
-            f"\"{REQUIRED_AGE_TIP}\" 字样。"
+            f"\"{REQUIRED_AGE_TIP}\" 字样; "
+            "6)正文引用的标准编号/百分比/数据必须出自权威引用池, "
+            "不得自行编造数字。"
             "只输出 JSON, 格式: "
             '{"title": "标题", "body": "正文", "hashtags": "#标签 #标签", '
             '"cta": "行动号召", "coverHint": "封面建议"}。'
@@ -208,7 +226,8 @@ class PromoAgentService:
                 f"产品聚焦: {analysis.get('focus', '')}\n"
                 f"平台: {platform} ({profile.get('format', '')})\n"
                 f"目标人群: {audience.get('audience', '')}\n"
-                f"话术基调: {audience.get('tone', '')}")
+                f"话术基调: {audience.get('tone', '')}\n"
+                f"{citation_block}")
         data, track = self._chat_json(system, user)
         if data is None or not (data.get("body") or "").strip():
             title = hotspot.get("title", "热点")
@@ -270,20 +289,28 @@ class PromoAgentService:
 
     async def generate_platform_contents(
             self, hotspot: dict,
-            platforms: tuple[str, ...] = (PROMO_PLATFORM_DOUYIN,)
+            platforms: tuple[str, ...] = (PROMO_PLATFORM_DOUYIN,),
+            profiles: dict = None,
+            citations: list[dict] = None
     ) -> list[dict]:
-        """对同一热点生成 N 平台内容(一源多态, Step1 共享)
+        """对同一热点生成 N 平台内容(一源多态, Step1/引用池共享)
+
+        P1: profiles 为画像库注入(平台→画像); citations 为权威引用池
+        (RAG top-k, Step3 注入 + 服务层溯源校验用)。
 
         Returns:
             [{"platform", "title", "body", "hashtags", "cta",
-              "coverHint", "selfCheck", "agentTrace"}]
+              "coverHint", "selfCheck", "agentTrace", "citations"}]
         """
         analysis, step1_track = self.analyze_hotspot(hotspot)
         results = []
         for platform in platforms:
-            audience, step2_track = self.match_audience(platform, analysis)
+            profile = (profiles or {}).get(platform)
+            audience, step2_track = self.match_audience(
+                platform, analysis, profile=profile)
             draft, step3_track = self.generate_draft(
-                hotspot, platform, analysis, audience)
+                hotspot, platform, analysis, audience,
+                citations=citations)
             checked, step4_track = self.self_check(draft, platform)
             body = checked.get("revisedBody") or draft.get("body", "")
             results.append({
@@ -300,5 +327,7 @@ class PromoAgentService:
                     "step3Generate": step3_track,
                     "step4SelfCheck": step4_track,
                 },
+                # 引用池快照(溯源校验与 authorityRefs 由服务层落库)
+                "citations": citations or [],
             })
         return results

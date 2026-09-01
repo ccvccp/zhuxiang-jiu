@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <!--
-    36号·AI智能推广模块 v1.0 · 内容工厂与发布中心看板
+    36号·AI智能推广模块 v1.1 · 内容工厂与发布中心看板
     页面: ai-promo-studio.html(配套脚本 js/promo-studio.js)
     依赖: css/style.css(主题变量, 不新建 css) / js/auth.js(登录态)
     后端: 36号 promo_routes(默认 http://localhost:8000, 请求头 X-Role: admin)
+    P1 扩展: 受众画像库(编辑/三维匹配测试/站内画像回传) + 权威信源库(关键词过滤/新增/RAG 检索测试)
 -->
 <html lang="zh-CN">
 <head>
@@ -167,8 +168,67 @@
             border-radius: 3px; padding: 1px 6px; font-size: 11px;
         }
 
+        /* ========= P1: 受众画像与权威信源扩展 ========= */
+        /* 小工具横排表单(三维匹配/站内回传/RAG 检索) */
+        .tool-form { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; padding: 14px 16px; }
+        .tool-form label { font-size: 13px; color: var(--color-text-light); }
+        .tool-form input[type="text"], .tool-form select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .tool-form input[type="text"] { width: 220px; }
+        .tool-form select { min-width: 130px; }
+
+        /* 纵向堆叠表单(新增信源) */
+        .stack-form { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+        .stack-form label { display: block; font-size: 13px; color: var(--color-text-light); margin-bottom: 5px; }
+        .stack-form input[type="text"], .stack-form select, .stack-form textarea {
+            width: 100%; box-sizing: border-box; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; background: #fff;
+        }
+        .stack-form textarea { min-height: 90px; resize: vertical; line-height: 1.7; font-family: inherit; }
+
+        /* 卡片头关键词过滤输入框 */
+        .card-head input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff; width: 200px;
+        }
+
+        /* 小工具结果区 */
+        .tool-result { padding: 2px 16px 12px; font-size: 13px; }
+        .tool-result .match-summary b { font-size: 16px; }
+        .tool-lines { margin-top: 8px; line-height: 1.8; word-break: break-all; }
+        .tool-lines b { font-weight: 600; }
+
+        /* RAG 检索结果条目 */
+        .rag-item { padding: 10px 0; border-bottom: 1px dashed var(--color-border); }
+        .rag-item:last-child { border-bottom: none; }
+        .rag-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .rag-head b { font-size: 13px; }
+        .rag-content { margin-top: 5px; font-size: 12px; color: var(--color-text-light); line-height: 1.7; word-break: break-all; }
+
+        /* 画像编辑弹窗 */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; z-index: 1000;
+            background: rgba(0, 0, 0, 0.45); padding: 60px 16px;
+            align-items: flex-start; justify-content: center; overflow-y: auto;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-card {
+            background: #fff; border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm); width: 100%; max-width: 520px; height: fit-content;
+        }
+        .modal-form { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+        .modal-form label { display: block; font-size: 13px; color: var(--color-text-light); margin-bottom: 5px; }
+        .modal-form input[type="text"] {
+            width: 100%; box-sizing: border-box; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; background: #fff;
+        }
+        .modal-foot { display: flex; gap: 10px; justify-content: flex-end; padding: 0 16px 16px; }
+
         @media (max-width: 640px) {
-            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-toolbar input[type="text"], .card-head input[type="text"],
+            .tool-form input[type="text"] { width: 100%; }
             .dash-last-update { margin-left: 0; width: 100%; }
             .banner-link { display: none; }
             .gen-form select { min-width: 100%; }
@@ -181,7 +241,7 @@
         <div class="container" style="display:flex;align-items:center;gap:12px;">
             <div style="flex:1;">
                 <h1>AI 智能推广 · 内容工厂与发布中心</h1>
-                <p>36号模块 · GLM-5.3 Agent 四步链一源多态生成 / 三审合规闸门 / 黄金时段发布调度 / attract 归因报表</p>
+                <p>36号模块 · GLM-5.3 Agent 四步链一源多态生成 / 三审合规闸门 / 黄金时段发布调度 / attract 归因报表 / 受众画像×权威信源(P1)</p>
             </div>
             <a class="banner-link" href="ai-promo-radar.html">← 热点雷达大屏</a>
             <div id="authBadge" style="display:flex;align-items:center;"></div>
@@ -328,13 +388,186 @@
             </div>
         </section>
 
+        <!-- P1: 受众画像库(平台 × 人群 × 调性 × 场景) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>受众画像库(平台 × 人群 × 调性 × 场景)</b>
+                    <span class="scan-result" id="audienceCount"></span>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>平台</th><th>目标人群</th><th>平台调性</th>
+                                <th>内容格式</th><th>消费场景</th><th>产品调性</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audienceBody">
+                            <tr><td colspan="7" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    画像驱动生成链 Step②受众匹配, 「编辑」保存后下一次生成即时生效(仅提交填写字段, 留空字段保持原值);
+                    三维匹配组合权重: 角度亲和 50% + 产品调性 30% + 场景命中 20%。
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;margin-top:14px;">
+                <!-- P1: 三维匹配测试 -->
+                <div class="dash-card">
+                    <div class="card-head"><b>三维匹配测试(角度 × 画像 × 调性)</b></div>
+                    <div class="tool-form">
+                        <label for="matchPlatform">平台</label>
+                        <select id="matchPlatform">
+                            <option value="">选择平台</option>
+                        </select>
+                        <input type="text" id="matchAngle" placeholder="内容角度, 如 节日送礼">
+                        <select id="matchTone">
+                            <option value="口粮酒">口粮酒</option>
+                            <option value="礼盒">礼盒</option>
+                            <option value="高端礼盒">高端礼盒</option>
+                            <option value="陈酿">陈酿</option>
+                            <option value="年轻化">年轻化</option>
+                            <option value="高性价比">高性价比</option>
+                            <option value="颜值款">颜值款</option>
+                            <option value="轻奢">轻奢</option>
+                            <option value="收藏款">收藏款</option>
+                        </select>
+                        <button class="dash-btn" id="btnMatch" onclick="runAudienceMatch()">匹配测试</button>
+                    </div>
+                    <div class="tool-result" id="matchResult"></div>
+                    <div class="note-bar">预览生成链 Step② 同链路打分: 输入准备投放的内容角度与产品调性, 查看与平台画像的契合度。</div>
+                </div>
+                <!-- P1: 站内画像回传 -->
+                <div class="dash-card">
+                    <div class="card-head"><b>站内画像回传(会员分布校准)</b></div>
+                    <div class="tool-form">
+                        <label for="onsitePlatform">平台</label>
+                        <select id="onsitePlatform" onchange="syncOnsiteButton()">
+                            <option value="">选择平台</option>
+                        </select>
+                        <button class="dash-btn" id="btnOnsite" onclick="loadOnsiteFeedback()" disabled>站内画像回传</button>
+                    </div>
+                    <div class="tool-result" id="onsiteResult"></div>
+                    <div class="note-bar">聚合 attract 会员等级分布(高价值 = Lv3 及以上), 结合占比给出画像校准建议。</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- P1: 权威信源库(国标 / 协会 / 媒体) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>权威信源库(国标 / 协会 / 媒体)</b>
+                    <div class="head-actions">
+                        <input type="text" id="sourceKeyword" placeholder="关键词过滤(标题/内容)"
+                            onkeydown="if(event.key==='Enter'){loadAuthoritySources();}">
+                        <button class="dash-btn ghost" onclick="loadAuthoritySources()">过滤</button>
+                        <span class="scan-result" id="sourceCount"></span>
+                    </div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr><th>ID</th><th>标题</th><th>类别</th><th>内容</th><th>允许用法</th></tr>
+                        </thead>
+                        <tbody id="authorityBody">
+                            <tr><td colspan="5" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    信源池供生成链 Step③内容生成引用(数字溯源校验); 权威引用仅限客观事实陈述,
+                    含「权威背书」红线词(如 最佳/第一/顶级)的信源会被拒绝入库; 内容列截断 80 字, 悬浮查看全文。
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;margin-top:14px;">
+                <!-- P1: 新增信源 -->
+                <div class="dash-card">
+                    <div class="card-head"><b>新增权威信源</b></div>
+                    <div class="stack-form">
+                        <div>
+                            <label for="srcTitle">信源标题 *</label>
+                            <input type="text" id="srcTitle" placeholder="如 GB/T 10781.2-2022 清香型白酒(相关表述)">
+                        </div>
+                        <div>
+                            <label for="srcCategory">信源类别 *</label>
+                            <select id="srcCategory">
+                                <option value="standard">国标(standard)</option>
+                                <option value="association">协会(association)</option>
+                                <option value="media">媒体(media)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="srcContent">信源内容 *</label>
+                            <textarea id="srcContent" placeholder="客观事实陈述(禁止权威背书类表述, 如 最佳/第一/顶级)"></textarea>
+                        </div>
+                        <div>
+                            <label for="srcAllowedUsage">允许用法(留空使用默认)</label>
+                            <input type="text" id="srcAllowedUsage" placeholder="仅可作客观事实引用, 不得用于推荐背书">
+                        </div>
+                        <div style="display:flex;justify-content:flex-end;">
+                            <button class="dash-btn" id="btnAddSource" onclick="addAuthoritySource()">入库</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- P1: RAG 检索测试 -->
+                <div class="dash-card">
+                    <div class="card-head"><b>RAG 检索测试(生成引用池同一链路)</b></div>
+                    <div class="tool-form">
+                        <input type="text" id="ragQuery" placeholder="检索查询, 如 清香型白酒执行标准"
+                            onkeydown="if(event.key==='Enter'){runAuthoritySearch();}">
+                        <button class="dash-btn" id="btnRagSearch" onclick="runAuthoritySearch()">检索 top3</button>
+                    </div>
+                    <div class="tool-result" id="ragResult"></div>
+                    <div class="note-bar">与生成链引用池同一检索链路(2-gram 余弦相似度 top-k), 相似度过低的信源不会返回。</div>
+                </div>
+            </div>
+        </section>
+
         <!-- 页脚说明 -->
         <footer class="dash-footer">
             <div>鉴权说明：默认 <code>AUTH_MODE=compat</code> 下本页以 <code>X-Role: admin</code> 兼容头直连管理端点；<code>strict</code> 模式需先登录获取 JWT 并改造请求头。</div>
-            <div>数据来源：<code>GET /api/promo/radar/hotspots?status=engaged</code> · <code>POST /api/promo/contents/generate</code> · <code>GET /api/promo/contents</code> · <code>POST /api/promo/contents/{id}/review</code> · <code>POST /api/promo/contents/{id}/publish</code> · <code>GET /api/promo/publish/queue</code> · <code>POST /api/promo/publish/process</code> · <code>GET /api/promo/report/overview</code> · <code>GET /api/promo/report/platform</code>。响应统一为 <code>{"success": true, "data": ...}</code>, 操作失败时横幅展示后端 <code>detail</code>。</div>
+            <div>数据来源：<code>GET /api/promo/radar/hotspots?status=engaged</code> · <code>POST /api/promo/contents/generate</code> · <code>GET /api/promo/contents</code> · <code>POST /api/promo/contents/{id}/review</code> · <code>POST /api/promo/contents/{id}/publish</code> · <code>GET /api/promo/publish/queue</code> · <code>POST /api/promo/publish/process</code> · <code>GET /api/promo/report/overview</code> · <code>GET /api/promo/report/platform</code> · <code>GET /api/promo/audience/profiles</code> · <code>PUT /api/promo/audience/profiles/{platform}</code> · <code>POST /api/promo/audience/match</code> · <code>GET /api/promo/audience/onsite</code> · <code>GET /api/promo/authority/sources</code> · <code>POST /api/promo/authority/sources</code> · <code>GET /api/promo/authority/search</code>。响应统一为 <code>{"success": true, "data": ...}</code>, 操作失败时横幅展示后端 <code>detail</code>。</div>
             <div>流程：热点雷达页「跟进」热点 → 此处生成一源多态内容 → 三审(pending → approved) → 入发布队列(黄金时段) → 到期发布(模拟轨回执) → attract 短码归因出报表。热点发现与人工裁决请前往 <a href="ai-promo-radar.html" style="color:var(--color-primary);">热点雷达大屏</a>。</div>
         </footer>
     </main>
+
+    <!-- P1: 画像编辑弹窗(点击遮罩关闭) -->
+    <div class="modal-overlay" id="profileModal" onclick="if(event.target===this){closeProfileModal();}">
+        <div class="modal-card">
+            <div class="card-head"><b id="profileModalTitle">编辑画像</b></div>
+            <div class="modal-form">
+                <input type="hidden" id="editProfilePlatform">
+                <div>
+                    <label for="editAudience">目标人群</label>
+                    <input type="text" id="editAudience" placeholder="如 25-40岁注重品质生活的都市女性">
+                </div>
+                <div>
+                    <label for="editTone">平台调性</label>
+                    <input type="text" id="editTone" placeholder="如 真实体验分享, 生活化场景">
+                </div>
+                <div>
+                    <label for="editFormat">内容格式</label>
+                    <input type="text" id="editFormat" placeholder="如 短视频脚本 15-30s">
+                </div>
+                <div>
+                    <label for="editScenes">消费场景(逗号分隔)</label>
+                    <input type="text" id="editScenes" placeholder="如 节日送礼,朋友聚会,家宴">
+                </div>
+                <div>
+                    <label for="editProductTones">产品调性(逗号分隔)</label>
+                    <input type="text" id="editProductTones" placeholder="如 礼盒,高性价比">
+                </div>
+                <div class="dash-error" id="profileModalError"></div>
+            </div>
+            <div class="modal-foot">
+                <button class="dash-btn ghost" onclick="closeProfileModal()">取消</button>
+                <button class="dash-btn" id="btnSaveProfile" onclick="saveAudienceProfile()">保存</button>
+            </div>
+        </div>
+    </div>
 
     <script src="js/auth.js"></script>
     <script src="js/promo-studio.js"></script>

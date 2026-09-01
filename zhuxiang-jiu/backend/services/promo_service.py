@@ -42,6 +42,8 @@ from repositories.promo_repository import (
 )
 from services.promo_radar_service import PromoRadarService
 from services.promo_agent_service import PromoAgentService
+from services.promo_audience_service import PromoAudienceService
+from services.promo_authority_service import PromoAuthorityService
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,8 @@ class PromoService:
         self.repo = repo
         self.radar = PromoRadarService(repo)
         self.agent = PromoAgentService()
+        self.audience = PromoAudienceService(repo)
+        self.authority = PromoAuthorityService(repo)
 
     # ============================================================
     # 1. 雷达扫描 + 自动决策
@@ -224,12 +228,24 @@ class PromoService:
                     f"{await self._cooldown_hours()}h)")
             await self.repo.incr_cooldown(hotspot["fingerprint"])
             group_id = await self.repo.next_id("content")
+            # P1: 画像库注入(Step2) + 权威引用池 RAG(Step3, 热点共享)
+            profiles = {}
+            for platform in platforms:
+                profiles[platform] = await self.audience.get_profile(platform)
+            citations = await self.authority.retrieve(
+                f"{hotspot.get('title', '')} "
+                f"{''.join(hotspot.get('brandHits') or [])}")
             drafts = await self.agent.generate_platform_contents(
-                hotspot, platforms=tuple(platforms))
+                hotspot, platforms=tuple(platforms),
+                profiles=profiles, citations=citations)
             contents = []
             for draft in drafts:
                 content_id = await self.repo.next_id("content")
                 gate = self.compliance_gate(draft["body"])
+                # P1: 数字溯源校验(引用池为 draft 携带快照)
+                pool = draft.get("citations") or citations or []
+                provenance = self.authority.provenance_check(
+                    draft["body"], pool)
                 status = (CONTENT_STATUS_REJECTED
                           if (gate["hardFail"]
                               or gate["score"] < PROMO_HITL_FLOOR)
@@ -248,6 +264,9 @@ class PromoService:
                     "complianceViolations": gate["violations"],
                     "hardFail": gate["hardFail"],
                     "requiresManualReview": gate["requiresManualReview"],
+                    "authorityRefs": [c["sourceId"] for c in pool],
+                    "provenanceReport": provenance,
+                    "provenanceViolations": provenance["violations"],
                     "selfCheck": draft.get("selfCheck", {}),
                     "agentTrace": draft.get("agentTrace", {}),
                     "status": status,
@@ -313,6 +332,11 @@ class PromoService:
                 raise ValueError(
                     f"合规分不足({content.get('complianceScore')}<"
                     f"{PROMO_HITL_FLOOR}, 违规:{content.get('complianceViolations')})")
+            # P1: 数字溯源 enforce —— 无出处数字视为编造数据, 不可通过
+            if content.get("provenanceViolations"):
+                raise ValueError(
+                    f"数字无权威信源出处({content['provenanceViolations']}), "
+                    "涉嫌编造数据不可发布, 请修改文案或补充信源后重新生成")
         content.update({
             "status": (CONTENT_STATUS_APPROVED if approved
                        else CONTENT_STATUS_REJECTED),

@@ -69,6 +69,31 @@ class PublishRequest(PydBaseModel):
                            description="指定发布时间(ISO, 空则取黄金时段)")
 
 
+class UpdateProfileRequest(PydBaseModel):
+    audience: str = Field(None, max_length=100, description="目标人群描述")
+    tone: str = Field(None, max_length=100, description="话术基调")
+    format: str = Field(None, max_length=100, description="格式约束")
+    scenes: list = Field(None, description="擅长场景列表")
+    productTones: list = Field(None, description="亲和产品调性列表")
+
+
+class AudienceMatchRequest(PydBaseModel):
+    platform: str = Field(..., description="平台: douyin/xiaohongshu/wechat_moments")
+    angle: str = Field(..., min_length=1, max_length=50,
+                       description="内容角度(如 婚宴/送礼/日常小酌)")
+    productTone: str = Field("口粮酒", description="产品调性")
+
+
+class AuthoritySourceRequest(PydBaseModel):
+    title: str = Field(..., min_length=1, max_length=200,
+                       description="信源标题(如国标全称)")
+    category: str = Field(..., description="类别: standard/association/media")
+    content: str = Field(..., min_length=1, max_length=2000,
+                         description="可引用客观事实内容")
+    allowedUsage: str = Field("", max_length=200,
+                              description="允许引用方式(空则默认客观事实引用)")
+
+
 # ============================================================
 # 雷达与决策(admin)
 # ============================================================
@@ -261,6 +286,119 @@ async def process_publish_queue(
     _require_admin(x_role)
     try:
         result = await _service.process_publish_queue()
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P1: 受众画像库(admin)
+# ============================================================
+
+@router.get("/api/promo/audience/profiles", tags=["AI智能推广模块"])
+async def list_audience_profiles(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """平台受众画像列表(首次访问自动初始化种子)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.audience.list_profiles()
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.put("/api/promo/audience/profiles/{platform}", tags=["AI智能推广模块"])
+async def update_audience_profile(
+    platform: str,
+    data: UpdateProfileRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """更新平台画像(部分字段; 生成 Step2 即时生效)"""
+    _require_admin(x_role)
+    try:
+        updates = {k: v for k, v in data.model_dump().items() if v is not None}
+        result = await _service.audience.update_profile(platform, updates)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/audience/match", tags=["AI智能推广模块"])
+async def audience_match(
+    data: AudienceMatchRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """三维匹配预览: 内容角度×平台画像×产品调性 → 匹配分与建议"""
+    _require_admin(x_role)
+    try:
+        result = await _service.audience.match(
+            platform=data.platform, angle=data.angle,
+            product_tone=data.productTone)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/audience/onsite", tags=["AI智能推广模块"])
+async def audience_onsite_feedback(
+    x_role: str = Header(None, alias="X-Role"),
+    platform: str = Query(..., description="平台"),
+):
+    """站内画像回传(会员等级分布聚合 + 画像校准建议)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.audience.onsite_feedback(platform)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P1: 权威信源库(admin)
+# ============================================================
+
+@router.get("/api/promo/authority/sources", tags=["AI智能推广模块"])
+async def list_authority_sources(
+    x_role: str = Header(None, alias="X-Role"),
+    keyword: str = Query(None, description="标题/内容关键词过滤"),
+):
+    """权威信源列表(国标/协会公开数据/权威媒体; 首次访问自动初始化种子)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.authority.list_sources(keyword=keyword)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/authority/sources", tags=["AI智能推广模块"])
+async def add_authority_source(
+    data: AuthoritySourceRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """新增权威信源(类别白名单 + 权威背书红线词校验)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.authority.add_source(
+            title=data.title, category=data.category,
+            content=data.content, allowed_usage=data.allowedUsage)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/authority/search", tags=["AI智能推广模块"])
+async def authority_search(
+    x_role: str = Header(None, alias="X-Role"),
+    query: str = Query(..., min_length=1, description="检索查询"),
+    topK: int = Query(3, ge=1, le=10, description="返回条数"),
+):
+    """权威信源 RAG 检索预览(2-gram 余弦 top-k, 生成引用池同一链路)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.authority.retrieve(query=query,
+                                                   top_k=topK)
         return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)

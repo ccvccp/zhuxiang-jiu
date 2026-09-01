@@ -1,5 +1,5 @@
 /**
- * 36号·AI智能推广模块 v1.0 · 内容工厂与发布中心脚本
+ * 36号·AI智能推广模块 v1.1 · 内容工厂与发布中心脚本
  *
  * 页面: ai-promo-studio.html
  * 职责:
@@ -13,6 +13,21 @@
  *   - 发布队列(GET /api/promo/publish/queue)与到期处理(POST /api/promo/publish/process)
  *   - 报表: GET /api/promo/report/overview + GET /api/promo/report/platform
  *   - 30 秒自动刷新
+ *
+ * P1: 受众画像与权威信源配置
+ *   - 受众画像库: GET /api/promo/audience/profiles 表格展示(场景/产品调性顿号连接);
+ *     行内「编辑」弹窗(audience/tone/format 文本 + scenes/productTones 逗号分隔输入)
+ *     → PUT /api/promo/audience/profiles/{platform}(仅提交有值字段, 留空保持原值)
+ *   - 三维匹配测试: 平台下拉 + 角度输入 + 产品调性下拉
+ *     → POST /api/promo/audience/match, 展示匹配分/matched 徽章/
+ *     三分项(angleAffinity/toneAffinity/sceneAffinity)
+ *   - 站内画像回传: GET /api/promo/audience/onsite?platform=xx
+ *     展示会员总数/高价值占比/等级分布/校准建议
+ *   - 权威信源库: GET /api/promo/authority/sources?keyword= 关键词过滤
+ *     (内容截断 80 字, title 悬浮全文); 新增信源 POST /api/promo/authority/sources;
+ *     RAG 检索测试 GET /api/promo/authority/search?query=xx&topK=3
+ *     展示标题 + 相似度百分比 + content 摘要
+ *   - 30s 自动刷新仅重渲染表格数据, 不触碰任何表单输入值
  *
  * 鉴权: X-Role: admin 兼容头(与 ai-hub-dashboard 一致; strict 模式叠加 JWT)
  * 响应约定: 统一解包 {"success": true, "data": ...}; 失败时横幅展示后端 detail
@@ -28,12 +43,17 @@ var state = {
     engagedSig: null,      // 已跟进热点下拉选项签名(无变化不重绘, 保持下拉展开态; null=首次)
     autoTimer: null,       // 自动刷新句柄
     AUTO_MS: 30000,
+    audienceProfiles: [],  // P1: 平台受众画像列表
+    profilesSig: null,     // P1: 画像平台集合签名(无变化不重绘平台下拉, 保持选择; null=首次)
 };
 
 /* 中文标签映射 */
 var CONTENT_STATUS_LABEL = { pending: '待审核', approved: '已通过', rejected: '已拒绝', queued: '已入队', published: '已发布' };
 var CONTENT_STATUS_BADGE = { pending: 'yellow', approved: 'green', rejected: 'red', queued: 'blue', published: 'gold' };
 var PLATFORM_LABEL = { baidu: '百度', douyin: '抖音', weibo: '微博', zhihu: '知乎', xiaohongshu: '小红书', wechat_moments: '微信朋友圈' };
+/* P1: 信源类别 → 中文徽章(standard=国标/association=协会/media=媒体) */
+var AUTHORITY_CATEGORY_LABEL = { standard: '国标', association: '协会', media: '媒体' };
+var AUTHORITY_CATEGORY_BADGE = { standard: 'green', association: 'blue', media: 'gold' };
 /* agentTrace 四步键 → 中文名 */
 var TRACE_STEPS = [
     ['step1Analysis', '①分析'],
@@ -53,6 +73,19 @@ function esc(s) {
 function fmtTime(iso) {
     if (!iso) { return '--'; }
     return String(iso).replace('T', ' ').replace(/\.\d+/, '').replace(/(\+00:00|Z)$/, '') + ' UTC';
+}
+
+/* P1: 逗号/中文逗号/顿号分隔文本 → 去空数组(画像场景与产品调性输入解析) */
+function splitList(text) {
+    return String(text || '').split(/[,，、]/)
+        .map(function (s) { return s.trim(); })
+        .filter(function (s) { return s; });
+}
+
+/* P1: 文本截断(超长加省略号, 配合 title 属性悬浮全文) */
+function truncate(text, max) {
+    var s = String(text || '');
+    return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
 /* ========= API ========= */
@@ -84,12 +117,13 @@ async function fetchJson(url, options) {
 }
 
 /* ========= 数据加载 ========= */
-/* 全量刷新: 热点下拉 + 内容列表 + 发布队列 + 报表 并行 */
+/* 全量刷新: 热点下拉 + 内容列表 + 发布队列 + 报表 + P1画像/信源 并行(只重渲染表格数据, 不触碰表单输入) */
 async function refreshData() {
     var btn = document.getElementById('btnRefresh');
     btn.disabled = true; btn.textContent = '刷新中…';
     try {
-        await Promise.all([loadEngagedHotspots(), loadContents(), loadQueue(), loadReports()]);
+        await Promise.all([loadEngagedHotspots(), loadContents(), loadQueue(), loadReports(),
+            loadAudienceProfiles(), loadAuthoritySources()]);
         hideBanner('errorBanner');
     } catch (err) {
         showBanner('errorBanner', '数据加载失败：' + err.message + '（请确认后端已启动且地址正确）');
@@ -372,6 +406,310 @@ async function processQueue() {
     } finally {
         btn.disabled = false; btn.textContent = '立即处理到期发布';
     }
+}
+
+/* ============================================================ */
+/* P1: 受众画像库                                                */
+/* ============================================================ */
+
+/* 平台画像列表(首次访问后端自动初始化种子) */
+async function loadAudienceProfiles() {
+    state.audienceProfiles = await fetchJson(state.apiBase + '/api/promo/audience/profiles');
+    renderAudienceProfiles();
+}
+
+/* 画像表格: 平台/人群/调性/格式/场景(顿号)/产品调性(顿号)/编辑 */
+function renderAudienceProfiles() {
+    var list = state.audienceProfiles;
+    document.getElementById('audienceCount').textContent = '共 ' + list.length + ' 个平台';
+    var tbody = document.getElementById('audienceBody');
+    tbody.innerHTML = list.length ? list.map(function (p) {
+        var scenes = (p.scenes || []).join('、');
+        var productTones = (p.productTones || []).join('、');
+        return '<tr>' +
+            '<td><b>' + esc(PLATFORM_LABEL[p.platform] || p.platform) + '</b></td>' +
+            '<td style="white-space:normal;max-width:200px;" title="' + esc(p.audience) + '">' + esc(p.audience || '--') + '</td>' +
+            '<td style="white-space:normal;max-width:170px;" title="' + esc(p.tone) + '">' + esc(p.tone || '--') + '</td>' +
+            '<td style="white-space:normal;max-width:170px;" title="' + esc(p.format) + '">' + esc(p.format || '--') + '</td>' +
+            '<td style="white-space:normal;max-width:210px;" title="' + esc(scenes) + '">' + esc(scenes || '--') + '</td>' +
+            '<td style="white-space:normal;max-width:210px;" title="' + esc(productTones) + '">' + esc(productTones || '--') + '</td>' +
+            '<td><button class="btn-mini" onclick="editAudienceProfile(\'' + esc(p.platform) + '\')">编辑</button></td>' +
+        '</tr>';
+    }).join('') : '<tr><td colspan="7" class="dash-empty">暂无画像数据</td></tr>';
+    renderProfilePlatformSelects();
+}
+
+/* 平台下拉(三维匹配/站内回传共用): 平台集合签名无变化不重绘, 保持刷新前的选择 */
+function renderProfilePlatformSelects() {
+    var list = state.audienceProfiles;
+    var sig = list.map(function (p) { return p.platform; }).join(',');
+    if (state.profilesSig !== null && sig === state.profilesSig) { return; }
+    state.profilesSig = sig;
+    var options = '<option value="">选择平台</option>' + list.map(function (p) {
+        return '<option value="' + esc(p.platform) + '">'
+            + esc(PLATFORM_LABEL[p.platform] || p.platform) + '</option>';
+    }).join('');
+    ['matchPlatform', 'onsitePlatform'].forEach(function (id) {
+        var sel = document.getElementById(id);
+        var prev = sel.value;
+        sel.innerHTML = options;
+        if (prev && list.some(function (p) { return p.platform === prev; })) { sel.value = prev; }
+    });
+    syncOnsiteButton();
+}
+
+/* 站内画像回传按钮: 选平台后可用 */
+function syncOnsiteButton() {
+    document.getElementById('btnOnsite').disabled = !document.getElementById('onsitePlatform').value;
+}
+
+/* 打开画像编辑弹窗(预填当前画像值, 留空字段保存时不动) */
+function editAudienceProfile(platform) {
+    var profile = null;
+    state.audienceProfiles.some(function (p) {
+        if (p.platform === platform) { profile = p; return true; }
+        return false;
+    });
+    if (!profile) { return; }
+    document.getElementById('profileModalTitle').textContent =
+        '编辑画像 · ' + (PLATFORM_LABEL[platform] || platform);
+    document.getElementById('editProfilePlatform').value = platform;
+    document.getElementById('editAudience').value = profile.audience || '';
+    document.getElementById('editTone').value = profile.tone || '';
+    document.getElementById('editFormat').value = profile.format || '';
+    document.getElementById('editScenes').value = (profile.scenes || []).join(',');
+    document.getElementById('editProductTones').value = (profile.productTones || []).join(',');
+    hideBanner('profileModalError');
+    document.getElementById('profileModal').classList.add('open');
+}
+
+/* 关闭画像编辑弹窗(取消/点击遮罩) */
+function closeProfileModal() {
+    document.getElementById('profileModal').classList.remove('open');
+}
+
+/* 保存画像: PUT 仅提交有值字段(留空字段保持原值) */
+async function saveAudienceProfile() {
+    var platform = document.getElementById('editProfilePlatform').value;
+    var body = {};
+    var audience = document.getElementById('editAudience').value.trim();
+    var tone = document.getElementById('editTone').value.trim();
+    var format = document.getElementById('editFormat').value.trim();
+    var scenes = splitList(document.getElementById('editScenes').value);
+    var productTones = splitList(document.getElementById('editProductTones').value);
+    if (audience) { body.audience = audience; }
+    if (tone) { body.tone = tone; }
+    if (format) { body.format = format; }
+    if (scenes.length) { body.scenes = scenes; }
+    if (productTones.length) { body.productTones = productTones; }
+    if (!Object.keys(body).length) {
+        showBanner('profileModalError', '请至少填写一个字段(留空字段保持原值)');
+        return;
+    }
+    var btn = document.getElementById('btnSaveProfile');
+    btn.disabled = true; btn.textContent = '保存中…';
+    try {
+        await fetchJson(
+            state.apiBase + '/api/promo/audience/profiles/' + encodeURIComponent(platform),
+            { method: 'PUT', body: JSON.stringify(body) });
+        closeProfileModal();
+        showBanner('infoBanner', '画像已更新: ' + (PLATFORM_LABEL[platform] || platform)
+            + ', 下一次生成内容即时生效');
+        await loadAudienceProfiles();
+    } catch (err) {
+        showBanner('profileModalError', '保存失败：' + err.message);
+        showBanner('errorBanner', '画像保存失败：' + err.message);
+    } finally {
+        btn.disabled = false; btn.textContent = '保存';
+    }
+}
+
+/* 三维匹配测试: 平台 × 内容角度 × 产品调性 → 匹配分/徽章/三分项 */
+async function runAudienceMatch() {
+    var platform = document.getElementById('matchPlatform').value;
+    var angle = document.getElementById('matchAngle').value.trim();
+    var productTone = document.getElementById('matchTone').value;
+    if (!platform) { showBanner('errorBanner', '请先选择测试平台'); return; }
+    if (!angle) { showBanner('errorBanner', '请输入内容角度(如 节日送礼)'); return; }
+    var btn = document.getElementById('btnMatch');
+    btn.disabled = true; btn.textContent = '匹配中…';
+    try {
+        var r = await fetchJson(state.apiBase + '/api/promo/audience/match', {
+            method: 'POST',
+            body: JSON.stringify({ platform: platform, angle: angle, productTone: productTone }),
+        });
+        renderMatchResult(r);
+    } catch (err) {
+        showBanner('errorBanner', '匹配测试失败：' + err.message);
+    } finally {
+        btn.disabled = false; btn.textContent = '匹配测试';
+    }
+}
+
+/* 匹配结果: 匹配分(0-1)+百分比+matched 徽章 + 三分项格子 */
+function renderMatchResult(r) {
+    var pct = function (v) { return v != null ? (v * 100).toFixed(1) + '%' : '--'; };
+    var comp = r.components || {};
+    var cell = function (v, label) {
+        return '<div class="ov-cell"><b>' + pct(v) + '</b><span>' + label + '</span></div>';
+    };
+    document.getElementById('matchResult').innerHTML =
+        '<div class="match-summary">匹配分 <b>' + (r.score != null ? r.score : '--') + '</b>'
+        + '(' + pct(r.score) + ') '
+        + (r.matched
+            ? '<span class="badge green">匹配</span>'
+            : '<span class="badge red">不匹配</span>') + '</div>'
+        + '<div class="ov-cells" style="padding-top:8px;">'
+        + cell(comp.angleAffinity, '角度亲和(50%)')
+        + cell(comp.toneAffinity, '调性亲和(30%)')
+        + cell(comp.sceneAffinity, '场景命中(20%)')
+        + '</div>';
+}
+
+/* 站内画像回传: 会员等级分布聚合 + 校准建议(高价值 = Lv3+) */
+async function loadOnsiteFeedback() {
+    var platform = document.getElementById('onsitePlatform').value;
+    if (!platform) { showBanner('errorBanner', '请先选择回传平台'); return; }
+    var btn = document.getElementById('btnOnsite');
+    btn.disabled = true; btn.textContent = '回传中…';
+    try {
+        var d = await fetchJson(state.apiBase + '/api/promo/audience/onsite?platform='
+            + encodeURIComponent(platform));
+        renderOnsiteResult(d);
+    } catch (err) {
+        showBanner('errorBanner', '站内画像回传失败：' + err.message);
+    } finally {
+        btn.disabled = false; btn.textContent = '站内画像回传';
+        syncOnsiteButton();
+    }
+}
+
+/* 回传结果: 会员总数/高价值占比/等级分布/校准建议 */
+function renderOnsiteResult(d) {
+    var levels = d.levelDistribution || {};
+    var levelText = Object.keys(levels).sort(function (a, b) { return Number(a) - Number(b); })
+        .map(function (lv) { return 'Lv' + lv + ' ' + levels[lv] + '人'; })
+        .join('、') || '--';
+    var cell = function (v, label) {
+        return '<div class="ov-cell"><b>' + v + '</b><span>' + label + '</span></div>';
+    };
+    document.getElementById('onsiteResult').innerHTML =
+        '<div class="ov-cells" style="padding-top:2px;">'
+        + cell(d.onsiteMembers != null ? d.onsiteMembers : '--', '会员总数')
+        + cell(d.highValueRatio != null ? (d.highValueRatio * 100).toFixed(1) + '%' : '--',
+            '高价值占比(Lv3+)')
+        + '</div>'
+        + '<div class="tool-lines">等级分布: <b>' + esc(levelText) + '</b></div>'
+        + '<div class="tool-lines">校准建议: <b>' + esc(d.calibrationSuggestion || '--') + '</b></div>';
+}
+
+/* ============================================================ */
+/* P1: 权威信源库                                                */
+/* ============================================================ */
+
+/* 信源列表(keyword 过滤, 自动刷新沿用当前关键词输入值) */
+async function loadAuthoritySources() {
+    var keyword = document.getElementById('sourceKeyword').value.trim();
+    var url = state.apiBase + '/api/promo/authority/sources'
+        + (keyword ? '?keyword=' + encodeURIComponent(keyword) : '');
+    renderAuthoritySources(await fetchJson(url));
+}
+
+/* 信源表格: ID/标题/类别徽章/内容(截断80字悬浮全文)/允许用法 */
+function renderAuthoritySources(list) {
+    document.getElementById('sourceCount').textContent = '共 ' + list.length + ' 条';
+    var tbody = document.getElementById('authorityBody');
+    if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="dash-empty">暂无信源(可调整关键词或新增信源)</td></tr>';
+        return;
+    }
+    tbody.innerHTML = list.map(function (s) {
+        var content = String(s.content || '');
+        return '<tr>' +
+            '<td class="cap-id">#' + s.sourceId + '</td>' +
+            '<td style="white-space:normal;max-width:190px;" title="' + esc(s.title) + '">' + esc(s.title || '--') + '</td>' +
+            '<td><span class="badge ' + (AUTHORITY_CATEGORY_BADGE[s.category] || 'weak') + '">'
+                + esc(AUTHORITY_CATEGORY_LABEL[s.category] || s.category || '--') + '</span></td>' +
+            '<td style="white-space:normal;max-width:330px;" title="' + esc(content) + '">'
+                + esc(truncate(content, 80)) + '</td>' +
+            '<td style="white-space:normal;max-width:190px;" title="' + esc(s.allowedUsage) + '">'
+                + esc(s.allowedUsage || '--') + '</td>' +
+        '</tr>';
+    }).join('');
+}
+
+/* 新增信源(类别白名单 + 权威背书红线词由后端校验) */
+async function addAuthoritySource() {
+    var title = document.getElementById('srcTitle').value.trim();
+    var category = document.getElementById('srcCategory').value;
+    var content = document.getElementById('srcContent').value.trim();
+    var allowedUsage = document.getElementById('srcAllowedUsage').value.trim();
+    if (!title || !content) {
+        showBanner('errorBanner', '信源标题与内容不能为空');
+        return;
+    }
+    var btn = document.getElementById('btnAddSource');
+    btn.disabled = true; btn.textContent = '入库中…';
+    try {
+        var s = await fetchJson(state.apiBase + '/api/promo/authority/sources', {
+            method: 'POST',
+            body: JSON.stringify({
+                title: title, category: category,
+                content: content, allowedUsage: allowedUsage,
+            }),
+        });
+        showBanner('infoBanner', '信源已入库 #' + (s && s.sourceId != null ? s.sourceId : '--')
+            + ': ' + title);
+        /* 清空表单便于连续录入(类别选择保留) */
+        document.getElementById('srcTitle').value = '';
+        document.getElementById('srcContent').value = '';
+        document.getElementById('srcAllowedUsage').value = '';
+        await loadAuthoritySources();
+    } catch (err) {
+        showBanner('errorBanner', '新增信源失败：' + err.message);
+    } finally {
+        btn.disabled = false; btn.textContent = '入库';
+    }
+}
+
+/* RAG 检索测试: 与生成链引用池同一链路(2-gram 余弦 top-3) */
+async function runAuthoritySearch() {
+    var query = document.getElementById('ragQuery').value.trim();
+    if (!query) { showBanner('errorBanner', '请输入检索查询(如 清香型白酒执行标准)'); return; }
+    var btn = document.getElementById('btnRagSearch');
+    btn.disabled = true; btn.textContent = '检索中…';
+    try {
+        var list = await fetchJson(state.apiBase + '/api/promo/authority/search?query='
+            + encodeURIComponent(query) + '&topK=3');
+        renderAuthoritySearch(list);
+    } catch (err) {
+        showBanner('errorBanner', 'RAG 检索失败：' + err.message);
+    } finally {
+        btn.disabled = false; btn.textContent = '检索 top3';
+    }
+}
+
+/* 检索结果: 标题 + 相似度百分比 + 内容摘要(截断80字悬浮全文) */
+function renderAuthoritySearch(list) {
+    var box = document.getElementById('ragResult');
+    if (!list.length) {
+        box.innerHTML = '<div class="dash-empty" style="padding:18px 0;">无相似信源(相似度低于阈值)</div>';
+        return;
+    }
+    box.innerHTML = list.map(function (s) {
+        var content = String(s.content || '');
+        return '<div class="rag-item">' +
+            '<div class="rag-head">' +
+                '<span class="cap-id">#' + s.sourceId + '</span>' +
+                '<span class="badge ' + (AUTHORITY_CATEGORY_BADGE[s.category] || 'weak') + '">'
+                    + esc(AUTHORITY_CATEGORY_LABEL[s.category] || s.category) + '</span>' +
+                '<b>' + esc(s.title || '--') + '</b>' +
+                '<span class="badge gold">相似度 '
+                    + (s.similarity != null ? (s.similarity * 100).toFixed(1) + '%' : '--') + '</span>' +
+            '</div>' +
+            '<div class="rag-content" title="' + esc(content) + '">' + esc(truncate(content, 80)) + '</div>' +
+        '</div>';
+    }).join('');
 }
 
 /* ========= 交互: 行展开/收起(事件委托, 按钮点击不触发) ========= */
