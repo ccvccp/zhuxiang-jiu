@@ -1,9 +1,16 @@
 <!DOCTYPE html>
+<!--
+    39号·AI智能网站入口管理模块 v1.0 · AI 智能入口页
+    升级自原 login.html(保留会员密码/管理员两 Tab 与既有跳转口径)
+    新增: ①AI 预判(设备识别+推荐登录方式+问候) ②扫码登录 Tab(QR 轮询协议)
+          ③step_up 轻量二次层(风控自适应) ④设备指纹 JS(弱特征拼接)
+    后端: 39号 entry_routes(默认 http://localhost:8000)
+-->
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - 竹香酒管理平台</title>
+    <title>AI 智能入口 · 登录 - 竹香酒管理平台</title>
     <link rel="stylesheet" href="css/style.css">
     <style>
         .login-banner {
@@ -19,12 +26,12 @@
             border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
             max-width: 420px; margin: 0 auto; padding: 26px 28px;
         }
-        .login-tabs { display: flex; gap: 6px; margin-bottom: 20px; }
+        .login-tabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
         .login-tab {
             flex: 1; text-align: center; padding: 9px 0; font-size: 14px;
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
             cursor: pointer; color: var(--color-text-light); transition: var(--transition);
-            background: var(--color-bg);
+            background: var(--color-bg); min-width: 88px;
         }
         .login-tab.active {
             background: var(--color-primary); color: #fff;
@@ -54,6 +61,11 @@
             border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
             padding: 9px 12px; font-size: 13px; word-break: break-all;
         }
+        .entry-greet {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 9px 12px; font-size: 13px; margin-bottom: 14px;
+        }
         .login-tip {
             font-size: 12px; color: var(--color-text-light); line-height: 1.8;
             border-top: 1px dashed var(--color-border); padding-top: 12px; margin-top: 4px;
@@ -64,25 +76,44 @@
         }
         .login-foot { padding: 18px 0 30px; text-align: center; }
         .login-foot a { color: var(--color-primary); font-size: 13px; text-decoration: none; }
+
+        /* 扫码登录(39号) */
+        .qr-box { text-align: center; padding: 6px 0 2px; }
+        .qr-canvas {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            background: #fff; padding: 8px; width: 168px; height: 168px;
+            box-sizing: border-box;
+        }
+        .qr-status { font-size: 13px; color: var(--color-text-light); margin-top: 10px; line-height: 1.7; }
+        .qr-status b { color: var(--color-primary); }
+        .qr-actions { display: flex; gap: 8px; margin-top: 10px; }
+        .qr-actions button {
+            flex: 1; border: 1px solid var(--color-border); background: #fff;
+            color: var(--color-text-light); border-radius: var(--radius-sm);
+            padding: 7px 0; font-size: 12px; cursor: pointer;
+        }
+        .qr-actions button:hover { border-color: var(--color-primary); color: var(--color-primary); }
     </style>
 </head>
 <body>
     <header class="login-banner">
         <div class="container">
-            <h1>竹香酒 · 管理平台登录</h1>
-            <p>统一鉴权入口（会员 / 管理员）· 登录后自动回跳原页面</p>
+            <h1>竹香酒 · AI 智能入口</h1>
+            <p>39号模块 · AI 识别设备与风险(低风险无感放行 / 中风险轻量二次) · 扫码 / 密码 / 短信多通道</p>
         </div>
     </header>
 
     <main class="container login-section">
         <div class="login-card">
+            <div class="entry-greet" id="greetBanner"></div>
             <div class="login-tabs">
-                <div class="login-tab active" data-tab="member" onclick="switchTab('member')">👤 会员登录</div>
-                <div class="login-tab" data-tab="admin" onclick="switchTab('admin')">🛡️ 管理员登录</div>
+                <div class="login-tab active" data-tab="member" onclick="switchTab('member')">👤 密码登录</div>
+                <div class="login-tab" data-tab="qr" onclick="switchTab('qr')">📱 扫码登录</div>
+                <div class="login-tab" data-tab="admin" onclick="switchTab('admin')">🛡️ 管理员</div>
             </div>
             <div class="login-error" id="errorBanner"></div>
 
-            <!-- 会员登录表单 -->
+            <!-- 会员密码登录(39号统一入口端点: 风控自适应) -->
             <form class="login-form active" id="form-member" onsubmit="doMemberLogin(event)">
                 <div class="form-item">
                     <label>手机号</label>
@@ -96,7 +127,19 @@
                 <button type="submit" class="login-btn" id="m-submit">登 录</button>
             </form>
 
-            <!-- 管理员登录表单 -->
+            <!-- 扫码登录(39号 QR 轮询协议) -->
+            <div class="login-form" id="form-qr">
+                <div class="qr-box">
+                    <canvas id="qrCanvas" class="qr-canvas" width="152" height="152"></canvas>
+                    <div class="qr-status" id="qrStatus">点击下方"生成二维码"，用<b>已登录的手机端</b>扫码确认</div>
+                    <div class="qr-actions">
+                        <button type="button" id="qrGen" onclick="qrStart()">生成二维码</button>
+                        <button type="button" id="qrCancel" onclick="qrCancel()" style="display:none;">取消</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 管理员登录表单(保持既有两段式) -->
             <form class="login-form" id="form-admin" onsubmit="doAdminLogin(event)">
                 <div class="form-item">
                     <label>管理员用户名</label>
@@ -118,10 +161,10 @@
             </form>
 
             <div class="login-tip">
-                <b>说明</b>：登录后统一使用 JWT 令牌（<code>Authorization: Bearer</code>）访问管理端点，
-                支持 <code>AUTH_MODE=strict</code> 严格模式。本地演示账号：会员 <code>13800000001 / test123456</code>，
-                管理员角色会员 <code>13800000002 / test123456</code>。管理员登录先校验后台管理员凭证，
-                再用绑定手机号换发统一令牌（已开启 2FA 的账号请直接使用会员入口）。
+                <b>说明</b>：39号 AI 智能入口——登录经 AI 风控自适应（常用设备直发令牌，
+                新设备/风险升高自动短信二次核验）；扫码登录用手机端已登录态确认，
+                60 秒一次性票据换发统一 JWT。本地演示账号：会员 <code>13800000001 / test123456</code>，
+                管理员角色会员 <code>13800000002 / test123456</code>。
             </div>
         </div>
     </main>
@@ -131,74 +174,6 @@
     </footer>
 
     <script src="js/auth.js"></script>
-    <script>
-        'use strict';
-
-        function switchTab(name) {
-            document.querySelectorAll('.login-tab').forEach(function (t) {
-                t.classList.toggle('active', t.dataset.tab === name);
-            });
-            document.querySelectorAll('.login-form').forEach(function (f) {
-                f.classList.toggle('active', f.id === 'form-' + name);
-            });
-            hideError();
-        }
-
-        function showError(msg) {
-            var el = document.getElementById('errorBanner');
-            el.textContent = msg;
-            el.style.display = 'block';
-        }
-        function hideError() {
-            document.getElementById('errorBanner').style.display = 'none';
-        }
-
-        /** 登录成功: 已登录则跳回 redirect(防开放跳转仅取文件名), 否则回知识库运营台 */
-        function afterLogin() {
-            var params = new URLSearchParams(location.search);
-            var back = params.get('redirect') || '';
-            // 只允许站内相对文件名(拒绝 //host、协议前缀与 javascript: 伪协议)
-            if (back && !back.startsWith('/') && back.indexOf(':') < 0) {
-                location.href = back;
-                return;
-            }
-            location.href = 'knowledge-dashboard.html';
-        }
-
-        async function doMemberLogin(e) {
-            e.preventDefault();
-            hideError();
-            var btn = document.getElementById('m-submit');
-            btn.disabled = true; btn.textContent = '登录中…';
-            var r = await Auth.login({
-                phone: document.getElementById('m-phone').value.trim(),
-                password: document.getElementById('m-password').value,
-            });
-            btn.disabled = false; btn.textContent = '登 录';
-            if (r.success) { afterLogin(); return; }
-            showError('登录失败：' + r.error);
-        }
-
-        async function doAdminLogin(e) {
-            e.preventDefault();
-            hideError();
-            var btn = document.getElementById('a-submit');
-            btn.disabled = true; btn.textContent = '登录中…';
-            var r = await Auth.adminLogin({
-                username: document.getElementById('a-username').value.trim(),
-                password: document.getElementById('a-password').value,
-                totpCode: document.getElementById('a-totp').value.trim() || null,
-                adminPhone: document.getElementById('a-phone').value.trim() || null,
-            });
-            btn.disabled = false; btn.textContent = '管理员登录';
-            if (r.success) { afterLogin(); return; }
-            showError('管理员登录失败：' + r.error);
-        }
-
-        // 已登录直接回跳
-        (function init() {
-            if (Auth.isLoggedIn()) { afterLogin(); return; }
-        })();
-    </script>
+    <script src="js/entry-login.js"></script>
 </body>
 </html>

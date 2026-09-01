@@ -67,6 +67,16 @@ PUBLIC_EXACT = {
     "/api/member/login/bonus",
     # 后台管理登录
     "/api/admin/login",
+    # AI智能网站入口管理模块(39号): 入口预判/统一登录/step_up/
+    # 扫码全协议/注册归并(登录前的入口面, 全公开)
+    "/api/entry/recognize",
+    "/api/entry/login",
+    "/api/entry/step-up/verify",
+    "/api/entry/qr/create",
+    "/api/entry/qr/scan",
+    "/api/entry/qr/exchange",
+    "/api/entry/qr/cancel",
+    "/api/entry/registration-merge",
     # 健康检查(Docker healthcheck / K8s 探针)
     "/api/decision/health",
     "/api/monitor/health",
@@ -84,6 +94,7 @@ PUBLIC_GET_PREFIXES = (
     "/api/groupbuy/products",       # 团购商品
     "/api/groupbuy/tiers",          # 团购阶梯
     "/api/payment/channels/active", # 可用支付方式
+    "/api/entry/qr/",               # 39号: 扫码状态轮询(GET, qrId 段)
 )
 
 

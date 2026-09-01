@@ -79,6 +79,8 @@ from routes.promo_routes import register_promo_routes
 from routes.alliance_routes import register_alliance_routes
 # AI智能产品管理模块(38号·权限审核×上下架×图片设计更换)
 from routes.pdm_routes import register_pdm_routes
+# AI智能网站入口管理模块(39号·AI自适应认证+扫码登录+设备指纹)
+from routes.entry_routes import register_entry_routes
 
 __all__ = [
     # 已有(15)
@@ -132,4 +134,5 @@ __all__ = [
     "register_promo_routes",
     "register_alliance_routes",
     "register_pdm_routes",
+    "register_entry_routes",
 ]

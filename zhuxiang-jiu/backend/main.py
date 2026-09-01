@@ -102,6 +102,8 @@ from routes import (
     register_alliance_routes,
     # AI智能产品管理模块(38号·权限审核×上下架×图片设计更换)
     register_pdm_routes,
+    # AI智能网站入口管理模块(39号·AI自适应认证+扫码登录+设备指纹)
+    register_entry_routes,
 )
 
 __all__ = ["app", "_mock_store"]
@@ -238,6 +240,8 @@ register_promo_routes(app)
 register_alliance_routes(app)
 # AI智能产品管理模块(38号)
 register_pdm_routes(app)
+# AI智能网站入口管理模块(39号)
+register_entry_routes(app)
 
 
 # ============================================================
