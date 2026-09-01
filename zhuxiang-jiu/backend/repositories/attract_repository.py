@@ -343,9 +343,16 @@ class AttractRepository:
             keys = await client.keys(_k("attract", "click", "*"))
             clicks = []
             for key in keys:
+                # 排除自增序列键(attract:click:seq 是 INCR 计数器 int 值,
+                # 会被 click:* 模式误扫 → json 解析为 int 引发 .get 崩溃)
+                if str(key).endswith(":seq"):
+                    continue
                 data = await client.get(key)
-                if data:
-                    clicks.append(json.loads(data))
+                if not data:
+                    continue
+                record = json.loads(data)
+                if isinstance(record, dict):
+                    clicks.append(record)
         else:
             self._ensure_store()
             clicks = list(self.store["attract_clicks"].values())
