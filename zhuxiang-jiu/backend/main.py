@@ -83,6 +83,8 @@ from routes import (
     register_attract_routes,
     # AI智能知识库训练模块
     register_knowledge_routes,
+    # AI智能中枢模块(35号·全站AI大模型总调度)
+    register_hub_routes,
     # 限时秒杀模块
     register_flashsale_routes,
     # AI 语义评分层(v7.2)
@@ -153,6 +155,7 @@ app = FastAPI(
         {"name": "AI智能监控模块", "description": "监控指标采集/告警/故障/仪表盘/健康检查"},
         {"name": "AI智能维护模块", "description": "维护任务/健康检查/故障自愈/性能优化/一键巡检"},
         {"name": "推广码矩阵模块", "description": "专属推广码/矩阵绑定/两级奖励/奖励余额购物/领酒发货"},
+        {"name": "AI智能中枢模块(35)", "description": "统一AI智能入口/多模态输入(文字语音图片)/意图路由/能力注册表编排/AI训练治理"},
     ],
 )
 
@@ -216,6 +219,7 @@ register_ticket_routes(app)
 register_role_routes(app)
 register_attract_routes(app)
 register_knowledge_routes(app)
+register_hub_routes(app)
 register_flashsale_routes(app)
 register_ai_scoring_routes(app)
 register_ai_scoring_ext_routes(app)

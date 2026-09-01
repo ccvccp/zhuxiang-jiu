@@ -71,6 +71,8 @@ from routes.role_routes import register_role_routes
 from routes.attract_routes import register_attract_routes
 # AI智能知识库训练模块
 from routes.knowledge_routes import register_knowledge_routes
+# AI智能中枢模块(35号·全站AI大模型总调度)
+from routes.hub_routes import register_hub_routes
 
 __all__ = [
     # 已有(15)
@@ -120,4 +122,5 @@ __all__ = [
     "register_role_routes",
     "register_attract_routes",
     "register_knowledge_routes",
+    "register_hub_routes",
 ]
