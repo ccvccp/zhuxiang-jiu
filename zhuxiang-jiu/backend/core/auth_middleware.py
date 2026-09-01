@@ -77,6 +77,9 @@ PUBLIC_EXACT = {
     "/api/entry/qr/exchange",
     "/api/entry/qr/cancel",
     "/api/entry/registration-merge",
+    # 39号 P1: 生物凭证挑战/验证(登录前, 凭一次性 challenge)
+    "/api/entry/bio/challenge",
+    "/api/entry/bio/verify",
     # 健康检查(Docker healthcheck / K8s 探针)
     "/api/decision/health",
     "/api/monitor/health",

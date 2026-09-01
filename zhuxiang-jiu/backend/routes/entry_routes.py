@@ -89,6 +89,32 @@ class RegistrationMergeRequest(PydBaseModel):
     clickId: int = Field(..., ge=1)
 
 
+class BioEnrollRequest(PydBaseModel):
+    bioType: str = Field(..., description="fingerprint|face")
+    deviceId: str = Field(..., min_length=2, max_length=40)
+
+
+class BioBindRequest(PydBaseModel):
+    bioType: str = Field(...)
+    deviceId: str = Field(..., min_length=2, max_length=40)
+    enrollChallenge: str = Field("", max_length=64)
+    publicKeyHash: str = Field(..., min_length=8, max_length=64)
+    name: str = Field("", max_length=30)
+
+
+class BioChallengeRequest(PydBaseModel):
+    credentialId: str = Field(..., min_length=4, max_length=40)
+
+
+class BioVerifyRequest(PydBaseModel):
+    credentialId: str = Field(..., min_length=4, max_length=40)
+    assertionHash: str = Field(..., min_length=8, max_length=64)
+
+
+class DecisionReviewRequest(PydBaseModel):
+    verdict: str = Field(..., description="confirm|false_block|false_allow")
+
+
 # ============================================================
 # 入口与识别(公开)
 # ============================================================
@@ -266,6 +292,131 @@ async def remove_device(
     member_id = _require_member(x_member_id)
     try:
         result = await _service.remove_device(member_id, device_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 生物凭证中心(P1, 设计文档 §2.3: 绑定须登录态, 挑战/验证公开)
+# ============================================================
+
+@router.post("/api/entry/bio/enroll", tags=["AI智能网站入口管理模块"])
+async def bio_enroll(
+    data: BioEnrollRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """发起生物凭证绑定(设备端本地生成凭证对, 原始数据不上送)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.bio_enroll(member_id, data.bioType,
+                                           data.deviceId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/entry/bio/bind", tags=["AI智能网站入口管理模块"])
+async def bio_bind(
+    data: BioBindRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """完成绑定(登记 publicKeyHash 摘要, 不落原始生物数据)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.bio_bind(
+            member_id, data.bioType, data.deviceId,
+            data.enrollChallenge, data.publicKeyHash, data.name)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/entry/bio/challenge",
+             tags=["AI智能网站入口管理模块"])
+async def bio_challenge(data: BioChallengeRequest):
+    """发起生物登录挑战(60s 一次性 assertionChallenge)"""
+    try:
+        result = await _service.bio_challenge(data.credentialId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/entry/bio/verify", tags=["AI智能网站入口管理模块"])
+async def bio_verify(
+    data: BioVerifyRequest,
+    x_forwarded_for: str = Header("", alias="X-Forwarded-For"),
+):
+    """验证断言 → AI 风控决策 → allow 直发令牌(Mock 轨确定性派生)"""
+    try:
+        result = await _service.bio_verify(
+            data.credentialId, data.assertionHash,
+            ip=x_forwarded_for.split(",")[0].strip())
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/entry/bio/credentials",
+            tags=["AI智能网站入口管理模块"])
+async def bio_list(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """我的生物凭证清单"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.bio_list(member_id)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.delete("/api/entry/bio/credentials/{credential_id}",
+               tags=["AI智能网站入口管理模块"])
+async def bio_revoke(
+    credential_id: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """吊销生物凭证(忘记这台设备的生物登录, 幂等)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.bio_revoke(member_id, credential_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 决策复核回流 + 角色落地页(P1)
+# ============================================================
+
+@router.post("/api/entry/decisions/{decision_id}/review",
+             tags=["AI智能网站入口管理模块"])
+async def review_decision(
+    decision_id: int,
+    data: DecisionReviewRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """管理员复核风控决策 → ai_learning 反馈回流(auth_risk 自学习)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    try:
+        result = await _service.review_decision(decision_id,
+                                                data.verdict)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/entry/landing", tags=["AI智能网站入口管理模块"])
+async def landing(
+    role: str = Query("member", description="member|cs_staff|admin|guest"),
+    memberId: int = Query(None, ge=1),
+):
+    """角色落地页(hub 面板 chips + 连续登录激励 + 问候)"""
+    try:
+        result = await _service.landing(role, memberId)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

@@ -507,6 +507,317 @@ class EntryService:
         return {"deviceId": device_id, "removed": True}
 
     # ============================================================
+    # 生物凭证中心(P1, 设计文档 §2.3: WebAuthn 式两段协议)
+    # ============================================================
+
+    async def bio_enroll(self, member_id: int, bio_type: str,
+                         device_id: str) -> dict:
+        """发起绑定: 生成设备挑战(60s)——设备端本地生成凭证对
+
+        合规红线: 原始生物数据永不上送(设计文档 §6), 服务端只存
+        publicKeyHash 摘要与绑定关系。
+
+        Raises:
+            ValueError: bioType 非法/凭证数超限
+        """
+        if bio_type not in (MODE_FINGERPRINT, MODE_FACE):
+            raise ValueError(f"生物类型非法({bio_type}, 须为"
+                             f"{MODE_FINGERPRINT}/{MODE_FACE})")
+        existing = await self.repo.list_bio(member_id=member_id,
+                                            limit=100)
+        active = [b for b in existing
+                  if b.get("status") == "active"]
+        if len(active) >= 5:
+            raise ValueError("生物凭证数已达上限(5), 请先删除旧凭证")
+        challenge = f"BC{secrets.token_hex(12)}"
+        return {"memberId": member_id, "bioType": bio_type,
+                "deviceId": device_id,
+                "enrollChallenge": challenge,
+                "challengeTtl": 60,
+                "hint": "设备端本地生成凭证对(公钥式摘要), "
+                        "原始生物数据不上送"}
+
+    async def bio_bind(self, member_id: int, bio_type: str,
+                       device_id: str, enroll_challenge: str,
+                       public_key_hash: str,
+                       credential_name: str = "") -> dict:
+        """完成绑定: 登记 publicKeyHash 摘要(不落原始数据)
+
+        Raises:
+            ValueError: 参数非法/凭证已存在
+        """
+        if not public_key_hash or len(public_key_hash) < 8:
+            raise ValueError("公钥摘要非法(≥8 字符)")
+        existing = await self.repo.list_bio(member_id=member_id,
+                                            limit=100)
+        if any(b.get("publicKeyHash") == public_key_hash
+               for b in existing):
+            raise ValueError("该凭证已绑定(勿重复绑定)")
+        credential_id = f"BIO{secrets.token_hex(8)}"
+        record = {
+            "credentialId": credential_id,
+            "memberId": member_id,
+            "bioType": bio_type,
+            "deviceId": device_id,
+            "publicKeyHash": public_key_hash,
+            "name": credential_name or f"{bio_type}凭证"
+                                      f"{credential_id[-4:]}",
+            "status": "active",
+            "mode": "mock",   # Mock 轨标记(设计文档 §8: strict 可拒)
+            "enrolledAt": _now_iso(),
+        }
+        await self.repo.save_bio(record)
+        return record
+
+    async def bio_challenge(self, credential_id: str) -> dict:
+        """发起登录挑战(60s 一次性 assertionChallenge)
+
+        Raises:
+            KeyError: 凭证不存在
+            ValueError: 凭证已吊销
+        """
+        record = await self.repo.get_bio(credential_id)
+        if record is None:
+            raise KeyError(f"生物凭证不存在(credentialId={credential_id})")
+        if record.get("status") != "active":
+            raise ValueError(f"凭证已吊销(当前{record.get('status')})")
+        challenge = f"AC{secrets.token_hex(12)}"
+        await self.repo.save_bio({
+            **record, "lastChallenge": challenge,
+            "lastChallengeAt": _now_iso()})
+        return {"credentialId": credential_id,
+                "assertionChallenge": challenge,
+                "challengeTtl": 60,
+                "bioType": record.get("bioType")}
+
+    async def bio_verify(self, credential_id: str,
+                         assertion_hash: str,
+                         ip: str = "") -> dict:
+        """验证断言 → 风控决策 → allow 签发令牌
+
+        Mock 轨: assertion 由 challenge+deviceId 确定性派生
+        (sha256 前 32 位), 测试可复现。
+
+        Raises:
+            KeyError: 凭证不存在
+            ValueError: 断言不匹配/挑战过期/风控拦截/strict 拒 mock
+        """
+        import os as _os
+        strict = (_os.environ.get("ENTRY_BIO_MODE", "mock")
+                  .strip().lower() == "strict")
+        record = await self.repo.get_bio(credential_id)
+        if record is None:
+            raise KeyError(
+                f"生物凭证不存在(credentialId={credential_id})")
+        if record.get("status") != "active":
+            raise ValueError(f"凭证已吊销(当前{record.get('status')})")
+        if strict and record.get("mode") == "mock":
+            raise ValueError("strict 模式拒绝 Mock 凭证登录")
+        challenge = record.get("lastChallenge") or ""
+        if not challenge:
+            raise ValueError("无待验证挑战(请先 bio/challenge)")
+        # 挑战时效(60s)
+        challenged_at = str(record.get("lastChallengeAt") or "")
+        if challenged_at:
+            try:
+                delta = (datetime.now(UTC)
+                         - datetime.fromisoformat(challenged_at)
+                         ).total_seconds()
+                if delta > 60:
+                    raise ValueError("挑战已过期(60s), 请重新发起")
+            except ValueError:
+                raise
+            except Exception:
+                pass
+        expected = hashlib.sha256(
+            (challenge + str(record.get("deviceId", "")))
+            .encode()).hexdigest()[:32]
+        if assertion_hash != expected:
+            raise ValueError("断言校验失败(设备端验证未通过)")
+        member_id = int(record.get("memberId") or 0)
+        if not member_id:
+            raise ValueError("凭证缺少归属会员")
+        # 风控决策(设备为绑定设备 → device_match=0)
+        decision = await self.guard(
+            member_id, record.get("bioType", MODE_FINGERPRINT),
+            fingerprint="", ip=ip)
+        if decision["action"] == GUARD_BLOCK:
+            raise ValueError(
+                f"生物登录被风控拦截(风险分{decision['riskScore']})")
+        await self._record_event(member_id, record.get("bioType", ""),
+                                 True, decision["riskScore"],
+                                 record.get("deviceId", ""),
+                                 note="bio_verify")
+        from services.auth_service import AuthService
+        tokens = await AuthService()._login_by_member_id(member_id)
+        # 挑战一次性消费
+        await self.repo.save_bio({
+            **record, "lastChallenge": ""})
+        if decision["action"] == GUARD_ALLOW:
+            return {"status": "authenticated", "tokens": tokens,
+                    "memberId": member_id, "decision": decision}
+        return {"status": "step_up_required", "memberId": member_id,
+                "decision": decision}
+
+    async def bio_list(self, member_id: int) -> list[dict]:
+        return await self.repo.list_bio(member_id=member_id,
+                                        limit=100)
+
+    async def bio_revoke(self, member_id: int,
+                         credential_id: str) -> dict:
+        """吊销凭证(忘记这台设备的生物登录)
+
+        Raises:
+            KeyError: 凭证不存在/非本人
+        """
+        record = await self.repo.get_bio(credential_id)
+        if record is None or int(record.get("memberId") or 0) \
+                != member_id:
+            raise KeyError(
+                f"生物凭证不存在(credentialId={credential_id})")
+        if record.get("status") == "revoked":
+            return record
+        updated = {**record, "status": "revoked",
+                   "revokedAt": _now_iso()}
+        await self.repo.save_bio(updated)
+        return updated
+
+    # ============================================================
+    # 决策反馈回流(P1, 设计文档 §2.4: 误拦/漏放 → ai_learning)
+    # ============================================================
+
+    async def review_decision(self, decision_id: int,
+                              verdict: str) -> dict:
+        """管理员复核风控决策 → ai_learning 反馈(第 21 档案回流)
+
+        Args:
+            verdict: "confirm"(决策正确) / "false_block"(误拦) /
+                     "false_allow"(漏放)
+
+        Raises:
+            KeyError: 决策不存在
+            ValueError: 裁决非法/已复核
+        """
+        decision = await self.repo.get_decision(decision_id)
+        if decision is None:
+            raise KeyError(f"决策不存在(decisionId={decision_id})")
+        if verdict not in ("confirm", "false_block", "false_allow"):
+            raise ValueError(f"裁决非法({verdict}, 须为 confirm/"
+                             f"false_block/false_allow)")
+        if decision.get("reviewStatus") not in ("none", ""):
+            raise ValueError("该决策已复核过(幂等)")
+        correct = verdict == "confirm"
+        # 反馈语义: 实际期望动作与 AI 决策比对
+        factors = []
+        for f in decision.get("factors") or []:
+            factors.append({
+                "name": f.get("name"),
+                "score": float(f.get("score") or 0),
+                "weight": float(f.get("weight") or 0),
+                "contribution": round(
+                    float(f.get("contribution") or 0), 4),
+            })
+        if not factors:
+            raise KeyError("决策因子快照缺失, 无法回流")
+        from services.ai_learning_service import submit_feedback
+        result = await submit_feedback({
+            "scorerId": "auth_risk",
+            "factors": factors,
+            "scoreAtDecision": decision.get("riskScore", 0),
+            "actualAction": verdict,
+            "correct": correct,
+            "note": f"decisionId={decision_id} action="
+                    f"{decision.get('action')}",
+            "source": "entry",
+        })
+        await self.repo.update_decision(decision_id, {
+            "reviewStatus": verdict,
+            "reviewedAt": _now_iso(),
+            "reviewCorrect": correct,
+        })
+        return result
+
+    # ============================================================
+    # 角色落地页(P1, 设计文档 §2.5: hub chips 复用 + 登录激励)
+    # ============================================================
+
+    async def landing(self, role: str, member_id: int = None) -> dict:
+        """登录成功后的角色落地页数据(hub 面板 + 连登激励)"""
+        from repositories.hub_repository import ROLE_PANELS
+        panels = ROLE_PANELS.get(role, ROLE_PANELS.get("guest", []))
+        streak = await self._login_streak(member_id) if member_id \
+            else 0
+        return {
+            "role": role,
+            "chips": panels,
+            "loginStreak": streak,
+            "streakMilestone": self._streak_reward(streak),
+            "greeting": self._landing_greeting(streak),
+        }
+
+    async def _login_streak(self, member_id: int) -> int:
+        """连续登录天数(UTC 日切, 断签归零)"""
+        record = await self.repo.get_fingerprint(
+            f"streak:{member_id}")
+        today = _now_iso()[:10]
+        if record is None:
+            return 0
+        last = str(record.get("lastSeenAt", ""))[:10]
+        if last == today:
+            return int(record.get("seenCount", 1))
+        # 断签: 昨天 → +1; 更早 → 归 1
+        from datetime import timedelta
+        yesterday = (datetime.now(UTC)
+                     - timedelta(days=1)).date().isoformat()
+        return int(record.get("seenCount", 1)) + 1 \
+            if last == yesterday else 1
+
+    async def touch_login_streak(self, member_id: int) -> int:
+        """登录时更新连登计数(幂等当日)"""
+        today = _now_iso()[:10]
+        key = f"streak:{member_id}"
+        record = await self.repo.get_fingerprint(key)
+        if record is None:
+            count = 1
+            record = {"deviceId": key, "firstSeenAt": _now_iso(),
+                      "lastSeenAt": _now_iso(), "seenCount": count}
+        else:
+            last = str(record.get("lastSeenAt", ""))[:10]
+            if last == today:
+                count = int(record.get("seenCount", 1))
+            else:
+                from datetime import timedelta
+                yesterday = (datetime.now(UTC)
+                             - timedelta(days=1)).date().isoformat()
+                count = (int(record.get("seenCount", 1)) + 1
+                         if last == yesterday else 1)
+            record = {**record, "lastSeenAt": _now_iso(),
+                      "seenCount": count}
+        await self.repo.save_fingerprint(key, record)
+        return count
+
+    @staticmethod
+    def _streak_reward(streak: int) -> dict:
+        """连登里程碑(1/7/30 天递进, 积分账本口径)"""
+        milestones = {1: 5, 7: 50, 30: 300}
+        for day in sorted(milestones, reverse=True):
+            if streak >= day:
+                return {"day": day, "points": milestones[day],
+                        "hint": f"连续登录{streak}天, "
+                                f"达成{day}天里程碑"}
+        return {"day": 0, "points": 0, "hint": "明日继续签到升级"}
+
+    @staticmethod
+    def _landing_greeting(streak: int) -> str:
+        if streak >= 30:
+            return f"竹香老友, 已连续陪伴 {streak} 天"
+        if streak >= 7:
+            return f"欢迎回来, 连续登录 {streak} 天"
+        if streak > 1:
+            return f"欢迎回来(连续 {streak} 天)"
+        return "欢迎来到竹香"
+
+    # ============================================================
     # 事件流水与看板(设计文档 §2.6)
     # ============================================================
 
