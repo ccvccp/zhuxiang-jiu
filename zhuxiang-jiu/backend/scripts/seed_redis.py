@@ -780,6 +780,11 @@ async def seed() -> int:
         risks_n = await seed_agent_risks(client)
         print(f"[OK] 代理商风控记录写入: {risks_n} 条(含代理商索引)")
 
+        # 4j. 写入供应链四件套 19 数据域(仓库/库位/仓储库存/券/积分等级)
+        # N.B. 此前主流程漏调 seed_supply_chain, 导致 zhuxiang:sc:* 域全空(联调 3.4 抽查失败)
+        sc_counts = await seed_supply_chain(client)
+        print(f"[OK] 供应链域写入: hash {sc_counts['hash']} 条 + 全量 {sc_counts['full']} 条")
+
         # 5. 空列表/空 Hash 不需要写入(inbound_log/outbound_log/orders/shipping_claims)
         print("[INFO] inbound_log/outbound_log/orders/shipping_claims: 初始为空, 不写入")
 

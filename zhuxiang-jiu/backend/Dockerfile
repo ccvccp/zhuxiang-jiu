@@ -5,7 +5,8 @@
 #  运行: docker run --rm -p 8000:8000 zhuxiang-decision-api:1.0
 # ============================================================
 
-FROM python:3.12-slim
+# 国内网络无法直连 docker.io, 走 DaoCloud 公益镜像站前缀拉取
+FROM docker.m.daocloud.io/library/python:3.12-slim
 
 LABEL org.opencontainers.image.title="竹香酒-AI决策筹划模块29"
 LABEL org.opencontainers.image.description="4层架构(core/repositories/services/routes) FastAPI后端"

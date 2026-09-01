@@ -72,18 +72,18 @@ Push-Location $Root
 Step "3.1 Docker Desktop / WSL2 内存配置"
 
 # 宿主机内存预检: Docker Desktop 启动弹窗 "not enough memory" 的根因是
-# 可用物理内存不足(需容纳: Docker 自身开销 ~0.5GB + WSL 虚拟机 4GB + Windows 余量 ~2GB)
+# 可用物理内存不足(.wslconfig 已设 memory=4GB, 需容纳: Docker 开销 ~0.5GB + WSL VM 上限 4GB)
 $osMem = Get-CimInstance Win32_OperatingSystem
 $freeGB = [math]::Round($osMem.FreePhysicalMemory / 1MB, 2)
 Write-Host "  当前可用物理内存: $freeGB GB"
-if ($freeGB -lt 5.5) {
-    Write-Host "  [警告] 可用内存不足 5.5GB, Docker Desktop 启动大概率报 not enough memory!" -ForegroundColor Yellow
+if ($freeGB -lt 4.5) {
+    Write-Host "  [警告] 可用内存不足 4.5GB(WSL2 上限 4GB), Docker Desktop 启动可能报 not enough memory!" -ForegroundColor Yellow
     Write-Host "  内存占用 TOP5(关闭非必要程序后重跑):" -ForegroundColor Yellow
     Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 5 |
         ForEach-Object { Write-Host ("    {0,-28} {1,6} MB" -f $_.Name, [math]::Round($_.WorkingSet64/1MB)) -ForegroundColor Yellow }
     Write-Host "  提示: 关闭浏览器多余标签页/其他 IDE/聊天工具通常可释放 1-2GB" -ForegroundColor Yellow
 } else {
-    Ok "宿主机可用内存 $freeGB GB(≥5.5GB, 满足启动条件)"
+    Ok "宿主机可用内存 $freeGB GB(≥4.5GB, 满足 WSL2 4GB 上限启动条件)"
 }
 
 docker info *> $null
@@ -146,17 +146,20 @@ Step "3.5 backend 容器内存占用(限额 1g)"
 $stats = docker compose -p $Project -f $Compose stats --no-stream --format "{{.Name}} {{.MemUsage}} {{.MemPerc}}"
 $stats | ForEach-Object { Write-Host "  $_" }
 $memLine = "$stats" | Select-String "backend"
-if ($memLine -match "([0-9.]+)GiB") {
-    if ([double]$Matches[1] -ge 1.0) { Bad "内存占用达 $($Matches[1])GiB(接近/超过 1g 硬限)" }
-    else { Ok "内存占用 $($Matches[1])GiB" }
-} elseif ($memLine -match "([0-9.]+)MiB") { Ok "内存占用 $($Matches[1])MiB" }
-else { Bad "未解析到 backend 内存数据" }
+# MemUsage 形如 "89.89MiB / 1GiB": 只取 / 前的实际占用, 避免误匹配限额列的 1GiB
+if ($memLine -match "([0-9.]+)(MiB|GiB|KiB|B)\s*/") {
+    $used = [double]$Matches[1]; $unit = $Matches[2]
+    $usedMiB = if ($unit -eq "GiB") { $used * 1024 } elseif ($unit -eq "KiB") { $used / 1024 } elseif ($unit -eq "B") { $used / 1MB } else { $used }
+    if ($usedMiB -ge 1024) { Bad "内存占用达 $([math]::Round($usedMiB,1))MiB(接近/超过 1g 硬限)" }
+    else { Ok "内存占用 $([math]::Round($usedMiB,1))MiB / 1024MiB(限额 1g 内)" }
+} else { Bad "未解析到 backend 内存数据" }
 
 # ---------- 3.6 业务链冒烟 ----------
 Step "3.6 业务链冒烟: 登录→checkout→库存核验→认领→结算"
 $login = $null
-try { $login = Post-Json "http://localhost:8000/api/auth/login" @{ phone = "13800000002"; password = "test123456" } } catch {}
-if ($login -and $login.accessToken) { Ok "管理员登录换 JWT(role=$($login.role))" }
+# seed_members 仅写入 13800000001(测试会员小竹), 此前脚本误用 13800000002 导致"未注册"
+try { $login = Post-Json "http://localhost:8000/api/auth/login" @{ phone = "13800000001"; password = "test123456" } } catch {}
+if ($login -and $login.accessToken) { Ok "会员登录换 JWT(role=$($login.role))" }
 else { Bad "登录失败, 跳过后续业务冒烟"; $login = $null }
 
 if ($login) {
