@@ -28,11 +28,14 @@ from repositories.promo_repository import (
 
 logger = logging.getLogger(__name__)
 
-# 评分权重(设计文档 §3.1)
-WEIGHT_HEAT = 0.4
-WEIGHT_VELOCITY = 0.2
-WEIGHT_RELEVANCE = 0.3
-WEIGHT_PERSISTENCE = 0.1
+# 评分权重(设计文档 §3.1 公式; P2 起为可学习因子——Hedge 效果回流
+# 经 ai_learning 在线调优, champion 权重经 load_effective_weights 生效)
+DEFAULT_RADAR_WEIGHTS = {
+    "heat": 0.4,            # 热度归一
+    "velocity": 0.2,        # 上升速度
+    "brandRelevance": 0.3,  # 品牌相关性
+    "persistence": 0.1,     # 持续时长
+}
 
 # 热度归一基准(万, heat ≥ 500 万记满分)
 HEAT_BASE_WAN = 500.0
@@ -121,12 +124,34 @@ class PromoRadarService:
     # 评分与风险
     # ============================================================
 
+    async def get_effective_weights(self) -> dict:
+        """读取生效评分权重(champion; ai_learning 异常回退默认)
+
+        P2: Hedge 效果回流——学习晋升的 champion 权重经
+        load_effective_weights(TTL 30s 缓存)在扫描时生效。
+        """
+        try:
+            from services.ai_learning_service import load_effective_weights
+            return await load_effective_weights(
+                "promo_hotspot", dict(DEFAULT_RADAR_WEIGHTS))
+        except Exception as exc:
+            logger.warning("promo_load_weights_failed(回退默认): %s", exc)
+            return dict(DEFAULT_RADAR_WEIGHTS)
+
     @staticmethod
-    def score_hotspot(item: dict) -> dict:
-        """热点评分(设计文档 §3.1 公式)
+    def score_hotspot(item: dict,
+                      weights: dict = None) -> dict:
+        """热点评分(设计文档 §3.1 公式, P2 权重可学习)
+
+        Args:
+            weights: 四因子权重(空则用默认); 因子名与
+                DEFAULT_RADAR_WEIGHTS 一致(heat/velocity/
+                brandRelevance/persistence)
 
         Returns:
-            {"score": 0-100, "components": {四项分项}, "brandHits": [...]}
+            {"score": 0-100, "components": {四项分项},
+             "contributions": {因子: 加权贡献}, "brandHits": [...]}
+            contributions 供 Hedge 反馈因子快照(influence 依据)
         """
         text = f"{item.get('title', '')} {item.get('summary', '')}"
         brand_hits = [w for w in BRAND_RELEVANCE_WORDS if w in text]
@@ -134,19 +159,22 @@ class PromoRadarService:
         velocity = max(0.0, min(1.0, float(item.get("velocity", 0))))
         relevance = _relevance_score(len(brand_hits))
         persistence = min(1.0, float(item.get("persistenceHours", 0)) / 48.0)
-        score = round(100 * (
-            WEIGHT_HEAT * heat_norm
-            + WEIGHT_VELOCITY * velocity
-            + WEIGHT_RELEVANCE * relevance
-            + WEIGHT_PERSISTENCE * persistence))
+        w = dict(weights or DEFAULT_RADAR_WEIGHTS)
+        components = {
+            "heat": round(heat_norm, 3),
+            "velocity": round(velocity, 3),
+            "brandRelevance": round(relevance, 3),
+            "persistence": round(persistence, 3),
+        }
+        contributions = {
+            name: round(w.get(name, 0.0) * value, 4)
+            for name, value in components.items()
+        }
+        score = round(100 * sum(contributions.values()))
         return {
             "score": max(0, min(100, score)),
-            "components": {
-                "heat": round(heat_norm, 3),
-                "velocity": round(velocity, 3),
-                "brandRelevance": round(relevance, 3),
-                "persistence": round(persistence, 3),
-            },
+            "components": components,
+            "contributions": contributions,
             "brandHits": brand_hits,
         }
 
@@ -170,6 +198,8 @@ class PromoRadarService:
         targets = tuple(platforms) if platforms else HOTSPOT_PLATFORMS
         scanned = new_count = discarded = skipped = 0
         new_hotspots = []
+        # P2: 生效权重一次加载(整轮共享; champion 学习结果即时体现)
+        weights = await self.get_effective_weights()
         for platform in targets:
             items = _fetch_real(platform)
             if items is None:
@@ -182,7 +212,7 @@ class PromoRadarService:
                     skipped += 1
                     continue
                 risk_flags = self.check_risk(item)
-                scoring = self.score_hotspot(item)
+                scoring = self.score_hotspot(item, weights=weights)
                 hotspot_id = await self.repo.next_id("hotspot")
                 hotspot = {
                     "hotspotId": hotspot_id,
@@ -193,6 +223,7 @@ class PromoRadarService:
                     "fingerprint": fingerprint,
                     "score": scoring["score"],
                     "scoreComponents": scoring["components"],
+                    "scoreContributions": scoring["contributions"],
                     "brandHits": scoring["brandHits"],
                     "riskFlags": risk_flags,
                     "status": (HOTSPOT_STATUS_DISCARDED if risk_flags

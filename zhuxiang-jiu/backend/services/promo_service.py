@@ -493,9 +493,159 @@ class PromoService:
         return entries
 
     # ============================================================
-    # 7. 报表(归因数据复用 attract)
+    # 7. P2: Hedge 效果回流(对接 ai_learning, scorer=promo_hotspot)
     # ============================================================
 
+    async def submit_learning_feedback(
+            self, content_id: int, clicks: int = None,
+            registrations: int = None, orders: int = None) -> dict:
+        """单条内容效果回流: 引流量 → 蹭点决策正确性 → Hedge 反馈
+
+        奖励语义(设计文档 §3.6): 内容带来点击 → engage 决策正确
+        (reward=+1); 零点击 → 决策失误(reward=-1)。因子快照取热点
+        评分四分量(heat/velocity/brandRelevance/persistence),
+        contributions 供 Hedge 计算因子影响度。
+
+        Args:
+            clicks/registrations/orders: 效果指标; clicks 为 None 时
+                自动从 attract 归因聚合(短码维度)
+
+        Raises:
+            KeyError: 内容不存在
+            ValueError: 内容未发布 / 已回流过(learningFed 幂等)
+        """
+        content = await self.repo.get_content(content_id)
+        if content is None:
+            raise KeyError(f"内容不存在(contentId={content_id})")
+        if content.get("status") != CONTENT_STATUS_PUBLISHED:
+            raise ValueError(
+                f"仅已发布内容可回流效果(当前{content.get('status')})")
+        if content.get("learningFed"):
+            raise ValueError(
+                f"内容已回流过效果(learningFed), 幂等不重复提交")
+        # clicks 未指定 → 自动归因聚合
+        if clicks is None:
+            metrics = await self._link_metrics(
+                [content.get("shortCode", "")])
+            clicks = metrics["clicks"]
+            registrations = (registrations
+                             if registrations is not None
+                             else metrics["registered"])
+            orders = (orders if orders is not None else metrics["ordered"])
+        hotspot = await self.repo.get_hotspot(
+            content.get("hotspotId", 0)) or {}
+        components = hotspot.get("scoreComponents") or {}
+        weights = await self.radar.get_effective_weights()
+        factors = []
+        for name, value in components.items():
+            weight = float(weights.get(name, 0.0))
+            factors.append({
+                "name": name,
+                "score": float(value),
+                "weight": weight,
+                "contribution": round(weight * float(value), 4),
+            })
+        if not factors:
+            raise ValueError("热点因子快照缺失, 无法回流(需重新扫描生成)")
+        correct = int(clicks) > 0
+        from services.ai_learning_service import submit_feedback
+        result = await submit_feedback({
+            "scorerId": "promo_hotspot",
+            "factors": factors,
+            "scoreAtDecision": hotspot.get("score", 0),
+            "actualAction": ("engage" if correct else "no_traffic"),
+            "correct": correct,
+            "note": f"contentId={content_id} clicks={clicks} "
+                    f"platform={content.get('platform')}",
+            "source": "promo",
+        })
+        # 幂等标记 + 指标留痕(重复提交直接 409)
+        content.update({
+            "learningFed": True,
+            "learningMetrics": {"clicks": int(clicks),
+                                "registrations": int(registrations or 0),
+                                "orders": int(orders or 0)},
+            "learningFedAt": _now_iso(),
+        })
+        await self.repo.save_content(content)
+        logger.info("promo_learning_feedback content=%s clicks=%s "
+                    "correct=%s", content_id, clicks, correct)
+        return result
+
+    async def collect_learning_feedback(self) -> dict:
+        """批量回流: 全部已发布未回流内容, 指标自动归因聚合
+
+        Returns:
+            {"submitted": N, "skipped": N, "results": [...]}
+        """
+        contents = await self.repo.list_contents(
+            status=CONTENT_STATUS_PUBLISHED, limit=1000)
+        submitted, skipped, results = 0, 0, []
+        for content in contents:
+            if content.get("learningFed"):
+                skipped += 1
+                continue
+            try:
+                results.append(await self.submit_learning_feedback(
+                    content["contentId"]))
+                submitted += 1
+            except (KeyError, ValueError) as exc:
+                # 单条失败不阻断批量(记录后继续)
+                logger.warning("promo_collect_skip content=%s: %s",
+                               content.get("contentId"), exc)
+                skipped += 1
+        return {"submitted": submitted, "skipped": skipped,
+                "results": results}
+
+    async def run_learning(self) -> dict:
+        """触发一轮 Hedge 学习(反馈不足时 409 提示)
+
+        Raises:
+            ValueError: 待学习反馈不足(可先调 ai-learning config
+                min_feedback 或继续回流)
+        """
+        from services.ai_learning_service import run_learning_cycle
+        return await run_learning_cycle("promo_hotspot")
+
+    async def learning_status(self) -> dict:
+        """回流与学习状态(权重档案/漂移/回流统计)"""
+        from services.ai_learning_service import (
+            get_weights_view, get_drift_view,
+        )
+        from repositories.ai_learning_repository import AiLearningRepository
+        weights_view = await get_weights_view("promo_hotspot")
+        drift_view = await get_drift_view("promo_hotspot")
+        repo = AiLearningRepository()
+        feedback = await repo.list_feedback("promo_hotspot", limit=1000)
+        pending = [f for f in feedback if f.get("status") == "pending"]
+        contents = await self.repo.list_contents(
+            status=CONTENT_STATUS_PUBLISHED, limit=1000)
+        fed = [c for c in contents if c.get("learningFed")]
+        total_clicks = sum(
+            (c.get("learningMetrics") or {}).get("clicks", 0) for c in fed)
+        return {
+            "scorerId": "promo_hotspot",
+            "weights": weights_view,
+            "drift": drift_view,
+            "feedback": {
+                "total": len(feedback),
+                "pending": len(pending),
+                "positive": sum(1 for f in feedback if f.get("correct")),
+                "negative": sum(1 for f in feedback
+                                if f.get("correct") is False),
+            },
+            "contents": {
+                "published": len(contents),
+                "fed": len(fed),
+                "unfed": len(contents) - len(fed),
+            },
+            "effectiveWeights": await self.radar.get_effective_weights(),
+            "totalFedClicks": total_clicks,
+        }
+
+    # ============================================================
+    # 8. 报表(归因数据复用 attract)
+    # ============================================================
     async def _link_metrics(self, codes: list[str]) -> dict:
         """按短码聚合 attract 点击/注册/下单(best-effort)"""
         metrics = {"clicks": 0, "registered": 0, "ordered": 0, "gmv": 0.0}

@@ -96,6 +96,14 @@ class AuthoritySourceRequest(PydBaseModel):
                               description="允许引用方式(空则默认客观事实引用)")
 
 
+class LearningFeedbackRequest(PydBaseModel):
+    contentId: int = Field(..., description="已发布内容ID")
+    clicks: int = Field(None, ge=0,
+                        description="引流量(空则自动从attract归因聚合)")
+    registrations: int = Field(None, ge=0, description="注册数(可选)")
+    orders: int = Field(None, ge=0, description="订单数(可选)")
+
+
 # ============================================================
 # 雷达与决策(admin)
 # ============================================================
@@ -402,6 +410,65 @@ async def authority_search(
         result = await _service.authority.retrieve(query=query,
                                                    top_k=topK)
         return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P2: Hedge 效果回流(admin, 对接 ai_learning)
+# ============================================================
+
+@router.post("/api/promo/learning/feedback", tags=["AI智能推广模块"])
+async def submit_learning_feedback(
+    data: LearningFeedbackRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """单条内容效果回流(引流量→蹭点决策正确性→Hedge反馈, 幂等)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.submit_learning_feedback(
+            content_id=data.contentId, clicks=data.clicks,
+            registrations=data.registrations, orders=data.orders)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/learning/collect", tags=["AI智能推广模块"])
+async def collect_learning_feedback(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """批量回流: 已发布未回流内容, 指标自动从attract归因聚合"""
+    _require_admin(x_role)
+    try:
+        result = await _service.collect_learning_feedback()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/learning/run", tags=["AI智能推广模块"])
+async def run_learning(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """触发一轮 Hedge 学习(反馈不足 409; 学习后雷达评分权重即时生效)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.run_learning()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/learning/status", tags=["AI智能推广模块"])
+async def learning_status(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """回流与学习状态(权重档案/漂移监控/反馈统计/生效权重)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.learning_status()
+        return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
 

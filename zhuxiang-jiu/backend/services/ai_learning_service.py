@@ -45,7 +45,8 @@ logger = logging.getLogger(__name__)
 MODEL_VERSION = "v1-learning"
 
 # ============================================================
-# 评分器注册表(14 评分器 + 物流路由 3 个策略子键 = 17 个可学习档案)
+# 评分器注册表(13 评分器 + 物流路由 3 个策略子键 + 36号热点蹭点
+# = 17 个可学习档案)
 # ============================================================
 
 SCORER_REGISTRY = {
@@ -68,6 +69,8 @@ SCORER_REGISTRY = {
     "finance_anomaly":             {"label": "财务异常检测评分", "module": "19财务管理", "batch": 2},
     # ---- 第三批(ai_scoring_auth_service) ----
     "auth_risk":                   {"label": "认证风控评分", "module": "30用户认证", "batch": 3},
+    # ---- 第四批(36号智能推广 P2: 热点蹭点评分 Hedge 效果回流) ----
+    "promo_hotspot":               {"label": "热点蹭点评分", "module": "36智能推广", "batch": 4},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -108,6 +111,11 @@ DRIFT_LEVELS = [(0.25, "high"), (0.10, "medium"), (0.0, "low")]
 
 def default_weights(scorer_id: str) -> dict:
     """获取评分器默认权重(懒加载评分器类, 避免循环导入)"""
+    if scorer_id == "promo_hotspot":
+        # 36号智能推广: 热点评分四因子(热度/速度/相关度/持续),
+        # 常量定义在 promo_radar_service(单一事实源)
+        from services.promo_radar_service import DEFAULT_RADAR_WEIGHTS
+        return dict(DEFAULT_RADAR_WEIGHTS)
     if scorer_id.startswith("logistics_routing:"):
         from services.ai_scoring_service import _BUDGET_WEIGHTS
         budget = scorer_id.split(":", 1)[1]
