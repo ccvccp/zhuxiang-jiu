@@ -17,6 +17,7 @@
 """
 
 import logging
+import random
 import re
 from datetime import datetime, UTC
 
@@ -155,6 +156,94 @@ class AuthService:
         await self._record_jtis(member["id"], tokens)
 
         logger.info("auth_login_success member_id=%r phone=%s", member["id"], phone)
+        return {
+            "success": True,
+            "memberId": member["id"],
+            "phone": phone,
+            "nickname": member.get("nickname", ""),
+            "role": role,
+            **tokens,
+        }
+
+    # ============================================================
+    # 短信验证码 + 验证码登录(P1-1, 设计文档 2.2 短信验证码规则)
+    # ============================================================
+
+    SMS_CODE_TTL = 300          # 验证码有效期 5 分钟
+    SMS_DAILY_LIMIT = 10        # 同一手机号日发送上限
+
+    async def send_sms_code(self, phone: str) -> dict:
+        """发送短信验证码(6 位数字, 5 分钟有效)
+
+        规则(设计文档 2.2):
+            - 同一手机号 60 秒内只能发送 1 次
+            - 同一手机号每日最多 10 次
+            - 短信服务商未接入: 验证码写 INFO 日志(模拟通道), 响应不回传明文
+
+        Raises:
+            ValueError: 手机号格式非法 / 60 秒频控 / 超日发送上限
+        """
+        if not phone or not _PHONE_PATTERN.match(phone):
+            raise ValueError("手机号格式不正确(需 1 开头 11 位有效手机号)")
+
+        if not await self.auth_repo.check_send_frequency(phone):
+            raise ValueError("发送过于频繁, 请 60 秒后再试")
+
+        count = await self.auth_repo.bump_daily_send_count(phone)
+        if count > self.SMS_DAILY_LIMIT:
+            raise ValueError(f"当日发送次数已达上限({self.SMS_DAILY_LIMIT} 次)")
+
+        code = f"{random.randint(0, 999999):06d}"
+        await self.auth_repo.save_sms_code(phone, code, self.SMS_CODE_TTL)
+        # 短信服务商未接入(纯标准库约定): 日志模拟通道; 生产接阿里云短信后替换此行
+        logger.info("sms_code_sent phone=%s code=%s ttl=%ds(当日第 %d 次)",
+                    phone, code, self.SMS_CODE_TTL, count)
+        return {"success": True, "phone": phone,
+                "expireSeconds": self.SMS_CODE_TTL,
+                "msg": "验证码已发送, 请查收短信"}
+
+    async def verify_sms_code(self, phone: str, code: str) -> dict:
+        """校验验证码(校验通过即消费, 一次性)
+
+        Raises:
+            ValueError: 手机号/验证码格式非法, 验证码错误或已过期
+        """
+        if not phone or not _PHONE_PATTERN.match(phone):
+            raise ValueError("手机号格式不正确")
+        if not code or not re.fullmatch(r"\d{6}", code):
+            raise ValueError("验证码须为 6 位数字")
+        saved = await self.auth_repo.get_sms_code(phone)
+        if not saved:
+            raise ValueError("验证码不存在或已过期, 请重新获取")
+        if saved != code:
+            raise ValueError("验证码错误")
+        await self.auth_repo.delete_sms_code(phone)
+        return {"success": True, "phone": phone, "verified": True}
+
+    async def login_by_sms(self, phone: str, code: str) -> dict:
+        """验证码登录(校验通过即消费; 返回 JWT 双令牌)
+
+        Raises:
+            KeyError:   手机号未注册
+            ValueError: 验证码校验失败 / 账号禁用
+        """
+        await self.verify_sms_code(phone, code)
+
+        member = await self.member_repo.get_by_phone(phone)
+        if not member:
+            raise KeyError(f"手机号 {phone} 未注册, 请先注册")
+        if member.get("status", 1) == 0:
+            raise ValueError("账号已被禁用,请联系客服")
+
+        role = member.get("role", ROLE_MEMBER)
+        await self.member_repo.update_fields(
+            member["id"], {"last_login_at": _now_iso()}
+        )
+        tokens = create_token_pair(member["id"], role)
+        await self._record_jtis(member["id"], tokens)
+
+        logger.info("auth_sms_login_success member_id=%r phone=%s",
+                    member["id"], phone)
         return {
             "success": True,
             "memberId": member["id"],

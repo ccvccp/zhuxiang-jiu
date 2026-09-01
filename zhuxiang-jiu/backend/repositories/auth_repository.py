@@ -122,6 +122,71 @@ class AuthRepository:
         jtis = registry.pop(str(member_id), [])
         return len(jtis)
 
+    # ---------- 短信验证码(P1-1, 设计文档 2.2 短信验证码规则) ----------
+
+    async def save_sms_code(self, phone: str, code: str, ttl: int = 300) -> None:
+        """存储验证码(TTL 5 分钟; 新码覆盖旧码)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("auth", "sms", "code", phone), code, ex=ttl)
+            return
+        sms = self.store.setdefault("auth_sms_codes", {})
+        sms[phone] = {"code": code, "expiresAt": int(time.time()) + ttl}
+
+    async def get_sms_code(self, phone: str) -> str | None:
+        """读取验证码(过期返回 None, 不删除)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.get(_k("auth", "sms", "code", phone))
+        entry = self.store.get("auth_sms_codes", {}).get(phone)
+        if not entry:
+            return None
+        if entry["expiresAt"] <= time.time():
+            self.store["auth_sms_codes"].pop(phone, None)
+            return None
+        return entry["code"]
+
+    async def delete_sms_code(self, phone: str) -> None:
+        """删除验证码(校验通过后消费, 一次性)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.delete(_k("auth", "sms", "code", phone))
+            return
+        self.store.get("auth_sms_codes", {}).pop(phone, None)
+
+    async def check_send_frequency(self, phone: str) -> bool:
+        """60 秒发送频控: 首次可发(并占用), 60 秒内重复 False
+
+        Returns:
+            bool: True=允许发送(已占用频控窗口), False=60 秒内已发过
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            # SETNX + TTL 60s: 原子占窗
+            return bool(await client.set(
+                _k("auth", "sms", "freq", phone), "1", ex=60, nx=True))
+        freq = self.store.setdefault("auth_sms_freq", {})
+        entry = freq.get(phone)
+        if entry and entry > time.time():
+            return False
+        freq[phone] = int(time.time()) + 60
+        return True
+
+    async def bump_daily_send_count(self, phone: str, daily_limit: int = 10) -> int:
+        """日发送计数+1, 返回当日累计次数(超限时仍计数, 由调用方判断)"""
+        today = time.strftime("%Y%m%d")
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("auth", "sms", "daily", phone, today)
+            n = await client.incr(key)
+            if n == 1:
+                await client.expire(key, 86400)
+            return n
+        daily = self.store.setdefault("auth_sms_daily", {})
+        day_map = daily.setdefault(today, {})
+        day_map[phone] = day_map.get(phone, 0) + 1
+        return day_map[phone]
+
     # ---------- Redis 实现 ----------
 
     async def _redis_add(self, jti: str, expires_at: int) -> None:

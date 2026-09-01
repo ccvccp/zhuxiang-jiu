@@ -47,8 +47,12 @@ PUBLIC_EXACT = {
     # 用户认证模块(JWT)
     "/api/auth/register",
     "/api/auth/login",
+    "/api/auth/login/sms",       # P1-1 验证码登录
     "/api/auth/refresh",
     "/api/auth/logout",
+    # 短信验证码(P1-1)
+    "/api/sms/send",
+    "/api/sms/verify",
     # 旧版登录/注册(存量前端兼容)
     "/api/member/login",
     "/api/member/register",

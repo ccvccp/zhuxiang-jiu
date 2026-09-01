@@ -66,6 +66,23 @@ class SetRoleRequest(BaseModel):
     role: str = Field(..., description="角色(member/admin)")
 
 
+class SmsSendRequest(BaseModel):
+    """发送短信验证码(P1-1)"""
+    phone: str = Field(..., min_length=11, max_length=11, description="手机号(11位)")
+
+
+class SmsVerifyRequest(BaseModel):
+    """校验短信验证码(P1-1, 校验通过即消费)"""
+    phone: str = Field(..., min_length=11, max_length=11, description="手机号(11位)")
+    code: str = Field(..., min_length=6, max_length=6, description="验证码(6位数字)")
+
+
+class SmsLoginRequest(BaseModel):
+    """验证码登录(P1-1, 返回 JWT 双令牌)"""
+    phone: str = Field(..., min_length=11, max_length=11, description="手机号(11位)")
+    code: str = Field(..., min_length=6, max_length=6, description="验证码(6位数字)")
+
+
 # ============================================================
 # 异常映射与鉴权依赖
 # ============================================================
@@ -154,6 +171,39 @@ async def login(data: LoginRequest):
         # v7.6 自动反馈: 登录成功 → 认证风控观察评分+配对(凭证有效期望 allow)
         await ai_hooks.on_login_success(data.phone)
         return result
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+@router.post("/api/auth/login/sms", tags=["用户认证模块"])
+async def login_by_sms(data: SmsLoginRequest):
+    """验证码登录(P1-1, 返回 JWT 双令牌; 校验通过即消费验证码)"""
+    try:
+        result = await _service.login_by_sms(phone=data.phone, code=data.code)
+        await ai_hooks.on_login_success(data.phone)
+        return result
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+# ============================================================
+# 短信验证码(P1-1, 设计文档 2.2: 6 位数字/5 分钟/60 秒频控/日 10 次)
+# ============================================================
+
+@router.post("/api/sms/send", tags=["用户认证模块"])
+async def sms_send(data: SmsSendRequest):
+    """发送短信验证码(60 秒频控 + 日 10 次上限; 服务商未接入, 验证码写日志)"""
+    try:
+        return await _service.send_sms_code(data.phone)
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+@router.post("/api/sms/verify", tags=["用户认证模块"])
+async def sms_verify(data: SmsVerifyRequest):
+    """校验短信验证码(校验通过即消费, 一次性)"""
+    try:
+        return await _service.verify_sms_code(data.phone, data.code)
     except Exception as exc:
         _handle_auth_error(exc)
 
