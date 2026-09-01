@@ -38,12 +38,13 @@ from repositories.promo_repository import (
     BANNED_WORDS, REQUIRED_DISCLAIMER, REQUIRED_AGE_TIP,
     PROMO_COMPLIANCE_PASS_SCORE, PROMO_HITL_FLOOR,
     PROMO_DAILY_CAP, PROMO_HOTSPOT_COOLDOWN_LIMIT,
-    GOLDEN_WINDOWS, PROMO_CHANNEL_MODE,
+    GOLDEN_WINDOWS,
 )
 from services.promo_radar_service import PromoRadarService
 from services.promo_agent_service import PromoAgentService
 from services.promo_audience_service import PromoAudienceService
 from services.promo_authority_service import PromoAuthorityService
+from services.promo_channel_service import PromoChannelService
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class PromoService:
         self.agent = PromoAgentService()
         self.audience = PromoAudienceService(repo)
         self.authority = PromoAuthorityService(repo)
+        self.channel = PromoChannelService(repo)
 
     # ============================================================
     # 1. 雷达扫描 + 自动决策
@@ -409,8 +411,9 @@ class PromoService:
             return await self.repo.save_content(content)
 
     async def process_publish_queue(self) -> list[dict]:
-        """处理到期发布(模拟轨: 回执含曝光预估; 真实轨 P2)
+        """处理到期发布(P2: 通道服务统一回执, mock/real/回退三态)
 
+        发布成功后 best-effort 触发百度 SEO 推送(新落地页 URL)。
         调度器周期调用, 也可手动触发。
         """
         async with get_lock("promo:publish"):
@@ -433,17 +436,21 @@ class PromoService:
                 await self.repo.dequeue_publish(entry["contentId"])
                 hotspot = await self.repo.get_hotspot(
                     content.get("hotspotId", 0)) or {}
+                # P2: 发布通道统一出回执(mock / real / mock_fallback)
+                receipt = await self.channel.publish_to_platform(
+                    content, hotspot)
                 content.update({
                     "status": CONTENT_STATUS_PUBLISHED,
                     "publishedAt": _now_iso(),
-                    "receipt": {
-                        "mode": PROMO_CHANNEL_MODE,
-                        "platform": content["platform"],
-                        "exposureEstimate": int(
-                            float(hotspot.get("heat", 0)) * 10000 * 0.3),
-                    },
+                    "receipt": receipt,
                 })
                 published.append(await self.repo.save_content(content))
+            # 发布后 best-effort SEO 推送(新短链落地页当日去重)
+            if published:
+                try:
+                    await self.channel.push_seo()
+                except Exception as exc:
+                    logger.warning("promo_post_publish_seo_failed: %s", exc)
             return published
 
     # ============================================================

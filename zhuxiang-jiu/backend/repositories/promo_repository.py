@@ -151,6 +151,22 @@ PROMO_LLM_FALLBACK_MODEL = "glm-4-flash"
 # 发布通道模式(mock 模拟轨 / real 真实平台 API, P2)
 PROMO_CHANNEL_MODE = os.environ.get("PROMO_CHANNEL_MODE", "mock")
 
+# 发布通道凭证环境变量(未配置该平台回退确定性 mock 回执)
+PROMO_CHANNEL_API_KEY_ENV = {
+    PROMO_PLATFORM_DOUYIN: "PROMO_CHANNEL_DOUYIN_KEY",
+    PROMO_PLATFORM_XHS: "PROMO_CHANNEL_XHS_KEY",
+    PROMO_PLATFORM_MOMENTS: "PROMO_CHANNEL_MOMENTS_KEY",
+    PROMO_PLATFORM_WEIBO: "PROMO_CHANNEL_WEIBO_KEY",
+    PROMO_PLATFORM_CHANNELS: "PROMO_CHANNEL_CHANNELS_KEY",
+}
+
+# P2: 百度普通收录推送(SITEMAP ping / urls 主动推送)
+BAIDU_PUSH_SITE = os.environ.get("BAIDU_PUSH_SITE", "")
+BAIDU_PUSH_TOKEN = os.environ.get("BAIDU_PUSH_TOKEN", "")
+# 推送记录状态
+SEO_PUSH_STATUS_OK = "ok"
+SEO_PUSH_STATUS_FAILED = "failed"
+
 # ============================================================
 # P1: 受众画像库(设计文档 §3.3, admin 可配)
 # ============================================================
@@ -568,6 +584,31 @@ class PromoRepository:
         return sorted(sources, key=lambda s: s.get("sourceId", 0))
 
     # ============================================================
+    # P2: 百度 SEO 推送记录
+    # ============================================================
+
+    async def save_seo_push(self, record: dict) -> dict:
+        return await self._save("promo_seo_pushes",
+                                record["pushId"], record)
+
+    async def list_seo_pushes(self, status: str = None,
+                              limit: int = 200) -> list[dict]:
+        pushes = await self._list("promo_seo_pushes", limit * 5)
+        if status:
+            pushes = [p for p in pushes if p.get("status") == status]
+        return sorted(pushes, key=lambda p: p.get("createdAt", ""),
+                      reverse=True)[:limit]
+
+    async def pushed_urls_today(self, date_key: str) -> set[str]:
+        """当日已推送 URL 集合(推送幂等: 同 URL 当日不重推)"""
+        pushes = await self._list("promo_seo_pushes", 1000)
+        urls = set()
+        for push in pushes:
+            if push.get("dateKey") == date_key:
+                urls.update(push.get("urls") or [])
+        return urls
+
+    # ============================================================
     # 通用存储(内存/Redis)
     # ============================================================
 
@@ -620,7 +661,9 @@ class PromoRepository:
             self.store["promo_daily_caps"] = {}
             self.store["promo_audience_profiles"] = {}     # P1: 受众画像库
             self.store["promo_authority_sources"] = {}     # P1: 权威信源库
+            self.store["promo_seo_pushes"] = {}            # P2: SEO推送记录
             self.store["_promo_hotspot_seq"] = 0
             self.store["_promo_decision_seq"] = 0
             self.store["_promo_content_seq"] = 0
             self.store["_promo_authority_seq"] = 0
+            self.store["_promo_seo_push_seq"] = 0

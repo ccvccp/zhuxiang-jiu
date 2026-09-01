@@ -474,6 +474,51 @@ async def learning_status(
 
 
 # ============================================================
+# P2: 发布通道与百度 SEO 提交(admin)
+# ============================================================
+
+@router.get("/api/promo/channels/status", tags=["AI智能推广模块"])
+async def channels_status(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """各平台发布通道配置状态(总模式/凭证配置/生效模式/端点)"""
+    _require_admin(x_role)
+    try:
+        result = _service.channel.channel_status()
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/seo/push", tags=["AI智能推广模块"])
+async def seo_push(
+    x_role: str = Header(None, alias="X-Role"),
+    force: bool = Query(False, description="忽略当日去重强制重推"),
+):
+    """百度普通收录推送(sitemap+已发布内容落地页, 当日幂等去重)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.channel.push_seo(force=force)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/seo/pushes", tags=["AI智能推广模块"])
+async def list_seo_pushes(
+    x_role: str = Header(None, alias="X-Role"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """SEO 推送记录列表(模式/提交数/成功数/失败原因)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.channel.list_pushes(limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
 # 报表(admin, 归因复用 attract)
 # ============================================================
 
