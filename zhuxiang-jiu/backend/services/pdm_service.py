@@ -34,7 +34,7 @@ from repositories.pdm_repository import (
     STATUS_REJECTED, STATUS_ON_SALE, STATUS_OFF_SALE,
     STATUS_TRANSITIONS, ADMIN_ANY_TRANSITIONS,
     CHANGE_COSMETIC, CHANGE_SUBSTANTIVE, SUBSTANTIVE_FIELDS,
-    IMAGE_STATUS_USABLE, IMAGE_HISTORY_LIMIT,
+    IMAGE_STATUS_USABLE, IMAGE_STATUS_FLAGGED, IMAGE_HISTORY_LIMIT,
     AI_PASS_SCORE, AI_REVIEW_SCORE,
 )
 from repositories.product_repository import (
@@ -455,6 +455,7 @@ class PdmService:
         if product is None:
             raise KeyError(f"商品不存在(productId={product_id})")
         median = await self._category_median(product.get("series"))
+        main_image = (product.get("images") or {}).get("main", "")
         ctx = {
             "productId": product_id,
             "name": product.get("name", ""),
@@ -462,7 +463,10 @@ class PdmService:
             "price": product.get("price", 0),
             "categoryMedian": median,
             "alcohol": product.get("alcohol"),
-            "mainImage": (product.get("images") or {}).get("main", ""),
+            "mainImage": main_image,
+            # P1: 图片质量分联动审图报告(图库有记录用报告分,
+            # 无记录回落 None → 评分器按主图有无给 70/0 中性)
+            "imageQuality": await self._main_image_quality(main_image),
             "missingFields": self._missing_fields(product),
         }
         try:
@@ -502,6 +506,22 @@ class PdmService:
             return _median(same_series)
         prices = [float(p["price"]) for p in on_sale]
         return _median(prices) if prices else 0.0
+
+    async def _main_image_quality(self, image_url: str):
+        """主图审图质量分(图库 aiReview.quality; 无记录返回 None)"""
+        if not image_url:
+            return None
+        images = await self.repo.list_images(limit=1000)
+        record = next((i for i in images
+                       if i.get("url") == image_url), None)
+        if record is None:
+            return None
+        review = record.get("aiReview") or {}
+        quality = review.get("quality")
+        try:
+            return float(quality) if quality is not None else None
+        except (TypeError, ValueError):
+            return None
 
     # ============================================================
     # 人工终审(SoD: 编辑≠审核, 设计文档 §2.2)
@@ -551,6 +571,14 @@ class PdmService:
                               else "review_reject",
                               STATUS_MANUAL_REVIEWING, to_status,
                               {"note": note})
+            # P1: 人工裁决自动回流 ai_learning(best-effort 不阻断;
+            # learningFed 幂等防重复提交)
+            try:
+                await self.submit_learning_feedback(
+                    product_id,
+                    "approve" if approved else "reject")
+            except Exception as exc:
+                logger.warning("pdm_review_feedback_failed: %s", exc)
             return await self.get_admin_product(product_id)
 
     async def list_reviews_pending(self, limit: int = 100) -> list[dict]:
@@ -731,10 +759,13 @@ class PdmService:
     # ============================================================
 
     async def upload_image(self, operator: int, role: str,
-                           data_base64: str, ext: str = ".png") -> dict:
-        """上传图片(base64 → hub media 管线落盘 → 图库)
+                           data_base64: str, ext: str = ".png",
+                           product_name: str = "",
+                           category: str = "") -> dict:
+        """上传图片(base64 → hub media 管线落盘 → AI 审图 → 图库)
 
-        P0 规则轨审图(扩展名/大小由 hub 管线校); P1 接 vision 审图。
+        P1: 审图三级降级(vision 多模态 → 规则轨 aiSkipped 转人工);
+        硬红线(饮酒动作/未成年人/低俗/图文不一致) → flagged 禁用主图。
 
         Raises:
             ValueError: base64 非法/落盘失败(管线结构化报错)
@@ -748,6 +779,13 @@ class PdmService:
         saved = await HubService().save_media("image", data, ext)
         if not saved.get("success"):
             raise ValueError(saved.get("error", "图片保存失败"))
+        # P1 AI 审图(vision → 规则轨降级; 本地 /media URL 走规则轨)
+        from services.pdm_image_review_service import (
+            PdmImageReviewService,
+        )
+        review = PdmImageReviewService().review_image(
+            saved["url"], size=saved.get("size", len(data)),
+            product_name=product_name, category=category)
         image_id = await self.repo.next_id("image")
         record = {
             "imageId": image_id,
@@ -755,13 +793,78 @@ class PdmService:
             "size": saved.get("size", len(data)),
             "uploadedBy": operator,
             "productId": None,
-            "status": IMAGE_STATUS_USABLE,
-            # P0 规则轨审图报告(P1 替换为 vision 判定)
-            "aiReview": {"mode": "rule", "violations": [],
-                         "note": "P0 规则轨(扩展名/大小校验通过)"},
+            "status": (IMAGE_STATUS_FLAGGED if review["flagged"]
+                       else IMAGE_STATUS_USABLE),
+            "aiReview": review,
             "createdAt": _now_iso(),
         }
         await self.repo.save_image(record)
+        return record
+
+    async def reupload_image(self, operator: int, role: str,
+                             image_id: int, data_base64: str,
+                             ext: str = ".png") -> dict:
+        """重传被标记图片(flagged 流转: 重传 → 重新审图, 同 imageId)
+
+        Raises:
+            KeyError: 图片不存在
+            ValueError: 图片非 flagged 态(无需重传)
+        """
+        await self._require(operator, role, PERM_OPERATE)
+        record = await self.repo.get_image(image_id)
+        if record is None:
+            raise KeyError(f"图片不存在(imageId={image_id})")
+        if record.get("status") != IMAGE_STATUS_FLAGGED:
+            raise ValueError(
+                f"图片非被标记态(当前{record.get('status')}, 无需重传)")
+        try:
+            data = base64.b64decode(data_base64 or "")
+        except Exception as exc:
+            raise ValueError(f"图片 base64 解码失败: {exc}") from exc
+        from services.hub_service import HubService
+        from services.pdm_image_review_service import (
+            PdmImageReviewService,
+        )
+        saved = await HubService().save_media("image", data, ext)
+        if not saved.get("success"):
+            raise ValueError(saved.get("error", "图片保存失败"))
+        review = PdmImageReviewService().review_image(
+            saved["url"], size=saved.get("size", len(data)),
+            product_name="", category="")
+        record.update({
+            "url": saved["url"],
+            "size": saved.get("size", len(data)),
+            "status": (IMAGE_STATUS_FLAGGED if review["flagged"]
+                       else IMAGE_STATUS_USABLE),
+            "aiReview": review,
+            "reuploadedAt": _now_iso(),
+        })
+        await self.repo.update_image(image_id, dict(record))
+        return record
+
+    async def destroy_image(self, operator: int, role: str,
+                            image_id: int) -> dict:
+        """销毁被标记图片(flagged 流转终点: 逻辑删除留痕)
+
+        Raises:
+            KeyError: 图片不存在
+            ValueError: 图片非 flagged 态(在用图片不可销毁)
+        """
+        via = await self._require(operator, role, PERM_OPERATE)
+        record = await self.repo.get_image(image_id)
+        if record is None:
+            raise KeyError(f"图片不存在(imageId={image_id})")
+        if record.get("status") != IMAGE_STATUS_FLAGGED:
+            raise ValueError(
+                f"仅被标记图片可销毁(当前{record.get('status')})")
+        record.update({"status": "destroyed",
+                       "destroyedBy": operator,
+                       "destroyedAt": _now_iso()})
+        await self.repo.update_image(image_id, dict(record))
+        await self._audit(operator, via["via"],
+                          record.get("productId") or "",
+                          "image_destroy", IMAGE_STATUS_FLAGGED,
+                          "destroyed", {"imageId": image_id})
         return record
 
     async def get_image(self, image_id: int) -> dict:
@@ -863,6 +966,134 @@ class PdmService:
             await self.product_repo.save_product(product)
 
     # ============================================================
+    # 智能下架建议(设计文档 §2.5 P1: 只建议不执行, 运营确认)
+    # ============================================================
+
+    # 建议阈值(可经环境变量调参)
+    _STALE_DAYS = 30          # 零销天数阈值
+    _LOW_SCORE = 60.0         # AI 预审低分线
+
+    async def listing_advice(self, limit: int = 50) -> list[dict]:
+        """智能上下架建议(在售商品):
+
+        - 下架建议: 连续零销≥30天(月销=0 且创建超30天)
+          或 AI 预审分<60 或 主图被标记(flagged)
+        - 保留原因留痕供运营裁决; 不自动执行任何状态变更
+        """
+        import os as _os
+        stale_days = int(_os.environ.get(
+            "PDM_STALE_DAYS", self._STALE_DAYS))
+        products = await self.product_repo.list_all()
+        overlays = {r["productId"]: r
+                    for r in await self.repo.list_pdm_products()}
+        images = await self.repo.list_images(limit=1000)
+        flagged_urls = {i.get("url") for i in images
+                        if i.get("status") == IMAGE_STATUS_FLAGGED}
+        from datetime import timedelta
+        cutoff = (datetime.now(UTC)
+                  - timedelta(days=stale_days)).isoformat()
+        advices = []
+        for product in products:
+            if product.get("status") != STATUS_ON_SALE:
+                continue
+            overlay = overlays.get(product["product_id"]) or {}
+            reasons = []
+            created = str(product.get("created_at") or "")
+            if (not product.get("sales_monthly")
+                    and created and created < cutoff):
+                reasons.append(f"连续{stale_days}天零销"
+                               f"(月销0, 上架于{created[:10]})")
+            ai = overlay.get("aiReview") or {}
+            if ai and float(ai.get("score") or 100) < self._LOW_SCORE:
+                reasons.append(
+                    f"AI 预审低分({ai.get('score')})")
+            main = (product.get("images") or {}).get("main", "")
+            if main in flagged_urls:
+                reasons.append("主图被AI审图标记(flagged)")
+            if reasons:
+                advices.append({
+                    "productId": product["product_id"],
+                    "name": product.get("name", ""),
+                    "price": product.get("price", 0),
+                    "salesMonthly": product.get("sales_monthly", 0),
+                    "stock": product.get("stock", 0),
+                    "aiScore": ai.get("score"),
+                    "reasons": reasons,
+                    "action": "delist_suggested",
+                    "note": "建议下架(运营确认后执行 delist)",
+                })
+            if len(advices) >= limit:
+                break
+        return advices
+
+    # ============================================================
+    # ai_learning 回流(P1: 人工裁决 → product_gate 权重学习)
+    # ============================================================
+
+    async def submit_learning_feedback(self, product_id: str,
+                                       human_decision: str) -> dict:
+        """人工终审裁决回流: AI 预审 vs 人工结论 → Hedge 反馈
+
+        奖励语义(设计文档 §5 权重学习): 人工推翻 AI 决策 → AI 失误
+        (correct=False); 人工维持 → AI 正确(correct=True)。
+
+        Args:
+            human_decision: "approve"(人工通过) / "reject"(人工驳回)
+
+        Raises:
+            KeyError: 商品不存在/无 AI 预审快照
+            ValueError: 决策非法/已回流过(learningFed 幂等)
+        """
+        if human_decision not in ("approve", "reject"):
+            raise ValueError("裁决须为 approve/reject")
+        overlay = await self.repo.get_pdm_product(product_id)
+        if overlay is None:
+            raise KeyError(f"商品未纳入PDM管理(productId={product_id})")
+        ai = overlay.get("aiReview") or {}
+        if not ai.get("score") and ai.get("score") != 0:
+            raise KeyError(f"无 AI 预审快照(productId={product_id})")
+        if overlay.get("learningFed"):
+            raise ValueError("该商品裁决已回流过(learningFed 幂等)")
+        factors = []
+        for f in ai.get("factors") or []:
+            factors.append({
+                "name": f.get("name"),
+                "score": float(f.get("score") or 0),
+                "weight": float(f.get("weight") or 0),
+                "contribution": round(
+                    float(f.get("contribution") or 0), 4),
+            })
+        if not factors:
+            raise KeyError("AI 预审因子快照缺失, 无法回流")
+        # AI 动作 → 人工裁决一致性: AI reject 被人工通过 /
+        # AI fast_track 被人工驳回 = AI 失误
+        ai_action = ai.get("action", "")
+        if ai_action == "reject":
+            correct = (human_decision == "reject")
+        else:  # fast_track / manual_review 均预期人工可裁
+            correct = True if human_decision == "approve" else (
+                ai_action != "fast_track")
+        from services.ai_learning_service import submit_feedback
+        result = await submit_feedback({
+            "scorerId": "product_gate",
+            "factors": factors,
+            "scoreAtDecision": ai.get("score", 0),
+            "actualAction": human_decision,
+            "correct": correct,
+            "note": f"productId={product_id} aiAction={ai_action}",
+            "source": "pdm",
+        })
+        await self.repo.update_pdm_product(product_id, {
+            "learningFed": True,
+            "learningDecision": human_decision,
+            "learningFedAt": _now_iso(),
+        })
+        logger.info("pdm_learning_feedback product=%s ai=%s human=%s "
+                    "correct=%s", product_id, ai_action,
+                    human_decision, correct)
+        return result
+
+    # ============================================================
     # 看板报表(设计文档 §4)
     # ============================================================
 
@@ -885,6 +1116,16 @@ class PdmService:
             elif action == "reject":
                 ai_reject += 1
         images = await self.repo.list_images(limit=1000)
+        # P1: 审图模式统计(vision 占比可观测降级健康度)
+        vision_cnt = rule_cnt = skipped_cnt = 0
+        for i in images:
+            review = i.get("aiReview") or {}
+            if review.get("mode") == "vision":
+                vision_cnt += 1
+            else:
+                rule_cnt += 1
+                if review.get("aiSkipped"):
+                    skipped_cnt += 1
         today = _now_iso()[:10]
         audits = await self.repo.list_audits(limit=1000)
         today_audits = [a for a in audits
@@ -898,9 +1139,15 @@ class PdmService:
                             ai_pass / (ai_pass + ai_review + ai_reject)
                             * 100, 1)
                             if (ai_pass + ai_review + ai_reject) else 0.0},
-            "images": {"total": len(images),
-                       "flagged": sum(1 for i in images
-                                      if i.get("status") == "flagged")},
+            "images": {
+                "total": len(images),
+                "flagged": sum(1 for i in images
+                               if i.get("status") == "flagged"),
+                "destroyed": sum(1 for i in images
+                                 if i.get("status") == "destroyed"),
+                "reviewModes": {"vision": vision_cnt, "rule": rule_cnt,
+                                "ruleSkipped": skipped_cnt},
+            },
             "today": {"audits": len(today_audits),
                       "listed": sum(1 for a in today_audits
                                     if a.get("action") == "list"),

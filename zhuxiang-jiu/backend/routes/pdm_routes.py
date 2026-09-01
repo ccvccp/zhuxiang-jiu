@@ -98,6 +98,18 @@ class DelistRequest(PydBaseModel):
 class ImageUploadRequest(PydBaseModel):
     dataBase64: str = Field(..., min_length=1, description="图片 base64")
     ext: str = Field(".png", description="扩展名(.jpg/.png/.webp/.gif)")
+    productName: str = Field("", max_length=100,
+                             description="关联商品名(图文一致性审图)")
+    category: str = Field("", max_length=50, description="商品类目")
+
+
+class ImageReuploadRequest(PydBaseModel):
+    dataBase64: str = Field(..., min_length=1, description="新图片 base64")
+    ext: str = Field(".png", description="扩展名")
+
+
+class LearningFeedbackRequest(PydBaseModel):
+    decision: str = Field(..., description="人工裁决: approve/reject")
 
 
 class ImagesUpdateRequest(PydBaseModel):
@@ -370,11 +382,87 @@ async def upload_image(
     x_member_id: str = Header(None, alias="X-Member-Id"),
     x_role: str = Header(None, alias="X-Role"),
 ):
-    """上传图片(base64 → hub media 管线 → 图库; P1 接 AI 审图)"""
+    """上传图片(base64 → hub media 管线 → AI 审图 → 图库)
+
+    P1: vision 多模态审图(饮酒动作/未成年人/低俗/水印/模糊/图文
+    一致性), 硬红线 → flagged 禁用主图; vision 不可用降级规则轨。
+    """
     member_id = _require_member(x_member_id)
     try:
         result = await _service.upload_image(
-            member_id, x_role, data.dataBase64, data.ext)
+            member_id, x_role, data.dataBase64, data.ext,
+            product_name=data.productName, category=data.category)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/pdm/images/{image_id}/reupload",
+             tags=["AI智能产品管理模块"])
+async def reupload_image(
+    image_id: int,
+    data: ImageReuploadRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """重传被标记图片(flagged → 重新审图, 同 imageId)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.reupload_image(
+            member_id, x_role, image_id, data.dataBase64, data.ext)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/pdm/images/{image_id}/destroy",
+             tags=["AI智能产品管理模块"])
+async def destroy_image(
+    image_id: int,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """销毁被标记图片(flagged 流转终点, 逻辑删除留痕)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.destroy_image(member_id, x_role,
+                                              image_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/pdm/listing-advice",
+            tags=["AI智能产品管理模块"])
+async def listing_advice(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """智能下架建议(零销+低分+主图被标记; 只建议不执行)"""
+    member_id = _require_member(x_member_id)
+    try:
+        await _service.check_permission(member_id, x_role, "view")
+        result = await _service.listing_advice(limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/pdm/products/{product_id}/learning-feedback",
+             tags=["AI智能产品管理模块"])
+async def submit_learning_feedback(
+    product_id: str,
+    data: LearningFeedbackRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """人工裁决回流 ai_learning(终审时自动触发; 此为手动补提)"""
+    member_id = _require_member(x_member_id)
+    try:
+        await _service.check_permission(member_id, x_role, "approve")
+        result = await _service.submit_learning_feedback(
+            product_id, data.decision)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
