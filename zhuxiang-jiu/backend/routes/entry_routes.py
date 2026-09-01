@@ -475,6 +475,24 @@ async def report_overview(
         _handle(e)
 
 
+@router.get("/api/entry/events", tags=["AI智能网站入口管理模块"])
+async def list_events(
+    x_role: str = Header(None, alias="X-Role"),
+    memberId: int = Query(None, ge=1),
+    mode: str = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """登录事件流水(admin, 看板明细)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    try:
+        result = await _service.repo.list_events(
+            member_id=memberId, mode=mode, limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_entry_routes(app):
     """注册39号·AI智能网站入口管理模块路由"""
     app.include_router(router)

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<!--
+    39号·AI智能网站入口管理模块 v1.0 · 入口运营看板(P2)
+    页面: ai-entry-dashboard.html(配套脚本 js/entry-dashboard.js)
+    依赖: css/style.css / js/auth.js
+    后端: 39号 entry_routes(默认 http://localhost:8000, admin)
+    区块: ①全景统计 ②通道转化漏斗 ③风险动作分布 ④风控决策复核
+          ⑤登录事件流水 ⑥生物凭证/设备总览(联动口径)
+-->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 智能入口 · 运营看板</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+        .banner-link {
+            color: #fff; text-decoration: none; border: 1px solid rgba(255,255,255,.55);
+            border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px;
+            white-space: nowrap; transition: var(--transition);
+        }
+        .banner-link:hover { background: rgba(255,255,255,.15); }
+
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+        }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .dash-info {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .card-head {
+            display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--color-border);
+        }
+        .card-head b { font-size: 14px; }
+        .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+        .scan-result { font-size: 12px; color: var(--color-text-light); }
+
+        .ov-wrap { padding: 6px 0 12px; }
+        .ov-group { padding: 8px 16px 2px; }
+        .ov-gtitle { font-size: 12px; font-weight: 700; color: var(--color-primary-dark); margin-bottom: 6px; }
+        .ov-cells { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+        .ov-cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 8px 4px; text-align: center; }
+        .ov-cell b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+        .ov-cell span { font-size: 11px; color: var(--color-text-light); }
+
+        .matrix-wrap { overflow-x: auto; }
+        table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .matrix th, .matrix td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .matrix th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .matrix .cap-id { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+
+        .badge { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 11px; white-space: nowrap; }
+        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.yellow { background: #fdf3e3; color: #a06b00; }
+        .badge.red { background: #fdecea; color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: #999; }
+        .badge.blue { background: #eef2fb; color: #3b5998; }
+        .badge.purple { background: #f2eaf9; color: #7b3fa0; }
+
+        .btn-mini {
+            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px; cursor: pointer;
+        }
+        .btn-mini:hover { background: rgba(74,124,89,.08); }
+        .btn-mini.danger { border-color: var(--color-danger); color: var(--color-danger); }
+
+        .dash-empty { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 14px; }
+        .note-bar { padding: 10px 16px; font-size: 11px; color: var(--color-text-light); line-height: 1.7; border-top: 1px solid var(--color-border); }
+        .dash-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+
+        @media (max-width: 640px) {
+            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+            .banner-link { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <header class="dash-banner">
+        <div class="container" style="display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+                <h1>AI 智能入口 · 运营看板</h1>
+                <p>39号模块 · 通道转化漏斗 / AI 风控动作分布 / 决策复核回流 / 登录事件流水</p>
+            </div>
+            <a class="banner-link" href="login.html">← AI 智能入口</a>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="dash-toolbar">
+                    <label>后端地址</label>
+                    <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                    <button class="dash-btn ghost" onclick="saveApiBase()">保存</button>
+                    <button class="dash-btn" onclick="refreshData()">刷新</button>
+                    <input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()"> 自动刷新(30s)
+                    <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+                </div>
+                <div class="dash-error" id="errorBanner"></div>
+                <div class="dash-info" id="infoBanner"></div>
+            </div>
+        </section>
+
+        <!-- ① 全景统计 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>① 全景统计</b></div>
+                <div class="ov-wrap" id="ovWrap"></div>
+            </div>
+        </section>
+
+        <!-- ② 通道转化漏斗 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>② 通道转化漏斗</b>
+                    <div class="head-actions"><span class="scan-result" id="modeCount"></span></div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead><tr>
+                            <th>通道</th><th class="num">尝试</th><th class="num">成功</th>
+                            <th class="num">成功率</th><th>说明</th>
+                        </tr></thead>
+                        <tbody id="modeBody"><tr><td colspan="5" class="dash-empty">加载中…</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ③ 风控决策复核 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>③ 风控决策复核(误拦/漏放回流 AI 自学习)</b>
+                    <div class="head-actions">
+                        <select id="actionFilter" onchange="loadDecisions()">
+                            <option value="">全部动作</option>
+                            <option value="allow">allow 放行</option>
+                            <option value="step_up">step_up 二次</option>
+                            <option value="challenge">challenge 强核验</option>
+                            <option value="block">block 拦截</option>
+                        </select>
+                        <button class="dash-btn ghost" onclick="loadDecisions()">刷新</button>
+                        <span class="scan-result" id="decisionCount"></span>
+                    </div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead><tr>
+                            <th class="num">ID</th><th class="num">会员</th><th>通道</th>
+                            <th class="num">风险分</th><th>动作</th><th>复核</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="decisionBody"><tr><td colspan="7" class="dash-empty">加载中…</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="note-bar">复核口径: confirm(决策正确) / false_block(误拦) / false_allow(漏放) —— 反馈自动回流 ai_learning(auth_risk 第 21 档案 Hedge 自学习)。</div>
+            </div>
+        </section>
+
+        <!-- ④ 登录事件流水 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>④ 登录事件流水</b>
+                    <div class="head-actions">
+                        <select id="modeFilter" onchange="loadEvents()">
+                            <option value="">全部通道</option>
+                            <option value="password">密码</option>
+                            <option value="sms">短信</option>
+                            <option value="qr">扫码</option>
+                            <option value="fingerprint">指纹</option>
+                            <option value="face">刷脸</option>
+                        </select>
+                        <span class="scan-result" id="eventCount"></span>
+                    </div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead><tr>
+                            <th class="num">ID</th><th class="num">会员</th><th>通道</th>
+                            <th class="num">风险分</th><th>结果</th><th class="cap-id">设备</th><th>时间</th>
+                        </tr></thead>
+                        <tbody id="eventBody"><tr><td colspan="7" class="dash-empty">加载中…</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <div class="dash-footer">
+            39号·AI智能网站入口管理模块 · P2 运营看板 · 端点速查:
+            <code>GET /api/entry/report/overview</code> ·
+            <code>GET /api/entry/decisions</code> ·
+            <code>POST /api/entry/decisions/{id}/review</code> ·
+            <code>GET /api/entry/events</code><br>
+            真实化预留(P2 尾项): WebSocket 扫码推送 / WebAuthn 平台 API /
+            真实短信服务商与 OAuth 平台(换实现不动协议)。
+        </div>
+    </main>
+
+    <script src="js/entry-dashboard.js"></script>
+</body>
+</html>
