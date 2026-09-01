@@ -217,44 +217,54 @@ async def risk_control(
 @router.post(f"{API_BASE}/orchestrate", tags=["编排层"],
              response_model=BaseSuccessResponse,
              summary="编排调度",
-             description="28模块跨域工作流编排+任务分解+依赖管理。编排成功率95%。\n\n**角色**: agent+\n**并发安全**: Mutex锁 `decision:orchestrate:{workflowId}`")
+             description="28模块跨域工作流编排+任务分解+依赖管理。编排成功率95%。\n\n**角色**: agent+\n**并发安全**: Mutex锁 `decision:orchestrate:{workflowId}`\n\n**P1 真实化(v35 AI中枢接管)**: 任务不再硬编码, 经 hub_service.orchestrate 按各模块文本真实意图路由, capability 为空的任务回退 chat.general 兜底。")
 async def orchestrate(
     req: OrchestrateRequest,
     role: str = Depends(require_role("agent")),
 ):
+    # P1: 35号AI智能中枢接管——各模块名作为意图文本真实路由(替代硬编码任务列表)
+    from services.hub_service import hub_service
+    result = await hub_service.orchestrate(req.modules, role="admin")
     tasks = []
-    for i, mod_id in enumerate(req.modules):
+    for i, (mod_id, t) in enumerate(zip(req.modules, result["tasks"])):
         tasks.append({
-            "id": f"T{i+1}", "module": mod_id,
-            "name": f"模块{mod_id}任务", "status": "pass" if i < len(req.modules) - 1 else "pending",
+            "id": t["id"], "module": mod_id,
+            "name": f"模块{mod_id}任务",
+            "status": "pass" if t["capability"] else "fallback",
             "depends": [f"T{i}"] if i > 0 else [],
+            "capability": t["capability"],
+            "intent": t["intent"],
         })
+    routed = sum(1 for t in tasks if t["capability"])
     details = OrchestrateDetails(
         workflow=req.workflow,
         tasks=tasks,
-        parallelGroups=[[f"T{i+1}"] for i in range(len(req.modules))],
-        successRate="95%",
-        duration="1.2s",
+        parallelGroups=result["parallelGroups"],
+        successRate=f"{(routed / len(tasks) * 100):.0f}%" if tasks else "0%",
+        duration="<5ms",
     )
     return ok("orchestrate", details.model_dump(by_alias=True),
-              logs=[{"stage": "编排层-编排调度", "message": f"工作流{req.workflow}编排完成",
-                     "data": {"modules": req.modules, "tasks": len(tasks)}}])
+              logs=[{"stage": "编排层-编排调度", "message": f"工作流{req.workflow}编排完成(中枢真实路由)",
+                     "data": {"modules": req.modules, "tasks": len(tasks),
+                              "routed": routed}}])
 
 
 @router.post(f"{API_BASE}/capability-route", tags=["编排层"],
              response_model=BaseSuccessResponse,
              summary="能力路由",
-             description="原子能力插件池(120个)+动态组合(≥20种)+按需调度。能力复用率78%。\n\n**角色**: store_owner+")
+             description="原子能力插件池+动态组合+按需调度。\n\n**角色**: store_owner+\n\n**P1 真实化(v35 AI中枢接管)**: 插件池来自 zhuxiang:hub:capabilities 真实能力注册表(Admin 可上下架), 而非硬编码 plugin_map。")
 async def capability_route(
     req: CapabilityRouteRequest,
     role: str = Depends(require_role("store_owner")),
 ):
-    plugin_map = {
-        "nlp": {"id": "nlp_bert_v2", "type": "自然语言", "latency": "120ms", "cost": "¥0.01"},
-        "vision": {"id": "vision_resnet50", "type": "计算机视觉", "latency": "180ms", "cost": "¥0.02"},
-        "decision_reasoning": {"id": "rule_engine_v1", "type": "决策推理", "latency": "30ms", "cost": "¥0.00"},
-        "multimodal": {"id": "multimodal_v1", "type": "多模态融合", "latency": "200ms", "cost": "¥0.03"},
-    }
+    # P1: 35号AI智能中枢接管——真实能力注册表(替代硬编码 plugin_map)
+    from services.hub_service import hub_service
+    caps = await hub_service.repo.list_capabilities()
+    plugin_map = {c["id"]: {
+        "id": c["id"], "type": c["module"],
+        "latency": f"{int(c.get('health', {}).get('p95_ms', 100))}ms",
+        "cost": f"¥{c.get('cost_weight', 1.0):.2f}",
+    } for c in caps if c.get("enabled")}
     selected = [plugin_map[c] for c in req.requiredCapabilities if c in plugin_map]
     composition = " → ".join(p["id"] for p in selected)
     details = CapabilityRouteDetails(
@@ -262,12 +272,12 @@ async def capability_route(
         composition=composition,
         totalLatency=f"{sum(int(p['latency'].replace('ms', '')) for p in selected)}ms",
         totalCost=f"¥{sum(float(p['cost'].replace('¥', '')) for p in selected):.2f}",
-        reuseRate="78%",
-        pluginPool=120,
+        reuseRate=f"{(len(plugin_map) / max(len(caps), 1) * 100):.0f}%",
+        pluginPool=len(plugin_map),
     )
     return ok("capability-route", details.model_dump(by_alias=True),
-              logs=[{"stage": "编排层-能力路由", "message": f"选择{len(selected)}个插件",
-                     "data": {"composition": composition}}])
+              logs=[{"stage": "编排层-能力路由", "message": f"选择{len(selected)}个插件(真实注册表)",
+                     "data": {"composition": composition, "pool": len(plugin_map)}}])
 
 
 # ============================================================

@@ -252,7 +252,7 @@ async def test_chat_voice_compat():
     except ImportError:
         RESULTS.append("  - chat 兼容测试跳过(chat_service 不可用)")
         return
-    from repositories.chat_repository import SENDER_USER, MESSAGE_TYPE_TEXT
+        from repositories.chat_repository import SENDER_USER, MESSAGE_TYPE_TEXT
     svc = ChatService()
     try:
         s = await svc.create_session(user_id=9911, session_type="presale",
@@ -263,10 +263,191 @@ async def test_chat_voice_compat():
         record("chat 会话建立(voice 容器)", False, str(exc))
 
 
+# ============================================================
+# P1: 意图路由器 + 熔断 + 编排 + decision 接管
+# ============================================================
+
+async def test_router():
+    """9. 意图路由器(角色过滤 + 命中路由 + 通用兜底)"""
+    svc = HubService()
+    # guest 问价 → knowledge.rag(product.price 意图在 knowledge.rag 域)
+    r = await svc.route("这瓶酒多少钱", role="guest")
+    record("路由: 游客问价→knowledge.rag", r["capability"] == "knowledge.rag",
+           f"got {r['capability']}")
+    # guest 查订单 → degraded(member 能力, 游客被拒)
+    r = await svc.route("查我的订单", role="guest")
+    record("路由: 游客查订单 degraded", r["status"] == "degraded"
+           and any(x["reason"] == "role" for x in r["rejected"]))
+    # member 查订单 → order.query
+    r = await svc.route("查我的订单", role="member")
+    record("路由: 会员查订单→order.query", r["capability"] == "order.query")
+    # staff 查分润 → role.profit
+    r = await svc.route("查我的分润", role="cs_staff")
+    record("路由: 客服查分润→role.profit", r["capability"] == "role.profit")
+    # 游客查分润 → degraded(角色隔离)
+    r = await svc.route("查我的分润", role="guest")
+    record("路由: 游客查分润 degraded", r["status"] == "degraded")
+    # 通用闲聊 → unmatched 兜底
+    r = await svc.route("今天天气不错", role="member")
+    record("路由: 闲聊 unmatched", r["status"] == "unmatched"
+           and r["capability"] is None)
+    # 转人工 → chat.human(全角色可用)
+    r = await svc.route("转人工", role="guest")
+    record("路由: 转人工→chat.human", r["capability"] == "chat.human")
+    # 下架 knowledge.rag 后问价 → degraded
+    cap = await svc.repo.get_capability("knowledge.rag")
+    cap["enabled"] = False
+    await svc.repo.upsert_capability(cap)
+    r = await svc.route("这瓶酒多少钱", role="guest")
+    record("路由: 下架后 degraded", r["status"] == "degraded")
+    cap["enabled"] = True
+    await svc.repo.upsert_capability(cap)
+
+
+async def test_circuit():
+    """10. 熔断: 窗口成功率跌破阈值自动摘除 + 半开探测自愈"""
+    svc = HubService()
+    repo = svc.repo
+    # 样本不足(<5)不熔断
+    for _ in range(3):
+        await repo.record_health("knowledge.rag", success=False, latency_ms=100)
+    st = await svc.get_circuit_status("knowledge.rag")
+    record("熔断: 样本不足不摘除", st["circuitOpen"] is False
+           and st["successRate"] is None)
+    # 5 次全失败 → 成功率 0 < 0.5 → 熔断
+    for _ in range(2):
+        await repo.record_health("knowledge.rag", success=False, latency_ms=100)
+    st = await svc.get_circuit_status("knowledge.rag")
+    record("熔断: 连续失败摘除", st["circuitOpen"] is True and st["successRate"] == 0.0)
+    # 熔断后路由自动绕行
+    r = await svc.route("这瓶酒多少钱", role="guest")
+    record("熔断: 路由绕行 degraded", r["status"] == "degraded"
+           and any(x["reason"] == "circuit" for x in r["rejected"]))
+    # 半开探测: 清零窗口 → 恢复路由
+    pr = await svc.probe_capability("knowledge.rag")
+    record("熔断: 半开探测清零", pr["reset"] is True)
+    r = await svc.route("这瓶酒多少钱", role="guest")
+    record("熔断: 探测后恢复路由", r["capability"] == "knowledge.rag")
+    # 混合成功率高不熔断(4成功1失败=0.8)
+    await repo.reset_health_window("knowledge.rag")
+    for ok in (True, True, True, True, False):
+        await repo.record_health("knowledge.rag", success=ok, latency_ms=100)
+    st = await svc.get_circuit_status("knowledge.rag")
+    record("熔断: 80%成功率不摘除", st["circuitOpen"] is False
+           and abs(st["successRate"] - 0.8) < 1e-9)
+
+
+async def test_orchestrate():
+    """11. 复合编排(≤3 段并行 + 截断)"""
+    svc = HubService()
+    r = await svc.orchestrate(
+        ["这瓶酒多少钱", "查我的订单", "转人工"], role="member")
+    record("编排: 3 段任务生成", len(r["tasks"]) == 3
+           and len(r["parallelGroups"]) == 3)
+    caps = [t["capability"] for t in r["tasks"]]
+    record("编排: 各段正确路由",
+           caps[0] == "knowledge.rag" and caps[1] == "order.query"
+           and caps[2] == "chat.human", f"got {caps}")
+    # 超 3 段截断
+    r = await svc.orchestrate(["问价", "查单", "转人工", "查积分"], role="member")
+    record("编排: 超限截断为 3", len(r["tasks"]) == 3)
+    # 空段过滤
+    r = await svc.orchestrate(["", "  ", "问价"], role="member")
+    record("编排: 空段过滤", len(r["tasks"]) == 1)
+
+
+def test_http_p1():
+    """12. HTTP 层 P1 端点(route/orchestrate/circuit)"""
+    try:
+        from fastapi.testclient import TestClient
+        from main import app
+    except ImportError:
+        RESULTS.append("  - HTTP P1 测试跳过(TestClient 不可用)")
+        return
+    client = TestClient(app)
+
+    # 12a. 路由
+    r = client.post("/api/hub/route", json={"text": "这瓶酒多少钱", "role": "guest"})
+    body = r.json()
+    record("HTTP P1 路由", r.status_code == 200
+           and body["capability"] == "knowledge.rag", f"{body}")
+
+    # 12b. 路由角色隔离
+    r = client.post("/api/hub/route", json={"text": "查我的订单", "role": "guest"})
+    record("HTTP P1 路由角色隔离", r.json()["status"] == "degraded")
+
+    # 12c. 编排
+    r = client.post("/api/hub/orchestrate",
+                    json={"segments": ["问价", "转人工"], "role": "member"})
+    body = r.json()
+    record("HTTP P1 编排", r.status_code == 200 and len(body["tasks"]) == 2)
+
+    # 12d. 编排超 3 段 → 422
+    r = client.post("/api/hub/orchestrate",
+                    json={"segments": ["a", "b", "c", "d"], "role": "member"})
+    record("HTTP P1 编排超限 422", r.status_code == 422)
+
+    # 12e. 熔断查询(admin)
+    r = client.get("/api/hub/ops/circuit/knowledge.rag",
+                   headers={"X-Role": "admin"})
+    record("HTTP P1 熔断查询", r.status_code == 200
+           and "circuitOpen" in r.json())
+    r = client.get("/api/hub/ops/circuit/knowledge.rag")
+    record("HTTP P1 熔断查询无权限 403", r.status_code == 403)
+
+    # 12f. 半开探测(admin)
+    r = client.post("/api/hub/ops/circuit/knowledge.rag/probe",
+                    headers={"X-Role": "admin"})
+    record("HTTP P1 半开探测", r.status_code == 200 and r.json()["reset"] is True)
+    r = client.post("/api/hub/ops/circuit/not-exist/probe",
+                    headers={"X-Role": "admin"})
+    record("HTTP P1 探测 404", r.status_code == 404)
+
+
+def test_decision_takeover():
+    """13. decision 模块编排端点真实化接管验证"""
+    try:
+        from fastapi.testclient import TestClient
+        from main import app
+    except ImportError:
+        RESULTS.append("  - decision 接管测试跳过(TestClient 不可用)")
+        return
+    client = TestClient(app)
+
+    # 13a. capability-route: 插件池来自真实注册表(pluginPool=7 而非硬编码 120)
+    r = client.post("/api/decision/capability-route",
+                    json={"requiredCapabilities": ["knowledge.rag", "chat.human"],
+                          "task": "问价并转人工"},
+                    headers={"X-Role": "store_owner"})
+    body = r.json()
+    data = body.get("details", body.get("data", body))
+    record("decision 接管: 真实插件池",
+           data.get("pluginPool") == 7, f"pool={data.get('pluginPool')}")
+    selected = data.get("selectedPlugins", [])
+    record("decision 接管: 能力选中",
+           any(p["id"] == "knowledge.rag" for p in selected))
+
+    # 13b. orchestrate: 任务带真实 capability/intent(非硬编码)
+    r = client.post("/api/decision/orchestrate",
+                    json={"workflow": "test",
+                          "modules": ["这瓶酒多少钱", "转人工"],
+                          "context": {}},
+                    headers={"X-Role": "agent"})
+    body = r.json()
+    data = body.get("details", body.get("data", body))
+    tasks = data.get("tasks", [])
+    record("decision 接管: 任务带 capability",
+           len(tasks) == 2 and all("capability" in t for t in tasks))
+    record("decision 接管: 意图真实路由",
+           len(tasks) == 2 and tasks[0].get("capability") == "knowledge.rag"
+           and tasks[1].get("capability") == "chat.human",
+           f"got {tasks}")
+
+
 async def main():
     reset_store()
     print("=" * 64)
-    print("AI智能中枢模块(35号) P0 端到端测试")
+    print("AI智能中枢模块(35号) P0+P1 端到端测试")
     print("=" * 64)
 
     await test_intent_rules()
@@ -277,6 +458,12 @@ async def main():
     await test_health()
     test_http_layer()
     await test_chat_voice_compat()
+    # ---- P1 ----
+    await test_router()
+    await test_circuit()
+    await test_orchestrate()
+    test_http_p1()
+    test_decision_takeover()
 
     print("\n".join(RESULTS))
     print("-" * 64)

@@ -7,8 +7,8 @@
     hub:route:health:{cid}:  能力健康滚动窗口(Hash: success/fail/p95样本)
 
 设计对齐(AI智能中枢模块设计文档 v1.0):
-    - P0: 能力注册表种子 + 意图统计 + ASR限流存储
-    - 能力注册表为 P1 路由器的数据地基, P0 先落存储与种子
+    - P0: 能力注册表种子 + 意图统计 + ASR 限流存储
+    - P1: 健康滚动窗口(路由决策与熔断的数据源)
 """
 
 import json
@@ -172,6 +172,7 @@ class HubRepository:
             self.store["hub_capabilities"] = {}
             self.store["hub_intent_stats"] = {}      # {date: {intent: n}}
             self.store["hub_asr_usage"] = {}          # {(mid, date): n}
+            self.store["hub_route_health"] = {}      # {cap_id: window}
             for cap in CAPABILITY_SEED:
                 self.store["hub_capabilities"][cap["id"]] = dict(cap)
 
@@ -263,3 +264,49 @@ class HubRepository:
         used = self.store["hub_asr_usage"].get(k, 0) + 1
         self.store["hub_asr_usage"][k] = used
         return used, used > daily_limit
+
+    # ============================================================
+    # 能力健康滚动窗口(P1: 路由决策与熔断的数据源)
+    # ============================================================
+
+    async def record_health(self, cap_id: str, success: bool,
+                            latency_ms: int = 0) -> None:
+        """能力调用结果入健康窗口(field: success/fail/total/p95_sum/samples)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("hub", "route", "health", cap_id)
+            pipe = client.pipeline()
+            pipe.hincrby(key, "success" if success else "fail", 1)
+            pipe.hincrby(key, "total", 1)
+            pipe.hincrby(key, "p95_sum", latency_ms)
+            pipe.hincrby(key, "samples", 1)
+            await pipe.execute()
+            return
+        self._ensure_store()
+        w = self.store["hub_route_health"].setdefault(cap_id,
+            {"success": 0, "fail": 0, "total": 0, "p95_sum": 0, "samples": 0})
+        w["success" if success else "fail"] += 1
+        w["total"] += 1
+        w["p95_sum"] += latency_ms
+        w["samples"] += 1
+
+    async def get_health_window(self, cap_id: str) -> dict:
+        """读取能力健康窗口(空窗口返回全 0)"""
+        empty = {"success": 0, "fail": 0, "total": 0, "p95_sum": 0, "samples": 0}
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k("hub", "route", "health", cap_id))
+            if not data:
+                return dict(empty)
+            return {k: int(v) for k, v in data.items()}
+        self._ensure_store()
+        return dict(self.store["hub_route_health"].get(cap_id, empty))
+
+    async def reset_health_window(self, cap_id: str) -> None:
+        """清零健康窗口(半开探测/管理员复位用)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.delete(_k("hub", "route", "health", cap_id))
+            return
+        self._ensure_store()
+        self.store["hub_route_health"].pop(cap_id, None)

@@ -72,6 +72,20 @@ class ToggleRequest(BaseModel):
     enabled: bool = Field(..., description="目标状态")
 
 
+class RouteRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000,
+                      description="用户输入文本")
+    role: str = Field(default="guest",
+                      description="角色: guest/member/cs_staff/admin")
+
+
+class OrchestrateHubRequest(BaseModel):
+    segments: list[str] = Field(..., min_length=1, max_length=3,
+                                description="复合任务子段(≤3 段并行)")
+    role: str = Field(default="guest",
+                      description="角色: guest/member/cs_staff/admin")
+
+
 # ============================================================
 # 输入引擎: ASR(设计文档 5.2.1)
 # ============================================================
@@ -157,6 +171,43 @@ async def toggle_capability(
     cap["enabled"] = req.enabled
     await hub_service.repo.upsert_capability(cap)
     return {"success": True, "id": cap_id, "enabled": req.enabled}
+
+
+# ============================================================
+# 意图路由器 + 复合编排(设计文档 5.3, P1)
+# ============================================================
+
+@router.post("/api/hub/route")
+async def route_intent(req: RouteRequest):
+    """意图 → 能力路由(路由器核心: 角色过滤+熔断摘除+健康排序).
+
+    status: routed=已路由 / degraded=意图命中但能力全被摘 / unmatched=通用兜底.
+    capability=None 时调用方回退 chat.general.
+    """
+    return await hub_service.route(req.text, req.role)
+
+
+@router.post("/api/hub/orchestrate")
+async def orchestrate_hub(req: OrchestrateHubRequest):
+    """复合任务编排(≤3 段并行路由 + 后置动作)."""
+    return await hub_service.orchestrate(req.segments, req.role)
+
+
+@router.get("/api/hub/ops/circuit/{cap_id}")
+async def get_circuit(cap_id: str, x_role: str | None = Header(None, alias="X-Role")):
+    """能力熔断状态查询(admin; 滚动窗口+判定)"""
+    _require_admin(x_role)
+    return await hub_service.get_circuit_status(cap_id)
+
+
+@router.post("/api/hub/ops/circuit/{cap_id}/probe")
+async def probe_circuit(cap_id: str, x_role: str | None = Header(None, alias="X-Role")):
+    """半开恢复探测: 清零健康窗口重新统计(admin)"""
+    _require_admin(x_role)
+    cap = await hub_service.repo.get_capability(cap_id)
+    if cap is None:
+        raise HTTPException(status_code=404, detail=f"能力不存在: {cap_id}")
+    return await hub_service.probe_capability(cap_id)
 
 
 # ============================================================
