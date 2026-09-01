@@ -7,12 +7,14 @@
     - 扫码追溯(全链路追溯链)
     - 防窜货检测(激活位置与代理区域比对)
     - 转让管理(持有人变更, 激活日期延续)
+    - 窜货分级处罚(P1-7: 轻微/一般/严重/极重四级, 扣返利+扣保证金+取消资格)
 
 锁保护:
     - 生成: lock:trace:generate:{code_type}:{batch_no} (码生成幂等)
     - 激活: lock:trace:activate:{life_code}  (激活幂等)
     - 绑定: lock:trace:bind:{box_id}         (箱码绑定)
     - 转让: lock:trace:transfer:{life_code}  (转让原子操作)
+    - 处罚: lock:trace:penalty:{agent_id}    (窜货处罚原子操作)
 
 异常约定:
     - KeyError → 404(码不存在)
@@ -1129,3 +1131,228 @@ class TraceService:
         return {"agentId": agent_id, "warningCount": len(warnings),
                 "warnings": warnings,
                 "inStockBoxes": len(in_stock)}
+
+    # ============================================================
+    # 8. 窜货分级处罚(P1-7, 设计文档 5.3 处罚分级表)
+    # ============================================================
+
+    # 处罚分级(箱码设计文档 5.3):
+    #   minor(轻微):   跨区开箱 1-2 箱   → 警告+限期整改
+    #   moderate(一般): 跨区开箱 3-10 箱  → 扣返利 10% + 保证金 20%
+    #   severe(严重):  跨区开箱 >10 箱   → 扣返利 30% + 保证金 50%
+    #   extreme(极重): 恶意窜货(人工判定) → 取消代理资格 + 扣全部保证金
+    PENALTY_MINOR = "minor"
+    PENALTY_MODERATE = "moderate"
+    PENALTY_SEVERE = "severe"
+    PENALTY_EXTREME = "extreme"
+    VALID_PENALTY_LEVELS = (PENALTY_MINOR, PENALTY_MODERATE,
+                            PENALTY_SEVERE, PENALTY_EXTREME)
+
+    # 各级返利扣减比例 / 保证金扣减比例
+    PENALTY_REBATE_RATES = {PENALTY_MINOR: 0.0, PENALTY_MODERATE: 0.10,
+                            PENALTY_SEVERE: 0.30, PENALTY_EXTREME: 1.0}
+    PENALTY_DEPOSIT_RATES = {PENALTY_MINOR: 0.0, PENALTY_MODERATE: 0.20,
+                             PENALTY_SEVERE: 0.50, PENALTY_EXTREME: 1.0}
+
+    # 保证金默认基准(按代理商等级, 档案未显式设置时初始化)
+    DEFAULT_DEPOSIT_BY_LEVEL = {"S": 100000.0, "A": 60000.0, "B": 40000.0,
+                                "C": 20000.0, "D": 10000.0}
+
+    # 信用分扣减(信用管理文档: 区门外窜货 -30/次)
+    CREDIT_DELTA_PER_PENALTY = -30
+
+    @staticmethod
+    def _classify_penalty(cross_box_count: int) -> str:
+        """按跨区箱数自动定级(箱码设计文档 5.3)"""
+        if cross_box_count <= 2:
+            return TraceService.PENALTY_MINOR
+        if cross_box_count <= 10:
+            return TraceService.PENALTY_MODERATE
+        return TraceService.PENALTY_SEVERE
+
+    async def _get_agent_deposit(self, agent_id, agent: dict) -> float:
+        """读取/初始化代理商保证金(档案未设置时按等级基准初始化)"""
+        if agent.get("deposit") is None:
+            base = self.DEFAULT_DEPOSIT_BY_LEVEL.get(
+                agent.get("level", "C"), 20000.0)
+            from repositories.agent_repository import AgentRepository
+            await AgentRepository().update_fields(
+                agent_id, {"deposit": base})
+            return base
+        return float(agent.get("deposit", 0))
+
+    async def anti_channel_punish(self, agent_id: int,
+                                   cross_box_count: int = None,
+                                   violation_level: str = None,
+                                   handled_by: str = "",
+                                   remark: str = "") -> dict:
+        """窜货分级处罚执行(原子操作)
+
+        流程(设计文档 5.3):
+            1. 跨区箱数: 未指定时自动统计该代理商名下 isCrossRegion 的箱数
+            2. 定级: violation_level 显式指定(极重须人工判定), 否则按箱数自动分级
+            3. 执行:
+                - minor:    警告(写风控记录, 不扣款)
+                - moderate: 扣 pending 返利 10% + 保证金 20%
+                - severe:   扣 pending 返利 30% + 保证金 50%
+                - extreme:  取消代理资格(status=terminated) + 保证金清零
+            4. 写处罚单(含区块哈希存证) + 代理商风控记录留痕
+
+        Raises:
+            KeyError: 代理商不存在
+            ValueError: 分级非法 / 跨区箱数为 0 / 已终止代理商
+        """
+        from repositories.agent_repository import AgentRepository
+        agent_repo = AgentRepository()
+
+        async with get_lock(f"trace:penalty:{agent_id}"):
+            agent = await agent_repo.get(agent_id)
+            if not agent:
+                raise KeyError(f"代理商不存在(agentId={agent_id})")
+            if agent.get("status") == "terminated":
+                raise ValueError("代理商已终止, 不能重复处罚")
+
+            # 跨区箱数(自动统计: 开箱时 isCrossRegion 已落箱档案)
+            if cross_box_count is None:
+                boxes = await self.repo.list_boxes_by_agent(agent_id)
+                cross_box_count = sum(1 for b in boxes if b.get("isCrossRegion"))
+
+            if violation_level is None:
+                if cross_box_count <= 0:
+                    raise ValueError("该代理商无跨区开箱记录, 无须处罚")
+                violation_level = self._classify_penalty(cross_box_count)
+            elif violation_level not in self.VALID_PENALTY_LEVELS:
+                raise ValueError(f"处罚分级非法(须为 {'/'.join(self.VALID_PENALTY_LEVELS)})")
+
+            # ---- 执行处罚 ----
+            rebate_rate = self.PENALTY_REBATE_RATES[violation_level]
+            deposit_rate = self.PENALTY_DEPOSIT_RATES[violation_level]
+
+            # 1) 扣返利(pending 状态返利按比例扣减, deductedAmount 留痕)
+            rebate_deducted = 0.0
+            if rebate_rate > 0:
+                rebates = await agent_repo.list_rebates_by_agent(
+                    agent_id, status="pending")
+                for r in rebates:
+                    amount = float(r.get("rebateAmount", 0)) \
+                             - float(r.get("deductedAmount", 0))
+                    if amount <= 0:
+                        continue
+                    deduct = round(amount * rebate_rate, 2)
+                    await agent_repo.update_rebate_fields(
+                        r["rebateId"], {
+                            "deductedAmount":
+                                round(float(r.get("deductedAmount", 0)) + deduct, 2),
+                        })
+                    rebate_deducted += deduct
+
+            # 2) 扣保证金
+            deposit_before = await self._get_agent_deposit(agent_id, agent)
+            deposit_deducted = round(deposit_before * deposit_rate, 2)
+            deposit_after = round(deposit_before - deposit_deducted, 2)
+            agent_updates = {
+                "deposit": deposit_after,
+                "depositDeductedTotal": round(
+                    float(agent.get("depositDeductedTotal", 0))
+                    + deposit_deducted, 2),
+            }
+
+            # 3) 极重: 取消代理资格
+            terminated = violation_level == self.PENALTY_EXTREME
+            if terminated:
+                agent_updates["status"] = "terminated"
+                agent_updates["terminatedAt"] = ts()
+            await agent_repo.update_fields(agent_id, agent_updates)
+
+            # 4) 处罚动作描述
+            actions = {
+                self.PENALTY_MINOR: "警告+限期整改",
+                self.PENALTY_MODERATE: "扣返利10%+保证金20%",
+                self.PENALTY_SEVERE: "扣返利30%+保证金50%",
+                self.PENALTY_EXTREME: "取消代理资格+扣除全部保证金",
+            }[violation_level]
+
+            # 5) 写处罚单(含存证哈希)
+            penalty = {
+                "agentId": agent_id,
+                "agentName": agent.get("name", ""),
+                "violationLevel": violation_level,
+                "crossBoxCount": cross_box_count,
+                "penaltyAction": actions,
+                "rebateDeducted": rebate_deducted,
+                "depositDeducted": deposit_deducted,
+                "depositBefore": deposit_before,
+                "depositAfter": deposit_after,
+                "creditDelta": self.CREDIT_DELTA_PER_PENALTY,
+                "status": "executed",
+                "handledBy": handled_by,
+                "handledAt": ts(),
+                "remark": remark,
+                "blockHash": bc_hash(),
+            }
+            penalty_id = await self.repo.save_penalty(penalty)
+            penalty["id"] = penalty_id
+
+            # 6) 代理商风控记录留痕(信用档案联动)
+            await agent_repo.save_risk({
+                "riskId": await agent_repo.next_risk_id(),
+                "agentId": agent_id,
+                "type": "anti_channel_penalty",
+                "level": "high" if violation_level in (
+                    self.PENALTY_SEVERE, self.PENALTY_EXTREME) else "medium",
+                "desc": f"窜货处罚({violation_level}): {actions}, "
+                        f"跨区 {cross_box_count} 箱",
+                "penaltyId": penalty_id,
+                "creditDelta": self.CREDIT_DELTA_PER_PENALTY,
+                "createdAt": ts(),
+            })
+
+            logger.info("anti_channel_penalty agent=%s level=%s cross_boxes=%d "
+                        "rebate_deducted=%.2f deposit_deducted=%.2f terminated=%s",
+                        agent_id, violation_level, cross_box_count,
+                        rebate_deducted, deposit_deducted, terminated)
+            return penalty
+
+    async def list_agent_penalties(self, agent_id: int = None,
+                                    limit: int = 50) -> list[dict]:
+        """窜货处罚单查询(按代理商过滤)"""
+        return await self.repo.list_penalties_by_agent(agent_id, limit)
+
+    async def anti_channel_warning_summary(self) -> dict:
+        """全代理商防窜预警汇总(admin 巡检用)
+
+        数据源: 箱档案 isCrossRegion(开箱时写入), 按代理商聚合:
+            - 各代理商跨区开箱箱数 + 涉及批次
+            - 建议处罚分级(未处罚的跨区箱数自动定级)
+        """
+        from repositories.agent_repository import AgentRepository
+        agents = await AgentRepository().list_all()
+
+        summary = []
+        for agent in agents:
+            agent_id = agent.get("id")
+            boxes = await self.repo.list_boxes_by_agent(agent_id)
+            cross_boxes = [b for b in boxes if b.get("isCrossRegion")]
+            if not cross_boxes:
+                continue
+            batches = sorted({b.get("batchNo", "") for b in cross_boxes})
+            penalties = await self.repo.list_penalties_by_agent(agent_id)
+            summary.append({
+                "agentId": agent_id,
+                "agentName": agent.get("name", ""),
+                "status": agent.get("status", ""),
+                "crossBoxCount": len(cross_boxes),
+                "crossBatches": batches,
+                "suggestedLevel": self._classify_penalty(len(cross_boxes)),
+                "penaltyCount": len(penalties),
+                "crossBoxes": [{"boxCode": b["boxCode"],
+                                "batchNo": b.get("batchNo"),
+                                "openProvince": b.get("openProvince"),
+                                "openCity": b.get("openCity"),
+                                "openedAt": b.get("openedAt")}
+                               for b in cross_boxes[:20]],
+            })
+
+        return {"totalAgents": len(summary),
+                "totalCrossBoxes": sum(s["crossBoxCount"] for s in summary),
+                "summary": summary}

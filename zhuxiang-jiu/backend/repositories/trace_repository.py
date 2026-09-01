@@ -7,6 +7,7 @@
     agent_inbound_logs:  代理商箱级入库流水(P1-6, 扫箱底码 BBC 入库)
     agent_outbound_logs: 代理商箱级出库流水(P1-6)
     agent_stocktakes:    代理商盘点单(P1-6, 实盘 vs 系统差异)
+    anti_channel_penalties: 窜货分级处罚单(P1-7, 对齐设计文档 cross_region_warnings)
 
 设计对齐:
     - 双模式存储: is_redis_mode() 切换内存字典/Redis Hash
@@ -15,6 +16,7 @@
     - 扫码记录: 按时间倒序, 支持按码/用户筛选
     - 箱级库存(P1-6): 入库回写 box(inboundAt/inboundLocation),
       出库回写 box(outboundAt/outboundTo), 看板按 agentId 聚合
+    - 窜货处罚(P1-7): 处罚单含分级/跨区箱数/扣返利/扣保证金/存证哈希
 """
 
 import json
@@ -258,6 +260,69 @@ class TraceRepository:
         self._ensure_store()
         return [b for b in self.store["trace_box_codes"].values()
                 if str(b.get("agentId")) == str(agent_id)][:limit]
+
+    # ============================================================
+    # 窜货分级处罚单(P1-7, 对齐设计文档 cross_region_warnings 表)
+    # ============================================================
+
+    async def next_penalty_id(self) -> int:
+        """生成处罚单ID"""
+        if is_redis_mode():
+            return await self._redis_next_id("trace_penalty")
+        return self._mem_next_id("_trace_penalty_seq")
+
+    async def save_penalty(self, penalty: dict) -> int:
+        """保存窜货处罚单(返回ID)"""
+        penalty_id = await self.next_penalty_id()
+        penalty["id"] = penalty_id
+        penalty.setdefault("createdAt", datetime.utcnow().isoformat())
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("trace", "penalty", penalty_id),
+                             json.dumps(penalty, ensure_ascii=False))
+            await client.lpush(_k("trace", "penalties_by_agent",
+                                  penalty.get("agentId")), penalty_id)
+        else:
+            self._ensure_store()
+            self.store.setdefault("trace_penalties", {})[penalty_id] = penalty
+            self.store.setdefault("trace_penalty_by_agent", {}).setdefault(
+                str(penalty.get("agentId")), []).append(penalty_id)
+        return penalty_id
+
+    async def get_penalty(self, penalty_id: int) -> dict | None:
+        """按ID查询处罚单"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("trace", "penalty", penalty_id))
+            return json.loads(raw) if raw else None
+        self._ensure_store()
+        return self.store.get("trace_penalties", {}).get(penalty_id)
+
+    async def list_penalties_by_agent(self, agent_id=None,
+                                       limit: int = 50) -> list[dict]:
+        """查询窜货处罚单(按代理商过滤, 时间倒序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if agent_id is not None:
+                ids = await client.lrange(
+                    _k("trace", "penalties_by_agent", agent_id), 0, limit - 1)
+            else:
+                keys = await client.keys(_k("trace", "penalty", "*"))
+                ids = [k.rsplit(":", 1)[-1] for k in keys]
+            records = []
+            for pid in ids[:limit]:
+                raw = await client.get(_k("trace", "penalty", pid))
+                if raw:
+                    records.append(json.loads(raw))
+            records.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+            return records
+        self._ensure_store()
+        records = list(self.store.get("trace_penalties", {}).values())
+        if agent_id is not None:
+            records = [r for r in records
+                       if str(r.get("agentId")) == str(agent_id)]
+        records.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+        return records[:limit]
 
     # ============================================================
     # 箱码表 CRUD

@@ -1,15 +1,15 @@
-"""双码追溯管理模块路由(19 端点)
+"""双码追溯管理模块路由(22 端点)
 
 鉴权:
     - 用户端: X-Member-Id 头(扫码激活/转让/查询/开箱)
-    - 管理端: X-Role: admin 头(生成箱码/生命码/绑定/统计)
+    - 管理端: X-Role: admin 头(生成箱码/生命码/绑定/统计/处罚)
     - 代理商端: X-Agent-Id 头(箱级库存, 须与路径 agent_id 一致)
 
 端点分布:
     - 箱码(4):     generate-box / bind-box / open-box / query-box
     - 生命码(3):    generate-life / bind-life / query-life
     - 扫码(3):     activate / scan-trace / trace-chain
-    - 防窜(1):     anti-channel
+    - 防窜(4):     anti-channel(检测) / punish / penalties / warnings汇总
     - 转让(1):     transfer
     - 记录(1):     scan-logs
     - 统计(1):     stats
@@ -530,6 +530,73 @@ async def agent_warnings(
         result = await _service.agent_inventory_warnings(
             agent_id, safety_stock=safety_stock,
             overstock_days=overstock_days)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 窜货分级处罚(P1-7, 设计文档 5.3: 轻微/一般/严重/极重)
+# ============================================================
+
+class AntiChannelPunishRequest(PydBaseModel):
+    agentId: int = Field(..., description="被处罚代理商ID")
+    crossBoxCount: int | None = Field(
+        None, ge=1, description="跨区开箱箱数(缺省自动统计该代理商跨区箱)")
+    violationLevel: str | None = Field(
+        None, description="处罚分级 minor/moderate/severe/extreme"
+                          "(缺省按箱数自动定级; extreme 须人工显式指定)")
+    remark: str = Field("", description="处罚备注(取证说明等)")
+
+
+@router.post("/api/trace/anti-channel/punish", tags=["双码追溯模块"])
+async def anti_channel_punish(
+    data: AntiChannelPunishRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """窜货分级处罚执行(管理员, 设计文档 5.3)
+
+    分级: minor(1-2 箱, 警告) / moderate(3-10 箱, 扣返利10%+保证金20%) /
+    severe(>10 箱, 扣返利30%+保证金50%) / extreme(恶意窜货, 取消资格+保证金清零)。
+    """
+    _require_admin(x_role)
+    try:
+        result = await _service.anti_channel_punish(
+            agent_id=data.agentId,
+            cross_box_count=data.crossBoxCount,
+            violation_level=data.violationLevel,
+            handled_by="admin",
+            remark=data.remark,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/trace/anti-channel/penalties/{agent_id}", tags=["双码追溯模块"])
+async def agent_penalties(
+    agent_id: int,
+    x_agent_id: str = Header(None, alias="X-Agent-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """查询代理商窜货处罚单记录(admin 或代理商本人)"""
+    if x_role != "admin":
+        _require_agent(x_agent_id, agent_id)
+    try:
+        result = await _service.list_agent_penalties(agent_id)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/trace/anti-channel/warnings", tags=["双码追溯模块"])
+async def anti_channel_warnings(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """全代理商防窜预警汇总(管理员巡检: 跨区箱数/批次/建议分级)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.anti_channel_warning_summary()
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
