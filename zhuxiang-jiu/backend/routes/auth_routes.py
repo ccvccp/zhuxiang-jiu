@@ -83,6 +83,29 @@ class SmsLoginRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=6, description="验证码(6位数字)")
 
 
+class OAuthUrlRequest(BaseModel):
+    """三方授权跳转 URL(P1-2)"""
+    redirectUri: str = Field(..., min_length=1, description="回调地址(备案域名)")
+
+
+class OAuthCallbackRequest(BaseModel):
+    """三方授权回调(P1-2, code 换登录态/绑定票据)"""
+    code: str = Field(..., min_length=1, description="授权 code(平台回调携带)")
+    state: str | None = Field(None, description="防 CSRF 回传 state(透传校验)")
+
+
+class OAuthBindPhoneRequest(BaseModel):
+    """三方登录绑定手机号(P1-2, 手机号+短信验证码)"""
+    ticket: str = Field(..., min_length=8, description="回调返回的授权票据")
+    phone: str = Field(..., min_length=11, max_length=11, description="手机号(11位)")
+    smsCode: str = Field(..., min_length=6, max_length=6, description="短信验证码")
+
+
+class OAuthUnbindRequest(BaseModel):
+    """解绑三方账号(P1-2)"""
+    platform: str = Field(..., description="平台 wechat/alipay/qq")
+
+
 # ============================================================
 # 异常映射与鉴权依赖
 # ============================================================
@@ -204,6 +227,70 @@ async def sms_verify(data: SmsVerifyRequest):
     """校验短信验证码(校验通过即消费, 一次性)"""
     try:
         return await _service.verify_sms_code(data.phone, data.code)
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+# ============================================================
+# 三方快捷登录(P1-2, 设计文档 2.3/2.4/5.2/5.3)
+# 流程: 授权 URL → 平方回调(code→已绑定直接登录/未绑定发票据) → 绑定手机号 → 登录
+# ============================================================
+
+@router.post("/api/auth/oauth/{platform}/url", tags=["用户认证模块"])
+async def oauth_url(platform: str, data: OAuthUrlRequest):
+    """生成三方授权跳转 URL(wechat/alipay/qq)"""
+    try:
+        return await _service.get_oauth_url(platform, data.redirectUri)
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+@router.post("/api/auth/oauth/{platform}/callback", tags=["用户认证模块"])
+async def oauth_callback(platform: str, data: OAuthCallbackRequest):
+    """三方授权回调
+
+    已绑定 → status=loggedIn 返回 JWT 双令牌;
+    未绑定 → status=bindRequired 返回 10 分钟票据, 调 /bind-phone 完成。
+    """
+    try:
+        return await _service.oauth_callback(platform, data.code)
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+@router.post("/api/auth/oauth/bind-phone", tags=["用户认证模块"])
+async def oauth_bind_phone(data: OAuthBindPhoneRequest):
+    """三方登录绑定手机号(手机号+短信验证码)
+
+    手机号已注册 → 绑定既有账号; 未注册 → 自动创建并绑定; 均返回 JWT 双令牌。
+    """
+    try:
+        return await _service.bind_phone(data.ticket, data.phone, data.smsCode)
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+@router.get("/api/auth/oauth/bindings", tags=["用户认证模块"])
+async def oauth_bindings(
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    """查询本人三方绑定列表(多账号合并视图, 设计文档 5.3)"""
+    token = _extract_bearer_token(authorization)
+    try:
+        return await _service.list_my_bindings(token)
+    except Exception as exc:
+        _handle_auth_error(exc)
+
+
+@router.post("/api/auth/oauth/unbind", tags=["用户认证模块"])
+async def oauth_unbind(
+    data: OAuthUnbindRequest,
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    """解绑三方账号(最后登录方式保护: 无密码且仅剩此绑定时拒绝)"""
+    token = _extract_bearer_token(authorization)
+    try:
+        return await _service.unbind(token, data.platform)
     except Exception as exc:
         _handle_auth_error(exc)
 

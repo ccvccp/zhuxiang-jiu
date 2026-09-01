@@ -16,9 +16,12 @@
     - AuthError  → 401(Token 无效/过期/被吊销/权限不足)
 """
 
+import hashlib
 import logging
+import os
 import random
 import re
+import secrets
 from datetime import datetime, UTC
 
 from core.auth import (
@@ -252,6 +255,220 @@ class AuthService:
             "role": role,
             **tokens,
         }
+
+    # ============================================================
+    # 三方快捷登录(P1-2, 设计文档 2.3/2.4/5.2/5.3)
+    # ============================================================
+
+    OAUTH_PLATFORMS = ("wechat", "alipay", "qq")
+    OAUTH_TICKET_TTL = 600   # 授权→绑定手机号中转态 10 分钟
+
+    def _oauth_appid(self, platform: str) -> str:
+        """读取平台 AppID(环境变量; 未配置返回空串, 授权 URL 走模拟格式)"""
+        return os.environ.get(f"OAUTH_{platform.upper()}_APPID", "")
+
+    async def get_oauth_url(self, platform: str, redirect_uri: str) -> dict:
+        """生成三方授权跳转 URL
+
+        平台真实端点:
+            wechat: https://open.weixin.qq.com/connect/qr/authorize
+            alipay: https://openauth.alipay.com/oauth2/publicAppAuthorize.htm
+            qq:     https://graph.qq.com/oauth2.0/authorize
+
+        Raises:
+            ValueError: 平台非法
+        """
+        if platform not in self.OAUTH_PLATFORMS:
+            raise ValueError(f"不支持的三方平台: {platform}(须为 {'/'.join(self.OAUTH_PLATFORMS)})")
+        appid = self._oauth_appid(platform)
+        state = secrets.token_hex(8)
+        if platform == "wechat":
+            url = (f"https://open.weixin.qq.com/connect/qr/authorize"
+                   f"?appid={appid}&redirect_uri={redirect_uri}"
+                   f"&response_type=code&scope=snsapi_login&state={state}")
+        elif platform == "alipay":
+            url = (f"https://openauth.alipay.com/oauth2/publicAppAuthorize.htm"
+                   f"?app_id={appid}&redirect_uri={redirect_uri}"
+                   f"&scope=auth_user&state={state}")
+        else:
+            url = (f"https://graph.qq.com/oauth2.0/authorize"
+                   f"?client_id={appid}&redirect_uri={redirect_uri}"
+                   f"&response_type=code&state={state}")
+        logger.info("oauth_url_generated platform=%s appid_configured=%s state=%s",
+                    platform, bool(appid), state)
+        return {"success": True, "platform": platform,
+                "authorizeUrl": url, "state": state,
+                "appidConfigured": bool(appid)}
+
+    async def oauth_callback(self, platform: str, code: str) -> dict:
+        """三方授权回调: code 换 openid → 已绑定直接登录 / 未绑定发临时票据
+
+        三方平台未接入(备案/资质前置条件未满足): openid 由 code 确定性派生
+        (sha256 前缀), 生产接入后替换为真实 API 换取; 逻辑链路完整可测。
+
+        Returns:
+            已绑定: {"status": "loggedIn", accessToken/refreshToken, ...}
+            未绑定: {"status": "bindRequired", ticket, expireSeconds}
+        """
+        if platform not in self.OAUTH_PLATFORMS:
+            raise ValueError(f"不支持的三方平台: {platform}")
+        if not code:
+            raise ValueError("授权 code 不能为空")
+
+        # 模拟通道: code → openid(确定性派生, 平台未接入)
+        openid = f"{platform}_{hashlib.sha256(code.encode()).hexdigest()[:24]}"
+        nickname = f"{platform}用户"
+        logger.info("oauth_callback platform=%s code=%s openid=%s(模拟通道)",
+                    platform, code, openid)
+
+        binding = await self.auth_repo.get_oauth_binding(platform, openid)
+        if binding:
+            # 已绑定 → 直接登录(设计文档 5.2)
+            return await self._login_by_member_id(
+                binding["memberId"],
+                extra={"status": "loggedIn", "platform": platform,
+                       "openid": openid})
+
+        # 未绑定 → 发临时票据, 前端进入绑定手机号流程
+        ticket = secrets.token_hex(16)
+        await self.auth_repo.save_oauth_ticket(ticket, {
+            "platform": platform, "openid": openid,
+            "nickname": nickname,
+        }, ttl=self.OAUTH_TICKET_TTL)
+        return {"success": True, "status": "bindRequired",
+                "platform": platform, "ticket": ticket,
+                "expireSeconds": self.OAUTH_TICKET_TTL,
+                "msg": "请绑定手机号完成登录(手机号+短信验证码)"}
+
+    async def bind_phone(self, ticket: str, phone: str,
+                         sms_code: str) -> dict:
+        """三方登录绑定手机号(设计文档 5.2 流程)
+
+        票据有效 + 验证码通过 → 手机号已注册则绑定既有账号 /
+        未注册自动创建账号并绑定 → 登录。验证码复用 P1-1 短信通道
+        (校验通过即消费)。
+
+        Raises:
+            ValueError: 票据无效或过期 / 验证码校验失败
+        """
+        payload = await self.auth_repo.get_oauth_ticket(ticket)
+        if not payload:
+            raise ValueError("授权票据无效或已过期, 请重新发起三方登录")
+        platform, openid = payload["platform"], payload["openid"]
+
+        # 验证码校验(复用 P1-1; 校验通过即消费)
+        await self.verify_sms_code(phone, sms_code)
+
+        member = await self.member_repo.get_by_phone(phone)
+        created = False
+        if member:
+            if member.get("status", 1) == 0:
+                raise ValueError("账号已被禁用,请联系客服")
+            member_id = member["id"]
+        else:
+            # 未注册 → 自动创建账号(密码空串=未设置, 三方登录方式保护以此判定;
+            # 后续可经手机验证码设置密码)
+            member_data = {
+                "phone": phone,
+                "password": "",
+                "nickname": payload.get("nickname") or f"竹香用户{phone[-4:]}",
+                "avatar": "",
+                "gender": 0,
+                "level": 1,
+                "growth_value": 0,
+                "points": 0,
+                "status": 1,
+                "reg_source": platform,
+                "role": ROLE_MEMBER,
+                "ageConfirmed": False,
+                "birthdate": "",
+                "ageVerified": False,
+                "created_at": _now_iso(),
+                "last_login_at": _now_iso(),
+            }
+            member = await self.member_repo.create(member_data)
+            member_id = member["id"]
+            created = True
+            logger.info("oauth_auto_register member_id=%r phone=%s via=%s",
+                        member_id, phone, platform)
+
+        # 绑定(同一手机号可绑多平台, 设计文档 5.3 多账号合并)
+        await self.auth_repo.save_oauth_binding(
+            platform, openid, member_id,
+            {"nickname": payload.get("nickname", "")})
+        await self.auth_repo.delete_oauth_ticket(ticket)
+
+        result = await self._login_by_member_id(
+            member_id, extra={"status": "loggedIn", "platform": platform,
+                              "openid": openid, "accountCreated": created,
+                              "phoneBound": phone})
+        logger.info("oauth_bind_success member_id=%r platform=%s", member_id, platform)
+        return result
+
+    async def list_my_bindings(self, access_token: str) -> dict:
+        """查询当前登录会员的三方绑定列表(多账号合并视图)"""
+        payload = decode_token(access_token, expected_type="access")
+        if await self.auth_repo.is_blacklisted(payload["jti"]):
+            raise AuthError("Token 已被吊销,请重新登录")
+        member_id = payload["sub"]
+        bindings = await self.auth_repo.list_oauth_bindings_by_member(member_id)
+        return {"success": True, "memberId": member_id,
+                "bindings": bindings}
+
+    async def unbind(self, access_token: str, platform: str) -> dict:
+        """解绑三方账号(至少保留一种登录方式: 无密码且仅剩此绑定时拒绝)
+
+        Raises:
+            AuthError: Token 无效
+            ValueError: 平台非法 / 无该平台绑定 / 最后登录方式保护
+        """
+        if platform not in self.OAUTH_PLATFORMS:
+            raise ValueError(f"不支持的三方平台: {platform}")
+        payload = decode_token(access_token, expected_type="access")
+        if await self.auth_repo.is_blacklisted(payload["jti"]):
+            raise AuthError("Token 已被吊销,请重新登录")
+        member_id = payload["sub"]
+
+        bindings = await self.auth_repo.list_oauth_bindings_by_member(member_id)
+        target = next((b for b in bindings if b.get("platform") == platform), None)
+        if not target:
+            raise ValueError(f"未绑定 {platform} 账号")
+
+        # 最后登录方式保护: 三方注册账号密码为空(未设置), 仅剩 1 个绑定时拒绝
+        member = await self.member_repo.get_by_id(member_id)
+        has_password = bool(member and member.get("password"))
+        if not has_password and len(bindings) <= 1:
+            raise ValueError("解绑后无可用登录方式(该账号未设置密码), "
+                             "请先绑定其他平台或设置密码")
+
+        await self.auth_repo.delete_oauth_binding(platform, target["openid"])
+        logger.info("oauth_unbind member_id=%r platform=%s", member_id, platform)
+        return {"success": True, "memberId": member_id,
+                "unbound": platform}
+
+    async def _login_by_member_id(self, member_id, extra: dict = None) -> dict:
+        """按会员ID签发登录态(三方已绑定登录/绑定完成登录共用)"""
+        member = await self.member_repo.get_by_id(member_id)
+        if not member:
+            raise KeyError(f"会员不存在(id={member_id})")
+        if member.get("status", 1) == 0:
+            raise ValueError("账号已被禁用,请联系客服")
+        role = member.get("role", ROLE_MEMBER)
+        await self.member_repo.update_fields(
+            member["id"], {"last_login_at": _now_iso()})
+        tokens = create_token_pair(member["id"], role)
+        await self._record_jtis(member["id"], tokens)
+        result = {
+            "success": True,
+            "memberId": member["id"],
+            "phone": member.get("phone", ""),
+            "nickname": member.get("nickname", ""),
+            "role": role,
+            **tokens,
+        }
+        if extra:
+            result.update(extra)
+        return result
 
     # ============================================================
     # 令牌刷新(refresh 轮换, 旧 refresh 立即吊销)

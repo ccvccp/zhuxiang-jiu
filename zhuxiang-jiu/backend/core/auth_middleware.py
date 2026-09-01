@@ -53,6 +53,14 @@ PUBLIC_EXACT = {
     # 短信验证码(P1-1)
     "/api/sms/send",
     "/api/sms/verify",
+    # 三方快捷登录(P1-2): 授权/回调/绑定手机号(携带票据与验证码自证)
+    "/api/auth/oauth/wechat/url",
+    "/api/auth/oauth/wechat/callback",
+    "/api/auth/oauth/alipay/url",
+    "/api/auth/oauth/alipay/callback",
+    "/api/auth/oauth/qq/url",
+    "/api/auth/oauth/qq/callback",
+    "/api/auth/oauth/bind-phone",
     # 旧版登录/注册(存量前端兼容)
     "/api/member/login",
     "/api/member/register",

@@ -14,6 +14,7 @@
     - 内存: 查询时惰性清理已到期条目
 """
 
+import json
 import time
 
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
@@ -186,6 +187,92 @@ class AuthRepository:
         day_map = daily.setdefault(today, {})
         day_map[phone] = day_map.get(phone, 0) + 1
         return day_map[phone]
+
+    # ---------- 三方账号绑定(P1-2, 设计文档 5.2/5.3: 一手机号可绑多平台) ----------
+
+    async def save_oauth_binding(self, platform: str, openid: str,
+                                 member_id, extra: dict = None) -> None:
+        """保存三方绑定记录({platform}:{openid} → memberId)
+
+        同一 platform+openid 只能绑定一个会员(重复保存覆盖更新绑定时间)。
+        """
+        record = {"platform": platform, "openid": openid,
+                  "memberId": member_id,
+                  "nickname": (extra or {}).get("nickname", ""),
+                  "avatar": (extra or {}).get("avatar", ""),
+                  "boundAt": int(time.time())}
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("auth", "oauth", "bindings"),
+                              f"{platform}:{openid}",
+                              json.dumps(record, ensure_ascii=False))
+            return
+        bindings = self.store.setdefault("auth_oauth_bindings", {})
+        bindings[f"{platform}:{openid}"] = record
+
+    async def get_oauth_binding(self, platform: str, openid: str) -> dict | None:
+        """查询三方绑定(未绑定返回 None)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.hget(_k("auth", "oauth", "bindings"),
+                                    f"{platform}:{openid}")
+            return json.loads(raw) if raw else None
+        return self.store.get("auth_oauth_bindings", {}).get(
+            f"{platform}:{openid}")
+
+    async def list_oauth_bindings_by_member(self, member_id) -> list[dict]:
+        """查询会员全部三方绑定(多账号合并视图, 设计文档 5.3)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k("auth", "oauth", "bindings"))
+            records = [json.loads(v) for v in data.values()] if data else []
+        else:
+            records = list(self.store.get("auth_oauth_bindings", {}).values())
+        return [r for r in records if str(r.get("memberId")) == str(member_id)]
+
+    async def delete_oauth_binding(self, platform: str, openid: str) -> bool:
+        """解绑三方账号, 返回是否删除成功"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return bool(await client.hdel(_k("auth", "oauth", "bindings"),
+                                          f"{platform}:{openid}"))
+        bindings = self.store.get("auth_oauth_bindings", {})
+        return bindings.pop(f"{platform}:{openid}", None) is not None
+
+    # ---------- OAuth 临时票据(回调→绑定手机号的中转态) ----------
+
+    async def save_oauth_ticket(self, ticket: str, payload: dict,
+                                 ttl: int = 600) -> None:
+        """保存 OAuth 临时票据(10 分钟内须完成手机号绑定)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("auth", "oauth", "ticket", ticket),
+                             json.dumps(payload, ensure_ascii=False), ex=ttl)
+            return
+        tickets = self.store.setdefault("auth_oauth_tickets", {})
+        tickets[ticket] = {"payload": payload, "expiresAt": int(time.time()) + ttl}
+
+    async def get_oauth_ticket(self, ticket: str) -> dict | None:
+        """读取临时票据(过期返回 None 并清理)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("auth", "oauth", "ticket", ticket))
+            return json.loads(raw) if raw else None
+        entry = self.store.get("auth_oauth_tickets", {}).get(ticket)
+        if not entry:
+            return None
+        if entry["expiresAt"] <= time.time():
+            self.store["auth_oauth_tickets"].pop(ticket, None)
+            return None
+        return entry["payload"]
+
+    async def delete_oauth_ticket(self, ticket: str) -> None:
+        """消费即删(一次性票据)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.delete(_k("auth", "oauth", "ticket", ticket))
+            return
+        self.store.get("auth_oauth_tickets", {}).pop(ticket, None)
 
     # ---------- Redis 实现 ----------
 
