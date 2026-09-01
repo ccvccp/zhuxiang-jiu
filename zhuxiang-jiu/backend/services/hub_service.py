@@ -15,6 +15,7 @@
 import logging
 import os
 import tempfile
+from datetime import datetime, UTC
 
 from repositories.hub_repository import (
     HubRepository, classify_intent_rule, ROLE_PANELS, HUB_ROLES,
@@ -271,6 +272,80 @@ class HubService:
         """半开恢复探测: 清零窗口重新统计(管理员/自愈定时器调用)"""
         await self.repo.reset_health_window(cap_id)
         return {"id": cap_id, "reset": True, "hint": "健康窗口已清零, 恢复探测中"}
+
+    # ============================================================
+    # AI训练与治理(设计文档 5.4, P2)
+    # ============================================================
+
+    async def get_ops_overview(self) -> dict:
+        """治理看板数据: 能力健康矩阵 + 意图分布 + 入口健康(三视图)"""
+        caps = await self.repo.list_capabilities()
+        matrix = []
+        for cap in caps:
+            win = await self.repo.get_health_window(cap["id"])
+            rate = (win["success"] / win["total"]) if win.get("total") else None
+            circuit = await self.is_circuit_open(cap["id"])
+            matrix.append({
+                "id": cap["id"], "name": cap.get("name", cap["id"]),
+                "module": cap.get("module", ""),
+                "enabled": cap.get("enabled", False),
+                "circuitOpen": circuit,
+                "windowSuccessRate": rate,
+                "windowTotal": win.get("total", 0),
+                "declaredHealth": cap.get("health", {}).get(
+                    "success_rate_7d", 1.0),
+                "p95Ms": cap.get("health", {}).get("p95_ms", 0),
+                "costWeight": cap.get("cost_weight", 1.0),
+                # 红黄绿: red=熔断/下架, yellow=窗口成功率低但未熔断, green=正常
+                "trafficLight": ("red" if (circuit or not cap.get("enabled"))
+                                else "yellow" if (rate is not None
+                                                  and rate < _circuit_min_success())
+                                else "green"),
+            })
+        # 近 7 日意图分布
+        intent_7d: dict[str, int] = {}
+        from datetime import timedelta
+        now = datetime.now(UTC)
+        for i in range(7):
+            day = (now - timedelta(days=i)).strftime("%Y%m%d")
+            for intent, n in (await self.repo.get_intent_stats(day)).items():
+                intent_7d[intent] = intent_7d.get(intent, 0) + n
+        health = await self.get_health()
+        return {
+            "generatedAt": now.isoformat(timespec="seconds"),
+            "health": health,
+            "capabilityMatrix": matrix,
+            "intentDistribution7d": dict(sorted(
+                intent_7d.items(), key=lambda kv: -kv[1])),
+            "asrEnabled": HubService._asr_enabled(),
+            "hubEnabled": _hub_enabled(),
+        }
+
+    async def retrigger_learning(self, scorer_id: str | None = None) -> dict:
+        """学习周期管理: 重跑 AI 自学习(单评分器或全部, P2 对接 16 评分器档案体系)
+
+        Args:
+            scorer_id: 指定评分器; None 时遍历全部(反馈不足的跳过不报错)
+        """
+        from services import ai_learning_service
+        from services.ai_learning_service import SCORER_REGISTRY
+
+        targets = ([scorer_id] if scorer_id
+                   else list(SCORER_REGISTRY.keys()))
+        results = []
+        for sid in targets:
+            try:
+                r = await ai_learning_service.run_learning_cycle(sid)
+                results.append({"scorer": sid, "status": "learned",
+                                "detail": r})
+            except ValueError as exc:   # 反馈不足 → 跳过(非错误)
+                results.append({"scorer": sid, "status": "skipped",
+                                "reason": str(exc)})
+            except KeyError:
+                results.append({"scorer": sid, "status": "unknown"})
+        learned = sum(1 for r in results if r["status"] == "learned")
+        return {"total": len(targets), "learned": learned,
+                "skipped": len(targets) - learned, "results": results}
 
 
 hub_service = HubService()

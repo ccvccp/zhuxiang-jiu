@@ -404,6 +404,103 @@ def test_http_p1():
     record("HTTP P1 探测 404", r.status_code == 404)
 
 
+async def test_ops_overview():
+    """14. P2 治理总览: 能力健康矩阵(红黄绿) + 意图分布 + 入口健康"""
+    svc = HubService()
+    ov = await svc.get_ops_overview()
+    matrix = ov["capabilityMatrix"]
+    record("总览: 能力矩阵非空", len(matrix) > 0)
+    record("总览: 矩阵字段齐全",
+           all(k in matrix[0] for k in
+               ("id", "trafficLight", "windowSuccessRate", "circuitOpen")))
+    record("总览: 入口健康聚合", ov["health"]["capabilities_total"] == len(matrix))
+    # 红绿灯: 健康窗口 5 连败 → red
+    for _ in range(5):
+        await svc.repo.record_health("knowledge.rag", success=False, latency_ms=100)
+    ov2 = await svc.get_ops_overview()
+    rag = next(c for c in ov2["capabilityMatrix"] if c["id"] == "knowledge.rag")
+    record("总览: 熔断能力红灯", rag["trafficLight"] == "red"
+           and rag["circuitOpen"] is True)
+    await svc.repo.reset_health_window("knowledge.rag")
+    # 下架 → red
+    cap = await svc.repo.get_capability("chat.human")
+    cap["enabled"] = False
+    await svc.repo.upsert_capability(cap)
+    ov3 = await svc.get_ops_overview()
+    ch = next(c for c in ov3["capabilityMatrix"] if c["id"] == "chat.human")
+    record("总览: 下架能力红灯", ch["trafficLight"] == "red")
+    cap["enabled"] = True
+    await svc.repo.upsert_capability(cap)
+    # 黄灯: 4 样本 1 成功(0.25 < 阈值, 但样本<5 不熔断 → yellow)
+    for ok in (True, False, False, False):
+        await svc.repo.record_health("role.profit", success=ok, latency_ms=100)
+    ov4 = await svc.get_ops_overview()
+    rp = next(c for c in ov4["capabilityMatrix"] if c["id"] == "role.profit")
+    record("总览: 低成功率黄灯", rp["trafficLight"] == "yellow"
+           and rp["circuitOpen"] is False, f"light={rp['trafficLight']}")
+    await svc.repo.reset_health_window("role.profit")
+    # 意图分布: bump 后汇总非空
+    await svc.classify_intent("这瓶酒多少钱")
+    ov5 = await svc.get_ops_overview()
+    record("总览: 意图分布聚合", ov5["intentDistribution7d"].get("product.price", 0) >= 1,
+           f"got {ov5['intentDistribution7d']}")
+
+
+async def test_learning_retrigger():
+    """15. P2 学习周期管理: 单评分器 / 全量(反馈不足跳过) / 未知 404"""
+    svc = HubService()
+    # 15a. 全量: 无反馈 → 全部 skipped(非错误)
+    r = await svc.retrigger_learning()
+    record("重跑: 全量 total=16", r["total"] == 16, f"got {r['total']}")
+    record("重跑: 无反馈全 skipped", r["learned"] == 0 and r["skipped"] == 16)
+    record("重跑: 结果含状态字段", all("status" in x for x in r["results"]))
+    # 15b. 单评分器
+    r = await svc.retrigger_learning("order_risk")
+    record("重跑: 单评分器 total=1", r["total"] == 1
+           and r["results"][0]["scorer"] == "order_risk")
+
+
+def test_http_p2():
+    """16. HTTP 层 P2 端点(ops/overview + learning/retrigger)"""
+    try:
+        from fastapi.testclient import TestClient
+        from main import app
+    except ImportError:
+        RESULTS.append("  - HTTP P2 测试跳过(TestClient 不可用)")
+        return
+    client = TestClient(app)
+
+    # 16a. 治理总览: 无权限 → 403
+    r = client.get("/api/hub/ops/overview")
+    record("HTTP P2 总览无权限 403", r.status_code == 403)
+    # admin → 200
+    r = client.get("/api/hub/ops/overview", headers={"X-Role": "admin"})
+    body = r.json()
+    record("HTTP P2 总览 admin 200", r.status_code == 200
+           and isinstance(body["capabilityMatrix"], list)
+           and "intentDistribution7d" in body, f"{r.status_code}")
+    record("HTTP P2 总览带生成时间", bool(body.get("generatedAt")))
+
+    # 16b. 学习重跑: 无权限 → 403
+    r = client.post("/api/hub/ops/learning/retrigger", json={})
+    record("HTTP P2 重跑无权限 403", r.status_code == 403)
+    # admin + 全量 → 200 (16 档案全 skipped 也算成功)
+    r = client.post("/api/hub/ops/learning/retrigger", json={},
+                    headers={"X-Role": "admin"})
+    body = r.json()
+    record("HTTP P2 重跑全量", r.status_code == 200 and body["success"] is True
+           and body["total"] == 16, f"{r.status_code} {body}")
+    # 未知评分器 → 404
+    r = client.post("/api/hub/ops/learning/retrigger",
+                    json={"scorerId": "not-exist"}, headers={"X-Role": "admin"})
+    record("HTTP P2 重跑未知 404", r.status_code == 404)
+    # 单评分器 → 200
+    r = client.post("/api/hub/ops/learning/retrigger",
+                    json={"scorerId": "order_risk"}, headers={"X-Role": "admin"})
+    record("HTTP P2 重跑单评分器", r.status_code == 200
+           and r.json()["total"] == 1)
+
+
 def test_decision_takeover():
     """13. decision 模块编排端点真实化接管验证"""
     try:
@@ -447,7 +544,7 @@ def test_decision_takeover():
 async def main():
     reset_store()
     print("=" * 64)
-    print("AI智能中枢模块(35号) P0+P1 端到端测试")
+    print("AI智能中枢模块(35号) P0+P1+P2 端到端测试")
     print("=" * 64)
 
     await test_intent_rules()
@@ -464,6 +561,10 @@ async def main():
     await test_orchestrate()
     test_http_p1()
     test_decision_takeover()
+    # ---- P2 ----
+    await test_ops_overview()
+    await test_learning_retrigger()
+    test_http_p2()
 
     print("\n".join(RESULTS))
     print("-" * 64)

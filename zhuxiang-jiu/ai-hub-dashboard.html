@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 智能中枢治理看板</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 治理看板专属样式(复用 style.css 主题变量) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 错误横幅 */
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .dash-info {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 全局统计卡 */
+        .dash-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+        .dash-stat { padding: 16px; text-align: center; }
+        .dash-stat .stat-value { font-size: 26px; font-weight: 700; color: var(--color-primary-dark); }
+        .dash-stat .stat-label { font-size: 12px; color: var(--color-text-light); margin-top: 4px; }
+        .dash-stat.warn .stat-value { color: var(--color-danger); }
+        .dash-stat.gold .stat-value { color: var(--color-accent); }
+
+        /* 入口健康条 */
+        .hub-status-bar {
+            display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 12px 16px;
+            font-size: 13px; align-items: center;
+        }
+        .hub-status-bar .k { color: var(--color-text-light); margin-right: 4px; }
+        .traffic-dot {
+            display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+            margin-right: 6px; vertical-align: middle;
+        }
+        .traffic-dot.green { background: #2e8b57; }
+        .traffic-dot.yellow { background: #e67e22; }
+        .traffic-dot.red { background: var(--color-danger); }
+
+        /* 能力矩阵表 */
+        .matrix-wrap { overflow-x: auto; }
+        table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .matrix th, .matrix td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .matrix th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .matrix .cap-id { font-family: Consolas, monospace; font-size: 12px; }
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.on { background: #e8f4ec; color: #2e8b57; }
+        .badge.off { background: #f4f4f4; color: #999; }
+        .badge.red { background: #fdecea; color: var(--color-danger); }
+        .badge.yellow { background: #fdf3e3; color: #a06b00; }
+        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.weak { background: #f0f0f0; color: #666; }
+        .btn-mini {
+            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
+            cursor: pointer; transition: var(--transition);
+        }
+        .btn-mini:hover { background: rgba(74, 124, 89, 0.08); }
+        .btn-mini.danger { border-color: var(--color-danger); color: var(--color-danger); }
+        .btn-mini.danger:hover { background: rgba(192, 57, 43, 0.06); }
+
+        /* 意图分布 */
+        .intent-list { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
+        .intent-row { display: grid; grid-template-columns: 150px 1fr 56px; gap: 10px; align-items: center; font-size: 13px; }
+        .intent-row .name { font-family: Consolas, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .intent-bar-track { background: var(--color-bg); border-radius: 999px; height: 14px; overflow: hidden; }
+        .intent-bar { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #4a7c59, #355c44); min-width: 2px; }
+        .intent-row .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--color-text-light); }
+        .dash-empty { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 14px; }
+
+        /* 学习重跑结果 */
+        .learn-result { padding: 14px 16px; font-size: 13px; }
+        .learn-result table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+        .learn-result th, .learn-result td { padding: 5px 10px; text-align: left; border-bottom: 1px solid var(--color-border); }
+        .learn-result .reason { color: var(--color-text-light); font-size: 11px; }
+
+        /* 页脚说明 */
+        .dash-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .dash-footer code {
+            background: var(--color-bg); border: 1px solid var(--color-border);
+            border-radius: 3px; padding: 1px 6px; font-size: 11px;
+        }
+
+        @media (max-width: 640px) {
+            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+            .intent-row { grid-template-columns: 110px 1fr 46px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container" style="display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+                <h1>AI 智能中枢 · 治理看板</h1>
+                <p>35号模块 · 能力健康矩阵(红黄绿) / 意图分布 / 学习周期管理一屏尽览</p>
+            </div>
+            <div id="authBadge" style="display:flex;align-items:center;"></div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏 -->
+        <section class="dash-section">
+            <div class="dash-card dash-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="dash-btn ghost" id="btnSaveApi" onclick="saveApiBase()">保存</button>
+                <button class="dash-btn" id="btnRefresh" onclick="loadOverview()">刷新</button>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()"> 自动刷新(30s)
+                </label>
+                <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="dash-error" id="errorBanner"></div>
+            <div class="dash-info" id="infoBanner"></div>
+        </section>
+
+        <!-- 全局统计 -->
+        <section class="dash-section">
+            <div class="dash-stats">
+                <div class="dash-card dash-stat">
+                    <div class="stat-value" id="statTotal">--</div>
+                    <div class="stat-label">能力总数</div>
+                </div>
+                <div class="dash-card dash-stat">
+                    <div class="stat-value" id="statEnabled">--</div>
+                    <div class="stat-label">已上架</div>
+                </div>
+                <div class="dash-card dash-stat warn">
+                    <div class="stat-value" id="statRed">--</div>
+                    <div class="stat-label">红灯(熔断/下架)</div>
+                </div>
+                <div class="dash-card dash-stat gold">
+                    <div class="stat-value" id="statYellow">--</div>
+                    <div class="stat-label">黄灯(成功率偏低)</div>
+                </div>
+                <div class="dash-card dash-stat">
+                    <div class="stat-value" id="statIntents">--</div>
+                    <div class="stat-label">7日意图调用量</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 入口健康条 -->
+        <section class="dash-section">
+            <div class="dash-card hub-status-bar" id="hubStatusBar">
+                <span>入口健康加载中…</span>
+            </div>
+        </section>
+
+        <!-- 能力健康矩阵 -->
+        <section class="dash-section">
+            <div class="dash-card matrix-wrap">
+                <table class="matrix">
+                    <thead>
+                        <tr>
+                            <th>能力</th><th>模块</th><th>红绿灯</th><th>上架</th>
+                            <th>窗口成功率</th><th>样本</th><th>声明健康度</th>
+                            <th>p95(ms)</th><th>成本权重</th><th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="matrixBody">
+                        <tr><td colspan="10" class="dash-empty">加载中…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 意图分布 + 学习周期 -->
+        <section class="dash-section">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;">
+                <div class="dash-card">
+                    <div class="hub-status-bar"><b>近 7 日意图分布</b></div>
+                    <div class="intent-list" id="intentList">
+                        <div class="dash-empty">暂无意图统计数据</div>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="hub-status-bar" style="justify-content:space-between;">
+                        <b>学习周期管理(16 个评分器档案)</b>
+                        <button class="dash-btn" id="btnRetrigger" onclick="retriggerLearning()">重跑全部学习</button>
+                    </div>
+                    <div class="learn-result" id="learnResult">
+                        点击「重跑全部学习」触发一轮 Hedge 在线学习; 反馈不足的评分器会被跳过(非错误)。
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 页脚说明 -->
+        <footer class="dash-footer">
+            <div>鉴权说明：默认 <code>AUTH_MODE=compat</code> 下本页以 <code>X-Role: admin</code> 兼容头直连管理端点；<code>strict</code> 模式需先登录获取 JWT 并改造请求头。</div>
+            <div>数据来源：<code>GET /api/hub/ops/overview</code> / <code>POST /api/hub/ops/learning/retrigger</code> / <code>POST /api/hub/ops/circuit/{id}/probe</code> / <code>POST /api/hub/capabilities/{id}/toggle</code>。红绿灯：<code>red</code>=熔断或下架，<code>yellow</code>=窗口成功率低于熔断阈值但样本不足或未触发，<code>green</code>=正常。</div>
+        </footer>
+    </main>
+
+    <script src="js/auth.js"></script>
+    <script>
+        'use strict';
+
+        /* ========= 全局状态 ========= */
+        var API_BASE_KEY = 'aiHubDash.apiBase';
+        var state = {
+            apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+            data: null,
+            autoTimer: null,
+            AUTO_MS: 30000,
+        };
+
+        /* HTML 转义(防注入, 统一出口) */
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+
+        function pct(v) {
+            return (v == null || isNaN(v)) ? '--' : (v * 100).toFixed(1) + '%';
+        }
+
+        /* ========= API ========= */
+        function apiHeaders() {
+            var h = { 'X-Role': 'admin', 'Content-Type': 'application/json' };
+            var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+            return auth ? Object.assign(h, auth) : h;
+        }
+
+        async function fetchJson(url, options) {
+            var res = await fetch(url, Object.assign({ headers: apiHeaders() }, options || {}));
+            if (res.status === 401) {
+                if (typeof Auth !== 'undefined') { Auth.requireLogin(); }
+                throw new Error('登录已失效, 正在跳转登录页…');
+            }
+            var body = null;
+            try { body = await res.json(); } catch (e) { /* 非 JSON 错误体 */ }
+            if (!res.ok) {
+                var msg = body && (body.detail || body.error || body.message) ? ' · ' + (body.detail || body.error || body.message) : '';
+                throw new Error('HTTP ' + res.status + msg);
+            }
+            return body;
+        }
+
+        async function loadOverview() {
+            var btn = document.getElementById('btnRefresh');
+            btn.disabled = true; btn.textContent = '刷新中…';
+            try {
+                var data = await fetchJson(state.apiBase + '/api/hub/ops/overview');
+                state.data = data;
+                hideBanner('errorBanner');
+                renderAll();
+            } catch (err) {
+                showBanner('errorBanner', '总览加载失败：' + err.message + '（请确认后端已启动且地址正确）');
+            } finally {
+                btn.disabled = false; btn.textContent = '刷新';
+                document.getElementById('lastUpdate').textContent = '最后刷新 ' + new Date().toLocaleTimeString('zh-CN');
+            }
+        }
+
+        /* ========= 渲染 ========= */
+        function renderAll() {
+            renderStats();
+            renderStatusBar();
+            renderMatrix();
+            renderIntents();
+        }
+
+        function renderStats() {
+            var d = state.data || {};
+            var matrix = d.capabilityMatrix || [];
+            var total7d = 0;
+            var dist = d.intentDistribution7d || {};
+            Object.keys(dist).forEach(function (k) { total7d += dist[k] || 0; });
+            document.getElementById('statTotal').textContent = matrix.length;
+            document.getElementById('statEnabled').textContent =
+                matrix.filter(function (c) { return c.enabled; }).length;
+            document.getElementById('statRed').textContent =
+                matrix.filter(function (c) { return c.trafficLight === 'red'; }).length;
+            document.getElementById('statYellow').textContent =
+                matrix.filter(function (c) { return c.trafficLight === 'yellow'; }).length;
+            document.getElementById('statIntents').textContent = total7d;
+        }
+
+        function renderStatusBar() {
+            var d = state.data || {};
+            var h = d.health || {};
+            var light = h.status === 'healthy' ? 'green' : 'yellow';
+            document.getElementById('hubStatusBar').innerHTML =
+                '<span><span class="traffic-dot ' + light + '"></span>入口健康: <b>' + esc(h.status || '--') + '</b></span>' +
+                '<span><span class="k">能力总数</span>' + (h.capabilities_total != null ? h.capabilities_total : '--') + '</span>' +
+                '<span><span class="k">已上架</span>' + (h.capabilities_enabled != null ? h.capabilities_enabled : '--') + '</span>' +
+                '<span><span class="k">健康</span>' + (h.capabilities_healthy != null ? h.capabilities_healthy : '--') + '</span>' +
+                '<span><span class="k">中枢开关</span>' + (d.hubEnabled ? 'ON' : 'OFF') + '</span>' +
+                '<span><span class="k">语音入口</span>' + (d.asrEnabled ? 'ON' : 'OFF') + '</span>';
+        }
+
+        function renderMatrix() {
+            var matrix = (state.data && state.data.capabilityMatrix) || [];
+            var tbody = document.getElementById('matrixBody');
+            if (!matrix.length) {
+                tbody.innerHTML = '<tr><td colspan="10" class="dash-empty">暂无能力注册数据</td></tr>';
+                return;
+            }
+            tbody.innerHTML = matrix.map(function (c) {
+                var light = c.trafficLight || 'green';
+                var lightLabel = { green: '正常', yellow: '关注', red: '熔断/下架' }[light];
+                return '<tr>' +
+                    '<td><b>' + esc(c.name) + '</b><br><span class="cap-id">' + esc(c.id) + '</span></td>' +
+                    '<td>' + esc(c.module || '--') + '</td>' +
+                    '<td><span class="badge ' + light + '">' + lightLabel + '</span></td>' +
+                    '<td><span class="badge ' + (c.enabled ? 'on' : 'off') + '">' + (c.enabled ? '上架' : '下架') + '</span></td>' +
+                    '<td class="num">' + pct(c.windowSuccessRate) + '</td>' +
+                    '<td class="num">' + (c.windowTotal || 0) + '</td>' +
+                    '<td class="num">' + pct(c.declaredHealth) + '</td>' +
+                    '<td class="num">' + (c.p95Ms != null ? c.p95Ms : '--') + '</td>' +
+                    '<td class="num">' + (c.costWeight != null ? c.costWeight : '--') + '</td>' +
+                    '<td>' +
+                        '<button class="btn-mini" onclick="probeCircuit(\'' + esc(c.id) + '\')">半开探测</button> ' +
+                        '<button class="btn-mini ' + (c.enabled ? 'danger' : '') + '" onclick="toggleCap(\'' + esc(c.id) + '\', ' + (!c.enabled) + ')">' +
+                        (c.enabled ? '下架' : '上架') + '</button>' +
+                    '</td>' +
+                '</tr>';
+            }).join('');
+        }
+
+        function renderIntents() {
+            var dist = (state.data && state.data.intentDistribution7d) || {};
+            var keys = Object.keys(dist);
+            var el = document.getElementById('intentList');
+            if (!keys.length) {
+                el.innerHTML = '<div class="dash-empty">暂无意图统计数据(调用 /api/hub/input/intent 或 /api/hub/route 后产生)</div>';
+                return;
+            }
+            var max = Math.max.apply(null, keys.map(function (k) { return dist[k]; }));
+            el.innerHTML = keys.map(function (k) {
+                var w = max > 0 ? Math.round(dist[k] / max * 100) : 0;
+                return '<div class="intent-row">' +
+                    '<span class="name" title="' + esc(k) + '">' + esc(k) + '</span>' +
+                    '<div class="intent-bar-track"><div class="intent-bar" style="width:' + w + '%"></div></div>' +
+                    '<span class="n">' + dist[k] + '</span>' +
+                '</div>';
+            }).join('');
+        }
+
+        /* ========= 管理操作 ========= */
+        async function probeCircuit(capId) {
+            try {
+                var r = await fetchJson(
+                    state.apiBase + '/api/hub/ops/circuit/' + encodeURIComponent(capId) + '/probe',
+                    { method: 'POST' });
+                showBanner('infoBanner', '「' + capId + '」健康窗口已清零, 恢复探测中(' + (r.hint || '') + ')');
+                loadOverview();
+            } catch (err) {
+                showBanner('errorBanner', '半开探测失败：' + err.message);
+            }
+        }
+
+        async function toggleCap(capId, enabled) {
+            try {
+                await fetchJson(
+                    state.apiBase + '/api/hub/capabilities/' + encodeURIComponent(capId) + '/toggle',
+                    { method: 'POST', body: JSON.stringify({ enabled: enabled }) });
+                showBanner('infoBanner', '「' + capId + '」已' + (enabled ? '上架' : '下架'));
+                loadOverview();
+            } catch (err) {
+                showBanner('errorBanner', '上下架失败：' + err.message);
+            }
+        }
+
+        async function retriggerLearning() {
+            var btn = document.getElementById('btnRetrigger');
+            btn.disabled = true; btn.textContent = '重跑中…';
+            document.getElementById('learnResult').innerHTML = '<div class="dash-empty">学习周期执行中…</div>';
+            try {
+                var r = await fetchJson(
+                    state.apiBase + '/api/hub/ops/learning/retrigger',
+                    { method: 'POST', body: JSON.stringify({}) });
+                var rows = (r.results || []).map(function (x) {
+                    var statusBadge = x.status === 'learned'
+                        ? '<span class="badge green">已学习</span>'
+                        : (x.status === 'skipped'
+                            ? '<span class="badge weak">跳过</span>'
+                            : '<span class="badge red">未知</span>');
+                    return '<tr><td style="font-family:Consolas,monospace;font-size:11px;">' + esc(x.scorer) + '</td>' +
+                        '<td>' + statusBadge + '</td>' +
+                        '<td class="reason">' + esc(x.reason || x.detail && JSON.stringify(x.detail).slice(0, 120) || '') + '</td></tr>';
+                }).join('');
+                document.getElementById('learnResult').innerHTML =
+                    '<div>共 <b>' + r.total + '</b> 个档案: 已学习 <b>' + r.learned + '</b>, 跳过 <b>' + r.skipped + '</b>(反馈不足)。</div>' +
+                    '<table><thead><tr><th>评分器</th><th>状态</th><th>说明</th></tr></thead><tbody>' +
+                    (rows || '<tr><td colspan="3">无结果</td></tr>') + '</tbody></table>';
+                hideBanner('errorBanner');
+            } catch (err) {
+                showBanner('errorBanner', '学习重跑失败：' + err.message);
+                document.getElementById('learnResult').textContent = '学习周期执行失败, 见上方错误信息。';
+            } finally {
+                btn.disabled = false; btn.textContent = '重跑全部学习';
+            }
+        }
+
+        /* ========= 横幅/工具 ========= */
+        function showBanner(id, msg) {
+            var el = document.getElementById(id);
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+        function hideBanner(id) {
+            document.getElementById(id).style.display = 'none';
+        }
+        function saveApiBase() {
+            var v = document.getElementById('apiBase').value.trim().replace(/\/+$/, '');
+            if (!v) { return; }
+            state.apiBase = v;
+            localStorage.setItem(API_BASE_KEY, v);
+            showBanner('infoBanner', '后端地址已保存: ' + v);
+            loadOverview();
+        }
+        function toggleAutoRefresh() {
+            if (state.autoTimer) { clearInterval(state.autoTimer); state.autoTimer = null; }
+            if (document.getElementById('autoRefresh').checked) {
+                state.autoTimer = setInterval(loadOverview, state.AUTO_MS);
+            }
+        }
+
+        /* ========= 初始化 ========= */
+        (function init() {
+            document.getElementById('apiBase').value = state.apiBase;
+            toggleAutoRefresh();
+            loadOverview();
+        })();
+    </script>
+</body>
+</html>

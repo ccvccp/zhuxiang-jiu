@@ -8,6 +8,8 @@
     路由:  GET  /api/hub/capabilities      能力注册表查询(admin)
     路由:  POST /api/hub/capabilities/{id}/toggle   上下架(admin)
     治理:  GET  /api/hub/ops/intents       意图分布统计(admin)
+    治理:  GET  /api/hub/ops/overview       治理看板总览(admin, P2)
+    治理:  POST /api/hub/ops/learning/retrigger  学习周期重跑(admin, P2)
 
 鉴权惯例(对齐 role_routes): X-Member-Id(用户) / X-Role: admin(管理)。
 
@@ -84,6 +86,12 @@ class OrchestrateHubRequest(BaseModel):
                                 description="复合任务子段(≤3 段并行)")
     role: str = Field(default="guest",
                       description="角色: guest/member/cs_staff/admin")
+
+
+class RetriggerRequest(BaseModel):
+    """学习周期重跑请求(空 scorerId = 全部 16 个评分器档案)"""
+    scorerId: str | None = Field(default=None,
+                                 description="评分器ID; 缺省重跑全部")
 
 
 # ============================================================
@@ -208,6 +216,39 @@ async def probe_circuit(cap_id: str, x_role: str | None = Header(None, alias="X-
     if cap is None:
         raise HTTPException(status_code=404, detail=f"能力不存在: {cap_id}")
     return await hub_service.probe_capability(cap_id)
+
+
+# ============================================================
+# 治理: 运维总览 + 学习周期管理(设计文档 5.4, P2)
+# ============================================================
+
+@router.get("/api/hub/ops/overview")
+async def get_ops_overview(x_role: str | None = Header(None, alias="X-Role")):
+    """治理看板总览(admin): 能力健康矩阵(红黄绿) + 意图分布 + 入口健康"""
+    _require_admin(x_role)
+    return await hub_service.get_ops_overview()
+
+
+@router.post("/api/hub/ops/learning/retrigger")
+async def retrigger_learning(
+    req: RetriggerRequest,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """学习周期管理(admin): 重跑 AI 自学习(单评分器或全部 17 个档案)
+
+    反馈不足的评分器 status=skipped(非错误); 未知评分器 → 404。
+    """
+    _require_admin(x_role)
+    if req.scorerId:
+        from services.ai_learning_service import SCORER_REGISTRY
+        if req.scorerId not in SCORER_REGISTRY:
+            raise HTTPException(status_code=404,
+                                detail=f"未知评分器: {req.scorerId}")
+    try:
+        result = await hub_service.retrigger_learning(req.scorerId)
+    except Exception as exc:  # noqa: BLE001
+        _handle(exc)
+    return {"success": True, **result}
 
 
 # ============================================================
