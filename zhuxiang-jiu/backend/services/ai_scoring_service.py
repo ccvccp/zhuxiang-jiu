@@ -620,4 +620,113 @@ SCORERS = {
     "logistics_routing": LogisticsRoutingScorer(),
     "traffic_antifraud": TrafficAntiFraudScorer(),
     "promotion_antifraud": PromotionAntiFraudScorer(),
+    "alliance_onboarding": None,   # 37号: 下方定义后回填
 }
+
+
+# ============================================================
+# 6. 同盟入驻预审评分(模块 37 AI智能网站同盟)
+# ============================================================
+
+class AllianceOnboardingScorer:
+    """同盟入驻预审评分: 超级会员入盟申请资质画像
+
+    5 因子加权 → 资质分(0-100, 越高越优) → 3级 → 入盟处置动作
+    (37号设计文档 §2.1: ≥80 快车道/60-79 人工重点审/<60 拒)
+
+    与风险类评分器方向相反: 高分=优质, action 语义为入盟通道。
+    """
+
+    WEIGHTS: ClassVar[dict] = {
+        "member_level": 0.25,      # 会员等级(超级会员线)
+        "credit": 0.20,            # 信用分
+        "realname": 0.15,          # 实名完整性
+        "credentials": 0.25,       # 类目资质齐备度
+        "competition": 0.15,       # 区域竞争度(竞争小加分)
+    }
+    REQUIRED: ClassVar[list] = ["memberLevel", "creditScore", "realnameVerified"]
+
+    async def score(self, ctx: dict) -> dict:
+        """评分入口
+
+        Args:
+            ctx: {
+                applicantId: int 申请人会员ID,
+                memberLevel: int 会员等级,
+                creditScore: int 信用分(0-100, 缺省 85 中性),
+                realnameVerified: bool 已实名,
+                credentialsTotal: int 类目要求资质数,
+                credentialsProvided: int 已提交资质数,
+                gridOccupancy: int 所在网格同业商户数,
+                gridCap: int 网格同业密度上限
+            }
+        """
+        weights = await load_effective_weights("alliance_onboarding",
+                                               self.WEIGHTS)
+        f = {}
+        # ① 会员等级: ≥6 满分, 达超级会员线(4) 及格, <4 记差
+        level = int(ctx.get("memberLevel") or 0)
+        level_score = 100 if level >= 6 else (
+            70 + (level - 4) * 15 if level >= 4 else max(0, level * 15))
+        f["member_level"] = _factor("member_level", "会员等级",
+                                    level_score, weights["member_level"],
+                                    f"Lv{level}(" +
+                                    ("超级会员" if level >= 4 else "未达超级会员线") + ")")
+        # ② 信用分: ≥95 满分, 60 及格线
+        credit = float(ctx.get("creditScore") if
+                       ctx.get("creditScore") is not None else 85)
+        f["credit"] = _factor("credit", "信用分",
+                              _clamp((credit - 60) / 35 * 100),
+                              weights["credit"], f"信用分 {credit:.0f}")
+        # ③ 实名完整性
+        verified = bool(ctx.get("realnameVerified", False))
+        f["realname"] = _factor("realname", "实名认证",
+                                100 if verified else 0,
+                                weights["realname"],
+                                "已实名" if verified else "未实名")
+        # ④ 类目资质齐备度
+        required = int(ctx.get("credentialsTotal") or 0)
+        provided = int(ctx.get("credentialsProvided") or 0)
+        completeness = (provided / required * 100) if required else 100
+        f["credentials"] = _factor("credentials", "资质齐备",
+                                   _clamp(completeness),
+                                   weights["credentials"],
+                                   f"资质 {provided}/{required}")
+        # ⑤ 区域竞争度: 空白网格满分, 满员零分
+        occupancy = int(ctx.get("gridOccupancy") or 0)
+        cap = int(ctx.get("gridCap") or 3)
+        spare = max(0, cap - occupancy)
+        f["competition"] = _factor("competition", "区域竞争",
+                                   _clamp(spare / cap * 100) if cap else 100,
+                                   weights["competition"],
+                                   f"同业 {occupancy}/{cap}")
+
+        total = sum(x["contribution"] for x in f.values())
+        # 高分=优质: ≥80 快车道, 60-79 重点审, <60 拒
+        if total >= 80:
+            level_key, action = LEVEL_HIGH, "fast_track"
+        elif total >= 60:
+            level_key, action = LEVEL_MEDIUM, "manual_review"
+        else:
+            level_key, action = LEVEL_LOW, "reject"
+        result = {
+            "success": True, "scorer": "alliance_onboarding",
+            "modelVersion": MODEL_VERSION,
+            "applicantId": ctx.get("applicantId"),
+            "score": round(total, 1), "level": level_key,
+            "levelName": {LEVEL_HIGH: "优质", LEVEL_MEDIUM: "待核",
+                          LEVEL_LOW: "不足"}[level_key],
+            "action": action,
+            "actionName": {"fast_track": "人工终审快车道",
+                           "manual_review": "人工重点审核",
+                           "reject": "预审拒绝"}[action],
+            "confidence": _confidence(ctx, self.REQUIRED),
+            "factors": list(f.values()), "scoredAt": ts(),
+        }
+        logger.info("ai_alliance_onboarding_scored applicant=%s score=%s "
+                    "action=%s", ctx.get("applicantId"), result["score"],
+                    action)
+        return result
+
+
+SCORERS["alliance_onboarding"] = AllianceOnboardingScorer()

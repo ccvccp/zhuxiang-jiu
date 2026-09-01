@@ -75,6 +75,8 @@ from routes.knowledge_routes import register_knowledge_routes
 from routes.hub_routes import register_hub_routes
 # AI智能推广模块(36号·热点雷达+GLM-5.3 Agent内容工厂)
 from routes.promo_routes import register_promo_routes
+# AI智能网站同盟模块(37号·酒水不分家商户同盟平台)
+from routes.alliance_routes import register_alliance_routes
 
 __all__ = [
     # 已有(15)
@@ -126,4 +128,5 @@ __all__ = [
     "register_knowledge_routes",
     "register_hub_routes",
     "register_promo_routes",
+    "register_alliance_routes",
 ]

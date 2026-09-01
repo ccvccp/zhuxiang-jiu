@@ -71,6 +71,8 @@ SCORER_REGISTRY = {
     "auth_risk":                   {"label": "认证风控评分", "module": "30用户认证", "batch": 3},
     # ---- 第四批(36号智能推广 P2: 热点蹭点评分 Hedge 效果回流) ----
     "promo_hotspot":               {"label": "热点蹭点评分", "module": "36智能推广", "batch": 4},
+    # ---- 第五批(37号网站同盟 P0: 入盟预审评分, Hedge 自学习) ----
+    "alliance_onboarding":         {"label": "同盟入驻预审评分", "module": "37网站同盟", "batch": 5},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -116,6 +118,10 @@ def default_weights(scorer_id: str) -> dict:
         # 常量定义在 promo_radar_service(单一事实源)
         from services.promo_radar_service import DEFAULT_RADAR_WEIGHTS
         return dict(DEFAULT_RADAR_WEIGHTS)
+    if scorer_id == "alliance_onboarding":
+        # 37号网站同盟: 入盟预审五因子, 单一事实源在评分器类
+        from services.ai_scoring_service import AllianceOnboardingScorer
+        return dict(AllianceOnboardingScorer.WEIGHTS)
     if scorer_id.startswith("logistics_routing:"):
         from services.ai_scoring_service import _BUDGET_WEIGHTS
         budget = scorer_id.split(":", 1)[1]

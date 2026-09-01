@@ -98,6 +98,8 @@ from routes import (
     register_ai_learning_routes,
     # AI智能推广模块(36号·热点雷达+GLM-5.3 Agent内容工厂)
     register_promo_routes,
+    # AI智能网站同盟模块(37号·酒水不分家商户同盟平台)
+    register_alliance_routes,
 )
 
 __all__ = ["app", "_mock_store"]
@@ -230,6 +232,8 @@ register_ai_scoring_auth_routes(app)
 register_ai_learning_routes(app)
 # AI智能推广模块(36号)
 register_promo_routes(app)
+# AI智能网站同盟模块(37号)
+register_alliance_routes(app)
 
 
 # ============================================================
@@ -273,6 +277,9 @@ async def _on_startup():
         start_radar_scheduler, start_publish_scheduler)
     start_radar_scheduler()
     start_publish_scheduler()
+    # 37号·AI智能网站同盟: T+1 结算(ALLIANCE_SETTLE_AUTO=off 可关闭)
+    from services.alliance_settle_scheduler import start_scheduler as start_alliance_settle
+    start_alliance_settle()
 
 
 @app.on_event("shutdown")
@@ -295,6 +302,9 @@ async def _on_shutdown():
     # 36号·AI智能推广调度器
     from services.promo_scheduler import stop_schedulers as stop_promo_schedulers
     stop_promo_schedulers()
+    # 37号·AI智能网站同盟结算调度器
+    from services.alliance_settle_scheduler import stop_scheduler as stop_alliance_settle
+    stop_alliance_settle()
     await close_redis_client()
     logger.info("清理完成")
 
