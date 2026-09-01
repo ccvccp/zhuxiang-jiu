@@ -297,7 +297,7 @@ HUB_CIRCUIT_MIN_SUCCESS=0.5          # 熔断阈值(7日成功率)
 | 期 | 内容 | 验收 |
 |---|---|---|
 | **P0 统一入口+语音** | ai-hub-widget.js（三键输入条/按住说话/角色面板chips）+ `/api/hub/asr` + voice 消息模型落地 + 意图规则轨 + `GET /panel` | 联调清单风格 E2E：游客语音问价→RAG答；member点chip查订单；管理员见治理入口占位 |
-| **P1 编排中枢** | 能力注册表 + 路由器 + 熔断 + decision/orchestrate 真实化接管 + `/api/hub/route|capabilities` | 12意图路由准确率≥90%（回归用例）；摘除能力自动绕行 |
+| **P1 编排中枢** ✅ 已交付(后端 83f67cc + 前端接线 2026-09-01) | 能力注册表 + 路由器 + 熔断 + decision/orchestrate 真实化接管 + `/api/hub/route|capabilities` + ai-hub-widget.js 前端接线 | 12意图路由准确率≥90%（回归用例）；摘除能力自动绕行；前端路由闭环(转人工直达/路由徽章/失败降级) |
 | **P2 训练治理** ✅ 已交付(2026-09-01) | ai-hub-dashboard.html + 学习周期管理 + 意图统计 | 看板三视图齐；重跑学习周期幂等(93/93 E2E 通过)；容器实机 200 验证 |
 | **P3 媒体+用量+审批** ✅ 已交付(2026-09-01) | media/voice+image 上传 + `/media` 静态服务 + `ops/usage` 用量成本 + 晋升审批流(approve/reject) | 125/125 E2E 通过；容器实机媒体上传→静态回读 200 |
 

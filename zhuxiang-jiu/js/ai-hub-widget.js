@@ -7,7 +7,9 @@
  * 新增能力(对接 backend/routes/hub_routes.py):
  *     GET  /api/hub/panel          角色能力面板 chips(≤6, 点击注入快捷指令)
  *     POST /api/hub/asr            语音转文字(按住说话→松手→文字预览可改再发)
- *     POST /api/hub/input/intent   意图分类(埋点, 展示意图徽章)
+ *     POST /api/hub/route          意图路由(P1 编排中枢: 发送前决策, 转人工直达,
+ *                                  其余按意图→能力分发, AI 回复带路由徽章; 失败
+ *                                  静默回退 chat 旧轨, 降级不阻断)
  * 兼容: 保留 ChatWidget.mount() 全部协议(旧页面零改动);
  *       HUB 不可用时自动隐藏 🎤/📷, 降级为纯文本(与旧版一致)。
  *
@@ -144,15 +146,28 @@ var AIHubWidget = (function () {
         bar.style.display = chips.length ? 'flex' : 'none';
     }
 
-    /* ========= 意图徽章(发送前埋点) ========= */
-    async function trackIntent(text) {
+    /* ========= 意图路由(P1 编排中枢前端接线: 发送前经 /api/hub/route 决策) ========= */
+    var CAPABILITY_LABEL = {
+        'knowledge.rag': '知识库', 'chat.human': '人工客服', 'order.query': '订单服务',
+        'role.dispatch': '工单派单', 'role.profit': '分润结算', 'hub.ops': 'AI治理',
+        'hub.asr': '语音识别',
+    };
+
+    async function routeMessage(text) {
+        /* 路由决策(埋点已内含: route 内部 bump_intent);
+           失败返回 null, 调用方回退 chat 旧轨(降级不阻断) */
         try {
-            await fetch(apiBase() + '/api/hub/input/intent', {
+            var res = await fetch(apiBase() + '/api/hub/route', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-Member-Id': memberId() },
-                body: JSON.stringify({ text: text }),
+                body: JSON.stringify({ text: text, role: state.role }),
             });
-        } catch (e) { /* 埋点失败不阻断 */ }
+            if (!res.ok) return null;
+            var body = await res.json();
+            return (body && body.intent) ? body : null;
+        } catch (e) {
+            return null;
+        }
     }
 
     /* ========= 发送与渲染 ========= */
@@ -163,8 +178,21 @@ var AIHubWidget = (function () {
         input.value = '';
         state.sending = true;
         appendMessage('user', text);
-        trackIntent(text);
         var typingId = appendTyping();
+
+        /* P1 路由分发: 转人工意图直达, 其余走 chat(AI 能力链) */
+        var route = await routeMessage(text);
+        if (route && route.status === 'routed'
+                && route.capability === 'chat.human') {
+            removeTyping(typingId);
+            state.pendingAsr = null;
+            hideAsrPreview();
+            appendMessage('system', '已识别转人工意图，正在为您接入…');
+            await transferHuman();
+            state.sending = false;
+            return;
+        }
+
         try {
             var sid = await ensureSession();
             var r = await apiJson('/api/chat/sessions/' + encodeURIComponent(sid) + '/messages', {
@@ -178,7 +206,7 @@ var AIHubWidget = (function () {
             hideAsrPreview();
             var ai = r.aiReply;
             if (ai) {
-                appendMessage('ai', ai.content, ai);
+                appendMessage('ai', ai.content, ai, route);
                 if (ai.transferred) {
                     state.transferred = true;
                     appendMessage('system', '已为您转接人工客服，请稍候。');
@@ -195,7 +223,7 @@ var AIHubWidget = (function () {
         }
     }
 
-    function appendMessage(senderType, content, ai) {
+    function appendMessage(senderType, content, ai, route) {
         var log = document.getElementById('cw-log');
         if (!log) return null;
         var wrap = document.createElement('div');
@@ -212,6 +240,15 @@ var AIHubWidget = (function () {
                     '<span class="cw-conf">置信度 ' + (ai.aiConfidence != null ? ai.aiConfidence : '--') + '</span></div>';
             } else if (ai.aiConfidence != null) {
                 html += '<div class="cw-meta"><span class="cw-conf">置信度 ' + ai.aiConfidence + '</span></div>';
+            }
+            /* P1 路由徽章: 意图 → 命中能力(编排中枢决策可视化) */
+            if (route && route.intent) {
+                var intentLabel = INTENT_LABEL[route.intent] || route.intent;
+                var capLabel = route.capability
+                    ? (CAPABILITY_LABEL[route.capability] || route.capability)
+                    : '通用助手';
+                html += '<div class="cw-meta"><span class="cw-badge m-route">🧭 ' +
+                    esc(intentLabel) + ' → ' + esc(capLabel) + '</span></div>';
             }
             var cites = ai.citations || [];
             if (cites.length) {
@@ -436,6 +473,7 @@ var AIHubWidget = (function () {
             '.cw-badge.m-direct{background:#e8f4ec;color:#2e8b57;border:1px solid rgba(46,139,87,.3)}',
             '.cw-badge.m-synthesized{background:#eef2fb;color:#3b5998;border:1px solid rgba(59,89,152,.3)}',
             '.cw-badge.m-legacy{background:#f4f4f4;color:#999;border:1px solid #ddd}',
+            '.cw-badge.m-route{background:#eef2fb;color:#3b5998;border:1px solid rgba(59,89,152,.3)}',
             '.cw-conf{font-size:10px;color:#98a29a}',
             '.cw-cites{margin-top:8px;border-top:1px dashed #e4e8e4;padding-top:6px}',
             '.cw-cites-title{font-size:10px;color:#98a29a;margin-bottom:4px}',
