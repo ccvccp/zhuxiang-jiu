@@ -310,3 +310,48 @@ class HubRepository:
             return
         self._ensure_store()
         self.store["hub_route_health"].pop(cap_id, None)
+
+    # ============================================================
+    # LLM 用量日聚合(P3: hub 治理看板用量成本视图的数据源)
+    # ============================================================
+
+    async def save_llm_daily(self, date: str,
+                             counts: dict[str, dict[str, int]]) -> None:
+        """保存某日 LLM 调用计数快照(幂等覆盖)
+
+        Args:
+            date: yyyymmdd
+            counts: {method: {ok: n, error: n}}
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("hub", "llm", "usage", date)
+            await client.delete(key)
+            if counts:
+                pipe = client.pipeline()
+                for method, m in counts.items():
+                    pipe.hset(key, f"{method}:ok", int(m.get("ok", 0)))
+                    pipe.hset(key, f"{method}:error", int(m.get("error", 0)))
+                await pipe.execute()
+            return
+        self._ensure_store()
+        self.store.setdefault("hub_llm_usage", {})[date] = {
+            m: {"ok": int(v.get("ok", 0)),
+                "error": int(v.get("error", 0))}
+            for m, v in (counts or {}).items()}
+
+    async def get_llm_daily(self, date: str) -> dict[str, dict[str, int]]:
+        """读取某日 LLM 调用计数({method: {ok, error}}, 空日返回 {})"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k("hub", "llm", "usage", date))
+            if not data:
+                return {}
+            out: dict[str, dict[str, int]] = {}
+            for field, val in data.items():
+                method, _, kind = field.partition(":")
+                out.setdefault(method, {"ok": 0, "error": 0})[kind] = int(val)
+            return out
+        self._ensure_store()
+        raw = self.store.get("hub_llm_usage", {}).get(date, {})
+        return {m: dict(v) for m, v in raw.items()}

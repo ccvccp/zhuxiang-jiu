@@ -541,10 +541,188 @@ def test_decision_takeover():
            f"got {tasks}")
 
 
+async def test_media():
+    """17. P3 媒体上传: 尺寸/格式校验 + 落盘 URL + 静态服务可访问"""
+    import shutil
+    svc = HubService()
+    # 17a. 语音正常上传
+    r = await svc.save_media("voice", b"fake-webm-audio", "webm")
+    record("媒体: 语音上传成功", r["success"] is True
+           and r["url"].startswith("/media/voice/"), f"got {r}")
+    voice_url = r.get("url")
+    # 17b. 图片正常上传
+    r = await svc.save_media("image", b"fake-jpeg-data", ".jpg")
+    record("媒体: 图片上传成功", r["success"] is True
+           and r["url"].startswith("/media/image/"))
+    # 17c. 超限拒绝(语音 2MB / 图片 5MB)
+    r = await svc.save_media("voice", b"x" * (2 * 1024 * 1024 + 1), "mp3")
+    record("媒体: 语音超 2MB 拒绝", r["success"] is False and "过大" in r["error"])
+    r = await svc.save_media("image", b"x" * (5 * 1024 * 1024 + 1), "png")
+    record("媒体: 图片超 5MB 拒绝", r["success"] is False and "过大" in r["error"])
+    # 17d. 格式白名单拒绝
+    r = await svc.save_media("voice", b"data", ".exe")
+    record("媒体: 语音非法格式拒绝", r["success"] is False and "格式" in r["error"])
+    r = await svc.save_media("image", b"data", "bmp")
+    record("媒体: 图片非法格式拒绝", r["success"] is False)
+    # 17e. 空内容拒绝
+    r = await svc.save_media("voice", b"", "wav")
+    record("媒体: 空内容拒绝", r["success"] is False)
+    # 17f. HTTP 层: base64 上传 + 静态服务回读
+    try:
+        from fastapi.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        import base64 as _b64
+        resp = client.post("/api/hub/media/voice",
+                           json={"data_b64": _b64.b64encode(b"httptest-voice").decode(),
+                                 "fmt": "wav"})
+        body = resp.json()
+        record("HTTP 媒体: 上传 200", resp.status_code == 200
+               and body["success"] is True, f"{resp.status_code} {body}")
+        if body.get("success"):
+            static = client.get(body["url"])
+            record("HTTP 媒体: 静态回读 200", static.status_code == 200
+                   and static.content == b"httptest-voice")
+        resp = client.post("/api/hub/media/image",
+                           json={"data_b64": "!!!bad!!!"})
+        record("HTTP 媒体: 非法base64 结构化", resp.status_code == 200
+               and resp.json()["success"] is False)
+    except ImportError:
+        RESULTS.append("  - HTTP 媒体测试跳过(TestClient 不可用)")
+    # 17g. 清理测试产物
+    from services.hub_service import MEDIA_ROOT
+    for sub in ("voice", "image"):
+        folder = os.path.join(MEDIA_ROOT, sub)
+        if os.path.isdir(folder):
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+async def test_usage():
+    """18. P3 LLM 用量聚合: 内存埋点 → 快照 Redis → 汇总视图"""
+    from core.metrics import llm_daily_counts, reset_metrics
+    from datetime import datetime, UTC
+    reset_metrics()
+    svc = HubService()
+    # 18a. repo 层日聚合存取
+    today = datetime.now(UTC).strftime("%Y%m%d")
+    counts = {"chat": {"ok": 3, "error": 1}, "vision": {"ok": 2, "error": 0}}
+    await svc.repo.save_llm_daily(today, counts)
+    got = await svc.repo.get_llm_daily(today)
+    record("用量: 日聚合存取", got == counts, f"got {got}")
+    record("用量: 空日返回空", await svc.repo.get_llm_daily("20000101") == {})
+    # 18b. 无内存埋点时视图读 Redis 快照
+    ov = await svc.get_usage_overview(days=7)
+    day = ov["daily"].get(today)
+    record("用量: 视图含当日数据", day is not None and day["calls"] == 6
+           and day["errors"] == 1, f"got {day}")
+    record("用量: 成本为正", day and day["cost"] > 0)
+    record("用量: 汇总口径一致", ov["totals"]["calls"] >= 6)
+    # 18c. metrics 埋点联动(llm_timer)
+    from core.metrics import llm_timer
+    with llm_timer("chat"):
+        pass
+    try:
+        with llm_timer("embed"):
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    m = llm_daily_counts()
+    record("用量: llm_timer 日计数", m.get(today, {}).get("chat", {}).get("ok", 0) >= 1
+           and m.get(today, {}).get("embed", {}).get("error", 0) >= 1)
+    reset_metrics()
+
+
+async def test_approvals():
+    """19. P3 晋升审批流: 清单/批准/拒绝/无挑战者 409"""
+    from repositories.ai_learning_repository import AiLearningRepository
+    from services import ai_learning_service as als
+    repo = AiLearningRepository()
+    svc = HubService()
+    # 19a. 无挑战者 → 空清单
+    a = await svc.list_approvals()
+    record("审批: 初始空清单", a["total"] == 0 and a["pending"] == [])
+    # 19b. 构造挑战者(order_risk)
+    champion = {"version": "v1", "weights": {"a": 1.0}, "source": "default",
+                "parentVersion": None, "stats": {}, "note": "", "createdAt": "2026-09-01T00:00:00"}
+    challenger = {"version": "v2", "weights": {"a": 1.4}, "source": "learning",
+                  "parentVersion": "v1", "stats": {"rewardAlignment": 0.82},
+                  "note": "", "createdAt": "2026-09-01T01:00:00"}
+    await repo.save_profile("order_risk", {"champion": champion,
+                                            "challenger": challenger})
+    a = await svc.list_approvals()
+    record("审批: 挑战者入清单", a["total"] == 1
+           and a["pending"][0]["scorerId"] == "order_risk"
+           and a["pending"][0]["challengerVersion"] == "v2")
+    # 19c. 拒绝 → 挑战者退役 + 清单清空
+    r = await svc.reject_promotion("order_risk", "测试拒绝")
+    record("审批: 拒绝成功", r["success"] is True and r["discardedVersion"] == "v2")
+    a = await svc.list_approvals()
+    record("审批: 拒绝后清单清空", a["total"] == 0)
+    hist = await repo.list_history("order_risk", limit=5)
+    record("审批: 拒绝版本进历史", any(h.get("note", "").startswith("rejected")
+                                       for h in hist), f"got {[h.get('note') for h in hist]}")
+    # 19d. 再次构造 → 批准晋升
+    await repo.save_profile("order_risk", {"champion": champion,
+                                            "challenger": challenger})
+    r = await svc.approve_promotion("order_risk")
+    record("审批: 批准晋升成功", r["success"] is True
+           and r["promotedVersion"] == "v2" and r["previousVersion"] == "v1")
+    profile = await repo.get_profile("order_risk")
+    record("审批: 晋升后冠军=v2", profile["champion"]["version"] == "v2"
+           and profile["challenger"] is None)
+    # 19e. 无挑战者时拒绝/批准 → ValueError
+    try:
+        await svc.reject_promotion("order_risk")
+        record("审批: 无挑战者拒绝报冲突", False)
+    except ValueError:
+        record("审批: 无挑战者拒绝报冲突", True)
+    # 19f. 清理(重置 order_risk 档案)
+    await als.reset_weights("order_risk")
+    record("审批: 重置清理", (await repo.get_profile("order_risk")) is not None)
+
+
+def test_http_p3():
+    """20. HTTP 层 P3 端点(usage/approvals/media)"""
+    try:
+        from fastapi.testclient import TestClient
+        from main import app
+    except ImportError:
+        RESULTS.append("  - HTTP P3 测试跳过(TestClient 不可用)")
+        return
+    client = TestClient(app)
+
+    # 20a. 用量视图: 无权限 403 / admin 200
+    r = client.get("/api/hub/ops/usage")
+    record("HTTP P3 用量无权限 403", r.status_code == 403)
+    r = client.get("/api/hub/ops/usage?days=7", headers={"X-Role": "admin"})
+    body = r.json()
+    record("HTTP P3 用量 admin 200", r.status_code == 200
+           and "daily" in body and "totals" in body)
+
+    # 20b. 审批清单: 无权限 403 / admin 200
+    r = client.get("/api/hub/ops/learning/approvals")
+    record("HTTP P3 审批无权限 403", r.status_code == 403)
+    r = client.get("/api/hub/ops/learning/approvals", headers={"X-Role": "admin"})
+    body = r.json()
+    record("HTTP P3 审批清单 200", r.status_code == 200
+           and isinstance(body["pending"], list))
+
+    # 20c. 批准/拒绝: 无挑战者 → 409; 未知评分器 → 404
+    r = client.post("/api/hub/ops/learning/approve/order_risk",
+                    headers={"X-Role": "admin"})
+    record("HTTP P3 批准无挑战者 409", r.status_code == 409)
+    r = client.post("/api/hub/ops/learning/reject/not-exist",
+                    json={"reason": None}, headers={"X-Role": "admin"})
+    record("HTTP P3 拒绝未知 404", r.status_code == 404)
+    r = client.post("/api/hub/ops/learning/reject/order_risk",
+                    json={"reason": None}, headers={"X-Role": "admin"})
+    record("HTTP P3 拒绝无挑战者 409", r.status_code == 409)
+
+
 async def main():
     reset_store()
     print("=" * 64)
-    print("AI智能中枢模块(35号) P0+P1+P2 端到端测试")
+    print("AI智能中枢模块(35号) P0+P1+P2+P3 端到端测试")
     print("=" * 64)
 
     await test_intent_rules()
@@ -565,6 +743,11 @@ async def main():
     await test_ops_overview()
     await test_learning_retrigger()
     test_http_p2()
+    # ---- P3 ----
+    await test_media()
+    await test_usage()
+    await test_approvals()
+    test_http_p3()
 
     print("\n".join(RESULTS))
     print("-" * 64)

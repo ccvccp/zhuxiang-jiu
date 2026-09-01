@@ -132,3 +132,8 @@ taro-app/.swc/
 #  Coverage JSON 报告(backend 临时产物,与 .coverage / coverage.xml 互补)
 # ============================================================
 zhuxiang-jiu/backend/coverage*.json
+
+# ============================================================
+#  AI Hub 媒体文件(35号 P3: 本地测试上传产物, 容器内走 hub-media 卷)
+# ============================================================
+zhuxiang-jiu/backend/media/

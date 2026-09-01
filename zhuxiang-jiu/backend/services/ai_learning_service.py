@@ -709,6 +709,38 @@ async def promote_challenger(scorer_id: str) -> dict:
             "weights": challenger["weights"], "promotedAt": ts()}
 
 
+async def discard_challenger(scorer_id: str, reason: str | None = None) -> dict:
+    """丢弃挑战者版本(审批拒绝通道, v7.9)
+
+    挑战者退役进历史(note 标记 rejected), 影子位清空; 冠军不受影响。
+    与 promote 同为读-改-写操作, 统一走 get_lock。
+
+    Raises:
+        KeyError: 未知评分器
+        ValueError: 无可丢弃的挑战者
+    """
+    _require_scorer(scorer_id)
+    repo = AiLearningRepository()
+    async with get_lock(f"ai_learning:{scorer_id}"):
+        profile = await _load_profile(scorer_id, repo)
+        challenger = profile.get("challenger")
+        if not challenger:
+            raise ValueError(f"评分器 {scorer_id} 当前没有挑战者版本可拒绝")
+        challenger = dict(challenger)
+        challenger["note"] = (f"rejected: {reason}" if reason
+                              else "rejected: 审批拒绝")
+        await repo.add_history(scorer_id, challenger)
+        profile["challenger"] = None
+        await repo.save_profile(scorer_id, profile)
+        # 拒绝不影响冠军生效权重, 无需失效权重缓存
+
+    logger.info("ai_learning_discard scorer=%s %s",
+                scorer_id, challenger["version"])
+    return {"success": True, "scorerId": scorer_id,
+            "discardedVersion": challenger["version"],
+            "reason": reason, "discardedAt": ts()}
+
+
 async def reset_weights(scorer_id: str) -> dict:
     """重置为默认权重(新冠军版本, 挑战者清除, 历史保留支持审计)"""
     _require_scorer(scorer_id)

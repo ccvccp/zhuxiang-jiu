@@ -104,6 +104,25 @@ rag_cache_hits_total = Counter(
     "app_rag_cache_hits_total", "RAG 缓存命中数",
     ("layer", "hit"))
 
+# LLM 日计数(内存, 按日聚合: {date: {method: {ok: n, error: n}}})
+# 供 hub 治理看板用量成本视图读取; 持久化由 hub 层快照进 Redis
+_llm_daily: dict[str, dict[str, dict[str, int]]] = defaultdict(dict)
+
+
+def _bump_llm_daily(method: str, ok: bool) -> None:
+    """LLM 调用日计数(本地日期键; 线程安全)"""
+    date = time.strftime("%Y%m%d")
+    with _lock:
+        day = _llm_daily.setdefault(date, {})
+        m = day.setdefault(method, {"ok": 0, "error": 0})
+        m["ok" if ok else "error"] += 1
+
+
+def llm_daily_counts() -> dict[str, dict[str, dict[str, int]]]:
+    """读取 LLM 日计数快照(浅拷贝日期层, 供 hub 用量视图)"""
+    with _lock:
+        return {d: dict(methods) for d, methods in _llm_daily.items()}
+
 
 def _fmt_labels(labels: tuple[str, ...], values: tuple[str, ...]) -> str:
     if not labels:
@@ -170,6 +189,7 @@ class llm_timer:
         llm_call_duration.observe(duration, {"method": self.method})
         result = "error" if exc_type else "ok"
         llm_calls_total.inc({"method": self.method, "result": result})
+        _bump_llm_daily(self.method, exc_type is None)
         return False   # 不吞异常语义(由调用方处理)
 
 
@@ -183,3 +203,4 @@ def reset_metrics() -> None:
         http_request_duration._sums.clear()
         llm_call_duration._counts.clear()
         llm_call_duration._sums.clear()
+        _llm_daily.clear()

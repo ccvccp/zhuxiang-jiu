@@ -86,3 +86,4 @@ services:
 
 volumes:
   redis-data:
+  hub-media:

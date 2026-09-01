@@ -1,7 +1,7 @@
 # AI智能中枢模块设计文档（35号·全站AI大模型总调度）
 
-> 版本: v1.2（2026-09-01）
-> 状态: P0+P1+P2 已交付（统一入口/语音/意图路由/熔断自愈/编排/治理看板/学习周期管理）
+> 版本: v1.3（2026-09-01）
+> 状态: P0+P1+P2+P3 已交付（统一入口/语音/意图路由/熔断自愈/编排/治理看板/学习周期管理/媒体上传/用量成本/晋升审批流）
 > 模块编号: **35**
 > 模块名: **AI智能中枢模块（AI Hub）**——统一AI智能入口 + 多模态交互引擎 + 全站AI能力编排中枢
 
@@ -236,8 +236,8 @@ v1 仅支持 ≤3 个并行能力 + 1 个后置动作（转人工/建工单）�
    - 能力健康矩阵（窗口成功率/声明健康度/p95/成本权重，红黄绿三色灯：red=熔断或下架, yellow=窗口成功率偏低未熔断, green=正常）
    - 意图分布（近 7 日 `intentDistribution7d` 横条图）+ 入口健康聚合条
    - 学习周期管理面板（16 个评分器档案重跑结果表格）
-   - LLM 用量与成本聚合（复用 `/metrics` 数据 + Redis 日聚合，后续版本）
-2. **训练管理**（✅ 已交付）：学习周期手动重跑（`POST /api/hub/ops/learning/retrigger`，单评分器或全部 16 档案，反馈不足自动跳过不报错）；评分器晋升/回退审批流（后续版本）。
+   - LLM 用量与成本（✅ P3 已交付：`GET /api/hub/ops/usage`——当日取内存指标实时值, 历史日取 Redis 日聚合快照（`hub:llm:usage:{date}` Hash, 惰性持久化幂等覆盖）; 成本按方法估算单价折算, 非账单口径）
+2. **训练管理**（✅ 已交付）：学习周期手动重跑（`POST /api/hub/ops/learning/retrigger`，单评分器或全部 16 档案，反馈不足自动跳过不报错）；评分器晋升审批流（✅ P3 已交付：`GET /api/hub/ops/learning/approvals` 待审清单 + `approve/{id}` 批准（复用 promote）+ `reject/{id}` 拒绝（挑战者退役进历史, note 标记 rejected））。
 3. **熔断与自愈**（✅ P1 已交付）：能力连续失败 → 自动摘除路由 → 恢复探测（半开）→ 重新上架；看板内可一键半开探测/上下架。
 
 ---
@@ -250,9 +250,10 @@ v1 仅支持 ≤3 个并行能力 + 1 个后置动作（转人工/建工单）�
 | `hub:intent_stats:{yyyymmdd}` | Hash | 意图日计数（field=intent, value=n） |
 | `hub:asr:usage:{mid}` | String(TTL 24h) | 会员日语音用量（限流 200次/日） |
 | `hub:route:health:{cap_id}` | Hash | 健康滚动窗口（success/fail/p95样本） |
+| `hub:llm:usage:{yyyymmdd}` | Hash | LLM 调用日聚合（field=method:ok/error, P3） |
 | `hub:feedback:{sid}` | List | 入口会话反馈（复用 chat 满意度） |
 
-语音文件存本地卷 `hub-media/`（compose 挂载），URL 走静态服务（P0 简化，不上 OSS）。
+媒体文件存本地卷（`backend/media/{voice|image}/`，compose 挂 `hub-media:/app/media`），URL 走 `/media/...` 静态服务（✅ P3 已交付，不上 OSS；语音 ≤2MB，图片 ≤5MB，base64 JSON 上传）。
 
 ---
 
@@ -298,6 +299,7 @@ HUB_CIRCUIT_MIN_SUCCESS=0.5          # 熔断阈值(7日成功率)
 | **P0 统一入口+语音** | ai-hub-widget.js（三键输入条/按住说话/角色面板chips）+ `/api/hub/asr` + voice 消息模型落地 + 意图规则轨 + `GET /panel` | 联调清单风格 E2E：游客语音问价→RAG答；member点chip查订单；管理员见治理入口占位 |
 | **P1 编排中枢** | 能力注册表 + 路由器 + 熔断 + decision/orchestrate 真实化接管 + `/api/hub/route|capabilities` | 12意图路由准确率≥90%（回归用例）；摘除能力自动绕行 |
 | **P2 训练治理** ✅ 已交付(2026-09-01) | ai-hub-dashboard.html + 学习周期管理 + 意图统计 | 看板三视图齐；重跑学习周期幂等(93/93 E2E 通过)；容器实机 200 验证 |
+| **P3 媒体+用量+审批** ✅ 已交付(2026-09-01) | media/voice+image 上传 + `/media` 静态服务 + `ops/usage` 用量成本 + 晋升审批流(approve/reject) | 125/125 E2E 通过；容器实机媒体上传→静态回读 200 |
 
 每期交付遵循全站惯例：四层代码 + E2E 测试（LOCK_MODE/STORE_MODE=asyncio）+ 更新日志 + 总体架构文档3.1清单补录（35号）。
 

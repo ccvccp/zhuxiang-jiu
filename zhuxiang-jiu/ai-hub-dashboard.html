@@ -228,10 +228,51 @@
             </div>
         </section>
 
+        <!-- P3: LLM 用量成本 + 晋升审批 -->
+        <section class="dash-section">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;">
+                <div class="dash-card">
+                    <div class="hub-status-bar" style="justify-content:space-between;">
+                        <b>LLM 用量与成本(近 7 日)</b>
+                        <span style="font-size:12px;color:var(--color-text-light);" id="usageTotals">--</span>
+                    </div>
+                    <div class="matrix-wrap">
+                        <table class="matrix">
+                            <thead>
+                                <tr><th>日期</th><th>调用次数</th><th>失败</th><th>估算成本(元)</th><th>方法分布</th></tr>
+                            </thead>
+                            <tbody id="usageBody">
+                                <tr><td colspan="5" class="dash-empty">暂无 LLM 调用数据</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="hub-status-bar" style="font-size:11px;color:var(--color-text-light);">
+                        成本为调用次数 × 估算单价, 非账单口径; 当日为内存指标实时值, 历史日为 Redis 日聚合快照。
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="hub-status-bar" style="justify-content:space-between;">
+                        <b>晋升审批(待审挑战者)</b>
+                        <button class="dash-btn ghost" onclick="loadApprovals()">刷新</button>
+                    </div>
+                    <div class="matrix-wrap">
+                        <table class="matrix">
+                            <thead>
+                                <tr><th>评分器</th><th>挑战者版本</th><th>奖励对齐度</th><th>来源</th><th>操作</th></tr>
+                            </thead>
+                            <tbody id="approvalsBody">
+                                <tr><td colspan="5" class="dash-empty">暂无待审批的挑战者</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- 页脚说明 -->
         <footer class="dash-footer">
             <div>鉴权说明：默认 <code>AUTH_MODE=compat</code> 下本页以 <code>X-Role: admin</code> 兼容头直连管理端点；<code>strict</code> 模式需先登录获取 JWT 并改造请求头。</div>
-            <div>数据来源：<code>GET /api/hub/ops/overview</code> / <code>POST /api/hub/ops/learning/retrigger</code> / <code>POST /api/hub/ops/circuit/{id}/probe</code> / <code>POST /api/hub/capabilities/{id}/toggle</code>。红绿灯：<code>red</code>=熔断或下架，<code>yellow</code>=窗口成功率低于熔断阈值但样本不足或未触发，<code>green</code>=正常。</div>
+            <div>数据来源：<code>GET /api/hub/ops/overview</code> / <code>POST /api/hub/ops/learning/retrigger</code> / <code>GET /api/hub/ops/usage</code> / <code>GET /api/hub/ops/learning/approvals</code> / <code>POST /api/hub/ops/learning/approve|reject/{id}</code> / <code>POST /api/hub/ops/circuit/{id}/probe</code> / <code>POST /api/hub/capabilities/{id}/toggle</code>。红绿灯：<code>red</code>=熔断或下架，<code>yellow</code>=窗口成功率低于熔断阈值但样本不足或未触发，<code>green</code>=正常。</div>
         </footer>
     </main>
 
@@ -303,6 +344,8 @@
             renderStatusBar();
             renderMatrix();
             renderIntents();
+            loadUsage();
+            loadApprovals();
         }
 
         function renderStats() {
@@ -435,6 +478,93 @@
                 document.getElementById('learnResult').textContent = '学习周期执行失败, 见上方错误信息。';
             } finally {
                 btn.disabled = false; btn.textContent = '重跑全部学习';
+            }
+        }
+
+        /* ========= P3: 用量成本 + 晋升审批 ========= */
+        async function loadUsage() {
+            try {
+                var u = await fetchJson(state.apiBase + '/api/hub/ops/usage?days=7');
+                var tbody = document.getElementById('usageBody');
+                var days = Object.keys(u.daily || {}).sort().reverse();
+                if (!days.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="dash-empty">暂无 LLM 调用数据</td></tr>';
+                } else {
+                    tbody.innerHTML = days.map(function (d) {
+                        var day = u.daily[d];
+                        var byMethod = Object.keys(day.byMethod || {}).map(function (m) {
+                            return m + '(' + ((day.byMethod[m].ok || 0) + (day.byMethod[m].error || 0)) + ')';
+                        }).join(', ');
+                        var cost = (day.cost || 0).toFixed(4);
+                        return '<tr><td class="cap-id">' + esc(d) + '</td>' +
+                            '<td class="num">' + day.calls + '</td>' +
+                            '<td class="num">' + day.errors + '</td>' +
+                            '<td class="num">' + cost + '</td>' +
+                            '<td style="font-size:11px;color:var(--color-text-light);white-space:normal;">' + esc(byMethod || '--') + '</td></tr>';
+                    }).join('');
+                }
+                var t = u.totals || {};
+                document.getElementById('usageTotals').textContent =
+                    '合计: ' + (t.calls || 0) + ' 次 / 失败 ' + (t.errors || 0) + ' / 估算 ¥' + (t.cost || 0).toFixed(4);
+            } catch (err) {
+                document.getElementById('usageBody').innerHTML =
+                    '<tr><td colspan="5" class="dash-empty">用量加载失败: ' + esc(err.message) + '</td></tr>';
+            }
+        }
+
+        async function loadApprovals() {
+            try {
+                var a = await fetchJson(state.apiBase + '/api/hub/ops/learning/approvals');
+                var tbody = document.getElementById('approvalsBody');
+                var pending = a.pending || [];
+                if (!pending.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="dash-empty">暂无待审批的挑战者</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = pending.map(function (p) {
+                    var stats = p.stats || {};
+                    var align = stats.rewardAlignment != null ? pct(stats.rewardAlignment) : '--';
+                    return '<tr>' +
+                        '<td><b>' + esc(p.label || p.scorerId) + '</b><br><span class="cap-id">' + esc(p.scorerId) + '</span></td>' +
+                        '<td class="cap-id">' + esc(p.challengerVersion || '--') +
+                        (p.parentVersion ? '<br><span style="color:var(--color-text-light);">← ' + esc(p.parentVersion) + '</span>' : '') + '</td>' +
+                        '<td class="num">' + align + '</td>' +
+                        '<td><span class="badge weak">' + esc(p.source || '--') + '</span></td>' +
+                        '<td>' +
+                            '<button class="btn-mini" onclick="approvePromotion(\'' + esc(p.scorerId) + '\')">批准</button> ' +
+                            '<button class="btn-mini danger" onclick="rejectPromotion(\'' + esc(p.scorerId) + '\')">拒绝</button>' +
+                        '</td></tr>';
+                }).join('');
+            } catch (err) {
+                document.getElementById('approvalsBody').innerHTML =
+                    '<tr><td colspan="5" class="dash-empty">审批清单加载失败: ' + esc(err.message) + '</td></tr>';
+            }
+        }
+
+        async function approvePromotion(scorerId) {
+            if (!confirm('确认批准「' + scorerId + '」的挑战者晋升为冠军? 立即生效。')) { return; }
+            try {
+                var r = await fetchJson(
+                    state.apiBase + '/api/hub/ops/learning/approve/' + encodeURIComponent(scorerId),
+                    { method: 'POST' });
+                showBanner('infoBanner', '已晋升: ' + (r.previousVersion || '?') + ' → ' + (r.promotedVersion || '?'));
+                loadApprovals();
+            } catch (err) {
+                showBanner('errorBanner', '批准失败：' + err.message);
+            }
+        }
+
+        async function rejectPromotion(scorerId) {
+            var reason = prompt('拒绝「' + scorerId + '」挑战者的原因(可空):', '');
+            if (reason === null) { return; }
+            try {
+                var r = await fetchJson(
+                    state.apiBase + '/api/hub/ops/learning/reject/' + encodeURIComponent(scorerId),
+                    { method: 'POST', body: JSON.stringify({ reason: reason || null }) });
+                showBanner('infoBanner', '已拒绝: ' + (r.discardedVersion || '?') + ' 退役进历史');
+                loadApprovals();
+            } catch (err) {
+                showBanner('errorBanner', '拒绝失败：' + err.message);
             }
         }
 

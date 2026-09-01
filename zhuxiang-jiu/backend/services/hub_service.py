@@ -15,6 +15,7 @@
 import logging
 import os
 import tempfile
+import uuid
 from datetime import datetime, UTC
 
 from repositories.hub_repository import (
@@ -23,6 +24,16 @@ from repositories.hub_repository import (
 )
 
 logger = logging.getLogger("hub_service")
+
+# 媒体存储(P3: 本地卷, 不上 OSS; compose 挂 hub-media 卷持久化)
+MEDIA_ROOT = os.environ.get(
+    "HUB_MEDIA_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "media"))
+MEDIA_LIMITS = {"voice": 2 * 1024 * 1024, "image": 5 * 1024 * 1024}
+MEDIA_EXTS = {
+    "voice": {".webm", ".mp3", ".wav"},
+    "image": {".jpg", ".jpeg", ".png", ".webp", ".gif"},
+}
 
 
 def _hub_enabled() -> bool:
@@ -346,6 +357,124 @@ class HubService:
         learned = sum(1 for r in results if r["status"] == "learned")
         return {"total": len(targets), "learned": learned,
                 "skipped": len(targets) - learned, "results": results}
+
+    # ============================================================
+    # 媒体上传(P3, 设计文档 6 章: 本地卷 hub-media, URL 走静态服务)
+    # ============================================================
+
+    async def save_media(self, kind: str, data: bytes, ext: str) -> dict:
+        """媒体文件落盘(voice ≤2MB / image ≤5MB), 返回静态 URL
+
+        Returns:
+            {"success": True, "url": "/media/voice/xxx.webm", "size": n, "mediaType": kind}
+            失败: {"success": False, "error": ...}(结构化, 不抛异常)
+        """
+        if kind not in MEDIA_LIMITS:
+            return {"success": False, "error": f"不支持的媒体类型: {kind}"}
+        if not data:
+            return {"success": False, "error": "媒体内容为空"}
+        if len(data) > MEDIA_LIMITS[kind]:
+            return {"success": False, "error": f"文件过大(上限 {MEDIA_LIMITS[kind] // 1024 // 1024}MB)"}
+        ext = (ext or "").lower()
+        if not ext.startswith("."):
+            ext = "." + ext
+        if ext not in MEDIA_EXTS[kind]:
+            return {"success": False,
+                    "error": f"不支持的格式: {ext}(允许 {sorted(MEDIA_EXTS[kind])})"}
+        folder = os.path.join(MEDIA_ROOT, kind)
+        os.makedirs(folder, exist_ok=True)
+        name = f"{datetime.now(UTC).strftime('%Y%m%d')}-{uuid.uuid4().hex[:12]}{ext}"
+        path = os.path.join(folder, name)
+        try:
+            with open(path, "wb") as f:
+                f.write(data)
+        except OSError as exc:
+            logger.warning("hub_media_write_failed: %s", exc)
+            return {"success": False, "error": "媒体写入失败, 请重试"}
+        return {"success": True, "url": f"/media/{kind}/{name}",
+                "size": len(data), "mediaType": kind}
+
+    # ============================================================
+    # LLM 用量与成本聚合(P3, 设计文档 5.4: /metrics 数据 + Redis 日聚合)
+    # ============================================================
+
+    async def get_usage_overview(self, days: int = 7) -> dict:
+        """LLM 用量成本视图: 当日取内存指标实时值, 历史日取 Redis 日聚合
+
+        惰性持久化: 每次调用把当日内存计数快照进 Redis(幂等覆盖),
+        进程重启丢当日计数 → 快照兜底(metrics 约定: 重启清零)。
+        成本按每方法估算单价(次)折算, 常量级粗估非账单口径。
+        """
+        from core.metrics import llm_daily_counts
+        # 估算单价(元/次): 视觉>生成>嵌入>转写>重排, 数量级粗估
+        unit_cost = {"chat": 0.002, "embed": 0.0005, "vision": 0.008,
+                     "transcribe": 0.003, "rerank": 0.001}
+        today = datetime.now(UTC).strftime("%Y%m%d")
+        memory_counts = llm_daily_counts()  # {date: {method: {ok: n, error: n}}}
+        # 当日内存值快照进存储(幂等)
+        if today in memory_counts:
+            await self.repo.save_llm_daily(today, memory_counts[today])
+        # 汇总近 N 日
+        from datetime import timedelta
+        now = datetime.now(UTC)
+        daily, totals = {}, {"calls": 0, "errors": 0, "cost": 0.0}
+        for i in range(days):
+            day = (now - timedelta(days=i)).strftime("%Y%m%d")
+            counts = (memory_counts.get(day)
+                      or await self.repo.get_llm_daily(day))
+            if not counts:
+                continue
+            day_calls = sum(m.get("ok", 0) + m.get("error", 0)
+                            for m in counts.values())
+            day_errors = sum(m.get("error", 0) for m in counts.values())
+            day_cost = sum((m.get("ok", 0) + m.get("error", 0))
+                           * unit_cost.get(method, 0.001)
+                           for method, m in counts.items())
+            daily[day] = {"calls": day_calls, "errors": day_errors,
+                          "cost": round(day_cost, 4),
+                          "byMethod": counts}
+            totals["calls"] += day_calls
+            totals["errors"] += day_errors
+            totals["cost"] += day_cost
+        totals["cost"] = round(totals["cost"], 4)
+        return {"days": days, "daily": daily, "totals": totals,
+                "unitCostEstimate": unit_cost,
+                "note": "成本为调用次数×估算单价, 非账单口径"}
+
+    # ============================================================
+    # 评分器晋升审批流(P3, 设计文档 5.4: 挑战者→冠军审批)
+    # ============================================================
+
+    async def list_approvals(self) -> dict:
+        """待审批挑战者清单(全部 16 档案中带 challenger 的)"""
+        from services.ai_learning_service import SCORER_REGISTRY
+        from repositories.ai_learning_repository import AiLearningRepository
+        repo = AiLearningRepository()
+        pending = []
+        for sid, meta in SCORER_REGISTRY.items():
+            profile = await repo.get_profile(sid)
+            ch = (profile or {}).get("challenger")
+            if not ch:
+                continue
+            pending.append({
+                "scorerId": sid, "label": meta.get("label", sid),
+                "challengerVersion": ch.get("version"),
+                "parentVersion": ch.get("parentVersion"),
+                "source": ch.get("source"),
+                "stats": ch.get("stats", {}),
+                "createdAt": ch.get("createdAt"),
+            })
+        return {"total": len(pending), "pending": pending}
+
+    async def approve_promotion(self, scorer_id: str) -> dict:
+        """批准晋升: 挑战者→冠军(复用 ai_learning_service.promote_challenger)"""
+        from services import ai_learning_service
+        return await ai_learning_service.promote_challenger(scorer_id)
+
+    async def reject_promotion(self, scorer_id: str, reason: str | None = None) -> dict:
+        """拒绝晋升: 丢弃挑战者(版本退役进历史, note 标记 rejected)"""
+        from services import ai_learning_service
+        return await ai_learning_service.discard_challenger(scorer_id, reason)
 
 
 hub_service = HubService()

@@ -10,6 +10,12 @@
     治理:  GET  /api/hub/ops/intents       意图分布统计(admin)
     治理:  GET  /api/hub/ops/overview       治理看板总览(admin, P2)
     治理:  POST /api/hub/ops/learning/retrigger  学习周期重跑(admin, P2)
+    治理:  GET  /api/hub/ops/usage          LLM 用量成本视图(admin, P3)
+    治理:  GET  /api/hub/ops/learning/approvals   待审批挑战者清单(admin, P3)
+    治理:  POST /api/hub/ops/learning/approve/{id} 批准晋升(admin, P3)
+    治理:  POST /api/hub/ops/learning/reject/{id}  拒绝晋升(admin, P3)
+    媒体:  POST /api/hub/media/voice        语音文件上传(P3)
+    媒体:  POST /api/hub/media/image        图片文件上传(P3)
 
 鉴权惯例(对齐 role_routes): X-Member-Id(用户) / X-Role: admin(管理)。
 
@@ -92,6 +98,19 @@ class RetriggerRequest(BaseModel):
     """学习周期重跑请求(空 scorerId = 全部 16 个评分器档案)"""
     scorerId: str | None = Field(default=None,
                                  description="评分器ID; 缺省重跑全部")
+
+
+class MediaUploadRequest(BaseModel):
+    """媒体上传请求(base64 JSON 惯例, 零 python-multipart 依赖)"""
+    data_b64: str = Field(..., min_length=1,
+                          description="媒体文件 base64 编码")
+    fmt: str = Field(default="", description="扩展名: voice(webm/mp3/wav) / image(jpg/png/webp/gif)")
+
+
+class RejectRequest(BaseModel):
+    """晋升审批拒绝请求"""
+    reason: str | None = Field(default=None, max_length=200,
+                                description="拒绝原因(进入版本历史 note)")
 
 
 # ============================================================
@@ -249,6 +268,75 @@ async def retrigger_learning(
     except Exception as exc:  # noqa: BLE001
         _handle(exc)
     return {"success": True, **result}
+
+
+# ============================================================
+# 治理: LLM 用量成本 + 晋升审批流(设计文档 5.4, P3)
+# ============================================================
+
+@router.get("/api/hub/ops/usage")
+async def get_usage_overview(
+    days: int = Query(default=7, ge=1, le=30),
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """LLM 用量与成本视图(admin; 当日内存指标 + 历史日 Redis 聚合)"""
+    _require_admin(x_role)
+    return await hub_service.get_usage_overview(days)
+
+
+@router.get("/api/hub/ops/learning/approvals")
+async def list_approvals(x_role: str | None = Header(None, alias="X-Role")):
+    """待审批挑战者清单(admin; 16 档案中带 challenger 的)"""
+    _require_admin(x_role)
+    return await hub_service.list_approvals()
+
+
+@router.post("/api/hub/ops/learning/approve/{scorer_id}")
+async def approve_promotion(scorer_id: str,
+                             x_role: str | None = Header(None, alias="X-Role")):
+    """批准晋升: 挑战者→冠军(admin; 无挑战者 → 409)"""
+    _require_admin(x_role)
+    try:
+        return await hub_service.approve_promotion(scorer_id)
+    except Exception as exc:  # noqa: BLE001
+        _handle(exc)
+
+
+@router.post("/api/hub/ops/learning/reject/{scorer_id}")
+async def reject_promotion(scorer_id: str, req: RejectRequest,
+                           x_role: str | None = Header(None, alias="X-Role")):
+    """拒绝晋升: 丢弃挑战者, 版本退役进历史(admin; 无挑战者 → 409)"""
+    _require_admin(x_role)
+    try:
+        return await hub_service.reject_promotion(scorer_id, req.reason)
+    except Exception as exc:  # noqa: BLE001
+        _handle(exc)
+
+
+# ============================================================
+# 媒体上传(P3, 设计文档 6 章: 本地卷 + 静态服务, base64 JSON)
+# ============================================================
+
+@router.post("/api/hub/media/voice")
+async def upload_voice(req: MediaUploadRequest):
+    """语音文件上传(≤2MB, webm/mp3/wav), 返回静态 URL 供消息引用"""
+    try:
+        raw = base64.b64decode(req.data_b64, validate=False)
+    except (binascii.Error, ValueError):
+        return JSONResponse({"success": False, "error": "音频 base64 解码失败"})
+    result = await hub_service.save_media("voice", raw, req.fmt or "webm")
+    return JSONResponse(result)
+
+
+@router.post("/api/hub/media/image")
+async def upload_image(req: MediaUploadRequest):
+    """图片文件上传(≤5MB, jpg/png/webp/gif), 返回静态 URL"""
+    try:
+        raw = base64.b64decode(req.data_b64, validate=False)
+    except (binascii.Error, ValueError):
+        return JSONResponse({"success": False, "error": "图片 base64 解码失败"})
+    result = await hub_service.save_media("image", raw, req.fmt or "jpg")
+    return JSONResponse(result)
 
 
 # ============================================================

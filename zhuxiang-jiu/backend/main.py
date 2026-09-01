@@ -24,6 +24,7 @@ import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from core.auth_middleware import JWTAuthMiddleware
 from core.config import ALLOW_HEADERS, ALLOW_METHODS, CORS_ORIGINS
@@ -225,6 +226,18 @@ register_ai_scoring_routes(app)
 register_ai_scoring_ext_routes(app)
 register_ai_scoring_auth_routes(app)
 register_ai_learning_routes(app)
+
+
+# ============================================================
+# 静态媒体服务(35号 AI Hub P3: /media/voice|image/xxx, 本地卷持久化)
+# ============================================================
+
+_MEDIA_ROOT = os.environ.get(
+    "HUB_MEDIA_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "media"))
+for _sub in ("voice", "image"):
+    os.makedirs(os.path.join(_MEDIA_ROOT, _sub), exist_ok=True)
+app.mount("/media", StaticFiles(directory=_MEDIA_ROOT), name="media")
 
 
 # ============================================================
