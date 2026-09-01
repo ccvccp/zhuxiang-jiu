@@ -237,9 +237,35 @@ class MessageRepository:
             self.store["message_push_logs"] = {}                 # id → pushLog
             self.store["message_push_logs_by_task"] = {}         # taskId → [pushLogId, ...]
             self.store["message_push_logs_by_user"] = {}         # userId → [pushLogId, ...]
+            self.store["message_subscriptions"] = {}             # userId → 订阅偏好
             self.store["_message_seq"] = 0
             self.store["_message_template_seq"] = 0
             self.store["_message_push_log_seq"] = 0
+
+    # ============================================================
+    # 用户订阅偏好(P1-5 防骚扰体系, 设计文档 5.1/6.2/user_subscriptions 表)
+    # ============================================================
+
+    async def get_subscription(self, user_id: int) -> dict | None:
+        """读取用户订阅偏好(无记录返回 None)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("message", "subscription", str(user_id)))
+            return json.loads(raw) if raw else None
+        self._ensure_store()
+        sub = self.store["message_subscriptions"].get(user_id)
+        return dict(sub) if sub else None
+
+    async def save_subscription(self, sub: dict) -> dict:
+        """保存用户订阅偏好(整体覆盖, 幂等)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("message", "subscription", str(sub["userId"])),
+                             json.dumps(sub, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["message_subscriptions"][sub["userId"]] = dict(sub)
+        return sub
 
     # --- 消息 ---
 

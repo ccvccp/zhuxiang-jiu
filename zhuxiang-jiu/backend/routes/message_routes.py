@@ -151,6 +151,17 @@ class BatchSendRequest(PydBaseModel):
     taskId: int = Field(0, description="任务ID")
 
 
+class UpdateSubscriptionRequest(PydBaseModel):
+    """订阅偏好更新(P1-5 防骚扰; 不可退订分类服务端强制保留)"""
+    channels: list[str] | None = Field(None, description="订阅渠道列表(缺省不改)")
+    categories: list[str] | None = Field(None, description="订阅分类列表(缺省不改; 必需类强制保留)")
+    silentStart: str | None = Field(None, description="静默时段开始 HH:MM")
+    silentEnd: str | None = Field(None, description="静默时段结束 HH:MM")
+    silentEnabled: bool | None = Field(None, description="静默时段开关")
+    dailyLimit: int | None = Field(None, ge=1, le=3, description="每日营销上限(1-3)")
+    weeklyLimit: int | None = Field(None, ge=1, le=10, description="每周营销上限(1-10)")
+
+
 # ============================================================
 # P0 接口(10 个) — 静态路径优先于动态路径
 # ============================================================
@@ -259,21 +270,63 @@ async def mark_read(
         _handle(e)
 
 
-@router.get("/api/message/{message_id}", tags=["信息管理模块"])
-async def get_message(
-    message_id: int,
+# 注: GET /api/message/{message_id}(动态)已移至文件末尾, 避免捕获
+#      subscription 等静态 GET 路径(int 转换失败 422)
+
+
+# ============================================================
+# P1-5 防骚扰体系: 订阅偏好 / 退订管理(设计文档 5.1/5.3)
+# 注: 静态路径 subscription 必须先于动态路由 /{message_id} 声明,
+#      否则 "subscription" 被当作 message_id 捕获(int 转换失败 422)
+# ============================================================
+
+@router.get("/api/message/subscription", tags=["信息管理模块"])
+async def get_subscription(
     x_member_id: str = Header(None, alias="X-Member-Id"),
     x_role: str = Header(None, alias="X-Role"),
 ):
-    """查询消息详情(会员仅自己的消息, admin 任意)"""
-    if x_role != "admin":
-        _require_member_id(x_member_id)
+    """查询本人订阅偏好(渠道/分类/静默时段/频率阈值; 无记录返回默认值)"""
+    effective_user = _resolve_user_access(x_member_id, x_role, None)
     try:
-        result = await _service.get_message(message_id)
-    except KeyError as e:
-        raise _map_key_error(e) from e
-    _check_message_access(result, x_member_id, x_role)
-    return {"success": True, "data": result}
+        sub = await _service.get_subscription(effective_user)
+        return {"success": True, "data": sub}
+    except Exception as e:
+        _handle(e)
+
+
+@router.put("/api/message/subscription", tags=["信息管理模块"])
+async def update_subscription(
+    data: UpdateSubscriptionRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """更新本人订阅偏好(不可退订分类服务端强制保留)"""
+    effective_user = _resolve_user_access(x_member_id, x_role, None)
+    try:
+        sub = await _service.update_subscription(
+            effective_user, channels=data.channels, categories=data.categories,
+            silent_start=data.silentStart, silent_end=data.silentEnd,
+            silent_enabled=data.silentEnabled, daily_limit=data.dailyLimit,
+            weekly_limit=data.weeklyLimit,
+        )
+        return {"success": True, "data": sub}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/message/subscription/unsubscribe-all", tags=["信息管理模块"])
+async def unsubscribe_all(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """一键退订全部营销消息(仅保留订单/物流/安全等必需通知)"""
+    effective_user = _resolve_user_access(x_member_id, x_role, None)
+    try:
+        sub = await _service.unsubscribe_all(effective_user)
+        return {"success": True, "data": sub,
+                "msg": "已退订全部营销消息, 必需通知(订单/物流/安全等)保留"}
+    except Exception as e:
+        _handle(e)
 
 
 # --- 管理端接口 ---
@@ -400,6 +453,27 @@ async def batch_send(
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
+
+
+# ============================================================
+# 消息详情(动态路径, 必须在所有静态 GET 路由之后)
+# ============================================================
+
+@router.get("/api/message/{message_id}", tags=["信息管理模块"])
+async def get_message(
+    message_id: int,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """查询消息详情(会员仅自己的消息, admin 任意)"""
+    if x_role != "admin":
+        _require_member_id(x_member_id)
+    try:
+        result = await _service.get_message(message_id)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    _check_message_access(result, x_member_id, x_role)
+    return {"success": True, "data": result}
 
 
 def register_message_routes(app):

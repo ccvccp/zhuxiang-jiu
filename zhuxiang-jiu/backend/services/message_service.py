@@ -38,11 +38,211 @@ from repositories.message_repository import (
 )
 
 
+# ============================================================
+# P1-5 防骚扰体系常量(设计文档 5.2 订阅规则 / 6.1 频率限制 / 6.2 时段控制)
+# ============================================================
+
+# 不可退订分类(交易/资金/安全/资产必需信息, 强制投递)
+MANDATORY_CATEGORIES = frozenset({
+    CATEGORY_ORDER, CATEGORY_LOGISTICS, CATEGORY_SECURITY,
+    CATEGORY_OLD_WINE, CATEGORY_SYSTEM, CATEGORY_SERVICE,
+})
+
+# 可退订的营销分类
+MARKETING_CATEGORIES = frozenset({
+    CATEGORY_ACTIVITY, CATEGORY_COUPON, CATEGORY_MEMBER, CATEGORY_CONTENT,
+})
+
+# 营销分类每日单类上限(设计文档 6.1.1: 活动1/优惠2/会员1/资讯2)
+CATEGORY_DAILY_LIMITS = {
+    CATEGORY_ACTIVITY: 1, CATEGORY_COUPON: 2,
+    CATEGORY_MEMBER: 1, CATEGORY_CONTENT: 2,
+}
+
+# 营销合计上限(每日 3 / 每周 10)
+MARKETING_DAILY_TOTAL = 3
+MARKETING_WEEKLY_TOTAL = 10
+
+ALL_CHANNELS = [CHANNEL_INMAIL, CHANNEL_SMS, CHANNEL_EMAIL,
+                CHANNEL_MINIAPP, CHANNEL_POPUP, CHANNEL_PUSH]
+ALL_CATEGORIES = [CATEGORY_SYSTEM, CATEGORY_ORDER, CATEGORY_LOGISTICS,
+                  CATEGORY_ACTIVITY, CATEGORY_COUPON, CATEGORY_MEMBER,
+                  CATEGORY_OLD_WINE, CATEGORY_CONTENT, CATEGORY_SECURITY,
+                  CATEGORY_SERVICE]
+
+
 class MessageService:
     """信息管理业务逻辑(双模式存储, 锁保护 RMW)"""
 
     def __init__(self, repo: MessageRepository = MessageRepository()):
         self.repo = repo
+
+    # ============================================================
+    # 1b. 订阅偏好管理(P1-5 防骚扰体系, 设计文档 5.1/5.3)
+    # ============================================================
+
+    def _default_subscription(self, user_id: int) -> dict:
+        """默认订阅偏好: 全渠道全分类订阅 + 默认静默时段与频率阈值"""
+        return {
+            "userId": user_id,
+            "channels": list(ALL_CHANNELS),
+            "categories": list(ALL_CATEGORIES),
+            "silentStart": "22:00",
+            "silentEnd": "08:00",
+            "silentEnabled": True,
+            "dailyLimit": MARKETING_DAILY_TOTAL,
+            "weeklyLimit": MARKETING_WEEKLY_TOTAL,
+            "updatedAt": ts(),
+        }
+
+    async def get_subscription(self, user_id: int) -> dict:
+        """读取订阅偏好(无记录时返回默认值并落库)"""
+        sub = await self.repo.get_subscription(user_id)
+        if sub is None:
+            sub = self._default_subscription(user_id)
+            await self.repo.save_subscription(sub)
+        return sub
+
+    async def update_subscription(self, user_id: int, channels: list = None,
+                                  categories: list = None,
+                                  silent_start: str = None, silent_end: str = None,
+                                  silent_enabled: bool = None,
+                                  daily_limit: int = None,
+                                  weekly_limit: int = None) -> dict:
+        """更新订阅偏好(不可退订分类强制保留; 上限夹在 1~默认值之间)
+
+        Raises:
+            ValueError: 渠道/分类/时段格式非法
+        """
+        sub = await self.get_subscription(user_id)
+        if channels is not None:
+            invalid = set(channels) - set(ALL_CHANNELS)
+            if invalid:
+                raise ValueError(f"无效渠道: {sorted(invalid)}")
+            sub["channels"] = list(channels) or []
+        if categories is not None:
+            invalid = set(categories) - set(ALL_CATEGORIES)
+            if invalid:
+                raise ValueError(f"无效分类: {sorted(invalid)}")
+            # 不可退订分类强制保留(设计文档 5.2)
+            effective = set(categories) | MANDATORY_CATEGORIES
+            sub["categories"] = sorted(effective)
+        if silent_start is not None:
+            self._validate_hhmm(silent_start)
+            sub["silentStart"] = silent_start
+        if silent_end is not None:
+            self._validate_hhmm(silent_end)
+            sub["silentEnd"] = silent_end
+        if silent_enabled is not None:
+            sub["silentEnabled"] = bool(silent_enabled)
+        if daily_limit is not None:
+            sub["dailyLimit"] = max(1, min(int(daily_limit), MARKETING_DAILY_TOTAL))
+        if weekly_limit is not None:
+            sub["weeklyLimit"] = max(1, min(int(weekly_limit), MARKETING_WEEKLY_TOTAL))
+        sub["updatedAt"] = ts()
+        return await self.repo.save_subscription(sub)
+
+    async def unsubscribe_all(self, user_id: int) -> dict:
+        """一键退订全部营销信息(仅保留不可退订的必需通知, 设计文档 5.3)"""
+        sub = await self.get_subscription(user_id)
+        sub["categories"] = sorted(MANDATORY_CATEGORIES)
+        sub["updatedAt"] = ts()
+        return await self.repo.save_subscription(sub)
+
+    @staticmethod
+    def _validate_hhmm(value: str) -> None:
+        if not isinstance(value, str) or len(value) != 5 \
+                or value[2] != ":" or not value[:2].isdigit() or not value[3:].isdigit():
+            raise ValueError(f"时段格式须为 HH:MM: {value}")
+        if not (0 <= int(value[:2]) <= 23 and 0 <= int(value[3:]) <= 59):
+            raise ValueError(f"时段超出范围: {value}")
+
+    # ============================================================
+    # 1c. 发送前防骚扰检查(四重调控, 设计文档 6.1.2)
+    # ============================================================
+
+    def _in_silent_window(self, sub: dict, now: datetime) -> bool:
+        """当前是否处于静默时段(支持跨零点区间, 如 22:00-08:00)"""
+        if not sub.get("silentEnabled", True):
+            return False
+        start = int(sub.get("silentStart", "22:00")[:2]) * 60 + int(sub.get("silentStart", "22:00")[3:])
+        end = int(sub.get("silentEnd", "08:00")[:2]) * 60 + int(sub.get("silentEnd", "08:00")[3:])
+        cur = now.hour * 60 + now.minute
+        if start <= end:
+            return start <= cur < end
+        return cur >= start or cur < end   # 跨零点
+
+    async def _check_send_allowed(self, user_id: int, channel: str,
+                                   category: str, priority: str,
+                                   now: datetime = None) -> dict:
+        """发送前四重调控: 订阅 → 静默时段 → 频率
+
+        Returns:
+            {"allowed": bool, "reason": str}  拦截原因供调用方透出
+
+        规则(设计文档 5.2/6.1/6.2):
+            - 不可退订分类(交易/资金/安全/资产): 强制投递, 不受订阅/静默/频率限制
+            - P0 紧急通知: 静默时段白名单放行(仍受订阅与频率约束)
+            - 营销分类: 订阅检查 + 静默时段 + 单类每日上限 + 营销合计日/周上限
+        """
+        now = now or datetime.now()
+        is_mandatory = category in MANDATORY_CATEGORIES
+        sub = await self.get_subscription(user_id)
+
+        # 1. 订阅检查(渠道 + 分类; 必需类强制放行)
+        if not is_mandatory:
+            if channel not in sub.get("channels", []):
+                return {"allowed": False,
+                        "reason": f"用户已退订渠道 {channel}"}
+            if category not in sub.get("categories", []):
+                return {"allowed": False,
+                        "reason": f"用户已退订 {category} 类消息"}
+
+        # 2. 静默时段(营销类; P0 紧急白名单放行, 设计文档 6.2.2)
+        if not is_mandatory and priority != PRIORITY_P0 \
+                and self._in_silent_window(sub, now):
+            return {"allowed": False,
+                    "reason": f"静默时段({sub['silentStart']}-{sub['silentEnd']}), "
+                              f"营销消息延迟至活跃时段发送"}
+
+        # 3. 频率(仅营销类; 按用户当日/当周已发送数)
+        if not is_mandatory:
+            messages = await self.repo.list_messages(
+                user_id, limit=10000)
+            today_str = now.strftime("%Y-%m-%d")
+            week_key = now.isocalendar()[:2]
+            day_total = week_total = 0
+            day_category = 0
+            for m in messages:
+                if m.get("category") not in MARKETING_CATEGORIES:
+                    continue
+                sent = str(m.get("sentAt", ""))[:10]
+                if sent != today_str:
+                    continue
+                day_total += 1
+                if m.get("category") == category:
+                    day_category += 1
+                sent_dt = m.get("sentAt")
+                if sent_dt:
+                    try:
+                        iso = datetime.fromisoformat(sent_dt)
+                        if iso.isocalendar()[:2] == week_key:
+                            week_total += 1
+                    except (ValueError, TypeError):
+                        pass
+            cat_limit = CATEGORY_DAILY_LIMITS.get(category)
+            if cat_limit is not None and day_category >= cat_limit:
+                return {"allowed": False,
+                        "reason": f"{category} 类今日已达上限({cat_limit} 条)"}
+            if day_total >= sub.get("dailyLimit", MARKETING_DAILY_TOTAL):
+                return {"allowed": False,
+                        "reason": f"营销消息今日合计已达上限"
+                                  f"({sub.get('dailyLimit')} 条)"}
+            if week_total >= sub.get("weeklyLimit", MARKETING_WEEKLY_TOTAL):
+                return {"allowed": False,
+                        "reason": f"营销消息本周合计已达上限"
+                                  f"({sub.get('weeklyLimit')} 条)"}
+        return {"allowed": True, "reason": ""}
 
     # ============================================================
     # 1. 发送消息
@@ -81,7 +281,13 @@ class MessageService:
             if template.get("status") != TEMPLATE_APPROVED:
                 raise ValueError(f"模板未审核通过(status={template.get('status')})")
 
-        now = datetime.utcnow().isoformat()
+        # P1-5 防骚扰: 发送前四重调控(订阅/静默/频率; 必需类强制放行)
+        gate = await self._check_send_allowed(user_id, channel, category, priority)
+        if not gate["allowed"]:
+            raise ValueError(f"发送被拦截: {gate['reason']}")
+
+        # 本地时间: 与静默时段/频率检查同口径(用户视角), sentAt 前缀即发送日
+        now = datetime.now().isoformat()
         message_id = await self.repo.add_message({
             "userId": user_id,
             "channel": channel,
