@@ -161,8 +161,13 @@ class LLMProviderClient:
     """OpenAI 兼容 /chat/completions 与 /embeddings 客户端(urllib, 纯标准库)"""
 
     def chat(self, system: str, user: str,
-             temperature: float = 0.3) -> str | None:
+             temperature: float = 0.3,
+             model: str = "") -> str | None:
         """单轮对话补全, 失败/未配置返回 None(调用方回退 rule)
+
+        Args:
+            model: 指定模型档位(空则用 LLM_MODEL 默认档)。
+                36号智能推广模块传 LLM_MODEL_PROMO(glm-5.3 Agent 链)。
 
         Returns:
             模型回复文本; 未配置 key、请求失败、响应异常均返回 None。
@@ -175,7 +180,7 @@ class LLMProviderClient:
             base_url = os.environ.get(
                 "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
             ).rstrip("/")
-            model = os.environ.get("LLM_MODEL", "glm-4-flash")
+            model = model or os.environ.get("LLM_MODEL", "glm-4-flash")
             payload = json.dumps({
                 "model": model,
                 "messages": [

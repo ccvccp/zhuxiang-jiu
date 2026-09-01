@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<!--
+    36号·AI智能推广模块 v1.0 · 热点雷达大屏
+    页面: ai-promo-radar.html(配套脚本 js/promo-radar.js)
+    依赖: css/style.css(主题变量, 不新建 css) / js/auth.js(登录态)
+    后端: 36号 promo_routes(默认 http://localhost:8000, 请求头 X-Role: admin)
+-->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 智能推广 · 热点雷达大屏</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 热点雷达大屏专属样式(复用 style.css 主题变量) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+        .banner-link {
+            color: #fff; text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.55);
+            border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px;
+            white-space: nowrap; transition: var(--transition);
+        }
+        .banner-link:hover { background: rgba(255, 255, 255, 0.15); }
+
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 错误/提示横幅 */
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .dash-info {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 全局统计卡 */
+        .dash-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+        .dash-stat { padding: 16px; text-align: center; }
+        .dash-stat .stat-value { font-size: 26px; font-weight: 700; color: var(--color-primary-dark); }
+        .dash-stat .stat-label { font-size: 12px; color: var(--color-text-light); margin-top: 4px; }
+        .dash-stat.warn .stat-value { color: var(--color-danger); }
+        .dash-stat.gold .stat-value { color: var(--color-accent); }
+
+        /* 卡片头(标题 + 筛选 + 操作) */
+        .card-head {
+            display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--color-border);
+        }
+        .card-head b { font-size: 14px; }
+        .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .card-head select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .scan-result { font-size: 12px; color: var(--color-text-light); }
+
+        /* 表格 */
+        .matrix-wrap { overflow-x: auto; }
+        table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .matrix th, .matrix td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .matrix th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .matrix .cap-id { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+
+        /* 徽章 */
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.yellow { background: #fdf3e3; color: #a06b00; }
+        .badge.red { background: #fdecea; color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: #999; }
+
+        /* 小按钮 */
+        .btn-mini {
+            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
+            cursor: pointer; transition: var(--transition);
+        }
+        .btn-mini:hover { background: rgba(74, 124, 89, 0.08); }
+        .btn-mini.danger { border-color: var(--color-danger); color: var(--color-danger); }
+        .btn-mini.danger:hover { background: rgba(192, 57, 43, 0.06); }
+
+        /* 评分进度条 */
+        .score-cell { display: flex; align-items: center; gap: 8px; }
+        .score-track { width: 78px; height: 8px; background: var(--color-bg); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+        .score-bar { height: 100%; border-radius: 999px; }
+        .score-bar.hi { background: linear-gradient(90deg, #4a7c59, #2e8b57); }   /* ≥70 */
+        .score-bar.mid { background: linear-gradient(90deg, #c9a961, #b08d3e); }  /* 50-69 */
+        .score-bar.lo { background: #c9c9c9; }                                    /* <50 */
+        .score-num { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+        /* 决策理由(可换行) */
+        .reason-cell { white-space: normal; max-width: 340px; color: var(--color-text-light); font-size: 12px; line-height: 1.6; }
+
+        /* 空态/脚注 */
+        .dash-empty { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 14px; }
+        .note-bar {
+            padding: 10px 16px; font-size: 11px; color: var(--color-text-light);
+            line-height: 1.7; border-top: 1px solid var(--color-border);
+        }
+
+        /* 页脚说明 */
+        .dash-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .dash-footer code {
+            background: var(--color-bg); border: 1px solid var(--color-border);
+            border-radius: 3px; padding: 1px 6px; font-size: 11px;
+        }
+
+        @media (max-width: 640px) {
+            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+            .banner-link { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container" style="display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+                <h1>AI 智能推广 · 热点雷达大屏</h1>
+                <p>36号模块 · 五平台热榜扫描 / 评分决策(≥70 自动跟进 · 50-70 人工裁决 · &lt;50 留痕放弃) / 风险一票否决</p>
+            </div>
+            <a class="banner-link" href="ai-promo-studio.html">内容工厂与发布中心 →</a>
+            <div id="authBadge" style="display:flex;align-items:center;"></div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏: API 地址 / 刷新 / 自动刷新 -->
+        <section class="dash-section">
+            <div class="dash-card dash-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="dash-btn ghost" id="btnSaveApi" onclick="saveApiBase()">保存</button>
+                <button class="dash-btn" id="btnRefresh" onclick="refreshData()">刷新</button>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()"> 自动刷新(30s)
+                </label>
+                <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="dash-error" id="errorBanner"></div>
+            <div class="dash-info" id="infoBanner"></div>
+        </section>
+
+        <!-- 顶部统计卡 -->
+        <section class="dash-section">
+            <div class="dash-stats">
+                <div class="dash-card dash-stat">
+                    <div class="stat-value" id="statTotal">--</div>
+                    <div class="stat-label">热点总数</div>
+                </div>
+                <div class="dash-card dash-stat">
+                    <div class="stat-value" id="statEngaged">--</div>
+                    <div class="stat-label">已跟进(进入内容工厂)</div>
+                </div>
+                <div class="dash-card dash-stat">
+                    <div class="stat-value" id="statPassed">--</div>
+                    <div class="stat-label">已放弃(留痕)</div>
+                </div>
+                <div class="dash-card dash-stat warn">
+                    <div class="stat-value" id="statDiscarded">--</div>
+                    <div class="stat-label">风险否决</div>
+                </div>
+                <div class="dash-card dash-stat gold">
+                    <div class="stat-value" id="statPending">--</div>
+                    <div class="stat-label">待人工裁决</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 热点列表(状态/平台筛选 + 立即扫描) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>热点列表</b>
+                    <span class="scan-result" id="scanResult">尚未扫描(点击「立即扫描」抓取五平台热榜)</span>
+                    <div class="head-actions">
+                        <select id="statusFilter" onchange="loadHotspotTable()">
+                            <option value="">全部状态</option>
+                            <option value="active">待裁决(active)</option>
+                            <option value="engaged">已跟进(engaged)</option>
+                            <option value="passed">已放弃(passed)</option>
+                            <option value="discarded">风险否决(discarded)</option>
+                        </select>
+                        <select id="platformFilter" onchange="loadHotspotTable()">
+                            <option value="">全部平台</option>
+                            <option value="baidu">百度</option>
+                            <option value="douyin">抖音</option>
+                            <option value="weibo">微博</option>
+                            <option value="zhihu">知乎</option>
+                            <option value="xiaohongshu">小红书</option>
+                        </select>
+                        <button class="dash-btn" id="btnScan" onclick="scanNow()">立即扫描</button>
+                    </div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>热点标题</th><th>平台</th><th>热度(万)</th>
+                                <th>评分</th><th>品牌命中词</th><th>状态</th><th>风险标记</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hotspotBody">
+                            <tr><td colspan="7" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    评分 = 40%热度 + 20%上升速度 + 30%品牌相关性 + 10%持续时长; 命中风险词(政治/未成年人/医疗功效/重大灾害)一票否决; 指纹去重窗口 48h。
+                </div>
+            </div>
+        </section>
+
+        <!-- 待人工裁决决策列表 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>待人工裁决(评分 50-70 区间)</b>
+                    <span class="scan-result" id="decisionCount"></span>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>热点标题</th><th>平台</th><th>评分</th><th>决策理由</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="decisionBody">
+                            <tr><td colspan="5" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    「跟进」后热点进入内容工厂(可前往<a href="ai-promo-studio.html" style="color:var(--color-primary);">内容工厂与发布中心</a>生成一源多态内容); 「放弃」仅留痕, 不再跟进。
+                </div>
+            </div>
+        </section>
+
+        <!-- 页脚说明 -->
+        <footer class="dash-footer">
+            <div>鉴权说明：默认 <code>AUTH_MODE=compat</code> 下本页以 <code>X-Role: admin</code> 兼容头直连管理端点；<code>strict</code> 模式需先登录获取 JWT 并改造请求头。</div>
+            <div>数据来源：<code>POST /api/promo/radar/scan</code> · <code>GET /api/promo/radar/hotspots</code> · <code>GET /api/promo/decisions?pendingOnly=true</code> · <code>POST /api/promo/decisions/{hotspotId}/decide</code>。响应统一为 <code>{"success": true, "data": ...}</code>, 操作失败时横幅展示后端 <code>detail</code>。</div>
+        </footer>
+    </main>
+
+    <script src="js/auth.js"></script>
+    <script src="js/promo-radar.js"></script>
+</body>
+</html>

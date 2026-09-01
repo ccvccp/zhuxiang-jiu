@@ -73,6 +73,8 @@ from routes.attract_routes import register_attract_routes
 from routes.knowledge_routes import register_knowledge_routes
 # AI智能中枢模块(35号·全站AI大模型总调度)
 from routes.hub_routes import register_hub_routes
+# AI智能推广模块(36号·热点雷达+GLM-5.3 Agent内容工厂)
+from routes.promo_routes import register_promo_routes
 
 __all__ = [
     # 已有(15)
@@ -123,4 +125,5 @@ __all__ = [
     "register_attract_routes",
     "register_knowledge_routes",
     "register_hub_routes",
+    "register_promo_routes",
 ]

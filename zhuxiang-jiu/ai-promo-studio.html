@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<!--
+    36号·AI智能推广模块 v1.0 · 内容工厂与发布中心看板
+    页面: ai-promo-studio.html(配套脚本 js/promo-studio.js)
+    依赖: css/style.css(主题变量, 不新建 css) / js/auth.js(登录态)
+    后端: 36号 promo_routes(默认 http://localhost:8000, 请求头 X-Role: admin)
+-->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 智能推广 · 内容工厂与发布中心</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 内容工厂看板专属样式(复用 style.css 主题变量) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+        .banner-link {
+            color: #fff; text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.55);
+            border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px;
+            white-space: nowrap; transition: var(--transition);
+        }
+        .banner-link:hover { background: rgba(255, 255, 255, 0.15); }
+
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 错误/提示横幅 */
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .dash-info {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 卡片头(标题 + 筛选 + 操作) */
+        .card-head {
+            display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--color-border);
+        }
+        .card-head b { font-size: 14px; }
+        .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .card-head select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .scan-result { font-size: 12px; color: var(--color-text-light); }
+
+        /* 生成表单 */
+        .gen-form { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; padding: 14px 16px; }
+        .gen-form .gk { font-size: 13px; color: var(--color-text-light); }
+        .gen-form select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+            min-width: 280px; max-width: 460px; flex: 1;
+        }
+        .platform-checks { display: flex; gap: 16px; flex-wrap: wrap; }
+        .platform-checks label {
+            font-size: 13px; display: flex; align-items: center; gap: 5px;
+            cursor: pointer; color: var(--color-text);
+        }
+
+        /* 表格 */
+        .matrix-wrap { overflow-x: auto; }
+        table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .matrix th, .matrix td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .matrix th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .matrix .cap-id { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+
+        /* 徽章 */
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.yellow { background: #fdf3e3; color: #a06b00; }
+        .badge.red { background: #fdecea; color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: #999; }
+        .badge.blue { background: #eef2fb; color: #3b5998; }
+        .badge.gold { background: rgba(201, 169, 97, 0.15); color: #8a6d2f; }
+
+        /* 小按钮 */
+        .btn-mini {
+            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
+            cursor: pointer; transition: var(--transition);
+        }
+        .btn-mini:hover { background: rgba(74, 124, 89, 0.08); }
+        .btn-mini.danger { border-color: var(--color-danger); color: var(--color-danger); }
+        .btn-mini.danger:hover { background: rgba(192, 57, 43, 0.06); }
+
+        /* Agent 四步走轨徽章 */
+        .trace-chips { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+        .trace-chip {
+            display: inline-block; border-radius: 999px; padding: 1px 8px;
+            font-size: 10px; white-space: nowrap; border: 1px solid transparent;
+            font-family: Consolas, monospace;
+        }
+        .trace-chip.green { background: #e8f4ec; color: #2e8b57; }   /* glm-5.3 主档 */
+        .trace-chip.yellow { background: #fdf3e3; color: #a06b00; }  /* glm-4-flash 降级 */
+        .trace-chip.weak { background: #f4f4f4; color: #999; }       /* rule 规则模板轨 */
+
+        /* 内容行展开 */
+        .row-toggle { cursor: pointer; }
+        .row-toggle:hover { background: rgba(74, 124, 89, 0.04); }
+        .exp-arrow { color: var(--color-text-light); font-size: 11px; display: inline-block; width: 12px; }
+        tr.detail-row > td { background: var(--color-bg); padding: 0 16px; }
+        .detail-box { padding: 14px 0; }
+        .detail-body {
+            background: #fff; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 12px 14px;
+            font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
+        }
+        .detail-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 12px; color: var(--color-text-light); }
+        .detail-meta b { color: var(--color-text); font-weight: 600; }
+
+        /* 全景报表 */
+        .ov-wrap { padding: 6px 0 12px; }
+        .ov-group { padding: 8px 16px 2px; }
+        .ov-gtitle { font-size: 12px; font-weight: 700; color: var(--color-primary-dark); margin-bottom: 6px; }
+        .ov-cells { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 8px; }
+        .ov-cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 8px 4px; text-align: center; }
+        .ov-cell b { display: block; font-size: 16px; color: var(--color-text); font-variant-numeric: tabular-nums; }
+        .ov-cell span { font-size: 11px; color: var(--color-text-light); }
+
+        /* 空态/脚注 */
+        .dash-empty { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 14px; }
+        .note-bar {
+            padding: 10px 16px; font-size: 11px; color: var(--color-text-light);
+            line-height: 1.7; border-top: 1px solid var(--color-border);
+        }
+
+        /* 页脚说明 */
+        .dash-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .dash-footer code {
+            background: var(--color-bg); border: 1px solid var(--color-border);
+            border-radius: 3px; padding: 1px 6px; font-size: 11px;
+        }
+
+        @media (max-width: 640px) {
+            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+            .banner-link { display: none; }
+            .gen-form select { min-width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container" style="display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+                <h1>AI 智能推广 · 内容工厂与发布中心</h1>
+                <p>36号模块 · GLM-5.3 Agent 四步链一源多态生成 / 三审合规闸门 / 黄金时段发布调度 / attract 归因报表</p>
+            </div>
+            <a class="banner-link" href="ai-promo-radar.html">← 热点雷达大屏</a>
+            <div id="authBadge" style="display:flex;align-items:center;"></div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏: API 地址 / 刷新 / 自动刷新 -->
+        <section class="dash-section">
+            <div class="dash-card dash-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="dash-btn ghost" id="btnSaveApi" onclick="saveApiBase()">保存</button>
+                <button class="dash-btn" id="btnRefresh" onclick="refreshData()">刷新</button>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()"> 自动刷新(30s)
+                </label>
+                <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="dash-error" id="errorBanner"></div>
+            <div class="dash-info" id="infoBanner"></div>
+        </section>
+
+        <!-- 生成表单: 已跟进热点 + 平台多选 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>内容生成 · GLM-5.3 Agent 四步链(一源多态)</b></div>
+                <div class="gen-form">
+                    <label class="gk" for="hotspotSelect">已跟进热点</label>
+                    <select id="hotspotSelect">
+                        <option value="">加载中…</option>
+                    </select>
+                    <span class="gk">发布平台</span>
+                    <div class="platform-checks" id="platformChecks">
+                        <label><input type="checkbox" value="douyin" checked> 抖音</label>
+                        <label><input type="checkbox" value="xiaohongshu"> 小红书</label>
+                        <label><input type="checkbox" value="wechat_moments"> 微信朋友圈</label>
+                    </div>
+                    <button class="dash-btn" id="btnGenerate" onclick="generateContents()">生成内容</button>
+                </div>
+                <div class="note-bar">
+                    四步链: ①热点分析 → ②受众匹配 → ③内容生成 → ④自查自纠, 每步独立三级降级(glm-5.3 → glm-4-flash → 规则轨);
+                    同热点 48h 冷却期内最多生成 2 条内容; 生成即过一审(规则硬拒)/二审(AI 评分), 通过的内容为「待审核」状态, 需人工三审通过后才能入发布队列。
+                </div>
+            </div>
+        </section>
+
+        <!-- 内容列表(状态筛选 + 展开正文) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>内容列表</b>
+                    <div class="head-actions">
+                        <select id="contentStatusFilter" onchange="loadContents()">
+                            <option value="">全部状态</option>
+                            <option value="pending">待审核</option>
+                            <option value="approved">已通过</option>
+                            <option value="rejected">已拒绝</option>
+                            <option value="queued">已入队</option>
+                            <option value="published">已发布</option>
+                        </select>
+                        <span class="scan-result" id="contentCount"></span>
+                    </div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>ID</th><th>平台</th><th>标题</th><th>状态</th>
+                                <th>合规分</th><th>Agent 走轨</th><th>短码</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="contentBody">
+                            <tr><td colspan="8" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    点击行可展开查看正文与生成详情; 走轨图例:
+                    <span class="trace-chip green">glm-5.3 主档</span>
+                    <span class="trace-chip yellow">glm-4-flash 降级</span>
+                    <span class="trace-chip weak">rule 规则模板轨</span>;
+                    审核规则: 存在硬性违规或二审分 &lt;60 的内容不可通过; 「入发布队列」不指定时间则按平台黄金时段自动调度。
+                </div>
+            </div>
+        </section>
+
+        <!-- 发布队列 + 全景报表 -->
+        <section class="dash-section">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;">
+                <div class="dash-card">
+                    <div class="card-head">
+                        <b>发布队列(黄金时段调度)</b>
+                        <div class="head-actions">
+                            <button class="dash-btn ghost" id="btnProcess" onclick="processQueue()">立即处理到期发布</button>
+                        </div>
+                    </div>
+                    <div class="matrix-wrap">
+                        <table class="matrix">
+                            <thead>
+                                <tr><th>内容ID</th><th>平台</th><th>计划发布时间</th><th>黄金时段</th></tr>
+                            </thead>
+                            <tbody id="queueBody">
+                                <tr><td colspan="4" class="dash-empty">加载中…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="note-bar">
+                        到期内容由调度器自动发布(模拟轨回执含曝光预估), 也可手动点击「立即处理到期发布」; 单日全平台发布有上限(防刷屏触发平台风控)。
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="card-head">
+                        <b>推广全景报表</b>
+                        <span class="scan-result" id="ovDailyCap">单日发布上限 --</span>
+                    </div>
+                    <div class="ov-wrap" id="ovWrap">
+                        <div class="dash-empty">加载中…</div>
+                    </div>
+                    <div class="note-bar">
+                        归因数据复用 attract 短码体系(点击/注册/下单/GMV), 仅统计已发布内容挂载的短码。
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 平台维度报表 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>平台维度报表(一源多态哪条跑得动)</b></div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>平台</th><th>内容数</th><th>已发布</th><th>点击</th>
+                                <th>注册</th><th>下单</th><th>GMV(¥)</th><th>单点击GMV(¥)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="platformReportBody">
+                            <tr><td colspan="8" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- 页脚说明 -->
+        <footer class="dash-footer">
+            <div>鉴权说明：默认 <code>AUTH_MODE=compat</code> 下本页以 <code>X-Role: admin</code> 兼容头直连管理端点；<code>strict</code> 模式需先登录获取 JWT 并改造请求头。</div>
+            <div>数据来源：<code>GET /api/promo/radar/hotspots?status=engaged</code> · <code>POST /api/promo/contents/generate</code> · <code>GET /api/promo/contents</code> · <code>POST /api/promo/contents/{id}/review</code> · <code>POST /api/promo/contents/{id}/publish</code> · <code>GET /api/promo/publish/queue</code> · <code>POST /api/promo/publish/process</code> · <code>GET /api/promo/report/overview</code> · <code>GET /api/promo/report/platform</code>。响应统一为 <code>{"success": true, "data": ...}</code>, 操作失败时横幅展示后端 <code>detail</code>。</div>
+            <div>流程：热点雷达页「跟进」热点 → 此处生成一源多态内容 → 三审(pending → approved) → 入发布队列(黄金时段) → 到期发布(模拟轨回执) → attract 短码归因出报表。热点发现与人工裁决请前往 <a href="ai-promo-radar.html" style="color:var(--color-primary);">热点雷达大屏</a>。</div>
+        </footer>
+    </main>
+
+    <script src="js/auth.js"></script>
+    <script src="js/promo-studio.js"></script>
+</body>
+</html>
