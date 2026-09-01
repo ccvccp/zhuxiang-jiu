@@ -518,6 +518,21 @@ async def list_seo_pushes(
         _handle(e)
 
 
+@router.get("/api/promo/alliance-topic-suggestions",
+            tags=["AI智能推广模块"])
+async def alliance_topic_suggestions(
+    x_role: str = Header(None, alias="X-Role"),
+    limit: int = Query(5, ge=1, le=20),
+):
+    """同盟商品营销选题建议(37号商品入引流选题池, 流量统筹)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.suggest_alliance_topics(limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
 # ============================================================
 # 报表(admin, 归因复用 attract)
 # ============================================================

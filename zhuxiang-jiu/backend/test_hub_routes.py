@@ -451,8 +451,8 @@ async def test_learning_retrigger():
     svc = HubService()
     # 15a. 全量: 无反馈 → 全部 skipped(非错误)
     r = await svc.retrigger_learning()
-    record("重跑: 全量 total=16", r["total"] == 16, f"got {r['total']}")
-    record("重跑: 无反馈全 skipped", r["learned"] == 0 and r["skipped"] == 16)
+    record("重跑: 全量 total=19", r["total"] == 19, f"got {r['total']}")
+    record("重跑: 无反馈全 skipped", r["learned"] == 0 and r["skipped"] == 19)
     record("重跑: 结果含状态字段", all("status" in x for x in r["results"]))
     # 15b. 单评分器
     r = await svc.retrigger_learning("order_risk")
@@ -489,7 +489,7 @@ def test_http_p2():
                     headers={"X-Role": "admin"})
     body = r.json()
     record("HTTP P2 重跑全量", r.status_code == 200 and body["success"] is True
-           and body["total"] == 16, f"{r.status_code} {body}")
+           and body["total"] == 19, f"{r.status_code} {body}")
     # 未知评分器 → 404
     r = client.post("/api/hub/ops/learning/retrigger",
                     json={"scorerId": "not-exist"}, headers={"X-Role": "admin"})
@@ -519,7 +519,7 @@ def test_decision_takeover():
     body = r.json()
     data = body.get("details", body.get("data", body))
     record("decision 接管: 真实插件池",
-           data.get("pluginPool") == 7, f"pool={data.get('pluginPool')}")
+           data.get("pluginPool") == 8, f"pool={data.get('pluginPool')}")
     selected = data.get("selectedPlugins", [])
     record("decision 接管: 能力选中",
            any(p["id"] == "knowledge.rag" for p in selected))

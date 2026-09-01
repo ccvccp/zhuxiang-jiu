@@ -426,6 +426,20 @@ async def reverse_settlement(
         _handle(e)
 
 
+@router.get("/api/alliance/settlements", tags=["AI智能网站同盟模块"])
+async def list_settlements(
+    x_role: str = Header(None, alias="X-Role"),
+    status: str = Query(None, description="状态筛选 settled/reversed"),
+):
+    """结算单列表(拆账明细/状态)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.list_settlements(status=status)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/alliance/settlements/{order_id}",
             tags=["AI智能网站同盟模块"])
 async def get_settlement(

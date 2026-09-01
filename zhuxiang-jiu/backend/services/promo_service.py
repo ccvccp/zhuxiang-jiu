@@ -651,6 +651,52 @@ class PromoService:
         }
 
     # ============================================================
+    # 9. P2: 同盟选题池(37号商品入 36号 引流体系, 设计文档 §2.8)
+    # ============================================================
+
+    async def suggest_alliance_topics(self, limit: int = 5) -> list[dict]:
+        """从 37号同盟在售商品生成营销选题建议(流量统筹)
+
+        同盟商品(带溯源/星级)进入 36号 引流选题池, 热点内容可挂
+        同盟商品短码, 归因复用 attract 链路(设计文档 §2.8)。
+        返回建议(不落库, 运营采纳后由 generate 流程使用)。
+        """
+        try:
+            from repositories.alliance_repository import (
+                AllianceRepository, CATEGORY_SEEDS,
+                PRODUCT_STATUS_ACTIVE,
+            )
+            repo = AllianceRepository()
+            products = await repo.list_products(
+                status=PRODUCT_STATUS_ACTIVE, limit=limit * 10)
+            suggestions = []
+            for product in products[:limit]:
+                merchant = await repo.get_merchant(
+                    product.get("merchantId", 0)) or {}
+                category = product.get("category", "")
+                category_name = CATEGORY_SEEDS.get(
+                    category, {}).get("name", category)
+                suggestions.append({
+                    "productId": product["productId"],
+                    "productName": product.get("name", ""),
+                    "category": category,
+                    "categoryName": category_name,
+                    "merchantId": product.get("merchantId"),
+                    "shopName": merchant.get("shopName", ""),
+                    "ratingAvg": merchant.get("ratingAvg", 0.0),
+                    "price": product.get("price", 0.0),
+                    "traceLevel": (product.get("trace") or {}).get("level"),
+                    "suggestedAngle": ("溯源种草(全量溯源)" if
+                                       (product.get("trace") or {}).get(
+                                           "level") == "full" else
+                                       f"{category_name}×竹香酒组合推荐"),
+                })
+            return suggestions
+        except Exception as exc:
+            logger.warning("promo_suggest_alliance_failed: %s", exc)
+            return []
+
+    # ============================================================
     # 8. 报表(归因数据复用 attract)
     # ============================================================
     async def _link_metrics(self, codes: list[str]) -> dict:

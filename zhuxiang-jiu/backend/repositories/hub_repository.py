@@ -33,6 +33,8 @@ INTENT_CREDIT_QUERY = "credit.query"
 INTENT_OPS_HEALTH = "ops.health"
 INTENT_MEDIA_IMAGE_QA = "media.image_qa"
 INTENT_CHAT_GENERAL = "chat.general"
+# 37号网站同盟: 同盟场景意图(酒友小聚编排入口)
+INTENT_ALLIANCE_SCENE = "alliance.scene"
 
 INTENTS = (
     INTENT_PRODUCT_PRICE, INTENT_PRODUCT_RECOMMEND,
@@ -56,7 +58,10 @@ INTENT_RULES: list[tuple[str, list[str]]] = [
     (INTENT_PRODUCT_RECOMMEND, ["推荐", "哪种好", "介绍下", "适合我"]),
     (INTENT_OPS_HEALTH, ["AI健康", "AI状态", "系统状态", "运维状态"]),
     (INTENT_KNOWLEDGE_QA, ["是什么", "为什么", "怎么回",
-                            "竹香", "酿造", "储藏", "酒厂"]),
+                           "竹香", "酿造", "储藏", "酒厂"]),
+    # 37号: 同盟场景(小聚/订餐/定制)
+    (INTENT_ALLIANCE_SCENE, ["小聚", "聚一聚", "订餐", "包间", "订包厢",
+                             "定制酒具", "封坛", "私宴"]),
 ]
 
 
@@ -94,7 +99,7 @@ ROLE_PANELS: dict[str, list[dict]] = {
         {"id": "product.price", "label": "问价格", "quick": "竹韵佳酿多少钱一瓶？"},
         {"id": "credit.query", "label": "我的积分", "quick": "查我的积分和等级"},
         {"id": "product.recommend", "label": "推荐", "quick": "推荐一款适合送长辈的酒"},
-        {"id": "order.aftersale", "label": "售后", "quick": "我要退货"},
+        {"id": "alliance.scene", "label": "酒友小聚", "quick": "周六6人小聚，喝竹香酒"},
         {"id": "chat.human", "label": "转人工", "quick": "转人工"},
     ],
     ROLE_STAFF: [
@@ -157,6 +162,12 @@ CAPABILITY_SEED: list[dict] = [
      "endpoint": "internal:hub_service",
      "health": {"success_rate_7d": 1.0, "p95_ms": 80, "fallback_rate": 0.0},
      "cost_weight": 0.1, "enabled": True},
+    # 37号网站同盟: 同盟场景编排(酒友小聚/定制入口)
+    {"id": "alliance.scene", "name": "同盟场景", "module": "alliance",
+     "intents": [INTENT_ALLIANCE_SCENE], "roles": list(HUB_ROLES),
+     "endpoint": "internal:alliance_scene_service",
+     "health": {"success_rate_7d": 1.0, "p95_ms": 150, "fallback_rate": 0.0},
+     "cost_weight": 0.2, "enabled": True},
 ]
 
 

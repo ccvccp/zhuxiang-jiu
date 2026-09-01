@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<!--
+    37号·AI智能网站同盟模块 v1.0 · 同盟管理看板
+    页面: ai-alliance-dashboard.html(配套脚本 js/alliance-dashboard.js)
+    依赖: css/style.css(主题变量, 不新建 css) / js/auth.js(登录态)
+    后端: 37号 alliance_routes(默认 http://localhost:8000)
+    鉴权: 管理端 X-Role: admin / 会员端 X-Member-Id / 类目·商品·评价·就近推荐为公开端点
+    区块: ①全景统计 ②入盟申请审核 ③商户管理(九态) ④类目字典(折叠) ⑤就近推荐(P1 GeoGrid)
+          ⑥商品浏览(行展开溯源) ⑦分润与结算 ⑧评价 ⑨月度考核(P1) ⑩场景与定制(P2)
+-->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 智能网站同盟 · 同盟管理看板</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 同盟管理看板专属样式(复用 style.css 主题变量) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+        .banner-link {
+            color: #fff; text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.55);
+            border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px;
+            white-space: nowrap; transition: var(--transition);
+        }
+        .banner-link:hover { background: rgba(255, 255, 255, 0.15); }
+
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 错误/提示横幅 */
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .dash-info {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 卡片头(标题 + 筛选 + 操作) */
+        .card-head {
+            display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--color-border);
+        }
+        .card-head b { font-size: 14px; }
+        .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .card-head select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .scan-result { font-size: 12px; color: var(--color-text-light); }
+
+        /* 小工具横排表单(就近推荐/结算预览/评价查询/考核等) */
+        .tool-form { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; padding: 14px 16px; }
+        .tool-form label { font-size: 13px; color: var(--color-text-light); }
+        .tool-form input[type="text"], .tool-form select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .tool-form input[type="text"] { width: 220px; }
+        .tool-form select { min-width: 130px; }
+
+        /* 表格 */
+        .matrix-wrap { overflow-x: auto; }
+        table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .matrix th, .matrix td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .matrix th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .matrix .cap-id { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+
+        /* 徽章(九态商户状态含紫/橙扩展色) */
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.yellow { background: #fdf3e3; color: #a06b00; }
+        .badge.red { background: #fdecea; color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: #999; }
+        .badge.blue { background: #eef2fb; color: #3b5998; }
+        .badge.gold { background: rgba(201, 169, 97, 0.15); color: #8a6d2f; }
+        .badge.purple { background: #f2eaf9; color: #7b3fa0; }
+        .badge.orange { background: #fdefdf; color: #c05f00; }
+
+        /* 小按钮 */
+        .btn-mini {
+            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
+            cursor: pointer; transition: var(--transition);
+        }
+        .btn-mini:hover { background: rgba(74, 124, 89, 0.08); }
+        .btn-mini.danger { border-color: var(--color-danger); color: var(--color-danger); }
+        .btn-mini.danger:hover { background: rgba(192, 57, 43, 0.06); }
+
+        /* 场景单三子单纵向堆叠徽章 */
+        .trace-chips { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+
+        /* 商品行展开(溯源信息) */
+        .row-toggle { cursor: pointer; }
+        .row-toggle:hover { background: rgba(74, 124, 89, 0.04); }
+        .exp-arrow { color: var(--color-text-light); font-size: 11px; display: inline-block; width: 12px; }
+        tr.detail-row > td { background: var(--color-bg); padding: 0 16px; }
+        .detail-box { padding: 14px 0; }
+        .detail-body {
+            background: #fff; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 12px 14px;
+            font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
+        }
+        .detail-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 12px; color: var(--color-text-light); }
+        .detail-meta b { color: var(--color-text); font-weight: 600; }
+
+        /* 全景统计卡 / 分润配置 / 结算预览 */
+        .ov-wrap { padding: 6px 0 12px; }
+        .ov-group { padding: 8px 16px 2px; }
+        .ov-gtitle { font-size: 12px; font-weight: 700; color: var(--color-primary-dark); margin-bottom: 6px; }
+        .ov-cells { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 8px; }
+        .ov-cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 8px 4px; text-align: center; }
+        .ov-cell b { display: block; font-size: 16px; color: var(--color-text); font-variant-numeric: tabular-nums; }
+        .ov-cell span { font-size: 11px; color: var(--color-text-light); }
+
+        /* 小工具结果区(结算预览/考核结果) */
+        .tool-result { padding: 2px 16px 12px; font-size: 13px; }
+        .tool-lines { margin-top: 8px; line-height: 1.8; word-break: break-all; }
+        .tool-lines b { font-weight: 600; }
+
+        /* 评价星级与折叠灰显 */
+        .stars { color: #c9a961; letter-spacing: 1px; }
+        tr.folded-row { opacity: 0.55; }
+        tr.folded-row td { color: #a3a3a3; }
+
+        /* 空态/脚注 */
+        .dash-empty { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 14px; }
+        .note-bar {
+            padding: 10px 16px; font-size: 11px; color: var(--color-text-light);
+            line-height: 1.7; border-top: 1px solid var(--color-border);
+        }
+        .note-bar.note-top { border-top: none; border-bottom: 1px solid var(--color-border); }
+        .note-bar code {
+            background: var(--color-bg); border-radius: 3px; padding: 1px 5px; font-size: 11px;
+        }
+
+        /* 页脚说明 */
+        .dash-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .dash-footer code {
+            background: var(--color-bg); border: 1px solid var(--color-border);
+            border-radius: 3px; padding: 1px 6px; font-size: 11px;
+        }
+
+        @media (max-width: 640px) {
+            .dash-toolbar input[type="text"], .tool-form input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+            .banner-link { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container" style="display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+                <h1>AI 智能网站同盟 · 同盟管理看板</h1>
+                <p>37号模块 · 超级会员入盟(AI预审三档) / 商户九态生命周期 / GeoGrid就近推荐(P1) / 月度考核S/A/B/C(P1) / 酒友小聚场景单与定制状态机(P2)</p>
+            </div>
+            <a class="banner-link" href="ai-hub-dashboard.html">← AI 中枢</a>
+            <div id="authBadge" style="display:flex;align-items:center;"></div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏: API 地址 / 刷新 / 自动刷新 -->
+        <section class="dash-section">
+            <div class="dash-card dash-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="dash-btn ghost" id="btnSaveApi" onclick="saveApiBase()">保存</button>
+                <button class="dash-btn" id="btnRefresh" onclick="refreshData()">刷新</button>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()"> 自动刷新(30s)
+                </label>
+                <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="dash-error" id="errorBanner"></div>
+            <div class="dash-info" id="infoBanner"></div>
+        </section>
+
+        <!-- ① 全景统计卡 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>同盟全景统计</b>
+                    <span class="scan-result">商户 / 商品 / 订单GMV / 结算分润汇总(admin)</span>
+                </div>
+                <div class="ov-wrap" id="ovWrap">
+                    <div class="dash-empty">加载中…</div>
+                </div>
+                <div class="note-bar">
+                    商户统计按状态分档(在营/试用期/暂停/终止); GMV 为全部订单成交口径; 佣金总额/货款总额仅统计已结算(settled)结算单。
+                </div>
+            </div>
+        </section>
+
+        <!-- ② 入盟申请审核区 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>入盟申请审核(人工终审)</b>
+                    <span class="scan-result" id="appCount">加载中…</span>
+                </div>
+                <div class="note-bar note-top">
+                    仅列出 manual_reviewing(人工审核中)申请; AI 预审三档: ≥80 <span class="badge green">优质</span> 快车道 /
+                    60-79 <span class="badge yellow">待核</span> 重点审 / &lt;60 <span class="badge red">不足</span>(提交时已直接拒)。
+                    「通过」即签约建档(signed), 「拒绝」触发 90 天冷却。
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>申请ID</th><th>申请人</th><th>类目</th><th>店铺名</th>
+                                <th>AI预审分</th><th>资质数</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="appBody">
+                            <tr><td colspan="7" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ③ 商户管理区 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>商户管理(九态生命周期)</b>
+                    <span class="scan-result" id="merchantCount">加载中…</span>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>商户ID</th><th>店铺</th><th>类目</th><th>状态</th>
+                                <th>等级</th><th>星级</th><th>推荐人</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="merchantBody">
+                            <tr><td colspan="8" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    状态操作: signed→「激活试用」(进入 90 天试用期) · probation→「转正」 · active/probation→「暂停」(在售商品自动下架)/「终止」(需确认, 90 天冷却)。
+                </div>
+            </div>
+        </section>
+
+        <!-- ④ 类目字典区(折叠默认收起) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>类目字典(公开)</b>
+                    <span class="scan-result" id="catCount"></span>
+                    <div class="head-actions">
+                        <button class="dash-btn ghost" id="catToggle" onclick="toggleCategories()">展开 ▸</button>
+                    </div>
+                </div>
+                <div id="catPanel" style="display:none;">
+                    <div class="matrix-wrap">
+                        <table class="matrix">
+                            <thead>
+                                <tr>
+                                    <th>code</th><th>名称</th><th>溯源级别</th>
+                                    <th>必备资质</th><th>密度上限</th>
+                                </tr>
+                            </thead>
+                            <tbody id="catBody">
+                                <tr><td colspan="5" class="dash-empty">加载中…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="note-bar">
+                        溯源级别: <span class="badge red">full</span> 酒类全量溯源(复用 trace_prod 7 工段批次) /
+                        <span class="badge weak">lite</span> 简化溯源(凭证上链存证); 密度上限 = 同 5km 网格同类目商户数上限(优质优先仲裁)。
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ⑤ 就近推荐工具(公开) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>就近推荐(GeoGrid · 公开)</b>
+                    <span class="scan-result" id="nearbyCount"></span>
+                </div>
+                <div class="tool-form">
+                    <label for="nearbyLat">纬度</label>
+                    <input type="text" id="nearbyLat" value="36.06" style="width:110px;">
+                    <label for="nearbyLng">经度</label>
+                    <input type="text" id="nearbyLng" value="120.38" style="width:110px;">
+                    <label for="nearbyCategory">类目</label>
+                    <select id="nearbyCategory">
+                        <option value="">全部类目</option>
+                    </select>
+                    <button class="dash-btn" id="btnNearby" onclick="loadNearby()">就近查询</button>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr><th>店铺</th><th>类目</th><th>等级</th><th>星级</th><th>距离</th></tr>
+                        </thead>
+                        <tbody id="nearbyBody">
+                            <tr><td colspan="5" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    定位 → 5km 网格(含邻近 3×3 网格) → 类目在营商户, 距离升序(同距按星级); 仅推荐已申请服务范围(service coverage)的 active 商户。
+                </div>
+            </div>
+        </section>
+
+        <!-- ⑥ 商品浏览区(公开) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>商品浏览(公开)</b>
+                    <div class="head-actions">
+                        <select id="productCategory" onchange="loadProducts()">
+                            <option value="">全部类目</option>
+                        </select>
+                        <span class="scan-result" id="productCount"></span>
+                    </div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>SKU</th><th>名称</th><th>类目</th><th>商户ID</th>
+                                <th>价格</th><th>库存</th><th>溯源级别</th>
+                            </tr>
+                        </thead>
+                        <tbody id="productBody">
+                            <tr><td colspan="7" class="dash-empty">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    点击行展开溯源信息(批次号/凭证/存证哈希); 仅展示在售(active)商品; 酒类为全量溯源(须挂 trace_prod 已放行批次)。
+                </div>
+            </div>
+        </section>
+
+        <!-- ⑦ 分润与结算区(admin) -->
+        <section class="dash-section">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;">
+                <div class="dash-card">
+                    <div class="card-head"><b>分润配置与结算预览(admin)</b></div>
+                    <div class="ov-wrap" id="shareWrap">
+                        <div class="dash-empty">加载中…</div>
+                    </div>
+                    <div class="tool-form">
+                        <label for="previewAmount">订单金额(¥)</label>
+                        <input type="text" id="previewAmount" placeholder="如 999">
+                        <button class="dash-btn" id="btnPreview" onclick="previewShares()">结算预览</button>
+                    </div>
+                    <div class="tool-result" id="previewResult">
+                        <div class="dash-empty" style="padding:14px 0;">输入金额后预览抽佣五方拆账</div>
+                    </div>
+                    <div class="note-bar">
+                        抽佣率占成交价, 五方比例占抽佣额(合计=1); 拆账: 佣金 = 金额×抽佣率, 商户货款 = 金额−佣金, 舍入残差归平台对账。
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="card-head">
+                        <b>结算单列表(已结算)</b>
+                        <span class="scan-result" id="settleCount"></span>
+                    </div>
+                    <div class="matrix-wrap">
+                        <table class="matrix">
+                            <thead>
+                                <tr><th>订单号</th><th>佣金(¥)</th><th>货款(¥)</th><th>结算时间</th></tr>
+                            </thead>
+                            <tbody id="settleBody">
+                                <tr><td colspan="4" class="dash-empty">加载中…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="note-bar">
+                        T+1 定时结算(调度器/手动运维通道均可触发), 幂等; 退款场景走结算冲正(reversed, 不在本列表)。
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ⑧ 评价区(公开) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>评价区(公开)</b>
+                    <span class="scan-result" id="reviewCount"></span>
+                </div>
+                <div class="tool-form">
+                    <label for="reviewMerchantId">商户ID</label>
+                    <input type="text" id="reviewMerchantId" placeholder="如 1(留空查全部)">
+                    <button class="dash-btn" id="btnReviews" onclick="loadReviews()">查询评价</button>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr><th>订单</th><th>评分</th><th>内容</th><th>AI审评分</th><th>折叠状态</th></tr>
+                        </thead>
+                        <tbody id="reviewBody">
+                            <tr><td colspan="5" class="dash-empty">输入商户ID后查询(订单结算后一单一评)</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    AI审评分为违规分(越高越可疑): low <span class="badge green">正常</span> / medium
+                    <span class="badge yellow">观察</span> / high <span class="badge red">高危</span>(自动折叠);
+                    折叠评价灰显且不计入商户星级聚合。
+                </div>
+            </div>
+        </section>
+
+        <!-- ⑨ 月度考核区(admin) -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>月度考核(admin)</b></div>
+                <div class="tool-form">
+                    <label for="assessMonth">考核月份</label>
+                    <input type="text" id="assessMonth" placeholder="YYYY-MM" style="width:120px;">
+                    <button class="dash-btn" id="btnRunAssess" onclick="runAssessment()">执行考核</button>
+                    <label for="assessMerchantId">商户ID</label>
+                    <input type="text" id="assessMerchantId" placeholder="考核历史查询">
+                    <button class="dash-btn ghost" id="btnAssessHistory" onclick="loadAssessmentHistory()">查询考核历史</button>
+                </div>
+                <div class="tool-result" id="assessResult">
+                    <div class="dash-empty" style="padding:14px 0;">执行考核: 按 GMV/星级判定 S/A/B/C, 连续 2 月 C 暂停、连续 3 月 C 清退</div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr><th>月份</th><th>GMV(¥)</th><th>星级</th><th>等级</th><th>连续C</th><th>动作</th></tr>
+                        </thead>
+                        <tbody id="assessBody">
+                            <tr><td colspan="6" class="dash-empty">输入商户ID查询考核历史</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    等级判定: GMV≥2×达标线且星级≥4.8→<span class="badge gold">S</span> · GMV≥达标线且星级≥4.0→<span class="badge green">A</span> ·
+                    GMV≥50%线→<span class="badge blue">B</span> · 否则→<span class="badge red">C</span>; 试用期商户仅记录不处置。
+                </div>
+            </div>
+        </section>
+
+        <!-- ⑩ 场景与定制区(会员端演示) -->
+        <section class="dash-section">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;">
+                <div class="dash-card">
+                    <div class="card-head">
+                        <b>我的场景单(会员端演示)</b>
+                        <span class="scan-result" id="sceneCount"></span>
+                    </div>
+                    <div class="tool-form">
+                        <label for="memberId">X-Member-Id</label>
+                        <input type="text" id="memberId" value="60001" style="width:130px;">
+                        <button class="dash-btn" id="btnScenes" onclick="loadScenes()">我的场景单</button>
+                    </div>
+                    <div class="matrix-wrap">
+                        <table class="matrix">
+                            <thead>
+                                <tr>
+                                    <th>场景ID</th><th>类型</th><th>人数</th><th>三子单</th>
+                                    <th>总额(¥)</th><th>核销码</th><th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sceneBody">
+                                <tr><td colspan="7" class="dash-empty">加载中…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="note-bar">
+                        酒友小聚「选酒→配菜→订境」一单三子单 + 单一核销码(线下核销, 72h 有效); 核销完成即三子单结算、分润起算。
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <div class="card-head">
+                        <b>我的定制(管理端列表)</b>
+                        <div class="head-actions">
+                            <button class="dash-btn ghost" id="btnDemands" onclick="loadCustomDemands()">我的定制</button>
+                        </div>
+                    </div>
+                    <div class="matrix-wrap">
+                        <table class="matrix">
+                            <thead>
+                                <tr>
+                                    <th>需求ID</th><th>商户</th><th>类型</th><th>描述</th>
+                                    <th>预算</th><th>报价</th><th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody id="demandBody">
+                                <tr><td colspan="7" class="dash-empty">加载中…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="note-bar">
+                        定制状态机: <span class="badge weak">需求提交</span>→<span class="badge blue">已报价</span>→
+                        <span class="badge green">已确认</span>→<span class="badge yellow">生产中</span>→
+                        <span class="badge gold">已交付</span>(任一环节可<span class="badge red">取消</span>);
+                        类型: 酒具刻字/私宴定制/封坛定制。
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 页脚说明 -->
+        <footer class="dash-footer">
+            <div>鉴权说明：管理端区块以 <code>X-Role: admin</code> 兼容头直连(<code>AUTH_MODE=compat</code>)；会员端演示区块以 <code>X-Member-Id</code> 头标识当前会员；类目/商品/评价/就近推荐为公开端点。</div>
+            <div>数据来源：<code>GET /api/alliance/report/overview</code> · <code>GET /api/alliance/applications</code> · <code>POST /api/alliance/applications/{id}/audit</code> · <code>GET /api/alliance/merchants</code> · <code>POST /api/alliance/merchants/{id}/activate|confirm|suspend|terminate</code> · <code>GET /api/alliance/categories</code> · <code>GET /api/alliance/geo/nearby</code> · <code>GET /api/alliance/products</code> · <code>GET /api/alliance/share-settings</code> · <code>GET /api/alliance/share-preview</code> · <code>GET /api/alliance/settlements</code> · <code>GET /api/alliance/reviews</code> · <code>POST /api/alliance/assessment/run</code> · <code>GET /api/alliance/merchants/{id}/assessment</code> · <code>GET /api/alliance/scenes</code> · <code>GET /api/alliance/custom-demands</code>。响应统一为 <code>{"success": true, "data": ...}</code>, 操作失败时横幅展示后端 <code>detail</code>。</div>
+            <div>流程：超级会员入盟申请(AI预审三档) → 人工终审签约 → 激活试用(90天) → 转正在营 → 商品上架(三道门禁) → 下单结算(15% 抽佣五方拆账) → 评价(AI审评/折叠) → 月度考核(S/A/B/C) → 场景单与定制服务(P2)。</div>
+        </footer>
+    </main>
+
+    <script src="js/auth.js"></script>
+    <script src="js/alliance-dashboard.js"></script>
+</body>
+</html>
