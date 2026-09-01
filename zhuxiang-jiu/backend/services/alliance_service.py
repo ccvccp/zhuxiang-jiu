@@ -541,8 +541,11 @@ class AllianceService:
             product["updatedAt"] = _now_iso()
             await self.repo.save_product(product)
 
+            # 订单号必须全局唯一: 时间戳+自增序列(实机验收发现同买家同秒
+            # 同商品两单 orderId 碰撞互相覆盖, 丢单+结算错位+评价被拦)
+            order_seq = await self.repo.next_id("order")
             order_id = (f"ALO{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
-                        f"{product_id:04d}{buyer_id % 100:02d}")
+                        f"{order_seq:06d}")
             amount = round(product["price"] * quantity, 2)
             order = {
                 "orderId": order_id,
