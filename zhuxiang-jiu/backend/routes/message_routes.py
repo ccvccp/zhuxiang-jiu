@@ -40,6 +40,41 @@ def _require_admin(x_role: str | None):
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
 
+def _resolve_user_access(x_member_id: str | None, x_role: str | None,
+                         user_id: int | None) -> int | None:
+    """会员数据访问控制(v2 安全加固, TD-4 遗留项: message/list 公开越权):
+
+    - 无头: 401
+    - 会员: 只能查自己(user_id 缺省取 X-Member-Id), 访问他人 403
+    - admin: 任意(user_id 原样透传, None = 全局)
+
+    Returns:
+        实际生效的 user_id(会员恒为自身; admin 透传)
+    """
+    if x_role == "admin":
+        return user_id
+    if not x_member_id:
+        raise HTTPException(status_code=401,
+                            detail="未登录: 请提供 X-Member-Id 头")
+    if user_id is not None and str(user_id) != str(x_member_id):
+        raise HTTPException(status_code=403, detail="无权查看他人消息数据")
+    if user_id is not None:
+        return user_id
+    try:
+        return int(x_member_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="无效的会员身份头") from None
+
+
+def _check_message_access(message: dict, x_member_id: str | None,
+                          x_role: str | None) -> None:
+    """单条消息归属校验(admin 任意; 会员仅自己的消息)"""
+    if x_role == "admin":
+        return
+    if str(message.get("userId", "")) != str(x_member_id):
+        raise HTTPException(status_code=403, detail="无权操作该消息")
+
+
 def _map_key_error(exc: KeyError) -> HTTPException:
     msg = str(exc) if str(exc) else "资源不存在"
     if msg.startswith("'") and msg.endswith("'"):
@@ -125,10 +160,15 @@ class BatchSendRequest(PydBaseModel):
 @router.post("/api/message/send", tags=["信息管理模块"])
 async def send_message(
     data: SendMessageRequest,
-    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
 ):
-    """发送消息(站内信/短信/邮件/小程序订阅消息)"""
-    _require_member_id(x_member_id)
+    """发送消息(站内信/短信/邮件/小程序订阅消息; 管理端)
+
+    v2 安全加固: 原会员端任意登录者可向任意 userId 发消息(垃圾消息/钓鱼向量),
+    收紧为 admin; 系统性触达(订单/物流/活动通知)由各业务模块服务层直调
+    MessageService, 不经本端点。
+    """
+    _require_admin(x_role)
     try:
         result = await _service.send_message(
             user_id=data.userId,
@@ -147,15 +187,18 @@ async def send_message(
 
 @router.get("/api/message/list", tags=["信息管理模块"])
 async def list_messages(
-    user_id: int = Query(..., description="会员ID"),
+    user_id: int = Query(..., description="会员ID(admin 可查任意会员)"),
     channel: str = Query(None, description="按渠道筛选: inmail/sms/email/miniapp/popup/push"),
     category: str = Query(None, description="按分类筛选: system/order/logistics/activity/coupon/member"),
     status: str = Query(None, description="按状态筛选: unread/read/deleted"),
     limit: int = Query(50, ge=1, le=500, description="查询条数"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
 ):
-    """查询用户消息列表(支持多条件筛选)"""
+    """查询用户消息列表(支持多条件筛选; 会员仅自己, admin 可查任意)"""
+    effective_user = _resolve_user_access(x_member_id, x_role, user_id)
     try:
-        result = await _service.list_messages(user_id, channel, category, status, limit)
+        result = await _service.list_messages(effective_user, channel, category, status, limit)
         return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)
@@ -165,12 +208,13 @@ async def list_messages(
 async def mark_all_read(
     data: MarkAllReadRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
 ):
-    """批量标记已读(指定用户的所有未读消息)"""
-    _require_member_id(x_member_id)
+    """批量标记已读(指定用户的所有未读消息; 会员仅自己, admin 任意)"""
+    effective_user = _resolve_user_access(x_member_id, x_role, data.userId)
     try:
         result = await _service.mark_all_read(
-            user_id=data.userId,
+            user_id=effective_user,
             channel=data.channel,
             category=data.category,
         )
@@ -181,13 +225,14 @@ async def mark_all_read(
 
 @router.get("/api/message/stats", tags=["信息管理模块"])
 async def get_stats(
-    user_id: int = Query(None, description="指定会员ID查询其统计"),
+    user_id: int = Query(None, description="指定会员ID查询其统计(admin 可查任意/全局)"),
     x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
 ):
-    """消息统计(按用户或全局)"""
-    _require_member_id(x_member_id)
+    """消息统计(会员查自己; admin 按用户或全局)"""
+    effective_user = _resolve_user_access(x_member_id, x_role, user_id)
     try:
-        result = await _service.get_stats(user_id=user_id)
+        result = await _service.get_stats(user_id=effective_user)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
@@ -197,9 +242,16 @@ async def get_stats(
 async def mark_read(
     message_id: int,
     x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
 ):
-    """标记单条消息为已读"""
-    _require_member_id(x_member_id)
+    """标记单条消息为已读(会员仅自己的消息, admin 任意)"""
+    if x_role != "admin":
+        _require_member_id(x_member_id)
+    try:
+        message = await _service.get_message(message_id)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    _check_message_access(message, x_member_id, x_role)
     try:
         result = await _service.mark_read(message_id)
         return {"success": True, "data": result}
@@ -211,14 +263,17 @@ async def mark_read(
 async def get_message(
     message_id: int,
     x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
 ):
-    """查询消息详情"""
-    _require_member_id(x_member_id)
+    """查询消息详情(会员仅自己的消息, admin 任意)"""
+    if x_role != "admin":
+        _require_member_id(x_member_id)
     try:
         result = await _service.get_message(message_id)
-        return {"success": True, "data": result}
-    except Exception as e:
-        _handle(e)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    _check_message_access(result, x_member_id, x_role)
+    return {"success": True, "data": result}
 
 
 # --- 管理端接口 ---
