@@ -101,6 +101,117 @@ HANDLE_SUGGEST_REFUND = "refund"          # 退款
 HANDLE_SUGGEST_IGNORE = "ignore"          # 忽略
 
 
+# ============================================================
+# P1-17 智能选物流商(设计文档 2.3 智能选型路由 / 2.4 路由规则详表)
+# ============================================================
+
+# 单瓶规格(约 1.5kg 含包装), 件数→瓶数折算用
+BOTTLES_PER_PIECE = 6
+
+# 偏远省份(经济快递覆盖区)
+REMOTE_PROVINCES = {"新疆", "西藏", "青海", "内蒙古", "甘肃", "宁夏"}
+
+# 高货值线(≥¥10,000 保价运输)
+HIGH_VALUE_LINE = 10000.0
+
+
+def _is_remote(receiver: dict) -> bool:
+    """偏远地区判定(收件省份在偏远列表)"""
+    province = str(receiver.get("province", "") or "")
+    return any(p in province for p in REMOTE_PROVINCES)
+
+
+def _is_same_city(sender: dict, receiver: dict) -> bool:
+    """同城判定(收件城市出现在发货地址中, 发货方地址含城市名)"""
+    r_city = str(receiver.get("city", "") or "").strip()
+    s_addr = str(sender.get("address", "") or sender.get("city", "") or "")
+    return bool(r_city and r_city in s_addr)
+
+
+def smart_route_carrier(order_type: str, weight: float, piece_count: int,
+                        insured_value: float, sender: dict,
+                        receiver: dict) -> dict:
+    """智能选择最优物流商(纯函数, 设计文档 2.4 路由规则详表)
+
+    路由规则(按优先级):
+        1. 团购 ≥100 瓶(≈17 件) 同城 → 货拉拉整车
+        2. 团购 ≥100 瓶 跨省     → 德邦零担
+        3. 团购 50-100 瓶 同城   → 货拉拉小货车
+        4. 团购 50-100 瓶 跨省   → 德邦大件快递
+        5. 货值 ≥ ¥10,000       → 顺丰保价运输
+        6. 偏远地区              → 圆通经济
+        7. 零售默认              → 顺丰(件数≤5 特快/标快, 6-50 卡班)
+
+    Returns:
+        {"carrier", "carrierName", "serviceType", "reason",
+         "candidates": [(carrier, score, reason)]}  按综合分降序
+    """
+    bottles = piece_count * BOTTLES_PER_PIECE
+    remote = _is_remote(receiver)
+    same_city = _is_same_city(sender, receiver)
+    candidates = []   # (carrier, service_type, reason, score)
+
+    if order_type == "groupbuy":
+        if bottles >= 100:
+            if same_city:
+                candidates.append((CARRIER_LLL, "整车配送",
+                                   f"团购{bottles}瓶同城→货拉拉整车", 100))
+            candidates.append((CARRIER_DB, "零担物流",
+                               f"团购{bottles}瓶跨省→德邦零担批量运输", 95))
+        elif bottles >= 50:
+            if same_city:
+                candidates.append((CARRIER_LLL, "小货车",
+                                   f"团购{bottles}瓶同城→货拉拉小货车", 90))
+            candidates.append((CARRIER_DB, "大件快递",
+                               f"团购{bottles}瓶跨省→德邦大件快递", 85))
+        else:
+            candidates.append((CARRIER_SF, "standard",
+                               f"团购{bottles}瓶小批量→顺丰标快", 80))
+    elif remote:
+        candidates.append((CARRIER_YT, "经济快递",
+                            f"偏远地区({receiver.get('province', '')})→圆通经济覆盖乡镇",
+                            75))
+    else:
+        service = "express" if piece_count <= 5 else "standard"
+        label = "特快/标快" if piece_count <= 5 else "卡班大件"
+        candidates.append((CARRIER_SF, service,
+                           f"零售{piece_count}件→顺丰{label}", 80))
+
+    # 高货值保价(设计文档: 货值≥1万→顺丰保价运输)
+    # 语义: 保价为独立高优先级规则, 但批量团购整车/零担场景优先级更高
+    # (整车运输天然含保障); 即: 无更高优先级匹配时保价置顶。
+    if insured_value >= HIGH_VALUE_LINE:
+        best_score = candidates[0][3] if candidates else 0
+        if best_score < 99:
+            candidates.insert(0, (CARRIER_SF, "保价运输",
+                                 f"货值¥{insured_value:,.0f}≥1万→顺丰保价运输", 99))
+        else:
+            candidates.append((CARRIER_SF, "保价运输",
+                               f"货值¥{insured_value:,.0f}≥1万(整车场景含保障)",
+                               60))
+
+    if not candidates:
+        candidates.append((CARRIER_SF, "standard", "默认→顺丰标快", 50))
+
+    # 综合分排序(设计文档 2.2: 健康度×0.6+成本×0.4 的简化静态版)
+    candidates.sort(key=lambda c: -c[3])
+    best = candidates[0]
+    return {
+        "carrier": best[0],
+        "carrierName": CARRIER_NAMES.get(best[0], best[0]),
+        "serviceType": best[1],
+        "reason": best[2],
+        "bottles": bottles,
+        "remote": remote,
+        "sameCity": same_city,
+        "candidates": [
+            {"carrier": c[0], "carrierName": CARRIER_NAMES.get(c[0], c[0]),
+             "serviceType": c[1], "reason": c[2], "score": c[3]}
+            for c in candidates
+        ],
+    }
+
+
 def _calc_insured_fee(insured_value: float) -> float:
     """计算保价费(0.5%)"""
     return round(insured_value * INSURED_FEE_RATE, 2)

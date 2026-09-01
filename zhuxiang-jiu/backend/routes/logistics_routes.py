@@ -98,7 +98,8 @@ class ReceiverInfo(ContactInfo):
 class CreateOrderRequest(PydBaseModel):
     orderId: str = Field(..., description="关联竹香酒订单号")
     orderType: str = Field(..., description="订单类型 retail/groupbuy/return")
-    carrier: str = Field(..., description="物流商 SF/JD/LLL/DB/YT")
+    carrier: str | None = Field(
+        None, description="物流商 SF/JD/LLL/DB/YT; 缺省或 AUTO 时智能路由自动选择(P1-17)")
     serviceType: str = Field("standard", description="服务类型 standard/express")
     sender: ContactInfo
     receiver: ReceiverInfo
@@ -109,6 +110,16 @@ class CreateOrderRequest(PydBaseModel):
     settleMode: str = Field("monthly", description="结算模式 monthly/cash/prepaid")
     extraFee: float = Field(0.0, ge=0, description="附加费")
     discount: float = Field(1.0, gt=0, le=1.0, description="折扣率(0-1.0]")
+
+
+class RouteCarrierRequest(PydBaseModel):
+    """智能选物流商推荐(P1-17, 设计文档 2.3 智能选型路由)"""
+    orderType: str = Field(..., description="订单类型 retail/groupbuy/return")
+    weight: float = Field(..., gt=0, description="重量(kg)")
+    pieceCount: int = Field(1, gt=0, description="件数")
+    insuredValue: float = Field(0.0, ge=0, description="保价金额")
+    sender: ContactInfo
+    receiver: ReceiverInfo
 
 
 class UpdateStatusRequest(PydBaseModel):
@@ -167,15 +178,29 @@ async def create_logistics_order(
     data: CreateOrderRequest,
     x_member_id: str = Header(..., alias="X-Member-Id"),
 ):
-    """物流下单(幂等: 同一 orderId 只能有一个未关闭运单)"""
+    """物流下单(幂等: 同一 orderId 只能有一个未关闭运单)
+
+    P1-17: carrier 缺省或传 "AUTO" 时, 经智能路由引擎自动选择最优物流商
+    (团购批量/高货值/偏远地区/零售默认 → 设计文档 2.4 路由规则详表)。
+    """
     _require_member_id(x_member_id)
     try:
         sender = data.sender.model_dump()
         receiver = data.receiver.model_dump()
+
+        carrier = data.carrier
+        routing = None
+        if not carrier or carrier.upper() == "AUTO":
+            from services.logistics_service import smart_route_carrier
+            routing = smart_route_carrier(
+                data.orderType, data.weight, data.pieceCount,
+                data.insuredValue, sender, receiver)
+            carrier = routing["carrier"]
+
         result = await _service.create_order(
             order_id=data.orderId,
             order_type=data.orderType,
-            carrier=data.carrier,
+            carrier=carrier,
             service_type=data.serviceType,
             sender=sender,
             receiver=receiver,
@@ -187,9 +212,27 @@ async def create_logistics_order(
             extra_fee=data.extraFee,
             discount=data.discount,
         )
+        if routing:
+            result["smartRouting"] = routing
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
+
+
+@router.post("/api/logistics/route-carrier", tags=["物流接口管理"])
+async def route_carrier(data: RouteCarrierRequest):
+    """智能选物流商推荐(P1-17; 按订单类型/件数/货值/目的地返回最优物流商+候选)
+
+    路由规则(设计文档 2.4): 团购≥100瓶同城→货拉拉整车 / 跨省→德邦零担;
+    50-100瓶 同城→货拉拉小货车 / 跨省→德邦大件; 货值≥1万→顺丰保价;
+    偏远地区→圆通经济; 零售默认→顺丰。
+    """
+    from services.logistics_service import smart_route_carrier
+    routing = smart_route_carrier(
+        data.orderType, data.weight, data.pieceCount,
+        data.insuredValue, data.sender.model_dump(),
+        data.receiver.model_dump())
+    return {"success": True, "data": routing}
 
 
 @router.get("/api/logistics/order/{waybill_no}", tags=["物流接口管理"])
