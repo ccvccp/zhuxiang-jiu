@@ -55,6 +55,31 @@ def _require_admin(x_role: str | None):
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
 
+def _check_pay_access(pay: dict, x_member_id: str | None,
+                      x_role: str | None,
+                      *, guest_writable: bool = True) -> None:
+    """支付单访问控制(v2 安全加固, TD-4 遗留项):
+
+    - admin: 全通过
+    - 游客单(isGuest): guest_writable=True 的操作凭单号访问(单号即凭证);
+      guest_writable=False 的操作(退款等资金敏感)仅 admin, 游客走客服
+    - 会员单: X-Member-Id 缺失 401, 与支付单归属人不符 403
+    """
+    if x_role == "admin":
+        return
+    if pay.get("isGuest"):
+        if guest_writable:
+            return
+        raise HTTPException(
+            status_code=403,
+            detail="游客支付单的该操作需管理员处理(请联系客服)")
+    if not x_member_id:
+        raise HTTPException(status_code=401,
+                            detail="未登录: 请提供 X-Member-Id 头")
+    if str(pay.get("userId", "")) != str(x_member_id):
+        raise HTTPException(status_code=403, detail="无权操作该支付单")
+
+
 def _map_key_error(exc: KeyError) -> HTTPException:
     """KeyError → 404"""
     msg = str(exc) if str(exc) else "资源不存在"
@@ -268,9 +293,35 @@ async def list_pays(
 #      (payouts/reconciliations/channels 等同段数 GET 路由)
 
 
+# 注: 静态路径 reconciliation/start 必须先于动态路由 /{pay_no}/start 声明,
+#      否则 "reconciliation" 会被当作 pay_no 捕获(路由冲突, v2 加固时发现并修复)
+@router.post("/api/payment/reconciliation/start", tags=["收款管理"])
+async def start_reconciliation(
+    req: StartReconciliationRequest,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """启动日终对账(管理端, 按日期+渠道生成对账批次)"""
+    _require_admin(x_role)
+    try:
+        return await _service.start_reconciliation(req.reconDate, req.channel, req.operator)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
 @router.post("/api/payment/{pay_no}/start", tags=["收款管理"])
-async def start_pay(pay_no: str):
-    """发起渠道支付(待支付 → 支付中)"""
+async def start_pay(
+    pay_no: str,
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """发起渠道支付(待支付 → 支付中; 归属会员/admin, 游客单凭单号)"""
+    try:
+        pay = await _service.get_pay(pay_no)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    _check_pay_access(pay, x_member_id, x_role)
     try:
         return await _service.start_pay(pay_no)
     except KeyError as e:
@@ -283,8 +334,15 @@ async def start_pay(pay_no: str):
 async def close_pay(
     pay_no: str,
     req: ClosePayRequest,
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
-    """关闭支付单(待支付/支付中 → 已关闭)"""
+    """关闭支付单(待支付/支付中 → 已关闭; 归属会员/admin, 游客单凭单号)"""
+    try:
+        pay = await _service.get_pay(pay_no)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    _check_pay_access(pay, x_member_id, x_role)
     try:
         return await _service.close_pay(pay_no, req.reason)
     except KeyError as e:
@@ -328,8 +386,18 @@ async def list_pending_refunds(
 async def create_refund(
     pay_no: str,
     req: CreateRefundRequest,
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
-    """创建退款申请(幂等: 累计退款不超过原支付金额)"""
+    """创建退款申请(幂等: 累计退款不超过原支付金额)
+
+    访问控制: 归属会员/admin; 游客单仅 admin(游客退款走客服人工通道)。
+    """
+    try:
+        pay = await _service.get_pay(pay_no)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    _check_pay_access(pay, x_member_id, x_role, guest_writable=False)
     try:
         return await _service.create_refund(
             pay_no, req.refundAmount, req.refundReason, req.refundType,
@@ -345,8 +413,15 @@ async def list_refunds(
     pay_no: str,
     status: str | None = Query(None, description="状态筛选"),
     limit: int = Query(50, ge=1, le=200),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
-    """列出支付单关联的退款记录"""
+    """列出支付单关联的退款记录(归属会员/admin, 游客单凭单号)"""
+    try:
+        pay = await _service.get_pay(pay_no)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    _check_pay_access(pay, x_member_id, x_role)
     try:
         return await _service.list_refunds(pay_no, status, limit)
     except KeyError as e:
@@ -530,24 +605,9 @@ async def payout_callback(
 
 
 # ============================================================
-# 4. 对账记录(6 端点, 管理端 + 公开查询)
-# 注: 静态 GET 路径(list/pending)声明在参数路径 {recon_no} 之前
+# 4. 对账记录(6 端点, 管理端; 全部需 admin)
+# 注: reconciliation/start 已上移至动态路由 /{pay_no}/start 之前(路由冲突修复)
 # ============================================================
-
-@router.post("/api/payment/reconciliation/start", tags=["收款管理"])
-async def start_reconciliation(
-    req: StartReconciliationRequest,
-    x_role: str | None = Header(None, alias="X-Role"),
-):
-    """启动日终对账(管理端)"""
-    _require_admin(x_role)
-    try:
-        return await _service.start_reconciliation(req.reconDate, req.channel, req.operator)
-    except KeyError as e:
-        raise _map_key_error(e) from e
-    except ValueError as e:
-        raise _map_value_error(e) from e
-
 
 @router.get("/api/payment/reconciliations", tags=["收款管理"])
 async def list_reconciliations(
@@ -555,10 +615,13 @@ async def list_reconciliations(
     channel: str | None = Query(None, description="按渠道筛选"),
     status: str | None = Query(None, description="按状态筛选 pending/matched/diff/investigating/resolved"),
     limit: int = Query(20, ge=1, le=100),
+    x_role: str | None = Header(None, alias="X-Role"),
 ):
-    """对账批次列表(支持筛选)"""
+    """对账批次列表(管理端, 支持筛选; 财务敏感数据)"""
+    _require_admin(x_role)
     try:
-        return await _service.list_reconciliations(date=date, channel=channel, status=status, limit=limit)
+        return await _service.list_reconciliations(recon_date=date, channel=channel,
+                                                   status=status, limit=limit)
     except ValueError as e:
         raise _map_value_error(e) from e
 
@@ -577,8 +640,12 @@ async def list_pending_diffs(
 
 
 @router.get("/api/payment/reconciliation/{recon_no}", tags=["收款管理"])
-async def get_reconciliation(recon_no: str):
-    """查询对账批次详情"""
+async def get_reconciliation(
+    recon_no: str,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """查询对账批次详情(管理端; 财务敏感数据)"""
+    _require_admin(x_role)
     try:
         return await _service.get_reconciliation(recon_no)
     except KeyError as e:
@@ -677,18 +744,30 @@ async def list_channels(
         raise _map_value_error(e) from e
 
 
+# 收银台公开字段白名单(v2 安全加固: 公开端点剥离商户号/费率/限额/重试策略)
+_CASHIER_FIELDS = ("channelCode", "channelName", "channelType",
+                   "supportedMethods", "supportedScenes")
+
+
 @router.get("/api/payment/channels/active", tags=["收款管理"])
 async def list_active_channels():
-    """启用的渠道列表(公开, 供客户端收银台选择)"""
+    """启用的渠道列表(公开, 供客户端收银台选择; 字段白名单脱敏)"""
     try:
-        return await _service.list_active_channels()
+        result = await _service.list_active_channels()
     except ValueError as e:
         raise _map_value_error(e) from e
+    masked = [{k: item[k] for k in _CASHIER_FIELDS if k in item}
+              for item in result.get("items", [])]
+    return {"success": True, "count": len(masked), "items": masked}
 
 
 @router.get("/api/payment/channel/{code}", tags=["收款管理"])
-async def get_channel(code: str):
-    """查询渠道详情(公开)"""
+async def get_channel(
+    code: str,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """查询渠道详情(管理端; 含商户号/费率等敏感配置)"""
+    _require_admin(x_role)
     try:
         return await _service.get_channel(code)
     except KeyError as e:
@@ -740,12 +819,18 @@ async def update_channel(
 # ============================================================
 
 @router.get("/api/payment/{pay_no}", tags=["收款管理"])
-async def get_pay(pay_no: str):
-    """查询支付订单详情"""
+async def get_pay(
+    pay_no: str,
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """查询支付订单详情(归属会员/admin, 游客单凭单号)"""
     try:
-        return await _service.get_pay(pay_no)
+        pay = await _service.get_pay(pay_no)
     except KeyError as e:
         raise _map_key_error(e) from e
+    _check_pay_access(pay, x_member_id, x_role)
+    return pay
 
 
 # ============================================================

@@ -723,9 +723,9 @@ class PaymentRepository:
         client = await get_redis_client()
         pay_no = order["payNo"]
         key = _k("payment", "order", pay_no)
-        # 用 SETNX 保证 payNo 唯一
-        acquired = await client.setnx(key, "")
-        if not acquired:
+        # payNo 唯一性: 由 INCR 原子序号生成保证; exists 兜底防重
+        # (勿用 setnx 占位再 hset: setnx 建的是 String 键, hset 会 WRONGTYPE)
+        if await client.exists(key):
             raise ValueError(f"支付单号 {pay_no} 已存在")
         await client.hset(key, mapping=self._serialize_hash(order))
         # 用户索引
@@ -1693,6 +1693,13 @@ class PaymentRepository:
         for k in amount_fields:
             if k in result:
                 result[k] = _to_number(result[k])
+        # 布尔字段(序列化为 0/1, 须还原为 bool;
+        # 否则字符串 "0" 为 truthy, 归属鉴权会把会员单误判为游客单)
+        bool_fields = {"isGuest", "ageConfirmed"}
+        for k in bool_fields:
+            if k in result:
+                v = result[k]
+                result[k] = (v is True) or (str(v) == "1")
         return result
 
     def _deserialize_channel(self, data: dict) -> dict:
