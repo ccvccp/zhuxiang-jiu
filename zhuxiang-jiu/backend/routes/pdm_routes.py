@@ -468,6 +468,64 @@ async def submit_learning_feedback(
         _handle(e)
 
 
+# ============================================================
+# AI 设计工坊(P2, 设计文档 §2.4)
+# ============================================================
+
+@router.post("/api/pdm/products/{product_id}/design/generate-main-image",
+             tags=["AI智能产品管理模块"])
+async def generate_main_image(
+    product_id: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """AI 生成商品主图(LLM 构造 prompt → 生成图 URL → 入库+审图一站式)
+
+    LLM 不可用走规则模板轨, 产出不中断; 生成图自动 AI 审图。
+    """
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.generate_main_image(
+            member_id, x_role, product_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/pdm/products/{product_id}/design/copy-optimize",
+             tags=["AI智能产品管理模块"])
+async def optimize_copy(
+    product_id: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """AI 文案优化建议(三级降级链+禁用词硬校验, 仅建议不入库)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.optimize_copy(member_id, x_role,
+                                              product_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/pdm/products/{product_id}/design/main-image-ab",
+            tags=["AI智能产品管理模块"])
+async def main_image_ab_advice(
+    product_id: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """主图 A/B 智能选择建议(版本历史主图 × 销量/评分数据)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.main_image_ab_advice(
+            member_id, x_role, product_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/pdm/images", tags=["AI智能产品管理模块"])
 async def list_images(
     x_member_id: str = Header(None, alias="X-Member-Id"),

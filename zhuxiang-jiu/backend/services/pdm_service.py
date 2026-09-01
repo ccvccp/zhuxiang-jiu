@@ -873,6 +873,81 @@ class PdmService:
             raise KeyError(f"图片不存在(imageId={image_id})")
         return record
 
+    # ============================================================
+    # AI 设计工坊(P2, 设计文档 §2.4)
+    # ============================================================
+
+    async def generate_main_image(self, operator: int, role: str,
+                                  product_id: str) -> dict:
+        """AI 生成商品主图: LLM 构造 prompt → 生成图 URL → 入图库
+        + AI 审图一站式(LLM 不可用走规则模板轨, 产出不中断)
+
+        Raises:
+            KeyError: 商品不存在
+        """
+        await self._require(operator, role, PERM_OPERATE)
+        product = await self.product_repo.get_by_id(product_id)
+        if product is None:
+            raise KeyError(f"商品不存在(productId={product_id})")
+        from services.pdm_design_service import PdmDesignService
+        generated = PdmDesignService().generate_main_image(product)
+        # 生成图自动审图(外链 URL + LLM 配置时走 vision 轨)
+        from services.pdm_image_review_service import (
+            PdmImageReviewService,
+        )
+        review = PdmImageReviewService().review_image(
+            generated["imageUrl"], size=0,
+            product_name=product.get("name", ""),
+            category=product.get("series", ""))
+        image_id = await self.repo.next_id("image")
+        record = {
+            "imageId": image_id,
+            "url": generated["imageUrl"],
+            "size": 0,
+            "uploadedBy": operator,
+            "productId": product_id,
+            "status": (IMAGE_STATUS_FLAGGED if review["flagged"]
+                       else IMAGE_STATUS_USABLE),
+            "aiReview": review,
+            "generated": True,           # AI 生成图标记
+            "designPrompt": generated["prompt"],
+            "designTrack": generated["track"],
+            "createdAt": _now_iso(),
+        }
+        await self.repo.save_image(record)
+        return {"image": record, "design": generated,
+                "review": review}
+
+    async def optimize_copy(self, operator: int, role: str,
+                            product_id: str) -> dict:
+        """AI 文案优化建议(仅建议不入库; 禁用词硬校验)
+
+        Raises:
+            KeyError: 商品不存在
+        """
+        await self._require(operator, role, PERM_OPERATE)
+        product = await self.product_repo.get_by_id(product_id)
+        if product is None:
+            raise KeyError(f"商品不存在(productId={product_id})")
+        from services.pdm_design_service import PdmDesignService
+        return PdmDesignService().optimize_copy(product)
+
+    async def main_image_ab_advice(self, operator: int, role: str,
+                                   product_id: str) -> dict:
+        """主图 A/B 智能选择建议(版本历史 × 销量/评分)
+
+        Raises:
+            KeyError: 商品不存在
+        """
+        await self._require(operator, role, PERM_VIEW)
+        product = await self.product_repo.get_by_id(product_id)
+        if product is None:
+            raise KeyError(f"商品不存在(productId={product_id})")
+        versions = await self.repo.list_versions(product_id)
+        from services.pdm_design_service import PdmDesignService
+        return PdmDesignService().main_image_ab_advice(product,
+                                                       versions)
+
     async def list_images(self, status: str = None,
                           limit: int = 100) -> list[dict]:
         return await self.repo.list_images(status=status, limit=limit)

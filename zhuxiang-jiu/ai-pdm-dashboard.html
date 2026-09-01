@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<!--
+    38号·AI智能产品管理模块 v1.0 · 产品管理看板
+    页面: ai-pdm-dashboard.html(配套脚本 js/pdm-dashboard.js)
+    依赖: css/style.css(主题变量, 不新建 css) / js/auth.js(登录态)
+    后端: 38号 pdm_routes(默认 http://localhost:8000)
+    鉴权: 全部端点须登录(X-Member-Id + X-Role); admin 兜底全权限
+    区块: ①全景统计 ②商品管理(六态/编辑/提交/上下架/紧急下架) ③待审队列(AI报告+终审)
+          ④版本与回滚 ⑤图片中心(上传/审图/重传/销毁) ⑥AI设计工坊(主图生成/文案优化/A-B建议)
+          ⑦智能下架建议 ⑧学习回流状态
+-->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 智能产品管理 · 产品管理看板</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 产品管理看板专属样式(复用 style.css 主题变量) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+        .banner-link {
+            color: #fff; text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.55);
+            border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px;
+            white-space: nowrap; transition: var(--transition);
+        }
+        .banner-link:hover { background: rgba(255, 255, 255, 0.15); }
+
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"], .dash-toolbar input[type="number"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 220px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 错误/提示横幅 */
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .dash-info {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 卡片头 */
+        .card-head {
+            display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--color-border);
+        }
+        .card-head b { font-size: 14px; }
+        .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .card-head select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .scan-result { font-size: 12px; color: var(--color-text-light); }
+
+        /* 横排表单 */
+        .tool-form { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; padding: 14px 16px; }
+        .tool-form label { font-size: 13px; color: var(--color-text-light); }
+        .tool-form input[type="text"], .tool-form input[type="number"], .tool-form select, .tool-form textarea {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .tool-form input[type="text"], .tool-form input[type="number"] { width: 180px; }
+        .tool-form textarea { width: 100%; min-height: 56px; resize: vertical; }
+
+        /* 表格 */
+        .matrix-wrap { overflow-x: auto; }
+        table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .matrix th, .matrix td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .matrix th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .matrix .cap-id { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+
+        /* 徽章(六态) */
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.yellow { background: #fdf3e3; color: #a06b00; }
+        .badge.red { background: #fdecea; color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: #999; }
+        .badge.blue { background: #eef2fb; color: #3b5998; }
+        .badge.purple { background: #f2eaf9; color: #7b3fa0; }
+        .badge.orange { background: #fdefdf; color: #c05f00; }
+
+        /* 小按钮 */
+        .btn-mini {
+            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
+            cursor: pointer; transition: var(--transition);
+        }
+        .btn-mini:hover { background: rgba(74, 124, 89, 0.08); }
+        .btn-mini.danger { border-color: var(--color-danger); color: var(--color-danger); }
+        .btn-mini.danger:hover { background: rgba(192, 57, 43, 0.06); }
+
+        /* 全景统计卡 */
+        .ov-wrap { padding: 6px 0 12px; }
+        .ov-group { padding: 8px 16px 2px; }
+        .ov-gtitle { font-size: 12px; font-weight: 700; color: var(--color-primary-dark); margin-bottom: 6px; }
+        .ov-cells { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 8px; }
+        .ov-cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 8px 4px; text-align: center; }
+        .ov-cell b { display: block; font-size: 16px; color: var(--color-text); font-variant-numeric: tabular-nums; }
+        .ov-cell span { font-size: 11px; color: var(--color-text-light); }
+
+        /* AI 报告详情框(预审五因子/审图报告) */
+        .detail-box { padding: 12px 16px; }
+        .detail-body {
+            background: #fff; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 12px 14px;
+            font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
+        }
+        .ai-badge { display: inline-block; font-size: 11px; border-radius: 3px; padding: 1px 6px; margin-right: 6px; }
+        .ai-badge.pass { background: #e8f4ec; color: #2e8b57; }
+        .ai-badge.mid { background: #fdf3e3; color: #a06b00; }
+        .ai-badge.fail { background: #fdecea; color: var(--color-danger); }
+
+        /* 图片缩略 */
+        .thumb { width: 48px; height: 48px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--color-border); vertical-align: middle; }
+
+        /* 空态/脚注 */
+        .dash-empty { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 14px; }
+        .note-bar {
+            padding: 10px 16px; font-size: 11px; color: var(--color-text-light);
+            line-height: 1.7; border-top: 1px solid var(--color-border);
+        }
+
+        .dash-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+
+        @media (max-width: 640px) {
+            .dash-toolbar input[type="text"], .tool-form input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+            .banner-link { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container" style="display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+                <h1>AI 智能产品管理 · 产品管理看板</h1>
+                <p>38号模块 · 权限审核制度(perm产品域+SoD) / 六态状态机 / 版本回滚 / AI审图(P1) / AI设计工坊(P2)</p>
+            </div>
+            <a class="banner-link" href="ai-alliance-dashboard.html">← 同盟看板</a>
+            <div id="authBadge" style="display:flex;align-items:center;"></div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="dash-toolbar">
+                    <label>后端地址</label>
+                    <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                    <button class="dash-btn ghost" id="btnSaveApi" onclick="saveApiBase()">保存</button>
+                    <button class="dash-btn" id="btnRefresh" onclick="refreshData()">刷新</button>
+                    <input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()"> 自动刷新(30s)
+                    <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+                </div>
+                <div class="dash-error" id="errorBanner"></div>
+                <div class="dash-info" id="infoBanner"></div>
+                <div class="note-bar note-top">
+                    身份: <input type="number" id="memberId" placeholder="会员ID" style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:3px 8px;font-size:12px;width:90px;">
+                    <select id="roleSel" style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:3px 8px;font-size:12px;">
+                        <option value="admin">admin</option>
+                        <option value="member">member</option>
+                    </select>
+                    <span>(admin 走 JWT 角色兜底; member 须 perm 产品域授权)</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ① 全景统计 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>① 全景统计</b>
+                    <div class="head-actions"><span class="scan-result" id="ovSummary"></span></div>
+                </div>
+                <div class="ov-wrap" id="ovWrap"></div>
+            </div>
+        </section>
+
+        <!-- ② 商品管理 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>② 商品管理(六态)</b>
+                    <div class="head-actions">
+                        <select id="statusFilter" onchange="loadProducts()">
+                            <option value="">全部状态</option>
+                            <option value="draft">草稿</option>
+                            <option value="ai_reviewing">AI预审中</option>
+                            <option value="manual_reviewing">待人工审核</option>
+                            <option value="rejected">已驳回</option>
+                            <option value="on_sale">在售</option>
+                            <option value="off_sale">已下架</option>
+                        </select>
+                        <span class="scan-result" id="productCount">加载中…</span>
+                    </div>
+                </div>
+                <div class="tool-form">
+                    <label>新建草稿:</label>
+                    <input type="text" id="newName" placeholder="商品名">
+                    <input type="number" id="newPrice" placeholder="售价">
+                    <input type="number" id="newAlcohol" placeholder="度数(42)" value="42">
+                    <input type="number" id="newStock" placeholder="库存(0)" value="0">
+                    <input type="text" id="newDesc" placeholder="描述" style="width:260px;">
+                    <button class="dash-btn" onclick="createProduct()">创建草稿</button>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead><tr>
+                            <th>ID</th><th>名称</th><th>系列</th><th class="num">价格</th>
+                            <th class="num">库存</th><th>状态</th><th class="num">版本</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="productBody"><tr><td colspan="8" class="dash-empty">加载中…</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="note-bar">编辑(改价回落重审)/提交审核/上架/下架(原因必填)/紧急下架(admin); substantive 变更自动回落 draft。</div>
+            </div>
+        </section>
+
+        <!-- ③ 待审队列 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>③ 待审队列(AI 预审报告)</b>
+                    <div class="head-actions">
+                        <button class="dash-btn ghost" onclick="loadPending()">刷新队列</button>
+                        <span class="scan-result" id="pendingCount"></span>
+                    </div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead><tr>
+                            <th>ID</th><th>名称</th><th class="num">AI分</th><th>AI档</th>
+                            <th>五因子</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="pendingBody"><tr><td colspan="6" class="dash-empty">暂无待审商品</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="note-bar">SoD: 审核人不得为最近实质编辑人; 终审通过 → on_sale, 驳回 → rejected; 裁决自动回流 ai_learning。</div>
+            </div>
+        </section>
+
+        <!-- ④ 版本与回滚 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>④ 版本与回滚</b></div>
+                <div class="tool-form">
+                    <label>商品ID:</label>
+                    <input type="text" id="verProductId" placeholder="PD00001">
+                    <button class="dash-btn ghost" onclick="loadVersions()">查版本</button>
+                    <span class="scan-result" id="verCount"></span>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead><tr>
+                            <th class="num">版本</th><th>变更类型</th><th>操作人</th><th>备注</th><th>时间</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="versionBody"><tr><td colspan="6" class="dash-empty">输入商品ID查询版本历史</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="note-bar">回滚 = substantive 编辑(在售商品回落 draft 重审); 版本组超限自动淘汰最旧 cosmetic 版。</div>
+            </div>
+        </section>
+
+        <!-- ⑤ 图片中心 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>⑤ 图片中心(AI 审图)</b>
+                    <div class="head-actions">
+                        <select id="imageFilter" onchange="loadImages()">
+                            <option value="">全部</option>
+                            <option value="usable">可用</option>
+                            <option value="flagged">被标记</option>
+                            <option value="destroyed">已销毁</option>
+                        </select>
+                        <span class="scan-result" id="imageCount"></span>
+                    </div>
+                </div>
+                <div class="tool-form">
+                    <label>上传(base64):</label>
+                    <input type="file" id="imageFile" accept=".png,.jpg,.jpeg,.webp,.gif">
+                    <input type="text" id="imageProductName" placeholder="关联商品名(图文一致性)" style="width:180px;">
+                    <button class="dash-btn" onclick="uploadImage()">上传+审图</button>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead><tr>
+                            <th class="num">ID</th><th>预览</th><th>URL</th><th class="num">大小</th>
+                            <th>审图</th><th>状态</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="imageBody"><tr><td colspan="7" class="dash-empty">加载中…</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="note-bar">硬红线(饮酒动作/未成年人/低俗/图文不一致) → flagged 禁用主图; 轻缺陷(水印/模糊)仅扣质量分; 重传再审同 imageId。</div>
+            </div>
+        </section>
+
+        <!-- ⑥ AI 设计工坊 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>⑥ AI 设计工坊(P2)</b></div>
+                <div class="tool-form">
+                    <label>商品ID:</label>
+                    <input type="text" id="designProductId" placeholder="PD00001">
+                    <button class="dash-btn" onclick="generateMainImage()">AI 生成主图</button>
+                    <button class="dash-btn ghost" onclick="optimizeCopy()">AI 文案优化</button>
+                    <button class="dash-btn ghost" onclick="mainImageAB()">主图 A/B 建议</button>
+                </div>
+                <div class="detail-box" id="designResult" style="display:none;">
+                    <div class="detail-body" id="designBody"></div>
+                </div>
+                <div class="note-bar">主图生成: LLM 构造 prompt → 生成图 URL → 自动入库+审图; 文案优化三级降级链+禁用词硬校验(仅建议不入库)。</div>
+            </div>
+        </section>
+
+        <!-- ⑦ 智能下架建议 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>⑦ 智能下架建议</b>
+                    <div class="head-actions">
+                        <button class="dash-btn ghost" onclick="loadAdvice()">刷新建议</button>
+                        <span class="scan-result" id="adviceCount"></span>
+                    </div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead><tr>
+                            <th>ID</th><th>名称</th><th class="num">月销</th><th class="num">库存</th>
+                            <th class="num">AI分</th><th>原因</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="adviceBody"><tr><td colspan="7" class="dash-empty">暂无建议</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="note-bar">触发条件: 连续零销≥30天 / AI 预审分&lt;60 / 主图被标记; 只建议不执行, 运营确认后下架。</div>
+            </div>
+        </section>
+
+        <div class="dash-footer">
+            38号·AI智能产品管理模块 · 端点速查: <code>POST /api/pdm/products</code>(创建草稿) ·
+            <code>POST /{id}/submit</code>(提交审核) · <code>POST /{id}/review</code>(终审) ·
+            <code>POST /{id}/list|delist|force-delist</code>(上下架) ·
+            <code>POST /api/pdm/images</code>(上传+审图) ·
+            <code>POST /{id}/design/generate-main-image</code>(AI主图) ·
+            <code>GET /api/pdm/listing-advice</code>(下架建议)<br>
+            注意: 本机 8000 端口若被宿主机 dev 后端占用, 直达容器用 <code>http://127.0.0.2:8000</code>。
+        </div>
+    </main>
+
+    <script src="js/pdm-dashboard.js"></script>
+</body>
+</html>
