@@ -1,23 +1,29 @@
-"""41号·AI智能代驾模块路由(P0, 13 端点)
+"""41号·AI智能代驾模块路由(P0+P1, 24 端点)
 
 鉴权:
-    - 会员端: X-Member-Id(券包/司机申请/上下线)
-    - 管理端: X-Role: admin(补发/冲正/复核/司机池)
+    - 会员端: X-Member-Id(券包/叫单/行程/司机申请/上下线)
+    - 管理端: X-Role: admin(补发/冲正/复核/司机池/行程/结算)
 
 异常映射(遵循项目约定):
-    - KeyError → 404(券/申请/司机不存在)
-    - ValueError → 409(门槛不达标/材料缺失/重复申请/状态非法)
+    - KeyError → 404(券/申请/司机/行程不存在)
+    - ValueError → 409(门槛不达标/材料缺失/重复申请/状态非法等)
 
 端点分布:
     - 券引擎(5): GET /coupons / GET /coupons/{code}
                   / POST /coupons/grant(补发) / POST /coupons/revoke(冲正)
-                  / POST /coupons/redeem(核销, P1 结算入口口径)
+                  / POST /coupons/redeem(核销)
     - 司机资格(4): POST /driver/apply / GET /driver/application
                     / POST /driver/status / POST /driver/profile
-    - 管理端(4): GET /admin/applications / POST /admin/applications/{id}/decide
+    - 行程(乘客 4): POST /call / GET /orders / GET /orders/{id}
+                    / POST /orders/{id}/cancel
+    - 行程(司机 5): POST /driver/orders/{id}/accept|start|complete
+                    / GET /driver/orders / GET /driver/settlements
+    - 管理端(6): GET /admin/applications
+                  / POST /admin/applications/{id}/decide
                   / GET /admin/pool / GET /admin/overview
+                  / GET /admin/rides / GET /admin/settlements
 
-P1 预留: /api/ride/call(智能派单) / 行程状态机 / AI 结算
+P2 预留: 平台直发回调 / 安全监控 / 双向评价 / 日结对账
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -26,11 +32,13 @@ from pydantic import BaseModel as PydBaseModel, Field
 
 from services.ride_coupon_service import RideCouponService
 from services.driver_gate_service import DriverGateService
+from services.ride_dispatch_service import RideDispatchService
 
 
 router = APIRouter()
 _coupon_service = RideCouponService()
 _gate_service = DriverGateService()
+_dispatch_service = RideDispatchService()
 
 
 # ============================================================
@@ -108,12 +116,41 @@ class DriverProfileRequest(PydBaseModel):
     plateNo: str = Field(None, min_length=0, max_length=16,
                          description="车辆牌照(上线接单必填)")
     city: str = Field(None, min_length=1, max_length=32, description="服务城市")
+    lat: float = Field(None, ge=-90, le=90, description="常驻位置纬度")
+    lng: float = Field(None, ge=-180, le=180, description="常驻位置经度")
 
 
 class ApplicationDecideRequest(PydBaseModel):
     approve: bool = Field(..., description="true=通过入池 / false=拒绝")
     reviewer: str = Field("admin", max_length=50, description="审核人")
     note: str = Field("", max_length=200, description="裁决备注")
+
+
+class RideLocation(PydBaseModel):
+    lat: float = Field(..., ge=-90, le=90, description="纬度")
+    lng: float = Field(..., ge=-180, le=180, description="经度")
+    address: str = Field("", max_length=200, description="地址描述")
+
+
+class RideCallRequest(PydBaseModel):
+    pickup: RideLocation = Field(..., description="上车点")
+    dropoff: RideLocation = Field(..., description="下车点")
+    distanceKm: float = Field(None, gt=0, le=500,
+                              description="行程里程(缺省按坐标球面距离; "
+                                          "Mock-first 确定性口径)")
+
+
+class RideCancelRequest(PydBaseModel):
+    reason: str = Field("", max_length=200, description="取消原因")
+
+
+class RideCompleteRequest(PydBaseModel):
+    durationMinutes: float = Field(None, ge=0, le=1440,
+                                  description="行程时长分钟(缺省按实际起止; "
+                                              "Mock-first 确定性口径)")
+    pricingHour: int = Field(None, ge=0, le=23,
+                             description="计价小时(缺省当前小时; 夜间加成 "
+                                         "Mock-first 确定性口径)")
 
 
 # ============================================================
@@ -253,7 +290,157 @@ async def driver_profile(
 
 
 # ============================================================
-# 管理端(审查队列/司机池)
+# 行程(乘客端: 叫单/查询/取消)
+# ============================================================
+
+@router.post("/api/ride/call")
+async def ride_call(
+    body: RideCallRequest,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """叫代驾: 选券(FEFO) → 规则过滤 → AI 评分 → 三轨派单(永不拒单)"""
+    member_id = _require_member(x_member_id)
+    try:
+        return await _dispatch_service.call(
+            member_id,
+            pickup=body.pickup.model_dump(),
+            dropoff=body.dropoff.model_dump(),
+            distance_km=body.distanceKm)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/orders")
+async def my_rides(
+    status: str = Query(None, description="按状态过滤"),
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """我的行程列表"""
+    member_id = _require_member(x_member_id)
+    try:
+        rides = await _dispatch_service.list_my_rides(member_id,
+                                                      status=status)
+        return {"success": True, "total": len(rides), "rides": rides}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/orders/{ride_id}")
+async def ride_detail(
+    ride_id: str,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """行程详情(司机信息/状态/计价明细)"""
+    member_id = _require_member(x_member_id)
+    try:
+        return {"success": True,
+                "ride": await _dispatch_service.get_ride(member_id,
+                                                        ride_id)}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/orders/{ride_id}/cancel")
+async def ride_cancel(
+    ride_id: str,
+    body: RideCancelRequest = None,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """取消行程(免责窗口判定: 派单后 3 分钟内券退回)"""
+    member_id = _require_member(x_member_id)
+    try:
+        ride = await _dispatch_service.cancel(
+            member_id, ride_id,
+            reason=(body.reason if body else ""))
+        return {"success": True, "ride": ride}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 行程(司机端: 接单/开始/结束/我的行程/我的结算)
+# ============================================================
+
+@router.post("/api/ride/driver/orders/{ride_id}/accept")
+async def driver_accept_ride(
+    ride_id: str,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """司机确认接单 dispatched → driver_arriving"""
+    member_id = _require_member(x_member_id)
+    try:
+        return {"success": True,
+                "ride": await _dispatch_service.driver_accept(member_id,
+                                                              ride_id)}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/driver/orders/{ride_id}/start")
+async def driver_start_ride(
+    ride_id: str,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """行程开始 driver_arriving → trip_started(乘客上车)"""
+    member_id = _require_member(x_member_id)
+    try:
+        return {"success": True,
+                "ride": await _dispatch_service.driver_start(member_id,
+                                                             ride_id)}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/driver/orders/{ride_id}/complete")
+async def driver_complete_ride(
+    ride_id: str,
+    body: RideCompleteRequest = None,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """行程结束 → AI 自动结算(计价/核券/拆分/结算单)→ settled"""
+    member_id = _require_member(x_member_id)
+    try:
+        ride = await _dispatch_service.driver_complete(
+            member_id, ride_id,
+            duration_minutes=(body.durationMinutes if body else None),
+            pricing_hour=(body.pricingHour if body else None))
+        return {"success": True, "ride": ride}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/driver/orders")
+async def driver_rides(
+    status: str = Query(None, description="按状态过滤"),
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """司机我的行程"""
+    member_id = _require_member(x_member_id)
+    try:
+        rides = await _dispatch_service.list_driver_rides(member_id,
+                                                          status=status)
+        return {"success": True, "total": len(rides), "rides": rides}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/driver/settlements")
+async def driver_settlements(
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """司机我的结算单"""
+    member_id = _require_member(x_member_id)
+    try:
+        settlements = await _dispatch_service.list_driver_settlements(
+            member_id)
+        return {"success": True, "total": len(settlements),
+                "settlements": settlements}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 管理端(审查队列/司机池/行程/结算)
 # ============================================================
 
 @router.get("/api/ride/admin/applications")
@@ -311,6 +498,38 @@ async def admin_overview(
     _require_admin(x_role)
     try:
         return await _gate_service.overview()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/admin/rides")
+async def admin_rides(
+    status: str = Query(None, description="按行程状态过滤"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """行程列表(管理端)"""
+    _require_admin(x_role)
+    try:
+        rides = await _dispatch_service.admin_rides(status=status)
+        return {"success": True, "total": len(rides), "status": status,
+                "rides": rides}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/admin/settlements")
+async def admin_settlements(
+    track: str = Query(None, description="self/partner/platform"),
+    payout_status: str = Query(None, description="paid/aggregated"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """结算单列表(管理端, 可按轨道/支付状态过滤)"""
+    _require_admin(x_role)
+    try:
+        settlements = await _dispatch_service.admin_settlements(
+            track=track, payout_status=payout_status)
+        return {"success": True, "total": len(settlements),
+                "settlements": settlements}
     except Exception as e:
         raise _handle(e) from e
 

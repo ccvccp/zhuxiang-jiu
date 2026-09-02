@@ -5,11 +5,13 @@
     ride_driver_applications  注册审查流水(材料/AI评分/档位/复核记录)
     ride_coupons              代驾券(code/面值/来源订单/过期时间/状态)
     ride_coupon_packages      券包(用户维度, 持有计数/累计发放/累计核销)
+    ride_orders               行程订单(P1: 状态机/起终点/司机快照/计价明细)
+    ride_settlements          结算单(P1: 本站支付流水/券抵扣/乘客补差)
 
 设计对齐:
     - 双模式存储 + None/bool 序列化口径(38号实机修复惯例)
     - Mock-first: 8 位种子司机(自营3/加盟3/直发2, 对齐 40号 8 博主惯例)
-    - P0 范围: 券引擎 + 司机资格审查(派单/行程表 P1 落地)
+    - 种子司机内置经纬度(泰安市区), 支撑派单距离计算确定性测试
 """
 
 import json
@@ -97,29 +99,80 @@ FREE_CANCEL_SECONDS = int(os.environ.get("DRIDE_FREE_CANCEL_SECONDS", "180"))
 # 司机准入最低服务评分(派单硬过滤, P1 用)
 MIN_DRIVER_RATING = 4.0
 
+# ============================================================
+# 行程状态机(设计文档 §2.4, P1)
+# ============================================================
+
+RIDE_STATUS_REQUESTED = "requested"          # 已叫单(选券完成)
+RIDE_STATUS_DISPATCHED = "dispatched"        # 已派单(含司机信息)
+RIDE_STATUS_ARRIVING = "driver_arriving"     # 司机已出发/到位
+RIDE_STATUS_STARTED = "trip_started"         # 行程开始(乘客上车)
+RIDE_STATUS_COMPLETED = "trip_completed"     # 行程结束
+RIDE_STATUS_SETTLING = "settling"            # AI 结算中
+RIDE_STATUS_SETTLED = "settled"              # 本站已支付(终态)
+RIDE_STATUS_CANCELLED = "cancelled"          # 取消(免责窗口判定)
+RIDE_STATUS_NO_DRIVER = "no_driver"          # 全轨无运力(券退回, 罕见)
+RIDE_STATUSES = (RIDE_STATUS_REQUESTED,
+                 RIDE_STATUS_DISPATCHED, RIDE_STATUS_ARRIVING,
+                 RIDE_STATUS_STARTED, RIDE_STATUS_COMPLETED,
+                 RIDE_STATUS_SETTLING, RIDE_STATUS_SETTLED,
+                 RIDE_STATUS_CANCELLED, RIDE_STATUS_NO_DRIVER)
+
+# 行程非终态(活跃中: 选券时需排除这些行程已占用的券)
+RIDE_ACTIVE_STATUSES = (RIDE_STATUS_REQUESTED, RIDE_STATUS_DISPATCHED,
+                        RIDE_STATUS_ARRIVING, RIDE_STATUS_STARTED,
+                        RIDE_STATUS_COMPLETED, RIDE_STATUS_SETTLING)
+
+# ============================================================
+# 计价常量(设计文档 §2.5, 市内代驾, 环境变量可覆盖便于测试)
+# ============================================================
+
+RIDE_BASE_FARE = float(os.environ.get("DRIDE_BASE_FARE", "35"))   # 起步价(含 BASE_KM)
+RIDE_BASE_KM = float(os.environ.get("DRIDE_BASE_KM", "5"))        # 起步里程
+RIDE_PER_KM = float(os.environ.get("DRIDE_PER_KM", "5"))          # 超里程单价
+RIDE_PER_MIN = float(os.environ.get("DRIDE_PER_MIN", "1"))        # 超时单价
+RIDE_FREE_MINUTES = float(os.environ.get("DRIDE_FREE_MINUTES", "40"))  # 免费时长
+RIDE_NIGHT_SURGE = float(os.environ.get("DRIDE_NIGHT_SURGE", "0.2"))  # 夜间加成 20%
+RIDE_NIGHT_START = 22   # 夜间起始(时, 含)
+RIDE_NIGHT_END = 6       # 夜间结束(时, 不含)
+
+# 派单决策阈值(设计文档 §2.3: ≥70 直接派 / 50-70 次优+备选 / <50 溢出直发)
+DISPATCH_AUTO_SCORE = 70.0
+DISPATCH_BACKUP_SCORE = 50.0
+
+# 直发通道模式(对齐 36号三态: mock/real/mock_fallback)
+DRIDE_CHANNEL_MODE = os.environ.get("DRIDE_CHANNEL_MODE", "mock")
+DRIDE_PARTNER_URL = os.environ.get("DRIDE_PARTNER_URL", "")
+
 
 # ============================================================
 # 种子司机(8 位: 自营3/加盟3/直发2)
 # ============================================================
 
 def _build_seed_drivers() -> dict[int, dict]:
-    """表驱动种子(平台, 姓名, 电话, 车牌, 驾龄, 评分, 完单, 接单率, 取消率, 状态)"""
+    """表驱动种子(平台, 姓名, 电话, 车牌, 驾龄, 评分, 完单, 接单率,
+    取消率, 状态, 纬度, 经度)
+
+    位置锚点: 泰安市区中心 ≈ (36.19, 117.13), 0.01° 纬度 ≈ 1.11km,
+    0.01° 经度 ≈ 0.9km——种子分布覆盖 0.2-2.8km 派单半径带, 支撑
+    派单距离因子与半径过滤的确定性测试。
+    """
     seeds = [
         # 自营轨道(本站超级会员代驾员)
-        (TRACK_SELF, "王师傅", "13900000001", "鲁J10001", 8, 4.9, 312, 0.98, 0.01, DRIVER_STATUS_ONLINE),
-        (TRACK_SELF, "李师傅", "13900000002", "鲁J10002", 5, 4.7, 156, 0.95, 0.02, DRIVER_STATUS_ONLINE),
-        (TRACK_SELF, "赵师傅", "13900000003", "鲁J10003", 12, 4.8, 489, 0.97, 0.01, DRIVER_STATUS_OFFLINE),
+        (TRACK_SELF, "王师傅", "13900000001", "鲁J10001", 8, 4.9, 312, 0.98, 0.01, DRIVER_STATUS_ONLINE, 36.192, 117.130),
+        (TRACK_SELF, "李师傅", "13900000002", "鲁J10002", 5, 4.7, 156, 0.95, 0.02, DRIVER_STATUS_ONLINE, 36.190, 117.135),
+        (TRACK_SELF, "赵师傅", "13900000003", "鲁J10003", 12, 4.8, 489, 0.97, 0.01, DRIVER_STATUS_OFFLINE, 36.188, 117.128),
         # 加盟轨道(代驾加盟平台合作会员)
-        (TRACK_PARTNER, "陈师傅", "13900000004", "鲁J20001", 6, 4.5, 203, 0.92, 0.04, DRIVER_STATUS_ONLINE),
-        (TRACK_PARTNER, "刘师傅", "13900000005", "鲁J20002", 4, 4.3, 87, 0.90, 0.05, DRIVER_STATUS_ONLINE),
-        (TRACK_PARTNER, "孙师傅", "13900000006", "鲁J20003", 9, 4.6, 275, 0.94, 0.03, DRIVER_STATUS_OFFLINE),
+        (TRACK_PARTNER, "陈师傅", "13900000004", "鲁J20001", 6, 4.5, 203, 0.92, 0.04, DRIVER_STATUS_ONLINE, 36.200, 117.130),
+        (TRACK_PARTNER, "刘师傅", "13900000005", "鲁J20002", 4, 4.3, 87, 0.90, 0.05, DRIVER_STATUS_ONLINE, 36.190, 117.160),
+        (TRACK_PARTNER, "孙师傅", "13900000006", "鲁J20003", 9, 4.6, 275, 0.94, 0.03, DRIVER_STATUS_OFFLINE, 36.185, 117.140),
         # 平台直发轨道(外部代驾平台模拟运力, 展示口径)
-        (TRACK_PLATFORM, "平台司机甲", "13900000007", "鲁J30001", 7, 4.4, 341, 0.91, 0.05, DRIVER_STATUS_ONLINE),
-        (TRACK_PLATFORM, "平台司机乙", "13900000008", "鲁J30002", 3, 4.2, 64, 0.89, 0.06, DRIVER_STATUS_ONLINE),
+        (TRACK_PLATFORM, "平台司机甲", "13900000007", "鲁J30001", 7, 4.4, 341, 0.91, 0.05, DRIVER_STATUS_ONLINE, 36.190, 117.130),
+        (TRACK_PLATFORM, "平台司机乙", "13900000008", "鲁J30002", 3, 4.2, 64, 0.89, 0.06, DRIVER_STATUS_ONLINE, 36.190, 117.131),
     ]
     pool = {}
     for i, (track, name, phone, plate, years, rating, done,
-            accept_rate, cancel_rate, status) in enumerate(seeds, start=1):
+            accept_rate, cancel_rate, status, lat, lng) in enumerate(seeds, start=1):
         pool[i] = {
             "driverId": i,
             "track": track,
@@ -137,6 +190,9 @@ def _build_seed_drivers() -> dict[int, dict]:
             "cancelRate": cancel_rate,
             "status": status,
             "city": "泰安",
+            "lat": lat,
+            "lng": lng,
+            "currentRideId": "",   # 在忙行程(派单占用/完成后释放)
             "todayOrders": 0,
             "memberId": 0,          # 关联超级会员(自营轨道审查通过后回填)
             "applicationId": 0,     # 关联审查流水
@@ -154,12 +210,18 @@ class RideRepository:
     TABLE_APPS = "ride_driver_applications"
     TABLE_COUPONS = "ride_coupons"
     TABLE_PACKAGES = "ride_coupon_packages"
+    TABLE_RIDES = "ride_orders"
+    TABLE_SETTLEMENTS = "ride_settlements"
 
     _INT_FIELDS = ("driverId", "applicationId", "memberId",
                    "completedOrders", "todayOrders", "drivingYears",
-                   "totalGranted", "totalUsed", "couponCount", "grantCount")
+                   "totalGranted", "totalUsed", "couponCount", "grantCount",
+                   "settlementId", "rideSeq")
     _FLOAT_FIELDS = ("rating", "acceptRate", "cancelRate", "score",
-                     "value", "amount", "consistency")
+                     "value", "amount", "consistency",
+                     "lat", "lng", "distanceKm", "estimatedKm",
+                     "totalAmount", "couponDeduction", "extraCharge",
+                     "payoutAmount", "dispatchScore")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -170,7 +232,8 @@ class RideRepository:
 
     def _ensure_store(self):
         for key in (self.TABLE_POOL, self.TABLE_APPS,
-                    self.TABLE_COUPONS, self.TABLE_PACKAGES):
+                    self.TABLE_COUPONS, self.TABLE_PACKAGES,
+                    self.TABLE_RIDES, self.TABLE_SETTLEMENTS):
             self.store.setdefault(key, {})
         # 种子司机(内存模式惰性灌入; Redis 模式由 _ensure_pool_seeded 兜底)
         if not self.store[self.TABLE_POOL]:
@@ -381,3 +444,67 @@ class RideRepository:
             }
             await self.save_package(package)
         return package
+
+    # --------------------------------------------------------
+    # 行程订单(P1)
+    # --------------------------------------------------------
+
+    async def save_ride(self, ride: dict) -> dict:
+        return await self._save(self.TABLE_RIDES, ride["rideId"], ride)
+
+    async def get_ride(self, ride_id: str) -> dict | None:
+        return await self._get(self.TABLE_RIDES, ride_id)
+
+    async def list_rides(self, member_id: int = None, driver_id: int = None,
+                        status: str = None, limit: int = 200) -> list[dict]:
+        rides = await self._list(self.TABLE_RIDES, limit=2000)
+        if member_id is not None:
+            rides = [r for r in rides
+                     if int(r.get("memberId") or 0) == int(member_id)]
+        if driver_id is not None:
+            rides = [r for r in rides
+                     if int(r.get("driverId") or 0) == int(driver_id)]
+        if status:
+            rides = [r for r in rides if r.get("status") == status]
+        return rides[:limit]
+
+    async def next_ride_id(self) -> str:
+        """行程号: RD + 8 位零填充自增(如 RD00000001)"""
+        seq = await self.next_id("ride")
+        return f"RD{seq:08d}"
+
+    # --------------------------------------------------------
+    # 结算单(P1)
+    # --------------------------------------------------------
+
+    async def save_settlement(self, settlement: dict) -> dict:
+        return await self._save(self.TABLE_SETTLEMENTS,
+                                 settlement["settlementId"], settlement)
+
+    async def get_settlement(self, settlement_id: int) -> dict | None:
+        return await self._get(self.TABLE_SETTLEMENTS, settlement_id)
+
+    async def get_settlement_by_ride(self, ride_id: str) -> dict | None:
+        settlements = await self._list(self.TABLE_SETTLEMENTS, limit=2000)
+        for s in settlements:
+            if s.get("rideId") == ride_id:
+                return s
+        return None
+
+    async def list_settlements(self, driver_id: int = None,
+                               track: str = None,
+                               payout_status: str = None,
+                               limit: int = 200) -> list[dict]:
+        settlements = await self._list(self.TABLE_SETTLEMENTS, limit=2000)
+        if driver_id is not None:
+            settlements = [s for s in settlements
+                           if int(s.get("driverId") or 0) == int(driver_id)]
+        if track:
+            settlements = [s for s in settlements if s.get("track") == track]
+        if payout_status:
+            settlements = [s for s in settlements
+                           if s.get("payoutStatus") == payout_status]
+        return settlements[:limit]
+
+    async def next_settlement_id(self) -> int:
+        return await self.next_id("settlement")

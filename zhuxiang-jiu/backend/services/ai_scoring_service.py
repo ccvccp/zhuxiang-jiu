@@ -1223,3 +1223,116 @@ class DriverApplicationScorer:
 
 
 SCORERS["driver_application_gate"] = DriverApplicationScorer()
+
+
+# ============================================================
+# 11. 代驾派单评分(模块 41 P1: 智能派单引擎 AI 层)
+# ============================================================
+
+class RideDispatchScorer:
+    """代驾派单适配评分: 司机-乘客匹配质量分(41号设计文档 §2.3)
+
+    5 因子加权 → 适配分(0-100, 越高越优先派) → 3级 → 决策动作
+    (≥70 dispatch 直接派单 / 50-70 dispatch_backup 派次优+备选通知 /
+     <50 escalate 平台直发), 阈值沿用 36/40/41号范式。
+
+    高分=优质, action 语义为派单通道; 规则层硬过滤(半径/评分/在忙)
+    在服务层前置完成, 评分器仅对入围司机输出适配画像。
+    """
+
+    WEIGHTS: ClassVar[dict] = {
+        "distance": 0.30,       # 接驾距离(≤1km 满分, 线性衰减至半径边界)
+        "rating": 0.25,         # 服务评分(五星归一)
+        "reliability": 0.20,    # 接单可靠度(接单率/取消率)
+        "track_cost": 0.15,     # 轨道成本(自营满分/加盟居中/直发兜底)
+        "load_balance": 0.10,   # 负载均衡(当日已接单数, 防过载)
+    }
+    # 轨道成本档位(自营低本站直付 / 加盟平台抽佣 / 直发平台定价最高)
+    TRACK_COST_SCORE = {"self": 100.0, "partner": 60.0, "platform": 30.0}
+    REQUIRED: ClassVar[list] = ["driverId", "distanceKm", "rating"]
+
+    async def score(self, ctx: dict) -> dict:
+        """评分入口
+
+        Args:
+            ctx: {
+                driverId: int, track: str,
+                distanceKm: float 接驾直线距离(规则层已过滤超半径),
+                rating: float 服务评分(0-5),
+                acceptRate: float 接单率(0-1, 缺省 0.9),
+                cancelRate: float 取消率(0-1, 缺省 0.05),
+                todayOrders: int 当日已接单数(缺省 0),
+                dispatchRadiusKm: float 派单半径(缺省 5, 距离衰减标尺)
+            }
+        """
+        weights = await load_effective_weights("ride_dispatch", self.WEIGHTS)
+        f = {}
+        # ① 接驾距离: ≤1km 满分, 1-半径线性衰减(超半径已被规则层过滤)
+        dist = float(ctx.get("distanceKm") or 0)
+        radius = float(ctx.get("dispatchRadiusKm") or 5)
+        if dist <= 1.0:
+            dist_score = 100.0
+        else:
+            dist_score = _clamp(100 - (dist - 1) / max(0.1, radius - 1) * 100)
+        f["distance"] = _factor(
+            "distance", "接驾距离", dist_score, weights["distance"],
+            f"{dist:.2f}km" + ("(满分档)" if dist <= 1 else ""))
+
+        # ② 服务评分: 五星归一
+        rating = float(ctx.get("rating") or 0)
+        f["rating"] = _factor(
+            "rating", "服务评分", _clamp(rating / 5 * 100),
+            weights["rating"], f"{rating:.1f}星")
+
+        # ③ 接单可靠度: 接单率 70% + 完成率(1-取消率) 30%
+        accept_rate = float(ctx.get("acceptRate") if
+                            ctx.get("acceptRate") is not None else 0.9)
+        cancel_rate = float(ctx.get("cancelRate") if
+                            ctx.get("cancelRate") is not None else 0.05)
+        f["reliability"] = _factor(
+            "reliability", "接单可靠度",
+            _clamp(accept_rate * 70 + (1 - cancel_rate) * 30),
+            weights["reliability"],
+            f"接单率{accept_rate:.0%} 取消率{cancel_rate:.1%}")
+
+        # ④ 轨道成本: 自营 100 / 加盟 60 / 直发 30
+        track = str(ctx.get("track") or "platform")
+        track_score = self.TRACK_COST_SCORE.get(track, 30.0)
+        f["track_cost"] = _factor(
+            "track_cost", "轨道成本", track_score, weights["track_cost"],
+            f"{track}轨")
+
+        # ⑤ 负载均衡: 当日 0 单满分, 每单 -15
+        today = int(ctx.get("todayOrders") or 0)
+        f["load_balance"] = _factor(
+            "load_balance", "负载均衡", _clamp(100 - today * 15),
+            weights["load_balance"], f"当日{today}单")
+
+        total_score = sum(x["contribution"] for x in f.values())
+        if total_score >= 70:
+            level_key, action = LEVEL_HIGH, "dispatch"
+        elif total_score >= 50:
+            level_key, action = LEVEL_MEDIUM, "dispatch_backup"
+        else:
+            level_key, action = LEVEL_LOW, "escalate"
+        result = {
+            "success": True, "scorer": "ride_dispatch",
+            "modelVersion": MODEL_VERSION,
+            "driverId": ctx.get("driverId"),
+            "track": track,
+            "score": round(total_score, 1), "level": level_key,
+            "levelName": {LEVEL_HIGH: "优质", LEVEL_MEDIUM: "待核",
+                          LEVEL_LOW: "不足"}[level_key],
+            "action": action,
+            "actionName": {"dispatch": "直接派单",
+                           "dispatch_backup": "次优选派+备选通知",
+                           "escalate": "升级平台直发"}[action],
+            "confidence": _confidence(ctx, self.REQUIRED),
+            "factors": list(f.values()), "scoredAt": ts(),
+        }
+        logger.info("ai_ride_dispatch_scored driver=%s score=%s action=%s",
+                    ctx.get("driverId"), result["score"], action)
+        return result
+
+
+SCORERS["ride_dispatch"] = RideDispatchScorer()

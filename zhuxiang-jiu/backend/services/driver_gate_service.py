@@ -210,6 +210,9 @@ class DriverGateService:
             "cancelRate": 0.0,
             "status": DRIVER_STATUS_OFFLINE,
             "city": "泰安",
+            "lat": 36.19,           # 默认位置(泰安市区中心), 上线前可经 profile 更新
+            "lng": 117.13,
+            "currentRideId": "",
             "todayOrders": 0,
             "memberId": int(application.get("memberId") or 0),
             "applicationId": int(application.get("applicationId") or 0),
@@ -312,7 +315,7 @@ class DriverGateService:
             KeyError: 会员无司机资格
             ValueError: 字段非法
         """
-        allowed = {"plateNo", "city"}
+        allowed = {"plateNo", "city", "lat", "lng"}
         updates = {k: v for k, v in (fields or {}).items() if k in allowed}
         if not updates:
             raise ValueError(f"无可更新字段(允许: {sorted(allowed)})")
