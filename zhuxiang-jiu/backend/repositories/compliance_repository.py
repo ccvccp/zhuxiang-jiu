@@ -42,6 +42,7 @@ EVIDENCE_TYPE_COMPLIANCE = "compliance"  # 合规存证
 EVIDENCE_TYPE_RISK = "risk"              # 风险存证
 EVIDENCE_TYPE_DISPOSAL = "disposal"      # 处置存证
 EVIDENCE_TYPE_REGULATORY = "regulatory"  # 监管存证
+EVIDENCE_TYPE_CITATION = "citation"      # 出处声明存证(40号博主跟随版权溯源)
 
 # 监控处置方式
 DISPOSAL_WARN = "warn"        # 警告

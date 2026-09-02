@@ -380,6 +380,9 @@ class BloggerService:
                 "hardFail": gate["hardFail"],
                 "evidenceHash": (evidence or {}).get("evidenceHash", ""),
                 "txId": (evidence or {}).get("txId", ""),
+                "evidenceType": (evidence or {}).get("evidenceType",
+                                                     "citation"),
+                "evidenceData": (evidence or {}).get("evidenceData", ""),
                 "workSnapshot": {
                     "extWorkId": work.get("extWorkId", ""),
                     "title": work.get("title", ""),
@@ -506,18 +509,18 @@ class BloggerService:
 
     async def _notarize_source(self, draft: dict, work: dict,
                                blogger: dict) -> dict | None:
-        """出处声明区块链存证(best-effort, 复用合规模块)"""
+        """出处声明区块链存证(best-effort, 复用合规模块 citation 类型)"""
         try:
             from services.compliance_service import ComplianceService
             from repositories.compliance_repository import \
-                EVIDENCE_TYPE_COMPLIANCE
+                EVIDENCE_TYPE_CITATION
             statement = (f"40号博主跟随出处声明: 灵感来自@"
                          f"{blogger.get('account', '')}作品"
                          f"[{work.get('extWorkId', '')}]"
                          f"《{work.get('title', '')}》, "
                          f"重合度{draft.get('overlapRatio', 0)}")
             return await ComplianceService().add_blockchain_evidence(
-                EVIDENCE_TYPE_COMPLIANCE, evidence_data=statement)
+                EVIDENCE_TYPE_CITATION, evidence_data=statement)
         except Exception as exc:
             logger.warning("blogger_notarize_failed work=%s: %s",
                            work.get("workId"), exc)
