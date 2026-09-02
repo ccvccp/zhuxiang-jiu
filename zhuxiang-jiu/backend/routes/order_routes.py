@@ -214,6 +214,12 @@ async def review_order(
         result = await _service.review(order_id, rating, content)
         # v7.6 自动反馈: 订单顺利完成(风控决策正确性信号)
         await ai_hooks.on_order_outcome(order_id, "completed")
+        # 42号: 无感开票(COMPLETED → AI 自动开票, best-effort 火后不管)
+        try:
+            from services.invoice_service import Invoice42Service
+            await Invoice42Service().on_order_completed(order_id)
+        except Exception:
+            pass
         return result
     except Exception as e:
         raise _handle(e) from e
@@ -313,6 +319,12 @@ async def refund_order(
         try:
             from services.ride_coupon_service import RideCouponService
             await RideCouponService().revoke_for_order(order_id)
+        except Exception:
+            pass
+        # 42号: 退款 → 已开发票自动红冲(best-effort 火后不管)
+        try:
+            from services.invoice_service import Invoice42Service
+            await Invoice42Service().on_order_refunded(order_id)
         except Exception:
             pass
         return result

@@ -82,6 +82,8 @@ SCORER_REGISTRY = {
     "driver_application_gate":     {"label": "代驾司机资格审查评分", "module": "41智能代驾", "batch": 8},
     "ride_dispatch":              {"label": "代驾派单适配评分", "module": "41智能代驾", "batch": 8},
     "ride_review":                {"label": "代驾评价审评评分", "module": "41智能代驾", "batch": 8},
+    # ---- 第九批(42号AI无感开票 P0: 开票决策评分) ----
+    "invoice_decision_gate":       {"label": "无感开票决策评分", "module": "42无感开票", "batch": 9},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -107,6 +109,9 @@ DECISION_THRESHOLDS = {
     "ride_dispatch":      [(70.0, "dispatch"), (50.0, "dispatch_backup"),
                           (0.0, "escalate")],
     "ride_review":        [(45.0, "fold"), (30.0, "watch"), (0.0, "show")],
+    # 42号无感开票
+    "invoice_decision_gate": [(70.0, "auto_issue"), (50.0, "manual_queue"),
+                              (0.0, "reject")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -161,6 +166,10 @@ def default_weights(scorer_id: str) -> dict:
         # 41号智能代驾: 评价审评五因子, 单一事实源在评分器类
         from services.ai_scoring_service import RideReviewScorer
         return dict(RideReviewScorer.WEIGHTS)
+    if scorer_id == "invoice_decision_gate":
+        # 42号无感开票: 开票决策四因子, 单一事实源在评分器类
+        from services.ai_scoring_service import InvoiceDecisionScorer
+        return dict(InvoiceDecisionScorer.WEIGHTS)
     if scorer_id.startswith("logistics_routing:"):
         from services.ai_scoring_service import _BUDGET_WEIGHTS
         budget = scorer_id.split(":", 1)[1]

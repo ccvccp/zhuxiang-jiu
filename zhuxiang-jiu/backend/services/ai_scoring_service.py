@@ -1439,3 +1439,122 @@ class RideReviewScorer:
 
 
 SCORERS["ride_review"] = RideReviewScorer()
+
+
+# ============================================================
+# 13. 无感开票决策评分(模块 42 P0: 订单完成自动开票)
+# ============================================================
+
+class InvoiceDecisionScorer:
+    """无感开票决策评分: 自动开票可行性分(42号设计文档 §2.2)
+
+    4 因子加权 → 可行分(0-100, 越高越适合自动开) → 3级 → 决策动作
+    (≥70 auto_issue 自动开具 / 50-70 manual_queue 待确认 /
+     <50 reject 拦截留痕)。
+
+    高分=可自动, action 语义为开票通道; 抬头缺失(collect)与
+    金额下限在服务层前置判定, 评分器仅输出可行性画像。
+    """
+
+    WEIGHTS: ClassVar[dict] = {
+        "title_confidence": 0.30,   # 抬头置信度(默认抬头+使用次数)
+        "amount_reasonable": 0.25,  # 金额合理性(相对会员历史区间)
+        "frequency": 0.20,          # 开票频次(24h 窗口, 拆分嫌疑)
+        "order_risk": 0.25,        # 订单风险(order_risk 决策信号)
+    }
+    REQUIRED: ClassVar[list] = ["orderId", "memberId", "titleConfidence",
+                               "amount"]
+
+    async def score(self, ctx: dict) -> dict:
+        """评分入口
+
+        Args:
+            ctx: {
+                orderId: str, memberId: int,
+                titleConfidence: float 抬头置信度(0-1, 服务层由
+                    默认抬头+使用次数折算),
+                amount: float 订单实付,
+                memberAvgAmount: float 会员历史均单(缺省=当次金额,
+                    首单中性),
+                invoices24h: int 该会员 24h 已开票数(缺省 0),
+                freqThreshold: int 高频阈值(缺省 5),
+                orderRiskAction: str order_risk 决策动作
+                    (pass/review/block, 缺省 pass)
+            }
+        """
+        weights = await load_effective_weights("invoice_decision_gate",
+                                               self.WEIGHTS)
+        f = {}
+        # ① 抬头置信度: 0-1 线性归一
+        confidence = float(ctx.get("titleConfidence") or 0)
+        f["title_confidence"] = _factor(
+            "title_confidence", "抬头置信度",
+            _clamp(confidence * 100), weights["title_confidence"],
+            f"置信度{confidence:.0%}")
+
+        # ② 金额合理性: 相对会员均单 0.5-2 倍区间满分,
+        #    超出线性衰减(异常大额/小额)
+        amount = float(ctx.get("amount") or 0)
+        avg = float(ctx.get("memberAvgAmount")
+                    if ctx.get("memberAvgAmount") else amount)
+        if avg > 0 and amount > 0:
+            ratio = amount / avg
+            if 0.5 <= ratio <= 2.0:
+                amount_score = 100.0
+            elif ratio < 0.5:
+                amount_score = _clamp(ratio / 0.5 * 100)
+            else:
+                amount_score = _clamp(100 - (ratio - 2) * 25)
+        else:
+            amount_score = 50.0
+        f["amount_reasonable"] = _factor(
+            "amount_reasonable", "金额合理性", amount_score,
+            weights["amount_reasonable"],
+            f"¥{amount:.0f} vs 均单¥{avg:.0f}")
+
+        # ③ 开票频次: 24h 窗口, 达阈值 0 分
+        invoices_24h = int(ctx.get("invoices24h") or 0)
+        threshold = int(ctx.get("freqThreshold") or 5)
+        freq_score = _clamp(100 - invoices_24h / max(1, threshold)
+                            * 100)
+        f["frequency"] = _factor(
+            "frequency", "开票频次", freq_score, weights["frequency"],
+            f"24h内{invoices_24h}张(阈值{threshold})")
+
+        # ④ 订单风险: order_risk 决策信号直通降档
+        risk_action = str(ctx.get("orderRiskAction") or "pass")
+        risk_score = {"pass": 100.0, "review": 50.0,
+                      "block": 0.0}.get(risk_action, 50.0)
+        f["order_risk"] = _factor(
+            "order_risk", "订单风险", risk_score,
+            weights["order_risk"], f"风控{risk_action}")
+
+        total_score = sum(x["contribution"] for x in f.values())
+        if total_score >= 70:
+            level_key, action = LEVEL_HIGH, "auto_issue"
+        elif total_score >= 50:
+            level_key, action = LEVEL_MEDIUM, "manual_queue"
+        else:
+            level_key, action = LEVEL_LOW, "reject"
+        result = {
+            "success": True, "scorer": "invoice_decision_gate",
+            "modelVersion": MODEL_VERSION,
+            "orderId": ctx.get("orderId"),
+            "memberId": ctx.get("memberId"),
+            "score": round(total_score, 1), "level": level_key,
+            "levelName": {LEVEL_HIGH: "可自动", LEVEL_MEDIUM: "待确认",
+                          LEVEL_LOW: "拦截"}[level_key],
+            "action": action,
+            "actionName": {"auto_issue": "自动开具",
+                           "manual_queue": "待确认队列",
+                           "reject": "拦截留痕"}[action],
+            "confidence": _confidence(ctx, self.REQUIRED),
+            "factors": list(f.values()), "scoredAt": ts(),
+        }
+        logger.info("ai_invoice_decision_scored order=%s member=%s "
+                    "score=%s action=%s", ctx.get("orderId"),
+                    ctx.get("memberId"), result["score"], action)
+        return result
+
+
+SCORERS["invoice_decision_gate"] = InvoiceDecisionScorer()

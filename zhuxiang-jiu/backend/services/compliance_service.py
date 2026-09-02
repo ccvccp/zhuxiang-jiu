@@ -32,7 +32,7 @@ from repositories.compliance_repository import (
     REPORT_STATUS_PENDING, REPORT_STATUS_SUBMITTED, REPORT_STATUS_ACCEPTED,
     # 存证类型
     EVIDENCE_TYPE_COMPLIANCE, EVIDENCE_TYPE_RISK, EVIDENCE_TYPE_DISPOSAL, EVIDENCE_TYPE_REGULATORY,
-    EVIDENCE_TYPE_CITATION,
+    EVIDENCE_TYPE_CITATION, EVIDENCE_TYPE_INVOICE,
     # 处置方式
     DISPOSAL_WARN, DISPOSAL_LIMIT, DISPOSAL_BLOCK, DISPOSAL_REPORT, REPORT_TYPE_LARGE_AMOUNT, REPORT_TYPE_SUSPICIOUS, REPORT_TYPE_REGULAR, REPORT_TYPE_INQUIRY,
     # 分析周期
@@ -486,7 +486,7 @@ class ComplianceService:
         """
         if evidence_type not in (EVIDENCE_TYPE_COMPLIANCE, EVIDENCE_TYPE_RISK,
                                   EVIDENCE_TYPE_DISPOSAL, EVIDENCE_TYPE_REGULATORY,
-                                  EVIDENCE_TYPE_CITATION):
+                                  EVIDENCE_TYPE_CITATION, EVIDENCE_TYPE_INVOICE):
             raise ValueError(f"非法存证类型: {evidence_type}")
 
         evidence_hash = bc_hash()
