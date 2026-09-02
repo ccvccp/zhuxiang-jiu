@@ -37,6 +37,7 @@ from services.ride_coupon_service import RideCouponService
 from services.driver_gate_service import DriverGateService
 from services.ride_dispatch_service import RideDispatchService
 from services.ride_safety_service import RideSafetyService
+from services.ride_review_service import RideReviewService
 
 
 router = APIRouter()
@@ -44,6 +45,7 @@ _coupon_service = RideCouponService()
 _gate_service = DriverGateService()
 _dispatch_service = RideDispatchService()
 _safety_service = RideSafetyService()
+_review_service = RideReviewService()
 
 
 # ============================================================
@@ -171,6 +173,13 @@ class PartnerCallbackRequest(PydBaseModel):
 
 class RiskResolveRequest(PydBaseModel):
     note: str = Field("", max_length=200, description="处置备注")
+
+
+class RideReviewRequest(PydBaseModel):
+    direction: str = Field(..., description="passenger_to_driver / "
+                                         "driver_to_passenger")
+    score: int = Field(..., ge=1, le=5, description="星级 1-5")
+    content: str = Field("", max_length=500, description="评价文本")
 
 
 # ============================================================
@@ -609,6 +618,84 @@ async def resolve_risk_event(
         event = await _safety_service.resolve_event(
             risk_id, (body.note if body else ""))
         return {"success": True, "event": event}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 双向评价(P3: 乘客/司机提交 + AI 审评)
+# ============================================================
+
+@router.post("/api/ride/orders/{ride_id}/review")
+async def submit_review(
+    ride_id: str,
+    body: RideReviewRequest,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """提交双向评价 → AI 审评(show/watch/fold)→ 司机评分回写"""
+    member_id = _require_member(x_member_id)
+    try:
+        return await _review_service.submit(
+            member_id, ride_id, body.direction, body.score,
+            body.content)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/orders/{ride_id}/reviews")
+async def ride_reviews(
+    ride_id: str,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """行程的双向评价(乘客本人可见, fold 文本不外泄)"""
+    member_id = _require_member(x_member_id)
+    try:
+        return await _review_service.get_ride_reviews(member_id, ride_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/driver/reviews")
+async def driver_reviews(
+    action: str = Query(None, description="show/watch/fold 过滤"),
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """司机收到的评价(fold 文本不外泄)"""
+    member_id = _require_member(x_member_id)
+    try:
+        reviews = await _review_service.driver_reviews(
+            member_id, action=action)
+        return {"success": True, "total": len(reviews),
+                "reviews": reviews}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/admin/reviews")
+async def admin_reviews(
+    action: str = Query(None, description="show/watch/fold 过滤"),
+    direction: str = Query(None, description="评价方向过滤"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """评价审评观察列表(管理端)"""
+    _require_admin(x_role)
+    try:
+        reviews = await _review_service.admin_reviews(
+            action=action, direction=direction)
+        return {"success": True, "total": len(reviews),
+                "reviews": reviews}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/admin/review-stats")
+async def admin_review_stats(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """评价审评统计(管理端看板: 处置动作/方向分布)"""
+    _require_admin(x_role)
+    try:
+        return await _review_service.admin_fold_stats()
     except Exception as e:
         raise _handle(e) from e
 

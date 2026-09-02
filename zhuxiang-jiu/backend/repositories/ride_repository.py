@@ -173,6 +173,31 @@ PARTNER_EVENT_CANCELLED = "cancelled"
 PARTNER_EVENTS = (PARTNER_EVENT_ACCEPTED, PARTNER_EVENT_STARTED,
                  PARTNER_EVENT_COMPLETED, PARTNER_EVENT_CANCELLED)
 
+# ============================================================
+# P3 双向评价常量(设计文档 §2.4 行后)
+# ============================================================
+
+# 评价方向(双向)
+REVIEW_BY_PASSENGER = "passenger_to_driver"   # 乘客评司机(回写司机评分)
+REVIEW_BY_DRIVER = "driver_to_passenger"      # 司机评乘客(留档观察)
+REVIEW_DIRECTIONS = (REVIEW_BY_PASSENGER, REVIEW_BY_DRIVER)
+
+# AI 审评处置动作(对齐 37号评价审评范式)
+REVIEW_ACTION_SHOW = "show"    # 正常展示
+REVIEW_ACTION_WATCH = "watch"  # 观察
+REVIEW_ACTION_FOLD = "fold"    # 折叠(垃圾评价, 不回写评分)
+REVIEW_ACTIONS = (REVIEW_ACTION_SHOW, REVIEW_ACTION_WATCH,
+                  REVIEW_ACTION_FOLD)
+
+# 评价星级边界
+REVIEW_SCORE_MIN = 1
+REVIEW_SCORE_MAX = 5
+
+# 行程评价状态(双向各自独立标记)
+RIDE_REVIEW_PENDING = "pending"    # 待评价
+RIDE_REVIEW_DONE = "done"          # 已评价
+RIDE_REVIEW_STATUSES = (RIDE_REVIEW_PENDING, RIDE_REVIEW_DONE)
+
 
 # ============================================================
 # 种子司机(8 位: 自营3/加盟3/直发2)
@@ -242,11 +267,13 @@ class RideRepository:
     TABLE_RIDES = "ride_orders"
     TABLE_SETTLEMENTS = "ride_settlements"
     TABLE_RISK = "ride_risk_events"
+    TABLE_REVIEWS = "ride_reviews"
 
     _INT_FIELDS = ("driverId", "applicationId", "memberId",
                    "completedOrders", "todayOrders", "drivingYears",
                    "totalGranted", "totalUsed", "couponCount", "grantCount",
-                   "settlementId", "rideSeq", "riskId")
+                   "settlementId", "rideSeq", "riskId", "reviewId",
+                   "reviewScore", "reviewsToday")
     _FLOAT_FIELDS = ("rating", "acceptRate", "cancelRate", "score",
                      "value", "amount", "consistency",
                      "lat", "lng", "distanceKm", "estimatedKm",
@@ -264,7 +291,7 @@ class RideRepository:
         for key in (self.TABLE_POOL, self.TABLE_APPS,
                     self.TABLE_COUPONS, self.TABLE_PACKAGES,
                     self.TABLE_RIDES, self.TABLE_SETTLEMENTS,
-                    self.TABLE_RISK):
+                    self.TABLE_RISK, self.TABLE_REVIEWS):
             self.store.setdefault(key, {})
         # 种子司机(内存模式惰性灌入; Redis 模式由 _ensure_pool_seeded 兜底)
         if not self.store[self.TABLE_POOL]:
@@ -572,3 +599,45 @@ class RideRepository:
             if snap.get("partnerOrderId") == str(partner_order_id):
                 return r
         return None
+
+    # --------------------------------------------------------
+    # 双向评价(P3)
+    # --------------------------------------------------------
+
+    async def save_review(self, review: dict) -> dict:
+        return await self._save(self.TABLE_REVIEWS,
+                                review["reviewId"], review)
+
+    async def get_review(self, review_id: int) -> dict | None:
+        return await self._get(self.TABLE_REVIEWS, review_id)
+
+    async def get_review_by_ride(self, ride_id: str,
+                                 direction: str) -> dict | None:
+        """按行程+方向查评价(幂等: 一行程一方向一评价)"""
+        reviews = await self._list(self.TABLE_REVIEWS, limit=2000)
+        for r in reviews:
+            if (r.get("rideId") == ride_id
+                    and r.get("direction") == direction):
+                return r
+        return None
+
+    async def list_reviews(self, driver_id: int = None,
+                          member_id: int = None, action: str = None,
+                          direction: str = None,
+                          limit: int = 200) -> list[dict]:
+        reviews = await self._list(self.TABLE_REVIEWS, limit=2000)
+        if driver_id is not None:
+            reviews = [r for r in reviews
+                      if int(r.get("driverId") or 0) == int(driver_id)]
+        if member_id is not None:
+            reviews = [r for r in reviews
+                       if int(r.get("memberId") or 0) == int(member_id)]
+        if action:
+            reviews = [r for r in reviews if r.get("action") == action]
+        if direction:
+            reviews = [r for r in reviews
+                       if r.get("direction") == direction]
+        return reviews[:limit]
+
+    async def next_review_id(self) -> int:
+        return await self.next_id("review")

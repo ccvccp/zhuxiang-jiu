@@ -1336,3 +1336,106 @@ class RideDispatchScorer:
 
 
 SCORERS["ride_dispatch"] = RideDispatchScorer()
+
+
+# ============================================================
+# 12. 代驾评价审评评分(模块 41 P3: 双向评价垃圾过滤)
+# ============================================================
+
+class RideReviewScorer:
+    """代驾评价审评: 恶意差评/刷好评识别(41号设计文档 §2.4 行后,
+    37号 AllianceReviewScorer 范式平移)
+
+    5 因子加权 → 违规分(0-100, 越高越可疑) → 3级 → 处置动作
+    (low=show 正常展示 / medium=watch 观察 / high=fold 折叠)。
+
+    折叠评价不回写司机评分; 双向通用(乘客评司机/司机评乘客)。
+    """
+
+    WEIGHTS: ClassVar[dict] = {
+        "extreme_words": 0.25,    # 情绪极端词
+        "attack": 0.25,           # 人身攻击/辱骂
+        "ad_spam": 0.20,          # 广告刷评
+        "frequency": 0.15,        # 短时高频评价
+        "score_deviation": 0.15,   # 与司机当前评分严重偏离
+    }
+    EXTREME_WORDS = ("垃圾", "骗子", "黑店", "无语", "恶心",
+                     "再也不会用", "投诉到底")
+    ATTACK_WORDS = ("傻", "蠢", "滚", "废物", "玩意", "货色",
+                    "酒鬼", "马路杀手")
+    AD_SPAM_WORDS = ("加微信", "加V", "低价出", "代驾券收", "点击链接",
+                     "优惠券链接", "接私单")
+    REQUIRED: ClassVar[list] = ["score", "content"]
+
+    async def score(self, ctx: dict) -> dict:
+        """评分入口
+
+        Args:
+            ctx: {
+                reviewId: int, rideId: str, direction: str,
+                driverId: int, memberId: int,
+                score: int 星级(1-5),
+                content: str 评价文本,
+                driverRating: float 司机当前评分(缺省取评价分),
+                reviewerReviewsToday: int 该用户当日评价数(缺省 0)
+            }
+        """
+        weights = await load_effective_weights("ride_review", self.WEIGHTS)
+        content = str(ctx.get("content") or "")
+        review_score = int(ctx.get("score") or 0)
+        f = {}
+        # ① 极端情绪词
+        extreme = [w for w in self.EXTREME_WORDS if w in content]
+        f["extreme_words"] = _factor(
+            "extreme_words", "极端情绪", _clamp(len(extreme) * 60),
+            weights["extreme_words"],
+            f"命中{extreme}" if extreme else "无")
+        # ② 人身攻击
+        attack = [w for w in self.ATTACK_WORDS if w in content]
+        f["attack"] = _factor(
+            "attack", "人身攻击", _clamp(len(attack) * 80),
+            weights["attack"], f"命中{attack}" if attack else "无")
+        # ③ 广告刷评
+        spam = [w for w in self.AD_SPAM_WORDS if w in content]
+        f["ad_spam"] = _factor(
+            "ad_spam", "广告刷评", _clamp(len(spam) * 90),
+            weights["ad_spam"], f"命中{spam}" if spam else "无")
+        # ④ 短时高频(≥5 条/日 满分)
+        today = int(ctx.get("reviewerReviewsToday") or 0)
+        f["frequency"] = _factor(
+            "frequency", "评价频率", _clamp(today * 20),
+            weights["frequency"], f"当日 {today} 条")
+        # ⑤ 与司机当前评分偏离(负向偏离计差评嫌疑)
+        driver_rating = float(ctx.get("driverRating")
+                              if ctx.get("driverRating") is not None
+                              else review_score)
+        deviation = max(0.0, driver_rating - review_score)
+        f["score_deviation"] = _factor(
+            "score_deviation", "分值偏离", _clamp(deviation * 40),
+            weights["score_deviation"],
+            f"评分{review_score} vs 司机{driver_rating:.1f}")
+
+        total = sum(x["contribution"] for x in f.values())
+        # 评价语义场景更敏感(对齐 37号阈值): 30 观察 / 45 折叠
+        level = _risk_level(total, medium_at=30.0, high_at=45.0)
+        action = {"low": "show", "medium": "watch",
+                  "high": "fold"}[level]
+        return {
+            "success": True, "scorer": "ride_review",
+            "modelVersion": MODEL_VERSION,
+            "reviewId": ctx.get("reviewId"),
+            "rideId": ctx.get("rideId"),
+            "direction": ctx.get("direction"),
+            "driverId": ctx.get("driverId"),
+            "memberId": ctx.get("memberId"),
+            "score": round(total, 1), "level": level,
+            "levelName": LEVEL_NAMES[level],
+            "action": action,
+            "actionName": {"show": "正常展示", "watch": "观察",
+                           "fold": "折叠"}[action],
+            "confidence": _confidence(ctx, self.REQUIRED),
+            "factors": list(f.values()), "scoredAt": ts(),
+        }
+
+
+SCORERS["ride_review"] = RideReviewScorer()
