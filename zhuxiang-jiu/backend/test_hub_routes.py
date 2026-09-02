@@ -511,7 +511,7 @@ def test_decision_takeover():
         return
     client = TestClient(app)
 
-    # 13a. capability-route: 插件池来自真实注册表(pluginPool=7 而非硬编码 120)
+    # 13a. capability-route: 插件池来自真实注册表(pluginPool=9 而非硬编码 120)
     r = client.post("/api/decision/capability-route",
                     json={"requiredCapabilities": ["knowledge.rag", "chat.human"],
                           "task": "问价并转人工"},
@@ -519,7 +519,7 @@ def test_decision_takeover():
     body = r.json()
     data = body.get("details", body.get("data", body))
     record("decision 接管: 真实插件池",
-           data.get("pluginPool") == 8, f"pool={data.get('pluginPool')}")
+           data.get("pluginPool") == 9, f"pool={data.get('pluginPool')}")
     selected = data.get("selectedPlugins", [])
     record("decision 接管: 能力选中",
            any(p["id"] == "knowledge.rag" for p in selected))

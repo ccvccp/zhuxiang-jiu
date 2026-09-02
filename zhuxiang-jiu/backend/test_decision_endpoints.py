@@ -730,12 +730,12 @@ class TestCapabilityRoute:
         }
 
     def test_store_owner_can_route(self):
-        """store_owner: 能力路由成功(v35 真实能力注册表 8 插件池)"""
+        """store_owner: 能力路由成功(v35 真实能力注册表 9 插件池)"""
         response = client.post(self.URL, json=self._payload(),
                               headers=STORE_OWNER_HEADERS)
         data = assert_success(response, "capability-route")
         details = data["details"]
-        assert details["pluginPool"] == 8
+        assert details["pluginPool"] == 9
         assert details["reuseRate"] == "100%"
         assert len(details["selectedPlugins"]) == 2
         # 插件结构

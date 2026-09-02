@@ -35,6 +35,8 @@ INTENT_MEDIA_IMAGE_QA = "media.image_qa"
 INTENT_CHAT_GENERAL = "chat.general"
 # 37号网站同盟: 同盟场景意图(酒友小聚编排入口)
 INTENT_ALLIANCE_SCENE = "alliance.scene"
+# 40号DV博主: 博主引流意图(博主池/雷达/跟随发布编排入口)
+INTENT_BLOGGER_TRAFFIC = "blogger.traffic"
 
 INTENTS = (
     INTENT_PRODUCT_PRICE, INTENT_PRODUCT_RECOMMEND,
@@ -43,6 +45,7 @@ INTENTS = (
     INTENT_ROLE_PROFIT, INTENT_ROLE_DISPATCH,
     INTENT_CREDIT_QUERY, INTENT_OPS_HEALTH,
     INTENT_MEDIA_IMAGE_QA, INTENT_CHAT_GENERAL,
+    INTENT_ALLIANCE_SCENE, INTENT_BLOGGER_TRAFFIC,
 )
 
 # 意图 → 规则轨关键词(正则, 命中即路由; 顺序即优先级)
@@ -62,6 +65,9 @@ INTENT_RULES: list[tuple[str, list[str]]] = [
     # 37号: 同盟场景(小聚/订餐/定制)
     (INTENT_ALLIANCE_SCENE, ["小聚", "聚一聚", "订餐", "包间", "订包厢",
                              "定制酒具", "封坛", "私宴"]),
+    # 40号: 博主引流(博主池/雷达/跟随发布)
+    (INTENT_BLOGGER_TRAFFIC, ["博主池", "博主引流", "达人引流", "KOL引流",
+                              "跟随发布", "博主雷达", "作品侦测"]),
 ]
 
 
@@ -113,9 +119,9 @@ ROLE_PANELS: dict[str, list[dict]] = {
         {"id": "ops.health", "label": "AI健康", "quick": "查看AI系统健康状态"},
         {"id": "role.dispatch", "label": "派单总览", "quick": "查看派单总览"},
         {"id": "role.profit", "label": "分润总账", "quick": "查分润总账"},
+        {"id": "blogger.traffic", "label": "博主引流", "quick": "查看博主池与跟随发布情况"},
         {"id": "knowledge.qa", "label": "知识库", "quick": "查询产品知识"},
         {"id": "order.query", "label": "查订单", "quick": "查我的最近订单"},
-        {"id": "chat.human", "label": "转人工", "quick": "转人工"},
     ],
 }
 
@@ -168,6 +174,12 @@ CAPABILITY_SEED: list[dict] = [
      "endpoint": "internal:alliance_scene_service",
      "health": {"success_rate_7d": 1.0, "p95_ms": 150, "fallback_rate": 0.0},
      "cost_weight": 0.2, "enabled": True},
+    # 40号DV博主: 博主引流(博主池/雷达/跟随发布编排, admin 运营域)
+    {"id": "blogger.traffic", "name": "博主引流", "module": "blogger",
+     "intents": [INTENT_BLOGGER_TRAFFIC], "roles": [ROLE_ADMIN],
+     "endpoint": "internal:blogger_service",
+     "health": {"success_rate_7d": 1.0, "p95_ms": 200, "fallback_rate": 0.0},
+     "cost_weight": 0.3, "enabled": True},
 ]
 
 
