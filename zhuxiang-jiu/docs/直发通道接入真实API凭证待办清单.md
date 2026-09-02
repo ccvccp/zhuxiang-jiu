@@ -46,18 +46,18 @@
 - [x] **3.3 补充平台鉴权头**（按平台规范二选一或组合）：
   ✅ 已完成：`_partner_auth_headers()` 双风格——APP_ID+APP_SECRET → HMAC-SHA256 签名头（X-App-Id/X-Timestamp/X-Nonce/X-Signature）；仅 TOKEN → `Authorization: Bearer`；均未配置 → 裸跑
 - [x] **3.4 超时与重试对齐**：✅ 已完成：timeout=10s + 传输层错误重试 1 次（`X-Request-Id: rideId` 幂等键；HTTP 4xx/5xx 业务响应不重试）
-- [ ] **3.5 计价口径确认**：平台若按自己的计价结算（非本站 35+5/km 口径），确认差异由谁承担——影响日结对账 `amount_mismatch` 差异频率，必要时在结算单加 `channelQuotedAmount` 字段留痕
+- [x] **3.5 计价口径确认**：✅ 代码侧已完成留痕：直发响应捕获平台报价（字段名兼容 `quotedAmount`/`totalFee`/`estimatedFee`）→ 行程 `channelQuotedAmount` → 结算单同名字段落库（本站计价 vs 平台报价差异溯源，供对账 `amount_mismatch` 审计）；剩余：拿到真实平台后核对计价承担方
 
 ## 四、回调安全加固（当前开放端点，上线前必做）
 
 - [x] **4.1 回调签名校验**：✅ 已完成（`ride_routes.py` `_verify_partner_callback`）：配置 `DRIDE_PARTNER_CALLBACK_TOKEN` 后双通道校验——`X-Partner-Token` 静态令牌 或 `X-Partner-Signature` HMAC-SHA256(原始请求体)；未配置则放行（mock/联调兼容口径，生产 real 模式前必须配置）
 - [x] **4.2 回调幂等复核**：✅ 已复核：同 `partnerOrderId`+`event` 重复回调依赖状态机 409 拒绝（test_ride_real_channel.py 验证重复事件不产生脏数据）
-- [ ] **4.3 回调事件补全**：若平台有 `driver_arrived`（司机到达）等本站没有的事件，决定映射或忽略（映射到 `driver_arriving` 或加新状态）
+- [x] **4.3 回调事件补全**：✅ 已完成：`driver_arrived`（司机到达）事件映射 `driver_arriving`（幂等，重复到达不报错）；PARTNER_EVENTS 扩至五事件，其余平台特有事件维持 409 拒绝（显式忽略需真实平台文档确认后按需加）
 - [ ] **4.4 回调网络准入**：生产环境将回调端点限制为平台出口 IP（nginx/网关层）
 
 ## 五、测试与灰度验证（Mock-first 三步走）
 
-- [x] **5.1 宿主机专项**：✅ 已完成（`test_ride_real_channel.py`，21 项）：本地 mock 平台服务器（ThreadingHTTPServer 记录请求头/体）验证 real 轨全链路/HMAC 与 Bearer 鉴权头/X-Request-Id 契约/首连失败重试/accepted=false 券退回/fail-hard/回调签名四分支（正确令牌·错误令牌·HMAC·篡改体·无凭证）
+- [x] **5.1 宿主机专项**：✅ 已完成（`test_ride_real_channel.py`，24 项）：本地 mock 平台服务器（ThreadingHTTPServer 记录请求头/体）验证 real 轨全链路/HMAC 与 Bearer 鉴权头/X-Request-Id 契约/首连失败重试/accepted=false 券退回/fail-hard/回调签名四分支/`driver_arrived` 事件映射/平台报价留痕（行程 + 结算单 `channelQuotedAmount`）。另：实机验收脚本已加"三态通道标记"断言（mock 模式验证 `platformChannel=mock`，灰度切 mock_fallback/real 后自动覆盖真实轨标记验证），实机 106 项两跑全绿
 - [ ] **5.2 实机灰度（mock_fallback）**：容器置 `DRIDE_CHANNEL_MODE=mock_fallback` + 真实 `DRIDE_PARTNER_URL`，跑 `verify_ride_live.py`——真实轨成功则 `platformChannel=real`，失败自动回退 mock 且标记 `mock_fallback`，105 项断言全绿
 - [ ] **5.3 实机全量（real）**：切 `real` 模式重跑验收脚本（郊区 11km 叫单走真实平台派单→回调→结算链路）
 - [ ] **5.4 对账单真实化**：`channelBills` 从平台 API 拉取（或后台导出转 JSON），替换当前"按本站镜像"Mock 口径；验证四类差异检测在真实数据上的表现
@@ -80,14 +80,13 @@
 
 | 文件 | 改动 | 规模 | 状态 |
 |------|------|------|------|
-| `services/ride_dispatch_service.py` | `_partner_auth_headers()` 双风格鉴权 + 重试 + 幂等键 | ~60 行 | ✅ 已完成 |
+| `services/ride_dispatch_service.py` | `_partner_auth_headers()` 双风格鉴权 + 重试 + 幂等键 + 报价捕获 + driver_arrived | ~75 行 | ✅ 已完成 |
 | `routes/ride_routes.py` | `_verify_partner_callback` 回调签名校验 | ~30 行 | ✅ 已完成 |
-| `repositories/ride_repository.py` | 4 个凭证环境变量常量 | ~8 行 | ✅ 已完成 |
+| `repositories/ride_repository.py` | 凭证常量 + driver_arrived 事件 + 空浮点反序列化修复 | ~15 行 | ✅ 已完成 |
 | `docker-compose.yml` + `.env` | 6 个新环境变量脚手架 | 配置 | ✅ 已完成 |
-| `test_ride_real_channel.py` | real 轨全分支测试（本地 mock 平台服务器） | ~260 行 | ✅ 21/21 |
-| `repositories/ride_repository.py` | （可选）结算单加 `channelQuotedAmount` | ~5 行 | 待 3.5 决策 |
-| `verify_ride_live.py` | real 轨实机用例 | ~40 行 | 待 5.2/5.3 |
+| `test_ride_real_channel.py` | real 轨全分支测试（本地 mock 平台服务器） | ~300 行 | ✅ 24/24 |
+| `verify_ride_live.py` | 三态通道标记断言（灰度自动覆盖） | ~6 行 | ✅ 106/106 两跑 |
 
-**当前状态**：代码侧全部就绪（约 360 行，含测试），**只欠凭证**——完成第一节入驻拿到凭证后，仅需在 `.env` 填入 6 个变量 + 按清单 5.2-5.3 灰度验证即可上线。
+**当前状态**：代码侧全部就绪（约 420 行，含测试），**只欠凭证**——完成第一节入驻拿到凭证后，仅需在 `.env` 填入 6 个变量 + 按清单 5.2-5.3 灰度验证即可上线。清单剩余未勾选项（1.x 凭证/4.4 网关/5.2-5.5 灰度/6.x 切换）全部依赖外部凭证或真实环境。
 
 *清单更新于代码侧落地后，配套：[设计文档](AI智能代驾模块41_设计文档.md) §2.3 平台直发契约 · [交付总结](AI智能代驾模块41_交付总结.md) §八 · [real 轨测试](../backend/test_ride_real_channel.py)*

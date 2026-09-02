@@ -173,13 +173,15 @@ RISK_EVENT_TIMEOUT = "trip_timeout"      # 行中: 行程超时未结束
 RISK_EVENT_MILEAGE = "mileage_anomaly"   # 行后: 实际里程超预估 2 倍
 RISK_EVENT_TYPES = (RISK_EVENT_POI, RISK_EVENT_TIMEOUT, RISK_EVENT_MILEAGE)
 
-# 平台直发回调事件(四态生命周期: 接单/开始/完成/取消)
+# 平台直发回调事件(五态生命周期: 接单/到达/开始/完成/取消)
 PARTNER_EVENT_ACCEPTED = "accepted"
+PARTNER_EVENT_ARRIVED = "driver_arrived"   # 4.3: 司机到达(映射 arriving)
 PARTNER_EVENT_STARTED = "started"
 PARTNER_EVENT_COMPLETED = "completed"
 PARTNER_EVENT_CANCELLED = "cancelled"
-PARTNER_EVENTS = (PARTNER_EVENT_ACCEPTED, PARTNER_EVENT_STARTED,
-                 PARTNER_EVENT_COMPLETED, PARTNER_EVENT_CANCELLED)
+PARTNER_EVENTS = (PARTNER_EVENT_ACCEPTED, PARTNER_EVENT_ARRIVED,
+                 PARTNER_EVENT_STARTED, PARTNER_EVENT_COMPLETED,
+                 PARTNER_EVENT_CANCELLED)
 
 # ============================================================
 # P3 双向评价常量(设计文档 §2.4 行后)
@@ -308,7 +310,7 @@ class RideRepository:
                      "value", "amount", "consistency",
                      "lat", "lng", "distanceKm", "estimatedKm",
                      "totalAmount", "couponDeduction", "extraCharge",
-                     "payoutAmount", "dispatchScore")
+                     "payoutAmount", "dispatchScore", "channelQuotedAmount")
     # bool 字段(Redis 序列化为 1/0, 读回须恢复 bool 否则 "0" 为 truthy)
     _BOOL_FIELDS = ("dispatchFed", "cancelWindowFree", "mileageAnomaly",
                     "ratingApplied", "resolved", "appFed", "reviewFed")
@@ -366,10 +368,14 @@ class RideRepository:
                 except (TypeError, ValueError):
                     record[k] = v
             elif k in RideRepository._FLOAT_FIELDS:
-                try:
-                    record[k] = float(v)
-                except (TypeError, ValueError):
-                    record[k] = v
+                # None 序列化为 "" → 恢复 None(金额类空值口径)
+                if v == "" or v is None:
+                    record[k] = None
+                else:
+                    try:
+                        record[k] = float(v)
+                    except (TypeError, ValueError):
+                        record[k] = v
             elif k in RideRepository._BOOL_FIELDS:
                 record[k] = v in (1, "1", True, "True", "true")
             elif isinstance(v, str) and v.startswith(("{", "[")):

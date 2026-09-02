@@ -420,6 +420,11 @@ def main():
            and bool(po5), f"{s} {str(b)[:120]}")
     record("溢出-平台司机mock", (b.get("driverSnapshot") or {})
            .get("name") == "平台司机丙")
+    # 三态通道标记(mock/real/mock_fallback 任一为合法留痕;
+    # 灰度切 mock_fallback/real 后本断言自动覆盖真实轨验证)
+    record("直发-三态通道标记", b.get("platformChannel")
+           in ("mock", "real", "mock_fallback"),
+           str(b.get("platformChannel")))
 
     s, b = req("POST", "/api/ride/call", {
         "pickup": near, "dropoff": center, "distanceKm": 41.0}, M1)

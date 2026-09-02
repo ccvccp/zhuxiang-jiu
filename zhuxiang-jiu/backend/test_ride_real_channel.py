@@ -57,6 +57,7 @@ DEFAULT_RESPONSE = {
     "driver": {"name": "平台模拟司机", "phone": "13900000099",
                "plateNo": "鲁J90001", "rating": 4.6},
     "etaSeconds": 300,
+    "quotedAmount": 62.5,
 }
 
 
@@ -155,6 +156,27 @@ class TestRealChannel:
                    == "PDMOCK0001", str(r["driverSnapshot"]))
             record("real-ETA留痕",
                    r["driverSnapshot"].get("etaSeconds") == 300)
+            record("real-平台报价留痕",
+                   r.get("channelQuotedAmount") == 62.5,
+                   str(r.get("channelQuotedAmount")))
+            # 报价结算单留痕(3.5 对账审计口径)
+            po = r["driverSnapshot"]["partnerOrderId"]
+            await svc.partner_callback({"partnerOrderId": po,
+                                        "event": "driver_arrived"})
+            ride = await svc.repo.get_ride(r["rideId"])
+            record("real-driver_arrived映射arriving",
+                   ride["status"] == "driver_arriving",
+                   str(ride.get("status")))
+            await svc.partner_callback({
+                "partnerOrderId": po, "event": "completed",
+                "trace": {"actualKm": 11.0, "durationMinutes": 0,
+                           "pricingHour": 14}})
+            settlement = await svc.repo.get_settlement_by_ride(
+                r["rideId"])
+            record("real-结算单报价留痕",
+                   settlement is not None
+                   and settlement.get("channelQuotedAmount") == 62.5,
+                   str((settlement or {}).get("channelQuotedAmount")))
             record("real-请求契约字段",
                    records and
                    {"rideId", "pickup", "dropoff", "couponValue",

@@ -49,9 +49,9 @@ from repositories.ride_repository import (
     DRIDE_PARTNER_APP_ID, DRIDE_PARTNER_APP_SECRET, DRIDE_PARTNER_TOKEN,
     RIDE_MILEAGE_ANOMALY_RATIO,
     RISK_EVENT_MILEAGE,
-    PARTNER_EVENT_ACCEPTED, PARTNER_EVENT_STARTED,
-    PARTNER_EVENT_COMPLETED, PARTNER_EVENT_CANCELLED,
-    PARTNER_EVENTS,
+    PARTNER_EVENT_ACCEPTED, PARTNER_EVENT_ARRIVED,
+    PARTNER_EVENT_STARTED, PARTNER_EVENT_COMPLETED,
+    PARTNER_EVENT_CANCELLED, PARTNER_EVENTS,
 )
 from services.ai_scoring_service import SCORERS
 
@@ -390,9 +390,17 @@ class RideDispatchService:
             return
 
         driver_info = result.get("driver") or {}
+        # 3.5: 平台报价留痕(字段名兼容 quotedAmount/totalFee/estimatedFee)
+        channel_quoted = (result.get("quotedAmount")
+                          if result.get("quotedAmount") is not None
+                          else (result.get("totalFee")
+                                if result.get("totalFee") is not None
+                                else result.get("estimatedFee")))
         ride.update({
             "status": RIDE_STATUS_DISPATCHED,
             "driverId": None,
+            "channelQuotedAmount": (float(channel_quoted)
+                                   if channel_quoted is not None else None),
             "driverSnapshot": {
                 "driverId": None,
                 "track": TRACK_PLATFORM,
@@ -631,6 +639,12 @@ class RideDispatchService:
                 ride["status"] = RIDE_STATUS_DISPATCHED
                 ride["dispatchedAt"] = _now_iso()
 
+        elif ev == PARTNER_EVENT_ARRIVED:
+            # 4.3: 司机到达事件 → 映射 driver_arriving(幂等, 已到达不报错)
+            if status == RIDE_STATUS_DISPATCHED:
+                ride["status"] = RIDE_STATUS_ARRIVING
+                ride["arrivingAt"] = _now_iso()
+
         elif ev == PARTNER_EVENT_STARTED:
             if status not in (RIDE_STATUS_DISPATCHED,
                               RIDE_STATUS_ARRIVING):
@@ -770,6 +784,11 @@ class RideDispatchService:
             "totalAmount": total,
             "couponDeduction": deduction,
             "couponCode": ride.get("couponCode") or "",   # P4 对账用
+            # 3.5: 平台直发报价留痕(对账 amount_mismatch 审计口径;
+            # 本站计价 vs 平台报价差异溯源)
+            "channelQuotedAmount": (float(ride.get("channelQuotedAmount"))
+                                   if ride.get("channelQuotedAmount")
+                                   is not None else None),
             "extraCharge": extra,
             "payoutAmount": total,     # 司机/平台应收全额
             "payoutStatus": "paid" if track == TRACK_SELF else "aggregated",
