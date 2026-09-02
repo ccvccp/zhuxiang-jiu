@@ -302,6 +302,12 @@ class RideDispatchService:
             },
             "dispatchMode": mode,
             "dispatchScore": scoring["score"] if mode == "ai" else None,
+            # P4: 派单评分快照(factors 供 Hedge 回流)
+            "dispatchScoring": {
+                "factors": scoring.get("factors") or [],
+                "action": scoring.get("action"),
+            } if mode == "ai" else {},
+            "dispatchFed": False,   # P4: 学习回流幂等标记
             "dispatchedAt": _now_iso(),
         })
         driver["currentRideId"] = ride["rideId"]
@@ -601,6 +607,7 @@ class RideDispatchService:
             ride = await self._settle(
                 ride, driver=None,
                 duration_minutes=trace.get("durationMinutes"),
+                pricing_hour=trace.get("pricingHour"),
                 actual_km=trace.get("actualKm"))
             return {"success": True,
                     "ride": self._ride_detail(ride)}
@@ -713,6 +720,7 @@ class RideDispatchService:
             "track": track,
             "totalAmount": total,
             "couponDeduction": deduction,
+            "couponCode": ride.get("couponCode") or "",   # P4 对账用
             "extraCharge": extra,
             "payoutAmount": total,     # 司机/平台应收全额
             "payoutStatus": "paid" if track == TRACK_SELF else "aggregated",
@@ -797,3 +805,82 @@ class RideDispatchService:
         out = dict(ride)
         out.pop("candidates", None)   # 候选列表仅派单决策留痕, 不外泄
         return out
+
+    # --------------------------------------------------------
+    # P4 Hedge 学习回流(第23档案 ride_dispatch)
+    # --------------------------------------------------------
+
+    async def collect_learning_feedback(self) -> dict:
+        """批量回流: 已结算且有乘客评价的 AI 派单行程 → 派单决策反馈
+
+        真值口径(乘客评司机星级 → 期望动作):
+            4-5 星 → dispatch(优, 应直接派)
+            3 星   → dispatch_backup(中, 次优选派合理)
+            1-2 星 → escalate(差, 不如直发)
+
+        只回流 dispatchScoring 存在(AI 派单)且未 dispatchFed 的行程;
+        单条失败不阻断批量。
+
+        Returns:
+            {submitted, skipped, results}
+        """
+        rides = await self.repo.list_rides(
+            status=RIDE_STATUS_SETTLED, limit=1000)
+        from repositories.ride_repository import REVIEW_BY_PASSENGER
+        submitted, skipped, results = 0, 0, []
+        for ride in rides:
+            if ride.get("dispatchFed"):
+                skipped += 1
+                continue
+            scoring = ride.get("dispatchScoring") or {}
+            factors = scoring.get("factors") or []
+            if not factors:
+                skipped += 1     # 平台直发/旧数据无 AI 评分快照
+                continue
+            review = await self.repo.get_review_by_ride(
+                ride["rideId"], REVIEW_BY_PASSENGER)
+            if review is None:
+                skipped += 1     # 无评价 → 无真值
+                continue
+            try:
+                results.append(await self._submit_dispatch_feedback(
+                    ride, review))
+                submitted += 1
+            except (KeyError, ValueError) as exc:
+                skipped += 1
+                logger.warning("ride_dispatch_feed_skip ride=%s: %s",
+                               ride["rideId"], exc)
+        return {"submitted": submitted, "skipped": skipped,
+                "results": results}
+
+    async def _submit_dispatch_feedback(self, ride: dict,
+                                         review: dict) -> dict:
+        """单条派单决策回流(submit_feedback 第23档案)"""
+        stars = int(review.get("reviewScore") or 3)
+        expected = ("dispatch" if stars >= 4
+                   else ("dispatch_backup" if stars == 3
+                         else "escalate"))
+        actual = (ride.get("dispatchScoring") or {}).get("action") \
+            or "dispatch"
+        reward = round((stars - 3) / 2, 2)   # 1星-1.0 … 5星+1.0
+        from services.ai_learning_service import submit_feedback
+        result = await submit_feedback({
+            "scorerId": "ride_dispatch",
+            "factors": (ride.get("dispatchScoring")
+                        or {}).get("factors") or [],
+            "scoreAtDecision": float(ride.get("dispatchScore") or 0),
+            "actualAction": actual,
+            "expectedAction": expected,
+            "correct": actual == expected,
+            "reward": reward,
+            "note": f"rideId={ride['rideId']} stars={stars}",
+            "source": "ride",
+        })
+        ride["dispatchFed"] = True     # 幂等标记
+        await self.repo.save_ride(ride)
+        return result
+
+    async def run_learning(self) -> dict:
+        """触发第23档案一轮 Hedge 学习(反馈不足抛 ValueError)"""
+        from services.ai_learning_service import run_learning_cycle
+        return await run_learning_cycle("ride_dispatch")

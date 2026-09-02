@@ -38,6 +38,7 @@ from services.driver_gate_service import DriverGateService
 from services.ride_dispatch_service import RideDispatchService
 from services.ride_safety_service import RideSafetyService
 from services.ride_review_service import RideReviewService
+from services.ride_reconcile_service import RideReconcileService
 
 
 router = APIRouter()
@@ -46,6 +47,7 @@ _gate_service = DriverGateService()
 _dispatch_service = RideDispatchService()
 _safety_service = RideSafetyService()
 _review_service = RideReviewService()
+_reconcile_service = RideReconcileService()
 
 
 # ============================================================
@@ -180,6 +182,19 @@ class RideReviewRequest(PydBaseModel):
                                          "driver_to_passenger")
     score: int = Field(..., ge=1, le=5, description="星级 1-5")
     content: str = Field("", max_length=500, description="评价文本")
+
+
+class ReconStartRequest(PydBaseModel):
+    period: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$",
+                        description="账期日 YYYY-MM-DD")
+    track: str = Field(..., description="partner/platform(自营直付不对账)")
+    channelBills: list = Field(None,
+                               description="平台账单(缺省按本站镜像, "
+                                           "Mock 口径)")
+
+
+class ReconResolveRequest(PydBaseModel):
+    resolution: str = Field("", max_length=500, description="差异处理说明")
 
 
 # ============================================================
@@ -696,6 +711,187 @@ async def admin_review_stats(
     _require_admin(x_role)
     try:
         return await _review_service.admin_fold_stats()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 日结对账(P4: 三方对平 + 状态机, 管理端)
+# ============================================================
+
+@router.post("/api/ride/admin/reconciliation/start")
+async def start_reconciliation(
+    body: ReconStartRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """生成日结对账单(本站结算 vs 平台账单 vs 券核销三方比对)"""
+    _require_admin(x_role)
+    try:
+        return await _reconcile_service.generate(
+            body.period, body.track, body.channelBills)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/admin/reconciliation/{recon_no}")
+async def get_reconciliation(
+    recon_no: str,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """对账单详情(含差异明细)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True,
+                "reconciliation":
+                    await _reconcile_service.get(recon_no)}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/admin/reconciliations")
+async def list_reconciliations(
+    track: str = Query(None, description="partner/platform"),
+    status: str = Query(None, description="按状态过滤"),
+    period: str = Query(None, description="按账期过滤"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """对账单列表(可按轨道/状态/账期过滤)"""
+    _require_admin(x_role)
+    try:
+        recons = await _reconcile_service.list_all(
+            track=track, status=status, period=period)
+        return {"success": True, "total": len(recons),
+                "reconciliations": recons}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/admin/reconciliation/{recon_no}/investigate")
+async def investigate_reconciliation(
+    recon_no: str,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """diff → investigating(介入调查差异)"""
+    _require_admin(x_role)
+    try:
+        recon = await _reconcile_service.investigate(recon_no)
+        return {"success": True, "reconciliation": recon}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/admin/reconciliation/{recon_no}/resolve")
+async def resolve_reconciliation(
+    recon_no: str,
+    body: ReconResolveRequest = None,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """investigating → resolved(差异处理完毕)"""
+    _require_admin(x_role)
+    try:
+        recon = await _reconcile_service.resolve(
+            recon_no, (body.resolution if body else ""))
+        return {"success": True, "reconciliation": recon}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/admin/reconciliation/{recon_no}/confirm")
+async def confirm_reconciliation(
+    recon_no: str,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """reconciling/resolved → confirmed(确认对账结果)"""
+    _require_admin(x_role)
+    try:
+        recon = await _reconcile_service.confirm(recon_no)
+        return {"success": True, "reconciliation": recon}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/admin/reconciliation/{recon_no}/pay")
+async def pay_reconciliation(
+    recon_no: str,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """confirmed → paid(付款完成, 终态)"""
+    _require_admin(x_role)
+    try:
+        recon = await _reconcile_service.pay(recon_no)
+        return {"success": True, "reconciliation": recon}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P4 学习回流(第22/23档案 Hedge 闭环, 管理端)
+# ============================================================
+
+@router.post("/api/ride/admin/learning/collect")
+async def collect_learning(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """批量回流: 派单决策(settled+有评价)+审查决策(有服务数据)"""
+    _require_admin(x_role)
+    try:
+        dispatch = await _dispatch_service.collect_learning_feedback()
+        gate = await _gate_service.collect_application_feedback()
+        return {"success": True,
+                "dispatch": {"submitted": dispatch["submitted"],
+                             "skipped": dispatch["skipped"]},
+                "gate": {"submitted": gate["submitted"],
+                         "skipped": gate["skipped"]}}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/admin/learning/run")
+async def run_learning(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """触发两个档案的 Hedge 学习(反馈不足 409)"""
+    _require_admin(x_role)
+    results = {}
+    for scorer_id, service in (
+            ("ride_dispatch", _dispatch_service),
+            ("driver_application_gate", _gate_service)):
+        try:
+            results[scorer_id] = await service.run_learning()
+        except ValueError as exc:
+            results[scorer_id] = {"success": False, "detail": str(exc)}
+    return {"success": True, "results": results}
+
+
+@router.get("/api/ride/admin/learning/status")
+async def learning_status(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """学习回流状态(两档案 pending 反馈/幂等标记统计)"""
+    _require_admin(x_role)
+    try:
+        from services.ai_learning_service import get_weights_view
+        rides = await _dispatch_service.repo.list_rides(limit=2000)
+        apps = await _gate_service.repo.list_applications(limit=1000)
+        return {
+            "success": True,
+            "dispatch": {
+                "settled": sum(1 for r in rides
+                              if r.get("status") == "settled"),
+                "fed": sum(1 for r in rides if r.get("dispatchFed")),
+            },
+            "gate": {
+                "approved": sum(1 for a in apps
+                                if a.get("status") == "approved"),
+                "fed": sum(1 for a in apps if a.get("appFed")),
+            },
+            "weights": {
+                "ride_dispatch":
+                    await get_weights_view("ride_dispatch"),
+                "driver_application_gate":
+                    await get_weights_view("driver_application_gate"),
+            },
+        }
     except Exception as e:
         raise _handle(e) from e
 

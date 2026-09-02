@@ -131,7 +131,7 @@ class TestPartnerCallback:
         # completed: trace actualKm=12km/30min → 35+35=70, 券抵60补差10
         r = await svc.partner_callback({
             "partnerOrderId": po, "event": "completed",
-            "trace": {"actualKm": 12.0, "durationMinutes": 30}})
+            "trace": {"actualKm": 12.0, "durationMinutes": 30, "pricingHour": 14}})
         ride = r["ride"]
         record("回调-completed结算settled", ride["status"] == "settled",
                str(ride.get("status")))
@@ -397,7 +397,7 @@ class TestHttpRoutes:
         # 回调 completed(带 trace, 实际25km 超预估11km×2 → 里程异常+面板有事件)
         resp = client.post("/api/ride/partner/callback", json={
             "partnerOrderId": po, "event": "completed",
-            "trace": {"actualKm": 25.0, "durationMinutes": 0}})
+            "trace": {"actualKm": 25.0, "durationMinutes": 0, "pricingHour": 14}})
         body = resp.json()["ride"]
         record("HTTP-回调completed结算", resp.status_code == 200
                and body["status"] == "settled", str(body.get("status")))

@@ -438,7 +438,8 @@ def main():
 
     s, b = req("POST", "/api/ride/partner/callback", {
         "partnerOrderId": po5, "event": "completed",
-        "trace": {"actualKm": 12.0, "durationMinutes": 30}})
+        "trace": {"actualKm": 12.0, "durationMinutes": 30,
+                   "pricingHour": 14}})
     ride = b.get("ride") or {}
     record("回调-completed触发AI结算", s == 200
            and ride.get("status") == "settled", f"{s}")
@@ -585,9 +586,19 @@ def main():
     # 13 无券拒绝
     # --------------------------------------------------------
     print("\n[13. 无券拒绝]")
-    clear_coupons()
+    # 造 member 3(存在但无券, 不清 member 1 的券以保留对账数据)
+    _r = redis.Redis(host="127.0.0.1", port=6379, db=0,
+                     decode_responses=True)
+    _r.hset("zhuxiang:member:3", mapping={
+        "id": "3", "phone": "13800000003", "password": "x",
+        "nickname": "无券测试会员", "level": "1", "growth_value": "0",
+        "points": "0", "status": "1", "role": "member",
+        "ageConfirmed": "1", "birthdate": "1995-05-05",
+        "ageVerified": "1",
+        "created_at": "2026-08-21T00:00:00+00:00"})
     s, b = req("POST", "/api/ride/call", {
-        "pickup": near, "dropoff": center, "distanceKm": 8.0}, M1)
+        "pickup": near, "dropoff": center, "distanceKm": 8.0},
+               {"X-Member-Id": "3"})
     record("无券-叫单409", s == 409 and "无可用代驾券" in err_msg(b),
            f"{s} {err_msg(b)}")
 
@@ -616,6 +627,94 @@ def main():
     record("全景-概览收口", s == 200 and b.get("poolTotal") == 9
            and b.get("applications", {}).get("approved") == 1,
            str(b.get("poolTotal")))
+
+    # --------------------------------------------------------
+    # 15 P4: 日结对账与学习回流
+    # --------------------------------------------------------
+    print("\n[15. P4 日结对账与学习回流]")
+    from datetime import datetime as _dt, timezone as _tz
+    period = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+
+    # 镜像对账(platform): 零差异 → reconciling → confirmed → paid
+    s, b = req("POST", "/api/ride/admin/reconciliation/start", {
+        "period": period, "track": "platform"}, ADMIN)
+    record("对账-镜像生成reconciling", s == 200
+           and b.get("status") == "reconciling"
+           and b.get("diffCount") == 0, f"{s} {str(b)[:150]}")
+    recon_no = b.get("reconNo")
+    record("对账-三方总额一致",
+           b.get("siteTotal") == b.get("channelTotal"),
+           f"{b.get('siteTotal')} vs {b.get('channelTotal')}")
+    s, b = req("POST",
+               f"/api/ride/admin/reconciliation/{recon_no}/confirm",
+               None, ADMIN)
+    record("对账-confirm", s == 200
+           and (b.get("reconciliation") or {}).get("status")
+           == "confirmed", str(s))
+    s, b = req("POST",
+               f"/api/ride/admin/reconciliation/{recon_no}/pay",
+               None, ADMIN)
+    record("对账-pay终态", s == 200
+           and (b.get("reconciliation") or {}).get("status") == "paid",
+           str(s))
+
+    # 差异对账(partner): 注入差异账单 → diff 分支
+    s, b = req("GET", "/api/ride/admin/settlements?track=partner",
+               None, ADMIN)
+    partner_bills = [
+        {"rideId": x.get("rideId"),
+         "totalAmount": (float(x.get("totalAmount") or 0) - 3.0)}
+        for x in (b.get("settlements") or [])[:2]]
+    partner_bills.append({"rideId": "RD99999999", "totalAmount": 88.0})
+    s, b = req("POST", "/api/ride/admin/reconciliation/start", {
+        "period": period, "track": "partner",
+        "channelBills": partner_bills}, ADMIN)
+    recon_no2 = b.get("reconNo")
+    record("对账-差异生成diff", s == 200 and b.get("status") == "diff"
+           and b.get("diffCount") >= 1, f"{s} {str(b)[:150]}")
+    s, b = req("POST",
+               f"/api/ride/admin/reconciliation/{recon_no2}/investigate",
+               None, ADMIN)
+    record("对账-investigate", s == 200
+           and (b.get("reconciliation") or {}).get("status")
+           == "investigating", str(s))
+    s, b = req("POST",
+               f"/api/ride/admin/reconciliation/{recon_no2}/resolve",
+               {"resolution": "平台补单核对"}, ADMIN)
+    record("对账-resolve留痕", s == 200
+           and "补单" in str((b.get("reconciliation") or {})
+                          .get("resolution", "")), str(s))
+    # 自营轨道拒绝
+    s, b = req("POST", "/api/ride/admin/reconciliation/start", {
+        "period": period, "track": "self"}, ADMIN)
+    record("对账-自营轨道409", s == 409, str(s))
+    # 列表
+    s, b = req("GET", "/api/ride/admin/reconciliations?status=paid",
+               None, ADMIN)
+    record("对账-列表过滤paid", s == 200 and (b.get("total") or 0)
+           >= 1, str(b.get("total")))
+
+    # 学习回流: collect(派单+审查) → status → run
+    s, b = req("POST", "/api/ride/admin/learning/collect", None, ADMIN)
+    record("回流-批量collect", s == 200
+           and (b.get("dispatch") or {}).get("submitted", 0) >= 1
+           and (b.get("gate") or {}).get("submitted", 0) >= 1,
+           f"{s} {str(b)[:150]}")
+    s, b = req("POST", "/api/ride/admin/learning/collect", None, ADMIN)
+    record("回流-幂等二轮0提交", s == 200
+           and (b.get("dispatch") or {}).get("submitted") == 0
+           and (b.get("gate") or {}).get("submitted") == 0, str(b)[:150])
+    s, b = req("GET", "/api/ride/admin/learning/status", None, ADMIN)
+    record("回流-状态视图", s == 200
+           and (b.get("dispatch") or {}).get("fed", 0) >= 1
+           and (b.get("gate") or {}).get("fed", 0) >= 1,
+           f"{s} {str(b.get('dispatch'))[:80]}")
+    record("回流-权重视图", "weights" in b
+           and "ride_dispatch" in (b.get("weights") or {}),
+           str((b.get("weights") or {}).keys()))
+    s, b = req("POST", "/api/ride/admin/learning/run", None, ADMIN)
+    record("回流-学习触发", s == 200 and "ride_dispatch"
+           in (b.get("results") or {}), f"{s} {str(b)[:120]}")
 
     # --------------------------------------------------------
     print("\n" + "-" * 62)

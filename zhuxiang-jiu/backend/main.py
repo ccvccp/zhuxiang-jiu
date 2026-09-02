@@ -304,6 +304,9 @@ async def _on_startup():
     start_blogger_radar()
     start_blogger_publish()
     start_blogger_learning()
+    # 41号·AI智能代驾: 学习回流(RIDE_LEARNING_AUTO=off 可关闭)
+    from services.ride_scheduler import start_learning_scheduler as start_ride_learning
+    start_ride_learning()
 
 
 @app.on_event("shutdown")
@@ -332,6 +335,9 @@ async def _on_shutdown():
     # 40号·平台流量DV博主调度器
     from services.blogger_scheduler import stop_schedulers as stop_blogger_schedulers
     stop_blogger_schedulers()
+    # 41号·AI智能代驾调度器
+    from services.ride_scheduler import stop_schedulers as stop_ride_schedulers
+    stop_ride_schedulers()
     await close_redis_client()
     logger.info("清理完成")
 

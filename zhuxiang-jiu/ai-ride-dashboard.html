@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<!--
+    41号·AI智能代驾模块 v1.0 · 智能代驾看板
+    页面: ai-ride-dashboard.html(配套脚本 js/ride-dashboard.js)
+    依赖: css/style.css(主题变量, 不新建 css) / 后端 41号 ride_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    鉴权: 管理端区块 X-Role: admin / 会员端区块 X-Member-Id
+    区块: ①全景统计 ②券包 ③我的行程 ④司机池 ⑤风险面板
+          ⑥对账单 ⑦学习闭环
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>41号·AI智能代驾看板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,var(--color-primary,#2f6f4f),#4a90a4);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        var(--color-primary,#2f6f4f);color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-btn:disabled{opacity:.5;cursor:not-allowed}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-info{background:#efe;border:1px solid #9c9;color:#393;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    table.matrix{width:100%;border-collapse:collapse;font-size:12px}
+    table.matrix th,table.matrix td{border:1px solid
+        var(--color-border,#e5e5e5);padding:6px 8px;text-align:left}
+    table.matrix th{background:var(--color-bg-secondary,#f7f7f7)}
+    .badge{display:inline-block;padding:1px 8px;border-radius:9px;
+        font-size:11px;white-space:nowrap}
+    .badge.green{background:#e6f7e6;color:#2c7a2c}
+    .badge.yellow{background:#fff7e0;color:#a37400}
+    .badge.red{background:#fdeaea;color:#c0392b}
+    .badge.weak{background:#eee;color:#666}
+    .badge.blue{background:#e8f1fb;color:#24619c}
+    .badge.purple{background:#f3e9fb;color:#7b3fa0}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(130px,1fr));gap:10px}
+    .ov-cell{background:var(--color-bg-secondary,#f7f9f7);border-radius:6px;
+        padding:10px 12px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:4px}
+    .ov-cell .v{font-size:20px;font-weight:600;color:
+        var(--color-primary,#2f6f4f)}
+    .dash-empty{color:#999;font-size:12px;padding:14px;text-align:center}
+    .note-bar{font-size:11px;color:#999;padding:10px 4px;
+        border-top:1px solid var(--color-border,#eee);margin-top:16px}
+    .btn-mini{padding:2px 8px;font-size:11px;border:none;border-radius:4px;
+        cursor:pointer;background:var(--color-primary,#2f6f4f);color:#fff;
+        margin-right:4px}
+    .btn-mini.ghost{background:#6b7280}
+    .detail-body{background:var(--color-bg-secondary,#f7f7f7);border:1px
+        solid var(--color-border,#e5e5e5);border-radius:5px;padding:10px;
+        font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto;
+        display:none;font-family:Consolas,monospace}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>41号·AI智能代驾看板</h1>
+    <p>满额赠券 · 三轨智能派单 · AI结算 · 安全监控 · 双向评价 · 日结对账 · 学习回流</p>
+</header>
+
+<div class="container">
+
+    <!-- 连接工具栏 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <label>会员ID <input id="memberId" size="6" value="1"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="refreshData()">手动刷新</button>
+                <label><input type="checkbox" id="autoRef"> 30s 自动刷新</label>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div id="infoBar" class="dash-info"></div>
+        </div>
+    </div>
+
+    <!-- ① 全景统计 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 全景统计</h3></div>
+            <div id="ovCells" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ② 券包 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② 我的券包</h3></div>
+            <table class="matrix" id="couponTable">
+                <thead><tr><th>券码</th><th>面值</th><th>状态</th>
+                    <th>来源订单</th><th>有效期至</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="couponEmpty" style="display:none">暂无代驾券(买竹香酒满 ¥500 支付后自动赠券)</div>
+        </div>
+    </div>
+
+    <!-- ③ 我的行程 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>③ 我的行程</h3>
+                <div class="dash-toolbar">
+                    <select id="rideStatusSel" onchange="loadRides()">
+                        <option value="">全部状态</option>
+                        <option value="settled">已结算</option>
+                        <option value="trip_started">进行中</option>
+                        <option value="dispatched">已派单</option>
+                        <option value="cancelled">已取消</option>
+                    </select>
+                </div>
+            </div>
+            <table class="matrix" id="rideTable">
+                <thead><tr><th>行程号</th><th>状态</th><th>轨道</th>
+                    <th>司机</th><th>里程</th><th>总费用</th><th>券抵</th>
+                    <th>补差</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="rideEmpty" style="display:none">暂无行程</div>
+        </div>
+    </div>
+
+    <!-- ④ 司机池 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>④ 司机池(admin)</h3>
+                <div class="dash-toolbar">
+                    <select id="trackSel" onchange="loadPool()">
+                        <option value="">全部轨道</option>
+                        <option value="self">自营</option>
+                        <option value="partner">加盟</option>
+                        <option value="platform">平台直发</option>
+                    </select>
+                    <select id="poolStatusSel" onchange="loadPool()">
+                        <option value="">全部状态</option>
+                        <option value="online">在线</option>
+                        <option value="offline">休息</option>
+                        <option value="suspended">暂停</option>
+                    </select>
+                </div>
+            </div>
+            <table class="matrix" id="poolTable">
+                <thead><tr><th>ID</th><th>姓名</th><th>轨道</th><th>状态</th>
+                    <th>评分</th><th>完单</th><th>当日</th><th>牌照</th></tr></thead>
+                <tbody></tbody></table>
+        </div>
+    </div>
+
+    <!-- ⑤ 风险面板 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>⑤ 安全风险面板(admin)</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn ghost" onclick="runSafetyScan()">超时扫描</button>
+                </div>
+            </div>
+            <div id="riskSummary" class="ov-cells" style="margin-bottom:10px"></div>
+            <table class="matrix" id="riskTable">
+                <thead><tr><th>ID</th><th>类型</th><th>行程</th><th>详情</th>
+                    <th>状态</th><th>操作</th></tr></thead>
+                <tbody></tbody></table>
+        </div>
+    </div>
+
+    <!-- ⑥ 对账单 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>⑥ 日结对账(admin)</h3>
+                <div class="dash-toolbar">
+                    <input id="reconPeriod" size="12" placeholder="YYYY-MM-DD">
+                    <select id="reconTrackSel">
+                        <option value="partner">加盟</option>
+                        <option value="platform">平台直发</option>
+                    </select>
+                    <button class="dash-btn" onclick="startRecon()">生成对账单</button>
+                </div>
+            </div>
+            <table class="matrix" id="reconTable">
+                <thead><tr><th>对账单号</th><th>账期</th><th>轨道</th><th>单数</th>
+                    <th>本站总额</th><th>平台总额</th><th>差异</th>
+                    <th>状态</th><th>操作</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="detail-body" id="reconDetail"></div>
+        </div>
+    </div>
+
+    <!-- ⑦ 学习闭环 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>⑦ 学习回流闭环(admin)</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn" onclick="collectLearning()">批量回流</button>
+                    <button class="dash-btn ghost" onclick="runLearning()">触发学习</button>
+                </div>
+            </div>
+            <div id="learnCells" class="ov-cells"></div>
+            <div class="detail-body" id="learnDetail"></div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        管理端区块需 admin 角色 · 券包/行程为会员视角 ·
+        对账与学习为 P4 演进项 · 数据口径见 41号设计文档
+    </div>
+</div>
+
+<script src="js/ride-dashboard.js"></script>
+</body>
+</html>

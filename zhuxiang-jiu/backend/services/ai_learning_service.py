@@ -101,6 +101,12 @@ DECISION_THRESHOLDS = {
     "finance_anomaly":    [(50.0, "high"), (25.0, "medium"), (0.0, "low")],
     "auth_risk":          [(70.0, "block"), (50.0, "challenge"),
                            (25.0, "step_up"), (0.0, "allow")],
+    # 41号智能代驾(与各评分器 score() 内等级映射一致)
+    "driver_application_gate": [(70.0, "approved"), (50.0, "manual_review"),
+                                (0.0, "rejected")],
+    "ride_dispatch":      [(70.0, "dispatch"), (50.0, "dispatch_backup"),
+                          (0.0, "escalate")],
+    "ride_review":        [(45.0, "fold"), (30.0, "watch"), (0.0, "show")],
 }
 
 # 学习配置默认值(可按评分器覆盖)

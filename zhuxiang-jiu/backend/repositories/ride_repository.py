@@ -198,6 +198,26 @@ RIDE_REVIEW_PENDING = "pending"    # 待评价
 RIDE_REVIEW_DONE = "done"          # 已评价
 RIDE_REVIEW_STATUSES = (RIDE_REVIEW_PENDING, RIDE_REVIEW_DONE)
 
+# ============================================================
+# P4 日结对账常量(物流结算单模式平移, 设计文档 §2.5 对账)
+# ============================================================
+
+# 对账单状态机: 主链 pending → reconciling → confirmed → paid;
+# 差异分支 diff → investigating → resolved → confirmed
+RECON_STATUS_PENDING = "pending"
+RECON_STATUS_RECONCILING = "reconciling"
+RECON_STATUS_CONFIRMED = "confirmed"
+RECON_STATUS_PAID = "paid"
+RECON_STATUS_DIFF = "diff"
+RECON_STATUS_INVESTIGATING = "investigating"
+RECON_STATUS_RESOLVED = "resolved"
+
+# 差异类型(三方: 本站结算单 vs 平台账单 vs 券核销)
+RECON_DIFF_AMOUNT = "amount_mismatch"       # 金额不符
+RECON_DIFF_MISSING = "order_missing"       # 单据缺失(本站有, 平台无)
+RECON_DIFF_EXTRA = "extra_order"            # 多余单据(平台有, 本站无)
+RECON_DIFF_COUPON = "coupon_unredeemed"    # 结算单的券未核销
+
 
 # ============================================================
 # 种子司机(8 位: 自营3/加盟3/直发2)
@@ -268,17 +288,22 @@ class RideRepository:
     TABLE_SETTLEMENTS = "ride_settlements"
     TABLE_RISK = "ride_risk_events"
     TABLE_REVIEWS = "ride_reviews"
+    TABLE_RECON = "ride_reconciliations"
 
     _INT_FIELDS = ("driverId", "applicationId", "memberId",
                    "completedOrders", "todayOrders", "drivingYears",
                    "totalGranted", "totalUsed", "couponCount", "grantCount",
                    "settlementId", "rideSeq", "riskId", "reviewId",
-                   "reviewScore", "reviewsToday")
+                   "reviewScore", "reviewsToday", "totalOrders",
+                   "diffCount")
     _FLOAT_FIELDS = ("rating", "acceptRate", "cancelRate", "score",
                      "value", "amount", "consistency",
                      "lat", "lng", "distanceKm", "estimatedKm",
                      "totalAmount", "couponDeduction", "extraCharge",
                      "payoutAmount", "dispatchScore")
+    # bool 字段(Redis 序列化为 1/0, 读回须恢复 bool 否则 "0" 为 truthy)
+    _BOOL_FIELDS = ("dispatchFed", "cancelWindowFree", "mileageAnomaly",
+                    "ratingApplied", "resolved", "appFed")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -291,7 +316,8 @@ class RideRepository:
         for key in (self.TABLE_POOL, self.TABLE_APPS,
                     self.TABLE_COUPONS, self.TABLE_PACKAGES,
                     self.TABLE_RIDES, self.TABLE_SETTLEMENTS,
-                    self.TABLE_RISK, self.TABLE_REVIEWS):
+                    self.TABLE_RISK, self.TABLE_REVIEWS,
+                    self.TABLE_RECON):
             self.store.setdefault(key, {})
         # 种子司机(内存模式惰性灌入; Redis 模式由 _ensure_pool_seeded 兜底)
         if not self.store[self.TABLE_POOL]:
@@ -336,6 +362,8 @@ class RideRepository:
                     record[k] = float(v)
                 except (TypeError, ValueError):
                     record[k] = v
+            elif k in RideRepository._BOOL_FIELDS:
+                record[k] = v in (1, "1", True, "True", "true")
             elif isinstance(v, str) and v.startswith(("{", "[")):
                 try:
                     record[k] = json.loads(v)
@@ -641,3 +669,36 @@ class RideRepository:
 
     async def next_review_id(self) -> int:
         return await self.next_id("review")
+
+    # --------------------------------------------------------
+    # 日结对账单(P4, 物流结算单模式平移)
+    # --------------------------------------------------------
+
+    async def save_reconciliation(self, recon: dict) -> dict:
+        return await self._save(self.TABLE_RECON,
+                                 recon["reconNo"], recon)
+
+    async def get_reconciliation(self, recon_no: str) -> dict | None:
+        return await self._get(self.TABLE_RECON, recon_no)
+
+    async def list_reconciliations(self, track: str = None,
+                                   status: str = None,
+                                   period: str = None,
+                                   limit: int = 200) -> list[dict]:
+        recons = await self._list(self.TABLE_RECON, limit=1000)
+        if track:
+            recons = [r for r in recons if r.get("track") == track]
+        if status:
+            recons = [r for r in recons if r.get("status") == status]
+        if period:
+            recons = [r for r in recons
+                      if r.get("period") == period]
+        return recons[:limit]
+
+    async def update_reconciliation(self, recon_no: str,
+                                    fields: dict) -> dict:
+        recon = await self.get_reconciliation(recon_no)
+        if recon is None:
+            raise KeyError(recon_no)
+        recon.update(fields)
+        return await self.save_reconciliation(recon)

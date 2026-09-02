@@ -355,3 +355,84 @@ class DriverGateService:
             },
             "thresholds": {"auto": APP_AUTO_SCORE, "manual": APP_MANUAL_SCORE},
         }
+
+    # --------------------------------------------------------
+    # P4 Hedge 学习回流(第22档案 driver_application_gate)
+    # --------------------------------------------------------
+
+    async def collect_application_feedback(self) -> dict:
+        """批量回流: 审查通过且司机已有服务数据的申请 → 审查决策反馈
+
+        真值口径(司机当前服务评分 → 期望动作):
+            rating ≥ 4.0(MIN_DRIVER_RATING) → approved(审查正确放行)
+            rating < 4.0                      → rejected(审查误放行)
+
+        只回流 approved 且关联司机有完单(appFed 幂等);
+        单条失败不阻断批量。
+
+        Returns:
+            {submitted, skipped, results}
+        """
+        from repositories.ride_repository import MIN_DRIVER_RATING
+        from services.ai_learning_service import submit_feedback
+
+        apps = await self.repo.list_applications(
+            status=APP_STATUS_APPROVED, limit=1000)
+        submitted, skipped, results = 0, 0, []
+        for app in apps:
+            if app.get("appFed"):
+                skipped += 1
+                continue
+            driver_id = app.get("driverId")
+            if not driver_id:
+                skipped += 1
+                continue
+            driver = await self.repo.get_driver(int(driver_id))
+            # 真值需要服务数据: 有完单或被暂停/吊销(服务差信号)
+            if driver is None or (
+                    int(driver.get("completedOrders") or 0) <= 0
+                    and driver.get("status") in ("online",
+                                                "offline")):
+                skipped += 1     # 无服务数据 → 无真值
+                continue
+            snapshot = app.get("scoreSnapshot") or {}
+            factors = snapshot.get("factors") or []
+            if not factors:
+                skipped += 1
+                continue
+            rating = float(driver.get("rating") or 5.0)
+            expected = ("approved" if rating >= MIN_DRIVER_RATING
+                        else "rejected")
+            # 服务恶化(suspended/revoked)按误放行计
+            if driver.get("status") in ("suspended", "revoked"):
+                expected = "rejected"
+                rating = min(rating, 3.9)
+            reward = round((rating - 4.0), 2)   # 线性, 5.0→+1.0
+            try:
+                result = await submit_feedback({
+                    "scorerId": "driver_application_gate",
+                    "factors": factors,
+                    "scoreAtDecision": float(app.get("score") or 0),
+                    "actualAction": "approved",
+                    "expectedAction": expected,
+                    "correct": expected == "approved",
+                    "reward": reward,
+                    "note": (f"applicationId={app.get('applicationId')} "
+                             f"driverRating={rating}"),
+                    "source": "ride",
+                })
+                app["appFed"] = True    # 幂等标记
+                await self.repo.save_application(app)
+                results.append(result)
+                submitted += 1
+            except (KeyError, ValueError) as exc:
+                skipped += 1
+                logger.warning("ride_app_feed_skip app=%s: %s",
+                               app.get("applicationId"), exc)
+        return {"submitted": submitted, "skipped": skipped,
+                "results": results}
+
+    async def run_learning(self) -> dict:
+        """触发第22档案一轮 Hedge 学习(反馈不足抛 ValueError)"""
+        from services.ai_learning_service import run_learning_cycle
+        return await run_learning_cycle("driver_application_gate")
