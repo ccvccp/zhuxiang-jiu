@@ -264,3 +264,71 @@ class RideCouponService:
         return {"success": True, "code": code,
                 "value": coupon.get("value"),
                 "usedRideId": coupon.get("usedRideId")}
+
+    # --------------------------------------------------------
+    # P5: 会员营销 ROI 报表(设计文档 §7 营销 ROI 回流)
+    # --------------------------------------------------------
+
+    async def admin_roi(self) -> dict:
+        """赠券营销 ROI: 发放 → 核销率 → 复购链路统计
+
+        口径:
+            - 发放/核销/过期/作废/持有: 全量券状态分布
+            - 核销率 = used / totalGranted
+            - 复购会员: 同一会员有 ≥2 个不同来源订单赠券
+              (再次满额下单才会产生新赠券, 为复购代理口径)
+            - 营销成本 = 已核销券面值合计(本站支付部分)
+            - 券均拉动: 每张核销券对应的行程总费用均值
+        """
+        coupons = await self.repo.list_coupons(limit=5000)
+        granted = len(coupons)
+        by_status = {s: 0 for s in ("granted", "used",
+                                    "expired", "revoked")}
+        used_value = 0.0
+        member_orders = {}   # memberId → set(orderId)
+        for c in coupons:
+            st = c.get("status")
+            if st in by_status:
+                by_status[st] += 1
+            if st == "used":
+                used_value += float(c.get("value") or 0)
+            mid = int(c.get("memberId") or 0)
+            oid = c.get("orderId")
+            if mid and oid:
+                member_orders.setdefault(mid, set()).add(oid)
+
+        used = by_status["used"]
+        used_rate = round(used / granted, 4) if granted else 0.0
+        repeat_members = sum(1 for orders in member_orders.values()
+                            if len(orders) >= 2)
+        distinct_members = len(member_orders)
+        repeat_rate = (round(repeat_members / distinct_members, 4)
+                       if distinct_members else 0.0)
+
+        # 核销券拉动的行程费用(券 → 行程结算总额)
+        rides_total = 0.0
+        settled_with_coupon = 0
+        rides = await self.repo.list_rides(limit=5000)
+        for r in rides:
+            if r.get("status") != "settled":
+                continue
+            pricing = r.get("pricing") or {}
+            if pricing.get("couponRedeemed"):
+                settled_with_coupon += 1
+                rides_total += float(pricing.get("totalAmount") or 0)
+        avg_ride = round(rides_total / settled_with_coupon, 2) \
+            if settled_with_coupon else 0.0
+
+        return {
+            "success": True,
+            "totalGranted": granted,
+            "byStatus": by_status,
+            "usedRate": used_rate,
+            "distinctMembers": distinct_members,
+            "repeatMembers": repeat_members,
+            "repeatRate": repeat_rate,
+            "marketingCost": round(used_value, 2),
+            "settledRidesWithCoupon": settled_with_coupon,
+            "avgRideAmountPerUsedCoupon": avg_ride,
+            "couponValue": COUPON_VALUE,
+        }

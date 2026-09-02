@@ -197,6 +197,11 @@ class ReconResolveRequest(PydBaseModel):
     resolution: str = Field("", max_length=500, description="差异处理说明")
 
 
+class ReviewAnnotateRequest(PydBaseModel):
+    expectedAction: str = Field(..., description="真值动作: show/watch/fold")
+    note: str = Field("", max_length=200, description="标注说明")
+
+
 # ============================================================
 # 券引擎(乘客端 + 管理端)
 # ============================================================
@@ -832,16 +837,20 @@ async def pay_reconciliation(
 async def collect_learning(
     x_role: str = Header(default="", alias="X-Role"),
 ):
-    """批量回流: 派单决策(settled+有评价)+审查决策(有服务数据)"""
+    """批量回流: 派单决策(settled+有评价)+审查决策(有服务数据)
+    +评价审评决策(已标注)"""
     _require_admin(x_role)
     try:
         dispatch = await _dispatch_service.collect_learning_feedback()
         gate = await _gate_service.collect_application_feedback()
+        review = await _review_service.collect_review_feedback()
         return {"success": True,
                 "dispatch": {"submitted": dispatch["submitted"],
                              "skipped": dispatch["skipped"]},
                 "gate": {"submitted": gate["submitted"],
-                         "skipped": gate["skipped"]}}
+                         "skipped": gate["skipped"]},
+                "review": {"submitted": review["submitted"],
+                           "skipped": review["skipped"]}}
     except Exception as e:
         raise _handle(e) from e
 
@@ -850,12 +859,13 @@ async def collect_learning(
 async def run_learning(
     x_role: str = Header(default="", alias="X-Role"),
 ):
-    """触发两个档案的 Hedge 学习(反馈不足 409)"""
+    """触发三个档案的 Hedge 学习(反馈不足 409)"""
     _require_admin(x_role)
     results = {}
     for scorer_id, service in (
             ("ride_dispatch", _dispatch_service),
-            ("driver_application_gate", _gate_service)):
+            ("driver_application_gate", _gate_service),
+            ("ride_review", _review_service)):
         try:
             results[scorer_id] = await service.run_learning()
         except ValueError as exc:
@@ -867,12 +877,13 @@ async def run_learning(
 async def learning_status(
     x_role: str = Header(default="", alias="X-Role"),
 ):
-    """学习回流状态(两档案 pending 反馈/幂等标记统计)"""
+    """学习回流状态(三档案 pending 反馈/幂等标记统计)"""
     _require_admin(x_role)
     try:
         from services.ai_learning_service import get_weights_view
         rides = await _dispatch_service.repo.list_rides(limit=2000)
         apps = await _gate_service.repo.list_applications(limit=1000)
+        reviews = await _review_service.repo.list_reviews(limit=2000)
         return {
             "success": True,
             "dispatch": {
@@ -885,13 +896,52 @@ async def learning_status(
                                 if a.get("status") == "approved"),
                 "fed": sum(1 for a in apps if a.get("appFed")),
             },
+            "review": {
+                "annotated": sum(1 for r in reviews
+                                 if r.get("annotatedAction")),
+                "fed": sum(1 for r in reviews if r.get("reviewFed")),
+            },
             "weights": {
                 "ride_dispatch":
                     await get_weights_view("ride_dispatch"),
                 "driver_application_gate":
                     await get_weights_view("driver_application_gate"),
+                "ride_review":
+                    await get_weights_view("ride_review"),
             },
         }
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P5: 评价真值标注 + 营销 ROI 报表(管理端)
+# ============================================================
+
+@router.post("/api/ride/admin/reviews/{review_id}/annotate")
+async def annotate_review(
+    review_id: int,
+    body: ReviewAnnotateRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """管理端标注评价处置真值(ride_review 学习回流真值源)"""
+    _require_admin(x_role)
+    try:
+        review = await _review_service.annotate(
+            review_id, body.expectedAction, note=body.note)
+        return {"success": True, "review": review}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/admin/roi")
+async def admin_roi(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """赠券营销 ROI: 发放/核销率/复购/成本/券均拉动(管理端看板)"""
+    _require_admin(x_role)
+    try:
+        return await _coupon_service.admin_roi()
     except Exception as e:
         raise _handle(e) from e
 

@@ -6,7 +6,7 @@
     后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
     鉴权: 管理端区块 X-Role: admin / 会员端区块 X-Member-Id
     区块: ①全景统计 ②券包 ③我的行程 ④司机池 ⑤风险面板
-          ⑥对账单 ⑦学习闭环
+          ⑥对账单 ⑦学习闭环 ⑧赠券营销ROI
 -->
 <html lang="zh-CN">
 <head>
@@ -220,6 +220,14 @@
             </div>
             <div id="learnCells" class="ov-cells"></div>
             <div class="detail-body" id="learnDetail"></div>
+        </div>
+    </div>
+
+    <!-- ⑧ 营销 ROI -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑧ 赠券营销 ROI(admin)</h3></div>
+            <div id="roiCells" class="ov-cells"><div class="dash-empty">加载中…</div></div>
         </div>
     </div>
 

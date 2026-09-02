@@ -9,7 +9,8 @@
     ① 派单决策批量回流(ride_dispatch 第23档案: settled+有评价行程)
     ② 审查决策批量回流(driver_application_gate 第22档案:
        approved 且司机有服务数据的申请)
-    ③ 触发两档案 Hedge 学习(反馈不足 ValueError 静默跳过)
+    ③ 评价审评决策批量回流(ride_review 第24档案: 已标注评价)
+    ④ 触发三档案 Hedge 学习(反馈不足 ValueError 静默跳过)
 """
 
 import asyncio
@@ -41,6 +42,7 @@ async def _learning_loop() -> None:
         try:
             from services.ride_dispatch_service import RideDispatchService
             from services.driver_gate_service import DriverGateService
+            from services.ride_review_service import RideReviewService
 
             dispatch = RideDispatchService()
             collected = await dispatch.collect_learning_feedback()
@@ -54,8 +56,15 @@ async def _learning_loop() -> None:
                         "skipped=%s", collected.get("submitted"),
                         collected.get("skipped"))
 
+            review = RideReviewService()
+            collected = await review.collect_review_feedback()
+            logger.info("ride_learning_scheduled review submitted=%s "
+                        "skipped=%s", collected.get("submitted"),
+                        collected.get("skipped"))
+
             for service, name in ((dispatch, "ride_dispatch"),
-                                  (gate, "driver_application_gate")):
+                                  (gate, "driver_application_gate"),
+                                  (review, "ride_review")):
                 try:
                     learned = await service.run_learning()
                     logger.info("ride_learning_cycle %s promoted=%s",

@@ -22,6 +22,7 @@ from repositories.ride_repository import (
     RideRepository,
     REVIEW_BY_PASSENGER, REVIEW_BY_DRIVER, REVIEW_DIRECTIONS,
     REVIEW_ACTION_SHOW, REVIEW_ACTION_WATCH, REVIEW_ACTION_FOLD,
+    REVIEW_ACTIONS,
     REVIEW_SCORE_MIN, REVIEW_SCORE_MAX,
     RIDE_STATUS_SETTLED, RIDE_STATUS_CANCELLED,
 )
@@ -246,3 +247,99 @@ class RideReviewService:
                 by_direction[r["direction"]] += 1
         return {"success": True, "total": len(reviews),
                 "byAction": by_action, "byDirection": by_direction}
+
+    # --------------------------------------------------------
+    # P5: 管理端真值标注 + ride_review 学习回流
+    # --------------------------------------------------------
+
+    async def annotate(self, review_id: int, expected_action: str,
+                        reviewer: str = "admin",
+                        note: str = "") -> dict:
+        """管理端人工标注评价处置真值(ride_review 回流真值源)
+
+        场景: AI 审评疑似误判(误折叠好评价/漏折叠恶意评价)时,
+        管理员给出 ground truth(show/watch/fold), 作为
+        collect_review_feedback 的期望动作。
+
+        Raises:
+            KeyError: 评价不存在
+            ValueError: 动作非法/已标注(幂等)
+        """
+        if expected_action not in REVIEW_ACTIONS:
+            raise ValueError(f"标注动作非法: {expected_action}"
+                             f"(允许: {'/'.join(REVIEW_ACTIONS)})")
+        review = await self.repo.get_review(int(review_id))
+        if review is None:
+            raise KeyError(f"评价 {review_id} 不存在")
+        if review.get("annotatedAction"):
+            raise ValueError(f"评价 {review_id} 已标注("
+                             f"{review.get('annotatedAction')})")
+        review.update({
+            "annotatedAction": expected_action,
+            "annotationNote": note,
+            "annotator": reviewer,
+            "annotatedAt": _now_iso(),
+        })
+        await self.repo.save_review(review)
+        logger.info("ride_review_annotated review=%s expected=%s",
+                    review_id, expected_action)
+        return review
+
+    async def collect_review_feedback(self) -> dict:
+        """批量回流: 已标注且未回流的评价 → ride_review 决策反馈
+
+        真值口径: 管理端标注的 annotatedAction 为期望动作;
+        AI 原判 action 为实际动作; 命中 → correct。
+        单条失败不阻断批量。
+
+        Returns:
+            {submitted, skipped, results}
+        """
+        from services.ai_learning_service import submit_feedback
+
+        reviews = await self.repo.list_reviews(annotated=True, limit=1000)
+        submitted, skipped, results = 0, 0, []
+        for review in reviews:
+            if review.get("reviewFed"):
+                skipped += 1
+                continue
+            snapshot = review.get("scoreSnapshot") or {}
+            factors = snapshot.get("factors") or []
+            if not factors:
+                skipped += 1
+                continue
+            actual = review.get("action") or "show"
+            expected = review.get("annotatedAction")
+            correct = actual == expected
+            # 评价审评为风险向(高分=可疑): 命中弱正, 误判弱负
+            # (fold/show 两极误判影响大, 加权到 ±0.8)
+            reward = 0.5 if correct else (-0.8 if {actual, expected}
+                                         & {REVIEW_ACTION_FOLD} else -0.5)
+            try:
+                result = await submit_feedback({
+                    "scorerId": "ride_review",
+                    "factors": factors,
+                    "scoreAtDecision": float(snapshot.get("score") or 0),
+                    "actualAction": actual,
+                    "expectedAction": expected,
+                    "correct": correct,
+                    "reward": reward,
+                    "note": (f"reviewId={review.get('reviewId')} "
+                             f"annotated={expected}"),
+                    "source": "ride",
+                })
+                review["reviewFed"] = True    # 幂等标记
+                await self.repo.save_review(review)
+                results.append(result)
+                submitted += 1
+            except (KeyError, ValueError) as exc:
+                skipped += 1
+                logger.warning("ride_review_feed_skip review=%s: %s",
+                               review.get("reviewId"), exc)
+        return {"submitted": submitted, "skipped": skipped,
+                "results": results}
+
+    async def run_learning(self) -> dict:
+        """触发 ride_review 一轮 Hedge 学习(反馈不足抛 ValueError)"""
+        from services.ai_learning_service import run_learning_cycle
+        return await run_learning_cycle("ride_review")

@@ -277,6 +277,8 @@ async function loadLearning() {
         ['派单已回流', (b.dispatch || {}).fed],
         ['审查已通过', (b.gate || {}).approved],
         ['审查已回流', (b.gate || {}).fed],
+        ['评价已标注', (b.review || {}).annotated],
+        ['评价已回流', (b.review || {}).fed],
     ];
     document.getElementById('learnCells').innerHTML =
         cells.map(function (c) {
@@ -304,12 +306,37 @@ async function runLearning() {
     } catch (e) { showError(e.message); }
 }
 
+/* ---------- ⑧ 营销 ROI ---------- */
+async function loadRoi() {
+    var b = await fetchJson(api('/api/ride/admin/roi'), {}, '营销ROI', true);
+    var st = b.byStatus || {};
+    var cells = [
+        ['总发放', b.totalGranted],
+        ['已核销', st.used || 0],
+        ['核销率', ((b.usedRate || 0) * 100).toFixed(1) + '%'],
+        ['未使用', st.granted || 0],
+        ['已过期', st.expired || 0],
+        ['已作废', st.revoked || 0],
+        ['覆盖会员', b.distinctMembers],
+        ['复购会员', b.repeatMembers],
+        ['复购率', ((b.repeatRate || 0) * 100).toFixed(1) + '%'],
+        ['营销成本(¥)', b.marketingCost],
+        ['券均拉动(¥)', b.avgRideAmountPerUsedCoupon],
+    ];
+    document.getElementById('roiCells').innerHTML =
+        cells.map(function (c) {
+            return '<div class="ov-cell"><div class="k">' + esc(c[0])
+                + '</div><div class="v">' + esc(c[1]) + '</div></div>';
+        }).join('');
+}
+
 /* ---------- 总刷新 ---------- */
 async function refreshData() {
     try {
         await Promise.all([
             loadOverview(), loadCoupons(), loadRides(),
             loadPool(), loadRisk(), loadRecons(), loadLearning(),
+            loadRoi(),
         ]);
         markUpdate();
     } catch (e) { showError(e.message); }

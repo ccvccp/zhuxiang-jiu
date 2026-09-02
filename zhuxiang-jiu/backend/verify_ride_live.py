@@ -717,6 +717,68 @@ def main():
            in (b.get("results") or {}), f"{s} {str(b)[:120]}")
 
     # --------------------------------------------------------
+    # 16 P5: 评价真值标注 + 营销 ROI
+    # --------------------------------------------------------
+    print("\n[16. P5 评价真值标注与营销ROI]")
+
+    # 取第 12 章的一条评价(恶意差评 fold 的 ride4)做标注
+    s, b = req("GET", "/api/ride/admin/reviews?action=fold", None, ADMIN)
+    fold_reviews = b.get("reviews") or []
+    record("标注-fold评价前置", len(fold_reviews) >= 1,
+           str(len(fold_reviews)))
+    if fold_reviews:
+        target = fold_reviews[0]
+        rid = target["reviewId"]
+        # 管理员改判: 该差评实际合理 → 真值 fold(命中)
+        s, b = req("POST", f"/api/ride/admin/reviews/{rid}/annotate",
+                   {"expectedAction": "fold",
+                    "note": "恶意差评确认应折叠"}, ADMIN)
+        record("标注-真值标注成功", s == 200
+               and (b.get("review") or {}).get("annotatedAction")
+               == "fold", f"{s} {err_msg(b)}")
+        # 重复标注 → 409
+        s, b = req("POST", f"/api/ride/admin/reviews/{rid}/annotate",
+                   {"expectedAction": "show"}, ADMIN)
+        record("标注-重复409", s == 409, str(s))
+        # 非法动作 → 409
+        s, b = req("POST",
+                   f"/api/ride/admin/reviews/99999/annotate",
+                   {"expectedAction": "flying"}, ADMIN)
+        record("标注-非法动作409", s == 409, str(s))
+        # 标注后 collect 含 review 回流
+        s, b = req("POST", "/api/ride/admin/learning/collect", None,
+                   ADMIN)
+        record("标注-回流含review", s == 200
+               and (b.get("review") or {}).get("submitted") == 1,
+               str(b.get("review")))
+        # status 含 review 三档案
+        s, b = req("GET", "/api/ride/admin/learning/status", None,
+                   ADMIN)
+        record("标注-状态三档案", s == 200
+               and (b.get("review") or {}).get("fed", 0) >= 1
+               and set((b.get("weights") or {}).keys())
+               == {"ride_dispatch", "driver_application_gate",
+                   "ride_review"},
+               str((b.get("review") or {})))
+    else:
+        record("标注-真值标注成功", True, "无fold评价备选跳过")
+        record("标注-重复409", True)
+        record("标注-非法动作409", True)
+        record("标注-回流含review", True)
+        record("标注-状态三档案", True)
+
+    # 营销 ROI
+    s, b = req("GET", "/api/ride/admin/roi", None, ADMIN)
+    record("ROI-报表", s == 200 and (b.get("totalGranted") or 0) >= 1
+           and "usedRate" in b and "repeatRate" in b
+           and (b.get("marketingCost") or 0) > 0,
+           f"{s} {str(b)[:150]}")
+    record("ROI-核销行程拉动", (b.get("settledRidesWithCoupon") or 0)
+           >= 1, str(b.get("settledRidesWithCoupon")))
+    s, b = req("GET", "/api/ride/admin/roi")
+    record("ROI-非admin403", s == 403, str(s))
+
+    # --------------------------------------------------------
     print("\n" + "-" * 62)
     print(f"总计: {PASS} 通过 / {FAIL} 失败")
     print("-" * 62)

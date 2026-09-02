@@ -303,7 +303,7 @@ class RideRepository:
                      "payoutAmount", "dispatchScore")
     # bool 字段(Redis 序列化为 1/0, 读回须恢复 bool 否则 "0" 为 truthy)
     _BOOL_FIELDS = ("dispatchFed", "cancelWindowFree", "mileageAnomaly",
-                    "ratingApplied", "resolved", "appFed")
+                    "ratingApplied", "resolved", "appFed", "reviewFed")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -652,6 +652,7 @@ class RideRepository:
     async def list_reviews(self, driver_id: int = None,
                           member_id: int = None, action: str = None,
                           direction: str = None,
+                          annotated: bool = None,
                           limit: int = 200) -> list[dict]:
         reviews = await self._list(self.TABLE_REVIEWS, limit=2000)
         if driver_id is not None:
@@ -665,6 +666,10 @@ class RideRepository:
         if direction:
             reviews = [r for r in reviews
                        if r.get("direction") == direction]
+        if annotated is not None:
+            reviews = [r for r in reviews
+                       if bool(r.get("annotatedAction"))
+                       == bool(annotated)]
         return reviews[:limit]
 
     async def next_review_id(self) -> int:
