@@ -156,7 +156,9 @@ class WorkRadarService:
             bloggers = []
             for bid in blogger_ids:
                 blogger = await self.repo.get_blogger(bid)
-                if blogger is not None:
+                # paused 博主(手动/AI止损)不扫描——与全池口径一致
+                if blogger is not None \
+                        and blogger.get("status") == BLOGGER_STATUS_ACTIVE:
                     bloggers.append(blogger)
         else:
             bloggers = await self.repo.list_bloggers(

@@ -98,11 +98,32 @@ FOLLOW_GAP_HOURS = int(os.environ.get("BLOGGER_FOLLOW_GAP_HOURS", "4"))
 # 单博主连续零引流止损线(P1 学习回流用, 常量先行)
 AUTO_PAUSE_STREAK = 3
 
+# ============================================================
+# P1 博主权重自进化常量(设计文档 §2.6)
+# ============================================================
+
+# weightAdjust 边界(层2进化偏移量, 派生 weight = clamp(base+adjust))
+WEIGHT_ADJUST_MAX = 0.3
+WEIGHT_ADJUST_MIN = -0.3
+# weight 派生值边界
+WEIGHT_FLOOR = 0.1
+WEIGHT_CEIL = 1.0
+# 进化步长(强引流+0.05 / 有效引流+0.02 / 零引流-0.05 / 止损再罚-0.05)
+WEIGHT_STEP_GMV = 0.05
+WEIGHT_STEP_CLICK = 0.02
+WEIGHT_STEP_ZERO = -0.05
+# 反馈沉淀窗口(小时): publishedAt ≤ now-N 才批量回流(短内容流量80%
+# 集中在24h内, 与同博主24h冷却周期同构)
+FEEDBACK_SETTLE_HOURS = int(
+    os.environ.get("BLOGGER_FEEDBACK_SETTLE_HOURS", "24"))
+
+# 层2进化字段(float, 序列化口径)
 _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "fansWan", "likes", "comments", "shares",
-               "durationSeconds", "publishedAtTs")
+               "durationSeconds", "publishedAtTs",
+               "zeroTrafficStreak", "trafficInfluencerId")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
-                 "overlapRatio")
+                 "overlapRatio", "weightBase", "weightAdjust")
 
 
 def _now_iso() -> str:
@@ -149,6 +170,7 @@ def _build_seed_bloggers() -> dict[int, dict]:
     pool = {}
     for i, (platform, account, nick, fans, domain, engage) in \
             enumerate(seeds, start=1):
+        weight_base = fan_tier_weight(fans)
         pool[i] = {
             "bloggerId": i,
             "platform": platform,
@@ -158,13 +180,45 @@ def _build_seed_bloggers() -> dict[int, dict]:
             "domain": domain,
             "engagementRate": engage,
             "status": BLOGGER_STATUS_ACTIVE,
-            "weight": fan_tier_weight(fans),
+            # P1 层2自进化: weight = clamp(weightBase+weightAdjust)
+            "weightBase": weight_base,
+            "weightAdjust": 0.0,
+            "weight": weight_base,
+            "pausedReason": "",
             "lastSeenWorkAt": "",
             "zeroTrafficStreak": 0,
+            "trafficInfluencerId": 0,
             "createdAt": _now_iso(),
             "updatedAt": _now_iso(),
         }
     return pool
+
+
+def derived_weight(weight_base: float, weight_adjust: float) -> float:
+    """P1 层2派生权重: clamp(base+adjust, 0.1, 1.0)"""
+    return round(max(WEIGHT_FLOOR,
+                     min(WEIGHT_CEIL,
+                         float(weight_base or 0)
+                         + float(weight_adjust or 0))), 4)
+
+
+def normalize_blogger(record: dict) -> dict:
+    """P1 字段向后兼容: 旧记录惰性补进化字段缺省值
+
+    weightBase 缺省按当前 weight 回填(旧口径 weight 即静态基线)。
+    """
+    base = record.get("weightBase")
+    if base is None or base == "":
+        record["weightBase"] = float(record.get("weight") or 0)
+    if record.get("weightAdjust") in (None, ""):
+        record["weightAdjust"] = 0.0
+    if record.get("pausedReason") is None:
+        record["pausedReason"] = ""
+    if record.get("zeroTrafficStreak") is None:
+        record["zeroTrafficStreak"] = 0
+    if record.get("trafficInfluencerId") in (None, ""):
+        record["trafficInfluencerId"] = 0
+    return record
 
 
 class BloggerRepository:
@@ -304,7 +358,8 @@ class BloggerRepository:
 
     async def get_blogger(self, blogger_id: int) -> dict | None:
         await self._ensure_pool_seeded()
-        return await self._get(self.TABLE_POOL, blogger_id)
+        record = await self._get(self.TABLE_POOL, blogger_id)
+        return normalize_blogger(record) if record else record
 
     async def update_blogger(self, blogger_id: int,
                              fields: dict) -> dict:
@@ -317,6 +372,7 @@ class BloggerRepository:
         records = await self._list(self.TABLE_POOL, limit=1000)
         result = []
         for r in records:
+            r = normalize_blogger(r)
             if status and r.get("status") != status:
                 continue
             if platform and r.get("platform") != platform:

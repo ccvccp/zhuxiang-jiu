@@ -45,7 +45,10 @@ from repositories.blogger_repository import (
     COMPLIANCE_PASS_SCORE, COMPLIANCE_HITL_FLOOR,
     PLAGIARISM_OVERLAP_LIMIT,
     BLOGGER_DAILY_CAP, BLOGGER_FOLLOW_COOLDOWN_HOURS, FOLLOW_GAP_HOURS,
-    fan_tier_weight,
+    AUTO_PAUSE_STREAK, WEIGHT_ADJUST_MAX, WEIGHT_ADJUST_MIN,
+    WEIGHT_STEP_GMV, WEIGHT_STEP_CLICK, WEIGHT_STEP_ZERO,
+    FEEDBACK_SETTLE_HOURS,
+    fan_tier_weight, derived_weight,
 )
 from repositories.promo_repository import (
     DRINKING_ACTION_WORDS, AUTHORITY_BACKING_WORDS,
@@ -674,6 +677,7 @@ class BloggerService:
         if float(fans_wan or 0) <= 0:
             raise ValueError("粉丝量须大于0(单位: 万)")
         blogger_id = await self.repo.next_blogger_id()
+        weight_base = fan_tier_weight(float(fans_wan))
         blogger = {
             "bloggerId": blogger_id,
             "platform": platform,
@@ -683,7 +687,11 @@ class BloggerService:
             "domain": domain,
             "engagementRate": float(engagement_rate),
             "status": BLOGGER_STATUS_ACTIVE,
-            "weight": fan_tier_weight(float(fans_wan)),
+            # P1 层2自进化字段
+            "weightBase": weight_base,
+            "weightAdjust": 0.0,
+            "weight": weight_base,
+            "pausedReason": "",
             "lastSeenWorkAt": "",
             "zeroTrafficStreak": 0,
             "trafficInfluencerId": 0,
@@ -718,8 +726,12 @@ class BloggerService:
             raise ValueError(f"领域无效: {fields['domain']}")
         blogger.update(fields)
         if "fansWan" in fields:
-            blogger["weight"] = fan_tier_weight(
+            # P1: 粉丝量变化联动静态基线, adjust 保留(进化教训不白给)
+            blogger["weightBase"] = fan_tier_weight(
                 float(blogger["fansWan"] or 0))
+            blogger["weight"] = derived_weight(
+                blogger["weightBase"],
+                blogger.get("weightAdjust") or 0.0)
         blogger["updatedAt"] = _now_iso()
         return await self.repo.save_blogger(blogger)
 
@@ -760,10 +772,23 @@ class BloggerService:
             raise ValueError(
                 f"非法状态({status}, 须为{BLOGGER_STATUS_ACTIVE}/"
                 f"{BLOGGER_STATUS_PAUSED})")
-        blogger = await self.repo.update_blogger(blogger_id, {
-            "status": status, "updatedAt": _now_iso()})
+        blogger = await self.repo.get_blogger(blogger_id)
+        if blogger is None:
+            raise KeyError(f"博主不存在(bloggerId={blogger_id})")
+        fields = {"status": status, "updatedAt": _now_iso()}
+        if status == BLOGGER_STATUS_PAUSED:
+            # admin 手动暂停(区别于 AI 止损 auto_loss_cut)
+            fields["pausedReason"] = "manual"
+        else:
+            # 恢复: 清零止损计数与原因, weightAdjust 保留
+            # (进化教训不白给, 需连续引流赚回)
+            fields["zeroTrafficStreak"] = 0
+            fields["pausedReason"] = ""
+        blogger.update(fields)
+        blogger = await self.repo.save_blogger(blogger)
         await self._audit(blogger_id, "status_change",
-                          {"status": status})
+                          {"status": status,
+                           "weightAdjust": blogger.get("weightAdjust")})
         return blogger
 
     async def report_overview(self) -> dict:
@@ -783,6 +808,12 @@ class BloggerService:
                               == BLOGGER_STATUS_ACTIVE),
                 "paused": sum(1 for b in bloggers if b.get("status")
                               == BLOGGER_STATUS_PAUSED),
+                "autoPaused": sum(1 for b in bloggers
+                                  if b.get("pausedReason")
+                                  == "auto_loss_cut"),
+                "evolved": sum(1 for b in bloggers
+                               if float(b.get("weightAdjust") or 0)
+                               != 0),
             },
             "works": {
                 "total": len(works),
@@ -818,6 +849,281 @@ class BloggerService:
         }
 
     # ============================================================
+    # 7. P1 学习闭环与权重自进化(设计文档 §2.6)
+    # ============================================================
+
+    async def submit_learning_feedback(
+            self, follow_id: int, clicks: int = None,
+            registrations: int = None,
+            orders: int = None) -> dict:
+        """单条跟随内容效果回流(层1 Hedge + 层2 博主权重进化)
+
+        奖励语义: clicks>0 → auto_follow 决策 correct(+1);
+        零点击 → 失误(-1)。因子快照取作品决策时刻的 scoreSnapshot
+        (Hedge 正确姿势: 用决策时 contribution 计算影响度)。
+        GMV 不进 Hedge(留给层2), 避免"有点击无转化"误判决策失误。
+
+        Raises:
+            KeyError: 跟随内容/作品/博主不存在
+            ValueError: 未发布 / 已回流(learningFed 幂等) / 快照缺失
+        """
+        follow = await self.repo.get_follow(follow_id)
+        if follow is None:
+            raise KeyError(f"跟随内容不存在(followId={follow_id})")
+        if follow.get("status") != FOLLOW_STATUS_PUBLISHED:
+            raise ValueError(
+                f"仅已发布内容可回流效果(当前{follow.get('status')})")
+        if follow.get("learningFed"):
+            raise ValueError(
+                f"内容已回流过效果(learningFed), 幂等不重复提交")
+        # clicks 未指定 → 自动归因聚合(含 GMV)
+        gmv = 0.0
+        if clicks is None:
+            metrics = await self._link_metrics(
+                [follow.get("shortCode", "")])
+            clicks = metrics["clicks"]
+            registrations = (registrations
+                             if registrations is not None
+                             else metrics["registered"])
+            orders = (orders if orders is not None
+                      else metrics["ordered"])
+            gmv = metrics["gmv"]
+        work = await self.repo.get_work(
+            follow.get("workId", 0)) or {}
+        factors = ((work.get("scoreSnapshot") or {})
+                   .get("factors")) or []
+        if not factors:
+            raise ValueError(
+                "作品评分快照缺失, 无法回流(需重新扫描决策生成)")
+        correct = int(clicks) > 0
+        from services.ai_learning_service import submit_feedback
+        result = await submit_feedback({
+            "scorerId": "blogger_work_gate",
+            "factors": factors,
+            "scoreAtDecision": work.get("score", 0),
+            "actualAction": ("auto_follow" if correct
+                             else "no_traffic"),
+            "correct": correct,
+            "note": (f"followId={follow_id} clicks={clicks} "
+                     f"blogger={follow.get('bloggerId')} "
+                     f"platform={follow.get('platform')}"),
+            "source": "blogger",
+        })
+        # 幂等标记 + 指标留痕(重复提交直接 409)
+        follow.update({
+            "learningFed": True,
+            "learningMetrics": {
+                "clicks": int(clicks),
+                "registrations": int(registrations or 0),
+                "orders": int(orders or 0),
+                "gmv": round(float(gmv), 2),
+            },
+            "learningFedAt": _now_iso(),
+        })
+        await self.repo.save_follow(follow)
+        # 层2 博主权重自进化(GMV 驱动, best-effort 不阻断回流)
+        evolution = await self._evolve_blogger_weight(
+            follow, {"clicks": int(clicks),
+                     "registered": int(registrations or 0),
+                     "gmv": round(float(gmv), 2)})
+        logger.info("blogger_learning_feedback follow=%s clicks=%s "
+                    "correct=%s adjust=%s",
+                    follow_id, clicks, correct,
+                    (evolution or {}).get("weightAdjust"))
+        result["bloggerEvolution"] = evolution
+        return result
+
+    async def _evolve_blogger_weight(self, follow: dict,
+                                     metrics: dict) -> dict | None:
+        """层2 博主池权重进化(规则步进, 可解释可回滚)
+
+        步长: GMV>0 +0.05 / 点击>0 +0.02 / 零引流 -0.05;
+        连续 AUTO_PAUSE_STREAK 条零引流 → auto-paused(AI 止损)。
+
+        Returns:
+            {bloggerId, weightBase, weightAdjust(新), weightOld,
+             weightNew, zeroTrafficStreak, autoPaused} 或 None(博主缺失)
+        """
+        blogger = await self.repo.get_blogger(
+            follow.get("bloggerId", 0))
+        if blogger is None:
+            return None
+        clicks = int(metrics.get("clicks") or 0)
+        registered = int(metrics.get("registered") or 0)
+        gmv = float(metrics.get("gmv") or 0)
+        adjust = float(blogger.get("weightAdjust") or 0.0)
+        streak = int(blogger.get("zeroTrafficStreak") or 0)
+        reason = ""
+        if gmv > 0:
+            step, streak = WEIGHT_STEP_GMV, 0
+            reason = f"GMV引流{gmv}(+{WEIGHT_STEP_GMV})"
+        elif clicks > 0:
+            step, streak = WEIGHT_STEP_CLICK, 0
+            reason = f"点击引流{clicks}(+{WEIGHT_STEP_CLICK})"
+        elif registered > 0:
+            step = 0.0   # 弱引流(有注册无点击归并口径), 不奖不罚
+            reason = f"仅注册{registered}(观察)"
+        else:
+            step, streak = WEIGHT_STEP_ZERO, streak + 1
+            reason = f"零引流(-{-WEIGHT_STEP_ZERO})"
+        adjust = max(WEIGHT_ADJUST_MIN,
+                     min(WEIGHT_ADJUST_MAX, adjust + step))
+        weight_old = float(blogger.get("weight") or 0)
+        weight_new = derived_weight(
+            blogger.get("weightBase"), adjust)
+        auto_paused = False
+        fields = {
+            "weightAdjust": round(adjust, 4),
+            "weight": weight_new,
+            "zeroTrafficStreak": streak,
+            "updatedAt": _now_iso(),
+        }
+        # AI 止损: 连续 N 条零引流 → 出池停扫(再罚一档)
+        if streak >= AUTO_PAUSE_STREAK \
+                and blogger.get("status") == BLOGGER_STATUS_ACTIVE:
+            auto_paused = True
+            fields.update({
+                "status": BLOGGER_STATUS_PAUSED,
+                "pausedReason": "auto_loss_cut",
+                "weightAdjust": round(max(
+                    WEIGHT_ADJUST_MIN, adjust + WEIGHT_STEP_ZERO), 4),
+            })
+            fields["weight"] = derived_weight(
+                blogger.get("weightBase"),
+                fields["weightAdjust"])
+            weight_new = fields["weight"]
+        blogger.update(fields)
+        await self.repo.save_blogger(blogger)
+        await self._audit(
+            blogger["bloggerId"], "weight_evolve", {
+                "followId": follow.get("followId"),
+                "reason": reason,
+                "metrics": metrics,
+                "weightOld": weight_old,
+                "weightNew": weight_new,
+                "weightAdjust": fields["weightAdjust"],
+                "zeroTrafficStreak": streak,
+                "autoPaused": auto_paused,
+            })
+        if auto_paused:
+            await self._audit(
+                blogger["bloggerId"], "auto_paused", {
+                    "streak": streak,
+                    "reason": f"连续{streak}条零引流, AI止损出池",
+                })
+            logger.warning("blogger_auto_paused blogger=%s streak=%s",
+                           blogger["bloggerId"], streak)
+        return {
+            "bloggerId": blogger["bloggerId"],
+            "weightBase": blogger.get("weightBase"),
+            "weightAdjust": fields["weightAdjust"],
+            "weightOld": round(weight_old, 4),
+            "weightNew": round(weight_new, 4),
+            "zeroTrafficStreak": streak,
+            "autoPaused": auto_paused,
+            "reason": reason,
+        }
+
+    async def collect_learning_feedback(self) -> dict:
+        """批量回流: 已发布未回流且过沉淀窗口的内容
+
+        窗口: publishedAt ≤ now - FEEDBACK_SETTLE_HOURS(默认24h,
+        短内容流量80%集中在24h内)。
+
+        Returns:
+            {"submitted": N, "skipped": N, "results": [...]}
+        """
+        cutoff = datetime.now(UTC) - timedelta(
+            hours=FEEDBACK_SETTLE_HOURS)
+        follows = await self.repo.list_follows(
+            status=FOLLOW_STATUS_PUBLISHED, limit=1000)
+        submitted, skipped, results = 0, 0, []
+        for follow in follows:
+            if follow.get("learningFed"):
+                skipped += 1
+                continue
+            try:
+                published_at = datetime.fromisoformat(
+                    follow.get("publishedAt", ""))
+                if published_at > cutoff:
+                    skipped += 1   # 未过沉淀窗口
+                    continue
+            except ValueError:
+                pass   # 非法时间视为已沉淀(脏数据治理)
+            try:
+                results.append(await self.submit_learning_feedback(
+                    follow["followId"]))
+                submitted += 1
+            except (KeyError, ValueError) as exc:
+                # 单条失败不阻断批量(记录后继续)
+                logger.warning("blogger_collect_skip follow=%s: %s",
+                               follow.get("followId"), exc)
+                skipped += 1
+        return {"submitted": submitted, "skipped": skipped,
+                "results": results}
+
+    async def run_learning(self) -> dict:
+        """触发一轮 Hedge 学习(层1 因子权重, 反馈不足时 409)
+
+        Raises:
+            ValueError: 待学习反馈不足(可先调 ai-learning config
+                min_feedback 或继续回流)
+        """
+        from services.ai_learning_service import run_learning_cycle
+        return await run_learning_cycle("blogger_work_gate")
+
+    async def learning_status(self) -> dict:
+        """回流与学习状态(层1权重档案/漂移 + 层2进化榜)"""
+        from services.ai_learning_service import (
+            get_weights_view, get_drift_view,
+        )
+        follows = await self.repo.list_follows(limit=10000)
+        published = [f for f in follows
+                     if f.get("status") == FOLLOW_STATUS_PUBLISHED]
+        fed = [f for f in published if f.get("learningFed")]
+        # 层2 进化榜(升/降权 TOP, 按 weightAdjust 排序)
+        bloggers = await self.repo.list_bloggers(limit=1000)
+        evolved = sorted(
+            (b for b in bloggers
+             if float(b.get("weightAdjust") or 0) != 0),
+            key=lambda x: -float(x.get("weightAdjust") or 0))
+        return {
+            "scorerId": "blogger_work_gate",
+            "weights": await get_weights_view("blogger_work_gate"),
+            "drift": await get_drift_view("blogger_work_gate"),
+            "feedback": {
+                "published": len(published),
+                "fed": len(fed),
+                "pending": len(published) - len(fed),
+                "settleHours": FEEDBACK_SETTLE_HOURS,
+            },
+            "weightEvolution": {
+                "top": [{"bloggerId": b["bloggerId"],
+                         "nickname": b.get("nickname", ""),
+                         "weightBase": b.get("weightBase"),
+                         "weightAdjust": b.get("weightAdjust"),
+                         "weight": b.get("weight"),
+                         "zeroTrafficStreak": b.get(
+                             "zeroTrafficStreak", 0)}
+                        for b in evolved[:5]],
+                "bottom": [{"bloggerId": b["bloggerId"],
+                            "nickname": b.get("nickname", ""),
+                            "weightBase": b.get("weightBase"),
+                            "weightAdjust": b.get("weightAdjust"),
+                            "weight": b.get("weight"),
+                            "zeroTrafficStreak": b.get(
+                                "zeroTrafficStreak", 0)}
+                           for b in evolved[-5:][::-1]],
+                "autoPaused": [{"bloggerId": b["bloggerId"],
+                                "nickname": b.get("nickname", ""),
+                                "zeroTrafficStreak": b.get(
+                                    "zeroTrafficStreak", 0)}
+                               for b in bloggers
+                               if b.get("pausedReason")
+                               == "auto_loss_cut"],
+            },
+        }
+
     # 内部: 流水留痕
     # ============================================================
 

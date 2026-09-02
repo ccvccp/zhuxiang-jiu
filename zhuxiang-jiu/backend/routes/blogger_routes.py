@@ -94,6 +94,14 @@ class PublishRequest(PydBaseModel):
                            description="指定发布时间(ISO, 空则取黄金时段)")
 
 
+class LearningFeedbackRequest(PydBaseModel):
+    followId: int = Field(..., description="已发布跟随内容ID")
+    clicks: int = Field(None, ge=0,
+                        description="引流量(空则自动从attract归因聚合)")
+    registrations: int = Field(None, ge=0, description="注册数(可选)")
+    orders: int = Field(None, ge=0, description="订单数(可选)")
+
+
 # ============================================================
 # 博主池管理(admin)
 # ============================================================
@@ -399,6 +407,61 @@ async def report_blogger(blogger_id: int,
     try:
         result = await _service.get_blogger_attribution(blogger_id)
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 学习闭环与权重自进化(P1, 对齐 36号 P2 端点形态)
+# ============================================================
+
+@router.post("/api/blogger/learning/feedback",
+             tags=["平台流量DV博主模块"])
+async def learning_feedback(req: LearningFeedbackRequest,
+                            x_role: str = Header(None, alias="X-Role")):
+    """单条效果回流(层1 Hedge反馈 + 层2博主权重进化, learningFed幂等)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.submit_learning_feedback(
+            req.followId, clicks=req.clicks,
+            registrations=req.registrations, orders=req.orders)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/learning/collect",
+             tags=["平台流量DV博主模块"])
+async def learning_collect(x_role: str = Header(None, alias="X-Role")):
+    """批量回流: 已发布未回流且过沉淀窗口(24h)的内容"""
+    _require_admin(x_role)
+    try:
+        result = await _service.collect_learning_feedback()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/learning/run",
+             tags=["平台流量DV博主模块"])
+async def learning_run(x_role: str = Header(None, alias="X-Role")):
+    """触发一轮 Hedge 学习(第21档案, 反馈不足时 409)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.run_learning()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/learning/status",
+            tags=["平台流量DV博主模块"])
+async def learning_status(x_role: str = Header(None, alias="X-Role")):
+    """回流与学习状态(层1权重档案/漂移 + 层2进化榜/止损榜)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True,
+                "data": await _service.learning_status()}
     except Exception as e:
         _handle(e)
 

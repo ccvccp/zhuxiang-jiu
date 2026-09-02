@@ -292,12 +292,14 @@ async def _on_startup():
     # 37号·AI智能网站同盟: T+1 结算(ALLIANCE_SETTLE_AUTO=off 可关闭)
     from services.alliance_settle_scheduler import start_scheduler as start_alliance_settle
     start_alliance_settle()
-    # 40号·平台流量DV博主: 作品雷达 + 发布出队(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO=off 可关闭)
+    # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
     from services.blogger_scheduler import (
         start_radar_scheduler as start_blogger_radar,
-        start_publish_scheduler as start_blogger_publish)
+        start_publish_scheduler as start_blogger_publish,
+        start_learning_scheduler as start_blogger_learning)
     start_blogger_radar()
     start_blogger_publish()
+    start_blogger_learning()
 
 
 @app.on_event("shutdown")
