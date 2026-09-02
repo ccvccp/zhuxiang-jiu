@@ -958,3 +958,129 @@ class ProductGateScorer:
 
 
 SCORERS["product_gate"] = ProductGateScorer()
+
+
+# ============================================================
+# 9. 博主作品引流价值评分(模块 40 P0: DV博主跟随决策)
+# ============================================================
+
+class BloggerWorkScorer:
+    """博主作品引流价值评分: 跟随决策质量分(40号设计文档 §2.4)
+
+    5 因子加权 → 价值分(0-100, 越高越值得跟随) → 3级 → 决策动作
+    (≥70 auto_follow / 50-70 manual_queue / <50 pass),
+    阈值沿用 36号蹭点决策范式。
+
+    与风险类评分器方向相反: 高分=优质, action 语义为跟随通道。
+    """
+
+    WEIGHTS: ClassVar[dict] = {
+        "blogger_weight": 0.25,   # 博主权重(粉丝量级+互动率)
+        "brand_fit": 0.25,        # 品牌契合(作品主题 vs 酒/礼场景)
+        "work_heat": 0.20,        # 作品热度(互动数相对博主基线)
+        "traffic_potential": 0.15,  # 引流潜力(推荐/测评/开箱语义)
+        "competition": 0.15,      # 竞争密度(已跟随账号少 → 蓝海加分)
+    }
+    # 品牌契合词表(作品主题命中 → 契合度, 36号 _RELEVANCE_MAP 范式)
+    BRAND_FIT_WORDS = ("酒", "白酒", "竹香", "品鉴", "微醺", "宴",
+                       "礼", "送礼", "年货", "美食", "下酒菜")
+    # 高转化语义(引流潜力因子)
+    TRAFFIC_WORDS = ("推荐", "测评", "开箱", "排名", "清单", "合集",
+                     "种草", "避坑", "指南")
+    REQUIRED: ClassVar[list] = ["bloggerWeight"]
+
+    async def score(self, ctx: dict) -> dict:
+        """评分入口
+
+        Args:
+            ctx: {
+                workId: int, bloggerId: int,
+                bloggerWeight: float 博主权重(0-1, 池内 weight),
+                engagementRate: float 互动率(0-1),
+                brandHitCount: int 主题品牌词命中数(缺省按标题探测),
+                title: str 作品标题, summary: str 作品文案,
+                likes/comments/shares: int 互动数,
+                bloggerBaselineLikes: int 该博主历史基线赞(缺省=likes),
+                competitorCount: int 该作品下已跟随账号数(缺省 0)
+            }
+        """
+        weights = await load_effective_weights("blogger_work_gate",
+                                               self.WEIGHTS)
+        f = {}
+        # ① 博主权重: 权重(0-1)×70 + 互动率加分(≥5% 满分段)
+        bw = float(ctx.get("bloggerWeight") or 0)
+        engage = float(ctx.get("engagementRate") or 0)
+        f["blogger_weight"] = _factor(
+            "blogger_weight", "博主权重",
+            _clamp(bw * 70 + engage * 600),
+            weights["blogger_weight"],
+            f"权重{bw:.1f} 互动率{engage:.1%}")
+        # ② 品牌契合: 命中词数档位(0→5/1→55/2→75/3+→90)
+        hits = ctx.get("brandHitCount")
+        if hits is None:
+            text = " ".join([str(ctx.get("title") or ""),
+                             str(ctx.get("summary") or "")])
+            hits = sum(1 for w in self.BRAND_FIT_WORDS if w in text)
+        hits = int(hits or 0)
+        fit = 5.0 if hits == 0 else (55.0 if hits == 1
+                                     else (75.0 if hits == 2 else 90.0))
+        f["brand_fit"] = _factor(
+            "brand_fit", "品牌契合", fit, weights["brand_fit"],
+            f"命中{hits}词")
+        # ③ 作品热度: 互动总量相对博主基线放大倍数(≥3倍满分)
+        likes = int(ctx.get("likes") or 0)
+        comments = int(ctx.get("comments") or 0)
+        shares = int(ctx.get("shares") or 0)
+        baseline = int(ctx.get("bloggerBaselineLikes") or likes or 1)
+        total = likes + comments * 3 + shares * 5
+        base_total = max(1, baseline)
+        ratio = total / base_total
+        f["work_heat"] = _factor(
+            "work_heat", "作品热度", _clamp(ratio / 3 * 100),
+            weights["work_heat"],
+            f"互动{total} vs 基线{base_total}(×{ratio:.1f})")
+        # ④ 引流潜力: 高转化语义命中(每词 40 分, 封顶)
+        text2 = " ".join([str(ctx.get("title") or ""),
+                          str(ctx.get("summary") or "")])
+        t_hits = [w for w in self.TRAFFIC_WORDS if w in text2]
+        f["traffic_potential"] = _factor(
+            "traffic_potential", "引流潜力",
+            _clamp(len(t_hits) * 40), weights["traffic_potential"],
+            f"命中{t_hits}" if t_hits else "无高转化语义")
+        # ⑤ 竞争密度: 已跟随账号 0 → 蓝海 100, ≥5 → 0
+        competitors = int(ctx.get("competitorCount") or 0)
+        comp = _clamp(100 - competitors * 20)
+        f["competition"] = _factor(
+            "competition", "竞争密度", comp, weights["competition"],
+            f"已跟随{competitors}号" + ("(蓝海)" if competitors == 0
+                                       else ""))
+
+        total_score = sum(x["contribution"] for x in f.values())
+        if total_score >= 70:
+            level_key, action = LEVEL_HIGH, "auto_follow"
+        elif total_score >= 50:
+            level_key, action = LEVEL_MEDIUM, "manual_queue"
+        else:
+            level_key, action = LEVEL_LOW, "pass"
+        result = {
+            "success": True, "scorer": "blogger_work_gate",
+            "modelVersion": MODEL_VERSION,
+            "workId": ctx.get("workId"),
+            "bloggerId": ctx.get("bloggerId"),
+            "score": round(total_score, 1), "level": level_key,
+            "levelName": {LEVEL_HIGH: "优质", LEVEL_MEDIUM: "待核",
+                          LEVEL_LOW: "不足"}[level_key],
+            "action": action,
+            "actionName": {"auto_follow": "全自动跟随",
+                           "manual_queue": "人工确认队列",
+                           "pass": "跳过留痕"}[action],
+            "confidence": _confidence(ctx, self.REQUIRED),
+            "factors": list(f.values()), "scoredAt": ts(),
+        }
+        logger.info("ai_blogger_work_scored work=%s blogger=%s "
+                    "score=%s action=%s", ctx.get("workId"),
+                    ctx.get("bloggerId"), result["score"], action)
+        return result
+
+
+SCORERS["blogger_work_gate"] = BloggerWorkScorer()

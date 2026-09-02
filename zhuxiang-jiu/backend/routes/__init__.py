@@ -81,6 +81,8 @@ from routes.alliance_routes import register_alliance_routes
 from routes.pdm_routes import register_pdm_routes
 # AI智能网站入口管理模块(39号·AI自适应认证+扫码登录+设备指纹)
 from routes.entry_routes import register_entry_routes
+# 平台流量DV博主模块(40号·博主雷达+三段式跟随+归因闭环)
+from routes.blogger_routes import register_blogger_routes
 
 __all__ = [
     # 已有(15)
@@ -135,4 +137,5 @@ __all__ = [
     "register_alliance_routes",
     "register_pdm_routes",
     "register_entry_routes",
+    "register_blogger_routes",
 ]

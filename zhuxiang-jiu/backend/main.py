@@ -104,6 +104,8 @@ from routes import (
     register_pdm_routes,
     # AI智能网站入口管理模块(39号·AI自适应认证+扫码登录+设备指纹)
     register_entry_routes,
+    # 平台流量DV博主模块(40号·博主雷达+三段式跟随+归因闭环)
+    register_blogger_routes,
 )
 
 __all__ = ["app", "_mock_store"]
@@ -242,6 +244,8 @@ register_alliance_routes(app)
 register_pdm_routes(app)
 # AI智能网站入口管理模块(39号)
 register_entry_routes(app)
+# 平台流量DV博主模块(40号)
+register_blogger_routes(app)
 
 
 # ============================================================
@@ -288,6 +292,12 @@ async def _on_startup():
     # 37号·AI智能网站同盟: T+1 结算(ALLIANCE_SETTLE_AUTO=off 可关闭)
     from services.alliance_settle_scheduler import start_scheduler as start_alliance_settle
     start_alliance_settle()
+    # 40号·平台流量DV博主: 作品雷达 + 发布出队(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO=off 可关闭)
+    from services.blogger_scheduler import (
+        start_radar_scheduler as start_blogger_radar,
+        start_publish_scheduler as start_blogger_publish)
+    start_blogger_radar()
+    start_blogger_publish()
 
 
 @app.on_event("shutdown")
@@ -313,6 +323,9 @@ async def _on_shutdown():
     # 37号·AI智能网站同盟结算调度器
     from services.alliance_settle_scheduler import stop_scheduler as stop_alliance_settle
     stop_alliance_settle()
+    # 40号·平台流量DV博主调度器
+    from services.blogger_scheduler import stop_schedulers as stop_blogger_schedulers
+    stop_blogger_schedulers()
     await close_redis_client()
     logger.info("清理完成")
 
