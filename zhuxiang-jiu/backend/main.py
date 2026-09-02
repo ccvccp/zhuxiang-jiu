@@ -106,6 +106,8 @@ from routes import (
     register_entry_routes,
     # 平台流量DV博主模块(40号·博主雷达+三段式跟随+归因闭环)
     register_blogger_routes,
+    # AI智能代驾模块(41号·满额赠券+司机资格审查+三轨派单)
+    register_ride_routes,
 )
 
 __all__ = ["app", "_mock_store"]
@@ -246,6 +248,8 @@ register_pdm_routes(app)
 register_entry_routes(app)
 # 平台流量DV博主模块(40号)
 register_blogger_routes(app)
+# AI智能代驾模块(41号)
+register_ride_routes(app)
 
 
 # ============================================================

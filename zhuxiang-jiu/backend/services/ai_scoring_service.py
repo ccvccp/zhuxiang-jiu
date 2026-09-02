@@ -1084,3 +1084,142 @@ class BloggerWorkScorer:
 
 
 SCORERS["blogger_work_gate"] = BloggerWorkScorer()
+
+
+# ============================================================
+# 10. 代驾司机资格审查评分(模块 41 P0: 超级会员注册代驾员)
+# ============================================================
+
+class DriverApplicationScorer:
+    """代驾司机资格审查评分: 申请质量分(41号设计文档 §2.2)
+
+    5 因子加权 → 资格分(0-100, 越高越可靠) → 3级 → 决策动作
+    (≥70 approved 自动通过 / 50-70 manual_review 人工复核 /
+     <50 rejected 拒绝), 阈值沿用 36/40号范式。
+
+    高分=优质, action 语义为资格审查通道; 驾龄<3年等硬门槛
+    在服务层前置拒绝, 评分器仅输出质量画像。
+    """
+
+    WEIGHTS: ClassVar[dict] = {
+        "completeness": 0.30,    # 材料齐全性(必填字段/格式校验)
+        "driving_years": 0.25,   # 驾龄与准驾车型
+        "member_credit": 0.20,   # 会员信用(竹信分+投诉率)
+        "account_health": 0.15,  # 账户健康(注册时长/实名等级)
+        "consistency": 0.10,     # 声明一致性(年龄vs驾龄交叉校验)
+    }
+    # 准驾车型档位(C1/C2 常规, B/A 系满分——代驾场景均覆盖小客车)
+    LICENSE_CLASS_SCORE = {"C1": 85.0, "C2": 80.0,
+                           "B1": 95.0, "B2": 95.0, "A1": 100.0, "A2": 100.0}
+    REQUIRED: ClassVar[list] = ["idNumber", "licenseNumber", "drivingYears",
+                                "age"]
+
+    async def score(self, ctx: dict) -> dict:
+        """评分入口
+
+        Args:
+            ctx: {
+                applicationId: int, memberId: int,
+                idNumber: str 身份证号, licenseNumber: str 驾照号,
+                licenseClass: str 准驾车型(缺省 C1),
+                drivingYears: int 驾龄(年),
+                age: int 年龄, ageVerified: bool 是否实名认证,
+                registerHours: float 注册至今年时数(缺省 720 中性),
+                bambooScore: int 竹信分(0-1000, 缺省 600 中性),
+                complaintRate: float 历史投诉率(0-1, 缺省 0),
+                accidentFreeDecl: bool 无重大事故声明,
+                drunkFreeDecl: bool 无酒驾记录声明,
+                emergencyContact: str 紧急联系人
+            }
+        """
+        weights = await load_effective_weights("driver_application_gate",
+                                               self.WEIGHTS)
+        f = {}
+        # ① 材料齐全性: 必填材料逐项计分 + 双声明加分
+        materials = [
+            ctx.get("idNumber"), ctx.get("licenseNumber"),
+            ctx.get("drivingYears"), ctx.get("emergencyContact"),
+            ctx.get("accidentFreeDecl"), ctx.get("drunkFreeDecl"),
+        ]
+        present = sum(1 for m in materials if m not in (None, "", 0))
+        # 身份证/驾照格式长度校验(18 位身份证 / 12 位驾照口径)
+        fmt_ok = (
+            len(str(ctx.get("idNumber") or "")) == 18
+            and len(str(ctx.get("licenseNumber") or "")) >= 10
+        )
+        f["completeness"] = _factor(
+            "completeness", "材料齐全性",
+            _clamp(present / len(materials) * (100 if fmt_ok else 60)),
+            weights["completeness"],
+            f"材料{present}/{len(materials)}" + ("" if fmt_ok else " 证件格式存疑"))
+
+        # ② 驾龄与准驾车型: ≥5 年满分, 3-4 年线性; 车型档位折算
+        years = float(ctx.get("drivingYears") or 0)
+        years_score = _clamp((years - 3) / 2 * 100) if years >= 3 else 0.0
+        license_class = str(ctx.get("licenseClass") or "C1").upper()
+        class_score = self.LICENSE_CLASS_SCORE.get(license_class, 70.0)
+        f["driving_years"] = _factor(
+            "driving_years", "驾龄与准驾车型",
+            _clamp(years_score * 0.7 + class_score * 0.3),
+            weights["driving_years"],
+            f"驾龄{years:.0f}年 {license_class}")
+
+        # ③ 会员信用: 竹信分归一(0-1000 → 0-100) - 投诉率惩罚
+        bamboo = float(ctx.get("bambooScore") or 600)
+        complaint_rate = float(ctx.get("complaintRate") or 0)
+        f["member_credit"] = _factor(
+            "member_credit", "会员信用",
+            _clamp(bamboo / 10 - complaint_rate * 200),
+            weights["member_credit"],
+            f"竹信分{bamboo:.0f} 投诉率{complaint_rate:.1%}")
+
+        # ④ 账户健康: 注册时长(≥1 年满分) + 实名认证
+        register_hours = float(ctx.get("registerHours") or 720)
+        age_verified = bool(ctx.get("ageVerified"))
+        f["account_health"] = _factor(
+            "account_health", "账户健康",
+            _clamp(min(register_hours / 8760, 1) * (100 if age_verified else 70)),
+            weights["account_health"],
+            f"注册{register_hours / 720:.0f}月" + (" 已实名" if age_verified else " 未实名"))
+
+        # ⑤ 声明一致性: 年龄 ≥ 驾龄 + 18 为合理, 差值越大越扣分
+        age = float(ctx.get("age") or 0)
+        if age > 0 and years > 0:
+            gap = age - years - 18
+            consist = _clamp(100 - max(0, -gap) * 50 - max(0, gap - 20) * 2)
+        else:
+            consist = 50.0
+        f["consistency"] = _factor(
+            "consistency", "声明一致性", consist, weights["consistency"],
+            f"年龄{age:.0f} 驾龄{years:.0f}"
+            + ("(合理)" if consist >= 60 else "(存疑)"))
+
+        total_score = sum(x["contribution"] for x in f.values())
+        if total_score >= 70:
+            level_key, action = LEVEL_HIGH, "approved"
+        elif total_score >= 50:
+            level_key, action = LEVEL_MEDIUM, "manual_review"
+        else:
+            level_key, action = LEVEL_LOW, "rejected"
+        result = {
+            "success": True, "scorer": "driver_application_gate",
+            "modelVersion": MODEL_VERSION,
+            "applicationId": ctx.get("applicationId"),
+            "memberId": ctx.get("memberId"),
+            "score": round(total_score, 1), "level": level_key,
+            "levelName": {LEVEL_HIGH: "优质", LEVEL_MEDIUM: "待核",
+                          LEVEL_LOW: "不足"}[level_key],
+            "action": action,
+            "actionName": {"approved": "自动通过",
+                           "manual_review": "人工复核队列",
+                           "rejected": "拒绝"}[action],
+            "confidence": _confidence(ctx, self.REQUIRED),
+            "factors": list(f.values()), "scoredAt": ts(),
+        }
+        logger.info("ai_driver_application_scored application=%s member=%s "
+                    "score=%s action=%s", ctx.get("applicationId"),
+                    ctx.get("memberId"), result["score"], action)
+        return result
+
+
+SCORERS["driver_application_gate"] = DriverApplicationScorer()

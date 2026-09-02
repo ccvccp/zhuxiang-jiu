@@ -78,6 +78,8 @@ SCORER_REGISTRY = {
     "product_gate":                {"label": "商品上架预审评分", "module": "38产品管理", "batch": 6},
     # ---- 第七批(40号平台流量DV博主 P0: 作品跟随价值评分) ----
     "blogger_work_gate":           {"label": "博主作品跟随价值评分", "module": "40博主引流", "batch": 7},
+    # ---- 第八批(41号AI智能代驾 P0: 司机资格审查评分) ----
+    "driver_application_gate":     {"label": "代驾司机资格审查评分", "module": "41智能代驾", "batch": 8},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -139,6 +141,10 @@ def default_weights(scorer_id: str) -> dict:
         # 40号博主引流: 作品跟随价值五因子, 单一事实源在评分器类
         from services.ai_scoring_service import BloggerWorkScorer
         return dict(BloggerWorkScorer.WEIGHTS)
+    if scorer_id == "driver_application_gate":
+        # 41号智能代驾: 司机资格审查五因子, 单一事实源在评分器类
+        from services.ai_scoring_service import DriverApplicationScorer
+        return dict(DriverApplicationScorer.WEIGHTS)
     if scorer_id.startswith("logistics_routing:"):
         from services.ai_scoring_service import _BUDGET_WEIGHTS
         budget = scorer_id.split(":", 1)[1]

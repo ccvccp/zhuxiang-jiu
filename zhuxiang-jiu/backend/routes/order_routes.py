@@ -158,6 +158,16 @@ async def pay_order(
             await ai_hooks.on_payment(order_id, payment_method, amount)
         except Exception:
             pass
+        # 41号: 买酒满额 → AI 自动发市内代驾券入券包(best-effort 火后不管)
+        try:
+            order = await _service.order_repo.get_by_id(order_id)
+            amount = (order.get("priceDetail") or {}).get("actualAmount") or 0
+            if amount >= 500:
+                from services.ride_coupon_service import RideCouponService
+                await RideCouponService().grant_for_order(
+                    order.get("memberId"), order_id, amount)
+        except Exception:
+            pass
         return result
     except Exception as e:
         raise _handle(e) from e
@@ -299,6 +309,12 @@ async def refund_order(
         )
         # v7.6 自动反馈: 退款完成(风控误放行信号)
         await ai_hooks.on_order_outcome(order_id, "refunded")
+        # 41号: 退款 → 未核销代驾券冲正作废(best-effort 火后不管)
+        try:
+            from services.ride_coupon_service import RideCouponService
+            await RideCouponService().revoke_for_order(order_id)
+        except Exception:
+            pass
         return result
     except Exception as e:
         raise _handle(e) from e
