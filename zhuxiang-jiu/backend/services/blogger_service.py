@@ -1683,7 +1683,17 @@ class BloggerService:
                                  for f in fed)), 4),
             },
             "bias": await self.repo.get_platform_bias(),
+            "source": self._source_health(),
         }
+
+    def _source_health(self) -> dict:
+        """真实源健康视图(P3b 代理适配器上报, best-effort)"""
+        try:
+            from services.blogger_source_adapter import source_adapter
+            return source_adapter.health()
+        except Exception as exc:
+            logger.warning("blogger_source_health_failed: %s", exc)
+            return {"mode": "unknown", "platforms": {}}
 
     async def _ensure_learning_config(self) -> None:
         """eta 覆盖(幂等): 配置未自定义时写入 ETA_OVERRIDE"""

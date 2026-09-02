@@ -19,7 +19,6 @@
 
 import hashlib
 import logging
-import os
 import random
 from datetime import datetime, timedelta, UTC
 
@@ -112,15 +111,20 @@ def _mock_fetch(blogger: dict) -> list[dict]:
     return items
 
 
-def _fetch_real(blogger: dict) -> list[dict] | None:
-    """真实作品列表拉取(P2 预留: 已配置凭证时返回条目, 失败回退 mock)
+def _fetch_real(blogger: dict, cursor: str = "") -> list[dict] | None:
+    """真实作品列表拉取(P3b proxy 轨适配器; 失败返回 None 回退 mock)
 
-    P0 不实现具体协议, 仅保留凭证判断接口。
+    BLOGGER_SOURCE_MODE=proxy 时经自建爬虫代理拉取(限速+熔断+
+    契约归一, 见 blogger_source_adapter); 其余情况(None 端点/
+    熔断/请求失败/契约异常)一律返回 None 回退确定性 mock——
+    Mock-first, 产出永不中断。
     """
-    env = f"BLOGGER_{str(blogger.get('platform', '')).upper()}_API_KEY"
-    if not os.environ.get(env, "").strip():
+    try:
+        from services.blogger_source_adapter import source_adapter
+        return source_adapter.fetch(blogger, cursor=cursor)
+    except Exception as exc:
+        logger.warning("work_radar_source_adapter_failed: %s", exc)
         return None
-    return None   # P2: 接入平台开放 API/自建爬虫代理
 
 
 class WorkRadarService:
@@ -176,7 +180,9 @@ class WorkRadarService:
         scanned = new_count = discarded = skipped = 0
         new_works = []
         for blogger in bloggers:
-            items = _fetch_real(blogger)
+            # 增量游标(P3b 真实源: lastSeenWorkAt; mock 源忽略游标按槽位)
+            items = _fetch_real(
+                blogger, cursor=blogger.get("lastSeenWorkAt", ""))
             if items is None:
                 items = _mock_fetch(blogger)
             for item in items:

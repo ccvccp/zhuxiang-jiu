@@ -164,6 +164,30 @@ FREEZE_DAYS = 14
 # 样本污染暂停: 待学习反馈 fraudSuspect 占比阈值
 FRAUD_SHARE_PAUSE = 0.3
 
+# ============================================================
+# P3b 真实源接入常量(设计文档 P3b: proxy 轨协议骨架)
+# ============================================================
+
+# 源模式: mock(默认确定性) | proxy(自建爬虫代理, 推荐主轨)
+# real(平台开放 API)待资质就绪, 现阶段与 proxy 同协议
+SOURCE_MODE = os.environ.get("BLOGGER_SOURCE_MODE", "mock").strip().lower()
+# 代理端点(运行时动态读; 未配置该平台 → 回退 mock, 产出不中断)
+SOURCE_PROXY_ENDPOINTS = {
+    PLATFORM_DOUYIN: os.environ.get("BLOGGER_DOUYIN_URL", "").strip(),
+    PLATFORM_XHS: os.environ.get("BLOGGER_XIAOHONGSHU_URL", "").strip(),
+    PLATFORM_WEIBO: os.environ.get("BLOGGER_WEIBO_URL", "").strip(),
+    PLATFORM_CHANNELS: os.environ.get("BLOGGER_WECHAT_CHANNELS_URL", "").strip(),
+}
+# 代理超时(秒)与限速(单平台 QPS, 防代理封禁)
+SOURCE_TIMEOUT_SECONDS = int(
+    os.environ.get("BLOGGER_SOURCE_TIMEOUT", "10"))
+SOURCE_QPS = float(os.environ.get("BLOGGER_SOURCE_QPS", "1.0"))
+# 源健康: 连续失败 N 次摘除该平台源(回退 mock), 熔断窗口分钟
+SOURCE_FAIL_THRESHOLD = int(
+    os.environ.get("BLOGGER_SOURCE_FAIL_THRESHOLD", "3"))
+SOURCE_BREAKER_MINUTES = int(
+    os.environ.get("BLOGGER_SOURCE_BREAKER_MINUTES", "30"))
+
 # 层2进化字段(float, 序列化口径)
 _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "fansWan", "likes", "comments", "shares",
