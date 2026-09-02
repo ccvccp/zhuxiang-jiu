@@ -52,6 +52,11 @@ from repositories.blogger_repository import (
     FRAUD_PAUSE_STREAK, GMV_REF, CLICK_P90_REF, ETA_OVERRIDE,
     CLICK_CLUSTER_SHARE, QUALITY_CLUSTER,
     CLICK_RAPID_SECONDS, CLICK_RAPID_SHARE, QUALITY_FEATURE,
+    PROBE_WORKS, PROBATION_DAYS, EXPLORE_EPSILON,
+    WEIGHT_DECAY_WEEKLY, EFFICIENCY_WINDOW_DAYS,
+    BIAS_LAMBDA, BIAS_CLAMP,
+    OSCILLATION_FLIPS, FREEZE_DAYS, FRAUD_SHARE_PAUSE,
+    PLATFORMS,
     fan_tier_weight, derived_weight,
 )
 from repositories.promo_repository import (
@@ -77,6 +82,14 @@ _TRAFFIC_PLATFORM_MAP = {
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _iso_in_future(iso: str, now: datetime | None = None) -> bool:
+    """ISO 时间是否在未来(非法格式视为已过期)"""
+    try:
+        return datetime.fromisoformat(iso) > (now or datetime.now(UTC))
+    except (TypeError, ValueError):
+        return False
 
 
 # ============================================================
@@ -248,18 +261,35 @@ class BloggerService:
             "pass": WORK_STATUS_PASSED,
         }
         top = max(scoring["factors"], key=lambda x: x["contribution"])
-        reason = (f"评分{scoring['score']}(主导因子:{top['label']}"
-                  f"{top['score']}), 决策{scoring['actionName']}")
+        # P2b 平台校准偏置: 决策自适应平台流量禀赋(设计文档 §5)
+        bias = await self._platform_bias(work.get("platform", ""))
+        calibrated = round(
+            max(0.0, min(100.0,
+                         float(scoring["score"]) + bias)), 1)
+        if bias and calibrated != scoring["score"]:
+            # 偏置后跨越阈值 → 重路由决策三档
+            if calibrated >= 70:
+                decision = "auto_follow"
+            elif calibrated >= 50:
+                decision = "manual_queue"
+            else:
+                decision = "pass"
+        reason = (f"评分{scoring['score']}"
+                  + (f"(平台校准+{bias}→{calibrated})" if bias else "")
+                  + f"(主导因子:{top['label']}{top['score']}), "
+                  f"决策{scoring['actionName']}")
         work.update({
-            "score": scoring["score"],
+            "score": calibrated,
             "decision": decision,
-            "scoreSnapshot": scoring,
+            "scoreSnapshot": {**scoring,
+                              "platformBias": bias,
+                              "rawScore": scoring["score"]},
             "status": status_map[decision],
         })
         await self.repo.save_work(work)
         audit = await self._audit(
             work["bloggerId"], "decision",
-            {"workId": work["workId"], "score": scoring["score"],
+            {"workId": work["workId"], "score": calibrated,
              "decision": decision, "reason": reason})
         return {"audit": audit, "work": work, "scoring": scoring}
 
@@ -813,6 +843,10 @@ class BloggerService:
             "lastSeenWorkAt": "",
             "zeroTrafficStreak": 0,
             "trafficInfluencerId": 0,
+            # P2b 冷启动探测: 前 N 件作品保底扫描(UCB 式)
+            "probeRemaining": PROBE_WORKS,
+            "probationNextAt": "",
+            "evolutionFrozenUntil": "",
             "createdAt": _now_iso(),
             "updatedAt": _now_iso(),
         }
@@ -1198,20 +1232,62 @@ class BloggerService:
         adjust = float(blogger.get("weightAdjust") or 0.0)
         streak = int(blogger.get("zeroTrafficStreak") or 0)
         quality = max(0.0, min(1.0, float(quality or 1.0)))
+        # P2b 缓刑自动复燃: 止损博主复扫后引流>0 → 自动 reactivate
+        # (adjust 保留, 教训不白给; streak 清零重新计数)
+        reactivated = False
+        if (clicks > 0 or gmv > 0) \
+                and blogger.get("status") == BLOGGER_STATUS_PAUSED \
+                and blogger.get("pausedReason") == "auto_loss_cut":
+            reactivated = True
+            blogger.update({
+                "status": BLOGGER_STATUS_ACTIVE,
+                "pausedReason": "",
+                "probationNextAt": "",
+                "zeroTrafficStreak": 0,
+            })
+            streak = 0
+            await self._audit(
+                blogger["bloggerId"], "probation_reactivate", {
+                    "followId": follow.get("followId"),
+                    "reason": "缓刑复扫引流>0, 自动恢复入池",
+                    "clicks": clicks, "gmv": gmv,
+                })
+            logger.info("blogger_probation_reactivate blogger=%s",
+                        blogger["bloggerId"])
+        # P2b 震荡冻结: 冻结期内步长置 0(只记录不进化)
+        frozen = False
+        frozen_until = blogger.get("evolutionFrozenUntil") or ""
         reason = ""
-        if gmv > 0:
-            step, streak = WEIGHT_STEP_GMV * quality, 0
-            reason = f"GMV引流{gmv}(+{WEIGHT_STEP_GMV}×q{quality:.2f})"
-        elif clicks > 0:
-            step, streak = WEIGHT_STEP_CLICK * quality, 0
-            reason = (f"点击引流{clicks}"
-                      f"(+{WEIGHT_STEP_CLICK}×q{quality:.2f})")
-        elif registered > 0:
-            step = 0.0   # 弱引流(有注册无点击归并口径), 不奖不罚
-            reason = f"仅注册{registered}(观察)"
+        if frozen_until:
+            try:
+                frozen = datetime.fromisoformat(frozen_until) \
+                    > datetime.now(UTC)
+            except ValueError:
+                frozen = False
+        if frozen:
+            step = 0.0
+            reason += "(震荡冻结期, 步长置0)"
         else:
-            step, streak = WEIGHT_STEP_ZERO, streak + 1
-            reason = f"零引流(-{-WEIGHT_STEP_ZERO})"
+            # P2b 效率调制: 近30d 引流效率池内分位调制正向步长
+            eff_mod = await self._efficiency_mod(
+                blogger["bloggerId"])
+            if gmv > 0:
+                step, streak = (round(
+                    WEIGHT_STEP_GMV * quality * eff_mod, 6), 0)
+                reason = (f"GMV引流{gmv}(+{WEIGHT_STEP_GMV}"
+                          f"×q{quality:.2f}×e{eff_mod})")
+            elif clicks > 0:
+                step, streak = (round(
+                    WEIGHT_STEP_CLICK * quality * eff_mod, 6), 0)
+                reason = (f"点击引流{clicks}"
+                          f"(+{WEIGHT_STEP_CLICK}"
+                          f"×q{quality:.2f}×e{eff_mod})")
+            elif registered > 0:
+                step = 0.0   # 弱引流(有注册无点击归并口径), 不奖不罚
+                reason = f"仅注册{registered}(观察)"
+            else:
+                step, streak = WEIGHT_STEP_ZERO, streak + 1
+                reason = f"零引流(-{-WEIGHT_STEP_ZERO})"
         step = round(step, 6)
         adjust = max(WEIGHT_ADJUST_MIN,
                      min(WEIGHT_ADJUST_MAX, adjust + step))
@@ -1226,12 +1302,16 @@ class BloggerService:
             "updatedAt": _now_iso(),
         }
         # AI 止损: 连续 N 条零引流 → 出池停扫(再罚一档)
+        # P2b: 止损即排定缓刑复扫时点(PROBATION_DAYS 天后)
         if streak >= AUTO_PAUSE_STREAK \
                 and blogger.get("status") == BLOGGER_STATUS_ACTIVE:
             auto_paused = True
             fields.update({
                 "status": BLOGGER_STATUS_PAUSED,
                 "pausedReason": "auto_loss_cut",
+                "probationNextAt": (
+                    datetime.now(UTC)
+                    + timedelta(days=PROBATION_DAYS)).isoformat(),
                 "weightAdjust": round(max(
                     WEIGHT_ADJUST_MIN, adjust + WEIGHT_STEP_ZERO), 4),
             })
@@ -1239,6 +1319,11 @@ class BloggerService:
                 blogger.get("weightBase"),
                 fields["weightAdjust"])
             weight_new = fields["weight"]
+        elif reactivated:
+            fields.update({"status": BLOGGER_STATUS_ACTIVE,
+                           "pausedReason": "",
+                           "probationNextAt": "",
+                           "zeroTrafficStreak": 0})
         blogger.update(fields)
         await self.repo.save_blogger(blogger)
         await self._audit(
@@ -1251,12 +1336,15 @@ class BloggerService:
                 "weightAdjust": fields["weightAdjust"],
                 "zeroTrafficStreak": streak,
                 "autoPaused": auto_paused,
+                "reactivated": reactivated,
+                "frozen": frozen,
             })
         if auto_paused:
             await self._audit(
                 blogger["bloggerId"], "auto_paused", {
                     "streak": streak,
-                    "reason": f"连续{streak}条零引流, AI止损出池",
+                    "reason": f"连续{streak}条零引流, AI止损出池"
+                              f"(缓刑复扫{PROBATION_DAYS}天后)",
                 })
             logger.warning("blogger_auto_paused blogger=%s streak=%s",
                            blogger["bloggerId"], streak)
@@ -1268,6 +1356,7 @@ class BloggerService:
             "weightNew": round(weight_new, 4),
             "zeroTrafficStreak": streak,
             "autoPaused": auto_paused,
+            "reactivated": reactivated,
             "reason": reason,
         }
 
@@ -1314,14 +1403,284 @@ class BloggerService:
 
         P2a: 首次调用前应用 ETA_OVERRIDE(连续奖励幅值大,
         乘性更新降速; 仅在未自定义配置时设置, 不覆盖 admin 调参)。
+        P2b: 待学习反馈疑似刷量占比 > FRAUD_SHARE_PAUSE 时暂停
+        学习(样本污染熔断, 仅 collect 积累干净样本)。
 
         Raises:
-            ValueError: 待学习反馈不足(可先调 ai-learning config
-                min_feedback 或继续回流)
+            ValueError: 待学习反馈不足 / 样本污染暂停
         """
         from services.ai_learning_service import run_learning_cycle
         await self._ensure_learning_config()
+        fraud_share = await self._fraud_share()
+        if fraud_share > FRAUD_SHARE_PAUSE:
+            raise ValueError(
+                f"样本污染暂停学习(疑似刷量占比{fraud_share:.0%}>"
+                f"{FRAUD_SHARE_PAUSE:.0%}), 先经质量门积累干净样本")
         return await run_learning_cycle("blogger_work_gate")
+
+    async def _fraud_share(self) -> float:
+        """待学习反馈中疑似刷量占比(note 含 [fraudSuspect] 标记)"""
+        try:
+            from repositories.ai_learning_repository import (
+                AiLearningRepository,
+            )
+            pending = await AiLearningRepository().list_feedback(
+                "blogger_work_gate", status="pending", limit=1000)
+            if not pending:
+                return 0.0
+            fraud = sum(1 for fb in pending
+                        if "[fraudSuspect]" in (fb.get("note") or ""))
+            return fraud / len(pending)
+        except Exception as exc:
+            logger.warning("blogger_fraud_share_failed: %s", exc)
+            return 0.0
+
+    # ============================================================
+    # 8. P2b 进化批: 平台偏置 / 效率调制 / 时间衰减 / 健康监控
+    # ============================================================
+
+    async def _platform_bias(self, platform: str) -> float:
+        """读取平台校准偏置(未配置返回 0)"""
+        bias_map = await self.repo.get_platform_bias()
+        try:
+            return float(bias_map.get(platform) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    async def recompute_platform_bias(self) -> dict:
+        """平台偏置重算(周级): 平台实际引流率 vs 全池引流率
+
+        引流率口径: 已回流跟随中 clicks>0 占比(learningMetrics);
+        bias = clamp(λ × (平台率 − 全池率) × 100, ±8)。
+        样本 <5 的平台偏置置 0(证据不足不动)。
+        """
+        follows = await self.repo.list_follows(
+            status=FOLLOW_STATUS_PUBLISHED, limit=10000)
+        fed = [f for f in follows if f.get("learningFed")]
+        bias = {p: 0.0 for p in PLATFORMS}
+        if len(fed) >= 5:
+            def _hit(f: dict) -> bool:
+                return int((f.get("learningMetrics") or {})
+                           .get("clicks") or 0) > 0
+            pool_rate = sum(1 for f in fed if _hit(f)) / len(fed)
+            for platform in PLATFORMS:
+                plat = [f for f in fed
+                        if f.get("platform") == platform]
+                if len(plat) < 5:
+                    continue   # 样本不足, 偏置保持 0
+                plat_rate = sum(1 for f in plat if _hit(f)) / len(plat)
+                raw = BIAS_LAMBDA * (plat_rate - pool_rate)
+                bias[platform] = round(
+                    max(-BIAS_CLAMP, min(BIAS_CLAMP, raw)), 2)
+        saved = await self.repo.save_platform_bias(bias)
+        await self._audit(0, "platform_bias_recompute", {
+            "bias": bias, "samples": len(fed)})
+        logger.info("blogger_platform_bias_recomputed %s", bias)
+        return saved
+
+    async def _efficiency_mod(self, blogger_id: int) -> float:
+        """效率调制系数: 近30d 引流效率的池内分位
+
+        eff = 有效点击数 / 已回流发布条数(30d 窗口);
+        分位 ≥75% → 1.5 / 25-75% → 1.0 / <25% → 0.6;
+        无样本(池内或本博主) → 1.0(不调制)。
+        """
+        cutoff = datetime.now(UTC) - timedelta(
+            days=EFFICIENCY_WINDOW_DAYS)
+        follows = await self.repo.list_follows(
+            status=FOLLOW_STATUS_PUBLISHED, limit=10000)
+        # 近窗口已回流样本(时间非法视为窗口内, 脏数据治理)
+        window = []
+        for f in follows:
+            if not f.get("learningFed"):
+                continue
+            try:
+                fed_at = datetime.fromisoformat(
+                    f.get("learningFedAt") or f.get("publishedAt", ""))
+                if fed_at < cutoff:
+                    continue
+            except ValueError:
+                pass
+            window.append(f)
+        if len(window) < 3:
+            return 1.0
+        # 各博主效率(点击/条)
+        by_blogger = {}
+        for f in window:
+            clicks = int((f.get("learningMetrics") or {})
+                         .get("clicks") or 0)
+            by_blogger.setdefault(f.get("bloggerId"), []).append(clicks)
+        if blogger_id not in by_blogger:
+            return 1.0   # 本博主窗口内无样本, 不调制
+        effs = {bid: sum(cs) / len(cs)
+                for bid, cs in by_blogger.items()}
+        values = sorted(effs.values())
+        my_eff = effs[blogger_id]
+        n = len(values)
+        rank = sum(1 for v in values if v <= my_eff) / n
+        if rank >= 0.75:
+            return 1.5
+        if rank >= 0.25:
+            return 1.0
+        return 0.6
+
+    async def apply_weight_decay(self) -> dict:
+        """时间衰减(周任务): weightAdjust 向 0 回归 10%
+
+        止损教训随证据老化淡出——配合缓刑复扫形成"可重返"闭环。
+        """
+        bloggers = await self.repo.list_bloggers(limit=1000)
+        decayed = 0
+        for b in bloggers:
+            adjust = float(b.get("weightAdjust") or 0.0)
+            if adjust == 0:
+                continue
+            new_adjust = round(adjust * (1 - WEIGHT_DECAY_WEEKLY), 4)
+            if abs(new_adjust) < 0.005:
+                new_adjust = 0.0   # 近零即归零
+            await self.repo.update_blogger(b["bloggerId"], {
+                "weightAdjust": new_adjust,
+                "weight": derived_weight(b.get("weightBase"),
+                                         new_adjust),
+                "updatedAt": _now_iso(),
+            })
+            decayed += 1
+        await self._audit(0, "weight_decay", {
+            "decayed": decayed, "rate": WEIGHT_DECAY_WEEKLY})
+        logger.info("blogger_weight_decay applied=%s", decayed)
+        return {"decayed": decayed, "rate": WEIGHT_DECAY_WEEKLY}
+
+    async def run_health_checks(self) -> dict:
+        """健康巡检(周任务): 层2震荡冻结 + 层1退化回滚
+
+        - 层2: 7d 内 adjust 方向翻转 ≥OSCILLATION_FLIPS 次 →
+          冻结 FREEZE_DAYS 天(步长置 0)
+        - 层1: champion rewardAlignment 连续 3 轮下降 →
+          回滚默认权重(reset_weights)
+        """
+        frozen, rolled_back = await self._detect_oscillation(), False
+        try:
+            rolled_back = await self._detect_degradation()
+        except Exception as exc:
+            logger.warning("blogger_health_layer1_failed: %s", exc)
+        return {"frozen": frozen, "rolledBack": rolled_back}
+
+    async def _detect_oscillation(self) -> list[int]:
+        """层2震荡检测: weight_evolve 流水 7d 方向翻转计数 → 冻结"""
+        now = datetime.now(UTC)
+        cutoff = now - timedelta(days=7)
+        bloggers = await self.repo.list_bloggers(limit=1000)
+        frozen = []
+        for b in bloggers:
+            audits = await self.repo.list_audits(
+                blogger_id=b["bloggerId"], limit=200)
+            deltas = []
+            for a in audits:
+                if a.get("action") != "weight_evolve":
+                    continue
+                try:
+                    at = datetime.fromisoformat(a.get("createdAt", ""))
+                except ValueError:
+                    continue
+                if at < cutoff:
+                    continue
+                detail = a.get("detail") or {}
+                old = float(detail.get("weightOld")
+                            or 0) or float(b.get("weightBase") or 0)
+                new = float(detail.get("weightNew") or 0)
+                if new != old:
+                    deltas.append(1 if new > old else -1)
+            flips = sum(1 for i in range(1, len(deltas))
+                        if deltas[i] != deltas[i - 1])
+            if flips >= OSCILLATION_FLIPS:
+                until = (now + timedelta(days=FREEZE_DAYS)).isoformat()
+                await self.repo.update_blogger(b["bloggerId"], {
+                    "evolutionFrozenUntil": until,
+                    "updatedAt": _now_iso()})
+                await self._audit(b["bloggerId"],
+                                  "evolution_freeze", {
+                                      "flips": flips,
+                                      "until": until})
+                frozen.append(b["bloggerId"])
+        if frozen:
+            logger.warning("blogger_evolution_frozen %s", frozen)
+        return frozen
+
+    async def _detect_degradation(self) -> bool:
+        """层1退化检测: champion rewardAlignment 连续 3 轮下降 → 回滚
+
+        依据版本历史 stats.rewardAlignment(近 3 条 champion 记录)。
+        """
+        from services.ai_learning_service import get_history, reset_weights
+        history = await get_history("blogger_work_gate", limit=10)
+        records = history.get("history") or history.get("records") or []
+        # 取近 3 条(时间倒序) champion 级记录的对齐度
+        aligns = [float((r.get("stats") or {})
+                        .get("rewardAlignment") or 0)
+                  for r in records[:3]]
+        if len(aligns) == 3 \
+                and aligns[0] < aligns[1] < aligns[2]:
+            await reset_weights("blogger_work_gate")
+            await self._audit(0, "learning_rollback", {
+                "reason": "champion 对齐度连续3轮下降, 回滚默认权重",
+                "recentAlignments": aligns})
+            logger.warning("blogger_learning_rollback aligns=%s",
+                           aligns)
+            return True
+        return False
+
+    async def learning_health(self) -> dict:
+        """学习健康三层视图(层1/层2/质量门)"""
+        from services.ai_learning_service import get_weights_view
+        bloggers = await self.repo.list_bloggers(limit=1000)
+        now = datetime.now(UTC)
+        frozen = [b["bloggerId"] for b in bloggers
+                  if b.get("evolutionFrozenUntil")
+                  and _iso_in_future(b["evolutionFrozenUntil"], now)]
+        follows = await self.repo.list_follows(limit=10000)
+        fed = [f for f in follows
+               if f.get("status") == FOLLOW_STATUS_PUBLISHED
+               and f.get("learningFed")]
+        fraud_count = sum(
+            1 for f in fed
+            if (f.get("learningMetrics") or {}).get("fraudSuspect"))
+        return {
+            "layer1": {
+                "weights": await get_weights_view(
+                    "blogger_work_gate"),
+                "fraudSharePending": round(
+                    await self._fraud_share(), 4),
+                "learningPaused": (await self._fraud_share())
+                > FRAUD_SHARE_PAUSE,
+            },
+            "layer2": {
+                "frozen": frozen,
+                "autoPaused": [b["bloggerId"] for b in bloggers
+                               if b.get("pausedReason")
+                               == "auto_loss_cut"],
+                "fraudPaused": [b["bloggerId"] for b in bloggers
+                                if b.get("pausedReason")
+                                == "fraud_suspect"],
+                "onProbation": [
+                    {"bloggerId": b["bloggerId"],
+                     "probationNextAt": b.get("probationNextAt", "")}
+                    for b in bloggers
+                    if b.get("pausedReason") == "auto_loss_cut"],
+            },
+            "qualityGate": {
+                "fedTotal": len(fed),
+                "fraudFlagged": fraud_count,
+                "fraudRate": round(
+                    fraud_count / len(fed), 4) if fed else 0.0,
+                "effectiveClickRate": round(
+                    sum(int((f.get("learningMetrics") or {})
+                            .get("clicks") or 0) for f in fed)
+                    / max(1, sum(int((f.get("learningMetrics") or {})
+                                     .get("clickRaw") or 0)
+                                 for f in fed)), 4),
+            },
+            "bias": await self.repo.get_platform_bias(),
+        }
 
     async def _ensure_learning_config(self) -> None:
         """eta 覆盖(幂等): 配置未自定义时写入 ETA_OVERRIDE"""

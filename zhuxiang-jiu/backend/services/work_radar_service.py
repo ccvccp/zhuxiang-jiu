@@ -28,6 +28,7 @@ from repositories.blogger_repository import (
     RISK_BLOCK_WORDS,
     BLOGGER_STATUS_ACTIVE,
     WORK_STATUS_DETECTED, WORK_STATUS_DISCARDED,
+    PROBE_WORKS, PROBATION_DAYS, EXPLORE_EPSILON,
 )
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,14 @@ class WorkRadarService:
         Args:
             blogger_ids: 指定博主(空则全池 active 博主)
 
+        全池路径含 P2b 探索三件套(设计文档 §4):
+            - 新博主冷启动: probeRemaining>0 保底置顶扫描(UCB 式),
+              按新作品数递减
+            - ε 探索: 每轮 EXPLORE_EPSILON 概率随机插队 1 位
+              低权重 active 博主
+            - 缓刑复扫: auto_loss_cut 且 probationNextAt 到期的
+              止损博主插一轮单博主扫描(复燃由回流层判定)
+
         Returns:
             {"scanned": N, "new": N, "discarded": N, "skipped": N,
              "works": [新入库作品(含 discarded)]}
@@ -163,6 +172,7 @@ class WorkRadarService:
         else:
             bloggers = await self.repo.list_bloggers(
                 status=BLOGGER_STATUS_ACTIVE, limit=1000)
+            bloggers, probation = await self._apply_exploration(bloggers)
         scanned = new_count = discarded = skipped = 0
         new_works = []
         for blogger in bloggers:
@@ -212,11 +222,25 @@ class WorkRadarService:
                 else:
                     new_count += 1
                     # 增量游标推进(取最新发布时间)
+                    updates = {
+                        "lastSeenWorkAt": work["publishedAt"],
+                        "updatedAt": datetime.now(UTC).isoformat(),
+                    }
+                    # P2b 冷启动探测: 按新作品数递减探测额度
+                    probe = int(blogger.get("probeRemaining") or 0)
+                    if probe > 0:
+                        updates["probeRemaining"] = probe - 1
                     await self.repo.update_blogger(
-                        blogger["bloggerId"], {
-                            "lastSeenWorkAt": work["publishedAt"],
-                            "updatedAt": datetime.now(UTC).isoformat(),
-                        })
+                        blogger["bloggerId"], updates)
+        # P2b 缓刑复扫: 扫完排定下一轮复扫时点
+        for blogger in bloggers:
+            if blogger.get("pausedReason") == "auto_loss_cut":
+                await self.repo.update_blogger(blogger["bloggerId"], {
+                    "probationNextAt": (
+                        datetime.now(UTC)
+                        + timedelta(days=PROBATION_DAYS)).isoformat(),
+                    "updatedAt": datetime.now(UTC).isoformat(),
+                })
         logger.info("work_radar_scan scanned=%s new=%s discarded=%s "
                     "skipped=%s", scanned, new_count, discarded, skipped)
         return {
@@ -226,6 +250,52 @@ class WorkRadarService:
             "skipped": skipped,
             "works": new_works,
         }
+
+    # ============================================================
+    # P2b 探索三件套(冷启动保底 + ε 探索 + 缓刑复扫)
+    # ============================================================
+
+    async def _apply_exploration(
+            self, bloggers: list[dict]) -> tuple[list[dict], list[dict]]:
+        """探索排序: 探测博主置顶 + ε 随机插队 + 缓刑到期博主追加
+
+        Returns:
+            (扫描序列, 缓刑博主列表)
+        """
+        ordered = list(bloggers)
+        # ① 冷启动保底: probeRemaining>0 置顶(权重排序失效)
+        probes = [b for b in ordered
+                  if int(b.get("probeRemaining") or 0) > 0]
+        if probes:
+            ordered = probes + [b for b in ordered if b not in probes]
+        # ② ε 探索: 低权重半区随机插队 1 位
+        rng = random.Random()
+        if ordered and rng.random() < EXPLORE_EPSILON:
+            low_half = ordered[len(ordered) // 2:]
+            if low_half:
+                picked = rng.choice(low_half)
+                ordered = ([picked]
+                           + [b for b in ordered if b is not picked])
+        # ③ 缓刑复扫: auto_loss_cut 且到期 → 追加扫描
+        probation = []
+        try:
+            all_bloggers = await self.repo.list_bloggers(limit=1000)
+            now = datetime.now(UTC)
+            for b in all_bloggers:
+                if b.get("pausedReason") != "auto_loss_cut":
+                    continue
+                next_at = b.get("probationNextAt") or ""
+                if not next_at:
+                    probation.append(b)   # 无排期(旧数据)视为到期
+                    continue
+                try:
+                    if datetime.fromisoformat(next_at) <= now:
+                        probation.append(b)
+                except ValueError:
+                    probation.append(b)
+        except Exception as exc:
+            logger.warning("work_radar_probation_failed: %s", exc)
+        return ordered + probation, probation
 
     # ============================================================
     # 查询

@@ -101,6 +101,9 @@ async def _learning_loop() -> None:
     interval = _interval("BLOGGER_LEARNING_INTERVAL_SECONDS", 3600)
     logger.info("blogger_learning_scheduler started interval=%ss",
                 interval)
+    weekly_interval = _interval(
+        "BLOGGER_WEEKLY_INTERVAL_SECONDS", 7 * 86400, floor=3600)
+    last_weekly = 0.0
     while True:
         await asyncio.sleep(interval)
         try:
@@ -110,13 +113,26 @@ async def _learning_loop() -> None:
             logger.info("blogger_learning_scheduled submitted=%s "
                         "skipped=%s", collected.get("submitted"),
                         collected.get("skipped"))
-            # 反馈不足属常态(产出速率低), 静默跳过本轮学习
+            # 反馈不足属常态(产出速率低), 静默跳过本轮学习;
+            # 样本污染熔断(P2b)亦静默(质量门积累干净样本)
             try:
                 learned = await service.run_learning()
                 logger.info("blogger_learning_cycle promoted=%s",
                             learned.get("promoted"))
             except ValueError:
                 pass
+            # P2b 周维护(默认 7d): 时间衰减 + 平台偏置重算 + 健康巡检
+            import time
+            now = time.monotonic()
+            if now - last_weekly >= weekly_interval:
+                last_weekly = now
+                decay = await service.apply_weight_decay()
+                await service.recompute_platform_bias()
+                health = await service.run_health_checks()
+                logger.info("blogger_weekly_maintenance decayed=%s "
+                            "frozen=%s rolledBack=%s",
+                            decay.get("decayed"), health.get("frozen"),
+                            health.get("rolledBack"))
         except Exception as exc:
             logger.warning("学习调度异常(继续运行): %s", exc)
 

@@ -139,12 +139,37 @@ CLICK_RAPID_SECONDS = 2.0
 CLICK_RAPID_SHARE = 0.5
 QUALITY_FEATURE = 0.2
 
+# ============================================================
+# P2b 进化批常量(设计文档 P2 §3/§4/§5/§6)
+# ============================================================
+
+# 新博主冷启动: 入池前 N 件作品无视 weight 保底扫描(UCB 式)
+PROBE_WORKS = int(os.environ.get("BLOGGER_PROBE_WORKS", "3"))
+# 止损缓刑复扫: auto_loss_cut 每 N 天自动插一轮单博主扫描
+PROBATION_DAYS = int(os.environ.get("BLOGGER_PROBATION_DAYS", "7"))
+# 全局 ε 探索: 每轮扫描概率随机插队 1 位低权重 active 博主
+EXPLORE_EPSILON = float(
+    os.environ.get("BLOGGER_EXPLORE_EPSILON", "0.05"))
+# 时间衰减: weightAdjust 每周向 0 回归比例
+WEIGHT_DECAY_WEEKLY = float(
+    os.environ.get("BLOGGER_WEIGHT_DECAY_WEEKLY", "0.1"))
+# 效率调制窗口(天, 近 N 天引流效率池内分位)
+EFFICIENCY_WINDOW_DAYS = 30
+# 平台校准偏置: bias = λ×(平台引流率−全池引流率)×100, clamp ±8 分
+BIAS_LAMBDA = 20.0
+BIAS_CLAMP = 8.0
+# 层2震荡冻结: 7d 内 adjust 方向翻转 ≥N 次 → 冻结 14d
+OSCILLATION_FLIPS = 3
+FREEZE_DAYS = 14
+# 样本污染暂停: 待学习反馈 fraudSuspect 占比阈值
+FRAUD_SHARE_PAUSE = 0.3
+
 # 层2进化字段(float, 序列化口径)
 _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "fansWan", "likes", "comments", "shares",
                "durationSeconds", "publishedAtTs",
                "zeroTrafficStreak", "trafficInfluencerId",
-               "fraudStreak")
+               "fraudStreak", "probeRemaining")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust")
 
@@ -212,6 +237,10 @@ def _build_seed_bloggers() -> dict[int, dict]:
             "zeroTrafficStreak": 0,
             "fraudStreak": 0,
             "trafficInfluencerId": 0,
+            # P2b 探索三件套
+            "probeRemaining": 0,
+            "probationNextAt": "",
+            "evolutionFrozenUntil": "",
             "createdAt": _now_iso(),
             "updatedAt": _now_iso(),
         }
@@ -242,6 +271,12 @@ def normalize_blogger(record: dict) -> dict:
         record["zeroTrafficStreak"] = 0
     if record.get("fraudStreak") in (None, ""):
         record["fraudStreak"] = 0
+    if record.get("probeRemaining") in (None, ""):
+        record["probeRemaining"] = 0
+    if record.get("probationNextAt") is None:
+        record["probationNextAt"] = ""
+    if record.get("evolutionFrozenUntil") is None:
+        record["evolutionFrozenUntil"] = ""
     if record.get("trafficInfluencerId") in (None, ""):
         record["trafficInfluencerId"] = 0
     return record
@@ -503,3 +538,34 @@ class BloggerRepository:
                        if r.get("bloggerId") == blogger_id]
         return sorted(records, key=lambda x: x.get("auditId", 0),
                       reverse=True)[:limit]
+
+    # ============================================================
+    # P2b 平台校准偏置(blogger:platform_bias, Hash)
+    # ============================================================
+
+    TABLE_BIAS = "platform_bias"
+
+    async def save_platform_bias(self, bias: dict) -> dict:
+        """保存平台偏置({platform: bias} + updatedAt)"""
+        record = dict(bias)
+        record["updatedAt"] = _now_iso()
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("blogger", self.TABLE_BIAS),
+                              mapping=self._serialize(record))
+        else:
+            self._ensure_store()
+            self.store.setdefault("blogger_platform_bias", {}) \
+                .update(record)
+        return record
+
+    async def get_platform_bias(self) -> dict:
+        """读取平台偏置(空库返回空 dict)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("blogger", self.TABLE_BIAS))
+            return self._deserialize(data) if data else {}
+        self._ensure_store()
+        self.store.setdefault("blogger_platform_bias", {})
+        return dict(self.store["blogger_platform_bias"])

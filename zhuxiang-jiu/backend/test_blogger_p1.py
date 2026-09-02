@@ -205,13 +205,14 @@ class TestLayer2Evolution:
         record("层2-Hedge零引流失误",
                result.get("correct") is False)
         # ③ 点击升权(无转化) +0.02
+        # P2b 效率调制: 3 博主样本(f1=1/f2=0/f3=3 点击) → f3 效率
+        # 分位最高 → eff_mod=1.5 → 步长 0.02×1×1.5=0.03
         f3 = follows[2]
         result = await svc.submit_learning_feedback(
             f3["followId"], clicks=3)
         blogger3 = await svc.repo.get_blogger(f3["bloggerId"])
-        record("层2-点击升权+0.02",
-               abs(float(blogger3.get("weightAdjust"))
-                   - WEIGHT_STEP_CLICK) < 1e-6,
+        record("层2-点击升权+0.02×效率1.5",
+               abs(float(blogger3.get("weightAdjust")) - 0.03) < 1e-6,
                f"adjust={blogger3.get('weightAdjust')}")
         # ④ 升权边界 clamp(+0.3 封顶)
         for _ in range(10):

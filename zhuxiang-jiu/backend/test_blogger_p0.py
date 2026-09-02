@@ -513,9 +513,12 @@ class TestPoolCrud:
                                               "active")
         record("CRUD-恢复", active["status"] == "active")
         # 删除: 有跟随内容的博主拒绝 / 无内容博主可删
+        # P2b: 新增博主带探测额度置顶扫描 → decisions 首位可能是
+        # 新博主; 删除保护语义取种子博主作品验证(bloggerId ≤ 8)
         works = await _auto_follow_works(svc)
-        await svc.generate_follow(works[0]["workId"])
-        busy = await svc.repo.get_blogger(works[0]["bloggerId"])
+        seed_work = next(w for w in works if w["bloggerId"] <= 8)
+        await svc.generate_follow(seed_work["workId"])
+        busy = await svc.repo.get_blogger(seed_work["bloggerId"])
         try:
             await svc.delete_blogger(busy["bloggerId"])
             record("CRUD-有跟随内容删除409", False)

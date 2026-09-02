@@ -466,6 +466,30 @@ async def learning_status(x_role: str = Header(None, alias="X-Role")):
         _handle(e)
 
 
+@router.get("/api/blogger/learning/health",
+            tags=["平台流量DV博主模块"])
+async def learning_health(x_role: str = Header(None, alias="X-Role")):
+    """学习健康三层视图(层1权重与污染熔断 / 层2冻结止损缓刑 / 质量门)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True,
+                "data": await _service.learning_health()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/learning/calibrate",
+             tags=["平台流量DV博主模块"])
+async def learning_calibrate(x_role: str = Header(None, alias="X-Role")):
+    """手动触发平台偏置重算(引流率差 ×λ, clamp ±8 分; 样本<5置0)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.recompute_platform_bias()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)
