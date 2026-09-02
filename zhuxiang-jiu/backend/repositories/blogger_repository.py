@@ -188,6 +188,28 @@ SOURCE_FAIL_THRESHOLD = int(
 SOURCE_BREAKER_MINUTES = int(
     os.environ.get("BLOGGER_SOURCE_BREAKER_MINUTES", "30"))
 
+# ============================================================
+# P3c 账号矩阵常量(设计文档 P3c: 多发布账号分散限流)
+# ============================================================
+
+# 账号状态机: active(在役) → cooling(限流冷却) → active
+#                          → banned(封号, admin 手动处理)
+ACCOUNT_STATUS_ACTIVE = "active"
+ACCOUNT_STATUS_COOLING = "cooling"
+ACCOUNT_STATUS_BANNED = "banned"
+ACCOUNT_STATUSES = (ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_COOLING,
+                    ACCOUNT_STATUS_BANNED)
+# 单账号单日发布上限(账号维度第④限, 与博主维度冷却正交)
+ACCOUNT_DAILY_CAP = int(os.environ.get("BLOGGER_ACCOUNT_DAILY_CAP", "3"))
+# 限流冷却时长(小时, 发布回执报限流类错误触发)
+ACCOUNT_COOLING_HOURS = int(
+    os.environ.get("BLOGGER_ACCOUNT_COOLING_HOURS", "24"))
+# 连续失败 N 次封号(需要 admin 介入)
+ACCOUNT_BAN_FAILS = int(os.environ.get("BLOGGER_ACCOUNT_BAN_FAILS", "3"))
+# 限流错误识别关键词(平台限流类报错, 命中 → cooling 而非计失败)
+ACCOUNT_RATELIMIT_WORDS = ("rate limit", "too many", "429", "频次",
+                           "限流", "发布频繁")
+
 # 层2进化字段(float, 序列化口径)
 _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "fansWan", "likes", "comments", "shares",
@@ -333,7 +355,8 @@ class BloggerRepository:
 
     def _ensure_store(self):
         for key in ("blogger_pool", "blogger_works",
-                    "blogger_follows", "blogger_audits"):
+                    "blogger_follows", "blogger_audits",
+                    "blogger_accounts"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -593,3 +616,45 @@ class BloggerRepository:
         self._ensure_store()
         self.store.setdefault("blogger_platform_bias", {})
         return dict(self.store["blogger_platform_bias"])
+
+    # ============================================================
+    # P3c 账号矩阵(blogger:accounts:{accountId}, Hash)
+    # ============================================================
+
+    TABLE_ACCOUNTS = "blogger_accounts"
+
+    async def save_account(self, record: dict) -> dict:
+        """保存发布账号({accountId, platform, alias, status,
+        dailyPublished, dateKey, coolingUntil, failStreak, ...})"""
+        return await self._save(self.TABLE_ACCOUNTS,
+                                record["accountId"], record)
+
+    async def get_account(self, account_id: int) -> dict | None:
+        return await self._get(self.TABLE_ACCOUNTS, account_id)
+
+    async def list_accounts(self, platform: str = None,
+                            status: str = None,
+                            limit: int = 200) -> list[dict]:
+        records = await self._list(self.TABLE_ACCOUNTS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if platform and r.get("platform") != platform:
+                continue
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("lastUsedAt", ""),
+                      reverse=False)[:limit]
+
+    async def delete_account(self, account_id: int) -> None:
+        if is_redis_mode():
+            from repositories.backend import get_redis_client, _k
+            client = await get_redis_client()
+            await client.delete(_k("blogger", self.TABLE_ACCOUNTS,
+                                   account_id))
+        else:
+            self._ensure_store()
+            self.store.get(self.TABLE_ACCOUNTS, {}) \
+                .pop(account_id, None)

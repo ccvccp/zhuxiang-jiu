@@ -102,6 +102,14 @@ class LearningFeedbackRequest(PydBaseModel):
     orders: int = Field(None, ge=0, description="订单数(可选)")
 
 
+class CreateAccountRequest(PydBaseModel):
+    platform: str = Field(..., description="平台: douyin/xiaohongshu/"
+                                         "weibo/wechat_channels")
+    alias: str = Field(..., min_length=1, max_length=64,
+                       description="账号别名(如 抖音主号A)")
+    note: str = Field("", max_length=200, description="备注")
+
+
 # ============================================================
 # 博主池管理(admin)
 # ============================================================
@@ -486,6 +494,107 @@ async def learning_calibrate(x_role: str = Header(None, alias="X-Role")):
     try:
         result = await _service.recompute_platform_bias()
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 发布账号矩阵(P3c, admin)
+# ============================================================
+
+@router.post("/api/blogger/accounts", tags=["平台流量DV博主模块"])
+async def create_account(req: CreateAccountRequest,
+                         x_role: str = Header(None, alias="X-Role")):
+    """新增发布账号(LRU 轮询池; 单账号日帽3条, 限流冷却24h)"""
+    _require_admin(x_role)
+    try:
+        from services.blogger_account_service import \
+            BloggerAccountService
+        account = await BloggerAccountService().create_account(
+            platform=req.platform, alias=req.alias, note=req.note)
+        return {"success": True, "data": account}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/accounts", tags=["平台流量DV博主模块"])
+async def list_accounts(
+    x_role: str = Header(None, alias="X-Role"),
+    platform: str = Query(None, description="平台筛选"),
+    status: str = Query(None, description="active/cooling/banned"),
+):
+    """账号池列表(过期 cooling 自动回 active)"""
+    _require_admin(x_role)
+    try:
+        from services.blogger_account_service import \
+            BloggerAccountService
+        accounts = await BloggerAccountService().list_accounts(
+            platform=platform, status=status)
+        return {"success": True, "data": accounts}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/accounts/overview",
+            tags=["平台流量DV博主模块"])
+async def accounts_overview(x_role: str = Header(None,
+                                                 alias="X-Role")):
+    """账号池全景(按平台聚合: 在役/冷却/封号/日计数)"""
+    _require_admin(x_role)
+    try:
+        from services.blogger_account_service import \
+            BloggerAccountService
+        return {"success": True, "data":
+                await BloggerAccountService().pool_overview()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/accounts/{account_id}/activate",
+             tags=["平台流量DV博主模块"])
+async def activate_account(account_id: int,
+                           x_role: str = Header(None,
+                                                alias="X-Role")):
+    """恢复账号(banned/cooling → active, 清零失败计数)"""
+    _require_admin(x_role)
+    try:
+        from services.blogger_account_service import \
+            BloggerAccountService
+        account = await BloggerAccountService().activate_account(
+            account_id)
+        return {"success": True, "data": account}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/accounts/{account_id}/ban",
+             tags=["平台流量DV博主模块"])
+async def ban_account(account_id: int,
+                      x_role: str = Header(None, alias="X-Role")):
+    """手动封号(违规/风险账号)"""
+    _require_admin(x_role)
+    try:
+        from services.blogger_account_service import \
+            BloggerAccountService
+        account = await BloggerAccountService().ban_account(
+            account_id)
+        return {"success": True, "data": account}
+    except Exception as e:
+        _handle(e)
+
+
+@router.delete("/api/blogger/accounts/{account_id}",
+               tags=["平台流量DV博主模块"])
+async def delete_account(account_id: int,
+                         x_role: str = Header(None, alias="X-Role")):
+    """删除账号"""
+    _require_admin(x_role)
+    try:
+        from services.blogger_account_service import \
+            BloggerAccountService
+        account = await BloggerAccountService().delete_account(
+            account_id)
+        return {"success": True, "data": account}
     except Exception as e:
         _handle(e)
 

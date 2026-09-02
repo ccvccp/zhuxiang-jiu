@@ -92,6 +92,14 @@ def _iso_in_future(iso: str, now: datetime | None = None) -> bool:
         return False
 
 
+def _is_rate_limit(error: str) -> bool:
+    """限流类错误识别(P3c, 委托账号矩阵口径)"""
+    from repositories.blogger_repository import \
+        ACCOUNT_RATELIMIT_WORDS
+    text = (error or "").lower()
+    return any(w in text for w in ACCOUNT_RATELIMIT_WORDS)
+
+
 # ============================================================
 # P2a 点击质量门与连续奖励(纯函数, 设计文档 P2 §1/§2)
 # ============================================================
@@ -714,7 +722,55 @@ class BloggerService:
             return published
 
     async def _publish_one(self, follow: dict) -> dict:
-        """单条发布(复用 36号通道服务三态回执)"""
+        """单条发布(复用 36号通道三态回执 + P3c 账号矩阵)
+
+        P3c 接线: 有可用账号 → 选号发布 + 回执处置(限流换号重试
+        一次); 无账号(mock 轨) → 原通道逻辑不阻断, 回执标注
+        accountUsed=unassigned。
+        """
+        platform = follow.get("platform", "")
+        account = None
+        try:
+            from services.blogger_account_service import \
+                BloggerAccountService
+            account_service = BloggerAccountService()
+            account = await account_service.pick_account(platform)
+        except Exception as exc:
+            logger.warning("blogger_pick_account_failed: %s", exc)
+            account_service = None
+        receipt = await self._channel_publish(follow)
+        receipt["accountUsed"] = (
+            account.get("alias") if account else "unassigned")
+        # 回执处置(限流 → cooling + 换号重试一次)
+        if account_service is not None and account is not None:
+            try:
+                await account_service.handle_receipt(account,
+                                                     receipt)
+            except Exception as exc:
+                logger.warning("blogger_receipt_handle_failed: %s",
+                               exc)
+            if receipt.get("error") and _is_rate_limit(
+                    receipt.get("error")):
+                retry_account = await \
+                    account_service.pick_account(platform)
+                if retry_account is not None:
+                    logger.info("blogger_publish_retry_account "
+                                "follow=%s account=%s",
+                                follow.get("followId"),
+                                retry_account["alias"])
+                    receipt = await self._channel_publish(follow)
+                    receipt["accountUsed"] = retry_account.get(
+                        "alias")
+                    try:
+                        await account_service.handle_receipt(
+                            retry_account, receipt)
+                    except Exception as exc:
+                        logger.warning(
+                            "blogger_retry_handle_failed: %s", exc)
+        return receipt
+
+    async def _channel_publish(self, follow: dict) -> dict:
+        """通道发布(36号 promo_channel_service 三态回执)"""
         try:
             from services.promo_channel_service import PromoChannelService
             # work.likes 作为曝光基数(对齐 36号 heat 口径)
