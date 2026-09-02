@@ -22,8 +22,12 @@ AI 结算(§2.5, 全程无人工):
 """
 
 import logging
+import hashlib
+import hmac
 import math
+import time
 from datetime import datetime, UTC
+from uuid import uuid4
 
 from core.locks import get_lock
 from repositories.ride_repository import (
@@ -42,6 +46,7 @@ from repositories.ride_repository import (
     RIDE_NIGHT_START, RIDE_NIGHT_END,
     DISPATCH_AUTO_SCORE, DISPATCH_BACKUP_SCORE,
     DRIDE_CHANNEL_MODE, DRIDE_PARTNER_URL,
+    DRIDE_PARTNER_APP_ID, DRIDE_PARTNER_APP_SECRET, DRIDE_PARTNER_TOKEN,
     RIDE_MILEAGE_ANOMALY_RATIO,
     RISK_EVENT_MILEAGE,
     PARTNER_EVENT_ACCEPTED, PARTNER_EVENT_STARTED,
@@ -73,6 +78,29 @@ def haversine_km(lat1: float, lng1: float, lat2: float,
 def is_night_hour(hour: int) -> bool:
     """夜间时段判定: [22:00, 次日 06:00)"""
     return hour >= RIDE_NIGHT_START or hour < RIDE_NIGHT_END
+
+
+def _partner_auth_headers() -> dict:
+    """平台鉴权头(待办清单 §3.3, 按配置双风格)
+
+    APP_ID+APP_SECRET → HMAC 签名头(签名串 app_id+timestamp+nonce);
+    仅 TOKEN          → Bearer 头; 均未配置 → 空(联调裸跑)。
+    """
+    if DRIDE_PARTNER_APP_ID and DRIDE_PARTNER_APP_SECRET:
+        timestamp = str(int(time.time()))
+        nonce = uuid4().hex[:16]
+        sign = hmac.new(
+            DRIDE_PARTNER_APP_SECRET.encode("utf-8"),
+            f"{DRIDE_PARTNER_APP_ID}{timestamp}{nonce}"
+            .encode("utf-8"),
+            hashlib.sha256).hexdigest()
+        return {"X-App-Id": DRIDE_PARTNER_APP_ID,
+                "X-Timestamp": timestamp,
+                "X-Nonce": nonce,
+                "X-Signature": sign}
+    if DRIDE_PARTNER_TOKEN:
+        return {"Authorization": f"Bearer {DRIDE_PARTNER_TOKEN}"}
+    return {}
 
 
 def compute_fare(distance_km: float, minutes: float = 0,
@@ -386,7 +414,16 @@ class RideDispatchService:
                     result.get("partnerOrderId"), ride["platformChannel"])
 
     async def _platform_real(self, ride: dict) -> dict | None:
-        """平台直发真实轨(P3b 冻结契约风格, 需 DRIDE_PARTNER_URL)"""
+        """平台直发真实轨(冻结契约 + 平台鉴权头, 需 DRIDE_PARTNER_URL)
+
+        鉴权(待办清单 §3.3, 双风格按配置自动选择):
+            APP_ID+APP_SECRET → HMAC-SHA256 签名头(X-App-Id/X-Timestamp/
+            X-Nonce/X-Signature, 签名串 app_id+timestamp+nonce);
+            仅 TOKEN           → Authorization: Bearer 头;
+            均未配置            → 无鉴权头(联调裸跑口径)。
+        幂等: X-Request-Id 携带 rideId; 传输层错误重试 1 次
+        (HTTP 4xx/5xx 为业务响应, 不重试直接失败)。
+        """
         import httpx
         payload = {
             "rideId": ride["rideId"],
@@ -395,11 +432,23 @@ class RideDispatchService:
             "couponValue": ride.get("couponValue"),
             "estimatedKm": ride.get("distanceKm"),
         }
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(f"{DRIDE_PARTNER_URL}/dispatch",
-                                     json=payload)
-            resp.raise_for_status()
-            return resp.json()
+        headers = {"Content-Type": "application/json",
+                   "X-Request-Id": ride["rideId"],
+                   **_partner_auth_headers()}
+        url = f"{DRIDE_PARTNER_URL}/dispatch"
+        for attempt in (1, 2):
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.post(url, json=payload,
+                                             headers=headers)
+                    resp.raise_for_status()
+                    return resp.json()
+            except httpx.TransportError:
+                if attempt == 2:
+                    raise
+                logger.warning("ride_platform_real_retry ride=%s",
+                               ride["rideId"])
+        return None
 
     @staticmethod
     def _platform_mock(ride: dict) -> dict:

@@ -34,6 +34,17 @@ services:
       - AI_LEARNING_AUTO=${AI_LEARNING_AUTO:-off}
       - ORDER_TIMEOUT_AUTO=${ORDER_TIMEOUT_AUTO:-off}
       - KNOWLEDGE_QUALITY_AUTO=${KNOWLEDGE_QUALITY_AUTO:-off}
+      # ---- 41号 直发平台真实接入(默认 mock; 见 docs/直发通道接入真实API凭证待办清单.md) ----
+      # 三态: mock(默认) / real(fail-hard) / mock_fallback(真实轨失败回退 mock)
+      # 灰度顺序: mock → mock_fallback(≥48h 观察) → real
+      - DRIDE_CHANNEL_MODE=${DRIDE_CHANNEL_MODE:-mock}
+      - DRIDE_PARTNER_URL=${DRIDE_PARTNER_URL:-}
+      # 平台鉴权(二选一): APP_ID+APP_SECRET(HMAC 签名头) 或 TOKEN(Bearer)
+      - DRIDE_PARTNER_APP_ID=${DRIDE_PARTNER_APP_ID:-}
+      - DRIDE_PARTNER_APP_SECRET=${DRIDE_PARTNER_APP_SECRET:-}
+      - DRIDE_PARTNER_TOKEN=${DRIDE_PARTNER_TOKEN:-}
+      # 回调签名令牌(real 模式上线前必须配置, 否则回调端点不校验)
+      - DRIDE_PARTNER_CALLBACK_TOKEN=${DRIDE_PARTNER_CALLBACK_TOKEN:-}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

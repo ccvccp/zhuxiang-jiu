@@ -29,7 +29,7 @@
 P3 预留: 双向评价 / 日结对账 / 学习回流调度
 """
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from pydantic import BaseModel as PydBaseModel, Field
 
@@ -588,16 +588,50 @@ async def admin_settlements(
 # 平台直发回调(合作平台服务间调用) + 安全监控(管理端)
 # ============================================================
 
+async def _verify_partner_callback(request: Request) -> None:
+    """平台回调鉴权(待办清单 §4.1)
+
+    配置 DRIDE_PARTNER_CALLBACK_TOKEN 后任一通过即放行:
+        ① X-Partner-Token 静态令牌相等
+        ② X-Partner-Signature == HMAC-SHA256(原始请求体, token)
+    未配置令牌 → 放行(mock/联调口径, 生产 real 模式前必须配置)。
+    """
+    import hashlib
+    import hmac as _hmac
+    import os
+
+    token = os.environ.get("DRIDE_PARTNER_CALLBACK_TOKEN", "")
+    if not token:
+        return
+    provided = request.headers.get("x-partner-token", "")
+    if provided and _hmac.compare_digest(provided, token):
+        return
+    sig = request.headers.get("x-partner-signature", "")
+    if sig:
+        raw = await request.body()   # Starlette 缓存, request.json() 可复读
+        expected = _hmac.new(token.encode("utf-8"), raw,
+                             hashlib.sha256).hexdigest()
+        if _hmac.compare_digest(sig, expected):
+            return
+    raise HTTPException(status_code=403, detail="平台回调鉴权失败")
+
+
 @router.post("/api/ride/partner/callback")
-async def partner_callback(body: PartnerCallbackRequest):
+async def partner_callback(request: Request):
     """平台直发回执(三态): accepted/started/completed/cancelled
 
     completed 事件携带 trace 摘要(actualKm/durationMinutes),
     触发 AI 结算(aggregated)与里程异常比对。
+
+    回调鉴权(待办清单 §4.1): 配置 DRIDE_PARTNER_CALLBACK_TOKEN 后
+    校验 X-Partner-Token(静态令牌)或 X-Partner-Signature
+    (HMAC-SHA256(原始请求体)); 未配置则放行(mock/联调口径,
+    生产切换 real 模式前必须配置)。
     """
+    await _verify_partner_callback(request)
     try:
-        return await _dispatch_service.partner_callback(
-            body.model_dump())
+        body = (await request.json()) or {}
+        return await _dispatch_service.partner_callback(body)
     except Exception as e:
         raise _handle(e) from e
 

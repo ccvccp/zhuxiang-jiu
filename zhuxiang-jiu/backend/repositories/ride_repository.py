@@ -144,6 +144,14 @@ DISPATCH_BACKUP_SCORE = 50.0
 DRIDE_CHANNEL_MODE = os.environ.get("DRIDE_CHANNEL_MODE", "mock")
 DRIDE_PARTNER_URL = os.environ.get("DRIDE_PARTNER_URL", "")
 
+# 直发平台真实接入凭证(待办清单 §二/§三; 均缺省空 = 不带鉴权头)
+DRIDE_PARTNER_APP_ID = os.environ.get("DRIDE_PARTNER_APP_ID", "")
+DRIDE_PARTNER_APP_SECRET = os.environ.get("DRIDE_PARTNER_APP_SECRET", "")
+DRIDE_PARTNER_TOKEN = os.environ.get("DRIDE_PARTNER_TOKEN", "")   # Bearer 备选风格
+# 回调签名令牌(待办清单 §四; 缺省空 = 回调端点不校验, 生产必须配置)
+DRIDE_PARTNER_CALLBACK_TOKEN = os.environ.get(
+    "DRIDE_PARTNER_CALLBACK_TOKEN", "")
+
 # ============================================================
 # P2 安全监控常量(设计文档 §2.4)
 # ============================================================
