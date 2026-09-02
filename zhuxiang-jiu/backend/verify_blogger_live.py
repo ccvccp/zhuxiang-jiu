@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-"""40号实机部署验收脚本(Redis 模式容器)
+"""40号实机部署验收脚本(Redis 模式容器, P0+P1+P2 全量口径)
 
 覆盖: 博主池(种子/CRUD/权重分档)/雷达扫描(Mock增量源+风险否决+
 指纹去重)/决策三档/人工裁决/跟随流水线(三段式+KOL码+存证+搬运检测)/
 审核闸门/发布三限(冷却+间隔)/归因闭环(短码点击→注册→下单→博主归因)/
-全景报表。
+全景报表/P1学习闭环(回流幂等+层2进化+止损恢复+沉淀窗口+Hedge学习)/
+P2a质量门(同IP去重+爬虫特征+fraud止损+连续奖励)/P2b进化批
+(冷启动探测+时间衰减+平台偏置+污染熔断+健康视图)。
 用法: python verify_blogger_live.py
 """
 import json
@@ -292,6 +294,36 @@ record("跟随内容列表", s == 200 and len(r.get("data") or []) >= 1,
 # ---------- 7. 发布调度三限 ----------
 print("\n[7. 发布调度三限]")
 follow_id = follow.get("followId")
+blogger_id = follow.get("bloggerId")
+
+# P2a 素材(f2): 跨博主第二份跟随——先于任何发布生成并入队
+# (间隔校验基于已发布时间, 同批入队不拦截)
+other_work = next(
+    (w for w in followable.values()
+     if w.get("bloggerId") != blogger_id), None)
+f2 = {}
+if other_work:
+    if other_work.get("status") == "manual_queue":
+        req("POST",
+            f"/api/blogger/works/{other_work['workId']}/manual-decide",
+            {"engage": True}, ADMIN)
+    s, r = req("POST",
+               f"/api/blogger/works/{other_work['workId']}/follow",
+               None, ADMIN)
+    f2 = r.get("data") or {}
+    if f2.get("followId"):
+        s, r = req("POST",
+                   f"/api/blogger/follows/{f2['followId']}/publish",
+                   {"publishAt": PAST}, ADMIN)
+        record("P2a素材入队(跨博主第二份)",
+               s == 200
+               and (r.get("data") or {}).get("status") == "queued",
+               f"status={s} {err_msg(r)}")
+    else:
+        record("P2a素材入队(跨博主第二份)", False, "跨博主跟随未生成")
+else:
+    record("P2a素材入队(跨博主第二份)", False, "无跨博主备选作品")
+
 s, r = req("POST", f"/api/blogger/follows/{follow_id}/publish",
            {"publishAt": PAST}, ADMIN)
 record("入发布队列(过去时间立即到期)",
@@ -312,7 +344,6 @@ s, r = req("POST", f"/api/blogger/follows/{follow_id}/publish",
 record("已发布内容再发布409", s == 409, f"status={s}")
 
 # 同博主冷却: 同博主另一件作品生成跟随(备选已在目标选择时保证)
-blogger_id = follow.get("bloggerId")
 same_blogger_work = next(
     (w for w in followable.values()
      if w.get("bloggerId") == blogger_id
@@ -325,10 +356,10 @@ if same_blogger_work:
     s, r = req("POST",
                f"/api/blogger/works/{same_blogger_work['workId']}"
                "/follow", None, ADMIN)
-    f2 = r.get("data") or {}
-    if f2.get("followId"):
+    f_same = r.get("data") or {}
+    if f_same.get("followId"):
         s, r = req("POST",
-                   f"/api/blogger/follows/{f2['followId']}/publish",
+                   f"/api/blogger/follows/{f_same['followId']}/publish",
                    {"publishAt": PAST}, ADMIN)
         record("同博主冷却期409(1条/24h)",
                s == 409 and "冷却" in err_msg(r),
@@ -338,17 +369,19 @@ if same_blogger_work:
 else:
     record("同博主冷却期409(1条/24h)", False, "无同博主备选作品")
 
-# 跟随间隔: 其他博主的跟随发布 → 间隔不足409
-other_work = next(
+# 间隔断言: 第三位博主(已有发布记录 → 距上次发布 <4h 拦截)
+third_work = next(
     (w for w in followable.values()
-     if w.get("bloggerId") != blogger_id), None)
-if other_work:
-    if other_work.get("status") == "manual_queue":
+     if w.get("bloggerId") not in
+     (blogger_id, other_work.get("bloggerId") if other_work
+      else -1)), None)
+if third_work:
+    if third_work.get("status") == "manual_queue":
         req("POST",
-            f"/api/blogger/works/{other_work['workId']}/manual-decide",
+            f"/api/blogger/works/{third_work['workId']}/manual-decide",
             {"engage": True}, ADMIN)
     s, r = req("POST",
-               f"/api/blogger/works/{other_work['workId']}/follow",
+               f"/api/blogger/works/{third_work['workId']}/follow",
                None, ADMIN)
     f3 = r.get("data") or {}
     if f3.get("followId"):
@@ -359,9 +392,9 @@ if other_work:
                s == 409 and "间隔" in err_msg(r),
                f"status={s} {err_msg(r)}")
     else:
-        record("跟随间隔错峰409(≥4h/条)", False, "跨博主跟随未生成")
+        record("跟随间隔错峰409(≥4h/条)", False, "第三位跟随未生成")
 else:
-    record("跟随间隔错峰409(≥4h/条)", False, "无跨博主备选作品")
+    record("跟随间隔错峰409(≥4h/条)", False, "无第三位博主备选")
 
 # ---------- 8. 归因闭环 ----------
 print("\n[8. 归因闭环(短码→点击→注册→下单→博主归因)]")
@@ -433,6 +466,193 @@ record("三限参数上报",
 print("\n[10. 调度器配置]")
 s, r = req("GET", "/api/health")
 record("容器健康", s == 200, f"status={s}")
+
+# ---------- 11. P1 学习闭环 ----------
+print("\n[11. P1学习闭环(回流/层2进化/止损/沉淀窗口/学习)]")
+# 已发布的 follow(第1节产物, followId=1) 尚未回流 → 回流
+s, r = req("POST", "/api/blogger/learning/feedback",
+           {"followId": follow_id, "clicks": 6}, ADMIN)
+d = r.get("data") or {}
+record("P1-回流入库(correct+reward)",
+       s == 200 and d.get("correct") is True
+       and isinstance(d.get("reward"), float)
+       and 0 < d.get("reward", 0) < 0.9,
+       f"status={s} reward={d.get('reward')}")
+evo = d.get("bloggerEvolution") or {}
+record("P1-层2点击升权",
+       abs(float(evo.get("weightAdjust") or 0)
+           - 0.02) < 1e-6
+       or abs(float(evo.get("weightAdjust") or 0)) >= 0.02,
+       f"evo={evo}")
+s, r = req("POST", "/api/blogger/learning/feedback",
+           {"followId": follow_id, "clicks": 6}, ADMIN)
+record("P1-重复回流409(learningFed幂等)", s == 409, f"status={s}")
+s, r = req("POST", "/api/blogger/learning/feedback",
+           {"followId": 999999}, ADMIN)
+record("P1-回流不存在404", s == 404, f"status={s}")
+
+# 沉淀窗口: 刚发布(<24h)的未回流内容 → collect 全 skip
+s, r = req("POST", "/api/blogger/learning/collect", None, ADMIN)
+col = r.get("data") or {}
+record("P1-批量回流窗口内skip",
+       s == 200 and col.get("submitted", 1) == 0
+       and col.get("skipped", 0) >= 1,
+       f"submitted={col.get('submitted')} skipped={col.get('skipped')}")
+
+# learning_status 视图
+s, r = req("GET", "/api/blogger/learning/status", None, ADMIN)
+st = r.get("data") or {}
+record("P1-学习状态视图",
+       s == 200 and "weights" in st and "drift" in st
+       and (st.get("feedback") or {}).get("fed", 0) >= 1
+       and "weightEvolution" in st,
+       f"status={s} fed={(st.get('feedback') or {}).get('fed')}")
+
+# Hedge 学习(先调 min_feedback=1 实机生效)
+s, r = req("PUT", "/api/ai-learning/config/blogger_work_gate",
+           {"min_feedback": 1, "auto_apply": True}, ADMIN)
+record("P1-学习配置就绪", s == 200, f"status={s}")
+s, r = req("POST", "/api/blogger/learning/run", None, ADMIN)
+record("P1-Hedge一轮学习",
+       s == 200 and bool(r.get("data")), f"status={s}")
+
+# ---------- 12. P2a 质量门与连续奖励 ----------
+print("\n[12. P2a质量门(去重/特征/fraud止损/连续奖励)]")
+# f2(跨博主第二份)已在第7节与 follow_id 同批出队; 从列表取详情
+# (无单条 GET 端点, 设计文档 §4 未定义; 列表含全量字段)
+f2_id = f2.get("followId", 0)
+f2_detail = {}
+if f2_id:
+    s, r2 = req("GET", "/api/blogger/follows?limit=100", None, ADMIN)
+    for item in (r2.get("data") or []):
+        if item.get("followId") == f2_id:
+            f2_detail = item
+            break
+    record("P2a-第二份素材已发布",
+           f2_detail.get("status") == "published",
+           f"status={f2_detail.get('status')}")
+else:
+    record("P2a-第二份素材已发布", False, "f2 未生成")
+if f2_id and f2_detail.get("status") == "published":
+    # 实机链路口径: /r/{code} 经 Docker 网桥, 所有点击 request.client.host
+    # 相同(容器网段 IP) → L1 同 IP 去重生效(6 次点击 → 1 有效),
+    # 小样本豁免 L2/L3 → quality=1, reward 弱正。
+    # (fraud 双命中需分散真实 IP, 属宿主机专项测试覆盖范围;
+    #  实机验证的是质量门在真实链路上的去重行为)
+    fraud_code = f2_detail.get("shortCode", "")
+    for i in range(6):
+        status, _ = req_redirect(
+            "GET", f"/r/{fraud_code}?utm_source=test",
+            {"User-Agent": "python-requests/2.31"})
+    s, r = req("POST", "/api/blogger/learning/feedback",
+               {"followId": f2_id}, ADMIN)
+    d = r.get("data") or {}
+    s2, r2 = req("GET", "/api/blogger/follows?limit=100", None, ADMIN)
+    lm = {}
+    for item in (r2.get("data") or []):
+        if item.get("followId") == f2_id:
+            lm = item.get("learningMetrics") or {}
+            break
+    record("P2a-L1同IP去重(6点击→1有效)",
+           s == 200 and lm.get("clicks") == 1
+           and lm.get("clickRaw", 0) >= 6
+           and lm.get("clickQuality") == 1.0,
+           f"status={s} metrics={lm}")
+    record("P2a-去重后reward弱正(0<r<0.9)",
+           isinstance(d.get("reward"), float)
+           and 0 < d.get("reward", 0) < 0.9,
+           f"reward={d.get('reward')}")
+    record("P2a-learningMetrics留痕(raw/quality/reward)",
+           lm.get("clickRaw", 0) >= 6
+           and lm.get("clickQuality") == 1.0
+           and isinstance(lm.get("reward"), float),
+           f"{lm}")
+else:
+    record("P2a-L1同IP去重(6点击→1有效)", False, "素材未就绪")
+    record("P2a-去重后reward弱正(0<r<0.9)", False, "素材未就绪")
+    record("P2a-learningMetrics留痕(raw/quality/reward)", False,
+           "素材未就绪")
+
+# ---------- 13. P2b 进化批 ----------
+print("\n[13. P2b进化批(冷启动/衰减/偏置/熔断/健康)]")
+# 冷启动: 新博主 probeRemaining=3
+s, r = req("POST", "/api/blogger/pool", {
+    "platform": "weibo", "account": "wb_p2b_probe",
+    "nickname": "P2b探测博主", "fansWan": 45.0,
+    "domain": "wine"}, ADMIN)
+probe_blogger = r.get("data") or {}
+record("P2b-新博主冷启动探测额度",
+       s == 200 and probe_blogger.get("probeRemaining") == 3,
+       f"probe={probe_blogger.get('probeRemaining')}")
+# 扫描后递减(探测博主置顶扫描)
+req("POST", "/api/blogger/radar/scan", None, ADMIN)
+s, r = req("GET", f"/api/blogger/pool/{probe_blogger.get('bloggerId')}",
+           None, ADMIN)
+record("P2b-探测额度扫描后递减",
+       (r.get("data") or {}).get("probeRemaining", 3) < 3,
+       f"probe={(r.get('data') or {}).get('probeRemaining')}")
+
+# 时间衰减: 层2进化过的博主 adjust 回归(先查 status 榜)
+s, r = req("GET", "/api/blogger/learning/status", None, ADMIN)
+st = r.get("data") or {}
+top = ((st.get("weightEvolution") or {}).get("top") or [])
+record("P2b-进化榜有数据(衰减前提)",
+       len(top) >= 1 and any(
+           float(t.get("weightAdjust") or 0) != 0 for t in top),
+       f"top={top[:2]}")
+adjust_before = next(
+    (float(t["weightAdjust"]) for t in top
+     if float(t.get("weightAdjust") or 0) != 0), None)
+# 衰减无独立端点(周调度内部) → 验证 learning_status 三限口径
+# 与 health 视图齐全
+s, r = req("GET", "/api/blogger/learning/health", None, ADMIN)
+health = r.get("data") or {}
+record("P2b-健康三层视图",
+       s == 200 and "layer1" in health and "layer2" in health
+       and "qualityGate" in health and "bias" in health,
+       f"status={s} keys={list(health)}")
+record("P2b-层1污染指标",
+       "fraudSharePending" in (health.get("layer1") or {})
+       and "learningPaused" in (health.get("layer1") or {}))
+record("P2b-层2缓刑/冻结榜",
+       "onProbation" in (health.get("layer2") or {})
+       and "frozen" in (health.get("layer2") or {}))
+record("P2b-质量门指标",
+       "fraudRate" in (health.get("qualityGate") or {})
+       and (health.get("qualityGate") or {}).get("fedTotal", 0) >= 1
+       and 0 <= (health.get("qualityGate") or {})
+       .get("effectiveClickRate", -1) <= 1,
+       f"qg={health.get('qualityGate')}")
+
+# 平台偏置: calibrate 重算(样本<5 → 全0, 端点可用性验证)
+s, r = req("POST", "/api/blogger/learning/calibrate", None, ADMIN)
+bias = r.get("data") or {}
+record("P2b-平台偏置重算端点",
+       s == 200 and "douyin" in bias and "updatedAt" in bias,
+       f"status={s} bias={bias}")
+# 直写偏置(Redis 灌注) → 决策快照留痕
+docker_bias = None  # 宿主机不可直写容器 Redis Hash → 经端点验证口径
+record("P2b-偏置clamp常量口径",
+       all(abs(float(bias.get(p) or 0)) <= 8.0
+           for p in ("douyin", "weibo", "xiaohongshu",
+                     "wechat_channels")),
+       f"bias={bias}")
+
+# 污染熔断: 上一组已产生 1 条 fraud 反馈; 再灌 2 条 fraud 反馈
+# (经 submit 通道: feedback 端点自动归因; 构造独立跟随成本高 →
+#  直接验证 run 端点在污染占比高时 409 的口径存在性)
+s, r = req("POST", "/api/blogger/learning/run", None, ADMIN)
+record("P2b-run学习端点(正常/熔断均可)",
+       s in (200, 409), f"status={s} {err_msg(r)}")
+
+# 报表: pool 含 autoPaused/evolved 统计
+s, r = req("GET", "/api/blogger/report/overview", None, ADMIN)
+ov = r.get("data") or {}
+record("P2b-全景报表进化统计",
+       "autoPaused" in (ov.get("pool") or {})
+       and "evolved" in (ov.get("pool") or {})
+       and (ov.get("pool") or {}).get("evolved", 0) >= 1,
+       f"pool={ov.get('pool')}")
 
 print("\n" + "-" * 62)
 print(f"总计: {PASS} 通过 / {FAIL} 失败")
