@@ -144,6 +144,35 @@ DISPATCH_BACKUP_SCORE = 50.0
 DRIDE_CHANNEL_MODE = os.environ.get("DRIDE_CHANNEL_MODE", "mock")
 DRIDE_PARTNER_URL = os.environ.get("DRIDE_PARTNER_URL", "")
 
+# ============================================================
+# P2 安全监控常量(设计文档 §2.4)
+# ============================================================
+
+# 饮酒场景 POI 词表(上车点命中 → 合规叫单场景, 不产生风控信号)
+RIDE_POI_DRINKING_WORDS = ("餐厅", "饭店", "酒", "吧", "烧烤", "火锅",
+                           "宴", "夜市", "KTV", "排档", "私房菜")
+# 非饮酒 POI 高频叫单风控: 24h 窗口内次数阈值(含当次)
+RIDE_POI_FREQ_WINDOW_HOURS = 24
+RIDE_POI_FREQ_THRESHOLD = 3
+# 行程超时预警: 市内行程 > 3h 未结束
+RIDE_TIMEOUT_HOURS = 3
+# 里程异常: 实际里程超预估倍数
+RIDE_MILEAGE_ANOMALY_RATIO = 2.0
+
+# 风险事件类型(POI 高频/行程超时/里程异常)
+RISK_EVENT_POI = "poi_high_frequency"    # 行前: 非饮酒场景 POI 高频叫单
+RISK_EVENT_TIMEOUT = "trip_timeout"      # 行中: 行程超时未结束
+RISK_EVENT_MILEAGE = "mileage_anomaly"   # 行后: 实际里程超预估 2 倍
+RISK_EVENT_TYPES = (RISK_EVENT_POI, RISK_EVENT_TIMEOUT, RISK_EVENT_MILEAGE)
+
+# 平台直发回调事件(四态生命周期: 接单/开始/完成/取消)
+PARTNER_EVENT_ACCEPTED = "accepted"
+PARTNER_EVENT_STARTED = "started"
+PARTNER_EVENT_COMPLETED = "completed"
+PARTNER_EVENT_CANCELLED = "cancelled"
+PARTNER_EVENTS = (PARTNER_EVENT_ACCEPTED, PARTNER_EVENT_STARTED,
+                 PARTNER_EVENT_COMPLETED, PARTNER_EVENT_CANCELLED)
+
 
 # ============================================================
 # 种子司机(8 位: 自营3/加盟3/直发2)
@@ -212,11 +241,12 @@ class RideRepository:
     TABLE_PACKAGES = "ride_coupon_packages"
     TABLE_RIDES = "ride_orders"
     TABLE_SETTLEMENTS = "ride_settlements"
+    TABLE_RISK = "ride_risk_events"
 
     _INT_FIELDS = ("driverId", "applicationId", "memberId",
                    "completedOrders", "todayOrders", "drivingYears",
                    "totalGranted", "totalUsed", "couponCount", "grantCount",
-                   "settlementId", "rideSeq")
+                   "settlementId", "rideSeq", "riskId")
     _FLOAT_FIELDS = ("rating", "acceptRate", "cancelRate", "score",
                      "value", "amount", "consistency",
                      "lat", "lng", "distanceKm", "estimatedKm",
@@ -233,7 +263,8 @@ class RideRepository:
     def _ensure_store(self):
         for key in (self.TABLE_POOL, self.TABLE_APPS,
                     self.TABLE_COUPONS, self.TABLE_PACKAGES,
-                    self.TABLE_RIDES, self.TABLE_SETTLEMENTS):
+                    self.TABLE_RIDES, self.TABLE_SETTLEMENTS,
+                    self.TABLE_RISK):
             self.store.setdefault(key, {})
         # 种子司机(内存模式惰性灌入; Redis 模式由 _ensure_pool_seeded 兜底)
         if not self.store[self.TABLE_POOL]:
@@ -508,3 +539,36 @@ class RideRepository:
 
     async def next_settlement_id(self) -> int:
         return await self.next_id("settlement")
+
+    # --------------------------------------------------------
+    # 风险事件(P2 安全监控)
+    # --------------------------------------------------------
+
+    async def save_risk_event(self, event: dict) -> dict:
+        return await self._save(self.TABLE_RISK, event["riskId"], event)
+
+    async def list_risk_events(self, ride_id: str = None, type: str = None,
+                               resolved: bool = None,
+                               limit: int = 200) -> list[dict]:
+        events = await self._list(self.TABLE_RISK, limit=2000)
+        if ride_id:
+            events = [e for e in events if e.get("rideId") == ride_id]
+        if type:
+            events = [e for e in events if e.get("type") == type]
+        if resolved is not None:
+            events = [e for e in events
+                      if bool(e.get("resolved")) == bool(resolved)]
+        return events[:limit]
+
+    async def next_risk_id(self) -> int:
+        return await self.next_id("risk")
+
+    async def get_ride_by_partner_order(self,
+                                        partner_order_id: str) -> dict | None:
+        """按平台直发单号查行程(回调入口)"""
+        rides = await self._list(self.TABLE_RIDES, limit=2000)
+        for r in rides:
+            snap = r.get("driverSnapshot") or {}
+            if snap.get("partnerOrderId") == str(partner_order_id):
+                return r
+        return None

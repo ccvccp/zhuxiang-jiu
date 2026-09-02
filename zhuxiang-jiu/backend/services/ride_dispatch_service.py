@@ -42,6 +42,11 @@ from repositories.ride_repository import (
     RIDE_NIGHT_START, RIDE_NIGHT_END,
     DISPATCH_AUTO_SCORE, DISPATCH_BACKUP_SCORE,
     DRIDE_CHANNEL_MODE, DRIDE_PARTNER_URL,
+    RIDE_MILEAGE_ANOMALY_RATIO,
+    RISK_EVENT_MILEAGE,
+    PARTNER_EVENT_ACCEPTED, PARTNER_EVENT_STARTED,
+    PARTNER_EVENT_COMPLETED, PARTNER_EVENT_CANCELLED,
+    PARTNER_EVENTS,
 )
 from services.ai_scoring_service import SCORERS
 
@@ -151,6 +156,10 @@ class RideDispatchService:
                                  "支付后自动赠券)")
 
             ride_id = await self.repo.next_ride_id()
+            # 行前安全预检: POI 场景分类 + 高频叫单风控(不阻断, 信号留痕)
+            from services.ride_safety_service import RideSafetyService
+            safety = await RideSafetyService().pre_ride_check(
+                member_id, pickup)
             ride = {
                 "rideId": ride_id,
                 "memberId": member_id,
@@ -177,6 +186,13 @@ class RideDispatchService:
                 "settlementId": None,
                 "cancelReason": "",
                 "cancelWindowFree": None,
+                # P2 安全监控字段
+                "poiCategory": safety.get("poiCategory"),
+                "riskFlag": safety.get("riskFlag") or "",
+                "actualKm": None,
+                "mileageAnomaly": False,
+                "partnerTrace": {},
+                "platformChannel": "",
                 "requestedAt": _now_iso(),
                 "dispatchedAt": None,
                 "arrivingAt": None,
@@ -298,20 +314,36 @@ class RideDispatchService:
                     scoring.get("score"), mode)
 
     async def _escalate_platform(self, ride: dict) -> None:
-        """平台直发(三轨兜底): 三态通道 mock/real/mock_fallback"""
+        """平台直发(三轨兜底): 三态通道
+
+        mock: 确定性模拟回执(默认);
+        real: 真实平台调用, 失败抛错(fail-hard, 不回退);
+        mock_fallback: 先走真实轨, 失败回退 mock(回执标记来源)。
+        """
         mode = DRIDE_CHANNEL_MODE
         result = None
-        if mode == "real" and DRIDE_PARTNER_URL:
+        real_error = None
+        if mode in ("real", "mock_fallback") and DRIDE_PARTNER_URL:
             try:
                 result = await self._platform_real(ride)
             except Exception as exc:
+                real_error = exc
                 logger.warning("ride_platform_real_failed: %s", exc)
                 result = None
         if result is None:
             if mode == "real":
-                raise ValueError("平台直发通道不可用(real 模式无回退)")
-            # mock / mock_fallback → 确定性模拟回执
+                raise ValueError(
+                    "平台直发通道不可用(real 模式无回退): "
+                    + (repr(real_error) if real_error else "未配置 DRIDE_PARTNER_URL"))
+            # mock 直发 / mock_fallback 回退 → 确定性模拟回执
             result = self._platform_mock(ride)
+            if real_error is not None:
+                result["mode"] = "mock_fallback"   # 真实轨失败回退标记
+                ride["platformChannel"] = "mock_fallback"
+            else:
+                ride["platformChannel"] = "mock"
+        else:
+            ride["platformChannel"] = "real"
 
         if not result.get("accepted"):
             # 全轨无运力(罕见): 券退回留痕
@@ -343,8 +375,9 @@ class RideDispatchService:
             "dispatchScore": None,
             "dispatchedAt": _now_iso(),
         })
-        logger.info("ride_escalated_platform ride=%s partnerOrder=%s",
-                    ride["rideId"], result.get("partnerOrderId"))
+        logger.info("ride_escalated_platform ride=%s partnerOrder=%s "
+                    "channel=%s", ride["rideId"],
+                    result.get("partnerOrderId"), ride["platformChannel"])
 
     async def _platform_real(self, ride: dict) -> dict | None:
         """平台直发真实轨(P3b 冻结契约风格, 需 DRIDE_PARTNER_URL)"""
@@ -423,11 +456,13 @@ class RideDispatchService:
 
     async def driver_complete(self, member_id: int, ride_id: str,
                               duration_minutes: float = None,
-                              pricing_hour: int = None) -> dict:
+                              pricing_hour: int = None,
+                              actual_km: float = None) -> dict:
         """行程结束 → AI 自动结算(计价/核券/拆分/结算单)→ settled
 
-        duration_minutes / pricing_hour 为 Mock-first 确定性测试口径:
-        缺省时按行程实际起止时间推算时长、按当前小时计价。
+        duration_minutes / pricing_hour / actual_km 为 Mock-first
+        确定性测试口径: 缺省时按行程实际起止时间推算时长、按当前小时
+        计价、按预估里程计价; actual_km 传入时参与里程异常比对。
         """
         driver = await self._require_driver_by_member(member_id)
         ride = await self._get_ride_or_404(ride_id)
@@ -442,7 +477,8 @@ class RideDispatchService:
         # AI 结算(全程无人工)
         ride = await self._settle(ride, driver,
                                   duration_minutes=duration_minutes,
-                                  pricing_hour=pricing_hour)
+                                  pricing_hour=pricing_hour,
+                                  actual_km=actual_km)
         return self._ride_detail(ride)
 
     async def cancel(self, member_id: int, ride_id: str,
@@ -499,17 +535,106 @@ class RideDispatchService:
         return self._ride_detail(ride)
 
     # --------------------------------------------------------
+    # 平台直发回调(P2 三态: accepted/started/completed/cancelled)
+    # --------------------------------------------------------
+
+    async def partner_callback(self, event: dict) -> dict:
+        """合作平台直发回执处理(设计文档 §2.3 平台直发契约)
+
+        事件流转:
+            accepted → 幂等确认 dispatched
+            started → trip_started
+            completed → trip_completed + AI 结算(aggregated)
+            cancelled → cancelled(平台侧取消, 券退回)
+
+        trace 摘要留痕(actualKm/durationMinutes), 供里程异常比对与审计。
+
+        Raises:
+            KeyError: 平台单号无对应行程
+            ValueError: 事件非法/非平台直发行程/状态不可流转
+        """
+        partner_order_id = str(event.get("partnerOrderId") or "")
+        ev = str(event.get("event") or "")
+        if not partner_order_id:
+            raise ValueError("回调缺少 partnerOrderId")
+        if ev not in PARTNER_EVENTS:
+            raise ValueError(f"未知平台回调事件: {ev}"
+                             f"(允许: {'/'.join(PARTNER_EVENTS)})")
+
+        ride = await self.repo.get_ride_by_partner_order(partner_order_id)
+        if ride is None:
+            raise KeyError(f"平台单号 {partner_order_id} 无对应行程")
+        snapshot = ride.get("driverSnapshot") or {}
+        if snapshot.get("track") != TRACK_PLATFORM:
+            raise ValueError("非平台直发行程, 不接受平台回调")
+
+        trace = event.get("trace") or {}
+        status = ride.get("status")
+
+        if ev == PARTNER_EVENT_ACCEPTED:
+            if status == RIDE_STATUS_REQUESTED:
+                ride["status"] = RIDE_STATUS_DISPATCHED
+                ride["dispatchedAt"] = _now_iso()
+
+        elif ev == PARTNER_EVENT_STARTED:
+            if status not in (RIDE_STATUS_DISPATCHED,
+                              RIDE_STATUS_ARRIVING):
+                raise ValueError(f"行程状态 {status}, 不可开始(平台回调)")
+            ride["status"] = RIDE_STATUS_STARTED
+            ride["startedAt"] = _now_iso()
+
+        elif ev == PARTNER_EVENT_COMPLETED:
+            if status not in (RIDE_STATUS_STARTED, RIDE_STATUS_DISPATCHED,
+                              RIDE_STATUS_ARRIVING):
+                raise ValueError(f"行程状态 {status}, 不可完成(平台回调)")
+            if not ride.get("startedAt"):
+                ride["startedAt"] = _now_iso()
+            ride["status"] = RIDE_STATUS_COMPLETED
+            ride["completedAt"] = _now_iso()
+            # 轨迹摘要留痕(设计文档: 起终点+里程+时长, 不做实时轨迹流)
+            ride["partnerTrace"] = {
+                "actualKm": trace.get("actualKm"),
+                "durationMinutes": trace.get("durationMinutes"),
+                "completedEvent": True,
+            }
+            await self.repo.save_ride(ride)
+            ride = await self._settle(
+                ride, driver=None,
+                duration_minutes=trace.get("durationMinutes"),
+                actual_km=trace.get("actualKm"))
+            return {"success": True,
+                    "ride": self._ride_detail(ride)}
+
+        elif ev == PARTNER_EVENT_CANCELLED:
+            if status in (RIDE_STATUS_SETTLED, RIDE_STATUS_CANCELLED):
+                raise ValueError(f"行程状态 {status}, 不可取消(平台回调)")
+            ride["status"] = RIDE_STATUS_CANCELLED
+            ride["cancelReason"] = "平台侧取消"
+            ride["cancelWindowFree"] = True   # 平台取消非乘客责任, 券退回
+
+        ride["partnerTrace"] = {**(ride.get("partnerTrace") or {}),
+                                 "lastEvent": ev}
+        await self.repo.save_ride(ride)
+        logger.info("ride_partner_callback ride=%s event=%s",
+                    ride["rideId"], ev)
+        return {"success": True, "ride": self._ride_detail(ride)}
+
+    # --------------------------------------------------------
     # AI 结算(计价 → 券抵扣 → 拆分 → 结算单)
     # --------------------------------------------------------
 
     async def _settle(self, ride: dict, driver: dict = None,
                       duration_minutes: float = None,
-                      pricing_hour: int = None) -> dict:
+                      pricing_hour: int = None,
+                      actual_km: float = None) -> dict:
         """trip_completed → settling → settled(AI 全自动, 设计文档 §2.5)
 
         计价 → 券抵扣 min(面值, 总额)(本站支付) → 超出部分乘客补差
         → 结算单落库(自营 mock 直付 paid / 加盟·直发汇总结付 aggregated)
         → 司机统计回写 + 释放占用
+
+        P2: actual_km(实际里程, 平台回执/司机上报)优先参与计价,
+        且与预估里程比对, 超 2 倍 → 里程异常风险事件留痕。
         """
         ride["status"] = RIDE_STATUS_SETTLING
         await self.repo.save_ride(ride)
@@ -526,8 +651,37 @@ class RideDispatchService:
             except ValueError:
                 minutes = 0.0
 
-        fare = compute_fare(ride.get("distanceKm") or 0, minutes,
-                            hour=pricing_hour)
+        # 里程: 实际里程优先计价 + 异常比对(设计文档 §2.4 行后防线)
+        estimated_km = float(ride.get("distanceKm") or 0)
+        if actual_km is not None:
+            actual_km = float(actual_km)
+            ride["actualKm"] = actual_km
+            if (estimated_km > 0
+                    and actual_km > RIDE_MILEAGE_ANOMALY_RATIO
+                    * estimated_km):
+                ride["mileageAnomaly"] = True
+                from services.ride_safety_service import RideSafetyService
+                safety = RideSafetyService()
+                risk_id = await safety.repo.next_risk_id()
+                await safety.repo.save_risk_event({
+                    "riskId": risk_id,
+                    "type": RISK_EVENT_MILEAGE,
+                    "memberId": int(ride.get("memberId") or 0),
+                    "rideId": ride["rideId"],
+                    "detail": (f"实际{actual_km:.1f}km vs 预估"
+                               f"{estimated_km:.1f}km(超"
+                               f"{RIDE_MILEAGE_ANOMALY_RATIO}倍)"),
+                    "resolved": False, "resolvedNote": "",
+                    "resolvedAt": None, "createdAt": _now_iso(),
+                })
+                logger.warning("ride_mileage_anomaly ride=%s "
+                               "actual=%.1f estimated=%.1f",
+                               ride["rideId"], actual_km, estimated_km)
+            km_for_pricing = actual_km
+        else:
+            km_for_pricing = estimated_km
+
+        fare = compute_fare(km_for_pricing, minutes, hour=pricing_hour)
         total = fare["totalAmount"]
         coupon_value = float(ride.get("couponValue") or 0)
         deduction = round(min(coupon_value, total), 2)   # 本站支付部分

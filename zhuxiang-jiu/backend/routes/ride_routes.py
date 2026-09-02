@@ -1,8 +1,9 @@
-"""41号·AI智能代驾模块路由(P0+P1, 24 端点)
+"""41号·AI智能代驾模块路由(P0+P1+P2, 28 端点)
 
 鉴权:
     - 会员端: X-Member-Id(券包/叫单/行程/司机申请/上下线)
-    - 管理端: X-Role: admin(补发/冲正/复核/司机池/行程/结算)
+    - 管理端: X-Role: admin(补发/冲正/复核/司机池/行程/结算/安全)
+    - 平台回调: 开放端点(合作平台服务间调用, P3 可加签名)
 
 异常映射(遵循项目约定):
     - KeyError → 404(券/申请/司机/行程不存在)
@@ -18,12 +19,14 @@
                     / POST /orders/{id}/cancel
     - 行程(司机 5): POST /driver/orders/{id}/accept|start|complete
                     / GET /driver/orders / GET /driver/settlements
-    - 管理端(6): GET /admin/applications
+    - 管理端(8): GET /admin/applications
                   / POST /admin/applications/{id}/decide
                   / GET /admin/pool / GET /admin/overview
                   / GET /admin/rides / GET /admin/settlements
+                  / POST /admin/safety/scan / GET /admin/risk-panel
+    - 平台回调(2): POST /partner/callback / POST /admin/risk-events/{id}/resolve
 
-P2 预留: 平台直发回调 / 安全监控 / 双向评价 / 日结对账
+P3 预留: 双向评价 / 日结对账 / 学习回流调度
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -33,12 +36,14 @@ from pydantic import BaseModel as PydBaseModel, Field
 from services.ride_coupon_service import RideCouponService
 from services.driver_gate_service import DriverGateService
 from services.ride_dispatch_service import RideDispatchService
+from services.ride_safety_service import RideSafetyService
 
 
 router = APIRouter()
 _coupon_service = RideCouponService()
 _gate_service = DriverGateService()
 _dispatch_service = RideDispatchService()
+_safety_service = RideSafetyService()
 
 
 # ============================================================
@@ -151,6 +156,21 @@ class RideCompleteRequest(PydBaseModel):
     pricingHour: int = Field(None, ge=0, le=23,
                              description="计价小时(缺省当前小时; 夜间加成 "
                                          "Mock-first 确定性口径)")
+    actualKm: float = Field(None, gt=0, le=500,
+                            description="实际里程(缺省按预估计价; "
+                                        "参与里程异常比对)")
+
+
+class PartnerCallbackRequest(PydBaseModel):
+    partnerOrderId: str = Field(..., min_length=1, max_length=64,
+                                description="平台直发单号")
+    event: str = Field(..., description="accepted/started/completed/cancelled")
+    trace: dict = Field(default_factory=dict,
+                        description="轨迹摘要{actualKm, durationMinutes}")
+
+
+class RiskResolveRequest(PydBaseModel):
+    note: str = Field("", max_length=200, description="处置备注")
 
 
 # ============================================================
@@ -403,7 +423,8 @@ async def driver_complete_ride(
         ride = await _dispatch_service.driver_complete(
             member_id, ride_id,
             duration_minutes=(body.durationMinutes if body else None),
-            pricing_hour=(body.pricingHour if body else None))
+            pricing_hour=(body.pricingHour if body else None),
+            actual_km=(body.actualKm if body else None))
         return {"success": True, "ride": ride}
     except Exception as e:
         raise _handle(e) from e
@@ -530,6 +551,64 @@ async def admin_settlements(
             track=track, payout_status=payout_status)
         return {"success": True, "total": len(settlements),
                 "settlements": settlements}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 平台直发回调(合作平台服务间调用) + 安全监控(管理端)
+# ============================================================
+
+@router.post("/api/ride/partner/callback")
+async def partner_callback(body: PartnerCallbackRequest):
+    """平台直发回执(三态): accepted/started/completed/cancelled
+
+    completed 事件携带 trace 摘要(actualKm/durationMinutes),
+    触发 AI 结算(aggregated)与里程异常比对。
+    """
+    try:
+        return await _dispatch_service.partner_callback(
+            body.model_dump())
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/admin/safety/scan")
+async def safety_scan(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """安全扫描: 进行中超时行程预警(>3h 未结束, 幂等)"""
+    _require_admin(x_role)
+    try:
+        return await _safety_service.scan_active()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/ride/admin/risk-panel")
+async def risk_panel(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """风险面板: POI 高频/行程超时/里程异常聚合(管理端)"""
+    _require_admin(x_role)
+    try:
+        return await _safety_service.risk_panel()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/ride/admin/risk-events/{risk_id}/resolve")
+async def resolve_risk_event(
+    risk_id: int,
+    body: RiskResolveRequest = None,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """处置风险事件(管理端)"""
+    _require_admin(x_role)
+    try:
+        event = await _safety_service.resolve_event(
+            risk_id, (body.note if body else ""))
+        return {"success": True, "event": event}
     except Exception as e:
         raise _handle(e) from e
 
