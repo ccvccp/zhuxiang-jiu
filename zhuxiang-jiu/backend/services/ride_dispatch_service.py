@@ -433,10 +433,21 @@ class RideDispatchService:
         (HTTP 4xx/5xx 为业务响应, 不重试直接失败)。
         """
         import httpx
+        from services.ride_coord_service import to_partner_coords
+        # 坐标转换: 真实平台为高德系 GCJ-02, 本站为 WGS84
+        # (DRIDE_COORD_SYS=gcj02 时转换, 默认 wgs84 原样)
+        p_lng, p_lat = to_partner_coords(
+            float(ride["pickup"]["lng"]),
+            float(ride["pickup"]["lat"]))
+        d_lng, d_lat = to_partner_coords(
+            float(ride["dropoff"]["lng"]),
+            float(ride["dropoff"]["lat"]))
         payload = {
             "rideId": ride["rideId"],
-            "pickup": ride["pickup"],
-            "dropoff": ride["dropoff"],
+            "pickup": {"lat": p_lat, "lng": p_lng,
+                       "address": ride["pickup"].get("address", "")},
+            "dropoff": {"lat": d_lat, "lng": d_lng,
+                        "address": ride["dropoff"].get("address", "")},
             "couponValue": ride.get("couponValue"),
             "estimatedKm": ride.get("distanceKm"),
         }

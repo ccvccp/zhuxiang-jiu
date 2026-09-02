@@ -45,6 +45,8 @@ services:
       - DRIDE_PARTNER_TOKEN=${DRIDE_PARTNER_TOKEN:-}
       # 回调签名令牌(real 模式上线前必须配置, 否则回调端点不校验)
       - DRIDE_PARTNER_CALLBACK_TOKEN=${DRIDE_PARTNER_CALLBACK_TOKEN:-}
+      # 输出坐标系: wgs84(默认, 本站内部口径) / gcj02(滴滴高德系, 凭证到手后切)
+      - DRIDE_COORD_SYS=${DRIDE_COORD_SYS:-wgs84}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
