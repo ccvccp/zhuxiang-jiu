@@ -358,7 +358,9 @@ async def submit_feedback(payload: dict) -> dict:
         payload: {scorerId, factors: [{name, score, ...}],
                   scoreAtDecision, actualAction,
                   expectedAction(可选, 与 correct 二选一),
-                  correct(可选 bool), note(可选), weightVersion(可选)}
+                  correct(可选 bool), reward(可选 float ∈ [-1,1],
+                  P2a 连续奖励, 缺省按 correct 二元 ±1),
+                  note(可选), weightVersion(可选)}
 
     Raises:
         KeyError: 未知评分器
@@ -399,6 +401,10 @@ async def submit_feedback(payload: dict) -> dict:
         "source": str(payload.get("source") or "manual"),
         "status": "pending", "createdAt": ts(),
     }
+    # P2a 连续奖励(缺省 None → 引擎回退二元 ±1 by correct)
+    reward = payload.get("reward")
+    if reward is not None:
+        record["reward"] = max(-1.0, min(1.0, float(reward)))
     repo = AiLearningRepository()
     feedback_id = await repo.add_feedback(record)
 
@@ -422,12 +428,27 @@ async def submit_feedback(payload: dict) -> dict:
 # Hedge 在线学习引擎
 # ============================================================
 
+def _feedback_reward(fb: dict) -> float:
+    """反馈奖励值: 连续 reward ∈ [-1,1](40号P2a), 缺省回退 ±1 by correct
+
+    兼容口径: 旧档案/手工反馈不携带 reward 时, 维持二元 ±1 奖励,
+    既有 21 档案行为零影响。
+    """
+    reward = fb.get("reward")
+    if reward is None:
+        return 1.0 if fb.get("correct") else -1.0
+    try:
+        return max(-1.0, min(1.0, float(reward)))
+    except (TypeError, ValueError):
+        return 1.0 if fb.get("correct") else -1.0
+
+
 def _hedge_update(weights: dict, defaults: dict, feedback_list: list[dict],
                   eta: float, guardrail: float) -> dict:
     """Hedge 乘性权重更新 + 护栏约束 + 归一化"""
     w = dict(weights)
     for fb in feedback_list:
-        reward = 1.0 if fb.get("correct") else -1.0
+        reward = _feedback_reward(fb)
         total = sum(f.get("contribution", 0) for f in fb.get("factors", []))
         if total <= 0:
             continue
@@ -457,7 +478,7 @@ def _evaluate(weights: dict, feedback_list: list[dict],
     for fb in feedback_list:
         score = sum(f.get("score", 0) * weights.get(f.get("name"), 0)
                     for f in fb.get("factors", []))
-        reward = 1.0 if fb.get("correct") else -1.0
+        reward = _feedback_reward(fb)
         reward_sum += reward * score
         expected = fb.get("expectedAction")
         if expected:

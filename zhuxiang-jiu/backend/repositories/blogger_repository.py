@@ -117,11 +117,34 @@ WEIGHT_STEP_ZERO = -0.05
 FEEDBACK_SETTLE_HOURS = int(
     os.environ.get("BLOGGER_FEEDBACK_SETTLE_HOURS", "24"))
 
+# ============================================================
+# P2a 点击质量门与连续奖励常量(设计文档 P2 §1/§2)
+# ============================================================
+
+# 连续2次疑似刷量 → fraud_suspect 止损出池
+FRAUD_PAUSE_STREAK = int(os.environ.get("BLOGGER_FRAUD_PAUSE_STREAK", "2"))
+# 变现加成基准(GMV 归一参照, 元)
+GMV_REF = float(os.environ.get("BLOGGER_GMV_REF", "1000"))
+# 引流量级归一基准(池内P90点击, 样本不足时缺省)
+CLICK_P90_REF = float(os.environ.get("BLOGGER_CLICK_P90_REF", "20"))
+# 引擎学习率覆盖(连续奖励幅值大, 乘性更新需降速; off/空=用引擎默认)
+_ETA_ENV = os.environ.get("BLOGGER_ETA_OVERRIDE", "0.3").strip().lower()
+ETA_OVERRIDE = (None if _ETA_ENV in ("", "off", "none")
+                else float(_ETA_ENV))
+# L2 聚簇: 单 /24 IP 段贡献占比阈值(超过 → quality×0.3)
+CLICK_CLUSTER_SHARE = 0.6
+QUALITY_CLUSTER = 0.3
+# L3 特征: 爬虫UA占比或点击间隔<2s占比 >50% → quality×0.2
+CLICK_RAPID_SECONDS = 2.0
+CLICK_RAPID_SHARE = 0.5
+QUALITY_FEATURE = 0.2
+
 # 层2进化字段(float, 序列化口径)
 _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "fansWan", "likes", "comments", "shares",
                "durationSeconds", "publishedAtTs",
-               "zeroTrafficStreak", "trafficInfluencerId")
+               "zeroTrafficStreak", "trafficInfluencerId",
+               "fraudStreak")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust")
 
@@ -187,6 +210,7 @@ def _build_seed_bloggers() -> dict[int, dict]:
             "pausedReason": "",
             "lastSeenWorkAt": "",
             "zeroTrafficStreak": 0,
+            "fraudStreak": 0,
             "trafficInfluencerId": 0,
             "createdAt": _now_iso(),
             "updatedAt": _now_iso(),
@@ -216,6 +240,8 @@ def normalize_blogger(record: dict) -> dict:
         record["pausedReason"] = ""
     if record.get("zeroTrafficStreak") is None:
         record["zeroTrafficStreak"] = 0
+    if record.get("fraudStreak") in (None, ""):
+        record["fraudStreak"] = 0
     if record.get("trafficInfluencerId") in (None, ""):
         record["trafficInfluencerId"] = 0
     return record

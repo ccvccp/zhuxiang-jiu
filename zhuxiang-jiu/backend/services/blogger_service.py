@@ -29,6 +29,7 @@
 """
 
 import logging
+import math
 from datetime import datetime, UTC, timedelta
 
 from core.locks import get_lock
@@ -48,6 +49,9 @@ from repositories.blogger_repository import (
     AUTO_PAUSE_STREAK, WEIGHT_ADJUST_MAX, WEIGHT_ADJUST_MIN,
     WEIGHT_STEP_GMV, WEIGHT_STEP_CLICK, WEIGHT_STEP_ZERO,
     FEEDBACK_SETTLE_HOURS,
+    FRAUD_PAUSE_STREAK, GMV_REF, CLICK_P90_REF, ETA_OVERRIDE,
+    CLICK_CLUSTER_SHARE, QUALITY_CLUSTER,
+    CLICK_RAPID_SECONDS, CLICK_RAPID_SHARE, QUALITY_FEATURE,
     fan_tier_weight, derived_weight,
 )
 from repositories.promo_repository import (
@@ -73,6 +77,120 @@ _TRAFFIC_PLATFORM_MAP = {
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+# ============================================================
+# P2a 点击质量门与连续奖励(纯函数, 设计文档 P2 §1/§2)
+# ============================================================
+
+_BOT_UA_MARKS = ("bot", "crawl", "spider", "python-requests",
+                 "curl/", "scrapy", "headless")
+
+
+def _ip24(ip: str) -> str:
+    """IPv4 → /24 网段前缀(非 IPv4 原样返回)"""
+    parts = (ip or "").split(".")
+    if len(parts) == 4:
+        return ".".join(parts[:3])
+    return ip or ""
+
+
+def gate_clicks(clicks: list[dict]) -> dict:
+    """点击质量门(反作弊, 一切进化的前置闸)
+
+    L1 去重: 同短码同 IP(非空)重复点击计 1
+    L2 聚簇: 单 /24 网段贡献 >60% 点击 → quality×0.3
+    L3 特征: 爬虫UA占比或点击间隔<2s占比 >50% → quality×0.2
+
+    Returns:
+        {"effective": 有效点击数, "quality": (0,1],
+         "fraudSuspect": bool, "raw": 原始数,
+         "dedupDropped": N, "clusterFlag": bool, "featureFlag": bool}
+    """
+    raw = list(clicks or [])
+    # L1 去重(空 IP 视为独立访客, 不去重)
+    seen_ips = set()
+    effective_clicks = []
+    for c in raw:
+        ip = (c.get("ip") or "").strip()
+        if ip:
+            if ip in seen_ips:
+                continue
+            seen_ips.add(ip)
+        effective_clicks.append(c)
+    effective = len(effective_clicks)
+    quality = 1.0
+    # L2 聚簇(样本 ≥5 才判, 小样本豁免)
+    cluster_flag = False
+    if effective >= 5:
+        segments = {}
+        for c in effective_clicks:
+            seg = _ip24((c.get("ip") or "").strip())
+            if seg:
+                segments[seg] = segments.get(seg, 0) + 1
+        top_share = (max(segments.values()) / sum(segments.values())
+                     if segments else 0.0)
+        if top_share > CLICK_CLUSTER_SHARE:
+            cluster_flag = True
+            quality *= QUALITY_CLUSTER
+    # L3 特征(样本 ≥3 才判)
+    feature_flag = False
+    if effective >= 3:
+        bot_hits = sum(
+            1 for c in effective_clicks
+            if any(m in (c.get("userAgent") or "").lower()
+                   for m in _BOT_UA_MARKS)
+            or not (c.get("userAgent") or "").strip())
+        bot_ratio = bot_hits / effective
+        # 点击间隔 <2s 占比(按时间正序相邻差)
+        rapid_hits = 0
+        timed = sorted(
+            (c for c in effective_clicks if c.get("at")),
+            key=lambda c: c["at"])
+        for i in range(1, len(timed)):
+            try:
+                delta = (datetime.fromisoformat(timed[i]["at"])
+                         - datetime.fromisoformat(
+                             timed[i - 1]["at"])).total_seconds()
+                if 0 <= delta < CLICK_RAPID_SECONDS:
+                    rapid_hits += 1
+            except ValueError:
+                continue
+        rapid_ratio = (rapid_hits / (len(timed) - 1)
+                       if len(timed) > 1 else 0.0)
+        if bot_ratio > CLICK_RAPID_SHARE \
+                or rapid_ratio > CLICK_RAPID_SHARE:
+            feature_flag = True
+            quality *= QUALITY_FEATURE
+    # 疑似刷量: 聚簇与特征同时命中(quality ≤ 0.06)
+    fraud_suspect = cluster_flag and feature_flag
+    return {
+        "effective": effective,
+        "quality": round(quality, 4),
+        "fraudSuspect": fraud_suspect,
+        "raw": len(raw),
+        "dedupDropped": len(raw) - effective,
+        "clusterFlag": cluster_flag,
+        "featureFlag": feature_flag,
+    }
+
+
+def compute_reward(effective_clicks: int, gmv: float,
+                   quality: float, click_p90: float) -> float:
+    """连续奖励 reward ∈ [-1,1](设计文档 P2 §1.2 公式)
+
+    零引流 → -0.1(弱惩罚); 有流量 → quality × (0.7·量级 + 0.3·变现)
+    - 0.1; fraud 由调用方直接置 -0.1(本函数不判 fraud)。
+    """
+    c = int(effective_clicks or 0)
+    if c <= 0:
+        return -0.1
+    mag_c = (math.log1p(c) / math.log1p(max(1.0, float(click_p90))))
+    mag_c = min(1.0, mag_c)
+    mag_g = min(1.0, float(gmv or 0) / GMV_REF)
+    q = max(0.0, min(1.0, float(quality or 0)))
+    reward = q * (0.7 * mag_c + 0.3 * mag_g) - 0.1
+    return round(max(-1.0, min(1.0, reward)), 4)
 
 
 class BloggerService:
@@ -780,10 +898,11 @@ class BloggerService:
             # admin 手动暂停(区别于 AI 止损 auto_loss_cut)
             fields["pausedReason"] = "manual"
         else:
-            # 恢复: 清零止损计数与原因, weightAdjust 保留
+            # 恢复: 清零止损计数与原因(含刷量计数), weightAdjust 保留
             # (进化教训不白给, 需连续引流赚回)
             fields["zeroTrafficStreak"] = 0
             fields["pausedReason"] = ""
+            fields["fraudStreak"] = 0
         blogger.update(fields)
         blogger = await self.repo.save_blogger(blogger)
         await self._audit(blogger_id, "status_change",
@@ -856,12 +975,15 @@ class BloggerService:
             self, follow_id: int, clicks: int = None,
             registrations: int = None,
             orders: int = None) -> dict:
-        """单条跟随内容效果回流(层1 Hedge + 层2 博主权重进化)
+        """单条跟随内容效果回流(P2a: 质量门→连续奖励→层1/层2)
 
-        奖励语义: clicks>0 → auto_follow 决策 correct(+1);
-        零点击 → 失误(-1)。因子快照取作品决策时刻的 scoreSnapshot
-        (Hedge 正确姿势: 用决策时 contribution 计算影响度)。
-        GMV 不进 Hedge(留给层2), 避免"有点击无转化"误判决策失误。
+        P2a 升级(设计文档 P2 §1/§2):
+        - 自动归因路径过点击质量门(去重/聚簇/特征) → 有效点击 c
+          与质量 quality; 手动指定 clicks 视为 admin 覆盖(quality=1)
+        - 连续奖励 reward ∈ [-1,1] 随反馈入库(引擎缺省回退二元 ±1):
+          零引流 -0.1(弱惩罚) / 爆款 ≈ +0.9 / fraud 强制 -0.1
+        - fraudSuspect → 博主 fraudStreak+1, 连续 FRAUD_PAUSE_STREAK
+          次 → auto-paused(fraud_suspect 止损出池)
 
         Raises:
             KeyError: 跟随内容/作品/博主不存在
@@ -876,12 +998,17 @@ class BloggerService:
         if follow.get("learningFed"):
             raise ValueError(
                 f"内容已回流过效果(learningFed), 幂等不重复提交")
-        # clicks 未指定 → 自动归因聚合(含 GMV)
+        # clicks 未指定 → 自动归因聚合 + 点击质量门
+        gate = None
         gmv = 0.0
+        quality = 1.0
         if clicks is None:
-            metrics = await self._link_metrics(
-                [follow.get("shortCode", "")])
-            clicks = metrics["clicks"]
+            code = follow.get("shortCode", "")
+            metrics = await self._link_metrics([code])
+            raw_clicks = await self._raw_clicks(code)
+            gate = gate_clicks(raw_clicks)
+            clicks = gate["effective"]
+            quality = gate["quality"] if clicks > 0 else 1.0
             registrations = (registrations
                              if registrations is not None
                              else metrics["registered"])
@@ -896,6 +1023,14 @@ class BloggerService:
             raise ValueError(
                 "作品评分快照缺失, 无法回流(需重新扫描决策生成)")
         correct = int(clicks) > 0
+        # 连续奖励(P2a): fraud 强制 -0.1, 其余按公式
+        fraud_suspect = bool(gate and gate["fraudSuspect"])
+        if fraud_suspect:
+            reward = -0.1
+        else:
+            reward = compute_reward(
+                int(clicks), gmv, quality,
+                await self._pool_click_p90())
         from services.ai_learning_service import submit_feedback
         result = await submit_feedback({
             "scorerId": "blogger_work_gate",
@@ -904,9 +1039,12 @@ class BloggerService:
             "actualAction": ("auto_follow" if correct
                              else "no_traffic"),
             "correct": correct,
+            "reward": reward,
             "note": (f"followId={follow_id} clicks={clicks} "
+                     f"quality={quality} reward={reward} "
                      f"blogger={follow.get('bloggerId')} "
-                     f"platform={follow.get('platform')}"),
+                     f"platform={follow.get('platform')}"
+                     + (" [fraudSuspect]" if fraud_suspect else "")),
             "source": "blogger",
         })
         # 幂等标记 + 指标留痕(重复提交直接 409)
@@ -914,6 +1052,10 @@ class BloggerService:
             "learningFed": True,
             "learningMetrics": {
                 "clicks": int(clicks),
+                "clickRaw": (gate or {}).get("raw", int(clicks)),
+                "clickQuality": round(quality, 4),
+                "reward": reward,
+                "fraudSuspect": fraud_suspect,
                 "registrations": int(registrations or 0),
                 "orders": int(orders or 0),
                 "gmv": round(float(gmv), 2),
@@ -921,23 +1063,125 @@ class BloggerService:
             "learningFedAt": _now_iso(),
         })
         await self.repo.save_follow(follow)
-        # 层2 博主权重自进化(GMV 驱动, best-effort 不阻断回流)
-        evolution = await self._evolve_blogger_weight(
-            follow, {"clicks": int(clicks),
-                     "registered": int(registrations or 0),
-                     "gmv": round(float(gmv), 2)})
+        # 层2 博主权重自进化: fraud 等效零引流 + 单独 fraud 处置;
+        # 正向步长 × clickQuality(质量折扣)
+        if fraud_suspect:
+            evolution = await self._evolve_blogger_weight(
+                follow, {"clicks": 0, "registered": 0, "gmv": 0})
+            fraud = await self._handle_fraud(follow, gate)
+            evolution = {**(evolution or {}), "fraud": fraud}
+        else:
+            evolution = await self._evolve_blogger_weight(
+                follow, {"clicks": int(clicks),
+                         "registered": int(registrations or 0),
+                         "gmv": round(float(gmv), 2)},
+                quality=quality)
+            # 干净回流清零刷量计数
+            await self._reset_fraud_streak(follow.get("bloggerId", 0))
         logger.info("blogger_learning_feedback follow=%s clicks=%s "
-                    "correct=%s adjust=%s",
-                    follow_id, clicks, correct,
-                    (evolution or {}).get("weightAdjust"))
+                    "quality=%s reward=%s fraud=%s",
+                    follow_id, clicks, quality, reward, fraud_suspect)
         result["bloggerEvolution"] = evolution
+        result["reward"] = reward
         return result
 
-    async def _evolve_blogger_weight(self, follow: dict,
-                                     metrics: dict) -> dict | None:
+    async def _raw_clicks(self, code: str) -> list[dict]:
+        """短码原始点击流(best-effort, 失败返回空)"""
+        if not code:
+            return []
+        try:
+            from services.attract_service import AttractService
+            return await AttractService().repo.list_clicks(
+                code=code, limit=10000)
+        except Exception as exc:
+            logger.warning("blogger_raw_clicks_failed code=%s: %s",
+                           code, exc)
+            return []
+
+    async def _pool_click_p90(self) -> float:
+        """池内 P90 点击基准(已发布跟随的短码点击数 P90;
+
+        样本 <5 时回退 CLICK_P90_REF 缺省)"""
+        try:
+            follows = await self.repo.list_follows(
+                status=FOLLOW_STATUS_PUBLISHED, limit=1000)
+            counts = []
+            for f in follows:
+                code = f.get("shortCode", "")
+                if not code:
+                    continue
+                clicks = await self._raw_clicks(code)
+                counts.append(len(clicks))
+            if len(counts) < 5:
+                return CLICK_P90_REF
+            counts.sort()
+            idx = min(len(counts) - 1,
+                      int(round(0.9 * (len(counts) - 1))))
+            return max(1.0, float(counts[idx]))
+        except Exception as exc:
+            logger.warning("blogger_pool_p90_failed: %s", exc)
+            return CLICK_P90_REF
+
+    async def _handle_fraud(self, follow: dict, gate: dict) -> dict:
+        """疑似刷量处置: fraudStreak+1, 连续 N 次 → fraud_suspect 出池
+
+        Returns:
+            {fraudStreak, autoPaused, reason}
+        """
+        blogger = await self.repo.get_blogger(
+            follow.get("bloggerId", 0))
+        if blogger is None:
+            return {"fraudStreak": 0, "autoPaused": False,
+                    "reason": "博主缺失"}
+        streak = int(blogger.get("fraudStreak") or 0) + 1
+        auto_paused = False
+        fields = {"fraudStreak": streak,
+                  "updatedAt": _now_iso()}
+        if streak >= FRAUD_PAUSE_STREAK \
+                and blogger.get("status") == BLOGGER_STATUS_ACTIVE:
+            auto_paused = True
+            fields.update({"status": BLOGGER_STATUS_PAUSED,
+                           "pausedReason": "fraud_suspect"})
+        blogger.update(fields)
+        await self.repo.save_blogger(blogger)
+        await self._audit(
+            blogger["bloggerId"], "fraud_flag", {
+                "followId": follow.get("followId"),
+                "fraudStreak": streak,
+                "autoPaused": auto_paused,
+                "gate": gate,
+            })
+        if auto_paused:
+            await self._audit(
+                blogger["bloggerId"], "auto_paused", {
+                    "streak": streak,
+                    "reason": (f"连续{streak}次疑似刷量"
+                               "(fraud_suspect), 止损出池"),
+                })
+            logger.warning("blogger_fraud_paused blogger=%s streak=%s",
+                           blogger["bloggerId"], streak)
+        return {"fraudStreak": streak, "autoPaused": auto_paused,
+                "reason": "疑似刷量(fraud_suspect)"}
+
+    async def _reset_fraud_streak(self, blogger_id: int) -> None:
+        """干净回流清零刷量计数(best-effort)"""
+        try:
+            blogger = await self.repo.get_blogger(blogger_id)
+            if blogger is None \
+                    or int(blogger.get("fraudStreak") or 0) == 0:
+                return
+            blogger["fraudStreak"] = 0
+            blogger["updatedAt"] = _now_iso()
+            await self.repo.save_blogger(blogger)
+        except Exception as exc:
+            logger.warning("blogger_reset_fraud_failed: %s", exc)
+
+    async def _evolve_blogger_weight(self, follow: dict, metrics: dict,
+                                     quality: float = 1.0) -> dict | None:
         """层2 博主池权重进化(规则步进, 可解释可回滚)
 
         步长: GMV>0 +0.05 / 点击>0 +0.02 / 零引流 -0.05;
+        正向步长 × clickQuality(P2a 质量折扣);
         连续 AUTO_PAUSE_STREAK 条零引流 → auto-paused(AI 止损)。
 
         Returns:
@@ -953,19 +1197,22 @@ class BloggerService:
         gmv = float(metrics.get("gmv") or 0)
         adjust = float(blogger.get("weightAdjust") or 0.0)
         streak = int(blogger.get("zeroTrafficStreak") or 0)
+        quality = max(0.0, min(1.0, float(quality or 1.0)))
         reason = ""
         if gmv > 0:
-            step, streak = WEIGHT_STEP_GMV, 0
-            reason = f"GMV引流{gmv}(+{WEIGHT_STEP_GMV})"
+            step, streak = WEIGHT_STEP_GMV * quality, 0
+            reason = f"GMV引流{gmv}(+{WEIGHT_STEP_GMV}×q{quality:.2f})"
         elif clicks > 0:
-            step, streak = WEIGHT_STEP_CLICK, 0
-            reason = f"点击引流{clicks}(+{WEIGHT_STEP_CLICK})"
+            step, streak = WEIGHT_STEP_CLICK * quality, 0
+            reason = (f"点击引流{clicks}"
+                      f"(+{WEIGHT_STEP_CLICK}×q{quality:.2f})")
         elif registered > 0:
             step = 0.0   # 弱引流(有注册无点击归并口径), 不奖不罚
             reason = f"仅注册{registered}(观察)"
         else:
             step, streak = WEIGHT_STEP_ZERO, streak + 1
             reason = f"零引流(-{-WEIGHT_STEP_ZERO})"
+        step = round(step, 6)
         adjust = max(WEIGHT_ADJUST_MIN,
                      min(WEIGHT_ADJUST_MAX, adjust + step))
         weight_old = float(blogger.get("weight") or 0)
@@ -1065,12 +1312,36 @@ class BloggerService:
     async def run_learning(self) -> dict:
         """触发一轮 Hedge 学习(层1 因子权重, 反馈不足时 409)
 
+        P2a: 首次调用前应用 ETA_OVERRIDE(连续奖励幅值大,
+        乘性更新降速; 仅在未自定义配置时设置, 不覆盖 admin 调参)。
+
         Raises:
             ValueError: 待学习反馈不足(可先调 ai-learning config
                 min_feedback 或继续回流)
         """
         from services.ai_learning_service import run_learning_cycle
+        await self._ensure_learning_config()
         return await run_learning_cycle("blogger_work_gate")
+
+    async def _ensure_learning_config(self) -> None:
+        """eta 覆盖(幂等): 配置未自定义时写入 ETA_OVERRIDE"""
+        if ETA_OVERRIDE is None:
+            return
+        try:
+            from repositories.ai_learning_repository import (
+                AiLearningRepository,
+            )
+            repo = AiLearningRepository()
+            existing = await repo.get_config("blogger_work_gate")
+            if existing is None:
+                from services.ai_learning_service import (
+                    update_learning_config,
+                )
+                await update_learning_config(
+                    "blogger_work_gate",
+                    {"eta": ETA_OVERRIDE})
+        except Exception as exc:
+            logger.warning("blogger_ensure_config_failed: %s", exc)
 
     async def learning_status(self) -> dict:
         """回流与学习状态(层1权重档案/漂移 + 层2进化榜)"""
@@ -1121,6 +1392,13 @@ class BloggerService:
                                for b in bloggers
                                if b.get("pausedReason")
                                == "auto_loss_cut"],
+                "fraudSuspect": [{"bloggerId": b["bloggerId"],
+                                  "nickname": b.get("nickname", ""),
+                                  "fraudStreak": b.get("fraudStreak", 0)}
+                                 for b in bloggers
+                                 if b.get("pausedReason")
+                                 == "fraud_suspect"
+                                 or int(b.get("fraudStreak") or 0) > 0],
             },
         }
 
