@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<!--
+    40号·平台流量DV博主模块 v1.0 · 博主引流看板
+    页面: ai-blogger-dashboard.html(配套脚本 js/blogger-dashboard.js)
+    依赖: css/style.css(主题变量, 不新建 css) / 后端 40号 blogger_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    鉴权: 全部端点须登录(X-Member-Id + X-Role: admin)
+    区块: ①全景统计(池/作品/跟随/归因/三限) ②博主池(权重进化/状态机/探测额度/CRUD)
+          ③作品流(决策三档/评分快照) ④跟随内容(三段式/短码/回执/回流指标)
+          ⑤待人工队列(审核/裁决) ⑥雷达扫描 ⑦发布调度(入队/出队)
+          ⑧学习闭环(回流/收集/Hedge学习) ⑨权重自进化(进化榜/止损榜)
+          ⑩学习健康(三层视图/平台偏置)
+-->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · 平台流量DV博主 · 博主引流看板</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 博主引流看板专属样式(复用 style.css 主题变量) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"], .dash-toolbar input[type="number"], .dash-toolbar select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+        .dash-toolbar input[type="text"] { width: 220px; }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 横幅 */
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .dash-info {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 卡片头 */
+        .card-head {
+            display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--color-border);
+        }
+        .card-head b { font-size: 14px; }
+        .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .card-head select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+
+        /* 表格 */
+        .matrix-wrap { overflow-x: auto; }
+        table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .matrix th, .matrix td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .matrix th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .matrix .cap-id { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+
+        /* 徽章 */
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.yellow { background: #fdf3e3; color: #a06b00; }
+        .badge.red { background: #fdecea; color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: #999; }
+        .badge.blue { background: #eef2fb; color: #3b5998; }
+        .badge.purple { background: #f2eaf9; color: #7b3fa0; }
+        .badge.orange { background: #fdefdf; color: #c05f00; }
+
+        /* 小按钮 */
+        .btn-mini {
+            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
+            cursor: pointer; transition: var(--transition);
+        }
+        .btn-mini:hover { background: rgba(74, 124, 89, 0.08); }
+        .btn-mini.danger { border-color: var(--color-danger); color: var(--color-danger); }
+        .btn-mini.danger:hover { background: rgba(192, 57, 43, 0.06); }
+
+        /* 全景统计卡 */
+        .ov-wrap { padding: 6px 0 12px; }
+        .ov-group { padding: 8px 16px 2px; }
+        .ov-gtitle { font-size: 12px; font-weight: 700; color: var(--color-primary-dark); margin-bottom: 6px; }
+        .ov-cells { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 8px; }
+        .ov-cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 8px 4px; text-align: center; }
+        .ov-cell b { display: block; font-size: 16px; color: var(--color-text); font-variant-numeric: tabular-nums; }
+        .ov-cell span { font-size: 11px; color: var(--color-text-light); }
+
+        /* 详情框(评分快照/三段式文案) */
+        .detail-box { padding: 12px 16px; }
+        .detail-body {
+            background: #fff; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 12px 14px;
+            font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
+        }
+        .factor-bar {
+            display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 12px;
+        }
+        .factor-bar .f-name { width: 90px; color: var(--color-text-light); flex-shrink: 0; }
+        .factor-bar .f-track { flex: 1; height: 8px; background: var(--color-bg); border-radius: 4px; overflow: hidden; }
+        .factor-bar .f-fill { height: 100%; background: var(--color-primary); border-radius: 4px; }
+        .factor-bar .f-val { width: 120px; text-align: right; font-variant-numeric: tabular-nums; color: var(--color-text-light); flex-shrink: 0; }
+
+        /* 空态/脚注 */
+        .dash-empty { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 14px; }
+        .note-bar {
+            padding: 10px 16px; font-size: 11px; color: var(--color-text-light);
+            border-top: 1px dashed var(--color-border); line-height: 1.8;
+        }
+    </style>
+</head>
+<body>
+    <!-- 横幅 -->
+    <div class="dash-banner">
+        <h1>平台流量DV博主 · 博主引流看板</h1>
+        <p>博主池 → 作品雷达 → 跟随流水线 → 发布三限 → 归因闭环 → AI 权重自进化</p>
+    </div>
+
+    <div class="container">
+        <!-- 工具栏 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="dash-toolbar">
+                    <label>后端</label>
+                    <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                    <label>会员ID</label>
+                    <input type="text" id="memberId" style="width:70px" placeholder="2">
+                    <label>角色</label>
+                    <select id="roleSel">
+                        <option value="admin">admin</option>
+                        <option value="member">member</option>
+                    </select>
+                    <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                    <button class="dash-btn ghost" onclick="refreshData()">手动刷新</button>
+                    <label><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> 30s自动</label>
+                    <span class="dash-last-update" id="lastUpdate">—</span>
+                </div>
+                <div style="padding: 0 16px 12px">
+                    <div class="dash-error" id="errorBanner"></div>
+                    <div class="dash-info" id="infoBanner"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ① 全景统计 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>① 全景统计</b>
+                    <span class="head-actions">
+                        <button class="btn-mini" onclick="loadOverview()">刷新</button>
+                    </span>
+                </div>
+                <div class="ov-wrap" id="overviewBox"><div class="dash-empty">加载中…</div></div>
+            </div>
+        </div>
+
+        <!-- ② 博主池 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>② 博主池（权重自进化字段可见）</b>
+                    <span class="head-actions">
+                        <select id="poolStatusSel" onchange="loadPool()">
+                            <option value="">全部状态</option>
+                            <option value="active">active</option>
+                            <option value="paused">paused</option>
+                        </select>
+                        <button class="btn-mini" onclick="loadPool()">刷新</button>
+                    </span>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix" id="poolTable">
+                        <thead><tr>
+                            <th>ID</th><th>博主</th><th>平台</th><th>领域</th>
+                            <th class="num">粉丝(万)</th><th class="num">基线权重</th>
+                            <th class="num">进化偏移</th><th class="num">生效权重</th>
+                            <th>状态</th><th class="num">零引流</th>
+                            <th class="num">刷量</th><th class="num">探测</th>
+                            <th>操作</th>
+                        </tr></thead>
+                        <tbody id="poolBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ③ 作品流 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>③ 作品流（雷达侦测 × 决策三档）</b>
+                    <span class="head-actions">
+                        <select id="workStatusSel" onchange="loadWorks()">
+                            <option value="">全部状态</option>
+                            <option value="auto_follow">auto_follow</option>
+                            <option value="manual_queue">manual_queue</option>
+                            <option value="passed">passed</option>
+                            <option value="discarded">discarded</option>
+                            <option value="following">following</option>
+                        </select>
+                        <button class="btn-mini" onclick="loadWorks()">刷新</button>
+                    </span>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix" id="workTable">
+                        <thead><tr>
+                            <th>ID</th><th>博主</th><th>作品标题</th>
+                            <th class="num">赞/评/转</th><th class="num">评分</th>
+                            <th>决策</th><th>状态</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="workBody"></tbody>
+                    </table>
+                </div>
+                <div class="detail-box" id="workDetail" style="display:none">
+                    <div class="detail-body" id="workDetailBody"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ④ 跟随内容 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>④ 跟随内容（三段式 × KOL码 × 回流指标）</b>
+                    <span class="head-actions">
+                        <select id="followStatusSel" onchange="loadFollows()">
+                            <option value="">全部状态</option>
+                            <option value="approved">approved</option>
+                            <option value="pending">pending</option>
+                            <option value="rejected">rejected</option>
+                            <option value="queued">queued</option>
+                            <option value="published">published</option>
+                        </select>
+                        <button class="btn-mini" onclick="loadFollows()">刷新</button>
+                    </span>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix" id="followTable">
+                        <thead><tr>
+                            <th>ID</th><th>博主</th><th>标题</th><th>短码</th>
+                            <th class="num">搬运%</th><th class="num">合规分</th>
+                            <th>状态</th><th>回流指标</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="followBody"></tbody>
+                    </table>
+                </div>
+                <div class="detail-box" id="followDetail" style="display:none">
+                    <div class="detail-body" id="followDetailBody"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⑤ 待人工队列 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>⑤ 待人工队列（三审 + 人工裁决）</b>
+                    <span class="head-actions">
+                        <button class="btn-mini" onclick="loadPending()">刷新</button>
+                    </span>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix" id="pendingTable">
+                        <thead><tr>
+                            <th>ID</th><th>博主</th><th>标题</th>
+                            <th class="num">合规分</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="pendingBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⑥⑦ 雷达与发布 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>⑥⑦ 雷达扫描与发布调度</b>
+                    <span class="head-actions">
+                        <button class="btn-mini" onclick="runScan()">雷达扫描</button>
+                        <button class="btn-mini" onclick="runPublish()">发布出队</button>
+                    </span>
+                </div>
+                <div class="detail-box">
+                    <div class="detail-body" id="opsResult">点击上方按钮执行操作（扫描=发现→评分→决策三档；出队=到期 queued 发布）</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⑧ 学习闭环 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>⑧ 学习闭环（Hedge 回流与学习）</b>
+                    <span class="head-actions">
+                        <button class="btn-mini" onclick="runCollect()">批量回流</button>
+                        <button class="btn-mini" onclick="runLearning()">触发学习</button>
+                        <button class="btn-mini" onclick="loadLearning()">刷新</button>
+                    </span>
+                </div>
+                <div class="detail-box" id="learningBox"><div class="dash-empty">加载中…</div></div>
+            </div>
+        </div>
+
+        <!-- ⑨ 权重自进化榜 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>⑨ 权重自进化（升/降榜 × 止损榜）</b>
+                    <span class="head-actions">
+                        <button class="btn-mini" onclick="loadEvolution()">刷新</button>
+                    </span>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix" id="evoTable">
+                        <thead><tr>
+                            <th>博主</th><th>平台</th><th class="num">基线</th>
+                            <th class="num">偏移</th><th class="num">生效</th>
+                            <th class="num">零引流连续</th><th>状态</th>
+                        </tr></thead>
+                        <tbody id="evoBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⑩ 学习健康 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>⑩ 学习健康（三层视图 × 平台偏置）</b>
+                    <span class="head-actions">
+                        <button class="btn-mini" onclick="runCalibrate()">偏置重算</button>
+                        <button class="btn-mini" onclick="loadHealth()">刷新</button>
+                    </span>
+                </div>
+                <div class="detail-box" id="healthBox"><div class="dash-empty">加载中…</div></div>
+            </div>
+        </div>
+
+        <div class="note-bar">
+            后端: 40号 blogger_routes(/api/blogger/*, 默认 http://localhost:8000;
+            实机 Docker 直达 http://127.0.0.2:8000) · 鉴权: X-Member-Id + X-Role
+            · 数据口径: overview/pool/works/follows/reviews/learning/* 端点
+        </div>
+    </div>
+
+    <script src="js/blogger-dashboard.js"></script>
+</body>
+</html>
