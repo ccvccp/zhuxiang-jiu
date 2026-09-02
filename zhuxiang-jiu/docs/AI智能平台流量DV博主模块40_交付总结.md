@@ -170,12 +170,22 @@ BLOGGER_RADAR_AUTO=on / BLOGGER_PUBLISH_AUTO=on / BLOGGER_LEARNING_AUTO=on
 
 ---
 
-## 七、后续演进方向（超出现有规划，供参考）
+## 七、P4 后续演进交付（跨模块选题去重 + 评论归因回流 + 参考代理）
 
-- **真实源协议冻结待接**：P3b 代理契约已冻结（`GET {endpoint}?account&cursor&limit` → `{works:[...]}`），代理侧按契约实现即插即用
+原"后续演进方向"四项中三项已随 P4 落地：
+
+- **跨模块选题去重**：新增 `topic_dedup_service`（二元组 Jaccard 相似度，阈值 0.6），40号作品标题 ↔ 36号 engaged 热点双向互查，撞车自动降档 manual_queue 并留痕 `topicClash` 快照；查询失败非阻塞放行
+- **评论归因回流**：`comment_intercept_service.collect_comment_feedback()` 批量回流——过 24h 存活窗口的已发评论按短码点击数计 hit/miss 信号写账号层（commentHits/commentMisses，hit 清零 failStreak），幂等标记 commentFed；调度器每日钩子 + `POST /api/blogger/comments/collect` 手动触发端点
+- **参考代理脚本**：`scripts/reference_source_proxy.py` 按 P3b 冻结契约（`GET /works?account&cursor&limit`）提供确定性参考实现（hash 种子，同账号同结果），支撑 proxy 模式 E2E（雷达走代理/真实字段入库/指纹去重）
+- **评论区截流真实化**：真实评论 API 仍随平台资质待接（复用账号矩阵+存活检查框架不变）
+
+P4 专项 24 项（`test_blogger_p4.py`）+ 全量回归 1189/0 与基线一致。
+
+---
+
+## 八、剩余演进方向（供参考）
+
 - **评论区截流真实化**：评论发布回执当前 mock，真实评论 API 随平台资质接入（复用账号矩阵+存活检查框架）
-- **P3d 学习回流**：评论归因数据可回流层2（评论质量作为账号维度信号），当前仅 failStreak 降权
-- **跨模块选题去重**：40号博主跟随与 36号热点蹭点选题互查（设计文档风险表已预留口径）
 
 ---
 

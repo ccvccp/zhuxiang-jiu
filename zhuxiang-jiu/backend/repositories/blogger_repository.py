@@ -235,7 +235,8 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "durationSeconds", "publishedAtTs",
                "zeroTrafficStreak", "trafficInfluencerId",
                "probeRemaining", "commentId", "targetComments",
-               "ageHours", "accountId")
+               "ageHours", "accountId",
+               "commentHits", "commentMisses")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust")
 

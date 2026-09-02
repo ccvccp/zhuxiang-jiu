@@ -694,6 +694,21 @@ async def comment_post(comment_id: int,
         _handle(e)
 
 
+@router.post("/api/blogger/comments/collect",
+             tags=["平台流量DV博主模块"])
+async def comments_collect(x_role: str = Header(None, alias="X-Role")):
+    """批量回流评论归因(过存活窗口 → 账号层 hit/miss 信号)"""
+    _require_admin(x_role)
+    try:
+        from services.comment_intercept_service import \
+            CommentInterceptService
+        result = await CommentInterceptService() \
+            .collect_comment_feedback()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 @router.post("/api/blogger/comments/{comment_id}/survival",
              tags=["平台流量DV博主模块"])
 async def comment_survival(

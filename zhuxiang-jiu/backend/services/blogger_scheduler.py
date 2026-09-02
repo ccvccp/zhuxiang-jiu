@@ -113,6 +113,14 @@ async def _learning_loop() -> None:
             logger.info("blogger_learning_scheduled submitted=%s "
                         "skipped=%s", collected.get("submitted"),
                         collected.get("skipped"))
+            # P4b: 评论归因回流账号层(best-effort, 单独容错)
+            try:
+                from services.comment_intercept_service import \
+                    CommentInterceptService
+                await CommentInterceptService() \
+                    .collect_comment_feedback()
+            except Exception as exc:
+                logger.warning("评论回流调度异常(继续): %s", exc)
             # 反馈不足属常态(产出速率低), 静默跳过本轮学习;
             # 样本污染熔断(P2b)亦静默(质量门积累干净样本)
             try:

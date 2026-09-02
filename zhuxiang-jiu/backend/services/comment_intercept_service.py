@@ -415,6 +415,82 @@ class CommentInterceptService:
                 **metrics}
 
     # ============================================================
+    # 6.5 归因回流账号层(P4b: 评论质量作为账号维度信号)
+    # ============================================================
+
+    async def collect_comment_feedback(self) -> dict:
+        """批量回流: 已发布过存活窗口(COMMENT_SURVIVAL_HOURS)且未回流
+        的评论 → 短码归因聚合 → 账号层信号
+
+        信号语义(对齐层2进化保守取向):
+            clicks>0 → commentHits+1 + 账号 failStreak 清零(正反馈)
+            零点击 → commentMisses+1(仅计数, 不罚 streak——
+                      被删已另有降权口径, 避免双重惩罚)
+
+        Returns:
+            {"submitted": N, "skipped": N, "results": [...]}
+        """
+        from datetime import timedelta
+        cutoff = datetime.now(UTC) - timedelta(
+            hours=COMMENT_SURVIVAL_HOURS)
+        comments = await self.repo.list_comments(
+            status=COMMENT_STATUS_POSTED, limit=1000)
+        submitted, skipped, results = 0, 0, []
+        for comment in comments:
+            if comment.get("commentFed"):
+                skipped += 1
+                continue
+            try:
+                posted_at = datetime.fromisoformat(
+                    comment.get("postedAt", ""))
+                if posted_at > cutoff:
+                    skipped += 1   # 未过存活窗口
+                    continue
+            except ValueError:
+                pass   # 非法时间视为已沉淀(脏数据治理)
+            from services.blogger_service import BloggerService
+            metrics = await BloggerService()._link_metrics(
+                [comment.get("shortCode", "")])
+            clicks = int(metrics.get("clicks") or 0)
+            # 账号层信号
+            account_id = int(comment.get("accountId") or 0)
+            signal = None
+            if account_id:
+                account = await self.repo.get_account(account_id)
+                if account is not None:
+                    if clicks > 0:
+                        account["commentHits"] = int(
+                            account.get("commentHits") or 0) + 1
+                        account["failStreak"] = 0
+                        signal = f"hit(clicks={clicks})"
+                    else:
+                        account["commentMisses"] = int(
+                            account.get("commentMisses") or 0) + 1
+                        signal = "miss(clicks=0)"
+                    account["updatedAt"] = _now_iso()
+                    await self.repo.save_account(account)
+            # 幂等标记 + 指标留痕
+            comment.update({
+                "commentFed": True,
+                "commentMetrics": {
+                    "clicks": clicks,
+                    "registered": int(
+                        metrics.get("registered") or 0),
+                    "ordered": int(metrics.get("ordered") or 0),
+                    "gmv": round(float(metrics.get("gmv") or 0), 2)},
+                "commentFedAt": _now_iso(),
+            })
+            await self.repo.save_comment(comment)
+            results.append({"commentId": comment["commentId"],
+                            "clicks": clicks, "accountSignal": signal})
+            submitted += 1
+        if submitted:
+            logger.info("comment_feedback_collected submitted=%s "
+                        "skipped=%s", submitted, skipped)
+        return {"submitted": submitted, "skipped": skipped,
+                "results": results}
+
+    # ============================================================
     # 7. 报表
     # ============================================================
 

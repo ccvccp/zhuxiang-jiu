@@ -97,7 +97,26 @@ async def _publish_follows(svc: BloggerService, same_blogger: int = 0,
                    if len(ws) >= same_blogger)
         works = by_blogger[bid][:same_blogger]
     else:
-        works = works[:count]
+        # 跨博主轮询取件(避免 Mock 槽位数据下前 N 件同属一博主,
+        # 干扰层2进化断言)
+        by_blogger = {}
+        for w in works:
+            by_blogger.setdefault(w["bloggerId"], []).append(w)
+        picked = []
+        round_idx = 0
+        while len(picked) < count:
+            advanced = False
+            for bid in sorted(by_blogger):
+                q = by_blogger[bid]
+                if round_idx < len(q):
+                    picked.append(q[round_idx])
+                    advanced = True
+                    if len(picked) >= count:
+                        break
+            if not advanced:
+                break
+            round_idx += 1
+        works = picked
     published = []
     for w in works:
         follow = await svc.generate_follow(w["workId"])

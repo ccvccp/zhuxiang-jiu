@@ -286,12 +286,26 @@ class BloggerService:
                   + (f"(平台校准+{bias}→{calibrated})" if bias else "")
                   + f"(主导因子:{top['label']}{top['score']}), "
                   f"决策{scoring['actionName']}")
+        # P4a 跨模块选题去重: 与 36号已跟进热点撞车 → 降档人工裁决
+        clash = None
+        try:
+            from services.topic_dedup_service import blogger_work_clash
+            clash = await blogger_work_clash(work.get("title", ""))
+        except Exception as exc:
+            logger.warning("blogger_topic_dedup_failed: %s", exc)
+        if clash and decision == "auto_follow":
+            decision = "manual_queue"
+            reason += (f"; 选题与36号热点#{clash['hotspotId']}"
+                       f"《{clash['title']}》撞车"
+                       f"(相似度{clash['similarity']}), 降档人工裁决")
         work.update({
             "score": calibrated,
             "decision": decision,
             "scoreSnapshot": {**scoring,
                               "platformBias": bias,
-                              "rawScore": scoring["score"]},
+                              "rawScore": scoring["score"],
+                              **({"topicClash": clash}
+                                 if clash else {})},
             "status": status_map[decision],
         })
         await self.repo.save_work(work)

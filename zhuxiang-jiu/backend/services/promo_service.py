@@ -99,6 +99,23 @@ class PromoService:
         else:
             decision, hotspot_status = DECISION_PASS, HOTSPOT_STATUS_PASSED
             reason = f"评分{score}<{DECISION_MANUAL_QUEUE_SCORE}, 品牌相关性不足"
+        # P4a 跨模块选题去重: 与 40号已跟随作品撞车 → 降档人工裁决
+        if decision == DECISION_AUTO_ENGAGE:
+            try:
+                from services.topic_dedup_service import \
+                    promo_hotspot_clash
+                clash = await promo_hotspot_clash(
+                    hotspot.get("title", ""))
+            except Exception as exc:
+                logger.warning("promo_topic_dedup_failed: %s", exc)
+                clash = None
+            if clash:
+                decision, hotspot_status = (
+                    DECISION_MANUAL_QUEUE, HOTSPOT_STATUS_ACTIVE)
+                reason += (f"; 选题与40号作品#{clash['workId']}"
+                           f"《{clash['title']}》撞车"
+                           f"(相似度{clash['similarity']}), "
+                           "降档人工裁决")
         decision_id = await self.repo.next_id("decision")
         record = {
             "decisionId": decision_id,
