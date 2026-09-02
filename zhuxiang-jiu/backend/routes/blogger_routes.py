@@ -110,6 +110,15 @@ class CreateAccountRequest(PydBaseModel):
     note: str = Field("", max_length=200, description="备注")
 
 
+class GenerateCommentRequest(PydBaseModel):
+    targetWorkKey: str = Field(..., min_length=1, max_length=64,
+                               description="目标作品键(扫描结果返回)")
+
+
+class SurvivalCheckRequest(PydBaseModel):
+    alive: bool = Field(..., description="评论是否存活(被删→账号降权)")
+
+
 # ============================================================
 # 博主池管理(admin)
 # ============================================================
@@ -595,6 +604,141 @@ async def delete_account(account_id: int,
         account = await BloggerAccountService().delete_account(
             account_id)
         return {"success": True, "data": account}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 评论区截流(P3d, admin)
+# ============================================================
+
+@router.post("/api/blogger/comments/scan",
+             tags=["平台流量DV博主模块"])
+async def comments_scan(x_role: str = Header(None, alias="X-Role")):
+    """扫描热门大V作品(Mock源+风险否决+三因子评分+单作品护栏)"""
+    _require_admin(x_role)
+    try:
+        from services.comment_intercept_service import \
+            CommentInterceptService
+        result = await CommentInterceptService().scan_hot_works()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/comments/generate",
+             tags=["平台流量DV博主模块"])
+async def comment_generate(req: GenerateCommentRequest,
+                           x_role: str = Header(None,
+                                                alias="X-Role")):
+    """生成截流评论(≥70分目标: 共鸣+提及+短码 → 三审)"""
+    _require_admin(x_role)
+    try:
+        from services.comment_intercept_service import \
+            CommentInterceptService
+        comment = await CommentInterceptService().generate_comment(
+            req.targetWorkKey)
+        return {"success": True, "data": comment}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/comments", tags=["平台流量DV博主模块"])
+async def list_comments(
+    x_role: str = Header(None, alias="X-Role"),
+    platform: str = Query(None, description="平台筛选"),
+    status: str = Query(None,
+                        description="pending/approved/posted/deleted"),
+):
+    """截流评论列表"""
+    _require_admin(x_role)
+    try:
+        from services.comment_intercept_service import \
+            CommentInterceptService
+        comments = await CommentInterceptService().repo.list_comments(
+            platform=platform, status=status)
+        return {"success": True, "data": comments}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/comments/{comment_id}/review",
+             tags=["平台流量DV博主模块"])
+async def comment_review(comment_id: int, req: ReviewRequest,
+                         x_role: str = Header(None, alias="X-Role")):
+    """评论人工审核(pending → approved/deleted)"""
+    _require_admin(x_role)
+    try:
+        from services.comment_intercept_service import \
+            CommentInterceptService
+        comment = await CommentInterceptService().review_comment(
+            comment_id, req.approved)
+        return {"success": True, "data": comment}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/comments/{comment_id}/post",
+             tags=["平台流量DV博主模块"])
+async def comment_post(comment_id: int,
+                       x_role: str = Header(None, alias="X-Role")):
+    """发布评论(账号矩阵选号, 单账号单作品1条)"""
+    _require_admin(x_role)
+    try:
+        from services.comment_intercept_service import \
+            CommentInterceptService
+        comment = await CommentInterceptService().post_comment(
+            comment_id)
+        return {"success": True, "data": comment}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/comments/{comment_id}/survival",
+             tags=["平台流量DV博主模块"])
+async def comment_survival(
+        comment_id: int, req: SurvivalCheckRequest,
+        x_role: str = Header(None, alias="X-Role")):
+    """存活检查上报(被删 → deleted + 账号降权, 24h 口径)"""
+    _require_admin(x_role)
+    try:
+        from services.comment_intercept_service import \
+            CommentInterceptService
+        comment = await CommentInterceptService().check_survival(
+            comment_id, req.alive)
+        return {"success": True, "data": comment}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/comments/report",
+            tags=["平台流量DV博主模块"])
+async def comments_report(x_role: str = Header(None,
+                                               alias="X-Role")):
+    """截流全景(评论量/状态分布/归因汇总)"""
+    _require_admin(x_role)
+    try:
+        from services.comment_intercept_service import \
+            CommentInterceptService
+        return {"success": True, "data":
+                await CommentInterceptService().report()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/comments/{comment_id}/attribution",
+            tags=["平台流量DV博主模块"])
+async def comment_attribution(
+        comment_id: int,
+        x_role: str = Header(None, alias="X-Role")):
+    """单条评论归因(短码点击/注册/下单/GMV)"""
+    _require_admin(x_role)
+    try:
+        from services.comment_intercept_service import \
+            CommentInterceptService
+        result = await CommentInterceptService() \
+            .comment_attribution(comment_id)
+        return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
 

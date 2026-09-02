@@ -210,12 +210,32 @@ ACCOUNT_BAN_FAILS = int(os.environ.get("BLOGGER_ACCOUNT_BAN_FAILS", "3"))
 ACCOUNT_RATELIMIT_WORDS = ("rate limit", "too many", "429", "频次",
                            "限流", "发布频繁")
 
+# ============================================================
+# P3d 评论区截流常量(设计文档 P3d: 大V评论区精准回复)
+# ============================================================
+
+# 评论状态机: pending(待审) → approved → posted → deleted(被删)
+COMMENT_STATUS_PENDING = "pending"
+COMMENT_STATUS_APPROVED = "approved"
+COMMENT_STATUS_POSTED = "posted"
+COMMENT_STATUS_DELETED = "deleted"
+COMMENT_STATUSES = (COMMENT_STATUS_PENDING, COMMENT_STATUS_APPROVED,
+                   COMMENT_STATUS_POSTED, COMMENT_STATUS_DELETED)
+# 截流评分阈值(对齐决策三档: ≥70 直接跟评 / 50-70 人工确认)
+COMMENT_SCORE_AUTO = 70.0
+COMMENT_SCORE_MANUAL = 50.0
+# 评论护栏: 单作品仅 1 条品牌评论; 24h 存活检查
+COMMENT_SURVIVAL_HOURS = int(
+    os.environ.get("BLOGGER_COMMENT_SURVIVAL_HOURS", "24"))
+# Mock 热门作品源: 大V 作品档位(评论热度/时效/品牌契合)
+
 # 层2进化字段(float, 序列化口径)
 _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "fansWan", "likes", "comments", "shares",
                "durationSeconds", "publishedAtTs",
                "zeroTrafficStreak", "trafficInfluencerId",
-               "fraudStreak", "probeRemaining")
+               "probeRemaining", "commentId", "targetComments",
+               "ageHours", "accountId")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust")
 
@@ -356,7 +376,7 @@ class BloggerRepository:
     def _ensure_store(self):
         for key in ("blogger_pool", "blogger_works",
                     "blogger_follows", "blogger_audits",
-                    "blogger_accounts"):
+                    "blogger_accounts", "blogger_comments"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -658,3 +678,49 @@ class BloggerRepository:
             self._ensure_store()
             self.store.get(self.TABLE_ACCOUNTS, {}) \
                 .pop(account_id, None)
+
+    # ============================================================
+    # P3d 评论区截流(blogger:comments:{commentId}, Hash)
+    # ============================================================
+
+    TABLE_COMMENTS = "blogger_comments"
+
+    async def save_comment(self, record: dict) -> dict:
+        """保存截流评论({commentId, targetWorkKey, platform,
+        targetAuthor, targetTitle, body, shortCode, accountId,
+        score, status, receipt, ...})"""
+        return await self._save(self.TABLE_COMMENTS,
+                                record["commentId"], record)
+
+    async def get_comment(self, comment_id: int) -> dict | None:
+        return await self._get(self.TABLE_COMMENTS, comment_id)
+
+    async def update_comment(self, comment_id: int,
+                             fields: dict) -> dict:
+        return await self._update(self.TABLE_COMMENTS, comment_id,
+                                  fields)
+
+    async def list_comments(self, platform: str = None,
+                            status: str = None,
+                            limit: int = 200) -> list[dict]:
+        records = await self._list(self.TABLE_COMMENTS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if platform and r.get("platform") != platform:
+                continue
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result, key=lambda x: x.get("commentId", 0),
+                      reverse=True)[:limit]
+
+    async def find_comment_by_target(self,
+                                     target_work_key: str
+                                     ) -> dict | None:
+        """按目标作品键查评论(单作品仅1条护栏)"""
+        for r in await self._list(self.TABLE_COMMENTS,
+                                  limit=1000):
+            if r.get("targetWorkKey") == target_work_key:
+                return r
+        return None
