@@ -83,6 +83,17 @@ class ManualRequest(PydBaseModel):
                          description="指定抬头ID(缺省取默认抬头)")
 
 
+class AppealRequest(PydBaseModel):
+    reason: str = Field("", max_length=500,
+                        description="申诉理由(缺省默认话术)")
+
+
+class AppealDecideRequest(PydBaseModel):
+    approve: bool = Field(..., description="true=误拦恢复 / false=维持拦截")
+    reviewer: str = Field("admin", max_length=50, description="裁决人")
+    note: str = Field("", max_length=200, description="裁决备注")
+
+
 # ============================================================
 # 抬头簿(会员端)
 # ============================================================
@@ -193,12 +204,42 @@ async def request_invoice(
     body: ManualRequest = None,
     x_member_id: str = Header(default="", alias="X-Member-Id"),
 ):
-    """手动触发开票(无感漏网兜底, 如 collect 档补开)"""
+    """手动触发开票(无感漏网兜底, 如 collect/申诉恢复后补开)"""
     member_id = _require_member(x_member_id)
     try:
         return await _service.request_invoice(
             member_id, order_id,
             (body.titleId if body else None))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/invoice/orders/{order_id}/appeal")
+async def submit_appeal(
+    order_id: str,
+    body: AppealRequest = None,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """会员对拦截决策提交申诉(P1: 拦截面板四步法第 2 步)"""
+    member_id = _require_member(x_member_id)
+    try:
+        return await _service.submit_appeal(
+            member_id, order_id,
+            (body.reason if body else ""))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/invoice/appeals")
+async def my_appeals(
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """我的申诉记录"""
+    member_id = _require_member(x_member_id)
+    try:
+        appeals = await _service.my_appeals(member_id)
+        return {"success": True, "total": len(appeals),
+                "appeals": appeals}
     except Exception as e:
         raise _handle(e) from e
 
@@ -259,10 +300,47 @@ async def admin_decisions(
 async def admin_stats(
     x_role: str = Header(default="", alias="X-Role"),
 ):
-    """自动化率统计(管理端看板: 四档分布/开票数/自动率)"""
+    """自动化率统计(管理端看板: 四档分布/开票数/自动率/误拦截率)"""
     _require_admin(x_role)
     try:
         return await _service.admin_stats()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 管理端申诉裁决(P1: 拦截面板四步法第 2/3 步)
+# ============================================================
+
+@router.get("/api/invoice/admin/appeals")
+async def admin_appeals(
+    status: str = Query(None, description="pending/approved/"
+                                       "rejected 过滤"),
+    limit: int = Query(100, ge=1, le=1000),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """申诉队列(管理端, 待裁决=拦截面板工作列表)"""
+    _require_admin(x_role)
+    try:
+        appeals = await _service.admin_appeals(status=status,
+                                                limit=limit)
+        return {"success": True, "total": len(appeals),
+                "status": status, "appeals": appeals}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/invoice/admin/appeals/{appeal_id}/decide")
+async def decide_appeal(
+    appeal_id: int,
+    body: AppealDecideRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """申诉裁决: approve=误拦恢复(会员手动补开) / 拒绝=维持拦截归档"""
+    _require_admin(x_role)
+    try:
+        return await _service.decide_appeal(
+            appeal_id, body.approve, body.reviewer, body.note)
     except Exception as e:
         raise _handle(e) from e
 

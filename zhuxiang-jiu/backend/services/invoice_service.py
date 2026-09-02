@@ -33,6 +33,8 @@ from repositories.invoice_repository import (
     INVOICE_AUTO_MODE, INVOICE_FREQ_WINDOW_HOURS,
     INVOICE_FREQ_THRESHOLD, INVOICE_MIN_AMOUNT,
     QUEUE_PENDING, QUEUE_DONE, QUEUE_EXPIRED,
+    APPEAL_STATUS_PENDING, APPEAL_STATUS_APPROVED,
+    APPEAL_STATUS_REJECTED,
 )
 from services.ai_scoring_service import SCORERS
 
@@ -516,6 +518,15 @@ class Invoice42Service:
             if d.get("invoiceNo"):
                 issued += 1
         total = len(decisions)
+        # P1: 申诉与误拦截率(拦截面板核心指标)
+        appeals = await self.repo.list_appeals(limit=2000)
+        appeal_approved = sum(1 for a in appeals
+                               if a.get("status")
+                               == APPEAL_STATUS_APPROVED)
+        appeal_pending = sum(1 for a in appeals
+                              if a.get("status")
+                              == APPEAL_STATUS_PENDING)
+        reject_total = by_action[DECISION_REJECT]
         return {
             "success": True,
             "total": total,
@@ -524,6 +535,103 @@ class Invoice42Service:
             "automationRate": round(
                 by_action[DECISION_AUTO_ISSUE] / total, 4)
             if total else 0.0,
+            "appeals": {"total": len(appeals),
+                        "pending": appeal_pending,
+                        "approved": appeal_approved},
+            "falsePositiveRate": round(
+                appeal_approved / reject_total, 4)
+            if reject_total else 0.0,
             "thresholds": {"auto": DECISION_AUTO_SCORE,
                           "manual": DECISION_MANUAL_SCORE},
         }
+
+    # --------------------------------------------------------
+    # P1: 申诉与裁决(拦截面板 §三 第 2/3 步)
+    # --------------------------------------------------------
+
+    async def submit_appeal(self, member_id: int, order_id: str,
+                            reason: str = "") -> dict:
+        """会员对 reject 拦截决策提交申诉
+
+        Raises:
+            KeyError: 决策不存在
+            ValueError: 非本人/非 reject 档/已申诉
+        """
+        decision = await self.repo.get_decision(order_id)
+        if decision is None:
+            raise KeyError(f"订单 {order_id} 无开票决策")
+        if int(decision.get("memberId") or 0) != int(member_id):
+            raise ValueError("仅本人可申诉")
+        if decision.get("action") != DECISION_REJECT:
+            raise ValueError(f"决策档位 {decision.get('action')}, "
+                             "仅拦截(reject)决策可申诉")
+        existing = await self.repo.get_appeal_by_order(order_id)
+        if existing is not None:
+            raise ValueError(f"该订单已有申诉(appealId="
+                             f"{existing.get('appealId')}, 状态 "
+                             f"{existing.get('status')})")
+
+        appeal_id = await self.repo.next_id("appeal")
+        appeal = {
+            "appealId": appeal_id,
+            "orderId": order_id,
+            "memberId": int(member_id),
+            "reason": str(reason or "").strip()
+                      or "会员对拦截决策有异议",
+            "status": APPEAL_STATUS_PENDING,
+            "reviewer": "",
+            "reviewNote": "",
+            "scoreAtDecision": decision.get("score"),
+            "createdAt": _now_iso(),
+            "decidedAt": None,
+        }
+        await self.repo.save_appeal(appeal)
+        logger.info("invoice_appeal_submitted appeal=%s order=%s "
+                    "member=%s", appeal_id, order_id, member_id)
+        return {"success": True, "appeal": appeal}
+
+    async def decide_appeal(self, appeal_id: int, approve: bool,
+                            reviewer: str = "admin",
+                            note: str = "") -> dict:
+        """管理员裁决申诉
+
+        approve=True(误拦恢复): 申诉置 approved; 决策流水 detail
+        标注"申诉恢复", 会员经手动触发端点补开(四步法第 3 步路径A)。
+        approve=False(维持拦截): 申诉置 rejected 归档。
+
+        Raises:
+            KeyError: 申诉不存在
+            ValueError: 已裁决
+        """
+        appeal = await self.repo.get_appeal(int(appeal_id))
+        if appeal is None:
+            raise KeyError(f"申诉 {appeal_id} 不存在")
+        if appeal.get("status") != APPEAL_STATUS_PENDING:
+            raise ValueError(f"申诉状态 {appeal.get('status')}, "
+                             "仅待裁决申诉可处理")
+
+        appeal["status"] = (APPEAL_STATUS_APPROVED if approve
+                            else APPEAL_STATUS_REJECTED)
+        appeal["reviewer"] = reviewer
+        appeal["reviewNote"] = note
+        appeal["decidedAt"] = _now_iso()
+        await self.repo.save_appeal(appeal)
+
+        # 误拦恢复: 决策流水标注(补开走会员手动触发, 升级口径已有)
+        decision = await self.repo.get_decision(appeal["orderId"])
+        if approve and decision is not None:
+            decision["detail"] = (f"申诉恢复(appealId={appeal_id}, "
+                                   f"{reviewer})")
+            await self.repo.save_decision(decision)
+
+        logger.info("invoice_appeal_decided appeal=%s approve=%s "
+                    "reviewer=%s", appeal_id, approve, reviewer)
+        return {"success": True, "appeal": appeal}
+
+    async def my_appeals(self, member_id: int) -> list[dict]:
+        return await self.repo.list_appeals(member_id=int(member_id))
+
+    async def admin_appeals(self, status: str = None,
+                            limit: int = 100) -> list[dict]:
+        return await self.repo.list_appeals(status=status,
+                                             limit=limit)

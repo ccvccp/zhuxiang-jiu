@@ -66,6 +66,16 @@ QUEUE_PENDING = "pending"   # 待用户确认
 QUEUE_DONE = "done"         # 已确认开票
 QUEUE_EXPIRED = "expired"    # 已过期(订单退款)
 
+# ============================================================
+# P1 申诉状态机(reject 拦截 → 申诉 → 裁决)
+# ============================================================
+
+APPEAL_STATUS_PENDING = "pending"    # 待裁决
+APPEAL_STATUS_APPROVED = "approved"  # 误拦, 已恢复(通知补开)
+APPEAL_STATUS_REJECTED = "rejected"  # 维持拦截, 归档
+APPEAL_STATUSES = (APPEAL_STATUS_PENDING, APPEAL_STATUS_APPROVED,
+                   APPEAL_STATUS_REJECTED)
+
 
 class Invoice42Repository:
     """42号无感开票仓储(双模式, blogger/ride 四原语模式平移)"""
@@ -73,9 +83,10 @@ class Invoice42Repository:
     TABLE_TITLES = "invoice_title_books"
     TABLE_DECISIONS = "invoice_decisions"
     TABLE_QUEUE = "invoice_auto_queue"
+    TABLE_APPEALS = "invoice_appeals"
 
     _INT_FIELDS = ("titleId", "memberId", "useCount", "decisionId",
-                   "reviewsToday")
+                   "reviewsToday", "appealId")
     _FLOAT_FIELDS = ("score", "amount", "consistency")
     _BOOL_FIELDS = ("isDefault", "decided", "queuedFed")
 
@@ -88,7 +99,7 @@ class Invoice42Repository:
 
     def _ensure_store(self):
         for key in (self.TABLE_TITLES, self.TABLE_DECISIONS,
-                    self.TABLE_QUEUE):
+                    self.TABLE_QUEUE, self.TABLE_APPEALS):
             self.store.setdefault(key, {})
 
     async def next_id(self, kind: str) -> int:
@@ -243,3 +254,35 @@ class Invoice42Repository:
             items = [i for i in items
                      if i.get("status") == status]
         return items[:limit]
+
+    # --------------------------------------------------------
+    # 申诉(P1)
+    # --------------------------------------------------------
+
+    async def save_appeal(self, appeal: dict) -> dict:
+        return await self._save(self.TABLE_APPEALS,
+                                appeal["appealId"], appeal)
+
+    async def get_appeal(self, appeal_id: int) -> dict | None:
+        return await self._get(self.TABLE_APPEALS, appeal_id)
+
+    async def get_appeal_by_order(self, order_id: str) -> dict | None:
+        """按订单号查申诉(幂等: 一拦截一申诉)"""
+        appeals = await self._list(self.TABLE_APPEALS, limit=2000)
+        for a in appeals:
+            if a.get("orderId") == order_id:
+                return a
+        return None
+
+    async def list_appeals(self, status: str = None,
+                           member_id: int = None,
+                           limit: int = 200) -> list[dict]:
+        appeals = await self._list(self.TABLE_APPEALS, limit=2000)
+        if status:
+            appeals = [a for a in appeals
+                       if a.get("status") == status]
+        if member_id is not None:
+            appeals = [a for a in appeals
+                       if int(a.get("memberId") or 0)
+                       == int(member_id)]
+        return appeals[:limit]

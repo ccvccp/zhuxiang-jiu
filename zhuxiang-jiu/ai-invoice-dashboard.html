@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<!--
+    42号·AI无感开票模块 v1.0 · 拦截面板
+    页面: ai-invoice-dashboard.html(配套脚本 js/invoice-dashboard.js)
+    依赖: css/style.css(主题变量) / 后端 42号 invoice_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    鉴权: X-Role: admin(全部管理端区块)
+    区块: ①统计卡(四档/自动率/误拦截率) ②申诉队列(裁决)
+          ③拦截流水(因子判读) ④全量决策流水
+    操作手册: docs/无感开票管理端拦截面板操作指南.md(四步处置法)
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>42号·无感开票拦截面板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#8a5a2f,#c49158);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #8a5a2f;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-info{background:#efe;border:1px solid #9c9;color:#393;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    table.matrix{width:100%;border-collapse:collapse;font-size:12px}
+    table.matrix th,table.matrix td{border:1px solid
+        var(--color-border,#e5e5e5);padding:6px 8px;text-align:left}
+    table.matrix th{background:var(--color-bg-secondary,#f7f7f7)}
+    .badge{display:inline-block;padding:1px 8px;border-radius:9px;
+        font-size:11px;white-space:nowrap}
+    .badge.green{background:#e6f7e6;color:#2c7a2c}
+    .badge.yellow{background:#fff7e0;color:#a37400}
+    .badge.red{background:#fdeaea;color:#c0392b}
+    .badge.weak{background:#eee;color:#666}
+    .badge.blue{background:#e8f1fb;color:#24619c}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:10px}
+    .ov-cell{background:var(--color-bg-secondary,#f7f9f7);border-radius:6px;
+        padding:10px 12px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:4px}
+    .ov-cell .v{font-size:20px;font-weight:600;color:#8a5a2f}
+    .dash-empty{color:#999;font-size:12px;padding:14px;text-align:center}
+    .btn-mini{padding:2px 8px;font-size:11px;border:none;border-radius:4px;
+        cursor:pointer;background:#2c7a2c;color:#fff;margin-right:4px}
+    .btn-mini.danger{background:#c0392b}
+    .btn-mini.ghost{background:#6b7280}
+    .detail-body{background:var(--color-bg-secondary,#f7f7f7);border:1px
+        solid var(--color-border,#e5e5e5);border-radius:5px;padding:10px;
+        font-size:12px;white-space:pre-wrap;max-height:300px;overflow:auto;
+        display:none;font-family:Consolas,monospace}
+    .note-bar{font-size:11px;color:#999;padding:10px 4px;
+        border-top:1px solid var(--color-border,#eee);margin-top:16px}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>42号·无感开票拦截面板</h1>
+    <p>拦截观察 · 申诉裁决 · 误拦截率 · 四步处置法（见操作指南）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="refreshData()">手动刷新</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div id="infoBar" class="dash-info"></div>
+        </div>
+    </div>
+
+    <!-- ① 统计卡 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 统计（四档分布 / 自动化率 / 误拦截率）</h3></div>
+            <div id="ovCells" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ② 申诉队列 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>② 申诉队列（四步法第 2/3 步：裁决）</h3>
+                <div class="dash-toolbar">
+                    <select id="appealStatusSel" onchange="loadAppeals()">
+                        <option value="">全部状态</option>
+                        <option value="pending">待裁决</option>
+                        <option value="approved">已恢复</option>
+                        <option value="rejected">维持拦截</option>
+                    </select>
+                </div>
+            </div>
+            <table class="matrix" id="appealTable">
+                <thead><tr><th>申诉ID</th><th>订单号</th><th>会员</th>
+                    <th>申诉理由</th><th>决策评分</th><th>状态</th>
+                    <th>操作</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="appealEmpty" style="display:none">暂无申诉</div>
+        </div>
+    </div>
+
+    <!-- ③ 拦截流水 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>③ 拦截流水（四步法第 1 步：因子判读）</h3>
+            </div>
+            <table class="matrix" id="rejectTable">
+                <thead><tr><th>订单号</th><th>会员</th><th>评分</th>
+                    <th>拦截原因</th><th>时间</th><th>操作</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="rejectEmpty" style="display:none">暂无拦截记录</div>
+            <div class="detail-body" id="factorDetail"></div>
+        </div>
+    </div>
+
+    <!-- ④ 全量决策流水 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>④ 全量决策流水</h3>
+                <div class="dash-toolbar">
+                    <select id="actionSel" onchange="loadDecisions()">
+                        <option value="">全部档位</option>
+                        <option value="auto_issue">自动开具</option>
+                        <option value="manual_queue">待确认</option>
+                        <option value="reject">拦截</option>
+                        <option value="collect">引导收集</option>
+                    </select>
+                </div>
+            </div>
+            <table class="matrix" id="decisionTable">
+                <thead><tr><th>订单号</th><th>会员</th><th>档位</th>
+                    <th>评分</th><th>发票号</th><th>存证</th>
+                    <th>详情</th><th>时间</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="decisionEmpty" style="display:none">暂无决策</div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        全部区块需 admin · 误拦恢复=申诉 approve 后会员手动补开 ·
+        操作手册: docs/无感开票管理端拦截面板操作指南.md
+    </div>
+</div>
+
+<script src="js/invoice-dashboard.js"></script>
+</body>
+</html>
