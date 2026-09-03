@@ -634,17 +634,44 @@ class Security43Service:
     # --------------------------------------------------------
 
     async def verify_challenge(self, ip: str, token: str = "",
-                               answer: str = "") -> dict:
-        """挑战应答验证(mock: 应答非空即通过)
+                               answer: str = "",
+                               captcha_token: str = "") -> dict:
+        """挑战应答验证(P3-2 三态通道)
 
-        通过 → 颁发 IP 通行证(TTL 900s, 挑战档豁免);
-        mock 口径不含真实验证码(P3 极验/hCaptcha 通道预留)。
+        - 携带 captcha_token(前端验证码组件票据) → captcha_client
+          三态分发(mock/real/mock_fallback, 服务商二次校验);
+        - 仅 answer(旧客户端口径) → mock 应答(非空即过,
+          兼容 P1 行为; real 态拒绝——防自动化脚本绕过)。
+        - 票据一次性: 验证票据消费后入黑名单(TTL 900s)防重放。
+
+        通过 → 颁发 IP 通行证(TTL 900s, 挑战档豁免)。
 
         Raises:
-            ValueError: 应答为空(未完成验证)
+            ValueError: 应答为空 / 服务商校验未通过 / 票据重放
         """
-        if not str(answer or "").strip():
-            raise ValueError("验证失败: 应答为空, 请完成安全验证")
+        from services.captcha_client import (
+            validate_captcha, get_captcha_mode, mock_answer_valid,
+        )
+
+        captcha_detail = ""
+        if captcha_token:
+            # 票据一次性: 消费后立即拉黑(防重放)
+            if await self._captcha_token_consumed(captcha_token):
+                raise ValueError("验证失败: 验证码票据已使用(一次性)")
+            result = await validate_captcha(captcha_token)
+            captcha_detail = result.get("detail") or ""
+            if not result.get("valid"):
+                raise ValueError(f"验证失败: {captcha_detail}")
+        else:
+            # 旧口径(mock 应答): 仅 mock 态放行——real 态下
+            # 无票据请求一律拒绝(自动化脚本无法伪造服务商票据)
+            if get_captcha_mode() != "mock":
+                raise ValueError("验证失败: 需完成安全验证"
+                                 "(缺少验证码票据)")
+            if not mock_answer_valid(answer):
+                raise ValueError("验证失败: 应答为空, 请完成安全验证")
+            captcha_detail = "mock 应答通过"
+
         await self.repo.grant_challenge_pass(
             ip, ttl=CHALLENGE_PASS_TTL)
         # 验证通过留痕(事件流水, 供观察挑战漏斗)
@@ -659,13 +686,28 @@ class Security43Service:
             "enforced": get_enforce_level() == "enforce",
             "verdict": VERDICT_CONFIRMED,  # 通过验证=真人信号
             "eventFed": False,
+            "captchaDetail": captcha_detail[:120],
             "createdAt": ts(),
         }
         await self.repo.save_event(event)
-        logger.info("security_challenge_verified ip=%s token=%s",
-                    ip, (token or "")[:32])
+        logger.info("security_challenge_verified ip=%s token=%s "
+                    "captcha=%s", ip, (token or "")[:32],
+                    captcha_detail[:60])
         return {"success": True, "ip": ip,
-                "passTtl": CHALLENGE_PASS_TTL}
+                "passTtl": CHALLENGE_PASS_TTL,
+                "captchaDetail": captcha_detail}
+
+    async def _captcha_token_consumed(self, captcha_token: str) -> bool:
+        """票据一次性检查并消费(SETNX + TTL 900s)"""
+        if not captcha_token:
+            return False
+        digest = __import__("hashlib").sha256(
+            captcha_token.encode("utf-8")).hexdigest()
+        key = f"captcha_consumed:{digest[:32]}"
+        if await self.repo.has_challenge_pass(key):
+            return True   # 已消费(复用通行证键族语义)
+        await self.repo.grant_challenge_pass(key, ttl=900)
+        return False
 
     # --------------------------------------------------------
     # P1: 误报申诉(会员端 → 管理端裁决, 42号申诉范式平移)

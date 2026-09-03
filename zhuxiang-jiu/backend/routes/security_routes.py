@@ -44,8 +44,11 @@ _service = Security43Service()
 
 class ChallengeVerifyRequest(PydBaseModel):
     token: str = Field("", description="挑战令牌(响应头 x-security-challenge)")
-    answer: str = Field(..., min_length=1, max_length=64,
-                         description="验证应答(mock: 非空即通过)")
+    answer: str = Field("", max_length=64,
+                         description="旧口径应答(仅 mock 态放行, 兼容 P1)")
+    captchaToken: str = Field("", max_length=512,
+                               description="验证码组件票据(P3-2 三态通道,"
+                               "real 态必填)")
 
 
 class AppealRequest(PydBaseModel):
@@ -130,10 +133,16 @@ async def challenge_verify(
     request: Request,
     body: ChallengeVerifyRequest,
 ):
-    """挑战应答验证(mock 验证码: 应答非空即通过 → IP 通行证 TTL 900s)"""
+    """挑战应答验证(P3-2 三态通道)
+
+    - captchaToken(推荐): 服务商票据 → mock/real/mock_fallback 分发,
+      票据一次性消费防重放
+    - answer(旧口径): 仅 mock 态放行(real 态拒绝, 防脚本绕过)
+    """
     try:
         return await _service.verify_challenge(
-            _client_ip(request), token=body.token, answer=body.answer)
+            _client_ip(request), token=body.token, answer=body.answer,
+            captcha_token=body.captchaToken)
     except Exception as e:
         raise _handle(e) from e
 

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+    43号·安全挑战页(会员侧, P3-2 真实验证码通道配套)
+    场景: 网关 challenge 档返回 401 + x-security-challenge 头时,
+    前端跳转本页完成验证 → 获得 IP 通行证(TTL 900s)后返回原页面。
+    通道: mock(默认, 应答非空即过) / real(极验v4/hCaptcha 组件,
+    凭证配置后自动加载) / mock_fallback。
+    URL 参数: ?redirect=<验证后跳回地址>&token=<挑战令牌>
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>安全验证</title>
+<style>
+    body{font-family:"Microsoft YaHei",sans-serif;background:#f5f6f8;
+        display:flex;align-items:center;justify-content:center;
+        min-height:100vh;margin:0}
+    .card{background:#fff;border-radius:12px;padding:36px 32px;
+        width:360px;box-shadow:0 4px 20px rgba(0,0,0,.08);text-align:center}
+    .icon{font-size:44px;margin-bottom:12px}
+    h1{font-size:18px;color:#2d3748;margin:0 0 8px}
+    p{font-size:13px;color:#718096;margin:0 0 24px;line-height:1.6}
+    input{width:100%;box-sizing:border-box;padding:11px 14px;
+        border:1px solid #cbd5e0;border-radius:8px;font-size:14px;
+        margin-bottom:16px;outline:none}
+    input:focus{border-color:#4299e1}
+    button{width:100%;padding:12px;background:#2d3748;color:#fff;
+        border:none;border-radius:8px;font-size:15px;cursor:pointer}
+    button:disabled{background:#a0aec0;cursor:not-allowed}
+    .msg{font-size:12px;margin-top:14px;min-height:16px}
+    .msg.err{color:#e53e3e}
+    .msg.ok{color:#38a169}
+    #captchaBox{margin-bottom:16px;min-height:0}
+    .note{font-size:11px;color:#a0aec0;margin-top:20px;
+        border-top:1px solid #edf2f7;padding-top:12px}
+</style>
+</head>
+<body>
+<div class="card">
+    <div class="icon">&#128737;</div>
+    <h1>安全验证</h1>
+    <p>检测到您的请求存在可疑特征<br>完成验证后将自动放行并继续访问</p>
+
+    <!-- real 态: 极验/hCaptcha 组件挂载点(凭证配置后由
+         challenge-verify.js 动态加载 SDK; mock 态隐藏) -->
+    <div id="captchaBox" style="display:none"></div>
+
+    <!-- mock 态: 简单应答输入(默认通道) -->
+    <div id="mockBox">
+        <input id="answerInput" placeholder="请输入「我已完成验证」"
+               maxlength="64">
+    </div>
+
+    <button id="submitBtn" onclick="doVerify()">完成验证</button>
+    <div id="msg" class="msg"></div>
+
+    <div class="note">
+        验证通过后 15 分钟内免重复验证 ·
+        认为是误判可登录后在"我的安全状态"提交申诉
+    </div>
+</div>
+
+<script src="js/challenge-verify.js"></script>
+</body>
+</html>

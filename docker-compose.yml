@@ -58,6 +58,14 @@ services:
       - SECURITY_RATE_LIMIT=${SECURITY_RATE_LIMIT:-120}
       # 自动封禁时长(秒, 到点自动解封)
       - SECURITY_BAN_TTL=${SECURITY_BAN_TTL:-900}
+      # ---- 43号 P3-2 真实验证码通道(默认 mock; 凭证经 .env 注入) ----
+      # 三态: mock(默认, 应答非空即过) / real(服务商校验, fail-hard) /
+      #        mock_fallback(真实轨传输故障回退 mock, 回执标记来源)
+      - SECURITY_CAPTCHA_MODE=${SECURITY_CAPTCHA_MODE:-mock}
+      # 服务商: geetest(v4, 国内合规首选) / hcaptcha(海外备选)
+      - CAPTCHA_PROVIDER=${CAPTCHA_PROVIDER:-geetest}
+      - CAPTCHA_ID=${CAPTCHA_ID:-}
+      - CAPTCHA_KEY=${CAPTCHA_KEY:-}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
