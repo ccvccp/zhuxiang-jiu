@@ -151,12 +151,21 @@ class ThreatIntelService:
         except Exception:
             auto = {"enabled": False, "degraded": False,
                     "consecutiveFailures": 0}
+
+        # P5-6: 匹配策略实况(linear/bisect + 段数)——
+        # 聚合多源时可直接确认二分已生效
+        try:
+            match = self.repo.threatintel_match_mode()
+        except Exception:
+            match = {"mode": "linear", "segments": 0}
         return {
             "success": True,
             "totalCidrs": len(records),
             "sources": sources,
             "lastImportedAt": latest,
             "auto": auto,
+            "matchMode": match.get("mode"),
+            "matchSegments": match.get("segments"),
         }
 
     # ========================================================

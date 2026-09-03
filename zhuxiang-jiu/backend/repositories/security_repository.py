@@ -38,6 +38,18 @@ REPUTATION_COLD_START = 80.0   # 新 IP 中性分(不因新面孔误杀)
 REPUTATION_NORMAL_MIN = 60.0
 REPUTATION_BLACKLIST_MAX = 30.0
 
+# ============================================================
+# P5-6: 威胁情报区间二分(阈值分流 + 版本戳缓存)
+# - RANGE_MATCH_THRESHOLD: 段数阈值(≥1000 走二分, 规模即开关)
+# - _TI_VERSION: 版本戳(save/clear 递增——同规模换内容/
+#   导入中途/增量导入三陷阱统一防御)
+# - _TI_RANGE_CACHE: (version, v4_intervals, v6_intervals)
+#   模块级单例——缓存是纯计算产物, 双模式通用
+# ============================================================
+RANGE_MATCH_THRESHOLD = 1000
+_TI_VERSION = 0
+_TI_RANGE_CACHE: tuple | None = None
+
 
 def reputation_status(score: float) -> str:
     """信誉分 → 三态"""
@@ -453,7 +465,7 @@ class Security43Repository:
     # --------------------------------------------------------
     # P4-3: 威胁情报表(外源 CIDR 段, 命中降档不直封防误伤)
     # 存储: Hash field=CIDR(如 1.2.3.0/24), value=导入元信息
-    # 匹配: ipaddress 标准库线性扫段(段数少; >10k 段改前缀树)
+    # 匹配: P5-6 区间二分(≥1000 段) / 线性扫段(<1000 段)
     # --------------------------------------------------------
 
     async def get_threatintel(self, cidr: str) -> dict | None:
@@ -462,8 +474,13 @@ class Security43Repository:
 
     async def save_threatintel(self, cidr: str,
                                meta: dict) -> dict:
-        return await self._save(self.TABLE_POSTURE,
-                                f"threatintel:{cidr}", meta)
+        result = await self._save(self.TABLE_POSTURE,
+                                  f"threatintel:{cidr}", meta)
+        # P5-6: 版本戳递增(区间缓存失效——同规模换内容/
+        # 导入中途/增量导入三陷阱统一防御)
+        global _TI_VERSION
+        _TI_VERSION += 1
+        return result
 
     # --------------------------------------------------------
     # P5-3: 威胁情报自动订阅状态(单例记录, posture 表族键空间)
@@ -479,7 +496,14 @@ class Security43Repository:
                                 "threatintel:auto", record)
 
     async def list_threatintel(self,
-                               limit: int = 10000) -> list[dict]:
+                               limit: int = 200000) -> list[dict]:
+        """列出全部威胁情报段
+
+        P5-6 修正: 默认 limit 由 10000 提至 200000——
+        MAX_IMPORT_CIDRS=20000 允许导入 2 万段, 原 1 万
+        上限导致 list/clear/stats 截断(导入超 1 万段后
+        clear 只清一半/stats 少算——20k 段实机暴露的存量缺陷)。
+        """
         records = await self._list(self.TABLE_POSTURE, limit)
         return [r for r in records
                 if str(r.get("actorKey", "")).startswith(
@@ -499,19 +523,89 @@ class Security43Repository:
                 self._ensure_store()
                 self.store[self.TABLE_POSTURE].pop(
                     f"threatintel:{key}", None)
+        # P5-6: 版本戳递增(区间缓存失效)
+        global _TI_VERSION
+        _TI_VERSION += 1
         return len(records)
+
+    async def _build_range_cache(self) -> tuple:
+        """P5-6: 构建有序区间表(懒构建, 导入后首次匹配触发)
+
+        结构: (version, (v4_starts, v4_intervals),
+                        (v6_starts, v6_intervals))
+        - starts 与 intervals 构建时预计算(查询零列表重建——
+          每次 O(n) 重建 starts 会抵消二分收益)
+        - 命中回填单键取(get_threatintel)——区间只存 cidr
+          字符串, 省 180k 段 × dict 内存
+        """
+        import ipaddress
+        v4, v6 = [], []
+        for r in await self.list_threatintel(limit=200000):
+            cidr = str(r.get("actorKey", ""))[len("threatintel:"):]
+            try:
+                net = ipaddress.ip_network(cidr, strict=False)
+                entry = (int(net.network_address),
+                         int(net.broadcast_address), cidr)
+                (v4 if net.version == 4 else v6).append(entry)
+            except ValueError:
+                continue   # 非法段跳过(导入校验兜底)
+        v4.sort(key=lambda e: e[0])
+        v6.sort(key=lambda e: e[0])
+        return (_TI_VERSION,
+                ([e[0] for e in v4], v4),
+                ([e[0] for e in v6], v6))
+
+    async def _match_bisect(self, ip_int: int,
+                            family: tuple) -> dict | None:
+        """P5-6: 区间二分命中(bisect_right 找左邻区间)
+
+        IP int ∈ [start, end] 即命中; 返回完整段记录
+        (单键回填)。
+        """
+        from bisect import bisect_right
+        starts, intervals = family
+        idx = bisect_right(starts, ip_int) - 1
+        if idx < 0:
+            return None
+        start, end, cidr = intervals[idx]
+        if start <= ip_int <= end:
+            record = await self.get_threatintel(cidr)
+            if record is None:
+                # 存储与缓存瞬时不一致(导入中)——返回段标识
+                return {"cidr": cidr}
+            return {"cidr": cidr, **{
+                k: v for k, v in record.items()
+                if k != "actorKey"}}
+        return None
 
     async def match_threatintel(self, ip: str) -> dict | None:
         """IP 是否命中威胁情报段(返回命中的段信息)
 
-        线性扫描 + ipaddress 库匹配; 段数少(<10k)可接受,
-        大规模导入后改前缀树(P5 优化)。
+        P5-6 阈值分流:
+            段数 < 1000 → 线性扫段(既有路径零改动)
+            段数 ≥ 1000 → 区间二分 O(log n)(缓存构建一次,
+                查询零 list 调用——顺带消解逐键 hgetall
+                网络往返的隐性瓶颈)
         """
         import ipaddress
+        global _TI_RANGE_CACHE
         try:
             addr = ipaddress.ip_address(ip)
         except ValueError:
             return None
+
+        # 懒构建/版本失效检查(单次判断开销)
+        if _TI_RANGE_CACHE is None or \
+                _TI_RANGE_CACHE[0] != _TI_VERSION:
+            _TI_RANGE_CACHE = await self._build_range_cache()
+        _, v4_family, v6_family = _TI_RANGE_CACHE
+        total = len(v4_family[1]) + len(v6_family[1])
+        if total >= RANGE_MATCH_THRESHOLD:
+            family = v4_family if addr.version == 4 \
+                else v6_family
+            return await self._match_bisect(int(addr), family)
+
+        # 线性路径(既有口径)
         for r in await self.list_threatintel():
             cidr = str(r.get("actorKey", ""))[len("threatintel:"):]
             try:
@@ -522,6 +616,16 @@ class Security43Repository:
             except ValueError:
                 continue
         return None
+
+    def threatintel_match_mode(self) -> dict:
+        """P5-6: 当前匹配策略实况(可观测)"""
+        total = 0
+        if _TI_RANGE_CACHE is not None:
+            total = (len(_TI_RANGE_CACHE[1][1])
+                     + len(_TI_RANGE_CACHE[2][1]))
+        return {"mode": ("bisect" if total >=
+                         RANGE_MATCH_THRESHOLD else "linear"),
+                "segments": total}
 
     # --------------------------------------------------------
     # P3-3: 会员地理历史(geo velocity 异地跳变, 滚动窗口)
