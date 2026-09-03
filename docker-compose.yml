@@ -78,6 +78,13 @@ services:
       - SECURITY_D5_ENFORCE=${SECURITY_D5_ENFORCE:-off}
       # 联动边界区(威胁分窗口, 默认挑战档 25-50; 可调如 50-70 覆盖减速档)
       - SECURITY_D5_ENFORCE_BAND=${SECURITY_D5_ENFORCE_BAND:-25-50}
+      # ---- 43号 P5-3 威胁情报自动订阅(默认 off 主动开启; 周度拉取) ----
+      # 拉取失败 fail-soft 旧段保留(情报宁旧勿空); 连续3次失败 degraded
+      - SECURITY_THREATINTEL_AUTO=${SECURITY_THREATINTEL_AUTO:-off}
+      # 情报源(默认 firehol_level1 官方 raw; 国内可换镜像如 ghproxy)
+      - SECURITY_THREATINTEL_URL=${SECURITY_THREATINTEL_URL:-https://raw.githubusercontent.com/firehol/blocklist/master/firehol_level1.netset}
+      # 拉取周期(秒, 默认 7 天; 下限 3600 防误配忙循环)
+      - SECURITY_THREATINTEL_INTERVAL=${SECURITY_THREATINTEL_INTERVAL:-604800}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

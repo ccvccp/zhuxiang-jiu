@@ -126,6 +126,28 @@ async def run_scheduled_security_tasks() -> dict:
         logger.warning("security_scheduler_alert_failed: %s", exc)
         result["errors"].append(f"alert:{exc}")
 
+    # ⑤ 威胁情报自动订阅(P5-3): 周期到点拉取 netset →
+    #    幂等全量替换(import 内部先 parse 成功才 clear——
+    #    拉取/校验失败旧段保留, 情报宁旧勿空);
+    #    仅 AUTO 开关开启时执行; 30s 超时不阻塞调度
+    try:
+        from services.threatintel_feed import (
+            feed_enabled, maybe_refresh,
+        )
+        if feed_enabled():
+            ti = await maybe_refresh()
+            result["threatintel"] = {
+                "executed": ti.get("executed"),
+                "status": ti.get("status"),
+                "imported": ti.get("imported"),
+                "consecutiveFailures": ti.get(
+                    "consecutiveFailures"),
+            }
+    except Exception as exc:
+        logger.warning("security_scheduler_threatintel_failed: "
+                       "%s", exc)
+        result["errors"].append(f"threatintel:{exc}")
+
     repo = Security43Repository()
     stats = await repo.get_scheduler_stats() or {"runs": 0}
     stats = {
@@ -135,6 +157,7 @@ async def run_scheduled_security_tasks() -> dict:
         "lastBaselines": result["baselines"],
         "lastPosture": (result["posture"] or {}).get("posture"),
         "lastAlerts": result.get("alerts"),
+        "lastThreatintel": result.get("threatintel"),
         "lastErrors": result["errors"][-10:],
     }
     await repo.save_scheduler_stats(stats)

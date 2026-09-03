@@ -536,6 +536,24 @@ async def admin_threatintel_check(
         raise _handle(e) from e
 
 
+@router.post("/admin/threatintel/auto/refresh")
+async def admin_threatintel_auto_refresh(
+    force: bool = Query(True, description="跳过周期判断立即拉取"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """手动触发威胁情报自动订阅拉取(自动轨演练/即时更新)
+
+    与 POST /admin/threatintel/import(内容上传)双轨并存:
+    本端点走外部源拉取(三重校验+fail-soft 旧段保留)。
+    """
+    _require_admin(x_role)
+    try:
+        from services.threatintel_feed import maybe_refresh
+        return await maybe_refresh(force=force)
+    except Exception as e:
+        raise _handle(e) from e
+
+
 # ============================================================
 #  管理端·Redis 实况监控(P4-4, 键族健康)
 # ============================================================

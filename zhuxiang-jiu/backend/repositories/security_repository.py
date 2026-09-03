@@ -463,7 +463,20 @@ class Security43Repository:
     async def save_threatintel(self, cidr: str,
                                meta: dict) -> dict:
         return await self._save(self.TABLE_POSTURE,
-                               f"threatintel:{cidr}", meta)
+                                f"threatintel:{cidr}", meta)
+
+    # --------------------------------------------------------
+    # P5-3: 威胁情报自动订阅状态(单例记录, posture 表族键空间)
+    # --------------------------------------------------------
+
+    async def get_threatintel_auto_state(self) -> dict | None:
+        return await self._get(self.TABLE_POSTURE,
+                               "threatintel:auto")
+
+    async def save_threatintel_auto_state(self,
+                                          record: dict) -> dict:
+        return await self._save(self.TABLE_POSTURE,
+                                "threatintel:auto", record)
 
     async def list_threatintel(self,
                                limit: int = 10000) -> list[dict]:

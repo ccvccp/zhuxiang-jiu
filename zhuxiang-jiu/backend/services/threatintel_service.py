@@ -120,7 +120,7 @@ class ThreatIntelService:
     # ========================================================
 
     async def stats(self) -> dict:
-        """情报表统计(段数/来源分布/最近导入)"""
+        """情报表统计(段数/来源分布/最近导入/自动订阅状态)"""
         records = await self.repo.list_threatintel()
         sources = {}
         latest = None
@@ -130,11 +130,33 @@ class ThreatIntelService:
             imported = r.get("importedAt")
             if imported and (latest is None or imported > latest):
                 latest = imported
+
+        # P5-3: 自动订阅状态实况(enabled/最近拉取/失败计数/
+        # degraded——连续失败 ≥3 次外显, 可接 P5-2 告警)
+        try:
+            from services.threatintel_feed import feed_enabled
+            auto_state = (
+                await self.repo.get_threatintel_auto_state()) or {}
+            failures = int(auto_state.get("consecutiveFailures")
+                           or 0)
+            auto = {
+                "enabled": feed_enabled(),
+                "lastAutoImportAt":
+                    auto_state.get("lastAutoImportAt") or None,
+                "lastAutoStatus":
+                    auto_state.get("lastAutoStatus") or None,
+                "consecutiveFailures": failures,
+                "degraded": failures >= 3,
+            }
+        except Exception:
+            auto = {"enabled": False, "degraded": False,
+                    "consecutiveFailures": 0}
         return {
             "success": True,
             "totalCidrs": len(records),
             "sources": sources,
             "lastImportedAt": latest,
+            "auto": auto,
         }
 
     # ========================================================
