@@ -71,6 +71,15 @@
     .mod-list{columns:3;column-gap:16px;font-size:12px}
     .mod-list li{margin-bottom:2px;break-inside:avoid}
     .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    /* P3: 健康档位色 */
+    .grade-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600}
+    .grade-pill.healthy{background:#e9f7ee;color:#2f9e44}
+    .grade-pill.watch{background:#fff7e0;color:#a37400}
+    .grade-pill.strained{background:#fdeaea;color:#c0392b}
+    .grade-pill.critical{background:#c0392b;color:#fff}
+    .err-red{color:#c0392b;font-weight:600}
+    .quota-high{color:#a37400;font-weight:600}
 </style>
 </head>
 <body>
@@ -130,6 +139,66 @@
                             <th>状态</th><th>说明</th>
                         </tr></thead>
                         <tbody id="apiList"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ② 调用观测（P3: 三视图） -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② 调用观测（per-API / per-Key / 配额命中率）</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn ghost" onclick="loadUsage()">刷新观测</button>
+                </div>
+            </div>
+            <div id="usageStats" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            <div style="margin-top:12px">
+                <b style="font-size:12px">per-API Top（调用量 / 错误率 / 峰值延迟）</b>
+                <div style="max-height:260px;overflow:auto;margin-top:6px">
+                    <table class="dash-table">
+                        <thead><tr>
+                            <th>API</th><th>调用</th><th>错误率</th><th>avg(ms)</th>
+                            <th>max(ms)</th><th>消费方</th>
+                        </tr></thead>
+                        <tbody id="usageByApi"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div style="margin-top:12px;border-top:1px solid
+                var(--color-border,#eee);padding-top:10px">
+                <b style="font-size:12px">per-Key Top（消费量 / 配额命中率）</b>
+                <div style="max-height:220px;overflow:auto;margin-top:6px">
+                    <table class="dash-table">
+                        <thead><tr>
+                            <th>Key</th><th>名称</th><th>档位</th><th>调用</th>
+                            <th>错误率</th><th>配额命中</th>
+                        </tr></thead>
+                        <tbody id="usageByKey"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ③ API 健康评分（P3: 第27档案） -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>③ API 健康评分（第27档案 · 建议型）</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn ghost" onclick="loadHealth()">刷新评分</button>
+                </div>
+            </div>
+            <div id="healthOverall" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            <div style="margin-top:12px">
+                <div style="max-height:300px;overflow:auto">
+                    <table class="dash-table">
+                        <thead><tr>
+                            <th>API</th><th>健康分</th><th>档位</th>
+                            <th>因子摘要（成功率/延迟/稳定/配额/变更）</th>
+                        </tr></thead>
+                        <tbody id="healthByApi"></tbody>
                     </table>
                 </div>
             </div>

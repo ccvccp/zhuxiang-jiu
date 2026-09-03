@@ -35,7 +35,7 @@ from core.auth_middleware import (
 
 logger = logging.getLogger(__name__)
 
-# published 集缓存(模板 → regex 预编译)
+# published 集缓存(条目 (method, template, regex) 预编译)
 _PUBLISHED_CACHE = {"at": 0.0, "templates": ()}
 _PUBLISHED_TTL = 60.0
 
@@ -114,6 +114,8 @@ class ApiKeyMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # 观测上下文(P3; 通过路径之外保持 None)
+        observe = None
         try:
             if not await self._is_published(method, path):
                 # 非 Key 面(published 之外不拦截——JWT/游客
@@ -160,19 +162,41 @@ class ApiKeyMiddleware:
                 return
 
             # 通过: 注入身份(先移除客户端伪造头——同 JWTAuth
-            # 安全口径) + 用量留痕(异步不阻塞)
+            # 安全口径) + P3 观测上下文(send 包装捕获状态码)
             inject_identity(scope, {
                 "memberId": verdict["memberId"],
                 "role": "member"})
+            key_id = verdict.get("keyId")
+            template = self._match_template(method, path)
+            observe = {"keyId": key_id, "template": template,
+                       "start": time.monotonic()}
             asyncio.create_task(
-                self._safe_record_usage(verdict.get("keyId")))
+                self._safe_record_usage(key_id))
         except Exception as exc:
             # fail-open 铁律: 治理基础设施异常放行并留痕
             logger.exception(
                 "api44_key_gateway_fail_open path=%s: %s",
                 path, exc)
 
-        await self.app(scope, receive, send)
+        # P3: 观测路径用包装 send(状态码/延迟捕获);
+        # 业务异常传播时补 500 留痕后重抛(500 响应由外层
+        # ServerErrorMiddleware 用原始 send 发送, 不经包装)
+        if observe is None:
+            await self.app(scope, receive, send)
+            return
+        wrapped_send = self._wrap_send(
+            send, observe["keyId"], observe["template"],
+            observe["start"])
+        try:
+            await self.app(scope, receive, wrapped_send)
+        except Exception:
+            elapsed_ms = (time.monotonic()
+                          - observe["start"]) * 1000
+            asyncio.create_task(
+                self._safe_record_event(
+                    observe["keyId"], observe["template"],
+                    elapsed_ms, 500))
+            raise
 
     # --------------------------------------------------------
     # 内部
@@ -187,12 +211,50 @@ class ApiKeyMiddleware:
             logger.warning("api44_usage_record_skip keyId=%s",
                            key_id, exc_info=True)
 
+    def _match_template(self, method: str, path: str) -> str:
+        """实际路径 → 匹配的 published 模板(观测聚合键)"""
+        for m, template, regex in _PUBLISHED_CACHE["templates"]:
+            if m == method and regex.match(path):
+                return template
+        return path   # 兜底: 无匹配(理论不可达)用实际路径
+
+    def _wrap_send(self, send, key_id, template, start):
+        """P3: 包装 send 捕获响应状态码 → 观测留痕(异步)"""
+        state = {"status": None}
+
+        async def wrapped(message):
+            if message.get("type") == "http.response.start":
+                state["status"] = message.get("status", 500)
+            await send(message)
+            if message.get("type") == "http.response.body" \
+                    and message.get("more_body") is not True:
+                # 响应完成——异步留痕(不阻塞响应下发)
+                elapsed_ms = (time.monotonic() - start) * 1000
+                asyncio.create_task(
+                    self._safe_record_event(
+                        key_id, template, elapsed_ms,
+                        state["status"] or 500))
+        return wrapped
+
+    async def _safe_record_event(self, key_id, template,
+                                 elapsed_ms, status) -> None:
+        """观测留痕(异常吞掉)"""
+        try:
+            from services.api_rate_limit_service import (
+                record_usage_event,
+            )
+            await record_usage_event(
+                key_id, template, elapsed_ms, status)
+        except Exception:
+            logger.warning("api44_usage_event_wrap_skip keyId=%s",
+                           key_id, exc_info=True)
+
     async def _is_published(self, method: str, path: str) -> bool:
         """是否 Key 面(published 集缓存 + 模板匹配)"""
         now = time.monotonic()
         if now - _PUBLISHED_CACHE["at"] > _PUBLISHED_TTL:
             await self._refresh_published()
-        for m, regex in _PUBLISHED_CACHE["templates"]:
+        for m, _tpl, regex in _PUBLISHED_CACHE["templates"]:
             if m == method and regex.match(path):
                 return True
         return False
@@ -207,6 +269,6 @@ class ApiKeyMiddleware:
         for member in members:
             m, sep, p = str(member).partition("|")
             if sep:
-                templates.append((m, _template_to_regex(p)))
+                templates.append((m, p, _template_to_regex(p)))
         _PUBLISHED_CACHE["templates"] = tuple(templates)
         _PUBLISHED_CACHE["at"] = time.monotonic()

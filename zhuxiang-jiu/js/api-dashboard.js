@@ -170,8 +170,102 @@ async function syncRegistry() {
     } catch (e) { showError(e.message); }
 }
 
+/* ============================================================
+ * ② 调用观测(P3: 三视图) / ③ 健康评分(第27档案)
+ * ============================================================ */
+
+function pct1(v) { return ((v || 0) * 100).toFixed(1) + '%'; }
+
+async function loadUsage() {
+    try {
+        var b = await fetchJson(
+            api('/api/api-manager/admin/apis/usage'),
+            { headers: headers() }, '调用观测');
+        var cells = [
+            { k: '总调用(今日)', v: b.totalCalls || 0, cls: 'blue' },
+            { k: '总错误', v: b.totalErrors || 0,
+              cls: (b.totalErrors || 0) > 0 ? 'red' : 'green' },
+            { k: '活跃 API', v: (b.byApi || []).length },
+            { k: '活跃 Key', v: (b.byKey || []).length }
+        ];
+        document.getElementById('usageStats').innerHTML =
+            cells.map(function (c) {
+                return '<div class="ov-cell"><div class="k">' + esc(c.k) +
+                    '</div><div class="v ' + (c.cls || '') + '">' + esc(c.v) +
+                    '</div></div>';
+            }).join('');
+
+        document.getElementById('usageByApi').innerHTML =
+            (b.byApi || []).map(function (a) {
+                var er = a.errorRate || 0;
+                return '<tr><td style="word-break:break-all">' + esc(a.template) +
+                    '</td><td>' + esc(a.total) + '</td><td class="' +
+                    (er > 0.1 ? 'err-red' : '') + '">' + pct1(er) +
+                    '</td><td>' + esc(a.avgMs) + '</td><td>' + esc(a.maxMs) +
+                    '</td><td>' + esc(a.callers) + '</td></tr>';
+            }).join('') ||
+            '<tr><td colspan="6" class="dash-empty">暂无调用(发布 API 并用 Key 访问后产生观测)</td></tr>';
+
+        document.getElementById('usageByKey').innerHTML =
+            (b.byKey || []).map(function (k) {
+                var er = k.errorRate || 0;
+                var q = (b.quota || []).find(function (x) {
+                    return x.keyId === k.keyId;
+                }) || {};
+                var hit = q.hitRate || 0;
+                return '<tr><td>#' + esc(k.keyId) + '</td><td>' +
+                    esc(k.name || '-') + '</td><td>' + esc(k.tier || '-') +
+                    '</td><td>' + esc(k.total) + '</td><td class="' +
+                    (er > 0.1 ? 'err-red' : '') + '">' + pct1(er) +
+                    '</td><td class="' + (hit >= 0.9 ? 'quota-high' : '') +
+                    '">' + pct1(hit) +
+                    (hit >= 0.9 ? ' ⚠' : '') + '</td></tr>';
+            }).join('') ||
+            '<tr><td colspan="6" class="dash-empty">暂无</td></tr>';
+        markUpdate();
+    } catch (e) { showError(e.message); }
+}
+
+async function loadHealth() {
+    try {
+        var b = await fetchJson(
+            api('/api/api-manager/admin/apis/health'),
+            { headers: headers() }, '健康评分');
+        var o = b.overall || {};
+        var cells = [
+            { k: '总健康分', v: o.score || 0,
+              cls: (o.grade === 'healthy') ? 'green'
+                   : (o.grade === 'watch') ? 'yellow' : 'red' },
+            { k: '档位', v: o.grade || '-' },
+            { k: '参评 API', v: (b.apis || []).length },
+            { k: '口径', v: '建议型' }
+        ];
+        document.getElementById('healthOverall').innerHTML =
+            cells.map(function (c) {
+                return '<div class="ov-cell"><div class="k">' + esc(c.k) +
+                    '</div><div class="v ' + (c.cls || '') + '">' + esc(c.v) +
+                    '</div></div>';
+            }).join('');
+
+        document.getElementById('healthByApi').innerHTML =
+            (b.apis || []).map(function (a) {
+                var summary = (a.factors || []).map(function (f) {
+                    return esc(f.detail || f.name);
+                }).join(' · ');
+                return '<tr><td style="word-break:break-all">' + esc(a.template) +
+                    '</td><td><b>' + esc(a.health) + '</b></td><td><span class="grade-pill ' +
+                    esc(a.grade) + '">' + esc(a.grade) + '</span></td><td style="color:#888">' +
+                    summary + '</td></tr>';
+            }).join('') ||
+            '<tr><td colspan="4" class="dash-empty">暂无评分样本</td></tr>';
+        markUpdate();
+    } catch (e) { showError(e.message); }
+}
+
 /* 初始化 */
 (function init() {
     document.getElementById('apiBase').value = state.apiBase;
     loadRegistry();
+    loadUsage();
+    loadHealth();
 })();

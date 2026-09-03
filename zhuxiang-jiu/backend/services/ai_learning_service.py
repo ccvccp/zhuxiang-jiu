@@ -86,6 +86,8 @@ SCORER_REGISTRY = {
     "invoice_decision_gate":       {"label": "无感开票决策评分", "module": "42无感开票", "batch": 9},
     # ---- 第十批(43号AI智能安全管理 P0: 威胁网关评分) ----
     "security_threat_gate":        {"label": "安全威胁网关评分", "module": "43安全管理", "batch": 10},
+    # ---- 第十一批(44号AI智能API管理 P3: API健康评分) ----
+    "api_health":                  {"label": "API健康评分", "module": "44API管理", "batch": 11},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -179,6 +181,10 @@ def default_weights(scorer_id: str) -> dict:
         # 43号安全管理: 威胁网关六因子, 单一事实源在评分器类
         from services.ai_scoring_service import ThreatGateScorer
         return dict(ThreatGateScorer.WEIGHTS)
+    if scorer_id == "api_health":
+        # 44号API管理: API健康五因子, 单一事实源在评分器类
+        from services.api_usage_service import ApiHealthScorer
+        return dict(ApiHealthScorer.WEIGHTS)
     if scorer_id.startswith("logistics_routing:"):
         from services.ai_scoring_service import _BUDGET_WEIGHTS
         budget = scorer_id.split(":", 1)[1]

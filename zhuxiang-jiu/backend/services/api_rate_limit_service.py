@@ -145,3 +145,169 @@ async def _daily_incr(key_id: int, now: float) -> int:
     _DAILY_COUNTS[cache_key] = \
         _DAILY_COUNTS.get(cache_key, 0) + 1
     return _DAILY_COUNTS[cache_key]
+
+
+# ============================================================
+# P3: 调用观测统计(中间件留痕 → 三视图/健康评分数据源)
+# ============================================================
+
+def _usage_buckets(key_id: int, api_template: str,
+                   now: float) -> dict:
+    """统计桶键生成(yyyymmdd 同日配额口径)"""
+    day = datetime.fromtimestamp(now, tz=UTC).strftime("%Y%m%d")
+    return {
+        "stat": _k("api44", "stat", key_id, day, api_template),
+        "err": _k("api44", "err", key_id, day, api_template),
+        "lat": _k("api44", "lat", key_id, day, api_template),
+    }
+
+
+async def record_usage_event(key_id: int, api_template: str,
+                             elapsed_ms: float,
+                             status_code: int) -> None:
+    """调用留痕(中间件 fire-and-forget; 异常吞掉不阻塞)
+
+    桶结构:
+        stat hash: {total, byCode:{code:n}}  请求数与状态码分布
+        err  hash: {total}                    4xx/5xx 计数(429 计入)
+        lat  hash: {sum, count, max}          近似分位累计(口径明示)
+    """
+    try:
+        now = time.time()
+        day = datetime.fromtimestamp(now, tz=UTC).strftime(
+            "%Y%m%d")
+        buckets = _usage_buckets(key_id, api_template, now)
+        code = int(status_code)
+        is_err = code >= 400
+        day_ttl = _seconds_to_midnight(now) + 86400   # 留两天余量
+
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.hincrby(buckets["stat"], "total", 1)
+            pipe.hincrby(buckets["stat"],
+                         f"code:{code}", 1)
+            if is_err:
+                pipe.hincrby(buckets["err"], "total", 1)
+            pipe.hincrby(buckets["lat"], "sum",
+                         max(0, int(elapsed_ms)))
+            pipe.hincrby(buckets["lat"], "count", 1)
+            pipe.hget(buckets["lat"], "max")
+            # max 需 CAS——简化: 执行后单命令补偿
+            for k in buckets.values():
+                pipe.expire(k, day_ttl)
+            await pipe.execute()
+            # max 更新(单命令, 非严格原子可接受——观测近似)
+            current_max = await client.hget(buckets["lat"], "max")
+            if current_max is None or \
+                    int(elapsed_ms) > int(current_max or 0):
+                await client.hset(buckets["lat"], "max",
+                                 int(max(0, elapsed_ms)))
+            return
+
+        # 内存模式
+        _MEM_USAGE.setdefault(key_id, {}).setdefault(
+            (day, api_template), {
+                "total": 0, "err": 0, "sum": 0.0,
+                "count": 0, "max": 0, "byCode": {}})
+        b = _MEM_USAGE[key_id][(day, api_template)]
+        b["total"] += 1
+        code_key = str(code)   # 与 Redis 桶口径一致(字符串键)
+        b["byCode"][code_key] = \
+            b["byCode"].get(code_key, 0) + 1
+        if is_err:
+            b["err"] += 1
+        ms = max(0.0, float(elapsed_ms))
+        b["sum"] += ms
+        b["count"] += 1
+        b["max"] = max(b["max"], int(ms))
+    except Exception:
+        logger.warning("api44_usage_event_skip keyId=%s",
+                       key_id, exc_info=True)
+
+
+# 内存模式统计存储 {keyId: {(day, template): bucket}}
+_MEM_USAGE: dict = {}
+
+
+def _reset_usage_state() -> None:
+    """清空内存统计(测试用)"""
+    _MEM_USAGE.clear()
+
+
+async def load_usage_window(
+        key_ids: list = None) -> list[dict]:
+    """读取观测窗口内全部统计桶(三视图/健康评分数据源)
+
+    Args:
+        key_ids: 限定 Key(缺省全量——管理端三视图)
+    Returns:
+        [{keyId, day, template, total, err, avgMs, maxMs,
+          byCode}]
+    """
+    from datetime import datetime as _dt
+    today = _dt.now(UTC).strftime("%Y%m%d")
+    rows = []
+    if is_redis_mode():
+        client = await get_redis_client()
+        # 窗口: 今日(观测以当日为主——单日窗口与 43号日报同口径)
+        patterns = [_k("api44", "stat", "*", today, "*")]
+        keys = []
+        for pattern in patterns:
+            found = await client.keys(pattern)
+            keys += [k for k in found]
+        pipe = client.pipeline(transaction=False)
+        for k in keys:
+            pipe.hgetall(k)
+        for stat_key, stat in zip(keys, await pipe.execute()):
+            if not stat:
+                continue
+            # zhuxiang:api44:stat:{keyId}:{day}:{template}
+            # template 可含冒号——从左按固定前缀长切, 剩余全归模板
+            prefix = _k("api44", "stat") + ":"
+            rest = stat_key[len(prefix):]
+            key_str, day, template = rest.split(":", 2)
+            try:
+                key_id = int(key_str)
+            except ValueError:
+                continue
+            if key_ids is not None and key_id not in key_ids:
+                continue
+            buckets = _usage_buckets(key_id, template,
+                                      time.time())
+            lat = await client.hgetall(buckets["lat"])
+            err = await client.hgetall(buckets["err"])
+            total = int(stat.get("total") or 0)
+            lat_count = int(lat.get("count") or 0)
+            rows.append({
+                "keyId": key_id, "day": day,
+                "template": template, "total": total,
+                "err": int(err.get("total") or 0),
+                "avgMs": (round(float(lat.get("sum") or 0)
+                                / lat_count, 1)
+                          if lat_count else 0.0),
+                "maxMs": int(lat.get("max") or 0),
+                "byCode": {k[5:]: int(v) for k, v in stat.items()
+                           if k.startswith("code:")},
+            })
+        return rows
+
+    # 内存模式
+    for key_id, buckets in _MEM_USAGE.items():
+        if key_ids is not None and key_id not in key_ids:
+            continue
+        for (day, template), b in buckets.items():
+            rows.append({
+                "keyId": key_id, "day": day,
+                "template": template, "total": b["total"],
+                "err": b["err"],
+                "avgMs": (round(b["sum"] / b["count"], 1)
+                          if b["count"] else 0.0),
+                "maxMs": b["max"], "byCode": dict(b["byCode"]),
+            })
+    return rows
+
+
+def _window_days() -> int:
+    """观测窗口天数(当前实现=当日; 留扩展点)"""
+    return 1

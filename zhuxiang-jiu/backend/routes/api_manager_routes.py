@@ -240,6 +240,78 @@ async def admin_revoke_key(
 
 
 # ============================================================
+# P3: 调用观测 + 健康评分
+# ============================================================
+
+@router.get("/admin/apis/usage")
+async def admin_usage_views(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """调用观测三视图(per-API/per-Key Top/配额命中率)"""
+    _require_admin(x_role)
+    try:
+        from services.api_usage_service import ApiUsageService
+        return await ApiUsageService().usage_views()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/apis/health")
+async def admin_api_health(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """API 健康评分(第27档案五因子, 建议型不自动处置)"""
+    _require_admin(x_role)
+    try:
+        from services.api_usage_service import (
+            ApiUsageService, ApiHealthScorer,
+        )
+        svc = ApiUsageService()
+        views = await svc.usage_views()
+        scored = []
+        for a in views.get("byApi") or []:
+            # 配额因子: 该 API 消费方的平均命中率
+            hit = max((q["hitRate"] for q in views.get("quota")
+                       or []), default=0.0)
+            ctx = {"total": a["total"], "err": a["err"],
+                   "avgMs": a["avgMs"], "maxMs": a["maxMs"],
+                   "quotaHitRate": hit, "recentChanges": 0}
+            r = ApiHealthScorer.score(ctx)
+            scored.append({**a, "health": r["score"],
+                           "grade": r["grade"],
+                           "factors": r["factors"]})
+        # 全局: 全量聚合单评分
+        g = ApiHealthScorer.score({
+            "total": views.get("totalCalls") or 0,
+            "err": views.get("totalErrors") or 0,
+            "avgMs": max((a["avgMs"] for a in scored),
+                         default=0.0),
+            "maxMs": max((a["maxMs"] for a in scored),
+                         default=0),
+            "quotaHitRate": max(
+                (q["hitRate"] for q in views.get("quota")
+                 or []), default=0.0),
+            "recentChanges": 0})
+        return {"success": True, "overall": g,
+                "apis": scored}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/keys/usage")
+async def my_key_usage(
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """消费方用量自查(自己的用量自己看)"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        from services.api_usage_service import ApiUsageService
+        return await ApiUsageService().my_usage(member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
 # P2: 流量治理(管理面)
 # ============================================================
 
