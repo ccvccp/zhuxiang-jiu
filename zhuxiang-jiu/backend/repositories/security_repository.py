@@ -6,6 +6,8 @@
     security_blocks          封禁表(IP/原因/自动解封时间)
     security_appeals         误报申诉(事件→裁决→P2学习真值)
     security_chall_pass      挑战通行证(IP维度, TTL内免挑战)
+    security_baselines       UEBA行为基线(P2, 双层: 个人+角色全局)
+    behavior三维计数         member×hour×module 计数直方图(非流水, 防爆炸)
 
 设计对齐:
     - 双模式存储 + None/bool 序列化口径(38/41/42号惯例)
@@ -53,11 +55,14 @@ class Security43Repository:
     TABLE_EVENTS = "security_events"
     TABLE_BLOCKS = "security_blocks"
     TABLE_APPEALS = "security_appeals"
+    TABLE_BASELINES = "security_baselines"
 
     _INT_FIELDS = ("eventId", "memberId", "requestCount",
-                   "attackCount", "recoverCount", "appealId")
+                   "attackCount", "recoverCount", "appealId",
+                   "sampleDays")
     _FLOAT_FIELDS = ("score", "reputation", "lastPenaltyAt",
-                     "expireAt", "createdAt", "decidedAt")
+                     "expireAt", "createdAt", "decidedAt",
+                     "avgOpsPerHour", "p95OpsPerHour", "updatedAt")
     _BOOL_FIELDS = ("pinned", "enforced", "eventFed", "appealFed")
 
     def __init__(self):
@@ -69,7 +74,8 @@ class Security43Repository:
 
     def _ensure_store(self):
         for key in (self.TABLE_IP, self.TABLE_EVENTS,
-                    self.TABLE_BLOCKS, self.TABLE_APPEALS):
+                    self.TABLE_BLOCKS, self.TABLE_APPEALS,
+                    self.TABLE_BASELINES):
             self.store.setdefault(key, {})
 
     async def next_id(self, kind: str) -> int:
@@ -315,3 +321,62 @@ class Security43Repository:
         stamps.append(now)
         bucket[dimension_key] = stamps
         return len(stamps)
+
+    # --------------------------------------------------------
+    # UEBA(P2): 三维行为计数(memberId × hour × module, 直方图)
+    # 非全量流水——只记计数, 防存储爆炸(设计文档 §2.1)
+    # --------------------------------------------------------
+
+    @staticmethod
+    def _bh_field(hour: int, module: str) -> str:
+        return f"{int(hour) % 24}|{module}"
+
+    async def count_behavior(self, member_id: int, module: str,
+                             hour: int) -> int:
+        """网关顺带计数一次行为(返回该 小时×模块 计数)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("security43", "behavior", int(member_id))
+            return int(await client.hincrby(
+                key, self._bh_field(hour, module), 1))
+        self._ensure_store()
+        bucket = self.store.setdefault("_security43_behavior", {})
+        actor = bucket.setdefault(int(member_id), {})
+        field = self._bh_field(hour, module)
+        actor[field] = actor.get(field, 0) + 1
+        return actor[field]
+
+    async def get_behavior(self, member_id: int) -> dict:
+        """取该会员的全部三维计数({hour|module: count})"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("security43", "behavior", int(member_id)))
+            return {k: int(v) for k, v in data.items()}
+        self._ensure_store()
+        bucket = self.store.get("_security43_behavior", {})
+        return dict(bucket.get(int(member_id), {}))
+
+    async def list_behavior_actors(self) -> list[int]:
+        """列出有行为计数的全部会员ID(基线重建用)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("security43", "behavior", "*"))
+            prefix = _k("security43", "behavior", "")
+            return sorted({k[len(prefix):] for k in keys})
+        self._ensure_store()
+        return sorted(self.store.get("_security43_behavior", {}).keys())
+
+    # --------------------------------------------------------
+    # UEBA(P2): 基线表(双层: 个人 member:{id} + 角色 role:{name}_global)
+    # --------------------------------------------------------
+
+    async def get_baseline(self, actor_key: str) -> dict | None:
+        return await self._get(self.TABLE_BASELINES, actor_key)
+
+    async def save_baseline(self, record: dict) -> dict:
+        return await self._save(self.TABLE_BASELINES,
+                                record["actorKey"], record)
+
+    async def list_baselines(self, limit: int = 500) -> list[dict]:
+        return await self._list(self.TABLE_BASELINES, limit)

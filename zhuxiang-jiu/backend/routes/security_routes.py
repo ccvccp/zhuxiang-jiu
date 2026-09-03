@@ -322,6 +322,57 @@ async def admin_decide_appeal(
         raise _handle(e) from e
 
 
+# ============================================================
+#  管理端·UEBA 行为基线(P2, 方案 §6)
+# ============================================================
+
+@router.post("/admin/behavior/rebuild")
+async def admin_behavior_rebuild(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """手动重建行为基线(30天窗口口径, 幂等)"""
+    _require_admin(x_role)
+    try:
+        from services.ueba_service import UebaService
+        return await UebaService().rebuild_baselines()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/behavior/baselines")
+async def admin_behavior_baselines(
+    role: str = Query(None, description="角色过滤(member/admin)"),
+    actor: str = Query(None, description="actorKey 模糊过滤"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """行为基线查询(时段直方图/P95/功能分布)"""
+    _require_admin(x_role)
+    try:
+        from services.ueba_service import UebaService
+        baselines = await UebaService().list_baselines(
+            role=role, actor=actor)
+        return {"success": True, "total": len(baselines),
+                "baselines": baselines}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/behavior/deviations")
+async def admin_behavior_deviations(
+    limit: int = Query(100, ge=1, le=500),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """行为偏离记录(近 behavior_alert 事件, 含四检测器明细)"""
+    _require_admin(x_role)
+    try:
+        from services.ueba_service import UebaService
+        alerts = await UebaService().list_deviations(limit=limit)
+        return {"success": True, "total": len(alerts),
+                "deviations": alerts}
+    except Exception as e:
+        raise _handle(e) from e
+
+
 def register_security_routes(app) -> None:
     """注册43号路由(main.py startup 调用)"""
     app.include_router(router)

@@ -324,6 +324,29 @@ class Security43Service:
         path_score = scan_path(path)
         identity_score = scan_identity(path, member_id)
 
+        # ②' UEBA(P2): 网关顺带行为采集 + 四检测器偏离合议
+        #     (零侵入: 计数直方图; 偏离注入 identity_risk 只降不升;
+        #      冷启动无基线完全豁免; UEBA off 跳过)
+        behavior_deviation = None
+        try:
+            from services.ueba_service import get_ueba_mode
+            if member_id and get_ueba_mode() == "on":
+                from services.ueba_service import UebaService
+                ueba = UebaService()
+                hour_now = (int(hour) if hour is not None
+                            else datetime.now(UTC).hour)
+                current_ops = await ueba.record_behavior(
+                    member_id, path, hour=hour_now)
+                behavior_deviation = await ueba.compute_deviation(
+                    member_id, path, hour=hour_now,
+                    current_hour_ops=current_ops)
+                if behavior_deviation is not None:
+                    identity_score = min(
+                        identity_score,
+                        float(behavior_deviation["score"]))
+        except Exception as exc:  # UEBA 异常不阻断网关(fail-open)
+            logger.warning("security_ueba_skip ip=%s: %s", ip, exc)
+
         # ③ 频次计数(IP 维度; 会员维度叠加取较差值)
         window = int(_env("SECURITY_RATE_WINDOW", "60"))
         rate_limit = int(_env("SECURITY_RATE_LIMIT", "120"))
@@ -362,6 +385,20 @@ class Security43Service:
             chall_exempt = True
             action = ACTION_ALLOW
 
+        # ⑤'' UEBA 行为预警(方案 §5.1): 偏离总分 <60 生成
+        #      behavior_alert 事件, 复用 P1 裁决/申诉全链路;
+        #      默认 pending 人工裁决, 不自动处置(防误报铁律)
+        behavior_alert_event = None
+        if behavior_deviation is not None and \
+                float(behavior_deviation["score"]) < 60:
+            behavior_alert_event = await self._record_event(
+                ip, method, path, query, ua, member_id,
+                "behavior_alert", None, enforced=False,
+                factors=[{"name": d["code"], "label": "行为偏离",
+                          "score": float(behavior_deviation["score"]),
+                          "detail": d["detail"]}
+                         for d in behavior_deviation["deviations"]])
+
         # ⑥ observe/shadow: 只留痕不处置(灰度铁律)
         enforced = enforce
         effective_action = action if enforce else ACTION_ALLOW
@@ -395,7 +432,8 @@ class Security43Service:
 
         return {"action": effective_action, "scoring": scoring,
                 "event": event, "enforced": enforced,
-                "blocked": action == ACTION_BLOCK and enforce}
+                "blocked": action == ACTION_BLOCK and enforce,
+                "behaviorAlert": behavior_alert_event}
 
     async def _try_recover(self, ip: str) -> None:
         """正常流量冷却恢复(fail-open: 恢复失败不影响请求)"""
@@ -406,8 +444,12 @@ class Security43Service:
 
     async def _record_event(self, ip, method, path, query, ua,
                             member_id, action, scoring,
-                            enforced: bool) -> dict:
-        """可疑请求入事件流水(正常放行不入, 防流水爆炸)"""
+                            enforced: bool,
+                            factors: list = None) -> dict:
+        """可疑请求入事件流水(正常放行不入, 防流水爆炸)
+
+        factors 显式传入时覆盖评分快照(behavior_alert 等合成事件用)
+        """
         event_id = await self.repo.next_id("event")
         event = {
             "eventId": event_id,
@@ -419,7 +461,8 @@ class Security43Service:
             "ua": (ua or "")[:200],
             "action": action,
             "score": (scoring or {}).get("score"),
-            "factors": (scoring or {}).get("factors") or [],
+            "factors": (factors if factors is not None
+                        else (scoring or {}).get("factors") or []),
             "enforced": enforced,
             "verdict": "pending",   # P1 裁决: confirmed/false_positive
             "eventFed": False,      # P2 学习回流幂等标记
