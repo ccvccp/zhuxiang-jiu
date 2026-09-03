@@ -554,6 +554,26 @@ async def admin_threatintel_auto_refresh(
         raise _handle(e) from e
 
 
+@router.get("/admin/threatintel/abuseipdb/check")
+async def admin_abuseipdb_check(
+    ip: str = Query(..., description="待查询 IP"),
+    refresh: bool = Query(False, description="跳过缓存强制查询"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """单 IP AbuseIPDB 实时置信度(缓存/配额余量/来源)
+
+    三态: mock(默认, 无 key 可测) / real(Bearer key) /
+    mock_fallback(失败回退)。手动查询与自动链路共用
+    配额计数(余量口径统一)。
+    """
+    _require_admin(x_role)
+    try:
+        from services.abuseipdb_client import check_ip
+        return await check_ip(ip, force=refresh)
+    except Exception as e:
+        raise _handle(e) from e
+
+
 # ============================================================
 #  管理端·Redis 实况监控(P4-4, 键族健康)
 # ============================================================

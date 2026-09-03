@@ -169,39 +169,134 @@ class ThreatIntelService:
 
         由 Security43Service._do_process ② 处调用;
         未命中原样返回(零影响)。
+
+        P5-4 两级串联:
+            第一级 Firehol 段命中(免费) → 降档 31 + 留痕 → 返回
+            第二级 AbuseIPDB 实时置信度(配额) → 三级强度递进:
+                ≥75 降档 31(同口径不直封) / 25-75 轻扣 -10 /
+                <25 零影响
         """
         hit = await self.check_ip(ip)
-        if hit is None:
-            return reputation
-        current = float(reputation.get("score") or 0)
-        if current > THREATINTEL_REPUTATION_CAP:
-            reputation["score"] = THREATINTEL_REPUTATION_CAP
-            from repositories.security_repository import (
-                reputation_status,
+        if hit is not None:
+            current = float(reputation.get("score") or 0)
+            if current > THREATINTEL_REPUTATION_CAP:
+                reputation["score"] = THREATINTEL_REPUTATION_CAP
+                from repositories.security_repository import (
+                    reputation_status,
+                )
+                reputation["status"] = reputation_status(
+                    reputation["score"])
+                # 降档事件留痕(审计可见, 可申诉)
+                event_id = await self.repo.next_id("event")
+                event = {
+                    "eventId": event_id,
+                    "ip": ip, "memberId": 0, "method": "GET",
+                    "path": "(threatintel)", "query": "", "ua": "",
+                    "action": "threatintel_hit",
+                    "score": reputation["score"],
+                    "factors": [{"name": "threatintel",
+                                 "label": "威胁情报命中",
+                                 "score": reputation["score"],
+                                 "detail": f"段{hit.get('cidr')}"
+                                           f"({hit.get('source')})"}],
+                    "enforced": False,
+                    "verdict": "pending",
+                    "eventFed": False,
+                    "createdAt": ts(),
+                }
+                await self.repo.save_event(event)
+                await self.repo.save_reputation(reputation)
+                logger.info(
+                    "security_threatintel_hit ip=%s cidr=%s "
+                    "score→%s", ip, hit.get("cidr"),
+                    reputation["score"])
+            return reputation   # 第一级出口(不再花配额)
+
+        # ---- P5-4 第二级: Firehol 未命中 → AbuseIPDB 实时置信度
+        # (异常不阻断网关 fail-soft; score=None 零影响)
+        # 仅 real/mock_fallback 态联动——mock 态是客户端测试口径,
+        # 确定性分数不参与信誉联动(未配置零影响)
+        try:
+            from services.abuseipdb_client import (
+                abuseipdb_mode, check_ip as ab_check,
             )
-            reputation["status"] = reputation_status(
-                reputation["score"])
-            # 降档事件留痕(审计可见, 可申诉)
-            event_id = await self.repo.next_id("event")
-            event = {
-                "eventId": event_id,
-                "ip": ip, "memberId": 0, "method": "GET",
-                "path": "(threatintel)", "query": "", "ua": "",
-                "action": "threatintel_hit",
-                "score": reputation["score"],
-                "factors": [{"name": "threatintel",
-                             "label": "威胁情报命中",
-                             "score": reputation["score"],
-                             "detail": f"段{hit.get('cidr')}"
-                                       f"({hit.get('source')})"}],
-                "enforced": False,
-                "verdict": "pending",
-                "eventFed": False,
-                "createdAt": ts(),
-            }
-            await self.repo.save_event(event)
-            await self.repo.save_reputation(reputation)
-            logger.info("security_threatintel_hit ip=%s cidr=%s "
-                        "score→%s", ip, hit.get("cidr"),
+            if abuseipdb_mode() == "mock":
+                return reputation
+            r = await ab_check(ip)
+            score = r.get("score")
+            if score is None:
+                return reputation
+            current = float(reputation.get("score") or 0)
+            if score >= 75:
+                # 高置信恶意 → 降档 31(同 Firehol 口径, 不直封)
+                if current > THREATINTEL_REPUTATION_CAP:
+                    reputation["score"] = \
+                        THREATINTEL_REPUTATION_CAP
+                    from repositories.security_repository import (
+                        reputation_status,
+                    )
+                    reputation["status"] = reputation_status(
                         reputation["score"])
+                    await self._record_abuseipdb_event(
+                        ip, reputation, score, r.get("source"),
+                        tier="hit")
+                    await self.repo.save_reputation(reputation)
+                    logger.info(
+                        "security_abuseipdb_hit ip=%s score=%s "
+                        "source=%s rep→%s", ip, score,
+                        r.get("source"), reputation["score"])
+            elif score >= 25:
+                # 中置信 → 轻度扣分 -10(下限 31 防误杀过深;
+                # 已扣过(≤70)不重复扣——与 Firehol
+                # "已降档不重复降"同口径)
+                if current > 70:
+                    reputation["score"] = max(
+                        THREATINTEL_REPUTATION_CAP, current - 10)
+                    from repositories.security_repository import (
+                        reputation_status,
+                    )
+                    reputation["status"] = reputation_status(
+                        reputation["score"])
+                    await self._record_abuseipdb_event(
+                        ip, reputation, score, r.get("source"),
+                        tier="low")
+                    await self.repo.save_reputation(reputation)
+                    logger.info(
+                        "security_abuseipdb_low ip=%s score=%s "
+                        "rep→%s", ip, score, reputation["score"])
+            # score < 25 → 零影响
+        except Exception as exc:
+            logger.warning("security_abuseipdb_skip ip=%s: %s",
+                           ip, exc)
         return reputation
+
+    async def _record_abuseipdb_event(self, ip: str,
+                                      reputation: dict, score: int,
+                                      source: str,
+                                      tier: str) -> None:
+        """AbuseIPDB 联动留痕(tier=hit 降档 / low 轻扣)
+
+        复用 threatintel_hit 事件口径(裁决/申诉全链路),
+        因子名单列区分来源。
+        """
+        event_id = await self.repo.next_id("event")
+        label = ("AbuseIPDB 高置信命中" if tier == "hit"
+                 else "AbuseIPDB 中置信轻扣")
+        event = {
+            "eventId": event_id,
+            "ip": ip, "memberId": 0, "method": "GET",
+            "path": "(threatintel)", "query": "", "ua": "",
+            "action": "threatintel_hit",
+            "score": reputation["score"],
+            "factors": [{
+                "name": f"abuseipdb{'_low' if tier == 'low' else ''}",
+                "label": label,
+                "score": float(score),
+                "detail": f"置信度{score}(实时, source="
+                          f"{source or 'mock'})"}],
+            "enforced": False,
+            "verdict": "pending",
+            "eventFed": False,
+            "createdAt": ts(),
+        }
+        await self.repo.save_event(event)

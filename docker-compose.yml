@@ -85,6 +85,13 @@ services:
       - SECURITY_THREATINTEL_URL=${SECURITY_THREATINTEL_URL:-https://raw.githubusercontent.com/firehol/blocklist/master/firehol_level1.netset}
       # 拉取周期(秒, 默认 7 天; 下限 3600 防误配忙循环)
       - SECURITY_THREATINTEL_INTERVAL=${SECURITY_THREATINTEL_INTERVAL:-604800}
+      # ---- 43号 P5-4 AbuseIPDB 单 IP 实时情报(默认 mock 无 key 可测) ----
+      # 三态: mock(确定性三档) / real(Bearer key) / mock_fallback(失败回退)
+      - SECURITY_ABUSEIPDB_MODE=${SECURITY_ABUSEIPDB_MODE:-mock}
+      # API key(免费档 1000 次/天; real 态必填, 经 .env 注入不入 git)
+      - SECURITY_ABUSEIPDB_KEY=${SECURITY_ABUSEIPDB_KEY:-}
+      # 配额红线(默认 900 预留 100 手动余量; 超限走 fallback)
+      - SECURITY_ABUSEIPDB_DAILY_LIMIT=${SECURITY_ABUSEIPDB_DAILY_LIMIT:-900}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
