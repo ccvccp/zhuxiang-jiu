@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<!--
+    43号·AI智能安全管理模块 v1.0 · 安全管理面板
+    页面: ai-security-dashboard.html(配套脚本 js/security-dashboard.js)
+    依赖: css/style.css(主题变量) / 后端 43号 security_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    鉴权: X-Role: admin(全部管理端区块)
+    区块: ①态势卡(三态/EMA/误报率/封禁数) ②攻击事件(裁决/因子判读)
+          ③申诉队列(裁决) ④IP处置(封禁/解封/钉住)
+          ⑤UEBA行为基线(rebuild/查询) ⑥学习回流(collect/run/status)
+    操作手册: docs/安全管理端操作指南.md(四步法+enforce上线检查单)
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>43号·安全管理面板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#4a5568,#2d3748);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #2d3748;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-info{background:#efe;border:1px solid #9c9;color:#393;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    table.matrix{width:100%;border-collapse:collapse;font-size:12px}
+    table.matrix th,table.matrix td{border:1px solid
+        var(--color-border,#e5e5e5);padding:6px 8px;text-align:left}
+    table.matrix th{background:var(--color-bg-secondary,#f7f7f7)}
+    .badge{display:inline-block;padding:1px 8px;border-radius:9px;
+        font-size:11px;white-space:nowrap}
+    .badge.green{background:#e6f7e6;color:#2c7a2c}
+    .badge.yellow{background:#fff7e0;color:#a37400}
+    .badge.red{background:#fdeaea;color:#c0392b}
+    .badge.weak{background:#eee;color:#666}
+    .badge.blue{background:#e8f1fb;color:#24619c}
+    .badge.purple{background:#f3e8fb;color:#6b46c1}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:10px}
+    .ov-cell{background:var(--color-bg-secondary,#f7f9f7);border-radius:6px;
+        padding:10px 12px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:4px}
+    .ov-cell .v{font-size:20px;font-weight:600;color:#2d3748}
+    .ov-cell .v.red{color:#c0392b}
+    .ov-cell .v.yellow{color:#a37400}
+    .ov-cell .v.green{color:#2c7a2c}
+    .dash-empty{color:#999;font-size:12px;padding:14px;text-align:center}
+    .btn-mini{padding:2px 8px;font-size:11px;border:none;border-radius:4px;
+        cursor:pointer;background:#2c7a2c;color:#fff;margin-right:4px}
+    .btn-mini.danger{background:#c0392b}
+    .btn-mini.ghost{background:#6b7280}
+    .btn-mini.blue{background:#24619c}
+    .detail-body{background:var(--color-bg-secondary,#f7f7f7);border:1px
+        solid var(--color-border,#e5e5e5);border-radius:5px;padding:10px;
+        font-size:12px;white-space:pre-wrap;max-height:300px;overflow:auto;
+        display:none;font-family:Consolas,monospace}
+    .note-bar{font-size:11px;color:#999;padding:10px 4px;
+        border-top:1px solid var(--color-border,#eee);margin-top:16px}
+    .hours-bar{display:inline-block;height:14px;background:#cbd5e0;
+        vertical-align:middle;border-radius:2px}
+    .hours-bar span{display:inline-block;height:100%;
+        background:#2d3748;border-radius:2px}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>43号·安全管理面板</h1>
+    <p>态势三态 · 事件裁决 · 误报申诉 · IP 处置 · UEBA 基线 · 学习回流（见操作指南）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="refreshData()">手动刷新</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div id="infoBar" class="dash-info"></div>
+        </div>
+    </div>
+
+    <!-- ① 态势卡 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 态势总览（三态 / 攻击密度 EMA / 误报率 / 封禁数）</h3>
+                <div class="dash-toolbar">
+                    <select id="postureSel" onchange="setPosture(this.value)">
+                        <option value="">— 手动切换态势 —</option>
+                        <option value="peace">peace（宽松 ×1.5）</option>
+                        <option value="alert">alert（正常 ×1.0）</option>
+                        <option value="wartime">wartime（收紧 ×0.3）</option>
+                    </select>
+                    <button class="dash-btn ghost" onclick="togglePin()">钉住/解钉</button>
+                </div>
+            </div>
+            <div id="ovCells" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ② 攻击事件 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>② 攻击事件（四步法：复核 → 裁决）</h3>
+                <div class="dash-toolbar">
+                    <select id="eventActionSel" onchange="loadEvents()">
+                        <option value="">全部档位</option>
+                        <option value="block">封禁</option>
+                        <option value="challenge">挑战</option>
+                        <option value="throttle">减速</option>
+                        <option value="challenge_exempt">豁免(真人)</option>
+                        <option value="behavior_alert">行为预警</option>
+                    </select>
+                    <select id="eventVerdictSel" onchange="loadEvents()">
+                        <option value="">全部裁决</option>
+                        <option value="pending">待裁决</option>
+                        <option value="confirmed">确认攻击</option>
+                        <option value="false_positive">误报</option>
+                    </select>
+                </div>
+            </div>
+            <table class="matrix" id="eventTable">
+                <thead><tr><th>ID</th><th>IP</th><th>路径</th><th>档位</th>
+                    <th>威胁分</th><th>裁决</th><th>操作</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="eventEmpty" style="display:none">暂无事件</div>
+            <div class="detail-body" id="factorDetail"></div>
+        </div>
+    </div>
+
+    <!-- ③ 申诉队列 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>③ 申诉队列（误报自救通道裁决）</h3>
+                <div class="dash-toolbar">
+                    <select id="appealStatusSel" onchange="loadAppeals()">
+                        <option value="">全部状态</option>
+                        <option value="pending">待裁决</option>
+                        <option value="approved">已恢复</option>
+                        <option value="rejected">维持处置</option>
+                    </select>
+                </div>
+            </div>
+            <table class="matrix" id="appealTable">
+                <thead><tr><th>申诉ID</th><th>事件ID</th><th>会员</th>
+                    <th>IP</th><th>申诉理由</th><th>状态</th>
+                    <th>操作</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="appealEmpty" style="display:none">暂无申诉</div>
+        </div>
+    </div>
+
+    <!-- ④ IP 处置 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>④ IP 信誉与封禁</h3>
+                <div class="dash-toolbar">
+                    <input id="ipInput" size="16" placeholder="IP 地址">
+                    <button class="dash-btn danger" onclick="banIp()">封禁</button>
+                    <button class="dash-btn ghost" onclick="unbanIp()">解封</button>
+                    <button class="dash-btn ghost" onclick="pinIp(true)">钉住</button>
+                    <button class="dash-btn ghost" onclick="pinIp(false)">解钉</button>
+                </div>
+            </div>
+            <table class="matrix" id="ipTable">
+                <thead><tr><th>IP</th><th>信誉分</th><th>状态</th>
+                    <th>攻击次数</th><th>钉住</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="ipEmpty" style="display:none">暂无记录</div>
+        </div>
+    </div>
+
+    <!-- ⑤ UEBA 行为基线 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑤ UEBA 行为基线（时段直方图 / P95）</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn" onclick="rebuildBaselines()">重建基线</button>
+                    <button class="dash-btn ghost" onclick="loadDeviations()">查偏离记录</button>
+                </div>
+            </div>
+            <table class="matrix" id="baselineTable">
+                <thead><tr><th>主体</th><th>角色</th><th>活跃时段(直方图)</th>
+                    <th>P95/时</th><th>功能分布</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="baselineEmpty" style="display:none">暂无基线（点"重建基线"）</div>
+            <div class="detail-body" id="deviationDetail"></div>
+        </div>
+    </div>
+
+    <!-- ⑥ 学习回流 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑥ 学习回流（裁决真值 → 第26档案权重调优）</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn" onclick="collectLearning()">collect 回流</button>
+                    <button class="dash-btn blue" onclick="runLearning()">run 学习</button>
+                </div>
+            </div>
+            <div id="learningCells" class="ov-cells"><div class="dash-empty">点 collect 后加载</div></div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        全部区块需 admin · 误报裁决自动恢复信誉与封禁 ·
+        enforce 上线检查单见操作指南 §六 ·
+        操作手册: docs/安全管理端操作指南.md
+    </div>
+</div>
+
+<script src="js/security-dashboard.js"></script>
+</body>
+</html>
