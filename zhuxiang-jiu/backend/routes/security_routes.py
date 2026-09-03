@@ -446,6 +446,39 @@ async def admin_pin_posture(
 #  管理端·学习回流(P2b, 第26档案, 42号P2范式平移)
 # ============================================================
 
+@router.get("/admin/reports/daily")
+async def admin_daily_report(
+    date: str = Query(None, description="指定日期 YYYY-MM-DD"
+                      "(缺省今天)"),
+    days: int = Query(None, ge=1, le=90,
+                      description="传此参数返回近 N 天序列"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """SOC 安全运营日报(单日/近 N 天序列, 误报率与事件分布)"""
+    _require_admin(x_role)
+    try:
+        from services.soc_report_service import SocReportService
+        svc = SocReportService()
+        if days:
+            return await svc.daily_series(days)
+        return await svc.daily_report(date)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/reports/d5")
+async def admin_d5_report(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """D5 联动决策观测(硬标准: ≥14天+误报<5%+样本≥20)"""
+    _require_admin(x_role)
+    try:
+        from services.soc_report_service import SocReportService
+        return await SocReportService().d5_observation()
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.post("/admin/learning/collect")
 async def admin_learning_collect(
     x_role: str = Header(default="", alias="X-Role"),
