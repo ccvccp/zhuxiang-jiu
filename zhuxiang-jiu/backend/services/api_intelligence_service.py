@@ -189,9 +189,14 @@ class ApiAnomalyService:
                     f"{today_rate / hist_rate:.1f} 倍"
                     f"(基线 {hist_rate:.0%})"))
 
-        # 落库(今日事件幂等——同模板同类型当日一条)
+        # 落库(今日事件幂等——同模板同类型当日一条;
+        # 已存在(含已裁决)不覆盖——人工裁决真值保护,
+        # 重复检测不得把 confirmed/false_positive 重置回 pending)
         for e in events:
-            await self._save_event(e)
+            key = (f"{e['template']}|{e['kind']}|"
+                   f"{e['day']}")
+            if not await self._event_exists(key):
+                await self._save_event(e)
         return {"success": True, "detected": len(events),
                 "events": events}
 
@@ -207,12 +212,23 @@ class ApiAnomalyService:
                 "baselineStd": round(std, 1),
                 "summary": summary, "status": ANOMALY_PENDING}
 
+    async def _event_exists(self, key: str) -> bool:
+        """事件是否已存在(同模板同类型当日幂等判定)"""
+        if is_redis_mode_cached():
+            client = await get_redis_client_cached()
+            return bool(await client.exists(
+                _k_cached("api44", "anomaly", key)))
+        store = get_in_memory_store_cached()
+        return key in store.get("api44_anomalies", {})
+
     async def _save_event(self, event: dict) -> None:
         """事件落库(自然键 template|kind|day 幂等)"""
         key = (f"{event['template']}|{event['kind']}|"
                f"{event['day']}")
         event_id = await self._event_id(key)
-        event = {"eventId": event_id, **event}
+        # 回填 eventId: detect() 响应事件可直接裁决
+        # (P4 面板「真异常/误报」按钮消费此字段)
+        event["eventId"] = event_id
         if is_redis_mode_cached():
             client = await get_redis_client_cached()
             await client.hset(

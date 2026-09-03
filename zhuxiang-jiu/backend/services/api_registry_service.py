@@ -217,13 +217,18 @@ class ApiRegistryService:
             changes["moduleSource"] = "manual"
         if status is not None:
             changes["status"] = status
+            # P5: 弃用时间戳(预警头倒计时/目录日落数据源)
+            if status == "deprecated":
+                changes["deprecatedAt"] = ts()
         updated = await self.repo.update_entry_fields(
             rec["method"], rec["path"], changes)
-        # P1: published 索引联动(published 入索引, 其余状态出)
+        # P1/P5: Key 面索引联动(索引= published+deprecated+
+        # offline——development 不拦截; deprecated 仍可用带
+        # 弃用预警头, offline 直接 410)
         if status is not None:
             await self.repo.set_published(
                 rec["method"], rec["path"],
-                status == "published")
+                status != "development")
             from core.api_key_middleware import (
                 invalidate_published_cache,
             )

@@ -325,7 +325,7 @@ class ApiManager44Repository:
             bucket.discard(member)
 
     async def get_published(self) -> set:
-        """published 索引全集(中间件 60s 缓存刷新用)"""
+        """Key 面索引全集(中间件 60s 缓存刷新用)"""
         if is_redis_mode():
             client = await get_redis_client()
             members = await client.smembers(
@@ -333,3 +333,32 @@ class ApiManager44Repository:
             return set(members or ())
         self._ensure_store()
         return set(self.store.get("_api44_published", ()))
+
+    async def get_published_with_status(self) -> dict:
+        """Key 面索引全集 + 各条目状态({member: status})
+
+        P5: Key 面 = published + deprecated + offline
+        (development 不入面); 状态供中间件弃用预警头/410 判定。
+        Redis: SMEMBERS + pipeline HGET status 单字段批量取。
+        """
+        members = await self.get_published()
+        if not members:
+            return {}
+        result = {}
+        if is_redis_mode():
+            client = await get_redis_client()
+            member_list = [str(m) for m in members]
+            pipe = client.pipeline(transaction=False)
+            for member in member_list:
+                pipe.hget(_k("api44", self.TABLE_REGISTRY,
+                             member), "status")
+            for member, status in zip(
+                    member_list, await pipe.execute()):
+                result[member] = str(status or "published")
+            return result
+        self._ensure_store()
+        for member in members:
+            rec = self.store[self.TABLE_REGISTRY].get(str(member))
+            result[str(member)] = \
+                (rec or {}).get("status") or "published"
+        return result

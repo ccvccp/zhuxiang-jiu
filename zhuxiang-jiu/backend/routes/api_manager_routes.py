@@ -19,6 +19,15 @@
     POST /api/api-manager/admin/apis/keys/{keyId}/reject  驳回申请
     POST /api/api-manager/admin/apis/keys/{keyId}/revoke  管理员吊销
 
+端点(P5, 治理闭环 5):
+    POST /api/api-manager/admin/apis/{apiId}/lifecycle  生命周期转换
+                                                        (软护栏+force)
+    GET  /api/api-manager/apis/catalog                  对外目录
+                                                        (published+deprecated)
+    POST /api/api-manager/admin/apis/learning/collect   裁决真值批量回流
+    POST /api/api-manager/admin/apis/learning/run        触发一轮学习
+    GET  /api/api-manager/admin/apis/learning/status     学习状态视图
+
 鉴权:
     - 管理端: X-Role: admin 头(43号同款口径)
     - 会员端: X-Member-Id 头(JWTAuthMiddleware 注入/兼容)
@@ -484,6 +493,102 @@ async def admin_set_key_limits(
             tier=body.get("tier"),
             custom_qps=body.get("customQps"),
             custom_daily=body.get("customDaily"))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P5: 治理闭环(生命周期状态机 + 裁决回流 + 对外目录)
+# ============================================================
+
+@router.post("/admin/apis/{api_id}/lifecycle")
+async def admin_lifecycle_transition(
+    api_id: int,
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """生命周期转换(development→published→deprecated→offline)
+
+    软护栏: offline 前检查近 7 日 Key 面调用量, 有存量则
+    阻断(body.force=true 强制下线, 留痕)。
+    """
+    _require_admin(x_role)
+    if not isinstance(body, dict) or not body.get("status"):
+        raise HTTPException(status_code=409,
+                            detail="请求体需含 status 字段")
+    try:
+        from services.api_lifecycle_service import (
+            ApiLifecycleService,
+        )
+        return await ApiLifecycleService().transition(
+            api_id, str(body.get("status")),
+            force=bool(body.get("force")))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/apis/catalog")
+async def api_catalog():
+    """对外目录(published 接口自助文档门面, 无需鉴权)
+
+    published 正常开放; deprecated 带弃用预警与日落时间
+    (30 天迁移窗口); offline/development 不展示。
+    """
+    try:
+        from services.api_lifecycle_service import (
+            ApiLifecycleService,
+        )
+        return await ApiLifecycleService().catalog()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/admin/apis/learning/collect")
+async def admin_learning_collect(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """裁决真值批量回流(已裁决未回流事件 → 第27档案反馈)
+
+    confirmed=正反馈(+0.5) / false_positive=负反馈(-0.5);
+    eventFed 幂等标记防重复回流。
+    """
+    _require_admin(x_role)
+    try:
+        from services.api_lifecycle_service import (
+            ApiLearningService,
+        )
+        return await ApiLearningService(
+        ).collect_anomaly_feedback()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/admin/apis/learning/run")
+async def admin_learning_run(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """触发一轮 Hedge 学习(第27档案 ApiHealthScorer)"""
+    _require_admin(x_role)
+    try:
+        from services.api_lifecycle_service import (
+            ApiLearningService,
+        )
+        return await ApiLearningService().run_learning()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/apis/learning/status")
+async def admin_learning_status(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """学习状态(档案/已裁决/已回流/当前权重视图)"""
+    _require_admin(x_role)
+    try:
+        from services.api_lifecycle_service import (
+            ApiLearningService,
+        )
+        return await ApiLearningService().learning_status()
     except Exception as e:
         raise _handle(e) from e
 

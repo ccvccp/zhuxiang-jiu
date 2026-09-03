@@ -72,6 +72,25 @@ async def _send_rate_limited(send, detail: str,
     await send({"type": "http.response.body", "body": body})
 
 
+async def _send_gone(send, path: str) -> None:
+    """410 Gone(P5: offline API——Key 面终点响应)"""
+    body = json.dumps(
+        {"detail": f"该 API 已下线({path}), 请迁移替代接口"
+                   f"(目录: GET /api/api-manager/apis/catalog)"},
+        ensure_ascii=False).encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": 410,
+        "headers": [
+            (b"content-type",
+             b"application/json; charset=utf-8"),
+            (b"content-length",
+             str(len(body)).encode("latin-1")),
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
 def _template_to_regex(template: str):
     """路由模板 → 匹配 regex({param} 段通配 [^/]+)"""
     parts = []
@@ -181,12 +200,18 @@ class ApiKeyMiddleware:
         # P3: 观测路径用包装 send(状态码/延迟捕获);
         # 业务异常传播时补 500 留痕后重抛(500 响应由外层
         # ServerErrorMiddleware 用原始 send 发送, 不经包装)
+        # P5: deprecated 状态注入弃用预警头; offline 直接 410。
         if observe is None:
             await self.app(scope, receive, send)
             return
+        lifecycle = self._lifecycle_state(method, path)
+        if lifecycle == "offline":
+            await _send_gone(send, path)
+            return
         wrapped_send = self._wrap_send(
             send, observe["keyId"], observe["template"],
-            observe["start"])
+            observe["start"],
+            inject_deprecated=(lifecycle == "deprecated"))
         try:
             await self.app(scope, receive, wrapped_send)
         except Exception:
@@ -212,19 +237,46 @@ class ApiKeyMiddleware:
                            key_id, exc_info=True)
 
     def _match_template(self, method: str, path: str) -> str:
-        """实际路径 → 匹配的 published 模板(观测聚合键)"""
-        for m, template, regex in _PUBLISHED_CACHE["templates"]:
+        """实际路径 → 匹配的 Key 面模板(观测聚合键)"""
+        for m, template, regex, _status in \
+                _PUBLISHED_CACHE["templates"]:
             if m == method and regex.match(path):
                 return template
         return path   # 兜底: 无匹配(理论不可达)用实际路径
 
-    def _wrap_send(self, send, key_id, template, start):
-        """P3: 包装 send 捕获响应状态码 → 观测留痕(异步)"""
+    def _lifecycle_state(self, method: str, path: str) -> str:
+        """Key 面生命周期状态(P5: published/deprecated/offline)
+
+        同请求内 _is_published 刚刷新过缓存, 直接读无二次 I/O;
+        未知/空状态按 published 处理(保守放行业务)。
+        """
+        for m, _tpl, regex, status in \
+                _PUBLISHED_CACHE["templates"]:
+            if m == method and regex.match(path):
+                return status if status in (
+                    "published", "deprecated", "offline") \
+                    else "published"
+        return "published"
+
+    def _wrap_send(self, send, key_id, template, start,
+                   inject_deprecated: bool = False):
+        """P3: 包装 send 捕获响应状态码 → 观测留痕(异步)
+
+        P5: inject_deprecated=True 时响应头注入
+        X-Api-Deprecated 弃用预警(台账黄标 + 看板倒计时数据源
+        之外的线上消费方信号)。
+        """
         state = {"status": None}
 
         async def wrapped(message):
             if message.get("type") == "http.response.start":
                 state["status"] = message.get("status", 500)
+                if inject_deprecated:
+                    headers = list(
+                        message.get("headers") or [])
+                    headers.append(
+                        (b"x-api-deprecated", b"true"))
+                    message = {**message, "headers": headers}
             await send(message)
             if message.get("type") == "http.response.body" \
                     and message.get("more_body") is not True:
@@ -250,25 +302,29 @@ class ApiKeyMiddleware:
                            key_id, exc_info=True)
 
     async def _is_published(self, method: str, path: str) -> bool:
-        """是否 Key 面(published 集缓存 + 模板匹配)"""
+        """是否 Key 面(published+deprecated+offline 集缓存 +
+        模板匹配)"""
         now = time.monotonic()
         if now - _PUBLISHED_CACHE["at"] > _PUBLISHED_TTL:
             await self._refresh_published()
-        for m, _tpl, regex in _PUBLISHED_CACHE["templates"]:
+        for m, _tpl, regex, _status in \
+                _PUBLISHED_CACHE["templates"]:
             if m == method and regex.match(path):
                 return True
         return False
 
     async def _refresh_published(self) -> None:
-        """刷新 published 集(SMEMBERS 单命令, 非全表扫)"""
+        """刷新 Key 面集(SMEMBERS 单命令 + 状态 pipeline 批量取)"""
         from repositories.api_manager_repository import (
             ApiManager44Repository,
         )
-        members = await ApiManager44Repository().get_published()
+        surface = await ApiManager44Repository(
+        ).get_published_with_status()
         templates = []
-        for member in members:
-            m, sep, p = str(member).partition("|")
+        for member, status in surface.items():
+            m, sep, p = member.partition("|")
             if sep:
-                templates.append((m, p, _template_to_regex(p)))
+                templates.append(
+                    (m, p, _template_to_regex(p), status))
         _PUBLISHED_CACHE["templates"] = tuple(templates)
         _PUBLISHED_CACHE["at"] = time.monotonic()

@@ -1,10 +1,12 @@
 <!--
-    44号·AI智能API管理模块 P0 · API 资产中心面板
+    44号·AI智能API管理模块 · API 管理面板(P0-P5)
     页面: ai-api-dashboard.html(配套脚本 js/api-dashboard.js)
     依赖: css/style.css(主题变量) / 后端 44号 api_manager_routes
     后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
     鉴权: X-Role: admin(管理端区块)
-    区块: ①API 资产总览(分布统计/模块分组/台账列表/手动重扫 diff)
+    区块: ①API 资产总览(分布/台账/生命周期转换)
+          ②调用观测(P3) ③健康评分(P3) ④AI 自治(P4)
+          ⑤治理闭环(P5: 裁决回流三连/对外目录/try-out 在线调试)
     操作手册: docs/44号_API智能管理模块实施计划.md
 -->
 <html lang="zh-CN">
@@ -85,7 +87,7 @@
 <body>
 <header class="dash-banner">
     <h1>44号·API 管理面板</h1>
-    <p>API 资产中心 · 凭证 · 流量治理 · 观测 · AI 自治（P0: 资产总览）</p>
+    <p>API 资产中心 · 凭证 · 流量治理 · 观测 · AI 自治 · 治理闭环（P0-P5 全量）</p>
 </header>
 
 <div class="container">
@@ -130,13 +132,16 @@
                         <option value="deprecated">deprecated（已弃用）</option>
                         <option value="offline">offline（已下线）</option>
                     </select>
+                    <label style="font-size:11px;color:#a37400">
+                        <input type="checkbox" id="forceOffline"> 强制下线
+                        （跳过近 7 日存量护栏, 留痕）</label>
                     <span id="listCount" style="font-size:11px;color:#999"></span>
                 </div>
                 <div style="max-height:420px;overflow:auto">
                     <table class="dash-table">
                         <thead><tr>
                             <th>ID</th><th>方法</th><th>路径</th><th>模块</th>
-                            <th>状态</th><th>说明</th>
+                            <th>状态</th><th>说明</th><th>生命周期</th>
                         </tr></thead>
                         <tbody id="apiList"></tbody>
                     </table>
@@ -226,6 +231,62 @@
                 <div id="assistantAnswer" class="sync-diff"
                     style="display:block;background:var(--color-bg-sub,#f7f7f7);
                     min-height:36px">输入问题后点「提问」</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑤ 治理闭环（P5: 学习回流 / 对外目录 / try-out） -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑤ 治理闭环（裁决回流 / 对外目录 / 在线调试）</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn" onclick="learningCollect()">回流裁决真值</button>
+                    <button class="dash-btn ghost" onclick="learningRun()">触发一轮学习</button>
+                    <button class="dash-btn ghost" onclick="learningStatus()">学习状态</button>
+                </div>
+            </div>
+            <div id="learningPanel" class="sync-diff"
+                style="display:block;background:var(--color-bg-sub,#f7f7f7);
+                min-height:36px">裁决事件(refresh 后)点「回流裁决真值」→
+                confirmed=正反馈 / false_positive=负反馈 → 第27档案权重调优</div>
+
+            <div style="margin-top:12px;border-top:1px solid
+                var(--color-border,#eee);padding-top:10px">
+                <div class="card-head" style="margin-bottom:6px">
+                    <b style="font-size:12px">对外目录（published 自助文档 ·
+                        deprecated 带 30 天日落迁移窗口）</b>
+                    <button class="dash-btn ghost"
+                        onclick="loadCatalog()">刷新目录</button>
+                </div>
+                <div style="max-height:300px;overflow:auto">
+                    <table class="dash-table">
+                        <thead><tr>
+                            <th>方法</th><th>路径</th><th>模块</th>
+                            <th>状态</th><th>日落</th><th>说明</th><th>调试</th>
+                        </tr></thead>
+                        <tbody id="catalogList"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div style="margin-top:12px;border-top:1px solid
+                var(--color-border,#eee);padding-top:10px">
+                <b style="font-size:12px">在线调试（try-out —— 填 Key 双头
+                    凭证直调, 弃用预警头/410 可实测）</b>
+                <div class="dash-toolbar" style="margin:8px 0">
+                    <select id="tryMethod">
+                        <option>GET</option><option>POST</option>
+                        <option>PUT</option><option>PATCH</option>
+                        <option>DELETE</option>
+                    </select>
+                    <input id="tryPath" size="34" placeholder="/api/…">
+                    <input id="tryKey" size="24" placeholder="X-Api-Key(zk_…)">
+                    <input id="tryApp" size="18" placeholder="X-App-Code(ac_…)">
+                    <button class="dash-btn" onclick="runTryOut()">发起调试</button>
+                </div>
+                <div id="tryOutResult" class="sync-diff"
+                    style="display:block;background:var(--color-bg-sub,#f7f7f7);
+                    min-height:36px">从目录点「调试」带入, 或手工填写路径与凭证</div>
             </div>
         </div>
     </div>

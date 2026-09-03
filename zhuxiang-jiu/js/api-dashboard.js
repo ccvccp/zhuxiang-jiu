@@ -1,9 +1,11 @@
 /**
- * 44号·AI智能API管理模块 P0 · API 资产中心面板
+ * 44号·AI智能API管理模块 · API 管理面板(P0-P5)
  * 范式: js/security-dashboard.js(43号)平移——ES5、localStorage 连接、
  * 区块化加载(台账静态, 手动/保存触发, 不进自动刷新)。
- * 依赖后端: /api/api-manager/*(44号 api_manager_routes, 3 端点)
- * 区块: ①API 资产总览(分布统计/模块分组/台账列表/重扫 diff)
+ * 依赖后端: /api/api-manager/*(44号 api_manager_routes)
+ * 区块: ①API 资产总览(分布/台账/生命周期转换) ②调用观测(P3)
+ *       ③健康评分(P3) ④AI 自治(P4) ⑤治理闭环(P5:
+ *       裁决回流三连/对外目录/try-out 在线调试)
  */
 'use strict';
 
@@ -120,7 +122,7 @@ async function loadRegistry() {
             }).join('');
         if (cur && bm[cur] !== undefined) { sel.value = cur; }
 
-        // 台账列表
+        // 台账列表(含 P5 生命周期主链操作)
         var rows = (b.entries || []).map(function (e) {
             var dot = '<i class="dot ' + esc(e.status || 'development') +
                 '"></i>' + esc(e.status || 'development');
@@ -130,15 +132,30 @@ async function loadRegistry() {
             var modBadge = esc(e.module || 'uncategorized') +
                 (e.moduleSource === 'manual'
                  ? ' <span class="badge manual">人工</span>' : '');
+            // 主链下一步(development→published→deprecated→offline;
+            // offline→development 重启); 其余转换走 API
+            var next = { development: ['published', '发布'],
+                         published: ['deprecated', '弃用'],
+                         deprecated: ['offline', '下线'],
+                         offline: ['development', '重启'] }[
+                e.status || 'development'];
+            var act = next
+                ? '<button class="btn-mini" onclick="lifecycleAction(' +
+                  e.apiId + ',\'' + next[0] + '\')">' + next[1] + '</button>'
+                : '-';
+            if (e.deprecatedAt) {
+                act += ' <span class="badge" title="弃用于 ' +
+                    esc(e.deprecatedAt) + '">弃用中</span>';
+            }
             return '<tr><td>' + esc(e.apiId) + '</td><td>' +
                 esc(e.method) + '</td><td style="word-break:break-all">' +
                 esc(e.path) + '</td><td>' + modBadge + '</td><td>' +
                 dot + '</td><td style="color:#888">' +
-                esc(e.summary || '') + '</td></tr>';
+                esc(e.summary || '') + '</td><td>' + act + '</td></tr>';
         });
         document.getElementById('apiList').innerHTML =
             rows.join('') ||
-            '<tr><td colspan="6" class="dash-empty">暂无台账(点「重扫台账」同步)</td></tr>';
+            '<tr><td colspan="7" class="dash-empty">暂无台账(点「重扫台账」同步)</td></tr>';
         document.getElementById('listCount').textContent =
             '共 ' + (b.total || 0) + ' 条';
         markUpdate();
@@ -296,7 +313,9 @@ async function decideAnomaly(eventId, confirm) {
         await fetchJson(
             api('/api/api-manager/admin/apis/anomalies/' +
                 eventId + '/decide'),
-            { method: 'POST', headers: headers(),
+            { method: 'POST',
+              headers: Object.assign(headers(),
+                  { 'Content-Type': 'application/json' }),
               body: JSON.stringify({ confirm: confirm }) },
             '事件裁决');
         showInfo('已裁决: ' + (confirm ? '真异常' : '误报'));
@@ -319,10 +338,172 @@ async function askAssistant() {
     } catch (e) { showError(e.message); }
 }
 
+/* ============================================================
+ * ⑤ 治理闭环(P5: 生命周期转换 / 裁决回流三连 / 对外目录 / try-out)
+ * ============================================================ */
+
+/* 生命周期转换(主链人工触发; 下线带近 7 日存量软护栏,
+ * forceOffline 勾选时 force=true 强制留痕) */
+async function lifecycleAction(apiId, status) {
+    var force = false;
+    var box = document.getElementById('forceOffline');
+    if (status === 'offline' && box && box.checked) { force = true; }
+    if (status === 'offline' && !force &&
+        !window.confirm('下线前将检查近 7 日 Key 面调用量, ' +
+                        '有存量会被阻断。继续?')) { return; }
+    try {
+        var b = await fetchJson(
+            api('/api/api-manager/admin/apis/' + apiId + '/lifecycle'),
+            { method: 'POST',
+              headers: Object.assign(headers(),
+                  { 'Content-Type': 'application/json' }),
+              body: JSON.stringify(
+                  { status: status, force: force }) },
+            '生命周期转换');
+        showInfo('已转换: #' + apiId + ' → ' + b.status);
+        await loadRegistry();
+        await loadCatalog();
+    } catch (e) { showError(e.message); }
+}
+
+/* 裁决真值批量回流(已裁决未回流 → 第27档案反馈) */
+async function learningCollect() {
+    try {
+        var b = await fetchJson(
+            api('/api/api-manager/admin/apis/learning/collect'),
+            { method: 'POST', headers: headers() }, '裁决回流');
+        document.getElementById('learningPanel').textContent =
+            '回流完成: 提交 ' + (b.submitted || 0) +
+            ' 条 / 跳过 ' + (b.skipped || 0) +
+            ' 条(pending 未裁决或已回流幂等跳过)';
+        showInfo('裁决回流: 提交 ' + (b.submitted || 0) + ' 条');
+    } catch (e) { showError(e.message); }
+}
+
+/* 触发一轮 Hedge 学习(第27档案) */
+async function learningRun() {
+    try {
+        var b = await fetchJson(
+            api('/api/api-manager/admin/apis/learning/run'),
+            { method: 'POST', headers: headers() }, '触发学习');
+        var delta = b.weightDelta || {};
+        var moved = Object.keys(delta).filter(function (k) {
+            return Math.abs(delta[k]) > 0.0001;
+        });
+        document.getElementById('learningPanel').textContent =
+            '学习完成: ' + (b.newVersion || '-') + '(' +
+            (b.newStatus || '-') + ') · 样本 ' +
+            (b.learnedFrom || 0) + ' · 权重变化 ' +
+            (moved.length ? moved.map(function (k) {
+                return k + ' ' + (delta[k] > 0 ? '+' : '') +
+                    delta[k].toFixed(4);
+            }).join(', ') : '(护栏内无变化)');
+        showInfo('学习一轮完成(' + (b.newStatus || '-') + ')');
+    } catch (e) { showError(e.message); }
+}
+
+/* 学习状态视图(档案/裁决/已回流/当前权重视图) */
+async function learningStatus() {
+    try {
+        var b = await fetchJson(
+            api('/api/api-manager/admin/apis/learning/status'),
+            { headers: headers() }, '学习状态');
+        var w = b.weights || {};
+        var champ = (w.champion && w.champion.weights) || w.defaults || {};
+        var rows = Object.keys(champ).map(function (k) {
+            return k + '=' + Number(champ[k]).toFixed(3);
+        });
+        document.getElementById('learningPanel').textContent =
+            '档案: ' + (b.scorer || '-') + ' · 已裁决 ' +
+            (b.decided || 0) + ' / 已回流 ' + (b.fed || 0) +
+            ' / 待裁决 ' + (b.pending || 0) +
+            ' · 冠军权重: ' + rows.join(' ');
+    } catch (e) { showError(e.message); }
+}
+
+/* 对外目录(published + deprecated 迁移窗口) */
+async function loadCatalog() {
+    try {
+        var b = await fetchJson(
+            api('/api/api-manager/apis/catalog'), {}, '对外目录');
+        var rows = (b.apis || []).map(function (a) {
+            var st = a.deprecated
+                ? '<span style="color:#a37400">⚠ deprecated</span>'
+                : '<span style="color:#2f9e44">published</span>';
+            var sunset = a.deprecated
+                ? (sunsetDays(a.sunsetAt) + ' 天') : '-';
+            return '<tr><td>' + esc(a.method) + '</td>' +
+                '<td style="word-break:break-all">' + esc(a.path) +
+                '</td><td>' + esc(a.module || '-') + '</td><td>' +
+                st + '</td><td>' + esc(sunset) + '</td><td style="color:#888">' +
+                esc(a.summary || '') + '</td><td><button class="btn-mini" ' +
+                'onclick="fillTryOut(\'' + esc(a.method) + '\',\'' +
+                esc(a.path) + '\')">调试</button></td></tr>';
+        });
+        document.getElementById('catalogList').innerHTML =
+            rows.join('') ||
+            '<tr><td colspan="7" class="dash-empty">目录为空(发布 API 后展示)</td></tr>';
+        markUpdate();
+    } catch (e) { showError(e.message); }
+}
+
+/* 日落倒计时(天数; 过期为红字"已到期") */
+function sunsetDays(sunsetAt) {
+    if (!sunsetAt) { return '?'; }
+    var t = Date.parse(sunsetAt);
+    if (isNaN(t)) { return '?'; }
+    var days = Math.ceil((t - Date.now()) / 86400000);
+    if (days <= 0) { return '已到期'; }
+    return days;
+}
+
+/* try-out: 目录带入 */
+function fillTryOut(method, path) {
+    document.getElementById('tryMethod').value = method;
+    document.getElementById('tryPath').value = path;
+    document.getElementById('tryOutResult').textContent =
+        '已带入 ' + method + ' ' + path +
+        ' —— 填 X-Api-Key / X-App-Code 后点「发起调试」';
+}
+
+/* try-out: 发起调试(真实请求, 弃用预警头/410/401 可实测) */
+async function runTryOut() {
+    var method = document.getElementById('tryMethod').value;
+    var path = (document.getElementById('tryPath').value || '').trim();
+    var key = (document.getElementById('tryKey').value || '').trim();
+    var app = (document.getElementById('tryApp').value || '').trim();
+    var out = document.getElementById('tryOutResult');
+    if (!path) { showError('请填写调试路径'); return; }
+    if (!key || !app) {
+        out.textContent = '提示: 该 API 已发布(Key 面)时需 X-Api-Key ' +
+            '与 X-App-Code 双头凭证; 仅 JWT 面接口可免 Key 调试';
+    }
+    try {
+        var resp = await fetch(state.apiBase + path, {
+            method: method,
+            headers: { 'X-Api-Key': key, 'X-App-Code': app }
+        });
+        var text = await resp.text();
+        var dep = resp.headers.get('X-Api-Deprecated');
+        var retry = resp.headers.get('Retry-After');
+        var lines = ['HTTP ' + resp.status + ' ' + (resp.statusText || '')];
+        if (dep) { lines.push('⚠ X-Api-Deprecated: ' + dep +
+                              '(弃用预警——请迁移)'); }
+        if (retry) { lines.push('⏳ Retry-After: ' + retry + 's'); }
+        lines.push('');
+        lines.push(text.length > 800 ? text.slice(0, 800) + ' …' : text);
+        out.textContent = lines.join('\n');
+    } catch (e) {
+        out.textContent = '请求失败: ' + e.message +
+            '(检查路径/跨域/后端地址)';
+    }
+}
+
 /* 初始化 */
 (function init() {
     document.getElementById('apiBase').value = state.apiBase;
     loadRegistry();
     loadUsage();
     loadHealth();
+    loadCatalog();
 })();
