@@ -52,6 +52,12 @@ PENALTY_MAP = {
     ACTION_BLOCK: 60.0,
 }
 
+# 档位严重度序(P5-1 D5 强制联动升档比较用)
+_ACTION_ORDER = {
+    ACTION_ALLOW: 0, ACTION_THROTTLE: 1,
+    ACTION_CHALLENGE: 2, ACTION_BLOCK: 3,
+}
+
 # 网关快道白名单(健康检查永久放行 + 挑战应答端点防死锁)
 GATEWAY_WHITELIST = (
     "/api/decision/health",
@@ -384,6 +390,8 @@ class Security43Service:
         # ②''' P3-4 D5 跳步检测(登录后 N 请求内直奔敏感端点):
         #     会话序列记录 + 跳步命中 → identity_risk 降分
         #     (仅降分不处置, observe 口径; 异常不阻断)
+        #     P5-1: 命中标志留存, 评分后参与强制联动升档
+        d5_jump = None
         try:
             if member_id:
                 from services.sequence_service import SequenceService
@@ -393,6 +401,7 @@ class Security43Service:
                 await seq.record_sequence(member_id, module)
                 jump = await seq.detect_jump(member_id, module)
                 if jump:
+                    d5_jump = jump
                     identity_score = min(identity_score, 20.0)
                     logger.warning("security_d5_jump member=%s "
                                    "module=%s", member_id, module)
@@ -457,6 +466,35 @@ class Security43Service:
                 ctx["hour"] = int(hour)
             scoring = await SCORERS["security_threat_gate"].score(ctx)
             action = scoring["action"]
+
+            # ⑤'''' P5-1 D5 强制联动(收口): 开启且命中且威胁分处于
+            #       挑战边界区 → 处置升档为至少 challenge(不 block——
+            #       D5 是行为信号非确定性攻击, 封禁过重; 与硬规则
+            #       叠加时按硬规则既有口径——block 不因 D5 降档)
+            #       off 零影响; 因子留痕 d5_enforce 与降分留痕区分,
+            #       便于后续单独统计 D5 联动误报率。
+            if d5_jump is not None:
+                from services.sequence_service import (
+                    d5_enforce_on, d5_enforce_band,
+                )
+                if d5_enforce_on():
+                    band_lo, band_hi = d5_enforce_band()
+                    d5_score = float(scoring.get("score") or 0)
+                    if band_lo <= d5_score < band_hi:
+                        if _ACTION_ORDER.get(
+                                action, 0) < _ACTION_ORDER.get(
+                                ACTION_CHALLENGE, 2):
+                            action = ACTION_CHALLENGE
+                        scoring.setdefault("factors", []).append({
+                            "name": "d5_enforce", "label": "D5强制联动",
+                            "score": d5_score, "weight": 0,
+                            "detail": f"威胁分{d5_score:.1f}"
+                                      f"∈边界区[{band_lo:g},{band_hi:g})"
+                                      f" 升档challenge"
+                                      f"({d5_jump.get('detail')})"})
+                        logger.warning(
+                            "security_d5_enforce member=%s score=%s "
+                            "action=%s", member_id, d5_score, action)
 
         # ⑤' 通行证豁免: 挑战档在通行证有效期内升级为放行
         #     (评分快照保留原貌; 豁免仍留痕——审计口径,

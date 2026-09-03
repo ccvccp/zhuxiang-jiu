@@ -40,6 +40,42 @@ def get_d5_mode() -> str:
     return _env("SECURITY_D5_MODE", "on").lower()
 
 
+# ============================================================
+# P5-1: D5 强制联动开关(收口)
+# ============================================================
+
+# 默认挑战边界区(与 ThreatGateScorer 挑战档一致):
+# 威胁分 ∈ [25, 50) → 处置升档为至少 challenge;
+# 单一 D5 命中永不单独触发 block(行为信号非确定性攻击)
+D5_ENFORCE_BAND_DEFAULT = "25-50"
+
+
+def d5_enforce_on() -> bool:
+    """D5 强制联动开关(默认 off——数据达标后人工开启)
+
+    达标口径(GET /admin/reports/d5 三条件硬标准):
+        观察期 ≥14 天 + D5 相关误报率 <5% + 样本 ≥20
+    """
+    return _env("SECURITY_D5_ENFORCE", "off").lower() == "on"
+
+
+def d5_enforce_band() -> tuple[float, float]:
+    """D5 强制联动的威胁分边界区(默认 25-50, 可调)
+
+    Returns:
+        (band_lo, band_hi)——威胁分 ∈ [lo, hi) 时升档 challenge
+    """
+    raw = _env("SECURITY_D5_ENFORCE_BAND", D5_ENFORCE_BAND_DEFAULT)
+    try:
+        lo, hi = (float(x) for x in raw.replace(
+            "，", ",").replace(" ", "").split("-", 1))
+        if lo < hi and 0 <= lo <= 100 and 0 < hi <= 100:
+            return lo, hi
+    except (ValueError, TypeError):
+        pass
+    return 25.0, 50.0
+
+
 def _now_ts() -> float:
     return datetime.now(UTC).timestamp()
 

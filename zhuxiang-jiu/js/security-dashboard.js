@@ -485,6 +485,22 @@ async function loadReportSeries() {
         { k: '活跃天数', v: s.activeDays || 0 },
         { k: 'D5 样本', v: s.d5Samples || 0, cls: 'yellow' }
     ];
+
+    // P5-1: D5 联动状态卡(off/达标未启/已启用, 边界区口径)
+    try {
+        var d5 = await fetchJson(api('/api/security/admin/reports/d5'),
+                                 { headers: headers() }, 'D5 观测');
+        var enf = d5.d5Enforce || {};
+        var state = enf.active
+            ? '已启用(区' + (enf.band || '25-50') + ')'
+            : (d5.recommendation === 'enable_strict_linkage'
+               ? '达标未启' : 'off(观察中)');
+        cells.push({ k: 'D5 强制联动', v: state,
+                     cls: enf.active ? 'red' :
+                          (d5.recommendation === 'enable_strict_linkage'
+                           ? 'yellow' : '') });
+    } catch (e) { /* D5 卡缺省不阻断序列图 */ }
+
     document.getElementById('seriesSummary').innerHTML =
         cells.map(function (c) {
             return '<div class="ov-cell"><div class="k">' + esc(c.k) +

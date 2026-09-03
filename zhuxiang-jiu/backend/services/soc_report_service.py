@@ -233,6 +233,12 @@ class SocReportService:
             recommendation = "enable_strict_linkage"
         else:
             recommendation = "keep_observe"
+
+        # P5-1: 联动执行开关实况(面板⑦区 D5 状态卡数据源)
+        from services.sequence_service import (
+            d5_enforce_on, d5_enforce_band,
+        )
+        band_lo, band_hi = d5_enforce_band()
         return {
             "success": True,
             "samples": samples,
@@ -241,6 +247,12 @@ class SocReportService:
             "observeDays": active_days,
             "criteria": criteria,
             "recommendation": recommendation,
+            "d5Enforce": {
+                "active": d5_enforce_on(),
+                "band": f"{band_lo:g}-{band_hi:g}",
+                "note": "SECURITY_D5_ENFORCE=on 开启"
+                        "(建议: 达标后人工开启, 7 天内复核误报率)",
+            },
             "recommendationName": {
                 "enable_strict_linkage": "建议开启 D5 强制联动",
                 "keep_observe": "维持 observe 继续观察",
