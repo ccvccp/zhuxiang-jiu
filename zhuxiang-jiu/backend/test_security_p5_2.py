@@ -245,7 +245,9 @@ class TestScheduler:
                stats.get("lastBaselines") is not None,
                str(stats.get("lastBaselines")))
 
-        # 告警异常不阻断调度(拦截 collect 抛错)
+        # 告警异常不阻断调度(P6-2 后 S1 失败为
+        # notify_security_alerts 内部 fail-soft 单信号隔离,
+        # 不再向调度器 errors 传播——断言口径随之更新)
         import services.redis_health_service as rhs
 
         async def _fail_collect(self):
@@ -255,8 +257,8 @@ class TestScheduler:
         stats = await run_scheduled_security_tasks()
         record("告警异常不阻断调度",
                stats.get("lastBaselines") is not None
-               and any("alert" in str(e) for e in
-                       stats.get("lastErrors", [])),
+               and not any("alert" in str(e) for e in
+                           stats.get("lastErrors", [])),
                str(stats.get("lastErrors")))
         rhs.RedisHealthService.collect = orig
 

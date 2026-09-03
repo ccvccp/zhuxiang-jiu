@@ -108,15 +108,18 @@ async def run_scheduled_security_tasks() -> dict:
         result["errors"].append(f"posture:{exc}")
 
     # ③ 统计留痕(供日报/运维观察)
-    # ④ Redis 日度体检+告警触达(P5-2): 调度器开启即自动巡检,
+    # ④ 安全告警触达(P5-2 建, P6-2 三信号化): 调度器开启即
+    #    自动巡检(Redis 体检+情报订阅降级+基线重建异常),
     #    P1 级风险站内信直达管理员(24h 规则级去重防重复);
-    #    体检结果与告警分离——collect() 全量结果不落库(开销大),
-    #    仅告警计数留痕(与 P4-4"体检不进自动刷新"口径一致)
+    #    S3 读上一轮调度留痕(自检口径——本轮异常下轮触达,
+    #    滞后一轮可接受); 体检结果与告警分离(仅计数留痕,
+    #    与 P4-4"体检不进自动刷新"口径一致)
     try:
         from services.security_alert_service import (
             SecurityAlertService,
         )
-        alert = await SecurityAlertService().notify_redis_alerts()
+        alert = await SecurityAlertService(
+        ).notify_security_alerts()
         result["alerts"] = {
             "eligible": alert.get("eligible", 0),
             "deduped": alert.get("deduped", 0),

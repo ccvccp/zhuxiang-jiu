@@ -526,15 +526,19 @@ async function loadRedisHealth() {
     }
 }
 
-/* P5-2: 一键发送 Redis 告警站内信(管理员触达, 24h 规则级去重) */
+/* P6-2: 一键发送安全告警站内信(三信号: Redis 体检/情报订阅降级/
+ * 基线重建异常; 管理员触达, 24h 规则级去重) */
 async function sendRedisAlert() {
     try {
         var b = await fetchJson(
-            api('/api/security/admin/redis/alert/test'), {
+            api('/api/security/admin/alerts/collect'), {
                 method: 'POST', headers: headers()
-            }, '发送告警站内信');
-        showInfo('告警站内信: 已发送 ' + (b.sent || 0) + ' 名管理员' +
-                 '(去重 ' + (b.deduped || 0) + ' 条)');
+            }, '发送安全告警站内信');
+        var sig = b.signals || {};
+        showInfo('安全告警: 已发送 ' + (b.sent || 0) + ' 名管理员' +
+                 '(去重 ' + (b.deduped || 0) + ' 条 · Redis ' +
+                 (sig.redis || 0) + '/情报 ' + (sig.intel || 0) +
+                 '/调度 ' + (sig.scheduler || 0) + ')');
     } catch (e) { showError(e.message); }
 }
 

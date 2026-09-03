@@ -1,23 +1,33 @@
 """43号·P5-2 Redis 体检告警 → 管理员站内信服务
+        + P6-2 三信号化(Redis 体检/情报订阅降级/调度器基线异常)
 
-计划(docs/43号P5-2_Redis告警消息通道实施计划.md):
-    - 采集: 复用 P4-4 RedisHealthService.collect() 的 alerts
-    - 级别过滤: 仅 critical/warn 触达(info 碎片率提示仅面板
-      可见——防收件箱噪声)
-    - 规则级 24h 去重: 同 rule(如"单键 >100KB")24h 一条——
-      大 key 昨天未处理今天还在 → 是提醒不是新事件; 处理掉后
-      次日再出现则重新触达(去重锁过期)
-    - 聚合单封: 一轮体检 N 条告警 → 单封站内信(逐条列明)
-    - 管理员触达: 会员表 role=admin 逐一发送(单人失败不阻断)
+P5-2 原始口径(docs/43号P5-2_Redis告警消息通道实施计划.md):
+    - 采集: RedisHealthService.collect() 的 alerts
+    - 级别过滤: 仅 critical/warn 触达(info 碎片率仅面板可见)
+    - 规则级 24h 去重 + 聚合单封 + 管理员逐一触达
+    - CATEGORY_SECURITY 强制投递 + P1 优先级
+
+P6-2 增强(docs/43号P6_聚合规模化与就绪度实施计划.md §三):
+    - S1 Redis 体检告警(P5-2 既有, 原样)
+    - S2 情报订阅降级: auto 状态 consecutiveFailures ≥3 →
+      warn(rule=threatintel_degraded; P6-1 多源化后按源细化)
+    - S3 调度器异常: lastErrors 含 baseline_anomaly → warn
+      (自检口径: 读上一轮调度留痕——本轮基线异常下轮触达,
+      滞后一轮可接受)
+    - notify_security_alerts: 三信号统一采集→过滤→去重→触达
+      (单信号采集异常不阻断其余 fail-soft)
+    - notify_redis_alerts: 仅 Redis 信号(向后兼容,
+      旧端点 POST /admin/redis/alert/test 保留)
 
 消息通道口径(调研确认):
     - CATEGORY_SECURITY ∈ MANDATORY_CATEGORIES(不可退订强制
       投递)——天然绕过订阅/静默/频率四重调控, 零改造直通
     - priority=P1(高优先非紧急; P0 留给全站级故障)
 
-触发时机(仅两处, 与 P4-4"体检不进自动刷新"口径一致):
-    - 日度调度轨: security_scheduler ④ 步骤
-    - 手动轨: POST /admin/redis/alert/test(演练/通道验证)
+触发时机:
+    - 日度调度轨: security_scheduler ④ 步骤(三信号)
+    - 手动轨: POST /admin/alerts/collect(三信号) /
+      POST /admin/redis/alert/test(仅 Redis, 兼容)
 """
 
 import hashlib
@@ -33,32 +43,135 @@ logger = logging.getLogger(__name__)
 ALERT_LEVELS = ("critical", "warn")
 # 同规则去重窗口(秒)——防日度体检重复轰炸
 DEDUPE_TTL = 86400
+# S2 订阅降级阈值(与 P5-3 stats().auto.degraded 口径一致)
+DEGRADED_THRESHOLD = 3
+
+# 信号分组展示名(面板/站内信分组渲染)
+SIGNAL_NAMES = {"redis": "Redis 体检", "intel": "情报订阅",
+                "scheduler": "调度器"}
 
 
 class SecurityAlertService:
-    """Redis 体检告警 → 管理员站内信(P5-2)"""
+    """安全告警 → 管理员站内信(P5-2 建, P6-2 三信号化)"""
 
-    async def notify_redis_alerts(self, force: bool = False) -> dict:
-        """体检 → 过滤 → 去重 → 管理员触达
+    # --------------------------------------------------------
+    # 信号采集
+    # --------------------------------------------------------
 
-        Args:
-            force: True 跳过 24h 去重(手动轨演练/通道验证用)
+    async def _collect_redis_alerts(self) -> tuple:
+        """S1: Redis 体检告警(P5-2 既有逻辑)
 
         Returns:
-            {success, alerts(总数), eligible, deduped, fresh,
-             admins, sent, failed, collectedAt}
+            (alerts(已标 signal=redis), collectedAt)
         """
         from services.redis_health_service import RedisHealthService
-
-        # ① 采集(复用 P4-4; 异常上抛由调用方兜底)
         report = await RedisHealthService().collect()
-        alerts = report.get("alerts") or []
+        alerts = [{**a, "signal": "redis"}
+                  for a in (report.get("alerts") or [])]
+        return alerts, report.get("collectedAt")
 
-        # ② 级别过滤: critical/warn 触达, info 不发
+    async def _collect_intel_degraded(self) -> list[dict]:
+        """S2: 情报订阅降级(consecutiveFailures ≥3 → warn)
+
+        P6-1 多源化后此方法按源循环输出(rule 含 source
+        维度); 当前单源口径 rule=threatintel_degraded。
+        """
+        try:
+            from repositories.security_repository import (
+                Security43Repository,
+            )
+            state = await Security43Repository(
+            ).get_threatintel_auto_state() or {}
+            failures = int(state.get("consecutiveFailures") or 0)
+            if failures >= DEGRADED_THRESHOLD:
+                last_error = str(
+                    state.get("lastError") or "")[:120]
+                return [{
+                    "level": "warn", "signal": "intel",
+                    "rule": "threatintel_degraded",
+                    "message": f"威胁情报订阅连续失败 "
+                               f"{failures} 次: {last_error}",
+                }]
+        except Exception as exc:
+            logger.warning("security_alert_intel_skip: %s", exc)
+        return []
+
+    async def _collect_scheduler_anomalies(self) -> list[dict]:
+        """S3: 调度器基线重建异常(lastErrors 含 baseline_anomaly)
+
+        读上一轮调度留痕(自检口径——本轮异常下轮触达)。
+        """
+        try:
+            from repositories.security_repository import (
+                Security43Repository,
+            )
+            stats = await Security43Repository(
+            ).get_scheduler_stats() or {}
+            errors = stats.get("lastErrors") or []
+            if any("baseline_anomaly" in str(e) for e in errors):
+                return [{
+                    "level": "warn", "signal": "scheduler",
+                    "rule": "baseline_anomaly",
+                    "message": "UEBA 基线重建异常: 有行为计数"
+                               "但 0 基线(采集/重建链路异常)",
+                }]
+        except Exception as exc:
+            logger.warning("security_alert_sched_skip: %s", exc)
+        return []
+
+    # --------------------------------------------------------
+    # 统一入口
+    # --------------------------------------------------------
+
+    async def notify_security_alerts(self,
+                                      force: bool = False) -> dict:
+        """P6-2: 三信号统一采集 → 过滤 → 去重 → 管理员触达
+
+        单信号采集异常不阻断其余(fail-soft);
+        无 P1 级告警零发送(不发"一切正常"骚扰信)。
+
+        Returns:
+            {success, alerts, eligible, deduped, fresh, admins,
+             sent, failed, signals{redis/intel/scheduler},
+             collectedAt}
+        """
+        alerts = []
+        collected_at = None
+        # S1(fail-soft: 采集异常不阻断 S2/S3)
+        try:
+            redis_alerts, collected_at = (
+                await self._collect_redis_alerts())
+            alerts.extend(redis_alerts)
+        except Exception as exc:
+            logger.warning("security_alert_redis_skip: %s", exc)
+        # S2 + S3(内部各自 fail-soft)
+        alerts.extend(await self._collect_intel_degraded())
+        alerts.extend(await self._collect_scheduler_anomalies())
+        return await self._dispatch(alerts, force,
+                                     collected_at=collected_at)
+
+    async def notify_redis_alerts(self, force: bool = False) -> dict:
+        """(P5-2 既有口径: 仅 Redis 信号——旧端点向后兼容)"""
+        alerts, collected_at = await self._collect_redis_alerts()
+        return await self._dispatch(alerts, force,
+                                     collected_at=collected_at)
+
+    # --------------------------------------------------------
+    # 共享分发(过滤→去重→聚合单封→触达)
+    # --------------------------------------------------------
+
+    async def _dispatch(self, alerts: list, force: bool,
+                        collected_at: str = None) -> dict:
+        """级别过滤 → 规则级 24h 去重 → 聚合单封 → 触达"""
         eligible = [a for a in alerts
                     if a.get("level") in ALERT_LEVELS]
+        # 信号分组计数(P6-2 面板/返回结构展示)
+        signals = {}
+        for a in eligible:
+            sig = str(a.get("signal") or "redis")
+            signals[sig] = signals.get(sig, 0) + 1
 
-        # ③ 规则级 24h 去重(force 跳过)
+        # 规则级 24h 去重(force 跳过)
         fresh = []
         deduped = 0
         for alert in eligible:
@@ -68,7 +181,7 @@ class SecurityAlertService:
                 continue
             fresh.append(alert)
 
-        # ④ 管理员触达(聚合单封; 逐一发送, 单人失败不阻断)
+        # 管理员触达(聚合单封; 逐一发送, 单人失败不阻断)
         admins = await self._list_admin_ids()
         sent = failed = 0
         if fresh and admins:
@@ -79,8 +192,9 @@ class SecurityAlertService:
         if fresh:
             logger.warning(
                 "security_alert_dispatched eligible=%s deduped=%s "
-                "admins=%s sent=%s failed=%s", len(eligible),
-                deduped, len(admins), sent, failed)
+                "signals=%s admins=%s sent=%s failed=%s",
+                len(eligible), deduped, signals,
+                len(admins), sent, failed)
         return {
             "success": True,
             "alerts": len(alerts),
@@ -90,7 +204,8 @@ class SecurityAlertService:
             "admins": len(admins),
             "sent": sent,
             "failed": failed,
-            "collectedAt": report.get("collectedAt"),
+            "signals": signals,
+            "collectedAt": collected_at,
         }
 
     # --------------------------------------------------------
@@ -139,28 +254,47 @@ class SecurityAlertService:
             return []
 
     # --------------------------------------------------------
-    # 聚合单封站内信
+    # 聚合单封站内信(按信号分组渲染, 超 10 条截断)
     # --------------------------------------------------------
 
-    def _compose(self, alerts: list[dict]) -> tuple[str, str]:
-        """N 条告警 → (标题, 正文): 逐条列明+处置建议+入口指引"""
-        lines = []
+    def _compose(self, alerts: list) -> tuple:
+        """N 条告警 → (标题, 正文): 信号分组+逐条列明+入口指引
+
+        标题口径: 仅 Redis 信号时保持 P5-2 兼容标题
+        ("Redis 体检告警"); 多信号用通用标题("安全告警")。
+        """
+        groups = {}
         for a in alerts:
-            level = str(a.get("level") or "warn")
-            lines.append(
-                f"[{level.upper()}] {a.get('rule')}\n"
-                f"  {a.get('message')}")
-        title = f"[安全运维] Redis 体检告警({len(alerts)} 项)"
+            sig = str(a.get("signal") or "redis")
+            groups.setdefault(sig, []).append(a)
+
+        sections = []
+        for sig, items in groups.items():
+            name = SIGNAL_NAMES.get(sig, sig)
+            lines = []
+            for a in items[:10]:   # 超 10 条截断防单封过长
+                level = str(a.get("level") or "warn")
+                lines.append(
+                    f"[{level.upper()}] {a.get('rule')}\n"
+                    f"  {a.get('message')}")
+            if len(items) > 10:
+                lines.append(f"(另有 {len(items) - 10} 条略)")
+            sections.append(f"■ {name}({len(items)} 项)\n"
+                            + "\n".join(lines))
+        total = len(alerts)
+        if set(groups) == {"redis"}:
+            title = f"[安全运维] Redis 体检告警({total} 项)"
+        else:
+            title = f"[安全运维] 安全告警({total} 项)"
         content = (
-            "Redis 实况体检发现以下风险:\n\n"
-            + "\n\n".join(lines)
-            + "\n\n处置建议见操作指南 §八; 详情查看安全管理面板"
-              "⑦区「Redis 实况体检」。\n"
+            "安全告警汇总:\n\n"
+            + "\n\n".join(sections)
+            + "\n\n处置建议见操作指南; 详情查看安全管理面板。\n"
               "(日度自动巡检/手动触发)")
         return title, content
 
-    async def _broadcast(self, admins: list[int], title: str,
-                         content: str) -> tuple[int, int]:
+    async def _broadcast(self, admins: list, title: str,
+                         content: str) -> tuple:
         """逐一发送(单人失败不阻断), 返回 (sent, failed)"""
         from services.message_service import (
             MessageService, CHANNEL_INMAIL, CATEGORY_SECURITY,
