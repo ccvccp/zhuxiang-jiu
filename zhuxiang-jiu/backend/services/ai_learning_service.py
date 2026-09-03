@@ -84,6 +84,8 @@ SCORER_REGISTRY = {
     "ride_review":                {"label": "代驾评价审评评分", "module": "41智能代驾", "batch": 8},
     # ---- 第九批(42号AI无感开票 P0: 开票决策评分) ----
     "invoice_decision_gate":       {"label": "无感开票决策评分", "module": "42无感开票", "batch": 9},
+    # ---- 第十批(43号AI智能安全管理 P0: 威胁网关评分) ----
+    "security_threat_gate":        {"label": "安全威胁网关评分", "module": "43安全管理", "batch": 10},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -112,6 +114,9 @@ DECISION_THRESHOLDS = {
     # 42号无感开票
     "invoice_decision_gate": [(70.0, "auto_issue"), (50.0, "manual_queue"),
                               (0.0, "reject")],
+    # 43号安全管理(四档处置)
+    "security_threat_gate":  [(70.0, "allow"), (50.0, "throttle"),
+                              (25.0, "challenge"), (0.0, "block")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -170,6 +175,10 @@ def default_weights(scorer_id: str) -> dict:
         # 42号无感开票: 开票决策四因子, 单一事实源在评分器类
         from services.ai_scoring_service import InvoiceDecisionScorer
         return dict(InvoiceDecisionScorer.WEIGHTS)
+    if scorer_id == "security_threat_gate":
+        # 43号安全管理: 威胁网关六因子, 单一事实源在评分器类
+        from services.ai_scoring_service import ThreatGateScorer
+        return dict(ThreatGateScorer.WEIGHTS)
     if scorer_id.startswith("logistics_routing:"):
         from services.ai_scoring_service import _BUDGET_WEIGHTS
         budget = scorer_id.split(":", 1)[1]

@@ -1558,3 +1558,157 @@ class InvoiceDecisionScorer:
 
 
 SCORERS["invoice_decision_gate"] = InvoiceDecisionScorer()
+
+
+# ============================================================
+#  43号·AI智能安全管理 P0: 威胁网关评分(第 26 档案)
+# ============================================================
+
+class ThreatGateScorer:
+    """安全威胁网关评分: 请求威胁分(43号设计文档 §2.2)
+
+    6 因子加权 → 威胁分(0-100, 越高越安全) → 4级 → 处置动作
+    (≥70 allow 放行 / 50-70 throttle 渐进延迟 /
+     25-50 challenge 挑战验证 / <25 block 封禁)。
+
+    高分=可信, action 语义为处置通道; IP 冷启动给中性信誉
+    (ip_reputation 因子), 频次/注入特征由安全网关中间件预计算。
+    """
+
+    WEIGHTS: ClassVar[dict] = {
+        "ip_reputation": 0.20,      # IP 信誉(历史攻击/封禁/冷却)
+        "request_rate": 0.20,        # 频次(IP+会员双维度滑动窗口)
+        "payload_signature": 0.25,   # 注入特征(SQLi/XSS/遍历/扫描器)
+        "path_anomaly": 0.10,        # 路径异常(探针路径/深度遍历)
+        "identity_risk": 0.15,       # 身份风险(未认证打敏感端点/越权)
+        "geo_time": 0.10,            # 时空异常(凌晨高频/密度跳变)
+    }
+    REQUIRED: ClassVar[list] = ["ip", "reputation", "requestCount"]
+
+    async def score(self, ctx: dict) -> dict:
+        """评分入口
+
+        Args:
+            ctx: {
+                ip: str 客户端 IP,
+                memberId: int 会员ID(缺省 0=未认证),
+                reputation: float IP 信誉分(0-100, 冷启动 80),
+                requestCount: int 窗口内请求数,
+                rateLimit: int 窗口上限(缺省 120),
+                payloadSignature: float 注入特征分(0-100, 服务层
+                    预计算, 缺省 100=干净),
+                pathAnomaly: float 路径异常分(0-100, 缺省 100),
+                identityRisk: float 身份风险分(0-100, 缺省 100),
+                hour: int 请求时段(0-23, 缺省取当前)
+            }
+        """
+        weights = await load_effective_weights("security_threat_gate",
+                                               self.WEIGHTS)
+        f = {}
+        # ① IP 信誉: 0-100 线性直通(blacklisted 直通 0)
+        reputation = float(ctx.get("reputation")
+                           if ctx.get("reputation") is not None
+                           else 80.0)
+        f["ip_reputation"] = _factor(
+            "ip_reputation", "IP信誉", _clamp(reputation),
+            weights["ip_reputation"], f"信誉分{reputation:.0f}")
+
+        # ② 频次: 窗口内达到上限 0 分, 80% 起线性衰减
+        count = int(ctx.get("requestCount") or 0)
+        limit = max(1, int(ctx.get("rateLimit") or 120))
+        if count <= limit * 0.8:
+            rate_score = 100.0
+        else:
+            rate_score = _clamp(
+                (1 - (count - limit * 0.8) / (limit * 0.2)) * 100)
+        f["request_rate"] = _factor(
+            "request_rate", "请求频次", rate_score,
+            weights["request_rate"],
+            f"窗口{count}/{limit}")
+
+        # ③ 注入特征: 服务层预计算直通(0-100, 低=有特征)
+        payload = float(ctx.get("payloadSignature")
+                        if ctx.get("payloadSignature") is not None
+                        else 100.0)
+        f["payload_signature"] = _factor(
+            "payload_signature", "注入特征", _clamp(payload),
+            weights["payload_signature"],
+            "干净" if payload >= 100 else f"特征分{payload:.0f}")
+
+        # ④ 路径异常: 服务层预计算直通
+        path_anom = float(ctx.get("pathAnomaly")
+                         if ctx.get("pathAnomaly") is not None
+                         else 100.0)
+        f["path_anomaly"] = _factor(
+            "path_anomaly", "路径异常", _clamp(path_anom),
+            weights["path_anomaly"],
+            "正常" if path_anom >= 100 else f"异常分{path_anom:.0f}")
+
+        # ⑤ 身份风险: 未认证/越权信号直通
+        identity = float(ctx.get("identityRisk")
+                        if ctx.get("identityRisk") is not None
+                        else 100.0)
+        f["identity_risk"] = _factor(
+            "identity_risk", "身份风险", _clamp(identity),
+            weights["identity_risk"],
+            "可信" if identity >= 100 else f"风险分{identity:.0f}")
+
+        # ⑥ 时空异常: 凌晨 0-5 点递减(高危时段), 其余满分
+        hour = int(ctx.get("hour")
+                   if ctx.get("hour") is not None else _now_hour())
+        if 0 <= hour <= 5:
+            geo_score = 40.0
+        else:
+            geo_score = 100.0
+        f["geo_time"] = _factor(
+            "geo_time", "时空异常", geo_score, weights["geo_time"],
+            f"时段{hour}时")
+
+        total_score = sum(x["contribution"] for x in f.values())
+        if total_score >= 70:
+            level_key, action = LEVEL_HIGH, "allow"
+        elif total_score >= 50:
+            level_key, action = LEVEL_MEDIUM, "throttle"
+        elif total_score >= 25:
+            level_key, action = LEVEL_LOW, "challenge"
+        else:
+            level_key, action = LEVEL_LOW, "block"
+
+        # 确定性攻击硬规则(设计文档 §2.2 注): 注入特征/探针路径为
+        # 近零误报信号, 不参与加权合议, 直接触发处置档位下限——
+        #   任一特征命中或探针路径 → 至少 challenge(单次 SQLi 尝试
+        #     即使 IP 干净/频次正常也不放行)
+        #   多类特征叠加(特征分≤0, 如 SQLi+扫描器) → block
+        #   (与 IP 黑名单直封同口径的硬防线, 防单信号被合议淹没)
+        severity = {"allow": 0, "throttle": 1,
+                    "challenge": 2, "block": 3}
+        if payload <= 0.0:
+            hard = "block"
+        elif payload < 100.0 or path_anom < 100.0:
+            hard = "challenge"
+        else:
+            hard = None
+        if hard and severity[hard] > severity[action]:
+            action = hard
+        result = {
+            "success": True, "scorer": "security_threat_gate",
+            "modelVersion": MODEL_VERSION,
+            "ip": ctx.get("ip"),
+            "memberId": ctx.get("memberId"),
+            "score": round(total_score, 1), "level": level_key,
+            "levelName": {LEVEL_HIGH: "可信", LEVEL_MEDIUM: "可疑",
+                          LEVEL_LOW: "高危"}[level_key],
+            "action": action,
+            "actionName": {"allow": "放行", "throttle": "渐进减速",
+                           "challenge": "挑战验证",
+                           "block": "封禁拦截"}[action],
+            "confidence": _confidence(ctx, self.REQUIRED),
+            "factors": list(f.values()), "scoredAt": ts(),
+        }
+        logger.info("ai_threat_gate_scored ip=%s member=%s score=%s "
+                    "action=%s", ctx.get("ip"), ctx.get("memberId"),
+                    result["score"], action)
+        return result
+
+
+SCORERS["security_threat_gate"] = ThreatGateScorer()

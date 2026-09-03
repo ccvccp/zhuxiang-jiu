@@ -27,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from core.auth_middleware import JWTAuthMiddleware
+from core.security_gateway import SecurityGatewayMiddleware
 from core.config import ALLOW_HEADERS, ALLOW_METHODS, CORS_ORIGINS
 from core.errors import register_exception_handlers
 from core.helpers import uptime
@@ -183,6 +184,11 @@ app = FastAPI(
 # 注意: 先于 CORS 添加, 使 CORS 位于外层(预检请求由 CORS 直接响应,
 # 认证错误响应也会带上 CORS 头)
 app.add_middleware(JWTAuthMiddleware)
+
+# 43号安全网关中间件(中层层: 攻击请求在鉴权层之前被评分拦截)
+# 挂载次序(后添加者在外层): CORS(最外) → SecurityGateway → JWT(最内)
+# P0 默认 observe 灰度(只留痕不处置), SECURITY_ENFORCE_LEVEL=enforce 生效
+app.add_middleware(SecurityGatewayMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
