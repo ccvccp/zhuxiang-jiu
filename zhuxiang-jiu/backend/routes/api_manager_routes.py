@@ -312,6 +312,109 @@ async def my_key_usage(
 
 
 # ============================================================
+# P4: AI 智能自治
+# ============================================================
+
+@router.post("/admin/apis/anomalies/detect")
+async def admin_detect_anomalies(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """触发异常检测(基线 vs 当日, 只记录不处置)"""
+    _require_admin(x_role)
+    try:
+        from services.api_intelligence_service import (
+            ApiAnomalyService,
+        )
+        return await ApiAnomalyService().detect()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/apis/anomalies")
+async def admin_list_anomalies(
+    status: str = Query(None, description="状态过滤"
+                                    "(pending/confirmed/"
+                                    "false_positive)"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """异常事件队列(P5 裁决回流真值源)"""
+    _require_admin(x_role)
+    try:
+        from services.api_intelligence_service import (
+            ApiAnomalyService,
+        )
+        return await ApiAnomalyService().list_events(
+            status=status)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/admin/apis/anomalies/{event_id}/decide")
+async def admin_decide_anomaly(
+    event_id: int,
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """异常事件裁决(true=真异常 / false=误报)"""
+    _require_admin(x_role)
+    if not isinstance(body, dict) or \
+            "confirm" not in body:
+        raise HTTPException(status_code=409,
+                            detail="请求体需含 confirm 字段")
+    try:
+        from services.api_intelligence_service import (
+            ApiAnomalyService,
+        )
+        return await ApiAnomalyService().decide_event(
+            event_id, bool(body.get("confirm")))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/apis/keys/{key_id}/recommend")
+async def admin_recommend_limits(
+    key_id: int,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """智能配额推荐(近 7 日 P95 × 1.3 → 档位建议)"""
+    _require_admin(x_role)
+    try:
+        from services.api_intelligence_service import (
+            ApiRecommendService,
+        )
+        return await ApiRecommendService().recommend(key_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/apis/assistant")
+async def api_assistant(
+    body: dict,
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """NL API 助手(会员可用; mock 确定性模板 + real LLM 润色)
+
+    数字永远来自查询层, LLM 仅做编排与润色。
+    """
+    member_id = None
+    if x_member_id:
+        try:
+            member_id = int(x_member_id)
+        except (TypeError, ValueError):
+            member_id = None   # 助手开放——memberId 仅增强意图
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.api_intelligence_service import (
+            ApiAssistantService,
+        )
+        return await ApiAssistantService().answer(
+            str(body.get("q") or ""), member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
 # P2: 流量治理(管理面)
 # ============================================================
 

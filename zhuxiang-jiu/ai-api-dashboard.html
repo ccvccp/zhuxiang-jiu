@@ -205,6 +205,31 @@
         </div>
     </div>
 
+    <!-- ④ AI 自治（P4: 异常检测/配额推荐/NL 助手） -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>④ AI 自治（异常检测 / 配额推荐 / NL 助手）</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn ghost" onclick="detectAnomalies()">检测异常</button>
+                </div>
+            </div>
+            <div id="anomalyList"></div>
+            <div style="margin-top:12px;border-top:1px solid
+                var(--color-border,#eee);padding-top:10px">
+                <b style="font-size:12px">NL 助手（mock 确定性模板 / real LLM 润色——数字永远来自查询层）</b>
+                <div class="dash-toolbar" style="margin:8px 0">
+                    <input id="assistantQ" size="36"
+                        placeholder="如: 哪个接口最慢 / 有没有物流相关的接口">
+                    <button class="dash-btn" onclick="askAssistant()">提问</button>
+                    <span id="assistantMode" style="font-size:11px;color:#999"></span>
+                </div>
+                <div id="assistantAnswer" class="sync-diff"
+                    style="display:block;background:var(--color-bg-sub,#f7f7f7);
+                    min-height:36px">输入问题后点「提问」</div>
+            </div>
+        </div>
+    </div>
+
     <div class="note-bar">
         后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
         台账来自路由自发现(重扫幂等, 人工修正不被覆盖) ·

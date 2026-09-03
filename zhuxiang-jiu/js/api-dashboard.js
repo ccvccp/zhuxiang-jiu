@@ -262,6 +262,63 @@ async function loadHealth() {
     } catch (e) { showError(e.message); }
 }
 
+/* ============================================================
+ * ④ AI 自治(P4: 异常检测 + NL 助手)
+ * ============================================================ */
+
+var KIND_NAMES = { spike: '尖刺', drop: '骤降',
+                   error_burst: '错误激增' };
+
+async function detectAnomalies() {
+    try {
+        var r = await fetchJson(
+            api('/api/api-manager/admin/apis/anomalies/detect'),
+            { method: 'POST', headers: headers() }, '异常检测');
+        var events = r.events || [];
+        var html = events.length
+            ? events.map(function (e) {
+                return '<div class="redis-alert warn">[' +
+                    (KIND_NAMES[e.kind] || e.kind) + '] ' +
+                    esc(e.summary) +
+                    ' <button class="btn-mini" onclick="decideAnomaly(' +
+                    e.eventId + ',true)">真异常</button>' +
+                    ' <button class="btn-mini ghost" onclick="decideAnomaly(' +
+                    e.eventId + ',false)">误报</button></div>';
+            }).join('')
+            : '<div class="dash-empty">无异常(基线 vs 当日正常)</div>';
+        document.getElementById('anomalyList').innerHTML = html;
+        showInfo('检测完成: ' + (r.detected || 0) + ' 个异常');
+    } catch (e) { showError(e.message); }
+}
+
+async function decideAnomaly(eventId, confirm) {
+    try {
+        await fetchJson(
+            api('/api/api-manager/admin/apis/anomalies/' +
+                eventId + '/decide'),
+            { method: 'POST', headers: headers(),
+              body: JSON.stringify({ confirm: confirm }) },
+            '事件裁决');
+        showInfo('已裁决: ' + (confirm ? '真异常' : '误报'));
+    } catch (e) { showError(e.message); }
+}
+
+async function askAssistant() {
+    var q = (document.getElementById('assistantQ').value || '').trim();
+    if (!q) { showError('请输入问题'); return; }
+    try {
+        var r = await fetchJson(
+            api('/api/api-manager/apis/assistant'),
+            { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ q: q }) }, 'NL 助手');
+        document.getElementById('assistantAnswer').textContent =
+            r.answer || '(空回答)';
+        document.getElementById('assistantMode').textContent =
+            '模式: ' + (r.mode || 'mock') +
+            ' · 意图: ' + (r.intent || '-');
+    } catch (e) { showError(e.message); }
+}
+
 /* 初始化 */
 (function init() {
     document.getElementById('apiBase').value = state.apiBase;
