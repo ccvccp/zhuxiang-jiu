@@ -335,6 +335,18 @@ class Security43Service:
 
         # ② 特征预计算(query 需 URL 解码, 攻击载荷通常编码传输)
         reputation = await self.ensure_reputation(ip)
+        # ②' P4-3 威胁情报联动: 命中外源情报段 → 信誉降档
+        #    suspicious(≤30), 不直封(防共享出口误伤; 申诉兜底);
+        #    未命中原样(零影响); 异常不阻断网关
+        try:
+            from services.threatintel_service import (
+                ThreatIntelService,
+            )
+            reputation = await ThreatIntelService(
+                self.repo).apply_to_reputation(ip, reputation)
+        except Exception as exc:
+            logger.warning("security_threatintel_skip ip=%s: %s",
+                           ip, exc)
         query_decoded = unquote_plus(query or "")
         scan_text = " ".join(filter(
             None, [path, query_decoded, body_text, ua]))

@@ -479,6 +479,63 @@ async def admin_d5_report(
         raise _handle(e) from e
 
 
+# ============================================================
+#  管理端·威胁情报(P4-3, Firehol netset 导入)
+# ============================================================
+
+class ThreatIntelImportRequest(PydBaseModel):
+    content: str = Field(..., min_length=1, max_length=2_000_000,
+                          description="netset 文本(IP/CIDR 逐行,"
+                          "支持 # 注释)")
+    source: str = Field("firehol_level1", max_length=64,
+                        description="情报源标识")
+    replace: bool = Field(True, description="全量替换(默认)")
+
+
+@router.post("/admin/threatintel/import")
+async def admin_threatintel_import(
+    body: ThreatIntelImportRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """导入威胁情报 netset(Firehol 格式, 幂等可重复)"""
+    _require_admin(x_role)
+    try:
+        from services.threatintel_service import ThreatIntelService
+        return await ThreatIntelService().import_netset(
+            body.content, source=body.source,
+            replace=body.replace)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/threatintel/stats")
+async def admin_threatintel_stats(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """威胁情报统计(段数/来源分布/最近导入)"""
+    _require_admin(x_role)
+    try:
+        from services.threatintel_service import ThreatIntelService
+        return await ThreatIntelService().stats()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/threatintel/check")
+async def admin_threatintel_check(
+    ip: str = Query(..., description="待查询 IP"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """单 IP 情报命中查询(命中返回段信息)"""
+    _require_admin(x_role)
+    try:
+        from services.threatintel_service import ThreatIntelService
+        hit = await ThreatIntelService().check_ip(ip)
+        return {"success": True, "ip": ip, "hit": hit}
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.post("/admin/learning/collect")
 async def admin_learning_collect(
     x_role: str = Header(default="", alias="X-Role"),

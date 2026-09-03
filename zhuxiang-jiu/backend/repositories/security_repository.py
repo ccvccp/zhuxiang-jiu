@@ -451,6 +451,66 @@ class Security43Repository:
                                 "scheduler:stats", record)
 
     # --------------------------------------------------------
+    # P4-3: 威胁情报表(外源 CIDR 段, 命中降档不直封防误伤)
+    # 存储: Hash field=CIDR(如 1.2.3.0/24), value=导入元信息
+    # 匹配: ipaddress 标准库线性扫段(段数少; >10k 段改前缀树)
+    # --------------------------------------------------------
+
+    async def get_threatintel(self, cidr: str) -> dict | None:
+        return await self._get(self.TABLE_POSTURE,
+                               f"threatintel:{cidr}")
+
+    async def save_threatintel(self, cidr: str,
+                               meta: dict) -> dict:
+        return await self._save(self.TABLE_POSTURE,
+                               f"threatintel:{cidr}", meta)
+
+    async def list_threatintel(self,
+                               limit: int = 10000) -> list[dict]:
+        records = await self._list(self.TABLE_POSTURE, limit)
+        return [r for r in records
+                if str(r.get("actorKey", "")).startswith(
+                    "threatintel:")]
+
+    async def clear_threatintel(self) -> int:
+        """清空全部情报段(重新导入前调用)"""
+        records = await self.list_threatintel()
+        for r in records:
+            key = str(r.get("actorKey", ""))[len("threatintel:"):]
+            if is_redis_mode():
+                client = await get_redis_client()
+                await client.delete(_k(
+                    "security43", self.TABLE_POSTURE,
+                    f"threatintel:{key}"))
+            else:
+                self._ensure_store()
+                self.store[self.TABLE_POSTURE].pop(
+                    f"threatintel:{key}", None)
+        return len(records)
+
+    async def match_threatintel(self, ip: str) -> dict | None:
+        """IP 是否命中威胁情报段(返回命中的段信息)
+
+        线性扫描 + ipaddress 库匹配; 段数少(<10k)可接受,
+        大规模导入后改前缀树(P5 优化)。
+        """
+        import ipaddress
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return None
+        for r in await self.list_threatintel():
+            cidr = str(r.get("actorKey", ""))[len("threatintel:"):]
+            try:
+                if addr in ipaddress.ip_network(cidr):
+                    return {"cidr": cidr, **{
+                        k: v for k, v in r.items()
+                        if k != "actorKey"}}
+            except ValueError:
+                continue
+        return None
+
+    # --------------------------------------------------------
     # P3-3: 会员地理历史(geo velocity 异地跳变, 滚动窗口)
     # --------------------------------------------------------
 
