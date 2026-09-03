@@ -303,7 +303,7 @@ class Security43Service:
     async def process_request(
         self, ip: str, method: str = "GET", path: str = "/",
         query: str = "", body_text: str = "", ua: str = "",
-        member_id: int = 0, hour: int = None,
+        member_id: int = 0, hour: int = None, device_id: str = "",
     ) -> dict:
         """单请求安全决策(网关中间件每请求调用)
 
@@ -314,14 +314,15 @@ class Security43Service:
         """
         try:
             return await self._do_process(
-                ip, method, path, query, body_text, ua, member_id, hour)
+                ip, method, path, query, body_text, ua, member_id,
+                hour, device_id)
         except Exception as exc:  # fail-open: 安全网关不能锁死网站
             logger.exception("security_gateway_error ip=%s: %s", ip, exc)
             return {"action": ACTION_ALLOW, "scoring": None,
                     "event": None, "enforced": False, "blocked": False}
 
     async def _do_process(self, ip, method, path, query, body_text,
-                          ua, member_id, hour) -> dict:
+                          ua, member_id, hour, device_id="") -> dict:
         # ① 封禁表直查(blacklisted 直封口径, enforce 生效)
         enforce = get_enforce_level() == "enforce"
         if enforce and await self.is_blocked(ip):
@@ -340,6 +341,33 @@ class Security43Service:
         payload_score = scan_payload(scan_text)
         path_score = scan_path(path)
         identity_score = scan_identity(path, member_id)
+
+        # ②'' P3-3 geo_device 信号(设备指纹 + 异地跳变, 只降不升):
+        #     - 陌生设备打敏感端点 → 降分(复用 39号信任设备表)
+        #     - geo 离线库可用时异地跳变 → 降分(缺失静默跳过)
+        #     异常不阻断网关(fail-open 同 UEBA 口径)
+        try:
+            geo_device_score = 100.0
+            if member_id:
+                from services.geoip_service import (
+                    device_risk_signal, geo_velocity_signal,
+                )
+                dev = await device_risk_signal(
+                    member_id, device_id or "", path)
+                if dev.get("hasSignal"):
+                    geo_device_score = min(
+                        geo_device_score,
+                        float(dev["score"]))
+                geo = await geo_velocity_signal(member_id, ip)
+                if geo.get("hasSignal"):
+                    geo_device_score = min(
+                        geo_device_score,
+                        float(geo["score"]))
+            if geo_device_score < 100.0:
+                identity_score = min(identity_score, geo_device_score)
+        except Exception as exc:
+            logger.warning("security_geo_device_skip ip=%s: %s",
+                           ip, exc)
 
         # ②' UEBA(P2): 网关顺带行为采集 + 四检测器偏离合议
         #     (零侵入: 计数直方图; 偏离注入 identity_risk 只降不升;

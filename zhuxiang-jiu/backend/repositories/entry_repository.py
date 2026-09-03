@@ -206,6 +206,8 @@ class EntryRepository:
 
     async def save_device(self, member_id: int, record: dict) -> dict:
         record_id = f"{member_id}:{record['deviceId']}"
+        # memberId 落记录体内(list_devices 过滤依据)
+        record = {**record, "memberId": int(member_id)}
         return await self._save(self.TABLE_DEVICES, record_id, record)
 
     async def get_device(self, member_id: int,

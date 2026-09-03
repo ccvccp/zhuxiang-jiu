@@ -437,3 +437,48 @@ class Security43Repository:
 
     async def save_posture(self, record: dict) -> dict:
         return await self._save(self.TABLE_POSTURE, "global", record)
+
+    # --------------------------------------------------------
+    # P3-3: 会员地理历史(geo velocity 异地跳变, 滚动窗口)
+    # --------------------------------------------------------
+
+    async def record_member_geo(self, member_id: int,
+                                ip: str) -> list[str]:
+        """记录可定位 IP(去重, 滚动窗口 GEO_VELOCITY_WINDOW 秒)"""
+        from datetime import datetime, UTC
+        cutoff = datetime.now(UTC).timestamp() - 7200
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("security43", "geo", int(member_id))
+            # ZSET: member=ip, score=时间戳
+            await client.zadd(key, {ip: datetime.now(UTC).timestamp()})
+            await client.zremrangebyscore(key, "-inf", cutoff)
+            await client.expire(key, 7200)
+            return [m.decode() if isinstance(m, bytes) else m
+                    for m in await client.zrange(key, 0, -1)]
+        self._ensure_store()
+        bucket = self.store.setdefault("_security43_geo", {})
+        now = datetime.now(UTC).timestamp()
+        history = [(t, old_ip) for t, old_ip
+                   in bucket.get(int(member_id), [])
+                   if t >= cutoff]
+        if not any(old_ip == ip for _, old_ip in history):
+            history.append((now, ip))
+        bucket[int(member_id)] = history
+        return [old_ip for _, old_ip in history]
+
+    async def get_member_geo_history(self,
+                                     member_id: int) -> list[str]:
+        """查询会员滚动窗口内的可定位 IP 历史(不记录)"""
+        from datetime import datetime, UTC
+        cutoff = datetime.now(UTC).timestamp() - 7200
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("security43", "geo", int(member_id))
+            members = await client.zrangebyscore(key, cutoff, "+inf")
+            return [m.decode() if isinstance(m, bytes) else m
+                    for m in members]
+        self._ensure_store()
+        history = self.store.get("_security43_geo", {}).get(
+            int(member_id), [])
+        return [old_ip for t, old_ip in history if t >= cutoff]

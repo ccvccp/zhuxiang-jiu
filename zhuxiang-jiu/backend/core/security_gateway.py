@@ -144,7 +144,11 @@ class SecurityGatewayMiddleware:
 
         # 提取请求要素
         client = scope.get("client") or ("", 0)
-        ip = str(client[0] or "unknown")
+        direct_ip = str(client[0] or "unknown")
+        # P3-3: XFF 反代头第一跳优先(云部署生效, 直连场景不变)
+        from services.geoip_service import extract_client_ip
+        ip = extract_client_ip(
+            _get_header(scope, "x-forwarded-for"), direct_ip)
         query = scope.get("query_string", b"").decode(
             "latin-1", errors="ignore")
         ua = _get_header(scope, "user-agent")
@@ -153,6 +157,8 @@ class SecurityGatewayMiddleware:
             member_id = int(member_raw) if member_raw else 0
         except ValueError:
             member_id = 0
+        # P3-3: 设备指纹头(39号登录时前端生成并登记)
+        device_id = _get_header(scope, "x-device-id")
 
         # body 预读(JSON/表单类请求扫描后回放)
         body_text = ""
@@ -173,7 +179,8 @@ class SecurityGatewayMiddleware:
         # 评分决策(fail-open: service 内部已兜底异常)
         result = await self._service.process_request(
             ip, method=method, path=path, query=query,
-            body_text=body_text, ua=ua, member_id=member_id)
+            body_text=body_text, ua=ua, member_id=member_id,
+            device_id=device_id)
         action = result.get("action") or "allow"
 
         # 响应侧观测(P3-1): 所有放行路径经包装器捕获状态码,

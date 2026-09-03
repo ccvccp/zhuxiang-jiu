@@ -66,11 +66,18 @@ services:
       - CAPTCHA_PROVIDER=${CAPTCHA_PROVIDER:-geetest}
       - CAPTCHA_ID=${CAPTCHA_ID:-}
       - CAPTCHA_KEY=${CAPTCHA_KEY:-}
+      # ---- 43号 P3-3 GeoIP 离线库(mmdb 文件挂载, 缺失则 geo 静默关闭) ----
+      # GeoLite2-City.mmdb 放宿主机 ./data/ 下(MaxMind 免费下载, 不入 git)
+      - GEOIP_DB_PATH=${GEOIP_DB_PATH:-/app/data/GeoLite2-City.mmdb}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      # 43号 P3-3 GeoIP 离线库(宿主机 ./data/GeoLite2-City.mmdb,
+      # MaxMind 免费下载; 缺失时 geo 功能静默关闭零影响)
+      - ./data:/app/data:ro
     # 内存限制: 给 backend 充足空间(pip install + uvicorn 启动峰值约 400MB)
     # mem_limit: 容器内存硬上限(cgroup)
     # memswap_limit: 内存 + swap 上限(允许借用 swap 缓冲峰值)
