@@ -344,6 +344,7 @@ class Security43Service:
         # ②' UEBA(P2): 网关顺带行为采集 + 四检测器偏离合议
         #     (零侵入: 计数直方图; 偏离注入 identity_risk 只降不升;
         #      冷启动无基线完全豁免; UEBA off 跳过)
+        #     P3-1: D4 输入实时查询(24h 403/401 加权堆积)
         behavior_deviation = None
         try:
             from services.ueba_service import get_ueba_mode
@@ -354,9 +355,11 @@ class Security43Service:
                             else datetime.now(UTC).hour)
                 current_ops = await ueba.record_behavior(
                     member_id, path, hour=hour_now)
+                forbidden_hits = await self.get_forbidden_hits(member_id)
                 behavior_deviation = await ueba.compute_deviation(
                     member_id, path, hour=hour_now,
-                    current_hour_ops=current_ops)
+                    current_hour_ops=current_ops,
+                    forbidden_hits=forbidden_hits)
                 if behavior_deviation is not None:
                     identity_score = min(
                         identity_score,
@@ -461,6 +464,39 @@ class Security43Service:
                 "event": event, "enforced": enforced,
                 "blocked": action == ACTION_BLOCK and enforce,
                 "behaviorAlert": behavior_alert_event}
+
+    # --------------------------------------------------------
+    # P3-1: 响应侧观测(D4 试探偏离——403/401 堆积实时统计)
+    # --------------------------------------------------------
+
+    async def observe_response(self, ip: str, member_id: int,
+                              status_code: int | None) -> None:
+        """网关放行后的响应钩子: 403/401 计入会员 24h 加权堆积
+
+        由 SecurityGatewayMiddleware._finish 调用(fail-open,
+        异常由调用方兜底)。仅统计带身份的请求(未认证 401 归
+        member 0 不累积——网关层已由 identity_risk 因子覆盖)。
+        """
+        if status_code not in (401, 403):
+            return
+        weight = 1.0 if status_code == 403 else 0.5
+        if not member_id:
+            # 未认证请求打敏感端点: 已由 scan_identity 覆盖;
+            # 此处仅记 IP 维度日志供观察
+            logger.info("security_unauth_forbidden ip=%s status=%s",
+                        ip, status_code)
+            return
+        total = await self.repo.count_forbidden(member_id,
+                                                weight=weight)
+        logger.info("security_forbidden_recorded ip=%s member=%s "
+                    "status=%s total=%.1f", ip, member_id,
+                    status_code, total)
+
+    async def get_forbidden_hits(self, member_id: int) -> float:
+        """查询会员 24h 加权 403/401 堆积数(D4 输入)"""
+        if not member_id:
+            return 0.0
+        return await self.repo.get_forbidden(member_id)
 
     async def _try_recover(self, ip: str) -> None:
         """正常流量冷却恢复(fail-open: 恢复失败不影响请求)"""

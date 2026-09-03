@@ -282,7 +282,7 @@ class UebaService:
     async def compute_deviation(self, member_id: int, path: str,
                                 hour: int = None,
                                 current_hour_ops: int = None,
-                                forbidden_hits: int = 0) -> dict | None:
+                                forbidden_hits: float = 0.0) -> dict | None:
         """四检测器合议 → 行为偏离画像(无基线返回 None 豁免)
 
         Args:
@@ -290,7 +290,8 @@ class UebaService:
             path: 当前请求路径(D1/D3)
             hour: 请求时段(缺省当前)
             current_hour_ops: 该会员当前小时操作数(D2, 缺省实时查)
-            forbidden_hits: 24h 内 403 堆积数(D4, 网关响应侧统计)
+            forbidden_hits: 24h 内 403/401 加权堆积数(D4, 网关
+                响应侧统计; 403 计 1.0 / 401 计 0.5)
 
         Returns:
             {score, deviations: [{code, detail}], baseline} 或 None
@@ -337,11 +338,11 @@ class UebaService:
             deviations.append({
                 "code": "D3_sensitive_first",
                 "detail": f"首次触碰敏感功能{module}"})
-        # D4 试探偏离: 403 堆积
-        if forbidden_hits >= 3:
+        # D4 试探偏离: 403/401 加权堆积(阈值 3.0)
+        if forbidden_hits >= 3.0:
             deviations.append({
                 "code": "D4_probe",
-                "detail": f"24h内403堆积{forbidden_hits}次"})
+                "detail": f"24h内403/401堆积{forbidden_hits:g}次"})
 
         points = 0
         for d in deviations:

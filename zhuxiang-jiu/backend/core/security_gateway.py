@@ -96,6 +96,24 @@ class _BodyPeeker:
         return await self._receive()
 
 
+class _SendWrapper:
+    """响应侧观测包装器(P3-1): 捕获 http.response.start 的状态码
+
+    其余 ASGI 消息原样透传(不修改响应语义);
+    本项目无 SSE/流式端点, 包装层零侵入。
+    """
+
+    def __init__(self, send):
+        self._send = send
+        self.status_code = None
+
+    async def __call__(self, message):
+        if (message.get("type") == "http.response.start"
+                and self.status_code is None):
+            self.status_code = message.get("status")
+        await self._send(message)
+
+
 class SecurityGatewayMiddleware:
     """安全网关中间件(纯 ASGI, 43号设计文档 §2.1)"""
 
@@ -158,9 +176,14 @@ class SecurityGatewayMiddleware:
             body_text=body_text, ua=ua, member_id=member_id)
         action = result.get("action") or "allow"
 
+        # 响应侧观测(P3-1): 所有放行路径经包装器捕获状态码,
+        # 放行后供 D4 试探偏离(403/401 堆积)实时统计
+        wrapper = _SendWrapper(send)
+
         # observe/shadow 灰度: 只留痕不处置
         if not result.get("enforced"):
-            await self.app(scope, downstream_receive, send)
+            await self._finish(scope, downstream_receive, wrapper,
+                               ip, member_id)
             return
 
         # enforce 四档处置
@@ -170,7 +193,8 @@ class SecurityGatewayMiddleware:
                           or 60)
             delay = min(3.0, max(1.0, (70.0 - score) / 10.0))
             await asyncio.sleep(delay)
-            await self.app(scope, downstream_receive, send)
+            await self._finish(scope, downstream_receive, wrapper,
+                               ip, member_id)
             return
         if action == "challenge":
             await self._send_challenge(send, ip, result)
@@ -179,7 +203,24 @@ class SecurityGatewayMiddleware:
             await self._send_block(send, ip, result)
             return
 
-        await self.app(scope, downstream_receive, send)
+        await self._finish(scope, downstream_receive, wrapper,
+                           ip, member_id)
+
+    async def _finish(self, scope, receive, wrapper: _SendWrapper,
+                      ip: str, member_id: int):
+        """透传业务响应, 完成后观测状态码计入 D4 统计
+
+        fail-open: 响应钩子异常不影响已发出的响应。
+        """
+        try:
+            await self.app(scope, receive, wrapper)
+        finally:
+            try:
+                await self._service.observe_response(
+                    ip, member_id, wrapper.status_code)
+            except Exception as exc:
+                logger.warning("security_response_hook_skip ip=%s: %s",
+                               ip, exc)
 
     # --------------------------------------------------------
     # 响应构造(纯 ASGI, 不依赖 starlette)

@@ -325,6 +325,51 @@ class Security43Repository:
         return len(stamps)
 
     # --------------------------------------------------------
+    # P3-1: 403/401 堆积计数(D4 试探偏离, 24h 滚动窗口)
+    # 401 权重减半(鉴权失败同为试探信号, 计 0.5)
+    # --------------------------------------------------------
+
+    async def count_forbidden(self, member_id: int,
+                              weight: float = 1.0,
+                              window: int = 86400) -> float:
+        """记一次鉴权失败并返回 24h 加权堆积数
+
+        Args:
+            weight: 403 计 1.0 / 401 计 0.5
+        """
+        dimension = f"forbidden:{int(member_id)}"
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("security43", "rate", dimension)
+            count = await client.incrbyfloat(key, weight)
+            ttl = await client.ttl(key)
+            if ttl < 0:
+                await client.expire(key, window)
+            return float(count)
+        self._ensure_store()
+        bucket = self.store.setdefault("_security43_forbidden", {})
+        now = _now_ts()
+        samples = [(t, w) for t, w in bucket.get(dimension, [])
+                   if now - t < window]
+        samples.append((now, weight))
+        bucket[dimension] = samples
+        return sum(w for _, w in samples)
+
+    async def get_forbidden(self, member_id: int,
+                            window: int = 86400) -> float:
+        """查询 24h 加权堆积数(不记数)"""
+        dimension = f"forbidden:{int(member_id)}"
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("security43", "rate", dimension))
+            return float(raw) if raw else 0.0
+        self._ensure_store()
+        bucket = self.store.get("_security43_forbidden", {})
+        now = _now_ts()
+        return sum(w for t, w in bucket.get(dimension, [])
+                   if now - t < window)
+
+    # --------------------------------------------------------
     # UEBA(P2): 三维行为计数(memberId × hour × module, 直方图)
     # 非全量流水——只记计数, 防存储爆炸(设计文档 §2.1)
     # --------------------------------------------------------
