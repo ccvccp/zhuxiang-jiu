@@ -284,7 +284,9 @@ async function loadIps() {
                       blacklisted: ['red', '黑名单'] };
     var rows = (b.ips || []).slice(0, 30).map(function (r) {
         var m = statusMap[r.status] || ['weak', r.status];
+        // P5-5: 归属地列(geo 库可用时城市名, 无库显示 -)
         return '<tr><td>' + esc(r.ip) + '</td><td>' +
+            esc(r.geoCity || '-') + '</td><td>' +
             (r.score == null ? '-' : r.score) + '</td><td>' +
             '<span class="badge ' + m[0] + '">' + m[1] + '</span>' +
             '</td><td>' + (r.attackCount || 0) + '</td><td>' +

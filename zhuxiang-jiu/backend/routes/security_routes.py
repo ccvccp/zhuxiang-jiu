@@ -232,10 +232,20 @@ async def admin_decide_event(
 async def admin_ips(
     x_role: str = Header(default="", alias="X-Role"),
 ):
-    """IP 信誉列表(三态分布)"""
+    """IP 信誉列表(三态分布 + P5-5 归属地)"""
     _require_admin(x_role)
     try:
         reps = await _service.list_reputations()
+        # P5-5: 归属地列(geo 库可用时 city_name; 仅列表渲染
+        # 时调用 lookup_geo——LRU 缓存兜底, 不进网关热路径)
+        try:
+            from services.geoip_service import lookup_geo
+            for rep in reps:
+                geo = lookup_geo(str(rep.get("ip") or ""))
+                rep["geoCity"] = (
+                    (geo or {}).get("city_name") or None)
+        except Exception:
+            pass
         return {"success": True, "total": len(reps),
                 "ips": reps}
     except Exception as e:

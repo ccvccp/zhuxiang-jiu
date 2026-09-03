@@ -92,6 +92,9 @@ services:
       - SECURITY_ABUSEIPDB_KEY=${SECURITY_ABUSEIPDB_KEY:-}
       # 配额红线(默认 900 预留 100 手动余量; 超限走 fallback)
       - SECURITY_ABUSEIPDB_DAILY_LIMIT=${SECURITY_ABUSEIPDB_DAILY_LIMIT:-900}
+      # ---- 43号 P5-5 GeoLite2 距离跳变阈值(mmdb 就位即启用) ----
+      # 2h 窗口位移超过此值(km)触发异地跳变信号; 同城宽带 ~50km 不误杀
+      - SECURITY_GEO_VELOCITY_KM=${SECURITY_GEO_VELOCITY_KM:-500}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
