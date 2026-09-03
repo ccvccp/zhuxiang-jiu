@@ -195,6 +195,9 @@ class ApiRegistryService:
                           status: str = None) -> dict:
         """人工修正归属/状态(module 修正后不被重扫覆盖)
 
+        P1 联动: status 转换维护 published 索引(Key 面判定的
+        O(1) 数据源) + 失效中间件缓存(即时生效)。
+
         Raises:
             ValueError: 参数缺失/非法 status
             KeyError: apiId 不存在
@@ -216,6 +219,15 @@ class ApiRegistryService:
             changes["status"] = status
         updated = await self.repo.update_entry_fields(
             rec["method"], rec["path"], changes)
+        # P1: published 索引联动(published 入索引, 其余状态出)
+        if status is not None:
+            await self.repo.set_published(
+                rec["method"], rec["path"],
+                status == "published")
+            from core.api_key_middleware import (
+                invalidate_published_cache,
+            )
+            invalidate_published_cache()
         logger.info("api44_registry_patched apiId=%s changes=%s",
                     api_id, list(changes))
         return updated

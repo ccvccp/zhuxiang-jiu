@@ -27,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from core.auth_middleware import JWTAuthMiddleware
+from core.api_key_middleware import ApiKeyMiddleware
 from core.security_gateway import SecurityGatewayMiddleware
 from routes.security_routes import register_security_routes
 from routes.api_manager_routes import register_api_manager_routes
@@ -186,6 +187,12 @@ app = FastAPI(
 # 注意: 先于 CORS 添加, 使 CORS 位于外层(预检请求由 CORS 直接响应,
 # 认证错误响应也会带上 CORS 头)
 app.add_middleware(JWTAuthMiddleware)
+
+# 44号 API Key 消费方凭证网关(默认 off 全直通, API_MANAGER_MODE=on 开启)
+# 挂载次序(后添加者在外层): CORS(最外) → SecurityGateway → ApiKey(44号)
+#   → JWT(最内)——ApiKey 先于 JWTAuth 注入身份(Key 面双头校验通过后
+#   inject_identity, compat 模式无 Authorization 头时透传注入值)
+app.add_middleware(ApiKeyMiddleware)
 
 # 43号安全网关中间件(中层层: 攻击请求在鉴权层之前被评分拦截)
 # 挂载次序(后添加者在外层): CORS(最外) → SecurityGateway → JWT(最内)

@@ -91,6 +91,11 @@ services:
       # 单次导入段数上限(部署态默认 200000 支持聚合全量 ~180k;
       # 代码默认 20000 兼容——提额为显式运维决策)
       - SECURITY_THREATINTEL_MAX_CIDRS=${SECURITY_THREATINTEL_MAX_CIDRS:-200000}
+      # ---- 44号 API 智能管理(P1: Key 面总开关/审批开关, 默认零影响) ----
+      # on=开启 API Key 消费方凭证网关(仅拦截台账 status=published 的 API)
+      - API_MANAGER_MODE=${API_MANAGER_MODE:-off}
+      # on=申请即批秒级发放(默认); off=进管理队列人工批
+      - API_KEY_AUTO_APPROVE=${API_KEY_AUTO_APPROVE:-on}
       # ---- 43号 P5-4 AbuseIPDB 单 IP 实时情报(默认 mock 无 key 可测) ----
       # 三态: mock(确定性三档) / real(Bearer key) / mock_fallback(失败回退)
       - SECURITY_ABUSEIPDB_MODE=${SECURITY_ABUSEIPDB_MODE:-mock}
