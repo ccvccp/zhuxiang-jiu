@@ -72,6 +72,12 @@ services:
       # ---- 43号 P4-2 安全调度器(UEBA基线日度重建, 默认 off 主动开启) ----
       - SECURITY_SCHEDULER_MODE=${SECURITY_SCHEDULER_MODE:-off}
       - SECURITY_UEBA_REBUILD_INTERVAL=${SECURITY_UEBA_REBUILD_INTERVAL:-86400}
+      # ---- 43号 P5-1 D5 强制联动(默认 off——三条件达标后人工开启) ----
+      # 达标口径: GET /admin/reports/d5(观察期≥14天+误报率<5%+样本≥20)
+      # on 语义: D5 命中且威胁分∈边界区 → 升档 challenge(永不单独 block)
+      - SECURITY_D5_ENFORCE=${SECURITY_D5_ENFORCE:-off}
+      # 联动边界区(威胁分窗口, 默认挑战档 25-50; 可调如 50-70 覆盖减速档)
+      - SECURITY_D5_ENFORCE_BAND=${SECURITY_D5_ENFORCE_BAND:-25-50}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
