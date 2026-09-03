@@ -23,6 +23,7 @@
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -48,6 +49,27 @@ def api_manager_enabled() -> bool:
 def invalidate_published_cache() -> None:
     """状态变更后失效 published 缓存(即时生效, 不等 TTL)"""
     _PUBLISHED_CACHE["at"] = 0.0
+
+
+async def _send_rate_limited(send, detail: str,
+                             retry_after: int) -> None:
+    """429 响应(Retry-After 标准头 + JSON body 含 retryAfter)"""
+    body = json.dumps(
+        {"detail": detail, "retryAfter": retry_after},
+        ensure_ascii=False).encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": 429,
+        "headers": [
+            (b"content-type",
+             b"application/json; charset=utf-8"),
+            (b"content-length",
+             str(len(body)).encode("latin-1")),
+            (b"retry-after",
+             str(retry_after).encode("latin-1")),
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
 
 
 def _template_to_regex(template: str):
@@ -115,6 +137,26 @@ class ApiKeyMiddleware:
                 await _send_json_error(
                     send, 401,
                     verdict.get("reason", "API Key 无效"))
+                return
+
+            # P2: 双限检查(套餐/覆盖 → QPS 窗口 → 日配额;
+            # 限流失败不消耗日配额, 被拒计入 QPS 窗口)
+            from services.api_rate_limit_service import (
+                check_rate_limit,
+            )
+            limits = await check_rate_limit(
+                verdict.get("keyId"), verdict.get("tier"),
+                verdict.get("customQps"),
+                verdict.get("customDaily"))
+            if not limits.get("allowed"):
+                logger.info(
+                    "api44_rate_limited keyId=%s type=%s "
+                    "retryAfter=%s", verdict.get("keyId"),
+                    limits.get("limitType"),
+                    limits.get("retryAfter"))
+                await _send_rate_limited(
+                    send, limits["detail"],
+                    limits["retryAfter"])
                 return
 
             # 通过: 注入身份(先移除客户端伪造头——同 JWTAuth

@@ -239,6 +239,80 @@ async def admin_revoke_key(
         raise _handle(e) from e
 
 
+# ============================================================
+# P2: 流量治理(管理面)
+# ============================================================
+
+@router.get("/admin/apis/tiers")
+async def admin_tier_view(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """套餐视图(三档限值 + 各档在用 Key 数)
+
+    在用口径: status=active 的 Key(吊销/过期不占档)。
+    """
+    _require_admin(x_role)
+    from services.api_rate_limit_service import TIERS
+    try:
+        keys = await _key_service.admin_list_keys()
+        active = [k for k in keys.get("keys") or []
+                  if k.get("status") == "active"]
+        tiers = {}
+        for name, cfg in TIERS.items():
+            tiers[name] = {
+                **cfg,
+                "activeKeys": sum(
+                    1 for k in active
+                    if (k.get("tier") or "free") == name),
+            }
+        return {"success": True, "default": "free",
+                "tiers": tiers,
+                "customQpsMax": 10000,
+                "customDailyMax": 10_000_000}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.patch("/admin/apis/keys/{key_id}/limits")
+async def admin_set_key_limits(
+    key_id: int,
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """限值调参(套餐切换 + per-Key 覆盖; 调参留痕即时生效)
+
+    body: {tier?, customQps?, customDaily?}——覆盖值传 null 清除。
+    """
+    _require_admin(x_role)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        # null = 清除覆盖(显式区分缺省与清除)
+        if "customQps" in body and body["customQps"] is None:
+            r = await _key_service.admin_clear_limit(
+                key_id, "customQps")
+            body = {k: v for k, v in body.items()
+                    if k != "customQps"}
+            if body:
+                pass   # 还有其余字段继续 set
+            else:
+                return r
+        if "customDaily" in body and body["customDaily"] is None:
+            r = await _key_service.admin_clear_limit(
+                key_id, "customDaily")
+            body = {k: v for k, v in body.items()
+                    if k != "customDaily"}
+            if not body:
+                return r
+        return await _key_service.admin_set_limits(
+            key_id,
+            tier=body.get("tier"),
+            custom_qps=body.get("customQps"),
+            custom_daily=body.get("customDaily"))
+    except Exception as e:
+        raise _handle(e) from e
+
+
 def register_api_manager_routes(app) -> None:
     """注册44号路由(main.py startup 调用)"""
     app.include_router(router)

@@ -130,19 +130,32 @@ class ApiKeyService:
         out = []
         for k in keys:
             k = await self._lazy_expire(k)
-            out.append({
-                "keyId": k.get("keyId"),
-                "name": k.get("name"),
-                "keyPrefix": k.get("keyPrefix"),
-                "appCode": k.get("appCode"),
-                "tier": k.get("tier"),
-                "status": k.get("status"),
-                "createdAt": k.get("createdAt"),
-                "expireAt": k.get("expireAt"),
-                "lastUsedAt": k.get("lastUsedAt") or None,
-                "requestCount": k.get("requestCount") or 0,
-            })
+            out.append(self._key_view(k))
         return {"success": True, "total": len(out), "keys": out}
+
+    @staticmethod
+    def _key_view(k: dict) -> dict:
+        """Key 对外视图(P2: 含生效限值——方便快捷: 自己的配额自己看)"""
+        from services.api_rate_limit_service import tier_limits
+        qps, daily = tier_limits(
+            k.get("tier"), k.get("customQps") or None,
+            k.get("customDaily") or None)
+        return {
+            "keyId": k.get("keyId"),
+            "name": k.get("name"),
+            "keyPrefix": k.get("keyPrefix"),
+            "appCode": k.get("appCode"),
+            "tier": k.get("tier"),
+            "customQps": k.get("customQps") or None,
+            "customDaily": k.get("customDaily") or None,
+            "qpsLimit": qps,
+            "dailyLimit": daily,
+            "status": k.get("status"),
+            "createdAt": k.get("createdAt"),
+            "expireAt": k.get("expireAt"),
+            "lastUsedAt": k.get("lastUsedAt") or None,
+            "requestCount": k.get("requestCount") or 0,
+        }
 
     async def revoke_key(self, member_id: int,
                          key_id: int) -> dict:
@@ -199,24 +212,90 @@ class ApiKeyService:
             if member_id is not None and \
                     k.get("memberId") != member_id:
                 continue
-            out.append({
-                "keyId": k.get("keyId"),
-                "memberId": k.get("memberId"),
-                "name": k.get("name"),
-                "keyPrefix": k.get("keyPrefix"),
-                "tier": k.get("tier"),
-                "status": k.get("status"),
-                "createdAt": k.get("createdAt"),
-                "expireAt": k.get("expireAt"),
-                "lastUsedAt": k.get("lastUsedAt") or None,
-                "requestCount": k.get("requestCount") or 0,
-            })
+            view = self._key_view(k)
+            view["memberId"] = k.get("memberId")
+            out.append(view)
         by_status: dict = {}
         for k in out:
             s = k["status"] or "unknown"
             by_status[s] = by_status.get(s, 0) + 1
         return {"success": True, "total": len(out), "keys": out,
                 "byStatus": by_status}
+
+    async def admin_set_limits(self, key_id: int, tier: str = None,
+                               custom_qps=None,
+                               custom_daily=None) -> dict:
+        """P2: 限值调参(套餐切换 + per-Key 覆盖, 白名单式留痕)
+
+        Raises:
+            KeyError: keyId 不存在
+            ValueError: 非法 tier/限值
+        """
+        from services.api_rate_limit_service import (
+            TIERS, CUSTOM_QPS_MAX, CUSTOM_DAILY_MAX, tier_limits,
+        )
+        d = await self.repo.digest_by_key_id(key_id)
+        if d is None:
+            raise KeyError(f"Key {key_id} 不存在")
+        rec = await self.repo.get_key(d)
+
+        changes = {}
+        if tier is not None:
+            if tier not in TIERS:
+                raise ValueError(
+                    f"非法 tier: {tier}(合法值: "
+                    f"{'/'.join(TIERS)})")
+            changes["tier"] = tier
+        if custom_qps is not None:
+            if not isinstance(custom_qps, int) \
+                    or not (1 <= custom_qps <= CUSTOM_QPS_MAX):
+                raise ValueError(
+                    f"customQps 须为 1~{CUSTOM_QPS_MAX} 整数")
+            changes["customQps"] = custom_qps
+        if custom_daily is not None:
+            if not isinstance(custom_daily, int) \
+                    or not (1 <= custom_daily <= CUSTOM_DAILY_MAX):
+                raise ValueError(
+                    f"customDaily 须为 1~{CUSTOM_DAILY_MAX} 整数")
+            changes["customDaily"] = custom_daily
+        if not changes:
+            raise ValueError(
+                "tier/customQps/customDaily 至少提供一项"
+                "(置空字段请传 null)")
+        await self.repo.update_key_fields(d, changes)
+        _invalidate_key_cache(d)
+        logger.info("api44_key_limits_set keyId=%s changes=%s",
+                    key_id, changes)
+
+        rec = await self.repo.get_key(d)
+        qps, daily = tier_limits(
+            rec.get("tier"), rec.get("customQps") or None,
+            rec.get("customDaily") or None)
+        return {"success": True, "keyId": key_id,
+                "tier": rec.get("tier"),
+                "customQps": rec.get("customQps") or None,
+                "customDaily": rec.get("customDaily") or None,
+                "qpsLimit": qps, "dailyLimit": daily}
+
+    async def admin_clear_limit(self, key_id: int,
+                                field: str) -> dict:
+        """清除 per-Key 覆盖(回退套餐基础值)"""
+        if field not in ("customQps", "customDaily"):
+            raise ValueError("仅支持清除 customQps/customDaily")
+        d = await self.repo.digest_by_key_id(key_id)
+        if d is None:
+            raise KeyError(f"Key {key_id} 不存在")
+        await self.repo.update_key_fields(d, {field: ""})
+        _invalidate_key_cache(d)
+        logger.info("api44_key_limit_cleared keyId=%s field=%s",
+                    key_id, field)
+        rec = await self.repo.get_key(d)
+        from services.api_rate_limit_service import tier_limits
+        qps, daily = tier_limits(
+            rec.get("tier"), rec.get("customQps") or None,
+            rec.get("customDaily") or None)
+        return {"success": True, "keyId": key_id, "cleared": field,
+                "qpsLimit": qps, "dailyLimit": daily}
 
     async def admin_approve(self, key_id: int) -> dict:
         """审批通过(pending → active, 有效期自批准起算)"""
@@ -314,7 +393,11 @@ class ApiKeyService:
     @staticmethod
     def _check_record(rec: dict | None,
                       app_code: str) -> dict:
-        """纯内存记录检查(缓存命中路径零 IO)"""
+        """纯内存记录检查(缓存命中路径零 IO)
+
+        P2: 成功 verdict 附带 tier/customQps/customDaily——
+        中间件据此执行双限(限值调参即时经缓存失效生效)。
+        """
         if rec is None:
             return {"ok": False, "reason": "API Key 无效"}
         if str(rec.get("appCode") or "") != app_code:
@@ -327,7 +410,10 @@ class ApiKeyService:
             return {"ok": False, "reason": "API Key 已过期"
                     "(可续期或重新申请)"}
         return {"ok": True, "memberId": rec.get("memberId"),
-                "keyId": rec.get("keyId")}
+                "keyId": rec.get("keyId"),
+                "tier": rec.get("tier"),
+                "customQps": rec.get("customQps") or None,
+                "customDaily": rec.get("customDaily") or None}
 
     async def record_usage(self, key_id: int) -> None:
         """调用留痕(lastUsedAt + requestCount; 中间件通过后调)"""
