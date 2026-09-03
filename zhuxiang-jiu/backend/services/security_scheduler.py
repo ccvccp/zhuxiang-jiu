@@ -108,6 +108,24 @@ async def run_scheduled_security_tasks() -> dict:
         result["errors"].append(f"posture:{exc}")
 
     # ③ 统计留痕(供日报/运维观察)
+    # ④ Redis 日度体检+告警触达(P5-2): 调度器开启即自动巡检,
+    #    P1 级风险站内信直达管理员(24h 规则级去重防重复);
+    #    体检结果与告警分离——collect() 全量结果不落库(开销大),
+    #    仅告警计数留痕(与 P4-4"体检不进自动刷新"口径一致)
+    try:
+        from services.security_alert_service import (
+            SecurityAlertService,
+        )
+        alert = await SecurityAlertService().notify_redis_alerts()
+        result["alerts"] = {
+            "eligible": alert.get("eligible", 0),
+            "deduped": alert.get("deduped", 0),
+            "sent": alert.get("sent", 0),
+        }
+    except Exception as exc:
+        logger.warning("security_scheduler_alert_failed: %s", exc)
+        result["errors"].append(f"alert:{exc}")
+
     repo = Security43Repository()
     stats = await repo.get_scheduler_stats() or {"runs": 0}
     stats = {
@@ -116,6 +134,7 @@ async def run_scheduled_security_tasks() -> dict:
         "lastIntervalSeconds": scheduler_interval_seconds(),
         "lastBaselines": result["baselines"],
         "lastPosture": (result["posture"] or {}).get("posture"),
+        "lastAlerts": result.get("alerts"),
         "lastErrors": result["errors"][-10:],
     }
     await repo.save_scheduler_stats(stats)

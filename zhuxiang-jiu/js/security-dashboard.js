@@ -524,10 +524,25 @@ async function loadRedisHealth() {
     }
 }
 
+/* P5-2: 一键发送 Redis 告警站内信(管理员触达, 24h 规则级去重) */
+async function sendRedisAlert() {
+    try {
+        var b = await fetchJson(
+            api('/api/security/admin/redis/alert/test'), {
+                method: 'POST', headers: headers()
+            }, '发送告警站内信');
+        showInfo('告警站内信: 已发送 ' + (b.sent || 0) + ' 名管理员' +
+                 '(去重 ' + (b.deduped || 0) + ' 条)');
+    } catch (e) { showError(e.message); }
+}
+
 function renderRedisHealth(b) {
     var html = '';
 
     // 告警条(critical/warn/info)
+    var hasP1 = (b.alerts || []).some(function (a) {
+        return a.level === 'critical' || a.level === 'warn';
+    });
     (b.alerts || []).forEach(function (a) {
         html += '<div class="redis-alert ' + esc(a.level || 'info') +
             '">[' + esc(a.rule) + '] ' + esc(a.message) + '</div>';
@@ -535,6 +550,11 @@ function renderRedisHealth(b) {
     if (!(b.alerts || []).length) {
         html += '<div class="redis-alert info">无告警(阈值: 单键>100KB / ' +
             'rate键>100k / 内存>80%)</div>';
+    }
+    // P5-2: 有 P1 级告警时提供一键触达(24h 规则级去重)
+    if (hasP1) {
+        html += '<button class="dash-btn" style="margin-bottom:6px" ' +
+            'onclick="sendRedisAlert()">发送告警站内信</button>';
     }
 
     // 内存水位 + 概览 cells

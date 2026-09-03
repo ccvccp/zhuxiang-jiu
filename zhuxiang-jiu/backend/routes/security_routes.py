@@ -557,6 +557,26 @@ async def admin_redis_health(
         raise _handle(e) from e
 
 
+@router.post("/admin/redis/alert/test")
+async def admin_redis_alert_test(
+    force: bool = Query(False, description="跳过 24h 去重"
+                        "(演练/通道验证)"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """手动轨: 立即 Redis 体检并发送告警站内信(通道演练)
+
+    仅 critical/warn 触达(CATEGORY_SECURITY 强制投递);
+    无 P1 级告警零发送(不发"一切正常"骚扰信)。
+    """
+    _require_admin(x_role)
+    try:
+        from services.security_alert_service import SecurityAlertService
+        return await SecurityAlertService().notify_redis_alerts(
+            force=force)
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.post("/admin/learning/collect")
 async def admin_learning_collect(
     x_role: str = Header(default="", alias="X-Role"),
