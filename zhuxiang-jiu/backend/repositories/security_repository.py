@@ -482,3 +482,96 @@ class Security43Repository:
         history = self.store.get("_security43_geo", {}).get(
             int(member_id), [])
         return [old_ip for t, old_ip in history if t >= cutoff]
+
+    # --------------------------------------------------------
+    # P3-4: 会话序列(最近 N 个 module 环形缓冲) + 登录失败计数
+    # --------------------------------------------------------
+
+    async def push_session_seq(self, member_id: int,
+                               module: str) -> list[str]:
+        """记录会话序列一次请求模块(保留最近 5 个)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("security43", "session", int(member_id))
+            await client.lpush(key, module)
+            await client.ltrim(key, 0, 4)
+            await client.expire(key, 7200)
+            items = await client.lrange(key, 0, -1)
+            return [m.decode() if isinstance(m, bytes) else m
+                    for m in items]
+        self._ensure_store()
+        bucket = self.store.setdefault("_security43_session", {})
+        seq = bucket.get(int(member_id), [])
+        seq.insert(0, module)
+        bucket[int(member_id)] = seq[:5]
+        return bucket[int(member_id)]
+
+    async def get_session_seq(self, member_id: int) -> list[str]:
+        """查询会话序列(最近 5 个 module, 不记录)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            items = await client.lrange(
+                _k("security43", "session", int(member_id)), 0, -1)
+            return [m.decode() if isinstance(m, bytes) else m
+                    for m in items]
+        self._ensure_store()
+        return list(self.store.get("_security43_session", {}).get(
+            int(member_id), []))
+
+    async def has_session_seq(self, member_id: int) -> bool:
+        """会话序列是否存活(登录后 2h 内)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return bool(await client.exists(
+                _k("security43", "session", int(member_id))))
+        self._ensure_store()
+        return int(member_id) in self.store.get(
+            "_security43_session", {})
+
+    async def start_session_seq(self, member_id: int) -> None:
+        """登录成功: 清空旧序列开启新会话"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("security43", "session", int(member_id))
+            await client.delete(key)
+            await client.rpush(key, "__login__")
+            await client.expire(key, 7200)
+            return
+        self._ensure_store()
+        self.store.setdefault("_security43_session", {})[
+            int(member_id)] = ["__login__"]
+
+    async def count_auth_fail(self, member_id: int,
+                             window: int = 86400) -> float:
+        """记一次登录失败并返回 24h 堆积数(撞库计数)"""
+        dimension = f"authfail:{int(member_id)}"
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("security43", "rate", dimension)
+            count = await client.incr(key)
+            ttl = await client.ttl(key)
+            if ttl < 0:
+                await client.expire(key, window)
+            return float(count)
+        self._ensure_store()
+        bucket = self.store.setdefault("_security43_authfail", {})
+        now = _now_ts()
+        stamps = [t for t in bucket.get(dimension, [])
+                  if now - t < window]
+        stamps.append(now)
+        bucket[dimension] = stamps
+        return float(len(stamps))
+
+    async def get_auth_fail(self, member_id: int,
+                            window: int = 86400) -> float:
+        """查询 24h 登录失败堆积数(不记数)"""
+        dimension = f"authfail:{int(member_id)}"
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("security43", "rate", dimension))
+            return float(raw) if raw else 0.0
+        self._ensure_store()
+        now = _now_ts()
+        stamps = self.store.get("_security43_authfail", {}).get(
+            dimension, [])
+        return float(sum(1 for t in stamps if now - t < window))

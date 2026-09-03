@@ -182,6 +182,8 @@ class AuthService:
             raise ValueError("账号已被禁用,请联系客服")
 
         if not verify_password(password, member.get("password", "")):
+            # 43号 P3-4: 登录失败留痕(撞库计数, best-effort)
+            await self._record_auth_event(member["id"], success=False)
             raise ValueError("密码错误")
 
         # 存量弱哈希自动升级为 PBKDF2(透明迁移)
@@ -197,6 +199,8 @@ class AuthService:
         )
         tokens = create_token_pair(member["id"], role)
         await self._record_jtis(member["id"], tokens)
+        # 43号 P3-4: 登录成功留痕 + 开启会话序列(best-effort)
+        await self._record_auth_event(member["id"], success=True)
 
         logger.info("auth_login_success member_id=%r phone=%s", member["id"], phone)
         return {
@@ -207,6 +211,17 @@ class AuthService:
             "role": role,
             **tokens,
         }
+
+    async def _record_auth_event(self, member_id: int,
+                                 success: bool) -> None:
+        """43号安全留痕钩子(火后不管, 异常绝不阻断登录)"""
+        try:
+            from services.sequence_service import SequenceService
+            await SequenceService().record_auth_event(
+                member_id, ip="", success=success, method="password")
+        except Exception as exc:
+            logger.warning("auth_security_hook_skip member=%s: %s",
+                           member_id, exc)
 
     # ============================================================
     # 短信验证码 + 验证码登录(P1-1, 设计文档 2.2 短信验证码规则)

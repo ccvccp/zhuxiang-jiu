@@ -369,6 +369,24 @@ class Security43Service:
             logger.warning("security_geo_device_skip ip=%s: %s",
                            ip, exc)
 
+        # ②''' P3-4 D5 跳步检测(登录后 N 请求内直奔敏感端点):
+        #     会话序列记录 + 跳步命中 → identity_risk 降分
+        #     (仅降分不处置, observe 口径; 异常不阻断)
+        try:
+            if member_id:
+                from services.sequence_service import SequenceService
+                from services.ueba_service import path_to_module
+                seq = SequenceService()
+                module = path_to_module(path)
+                await seq.record_sequence(member_id, module)
+                jump = await seq.detect_jump(member_id, module)
+                if jump:
+                    identity_score = min(identity_score, 20.0)
+                    logger.warning("security_d5_jump member=%s "
+                                   "module=%s", member_id, module)
+        except Exception as exc:
+            logger.warning("security_d5_hook_skip ip=%s: %s", ip, exc)
+
         # ②' UEBA(P2): 网关顺带行为采集 + 四检测器偏离合议
         #     (零侵入: 计数直方图; 偏离注入 identity_risk 只降不升;
         #      冷启动无基线完全豁免; UEBA off 跳过)
