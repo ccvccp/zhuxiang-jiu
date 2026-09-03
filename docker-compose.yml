@@ -47,6 +47,17 @@ services:
       - DRIDE_PARTNER_CALLBACK_TOKEN=${DRIDE_PARTNER_CALLBACK_TOKEN:-}
       # 输出坐标系: wgs84(默认, 本站内部口径) / gcj02(滴滴高德系, 凭证到手后切)
       - DRIDE_COORD_SYS=${DRIDE_COORD_SYS:-wgs84}
+      # ---- 43号 AI智能安全管理(默认 observe 灰度只留痕; 见 docs/安全管理端操作指南.md) ----
+      # 总开关: off=一键回退(网关全放行, fail-open 铁律)
+      - SECURITY_GATEWAY_MODE=${SECURITY_GATEWAY_MODE:-on}
+      # 灰度: observe(默认, 只留痕) / shadow(演练) / enforce(四档真处置)
+      # enforce 上线检查单: 见 docs/安全管理端操作指南.md §六
+      - SECURITY_ENFORCE_LEVEL=${SECURITY_ENFORCE_LEVEL:-observe}
+      # 频次窗口与上限(误杀多则上调 RATE_LIMIT)
+      - SECURITY_RATE_WINDOW=${SECURITY_RATE_WINDOW:-60}
+      - SECURITY_RATE_LIMIT=${SECURITY_RATE_LIMIT:-120}
+      # 自动封禁时长(秒, 到点自动解封)
+      - SECURITY_BAN_TTL=${SECURITY_BAN_TTL:-900}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
