@@ -1,0 +1,148 @@
+<!--
+    44号·AI智能API管理模块 P0 · API 资产中心面板
+    页面: ai-api-dashboard.html(配套脚本 js/api-dashboard.js)
+    依赖: css/style.css(主题变量) / 后端 44号 api_manager_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    鉴权: X-Role: admin(管理端区块)
+    区块: ①API 资产总览(分布统计/模块分组/台账列表/手动重扫 diff)
+    操作手册: docs/44号_API智能管理模块实施计划.md
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>44号·API管理面板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#4a5568,#2d3748);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #2d3748;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-info{background:#efe;border:1px solid #9c9;color:#393;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:8px}
+    .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
+        padding:8px 10px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .v{font-size:17px;font-weight:600}
+    .ov-cell .v.red{color:#c0392b}
+    .ov-cell .v.green{color:#2f9e44}
+    .ov-cell .v.blue{color:#24619c}
+    .ov-cell .v.yellow{color:#a37400}
+    table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
+    .dash-table th{text-align:left;padding:6px 8px;background:
+        var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
+        var(--color-border,#ddd);white-space:nowrap}
+    .dash-table td{padding:5px 8px;border-bottom:1px solid
+        var(--color-border,#eee);vertical-align:top}
+    .dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+        margin-right:4px;vertical-align:middle}
+    .dot.development{background:#8895a7}
+    .dot.published{background:#2f9e44}
+    .dot.deprecated{background:#e8a30c}
+    .dot.offline{background:#c0392b}
+    .dot.missing{background:#c0392b;box-shadow:0 0 3px #c0392b}
+    .badge{display:inline-block;padding:1px 6px;border-radius:8px;
+        font-size:10px;background:var(--color-bg-sub,#eee);color:#666}
+    .badge.manual{background:#e8f1fb;color:#24619c}
+    .sync-diff{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
+        padding:8px 12px;font-size:12px;margin-bottom:10px;
+        white-space:pre-wrap;display:none}
+    .mod-list{columns:3;column-gap:16px;font-size:12px}
+    .mod-list li{margin-bottom:2px;break-inside:avoid}
+    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>44号·API 管理面板</h1>
+    <p>API 资产中心 · 凭证 · 流量治理 · 观测 · AI 自治（P0: 资产总览）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="loadRegistry()">手动刷新</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div id="infoBar" class="dash-info"></div>
+        </div>
+    </div>
+
+    <!-- ① API 资产总览 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① API 资产总览（台账 / 模块分布）</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn ghost" onclick="syncRegistry()">重扫台账（diff）</button>
+                </div>
+            </div>
+            <div id="syncDiff" class="sync-diff"></div>
+            <div id="apiStats" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            <div style="margin-top:12px">
+                <b style="font-size:12px">模块分布</b>
+                <ul id="moduleList" class="mod-list" style="margin:6px 0 0;
+                    padding-left:18px"></ul>
+            </div>
+            <div style="margin-top:12px;border-top:1px solid
+                var(--color-border,#eee);padding-top:10px">
+                <div class="dash-toolbar" style="margin-bottom:8px">
+                    <select id="filterModule" onchange="loadRegistry()"></select>
+                    <select id="filterStatus" onchange="loadRegistry()">
+                        <option value="">全部状态</option>
+                        <option value="development">development（开发中）</option>
+                        <option value="published">published（已开放）</option>
+                        <option value="deprecated">deprecated（已弃用）</option>
+                        <option value="offline">offline（已下线）</option>
+                    </select>
+                    <span id="listCount" style="font-size:11px;color:#999"></span>
+                </div>
+                <div style="max-height:420px;overflow:auto">
+                    <table class="dash-table">
+                        <thead><tr>
+                            <th>ID</th><th>方法</th><th>路径</th><th>模块</th>
+                            <th>状态</th><th>说明</th>
+                        </tr></thead>
+                        <tbody id="apiList"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        台账来自路由自发现(重扫幂等, 人工修正不被覆盖) ·
+        计划: docs/44号_API智能管理模块实施计划.md
+    </div>
+</div>
+
+<script src="js/api-dashboard.js"></script>
+</body>
+</html>

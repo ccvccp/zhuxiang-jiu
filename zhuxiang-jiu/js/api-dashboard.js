@@ -1,0 +1,177 @@
+/**
+ * 44号·AI智能API管理模块 P0 · API 资产中心面板
+ * 范式: js/security-dashboard.js(43号)平移——ES5、localStorage 连接、
+ * 区块化加载(台账静态, 手动/保存触发, 不进自动刷新)。
+ * 依赖后端: /api/api-manager/*(44号 api_manager_routes, 3 端点)
+ * 区块: ①API 资产总览(分布统计/模块分组/台账列表/重扫 diff)
+ */
+'use strict';
+
+var API_BASE_KEY = 'apiDash.apiBase';
+var state = { apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000' };
+
+function headers() { return { 'X-Role': 'admin' }; }
+
+async function fetchJson(url, options, label) {
+    try {
+        var resp = await fetch(url, options);
+        var text = await resp.text();
+        var body = {};
+        try { body = JSON.parse(text); } catch (e) { body = { raw: text }; }
+        if (!resp.ok) {
+            var detail = (body && (body.detail || body.error)) || resp.status;
+            throw new Error(label + ' HTTP ' + resp.status + ': ' + detail);
+        }
+        return body;
+    } catch (e) {
+        if (e instanceof TypeError) {
+            throw new Error(label + ' 无法连接后端(检查地址/跨域)');
+        }
+        throw e;
+    }
+}
+
+function api(path) { return state.apiBase + path; }
+
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                 '"': '&quot;', "'": '&#39;' }[c];
+    });
+}
+
+function showError(msg) {
+    var el = document.getElementById('errBar');
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(function () { el.style.display = 'none'; }, 8000);
+}
+
+function showInfo(msg) {
+    var el = document.getElementById('infoBar');
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(function () { el.style.display = 'none'; }, 5000);
+}
+
+function markUpdate() {
+    document.getElementById('lastUpdate').textContent =
+        '更新于 ' + new Date().toLocaleTimeString();
+}
+
+function saveConn() {
+    var el = document.getElementById('apiBase');
+    state.apiBase = el.value.trim().replace(/\/+$/, '');
+    if (!state.apiBase) { state.apiBase = 'http://localhost:8000'; }
+    el.value = state.apiBase;
+    localStorage.setItem(API_BASE_KEY, state.apiBase);
+    loadRegistry();
+}
+
+/* ============================================================
+ * ① API 资产总览
+ * ============================================================ */
+
+async function loadRegistry() {
+    try {
+        var mod = document.getElementById('filterModule').value || '';
+        var st = document.getElementById('filterStatus').value || '';
+        var qs = [];
+        if (mod) { qs.push('module=' + encodeURIComponent(mod)); }
+        if (st) { qs.push('status=' + encodeURIComponent(st)); }
+        var b = await fetchJson(
+            api('/api/api-manager/admin/apis' + (qs.length ? '?' + qs.join('&') : '')),
+            { headers: headers() }, 'API 台账');
+
+        // 统计卡
+        var bs = b.byStatus || {};
+        var missing = 0;
+        (b.entries || []).forEach(function (e) { if (e.missing) { missing++; } });
+        var cells = [
+            { k: 'API 总数', v: b.total || 0, cls: 'blue' },
+            { k: '模块数', v: b.moduleCount || 0 },
+            { k: 'published', v: bs.published || 0, cls: 'green' },
+            { k: 'development', v: bs.development || 0 },
+            { k: 'deprecated', v: bs.deprecated || 0, cls: 'yellow' },
+            { k: 'offline', v: bs.offline || 0, cls: 'red' }
+        ];
+        document.getElementById('apiStats').innerHTML =
+            cells.map(function (c) {
+                return '<div class="ov-cell"><div class="k">' + esc(c.k) +
+                    '</div><div class="v ' + (c.cls || '') + '">' + esc(c.v) +
+                    '</div></div>';
+            }).join('');
+
+        // 模块分布(全部口径, 不随过滤变)
+        var bm = b.byModule || {};
+        var items = Object.keys(bm).map(function (k) {
+            return '<li>' + esc(k) + ' <b>' + bm[k] + '</b></li>';
+        });
+        document.getElementById('moduleList').innerHTML =
+            items.join('') || '<li>暂无</li>';
+
+        // 模块过滤下拉(保留当前选择)
+        var sel = document.getElementById('filterModule');
+        var cur = sel.value;
+        sel.innerHTML = '<option value="">全部模块</option>' +
+            Object.keys(bm).map(function (k) {
+                return '<option value="' + esc(k) + '">' + esc(k) +
+                    ' (' + bm[k] + ')</option>';
+            }).join('');
+        if (cur && bm[cur] !== undefined) { sel.value = cur; }
+
+        // 台账列表
+        var rows = (b.entries || []).map(function (e) {
+            var dot = '<i class="dot ' + esc(e.status || 'development') +
+                '"></i>' + esc(e.status || 'development');
+            if (e.missing) {
+                dot += ' <i class="dot missing" title="路由已消失"></i>missing';
+            }
+            var modBadge = esc(e.module || 'uncategorized') +
+                (e.moduleSource === 'manual'
+                 ? ' <span class="badge manual">人工</span>' : '');
+            return '<tr><td>' + esc(e.apiId) + '</td><td>' +
+                esc(e.method) + '</td><td style="word-break:break-all">' +
+                esc(e.path) + '</td><td>' + modBadge + '</td><td>' +
+                dot + '</td><td style="color:#888">' +
+                esc(e.summary || '') + '</td></tr>';
+        });
+        document.getElementById('apiList').innerHTML =
+            rows.join('') ||
+            '<tr><td colspan="6" class="dash-empty">暂无台账(点「重扫台账」同步)</td></tr>';
+        document.getElementById('listCount').textContent =
+            '共 ' + (b.total || 0) + ' 条';
+        markUpdate();
+    } catch (e) { showError(e.message); }
+}
+
+/* 手动重扫(diff 返回后刷新台账) */
+async function syncRegistry() {
+    try {
+        var b = await fetchJson(
+            api('/api/api-manager/admin/apis/sync'),
+            { method: 'POST', headers: headers() }, '重扫台账');
+        var lines = ['重扫完成: 发现 ' + (b.discovered || 0) + ' 条'];
+        lines.push('新增 ' + (b.added || 0) +
+                   (b.addedList && b.addedList.length
+                    ? ' — ' + b.addedList.join(', ')
+                      + (b.added > b.addedList.length ? ' …' : '') : ''));
+        lines.push('消失 ' + (b.disappeared || 0) +
+                   (b.disappearedList && b.disappearedList.length
+                    ? ' — ' + b.disappearedList.join(', ')
+                      + (b.disappeared > b.disappearedList.length ? ' …' : '') : ''));
+        lines.push('module 修正 ' + (b.moduleUpdated || 0));
+        var el = document.getElementById('syncDiff');
+        el.textContent = lines.join('\n');
+        el.style.display = 'block';
+        showInfo('台账重扫完成(新增 ' + (b.added || 0) +
+                 ' / 消失 ' + (b.disappeared || 0) + ')');
+        await loadRegistry();
+    } catch (e) { showError(e.message); }
+}
+
+/* 初始化 */
+(function init() {
+    document.getElementById('apiBase').value = state.apiBase;
+    loadRegistry();
+})();
