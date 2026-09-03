@@ -536,6 +536,27 @@ async def admin_threatintel_check(
         raise _handle(e) from e
 
 
+# ============================================================
+#  管理端·Redis 实况监控(P4-4, 键族健康)
+# ============================================================
+
+@router.get("/admin/redis/health")
+async def admin_redis_health(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """Redis 实况监控(键族计数/内存水位/慢日志/大 key 告警)
+
+    性能约束: KEYS/SLOWLOG/MEMORY USAGE 有执行开销,
+    仅 admin 手动触发(不进 30s 自动刷新)。
+    """
+    _require_admin(x_role)
+    try:
+        from services.redis_health_service import RedisHealthService
+        return await RedisHealthService().collect()
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.post("/admin/learning/collect")
 async def admin_learning_collect(
     x_role: str = Header(default="", alias="X-Role"),

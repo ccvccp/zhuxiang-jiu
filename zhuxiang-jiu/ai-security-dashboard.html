@@ -8,7 +8,10 @@
     区块: ①态势卡(三态/EMA/误报率/封禁数) ②攻击事件(裁决/因子判读)
           ③申诉队列(裁决) ④IP处置(封禁/解封/钉住)
           ⑤UEBA行为基线(rebuild/查询) ⑥学习回流(collect/run/status)
+          ⑦运营成熟化(日报序列柱状图/Redis键族健康体检)
     操作手册: docs/安全管理端操作指南.md(四步法+enforce上线检查单)
+    注意: ⑦区 Redis 实况体检为按需加载(KEYS/SLOWLOG 有开销,
+          不进 30s 自动刷新)
 -->
 <html lang="zh-CN">
 <head>
@@ -78,12 +81,31 @@
         vertical-align:middle;border-radius:2px}
     .hours-bar span{display:inline-block;height:100%;
         background:#2d3748;border-radius:2px}
+    /* ⑦ 日报序列柱状图(纯 CSS, 零图表库依赖) */
+    .series-chart{display:flex;align-items:flex-end;gap:4px;height:96px;
+        padding:6px 4px 0;margin-bottom:2px}
+    .series-col{flex:1;min-width:10px;display:flex;flex-direction:column;
+        justify-content:flex-end;height:100%}
+    .series-col-bar{background:#4a72b8;border-radius:2px 2px 0 0;
+        min-height:2px}
+    .series-col-bar.zero{background:#e2e8f0}
+    .series-col-bar.fpr{background:#c0392b}
+    .series-labels{display:flex;gap:4px;margin-bottom:8px}
+    .series-labels span{flex:1;min-width:10px;text-align:center;
+        font-size:10px;color:#999;white-space:nowrap;overflow:hidden}
+    .redis-fam{font-size:12px}
+    .redis-fam td.red{color:#c0392b;font-weight:600}
+    .redis-alert{padding:6px 10px;border-radius:5px;font-size:12px;
+        margin-bottom:6px}
+    .redis-alert.critical{background:#fdeaea;color:#c0392b}
+    .redis-alert.warn{background:#fff7e0;color:#a37400}
+    .redis-alert.info{background:#e8f1fb;color:#24619c}
 </style>
 </head>
 <body>
 <header class="dash-banner">
     <h1>43号·安全管理面板</h1>
-    <p>态势三态 · 事件裁决 · 误报申诉 · IP 处置 · UEBA 基线 · 学习回流（见操作指南）</p>
+    <p>态势三态 · 事件裁决 · 误报申诉 · IP 处置 · UEBA 基线 · 学习回流 · 运营成熟化（见操作指南）</p>
 </header>
 
 <div class="container">
@@ -222,6 +244,29 @@
                 </div>
             </div>
             <div id="learningCells" class="ov-cells"><div class="dash-empty">点 collect 后加载</div></div>
+        </div>
+    </div>
+
+    <!-- ⑦ 运营成熟化(P4: 日报序列 + Redis 键族健康) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑦ 运营成熟化（日报序列 / Redis 键族健康）</h3>
+                <div class="dash-toolbar">
+                    <button class="dash-btn ghost" onclick="loadReportSeries()">刷新日报序列</button>
+                    <button class="dash-btn" onclick="loadRedisHealth()">Redis 实况体检</button>
+                </div>
+            </div>
+            <!-- 日报序列图(近14天事件量柱状, hover 见误报率) -->
+            <div id="seriesChart" class="series-chart">
+                <div class="dash-empty">加载中…</div></div>
+            <div id="seriesLabels" class="series-labels"></div>
+            <div id="seriesSummary" class="ov-cells" style="margin-top:6px"></div>
+            <!-- Redis 键族健康卡(按需加载) -->
+            <div id="redisHealth" style="margin-top:12px;border-top:1px solid
+                var(--color-border,#eee);padding-top:10px">
+                <div class="dash-empty">Redis 实况：点「Redis 实况体检」按需加载
+                    （KEYS/SLOWLOG 有开销，不进自动刷新）</div>
+            </div>
         </div>
     </div>
 

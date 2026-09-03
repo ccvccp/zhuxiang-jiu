@@ -1,8 +1,10 @@
 /* 43号·AI智能安全管理面板(配套 ai-security-dashboard.html)
  * 范式: js/invoice-dashboard.js(42号)平移——ES5、localStorage 连接、
  * 30s 自动刷新、区块化加载。
- * 区块: 态势卡/事件裁决/申诉/IP处置/UEBA基线/学习回流
- * 依赖后端: /api/security/*(43号 security_routes, 23 端点)
+ * 区块: 态势卡/事件裁决/申诉/IP处置/UEBA基线/学习回流/运营成熟化
+ * 依赖后端: /api/security/*(43号 security_routes, 29 端点)
+ * ⑦区: 日报序列按钮刷新; Redis 实况体检按需加载(KEYS/SLOWLOG
+ *      有执行开销, 不进 30s 自动刷新)
  */
 'use strict';
 
@@ -444,6 +446,132 @@ async function runLearning() {
 }
 
 /* ============================================================
+ * ⑦ 运营成熟化(P4: 日报序列 + Redis 键族健康)
+ * ============================================================ */
+
+/* 日报序列图(近14天事件量纯 CSS 柱状, hover 见误报率;
+ * 按钮触发刷新, 不进 30s 自动刷新(14×daily_report 有读取开销) */
+async function loadReportSeries() {
+    var b = await fetchJson(api('/api/security/admin/reports/daily?days=14'),
+                            { headers: headers() }, '日报序列');
+    var reports = b.reports || [];
+    var max = 0;
+    reports.forEach(function (r) {
+        max = Math.max(max, r.eventsTotal || 0);
+    });
+    var bars = reports.map(function (r) {
+        var total = r.eventsTotal || 0;
+        var fpr = r.falsePositiveRate || 0;
+        var h = max > 0 ? Math.max(2, Math.round(total / max * 80)) : 2;
+        var cls = 'series-col-bar' + (total ? (fpr > 0.1 ? ' fpr' : '')
+                                           : ' zero');
+        return '<div class="series-col" title="' + esc(r.date) +
+            ' 事件 ' + total + ' · 误报率 ' + pct(fpr) + '">' +
+            '<div class="' + cls + '" style="height:' + h + 'px"></div></div>';
+    });
+    document.getElementById('seriesChart').innerHTML = bars.join('');
+    document.getElementById('seriesLabels').innerHTML =
+        reports.map(function (r) {
+            return '<span>' + esc((r.date || '').slice(5)) + '</span>';
+        }).join('');
+
+    var s = b.summary || {};
+    var cells = [
+        { k: '事件总量(14天)', v: s.eventsTotal || 0 },
+        { k: '确认攻击', v: s.confirmed || 0, cls: 'red' },
+        { k: '误报', v: s.falsePositive || 0, cls: 'blue' },
+        { k: '误报率', v: pct(s.falsePositiveRate),
+          cls: (s.falsePositiveRate || 0) > 0.1 ? 'red' : 'green' },
+        { k: '活跃天数', v: s.activeDays || 0 },
+        { k: 'D5 样本', v: s.d5Samples || 0, cls: 'yellow' }
+    ];
+    document.getElementById('seriesSummary').innerHTML =
+        cells.map(function (c) {
+            return '<div class="ov-cell"><div class="k">' + esc(c.k) +
+                '</div><div class="v ' + (c.cls || '') + '">' +
+                esc(c.v) + '</div></div>';
+        }).join('');
+}
+
+/* Redis 实况体检(键族/内存水位/慢日志/大 key/告警;
+ * 仅按钮按需加载——KEYS/SLOWLOG/MEMORY USAGE 有执行开销) */
+async function loadRedisHealth() {
+    var el = document.getElementById('redisHealth');
+    el.innerHTML = '<div class="dash-empty">采集中…(KEYS/SLOWLOG/MEMORY USAGE)</div>';
+    try {
+        var b = await fetchJson(api('/api/security/admin/redis/health'),
+                                { headers: headers() }, 'Redis 实况');
+        renderRedisHealth(b);
+    } catch (e) {
+        el.innerHTML = '<div class="dash-error" style="display:block">' +
+            esc(e.message) + '</div>';
+    }
+}
+
+function renderRedisHealth(b) {
+    var html = '';
+
+    // 告警条(critical/warn/info)
+    (b.alerts || []).forEach(function (a) {
+        html += '<div class="redis-alert ' + esc(a.level || 'info') +
+            '">[' + esc(a.rule) + '] ' + esc(a.message) + '</div>';
+    });
+    if (!(b.alerts || []).length) {
+        html += '<div class="redis-alert info">无告警(阈值: 单键>100KB / ' +
+            'rate键>100k / 内存>80%)</div>';
+    }
+
+    // 内存水位 + 概览 cells
+    var m = b.memory;
+    var cells = [{ k: '存储模式', v: b.mode === 'redis' ? 'Redis' : '内存' }];
+    if (m) {
+        cells.push({ k: '已用内存', v: m.usedHuman || '-' });
+        cells.push({ k: '内存上限', v: m.maxHuman || '无限制' });
+        cells.push({ k: '内存水位',
+            v: m.usedPct == null ? '-' : pct(m.usedPct),
+            cls: (m.usedPct || 0) > 0.8 ? 'red' : 'green' });
+        cells.push({ k: '碎片率', v: m.fragmentationRatio || '-',
+            cls: (m.fragmentationRatio || 0) > 1.5 ? 'yellow' : '' });
+        cells.push({ k: '淘汰策略', v: m.policy || '-' });
+    }
+    if (b.dbSize != null) { cells.push({ k: '总键数(DBSIZE)', v: b.dbSize }); }
+    html += '<div class="ov-cells">' + cells.map(function (c) {
+        return '<div class="ov-cell"><div class="k">' + esc(c.k) +
+            '</div><div class="v ' + (c.cls || '') + '">' +
+            esc(c.v) + '</div></div>';
+    }).join('') + '</div>';
+
+    // 键族计数表(12 族; rate 超 10 万红标=窗口泄漏检查)
+    var fam = b.keyFamilies || {};
+    var famRows = Object.keys(fam).map(function (k) {
+        var red = k === 'rate' && fam[k] > 100000;
+        return '<tr><td>' + esc(k) + '</td><td class="' +
+            (red ? 'red' : '') + '">' + fam[k] + '</td></tr>';
+    }).join('');
+    html += '<table class="matrix redis-fam" style="margin-top:10px">' +
+        '<thead><tr><th>键族(zhuxiang:security43:)</th><th>键数</th>' +
+        '</tr></thead><tbody>' + famRows + '</tbody></table>';
+
+    // 慢日志 Top10 + 大 key
+    var lines = [];
+    (b.slowlog || []).forEach(function (s) {
+        lines.push('慢[' + s.durationMs + 'ms] ' + s.command);
+    });
+    (b.bigKeys || []).forEach(function (k) {
+        lines.push('大key ' + k.human + ' ' + k.key);
+    });
+    if (lines.length) {
+        html += '<div class="detail-body" style="display:block">' +
+            esc(lines.join('\n')) + '</div>';
+    }
+    html += '<div style="font-size:11px;color:#999;margin-top:8px">' +
+        '采集于 ' + esc(b.collectedAt || '-') + ' · 手动体检' +
+        '(不进自动刷新) · 阈值口径见操作指南 §七</div>';
+
+    document.getElementById('redisHealth').innerHTML = html;
+}
+
+/* ============================================================
  * 刷新编排
  * ============================================================ */
 
@@ -460,5 +588,6 @@ async function refreshData() {
 (function init() {
     document.getElementById('apiBase').value = state.apiBase;
     refreshData();
+    loadReportSeries().catch(function (e) { showError(e.message); });
     setInterval(function () { refreshData(); }, 30000);
 })();
