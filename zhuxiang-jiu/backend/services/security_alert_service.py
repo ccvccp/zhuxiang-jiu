@@ -71,27 +71,42 @@ class SecurityAlertService:
         return alerts, report.get("collectedAt")
 
     async def _collect_intel_degraded(self) -> list[dict]:
-        """S2: 情报订阅降级(consecutiveFailures ≥3 → warn)
+        """S2: 情报订阅降级(连续失败 ≥3 → warn)
 
-        P6-1 多源化后此方法按源循环输出(rule 含 source
-        维度); 当前单源口径 rule=threatintel_degraded。
+        P6-1 多源化: URLS 已配时按源输出(rule 含源名,
+        站内信可辨识坏源); 单源回退口径不变
+        (rule=threatintel_degraded, 消息文案不变)。
         """
         try:
-            from repositories.security_repository import (
-                Security43Repository,
+            from services.threatintel_feed import (
+                degraded_sources, multi_source_enabled,
             )
-            state = await Security43Repository(
-            ).get_threatintel_auto_state() or {}
-            failures = int(state.get("consecutiveFailures") or 0)
-            if failures >= DEGRADED_THRESHOLD:
+            multi = multi_source_enabled()
+            states = (await degraded_sources()).get(
+                "states") or {}
+            alerts = []
+            for name, st in states.items():
+                failures = int(
+                    st.get("consecutiveFailures") or 0)
+                if failures < DEGRADED_THRESHOLD:
+                    continue
                 last_error = str(
-                    state.get("lastError") or "")[:120]
-                return [{
-                    "level": "warn", "signal": "intel",
-                    "rule": "threatintel_degraded",
-                    "message": f"威胁情报订阅连续失败 "
-                               f"{failures} 次: {last_error}",
-                }]
+                    st.get("lastError") or "")[:120]
+                if multi:
+                    alerts.append({
+                        "level": "warn", "signal": "intel",
+                        "rule": f"threatintel_degraded:{name}",
+                        "message": f"威胁情报源 {name} 连续失败 "
+                                   f"{failures} 次: {last_error}",
+                    })
+                else:
+                    alerts.append({
+                        "level": "warn", "signal": "intel",
+                        "rule": "threatintel_degraded",
+                        "message": f"威胁情报订阅连续失败 "
+                                   f"{failures} 次: {last_error}",
+                    })
+            return alerts
         except Exception as exc:
             logger.warning("security_alert_intel_skip: %s", exc)
         return []

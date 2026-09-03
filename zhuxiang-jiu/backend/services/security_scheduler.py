@@ -129,23 +129,54 @@ async def run_scheduled_security_tasks() -> dict:
         logger.warning("security_scheduler_alert_failed: %s", exc)
         result["errors"].append(f"alert:{exc}")
 
-    # ⑤ 威胁情报自动订阅(P5-3): 周期到点拉取 netset →
-    #    幂等全量替换(import 内部先 parse 成功才 clear——
-    #    拉取/校验失败旧段保留, 情报宁旧勿空);
+    # ⑤ 威胁情报自动订阅(P5-3 建, P6-1 多源遍历):
+    #    周期到点逐源拉取 netset → 按源替换导入(import
+    #    内部先 parse 成功才 clear——拉取/校验失败旧段
+    #    保留, 情报宁旧勿空); 单源失败不阻断其余源;
     #    仅 AUTO 开关开启时执行; 30s 超时不阻塞调度
     try:
         from services.threatintel_feed import (
-            feed_enabled, maybe_refresh,
+            feed_enabled, feed_sources, maybe_refresh,
+            multi_source_enabled,
         )
         if feed_enabled():
-            ti = await maybe_refresh()
-            result["threatintel"] = {
-                "executed": ti.get("executed"),
-                "status": ti.get("status"),
-                "imported": ti.get("imported"),
-                "consecutiveFailures": ti.get(
-                    "consecutiveFailures"),
-            }
+            # 单源回退(未配 URLS)走 source=None——P5-3
+            # 单源键 threatintel:auto 状态连续(兼容口径)
+            multi = multi_source_enabled()
+            src_results = []
+            for src in feed_sources():
+                # 单源独立 try(fail-soft 毒源不拖垮其余)
+                try:
+                    r = await maybe_refresh(
+                        source=src if multi else None)
+                    src_results.append(r)
+                    # maybe_refresh 拉取失败不抛(fail-soft
+                    # 旧段保留), 此处补错误留痕(lastErrors 可观测)
+                    if r.get("status") == "failed":
+                        result["errors"].append(
+                            f"threatintel:{src.get('name')}:"
+                            f"{r.get('error') or 'refresh failed'}")
+                except Exception as src_exc:
+                    result["errors"].append(
+                        f"threatintel:{src.get('name')}:"
+                        f"{src_exc}")
+                    logger.warning(
+                        "security_scheduler_ti_failed src=%s: %s",
+                        src.get("name"), src_exc)
+            if len(src_results) == 1:
+                # 单源兼容口径(P5-3): 保留单源结果字段
+                # (status/executed:bool/imported 等) + sources
+                # 计数(P6-1 可观测)
+                result["threatintel"] = {
+                    **src_results[0], "sources": 1}
+            else:
+                result["threatintel"] = {
+                    "sources": len(src_results),
+                    "executed": sum(1 for r in src_results
+                                    if r.get("executed")),
+                    "failed": sum(1 for r in src_results
+                                  if r.get("status") == "failed"),
+                }
     except Exception as exc:
         logger.warning("security_scheduler_threatintel_failed: "
                        "%s", exc)

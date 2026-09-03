@@ -16,6 +16,7 @@ netset 格式(Firehol 标准):
 """
 
 import logging
+import os
 from datetime import datetime, UTC
 
 from core.helpers import ts
@@ -25,11 +26,22 @@ from repositories.security_repository import (
 
 logger = logging.getLogger(__name__)
 
-# 导入段数上限(防误传大文件撑爆存储)
+# 导入段数上限默认(P6-1 环境变量化: SECURITY_THREATINTEL_
+# MAX_CIDRS 可调, 聚合全量 ~180k 段时提额)
 MAX_IMPORT_CIDRS = 20000
 # 命中降档后的信誉值(31: suspicious 区间 30<x≤60——
 # 30 会落入 blacklisted(≤30)触发直封, 与"不直封"设计矛盾)
 THREATINTEL_REPUTATION_CAP = 31.0
+
+
+def max_import_cidrs() -> int:
+    """单次导入段数上限(P6-1 环境变量, 默认 20000 兼容)"""
+    try:
+        return max(1000, int(os.environ.get(
+            "SECURITY_THREATINTEL_MAX_CIDRS",
+            str(MAX_IMPORT_CIDRS))))
+    except ValueError:
+        return MAX_IMPORT_CIDRS
 
 
 def _now_iso() -> str:
@@ -69,9 +81,10 @@ class ThreatIntelService:
             except ValueError:
                 invalid += 1
         cidrs = sorted(seen)
-        if len(cidrs) > MAX_IMPORT_CIDRS:
+        limit = max_import_cidrs()
+        if len(cidrs) > limit:
             raise ValueError(
-                f"导入段数 {len(cidrs)} 超上限 {MAX_IMPORT_CIDRS}")
+                f"导入段数 {len(cidrs)} 超上限 {limit}")
         if not cidrs:
             raise ValueError("netset 内容无有效 CIDR 段")
         return cidrs
@@ -83,12 +96,14 @@ class ThreatIntelService:
     async def import_netset(self, content: str,
                             source: str = "firehol_level1",
                             replace: bool = True) -> dict:
-        """导入 netset 内容(默认全量替换, 幂等可重复)
+        """导入 netset 内容(幂等可重复, P6-1 按源替换+批量写)
 
         Args:
             content: netset 文本(IP/CIDR 逐行)
-            source: 情报源标识(导入元信息留痕)
-            replace: True 先清空旧段(全量导入口径)
+            source: 情报源标识(导入元信息留痕+按源替换键)
+            replace: True 先清**同源**旧段(P6-1 聚合口径——
+                导入 level2 只清 level2, 多源互不干扰;
+                单源默认 firehol_level1 行为不变)
 
         Returns:
             {imported, skipped(替换清除), source}
@@ -96,12 +111,16 @@ class ThreatIntelService:
         cidrs = self.parse_netset(content)
         cleared = 0
         if replace:
-            cleared = await self.repo.clear_threatintel()
+            cleared = await self.repo.clear_threatintel(
+                source=source)
         meta = {"source": source, "importedAt": _now_iso()}
-        for cidr in cidrs:
-            # actorKey 冗余入记录体(_list 读取与过滤依据)
-            await self.repo.save_threatintel(
-                cidr, {"actorKey": f"threatintel:{cidr}", **meta})
+        entries = [
+            (cidr, {"actorKey": f"threatintel:{cidr}", **meta})
+            for cidr in cidrs]
+        # P6-1: pipeline 批量写(180k 段拆 round-trip;
+        # 源计数器由仓储层同点维护——clear 负抵扣 +
+        # save 正增量, 旁路调用不漂移)
+        await self.repo.save_many_threatintel(entries)
         logger.info("threatintel_imported source=%s count=%s "
                     "cleared=%s", source, len(cidrs), cleared)
         return {"success": True, "imported": len(cidrs),
@@ -116,25 +135,112 @@ class ThreatIntelService:
         return await self.repo.match_threatintel(ip)
 
     # ========================================================
-    # 统计
+    # 统计(P6-1 计数器化——查询零 list, 180k 段毫秒级)
+    # 计数器写入由仓储层维护(save_many 正增量 /
+    # clear 负抵扣·全清重置), 本层只读 + 兜底重建
     # ========================================================
 
-    async def stats(self) -> dict:
-        """情报表统计(段数/来源分布/最近导入/自动订阅状态)"""
+    async def _load_source_counts(self,
+                                  rebuild: bool = False
+                                  ) -> dict | None:
+        """读源计数器(rebuild=True 触发全量重建)
+
+        Returns:
+            {source: count} 或 None(计数器缺失且未重建)
+        """
+        from repositories.backend import (
+            is_redis_mode, get_redis_client,
+            get_in_memory_store, _k,
+        )
+        try:
+            if is_redis_mode():
+                client = await get_redis_client()
+                key = _k("security43", "threatintel",
+                         "srcstats")
+                if rebuild:
+                    await client.delete(key)
+                raw = await client.hgetall(key)
+                if not raw:
+                    return None
+                return {k: int(v) for k, v in raw.items()}
+            store = get_in_memory_store()
+            if rebuild:
+                store.pop("_security43_srcstats", None)
+            bucket = store.get("_security43_srcstats")
+            if not bucket:
+                return None
+            return {k: int(v) for k, v in bucket.items()}
+        except Exception as exc:
+            logger.warning("srcstats_load_skip: %s", exc)
+            return None
+
+    async def _rebuild_source_counts(self) -> dict:
+        """全量重建源计数器(兜底: 计数器缺失/漂移时)"""
         records = await self.repo.list_threatintel()
-        sources = {}
+        counts = {}
         latest = None
         for r in records:
             src = r.get("source") or "unknown"
-            sources[src] = sources.get(src, 0) + 1
+            counts[src] = counts.get(src, 0) + 1
             imported = r.get("importedAt")
-            if imported and (latest is None or imported > latest):
+            if imported and (latest is None
+                             or imported > latest):
                 latest = imported
+        # 写回计数器
+        from repositories.backend import (
+            is_redis_mode, get_redis_client,
+            get_in_memory_store, _k,
+        )
+        try:
+            if is_redis_mode():
+                client = await get_redis_client()
+                key = _k("security43", "threatintel",
+                         "srcstats")
+                await client.delete(key)
+                if counts:
+                    await client.hset(key, mapping=counts)
+            else:
+                store = get_in_memory_store()
+                store["_security43_srcstats"] = counts
+        except Exception as exc:
+            logger.warning("srcstats_rebuild_write_skip: %s",
+                           exc)
+        return {"counts": counts, "latest": latest}
+
+    async def stats(self) -> dict:
+        """情报表统计(段数/来源分布/最近导入/订阅状态/匹配策略)
+
+        P6-1 计数器化: sources/totalCidrs 优先读计数器
+        (毫秒级); 计数器缺失 → 全量重建一次(兜底口径);
+        计数器在位但合计 ≠ 区间缓存段数(漂移) → 重建一次。
+        """
+        counts = await self._load_source_counts()
+        latest = None
+        if counts is None:
+            # 兜底: 计数器缺失(旧数据/旁路删键)→ 全量重建
+            # (重建内部已写回, 下次调用毫秒级)
+            rebuilt = await self._rebuild_source_counts()
+            counts = rebuilt["counts"]
+            latest = rebuilt["latest"]
+        else:
+            # 交叉校验: 计数器合计 vs 区间缓存段数(计划 §三③)
+            # ——缓存版本戳一致才可比(未建/过期跳过防误重建)
+            cached = self.repo.threatintel_cached_segments()
+            if cached is not None and \
+                    sum(counts.values()) != cached:
+                rebuilt = await self._rebuild_source_counts()
+                counts = rebuilt["counts"]
+                latest = rebuilt["latest"]
+        sources = dict(counts or {})
+        total = sum(sources.values())
 
         # P5-3: 自动订阅状态实况(enabled/最近拉取/失败计数/
         # degraded——连续失败 ≥3 次外显, 可接 P5-2 告警)
+        # P6-1: sources 每源状态(degradedSources 聚合口径)
         try:
-            from services.threatintel_feed import feed_enabled
+            from services.threatintel_feed import (
+                feed_enabled, degraded_sources,
+            )
             auto_state = (
                 await self.repo.get_threatintel_auto_state()) or {}
             failures = int(auto_state.get("consecutiveFailures")
@@ -148,6 +254,13 @@ class ThreatIntelService:
                 "consecutiveFailures": failures,
                 "degraded": failures >= 3,
             }
+            try:
+                agg = await degraded_sources()
+                auto["sources"] = agg["states"]
+                auto["degradedSources"] = agg[
+                    "degradedSources"]
+            except Exception:
+                pass
         except Exception:
             auto = {"enabled": False, "degraded": False,
                     "consecutiveFailures": 0}
@@ -160,7 +273,7 @@ class ThreatIntelService:
             match = {"mode": "linear", "segments": 0}
         return {
             "success": True,
-            "totalCidrs": len(records),
+            "totalCidrs": total,
             "sources": sources,
             "lastImportedAt": latest,
             "auto": auto,

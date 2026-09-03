@@ -90,10 +90,11 @@ class TestImport:
             "1.2.3.4\n5.6.7.0/24\n", source="test")
         record("导入成功", r["success"] is True
                and r["imported"] == 2, str(r))
-        # 幂等(替换导入, 默认源)
+        # 幂等(替换导入, 默认源; P6-1 按源口径——异源不清,
+        # 同 CIDR 键覆写归新源, 段数不重复)
         r = await svc.import_netset("1.2.3.4\n5.6.7.0/24\n")
         record("重复导入幂等", r["imported"] == 2
-               and r["cleared"] == 2, str(r))
+               and r["cleared"] == 0, str(r))
         # 增量(replace=False 不清旧)
         await svc.import_netset("1.2.3.4\n5.6.7.0/24\n")
         r = await svc.import_netset("8.8.8.8\n",

@@ -45,6 +45,10 @@ REPUTATION_BLACKLIST_MAX = 30.0
 #   导入中途/增量导入三陷阱统一防御)
 # - _TI_RANGE_CACHE: (version, v4_intervals, v6_intervals)
 #   模块级单例——缓存是纯计算产物, 双模式通用
+# P6-1: 段元信息 aux 串键(Redis 模式)——
+#   zhuxiang:security43:threatintel:meta:{cidr} = "source|ts"
+#   区间构建 MGET 批量取(1 命令/5000 键, 180k 段秒级),
+#   段记录内联区间项(命中零回填往返)
 # ============================================================
 RANGE_MATCH_THRESHOLD = 1000
 _TI_VERSION = 0
@@ -476,57 +480,262 @@ class Security43Repository:
                                meta: dict) -> dict:
         result = await self._save(self.TABLE_POSTURE,
                                   f"threatintel:{cidr}", meta)
+        # P6-1: 元信息 aux 串(区间构建 MGET 批量取)
+        if is_redis_mode():
+            try:
+                client = await get_redis_client()
+                source = str((meta or {}).get("source")
+                             or "unknown")
+                ts = str((meta or {}).get("importedAt") or "")
+                await client.set(_k("security43", "threatintel",
+                                     f"meta:{cidr}"),
+                                  f"{source}|{ts}")
+            except Exception:
+                pass   # 失败不阻断(构建侧 hmget 回退)
         # P5-6: 版本戳递增(区间缓存失效——同规模换内容/
         # 导入中途/增量导入三陷阱统一防御)
         global _TI_VERSION
         _TI_VERSION += 1
         return result
 
+    async def save_many_threatintel(self,
+                                     entries: list) -> int:
+        """P6-1: 批量写入情报段(pipeline, 每批 5000)
+
+        180k 段聚合导入拆 round-trip(逐键 hset 15~20s+ →
+        目标秒级); 批间 await asyncio.sleep(0) 让出事件循环
+        (P4-2 分批节流范式)。版本戳末尾递增一次(逐段 N 次
+        收敛为 1 次, 防陈旧口径等价)。
+        源计数器同步增量: 按段 meta.source 分组 + 覆写检测
+        (CIDR 键跨源冲突——如 level1⊂level2 交集段——旧源
+        负抵扣), 写入与计数器在仓储层同点维护不漂移。
+
+        Args:
+            entries: [(cidr, meta_dict), ...]
+        Returns:
+            写入条数
+        """
+        if not entries:
+            return 0
+        deltas: dict = {}
+        if is_redis_mode():
+            import asyncio
+            client = await get_redis_client()
+            meta_prefix = _k("security43", "threatintel",
+                             "meta:")
+            for i in range(0, len(entries), 5000):
+                batch = entries[i:i + 5000]
+                # 覆写检测: 先读旧 source(单字段 hget, 轻量)
+                pipe = client.pipeline(transaction=False)
+                for cidr, _ in batch:
+                    pipe.hget(
+                        _k("security43", self.TABLE_POSTURE,
+                           f"threatintel:{cidr}"), "source")
+                olds = await pipe.execute()
+                # 批量写(段 hash + 元信息 aux 串——构建侧
+                # MGET 5000 键/命令, 180k 段元信息秒级取)
+                pipe = client.pipeline(transaction=False)
+                for cidr, meta in batch:
+                    pipe.hset(
+                        _k("security43", self.TABLE_POSTURE,
+                           f"threatintel:{cidr}"),
+                        mapping=self._serialize(meta))
+                    source = str((meta or {}).get("source")
+                                 or "unknown")
+                    ts = str((meta or {}).get("importedAt")
+                             or "")
+                    pipe.set(meta_prefix + cidr,
+                             f"{source}|{ts}")
+                await pipe.execute()
+                for (_, meta), old in zip(batch, olds):
+                    self._merge_srcstat_delta(
+                        deltas, meta, old)
+                await asyncio.sleep(0)   # 让出事件循环
+            global _TI_VERSION
+            _TI_VERSION += 1
+            await self._bump_srcstats(deltas)
+            return len(entries)
+        # 内存模式: 直写(无 round-trip)
+        self._ensure_store()
+        table = self.store[self.TABLE_POSTURE]
+        for cidr, meta in entries:
+            self._merge_srcstat_delta(
+                deltas, meta,
+                table.get(f"threatintel:{cidr}"))
+            table[f"threatintel:{cidr}"] = meta
+        _TI_VERSION += 1
+        await self._bump_srcstats(deltas)
+        return len(entries)
+
+    @staticmethod
+    def _merge_srcstat_delta(deltas: dict, meta: dict,
+                              old) -> None:
+        """单段计数增量并入 deltas(覆写检测)
+
+        新建段 → 新源 +1; 跨源覆写 → 旧源 -1 / 新源 +1;
+        同源覆写 → 零变化(replace=False 重复导入不虚增)。
+        """
+        src = str((meta or {}).get("source") or "unknown")
+        if old is None or old == "":
+            deltas[src] = deltas.get(src, 0) + 1
+            return
+        if isinstance(old, dict):
+            old_src = str(old.get("source") or "unknown")
+        else:
+            old_src = (old.decode() if isinstance(old, bytes)
+                       else str(old))
+        if old_src == src:
+            return
+        deltas[old_src] = deltas.get(old_src, 0) - 1
+        deltas[src] = deltas.get(src, 0) + 1
+
+    async def _bump_srcstats(self, deltas: dict) -> None:
+        """P6-1: 源计数器增量维护(正=导入 / 负=清除)
+
+        计数器键(与服务层 stats() 共读):
+            Redis: zhuxiang:security43:threatintel:srcstats
+                   (hash, field=source; hincrby 原子增量)
+            内存: store["_security43_srcstats"]
+        ≤0 的源删除字段(源清空不残留 0 计数项)。
+        """
+        if not deltas:
+            return
+        try:
+            if is_redis_mode():
+                client = await get_redis_client()
+                key = _k("security43", "threatintel", "srcstats")
+                for source, delta in deltas.items():
+                    new = await client.hincrby(key, source, delta)
+                    if new <= 0:
+                        await client.hdel(key, source)
+                return
+            store = get_in_memory_store()
+            bucket = store.setdefault("_security43_srcstats", {})
+            for source, delta in deltas.items():
+                new = int(bucket.get(source) or 0) + delta
+                if new > 0:
+                    bucket[source] = new
+                else:
+                    bucket.pop(source, None)
+        except Exception:
+            # 计数器是 stats 加速层——失败不阻断导入/清除
+            # 主链路(stats 兜底全量重建)
+            pass
+
     # --------------------------------------------------------
     # P5-3: 威胁情报自动订阅状态(单例记录, posture 表族键空间)
+    # P6-1: source 参数——按源状态键 threatintel:auto:{source}
+    # (source=None 单源兼容键, P5-3 口径不变)
     # --------------------------------------------------------
 
-    async def get_threatintel_auto_state(self) -> dict | None:
-        return await self._get(self.TABLE_POSTURE,
-                               "threatintel:auto")
+    async def get_threatintel_auto_state(
+            self, source: str = None) -> dict | None:
+        key = ("threatintel:auto" if not source
+               else f"threatintel:auto:{source}")
+        return await self._get(self.TABLE_POSTURE, key)
 
-    async def save_threatintel_auto_state(self,
-                                          record: dict) -> dict:
-        return await self._save(self.TABLE_POSTURE,
-                                "threatintel:auto", record)
+    async def save_threatintel_auto_state(
+            self, record: dict,
+            source: str = None) -> dict:
+        key = ("threatintel:auto" if not source
+               else f"threatintel:auto:{source}")
+        return await self._save(self.TABLE_POSTURE, key, record)
 
     async def list_threatintel(self,
                                limit: int = 200000) -> list[dict]:
         """列出全部威胁情报段
 
-        P5-6 修正: 默认 limit 由 10000 提至 200000——
-        MAX_IMPORT_CIDRS=20000 允许导入 2 万段, 原 1 万
-        上限导致 list/clear/stats 截断(导入超 1 万段后
-        clear 只清一半/stats 少算——20k 段实机暴露的存量缺陷)。
+        P5-6 修正: 默认 limit 200000(超万段截断缺陷修复)。
+        P6-1: Redis 模式 pipeline 批量读(每批 5000)——
+        180k 段逐键 hgetall 15s+ → 目标 <5s; 键过滤
+        ":threatintel:" 中缀天然排除 auto/scheduler 单例键。
         """
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "security43", self.TABLE_POSTURE, "*"))
+            ti_keys = [k for k in keys
+                       if ":threatintel:" in k
+                       and not k.endswith(":seq")]
+            result = []
+            for i in range(0, len(ti_keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in ti_keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if data:
+                        rec = self._deserialize(data)
+                        if str(rec.get("actorKey", "")).startswith(
+                                "threatintel:"):
+                            result.append(rec)
+            return result[:limit]
         records = await self._list(self.TABLE_POSTURE, limit)
         return [r for r in records
                 if str(r.get("actorKey", "")).startswith(
                     "threatintel:")]
 
-    async def clear_threatintel(self) -> int:
-        """清空全部情报段(重新导入前调用)"""
+    async def clear_threatintel(self,
+                                source: str = None) -> int:
+        """清空情报段(P6-1 按源清除 + 计数器同步)
+
+        source=None → 清全部(既有口径, 手动导入兼容;
+                      计数器整体重置)
+        source="firehol_level2" → 仅清该源段(聚合按源替换;
+                      该源计数器负抵扣)
+        返回清除条数; 版本戳递增(区间缓存失效)。
+        """
         records = await self.list_threatintel()
-        for r in records:
-            key = str(r.get("actorKey", ""))[len("threatintel:"):]
-            if is_redis_mode():
-                client = await get_redis_client()
-                await client.delete(_k(
-                    "security43", self.TABLE_POSTURE,
-                    f"threatintel:{key}"))
-            else:
-                self._ensure_store()
+        if source:
+            records = [r for r in records
+                       if r.get("source") == source]
+        if is_redis_mode():
+            import asyncio
+            client = await get_redis_client()
+            meta_prefix = _k("security43", "threatintel",
+                             "meta:")
+            for i in range(0, len(records), 5000):
+                batch = records[i:i + 5000]
+                pipe = client.pipeline(transaction=False)
+                for r in batch:
+                    key = str(r.get("actorKey", "")
+                              )[len("threatintel:"):]
+                    pipe.delete(_k(
+                        "security43", self.TABLE_POSTURE,
+                        f"threatintel:{key}"))
+                    pipe.delete(meta_prefix + key)   # 元信息 aux
+                await pipe.execute()
+                await asyncio.sleep(0)
+        else:
+            self._ensure_store()
+            for r in records:
+                key = str(r.get("actorKey", "")
+                          )[len("threatintel:"):]
                 self.store[self.TABLE_POSTURE].pop(
                     f"threatintel:{key}", None)
+        # P6-1: 源计数器同步(清除负抵扣/全清重置)——
+        # 与 save_many 同点维护, 旁路 clear 不再漂移
+        if source:
+            await self._bump_srcstats(
+                {source: -len(records)})
+        elif records:
+            await self._reset_srcstats()
         # P5-6: 版本戳递增(区间缓存失效)
         global _TI_VERSION
         _TI_VERSION += 1
         return len(records)
+
+    async def _reset_srcstats(self) -> None:
+        """P6-1: 全量清除后重置源计数器(stats 兜底重建口径)"""
+        try:
+            if is_redis_mode():
+                client = await get_redis_client()
+                await client.delete(_k(
+                    "security43", "threatintel", "srcstats"))
+                return
+            get_in_memory_store().pop(
+                "_security43_srcstats", None)
+        except Exception:
+            pass
 
     async def _build_range_cache(self) -> tuple:
         """P5-6: 构建有序区间表(懒构建, 导入后首次匹配触发)
@@ -535,17 +744,32 @@ class Security43Repository:
                         (v6_starts, v6_intervals))
         - starts 与 intervals 构建时预计算(查询零列表重建——
           每次 O(n) 重建 starts 会抵消二分收益)
-        - 命中回填单键取(get_threatintel)——区间只存 cidr
-          字符串, 省 180k 段 × dict 内存
+        - P6-1 性能强化(180k 段构建 15.9s → 秒级):
+            ① scan 分批取段(内存有界——KEYS 全量列表 ~25MB
+               常驻碎片) + pipeline hmget 仅取 source/importedAt
+            ② v4 纯整数快速解析(ipaddress ~40µs/段 → ~3µs)
+            ③ 段记录内联区间项(命中零 Redis 回填往返——
+               10k 查询 3.7s → 毫秒级); source/importedAt
+               字符串驻留(3 源 × 60k 段 → 6 个对象)
         """
-        import ipaddress
         v4, v6 = [], []
-        for r in await self.list_threatintel(limit=200000):
-            cidr = str(r.get("actorKey", ""))[len("threatintel:"):]
+        intern = {}
+        async for cidr, source, imported_at in \
+                self._iter_ti_entries():
+            source = intern.setdefault(source, source)
+            imported_at = intern.setdefault(imported_at,
+                                            imported_at)
+            rng = self._fast_v4_range(cidr)
+            if rng is not None:
+                v4.append((rng[0], rng[1], cidr, source,
+                           imported_at))
+                continue
+            import ipaddress
             try:
                 net = ipaddress.ip_network(cidr, strict=False)
                 entry = (int(net.network_address),
-                         int(net.broadcast_address), cidr)
+                         int(net.broadcast_address), cidr,
+                         source, imported_at)
                 (v4 if net.version == 4 else v6).append(entry)
             except ValueError:
                 continue   # 非法段跳过(导入校验兜底)
@@ -555,27 +779,155 @@ class Security43Repository:
                 ([e[0] for e in v4], v4),
                 ([e[0] for e in v6], v6))
 
-    async def _match_bisect(self, ip_int: int,
-                            family: tuple) -> dict | None:
+    async def _iter_ti_entries(self):
+        """异步迭代段三元组 (cidr, source, importedAt)
+
+        Redis: scan 取段键(posture 表) + MGET 元信息 aux 串
+        (1 命令/5000 键——hmget 逐命令 ~40µs × 180k ≈ 7.7s →
+        MGET 秒级; aux 缺失回退 hmget 兼容旧数据);
+        内存: 直读 store(键名自含 CIDR)。
+        """
+        if is_redis_mode():
+            import asyncio
+            client = await get_redis_client()
+            seg_prefix = _k("security43", self.TABLE_POSTURE,
+                           "threatintel:")
+            meta_prefix = _k("security43", "threatintel",
+                             "meta:")
+            cidrs = []
+            async for k in client.scan_iter(
+                    match=seg_prefix + "*", count=5000):
+                rest = k[len(seg_prefix):]
+                if (not rest or rest == "auto"
+                        or rest.startswith("auto:")):
+                    continue   # 订阅状态单例键
+                cidrs.append(rest)
+                if len(cidrs) >= 5000:
+                    for e in await self._fetch_entry_batch(
+                            cidrs, meta_prefix, seg_prefix):
+                        yield e
+                    cidrs = []
+                    await asyncio.sleep(0)   # 让出事件循环
+            if cidrs:
+                for e in await self._fetch_entry_batch(
+                        cidrs, meta_prefix, seg_prefix):
+                    yield e
+            return
+        # 内存模式: 直读(键名自含 CIDR)
+        self._ensure_store()
+        prefix = "threatintel:"
+        for k, rec in list(
+                self.store[self.TABLE_POSTURE].items()):
+            rest = k[len(prefix):]
+            if (not rest or rest == "auto"
+                    or rest.startswith("auto:")):
+                continue
+            rec = rec or {}
+            yield (rest, str(rec.get("source") or "unknown"),
+                   str(rec.get("importedAt") or ""))
+
+    async def _fetch_entry_batch(self, cidrs: list,
+                                 meta_prefix: str,
+                                 seg_prefix: str) -> list:
+        """MGET 批量取段元信息(aux 串 "source|importedAt")
+
+        aux 缺失(旧数据未写 aux)→ hmget 回退逐段取。
+        """
+        client = await get_redis_client()
+        vals = await client.mget(
+            [meta_prefix + c for c in cidrs])
+        entries = []
+        missing = []
+        for cidr, v in zip(cidrs, vals):
+            if v:
+                source, _, ts = v.partition("|")
+                entries.append((cidr, source or "unknown",
+                                ts))
+            else:
+                missing.append(cidr)
+        if missing:
+            # 旧数据回退(P5-6 遗留段无 aux 串)
+            pipe = client.pipeline(transaction=False)
+            for c in missing:
+                pipe.hmget(seg_prefix + c,
+                           ("source", "importedAt"))
+            for c, mv in zip(missing, await pipe.execute()):
+                source = (mv[0]
+                          if mv and mv[0] else "unknown")
+                ts = (mv[1] if mv and mv[1] else "")
+                entries.append((c, source, ts))
+        return entries
+
+    @staticmethod
+    def _fast_v4_range(cidr: str):
+        """v4 CIDR → (start_int, end_int) 纯整数快速解析
+
+        非 v4/非法 → None(调用方回退 ipaddress——v6 段与
+        兜底校验)。前导零/超界拒绝口径与 ipaddress 一致。
+        """
+        net_part, sep, bits_str = cidr.partition("/")
+        octets = net_part.split(".")
+        if len(octets) != 4:
+            return None
+        bits = 32
+        if sep:
+            if not bits_str.isdigit():
+                return None
+            bits = int(bits_str)
+            if bits > 32:
+                return None
+        ip_int = 0
+        for o in octets:
+            if len(o) > 1 and o[0] == "0":
+                return None   # 前导零(ipaddress 同口径拒绝)
+            try:
+                b = int(o)
+            except ValueError:
+                return None
+            if b > 255:
+                return None
+            ip_int = (ip_int << 8) | b
+        if bits == 0:
+            return 0, 0xFFFFFFFF
+        mask = ((1 << bits) - 1) << (32 - bits)
+        start = ip_int & mask
+        return start, start | (~mask & 0xFFFFFFFF)
+
+    @staticmethod
+    def _fast_v4_int(ip: str):
+        """点分 v4 字符串 → int(None=非 v4, 调用方回退)"""
+        octets = ip.split(".")
+        if len(octets) != 4:
+            return None
+        ip_int = 0
+        for o in octets:
+            if len(o) > 1 and o[0] == "0":
+                return None
+            try:
+                b = int(o)
+            except ValueError:
+                return None
+            if b > 255:
+                return None
+            ip_int = (ip_int << 8) | b
+        return ip_int
+
+    def _match_bisect(self, ip_int: int,
+                      family: tuple) -> dict | None:
         """P5-6: 区间二分命中(bisect_right 找左邻区间)
 
-        IP int ∈ [start, end] 即命中; 返回完整段记录
-        (单键回填)。
+        P6-1: 段记录内联返回(区间项自带 source/importedAt,
+        零 Redis 回填往返); IP int ∈ [start, end] 即命中。
         """
         from bisect import bisect_right
         starts, intervals = family
         idx = bisect_right(starts, ip_int) - 1
         if idx < 0:
             return None
-        start, end, cidr = intervals[idx]
+        start, end, cidr, source, imported_at = intervals[idx]
         if start <= ip_int <= end:
-            record = await self.get_threatintel(cidr)
-            if record is None:
-                # 存储与缓存瞬时不一致(导入中)——返回段标识
-                return {"cidr": cidr}
-            return {"cidr": cidr, **{
-                k: v for k, v in record.items()
-                if k != "actorKey"}}
+            return {"cidr": cidr, "source": source,
+                    "importedAt": imported_at}
         return None
 
     async def match_threatintel(self, ip: str) -> dict | None:
@@ -586,13 +938,20 @@ class Security43Repository:
             段数 ≥ 1000 → 区间二分 O(log n)(缓存构建一次,
                 查询零 list 调用——顺带消解逐键 hgetall
                 网络往返的隐性瓶颈)
+        P6-1 性能强化: v4 快速整数解析(ipaddress 回退
+        v6/非法), 二分命中返回内联记录(零 Redis 往返)。
         """
         import ipaddress
         global _TI_RANGE_CACHE
-        try:
-            addr = ipaddress.ip_address(ip)
-        except ValueError:
-            return None
+        ip_int = self._fast_v4_int(ip)
+        if ip_int is not None:
+            version = 4
+        else:
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                return None
+            version, ip_int = addr.version, int(addr)
 
         # 懒构建/版本失效检查(单次判断开销)
         if _TI_RANGE_CACHE is None or \
@@ -601,11 +960,15 @@ class Security43Repository:
         _, v4_family, v6_family = _TI_RANGE_CACHE
         total = len(v4_family[1]) + len(v6_family[1])
         if total >= RANGE_MATCH_THRESHOLD:
-            family = v4_family if addr.version == 4 \
+            family = v4_family if version == 4 \
                 else v6_family
-            return await self._match_bisect(int(addr), family)
+            return self._match_bisect(ip_int, family)
 
         # 线性路径(既有口径)
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return None
         for r in await self.list_threatintel():
             cidr = str(r.get("actorKey", ""))[len("threatintel:"):]
             try:
@@ -626,6 +989,20 @@ class Security43Repository:
         return {"mode": ("bisect" if total >=
                          RANGE_MATCH_THRESHOLD else "linear"),
                 "segments": total}
+
+    @staticmethod
+    def threatintel_cached_segments() -> int | None:
+        """P6-1: 区间缓存段数(仅缓存版本戳一致时可信)
+
+        stats 交叉校验用: 缓存未建/过期返回 None(跳过校验,
+        防误触发全量重建); 版本一致 → 与计数器合计比对,
+        漂移(旁路删键/覆写)触发兜底重建。
+        """
+        if _TI_RANGE_CACHE is None or \
+                _TI_RANGE_CACHE[0] != _TI_VERSION:
+            return None
+        return (len(_TI_RANGE_CACHE[1][1])
+                + len(_TI_RANGE_CACHE[2][1]))
 
     # --------------------------------------------------------
     # P3-3: 会员地理历史(geo velocity 异地跳变, 滚动窗口)

@@ -61,6 +61,72 @@ def feed_url() -> str:
     return _env("SECURITY_THREATINTEL_URL", DEFAULT_FEED_URL).strip()
 
 
+# ============================================================
+# P6-1: 多源列表(SECURITY_THREATINTEL_URLS 优先)
+# ============================================================
+
+def _source_name_from_url(url: str) -> str:
+    """URL 文件名 → 源名(firehol_level2.netset →
+    firehol_level2; 无扩展名/无名回退 host)"""
+    import re
+    path = url.rstrip("/").split("?")[0]
+    filename = path.rsplit("/", 1)[-1]
+    base = re.sub(r"\.netset$", "", filename)
+    if base and re.match(r"^[A-Za-z0-9_\-]+$", base):
+        return base
+    # 回退: 取 host(如 raw.githubusercontent.com →
+    # 点转下划线防状态键歧义)
+    host = url.split("//", 1)[-1].split("/", 1)[0]
+    return host.replace(".", "_") or "feed"
+
+
+def multi_source_enabled() -> bool:
+    """P6-1 多源模式(SECURITY_THREATINTEL_URLS 已配置)
+
+    False = 单源回退(P5-3 兼容口径——调度器走 source=None
+    单源键 threatintel:auto, 既有部署状态连续);
+    True = 多源(调度器按源遍历, 状态键 threatintel:auto:{name})。
+    """
+    return bool(_env("SECURITY_THREATINTEL_URLS", "").strip())
+
+
+def feed_sources() -> list[dict]:
+    """多源列表(P6-1)
+
+    SECURITY_THREATINTEL_URLS 格式:
+        name1=url1,name2=url2(逗号分隔; name 可省略
+        ——省略时从 URL 文件名推导)
+    空/未配置 → 回退单 URL 变量(推导 firehol_level1)
+    ——P5-3 兼容口径。
+
+    Returns:
+        [{"name": "firehol_level1", "url": "..."}]
+    """
+    raw = _env("SECURITY_THREATINTEL_URLS", "").strip()
+    sources = []
+    if raw:
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "=" in part:
+                name, url = part.split("=", 1)
+                name = name.strip() or \
+                    _source_name_from_url(url.strip())
+                sources.append({"name": name,
+                               "url": url.strip()})
+            else:
+                sources.append({"name": _source_name_from_url(
+                    part), "url": part})
+    if not sources:
+        url = feed_url()
+        name = (_source_name_from_url(url)
+                if url != DEFAULT_FEED_URL
+                else "firehol_level1")
+        sources.append({"name": name, "url": url})
+    return sources
+
+
 def feed_interval_seconds() -> int:
     """拉取周期(秒), 默认 7 天, 下限 3600 防误配忙循环"""
     try:
@@ -107,12 +173,23 @@ async def fetch_netset(url: str = None,
 
 
 # ============================================================
-# ② 状态存储(双模式, security_posture 表)
+# ② 状态存储(双模式, security_posture 表; P6-1 按源键)
 # ============================================================
 
-async def _load_auto_state() -> dict:
+async def _load_auto_state(source: dict = None) -> dict:
+    """按源加载订阅状态(P6-1 键路由)
+
+    多源模式(URLS 已配): source={"name": ...} → 按源键
+        threatintel:auto:{name}
+    单源回退(未配 URLS 或 source=None): → legacy 单源键
+        threatintel:auto(P5-3 既有状态连续)
+    """
     repo = Security43Repository()
-    state = await repo.get_threatintel_auto_state()
+    name = (source or {}).get("name")
+    if name and multi_source_enabled():
+        state = await repo.get_threatintel_auto_state(name)
+    else:
+        state = await repo.get_threatintel_auto_state()
     if not state:
         state = {"lastAutoImportAt": "",
                  "lastAutoStatus": "",
@@ -125,9 +202,14 @@ async def _load_auto_state() -> dict:
     return state
 
 
-async def _save_auto_state(state: dict) -> None:
+async def _save_auto_state(state: dict,
+                           source: dict = None) -> None:
     repo = Security43Repository()
-    await repo.save_threatintel_auto_state(state)
+    name = (source or {}).get("name")
+    if name and multi_source_enabled():
+        await repo.save_threatintel_auto_state(state, name)
+    else:
+        await repo.save_threatintel_auto_state(state)
 
 
 def _within_interval(state: dict) -> bool:
@@ -150,20 +232,30 @@ def _within_interval(state: dict) -> bool:
 # ③ 周期刷新主入口(调度器⑤ / 手动 refresh 共用)
 # ============================================================
 
-async def maybe_refresh(force: bool = False) -> dict:
-    """周期到点才拉取(force 跳过周期判断, 手动刷新用)
+async def maybe_refresh(source: dict = None,
+                        force: bool = False) -> dict:
+    """单源周期刷新(P6-1 source 参数化; 调度器遍历调用)
+
+    Args:
+        source: {"name": ..., "url": ...}——None 走单源
+            兼容口径(P5-3 既有端点行为不变)
+        force: 跳过周期判断(手动刷新用)
 
     Returns:
         {executed, reason?, status, imported?, cleared?,
-         lastAutoImportAt, consecutiveFailures, degraded}
+         lastAutoImportAt, consecutiveFailures, degraded,
+         source?}
     """
-    state = await _load_auto_state()
+    name = (source or {}).get("name")
+    url = (source or {}).get("url")
+    state = await _load_auto_state(source)
 
     # ① 周期判断(手动 refresh force=True 跳过)
     if not force and _within_interval(state):
         return {
             "executed": False, "reason": "interval_not_reached",
             "status": state.get("lastAutoStatus") or "idle",
+            "source": name,
             "lastAutoImportAt":
                 state.get("lastAutoImportAt") or None,
             "consecutiveFailures":
@@ -175,18 +267,19 @@ async def maybe_refresh(force: bool = False) -> dict:
     # ② 拉取 + 校验(TransportError/ValueError 均走失败链;
     #    旧段不动——fail-soft 情报宁旧勿空)
     try:
-        content = await fetch_netset()
+        content = await fetch_netset(url)
     except Exception as exc:
         state["consecutiveFailures"] = \
             int(state.get("consecutiveFailures") or 0) + 1
         state["lastAutoStatus"] = "failed"
         state["lastError"] = str(exc)[:200]
-        await _save_auto_state(state)
-        logger.warning("threatintel_auto_fetch_failed "
-                       "count=%s: %s",
+        await _save_auto_state(state, source)
+        logger.warning("threatintel_auto_fetch_failed source=%s "
+                       "count=%s: %s", name,
                        state["consecutiveFailures"], exc)
         return {
             "executed": False, "status": "failed",
+            "source": name,
             "error": state["lastError"],
             "lastAutoImportAt":
                 state.get("lastAutoImportAt") or None,
@@ -197,10 +290,10 @@ async def maybe_refresh(force: bool = False) -> dict:
                 >= DEGRADED_THRESHOLD,
         }
 
-    # ③ 导入(幂等全量替换, source=自动轨标识)
+    # ③ 导入(按源替换, source=源名——多源互不干扰)
     from services.threatintel_service import ThreatIntelService
     r = await ThreatIntelService().import_netset(
-        content, source=AUTO_SOURCE, replace=True)
+        content, source=name or AUTO_SOURCE, replace=True)
 
     # ④ 成功: 重置失败计数 + 留痕
     state.update({
@@ -209,12 +302,42 @@ async def maybe_refresh(force: bool = False) -> dict:
         "consecutiveFailures": 0,
         "lastError": "",
     })
-    await _save_auto_state(state)
-    logger.info("threatintel_auto_refreshed imported=%s "
-                "cleared=%s", r["imported"], r["cleared"])
+    await _save_auto_state(state, source)
+    logger.info("threatintel_auto_refreshed source=%s "
+                "imported=%s cleared=%s", name,
+                r["imported"], r["cleared"])
     return {
         "executed": True, "status": "ok",
+        "source": name,
         "imported": r["imported"], "cleared": r["cleared"],
         "lastAutoImportAt": state["lastAutoImportAt"],
         "consecutiveFailures": 0, "degraded": False,
     }
+
+
+# ============================================================
+# ④ P6-1: 多源汇总(degradedSources 聚合)
+# ============================================================
+
+async def degraded_sources() -> dict:
+    """多源降级汇总(stats().auto 消费)
+
+    Returns:
+        {"degradedSources": [name, ...], "any": bool,
+         "states": {name: {lastAutoStatus,
+         consecutiveFailures, lastError}}}
+    """
+    degraded = []
+    states = {}
+    for src in feed_sources():
+        state = await _load_auto_state(src)
+        failures = int(state.get("consecutiveFailures") or 0)
+        states[src["name"]] = {
+            "lastAutoStatus": state.get("lastAutoStatus") or "",
+            "consecutiveFailures": failures,
+            "lastError": state.get("lastError") or "",
+        }
+        if failures >= DEGRADED_THRESHOLD:
+            degraded.append(src["name"])
+    return {"degradedSources": degraded,
+            "any": bool(degraded), "states": states}

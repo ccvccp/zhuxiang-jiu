@@ -237,7 +237,7 @@ class TestCacheInvalidation:
         after = await _match_via_repo(hit_ip)
         record("同规模换内容必重建", after is None, str(after))
 
-        # 陷阱2: clear 后未命中
+        # 陷阱2: clear 后未命中(同源 clear+导入——P6-1 按源口径)
         from services.threatintel_service import ThreatIntelService
         _reset_range_state()
         segs = _gen_v4_segments(1500, seed=23)
@@ -246,7 +246,8 @@ class TestCacheInvalidation:
         before = await _match_via_repo(hit_ip)
         record("clear前命中", before == segs[0], str(before))
         await ThreatIntelService().import_netset(
-            "203.0.113.0/24\n", replace=True)   # clear+导入1段
+            "203.0.113.0/24\n", source="p5_6_test",
+            replace=True)   # 同源clear+导入1段
         after = await _match_via_repo(hit_ip)
         record("clear后旧段未命中", after is None, str(after))
         r = await _match_via_repo("203.0.113.9")
@@ -254,7 +255,8 @@ class TestCacheInvalidation:
 
         # 陷阱3: 增量导入(replace=False)生效
         await ThreatIntelService().import_netset(
-            "198.51.100.0/24\n", replace=False)
+            "198.51.100.0/24\n", source="p5_6_test",
+            replace=False)
         r = await _match_via_repo("198.51.100.9")
         record("增量导入生效", r == "198.51.100.0/24", str(r))
         r = await _match_via_repo("203.0.113.9")
@@ -265,8 +267,11 @@ class TestStats:
     async def run(self):
         print("[06 stats 可观测]")
         from services.threatintel_service import ThreatIntelService
+        from repositories.security_repository import \
+            Security43Repository
         svc = ThreatIntelService()
 
+        await Security43Repository().clear_threatintel()  # 隔离残留
         _reset_range_state()
         await _import_segments(["203.0.113.0/24\n"])
         s = await svc.stats()
