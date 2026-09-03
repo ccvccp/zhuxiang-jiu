@@ -4,6 +4,8 @@
     security_ip_reputation   IP信誉库(评分/状态/攻击计数/冷却/pinned)
     security_events          攻击事件流水(请求快照/威胁分/因子明细/处置动作)
     security_blocks          封禁表(IP/原因/自动解封时间)
+    security_appeals         误报申诉(事件→裁决→P2学习真值)
+    security_chall_pass      挑战通行证(IP维度, TTL内免挑战)
 
 设计对齐:
     - 双模式存储 + None/bool 序列化口径(38/41/42号惯例)
@@ -11,7 +13,6 @@
     - 封禁 TTL 到点自动解封(懒清理), 不产生永久误封
 """
 
-import time
 from datetime import datetime, UTC
 
 from repositories.backend import (
@@ -51,12 +52,13 @@ class Security43Repository:
     TABLE_IP = "security_ip_reputation"
     TABLE_EVENTS = "security_events"
     TABLE_BLOCKS = "security_blocks"
+    TABLE_APPEALS = "security_appeals"
 
     _INT_FIELDS = ("eventId", "memberId", "requestCount",
-                   "attackCount", "recoverCount")
+                   "attackCount", "recoverCount", "appealId")
     _FLOAT_FIELDS = ("score", "reputation", "lastPenaltyAt",
                      "expireAt", "createdAt", "decidedAt")
-    _BOOL_FIELDS = ("pinned", "enforced", "eventFed")
+    _BOOL_FIELDS = ("pinned", "enforced", "eventFed", "appealFed")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -66,7 +68,8 @@ class Security43Repository:
     # --------------------------------------------------------
 
     def _ensure_store(self):
-        for key in (self.TABLE_IP, self.TABLE_EVENTS, self.TABLE_BLOCKS):
+        for key in (self.TABLE_IP, self.TABLE_EVENTS,
+                    self.TABLE_BLOCKS, self.TABLE_APPEALS):
             self.store.setdefault(key, {})
 
     async def next_id(self, kind: str) -> int:
@@ -226,6 +229,69 @@ class Security43Repository:
         now = _now_ts()
         return [b for b in blocks
                 if (b.get("expireAt") or 0) > now]
+
+    # --------------------------------------------------------
+    # 申诉表(P1: 误报申诉 → 裁决 → P2 学习真值)
+    # --------------------------------------------------------
+
+    async def get_appeal(self, appeal_id: int) -> dict | None:
+        return await self._get(self.TABLE_APPEALS, int(appeal_id))
+
+    async def get_appeal_by_event(self, event_id: int) -> dict | None:
+        appeals = await self._list(self.TABLE_APPEALS, limit=1000)
+        for a in appeals:
+            if int(a.get("eventId") or 0) == int(event_id):
+                return a
+        return None
+
+    async def save_appeal(self, record: dict) -> dict:
+        return await self._save(self.TABLE_APPEALS,
+                                record["appealId"], record)
+
+    async def list_appeals(self, member_id: int = None,
+                           status: str = None,
+                           limit: int = 200) -> list[dict]:
+        appeals = await self._list(self.TABLE_APPEALS, limit)
+        if member_id is not None:
+            appeals = [a for a in appeals
+                       if int(a.get("memberId") or 0) == int(member_id)]
+        if status:
+            appeals = [a for a in appeals
+                       if a.get("status") == status]
+        appeals.sort(key=lambda x: x.get("createdAt") or "",
+                     reverse=True)
+        return appeals
+
+    # --------------------------------------------------------
+    # 挑战通行证(IP 维度, TTL 内免挑战)
+    # --------------------------------------------------------
+
+    async def grant_challenge_pass(self, ip: str, ttl: int = 900) -> bool:
+        """颁发挑战通行证(TTL 秒), 已有则刷新"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("security43", "challpass", ip),
+                             "1", ex=max(1, int(ttl)))
+            return True
+        self._ensure_store()
+        bucket = self.store.setdefault("_security43_challpass", {})
+        bucket[ip] = _now_ts() + ttl
+        return True
+
+    async def has_challenge_pass(self, ip: str) -> bool:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return bool(await client.exists(
+                _k("security43", "challpass", ip)))
+        self._ensure_store()
+        bucket = self.store.get("_security43_challpass", {})
+        expire = bucket.get(ip)
+        if expire is None:
+            return False
+        if expire <= _now_ts():
+            del bucket[ip]
+            return False
+        return True
 
     # --------------------------------------------------------
     # 频次计数(固定窗口: Redis INCR+EXPIRE / 内存时间戳列表)

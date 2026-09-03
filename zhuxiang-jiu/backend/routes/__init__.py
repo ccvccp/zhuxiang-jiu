@@ -87,6 +87,8 @@ from routes.blogger_routes import register_blogger_routes
 from routes.ride_routes import register_ride_routes
 # AI无感开票模块(42号·抬头簿+决策评分+自动开具/红冲)
 from routes.invoice_routes import register_invoice_routes
+# AI智能安全管理模块(43号·安全网关+威胁评分+挑战验证+申诉)
+from routes.security_routes import register_security_routes
 
 __all__ = [
     # 已有(15)
@@ -144,4 +146,5 @@ __all__ = [
     "register_blogger_routes",
     "register_ride_routes",
     "register_invoice_routes",
+    "register_security_routes",
 ]

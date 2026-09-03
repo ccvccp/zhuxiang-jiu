@@ -52,11 +52,14 @@ PENALTY_MAP = {
     ACTION_BLOCK: 60.0,
 }
 
-# 网关快道白名单(健康检查永久放行, Docker healthcheck 依赖)
+# 网关快道白名单(健康检查永久放行 + 挑战应答端点防死锁)
 GATEWAY_WHITELIST = (
     "/api/decision/health",
     "/api/monitor/health",
     "/api/maintenance/health",
+    # 43号 P1: 挑战应答端点自身不得被挑战(enforce 下死循环);
+    # mock 口径应答即过, P3 真验证码(极验/hCaptcha)接入后收紧
+    "/api/security/challenge/verify",
 )
 
 # 未认证请求打敏感端点 → 身份风险降分(其余满分)
@@ -71,6 +74,23 @@ IDENTITY_UNAUTH_SCORE = 20.0
 def _env(name: str, default: str) -> str:
     """运行时动态读环境变量(不模块级冻结)"""
     return os.environ.get(name, default)
+
+
+# ============================================================
+# P1 申诉状态机(误报 → 申诉 → 裁决)
+# ============================================================
+
+APPEAL_STATUS_PENDING = "pending"    # 待裁决
+APPEAL_STATUS_APPROVED = "approved"  # 误报, 已恢复(信誉返还+解封)
+APPEAL_STATUS_REJECTED = "rejected"  # 确认攻击, 归档
+
+# 事件裁决口径(P2 学习真值: confirmed=AI拦对 / false_positive=AI拦错)
+VERDICT_PENDING = "pending"
+VERDICT_CONFIRMED = "confirmed"
+VERDICT_FALSE_POSITIVE = "false_positive"
+
+# 挑战通行证 TTL(验证通过后免挑战时长)
+CHALLENGE_PASS_TTL = 900
 
 
 def get_gateway_mode() -> str:
@@ -291,6 +311,10 @@ class Security43Service:
             return {"action": ACTION_BLOCK, "scoring": None,
                     "event": None, "enforced": True, "blocked": True}
 
+        # ①' 挑战通行证: 验证通过的 IP 在 TTL 内豁免挑战档
+        #    (throttle/block 不豁免——通行证不是免死金牌)
+        has_pass = await self.repo.has_challenge_pass(ip)
+
         # ② 特征预计算(query 需 URL 解码, 攻击载荷通常编码传输)
         reputation = await self.ensure_reputation(ip)
         query_decoded = unquote_plus(query or "")
@@ -330,13 +354,30 @@ class Security43Service:
             scoring = await SCORERS["security_threat_gate"].score(ctx)
             action = scoring["action"]
 
+        # ⑤' 通行证豁免: 挑战档在通行证有效期内升级为放行
+        #     (评分快照保留原貌; 豁免仍留痕——审计口径,
+        #      通行证放行的挑战档事件 action 记 challenge_exempt)
+        chall_exempt = False
+        if action == ACTION_CHALLENGE and has_pass:
+            chall_exempt = True
+            action = ACTION_ALLOW
+
         # ⑥ observe/shadow: 只留痕不处置(灰度铁律)
         enforced = enforce
         effective_action = action if enforce else ACTION_ALLOW
 
         # ⑦ 处置副作用(仅 enforce): 扣分 + 封禁
         event = None
-        if action != ACTION_ALLOW:
+        if chall_exempt:
+            # 通行证豁免: 不处置只留痕(审计可见)
+            event = await self._record_event(
+                ip, method, path, query, ua, member_id,
+                "challenge_exempt", scoring, enforced=False)
+            # 豁免仍计正常流量(计数累计 + 冷却恢复)
+            reputation["requestCount"] = \
+                int(reputation.get("requestCount") or 0) + 1
+            await self.repo.save_reputation(reputation)
+        elif action != ACTION_ALLOW:
             if enforce:
                 await self.apply_penalty(ip, action)
                 if action == ACTION_BLOCK:
@@ -405,12 +446,17 @@ class Security43Service:
         return await self.repo.list_reputations()
 
     async def stats(self) -> dict:
-        """P0 观察统计(事件按档位/是否已执行分布)"""
+        """管理端态势总览(事件按档位/裁决分布 + 误报率)"""
         events = await self.repo.list_events(limit=1000)
         by_action = {}
         for e in events:
             a = e.get("action") or "unknown"
             by_action[a] = by_action.get(a, 0) + 1
+        decided = [e for e in events
+                   if e.get("verdict") not in (VERDICT_PENDING, None)]
+        false_pos = sum(1 for e in decided
+                        if e.get("verdict") == VERDICT_FALSE_POSITIVE)
+        appeals = await self.repo.list_appeals(limit=1000)
         return {
             "success": True,
             "gatewayMode": get_gateway_mode(),
@@ -419,8 +465,250 @@ class Security43Service:
                 "total": len(events),
                 "byAction": by_action,
                 "pending": sum(1 for e in events
-                               if e.get("verdict") == "pending"),
+                               if e.get("verdict") == VERDICT_PENDING),
+                "confirmed": sum(1 for e in decided
+                                  if e.get("verdict")
+                                  == VERDICT_CONFIRMED),
+                "falsePositive": false_pos,
+                # 误报率(对齐42号 falsePositiveRate 口径, P2 学习真值源)
+                "falsePositiveRate": (
+                    round(false_pos / len(decided), 4)
+                    if decided else 0.0),
+            },
+            "appeals": {
+                "total": len(appeals),
+                "pending": sum(1 for a in appeals
+                               if a.get("status")
+                               == APPEAL_STATUS_PENDING),
             },
             "blocks": len(await self.repo.list_blocks()),
             "reputations": len(await self.repo.list_reputations()),
         }
+
+    # --------------------------------------------------------
+    # P1: 挑战验证(mock 应答, 一次通过 → TTL 通行证)
+    # --------------------------------------------------------
+
+    async def verify_challenge(self, ip: str, token: str = "",
+                               answer: str = "") -> dict:
+        """挑战应答验证(mock: 应答非空即通过)
+
+        通过 → 颁发 IP 通行证(TTL 900s, 挑战档豁免);
+        mock 口径不含真实验证码(P3 极验/hCaptcha 通道预留)。
+
+        Raises:
+            ValueError: 应答为空(未完成验证)
+        """
+        if not str(answer or "").strip():
+            raise ValueError("验证失败: 应答为空, 请完成安全验证")
+        await self.repo.grant_challenge_pass(
+            ip, ttl=CHALLENGE_PASS_TTL)
+        # 验证通过留痕(事件流水, 供观察挑战漏斗)
+        event_id = await self.repo.next_id("event")
+        event = {
+            "eventId": event_id,
+            "ip": ip, "memberId": 0, "method": "POST",
+            "path": "/api/security/challenge/verify",
+            "query": "", "ua": "",
+            "action": "verify_pass",
+            "score": None, "factors": [],
+            "enforced": get_enforce_level() == "enforce",
+            "verdict": VERDICT_CONFIRMED,  # 通过验证=真人信号
+            "eventFed": False,
+            "createdAt": ts(),
+        }
+        await self.repo.save_event(event)
+        logger.info("security_challenge_verified ip=%s token=%s",
+                    ip, (token or "")[:32])
+        return {"success": True, "ip": ip,
+                "passTtl": CHALLENGE_PASS_TTL}
+
+    # --------------------------------------------------------
+    # P1: 误报申诉(会员端 → 管理端裁决, 42号申诉范式平移)
+    # --------------------------------------------------------
+
+    async def submit_appeal(self, member_id: int, event_id: int,
+                           reason: str = "") -> dict:
+        """会员对 challenge/block 事件提交误报申诉
+
+        Raises:
+            KeyError: 事件不存在
+            ValueError: 非本会员事件 / 事件无可申诉处置 / 已有申诉
+        """
+        event = await self.repo.get_event(int(event_id))
+        if event is None:
+            raise KeyError(f"安全事件 {event_id} 不存在")
+        if int(event.get("memberId") or 0) != int(member_id):
+            raise ValueError("仅事件当事人可申诉")
+        if event.get("action") not in (ACTION_CHALLENGE, ACTION_BLOCK,
+                                        "challenge_exempt"):
+            raise ValueError(f"事件处置档位 {event.get('action')}, "
+                             "仅挑战/封禁事件可申诉")
+        existing = await self.repo.get_appeal_by_event(int(event_id))
+        if existing is not None:
+            raise ValueError(f"该事件已有申诉(appealId="
+                             f"{existing.get('appealId')}, 状态 "
+                             f"{existing.get('status')})")
+
+        appeal_id = await self.repo.next_id("appeal")
+        appeal = {
+            "appealId": appeal_id,
+            "eventId": int(event_id),
+            "memberId": int(member_id),
+            "ip": event.get("ip"),
+            "reason": str(reason or "").strip()
+                     or "对安全处置有异议",
+            "status": APPEAL_STATUS_PENDING,
+            "reviewer": "",
+            "reviewNote": "",
+            "createdAt": ts(),
+            "decidedAt": None,
+        }
+        await self.repo.save_appeal(appeal)
+        logger.info("security_appeal_submitted appeal=%s event=%s "
+                    "member=%s", appeal_id, event_id, member_id)
+        return {"success": True, "appeal": appeal}
+
+    async def decide_appeal(self, appeal_id: int, approve: bool,
+                           reviewer: str = "admin",
+                           note: str = "") -> dict:
+        """管理员裁决申诉
+
+        approve=True(误报): 事件置 false_positive + IP 信誉返还扣分
+            + 解除封禁;
+        approve=False(确认攻击): 事件置 confirmed 归档。
+
+        Raises:
+            KeyError: 申诉不存在
+            ValueError: 已裁决
+        """
+        appeal = await self.repo.get_appeal(int(appeal_id))
+        if appeal is None:
+            raise KeyError(f"申诉 {appeal_id} 不存在")
+        if appeal.get("status") != APPEAL_STATUS_PENDING:
+            raise ValueError(f"申诉状态 {appeal.get('status')}, "
+                             "仅待裁决申诉可处理")
+
+        appeal["status"] = (APPEAL_STATUS_APPROVED if approve
+                            else APPEAL_STATUS_REJECTED)
+        appeal["reviewer"] = reviewer
+        appeal["reviewNote"] = note
+        appeal["decidedAt"] = ts()
+        await self.repo.save_appeal(appeal)
+
+        event = await self.repo.get_event(
+            int(appeal.get("eventId") or 0))
+        if event is not None:
+            event["verdict"] = (VERDICT_FALSE_POSITIVE if approve
+                                else VERDICT_CONFIRMED)
+            await self.repo.save_event(event)
+            if approve:
+                await self._restore_victim(event)
+
+        logger.info("security_appeal_decided appeal=%s approve=%s "
+                    "reviewer=%s", appeal_id, approve, reviewer)
+        return {"success": True, "appeal": appeal}
+
+    async def _restore_victim(self, event: dict) -> None:
+        """误报恢复: 返还该事件处置对应的信誉扣分 + 解封"""
+        ip = event.get("ip") or ""
+        if not ip:
+            return
+        penalty = PENALTY_MAP.get(event.get("action") or "", 0.0)
+        if penalty > 0:
+            record = await self.ensure_reputation(ip)
+            record["score"] = min(100.0,
+                                  float(record.get("score") or 0)
+                                  + penalty)
+            record["status"] = reputation_status(record["score"])
+            record["attackCount"] = max(
+                0, int(record.get("attackCount") or 0) - 1)
+            await self.repo.save_reputation(record)
+        await self.unblock_ip(ip)
+
+    # --------------------------------------------------------
+    # P1: 事件直接裁决(管理端, 不经申诉)
+    # --------------------------------------------------------
+
+    async def decide_event(self, event_id: int, confirm: bool,
+                           reviewer: str = "admin",
+                           note: str = "") -> dict:
+        """事件裁决: 确认攻击/误报(P2 学习真值)
+
+        confirm=False(误报)时同步恢复 IP 信誉与封禁。
+
+        Raises:
+            KeyError: 事件不存在
+            ValueError: 已裁决
+        """
+        event = await self.repo.get_event(int(event_id))
+        if event is None:
+            raise KeyError(f"安全事件 {event_id} 不存在")
+        if event.get("verdict") != VERDICT_PENDING:
+            raise ValueError(f"事件已裁决({event.get('verdict')})")
+
+        event["verdict"] = (VERDICT_CONFIRMED if confirm
+                            else VERDICT_FALSE_POSITIVE)
+        event["reviewer"] = reviewer
+        event["reviewNote"] = note
+        await self.repo.save_event(event)
+        if not confirm:
+            await self._restore_victim(event)
+        logger.info("security_event_decided event=%s confirm=%s "
+                    "reviewer=%s", event_id, confirm, reviewer)
+        return {"success": True, "event": event}
+
+    # --------------------------------------------------------
+    # P1: 会员端状态
+    # --------------------------------------------------------
+
+    async def my_status(self, member_id: int, ip: str = "") -> dict:
+        """我的安全状态(当前 IP 信誉/封禁/通行证/我的事件)"""
+        reputation = (await self.ensure_reputation(ip)
+                      if ip else None)
+        events = await self.repo.list_events(limit=500)
+        mine = [e for e in events
+                if int(e.get("memberId") or 0) == int(member_id)]
+        appeals = await self.repo.list_appeals(
+            member_id=int(member_id), limit=100)
+        return {
+            "success": True,
+            "memberId": int(member_id),
+            "ip": ip,
+            "reputation": ({k: reputation[k] for k in
+                            ("score", "status", "pinned")}
+                           if reputation else None),
+            "blocked": (await self.is_blocked(ip)
+                        if ip else False),
+            "challengePass": (await self.repo.has_challenge_pass(ip)
+                              if ip else False),
+            "myEvents": {
+                "total": len(mine),
+                "pending": sum(1 for e in mine
+                               if e.get("verdict")
+                               == VERDICT_PENDING),
+            },
+            "myAppeals": {
+                "total": len(appeals),
+                "pending": sum(1 for a in appeals
+                               if a.get("status")
+                               == APPEAL_STATUS_PENDING),
+            },
+        }
+
+    # --------------------------------------------------------
+    # P1: 管理端 IP 处置
+    # --------------------------------------------------------
+
+    async def admin_ban_ip(self, ip: str, reason: str = "",
+                           ttl: int = None) -> dict:
+        """手动封禁 IP(管理端, 默认走 SECURITY_BAN_TTL)"""
+        block = await self.block_ip(ip, reason=reason or "管理员手动封禁")
+        return {"success": True, "block": block}
+
+    async def admin_unban_ip(self, ip: str) -> dict:
+        """手动解封(误报兜底)"""
+        ok = await self.unblock_ip(ip)
+        if not ok:
+            raise KeyError(f"IP {ip} 未在封禁表中")
+        return {"success": True, "ip": ip}
