@@ -56,13 +56,15 @@ class Security43Repository:
     TABLE_BLOCKS = "security_blocks"
     TABLE_APPEALS = "security_appeals"
     TABLE_BASELINES = "security_baselines"
+    TABLE_POSTURE = "security_posture"
 
     _INT_FIELDS = ("eventId", "memberId", "requestCount",
                    "attackCount", "recoverCount", "appealId",
                    "sampleDays")
     _FLOAT_FIELDS = ("score", "reputation", "lastPenaltyAt",
                      "expireAt", "createdAt", "decidedAt",
-                     "avgOpsPerHour", "p95OpsPerHour", "updatedAt")
+                     "avgOpsPerHour", "p95OpsPerHour", "updatedAt",
+                     "densityEma", "consecutiveWindows")
     _BOOL_FIELDS = ("pinned", "enforced", "eventFed", "appealFed")
 
     def __init__(self):
@@ -75,7 +77,7 @@ class Security43Repository:
     def _ensure_store(self):
         for key in (self.TABLE_IP, self.TABLE_EVENTS,
                     self.TABLE_BLOCKS, self.TABLE_APPEALS,
-                    self.TABLE_BASELINES):
+                    self.TABLE_BASELINES, self.TABLE_POSTURE):
             self.store.setdefault(key, {})
 
     async def next_id(self, kind: str) -> int:
@@ -380,3 +382,13 @@ class Security43Repository:
 
     async def list_baselines(self, limit: int = 500) -> list[dict]:
         return await self._list(self.TABLE_BASELINES, limit)
+
+    # --------------------------------------------------------
+    # UEBA(P2b): 态势表(全局单例记录, security43:security_posture:global)
+    # --------------------------------------------------------
+
+    async def get_posture(self) -> dict | None:
+        return await self._get(self.TABLE_POSTURE, "global")
+
+    async def save_posture(self, record: dict) -> dict:
+        return await self._save(self.TABLE_POSTURE, "global", record)

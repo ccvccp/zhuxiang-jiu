@@ -373,6 +373,106 @@ async def admin_behavior_deviations(
         raise _handle(e) from e
 
 
+# ============================================================
+#  管理端·防御态势三态(P2b, 设计文档 §2.5)
+# ============================================================
+
+class PostureSetRequest(PydBaseModel):
+    posture: str = Field(..., description="peace/alert/wartime")
+    pin: bool = Field(None, description="同时钉住(缺省不变)")
+
+
+class PosturePinRequest(PydBaseModel):
+    pinned: bool = Field(..., description="true=钉住 / false=解除")
+
+
+@router.get("/admin/posture")
+async def admin_get_posture(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """当前防御态势(peace/alert/wartime + 频次系数 + EMA)"""
+    _require_admin(x_role)
+    try:
+        from services.posture_service import PostureService
+        return await PostureService().current()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/admin/posture")
+async def admin_set_posture(
+    body: PostureSetRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """手动切换态势(可选同时钉住)"""
+    _require_admin(x_role)
+    try:
+        from services.posture_service import PostureService
+        from services.security_service import Security43Service
+        from services.posture_service import POSTURE_RATE_FACTOR
+        result = await PostureService().set_posture(
+            body.posture, pin=body.pin)
+        Security43Service._refresh_posture_cache(
+            POSTURE_RATE_FACTOR.get(result["posture"], 1.0))
+        return result
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/admin/posture/pin")
+async def admin_pin_posture(
+    body: PosturePinRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """态势钉住/解除(钉住=不受自动升降级影响)"""
+    _require_admin(x_role)
+    try:
+        from services.posture_service import PostureService
+        return await PostureService().set_pinned(body.pinned)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+#  管理端·学习回流(P2b, 第26档案, 42号P2范式平移)
+# ============================================================
+
+@router.post("/admin/learning/collect")
+async def admin_learning_collect(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """批量回流已裁决事件 → 决策正确性反馈(幂等 eventFed)"""
+    _require_admin(x_role)
+    try:
+        return await _service.collect_event_feedback()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/admin/learning/run")
+async def admin_learning_run(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """触发第26档案一轮 Hedge 学习(反馈不足抛 409 正常保护)"""
+    _require_admin(x_role)
+    try:
+        return await _service.run_learning()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/admin/learning/status")
+async def admin_learning_status(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """学习回流状态(裁决事件计数/当前权重视图)"""
+    _require_admin(x_role)
+    try:
+        return await _service.learning_status()
+    except Exception as e:
+        raise _handle(e) from e
+
+
 def register_security_routes(app) -> None:
     """注册43号路由(main.py startup 调用)"""
     app.include_router(router)

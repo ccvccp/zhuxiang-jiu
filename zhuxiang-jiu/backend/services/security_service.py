@@ -171,8 +171,25 @@ def scan_identity(path: str, member_id: int) -> float:
 class Security43Service:
     """43号安全管理业务服务"""
 
+    # 态势频次系数缓存 (expiry, rate_factor)
+    # 异步侧(posture observe/手动切换)刷新, 网关同步读缓存——
+    # 避免 ASGI 请求路径上引入 await 之外的存储往返
+    _POSTURE_CACHE: tuple = (0.0, 1.5)
+
     def __init__(self, repo: Security43Repository = Security43Repository()):
         self.repo = repo
+
+    def _posture_factor(self) -> float:
+        """当前态势频次系数(60s 进程内缓存; 冷启动默认 peace ×1.5)"""
+        import time as _time
+        expiry, factor = Security43Service._POSTURE_CACHE
+        return factor if expiry > _time.time() else 1.5
+
+    @classmethod
+    def _refresh_posture_cache(cls, factor: float) -> None:
+        """态势变化后刷新系数缓存(posture_service 异步侧调用)"""
+        import time as _time
+        cls._POSTURE_CACHE = (_time.time() + 60, factor)
 
     # --------------------------------------------------------
     # IP 信誉库(设计文档 §2.3)
@@ -348,8 +365,11 @@ class Security43Service:
             logger.warning("security_ueba_skip ip=%s: %s", ip, exc)
 
         # ③ 频次计数(IP 维度; 会员维度叠加取较差值)
+        #    态势缩放(P2b): rate_limit × 当前态势系数
+        #    (peace ×1.5 宽松 / alert ×1.0 / wartime ×0.3 收紧)
         window = int(_env("SECURITY_RATE_WINDOW", "60"))
-        rate_limit = int(_env("SECURITY_RATE_LIMIT", "120"))
+        base_rate_limit = int(_env("SECURITY_RATE_LIMIT", "120"))
+        rate_limit = int(base_rate_limit * self._posture_factor())
         ip_count = await self.repo.count_request(f"ip:{ip}", window)
         count = ip_count
         if member_id:
@@ -399,6 +419,13 @@ class Security43Service:
                           "detail": d["detail"]}
                          for d in behavior_deviation["deviations"]])
 
+        # ⑤''' 态势窗口观测(P2b): 可疑事件计数 + 窗口节拍升降级
+        #      (异常不阻断请求; pinned/manual 只更新 EMA)
+        try:
+            await self._observe_posture_tick(action)
+        except Exception as exc:
+            logger.warning("security_posture_observe_skip: %s", exc)
+
         # ⑥ observe/shadow: 只留痕不处置(灰度铁律)
         enforced = enforce
         effective_action = action if enforce else ACTION_ALLOW
@@ -441,6 +468,44 @@ class Security43Service:
             await self.recover_reputation(ip)
         except Exception as exc:
             logger.warning("security_recover_skip ip=%s: %s", ip, exc)
+
+    # --------------------------------------------------------
+    # P2b: 态势窗口观测(节拍内计数, 窗口满触发升降级评估)
+    # --------------------------------------------------------
+
+    _WINDOW_COUNT = 0
+    _WINDOW_AT = 0.0
+
+    async def _observe_posture_tick(self, action: str) -> None:
+        """可疑动作计入当前窗口; 窗口满(POSTURE_WINDOW 秒)评估"""
+        import time as _time
+        if action not in (ACTION_CHALLENGE, ACTION_BLOCK,
+                          "behavior_alert"):
+            return
+        now = _time.time()
+        if now - Security43Service._WINDOW_AT >= \
+                int(_env("SECURITY_POSTURE_WINDOW", "300")):
+            # 新窗口: 用上一窗口累计触发评估, 然后重置
+            count = Security43Service._WINDOW_COUNT
+            Security43Service._WINDOW_COUNT = 1
+            Security43Service._WINDOW_AT = now
+            if count > 0:
+                await self._evaluate_posture(count)
+        else:
+            Security43Service._WINDOW_COUNT += 1
+
+    async def _evaluate_posture(self, count: int) -> None:
+        """触发一次态势窗口评估(升降级 + 缓存刷新)"""
+        from services.posture_service import (
+            PostureService, POSTURE_RATE_FACTOR,
+        )
+        result = await PostureService().observe_window(count)
+        Security43Service._refresh_posture_cache(
+            POSTURE_RATE_FACTOR.get(result["posture"], 1.0))
+        if result.get("changed"):
+            logger.warning("security_posture_shifted posture=%s "
+                           "ema=%s", result["posture"],
+                           result["densityEma"])
 
     async def _record_event(self, ip, method, path, query, ua,
                             member_id, action, scoring,
@@ -755,3 +820,98 @@ class Security43Service:
         if not ok:
             raise KeyError(f"IP {ip} 未在封禁表中")
         return {"success": True, "ip": ip}
+
+    # --------------------------------------------------------
+    # P2b: 学习回流(事件裁决真值 → 第26档案, 42号P2范式平移)
+    # --------------------------------------------------------
+
+    async def collect_event_feedback(self) -> dict:
+        """批量回流: 已裁决且未回流的事件 → 决策正确性反馈
+
+        真值口径: confirmed=AI拦对(正反馈) /
+                  false_positive=AI拦错(负反馈)。
+        单条失败不阻断批量; eventFed 幂等标记。
+        """
+        from services.ai_learning_service import submit_feedback
+
+        events = await self.repo.list_events(limit=1000)
+        submitted, skipped, results = 0, 0, []
+        for event in events:
+            if event.get("eventFed"):
+                skipped += 1
+                continue
+            verdict = event.get("verdict")
+            if verdict == VERDICT_PENDING:
+                skipped += 1
+                continue
+            factors = event.get("factors") or []
+            if not factors:
+                skipped += 1
+                continue
+            # verify_pass(真人信号)与 behavior_alert 无完整六因子
+            # 快照, 仅 threat_gate 评分事件回流
+            action = event.get("action")
+            if action in ("verify_pass", "challenge_exempt",
+                          "behavior_alert"):
+                skipped += 1
+                continue
+            correct = verdict == VERDICT_CONFIRMED
+            expected = action if correct else \
+                ("allow" if action != "allow" else "challenge")
+            try:
+                result = await submit_feedback({
+                    "scorerId": "security_threat_gate",
+                    "factors": factors,
+                    "scoreAtDecision": float(
+                        event.get("score") or 0),
+                    "actualAction": action,
+                    "expectedAction": expected,
+                    "correct": correct,
+                    "reward": 0.5 if correct else -0.5,
+                    "note": f"eventId={event.get('eventId')} "
+                            f"verdict={verdict}",
+                    "source": "security43",
+                })
+                event["eventFed"] = True
+                await self.repo.save_event(event)
+                results.append(result)
+                submitted += 1
+            except (KeyError, ValueError) as exc:
+                skipped += 1
+                logger.warning("security_event_feed_skip event=%s: %s",
+                               event.get("eventId"), exc)
+        return {"submitted": submitted, "skipped": skipped,
+                "results": results}
+
+    async def run_learning(self) -> dict:
+        """触发第26档案一轮 Hedge 学习(反馈不足抛 ValueError)"""
+        from services.ai_learning_service import run_learning_cycle
+        return await run_learning_cycle("security_threat_gate")
+
+    async def learning_status(self) -> dict:
+        """第26档案学习状态(裁决事件计数/权重视图)"""
+        from services.ai_learning_service import (
+            SCORER_REGISTRY, get_weights_view,
+        )
+        events = await self.repo.list_events(limit=2000)
+        decided = [e for e in events
+                   if e.get("verdict")
+                   not in (VERDICT_PENDING, None)]
+        return {
+            "success": True,
+            "scorer": "security_threat_gate",
+            "registry": SCORER_REGISTRY.get("security_threat_gate"),
+            "events": {
+                "total": len(events),
+                "decided": len(decided),
+                "fed": sum(1 for e in events if e.get("eventFed")),
+                "confirmed": sum(1 for e in decided
+                                 if e.get("verdict")
+                                 == VERDICT_CONFIRMED),
+                "falsePositive": sum(
+                    1 for e in decided
+                    if e.get("verdict") == VERDICT_FALSE_POSITIVE),
+            },
+            "weights": await get_weights_view(
+                "security_threat_gate"),
+        }
