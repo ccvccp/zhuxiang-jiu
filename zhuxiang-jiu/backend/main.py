@@ -31,6 +31,7 @@ from core.api_key_middleware import ApiKeyMiddleware
 from core.security_gateway import SecurityGatewayMiddleware
 from routes.security_routes import register_security_routes
 from routes.api_manager_routes import register_api_manager_routes
+from routes.trust_value_routes import register_trust_value_routes
 from core.config import ALLOW_HEADERS, ALLOW_METHODS, CORS_ORIGINS
 from core.errors import register_exception_handlers
 from core.helpers import uptime
@@ -272,6 +273,8 @@ register_invoice_routes(app)
 register_security_routes(app)
 # AI智能API管理模块(44号)
 register_api_manager_routes(app)
+# 信值模块(45号)
+register_trust_value_routes(app)
 
 
 # ============================================================
