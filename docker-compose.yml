@@ -69,6 +69,9 @@ services:
       # ---- 43号 P3-3 GeoIP 离线库(mmdb 文件挂载, 缺失则 geo 静默关闭) ----
       # GeoLite2-City.mmdb 放宿主机 ./data/ 下(MaxMind 免费下载, 不入 git)
       - GEOIP_DB_PATH=${GEOIP_DB_PATH:-/app/data/GeoLite2-City.mmdb}
+      # ---- 43号 P4-2 安全调度器(UEBA基线日度重建, 默认 off 主动开启) ----
+      - SECURITY_SCHEDULER_MODE=${SECURITY_SCHEDULER_MODE:-off}
+      - SECURITY_UEBA_REBUILD_INTERVAL=${SECURITY_UEBA_REBUILD_INTERVAL:-86400}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

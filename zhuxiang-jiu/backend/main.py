@@ -319,6 +319,10 @@ async def _on_startup():
     # 41号·AI智能代驾: 学习回流(RIDE_LEARNING_AUTO=off 可关闭)
     from services.ride_scheduler import start_learning_scheduler as start_ride_learning
     start_ride_learning()
+    # 43号·AI智能安全管理: UEBA基线日度重建+态势空窗评估
+    # (SECURITY_SCHEDULER_MODE=on 开启, 默认 off)
+    from services.security_scheduler import start_scheduler as start_security
+    start_security()
 
 
 @app.on_event("shutdown")
@@ -350,6 +354,9 @@ async def _on_shutdown():
     # 41号·AI智能代驾调度器
     from services.ride_scheduler import stop_schedulers as stop_ride_schedulers
     stop_ride_schedulers()
+    # 43号·AI智能安全管理调度器
+    from services.security_scheduler import stop_scheduler as stop_security_scheduler
+    stop_security_scheduler()
     await close_redis_client()
     logger.info("清理完成")
 

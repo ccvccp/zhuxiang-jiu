@@ -439,6 +439,18 @@ class Security43Repository:
         return await self._save(self.TABLE_POSTURE, "global", record)
 
     # --------------------------------------------------------
+    # P4-2: 安全调度器统计(单例记录, 借用 posture 表族键空间)
+    # --------------------------------------------------------
+
+    async def get_scheduler_stats(self) -> dict | None:
+        return await self._get(self.TABLE_POSTURE,
+                               "scheduler:stats")
+
+    async def save_scheduler_stats(self, record: dict) -> dict:
+        return await self._save(self.TABLE_POSTURE,
+                                "scheduler:stats", record)
+
+    # --------------------------------------------------------
     # P3-3: 会员地理历史(geo velocity 异地跳变, 滚动窗口)
     # --------------------------------------------------------
 
