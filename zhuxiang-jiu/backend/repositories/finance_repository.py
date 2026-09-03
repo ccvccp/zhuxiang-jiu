@@ -633,7 +633,7 @@ class FinanceRepository:
             keys = [_k("finance", "invoice", n) for n in nos]
         else:
             keys = await client.keys(_k("finance", "invoice", "*"))
-            keys = [k for k in keys if ":index:" not in k and not k.endswith(":invoice:seq")]
+            keys = [k for k in keys if ":index:" not in k and ":invoice:seq" not in k]
         result = []
         for key in keys:
             data = await client.hgetall(key)
@@ -751,7 +751,7 @@ class FinanceRepository:
             keys = [_k("finance", "payment", n) for n in nos]
         else:
             keys = await client.keys(_k("finance", "payment", "*"))
-            keys = [k for k in keys if ":index:" not in k and not k.endswith(":payment:seq")]
+            keys = [k for k in keys if ":index:" not in k and ":payment:seq" not in k]
         result = []
         for key in keys:
             data = await client.hgetall(key)

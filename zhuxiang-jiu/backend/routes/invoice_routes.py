@@ -345,6 +345,46 @@ async def decide_appeal(
         raise _handle(e) from e
 
 
+# ============================================================
+# P2: 学习回流(申诉裁决真值 → 第25档案 Hedge 学习)
+# ============================================================
+
+@router.post("/api/invoice/admin/learning/collect")
+async def collect_learning(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """批量回流已裁决申诉 → 决策正确性反馈(幂等)"""
+    _require_admin(x_role)
+    try:
+        return await _service.collect_appeal_feedback()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/api/invoice/admin/learning/run")
+async def run_learning(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """触发第25档案一轮 Hedge 学习(反馈不足抛 409)"""
+    _require_admin(x_role)
+    try:
+        return await _service.run_learning()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/invoice/admin/learning/status")
+async def learning_status(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """学习回流状态(裁决申诉计数/当前权重)"""
+    _require_admin(x_role)
+    try:
+        return await _service.learning_status()
+    except Exception as e:
+        raise _handle(e) from e
+
+
 def register_invoice_routes(app) -> None:
     """注册42号路由(main.py startup 调用)"""
     app.include_router(router)

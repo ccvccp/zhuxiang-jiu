@@ -635,3 +635,98 @@ class Invoice42Service:
                             limit: int = 100) -> list[dict]:
         return await self.repo.list_appeals(status=status,
                                              limit=limit)
+
+    # --------------------------------------------------------
+    # P2: 学习回流(申诉裁决真值 → 第25档案)
+    # --------------------------------------------------------
+
+    async def collect_appeal_feedback(self) -> dict:
+        """批量回流: 已裁决且未回流的申诉 → 决策正确性反馈
+
+        真值口径: 申诉裁决为管理员人工复核真值——
+        approved(误拦) = AI 拦错了, 期望 auto_issue;
+        rejected(维持拦截) = AI 拦对了, 期望 reject。
+        单条失败不阻断批量。
+
+        Returns:
+            {submitted, skipped, results}
+        """
+        from services.ai_learning_service import submit_feedback
+
+        appeals = await self.repo.list_appeals(limit=1000)
+        submitted, skipped, results = 0, 0, []
+        for appeal in appeals:
+            if appeal.get("appealFed"):
+                skipped += 1
+                continue
+            if appeal.get("status") == APPEAL_STATUS_PENDING:
+                skipped += 1
+                continue
+            decision = await self.repo.get_decision(
+                appeal.get("orderId", ""))
+            if decision is None:
+                skipped += 1
+                continue
+            snapshot = decision.get("scoreSnapshot") or {}
+            factors = snapshot.get("factors") or []
+            if not factors:
+                skipped += 1
+                continue
+            actual = "reject"
+            expected = ("auto_issue"
+                        if appeal.get("status") == APPEAL_STATUS_APPROVED
+                        else "reject")
+            correct = actual == expected
+            # 决策为可行性向(高分=可自动): 误拦(reject→应auto)影响
+            # 会员体验, 弱负; 拦对强正
+            reward = 0.5 if correct else -0.5
+            try:
+                result = await submit_feedback({
+                    "scorerId": "invoice_decision_gate",
+                    "factors": factors,
+                    "scoreAtDecision": float(
+                        snapshot.get("score") or 0),
+                    "actualAction": actual,
+                    "expectedAction": expected,
+                    "correct": correct,
+                    "reward": reward,
+                    "note": (f"appealId={appeal.get('appealId')} "
+                             f"decision={appeal.get('status')}"),
+                    "source": "invoice42",
+                })
+                appeal["appealFed"] = True    # 幂等标记
+                await self.repo.save_appeal(appeal)
+                results.append(result)
+                submitted += 1
+            except (KeyError, ValueError) as exc:
+                skipped += 1
+                logger.warning("invoice_appeal_feed_skip appeal=%s: %s",
+                               appeal.get("appealId"), exc)
+        return {"submitted": submitted, "skipped": skipped,
+                "results": results}
+
+    async def run_learning(self) -> dict:
+        """触发第25档案一轮 Hedge 学习(反馈不足抛 ValueError)"""
+        from services.ai_learning_service import run_learning_cycle
+        return await run_learning_cycle("invoice_decision_gate")
+
+    async def learning_status(self) -> dict:
+        """第25档案学习状态(裁决申诉回流计数/幂等标记统计)"""
+        from services.ai_learning_service import (
+            SCORER_REGISTRY, get_weights_view,
+        )
+        appeals = await self.repo.list_appeals(limit=2000)
+        decided = [a for a in appeals
+                   if a.get("status") != APPEAL_STATUS_PENDING]
+        return {
+            "success": True,
+            "scorer": "invoice_decision_gate",
+            "registry": SCORER_REGISTRY.get("invoice_decision_gate"),
+            "appeals": {
+                "total": len(appeals),
+                "decided": len(decided),
+                "fed": sum(1 for a in appeals if a.get("appealFed")),
+            },
+            "weights": await get_weights_view(
+                "invoice_decision_gate"),
+        }
