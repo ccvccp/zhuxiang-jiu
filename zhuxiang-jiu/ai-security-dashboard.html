@@ -100,6 +100,23 @@
     .redis-alert.critical{background:#fdeaea;color:#c0392b}
     .redis-alert.warn{background:#fff7e0;color:#a37400}
     .redis-alert.info{background:#e8f1fb;color:#24619c}
+    /* P6-3: enforce 就绪度灯卡(ready 绿/holding 黄) */
+    .rd-light{display:inline-block;width:10px;height:10px;border-radius:50%;
+        margin-right:6px;vertical-align:middle}
+    .rd-light.ready{background:#2f9e44;box-shadow:0 0 4px #2f9e44}
+    .rd-light.holding{background:#e8a30c;box-shadow:0 0 4px #e8a30c}
+    .rd-bar{padding:8px 12px;border-radius:5px;font-size:12px;
+        margin-bottom:8px;display:flex;align-items:center;
+        justify-content:space-between;gap:8px}
+    .rd-bar.ready{background:#e9f7ee;color:#226b38}
+    .rd-bar.holding{background:#fff7e0;color:#a37400}
+    .rd-checks{font-size:12px;width:100%;border-collapse:collapse;
+        margin-top:4px}
+    .rd-checks td{padding:4px 8px;border-bottom:1px solid
+        var(--color-border,#f0f0f0);vertical-align:top}
+    .rd-checks td.pass{color:#2f9e44}
+    .rd-checks td.fail{color:#c0392b;font-weight:600}
+    .rd-note{font-size:11px;color:#999;margin-top:6px}
 </style>
 </head>
 <body>
@@ -261,6 +278,13 @@
                 <div class="dash-empty">加载中…</div></div>
             <div id="seriesLabels" class="series-labels"></div>
             <div id="seriesSummary" class="ov-cells" style="margin-top:6px"></div>
+            <!-- P6-3: enforce 就绪度灯卡(随日报序列按钮一并刷新;
+                 五检查+三信号, ready 绿/holding 黄+blockers 首条) -->
+            <div id="enforceReadiness" style="margin-top:12px;border-top:1px solid
+                var(--color-border,#eee);padding-top:10px">
+                <div class="dash-empty">enforce 就绪度：点「刷新日报序列」一并评估
+                    （五检查 + 三信号，只评估不切换）</div>
+            </div>
             <!-- Redis 键族健康卡(按需加载) -->
             <div id="redisHealth" style="margin-top:12px;border-top:1px solid
                 var(--color-border,#eee);padding-top:10px">

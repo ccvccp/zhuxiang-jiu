@@ -665,6 +665,26 @@ async def admin_learning_collect(
         raise _handle(e) from e
 
 
+@router.get("/admin/enforce/readiness")
+async def admin_enforce_readiness(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """enforce 上线就绪度评估(P6-3: 五检查+三信号+blockers)
+
+    检查单前四条自动化(观察期/误报率/积压/申诉/白名单);
+    铁律: 只评估不切换——切换仍人工改 SECURITY_ENFORCE_LEVEL
+    (第5条切换后 30 分钟盯盘为人工动作, note 明示)。
+    """
+    _require_admin(x_role)
+    try:
+        from services.enforce_readiness_service import (
+            EnforceReadinessService,
+        )
+        return await EnforceReadinessService().evaluate()
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.post("/admin/learning/run")
 async def admin_learning_run(
     x_role: str = Header(default="", alias="X-Role"),

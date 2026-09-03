@@ -509,6 +509,56 @@ async function loadReportSeries() {
                 '</div><div class="v ' + (c.cls || '') + '">' +
                 esc(c.v) + '</div></div>';
         }).join('');
+
+    // P6-3: enforce 就绪度灯卡链式评估(与 D5 状态卡同范式——
+    // 不进 30s 自动刷新, 日报序列按钮一并触发)
+    loadEnforceReadiness();
+}
+
+/* P6-3: enforce 上线就绪度灯卡(ready 绿/holding 黄+blockers 首条,
+ * 五检查表展开 + 三信号摘要; 文案铁律: ready 仍提示切换需人工操作) */
+async function loadEnforceReadiness() {
+    var el = document.getElementById('enforceReadiness');
+    try {
+        var b = await fetchJson(
+            api('/api/security/admin/enforce/readiness'),
+            { headers: headers() }, 'enforce 就绪度');
+        var ready = b.overall === 'ready';
+        var blockers = b.blockers || [];
+        var html = '<div class="rd-bar ' + (ready ? 'ready' : 'holding') +
+            '"><span><i class="rd-light ' + (ready ? 'ready' : 'holding') +
+            '"></i><b>' + (ready ? 'ready' : 'holding') + '</b>' +
+            (ready ? '（切换需人工改 SECURITY_ENFORCE_LEVEL）'
+                   : ' — ' + esc(blockers[0] || '')) +
+            '</span><span>当前: ' + esc(b.enforceLevel || 'observe') +
+            '</span></div>';
+        if (!ready && blockers.length > 1) {
+            html += '<div class="rd-note">其余: ' +
+                esc(blockers.slice(1).join('；')) + '</div>';
+        }
+        html += '<table class="rd-checks">' +
+            (b.checks || []).map(function (c) {
+                return '<tr><td class="' + (c.passed ? 'pass' : 'fail') +
+                    '">' + (c.passed ? '✓' : '✗') + '</td><td>' +
+                    esc(c.name) + '</td><td>' + esc(c.actual) +
+                    '</td><td style="color:#999">' + esc(c.required) +
+                    '</td></tr>';
+            }).join('') + '</table>';
+        var sig = b.signals || {};
+        var ti = sig.threatintel || {};
+        var d5 = sig.d5 || {};
+        html += '<div class="rd-note">三信号: D5 样本 ' +
+            (d5.samples || 0) + '(' + esc(d5.recommendation || '-') +
+            ') · 情报 ' + (ti.totalCidrs || 0) + ' 段' +
+            (ti.degraded ? ' [订阅降级]' : '') + ' · GeoIP ' +
+            ((sig.geo || {}).available ? '可用' : '关闭') + ' · AbuseIPDB ' +
+            esc((sig.abuseipdb || {}).mode || '-') + '</div>';
+        html += '<div class="rd-note">铁律: ' + esc(b.note || '') + '</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<div class="dash-error" style="display:block">' +
+            esc(e.message) + '</div>';
+    }
 }
 
 /* Redis 实况体检(键族/内存水位/慢日志/大 key/告警;
