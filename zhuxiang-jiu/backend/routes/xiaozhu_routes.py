@@ -1,7 +1,8 @@
 """48号·小竹智能语音中枢路由(P0 感知层)
 
 端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1
-     + 49号P2 2 + 49号P4 1 + 50号P0 5 + 50号P2 2 = 32):
+     + 49号P2 2 + 49号P4 1 + 50号P0 5 + 50号P2 2
+     + 50号P3 6 = 38):
     POST /api/xiaozhu/sessions              开启会话
     POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
@@ -21,6 +22,12 @@
     POST /api/xiaozhu/voice50/unfreeze      积分冻结恢复(50号P0, admin)
     POST /api/xiaozhu/voice50/settle        T+1结算手动补偿(50号P2, admin)
     GET  /api/xiaozhu/voice50/settlements   结算批次视图(50号P2, admin)
+    POST /api/xiaozhu/voice50/evidence      佐证per-claim验真(50号P3)
+    POST /api/xiaozhu/voice50/corpus        语料捐赠提交(50号P3)
+    POST /api/xiaozhu/voice50/corpus/{id}/review  语料审核(50号P3, admin)
+    POST /api/xiaozhu/voice50/qa            社区知识问答(50号P3)
+    POST /api/xiaozhu/voice50/companion/check  伴侣月度核算(50号P3)
+    POST /api/xiaozhu/voice50/fairness-bridge  L3分布公平采样(50号P3, admin)
 
 鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例);
 管理端 X-Role: admin(43-47号同款口径)。
@@ -704,6 +711,146 @@ async def voice50_settlements(
         return await Voice50Service().settlement_view(
             day_key=day_key, member_id=member_id,
             limit=limit)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 50号 P3 L3 五行为+公平天花板
+# ============================================================
+
+@router.post("/voice50/evidence")
+async def voice50_evidence(
+    body: dict,
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """真伪鉴别辅助验证(会员——per-claim 走 45号验真,
+    采信 ×2)"""
+    member_id = _require_member_strict(x_member_id)
+    if not isinstance(body, dict) \
+            or "evidence" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 evidence 字段")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().record_evidence(
+            member_id, body.get("evidence"),
+            sources=body.get("sources"),
+            summary=body.get("summary") or "")
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/corpus")
+async def voice50_corpus_submit(
+    body: dict,
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """新场景语料捐赠提交(会员——捐赠即得基础 10 分,
+    采纳 +20)"""
+    member_id = _require_member_strict(x_member_id)
+    if not isinstance(body, dict) \
+            or "scenario" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 scenario 字段")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().submit_corpus(
+            member_id, body.get("scenario"))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/corpus/{corpus_id}/review")
+async def voice50_corpus_review(
+    corpus_id: int,
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """语料审核(admin——adopted 纳入训练集 +20)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    if not isinstance(body, dict) \
+            or "adopted" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 adopted 布尔字段")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().review_corpus(
+            corpus_id, bool(body.get("adopted")),
+            note=str(body.get("note") or ""))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/qa")
+async def voice50_qa(
+    body: dict,
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """社区知识问答(会员——内容安全过滤+点赞 ×1.5)"""
+    member_id = _require_member_strict(x_member_id)
+    if not isinstance(body, dict) \
+            or "content" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 content 字段")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().record_qa(
+            member_id, body.get("content"),
+            liked=bool(body.get("liked")))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/companion/check")
+async def voice50_companion_check(
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """长期语音伴侣关系核算(会员——30 天日均 ≥3/
+    多样性 ×1.3/月限 1)"""
+    member_id = _require_member_strict(x_member_id)
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().check_companion(
+            member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/fairness-bridge")
+async def voice50_fairness_bridge(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """L3 日积分分布上报 46号公平性采样(admin——
+    高/中/低三组, 各组 <5 样本不上报)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().bridge_fairness()
     except Exception as e:
         raise _handle(e) from e
 

@@ -7,6 +7,8 @@
                      余额/基线/冻结/衰减史)
     voice50_settlement T+1 结算批次(batchId 键——
                      L2/L3 聚合 deposit 申报留痕)
+    voice50_corpus  新场景语料捐赠(corpusId 键——
+                     P3 人工审核流; 采纳 base+20)
     voice50_rules_log 规则热更新留痕(logId 键, 只追加)
 
 设计对齐(43-49号仓储范式):
@@ -29,11 +31,12 @@ class Voice50Repository:
     TABLE_EVENTS = "voice50_events"
     TABLE_LEDGER = "voice50_ledger"
     TABLE_SETTLEMENT = "voice50_settlement"
+    TABLE_CORPUS = "voice50_corpus"
     TABLE_RULES_LOG = "voice50_rules_log"
 
     _INT_FIELDS = ("evId", "memberId", "sessionId", "turnSeq",
                   "logId", "batchId", "eventCount",
-                  "depositId")
+                  "depositId", "corpusId")
     _FLOAT_FIELDS = ("baseScore", "finalScore",
                      "poolBalance", "earnedTotal",
                      "offsetUsed", "baseline",
@@ -47,6 +50,7 @@ class Voice50Repository:
     def _ensure_store(self):
         for t in (self.TABLE_EVENTS, self.TABLE_LEDGER,
                   self.TABLE_SETTLEMENT,
+                  self.TABLE_CORPUS,
                   self.TABLE_RULES_LOG):
             self.store.setdefault(t, {})
 
@@ -263,6 +267,78 @@ class Voice50Repository:
                   and (member_id is None
                        or r.get("memberId") == member_id)]
         result.sort(key=lambda r: r.get("batchId") or 0)
+        return result[-limit:]
+
+    # --------------------------------------------------------
+    # P3 语料捐赠(corpusId 键——人工审核流)
+    # --------------------------------------------------------
+
+    async def next_corpus_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("voice50", self.TABLE_CORPUS, "seq"))
+        self._ensure_store()
+        seq = self.store.get(
+            "_voice50_corpus_seq", 0) + 1
+        self.store["_voice50_corpus_seq"] = seq
+        return seq
+
+    async def save_corpus(self, record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("voice50", self.TABLE_CORPUS,
+                   record["corpusId"]),
+                mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_CORPUS][
+            record["corpusId"]] = dict(record)
+        return record
+
+    async def get_corpus(self,
+                         corpus_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k(
+                "voice50", self.TABLE_CORPUS, corpus_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_CORPUS].get(corpus_id)
+        return dict(rec) if rec else None
+
+    async def list_corpus(self,
+                          status: str = None,
+                          limit: int = 200) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "voice50", self.TABLE_CORPUS, "*"))
+            keys = [k for k in keys
+                    if not k.endswith(":seq")]
+            result = []
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if not data:
+                        continue
+                    rec = self._deserialize(data)
+                    if status is None \
+                            or rec.get("status") == status:
+                        result.append(rec)
+            result.sort(
+                key=lambda r: r.get("corpusId") or 0)
+            return result[-limit:]
+        self._ensure_store()
+        result = [dict(r) for r in
+                  self.store[self.TABLE_CORPUS].values()
+                  if status is None
+                  or r.get("status") == status]
+        result.sort(
+            key=lambda r: r.get("corpusId") or 0)
         return result[-limit:]
 
     # --------------------------------------------------------

@@ -38,6 +38,7 @@ from services.xiaozhu_voice50_rules import (
     VOICEPRINT_VERIFIED, VOICEPRINT_UNVERIFIED,
     QUALITY_THRESHOLD, VOICEPRINT_PROXY, VOICEPRINT_REAL,
     DEFAULT_MODE, rules_view,
+    NEWCOMER_L3_BOOST, NEWCOMER_WINDOW_DAYS,
 )
 
 logger = logging.getLogger("xiaozhu_voice50")
@@ -180,11 +181,16 @@ class Voice50Service:
                 raise ValueError(
                     f"行为 {behavior} 无扣分项定义")
 
-        # ---- 防刷封顶(仅正向) ----
+        # ---- 防刷封顶(仅正向; P3: L3 专属动态天花板——
+        #      贡献层防资源集中: 基线×2(比全局 ×3 紧);
+        #      新用户首月(首事件 30 天内)上浮 50% 冷启动) ----
         capped, overflow = final, 0.0
         if final > 0:
+            newcomer = await self._is_newcomer(member_id)
             capped, overflow = await self._apply_cap(
-                member_id, ledger, final)
+                member_id, ledger, final,
+                layer=rule["layer"],
+                newcomer=newcomer)
 
         # ---- 事件落账(只追加——ref 绑定) ----
         ev_id = await self.repo.next_event_id()
@@ -343,10 +349,17 @@ class Voice50Service:
     # --------------------------------------------------------
 
     async def _apply_cap(self, member_id: int,
-                         ledger: dict,
-                         score: float) -> tuple[float, float]:
+                         ledger: dict, score: float,
+                         layer: str = "",
+                         newcomer: bool = False
+                         ) -> tuple[float, float]:
         """封顶: 当日累计 ≤ max(基线×3, 首日下限)
 
+        P3 L3 动态天花板(公平性保障):
+        - L3 层单独收紧: cap = min(全局 cap, 基线×2)
+          (贡献层防资源向高频用户集中——v2.0 §四);
+        - 新用户首月(首事件 30 天内)L3 上浮 50%:
+          基线×2×1.5=基线×3(与全局持平——冷启动激励)。
         基线=前 7 日日均(滚动); 新用户/冷启动首日下限
         30 分(保证可测)。溢出部分 ×0.1(CAP_OVERFLOW_RATE)。
         """
@@ -357,6 +370,10 @@ class Voice50Service:
             used = 0.0
         baseline = await self._rolling_baseline(member_id)
         cap = max(baseline * CAP_MULTIPLIER, 30.0)
+        if layer == "L3":
+            l3_cap = baseline * 2.0 * (
+                NEWCOMER_L3_BOOST if newcomer else 1.0)
+            cap = min(cap, max(l3_cap, 30.0))
         room = max(0.0, cap - used)
         if score <= room:
             ledger["usedToday"] = _r2(used + score)
@@ -372,6 +389,24 @@ class Voice50Service:
             "capped=%s overflow=%s", member_id, score,
             cap, capped, overflow)
         return capped, overflow
+
+    async def _is_newcomer(self, member_id: int) -> bool:
+        """新用户判定(voice50 首笔事件 30 天内——冷启动)
+
+        无事件按新用户(首笔即将发生)。
+        """
+        from datetime import datetime, timedelta
+        evs = await self.repo.list_events(
+            member_id=member_id, limit=1)
+        if not evs:
+            return True
+        try:
+            first = datetime.fromisoformat(
+                str(evs[0].get("ts") or ""))
+        except ValueError:
+            return False
+        return datetime.now(UTC) - first \
+            < timedelta(days=NEWCOMER_WINDOW_DAYS)
 
     async def _rolling_baseline(self,
                                 member_id: int) -> float:
@@ -564,6 +599,283 @@ class Voice50Service:
                 float(profile.get("riskEMA") or 0)))
         except Exception:  # noqa: BLE001
             return None
+
+    # --------------------------------------------------------
+    # P3 L3 五行为 API(佐证/语料/问答/伴侣/FL 预留)
+    # --------------------------------------------------------
+
+    async def record_evidence(self, member_id: int,
+                              evidence: str,
+                              sources: list = None,
+                              summary: str = ""
+                              ) -> dict:
+        """真伪鉴别辅助验证(v2.0 L3——per-claim 验真)
+
+        佐证行为不走 T+1 聚合, 逐条走 45号验真三道关
+        (证据≥8字/双源或权威源/意图中性):
+        - 验真通过 → 采信 gains ×2(base 12 → 24);
+        - 不通过 → 基础分(未采信——留事件待补源重试)。
+        Returns:
+            {**record_behavior 回包, verify: {verified,
+            confidence, checks}}
+        """
+        from services.trust_radar_service import (
+            verify_pipeline,
+        )
+        srcs = sources or ["voice_evidence"]
+        v = verify_pipeline(
+            "deposit", evidence, srcs,
+            summary or "语音佐证提交")
+        r = await self.record_behavior(
+            member_id, "voice_evidence",
+            gains={"accepted": v["verified"]},
+            note=f"verify:{v['confidence']}"
+                 f"|src:{','.join(srcs)[:40]}")
+        r["verify"] = {
+            "verified": v["verified"],
+            "confidence": v["confidence"],
+            "checks": v["checks"],
+        }
+        return r
+
+    async def submit_corpus(self, member_id: int,
+                            scenario: str) -> dict:
+        """新场景语料捐赠提交(v2.0 L3——人工审核)
+
+        捐赠即得基础 10 分(主动描述未覆盖场景);
+        纳入训练集(审核采纳)再 +20(P2 加法 bonus)。
+        场景描述 ≥8 字(与 45号证据口径一致)。
+        """
+        scenario = str(scenario or "").strip()
+        if len(scenario) < 8:
+            raise ValueError("场景描述需 ≥8 字符")
+        corpus_id = await self.repo.next_corpus_id()
+        await self.repo.save_corpus({
+            "corpusId": corpus_id,
+            "memberId": member_id,
+            "scenario": scenario[:500],
+            "status": "pending",
+            "reviewedAt": "", "note": "",
+            "ts": ts(),
+        })
+        # 捐赠基础分(不采纳也计入——v2.0 口径)
+        r = await self.record_behavior(
+            member_id, "voice_corpus_donate",
+            note=f"corpus-{corpus_id}-submitted")
+        return {"success": True,
+                "corpusId": corpus_id,
+                "status": "pending",
+                "baseScore": r.get("finalScore"),
+                "note": "审核采纳后 +20(纳入训练集)"}
+
+    async def review_corpus(self, corpus_id: int,
+                            adopted: bool,
+                            note: str = "") -> dict:
+        """语料审核(admin——采纳 +20 bonus)"""
+        rec = await self.repo.get_corpus(corpus_id)
+        if rec is None:
+            raise KeyError(f"语料 {corpus_id} 不存在")
+        if rec.get("status") != "pending":
+            raise ValueError(
+                f"已处理({rec.get('status')})")
+        rec["status"] = ("adopted" if adopted
+                         else "rejected")
+        rec["reviewedAt"] = ts()
+        rec["note"] = str(note or "")[:200]
+        await self.repo.save_corpus(rec)
+        if adopted:
+            await self.record_behavior(
+                rec.get("memberId"),
+                "voice_corpus_donate",
+                gains={"adopted": True},
+                note=f"corpus-{corpus_id}-adopted")
+        return {"success": True, **rec}
+
+    async def record_qa(self, member_id: int,
+                        content: str,
+                        liked: bool = False) -> dict:
+        """社区知识问答(v2.0 L3——内容安全过滤)
+
+        语音回答其他用户关于信值的疑问:
+        - 攻击性内容拒绝(内容安全红线);
+        - 答案被点赞 ×1.5(gains liked);
+        日限 40(dailyCap enforcement)。
+        """
+        content = str(content or "")
+        from services.xiaozhu_service import ATTACK_WORDS
+        if any(w in content for w in ATTACK_WORDS):
+            raise ValueError(
+                "内容含攻击性语言——社区问答拒绝计分")
+        return await self.record_behavior(
+            member_id, "voice_community_qa",
+            gains={"liked": bool(liked)},
+            note="community-qa")
+
+    async def check_companion(self,
+                             member_id: int) -> dict:
+        """长期语音伴侣关系核算(v2.0 L3——月度)
+
+        条件: 连续 30 天日均有效交互(cappedScore>0
+        事件)≥3 次 → 月度 100;
+        多样性指数(近 30 天 distinct 行为数/14)>0.6
+        → ×1.3; 月限 1(当月已发拒绝)。
+        """
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now(UTC)
+                  - timedelta(days=30)).isoformat()
+        evs = await self.repo.list_events(
+            member_id=member_id, limit=10000)
+        window = [e for e in evs
+                  if str(e.get("ts") or "") >= cutoff
+                  and float(e.get("cappedScore")
+                           or 0) > 0]
+        if not window:
+            return {"success": True, "eligible": False,
+                    "reason": "近 30 天无有效交互",
+                    "dailyAvg": 0.0}
+        daily_avg = round(len(window) / 30.0, 1)
+        diversity = round(len(
+            {e.get("behavior") for e in window}) / 14.0, 3)
+        # 月限 1: 当月已有 companion 事件 → 拒绝
+        month_prefix = _today_key()[:7]
+        already = any(
+            e.get("behavior") == "voice_companion"
+            and str(e.get("ts") or "").startswith(
+                month_prefix)
+            for e in evs)
+        if already:
+            return {"success": True, "eligible": False,
+                    "reason": "本月已发放(月限 1)",
+                    "dailyAvg": daily_avg,
+                    "diversity": diversity}
+        if daily_avg < 3.0:
+            return {"success": True, "eligible": False,
+                    "reason": f"日均有效交互 {daily_avg}<3",
+                    "dailyAvg": daily_avg,
+                    "diversity": diversity}
+        r = await self.record_behavior(
+            member_id, "voice_companion",
+            gains={"diversity": diversity > 0.6},
+            note=f"companion|avg:{daily_avg}"
+                 f"|div:{diversity}")
+        return {"success": True, "eligible": True,
+                "dailyAvg": daily_avg,
+                "diversity": diversity,
+                "award": r}
+
+    async def record_fl_gradient(self, member_id: int,
+                                 quality: float = 0.75
+                                 ) -> dict:
+        """联邦梯度贡献(v2.0 L3——FL 预留接口)
+
+        预算充足前置(49号 P2——FL 上传消耗隐私预算,
+        剩余不足拒绝); 梯度质量 >0.7 ×1.5;
+        真实 FL 上传通道为外部待办——本 API 为预留
+        接口(集成方调用时走此口径)。
+        """
+        from services.xiaozhu_privacy_service import (
+            XiaozhuPrivacyService,
+        )
+        budget = await XiaozhuPrivacyService(
+        ).budget_view(member_id)
+        if float(budget.get("remaining") or 0) < 0.5:
+            raise ValueError(
+                "隐私预算不足(FL 梯度上传前置校验"
+                f"剩余 {budget.get('remaining')})"
+                "——请调整偏好或明日再试")
+        return await self.record_behavior(
+            member_id, "voice_fl_gradient",
+            gains={"quality": float(quality) > 0.7},
+            note=f"fl-gradient|q:{quality}"
+                 f"|budget:{budget.get('remaining')}")
+
+    # --------------------------------------------------------
+    # P3 公平性桥(46号采样——L3 分布无歧视核验)
+    # --------------------------------------------------------
+
+    async def bridge_fairness(self) -> dict:
+        """L3 日积分分布上报 46号公平性采样
+
+        分组(v2.0 §四公平性保障——动态天花板/新用户
+        上浮的分布核验): l3_high(≥30)/l3_mid(10-30)/
+        l3_low(<10), 各组 score=当日 L3 正向积分均值;
+        46号 MIN_GROUP_SAMPLES=5(不足组不上报——47号
+        教训)。side-door 档案 voice50_l3_credits(不入
+        SCORER_REGISTRY——46号 28 档案断言零改动红线)。
+        """
+        evs = await self.repo.list_events(limit=10000)
+        today = _today_key()
+        daily: dict = {}
+        for e in evs:
+            if e.get("dayKey") != today \
+                    or e.get("layer") != "L3":
+                continue
+            score = float(e.get("cappedScore") or 0)
+            if score > 0:
+                daily.setdefault(
+                    e.get("memberId"), []).append(score)
+        if not daily:
+            return {"success": True, "bridged": 0,
+                    "groups": [],
+                    "note": "今日无 L3 正向积分(无需上报)"}
+        buckets = {"l3_high": [], "l3_mid": [],
+                   "l3_low": []}
+        for mid, scores in daily.items():
+            total = sum(scores)
+            if total >= 30:
+                buckets["l3_high"].append(total)
+            elif total >= 10:
+                buckets["l3_mid"].append(total)
+            else:
+                buckets["l3_low"].append(total)
+        # 46号 side-door 档案(48号 bridge 范式)
+        from repositories.ai_governance_repository \
+            import AiGovernance46Repository
+        gov_repo = AiGovernance46Repository()
+        scorer_id = "voice50_l3_credits"
+        gov = await gov_repo.get_gov(scorer_id)
+        if gov is None:
+            gov = {"govId": await gov_repo.next_gov_id(),
+                   "scorerId": scorer_id,
+                   "label": "语音L3积分分布采样",
+                   "module": "50语音积分",
+                   "batch": 13, "status": "active",
+                   "ownerNote": "50号公平性桥接专属档案"
+                                "(side-door 入册)",
+                   "frozenAt": "", "frozenBy": "",
+                   "firstSeenAt": ts(),
+                   "createdAt": ts(),
+                   "lastSyncedAt": ts()}
+        else:
+            gov["status"] = "active"
+            gov["lastSyncedAt"] = ts()
+        await gov_repo.save_gov(gov)
+
+        samples = []
+        for group, totals in sorted(buckets.items()):
+            if len(totals) < 5:   # MIN_GROUP_SAMPLES
+                continue
+            samples.append({
+                "group": group,
+                "score": round(
+                    sum(totals) / len(totals), 1),
+                "passed": None})
+        if not samples:
+            return {"success": True, "bridged": 0,
+                    "groups": [],
+                    "note": "各分组样本 <5(46号最小采样"
+                            "口径)——暂不上报"}
+        from services.ai_governance_fairness import (
+            AiGovernanceFairnessService,
+        )
+        result = await AiGovernanceFairnessService(
+        ).submit_samples(
+            scorer_id, samples, source="report")
+        logger.info("voice50_fairness_bridged groups=%s",
+                    len(samples))
+        return {"success": True,
+                "bridged": result.get("accepted"),
+                "groups": [s["group"] for s in samples]}
 
     # --------------------------------------------------------
     # T+1 结算器(P2——L2/L3 聚合 → 45号 deposit 验真入信值)
