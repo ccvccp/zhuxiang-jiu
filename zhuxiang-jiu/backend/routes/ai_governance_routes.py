@@ -50,12 +50,17 @@
                                          (时间窗聚合,
                                           ?days=30)
 
+端点(P5, 管理面 1——X-Role: admin):
+    GET  /api/ai-gov/dashboard             治理看板聚合
+                                         (六区块一次
+                                          拉取, 压轴)
+
 鉴权: 管理端 X-Role: admin(43/44/45号同款口径)
 
 统一口径:
     - 模块纯增量(零既有路由改动; ai_learning 仅加冻结守卫)
     - 治理不阻断: fail-soft 铁律(守卫异常放行学习;
-      健康巡检异常降级留痕不抛出)
+      健康巡检异常降级留痕不抛出; 看板区块级容错)
     - 采样脱敏: 含个人标识字段的上报直接 409(最小必要红线)
     - 数字来自数据层: 备案/报告数字可溯源, LLM 仅润色
     - KeyError → 404 / ValueError → 409(44/45号同款)
@@ -448,6 +453,29 @@ async def build_compliance_report(
         )
         return await AiGovernanceComplianceService(
         ).build_report(days=days)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P5 治理看板(六区块聚合 + 干预闭环入口, 压轴)
+# ============================================================
+
+@router.get("/dashboard")
+async def governance_dashboard(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """治理看板聚合(六区块一次拉取, fail-soft 分区)
+
+    ① 档案总览 ② 审批队列 ③ 健康排行 ④ 公平性视图
+    ⑤ 回放轨迹 ⑥ 合规入口——前端面板单次 GET 零拼装。
+    """
+    _require_admin(x_role)
+    try:
+        from services.ai_governance_dashboard import (
+            AiGovernanceDashboardService,
+        )
+        return await AiGovernanceDashboardService().build()
     except Exception as e:
         raise _handle(e) from e
 
