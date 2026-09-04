@@ -448,6 +448,13 @@ class XiaozhuService:
         last = turns[-1] if turns else None
         resolved = _resolve_reference(command_text, last)
 
+        # 49号P1 语音确认词拦截(高敏双因子——意图证据;
+        # 必须先于指令路由: 确认短语无指令 pattern)
+        voice_hit = await self._try_voice_confirmation(
+            session, command_text)
+        if voice_hit:
+            return voice_hit
+
         # ④ 指令路由(绑定快捷指令 → 共创短语 → 规则轨
         #    → LLM 增强轨)
         # P1 绑定指令优先于 pattern 匹配("绑定信值档案 N"
@@ -666,9 +673,12 @@ class XiaozhuService:
                          "subject": r["summary"],
                          "confirmToken": r["confirmToken"],
                          "codeHint": r["codeHint"],
-                         "expiresIn": r["expiresIn"]},
+                         "expiresIn": r["expiresIn"],
+                         "consentPhrase":
+                             r.get("consentPhrase")},
                 "confirmRequired": True,
                 "confirmToken": r["confirmToken"],
+                "consentPhrase": r.get("consentPhrase"),
                 "summary": r["summary"],
             }
         if r.get("result", {}).get("clarify"):
@@ -757,6 +767,11 @@ class XiaozhuService:
         ex = get_executor()
         r = await ex.confirm(token, code)
         result = r.get("result") or {}
+        # 49号P1: 双因子齐备 → consent_token 透传(60s 一次性
+        # FC 网关凭证)+ 语音因子标记
+        extra = {k: r[k] for k in (
+            "consentToken", "consentExpiresIn",
+            "voiceConfirmed") if k in r}
         if r.get("action") == "trust.convert" \
                 and result.get("success"):
             return {
@@ -764,13 +779,13 @@ class XiaozhuService:
                 "reply": f"兑换完成——到账 "
                          f"{result.get('amount')} TV"
                          f"(余额 {result.get('balance')})",
-                "result": result}
+                "result": result, **extra}
         return {"success": bool(result.get("success")),
                 "executed": True,
                 "reply": str(result.get("detail")
                              or result.get("error")
                              or "已执行"),
-                "result": result}
+                "result": result, **extra}
 
     # --------------------------------------------------------
     # 执行器(只读直达——全部调既有业务 API)
@@ -1191,6 +1206,41 @@ class XiaozhuService:
             logger.debug("voice48_ctx_pref_skip: %s", exc)
         return context
 
+    async def _try_voice_confirmation(self, session: dict,
+                                      command_text: str
+                                      ) -> dict | None:
+        """49号P1 语音确认词轮次(高敏双因子——意图证据)
+
+        命中待确认高敏令牌的确认短语 → 标记 voiceConfirmed
+        并回复屏幕码引导; 未命中返回 None(走正常路由)。
+
+        红线: 语音确认词是意图证据不是身份凭证——执行
+        仍需屏幕码核销(confirmToken 流不变)。
+        """
+        try:
+            from services.xiaozhu_executor import (
+                get_executor,
+            )
+            hit = get_executor() \
+                .mark_voice_confirmation(
+                    session.get("memberId"), command_text)
+            if not hit:
+                return None
+            return await self._save_turn(
+                session, session.get("channel") or "voice",
+                command_text, "consent.voice", {
+                    "reply": "已收到您的语音确认(意图凭证)"
+                             "——请在屏幕输入 4 位确认码完成"
+                             "身份核验, 双因子齐备后执行",
+                    "card": {"type": "confirm_voice",
+                             "subject": "语音确认已记录",
+                             "action": hit.get("action")},
+                }, {"commandText": command_text})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice49_voice_confirm_skip: %s",
+                         exc)
+            return None
+
     async def _llm_match(self, text: str) -> dict | None:
         """LLM 意图增强轨(XIAOZHU_LLM_MODE=on 且规则轨
         未中时; LLM 只从白名单指令集选 action——不产内容)
@@ -1330,6 +1380,7 @@ class XiaozhuService:
             "confirmRequired": result.get("confirmRequired",
                                           False),
             "confirmToken": result.get("confirmToken"),
+            "consentPhrase": result.get("consentPhrase"),
             "summary": result.get("summary"),
             "executed": result.get("executed", False),
             "duplicate": result.get("duplicate", False),

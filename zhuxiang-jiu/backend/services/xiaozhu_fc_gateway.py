@@ -8,15 +8,16 @@
     [校验③ explainability_ref]─────────→ 写响应缺失→阻断
     [审计] voice48_fc_audit 六字段流水落库
 
-P0 口径(骨架):
-    - 校验①: 占位实现(50号 P1 双因子 consent_token 落地
-      后接管——当前高敏仍走 48号 confirmToken 屏幕码流,
-      网关透传不拦截)
-    - 校验②: 占位实现(预算检查函数返回 True——P2 隐私
-      预算落地后接管)
-    - 校验③: 占位实现(ref 生成——P3 可解释性绑定落地后
-      由 45号 attribution/46号回放充实)
-    - 审计: 完整落地(P0 核心交付——六字段铁律)
+P0 口径(骨架) + P1 升级(双因子):
+    - 校验① consent_token(P1 真实现): 高敏工具携带有效
+      token → 一次性核销 + 直执行(_exec_sensitive 绕过
+      confirmToken 再发——双因子已齐备); 无 token → 走
+      confirmToken 挑战流(语音确认词+屏幕码双因子发起);
+      校验含 TTL≤60s/一次性/action 匹配/声纹代理绑定
+      (跨用户复用无效)
+    - 校验② 隐私预算: 占位放行(P2 接管)
+    - 校验③ explainability_ref: 占位(P3 接管)
+    - 审计: 完整落地(六字段铁律 + consent_token hash)
 
 设计红线:
     - fail-soft: 审计落库失败不阻断业务(记 warning)
@@ -79,17 +80,45 @@ class XiaozhuFcGateway:
         started = time.monotonic()
         consent_hash = None
         try:
-            # 校验① consent_token(P0 占位透传——P1 接管)
-            consent_hash = self._verify_consent(
-                params.get("consentToken"), action, tool)
+            from services.xiaozhu_executor import (
+                get_executor,
+            )
+            executor = get_executor()
+            # 校验① consent_token(49号P1 真实现——
+            # 高敏必验; 写暂不要求)
+            if tool.get("requiresConsent"):
+                token = params.get("consentToken")
+                if token:
+                    # 有效 → 一次性核销 + 直执行
+                    # (绕过 confirmToken 再发——双因子已齐备)
+                    verified = executor \
+                        .validate_consent_token(
+                            str(token), member_id, action)
+                    consent_hash = verified[
+                        "consentTokenHash"]
+                    self._check_privacy_budget(
+                        member_id, tool["privacyCost"])
+                    result = await executor \
+                        ._exec_sensitive(action, params,
+                                         member_id)
+                    latency = round(
+                        (time.monotonic() - started)
+                        * 1000, 1)
+                    await self._audit(
+                        session, action, params, member_id,
+                        consent_hash, latency, "ok",
+                        error="consent-direct")
+                    return {"executed": True,
+                            "action": action,
+                            "result": result,
+                            "consentDirect": True}
+                # 无 token → 走 confirmToken 挑战流
+                # (双因子发起: 语音确认词+屏幕码)
             # 校验② 隐私预算(P0 占位放行——P2 接管)
             self._check_privacy_budget(
                 member_id, tool["privacyCost"])
             # 执行(48号沙箱——幂等/冷静期全继承)
-            from services.xiaozhu_executor import (
-                get_executor,
-            )
-            result = await get_executor().execute(
+            result = await executor.execute(
                 session, action, params)
             latency = round((time.monotonic() - started)
                             * 1000, 1)
@@ -114,21 +143,20 @@ class XiaozhuFcGateway:
                     "action": action}
 
     # --------------------------------------------------------
-    # 校验① consent_token(P0 占位——P1 双因子接管)
+    # 校验① consent_token(P1 双因子——由 executor 池核验)
     # --------------------------------------------------------
 
-    @staticmethod
-    def _verify_consent(token: str, action: str,
-                        tool: dict) -> str | None:
-        """显式授权前置校验(P0 占位: 高敏仍由 48号
-        confirmToken 屏幕码流守门——网关层不重复拦截)
+    def verify_consent_token(self, token: str, member_id: int,
+                             action: str) -> dict:
+        """显式授权前置校验(对外口径——网关管道内已织入;
+        此方法供测试/管理端单独核验)
 
-        P1 落地后: 校验 TTL≤60s/一次性/action 匹配/
-        声纹摘要绑定; 返回 token_hash 入审计。
+        校验: TTL≤60s / 一次性 / action 匹配 / 声纹代理
+        绑定(跨用户复用无效)。失败即抛(403/409 语义)。
         """
-        if not tool.get("requiresConsent"):
-            return None
-        return XiaozhuFcGateway._hash_token(token)
+        from services.xiaozhu_executor import get_executor
+        return get_executor().validate_consent_token(
+            str(token or ""), member_id, action)
 
     @staticmethod
     def _hash_token(token: str) -> str | None:

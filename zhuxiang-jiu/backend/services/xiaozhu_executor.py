@@ -38,8 +38,12 @@ from repositories.xiaozhu_repository import (
 
 logger = logging.getLogger("xiaozhu_executor")
 
-# 高敏确认令牌有效期(秒)
-CONFIRM_TOKEN_TTL = 120
+# 高敏确认令牌有效期(秒)——49号P1: 120→60 收紧
+# (计划 §四 铁律① TTL ≤60s)
+CONFIRM_TOKEN_TTL = 60
+
+# 49号P1 consent_token 有效期(秒——双因子合成凭证)
+CONSENT_TOKEN_TTL = 60
 
 # 码错重试上限(超限令牌作废须重新发起)
 CONFIRM_MAX_ATTEMPTS = 3
@@ -88,10 +92,13 @@ class XiaozhuExecutor:
         self.repo = repo or Xiaozhu48Repository()
         # 内存态(进程级): confirmToken/幂等/冷静期
         # (双机部署时确认令牌建议迁 Redis——单机容器 1 副本
-        #  当前口径; 令牌 TTL 120s 天然短窗)
+        #  当前口径; 令牌 TTL 60s 天然短窗)
         self._tokens: dict = {}
         self._idem: dict = {}
         self._confirm_log: dict = {}
+        # 49号P1 consent_token 池(双因子合成凭证——
+        # 一次性核销, 60s TTL, 声纹代理绑定)
+        self._consent_tokens: dict = {}
         # P4 高敏台账计数(进程级——与令牌同口径, 重启归零)
         self._stats: dict = {
             "issued": 0, "confirmed": 0, "wrongCode": 0,
@@ -159,17 +166,27 @@ class XiaozhuExecutor:
         token = f"cf-{uuid.uuid4().hex[:12]}"
         code = f"{secrets.randbelow(9000) + 1000}"
         self._stats["issued"] += 1
+        # 49号P1: 注册表取确认短语(语音因子——意图证据)
+        from services.xiaozhu_fc_registry import get_tool
+        tool = get_tool(action) or {}
+        consent_phrase = tool.get("consentPhrase") or ""
         self._tokens[token] = {
             "memberId": member_id,
             "sessionId": session_id,
             "action": action, "params": params,
             "code": code, "attempts": 0,
             "expiresAt": _now() + CONFIRM_TOKEN_TTL,
+            "consentPhrase": consent_phrase,
+            "voiceConfirmed": False,
+            "voiceEvidenceHash": "",
         }
         summary = self._summarize(action, params)
         logger.info("voice48_confirm_issued member=%s "
                     "action=%s token=%s", member_id,
                     action, token)
+        voice_hint = (f"。请先清晰说出「{consent_phrase}」"
+                      f"(语音确认), 再在屏幕输入 4 位确认码"
+                      if consent_phrase else "")
         return {
             "confirmRequired": True,
             "confirmToken": token,
@@ -177,12 +194,109 @@ class XiaozhuExecutor:
             "codeHint": f"屏幕显示 4 位数字码({code[:1]}**"
                         f"**)",   # 只泄首位——核验走输入
             "expiresIn": CONFIRM_TOKEN_TTL,
+            "consentPhrase": consent_phrase,
             "reply": f"高风险操作需屏幕确认: {summary}"
-                     f"——请在屏幕上输入 4 位确认码完成",
+                     f"——请在屏幕上输入 4 位确认码完成"
+                     f"{voice_hint}",
         }
+
+    def mark_voice_confirmation(self, member_id: int,
+                                spoken_text: str) -> dict | None:
+        """49号P1 语音确认词标记(双因子——意图证据)
+
+        会员在会话中说出待确认高敏令牌的确认短语(ASR 精确
+        包含匹配) → 标记 voiceConfirmed + 意图证据哈希留痕。
+        屏幕码(身份)仍走 confirm() ——语音念码不算红线不变。
+
+        Returns:
+            {"token", "action"} 或 None(无待确认短语匹配)
+        """
+        text = str(spoken_text or "").strip()
+        if not text:
+            return None
+        for token, entry in self._tokens.items():
+            if entry.get("memberId") != member_id:
+                continue
+            phrase = entry.get("consentPhrase")
+            if phrase and phrase in text \
+                    and not entry.get("voiceConfirmed"):
+                entry["voiceConfirmed"] = True
+                entry["voiceEvidenceHash"] = hashlib.sha256(
+                    text.encode("utf-8")).hexdigest()[:32]
+                logger.info(
+                    "voice49_voice_confirmed member=%s "
+                    "action=%s token=%s", member_id,
+                    entry.get("action"), token)
+                return {"token": token,
+                        "action": entry.get("action")}
+        return None
+
+    @staticmethod
+    def speaker_digest(member_id: int) -> str:
+        """声纹代理摘要(确定性哈希——真声纹外部待办前
+        以会员身份哈希代理; 不作身份凭证, 仅跨用户复用
+        校验)"""
+        return hashlib.sha256(
+            f"speaker:{member_id}".encode(
+                "utf-8")).hexdigest()[:32]
+
+    def _issue_consent_token(self, member_id: int,
+                             action: str) -> str:
+        """签发 consent_token(双因子齐备后——60s 一次性
+        FC 网关凭证, 声纹代理绑定)"""
+        token = f"ct-{uuid.uuid4().hex[:12]}"
+        self._consent_tokens[token] = {
+            "memberId": member_id,
+            "action": action,
+            "speakerDigest": self.speaker_digest(member_id),
+            "expiresAt": _now() + CONSENT_TOKEN_TTL,
+            "used": False,
+        }
+        logger.info("voice49_consent_issued member=%s "
+                    "action=%s", member_id, action)
+        return token
+
+    def validate_consent_token(self, token: str,
+                              member_id: int,
+                              action: str) -> dict:
+        """核验 consent_token(TTL/一次性/action 匹配/
+        声纹代理绑定——跨用户复用无效)
+
+        Raises:
+            KeyError: 令牌不存在/过期/已核销(一次性)
+            ValueError: 跨用户复用/action 不匹配
+        """
+        entry = self._consent_tokens.get(token)
+        if entry is None:
+            raise KeyError(
+                f"consent_token {token} 不存在或已作废")
+        if _now() > entry["expiresAt"]:
+            self._consent_tokens.pop(token, None)
+            raise KeyError(
+                "consent_token 已过期(60s), 请重新双因子确认")
+        if entry.get("used"):
+            raise KeyError(
+                "consent_token 已核销(一次性)——请重新发起")
+        if entry.get("memberId") != member_id:
+            raise ValueError(
+                "consent_token 跨用户复用无效(声纹绑定)")
+        if entry.get("action") != action:
+            raise ValueError(
+                f"consent_token 与动作不匹配"
+                f"({entry.get('action')} ≠ {action})")
+        # 一次性核销
+        entry["used"] = True
+        return {"memberId": member_id, "action": action,
+                "consentTokenHash": hashlib.sha256(
+                    token.encode("utf-8")).hexdigest()[:32],
+                "voiceEvidence": True}
 
     async def confirm(self, token: str, code: str) -> dict:
         """核销确认码执行高敏操作(数字码为准红线)
+
+        49号P1: 双因子齐备(语音确认词+屏幕码)时签发
+        consent_token 随结果返回——供 FC 网关后续直执行
+        (60s 一次性); 纯屏幕码仍执行(48号既有口径)。
 
         Raises:
             KeyError: 令牌不存在/已过期/已作废
@@ -194,7 +308,7 @@ class XiaozhuExecutor:
         if _now() > entry["expiresAt"]:
             self._tokens.pop(token, None)
             self._stats["expired"] += 1
-            raise KeyError("确认令牌已过期(120s), 请重新发起")
+            raise KeyError("确认令牌已过期(60s), 请重新发起")
         if str(code or "").strip() != entry["code"]:
             entry["attempts"] += 1
             self._stats["wrongCode"] += 1
@@ -210,6 +324,7 @@ class XiaozhuExecutor:
                 f"次机会)")
         # 核销
         self._stats["confirmed"] += 1
+        voice_confirmed = bool(entry.get("voiceConfirmed"))
         self._tokens.pop(token, None)
         self._bump_confirm_log(entry["memberId"])
         action = entry["action"]
@@ -218,8 +333,15 @@ class XiaozhuExecutor:
             action, params, entry["memberId"])
         logger.info("voice48_confirm_executed member=%s "
                     "action=%s", entry["memberId"], action)
-        return {"executed": True, "action": action,
-                "result": result}
+        out = {"executed": True, "action": action,
+               "result": result,
+               "voiceConfirmed": voice_confirmed}
+        # 双因子齐备 → 签发 consent_token(60s 一次性)
+        if voice_confirmed:
+            out["consentToken"] = self._issue_consent_token(
+                entry["memberId"], action)
+            out["consentExpiresIn"] = CONSENT_TOKEN_TTL
+        return out
 
     # --------------------------------------------------------
     # 写执行器(真实业务通道——数字来自返回值)
