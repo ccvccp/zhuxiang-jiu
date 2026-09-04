@@ -448,7 +448,8 @@ class XiaozhuService:
         last = turns[-1] if turns else None
         resolved = _resolve_reference(command_text, last)
 
-        # ④ 指令路由(绑定快捷指令 → 规则轨 → LLM 增强轨)
+        # ④ 指令路由(绑定快捷指令 → 共创短语 → 规则轨
+        #    → LLM 增强轨)
         # P1 绑定指令优先于 pattern 匹配("绑定信值档案 N"
         # 含 trust.score 的 pattern 词, 须先拦截)
         if re.fullmatch(r"绑定\s*信值?\s*档案?\s*[0-9]+",
@@ -460,12 +461,37 @@ class XiaozhuService:
         cmd = match_command(resolved)
         track = "rule"
         if cmd is None:
+            # P3 共创短语匹配(已上架的自定义指令)
+            try:
+                from services.xiaozhu_evolution_service \
+                    import XiaozhuEvolutionService
+                custom = await XiaozhuEvolutionService(
+                    repo=self.repo).match_custom(resolved)
+                if custom:
+                    cmd = next(
+                        c for c in COMMANDS
+                        if c["action"] == custom["action"])
+                    track = "custom"
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("voice48_custom_skip: %s", exc)
+        if cmd is None:
             llm_hit = await self._llm_match(resolved)
             if llm_hit:
                 cmd = next(c for c in COMMANDS
                            if c["action"] == llm_hit["action"])
                 track = "llm"
         if cmd is None:
+            # P3 失败挖掘: 兜底轮次归 failure_cases(fail-soft)
+            # 负反馈词优先归 negative, 其余归 fallback
+            from services.xiaozhu_evolution_service import (
+                NEGATIVE_FEEDBACK_WORDS,
+            )
+            kind = ("negative"
+                    if any(w in command_text
+                           for w in
+                           NEGATIVE_FEEDBACK_WORDS)
+                    else "fallback")
+            await self._mine_failure(session, text, kind)
             return await self._save_turn(
                 session, channel, text, "general",
                 {"reply": "这个我还不会——试试「看新品」"
@@ -477,13 +503,61 @@ class XiaozhuService:
             session, cmd, resolved, member_id_hint=True)
         latency = round((time.monotonic() - started)
                         * 1000, 1)
-        return await self._save_turn(
+        saved = await self._save_turn(
             session, channel, text, cmd["action"],
             result, {"latencyMs": latency,
                      "audioMeta": audio_meta,
                      "commandText": command_text,
                      "track": track,
                      "resolved": resolved})
+        # P3 进化层接入(fail-soft): 有效指令计分 + 负反馈/
+        # 重复失败挖掘——不阻断主链路
+        await self._evolve_turn(session, text, cmd,
+                                result)
+        return saved
+
+    async def _evolve_turn(self, session: dict,
+                           raw_text: str, cmd: dict,
+                           result: dict) -> None:
+        """P3 进化层轮次后处理(积分 + 失败挖掘, fail-soft)"""
+        try:
+            from services.xiaozhu_evolution_service import (
+                XiaozhuEvolutionService,
+            )
+            ev = XiaozhuEvolutionService(repo=self.repo)
+            member_id = session.get("memberId")
+            # 计分: 指令直达完成(有效行为——反语音霸权:
+            # 只对完成行为计分, 不因"用语音"本身)
+            if member_id and not result.get("clarify"):
+                turns = await self.repo.list_turns(
+                    session["sessionId"])
+                seq = turns[-1].get("seq") \
+                    if turns else 0
+                await ev.award_command_done(
+                    member_id, session["sessionId"], seq)
+            # 失败挖掘: 负反馈/重复
+            kind = await ev.classify_turn(
+                session, raw_text, member_id, result)
+            if kind:
+                await ev.record_failure(
+                    session, raw_text, kind, member_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_evolve_skip: %s", exc)
+
+    async def _mine_failure(self, session: dict,
+                            raw_text: str,
+                            kind: str) -> None:
+        """兜底轮次失败归档(fail-soft)"""
+        try:
+            from services.xiaozhu_evolution_service import (
+                XiaozhuEvolutionService,
+            )
+            await XiaozhuEvolutionService(
+                repo=self.repo).record_failure(
+                session, raw_text, kind,
+                session.get("memberId"))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_mine_skip: %s", exc)
 
     async def _bind_flow(self, session: dict, channel: str,
                          raw_text: str, trust_id: int,

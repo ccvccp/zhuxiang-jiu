@@ -1,30 +1,36 @@
 """48号·小竹智能语音中枢数据访问层(双模式: 内存 + Redis)
 
-表清单(前缀 voice48, 计划 §四 P0/§五 P1):
+表清单(前缀 voice48, 计划 §四 P0/§五 P1/§七 P3):
     voice48_sessions   会话(sessionId 键; memberId 归属)
     voice48_turns      轮次(sessionId 下的 seq 键; 时间正序)
-    voice48_bindings   会员↔信值档案绑定(P1; memberId 自然键,
-                      单向唯一——一会员绑一档案)
+    voice48_bindings   会员↔信值档案绑定(P1)
+    voice48_points     语音积分账本(P3; ledgerId 键, 只追加)
+    voice48_points_acc 会员积分余额(P3; memberId 自然键)
+    voice48_failures   失败案例池(P3; caseId 键, 只追加)
+    voice48_custom_cmds 共创指令(P3; cmdId 键, 审核流)
+    voice48_proactive  主动关怀任务(P3; taskId 键)
 
-会话记录结构:
-    {sessionId, memberId, channel(voice|text),
-     status(open|closed), startedAt, lastActiveAt}
+积分账本结构(P3, 计划 §七 ①——独立账本不直改信值):
+    {ledgerId, memberId, kind(command_done|feedback_ad
+     opted|custom_accepted|redeem), points(±), balance
+     After, refId, note, ts}
 
-轮次记录结构(P0; 音频本体永不落库——仅元信息):
-    {turnId, sessionId, seq, channel, audioMeta(JSON:
-      {durationSec, sizeBytes} 或空——转写后即删),
-     rawText(PII 脱敏后), wake(本轮是否经唤醒判定),
-     intent, action, reply, card(JSON 或空), jump,
-     latencyMs, ts}
+失败案例(P3, 计划 §七 ③):
+    {caseId, sessionId, memberId, rawText(脱敏), kind(
+     fallback|repeat|negative), ts}
 
-绑定记录结构(P1, 计划 §二 2.3——两套 ID 体系衔接):
-    {memberId(自然键), trustId, boundAt, note}
+共创指令(P3, 计划 §七 ④):
+    {cmdId, memberId, phrase, action(白名单), status(
+     pending|approved|rejected), reviewedAt, note, ts}
+
+关怀任务(P3, 计划 §七 ②):
+    {taskId, memberId, kind(repair_window), payload(
+     JSON), status(pending|sent), sentAt, ts}
 
 设计对齐(43-47号惯例):
     - 双模式存储 + 显式序列化口径(bool→0/1, dict/list→
       JSON 字符串, None→"")
-    - 会话清除级联轮次(隐私一键清除红线)
-    - 绑定可解除可改绑(零不可逆)
+    - 积分账本只追加; 会话清除级联轮次(隐私红线)
 """
 
 import json
@@ -42,17 +48,26 @@ class Xiaozhu48Repository:
     TABLE_SESSIONS = "voice48_sessions"
     TABLE_TURNS = "voice48_turns"
     TABLE_BINDINGS = "voice48_bindings"
+    TABLE_POINTS = "voice48_points"
+    TABLE_POINTS_ACC = "voice48_points_acc"
+    TABLE_FAILURES = "voice48_failures"
+    TABLE_CUSTOM = "voice48_custom_cmds"
+    TABLE_PROACTIVE = "voice48_proactive"
 
-    _INT_FIELDS = ("memberId", "seq", "trustId")
-    _FLOAT_FIELDS = ("latencyMs",)
+    _INT_FIELDS = ("memberId", "seq", "trustId", "ledgerId",
+                   "caseId", "cmdId", "taskId")
+    _FLOAT_FIELDS = ("latencyMs", "points", "balance")
 
     def __init__(self):
         self.store = get_in_memory_store()
 
     def _ensure_store(self):
-        self.store.setdefault(self.TABLE_SESSIONS, {})
-        self.store.setdefault(self.TABLE_TURNS, {})
-        self.store.setdefault(self.TABLE_BINDINGS, {})
+        for t in (self.TABLE_SESSIONS, self.TABLE_TURNS,
+                  self.TABLE_BINDINGS, self.TABLE_POINTS,
+                  self.TABLE_POINTS_ACC,
+                  self.TABLE_FAILURES, self.TABLE_CUSTOM,
+                  self.TABLE_PROACTIVE):
+            self.store.setdefault(t, {})
 
     @staticmethod
     def _serialize(record: dict) -> dict:
@@ -72,17 +87,17 @@ class Xiaozhu48Repository:
     def _deserialize(data: dict) -> dict:
         record = {}
         for k, v in data.items():
-            if k in ("memberId", "seq", "trustId"):
+            if k in Xiaozhu48Repository._INT_FIELDS:
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
                     record[k] = v
-            elif k == "latencyMs":
+            elif k in Xiaozhu48Repository._FLOAT_FIELDS:
                 try:
                     record[k] = float(v) if v != "" else 0.0
                 except (TypeError, ValueError):
                     record[k] = 0.0
-            elif k in ("audioMeta", "card"):
+            elif k in ("audioMeta", "card", "payload"):
                 try:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
@@ -252,3 +267,154 @@ class Xiaozhu48Repository:
                   if t.get("sessionId") == session_id]
         result.sort(key=lambda t: (t.get("seq") or 0))
         return result[:limit]
+
+    # --------------------------------------------------------
+    # P3 积分账本(独立于信值——入信值走 deposit 验真通道)
+    # --------------------------------------------------------
+
+    async def next_ledger_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("voice48", "points", "seq"))
+        self._ensure_store()
+        seq = self.store.get("_voice48_points_seq", 0) + 1
+        self.store["_voice48_points_seq"] = seq
+        return seq
+
+    async def points_balance(self,
+                             member_id: int) -> float:
+        if is_redis_mode():
+            client = await get_redis_client()
+            v = await client.get(_k(
+                "voice48", self.TABLE_POINTS_ACC, member_id))
+            return float(v or 0.0)
+        self._ensure_store()
+        return float(self.store[
+            self.TABLE_POINTS_ACC].get(member_id, 0.0))
+
+    async def add_points(self, record: dict) -> dict:
+        """计分入账(账本只追加 + 余额原子更新)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("voice48", self.TABLE_POINTS,
+                   record["ledgerId"]),
+                mapping=self._serialize(record))
+            await client.set(
+                _k("voice48", self.TABLE_POINTS_ACC,
+                   record["memberId"]),
+                str(record["balanceAfter"]))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_POINTS][
+            record["ledgerId"]] = dict(record)
+        self.store[self.TABLE_POINTS_ACC][
+            record["memberId"]] = record["balanceAfter"]
+        return record
+
+    async def list_points(self, member_id: int,
+                          limit: int = 50) -> list[dict]:
+        """会员积分流水(时间倒序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "voice48", self.TABLE_POINTS, "*"))
+            keys = [k for k in keys
+                    if not k.endswith(":seq")]
+            result = []
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if data:
+                        ev = self._deserialize(data)
+                        if ev.get("memberId") == member_id:
+                            result.append(ev)
+            result.sort(key=lambda e: -(
+                e.get("ledgerId") or 0))
+            return result[:limit]
+        self._ensure_store()
+        result = [dict(r) for r in
+                  self.store[self.TABLE_POINTS].values()
+                  if r.get("memberId") == member_id]
+        result.sort(key=lambda e: -(
+            e.get("ledgerId") or 0))
+        return result[:limit]
+
+    # --------------------------------------------------------
+    # P3 失败案例池 / 共创指令 / 关怀任务
+    # --------------------------------------------------------
+
+    async def _next_id(self, table: str) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("voice48", table, "seq"))
+        self._ensure_store()
+        seq = self.store.get(
+            f"_voice48_{table}_seq", 0) + 1
+        self.store[f"_voice48_{table}_seq"] = seq
+        return seq
+
+    async def save_record(self, table: str,
+                          record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("voice48", table,
+                   list(record.values())[0]),
+                mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        key = list(record.values())[0]
+        self.store[table][key] = dict(record)
+        return record
+
+    async def list_records(self, table: str,
+                           field: str = None,
+                           value=None,
+                           limit: int = 100) -> list[dict]:
+        """表记录列表(按 id 键正序; 可选字段过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "voice48", table, "*"))
+            keys = [k for k in keys
+                    if not k.endswith(":seq")]
+            result = []
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if data:
+                        rec = self._deserialize(data)
+                        if field is None \
+                                or rec.get(field) == value:
+                            result.append(rec)
+            result.sort(key=lambda r: next(
+                (v for k, v in r.items()
+                 if k.endswith("Id")), 0))
+            return result[:limit]
+        self._ensure_store()
+        result = [dict(r) for r in
+                  self.store[table].values()
+                  if field is None
+                  or r.get(field) == value]
+        result.sort(key=lambda r: next(
+            (v for k, v in r.items()
+             if k.endswith("Id")), 0))
+        return result[:limit]
+
+    async def get_record(self, table: str,
+                         record_id) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("voice48", table, record_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[table].get(record_id)
+        return dict(rec) if rec else None

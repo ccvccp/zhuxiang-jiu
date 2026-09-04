@@ -218,7 +218,7 @@ async def get_context(
         None, alias="X-Member-Id"),
 ):
     """角色上下文调试视图(等级/绑定/余额/偏好/LLM 轨态)"""
-    member_id = _require_member(x_member_id)
+    member_id = _require_member_strict(x_member_id)
     try:
         from services.xiaozhu_service import XiaozhuService
         return await XiaozhuService().get_context_view(
@@ -283,6 +283,151 @@ async def list_actions(session_id: int,
                 "sessionId": session_id,
                 "actions": actions,
                 "count": len(actions)}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P3 进化层(积分 + 主动关怀 + 失败挖掘 + 共创指令)
+# ============================================================
+
+@router.get("/points")
+async def points_view(
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """语音积分视图(余额+流水+可兑换单位)"""
+    member_id = _require_member_strict(x_member_id)
+    try:
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+        return await XiaozhuEvolutionService(
+        ).points_view(member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/points/redeem")
+async def points_redeem(
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """积分兑换——走 45号 deposit 验真申报通道(不直改
+    信值; 47号风控全链审查)"""
+    member_id = _require_member_strict(x_member_id)
+    try:
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+        return await XiaozhuEvolutionService().redeem(
+            member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/commands/custom")
+async def submit_custom(body: dict,
+                       x_member_id: str | None = Header(
+                           None, alias="X-Member-Id"),
+                       ):
+    """提交共创指令(短语→白名单 action 映射; pending 审核)
+
+    body: {phrase(2-30 字符), action(白名单)}
+    """
+    member_id = _require_member_strict(x_member_id)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409,
+                            detail="请求体需为对象")
+    try:
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+        return await XiaozhuEvolutionService(
+        ).submit_custom(
+            member_id, str(body.get("phrase") or ""),
+            str(body.get("action") or ""))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/commands/custom")
+async def custom_view(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """共创指令队列(admin——pending 审核/已上架)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+        return await XiaozhuEvolutionService(
+        ).custom_view()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/commands/custom/{cmd_id}/review")
+async def review_custom(cmd_id: int, body: dict,
+                       x_role: str = Header(
+                           default="", alias="X-Role"),
+                       ):
+    """审核共创指令(上架→贡献者+100/驳回留痕)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    if not isinstance(body, dict) \
+            or not isinstance(body.get("approve"), bool):
+        raise HTTPException(status_code=409,
+                            detail="请求体需含 approve 布尔字段")
+    try:
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+        return await XiaozhuEvolutionService(
+        ).review_custom(
+            cmd_id, body.get("approve"),
+            str(body.get("note") or ""))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/proactive/scan")
+async def proactive_scan(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """手动触发关怀扫描(admin; 调度器默认 off——
+    XIAOZHU_PROACTIVE_MODE=on 时日度自动)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+        return await XiaozhuEvolutionService(
+        ).scan_proactive()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/failures")
+async def failures_view(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """失败案例聚类视图(admin——top 未命中短语→
+    建议新增指令 pattern)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+        return await XiaozhuEvolutionService(
+        ).failures_view()
     except Exception as e:
         raise _handle(e) from e
 
