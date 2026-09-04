@@ -41,6 +41,15 @@
                                          (档案过滤+漂移
                                           标注)
 
+端点(P4, 管理面 2——X-Role: admin):
+    GET  /api/ai-gov/compliance/filing    算法备案材料
+                                         (六节汇编,
+                                          按 scorerId 或
+                                          全量)
+    GET  /api/ai-gov/compliance/report     治理审计报告
+                                         (时间窗聚合,
+                                          ?days=30)
+
 鉴权: 管理端 X-Role: admin(43/44/45号同款口径)
 
 统一口径:
@@ -48,6 +57,7 @@
     - 治理不阻断: fail-soft 铁律(守卫异常放行学习;
       健康巡检异常降级留痕不抛出)
     - 采样脱敏: 含个人标识字段的上报直接 409(最小必要红线)
+    - 数字来自数据层: 备案/报告数字可溯源, LLM 仅润色
     - KeyError → 404 / ValueError → 409(44/45号同款)
 """
 
@@ -398,6 +408,46 @@ async def list_replay_logs(
         )
         return await AiGovernanceReplayService(
         ).list_logs(scorer_id=scorerId, limit=limit)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P4 合规材料自动化(备案六节汇编 + 审计报告时间窗聚合)
+# ============================================================
+
+@router.get("/compliance/filing")
+async def build_compliance_filing(
+    scorerId: str = Query(None, description="档案过滤"
+                                    "(空=全档案汇总版)"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """算法备案材料(六节结构化汇编——数字来自数据层)"""
+    _require_admin(x_role)
+    try:
+        from services.ai_governance_compliance import (
+            AiGovernanceComplianceService,
+        )
+        return await AiGovernanceComplianceService(
+        ).build_filing(scorer_id=scorerId)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/compliance/report")
+async def build_compliance_report(
+    days: int = Query(30, ge=1, le=365,
+                      description="时间窗(天)"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """治理审计报告(时间窗聚合: 变更/告警/公平性/冻结)"""
+    _require_admin(x_role)
+    try:
+        from services.ai_governance_compliance import (
+            AiGovernanceComplianceService,
+        )
+        return await AiGovernanceComplianceService(
+        ).build_report(days=days)
     except Exception as e:
         raise _handle(e) from e
 

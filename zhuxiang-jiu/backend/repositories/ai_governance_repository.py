@@ -242,7 +242,10 @@ class AiGovernance46Repository:
     # 变更审批总线(只追加语义: 创建后仅状态字段可翻转)
     # --------------------------------------------------------
 
-    async def save_change(self, record: dict) -> dict:
+    async def save_change(self, record: dict,
+                          new: bool = True) -> dict:
+        """保存变更(new=True 创建并入列; new=False 仅更新
+        字段不重复入列——Redis LPUSH 幂等防线, 45号教训)"""
         if is_redis_mode():
             client = await get_redis_client()
             pipe = client.pipeline(transaction=False)
@@ -250,8 +253,9 @@ class AiGovernance46Repository:
                 _k("ai46", self.TABLE_CHANGES,
                    record["changeId"]),
                 mapping=self._serialize(record))
-            pipe.lpush(_k("ai46", "changes_all"),
-                       record["changeId"])
+            if new:
+                pipe.lpush(_k("ai46", "changes_all"),
+                           record["changeId"])
             await pipe.execute()
             return record
         self._ensure_store()
@@ -263,12 +267,12 @@ class AiGovernance46Repository:
             self, change_id: int,
             changes: dict) -> dict | None:
         """部分字段更新(仅审批翻转: status/reviewedBy/
-        reviewNote/error/reviewedAt)"""
+        reviewNote/error/reviewedAt——不入列)"""
         rec = await self.get_change(change_id)
         if rec is None:
             return None
         rec.update(changes)
-        return await self.save_change(rec)
+        return await self.save_change(rec, new=False)
 
     async def get_change(self, change_id: int) -> dict | None:
         if is_redis_mode():
