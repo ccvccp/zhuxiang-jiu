@@ -106,6 +106,10 @@ services:
       # ---- 43号 P5-5 GeoLite2 距离跳变阈值(mmdb 就位即启用) ----
       # 2h 窗口位移超过此值(km)触发异地跳变信号; 同城宽带 ~50km 不误杀
       - SECURITY_GEO_VELOCITY_KM=${SECURITY_GEO_VELOCITY_KM:-500}
+      # ---- 47号 验真风控(P3: 先验回流, 默认 off——画像只沉淀不干预) ----
+      # on=画像信任度回流验真通道: v2 起点折扣 + L2/L3 入分
+      # 层级乘性(restricted ×0.5 / watched ×0.8 / trusted ×1.1)
+      - RISK_PRIOR_MODE=${RISK_PRIOR_MODE:-off}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
