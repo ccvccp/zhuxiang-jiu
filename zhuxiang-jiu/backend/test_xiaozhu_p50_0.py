@@ -176,9 +176,13 @@ class TestCap:
             Voice50Service,
         )
         from services.xiaozhu_voice50_rules import (
-            CAP_OVERFLOW_RATE,
+            VOICE_RULES, CAP_OVERFLOW_RATE,
         )
         svc = Voice50Service()
+        # 封顶灌爆需突破日限(P1 enforcement)——测试期
+        # 临时放开 dailyCap, 测完复原(日限数学 P1 专项覆盖)
+        saved_cap = VOICE_RULES["voice_login"]["dailyCap"]
+        VOICE_RULES["voice_login"]["dailyCap"] = None
         # 冷启动首日下限 30
         r1 = await svc.record_behavior(
             5201, "voice_login", voiceprint="real")
@@ -227,6 +231,8 @@ class TestCap:
                f"{v['poolBalance']} vs {total_in}")
         record("封顶先于桥接(溢出独立字段)",
                all("overflowScore" in e for e in evs))
+        # 复原日限(热更新语义自检)
+        VOICE_RULES["voice_login"]["dailyCap"] = saved_cap
 
 
 class TestL1Realtime:

@@ -48,6 +48,11 @@ L1_FACTORS = {
     "voice_env_verify", "voice_antifraud_coop",
 }
 
+# 声纹系数作用域(P1 修正: 只有声纹比对类行为乘
+# 声纹系数——v2.0 L1 表验证加成列; env_verify 的
+# "一次通过 ×1.5"/coop 的"一致性 ×1.3"走 gains)
+VOICEPRINT_FACTORS = {"voice_login", "voice_confirm"}
+
 
 def voice50_mode_enabled() -> bool:
     """引擎总开关(默认 off——钩子空转, 零影响)"""
@@ -86,13 +91,19 @@ class Voice50Service:
                               group_mult: float = 1.0,
                               gains: dict = None,
                               penalty: bool = False,
+                              extra_mult: float = 1.0,
                               note: str = "") -> dict:
         """行为计分统一入口(系数链 → 封顶 → 台账+池)
 
         系数链(P0 确定性数学):
             final = base × voiceprint × quality × group
+                    × extra_mult(P1——场景折扣如"多次失败
+                    后成功 ×0.5")
         加成(P1 行为表 gains——显式命中才乘):
             gains 命中行为表 gain 键时乘入
+        日限(P1 enforcement):
+            当日该行为已计事件数 ≥ dailyCap → 不计分
+            (返回 skipped——v2.0 "日限"口径: 超限不累计)
         防刷封顶(台账层):
             当日累计 cap = max(基线×3, 首日下限);
             超限部分 ×0.1 入池(溢出绝不进信值轨道)
@@ -100,7 +111,7 @@ class Voice50Service:
         Returns:
             {evId, behavior, layer, baseScore, multipliers,
              finalScore, cappedScore, overflowScore,
-             poolBalance, frozen, ref}
+             poolBalance, frozen, ref, skipped?}
         Raises:
             KeyError: 行为未注册
             ValueError: 参数非法/会员缺省/冻结期提交
@@ -122,6 +133,32 @@ class Voice50Service:
                 "语音积分已被冻结(累计扣分超限)——"
                 "需人工复核恢复")
 
+        # ---- 日限 enforcement(P1) ----
+        daily_cap = rule.get("dailyCap")
+        if daily_cap is not None and not penalty:
+            today_events = await self.repo.list_events(
+                member_id=member_id,
+                day_key=_today_key(), limit=5000)
+            used_n = sum(
+                1 for e in today_events
+                if e.get("behavior") == behavior)
+            if used_n >= int(daily_cap):
+                logger.info(
+                    "voice50_daily_cap_skip member=%s "
+                    "behavior=%s cap=%s", member_id,
+                    behavior, daily_cap)
+                return {
+                    "skipped": "dailyCapReached",
+                    "behavior": behavior,
+                    "dailyCap": daily_cap,
+                    "finalScore": 0.0,
+                    "cappedScore": 0.0,
+                    "poolBalance": ledger.get(
+                        "poolBalance"),
+                    "note": f"日限 {daily_cap} 已满——"
+                            "超限不累计(v2.0 日限口径)",
+                }
+
         # ---- 系数链 ----
         base = float(rule["base"])
         vp_mult = self._voiceprint_mult(
@@ -129,7 +166,8 @@ class Voice50Service:
         q_mult = self._quality_mult(quality, penalty)
         g_mult = self._gains_mult(rule, gains or {})
         final = _r2(base * vp_mult * q_mult * g_mult
-                    * float(group_mult or 1.0))
+                    * float(group_mult or 1.0)
+                    * float(extra_mult or 1.0))
 
         # 扣分项(负向事件——不参与封顶截断, 直接入账)
         if penalty:
@@ -248,11 +286,13 @@ class Voice50Service:
                          rule: dict) -> float:
         """声纹系数: proxy 加成只入台账(桥接轨道 P2 硬拒)
 
-        L1 验证类行为(登录/确认/环境/反欺诈)才乘声纹系数;
-        L2/L3 行为与身份验证解耦(交互质量与贡献不受声纹影响
-        ——伦理导向而非生物特征溢价)。
+        P1 作用域修正: 仅声纹比对类行为(login/confirm——
+        v2.0 L1 验证加成列)乘声纹系数; env_verify 的
+        "一次通过 ×1.5"与 coop 的"一致性 ×1.3"走 gains
+        (环境核验/风控应答的加成与生物特征解耦)。
         """
-        if rule.get("voiceFactor") not in L1_FACTORS:
+        if rule.get("voiceFactor") not in \
+                VOICEPRINT_FACTORS:
             return 1.0
         if voiceprint == VOICEPRINT_REAL:
             return VOICEPRINT_VERIFIED
@@ -424,6 +464,93 @@ class Voice50Service:
             "note": "L1 实时轨(台账+风控域)——"
                     "不污染 45号法治因子",
         }
+
+    # --------------------------------------------------------
+    # L1 行为信号源 API(P1——供钩子/管理端/后续真实撤销流)
+    # --------------------------------------------------------
+
+    async def record_confirm_undo(self, member_id: int,
+                                   session_id: int = 0,
+                                   turn_seq: int = 0,
+                                   note: str = "confirm-undo"
+                                   ) -> dict:
+        """确认后撤销(v2.0 L1 扣分项 -1)
+
+        高敏操作语音确认后又撤销——负向事件(记事件+池
+        不动; 真实撤销信号源由后续撤销流接入, P1 提供
+        引擎 API+管理端补录通道)。
+        """
+        return await self.record_behavior(
+            member_id, "voice_confirm",
+            session_id, turn_seq, penalty=True,
+            note=str(note)[:120])
+
+    async def record_antifraud_coop(
+            self, member_id: int,
+            session_id: int = 0,
+            turn_seq: int = 0,
+            consistency_passed: bool = True,
+            note: str = "") -> dict:
+        """反欺诈配合响应(v2.0 L1——47号画像联动)
+
+        触发条件(计划 §六 L1 表): 会员被 47号画像标记
+        风险(tier ∈ watched/restricted/flagged——风控
+        问询场景)时, 如实语音应答。
+        consistency_passed: 内容一致性校验(绑定+查询
+        完成=通过 → ×1.3; 回避/矛盾 → 扣分 -3)。
+
+        Raises:
+            ValueError: 会员未被风控标记(非问询场景
+            不计配合分——防刷)
+        """
+        # 47号画像检查(绑定→trustId→tier)
+        binding = await self._get_binding(member_id)
+        tier = None
+        if binding:
+            tier = await self._risk47_tier(
+                binding.get("trustId"))
+        if tier in (None, "trusted"):
+            raise ValueError(
+                "该会员未被风控问询(47号画像 trusted/"
+                "无画像)——非问询场景不计配合分")
+        if consistency_passed:
+            return await self.record_behavior(
+                member_id, "voice_antifraud_coop",
+                session_id, turn_seq,
+                gains={"consistency": True},
+                note=str(note or "risk-query")[:80]
+                     + f"|risk47-tier:{tier}")
+        # 回避/矛盾 → 扣分
+        return await self.record_behavior(
+            member_id, "voice_antifraud_coop",
+            session_id, turn_seq, penalty=True,
+            note=str(note or "risk-query")[:80]
+                 + f"|risk47-tier:{tier}-回避")
+
+    async def _get_binding(self, member_id: int) -> dict:
+        """会员信值绑定(48号仓储——fail-soft None)"""
+        try:
+            from repositories.xiaozhu_repository import (
+                Xiaozhu48Repository,
+            )
+            return await Xiaozhu48Repository().get_binding(
+                member_id)
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    async def _risk47_tier(trust_id) -> str | None:
+        """47号画像 tier(风控域只读——异常 None)"""
+        try:
+            from services.trust_risk_profile_service \
+                import (TrustRiskProfileService,
+                        trust_level_of, tier_of)
+            profile = await TrustRiskProfileService(
+            ).get_profile(int(trust_id))
+            return tier_of(trust_level_of(
+                float(profile.get("riskEMA") or 0)))
+        except Exception:  # noqa: BLE001
+            return None
 
     # --------------------------------------------------------
     # 冻结恢复(人工复核——admin)

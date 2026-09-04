@@ -99,11 +99,14 @@ def container_engine_check(round_no: int) -> dict:
         # ref 格式
         "    out['refOk'] = r['ref'].startswith("
         "'exp-voice50-')\n"
-        # 防刷封顶(灌爆首日下限 30)
+        # 防刷封顶(灌爆首日下限 30)——临时放开日限
+        # (P1 enforcement; 测完复原)
+        "    VOICE_RULES['voice_login']['dailyCap'] = None\n"
         "    for _ in range(12):\n"
         "        r2 = await svc.record_behavior(\n"
         f"            MEMBER, 'voice_login', "
         "voiceprint='real')\n"
+        "    VOICE_RULES['voice_login']['dailyCap'] = 6\n"
         "    out['overflow'] = r2['overflowScore']\n"
         "    out['capped'] = r2['cappedScore']\n"
         # L2 pending

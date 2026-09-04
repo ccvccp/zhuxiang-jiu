@@ -553,14 +553,19 @@ class XiaozhuService:
                                   channel: str,
                                   text: str, cmd: dict,
                                   result: dict) -> None:
-        """50号P0 语音信值积分轮次钩子(计划 §四)
+        """50号P1 语音信值积分轮次钩子(计划 §四)
 
-        P0 触发行为(信号源=既有轮次事实, 无新采集):
-        - voice_login: 唤醒成功(语音通道)+会员身份
-          (声纹 proxy——确定性哈希代理口径)
+        P1 触发行为(信号源=既有轮次事实+绑定+47号画像,
+        无新采集):
+        - voice_login: 声纹验证器(双态——绑定+语音通道
+          → proxy/real verified; 否则未验证 ×0.3)
         - voice_confirm: 高敏语音确认轮(49号 voiceConfirmed)
         - voice_clear_intent: 规则轨精确命中且无澄清
-          (质量系数=置信度映射)
+        - voice_env_verify(P1 新增): ①新环境(会员跨会话
+          首轮语音成功——firstPass ×1.5) ②本会话此前
+          asr_failed ≥2 后语音成功(多次失败后成功 ×0.5)
+        - voice_antifraud_coop(P1 新增): 47号画像风险
+          tier 会员的只读查询轮(如实应答)
         fail-soft 铁律: 引擎任何异常只记日志, 不阻断语音
         主链路; VOICE50_MODE=off 时不进引擎(空转)。
         """
@@ -578,23 +583,38 @@ class XiaozhuService:
             turns = await self.repo.list_turns(session_id)
             turn_seq = (turns[-1].get("seq")
                         if turns else 0)
-            # ① 声纹登录验证(语音通道+唤醒——proxy 口径)
+            # ① 声纹登录验证(P1: 验证器双态——绑定检查)
             if channel == "voice":
+                from services.xiaozhu_voice50_voiceprint \
+                    import verify as vp_verify
+                vp = await vp_verify(
+                    member_id, session, channel,
+                    binding_repo=self.repo)
                 await svc.record_behavior(
                     member_id, "voice_login",
                     session_id, turn_seq,
-                    voiceprint="proxy",
-                    note="turn-hook")
-            # ② 敏感操作语音确认(49号 双因子语义证据)
+                    voiceprint=(vp["mode"]
+                                if vp["verified"] else ""),
+                    note=f"vp:{vp['note'][:60]}")
+                # ② 异常环境自适应验证(P1——同轮次判定)
+                await self._voice50_env_verify(
+                    svc, member_id, session, channel,
+                    turn_seq, turns, result)
+            # ③ 敏感操作语音确认(49号 双因子语义证据)
             if result.get("voiceConfirmed"):
+                from services.xiaozhu_voice50_voiceprint \
+                    import verify as vp_verify
+                vp = await vp_verify(
+                    member_id, session, channel,
+                    binding_repo=self.repo)
                 await svc.record_behavior(
                     member_id, "voice_confirm",
                     session_id, turn_seq,
-                    voiceprint="proxy",
+                    voiceprint=(vp["mode"]
+                                if vp["verified"] else ""),
                     gains={"dualFactor": True},
                     note="consent-voice-confirmed")
-            # ③ 清晰意图表达(规则轨精确命中+无澄清——
-            #    质量系数: 置信度 ≥0.8)
+            # ④ 清晰意图表达(规则轨精确命中+无澄清)
             if not result.get("clarify") \
                     and not result.get("confirmRequired"):
                 await svc.record_behavior(
@@ -602,8 +622,65 @@ class XiaozhuService:
                     session_id, turn_seq,
                     quality=0.95,
                     note=f"intent-{cmd.get('action')}")
+                # ⑤ 反欺诈配合(P1——47号风险 tier 会员
+                #    只读查询如实应答; 非 问询场景静默跳过)
+                if cmd.get("action") in (
+                        "trust.score", "trust.balance"):
+                    try:
+                        await svc.record_antifraud_coop(
+                            member_id, session_id,
+                            turn_seq,
+                            consistency_passed=True,
+                            note="risk-query-turn")
+                    except ValueError:
+                        pass   # 未被问询——不计(防刷)
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice50_turn_hook_skip: %s", exc)
+
+    async def _voice50_env_verify(
+            self, svc, member_id: int, session: dict,
+            channel: str, turn_seq: int, turns: list,
+            result: dict) -> None:
+        """异常环境自适应验证(P1 信号源——会话级判定)
+
+        场景①新环境: 会员存在历史会话(≠当前会话)且本
+        会话首轮语音成功 → firstPass ×1.5(设备/IP 变更
+        主动核验的会话代理口径);
+        场景②多次失败后成功: 本会话此前 asr_failed ≥2
+        且本轮语音成功 → extra_mult ×0.5(v2.0 降级加成)。
+        """
+        if channel != "voice":
+            return
+        # 本轮成功(非 asr_failed 回包)
+        if result.get("fallbackHint") is not None \
+                and not result.get("reply"):
+            return
+        prior_failed = sum(
+            1 for t in turns[:-1]
+            if t.get("intent") == "asr_failed")
+        if prior_failed >= 2:
+            await svc.record_behavior(
+                member_id, "voice_env_verify",
+                session.get("sessionId") or 0, turn_seq,
+                voiceprint="proxy",
+                extra_mult=0.5,
+                note=f"asr-failed×{prior_failed}-后成功")
+            return
+        # 首轮成功+跨会话(新环境)
+        if not [t for t in turns[:-1]
+                if t.get("channel") == "voice"]:
+            sessions = await self.repo.scan_sessions()
+            prior = [s for s in sessions
+                     if s.get("memberId") == member_id
+                     and s.get("sessionId")
+                     != session.get("sessionId")]
+            if prior:
+                await svc.record_behavior(
+                    member_id, "voice_env_verify",
+                    session.get("sessionId") or 0,
+                    turn_seq, voiceprint="proxy",
+                    gains={"firstPass": True},
+                    note="新环境首轮核验")
 
     async def _evolve_turn(self, session: dict,
                            raw_text: str, cmd: dict,
