@@ -645,6 +645,31 @@ class AiGovernance46Repository:
         return reports[0] if reports else None
 
     # --------------------------------------------------------
+    # 调度统计(P6 调度轨——JSON 整体存取, ai_learning config 同款)
+    # --------------------------------------------------------
+
+    async def get_scheduler_stats(self) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(
+                _k("ai46", "scheduler", "stats"))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store.get("_ai46_scheduler_stats")
+
+    async def save_scheduler_stats(self,
+                                   record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("ai46", "scheduler", "stats"),
+                json.dumps(record, ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store["_ai46_scheduler_stats"] = dict(record)
+        return record
+
+    # --------------------------------------------------------
     # 决策回放日志(P3, 只追加——决策流水不可变)
     # --------------------------------------------------------
 

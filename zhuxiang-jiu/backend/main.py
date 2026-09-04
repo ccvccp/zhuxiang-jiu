@@ -339,6 +339,10 @@ async def _on_startup():
     # (SECURITY_SCHEDULER_MODE=on 开启, 默认 off)
     from services.security_scheduler import start_scheduler as start_security
     start_security()
+    # 46号·AI治理与合规中枢: 档案健康日度巡检+新告警管理员触达
+    # (AI_GOV_SCHEDULER_MODE=on 开启, 默认 off)
+    from services.ai_governance_scheduler import start_scheduler as start_ai_gov
+    start_ai_gov()
 
 
 @app.on_event("shutdown")
@@ -373,6 +377,9 @@ async def _on_shutdown():
     # 43号·AI智能安全管理调度器
     from services.security_scheduler import stop_scheduler as stop_security_scheduler
     stop_security_scheduler()
+    # 46号·AI治理与合规中枢调度器
+    from services.ai_governance_scheduler import stop_scheduler as stop_ai_gov_scheduler
+    stop_ai_gov_scheduler()
     await close_redis_client()
     logger.info("清理完成")
 
