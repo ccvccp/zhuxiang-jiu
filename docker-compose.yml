@@ -110,6 +110,13 @@ services:
       # on=画像信任度回流验真通道: v2 起点折扣 + L2/L3 入分
       # 层级乘性(restricted ×0.5 / watched ×0.8 / trusted ×1.1)
       - RISK_PRIOR_MODE=${RISK_PRIOR_MODE:-off}
+      # ---- 48号 小竹语音中枢(P1/P3: 两轨默认 off——规则轨/手动扫描兜底) ----
+      # on=LLM 意图增强轨(白名单 action 抽参, 数字仍来自 API;
+      #     off=规则轨 track=rule 兜底, 无 key 依赖)
+      - XIAOZHU_LLM_MODE=${XIAOZHU_LLM_MODE:-off}
+      # on=主动关怀日度调度(7天/人/类型频控+日上限;
+      #     off=仅手动触发 POST /api/xiaozhu/proactive/scan)
+      - XIAOZHU_PROACTIVE_MODE=${XIAOZHU_PROACTIVE_MODE:-off}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
