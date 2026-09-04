@@ -601,11 +601,28 @@ async def _sample_replay(scorer_id: str, limit: int) -> list[dict]:
 async def run_learning_cycle(scorer_id: str) -> dict:
     """执行一轮在线学习: 待学习反馈 → Hedge 更新 → 挑战者/自动晋升
 
+    46号治理冻结守卫(fail-soft): 档案被治理审批冻结时拦截
+    学习——治理设施异常不阻断学习(只有显式冻结才干预,
+    且仅拦学习不拦评分)。
+
     Raises:
         KeyError: 未知评分器
-        ValueError: 待学习反馈不足
+        ValueError: 待学习反馈不足/治理冻结中
     """
     _require_scorer(scorer_id)
+    # 46号冻结守卫(fail-soft: 治理设施异常放行)
+    try:
+        from services.ai_governance_service import (
+            AiGovernanceService,
+        )
+        if await AiGovernanceService().is_frozen(scorer_id):
+            raise ValueError(
+                "档案治理冻结中(审批解锁后恢复学习)")
+    except ValueError:
+        raise
+    except Exception as exc:
+        logger.warning("ai46_guard_failsoft scorer=%s: %s",
+                       scorer_id, exc)
     repo = AiLearningRepository()
     async with get_lock(f"ai_learning:{scorer_id}"):
         profile = await _load_profile(scorer_id, repo)
