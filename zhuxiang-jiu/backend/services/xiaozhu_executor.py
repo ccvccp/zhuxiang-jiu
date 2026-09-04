@@ -100,6 +100,12 @@ class XiaozhuExecutor:
         # 49号P1 consent_token 池(双因子合成凭证——
         # 一次性核销, 60s TTL, 声纹代理绑定)
         self._consent_tokens: dict = {}
+        # 49号P4 consent_token 拒绝分布(进程级——
+        # 看板 FC 分区 token 拒绝分布数据源)
+        self._consent_rejects: dict = {
+            "notFound": 0, "expired": 0, "used": 0,
+            "crossUser": 0, "actionMismatch": 0,
+        }
         # P4 高敏台账计数(进程级——与令牌同口径, 重启归零)
         self._stats: dict = {
             "issued": 0, "confirmed": 0, "wrongCode": 0,
@@ -269,19 +275,24 @@ class XiaozhuExecutor:
         """
         entry = self._consent_tokens.get(token)
         if entry is None:
+            self._consent_rejects["notFound"] += 1
             raise KeyError(
                 f"consent_token {token} 不存在或已作废")
         if _now() > entry["expiresAt"]:
             self._consent_tokens.pop(token, None)
+            self._consent_rejects["expired"] += 1
             raise KeyError(
                 "consent_token 已过期(60s), 请重新双因子确认")
         if entry.get("used"):
+            self._consent_rejects["used"] += 1
             raise KeyError(
                 "consent_token 已核销(一次性)——请重新发起")
         if entry.get("memberId") != member_id:
+            self._consent_rejects["crossUser"] += 1
             raise ValueError(
                 "consent_token 跨用户复用无效(声纹绑定)")
         if entry.get("action") != action:
+            self._consent_rejects["actionMismatch"] += 1
             raise ValueError(
                 f"consent_token 与动作不匹配"
                 f"({entry.get('action')} ≠ {action})")
@@ -528,6 +539,20 @@ class XiaozhuExecutor:
         s["note"] = ("进程级计数(重启归零, 与令牌同口径); "
                      "通过率=核销成功/令牌发放")
         return s
+
+    def consent_stats(self) -> dict:
+        """consent_token 核验拒绝分布(49号P4——看板
+        FC 分区数据源; 进程级计数, 重启归零)
+
+        五类拒绝: notFound(伪造/作废)/expired(TTL 超时)/
+        used(重放)/crossUser(跨用户盗用)/actionMismatch
+        (动作劫持)——分布异常升是 token 攻击面预警。
+        """
+        r = dict(self._consent_rejects)
+        r["total"] = sum(r.values())
+        r["note"] = ("进程级计数(重启归零); 重放/跨用户/"
+                     "动作不匹配骤升=凭证攻击面预警")
+        return r
 
     # --------------------------------------------------------
     # 执行留痕回溯("我刚才做了什么")

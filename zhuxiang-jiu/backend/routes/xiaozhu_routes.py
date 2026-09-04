@@ -1,17 +1,19 @@
 """48号·小竹智能语音中枢路由(P0 感知层)
 
-端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1 + 49号P2 2 = 24):
+端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1
+     + 49号P2 2 + 49号P4 1 = 25):
     POST /api/xiaozhu/sessions              开启会话
     POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
     GET  /api/xiaozhu/sessions/{id}          会话视图(轮次历史)
     DELETE /api/xiaozhu/sessions/{id}       一键清除(级联轮次)
     GET  /api/xiaozhu/commands              指令集自描述
-    GET  /api/xiaozhu/dashboard             看板六区块(P4, admin)
+    GET  /api/xiaozhu/dashboard             看板七区块(48号P4+49号P4 FC分区, admin)
     POST /api/xiaozhu/dashboard/fairness-bridge  公平性桥接(P4)
     GET  /api/xiaozhu/fc/audit              FC审计流水(49号P0, admin)
     GET  /api/xiaozhu/privacy/budget        隐私预算视图(49号P2)
     PUT  /api/xiaozhu/privacy/preferences   隐私偏好调整(49号P2)
+    POST /api/xiaozhu/fc/redteam            红队用例集执行(49号P4, admin)
 
 鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例);
 管理端 X-Role: admin(43-47号同款口径)。
@@ -546,6 +548,29 @@ async def privacy_set_preference(
         )
         return await XiaozhuPrivacyService(
         ).set_preference(member_id, body.get("preference"))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 49号 P4 红队用例集(上线检查清单第 5 项——Prompt 注入防护)
+# ============================================================
+
+@router.post("/fc/redteam")
+async def fc_redteam_run(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """红队用例集执行(admin——四类攻击向量 14 用例跑真
+    网关: 越狱/成本篡改/伪造 token/越权诱导; breached>0
+    即上线阻断, 拒绝细节落 FC 审计流水)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_fc_redteam import (
+            XiaozhuFcRedteamService,
+        )
+        return await XiaozhuFcRedteamService().run()
     except Exception as e:
         raise _handle(e) from e
 

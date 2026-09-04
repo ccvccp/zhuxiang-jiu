@@ -1,10 +1,10 @@
 /**
- * 48号·小竹智能语音中枢看板(P0-P4 六区块)
+ * 48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
  * 范式: js/trust-risk-dashboard.js(47号)平移——ES5、localStorage
  * 连接、区块化加载(手动刷新, 不进自动刷新)。
  * 依赖后端: /api/xiaozhu/*(48号 xiaozhu_routes; admin)
  * 区块: ①使用总览 ②指令命中 ③高敏台账 ④积分账本
- *       ⑤共创队列 ⑥治理桥接
+ *       ⑤共创队列 ⑥治理桥接 ⑦FC 分区(49号P4)
  */
 'use strict';
 
@@ -251,13 +251,53 @@ async function loadAll() {
             document.getElementById('fairnessNote').textContent =
                 f.note || '';
         }
+
+        // ⑦ FC 分区(49号P4)
+        var fc = zones.fc || {};
+        if (fc.error) {
+            cells('ovFc', [{ k: 'FC 分区', v: '区块异常',
+                cls: 'red' }]);
+        } else {
+            var fr = fc.fallbackRate;
+            cells('ovFc', [
+                { k: 'FC 调用量', v: fc.calls || 0, cls: 'blue' },
+                { k: '失败降级率', v: pct(fr),
+                  cls: fr != null && fr > 30 ? 'red' : 'green' },
+                { k: '成本合计', v: fc.privacyCostTotal || 0,
+                  cls: 'yellow' },
+                { k: '预算账户', v: (fc.budget || {}).accounts || 0 },
+                { k: '当日累计消耗',
+                  v: (fc.budget || {}).usedTodayTotal || 0 },
+                { k: 'token 拒绝总数',
+                  v: (fc.consentRejects || {}).total || 0,
+                  cls: ((fc.consentRejects || {}).total || 0) > 0
+                      ? 'yellow' : 'gray' },
+            ]);
+            document.getElementById('fcNote').textContent =
+                fc.note || '';
+            var rej = fc.consentRejects || {};
+            var rejRows = [
+                ['notFound(伪造/作废)', rej.notFound],
+                ['expired(超时)', rej.expired],
+                ['used(重放)', rej.used],
+                ['crossUser(跨用户)', rej.crossUser],
+                ['actionMismatch(动作劫持)', rej.actionMismatch],
+            ];
+            document.getElementById('rejectList').innerHTML =
+                rejRows.map(function (r) {
+                    return '<tr><td>' + esc(r[0]) + '</td><td>' +
+                        esc(r[1] || 0) + '</td></tr>';
+                }).join('');
+            document.getElementById('fcToolChips').innerHTML =
+                kindChips(fc.byKind) + ' · ' + kindChips(fc.byTool);
+        }
     } catch (e) {
         showError(e.message);
     }
 }
 
 /* ============================================================
- * 干预闭环(共创审核 / 公平性桥接)
+ * 干预闭环(共创审核 / 公平性桥接 / 红队复跑)
  * ============================================================ */
 
 async function reviewCustom(cmdId, approve) {
@@ -284,6 +324,27 @@ async function runFairnessBridge() {
             { method: 'POST', headers: ADMIN_HEADERS }, '公平性桥接');
         showInfo('桥接完成: 上报 ' + (b.bridged || 0) + ' 组(' +
                  ((b.groups || []).join(', ') || '无有效分组') + ')');
+        loadAll();
+    } catch (e) {
+        showError(e.message);
+    }
+}
+
+async function runRedteam() {
+    try {
+        showInfo('红队用例集执行中(四类向量 14 用例跑真网关)…');
+        var b = await fetchJson(api('/api/xiaozhu/fc/redteam'),
+            { method: 'POST', headers: ADMIN_HEADERS }, '红队复跑');
+        if ((b.breached || 0) > 0) {
+            var names = (b.cases || []).filter(function (c) {
+                return !c.blocked;
+            }).map(function (c) { return c.caseId; }).join(', ');
+            showError('红队发现 ' + b.breached + ' 例突破(' +
+                     names + ')——上线阻断, 须修复后重跑');
+        } else {
+            showInfo('红队复跑完成: ' + (b.blocked || 0) + '/' +
+                     (b.total || 0) + ' 全部阻断(breached=0)');
+        }
         loadAll();
     } catch (e) {
         showError(e.message);

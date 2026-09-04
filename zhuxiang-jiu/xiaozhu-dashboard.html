@@ -1,15 +1,18 @@
 <!--
-    48号·小竹智能语音中枢看板(P0-P4 六区块)
+    48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
     页面: xiaozhu-dashboard.html(配套脚本 js/xiaozhu-dashboard.js)
     依赖: css/style.css(主题变量) / 后端 48号 xiaozhu_routes
     后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
-    数据源: GET /api/xiaozhu/dashboard(六区块聚合, 手动刷新;
+    数据源: GET /api/xiaozhu/dashboard(七区块聚合, 手动刷新;
             X-Role: admin)
     区块: ①使用总览(会话/指令量/直达率/语音占比)
           ②指令命中(action 排行+兜底率) ③高敏操作台账
           ④积分账本(发放/兑换/余额) ⑤共创队列(审核+失败聚类)
           ⑥治理桥接(等级直达率→46号公平性)
-    红线: 反语音霸权——不用语音不扣分; 高敏不可纯语音
+          ⑦FC 分区(49号P4: 调用量/失败降级/预算消耗/
+            token 拒绝分布 + 红队复跑)
+    红线: 反语音霸权——不用语音不扣分; 高敏不可纯语音;
+          FC 防御不在模型层终止
 -->
 <html lang="zh-CN">
 <head>
@@ -77,7 +80,7 @@
 <body>
 <header class="dash-banner">
     <h1>48号·小竹语音中枢看板</h1>
-    <p>感知 · 认知 · 执行 · 进化 · 治理（P0-P4 全量六区块）</p>
+    <p>感知 · 认知 · 执行 · 进化 · 治理（P0-P4 全量 + 49号P4 FC 分区）</p>
 </header>
 
 <div class="container">
@@ -91,6 +94,8 @@
                 <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
                 <button class="dash-btn ghost" onclick="runFairnessBridge()">
                     公平性桥接</button>
+                <button class="dash-btn ghost" onclick="runRedteam()">
+                    红队复跑</button>
                 <span id="lastUpdate" style="font-size:11px;color:#999"></span>
             </div>
             <div id="errBar" class="dash-error"></div>
@@ -181,6 +186,33 @@
                     </div>
                     <div style="margin-top:8px;font-size:11px;color:#888"
                         id="fairnessNote"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑦ FC 分区(49号P4 可信函数调用) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑦ FC 可信函数调用（49号P4：调用量 / 失败降级 / 预算消耗 / token 拒绝分布）</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovFc" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="fcNote"></div>
+                </div>
+                <div>
+                    <div style="max-height:200px;overflow:auto">
+                        <table class="dash-table">
+                            <thead><tr>
+                                <th>token 拒绝类型</th><th>计数</th>
+                            </tr></thead>
+                            <tbody id="rejectList"><tr><td colspan="2"
+                                class="dash-empty">暂无拒绝记录</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="fcToolChips"></div>
                 </div>
             </div>
         </div>

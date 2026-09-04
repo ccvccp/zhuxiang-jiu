@@ -14,8 +14,11 @@
        直达率差异 > 20% 触发 46号 flagged 人工复核)
 
 设计对齐(46号 P5/47号 P4 看板范式):
-    - 单次 GET 六区块聚合 + fail-soft 分区
+    - 单次 GET 分区聚合 + fail-soft 分区
       (单区块异常不阻断看板, 记 zoneErrors)
+    - 49号P4 新增 FC 分区: 调用量/失败降级/预算消耗/
+      token 拒绝分布(数据源=FC 审计流水+预算账户+
+      executor 进程级拒绝计数)
     - 桥接走 46号 submit_samples 显式上报(group 标签,
       无个人标识字段——脱敏红线)
     - 46号 28 档案断言零改动红线: 48号专属采样档案
@@ -57,7 +60,8 @@ class XiaozhuDashboardService:
         self.repo = repo or Xiaozhu48Repository()
 
     async def build(self) -> dict:
-        """六区块聚合(单次 GET, fail-soft 分区)"""
+        """七区块聚合(单次 GET, fail-soft 分区——49号P4
+        新增 FC 分区)"""
         zones = {}
         errors = []
 
@@ -77,6 +81,9 @@ class XiaozhuDashboardService:
         await _zone("points", self._zone_points)
         await _zone("cocreate", self._zone_cocreate)
         await _zone("fairness", self._zone_fairness)
+        # 49号P4: FC 分区(可信函数调用——调用量/失败降级/
+        # 预算消耗/token 拒绝分布)
+        await _zone("fc", self._zone_fc)
 
         return {
             "success": True,
@@ -88,15 +95,19 @@ class XiaozhuDashboardService:
                 "积分独立账本: 入信值走 45号 deposit 验真",
                 "共创只映射白名单 action(不新建执行器)",
                 "公平性桥接无个人标识字段(脱敏红线)",
+                "FC 防御不在模型层终止(注册表静态值+三重校验)",
             ),
             "intervention": {
                 "note": "共创审核走既有端点: 看板一键上架/"
                         "驳回 → POST /api/xiaozhu/commands/"
-                        "custom/{cmdId}/review",
+                        "custom/{cmdId}/review; 红队复跑 → "
+                        "POST /api/xiaozhu/fc/redteam",
                 "reviewEndpoint": "POST /api/xiaozhu/commands"
                                   "/custom/{cmdId}/review",
                 "bridgeEndpoint": "POST /api/xiaozhu/"
                                   "dashboard/fairness-bridge",
+                "redteamEndpoint": "POST /api/xiaozhu/"
+                                   "fc/redteam",
             },
             "generatedAt": ts(),
         }
@@ -240,6 +251,53 @@ class XiaozhuDashboardService:
             "note": "人工触发桥接(POST fairness-bridge)——"
                     "等级间直达率差异 >20% 由 46号 flagged "
                     "提示人工复核(防语音层歧视)",
+        }
+
+    async def _zone_fc(self) -> dict:
+        """⑦ FC 分区(49号P4——调用量/失败降级/预算消耗/
+        token 拒绝分布)
+
+        数据源: voice48_fc_audit 审计流水(持久) +
+        voice48_privacy_budget 预算账户(持久) +
+        executor consent_token 拒绝分布(进程级)。
+        """
+        records = await self.repo.list_records(
+            self.repo.TABLE_FC_AUDIT, limit=5000)
+        by_kind: dict = {}
+        by_tool: dict = {}
+        cost_total = 0.0
+        for r in records:
+            k = r.get("kind") or "unknown"
+            by_kind[k] = by_kind.get(k, 0) + 1
+            t = r.get("toolName") or "unknown"
+            by_tool[t] = by_tool.get(t, 0) + 1
+            cost_total += float(r.get("privacyCost") or 0)
+        total = len(records)
+        fallback_n = by_kind.get("fallback", 0)
+        # 预算账户聚合(会员维度消耗)
+        budgets = await self.repo.list_records(
+            self.repo.TABLE_PRIVACY, limit=5000)
+        used_total = sum(float(b.get("usedToday") or 0)
+                        for b in budgets)
+        # token 拒绝分布(进程级——重启归零口径)
+        from services.xiaozhu_executor import get_executor
+        consent = get_executor().consent_stats()
+        return {
+            "calls": total,
+            "byKind": by_kind,
+            "byTool": by_tool,
+            "fallbackRate": (round(
+                fallback_n / total * 100, 1)
+                if total else None),
+            "privacyCostTotal": round(cost_total, 2),
+            "budget": {
+                "accounts": len(budgets),
+                "usedTodayTotal": round(used_total, 2),
+            },
+            "consentRejects": consent,
+            "note": "失败降级率/拒绝分布骤升=攻击面或"
+                    "数据源异常预警(红队 RT-07~11 与 "
+                    "notFound/used/crossUser 计数对应)",
         }
 
     # --------------------------------------------------------
