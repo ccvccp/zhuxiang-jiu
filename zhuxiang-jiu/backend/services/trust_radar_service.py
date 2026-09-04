@@ -413,11 +413,16 @@ class TrustRadarService:
                              factor: str, observed: float,
                              peer_baseline: float,
                              evidence: str, summary: str = "",
-                             sources: list = None) -> dict:
+                             sources: list = None,
+                             voluntary=None) -> dict:
         """自愿存证上传(AI 先验真 → 因果净贡献 → 入库)
 
         净贡献口径: observed 为角色申报的绝对量, 因果效应
         估计剔除群体自然增长后按 0-100 折算因子增量。
+
+        P6 UEBA 自愿披露激励(Value-UEBA 本体对齐):
+            voluntary=True 时正向 delta ×1.05(鼓励自愿
+            披露——验真前置已通过); 缺省 None 不激励。
 
         Raises:
             KeyError: 档案不存在
@@ -476,6 +481,14 @@ class TrustRadarService:
         # 折算因子增量: 净贡献线性映射, 上限 +30(存证单次)
         delta = min(30.0, net / 10.0)
 
+        # P6 UEBA 自愿披露激励(正向才激励——防"认领扣分";
+        # None/False 不激励, 既有调用零影响)
+        from services.trust_ueba_service import voluntary_bonus
+        bonus_mult, bonus_note = voluntary_bonus(
+            voluntary, positive=delta > 0)
+        if bonus_mult > 1.0:
+            delta = round(delta * bonus_mult, 1)
+
         # 显式落库存证事件(depositId 稳定——status 可查),
         # 再走因子增量(record_event 只管因子更新)
         await self.repo.save_event({
@@ -517,6 +530,8 @@ class TrustRadarService:
                 "checks": v["checks"],
                 "netContribution": net,
                 "delta": round(delta, 1), "applied": True,
+                "voluntaryBonus": bonus_mult,
+                "voluntaryNote": bonus_note,
                 "score": result.get("score"),
                 "tvIssued": round(net / 2.0, 2) if (
                     layer == "L3" and net > 0

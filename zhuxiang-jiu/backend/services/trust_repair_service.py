@@ -346,6 +346,24 @@ class TrustRepairService:
         raw_gain = repair_gain(alpha, verified_items,
                                authenticity)
 
+        # P6 UEBA 再犯风险守门(Value-UEBA 本体对齐):
+        # 同因子历史违规序列(含当前)→ risk=n/(n+2);
+        # risk>0.7(第 5 次起)修复效率 ×0.5——惯犯通道收窄
+        from services.trust_ueba_service import recurrence_gate
+        same_factor_violations = sum(
+            1 for e in await self.repo.list_events_by_trust(
+                trust_id)
+            if e.get("factor") == violation_factor
+            and (e.get("delta") or 0) < 0)
+        recurrence_risk, eff, eff_note = recurrence_gate(
+            same_factor_violations)
+        if eff_note:
+            raw_gain = round(raw_gain * eff, 1)
+            logger.info("trust45_repair_recurrence "
+                        "trustId=%s factor=%s risk=%s "
+                        "eff=%s", trust_id,
+                        violation_factor, recurrence_risk, eff)
+
         # 三重校验①: 天花板 = |违规扣分| × α
         cap = abs(v_delta) * alpha
         gain = round(min(raw_gain, cap), 1)
@@ -409,6 +427,9 @@ class TrustRepairService:
             "applied": True, "gain": gain,
             "rawGain": raw_gain,
             "cap": round(cap, 1), "alpha": alpha,
+            "recurrenceRisk": recurrence_risk,
+            "repairEfficiency": eff,
+            "recurrenceNote": eff_note,
             "factorDelta": round(factor_delta, 1),
             "beforeScore": before_score,
             "afterScore": result.get("score"),

@@ -317,11 +317,21 @@ class TrustProfileService:
                            factor: str, delta: float,
                            severity: str = "general",
                            source: str = "manual",
-                           summary: str = "") -> dict:
+                           summary: str = "",
+                           *,
+                           consistency=None,
+                           self_promotion=None) -> dict:
         """记录行为事件 → 因子增量更新 → 熔断计数维护 → 重算
 
         P0 数据灌入通道(管理端 manual); P1 起由雷达/存证通道
         以 source=radar|probe|deposit 接管。
+
+        P6 UEBA 守门(Value-UEBA 本体对齐, 显式参数激活):
+            consistency: L2 跨平台一致性 0-1(<0.3 伪善预警
+                ——正向 delta ×0.5)
+            self_promotion: L3 宣传占比 0-1(>0.7 作秀降权
+                ——正向 delta ×0.5)
+            缺省 None 不守门(既有调用零影响)。
 
         Raises:
             KeyError: trustId 不存在
@@ -350,6 +360,20 @@ class TrustProfileService:
             raise ValueError(
                 f"非法 severity: {severity}"
                 f"(合法值: {'/'.join(SEVERITY_VALUES)})")
+
+        # P6 UEBA 守门(仅正向 delta——扣分不折损,
+        # 伪善只影响加分; None 不守门)
+        from services.trust_ueba_service import (
+            apply_event_gates,
+        )
+        gated = apply_event_gates(
+            layer, delta, consistency=consistency,
+            self_promotion=self_promotion)
+        ueba_gates = gated["gates"]
+        if ueba_gates:
+            delta = gated["delta"]
+            summary = (f"{summary} [{'; '.join(
+                g['note'] for g in ueba_gates)}]").strip()
 
         # 事件落库(审计流水; P4 起补 scoreBefore/After 归因口径)
         event_id = await self.repo.next_event_id()
@@ -380,6 +404,8 @@ class TrustProfileService:
             "scoreAfter": result.get("score") or 0,
             "ts": ts(),
         })
+        # P6 UEBA 守门留痕(空列表=未守门/无命中)
+        result["uebaGates"] = ueba_gates
         return result
 
     async def compute_score(self, trust_id: int) -> dict:

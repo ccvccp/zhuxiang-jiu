@@ -156,7 +156,8 @@ async def record_role_event(
 
     body: {layer: L1|L2|L3, factor, delta ∈ [-100,100],
            severity?: general|severe|criminal(仅 L1 语义),
-           summary?}
+           summary?, consistency?(P6 UEBA L2 伪善预警 0-1),
+           selfPromotion?(P6 UEBA L3 作秀降权 0-1)}
     P1 起由 AI 雷达/授权探针/自愿存证以 source 接管, 本端点
     保留为 manual 通道。
     """
@@ -171,7 +172,9 @@ async def record_role_event(
             delta=body.get("delta") or 0,
             severity=str(body.get("severity") or "general"),
             source="manual",
-            summary=str(body.get("summary") or ""))
+            summary=str(body.get("summary") or ""),
+            consistency=body.get("consistency"),
+            self_promotion=body.get("selfPromotion"))
     except Exception as e:
         raise _handle(e) from e
 
@@ -235,7 +238,9 @@ async def submit_deposit(body: dict):
 
     body: {trustId, layer, factor, observed(申报绝对量),
     peerBaseline(同类角色群体基线), evidence(证据内容),
-    summary?, sources?}——验真不过不入分(孤证/置信度不足)。
+    summary?, sources?,
+    voluntary?(P6 UEBA 自愿披露激励——正向 delta ×1.05)}
+    ——验真不过不入分(孤证/置信度不足)。
     """
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
@@ -249,7 +254,8 @@ async def submit_deposit(body: dict):
             peer_baseline=body.get("peerBaseline") or 0,
             evidence=str(body.get("evidence") or ""),
             summary=str(body.get("summary") or ""),
-            sources=body.get("sources"))
+            sources=body.get("sources"),
+            voluntary=body.get("voluntary"))
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
