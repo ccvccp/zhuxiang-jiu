@@ -1,6 +1,6 @@
 """48号·小竹智能语音中枢路由(P0 感知层)
 
-端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1 = 22):
+端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1 + 49号P2 2 = 24):
     POST /api/xiaozhu/sessions              开启会话
     POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
@@ -10,6 +10,8 @@
     GET  /api/xiaozhu/dashboard             看板六区块(P4, admin)
     POST /api/xiaozhu/dashboard/fairness-bridge  公平性桥接(P4)
     GET  /api/xiaozhu/fc/audit              FC审计流水(49号P0, admin)
+    GET  /api/xiaozhu/privacy/budget        隐私预算视图(49号P2)
+    PUT  /api/xiaozhu/privacy/preferences   隐私偏好调整(49号P2)
 
 鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例);
 管理端 X-Role: admin(43-47号同款口径)。
@@ -500,6 +502,50 @@ async def fc_audit_view(
         )
         return await XiaozhuFcGateway().audit_view(
             limit=limit, member_id=member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 49号 P2 隐私预算(会员自主——知情权与控制权)
+# ============================================================
+
+@router.get("/privacy/budget")
+async def privacy_budget_view(
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """隐私预算视图(会员——余额/偏好/近 7 日消耗)"""
+    member_id = _require_member_strict(x_member_id)
+    try:
+        from services.xiaozhu_privacy_service import (
+            XiaozhuPrivacyService,
+        )
+        return await XiaozhuPrivacyService(
+        ).budget_view(member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.put("/privacy/preferences")
+async def privacy_set_preference(
+    body: dict,
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """调整隐私偏好(0.5-2.0——会员自主, 与信值等级无关)"""
+    member_id = _require_member_strict(x_member_id)
+    if not isinstance(body, dict) \
+            or "preference" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 preference 数值字段")
+    try:
+        from services.xiaozhu_privacy_service import (
+            XiaozhuPrivacyService,
+        )
+        return await XiaozhuPrivacyService(
+        ).set_preference(member_id, body.get("preference"))
     except Exception as e:
         raise _handle(e) from e
 

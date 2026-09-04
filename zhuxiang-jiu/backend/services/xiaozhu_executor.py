@@ -61,7 +61,7 @@ SAFE_READONLY = {"product.new", "product.price",
                  "trust.exchange", "trust.repair",
                  "promo.query", "nav.page",
                  "chat.human", "xiaozhu.help",
-                 "trust.bind"}
+                 "trust.bind", "privacy.budget"}
 SAFE_WRITE = {"cart.submit"}          # 一般写: 执行+播报
 SENSITIVE = {"trust.convert",        # 高敏: confirmToken 流
              "repair.execute"}       # 49号P0: 修复执行同高敏流

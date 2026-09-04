@@ -203,6 +203,13 @@ COMMANDS = [
         "examples": ["小竹，你能干什么"],
     },
     {
+        "action": "privacy.budget",
+        "label": "隐私预算",
+        "patterns": ["隐私预算", "隐私余额", "隐私偏好",
+                     "还剩多少隐私", "隐私设置"],
+        "examples": ["小竹，我的隐私预算"],
+    },
+    {
         "action": "cart.submit",
         "label": "结算下单",
         "patterns": ["结算", "下单", "买下", "提交订单",
@@ -624,6 +631,9 @@ class XiaozhuService:
                 return self._exec_human()
             if action == "xiaozhu.help":
                 return self._exec_help()
+            if action == "privacy.budget":
+                return await self._exec_privacy_budget(
+                    member_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("voice48_exec_fail %s: %s",
                            action, exc)
@@ -1024,6 +1034,36 @@ class XiaozhuService:
                                     or [])[:3]}
                          for p in plans[:3]]},
             "jump": "/trust-dashboard.html",
+        }
+
+    async def _exec_privacy_budget(self,
+                                    member_id: int) -> dict:
+        """49号P2 "我的隐私预算"(余额/偏好/近 7 日消耗)"""
+        from services.xiaozhu_privacy_service import (
+            XiaozhuPrivacyService,
+        )
+        v = await XiaozhuPrivacyService().budget_view(
+            member_id)
+        reply = (f"今日隐私预算: 剩余 {v['remaining']}"
+                 f"(限额 {v['effectiveLimit']}, 偏好 "
+                 f"{v['preference']})——预算只按您的自主"
+                 f"偏好分级, 只读工具零成本不受限")
+        history = v.get("history") or []
+        if history:
+            reply += (f"; 近 7 日消耗: "
+                      + "、".join(
+                          f"{h.get('dayKey')} 用 {h.get('used')}"
+                          for h in history[-3:]))
+        return {
+            "reply": reply,
+            "card": {"type": "privacy_budget",
+                     "subject": "隐私预算",
+                     "remaining": v["remaining"],
+                     "effectiveLimit": v["effectiveLimit"],
+                     "preference": v["preference"],
+                     "usedToday": v["usedToday"],
+                     "history": history},
+            "jump": None,
         }
 
     def _exec_nav(self, text: str) -> dict:

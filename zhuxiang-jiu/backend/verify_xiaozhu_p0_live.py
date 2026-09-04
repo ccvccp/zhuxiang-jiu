@@ -103,8 +103,8 @@ def main():
            str(body)[:70])
     ok, (code, body) = call("GET", "/api/xiaozhu/commands")
     cmds = body.get("commands") or []
-    record("指令集自描述(12 条)",
-           code == 200 and len(cmds) == 12
+    record("指令集自描述(13 条)",
+           code == 200 and len(cmds) == 13
            and body.get("wakeWords") == ["小竹"],
            str(len(cmds)))
 

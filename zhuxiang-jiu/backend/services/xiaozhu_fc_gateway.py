@@ -15,7 +15,10 @@ P0 口径(骨架) + P1 升级(双因子):
       confirmToken 挑战流(语音确认词+屏幕码双因子发起);
       校验含 TTL≤60s/一次性/action 匹配/声纹代理绑定
       (跨用户复用无效)
-    - 校验② 隐私预算: 占位放行(P2 接管)
+    - 校验② 隐私预算(P2 真实现): 原子检查+扣减
+      (voice48_privacy_budget 表; 超限 429 话术;
+      只读零成本永不降级; 预算只按用户自主偏好
+      分级——绝不与信值等级挂钩)
     - 校验③ explainability_ref: 占位(P3 接管)
     - 审计: 完整落地(六字段铁律 + consent_token hash)
 
@@ -96,7 +99,7 @@ class XiaozhuFcGateway:
                             str(token), member_id, action)
                     consent_hash = verified[
                         "consentTokenHash"]
-                    self._check_privacy_budget(
+                    await self._check_privacy_budget(
                         member_id, tool["privacyCost"])
                     result = await executor \
                         ._exec_sensitive(action, params,
@@ -114,8 +117,8 @@ class XiaozhuFcGateway:
                             "consentDirect": True}
                 # 无 token → 走 confirmToken 挑战流
                 # (双因子发起: 语音确认词+屏幕码)
-            # 校验② 隐私预算(P0 占位放行——P2 接管)
-            self._check_privacy_budget(
+            # 校验② 隐私预算(P2 真实现——原子检查+扣减)
+            await self._check_privacy_budget(
                 member_id, tool["privacyCost"])
             # 执行(48号沙箱——幂等/冷静期全继承)
             result = await executor.execute(
@@ -130,6 +133,7 @@ class XiaozhuFcGateway:
             return result
         except Exception as exc:  # noqa: BLE001
             # 失败安全降级铁律: 不编结果——预定义话术
+            # (预算超限话术透传——用户须知剩余/需求)
             latency = round((time.monotonic() - started)
                             * 1000, 1)
             await self._audit(session, action, params,
@@ -138,8 +142,13 @@ class XiaozhuFcGateway:
                               error=str(exc)[:120])
             logger.warning("voice49_fc_fallback %s: %s",
                            action, exc)
+            msg = safe_message_of(action)
+            if isinstance(exc, ValueError) \
+                    and "隐私预算不足" in str(exc):
+                msg = (f"{exc}。如需协助, 可说「转人工"
+                       f"客服」由真人客服为您处理")
             return {"executed": False, "fallback": True,
-                    "safeMessage": safe_message_of(action),
+                    "safeMessage": msg,
                     "action": action}
 
     # --------------------------------------------------------
@@ -167,20 +176,23 @@ class XiaozhuFcGateway:
             str(token).encode("utf-8")).hexdigest()[:32]
 
     # --------------------------------------------------------
-    # 校验② 隐私预算(P0 占位放行——P2 接管)
+    # 校验② 隐私预算(P2 真实现——原子检查+扣减)
     # --------------------------------------------------------
 
     @staticmethod
-    def _check_privacy_budget(member_id: int,
-                              cost: float) -> None:
-        """隐私预算感知校验(P0 占位: 一律放行——P2 落地
-        voice48_privacy_budget 表+原子扣减后接管)
+    async def _check_privacy_budget(member_id: int,
+                                    cost: float) -> dict:
+        """隐私预算感知校验(P2 真实现)
 
-        P2 落地后: 超限 raise ValueError(429 话术——
-        "隐私预算不足(剩余 X, 需 Y), 请在设置中调整
-        隐私偏好或明日再试"); 只读零成本永不降级。
+        超限 raise ValueError(429 话术——"隐私预算不足
+        (剩余 X, 需 Y), 请在设置中调整隐私偏好或明日再试");
+        只读零成本永不降级(check_and_spend 内部短路)。
         """
-        return None
+        from services.xiaozhu_privacy_service import (
+            XiaozhuPrivacyService,
+        )
+        return await XiaozhuPrivacyService(
+            repo=None).check_and_spend(member_id, cost)
 
     # --------------------------------------------------------
     # 审计(六字段铁律——P0 完整交付)

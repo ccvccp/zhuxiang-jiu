@@ -238,7 +238,7 @@ class TestCommands:
         record("帮助直达",
                (r["card"] or {}).get("type") == "help"
                and len((r["card"] or {}).get("items")
-                       or []) == 12,
+                       or []) == 13,
                str((r["card"] or {}).get("items"))[:50])
 
         # 未匹配 → general 兜底
@@ -363,7 +363,7 @@ class TestHttp:
         body = resp.json()
         record("GET commands 200",
                resp.status_code == 200
-               and len(body.get("commands") or []) == 12
+               and len(body.get("commands") or []) == 13
                and body.get("wakeWords") == ["小竹"],
                str(len(body.get("commands") or [])))
 

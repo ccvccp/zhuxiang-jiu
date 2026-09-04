@@ -160,6 +160,20 @@ TOOL_REGISTRY = {
         "requiresConsent": False,
         "safeMessage": "帮助信息暂时不可用。",
     },
+    "privacy.budget": {
+        "operationId": "get_privacy_budget",
+        "summary": "查询隐私预算余额与偏好",
+        "description": "【只读】当用户问「我的隐私预算/隐私"
+                      "偏好」时调用, 返回余额/偏好/近 7 日"
+                      "消耗。❌ 预算只按用户自主偏好分级, "
+                      "禁止与信值等级挂钩(公平性红线)。"
+                      "🔒 privacy_cost: 0(知情权零成本——"
+                      "永不降级)。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.0,
+        "requiresConsent": False,
+        "safeMessage": "预算信息暂时读取失败, 请稍后再试。",
+    },
     # ---------- 写(2) ----------
     "trust.bind": {
         "operationId": "bind_trust_profile",

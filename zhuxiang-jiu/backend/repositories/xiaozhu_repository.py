@@ -12,6 +12,8 @@
     voice48_proactive  主动关怀任务(P3; taskId 键)
     voice48_fc_audit   FC 调用审计流水(49号P0; fcId 键,
                       只追加——六字段铁律)
+    voice48_privacy_budget 会员隐私预算(49号P2;
+                      memberId 自然键——日预算/偏好/日切重置)
 
 积分账本结构(P3, 计划 §七 ①——独立账本不直改信值):
     {ledgerId, memberId, kind(command_done|feedback_ad
@@ -57,12 +59,14 @@ class Xiaozhu48Repository:
     TABLE_CUSTOM = "voice48_custom_cmds"
     TABLE_PROACTIVE = "voice48_proactive"
     TABLE_FC_AUDIT = "voice48_fc_audit"
+    TABLE_PRIVACY = "voice48_privacy_budget"
 
     _INT_FIELDS = ("memberId", "seq", "trustId", "ledgerId",
                    "caseId", "cmdId", "taskId", "fcId",
                    "sessionId")
     _FLOAT_FIELDS = ("latencyMs", "points", "balance",
-                     "privacyCost")
+                     "privacyCost", "dailyBudget",
+                     "usedToday")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -73,7 +77,8 @@ class Xiaozhu48Repository:
                   self.TABLE_POINTS_ACC,
                   self.TABLE_FAILURES, self.TABLE_CUSTOM,
                   self.TABLE_PROACTIVE,
-                  self.TABLE_FC_AUDIT):
+                  self.TABLE_FC_AUDIT,
+                  self.TABLE_PRIVACY):
             self.store.setdefault(t, {})
 
     @staticmethod
@@ -109,6 +114,15 @@ class Xiaozhu48Repository:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
                     record[k] = {}
+            elif k == "history":
+                # 49号P2: 隐私预算近 7 日消耗(list)
+                try:
+                    parsed = json.loads(v) if v else []
+                    record[k] = (parsed
+                                 if isinstance(parsed, list)
+                                 else [])
+                except (TypeError, ValueError):
+                    record[k] = []
             elif k == "wake":
                 record[k] = v in (1, "1", True, "True", "true")
             else:
@@ -153,6 +167,35 @@ class Xiaozhu48Repository:
         return self.store[
             self.TABLE_BINDINGS].pop(member_id,
                                      None) is not None
+
+    # --------------------------------------------------------
+    # 49号P2 隐私预算(memberId 自然键——日切重置)
+    # --------------------------------------------------------
+
+    async def get_privacy_budget(self,
+                                  member_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k(
+                "voice48", self.TABLE_PRIVACY, member_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_PRIVACY].get(member_id)
+        return dict(rec) if rec else None
+
+    async def save_privacy_budget(self,
+                                  record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("voice48", self.TABLE_PRIVACY,
+                   record["memberId"]),
+                mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_PRIVACY][
+            record["memberId"]] = dict(record)
+        return record
 
     # --------------------------------------------------------
     # 会话
