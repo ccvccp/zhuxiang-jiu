@@ -1,12 +1,13 @@
 """46号·AI 治理与合规中枢数据访问层(双模式: 内存 + Redis)
 
-表清单(前缀 ai46, 计划 §三/§四/§五):
+表清单(前缀 ai46, 计划 §三/§四/§五/§六):
     ai46_registry             AI 资产注册中心(scorerId 自然键, P0)
     ai46_changes              变更审批总线(P0)
     ai46_health_snapshots     健康巡检快照(P1, 只追加)
     ai46_alerts               治理告警队列(P1, 当日同键去重)
     ai46_fairness_samples     公平性采样(P2, 只追加)
     ai46_fairness_reports     公平性审计报告(P2, 只追加)
+    ai46_replay_log           决策日志总线(P3, 只追加)
 
 注册中心记录结构:
     {govId, scorerId, label, module, batch,
@@ -42,6 +43,12 @@
     {reportId, scorerId, generatedAt, sampleCount,
      groupCount, flagged, meanDiffRatio, passRateGap,
      groups(JSON: 群体统计), conclusion}
+
+决策回放日志结构(P3):
+    {replayId, scorerId, subjectRef(脱敏引用——不含个人
+     标识字段), factors(JSON: 因子快照), weightVersion,
+     score, action, ts}
+    ——最小采集红线: subjectRef 仅存脱敏引用(哈希/业务键)
 
 设计对齐:
     - 双模式存储 + 显式序列化口径(38-45号惯例:
@@ -86,6 +93,7 @@ class AiGovernance46Repository:
     TABLE_ALERTS = "ai46_alerts"
     TABLE_FAIRNESS_SAMPLES = "ai46_fairness_samples"
     TABLE_FAIRNESS_REPORTS = "ai46_fairness_reports"
+    TABLE_REPLAY_LOG = "ai46_replay_log"
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -101,6 +109,7 @@ class AiGovernance46Repository:
         self.store.setdefault(self.TABLE_ALERTS, {})
         self.store.setdefault(self.TABLE_FAIRNESS_SAMPLES, {})
         self.store.setdefault(self.TABLE_FAIRNESS_REPORTS, {})
+        self.store.setdefault(self.TABLE_REPLAY_LOG, {})
 
     @staticmethod
     def _serialize(record: dict) -> dict:
@@ -123,11 +132,17 @@ class AiGovernance46Repository:
             if k in ("govId", "changeId", "scanId", "alertId",
                      "occurrences", "alertsNew", "alertsUpdated",
                      "scorerCount", "firstScanId", "sampleId",
-                     "reportId", "sampleCount", "groupCount"):
+                     "reportId", "sampleCount", "groupCount",
+                     "replayId"):
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
                     record[k] = v
+            elif k in ("factors",):
+                try:
+                    record[k] = json.loads(v) if v else []
+                except (TypeError, ValueError):
+                    record[k] = []
             elif k in ("payload", "byLevel", "hits", "groups"):
                 try:
                     record[k] = json.loads(v) if v else {}
@@ -624,3 +639,85 @@ class AiGovernance46Repository:
         reports = await self.list_reports(
             scorer_id=scorer_id, limit=1)
         return reports[0] if reports else None
+
+    # --------------------------------------------------------
+    # 决策回放日志(P3, 只追加——决策流水不可变)
+    # --------------------------------------------------------
+
+    async def next_replay_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("ai46", "replay", "seq"))
+        self._ensure_store()
+        seq = self.store.get("_ai46_replay_seq", 0) + 1
+        self.store["_ai46_replay_seq"] = seq
+        return seq
+
+    async def add_replay_log(self, record: dict) -> int:
+        """追加一条决策日志(返回 replayId; LPUSH 新→旧)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.lpush(
+                _k("ai46", "replay", "log",
+                   record["scorerId"]),
+                json.dumps(record, ensure_ascii=False))
+            pipe.hset(
+                _k("ai46", self.TABLE_REPLAY_LOG,
+                   record["replayId"]),
+                mapping=self._serialize(record))
+            await pipe.execute()
+            return record["replayId"]
+        self._ensure_store()
+        self.store[self.TABLE_REPLAY_LOG][
+            record["replayId"]] = dict(record)
+        self.store.setdefault(
+            "_ai46_replay_index", {}).setdefault(
+            record["scorerId"], []).insert(
+            0, record["replayId"])
+        return record["replayId"]
+
+    async def get_replay_log(self,
+                             replay_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("ai46", self.TABLE_REPLAY_LOG, replay_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_REPLAY_LOG].get(replay_id)
+        return dict(rec) if rec else None
+
+    async def list_replay_logs(
+            self, scorer_id: str = None,
+            limit: int = 50) -> list[dict]:
+        """决策日志查询(新→旧; 档案过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = ([_k("ai46", "replay", "log", scorer_id)]
+                    if scorer_id
+                    else await client.keys(_k(
+                        "ai46", "replay", "log", "*")))
+            result = []
+            for i in range(0, len(keys), 500):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 500]:
+                    pipe.lrange(k, 0, -1)
+                for raw_list in await pipe.execute():
+                    for raw in raw_list:
+                        result.append(json.loads(raw))
+        else:
+            self._ensure_store()
+            index = self.store.get("_ai46_replay_index", {})
+            if scorer_id:
+                ids = index.get(scorer_id, [])
+            else:
+                ids = [rid for lst in index.values()
+                       for rid in lst]
+            result = [dict(self.store[
+                self.TABLE_REPLAY_LOG].get(rid))
+                for rid in ids]
+        result.sort(key=lambda r: -(
+            int(r.get("replayId") or 0)))
+        return result[:limit]

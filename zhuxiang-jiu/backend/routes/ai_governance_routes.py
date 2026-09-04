@@ -30,6 +30,17 @@
                                          (分组统计+flagged+
                                           中文归因)
 
+端点(P3, 管理面 3——X-Role: admin):
+    POST /api/ai-gov/replay                决策日志上报
+                                         (脱敏引用+因子
+                                          快照)
+    POST /api/ai-gov/replay/{replayId}     重放对比
+                                         (通用重算公式+
+                                          漂移标记+归因)
+    GET  /api/ai-gov/replay                日志查询
+                                         (档案过滤+漂移
+                                          标注)
+
 鉴权: 管理端 X-Role: admin(43/44/45号同款口径)
 
 统一口径:
@@ -308,6 +319,85 @@ async def get_fairness_report(
         )
         return await AiGovernanceFairnessService(
         ).get_report(scorer_id=scorerId, history=history)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P3 决策回放与追溯(日志上报→通用重算→漂移检测)
+# ============================================================
+
+@router.post("/replay")
+async def submit_replay_log(
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """决策日志上报(脱敏引用+因子快照)
+
+    body: {scorerId, subjectRef(脱敏引用),
+    factors: [{name, value}], score, action?,
+    weightVersion?}
+    """
+    _require_admin(x_role)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.ai_governance_replay import (
+            AiGovernanceReplayService,
+        )
+        return await AiGovernanceReplayService(
+        ).submit_log(
+            str(body.get("scorerId") or ""),
+            str(body.get("subjectRef") or ""),
+            body.get("factors"),
+            body.get("score"),
+            action=str(body.get("action") or ""),
+            weight_version=str(
+                body.get("weightVersion") or ""))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/replay/{replay_id}")
+async def replay_decision(
+    replay_id: int,
+    body: dict = None,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """重放对比(通用重算公式: 因子快照×当前冠军权重)
+
+    body: {importTrust45?: true}(可选——导入 45号申诉
+    快照后重放)
+    """
+    _require_admin(x_role)
+    try:
+        from services.ai_governance_replay import (
+            AiGovernanceReplayService,
+        )
+        svc = AiGovernanceReplayService()
+        if isinstance(body, dict) and \
+                body.get("importTrust45"):
+            await svc.import_trust45_appeals()
+        return await svc.replay(replay_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/replay")
+async def list_replay_logs(
+    scorerId: str = Query(None, description="档案过滤"),
+    limit: int = Query(50, ge=1, le=500,
+                       description="返回条数上限"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """决策日志查询(新→旧; 档案过滤+漂移标注)"""
+    _require_admin(x_role)
+    try:
+        from services.ai_governance_replay import (
+            AiGovernanceReplayService,
+        )
+        return await AiGovernanceReplayService(
+        ).list_logs(scorer_id=scorerId, limit=limit)
     except Exception as e:
         raise _handle(e) from e
 
