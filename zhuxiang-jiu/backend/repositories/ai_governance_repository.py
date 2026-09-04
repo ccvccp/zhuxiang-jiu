@@ -1,10 +1,12 @@
 """46号·AI 治理与合规中枢数据访问层(双模式: 内存 + Redis)
 
-表清单(前缀 ai46, 计划 §三/§四):
+表清单(前缀 ai46, 计划 §三/§四/§五):
     ai46_registry             AI 资产注册中心(scorerId 自然键, P0)
     ai46_changes              变更审批总线(P0)
     ai46_health_snapshots     健康巡检快照(P1, 只追加)
     ai46_alerts               治理告警队列(P1, 当日同键去重)
+    ai46_fairness_samples     公平性采样(P2, 只追加)
+    ai46_fairness_reports     公平性审计报告(P2, 只追加)
 
 注册中心记录结构:
     {govId, scorerId, label, module, batch,
@@ -31,12 +33,23 @@
      occurrences, firstSeenAt, lastSeenAt, firstScanId,
      status: open}
 
+公平性采样记录结构(P2):
+    {sampleId, scorerId, group, score, passed,
+     source: report|trust45, reportedAt}
+    ——最小采集红线: 无个人标识字段(43号脱敏口径)
+
+公平性审计报告记录结构(P2):
+    {reportId, scorerId, generatedAt, sampleCount,
+     groupCount, flagged, meanDiffRatio, passRateGap,
+     groups(JSON: 群体统计), conclusion}
+
 设计对齐:
     - 双模式存储 + 显式序列化口径(38-45号惯例:
       bool→0/1, dict/list→JSON 字符串, None→"")
     - 变更审批留痕只追加语义(状态翻转仅 update 固定字段)
     - 告警索引创建与更新分离(45号教训: 列表 LPUSH 仅在
       new=True 创建时执行, 更新不重复入列)
+    - 采样与报告只追加(审计流水不可变)
 """
 
 import json
@@ -60,6 +73,9 @@ CHANGE_STATUS_VALUES = ("pending", "approved", "rejected")
 # 健康信号(P1 三检测器)
 HEALTH_SIGNAL_VALUES = ("stagnation", "depletion", "drift_high")
 
+# 公平性采样来源(P2: 自愿上报 / 45号事件适配器)
+FAIRNESS_SAMPLE_SOURCES = ("report", "trust45")
+
 
 class AiGovernance46Repository:
     """46号 AI 治理仓储(双模式, 45号仓储范式平移)"""
@@ -68,6 +84,8 @@ class AiGovernance46Repository:
     TABLE_CHANGES = "ai46_changes"
     TABLE_SNAPSHOTS = "ai46_health_snapshots"
     TABLE_ALERTS = "ai46_alerts"
+    TABLE_FAIRNESS_SAMPLES = "ai46_fairness_samples"
+    TABLE_FAIRNESS_REPORTS = "ai46_fairness_reports"
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -81,6 +99,8 @@ class AiGovernance46Repository:
         self.store.setdefault(self.TABLE_CHANGES, {})
         self.store.setdefault(self.TABLE_SNAPSHOTS, {})
         self.store.setdefault(self.TABLE_ALERTS, {})
+        self.store.setdefault(self.TABLE_FAIRNESS_SAMPLES, {})
+        self.store.setdefault(self.TABLE_FAIRNESS_REPORTS, {})
 
     @staticmethod
     def _serialize(record: dict) -> dict:
@@ -102,12 +122,13 @@ class AiGovernance46Repository:
         for k, v in data.items():
             if k in ("govId", "changeId", "scanId", "alertId",
                      "occurrences", "alertsNew", "alertsUpdated",
-                     "scorerCount", "firstScanId"):
+                     "scorerCount", "firstScanId", "sampleId",
+                     "reportId", "sampleCount", "groupCount"):
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
                     record[k] = v
-            elif k == "payload":
+            elif k in ("payload", "byLevel", "hits", "groups"):
                 try:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
@@ -117,16 +138,14 @@ class AiGovernance46Repository:
                     record[k] = json.loads(v) if v else []
                 except (TypeError, ValueError):
                     record[k] = []
-            elif k in ("byLevel", "hits"):
-                try:
-                    record[k] = json.loads(v) if v else {}
-                except (TypeError, ValueError):
-                    record[k] = {}
-            elif k == "avgScore":
+            elif k in ("avgScore", "score", "meanDiffRatio",
+                       "passRateGap", "passRate"):
                 try:
                     record[k] = float(v) if v != "" else 0.0
                 except (TypeError, ValueError):
                     record[k] = 0.0
+            elif k == "flagged":
+                record[k] = str(v) == "1"
             else:
                 record[k] = v
         return record
@@ -467,3 +486,141 @@ class AiGovernance46Repository:
         result.sort(key=lambda a: -(
             int(a.get("alertId") or 0)))
         return result[:limit]
+
+    # --------------------------------------------------------
+    # 公平性采样(P2, 只追加——审计流水不可变)
+    # --------------------------------------------------------
+
+    async def next_sample_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("ai46", "fairness", "samples", "seq"))
+        self._ensure_store()
+        seq = self.store.get("_ai46_sample_seq", 0) + 1
+        self.store["_ai46_sample_seq"] = seq
+        return seq
+
+    async def add_sample(self, record: dict) -> int:
+        """追加一条公平性采样(返回 sampleId; LPUSH 新→旧)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.lpush(
+                _k("ai46", "fairness", "samples",
+                   record["scorerId"]),
+                json.dumps(record, ensure_ascii=False))
+            pipe.hset(
+                _k("ai46", self.TABLE_FAIRNESS_SAMPLES,
+                   record["sampleId"]),
+                mapping=self._serialize(record))
+            await pipe.execute()
+            return record["sampleId"]
+        self._ensure_store()
+        self.store[self.TABLE_FAIRNESS_SAMPLES][
+            record["sampleId"]] = dict(record)
+        self.store.setdefault(
+            "_ai46_fairness_index", {}).setdefault(
+            record["scorerId"], []).insert(
+            0, record["sampleId"])
+        return record["sampleId"]
+
+    async def list_samples(self, scorer_id: str,
+                           limit: int = 0) -> list[dict]:
+        """按档案列采样(新→旧; limit=0 不限)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.lrange(
+                _k("ai46", "fairness", "samples", scorer_id),
+                0, -1)
+            records = [json.loads(x) for x in raw]
+        else:
+            self._ensure_store()
+            records = [dict(self.store[
+                self.TABLE_FAIRNESS_SAMPLES].get(sid))
+                for sid in self.store.get(
+                    "_ai46_fairness_index", {}).get(
+                    scorer_id, [])]
+        return records if not limit else records[:limit]
+
+    async def count_samples(self, scorer_id: str) -> int:
+        return len(await self.list_samples(scorer_id))
+
+    # --------------------------------------------------------
+    # 公平性审计报告(P2, 只追加)
+    # --------------------------------------------------------
+
+    async def next_report_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("ai46", "fairness", "reports", "seq"))
+        self._ensure_store()
+        seq = self.store.get("_ai46_report_seq", 0) + 1
+        self.store["_ai46_report_seq"] = seq
+        return seq
+
+    async def save_report(self, record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.hset(
+                _k("ai46", self.TABLE_FAIRNESS_REPORTS,
+                   record["reportId"]),
+                mapping=self._serialize(record))
+            pipe.lpush(_k("ai46", "fairness", "reports_all"),
+                       record["reportId"])
+            await pipe.execute()
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_FAIRNESS_REPORTS][
+            record["reportId"]] = dict(record)
+        return record
+
+    async def get_report(self, report_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("ai46", self.TABLE_FAIRNESS_REPORTS,
+                   report_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_FAIRNESS_REPORTS].get(
+            report_id)
+        return dict(rec) if rec else None
+
+    async def list_reports(self, scorer_id: str = None,
+                           limit: int = 50) -> list[dict]:
+        """审计报告列表(最新在前; 档案过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.lrange(
+                _k("ai46", "fairness", "reports_all"), 0, -1)
+            result = []
+            for i in range(0, len(ids), 500):
+                pipe = client.pipeline(transaction=False)
+                for rid in ids[i:i + 500]:
+                    pipe.hgetall(_k(
+                        "ai46", self.TABLE_FAIRNESS_REPORTS,
+                        int(rid)))
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+        else:
+            self._ensure_store()
+            result = [dict(r) for r in
+                      self.store[
+                          self.TABLE_FAIRNESS_REPORTS].values()]
+        if scorer_id:
+            result = [r for r in result
+                      if r.get("scorerId") == scorer_id]
+        result.sort(key=lambda r: -(
+            int(r.get("reportId") or 0)))
+        return result[:limit]
+
+    async def get_latest_report(
+            self, scorer_id: str = None) -> dict | None:
+        reports = await self.list_reports(
+            scorer_id=scorer_id, limit=1)
+        return reports[0] if reports else None

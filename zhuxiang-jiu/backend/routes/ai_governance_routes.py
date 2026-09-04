@@ -1,5 +1,5 @@
 """46号·AI 治理与合规中枢路由(P0 资产注册中心 + 变更审批总线
-+ P1 档案健康度监控)
++ P1 档案健康度监控 + P2 公平性审计)
 
 端点(P0, 管理面 5——X-Role: admin):
     GET  /api/ai-gov/registry             治理台账(状态/batch
@@ -21,12 +21,22 @@
     GET  /api/ai-gov/alerts               治理告警队列
                                          (信号/档案过滤)
 
+端点(P2, 管理面 3——X-Role: admin):
+    POST /api/ai-gov/fairness/samples     采样上报(批量,
+                                         脱敏校验)
+    POST /api/ai-gov/fairness/audit        触发审计
+                                         (指标计算→报告落库)
+    GET  /api/ai-gov/fairness/report       最近报告
+                                         (分组统计+flagged+
+                                          中文归因)
+
 鉴权: 管理端 X-Role: admin(43/44/45号同款口径)
 
 统一口径:
     - 模块纯增量(零既有路由改动; ai_learning 仅加冻结守卫)
     - 治理不阻断: fail-soft 铁律(守卫异常放行学习;
       健康巡检异常降级留痕不抛出)
+    - 采样脱敏: 含个人标识字段的上报直接 409(最小必要红线)
     - KeyError → 404 / ValueError → 409(44/45号同款)
 """
 
@@ -210,6 +220,94 @@ async def list_alerts(
         )
         return await AiGovernanceHealthService().list_alerts(
             signal=signal, scorer_id=scorerId, limit=limit)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P2 公平性审计(采样→指标→报告)
+# ============================================================
+
+@router.post("/fairness/samples")
+async def submit_fairness_samples(
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """公平性采样上报(批量, 脱敏校验)
+
+    body: {scorerId, samples: [{group, score,
+    passed?}], source?: report|trust45}
+    """
+    _require_admin(x_role)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.ai_governance_fairness import (
+            AiGovernanceFairnessService,
+        )
+        return await AiGovernanceFairnessService(
+        ).submit_samples(
+            str(body.get("scorerId") or ""),
+            body.get("samples"),
+            source=str(body.get("source") or "report"))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/fairness/audit")
+async def run_fairness_audit(
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """触发公平性审计(指标计算→报告落库)
+
+    body: {scorerId}(空=全档案逐个审计);
+    importTrust45: true 时先执行 45号事件适配器
+    """
+    _require_admin(x_role)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.ai_governance_fairness import (
+            AiGovernanceFairnessService,
+        )
+        svc = AiGovernanceFairnessService()
+        results = []
+        if body.get("importTrust45"):
+            results.append(await svc.import_trust45())
+        scorer_id = str(body.get("scorerId") or "")
+        if scorer_id:
+            results.append(await svc.run_audit(scorer_id))
+        else:
+            govs = await svc.repo.list_govs(limit=1000)
+            audited = 0
+            for gov in govs:
+                sid = gov.get("scorerId")
+                if await svc.repo.count_samples(sid) > 0:
+                    results.append(await svc.run_audit(sid))
+                    audited += 1
+            results.append({"success": True,
+                            "audited": audited})
+        return (results[0] if len(results) == 1
+                else {"success": True, "results": results})
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/fairness/report")
+async def get_fairness_report(
+    scorerId: str = Query(None, description="档案过滤"),
+    history: bool = Query(False, description="返回报告历史"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """最近公平性审计报告(分组统计+flagged+中文归因)"""
+    _require_admin(x_role)
+    try:
+        from services.ai_governance_fairness import (
+            AiGovernanceFairnessService,
+        )
+        return await AiGovernanceFairnessService(
+        ).get_report(scorer_id=scorerId, history=history)
     except Exception as e:
         raise _handle(e) from e
 
