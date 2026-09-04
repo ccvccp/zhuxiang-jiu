@@ -1,14 +1,17 @@
 """48号·小竹智能语音中枢路由(P0 感知层)
 
-端点(P0 共 6):
+端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 = 21):
     POST /api/xiaozhu/sessions              开启会话
     POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
     GET  /api/xiaozhu/sessions/{id}          会话视图(轮次历史)
     DELETE /api/xiaozhu/sessions/{id}       一键清除(级联轮次)
     GET  /api/xiaozhu/commands              指令集自描述
+    GET  /api/xiaozhu/dashboard             看板六区块(P4, admin)
+    POST /api/xiaozhu/dashboard/fairness-bridge  公平性桥接(P4)
 
-鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例)。
+鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例);
+管理端 X-Role: admin(43-47号同款口径)。
 语音传输: base64 JSON(35号 /api/hub/asr 同款惯例——
 不依赖 python-multipart)。
 
@@ -428,6 +431,50 @@ async def failures_view(
         )
         return await XiaozhuEvolutionService(
         ).failures_view()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P4 语音中枢看板与治理桥接(fail-soft 六区块)
+# ============================================================
+
+@router.get("/dashboard")
+async def xiaozhu_dashboard(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """语音中枢看板(六区块一次拉取, fail-soft 分区)
+
+    ①使用总览 ②指令命中 ③高敏台账 ④积分账本
+    ⑤共创队列 ⑥治理桥接——前端面板单次 GET 零拼装。
+    """
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_dashboard_service import (
+            XiaozhuDashboardService,
+        )
+        return await XiaozhuDashboardService().build()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/dashboard/fairness-bridge")
+async def fairness_bridge(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """语音直达率→46号公平性采样桥接(member_level 维度
+    ——防语音层歧视; 无个人标识字段, 脱敏红线)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_dashboard_service import (
+            XiaozhuDashboardService,
+        )
+        return await XiaozhuDashboardService(
+        ).bridge_fairness()
     except Exception as e:
         raise _handle(e) from e
 

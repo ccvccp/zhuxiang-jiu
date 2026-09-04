@@ -91,6 +91,11 @@ class XiaozhuExecutor:
         self._tokens: dict = {}
         self._idem: dict = {}
         self._confirm_log: dict = {}
+        # P4 高敏台账计数(进程级——与令牌同口径, 重启归零)
+        self._stats: dict = {
+            "issued": 0, "confirmed": 0, "wrongCode": 0,
+            "expired": 0, "cooldown": 0, "duplicate": 0,
+        }
 
     # --------------------------------------------------------
     # 沙箱入口
@@ -121,10 +126,12 @@ class XiaozhuExecutor:
                                   action, params)
         hit = self._check_idempotent(idem_key)
         if hit:
+            self._stats["duplicate"] += 1
             return {"executed": False, "duplicate": True,
                     "note": "10 秒内同指令已受理, 无需重复"}
         if action in SENSITIVE:
             if self._in_cooldown(member_id):
+                self._stats["cooldown"] += 1
                 return {
                     "cooldown": True,
                     "reply": "短时间内多次高风险操作已触发"
@@ -150,6 +157,7 @@ class XiaozhuExecutor:
                      action: str, params: dict) -> dict:
         token = f"cf-{uuid.uuid4().hex[:12]}"
         code = f"{secrets.randbelow(9000) + 1000}"
+        self._stats["issued"] += 1
         self._tokens[token] = {
             "memberId": member_id,
             "sessionId": session_id,
@@ -184,9 +192,11 @@ class XiaozhuExecutor:
             raise KeyError(f"确认令牌 {token} 不存在或已作废")
         if _now() > entry["expiresAt"]:
             self._tokens.pop(token, None)
+            self._stats["expired"] += 1
             raise KeyError("确认令牌已过期(120s), 请重新发起")
         if str(code or "").strip() != entry["code"]:
             entry["attempts"] += 1
+            self._stats["wrongCode"] += 1
             if entry["attempts"] >= CONFIRM_MAX_ATTEMPTS:
                 self._tokens.pop(token, None)
                 self._bump_confirm_log(entry["memberId"])
@@ -196,8 +206,9 @@ class XiaozhuExecutor:
             raise ValueError(
                 f"确认码错误(剩余 "
                 f"{CONFIRM_MAX_ATTEMPTS - entry['attempts']}"
-                f" 次机会)")
+                f"次机会)")
         # 核销
+        self._stats["confirmed"] += 1
         self._tokens.pop(token, None)
         self._bump_confirm_log(entry["memberId"])
         action = entry["action"]
@@ -333,6 +344,25 @@ class XiaozhuExecutor:
                     f" 信用分, 按当前汇率折算信值"
                     f"(到账金额以执行结果为准)")
         return "即将执行高风险操作"
+
+    # --------------------------------------------------------
+    # P4 高敏台账(进程级计数——看板③数据源)
+    # --------------------------------------------------------
+
+    def stats(self) -> dict:
+        """高敏/写操作台账计数(只读快照)
+
+        口径: 进程级与令牌同生命周期(重启归零); 通过率 =
+        confirmed / issued(发放即含未核销/过期/作废)。
+        """
+        s = dict(self._stats)
+        issued = s["issued"]
+        s["passRate"] = (round(
+            s["confirmed"] / issued * 100, 1)
+            if issued else None)
+        s["note"] = ("进程级计数(重启归零, 与令牌同口径); "
+                     "通过率=核销成功/令牌发放")
+        return s
 
     # --------------------------------------------------------
     # 执行留痕回溯("我刚才做了什么")

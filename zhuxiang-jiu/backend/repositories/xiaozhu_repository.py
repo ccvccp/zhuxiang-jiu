@@ -1,6 +1,6 @@
 """48号·小竹智能语音中枢数据访问层(双模式: 内存 + Redis)
 
-表清单(前缀 voice48, 计划 §四 P0/§五 P1/§七 P3):
+表清单(前缀 voice48, 计划 §四 P0/§五 P1/§七 P3/§八 P4):
     voice48_sessions   会话(sessionId 键; memberId 归属)
     voice48_turns      轮次(sessionId 下的 seq 键; 时间正序)
     voice48_bindings   会员↔信值档案绑定(P1)
@@ -267,6 +267,105 @@ class Xiaozhu48Repository:
                   if t.get("sessionId") == session_id]
         result.sort(key=lambda t: (t.get("seq") or 0))
         return result[:limit]
+
+    # --------------------------------------------------------
+    # P4 看板聚合扫描(全表只读——六区块数据源)
+    # --------------------------------------------------------
+
+    async def scan_sessions(self,
+                            limit: int = 2000) -> list[dict]:
+        """全量会话(时间正序——使用总览/公平性桥接取
+        memberId 维度)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "voice48", self.TABLE_SESSIONS, "*"))
+            keys = [k for k in keys
+                    if not k.endswith(":seq")]
+            result = []
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+            result.sort(key=lambda s: (
+                s.get("sessionId") or 0))
+            return result[:limit]
+        self._ensure_store()
+        result = [dict(s) for s in
+                  self.store[self.TABLE_SESSIONS].values()]
+        result.sort(key=lambda s: (
+            s.get("sessionId") or 0))
+        return result[:limit]
+
+    async def scan_turns(self,
+                         limit: int = 10000) -> list[dict]:
+        """全量轮次(跨会话——指令命中排行/直达率/通道比;
+        rawText 已 PII 脱敏, 看板仅取聚合字段)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "voice48", self.TABLE_TURNS, "*", "*"))
+            keys = [k for k in keys
+                    if not k.endswith(":seq")]
+            result = []
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+            result.sort(key=lambda t: (
+                t.get("sessionId") or 0,
+                t.get("seq") or 0))
+            return result[:limit]
+        self._ensure_store()
+        result = [dict(t) for t in
+                  self.store[self.TABLE_TURNS].values()]
+        result.sort(key=lambda t: (
+            t.get("sessionId") or 0,
+            t.get("seq") or 0))
+        return result[:limit]
+
+    async def points_balances_total(self) -> dict:
+        """会员积分余额合计(发放-兑换净额口径)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "voice48", self.TABLE_POINTS_ACC, "*"))
+            total = 0.0
+            holders = 0
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.get(k)
+                for v in await pipe.execute():
+                    if v is None or v == "":
+                        continue
+                    try:
+                        total += float(v)
+                        holders += 1
+                    except (TypeError, ValueError):
+                        continue
+            return {"balanceTotal": round(total, 1),
+                    "holders": holders}
+        self._ensure_store()
+        values = [v for v in
+                  self.store[self.TABLE_POINTS_ACC].values()
+                  if v not in ("", None)]
+        total = 0.0
+        for v in values:
+            try:
+                total += float(v)
+            except (TypeError, ValueError):
+                continue
+        return {"balanceTotal": round(total, 1),
+                "holders": len(values)}
 
     # --------------------------------------------------------
     # P3 积分账本(独立于信值——入信值走 deposit 验真通道)
