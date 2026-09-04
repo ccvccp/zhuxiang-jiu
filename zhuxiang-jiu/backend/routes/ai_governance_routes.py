@@ -1,4 +1,5 @@
-"""46号·AI 治理与合规中枢路由(P0 资产注册中心 + 变更审批总线)
+"""46号·AI 治理与合规中枢路由(P0 资产注册中心 + 变更审批总线
++ P1 档案健康度监控)
 
 端点(P0, 管理面 5——X-Role: admin):
     GET  /api/ai-gov/registry             治理台账(状态/batch
@@ -12,11 +13,20 @@
                                          (approved→执行器/
                                           rejected→留痕)
 
+端点(P1, 管理面 3——X-Role: admin):
+    GET  /api/ai-gov/health               全档案健康度排行+
+                                         分层统计(实时)
+    POST /api/ai-gov/health/scan          触发一轮巡检
+                                         (落快照+生成告警)
+    GET  /api/ai-gov/alerts               治理告警队列
+                                         (信号/档案过滤)
+
 鉴权: 管理端 X-Role: admin(43/44/45号同款口径)
 
 统一口径:
     - 模块纯增量(零既有路由改动; ai_learning 仅加冻结守卫)
-    - 治理不阻断: fail-soft 铁律(守卫异常放行学习)
+    - 治理不阻断: fail-soft 铁律(守卫异常放行学习;
+      健康巡检异常降级留痕不抛出)
     - KeyError → 404 / ValueError → 409(44/45号同款)
 """
 
@@ -149,6 +159,57 @@ async def review_change(
             change_id, bool(body.get("approve")),
             reviewed_by=str(body.get("reviewedBy") or "admin"),
             review_note=str(body.get("reviewNote") or ""))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/health")
+async def health_overview(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """全档案健康度排行 + 分层统计(实时计算, 不落库)"""
+    _require_admin(x_role)
+    try:
+        from services.ai_governance_health import (
+            AiGovernanceHealthService,
+        )
+        return await AiGovernanceHealthService().live_health()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/health/scan")
+async def health_scan(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """触发一轮健康巡检(评估→落快照→生成告警当日去重)"""
+    _require_admin(x_role)
+    try:
+        from services.ai_governance_health import (
+            AiGovernanceHealthService,
+        )
+        return await AiGovernanceHealthService().scan()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/alerts")
+async def list_alerts(
+    signal: str = Query(None, description="信号过滤"
+                                    "(stagnation/depletion/drift_high)"),
+    scorerId: str = Query(None, description="档案过滤"),
+    limit: int = Query(100, ge=1, le=500,
+                       description="返回条数上限"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """治理告警队列(最新在前; 信号/档案过滤)"""
+    _require_admin(x_role)
+    try:
+        from services.ai_governance_health import (
+            AiGovernanceHealthService,
+        )
+        return await AiGovernanceHealthService().list_alerts(
+            signal=signal, scorer_id=scorerId, limit=limit)
     except Exception as e:
         raise _handle(e) from e
 

@@ -87,7 +87,7 @@ async def main():
     # 1. 注册表与默认权重
     # ========================================================
     record("01_registry_covers_19_profiles",
-           len(SCORER_REGISTRY) == 21
+           len(SCORER_REGISTRY) == 28
            and "logistics_routing:cost" in SCORER_REGISTRY
            and "promo_hotspot" in SCORER_REGISTRY
            and "alliance_onboarding" in SCORER_REGISTRY
@@ -385,8 +385,8 @@ async def main():
     resp = client.get("/api/ai-learning/overview", headers={"X-Role": "admin"})
     body = resp.json()
     record("30_http_overview_lists_all_scorers",
-           resp.status_code == 200 and body.get("scorerCount") == 21
-           and len(body.get("scorers", [])) == 21,
+           resp.status_code == 200 and body.get("scorerCount") == 28
+           and len(body.get("scorers", [])) == 28,
            f"status={resp.status_code}, count={body.get('scorerCount')}")
 
     resp = client.get("/api/ai-learning/weights/no_such_scorer",

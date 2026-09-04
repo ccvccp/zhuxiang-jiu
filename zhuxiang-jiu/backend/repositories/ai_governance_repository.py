@@ -1,8 +1,10 @@
 """46号·AI 治理与合规中枢数据访问层(双模式: 内存 + Redis)
 
-表清单(前缀 ai46, 计划 §三):
-    ai46_registry   AI 资产注册中心(scorerId 自然键, P0)
-    ai46_changes    变更审批总线(P0)
+表清单(前缀 ai46, 计划 §三/§四):
+    ai46_registry             AI 资产注册中心(scorerId 自然键, P0)
+    ai46_changes              变更审批总线(P0)
+    ai46_health_snapshots     健康巡检快照(P1, 只追加)
+    ai46_alerts               治理告警队列(P1, 当日同键去重)
 
 注册中心记录结构:
     {govId, scorerId, label, module, batch,
@@ -18,10 +20,23 @@
      reviewedBy, reviewNote, error,
      requestedAt, reviewedAt}
 
+健康巡检快照结构(P1):
+    {scanId, scannedAt, scorerCount, avgScore,
+     byLevel(JSON), hits(JSON), alertsNew, alertsUpdated,
+     entries(JSON: [单档案健康明细])}
+
+治理告警记录结构(P1):
+    {alertId, scorerId, label, signal: stagnation|depletion|
+     drift_high, level: warn, message, day(YYYY-MM-DD),
+     occurrences, firstSeenAt, lastSeenAt, firstScanId,
+     status: open}
+
 设计对齐:
     - 双模式存储 + 显式序列化口径(38-45号惯例:
       bool→0/1, dict/list→JSON 字符串, None→"")
     - 变更审批留痕只追加语义(状态翻转仅 update 固定字段)
+    - 告警索引创建与更新分离(45号教训: 列表 LPUSH 仅在
+      new=True 创建时执行, 更新不重复入列)
 """
 
 import json
@@ -42,12 +57,17 @@ CHANGE_KIND_VALUES = ("promote", "patch", "config",
 # 审批状态
 CHANGE_STATUS_VALUES = ("pending", "approved", "rejected")
 
+# 健康信号(P1 三检测器)
+HEALTH_SIGNAL_VALUES = ("stagnation", "depletion", "drift_high")
+
 
 class AiGovernance46Repository:
     """46号 AI 治理仓储(双模式, 45号仓储范式平移)"""
 
     TABLE_REGISTRY = "ai46_registry"
     TABLE_CHANGES = "ai46_changes"
+    TABLE_SNAPSHOTS = "ai46_health_snapshots"
+    TABLE_ALERTS = "ai46_alerts"
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -59,6 +79,8 @@ class AiGovernance46Repository:
     def _ensure_store(self):
         self.store.setdefault(self.TABLE_REGISTRY, {})
         self.store.setdefault(self.TABLE_CHANGES, {})
+        self.store.setdefault(self.TABLE_SNAPSHOTS, {})
+        self.store.setdefault(self.TABLE_ALERTS, {})
 
     @staticmethod
     def _serialize(record: dict) -> dict:
@@ -78,7 +100,9 @@ class AiGovernance46Repository:
     def _deserialize(data: dict) -> dict:
         record = {}
         for k, v in data.items():
-            if k in ("govId", "changeId"):
+            if k in ("govId", "changeId", "scanId", "alertId",
+                     "occurrences", "alertsNew", "alertsUpdated",
+                     "scorerCount", "firstScanId"):
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
@@ -88,6 +112,21 @@ class AiGovernance46Repository:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
                     record[k] = {}
+            elif k in ("entries", "skipped"):
+                try:
+                    record[k] = json.loads(v) if v else []
+                except (TypeError, ValueError):
+                    record[k] = []
+            elif k in ("byLevel", "hits"):
+                try:
+                    record[k] = json.loads(v) if v else {}
+                except (TypeError, ValueError):
+                    record[k] = {}
+            elif k == "avgScore":
+                try:
+                    record[k] = float(v) if v != "" else 0.0
+                except (TypeError, ValueError):
+                    record[k] = 0.0
             else:
                 record[k] = v
         return record
@@ -238,4 +277,193 @@ class AiGovernance46Repository:
                       if c.get("scorerId") == scorer_id]
         result.sort(key=lambda c: -(
             int(c.get("changeId") or 0)))
+        return result[:limit]
+
+    # --------------------------------------------------------
+    # 健康巡检快照(P1, 只追加——快照不可变)
+    # --------------------------------------------------------
+
+    async def next_scan_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("ai46", "health", "snap", "seq"))
+        self._ensure_store()
+        seq = self.store.get("_ai46_scan_seq", 0) + 1
+        self.store["_ai46_scan_seq"] = seq
+        return seq
+
+    async def save_snapshot(self, record: dict) -> dict:
+        """保存巡检快照(创建即追加索引——快照不可变, 无更新路径)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.hset(
+                _k("ai46", self.TABLE_SNAPSHOTS,
+                   record["scanId"]),
+                mapping=self._serialize(record))
+            pipe.lpush(_k("ai46", "health", "snap_all"),
+                       record["scanId"])
+            await pipe.execute()
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_SNAPSHOTS][
+            record["scanId"]] = dict(record)
+        return record
+
+    async def get_snapshot(self, scan_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("ai46", self.TABLE_SNAPSHOTS, scan_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_SNAPSHOTS].get(scan_id)
+        return dict(rec) if rec else None
+
+    async def list_snapshots(
+            self, limit: int = 50) -> list[dict]:
+        """快照列表(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.lrange(
+                _k("ai46", "health", "snap_all"), 0, -1)
+            result = []
+            for i in range(0, len(ids), 500):
+                pipe = client.pipeline(transaction=False)
+                for sid in ids[i:i + 500]:
+                    pipe.hgetall(_k(
+                        "ai46", self.TABLE_SNAPSHOTS, int(sid)))
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+        else:
+            self._ensure_store()
+            result = [dict(r) for r in
+                      self.store[self.TABLE_SNAPSHOTS].values()]
+        result.sort(key=lambda r: -(
+            int(r.get("scanId") or 0)))
+        return result[:limit]
+
+    async def get_latest_snapshot(self) -> dict | None:
+        snaps = await self.list_snapshots(limit=1)
+        return snaps[0] if snaps else None
+
+    # --------------------------------------------------------
+    # 治理告警(P1, 当日同键去重: scorerId|signal|day)
+    # --------------------------------------------------------
+
+    async def next_alert_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("ai46", "alerts", "seq"))
+        self._ensure_store()
+        seq = self.store.get("_ai46_alert_seq", 0) + 1
+        self.store["_ai46_alert_seq"] = seq
+        return seq
+
+    @staticmethod
+    def _alert_day_key(scorer_id: str, signal: str,
+                       day: str) -> str:
+        return f"{scorer_id}|{signal}|{day}"
+
+    async def save_alert(self, record: dict,
+                         new: bool = True) -> dict:
+        """保存告警(new=True 创建并入列+登记当日索引;
+        new=False 仅更新字段不重复入列——45号索引教训)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            key = _k("ai46", self.TABLE_ALERTS,
+                     record["alertId"])
+            pipe.hset(key, mapping=self._serialize(record))
+            if new:
+                pipe.lpush(_k("ai46", "alerts_all"),
+                           record["alertId"])
+                pipe.hset(_k("ai46", "alerts", "day_index"),
+                          self._alert_day_key(
+                              record["scorerId"],
+                              record["signal"],
+                              record["day"]),
+                          record["alertId"])
+            await pipe.execute()
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_ALERTS][
+            record["alertId"]] = dict(record)
+        if new:
+            self.store.setdefault(
+                "_ai46_alerts_all", []).insert(
+                0, record["alertId"])
+            self.store.setdefault(
+                "_ai46_alert_day_index", {})[
+                self._alert_day_key(
+                    record["scorerId"],
+                    record["signal"],
+                    record["day"])] = record["alertId"]
+        return record
+
+    async def get_alert(self, alert_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("ai46", self.TABLE_ALERTS, alert_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_ALERTS].get(alert_id)
+        return dict(rec) if rec else None
+
+    async def find_alert_of_day(
+            self, scorer_id: str, signal: str,
+            day: str) -> dict | None:
+        """当日同键告警查询(去重判定: 同档案同信号当日一条)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            alert_id = await client.hget(
+                _k("ai46", "alerts", "day_index"),
+                self._alert_day_key(scorer_id, signal, day))
+            if not alert_id:
+                return None
+            return await self.get_alert(int(alert_id))
+        self._ensure_store()
+        alert_id = self.store.get(
+            "_ai46_alert_day_index", {}).get(
+            self._alert_day_key(scorer_id, signal, day))
+        if not alert_id:
+            return None
+        return await self.get_alert(alert_id)
+
+    async def list_alerts(
+            self, signal: str = None,
+            scorer_id: str = None,
+            limit: int = 200) -> list[dict]:
+        """告警队列(最新在前; 信号/档案过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.lrange(
+                _k("ai46", "alerts_all"), 0, -1)
+            result = []
+            for i in range(0, len(ids), 500):
+                pipe = client.pipeline(transaction=False)
+                for aid in ids[i:i + 500]:
+                    pipe.hgetall(_k(
+                        "ai46", self.TABLE_ALERTS, int(aid)))
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+        else:
+            self._ensure_store()
+            result = [dict(r) for r in
+                      self.store[self.TABLE_ALERTS].values()]
+        if signal:
+            result = [a for a in result
+                      if a.get("signal") == signal]
+        if scorer_id:
+            result = [a for a in result
+                      if a.get("scorerId") == scorer_id]
+        result.sort(key=lambda a: -(
+            int(a.get("alertId") or 0)))
         return result[:limit]
