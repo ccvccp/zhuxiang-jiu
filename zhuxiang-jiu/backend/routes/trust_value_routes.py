@@ -37,10 +37,27 @@
     POST /api/trust/convert              信用分→TV 单向转换
     GET  /api/trust/ledger               账本流水(只追加不可篡改)
 
+端点(P4, 自进化闭环 7):
+    POST /api/trust/appeals              提交申诉(信值变动异议,
+                                         7 日窗口)
+    GET  /api/trust/appeals              申诉队列(管理端)
+    POST /api/trust/appeals/{id}/decide  人工复核(upheld 计算
+                                         正确/overturned 翻转
+                                         重算)
+    GET  /api/trust/attribution/{tid}/{eid} 归因报告(可解释性
+                                         强制, LLM 三态)
+    POST /api/trust/learning/collect     裁决真值批量回流
+    POST /api/trust/learning/run          触发一轮 Hedge 学习
+    GET  /api/trust/learning/status       学习状态视图
+    POST /api/trust/patches               伦理补丁注入(β 映射
+                                         更新, 版本留痕)
+    GET  /api/trust/patches               补丁历史(版本审计)
+
 鉴权:
-    - 自助面(建档/查询/重算/存证/修复/兑换/转换): 公开(信值
-      查询脱敏口径——摘要掩码展示, 明文永不返回)
-    - 事件灌入: X-Role: admin(43/44号同款口径)
+    - 自助面(建档/查询/重算/存证/修复/兑换/转换/申诉): 公开
+      (信值查询脱敏口径——摘要掩码展示, 明文永不返回)
+    - 事件灌入/申诉裁决/学习三连/补丁: X-Role: admin
+      (43/44号同款口径)
 
 统一口径:
     - 模块纯增量(零既有路由改动)
@@ -49,7 +66,7 @@
       (账本 direction 枚举锁死, 无 transfer_out 类型)
 """
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 
 from services.trust_scoring_service import TrustProfileService
 
@@ -417,6 +434,171 @@ async def merchant_deposit(body: dict,
             body.get("amount") or 0)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P4: 自进化闭环(申诉复核 + 裁决回流 + 归因 + 伦理补丁)
+# ============================================================
+
+@router.post("/appeals")
+async def submit_appeal(body: dict):
+    """提交申诉(信值变动异议; 7 日窗口)
+
+    body: {trustId, eventId, reason}
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_learning_service import (
+            TrustAppealService,
+        )
+        return await TrustAppealService().submit_appeal(
+            int(body.get("trustId") or 0),
+            int(body.get("eventId") or 0),
+            str(body.get("reason") or ""))
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/appeals")
+async def list_appeals(
+    status: str = Query(None, description="状态过滤"
+                                    "(pending/upheld/overturned)"),
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """申诉队列(管理端)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_learning_service import (
+            TrustAppealService,
+        )
+        return await TrustAppealService().list_appeals(
+            status=status)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/appeals/{appeal_id}/decide")
+async def decide_appeal(appeal_id: int, body: dict,
+                        x_role: str = Header(default="",
+                                             alias="X-Role")):
+    """人工复核裁决(计算正确性真值源)
+
+    body: {uphold: bool, note?}——upheld=计算正确(正反馈);
+    overturned=计算错误(反向事件+熔断计数回退+重算)。
+    """
+    _require_admin(x_role)
+    if not isinstance(body, dict) or \
+            "uphold" not in body:
+        raise HTTPException(status_code=409,
+                            detail="请求体需含 uphold 字段")
+    try:
+        from services.trust_learning_service import (
+            TrustAppealService,
+        )
+        return await TrustAppealService().decide_appeal(
+            appeal_id, bool(body.get("uphold")),
+            str(body.get("note") or ""))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/attribution/{trust_id}/{event_id}")
+async def attribution(trust_id: int, event_id: int):
+    """信值变动归因报告(可解释性强制; LLM 三态)"""
+    try:
+        from services.trust_learning_service import (
+            TrustAppealService,
+        )
+        return await TrustAppealService().attribution(
+            trust_id, event_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/learning/collect")
+async def learning_collect(
+    x_role: str = Header(default="", alias="X-Role")):
+    """裁决真值批量回流(已裁决未回流申诉 → 第28档案)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_learning_service import (
+            TrustLearningService,
+        )
+        return await TrustLearningService(
+        ).collect_appeal_feedback()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/learning/run")
+async def learning_run(
+    x_role: str = Header(default="", alias="X-Role")):
+    """触发一轮 Hedge 学习(第28档案; 层内宪法护栏)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_learning_service import (
+            TrustLearningService,
+        )
+        return await TrustLearningService().run_learning()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/learning/status")
+async def learning_status(
+    x_role: str = Header(default="", alias="X-Role")):
+    """学习状态视图(档案/申诉统计/权重/宪法护栏)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_learning_service import (
+            TrustLearningService,
+        )
+        return await TrustLearningService().learning_status()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/patches")
+async def apply_patch(body: dict,
+                      x_role: str = Header(default="",
+                                           alias="X-Role")):
+    """伦理补丁注入(β 映射更新, 版本留痕)
+
+    body: {kind: beta_update, payload: {factor, repairKind,
+    beta, label?, category}, note?}
+    """
+    _require_admin(x_role)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_learning_service import (
+            TrustPatchService,
+        )
+        return await TrustPatchService().apply_patch(
+            str(body.get("kind") or ""),
+            body.get("payload") or {},
+            str(body.get("note") or ""))
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/patches")
+async def list_patches(
+    x_role: str = Header(default="", alias="X-Role")):
+    """补丁历史(版本审计)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_learning_service import (
+            TrustPatchService,
+        )
+        return await TrustPatchService().list_patches()
     except Exception as e:
         raise _handle(e) from e
 

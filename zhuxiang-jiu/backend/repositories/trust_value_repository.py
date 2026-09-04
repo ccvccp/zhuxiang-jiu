@@ -52,7 +52,8 @@ class TrustValue45Repository:
 
     _INT_FIELDS = ("trustId", "eventId")
     _BOOL_FIELDS = ("fused", "frozen")
-    _FLOAT_FIELDS = ("score", "rawScore", "delta")
+    _FLOAT_FIELDS = ("score", "rawScore", "delta",
+                     "scoreBefore", "scoreAfter")
 
     def __init__(self):
         self.store = get_in_memory_store()

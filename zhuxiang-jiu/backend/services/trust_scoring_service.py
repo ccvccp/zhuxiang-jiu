@@ -351,14 +351,9 @@ class TrustProfileService:
                 f"非法 severity: {severity}"
                 f"(合法值: {'/'.join(SEVERITY_VALUES)})")
 
-        # 事件落库(审计流水)
+        # 事件落库(审计流水; P4 起补 scoreBefore/After 归因口径)
         event_id = await self.repo.next_event_id()
-        await self.repo.save_event({
-            "eventId": event_id, "trustId": trust_id,
-            "layer": layer, "factor": factor,
-            "delta": round(delta, 1), "severity": severity,
-            "source": source, "summary": summary or "", "ts": ts(),
-        })
+        score_before = rec.get("score")
 
         # 因子增量更新(0-100 夹取)
         factors = dict(rec.get("factors") or {})
@@ -374,7 +369,18 @@ class TrustProfileService:
             rec["l1Severity"] = sev
 
         await self.repo.save_profile(rec)
-        return await self.compute_score(trust_id)
+        result = await self.compute_score(trust_id)
+        # 事件落库(归因口径: 变动前后信值分)
+        await self.repo.save_event({
+            "eventId": event_id, "trustId": trust_id,
+            "layer": layer, "factor": factor,
+            "delta": round(delta, 1), "severity": severity,
+            "source": source, "summary": summary or "",
+            "scoreBefore": score_before or 0,
+            "scoreAfter": result.get("score") or 0,
+            "ts": ts(),
+        })
+        return result
 
     async def compute_score(self, trust_id: int) -> dict:
         """重算(熔断判定 → 三层评分 → 熔断锁档 → 落盘)
