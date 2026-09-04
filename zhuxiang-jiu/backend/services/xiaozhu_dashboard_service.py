@@ -60,8 +60,8 @@ class XiaozhuDashboardService:
         self.repo = repo or Xiaozhu48Repository()
 
     async def build(self) -> dict:
-        """七区块聚合(单次 GET, fail-soft 分区——49号P4
-        新增 FC 分区)"""
+        """区块聚合(单次 GET, fail-soft 分区——48号六区块
+        +49号P4 FC 分区+50号P5 语音积分分区)"""
         zones = {}
         errors = []
 
@@ -84,6 +84,9 @@ class XiaozhuDashboardService:
         # 49号P4: FC 分区(可信函数调用——调用量/失败降级/
         # 预算消耗/token 拒绝分布)
         await _zone("fc", self._zone_fc)
+        # 50号P5: 语音积分分区(发放分布/结算批次/
+        # 反作弊处置计数——fail-soft)
+        await _zone("voice50", self._zone_voice50)
 
         return {
             "success": True,
@@ -298,6 +301,98 @@ class XiaozhuDashboardService:
             "note": "失败降级率/拒绝分布骤升=攻击面或"
                     "数据源异常预警(红队 RT-07~11 与 "
                     "notFound/used/crossUser 计数对应)",
+        }
+
+    async def _zone_voice50(self) -> dict:
+        """⑧ 语音积分分区(50号P5——发放分布/池汇总/
+        结算批次/反作弊处置计数)
+
+        数据源: voice50_events/ledger/settlement/
+        adjudication(独立键空间); 引擎 off 时返回
+        空态(不误报)。
+        """
+        from repositories.voice50_repository import (
+            Voice50Repository,
+        )
+        from services.xiaozhu_voice50_service import (
+            voice50_mode_enabled,
+        )
+        if not voice50_mode_enabled():
+            return {
+                "enabled": False,
+                "note": "语音积分引擎未启用"
+                        "(VOICE50_MODE=off)——零影响态",
+            }
+        vrepo = Voice50Repository()
+        events = await vrepo.list_events(limit=10000)
+        by_layer: dict = {}
+        by_behavior: dict = {}
+        awarded = 0.0
+        pending_n = 0
+        for e in events:
+            layer = e.get("layer") or "L1"
+            by_layer[layer] = by_layer.get(layer, 0) + 1
+            b = e.get("behavior") or "unknown"
+            by_behavior[b] = by_behavior.get(b, 0) + 1
+            awarded += max(0.0, float(
+                e.get("cappedScore") or 0))
+            if e.get("status") == "pending":
+                pending_n += 1
+        # 池汇总(经事件表反查会员)
+        members = sorted({e.get("memberId")
+                          for e in events
+                          if e.get("memberId")})
+        pool_total = 0.0
+        frozen_n = 0
+        for mid in members:
+            ledger = await vrepo.get_ledger(mid)
+            if ledger:
+                pool_total += float(
+                    ledger.get("poolBalance") or 0)
+                if ledger.get("frozen"):
+                    frozen_n += 1
+        # 结算批次
+        batches = await vrepo.list_settlements(limit=200)
+        by_batch_status: dict = {}
+        for b in batches:
+            s = b.get("status") or "unknown"
+            by_batch_status[s] = \
+                by_batch_status.get(s, 0) + 1
+        # 反作弊处置
+        adj = await vrepo.list_adjudications(limit=500)
+        by_pattern: dict = {}
+        by_adj_status: dict = {}
+        for a in adj:
+            p = a.get("pattern") or "unknown"
+            by_pattern[p] = by_pattern.get(p, 0) + 1
+            s = a.get("status") or "pending"
+            by_adj_status[s] = \
+                by_adj_status.get(s, 0) + 1
+        return {
+            "enabled": True,
+            "events": len(events),
+            "byLayer": by_layer,
+            "byBehavior": dict(sorted(
+                by_behavior.items(),
+                key=lambda kv: -kv[1])[:8]),
+            "awardedTotal": round(awarded, 2),
+            "pendingEvents": pending_n,
+            "poolTotal": round(pool_total, 2),
+            "members": len(members),
+            "frozenMembers": frozen_n,
+            "settlements": {
+                "total": len(batches),
+                "byStatus": by_batch_status,
+            },
+            "adjudications": {
+                "total": len(adj),
+                "byPattern": by_pattern,
+                "byStatus": by_adj_status,
+                "retentionDays": 180,
+            },
+            "note": "池保鲜不碰信值(90 天月衰减 5%/保底"
+                    " 30%); 处置只冻结积分域——语音入口"
+                    "永不阻断",
         }
 
     # --------------------------------------------------------

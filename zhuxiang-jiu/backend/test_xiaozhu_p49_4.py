@@ -199,8 +199,8 @@ class TestDashboardFc:
         svc = XiaozhuDashboardService()
         board = await svc.build()
         zones = board.get("zones") or {}
-        record("看板七区块(fail-soft 无错)",
-               len(zones) == 7
+        record("看板八区块(fail-soft 无错)",
+               len(zones) == 8
                and not (board.get("zoneErrors") or []),
                str(board.get("zoneErrors")))
         fc = zones.get("fc") or {}
@@ -267,7 +267,7 @@ class TestDashboardFc:
                .get("fc", {}).get("error"),
                str(board2.get("zoneErrors")))
         record("fail-soft 其余区块正常",
-               len((board2.get("zones") or {})) == 7
+               len((board2.get("zones") or {})) == 8
                and "usage" in (board2.get("zones")
                                or {}))
 

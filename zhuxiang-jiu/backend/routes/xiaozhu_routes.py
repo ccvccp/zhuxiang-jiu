@@ -2,7 +2,7 @@
 
 端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1
      + 49号P2 2 + 49号P4 1 + 50号P0 5 + 50号P2 2
-     + 50号P3 6 + 50号P4 3 = 41):
+     + 50号P3 6 + 50号P4 3 + 50号P5 3 = 44):
     POST /api/xiaozhu/sessions              开启会话
     POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
@@ -31,6 +31,9 @@
     POST /api/xiaozhu/voice50/adjudications/{id}/appeal  申诉提交(50号P4)
     POST /api/xiaozhu/voice50/adjudications/{id}/decide  申诉复核(50号P4, admin)
     GET  /api/xiaozhu/voice50/adjudications  处置台账视图(50号P4, admin)
+    PUT  /api/xiaozhu/voice50/group-profile  群体画像设置(50号P5, admin)
+    POST /api/xiaozhu/voice50/decay          激励池月度衰减(50号P5, admin)
+    POST /api/xiaozhu/voice50/offset         池对冲修复(50号P5)
 
 鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例);
 管理端 X-Role: admin(43-47号同款口径)。
@@ -931,6 +934,81 @@ async def voice50_adjudications(
         return await Voice50GateService(
         ).adjudication_view(member_id=member_id,
                            limit=limit)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 50号 P5 群体/衰减/对冲收官
+# ============================================================
+
+@router.put("/voice50/group-profile")
+async def voice50_group_profile(
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """设置群体画像(admin——minor/elder/disabled/
+    org_proxy/none; 系数只作用积分折算不碰预算)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    if not isinstance(body, dict) \
+            or "memberId" not in body \
+            or "group" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 memberId 与 group 字段")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().set_group_profile(
+            int(body["memberId"]), body.get("group"),
+            verified=bool(body.get("verified")),
+            guardian_id=body.get("guardianId"))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/decay")
+async def voice50_decay(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """激励池月度衰减(admin——90 天无交互 5%/月,
+    保底 30%; 只作用池不碰信值)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().run_decay()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/offset")
+async def voice50_offset(
+    body: dict,
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """池余额抵扣历史违规(会员——≤50%/次, 走 45号
+    submit_repair 修复通道)"""
+    member_id = _require_member_strict(x_member_id)
+    if not isinstance(body, dict) \
+            or "violationEventId" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 violationEventId 字段")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().offset_violation(
+            member_id, int(body["violationEventId"]),
+            amount=body.get("amount"))
     except Exception as e:
         raise _handle(e) from e
 

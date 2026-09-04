@@ -123,8 +123,8 @@ def run_round(round_no: int) -> None:
         "GET", "/api/xiaozhu/dashboard", headers=ADMIN)
     record("看板可拉取(admin)", code == 200, str(code))
     zones = board.get("zones") or {}
-    record("七区块齐备(含 fc)",
-           len(zones) == 7 and "fc" in zones
+    record("八区块齐备(含 fc)",
+           len(zones) == 8 and "fc" in zones
            and not (board.get("zoneErrors") or []),
            str(board.get("zoneErrors")))
     fc = zones.get("fc") or {}

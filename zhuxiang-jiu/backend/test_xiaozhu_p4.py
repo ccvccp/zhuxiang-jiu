@@ -105,13 +105,13 @@ class TestDashboardZones:
         svc = XiaozhuDashboardService()
 
         # 空库: 分区齐备 + zoneErrors 空
-        # (49号P4 新增 fc 分区——48号六区块+1)
+        # (49号P4 新增 fc/50号P5 新增 voice50 分区)
         b = await svc.build()
-        record("区块齐备(48号六区块+49号P4 fc)",
+        record("区块齐备(48号六区块+fc+voice50)",
                set(b["zones"].keys()) == {
                    "usage", "commands", "confirm",
                    "points", "cocreate", "fairness",
-                   "fc"}
+                   "fc", "voice50"}
                and b["zoneErrors"] == [],
                str(list(b["zones"].keys())))
         record("红线常驻",
@@ -333,7 +333,7 @@ class TestHttp:
                and set(body.get("zones") or {}) == {
                    "usage", "commands", "confirm",
                    "points", "cocreate", "fairness",
-                   "fc"},
+                   "fc", "voice50"},
                str(resp.status_code))
         record("看板 fail-soft 字段齐备",
                "zoneErrors" in body

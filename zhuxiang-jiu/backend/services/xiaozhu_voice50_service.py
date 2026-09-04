@@ -39,6 +39,8 @@ from services.xiaozhu_voice50_rules import (
     QUALITY_THRESHOLD, VOICEPRINT_PROXY, VOICEPRINT_REAL,
     DEFAULT_MODE, rules_view,
     NEWCOMER_L3_BOOST, NEWCOMER_WINDOW_DAYS,
+    DECAY_IDLE_DAYS, DECAY_MONTHLY_RATE, DECAY_FLOOR,
+    OFFSET_MAX_RATIO,
 )
 
 logger = logging.getLogger("xiaozhu_voice50")
@@ -89,7 +91,7 @@ class Voice50Service:
                               *,
                               voiceprint: str = "",
                               quality: float = None,
-                              group_mult: float = 1.0,
+                              group_mult: float = None,
                               gains: dict = None,
                               penalty: bool = False,
                               extra_mult: float = 1.0,
@@ -167,6 +169,12 @@ class Voice50Service:
                     "note": f"日限 {daily_cap} 已满——"
                             "超限不累计(v2.0 日限口径)",
                 }
+
+        # ---- 群体系数(P5: 群体画像自动读——显式
+        #      group_mult 覆盖优先) ----
+        if group_mult in (None, 1.0):
+            group_mult = await self._group_mult(
+                member_id, rule["layer"])
 
         # ---- 系数链(P2: 乘性 gains + 加法 bonus——
         #      v2.0 "被采纳 +10"类加成为加法语义) ----
@@ -976,6 +984,236 @@ class Voice50Service:
             gains={"quality": float(quality) > 0.7},
             note=f"fl-gradient|q:{quality}"
                  f"|budget:{budget.get('remaining')}")
+
+    # --------------------------------------------------------
+    # P5 群体三场景(儿童老人/残障/企业代理)
+    # --------------------------------------------------------
+
+    # 群体系数表(v2.0 §五——三场景)
+    GROUP_MULTIPLIERS = {
+        # 儿童/老人: 声纹阈值放宽 20%(P1 口径外的
+        # 积分层): L2 礼貌 ×1.5 / L3 贡献 ×0.8
+        # (防数据剥削); 日上限 -30% 由封顶乘算实现
+        "minor": {"L1": 1.0, "L2": 1.5, "L3": 0.8,
+                  "capFactor": 0.7},
+        "elder": {"L1": 1.0, "L2": 1.5, "L3": 0.8,
+                  "capFactor": 0.7},
+        # 残障(认证): 全积分 ×1.2 补偿
+        "disabled": {"L1": 1.2, "L2": 1.2, "L3": 1.2,
+                     "capFactor": 1.0},
+        # 企业代理: L1 正常 / L2·L3 ×0.5(非个人意愿)
+        "org_proxy": {"L1": 1.0, "L2": 0.5, "L3": 0.5,
+                      "capFactor": 1.0},
+    }
+
+    async def _group_mult(self, member_id: int,
+                          layer: str) -> float:
+        """群体系数(画像自动读——fail-soft 1.0)"""
+        try:
+            profile = await self.repo.get_group_profile(
+                member_id)
+            if not profile:
+                return 1.0
+            group = profile.get("group") or ""
+            table = self.GROUP_MULTIPLIERS.get(group)
+            if not table:
+                return 1.0
+            return float(table.get(layer) or 1.0)
+        except Exception:  # noqa: BLE001
+            return 1.0
+
+    async def set_group_profile(self, member_id: int,
+                                group: str,
+                                verified: bool = False,
+                                guardian_id: int = None
+                                ) -> dict:
+        """设置群体画像(admin/认证流程)
+
+        群体: minor(儿童)/elder(老人)/disabled(残障,
+        认证)/org_proxy(企业代理, DID 外部待办)/none。
+        红线: 群体系数作用积分折算不碰预算分级
+        (预算均等红线不破——计划 §三-5)。
+        """
+        group = str(group or "none").strip().lower()
+        if group not in ("minor", "elder", "disabled",
+                         "org_proxy", "none"):
+            raise ValueError(
+                f"非法群体 {group}(合法: minor/elder/"
+                f"disabled/org_proxy/none)")
+        rec = (await self.repo.get_group_profile(member_id)
+                or {"memberId": member_id})
+        rec.update({
+            "group": group,
+            "verified": bool(verified),
+            "guardianId": guardian_id or 0,
+            "ts": ts(),
+        })
+        await self.repo.save_group_profile(rec)
+        mults = self.GROUP_MULTIPLIERS.get(group)
+        return {
+            "success": True, "memberId": member_id,
+            "group": group,
+            "verified": bool(verified),
+            "multipliers": mults or {
+                "note": "none 群体无系数(标准计分)"},
+            "note": "群体系数只作用积分折算——预算均等"
+                    "红线不破(不与信值等级挂钩)" if mults
+                    else "标准计分",
+        }
+
+    # --------------------------------------------------------
+    # P5 激励池衰减(月度——保鲜不惩罚)
+    # --------------------------------------------------------
+
+    async def run_decay(self) -> dict:
+        """激励池月度衰减(v2.0 §七)
+
+        语义(计划 §三-1 红线裁定):
+        - 90 天无语音交互 → 池月衰减 5%, 保底 30%
+        (历史贡献底薪不没收——衰减对象只是池,
+          绝不触碰已入账信值分);
+        - 衰减史留痕(可审计)。
+        Returns:
+            {decayed: n, skipped: n, details: [...]}
+        """
+        from datetime import datetime, timedelta
+        now = datetime.now(UTC)
+        ledgers = []
+        # 全量台账(经事件表反查 member——池在 ledger)
+        evs = await self.repo.list_events(limit=100000)
+        members = sorted({e.get("memberId")
+                          for e in evs if e.get("memberId")})
+        for mid in members:
+            rec = await self.repo.get_ledger(mid)
+            if rec:
+                ledgers.append(rec)
+        decayed, skipped, details = 0, 0, []
+        for ledger in ledgers:
+            mid = ledger.get("memberId")
+            balance = float(ledger.get("poolBalance") or 0)
+            if balance <= 0:
+                skipped += 1
+                continue
+            # 最近交互(事件最后 ts / ledger.lastActiveAt)
+            last_active = str(
+                ledger.get("lastActiveAt") or "")
+            try:
+                last = datetime.fromisoformat(last_active)
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+            idle_days = (now - last).days
+            if idle_days < DECAY_IDLE_DAYS:
+                skipped += 1
+                continue
+            # 保底 30%(历史贡献底薪)
+            floor = float(ledger.get("earnedTotal") or 0) \
+                * DECAY_FLOOR
+            new_balance = max(floor,
+                              round(balance
+                                    * (1 - DECAY_MONTHLY_RATE),
+                                    2))
+            if new_balance >= balance:
+                skipped += 1   # 已到底薪——不再衰减
+                continue
+            history = list(
+                ledger.get("decayHistory") or [])
+            history.append({
+                "ts": ts(),
+                "from": balance,
+                "to": new_balance,
+                "idleDays": idle_days,
+            })
+            ledger["poolBalance"] = new_balance
+            ledger["decayHistory"] = history[-12:]
+            ledger["ts"] = ts()
+            await self.repo.save_ledger(ledger)
+            decayed += 1
+            details.append({
+                "memberId": mid,
+                "from": balance, "to": new_balance,
+                "idleDays": idle_days})
+            logger.info(
+                "voice50_decayed member=%s %s→%s "
+                "(idle %sd)", mid, balance, new_balance,
+                idle_days)
+        return {"success": True, "decayed": decayed,
+                "skipped": skipped, "details": details[:50],
+                "params": {
+                    "idleDays": DECAY_IDLE_DAYS,
+                    "monthlyRate": DECAY_MONTHLY_RATE,
+                    "floorRate": DECAY_FLOOR},
+                "note": "衰减只作用激励池(保鲜)——"
+                        "已入账信值永不因不用语音回退"}
+
+    # --------------------------------------------------------
+    # P5 修复对冲(≤50%/次——走 45号 submit_repair)
+    # --------------------------------------------------------
+
+    async def offset_violation(self, member_id: int,
+                                violation_event_id: int,
+                                amount: float = None
+                                ) -> dict:
+        """池余额抵扣历史违规(v2.0 §七修复对冲)
+
+        语义: 激励池余额抵扣历史违规扣分, 抵扣比例
+        ≤50%/次(OFFSET_MAX_RATIO); 执行走 45号
+        submit_repair 既有通道(α/β/γ 修复数学全继承
+        ——对冲修复属于修复行为的一种)。
+        Raises:
+            ValueError: 未绑定/池不足/超比例/45号拒绝
+        """
+        binding = await self._get_binding(member_id)
+        if binding is None:
+            raise ValueError(
+                "尚未绑定居值档案——无法对冲修复")
+        ledger = await self._ensure_ledger(member_id)
+        balance = float(ledger.get("poolBalance") or 0)
+        if balance <= 0:
+            raise ValueError(
+                f"激励池余额不足({balance})——无法对冲")
+        # 池内划扣上限: 余额 ×50%
+        max_offset = round(
+            balance * OFFSET_MAX_RATIO, 2)
+        use = (round(float(amount), 2)
+               if amount is not None else max_offset)
+        if use <= 0:
+            raise ValueError("对冲金额需为正")
+        if use > max_offset:
+            raise ValueError(
+                f"对冲超上限(余额 {balance} 的 50%"
+                f"={max_offset}, 请求 {use})")
+        # 45号 submit_repair(对冲修复——kind 走既有
+        # 白名单; evidence=对冲留痕)
+        from services.trust_repair_service import (
+            TrustRepairService,
+        )
+        repair = await TrustRepairService().submit_repair(
+            binding["trustId"], violation_event_id,
+            [{
+                "kind": "community_service",
+                # 1 池分=1 服务值(封顶 100——45号
+                # submit_repair value 口径)
+                "value": min(100, int(use)),
+                "evidence": (f"voice50 激励池对冲抵扣"
+                             f"(划扣 {use} 池分, "
+                             f"余额 {balance})"),
+            }],
+            sources=["voice50_engine", "session_audit"])
+        # 池划扣 + 留痕
+        ledger["poolBalance"] = _r2(balance - use)
+        ledger["offsetUsed"] = _r2(float(
+            ledger.get("offsetUsed") or 0) + use)
+        ledger["ts"] = ts()
+        await self.repo.save_ledger(ledger)
+        return {
+            "success": True, "memberId": member_id,
+            "offset": use,
+            "poolBalance": ledger["poolBalance"],
+            "repairId": repair.get("repairId"),
+            "note": "对冲走 45号修复通道(α/β/γ 数学"
+                    "全继承); 池上限 50%/次",
+        }
 
     # --------------------------------------------------------
     # P3 公平性桥(46号采样——L3 分布无歧视核验)
