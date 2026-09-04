@@ -1,0 +1,173 @@
+<!--
+    45号·信值模块治理看板(P0-P5 六区块)
+    页面: trust-dashboard.html(配套脚本 js/trust-dashboard.js)
+    依赖: css/style.css(主题变量) / 后端 45号 trust_value_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    数据源: GET /api/trust/open/dashboard(六区块聚合, 手动刷新)
+    区块: ①角色档案总览(双角色/熔断率/分数分层)
+          ②AI雷达态势 ③修复引擎 ④信值资产(发行/销毁/准备金)
+          ⑤自进化面板 ⑥监管审计日志
+    红线提示: 1 TV = 1 元货品/服务, 不可兑现金/不可二级交易
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>45号·信值治理看板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#4a5568,#2d3748);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #2d3748;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-info{background:#efe;border:1px solid #9c9;color:#393;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:8px}
+    .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
+        padding:8px 10px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .v{font-size:17px;font-weight:600}
+    .ov-cell .v.red{color:#c0392b}
+    .ov-cell .v.green{color:#2f9e44}
+    .ov-cell .v.blue{color:#24619c}
+    .ov-cell .v.yellow{color:#a37400}
+    table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
+    .dash-table th{text-align:left;padding:6px 8px;background:
+        var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
+        var(--color-border,#ddd);white-space:nowrap}
+    .dash-table td{padding:5px 8px;border-bottom:1px solid
+        var(--color-border,#eee);vertical-align:top}
+    .grade-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600}
+    .grade-pill.healthy{background:#e9f7ee;color:#2f9e44}
+    .grade-pill.watch{background:#fff7e0;color:#a37400}
+    .grade-pill.strained{background:#fdeaea;color:#c0392b}
+    .grade-pill.critical{background:#c0392b;color:#fff}
+    .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
+        padding:8px 12px;border-radius:5px;margin-bottom:14px;
+        font-size:11px}
+    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>45号·信值治理看板</h1>
+    <p>社会资本数字化度量与动态修复系统（三层宪法 50/30/20 · 1 TV = 1 元 · P0-P5 全量）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div id="infoBar" class="dash-info"></div>
+            <div class="redline-bar">
+                ⚠️ 价值红线：1 TV = 1 元<b>货品/服务</b>——不可兑现金、不可作贷款
+                审批依据、不可二级市场交易（账本 direction 枚举锁死）。
+            </div>
+        </div>
+    </div>
+
+    <!-- ① 角色档案总览 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 角色档案总览（双角色分布 / 熔断态 / 分数分层）</h3></div>
+            <div id="ovOverview" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ② AI 雷达态势 + ③ 修复引擎 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② AI 雷达态势（三通道采集）｜③ 修复引擎监控</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovRadar" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="radarBySource"></div>
+                </div>
+                <div>
+                    <div id="ovRepair" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888">
+                        修复引擎: 违规即开通道(24h 内效率≈30 天后 18 倍);
+                        severe 天花板 α=0.3 / criminal 永久熔断。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ④ 信值资产 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>④ 信值资产总览（发行 / 销毁 / 准备金覆盖率）</h3></div>
+            <div id="ovAssets" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ⑤ 自进化面板 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑤ 自进化面板（申诉 / 回流 / 伦理补丁）</h3></div>
+            <div id="ovEvolution" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ⑥ 监管审计日志(档案级查询) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑥ 监管审计日志（开放面访问留痕——输入 trustId 查询）</h3>
+                <div class="dash-toolbar">
+                    <input id="auditTrustId" size="10" placeholder="trustId">
+                    <button class="dash-btn ghost" onclick="loadAudit()">查询访问日志</button>
+                </div>
+            </div>
+            <div style="max-height:260px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>时间</th><th>动作</th><th>调用方</th><th>对象</th><th>明细</th>
+                    </tr></thead>
+                    <tbody id="auditLog"><tr><td colspan="5"
+                        class="dash-empty">输入 trustId 后查询(或走开放面 ⑤ 监管审计 API)</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        开放面五类 API 走 44号 Key 网关 ·
+        计划: docs/45号_信值模块实施计划.md
+    </div>
+</div>
+
+<script src="js/trust-dashboard.js"></script>
+</body>
+</html>

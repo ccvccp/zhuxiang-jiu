@@ -53,17 +53,35 @@
                                          更新, 版本留痕)
     GET  /api/trust/patches               补丁历史(版本审计)
 
+端点(P5, 对外服务开放面 6——走 44号 Key 网关):
+    GET  /api/trust/open/query/{trustId}       ①信值查询
+                                              (字段级脱敏+修复建议)
+    POST /api/trust/open/redeem/confirm       ②兑换核销(幂等键
+                                              +nonce 防重放)
+    POST /api/trust/open/deposits             ③行为存证(敏感词
+                                              过滤+验真)
+    POST /api/trust/open/convert              ④信用分单向转换
+                                              (nonce 防重放)
+    GET  /api/trust/open/audit/{trustId}      ⑤监管审计(只读,
+                                              全留痕)
+    GET  /api/trust/open/dashboard            治理看板聚合
+                                              (六区块数据源)
+
 鉴权:
     - 自助面(建档/查询/重算/存证/修复/兑换/转换/申诉): 公开
       (信值查询脱敏口径——摘要掩码展示, 明文永不返回)
     - 事件灌入/申诉裁决/学习三连/补丁: X-Role: admin
       (43/44号同款口径)
+    - 开放面(/open/*): 44号 Key 网关(台账 published 后
+      Key 双头+QPS+日配额; 未发布时公开兜底, 业务层
+      防重放/幂等/审计先行)
 
 统一口径:
     - 模块纯增量(零既有路由改动)
     - KeyError → 404 / ValueError → 409(44号同款)
     - 价值红线: TV 只兑货品/服务, 不可兑现金/不可二级交易
-      (账本 direction 枚举锁死, 无 transfer_out 类型)
+      (账本 direction 枚举锁死, 无 transfer_out 类型;
+      开放面无任何转账类 API)
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -599,6 +617,144 @@ async def list_patches(
             TrustPatchService,
         )
         return await TrustPatchService().list_patches()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P5: 对外服务开放面(五类 API + 看板聚合)
+# ============================================================
+
+@router.get("/open/query/{trust_id}")
+async def open_query(trust_id: int,
+                     x_app_code: str = Header(
+                         default="", alias="X-App-Code")):
+    """① 信值查询 API(字段级脱敏 + 修复建议摘要)
+
+    开放面走 44号 Key 网关(台账 published 后双头鉴权/
+    QPS/日配额); 本端点业务层脱敏先行(证件摘要/因子
+    快照不开放)。
+    """
+    try:
+        from services.trust_gateway_service import (
+            TrustGatewayService,
+        )
+        caller = x_app_code or "anonymous"
+        return await TrustGatewayService().open_query(
+            trust_id, caller)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/open/redeem/confirm")
+async def open_redeem_confirm(body: dict):
+    """② 兑换核销 API(商户端验证 + 销毁 TV)
+
+    body: {redeemId, merchant, idempotencyKey(≥8),
+    nonce(≥16), timestamp(秒)}——幂等键重复返回原结果;
+    nonce 原子占位防并发双花; 时间窗 ±300s 防重放。
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_gateway_service import (
+            TrustGatewayService,
+        )
+        return await TrustGatewayService(
+        ).open_redeem_confirm(
+            int(body.get("redeemId") or 0),
+            str(body.get("merchant") or ""),
+            str(body.get("idempotencyKey") or ""),
+            str(body.get("nonce") or ""),
+            body.get("timestamp") or 0)
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/open/deposits")
+async def open_deposits(body: dict):
+    """③ 行为存证 API(敏感词过滤 → P1 验真三道关)
+
+    body: {trustId, layer, factor, observed, peerBaseline,
+    evidence, summary?, sources?}——数据最小必要红线:
+    敏感信息(证件/病历/指纹等)硬拦截。
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_gateway_service import (
+            TrustGatewayService,
+        )
+        return await TrustGatewayService().open_deposit(
+            int(body.get("trustId") or 0),
+            layer=str(body.get("layer") or ""),
+            factor=str(body.get("factor") or ""),
+            observed=body.get("observed") or 0,
+            peer_baseline=body.get("peerBaseline") or 0,
+            evidence=str(body.get("evidence") or ""),
+            summary=str(body.get("summary") or ""),
+            sources=body.get("sources"))
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/open/convert")
+async def open_convert(body: dict):
+    """④ 信用分转换 API(与本站信用分单向同步)
+
+    body: {trustId, userId, creditPoints, nonce, timestamp}
+    ——nonce+时间窗防重放; TV→信用分方向永久禁止。
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_gateway_service import (
+            TrustGatewayService,
+        )
+        return await TrustGatewayService().open_convert(
+            int(body.get("trustId") or 0),
+            int(body.get("userId") or 0),
+            body.get("creditPoints") or 0,
+            str(body.get("nonce") or ""),
+            body.get("timestamp") or 0)
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/open/audit/{trust_id}")
+async def open_audit(trust_id: int,
+                     x_app_code: str = Header(
+                         default="", alias="X-App-Code")):
+    """⑤ 监管审计 API(只读视图 + 操作日志全留存)
+
+    返回档案/事件流水/账本/访问日志四视图(脱敏); 本次
+    访问自身也留痕(审计可回溯)。
+    """
+    try:
+        from services.trust_gateway_service import (
+            TrustGatewayService,
+        )
+        caller = x_app_code or "regulator"
+        return await TrustGatewayService().open_audit(
+            trust_id, caller)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/open/dashboard")
+async def open_dashboard():
+    """治理看板聚合(六区块数据源: 档案/雷达/资产/自进化)"""
+    try:
+        from services.trust_gateway_service import (
+            TrustGatewayService,
+        )
+        return await TrustGatewayService().dashboard()
     except Exception as e:
         raise _handle(e) from e
 

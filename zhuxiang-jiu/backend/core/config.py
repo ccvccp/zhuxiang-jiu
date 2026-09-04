@@ -23,8 +23,12 @@ ROLE_LEVELS = {
 }
 
 ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+# X-Api-Key/X-App-Code: 44号 Key 网关双头(45号开放面/浏览器直连
+# 跨域调试需要); Nonce/Idempotency-Key: 45号开放面防重放头
 ALLOW_HEADERS = ["Authorization", "Content-Type", "X-Role", "X-Member-Id",
-                 "X-Agent-Id", "X-Admin-Id"]
+                 "X-Agent-Id", "X-Admin-Id",
+                 "X-Api-Key", "X-App-Code",
+                 "X-Nonce", "X-Idempotency-Key"]
 
 
 # ============================================================
