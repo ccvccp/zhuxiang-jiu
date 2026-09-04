@@ -45,6 +45,10 @@ GRAY_ZONE = (0.3, 0.8)
 # 融合分阈值(与 v1 VERIFY_THRESHOLD 同口径)
 VERIFY_THRESHOLD = 0.7
 
+# 47号 P3 信任先验融合权重(计划 §六 ①: 画像信任度作为
+# 第 5 分量参与融合——prior×w + 组件融合×(1−w))
+TRUST_PRIOR_WEIGHT = 0.3
+
 # ============================================================
 # 自适应权重档案(模板 §一 WEIGHT_PROFILES; graph 维度以
 # 证据内容质量代理——摆拍/刷单识别本质是内容-团伙特征,
@@ -272,10 +276,26 @@ def _gray_zone_llm(summary: str) -> tuple:
 # 主入口: 验真管线 v2
 # ============================================================
 
+def _blend_trust_prior(fusion: float,
+                       trust_prior: float) -> float:
+    """47号 P3 信任先验融合(计划 §六 ①)
+
+    preliminary = prior×w + 组件融合×(1−w)  (w=0.3)
+
+    折扣是乘性不是禁入: restricted(0.3)+满分证据 → 0.79
+    仍可过验真(风险角色靠证据质量爬回来); trusted 天然
+    高起点(信任加速)。
+    """
+    prior = max(0.0, min(1.0, float(trust_prior)))
+    return round(prior * TRUST_PRIOR_WEIGHT
+                 + float(fusion) * (1 - TRUST_PRIOR_WEIGHT), 4)
+
+
 def verify_pipeline_v2(kind: str, evidence: str,
                        sources: list, summary: str = "",
                        event_timestamps: list = None,
-                       factor: str = "") -> dict:
+                       factor: str = "",
+                       trust_prior: float = None) -> dict:
     """真伪鉴别引擎 v2(自适应权重融合)
 
     组件分复用 v1 三道关(规则兜底层共享):
@@ -288,10 +308,15 @@ def verify_pipeline_v2(kind: str, evidence: str,
     灰色地带(0.3, 0.8): real 轨 LLM 重推理意图分量
     (mock 态不触发, 确定性可测)。
 
+    47号 P3 信任先验(计划 §六 ①, 显式激活零影响):
+        trust_prior != None 时画像信任度作为第 5 分量
+        参与融合(起点折扣/信任加速); 默认 None 完全
+        走既有融合——P7 既有调用与断言零改动。
+
     Returns:
         {verified, confidence, riskTags, components,
          fusionWeights, burstRatio, llmUsed, attribution,
-         checks, fingerprint}
+         checks, fingerprint, trustPrior}
     """
     from services.trust_radar_service import (
         multimodal_check, cross_source_check, intent_check,
@@ -322,6 +347,12 @@ def verify_pipeline_v2(kind: str, evidence: str,
     # --- 初步融合 ---
     preliminary = fuse_scores(components, weights)
 
+    # --- 47号 P3 信任先验融合(显式激活; None 零影响) ---
+    prior_used = trust_prior is not None
+    if prior_used:
+        preliminary = _blend_trust_prior(
+            preliminary, trust_prior)
+
     # --- 灰色地带 LLM(模板: 0.3 < score < 0.8 才调用) ---
     llm_used = False
     if GRAY_ZONE[0] < preliminary < GRAY_ZONE[1] \
@@ -333,12 +364,20 @@ def verify_pipeline_v2(kind: str, evidence: str,
                            if llm_note else intent_note)
             llm_used = True
             preliminary = fuse_scores(components, weights)
+            if prior_used:
+                preliminary = _blend_trust_prior(
+                    preliminary, trust_prior)
 
     score = preliminary
     risk_tags = build_risk_tags(
         components, cross_pass, burst)
     attribution = build_attribution(
         score, components, weights, risk_tags)
+    if prior_used:
+        prior_clamped = max(0.0, min(
+            1.0, float(trust_prior)))
+        attribution += (f"; 信任先验 {prior_clamped}×"
+                        f"{TRUST_PRIOR_WEIGHT} 融合(47号P3)")
     verified = (score >= VERIFY_THRESHOLD
                 and cross_pass)
 
@@ -373,4 +412,11 @@ def verify_pipeline_v2(kind: str, evidence: str,
              "note": temporal_note},
         ],
         "fingerprint": _evidence_fingerprint(evidence),
+        "trustPrior": {
+            "applied": prior_used,
+            "value": (round(max(0.0, min(
+                1.0, float(trust_prior))), 4)
+                if prior_used else None),
+            "weight": TRUST_PRIOR_WEIGHT,
+        },
     }

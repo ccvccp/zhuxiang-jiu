@@ -39,6 +39,9 @@ from core.helpers import ts
 from repositories.trust_value_repository import (
     TrustValue45Repository,
 )
+from services.trust_risk_profile_service import (
+    prior_mode_enabled, ACCEL_CAP,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -463,6 +466,27 @@ class TrustRadarService:
         sources = [s for s in (sources or [])
                    if s != f"trust:{trust_id}"]
 
+        # 47号 P3 先验回流(RISK_PRIOR_MODE=on 显式激活, 默认
+        # off 零影响): 读画像信任度——v2 验真起点折扣 +
+        # L2/L3 入分守门共用; 红线② 仅 L2/L3(L1 法治数据
+        # 官方背书不走风险折损); fail-soft(画像设施异常存证
+        # 照常)
+        prior_info = None
+        if prior_mode_enabled() and layer in ("L2", "L3"):
+            try:
+                from services.trust_risk_profile_service import (
+                    TrustRiskProfileService,
+                )
+                prof = await TrustRiskProfileService(
+                ).get_profile(trust_id)
+                prior_info = {
+                    "trustLevel": prof.get("trustLevel"),
+                    "tier": prof.get("tier"),
+                }
+            except Exception as exc:
+                logger.debug("trust47_prior_read_skip: %s",
+                             exc)
+
         # 验真管线(P7: verify_mode="v2" 走增强引擎——
         # 自适应权重融合+时序基线; 默认 v1 零影响)
         if (verify_mode or "v1").lower() == "v2":
@@ -477,7 +501,9 @@ class TrustRadarService:
                 event_timestamps=[
                     e.get("ts") for e in history
                     if e.get("ts")],
-                factor=factor)
+                factor=factor,
+                trust_prior=(prior_info or {}).get(
+                    "trustLevel"))
         else:
             v = verify_pipeline(
                 "deposit", evidence,
@@ -503,6 +529,8 @@ class TrustRadarService:
                     "verifyEngine": v.get("engine", "v1"),
                     "riskTags": v.get("riskTags"),
                     "attribution": v.get("attribution"),
+                    "trustPrior": v.get("trustPrior"),
+                    "riskPriorGate": None,
                     "netContribution": 0.0, "applied": False,
                     "note": "验真未通过(孤证/置信度不足), "
                             "不入分——可补充独立源后重新提交"}
@@ -510,12 +538,14 @@ class TrustRadarService:
         # 因果净贡献(反事实基线剔除)
         net = net_contribution(observed, peer_baseline)
         # 折算因子增量: 净贡献线性映射, 上限 +30(存证单次)
-        delta = min(30.0, net / 10.0)
+        base_delta = min(30.0, net / 10.0)
+        delta = base_delta
 
         # 47号 P1 语义指纹复用判定(fail-soft——改字重放识别;
         # 命中 → 正向 delta ×0.3 + semantic_reuse 沉淀画像)
         semantic = {"hit": False, "similarity": 0.0,
                     "reason": "", "bucketSize": 0}
+        entry_mult = 1.0
         if delta > 0:
             try:
                 from services.trust_risk_detector_service import (
@@ -529,8 +559,9 @@ class TrustRadarService:
                     risk_svc.semantic_check_and_sink(
                         trust_id, evidence)
                 if semantic.get("hit"):
+                    entry_mult *= SEMANTIC_REUSE_PENALTY
                     delta = round(
-                        delta * SEMANTIC_REUSE_PENALTY, 1)
+                        base_delta * entry_mult, 1)
             except Exception as exc:
                 logger.debug("trust47_semantic_skip: %s", exc)
 
@@ -549,10 +580,45 @@ class TrustRadarService:
                 value_mismatch = detect_value_mismatch(
                     observed, peer_baseline, comp_min)
                 if value_mismatch.get("hit"):
-                    delta = round(delta * 0.5, 1)
+                    entry_mult *= 0.5
+                    delta = round(
+                        base_delta * entry_mult, 1)
             except Exception as exc:
                 logger.debug("trust47_value_mismatch_skip: "
                              "%s", exc)
+
+        # 47号 P3 L2/L3 入分守门(RISK_PRIOR_MODE=on 显式激活;
+        # 红线② 只作用 L2/L3 自愿申报——L1 官方背书不折损;
+        # 红线③ 负向/零 delta 永不折损; §十一 入口×画像
+        # 叠乘封底 ×0.4, 命中入口守门(P1)时信任加速失效)
+        risk_prior_gate = None
+        if prior_info and layer in ("L2", "L3") \
+                and delta > 0:
+            try:
+                from services.trust_risk_profile_service import (
+                    TIER_DELTA_GATE, GATE_COMBINED_FLOOR,
+                )
+                gate = TIER_DELTA_GATE.get(
+                    prior_info["tier"], 1.0)
+                if entry_mult < 1.0:
+                    # 入口守门已折损: 不再加速, 叠乘封底
+                    gate = min(gate, 1.0)
+                    combined = max(
+                        entry_mult * gate,
+                        GATE_COMBINED_FLOOR)
+                else:
+                    combined = gate
+                delta = round(base_delta * combined, 1)
+                risk_prior_gate = {
+                    "tier": prior_info["tier"],
+                    "trustLevel": prior_info["trustLevel"],
+                    "gateMultiplier": gate,
+                    "entryMultiplier": round(entry_mult, 2),
+                    "combinedMultiplier": round(combined, 2),
+                }
+            except Exception as exc:
+                logger.debug("trust47_prior_gate_skip: %s",
+                             exc)
 
         # 47号风险画像回流(fail-soft——P7 验真结果+P1 语义/
         # 价值命中沉淀; verified 通过不加分: 画像只记风险
@@ -582,12 +648,21 @@ class TrustRadarService:
                          "%s", exc)
 
         # P6 UEBA 自愿披露激励(正向才激励——防"认领扣分";
-        # None/False 不激励, 既有调用零影响)
+        # None/False 不激励, 既有调用零影响) + P3 信任加速
+        # 封顶(§六 ②: trusted ×1.1 × voluntary ×1.05 → ×1.15)
         from services.trust_ueba_service import voluntary_bonus
         bonus_mult, bonus_note = voluntary_bonus(
             voluntary, positive=delta > 0)
         if bonus_mult > 1.0:
-            delta = round(delta * bonus_mult, 1)
+            gate_mult = (risk_prior_gate or {}).get(
+                "gateMultiplier")
+            if (gate_mult and gate_mult > 1.0
+                    and entry_mult >= 1.0):
+                total_accel = min(
+                    ACCEL_CAP, gate_mult * bonus_mult)
+                delta = round(base_delta * total_accel, 1)
+            else:
+                delta = round(delta * bonus_mult, 1)
 
         # 显式落库存证事件(depositId 稳定——status 可查),
         # 再走因子增量(record_event 只管因子更新)
@@ -632,6 +707,8 @@ class TrustRadarService:
                 "verifyEngine": v.get("engine", "v1"),
                 "riskTags": v.get("riskTags"),
                 "attribution": v.get("attribution"),
+                "trustPrior": v.get("trustPrior"),
+                "riskPriorGate": risk_prior_gate,
                 "semanticReuse": {
                     "hit": semantic.get("hit"),
                     "similarity":

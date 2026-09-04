@@ -14,7 +14,9 @@
      calibrateNote(校准理由留痕), calibrateAt,
      evidenceFingerprints(JSON: P1 近 100 条语义指纹桶
      ——[{grams, ts, evSha}]), createdAt, lastUpdated,
-     riskHistory(JSON: 近 20 条风险事件快照)}
+     riskHistory(JSON: 近 20 条风险事件快照),
+     reviewRequests(JSON: P3 近 20 条复核申诉
+     ——[{reviewId, reason, status, requestedAt, ...}])}
 
 设计对齐:
     - 双模式存储 + 显式序列化口径(38-46号惯例:
@@ -92,7 +94,8 @@ class TrustRisk47Repository:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
                     record[k] = {} if k == "hitCounts" else []
-            elif k == "evidenceFingerprints":
+            elif k in ("evidenceFingerprints",
+                       "reviewRequests"):
                 try:
                     record[k] = json.loads(v) if v else []
                 except (TypeError, ValueError):
