@@ -174,6 +174,21 @@ TOOL_REGISTRY = {
         "requiresConsent": False,
         "safeMessage": "预算信息暂时读取失败, 请稍后再试。",
     },
+    "explanation.report": {
+        "operationId": "get_explanation_report",
+        "summary": "打开归因报告(修复说明)",
+        "description": "【只读】当用户说「打开修复说明/为什么"
+                      "扣分」时调用, 基于最近写操作的"
+                      "explainability_ref 返回归因报告"
+                      "(45号 attribution 全文+回放留痕)。"
+                      "❌ 报告数字只来自数据层, 禁止自行"
+                      "解释编造。🔒 privacy_cost: 0(解释权"
+                      "零成本——可解释性红线)。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.0,
+        "requiresConsent": False,
+        "safeMessage": "归因报告暂时读取失败, 请稍后再试。",
+    },
     # ---------- 写(2) ----------
     "trust.bind": {
         "operationId": "bind_trust_profile",

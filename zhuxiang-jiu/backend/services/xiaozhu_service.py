@@ -159,6 +159,14 @@ COMMANDS = [
         "examples": ["小竹，查我的信值", "小竹，我的信值多少"],
     },
     {
+        "action": "explanation.report",
+        "label": "打开修复说明",
+        "patterns": ["打开修复说明", "修复说明", "归因报告",
+                     "为什么扣分", "打开归因", "说明一下",
+                     "为什么恢复"],
+        "examples": ["小竹，打开修复说明"],
+    },
+    {
         "action": "nav.page",
         "label": "页面导航",
         "patterns": ["打开", "带我去", "跳转到", "去个人",
@@ -634,6 +642,9 @@ class XiaozhuService:
             if action == "privacy.budget":
                 return await self._exec_privacy_budget(
                     member_id)
+            if action == "explanation.report":
+                return await self._exec_explanation_report(
+                    session, member_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("voice48_exec_fail %s: %s",
                            action, exc)
@@ -775,6 +786,9 @@ class XiaozhuService:
         """
         from services.xiaozhu_executor import get_executor
         ex = get_executor()
+        # confirm 前取会话 id(核销后令牌即焚)
+        _entry = ex._tokens.get(token) or {}
+        _sid = _entry.get("sessionId")
         r = await ex.confirm(token, code)
         result = r.get("result") or {}
         # 49号P1: 双因子齐备 → consent_token 透传(60s 一次性
@@ -782,19 +796,45 @@ class XiaozhuService:
         extra = {k: r[k] for k in (
             "consentToken", "consentExpiresIn",
             "voiceConfirmed") if k in r}
+        # 49号P3: explainability_ref 绑定(铁律②——
+        # 缺失业务标识即阻断; 归因播报参数化)
+        action = r.get("action")
+        try:
+            from services.xiaozhu_explainability_service \
+                import XiaozhuExplainabilityService
+            ref_bind = XiaozhuExplainabilityService.bind(
+                action, result)
+            extra.update(ref_bind)
+        except ValueError:
+            raise   # 阻断(不返回半成品)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice49_ref_bind_skip: %s", exc)
+        broadcast = extra.pop("attributionBroadcast", "")
+        # 会话侧留最近 ref("打开修复说明"跨轮次可达)
+        if extra.get("explainabilityRef") and _sid:
+            try:
+                s = await self.repo.get_session(_sid)
+                if s:
+                    s["lastRef"] = extra[
+                        "explainabilityRef"]
+                    await self.repo.save_session(s)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("voice49_ref_keep_skip: %s",
+                             exc)
         if r.get("action") == "trust.convert" \
                 and result.get("success"):
             return {
                 "success": True, "executed": True,
-                "reply": f"兑换完成——到账 "
-                         f"{result.get('amount')} TV"
-                         f"(余额 {result.get('balance')})",
+                "reply": (f"兑换完成——到账 "
+                          f"{result.get('amount')} TV"
+                          f"(余额 {result.get('balance')})"
+                          + broadcast),
                 "result": result, **extra}
         return {"success": bool(result.get("success")),
                 "executed": True,
-                "reply": str(result.get("detail")
-                             or result.get("error")
-                             or "已执行"),
+                "reply": (str(result.get("detail")
+                              or result.get("error")
+                              or "已执行") + broadcast),
                 "result": result, **extra}
 
     # --------------------------------------------------------
@@ -1064,6 +1104,56 @@ class XiaozhuService:
                      "usedToday": v["usedToday"],
                      "history": history},
             "jump": None,
+        }
+
+    async def _exec_explanation_report(self,
+                                       session: dict,
+                                       member_id: int) -> dict:
+        """49号P3 "打开修复说明"(ref 落地——归因三源)
+
+        优先取会话最近一轮写操作 card 的 explainabilityRef
+        (无则提示先执行写操作)→ 归因报告卡片。
+        """
+        from services.xiaozhu_explainability_service import (
+            XiaozhuExplainabilityService,
+        )
+        # 会话侧最近 ref(confirm 落笔时留痕)优先,
+        # 次选写操作轮次卡片携带
+        ref = session.get("lastRef")
+        if not ref:
+            turns = await self.repo.list_turns(
+                session["sessionId"])
+            for t in reversed(turns):
+                card = t.get("card") or {}
+                ref = card.get("explainabilityRef")
+                if ref:
+                    break
+        svc = XiaozhuExplainabilityService(
+            repo=self.repo)
+        if not ref:
+            return {
+                "reply": "最近没有可解释的操作——先执行"
+                         "兑换/修复后, 再说「打开修复说明」"
+                         "查看归因",
+                "card": None,
+            }
+        try:
+            r = await svc.report_of_ref(member_id, ref)
+        except KeyError as exc:
+            return {"reply": f"归因查询失败: {exc}",
+                    "card": None}
+        return {
+            "reply": (r.get("report") or "").splitlines()[0]
+                     if r.get("report") else "归因报告已生成",
+            "card": {"type": "explanation",
+                     "subject": "归因报告",
+                     "ref": ref,
+                     "action": r.get("action"),
+                     "businessId": r.get("businessId"),
+                     "mode": r.get("mode"),
+                     "report": r.get("report"),
+                     "replayNote": r.get("replayNote")},
+            "jump": "/trust-dashboard.html",
         }
 
     def _exec_nav(self, text: str) -> dict:

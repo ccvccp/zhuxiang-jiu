@@ -88,14 +88,14 @@ class TestRegistry:
             TIER_SENSITIVE, get_tool, build_tool_prompt,
             safe_message_of, audit_fields,
         )
-        record("15 工具齐备",
-               len(TOOL_REGISTRY) == 15,
+        record("16 工具齐备",
+               len(TOOL_REGISTRY) == 16,
                str(len(TOOL_REGISTRY)))
         from collections import Counter
         tiers = dict(Counter(
             t["tier"] for t in TOOL_REGISTRY.values()))
-        record("三级分布(12只读/1写/2高敏)",
-               tiers == {TIER_READONLY: 12,
+        record("三级分布(13只读/1写/2高敏)",
+               tiers == {TIER_READONLY: 13,
                          TIER_WRITE: 1,
                          TIER_SENSITIVE: 2}, str(tiers))
 
@@ -170,7 +170,7 @@ class TestRegistry:
         # prompt 注入块(约束内化)
         prompt = build_tool_prompt()
         record("prompt 含全部工具",
-               prompt.count("action=") == 15
+               prompt.count("action=") == 16
                and "privacy_cost=0.08" in prompt)
         record("prompt 含使用规则",
                "requiresConsent" in prompt

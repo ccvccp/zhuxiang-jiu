@@ -19,7 +19,10 @@ P0 口径(骨架) + P1 升级(双因子):
       (voice48_privacy_budget 表; 超限 429 话术;
       只读零成本永不降级; 预算只按用户自主偏好
       分级——绝不与信值等级挂钩)
-    - 校验③ explainability_ref: 占位(P3 接管)
+    - 校验③ explainability_ref(P3 真实现): 写响应必填
+      ref(缺失业务标识即 raise 阻断——不返回半成品);
+      归因三源=45号 attribution+46号回放+49号语音播报
+      (参数化模板, 非 LLM 生成)
     - 审计: 完整落地(六字段铁律 + consent_token hash)
 
 设计红线:
@@ -104,6 +107,9 @@ class XiaozhuFcGateway:
                     result = await executor \
                         ._exec_sensitive(action, params,
                                          member_id)
+                    # 校验③ ref 必填(写响应缺失→阻断)
+                    binding = self._bind_ref(action,
+                                             result)
                     latency = round(
                         (time.monotonic() - started)
                         * 1000, 1)
@@ -114,7 +120,8 @@ class XiaozhuFcGateway:
                     return {"executed": True,
                             "action": action,
                             "result": result,
-                            "consentDirect": True}
+                            "consentDirect": True,
+                            **binding}
                 # 无 token → 走 confirmToken 挑战流
                 # (双因子发起: 语音确认词+屏幕码)
             # 校验② 隐私预算(P2 真实现——原子检查+扣减)
@@ -123,6 +130,14 @@ class XiaozhuFcGateway:
             # 执行(48号沙箱——幂等/冷静期全继承)
             result = await executor.execute(
                 session, action, params)
+            # 校验③ ref 必填(写响应缺失→阻断;
+            # 挑战/幂等/冷静期回包不绑定——未落笔)
+            binding = ({}
+                       if result.get("confirmRequired")
+                       or result.get("duplicate")
+                       or result.get("cooldown")
+                       else self._bind_ref(action,
+                                           result))
             latency = round((time.monotonic() - started)
                             * 1000, 1)
             kind = ("ok" if not result.get("duplicate")
@@ -130,7 +145,7 @@ class XiaozhuFcGateway:
             await self._audit(session, action, params,
                               member_id, consent_hash,
                               latency, kind)
-            return result
+            return {**result, **binding}
         except Exception as exc:  # noqa: BLE001
             # 失败安全降级铁律: 不编结果——预定义话术
             # (预算超限话术透传——用户须知剩余/需求)
@@ -150,6 +165,19 @@ class XiaozhuFcGateway:
             return {"executed": False, "fallback": True,
                     "safeMessage": msg,
                     "action": action}
+
+    # --------------------------------------------------------
+    # 校验③ ref 必填(P3——写响应缺失即阻断)
+    # --------------------------------------------------------
+
+    @staticmethod
+    def _bind_ref(action: str, result: dict) -> dict:
+        """绑定 explainability_ref(铁律②——缺失业务
+        标识时 raise 阻断, 不返回半成品)"""
+        from services.xiaozhu_explainability_service \
+            import XiaozhuExplainabilityService
+        return XiaozhuExplainabilityService.bind(
+            action, result or {})
 
     # --------------------------------------------------------
     # 校验① consent_token(P1 双因子——由 executor 池核验)
