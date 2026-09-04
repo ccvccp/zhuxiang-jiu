@@ -93,6 +93,11 @@ def container_p1_check(round_no: int) -> dict:
         "async def m():\n"
         "    out = {}\n"
         "    svc = Voice50Service()\n"
+        # 跨轮残留清理(voice48 绑定不在 voice50 清理范围)
+        "    from repositories.xiaozhu_repository import "
+        "Xiaozhu48Repository\n"
+        "    await Xiaozhu48Repository().delete_binding(M1)\n"
+        "    await Xiaozhu48Repository().delete_binding(M2)\n"
         # 绑定 M1
         "    import uuid as _u\n"
         "    sfx = _u.uuid4().hex[:10]\n"

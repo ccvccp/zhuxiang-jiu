@@ -5,6 +5,8 @@
                      每笔绑 explainability_ref)
     voice50_ledger  会员激励池台账(memberId 自然键——
                      余额/基线/冻结/衰减史)
+    voice50_settlement T+1 结算批次(batchId 键——
+                     L2/L3 聚合 deposit 申报留痕)
     voice50_rules_log 规则热更新留痕(logId 键, 只追加)
 
 设计对齐(43-49号仓储范式):
@@ -26,21 +28,25 @@ class Voice50Repository:
 
     TABLE_EVENTS = "voice50_events"
     TABLE_LEDGER = "voice50_ledger"
+    TABLE_SETTLEMENT = "voice50_settlement"
     TABLE_RULES_LOG = "voice50_rules_log"
 
     _INT_FIELDS = ("evId", "memberId", "sessionId", "turnSeq",
-                  "logId")
+                  "logId", "batchId", "eventCount",
+                  "depositId")
     _FLOAT_FIELDS = ("baseScore", "finalScore",
                      "poolBalance", "earnedTotal",
                      "offsetUsed", "baseline",
                      "l1PenaltyTotal", "capBaseline",
-                     "cappedScore", "overflowScore")
+                     "cappedScore", "overflowScore",
+                     "credits", "depositDelta")
 
     def __init__(self):
         self.store = get_in_memory_store()
 
     def _ensure_store(self):
         for t in (self.TABLE_EVENTS, self.TABLE_LEDGER,
+                  self.TABLE_SETTLEMENT,
                   self.TABLE_RULES_LOG):
             self.store.setdefault(t, {})
 
@@ -189,6 +195,75 @@ class Voice50Repository:
         self.store[self.TABLE_LEDGER][
             record["memberId"]] = dict(record)
         return record
+
+    # --------------------------------------------------------
+    # T+1 结算批次(batchId 键——只追加; 幂等由事件状态迁移保证)
+    # --------------------------------------------------------
+
+    async def next_batch_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("voice50", self.TABLE_SETTLEMENT, "seq"))
+        self._ensure_store()
+        seq = self.store.get(
+            "_voice50_settlement_seq", 0) + 1
+        self.store["_voice50_settlement_seq"] = seq
+        return seq
+
+    async def save_settlement(self, record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("voice50", self.TABLE_SETTLEMENT,
+                   record["batchId"]),
+                mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_SETTLEMENT][
+            record["batchId"]] = dict(record)
+        return record
+
+    async def list_settlements(self,
+                               day_key: str = None,
+                               member_id: int = None,
+                               limit: int = 200) -> list[dict]:
+        """结算批次列表(可按日/会员过滤; batchId 正序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "voice50", self.TABLE_SETTLEMENT, "*"))
+            keys = [k for k in keys
+                    if not k.endswith(":seq")]
+            result = []
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if not data:
+                        continue
+                    rec = self._deserialize(data)
+                    if day_key is not None \
+                            and rec.get("dayKey") != day_key:
+                        continue
+                    if member_id is not None \
+                            and rec.get("memberId") != member_id:
+                        continue
+                    result.append(rec)
+            result.sort(
+                key=lambda r: r.get("batchId") or 0)
+            return result[-limit:]
+        self._ensure_store()
+        result = [dict(r) for r in
+                  self.store[
+                      self.TABLE_SETTLEMENT].values()
+                  if (day_key is None
+                      or r.get("dayKey") == day_key)
+                  and (member_id is None
+                       or r.get("memberId") == member_id)]
+        result.sort(key=lambda r: r.get("batchId") or 0)
+        return result[-limit:]
 
     # --------------------------------------------------------
     # 规则热更新留痕(只追加——logId 键)

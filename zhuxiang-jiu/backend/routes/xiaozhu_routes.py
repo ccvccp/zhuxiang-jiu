@@ -1,7 +1,7 @@
 """48号·小竹智能语音中枢路由(P0 感知层)
 
 端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1
-     + 49号P2 2 + 49号P4 1 + 50号P0 5 = 30):
+     + 49号P2 2 + 49号P4 1 + 50号P0 5 + 50号P2 2 = 32):
     POST /api/xiaozhu/sessions              开启会话
     POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
@@ -19,6 +19,8 @@
     GET  /api/xiaozhu/voice50/rules         规则注册表(50号P0, admin)
     PUT  /api/xiaozhu/voice50/rules/{behavior}  规则热更新(50号P0, admin)
     POST /api/xiaozhu/voice50/unfreeze      积分冻结恢复(50号P0, admin)
+    POST /api/xiaozhu/voice50/settle        T+1结算手动补偿(50号P2, admin)
+    GET  /api/xiaozhu/voice50/settlements   结算批次视图(50号P2, admin)
 
 鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例);
 管理端 X-Role: admin(43-47号同款口径)。
@@ -656,6 +658,52 @@ async def voice50_update_rule(
         )
         return await Voice50Service().update_rule(
             behavior, body)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/settle")
+async def voice50_settle(
+    body: dict = None,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """T+1 结算手动补偿(admin——L2/L3 pending 聚合走
+    45号 deposit 验真; body 可选 {dayKey, memberId})"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    body = body or {}
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().settle_day(
+            day_key=body.get("dayKey"),
+            member_id=body.get("memberId"),
+            operator="manual")
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/voice50/settlements")
+async def voice50_settlements(
+    day_key: str = None,
+    member_id: int = None,
+    limit: int = 100,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """结算批次视图(admin——done/rejected/skipped 与
+    拒收原因)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().settlement_view(
+            day_key=day_key, member_id=member_id,
+            limit=limit)
     except Exception as e:
         raise _handle(e) from e
 

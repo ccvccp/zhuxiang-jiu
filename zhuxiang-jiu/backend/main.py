@@ -349,6 +349,12 @@ async def _on_startup():
     # (AI_GOV_SCHEDULER_MODE=on 开启, 默认 off)
     from services.ai_governance_scheduler import start_scheduler as start_ai_gov
     start_ai_gov()
+    # 50号·语音信值积分引擎: T+1 结算调度(L2/L3 pending
+    # 聚合 → 45号 deposit 验真; VOICE50_SETTLE_MODE=on
+    # 开启, 默认 off)
+    from services.xiaozhu_voice50_scheduler import (
+        start_scheduler as start_voice50_settle)
+    start_voice50_settle()
 
 
 @app.on_event("shutdown")
@@ -386,6 +392,10 @@ async def _on_shutdown():
     # 46号·AI治理与合规中枢调度器
     from services.ai_governance_scheduler import stop_scheduler as stop_ai_gov_scheduler
     stop_ai_gov_scheduler()
+    # 50号·语音信值积分 T+1 结算调度器
+    from services.xiaozhu_voice50_scheduler import (
+        stop_scheduler as stop_voice50_settle)
+    stop_voice50_settle()
     await close_redis_client()
     logger.info("清理完成")
 

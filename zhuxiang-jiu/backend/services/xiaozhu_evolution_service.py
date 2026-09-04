@@ -440,7 +440,30 @@ class XiaozhuEvolutionService:
         if approve:
             await self.award_custom_accepted(
                 rec.get("memberId"), cmd_id)
+            # 50号P2 建设性反馈桥(v2.0 L2——建议被采纳
+            # +10 加法加成; fail-soft off 空转)
+            await self._voice50_feedback_hook(
+                rec.get("memberId"), cmd_id)
         return {"success": True, **rec}
+
+    @staticmethod
+    async def _voice50_feedback_hook(member_id: int,
+                                     cmd_id: int) -> None:
+        """建设性反馈被采纳积分(v2.0 L2 表)"""
+        try:
+            from services.xiaozhu_voice50_service import (
+                voice50_mode_enabled, Voice50Service,
+            )
+            if not voice50_mode_enabled():
+                return
+            await Voice50Service().record_behavior(
+                member_id, "voice_feedback",
+                voiceprint="",
+                gains={"adopted": True},
+                note=f"custom-cmd-{cmd_id}-approved")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice50_feedback_hook_skip: %s",
+                          exc)
 
     async def match_custom(self, text: str) -> dict | None:
         """共创短语匹配(已上架; 命中返回其 action)"""

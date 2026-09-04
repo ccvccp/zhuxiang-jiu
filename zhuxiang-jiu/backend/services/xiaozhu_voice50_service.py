@@ -159,15 +159,18 @@ class Voice50Service:
                             "超限不累计(v2.0 日限口径)",
                 }
 
-        # ---- 系数链 ----
+        # ---- 系数链(P2: 乘性 gains + 加法 bonus——
+        #      v2.0 "被采纳 +10"类加成为加法语义) ----
         base = float(rule["base"])
         vp_mult = self._voiceprint_mult(
             voiceprint, rule)
         q_mult = self._quality_mult(quality, penalty)
         g_mult = self._gains_mult(rule, gains or {})
+        bonus_add = self._bonus_add(rule, gains or {})
         final = _r2(base * vp_mult * q_mult * g_mult
                     * float(group_mult or 1.0)
-                    * float(extra_mult or 1.0))
+                    * float(extra_mult or 1.0)
+                    + bonus_add)
 
         # 扣分项(负向事件——不参与封顶截断, 直接入账)
         if penalty:
@@ -318,12 +321,22 @@ class Voice50Service:
 
     @staticmethod
     def _gains_mult(rule: dict, gains: dict) -> float:
-        """行为加成链(显式命中才乘——v2.0 §二/§三加成列)"""
+        """行为加成链(乘性——显式命中才乘; v2.0 ×1.2/×1.5 类)"""
         mult = 1.0
         for key, hit in (gains or {}).items():
             if hit and key in (rule.get("gain") or {}):
                 mult *= float(rule["gain"][key])
         return round(mult, 3)
+
+    @staticmethod
+    def _bonus_add(rule: dict, gains: dict) -> float:
+        """行为加成(加法——v2.0 "被采纳 +10/+20" 列;
+        命中 gains 键且注册表声明 bonus 时累加)"""
+        add = 0.0
+        for key, hit in (gains or {}).items():
+            if hit and key in (rule.get("bonus") or {}):
+                add += float(rule["bonus"][key])
+        return round(add, 2)
 
     # --------------------------------------------------------
     # 防刷封顶(台账层——溢出 ×0.1 只入池)
@@ -551,6 +564,213 @@ class Voice50Service:
                 float(profile.get("riskEMA") or 0)))
         except Exception:  # noqa: BLE001
             return None
+
+    # --------------------------------------------------------
+    # T+1 结算器(P2——L2/L3 聚合 → 45号 deposit 验真入信值)
+    # --------------------------------------------------------
+
+    async def settle_day(self, day_key: str = None,
+                         member_id: int = None,
+                         operator: str = "manual") -> dict:
+        """结算一批 pending L2/L3 事件(45号 deposit 验真)
+
+        口径(计划 §三-2/§六):
+        - day_key=None → 结算 dayKey < 今日 的全部 pending
+          (T+1 次日凌晨语义; 手动补偿可显式指定 day_key)
+        - 聚合只计正向 cappedScore(溢出不进信值轨道——
+          封顶先于桥接红线; 负向事件留台账不申报)
+        - 验真通过 → 事件 settled + 批次 done(delta 留痕);
+          验真拒收 → 事件保持 pending(可重试) + 批次
+          rejected(reason——47号教训: summary 中性措辞)
+        - frozen/unbound → 批次 skipped, 事件保持 pending
+        幂等: settled/rejected 批次不再重拾; 事件状态
+        pending→settled 迁移即防重复申报。
+
+        Returns:
+            {dayKey, batches: [...], counts: {done|
+            rejected|skipped, credits, settledEvents}}
+        """
+        today = _today_key()
+        pending = await self.repo.list_events(
+            member_id=member_id, status="pending",
+            limit=10000)
+        if day_key is not None:
+            targets = [e for e in pending
+                       if e.get("dayKey") == day_key
+                       and e.get("layer")
+                       in ("L2", "L3")]
+        else:
+            targets = [e for e in pending
+                       if (e.get("dayKey") or "")
+                       < today
+                       and e.get("layer")
+                       in ("L2", "L3")]
+        if not targets:
+            return {"success": True, "dayKey": day_key,
+                    "batches": [], "counts": {
+                        "done": 0, "rejected": 0,
+                        "skipped": 0, "credits": 0.0,
+                        "settledEvents": 0},
+                    "note": "无可结算事件(pending L2/L3)"}
+
+        # 按 (member, layer, factor) 分组聚合
+        groups: dict = {}
+        for e in targets:
+            key = (e.get("memberId"), e.get("layer"),
+                   e.get("targetFactor")
+                   or "ethics_evidence")
+            groups.setdefault(key, []).append(e)
+
+        batches = []
+        counts = {"done": 0, "rejected": 0, "skipped": 0,
+                  "credits": 0.0, "settledEvents": 0}
+        for (mid, layer, factor), evs in \
+                sorted(groups.items()):
+            batch_id = await self.repo.next_batch_id()
+            day_k = (day_key
+                     if day_key is not None
+                     else max(e.get("dayKey") or ""
+                              for e in evs))
+            base_rec = {
+                "batchId": batch_id, "dayKey": day_k,
+                "memberId": mid, "layer": layer,
+                "factor": factor,
+                "credits": 0.0, "eventCount": len(evs),
+                "status": "skipped", "reason": "",
+                "depositId": 0, "depositVerified": False,
+                "depositDelta": 0.0,
+                "evidence": "", "operator": operator,
+                "ts": ts(),
+            }
+            # ① 冻结/未绑定 → 跳过(事件保持 pending)
+            ledger = await self.repo.get_ledger(mid)
+            if ledger is not None \
+                    and ledger.get("frozen"):
+                base_rec["reason"] = "frozen"
+                await self.repo.save_settlement(base_rec)
+                batches.append(base_rec)
+                counts["skipped"] += 1
+                continue
+            binding = await self._get_binding(mid)
+            if binding is None:
+                base_rec["reason"] = "unbound"
+                await self.repo.save_settlement(base_rec)
+                batches.append(base_rec)
+                counts["skipped"] += 1
+                continue
+            # ② 聚合正向 cappedScore(溢出/负向不入信值轨道)
+            credits = _r2(sum(
+                max(0.0, float(e.get("cappedScore") or 0))
+                for e in evs))
+            base_rec["credits"] = credits
+            refs = [e.get("ref") or ""
+                    for e in evs[:5]]
+            if credits <= 0:
+                # 无正向可申报(纯负向/零分事件)——
+                # 闭环标记 settled(无申报必要)
+                base_rec["reason"] = "no_positive_credits"
+                await self.repo.save_settlement(base_rec)
+                for e in evs:
+                    e["status"] = "settled"
+                    e["settledBatchId"] = batch_id
+                    await self.repo.save_event(e)
+                batches.append(base_rec)
+                counts["skipped"] += 1
+                counts["settledEvents"] += len(evs)
+                continue
+            # ③ 45号 deposit 申报(验真管线全继承:
+            #    三道关/语义指纹/因果净贡献/UEBA 守门)
+            evidence = (f"voice50 T+1 结算批次 {batch_id}"
+                        f"(member {mid}, {len(evs)} 笔"
+                        f"语音事件, 明细 ref: "
+                        f"{';'.join(refs)})")
+            summary = (f"语音交互行为积分聚合"
+                       f"(批次 {batch_id}, "
+                       f"{len(evs)} 笔事件)")
+            deposit = None
+            try:
+                from services.trust_radar_service import (
+                    TrustRadarService,
+                )
+                deposit = await TrustRadarService(
+                ).submit_deposit(
+                    binding["trustId"], layer, factor,
+                    observed=credits, peer_baseline=0.0,
+                    evidence=evidence, summary=summary,
+                    sources=["voice50_engine",
+                             "session_audit"],
+                    voluntary=True,
+                    verify_mode="v1")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "voice50_settle_deposit_fail "
+                    "member=%s batch=%s: %s", mid,
+                    batch_id, exc)
+            if deposit and deposit.get("verified"):
+                # 入账: 事件 settled + 批次 done
+                base_rec.update({
+                    "status": "done", "reason": "",
+                    "depositId": deposit.get("depositId")
+                    or 0,
+                    "depositVerified": True,
+                    "depositDelta": float(
+                        deposit.get("delta") or 0),
+                    "evidence": evidence,
+                })
+                await self.repo.save_settlement(base_rec)
+                for e in evs:
+                    e["status"] = "settled"
+                    e["settledBatchId"] = batch_id
+                    await self.repo.save_event(e)
+                batches.append(base_rec)
+                counts["done"] += 1
+                counts["credits"] = _r2(
+                    counts["credits"] + credits)
+                counts["settledEvents"] += len(evs)
+            else:
+                # 拒收: 事件保持 pending(可重试——
+                # 拒绝原因留批次; P4 处置台账接管)
+                reason = ((deposit or {}).get("note")
+                          or "验真未通过")
+                checks = (deposit or {}).get("checks")
+                if checks:
+                    reason += "; " + "; ".join(
+                        f"{c.get('stage')}:"
+                        f"{c.get('note')}"
+                        for c in checks)
+                base_rec.update({
+                    "status": "rejected",
+                    "reason": str(reason)[:300],
+                    "depositId":
+                        (deposit or {}).get("depositId")
+                        or 0,
+                    "depositVerified": False,
+                    "evidence": evidence,
+                })
+                await self.repo.save_settlement(base_rec)
+                batches.append(base_rec)
+                counts["rejected"] += 1
+        return {"success": True, "dayKey": day_key,
+                "batches": batches, "counts": counts}
+
+    async def settlement_view(self, day_key: str = None,
+                              member_id: int = None,
+                              limit: int = 100) -> dict:
+        """结算批次视图(管理端——批次/状态/拒收原因)"""
+        rows = await self.repo.list_settlements(
+            day_key=day_key, member_id=member_id,
+            limit=limit)
+        by_status: dict = {}
+        for r in rows:
+            s = r.get("status") or "unknown"
+            by_status[s] = by_status.get(s, 0) + 1
+        return {"success": True, "total": len(rows),
+                "byStatus": by_status,
+                "batches": rows[-limit:],
+                "note": "done=入账(事件 settled)/rejected="
+                        "拒收(事件 pending 可重试)/skipped="
+                        "冻结或未绑定或无正向——幂等由事件"
+                        "状态迁移保证"}
 
     # --------------------------------------------------------
     # 冻结恢复(人工复核——admin)

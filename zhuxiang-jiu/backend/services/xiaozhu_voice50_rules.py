@@ -139,7 +139,7 @@ VOICE_RULES = {
         "layer": "L2",
         "targetFactor": "ethics_evidence",
         "base": 6.0,
-        "gain": {"adopted": 10.0},     # 建议被采纳 +10
+        "bonus": {"adopted": 10.0},    # 建议被采纳 +10(加法)
         "penaltyFactor": 0.3,          # 重复/无效反馈
         "dailyCap": 5,
         "trigger": "对语音服务提出具体改进建议(非情绪宣泄)",
@@ -182,7 +182,7 @@ VOICE_RULES = {
         "layer": "L3",
         "targetFactor": "contribution_net",
         "base": 10.0,
-        "gain": {"adopted": 20.0},     # 场景纳入训练集
+        "bonus": {"adopted": 20.0},    # 场景纳入训练集 +20(加法)
         "dailyCap": 30,
         "trigger": "主动描述未被覆盖的使用场景(人工审核)",
     },

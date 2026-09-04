@@ -63,6 +63,28 @@ WAKE_FREE_WINDOW_SECONDS = 300
 # 指代词(指代消解——指向上一轮 jump/card 的对象)
 REFERENCE_WORDS = ("这个", "它", "这件", "这款", "那个")
 
+# 50号P2 礼貌交互词表(确定性——敬语/感谢词 + 辱骂/威胁)
+POLITE_WORDS = ("谢谢", "感谢", "麻烦您", "请您", "您好",
+                "劳驾", "辛苦了", "多谢")
+ATTACK_WORDS = ("辱骂", "威胁", "傻逼", "滚蛋", "白痴",
+                "蠢货", "废物", "去死")
+
+# 跨文化包容表达标记(方言常用词 + 外语单词)
+DIALECT_MARKERS = ("咋办", "俺们", "晓得", "唔该", "梗系",
+                   "得劲", "唠嗑", "侬好", "伐啦")
+
+# 非指令轮次(50号P2 连贯性判定——与看板口径一致)
+NON_ACTION_INTENTS = {"not_woken", "general", "asr_failed"}
+
+
+def _detect_inclusive(text: str) -> bool:
+    """跨文化表达检测(确定性: 方言标记或外语单词)"""
+    import re as _re
+    t = str(text or "")
+    if any(w in t for w in DIALECT_MARKERS):
+        return True
+    return bool(_re.search(r"[a-zA-Z]{3,}", t))
+
 # PII 脱敏正则(身份证 15/18 位/手机号/银行卡 13-19 位)
 _PII_PATTERNS = (
     (re.compile(r"\d{17}[\dXx]"), "*身份证*"),
@@ -614,13 +636,28 @@ class XiaozhuService:
                                 if vp["verified"] else ""),
                     gains={"dualFactor": True},
                     note="consent-voice-confirmed")
-            # ④ 清晰意图表达(规则轨精确命中+无澄清)
+            # ④ 清晰意图表达(规则轨精确命中+无澄清——
+            #    P2: 连贯性 ×1.2/频繁修正后 ×0.5)
             if not result.get("clarify") \
                     and not result.get("confirmRequired"):
+                gains = {}
+                extra = 1.0
+                prior_turns = turns[:-1]
+                if prior_turns and \
+                        prior_turns[-1].get("intent") \
+                        not in NON_ACTION_INTENTS \
+                        and prior_turns[-1].get("intent"):
+                    gains["coherence"] = True   # 多轮连贯 ×1.2
+                fallbacks = sum(
+                    1 for t in prior_turns
+                    if t.get("intent") == "general")
+                if fallbacks >= 2:
+                    extra = 0.5    # 频繁修正/重试后 ×0.5
                 await svc.record_behavior(
                     member_id, "voice_clear_intent",
                     session_id, turn_seq,
-                    quality=0.95,
+                    quality=0.95, gains=gains,
+                    extra_mult=extra,
                     note=f"intent-{cmd.get('action')}")
                 # ⑤ 反欺诈配合(P1——47号风险 tier 会员
                 #    只读查询如实应答; 非 问询场景静默跳过)
@@ -634,8 +671,47 @@ class XiaozhuService:
                             note="risk-query-turn")
                     except ValueError:
                         pass   # 未被问询——不计(防刷)
+            # ⑥ 礼貌交互(P2——敬语/感谢词; 持续 3 轮+ ×1.5;
+            #    辱骂/威胁 -10 不限日限)
+            await self._voice50_polite(
+                svc, member_id, session_id, turn_seq,
+                turns, text)
+            # ⑦ 跨文化包容表达(P2——方言/外语识别标记
+            #    小众语种数据积累 ×2)
+            if _detect_inclusive(command_text):
+                await svc.record_behavior(
+                    member_id, "voice_inclusive",
+                    session_id, turn_seq,
+                    gains={"minorityLang": True},
+                    note="inclusive-expression")
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice50_turn_hook_skip: %s", exc)
+
+    async def _voice50_polite(self, svc, member_id: int,
+                              session_id: int, turn_seq: int,
+                              turns: list, text: str) -> None:
+        """礼貌交互习惯(P2——v2.0 L2 表)
+
+        命中敬语/感谢词: base 0.5; 本会话连续第 ≥3 轮礼貌
+        → streak3 ×1.5; 命中辱骂/威胁词 → penalty -10。
+        """
+        t = str(text or "")
+        if any(w in t for w in ATTACK_WORDS):
+            await svc.record_behavior(
+                member_id, "voice_polite",
+                session_id, turn_seq, penalty=True,
+                note="attack-words")
+            return
+        if any(w in t for w in POLITE_WORDS):
+            streak = 1 + sum(
+                1 for x in reversed(turns[:-1])
+                if any(w in str(x.get("rawText") or "")
+                        for w in POLITE_WORDS))
+            await svc.record_behavior(
+                member_id, "voice_polite",
+                session_id, turn_seq,
+                gains={"streak3": True} if streak >= 3 else {},
+                note=f"polite-streak:{streak}")
 
     async def _voice50_env_verify(
             self, svc, member_id: int, session: dict,

@@ -151,7 +151,13 @@ class XiaozhuPrivacyService:
 
     async def set_preference(self, member_id: int,
                              preference: float) -> dict:
-        """调整偏好(0.5-2.0——用户自主, 与信值等级无关)"""
+        """调整偏好(0.5-2.0——用户自主, 与信值等级无关)
+
+        50号P2 主动隐私授权桥(v2.0 L2 表):
+        - 上调偏好 = 主动授权(基础 8; 范围具体 <2.0 ×1.3)
+        - 当日已授权后下调 = 授权后立即撤回(-2)
+        fail-soft: 积分引擎异常不影响偏好调整主流程。
+        """
         try:
             pref = round(float(preference), 2)
         except (TypeError, ValueError):
@@ -161,9 +167,58 @@ class XiaozhuPrivacyService:
                 f"偏好需在 {PREFERENCE_MIN}-{PREFERENCE_MAX}"
                 f" 区间(当前 {pref})")
         rec = await self._account(member_id)
+        old_pref = float(rec.get("preference") or 1.0)
         rec["preference"] = pref
         rec["ts"] = ts()
         await self.repo.save_privacy_budget(rec)
         logger.info("voice49_privacy_pref member=%s "
                     "pref=%s", member_id, pref)
+        # 50号P2 授权桥(fail-soft——VOICE50_MODE=off 空转)
+        await self._voice50_grant_hook(
+            member_id, old_pref, pref)
         return await self.budget_view(member_id)
+
+    @staticmethod
+    async def _voice50_grant_hook(member_id: int,
+                                  old_pref: float,
+                                  new_pref: float) -> None:
+        """主动隐私授权积分(v2.0 L2——上调授权/撤回扣分)"""
+        try:
+            from services.xiaozhu_voice50_service import (
+                voice50_mode_enabled, Voice50Service,
+            )
+            if not voice50_mode_enabled():
+                return
+            svc = Voice50Service()
+            if new_pref > old_pref:
+                # 上调 = 授权(范围具体: 未拉满 ×1.3)
+                await svc.record_behavior(
+                    member_id, "voice_privacy_grant",
+                    voiceprint="",
+                    gains={"specificScope":
+                           new_pref < PREFERENCE_MAX},
+                    note=f"pref:{old_pref}->{new_pref}")
+            elif new_pref < old_pref:
+                # 当日已授权后下调 → 撤回(-2)
+                from repositories.voice50_repository import (
+                    Voice50Repository,
+                )
+                from services.xiaozhu_voice50_service import (
+                    _today_key,
+                )
+                evs = await Voice50Repository().list_events(
+                    member_id=member_id,
+                    day_key=_today_key(), limit=500)
+                granted = any(
+                    e.get("behavior")
+                    == "voice_privacy_grant"
+                    and float(e.get("finalScore") or 0) > 0
+                    for e in evs)
+                if granted:
+                    await svc.record_behavior(
+                        member_id, "voice_privacy_grant",
+                        penalty=True,
+                        note=f"revoke:{old_pref}"
+                             f"->{new_pref}")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice50_grant_hook_skip: %s", exc)
