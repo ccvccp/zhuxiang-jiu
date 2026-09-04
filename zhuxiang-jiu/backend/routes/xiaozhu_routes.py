@@ -1,7 +1,7 @@
 """48号·小竹智能语音中枢路由(P0 感知层)
 
 端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1
-     + 49号P2 2 + 49号P4 1 = 25):
+     + 49号P2 2 + 49号P4 1 + 50号P0 5 = 30):
     POST /api/xiaozhu/sessions              开启会话
     POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
@@ -14,6 +14,11 @@
     GET  /api/xiaozhu/privacy/budget        隐私预算视图(49号P2)
     PUT  /api/xiaozhu/privacy/preferences   隐私偏好调整(49号P2)
     POST /api/xiaozhu/fc/redteam            红队用例集执行(49号P4, admin)
+    GET  /api/xiaozhu/voice50/my            我的语音积分(50号P0)
+    GET  /api/xiaozhu/voice50/risk-state    L1风控状态(50号P0, admin)
+    GET  /api/xiaozhu/voice50/rules         规则注册表(50号P0, admin)
+    PUT  /api/xiaozhu/voice50/rules/{behavior}  规则热更新(50号P0, admin)
+    POST /api/xiaozhu/voice50/unfreeze      积分冻结恢复(50号P0, admin)
 
 鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例);
 管理端 X-Role: admin(43-47号同款口径)。
@@ -571,6 +576,111 @@ async def fc_redteam_run(
             XiaozhuFcRedteamService,
         )
         return await XiaozhuFcRedteamService().run()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 50号 P0 语音信值积分引擎(台账轨+L1 实时轨)
+# ============================================================
+
+@router.get("/voice50/my")
+async def voice50_my(
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """我的语音积分(会员——激励池余额/近期事件/ref 可溯)"""
+    member_id = _require_member_strict(x_member_id)
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().my_view(member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/voice50/risk-state")
+async def voice50_risk_state(
+    member_id: int,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """L1 风控状态(风控域——47号画像消费口径)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().risk_state(
+            member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/voice50/rules")
+async def voice50_rules(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """规则注册表视图(admin——14 行为+参数+更新留痕)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().rules_admin_view()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.put("/voice50/rules/{behavior}")
+async def voice50_update_rule(
+    behavior: str,
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """规则热更新(admin——base/dailyCap 可调, 留痕)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    if not isinstance(body, dict) or not body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含待更新字段(base/dailyCap)")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().update_rule(
+            behavior, body)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/unfreeze")
+async def voice50_unfreeze(
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """L1 降级人工复核恢复(admin——只解冻积分域)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    if not isinstance(body, dict) \
+            or "memberId" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 memberId")
+    try:
+        from services.xiaozhu_voice50_service import (
+            Voice50Service,
+        )
+        return await Voice50Service().unfreeze(
+            int(body["memberId"]),
+            note=str(body.get("note") or ""))
     except Exception as e:
         raise _handle(e) from e
 

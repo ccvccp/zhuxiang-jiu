@@ -218,6 +218,13 @@ COMMANDS = [
         "examples": ["小竹，我的隐私预算"],
     },
     {
+        "action": "voice.score",
+        "label": "我的语音积分",
+        "patterns": ["语音积分", "我的语音分", "语音信值",
+                     "积分余额", "语音奖励"],
+        "examples": ["小竹，我的语音积分"],
+    },
+    {
         "action": "cart.submit",
         "label": "结算下单",
         "patterns": ["结算", "下单", "买下", "提交订单",
@@ -536,7 +543,67 @@ class XiaozhuService:
         # 重复失败挖掘——不阻断主链路
         await self._evolve_turn(session, text, cmd,
                                 result)
+        # 50号P0 语音信值积分钩子(fail-soft; VOICE50_MODE
+        # =off 默认空转——零影响红线)
+        await self._voice50_turn_hook(session, channel,
+                                       text, cmd, result)
         return saved
+
+    async def _voice50_turn_hook(self, session: dict,
+                                  channel: str,
+                                  text: str, cmd: dict,
+                                  result: dict) -> None:
+        """50号P0 语音信值积分轮次钩子(计划 §四)
+
+        P0 触发行为(信号源=既有轮次事实, 无新采集):
+        - voice_login: 唤醒成功(语音通道)+会员身份
+          (声纹 proxy——确定性哈希代理口径)
+        - voice_confirm: 高敏语音确认轮(49号 voiceConfirmed)
+        - voice_clear_intent: 规则轨精确命中且无澄清
+          (质量系数=置信度映射)
+        fail-soft 铁律: 引擎任何异常只记日志, 不阻断语音
+        主链路; VOICE50_MODE=off 时不进引擎(空转)。
+        """
+        try:
+            from services.xiaozhu_voice50_service import (
+                voice50_mode_enabled, Voice50Service,
+            )
+            if not voice50_mode_enabled():
+                return
+            member_id = session.get("memberId")
+            if not member_id:
+                return
+            svc = Voice50Service()
+            session_id = session.get("sessionId") or 0
+            turns = await self.repo.list_turns(session_id)
+            turn_seq = (turns[-1].get("seq")
+                        if turns else 0)
+            # ① 声纹登录验证(语音通道+唤醒——proxy 口径)
+            if channel == "voice":
+                await svc.record_behavior(
+                    member_id, "voice_login",
+                    session_id, turn_seq,
+                    voiceprint="proxy",
+                    note="turn-hook")
+            # ② 敏感操作语音确认(49号 双因子语义证据)
+            if result.get("voiceConfirmed"):
+                await svc.record_behavior(
+                    member_id, "voice_confirm",
+                    session_id, turn_seq,
+                    voiceprint="proxy",
+                    gains={"dualFactor": True},
+                    note="consent-voice-confirmed")
+            # ③ 清晰意图表达(规则轨精确命中+无澄清——
+            #    质量系数: 置信度 ≥0.8)
+            if not result.get("clarify") \
+                    and not result.get("confirmRequired"):
+                await svc.record_behavior(
+                    member_id, "voice_clear_intent",
+                    session_id, turn_seq,
+                    quality=0.95,
+                    note=f"intent-{cmd.get('action')}")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice50_turn_hook_skip: %s", exc)
 
     async def _evolve_turn(self, session: dict,
                            raw_text: str, cmd: dict,
@@ -641,6 +708,9 @@ class XiaozhuService:
                 return self._exec_help()
             if action == "privacy.budget":
                 return await self._exec_privacy_budget(
+                    member_id)
+            if action == "voice.score":
+                return await self._exec_voice50_score(
                     member_id)
             if action == "explanation.report":
                 return await self._exec_explanation_report(
@@ -1103,6 +1173,47 @@ class XiaozhuService:
                      "preference": v["preference"],
                      "usedToday": v["usedToday"],
                      "history": history},
+            "jump": None,
+        }
+
+    async def _exec_voice50_score(self,
+                                  member_id: int) -> dict:
+        """50号P0 "我的语音积分"(第 17 指令——池余额+
+        近期事件; off 时提示引擎未启用)"""
+        from services.xiaozhu_voice50_service import (
+            Voice50Service, voice50_mode_enabled,
+        )
+        if not voice50_mode_enabled():
+            return {
+                "reply": "语音积分引擎当前未启用"
+                         "(VOICE50_MODE=off)——启用后语音"
+                         "交互将按信值积分规则累积激励池",
+                "card": {"type": "voice50_score",
+                         "subject": "语音积分",
+                         "enabled": False},
+                "jump": None,
+            }
+        v = await Voice50Service().my_view(member_id)
+        recent = v.get("recent") or []
+        reply = (f"您的语音积分(激励池): {v['poolBalance']}"
+                 f"(今日已计 {v['usedToday']})——"
+                 f"入信值须 T+1 验真, 池会保鲜但绝不"
+                 f"因不用语音而扣减")
+        if recent:
+            reply += ("; 近期: "
+                      + "、".join(
+                          f"{r.get('behavior')}"
+                          f" {r.get('score'):+}"
+                          for r in recent[-3:]))
+        return {
+            "reply": reply,
+            "card": {"type": "voice50_score",
+                     "subject": "语音积分(激励池)",
+                     "poolBalance": v["poolBalance"],
+                     "earnedTotal": v["earnedTotal"],
+                     "usedToday": v["usedToday"],
+                     "frozen": v["frozen"],
+                     "recent": recent},
             "jump": None,
         }
 

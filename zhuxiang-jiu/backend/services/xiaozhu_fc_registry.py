@@ -174,6 +174,20 @@ TOOL_REGISTRY = {
         "requiresConsent": False,
         "safeMessage": "预算信息暂时读取失败, 请稍后再试。",
     },
+    "voice.score": {
+        "operationId": "get_voice50_score",
+        "summary": "查询语音积分(激励池)",
+        "description": "【只读】当用户问「我的语音积分/语音"
+                      "奖励」时调用, 返回激励池余额与近期"
+                      "积分事件(每笔带归因 ref)。❌ 语音积分"
+                      "是激励池余额(≠信值分)——入信值须"
+                      "T+1 验真; 不用语音不扣分(反语音霸权)"
+                      "。🔒 privacy_cost: 0(知情权零成本)。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.0,
+        "requiresConsent": False,
+        "safeMessage": "语音积分暂时读取失败, 请稍后再试。",
+    },
     "explanation.report": {
         "operationId": "get_explanation_report",
         "summary": "打开归因报告(修复说明)",
