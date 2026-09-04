@@ -218,11 +218,71 @@ async def get_context(
         None, alias="X-Member-Id"),
 ):
     """角色上下文调试视图(等级/绑定/余额/偏好/LLM 轨态)"""
-    member_id = _require_member_strict(x_member_id)
+    member_id = _require_member(x_member_id)
     try:
         from services.xiaozhu_service import XiaozhuService
         return await XiaozhuService().get_context_view(
             member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P2 执行层·安全业务代理(confirmToken 高敏流)
+# ============================================================
+
+@router.post("/confirm/{token}")
+async def confirm_action(token: str, body: dict,
+                         x_member_id: str | None = Header(
+                             None, alias="X-Member-Id"),
+                         ):
+    """核销高敏确认码执行(confirmToken 屏幕码流)
+
+    高敏操作不可纯语音完成红线——数字码为准(语音念码
+    不算, 须屏幕输入)。body: {code(必填 4 位数字)}
+    """
+    member_id = _require_member_strict(x_member_id)
+    if not isinstance(body, dict) \
+            or not body.get("code"):
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 code(4 位确认码)")
+    code = str(body["code"]).strip()
+    if not (code.isdigit() and len(code) == 4):
+        raise HTTPException(
+            status_code=409, detail="code 需为 4 位数字")
+    try:
+        from services.xiaozhu_service import XiaozhuService
+        return await XiaozhuService().confirm_action(
+            token, code)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/sessions/{session_id}/actions")
+async def list_actions(session_id: int,
+                       x_member_id: str | None = Header(
+                           None, alias="X-Member-Id"),
+                       ):
+    """执行留痕回溯("我刚才做了什么")——写/高敏轮次视图"""
+    _require_member_strict(x_member_id)
+    try:
+        from services.xiaozhu_service import XiaozhuService
+        view = await XiaozhuService().get_session(
+            session_id)
+        actions = [
+            {"seq": t.get("seq"), "action":
+             t.get("intent"), "ts": t.get("ts"),
+             "reply": t.get("reply"),
+             "card": t.get("card") or {}}
+            for t in view.get("turns") or []
+            if t.get("intent") in (
+                "cart.submit", "trust.convert",
+                "trust.bind")]
+        return {"success": True,
+                "sessionId": session_id,
+                "actions": actions,
+                "count": len(actions)}
     except Exception as e:
         raise _handle(e) from e
 

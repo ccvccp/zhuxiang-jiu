@@ -202,6 +202,20 @@ COMMANDS = [
                      "你能做什么", "指令列表"],
         "examples": ["小竹，你能干什么"],
     },
+    {
+        "action": "cart.submit",
+        "label": "结算下单",
+        "patterns": ["结算", "下单", "买下", "提交订单",
+                     "帮我下单"],
+        "examples": ["小竹，结算这个", "小竹，买下它"],
+    },
+    {
+        "action": "trust.convert",
+        "label": "信用分换信值",
+        "patterns": ["信用分换", "换成信值", "换信值",
+                     "把.*信用分", "兑换信值"],
+        "examples": ["小竹，把100信用分换成信值"],
+    },
 ]
 
 COMMAND_ACTIONS = tuple(c["action"] for c in COMMANDS)
@@ -500,11 +514,14 @@ class XiaozhuService:
     async def _execute(self, session: dict, cmd: dict,
                        text: str,
                        member_id_hint: bool = True) -> dict:
-        """指令执行(P0 只读直达 + P1 角色注入——数字来自
-        既有业务 API, LLM 不产数字红线)"""
+        """指令执行(P0 只读直达 + P1 角色注入 + P2 沙箱写)"""
         action = cmd["action"]
         member_id = session.get("memberId")
         context = await self.build_context(member_id)
+        # P2 沙箱: 写/高敏动作经统一执行器
+        if action in ("cart.submit", "trust.convert"):
+            return await self._exec_sandbox(
+                session, action, text, context)
         try:
             if action == "product.new":
                 return await self._exec_product_new(context)
@@ -534,6 +551,153 @@ class XiaozhuService:
                             "转人工", "card": None}
         return {"reply": "未知指令", "card": None}
 
+    async def _exec_sandbox(self, session: dict,
+                            action: str, text: str,
+                            context: dict) -> dict:
+        """P2 沙箱入口: 参数抽取 → 澄清/令牌/执行"""
+        from services.xiaozhu_executor import (
+            get_executor,
+        )
+        ex = get_executor()
+        if action == "trust.convert":
+            credit = self._extract_credit(text)
+            if credit is None:
+                return {"reply": "想把多少信用分换成信值?"
+                                " 例如「把100信用分换成信值」",
+                        "card": None,
+                        "clarify": "creditPoints"}
+            r = await ex.try_convert_flow(session, credit)
+        else:   # cart.submit
+            items = await self._resolve_cart_items(session)
+            if not items:
+                return {"reply": "想结算哪些商品? 先说"
+                                "「看新品」选中后说「结算这个」",
+                        "card": None, "clarify": "items"}
+            r = await ex.try_checkout_flow(
+                session, items,
+                context.get("levelTitle") and
+                f"L{context.get('level') or 1}" or "L1")
+        # 沙箱结果 → 统一回包
+        if r.get("duplicate"):
+            return {"reply": r.get("note",
+                                   "同指令已受理"),
+                    "card": None, "duplicate": True}
+        if r.get("cooldown"):
+            return {"reply": r.get("reply", "已触发冷静期"),
+                    "card": None, "cooldown": True}
+        if r.get("confirmRequired"):
+            return {
+                "reply": r["reply"],
+                "card": {"type": "confirm",
+                         "subject": r["summary"],
+                         "confirmToken": r["confirmToken"],
+                         "codeHint": r["codeHint"],
+                         "expiresIn": r["expiresIn"]},
+                "confirmRequired": True,
+                "confirmToken": r["confirmToken"],
+                "summary": r["summary"],
+            }
+        if r.get("result", {}).get("clarify"):
+            return {"reply": r["result"]["clarify"],
+                    "card": None,
+                    "clarify": r["result"]["clarify"]}
+        result = r.get("result") or {}
+        if action == "trust.convert":
+            if result.get("success"):
+                return {
+                    "reply": f"兑换完成——扣除 "
+                             f"{result.get('creditPoints')} "
+                             f"信用分, 到账 "
+                             f"{result.get('amount')} TV"
+                             f"(汇率 "
+                             f"{result.get('rate')}:1, "
+                             f"余额 {result.get('balance')})",
+                    "card": {"type": "trust_convert_done",
+                             "subject": "兑换完成",
+                             "amount": result.get("amount"),
+                             "balance":
+                                 result.get("balance")},
+                    "executed": True}
+            return {"reply": "兑换未完成: "
+                            + str(result.get("detail")
+                                  or result.get("error")
+                                  or "余额/参数问题"),
+                    "card": None}
+        # cart.submit
+        if result.get("success") or result.get("orderId"):
+            return {
+                "reply": f"订单已提交(单号 "
+                         f"{result.get('orderId') or '-'})——"
+                         f"金额 {result.get('totalPrice') or
+                                result.get('amount') or '-'} 元",
+                "card": {"type": "order_done",
+                         "subject": "订单已提交",
+                         "orderId": result.get("orderId")},
+                "executed": True}
+        return {"reply": "结算未完成: "
+                        + str(result.get("message")
+                              or result.get("error")
+                              or "参数问题")[:80],
+                "card": None}
+
+    @staticmethod
+    def _extract_credit(text: str) -> float | None:
+        """抽取信用分数额("把100信用分换成信值")"""
+        m = re.search(r"(\d+(?:\.\d+)?)\s*信用分",
+                     str(text or ""))
+        if m:
+            return float(m.group(1))
+        m = re.search(r"(\d+(?:\.\d+)?)\s*(?:分|积分)",
+                      str(text or ""))
+        return float(m.group(1)) if m else None
+
+    async def _resolve_cart_items(self,
+                                  session: dict) -> list:
+        """结算对象: 上一轮商品卡片条目"""
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        for t in reversed(turns):
+            card = t.get("card") or {}
+            if card.get("type") in ("product_list",
+                                     "product_detail"):
+                items = card.get("items") or []
+                if items:
+                    pid = (items[0].get("id")
+                           or items[0].get("productId"))
+                    if pid:
+                        return [{
+                            "productId": str(pid),
+                            "quantity": 1}]
+        return []
+
+    # P2 高敏确认(路由端点调用)
+    async def confirm_action(self, token: str,
+                             code: str) -> dict:
+        """核销确认码执行高敏操作(数字码为准红线)
+
+        Raises:
+            KeyError: 令牌不存在/过期
+            ValueError: 码错超限/业务校验
+        """
+        from services.xiaozhu_executor import get_executor
+        ex = get_executor()
+        r = await ex.confirm(token, code)
+        result = r.get("result") or {}
+        if r.get("action") == "trust.convert" \
+                and result.get("success"):
+            return {
+                "success": True, "executed": True,
+                "reply": f"兑换完成——到账 "
+                         f"{result.get('amount')} TV"
+                         f"(余额 {result.get('balance')})",
+                "result": result}
+        return {"success": bool(result.get("success")),
+                "executed": True,
+                "reply": str(result.get("detail")
+                             or result.get("error")
+                             or "已执行"),
+                "result": result}
+
     # --------------------------------------------------------
     # 执行器(只读直达——全部调既有业务 API)
     # --------------------------------------------------------
@@ -558,7 +722,8 @@ class XiaozhuService:
             items = sorted(items, key=_pref_score)
         items = items[:5]
         cards = [{
-            "id": p.get("productId") or p.get("id"),
+            "id": p.get("product_id") or p.get("productId")
+                   or p.get("id"),
             "name": p.get("name"),
             "price": p.get("price"),
             "subtitle": p.get("subtitle"),
@@ -1083,4 +1248,13 @@ class XiaozhuService:
             "fallbackHint": (result.get("fallbackHint")
                              or extras.get("fallbackHint")),
             "commandText": extras.get("commandText"),
+            # P2 沙箱字段透传(高敏确认/幂等/冷静期/执行态)
+            "confirmRequired": result.get("confirmRequired",
+                                          False),
+            "confirmToken": result.get("confirmToken"),
+            "summary": result.get("summary"),
+            "executed": result.get("executed", False),
+            "duplicate": result.get("duplicate", False),
+            "cooldown": result.get("cooldown", False),
+            "clarify": result.get("clarify"),
         }
