@@ -375,6 +375,21 @@ class TrustProfileService:
             summary = (f"{summary} [{'; '.join(
                 g['note'] for g in ueba_gates)}]").strip()
 
+        # 47号风险画像回流(fail-soft——守门命中沉淀画像,
+        # 异常零感知; P0 纯观察不干预)
+        try:
+            from services.trust_risk_profile_service import (
+                TrustRiskProfileService,
+            )
+            await TrustRiskProfileService(
+            ).record_risk_event(
+                trust_id, "event",
+                signals=[g["tag"] for g in ueba_gates],
+                detail=(f"layer={layer} delta="
+                        f"{round(delta, 1)}"))
+        except Exception as exc:
+            logger.debug("trust47_backflow_skip: %s", exc)
+
         # 事件落库(审计流水; P4 起补 scoreBefore/After 归因口径)
         event_id = await self.repo.next_event_id()
         score_before = rec.get("score")

@@ -391,6 +391,28 @@ class TrustRepairService:
         cap = abs(v_delta) * alpha
         gain = round(min(raw_gain, cap), 1)
 
+        # 47号风险画像回流(fail-soft——再犯命中+修复项验真
+        # 组件沉淀; P0 纯观察不干预)
+        try:
+            from services.trust_risk_profile_service import (
+                TrustRiskProfileService,
+            )
+            repair_signals = (["recurrence"]
+                              if eff_note else [])
+            await TrustRiskProfileService(
+            ).record_risk_event(
+                trust_id, "repair",
+                signals=repair_signals,
+                components={
+                    "content": min(
+                        (it.get("confidence") or 1.0
+                         for it in checked), default=1.0)},
+                detail=(f"violation={violation_event_id} "
+                        f"gain={gain}"))
+        except Exception as exc:
+            logger.debug("trust47_repair_backflow_skip: %s",
+                         exc)
+
         # 入分: 修复值转正作用于违规因子(回分)
         before_score = profile.get("score")
         svc = TrustProfileService(repo=self.repo)

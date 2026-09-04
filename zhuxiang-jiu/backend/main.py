@@ -278,6 +278,9 @@ register_api_manager_routes(app)
 register_trust_value_routes(app)
 # AI治理与合规中枢(46号)
 register_ai_governance_routes(app)
+# 信值验真风控模块(47号)
+from routes.trust_risk_routes import register_trust_risk_routes
+register_trust_risk_routes(app)
 
 
 # ============================================================

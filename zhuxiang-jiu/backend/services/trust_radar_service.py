@@ -505,6 +505,26 @@ class TrustRadarService:
         # 折算因子增量: 净贡献线性映射, 上限 +30(存证单次)
         delta = min(30.0, net / 10.0)
 
+        # 47号风险画像回流(fail-soft——P7 验真结果沉淀画像;
+        # verified 通过不加分: 画像只记风险不记功劳, 组件分
+        # <0.5 的维度才构成 risk_event; P0 纯观察不干预)
+        try:
+            from services.trust_risk_profile_service import (
+                TrustRiskProfileService,
+            )
+            await TrustRiskProfileService().record_risk_event(
+                trust_id, "deposit",
+                signals=(v.get("riskTags")
+                         if v.get("engine") == "v2" else []),
+                components=(v.get("components")
+                            if v.get("engine") == "v2"
+                            else None),
+                detail=f"depositId={deposit_id} "
+                       f"verified={v.get('verified')}")
+        except Exception as exc:
+            logger.debug("trust47_deposit_backflow_skip: "
+                         "%s", exc)
+
         # P6 UEBA 自愿披露激励(正向才激励——防"认领扣分";
         # None/False 不激励, 既有调用零影响)
         from services.trust_ueba_service import voluntary_bonus
