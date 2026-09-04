@@ -21,9 +21,17 @@
                                          因果净贡献折算)
     GET  /api/trust/deposits/{id}/status 存证验真状态查询
 
+端点(P2, 即时修复引擎 4):
+    POST /api/trust/repairs              提交修复证据包(验真→
+                                         修复值→天花板→入分)
+    GET  /api/trust/repairs/{trustId}/plan 修复建议路径(违规即列,
+                                         β 加权最优清单+时效窗口)
+    GET  /api/trust/repairs/detail/{id}  修复明细(归因回放)
+    POST /api/trust/repairs/{id}/verify  触发验真(验真明细回放)
+
 鉴权:
-    - 自助面(建档/查询/重算): 公开(信值查询脱敏口径——
-      摘要掩码展示, 明文永不返回)
+    - 自助面(建档/查询/重算/存证/修复): 公开(信值查询脱敏
+      口径——摘要掩码展示, 明文永不返回)
     - 事件灌入: X-Role: admin(43/44号同款口径)
 
 统一口径:
@@ -211,6 +219,73 @@ async def deposit_status(deposit_id: int):
         from services.trust_radar_service import TrustRadarService
         return await TrustRadarService().deposit_status(
             deposit_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P2: 即时修复引擎("立地成佛"——违规确认即开通道)
+# ============================================================
+
+@router.post("/repairs")
+async def submit_repair(body: dict):
+    """提交修复证据包(验真 → 修复值 α×ΣβVγ → 天花板 → 入分)
+
+    body: {trustId, violationEventId, repairs: [{kind,
+    value(1-100), evidence, daysSince?}], sources?}
+    ——24h 内修复效率约为 30 天后的 18 倍(高效激励窗口)。
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_repair_service import (
+            TrustRepairService,
+        )
+        return await TrustRepairService().submit_repair(
+            int(body.get("trustId") or 0),
+            int(body.get("violationEventId") or 0),
+            body.get("repairs") or [],
+            sources=body.get("sources"))
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/repairs/{trust_id}/plan")
+async def repair_plan(trust_id: int):
+    """修复建议路径(违规即列, 无等待期——β 加权最优清单)"""
+    try:
+        from services.trust_repair_service import (
+            TrustRepairService,
+        )
+        return await TrustRepairService().repair_plan(trust_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/repairs/detail/{repair_id}")
+async def repair_detail(repair_id: int):
+    """修复明细(归因回放)"""
+    try:
+        from services.trust_repair_service import (
+            TrustRepairService,
+        )
+        return await TrustRepairService().repair_detail(
+            repair_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/repairs/{repair_id}/verify")
+async def repair_verify(repair_id: int):
+    """触发验真(验真明细回放——提交时已同步完成三道关)"""
+    try:
+        from services.trust_repair_service import (
+            TrustRepairService,
+        )
+        return await TrustRepairService().trigger_verify(
+            repair_id)
     except Exception as e:
         raise _handle(e) from e
 
