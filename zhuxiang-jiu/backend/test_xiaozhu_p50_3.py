@@ -159,8 +159,10 @@ class TestEvidence:
         record("短证据验真拒绝",
                r4["verify"]["confidence"] == 0.0)
         # 缺可核验要素(无数字) → 0.5 不采信
+        # (8201 已提交 4 次——第 5 次语义复用会被 P4
+        #  闸门拦截[正确语义]; 换新会员 8202 测验真分支)
         r5 = await svc.record_evidence(
-            8201, "社区志愿服务现场录音佐证八小时",
+            8202, "社区志愿服务现场录音佐证八小时",
             sources=["gov_penalty", "media"])
         record("缺可核验要素不采信",
                r5["verify"]["confidence"] == 0.5

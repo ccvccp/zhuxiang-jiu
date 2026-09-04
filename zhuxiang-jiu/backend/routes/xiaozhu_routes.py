@@ -2,7 +2,7 @@
 
 端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1
      + 49号P2 2 + 49号P4 1 + 50号P0 5 + 50号P2 2
-     + 50号P3 6 = 38):
+     + 50号P3 6 + 50号P4 3 = 41):
     POST /api/xiaozhu/sessions              开启会话
     POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
@@ -28,6 +28,9 @@
     POST /api/xiaozhu/voice50/qa            社区知识问答(50号P3)
     POST /api/xiaozhu/voice50/companion/check  伴侣月度核算(50号P3)
     POST /api/xiaozhu/voice50/fairness-bridge  L3分布公平采样(50号P3, admin)
+    POST /api/xiaozhu/voice50/adjudications/{id}/appeal  申诉提交(50号P4)
+    POST /api/xiaozhu/voice50/adjudications/{id}/decide  申诉复核(50号P4, admin)
+    GET  /api/xiaozhu/voice50/adjudications  处置台账视图(50号P4, admin)
 
 鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例);
 管理端 X-Role: admin(43-47号同款口径)。
@@ -851,6 +854,83 @@ async def voice50_fairness_bridge(
             Voice50Service,
         )
         return await Voice50Service().bridge_fairness()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 50号 P4 反作弊处置台账(申诉/复核)
+# ============================================================
+
+@router.post("/voice50/adjudications/{adj_id}/appeal")
+async def voice50_appeal(
+    adj_id: int,
+    body: dict,
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """申诉提交(会员——≤48h SLA; 原始录音+设备日志/
+    合理业务场景说明/家庭成员报备)"""
+    member_id = _require_member_strict(x_member_id)
+    if not isinstance(body, dict) \
+            or "note" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 note 申诉说明字段")
+    try:
+        from services.xiaozhu_voice50_gates import (
+            Voice50GateService,
+        )
+        return await Voice50GateService().submit_appeal(
+            member_id, adj_id, body.get("note"))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/voice50/adjudications/{adj_id}/decide")
+async def voice50_decide(
+    adj_id: int,
+    body: dict,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """申诉复核裁决(admin——upheld 维持/overturned
+    翻转并解除积分域)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    if not isinstance(body, dict) \
+            or "upheld" not in body:
+        raise HTTPException(
+            status_code=409,
+            detail="请求体需含 upheld 布尔字段")
+    try:
+        from services.xiaozhu_voice50_gates import (
+            Voice50GateService,
+        )
+        return await Voice50GateService().decide_appeal(
+            adj_id, bool(body.get("upheld")),
+            review_note=str(body.get("reviewNote") or ""))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/voice50/adjudications")
+async def voice50_adjudications(
+    member_id: int = None,
+    limit: int = 100,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """处置台账视图(admin——180 天保留/分布统计)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_voice50_gates import (
+            Voice50GateService,
+        )
+        return await Voice50GateService(
+        ).adjudication_view(member_id=member_id,
+                           limit=limit)
     except Exception as e:
         raise _handle(e) from e
 

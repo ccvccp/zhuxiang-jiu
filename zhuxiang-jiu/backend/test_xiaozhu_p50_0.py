@@ -191,9 +191,15 @@ class TestCap:
         record("首日下限内不截断",
                r1["cappedScore"] == 3.0
                and r2["cappedScore"] == 3.0)
-        # 基线×3=30(冷启动 10×3)——灌爆
+        # 基线×3=30(冷启动 10×3)——灌爆(交错 sleep
+        # 制造时序抖动——防 P4 机器节拍闸门误伤连跑)
+        import time as _time
         results = []
-        for _ in range(12):
+        for i in range(12):
+            if i % 3 == 0:
+                _time.sleep(0.02)
+            elif i % 3 == 1:
+                _time.sleep(0.05)
             results.append(
                 await svc.record_behavior(
                     5201, "voice_login",

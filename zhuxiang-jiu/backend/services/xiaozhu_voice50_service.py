@@ -134,6 +134,14 @@ class Voice50Service:
                 "语音积分已被冻结(累计扣分超限)——"
                 "需人工复核恢复")
 
+        # ---- P4 反作弊闸门(计分前置——fail-soft;
+        #      命中即处置: 归零/扣分/冻结+台账留痕) ----
+        gate_hit = await self._run_gates(
+            member_id, behavior, note,
+            evidence=str(note or ""))
+        if gate_hit is not None:
+            return gate_hit
+
         # ---- 日限 enforcement(P1) ----
         daily_cap = rule.get("dailyCap")
         if daily_cap is not None and not penalty:
@@ -285,6 +293,155 @@ class Voice50Service:
             "frozen": degrade,
             "ref": ref,
         }
+
+    # --------------------------------------------------------
+    # P4 反作弊闸门(计分前置——处置只作用积分域)
+    # --------------------------------------------------------
+
+    async def _run_gates(self, member_id: int,
+                         behavior: str,
+                         note: str,
+                         evidence: str = "") -> dict | None:
+        """五模式闸门(命中 → 处置执行+台账留痕)
+
+        处置(v2.0 §六——只作用积分域, 语音入口不阻断):
+        - tts_spoof: 当次积分归零(跳过计分)+L1 扣 10
+        - scripted_repeat: 台账 frozen(当日冻结+人工复核)
+        - shared_account: 台账 frozen(积分域锁定)
+        - privacy_extraction: L2 扣 20(以事件负分入账)
+        - budget_exhausted: 拒绝积分(引导调整)
+        Returns:
+            命中: 处置回包(调用方直接返回);
+            未中: None(继续正常计分)。
+        """
+        try:
+            from services.xiaozhu_voice50_gates import (
+                Voice50GateService, PATTERN_TTS,
+                PATTERN_SCRIPTED, PATTERN_SHARED,
+                PATTERN_EXTRACTION, PATTERN_BUDGET,
+            )
+            gates = Voice50GateService(repo=self.repo)
+            # 时序信号: 距同行为上一笔事件的间隔(秒)
+            interval = None
+            try:
+                from datetime import datetime
+                prior = await self.repo.list_events(
+                    member_id=member_id, limit=500)
+                same = [e for e in prior
+                        if e.get("behavior") == behavior]
+                if same:
+                    t0 = datetime.fromisoformat(
+                        str(same[-1].get("ts") or ""))
+                    interval = max(
+                        0.0, datetime.now(UTC).timestamp()
+                        - t0.timestamp())
+            except (ValueError, TypeError):
+                interval = None
+            hit = await gates.check(
+                member_id, behavior,
+                evidence=evidence or note,
+                interval_sec=interval)
+            if hit is None:
+                return None
+            pattern = hit["pattern"]
+            adj = await gates.record_adjudication(
+                member_id, pattern, hit.get("detail"),
+                hit.get("action"), evidence=note)
+            out = {
+                "gated": True,
+                "pattern": pattern,
+                "action": hit.get("action"),
+                "adjId": adj["adjId"],
+                "finalScore": 0.0,
+                "cappedScore": 0.0,
+                "overflowScore": 0.0,
+                "behavior": behavior,
+                "note": "反作弊闸门处置——申诉路径见"
+                        "处置台账(≤48h SLA)",
+            }
+            # 处置执行
+            if pattern == PATTERN_TTS:
+                # L1 扣 10(负向事件入账——不走闸门防递归,
+                # 直接触发扣分管线)
+                out["finalScore"] = -10.0
+                out["cappedScore"] = -10.0
+                await self._apply_gate_penalty(
+                    member_id, behavior, -10.0,
+                    note=f"gate:{pattern}")
+            elif pattern in (PATTERN_SCRIPTED,
+                             PATTERN_SHARED,
+                             PATTERN_BUDGET):
+                # 冻结(当日积分冻结/锁定/拒绝)
+                ledger = await self._ensure_ledger(
+                    member_id)
+                ledger["frozen"] = True
+                ledger["ts"] = ts()
+                await self.repo.save_ledger(ledger)
+                out["frozen"] = True
+                if pattern == PATTERN_BUDGET:
+                    out["note"] = ("隐私预算耗尽——拒绝积分, "
+                                   "请在设置中调整隐私偏好"
+                                   "或申请临时额度")
+            elif pattern == PATTERN_EXTRACTION:
+                # L2 扣 20(负向事件)
+                out["finalScore"] = -20.0
+                out["cappedScore"] = -20.0
+                await self._apply_gate_penalty(
+                    member_id, behavior, -20.0,
+                    note=f"gate:{pattern}")
+            logger.warning(
+                "voice50_gate_hit member=%s behavior=%s "
+                "pattern=%s", member_id, behavior, pattern)
+            return out
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("voice50_gates_failsoft: %s",
+                           exc)
+            return None   # fail-soft 放行
+
+    async def _apply_gate_penalty(self, member_id: int,
+                                  behavior: str,
+                                  delta: float,
+                                  note: str) -> None:
+        """闸门扣分直入账(负向事件——绕闸门防递归)"""
+        from services.xiaozhu_voice50_rules import (
+            VOICE_RULES,
+        )
+        rule = VOICE_RULES.get(behavior) or {}
+        ev_id = await self.repo.next_event_id()
+        from services.xiaozhu_explainability_service \
+            import build_ref
+        ref = build_ref("voice50", ev_id,
+                        f"{member_id}-{behavior}-gate")
+        ledger = await self._ensure_ledger(member_id)
+        await self.repo.save_event({
+            "evId": ev_id,
+            "memberId": member_id,
+            "sessionId": 0, "turnSeq": 0,
+            "behavior": behavior,
+            "layer": rule.get("layer") or "L1",
+            "voiceFactor": rule.get("voiceFactor") or "",
+            "targetFactor": rule.get("targetFactor") or "",
+            "voiceprintMode": "",
+            "baseScore": 0.0,
+            "multipliers": {"gate": 1.0},
+            "finalScore": delta,
+            "cappedScore": delta,
+            "overflowScore": 0.0,
+            "status": "settled",
+            "ref": ref,
+            "note": str(note)[:120],
+            "dayKey": _today_key(),
+            "ts": ts(),
+        })
+        # L1 因子扣分计入降级累计
+        if rule.get("voiceFactor") in L1_FACTORS:
+            ledger["l1PenaltyTotal"] = _r2(
+                float(ledger.get("l1PenaltyTotal") or 0)
+                + abs(delta))
+            if ledger["l1PenaltyTotal"] \
+                    > L1_DEGRADE_THRESHOLD:
+                ledger["frozen"] = True
+        await self.repo.save_ledger(ledger)
 
     # --------------------------------------------------------
     # 系数链(确定性数学)
@@ -706,6 +863,37 @@ class Voice50Service:
         if any(w in content for w in ATTACK_WORDS):
             raise ValueError(
                 "内容含攻击性语言——社区问答拒绝计分")
+        # P4: 诱导套取闸门(content 走证据检测)
+        from services.xiaozhu_voice50_gates import (
+            Voice50GateService,
+        )
+        gates = Voice50GateService(repo=self.repo)
+        hit = await gates.check(
+            member_id, "voice_community_qa",
+            evidence=content)
+        if hit is not None:
+            adj = await gates.record_adjudication(
+                member_id, hit["pattern"],
+                hit.get("detail"), hit.get("action"),
+                evidence=content)
+            if hit["pattern"] == "privacy_extraction":
+                await self._apply_gate_penalty(
+                    member_id, "voice_community_qa",
+                    -20.0,
+                    note=f"gate:{hit['pattern']}")
+                return {"gated": True,
+                        "pattern": hit["pattern"],
+                        "action": hit["action"],
+                        "adjId": adj["adjId"],
+                        "finalScore": -20.0,
+                        "cappedScore": -20.0,
+                        "note": "诱导套取处置——L2 扣 20"}
+            return {"gated": True,
+                    "pattern": hit["pattern"],
+                    "action": hit["action"],
+                    "adjId": adj["adjId"],
+                    "finalScore": 0.0,
+                    "note": "反作弊闸门处置"}
         return await self.record_behavior(
             member_id, "voice_community_qa",
             gains={"liked": bool(liked)},

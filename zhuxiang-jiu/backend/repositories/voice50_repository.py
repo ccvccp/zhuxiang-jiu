@@ -9,6 +9,8 @@
                      L2/L3 聚合 deposit 申报留痕)
     voice50_corpus  新场景语料捐赠(corpusId 键——
                      P3 人工审核流; 采纳 base+20)
+    voice50_adjudication 反作弊处置台账(adjId 键——
+                     P4 申诉复核流; 180 天保留)
     voice50_rules_log 规则热更新留痕(logId 键, 只追加)
 
 设计对齐(43-49号仓储范式):
@@ -32,11 +34,12 @@ class Voice50Repository:
     TABLE_LEDGER = "voice50_ledger"
     TABLE_SETTLEMENT = "voice50_settlement"
     TABLE_CORPUS = "voice50_corpus"
+    TABLE_ADJUDICATION = "voice50_adjudication"
     TABLE_RULES_LOG = "voice50_rules_log"
 
     _INT_FIELDS = ("evId", "memberId", "sessionId", "turnSeq",
                   "logId", "batchId", "eventCount",
-                  "depositId", "corpusId")
+                  "depositId", "corpusId", "adjId")
     _FLOAT_FIELDS = ("baseScore", "finalScore",
                      "poolBalance", "earnedTotal",
                      "offsetUsed", "baseline",
@@ -51,6 +54,7 @@ class Voice50Repository:
         for t in (self.TABLE_EVENTS, self.TABLE_LEDGER,
                   self.TABLE_SETTLEMENT,
                   self.TABLE_CORPUS,
+                  self.TABLE_ADJUDICATION,
                   self.TABLE_RULES_LOG):
             self.store.setdefault(t, {})
 
@@ -339,6 +343,82 @@ class Voice50Repository:
                   or r.get("status") == status]
         result.sort(
             key=lambda r: r.get("corpusId") or 0)
+        return result[-limit:]
+
+    # --------------------------------------------------------
+    # P4 处置台账(adjId 键——180 天保留, 申诉复核流)
+    # --------------------------------------------------------
+
+    async def next_adjudication_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(_k(
+                "voice50", self.TABLE_ADJUDICATION, "seq"))
+        self._ensure_store()
+        seq = self.store.get(
+            "_voice50_adjudication_seq", 0) + 1
+        self.store["_voice50_adjudication_seq"] = seq
+        return seq
+
+    async def save_adjudication(self,
+                                record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("voice50", self.TABLE_ADJUDICATION,
+                   record["adjId"]),
+                mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_ADJUDICATION][
+            record["adjId"]] = dict(record)
+        return record
+
+    async def get_adjudication(self,
+                               adj_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k(
+                "voice50", self.TABLE_ADJUDICATION, adj_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_ADJUDICATION].get(adj_id)
+        return dict(rec) if rec else None
+
+    async def list_adjudications(
+            self, member_id: int = None,
+            limit: int = 200) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "voice50", self.TABLE_ADJUDICATION, "*"))
+            keys = [k for k in keys
+                    if not k.endswith(":seq")]
+            result = []
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if not data:
+                        continue
+                    rec = self._deserialize(data)
+                    if member_id is None \
+                            or rec.get("memberId") \
+                            == member_id:
+                        result.append(rec)
+            result.sort(
+                key=lambda r: r.get("adjId") or 0)
+            return result[-limit:]
+        self._ensure_store()
+        result = [dict(r) for r in
+                  self.store[
+                      self.TABLE_ADJUDICATION].values()
+                  if member_id is None
+                  or r.get("memberId") == member_id]
+        result.sort(
+            key=lambda r: r.get("adjId") or 0)
         return result[-limit:]
 
     # --------------------------------------------------------
