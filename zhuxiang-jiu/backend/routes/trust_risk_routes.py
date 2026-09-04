@@ -1,6 +1,7 @@
-"""47号·L2/L3 信值验真风控模块路由(P0 画像 + P1 扫描 + P2 协同 + P3 复核)
+"""47号·L2/L3 信值验真风控模块路由(P0-P4 全量)
 
-端点(P0 画像 2 + 校准 2 + P1 扫描 1 + P2 协同 2 + P3 复核 2):
+端点(P0 画像 2 + 校准 2 + P1 扫描 1 + P2 协同 2 +
+P3 复核 2 + P4 看板 2):
     GET  /api/trust/risk/{trustId}     画像视图(风险指数/信任
                                       分层/命中明细/历史/复核
                                       队列; X-Role: admin)
@@ -30,6 +31,12 @@
                                       (留痕, 可反复修正)
     POST /api/trust/risk/{trustId}/calibrate/clear
                                       清除校准回到计算值
+    GET  /api/trust/risk/dashboard     风控看板(P4 五区块聚合,
+                                      fail-soft 分区; admin)
+    POST /api/trust/risk/dashboard/fairness-bridge
+                                      风险等级→46号公平性采样
+                                      桥接(tier 维度上报;
+                                      admin)
 
 鉴权: 管理端 X-Role: admin(43-46号同款口径); 画像查询对
 管理端开放(角色自查走 45号档案视图, 按需再开); 复核申诉
@@ -38,8 +45,8 @@
 统一口径:
     - 模块纯增量(零既有路由改动; 回流经 try 包裹 fail-soft)
     - 画像不处罚: 嫌疑仅标记, 处罚走人工复核(红线④)
-    - /collusion 字面路由须注册在 /{trust_id} 之前
-      (防 int 路径参数 422 抢匹配)
+    - /collusion、/dashboard 字面路由须注册在 /{trust_id}
+      之前(防 int 路径参数 422 抢匹配)
     - KeyError → 404 / ValueError → 409(44-46号同款)
 """
 
@@ -98,6 +105,45 @@ async def collusion_view(
             TrustRiskCollusionService,
         )
         return await TrustRiskCollusionService().view()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P4 风控看板(字面路由——须在 /{trust_id} 之前注册)
+# ============================================================
+
+@router.get("/dashboard")
+async def risk_dashboard(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """风控看板(P4 五区块聚合: 风险排行/命中统计/嫌疑
+    视图/复核队列/回流状态——fail-soft 分区, 单区块异常
+    不阻断看板)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_risk_dashboard_service import (
+            TrustRiskDashboardService,
+        )
+        return await TrustRiskDashboardService().build()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/dashboard/fairness-bridge")
+async def fairness_bridge(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """风险等级→46号公平性采样桥接(tier 维度上报——验证
+    通道收窄是否在群体间造成系统性偏差; 画像只读, tier
+    标签无个人标识字段)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_risk_dashboard_service import (
+            TrustRiskDashboardService,
+        )
+        return await TrustRiskDashboardService(
+        ).bridge_fairness()
     except Exception as e:
         raise _handle(e) from e
 
