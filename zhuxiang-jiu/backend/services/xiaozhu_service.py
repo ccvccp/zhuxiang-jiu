@@ -1,28 +1,40 @@
-"""48号·小竹智能语音中枢 P0 感知层服务
-(唤醒判定 + 免唤醒连续对话 + 指代消解 + PII 脱敏 +
- 八指令直达路由)
+"""48号·小竹智能语音中枢服务
+(P0 感知层 + P1 认知层·角色感知大脑)
 
-计划(docs/48号_小竹智能语音中枢实施计划.md §四):
-    ① 唤醒判定: 转写文本前缀"小竹"(含近似音容错——
-       ASR 对唤醒词的常见误听)→ 唤醒并剥离前缀
-    ② 免唤醒连续对话: 会话 5 分钟窗内后续语句直接解析;
-       指代消解("这个/它"→ 上一轮 jump/card 对象)
-    ③ PII 脱敏: 身份证/手机号/银行卡 正则 mask 后落库
-    ④ 八指令直达(规则轨, 计划 §四 4.2 ③):
-       product.new / product.price / trust.score /
-       trust.balance / nav.page / promo.query /
-       chat.human / xiaozhu.help
-    ⑤ 音频即转即删(复用 hub transcribe 的临时文件语义;
-       小竹只落 audioMeta 元信息——durationSec/sizeBytes)
+计划(docs/48号_小竹智能语音中枢实施计划.md §四/§五):
+    P0 感知层:
+    ① 唤醒判定: 前缀"小竹"(近似音容错)→ 剥离前缀
+    ② 免唤醒连续对话: 会话 5 分钟窗; 指代消解
+    ③ PII 脱敏: 身份证/手机号/银行卡 mask 后落库
+    ④ 八指令直达(规则轨)
+    ⑤ 音频即转即删(复用 hub ASR 链路)
 
-设计红线(计划 §一 1.4):
-    - 反语音霸权: 未唤醒语句返回 wakeHint 不执行
-    - 隐私最小采集: rawText 落库前 PII mask; 音频本体
-      永不落库
-    - 默认零影响: 独立路由前缀, 既有 Hub/chat 零改动
+    P1 认知层(角色感知大脑):
+    ⑥ 绑定表: member_id ↔ trustId(可解除/改绑, 零不可逆)
+    ⑦ 角色上下文: 会员等级 + 信值余额(经绑定) + 偏好
+       标签(历史订单类目 top3) + 47号画像 tier——注入
+       指令响应(等级话术变体/偏好重排序只调序不筛除)
+    ⑧ LLM 意图增强轨(XIAOZHU_LLM_MODE, 默认 off):
+       规则轨不中且开关 on → LLM 从指令集选 action+
+       抽参数(JSON 输出); 失败/未配 key → 回退规则轨;
+       LLM 只产 action 不产内容(数字来自执行层——防幻觉)
+    ⑨ 信值上下文指令:
+       - "能换吗/能用信值换吗" → 商品价 vs 信值余额
+         换算 + 获取路径卡片
+       - "怎么修复/修复窗口" → 45号修复计划(剩余窗口 +
+         高效修复方式)实时计算
+       - trust.score/balance 升级: 绑定后直读 45号档案
+
+设计红线(计划 §一 1.4/§九):
+    - 反语音霸权: 未唤醒不执行
+    - 隐私最小采集: rawText PII mask; 音频不落库
+    - LLM 不产数字: LLM 轨只选 action; 一切数字来自
+      执行层 API 调 45/47/member/product 既有数据
+    - 默认零影响: XIAOZHU_LLM_MODE 默认 off(规则轨兜底)
 """
 
 import logging
+import os
 import re
 import uuid
 
@@ -33,6 +45,13 @@ from repositories.xiaozhu_repository import (
 )
 
 logger = logging.getLogger("xiaozhu_service")
+
+
+def _llm_mode_enabled() -> bool:
+    """P1 LLM 意图增强轨开关(默认 off——规则轨兜底)"""
+    return os.environ.get(
+        "XIAOZHU_LLM_MODE", "off").lower() in ("on", "1",
+                                               "true")
 
 # 唤醒词与近似音容错(ASR 常见误听映射——mock 确定性)
 WAKE_WORDS = ("小竹", "小朱", "小珠", "小猪", "小竹竹",
@@ -126,18 +145,18 @@ COMMANDS = [
                      "小竹，这个多少钱"],
     },
     {
-        "action": "trust.score",
-        "label": "查信值",
-        "patterns": ["信值多少", "查信值", "我的信值",
-                     "信值分", "信用等级", "信值档案"],
-        "examples": ["小竹，查我的信值", "小竹，我的信值多少"],
-    },
-    {
         "action": "trust.balance",
         "label": "信值余额",
         "patterns": ["信值余额", "余额多少", "还剩多少信值",
                      "信值还剩", "信值资产"],
         "examples": ["小竹，我的信值余额"],
+    },
+    {
+        "action": "trust.score",
+        "label": "查信值",
+        "patterns": ["信值多少", "查信值", "我的信值",
+                     "信值分", "信用等级", "信值档案"],
+        "examples": ["小竹，查我的信值", "小竹，我的信值多少"],
     },
     {
         "action": "nav.page",
@@ -162,6 +181,21 @@ COMMANDS = [
         "examples": ["小竹，转人工客服"],
     },
     {
+        "action": "trust.exchange",
+        "label": "能换吗(信值换算)",
+        "patterns": ["能换吗", "能兑换吗", "能用信值",
+                     "信值够吗", "可以换吗", "换得起吗"],
+        "examples": ["小竹，这个能用信值换吗"],
+    },
+    {
+        "action": "trust.repair",
+        "label": "修复引导",
+        "patterns": ["怎么修复", "修复窗口", "如何修复",
+                     "修复计划", "修复一下", "怎么补救",
+                     "违章怎么", "违规怎么"],
+        "examples": ["小竹，我上次违章怎么修复"],
+    },
+    {
         "action": "xiaozhu.help",
         "label": "帮助",
         "patterns": ["帮助", "你能干什么", "你会什么",
@@ -171,6 +205,12 @@ COMMANDS = [
 ]
 
 COMMAND_ACTIONS = tuple(c["action"] for c in COMMANDS)
+
+# 会员等级 → 话术敬语变体(P1 角色注入)
+LEVEL_TITLES = {
+    1: "", 2: "竹叶会员", 3: "竹林会员",
+    4: "竹海贵宾", 5: "竹海至尊",
+}
 
 
 def match_command(text: str) -> dict | None:
@@ -394,8 +434,23 @@ class XiaozhuService:
         last = turns[-1] if turns else None
         resolved = _resolve_reference(command_text, last)
 
-        # ④ 指令路由(规则轨)
+        # ④ 指令路由(绑定快捷指令 → 规则轨 → LLM 增强轨)
+        # P1 绑定指令优先于 pattern 匹配("绑定信值档案 N"
+        # 含 trust.score 的 pattern 词, 须先拦截)
+        if re.fullmatch(r"绑定\s*信值?\s*档案?\s*[0-9]+",
+                        command_text):
+            trust_id = int(re.search(
+                r"[0-9]+", command_text).group())
+            return await self._bind_flow(
+                session, channel, text, trust_id, audio_meta)
         cmd = match_command(resolved)
+        track = "rule"
+        if cmd is None:
+            llm_hit = await self._llm_match(resolved)
+            if llm_hit:
+                cmd = next(c for c in COMMANDS
+                           if c["action"] == llm_hit["action"])
+                track = "llm"
         if cmd is None:
             return await self._save_turn(
                 session, channel, text, "general",
@@ -413,22 +468,56 @@ class XiaozhuService:
             result, {"latencyMs": latency,
                      "audioMeta": audio_meta,
                      "commandText": command_text,
+                     "track": track,
                      "resolved": resolved})
+
+    async def _bind_flow(self, session: dict, channel: str,
+                         raw_text: str, trust_id: int,
+                         audio_meta: dict) -> dict:
+        """会话内绑定流程(「绑定信值档案 123」快捷指令)"""
+        try:
+            b = await self.bind_trust(
+                session.get("memberId"), trust_id,
+                note="voice-bind")
+            return await self._save_turn(
+                session, channel, raw_text, "trust.bind",
+                {"reply": f"已绑定居值档案 {trust_id}——"
+                          f"现在可以问我「查信值」"
+                          f"「信值余额」「能换吗」了",
+                 "card": {"type": "bind",
+                          "subject": f"档案 {trust_id}",
+                          "trustId": trust_id}},
+                {"audioMeta": audio_meta,
+                 "commandText": raw_text})
+        except KeyError as exc:
+            return await self._save_turn(
+                session, channel, raw_text, "trust.bind",
+                {"reply": f"绑定失败: {exc}——请确认档案号"
+                          f"后重新说「绑定信值档案 <编号>」"},
+                {"audioMeta": audio_meta,
+                 "commandText": raw_text})
 
     async def _execute(self, session: dict, cmd: dict,
                        text: str,
                        member_id_hint: bool = True) -> dict:
-        """指令执行(P0 只读直达——数字来自既有业务 API)"""
+        """指令执行(P0 只读直达 + P1 角色注入——数字来自
+        既有业务 API, LLM 不产数字红线)"""
         action = cmd["action"]
         member_id = session.get("memberId")
+        context = await self.build_context(member_id)
         try:
             if action == "product.new":
-                return await self._exec_product_new()
+                return await self._exec_product_new(context)
             if action == "product.price":
                 return await self._exec_product_price(text)
             if action in ("trust.score", "trust.balance"):
                 return await self._exec_trust(
-                    member_id, action)
+                    member_id, action, context)
+            if action == "trust.exchange":
+                return await self._exec_exchange(
+                    session, text, context)
+            if action == "trust.repair":
+                return await self._exec_repair(context)
             if action == "nav.page":
                 return self._exec_nav(text)
             if action == "promo.query":
@@ -449,13 +538,25 @@ class XiaozhuService:
     # 执行器(只读直达——全部调既有业务 API)
     # --------------------------------------------------------
 
-    async def _exec_product_new(self) -> dict:
+    async def _exec_product_new(self,
+                               context: dict = None) -> dict:
         from services.product_service import ProductService
         r = await ProductService().list_products(
-            filters=None, sort="new", page=1, page_size=5)
-        items = (r.get("items")
-                 or r.get("list")
-                 or r.get("products") or [])[:5]
+            filters=None, sort="new", page=1, page_size=8)
+        items = (r.get("products")
+                 or r.get("items") or [])[:8]
+        # P1 角色注入: 偏好重排序(只调序不筛除——防信息茧房)
+        prefs = (context or {}).get("preferenceTags") or []
+        if prefs and items:
+            def _pref_score(p):
+                tags = set((p.get("tags") or [])
+                           + [p.get("series") or ""])
+                hits = sum(1 for t in prefs
+                           if t in " ".join(
+                               str(x) for x in tags))
+                return -hits
+            items = sorted(items, key=_pref_score)
+        items = items[:5]
         cards = [{
             "id": p.get("productId") or p.get("id"),
             "name": p.get("name"),
@@ -464,12 +565,18 @@ class XiaozhuService:
         } for p in items]
         subject = (cards[0].get("name")
                    if cards else "新品")
+        # P1 角色注入: 等级敬语变体
+        title = (context or {}).get("levelTitle") or ""
+        greet = (f"{title}您好——" if title else "")
+        if prefs:
+            greet += f"按您偏好的 {('、'.join(prefs))} 排序, "
         return {
-            "reply": f"为您找到 {len(cards)} 款新品"
-                     + (f"(新上线), 主推「{subject}」"
+            "reply": greet + f"为您找到 {len(cards)} 款新品"
+                     + (f", 主推「{subject}」"
                         if subject != "新品" else ""),
             "card": {"type": "product_list",
-                     "subject": subject, "items": cards},
+                     "subject": subject, "items": cards,
+                     "preferenceApplied": prefs},
             "jump": "/product-list.html?sort=new"}
 
     async def _exec_product_price(self,
@@ -504,16 +611,164 @@ class XiaozhuService:
         }
 
     async def _exec_trust(self, member_id: int,
-                          action: str) -> dict:
-        """信值指令——member↔trustId 绑定表 P1 交付,
-        P0 未绑定态返回引导卡片(计划 §五绑定策略)"""
+                          action: str,
+                          context: dict = None) -> dict:
+        """信值指令(P1 绑定后直读 45号档案; 未绑定引导)"""
+        if not (context or {}).get("bound"):
+            return {
+                "reply": "信值服务需要先绑定居值档案——"
+                         "对我说「绑定信值档案」并提供"
+                         "您的信值档案号(trustId)",
+                "card": {"type": "guide",
+                         "subject": "绑定信值档案",
+                         "guide": "trust-bind"},
+                "jump": "/trust-dashboard.html",
+            }
+        trust_id = context["trustId"]
+        if action == "trust.balance":
+            from services.trust_asset_service import (
+                TrustAssetService,
+            )
+            b = await TrustAssetService().balance(trust_id)
+            return {
+                "reply": f"当前信值余额 {b.get('balance')} "
+                         f"TV(冻结 {b.get('frozen')}), "
+                         f"累计发行 {b.get('issuedTotal')}",
+                "card": {"type": "trust_balance",
+                         "subject": "信值余额",
+                         "balance": b.get("balance"),
+                         "frozen": b.get("frozen"),
+                         "issuedTotal": b.get("issuedTotal")},
+                "jump": None,
+            }
+        # trust.score → 45号档案视图(分数/等级/熔断态)
+        from repositories.trust_value_repository import (
+            TrustValue45Repository,
+        )
+        p = await TrustValue45Repository().get_profile(
+            trust_id)
+        if p is None:
+            return {"reply": "绑定的信值档案不存在, 请重新"
+                            "绑定", "card": None}
         return {
-            "reply": "信值服务需要先绑定居值档案——"
-                     "回复「绑定」或到信值看板操作"
-                     "(P1 上线角色感知后自动关联)",
-            "card": {"type": "guide",
-                     "subject": "绑定信值档案",
-                     "guide": "trust-bind"},
+            "reply": f"信值分 {p.get('score')}, 等级 "
+                     f"{p.get('grade')}"
+                     + ("(熔断态)" if p.get("fused")
+                        else "") + f", 熔断级 "
+                     f"{p.get('fusedLevel') or '-'}",
+            "card": {"type": "trust_score",
+                     "subject": "信值档案",
+                     "score": p.get("score"),
+                     "grade": p.get("grade"),
+                     "fused": p.get("fused"),
+                     "rawScore": p.get("rawScore")},
+            "jump": "/trust-dashboard.html",
+        }
+
+    async def _exec_exchange(self, session: dict,
+                             text: str,
+                             context: dict) -> dict:
+        """"能换吗"——商品价 vs 信值余额换算(数字来自
+        执行层: 商品价来自 product API, 余额来自 45号)"""
+        # 取上一轮或本轮指代的商品(指代消解后已含名称)
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        last_card = (turns[-1].get("card") or {}
+                     if turns else {})
+        subject = last_card.get("subject")
+        price = None
+        if last_card.get("type") in ("product_list",
+                                      "product_detail"):
+            items = last_card.get("items") or []
+            if items:
+                subject = items[0].get("name")
+                price = items[0].get("price")
+        if price is None:
+            # 无上文商品: 回退热销 Top1
+            from services.product_service import ProductService
+            hot = await ProductService().get_hot_products(
+                limit=1)
+            items = (hot.get("products")
+                     if isinstance(hot, dict) else hot) or []
+            if items:
+                subject = items[0].get("name")
+                price = items[0].get("price")
+        if price is None:
+            return {"reply": "想换哪件? 先说「看新品」或"
+                            "「问价格」再问我能不能换",
+                    "card": None}
+        if not context.get("bound"):
+            return {
+                "reply": f"「{subject}」{price} 元——用信值"
+                         f"兑换需先绑定信值档案(1 TV 抵 1 元"
+                         f"货品), 绑定后我帮您算余额够不够",
+                "card": {"type": "guide",
+                         "subject": "绑定信值档案",
+                         "guide": "trust-bind"},
+                "jump": "/trust-dashboard.html",
+            }
+        balance = context.get("trustBalance") or 0.0
+        if balance >= price:
+            reply = (f"「{subject}」{price} 元, 您的余额 "
+                     f"{balance} TV——够! 差额 "
+                     f"{round(balance - price, 2)}")
+        else:
+            reply = (f"「{subject}」{price} 元, 您的余额 "
+                     f"{balance} TV——还差 "
+                     f"{round(price - balance, 2)}, 做公益"
+                     f"任务/修复行为可赚信值")
+        return {
+            "reply": reply,
+            "card": {"type": "trust_exchange",
+                     "subject": subject,
+                     "price": price,
+                     "balance": balance,
+                     "enough": balance >= price},
+            "jump": None,
+        }
+
+    async def _exec_repair(self, context: dict) -> dict:
+        """"怎么修复"——45号修复计划实时(高 β 优先)"""
+        if not context.get("bound"):
+            return {
+                "reply": "修复引导需要先绑定居值档案——"
+                         "绑定后我告诉您剩余修复窗口和"
+                         "最高效的修复方式",
+                "card": {"type": "guide",
+                         "subject": "绑定信值档案",
+                         "guide": "trust-bind"},
+                "jump": "/trust-dashboard.html",
+            }
+        from services.trust_repair_service import (
+            TrustRepairService,
+        )
+        plan = await TrustRepairService().repair_plan(
+            context["trustId"])
+        plans = plan.get("plans") or []
+        if not plans:
+            return {
+                "reply": "您当前没有待修复的违规——保持"
+                         "良好记录, 信值只会越来越高",
+                "card": {"type": "repair",
+                         "subject": "无需修复", "items": []},
+                "jump": None,
+            }
+        first = plans[0]
+        best = (first.get("items") or [{}])[0]
+        reply = (f"当前有 {len(plans)} 项待修复——最高效: "
+                 f"{best.get('label') or '针对性修复行为'}"
+                 f"(关联度 β={best.get('beta')}, 24h 内完成"
+                 f"效率约为 30 天后的 18 倍)")
+        return {
+            "reply": reply,
+            "card": {"type": "repair",
+                     "subject": "修复计划",
+                     "items": [
+                         {"violationEventId":
+                          p.get("violationEventId"),
+                          "items": (p.get("items")
+                                    or [])[:3]}
+                         for p in plans[:3]]},
             "jump": "/trust-dashboard.html",
         }
 
@@ -581,6 +836,165 @@ class XiaozhuService:
                      "items": list_commands()},
             "jump": None,
         }
+
+    # --------------------------------------------------------
+    # P1 认知层: 绑定 + 角色上下文 + LLM 意图轨
+    # --------------------------------------------------------
+
+    async def bind_trust(self, member_id: int, trust_id: int,
+                         note: str = "") -> dict:
+        """绑定会员↔信值档案(两套 ID 体系衔接)
+
+        重复绑定=改绑(零不可逆); 绑定留痕。
+
+        Raises:
+            KeyError: 信值档案不存在(45号侧核验)
+        """
+        from repositories.trust_value_repository import (
+            TrustValue45Repository,
+        )
+        if await TrustValue45Repository().get_profile(
+                trust_id) is None:
+            raise KeyError(f"信值档案 {trust_id} 不存在")
+        record = {
+            "memberId": member_id, "trustId": trust_id,
+            "boundAt": ts(),
+            "note": str(note or "")[:200]}
+        await self.repo.save_binding(record)
+        logger.info("voice48_bound member=%s trust=%s",
+                    member_id, trust_id)
+        return await self.get_binding(member_id)
+
+    async def get_binding(self, member_id: int) -> dict:
+        """绑定视图
+
+        Raises:
+            KeyError: 未绑定
+        """
+        b = await self.repo.get_binding(member_id)
+        if b is None:
+            raise KeyError(f"会员 {member_id} 未绑定信值档案")
+        return {"success": True, **b}
+
+    async def unbind(self, member_id: int) -> dict:
+        """解除绑定(零不可逆)
+
+        Raises:
+            KeyError: 未绑定
+        """
+        if not await self.repo.delete_binding(member_id):
+            raise KeyError(f"会员 {member_id} 未绑定信值档案")
+        logger.info("voice48_unbound member=%s", member_id)
+        return {"success": True, "memberId": member_id,
+                "bound": False}
+
+    async def build_context(self,
+                            member_id: int) -> dict:
+        """角色上下文构建(千人千面数据基座; fail-soft——
+        任一数据源失败降级为空值不阻断指令)"""
+        context = {
+            "memberId": member_id,
+            "bound": False, "trustId": None,
+            "trustBalance": None, "level": 1,
+            "levelTitle": "", "preferenceTags": [],
+        }
+        if not member_id:
+            return context
+        # 会员等级(fail-soft)
+        try:
+            from services.member_service import (
+                MemberService,
+            )
+            lv = await MemberService().get_level(member_id)
+            context["level"] = int(lv.get("level") or 1)
+            context["levelTitle"] = LEVEL_TITLES.get(
+                context["level"], "")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_ctx_member_skip: %s", exc)
+        # 信值绑定(fail-soft——未绑定是正常态)
+        try:
+            b = await self.repo.get_binding(member_id)
+            if b:
+                context["bound"] = True
+                context["trustId"] = b.get("trustId")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_ctx_bind_skip: %s", exc)
+        # 信值余额(绑定后; fail-soft)
+        if context["bound"] and context["trustId"]:
+            try:
+                from services.trust_asset_service import (
+                    TrustAssetService,
+                )
+                bal = await TrustAssetService().balance(
+                    context["trustId"])
+                context["trustBalance"] = bal.get("balance")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("voice48_ctx_balance_skip: %s",
+                             exc)
+        # 偏好标签: 历史订单类目 top3(fail-soft)
+        try:
+            from repositories.order_repository import (
+                OrderRepository,
+            )
+            orders = await OrderRepository(
+            ).get_by_member(member_id)
+            from collections import Counter
+            series = Counter()
+            for o in (orders or [])[:30]:
+                for it in (o.get("items") or []):
+                    s = it.get("series") \
+                        or it.get("category")
+                    if s:
+                        series[str(s)] += 1
+            context["preferenceTags"] = [
+                tag for tag, _ in series.most_common(3)]
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_ctx_pref_skip: %s", exc)
+        return context
+
+    async def _llm_match(self, text: str) -> dict | None:
+        """LLM 意图增强轨(XIAOZHU_LLM_MODE=on 且规则轨
+        未中时; LLM 只从白名单指令集选 action——不产内容)
+
+        Returns: {"action", "track": "llm"} 或 None(回退规则轨)
+        """
+        if not _llm_mode_enabled():
+            return None
+        try:
+            from services.llm_client import (
+                provider_client, llm_enabled,
+            )
+            if not llm_enabled():
+                return None
+            catalog = "; ".join(
+                f"{c['action']}({c['label']})" for c in
+                COMMANDS)
+            reply = provider_client().chat(
+                system="你是语音指令路由器。从指令集中选择"
+                       "唯一 action 并只回答 JSON: "
+                       '{"action": "..." 或 null}',
+                user=f"指令集: {catalog}\n"
+                     f"用户指令: {text}")
+            if not reply:
+                return None
+            import json as _json
+            m = re.search(r"\{.*\}", reply, re.S)
+            if not m:
+                return None
+            data = _json.loads(m.group())
+            action = data.get("action")
+            if action in COMMAND_ACTIONS:
+                return {"action": action, "track": "llm"}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("voice48_llm_track_skip: %s", exc)
+        return None
+
+    async def get_context_view(self,
+                               member_id: int) -> dict:
+        """角色上下文调试视图(GET /xiaozhu/context)"""
+        context = await self.build_context(member_id)
+        return {"success": True, "llmMode":
+                _llm_mode_enabled(), **context}
 
     # --------------------------------------------------------
     # 工具
@@ -665,6 +1079,7 @@ class XiaozhuService:
             "card": turn["card"] or None,
             "jump": turn["jump"],
             "wakeHint": extras.get("wakeHint", False),
+            "track": extras.get("track", "rule"),
             "fallbackHint": (result.get("fallbackHint")
                              or extras.get("fallbackHint")),
             "commandText": extras.get("commandText"),

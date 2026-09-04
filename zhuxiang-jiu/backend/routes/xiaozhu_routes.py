@@ -36,6 +36,18 @@ def _require_member(x_member_id: str | None) -> int:
                             detail="X-Member-Id 需为整数")
 
 
+def _require_member_strict(x_member_id: str | None) -> int:
+    """强会员标识(P1 绑定/上下文——身份操作必须携带)"""
+    if not x_member_id:
+        raise HTTPException(status_code=401,
+                            detail="需要 X-Member-Id")
+    try:
+        return int(x_member_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401,
+                            detail="X-Member-Id 需为整数")
+
+
 def _handle(exc: Exception):
     if isinstance(exc, KeyError):
         msg = str(exc) if str(exc) else "资源不存在"
@@ -141,6 +153,78 @@ async def get_commands():
             "commands": list_commands(),
             "wakeWords": ["小竹"],
             "wakeFreeWindowSeconds": 300}
+
+
+# ============================================================
+# P1 认知层(绑定 + 角色上下文)
+# ============================================================
+
+@router.post("/bindings")
+async def bind_trust(body: dict,
+                     x_member_id: str | None = Header(
+                         None, alias="X-Member-Id")):
+    """绑定会员↔信值档案(两套 ID 体系衔接; 重复绑定=改绑)
+
+    body: {trustId(必填), note?}
+    """
+    member_id = _require_member_strict(x_member_id)
+    if not isinstance(body, dict) \
+            or not body.get("trustId"):
+        raise HTTPException(status_code=409,
+                            detail="请求体需含 trustId")
+    try:
+        from services.xiaozhu_service import XiaozhuService
+        return await XiaozhuService().bind_trust(
+            member_id, int(body["trustId"]),
+            note=str(body.get("note") or ""))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=409,
+                            detail="trustId 需为整数")
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.delete("/bindings")
+async def unbind_trust(
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """解除绑定(零不可逆)"""
+    member_id = _require_member_strict(x_member_id)
+    try:
+        from services.xiaozhu_service import XiaozhuService
+        return await XiaozhuService().unbind(member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/bindings")
+async def get_binding(
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """绑定视图"""
+    member_id = _require_member_strict(x_member_id)
+    try:
+        from services.xiaozhu_service import XiaozhuService
+        return await XiaozhuService().get_binding(member_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/context")
+async def get_context(
+    x_member_id: str | None = Header(
+        None, alias="X-Member-Id"),
+):
+    """角色上下文调试视图(等级/绑定/余额/偏好/LLM 轨态)"""
+    member_id = _require_member_strict(x_member_id)
+    try:
+        from services.xiaozhu_service import XiaozhuService
+        return await XiaozhuService().get_context_view(
+            member_id)
+    except Exception as e:
+        raise _handle(e) from e
 
 
 def register_xiaozhu_routes(app) -> None:

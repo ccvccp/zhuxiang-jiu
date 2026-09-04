@@ -1,8 +1,10 @@
 """48号·小竹智能语音中枢数据访问层(双模式: 内存 + Redis)
 
-表清单(前缀 voice48, 计划 §四 P0):
+表清单(前缀 voice48, 计划 §四 P0/§五 P1):
     voice48_sessions   会话(sessionId 键; memberId 归属)
     voice48_turns      轮次(sessionId 下的 seq 键; 时间正序)
+    voice48_bindings   会员↔信值档案绑定(P1; memberId 自然键,
+                      单向唯一——一会员绑一档案)
 
 会话记录结构:
     {sessionId, memberId, channel(voice|text),
@@ -15,11 +17,14 @@
      intent, action, reply, card(JSON 或空), jump,
      latencyMs, ts}
 
+绑定记录结构(P1, 计划 §二 2.3——两套 ID 体系衔接):
+    {memberId(自然键), trustId, boundAt, note}
+
 设计对齐(43-47号惯例):
     - 双模式存储 + 显式序列化口径(bool→0/1, dict/list→
       JSON 字符串, None→"")
     - 会话清除级联轮次(隐私一键清除红线)
-    - 轮次按会话 seq 排序返回(指代消解上下文窗口用)
+    - 绑定可解除可改绑(零不可逆)
 """
 
 import json
@@ -36,8 +41,9 @@ class Xiaozhu48Repository:
 
     TABLE_SESSIONS = "voice48_sessions"
     TABLE_TURNS = "voice48_turns"
+    TABLE_BINDINGS = "voice48_bindings"
 
-    _INT_FIELDS = ("memberId", "seq")
+    _INT_FIELDS = ("memberId", "seq", "trustId")
     _FLOAT_FIELDS = ("latencyMs",)
 
     def __init__(self):
@@ -46,6 +52,7 @@ class Xiaozhu48Repository:
     def _ensure_store(self):
         self.store.setdefault(self.TABLE_SESSIONS, {})
         self.store.setdefault(self.TABLE_TURNS, {})
+        self.store.setdefault(self.TABLE_BINDINGS, {})
 
     @staticmethod
     def _serialize(record: dict) -> dict:
@@ -65,7 +72,7 @@ class Xiaozhu48Repository:
     def _deserialize(data: dict) -> dict:
         record = {}
         for k, v in data.items():
-            if k in ("memberId", "seq"):
+            if k in ("memberId", "seq", "trustId"):
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
@@ -85,6 +92,45 @@ class Xiaozhu48Repository:
             else:
                 record[k] = v
         return record
+
+    # --------------------------------------------------------
+    # 绑定(P1: 会员 ↔ 信值档案, 两套 ID 体系衔接)
+    # --------------------------------------------------------
+
+    async def get_binding(self,
+                          member_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("voice48", self.TABLE_BINDINGS, member_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_BINDINGS].get(member_id)
+        return dict(rec) if rec else None
+
+    async def save_binding(self, record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("voice48", self.TABLE_BINDINGS,
+                   record["memberId"]),
+                mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_BINDINGS][
+            record["memberId"]] = dict(record)
+        return record
+
+    async def delete_binding(self,
+                             member_id: int) -> bool:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return bool(await client.delete(_k(
+                "voice48", self.TABLE_BINDINGS, member_id)))
+        self._ensure_store()
+        return self.store[
+            self.TABLE_BINDINGS].pop(member_id,
+                                     None) is not None
 
     # --------------------------------------------------------
     # 会话
