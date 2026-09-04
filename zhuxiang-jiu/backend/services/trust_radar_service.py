@@ -414,7 +414,8 @@ class TrustRadarService:
                              peer_baseline: float,
                              evidence: str, summary: str = "",
                              sources: list = None,
-                             voluntary=None) -> dict:
+                             voluntary=None,
+                             verify_mode: str = "v1") -> dict:
         """自愿存证上传(AI 先验真 → 因果净贡献 → 入库)
 
         净贡献口径: observed 为角色申报的绝对量, 因果效应
@@ -423,6 +424,10 @@ class TrustRadarService:
         P6 UEBA 自愿披露激励(Value-UEBA 本体对齐):
             voluntary=True 时正向 delta ×1.05(鼓励自愿
             披露——验真前置已通过); 缺省 None 不激励。
+
+        P7 验真引擎 v2(真伪鉴别指南对齐, 显式激活):
+            verify_mode="v2" → 自适应权重融合+时序基线
+            +风险标签+可解释归因(默认 "v1" 既有管线零影响)。
 
         Raises:
             KeyError: 档案不存在
@@ -452,9 +457,25 @@ class TrustRadarService:
         if profile is None:
             raise KeyError(f"信值档案 {trust_id} 不存在")
 
-        # 验真管线(存证默认单源——用户自证; 带权威源可过)
-        v = verify_pipeline("deposit", evidence,
-                            sources or ["self_deposit"], summary)
+        # 验真管线(P7: verify_mode="v2" 走增强引擎——
+        # 自适应权重融合+时序基线; 默认 v1 零影响)
+        if (verify_mode or "v1").lower() == "v2":
+            from services.trust_verify_v2 import (
+                verify_pipeline_v2,
+            )
+            history = await self.repo.list_events_by_trust(
+                trust_id)
+            v = verify_pipeline_v2(
+                "deposit", evidence,
+                sources or ["self_deposit"], summary,
+                event_timestamps=[
+                    e.get("ts") for e in history
+                    if e.get("ts")],
+                factor=factor)
+        else:
+            v = verify_pipeline(
+                "deposit", evidence,
+                sources or ["self_deposit"], summary)
 
         deposit_id = await self.repo.next_event_id()
         if not v["verified"]:
@@ -472,6 +493,9 @@ class TrustRadarService:
                     "verified": False,
                     "confidence": v["confidence"],
                     "checks": v["checks"],
+                    "verifyEngine": v.get("engine", "v1"),
+                    "riskTags": v.get("riskTags"),
+                    "attribution": v.get("attribution"),
                     "netContribution": 0.0, "applied": False,
                     "note": "验真未通过(孤证/置信度不足), "
                             "不入分——可补充独立源后重新提交"}
@@ -528,6 +552,9 @@ class TrustRadarService:
                 "verified": True,
                 "confidence": v["confidence"],
                 "checks": v["checks"],
+                "verifyEngine": v.get("engine", "v1"),
+                "riskTags": v.get("riskTags"),
+                "attribution": v.get("attribution"),
                 "netContribution": net,
                 "delta": round(delta, 1), "applied": True,
                 "voluntaryBonus": bonus_mult,

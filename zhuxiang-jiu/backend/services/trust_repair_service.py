@@ -252,12 +252,15 @@ class TrustRepairService:
     async def submit_repair(self, trust_id: int,
                             violation_event_id: int,
                             repairs: list,
-                            sources: list = None) -> dict:
+                            sources: list = None,
+                            verify_mode: str = "v1") -> dict:
         """提交修复证据包(验真 → 修复值计算 → 天花板 → 入分)
 
         Args:
             repairs: [{kind, value(0-100), evidence,
             daysSince?(缺省按提交时刻 0——即时修复)}]
+            verify_mode: "v1"(默认既有管线)/"v2"(P7 真伪
+                鉴别引擎——自适应权重融合, 修复类重时序)
         Raises:
             KeyError: 档案/违规事件不存在
             ValueError: 参数非法/criminal 不可修复
@@ -285,9 +288,16 @@ class TrustRepairService:
                 f"(delta ≥ 0)")
         violation_factor = violation.get("factor") or ""
 
-        # 逐项验真(P1 管线)+ β/γ 计算
+        # 逐项验真(P1 管线; P7 verify_mode="v2" 走增强
+        # 引擎——修复类重时序, 防突击刷分)+ β/γ 计算
         if not repairs or not isinstance(repairs, list):
             raise ValueError("修复项列表不能为空")
+        use_v2 = (verify_mode or "v1").lower() == "v2"
+        if use_v2:
+            history = await self.repo.list_events_by_trust(
+                trust_id)
+            event_ts = [e.get("ts") for e in history
+                        if e.get("ts")]
         checked = []
         authenticity_scores = []
         for it in repairs:
@@ -301,10 +311,20 @@ class TrustRepairService:
                     f"value 需在 (0, {REPAIR_VALUE_MAX:.0f}]")
             if len(evidence.strip()) < 8:
                 raise ValueError("证据内容必填(≥8 字符)")
-            v = verify_pipeline(
-                "repair", evidence,
-                sources or ["self_deposit"],
-                REPAIR_KIND_LABELS.get(kind, kind))
+            if use_v2:
+                from services.trust_verify_v2 import (
+                    verify_pipeline_v2,
+                )
+                v = verify_pipeline_v2(
+                    kind, evidence,
+                    sources or ["self_deposit"],
+                    REPAIR_KIND_LABELS.get(kind, kind),
+                    event_timestamps=event_ts)
+            else:
+                v = verify_pipeline(
+                    "repair", evidence,
+                    sources or ["self_deposit"],
+                    REPAIR_KIND_LABELS.get(kind, kind))
             beta = beta_of(violation_factor, kind)
             days = float(it.get("daysSince") or 0)
             checked.append({
@@ -317,6 +337,9 @@ class TrustRepairService:
                 "verified": v["verified"],
                 "confidence": v["confidence"],
                 "checks": v["checks"],
+                "verifyEngine": v.get("engine", "v1"),
+                "riskTags": v.get("riskTags"),
+                "attribution": v.get("attribution"),
             })
             if v["verified"]:
                 authenticity_scores.append(v["confidence"])

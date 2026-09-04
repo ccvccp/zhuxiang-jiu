@@ -239,7 +239,9 @@ async def submit_deposit(body: dict):
     body: {trustId, layer, factor, observed(申报绝对量),
     peerBaseline(同类角色群体基线), evidence(证据内容),
     summary?, sources?,
-    voluntary?(P6 UEBA 自愿披露激励——正向 delta ×1.05)}
+    voluntary?(P6 UEBA 自愿披露激励——正向 delta ×1.05),
+    verifyMode?(P7 验真引擎——"v2" 自适应权重融合+
+    时序基线+风险标签+可解释归因; 缺省 v1)}
     ——验真不过不入分(孤证/置信度不足)。
     """
     if not isinstance(body, dict):
@@ -255,7 +257,8 @@ async def submit_deposit(body: dict):
             evidence=str(body.get("evidence") or ""),
             summary=str(body.get("summary") or ""),
             sources=body.get("sources"),
-            voluntary=body.get("voluntary"))
+            voluntary=body.get("voluntary"),
+            verify_mode=str(body.get("verifyMode") or "v1"))
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -282,7 +285,9 @@ async def submit_repair(body: dict):
     """提交修复证据包(验真 → 修复值 α×ΣβVγ → 天花板 → 入分)
 
     body: {trustId, violationEventId, repairs: [{kind,
-    value(1-100), evidence, daysSince?}], sources?}
+    value(1-100), evidence, daysSince?}], sources?,
+    verifyMode?(P7 验真引擎——"v2" 修复类重时序防突击刷分;
+    缺省 v1)}
     ——24h 内修复效率约为 30 天后的 18 倍(高效激励窗口)。
     """
     if not isinstance(body, dict):
@@ -295,7 +300,8 @@ async def submit_repair(body: dict):
             int(body.get("trustId") or 0),
             int(body.get("violationEventId") or 0),
             body.get("repairs") or [],
-            sources=body.get("sources"))
+            sources=body.get("sources"),
+            verify_mode=str(body.get("verifyMode") or "v1"))
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
