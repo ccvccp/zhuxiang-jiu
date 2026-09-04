@@ -1,9 +1,10 @@
 """47号·L2/L3 信值验真风控模块数据访问层(双模式: 内存 + Redis)
 
-表清单(前缀 trust47, 计划 §三):
-    trust47_risk_profiles   角色风险画像(P0, upsert)
+表清单(前缀 trust47, 计划 §三/§四):
+    trust47_risk_profiles   角色风险画像(P0 upsert;
+                            P1 增 evidenceFingerprints 指纹桶)
 
-画像记录结构(P0):
+画像记录结构(P0 + P1):
     {trustId, riskEMA(0-1 风险指数, α=0.2 平滑),
      hitCounts(JSON: 七类命中计数—— hypocrisy/
      self_promotion/recurrence/behavior_burst/
@@ -11,15 +12,17 @@
      eventCount(参与画像的事件数),
      calibrateOverride(人工校准信任度覆盖, 0-1 或 ""),
      calibrateNote(校准理由留痕), calibrateAt,
-     createdAt, lastUpdated, riskHistory(JSON: 近 20 条
-     风险事件快照——供画像视图回放)}
+     evidenceFingerprints(JSON: P1 近 100 条语义指纹桶
+     ——[{grams, ts, evSha}]), createdAt, lastUpdated,
+     riskHistory(JSON: 近 20 条风险事件快照)}
 
 设计对齐:
     - 双模式存储 + 显式序列化口径(38-46号惯例:
       bool→0/1, dict/list→JSON 字符串, None→"")
     - 画像 upsert(单键 trustId; 保留校准覆盖——
       重放回流不冲掉人工校准)
-    - riskHistory 滚动截断(近 20 条, 防画像无限膨胀)
+    - riskHistory 滚动截断 20 条 / 指纹桶滚动截断
+      100 条(防画像无限膨胀)
 """
 
 import json
@@ -30,16 +33,15 @@ from repositories.backend import (
     is_redis_mode, get_redis_client, get_in_memory_store, _k,
 )
 
-# 七类命中信号(P6 四守门 + P1 两检测器 + P2 协同,
-# P0 先建枚举——P1/P2 填充后两类)
+# 七类命中信号(P6 四守门 + P1 两检测器 + P2 协同)
 RISK_SIGNAL_VALUES = (
     "hypocrisy",          # P6 L2 伪善预警
     "self_promotion",     # P6 L3 作秀降权
     "recurrence",         # P6 再犯风险
     "behavior_burst",     # P7 时序突增
-    "semantic_reuse",     # P1 语义指纹复用(占位)
-    "value_anomaly",     # P1 价值分布异常(占位)
-    "collusive_suspect",  # P2 团伙嫌疑(占位)
+    "semantic_reuse",     # P1 语义指纹复用
+    "value_anomaly",     # P1 价值分布异常
+    "collusive_suspect",  # P2 团伙嫌疑(P2 填充)
 )
 
 
@@ -90,6 +92,11 @@ class TrustRisk47Repository:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
                     record[k] = {} if k == "hitCounts" else []
+            elif k == "evidenceFingerprints":
+                try:
+                    record[k] = json.loads(v) if v else []
+                except (TypeError, ValueError):
+                    record[k] = []
             else:
                 record[k] = v
         return record

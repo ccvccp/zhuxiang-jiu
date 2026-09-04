@@ -75,6 +75,24 @@ async def list_risk_profiles(
         raise _handle(e) from e
 
 
+@router.post("/{trust_id}/scan")
+async def scan_risk_detectors(
+    trust_id: int,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """触发一轮角色级检测(P1: 语义复用桶况+价值分布
+    小额高频——命中沉淀画像, 幂等)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_risk_detector_service import (
+            TrustRiskDetectorService,
+        )
+        return await TrustRiskDetectorService().scan(
+            trust_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.post("/{trust_id}/calibrate")
 async def calibrate_risk_profile(
     trust_id: int,

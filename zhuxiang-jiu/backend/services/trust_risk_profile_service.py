@@ -135,7 +135,8 @@ class TrustRiskProfileService:
             self, trust_id: int, source: str,
             signals: list = None,
             components: dict = None,
-            detail: str = "") -> dict | None:
+            detail: str = "",
+            evidence: str = None) -> dict | None:
         """沉淀一条风险事件到画像(fail-soft)
 
         Args:
@@ -143,6 +144,8 @@ class TrustRiskProfileService:
                 scan 等——画像视图回放用)
             signals: 命中信号(P6 守门 tags/P7 riskTags)
             components: P7 组件分(四维)
+            evidence: P1 证据原文(非空时向画像指纹桶
+                沉淀语义指纹条目)
         Returns:
             更新后画像(异常返回 None——调用方零感知)
         """
@@ -158,6 +161,16 @@ class TrustRiskProfileService:
                 profile.get("riskEMA"), risk)
             profile["eventCount"] = int(
                 profile.get("eventCount") or 0) + 1
+            # P1 指纹桶沉淀(滚动 100 条)
+            if evidence:
+                from services.trust_risk_detector_service \
+                    import (fingerprint_entry,
+                             FINGERPRINT_BUCKET_MAX)
+                bucket = list(profile.get(
+                    "evidenceFingerprints") or [])
+                bucket.insert(0, fingerprint_entry(evidence))
+                profile["evidenceFingerprints"] = \
+                    bucket[:FINGERPRINT_BUCKET_MAX]
             history = list(
                 profile.get("riskHistory") or [])
             history.insert(0, {
@@ -179,6 +192,30 @@ class TrustRiskProfileService:
             logger.warning("trust47_record_failsoft "
                            "trustId=%s: %s", trust_id, exc)
             return None
+
+    async def semantic_check_and_sink(
+            self, trust_id: int, evidence: str) -> dict:
+        """P1 语义复用判定(fail-soft——读指纹桶比对)
+
+        Returns:
+            {hit, similarity, reason, bucketSize}
+            (异常返回 hit=False——存证主流程零感知)
+        """
+        from services.trust_risk_detector_service import (
+            check_semantic_reuse,
+        )
+        try:
+            profile = await self._load(trust_id)
+            bucket = list(profile.get(
+                "evidenceFingerprints") or [])
+            result = check_semantic_reuse(evidence, bucket)
+            result["bucketSize"] = len(bucket)
+            return result
+        except Exception as exc:
+            logger.warning("trust47_semantic_failsoft "
+                           "trustId=%s: %s", trust_id, exc)
+            return {"hit": False, "similarity": 0.0,
+                    "reason": "", "bucketSize": 0}
 
     async def _load(self, trust_id: int) -> dict:
         """读画像(无则初始化——校准覆盖保留语义)"""

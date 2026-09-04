@@ -505,22 +505,71 @@ class TrustRadarService:
         # 折算因子增量: 净贡献线性映射, 上限 +30(存证单次)
         delta = min(30.0, net / 10.0)
 
-        # 47号风险画像回流(fail-soft——P7 验真结果沉淀画像;
-        # verified 通过不加分: 画像只记风险不记功劳, 组件分
-        # <0.5 的维度才构成 risk_event; P0 纯观察不干预)
+        # 47号 P1 语义指纹复用判定(fail-soft——改字重放识别;
+        # 命中 → 正向 delta ×0.3 + semantic_reuse 沉淀画像)
+        semantic = {"hit": False, "similarity": 0.0,
+                    "reason": "", "bucketSize": 0}
+        if delta > 0:
+            try:
+                from services.trust_risk_detector_service import (
+                    SEMANTIC_REUSE_PENALTY,
+                )
+                from services.trust_risk_profile_service import (
+                    TrustRiskProfileService,
+                )
+                risk_svc = TrustRiskProfileService()
+                semantic = await \
+                    risk_svc.semantic_check_and_sink(
+                        trust_id, evidence)
+                if semantic.get("hit"):
+                    delta = round(
+                        delta * SEMANTIC_REUSE_PENALTY, 1)
+            except Exception as exc:
+                logger.debug("trust47_semantic_skip: %s", exc)
+
+        # 47号 P1 价值-证据错配判定(高申报低证据;
+        # 命中 → 正向 delta ×0.5 + value_anomaly 沉淀)
+        value_mismatch = {"hit": False, "reason": ""}
+        if delta > 0:
+            try:
+                from services.trust_risk_detector_service import (
+                    detect_value_mismatch,
+                    VALUE_MISMATCH_COMPONENT_THRESHOLD,
+                )
+                comp = (v.get("components") or {}) \
+                    if v.get("engine") == "v2" else {}
+                comp_min = min(comp.values()) if comp else None
+                value_mismatch = detect_value_mismatch(
+                    observed, peer_baseline, comp_min)
+                if value_mismatch.get("hit"):
+                    delta = round(delta * 0.5, 1)
+            except Exception as exc:
+                logger.debug("trust47_value_mismatch_skip: "
+                             "%s", exc)
+
+        # 47号风险画像回流(fail-soft——P7 验真结果+P1 语义/
+        # 价值命中沉淀; verified 通过不加分: 画像只记风险
+        # 不记功劳; 证据原文入指纹桶)
         try:
             from services.trust_risk_profile_service import (
                 TrustRiskProfileService,
             )
+            backflow_signals = list(
+                v.get("riskTags") or []) \
+                if v.get("engine") == "v2" else []
+            if semantic.get("hit"):
+                backflow_signals.append("semantic_reuse")
+            if value_mismatch.get("hit"):
+                backflow_signals.append("value_anomaly")
             await TrustRiskProfileService().record_risk_event(
                 trust_id, "deposit",
-                signals=(v.get("riskTags")
-                         if v.get("engine") == "v2" else []),
+                signals=backflow_signals,
                 components=(v.get("components")
                             if v.get("engine") == "v2"
                             else None),
                 detail=f"depositId={deposit_id} "
-                       f"verified={v.get('verified')}")
+                       f"verified={v.get('verified')}",
+                evidence=evidence)
         except Exception as exc:
             logger.debug("trust47_deposit_backflow_skip: "
                          "%s", exc)
@@ -575,6 +624,17 @@ class TrustRadarService:
                 "verifyEngine": v.get("engine", "v1"),
                 "riskTags": v.get("riskTags"),
                 "attribution": v.get("attribution"),
+                "semanticReuse": {
+                    "hit": semantic.get("hit"),
+                    "similarity":
+                        semantic.get("similarity"),
+                    "reason": semantic.get("reason"),
+                    "bucketSize":
+                        semantic.get("bucketSize")},
+                "valueMismatch": {
+                    "hit": value_mismatch.get("hit"),
+                    "reason":
+                        value_mismatch.get("reason")},
                 "netContribution": net,
                 "delta": round(delta, 1), "applied": True,
                 "voluntaryBonus": bonus_mult,
