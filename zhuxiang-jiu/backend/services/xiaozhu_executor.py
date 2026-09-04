@@ -59,7 +59,8 @@ SAFE_READONLY = {"product.new", "product.price",
                  "chat.human", "xiaozhu.help",
                  "trust.bind"}
 SAFE_WRITE = {"cart.submit"}          # 一般写: 执行+播报
-SENSITIVE = {"trust.convert"}         # 高敏: confirmToken 流
+SENSITIVE = {"trust.convert",        # 高敏: confirmToken 流
+             "repair.execute"}       # 49号P0: 修复执行同高敏流
 
 
 def _now() -> float:
@@ -237,7 +238,40 @@ class XiaozhuExecutor:
         if action == "trust.convert":
             return await self._exec_convert(params,
                                             member_id)
+        if action == "repair.execute":
+            return await self._exec_repair(params,
+                                           member_id)
         raise ValueError(f"未知高敏动作 {action}")
+
+    async def _exec_repair(self, params: dict,
+                           member_id: int) -> dict:
+        """高敏: 修复执行(45号 submit_repair 通道——β/γ
+        数学/验真管线/天花板/47号回流全部继承)
+
+        49号P0: 修复执行新工具(repair.execute)——走 45号
+        既有修复通道, 语音侧只做参数路由与双因子确认(P1)。
+        """
+        binding = await self.repo.get_binding(member_id)
+        if binding is None:
+            raise ValueError(
+                "尚未绑定居值档案——先说「绑定信值档案 N」")
+        violation_id = params.get("violationEventId")
+        try:
+            violation_id = int(violation_id)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "请指定要修复的违规项(先说「怎么修复」查看"
+                "修复计划)") from None
+        repairs = params.get("repairs")
+        if not isinstance(repairs, list) or not repairs:
+            raise ValueError("修复项列表不能为空")
+        from services.trust_repair_service import (
+            TrustRepairService,
+        )
+        return await TrustRepairService().submit_repair(
+            binding["trustId"], violation_id, repairs,
+            sources=params.get("sources") or None,
+            verify_mode=params.get("verifyMode") or "v1")
 
     async def _exec_checkout(self, params: dict,
                               member_id: int) -> dict:
@@ -343,6 +377,14 @@ class XiaozhuExecutor:
             return (f"将扣除 {params.get('creditPoints')}"
                     f" 信用分, 按当前汇率折算信值"
                     f"(到账金额以执行结果为准)")
+        if action == "repair.execute":
+            items = params.get("repairs") or []
+            kinds = "、".join(str(i.get("kind"))
+                             for i in items[:3])
+            return (f"将针对违规事件 "
+                    f"{params.get('violationEventId')} 提交"
+                    f"修复证据({kinds}——修复值以验真与"
+                    f"天花板为准)")
         return "即将执行高风险操作"
 
     # --------------------------------------------------------

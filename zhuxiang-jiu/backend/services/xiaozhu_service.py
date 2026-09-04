@@ -1195,6 +1195,10 @@ class XiaozhuService:
         """LLM 意图增强轨(XIAOZHU_LLM_MODE=on 且规则轨
         未中时; LLM 只从白名单指令集选 action——不产内容)
 
+        49号P0 升级: System Prompt 注入工具注册表 v2 描述
+        (禁令❌+隐私成本🔒内嵌——约束内化铁律), 替代裸
+        目录拼接; 输出契约不变(白名单 action 或 null)。
+
         Returns: {"action", "track": "llm"} 或 None(回退规则轨)
         """
         if not _llm_mode_enabled():
@@ -1205,15 +1209,15 @@ class XiaozhuService:
             )
             if not llm_enabled():
                 return None
-            catalog = "; ".join(
-                f"{c['action']}({c['label']})" for c in
-                COMMANDS)
+            # 49号P0: 工具描述注入(约束内化——模型在推理
+            # 阶段即感知禁令与隐私成本)
+            from services.xiaozhu_fc_registry import (
+                build_tool_prompt,
+            )
             reply = provider_client().chat(
-                system="你是语音指令路由器。从指令集中选择"
-                       "唯一 action 并只回答 JSON: "
-                       '{"action": "..." 或 null}',
-                user=f"指令集: {catalog}\n"
-                     f"用户指令: {text}")
+                system="你是语音指令路由器(可信函数调用)。"
+                       + build_tool_prompt(),
+                user=f"用户指令: {text}")
             if not reply:
                 return None
             import json as _json

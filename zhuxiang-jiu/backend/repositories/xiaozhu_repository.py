@@ -1,6 +1,7 @@
 """48号·小竹智能语音中枢数据访问层(双模式: 内存 + Redis)
 
-表清单(前缀 voice48, 计划 §四 P0/§五 P1/§七 P3/§八 P4):
+表清单(前缀 voice48, 计划 §四 P0/§五 P1/§七 P3/§八 P4/
+49号 §六 P0):
     voice48_sessions   会话(sessionId 键; memberId 归属)
     voice48_turns      轮次(sessionId 下的 seq 键; 时间正序)
     voice48_bindings   会员↔信值档案绑定(P1)
@@ -9,6 +10,8 @@
     voice48_failures   失败案例池(P3; caseId 键, 只追加)
     voice48_custom_cmds 共创指令(P3; cmdId 键, 审核流)
     voice48_proactive  主动关怀任务(P3; taskId 键)
+    voice48_fc_audit   FC 调用审计流水(49号P0; fcId 键,
+                      只追加——六字段铁律)
 
 积分账本结构(P3, 计划 §七 ①——独立账本不直改信值):
     {ledgerId, memberId, kind(command_done|feedback_ad
@@ -53,10 +56,13 @@ class Xiaozhu48Repository:
     TABLE_FAILURES = "voice48_failures"
     TABLE_CUSTOM = "voice48_custom_cmds"
     TABLE_PROACTIVE = "voice48_proactive"
+    TABLE_FC_AUDIT = "voice48_fc_audit"
 
     _INT_FIELDS = ("memberId", "seq", "trustId", "ledgerId",
-                   "caseId", "cmdId", "taskId")
-    _FLOAT_FIELDS = ("latencyMs", "points", "balance")
+                   "caseId", "cmdId", "taskId", "fcId",
+                   "sessionId")
+    _FLOAT_FIELDS = ("latencyMs", "points", "balance",
+                     "privacyCost")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -66,7 +72,8 @@ class Xiaozhu48Repository:
                   self.TABLE_BINDINGS, self.TABLE_POINTS,
                   self.TABLE_POINTS_ACC,
                   self.TABLE_FAILURES, self.TABLE_CUSTOM,
-                  self.TABLE_PROACTIVE):
+                  self.TABLE_PROACTIVE,
+                  self.TABLE_FC_AUDIT):
             self.store.setdefault(t, {})
 
     @staticmethod
