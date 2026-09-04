@@ -11,6 +11,16 @@
                                          通道——管理端 manual;
                                          P1 起雷达/存证接管)
 
+端点(P1, AI 雷达三通道 5):
+    POST /api/trust/radar/scan           公开域一轮扫描(白名单源
+                                         +去标识化+验真入分)
+    POST /api/trust/probes               授权登记(显式授权留痕+
+                                         mock 确定性读数入分)
+    GET  /api/trust/probes/{trustId}     角色的授权列表(留痕事件)
+    POST /api/trust/deposits             自愿存证上传(验真三道关+
+                                         因果净贡献折算)
+    GET  /api/trust/deposits/{id}/status 存证验真状态查询
+
 鉴权:
     - 自助面(建档/查询/重算): 公开(信值查询脱敏口径——
       摘要掩码展示, 明文永不返回)
@@ -110,6 +120,97 @@ async def record_role_event(
             severity=str(body.get("severity") or "general"),
             source="manual",
             summary=str(body.get("summary") or ""))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P1: AI 雷达三通道(公开域扫描 / 授权探针 / 自愿存证)
+# ============================================================
+
+@router.post("/radar/scan/{trust_id}")
+async def radar_scan(trust_id: int):
+    """公开域一轮扫描(白名单源定向 + 去标识化 + 验真入分)
+
+    mock 态确定性扫描(同档案结果恒定); real 态外接检索
+    API 凭证待办。公开域数据天然多源权威——跨源关直判。
+    """
+    try:
+        from services.trust_radar_service import TrustRadarService
+        return await TrustRadarService().scan_public(trust_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/probes")
+async def register_probe(body: dict):
+    """授权登记(显式授权留痕; 严禁爬虫抓取私有域)
+
+    body: {trustId, provider: zhima|platform_credit|
+    bank_reference, scope?}——登记后 mock 确定性读数入分。
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_radar_service import TrustRadarService
+        return await TrustRadarService().register_probe(
+            int(body.get("trustId") or 0),
+            str(body.get("provider") or ""),
+            str(body.get("scope") or "credit_score"))
+    except (TypeError, ValueError) as e:
+        if "int()" in str(e):
+            raise HTTPException(
+                status_code=409,
+                detail="trustId 需为整数") from e
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/probes/{trust_id}")
+async def list_probes(trust_id: int):
+    """角色的授权列表(授权留痕事件)"""
+    try:
+        from services.trust_radar_service import TrustRadarService
+        return await TrustRadarService().list_probes(trust_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/deposits")
+async def submit_deposit(body: dict):
+    """自愿存证上传(AI 先验真 → 因果净贡献折算 → 入库)
+
+    body: {trustId, layer, factor, observed(申报绝对量),
+    peerBaseline(同类角色群体基线), evidence(证据内容),
+    summary?, sources?}——验真不过不入分(孤证/置信度不足)。
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_radar_service import TrustRadarService
+        return await TrustRadarService().submit_deposit(
+            int(body.get("trustId") or 0),
+            layer=str(body.get("layer") or ""),
+            factor=str(body.get("factor") or ""),
+            observed=body.get("observed") or 0,
+            peer_baseline=body.get("peerBaseline") or 0,
+            evidence=str(body.get("evidence") or ""),
+            summary=str(body.get("summary") or ""),
+            sources=body.get("sources"))
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/deposits/{deposit_id}/status")
+async def deposit_status(deposit_id: int):
+    """存证验真状态查询(applied / rejected)"""
+    try:
+        from services.trust_radar_service import TrustRadarService
+        return await TrustRadarService().deposit_status(
+            deposit_id)
     except Exception as e:
         raise _handle(e) from e
 
