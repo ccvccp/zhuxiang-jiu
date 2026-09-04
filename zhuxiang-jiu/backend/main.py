@@ -33,6 +33,7 @@ from routes.security_routes import register_security_routes
 from routes.api_manager_routes import register_api_manager_routes
 from routes.trust_value_routes import register_trust_value_routes
 from routes.ai_governance_routes import register_ai_governance_routes
+from routes.xiaozhu_routes import register_xiaozhu_routes
 from core.config import ALLOW_HEADERS, ALLOW_METHODS, CORS_ORIGINS
 from core.errors import register_exception_handlers
 from core.helpers import uptime
@@ -281,6 +282,8 @@ register_ai_governance_routes(app)
 # 信值验真风控模块(47号)
 from routes.trust_risk_routes import register_trust_risk_routes
 register_trust_risk_routes(app)
+# 小竹智能语音中枢(48号)
+register_xiaozhu_routes(app)
 
 
 # ============================================================
