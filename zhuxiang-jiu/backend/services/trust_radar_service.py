@@ -493,13 +493,35 @@ class TrustRadarService:
             trust_id, layer, factor, delta,
             source="deposit_merge",
             summary=f"[存证并档] depositId={deposit_id}")
+
+        # P3 联动: L3 净贡献折半发行 TV(准备金锚定——
+        # 验真通过的存证即准备金资产; L1/L2 层不发行)
+        issued = 0.0
+        if layer == "L3" and net > 0 and not result.get("fused"):
+            try:
+                from services.trust_asset_service import (
+                    TrustAssetService,
+                )
+                issue_r = await TrustAssetService(
+                    repo=self.repo).issue(
+                    trust_id, round(net / 2.0, 2),
+                    reserve_ref=f"deposit:{deposit_id}",
+                    memo=f"存证净贡献发行(净贡献 {net} 折半)")
+                issued = issue_r.get("balance")
+            except ValueError as exc:
+                logger.info("trust45_deposit_issue_skip "
+                            "trustId=%s: %s", trust_id, exc)
         return {"success": True, "depositId": deposit_id,
                 "verified": True,
                 "confidence": v["confidence"],
                 "checks": v["checks"],
                 "netContribution": net,
                 "delta": round(delta, 1), "applied": True,
-                "score": result.get("score")}
+                "score": result.get("score"),
+                "tvIssued": round(net / 2.0, 2) if (
+                    layer == "L3" and net > 0
+                    and not result.get("fused")) else 0.0,
+                "tvBalance": issued}
 
     async def deposit_status(self, deposit_id: int) -> dict:
         """存证状态查询(异步验真回调查询口径)"""

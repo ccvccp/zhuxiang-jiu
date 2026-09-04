@@ -29,15 +29,24 @@
     GET  /api/trust/repairs/detail/{id}  修复明细(归因回放)
     POST /api/trust/repairs/{id}/verify  触发验真(验真明细回放)
 
+端点(P3, 信值资产与价值兑换 5):
+    GET  /api/trust/balance              余额+冻结+准备金池+上限
+    POST /api/trust/redeem               兑换申请(1TV=1元货品,
+                                         防挤兑四件套校验)
+    POST /api/trust/redeem/{id}/confirm  商户核销(TV 实时销毁)
+    POST /api/trust/convert              信用分→TV 单向转换
+    GET  /api/trust/ledger               账本流水(只追加不可篡改)
+
 鉴权:
-    - 自助面(建档/查询/重算/存证/修复): 公开(信值查询脱敏
-      口径——摘要掩码展示, 明文永不返回)
+    - 自助面(建档/查询/重算/存证/修复/兑换/转换): 公开(信值
+      查询脱敏口径——摘要掩码展示, 明文永不返回)
     - 事件灌入: X-Role: admin(43/44号同款口径)
 
 统一口径:
-    - 模块纯增量(零既有路由改动); TRUST_VALUE_MODE 保留给
-      P3(兑换/发行开关)与后续主动行为
+    - 模块纯增量(零既有路由改动)
     - KeyError → 404 / ValueError → 409(44号同款)
+    - 价值红线: TV 只兑货品/服务, 不可兑现金/不可二级交易
+      (账本 direction 枚举锁死, 无 transfer_out 类型)
 """
 
 from fastapi import APIRouter, Header, HTTPException
@@ -286,6 +295,128 @@ async def repair_verify(repair_id: int):
         )
         return await TrustRepairService().trigger_verify(
             repair_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# P3: 信值资产与价值兑换(1 TV = 1 元)
+# ============================================================
+
+@router.get("/balance/{trust_id}")
+async def trust_balance(trust_id: int):
+    """余额视图(可用/冻结/发行统计/准备金池/兑换上限)"""
+    try:
+        from services.trust_asset_service import (
+            TrustAssetService,
+        )
+        return await TrustAssetService().balance(trust_id)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/redeem")
+async def trust_redeem(body: dict):
+    """兑换申请(1 TV = 1 元货品/服务; 防挤兑四件套)
+
+    body: {trustId, amount, merchant, goods?}——
+    校验链: 熔断冻结→可用余额→日/月上限→商户保证金→
+    pending(额度锁定), 商户核销后 TV 销毁。
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_asset_service import (
+            TrustAssetService,
+        )
+        return await TrustAssetService().redeem(
+            int(body.get("trustId") or 0),
+            body.get("amount") or 0,
+            str(body.get("merchant") or ""),
+            str(body.get("goods") or ""))
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/redeem/{redeem_id}/confirm")
+async def trust_redeem_confirm(
+    redeem_id: int,
+    body: dict,
+):
+    """商户核销确认(TV 实时销毁 + 行为资产标记已消耗)
+
+    body: {merchant}——仅申请商户本人可核销。
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_asset_service import (
+            TrustAssetService,
+        )
+        return await TrustAssetService().redeem_confirm(
+            redeem_id, str(body.get("merchant") or ""))
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/convert")
+async def trust_convert(body: dict):
+    """信用分 → TV 单向转换(动态汇率, 转换后信用分同步扣减)
+
+    body: {trustId, userId, creditPoints}——TV → 信用分
+    方向永久禁止(防套利循环)。
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_asset_service import (
+            TrustAssetService,
+        )
+        return await TrustAssetService().convert(
+            int(body.get("trustId") or 0),
+            int(body.get("userId") or 0),
+            body.get("creditPoints") or 0)
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/ledger/{trust_id}")
+async def trust_ledger(trust_id: int,
+                       limit: int = 50):
+    """账本流水(只追加不可篡改; issue/burn/transfer_in)"""
+    try:
+        from services.trust_asset_service import (
+            TrustAssetService,
+        )
+        return await TrustAssetService().ledger(trust_id,
+                                                limit=limit)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/merchant/deposit")
+async def merchant_deposit(body: dict,
+                           x_role: str = Header(default="",
+                                                 alias="X-Role")):
+    """商户缴纳保证金(管理动作——兑换履约担保)"""
+    _require_admin(x_role)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        from services.trust_asset_service import (
+            TrustAssetService,
+        )
+        return await TrustAssetService().merchant_deposit_add(
+            str(body.get("merchant") or ""),
+            body.get("amount") or 0)
+    except (TypeError, ValueError) as e:
+        raise _handle(e) from e
     except Exception as e:
         raise _handle(e) from e
 

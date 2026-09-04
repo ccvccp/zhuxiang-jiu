@@ -385,6 +385,24 @@ class TrustRepairService:
                     "gain=%s(raw=%s cap=%s alpha=%s items=%s)",
                     trust_id, violation_event_id, gain, raw_gain,
                     cap, alpha, len(verified_items))
+
+        # P3 联动: 修复值折半发行 TV(准备金锚定——验真通过
+        # 的修复即准备金资产; "修复回信用折半"同口径)
+        tv_issued = 0.0
+        if gain > 0 and not result.get("fused"):
+            try:
+                from services.trust_asset_service import (
+                    TrustAssetService,
+                )
+                issue_r = await TrustAssetService(
+                    repo=self.repo).issue(
+                    trust_id, round(gain / 2.0, 2),
+                    reserve_ref=f"repair:{repair_id}",
+                    memo=f"修复值发行(修复值 {gain} 折半)")
+                tv_issued = round(gain / 2.0, 2)
+            except ValueError as exc:
+                logger.info("trust45_repair_issue_skip "
+                            "trustId=%s: %s", trust_id, exc)
         return {
             "success": True, "repairId": repair_id,
             "violationEventId": violation_event_id,
@@ -396,6 +414,7 @@ class TrustRepairService:
             "afterScore": result.get("score"),
             "fused": result.get("fused"),
             "fusedLevel": result.get("fusedLevel"),
+            "tvIssued": tv_issued,
             "note": (f"修复生效: 回分 +{factor_delta}"
                      f"(修复值 {gain}, 天花板 {round(cap, 1)})"
                      if gain > 0 else
