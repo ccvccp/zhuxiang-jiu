@@ -457,6 +457,12 @@ class TrustRadarService:
         if profile is None:
             raise KeyError(f"信值档案 {trust_id} 不存在")
 
+        # 47号 P2: sources 中的角色互证引用("trust:{id}")——
+        # 剔除自证(自己给自己作证不计独立源, 也不构成互证
+        # 对; 跨角色互证由协同分析扫描); 既有调用零影响
+        sources = [s for s in (sources or [])
+                   if s != f"trust:{trust_id}"]
+
         # 验真管线(P7: verify_mode="v2" 走增强引擎——
         # 自适应权重融合+时序基线; 默认 v1 零影响)
         if (verify_mode or "v1").lower() == "v2":
@@ -485,6 +491,7 @@ class TrustRadarService:
                 "layer": layer, "factor": factor,
                 "delta": 0, "severity": "general",
                 "source": "deposit_rejected",
+                "sources": sources or ["self_deposit"],
                 "summary": f"[存证拒] {summary or ''}"
                            f"(conf={v['confidence']})",
                 "ts": ts(),
@@ -589,6 +596,7 @@ class TrustRadarService:
             "layer": layer, "factor": factor,
             "delta": round(delta, 1), "severity": "general",
             "source": "deposit",
+            "sources": sources or ["self_deposit"],
             "summary": f"[存证] {summary or ''}"
                        f"(净贡献 {net}, 申报 {observed}, "
                        f"群体基线 {peer_baseline})",

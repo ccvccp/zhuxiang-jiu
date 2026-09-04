@@ -12,7 +12,8 @@
 
 事件记录结构:
     {eventId, trustId, layer: L1|L2|L3, factor, delta, severity,
-     source: radar|probe|deposit|manual, summary, ts}
+     source: radar|probe|deposit|manual, summary, ts,
+     sources(47号P2: 存证数据源数组, 含互证引用 "trust:{id}")}
 
 设计对齐:
     - 双模式存储 + None/bool 序列化口径(38-44号惯例)
@@ -102,6 +103,12 @@ class TrustValue45Repository:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
                     record[k] = {}
+            elif k == "sources":
+                # 47号P2: 存证数据源数组(含互证引用)
+                try:
+                    record[k] = json.loads(v) if v else []
+                except (TypeError, ValueError):
+                    record[k] = []
             else:
                 record[k] = v
         return record
@@ -238,5 +245,38 @@ class TrustValue45Repository:
         result = [dict(e) for e in
                   self.store[self.TABLE_EVENTS].values()
                   if e.get("trustId") == trust_id]
+        result.sort(key=lambda e: (e.get("ts") or ""))
+        return result
+
+    async def list_deposit_events(
+            self, days: int = 90) -> list[dict]:
+        """近 N 日全部已入库存证事件(跨角色——47号P2
+        互证对分析用; 口径 source=deposit, 按时间正序)"""
+        from datetime import UTC, datetime, timedelta
+        cutoff = (datetime.now(UTC)
+                  - timedelta(days=days)).isoformat()
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "trust45", self.TABLE_EVENTS, "*"))
+            keys = [k for k in keys if not k.endswith(":seq")]
+            result = []
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if data:
+                        ev = self._deserialize(data)
+                        if ev.get("source") == "deposit" \
+                                and (ev.get("ts") or "") >= cutoff:
+                            result.append(ev)
+            result.sort(key=lambda e: (e.get("ts") or ""))
+            return result
+        self._ensure_store()
+        result = [dict(e) for e in
+                  self.store[self.TABLE_EVENTS].values()
+                  if e.get("source") == "deposit"
+                  and (e.get("ts") or "") >= cutoff]
         result.sort(key=lambda e: (e.get("ts") or ""))
         return result

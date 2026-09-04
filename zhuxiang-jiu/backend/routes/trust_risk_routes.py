@@ -1,10 +1,19 @@
-"""47号·L2/L3 信值验真风控模块路由(P0 角色风险画像)
+"""47号·L2/L3 信值验真风控模块路由(P0 画像 + P1 扫描 + P2 协同)
 
-端点(P0, 画像查询 2 + 校准 2——X-Role: admin):
+端点(P0 画像 2 + 校准 2 + P1 扫描 1 + P2 协同 2——X-Role: admin):
     GET  /api/trust/risk/{trustId}     画像视图(风险指数/
                                       信任分层/命中明细/历史)
     GET  /api/trust/risk               全档案风险排行
                                       (最高风险在前+分层统计)
+    POST /api/trust/risk/{trustId}/scan
+                                      角色级检测(P1 语义指纹
+                                      +价值分布, 幂等)
+    POST /api/trust/risk/collusion/scan
+                                      协同扫描+嫌疑标记
+                                      (P2 互证对+指纹共享,
+                                      幂等——已标记跳过)
+    GET  /api/trust/risk/collusion    团伙视图(嫌疑对+证据链
+                                      明细, 供人工复核; 纯读)
     POST /api/trust/risk/{trustId}/calibrate
                                       人工校准信任度覆盖
                                       (留痕, 可反复修正)
@@ -16,7 +25,9 @@
 
 统一口径:
     - 模块纯增量(零既有路由改动; 回流经 try 包裹 fail-soft)
-    - 画像不处罚: P0 只沉淀观察, 不接任何入分/验真通道
+    - 画像不处罚: 嫌疑仅标记, 处罚走人工复核(红线④)
+    - /collusion 字面路由须注册在 /{trust_id} 之前
+      (防 int 路径参数 422 抢匹配)
     - KeyError → 404 / ValueError → 409(44-46号同款)
 """
 
@@ -41,6 +52,42 @@ def _handle(exc: Exception):
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=409, detail=str(exc))
     raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ============================================================
+# P2 协同分析(字面路由——须在 /{trust_id} 之前注册)
+# ============================================================
+
+@router.post("/collusion/scan")
+async def scan_collusion(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """协同扫描+嫌疑标记(互证对+跨角色指纹共享→
+    collusive_suspect 沉淀; 幂等——已标记角色跳过)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_risk_collusion_service import (
+            TrustRiskCollusionService,
+        )
+        return await TrustRiskCollusionService().scan()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/collusion")
+async def collusion_view(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """团伙视图(嫌疑对列表+证据链明细——互证时间线/共享
+    指纹, 供人工复核; 纯读零写入)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_risk_collusion_service import (
+            TrustRiskCollusionService,
+        )
+        return await TrustRiskCollusionService().view()
+    except Exception as e:
+        raise _handle(e) from e
 
 
 @router.get("/{trust_id}")
