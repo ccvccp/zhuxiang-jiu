@@ -53,9 +53,21 @@ class Kg51Repository:
     TABLE_TRIPLES = "kg51_triples"
     TABLE_REVIEWS = "kg51_reviews"
     TABLE_FP_INDEX = "kg51_fp_index"
+    TABLE_VERSIONS = "kg51_versions"
+    TABLE_INSPECTIONS = "kg51_inspections"
+    TABLE_FEEDBACK = "kg51_feedback"
+    TABLE_SCHEDULER = "kg51_scheduler_stats"
 
-    _INT_FIELDS = ("changeId", "reviewId")
-    _FLOAT_FIELDS = ("confidence",)
+    _INT_FIELDS = ("changeId", "reviewId", "versionId",
+                   "inspectionId", "feedbackId",
+                   "entityCount", "tripleCount",
+                   "verifiedCount", "unverifiedCount",
+                   "retiredCount", "issues",
+                   "runs", "memberId")
+    _FLOAT_FIELDS = ("confidence", "verifiedRatio",
+                     "completeness", "consistency",
+                     "freshness", "lastIngestAgeHours",
+                     "pendingConflicts", "avgUsedToday")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -70,6 +82,10 @@ class Kg51Repository:
         self.store.setdefault(self.TABLE_TRIPLES, {})
         self.store.setdefault(self.TABLE_REVIEWS, {})
         self.store.setdefault(self.TABLE_FP_INDEX, {})
+        self.store.setdefault(self.TABLE_VERSIONS, {})
+        self.store.setdefault(self.TABLE_INSPECTIONS, {})
+        self.store.setdefault(self.TABLE_FEEDBACK, {})
+        self.store.setdefault(self.TABLE_SCHEDULER, {})
 
     @staticmethod
     def _serialize(record: dict) -> dict:
@@ -99,11 +115,17 @@ class Kg51Repository:
                     record[k] = float(v) if v != "" else 0.0
                 except (TypeError, ValueError):
                     record[k] = 0.0
-            elif k in ("payload", "evidence", "attrs"):
+            elif k in ("payload", "evidence", "attrs",
+                       "bySourceType", "byEntityType"):
                 try:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
                     record[k] = {}
+            elif k in ("issues", "history"):
+                try:
+                    record[k] = json.loads(v) if v else []
+                except (TypeError, ValueError):
+                    record[k] = []
             else:
                 record[k] = v
         return record
@@ -492,7 +514,8 @@ class Kg51Repository:
 
     async def reset_all(self) -> None:
         """清空全部 kg51 数据面(审批总线/实体/三元组/
-        复核/指纹索引——治理留痕一并清理, 实机幂等验证用)"""
+        复核/指纹索引/版本/巡检/反馈——治理留痕一并清理,
+        实机幂等验证用)"""
         if is_redis_mode():
             client = await get_redis_client()
             keys = await client.keys(_k("kg51", "*"))
@@ -506,7 +529,244 @@ class Kg51Repository:
                       self.TABLE_ENTITIES,
                       self.TABLE_TRIPLES,
                       self.TABLE_REVIEWS,
-                      self.TABLE_FP_INDEX):
+                      self.TABLE_FP_INDEX,
+                      self.TABLE_VERSIONS,
+                      self.TABLE_INSPECTIONS,
+                      self.TABLE_FEEDBACK,
+                      self.TABLE_SCHEDULER):
             self.store[table] = {}
         self.store["_kg51_changes_seq"] = 0
         self.store["_kg51_reviews_seq"] = 0
+        self.store["_kg51_versions_seq"] = 0
+        self.store["_kg51_inspections_seq"] = 0
+        self.store["_kg51_feedback_seq"] = 0
+
+    # --------------------------------------------------------
+    # 版本快照(P4: 周度版本, 只追加——回溯查询)
+    # --------------------------------------------------------
+
+    async def next_version_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("kg51", "versions", "seq"))
+        self._ensure_store()
+        seq = self.store.get("_kg51_versions_seq", 0) + 1
+        self.store["_kg51_versions_seq"] = seq
+        return seq
+
+    async def save_version(self, record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.hset(
+                _k("kg51", self.TABLE_VERSIONS,
+                   record["versionId"]),
+                mapping=self._serialize(record))
+            pipe.lpush(_k("kg51", "versions_all"),
+                       record["versionId"])
+            await pipe.execute()
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_VERSIONS][
+            record["versionId"]] = dict(record)
+        return record
+
+    async def list_versions(
+            self, limit: int = 50) -> list[dict]:
+        """版本列表(最新在前——回溯查询)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.lrange(
+                _k("kg51", "versions_all"), 0, -1)
+            result = []
+            for i in range(0, len(ids), 500):
+                pipe = client.pipeline(transaction=False)
+                for vid in ids[i:i + 500]:
+                    pipe.hgetall(_k(
+                        "kg51", self.TABLE_VERSIONS, vid))
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+        else:
+            self._ensure_store()
+            result = [dict(r) for r in
+                      self.store[self.TABLE_VERSIONS]
+                      .values()]
+        result.sort(key=lambda r: -int(
+            r.get("versionId") or 0))
+        return result[:limit]
+
+    # --------------------------------------------------------
+    # 巡检结果(P4: 三指标快照, 只追加)
+    # --------------------------------------------------------
+
+    async def next_inspection_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("kg51", "inspections", "seq"))
+        self._ensure_store()
+        seq = self.store.get(
+            "_kg51_inspections_seq", 0) + 1
+        self.store["_kg51_inspections_seq"] = seq
+        return seq
+
+    async def save_inspection(self, record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.hset(
+                _k("kg51", self.TABLE_INSPECTIONS,
+                   record["inspectionId"]),
+                mapping=self._serialize(record))
+            pipe.lpush(_k("kg51", "inspections_all"),
+                       record["inspectionId"])
+            await pipe.execute()
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_INSPECTIONS][
+            record["inspectionId"]] = dict(record)
+        return record
+
+    async def list_inspections(
+            self, limit: int = 30) -> list[dict]:
+        """巡检历史(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.lrange(
+                _k("kg51", "inspections_all"), 0, -1)
+            result = []
+            for i in range(0, len(ids), 500):
+                pipe = client.pipeline(transaction=False)
+                for iid in ids[i:i + 500]:
+                    pipe.hgetall(_k(
+                        "kg51", self.TABLE_INSPECTIONS,
+                        iid))
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+        else:
+            self._ensure_store()
+            result = [dict(r) for r in
+                      self.store[self.TABLE_INSPECTIONS]
+                      .values()]
+        result.sort(key=lambda r: -int(
+            r.get("inspectionId") or 0))
+        return result[:limit]
+
+    # --------------------------------------------------------
+    # 纠错反馈(P4: 48号→修订队列, 只追加)
+    # --------------------------------------------------------
+
+    async def next_feedback_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("kg51", "feedback", "seq"))
+        self._ensure_store()
+        seq = self.store.get(
+            "_kg51_feedback_seq", 0) + 1
+        self.store["_kg51_feedback_seq"] = seq
+        return seq
+
+    async def save_feedback(self, record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.hset(
+                _k("kg51", self.TABLE_FEEDBACK,
+                   record["feedbackId"]),
+                mapping=self._serialize(record))
+            pipe.lpush(_k("kg51", "feedback_all"),
+                       record["feedbackId"])
+            await pipe.execute()
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_FEEDBACK][
+            record["feedbackId"]] = dict(record)
+        return record
+
+    async def list_feedback(
+            self, status: str = None,
+            limit: int = 200) -> list[dict]:
+        """反馈台账(最新在前; 状态过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.lrange(
+                _k("kg51", "feedback_all"), 0, -1)
+            result = []
+            for i in range(0, len(ids), 500):
+                pipe = client.pipeline(transaction=False)
+                for fid in ids[i:i + 500]:
+                    pipe.hgetall(_k(
+                        "kg51", self.TABLE_FEEDBACK,
+                        fid))
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+        else:
+            self._ensure_store()
+            result = [dict(r) for r in
+                      self.store[self.TABLE_FEEDBACK]
+                      .values()]
+        if status:
+            result = [r for r in result
+                      if r.get("status") == status]
+        result.sort(key=lambda r: -int(
+            r.get("feedbackId") or 0))
+        return result[:limit]
+
+    async def update_feedback_fields(
+            self, feedback_id: int,
+            changes: dict) -> dict | None:
+        rec = (await self.list_feedback(limit=10000))
+        rec = next((r for r in rec
+                    if int(r.get("feedbackId") or 0)
+                    == feedback_id), None)
+        if rec is None:
+            return None
+        rec.update(changes)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("kg51", self.TABLE_FEEDBACK,
+                   feedback_id),
+                mapping=self._serialize(rec))
+            return rec
+        self._ensure_store()
+        self.store[self.TABLE_FEEDBACK][
+            feedback_id] = dict(rec)
+        return rec
+
+    # --------------------------------------------------------
+    # 调度器留痕(P4: 46号 stats 口径)
+    # --------------------------------------------------------
+
+    async def save_scheduler_stats(
+            self, stats: dict) -> dict:
+        record = dict(stats)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("kg51", self.TABLE_SCHEDULER,
+                   "stats"),
+                mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_SCHEDULER][
+            "stats"] = dict(record)
+        return record
+
+    async def get_scheduler_stats(self) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("kg51", self.TABLE_SCHEDULER, "stats"))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_SCHEDULER].get("stats")
+        return dict(rec) if rec else None

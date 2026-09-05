@@ -358,6 +358,11 @@ async def _on_startup():
     from services.xiaozhu_voice50_scheduler import (
         start_scheduler as start_voice50_settle)
     start_voice50_settle()
+    # 51号·小竹可信知识图谱: 日度巡检调度(三指标快照;
+    # KG_INSPECT_MODE=on 开启, 默认 off)
+    from services.kg51_scheduler import (
+        start_scheduler as start_kg51_inspect)
+    start_kg51_inspect()
 
 
 @app.on_event("shutdown")
@@ -399,6 +404,10 @@ async def _on_shutdown():
     from services.xiaozhu_voice50_scheduler import (
         stop_scheduler as stop_voice50_settle)
     stop_voice50_settle()
+    # 51号·小竹可信知识图谱巡检调度器
+    from services.kg51_scheduler import (
+        stop_scheduler as stop_kg51_inspect)
+    stop_kg51_inspect()
     await close_redis_client()
     logger.info("清理完成")
 

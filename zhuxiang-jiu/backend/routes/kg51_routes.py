@@ -1,6 +1,6 @@
-"""51号·小竹可信知识图谱路由(P0 本体奠基 + P1 采集管道 + P2 查询面 + P3 溯源)
+"""51号·小竹可信知识图谱路由(P0-P4)
 
-端点(P0 共 4 + P1 共 5 + P2 共 2 + P3 共 2):
+端点(P0 4 + P1 5 + P2 2 + P3 2 + P4 7 = 20):
     GET  /api/kg51/schema                    本体注册表视图(admin)
     GET  /api/kg51/schema/changes            变更队列/历史(admin)
     POST /api/kg51/schema/changes            提交本体变更申请(admin)
@@ -14,6 +14,14 @@
     GET  /api/kg51/grounding                 问答锚定检索(P2, 公开面)
     GET  /api/kg51/trace/credit              信值溯源路径(P3, 会员自查)
     GET  /api/kg51/trace/event/{ev_id}       事件证据链渲染(P3, 属主+admin)
+    POST /api/kg51/inspect/run               巡检触发(P4, admin)
+    GET  /api/kg51/inspect/latest            最近巡检结果(P4, admin)
+    POST /api/kg51/versions/snapshot         版本快照(P4, admin)
+    GET  /api/kg51/versions                  版本列表回溯(P4, admin)
+    POST /api/kg51/fairness-bridge           公平桥上报46号(P4, admin)
+    POST /api/kg51/feedback                  纠错反馈(P4, 会员面)
+    GET  /api/kg51/feedback                  反馈台账(P4, admin)
+    GET  /api/kg51/dashboard                 治理看板(P4, admin)
 
 鉴权: 管理端 X-Role: admin(43-50号同款口径);
       会员面 X-Member-Id(48号惯例); 公开面无鉴权。
@@ -24,7 +32,8 @@
       查询面 off=空态降级(fail-soft 直通);
       溯源面只读跨表——不受数据面开关影响
       (图内三元组为空时链段降级 skipped);
-      观测面(triples/reviews/status)不受影响
+      观测面(triples/reviews/status)不受影响;
+      治理面(巡检/版本/公平桥/看板)不受影响
     - 模块纯增量(零既有路由改动)
     - KeyError → 404 / ValueError → 409(44-50号同款)
 """
@@ -32,6 +41,9 @@
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
+from services.kg51_governance_service import (
+    Kg51GovernanceService,
+)
 from services.kg51_ingest_service import (
     Kg51IngestService, Kg51ReviewService,
 )
@@ -339,6 +351,120 @@ async def trace_event(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
+
+
+class SnapshotIn(BaseModel):
+    label: str = ""
+
+
+class FeedbackIn(BaseModel):
+    turnId: str
+    targetTriple: str
+    note: str = ""
+
+
+@router.post("/inspect/run")
+async def run_inspection(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """巡检触发(P4——完整性/一致性/时效性三指标快照;
+    治理面不受 KG_MODE 影响)"""
+    _require_admin(x_role)
+    return {"success": True,
+            "inspection": await Kg51GovernanceService(
+            ).run_inspection()}
+
+
+@router.get("/inspect/latest")
+async def latest_inspection(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """最近巡检结果(无则触发一次)"""
+    _require_admin(x_role)
+    return await Kg51GovernanceService(
+    ).latest_inspection()
+
+
+@router.post("/versions/snapshot")
+async def snapshot_version(
+        body: SnapshotIn | None = None,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """版本快照(P4——只追加, 支持回溯查询)"""
+    _require_admin(x_role)
+    label = (body.label if body
+             and body.label else "")
+    return await Kg51GovernanceService(
+    ).snapshot_version(label=label)
+
+
+@router.get("/versions")
+async def list_versions(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """版本列表回溯(P4——最新在前)"""
+    _require_admin(x_role)
+    return await Kg51GovernanceService().list_versions()
+
+
+@router.post("/fairness-bridge")
+async def fairness_bridge(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """公平桥上报46号(P4——sourceType 三组 verified
+    覆盖分布; 不足组不上报)"""
+    _require_admin(x_role)
+    return await Kg51GovernanceService().bridge_fairness()
+
+
+@router.post("/feedback")
+async def submit_feedback(
+        body: FeedbackIn,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """纠错反馈(P4——48号轮次→目标三元组→修订队列;
+    会员面)"""
+    if not x_member_id:
+        raise HTTPException(
+            status_code=401,
+            detail="需要 X-Member-Id")
+    try:
+        member_id = int(x_member_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=401,
+            detail="X-Member-Id 需为整数")
+    try:
+        return await Kg51GovernanceService(
+        ).submit_feedback(
+            member_id=member_id,
+            turn_id=body.turnId,
+            target_triple=body.targetTriple,
+            note=body.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/feedback")
+async def list_feedback(
+        status: str = None,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """反馈台账视图(P4——admin)"""
+    _require_admin(x_role)
+    return await Kg51GovernanceService().list_feedback(
+        status=status)
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """治理看板(P4——规模/verified 占比/复核积压/
+    预算消耗/版本五分区)"""
+    _require_admin(x_role)
+    return await Kg51GovernanceService().dashboard()
 
 
 def register_kg51_routes(app) -> None:

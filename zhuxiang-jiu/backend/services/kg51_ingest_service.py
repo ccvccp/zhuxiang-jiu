@@ -149,6 +149,11 @@ class Kg51IngestService:
         if "system" in sources:
             report["sources"]["trace"] = \
                 await self._ingest_trace_links()
+        # P4 机构源(16号代理商+21号酒店合作商——
+        # Institution 实体, 权威效力)
+        if "authority" in sources:
+            report["sources"]["institution"] = \
+                await self._ingest_institution_source()
         logger.info("kg51_ingest_done %s",
                     {k: {kk: vv for kk, vv in v.items()
                          if kk != "errors"}
@@ -502,6 +507,75 @@ class Kg51IngestService:
             return list(seen.values())
         except Exception:  # noqa: BLE001
             return []
+
+    # --------------------------------------------------------
+    # P4 机构源(16号代理商+21号酒店合作商)
+    # --------------------------------------------------------
+
+    async def _ingest_institution_source(self) -> dict:
+        """机构采集(Institution 实体——计划 §三-1 P4 项)
+
+        - 16号代理商(agent): id/name/level/status/region
+        - 21号合作商(venue partner): id/partnerName/
+          partnerType/status(无 region——坐标不入图谱,
+          本体 allowedAttrs 白名单自然过滤)
+        仅入库 status=active 的机构(经营效力)。
+        """
+        stat = {"scanned": 0, "entities": 0,
+                "triples": 0, "skipped": 0,
+                "updated": 0, "reviews": 0}
+        try:
+            from repositories.agent_repository import (
+                AgentRepository,
+            )
+            agents = await AgentRepository().list_all()
+            for agent in agents:
+                stat["scanned"] += 1
+                if (agent.get("status") or "") \
+                        != "active":
+                    continue
+                org_id = agent.get("id")
+                if not org_id:
+                    continue
+                await self._upsert_entity(
+                    "Institution",
+                    f"org:partner:agent-{org_id}",
+                    {"orgId": f"agent-{org_id}",
+                     "type": "agent",
+                     "region": (agent.get("region")
+                                 or "")[:40]},
+                    "authority",
+                    f"agent:{org_id}",
+                    CONFIDENCE_AUTHORITY, stat)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("kg51_agent_scan_skip: %s", exc)
+        try:
+            from repositories.venue_repository import (
+                VenueRepository,
+            )
+            partners = await VenueRepository(
+            ).list_partners(limit=1000)
+            for partner in partners:
+                stat["scanned"] += 1
+                if (partner.get("status") or "") \
+                        != "active":
+                    continue
+                org_id = partner.get("id")
+                if not org_id:
+                    continue
+                await self._upsert_entity(
+                    "Institution",
+                    f"org:partner:venue-{org_id}",
+                    {"orgId": f"venue-{org_id}",
+                     "type": partner.get("partnerType")
+                     or "venue",
+                     "region": ""},
+                    "authority",
+                    f"venue:partner:{org_id}",
+                    CONFIDENCE_AUTHORITY, stat)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("kg51_venue_scan_skip: %s", exc)
+        return stat
 
     # --------------------------------------------------------
     # 抽取基建(upsert + 去重 + 冲突)
