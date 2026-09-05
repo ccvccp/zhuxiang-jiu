@@ -1,6 +1,6 @@
-"""52号·小竹语音可用性评估引擎路由(P0 注册表+P1 功能可信度管道)
+"""52号·小竹语音可用性评估引擎路由(P0-P2)
 
-端点(P0 6 + P1 3 = 9):
+端点(P0 6 + P1 3 + P2 1 = 10):
     GET  /api/us52/registry           指标注册表视图(admin)
     GET  /api/us52/dimensions         五维结构(admin)
     POST /api/us52/metrics/compute    指标快照计算(admin, US52_MODE=on)
@@ -10,6 +10,7 @@
     POST /api/us52/tests/run          执行测试任务集(P1, admin)
     GET  /api/us52/tests              测试会话历史(P1, admin)
     POST /api/us52/metrics/functional 功能可信度五指标计算(P1, admin)
+    POST /api/us52/metrics/resilience 安全韧性五指标计算(P2, admin)
 
 鉴权: 管理端 X-Role: admin(43-51号同款口径)。
 统一口径:
@@ -178,6 +179,22 @@ async def compute_functional(
         return await Us52MetricsService(
         ).compute_functional_metrics(
             test_id=test_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/metrics/resilience")
+async def compute_resilience(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """安全韧性五指标计算(P2——一票否决域:
+    注入抵御复用 49/51号红队真跑 +
+    降级合规/预算引导/跨会话隔离审计直采)"""
+    _require_admin(x_role)
+    try:
+        return await Us52MetricsService(
+        ).compute_resilience_metrics()
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
