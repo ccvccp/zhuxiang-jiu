@@ -386,6 +386,12 @@ async def _on_startup():
     from services.login54_scheduler import (
         start_scheduler as start_login54_learn)
     start_login54_learn()
+    # 55号·二维码AI智能管理: 决策回流 T+1 批次补标调度
+    # (过期清扫+七类信号补标+指标快照; QR55_LEARN_MODE
+    # =on 开启, 默认 off)
+    from services.qr55_scheduler import (
+        start_scheduler as start_qr55_learn)
+    start_qr55_learn()
 
 
 @app.on_event("shutdown")
@@ -439,6 +445,10 @@ async def _on_shutdown():
         stop_scheduler as stop_login54_learn)
     stop_us52_alert()
     stop_login54_learn()
+    # 55号·二维码AI智能管理学习调度器
+    from services.qr55_scheduler import (
+        stop_scheduler as stop_qr55_learn)
+    stop_qr55_learn()
     await close_redis_client()
     logger.info("清理完成")
 

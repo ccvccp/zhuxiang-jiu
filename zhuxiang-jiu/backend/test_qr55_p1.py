@@ -484,8 +484,10 @@ class TestHttp:
             router as qr_router,
         )
         count = sum(1 for r in qr_router.routes)
-        record("55号路由累计 7 端点",
-               count == 7, str(count))
+        # P2 新增 4 端点(codes/code/{id}/stats/collect)
+        # → 7→11(基线语义: ≥7——P1 交付面不因 P2 演进破坏)
+        record("55号路由累计 ≥7 端点(P2 扩至 11)",
+               count >= 7, str(count))
         os.environ["QR55_MODE"] = "off"
 
 

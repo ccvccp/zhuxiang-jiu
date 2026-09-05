@@ -33,10 +33,12 @@ class Qr55Repository:
 
     _INT_FIELDS = ("codeId", "eventId", "memberId",
                    "feedbackId", "modelEventId",
-                   "scanCount")
+                   "scanCount", "poolFeedbackId")
     _FLOAT_FIELDS = ("trustScore", "privacyCost", "reward")
+    # detail: 事件明细(P2 修复——Redis 态 dict→JSON 串
+    # 落库后须还原, 否则指标/回流管道读到 str)
     _JSON_DICT_FIELDS = ("params", "context", "metrics",
-                         "factorCtx")
+                         "factorCtx", "detail")
     _JSON_LIST_FIELDS = ("factors", "evidence")
     _BOOL_FIELDS = ("accessibility",)
 
@@ -334,6 +336,13 @@ class Qr55Repository:
                 "_qr55_feedback_all", []).insert(
                 0, record["feedbackId"])
         return record
+
+    async def get_feedback_by_event(
+            self, event_id: int) -> dict | None:
+        """按事件查回流标注(幂等判定——eventId 1:1)"""
+        records = await self.list_feedback(
+            event_id=int(event_id), limit=1)
+        return records[0] if records else None
 
     async def list_feedback(
             self, event_id: int = None,

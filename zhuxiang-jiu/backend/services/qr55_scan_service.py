@@ -85,12 +85,18 @@ class Qr55ScanService:
             }
 
         if result.get("status") == "expired":
-            await self._track(None, member_id,
-                              "expire", {
-                                  "serviceId":
-                                      result.get(
-                                          "serviceId"),
-                              })
+            # 验签已过——nonce 可信, 反查码实例挂链
+            # (P2 修复: expire 事件缺 codeId 导致
+            # 生成过剩信号无法按码聚合)
+            nonce = result.get("nonce")
+            code_rec = await self.repo.get_by_nonce(
+                nonce) if nonce else None
+            await self._track(
+                (code_rec or {}).get("codeId"),
+                member_id, "expire", {
+                    "serviceId":
+                        result.get("serviceId"),
+                })
             return {
                 "success": False,
                 "status": "expired",

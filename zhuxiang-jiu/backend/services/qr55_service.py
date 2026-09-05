@@ -159,6 +159,72 @@ class Qr55Service:
         return await self.repo._next_seq("codes")
 
     # --------------------------------------------------------
+    # 服务完成标记(P2 全链闭环: 生成→扫码→完成)
+    # --------------------------------------------------------
+
+    async def record_completion(self, code_id: int,
+                                member_id: int = None
+                                ) -> dict:
+        """服务完成回传(业务层在落地页服务交付后调用
+        ——scan_completed 真值信号的判定依据)
+
+        幂等: 已完成码重复标记跳过(事件不重发)。
+
+        Raises:
+            KeyError: 码不存在
+            ValueError: 状态机非法(active 未核销不可完成)
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"QR55_MODE={mode}(默认 off——核销域"
+                f"关闭, 完成标记不可用)")
+
+        code = await self.repo.get_code(int(code_id))
+        if code is None:
+            raise KeyError(f"码 {code_id} 不存在")
+        if code.get("status") != "redeemed":
+            raise ValueError(
+                f"码 {code_id} 状态 {code.get('status')}"
+                f"(需 redeemed 后方可标记完成)")
+
+        events = await self.repo.list_events(
+            code_id=int(code_id))
+        if any(e.get("eventType") == "complete"
+               for e in events):
+            return {
+                "success": True,
+                "codeId": int(code_id),
+                "status": "already_completed",
+                "note": "幂等——完成事件已存在(不重发)",
+            }
+
+        event_id = await self.repo.next_event_id()
+        await self.repo.add_event({
+            "eventId": event_id,
+            "codeId": int(code_id),
+            "memberId": int(
+                member_id or code.get("memberId") or 0),
+            "eventType": "complete",
+            "detail": {
+                "serviceId": code.get("serviceId"),
+                "label": code.get("label"),
+            },
+            "createdAt": ts(),
+        })
+        code["completedAt"] = ts()
+        await self.repo.update_code(code)
+        return {
+            "success": True,
+            "codeId": int(code_id),
+            "status": "completed",
+            "serviceId": code.get("serviceId"),
+            "note": "全链闭环: 生成→扫码→完成"
+                    "(决策回流 scan_completed 信号源)",
+            "completedAt": ts(),
+        }
+
+    # --------------------------------------------------------
     # 模型状态视图(44号复用——观测面)
     # --------------------------------------------------------
 
