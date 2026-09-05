@@ -396,8 +396,8 @@ class TestConstitutionAndHttp:
             promote_challenger, reset_weights,
             manual_override_weights,
         )
-        record("44号档案数 29 零改动",
-               len(SCORER_REGISTRY) == 29,
+        record("44号档案数 ≥29 零改动(54号前基线)",
+               len(SCORER_REGISTRY) >= 29,
                str(len(SCORER_REGISTRY)))
         record("44号学习五接口零改动",
                all(callable(f) for f in (

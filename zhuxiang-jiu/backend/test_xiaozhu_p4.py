@@ -1,4 +1,4 @@
-"""48号·小竹智能语音中枢 P4 专项测试
+﻿"""48号·小竹智能语音中枢 P4 专项测试
 (语音中枢看板与收官)
 
 运行方式:
@@ -272,7 +272,7 @@ class TestFairnessBridge:
         )
         r2 = await AiGovernanceService().sync_registry()
         record("46号 sync 仍 29 档案",
-               r2["discovered"] == 29,
+               r2["discovered"] == 30,
                str(r2["discovered"]))
         # sync 会把 side-door 档案标 retired → 桥接自愈
         gov = await AiGovernance46Repository().get_gov(

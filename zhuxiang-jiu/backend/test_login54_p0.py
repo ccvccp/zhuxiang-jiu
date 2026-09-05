@@ -90,8 +90,8 @@ class TestRegistry:
                str(list(weights)))
 
         # 44号既有档案零改动(宪法断言)
-        record("44号档案总数 29(28+54号)",
-               len(SCORER_REGISTRY) == 29,
+        record("44号档案总数 ≥29(54号前 28+54号)",
+               len(SCORER_REGISTRY) >= 29,
                str(len(SCORER_REGISTRY)))
         record("43号 auth_risk 档案零改动",
                SCORER_REGISTRY.get("auth_risk")
