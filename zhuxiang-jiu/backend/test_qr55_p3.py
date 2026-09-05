@@ -507,8 +507,11 @@ class TestHttp:
             router as qr_router,
         )
         count = sum(1 for r in qr_router.routes)
-        record("55号路由累计 14 端点",
-               count == 14, str(count))
+        # P4 新增 4 端点(governance/probe/compensate/
+        # attribution)→ 14→18(基线语义: ≥14——P3
+        # 交付面不因 P4 演进破坏)
+        record("55号路由累计 ≥14 端点(P4 扩至 18)",
+               count >= 14, str(count))
 
 
 async def run_all():

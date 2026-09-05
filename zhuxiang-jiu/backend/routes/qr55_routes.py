@@ -1,6 +1,6 @@
-"""55号·二维码AI智能管理路由(P0+P1+P2+P3)
+"""55号·二维码AI智能管理路由(P0-P4)
 
-端点(P0 4 + P1 3 + P2 4 + P3 3 = 14):
+端点(P0 4 + P1 3 + P2 4 + P3 3 + P4 4 = 18):
     GET  /api/qr55/registry          注册表自描述(admin, 观测面)
     POST /api/qr55/intent/parse      意图解析演示(admin, 观测面)
     POST /api/qr55/code/generate     签名码生成(admin, on, P0 能力验证)
@@ -15,18 +15,22 @@
     POST /api/qr55/model/learn       学习轮次(admin, 管理面, P3)
     POST /api/qr55/model/promote     手动晋升(admin, 管理面, P3)
     POST /api/qr55/model/rollback    版本回滚(admin, 管理面, P3)
+    GET  /api/qr55/governance/health 治理健康+冻结守卫(admin, P4)
+    POST /api/qr55/probe             拨测验证(admin, P4)
+    POST /api/qr55/probe/compensate  篡改受害者信值补偿(admin, P4)
+    GET  /api/qr55/attribution       LLM 归因报告(admin, P4)
 
 鉴权: 管理面 X-Role: admin(43-54号同款口径);
       会员面(member) generate/scan 携 memberId。
 统一口径:
-    - 观测面(registry/model/status/codes/code/stats)
-      不受 QR55_MODE 影响; intent/parse 为规则轨
-      确定性演示亦开放
+    - 观测面(registry/model/status/codes/code/stats/
+      governance/attribution)不受 QR55_MODE 影响;
+      intent/parse 为规则轨确定性演示亦开放
     - 生成面(generate): off=拒绝(409——存量二维码
       链路零影响)
     - 核销面(scan): off=拒绝(409)
-    - 管理面(feedback/collect+model/*): off 亦可用
-      (回流采集/学习面不依赖生成面——54号 同范式)
+    - 管理面(feedback/collect+model/*+probe*):
+      off 亦可用(治理/拨测面不依赖生成面)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -59,12 +63,14 @@ class GenerateIn(BaseModel):
 
 
 class OrchestrateIn(BaseModel):
-    """智能生码编排入参(P1)"""
+    """智能生码编排入参(P1+P4)"""
     memberId: int
     text: str
     audience: str | None = None
     confirmParams: dict | None = None
     accessibility: bool = False
+    childMode: bool = False       # P4 儿童简化模式
+    confirmed: bool = False       # P4 二次确认回传
 
 
 class ScanIn(BaseModel):
@@ -162,7 +168,8 @@ async def smart_generate(
         x_role: str | None = Header(default=None,
                                     alias="X-Role")):
     """智能生码编排(意图→评分→策略→生成——
-    direct/confirm/clarify 三态分派; off 409)"""
+    direct/confirm/clarify 三态分派+儿童模式二次
+    确认; off 409)"""
     _require_admin(x_role)
     from services.qr55_generate_service import (
         Qr55GenerateService,
@@ -172,7 +179,9 @@ async def smart_generate(
             body.memberId, body.text,
             audience=body.audience,
             confirm_params=body.confirmParams,
-            accessibility=body.accessibility)
+            accessibility=body.accessibility,
+            child_mode=body.childMode,
+            confirmed=body.confirmed)
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
@@ -360,6 +369,67 @@ async def model_rollback(
     try:
         return await Qr55LearnService().rollback(
             version_id=versionId, reason=reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/governance/health")
+async def governance_health(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """治理健康(46号三检测器只读+冻结守卫+55号域
+    治理事实+动作建议——P4)"""
+    _require_admin(x_role)
+    from services.qr55_governance_service import (
+        Qr55GovernanceService,
+    )
+    return await Qr55GovernanceService(
+    ).governance_health()
+
+
+@router.post("/probe")
+async def run_probe(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """拨测验证(白名单 route 可达性+失败重试+
+    probe 事件留痕——P4; 拨测失败不计预算铁律)"""
+    _require_admin(x_role)
+    from services.qr55_probe_service import (
+        Qr55ProbeService,
+    )
+    return await Qr55ProbeService().run_probe()
+
+
+@router.post("/probe/compensate")
+async def probe_compensate(
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """篡改受害者信值补偿(tamper 事件关联会员→
+    45号 L2 deposit 验真——幂等 1:1)"""
+    _require_admin(x_role)
+    from services.qr55_probe_service import (
+        Qr55ProbeService,
+    )
+    return await Qr55ProbeService(
+    ).compensate_tamper_victims(
+        limit=max(1, min(int(limit or 50), 200)))
+
+
+@router.get("/attribution")
+async def attribution(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """LLM 归因报告(权重变更+回流信号+指标→
+    自然语言——mock/real 三态, 数字来自数据层)"""
+    _require_admin(x_role)
+    from services.qr55_attribution_service import (
+        Qr55AttributionService,
+    )
+    try:
+        return await Qr55AttributionService(
+        ).attribution()
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))

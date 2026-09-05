@@ -60,7 +60,9 @@ class Qr55GenerateService:
     async def orchestrate(self, member_id: int, text: str,
                           audience: str = None,
                           confirm_params: dict = None,
-                          accessibility: bool = False
+                          accessibility: bool = False,
+                          child_mode: bool = False,
+                          confirmed: bool = False
                           ) -> dict:
         """生码编排主链(意图→富化→评分→策略→生成)
 
@@ -70,6 +72,9 @@ class Qr55GenerateService:
             audience: 受众过滤(elderly 等)
             confirm_params: confirm 策略的确认回传参数
             accessibility: 无障碍需求(千面适配)
+            child_mode: 儿童简化模式(P4——二次确认)
+            confirmed: 二次确认回传(child_mode 生成
+                前置确认; 无障碍高危服务同口径)
 
         Raises:
             ValueError: off 态/白名单外/空意图
@@ -119,6 +124,14 @@ class Qr55GenerateService:
         params = dict(intent.get("params") or {})
         params.update(confirm_params or {})
 
+        # ④-bis 儿童简化模式二次确认(P4——高危
+        # 服务(apply 办事类)儿童模式强制二次确认)
+        if child_mode and not confirmed \
+                and svc.get("template") == "apply":
+            return await self._handle_child_confirm(
+                member_id, service_id, svc, params,
+                scored)
+
         if strategy == "confirm" \
                 and not confirm_params:
             return await self._handle_confirm(
@@ -128,7 +141,8 @@ class Qr55GenerateService:
         # direct / confirm 已确认 → 生成
         return await self._do_generate(
             member_id, service_id, svc, params,
-            intent, scored, ctx, accessibility)
+            intent, scored, ctx, accessibility,
+            child_mode=child_mode)
 
     # ============================================================
     # 上下文富化(千面适配数据源)
@@ -249,6 +263,39 @@ class Qr55GenerateService:
             "orchestratedAt": ts(),
         }
 
+    async def _handle_child_confirm(self, member_id: int,
+                                    service_id: str,
+                                    svc: dict,
+                                    params: dict,
+                                    scored: dict) -> dict:
+        """儿童简化模式二次确认(P4——apply 办事类
+        高危服务强制监护人确认)"""
+        await self._track(member_id, "confirm", {
+            "serviceId": service_id,
+            "childMode": True,
+            "missingParams": [],
+            "trustScore": scored.get("trustScore"),
+        })
+        return {
+            "success": True,
+            "status": "child_confirm_required",
+            "strategy": "child_confirm",
+            "serviceId": service_id,
+            "label": svc.get("label"),
+            "currentParams": params,
+            "childSafety": {
+                "mode": "child",
+                "requireGuardian": True,
+                "note": "儿童简化模式——办事类服务"
+                        "需监护人二次确认",
+                "simplifiedCopy": True,
+            },
+            "scoring": self._scoring_view(scored),
+            "note": "回传 confirmed=true 完成生成"
+                    "(儿童保护铁律)",
+            "orchestratedAt": ts(),
+        }
+
     async def _handle_confirm(self, member_id: int,
                               service_id: str, svc: dict,
                               params: dict,
@@ -286,7 +333,8 @@ class Qr55GenerateService:
                            service_id: str, svc: dict,
                            params: dict, intent: dict,
                            scored: dict, ctx: dict,
-                           accessibility: bool) -> dict:
+                           accessibility: bool,
+                           child_mode: bool = False) -> dict:
         """direct/确认后生成(千面适配+落库+埋点)"""
         # 参数白名单过滤
         allowed = set(svc.get("params") or [])
@@ -300,6 +348,14 @@ class Qr55GenerateService:
         # 千面适配
         personalization = self._personalize(
             ctx, svc, accessibility)
+        if child_mode:
+            personalization["childMode"] = {
+                "enabled": True,
+                "simplifiedCopy": True,
+                "guardianConfirmed": True,
+                "note": "儿童简化模式——简化文案+"
+                        "监护人已确认",
+            }
 
         code_id = await self.repo._next_seq("codes")
         record = {
@@ -316,6 +372,7 @@ class Qr55GenerateService:
             "accessibility": bool(accessibility),
             "scanCount": 0,
             "trustScore": scored.get("trustScore"),
+            "childMode": bool(child_mode),
             "createdAt": ts(),
             "expiresAt": code_result["exp"],
         }
@@ -330,6 +387,7 @@ class Qr55GenerateService:
             else "confirm_done",
             "trustScore": scored.get("trustScore"),
             "personalization": personalization,
+            "childMode": bool(child_mode),
         })
 
         return {
