@@ -121,6 +121,21 @@ services:
       # on=多模态编排面开放(态势感知/五通道编排/语音唤醒/门户/驻留);
       #     off=编排面 409 直通存量 39号 entry 登录(零接管), 观测面不受影响
       - LOGIN53_MODE=${LOGIN53_MODE:-off}
+      # ---- 55号 二维码AI智能管理(P0-P5: 生成/核销面, 默认 off——存量二维码链路零影响) ----
+      # on=智能生码/扫码核销/完成标记开放(白名单注册表+HMAC 签名
+      #     +49号预算联动+千面适配); off=生成/核销 409(观测面
+      #     registry/model/codes/stats/governance/dashboard 不受影响)
+      - QR55_MODE=${QR55_MODE:-off}
+      # on=T+1 学习调度(过期清扫+决策回流补标+指标快照+Hedge 学习
+      #     +回归检测自动回滚); off=仅手动触发(collect/learn 端点)
+      - QR55_LEARN_MODE=${QR55_LEARN_MODE:-off}
+      # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
+      - QR55_LEARN_INTERVAL=${QR55_LEARN_INTERVAL:-86400}
+      # 滑动窗口回归检测阈值(rewardAlignment 下降超此值自动回滚+46号冻结)
+      - QR55_REGRESSION_THRESHOLD=${QR55_REGRESSION_THRESHOLD:-0.3}
+      # HMAC 签名密钥(生产必须强随机值经 .env 注入, 缺省 dev 仅限开发;
+      # 轮换使存量未核销码失效——默认 TTL 300s, 影响窗口 ≤5 分钟)
+      - QR55_SECRET=${QR55_SECRET:-dev}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
