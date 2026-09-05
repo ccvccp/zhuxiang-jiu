@@ -287,6 +287,9 @@ register_xiaozhu_routes(app)
 # 小竹可信知识图谱(51号)
 from routes.kg51_routes import register_kg51_routes
 register_kg51_routes(app)
+# 小竹语音可用性评估引擎(52号)
+from routes.us52_routes import register_us52_routes
+register_us52_routes(app)
 
 
 # ============================================================
