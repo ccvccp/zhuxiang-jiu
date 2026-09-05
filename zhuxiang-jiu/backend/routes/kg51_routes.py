@@ -1,15 +1,22 @@
-"""51号·小竹可信知识图谱路由(P0 本体奠基)
+"""51号·小竹可信知识图谱路由(P0 本体奠基 + P1 采集管道)
 
-端点(P0 共 4):
+端点(P0 共 4 + P1 共 5):
     GET  /api/kg51/schema                    本体注册表视图(admin)
     GET  /api/kg51/schema/changes            变更队列/历史(admin)
     POST /api/kg51/schema/changes            提交本体变更申请(admin)
     POST /api/kg51/schema/changes/{id}/decide  变更裁决(admin)
+    POST /api/kg51/ingest/run                触发三源采集(P1, admin)
+    GET  /api/kg51/ingest/status             采集状态视图(P1, admin)
+    GET  /api/kg51/triples                   三元组查询(P1, admin)
+    GET  /api/kg51/reviews                   复核队列(P1, admin)
+    POST /api/kg51/reviews/{id}/decide       复核裁决(P1, admin)
 
 鉴权: 管理端 X-Role: admin(43-50号同款口径)。
 统一口径:
     - 治理面端点不受 KG_MODE 数据面开关影响
       (off 态亦可管理本体)
+    - 采集面 off=采集停(ingest/run 拒绝);
+      观测面(triples/reviews/status)不受影响
     - 模块纯增量(零既有路由改动)
     - KeyError → 404 / ValueError → 409(44-50号同款)
 """
@@ -17,6 +24,9 @@
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
+from services.kg51_ingest_service import (
+    Kg51IngestService, Kg51ReviewService,
+)
 from services.kg51_schema_service import Kg51SchemaService
 
 router = APIRouter(prefix="/api/kg51",
@@ -100,6 +110,91 @@ async def decide_change(
         return await Kg51SchemaService().decide_change(
             change_id=change_id, approve=body.approve,
             review_note=body.reviewNote)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+class IngestIn(BaseModel):
+    sources: list[str] | None = None
+
+
+class ReviewDecideIn(BaseModel):
+    approve: bool
+    decisionNote: str = ""
+
+
+@router.post("/ingest/run")
+async def run_ingest(
+        body: IngestIn | None = None,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """触发三源采集抽取(P1——KG_MODE=on 时可用,
+    off=采集停铁律)"""
+    _require_admin(x_role)
+    sources = (body.sources if body
+               and body.sources else None)
+    try:
+        return await Kg51IngestService().run_ingest(
+            sources=sources)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/ingest/status")
+async def ingest_status(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """采集状态视图(实时统计——观测不受 off 影响)"""
+    _require_admin(x_role)
+    return await Kg51IngestService().status()
+
+
+@router.get("/triples")
+async def query_triples(
+        status: str = None,
+        predicate: str = None,
+        sourceType: str = None,
+        subject: str = None,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """三元组查询(计分路径只取 verified——
+    unverified 物理隔离)"""
+    _require_admin(x_role)
+    return await Kg51ReviewService().query_triples(
+        status=status, predicate=predicate,
+        source_type=sourceType, subject=subject)
+
+
+@router.get("/reviews")
+async def list_reviews(
+        status: str = None,
+        reason: str = None,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """复核队列/历史(confidence|conflict|feedback)"""
+    _require_admin(x_role)
+    return await Kg51ReviewService().list_reviews(
+        status=status, reason=reason)
+
+
+@router.post("/reviews/{review_id}/decide")
+async def decide_review(
+        review_id: int,
+        body: ReviewDecideIn,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """复核裁决(approve→verified/active;
+    reject→retired 留痕)"""
+    _require_admin(x_role)
+    try:
+        return await Kg51ReviewService().decide_review(
+            review_id=review_id, approve=body.approve,
+            decision_note=body.decisionNote)
     except KeyError as exc:
         raise HTTPException(status_code=404,
                             detail=str(exc))
