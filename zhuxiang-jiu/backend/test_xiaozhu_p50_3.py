@@ -394,7 +394,7 @@ class TestFairnessBridge:
                r2["bridged"] == 1
                and r2["groups"] == ["l3_low"],
                str(r2))
-        # 46号 side-door 档案核验(28 档案断言零改动)
+        # 46号 side-door 档案核验(29 档案断言零改动)
         from repositories.ai_governance_repository \
             import AiGovernance46Repository
         gov = await AiGovernance46Repository().get_gov(

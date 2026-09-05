@@ -4,7 +4,7 @@
     python test_ai_governance_p0.py
 
 覆盖(计划 §三):
-    - 注册中心同步: 28 档案全量入册/幂等 diff 归零/
+    - 注册中心同步: 29 档案全量入册/幂等 diff 归零/
       治理状态保留(frozen 不被重扫覆盖)/分布统计
     - 变更审批总线: 提交 pending/同档案重复 pending 拒绝/
       freeze 幂等冲突/参数校验(类型/理由/payload)
@@ -57,13 +57,13 @@ class TestSync:
         svc = AiGovernanceService()
 
         r = await svc.sync_registry()
-        record("28档案全量入册",
+        record("29档案全量入册",
                r["discovered"] == len(SCORER_REGISTRY)
                and r["added"] == len(SCORER_REGISTRY)
-               and len(SCORER_REGISTRY) == 28,
+               and len(SCORER_REGISTRY) == 29,
                f"added={r.get('added')} "
                f"total={len(SCORER_REGISTRY)}")
-        record("批次覆盖1-12", r["discovered"] == 28,
+        record("批次覆盖1-13", r["discovered"] == 29,
                str(r.get("discovered")))
 
         # 幂等: 再同步 diff 归零
@@ -75,11 +75,11 @@ class TestSync:
 
         # 台账分布
         reg = await svc.list_registry()
-        record("台账统计", reg["total"] == 28
-               and reg["byStatus"].get("active") == 28,
+        record("台账统计", reg["total"] == 29
+               and reg["byStatus"].get("active") == 29,
                str(reg.get("byStatus")))
         record("批次分布", sum(
-            (reg.get("byBatch") or {}).values()) == 28,
+            (reg.get("byBatch") or {}).values()) == 29,
                str(reg.get("byBatch")))
 
         # 治理状态保留: 手动 frozen 后重扫不覆盖
@@ -363,19 +363,19 @@ class TestHttp:
         record("同步缺Role403", resp.status_code == 403,
                str(resp.status_code))
 
-        # 同步 200(28 档案)
+        # 同步 200(29 档案)
         resp = client.post("/api/ai-gov/registry/sync",
                            headers=admin)
         body = resp.json()
         record("同步200", resp.status_code == 200
-               and body.get("added") == 28,
+               and body.get("added") == 29,
                str(body)[:70])
 
         # 台账 200 + 过滤
         resp = client.get("/api/ai-gov/registry",
                           headers=admin)
         record("台账200", resp.status_code == 200
-               and resp.json().get("total") == 28,
+               and resp.json().get("total") == 29,
                str(resp.json().get("total")))
         resp = client.get(
             "/api/ai-gov/registry?status=active&batch=12",

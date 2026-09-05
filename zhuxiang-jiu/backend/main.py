@@ -293,6 +293,9 @@ register_us52_routes(app)
 # 小竹智能登录引擎(53号)
 from routes.login53_routes import register_login53_routes
 register_login53_routes(app)
+# 小竹登录引擎大模型(54号)
+from routes.login54_routes import register_login54_routes
+register_login54_routes(app)
 
 
 # ============================================================

@@ -90,6 +90,8 @@ SCORER_REGISTRY = {
     "api_health":                  {"label": "API健康评分", "module": "44API管理", "batch": 11},
     # ---- 第十二批(45号信值模块 P0: 信值三层评分) ----
     "trust_value":                  {"label": "信值三层评分", "module": "45信值模块", "batch": 12},
+    # ---- 第十三批(54号登录大模型 P0: 小竹登录引擎编排评分) ----
+    "login_orchestration":          {"label": "小竹登录引擎编排评分", "module": "54登录大模型", "batch": 13},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -121,6 +123,10 @@ DECISION_THRESHOLDS = {
     # 43号安全管理(四档处置)
     "security_threat_gate":  [(70.0, "allow"), (50.0, "throttle"),
                               (25.0, "challenge"), (0.0, "block")],
+    # 54号登录大模型(四级响应——对齐 53号 RISK_TIERS:
+    # 高分=低风险 → silent/one_tap/step_up/enhanced)
+    "login_orchestration":   [(75.0, "silent"), (50.0, "one_tap"),
+                              (25.0, "step_up"), (0.0, "enhanced")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -210,6 +216,7 @@ def default_weights(scorer_id: str) -> dict:
             GroupbuyQualifyScorer, MemberProfileScorer, MessageContentScorer,
             PointsRiskScorer, WithdrawRiskScorer,
         )
+        from services.login54_scorer import Login54Scorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -224,6 +231,7 @@ def default_weights(scorer_id: str) -> dict:
             "agreement_risk": AgreementRiskScorer,
             "finance_anomaly": FinanceAnomalyScorer,
             "auth_risk": AuthRiskScorer,
+            "login_orchestration": Login54Scorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

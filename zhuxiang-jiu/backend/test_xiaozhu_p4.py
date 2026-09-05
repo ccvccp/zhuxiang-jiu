@@ -11,7 +11,7 @@
     - 高敏台账: executor 计数(发放/核销/码错/
       过期/通过率)
     - 治理桥接: member_level 维度直达率上报 46号
-      (voice_L* 分组/46号侧采样入库/46号 28 档案
+      (voice_L* 分组/46号侧采样入库/46号 29 档案
       断言零改动红线/台账 upsert 幂等自愈)
     - HTTP 层: 2 端点/鉴权
 """
@@ -266,13 +266,13 @@ class TestFairnessBridge:
                         & set(s)) for s in samples),
                str(samples[:1]))
 
-        # 46号 28 档案断言零改动红线(桥接后 sync 不受扰)
+        # 46号 29 档案断言零改动红线(桥接后 sync 不受扰)
         from services.ai_governance_service import (
             AiGovernanceService,
         )
         r2 = await AiGovernanceService().sync_registry()
-        record("46号 sync 仍 28 档案",
-               r2["discovered"] == 28,
+        record("46号 sync 仍 29 档案",
+               r2["discovered"] == 29,
                str(r2["discovered"]))
         # sync 会把 side-door 档案标 retired → 桥接自愈
         gov = await AiGovernance46Repository().get_gov(

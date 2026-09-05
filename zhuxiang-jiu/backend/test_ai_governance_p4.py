@@ -192,7 +192,7 @@ class TestFiling:
 
         # 全档案汇总版
         r = await svc.build_filing()
-        record("全档案汇总28份", r["count"] == 28,
+        record("全档案汇总29份", r["count"] == 29,
                str(r["count"]))
         record("每份六节齐备",
                all(len(f["sections"]) == 6
@@ -250,8 +250,8 @@ class TestAuditReport:
                r["freezeEvents"]["total"] == 2,
                str(r["freezeEvents"]["total"]))
         record("台账分布",
-               r["registry"]["total"] == 28
-               and r["registry"]["active"] == 28
+               r["registry"]["total"] == 29
+               and r["registry"]["active"] == 29
                and r["registry"]["frozen"] == 0,
                str(r["registry"]))
         record("健康快照引用",
@@ -336,8 +336,8 @@ class TestHttp:
         resp = client.get("/api/ai-gov/compliance/filing",
                           headers=admin)
         body = resp.json()
-        record("备案200全量28", resp.status_code == 200
-               and body.get("count") == 28,
+        record("备案200全量29", resp.status_code == 200
+               and body.get("count") == 29,
                str(body.get("count")))
 
         # 未入册 404
