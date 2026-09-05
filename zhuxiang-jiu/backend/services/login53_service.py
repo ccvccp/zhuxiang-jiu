@@ -1733,3 +1733,267 @@ class Login53Service:
                     "(语音轻问+功能教育)",
             "generatedAt": ts(),
         }
+
+    # ============================================================
+    # P5 效果评估+监控看板
+    # ============================================================
+
+    async def compute_metrics(self) -> dict:
+        """六效果指标计算(P5——events 流水聚合,
+        计划 §八 六指标注册表口径)
+
+        - login_success_rate: success=True/总事件
+        - avg_login_duration: durationMs 均值(→秒)
+        - retention_5min_rate: 登录成功后 5 分钟内
+          有驻留行为(领取奖励/导览)占比(proxy)
+        - voice_login_share: voice 通道占比
+        - complaint_rate: 事件 detail 含负反馈
+          关键词占比(proxy——50号 corpus 待接入)
+        - trust_gain_delta: 52号 trust_gain 复用
+          proxy(0.5 中性过渡口径)
+
+        空态: 无事件→全满分口径(未观测到违规)。
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"LOGIN53_MODE={mode}(默认 off——"
+                f"编排面关闭)")
+
+        events = await self.repo.list_events(limit=10000)
+        total = len(events)
+        success_events = [e for e in events
+                          if e.get("success")]
+
+        # ① 登录成功率
+        if total:
+            success_rate = round(
+                len(success_events) / total, 4)
+        else:
+            success_rate = 1.0
+
+        # ② 平均登录耗时(成功事件——毫秒→秒)
+        durations = [float(e.get("durationMs") or 0)
+                     for e in success_events]
+        if durations:
+            avg_duration = round(
+                (sum(durations) / len(durations))
+                / 1000.0, 4)
+        else:
+            avg_duration = 0.0
+
+        # ③ 5 分钟留存(proxy——成功登录后 5 分钟
+        #    内有驻留行为: retention 领取/导览请求)
+        retained = 0
+        retention_records = await (
+            self.repo.list_retention(limit=5000))
+        for e in success_events:
+            e_time = str(e.get("createdAt") or "")
+            member_id = e.get("memberId")
+            if not e_time or member_id is None:
+                continue
+            # 驻留信号: 同会员当日有领取记录
+            has_retention = any(
+                r.get("memberId") == member_id
+                and str(r.get("dayKey") or "")
+                == e_time[:10]
+                for r in retention_records)
+            if has_retention:
+                retained += 1
+        if success_events:
+            retention_rate = round(
+                retained / len(success_events), 4)
+        else:
+            retention_rate = 1.0
+
+        # ④ 语音登录占比(空态=1.0 满分——
+        #    未观测到使用不足)
+        if total:
+            voice_events = sum(
+                1 for e in events
+                if e.get("method") == "voice")
+            voice_share = round(
+                voice_events / total, 4)
+        else:
+            voice_share = 1.0
+
+        # ⑤ 投诉率(proxy——事件 detail 负反馈
+        #    关键词; 50号 corpus 接入后切换正口径)
+        NEGATIVE_WORDS = ("投诉", "不满", "失败",
+                          "拦截", "拒绝")
+        if total:
+            complaints = sum(
+                1 for e in events
+                if any(w in str(e.get("detail") or "")
+                       for w in NEGATIVE_WORDS))
+            complaint_rate = round(
+                complaints / total, 4)
+        else:
+            complaint_rate = 0.0
+
+        # ⑥ 信任增益差值(52号 trust_gain 复用
+        #    proxy——中性 0.5 过渡口径; 量表外部待办)
+        trust_gain_delta = 0.5
+
+        metrics = {
+            "login_success_rate": success_rate,
+            "avg_login_duration": avg_duration,
+            "retention_5min_rate": retention_rate,
+            "voice_login_share": voice_share,
+            "complaint_rate": complaint_rate,
+            "trust_gain_delta": trust_gain_delta,
+        }
+
+        # 逐项判定+快照留痕(回溯可比)
+        from services.login53_registry import (
+            evaluate_metric,
+        )
+        evaluated = {}
+        passed = 0
+        for key, value in metrics.items():
+            status = evaluate_metric(key, value)
+            if status == "pass":
+                passed += 1
+            evaluated[key] = {
+                "value": value,
+                "status": status,
+            }
+        snap_id = await self.repo.next_snap_id()
+        record = {
+            "snapId": snap_id, "mode": mode,
+            "eventCount": total,
+            "successCount": len(success_events),
+            "passedCount": passed,
+            "metrics": evaluated,
+            "createdAt": ts(),
+        }
+        await self.repo.save_snapshot(record)
+        logger.info("login53_metrics snapId=%s "
+                    "events=%s passed=%s/6", snap_id,
+                    total, passed)
+        return {"success": True,
+                "snapshot": record}
+
+    async def latest_snapshot(self) -> dict:
+        """最近快照(无则空态——观测面)"""
+        records = await self.repo.list_snapshots(
+            limit=1)
+        if records:
+            return {"success": True,
+                    "snapshot": records[0]}
+        return {"success": True, "snapshot": None,
+                "note": "尚无快照(P5 计算后留痕)"}
+
+    async def list_snapshots(self) -> dict:
+        """快照历史(最新在前——回溯可比)"""
+        records = await self.repo.list_snapshots(
+            limit=50)
+        return {"success": True,
+                "total": len(records),
+                "snapshots": records}
+
+    async def list_all_events(
+            self, member_id: int = None,
+            limit: int = 200) -> dict:
+        """事件流水查询(admin 观测面)"""
+        return await self.list_events(
+            member_id=member_id, limit=limit)
+
+    async def dashboard(self) -> dict:
+        """监控看板(P5——六指标+通道占比+
+        风险分布+角色四态分布; 观测面只读已落数据,
+        off 不阻断, 无数据空态)"""
+        snapshots = await self.repo.list_snapshots(
+            limit=6)
+        events = await self.repo.list_events(
+            limit=10000)
+        retention = await self.repo.list_retention(
+            limit=5000)
+
+        latest = snapshots[0] if snapshots else None
+
+        # 通道占比(method 维)
+        by_channel: dict = {}
+        for e in events:
+            m = e.get("method") or "unknown"
+            by_channel[m] = by_channel.get(m, 0) + 1
+
+        # 风险分布(decision 维)
+        by_decision: dict = {}
+        for e in events:
+            d = e.get("decision") or "unknown"
+            by_decision[d] = by_decision.get(d, 0) + 1
+
+        # 角色四态分布(档案扫描)
+        portal_dist: dict = {
+            "new": 0, "active": 0,
+            "dormant": 0, "high_risk": 0}
+        try:
+            from repositories.backend import (
+                is_redis_mode, get_redis_client, _k,
+            )
+            if is_redis_mode():
+                client = await get_redis_client()
+                keys = await client.keys(_k(
+                    "login53", self.repo.TABLE_PROFILES,
+                    "*"))
+                profiles = []
+                for i in range(0, len(keys), 500):
+                    pipe = client.pipeline(
+                        transaction=False)
+                    for k in keys[i:i + 500]:
+                        pipe.hgetall(k)
+                    for data in await pipe.execute():
+                        if data:
+                            profiles.append(
+                                self.repo._deserialize(
+                                    data))
+            else:
+                self.repo._ensure_store()
+                profiles = list(
+                    self.repo.store.get(
+                        self.repo.TABLE_PROFILES,
+                        {}).values())
+            for p in profiles:
+                state = p.get("portalState") or "new"
+                portal_dist[state] = \
+                    portal_dist.get(state, 0) + 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("login53_dashboard_portal_"
+                           "failed: %s", exc)
+
+        # 驻留统计
+        streak_members = {}
+        for r in retention:
+            m = r.get("memberId")
+            s = int(r.get("streakDays") or 0)
+            if m not in streak_members \
+                    or s > streak_members[m]:
+                streak_members[m] = s
+        active_streaks = sorted(
+            streak_members.values(), reverse=True)
+
+        return {
+            "success": True,
+            "mode": current_mode(),
+            "latestSnapshot": latest,
+            "metrics": (latest or {}).get("metrics"),
+            "byChannel": by_channel,
+            "byDecision": by_decision,
+            "byPortalState": portal_dist,
+            "retention": {
+                "totalClaimed":
+                    len(retention),
+                "activeStreakMembers":
+                    len(streak_members),
+                "topStreaks":
+                    active_streaks[:10],
+                "milestones":
+                    list(self.STREAK_MILESTONES),
+            },
+            "eventTotal": len(events),
+            "snapshotTotal": len(snapshots),
+            "note": "看板为观测面(只读已落快照/事件/"
+                    "台账——评估面不阻断主链路; "
+                    "无快照即空态)",
+        }

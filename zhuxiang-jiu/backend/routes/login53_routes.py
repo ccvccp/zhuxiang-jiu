@@ -1,6 +1,6 @@
-"""53号·小竹智能登录引擎路由(P0-P4)
+"""53号·小竹智能登录引擎路由(P0-P5)
 
-端点(P0 6 + P1 2 + P2 2 + P3 2 + P4 3 = 15):
+端点(P0 6 + P1 2 + P2 2 + P3 2 + P4 3 + P5 5 = 20):
     GET  /api/login53/registry        注册表视图(admin)
     GET  /api/login53/portal          角色四态判定(会员面)
     POST /api/login53/prelogin/sense  态势感知(会员面, on)
@@ -16,12 +16,18 @@
     POST /api/login53/retention/claim  每日登录奖励领取(P4, on, 幂等)
     GET  /api/login53/retention/status 连续登录状态+成就(P4)
     POST /api/login53/exit/farewell    退出挽留话术(P4, on)
+    POST /api/login53/metrics/compute  六指标计算(P5, admin, on)
+    GET  /api/login53/metrics/latest   最近快照(P5, admin)
+    GET  /api/login53/metrics/snapshots 快照历史(P5, admin)
+    GET  /api/login53/events           事件流水(P5, admin)
+    GET  /api/login53/dashboard        监控看板(P5, admin)
 
 鉴权: 会员面 X-Member-Id(compat 兼容头)/管理面
 X-Role: admin(43-52号同款口径)。
 统一口径:
     - 观测面(registry/查询/事件历史/
-      retention/status)不受 LOGIN53_MODE 影响
+      retention/status/快照/看板)不受
+      LOGIN53_MODE 影响
     - 编排面 off=拒绝(409——直通存量 39号登录)
     - KeyError → 404 / ValueError → 409
 """
@@ -347,6 +353,61 @@ async def exit_farewell(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
+
+
+@router.post("/metrics/compute")
+async def compute_metrics(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """六效果指标计算(P5——events 聚合+
+    快照留痕; admin, on)"""
+    _require_admin(x_role)
+    try:
+        return await Login53Service().compute_metrics()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/metrics/latest")
+async def metrics_latest(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """最近快照(P5——观测面, 无则空态)"""
+    _require_admin(x_role)
+    return await Login53Service().latest_snapshot()
+
+
+@router.get("/metrics/snapshots")
+async def metrics_snapshots(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """快照历史(P5——观测面, 最新在前)"""
+    _require_admin(x_role)
+    return await Login53Service().list_snapshots()
+
+
+@router.get("/events")
+async def list_events_admin(
+        member_id: int | None = None,
+        limit: int = 200,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """事件流水(P5——admin 观测面,
+    可按会员过滤)"""
+    _require_admin(x_role)
+    return await Login53Service().list_all_events(
+        member_id=member_id, limit=limit)
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """监控看板(P5——六指标+通道占比+
+    风险分布+角色四态分布+驻留统计)"""
+    _require_admin(x_role)
+    return await Login53Service().dashboard()
 
 
 def register_login53_routes(app) -> None:
