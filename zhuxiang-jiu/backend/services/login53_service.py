@@ -1074,11 +1074,15 @@ class Login53Service:
 
     async def _bump_fail_count(self, member_id: int,
                                 channel: str) -> dict:
-        """失败计数累计(达到阈值→切换备选建议)"""
+        """失败计数累计(达到阈值→切换备选建议)
+
+        failCounts 防御: 旧数据/异构形态(字符串)
+        fail-soft 归零重计——计数异常不阻断降级路径。
+        """
         profile = await self.repo.get_profile(member_id)
         record = dict(profile or {})
-        counts = dict(
-            (record.get("failCounts") or {}))
+        raw = record.get("failCounts")
+        counts = dict(raw) if isinstance(raw, dict) else {}
         counts[channel] = int(
             counts.get(channel, 0)) + 1
         counts["__total__"] = int(

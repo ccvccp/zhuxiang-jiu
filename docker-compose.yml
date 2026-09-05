@@ -117,6 +117,10 @@ services:
       # on=主动关怀日度调度(7天/人/类型频控+日上限;
       #     off=仅手动触发 POST /api/xiaozhu/proactive/scan)
       - XIAOZHU_PROACTIVE_MODE=${XIAOZHU_PROACTIVE_MODE:-off}
+      # ---- 53号 小竹智能登录引擎(P0-P5: 编排层, 默认 off——直通存量 39号登录) ----
+      # on=多模态编排面开放(态势感知/五通道编排/语音唤醒/门户/驻留);
+      #     off=编排面 409 直通存量 39号 entry 登录(零接管), 观测面不受影响
+      - LOGIN53_MODE=${LOGIN53_MODE:-off}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

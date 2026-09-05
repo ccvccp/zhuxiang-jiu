@@ -36,7 +36,8 @@ class Login53Repository:
                    "successCount", "failCount")
     _FLOAT_FIELDS = ("riskScore", "privacyCost",
                      "durationMs", "value", "baseline")
-    _JSON_DICT_FIELDS = ("metrics", "context", "profile")
+    _JSON_DICT_FIELDS = ("metrics", "context", "profile",
+                         "failCounts")
     _JSON_LIST_FIELDS = ("intentTags", "factors",
                          "hooks")
 
