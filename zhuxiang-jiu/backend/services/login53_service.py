@@ -1526,3 +1526,210 @@ class Login53Service:
                     "转化为价值感知时间",
             "generatedAt": ts(),
         }
+
+    # ============================================================
+    # P4 驻留激励机制
+    # ============================================================
+
+    # 每日奖励口径(50号 voice_login L1 行为 base 2.0
+    # ——微量原则; 语音问候互动即触发)
+    DAILY_REWARD_POINTS = 2.0
+    # 连续登录成就阈值(天——解锁"小竹"专属语音包)
+    STREAK_MILESTONES = (3, 7, 30)
+
+    async def retention_claim(
+            self, member_id: int,
+            greeting: str = "") -> dict:
+        """每日登录奖励领取(P4——原方案 §四-3:
+        登录即奖励: 每日首次登录+语音问候互动
+        →微量 L2 积分)
+
+        幂等铁律: memberId+dayKey 复合自然键——
+        当日重复领取返回 already_claimed(不重复
+        发放)。
+
+        奖励口径: 50号 voice_login L1 行为台账
+        (base 2.0 微量+dailyCap 防刷上限继承);
+        streak 连续天数累计+成就解锁播报。
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"LOGIN53_MODE={mode}(默认 off——"
+                f"编排面关闭)")
+        day_key = ts()[:10]
+
+        # 幂等检查(当日已领取)
+        existing = await self.repo.get_retention(
+            member_id, day_key)
+        if existing:
+            return {
+                "status": "already_claimed",
+                "memberId": member_id,
+                "dayKey": day_key,
+                "claimedAt":
+                    existing.get("claimedAt"),
+                "rewardPoints":
+                    existing.get("rewardPoints"),
+                "streakDays":
+                    existing.get("streakDays"),
+                "note": "今日已领取(幂等——每日一次)",
+            }
+
+        # 连续天数计算(昨日有记录 → +1; 否则重置 1)
+        from datetime import datetime, timedelta
+        yesterday = (datetime.now()
+                     - timedelta(days=1)
+                     ).strftime("%Y-%m-%d")
+        yesterday_rec = await self.repo.get_retention(
+            member_id, yesterday)
+        streak = int(
+            (yesterday_rec or {}).get(
+                "streakDays") or 0) + 1
+
+        # 成就解锁判定
+        milestone = next(
+            (m for m in self.STREAK_MILESTONES
+             if m == streak), None)
+        unlocked = milestone is not None
+
+        # 50号事件台账落账(voice_login L1 行为——
+        # 防刷上限由 50号 dailyCap 域继承)
+        event_note = ""
+        try:
+            from repositories.voice50_repository import (
+                Voice50Repository,
+            )
+            v50 = Voice50Repository()
+            ev_id = await v50.next_event_id()
+            await v50.save_event({
+                "evId": ev_id, "memberId": member_id,
+                "dayKey": day_key,
+                "behavior": "voice_login",
+                "baseScore": self.DAILY_REWARD_POINTS,
+                "finalScore": self.DAILY_REWARD_POINTS,
+                "status": "pending",
+                "source": "login53_retention",
+                "ts": ts(),
+            })
+            event_note = f"50号事件 #{ev_id} 已落账"
+        except Exception as exc:  # noqa: BLE001
+            # 台账 fail-soft——奖励领取不因台账
+            # 异常阻断(留痕 warning)
+            event_note = f"台账 fail-soft: {exc}"[:60]
+            logger.warning("login53_retention_ledger_"
+                           "failed %s: %s", member_id, exc)
+
+        # 台账落库(幂等键)
+        record = {
+            "memberId": member_id,
+            "dayKey": day_key,
+            "rewardPoints": self.DAILY_REWARD_POINTS,
+            "streakDays": streak,
+            "greeting": greeting[:60],
+            "claimedAt": ts(),
+            "milestoneUnlocked": unlocked,
+            "eventNote": event_note,
+        }
+        await self.repo.save_retention(record)
+
+        # 成就话术(连续登录叙事——游戏化激励)
+        script = render_script(
+            "streak_achieved", {"days": streak}) \
+            if unlocked else None
+        return {
+            "status": "claimed",
+            "memberId": member_id,
+            "dayKey": day_key,
+            "rewardPoints": self.DAILY_REWARD_POINTS,
+            "streakDays": streak,
+            "milestone": milestone,
+            "unlocked": unlocked,
+            "script": script,
+            "eventNote": event_note,
+            "note": "每日首次登录+语音问候互动"
+                    "→微量积分(50号 voice_login "
+                    "L1 台账口径)",
+        }
+
+    async def retention_status(
+            self, member_id: int) -> dict:
+        """连续登录状态+成就(P4 观测面)
+
+        streak 口径: 今日已领→今日 streak;
+        今日未领但昨日有→昨日 streak(待续);
+        其余→0(断档/从未领取)。
+        """
+        records = await self.repo.list_retention(
+            member_id=member_id, limit=60)
+        today_key = ts()[:10]
+        from datetime import datetime, timedelta
+        yesterday_key = (datetime.now()
+                          - timedelta(days=1)
+                          ).strftime("%Y-%m-%d")
+        today = next(
+            (r for r in records
+             if r.get("dayKey") == today_key), None)
+        yesterday = next(
+            (r for r in records
+             if r.get("dayKey") == yesterday_key), None)
+        if today is not None:
+            current_streak = int(
+                today.get("streakDays") or 0)
+        elif yesterday is not None:
+            current_streak = int(
+                yesterday.get("streakDays") or 0)
+        else:
+            current_streak = 0
+        total_days = len(records)
+        next_milestone = next(
+            (m for m in self.STREAK_MILESTONES
+             if m > current_streak), None)
+        return {
+            "memberId": member_id,
+            "streakDays": current_streak,
+            "totalClaimedDays": total_days,
+            "todayClaimed": today is not None,
+            "milestones":
+                list(self.STREAK_MILESTONES),
+            "unlocked": [
+                m for m in self.STREAK_MILESTONES
+                if m <= current_streak],
+            "nextMilestone": next_milestone,
+            "rewardRule":
+                f"每日 {self.DAILY_REWARD_POINTS} 分"
+                f"(语音问候互动)",
+            "note": "连续登录解锁'小竹'专属"
+                    "语音包(游戏化情感养成)",
+        }
+
+    async def exit_farewell(
+            self, member_id: int) -> dict:
+        """退出挽留话术(P4——原方案 §四-3:
+        退出挽留: 检测关闭意图时语音轻问
+        ——非弹窗拦截, 尊重选择)
+
+        附: 功能教育(下次语音查分更快)+情感告别。
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"LOGIN53_MODE={mode}(默认 off——"
+                f"编排面关闭)")
+        script = render_script("proactive_exit", {})
+        # 明日预告(价值前置——给回访一个理由)
+        status = await self.retention_status(member_id)
+        next_m = status.get("nextMilestone")
+        tomorrow_hint = (
+            f"再连续登录 {int(next_m) - int(status.get('streakDays') or 0)} 天"
+            f" 即解锁新成就({next_m} 天里程碑)"
+            if next_m else "明日登录继续积累信值")
+        return {
+            "memberId": member_id,
+            "script": script,
+            "intercepted": False,
+            "tomorrowHint": tomorrow_hint,
+            "note": "非弹窗拦截——尊重选择"
+                    "(语音轻问+功能教育)",
+            "generatedAt": ts(),
+        }

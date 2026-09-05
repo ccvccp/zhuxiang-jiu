@@ -1,6 +1,6 @@
-"""53号·小竹智能登录引擎路由(P0-P3)
+"""53号·小竹智能登录引擎路由(P0-P4)
 
-端点(P0 6 + P1 2 + P2 2 + P3 2 = 12):
+端点(P0 6 + P1 2 + P2 2 + P3 2 + P4 3 = 15):
     GET  /api/login53/registry        注册表视图(admin)
     GET  /api/login53/portal          角色四态判定(会员面)
     POST /api/login53/prelogin/sense  态势感知(会员面, on)
@@ -13,15 +13,16 @@
     GET  /api/login53/voice/briefing   登录后语音导览(P2, on)
     GET  /api/login53/portal/config    四态门户配置(P3, on)
     POST /api/login53/portal/hook      登录前价值钩子投放(P3, on)
+    POST /api/login53/retention/claim  每日登录奖励领取(P4, on, 幂等)
+    GET  /api/login53/retention/status 连续登录状态+成就(P4)
+    POST /api/login53/exit/farewell    退出挽留话术(P4, on)
 
 鉴权: 会员面 X-Member-Id(compat 兼容头)/管理面
 X-Role: admin(43-52号同款口径)。
 统一口径:
-    - 观测面(registry/查询/事件历史)不受
-      LOGIN53_MODE 影响
-    - 编排面(sense/hook/baseline/orchestrate/
-      wake-login/briefing/portal) off=拒绝
-      (409——直通存量 39号登录)
+    - 观测面(registry/查询/事件历史/
+      retention/status)不受 LOGIN53_MODE 影响
+    - 编排面 off=拒绝(409——直通存量 39号登录)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -79,6 +80,10 @@ class WakeLoginIn(BaseModel):
     fingerprint: str = ""
     ip: str = ""
     hour: int | None = None
+
+
+class ClaimIn(BaseModel):
+    greeting: str = ""
 
 
 @router.get("/registry")
@@ -289,6 +294,56 @@ async def portal_hook(
                 "portalHook": await (
                     Login53Service()
                     .generate_portal_hook(member_id))}
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/retention/claim")
+async def retention_claim(
+        body: ClaimIn | None = None,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """每日登录奖励领取(P4——语音问候互动
+    →微量积分; memberId+dayKey 幂等)"""
+    member_id = _require_member(x_member_id)
+    greeting = (body.greeting if body
+                and body.greeting else "")
+    try:
+        result = await Login53Service().retention_claim(
+            member_id, greeting=greeting)
+        return {"success": True,
+                "claim": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/retention/status")
+async def retention_status(
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """连续登录状态+成就(P4——观测面
+    不受开关影响)"""
+    member_id = _require_member(x_member_id)
+    return {"success": True,
+            "status": await (
+                Login53Service()
+                .retention_status(member_id))}
+
+
+@router.post("/exit/farewell")
+async def exit_farewell(
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """退出挽留话术(P4——非弹窗拦截,
+    尊重选择+功能教育+明日预告)"""
+    member_id = _require_member(x_member_id)
+    try:
+        return {"success": True,
+                "farewell": await (
+                    Login53Service()
+                    .exit_farewell(member_id))}
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
