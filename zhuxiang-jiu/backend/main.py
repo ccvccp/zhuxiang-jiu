@@ -284,6 +284,9 @@ from routes.trust_risk_routes import register_trust_risk_routes
 register_trust_risk_routes(app)
 # 小竹智能语音中枢(48号)
 register_xiaozhu_routes(app)
+# 小竹可信知识图谱(51号)
+from routes.kg51_routes import register_kg51_routes
+register_kg51_routes(app)
 
 
 # ============================================================
