@@ -1,6 +1,6 @@
-"""51号·小竹可信知识图谱路由(P0 本体奠基 + P1 采集管道 + P2 查询面)
+"""51号·小竹可信知识图谱路由(P0 本体奠基 + P1 采集管道 + P2 查询面 + P3 溯源)
 
-端点(P0 共 4 + P1 共 5 + P2 共 2):
+端点(P0 共 4 + P1 共 5 + P2 共 2 + P3 共 2):
     GET  /api/kg51/schema                    本体注册表视图(admin)
     GET  /api/kg51/schema/changes            变更队列/历史(admin)
     POST /api/kg51/schema/changes            提交本体变更申请(admin)
@@ -12,6 +12,8 @@
     POST /api/kg51/reviews/{id}/decide       复核裁决(P1, admin)
     GET  /api/kg51/query                     邻域查询(P2, 会员面+admin)
     GET  /api/kg51/grounding                 问答锚定检索(P2, 公开面)
+    GET  /api/kg51/trace/credit              信值溯源路径(P3, 会员自查)
+    GET  /api/kg51/trace/event/{ev_id}       事件证据链渲染(P3, 属主+admin)
 
 鉴权: 管理端 X-Role: admin(43-50号同款口径);
       会员面 X-Member-Id(48号惯例); 公开面无鉴权。
@@ -20,6 +22,8 @@
       (off 态亦可管理本体)
     - 采集面 off=采集停(ingest/run 拒绝);
       查询面 off=空态降级(fail-soft 直通);
+      溯源面只读跨表——不受数据面开关影响
+      (图内三元组为空时链段降级 skipped);
       观测面(triples/reviews/status)不受影响
     - 模块纯增量(零既有路由改动)
     - KeyError → 404 / ValueError → 409(44-50号同款)
@@ -33,6 +37,7 @@ from services.kg51_ingest_service import (
 )
 from services.kg51_query_service import Kg51QueryService
 from services.kg51_schema_service import Kg51SchemaService
+from services.kg51_trace_service import Kg51TraceService
 
 router = APIRouter(prefix="/api/kg51",
                    tags=["小竹可信知识图谱(51号)"])
@@ -255,6 +260,82 @@ async def grounding_search(keyword: str):
     try:
         return await Kg51QueryService().grounding_search(
             keyword=keyword)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/trace/credit")
+async def trace_credit(
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id"),
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role"),
+        member_id: int | None = None):
+    """信值溯源路径(P3——会员自查: factor→deposit→
+    settlement→events→evidence(→turn) 全链渲染)
+
+    权限: 会员自查(X-Member-Id); admin 可指定
+    member_id 查任意会员。溯源只读跨表——不受
+    KG_MODE 影响(图内三元组为空时链段降级)。
+    """
+    admin = bool(x_role and x_role == "admin")
+    if admin and member_id is not None:
+        target = int(member_id)
+    else:
+        if not x_member_id:
+            raise HTTPException(
+                status_code=401,
+                detail="需要 X-Member-Id"
+                       "(或 X-Role: admin + member_id)")
+        try:
+            target = int(x_member_id)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=401,
+                detail="X-Member-Id 需为整数")
+    try:
+        return await Kg51TraceService().trace_credit(
+            member_id=target)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/trace/event/{ev_id}")
+async def trace_event(
+        ev_id: int,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id"),
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """事件证据链渲染(P3——evId→settlement→deposit→
+    证据链→turn→互证 全路径)
+
+    权限: 事件属主(X-Member-Id 匹配事件 memberId)
+    或 admin; 他人事件 → 409 越权语义。
+    """
+    admin = bool(x_role and x_role == "admin")
+    member_id = None
+    if not admin:
+        if not x_member_id:
+            raise HTTPException(
+                status_code=401,
+                detail="需要 X-Member-Id"
+                       "(或 X-Role: admin)")
+        try:
+            member_id = int(x_member_id)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=401,
+                detail="X-Member-Id 需为整数")
+    try:
+        return await Kg51TraceService().trace_event(
+            ev_id=ev_id, member_id=member_id,
+            admin=admin)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))

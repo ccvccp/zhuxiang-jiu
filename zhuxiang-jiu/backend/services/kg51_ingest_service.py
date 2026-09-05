@@ -144,6 +144,11 @@ class Kg51IngestService:
         if "user" in sources:
             report["sources"]["user"] = \
                 await self._ingest_user_source()
+        # P3 溯源链路(45号 deposit Evidence+RepairAction
+        # +verified_with 互证——随系统源联动采集)
+        if "system" in sources:
+            report["sources"]["trace"] = \
+                await self._ingest_trace_links()
         logger.info("kg51_ingest_done %s",
                     {k: {kk: vv for kk, vv in v.items()
                          if kk != "errors"}
@@ -372,6 +377,131 @@ class Kg51IngestService:
                     f"低置信仅候选, 人工采信后方可参与"
                     f"grounding", stat)
         return stat
+
+    # --------------------------------------------------------
+    # P3 溯源链路(45号 deposit Evidence + RepairAction
+    # + verified_with 互证)
+    # --------------------------------------------------------
+
+    async def _ingest_trace_links(self) -> dict:
+        """45号留痕事件采集(溯源链路图锚定——只读跨表)
+
+        - deposit 事件(source=deposit|deposit_rejected)
+          → Evidence 实体(evid:sha256:trust45:{eventId})
+        - repair 事件(source=repair|repair_rejected)
+          → RepairAction 实体(repair:trust45:{repairId})
+        - 互证对(47号 extract_mutual_pairs 实时计算)
+          → 双方 deposit Evidence 的 verified_with
+            三元组(对象按字典序规范化防重复)
+        """
+        stat = {"scanned": 0, "entities": 0,
+                "triples": 0, "skipped": 0,
+                "updated": 0, "reviews": 0}
+        from repositories.trust_value_repository import (
+            TrustValue45Repository,
+        )
+        repo45 = TrustValue45Repository()
+        # 近 90 日 deposit(互证窗——47号同口径)
+        deposits = await repo45.list_deposit_events(days=90)
+        # 全量 repair 留痕(独立扫描——45号事件表)
+        events45 = await self._scan_trust45_events(
+            repo45)
+
+        # ① deposit Evidence 实体(含 rejected 轨)
+        dep_by_id = {int(d.get("eventId") or 0): d
+                     for d in deposits}
+        for ev in events45:
+            stat["scanned"] += 1
+            source = ev.get("source") or ""
+            ev_id = int(ev.get("eventId") or 0)
+            if ev_id <= 0:
+                continue
+            if source in ("deposit", "deposit_rejected"):
+                e_id = (f"evid:sha256:"
+                        f"{evidence_digest(
+                            f'trust45:deposit:{ev_id}')}")
+                await self._upsert_entity(
+                    "Evidence", e_id,
+                    {"evSha": evidence_digest(
+                        f"trust45:deposit:{ev_id}"),
+                     "bcHash": "",
+                     "kind": f"trust45_{source}",
+                     "sourceRef":
+                         f"trust45:event:{ev_id}"},
+                    "system", f"trust45:event:{ev_id}",
+                    (CONFIDENCE_SYSTEM_SETTLED
+                     if source == "deposit"
+                     else CONFIDENCE_SYSTEM_PENDING),
+                    stat)
+            elif source in ("repair", "repair_rejected"):
+                e_id = f"repair:trust45:{ev_id}"
+                await self._upsert_entity(
+                    "RepairAction", e_id,
+                    {"repairId": str(ev_id),
+                     "channel": "trust45_submit_repair",
+                     "status": ("applied"
+                                if source == "repair"
+                                else "rejected")},
+                    "system", f"trust45:event:{ev_id}",
+                    CONFIDENCE_SYSTEM_SETTLED, stat)
+
+        # ② verified_with 互证三元组(47号纯函数复用
+        # ——零改动只调用)
+        try:
+            from services.trust_risk_collusion_service \
+                import extract_mutual_pairs
+            pairs = extract_mutual_pairs(deposits)
+            for pair in pairs.get("pairs") or []:
+                timeline = pair.get("timeline") or []
+                # 双方各自最近一条存证事件 → Evidence
+                by_depositor: dict = {}
+                for entry in timeline:
+                    dep_id = int(entry.get("eventId")
+                                 or 0)
+                    depositor = int(entry.get("depositor")
+                                   or 0)
+                    by_depositor[depositor] = dep_id
+                if len(by_depositor) < 2:
+                    continue
+                ev_ids = sorted(by_depositor.values())
+                e_a = (f"evid:sha256:"
+                       f"{evidence_digest(
+                           f'trust45:deposit:{ev_ids[0]}')}")
+                e_b = (f"evid:sha256:"
+                       f"{evidence_digest(
+                           f'trust45:deposit:{ev_ids[1]}')}")
+                await self._upsert_triple(
+                    e_a, "verified_with", e_b,
+                    "system", CONFIDENCE_SYSTEM_SETTLED,
+                    self._evidence_bundle(
+                        ev_ref=f"mutual:{pair.get('a')}"
+                               f"-{pair.get('b')}",
+                        verifier="collusion_scan"),
+                    stat)
+        except Exception as exc:  # noqa: BLE001
+            # fail-soft: 互证计算异常不阻断采集主链
+            logger.debug("kg51_mutual_skip: %s", exc)
+        return stat
+
+    async def _scan_trust45_events(
+            self, repo45) -> list[dict]:
+        """45号事件全量扫描(内存态直接遍历;
+        Redis 态走 profiles→events_by_trust 聚合)"""
+        try:
+            profiles = await repo45.list_profiles(
+                limit=5000)
+            result: list = []
+            for p in profiles:
+                evs = await repo45.list_events_by_trust(
+                    int(p.get("trustId") or 0))
+                result.extend(evs)
+            # 去重(同 eventId 只留一份)
+            seen: dict = {}
+            for e in result:
+                seen[int(e.get("eventId") or 0)] = e
+            return list(seen.values())
+        except Exception:  # noqa: BLE001
+            return []
 
     # --------------------------------------------------------
     # 抽取基建(upsert + 去重 + 冲突)
