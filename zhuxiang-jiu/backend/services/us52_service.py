@@ -14,9 +14,13 @@ off 语义:
 """
 
 import logging
+import os
 
 from core.helpers import ts
 
+from repositories.backend import (
+    is_redis_mode, get_redis_client, _k,
+)
 from repositories.us52_repository import Us52Repository
 from services.us52_registry import (
     USABILITY_REGISTRY, DECISION_RULES, DIMENSIONS,
@@ -1055,6 +1059,325 @@ class Us52MetricsService:
         return {"success": True,
                 "total": len(records),
                 "reports": records}
+
+    async def get_report(self, report_id: int) -> dict:
+        """评估报告明细(reportId 直查——P5)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k(
+                "us52", self.repo.TABLE_REPORTS, report_id))
+            record = self.repo._deserialize(data) \
+                if data else None
+        else:
+            self.repo._ensure_store()
+            rec = self.repo.store.get(
+                self.repo.TABLE_REPORTS,
+                {}).get(report_id)
+            record = dict(rec) if rec else None
+        if not record:
+            raise KeyError(
+                f"报告 {report_id} 不存在")
+        return {"success": True, "report": record}
+
+    # --------------------------------------------------------
+    # 阈值告警管道(P5: 静态基线+动态漂移——当日同键去重)
+    # --------------------------------------------------------
+
+    DRIFT_WINDOW = 3
+    DRIFT_THRESHOLD = 0.05
+
+    async def scan_alerts(self) -> dict:
+        """触发一轮告警扫描(计划 §七 P5:
+        动态阈值告警——46号当日同键去重范式)
+
+        两类告警:
+        - baseline: 指标跌破静态基线(evaluate_metric
+          fail——veto 域 level=veto, 其余 warn)
+        - drift: 动态漂移(较最近 DRIFT_WINDOW 次
+          快照均值劣化>DRIFT_THRESHOLD——即使
+          静态达标也预警负向漂移)
+
+        US52_ALERT_MODE(默认 off)与 US52_MODE
+        双开关均须 on——调度停+计算停双层铁律。
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"US52_MODE={mode}(默认 off——计算面"
+                f"关闭; 告警需计算管道)")
+        alert_mode = os.environ.get(
+            "US52_ALERT_MODE", "off")
+        if alert_mode != "on":
+            raise ValueError(
+                f"US52_ALERT_MODE={alert_mode}"
+                f"(默认 off——告警调度停)")
+
+        # 全量指标计算(P4 报告管道五维聚合)
+        functional = await \
+            self.compute_functional_metrics()
+        resilience = await \
+            self.compute_resilience_metrics()
+        inclusion = await \
+            self.compute_inclusion_metrics()
+        trust = await self.compute_trust_metrics()
+        transparency = await \
+            self.compute_transparency_metrics()
+        metrics = {}
+        for part in (functional, resilience, inclusion,
+                     trust, transparency):
+            metrics.update(part.get("metrics") or {})
+
+        # 快照留痕(回溯可比——动态阈值数据源)
+        snap = await self.compute_snapshot(metrics)
+        snap_id = snap["snapshot"]["snapId"]
+
+        # 动态漂移基线(最近 N 次快照均值)
+        history = await self.repo.list_snapshots(
+            limit=self.DRIFT_WINDOW + 1)
+        prior = [s for s in history
+                 if int(s.get("snapId") or 0) != snap_id]
+        avg_map: dict = {}
+        for key in metrics:
+            vals = []
+            for s in prior[:self.DRIFT_WINDOW]:
+                evaluated = (s.get("metrics") or {}) \
+                    .get(key) or {}
+                try:
+                    vals.append(float(
+                        evaluated.get("value")))
+                except (TypeError, ValueError):
+                    continue
+            if vals:
+                avg_map[key] = round(
+                    sum(vals) / len(vals), 4)
+
+        now = ts()
+        day = now[:10]
+        alerts_new = alerts_deduped = 0
+        emitted: list = []
+
+        for key, value in metrics.items():
+            meta = USABILITY_REGISTRY.get(key)
+            if meta is None:
+                continue
+            # ① 静态基线告警
+            if evaluate_metric(key, value) == "fail":
+                created = await self._emit_alert(
+                    key=key, meta=meta, value=value,
+                    alert_type="baseline",
+                    level="veto" if meta.get("veto")
+                    else "warn",
+                    message=f"{meta['label']}={value} "
+                            f"未达基线 {meta['baseline']}"
+                            f"({'≤' if meta['direction'] == 'lower' else '≥'}口径)",
+                    day=day, scan_id=snap_id, now=now)
+                if created:
+                    alerts_new += 1
+                else:
+                    alerts_deduped += 1
+                emitted.append(key)
+                continue
+            # ② 动态漂移告警(静态达标但劣化漂移)
+            avg = avg_map.get(key)
+            if avg is None:
+                continue
+            delta = (avg - value) if meta[
+                "direction"] == "higher" \
+                else (value - avg)
+            if delta > self.DRIFT_THRESHOLD:
+                created = await self._emit_alert(
+                    key=key, meta=meta, value=value,
+                    alert_type="drift", level="info",
+                    message=f"{meta['label']}={value} "
+                            f"较近{len(prior)}次均值 {avg} "
+                            f"劣化 {round(delta, 4)}"
+                            f">(阈值 {self.DRIFT_THRESHOLD})",
+                    day=day, scan_id=snap_id, now=now)
+                if created:
+                    alerts_new += 1
+                else:
+                    alerts_deduped += 1
+                emitted.append(key)
+
+        logger.info("us52_alert_scan snapId=%s metrics=%s "
+                    "new=%s deduped=%s", snap_id,
+                    len(metrics), alerts_new, alerts_deduped)
+        return {
+            "success": True, "scanId": snap_id,
+            "scannedAt": now,
+            "metricCount": len(metrics),
+            "alertsNew": alerts_new,
+            "alertsDeduped": alerts_deduped,
+            "emitted": emitted,
+            "driftBaseline": avg_map,
+        }
+
+    async def _emit_alert(self, key: str, meta: dict,
+                          value: float, alert_type: str,
+                          level: str, message: str,
+                          day: str, scan_id: int,
+                          now: str) -> bool:
+        """生成/去重一条告警(同指标同类型当日一条——
+        metricKey|alertType|day 复合键去重)
+
+        Returns:
+            True=新建 / False=当日已有(occurrences 累加)
+        """
+        dedup_key = f"{key}:{alert_type}"
+        try:
+            existing = await self.repo.find_alert_of_day(
+                dedup_key, day)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("us52_alert_dedupe_skip "
+                           "%s: %s", dedup_key, exc)
+            existing = None
+        if existing:
+            existing["occurrences"] = int(
+                existing.get("occurrences") or 1) + 1
+            existing["lastSeenAt"] = now
+            existing["message"] = message
+            existing["value"] = value
+            await self.repo.save_alert(existing, new=False)
+            return False
+        alert_id = await self.repo.next_alert_id()
+        await self.repo.save_alert({
+            "alertId": alert_id, "metricKey": key,
+            "dedupKey": dedup_key,
+            "alertType": alert_type,
+            "dimension": meta["dimension"],
+            "label": meta["label"], "level": level,
+            "message": message, "day": day,
+            "value": round(float(value), 4),
+            "baseline": float(meta["baseline"]),
+            "occurrences": 1, "status": "open",
+            "firstSeenAt": now, "lastSeenAt": now,
+            "firstScanId": scan_id,
+        })
+        return True
+
+    async def list_alerts(self, status: str = None,
+                          dimension: str = None) -> dict:
+        """告警视图(最新在前; 状态/维度过滤——
+        观测面不受开关影响)"""
+        records = await self.repo.list_alerts(
+            status=status, dimension=dimension,
+            limit=200)
+        open_count = sum(
+            1 for a in records
+            if (a.get("status") or "") == "open")
+        return {
+            "success": True, "total": len(records),
+            "openCount": open_count,
+            "alerts": records,
+            "note": "当日同键去重(46号告警范式——"
+                    "告警风暴防线)",
+        }
+
+    # --------------------------------------------------------
+    # 监控看板(P5: 五维分区+动态阈值)
+    # --------------------------------------------------------
+
+    async def dashboard(self) -> dict:
+        """五维监控看板(观测面——读快照/报告/告警
+        已落数据, off 不阻断; 无数据空态)"""
+        snapshots = await self.repo.list_snapshots(
+            limit=self.DRIFT_WINDOW + 3)
+        reports = await self.repo.list_reports(limit=5)
+        alerts = await self.repo.list_alerts(limit=200)
+
+        latest = snapshots[0] if snapshots else None
+        by_dimension = []
+        for dim in DIMENSIONS:
+            metas = {k: v for k, v in
+                     USABILITY_REGISTRY.items()
+                     if v["dimension"] == dim}
+            rows = []
+            for key, meta in metas.items():
+                row = {
+                    "key": key, "label": meta["label"],
+                    "baseline": meta["baseline"],
+                    "direction": meta["direction"],
+                    "veto": meta.get("veto", False),
+                    "proxy": meta.get("proxy", False),
+                }
+                if latest:
+                    evaluated = (latest.get("metrics")
+                                 or {}).get(key) or {}
+                    row.update({
+                        "value": evaluated.get("value"),
+                        "status":
+                            evaluated.get("status"),
+                    })
+                else:
+                    row.update({"value": None,
+                                "status": None})
+                rows.append(row)
+            by_dimension.append({
+                "dimension": dim,
+                "label": DIMENSION_LABELS[dim],
+                "metricCount": len(metas),
+                "metrics": rows,
+            })
+
+        # 动态阈值段(最近 N 次快照趋势)
+        history = snapshots[1:1 + self.DRIFT_WINDOW]
+        drifts = []
+        if latest:
+            for key, meta in \
+                    USABILITY_REGISTRY.items():
+                vals = []
+                for s in history:
+                    evaluated = (s.get("metrics")
+                                 or {}).get(key) or {}
+                    try:
+                        vals.append(float(
+                            evaluated.get("value")))
+                    except (TypeError, ValueError):
+                        continue
+                if not vals:
+                    continue
+                avg = round(sum(vals) / len(vals), 4)
+                cur = (latest.get("metrics")
+                       or {}).get(key) or {}
+                try:
+                    cur_v = float(cur.get("value"))
+                except (TypeError, ValueError):
+                    continue
+                delta = (avg - cur_v) if meta[
+                    "direction"] == "higher" \
+                    else (cur_v - avg)
+                drifts.append({
+                    "key": key, "avg": avg,
+                    "value": cur_v,
+                    "delta": round(delta, 4),
+                    "drifting": delta
+                    > self.DRIFT_THRESHOLD,
+                })
+
+        return {
+            "success": True,
+            "mode": current_mode(),
+            "alertMode": os.environ.get(
+                "US52_ALERT_MODE", "off"),
+            "latestSnapshot": latest,
+            "dimensions": by_dimension,
+            "dynamicThreshold": {
+                "window": self.DRIFT_WINDOW,
+                "driftThreshold":
+                    self.DRIFT_THRESHOLD,
+                "drifts": drifts,
+            },
+            "reportCount": len(reports),
+            "latestReport":
+                reports[0] if reports else None,
+            "alertTotal": len(alerts),
+            "alertOpenCount": sum(
+                1 for a in alerts
+                if (a.get("status") or "") == "open"),
+            "note": "看板为观测面(只读已落快照/报告/"
+                    "告警——评估面不阻断主链路; 无快照"
+                    "即空态)",
+        }
 
     # --------------------------------------------------------
     # 上线门禁(release-gate 决策入口)

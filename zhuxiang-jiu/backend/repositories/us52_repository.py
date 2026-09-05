@@ -36,7 +36,8 @@ class Us52Repository:
 
     _INT_FIELDS = ("snapId", "testId", "sessionId",
                    "memberId", "resultId", "reportId",
-                   "alertId", "taskCount", "sampleCount")
+                   "alertId", "taskCount", "sampleCount",
+                   "occurrences", "firstScanId")
     _FLOAT_FIELDS = ("value", "baseline")
     _JSON_DICT_FIELDS = ("metrics", "complianceImpact")
     _JSON_LIST_FIELDS = ("vetoFailed", "failedByDimension")
@@ -282,3 +283,131 @@ class Us52Repository:
             self.store[table] = {}
         self.store["_us52_snap_seq"] = 0
         self.store["_us52_test_seq"] = 0
+        self.store["_us52_alert_seq"] = 0
+        self.store["_us52_alerts_all"] = []
+        self.store["_us52_alert_day_index"] = {}
+
+    # --------------------------------------------------------
+    # 阈值告警(P5, 当日同键去重: metricKey|day——46号范式)
+    # --------------------------------------------------------
+
+    async def next_alert_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("us52", "alerts", "seq"))
+        self._ensure_store()
+        seq = self.store.get("_us52_alert_seq", 0) + 1
+        self.store["_us52_alert_seq"] = seq
+        return seq
+
+    @staticmethod
+    def _alert_day_key(metric_key: str, day: str) -> str:
+        return f"{metric_key}|{day}"
+
+    async def save_alert(self, record: dict,
+                         new: bool = True) -> dict:
+        """保存告警(new=True 创建并入列+登记当日索引;
+        new=False 仅更新字段不重复入列——45号索引教训)
+
+        当日索引键用 dedupKey(metricKey|alertType 复合)——
+        同指标同类型当日一条(告警风暴防线)。"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.hset(_k("us52", self.TABLE_ALERTS,
+                        record["alertId"]),
+                      mapping=self._serialize(record))
+            if new:
+                pipe.lpush(_k("us52", "alerts_all"),
+                           record["alertId"])
+                pipe.hset(
+                    _k("us52", "alerts", "day_index"),
+                    self._alert_day_key(
+                        record.get("dedupKey")
+                        or record["metricKey"],
+                        record["day"]),
+                    record["alertId"])
+            await pipe.execute()
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_ALERTS][
+            record["alertId"]] = dict(record)
+        if new:
+            self.store.setdefault(
+                "_us52_alerts_all", []).insert(
+                0, record["alertId"])
+            self.store.setdefault(
+                "_us52_alert_day_index", {})[
+                self._alert_day_key(
+                    record.get("dedupKey")
+                    or record["metricKey"],
+                    record["day"])] = record["alertId"]
+        return record
+
+    async def get_alert(self,
+                        alert_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("us52", self.TABLE_ALERTS, alert_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_ALERTS].get(alert_id)
+        return dict(rec) if rec else None
+
+    async def find_alert_of_day(
+            self, metric_key: str, day: str) -> dict | None:
+        """当日同键告警查询(去重判定:
+        同指标同类型当日一条——告警风暴防线)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            alert_id = await client.hget(
+                _k("us52", "alerts", "day_index"),
+                self._alert_day_key(metric_key, day))
+            if not alert_id:
+                return None
+            return await self.get_alert(int(alert_id))
+        self._ensure_store()
+        alert_id = self.store.get(
+            "_us52_alert_day_index", {}).get(
+            self._alert_day_key(metric_key, day))
+        if not alert_id:
+            return None
+        return await self.get_alert(alert_id)
+
+    async def list_alerts(
+            self, status: str = None,
+            dimension: str = None,
+            limit: int = 200) -> list[dict]:
+        """告警队列(最新在前; 状态/维度过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.lrange(
+                _k("us52", "alerts_all"), 0, -1)
+            result = []
+            for i in range(0, len(ids), 500):
+                pipe = client.pipeline(transaction=False)
+                for aid in ids[i:i + 500]:
+                    pipe.hgetall(_k(
+                        "us52", self.TABLE_ALERTS, int(aid)))
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+        else:
+            self._ensure_store()
+            result = [dict(r) for r in
+                      self.store[self.TABLE_ALERTS]
+                      .values()]
+        if status:
+            result = [a for a in result
+                      if (a.get("status") or "")
+                      == status]
+        if dimension:
+            result = [a for a in result
+                      if (a.get("dimension") or "")
+                      == dimension]
+        result.sort(key=lambda a: -int(
+            a.get("alertId") or 0))
+        return result[:limit]

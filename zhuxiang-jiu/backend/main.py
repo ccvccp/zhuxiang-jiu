@@ -366,6 +366,12 @@ async def _on_startup():
     from services.kg51_scheduler import (
         start_scheduler as start_kg51_inspect)
     start_kg51_inspect()
+    # 52号·小竹语音可用性评估引擎: 阈值告警日度调度
+    # (五维基线+漂移告警当日同键去重;
+    # US52_ALERT_MODE=on 开启, 默认 off)
+    from services.us52_alert_scheduler import (
+        start_scheduler as start_us52_alert)
+    start_us52_alert()
 
 
 @app.on_event("shutdown")
@@ -411,6 +417,10 @@ async def _on_shutdown():
     from services.kg51_scheduler import (
         stop_scheduler as stop_kg51_inspect)
     stop_kg51_inspect()
+    # 52号·小竹语音可用性评估告警调度器
+    from services.us52_alert_scheduler import (
+        stop_scheduler as stop_us52_alert)
+    stop_us52_alert()
     await close_redis_client()
     logger.info("清理完成")
 
