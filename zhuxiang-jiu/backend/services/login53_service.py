@@ -8,13 +8,28 @@ P0 范围(计划 §九 P0):
       (49号只读探针)
     - 价值钩子生成(登录前投放——45/50号只读聚合)
 
+P1 范围(计划 §九 P1):
+    - 多模态认证编排引擎(orchestrate): 五通道统一
+      编排——通道凭证校验(复用 39号 bio/qr+50号
+      声纹/活体)→AuthRiskScorer 风险分级→
+      静默/一键/常规/强化四级响应→令牌签发
+    - 安全兜底: 失败优雅降级(同通道 3 次→备选
+      切换+安抚话术)+反欺诈安全挑战(TTS 疑似→
+      随机动作指令)+降级 step_up 不裸放铁律
+    - 事件流水(六字段对齐 49号审计口径:
+      method/riskScore/decision/durationMs/
+      privacyCost/explainRef)
+
 off 语义:
     LOGIN53_MODE=off → 编排面关闭(直通存量 39号
     entry 登录——零接管); registry/查询观测面不受影响。
 """
 
+import hashlib
 import logging
 import math
+import secrets
+import time
 
 from core.helpers import ts
 
@@ -22,8 +37,8 @@ from repositories.login53_repository import (
     Login53Repository,
 )
 from services.login53_registry import (
-    AUTH_CHANNELS, PORTAL_STATES, current_mode,
-    registry_view,
+    AUTH_CHANNELS, PORTAL_STATES, RISK_TIERS,
+    current_mode, registry_view,
 )
 from services.login53_scripts import render_script
 
@@ -418,3 +433,713 @@ class Login53Service:
                 "memberId": member_id,
                 "baselineUpdatedAt":
                     record["baselineUpdatedAt"]}
+
+    # ============================================================
+    # P1 多模态认证编排引擎
+    # ============================================================
+
+    # 一键确认令牌 TTL(60s)
+    CONFIRM_TTL_SECONDS = 60
+    # 同通道失败优雅降级阈值(3 次→切换备选)
+    FAIL_DEGRADE_THRESHOLD = 3
+    # 反欺诈安全挑战动作指令(随机——既防机器又保真人)
+    SECURITY_CHALLENGE_ACTIONS = (
+        "请眨眨眼", "请轻轻摇头",
+        "请念出屏幕数字 8642", "请微笑")
+
+    async def orchestrate(self, member_id: int,
+                          channel: str,
+                          credential: dict | None = None,
+                          fingerprint: str = "",
+                          ip: str = "",
+                          confirm_token: str = None,
+                          challenge_response: str = None,
+                          hour: int = None) -> dict:
+        """统一多模态登录编排(P1——五通道+风险分级)
+
+        编排流: 通道校验 → 预算扣减(49号) →
+        风险评分(43号 AuthRiskScorer) → 四级响应
+        (静默/一键/强化/多因子) → 令牌签发 → 事件流水。
+
+        Raises:
+            ValueError: off 态/通道非法/凭证无效/
+                预算不足/风控拦截
+            KeyError: 会员/凭证不存在
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"LOGIN53_MODE={mode}(默认 off——"
+                f"编排面关闭, 直通存量 39号登录)")
+        if channel not in AUTH_CHANNELS:
+            raise ValueError(
+                f"通道非法({channel}, 须为 "
+                f"{list(AUTH_CHANNELS)})")
+        credential = credential or {}
+        started = time.monotonic()
+        channel_meta = AUTH_CHANNELS[channel]
+
+        # ① 反欺诈安全挑战应答(face TTS 疑似通道)
+        if challenge_response is not None:
+            return await self._resolve_security_challenge(
+                member_id, channel, challenge_response,
+                fingerprint=fingerprint, ip=ip,
+                started=started)
+
+        # ② 通道凭证校验(各底座——mock/复用口径;
+        #    失败→优雅降级: 计数+3 次→备选建议+安抚话术)
+        try:
+            verification = await self._verify_channel(
+                member_id, channel, credential)
+        except (ValueError, KeyError) as exc:
+            degrade = await self._bump_fail_count(
+                member_id, channel)
+            await self._record_login_event(
+                member_id, channel, success=False,
+                risk_score=0.0, decision="credential_fail",
+                duration_ms=self._elapsed_ms(started),
+                privacy_cost=0.0,
+                explain_ref="credential_rejected",
+                detail=str(exc)[:120])
+            hint = ""
+            if degrade["degraded"]:
+                script = render_script(
+                    "voice_failed", {})
+                hint = (f"(已连续失败 "
+                        f"{degrade['channelFailCount']} 次"
+                        f"——建议切换备选通道 "
+                        f"{degrade['alternatives']}; "
+                        f"话术: {script['text'][:24]}...)")
+            if isinstance(exc, KeyError):
+                raise KeyError(
+                    f"{exc}{hint}") from None
+            raise ValueError(
+                f"{exc}{hint}") from None
+        # 反欺诈安全挑战触发(liveness<0.5 TTS 疑似)
+        if verification.get("securityChallenge"):
+            return await self._issue_security_challenge(
+                member_id, channel, started)
+
+        # ③ 预算扣减(通道成本>0 → 49号; 失败不签发)
+        privacy_cost = float(channel_meta["privacyCost"])
+        budget_info = {"spent": 0.0, "zeroCost": True}
+        if privacy_cost > 0:
+            from services.xiaozhu_privacy_service import (
+                XiaozhuPrivacyService,
+            )
+            try:
+                budget_info = await (
+                    XiaozhuPrivacyService()
+                    .check_and_spend(member_id,
+                                     privacy_cost))
+            except ValueError as exc:
+                # 预算不足 → 事件+降级话术(不签发)
+                await self._record_login_event(
+                    member_id, channel, success=False,
+                    risk_score=0.0, decision="budget_block",
+                    duration_ms=self._elapsed_ms(started),
+                    privacy_cost=0.0,
+                    explain_ref="budget_exhausted",
+                    detail=str(exc)[:120])
+                script = render_script(
+                    "budget_exhausted", {})
+                raise ValueError(
+                    f"{str(exc)}(已切换基础认证模式"
+                    f"话术: {script['text'][:24]}...)") \
+                    from None
+
+        # ④ 一键确认令牌(one_tap 二段)
+        if confirm_token is not None:
+            return await self._resolve_confirm_token(
+                member_id, channel, confirm_token,
+                fingerprint=fingerprint, ip=ip,
+                started=started,
+                privacy_cost=privacy_cost,
+                verification=verification)
+
+        # ⑤ 风险评分(43号——降级 step_up 不裸放铁律)
+        risk = await self._risk_score(
+            member_id, fingerprint, ip, hour)
+        risk_score = float(risk.get("score") or 0.0)
+
+        # ⑥ 四级响应(风险分→档位;
+        #    硬约束命中(黑名单 IP/泄露密码)或 43号风控
+        #    标记(riskFlagged——高危角色)→ 强制
+        #    enhanced 不裸放——规则兜底)
+        profile_now = await self.repo.get_profile(member_id)
+        risk_flagged = bool(
+            profile_now
+            and (profile_now.get("riskFlagged")
+                 or profile_now.get("riskFlagged") == 1))
+        if risk.get("hardBlocked") \
+                or risk.get("action") == "block" \
+                or risk_flagged:
+            tier = "enhanced"
+        else:
+            tier = self._risk_tier(risk_score)
+        duration_ms = self._elapsed_ms(started)
+
+        if tier == "silent":
+            # 静默: 直接签发(零打扰)
+            return await self._complete_login(
+                member_id, channel, risk_score,
+                duration_ms, privacy_cost, risk,
+                verification, tier="silent")
+        if tier == "one_tap":
+            # 一键: 发确认令牌(60s)+话术
+            return await self._issue_confirm_token(
+                member_id, channel, risk_score,
+                duration_ms, privacy_cost, risk,
+                verification)
+        if tier == "step_up":
+            # 常规: 追加轻量验证(短信/动态口令)
+            await self._record_login_event(
+                member_id, channel, success=False,
+                risk_score=risk_score,
+                decision="step_up",
+                duration_ms=duration_ms,
+                privacy_cost=privacy_cost,
+                explain_ref=self._explain_ref(risk),
+                detail="step_up_required")
+            script = render_script("new_device_login", {})
+            return {
+                "status": "step_up_required",
+                "memberId": member_id, "channel": channel,
+                "riskScore": risk_score, "tier": tier,
+                "nextStep": "短信验证码二次核验"
+                            "(POST /api/entry/login/"
+                            "step-up-verify)",
+                "script": script,
+            }
+        # enhanced: 强制多因子+人工客服选项
+        await self._record_login_event(
+            member_id, channel, success=False,
+            risk_score=risk_score,
+            decision="enhanced",
+            duration_ms=duration_ms,
+            privacy_cost=privacy_cost,
+            explain_ref=self._explain_ref(risk),
+            detail="enhanced_required")
+        script = render_script("account_protected", {})
+        return {
+            "status": "enhanced_required",
+            "memberId": member_id, "channel": channel,
+            "riskScore": risk_score, "tier": tier,
+            "nextStep": "多因子核验+人工客服选项"
+                        "(去污名化——'这不是您的错')",
+            "script": script,
+        }
+
+    # --------------------------------------------------------
+    # 通道凭证校验(五通道——底座复用/mock 口径)
+    # --------------------------------------------------------
+
+    async def _verify_channel(self, member_id: int,
+                               channel: str,
+                               credential: dict) -> dict:
+        """通道凭证校验(底座复用)
+
+        - passkey/fingerprint: 39号 bio 凭证查询
+          (credentialId 存在+active+归属匹配——凭证
+          持有即验 mock 口径; 完整挑战制断言走 39号
+          bio 专用端点)
+        - face: 50号 liveness(credential 显式携带
+          优先——mock 面; ≥0.85 通过/<0.5 TTS 疑似)
+        - voice: 50号 verify 声纹初筛+语义动态口令
+          双因子(proxy 不作凭证铁律——缺口令即
+          voice_confirm 引导)
+        - qr: 39号 qr_confirm 票据(hash 校验+归属
+          匹配+一次性消费)
+
+        Raises:
+            KeyError: 凭证不存在
+            ValueError: 凭证无效/声纹未过
+        """
+        if channel in ("passkey", "fingerprint"):
+            credential_id = str(
+                credential.get("credentialId") or "")
+            if not credential_id:
+                raise ValueError(
+                    "缺少 credentialId(生物凭证标识)")
+            from repositories.entry_repository import (
+                EntryRepository,
+            )
+            record = await EntryRepository().get_bio(
+                credential_id)
+            if record is None:
+                raise KeyError(
+                    f"生物凭证不存在({credential_id})")
+            if record.get("status") != "active":
+                raise ValueError("凭证已吊销")
+            if int(record.get("memberId") or 0) \
+                    != int(member_id):
+                raise ValueError("凭证归属不匹配")
+            return {"verified": True,
+                    "bioType": record.get("bioType"),
+                    "mode": record.get("mode", "mock")}
+
+        if channel == "face":
+            liveness = credential.get("liveness")
+            if liveness is None:
+                from services.xiaozhu_voice50_voiceprint \
+                    import liveness_score
+                liveness = liveness_score(member_id, 0)
+            liveness = float(liveness)
+            if liveness < 0.5:
+                # TTS/深伪疑似 → 反欺诈安全挑战
+                return {"verified": False,
+                        "securityChallenge": True,
+                        "liveness": liveness}
+            if liveness < 0.85:
+                raise ValueError(
+                    f"活体分不足({liveness}<0.85, "
+                    f"请正对镜头光线充足)")
+            return {"verified": True,
+                    "liveness": liveness,
+                    "mode": "mock"}
+
+        if channel == "voice":
+            voice_confirmed = bool(
+                credential.get("voiceConfirmed"))
+            spoken = str(
+                credential.get("spokenPhrase") or "")
+            if not voice_confirmed:
+                raise ValueError(
+                    "声纹初筛未通过(50号 verify 未确认)")
+            if not spoken:
+                # 声纹过但缺语义口令 → 双因子引导
+                script = render_script(
+                    "voice_confirm", {})
+                raise ValueError(
+                    f"声纹已识别但需语义动态口令"
+                    f"(双因子铁律——声纹 proxy 不作"
+                    f"凭证): {script['text'][:32]}...")
+            return {"verified": True,
+                    "dualFactor": True,
+                    "mode": "voice_semantic"}
+
+        if channel == "qr":
+            qr_id = str(credential.get("qrId") or "")
+            ticket = str(
+                credential.get("loginTicket") or "")
+            if not qr_id or not ticket:
+                raise ValueError("缺少扫码票据"
+                                 "(qrId+loginTicket)")
+            from repositories.entry_repository import (
+                EntryRepository,
+            )
+            record = await EntryRepository().get_qr(
+                qr_id)
+            if record is None:
+                raise KeyError(f"扫码会话不存在({qr_id})")
+            if record.get("status") != "confirmed":
+                raise ValueError(
+                    f"会话未确认(当前{record.get('status')})")
+            ticket_hash = hashlib.sha256(
+                ticket.encode()).hexdigest()[:32]
+            if ticket_hash != record.get(
+                    "loginTicketHash"):
+                raise ValueError("登录票据无效")
+            if int(record.get("confirmMemberId") or 0) \
+                    != int(member_id):
+                raise ValueError("票据归属不匹配")
+            # 一次性消费(防重放——39号同款)
+            from repositories.entry_repository import (
+                EntryRepository as _ER,
+            )
+            await _ER().update_qr(qr_id, {
+                "loginTicketHash": "",
+                "status": "expired",
+                "exchangedAt": ts()})
+            return {"verified": True,
+                    "qrId": qr_id,
+                    "consumed": True}
+
+        raise ValueError(f"未知通道({channel})")
+
+    # --------------------------------------------------------
+    # 风险评分(43号 AuthRiskScorer——降级铁律)
+    # --------------------------------------------------------
+
+    async def _risk_score(self, member_id: int,
+                          fingerprint: str,
+                          ip: str,
+                          hour: int = None) -> dict:
+        """43号认证风险评分(8 因子)
+
+        降级铁律: 评分器异常 → 默认 step_up 档
+        (风险分 40——不裸放)。
+        """
+        profile = await self.repo.get_profile(member_id)
+        fail_counts = (profile or {}).get(
+            "failCounts") or {}
+        failed = int(
+            fail_counts.get("__total__", 0)
+            if isinstance(fail_counts, dict) else 0)
+        # 新设备判定(基线指纹不匹配→新设备)
+        baseline = str((profile or {}).get(
+            "baselineFingerprint") or "")
+        if not fingerprint or not baseline:
+            new_device = None   # 未知(中性)
+        else:
+            new_device = (
+                self._fingerprint_match(
+                    baseline, fingerprint) < 0.70)
+        # IP 信誉(39号内置简表复用)
+        ip_risk = "clean"
+        from services.entry_service import (
+            IP_REPUTATION_TABLE,
+        )
+        for prefix, risk in \
+                IP_REPUTATION_TABLE.items():
+            if (ip or "").startswith(prefix):
+                ip_risk = risk
+                break
+        ctx = {
+            "memberId": member_id,
+            "failedAttempts": failed,
+            "newDevice": new_device,
+            "ipRiskType": ip_risk,
+            "accountAgeDays":
+                (profile or {}).get("accountAgeDays")
+                or 365,
+        }
+        if hour is not None:
+            ctx["loginHour"] = hour
+        try:
+            from services.ai_scoring_auth_service import (
+                AuthRiskScorer,
+            )
+            result = await AuthRiskScorer().score(ctx)
+            if result.get("success"):
+                return result
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("login53_risk_score_failed "
+                           "%s: %s", member_id, exc)
+        # 降级铁律: 异常 → step_up 档(40)不裸放
+        return {"success": False, "degraded": True,
+                "score": 40.0, "action": "step_up",
+                "factors": []}
+
+    @staticmethod
+    def _risk_tier(risk_score: float) -> str:
+        """风险分→响应档位(注册表阈值)"""
+        for tier, meta in RISK_TIERS.items():
+            if risk_score < meta["maxRisk"]:
+                return tier
+        return "enhanced"
+
+    @staticmethod
+    def _elapsed_ms(started: float) -> float:
+        return round(
+            (time.monotonic() - started) * 1000, 1)
+
+    @staticmethod
+    def _explain_ref(risk: dict) -> str:
+        """决策解释引用(49号审计口径——
+        factors 摘要哈希 16 位)"""
+        factors = risk.get("factors") or []
+        raw = "|".join(
+            f"{f.get('key')}:{f.get('score')}"
+            for f in factors) or "degraded"
+        return hashlib.sha256(
+            raw.encode()).hexdigest()[:16]
+
+    # --------------------------------------------------------
+    # 完成登录(令牌签发+事件+话术+档案更新)
+    # --------------------------------------------------------
+
+    async def _complete_login(self, member_id, channel,
+                              risk_score, duration_ms,
+                              privacy_cost, risk,
+                              verification, tier) -> dict:
+        """签发令牌+事件流水+话术+档案更新
+        (登录成功路径统一收口)"""
+        from services.auth_service import AuthService
+        tokens = await AuthService()._login_by_member_id(
+            member_id)
+        script_key = AUTH_CHANNELS[channel][
+            "scriptKey"]
+        script = render_script(script_key, {})
+        # 事件流水(六字段对齐 49号审计口径)
+        event = await self._record_login_event(
+            member_id, channel, success=True,
+            risk_score=risk_score,
+            decision=tier,
+            duration_ms=duration_ms,
+            privacy_cost=privacy_cost,
+            explain_ref=self._explain_ref(risk),
+            detail="orchestrated")
+        # 档案更新(登录时间+失败计数清零+基线刷新)
+        profile = await self.repo.get_profile(member_id)
+        record = dict(profile or {})
+        record.update({
+            "memberId": member_id,
+            "lastLoginAt": ts(),
+            "failCounts": {},
+            "lastChannel": channel,
+        })
+        await self.repo.save_profile(record)
+        return {
+            "status": "authenticated",
+            "memberId": member_id,
+            "channel": channel, "tier": tier,
+            "riskScore": risk_score,
+            "tokens": tokens,
+            "verification": verification,
+            "script": script,
+            "event": event,
+        }
+
+    # --------------------------------------------------------
+    # 一键确认令牌(one_tap 二段式)
+    # --------------------------------------------------------
+
+    async def _issue_confirm_token(self, member_id,
+                                   channel, risk_score,
+                                   duration_ms,
+                                   privacy_cost, risk,
+                                   verification) -> dict:
+        """发一键确认令牌(60s TTL)+确认话术"""
+        token = f"CT{secrets.token_hex(12)}"
+        profile = await self.repo.get_profile(member_id)
+        record = dict(profile or {})
+        record.update({
+            "memberId": member_id,
+            "pendingConfirmToken": token,
+            "pendingConfirmChannel": channel,
+            "pendingConfirmExpiresAt":
+                self._ttl_iso(self.CONFIRM_TTL_SECONDS),
+            "pendingConfirmRisk": risk_score,
+        })
+        await self.repo.save_profile(record)
+        await self._record_login_event(
+            member_id, channel, success=False,
+            risk_score=risk_score,
+            decision="one_tap_pending",
+            duration_ms=duration_ms,
+            privacy_cost=0.0,
+            explain_ref=self._explain_ref(risk),
+            detail="one_tap_confirm_issued")
+        script = render_script("voice_confirm", {})
+        return {
+            "status": "one_tap_pending",
+            "memberId": member_id, "channel": channel,
+            "riskScore": risk_score, "tier": "one_tap",
+            "confirmToken": token,
+            "confirmTtl": self.CONFIRM_TTL_SECONDS,
+            "nextStep": "一键确认(带 confirmToken 重调"
+                        " orchestrate)",
+            "script": script,
+        }
+
+    async def _resolve_confirm_token(self, member_id,
+                                     channel,
+                                     confirm_token,
+                                     fingerprint, ip,
+                                     started,
+                                     privacy_cost,
+                                     verification) -> dict:
+        """一键确认令牌核销(60s TTL 一次性)"""
+        profile = await self.repo.get_profile(member_id)
+        expected = (profile or {}).get(
+            "pendingConfirmToken") or ""
+        expires = str((profile or {}).get(
+            "pendingConfirmExpiresAt") or "")
+        pending_channel = (profile or {}).get(
+            "pendingConfirmChannel") or ""
+        if not expected or confirm_token != expected:
+            raise ValueError("确认令牌无效或已使用")
+        if pending_channel != channel:
+            raise ValueError("确认令牌通道不匹配")
+        if expires and expires < ts():
+            raise ValueError(
+                f"确认令牌已过期({self.CONFIRM_TTL_SECONDS}s)")
+        risk = await self._risk_score(
+            member_id, fingerprint, ip)
+        risk_score = float(risk.get("score") or 0.0)
+        # 令牌一次性消费
+        record = dict(profile or {})
+        record.update({
+            "pendingConfirmToken": "",
+            "pendingConfirmExpiresAt": "",
+            "pendingConfirmChannel": "",
+        })
+        await self.repo.save_profile(record)
+        return await self._complete_login(
+            member_id, channel, risk_score,
+            self._elapsed_ms(started), privacy_cost,
+            risk, verification, tier="one_tap")
+
+    # --------------------------------------------------------
+    # 反欺诈安全挑战(TTS/深伪疑似——随机动作指令)
+    # --------------------------------------------------------
+
+    async def _issue_security_challenge(self, member_id,
+                                        channel,
+                                        started) -> dict:
+        """触发安全挑战(随机动作指令——既防机器
+        又保真人体验; 不直接报错)"""
+        action = secrets.choice(
+            self.SECURITY_CHALLENGE_ACTIONS)
+        token = f"SC{secrets.token_hex(12)}"
+        profile = await self.repo.get_profile(member_id)
+        record = dict(profile or {})
+        record.update({
+            "memberId": member_id,
+            "securityChallengeToken": token,
+            "securityChallengeAction": action,
+            "securityChallengeChannel": channel,
+            "securityChallengeExpiresAt":
+                self._ttl_iso(self.CONFIRM_TTL_SECONDS),
+        })
+        await self.repo.save_profile(record)
+        await self._record_login_event(
+            member_id, channel, success=False,
+            risk_score=0.0,
+            decision="security_challenge",
+            duration_ms=self._elapsed_ms(started),
+            privacy_cost=0.0,
+            explain_ref="tts_suspect",
+            detail=f"liveness<0.5 深伪疑似")
+        script = render_script("liveness_failed", {})
+        return {
+            "status": "security_challenge",
+            "memberId": member_id, "channel": channel,
+            "challengeToken": token,
+            "challengeAction": action,
+            "challengeTtl": self.CONFIRM_TTL_SECONDS,
+            "nextStep": "完成动作后带 challengeResponse"
+                        "重调 orchestrate",
+            "script": script,
+        }
+
+    async def _resolve_security_challenge(self, member_id,
+                                          channel,
+                                          challenge_response,
+                                          fingerprint,
+                                          ip,
+                                          started) -> dict:
+        """安全挑战应答核销(动作指令匹配→放行重评)"""
+        profile = await self.repo.get_profile(member_id)
+        expected_action = (profile or {}).get(
+            "securityChallengeAction") or ""
+        token_channel = (profile or {}).get(
+            "securityChallengeChannel") or ""
+        expires = str((profile or {}).get(
+            "securityChallengeExpiresAt") or "")
+        if not expected_action:
+            raise ValueError("无待应答安全挑战")
+        if token_channel != channel:
+            raise ValueError("安全挑战通道不匹配")
+        if expires and expires < ts():
+            raise ValueError("安全挑战已过期, 请重试")
+        if str(challenge_response).strip() \
+                != expected_action:
+            raise ValueError(
+                "挑战动作不匹配(请按语音指引完成)")
+        # 挑战通过 → 重评风险(通常低)→ 完成登录
+        record = dict(profile or {})
+        record.update({
+            "securityChallengeToken": "",
+            "securityChallengeAction": "",
+            "securityChallengeChannel": "",
+            "securityChallengeExpiresAt": "",
+        })
+        await self.repo.save_profile(record)
+        risk = await self._risk_score(
+            member_id, fingerprint, ip)
+        risk_score = float(risk.get("score") or 0.0)
+        verification = {
+            "verified": True,
+            "securityChallengePassed": True}
+        return await self._complete_login(
+            member_id, channel, risk_score,
+            self._elapsed_ms(started),
+            float(AUTH_CHANNELS[channel]
+                  ["privacyCost"]),
+            risk, verification,
+            tier="challenge_passed")
+
+    @staticmethod
+    def _ttl_iso(seconds: int) -> str:
+        from datetime import datetime, timedelta
+        return (datetime.now()
+                + timedelta(seconds=seconds)
+                ).isoformat()
+
+    # --------------------------------------------------------
+    # 失败优雅降级(同通道 3 次→备选切换+安抚话术)
+    # --------------------------------------------------------
+
+    async def _bump_fail_count(self, member_id: int,
+                                channel: str) -> dict:
+        """失败计数累计(达到阈值→切换备选建议)"""
+        profile = await self.repo.get_profile(member_id)
+        record = dict(profile or {})
+        counts = dict(
+            (record.get("failCounts") or {}))
+        counts[channel] = int(
+            counts.get(channel, 0)) + 1
+        counts["__total__"] = int(
+            counts.get("__total__", 0)) + 1
+        record.update({"memberId": member_id,
+                       "failCounts": counts})
+        await self.repo.save_profile(record)
+        degraded = counts[channel] \
+            >= self.FAIL_DEGRADE_THRESHOLD
+        alternatives = [c for c in AUTH_CHANNELS
+                        if c != channel][:3]
+        return {"channelFailCount":
+                    counts[channel],
+                "degraded": degraded,
+                "alternatives": alternatives
+                if degraded else []}
+
+    # --------------------------------------------------------
+    # 事件流水(六字段对齐 49号审计口径)
+    # --------------------------------------------------------
+
+    async def _record_login_event(
+            self, member_id: int, channel: str,
+            success: bool, risk_score: float,
+            decision: str, duration_ms: float,
+            privacy_cost: float, explain_ref: str,
+            detail: str = "") -> dict:
+        """登录事件落库(审计六字段+状态)
+
+        六字段: method/riskScore/decision/
+        durationMs/privacyCost/explainRef
+        (49号 FC 审计口径平移)
+        """
+        event_id = await self.repo.next_event_id()
+        record = {
+            "eventId": event_id,
+            "memberId": member_id,
+            "method": channel,
+            "riskScore": round(float(risk_score), 1),
+            "decision": decision,
+            "durationMs": round(
+                float(duration_ms), 1),
+            "privacyCost": round(
+                float(privacy_cost), 3),
+            "explainRef": explain_ref,
+            "success": success,
+            "detail": detail[:120],
+            "createdAt": ts(),
+        }
+        await self.repo.save_event(record)
+        logger.info("login53_event id=%s member=%s "
+                    "channel=%s decision=%s risk=%s",
+                    event_id, member_id, channel,
+                    decision, risk_score)
+        return record
+
+    async def list_events(self, member_id: int = None,
+                          limit: int = 200) -> dict:
+        """事件流水查询(观测面——最新在前)"""
+        records = await self.repo.list_events(
+            member_id=member_id, limit=limit)
+        return {"success": True,
+                "total": len(records),
+                "events": records}

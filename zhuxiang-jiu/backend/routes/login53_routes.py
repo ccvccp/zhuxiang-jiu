@@ -1,19 +1,22 @@
-"""53号·小竹智能登录引擎路由(P0)
+"""53号·小竹智能登录引擎路由(P0-P1)
 
-端点(P0 6):
+端点(P0 6 + P1 2 = 8):
     GET  /api/login53/registry        注册表视图(admin)
     GET  /api/login53/portal          角色四态判定(会员面)
     POST /api/login53/prelogin/sense  态势感知(会员面, on)
     POST /api/login53/hook/generate   价值钩子生成(会员面, on)
     POST /api/login53/baseline        基线指纹登记(会员面, on)
     GET  /api/login53/my/profile      本人入口档案(会员面)
+    POST /api/login53/auth/orchestrate 统一多模态登录编排(P1, on)
+    GET  /api/login53/my/events       本人登录历史(P1, 脱敏)
 
 鉴权: 会员面 X-Member-Id(compat 兼容头)/管理面
 X-Role: admin(43-52号同款口径)。
 统一口径:
-    - 观测面(registry)不受 LOGIN53_MODE 影响
-    - 编排面(sense/hook/baseline) off=拒绝
-      (409——直通存量 39号登录)
+    - 观测面(registry/查询/事件历史)不受
+      LOGIN53_MODE 影响
+    - 编排面(sense/hook/baseline/orchestrate)
+      off=拒绝(409——直通存量 39号登录)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -54,6 +57,16 @@ class SenseIn(BaseModel):
 
 class BaselineIn(BaseModel):
     fingerprint: str
+
+
+class OrchestrateIn(BaseModel):
+    channel: str
+    credential: dict | None = None
+    fingerprint: str = ""
+    ip: str = ""
+    confirmToken: str | None = None
+    challengeResponse: str | None = None
+    hour: int | None = None
 
 
 @router.get("/registry")
@@ -154,6 +167,44 @@ async def my_profile(
         return {"success": True, "profile": None,
                 "note": "尚无入口档案(首次登录时建档)"}
     return {"success": True, "profile": profile}
+
+
+@router.post("/auth/orchestrate")
+async def auth_orchestrate(
+        body: OrchestrateIn,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """统一多模态登录编排(P1——五通道+
+    风险分级四级响应+安全兜底+事件流水)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await Login53Service().orchestrate(
+            member_id, body.channel,
+            credential=body.credential,
+            fingerprint=body.fingerprint,
+            ip=body.ip,
+            confirm_token=body.confirmToken,
+            challenge_response=body.challengeResponse,
+            hour=body.hour)
+        return {"success": True,
+                "orchestration": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+
+
+@router.get("/my/events")
+async def my_events(
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """本人登录历史(脱敏——观测面不受开关影响;
+    无原始凭证数据, 仅事件六字段)"""
+    member_id = _require_member(x_member_id)
+    return await Login53Service().list_events(
+        member_id=member_id)
 
 
 def register_login53_routes(app) -> None:
