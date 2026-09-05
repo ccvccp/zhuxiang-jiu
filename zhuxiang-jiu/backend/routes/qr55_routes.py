@@ -1,6 +1,6 @@
-"""55号·二维码AI智能管理路由(P0-P4)
+"""55号·二维码AI智能管理路由(P0-P5)
 
-端点(P0 4 + P1 3 + P2 4 + P3 3 + P4 4 = 18):
+端点(P0 4 + P1 3 + P2 4 + P3 3 + P4 4 + P5 2 = 20):
     GET  /api/qr55/registry          注册表自描述(admin, 观测面)
     POST /api/qr55/intent/parse      意图解析演示(admin, 观测面)
     POST /api/qr55/code/generate     签名码生成(admin, on, P0 能力验证)
@@ -19,18 +19,22 @@
     POST /api/qr55/probe             拨测验证(admin, P4)
     POST /api/qr55/probe/compensate  篡改受害者信值补偿(admin, P4)
     GET  /api/qr55/attribution       LLM 归因报告(admin, P4)
+    GET  /api/qr55/dashboard         四区看板(admin, 观测面, P5)
+    POST /api/qr55/redteam           红队六向量(admin, P5)
 
 鉴权: 管理面 X-Role: admin(43-54号同款口径);
       会员面(member) generate/scan 携 memberId。
 统一口径:
     - 观测面(registry/model/status/codes/code/stats/
-      governance/attribution)不受 QR55_MODE 影响;
-      intent/parse 为规则轨确定性演示亦开放
+      governance/attribution/dashboard)不受 QR55_MODE
+      影响; intent/parse 为规则轨确定性演示亦开放
     - 生成面(generate): off=拒绝(409——存量二维码
       链路零影响)
     - 核销面(scan): off=拒绝(409)
     - 管理面(feedback/collect+model/*+probe*):
       off 亦可用(治理/拨测面不依赖生成面)
+    - 红队(redteam): 需 QR55_MODE=on(攻击面开放
+      才可验证防御——off 409)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -430,6 +434,38 @@ async def attribution(
     try:
         return await Qr55AttributionService(
         ).attribution()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """四区看板(码量/服务分布/回流漏斗/漂移+防御
+    ——观测面, 不受开关影响)"""
+    _require_admin(x_role)
+    from services.qr55_dashboard_service import (
+        Qr55DashboardService,
+    )
+    return await Qr55DashboardService().build()
+
+
+@router.post("/redteam")
+async def redteam(
+        memberId: int = 9960,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队六向量(载荷伪造/重放/篡改/参数越权/
+    白名单逃逸/预算绕过+投毒洪流——需 on 态)"""
+    _require_admin(x_role)
+    from services.qr55_redteam_service import (
+        Qr55RedteamService,
+    )
+    try:
+        return await Qr55RedteamService().run_all(
+            member_id=memberId)
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
