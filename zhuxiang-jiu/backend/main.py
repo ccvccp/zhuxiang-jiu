@@ -290,6 +290,9 @@ register_kg51_routes(app)
 # 小竹语音可用性评估引擎(52号)
 from routes.us52_routes import register_us52_routes
 register_us52_routes(app)
+# 小竹智能登录引擎(53号)
+from routes.login53_routes import register_login53_routes
+register_login53_routes(app)
 
 
 # ============================================================
