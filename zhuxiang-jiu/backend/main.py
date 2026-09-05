@@ -378,6 +378,11 @@ async def _on_startup():
     from services.us52_alert_scheduler import (
         start_scheduler as start_us52_alert)
     start_us52_alert()
+    # 54号·小竹AI智能登录引擎大模型: 决策回流 T+1
+    # 批次补标调度(LOGIN54_LEARN_MODE=on 开启, 默认 off)
+    from services.login54_scheduler import (
+        start_scheduler as start_login54_learn)
+    start_login54_learn()
 
 
 @app.on_event("shutdown")
@@ -426,7 +431,11 @@ async def _on_shutdown():
     # 52号·小竹语音可用性评估告警调度器
     from services.us52_alert_scheduler import (
         stop_scheduler as stop_us52_alert)
+    # 54号·小竹AI智能登录引擎学习调度器
+    from services.login54_scheduler import (
+        stop_scheduler as stop_login54_learn)
     stop_us52_alert()
+    stop_login54_learn()
     await close_redis_client()
     logger.info("清理完成")
 

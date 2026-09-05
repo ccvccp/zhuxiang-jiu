@@ -31,7 +31,8 @@ class Login54Repository:
     TABLE_MODEL_EVENTS = "login54_model_events"
 
     _INT_FIELDS = ("feedbackId", "eventId", "modelEventId",
-                   "memberId", "sampleCount")
+                   "memberId", "sampleCount",
+                   "poolFeedbackId")
     _FLOAT_FIELDS = ("reward", "trustScore", "baseline")
     _JSON_DICT_FIELDS = ("factors", "context", "metrics")
     _JSON_LIST_FIELDS = ("evidence",)
@@ -106,25 +107,37 @@ class Login54Repository:
         self.store["_login54_feedback_seq"] = seq
         return seq
 
-    async def save_feedback(self, record: dict) -> dict:
-        """回流标注落库(创建入列——只追加)"""
+    async def save_feedback(self, record: dict, *,
+                            create: bool = True) -> dict:
+        """回流标注落库(create=True 创建入列——只追加;
+        create=False 仅更新 pending 转正场景——
+        索引不重复入列, 45号索引教训)"""
         if is_redis_mode():
             client = await get_redis_client()
             pipe = client.pipeline(transaction=False)
             pipe.hset(_k("login54", self.TABLE_FEEDBACK,
                         record["feedbackId"]),
                       mapping=self._serialize(record))
-            pipe.lpush(_k("login54", "feedback_all"),
-                       record["feedbackId"])
+            if create:
+                pipe.lpush(_k("login54", "feedback_all"),
+                           record["feedbackId"])
             await pipe.execute()
             return record
         self._ensure_store()
         self.store[self.TABLE_FEEDBACK][
             record["feedbackId"]] = dict(record)
-        self.store.setdefault(
-            "_login54_feedback_all", []).insert(
-            0, record["feedbackId"])
+        if create:
+            self.store.setdefault(
+                "_login54_feedback_all", []).insert(
+                0, record["feedbackId"])
         return record
+
+    async def get_feedback_by_event(
+            self, event_id: int) -> dict | None:
+        """按源事件查回流标注(eventId 1:1——幂等去重键)"""
+        records = await self.list_feedback(
+            event_id=int(event_id), limit=1)
+        return records[0] if records else None
 
     async def list_feedback(
             self, event_id: int = None,
