@@ -1,6 +1,6 @@
-"""51号·小竹可信知识图谱路由(P0 本体奠基 + P1 采集管道)
+"""51号·小竹可信知识图谱路由(P0 本体奠基 + P1 采集管道 + P2 查询面)
 
-端点(P0 共 4 + P1 共 5):
+端点(P0 共 4 + P1 共 5 + P2 共 2):
     GET  /api/kg51/schema                    本体注册表视图(admin)
     GET  /api/kg51/schema/changes            变更队列/历史(admin)
     POST /api/kg51/schema/changes            提交本体变更申请(admin)
@@ -10,12 +10,16 @@
     GET  /api/kg51/triples                   三元组查询(P1, admin)
     GET  /api/kg51/reviews                   复核队列(P1, admin)
     POST /api/kg51/reviews/{id}/decide       复核裁决(P1, admin)
+    GET  /api/kg51/query                     邻域查询(P2, 会员面+admin)
+    GET  /api/kg51/grounding                 问答锚定检索(P2, 公开面)
 
-鉴权: 管理端 X-Role: admin(43-50号同款口径)。
+鉴权: 管理端 X-Role: admin(43-50号同款口径);
+      会员面 X-Member-Id(48号惯例); 公开面无鉴权。
 统一口径:
     - 治理面端点不受 KG_MODE 数据面开关影响
       (off 态亦可管理本体)
     - 采集面 off=采集停(ingest/run 拒绝);
+      查询面 off=空态降级(fail-soft 直通);
       观测面(triples/reviews/status)不受影响
     - 模块纯增量(零既有路由改动)
     - KeyError → 404 / ValueError → 409(44-50号同款)
@@ -27,6 +31,7 @@ from pydantic import BaseModel
 from services.kg51_ingest_service import (
     Kg51IngestService, Kg51ReviewService,
 )
+from services.kg51_query_service import Kg51QueryService
 from services.kg51_schema_service import Kg51SchemaService
 
 router = APIRouter(prefix="/api/kg51",
@@ -198,6 +203,58 @@ async def decide_review(
     except KeyError as exc:
         raise HTTPException(status_code=404,
                             detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/query")
+async def neighborhood_query(
+        subject: str,
+        depth: int = 1,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role"),
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """邻域查询(P2——会员面: 自身 digest+L0, 预算感知;
+    admin: 任意主体不过滤; off 态空态降级)
+
+    权限: admin 任意; member 仅自身 digest 主体或
+    L0 公开实体(他人主体 → 409 越权语义)。
+    预算: 返回实体类型去重合计隐私成本(L0=0;
+    无结果零消耗; admin 不扣)。
+    """
+    admin = bool(x_role and x_role == "admin")
+    member_id = None
+    if not admin:
+        if not x_member_id:
+            raise HTTPException(
+                status_code=401,
+                detail="需要 X-Member-Id"
+                       "(或 X-Role: admin)")
+        try:
+            member_id = int(x_member_id)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=401,
+                detail="X-Member-Id 需为整数")
+    try:
+        return await Kg51QueryService(
+        ).neighborhood_query(
+            subject=subject, member_id=member_id,
+            admin=admin, depth=depth)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/grounding")
+async def grounding_search(keyword: str):
+    """问答锚定检索(P2——公开面: L0 实体, 零成本零鉴权;
+    off 态空态降级 fail-soft)"""
+    try:
+        return await Kg51QueryService().grounding_search(
+            keyword=keyword)
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))

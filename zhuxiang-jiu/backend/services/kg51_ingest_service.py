@@ -408,6 +408,9 @@ class Kg51IngestService:
         }
         await self.repo.save_entity(record)
         stat["entities"] += 1
+        # 写事件联动缓存失效(P2 查询缓存——fail-soft)
+        from services import kg51_query_cache
+        kg51_query_cache.invalidate_all()
         return True
 
     async def _upsert_triple(
@@ -493,6 +496,9 @@ class Kg51IngestService:
         await self.repo.save_triple(record)
         await self.repo.index_fp(fp, triple_id)
         stat["triples"] += 1
+        # 写事件联动缓存失效(P2 查询缓存——fail-soft)
+        from services import kg51_query_cache
+        kg51_query_cache.invalidate_all()
         # 低置信三元组 → 复核队列(confidence)
         if confidence < REVIEW_THRESHOLD:
             await self._enqueue_review(
