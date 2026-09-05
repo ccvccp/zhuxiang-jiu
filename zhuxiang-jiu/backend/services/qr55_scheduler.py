@@ -13,6 +13,10 @@
          转正, 已标注跳过; 含 44号池双写+45号信值结算)
       ③ 指标快照留痕(metrics_snapshot——P5 漂移监控
          数据源)
+      ④ 学习轮次(P3——44号 Hedge 复用; 门槛不足/
+         冻结中 skip 留痕不报错)
+      ⑤ 滑动窗口回归检测(P3——指标回退 → 自动回滚
+         +46号冻结; 无基线/反馈不足 skip 留痕)
 
 环境开关(计划 §六开关矩阵——双开关铁律):
     QR55_LEARN_MODE=on        开启学习调度
@@ -102,16 +106,19 @@ async def sweep_expired_codes() -> dict:
 
 
 # ============================================================
-# 调度主轮(清扫→补标→指标快照)
+# 调度主轮(清扫→补标→指标快照→学习→回归检测)
 # ============================================================
 
 async def run_scheduled_collect() -> dict:
     """执行一轮 T+1 批次补标(可独立调用, 便于测试与
     手动触发):
     ① sweep_expired_codes → ② collect_feedback →
-    ③ record_snapshot"""
+    ③ record_snapshot → ④ learn(门槛不足/冻结
+    skip 留痕) → ⑤ check_regression(回退确认
+    留痕)"""
     result = {"sweep": None, "collect": None,
-              "metrics": None, "errors": []}
+              "metrics": None, "learn": None,
+              "regression": None, "errors": []}
 
     try:
         result["sweep"] = await sweep_expired_codes()
@@ -151,6 +158,57 @@ async def run_scheduled_collect() -> dict:
         logger.warning("qr55_sched_metrics_failed: %s",
                        exc)
         result["errors"].append(f"metrics:{exc}")
+
+    # 学习步(门槛不足/冻结中 → skip 留痕不报错)
+    try:
+        from services.qr55_learn_service import (
+            Qr55LearnService,
+        )
+        learn = await Qr55LearnService().run_learning()
+        result["learn"] = {
+            "newVersion": learn.get("newVersion"),
+            "promoted": learn.get("promoted"),
+            "learnedFrom": learn.get("learnedFrom"),
+        }
+    except ValueError as exc:
+        # min_feedback 门槛未达/冻结——预期静默
+        result["learn"] = {"skipped": str(exc)[:80]}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("qr55_sched_learn_failed: %s",
+                       exc)
+        result["errors"].append(f"learn:{exc}")
+
+    # 回归检测步(滑动窗口回退 → 自动回滚+冻结;
+    # 无晋升基线/反馈不足 → skip 留痕不报错)
+    try:
+        from services.qr55_learn_service import (
+            Qr55LearnService,
+        )
+        regression = await Qr55LearnService(
+        ).check_regression()
+        if regression.get("regressed"):
+            result["regression"] = {
+                "regressed": True,
+                "drop": regression.get("drop"),
+                "threshold": regression.get("threshold"),
+                "rolledBackTo":
+                    (regression.get("rollback") or {})
+                    .get("newVersion"),
+                "frozen":
+                    (regression.get("freeze") or {})
+                    .get("frozen"),
+            }
+        else:
+            result["regression"] = {
+                "regressed": False,
+                "applicable":
+                    regression.get("applicable"),
+                "reason": regression.get("reason"),
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "qr55_sched_regression_failed: %s", exc)
+        result["errors"].append(f"regression:{exc}")
 
     # 调度层统计留痕(模型事件)
     try:

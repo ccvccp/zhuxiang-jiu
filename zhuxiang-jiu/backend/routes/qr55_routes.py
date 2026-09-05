@@ -1,10 +1,10 @@
-"""55号·二维码AI智能管理路由(P0+P1+P2)
+"""55号·二维码AI智能管理路由(P0+P1+P2+P3)
 
-端点(P0 4 + P1 3 + P2 4 = 11):
+端点(P0 4 + P1 3 + P2 4 + P3 3 = 14):
     GET  /api/qr55/registry          注册表自描述(admin, 观测面)
     POST /api/qr55/intent/parse      意图解析演示(admin, 观测面)
     POST /api/qr55/code/generate     签名码生成(admin, on, P0 能力验证)
-    GET  /api/qr55/model/status      模型状态(admin, 观测面)
+    GET  /api/qr55/model/status      模型状态+就绪态(admin, 观测面)
     POST /api/qr55/generate          智能生码编排(admin+member, P1)
     POST /api/qr55/scan              扫码核销(member, P1)
     POST /api/qr55/clarify           澄清问句生成(member, P1)
@@ -12,6 +12,9 @@
     GET  /api/qr55/code/{codeId}     码实例详情+事件链(admin, 观测面, P2)
     GET  /api/qr55/stats             六指标快照(admin, 观测面, P2)
     POST /api/qr55/feedback/collect  决策回流补标(admin, 管理面, P2)
+    POST /api/qr55/model/learn       学习轮次(admin, 管理面, P3)
+    POST /api/qr55/model/promote     手动晋升(admin, 管理面, P3)
+    POST /api/qr55/model/rollback    版本回滚(admin, 管理面, P3)
 
 鉴权: 管理面 X-Role: admin(43-54号同款口径);
       会员面(member) generate/scan 携 memberId。
@@ -22,8 +25,8 @@
     - 生成面(generate): off=拒绝(409——存量二维码
       链路零影响)
     - 核销面(scan): off=拒绝(409)
-    - 管理面(feedback/collect): off 亦可用(回流
-      采集不依赖生成面——54号 collect 同范式)
+    - 管理面(feedback/collect+model/*): off 亦可用
+      (回流采集/学习面不依赖生成面——54号 同范式)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -130,11 +133,27 @@ async def code_generate(
 async def model_status(
         x_role: str | None = Header(default=None,
                                     alias="X-Role")):
-    """模型状态(champion/challenger/八因子
-    ——44号 get_weights_view 复用; 观测面)"""
+    """模型状态+学习就绪态(champion/challenger/
+    八因子+pending 门槛——44号 get_weights_view 复用;
+    观测面)"""
     _require_admin(x_role)
     from services.qr55_service import Qr55Service
-    return await Qr55Service().model_status()
+    result = await Qr55Service().model_status()
+    # P3: 就绪态并入(pending 反馈数/门槛/ready)
+    try:
+        from services.qr55_learn_service import (
+            Qr55LearnService,
+        )
+        readiness = await Qr55LearnService(
+        ).learning_readiness()
+        result["status"]["readiness"] = {
+            k: readiness.get(k)
+            for k in ("pendingFeedback", "minFeedback",
+                      "ready", "championVersion",
+                      "challengerVersion")}
+    except Exception:  # noqa: BLE001
+        pass   # 就绪态 fail-soft——状态本体不受影响
+    return result
 
 
 @router.post("/generate")
@@ -287,6 +306,60 @@ async def feedback_collect(
     try:
         return await Qr55FeedbackService(
         ).collect_feedback(member_id=memberId)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/model/learn")
+async def model_learn(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """学习轮次(44号 Hedge 复用——护栏 [0.5,2.0] 倍
+    +归一化+冻结守卫内建; 门槛不足/冻结中 409)"""
+    _require_admin(x_role)
+    from services.qr55_learn_service import (
+        Qr55LearnService,
+    )
+    try:
+        return await Qr55LearnService().run_learning()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/model/promote")
+async def model_promote(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """手动晋升挑战者(44号 promote_challenger 复用;
+    无挑战者 409)"""
+    _require_admin(x_role)
+    from services.qr55_learn_service import (
+        Qr55LearnService,
+    )
+    try:
+        return await Qr55LearnService().promote()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/model/rollback")
+async def model_rollback(
+        versionId: str | None = None,
+        reason: str = "",
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """版本回滚(指定 versionId; 缺省最新退役;
+    无历史 409)"""
+    _require_admin(x_role)
+    from services.qr55_learn_service import (
+        Qr55LearnService,
+    )
+    try:
+        return await Qr55LearnService().rollback(
+            version_id=versionId, reason=reason)
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
