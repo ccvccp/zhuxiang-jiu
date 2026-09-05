@@ -1339,3 +1339,190 @@ class Login53Service:
             "quickCommands": self.BRIEFING_COMMANDS,
             "generatedAt": ts(),
         }
+
+    # ============================================================
+    # P3 角色专属入口+价值钩子
+    # ============================================================
+
+    async def portal_config(self,
+                            member_id: int) -> dict:
+        """四态门户配置(P3——原方案 §四-2 角色专属
+        入口模式: 界面随角色态自适应)
+
+        每态返回: 门户行为+UI 聚焦点+价值钩子+
+        推荐通道+话术键(高危去污名化——
+        禁红色警告, 橙色+解释性插图口径)。
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"LOGIN53_MODE={mode}(默认 off——"
+                f"编排面关闭; 四态判定走 GET /portal"
+                f" 观测面)")
+        state = await self.resolve_portal_state(member_id)
+        portal_state = state["portalState"]
+        meta = PORTAL_STATES[portal_state]
+
+        # 意图预判(登录后直达页——active 态核心)
+        profile = await self.repo.get_profile(member_id)
+        intent = (profile or {}).get("topIntent") \
+            or "browse"
+
+        # 推荐通道(预算感知——49号探针)
+        budget = await self._budget_probe(member_id)
+        channels = self._recommend_channels(budget)
+
+        # 各态差异化配置
+        if portal_state == "new":
+            ui = {
+                "focus": "价值启蒙+快速建档",
+                "heroScript": "wake_login",
+                "guideSteps": [
+                    "信值是什么(30 秒交互式演示)",
+                    "做任务→攒信值→兑权益流程图",
+                    "一键手机号快捷建档"],
+                "deEmphasize": "登录表单(弱化)",
+            }
+        elif portal_state == "active":
+            ui = {
+                "focus": "无感续接",
+                "heroScript": "passkey_silent",
+                "directPage": INTENT_PAGES.get(
+                    intent, INTENT_PAGES["browse"]),
+                "valueBar": "个人信值等级光晕+待办摘要",
+            }
+        elif portal_state == "dormant":
+            missed = self._missed_opportunities(
+                state.get("daysSinceLogin"))
+            ui = {
+                "focus": "损失规避+一键恢复",
+                "heroScript": "streak_achieved",
+                "missedTimeline": missed,
+                "restoreHint": "无需额外验证, 30 秒内"
+                               "恢复进度",
+            }
+        else:   # high_risk
+            ui = {
+                "focus": "透明保护(去污名化)",
+                "heroScript": "new_device_login",
+                "riskCard": "风险归因卡片"
+                             "(橙色+解释性插图"
+                             "——禁红色警告)",
+                "humanSupport": True,
+                "explainEntry": "查看安全策略"
+                                "(通俗语言解释风控逻辑)",
+            }
+
+        return {
+            "memberId": member_id,
+            "portalState": portal_state,
+            "stateLabel": meta["label"],
+            "criteria": meta["criteria"],
+            "portal": meta["portal"],
+            "hook": meta["hook"],
+            "ui": ui,
+            "recommendedChannels": channels,
+            "budget": budget,
+            "note": "液态信任布局——界面随信任"
+                    "等级与意图自适应(原方案 §四)",
+            "generatedAt": ts(),
+        }
+
+    @staticmethod
+    def _missed_opportunities(days: int | None) -> dict:
+        """沉睡用户错过收益时间轴(P3——原方案
+        §四-2 沉睡用户: 可视化"错过收益")"""
+        d = int(days or 0)
+        if d <= 0:
+            return {"days": 0,
+                    "items": [], "note": "活跃中"}
+        # 估算口径(mock——日均信值增长机会)
+        per_day = 0.4
+        return {
+            "days": d,
+            "estimatedMissed":
+                round(d * per_day, 1),
+            "items": [
+                {"period": "最近 7 天",
+                 "opportunities": min(d, 7) * 2},
+                {"period": "更早",
+                 "opportunities":
+                     max(0, d - 7) * 2},
+            ],
+            "restorePath": "一键恢复进度"
+                           "(无需额外验证)",
+            "note": "灰色虚线表示未登录时段, "
+                    "高亮标注可恢复节点",
+        }
+
+    async def generate_portal_hook(
+            self, member_id: int) -> dict:
+        """登录前价值钩子投放(P3——认证完成前投放:
+        "还没进门就有收获")
+
+        四态差异化钩子: new(交互式价值演示)/
+        active(待办摘要)/dormant(错过收益时间轴)/
+        high_risk(风险归因+人工兜底)。
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"LOGIN53_MODE={mode}(默认 off——"
+                f"编排面关闭)")
+        state = await self.resolve_portal_state(member_id)
+        portal_state = state["portalState"]
+        data = await self._collect_hook_data(member_id)
+
+        if portal_state == "new":
+            hook = {
+                "type": "value_demo",
+                "title": "信值是什么?",
+                "content": "做任务→攒信值→兑权益"
+                           "(30 秒交互式演示)",
+                "scriptKey": "wake_login",
+            }
+        elif portal_state == "active":
+            hook = {
+                "type": "todo_summary",
+                "title": "欢迎回来",
+                "content": f"今日待办 "
+                           f"{data.get('taskCount', '0')} 项"
+                           f" | 信值 {data.get('score', '—')}",
+                "scriptKey": "passkey_silent",
+            }
+        elif portal_state == "dormant":
+            missed = self._missed_opportunities(
+                state.get("daysSinceLogin"))
+            hook = {
+                "type": "loss_avoidance",
+                "title": "您错过的信值增长机会",
+                "content": f"离开 {missed['days']} 天, "
+                           f"约 {missed['estimatedMissed']} "
+                           f"个增长机会——一键即可恢复",
+                "missedTimeline": missed,
+                "scriptKey": "streak_achieved",
+            }
+        else:   # high_risk
+            hook = {
+                "type": "risk_transparency",
+                "title": "为保障您的信值安全",
+                "content": "需额外确认身份——这是常规"
+                           "保护措施, 请放心"
+                           "(这不是您的错)",
+                "humanSupport": True,
+                "scriptKey": "new_device_login",
+            }
+
+        script = render_script(
+            hook["scriptKey"], data)
+        return {
+            "memberId": member_id,
+            "portalState": portal_state,
+            "hook": hook,
+            "script": script,
+            "hookData": data,
+            "preAuth": True,
+            "note": "认证完成前投放——等待时间"
+                    "转化为价值感知时间",
+            "generatedAt": ts(),
+        }

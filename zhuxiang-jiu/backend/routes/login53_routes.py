@@ -1,6 +1,6 @@
-"""53号·小竹智能登录引擎路由(P0-P2)
+"""53号·小竹智能登录引擎路由(P0-P3)
 
-端点(P0 6 + P1 2 + P2 2 = 10):
+端点(P0 6 + P1 2 + P2 2 + P3 2 = 12):
     GET  /api/login53/registry        注册表视图(admin)
     GET  /api/login53/portal          角色四态判定(会员面)
     POST /api/login53/prelogin/sense  态势感知(会员面, on)
@@ -11,6 +11,8 @@
     GET  /api/login53/my/events       本人登录历史(P1, 脱敏)
     POST /api/login53/voice/wake-login 唤醒即认证(P2, on)
     GET  /api/login53/voice/briefing   登录后语音导览(P2, on)
+    GET  /api/login53/portal/config    四态门户配置(P3, on)
+    POST /api/login53/portal/hook      登录前价值钩子投放(P3, on)
 
 鉴权: 会员面 X-Member-Id(compat 兼容头)/管理面
 X-Role: admin(43-52号同款口径)。
@@ -18,8 +20,8 @@ X-Role: admin(43-52号同款口径)。
     - 观测面(registry/查询/事件历史)不受
       LOGIN53_MODE 影响
     - 编排面(sense/hook/baseline/orchestrate/
-      wake-login/briefing) off=拒绝(409——
-      直通存量 39号登录)
+      wake-login/briefing/portal) off=拒绝
+      (409——直通存量 39号登录)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -253,6 +255,40 @@ async def voice_briefing(
                 "briefing": await (
                     Login53Service()
                     .voice_briefing(member_id))}
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/portal/config")
+async def portal_config(
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """四态门户配置(P3——液态信任布局:
+    UI 聚焦+价值钩子+推荐通道自适应)"""
+    member_id = _require_member(x_member_id)
+    try:
+        return {"success": True,
+                "config": await (
+                    Login53Service()
+                    .portal_config(member_id))}
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/portal/hook")
+async def portal_hook(
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """登录前价值钩子投放(P3——认证完成前
+    投放: "还没进门就有收获")"""
+    member_id = _require_member(x_member_id)
+    try:
+        return {"success": True,
+                "portalHook": await (
+                    Login53Service()
+                    .generate_portal_hook(member_id))}
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
