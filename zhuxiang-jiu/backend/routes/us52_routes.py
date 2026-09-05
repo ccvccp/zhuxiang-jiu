@@ -1,19 +1,24 @@
-"""52号·小竹语音可用性评估引擎路由(P0 指标注册表+决策规则)
+"""52号·小竹语音可用性评估引擎路由(P0 注册表+P1 功能可信度管道)
 
-端点(P0 共 5):
+端点(P0 6 + P1 3 = 9):
     GET  /api/us52/registry           指标注册表视图(admin)
     GET  /api/us52/dimensions         五维结构(admin)
     POST /api/us52/metrics/compute    指标快照计算(admin, US52_MODE=on)
     GET  /api/us52/metrics/latest      最近快照(admin)
     GET  /api/us52/metrics/snapshots   快照历史(admin)
     POST /api/us52/release-gate       上线门禁(admin)
+    POST /api/us52/tests/run          执行测试任务集(P1, admin)
+    GET  /api/us52/tests              测试会话历史(P1, admin)
+    POST /api/us52/metrics/functional 功能可信度五指标计算(P1, admin)
 
 鉴权: 管理端 X-Role: admin(43-51号同款口径)。
 统一口径:
     - 治理面(registry/dimensions/查询)不受
       US52_MODE 数据面开关影响
-    - 计算面 off=拒绝(409——测试停铁律,
+    - 计算面/测试面 off=拒绝(409——测试停铁律,
       51号采集停同款语义)
+    - 测试走真管道(48号会话+49号网关)——
+      独立号段 5300-5399 隔离
     - 模块纯增量(零既有路由改动)
     - KeyError → 404 / ValueError → 409
 """
@@ -22,6 +27,9 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from services.us52_service import Us52MetricsService
+from services.us52_task_engine import (
+    TASK_LIBRARY, Us52TaskEngine,
+)
 
 router = APIRouter(prefix="/api/us52",
                    tags=["小竹语音可用性评估(52号)"])
@@ -107,6 +115,72 @@ async def release_gate(
     _require_admin(x_role)
     return Us52MetricsService.release_gate(
         body.metrics, body.sacrificeFlags)
+
+
+class TestsRunIn(BaseModel):
+    taskIds: list[str] | None = None
+    memberId: int | None = None
+
+
+class FunctionalIn(BaseModel):
+    testId: int | None = None
+
+
+@router.post("/tests/run")
+async def run_tests(
+        body: TestsRunIn | None = None,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """执行测试任务集(P1——四类任务跑真管道;
+    US52_MODE=on 时可用)"""
+    _require_admin(x_role)
+    task_ids = (body.taskIds if body
+                and body.taskIds else None)
+    member_id = (body.memberId if body
+                 and body.memberId else None)
+    try:
+        return await Us52TaskEngine().run_tests(
+            task_ids=task_ids,
+            member_id=member_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/tests")
+async def list_tests(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """测试会话历史(最新在前)"""
+    _require_admin(x_role)
+    sessions = await Us52TaskEngine().repo \
+        .list_sessions(limit=100)
+    return {"success": True,
+            "total": len(sessions),
+            "tests": sessions,
+            "taskLibrary": {
+                k: {"kind": v["kind"],
+                    "description": v["description"]}
+                for k, v in TASK_LIBRARY.items()}}
+
+
+@router.post("/metrics/functional")
+async def compute_functional(
+        body: FunctionalIn | None = None,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """功能可信度五指标计算(P1——49号审计
+    口径直采+任务结果命中率)"""
+    _require_admin(x_role)
+    test_id = (body.testId if body
+               and body.testId else None)
+    try:
+        return await Us52MetricsService(
+        ).compute_functional_metrics(
+            test_id=test_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_us52_routes(app) -> None:

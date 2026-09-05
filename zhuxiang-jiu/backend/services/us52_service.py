@@ -136,6 +136,158 @@ class Us52MetricsService:
                 "snapshots": records}
 
     # --------------------------------------------------------
+    # 功能可信度管道(P1: 五指标计算)
+    # --------------------------------------------------------
+
+    async def compute_functional_metrics(
+            self, test_id: int = None) -> dict:
+        """功能可信度五指标计算(数据源:
+        49号审计口径直采 + 52号任务结果)
+
+        - fc_success_rate: 审计 kind=ok/总调用
+        - explain_ref_rate: 含 ref 审计比例
+        - budget_accuracy: 审计 cost 与预算
+          流水偏差≤0.01 比例
+        - confirm_rate: 确认挑战完成比例
+        - intent_accuracy: 任务结果
+          expectedIntent 命中率
+        """
+        from services.us52_registry import (
+            current_mode,
+        )
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"US52_MODE={mode}(默认 off——"
+                f"计算面关闭)")
+
+        from repositories.xiaozhu_repository \
+            import Xiaozhu48Repository
+        xrepo = Xiaozhu48Repository()
+        audits = await xrepo.list_records(
+            xrepo.TABLE_FC_AUDIT, limit=10000)
+
+        # ① FC 成功率(kind=ok 口径)
+        total_calls = len(audits)
+        ok_calls = sum(
+            1 for a in audits
+            if (a.get("kind") or "") == "ok")
+        fc_success = round(
+            ok_calls / total_calls, 4) \
+            if total_calls else 1.0
+
+        # ② 证据链完整性(审计六字段铁律——
+        # error 字段空即 ref 链完好口径)
+        ref_ok = sum(
+            1 for a in audits
+            if not (a.get("error") or ""))
+        explain_ref = round(
+            ref_ok / total_calls, 4) \
+            if total_calls else 1.0
+
+        # ③ 预算消耗准确性(审计静态 cost 与
+        # 注册表比对——偏差>0.01 告警)
+        from services.xiaozhu_fc_registry import (
+            TOOL_REGISTRY,
+        )
+        budget_ok = 0
+        budget_checked = 0
+        for a in audits:
+            tool = (a.get("toolName") or "")
+            # action 字段即 TOOL_REGISTRY 键
+            action = a.get("action") or ""
+            meta = TOOL_REGISTRY.get(action) \
+                or TOOL_REGISTRY.get(tool)
+            if meta is None:
+                continue
+            budget_checked += 1
+            if abs(float(a.get("privacyCost") or 0)
+                    - float(meta["privacyCost"])) \
+                    <= 0.01:
+                budget_ok += 1
+        budget_acc = round(
+            budget_ok / budget_checked, 4) \
+            if budget_checked else 1.0
+
+        # ④ 敏感操作确认率(敏感审计中
+        # consentTokenHash 非空比例)
+        sensitive = [a for a in audits
+                     if (a.get("tier") or "")
+                     == "sensitive"]
+        confirmed = sum(
+            1 for a in sensitive
+            if (a.get("consentTokenHash") or ""))
+        confirm_rate = round(
+            confirmed / len(sensitive), 4) \
+            if sensitive else 1.0
+
+        # ⑤ 意图准确率(任务结果命中率)
+        intent_acc = 1.0
+        sample_count = 0
+        results = list(
+            self.repo.store.get(
+                self.repo.TABLE_RESULTS,
+                {}).values()) \
+            if self.repo.store is not None else []
+        if test_id is not None:
+            results = [r for r in results
+                       if int(r.get("testId") or 0)
+                       == int(test_id)]
+        # Redis 态直扫
+        from repositories.backend import (
+            is_redis_mode, get_redis_client, _k,
+        )
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "us52", self.repo.TABLE_RESULTS, "*"))
+            results = []
+            for i in range(0, len(keys), 500):
+                pipe = client.pipeline(
+                    transaction=False)
+                for k in keys[i:i + 500]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if data:
+                        results.append(
+                            self.repo._deserialize(
+                                data))
+            if test_id is not None:
+                results = [
+                    r for r in results
+                    if int(r.get("testId") or 0)
+                    == int(test_id)]
+        intent_tasks = [r for r in results
+                        if r.get("expectedIntent")]
+        if intent_tasks:
+            sample_count = len(intent_tasks)
+            hits = sum(
+                1 for r in intent_tasks
+                if (r.get("expectedIntent") or "")
+                == (r.get("actualIntent") or ""))
+            intent_acc = round(
+                hits / sample_count, 4)
+
+        metrics = {
+            "fc_success_rate": fc_success,
+            "explain_ref_rate": explain_ref,
+            "budget_accuracy": budget_acc,
+            "confirm_rate": confirm_rate,
+            "intent_accuracy": intent_acc,
+        }
+        detail = {
+            "auditTotal": total_calls,
+            "auditOk": ok_calls,
+            "budgetChecked": budget_checked,
+            "sensitiveAudits": len(sensitive),
+            "intentSamples": sample_count,
+            "testId": test_id,
+        }
+        return {"success": True,
+                "metrics": metrics,
+                "detail": detail}
+
+    # --------------------------------------------------------
     # 上线门禁(release-gate 决策入口)
     # --------------------------------------------------------
 
