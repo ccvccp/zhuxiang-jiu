@@ -22,6 +22,7 @@
     POST /api/kg51/feedback                  纠错反馈(P4, 会员面)
     GET  /api/kg51/feedback                  反馈台账(P4, admin)
     GET  /api/kg51/dashboard                 治理看板(P4, admin)
+    POST /api/kg51/redteam                   红队用例集执行(P5, admin)
 
 鉴权: 管理端 X-Role: admin(43-50号同款口径);
       会员面 X-Member-Id(48号惯例); 公开面无鉴权。
@@ -48,6 +49,7 @@ from services.kg51_ingest_service import (
     Kg51IngestService, Kg51ReviewService,
 )
 from services.kg51_query_service import Kg51QueryService
+from services.kg51_redteam import Kg51RedteamService
 from services.kg51_schema_service import Kg51SchemaService
 from services.kg51_trace_service import Kg51TraceService
 
@@ -465,6 +467,16 @@ async def dashboard(
     预算消耗/版本五分区)"""
     _require_admin(x_role)
     return await Kg51GovernanceService().dashboard()
+
+
+@router.post("/redteam")
+async def run_redteam(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """红队用例集执行(P5——五类攻击向量 12 用例,
+    跑真管道; breached>0 即上线阻断)"""
+    _require_admin(x_role)
+    return await Kg51RedteamService().run()
 
 
 def register_kg51_routes(app) -> None:

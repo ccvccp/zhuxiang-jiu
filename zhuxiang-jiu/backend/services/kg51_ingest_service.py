@@ -623,7 +623,15 @@ class Kg51IngestService:
             confidence: float,
             evidence: dict, stat: dict) -> None:
         """三元组 upsert(指纹查重; 置信度更优更新;
-        单值谓词冲突按源优先级裁决)"""
+        单值谓词冲突按源优先级裁决)
+
+        置信度源上限钳制(P5 红队防线——注入护栏):
+            user ≤ CONFIDENCE_USER(0.6)/
+            system ≤ CONFIDENCE_SYSTEM_SETTLED(0.98)
+            ——调用方伪造高置信度无效(硬兜底)
+        """
+        confidence = _clamp_confidence(
+            source_type, confidence)
         fp = triple_fingerprint(subject, predicate,
                                object_id)
         existing = await self.repo.find_triple_by_fp(fp)
@@ -757,6 +765,23 @@ def _source_priority(source_type: str) -> int:
     """源优先级(计划 §五 阶段4: 权威>系统>用户)"""
     return {"authority": 3, "system": 2,
             "user": 1}.get(source_type or "", 0)
+
+
+def _clamp_confidence(source_type: str,
+                       confidence: float) -> float:
+    """置信度源上限钳制(P5 红队防线——注入护栏)
+
+    调用方(未来 LLM 抽取轨/外部管道)伪造高置信度
+    无效: 每源硬上限, 超限即钳制。
+    """
+    caps = {"user": CONFIDENCE_USER,
+            "system": CONFIDENCE_SYSTEM_SETTLED,
+            "authority": CONFIDENCE_AUTHORITY}
+    cap = caps.get(source_type or "")
+    if cap is None:
+        return min(float(confidence or 0),
+                   CONFIDENCE_USER)
+    return min(float(confidence or 0), cap)
 
 
 class Kg51ReviewService:
