@@ -38,7 +38,7 @@ class Us52Repository:
                    "memberId", "resultId", "reportId",
                    "alertId", "taskCount", "sampleCount")
     _FLOAT_FIELDS = ("value", "baseline")
-    _JSON_DICT_FIELDS = ("metrics", "rationale")
+    _JSON_DICT_FIELDS = ("metrics", "complianceImpact")
     _JSON_LIST_FIELDS = ("vetoFailed", "failedByDimension")
 
     def __init__(self):
@@ -165,6 +165,36 @@ class Us52Repository:
                       .values()]
         result.sort(key=lambda r: -int(
             r.get("snapId") or 0))
+        return result[:limit]
+
+    # --------------------------------------------------------
+    # 评估报告(P4 只追加)
+    # --------------------------------------------------------
+
+    async def list_reports(
+            self, limit: int = 50) -> list[dict]:
+        """评估报告列表(最新在前——P4 留痕回溯;
+        reportId 取自 sessions seq, 无独立 seq 键)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "us52", self.TABLE_REPORTS, "*"))
+            result = []
+            for i in range(0, len(keys), 5000):
+                pipe = client.pipeline(transaction=False)
+                for k in keys[i:i + 5000]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+        else:
+            self._ensure_store()
+            result = [dict(r) for r in
+                      self.store.get(self.TABLE_REPORTS,
+                                     {}).values()]
+        result.sort(key=lambda r: -int(
+            r.get("reportId") or 0))
         return result[:limit]
 
     # --------------------------------------------------------

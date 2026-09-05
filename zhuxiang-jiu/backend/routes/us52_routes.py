@@ -1,6 +1,6 @@
-"""52号·小竹语音可用性评估引擎路由(P0-P3)
+"""52号·小竹语音可用性评估引擎路由(P0-P4)
 
-端点(P0 6 + P1 3 + P2 1 + P3 1 = 11):
+端点(P0 6 + P1 3 + P2 1 + P3 1 + P4 4 = 15):
     GET  /api/us52/registry           指标注册表视图(admin)
     GET  /api/us52/dimensions         五维结构(admin)
     POST /api/us52/metrics/compute    指标快照计算(admin, US52_MODE=on)
@@ -12,6 +12,10 @@
     POST /api/us52/metrics/functional 功能可信度五指标计算(P1, admin)
     POST /api/us52/metrics/resilience 安全韧性五指标计算(P2, admin)
     POST /api/us52/metrics/inclusion   包容性公平两指标计算(P3, admin)
+    POST /api/us52/metrics/transparency 透明度四指标计算(P4, admin)
+    POST /api/us52/metrics/trust       信任体验四指标计算(P4, admin)
+    POST /api/us52/reports/generate    评估报告生成(P4, admin)
+    GET  /api/us52/reports             评估报告列表(P4, admin)
 
 鉴权: 管理端 X-Role: admin(43-51号同款口径)。
 统一口径:
@@ -214,6 +218,60 @@ async def compute_inclusion(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
+
+
+@router.post("/metrics/transparency")
+async def compute_transparency(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """交互透明度四指标计算(P4——隐私播报/
+    归因覆盖/错误合规/用途说明)"""
+    _require_admin(x_role)
+    try:
+        return await Us52MetricsService(
+        ).compute_transparency_metrics()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/metrics/trust")
+async def compute_trust(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """信任体验四指标计算(P4——行为代理:
+    信任增益四源加权/控制感/伦理负面/反馈健康)"""
+    _require_admin(x_role)
+    try:
+        return await Us52MetricsService(
+        ).compute_trust_metrics()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/reports/generate")
+async def generate_report(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """评估报告生成(P4——五维全量聚合+决策+
+    信值合规影响评估章节)"""
+    _require_admin(x_role)
+    try:
+        return await Us52MetricsService(
+        ).generate_report()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/reports")
+async def list_reports(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """评估报告列表(P4——留痕回溯, 双模式读取)"""
+    _require_admin(x_role)
+    return await Us52MetricsService().list_reports()
 
 
 def register_us52_routes(app) -> None:

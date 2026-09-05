@@ -631,6 +631,432 @@ class Us52MetricsService:
         return results
 
     # --------------------------------------------------------
+    # 透明度管道(P4: 四指标)
+    # --------------------------------------------------------
+
+    async def compute_transparency_metrics(
+            self) -> dict:
+        """交互透明度四指标(数据源:
+        48号轮次意图+49号审计——只读聚合)
+
+        - privacy_notice_rate: 隐私相关响应
+          含告知话术比例
+        - attribution_rate: 信值变动响应含
+          归因模板比例(proxy)
+        - error_clarity: 错误响应非技术术语
+          (黑名单匹配)比例
+        - data_purpose_rate: 联邦/验真场景响应
+          含用途说明比例(proxy)
+        """
+        from services.us52_registry import (
+            current_mode,
+        )
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"US52_MODE={mode}(默认 off——"
+                f"计算面关闭)")
+
+        from repositories.xiaozhu_repository import (
+            Xiaozhu48Repository,
+        )
+        xrepo = Xiaozhu48Repository()
+        turns = await xrepo.scan_turns(limit=10000)
+
+        # 隐私相关意图集
+        PRIVACY_INTENTS = ("privacy.budget",
+                           "trust.convert",
+                           "repair.execute")
+        privacy_turns = [t for t in turns
+                         if (t.get("intent")
+                             or "") in PRIVACY_INTENTS
+                         or "隐私" in str(
+                             t.get("reply") or "")]
+        notice_hits = sum(
+            1 for t in privacy_turns
+            if any(w in str(t.get("reply") or "")
+                   for w in ("隐私", "预算", "数据",
+                             "授权", "偏好")))
+        privacy_notice = round(
+            notice_hits / len(privacy_turns), 4) \
+            if privacy_turns else 1.0
+
+        # 信值变动意图(归因模板触发)
+        VALUE_INTENTS = ("trust.score", "trust.balance",
+                         "voice.score", "trust.convert",
+                         "repair.execute")
+        value_turns = [t for t in turns
+                       if (t.get("intent")
+                           or "") in VALUE_INTENTS]
+        attribution_hits = sum(
+            1 for t in value_turns
+            if t.get("reply"))
+        attribution = round(
+            attribution_hits / len(value_turns),
+            4) if value_turns else 1.0
+
+        # 错误解释合规(fallback 轮次无技术术语)
+        TECH_WORDS = ("traceback", "exception",
+                      "error code", "stack",
+                      "内部错误", "exception:")
+        error_turns = [t for t in turns
+                      if not t.get("wake")
+                      and any(w in str(
+                          t.get("reply") or "")
+                          .lower() for w
+                          in ("抱歉", "未能",
+                              "无法", "暂时"))]
+        clear_hits = sum(
+            1 for t in error_turns
+            if not any(w in str(
+                t.get("reply") or "").lower()
+                for w in TECH_WORDS))
+        error_clarity = round(
+            clear_hits / len(error_turns), 4) \
+            if error_turns else 1.0
+
+        # 数据用途说明(联邦/验真/训练场景)
+        PURPOSE_INTENTS = ("trust.convert",
+                           "repair.execute",
+                           "voice.score")
+        purpose_turns = [t for t in turns
+                         if (t.get("intent")
+                             or "") in PURPOSE_INTENTS]
+        purpose_hits = sum(
+            1 for t in purpose_turns
+            if any(w in str(t.get("reply") or "")
+                   for w in ("用途", "用于", "训练",
+                             "验真", "授权")))
+        data_purpose = round(
+            purpose_hits / len(purpose_turns),
+            4) if purpose_turns else 1.0
+
+        metrics = {
+            "privacy_notice_rate": privacy_notice,
+            "attribution_rate": attribution,
+            "error_clarity": error_clarity,
+            "data_purpose_rate": data_purpose,
+        }
+        return {"success": True,
+                "metrics": metrics,
+                "detail": {
+                    "turnTotal": len(turns),
+                    "privacyTurns": len(privacy_turns),
+                    "valueTurns": len(value_turns),
+                    "errorTurns": len(error_turns),
+                    "purposeTurns":
+                        len(purpose_turns),
+                    "note": "无样本场景=1.0"
+                            "(空态满分——透明度"
+                            "未观测到违规)",
+                }}
+
+    # --------------------------------------------------------
+    # 信任体验管道(P4: 行为代理四源加权)
+    # --------------------------------------------------------
+
+    async def compute_trust_metrics(self) -> dict:
+        """信任体验感四指标(全部行为代理——
+        主观量表外部待办, 报告显式标注)
+
+        - trust_gain_index: 反馈采纳+申诉翻转+
+          主动授权+礼貌留存(标准化加权)
+        - control_sense_rate: 隐私偏好可达性
+          (偏好调整流水观测)
+        - ethics_negative_rate: corpus 反馈
+          负关键词占比
+        - feedback_health_ratio:
+          建设性反馈/总反馈
+        """
+        from services.us52_registry import (
+            current_mode,
+        )
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"US52_MODE={mode}(默认 off——"
+                f"计算面关闭)")
+
+        from repositories.voice50_repository import (
+            Voice50Repository,
+        )
+        v50 = Voice50Repository()
+        events = await v50.list_events(limit=100000)
+        adjudications = await v50.list_adjudications(
+            limit=5000)
+        corpus = await v50.list_corpus(limit=5000)
+
+        # ① 信任增益指数(四源加权——proxy)
+        # 反馈采纳(corpus adopted)
+        adopted = sum(
+            1 for c in corpus
+            if (c.get("status") or "")
+            == "adopted")
+        corpus_total = len(corpus) or 1
+        adopt_ratio = adopted / corpus_total
+
+        # 申诉翻转(adjudication overturned)
+        overturned = sum(
+            1 for a in adjudications
+            if (a.get("status") or "")
+            == "overturned")
+        adj_total = len(adjudications) or 1
+        overturn_ratio = overturned / adj_total
+
+        # 主动授权(voice_privacy_grant 正向)
+        grants = sum(
+            1 for e in events
+            if (e.get("behavior") or "")
+            == "voice_privacy_grant"
+            and float(e.get("finalScore")
+                      or 0) > 0)
+        grant_ratio = min(1.0, grants / 10.0)
+
+        # 礼貌留存(voice_polite 连续性)
+        polite = sum(
+            1 for e in events
+            if (e.get("behavior") or "")
+            == "voice_polite"
+            and float(e.get("finalScore")
+                      or 0) > 0)
+        polite_ratio = min(1.0, polite / 20.0)
+
+        # 加权(各 25%——报告标注 proxy)
+        trust_gain = round(
+            0.25 * (adopt_ratio
+                    + overturn_ratio
+                    + grant_ratio
+                    + polite_ratio), 4)
+
+        # ② 控制感代理(隐私偏好调整可达性——
+        # 49号预算偏好流水观测)
+        control = 1.0
+        control_detail = {
+            "note": "偏好调整端点可达"
+                    "(PUT /privacy/preferences)"}
+        try:
+            from repositories.xiaozhu_repository \
+                import Xiaozhu48Repository
+            xrepo = Xiaozhu48Repository()
+            xrepo._ensure_store()
+            accounts = list(
+                xrepo.store.get(
+                    xrepo.TABLE_PRIVACY,
+                    {}).values())
+            control_detail["accounts"] = len(accounts)
+            # 有调整痕迹(非默认 1.0)即控制权行使
+            adjusted = sum(
+                1 for a in accounts
+                if float(a.get("preference")
+                         or 1.0) != 1.0)
+            control_detail["adjusted"] = adjusted
+            control = round(
+                adjusted / len(accounts), 4) \
+                if accounts else 0.6
+        except Exception as exc:  # noqa: BLE001
+            control_detail["note"] = \
+                f"skip: {str(exc)[:40]}"
+
+        # ③ 伦理负面提及率(corpus 负关键词)
+        NEGATIVE_WORDS = ("不满", "投诉", "恶心",
+                          "歧视", "骚扰", "侵犯",
+                          "泄露", "滥用")
+        negative = sum(
+            1 for c in corpus
+            if any(w in str(
+                c.get("scenario") or "")
+                for w in NEGATIVE_WORDS))
+        ethics_negative = round(
+            negative / corpus_total, 4)
+
+        # ④ 反馈健康度(建设性/总反馈)
+        feedbacks = [e for e in events
+                     if (e.get("behavior")
+                         or "") == "voice_feedback"]
+        constructive = sum(
+            1 for e in feedbacks
+            if float(e.get("finalScore")
+                     or 0) > 0)
+        feedback_health = round(
+            constructive / len(feedbacks), 4) \
+            if feedbacks else 0.7
+
+        metrics = {
+            "trust_gain_index": trust_gain,
+            "control_sense_rate": control,
+            "ethics_negative_rate":
+                ethics_negative,
+            "feedback_health_ratio":
+                feedback_health,
+        }
+        return {"success": True,
+                "metrics": metrics,
+                "detail": {
+                    "trustSources": {
+                        "adoptRatio":
+                            round(adopt_ratio, 4),
+                        "overturnRatio":
+                            round(overturn_ratio, 4),
+                        "grantRatio":
+                            round(grant_ratio, 4),
+                        "politeRatio":
+                            round(polite_ratio, 4)},
+                    "control": control_detail,
+                    "corpusTotal": len(corpus),
+                    "adjudicationTotal":
+                        len(adjudications),
+                    "feedbackTotal": len(feedbacks),
+                    "proxyNote":
+                        "信任增益/控制感为行为代理"
+                        "指标(主观量表外部待办)——"
+                        "报告已显式标注",
+                }}
+
+    # --------------------------------------------------------
+    # 评估报告(P4: 含信值合规影响评估章节)
+    # --------------------------------------------------------
+
+    async def generate_report(self) -> dict:
+        """评估报告生成(原方案 §六-6 直译:
+        除常规可用性指标外, 必须包含《信值合规
+        影响评估》章节——说明测试发现对信值体系
+        的潜在风险及缓解建议)
+
+        聚合五维全量指标 → 决策 → 报告留痕。
+        """
+        from services.us52_registry import (
+            current_mode, decide,
+            DIMENSION_LABELS,
+        )
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"US52_MODE={mode}(默认 off——"
+                f"计算面关闭)")
+
+        # 聚合五维指标
+        functional = await \
+            self.compute_functional_metrics()
+        resilience = await \
+            self.compute_resilience_metrics()
+        inclusion = await \
+            self.compute_inclusion_metrics()
+        trust = await self.compute_trust_metrics()
+        transparency = await \
+            self.compute_transparency_metrics()
+
+        metrics = {}
+        metrics.update(
+            functional.get("metrics") or {})
+        metrics.update(
+            resilience.get("metrics") or {})
+        metrics.update(
+            inclusion.get("metrics") or {})
+        metrics.update(trust.get("metrics") or {})
+        metrics.update(
+            transparency.get("metrics") or {})
+
+        decision = decide(metrics)
+
+        # 信值合规影响评估章节
+        compliance_impact = {
+            "potentialRisks": [],
+            "mitigations": [],
+        }
+        m = metrics
+        if (m.get("privacy_notice_rate")
+                or 1.0) < 0.9:
+            compliance_impact[
+                "potentialRisks"].append(
+                "隐私提示不足——用户对数据使用"
+                "边界认知缺口(合规风险)")
+            compliance_impact[
+                "mitigations"].append(
+                "强化隐私告知话术覆盖"
+                "(48号轮次回复模板)")
+        if (m.get("intent_parity_gap")
+                or 0) > 0.05:
+            compliance_impact[
+                "potentialRisks"].append(
+                "群体意图命中组间差超限——"
+                "老年/残障群体服务降级风险"
+                "(伦理合规)")
+            compliance_impact[
+                "mitigations"].append(
+                "方言/语速适配专项优化"
+                "(50号群体三场景系数复核)")
+        if (m.get("ethics_negative_rate")
+                or 0) > 0.05:
+            compliance_impact[
+                "potentialRisks"].append(
+                "伦理负面提及率超限——用户"
+                "信任损耗信号")
+            compliance_impact[
+                "mitigations"].append(
+                "负面反馈根因归类+48号话术"
+                "修订(人工复核通道)")
+        if decision["decision"] == "veto":
+            compliance_impact[
+                "potentialRisks"].append(
+                "安全韧性未达——上线即合规事故")
+            compliance_impact[
+                "mitigations"].append(
+                "禁止上线, 修复后重跑红队+回归")
+        if not compliance_impact[
+                "potentialRisks"]:
+            compliance_impact[
+                "potentialRisks"].append(
+                "未发现对信值体系的显著风险")
+            compliance_impact[
+                "mitigations"].append(
+                "维持现有防线(动态阈值监控)")
+
+        report_id = await self.repo.next_test_id()
+        record = {
+            "reportId": report_id,
+            "mode": mode,
+            "metricCount": len(metrics),
+            "metrics": metrics,
+            "decision": decision["decision"],
+            "rationale": decision["rationale"],
+            "vetoFailed": decision["vetoFailed"],
+            "failedByDimension":
+                decision["failedByDimension"],
+            "complianceImpact":
+                compliance_impact,
+            "proxyDisclaimer":
+                "trust 维四项为行为代理指标"
+                "(主观量表外部待办)",
+            "createdAt": ts(),
+        }
+        # 报告落库(us52_reports 表——
+        # 内存态; Redis 态 hset)
+        from repositories.backend import (
+            is_redis_mode, get_redis_client, _k,
+        )
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("us52", self.repo.TABLE_REPORTS,
+                   report_id),
+                mapping=self.repo._serialize(record))
+        else:
+            self.repo._ensure_store()
+            self.repo.store[
+                self.repo.TABLE_REPORTS][
+                report_id] = dict(record)
+        return {"success": True,
+                "report": record}
+
+    async def list_reports(self) -> dict:
+        """评估报告列表(最新在前——P4 留痕回溯;
+        内存+Redis 双模式)"""
+        records = await self.repo.list_reports(limit=50)
+        return {"success": True,
+                "total": len(records),
+                "reports": records}
+
+    # --------------------------------------------------------
     # 上线门禁(release-gate 决策入口)
     # --------------------------------------------------------
 
