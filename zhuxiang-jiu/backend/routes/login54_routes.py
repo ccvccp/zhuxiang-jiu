@@ -1,6 +1,6 @@
-"""54号·小竹AI智能登录引擎大模型路由(P0-P3)
+"""54号·小竹AI智能登录引擎大模型路由(P0-P4)
 
-端点(P0 4 + P1 2 + P2 2 + P3 2 = 10):
+端点(P0 4 + P1 2 + P2 2 + P3 2 + P4 2 = 12):
     GET  /api/login54/registry        模型注册表视图(admin, 观测面)
     GET  /api/login54/model/status    模型状态(admin, 观测面)
     POST /api/login54/score/preview   影子评分预览(admin, on)
@@ -11,10 +11,12 @@
     POST /api/login54/model/shadow-compare 影子对比(challenger vs champion, admin, P2)
     POST /api/login54/model/promote   挑战者手动晋升(admin, P3)
     POST /api/login54/model/rollback  版本回滚(admin, P3)
+    GET  /api/login54/governance/health 模型健康(46号三检测器, admin, P4)
+    POST /api/login54/attribution     LLM 归因报告(admin, P4)
 
 鉴权: 管理面 X-Role: admin(43-53号同款口径)。
 统一口径:
-    - 观测面(registry/status/history/stats)不受
+    - 观测面(registry/status/history/stats/health)不受
       LOGIN54_MODE 影响
     - 模型面(preview/dual_score 内部调用)
       off=拒绝(409——53号编排走 auth_risk 原轨)
@@ -25,6 +27,8 @@
     - 升级面(promote/rollback): 人工兜底通道;
       滑动窗口回归检测由调度器自动执行
       (回退→自动回滚+冻结+告警)
+    - 治理面(health/attribution): 漂移 EMA+46号
+      三检测器+LLM 归因(mock/real 三态)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -211,6 +215,37 @@ async def model_rollback(
         return await Login54LearnService().rollback(
             version_id=payload.versionId,
             reason=payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/governance/health")
+async def governance_health(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """模型健康(46号三检测器: 停滞/枯竭/漂移——
+    单档案评估+冻结状态+变更审批通道; 观测面)"""
+    _require_admin(x_role)
+    from services.login54_health_service import (
+        Login54HealthService,
+    )
+    return await Login54HealthService(
+    ).governance_health()
+
+
+@router.post("/attribution")
+async def attribution(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """LLM 归因报告(最近权重变更自然语言解释——
+    mock 确定性模板/real 润色三态, 数字来自数据层)"""
+    _require_admin(x_role)
+    from services.login54_health_service import (
+        Login54HealthService,
+    )
+    try:
+        return await Login54HealthService().attribution()
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))

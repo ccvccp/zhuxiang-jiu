@@ -504,8 +504,8 @@ class TestSchedulerAndHttp:
         )
         count54 = sum(
             1 for r in login54_router.routes)
-        record("54号路由累计 10 端点",
-               count54 == 10, str(count54))
+        record("54号路由 ≥10 端点(P3 基线)",
+               count54 >= 10, str(count54))
 
 
 async def run_all():
