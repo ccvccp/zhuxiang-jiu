@@ -1143,3 +1143,199 @@ class Login53Service:
         return {"success": True,
                 "total": len(records),
                 "events": records}
+
+    # ============================================================
+    # P2 语音融合登录
+    # ============================================================
+
+    # 唤醒即认证短语集(48号唤醒前缀+语义双因子口令)
+    WAKE_LOGIN_PHRASES = (
+        "我回来了", "我到家了", "我回来了呀")
+
+    # 语音导览快捷指令(登录后直达页映射)
+    BRIEFING_COMMANDS = {
+        "查详情": "信值报告页",
+        "去修复": "修复任务页",
+        "随便逛逛": "首页(随便逛逛)",
+    }
+
+    async def voice_wake_login(self, member_id: int,
+                               utterance: str,
+                               fingerprint: str = "",
+                               ip: str = "",
+                               hour: int = None) -> dict:
+        """唤醒即认证(P2——原方案 §三-1 直译)
+
+        流程: 唤醒词判定(48号 detect_wake) → 声纹
+        初验(50号 verify——proxy 标注不作凭证) →
+        语义口令校验(双因子) → 会话建立(48号
+        open_session) → 编排签发(风险分级) →
+        登录后导览首播。
+
+        - 声纹置信度达标+口令正确 → 完成登录
+        - 声纹过但口令缺失/错误 → voice_confirm
+          话术引导(双因子铁律)
+        - 未唤醒 → 反语音霸权提示(48号同款)
+
+        Raises:
+            ValueError: off 态/未唤醒/口令不匹配
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"LOGIN53_MODE={mode}(默认 off——"
+                f"编排面关闭, 直通存量 39号登录)")
+        text = str(utterance or "").strip()
+        if not text:
+            raise ValueError("语音内容不能为空")
+
+        # ① 唤醒判定(48号 detect_wake——近似音容错)
+        from services.xiaozhu_service import detect_wake
+        woken, command_text = detect_wake(text)
+        if not woken:
+            script = render_script("idle_30s", {})
+            raise ValueError(
+                "未唤醒——请以「小竹」开头唤我"
+                f"(反语音霸权红线): {script['text'][:20]}...")
+
+        # ② 声纹初验(50号 verify——语音通道+绑定)
+        #    proxy 态 verified 仅作初筛标注, 不作凭证
+        from services.xiaozhu_voice50_voiceprint import (
+            verify as voiceprint_verify,
+        )
+        voice = await voiceprint_verify(
+            member_id, session={}, channel="voice")
+        voice_mode = voice.get("mode")
+        liveness = voice.get("liveness")
+
+        # ③ 语义口令校验(双因子第二因子)
+        spoken = command_text.strip()
+        if spoken not in self.WAKE_LOGIN_PHRASES:
+            # 声纹过但口令缺失/错误 → 双因子引导
+            script = render_script("voice_confirm", {})
+            await self._record_login_event(
+                member_id, "voice", success=False,
+                risk_score=0.0,
+                decision="dual_factor_pending",
+                duration_ms=0.0,
+                privacy_cost=0.0,
+                explain_ref="voice_semantic_required",
+                detail=f"spoken={spoken[:20]}")
+            return {
+                "status": "dual_factor_required",
+                "memberId": member_id,
+                "voiceprint": {
+                    "mode": voice_mode,
+                    "liveness": liveness,
+                    "initialScreen": True,
+                    "note": "声纹初筛已过(proxy 标注——"
+                            "不作凭证, 须语义口令双因子)",
+                },
+                "expectedPhrases":
+                    list(self.WAKE_LOGIN_PHRASES),
+                "script": script,
+                "nextStep": "请再说一次口令(带 utterance "
+                            "重调 voice/wake-login)",
+            }
+
+        # ④ 会话建立(48号 open_session——语音通道)
+        from services.xiaozhu_service import (
+            XiaozhuService,
+        )
+        session = await XiaozhuService().open_session(
+            member_id, channel="voice")
+
+        # ⑤ 编排签发(voice 通道——双因子已齐)
+        try:
+            orchestration = await self.orchestrate(
+                member_id, "voice",
+                credential={
+                    "voiceConfirmed": True,
+                    "spokenPhrase": spoken},
+                fingerprint=fingerprint, ip=ip,
+                hour=hour)
+        except ValueError as exc:
+            # 编排层异常透传+会话留痕说明
+            raise ValueError(
+                f"{exc}(语音会话 {session.get('sessionId')} "
+                f"已建立待二次核验)") from None
+
+        # ⑥ 登录后导览首播(价值前置)
+        briefing = await self.voice_briefing(member_id)
+        orchestration["voiceSession"] = session
+        orchestration["briefing"] = briefing
+        orchestration["voiceprint"] = {
+            "mode": voice_mode, "liveness": liveness,
+            "dualFactor": True,
+        }
+        return orchestration
+
+    async def voice_briefing(
+            self, member_id: int) -> dict:
+        """登录后语音导览(P2——原方案 §三-3 直译)
+
+        个性化摘要: 信值分(45号经 48号绑定桥)+
+        语音积分(50号/48号台账)+待办+快捷指令;
+        "早上好！您当前信值 782, 较上周↑15..."
+        """
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"LOGIN53_MODE={mode}(默认 off——"
+                f"编排面关闭)")
+
+        # 素材聚合(全部 fail-soft 只读)
+        data = await self._collect_hook_data(member_id)
+        nickname = data.get("nickname") or "用户"
+        score = data.get("score") or "—"
+        delta = data.get("delta") or "持平"
+        task_count = data.get("taskCount") or "0"
+
+        # 语音积分(48号台账——fail-soft)
+        points = 0.0
+        try:
+            from repositories.xiaozhu_repository import (
+                Xiaozhu48Repository,
+            )
+            points = await (
+                Xiaozhu48Repository().points_balance(
+                    member_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("login53_briefing_points_"
+                           "failed %s: %s", member_id, exc)
+
+        # 时段问候
+        from datetime import datetime
+        h = datetime.now().hour
+        if 6 <= h < 11:
+            greeting = "早上好"
+        elif 11 <= h < 14:
+            greeting = "中午好"
+        elif 14 <= h < 18:
+            greeting = "下午好"
+        else:
+            greeting = "晚上好"
+
+        text = (f"{greeting}，{nickname}！当前信值{score}，"
+                f"较上周{delta}。语音积分{points:.0f}分，"
+                f"今日待办{task_count}项。"
+                f"您可以说'查详情'、'去修复'或"
+                f"'随便逛逛'，我来帮您导航。")
+        script = render_script("wake_login", {
+            "nickname": nickname, "score": score,
+            "delta": delta})
+        return {
+            "memberId": member_id,
+            "greeting": greeting,
+            "text": text,
+            "script": script,
+            "summary": {
+                "nickname": nickname,
+                "trustScore": score,
+                "delta": delta,
+                "voicePoints": round(points, 1),
+                "pendingTasks": task_count,
+            },
+            "quickCommands": self.BRIEFING_COMMANDS,
+            "generatedAt": ts(),
+        }

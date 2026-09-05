@@ -1,6 +1,6 @@
-"""53号·小竹智能登录引擎路由(P0-P1)
+"""53号·小竹智能登录引擎路由(P0-P2)
 
-端点(P0 6 + P1 2 = 8):
+端点(P0 6 + P1 2 + P2 2 = 10):
     GET  /api/login53/registry        注册表视图(admin)
     GET  /api/login53/portal          角色四态判定(会员面)
     POST /api/login53/prelogin/sense  态势感知(会员面, on)
@@ -9,14 +9,17 @@
     GET  /api/login53/my/profile      本人入口档案(会员面)
     POST /api/login53/auth/orchestrate 统一多模态登录编排(P1, on)
     GET  /api/login53/my/events       本人登录历史(P1, 脱敏)
+    POST /api/login53/voice/wake-login 唤醒即认证(P2, on)
+    GET  /api/login53/voice/briefing   登录后语音导览(P2, on)
 
 鉴权: 会员面 X-Member-Id(compat 兼容头)/管理面
 X-Role: admin(43-52号同款口径)。
 统一口径:
     - 观测面(registry/查询/事件历史)不受
       LOGIN53_MODE 影响
-    - 编排面(sense/hook/baseline/orchestrate)
-      off=拒绝(409——直通存量 39号登录)
+    - 编排面(sense/hook/baseline/orchestrate/
+      wake-login/briefing) off=拒绝(409——
+      直通存量 39号登录)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -66,6 +69,13 @@ class OrchestrateIn(BaseModel):
     ip: str = ""
     confirmToken: str | None = None
     challengeResponse: str | None = None
+    hour: int | None = None
+
+
+class WakeLoginIn(BaseModel):
+    utterance: str
+    fingerprint: str = ""
+    ip: str = ""
     hour: int | None = None
 
 
@@ -205,6 +215,47 @@ async def my_events(
     member_id = _require_member(x_member_id)
     return await Login53Service().list_events(
         member_id=member_id)
+
+
+@router.post("/voice/wake-login")
+async def voice_wake_login(
+        body: WakeLoginIn,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """唤醒即认证(P2——唤醒词+声纹初验+
+    语义口令双因子+会话建立+编排签发+
+    登录后导览首播)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await Login53Service().voice_wake_login(
+            member_id, body.utterance,
+            fingerprint=body.fingerprint,
+            ip=body.ip, hour=body.hour)
+        return {"success": True,
+                "wakeLogin": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+
+
+@router.get("/voice/briefing")
+async def voice_briefing(
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """登录后语音导览(P2——信值/积分/待办
+    个性化摘要+快捷指令)"""
+    member_id = _require_member(x_member_id)
+    try:
+        return {"success": True,
+                "briefing": await (
+                    Login53Service()
+                    .voice_briefing(member_id))}
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_login53_routes(app) -> None:
