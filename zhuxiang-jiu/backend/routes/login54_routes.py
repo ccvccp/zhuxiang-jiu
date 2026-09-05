@@ -1,12 +1,14 @@
-"""54号·小竹AI智能登录引擎大模型路由(P0+P1)
+"""54号·小竹AI智能登录引擎大模型路由(P0-P2)
 
-端点(P0 4 + P1 2 = 6):
+端点(P0 4 + P1 2 + P2 2 = 8):
     GET  /api/login54/registry        模型注册表视图(admin, 观测面)
     GET  /api/login54/model/status    模型状态(admin, 观测面)
     POST /api/login54/score/preview   影子评分预览(admin, on)
     GET  /api/login54/model/history   模型事件历史(admin, 观测面)
     POST /api/login54/feedback/collect 决策回流标注触发(admin, P1)
     GET  /api/login54/feedback/stats  回流统计(admin, 观测面, P1)
+    POST /api/login54/model/learn     在线学习轮次触发(admin, P2)
+    POST /api/login54/model/shadow-compare 影子对比(challenger vs champion, admin, P2)
 
 鉴权: 管理面 X-Role: admin(43-53号同款口径)。
 统一口径:
@@ -16,6 +18,8 @@
       off=拒绝(409——53号编排走 auth_risk 原轨)
     - 回流面(collect): 53号 events 幂等扫描——
       主动触发即回流(同步语义), 调度器 T+1 补标
+    - 学习面(learn): 44号 Hedge 引擎复用——
+      min_feedback 门槛不足/冻结中 → 409
     - KeyError → 404 / ValueError → 409
 """
 
@@ -124,6 +128,43 @@ async def feedback_stats(
         Login54FeedbackService,
     )
     return await Login54FeedbackService().feedback_stats()
+
+
+@router.post("/model/learn")
+async def model_learn(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """在线学习轮次触发(44号 Hedge 引擎复用——
+    min_feedback=10 门槛+护栏 [0.5,2.0] 倍+
+    冻结守卫内建; login54_model_events 留痕)"""
+    _require_admin(x_role)
+    from services.login54_learn_service import (
+        Login54LearnService,
+    )
+    try:
+        return await Login54LearnService().run_learning()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/model/shadow-compare")
+async def model_shadow_compare(
+        body: PreviewIn,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """影子评分对比(challenger vs champion 双轨试算
+    ——模拟决策对比; 无挑战者时仅返回 champion 轨)"""
+    _require_admin(x_role)
+    from services.login54_learn_service import (
+        Login54LearnService,
+    )
+    try:
+        return await Login54LearnService(
+        ).shadow_compare(body.ctx)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_login54_routes(app) -> None:

@@ -51,13 +51,15 @@ def scheduler_interval_seconds() -> int:
 
 
 async def run_scheduled_collect() -> dict:
-    """执行一轮 T+1 批次补标(可独立调用, 便于测试与
-    手动触发——collect 内部: 53号 events 幂等扫描→
-    pending 转正→44号池双写)"""
+    """执行一轮 T+1 批次补标+学习尝试(可独立调用,
+    便于测试与手动触发——collect 内部: 53号 events
+    幂等扫描→pending 转正→44号池双写; 补标后
+    pending≥min_feedback 时尝试一轮 Hedge 学习)"""
     from services.login54_feedback_service import (
         Login54FeedbackService,
     )
-    result = {"collect": None, "errors": []}
+    result = {"collect": None, "learn": None,
+              "errors": []}
     try:
         collect = await Login54FeedbackService(
         ).collect_feedback()
@@ -74,6 +76,24 @@ async def run_scheduled_collect() -> dict:
                        exc)
         result["errors"].append(f"collect:{exc}")
 
+    # 学习步(门槛不足/冻结中 → skip 留痕不报错)
+    try:
+        from services.login54_learn_service import (
+            Login54LearnService,
+        )
+        learn = await Login54LearnService().run_learning()
+        result["learn"] = {
+            "newVersion": learn.get("newVersion"),
+            "promoted": learn.get("promoted"),
+            "learnedFrom": learn.get("learnedFrom"),
+        }
+    except ValueError as exc:
+        # min_feedback 门槛未达/冻结——预期静默
+        result["learn"] = {"skipped": str(exc)[:80]}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("login54_sched_learn_failed: %s", exc)
+        result["errors"].append(f"learn:{exc}")
+
     # 统计留痕(供运维观察——collect 侧已落
     # model_events, 此处仅调度层状态)
     stats = {
@@ -81,6 +101,7 @@ async def run_scheduled_collect() -> dict:
         "lastIntervalSeconds":
             scheduler_interval_seconds(),
         "lastCollect": result["collect"],
+        "lastLearn": result["learn"],
         "lastErrors": result["errors"][-10:],
     }
     try:
