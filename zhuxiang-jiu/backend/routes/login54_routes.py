@@ -1,6 +1,6 @@
-"""54号·小竹AI智能登录引擎大模型路由(P0-P4)
+"""54号·小竹AI智能登录引擎大模型路由(P0-P5)
 
-端点(P0 4 + P1 2 + P2 2 + P3 2 + P4 2 = 12):
+端点(P0 4 + P1 2 + P2 2 + P3 2 + P4 2 + P5 1 = 13):
     GET  /api/login54/registry        模型注册表视图(admin, 观测面)
     GET  /api/login54/model/status    模型状态(admin, 观测面)
     POST /api/login54/score/preview   影子评分预览(admin, on)
@@ -13,11 +13,12 @@
     POST /api/login54/model/rollback  版本回滚(admin, P3)
     GET  /api/login54/governance/health 模型健康(46号三检测器, admin, P4)
     POST /api/login54/attribution     LLM 归因报告(admin, P4)
+    GET  /api/login54/dashboard       引擎大模型看板(admin, P5)
 
 鉴权: 管理面 X-Role: admin(43-53号同款口径)。
 统一口径:
-    - 观测面(registry/status/history/stats/health)不受
-      LOGIN54_MODE 影响
+    - 观测面(registry/status/history/stats/health/
+      dashboard)不受 LOGIN54_MODE 影响
     - 模型面(preview/dual_score 内部调用)
       off=拒绝(409——53号编排走 auth_risk 原轨)
     - 回流面(collect): 53号 events 幂等扫描——
@@ -29,6 +30,8 @@
       (回退→自动回滚+冻结+告警)
     - 治理面(health/attribution): 漂移 EMA+46号
       三检测器+LLM 归因(mock/real 三态)
+    - 看板面(dashboard): 四区聚合+红队防御区
+      (fail-soft 单区异常不阻断)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -249,6 +252,19 @@ async def attribution(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """引擎大模型看板(版本/因子/回流/漂移四区+
+    红队防御区——护栏状态+标注源集中度; fail-soft)"""
+    _require_admin(x_role)
+    from services.login54_dashboard_service import (
+        Login54DashboardService,
+    )
+    return await Login54DashboardService().build()
 
 
 def register_login54_routes(app) -> None:
