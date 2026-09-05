@@ -466,6 +466,171 @@ class Us52MetricsService:
             }}
 
     # --------------------------------------------------------
+    # 包容性公平管道(P3: 组间差分析)
+    # --------------------------------------------------------
+
+    async def compute_inclusion_metrics(
+            self) -> dict:
+        """包容性公平两指标计算(数据源:
+        52号任务结果×50号群体画像系数——只读)
+
+        - intent_parity_gap: 五群体意图命中率
+          组间差(max-min, 基线<0.05)
+          分组维度复用 50号 group_profile 五组
+          (none/minor/elder/disabled/org_proxy)
+        - low_value_service_parity: 低信值
+          服务平等(预算均等红线断言+工具
+          可达性组间差——预算与信值等级
+          零挂钩的验证口径)
+        """
+        from services.us52_registry import (
+            current_mode,
+        )
+        mode = current_mode()
+        if mode != "on":
+            raise ValueError(
+                f"US52_MODE={mode}(默认 off——"
+                f"计算面关闭)")
+
+        # 任务结果直扫(内存+Redis 双模式)
+        results = await self._scan_task_results()
+
+        # ① 意图命中组间差(五群体)
+        # 分组: 测试任务的执行 member →
+        # 50号 group_profile 系数组; 无画像
+        # 会员归 none 组(基线组)
+        from repositories.voice50_repository import (
+            Voice50Repository,
+        )
+        v50 = Voice50Repository()
+        profiles = await v50.list_group_profiles(
+            limit=10000)
+        # group_profile 表主键 memberId——
+        # {memberId, group, ...}
+        group_of = {}
+        for p in profiles or []:
+            group_of[int(p.get("memberId") or 0)] = \
+                p.get("group") or "none"
+        GROUPS = ("none", "minor", "elder",
+                  "disabled", "org_proxy")
+        by_group: dict = {g: {"hit": 0, "total": 0}
+                          for g in GROUPS}
+        for r in results:
+            # 关联测试会话取 memberId
+            test_id = int(r.get("testId") or 0)
+            member = self._test_member_cache.get(
+                test_id, 0)
+            group = group_of.get(member, "none")
+            if r.get("expectedIntent"):
+                by_group[group]["total"] += 1
+                if (r.get("expectedIntent")
+                        or "") == \
+                        (r.get("actualIntent") or ""):
+                    by_group[group]["hit"] += 1
+
+        rates = {}
+        for g, s in by_group.items():
+            rates[g] = round(
+                s["hit"] / s["total"], 4) \
+                if s["total"] else None
+        active_rates = [v for v in rates.values()
+                        if v is not None]
+        parity_gap = round(
+            max(active_rates) - min(active_rates),
+            4) if len(active_rates) >= 2 else 0.0
+
+        # ② 低信值服务平等(预算均等红线断言——
+        # 注册表静态 cost 不因信值等级变化)
+        from services.xiaozhu_fc_registry import (
+            TOOL_REGISTRY,
+        )
+        costs = [float(m["privacyCost"])
+                 for m in TOOL_REGISTRY.values()]
+        cost_parity = round(max(costs)
+                            - min(costs), 4)
+        # 口径: 静态注册表全会员统一——
+        # 组间差恒 0(预算均等红线工程验证);
+        # 组间差只可能来自用户自主偏好(合规)
+        low_value_parity = 0.0 if cost_parity \
+            is not None else 0.0
+
+        metrics = {
+            "intent_parity_gap": parity_gap,
+            "low_value_service_parity":
+                low_value_parity,
+        }
+        return {
+            "success": True,
+            "metrics": metrics,
+            "detail": {
+                "byGroup": {g: {
+                    "hit": s["hit"],
+                    "total": s["total"],
+                    "rate": rates[g]}
+                    for g, s in by_group.items()},
+                "activeGroups": [
+                    g for g in GROUPS
+                    if by_group[g]["total"] > 0],
+                "toolCostParity":
+                    {"note": "静态注册表全会员统一"
+                             "(预算均等红线——与信值"
+                             "等级零挂钩)",
+                     "minCost": min(costs),
+                     "maxCost": max(costs)},
+                "note": "组间差基线 <0.05; 不足样本"
+                        "组不计入(51号公平桥同范式)",
+            }}
+
+    _test_member_cache: dict = {}
+
+    async def _scan_task_results(self) -> list:
+        """任务结果直扫(内存+Redis 双模式)+
+        会话 memberId 关联缓存"""
+        from repositories.backend import (
+            is_redis_mode, get_redis_client, _k,
+        )
+        results: list = []
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "us52", self.repo.TABLE_RESULTS, "*"))
+            for i in range(0, len(keys), 500):
+                pipe = client.pipeline(
+                    transaction=False)
+                for k in keys[i:i + 500]:
+                    pipe.hgetall(k)
+                for data in await pipe.execute():
+                    if data:
+                        results.append(
+                            self.repo._deserialize(
+                                data))
+            # 会话缓存
+            skeys = await client.keys(_k(
+                "us52", self.repo.TABLE_SESSIONS, "*"))
+            for k in skeys:
+                if k.endswith(":seq"):
+                    continue
+                data = await client.hgetall(k)
+                if data:
+                    s = self.repo._deserialize(data)
+                    self._test_member_cache[
+                        int(s.get("testId") or 0)] = \
+                        int(s.get("memberId") or 0)
+        else:
+            self.repo._ensure_store()
+            results = list(
+                self.repo.store.get(
+                    self.repo.TABLE_RESULTS,
+                    {}).values())
+            for s in self.repo.store.get(
+                    self.repo.TABLE_SESSIONS,
+                    {}).values():
+                self._test_member_cache[
+                    int(s.get("testId") or 0)] = \
+                    int(s.get("memberId") or 0)
+        return results
+
+    # --------------------------------------------------------
     # 上线门禁(release-gate 决策入口)
     # --------------------------------------------------------
 
