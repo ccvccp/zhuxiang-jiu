@@ -94,6 +94,38 @@ async def run_scheduled_collect() -> dict:
         logger.warning("login54_sched_learn_failed: %s", exc)
         result["errors"].append(f"learn:{exc}")
 
+    # 回归检测步(滑动窗口指标回退 → 自动回滚+冻结;
+    # 无晋升基线/反馈不足 → skip 留痕不报错)
+    try:
+        from services.login54_learn_service import (
+            Login54LearnService,
+        )
+        regression = await Login54LearnService(
+        ).check_regression()
+        if regression.get("regressed"):
+            result["regression"] = {
+                "regressed": True,
+                "drop": regression.get("drop"),
+                "threshold": regression.get("threshold"),
+                "rolledBackTo":
+                    (regression.get("rollback") or {})
+                    .get("newVersion"),
+                "frozen":
+                    (regression.get("freeze") or {})
+                    .get("frozen"),
+            }
+        else:
+            result["regression"] = {
+                "regressed": False,
+                "applicable":
+                    regression.get("applicable"),
+                "reason": regression.get("reason"),
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "login54_sched_regression_failed: %s", exc)
+        result["errors"].append(f"regression:{exc}")
+
     # 统计留痕(供运维观察——collect 侧已落
     # model_events, 此处仅调度层状态)
     stats = {
@@ -102,6 +134,7 @@ async def run_scheduled_collect() -> dict:
             scheduler_interval_seconds(),
         "lastCollect": result["collect"],
         "lastLearn": result["learn"],
+        "lastRegression": result.get("regression"),
         "lastErrors": result["errors"][-10:],
     }
     try:

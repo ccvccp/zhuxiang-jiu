@@ -1,6 +1,6 @@
-"""54号·小竹AI智能登录引擎大模型路由(P0-P2)
+"""54号·小竹AI智能登录引擎大模型路由(P0-P3)
 
-端点(P0 4 + P1 2 + P2 2 = 8):
+端点(P0 4 + P1 2 + P2 2 + P3 2 = 10):
     GET  /api/login54/registry        模型注册表视图(admin, 观测面)
     GET  /api/login54/model/status    模型状态(admin, 观测面)
     POST /api/login54/score/preview   影子评分预览(admin, on)
@@ -9,6 +9,8 @@
     GET  /api/login54/feedback/stats  回流统计(admin, 观测面, P1)
     POST /api/login54/model/learn     在线学习轮次触发(admin, P2)
     POST /api/login54/model/shadow-compare 影子对比(challenger vs champion, admin, P2)
+    POST /api/login54/model/promote   挑战者手动晋升(admin, P3)
+    POST /api/login54/model/rollback  版本回滚(admin, P3)
 
 鉴权: 管理面 X-Role: admin(43-53号同款口径)。
 统一口径:
@@ -20,6 +22,9 @@
       主动触发即回流(同步语义), 调度器 T+1 补标
     - 学习面(learn): 44号 Hedge 引擎复用——
       min_feedback 门槛不足/冻结中 → 409
+    - 升级面(promote/rollback): 人工兜底通道;
+      滑动窗口回归检测由调度器自动执行
+      (回退→自动回滚+冻结+告警)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -162,6 +167,50 @@ async def model_shadow_compare(
     try:
         return await Login54LearnService(
         ).shadow_compare(body.ctx)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/model/promote")
+async def model_promote(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """挑战者手动晋升(auto_apply 外人工通道——
+    44号 promote_challenger 复用+事件留痕)"""
+    _require_admin(x_role)
+    from services.login54_learn_service import (
+        Login54LearnService,
+    )
+    try:
+        return await Login54LearnService().promote()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+class RollbackIn(BaseModel):
+    """版本回滚入参(缺省→最新退役版本)"""
+    versionId: str | None = None
+    reason: str = ""
+
+
+@router.post("/model/rollback")
+async def model_rollback(
+        body: RollbackIn | None = None,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """版本回滚(指定历史版本缺省→最新退役——
+    旧冠军入历史+rollback 事件留痕可溯)"""
+    _require_admin(x_role)
+    from services.login54_learn_service import (
+        Login54LearnService,
+    )
+    payload = body or RollbackIn()
+    try:
+        return await Login54LearnService().rollback(
+            version_id=payload.versionId,
+            reason=payload.reason)
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
