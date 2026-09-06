@@ -319,6 +319,10 @@ register_ii59_routes(app)
 from routes.ab63_routes import register_ab63_routes
 register_ab63_routes(app)
 
+# AI智能支付管理(60号)
+from routes.pay60_routes import register_pay60_routes
+register_pay60_routes(app)
+
 
 # ============================================================
 # 静态媒体服务(35号 AI Hub P3: /media/voice|image/xxx, 本地卷持久化)

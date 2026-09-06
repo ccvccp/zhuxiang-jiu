@@ -177,6 +177,18 @@ services:
       - AB63_LEARN_MODE=${AB63_LEARN_MODE:-off}
       # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
       - AB63_LEARN_INTERVAL=${AB63_LEARN_INTERVAL:-86400}
+      # ---- 60号 AI智能支付管理(P0: 决策面三级灰度, 默认 off——存量订单/交易链路零影响, 并行不替换) ----
+      # shadow=观察学习期(订单留痕); assist=辅助生产期(收银台渲染开放);
+      #     off=决策面 409(观测面 registry/orders/model 等不受影响)
+      - PAY60_MODE=${PAY60_MODE:-off}
+      # 渠道三态(41号 DRIDE 范式): mock=mock 回执(默认)/real=fail-hard 凭证经 .env/mock_fallback=真实失败回退
+      - PAY60_CHANNEL_MODE=${PAY60_CHANNEL_MODE:-mock}
+      # LLM 归因文案润色(仅建议不进判定链, 默认 off)
+      - PAY60_LLM_MODE=${PAY60_LLM_MODE:-off}
+      # on=T+1 决策回流补标调度; off=仅手动触发(P4 端点)
+      - PAY60_LEARN_MODE=${PAY60_LEARN_MODE:-off}
+      # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
+      - PAY60_LEARN_INTERVAL=${PAY60_LEARN_INTERVAL:-86400}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

@@ -152,7 +152,7 @@ class TestQuietRound:
                str(r)[:60])
         scan = r.get("lastScan") or {}
         record("巡检执行(31档案)",
-               scan.get("scorerCount") == 35
+               scan.get("scorerCount") == 36
                and scan.get("scanId") is not None,
                str(scan)[:60])
         record("零新告警", scan.get("alertsNew") == 0,
@@ -294,7 +294,7 @@ class TestFailSoft:
         r = await sched.run_scheduled_governance_tasks()
         record("恢复后正常巡检",
                (r.get("lastScan") or {})
-               .get("scorerCount") == 35,
+               .get("scorerCount") == 36,
                str(r.get("lastScan"))[:60])
 
 

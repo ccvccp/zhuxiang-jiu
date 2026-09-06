@@ -399,7 +399,7 @@ class TestConstitution:
                "admin_orchestration"
                in SCORER_REGISTRY
                and len(SCORER_REGISTRY)
-               == 35,
+               == 36,
                str(len(SCORER_REGISTRY)))
 
         # ② 63号 21 端点完整收官
