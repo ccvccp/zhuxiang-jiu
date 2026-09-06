@@ -114,6 +114,8 @@ SCORER_REGISTRY = {
     "value_exchange":           {"label": "智能信值兑换评分", "module": "64信值兑换", "batch": 23},
     # ---- 第二十四批(65号网店及商品AI智能管理 P0: 店铺经营评分) ----
     "shop_operation":           {"label": "智能店铺经营评分", "module": "65网店管理", "batch": 24},
+    # ---- 第二十五批(全站批次一·23号信用管理 AI 升级: 信用行为评分) ----
+    "credit_scoring":           {"label": "智能信用行为评分", "module": "23信用管理", "batch": 25},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -208,6 +210,10 @@ DECISION_THRESHOLDS = {
     # /urgent 紧急优化+店主经营复盘会)
     "shop_operation": [(80.0, "urgent"), (50.0, "optimize"),
                        (0.0, "observe")],
+    # 全站批次一·23号信用管理(先享后付审批三级——对齐 withdraw_risk 范式:
+    # 高分=高风险 → high 拦截/medium 转人工/low 放行)
+    "credit_scoring": [(60.0, "high"), (30.0, "medium"),
+                       (0.0, "low")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -309,6 +315,7 @@ def default_weights(scorer_id: str) -> dict:
         from services.av62_scorer import Av62Scorer
         from services.xx64_scorer import Xx64Scorer
         from services.xx65_scorer import Xx65Scorer
+        from services.credit_scorer import CreditScoringScorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -335,6 +342,7 @@ def default_weights(scorer_id: str) -> dict:
             "asset_valuation": Av62Scorer,
             "value_exchange": Xx64Scorer,
             "shop_operation": Xx65Scorer,
+            "credit_scoring": CreditScoringScorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

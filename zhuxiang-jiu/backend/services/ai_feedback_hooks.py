@@ -72,6 +72,10 @@ async def _invoke_scorer(scorer_id: str, ctx: dict) -> dict | None:
             cls = {"points_risk": PointsRiskScorer,
                    "withdraw_risk": WithdrawRiskScorer}[scorer_id]
             return await cls().score(ctx)
+        # 全站批次一·23号信用管理 AI 决策门
+        if scorer_id == "credit_scoring":
+            from services.credit_scorer import CreditScoringScorer
+            return await CreditScoringScorer().score(ctx)
     except Exception as exc:
         logger.warning("挂钩评分失败(scorer=%s): %s", scorer_id, exc)
     return None
@@ -413,3 +417,57 @@ async def on_traffic_commission(biz_no: str, total_records: int = 100) -> None:
                                  note=f"commission {biz_no}")
     except Exception as exc:
         logger.warning("on_traffic_commission 挂钩失败: %s", exc)
+
+
+async def on_paylater_reviewed(order_no: str, approved: bool) -> None:
+    """先享后付人工审批终态(approved/rejected) → 自动反馈(23号信用决策门回流)
+
+    语义映射: 审批通过期望低风险; 审批拒绝期望高风险(AI 若放行则误放)
+    business_key=paylater:{orderNo} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "credit_scoring", f"paylater:{order_no}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = (decision == "low") if approved else (decision != "low")
+        await record_outcome("credit_scoring", f"paylater:{order_no}",
+                            "approved" if approved else "rejected",
+                            correct=correct,
+                            note=f"paylater {order_no} "
+                                 f"{'approved' if approved else 'rejected'}")
+    except Exception as exc:
+        logger.warning("on_paylater_reviewed 挂钩失败(%s): %s",
+                       order_no, exc)
+
+
+async def on_paylater_repaid(order_no: str, overdue_days: int) -> None:
+    """先享后付还款终态(repaid) → 自动反馈(23号信用决策门回流)
+
+    语义映射: 按时还款期望低风险; 逾期>=7天期望高风险(漏防);
+    逾期 1-6 天期望 medium/high(预警正确); 其余 correct=None 待标注
+    business_key=paylater:{orderNo} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "credit_scoring", f"paylater:{order_no}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            if overdue_days <= 0:
+                correct = (decision == "low")
+            elif overdue_days >= 7:
+                correct = (decision == "high")
+            else:
+                correct = (decision in ("medium", "high"))
+        await record_outcome("credit_scoring", f"paylater:{order_no}",
+                            f"repaid_overdue_{overdue_days}",
+                            correct=correct,
+                            note=f"paylater {order_no} repaid "
+                                 f"(overdue {overdue_days}d)")
+    except Exception as exc:
+        logger.warning("on_paylater_repaid 挂钩失败(%s): %s",
+                       order_no, exc)

@@ -434,13 +434,20 @@ class TrustAssetService:
                 f"信用分不足: {bamboo:.0f} < {credit_points:.0f}")
 
         # 原子双动账: 信用分扣减 + TV 增发(转换轨)
-        account["bambooScore"] = int(
-            bamboo - credit_points)
+        # 旁路修复(全站批次一): creditLevel 不再即时改写——
+        # 等级统一由 23号持续天数评估器管理(v8.0 单一入口);
+        # 此处仅重置区间跟踪(对齐 _adjust_score_locked 口径)
         from repositories.credit_repository import (
-            level_from_score, clamp_score,
+            level_from_score,
         )
-        account["creditLevel"] = level_from_score(
-            clamp_score(account["bambooScore"]))
+        old_zone = level_from_score(int(bamboo))
+        new_bamboo = int(bamboo - credit_points)
+        account["bambooScore"] = new_bamboo
+        new_zone = level_from_score(new_bamboo)
+        if old_zone != new_zone:
+            from core.helpers import ts as _ts
+            account["scoreZoneSince"] = _ts()
+            account["downgradeWarningIssuedAt"] = None
         account["version"] = int(
             account.get("version") or 0) + 1
         from core.helpers import ts as _ts

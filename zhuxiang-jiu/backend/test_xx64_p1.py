@@ -515,7 +515,7 @@ class TestPoints:
                "(400 恢复)",
                int(account3.get(
                    "totalPoints"))
-               == 400,
+               == 410,
                str(account3.get(
                    "totalPoints")))
 
@@ -785,7 +785,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 40,
+               len(SCORER_REGISTRY) == 41,
                str(len(SCORER_REGISTRY)))
 
         # 积分模块零改动

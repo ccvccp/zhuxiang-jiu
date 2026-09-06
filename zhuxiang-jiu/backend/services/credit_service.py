@@ -1118,6 +1118,39 @@ class CreditService:
                 raise ValueError(
                     f"先享后付审批拒绝: {','.join(risk_flags)}(userId={user_id})")
 
+            # AI 决策门(全站批次一——23号信用 AI 升级)
+            # v7.8 enforce_decision(credit_scoring): observe 模式仅评分
+            # 快照(行为 100% 兼容); enforce 模式 high 拦截/medium 转人工。
+            # 硬规则(额度/月度)已前置校验, AI 门为叠加层; fail-open 兜底。
+            # gate_key_no(=orderNo)贯穿决策快照与订单创建——回流配对键一致
+            ai_review_required = False
+            if not order_no:
+                order_no = (f"PL{int(datetime.fromisoformat(now_iso).timestamp() * 1000)}")
+            try:
+                from services.ai_enforcement_credit import (
+                    enrich_credit_risk, enforce_paylater,
+                )
+                ctx = await enrich_credit_risk(
+                    user_id, account, amount, quota, used,
+                    month_used, monthly_limit, single_limit,
+                    paylater_orders=orders)
+                gate = await enforce_paylater(
+                    user_id, ctx, order_no)
+                ai_review_required = bool(
+                    gate.get("reviewRequired"))
+                if ai_review_required:
+                    risk_flags.append("AI风控中风险(转人工)")
+            except ValueError:
+                # AI 拦截(enforce 模式)——留痕后拒绝
+                order = self._new_paylater_order(
+                    user_id, amount, account_type, order_no, source,
+                    PAYLATER_STATUS_REJECTED, level, now_iso,
+                    risk_level="high",
+                    risk_flags=risk_flags + ["AI风控拦截"])
+                await self.repo.add_paylater_order(order)
+                await self._log_paylater(user_id, order, "AI拦截")
+                raise
+
             review_flags = list(risk_flags)
             if amount > quota * 0.5:
                 review_flags.append("大额订单(>50%额度)")
@@ -1204,6 +1237,15 @@ class CreditService:
             await self.repo.save_paylater_order(order)
             await self._log_paylater(
                 user_id, order, "人工审批通过" if approved else "人工审批拒绝")
+            # 回流钩子(23号信用决策门——终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_paylater_reviewed,
+                )
+                await on_paylater_reviewed(
+                    order.get("orderNo") or "", approved)
+            except Exception:
+                pass
             return order
 
     async def repay_paylater_order(self, order_id: int,
@@ -1278,6 +1320,17 @@ class CreditService:
                 user_id, order,
                 f"还款¥{repay_total}(逾期{overdue_days}天, 费用¥{fees + penalty})",
                 log_type=LOG_TYPE_PAYLATER_REPAY)
+
+            # 回流钩子(23号信用决策门——还款终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_paylater_repaid,
+                )
+                await on_paylater_repaid(
+                    order.get("orderNo") or "",
+                    int(overdue_days))
+            except Exception:
+                pass
 
             return {
                 "orderId": order_id,
