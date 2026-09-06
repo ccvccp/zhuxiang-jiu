@@ -595,14 +595,14 @@ class TestHttp:
                    resp.status_code == 403,
                    str(resp.status_code))
 
-        # 路由累计 5 端点
+        # 路由累计 5 端点(P1 扩至 9——基线语义)
         from routes.ii59_routes import (
             router as ii_router,
         )
         count = sum(
             1 for r in ii_router.routes)
-        record("59号路由累计 5 端点",
-               count == 5, str(count))
+        record("59号路由累计 ≥5 端点",
+               count >= 5, str(count))
         os.environ["II59_MODE"] = "off"
 
 
