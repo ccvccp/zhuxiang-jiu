@@ -98,13 +98,13 @@ class TestZones:
 
         # ① 档案总览
         z = await svc._zone_registry()
-        record("①总数32", z["total"] == 32, str(z["total"]))
+        record("①总数33", z["total"] == 33, str(z["total"]))
         record("①active分布",
-               z["byStatus"]["active"] == 32
+               z["byStatus"]["active"] == 33
                and z["byStatus"]["frozen"] == 0,
                str(z["byStatus"]))
-        record("①batch覆盖16",
-               len(z["byBatch"]) == 16,
+        record("①batch覆盖17",
+               len(z["byBatch"]) == 17,
                str(len(z["byBatch"])))
         record("①无冻结档案",
                z["frozenScorers"] == [],
@@ -299,7 +299,7 @@ class TestFailSoft:
                    str(r["zones"]["fairness"])[:60])
             record("其余区块照常",
                    (r["zones"]["registry"] or {})
-                   .get("total") == 32,
+                   .get("total") == 33,
                    str(r["zones"].get("registry"))[:40])
         finally:
             svc._zone_fairness = orig

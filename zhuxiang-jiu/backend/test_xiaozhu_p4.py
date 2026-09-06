@@ -272,7 +272,7 @@ class TestFairnessBridge:
         )
         r2 = await AiGovernanceService().sync_registry()
         record("46号 sync 仍 31 档案",
-               r2["discovered"] == 32,
+               r2["discovered"] == 33,
                str(r2["discovered"]))
         # sync 会把 side-door 档案标 retired → 桥接自愈
         gov = await AiGovernance46Repository().get_gov(

@@ -60,10 +60,10 @@ class TestSync:
         record("29档案全量入册",
                r["discovered"] == len(SCORER_REGISTRY)
                and r["added"] == len(SCORER_REGISTRY)
-               and len(SCORER_REGISTRY) == 32,
+               and len(SCORER_REGISTRY) == 33,
                f"added={r.get('added')} "
                f"total={len(SCORER_REGISTRY)}")
-        record("批次覆盖1-16", r["discovered"] == 32,
+        record("批次覆盖1-17", r["discovered"] == 33,
                str(r.get("discovered")))
 
         # 幂等: 再同步 diff 归零
@@ -75,11 +75,11 @@ class TestSync:
 
         # 台账分布
         reg = await svc.list_registry()
-        record("台账统计", reg["total"] == 32
-               and reg["byStatus"].get("active") == 32,
+        record("台账统计", reg["total"] == 33
+               and reg["byStatus"].get("active") == 33,
                str(reg.get("byStatus")))
         record("批次分布", sum(
-            (reg.get("byBatch") or {}).values()) == 32,
+            (reg.get("byBatch") or {}).values()) == 33,
                str(reg.get("byBatch")))
 
         # 治理状态保留: 手动 frozen 后重扫不覆盖
@@ -368,14 +368,14 @@ class TestHttp:
                            headers=admin)
         body = resp.json()
         record("同步200", resp.status_code == 200
-               and body.get("added") == 32,
+               and body.get("added") == 33,
                str(body)[:70])
 
         # 台账 200 + 过滤
         resp = client.get("/api/ai-gov/registry",
                           headers=admin)
         record("台账200", resp.status_code == 200
-               and resp.json().get("total") == 32,
+               and resp.json().get("total") == 33,
                str(resp.json().get("total")))
         resp = client.get(
             "/api/ai-gov/registry?status=active&batch=12",

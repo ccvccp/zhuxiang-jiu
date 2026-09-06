@@ -307,6 +307,10 @@ register_aiup56_routes(app)
 from routes.kb57_routes import register_kb57_routes
 register_kb57_routes(app)
 
+# AI智能优化意图识别(58号)
+from routes.ii58_routes import register_ii58_routes
+register_ii58_routes(app)
+
 
 # ============================================================
 # 静态媒体服务(35号 AI Hub P3: /media/voice|image/xxx, 本地卷持久化)
