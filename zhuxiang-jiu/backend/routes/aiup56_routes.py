@@ -1,6 +1,6 @@
-"""56号·AI智能升级管理路由(P0+P1)
+"""56号·AI智能升级管理路由(P0-P2)
 
-端点(P0 5 + P1 4 = 9):
+端点(P0 5 + P1 4 + P2 2 = 11):
     GET  /api/aiup56/registry            注册表自描述(admin, 观测面)
     POST /api/aiup56/signals/scan        信号采集+决策评估(admin, 管理)
     GET  /api/aiup56/proposals           提案列表(admin, 观测面)
@@ -10,12 +10,15 @@
     GET  /api/aiup56/proposals/{id}/tasks 任务列表(admin, 观测面, P1)
     POST /api/aiup56/proposals/{id}/code  编码Agent(admin, P1)
     GET  /api/aiup56/proposals/{id}/assets 资产列表(admin, 观测面, P1)
+    POST /api/aiup56/proposals/{id}/test  测试Agent+信值沙箱(admin, P2)
+    GET  /api/aiup56/proposals/{id}/sandboxes 沙箱列表(admin, 观测面, P2)
 
 鉴权: 管理面 X-Role: admin(43-55号同款口径)。
 统一口径:
     - 观测面(registry/proposals/proposal/model/
-      status/tasks/assets)不受 AIUP56_MODE 影响
-    - 决策面(signals/scan+plan+code):
+      status/tasks/assets/sandboxes)不受
+      AIUP56_MODE 影响
+    - 决策面(signals/scan+plan+code+test):
       off=拒绝(409——shadow/assist 开放)
     - KeyError → 404 / ValueError → 409
 """
@@ -195,6 +198,42 @@ async def list_assets(
     )
     return await Aiup56CodeService().list_assets(
         int(proposal_id))
+
+
+@router.post("/proposals/{proposal_id}/test")
+async def test_proposal(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """测试Agent+信值沙箱(用例矩阵+三关影子
+    评估: 静态/预算/价值——超支熔断; off 409)"""
+    _require_admin(x_role)
+    from services.aiup56_test_service import (
+        Aiup56TestService,
+    )
+    try:
+        return await Aiup56TestService().test(
+            int(proposal_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/proposals/{proposal_id}/sandboxes")
+async def list_sandboxes(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """沙箱评估列表(三关留痕——观测面)"""
+    _require_admin(x_role)
+    from services.aiup56_test_service import (
+        Aiup56TestService,
+    )
+    return await Aiup56TestService(
+    ).list_sandboxes(int(proposal_id))
 
 
 def register_aiup56_routes(app) -> None:
