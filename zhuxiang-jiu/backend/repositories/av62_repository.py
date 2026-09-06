@@ -60,21 +60,25 @@ class Av62Repository:
         "assetId", "assessId", "appealId",
         "reportId", "eventId", "memberId",
         "subjectId", "pooledFeedbackId",
-        "assessmentId", "appealCount")
+        "assessmentId", "appealCount",
+        "version", "changeId")
     _FLOAT_FIELDS = (
         "contribution", "riskDeduction",
         "netContribution", "confidence",
         "baseValue", "scenarioFactor",
         "decayFactor", "weight",
         "avgBefore", "avgAfter",
-        "poolReward")
+        "poolReward", "elementScore",
+        "causalWeight", "confidenceCoef",
+        "completeness", "groundedRate",
+        "weightedScore")
     _JSON_DICT_FIELDS = (
         "evidence", "factors", "reason",
         "attribution", "detail", "context",
         "config", "thresholds", "result",
         "liquidity", "appeal", "correction",
         "extra", "stats", "snapshot",
-        "impact")
+        "impact", "summary")
     _JSON_LIST_FIELDS = (
         "auditTrail", "domains", "findings",
         "signals", "history", "tags",
@@ -82,7 +86,8 @@ class Av62Repository:
     _BOOL_FIELDS = (
         "negative", "grounded",
         "overturned", "pooled",
-        "escalated")
+        "escalated", "spotCheck",
+        "verified")
 
     _TABLE_BY_KIND = {
         "asset": TABLE_ASSETS,

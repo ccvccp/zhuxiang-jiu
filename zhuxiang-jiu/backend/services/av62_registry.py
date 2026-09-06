@@ -233,6 +233,195 @@ ASSET_STATES = (
 # 铁律: 负资产不可清除(只追加)
 RISK_IMMUTABLE = True
 
+# ============================================================
+# CAUSAL_RULES 因果规则库封闭注册(P1——§3.2)
+# 三元组: 要素(role/domain)→结果(outcome)→强度(strength)
+# 版本化: RULES_VERSION; 46号审批: objective 动态
+# 权重模式切换(assess_service 双模)
+# ============================================================
+
+RULES_VERSION = "v1"
+
+CAUSAL_RULES = {
+    # ---- 正资产规则(10) ----
+    "CR-001": {
+        "role": "enterprise", "domain": "compliance",
+        "outcome": "audit_pass_rate", "strength": 0.90,
+        "label": "合规完备→审计通过与准入",
+    },
+    "CR-002": {
+        "role": "enterprise", "domain": "knowledge",
+        "outcome": "ops_efficiency", "strength": 0.80,
+        "label": "知识沉淀→运营效率(客服工单↓)",
+    },
+    "CR-003": {
+        "role": "enterprise", "domain": "behavior",
+        "outcome": "collab_quality", "strength": 0.70,
+        "label": "行为规范→协作质量",
+    },
+    "CR-004": {
+        "role": "organization", "domain": "social",
+        "outcome": "reach_trust", "strength": 0.85,
+        "label": "社会资本→触达与信任",
+    },
+    "CR-005": {
+        "role": "organization", "domain": "culture",
+        "outcome": "member_retention", "strength": 0.60,
+        "label": "文化一致→成员留存",
+    },
+    "CR-006": {
+        "role": "organization", "domain": "compliance",
+        "outcome": "event_safety", "strength": 0.80,
+        "label": "活动合规→安全零事故",
+    },
+    "CR-007": {
+        "role": "personal", "domain": "capability",
+        "outcome": "delivery_reliability", "strength": 0.85,
+        "label": "能力认证→交付可靠",
+    },
+    "CR-008": {
+        "role": "personal", "domain": "reputation",
+        "outcome": "peer_trust", "strength": 0.80,
+        "label": "声誉同行→背书信任",
+    },
+    "CR-009": {
+        "role": "personal", "domain": "growth",
+        "outcome": "adaptability", "strength": 0.65,
+        "label": "成长学习→跨域适应",
+    },
+    "CR-010": {
+        "role": "personal", "domain": "knowledge",
+        "outcome": "knowledge_spillover", "strength": 0.75,
+        "label": "知识分享→外溢贡献",
+    },
+    # ---- 负资产规则(3——强度高=传导快) ----
+    "CR-011": {
+        "role": "enterprise", "domain": "risk",
+        "outcome": "penalty_exposure", "strength": 0.95,
+        "label": "处罚记录→合规风险暴露",
+    },
+    "CR-012": {
+        "role": "organization", "domain": "risk",
+        "outcome": "complaint_burden", "strength": 0.90,
+        "label": "投诉负担→信任损耗",
+    },
+    "CR-013": {
+        "role": "personal", "domain": "risk",
+        "outcome": "conduct_risk", "strength": 0.85,
+        "label": "行为投诉→行为风险",
+    },
+}
+
+# objective 动态权重乘子(§3.2——模式切换经 46号审批)
+# 铁律: risk 域乘子恒 1.0(负资产不随目标模式减免)
+OBJECTIVE_VALUES = ("stability", "growth")
+
+OBJECTIVE_MULTIPLIERS = {
+    "stability": {"compliance": 1.2},
+    "growth": {"knowledge": 1.2, "growth": 1.2},
+}
+
+
+def get_rule(role: str, domain: str) -> dict | None:
+    """取要素因果规则(要素→结果→强度三元组)"""
+    for rule_id, rule in CAUSAL_RULES.items():
+        if rule.get("role") == str(role) \
+                and rule.get("domain") == str(domain):
+            rule = dict(rule)
+            rule["ruleId"] = rule_id
+            return rule
+    return None
+
+
+def get_objective_multiplier(objective: str,
+                             domain: str) -> float:
+    """objective 动态权重乘子(risk 恒 1.0 铁律)"""
+    if domain == RISK_DOMAIN:
+        return 1.0
+    mult = (OBJECTIVE_MULTIPLIERS.get(
+        str(objective)) or {}).get(str(domain))
+    return float(mult) if mult else 1.0
+
+
+def rules_view() -> dict:
+    """因果规则库视图(观测面)"""
+    by_element = {}
+    for rule_id, rule in CAUSAL_RULES.items():
+        by_element.setdefault(
+            f"{rule.get('role')}/{rule.get('domain')}",
+            []).append(rule_id)
+    return {
+        "success": True,
+        "version": RULES_VERSION,
+        "rules": len(CAUSAL_RULES),
+        "elementsCovered": len(by_element),
+        "byElement": by_element,
+        "objective": {
+            "values": list(OBJECTIVE_VALUES),
+            "multipliers": OBJECTIVE_MULTIPLIERS,
+            "riskMultiplierLocked": 1.0,
+            "switch": "46号审批(双模——submit/apply)",
+        },
+        "note": "因果规则库——要素→结果→强度"
+                "三元组封闭注册(归因强制"
+                "绑定规则 ID)",
+    }
+
+
+def _validate_causal_rules() -> None:
+    """规则库自检(RuntimeError 宪法级)"""
+    errors = []
+    if len(CAUSAL_RULES) < len(TRUST_ELEMENTS):
+        errors.append(
+            f"规则 {len(CAUSAL_RULES)} 条不足"
+            f"要素 {len(TRUST_ELEMENTS)} 个"
+            f"(全覆盖铁律)")
+    for rule_id, rule in CAUSAL_RULES.items():
+        if not rule_id.startswith("CR-"):
+            errors.append(
+                f"规则号 {rule_id} 格式非法"
+                f"(CR-NNN)")
+        for field in ("role", "domain",
+                      "outcome", "strength"):
+            if field not in rule:
+                errors.append(
+                    f"规则 {rule_id} 缺字段"
+                    f" {field}(三元组残缺)")
+        strength = rule.get("strength")
+        if not isinstance(strength, (int, float)) \
+                or not 0.0 < float(strength) <= 1.0:
+            errors.append(
+                f"规则 {rule_id} 强度越界"
+                f" {strength}((0,1])")
+    # 要素全覆盖(每个 TRUST_ELEMENT 至少一条规则)
+    for (role, domain) in TRUST_ELEMENTS:
+        if get_rule(role, domain) is None:
+            errors.append(
+                f"要素 {role}/{domain} 无因果"
+                f"规则锚点(归因强制绑定铁律)")
+    # objective 乘子域
+    for obj, mults in OBJECTIVE_MULTIPLIERS.items():
+        if obj not in OBJECTIVE_VALUES:
+            errors.append(
+                f"objective {obj} 域外")
+        for dom, m in mults.items():
+            if dom == RISK_DOMAIN:
+                errors.append(
+                    f"objective {obj} 不可调 "
+                    f"risk 域乘子(防洗白铁律)")
+            if not 0.5 <= float(m) <= 1.5:
+                errors.append(
+                    f"objective {obj}/{dom} "
+                    f"乘子越界 {m}")
+    if errors:
+        raise RuntimeError(
+            "av62 causal rules 自检失败: "
+            + "; ".join(errors))
+    logger.info(
+        "av62_causal_rules_validated rules=%s "
+        "version=%s", len(CAUSAL_RULES),
+        RULES_VERSION)
+
 
 def current_mode() -> str:
     """模块开关(AV62_MODE, 默认 off——
@@ -435,3 +624,4 @@ def _validate_registry() -> None:
 
 
 _validate_registry()
+_validate_causal_rules()
