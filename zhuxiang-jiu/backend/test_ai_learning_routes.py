@@ -386,8 +386,8 @@ async def main():
     resp = client.get("/api/ai-learning/overview", headers={"X-Role": "admin"})
     body = resp.json()
     record("30_http_overview_lists_all_scorers",
-           resp.status_code == 200 and body.get("scorerCount") == 39
-           and len(body.get("scorers", [])) == 39,
+           resp.status_code == 200 and body.get("scorerCount") == 40
+           and len(body.get("scorers", [])) == 40,
            f"status={resp.status_code}, count={body.get('scorerCount')}")
 
     resp = client.get("/api/ai-learning/weights/no_such_scorer",

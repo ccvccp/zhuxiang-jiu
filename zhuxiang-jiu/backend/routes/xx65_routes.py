@@ -1,7 +1,7 @@
 """65号·网店及商品AI智能管理路由
-(P0+P1+P2)
+(P0+P1+P2+P3)
 
-端点(P0 9+P1 7+P2 5=21; 全期规划 24):
+端点(P0 9+P1 7+P2 5+P3 4=25; 全期规划约 24):
     GET  /api/xx65/registry        刚性规则自描述(admin, 观测面)
     POST /api/xx65/intents/parse   意图解析(member/admin, 决策面 off 409)
     POST /api/xx65/shops/apply     开店申请+信值准入预检(member/admin, 决策面 off 409)
@@ -25,6 +25,11 @@
     POST /api/xx65/campaigns/{id}/revoke 撤销活动(member/admin, 决策面·S5 5 分钟窗口)
     GET  /api/xx65/campaigns            活动列表(member/admin, 观测面)
     GET  /api/xx65/campaigns/{id}/report 效果归因复盘(member/admin, 观测面)
+    --- P3·治理与成长层 ---
+    GET  /api/xx65/shops/{id}/health    合规健康度看板(member/admin, 观测面·三组件+S7 建议)
+    GET  /api/xx65/shops/{id}/coach     经营教练贴士分发(member/admin, 观测面·按配额档)
+    POST /api/xx65/shops/{id}/quota-adjust S7 配额升降档(admin, 决策面·经 46号审批轨)
+    POST /api/xx65/shops/{id}/dispute-assist 争议证据链辅助(member/admin, 决策面)
 
 鉴权: X-Role: admin 或 member(开店
 面向超级会员——双角色口径)。
@@ -33,10 +38,12 @@
       与详情/model status/drafts
       详情/products/order-window/
       campaigns recommend+列表+
-      report)不受 XX65_MODE 影响
+      report/health/coach)不受
+      XX65_MODE 影响
     - 决策面(意图解析/开店/认领/
       激活/草稿生成/发布/活动创建/
-      撤销): off=拒绝(409)
+      撤销/配额调整/争议辅助):
+      off=拒绝(409)
     - 关店不受开关影响(经营者
       退出权利); 人工兜底与巡检
       不受开关影响(S6 宪法+
@@ -601,6 +608,128 @@ async def campaign_report(
                 campaign_id))
     except KeyError as exc:
         raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
+
+
+# ============================================================
+# P3·治理与成长层
+# ============================================================
+
+@router.get("/shops/{shop_id}/health")
+async def shop_health(
+        shop_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """合规健康度看板(观测面——
+    三组件加权+待整改项+S7 配额
+    建议; 不受开关影响)"""
+    _require_role(x_role)
+    from services.xx65_service import (
+        Xx65Service,
+    )
+    try:
+        return await (
+            Xx65Service().shop_health(
+                shop_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
+
+
+@router.get("/shops/{shop_id}/coach")
+async def coach_tips(
+        shop_id: int,
+        kind: str = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """经营教练贴士分发(观测面——
+    按店铺配额档从确定性内容池
+    筛选+分发留痕; 不受开关影响)
+
+    Query: kind=daily_tip/hot_case/
+    warning(空=全类)"""
+    _require_role(x_role)
+    from services.xx65_service import (
+        Xx65Service,
+    )
+    try:
+        return await (
+            Xx65Service().coach_tips(
+                shop_id, kind=kind))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.post("/shops/{shop_id}/quota-adjust")
+async def quota_adjust(
+        shop_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """S7 配额升降档(决策面——
+    信值正反馈激励; 升/降档均经
+    46号审批总线提交建议书, 永不
+    自动执行; off 409)
+
+    Body: {direction: uplift/
+    downgrade}"""
+    _require_admin(x_role)
+    from services.xx65_service import (
+        Xx65Service,
+    )
+    try:
+        return await (
+            Xx65Service().quota_adjust(
+                shop_id=shop_id,
+                direction=body.get(
+                    "direction") or "",
+                requested_by=x_role))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.post("/shops/{shop_id}/dispute-assist")
+async def dispute_assist(
+        shop_id: int,
+        body: dict = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """争议快速响应(决策面——
+    买家投诉证据链辅助: 店铺/商品/
+    合规事件/活动四源+64号订单
+    只读聚合; AI 仅展示, 终审在
+    人工 S6; off 409)
+
+    Body: {productId?, orderId?,
+    summary?}"""
+    _require_role(x_role)
+    from services.xx65_service import (
+        Xx65Service,
+    )
+    body = body or {}
+    try:
+        return await (
+            Xx65Service().dispute_assist(
+                shop_id=shop_id,
+                product_id=body.get(
+                    "productId"),
+                order_id=body.get(
+                    "orderId"),
+                summary=body.get(
+                    "summary") or ""))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
                             detail=str(exc)) from exc
 
 

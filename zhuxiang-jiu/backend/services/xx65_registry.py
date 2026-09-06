@@ -410,6 +410,100 @@ CAMPAIGN_TRANSITIONS = {
     "expired": (),
 }
 
+# ============================================================
+# P3·治理与成长层——健康度口径+教练内容池+激励参数(宪法级)
+# ============================================================
+
+# 健康度三组件权重(合规事件命中/
+# 商品标记/活动撤销——全反向)
+HEALTH_WEIGHTS = {
+    "compliance_events": 0.40,
+    "product_flags": 0.35,
+    "campaign_revokes": 0.25,
+}
+
+# 健康度通过分(看板绿色阈值)
+HEALTH_PASS_SCORE = 70
+
+# S7 配额升降档激励参数(信值正反馈
+# ——仅建议, 惩罚性降档与奖励性升档
+# 均经 46号审批轨, 永不自动执行)
+QUOTA_UPLIFT_MIN_HEALTH = 85      # 健康度≥85 可建议升档
+QUOTA_DOWNGRADE_MAX_HEALTH = 50   # 健康度≤50 触发降档建议
+QUOTA_TIER_ORDER = (
+    "starter", "growth", "premium")
+
+# 教练内容池(确定性——按店铺配额档
+# 分发, 非即时生成; 三类: daily_tip
+# 每日贴士/hot_case 爆款案例/
+# warning 错误预警)
+COACH_TIPS = (
+    {"tier": "starter",
+     "kind": "daily_tip",
+     "title": "保持店铺活跃",
+     "body": "每日上架 1-2 件商品并"
+             "完善描述——活跃度是"
+             "店铺成长的第一杠杆。"},
+    {"tier": "starter",
+     "kind": "hot_case",
+     "title": "手工艺类目标杆",
+     "body": "定制木雕小店月销破百"
+             "的秘诀: 故事化详情页+"
+             "实拍图, 让买家看见手艺。"},
+    {"tier": "starter",
+     "kind": "warning",
+     "title": "广告法极限词",
+     "body": "避免使用'最好/第一'等"
+             "极限词——系统自动替换"
+             "并留痕, 人工核实耗时。"},
+    {"tier": "growth",
+     "kind": "daily_tip",
+     "title": "双轨定价展示",
+     "body": "开启信值支付额度展示"
+             "——信值友好店铺可获"
+             "更多平台曝光加权。"},
+    {"tier": "growth",
+     "kind": "hot_case",
+     "title": "小额高频组合",
+     "body": "当季特产+小额高频活动"
+             "的 ROI 双算显示: 信值"
+             "消耗更平稳、复购更高。"},
+    {"tier": "growth",
+     "kind": "warning",
+     "title": "R2 整单互斥",
+     "body": "信值支付订单整单互斥"
+             "其他优惠——活动叠加前"
+             "务必核对互斥声明。"},
+    {"tier": "premium",
+     "kind": "daily_tip",
+     "title": "合规巡检习惯",
+     "body": "定期查看合规健康度看板"
+             "——一次过审率直接影响"
+             "店铺健康度评分。"},
+    {"tier": "premium",
+     "kind": "hot_case",
+     "title": "跨店联动",
+     "body": "互补类目联合促销获"
+             "更高 ROI——建议经"
+             " 46号审批后执行。"},
+    {"tier": "premium",
+     "kind": "warning",
+     "title": "S5 撤销窗口",
+     "body": "营销承诺发布后 5 分钟"
+             "内可无理由撤销——超窗"
+             "需人工处置通道。"},
+)
+
+# 争议证据链(确定性聚合口径——
+# 65号域内四源+64号订单只读)
+DISPUTE_EVIDENCE_KINDS = (
+    "shop",       # 店铺档案+准入快照
+    "product",    # 商品+合规标记
+    "compliance", # 合规事件链(三道防线)
+    "campaign",   # 活动+撤销审计
+    "order64",    # 64号订单(只读对接)
+)
+
 
 def llm_mode() -> str:
     """LLM 文案轨开关(XX65_LLM_MODE,
@@ -550,11 +644,31 @@ def registry_view() -> dict:
             CAMPAIGN_STRATEGIES.items()},
         "campaignFactors":
             CAMPAIGN_FACTOR_WEIGHTS,
-        "note": "P2 营销中枢: S1-S8 刚性"
-                "规则+店铺/草稿/活动三"
-                "状态机+三因子推荐+ROI"
-                "双算+S5 撤销窗口+64号"
-                "流动性感知(纯读取)",
+        "health": {
+            "weights":
+                HEALTH_WEIGHTS,
+            "passScore":
+                HEALTH_PASS_SCORE,
+            "upliftMinHealth":
+                QUOTA_UPLIFT_MIN_HEALTH,
+            "downgradeMaxHealth":
+                QUOTA_DOWNGRADE_MAX_HEALTH,
+        },
+        "coachPool": {
+            "total": len(COACH_TIPS),
+            "tiers": sorted(
+                {t["tier"]
+                 for t in COACH_TIPS}),
+            "kinds": sorted(
+                {t["kind"]
+                 for t in COACH_TIPS}),
+        },
+        "note": "P3 治理与成长层: "
+                "S1-S8 刚性规则+店铺/"
+                "草稿/活动三状态机+健康"
+                "度看板+教练内容池+S7 "
+                "激励经 46号审批轨+争议"
+                "证据链辅助",
     }
 
 
@@ -715,6 +829,42 @@ def _validate_registry() -> None:
         raise RuntimeError(
             "65号流动性阈值未对齐"
             "64号 LIQ-CRUNCH")
+    # P3: 健康度权重归一
+    h_sum = sum(
+        HEALTH_WEIGHTS.values())
+    if abs(h_sum - 1.0) > 0.001:
+        raise RuntimeError(
+            f"65号健康度权重未归一: "
+            f"{h_sum}")
+    # P3: 激励阈值域合法
+    # (升档阈值>通过分>降档阈值)
+    if not QUOTA_DOWNGRADE_MAX_HEALTH \
+            < HEALTH_PASS_SCORE \
+            < QUOTA_UPLIFT_MIN_HEALTH:
+        raise RuntimeError(
+            "65号激励阈值域非法"
+            "(须 降档<通过<升档)")
+    # P3: 教练内容池覆盖
+    # (每档×每类至少 1 条)
+    for tier in ("starter",
+                 "growth",
+                 "premium"):
+        for kind in ("daily_tip",
+                     "hot_case",
+                     "warning"):
+            if not any(
+                    t["tier"] == tier
+                    and t["kind"]
+                    == kind
+                    for t in COACH_TIPS):
+                raise RuntimeError(
+                    f"65号教练池缺"
+                    f"{tier}/{kind}")
+    # P3: 争议证据链域合法
+    for ek in DISPUTE_EVIDENCE_KINDS:
+        if not ek:
+            raise RuntimeError(
+                "65号争议证据源空值")
 
 
 # 模块导入即自检(宪法级)

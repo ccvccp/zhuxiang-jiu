@@ -2112,6 +2112,661 @@ class Xx65Service:
             "generatedAt": ts(),
         }
 
+    # ============================================================
+    # P3·治理与成长层
+    # ============================================================
+
+    async def shop_health(
+            self, shop_id: int
+    ) -> dict:
+        """合规健康度看板(观测面——
+        三组件加权+待整改项+一键
+        修复通道+S7 配额建议)
+
+        三组件(全反向): 合规事件
+        命中率 0.40/商品标记率
+        0.35/活动撤销率 0.25;
+        空数据集组件计中性 100
+
+        Raises:
+            KeyError: 店铺不存在
+        """
+        shop = await self._get_shop(
+            int(shop_id))
+        from services.xx65_registry import (
+            HEALTH_PASS_SCORE,
+            HEALTH_WEIGHTS,
+            QUOTA_DOWNGRADE_MAX_HEALTH,
+            QUOTA_TIER_ORDER,
+            QUOTA_UPLIFT_MIN_HEALTH,
+        )
+
+        # ① 合规事件命中率(反向)
+        events = await \
+            self.repo.list_compliance(
+                shop_id=int(shop_id),
+                limit=500)
+        hit_events = [
+            e for e in events
+            if (e.get("findings")
+                or [])]
+        s1 = round(
+            100 * (1 - len(hit_events)
+                   / len(events)), 1) \
+            if events else 100.0
+
+        # ② 商品合规标记率(反向)
+        products = await \
+            self.repo.list_products(
+                shop_id=int(shop_id),
+                limit=500)
+        flagged = [
+            p for p in products
+            if p.get("complianceFlag")]
+        s2 = round(
+            100 * (1 - len(flagged)
+                   / len(products)), 1) \
+            if products else 100.0
+
+        # ③ 活动撤销率(反向)
+        campaigns = await \
+            self.repo.list_campaigns(
+                shop_id=int(shop_id),
+                limit=500)
+        revoked = [
+            c for c in campaigns
+            if c.get("revoked")]
+        s3 = round(
+            100 * (1 - len(revoked)
+                   / len(campaigns)), 1) \
+            if campaigns else 100.0
+
+        components = {
+            "compliance_events": {
+                "score": s1,
+                "weight":
+                    HEALTH_WEIGHTS[
+                        "compliance"
+                        "_events"],
+                "detail": f"合规事件 "
+                          f"{len(hit_events)}"
+                          f"/{len(events)}"
+                          f" 命中"},
+            "product_flags": {
+                "score": s2,
+                "weight":
+                    HEALTH_WEIGHTS[
+                        "product_flags"],
+                "detail": f"商品标记 "
+                          f"{len(flagged)}"
+                          f"/{len(products)}"},
+            "campaign_revokes": {
+                "score": s3,
+                "weight":
+                    HEALTH_WEIGHTS[
+                        "campaign"
+                        "_revokes"],
+                "detail": f"活动撤销 "
+                          f"{len(revoked)}"
+                          f"/{len(campaigns)}"},
+        }
+        health = round(
+            sum(c["score"] * c["weight"]
+                for c in
+                components.values()), 1)
+
+        # 待整改项(标记商品+严重
+        # 合规事件)
+        remediation = []
+        for p in flagged:
+            remediation.append({
+                "type": "product_flag",
+                "refId": p["productId"],
+                "issue": "商品命中合规"
+                         "标记(防御③巡检)",
+                "fix": "POST /api/xx65/"
+                       "drafts/{draftId}/"
+                       "human-review 转"
+                       "人工核实(S6)",
+            })
+        for e in hit_events:
+            if e.get("line") == \
+                    "post_inspect":
+                findings_str = str(
+                    (e.get("findings")
+                     or [])[:3])
+                remediation.append({
+                    "type":
+                        "compliance"
+                        "_event",
+                    "refId":
+                        e.get("eventId"),
+                    "issue":
+                        "上架后巡检命中: "
+                        + findings_str,
+                    "fix": "人工处置通道"
+                           "下架核实(S6 "
+                           "终审人工铁律)",
+                })
+
+        # S7 配额建议(仅建议——升/降
+        # 档均经 46号审批轨, 永不
+        # 自动执行)
+        tier = shop.get("quotaTier") \
+            or "starter"
+        suggestion = {
+            "direction": "keep",
+            "currentTier": tier,
+            "targetTier": tier,
+            "reason": f"健康度 {health}"
+                      f" 处于通过区间"
+                      f"({QUOTA_DOWNGRADE_MAX_HEALTH}"
+                      f"-{QUOTA_UPLIFT_MIN_HEALTH})",
+            "execution": "经 46号审批轨"
+                         "(POST /api/xx65/"
+                         "shops/{id}/"
+                         "quota-adjust)",
+        }
+        tier_idx = QUOTA_TIER_ORDER.index(
+            tier) if tier in \
+            QUOTA_TIER_ORDER else 0
+        if health \
+                >= QUOTA_UPLIFT_MIN_HEALTH \
+                and tier_idx < len(
+                    QUOTA_TIER_ORDER) - 1:
+            suggestion.update({
+                "direction": "uplift",
+                "targetTier":
+                    QUOTA_TIER_ORDER[
+                        tier_idx + 1],
+                "reason": f"健康度 {health}"
+                          f"≥{QUOTA_UPLIFT_MIN_HEALTH}"
+                          f"(守信扩容——S7 "
+                          f"信值正反馈)",
+            })
+        elif health \
+                <= QUOTA_DOWNGRADE_MAX_HEALTH \
+                and tier_idx > 0:
+            suggestion.update({
+                "direction": "downgrade",
+                "targetTier":
+                    QUOTA_TIER_ORDER[
+                        tier_idx - 1],
+                "reason": f"健康度 {health}"
+                          f"≤{QUOTA_DOWNGRADE_MAX_HEALTH}"
+                          f"(违规降档——经 "
+                          f"46号审批)",
+            })
+
+        return {
+            "success": True,
+            "shopId": int(shop_id),
+            "healthScore": health,
+            "passScore":
+                HEALTH_PASS_SCORE,
+            "passed":
+                health
+                >= HEALTH_PASS_SCORE,
+            "components": components,
+            "remediation":
+                remediation,
+            "quotaSuggestion":
+                suggestion,
+            "note": "合规健康度看板——"
+                    "三组件加权(0.40/"
+                    "0.35/0.25 全反向); "
+                    "S7 激励建议永不"
+                    "自动执行",
+            "generatedAt": ts(),
+        }
+
+    async def coach_tips(
+            self, shop_id: int,
+            kind: str = None
+    ) -> dict:
+        """AI 经营教练贴士分发(观测面
+        ——按店铺配额档从确定性
+        内容池筛选+分发留痕)
+
+        Args:
+            kind: 筛选类别(
+                daily_tip/hot_case/
+                warning; 空=全类)
+
+        Raises:
+            KeyError: 店铺不存在
+        """
+        shop = await self._get_shop(
+            int(shop_id))
+        from services.xx65_registry import (
+            COACH_TIPS,
+        )
+        tier = shop.get("quotaTier") \
+            or "starter"
+        kind = str(kind or "").strip()
+        if kind and kind not in (
+                "daily_tip",
+                "hot_case",
+                "warning"):
+            raise ValueError(
+                f"未知贴士类别 {kind}"
+                f"(支持: daily_tip/"
+                f"hot_case/warning)")
+        tips = [dict(t) for t
+                in COACH_TIPS
+                if t["tier"] == tier
+                and (not kind
+                     or t["kind"]
+                     == kind)]
+        # 分发留痕(fail-soft——
+        # 每次访问落 coach 表)
+        for t in tips:
+            try:
+                tip_id = await \
+                    self.repo.next_tip_id()
+                await self.repo.save_tip({
+                    "tipId": tip_id,
+                    "shopId":
+                        int(shop_id),
+                    "tier": tier,
+                    "kind": t["kind"],
+                    "title": t["title"],
+                    "deliveredAt":
+                        ts(),
+                })
+            except Exception as exc:
+                logger.warning(
+                    "xx65_coach_track"
+                    "_failed: %s", exc)
+        return {
+            "success": True,
+            "shopId": int(shop_id),
+            "quotaTier": tier,
+            "total": len(tips),
+            "tips": tips,
+            "note": "经营教练——确定性"
+                    "内容池按配额档分发"
+                    "(可追溯非即时生成; "
+                    "分发留痕)",
+            "generatedAt": ts(),
+        }
+
+    async def quota_adjust(
+            self, shop_id: int,
+            direction: str,
+            requested_by: str = "admin"
+    ) -> dict:
+        """S7 配额升降档(决策面——
+        信值正反馈激励; 奖励性升档
+        与惩罚性降档均经 46号审批
+        总线提交建议书, 永不自动
+        执行)
+
+        Args:
+            direction: uplift(升档)/
+                downgrade(降档)
+
+        Raises:
+            KeyError: 店铺不存在/
+                46号档案未入册
+            ValueError: 方向非法/
+                健康度不满足/已是
+                边界档/重复 pending
+        """
+        require_active_mode()
+        direction = str(
+            direction or "").strip().lower()
+        if direction not in ("uplift",
+                             "downgrade"):
+            raise ValueError(
+                "direction 仅支持 "
+                "uplift/downgrade")
+        if requested_by != "admin":
+            raise ValueError(
+                "配额调整须 admin "
+                "(S7 激励经 46号审批轨)")
+        shop = await self._get_shop(
+            int(shop_id))
+        # 健康度门槛(复用看板口径
+        # ——决策依据确定性)
+        health = await self.shop_health(
+            int(shop_id))
+        score = float(
+            health.get("healthScore")
+            or 0.0)
+        from services.xx65_registry import (
+            QUOTA_DOWNGRADE_MAX_HEALTH,
+            QUOTA_TIER_ORDER,
+            QUOTA_UPLIFT_MIN_HEALTH,
+        )
+        tier = shop.get("quotaTier") \
+            or "starter"
+        tier_idx = QUOTA_TIER_ORDER.index(
+            tier) if tier in \
+            QUOTA_TIER_ORDER else 0
+        if direction == "uplift":
+            if tier_idx >= len(
+                    QUOTA_TIER_ORDER) - 1:
+                raise ValueError(
+                    f"已是最高档 "
+                    f"{tier}(无可升档)")
+            if score \
+                    < QUOTA_UPLIFT_MIN_HEALTH:
+                raise ValueError(
+                    f"健康度 {score}"
+                    f"<{QUOTA_UPLIFT_MIN_HEALTH}"
+                    f" 不满足升档门槛"
+                    f"(守信扩容——S7)")
+            target = QUOTA_TIER_ORDER[
+                tier_idx + 1]
+        else:
+            if tier_idx <= 0:
+                raise ValueError(
+                    f"已是最低档 "
+                    f"{tier}(无可降档)")
+            if score \
+                    > QUOTA_DOWNGRADE_MAX_HEALTH:
+                raise ValueError(
+                    f"健康度 {score}"
+                    f">{QUOTA_DOWNGRADE_MAX_HEALTH}"
+                    f" 未触发降档门槛"
+                    f"(惩罚须确凿)")
+            target = QUOTA_TIER_ORDER[
+                tier_idx - 1]
+        # 46号审批总线(建议书
+        # ——pending 不直接生效)
+        from services.ai_governance_service import (
+            AiGovernanceService,
+        )
+        gov = AiGovernanceService()
+        reason = (
+            f"65号 S7 配额{('升档' if direction == 'uplift' else '降档')}"
+            f": 店铺 {shop_id} 健康"
+            f"度 {score}, {tier}"
+            f"→{target}(信值正反馈"
+            f"激励——审批后生效)")
+        payload = {
+            "shopId": int(shop_id),
+            "quotaTier": {
+                "before": tier,
+                "after": target,
+            },
+            "healthScore": score,
+            "module": "65网店管理",
+        }
+        try:
+            change = await gov.submit_change(
+                "shop_operation",
+                "config", payload,
+                reason,
+                requested_by=requested_by)
+        except KeyError:
+            # 档案未入册——幂等同步
+            # 后重提一次
+            await gov.sync_registry()
+            change = await gov.submit_change(
+                "shop_operation",
+                "config", payload,
+                reason,
+                requested_by=requested_by)
+        await self._track("shop", {
+            "action": "quota_adjust",
+            "shopId": int(shop_id),
+            "direction": direction,
+            "from": tier,
+            "to": target,
+            "changeId":
+                (change or {}).get(
+                    "changeId"),
+        })
+        return {
+            "success": True,
+            "shopId": int(shop_id),
+            "direction": direction,
+            "quotaTier": {
+                "before": tier,
+                "after": target,
+            },
+            "healthScore": score,
+            "governance": {
+                "changeId":
+                    (change or {}).get(
+                        "changeId"),
+                "status":
+                    (change or {}).get(
+                        "status")
+                or "pending",
+                "bus": "46号审批总线",
+                "note": "建议书已提交"
+                        "——审批通过后"
+                        "生效, 永不自动执行",
+            },
+            "note": "S7 配额调整——"
+                    "经 46号审批轨"
+                    "(信值正反馈)",
+            "requestedAt": ts(),
+        }
+
+    async def dispute_assist(
+            self, shop_id: int,
+            product_id: int = None,
+            order_id: int = None,
+            summary: str = ""
+    ) -> dict:
+        """争议快速响应(决策面——
+        买家投诉时确定性聚合证据链
+        辅助处理: 店铺/商品/合规
+        事件/活动四源+64号订单
+        只读; AI 仅展示'为什么
+        这样判'——终审在人工)
+
+        Raises:
+            KeyError: 店铺不存在
+        """
+        require_active_mode()
+        shop = await self._get_shop(
+            int(shop_id))
+        evidence = []
+
+        # ① 店铺档案(准入快照)
+        evidence.append({
+            "kind": "shop",
+            "refId": int(shop_id),
+            "data": {
+                "status":
+                    shop.get("status"),
+                "category":
+                    shop.get("category"),
+                "quotaTier":
+                    shop.get("quotaTier"),
+                "precheckSnapshot":
+                    shop.get(
+                        "precheck"
+                        "Snapshot"),
+                "complianceAnswers":
+                    shop.get(
+                        "compliance"
+                        "Answers"),
+            },
+        })
+
+        # ② 商品记录(合规标记)
+        if product_id:
+            product = await \
+                self.repo.get_product(
+                    int(product_id))
+            if product:
+                evidence.append({
+                    "kind": "product",
+                    "refId":
+                        int(product_id),
+                    "data": {
+                        "status":
+                            product.get(
+                                "status"),
+                        "complianceFlag":
+                            product.get(
+                                "compliance"
+                                "Flag"),
+                        "fingerprint":
+                            product.get(
+                                "finger"
+                                "print"),
+                        "createdAt":
+                            product.get(
+                                "created"
+                                "At"),
+                    },
+                })
+
+        # ③ 合规事件链(三道防线
+        #    命中明细)
+        events = await \
+            self.repo.list_compliance(
+                shop_id=int(shop_id),
+                limit=20)
+        compliance_hits = [
+            {"eventId":
+                 e.get("eventId"),
+             "line": e.get("line"),
+             "findings":
+                 e.get("findings"),
+             "createdAt":
+                 e.get("createdAt")}
+            for e in events
+            if (e.get("findings")
+                or [])]
+        evidence.append({
+            "kind": "compliance",
+            "refId": 0,
+            "data": {
+                "total": len(events),
+                "hits":
+                    compliance_hits[:5],
+            },
+        })
+
+        # ④ 活动撤销审计
+        campaigns = await \
+            self.repo.list_campaigns(
+                shop_id=int(shop_id),
+                limit=20)
+        revoked_audit = [
+            {"campaignId":
+                 c.get("campaignId"),
+             "name": c.get("name"),
+             "revokedAt":
+                 c.get("revokedAt"),
+             "revokedBy":
+                 c.get("revokedBy")}
+            for c in campaigns
+            if c.get("revoked")]
+        evidence.append({
+            "kind": "campaign",
+            "refId": 0,
+            "data": {
+                "total":
+                    len(campaigns),
+                "revokedAudit":
+                    revoked_audit[:5],
+            },
+        })
+
+        # ⑤ 64号订单(只读——
+        #    若提供 orderId)
+        order_ref = None
+        if order_id:
+            try:
+                from services.xx64_service import (
+                    Xx64Service,
+                )
+                od = await (
+                    Xx64Service()
+                    .get_order(
+                        int(order_id)))
+                o = (od or {}).get(
+                    "order") or {}
+                order_ref = {
+                    "orderId":
+                        o.get("orderId"),
+                    "status":
+                        o.get("status"),
+                    "price":
+                        o.get("price"),
+                    "trustValue":
+                        o.get(
+                            "trustValue"),
+                    "exclusive":
+                        o.get(
+                            "exclusive"),
+                }
+                evidence.append({
+                    "kind": "order64",
+                    "refId":
+                        int(order_id),
+                    "data": order_ref,
+                })
+            except Exception as exc:
+                logger.warning(
+                    "xx65_dispute"
+                    "_order64_skip: %s",
+                    exc)
+
+        # 确定性处置建议(AI 仅
+        # 展示——approve 决定权
+        # 在人工)
+        advises = []
+        if any(e["kind"] == "product"
+               and (e["data"].get(
+                   "complianceFlag"))
+               for e in evidence):
+            advises.append(
+                "商品存在合规标记——"
+                "建议优先核实内容"
+                "合规性(防御③巡检"
+                "命中留痕)")
+        if compliance_hits:
+            advises.append(
+                f"合规事件链命中 "
+                f"{len(compliance_hits)}"
+                f" 条——调取三道"
+                f"防线留痕辅助定责")
+        if revoked_audit:
+            advises.append(
+                "存在撤销活动——撤销"
+                "审计已固化(时间戳+"
+                "操作人), 不可抹除")
+        if order_ref and order_ref.get(
+                "exclusive"):
+            advises.append(
+                "订单为信值支付整单"
+                "互斥(R2)——核对活动"
+                "叠加是否违反互斥声明")
+        if not advises:
+            advises.append(
+                "65号域内无合规风险"
+                "信号——争议焦点或"
+                "在履约/物流域")
+
+        return {
+            "success": True,
+            "shopId": int(shop_id),
+            "productId":
+                int(product_id or 0),
+            "orderId":
+                int(order_id or 0),
+            "summary": str(
+                summary or "")[:200],
+            "evidence": evidence,
+            "advises": advises,
+            "note": "争议证据链辅助——"
+                    "确定性聚合(店铺/商品"
+                    "/合规/活动/64号订单"
+                    "只读); AI 仅展示, "
+                    "终审在人工(S6)",
+            "generatedAt": ts(),
+        }
+
     # --------------------------------------------------------
     # 内部
     # --------------------------------------------------------
