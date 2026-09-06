@@ -63,7 +63,7 @@ class Xx65Repository:
         "trustId", "version",
         "quotaGen", "quotaCampaign",
         "matchedRules", "wordHits",
-        "replacements", "turns")
+        "turns")
     _FLOAT_FIELDS = (
         "cashPrice", "trustQuota",
         "baselinePrice", "score",
@@ -83,12 +83,15 @@ class Xx65Repository:
         "keywords", "findings",
         "signals", "auditTrail",
         "matchedKeywords",
-        "complianceQuestions")
+        "complianceQuestions",
+        "replacements")
     _BOOL_FIELDS = (
         "activated", "frozen",
         "passed", "matched",
         "revocable", "pooled",
-        "fallback")
+        "fallback",
+        "requiresHumanReview",
+        "complianceFlag")
 
     _TABLE_BY_KIND: ClassVar[dict] = {
         "shop": TABLE_SHOPS,

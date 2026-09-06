@@ -696,13 +696,761 @@ class Xx65Service:
                                "optimize",
                                "urgent"),
             },
-            "note": "P0 底座: S1-S8"
-                    "刚性规则+六态状态机"
-                    "+意图路由+信值准入"
-                    "(P1 内容工坊完整"
-                    "交付)",
+            "note": "P1 内容工坊: S1-S8"
+                    "刚性规则+店铺/草稿双"
+                    "状态机+合规三道防线"
+                    "+下单窗口双轨展示"
+                    "(P2 营销中枢待交付)",
         })
         return view
+
+    # ============================================================
+    # P1·AI 内容工坊
+    # ============================================================
+
+    async def create_draft(
+            self, shop_id: int,
+            product_name: str,
+            description: str = "",
+            price: float = 0.0
+    ) -> dict:
+        """内容草稿生成(防御①:
+        LLM/rule 文案+禁词实时替换
+        +替换记录留痕——S1/S7/S8)
+
+        Raises:
+            KeyError: 店铺不存在
+            ValueError: off 态/店铺
+                非 active/配额超限/
+                参数非法
+        """
+        require_active_mode()
+        shop = await self._get_shop(
+            int(shop_id))
+        if shop.get("status") != "active":
+            raise ValueError(
+                f"店铺状态 "
+                f"{shop.get('status')}"
+                f" 不可生成内容(须 active)")
+        product_name = str(
+            product_name or "").strip()
+        description = str(
+            description or "").strip()
+        if not product_name or \
+                len(product_name) > 60:
+            raise ValueError(
+                "商品名必填(1-60 字符)")
+        if len(description) > 1000:
+            raise ValueError(
+                "商品描述超长"
+                "(≤1000 字符)")
+        price = float(price or 0)
+        if price <= 0:
+            raise ValueError(
+                "价格必须为正数")
+
+        # S7 配额检查(生成次数
+        # 与店铺信值等级绑定)
+        from services.xx65_registry import (
+            AI_QUOTA_TIERS,
+        )
+        tier = shop.get("quotaTier") \
+            or "starter"
+        limit = AI_QUOTA_TIERS.get(
+            tier, AI_QUOTA_TIERS[
+                "starter"])["contentGen"]
+        used = int(
+            shop.get("quotaGen") or 0)
+        if used >= limit:
+            raise ValueError(
+                f"S7 生成配额已满"
+                f"({used}/{limit}, "
+                f"{tier} 档)——守信扩容,"
+                f"违规降级(配额与信值"
+                f"等级动态绑定)")
+
+        # 文案生成(rule 轨确定性
+        # /LLM 轨三级降级——
+        # LLM 输出仍过禁词替换)
+        title, copy, track = \
+            self._generate_copy(
+                shop, product_name,
+                description)
+        # 防御①: 禁词实时替换
+        # (同输入同输出——记录
+        # 替换明细供溯源)
+        title, t_repl = \
+            self._apply_replacements(
+                title)
+        copy, c_repl = \
+            self._apply_replacements(
+                copy)
+        replacements = \
+            [{"field": "title",
+              "from": r["from"],
+              "to": r["to"]}
+             for r in t_repl] + \
+            [{"field": "copy",
+              "from": r["from"],
+              "to": r["to"]}
+             for r in c_repl]
+        scan = self._compliance_scan(
+            f"{title}\n{copy}")
+
+        draft_id = await \
+            self.repo.next_draft_id()
+        fingerprint = _fingerprint(
+            "draft", draft_id,
+            shop["shopId"],
+            product_name, title)
+        requires_review = bool(
+            scan["severeHits"])
+        record = {
+            "draftId": draft_id,
+            "shopId": int(shop_id),
+            "productId": 0,
+            "productName": product_name,
+            "description": description,
+            "generatedTitle": title,
+            "generatedCopy": copy,
+            "llmTrack": track,
+            "cashPrice": round(
+                price, 2),
+            "trustQuota": round(
+                price * 0.30, 2),
+            "replacements": replacements,
+            "wordHits": len(
+                replacements),
+            "compliance": scan,
+            "status": "draft",
+            "requiresHumanReview":
+                requires_review,
+            "reviewNote": "",
+            "fingerprint": fingerprint,
+            "createdAt": ts(),
+            "updatedAt": ts(),
+        }
+        await self.repo.save_draft(
+            record)
+        # S7 配额计数
+        shop["quotaGen"] = used + 1
+        shop["updatedAt"] = ts()
+        await self.repo.save_shop(
+            shop, create=False)
+        # 合规事件(防御①留痕)
+        await self._compliance_event(
+            shop_id=int(shop_id),
+            draft_id=draft_id,
+            line="gen_filter",
+            hits=scan["severeHits"]
+            + [r["from"]
+               for r in replacements],
+            disposition=(
+                "flagged_human_review"
+                if requires_review
+                else "auto_replaced"))
+        await self._track("draft", {
+            "action": "create",
+            "draftId": draft_id,
+            "shopId": int(shop_id),
+            "llmTrack": track,
+            "wordHits": len(replacements),
+            "requiresHumanReview":
+                requires_review,
+        })
+        return {
+            "success": True,
+            "draftId": draft_id,
+            "shopId": int(shop_id),
+            "productName": product_name,
+            "title": title,
+            "copy": copy,
+            "llmTrack": track,
+            "cashPrice": record[
+                "cashPrice"],
+            "trustQuota": record[
+                "trustQuota"],
+            "replacements": replacements,
+            "wordHits": len(replacements),
+            "compliance": scan,
+            "status": "draft",
+            "requiresHumanReview":
+                requires_review,
+            "note": "草稿已生成——防御①"
+                    "(禁词实时替换+留痕);"
+                    "发布须过二次校验"
+                    "(S1 终审不可跳过)",
+            "fingerprint": fingerprint,
+            "createdAt": ts(),
+        }
+
+    async def get_draft(
+            self, draft_id: int
+    ) -> dict:
+        """草稿详情+替换记录
+        (观测面——不受开关影响)"""
+        draft = await self._get_draft(
+            int(draft_id))
+        return {
+            "success": True,
+            "draft": draft,
+            "note": "草稿详情(观测面——"
+                    "替换记录可溯源 S1)",
+            "generatedAt": ts(),
+        }
+
+    async def publish_draft(
+            self, draft_id: int,
+            confirmed: bool = False
+    ) -> dict:
+        """草稿发布(防御②: 合规
+        二次校验+人工确认——S1
+        终审不可跳过; draft→
+        published 生成商品)
+
+        Raises:
+            KeyError: 草稿不存在
+            ValueError: 未确认/
+                合规不过/状态机拒绝
+        """
+        require_active_mode()
+        draft = await self._get_draft(
+            int(draft_id))
+        from services.xx65_registry import (
+            DRAFT_TRANSITIONS,
+        )
+        if "published" not in \
+                DRAFT_TRANSITIONS.get(
+                    draft.get("status"),
+                    ()):
+            raise ValueError(
+                f"草稿状态 "
+                f"{draft.get('status')}"
+                f" 不可发布(须 draft/"
+                f"pending_review)")
+        if not confirmed:
+            raise ValueError(
+                "发布须人工确认"
+                "(confirmed=true——"
+                "S1 终审不可跳过)")
+        # 防御②: 发布前独立二次
+        # 校验(重新扫描——防
+        # 人工/系统旁路改动)
+        text = f"{draft.get('generatedTitle', '')}\n" \
+            f"{draft.get('generatedCopy', '')}"
+        scan = self._compliance_scan(
+            text)
+        if scan["severeHits"] or \
+                not scan["passed"]:
+            raise ValueError(
+                f"S1 合规二次校验未过"
+                f"(严重词 {scan['severeHits']}"
+                f"/得分 {scan['score']})"
+                f"——禁止发布, 可转人工"
+                f"审核通道核实")
+        # 生成商品(S3/S4: 双轨
+        # 价格仅展示, 结算走 64号)
+        product_id = await \
+            self.repo.next_product_id()
+        product = {
+            "productId": product_id,
+            "shopId": draft["shopId"],
+            "draftId": int(draft_id),
+            "productName": draft[
+                "productName"],
+            "title": draft[
+                "generatedTitle"],
+            "copy": draft[
+                "generatedCopy"],
+            "cashPrice": draft[
+                "cashPrice"],
+            "trustQuota": draft[
+                "trustQuota"],
+            "status": "published",
+            "complianceFlag": False,
+            "fingerprint": draft.get(
+                "fingerprint"),
+            "createdAt": ts(),
+        }
+        await self.repo.save_product(
+            product)
+        draft.update({
+            "status": "published",
+            "productId": product_id,
+            "publishedAt": ts(),
+            "updatedAt": ts(),
+        })
+        await self.repo.save_draft(
+            draft, create=False)
+        await self._compliance_event(
+            shop_id=draft["shopId"],
+            draft_id=int(draft_id),
+            product_id=product_id,
+            line="publish_recheck",
+            hits=scan["bannedHits"],
+            disposition="passed")
+        await self._track("draft", {
+            "action": "publish",
+            "draftId": int(draft_id),
+            "shopId": draft["shopId"],
+            "productId": product_id,
+        })
+        return {
+            "success": True,
+            "draftId": int(draft_id),
+            "productId": product_id,
+            "status": "published",
+            "compliance": scan,
+            "note": "发布成功——防御②"
+                    "过审; 双轨价格仅展示"
+                    "(S3/S4 结算以 64号"
+                    "规则引擎为准)",
+            "publishedAt": ts(),
+        }
+
+    async def human_review(
+            self, draft_id: int,
+            note: str = "",
+            action: str = None,
+            reviewer: str = "member"
+    ) -> dict:
+        """人工兜底通道(S6——不受
+        开关影响: 转人工/审批双轨)
+
+        Args:
+            action: None=转人工申请
+                (member); approve/
+                reject=人工终审(admin
+                ——终审人工铁律)
+        """
+        draft = await self._get_draft(
+            int(draft_id))
+        from services.xx65_registry import (
+            DRAFT_TRANSITIONS,
+        )
+        note = str(note or "").strip()
+        if action is None:
+            # 转人工申请
+            if "pending_review" not in \
+                    DRAFT_TRANSITIONS.get(
+                        draft.get("status"),
+                        ()):
+                raise ValueError(
+                    f"草稿状态 "
+                    f"{draft.get('status')}"
+                    f" 不可转人工"
+                    f"(须 draft)")
+            draft.update({
+                "status":
+                    "pending_review",
+                "reviewNote": note,
+                "updatedAt": ts(),
+            })
+            await self.repo.save_draft(
+                draft, create=False)
+            await self._compliance_event(
+                shop_id=draft["shopId"],
+                draft_id=int(draft_id),
+                line="gen_filter",
+                hits=[],
+                disposition=(
+                    "human_review"
+                    "_requested"))
+            await self._track("draft", {
+                "action":
+                    "human_review",
+                "draftId": int(draft_id),
+                "shopId":
+                    draft["shopId"],
+                "note": note,
+            })
+            return {
+                "success": True,
+                "draftId": int(draft_id),
+                "status":
+                    "pending_review",
+                "note": "已转人工审核"
+                        "(S6 兜底通道——"
+                        "不受开关影响)",
+                "updatedAt": ts(),
+            }
+        if action not in ("approve",
+                         "reject"):
+            raise ValueError(
+                "action 仅支持 "
+                "approve/reject")
+        if reviewer != "admin":
+            raise ValueError(
+                "人工终审须 admin "
+                "(S6 终审人工铁律)")
+        target = "published" \
+            if action == "approve" \
+            else "rejected"
+        if target not in \
+                DRAFT_TRANSITIONS.get(
+                    draft.get("status"),
+                    ()):
+            raise ValueError(
+                f"草稿状态 "
+                f"{draft.get('status')}"
+                f" 不可终审"
+                f"(须 pending_review)")
+        if action == "reject":
+            draft.update({
+                "status": "rejected",
+                "reviewNote": note,
+                "updatedAt": ts(),
+            })
+            await self.repo.save_draft(
+                draft, create=False)
+            await self._compliance_event(
+                shop_id=draft["shopId"],
+                draft_id=int(draft_id),
+                line="gen_filter",
+                hits=[],
+                disposition=(
+                    "human_rejected"))
+            await self._track("draft", {
+                "action": "reject",
+                "draftId": int(draft_id),
+                "shopId":
+                    draft["shopId"],
+            })
+            return {
+                "success": True,
+                "draftId": int(draft_id),
+                "status": "rejected",
+                "note": "人工终审: 驳回",
+                "updatedAt": ts(),
+            }
+        # 人工 approve——终审放行
+        # (留痕+全量审计; 内容仍受
+        # 防御③上架后巡检监控)
+        text = f"{draft.get('generatedTitle', '')}\n" \
+            f"{draft.get('generatedCopy', '')}"
+        scan = self._compliance_scan(
+            text)
+        product_id = await \
+            self.repo.next_product_id()
+        product = {
+            "productId": product_id,
+            "shopId": draft["shopId"],
+            "draftId": int(draft_id),
+            "productName": draft[
+                "productName"],
+            "title": draft[
+                "generatedTitle"],
+            "copy": draft[
+                "generatedCopy"],
+            "cashPrice": draft[
+                "cashPrice"],
+            "trustQuota": draft[
+                "trustQuota"],
+            "status": "published",
+            "complianceFlag": bool(
+                scan["severeHits"]),
+            "fingerprint": draft.get(
+                "fingerprint"),
+            "createdAt": ts(),
+        }
+        await self.repo.save_product(
+            product)
+        draft.update({
+            "status": "published",
+            "productId": product_id,
+            "reviewNote": note,
+            "publishedAt": ts(),
+            "updatedAt": ts(),
+        })
+        await self.repo.save_draft(
+            draft, create=False)
+        await self._compliance_event(
+            shop_id=draft["shopId"],
+            draft_id=int(draft_id),
+            product_id=product_id,
+            line="gen_filter",
+            hits=scan["severeHits"],
+            disposition=(
+                "human_override"))
+        await self._track("draft", {
+            "action": "approve",
+            "draftId": int(draft_id),
+            "shopId": draft["shopId"],
+            "productId": product_id,
+            "humanOverride": True,
+        })
+        return {
+            "success": True,
+            "draftId": int(draft_id),
+            "productId": product_id,
+            "status": "published",
+            "compliance": scan,
+            "complianceFlag": product[
+                "complianceFlag"],
+            "note": "人工终审放行——"
+                    "留痕可溯, 防御③上架后"
+                    "巡检持续监控",
+            "publishedAt": ts(),
+        }
+
+    async def products_list(
+            self, shop_id: int = None,
+            status: str = None,
+            limit: int = 50
+    ) -> dict:
+        """商品列表(观测面)"""
+        products = await \
+            self.repo.list_products(
+                shop_id=shop_id,
+                status=status,
+                limit=limit)
+        return {
+            "success": True,
+            "total": len(products),
+            "products": products,
+            "note": "商品列表(观测面——"
+                    "双轨价格仅展示 S4)",
+            "generatedAt": ts(),
+        }
+
+    async def order_window(
+            self, product_id: int,
+            trust_id: int
+    ) -> dict:
+        """下单窗口智能构建(S4 双轨
+        展示+额度进度条——只读对接
+        64号观测面, 不写 64号任何表)
+
+        Raises:
+            KeyError: 商品不存在/
+                45号信值档案不存在
+        """
+        product = await \
+            self.repo.get_product(
+                int(product_id))
+        if not product:
+            raise KeyError(
+                f"商品 {product_id}"
+                f" 不存在")
+        if product.get("status") \
+                != "published":
+            raise ValueError(
+                f"商品状态 "
+                f"{product.get('status')}"
+                f" 未上架(下单窗口"
+                f"仅对 published 开放)")
+        price = float(
+            product.get("cashPrice")
+            or 0.0)
+        trust_id = int(trust_id or 0)
+        # S4 双轨展示(对齐 64号
+        # R1 口径——仅展示)
+        from services.xx65_registry import (
+            ORDER_WINDOW_CUMULATIVE_WARN,
+            ORDER_WINDOW_SINGLE_WARN,
+            POINTS_PER_TRUST_DISPLAY,
+            TRUST_DISPLAY_PORTION,
+        )
+        trust_value = round(
+            price * TRUST_DISPLAY_PORTION,
+            2)
+        cash_value = round(
+            price - trust_value, 2)
+        # 64号限额观测(纯读取——
+        # 65号不写 64号任何表)
+        from services.xx64_service import (
+            Xx64Service,
+        )
+        quota = await (
+            Xx64Service()
+            .quota_status(trust_id))
+        single_quota = float(
+            quota.get("singleQuota")
+            or 0.0)
+        window_used = float(
+            quota.get("windowUsed")
+            or 0.0)
+        cum_quota = float(
+            quota.get("cumulativeQuota")
+            or 0.0)
+        # 额度进度条+预警
+        # (展示层口径: 单次≥15%
+        # /累计≥35% 触发二次确认)
+        single_ratio = round(
+            trust_value / single_quota,
+            4) if single_quota > 0 \
+            else 1.0
+        cumulative_ratio = round(
+            (window_used + trust_value)
+            / cum_quota, 4) \
+            if cum_quota > 0 else 1.0
+        warnings = []
+        if single_ratio >= \
+                ORDER_WINDOW_SINGLE_WARN:
+            warnings.append(
+                f"单次信值占比 "
+                f"{single_ratio:.0%}"
+                f"≥{ORDER_WINDOW_SINGLE_WARN:.0%}"
+                f"(R4 限额预警)")
+        if cumulative_ratio >= \
+                ORDER_WINDOW_CUMULATIVE_WARN:
+            warnings.append(
+                f"累计信值占比 "
+                f"{cumulative_ratio:.0%}"
+                f"≥{ORDER_WINDOW_CUMULATIVE_WARN:.0%}"
+                f"(R5 窗口预警)")
+        # 无障碍(老年受众大字版
+        # +语音导购提示——店铺
+        # 意图受众确定性匹配)
+        elder = False
+        try:
+            shop = await \
+                self.repo.get_shop(
+                    int(product.get(
+                        "shopId") or 0))
+            if shop:
+                intent = await \
+                    self.repo.get_intent(
+                        int(shop.get(
+                            "intentId")
+                            or 0))
+                if intent:
+                    audience = str(
+                        intent.get(
+                            "audience")
+                        or "")
+                    from services.xx65_registry import (
+                        ELDER_AUDIENCE_MARKERS,
+                    )
+                    elder = any(
+                        m in audience
+                        for m in
+                        ELDER_AUDIENCE_MARKERS)
+        except Exception:
+            elder = False
+        return {
+            "success": True,
+            "productId": int(product_id),
+            "productName": product.get(
+                "productName"),
+            "dualTrack": {
+                "cashValue": cash_value,
+                "trustValue": trust_value,
+                "note": "双轨展示——"
+                        "扣减以 64号规则"
+                        "引擎为准(S3)",
+            },
+            "quotaProgress": {
+                "balance": quota.get(
+                    "balance"),
+                "singleQuota":
+                    single_quota,
+                "windowUsed":
+                    window_used,
+                "cumulativeQuota":
+                    cum_quota,
+                "singleRatio":
+                    single_ratio,
+                "cumulativeRatio":
+                    cumulative_ratio,
+            },
+            "warnings": warnings,
+            "confirmRequired": bool(
+                warnings),
+            "pointsHint": {
+                "pointsPerTrust":
+                    POINTS_PER_TRUST_DISPLAY,
+                "estimatedPoints": int(
+                    trust_value
+                    * POINTS_PER_TRUST_DISPLAY),
+                "note": "积分兑换入口"
+                        "提示(100:1 对齐"
+                        "64号 R6 口径)",
+            },
+            "accessibility": {
+                "largeFont": elder,
+                "voiceGuide": elder,
+                "note": "老年受众自动"
+                        "大字版+语音导购"
+                        "(确定性受众匹配)"
+                if elder else
+                    "标准版(非老年"
+                    "受众)",
+            },
+            "note": "下单窗口——双轨价格"
+                    "+额度进度条+二次确认"
+                    "预警(只读对接 64号"
+                    "观测面, 65号不做结算)",
+            "generatedAt": ts(),
+        }
+
+    async def inspect_products(
+            self, shop_id: int = None
+    ) -> dict:
+        """防御③: 上架后巡检
+        (published 商品全量重扫
+        ——命中即标记+合规事件
+        留痕; 惩罚性下架永不
+        自动执行, 须人工处置 S6)
+
+        不受开关影响(合规防线
+        永不关停——宪法口径)
+        """
+        products = await \
+            self.repo.list_products(
+                shop_id=shop_id,
+                status="published",
+                limit=500)
+        findings = []
+        for p in products:
+            text = f"{p.get('title', '')}\n" \
+                f"{p.get('copy', '')}"
+            scan = self._compliance_scan(
+                text)
+            if scan["severeHits"] or \
+                    not scan["passed"]:
+                # 标记(观测面警示——
+                # 不自动下架, 人工处置)
+                p["complianceFlag"] = True
+                p["updatedAt"] = ts()
+                await self.repo.save_product(
+                    p, create=False)
+                await self._compliance_event(
+                    shop_id=p["shopId"],
+                    product_id=p[
+                        "productId"],
+                    draft_id=p.get(
+                        "draftId") or 0,
+                    line="post_inspect",
+                    hits=scan[
+                        "severeHits"]
+                    + scan["bannedHits"],
+                    disposition=(
+                        "flagged_manual"
+                        "_takedown"))
+                findings.append({
+                    "productId": p[
+                        "productId"],
+                    "shopId": p[
+                        "shopId"],
+                    "severeHits": scan[
+                        "severeHits"],
+                    "bannedHits": scan[
+                        "bannedHits"],
+                    "score": scan[
+                        "score"],
+                })
+        return {
+            "success": True,
+            "scanned": len(products),
+            "flagged": len(findings),
+            "findings": findings,
+            "note": "防御③上架后巡检——"
+                    "命中仅标记+留痕,"
+                    "下架须人工处置"
+                    "(S6 终审人工铁律)",
+            "inspectedAt": ts(),
+        }
 
     # --------------------------------------------------------
     # 内部
@@ -719,9 +1467,20 @@ class Xx65Service:
                 f"店铺 {shop_id} 不存在")
         return shop
 
-    async def _questions(self,
-                         category: str
-                         ) -> list:
+    async def _get_draft(
+            self, draft_id: int
+            ) -> dict:
+        """读取草稿(KeyError 不存在)"""
+        draft = await self.repo.get_draft(
+            int(draft_id))
+        if not draft:
+            raise KeyError(
+                f"草稿 {draft_id} 不存在")
+        return draft
+
+    async def _questions(
+            self, category: str
+            ) -> list:
         """类目合规承诺问题清单
         (确定性)"""
         from services.xx65_registry import (
@@ -733,6 +1492,175 @@ class Xx65Service:
             return ["是否涉及品牌授权?"]
         return list(tpl[
             "complianceQuestions"])
+
+    def _generate_copy(
+            self, shop: dict,
+            product_name: str,
+            description: str
+            ) -> tuple:
+        """文案生成(rule 轨确定性
+        模板/LLM 轨三级降级——
+        LLM 仅润色位, 判定链
+        全确定性)"""
+        from services.xx65_registry import (
+            CATEGORY_TEMPLATES,
+            LLM_TRACK_FALLBACK,
+            LLM_TRACK_PRIMARY,
+            LLM_TRACK_RULE,
+            llm_mode,
+        )
+        category = shop.get(
+            "category") or "general"
+        label = CATEGORY_TEMPLATES.get(
+            category, {}).get(
+                "label", "综合")
+        # rule 轨确定性模板(同输入
+        # 同输出)
+        title = f"{product_name}·{label}甄选"
+        base_copy = description or (
+            f"{product_name}, 源自诚信"
+            f"店铺{label}类目, 匠心"
+            f"甄选、品质如实描述。")
+        rule_copy = (
+            f"{base_copy} 信值友好"
+            f"店铺, 支持信值支付额度"
+            f"展示(结算以平台规则为准)。")
+        if llm_mode() != "on":
+            return title, rule_copy, \
+                LLM_TRACK_RULE
+        # LLM 轨(glm 主档→备档
+        # →rule 兜底——fail-soft)
+        try:
+            from services.llm_client import (
+                provider_client,
+            )
+            system = (
+                "你是电商商品文案策划。"
+                "为商品输出一段 60-120 "
+                "字的中文商品描述文案, "
+                "合规红线: 不得出现"
+                "医疗功效宣称与广告法"
+                "极限词(如最好/第一/"
+                "顶级)。只输出文案正文。")
+            user = (
+                f"商品名: {product_name}\n"
+                f"类目: {label}\n"
+                f"描述: {description or '无'}")
+            for model in (
+                    LLM_TRACK_PRIMARY,
+                    LLM_TRACK_FALLBACK):
+                reply = provider_client.chat(
+                    system, user,
+                    model=model)
+                if reply and \
+                        len(reply.strip()) \
+                        >= 20:
+                    return title, \
+                        reply.strip(), model
+        except Exception as exc:
+            logger.warning(
+                "xx65_llm_copy_failed: %s",
+                exc)
+        return title, rule_copy, \
+            LLM_TRACK_RULE
+
+    def _apply_replacements(
+            self, text: str
+            ) -> tuple:
+        """禁词实时替换(确定性
+        ——记录替换明细)"""
+        from services.xx65_registry import (
+            BANNED_REPLACEMENTS,
+        )
+        replacements = []
+        out = str(text or "")
+        for word, repl in \
+                BANNED_REPLACEMENTS.items():
+            if word in out:
+                count = out.count(word)
+                out = out.replace(
+                    word, repl)
+                replacements.append({
+                    "from": word,
+                    "to": repl,
+                    "count": count,
+                    "reason": "广告法极限词"
+                              "自动替换(防御①)",
+                })
+        return out, replacements
+
+    def _compliance_scan(
+            self, text: str
+            ) -> dict:
+        """确定性合规扫描(三道
+        防线统一口径)"""
+        from services.xx65_registry import (
+            BANNED_PENALTY,
+            BANNED_REPLACEMENTS,
+            COMPLIANCE_PASS_SCORE,
+            SEVERE_PENALTY,
+            SEVERE_WORDS,
+        )
+        text = str(text or "")
+        severe_hits = [w for w in
+                       SEVERE_WORDS
+                       if w in text]
+        banned_hits = [w for w in
+                       BANNED_REPLACEMENTS
+                       if w in text]
+        score = 100 \
+            - len(severe_hits) \
+            * SEVERE_PENALTY \
+            - len(banned_hits) \
+            * BANNED_PENALTY
+        score = max(0, min(100, score))
+        passed = (not severe_hits
+                  and not banned_hits
+                  and score
+                  >= COMPLIANCE_PASS_SCORE)
+        return {
+            "severeHits": severe_hits,
+            "bannedHits": banned_hits,
+            "score": score,
+            "passed": passed,
+            "passScore":
+                COMPLIANCE_PASS_SCORE,
+        }
+
+    async def _compliance_event(
+            self, shop_id: int,
+            line: str,
+            hits: list,
+            draft_id: int = 0,
+            product_id: int = 0,
+            disposition: str = ""
+    ) -> None:
+        """合规事件留痕(三道防线
+        统一落 xx65_compliance)"""
+        try:
+            event_id = await \
+                self.repo \
+                .next_compliance_id()
+            await self.repo \
+                .save_compliance({
+                    "eventId": event_id,
+                    "shopId": int(
+                        shop_id or 0),
+                    "draftId": int(
+                        draft_id or 0),
+                    "productId": int(
+                        product_id or 0),
+                    "line": line,
+                    "findings": list(
+                        hits or []),
+                    "disposition": str(
+                        disposition or ""),
+                    "createdAt": ts(),
+                })
+        except Exception as exc:
+            logger.warning(
+                "xx65_compliance_event"
+                "_failed: %s", exc)
 
     async def _track(self,
                      event_type: str,

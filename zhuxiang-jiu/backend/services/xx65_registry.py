@@ -184,6 +184,94 @@ PRECHECK_CODES = {
     "S2_TRUST": "45号信值档案存在",
 }
 
+# ============================================================
+# P1·AI 内容工坊——合规三道防线+下单窗口参数(宪法级)
+# ============================================================
+
+# LLM 文案轨开关(XX65_LLM_MODE, 默认 off
+# ——off=rule 轨确定性模板; on=glm 主档
+# →备档→rule 三级降级; LLM 输出仍过
+# 禁词替换——S1 不豁免)
+LLM_TRACK_PRIMARY = "glm-5.3"
+LLM_TRACK_FALLBACK = "glm-4-flash"
+LLM_TRACK_RULE = "rule"
+
+# 禁词替换映射(广告法极限词——替换级:
+# 生成时自动替换+记录留痕, 同输入同输出)
+BANNED_REPLACEMENTS = {
+    "最好": "高品质", "最佳": "高品质",
+    "第一": "领先", "顶级": "上乘",
+    "极品": "上乘", "史上最": "十分",
+    "绝无仅有": "少见", "百分百": "高",
+    "绝对": "颇为", "永久": "长效",
+    "全网最低": "实惠", "国家级": "优质",
+    "世界级": "优质", "最高级": "高档",
+    "万能": "多用途", "顶级工艺": "精工",
+}
+
+# 严重违禁词(拒绝级——S1 硬拦:
+# 虚假功效/医疗宣称, 不可自动替换,
+# 仅可人工核实后处置)
+SEVERE_WORDS = (
+    "包治百病", "根治", "治愈",
+    "特效药", "无效退款", "治愈率",
+    "抗癌", "降三高", "延年益寿",
+    "提高免疫力", "医疗功效")
+
+# 合规通过分(三道防线统一口径:
+# ①生成时过滤 ②发布前二次 ③上架后巡检)
+COMPLIANCE_PASS_SCORE = 80
+
+# 严重词/极限词扣分权重(评分口径)
+SEVERE_PENALTY = 40
+BANNED_PENALTY = 10
+
+# 草稿四态状态机(draft→published
+# 发布流——S1 终审不可跳过)
+DRAFT_STATES = (
+    "draft",         # 已生成(待发布)
+    "pending_review",  # 转人工审核(S6)
+    "published",     # 已发布(生成商品)
+    "rejected",      # 人工驳回
+)
+
+DRAFT_TRANSITIONS = {
+    "draft": ("published",
+              "pending_review",
+              "rejected"),
+    "pending_review": ("published",
+                       "rejected"),
+    "published": (),
+    "rejected": (),
+}
+
+# 下单窗口展示参数(S4 双轨展示——
+# 仅前端展示不做结算, 扣减以 64号
+# 规则引擎为准——S3 服务端权威)
+TRUST_DISPLAY_PORTION = 0.30  # 对齐 64号 R1
+POINTS_PER_TRUST_DISPLAY = 100  # 对齐 64号 R6
+
+# 下单窗口预警阈值(展示层口径:
+# 单次≥15%/累计≥35% 触发二次确认)
+ORDER_WINDOW_SINGLE_WARN = 0.15
+ORDER_WINDOW_CUMULATIVE_WARN = 0.35
+
+# 老年受众无障碍标记(意图受众
+# 命中即 order-window 输出大字版
+# +语音导购脚本提示)
+ELDER_AUDIENCE_MARKERS = (
+    "老年", "长辈", "中老年", "银发")
+
+
+def llm_mode() -> str:
+    """LLM 文案轨开关(XX65_LLM_MODE,
+    默认 off——LLM 仅文案润色位,
+    判定链全确定性)"""
+    mode = os.environ.get(
+        "XX65_LLM_MODE") or "off"
+    return mode if mode in (
+        "off", "on") else "off"
+
 
 def current_mode() -> str:
     """模块开关(XX65_MODE, 默认 off——
@@ -267,6 +355,9 @@ def registry_view() -> dict:
         "shopStates": SHOP_STATES,
         "shopTransitions":
             SHOP_TRANSITIONS,
+        "draftStates": DRAFT_STATES,
+        "draftTransitions":
+            DRAFT_TRANSITIONS,
         "categories": {
             k: {
                 "label": v["label"],
@@ -277,9 +368,33 @@ def registry_view() -> dict:
             for k, v in
             CATEGORY_TEMPLATES.items()},
         "quotaTiers": AI_QUOTA_TIERS,
-        "note": "P0 底座: S1-S8 刚性"
-                "规则+店铺六态状态机"
-                "+意图路由+信值准入",
+        "llmMode": llm_mode(),
+        "compliance": {
+            "passScore":
+                COMPLIANCE_PASS_SCORE,
+            "bannedWords":
+                len(BANNED_REPLACEMENTS),
+            "severeWords":
+                len(SEVERE_WORDS),
+            "defenseLines": (
+                "gen_filter",
+                "publish_recheck",
+                "post_inspect"),
+        },
+        "orderWindow": {
+            "trustPortion":
+                TRUST_DISPLAY_PORTION,
+            "singleWarn":
+                ORDER_WINDOW_SINGLE_WARN,
+            "cumulativeWarn":
+                ORDER_WINDOW_CUMULATIVE_WARN,
+            "pointsPerTrust":
+                POINTS_PER_TRUST_DISPLAY,
+        },
+        "note": "P1 内容工坊: S1-S8 刚性"
+                "规则+店铺/草稿双状态机"
+                "+意图路由+信值准入+合规"
+                "三道防线+下单窗口双轨展示",
     }
 
 
@@ -306,6 +421,42 @@ def _validate_registry() -> None:
         raise RuntimeError(
             f"65号店铺状态机存在"
             f"不可达态: {missing}")
+    # 草稿状态机全态可达(BFS
+    # from draft)
+    d_reach = {"draft"}
+    changed = True
+    while changed:
+        changed = False
+        for src, dsts in \
+                DRAFT_TRANSITIONS.items():
+            if src in d_reach:
+                for d in dsts:
+                    if d not in d_reach:
+                        d_reach.add(d)
+                        changed = True
+    d_missing = set(DRAFT_STATES) \
+        - d_reach
+    if d_missing:
+        raise RuntimeError(
+            f"65号草稿状态机存在"
+            f"不可达态: {d_missing}")
+    # 禁词替换映射值不得再含
+    # 禁词(防替换自嵌套)
+    for word, repl in \
+            BANNED_REPLACEMENTS.items():
+        if any(w in repl for w
+               in BANNED_REPLACEMENTS
+               if w != word):
+            raise RuntimeError(
+                f"65号禁词替换自嵌套: "
+                f"{word}→{repl}")
+    # 严重词不得出现在替换映射键
+    overlap = set(SEVERE_WORDS) & \
+        set(BANNED_REPLACEMENTS)
+    if overlap:
+        raise RuntimeError(
+            f"65号严重词与替换级重叠: "
+            f"{overlap}")
     # 门槛映射合法
     for tier in TIER_STRICTEN:
         lv = required_level(tier)
@@ -319,6 +470,18 @@ def _validate_registry() -> None:
         if qt not in AI_QUOTA_TIERS:
             raise RuntimeError(
                 f"65号配额档缺失: {qt}")
+    # 展示参数域合法(S4 对齐
+    # 64号 R1/R6——仅展示)
+    if not 0 < TRUST_DISPLAY_PORTION \
+            < 1:
+        raise RuntimeError(
+            "65号信值展示占比越界")
+    if not 0 < ORDER_WINDOW_SINGLE_WARN \
+            <= ORDER_WINDOW_CUMULATIVE_WARN \
+            < 1:
+        raise RuntimeError(
+            "65号下单窗口预警阈值"
+            "域非法")
 
 
 # 模块导入即自检(宪法级)
