@@ -406,7 +406,7 @@ def run_round(round_no: int) -> None:
            str((r.get("sched_tasks"),
                 r.get("sched_err"))))
     record("44号 39 档案",
-           r.get("reg_n") == 42,
+           r.get("reg_n") == 45,
            str(r.get("reg_n")))
 
     print("\n[07 HTTP 端点+鉴权]")

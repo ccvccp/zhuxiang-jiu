@@ -771,7 +771,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 40 档案在册",
-               len(SCORER_REGISTRY) == 42,
+               len(SCORER_REGISTRY) == 45,
                str(len(SCORER_REGISTRY)))
         record("第39档案 shop_operation"
                "(batch24)",

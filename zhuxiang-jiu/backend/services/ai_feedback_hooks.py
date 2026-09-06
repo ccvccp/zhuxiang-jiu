@@ -80,6 +80,16 @@ async def _invoke_scorer(scorer_id: str, ctx: dict) -> dict | None:
         if scorer_id == "recycle_valuation":
             from services.recycle_scorer import RecycleValuationScorer
             return await RecycleValuationScorer().score(ctx)
+        # 全站批次三·内容类三模块 AI 决策门
+        if scorer_id == "product_launch":
+            from services.product_launch_scorer import ProductLaunchScorer
+            return await ProductLaunchScorer().score(ctx)
+        if scorer_id == "activity_risk":
+            from services.activity_risk_scorer import ActivityRiskScorer
+            return await ActivityRiskScorer().score(ctx)
+        if scorer_id == "ad_placement":
+            from services.ad_placement_scorer import AdPlacementScorer
+            return await AdPlacementScorer().score(ctx)
     except Exception as exc:
         logger.warning("挂钩评分失败(scorer=%s): %s", scorer_id, exc)
     return None
@@ -531,3 +541,89 @@ async def on_negotiation_settled(neg_id: int, accepted: bool,
     except Exception as exc:
         logger.warning("on_negotiation_settled 挂钩失败(%s): %s",
                        neg_id, exc)
+
+
+async def on_product_delisted(product_id: str,
+                              reason: str = "") -> None:
+    """商品下架终态(take_off_sale/force_delist)
+    → 自动反馈(01号 product_launch 决策门回流, 全站批次三)
+
+    语义映射: 下架(尤其违规原因)=上架决策修正信号
+    ——预测 low 却被下架=误放行, 预测非 low=预警正确;
+    business_key=onsale:{productId} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "product_launch", f"onsale:{product_id}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = (decision != "low")
+        await record_outcome("product_launch",
+                            f"onsale:{product_id}",
+                            "delisted",
+                            correct=correct,
+                            note=f"product {product_id} "
+                                 f"delisted({reason[:40]})")
+    except Exception as exc:
+        logger.warning("on_product_delisted 挂钩失败(%s): %s",
+                       product_id, exc)
+
+
+async def on_activity_settled(activity_id: int,
+                              approved: bool) -> None:
+    """活动审核终态(approved/rejected) → 自动反馈
+    (09号 activity_risk 决策门回流, 全站批次三)
+
+    语义映射: 审核通过期望低风险; 拒绝期望非低风险(预警正确);
+    business_key=activity:{activityId} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "activity_risk", f"activity:{activity_id}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = ((decision == "low") if approved
+                       else (decision != "low"))
+        await record_outcome("activity_risk",
+                            f"activity:{activity_id}",
+                            "approved" if approved else "rejected",
+                            correct=correct,
+                            note=f"activity {activity_id} "
+                                 f"{'approved' if approved else 'rejected'}")
+    except Exception as exc:
+        logger.warning("on_activity_settled 挂钩失败(%s): %s",
+                       activity_id, exc)
+
+
+async def on_ad_offline(ad_id: int,
+                        reason: str = "") -> None:
+    """广告下线终态 → 自动反馈
+    (10号 ad_placement 决策门回流, 全站批次三)
+
+    语义映射: 正常到点下线=投放决策正确(期望 low);
+    带原因提前下线=决策修正信号(期望非 low);
+    business_key=adonline:{adId} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "ad_placement", f"adonline:{ad_id}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            early = bool((reason or "").strip())
+            correct = ((decision == "low") if not early
+                       else (decision != "low"))
+        await record_outcome("ad_placement",
+                            f"adonline:{ad_id}",
+                            "offline",
+                            correct=correct,
+                            note=f"ad {ad_id} offline"
+                                 f"({reason[:40]})")
+    except Exception as exc:
+        logger.warning("on_ad_offline 挂钩失败(%s): %s",
+                       ad_id, exc)

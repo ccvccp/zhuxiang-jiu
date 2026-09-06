@@ -487,7 +487,7 @@ def run_round(round_no: int) -> None:
                "publish_recheck"],
            str(r.get("ev_lines")))
     record("44号 40 档案",
-           r.get("reg_n") == 42,
+           r.get("reg_n") == 45,
            str(r.get("reg_n")))
 
     print("\n[04 HTTP 端点+鉴权]")

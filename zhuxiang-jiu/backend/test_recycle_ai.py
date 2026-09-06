@@ -1,4 +1,4 @@
-"""全站批次二·13号老酒兑换 AI 升级 专项测试
+﻿"""全站批次二·13号老酒兑换 AI 升级 专项测试
 
 运行方式:
     python test_recycle_ai.py
@@ -174,7 +174,7 @@ class TestRegistry:
             default_weights,
         )
         record("42 档案",
-               len(SCORER_REGISTRY) == 42,
+               len(SCORER_REGISTRY) == 45,
                str(len(SCORER_REGISTRY)))
         entry = SCORER_REGISTRY.get("recycle_valuation")
         record("batch26 入册",

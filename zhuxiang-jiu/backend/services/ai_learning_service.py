@@ -118,6 +118,12 @@ SCORER_REGISTRY = {
     "credit_scoring":           {"label": "智能信用行为评分", "module": "23信用管理", "batch": 25},
     # ---- 第二十六批(全站批次二·13号老酒兑换 AI 升级: 回收估值议价评分) ----
     "recycle_valuation":        {"label": "智能回收估值议价评分", "module": "13老酒兑换", "batch": 26},
+    # ---- 第二十七批(全站批次三·01号产品展示 AI 升级: 商品上架评分) ----
+    "product_launch":           {"label": "智能商品上架评分", "module": "01产品展示", "batch": 27},
+    # ---- 第二十八批(全站批次三·09号活动管理 AI 升级: 活动风控评分) ----
+    "activity_risk":            {"label": "智能活动风控评分", "module": "09活动管理", "batch": 28},
+    # ---- 第二十九批(全站批次三·10号广告投放 AI 升级: 广告投放评分) ----
+    "ad_placement":             {"label": "智能广告投放评分", "module": "10广告投放", "batch": 29},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -220,6 +226,13 @@ DECISION_THRESHOLDS = {
     # 高分=高议价风险 → high 拦截/medium 转人工复核/low 放行)
     "recycle_valuation": [(60.0, "high"), (30.0, "medium"),
                           (0.0, "low")],
+    # 全站批次三·内容类三级(上架/发布/投放——对齐 credit_scoring 范式)
+    "product_launch": [(60.0, "high"), (30.0, "medium"),
+                       (0.0, "low")],
+    "activity_risk": [(60.0, "high"), (30.0, "medium"),
+                      (0.0, "low")],
+    "ad_placement": [(60.0, "high"), (30.0, "medium"),
+                     (0.0, "low")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -323,6 +336,9 @@ def default_weights(scorer_id: str) -> dict:
         from services.xx65_scorer import Xx65Scorer
         from services.credit_scorer import CreditScoringScorer
         from services.recycle_scorer import RecycleValuationScorer
+        from services.product_launch_scorer import ProductLaunchScorer
+        from services.activity_risk_scorer import ActivityRiskScorer
+        from services.ad_placement_scorer import AdPlacementScorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -351,6 +367,9 @@ def default_weights(scorer_id: str) -> dict:
             "shop_operation": Xx65Scorer,
             "credit_scoring": CreditScoringScorer,
             "recycle_valuation": RecycleValuationScorer,
+            "product_launch": ProductLaunchScorer,
+            "activity_risk": ActivityRiskScorer,
+            "ad_placement": AdPlacementScorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

@@ -614,6 +614,28 @@ class PdmService:
             if status == STATUS_DRAFT:
                 # draft 直通 = admin 管理动作(operate 不足)
                 await self._require(operator, role, PERM_MANAGE)
+
+            # AI 决策门(全站批次三——01号产品展示 AI 升级)
+            # product_launch 上架终审: observe 模式仅评分快照(行为
+            # 100% 兼容); enforce 模式 high 拦截/medium 转人工标记。
+            # 与 38号 product_gate(提交预审)构成双门; 状态机/权限硬规则
+            # 已前置校验, AI 门为叠加层; fail-open 兜底。
+            try:
+                product = await self.product_repo \
+                    .get_by_id(product_id) or {}
+                from services.ai_enforcement_content import (
+                    enrich_product_launch,
+                    enforce_product_launch,
+                )
+                ctx = await enrich_product_launch(
+                    product)
+                await enforce_product_launch(
+                    product_id, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞上架
+
             await self._transition(product_id, STATUS_ON_SALE)
             await self._audit(operator, via["via"], product_id,
                               "list", status, STATUS_ON_SALE)
@@ -638,6 +660,15 @@ class PdmService:
             await self._audit(operator, via["via"], product_id,
                               "delist", status, STATUS_OFF_SALE,
                               {"reason": reason})
+            # 回流钩子(01号上架决策门——下架终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_product_delisted,
+                )
+                await on_product_delisted(
+                    product_id, reason)
+            except Exception:
+                pass
             return await self.get_admin_product(product_id)
 
     async def force_delist(self, admin: int, role: str,
@@ -656,6 +687,15 @@ class PdmService:
             await self._audit(admin, via["via"], product_id,
                               "force_delist", status, STATUS_OFF_SALE,
                               {"reason": reason})
+            # 回流钩子(01号上架决策门——紧急下架终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_product_delisted,
+                )
+                await on_product_delisted(
+                    product_id, reason)
+            except Exception:
+                pass
             return await self.get_admin_product(product_id)
 
     # ============================================================

@@ -1,4 +1,4 @@
-"""全站批次一·23号信用管理 AI 升级 专项测试
+﻿"""全站批次一·23号信用管理 AI 升级 专项测试
 
 运行方式:
     python test_credit_ai.py
@@ -163,8 +163,8 @@ class TestRegistry:
             SCORER_REGISTRY,
             default_weights,
         )
-        record("44号 42 档案",
-               len(SCORER_REGISTRY) == 42,
+        record("44号 45 档案",
+               len(SCORER_REGISTRY) == 45,
                str(len(SCORER_REGISTRY)))
         record("credit_scoring 在册"
                "(batch25)",

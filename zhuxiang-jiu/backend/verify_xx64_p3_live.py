@@ -488,7 +488,7 @@ def run_round(round_no: int) -> None:
            and status[2] is True,
            str(status))
     record("44号 39 档案",
-           r.get("reg_n") == 42,
+           r.get("reg_n") == 45,
            str(r.get("reg_n")))
 
     print("\n[04 HTTP 端点+鉴权]")

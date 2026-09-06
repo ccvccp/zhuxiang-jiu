@@ -1,4 +1,4 @@
-"""AI 自动反馈挂钩层测试(v7.6: 业务事件 → 决策快照 → 自动反馈, 30 项)
+﻿"""AI 自动反馈挂钩层测试(v7.6: 业务事件 → 决策快照 → 自动反馈, 30 项)
 
 覆盖:
     - 开关与配对引擎(5): 默认开启 / AI_FEEDBACK_HOOKS=off / 评分+快照 /
@@ -344,7 +344,7 @@ async def main():
         auth_entry = next((s for s in ov.get("scorers", [])
                            if s.get("scorerId") == "auth_risk"), {})
         record("27_overview_reports_auto_feedback",
-               ov.get("scorerCount") == 42
+               ov.get("scorerCount") == 45
                and auth_entry.get("autoFeedback24h", 0) >= 1
                and isinstance(ov.get("scheduler", {}).get("runs"), int),
                f"auto24h={auth_entry.get('autoFeedback24h')}")

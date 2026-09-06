@@ -277,6 +277,21 @@ class AdService:
                     f"当前状态({ad['status']})不允许上线, 仅审核通过可上线"
                 )
 
+            # AI 决策门(全站批次三——10号广告投放 AI 升级)
+            # ad_placement 投放门: observe 模式仅评分快照(行为
+            # 100% 兼容); enforce 模式 high 拦截/medium 转人工标记。
+            # 状态机硬规则已前置校验, AI 门为叠加层; fail-open 兜底。
+            try:
+                from services.ai_enforcement_content import (
+                    enrich_ad_placement, enforce_ad_online,
+                )
+                ctx = await enrich_ad_placement(ad)
+                await enforce_ad_online(ad_id, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞上线
+
             ad["status"] = AD_STATUS_ONLINE
             ad["updatedAt"] = ts()
             await self.repo.save_ad(ad)
@@ -333,6 +348,15 @@ class AdService:
             for p in placements:
                 if p.get("status") in (PLACEMENT_STATUS_RUNNING, PLACEMENT_STATUS_PAUSED):
                     await self.repo.update_placement_status(p["id"], PLACEMENT_STATUS_ENDED)
+
+            # 回流钩子(10号广告投放决策门——下线终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_ad_offline,
+                )
+                await on_ad_offline(ad_id, reason)
+            except Exception:
+                pass
 
             return {
                 "adId": ad_id,

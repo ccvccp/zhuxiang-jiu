@@ -454,7 +454,7 @@ def run_round(round_no: int) -> None:
                "optimize", "urgent"),
            str(r.get("sc_dec")))
     record("44号 40 档案",
-           r.get("reg_n") == 42,
+           r.get("reg_n") == 45,
            str(r.get("reg_n")))
     record("shop_operation 在册",
            r.get("so_in") is True,

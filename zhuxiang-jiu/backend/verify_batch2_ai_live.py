@@ -1,4 +1,4 @@
-"""全站批次二·03积分主通道+13老酒兑换
+﻿"""全站批次二·03积分主通道+13老酒兑换
 AI 升级 Docker 实机验收(verify_batch2_ai_live)
 
 运行方式:
@@ -367,7 +367,7 @@ def run_round(round_no: int) -> None:
 
     print("\n[02 44号注册表]")
     record("42 档案(batch26 入册)",
-           seed.get("reg_n") == 42
+           seed.get("reg_n") == 45
            and seed.get("rv_in") is True
            and seed.get("pr_in") is True,
            str(seed.get("reg_n")))

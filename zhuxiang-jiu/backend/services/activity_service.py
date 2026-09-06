@@ -438,13 +438,49 @@ class ActivityService:
             if activity.get("status") != STATUS_DRAFT:
                 raise ValueError(f"仅草稿状态可审核(当前: {activity.get('status')})")
 
+            # AI 决策门(全站批次三——09号活动管理 AI 升级)
+            # activity_risk 审核门: observe 模式仅评分快照(行为
+            # 100% 兼容); enforce 模式 high 拦截/medium 转人工标记。
+            # 状态机硬规则已前置校验, AI 门为叠加层; fail-open 兜底。
+            ai_review_required = False
+            try:
+                from services.ai_enforcement_content import (
+                    enrich_activity_risk,
+                    enforce_activity_audit,
+                )
+                ctx = await enrich_activity_risk(activity)
+                gate = await enforce_activity_audit(
+                    activity_id, ctx)
+                ai_review_required = bool(
+                    gate.get("reviewRequired"))
+            except ValueError:
+                # AI 拦截(enforce 模式)——取消发布留痕后拒绝
+                activity["status"] = STATUS_CANCELLED
+                activity["auditReason"] = \
+                    f"AI风控拦截: {reason}"
+                await self.repo.save_activity(activity)
+                raise
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞审核
+
             if approve:
                 activity["status"] = STATUS_REGISTERING
                 activity["approvedBy"] = auditor
+                activity["aiReviewRequired"] = ai_review_required
             else:
                 activity["status"] = STATUS_CANCELLED
                 activity["auditReason"] = reason
             await self.repo.save_activity(activity)
+
+            # 回流钩子(09号活动决策门——审核终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_activity_settled,
+                )
+                await on_activity_settled(
+                    activity_id, approve)
+            except Exception:
+                pass
 
             return {
                 "activityId": activity_id,
