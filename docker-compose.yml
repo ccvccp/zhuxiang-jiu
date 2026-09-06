@@ -136,6 +136,16 @@ services:
       # HMAC 签名密钥(生产必须强随机值经 .env 注入, 缺省 dev 仅限开发;
       # 轮换使存量未核销码失效——默认 TTL 300s, 影响窗口 ≤5 分钟)
       - QR55_SECRET=${QR55_SECRET:-dev}
+      # ---- 57号 AI智能知识库(P0-P5: 决策面三级灰度, 默认 off——存量知识链路零影响) ----
+      # shadow=观察学习期(仅缺口诊断+采集留痕); assist=辅助生产期
+      #     (三重合规鉴别+种子工坊+终审发布+会员面植入开放);
+      #     off=决策面 409(观测面 registry/gaps/seeds/dashboard 等不受影响)
+      - KB57_MODE=${KB57_MODE:-off}
+      # on=T+1 决策回流补标+种子有效期健康检查调度; off=仅手动触发
+      #     (POST /api/kb57/feedback/collect)
+      - KB57_LEARN_MODE=${KB57_LEARN_MODE:-off}
+      # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
+      - KB57_LEARN_INTERVAL=${KB57_LEARN_INTERVAL:-86400}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
