@@ -120,6 +120,22 @@ class Xx64SettleService:
         trust_value = float(
             order.get("trustValue") or 0)
 
+        # P3 风控同步前置(ARB-HF+ARB-MA
+        # ——assist 态 high 阻断当前笔
+        # 可申诉秒级复核; shadow 仅观察)
+        from services.xx64_risk_service import (
+            Xx64RiskService,
+        )
+        gate = await Xx64RiskService() \
+            .sync_gate_pay(order)
+        if gate["blocked"]:
+            raise ValueError(
+                f"风控拦截(风险事件 "
+                f"{gate['riskId']}"
+                f"——多账号集中/高频套利"
+                f"命中; 可经申诉通道"
+                f"秒级复核)")
+
         # R7 余额复核(转移前)
         from services.xx64_service import (
             get_trust_balance,

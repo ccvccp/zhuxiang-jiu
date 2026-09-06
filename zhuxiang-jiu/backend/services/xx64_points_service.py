@@ -107,6 +107,22 @@ class Xx64PointsService:
         trust_gain = points_to_trust(
             points)  # 非 100 倍数抛错
 
+        # P3 风控同步前置(PTS-SHOCK
+        # ——assist 态量级 high 拦截当笔
+        # 可申诉秒级复核; shadow 仅观察)
+        from services.xx64_risk_service import (
+            Xx64RiskService,
+        )
+        gate = await Xx64RiskService() \
+            .sync_gate_exchange(
+                user_id, trust_id)
+        if gate["blocked"]:
+            raise ValueError(
+                f"风控拦截(风险事件 "
+                f"{gate['riskId']}"
+                f"——积分冲击量级命中; "
+                f"可经申诉通道秒级复核)")
+
         # 日限频(当日有效兑换计数
         # ——cancelled 不占频次)
         today = datetime.now(UTC) \

@@ -74,7 +74,8 @@ class Xx64Repository:
     _BOOL_FIELDS = (
         "negative", "exclusive",
         "reserved", "frozen",
-        "overturned", "pooled")
+        "overturned", "pooled",
+        "matched")
 
     _TABLE_BY_KIND = {
         "order": TABLE_ORDERS,

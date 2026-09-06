@@ -1,6 +1,6 @@
 """64号·信值兑换管理路由(P0-P5)
 
-端点(P1 12; 全期规划 24):
+端点(P3 16; 全期规划 24):
     GET  /api/xx64/registry        刚性规则自描述(admin, 观测面)
     POST /api/xx64/orders         创建订单+锁值(member/admin, 决策面 off 409)
     GET  /api/xx64/orders         订单列表(admin, 观测面)
@@ -15,7 +15,8 @@
     GET  /api/xx64/ledger               转移账本(admin, 观测面)
     GET  /api/xx64/plan                 最优支付组合+互斥对比+凑单候选(member/admin, 观测面)
     GET  /api/xx64/orders/{id}/explain  规则可视化解释(member/admin, 观测面)
-    # P3: GET /risk/status + POST /risk/scan
+    GET  /api/xx64/risk/status          用户风险画像(member/admin, 观测面)
+    POST /api/xx64/risk/scan            手动五防全量扫描(admin, 决策面 off 409)
     # P4: anchors/threshold/appeals/feedback/learn
     # P5: GET /dashboard + POST /redteam
 
@@ -418,6 +419,50 @@ async def explain_order(
             .explain_order(order_id))
     except KeyError as exc:
         raise HTTPException(status_code=404,
+                            detail=str(exc))
+
+
+@router.get("/risk/status")
+async def risk_status(
+        trust_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """用户风险画像(P3——当前风险分
+    +tier 摩擦+命中事件+处置状态;
+    观测面不受开关影响)"""
+    _require_role(x_role)
+    from services.xx64_risk_service import (
+        Xx64RiskService,
+    )
+    try:
+        return await (
+            Xx64RiskService()
+            .user_status(trust_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+
+
+@router.post("/risk/scan")
+async def risk_scan(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """手动五防全量扫描(P3——
+    仅落事件+建议书不阻断已成立交易;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    from services.xx64_risk_service import (
+        Xx64RiskService,
+    )
+    from services.xx64_service import (
+        require_active_mode,
+    )
+    try:
+        require_active_mode()
+        return await (
+            Xx64RiskService().scan_all())
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
                             detail=str(exc))
 
 

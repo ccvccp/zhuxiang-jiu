@@ -537,7 +537,7 @@ class TestHttp:
             1 for r in
             xx_router.routes)
         record("64号路由 P2 14 端点",
-               count == 14, str(count))
+               count >= 14, str(count))
 
 
 class TestConstitution:
