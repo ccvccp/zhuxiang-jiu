@@ -462,6 +462,13 @@ async def _on_startup():
     from services.dm61_scheduler import (
         start_scheduler as start_dm61_learn)
     start_dm61_learn()
+    # 62号·AI智能无形资产估值: 验证回流+衰减结算 T+1 调度
+    # (偏差三档信号+44号池双写 assessId 1:1 幂等
+    #  +权重复审建议 46号+衰减批量结算;
+    #  AV62_LEARN_MODE=on 开启, 默认 off)
+    from services.av62_scheduler import (
+        start_scheduler as start_av62_learn)
+    start_av62_learn()
 
 
 @app.on_event("shutdown")

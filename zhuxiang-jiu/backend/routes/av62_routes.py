@@ -21,7 +21,9 @@
     POST /api/av62/appeals/{id}/review 申诉裁决(终审, 人工铁律)
     GET  /api/av62/fairness/report   公平审计报告(admin, 观测面)
     POST /api/av62/fairness/audit    触发公平审计(管理面)
-    # P4: POST /feedback/collect
+    POST /api/av62/verifications     验证提交(admin, 管理面)
+    POST /api/av62/feedback/collect   验证回流(不受开关影响)
+    GET  /api/av62/learn/status      回流状态(admin, 观测面)
     # P5: GET /dashboard + POST /redteam
 
 鉴权: 管理面 X-Role: admin(43-61号同款口径)。
@@ -570,6 +572,67 @@ async def fairness_audit(
             triggered_by=str(
                 body.get("triggeredBy")
                 or "admin"))
+
+
+@router.post("/verifications")
+async def submit_verification(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """业务结果验证提交(P4——预测 vs
+    实际→偏差三档信号; 管理面)"""
+    _require_admin(x_role)
+    from services.av62_learn_service import (
+        Av62LearnService,
+    )
+    try:
+        return await (
+            Av62LearnService()
+            .submit_verification(
+                assess_id=int(
+                    body.get("assessId")
+                    or 0),
+                actual_value=body.get(
+                    "actualValue"),
+                verified_by=str(
+                    body.get("verifiedBy")
+                    or "admin")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/feedback/collect")
+async def feedback_collect(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """验证回流批处理(P4——44号池双写
+    assessId 1:1 幂等+偏差预警经 46号;
+    不受开关影响·回流管理面铁律)"""
+    _require_admin(x_role)
+    from services.av62_learn_service import (
+        Av62LearnService,
+    )
+    return await Av62LearnService() \
+        .collect_verification()
+
+
+@router.get("/learn/status")
+async def learn_status(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """回流状态观测面(P4——验证统计+
+    幂等标记; 不受开关影响)"""
+    _require_admin(x_role)
+    from services.av62_learn_service import (
+        Av62LearnService,
+    )
+    return await Av62LearnService() \
+        .learn_status()
 
 
 def register_av62_routes(app) -> None:

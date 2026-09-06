@@ -91,7 +91,8 @@ class Av62Repository:
         "liquidity", "appeal", "correction",
         "extra", "stats", "snapshot",
         "impact", "summary",
-        "newEvidence", "originalEvidence")
+        "newEvidence", "originalEvidence",
+        "verification")
     _JSON_LIST_FIELDS = (
         "auditTrail", "domains", "findings",
         "signals", "history", "tags",

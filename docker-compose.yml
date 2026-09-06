@@ -201,6 +201,10 @@ services:
       # shadow=估值观察期(登记留痕); assist=辅助估值期(评估开放);
       #     off=决策面 409(观测面 registry/assets/model 等不受影响)
       - AV62_MODE=${AV62_MODE:-off}
+      # on=T+1 验证回流+衰减结算调度; off=仅手动触发(P4 端点)
+      - AV62_LEARN_MODE=${AV62_LEARN_MODE:-off}
+      # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
+      - AV62_LEARN_INTERVAL=${AV62_LEARN_INTERVAL:-86400}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
