@@ -24,7 +24,8 @@
     POST /api/av62/verifications     验证提交(admin, 管理面)
     POST /api/av62/feedback/collect   验证回流(不受开关影响)
     GET  /api/av62/learn/status      回流状态(admin, 观测面)
-    # P5: GET /dashboard + POST /redteam
+    GET  /api/av62/dashboard         四区看板(admin, 观测面)
+    POST /api/av62/redteam           红队七向量(admin, 决策面 off 409)
 
 鉴权: 管理面 X-Role: admin(43-61号同款口径)。
 统一口径(计划 §六):
@@ -633,6 +634,42 @@ async def learn_status(
     )
     return await Av62LearnService() \
         .learn_status()
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """四区看板(P5——度量/资产/评估/
+    防御; 观测面不受开关影响)"""
+    _require_admin(x_role)
+    from services.av62_dashboard_service import (
+        Av62DashboardService,
+    )
+    return await Av62DashboardService() \
+        .get_dashboard()
+
+
+@router.post("/redteam")
+async def redteam(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队七向量(P5——证据伪造/权重
+    操纵/归因幻觉/流动性滥用/估值
+    套利/申诉刷分/负资产洗白;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    from services.av62_redteam_service import (
+        Av62RedteamService,
+    )
+    try:
+        return await (
+            Av62RedteamService()
+            .run_all())
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_av62_routes(app) -> None:
