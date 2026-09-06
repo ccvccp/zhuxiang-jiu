@@ -1,4 +1,4 @@
-"""61号AI智能系统升级决策 P5 Docker 实机验收
+﻿"""61号AI智能系统升级决策 P5 Docker 实机验收
 
 运行方式:
     # 容器以 shadow 态启动(HTTP 决策面
@@ -262,7 +262,7 @@ def run_round(round_no: int) -> None:
            and last.get("total") == 7,
            str(last))
     record("宪法: 44号 37 档案",
-           r.get("reg_n") == 37,
+           r.get("reg_n") == 38,
            str(r.get("reg_n")))
 
     print("\n[03 HTTP 面]")

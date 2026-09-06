@@ -1,4 +1,4 @@
-"""63号AI智能后台管理 P0 Docker 实机验收
+﻿"""63号AI智能后台管理 P0 Docker 实机验收
 
 运行方式:
     python verify_ab63_p0_live.py [基址]
@@ -271,7 +271,7 @@ def run_round(round_no: int) -> None:
            in ("optimize", "urgent"),
            str(r.get("sc_decision")))
     record("44号 36 档案",
-           r.get("reg_n") == 37,
+           r.get("reg_n") == 38,
            str(r.get("reg_n")))
     record("admin_orchestration 在册",
            r.get("ao_in_reg") is True,

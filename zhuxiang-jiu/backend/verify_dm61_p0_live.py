@@ -340,7 +340,7 @@ def run_round(round_no: int) -> None:
            in ("optimize", "urgent"),
            str(r.get("sc_decision")))
     record("44号 37 档案",
-           r.get("reg_n") == 37,
+           r.get("reg_n") == 38,
            str(r.get("reg_n")))
     record("decision_orchestration 在册",
            r.get("do_in_reg") is True,

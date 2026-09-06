@@ -192,7 +192,7 @@ class TestFiling:
 
         # 全档案汇总版
         r = await svc.build_filing()
-        record("全档案汇总36份", r["count"] == 37,
+        record("全档案汇总36份", r["count"] == 38,
                str(r["count"]))
         record("每份六节齐备",
                all(len(f["sections"]) == 6
@@ -250,8 +250,8 @@ class TestAuditReport:
                r["freezeEvents"]["total"] == 2,
                str(r["freezeEvents"]["total"]))
         record("台账分布",
-               r["registry"]["total"] == 37
-               and r["registry"]["active"] == 37
+               r["registry"]["total"] == 38
+               and r["registry"]["active"] == 38
                and r["registry"]["frozen"] == 0,
                str(r["registry"]))
         record("健康快照引用",
@@ -337,7 +337,7 @@ class TestHttp:
                           headers=admin)
         body = resp.json()
         record("备案200全量31", resp.status_code == 200
-               and body.get("count") == 37,
+               and body.get("count") == 38,
                str(body.get("count")))
 
         # 未入册 404

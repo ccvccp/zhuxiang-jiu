@@ -1,4 +1,4 @@
-"""60号·AI智能支付管理模块 P0 专项测试
+﻿"""60号·AI智能支付管理模块 P0 专项测试
 (支付注册表+订单状态机+渠道底座)
 
 运行方式:
@@ -856,7 +856,7 @@ class TestConstitution:
                "payment_orchestration"
                in SCORER_REGISTRY
                and len(SCORER_REGISTRY)
-               == 37
+               == 38
                and SCORER_REGISTRY[
                    "payment_"
                    "orchestration"]

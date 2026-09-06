@@ -197,6 +197,10 @@ services:
       - DM61_LEARN_MODE=${DM61_LEARN_MODE:-off}
       # 调度周期秒(默认 24h; 下限 300 防忙循环)
       - DM61_LEARN_INTERVAL=${DM61_LEARN_INTERVAL:-86400}
+      # ---- 62号 AI智能无形资产估值(P0: 信值体系资产铸币层, 默认 off——存量信值/流通链路零影响) ----
+      # shadow=估值观察期(登记留痕); assist=辅助估值期(评估开放);
+      #     off=决策面 409(观测面 registry/assets/model 等不受影响)
+      - AV62_MODE=${AV62_MODE:-off}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

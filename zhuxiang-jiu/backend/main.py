@@ -327,6 +327,10 @@ register_pay60_routes(app)
 from routes.dm61_routes import register_dm61_routes
 register_dm61_routes(app)
 
+# AI智能无形资产估值(62号)
+from routes.av62_routes import register_av62_routes
+register_av62_routes(app)
+
 
 # ============================================================
 # 静态媒体服务(35号 AI Hub P3: /media/voice|image/xxx, 本地卷持久化)
