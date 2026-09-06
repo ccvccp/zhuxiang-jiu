@@ -1,4 +1,4 @@
-"""58号·AI智能优化意图识别模块 P0 专项测试
+﻿"""58号·AI智能优化意图识别模块 P0 专项测试
 (意图注册表+置信度引擎+识别底座)
 
 运行方式:
@@ -9,7 +9,7 @@
     - 第33档案八因子评分器: 三级决策切档
     - 置信度引擎: 语料匹配+动态阈值+三态响应
     - off 拒绝+空语料 clarify+归因链
-    - 宪法: 44号 33 档案+48/55号零改动
+    - 宪法: 44号 34 档案+48/55号零改动
     - HTTP 层: 5 端点+鉴权
 """
 
@@ -461,12 +461,12 @@ class TestConstitution:
         print("[04 宪法断言]")
         reset_all()
 
-        # 44号 33 档案
+        # 44号 34 档案
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 33 档案",
-               len(SCORER_REGISTRY) == 33,
+        record("44号 34 档案",
+               len(SCORER_REGISTRY) == 34,
                str(len(SCORER_REGISTRY)))
         record("第33档案在册"
                "(intent_orchestration)",

@@ -1,4 +1,4 @@
-"""46号·AI 治理与合规中枢 P4 专项测试(合规材料自动化)
+﻿"""46号·AI 治理与合规中枢 P4 专项测试(合规材料自动化)
 
 运行方式:
     python test_ai_governance_p4.py
@@ -192,7 +192,7 @@ class TestFiling:
 
         # 全档案汇总版
         r = await svc.build_filing()
-        record("全档案汇总33份", r["count"] == 33,
+        record("全档案汇总34份", r["count"] == 34,
                str(r["count"]))
         record("每份六节齐备",
                all(len(f["sections"]) == 6
@@ -250,8 +250,8 @@ class TestAuditReport:
                r["freezeEvents"]["total"] == 2,
                str(r["freezeEvents"]["total"]))
         record("台账分布",
-               r["registry"]["total"] == 33
-               and r["registry"]["active"] == 33
+               r["registry"]["total"] == 34
+               and r["registry"]["active"] == 34
                and r["registry"]["frozen"] == 0,
                str(r["registry"]))
         record("健康快照引用",
@@ -337,7 +337,7 @@ class TestHttp:
                           headers=admin)
         body = resp.json()
         record("备案200全量31", resp.status_code == 200
-               and body.get("count") == 33,
+               and body.get("count") == 34,
                str(body.get("count")))
 
         # 未入册 404

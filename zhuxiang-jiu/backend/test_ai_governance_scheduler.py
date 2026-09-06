@@ -1,4 +1,4 @@
-"""46号·P6 AI 治理巡检调度器专项测试
+﻿"""46号·P6 AI 治理巡检调度器专项测试
 
 运行方式:
     python test_ai_governance_scheduler.py
@@ -152,7 +152,7 @@ class TestQuietRound:
                str(r)[:60])
         scan = r.get("lastScan") or {}
         record("巡检执行(31档案)",
-               scan.get("scorerCount") == 33
+               scan.get("scorerCount") == 34
                and scan.get("scanId") is not None,
                str(scan)[:60])
         record("零新告警", scan.get("alertsNew") == 0,
@@ -294,7 +294,7 @@ class TestFailSoft:
         r = await sched.run_scheduled_governance_tasks()
         record("恢复后正常巡检",
                (r.get("lastScan") or {})
-               .get("scorerCount") == 33,
+               .get("scorerCount") == 34,
                str(r.get("lastScan"))[:60])
 
 

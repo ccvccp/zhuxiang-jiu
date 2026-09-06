@@ -1,4 +1,4 @@
-"""57号·AI智能知识库模块 P0 专项测试
+﻿"""57号·AI智能知识库模块 P0 专项测试
 (缺口信号注册表+趋势诊断引擎+种子底座)
 
 运行方式:
@@ -521,7 +521,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 32 档案",
-               len(SCORER_REGISTRY) == 33,
+               len(SCORER_REGISTRY) == 34,
                str(len(SCORER_REGISTRY)))
         record("第32档案在册",
                "knowledge_orchestration"

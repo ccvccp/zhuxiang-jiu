@@ -1,4 +1,4 @@
-"""57号·AI智能知识库模块 P5 专项测试
+﻿"""57号·AI智能知识库模块 P5 专项测试
 (四区看板+红队七向量+宪法断言)
 
 运行方式:
@@ -430,7 +430,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 32 档案",
-               len(SCORER_REGISTRY) == 33,
+               len(SCORER_REGISTRY) == 34,
                str(len(SCORER_REGISTRY)))
         record("第32档案在册",
                "knowledge_orchestration"

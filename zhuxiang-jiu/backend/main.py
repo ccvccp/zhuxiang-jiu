@@ -311,6 +311,10 @@ register_kb57_routes(app)
 from routes.ii58_routes import register_ii58_routes
 register_ii58_routes(app)
 
+# AI智能服务编排(59号)
+from routes.ii59_routes import register_ii59_routes
+register_ii59_routes(app)
+
 
 # ============================================================
 # 静态媒体服务(35号 AI Hub P3: /media/voice|image/xxx, 本地卷持久化)

@@ -157,6 +157,16 @@ services:
       - II58_LEARN_MODE=${II58_LEARN_MODE:-off}
       # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
       - II58_LEARN_INTERVAL=${II58_LEARN_INTERVAL:-86400}
+      # ---- 59号 AI智能服务编排(P0: 决策面三级灰度, 默认 off——存量服务链路零影响) ----
+      # shadow=观察学习期(会话+路由留痕); assist=辅助生产期(会员面反馈开放);
+      #     off=决策面 409(观测面 registry/sessions/model 等不受影响)
+      - II59_MODE=${II59_MODE:-off}
+      # LLM 编排辅助建议(仅建议不入库, 默认 off)
+      - II59_LLM_MODE=${II59_LLM_MODE:-off}
+      # on=T+1 决策回流补标调度; off=仅手动触发(P4 端点)
+      - II59_LEARN_MODE=${II59_LEARN_MODE:-off}
+      # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
+      - II59_LEARN_INTERVAL=${II59_LEARN_INTERVAL:-86400}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
