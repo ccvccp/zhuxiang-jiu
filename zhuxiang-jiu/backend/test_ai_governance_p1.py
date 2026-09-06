@@ -237,7 +237,7 @@ class TestScan:
 
         r = await svc.scan()
         record("巡检28档案", r["success"] is True
-               and r["scorerCount"] == 30,
+               and r["scorerCount"] == 31,
                f"scorerCount={r.get('scorerCount')}")
         entries = {e["scorerId"]: e
                    for e in r["entries"]}
@@ -268,9 +268,9 @@ class TestScan:
         snap = await svc.repo.get_snapshot(r["scanId"])
         record("快照落库可读回",
                snap is not None
-               and snap["scorerCount"] == 30
+               and snap["scorerCount"] == 31
                and isinstance(snap.get("entries"), list)
-               and len(snap["entries"]) == 30,
+               and len(snap["entries"]) == 31,
                str(snap)[:60] if snap else "None")
         latest = await svc.repo.get_latest_snapshot()
         record("最新快照即本轮",
@@ -288,7 +288,7 @@ class TestScan:
         # 重扫 → 新快照
         r2 = await svc.scan()
         record("重扫新快照", r2["scanId"] > r["scanId"]
-               and r2["scorerCount"] == 30,
+               and r2["scorerCount"] == 31,
                str(r2.get("scanId")))
 
         # retired 跳过(直接评估层验证——scan 内 sync 会
@@ -299,7 +299,7 @@ class TestScan:
         await svc.repo.save_gov(target)
         entries2, stats2 = await svc._assess_all()
         record("retired档案跳过",
-               stats2["scorerCount"] == 29
+               stats2["scorerCount"] == 30
                and all(e["scorerId"] != target["scorerId"]
                       for e in entries2),
                f"count={stats2['scorerCount']}")
@@ -390,8 +390,8 @@ class TestAlerts:
         live = await svc.live_health()
         record("live排行结构",
                live["success"] is True
-               and live["scorerCount"] == 30
-               and len(live["entries"]) == 30,
+               and live["scorerCount"] == 31
+               and len(live["entries"]) == 31,
                str(live.get("scorerCount")))
         record("live含lastScan", (
             live.get("lastScan") or {}).get("scanId")
@@ -445,7 +445,7 @@ class TestFailSoft:
         try:
             r = await svc._assess_all()
             record("档案级异常跳过",
-                   r[1]["scorerCount"] == 29
+                   r[1]["scorerCount"] == 30
                    and r[1]["skipped"] == ["trust_value"],
                    f"skipped={r[1]['skipped']}")
         finally:
@@ -482,7 +482,7 @@ class TestHttp:
                           headers=admin)
         body = resp.json()
         record("健康视图200", resp.status_code == 200
-               and body.get("scorerCount") == 30
+               and body.get("scorerCount") == 31
                and body.get("live") is True,
                str(body)[:70])
         record("健康视图分层统计",
@@ -496,7 +496,7 @@ class TestHttp:
         body = resp.json()
         record("巡检200落快照", resp.status_code == 200
                and body.get("scanId", 0) >= 1
-               and body.get("scorerCount") == 30,
+               and body.get("scorerCount") == 31,
                str(body)[:70])
 
         # 告警 200

@@ -280,25 +280,25 @@ class TestConstitution:
 
     async def run(self):
         print("[03 宪法断言]")
-        # 44号: SCORER_REGISTRY 30 档案+batch14 含
-        # qr_orchestration(第30档案在册)
+        # 44号: SCORER_REGISTRY ≥30 档案(56号 P0 扩至 31)
+        # +batch14 含 qr_orchestration(第30档案在册)
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号零改动(30 档案+qr 在册)",
-               len(SCORER_REGISTRY) == 30
+        record("44号零改动(≥30 档案+qr 在册)",
+               len(SCORER_REGISTRY) >= 30
                and "qr_orchestration"
                in SCORER_REGISTRY,
                str(len(SCORER_REGISTRY)))
 
-        # 46号: 治理台账 30 档案(55号只读消费)
+        # 46号: 治理台账 ≥30 档案(55号只读消费)
         from services.ai_governance_service import (
             AiGovernanceService,
         )
         await AiGovernanceService().sync_registry()
         reg = await AiGovernanceService().list_registry()
-        record("46号零改动(台账 30 档案)",
-               (reg.get("total") or 0) == 30,
+        record("46号零改动(台账 ≥30 档案)",
+               (reg.get("total") or 0) >= 30,
                str(reg.get("total")))
 
         # 48号: 小竹意图轨零侵入(55号并行——

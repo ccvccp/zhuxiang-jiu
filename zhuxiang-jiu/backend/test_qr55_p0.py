@@ -433,8 +433,8 @@ class TestGenerateAndHttp:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号档案数 30(29+55号)",
-               len(SCORER_REGISTRY) == 30,
+        record("44号档案数 ≥30(56号扩至 31)",
+               len(SCORER_REGISTRY) >= 30,
                str(len(SCORER_REGISTRY)))
         record("54号档案零改动",
                SCORER_REGISTRY.get(

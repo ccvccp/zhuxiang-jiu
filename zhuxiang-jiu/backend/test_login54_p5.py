@@ -182,6 +182,13 @@ class TestDashboard:
         )
         old_ts = (datetime.now().astimezone()
                   - timedelta(hours=1)).isoformat()
+        # retention dayKey 与事件同日(UTC 归一口径——
+        # 修复: 每日 UTC 00:00-01:00 窗口运行时
+        # 回拨 1h 事件跨 UTC 日, dayKey 取事件 UTC 日期)
+        from datetime import UTC
+        old_day = (datetime.now(UTC)
+                   - timedelta(hours=1)) \
+            .strftime("%Y-%m-%d")
         repo53 = Login53Repository()
         for m in range(7501, 7511):   # 10 会员
             eid = await repo53.next_event_id()
@@ -196,7 +203,7 @@ class TestDashboard:
                 "detail": "", "createdAt": old_ts,
             })
             await repo53.save_retention({
-                "memberId": m, "dayKey": ts()[:10],
+                "memberId": m, "dayKey": old_day,
                 "rewardPoints": 1, "streakDays": 1,
                 "greeting": "p5", "claimedAt": ts(),
                 "milestoneUnlocked": 0,

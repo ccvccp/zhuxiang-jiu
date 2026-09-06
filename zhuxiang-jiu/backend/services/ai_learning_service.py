@@ -94,6 +94,8 @@ SCORER_REGISTRY = {
     "login_orchestration":          {"label": "小竹登录引擎编排评分", "module": "54登录大模型", "batch": 13},
     # ---- 第十四批(55号二维码AI智能管理 P0: 生码编排评分) ----
     "qr_orchestration":             {"label": "二维码生码编排评分", "module": "55二维码管理", "batch": 14},
+    # ---- 第十五批(56号AI智能升级管理 P0: 升级编排评分) ----
+    "upgrade_orchestration":        {"label": "智能升级编排评分", "module": "56升级管理", "batch": 15},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -134,6 +136,11 @@ DECISION_THRESHOLDS = {
     # /clarify 澄清对话)
     "qr_orchestration":      [(70.0, "direct"), (40.0, "confirm"),
                               (0.0, "clarify")],
+    # 56号AI智能升级管理(三级决策——计划 §六:
+    # 高分=高必要性+高信任 → propose 提案/escalate
+    # 紧急提案+双人复核/defer 观察)
+    "upgrade_orchestration": [(80.0, "escalate"), (50.0, "propose"),
+                              (0.0, "defer")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -225,6 +232,7 @@ def default_weights(scorer_id: str) -> dict:
         )
         from services.login54_scorer import Login54Scorer
         from services.qr55_scorer import Qr55Scorer
+        from services.aiup56_scorer import Aiup56Scorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -241,6 +249,7 @@ def default_weights(scorer_id: str) -> dict:
             "auth_risk": AuthRiskScorer,
             "login_orchestration": Login54Scorer,
             "qr_orchestration": Qr55Scorer,
+            "upgrade_orchestration": Aiup56Scorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

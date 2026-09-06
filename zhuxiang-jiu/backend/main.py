@@ -300,6 +300,9 @@ register_login54_routes(app)
 from routes.qr55_routes import register_qr55_routes
 register_qr55_routes(app)
 
+from routes.aiup56_routes import register_aiup56_routes
+register_aiup56_routes(app)
+
 
 # ============================================================
 # 静态媒体服务(35号 AI Hub P3: /media/voice|image/xxx, 本地卷持久化)
