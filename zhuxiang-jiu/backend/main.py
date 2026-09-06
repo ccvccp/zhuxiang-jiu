@@ -440,6 +440,13 @@ async def _on_startup():
     from services.ab63_scheduler import (
         start_scheduler as start_ab63_learn)
     start_ab63_learn()
+    # 60号·AI智能支付管理: 支付回流+对账+预测 T+1 调度
+    # (六类支付事件+44号池双写+对账批次差异检测
+    #  +现金流预测缺口预警;
+    #  PAY60_LEARN_MODE=on 开启, 默认 off)
+    from services.pay60_scheduler import (
+        start_scheduler as start_pay60_learn)
+    start_pay60_learn()
 
 
 @app.on_event("shutdown")

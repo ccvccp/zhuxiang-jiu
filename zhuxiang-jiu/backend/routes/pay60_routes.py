@@ -1,6 +1,6 @@
-"""60号·AI智能支付管理路由(P0-P3)
+"""60号·AI智能支付管理路由(P0-P4)
 
-端点(P0-P3 19):
+端点(P0-P4 21):
     GET  /api/pay60/registry          支付注册表自描述(admin, 观测面)
     GET  /api/pay60/orders            支付订单列表(admin, 观测面)
     GET  /api/pay60/orders/{payId}    订单单条+归因链(admin, P0 观测面)
@@ -21,19 +21,21 @@
     POST /api/pay60/splits           分账指令(admin, P3 决策面 off 409)
     GET  /api/pay60/splits           分账视图(admin, P3 观测面)
     POST /api/pay60/splits/{id}/settle 分账结算(admin, P3 终审——资金人工铁律)
+    POST /api/pay60/feedback/collect  支付事件回流(admin, P4——不受开关影响)
+    GET  /api/pay60/forecast         现金流预测(admin, P4 观测面)
 
 鉴权: 管理面 X-Role: admin(43-63号同款口径)。
 统一口径:
     - 观测面(registry/orders/model
       status/checkouts/thresholds/
-      verifications/recon/splits)
-      不受 PAY60_MODE 影响
+      verifications/recon/splits/
+      forecast)不受 PAY60_MODE 影响
     - 决策面(订单/收银台/恢复/验证/
       执行/分账创建): off=拒绝(409)
     - 会员面(confirm): 需 assist 态
     - 终审/回流(recon settle/splits
-      settle/recon run): 不受开关
-      影响(资金操作人工铁律)
+      settle/recon run/collect): 不受
+      开关影响(资金操作人工铁律)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -557,6 +559,47 @@ async def settle_split(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
+
+
+@router.post("/feedback/collect")
+async def feedback_collect(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """支付事件回流(P4——六类信号→44号
+    池双写 payId 1:1 幂等; 不受开关
+    影响——资金审计铁律)
+
+    Body: {limit?}"""
+    _require_admin(x_role)
+    from services.pay60_learn_service import (
+        Pay60LearnService,
+    )
+    try:
+        limit = body.get("limit")
+        return await (
+            Pay60LearnService()
+            .collect_feedback(
+                limit=int(limit)
+                if limit is not None
+                else 500))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/forecast")
+async def forecast(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """现金流预测(P4 观测面——7 日
+    确定性外推+缺口预警; 不受开关影响)"""
+    _require_admin(x_role)
+    from services.pay60_learn_service import (
+        Pay60LearnService,
+    )
+    return await (
+        Pay60LearnService().forecast())
 
 
 @router.get("/orders")
