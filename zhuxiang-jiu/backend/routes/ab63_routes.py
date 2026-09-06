@@ -1,19 +1,21 @@
-"""63号·AI智能后台管理路由(P0+P1)
+"""63号·AI智能后台管理路由(P0-P2)
 
-端点(P0+P1 6):
+端点(P0+P1+P2 7):
     GET  /api/ab63/registry            注册表自描述(admin, 观测面)
     POST /api/ab63/grants              权限裁决(admin, 决策面 off 409)
     GET  /api/ab63/grants              裁决记录列表(admin, 观测面)
     GET  /api/ab63/grants/{grantId}    裁决单条 reason 链(admin, P1 观测面)
     POST /api/ab63/workbench/render    工作台渲染(admin, 决策面 off 409)
+    POST /api/ab63/guard/check          编辑态护航检测(admin, P2 决策面 off 409)
     GET  /api/ab63/model/status         模型状态(admin, 观测面)
 
 鉴权: 管理面 X-Role: admin(43-59号同款口径)。
 统一口径:
     - 观测面(registry/grants/model/status)
       不受 AB63_MODE 影响
-    - 决策面(grants 裁决/workbench 渲染):
-      off=拒绝(409——shadow/assist 开放)
+    - 决策面(grants 裁决/workbench 渲染/
+      guard 护航检测): off=拒绝(409——
+      shadow/assist 开放)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -113,10 +115,14 @@ async def render_workbench(
         body: dict,
         x_role: str | None = Header(default=None,
                                     alias="X-Role")):
-    """工作台渲染(角色模板+novice/mature
-    视图——情境化呈现; 决策面 off 409)
+    """工作台渲染(P2 情境化——意图导航+
+    无障碍标记+模板推荐均为建议性;
+    决策面 off 409)
 
-    Body: {memberId, role, novice?}"""
+    Body: {memberId, role, novice?,
+    intentText?, accessibility?
+    {largeFont, voiceAssist, pauseDetected},
+    industry?}"""
     _require_admin(x_role)
     from services.ab63_service import Ab63Service
     try:
@@ -129,8 +135,57 @@ async def render_workbench(
                 role=str(
                     body.get("role") or ""),
                 novice=bool(
-                    body.get("novice"))))
+                    body.get("novice")),
+                intent_text=body.get(
+                    "intentText"),
+                accessibility=body.get(
+                    "accessibility")
+                if isinstance(
+                    body.get("accessibility"),
+                    dict) else None,
+                industry=str(
+                    body.get("industry")
+                    or "") or None))
     except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/guard/check")
+async def guard_check(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """编辑态护航检测(P2 三轨三档——
+    确定性规则 LLM 不进判定链; 决策面
+    off 409)
+
+    Body: {memberId, role, content?,
+    form? {title, price, validityStart,
+    validityEnd, refundPolicy,
+    collectFields}, estimatedCost?}"""
+    _require_admin(x_role)
+    from services.ab63_guard_service import (
+        Ab63GuardService,
+    )
+    try:
+        member_id = body.get("memberId")
+        return await (
+            Ab63GuardService().check(
+                member_id=int(member_id)
+                if member_id is not None
+                else 0,
+                role=str(
+                    body.get("role") or ""),
+                content=body.get("content"),
+                form=body.get("form")
+                if isinstance(
+                    body.get("form"), dict)
+                else None,
+                estimated_cost=float(
+                    body.get("estimatedCost")
+                    or 0)))
+    except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
 

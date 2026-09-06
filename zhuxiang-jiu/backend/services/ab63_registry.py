@@ -339,6 +339,159 @@ def get_template(role: str) -> dict | None:
         str(role))
 
 
+# ============================================================
+# COMPLIANCE_GUARD 合规护航规则库
+# (P2——计划 §3.3 编辑态三档干预)
+# ============================================================
+
+# 干预档(渐进式三档——tip<warn<block)
+GUARD_LEVELS = ("tip", "warn", "block")
+
+# 检测轨(三轨)
+GUARD_TRACKS = ("text", "form", "privacy")
+
+# 文本轨: 敏感词表(封闭——阻断级红线)
+SENSITIVE_WORDS = (
+    "假发票", "赌博", "洗钱通道", "违禁药品",
+    "枪支交易")
+
+# 文本轨: 夸大宣传词表(封闭——警告级)
+EXAGGERATION_WORDS = (
+    "最好", "第一品牌", "国家级", "根治",
+    "无效退款", "百分之百", "绝对安全")
+
+# 文本轨: 必要条款(封闭——提示级缺失检测)
+REQUIRED_CLAUSES = ("服务有效期", "退改政策")
+
+# 表单轨: 必填域(封闭——警告级)
+FORM_REQUIRED_FIELDS = (
+    "title", "price", "validityStart",
+    "validityEnd", "refundPolicy")
+
+# 表单轨: 超范围采集域(封闭——阻断级红线:
+# 基础服务禁采金融敏感域)
+OVERCOLLECT_FIELDS = (
+    "id_number", "bank_account")
+
+# 规则 ID 域(封闭——每条规则锚定干预档)
+GUARD_RULE_LEVELS = {
+    # 文本轨
+    "GUARD_SENSITIVE_WORD": "block",
+    "GUARD_EXAGGERATION": "warn",
+    "GUARD_MISSING_CLAUSE": "tip",
+    # 表单轨
+    "GUARD_FORM_REQUIRED": "warn",
+    "GUARD_FORM_LOGIC": "warn",
+    "GUARD_OVERCOLLECT": "block",
+    # 隐私轨
+    "GUARD_PII_LEAK": "block",
+    "GUARD_PRIVACY_BUDGET": "tip",
+}
+
+# 知识嵌入(每规则 why/regulation/example——
+# 易错点旁"为什么需要这个?"——封闭注册)
+GUARD_KNOWLEDGE = {
+    "GUARD_SENSITIVE_WORD": {
+        "why": "违禁内容存在法律风险, "
+               "平台与发布者均需担责",
+        "regulation": "《网络安全法》第12条"
+                      "(禁止传播违法信息)",
+        "example": "某商家因发布违禁内容"
+                   "被下架并扣减信值",
+    },
+    "GUARD_EXAGGERATION": {
+        "why": "夸大宣传误导消费者, "
+               "属高频驳回点",
+        "regulation": "《广告法》第9条"
+                      "(禁用'国家级''最佳'等"
+                      "绝对化用语)",
+        "example": "优质案例: 以'近30日评价"
+                   "满意度98%'数据代替绝对化"
+                   "用语",
+    },
+    "GUARD_MISSING_CLAUSE": {
+        "why": "必要条款缺失易引发服务纠纷, "
+               "补充后可提升用户信任",
+        "regulation": "《消费者权益保护法》"
+                      "第26条(格式条款显著提示)",
+        "example": "成功案例: 明示'服务有效期"
+                   "90天, 未使用可退'",
+    },
+    "GUARD_FORM_REQUIRED": {
+        "why": "必填信息完整是发布预检的"
+               "基础要求",
+        "regulation": "平台发布规范§2"
+                      "(产品信息完整性)",
+        "example": "缺价格字段是高频驳回点",
+    },
+    "GUARD_FORM_LOGIC": {
+        "why": "逻辑矛盾(价格非正/有效期"
+               "倒置)将导致无法正常履约",
+        "regulation": "平台发布规范§3"
+                      "(信息一致性)",
+        "example": "成功案例: 起止日期使用"
+                   "日期选择器避免倒置",
+    },
+    "GUARD_OVERCOLLECT": {
+        "why": "基础服务采集身份证/银行卡"
+               "属超范围收集, 触发个人信息"
+               "保护红线",
+        "regulation": "《个人信息保护法》"
+                      "第6条(最小必要原则)",
+        "example": "同类案例: 改为资质认证"
+                   "完成后服务端脱敏存证",
+    },
+    "GUARD_PII_LEAK": {
+        "why": "公开内容含个人敏感信息"
+               "(身份证/手机号/卡号)将直接"
+               "泄露他人隐私",
+        "regulation": "《个人信息保护法》"
+                      "第51条(防止泄露义务)",
+        "example": "替代方案: 使用"
+                   "'138****5678'式脱敏展示",
+    },
+    "GUARD_PRIVACY_BUDGET": {
+        "why": "隐私预算超支将限制个性化"
+               "能力, 脱敏后零成本",
+        "regulation": "49号隐私预算规则"
+                      "(会员自主偏好分级)",
+        "example": "替代方案: 对内容脱敏后"
+                   "预估成本归零",
+    },
+}
+
+# 意图侧→导航建议(58号纯消费——
+# 建议性渲染非强制)
+INTENT_NAV_MAP = {
+    "product": ["产品管理", "新品发布向导",
+                "行业模板库"],
+    "trust": ["信值面板", "信任流水",
+              "申诉中心"],
+    "nav": ["首页导航", "快捷入口"],
+    "other": ["帮助中心", "合规向导"],
+}
+
+
+def guard_rule_view() -> dict:
+    """护航规则视图(观测面)"""
+    return {
+        "tracks": list(GUARD_TRACKS),
+        "levels": list(GUARD_LEVELS),
+        "rules": len(GUARD_RULE_LEVELS),
+        "sensitiveWords": len(SENSITIVE_WORDS),
+        "exaggerationWords": len(
+            EXAGGERATION_WORDS),
+        "requiredClauses": len(REQUIRED_CLAUSES),
+        "formRequiredFields": len(
+            FORM_REQUIRED_FIELDS),
+        "overcollectFields": len(
+            OVERCOLLECT_FIELDS),
+        "knowledgeEntries": len(GUARD_KNOWLEDGE),
+        "note": "COMPLIANCE_GUARD 三轨检测"
+                "——确定性规则(LLM 不进判定链)",
+    }
+
+
 def registry_view() -> dict:
     """注册表自描述(观测面)"""
     return {
@@ -350,6 +503,7 @@ def registry_view() -> dict:
         "ruleEntries": len(ROLE_ACTION_BASE),
         "templates": len(
             WORKBENCH_TEMPLATES),
+        "guard": guard_rule_view(),
         "meta": {
             "roleDomains":
                 list(ROLE_DOMAINS),
@@ -364,8 +518,8 @@ def registry_view() -> dict:
         },
         "modeValues": MODE_VALUES,
         "note": "后台注册表——权限四轴规则"
-                "+五角色工作台模板(动态信任"
-                "协作网络)",
+                "+五角色工作台模板+三轨护航"
+                "规则(动态信任协作网络)",
     }
 
 
@@ -403,16 +557,44 @@ def _validate_registry() -> None:
         errors.append(
             f"模板数应为 4, 实际 "
             f"{len(WORKBENCH_TEMPLATES)}")
+    # 护航规则域(P2)
+    if len(GUARD_RULE_LEVELS) != 8:
+        errors.append(
+            f"护航规则数应为 8, 实际 "
+            f"{len(GUARD_RULE_LEVELS)}")
+    for rid, lv in GUARD_RULE_LEVELS.items():
+        if lv not in GUARD_LEVELS:
+            errors.append(
+                f"护航规则 {rid} 干预档 "
+                f"域外 {lv}")
+        if rid not in GUARD_KNOWLEDGE:
+            errors.append(
+                f"护航规则 {rid} 缺知识嵌入")
+    if len(GUARD_KNOWLEDGE) != len(
+            GUARD_RULE_LEVELS):
+        errors.append(
+            "知识嵌入与规则数不一致"
+            f"({len(GUARD_KNOWLEDGE)}/"
+            f"{len(GUARD_RULE_LEVELS)})")
+    if not SENSITIVE_WORDS or not \
+            EXAGGERATION_WORDS:
+        errors.append("词表为空(封闭注册违规)")
+    for side in INTENT_NAV_MAP:
+        if side not in ("product", "trust",
+                        "nav", "other"):
+            errors.append(
+                f"意图导航侧 {side} 域外")
     if errors:
         raise RuntimeError(
             "ab63 registry 自检失败: "
             + "; ".join(errors))
     logger.info(
         "ab63_registry_validated roles=%s "
-        "rules=%s templates=%s",
+        "rules=%s templates=%s guards=%s",
         len(ROLE_DOMAINS),
         len(ROLE_ACTION_BASE),
-        len(WORKBENCH_TEMPLATES))
+        len(WORKBENCH_TEMPLATES),
+        len(GUARD_RULE_LEVELS))
 
 
 _validate_registry()

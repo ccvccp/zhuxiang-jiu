@@ -216,10 +216,28 @@ class Ab63Service:
     async def render_workbench(self,
                                member_id: int,
                                role: str,
-                               novice: bool = False
+                               novice: bool = False,
+                               intent_text: str = None,
+                               accessibility: dict = None,
+                               industry: str = None
                                ) -> dict:
-        """工作台渲染(角色模板+novice/
-        mature 视图选择)
+        """工作台渲染(P2 情境化——角色模板
+        +novice/mature 视图+意图驱动导航
+        +无障碍标记+智能模板推荐)
+
+        Args:
+            member_id: 会员
+            role: 后台角色(四域)
+            novice: 新手态
+            intent_text: 意图文本(58号 evaluate
+                纯消费 fail-soft——建议性
+                导航推荐非强制)
+            accessibility: 无障碍输入
+                {largeFont, voiceAssist,
+                 pauseDetected}(设备/偏好
+                检测——建议性)
+            industry: 业务类型(养老/文创/
+                通用——智能模板推荐)
 
         Raises:
             ValueError: off 态/角色域外
@@ -243,6 +261,51 @@ class Ab63Service:
             if novice else "matureView"
         view = template.get(view_key) or {}
 
+        # ---- P2 情境化增强 ----
+        # ① 意图驱动导航(58号纯消费
+        #    fail-soft——建议性)
+        intent_nav, intent_state = \
+            await self._intent_nav(
+                member_id, intent_text)
+
+        # ② 无障碍标记(建议性)
+        acc_in = dict(accessibility or {})
+        acc_marks = {
+            "largeFont": bool(
+                acc_in.get("largeFont")),
+            "voiceAssist": bool(
+                acc_in.get("voiceAssist")),
+        }
+        simplification = []
+        if acc_in.get("pauseDetected"):
+            simplification.append(
+                "检测到操作停顿: 已标记"
+                "简化建议入口(可切换"
+                "精简模式——建议性)")
+
+        # ③ 智能模板推荐(行业域+
+        #    57号 seeds 纯读取 fail-soft)
+        template_rec, seed_refs = \
+            await self._recommend_templates(
+                template, industry)
+
+        render_options = {
+            "templateLabel":
+                template.get("label"),
+            "view": view,
+            "accessibility":
+                template.get(
+                    "accessibility") or {},
+            "intentNav": intent_nav,
+            "accessibilityMarks":
+                acc_marks,
+            "simplification":
+                simplification,
+            "templateRecommendation":
+                template_rec,
+            "seedRefs": seed_refs,
+        }
+
         wb_id = await self.repo.next_wb_id()
         await self.repo.save_workbench({
             "wbId": wb_id,
@@ -250,14 +313,7 @@ class Ab63Service:
                 int(member_id or 0),
             "role": role,
             "viewKey": view_key,
-            "renderOptions": {
-                "templateLabel":
-                    template.get("label"),
-                "view": view,
-                "accessibility":
-                    template.get(
-                        "accessibility") or {},
-            },
+            "renderOptions": render_options,
             "createdAt": ts(),
             "updatedAt": ts(),
         })
@@ -268,6 +324,9 @@ class Ab63Service:
                     int(member_id or 0),
                 "role": role,
                 "view": view_key,
+                "intentState": intent_state,
+                "industry":
+                    str(industry or ""),
             })
         return {
             "success": True,
@@ -275,16 +334,113 @@ class Ab63Service:
             "role": role,
             "label": template.get("label"),
             "view": view_key,
-            "renderOptions": {
-                "view": view,
-                "accessibility":
-                    template.get(
-                        "accessibility") or {},
-            },
-            "note": "工作台渲染(情境化"
-                    "模板)——呈现配置留痕",
+            "renderOptions": render_options,
+            "note": "工作台渲染(情境化——"
+                    "意图导航+无障碍标记+"
+                    "模板推荐均为建议性)",
             "renderedAt": ts(),
         }
+
+    # --------------------------------------------------------
+    # P2 情境化内部(纯消费 fail-soft)
+    # --------------------------------------------------------
+
+    @staticmethod
+    async def _intent_nav(member_id,
+                          intent_text
+                          ) -> tuple:
+        """意图驱动导航(58号 evaluate 纯
+        消费——fail-soft 不阻塞)
+
+        Returns:
+            (nav_list, intent_state)
+        """
+        text = str(intent_text or "").strip()
+        if not text:
+            return [], None
+        try:
+            from services.ii58_service import (
+                Ii58Service,
+            )
+            ev = await Ii58Service().evaluate(
+                text,
+                member_id=int(member_id or 0),
+                member_role="member")
+            state = ev.get("state")
+            if state != "resolved":
+                return [], state
+            intent_id = str(
+                ev.get("intentId") or "")
+            from services.ii58_registry import (
+                INTENT_REGISTRY,
+            )
+            from services.ab63_registry import (
+                INTENT_NAV_MAP,
+            )
+            side = (INTENT_REGISTRY.get(
+                intent_id) or {}).get("side")
+            nav = list(
+                INTENT_NAV_MAP.get(
+                    side) or [])
+            return nav, state
+        except Exception as exc:  # noqa: BLE001
+            # 感知源异常 fail-soft——
+            # 模板渲染不受影响
+            logger.warning(
+                "ab63_intent_nav_failsoft: "
+                "%s", exc)
+            return [], "failsoft"
+
+    @staticmethod
+    async def _recommend_templates(
+            template: dict,
+            industry: str) -> tuple:
+        """智能模板推荐(行业域+57号
+        published seeds 纯读取 fail-soft)
+
+        Returns:
+            (推荐模板名列表, 种子引用)
+        """
+        industry = str(industry or "").strip()
+        pool = list((template.get(
+            "noviceView") or {}).get(
+            "industryTemplates") or [])
+        if not pool:
+            # 兜底: 角色模板无行业域时
+            # 用通用域
+            pool = ["通用"]
+        if industry and industry in pool:
+            rec = [industry] + [
+                p for p in pool
+                if p != industry]
+        else:
+            rec = list(pool)
+        seed_refs = []
+        try:
+            from repositories.kb57_repository import (
+                Kb57Repository,
+            )
+            seeds = await (
+                Kb57Repository()
+                .list_seeds(
+                    status="published",
+                    limit=20))
+            for s in seeds:
+                tags = " ".join(
+                    str(t) for t in (
+                        s.get("valueTags")
+                        or []))
+                if industry \
+                        and industry in tags:
+                    seed_refs.append(
+                        s.get("seedId"))
+            seed_refs = seed_refs[:3]
+        except Exception as exc:  # noqa: BLE001
+            seed_refs = []
+            logger.warning(
+                "ab63_seed_rec_failsoft: "
+                "%s", exc)
+        return rec[:3], seed_refs
 
     # --------------------------------------------------------
     # 观测面(裁决/渲染记录)
