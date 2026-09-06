@@ -167,18 +167,13 @@ class Ab63Service:
             "score": verdict["score"],
             "threshold":
                 verdict["threshold"],
-            "reason": {
-                "text": verdict["reason"],
-                "factors":
-                    verdict["factors"],
-            },
+            "reason": verdict["reason"],
             "context": {
                 "tier": tier,
                 "complianceRate":
                     float(compliance_rate),
                 "period": period,
-                "sensitivity":
-                    sensitivity,
+                "sensitivity": sensitivity,
             },
             "createdAt": ts(),
             "updatedAt": ts(),
@@ -318,6 +313,25 @@ class Ab63Service:
             "grants": records,
             "note": "权限裁决记录——"
                     "reason 可解释链",
+        }
+
+    async def get_grant(self, grant_id: int) -> dict:
+        """权限裁决单条(P1 观测面——
+        reason 完整可解释链)
+
+        Raises:
+            KeyError: 记录不存在
+        """
+        record = await self.repo.get_grant(
+            int(grant_id))
+        if not record:
+            raise KeyError(
+                f"裁决记录 {grant_id} 不存在")
+        return {
+            "success": True,
+            "grant": record,
+            "note": "裁决记录单条——"
+                    "ruleId+recoveryPath 可解释",
         }
 
     async def model_status(self) -> dict:

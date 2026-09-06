@@ -153,11 +153,13 @@ def evaluate_permission(role: str, action: str,
                         sensitivity: str = "low"
                         ) -> dict:
     """权限裁决(确定性四轴计算——P1 完整
-    交付在 P0 提供骨架)
+    可解释链: text+ruleId+recoveryPath)
 
     Returns:
         {granted, score, threshold,
-         reason 可解释链, factors 因子快照}
+         reason 结构化可解释链
+         {text, ruleId, recoveryPath,
+          factors}, factors 因子快照}
     """
     base = ROLE_ACTION_BASE.get(
         (str(role), str(action)))
@@ -166,9 +168,15 @@ def evaluate_permission(role: str, action: str,
             "granted": False,
             "score": 0,
             "threshold": PERMISSION_THRESHOLD,
-            "reason": f"角色 {role} 无动作 "
-                      f"{action} 基线定义"
-                      f"(角色×动作域外)",
+            "reason": {
+                "text": f"角色 {role} 无动作 "
+                        f"{action} 基线定义"
+                        f"(角色×动作域外)",
+                "ruleId": "DOMAIN_OUT",
+                "recoveryPath":
+                    "使用合法角色/动作域",
+                "factors": {},
+            },
             "factors": {},
         }
     bonus = TIER_BONUS.get(
@@ -187,7 +195,25 @@ def evaluate_permission(role: str, action: str,
     if action in HIGH_RISK_ACTIONS:
         threshold = HIGH_RISK_THRESHOLD
     granted = score >= threshold
-    reason = (
+
+    # 恢复路径(未达标时的指引)
+    recovery_path = ""
+    if not granted:
+        parts = []
+        if bonus <= 0:
+            parts.append(
+                "提升信值等级(合规操作积累)")
+        if compliance < COMPLIANCE_MAX_BONUS:
+            parts.append(
+                "提高历史合规率(90 日窗口)")
+        if penalty > 0:
+            parts.append(
+                "避开业务高峰/降低内容"
+                "敏感度")
+        recovery_path = "; ".join(parts) \
+            or "积累合规行为后重试"
+
+    reason_text = (
         f"基线{base}+信值tier{bonus:+d}"
         f"+合规{compliance:+.1f}"
         f"-场景风险{penalty}={score}"
@@ -197,7 +223,19 @@ def evaluate_permission(role: str, action: str,
         "granted": granted,
         "score": score,
         "threshold": threshold,
-        "reason": reason,
+        "reason": {
+            "text": reason_text,
+            "ruleId": "PERM_4AXIS",
+            "recoveryPath": recovery_path
+            or "已达标(无需恢复)",
+            "factors": {
+                "base": base,
+                "tierBonus": bonus,
+                "complianceBonus":
+                    compliance,
+                "scenePenalty": penalty,
+            },
+        },
         "factors": {
             "base": base,
             "tierBonus": bonus,

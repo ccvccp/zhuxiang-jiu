@@ -1,9 +1,10 @@
-"""63号·AI智能后台管理路由(P0)
+"""63号·AI智能后台管理路由(P0+P1)
 
-端点(P0 5):
+端点(P0+P1 6):
     GET  /api/ab63/registry            注册表自描述(admin, 观测面)
     POST /api/ab63/grants              权限裁决(admin, 决策面 off 409)
     GET  /api/ab63/grants              裁决记录列表(admin, 观测面)
+    GET  /api/ab63/grants/{grantId}    裁决单条 reason 链(admin, P1 观测面)
     POST /api/ab63/workbench/render    工作台渲染(admin, 决策面 off 409)
     GET  /api/ab63/model/status         模型状态(admin, 观测面)
 
@@ -88,6 +89,23 @@ async def grants(
     from services.ab63_service import Ab63Service
     return await Ab63Service().list_grants(
         member_id=member_id, role=role)
+
+
+@router.get("/grants/{grant_id}")
+async def get_grant(
+        grant_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """裁决单条(P1 观测面——ruleId+
+    recoveryPath 完整可解释链; 不存在 404)"""
+    _require_admin(x_role)
+    from services.ab63_service import Ab63Service
+    try:
+        return await Ab63Service().get_grant(
+            grant_id=grant_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
 
 
 @router.post("/workbench/render")

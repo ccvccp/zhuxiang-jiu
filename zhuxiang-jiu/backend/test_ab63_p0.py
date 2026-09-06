@@ -119,10 +119,13 @@ class TestRegistry:
                str((v1.get("granted"),
                     v1.get("score"))))
         record("reason 可解释链",
-               "基线" in str(v1.get("reason"))
+               "基线" in str(
+                   (v1.get("reason")
+                    or {}).get("text"))
                and "门槛" in str(
-                   v1.get("reason")),
-               str(v1.get("reason"))[:60])
+                   (v1.get("reason")
+                    or {}).get("text")),
+               str(v1.get("reason"))[:70])
 
         v2 = evaluate_permission(
             "ally_merchant", "batch_ops",
@@ -235,8 +238,9 @@ class TestGrant:
                     r1.get("granted"))))
         record("裁决 reason(服务层可解释)",
                "基线" in str(
-                   r1.get("reason")),
-               str(r1.get("reason"))[:50])
+                   (r1.get("reason")
+                    or {}).get("text")),
+               str(r1.get("reason"))[:60])
 
         # 落库归因(上下文快照)
         from repositories.ab63_repository \
@@ -712,14 +716,14 @@ class TestHttp:
                    resp.status_code == 403,
                    str(resp.status_code))
 
-        # 路由累计 5 端点
+        # 路由累计 6 端点(P1 +grants/{id})
         from routes.ab63_routes import (
             router as ab_router,
         )
         count = sum(
             1 for r in ab_router.routes)
-        record("63号路由累计 5 端点",
-               count == 5, str(count))
+        record("63号路由累计 6 端点",
+               count == 6, str(count))
         os.environ["AB63_MODE"] = "off"
 
 
