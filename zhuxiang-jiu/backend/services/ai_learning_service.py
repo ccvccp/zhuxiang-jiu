@@ -102,6 +102,8 @@ SCORER_REGISTRY = {
     "intent_orchestration":       {"label": "意图识别编排评分", "module": "58意图识别", "batch": 17},
     # ---- 第十八批(59号AI智能服务编排 P0: 服务编排评分) ----
     "service_orchestration":     {"label": "智能服务编排评分", "module": "59服务编排", "batch": 18},
+    # ---- 第二十二批(63号AI智能后台管理 P0: 后台编排评分) ----
+    "admin_orchestration":       {"label": "智能后台编排评分", "module": "63智能后台", "batch": 22},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -164,6 +166,12 @@ DECISION_THRESHOLDS = {
     # /observe 观察)
     "service_orchestration": [(80.0, "urgent"), (50.0, "optimize"),
                               (0.0, "observe")],
+    # 63号AI智能后台管理(三级决策——计划 §四:
+    # 高分=高护航有效性+高审核一致性 → optimize 优化执行
+    # /urgent 紧急优化+人工加急(后台复盘会)
+    # /observe 观察)
+    "admin_orchestration": [(80.0, "urgent"), (50.0, "optimize"),
+                            (0.0, "observe")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -259,6 +267,7 @@ def default_weights(scorer_id: str) -> dict:
         from services.kb57_scorer import Kb57Scorer
         from services.ii58_scorer import Ii58Scorer
         from services.ii59_scorer import Ii59Scorer
+        from services.ab63_scorer import Ab63Scorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -279,6 +288,7 @@ def default_weights(scorer_id: str) -> dict:
             "knowledge_orchestration": Kb57Scorer,
             "intent_orchestration": Ii58Scorer,
             "service_orchestration": Ii59Scorer,
+            "admin_orchestration": Ab63Scorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

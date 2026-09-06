@@ -9,7 +9,7 @@
       澄清接受率/信值增益)+意图区+语料区+
       防御区(含宪法断言)
     - 红队七向量: RT-01~07 全 defended
-    - 宪法断言: 44号 34 档案在册+48号
+    - 宪法断言: 44号 35 档案在册+48号
       COMMAND_ACTIONS 零改动+55号零改动
     - HTTP 层: dashboard+redteam 端点+
       鉴权+19 端点计数
@@ -242,8 +242,8 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 34 档案在册",
-               len(SCORER_REGISTRY) == 34,
+        record("44号 35 档案在册",
+               len(SCORER_REGISTRY) == 35,
                str(len(SCORER_REGISTRY)))
         record("第33档案 intent_orchestration",
                "intent_orchestration"
