@@ -1,7 +1,8 @@
 """58号·AI智能优化意图识别 置信度引擎
-(ii58_service, P0)
+(ii58_service, P0; P2 业务耦合+动态信任校准)
 
-计划(docs/58号_AI智能优化意图识别算法模块实施计划.md §四/§九 P0):
+计划(docs/58号_AI智能优化意图识别算法模块实施计划.md §四/§九):
+    P0:
     ① L1 语料匹配引擎(55号 parse_intent 范式升级):
        关键词加权打分(FULL/PARTIAL/AMBIGUOUS)
        +命中数共识加成+对抗样本否决(易混淆域
@@ -14,10 +15,27 @@
        +tier 快照——无归因不计入有效服务)
     ⑤ evaluate 主链(决策面 off 409)
 
+    P2(业务耦合+动态信任校准):
+    ⑥ 识别即合规前置校验(仅 resolved 交付域):
+       minRole 角色校验+沙箱五级裁决+越界拦截
+       boundaryIntercepted(归因保留原始意图)
+    ⑦ 槽位上下文预填(48号会话上轮 card.subject
+       指代消解+页面状态——纯读取零写入)
+    ⑧ 合规模板关联(ii58_compliance——57号
+       valueTags 只读联动语义)
+    ⑨ 阈值配置域: calibrate→46号审批总线留痕
+       (config 人工通道)+58号镜像终审轨
+       (pending→active 唯一出口——人工铁律);
+       基线生效源三级回退(镜像 active→代码常量)
+
 铁律(计划 §一):
     - 澄清优于错误执行: 低置信度必 clarify,
       禁止盲执行
     - 归因 ID 强制: 每次识别携带归因链
+    - 三态纯度: 权限裁决不污染置信度三态
+    - 阈值校准不落库运行态口径不变
+      (tier delta 每轮重算; 基线变更唯一
+      生效通道=人工终审)
 """
 
 import logging
@@ -56,6 +74,17 @@ TIER_THRESHOLD_DELTA = {
     "watched": (0.05, 0.0),
     "restricted": (0.05, 0.10),
 }
+
+# P2 阈值校准合法域(0.50≤lower<upper≤0.99)
+CALIBRATE_MIN = 0.50
+CALIBRATE_MAX = 0.99
+
+# 阈值镜像键(ii58_thresholds 表 tier 键——
+# 单记录状态机: pending→active/rejected)
+THRESHOLD_MIRROR_KEY = "baseline"
+
+# 指代词(槽位预填——48号 REFERENCE_WORDS 范式)
+REFERENCE_WORDS = ("这个", "它", "这件", "这款", "那个")
 
 MODE_KEY = "II58_MODE"
 
@@ -104,9 +133,10 @@ class Ii58Service:
                 "states": ("resolved", "partial",
                            "clarify"),
             },
-            "note": "P0 底座: 意图注册表三位一体+"
-                    "置信度引擎+归因链(语料采集 P1 "
-                    "接管)",
+            "note": "P2 底座: 意图注册表三位一体+"
+                    "置信度引擎+归因链+识别即合规"
+                    "(权限前置校验/越界拦截)+阈值"
+                    "配置域(46号审批留痕+人工终审)",
         })
         return view
 
@@ -116,10 +146,12 @@ class Ii58Service:
 
     async def evaluate(self, text: str,
                        member_id: int = None,
-                       member_role: str = "member"
+                       member_role: str = "member",
+                       session_id: int = None,
+                       current_page: str = None
                        ) -> dict:
         """意图识别主链: L1 语料匹配→动态阈值校准
-        →三态响应→归因链落库
+        →三态响应→识别即合规前置校验→归因链落库
 
         Args:
             text: 用户输入(已过 48号唤醒/消解的
@@ -127,6 +159,9 @@ class Ii58Service:
             member_id: 会员(47号 tier 联动——
                        缺省系统态走 standard 基线)
             member_role: 会员角色(权限校验用)
+            session_id: 48号会话(槽位上下文预填
+                       ——上轮 card.subject 纯读取)
+            current_page: 页面状态(page 槽位预填)
 
         Raises:
             ValueError: off 态/文本为空
@@ -140,9 +175,10 @@ class Ii58Service:
         #    未建档走 standard 基线)
         tier = await self._member_tier(member_id)
 
-        # ② 动态阈值校准(运行态计算不落库)
-        upper, lower = self._calibrated_thresholds(
-            tier)
+        # ② 动态阈值校准(运行态计算不落库——
+        #    基线经人工终审生效域)
+        upper, lower = await \
+            self._calibrated_thresholds(tier)
 
         # ③ L1 语料匹配(置信度+候选)
         match = await self._match_corpus(text)
@@ -151,7 +187,35 @@ class Ii58Service:
         state, confidence, candidates = \
             self._classify(match, upper, lower)
 
-        # ⑤ 归因链落库(无归因不计入有效服务)
+        # ⑤ 识别即合规前置校验(P2——仅 resolved
+        #    交付域; 三态纯度: 权限不污染置信度)
+        compliance = None
+        if state == "resolved":
+            from services.ii58_compliance import (
+                judge,
+            )
+            compliance = judge(
+                str(match.get("intentId")
+                    or "unknown.unrecognized"),
+                member_role)
+        denied = bool(compliance
+                      and compliance.get("decision")
+                      == "denied")
+
+        # ⑥ 槽位抽取+上下文预填(交付域且未拦截)
+        slots = {}
+        slot_sources = {}
+        if state == "resolved" and not denied:
+            slots = self._extract_slots(
+                str(match.get("intentId") or ""),
+                text)
+            slots, slot_sources = \
+                await self._prefill_slots(
+                    str(match.get("intentId")
+                        or ""), text, slots,
+                    session_id, current_page)
+
+        # ⑦ 归因链落库(无归因不计入有效服务)
         eval_id = await self.repo.next_eval_id()
         attribution = {
             "corpusIds": match.get(
@@ -162,6 +226,11 @@ class Ii58Service:
                 "upper": upper, "lower": lower,
             },
         }
+        if compliance is not None:
+            attribution["compliance"] = compliance
+        if slot_sources:
+            attribution["slotSources"] = \
+                slot_sources
         record = {
             "evalId": eval_id,
             "text": text[:200],
@@ -171,11 +240,12 @@ class Ii58Service:
             "confidence": round(confidence, 4),
             "candidates": candidates,
             "attribution": attribution,
+            "slots": slots,
             "memberId": int(member_id or 0),
             "memberRole": member_role,
             "corpusHits": int(
                 match.get("corpusHits") or 0),
-            "boundaryIntercepted": False,
+            "boundaryIntercepted": denied,
             "pooledFeedbackId": 0,
             "evalCount": 0,
             "createdAt": ts(),
@@ -183,7 +253,7 @@ class Ii58Service:
         }
         await self.repo.save_evaluation(record)
 
-        # ⑥ evaluate 事件留痕
+        # ⑧ evaluate 事件留痕
         await self._track(eval_id, "evaluate", {
             "intentId": record["intentId"],
             "state": state,
@@ -192,9 +262,10 @@ class Ii58Service:
             "tier": tier,
             "corpusHits":
                 record["corpusHits"],
+            "boundaryIntercepted": denied,
         })
 
-        # ⑦ 响应组装(按三态语义)
+        # ⑨ 响应组装(按三态+合规裁决语义)
         result = {
             "success": True,
             "evalId": eval_id,
@@ -206,12 +277,35 @@ class Ii58Service:
             "attribution": attribution,
             "tier": tier,
         }
-        if state == "resolved":
+        if compliance is not None:
+            result["compliance"] = compliance
+        if state == "resolved" and denied:
+            # 越界拦截: 输出改判越界元意图
+            # (归因保留原始意图——审计完整)
+            result["intentId"] = \
+                "boundary.unauthorized"
+            result.update({
+                "boundaryIntercepted": True,
+                "note": compliance.get(
+                    "refusalNote") or
+                    "越界拦截(识别即合规)",
+            })
+        elif state == "resolved" \
+                and compliance \
+                and compliance.get("decision") \
+                == "confirm_required":
+            result.update({
+                "requireConfirm": True,
+                "slots": slots,
+                "note": "敏感意图(sensitive 沙箱)——"
+                        "需二次确认: 屏幕码核销"
+                        "(48号 confirmToken 流)",
+            })
+        elif state == "resolved":
             result.update({
                 "note": "识别完成(resolved)——"
                         "直接意图交付",
-                "slots": self._extract_slots(
-                    record["intentId"], text),
+                "slots": slots,
             })
         elif state == "partial":
             result.update({
@@ -407,20 +501,47 @@ class Ii58Service:
                 "ii58_tier_read_failed: %s", exc)
             return "standard"
 
-    @staticmethod
-    def _calibrated_thresholds(tier: str
-                                ) -> tuple:
+    # ============================================================
+    # 阈值基线生效域(P2——镜像→代码常量回退)
+    # ============================================================
+
+    async def _effective_baseline(self) -> tuple:
+        """生效基线(三级回退: 镜像 active 值→
+        代码常量; pending 态取镜像 effective 值)
+
+        Returns:
+            (upper, lower, source)——source:
+            mirror|code_default
+        """
+        mirror = None
+        try:
+            mirror = await self.repo.get_threshold(
+                THRESHOLD_MIRROR_KEY)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ii58_mirror_read_failed: %s", exc)
+        if mirror and mirror.get("baseUpper"):
+            return (round(float(mirror["baseUpper"]), 4),
+                    round(float(mirror["baseLower"]), 4),
+                    "mirror")
+        return (BASE_UPPER, BASE_LOWER,
+                "code_default")
+
+    async def _calibrated_thresholds(
+            self, tier: str) -> tuple:
         """动态阈值(运行态计算不落库——
-        计划 §4.2)"""
+        计划 §4.2; 基线经 _effective_baseline)"""
+        base_upper, base_lower, _ = await \
+            self._effective_baseline()
         delta_upper, delta_lower = \
             TIER_THRESHOLD_DELTA.get(
                 tier, (0.0, 0.0))
         upper = round(
-            min(0.99,
-                BASE_UPPER + delta_upper), 4)
+            min(CALIBRATE_MAX,
+                base_upper + delta_upper), 4)
         lower = round(
             min(upper - 0.05,
-                BASE_LOWER + delta_lower), 4)
+                base_lower + delta_lower), 4)
         return upper, lower
 
     # ============================================================
@@ -493,6 +614,405 @@ class Ii58Service:
                     slots["amount"] = float(
                         m.group(1))
         return slots
+
+    # ============================================================
+    # 槽位上下文预填(P2——48号纯读取)
+    # ============================================================
+
+    async def _prefill_slots(self, intent_id: str,
+                             text: str, slots: dict,
+                             session_id,
+                             current_page
+                             ) -> tuple:
+        """槽位上下文预填(会话上轮指代消解+
+        页面状态; 纯读取零写入)
+
+        预填域(不覆盖显式抽取值):
+            - keyword: 无引号显式抽取+文本含
+              指代词+48号上轮 card.subject 有值
+              → 指代消解预填("这个多少钱"→
+              上轮商品名)
+            - page: 文本无页面词+currentPage
+              给定 → 页面状态预填
+
+        Returns:
+            (slots, slot_sources)——来源标记
+            可审计(source/origin)
+        """
+        from services.ii58_registry import (
+            INTENT_REGISTRY,
+        )
+        meta = INTENT_REGISTRY.get(intent_id) or {}
+        schema = meta.get("slotSchema") or []
+        sources = {}
+
+        if "keyword" in schema \
+                and session_id is not None:
+            has_explicit = bool(re.search(
+                r"[「『\"']([^「」『』\"']+)"
+                r"[」』\"']", text))
+            if not has_explicit and any(
+                    w in text
+                    for w in REFERENCE_WORDS):
+                subject = await \
+                    self._last_turn_subject(
+                        session_id)
+                if subject:
+                    slots["keyword"] = subject[:32]
+                    sources["keyword"] = {
+                        "source": "context_prefill",
+                        "origin": "last_turn",
+                    }
+
+        if "page" in schema \
+                and "page" not in slots \
+                and current_page:
+            slots["page"] = str(current_page)[:16]
+            sources["page"] = {
+                "source": "context_prefill",
+                "origin": "currentPage",
+            }
+        return slots, sources
+
+    @staticmethod
+    async def _last_turn_subject(session_id) -> str:
+        """48号会话最近一轮 card.subject 纯读取
+        (fail-soft——无会话/无轮次/异常空串)"""
+        if session_id is None:
+            return ""
+        try:
+            from repositories.xiaozhu_repository \
+                import Xiaozhu48Repository
+            turns = await Xiaozhu48Repository(
+            ).list_turns(int(session_id), limit=50)
+            if not turns:
+                return ""
+            last = turns[-1]
+            card = last.get("card") or {}
+            return str(card.get("subject")
+                       or "")[:64]
+        except Exception:  # noqa: BLE001
+            return ""
+
+    # ============================================================
+    # 阈值配置域(P2——46号审批留痕+人工终审轨)
+    # ============================================================
+
+    async def calibrate(self, upper: float,
+                        lower: float,
+                        reason: str,
+                        requested_by: str = "admin"
+                        ) -> dict:
+        """基线阈值校准申请(→46号审批总线留痕
+        +58号镜像 pending; 不直接生效)
+
+        46号 config 类为人工通道语义(总线不自动
+        执行业务侧变更)——生效唯一出口为
+        review_calibration 人工终审。
+
+        Raises:
+            ValueError: off 态/阈值域非法/
+                理由非法/已有待终审校准
+        """
+        require_active_mode()
+        try:
+            upper = round(float(upper), 4)
+            lower = round(float(lower), 4)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "阈值须为数值")
+        if not (CALIBRATE_MIN <= lower < upper
+                <= CALIBRATE_MAX):
+            raise ValueError(
+                f"阈值域非法(须 {CALIBRATE_MIN}≤lower"
+                f"<upper≤{CALIBRATE_MAX})")
+        reason = str(reason or "").strip()
+        if not reason or len(reason) > 500:
+            raise ValueError(
+                "变更理由必填(1-500 字符)")
+
+        mirror = await self.repo.get_threshold(
+            THRESHOLD_MIRROR_KEY)
+        if mirror and mirror.get("status") \
+                == "pending":
+            raise ValueError(
+                "已有待终审校准(先处置再提交)")
+
+        cur_upper, cur_lower, _ = await \
+            self._effective_baseline()
+
+        # ① 46号审批总线留痕(config——人工通道)
+        change = await self._gov_submit(
+            {"scope": "threshold_baseline",
+             "before": {"upper": cur_upper,
+                        "lower": cur_lower},
+             "after": {"upper": upper,
+                       "lower": lower}},
+            reason, requested_by)
+        change_id = int(change.get("changeId") or 0)
+
+        # ② 58号镜像 pending 快照
+        record = {
+            "tier": THRESHOLD_MIRROR_KEY,
+            "status": "pending",
+            "baseUpper": cur_upper,
+            "baseLower": cur_lower,
+            "thresholds": {
+                "pendingUpper": upper,
+                "pendingLower": lower,
+                "scope": "threshold_baseline",
+            },
+            "changeId": change_id,
+            "extra": {
+                "lastAction": "submit",
+                "requestedBy": str(
+                    requested_by or "admin"),
+                "reason": reason[:200],
+            },
+            "updatedAt": ts(),
+        }
+        await self.repo.save_threshold(
+            record, create=mirror is None)
+
+        await self._track(0, "threshold_change", {
+            "action": "submit",
+            "changeId": change_id,
+            "before": {"upper": cur_upper,
+                       "lower": cur_lower},
+            "after": {"upper": upper,
+                      "lower": lower},
+        })
+        return {
+            "success": True,
+            "changeId": change_id,
+            "status": "pending",
+            "effective": {"upper": cur_upper,
+                          "lower": cur_lower},
+            "proposed": {"upper": upper,
+                         "lower": lower},
+            "note": "校准申请已受理(46号留痕+"
+                    "镜像 pending)——人工终审 "
+                    "review 后生效",
+            "calibratedAt": ts(),
+        }
+
+    async def review_calibration(self, change_id: int,
+                                 approve: bool,
+                                 reviewer: str = "admin",
+                                 note: str = ""
+                                 ) -> dict:
+        """阈值校准人工终审(pending→active 唯一
+        出口——不受开关影响的人工铁律)
+
+        46号 change 同步收口(config 人工通道:
+        批准侧总线记录 rejected+error"请人工
+        执行"为设计语义; 驳回侧一致 rejected)。
+
+        Raises:
+            KeyError: 无待终审校准
+            ValueError: changeId 不匹配
+        """
+        mirror = await self.repo.get_threshold(
+            THRESHOLD_MIRROR_KEY)
+        if mirror is None \
+                or mirror.get("status") != "pending":
+            raise KeyError(
+                "无待终审的阈值校准(pending)")
+        if int(mirror.get("changeId") or 0) \
+                != int(change_id):
+            raise ValueError(
+                f"changeId 不匹配(镜像 "
+                f"{mirror.get('changeId')}——"
+                f"当前申请 {change_id})")
+
+        pending = mirror.get("thresholds") or {}
+        p_upper = float(pending.get("pendingUpper")
+                        or 0)
+        p_lower = float(pending.get("pendingLower")
+                        or 0)
+        old_upper = round(float(
+            mirror.get("baseUpper") or 0), 4)
+        old_lower = round(float(
+            mirror.get("baseLower") or 0), 4)
+
+        # ① 46号 change 收口(fail-soft)
+        await self._gov_settle(
+            int(change_id), approve, reviewer, note)
+
+        # ② 镜像翻转(58号生效域唯一出口)
+        extra = dict(mirror.get("extra") or {})
+        if approve:
+            mirror["baseUpper"] = p_upper
+            mirror["baseLower"] = p_lower
+            mirror["status"] = "active"
+            extra.update({
+                "lastAction": "approve",
+                "approvedAt": ts(),
+                "approvedBy": str(reviewer or "admin"),
+                "note": str(note or "")[:200],
+                "history": (extra.get("history")
+                            or [])[-4:] + [{
+                    "action": "approve",
+                    "upper": p_upper,
+                    "lower": p_lower,
+                    "at": ts()}],
+            })
+        else:
+            mirror["status"] = "rejected"
+            extra.update({
+                "lastAction": "reject",
+                "rejectedAt": ts(),
+                "rejectedBy": str(reviewer or "admin"),
+                "note": str(note or "")[:200],
+                "history": (extra.get("history")
+                            or [])[-4:] + [{
+                    "action": "reject",
+                    "at": ts()}],
+            })
+        mirror["extra"] = extra
+        mirror["updatedAt"] = ts()
+        await self.repo.save_threshold(
+            mirror, create=False)
+
+        await self._track(0, "threshold_change", {
+            "action": "approve" if approve
+            else "reject",
+            "changeId": int(change_id),
+            "effective": {
+                "upper": p_upper if approve
+                else old_upper,
+                "lower": p_lower if approve
+                else old_lower,
+            },
+            "reviewer": reviewer,
+        })
+        return {
+            "success": True,
+            "changeId": int(change_id),
+            "status": mirror["status"],
+            "effective": {
+                "upper": round(float(
+                    mirror["baseUpper"]), 4),
+                "lower": round(float(
+                    mirror["baseLower"]), 4),
+            },
+            "note": "校准已批准生效(镜像 active)"
+                    if approve
+                    else "校准已驳回(基线不变)",
+            "reviewedAt": ts(),
+        }
+
+    async def thresholds_view(self) -> dict:
+        """阈值全景(观测面——各 tier 运行态计算
+        值+当前生效基线+pending 申请)"""
+        mirror = await self.repo.get_threshold(
+            THRESHOLD_MIRROR_KEY)
+        upper, lower, source = await \
+            self._effective_baseline()
+
+        by_tier = {}
+        for tier in ("trusted", "standard",
+                     "watched", "restricted"):
+            d_upper, d_lower = \
+                TIER_THRESHOLD_DELTA.get(
+                    tier, (0.0, 0.0))
+            by_tier[tier] = {
+                "upper": round(min(CALIBRATE_MAX,
+                                  upper + d_upper), 4),
+                "lower": round(min(
+                    upper + d_upper - 0.05,
+                    lower + d_lower), 4),
+            }
+
+        pending = None
+        if mirror and mirror.get("status") \
+                == "pending":
+            p = mirror.get("thresholds") or {}
+            pending = {
+                "changeId": int(
+                    mirror.get("changeId") or 0),
+                "proposed": {
+                    "upper": p.get("pendingUpper"),
+                    "lower": p.get("pendingLower"),
+                },
+                "reason": (mirror.get("extra")
+                           or {}).get("reason"),
+            }
+        return {
+            "success": True,
+            "baseline": {
+                "upper": upper, "lower": lower,
+                "source": source,
+                "mirrorStatus": (mirror or {}).get(
+                    "status") or "none",
+            },
+            "pending": pending,
+            "byTier": by_tier,
+            "tierDelta": {
+                k: {"upper": v[0], "lower": v[1]}
+                for k, v in
+                TIER_THRESHOLD_DELTA.items()},
+            "note": "阈值全景——tier delta 运行态"
+                    "计算不落库; 基线变更唯一生效"
+                    "通道=人工终审(46号留痕)",
+        }
+
+    # --------------------------------------------------------
+    # 46号审批总线联动(fail-soft)
+    # --------------------------------------------------------
+
+    async def _gov_submit(self, payload: dict,
+                          reason: str,
+                          requested_by: str
+                          ) -> dict:
+        """46号 submit_change 留痕(config——
+        冷态自愈 sync 幂等)"""
+        from services.ai_governance_service import (
+            AiGovernanceService,
+        )
+        gov = AiGovernanceService()
+        if await gov.repo.get_gov(
+                SCORER_ID) is None:
+            await gov.sync_registry()
+        return await gov.submit_change(
+            SCORER_ID, "config", payload,
+            reason, requested_by)
+
+    @staticmethod
+    async def _gov_settle(change_id: int,
+                           approve: bool,
+                           reviewer: str,
+                           note: str) -> None:
+        """46号 change 收口(fail-soft——
+        config 人工通道语义)"""
+        try:
+            from services.ai_governance_service import (
+                AiGovernanceService,
+            )
+            gov = AiGovernanceService()
+            if approve:
+                try:
+                    await gov.review_change(
+                        int(change_id), True,
+                        str(reviewer or "admin"),
+                        str(note or "")
+                        or "58号阈值终审: 批准生效"
+                           "(config 人工通道收口)")
+                except ValueError:
+                    # 总线对 config 不执行业务变更
+                    # (rejected+error"请人工执行"
+                    #  为设计语义——留痕已收口)
+                    pass
+            else:
+                await gov.review_change(
+                    int(change_id), False,
+                    str(reviewer or "admin"),
+                    str(note or "")
+                    or "58号阈值终审: 驳回")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ii58_gov_settle_failed %s: %s",
+                change_id, exc)
 
     # ============================================================
     # 观测面(识别记录/模型状态)

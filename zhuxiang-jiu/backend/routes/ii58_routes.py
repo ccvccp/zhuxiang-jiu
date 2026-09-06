@@ -1,6 +1,6 @@
-"""58号·AI智能优化意图识别路由(P0-P1)
+"""58号·AI智能优化意图识别路由(P0-P2)
 
-端点(P0 5 + P1 6 = 11):
+端点(P0 5 + P1 6 + P2 2 = 13):
     GET  /api/ii58/registry            注册表自描述(admin, 观测面)
     POST /api/ii58/evaluate            意图识别评估(admin, 管理)
     GET  /api/ii58/evaluations         识别记录列表(admin, 观测面)
@@ -12,14 +12,18 @@
     POST /api/ii58/mine/positive       正样本挖掘(admin, 管理, P1)
     POST /api/ii58/mine/negative       负样本增强(admin, 管理, P1)
     GET  /api/ii58/confusables         易混淆对视图(admin, 观测面, P1)
+    POST /api/ii58/threshold/calibrate 阈值校准(申请+终审双模, P2)
+    GET  /api/ii58/thresholds          阈值全景(admin, 观测面, P2)
 
 鉴权: 管理面 X-Role: admin(43-57号同款口径)。
 统一口径:
     - 观测面(registry/evaluations/model/status/
-      corpus/confusables)不受 II58_MODE 影响
-    - 决策面(evaluate/ingest/mine): off=拒绝
-      (409——shadow/assist 开放)
-    - review(语料终审): 不受开关影响
+      corpus/confusables/thresholds)不受
+      II58_MODE 影响
+    - 决策面(evaluate/ingest/mine/calibrate):
+      off=拒绝(409——shadow/assist 开放)
+    - review(语料终审)+calibrate 终审模
+      (changeId 请求): 不受开关影响
       (优化永不自动生效——人工铁律)
     - KeyError → 404 / ValueError → 409
 """
@@ -53,18 +57,25 @@ async def evaluate(
         x_role: str | None = Header(default=None,
                                     alias="X-Role")):
     """意图识别评估(L1 语料匹配→动态阈值→三态
-    响应+归因链; 决策面 off 409)"""
+    响应+识别即合规+槽位预填+归因链;
+    决策面 off 409; P2 扩 sessionId/currentPage)"""
     _require_admin(x_role)
     from services.ii58_service import Ii58Service
     try:
         member_id = body.get("memberId")
+        session_id = body.get("sessionId")
         return await Ii58Service().evaluate(
             str(body.get("text") or ""),
             member_id=int(member_id)
             if member_id is not None else None,
             member_role=str(
                 body.get("memberRole")
-                or "member"))
+                or "member"),
+            session_id=int(session_id)
+            if session_id is not None else None,
+            current_page=str(
+                body.get("currentPage") or "")
+            or None)
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
@@ -249,6 +260,55 @@ async def confusables(
     )
     return await (
         Ii58CorpusService().confusables_view())
+
+
+@router.post("/threshold/calibrate")
+async def threshold_calibrate(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """阈值校准双模端点(P2):
+        - 申请模 {upper, lower, reason}:
+          →46号审批总线留痕+镜像 pending
+          (不直接生效; 决策面 off 409)
+        - 终审模 {changeId, approve, reviewer,
+          note}: pending→active 唯一出口
+          (不受开关影响——人工铁律)"""
+    _require_admin(x_role)
+    from services.ii58_service import Ii58Service
+    svc = Ii58Service()
+    try:
+        if body.get("changeId") is not None:
+            return await svc.review_calibration(
+                int(body.get("changeId")),
+                approve=bool(body.get("approve")),
+                reviewer=str(
+                    body.get("reviewer") or "admin"),
+                note=str(body.get("note") or ""))
+        return await svc.calibrate(
+            upper=body.get("upper"),
+            lower=body.get("lower"),
+            reason=str(body.get("reason") or ""),
+            requested_by=str(
+                body.get("requestedBy") or "admin"))
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="无待终审的阈值校准(pending)")
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/thresholds")
+async def thresholds(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """阈值全景(基线+各 tier 运行态计算值
+    +pending 申请——观测面, P2)"""
+    _require_admin(x_role)
+    from services.ii58_service import Ii58Service
+    return await Ii58Service().thresholds_view()
 
 
 def register_ii58_routes(app) -> None:
