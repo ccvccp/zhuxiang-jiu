@@ -1,4 +1,4 @@
-﻿"""45号P2 即时修复引擎 Docker 实机验收
+﻿﻿"""45号P2 即时修复引擎 Docker 实机验收
 
 运行方式:
     python verify_trust_value_p2_live.py [基址]

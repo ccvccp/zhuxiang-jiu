@@ -205,6 +205,10 @@ services:
       - AV62_LEARN_MODE=${AV62_LEARN_MODE:-off}
       # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
       - AV62_LEARN_INTERVAL=${AV62_LEARN_INTERVAL:-86400}
+      # ---- 64号 信值兑换商品/服务AI智能管理(P0: 信值消费流通层, 默认 off——存量订单/信值链路零影响) ----
+      # shadow=兑换观察期(订单留痕不转移); assist=辅助结算期(支付开放);
+      #     off=决策面 409(观测面 registry/orders/quota/model 等不受影响)
+      - XX64_MODE=${XX64_MODE:-off}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

@@ -1,4 +1,4 @@
-"""62号AI智能无形资产估值 P4 Docker 实机验收
+﻿"""62号AI智能无形资产估值 P4 Docker 实机验收
 
 运行方式:
     python verify_av62_p4_live.py [基址]
@@ -393,7 +393,7 @@ def run_round(round_no: int) -> None:
            str((r.get("st_verified"),
                 r.get("st_pooled"))))
     record("44号 38 档案",
-           r.get("reg_n") == 38,
+           r.get("reg_n") == 39,
            str(r.get("reg_n")))
 
     print("\n[04 HTTP 端点+鉴权]")

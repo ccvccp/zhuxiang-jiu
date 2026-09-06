@@ -110,6 +110,8 @@ SCORER_REGISTRY = {
     "asset_valuation":         {"label": "智能资产估值评分", "module": "62资产估值", "batch": 21},
     # ---- 第二十二批(63号AI智能后台管理 P0: 后台编排评分) ----
     "admin_orchestration":       {"label": "智能后台编排评分", "module": "63智能后台", "batch": 22},
+    # ---- 第二十三批(64号信值兑换管理 P0: 兑换编排评分) ----
+    "value_exchange":           {"label": "智能信值兑换评分", "module": "64信值兑换", "batch": 23},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -196,6 +198,10 @@ DECISION_THRESHOLDS = {
     # /observe 观察(估值域收窄))
     "asset_valuation": [(80.0, "urgent"), (50.0, "optimize"),
                         (0.0, "observe")],
+    # 64号信值兑换(observe 观察(结算域收窄)/optimize 优化执行(规则与权重回流)
+    # /urgent 紧急优化+兑换经济复盘会)
+    "value_exchange": [(80.0, "urgent"), (50.0, "optimize"),
+                       (0.0, "observe")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -295,6 +301,7 @@ def default_weights(scorer_id: str) -> dict:
         from services.pay60_scorer import Pay60Scorer
         from services.dm61_scorer import Dm61Scorer
         from services.av62_scorer import Av62Scorer
+        from services.xx64_scorer import Xx64Scorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -319,6 +326,7 @@ def default_weights(scorer_id: str) -> dict:
             "payment_orchestration": Pay60Scorer,
             "decision_orchestration": Dm61Scorer,
             "asset_valuation": Av62Scorer,
+            "value_exchange": Xx64Scorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

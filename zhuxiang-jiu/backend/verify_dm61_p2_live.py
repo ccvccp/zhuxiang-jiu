@@ -1,4 +1,4 @@
-﻿"""61号AI智能系统升级决策 P2 Docker 实机验收
+﻿﻿"""61号AI智能系统升级决策 P2 Docker 实机验收
 
 运行方式:
     python verify_dm61_p2_live.py [基址]

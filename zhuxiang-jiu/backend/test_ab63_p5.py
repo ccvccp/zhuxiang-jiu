@@ -1,4 +1,4 @@
-﻿"""63号·AI智能后台管理模块 P5 专项测试
+"""63号·AI智能后台管理模块 P5 专项测试
 (看板+红队+收官)
 
 运行方式:
@@ -399,7 +399,7 @@ class TestConstitution:
                "admin_orchestration"
                in SCORER_REGISTRY
                and len(SCORER_REGISTRY)
-               == 38,
+               == 39,
                str(len(SCORER_REGISTRY)))
 
         # ② 63号 21 端点完整收官

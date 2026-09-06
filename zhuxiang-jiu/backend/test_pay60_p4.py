@@ -1,4 +1,4 @@
-﻿"""60号·AI智能支付管理模块 P4 专项测试
+"""60号·AI智能支付管理模块 P4 专项测试
 (支付数据反哺+现金流预测+T+1 调度)
 
 运行方式:
@@ -489,7 +489,7 @@ class TestConstitution:
                "payment_orchestration"
                in SCORER_REGISTRY
                and len(SCORER_REGISTRY)
-               == 38,
+               == 39,
                str(len(
                    SCORER_REGISTRY)))
 

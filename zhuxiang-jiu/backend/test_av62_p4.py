@@ -729,7 +729,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 38 档案在册",
-               len(SCORER_REGISTRY) == 38,
+               len(SCORER_REGISTRY) == 39,
                str(len(SCORER_REGISTRY)))
         record("第37档案 asset_valuation",
                SCORER_REGISTRY.get(
