@@ -63,7 +63,8 @@ class Xx65Repository:
         "trustId", "version",
         "quotaGen", "quotaCampaign",
         "matchedRules", "wordHits",
-        "turns")
+        "turns",
+        "pooledFeedbackId")
     _FLOAT_FIELDS = (
         "cashPrice", "trustQuota",
         "baselinePrice", "score",
@@ -72,7 +73,8 @@ class Xx65Repository:
         "discountRate",
         "estimatedGmv",
         "estimatedTrust",
-        "revocableUntilTs")
+        "revocableUntilTs",
+        "poolReward")
     _JSON_DICT_FIELDS = (
         "snapshot", "detail", "context",
         "config", "result", "factors",

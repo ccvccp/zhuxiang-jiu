@@ -1,7 +1,7 @@
 """65号·网店及商品AI智能管理路由
-(P0+P1+P2+P3)
+(P0+P1+P2+P3+P4)
 
-端点(P0 9+P1 7+P2 5+P3 4=25; 全期规划约 24):
+端点(P0 9+P1 7+P2 5+P3 4+P4 4=29):
     GET  /api/xx65/registry        刚性规则自描述(admin, 观测面)
     POST /api/xx65/intents/parse   意图解析(member/admin, 决策面 off 409)
     POST /api/xx65/shops/apply     开店申请+信值准入预检(member/admin, 决策面 off 409)
@@ -30,6 +30,11 @@
     GET  /api/xx65/shops/{id}/coach     经营教练贴士分发(member/admin, 观测面·按配额档)
     POST /api/xx65/shops/{id}/quota-adjust S7 配额升降档(admin, 决策面·经 46号审批轨)
     POST /api/xx65/shops/{id}/dispute-assist 争议证据链辅助(member/admin, 决策面)
+    --- P4·回流+看板+红队 ---
+    POST /api/xx65/feedback/collect    商品回流(admin, 不受开关影响·productId 1:1 幂等)
+    GET  /api/xx65/learn/status        回流状态观测(admin, 观测面)
+    GET  /api/xx65/dashboard           四区看板(admin, 观测面·店铺/内容/营销/治理)
+    POST /api/xx65/redteam             红队七向量(admin, 决策面 off 409·RT-01~07)
 
 鉴权: X-Role: admin 或 member(开店
 面向超级会员——双角色口径)。
@@ -38,16 +43,18 @@
       与详情/model status/drafts
       详情/products/order-window/
       campaigns recommend+列表+
-      report/health/coach)不受
+      report/health/coach/
+      learn status/dashboard)不受
       XX65_MODE 影响
     - 决策面(意图解析/开店/认领/
       激活/草稿生成/发布/活动创建/
-      撤销/配额调整/争议辅助):
-      off=拒绝(409)
+      撤销/配额调整/争议辅助/
+      红队): off=拒绝(409)
     - 关店不受开关影响(经营者
-      退出权利); 人工兜底与巡检
-      不受开关影响(S6 宪法+
-      合规防线永不关停)
+      退出权利); 人工兜底/巡检/
+      回流 collect 不受开关影响
+      (S6 宪法+合规防线与回流
+      通道永不关停)
     - KeyError → 404 /
       ValueError → 409
 """
@@ -728,6 +735,83 @@ async def dispute_assist(
     except KeyError as exc:
         raise HTTPException(status_code=404,
                             detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+# ============================================================
+# P4·回流+看板+红队
+# ============================================================
+
+@router.post("/feedback/collect")
+async def feedback_collect(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """商品回流(admin——productId
+    1:1 幂等; 不受 XX65_MODE
+    影响——回流通道永不关停)"""
+    _require_admin(x_role)
+    from services.xx65_learn_service import (
+        Xx65LearnService,
+    )
+    return await (
+        Xx65LearnService()
+        .collect_feedback())
+
+
+@router.get("/learn/status")
+async def learn_status(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """回流状态观测(第39档案
+    回流实况——观测面不受
+    开关影响)"""
+    _require_admin(x_role)
+    from services.xx65_learn_service import (
+        Xx65LearnService,
+    )
+    return await (
+        Xx65LearnService()
+        .learn_status())
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """四区看板(观测面——店铺/
+    内容/营销/治理四区实时
+    聚合+宪法三开关; 不受开关
+    影响)"""
+    _require_admin(x_role)
+    from services.xx65_dashboard_service import (
+        Xx65DashboardService,
+    )
+    return await (
+        Xx65DashboardService()
+        .dashboard())
+
+
+@router.post("/redteam")
+async def redteam(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队七向量(admin——RT-01~07
+    攻击仿真+防御断言+种子自清理;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    from services.xx65_redteam_service import (
+        Xx65RedteamService,
+    )
+    from services.xx65_service import (
+        require_active_mode,
+    )
+    try:
+        require_active_mode()
+        return await (
+            Xx65RedteamService()
+            .run_all())
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc)) from exc
