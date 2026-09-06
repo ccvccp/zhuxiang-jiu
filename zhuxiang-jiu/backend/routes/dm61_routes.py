@@ -1,12 +1,14 @@
 """61号·AI智能系统升级决策路由(P0-P5)
 
-端点(P0 5; 全期规划 17):
+端点(P0 5 + P1 3 = 8; 全期规划 17):
     GET  /api/dm61/registry          注册表自描述(admin, 观测面)
     POST /api/dm61/requests          决策请求接收(admin, 决策面 off 409)
     GET  /api/dm61/requests          请求列表(admin, 观测面)
     GET  /api/dm61/requests/{id}     请求详情(admin, 观测面)
     GET  /api/dm61/model/status      模型状态(admin, 观测面)
-    # P1: POST /assess + /recommend + /decisions/{id}/decide
+    POST /api/dm61/assess            风险评估(admin, P1 决策面 off 409)
+    POST /api/dm61/recommend         Top3 方案(admin, P1 决策面 off 409)
+    POST /api/dm61/decisions/{id}/decide  人类裁决(admin, P1 终审——不受开关影响)
     # P2: POST /simulate + /threshold/calibrate + GET /thresholds
     # P3: POST /decisions/{id}/dissent + POST /feedback + GET /cases
     # P4: POST /feedback/collect
@@ -17,9 +19,9 @@
     - 观测面(registry/requests 列表与
       详情/model status)不受 DM61_MODE
       影响
-    - 决策面(请求接收): off=拒绝(409)
-    - 后续: decide/dissent 终审与 collect
-      回流不受开关影响(人工铁律)
+    - 决策面(请求接收/评估/推荐):
+      off=拒绝(409)
+    - decide 终审不受开关影响(人工铁律)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -134,6 +136,113 @@ async def model_status(
     _require_admin(x_role)
     from services.dm61_service import Dm61Service
     return await Dm61Service().model_status()
+
+
+@router.post("/assess")
+async def assess(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """风险评估(P1——四因子 riskScore+容错
+    预算域+L1/L2/L3 判定+窗口升级;
+    决策面 off 409)
+
+    Body: {requestId, tier?, errorBudget?,
+    historyFailRate?}"""
+    _require_admin(x_role)
+    from services.dm61_assess_service import (
+        Dm61AssessService,
+    )
+    try:
+        request_id = body.get("requestId")
+        return await (
+            Dm61AssessService().assess(
+                request_id=int(request_id)
+                if request_id is not None
+                else 0,
+                tier=body.get("tier"),
+                error_budget=body.get(
+                    "errorBudget"),
+                history_fail_rate=body.get(
+                    "historyFailRate")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/recommend")
+async def recommend(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """Top3 方案生成(P1——确定性规则模板
+    按级别+推荐理由; 决策面 off 409)
+
+    Body: {requestId}"""
+    _require_admin(x_role)
+    from services.dm61_decision_service import (
+        Dm61DecisionService,
+    )
+    try:
+        request_id = body.get("requestId")
+        return await (
+            Dm61DecisionService().recommend(
+                request_id=int(request_id)
+                if request_id is not None
+                else 0))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/decisions/{decision_id}/decide")
+async def decide(
+        decision_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """人类裁决(P1 终审——adopted/modified/
+    rejected 三态+46号总线提交; L3 双人
+    复核铁律; 不受开关影响——人工铁律)
+
+    Body: {action, decidedBy?, note?,
+    optionIndex?, modifiedDetail?,
+    coReviewer?}"""
+    _require_admin(x_role)
+    from services.dm61_decision_service import (
+        Dm61DecisionService,
+    )
+    try:
+        return await (
+            Dm61DecisionService().decide(
+                decision_id=decision_id,
+                action=str(
+                    body.get("action") or ""),
+                decided_by=str(
+                    body.get("decidedBy")
+                    or "admin"),
+                note=str(
+                    body.get("note") or ""),
+                option_index=body.get(
+                    "optionIndex"),
+                modified_detail=str(
+                    body.get("modifiedDetail")
+                    or ""),
+                co_reviewer=str(
+                    body.get("coReviewer")
+                    or "")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_dm61_routes(app) -> None:

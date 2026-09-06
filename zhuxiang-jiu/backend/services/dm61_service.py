@@ -283,7 +283,7 @@ class Dm61Service:
     async def get_request(self,
                           request_id: int) -> dict:
         """请求详情(观测面——语义+影响面+
-        环境快照)
+        环境快照+最新评估/决策联动)
 
         Raises:
             KeyError: 请求不存在
@@ -293,11 +293,33 @@ class Dm61Service:
         if not record:
             raise KeyError(
                 f"决策请求 {request_id} 不存在")
+        # 最新评估+决策联动(P1 观测面)
+        assessment = None
+        decision = None
+        try:
+            assessments = await (
+                self.repo.list_assessments(
+                    request_id=int(request_id)))
+            assessment = assessments[0] \
+                if assessments else None
+        except Exception:  # noqa: BLE001
+            assessment = None
+        try:
+            decisions = await (
+                self.repo.list_decisions(
+                    request_id=int(request_id)))
+            decision = decisions[0] \
+                if decisions else None
+        except Exception:  # noqa: BLE001
+            decision = None
         return {
             "success": True,
             "request": record,
+            "latestAssessment": assessment,
+            "latestDecision": decision,
             "note": "决策请求详情——语义标签+"
-                    "影响面+环境感知快照",
+                    "影响面+环境感知快照"
+                    "+最新评估/决策联动",
         }
 
     async def list_requests(self,

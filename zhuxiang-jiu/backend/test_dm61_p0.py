@@ -654,14 +654,14 @@ class TestHttp:
                    resp.status_code == 403,
                    str(resp.status_code))
 
-        # 路由累计 5 端点(P0)
+        # 路由累计 8 端点(P0 5+P1 3)
         from routes.dm61_routes import (
             router as dm_router,
         )
         count = sum(
             1 for r in dm_router.routes)
-        record("61号路由 P0 5 端点",
-               count == 5, str(count))
+        record("61号路由累计 8 端点",
+               count == 8, str(count))
         os.environ["DM61_MODE"] = "off"
 
 
