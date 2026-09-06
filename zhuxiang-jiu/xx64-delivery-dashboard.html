@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>竹香酒官网 · 64号信值兑换管理 六期全链交付可视化</title>
+<style>
+    :root {
+        --green-dark: #355c44;
+        --green: #4a7c59;
+        --green-light: #6fa87f;
+        --accent: #c9a961;
+        --bg: #f7f8f6;
+        --card: #ffffff;
+        --border: #e3e7e1;
+        --text: #2c332b;
+        --text-light: #7a8279;
+        --danger: #c0564f;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+        background: var(--bg); color: var(--text); line-height: 1.6;
+    }
+
+    /* ========= 横幅 ========= */
+    .banner {
+        background: linear-gradient(135deg, #355c44 0%, #4a7c59 60%, #5d9270 100%);
+        color: #fff; padding: 44px 20px; text-align: center;
+    }
+    .banner h1 { font-size: 28px; letter-spacing: 2px; }
+    .banner .sub { margin-top: 10px; font-size: 14px; opacity: .92; }
+    .banner .tag {
+        display: inline-block; margin-top: 16px; padding: 5px 18px;
+        border: 1px solid rgba(255,255,255,.5); border-radius: 20px;
+        font-size: 12px; letter-spacing: 3px;
+    }
+
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px 60px; }
+
+    /* ========= 统计卡 ========= */
+    .stats {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 14px; margin: -28px auto 0; position: relative;
+    }
+    .stat {
+        background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+        padding: 20px 10px; text-align: center; box-shadow: 0 4px 14px rgba(53,92,68,.08);
+    }
+    .stat .v { font-size: 30px; font-weight: 800; color: var(--green-dark); }
+    .stat .l { font-size: 12px; color: var(--text-light); margin-top: 4px; }
+    .stat.gold .v { color: var(--accent); }
+    .stat.green .v { color: var(--green); }
+
+    /* ========= 通用节 ========= */
+    .section { margin-top: 42px; }
+    .section > h2 {
+        font-size: 18px; color: var(--green-dark); margin-bottom: 16px;
+        padding-left: 12px; border-left: 4px solid var(--accent);
+    }
+    .section > .desc { font-size: 13px; color: var(--text-light); margin: -8px 0 16px 16px; }
+    .card {
+        background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+        padding: 22px; box-shadow: 0 2px 8px rgba(53,92,68,.05);
+    }
+
+    /* ========= 六期时间线 ========= */
+    .timeline { display: flex; flex-wrap: wrap; gap: 10px; }
+    .phase {
+        flex: 1 1 150px; min-width: 150px; position: relative;
+        border: 1px solid var(--border); border-radius: 10px;
+        padding: 16px 12px 14px; background: linear-gradient(180deg, #fff, #f6faf7);
+        transition: transform .2s, box-shadow .2s;
+    }
+    .phase:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(53,92,68,.15); }
+    .phase .no {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 34px; height: 34px; border-radius: 50%;
+        background: var(--green-dark); color: #fff; font-weight: 800; font-size: 14px;
+    }
+    .phase:nth-child(6) .no { background: var(--accent); }
+    .phase h3 { font-size: 14px; margin: 10px 0 6px; color: var(--green-dark); }
+    .phase p { font-size: 11.5px; color: var(--text-light); line-height: 1.5; }
+    .phase .ep {
+        margin-top: 10px; font-size: 11px; color: var(--green);
+        border-top: 1px dashed var(--border); padding-top: 8px;
+    }
+    .phase .commit { font-family: Consolas, monospace; font-size: 10px; color: var(--text-light); }
+
+    /* ========= 双系列柱状图(纯CSS) ========= */
+    .chart-legend { display: flex; gap: 18px; font-size: 12px; color: var(--text-light); margin-bottom: 14px; }
+    .chart-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+    .bars { display: flex; align-items: flex-end; gap: 4%; height: 240px; padding: 0 8px; border-bottom: 2px solid var(--border); }
+    .bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+    .bar-pair { display: flex; align-items: flex-end; gap: 6px; height: 200px; width: 100%; justify-content: center; }
+    .bar { width: 26px; border-radius: 4px 4px 0 0; position: relative; transition: height 1s ease; min-height: 3px; }
+    .bar .tip {
+        position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
+        font-size: 11px; font-weight: 700; color: var(--green-dark); white-space: nowrap;
+    }
+    .bar.a { background: linear-gradient(180deg, #6fa87f, #4a7c59); }
+    .bar.b { background: linear-gradient(180deg, #dcc489, #c9a961); }
+    .bar.b .tip { color: #a2823a; }
+    .bar-label { margin-top: 8px; font-size: 12px; color: var(--text); font-weight: 600; }
+    .bar-sub { font-size: 10px; color: var(--text-light); }
+
+    /* ========= 端点增长折线(SVG) ========= */
+    .line-chart svg { width: 100%; height: 220px; }
+    .line-chart .grid { stroke: #eef1ec; stroke-width: 1; }
+    .line-chart .axis { stroke: var(--border); stroke-width: 1; }
+
+    /* ========= 架构分层 ========= */
+    .layers { display: flex; flex-direction: column; gap: 8px; }
+    .layer {
+        display: flex; align-items: center; gap: 14px;
+        border-radius: 8px; padding: 12px 18px; color: #fff;
+    }
+    .layer .ln { font-weight: 800; font-size: 13px; min-width: 64px; }
+    .layer .lt { font-size: 13px; font-weight: 600; min-width: 110px; }
+    .layer .ld { font-size: 11.5px; opacity: .92; flex: 1; }
+    .l5 { background: linear-gradient(90deg, #c9a961, #b8975a); }
+    .l4 { background: linear-gradient(90deg, #5d9270, #4a7c59); }
+    .l3 { background: linear-gradient(90deg, #4a7c59, #3d6c4c); }
+    .l2 { background: linear-gradient(90deg, #3d6c4c, #355c44); }
+    .l1 { background: linear-gradient(90deg, #355c44, #2c4d3a); }
+    .l0 { background: linear-gradient(90deg, #2c4d3a, #24402f); }
+
+    /* ========= 红队向量 ========= */
+    .rt-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .rt-table th {
+        background: #eef4ef; color: var(--green-dark); text-align: left;
+        padding: 10px 12px; border-bottom: 2px solid var(--border); font-size: 12px;
+    }
+    .rt-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    .rt-table tr:last-child td { border-bottom: none; }
+    .badge {
+        display: inline-block; padding: 2px 10px; border-radius: 10px;
+        font-size: 11px; font-weight: 700;
+    }
+    .badge.ok { background: #e8f4ec; color: #2e7d4f; }
+    .badge.rule { background: #eef4ef; color: var(--green-dark); }
+
+    /* ========= 铁律矩阵 ========= */
+    .matrix { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+    .mx {
+        border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+        background: #fdfefc; display: flex; gap: 12px; align-items: flex-start;
+    }
+    .mx .ic {
+        width: 34px; height: 34px; border-radius: 8px; flex: none;
+        display: flex; align-items: center; justify-content: center;
+        background: #e8f4ec; color: var(--green-dark); font-size: 16px; font-weight: 800;
+    }
+    .mx h4 { font-size: 13px; color: var(--green-dark); }
+    .mx p { font-size: 11.5px; color: var(--text-light); margin-top: 3px; }
+
+    /* ========= 结语 ========= */
+    .footer-quote {
+        margin-top: 46px; text-align: center; padding: 34px 20px;
+        background: linear-gradient(135deg, #355c44, #4a7c59);
+        border-radius: 12px; color: #fff;
+    }
+    .footer-quote p { font-size: 16px; letter-spacing: 1px; }
+    .footer-quote .small { font-size: 12px; opacity: .85; margin-top: 8px; }
+
+    @media (max-width: 720px) {
+        .bars { height: 300px; flex-wrap: wrap; }
+        .bar-pair { height: 160px; }
+    }
+</style>
+</head>
+<body>
+
+<div class="banner">
+    <h1>64号 · 信值兑换商品/服务 AI 智能管理模块</h1>
+    <div class="sub">六期全链交付可视化 —— 刚性规则 · 原子结算 · 智能体验 · 动态风控 · 价值锚定 · 看板红队</div>
+    <div class="tag">信值体系消费流通层 · P0-P5 全量收官</div>
+</div>
+
+<div class="wrap">
+
+    <!-- 统计卡 -->
+    <div class="stats">
+        <div class="stat"><div class="v">6</div><div class="l">分期交付 P0-P5</div></div>
+        <div class="stat"><div class="v">13</div><div class="l">服务模块</div></div>
+        <div class="stat"><div class="v">26</div><div class="l">HTTP 端点</div></div>
+        <div class="stat"><div class="v">9</div><div class="l">数据表 xx64_*</div></div>
+        <div class="stat green"><div class="v">293</div><div class="l">专项测试断言</div></div>
+        <div class="stat gold"><div class="v">342</div><div class="l">实机验收 ×2 轮幂等</div></div>
+        <div class="stat"><div class="v">7/7</div><div class="l">红队向量全防</div></div>
+    </div>
+
+    <!-- 六期时间线 -->
+    <div class="section">
+        <h2>六期演进时间线</h2>
+        <div class="desc">每期一层基石，向上生长 —— 合法性 → 可靠性 → 弹性 → 免疫 → 纠错 → 验证</div>
+        <div class="timeline">
+            <div class="phase">
+                <div class="no">P0</div>
+                <h3>刚性规则底座</h3>
+                <p>R1-R7 宪法封闭注册+启动自检 · 九态状态机 · 预校验四查 · 锁值先行 · 第38档案入册</p>
+                <div class="ep">6 端点 · 72 断言<br><span class="commit">d5e66f9</span></div>
+            </div>
+            <div class="phase">
+                <div class="no">P1</div>
+                <h3>支付结算引擎</h3>
+                <p>原子转移借贷对(买扣卖增) · 退款反向 · 积分管道 100:1+T+1 冻结+日限频</p>
+                <div class="ep">12 端点 · 59 断言<br><span class="commit">1b686bf</span></div>
+            </div>
+            <div class="phase">
+                <div class="no">P2</div>
+                <h3>智能体验层</h3>
+                <p>最优支付组合互斥对比卡 · 信值密度凑单 · 规则可视化"为什么这样算"可溯源</p>
+                <div class="ep">14 端点 · 36 断言<br><span class="commit">9d5c21e</span></div>
+            </div>
+            <div class="phase">
+                <div class="no">P3</div>
+                <h3>动态风控层</h3>
+                <p>五防检测(套利×2/积分冲击/价格操纵/流动性) · tier 摩擦分级 · 预警仅建议</p>
+                <div class="ep">16 端点 · 47 断言<br><span class="commit">63dff35</span></div>
+            </div>
+            <div class="phase">
+                <div class="no">P4</div>
+                <h3>价值锚定治理</h3>
+                <p>购买力指数+通胀预警 · 申诉人工终审翻转 · 回流 orderId 1:1 幂等 · T+1 调度</p>
+                <div class="ep">24 端点 · 42 断言<br><span class="commit">99e04d4</span></div>
+            </div>
+            <div class="phase">
+                <div class="no">P5</div>
+                <h3>看板红队收官</h3>
+                <p>四区看板(度量/订单/流通/防御) · 红队七向量 7/7 · 支付占位锁并发双花防护</p>
+                <div class="ep">26 端点 · 37 断言<br><span class="commit">62b3f5a</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 断言/实机柱状图 -->
+    <div class="section">
+        <h2>质量验证规模（专项断言 vs 实机验收）</h2>
+        <div class="card">
+            <div class="chart-legend">
+                <span><i style="background:#4a7c59"></i>专项测试断言（本地）</span>
+                <span><i style="background:#c9a961"></i>Docker 实机验收（真实 Redis 态 ×2 轮幂等）</span>
+            </div>
+            <div class="bars">
+                <div class="bar-group">
+                    <div class="bar-pair">
+                        <div class="bar a" style="height:106px"><span class="tip">72</span></div>
+                        <div class="bar b" style="height:115px"><span class="tip">78</span></div>
+                    </div>
+                    <div class="bar-label">P0</div><div class="bar-sub">底座</div>
+                </div>
+                <div class="bar-group">
+                    <div class="bar-pair">
+                        <div class="bar a" style="height:87px"><span class="tip">59</span></div>
+                        <div class="bar b" style="height:88px"><span class="tip">60</span></div>
+                    </div>
+                    <div class="bar-label">P1</div><div class="bar-sub">结算</div>
+                </div>
+                <div class="bar-group">
+                    <div class="bar-pair">
+                        <div class="bar a" style="height:53px"><span class="tip">36</span></div>
+                        <div class="bar b" style="height:82px"><span class="tip">56</span></div>
+                    </div>
+                    <div class="bar-label">P2</div><div class="bar-sub">体验</div>
+                </div>
+                <div class="bar-group">
+                    <div class="bar-pair">
+                        <div class="bar a" style="height:69px"><span class="tip">47</span></div>
+                        <div class="bar b" style="height:65px"><span class="tip">44</span></div>
+                    </div>
+                    <div class="bar-label">P3</div><div class="bar-sub">风控</div>
+                </div>
+                <div class="bar-group">
+                    <div class="bar-pair">
+                        <div class="bar a" style="height:62px"><span class="tip">42</span></div>
+                        <div class="bar b" style="height:85px"><span class="tip">58</span></div>
+                    </div>
+                    <div class="bar-label">P4</div><div class="bar-sub">锚定</div>
+                </div>
+                <div class="bar-group">
+                    <div class="bar-pair">
+                        <div class="bar a" style="height:55px"><span class="tip">37</span></div>
+                        <div class="bar b" style="height:68px"><span class="tip">46</span></div>
+                    </div>
+                    <div class="bar-label">P5</div><div class="bar-sub">收官</div>
+                </div>
+            </div>
+            <p style="text-align:center; margin-top:12px; font-size:12px; color:var(--text-light)">
+                合计：293 断言 + 342 实机项 = <b style="color:var(--green-dark)">635 项验证全部通过</b>（含全模块回归 P0-P5+points 联动）
+            </p>
+        </div>
+    </div>
+
+    <!-- 端点增长折线 -->
+    <div class="section">
+        <h2>API 端点增长曲线（累计 26 · 全期收官）</h2>
+        <div class="card line-chart">
+            <svg viewBox="0 0 640 220" preserveAspectRatio="xMidYMid meet">
+                <line class="axis" x1="50" y1="10" x2="50" y2="180"/>
+                <line class="axis" x1="50" y1="180" x2="620" y2="180"/>
+                <line class="grid" x1="50" y1="135" x2="620" y2="135"/>
+                <line class="grid" x1="50" y1="90"  x2="620" y2="90"/>
+                <line class="grid" x1="50" y1="45"  x2="620" y2="45"/>
+                <text x="42" y="184" font-size="10" fill="#7a8279" text-anchor="end">0</text>
+                <text x="42" y="139" font-size="10" fill="#7a8279" text-anchor="end">8</text>
+                <text x="42" y="94"  font-size="10" fill="#7a8279" text-anchor="end">16</text>
+                <text x="42" y="49"  font-size="10" fill="#7a8279" text-anchor="end">24</text>
+                <defs>
+                    <linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="rgba(74,124,89,.30)"/>
+                        <stop offset="100%" stop-color="rgba(74,124,89,.02)"/>
+                    </linearGradient>
+                </defs>
+                <path d="M80,180 L200,166.5 L320,157 L440,101.5 L560,21.5 L560,180 L80,180 Z" fill="url(#lg)"/>
+                <polyline points="80,180 200,166.5 320,157 440,101.5 560,21.5"
+                          fill="none" stroke="#4a7c59" stroke-width="2.5" stroke-linejoin="round"/>
+                <g fill="#4a7c59">
+                    <circle cx="80"  cy="180"   r="4"/><circle cx="200" cy="166.5" r="4"/>
+                    <circle cx="320" cy="157"   r="4"/><circle cx="440" cy="101.5" r="4"/>
+                    <circle cx="560" cy="21.5"  r="5" fill="#c9a961"/>
+                </g>
+                <text x="80"  y="170" font-size="11" fill="#355c44" text-anchor="middle" font-weight="700">6</text>
+                <text x="200" y="156" font-size="11" fill="#355c44" text-anchor="middle" font-weight="700">12</text>
+                <text x="320" y="147" font-size="11" fill="#355c44" text-anchor="middle" font-weight="700">14</text>
+                <text x="440" y="91"  font-size="11" fill="#355c44" text-anchor="middle" font-weight="700">24</text>
+                <text x="560" y="12"  font-size="12" fill="#a2823a" text-anchor="middle" font-weight="800">26</text>
+                <text x="80"  y="198" font-size="11" fill="#7a8279" text-anchor="middle">P0</text>
+                <text x="200" y="198" font-size="11" fill="#7a8279" text-anchor="middle">P1</text>
+                <text x="320" y="198" font-size="11" fill="#7a8279" text-anchor="middle">P2</text>
+                <text x="440" y="198" font-size="11" fill="#7a8279" text-anchor="middle">P4</text>
+                <text x="560" y="198" font-size="11" fill="#7a8279" text-anchor="middle">P5 收官</text>
+                <text x="560" y="212" font-size="9" fill="#a2823a" text-anchor="middle">规划 24 + 观测扩充 2</text>
+            </svg>
+        </div>
+    </div>
+
+    <!-- 架构分层 -->
+    <div class="section">
+        <h2>六层架构总览（自上而下调用 · 自下而上支撑）</h2>
+        <div class="card layers">
+            <div class="layer l5"><span class="ln">P5</span><span class="lt">看板 / 红队</span><span class="ld">四区看板（度量·订单·流通·防御）+ 红队七向量 7/7 + 支付占位锁双花防护 —— 观测与安全验证</span></div>
+            <div class="layer l4"><span class="ln">P4</span><span class="lt">锚定 / 治理</span><span class="ld">购买力指数·供需预警·校准建议(46号) + 申诉人工终审翻转 + 回流(44号)·T+1 调度 —— 经济仪表盘与纠错</span></div>
+            <div class="layer l3"><span class="ln">P3</span><span class="lt">动态风控</span><span class="ld">五防确定性检测 + tier 摩擦分级处置 + 预警仅建议铁律 —— 经济免疫系统</span></div>
+            <div class="layer l2"><span class="ln">P2</span><span class="lt">智能体验</span><span class="ld">最优支付组合互斥对比 + 信值密度凑单 + 规则可视化可溯源 —— 合规内弹性</span></div>
+            <div class="layer l1"><span class="ln">P1</span><span class="lt">结算引擎</span><span class="ld">原子转移借贷对 + 积分兑换管道 T+1 冻结 + 退款反向转移 —— 流通可靠性</span></div>
+            <div class="layer l0"><span class="ln">P0</span><span class="lt">刚性规则</span><span class="ld">R1-R7 宪法（30/70·互斥·转移·20%/40%·100:1·非负）+ 九态状态机 + 锁值先行 —— 合法性基座</span></div>
+        </div>
+        <p style="font-size:12px; color:var(--text-light); margin-top:12px">
+            五权分立：62铸币（从哪来）→ 45总账（怎么记账）→ <b>64消费（怎么花得健康）</b> → 47评级（可不可信）→ 46审批（谁批准调整）｜两账分离：总账在 45号，64号维护消费转移账本 xx64_ledger 只读对账
+        </p>
+    </div>
+
+    <!-- 红队七向量 -->
+    <div class="section">
+        <h2>红队七向量防御战绩（RT-01 ~ RT-07 · 真实 Redis 态验证）</h2>
+        <div class="card" style="padding:0; overflow:hidden">
+            <table class="rt-table">
+                <tr><th>向量</th><th>攻击仿真</th><th>防御机制</th><th>判定</th></tr>
+                <tr><td><b>RT-01</b> 规则绕过</td><td>伪造 trustValue 字段注入 / 超限价 / 负价</td><td>服务端强制计算 30/70 + R4 单次限额拒 + 非法价拒</td><td><span class="badge ok">✓ 防住</span></td></tr>
+                <tr><td><b>RT-02</b> 拆单绕限</td><td>5 笔小额压窗口用量后大额 200 信值</td><td>R5 累计限额拒（150+60=210 &gt; 500×40%=200）</td><td><span class="badge ok">✓ 防住</span></td></tr>
+                <tr><td><b>RT-03</b> 积分套利</td><td>同日高频兑换第 4 次冲击</td><td>R6 日限频 3 次拒（cancelled 不占频次）</td><td><span class="badge ok">✓ 防住</span></td></tr>
+                <tr><td><b>RT-04</b> 价格操纵</td><td>商品 7 日提价 50% 叠加信值支付</td><td>PRICE-MANIP 均价口径检测（drift 0.5 &gt; 0.2）</td><td><span class="badge ok">✓ 防住</span></td></tr>
+                <tr><td><b>RT-05</b> 双花</td><td>并发两笔支付同一订单</td><td>支付占位锁（Redis SET NX）—— 恰 1 成功</td><td><span class="badge ok">✓ 防住</span></td></tr>
+                <tr><td><b>RT-06</b> 申诉刷分</td><td>重复申诉 + 坐等过期自动翻转</td><td>重复拒 + 48h 过期 expired 不翻转（终审人工铁律）</td><td><span class="badge ok">✓ 防住</span></td></tr>
+                <tr><td><b>RT-07</b> 负值透支</td><td>锁值后压档案余额至 10 再支付</td><td>pay 时 R7 余额复核拒（10 &lt; 30）</td><td><span class="badge ok">✓ 防住</span></td></tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- 铁律矩阵 -->
+    <div class="section">
+        <h2>八条铁律落实矩阵（零改动宪法）</h2>
+        <div class="matrix">
+            <div class="mx"><div class="ic">§</div><div><h4>R1-R7 宪法永不可 AI 修改</h4><p>registry 封闭注册 + 启动自检 RuntimeError + 宪法域与可调域隔离</p></div></div>
+            <div class="mx"><div class="ic">AI</div><div><h4>LLM 不进判定链</h4><p>P2 排序/P3 检测/P4 重算/P5 看板红队全确定性算法（源码导入断言）</p></div></div>
+            <div class="mx"><div class="ic">!</div><div><h4>预警仅建议不自动处置</h4><p>建议书 autoExecute 永为 false，executor=人工/46号审批</p></div></div>
+            <div class="mx"><div class="ic">⚖</div><div><h4>申诉终审人工铁律</h4><p>AI 仅重算展示"为什么这样算"，approve 决定权在 admin</p></div></div>
+            <div class="mx"><div class="ic">↻</div><div><h4>回流幂等 orderId 1:1</h4><p>pooledFeedbackId 回写，双轮 collect 第二轮 labeled=0</p></div></div>
+            <div class="mx"><div class="ic">⏻</div><div><h4>三开关默认 off</h4><p>XX64_MODE/LLM_MODE/LEARN_MODE——观测·纠错·回流不受影响</p></div></div>
+            <div class="mx"><div class="ic">0</div><div><h4>五模块零改动宪法</h4><p>44/45/47/46/62号全程零改动（44号仅新增第38档案）</p></div></div>
+            <div class="mx"><div class="ic">⊥</div><div><h4>支付摩擦与信任成反比</h4><p>tier 摩擦修正 trusted ×0.6；但 high 阻断不可被 tier 豁免</p></div></div>
+        </div>
+    </div>
+
+    <!-- 结语 -->
+    <div class="footer-quote">
+        <p>机器识别风险，人类决定惩罚；规则刚性不可绕，每个数字可溯源。</p>
+        <p class="small">这个设计是让守信者更愿意持有信值，还是让投机者更容易套现？答案永远指向前者。</p>
+    </div>
+
+</div>
+</body>
+</html>
