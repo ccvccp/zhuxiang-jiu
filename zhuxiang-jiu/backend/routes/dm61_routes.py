@@ -1,10 +1,10 @@
 """61号·AI智能系统升级决策路由(P0-P5)
 
-端点(P0 5 + P1 3 + P2 3 = 11; 全期规划 17):
+端点(P0 5 + P1 3 + P2 3 + P3 3 = 14; 全期规划 17):
     GET  /api/dm61/registry          注册表自描述(admin, 观测面)
     POST /api/dm61/requests          决策请求接收(admin, 决策面 off 409)
     GET  /api/dm61/requests          请求列表(admin, 观测面)
-    GET  /api/dm61/requests/{id}     请求详情(admin, 观测面)
+    GET  /api/dm61/requests/{id}     请求详情(admin, 观测面——含归因链)
     GET  /api/dm61/model/status      模型状态(admin, 观测面)
     POST /api/dm61/assess            风险评估(admin, P1 决策面 off 409)
     POST /api/dm61/recommend         Top3 方案(admin, P1 决策面 off 409)
@@ -12,19 +12,22 @@
     POST /api/dm61/simulate          影子沙箱推演(admin, P2 决策面 off 409)
     POST /api/dm61/threshold/calibrate    阈值校准(admin, P2 管理+终审双模)
     GET  /api/dm61/thresholds        阈值视图(admin, P2 观测面)
-    # P3: POST /decisions/{id}/dissent + POST /feedback + GET /cases
+    POST /api/dm61/decisions/{id}/dissent  反对意见 raise/override/confirm(admin, P3——不受开关影响·AI 安全机制)
+    POST /api/dm61/feedback          RLHF 反馈(admin, P3——不受开关影响·人工铁律)
+    GET  /api/dm61/cases             决策图谱检索(admin, P3 观测面)
     # P4: POST /feedback/collect
     # P5: GET /dashboard + POST /redteam
 
 鉴权: 管理面 X-Role: admin(43-63号同款口径)。
 统一口径(计划 §六):
     - 观测面(registry/requests 列表与
-      详情/model status/thresholds)
-      不受 DM61_MODE 影响
+      详情/model status/thresholds/
+      cases)不受 DM61_MODE 影响
     - 决策面(请求接收/评估/推荐/推演):
       off=拒绝(409)
-    - decide 终审与 threshold apply
-      不受开关影响(人工铁律)
+    - decide/dissent/feedback 与
+      threshold apply 不受开关影响
+      (人工铁律+AI 安全机制)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -347,6 +350,148 @@ async def thresholds(
     return await (
         Dm61ThresholdService()
         .thresholds_view())
+
+
+@router.post(
+    "/decisions/{decision_id}/dissent")
+async def dissent(
+        decision_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """反对意见机制(P3——AI 可说"不";
+    不受开关影响·AI 安全机制)
+
+    Body: {mode: raise(默认)|
+    override|confirm, reason?,
+    raisedBy?, resolvedBy?}
+
+    raise: 发起(确定性触发评估+可选
+    人工理由)——决策挂 dissentFlag
+    override: 人类驳回 AI 意见
+    (reason 必填留痕)
+    confirm: 采纳 AI 意见
+    (recommended 态决策终止)"""
+    _require_admin(x_role)
+    from services.dm61_dissent_service import (
+        Dm61DissentService,
+    )
+    mode = str(body.get("mode") or "raise")
+    try:
+        if mode == "override":
+            return await (
+                Dm61DissentService()
+                .resolve(
+                    decision_id=decision_id,
+                    action="override",
+                    reason=str(
+                        body.get("reason")
+                        or ""),
+                    resolved_by=str(
+                        body.get("resolvedBy")
+                        or "admin")))
+        if mode == "confirm":
+            return await (
+                Dm61DissentService()
+                .resolve(
+                    decision_id=decision_id,
+                    action="confirm",
+                    reason=str(
+                        body.get("reason")
+                        or ""),
+                    resolved_by=str(
+                        body.get("resolvedBy")
+                        or "admin")))
+        if mode == "evaluate":
+            return await (
+                Dm61DissentService()
+                .evaluate(decision_id))
+        return await (
+            Dm61DissentService()
+            .raise_dissent(
+                decision_id=decision_id,
+                raised_by=str(
+                    body.get("raisedBy")
+                    or "ai"),
+                reason=str(
+                    body.get("reason")
+                    or "")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/feedback")
+async def submit_feedback(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """RLHF 反馈(P3——决策 1:1 三态+
+    执行结果; 不受开关影响·人工铁律)
+
+    Body: {decisionId, action:
+    adopted|modified|rejected,
+    outcome?: good|bad, comment?,
+    by?}"""
+    _require_admin(x_role)
+    from services.dm61_feedback_service import (
+        Dm61FeedbackService,
+    )
+    try:
+        decision_id = body.get("decisionId")
+        return await (
+            Dm61FeedbackService().submit(
+                decision_id=int(decision_id)
+                if decision_id is not None
+                else 0,
+                action=str(
+                    body.get("action") or ""),
+                outcome=body.get("outcome"),
+                comment=str(
+                    body.get("comment")
+                    or ""),
+                by=str(
+                    body.get("by")
+                    or "admin")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/cases")
+async def cases(
+        tag: str = None,
+        sensitivity: str = None,
+        level: str = None,
+        outcome: str = None,
+        risk: float = None,
+        limit: int = 10,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """决策图谱检索(P3 观测面——标签×
+    敏感级×风险带×结果; 不受开关影响)
+
+    Query: ?tag=&sensitivity=&level=
+    &outcome=&risk=(±15 同带)&limit="""
+    _require_admin(x_role)
+    from services.dm61_graph_service import (
+        Dm61GraphService,
+    )
+    return await (
+        Dm61GraphService().similar_cases(
+            tag=tag,
+            sensitivity=sensitivity,
+            level=level,
+            outcome=outcome,
+            risk=risk,
+            limit=max(1, min(
+                int(limit or 10), 50))))
 
 
 def register_dm61_routes(app) -> None:

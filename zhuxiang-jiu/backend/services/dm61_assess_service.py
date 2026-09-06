@@ -425,7 +425,8 @@ class Dm61AssessService:
                     for d in same]
         failed = sum(
             1 for o in outcomes
-            if o == "rejected")
+            if o in ("rejected",
+                     "dissent_confirmed"))
         fail_rate = round(
             failed / len(outcomes), 4)
         prior = {

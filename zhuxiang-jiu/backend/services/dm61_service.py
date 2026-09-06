@@ -312,14 +312,32 @@ class Dm61Service:
                 if decisions else None
         except Exception:  # noqa: BLE001
             decision = None
+        # 归因报告联动(P3——fail-soft)
+        attribution_report = None
+        if decision:
+            try:
+                from services.dm61_graph_service import (
+                    Dm61GraphService,
+                )
+                attribution_report = await (
+                    Dm61GraphService()
+                    .attribution_report(
+                        int(decision.get(
+                            "decisionId")
+                            or 0)))
+            except Exception:  # noqa: BLE001
+                attribution_report = None
         return {
             "success": True,
             "request": record,
             "latestAssessment": assessment,
             "latestDecision": decision,
+            "attributionReport":
+                attribution_report,
             "note": "决策请求详情——语义标签+"
                     "影响面+环境感知快照"
-                    "+最新评估/决策联动",
+                    "+最新评估/决策联动+归因"
+                    "推理链(P3)",
         }
 
     async def list_requests(self,

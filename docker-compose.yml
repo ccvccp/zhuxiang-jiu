@@ -189,6 +189,10 @@ services:
       - PAY60_LEARN_MODE=${PAY60_LEARN_MODE:-off}
       # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
       - PAY60_LEARN_INTERVAL=${PAY60_LEARN_INTERVAL:-86400}
+      # ---- 61号 AI智能系统升级决策(P0: 决策参谋部, 默认 off——三权分立 56生产→61参谋→46审批) ----
+      # shadow=影子推演期(评估留痕不联动); assist=辅助参谋期(方案生成开放);
+      #     off=决策面 409(观测面 registry/requests/cases 等不受影响; dissent/decide 不受开关影响)
+      - DM61_MODE=${DM61_MODE:-off}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

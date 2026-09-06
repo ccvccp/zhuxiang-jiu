@@ -348,6 +348,44 @@ class Dm61DecisionService:
                     "(coReviewer 必填且不同于 "
                     "decidedBy——人工铁律)")
 
+        # ---- P3 反对意见门禁(AI 可说"不") ----
+        # ① 已有未处置反对意见→阻断裁决
+        # ② 触发规则命中且未处置过→
+        #    自动弹窗(发起 dissent+阻断)
+        # ③ 已 override(人类驳回留痕)→放行
+        from services.dm61_dissent_service import (
+            Dm61DissentService,
+        )
+        dissent_svc = Dm61DissentService()
+        dissent = decision.get("dissent") or {}
+        if dissent.get("status") == "open":
+            raise ValueError(
+                "存在未处置反对意见(AI 说不)"
+                "——先经 dissent 端点处置"
+                "(override 驳回必留痕/"
+                "confirm 采纳)再裁决")
+        if dissent.get("status") \
+                != "overridden":
+            _dec, request, sim = \
+                await dissent_svc._load(
+                    int(decision_id))
+            triggers = \
+                dissent_svc \
+                ._evaluate_triggers(
+                    decision, request, sim)
+            if triggers:
+                await dissent_svc \
+                    .raise_dissent(
+                        int(decision_id),
+                        raised_by="ai")
+                raise ValueError(
+                    f"AI 反对意见已发起"
+                    f"(触发: {'/'.join(
+                        triggers)})——"
+                    f"需二次确认: override 驳回"
+                    f"留痕后重试 / confirm 采纳"
+                    f" AI 意见终止")
+
         # ---- 状态机推进 ----
         audit = list(
             decision.get("auditTrail")
