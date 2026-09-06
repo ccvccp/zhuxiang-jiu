@@ -146,6 +146,17 @@ services:
       - KB57_LEARN_MODE=${KB57_LEARN_MODE:-off}
       # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
       - KB57_LEARN_INTERVAL=${KB57_LEARN_INTERVAL:-86400}
+      # ---- 58号 AI智能优化意图识别(P0-P4: 决策面三级灰度, 默认 off——存量意图链路零影响) ----
+      # shadow=观察学习期(仅评估留痕); assist=辅助优化期(语料+标注+反馈开放);
+      #     off=决策面 409(观测面 registry/evaluations/corpus/thresholds 等不受影响)
+      - II58_MODE=${II58_MODE:-off}
+      # L2 LLM 路由(assist 态低置信路由+合成建议, 默认 off)
+      - II58_LLM_MODE=${II58_LLM_MODE:-off}
+      # on=T+1 决策回流补标调度(六类真值信号+44号池双写+高置信错误预警);
+      #     off=仅手动触发(POST /api/ii58/feedback/collect)
+      - II58_LEARN_MODE=${II58_LEARN_MODE:-off}
+      # 调度周期秒(默认 24h; 下限 300 防忙循环; 首轮在 interval 之后)
+      - II58_LEARN_INTERVAL=${II58_LEARN_INTERVAL:-86400}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

@@ -226,6 +226,11 @@ class Ii58Service:
                 "upper": upper, "lower": lower,
             },
         }
+        # 对抗否决留痕(P4 回流信号——
+        # 输入命中对抗样本降权事件)
+        if match.get("adversarialPenalty"):
+            attribution["adversarialPenalty"] = \
+                True
         if compliance is not None:
             attribution["compliance"] = compliance
         if slot_sources:
@@ -728,6 +733,27 @@ class Ii58Service:
                 理由非法/已有待终审校准
         """
         require_active_mode()
+        return await \
+            self.submit_calibration_proposal(
+                upper, lower, reason, requested_by)
+
+    async def submit_calibration_proposal(
+            self, upper: float, lower: float,
+            reason: str,
+            requested_by: str = "admin"
+            ) -> dict:
+        """校准建议提交共用轨(calibrate 端点
+        +P4 高置信错误预警轨共用)
+
+        无 mode 门槛——预警轨(回流管理面)不受
+        开关影响; 生效唯一出口=人工终审
+        (review_calibration——优化永不自动
+        生效铁律保持)。
+
+        Raises:
+            ValueError: 阈值域非法/理由非法/
+                已有待终审校准
+        """
         try:
             upper = round(float(upper), 4)
             lower = round(float(lower), 4)

@@ -1,6 +1,6 @@
-"""58号·AI智能优化意图识别路由(P0-P3)
+"""58号·AI智能优化意图识别路由(P0-P4)
 
-端点(P0 5 + P1 6 + P2 2 + P3 3 = 16):
+端点(P0 5 + P1 6 + P2 2 + P3 3 + P4 1 = 17):
     GET  /api/ii58/registry            注册表自描述(admin, 观测面)
     POST /api/ii58/evaluate            意图识别评估(admin, 管理)
     GET  /api/ii58/evaluations         识别记录列表(admin, 观测面)
@@ -17,6 +17,7 @@
     POST /api/ii58/feedback           显式反馈(会员, 会员面, P3)
     GET  /api/ii58/labels              标注队列列表(admin, 观测面, P3)
     POST /api/ii58/labels/{id}/decide  标注人工终审(admin, 终审, P3)
+    POST /api/ii58/feedback/collect    决策回流补标(admin, 回流, P4)
 
 鉴权: 管理面 X-Role: admin(43-57号同款口径);
 会员面 X-Member-Id(48号惯例)。
@@ -29,8 +30,9 @@
     - 会员面(feedback): 需 assist
       (off/shadow 409)
     - review(语料终审)+calibrate 终审模
-      (changeId 请求)+decide(标注终审):
-      不受开关影响(优化永不自动生效——人工铁律)
+      (changeId 请求)+decide(标注终审)+
+      collect(决策回流): 不受开关影响
+      (优化永不自动生效——人工铁律/回流管理面)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -422,6 +424,24 @@ async def label_decide(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
+
+
+@router.post("/feedback/collect")
+async def feedback_collect(
+        body: dict = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """决策回流补标(六类真值信号→44号池双写
+    +高置信错误预警——幂等 evaluationId 1:1;
+    回流管理面不受开关影响, P4)"""
+    _require_admin(x_role)
+    from services.ii58_learn_service import (
+        Ii58LearnService,
+    )
+    limit = int((body or {}).get("limit") or 500)
+    return await (
+        Ii58LearnService().collect_feedback(
+            limit=limit))
 
 
 def register_ii58_routes(app) -> None:

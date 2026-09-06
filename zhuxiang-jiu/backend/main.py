@@ -415,6 +415,12 @@ async def _on_startup():
     from services.kb57_scheduler import (
         start_scheduler as start_kb57_learn)
     start_kb57_learn()
+    # 58号·AI智能优化意图识别: 决策回流 T+1 补标调度
+    # (六类真值信号+44号池双写+高置信错误预警;
+    #  II58_LEARN_MODE=on 开启, 默认 off)
+    from services.ii58_scheduler import (
+        start_scheduler as start_ii58_learn)
+    start_ii58_learn()
 
 
 @app.on_event("shutdown")
@@ -480,6 +486,10 @@ async def _on_shutdown():
     from services.kb57_scheduler import (
         stop_scheduler as stop_kb57_learn)
     stop_kb57_learn()
+    # 58号·AI智能优化意图识别学习调度器
+    from services.ii58_scheduler import (
+        stop_scheduler as stop_ii58_learn)
+    stop_ii58_learn()
     await close_redis_client()
     logger.info("清理完成")
 
