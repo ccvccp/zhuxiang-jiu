@@ -1,6 +1,6 @@
-"""60号·AI智能支付管理路由(P0-P2)
+"""60号·AI智能支付管理路由(P0-P3)
 
-端点(P0-P2 13):
+端点(P0-P3 19):
     GET  /api/pay60/registry          支付注册表自描述(admin, 观测面)
     GET  /api/pay60/orders            支付订单列表(admin, 观测面)
     GET  /api/pay60/orders/{payId}    订单单条+归因链(admin, P0 观测面)
@@ -15,15 +15,25 @@
     POST /api/pay60/threshold/calibrate    阈值校准(admin, P2——管理+终审双模)
     GET  /api/pay60/thresholds             阈值视图(admin, P2 观测面)
     GET  /api/pay60/verifications           验证事件视图(admin, P2 观测面)
+    POST /api/pay60/recon/run        对账批次(admin, P3 回流——不受开关影响)
+    GET  /api/pay60/recon            对账批次视图(admin, P3 观测面)
+    POST /api/pay60/recon/{id}/settle 差异处置(admin, P3 终审——资金人工铁律)
+    POST /api/pay60/splits           分账指令(admin, P3 决策面 off 409)
+    GET  /api/pay60/splits           分账视图(admin, P3 观测面)
+    POST /api/pay60/splits/{id}/settle 分账结算(admin, P3 终审——资金人工铁律)
 
 鉴权: 管理面 X-Role: admin(43-63号同款口径)。
 统一口径:
     - 观测面(registry/orders/model
       status/checkouts/thresholds/
-      verifications)不受 PAY60_MODE 影响
+      verifications/recon/splits)
+      不受 PAY60_MODE 影响
     - 决策面(订单/收银台/恢复/验证/
-      执行): off=拒绝(409)
+      执行/分账创建): off=拒绝(409)
     - 会员面(confirm): 需 assist 态
+    - 终审/回流(recon settle/splits
+      settle/recon run): 不受开关
+      影响(资金操作人工铁律)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -385,6 +395,168 @@ async def verifications(
         Pay60RiskService()
         .verification_view(
             pay_id=pay_id))
+
+
+@router.post("/recon/run")
+async def recon_run(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """对账批次(P3 回流——订单↔流水↔
+    发票三方匹配+差异五类+冲正建议;
+    不受开关影响——资金审计铁律)
+
+    Body: {invoices?: [{payId, amount}]}"""
+    _require_admin(x_role)
+    from services.pay60_recon_service import (
+        Pay60ReconService,
+    )
+    try:
+        invoices = body.get("invoices")
+        return await (
+            Pay60ReconService().run_recon(
+                invoices=invoices
+                if isinstance(
+                    invoices, list)
+                else None))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/recon")
+async def recon_view(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """对账批次视图(P3 观测面——差异
+    分类可审计)"""
+    _require_admin(x_role)
+    from services.pay60_recon_service import (
+        Pay60ReconService,
+    )
+    return await (
+        Pay60ReconService()
+        .recon_view())
+
+
+@router.post("/recon/{recon_id}/settle")
+async def recon_settle(
+        recon_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """差异处置(P3 终审——资金操作
+    人工铁律, 不受开关影响; 冲正
+    T+1 延迟域)
+
+    Body: {payId, approve, settledBy?,
+    note?}"""
+    _require_admin(x_role)
+    from services.pay60_recon_service import (
+        Pay60ReconService,
+    )
+    try:
+        return await (
+            Pay60ReconService()
+            .settle_recon(
+                recon_id=recon_id,
+                pay_id=int(
+                    body.get("payId")
+                    or 0),
+                approve=bool(
+                    body.get("approve")),
+                settled_by=str(
+                    body.get("settledBy")
+                    or "admin"),
+                note=str(
+                    body.get("note")
+                    or "")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/splits")
+async def create_split(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """分账指令创建(P3——success 态
+    按合约拆分; 决策面 off 409)
+
+    Body: {payId, contractId?}"""
+    _require_admin(x_role)
+    from services.pay60_recon_service import (
+        Pay60ReconService,
+    )
+    try:
+        return await (
+            Pay60ReconService()
+            .create_split(
+                pay_id=int(
+                    body.get("payId")
+                    or 0),
+                contract_id=body.get(
+                    "contractId")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/splits")
+async def splits_view(
+        pay_id: int = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """分账指令视图(P3 观测面——
+    合约版本化可审计)"""
+    _require_admin(x_role)
+    from services.pay60_recon_service import (
+        Pay60ReconService,
+    )
+    return await (
+        Pay60ReconService()
+        .split_view(pay_id=pay_id))
+
+
+@router.post("/splits/{split_id}/settle")
+async def settle_split(
+        split_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """分账结算(P3 终审——资金操作
+    人工铁律, 不受开关影响; T+1 部分
+    延迟域留痕)
+
+    Body: {settledBy?, note?}"""
+    _require_admin(x_role)
+    from services.pay60_recon_service import (
+        Pay60ReconService,
+    )
+    try:
+        return await (
+            Pay60ReconService()
+            .settle_split(
+                split_id=split_id,
+                settled_by=str(
+                    body.get("settledBy")
+                    or "admin"),
+                note=str(
+                    body.get("note")
+                    or "")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 @router.get("/orders")

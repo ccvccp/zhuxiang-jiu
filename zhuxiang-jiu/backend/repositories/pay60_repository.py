@@ -69,12 +69,13 @@ class Pay60Repository:
         "renderOptions", "content",
         "evidence", "extra", "pricing",
         "channelReceipt", "recovery",
-        "attributionChain", "differences",
-        "settlement")
+        "attributionChain",
+        "settlement", "reversal")
     _JSON_LIST_FIELDS = (
         "candidates", "steps", "splits",
         "auditTrail", "history",
-        "findings", "methods")
+        "findings", "methods",
+        "differences", "invoices")
     _BOOL_FIELDS = (
         "granted", "conserved",
         "humanVerified", "pooled",
