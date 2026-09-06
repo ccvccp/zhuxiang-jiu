@@ -492,6 +492,192 @@ def guard_rule_view() -> dict:
     }
 
 
+# ============================================================
+# 智能审核网关分流规则(P3——计划 §3.4)
+# ============================================================
+
+# 分流三级
+REVIEW_TIERS = ("L1", "L2", "L3")
+
+# Publish_Score 三因子权重(计划 §二——
+# 确定性公式: AI 置信度×0.6+tier 基线×0.3
+# +内容风险系数×0.1)
+PUBLISH_WEIGHTS = {
+    "aiConfidence": 0.6,
+    "tierBaseline": 0.3,
+    "riskFactor": 0.1,
+}
+
+# AI 置信度映射(护航干预档→0-1)
+GUARD_CONFIDENCE = {
+    "clean": 1.0,
+    "tip": 0.9,
+    "warn": 0.7,
+    "block": 0.0,
+}
+
+# tier 基线映射(47号口径→0-1)
+TIER_BASELINE = {
+    "trusted": 1.0,
+    "standard": 0.8,
+    "watched": 0.5,
+    "restricted": 0.2,
+}
+
+# 内容风险系数(敏感度倒转→0-1)
+RISK_FACTOR = {
+    "low": 1.0,
+    "medium": 0.7,
+    "high": 0.3,
+}
+
+# 分流阈值(默认——可经 46号审批校准)
+L1_THRESHOLD = 90.0
+L2_THRESHOLD = 70.0
+
+# L1 自动过审附加条件: tier 必须 trusted
+L1_MIN_TIER = "trusted"
+
+# L3 高风险域标签(命中即强制 L3——
+# 无论分数; 铁律"L3 永不自动")
+L3_HIGH_RISK_TAGS = (
+    "funds",       # 资金域
+    "identity",    # 身份域
+    "children",    # 儿童域
+    "medical",     # 医疗域
+)
+
+# L1 抽检率(5%——自动过审兜底)
+L1_SPOT_CHECK_RATE = 0.05
+
+# 灰度建议触发标签(高风险变更——
+# 价格/服务范围; 建议域不执行)
+GRAYSCALE_TAGS = (
+    "priceChange", "scopeChange")
+
+# 灰度方案模板(建议域——实际放量由
+# 各模块开关矩阵执行)
+GRAYSCALE_PLAN = {
+    "stages": [5, 20, 50, 100],
+    "metric": "投诉率<0.5%+退款率<1%",
+    "rollback": "任一阶段不达标→全量回滚",
+    "note": "灰度发布建议(建议域——"
+            "不自动执行, 实际放量由模块"
+            "开关矩阵执行)",
+}
+
+
+def compute_publish_score(
+        guard_level: str,
+        tier: str,
+        sensitivity: str) -> dict:
+    """Publish_Score 确定性计算(计划 §3.4
+    公式——0-100 分+因子快照可解释)"""
+    conf = GUARD_CONFIDENCE.get(
+        str(guard_level), 1.0)
+    base = TIER_BASELINE.get(
+        str(tier), 0.8)
+    risk = RISK_FACTOR.get(
+        str(sensitivity), 1.0)
+    w = PUBLISH_WEIGHTS
+    score = round(
+        (conf * w["aiConfidence"]
+         + base * w["tierBaseline"]
+         + risk * w["riskFactor"]) * 100, 1)
+    return {
+        "score": score,
+        "factors": {
+            "aiConfidence": conf,
+            "tierBaseline": base,
+            "riskFactor": risk,
+            "weights": dict(w),
+        },
+    }
+
+
+def route_review_tier(
+        publish_score: float,
+        tier: str,
+        tags: list) -> dict:
+    """三级分流裁决(确定性)
+
+    L1 自动过审: score≥L1 阈值+无高危
+    标签+tier=trusted(秒级发布+5% 抽检)
+    L2 AI 辅助: score≥L2 阈值
+    L3 深度复核: score<L2 或命中高危域
+    (双人独立审核+合规官终审——
+    永不自动铁律)
+    """
+    tags = [str(t) for t in (tags or [])]
+    high_risk = [t for t in tags
+                 if t in L3_HIGH_RISK_TAGS]
+    if high_risk:
+        return {
+            "tier": "L3",
+            "autoPublished": False,
+            "forcedBy": "highRiskTag",
+            "highRiskTags": high_risk,
+            "reason": f"命中高风险域"
+                      f"({'/'.join(high_risk)})"
+                      f"——强制深度复核"
+                      f"(双人+合规官终审铁律)",
+        }
+    if publish_score >= L1_THRESHOLD \
+            and tier == L1_MIN_TIER:
+        return {
+            "tier": "L1",
+            "autoPublished": True,
+            "forcedBy": "",
+            "highRiskTags": [],
+            "reason": f"Publish_Score "
+                      f"{publish_score}≥{L1_THRESHOLD}"
+                      f"+tier={tier}——自动过审"
+                      f"(5% 抽样复检兜底)",
+        }
+    if publish_score >= L2_THRESHOLD:
+        return {
+            "tier": "L2",
+            "autoPublished": False,
+            "forcedBy": "",
+            "highRiskTags": [],
+            "reason": f"Publish_Score "
+                      f"{publish_score} 在 "
+                      f"{L2_THRESHOLD}-"
+                      f"{L1_THRESHOLD}——AI 辅助"
+                      f"预审+人工确认",
+        }
+    return {
+        "tier": "L3",
+        "autoPublished": False,
+        "forcedBy": "lowScore",
+        "highRiskTags": [],
+        "reason": f"Publish_Score "
+                  f"{publish_score}<{L2_THRESHOLD}"
+                  f"——深度复核(双人+"
+                  f"合规官终审铁律)",
+    }
+
+
+def review_rule_view() -> dict:
+    """审核网关规则视图(观测面)"""
+    return {
+        "tiers": list(REVIEW_TIERS),
+        "weights": dict(PUBLISH_WEIGHTS),
+        "l1Threshold": L1_THRESHOLD,
+        "l2Threshold": L2_THRESHOLD,
+        "l1MinTier": L1_MIN_TIER,
+        "l3HighRiskTags": list(
+            L3_HIGH_RISK_TAGS),
+        "l1SpotCheckRate":
+            L1_SPOT_CHECK_RATE,
+        "grayscaleTags": list(
+            GRAYSCALE_TAGS),
+        "note": "Publish_Score 三因子确定性"
+                "公式+三级分流(L3 永不自动; "
+                "L1 5% 抽检)",
+    }
+
+
 def registry_view() -> dict:
     """注册表自描述(观测面)"""
     return {
@@ -504,6 +690,7 @@ def registry_view() -> dict:
         "templates": len(
             WORKBENCH_TEMPLATES),
         "guard": guard_rule_view(),
+        "review": review_rule_view(),
         "meta": {
             "roleDomains":
                 list(ROLE_DOMAINS),
@@ -584,6 +771,37 @@ def _validate_registry() -> None:
                         "nav", "other"):
             errors.append(
                 f"意图导航侧 {side} 域外")
+    # 审核网关规则域(P3)
+    if not (0 < L2_THRESHOLD
+            < L1_THRESHOLD <= 100):
+        errors.append(
+            f"分流阈值非法 "
+            f"L1={L1_THRESHOLD}/"
+            f"L2={L2_THRESHOLD}")
+    if abs(sum(PUBLISH_WEIGHTS.values())
+           - 1.0) > 1e-9:
+        errors.append(
+            "Publish_Score 权重和≠1.0")
+    if set(GUARD_CONFIDENCE) != set(
+            GUARD_LEVELS) | {"clean"}:
+        errors.append(
+            "AI 置信度映射与干预档"
+            "不一致")
+    if set(TIER_BASELINE) != set(TIER_VALUES):
+        errors.append(
+            "tier 基线映射与 tier 域"
+            "不一致")
+    if set(RISK_FACTOR) != set(
+            SENSITIVITY_LEVELS):
+        errors.append(
+            "风险系数映射与敏感度域"
+            "不一致")
+    if not L3_HIGH_RISK_TAGS:
+        errors.append(
+            "L3 高风险域标签为空")
+    if not 0 < L1_SPOT_CHECK_RATE < 1:
+        errors.append(
+            "L1 抽检率域外(0-1 开区间)")
     if errors:
         raise RuntimeError(
             "ab63 registry 自检失败: "

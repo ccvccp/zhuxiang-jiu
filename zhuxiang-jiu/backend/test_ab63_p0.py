@@ -716,14 +716,14 @@ class TestHttp:
                    resp.status_code == 403,
                    str(resp.status_code))
 
-        # 路由累计 7 端点(P2 +guard/check)
+        # 路由累计 15 端点(P3 +审核网关 8)
         from routes.ab63_routes import (
             router as ab_router,
         )
         count = sum(
             1 for r in ab_router.routes)
-        record("63号路由累计 7 端点",
-               count == 7, str(count))
+        record("63号路由累计 15 端点",
+               count == 15, str(count))
         os.environ["AB63_MODE"] = "off"
 
 

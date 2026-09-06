@@ -53,7 +53,8 @@ class Ab63Repository:
         "subId", "reviewId", "eventId",
         "memberId", "score", "threshold",
         "publishScore", "intentId",
-        "pooledFeedbackId", "trainingId")
+        "pooledFeedbackId", "trainingId",
+        "changeId")
     _FLOAT_FIELDS = (
         "complianceRate", "riskScore",
         "avgSatisfaction", "trustScore")
@@ -62,15 +63,17 @@ class Ab63Repository:
         "factors", "reason", "results",
         "signals", "thresholds", "config",
         "renderOptions", "content",
-        "evidence", "extra")
+        "evidence", "extra", "grayscale",
+        "feedback", "routing")
     _JSON_LIST_FIELDS = (
         "candidates", "steps",
         "reviewers", "auditTrail",
-        "history", "findings")
+        "history", "findings", "tags")
     _BOOL_FIELDS = (
         "granted", "appealed",
         "humanVerified", "pooled",
-        "approved", "escalated")
+        "approved", "escalated",
+        "spotCheck")
 
     _TABLE_BY_KIND = {
         "grant": TABLE_GRANTS,
