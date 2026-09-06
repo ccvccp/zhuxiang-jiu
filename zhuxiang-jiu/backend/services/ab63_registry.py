@@ -186,8 +186,19 @@ def evaluate_permission(role: str, action: str,
                             or 0.0)))
     compliance = round(
         cr * COMPLIANCE_MAX_BONUS, 1)
-    penalty = SCENE_PENALTY.get(
-        (str(period), str(sensitivity)), 0)
+    # 场景惩罚(域外键 fail-safe 取
+    # 最坏惩罚——防伪造上下文降
+    # 风险分: RT-01 红队向量防御)
+    period = str(period)
+    sensitivity = str(sensitivity)
+    if (period not in SCENE_PERIODS
+            or sensitivity
+            not in SENSITIVITY_LEVELS):
+        penalty = max(
+            SCENE_PENALTY.values())
+    else:
+        penalty = SCENE_PENALTY.get(
+            (period, sensitivity), 0)
     score = round(
         base + bonus + compliance
         - penalty, 1)

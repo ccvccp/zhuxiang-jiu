@@ -1,6 +1,6 @@
-"""63号·AI智能后台管理路由(P0-P4)
+"""63号·AI智能后台管理路由(P0-P5)
 
-端点(P0-P4 18):
+端点(P0-P5 21):
     GET  /api/ab63/registry            注册表自描述(admin, 观测面)
     POST /api/ab63/grants              权限裁决(admin, 决策面 off 409)
     GET  /api/ab63/grants              裁决记录列表(admin, 观测面)
@@ -20,18 +20,21 @@
     POST /api/ab63/training/{trainingId}/complete  培训完成(admin, P4——不受开关影响)
     GET  /api/ab63/training            培训转化视图(admin, P4 观测面)
     POST /api/ab63/feedback/collect    决策回流(admin, P4——不受开关影响)
+    GET  /api/ab63/dashboard           四区看板(admin, P5 观测面——度量+权限+护航+防御)
+    POST /api/ab63/redteam             红队七向量(admin, P5——需 shadow/assist)
 
 鉴权: 管理面 X-Role: admin(43-59号同款口径)。
 统一口径:
     - 观测面(registry/grants/model/status/
       submissions 详情/reviews 队列/
-      thresholds/training 视图)不受
-      AB63_MODE 影响
+      thresholds/training 视图/
+      dashboard 看板)不受 AB63_MODE 影响
     - 决策面(grants/workbench/guard/
       submissions 提交/training 推送):
       off=拒绝(409)
     - review/appeal/resolve 终审与
       collect 回流不受开关影响(人工铁律)
+    - redteam 需决策面开放(off 409)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -549,6 +552,42 @@ async def feedback_collect(
                 limit=int(limit)
                 if limit is not None
                 else 500))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """四区看板(P5 观测面——度量+权限
+    +护航+防御; 纯确定性聚合不受开关
+    影响)"""
+    _require_admin(x_role)
+    from services.ab63_dashboard_service import (
+        Ab63DashboardService,
+    )
+    return await (
+        Ab63DashboardService().dashboard())
+
+
+@router.post("/redteam")
+async def redteam(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队七向量(P5——权限提升/护航
+    绕过/分流操纵/审核越权/申诉刷分/
+    培训逃避/模板注入; 确定性离线
+    可复现——需 shadow/assist)"""
+    _require_admin(x_role)
+    from services.ab63_redteam_service import (
+        Ab63RedteamService,
+    )
+    try:
+        return await (
+            Ab63RedteamService().run_all())
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
