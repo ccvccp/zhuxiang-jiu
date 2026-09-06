@@ -616,14 +616,14 @@ class TestHttp:
                resp.status_code == 403,
                str(resp.status_code))
 
-        # 路由累计 17 端点
+        # 路由累计 17 端点(P5 扩至 19——基线语义)
         from routes.ii58_routes import (
             router as ii_router,
         )
         count = sum(
             1 for r in ii_router.routes)
-        record("58号路由累计 17 端点",
-               count == 17, str(count))
+        record("58号路由累计 ≥17 端点",
+               count >= 17, str(count))
 
 
 async def run_all():

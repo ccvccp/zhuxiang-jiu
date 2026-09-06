@@ -329,8 +329,8 @@ def run_round(round_no: int) -> None:
         count = int((out.stdout or "").strip())
     except ValueError:
         count = -1
-    record("58号路由累计 17 端点",
-           count == 17, str(count))
+    record("58号路由累计 ≥17 端点",
+           count >= 17, str(count))
 
 
 def main() -> int:

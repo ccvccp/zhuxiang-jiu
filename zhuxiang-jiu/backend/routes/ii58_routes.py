@@ -1,6 +1,7 @@
-"""58号·AI智能优化意图识别路由(P0-P4)
+"""58号·AI智能优化意图识别路由(P0-P5)
 
-端点(P0 5 + P1 6 + P2 2 + P3 3 + P4 1 = 17):
+端点(P0 5 + P1 6 + P2 2 + P3 3 + P4 1
+     + P5 2 = 19):
     GET  /api/ii58/registry            注册表自描述(admin, 观测面)
     POST /api/ii58/evaluate            意图识别评估(admin, 管理)
     GET  /api/ii58/evaluations         识别记录列表(admin, 观测面)
@@ -18,15 +19,18 @@
     GET  /api/ii58/labels              标注队列列表(admin, 观测面, P3)
     POST /api/ii58/labels/{id}/decide  标注人工终审(admin, 终审, P3)
     POST /api/ii58/feedback/collect    决策回流补标(admin, 回流, P4)
+    GET  /api/ii58/dashboard           四区看板(admin, 观测面, P5)
+    POST /api/ii58/redteam             红队七向量(admin, 管理, P5)
 
 鉴权: 管理面 X-Role: admin(43-57号同款口径);
 会员面 X-Member-Id(48号惯例)。
 统一口径:
     - 观测面(registry/evaluations/model/status/
-      corpus/confusables/thresholds/labels)不受
-      II58_MODE 影响
-    - 决策面(evaluate/ingest/mine/calibrate):
-      off=拒绝(409——shadow/assist 开放)
+      corpus/confusables/thresholds/labels/
+      dashboard)不受 II58_MODE 影响
+    - 决策面(evaluate/ingest/mine/calibrate/
+      redteam): off=拒绝(409——shadow/assist
+      开放; 红队需攻击面)
     - 会员面(feedback): 需 assist
       (off/shadow 409)
     - review(语料终审)+calibrate 终审模
@@ -442,6 +446,38 @@ async def feedback_collect(
     return await (
         Ii58LearnService().collect_feedback(
             limit=limit))
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """四区看板(度量+意图+语料+防御
+    ——观测面, P5)"""
+    _require_admin(x_role)
+    from services.ii58_dashboard_service import (
+        Ii58DashboardService,
+    )
+    return await (
+        Ii58DashboardService().dashboard())
+
+
+@router.post("/redteam")
+async def redteam(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队七向量(确定性离线可复现——
+    需决策面开放 off 409, P5)"""
+    _require_admin(x_role)
+    from services.ii58_redteam_service import (
+        Ii58RedteamService,
+    )
+    try:
+        return await (
+            Ii58RedteamService().run_all())
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_ii58_routes(app) -> None:

@@ -427,11 +427,21 @@ class Ii58FeedbackService:
                 f"回流类型 {target_sample_type}"
                 f" 非法(合法值: "
                 f"{'/'.join(REFLOW_TYPES)})")
+        # 回流目标意图在册校验(封闭白名单——
+        # 恶意标注注入拒绝)
         target_intent = str(
             target_intent_id
             or label.get("correctedIntentId")
             or label.get("suggestedIntentId")
             or "unknown.unrecognized")
+        from services.ii58_registry import (
+            INTENT_REGISTRY,
+        )
+        if target_intent \
+                not in INTENT_REGISTRY:
+            raise ValueError(
+                f"回流目标意图 {target_intent}"
+                f" 不在册(封闭白名单)")
 
         reflow = {"corpusId": 0, "status": ""}
         try:
