@@ -409,13 +409,17 @@ class Ab63SubmissionService:
             feedback = \
                 self._rejection_feedback(
                     sub)
+            updates = {
+                "status": "rejected",
+                "fingerprint":
+                    fingerprint,
+                "feedback": feedback,
+                "updatedAt": ts()}
+            if review_type == "spot_check":
+                updates["spotCheckResult"] = \
+                    "rejected"
             await self._update_sub(
-                sub, {
-                    "status": "rejected",
-                    "fingerprint":
-                        fingerprint,
-                    "feedback": feedback,
-                    "updatedAt": ts()})
+                sub, updates)
             await self._track(sub_id, {
                 "action": "reject",
                 "reviewType": review_type,
@@ -439,6 +443,11 @@ class Ab63SubmissionService:
         if review_type == "spot_check":
             new_status = "published"
             note = "抽检复检通过——维持发布"
+            await self._update_sub(
+                sub, {
+                    "spotCheckResult":
+                        "approved",
+                    "updatedAt": ts()})
         elif review_type == "confirm":
             new_status = "published"
             note = "L2 人工确认通过——发布"

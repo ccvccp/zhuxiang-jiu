@@ -1,6 +1,6 @@
-"""63号·AI智能后台管理路由(P0-P3)
+"""63号·AI智能后台管理路由(P0-P4)
 
-端点(P0+P1+P2+P3 14):
+端点(P0-P4 18):
     GET  /api/ab63/registry            注册表自描述(admin, 观测面)
     POST /api/ab63/grants              权限裁决(admin, 决策面 off 409)
     GET  /api/ab63/grants              裁决记录列表(admin, 观测面)
@@ -16,16 +16,22 @@
     GET  /api/ab63/reviews/queue       审核队列风险分布(admin, P3 观测面)
     POST /api/ab63/threshold/calibrate 阈值校准(admin, P3——管理+终审双模)
     GET  /api/ab63/thresholds          阈值视图(admin, P3 观测面)
+    POST /api/ab63/training/push       培训推送(admin, P4 决策面 off 409——高频驳回触发)
+    POST /api/ab63/training/{trainingId}/complete  培训完成(admin, P4——不受开关影响)
+    GET  /api/ab63/training            培训转化视图(admin, P4 观测面)
+    POST /api/ab63/feedback/collect    决策回流(admin, P4——不受开关影响)
 
 鉴权: 管理面 X-Role: admin(43-59号同款口径)。
 统一口径:
     - 观测面(registry/grants/model/status/
       submissions 详情/reviews 队列/
-      thresholds)不受 AB63_MODE 影响
+      thresholds/training 视图)不受
+      AB63_MODE 影响
     - 决策面(grants/workbench/guard/
-      submissions 提交): off=拒绝(409)
-    - review/appeal/resolve 终审不受
-      开关影响(人工铁律)
+      submissions 提交/training 推送):
+      off=拒绝(409)
+    - review/appeal/resolve 终审与
+      collect 回流不受开关影响(人工铁律)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -447,6 +453,105 @@ async def thresholds(
     return await (
         Ab63SubmissionService()
         .thresholds_view())
+
+
+@router.post("/training/push")
+async def training_push(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """培训推送(P4——高频驳回点扫描→定向
+    推送; 决策面 off 409)
+
+    Body: {memberId?}(缺省全量扫描)"""
+    _require_admin(x_role)
+    from services.ab63_training_service import (
+        Ab63TrainingService,
+    )
+    try:
+        member_id = body.get("memberId")
+        return await (
+            Ab63TrainingService().push(
+                member_id=int(member_id)
+                if member_id is not None
+                else None))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post(
+    "/training/{training_id}/complete")
+async def training_complete(
+        training_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """培训完成(P4——pending→completed
+    留痕; 不受开关影响——会员赋能铁律)
+
+    Body: {memberId?}"""
+    _require_admin(x_role)
+    from services.ab63_training_service import (
+        Ab63TrainingService,
+    )
+    try:
+        member_id = body.get("memberId")
+        return await (
+            Ab63TrainingService().complete(
+                training_id=training_id,
+                member_id=int(member_id)
+                if member_id is not None
+                else None))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/training")
+async def training_view(
+        member_id: int = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """培训转化视图(P4 观测面——7 日窗口
+    完成率+规则分布)"""
+    _require_admin(x_role)
+    from services.ab63_training_service import (
+        Ab63TrainingService,
+    )
+    return await (
+        Ab63TrainingService().training_view(
+            member_id=member_id))
+
+
+@router.post("/feedback/collect")
+async def feedback_collect(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """决策回流(P4——六类终态信号→44号
+    池双写 subId 1:1 幂等+校准预警;
+    不受开关影响——人工铁律)
+
+    Body: {limit?}"""
+    _require_admin(x_role)
+    from services.ab63_learn_service import (
+        Ab63LearnService,
+    )
+    try:
+        limit = body.get("limit")
+        return await (
+            Ab63LearnService()
+            .collect_feedback(
+                limit=int(limit)
+                if limit is not None
+                else 500))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 @router.get("/model/status")

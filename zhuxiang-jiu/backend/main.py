@@ -429,6 +429,13 @@ async def _on_startup():
     from services.ii58_scheduler import (
         start_scheduler as start_ii58_learn)
     start_ii58_learn()
+    # 63号·AI智能后台管理: 决策回流+培训推送 T+1 调度
+    # (六类终态信号+44号池双写+自动过审错误率预警
+    #  +高频驳回点培训推送+7 日转化窗口;
+    #  AB63_LEARN_MODE=on 开启, 默认 off)
+    from services.ab63_scheduler import (
+        start_scheduler as start_ab63_learn)
+    start_ab63_learn()
 
 
 @app.on_event("shutdown")

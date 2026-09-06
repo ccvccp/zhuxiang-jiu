@@ -2,7 +2,7 @@
 (ab63_repository)
 
 计划(docs/63号_AI智能后台管理模块实施计划.md §五):
-    7 表(前缀 ab63):
+    7 表(前缀 ab63)+P4 培训表:
         ab63_grants       权限裁决记录(上下文快照+权限分+reason)
         ab63_workbench    工作台渲染(角色模板+意图关联+呈现配置)
         ab63_guards       编辑态护航事件(检测域+干预档+整改状态)
@@ -10,6 +10,7 @@
         ab63_reviews      审核记录(L1抽检/L2辅助/L3双人——证据链)
         ab63_thresholds   分流/权限配置域(tier 键——46号审批联动)
         ab63_events       全链事件
+        ab63_trainings    培训推送(P4——7 日转化窗口状态机)
 
 58/59号仓储范式平移:
     - 通用读写基元(_save/_get/_list——
@@ -37,12 +38,13 @@ class Ab63Repository:
     TABLE_REVIEWS = "ab63_reviews"
     TABLE_THRESHOLDS = "ab63_thresholds"
     TABLE_EVENTS = "ab63_events"
+    TABLE_TRAININGS = "ab63_trainings"
 
     _ALL_TABLES = (
         TABLE_GRANTS, TABLE_WORKBENCH,
         TABLE_GUARDS, TABLE_SUBMISSIONS,
         TABLE_REVIEWS, TABLE_THRESHOLDS,
-        TABLE_EVENTS)
+        TABLE_EVENTS, TABLE_TRAININGS)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -83,6 +85,7 @@ class Ab63Repository:
         "review": TABLE_REVIEWS,
         "threshold": TABLE_THRESHOLDS,
         "event": TABLE_EVENTS,
+        "training": TABLE_TRAININGS,
     }
 
     def __init__(self):
@@ -425,6 +428,38 @@ class Ab63Repository:
         return [dict(r) for r in
                 self.store[
                     table].values()][:limit]
+
+    # --------------------------------------------------------
+    # 培训推送(trainingId——7 日转化窗口)
+    # --------------------------------------------------------
+
+    async def next_training_id(self) -> int:
+        return await self._next_seq("training")
+
+    async def save_training(self,
+                            record: dict,
+                            *, create: bool = True
+                            ) -> dict:
+        return await self._save(
+            "training", record, "trainingId",
+            create=create)
+
+    async def get_training(self,
+                           training_id: int
+                           ) -> dict | None:
+        return await self._get(
+            "training", int(training_id))
+
+    async def list_trainings(self,
+                             member_id: int = None,
+                             status: str = None,
+                             rule_id: str = None,
+                             limit: int = 200
+                             ) -> list[dict]:
+        return await self._list(
+            "training", limit,
+            memberId=member_id,
+            status=status, ruleId=rule_id)
 
     # --------------------------------------------------------
     # 全链事件(eventId)
