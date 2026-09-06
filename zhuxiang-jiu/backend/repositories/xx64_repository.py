@@ -42,7 +42,8 @@ class Xx64Repository:
         TABLE_ORDERS, TABLE_LEDGER,
         TABLE_POINTS, TABLE_QUOTAS,
         TABLE_RISK, TABLE_ANCHORS,
-        TABLE_APPEALS, TABLE_EVENTS)
+        TABLE_APPEALS, TABLE_EVENTS,
+        "xx64_thresholds")
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -53,7 +54,8 @@ class Xx64Repository:
         "quotaId", "riskId", "anchorId",
         "appealId", "eventId", "buyerId",
         "sellerId", "trustId", "points",
-        "version", "changeId", "windowDays")
+        "version", "changeId", "windowDays",
+        "pooledFeedbackId")
     _FLOAT_FIELDS = (
         "price", "trustValue", "cashValue",
         "balance", "balanceSnapshot",
@@ -62,15 +64,21 @@ class Xx64Repository:
         "trustDelta", "pointsValue",
         "purchasingPower", "avgPrice",
         "exchangeRate", "trustScore",
-        "pointsSpent", "trustGained")
+        "pointsSpent", "trustGained",
+        "poolReward", "baseline", "drift",
+        "ratio")
     _JSON_DICT_FIELDS = (
         "snapshot", "detail", "context",
         "config", "result", "factors",
         "reason", "correction", "stats",
-        "precheck", "explain", "extra")
+        "precheck", "explain", "extra",
+        "recalc", "compensation",
+        "suggested", "alarms")
     _JSON_LIST_FIELDS = (
         "orders", "findings", "signals",
-        "history", "auditTrail")
+        "history", "auditTrail",
+        "alerts", "explainSteps",
+        "riskFindings", "actions")
     _BOOL_FIELDS = (
         "negative", "exclusive",
         "reserved", "frozen",
@@ -86,6 +94,7 @@ class Xx64Repository:
         "anchor": TABLE_ANCHORS,
         "appeal": TABLE_APPEALS,
         "event": TABLE_EVENTS,
+        "threshold": "xx64_thresholds",
     }
 
     # 表主键字段(排序依据)
@@ -98,6 +107,7 @@ class Xx64Repository:
         "anchor": "anchorId",
         "appeal": "appealId",
         "event": "eventId",
+        "threshold": "tier",
     }
 
     def __init__(self):

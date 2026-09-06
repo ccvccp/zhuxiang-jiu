@@ -1,6 +1,6 @@
 """64号·信值兑换管理路由(P0-P5)
 
-端点(P3 16; 全期规划 24):
+端点(P4 24; 全期规划 24):
     GET  /api/xx64/registry        刚性规则自描述(admin, 观测面)
     POST /api/xx64/orders         创建订单+锁值(member/admin, 决策面 off 409)
     GET  /api/xx64/orders         订单列表(admin, 观测面)
@@ -17,7 +17,14 @@
     GET  /api/xx64/orders/{id}/explain  规则可视化解释(member/admin, 观测面)
     GET  /api/xx64/risk/status          用户风险画像(member/admin, 观测面)
     POST /api/xx64/risk/scan            手动五防全量扫描(admin, 决策面 off 409)
-    # P4: anchors/threshold/appeals/feedback/learn
+    GET  /api/xx64/anchors              购买力指数序列+趋势预警(member/admin, 观测面)
+    POST /api/xx64/anchors/audit        手动触发指数计算(admin, 决策面 off 409)
+    POST /api/xx64/threshold/calibrate  兑换率校准建议提交46号(admin, 决策面 off 409)
+    GET  /api/xx64/thresholds           阈值域+46号 pending 视图(admin, 观测面)
+    POST /api/xx64/appeals              提交申诉(member/admin, 不受开关影响)
+    POST /api/xx64/appeals/{id}/review  申诉人工终审(admin, 不受开关影响·人工铁律)
+    POST /api/xx64/feedback/collect     手动触发回流(admin, 不受开关影响)
+    GET  /api/xx64/learn/status         回流状态+因子聚合(admin, 观测面)
     # P5: GET /dashboard + POST /redteam
 
 鉴权: X-Role: admin 或 member(订单
@@ -464,6 +471,186 @@ async def risk_scan(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
+
+
+@router.get("/anchors")
+async def anchors_view(
+        limit: int = 30,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """购买力指数序列+趋势预警
+    (P4——通胀/通缩仅建议;
+    观测面)"""
+    _require_role(x_role)
+    from services.xx64_anchor_service import (
+        Xx64AnchorService,
+    )
+    return await (
+        Xx64AnchorService()
+        .anchors_view(limit=limit))
+
+
+@router.post("/anchors/audit")
+async def anchors_audit(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """手动触发指数计算(P4——
+    决策面 off 409)"""
+    _require_admin(x_role)
+    from services.xx64_anchor_service import (
+        Xx64AnchorService,
+    )
+    from services.xx64_service import (
+        require_active_mode,
+    )
+    try:
+        require_active_mode()
+        return await (
+            Xx64AnchorService()
+            .snapshot())
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/threshold/calibrate")
+async def threshold_calibrate(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """兑换率校准检查+建议提交46号
+    (P4——仅建议, 人工审批后生效;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    from services.xx64_anchor_service import (
+        Xx64AnchorService,
+    )
+    from services.xx64_service import (
+        require_active_mode,
+    )
+    try:
+        require_active_mode()
+        return await (
+            Xx64AnchorService()
+            .rate_check())
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/thresholds")
+async def thresholds_view(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """阈值域+46号 pending 变更视图
+    (P4——宪法域占比永不可校准;
+    观测面)"""
+    _require_admin(x_role)
+    from services.xx64_anchor_service import (
+        Xx64AnchorService,
+    )
+    return await (
+        Xx64AnchorService()
+        .thresholds_view())
+
+
+@router.post("/appeals")
+async def submit_appeal(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """提交申诉(P4——重算展示,
+    终审人工; 不受开关影响)
+
+    Body: {orderId, reason,
+    submittedBy?}"""
+    _require_role(x_role)
+    from services.xx64_appeal_service import (
+        Xx64AppealService,
+    )
+    try:
+        return await (
+            Xx64AppealService()
+            .submit(
+                order_id=body.get(
+                    "orderId"),
+                reason=body.get(
+                    "reason"),
+                submitted_by=body.get(
+                    "submittedBy")
+                or x_role))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/appeals/{appeal_id}/review")
+async def review_appeal(
+        appeal_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """申诉人工终审(P4——approve
+    翻转/reject 维持; 人工铁律
+    不受开关影响)
+
+    Body: {decision: approve|reject,
+    reviewNote?}"""
+    _require_admin(x_role)
+    from services.xx64_appeal_service import (
+        Xx64AppealService,
+    )
+    try:
+        return await (
+            Xx64AppealService()
+            .review(
+                appeal_id=appeal_id,
+                decision=body.get(
+                    "decision"),
+                review_note=body.get(
+                    "reviewNote"),
+                reviewed_by=body.get(
+                    "reviewedBy")
+                or x_role))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/feedback/collect")
+async def feedback_collect(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """手动触发一轮回流(P4——
+    orderId 1:1 幂等; 不受开关
+    影响)"""
+    _require_admin(x_role)
+    from services.xx64_learn_service import (
+        Xx64LearnService,
+    )
+    return await (
+        Xx64LearnService()
+        .collect_feedback())
+
+
+@router.get("/learn/status")
+async def learn_status(
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """回流状态+因子聚合+调度状态
+    (P4——观测面)"""
+    _require_admin(x_role)
+    from services.xx64_learn_service import (
+        Xx64LearnService,
+    )
+    return await (
+        Xx64LearnService()
+        .learn_status())
 
 
 def register_xx64_routes(app) -> None:

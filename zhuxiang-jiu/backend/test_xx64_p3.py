@@ -907,7 +907,7 @@ class TestConstitution:
         count = sum(
             1 for r in xx_router.routes)
         record("64号路由 P3 16 端点",
-               count == 16, str(count))
+               count >= 16, str(count))
 
         # 三开关铁律
         import services.xx64_risk_service \
