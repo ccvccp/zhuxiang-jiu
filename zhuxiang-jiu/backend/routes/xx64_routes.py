@@ -13,7 +13,8 @@
     POST /api/xx64/points/exchange      积分→信值(member/admin, 决策面 off 409)
     GET  /api/xx64/points/preview       换算预览(admin, 观测面)
     GET  /api/xx64/ledger               转移账本(admin, 观测面)
-    # P2: GET /plan + GET /orders/{id}/explain
+    GET  /api/xx64/plan                 最优支付组合+互斥对比+凑单候选(member/admin, 观测面)
+    GET  /api/xx64/orders/{id}/explain  规则可视化解释(member/admin, 观测面)
     # P3: GET /risk/status + POST /risk/scan
     # P4: anchors/threshold/appeals/feedback/learn
     # P5: GET /dashboard + POST /redteam
@@ -32,7 +33,8 @@
     - KeyError → 404 / ValueError → 409
 """
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import (APIRouter, Header, HTTPException,
+                    Query)
 
 router = APIRouter(prefix="/api/xx64",
                    tags=["信值兑换管理(64号)"])
@@ -342,6 +344,81 @@ async def ledger(
             order_id=order_id,
             trust_id=trust_id,
             limit=limit)
+
+
+@router.get("/plan")
+async def payment_plan(
+        trust_id: int,
+        price: float,
+        discount_value: float = 0.0,
+        candidates: str | None = Query(
+            default=None,
+            description="凑单候选"
+            "(name:price 逗号串——"
+            "可选)"),
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """最优支付组合+凑单(P2——
+    30/70 刚性结构内方案 A/B
+    对比+积分缺口换算; 观测面)"""
+    _require_role(x_role)
+    from services.xx64_experience_service import (
+        Xx64ExperienceService,
+    )
+    exp = Xx64ExperienceService()
+    try:
+        result = await exp.payment_plan(
+            trust_id=trust_id,
+            price=price,
+            discount_value=(
+                discount_value))
+        # 凑单(可选——候选以
+        # name:price 逗号串传入)
+        if candidates:
+            cands = []
+            for part in candidates.split(","):
+                name, _, p = part.rpartition(
+                    ":")
+                if not name:
+                    continue
+                try:
+                    cands.append({
+                        "name": name.strip(),
+                        "price": float(p)})
+                except ValueError:
+                    continue
+            result["smartFill"] = (
+                await exp.smart_fill(
+                    trust_id=trust_id,
+                    candidates=cands))
+        return result
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/orders/{order_id}/explain")
+async def explain_order(
+        order_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """规则可视化解释(P2——"为什么
+    这样算"逐条 R1-R6+数字可溯源;
+    观测面)"""
+    _require_role(x_role)
+    from services.xx64_experience_service import (
+        Xx64ExperienceService,
+    )
+    try:
+        return await (
+            Xx64ExperienceService()
+            .explain_order(order_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
 
 
 def register_xx64_routes(app) -> None:

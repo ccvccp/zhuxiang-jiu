@@ -772,7 +772,7 @@ class TestHttp:
         count = sum(
             1 for r in xx_router.routes)
         record("64号路由 P1 12 端点",
-               count == 12, str(count))
+               count >= 12, str(count))
         os.environ["XX64_MODE"] = "off"
 
 
