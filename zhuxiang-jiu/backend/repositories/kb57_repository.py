@@ -48,7 +48,7 @@ class Kb57Repository:
     _JSON_DICT_FIELDS = (
         "signalSnapshot", "scoring", "detail",
         "content", "abTest", "gate", "copyright",
-        "privacy", "contentSafety", "fingerprint",
+        "privacy", "contentSafety",
         "context", "progress", "factors", "extra")
     _JSON_LIST_FIELDS = (
         "hits", "suggestedSources", "valueTags",
@@ -57,7 +57,8 @@ class Kb57Repository:
         "affectedMembers")
     _BOOL_FIELDS = (
         "humanVerified", "active", "completed",
-        "reviewRequired", "deferred", "escalated")
+        "reviewRequired", "deferred", "escalated",
+        "budgetHalted")
 
     TABLE_SOURCES = "kb57_sources"
     TABLE_GAPS = "kb57_gaps"
@@ -158,9 +159,27 @@ class Kb57Repository:
     # 通用读写基元(kind: 表短名; record 必含 {kind}Id)
     # --------------------------------------------------------
 
+    # kind → 表名显式映射(compliance/feedback 等
+    # 不规则复数词——通用 f"{kind}s" 推导会断裂)
+    _TABLE_BY_KIND = {
+        "source": TABLE_SOURCES,
+        "gap": TABLE_GAPS,
+        "resource": TABLE_RESOURCES,
+        "compliance": TABLE_COMPLIANCE,
+        "seed": TABLE_SEEDS,
+        "push": TABLE_PUSHES,
+        "path": TABLE_PATHS,
+        "feedback": TABLE_FEEDBACK,
+    }
+
+    @classmethod
+    def _table_of(cls, kind: str) -> str:
+        return cls._TABLE_BY_KIND.get(
+            kind, f"kb57_{kind}s")
+
     async def _save(self, kind: str, record: dict,
                     *, create: bool = True) -> dict:
-        table = f"kb57_{kind}s"
+        table = self._table_of(kind)
         if is_redis_mode():
             client = await get_redis_client()
             pipe = client.pipeline(transaction=False)
@@ -169,7 +188,7 @@ class Kb57Repository:
                      mapping=self._serialize(record))
             if create:
                 pipe.lpush(
-                    _k("kb57", f"{kind}s_all"),
+                    _k("kb57", f"{kind}_all"),
                     record[f"{kind}Id"])
             await pipe.execute()
             return record
@@ -178,13 +197,13 @@ class Kb57Repository:
             record[f"{kind}Id"]] = dict(record)
         if create:
             self.store.setdefault(
-                f"_kb57_{kind}s_all", []).insert(
+                f"_kb57_{kind}_all", []).insert(
                 0, record[f"{kind}Id"])
         return record
 
     async def _get(self, kind: str,
                    record_id: int) -> dict | None:
-        table = f"kb57_{kind}s"
+        table = self._table_of(kind)
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.hgetall(_k(
@@ -199,11 +218,11 @@ class Kb57Repository:
                     limit: int = 100,
                     **filters) -> list[dict]:
         """列表(最新在前; 可选字段过滤)"""
-        table = f"kb57_{kind}s"
+        table = self._table_of(kind)
         if is_redis_mode():
             client = await get_redis_client()
             ids = await client.lrange(
-                _k("kb57", f"{kind}s_all"), 0, -1)
+                _k("kb57", f"{kind}_all"), 0, -1)
             result = []
             for i in range(0, len(ids), 500):
                 pipe = client.pipeline(
@@ -505,4 +524,4 @@ class Kb57Repository:
                      "compliance", "seed", "push",
                      "path", "feedback", "event"):
             self.store[f"_kb57_{kind}_seq"] = 0
-            self.store[f"_kb57_{kind}s_all"] = []
+            self.store[f"_kb57_{kind}_all"] = []

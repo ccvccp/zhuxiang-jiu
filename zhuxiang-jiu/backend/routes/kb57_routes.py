@@ -1,19 +1,23 @@
-"""57号·AI智能知识库路由(P0)
+"""57号·AI智能知识库路由(P0-P1)
 
-端点(P0 5):
+端点(P0 6 + P1 3 = 9):
     GET  /api/kb57/registry           注册表自描述(admin, 观测面)
     GET  /api/kb57/sources            采集源注册表(admin, 观测面)
     POST /api/kb57/sources/register   采集源注册(admin, 管理)
     POST /api/kb57/gaps/scan          缺口诊断+决策评估(admin, 管理)
     GET  /api/kb57/gaps               缺口清单(admin, 观测面)
     GET  /api/kb57/model/status       模型状态(admin, 观测面)
+    POST /api/kb57/collect/run        定向采集运行(admin, 管理, P1)
+    POST /api/kb57/resources/{id}/compliance 三重合规鉴别(admin, 管理, P1)
+    GET  /api/kb57/compliance/{id}    合规鉴别报告(admin, 观测面, P1)
 
 鉴权: 管理面 X-Role: admin(43-56号同款口径)。
 统一口径:
-    - 观测面(registry/sources/gaps/model/status)
-      不受 KB57_MODE 影响
-    - 决策面(gaps/scan+sources/register):
-      off=拒绝(409——shadow/assist 开放)
+    - 观测面(registry/sources/gaps/model/status/
+      compliance)不受 KB57_MODE 影响
+    - 决策面(gaps/scan+sources/register+collect/run
+      +resources/{id}/compliance): off=拒绝
+      (409——shadow/assist 开放)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -204,6 +208,80 @@ async def model_status(
     _require_admin(x_role)
     from services.kb57_service import Kb57Service
     return await Kb57Service().model_status()
+
+
+@router.post("/collect/run")
+async def collect_run(
+        body: dict = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """定向采集运行(open 缺口→源白名单资源落库
+    quarantined 沙箱隔离态; P1)"""
+    _require_admin(x_role)
+    from services.kb57_collect_service import (
+        Kb57CollectService,
+    )
+    gap_id = None
+    if isinstance(body, dict):
+        raw = body.get("gapId")
+        if raw is not None:
+            try:
+                gap_id = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=422,
+                    detail="gapId 须为整数")
+    try:
+        return await Kb57CollectService().run_collect(
+            gap_id=gap_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/resources/{resource_id}/compliance")
+async def resource_compliance(
+        resource_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """三重合规鉴别(版权/隐私/内容安全串行+
+    合规指纹生成; P1)"""
+    _require_admin(x_role)
+    from services.kb57_compliance_service import (
+        Kb57ComplianceService,
+    )
+    try:
+        return await (
+            Kb57ComplianceService()
+            .run_compliance(int(resource_id)))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/compliance/{compliance_id}")
+async def compliance_detail(
+        compliance_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """合规鉴别报告详情(三关明细+合规指纹——观测面, P1)"""
+    _require_admin(x_role)
+    from services.kb57_compliance_service import (
+        Kb57ComplianceService,
+    )
+    try:
+        return await (
+            Kb57ComplianceService()
+            .get_compliance(int(compliance_id)))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
 
 
 def register_kb57_routes(app) -> None:
