@@ -1,6 +1,6 @@
-"""56号·AI智能升级管理路由(P0-P3)
+"""56号·AI智能升级管理路由(P0-P4)
 
-端点(P0 5 + P1 4 + P2 2 + P3 3 = 14):
+端点(P0 5 + P1 4 + P2 2 + P3 3 + P4 4 = 18):
     GET  /api/aiup56/registry            注册表自描述(admin, 观测面)
     POST /api/aiup56/signals/scan        信号采集+决策评估(admin, 管理)
     GET  /api/aiup56/proposals           提案列表(admin, 观测面)
@@ -15,16 +15,21 @@
     POST /api/aiup56/proposals/{id}/audit 审计Agent(admin, P3)
     GET  /api/aiup56/proposals/{id}/panel  审批面板视图(admin, 观测面, P3)
     POST /api/aiup56/proposals/{id}/review 人类审批(admin, P3)
+    POST /api/aiup56/proposals/{id}/deliver  资产包交付(admin, P4)
+    POST /api/aiup56/proposals/{id}/rollback 语义回滚(admin, P4)
+    POST /api/aiup56/feedback/collect     决策回流补标(admin, P4)
+    GET  /api/aiup56/feedback/stats        回流统计(admin, 观测面, P4)
 
 鉴权: 管理面 X-Role: admin(43-55号同款口径)。
 统一口径:
     - 观测面(registry/proposals/proposal/model/
-      status/tasks/assets/sandboxes/panel)不受
-      AIUP56_MODE 影响
+      status/tasks/assets/sandboxes/panel/stats)
+      不受 AIUP56_MODE 影响
     - 决策面(signals/scan+plan+code+test+
       audit): off=拒绝(409——shadow/assist 开放)
-    - review(人类审批): 不受开关影响(终审
-      人工铁律——审批是唯一交付出口)
+    - review/deliver/rollback(交付链人工动作):
+      不受开关影响(终审人工铁律)
+    - feedback/collect: 不受开关影响(回流管理面)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -310,6 +315,85 @@ async def review_proposal(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
+
+
+@router.post("/proposals/{proposal_id}/deliver")
+async def deliver_proposal(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """资产包交付(versioned 出口——人工下载后走
+    既有 CI; 无审批不可交付铁律)"""
+    _require_admin(x_role)
+    from services.aiup56_deliver_service import (
+        Aiup56DeliverService,
+    )
+    try:
+        return await Aiup56DeliverService().deliver(
+            int(proposal_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/proposals/{proposal_id}/rollback")
+async def rollback_proposal(
+        proposal_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """语义回滚(预案分步执行留痕+45号 L2 受影响
+    用户信值补偿)"""
+    _require_admin(x_role)
+    from services.aiup56_deliver_service import (
+        Aiup56DeliverService,
+    )
+    try:
+        return await Aiup56DeliverService().rollback(
+            int(proposal_id),
+            reason=str(body.get("reason") or ""),
+            affected_members=body.get(
+                "affectedMembers") or [])
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/feedback/collect")
+async def feedback_collect(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """决策回流补标(七类信号真值+44号池双写
+    ——幂等 proposalId 1:1; 不受开关影响)"""
+    _require_admin(x_role)
+    from services.aiup56_feedback_service import (
+        Aiup56FeedbackService,
+    )
+    try:
+        return await Aiup56FeedbackService(
+        ).collect_feedback()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/feedback/stats")
+async def feedback_stats(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """回流统计(信号分布/池双写——观测面)"""
+    _require_admin(x_role)
+    from services.aiup56_feedback_service import (
+        Aiup56FeedbackService,
+    )
+    return await Aiup56FeedbackService(
+    ).feedback_stats()
 
 
 def register_aiup56_routes(app) -> None:

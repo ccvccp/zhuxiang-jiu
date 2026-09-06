@@ -395,6 +395,12 @@ async def _on_startup():
     from services.qr55_scheduler import (
         start_scheduler as start_qr55_learn)
     start_qr55_learn()
+    # 56号·AI智能升级管理: 决策回流 T+1 补标调度
+    # (七类信号+44号池双写; AIUP56_LEARN_MODE=on
+    # 开启, 默认 off)
+    from services.aiup56_scheduler import (
+        start_scheduler as start_aiup56_learn)
+    start_aiup56_learn()
 
 
 @app.on_event("shutdown")
@@ -452,6 +458,10 @@ async def _on_shutdown():
     from services.qr55_scheduler import (
         stop_scheduler as stop_qr55_learn)
     stop_qr55_learn()
+    # 56号·AI智能升级管理学习调度器
+    from services.aiup56_scheduler import (
+        stop_scheduler as stop_aiup56_learn)
+    stop_aiup56_learn()
     await close_redis_client()
     logger.info("清理完成")
 

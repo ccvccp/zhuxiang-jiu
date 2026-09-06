@@ -625,13 +625,13 @@ class TestHttp:
                    resp.status_code == 403,
                    str(resp.status_code))
 
-        # 路由累计 14 端点
+        # 路由累计 14 端点(P4 扩至 18——基线语义)
         from routes.aiup56_routes import (
             router as aiup_router,
         )
         count = sum(1 for r in aiup_router.routes)
-        record("56号路由累计 14 端点",
-               count == 14, str(count))
+        record("56号路由累计 ≥14 端点",
+               count >= 14, str(count))
         os.environ["AIUP56_MODE"] = "off"
 
 

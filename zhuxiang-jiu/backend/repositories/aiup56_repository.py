@@ -39,11 +39,15 @@ class Aiup56Repository:
     _INT_FIELDS = ("proposalId", "taskId", "assetId",
                    "sandboxId", "reviewId", "eventId",
                    "assetVersion", "memberId",
-                   "retryCount", "llmCalls")
+                   "retryCount", "llmCalls",
+                   # 决策回流标记(P4)
+                   "pooledFeedbackId")
     _FLOAT_FIELDS = ("necessityScore", "trustScore",
                      "budgetCap", "budgetSpent",
                      "estimatedGain", "actualGain",
-                     "valueAchievement")
+                     "valueAchievement",
+                     # 决策回流奖励(P4)
+                     "poolReward")
     _JSON_DICT_FIELDS = ("signalSnapshot", "context",
                          "scoring", "summary",
                          "riskAssessment", "detail",
@@ -53,12 +57,17 @@ class Aiup56Repository:
                          "staticGate", "budgetGate",
                          "valueGate",
                          # 审计记录嵌套结构
-                         "auditReport", "auditLayers")
+                         "auditReport", "auditLayers",
+                         # 交付/回滚嵌套结构(P4)
+                         "deliveryPackage",
+                         "compensation")
     _JSON_LIST_FIELDS = ("tasks", "evidence",
                          "confirmations", "drafts",
                          "testPlans", "VALUE_REASONs",
                          # 沙箱/审计记录嵌套列表
-                         "caseMatrix", "highlightItems")
+                         "caseMatrix", "highlightItems",
+                         # 语义回滚分步留痕(P4)
+                         "rollbackSteps")
     _BOOL_FIELDS = ("escalated", "dualReview")
 
     # 提案状态机九态(计划 §五)
