@@ -1,6 +1,6 @@
-"""56号·AI智能升级管理路由(P0-P2)
+"""56号·AI智能升级管理路由(P0-P3)
 
-端点(P0 5 + P1 4 + P2 2 = 11):
+端点(P0 5 + P1 4 + P2 2 + P3 3 = 14):
     GET  /api/aiup56/registry            注册表自描述(admin, 观测面)
     POST /api/aiup56/signals/scan        信号采集+决策评估(admin, 管理)
     GET  /api/aiup56/proposals           提案列表(admin, 观测面)
@@ -12,14 +12,19 @@
     GET  /api/aiup56/proposals/{id}/assets 资产列表(admin, 观测面, P1)
     POST /api/aiup56/proposals/{id}/test  测试Agent+信值沙箱(admin, P2)
     GET  /api/aiup56/proposals/{id}/sandboxes 沙箱列表(admin, 观测面, P2)
+    POST /api/aiup56/proposals/{id}/audit 审计Agent(admin, P3)
+    GET  /api/aiup56/proposals/{id}/panel  审批面板视图(admin, 观测面, P3)
+    POST /api/aiup56/proposals/{id}/review 人类审批(admin, P3)
 
 鉴权: 管理面 X-Role: admin(43-55号同款口径)。
 统一口径:
     - 观测面(registry/proposals/proposal/model/
-      status/tasks/assets/sandboxes)不受
+      status/tasks/assets/sandboxes/panel)不受
       AIUP56_MODE 影响
-    - 决策面(signals/scan+plan+code+test):
-      off=拒绝(409——shadow/assist 开放)
+    - 决策面(signals/scan+plan+code+test+
+      audit): off=拒绝(409——shadow/assist 开放)
+    - review(人类审批): 不受开关影响(终审
+      人工铁律——审批是唯一交付出口)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -234,6 +239,77 @@ async def list_sandboxes(
     )
     return await Aiup56TestService(
     ).list_sandboxes(int(proposal_id))
+
+
+@router.post("/proposals/{proposal_id}/audit")
+async def audit_proposal(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """审计Agent(合规三重校验: 代码/逻辑/文档层+
+    一票否决+LLM 归因报告; off 409)"""
+    _require_admin(x_role)
+    from services.aiup56_audit_service import (
+        Aiup56AuditService,
+    )
+    try:
+        return await Aiup56AuditService().audit(
+            int(proposal_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/proposals/{proposal_id}/panel")
+async def review_panel(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """审批面板视图(信号/沙箱/审计报告/确认
+    清单——观测面)"""
+    _require_admin(x_role)
+    from services.aiup56_review_service import (
+        Aiup56ReviewService,
+    )
+    try:
+        return await Aiup56ReviewService().panel(
+            int(proposal_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+
+
+@router.post("/proposals/{proposal_id}/review")
+async def review_proposal(
+        proposal_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """人类审批(终审人工铁律——强制确认清单+
+    escalate 双人复核; 不受开关影响)"""
+    _require_admin(x_role)
+    from services.aiup56_review_service import (
+        Aiup56ReviewService,
+    )
+    try:
+        return await Aiup56ReviewService().review(
+            int(proposal_id),
+            reviewer=str(body.get("reviewer") or ""),
+            approved=bool(body.get("approved")),
+            confirmations=body.get("confirmations")
+            or [],
+            note=str(body.get("note") or ""),
+            second_reviewer=str(
+                body.get("secondReviewer") or ""))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_aiup56_routes(app) -> None:

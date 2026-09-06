@@ -48,10 +48,17 @@ class Aiup56Repository:
                          "scoring", "summary",
                          "riskAssessment", "detail",
                          "factors", "rollbackPlan",
-                         "testPlan", "draftBundle")
+                         "testPlan", "draftBundle",
+                         # 沙箱记录嵌套结构
+                         "staticGate", "budgetGate",
+                         "valueGate",
+                         # 审计记录嵌套结构
+                         "auditReport", "auditLayers")
     _JSON_LIST_FIELDS = ("tasks", "evidence",
                          "confirmations", "drafts",
-                         "testPlans", "VALUE_REASONs")
+                         "testPlans", "VALUE_REASONs",
+                         # 沙箱/审计记录嵌套列表
+                         "caseMatrix", "highlightItems")
     _BOOL_FIELDS = ("escalated", "dualReview")
 
     # 提案状态机九态(计划 §五)

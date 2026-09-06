@@ -408,8 +408,11 @@ class TestHttp:
             router as aiup_router,
         )
         count = sum(1 for r in aiup_router.routes)
-        record("56号路由累计 11 端点",
-               count == 11, str(count))
+        # P3 新增 3 端点(audit/panel/review)
+        # → 11→14(基线语义: ≥11——P2 交付面不因
+        # P3 演进破坏)
+        record("56号路由累计 ≥11 端点(P3 扩至 14)",
+               count >= 11, str(count))
         os.environ["AIUP56_MODE"] = "off"
 
 
