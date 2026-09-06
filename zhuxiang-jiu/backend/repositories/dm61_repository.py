@@ -67,7 +67,8 @@ class Dm61Repository:
     _FLOAT_FIELDS = (
         "riskScore", "impactPct", "trustScore",
         "confidence", "errorBudget",
-        "historyFailRate", "latencyP95")
+        "historyFailRate", "latencyP95",
+        "poolReward")
     _JSON_DICT_FIELDS = (
         "semantic", "environment", "impact",
         "factors", "reason", "attribution",

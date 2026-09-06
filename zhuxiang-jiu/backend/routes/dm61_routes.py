@@ -1,6 +1,6 @@
 """61号·AI智能系统升级决策路由(P0-P5)
 
-端点(P0 5 + P1 3 + P2 3 + P3 3 = 14; 全期规划 17):
+端点(P0 5 + P1 3 + P2 3 + P3 3 + P4 1 = 15; 全期规划 17):
     GET  /api/dm61/registry          注册表自描述(admin, 观测面)
     POST /api/dm61/requests          决策请求接收(admin, 决策面 off 409)
     GET  /api/dm61/requests          请求列表(admin, 观测面)
@@ -15,7 +15,7 @@
     POST /api/dm61/decisions/{id}/dissent  反对意见 raise/override/confirm(admin, P3——不受开关影响·AI 安全机制)
     POST /api/dm61/feedback          RLHF 反馈(admin, P3——不受开关影响·人工铁律)
     GET  /api/dm61/cases             决策图谱检索(admin, P3 观测面)
-    # P4: POST /feedback/collect
+    POST /api/dm61/feedback/collect  反馈回流(admin, P4——不受开关影响·人工铁律)
     # P5: GET /dashboard + POST /redteam
 
 鉴权: 管理面 X-Role: admin(43-63号同款口径)。
@@ -25,7 +25,7 @@
       cases)不受 DM61_MODE 影响
     - 决策面(请求接收/评估/推荐/推演):
       off=拒绝(409)
-    - decide/dissent/feedback 与
+    - decide/dissent/feedback/collect 与
       threshold apply 不受开关影响
       (人工铁律+AI 安全机制)
     - KeyError → 404 / ValueError → 409
@@ -492,6 +492,33 @@ async def cases(
             risk=risk,
             limit=max(1, min(
                 int(limit or 10), 50))))
+
+
+@router.post("/feedback/collect")
+async def feedback_collect(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """反馈回流(P4——七类终态信号→44号池
+    双写 decisionId 1:1 幂等+置信度校准
+    预警; 不受开关影响——人工铁律)
+
+    Body: {limit?}"""
+    _require_admin(x_role)
+    from services.dm61_learn_service import (
+        Dm61LearnService,
+    )
+    try:
+        limit = body.get("limit")
+        return await (
+            Dm61LearnService()
+            .collect_feedback(
+                limit=int(limit)
+                if limit is not None
+                else 500))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_dm61_routes(app) -> None:

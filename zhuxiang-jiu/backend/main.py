@@ -451,6 +451,13 @@ async def _on_startup():
     from services.pay60_scheduler import (
         start_scheduler as start_pay60_learn)
     start_pay60_learn()
+    # 61号·AI智能系统升级决策: RLHF 反馈回流 T+1 调度
+    # (七类终态信号+44号池双写+决策置信度
+    #  校准预警;
+    #  DM61_LEARN_MODE=on 开启, 默认 off)
+    from services.dm61_scheduler import (
+        start_scheduler as start_dm61_learn)
+    start_dm61_learn()
 
 
 @app.on_event("shutdown")
