@@ -196,7 +196,7 @@ class Pay60Service:
     @staticmethod
     def build_attribution(
             pay_id: int,
-            intent_id: int = None,
+            intent_id=None,
             session_id: int = None,
             tier: str = None,
             risk_tier: str = None,
@@ -208,12 +208,13 @@ class Pay60Service:
 
         归因 ID 强制铁律: 每笔支付携带
         归因链(45号信值/58号意图联动
-        的数据锚点)
+        的数据锚点); intentId 保留 58号
+        原值(字符串意图标识或 0)
         """
         return {
             "payId": int(pay_id or 0),
             "intentId":
-                int(intent_id or 0),
+                intent_id or 0,
             "sessionId":
                 int(session_id or 0),
             "tier": tier or "standard",
