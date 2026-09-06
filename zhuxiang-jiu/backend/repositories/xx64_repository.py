@@ -265,6 +265,66 @@ class Xx64Repository:
             int(r.get(key_field) or 0)))
         return result[:limit]
 
+    async def _delete(self, kind: str,
+                     key) -> bool:
+        """删除记录(红队自清理——
+        主键定位+索引列表同步
+        摘除)"""
+        table = self._table_of(kind)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.delete(
+                _k("xx64", table, key))
+            await client.lrem(
+                _k("xx64", f"{kind}_all"),
+                0, key)
+            return True
+        self._ensure_store()
+        existed = self.store[
+            table].pop(key, None) \
+            is not None
+        lst = self.store.get(
+            f"_xx64_{kind}_all", [])
+        if key in lst:
+            lst.remove(key)
+        return existed
+
+    async def delete_order(self,
+                           order_id: int
+                           ) -> bool:
+        """删除订单(红队清理)"""
+        return await self._delete(
+            "order", int(order_id))
+
+    async def delete_exchange(
+            self, exchange_id: int
+    ) -> bool:
+        """删除积分兑换记录(红队清理)"""
+        return await self._delete(
+            "points", int(exchange_id))
+
+    async def delete_risk(self,
+                          risk_id: int
+                          ) -> bool:
+        """删除风控事件(红队清理)"""
+        return await self._delete(
+            "risk", int(risk_id))
+
+    async def delete_ledger_pair(
+            self, entry_id: int
+    ) -> int:
+        """删除转移借贷对(两笔
+        同 entryId——红队清理)"""
+        removed = 0
+        for direction in ("debit",
+                          "credit"):
+            key = (f"{int(entry_id)}:"
+                   f"{direction}")
+            if await self._delete(
+                    "ledger", key):
+                removed += 1
+        return removed
+
     # --------------------------------------------------------
     # 订单(orderId)
     # --------------------------------------------------------

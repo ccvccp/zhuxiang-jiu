@@ -31,6 +31,9 @@ import os
 
 from core.helpers import ts
 
+from repositories.backend import (
+    _k, get_redis_client, is_redis_mode,
+)
 from repositories.xx64_repository import (
     Xx64Repository,
 )
@@ -48,6 +51,47 @@ DIRECTION_CREDIT = "credit"  # 卖方增加
 # 转移类型
 TRANSFER_PAY = "pay"              # 支付转移
 TRANSFER_REFUND = "refund"        # 退款反向转移
+
+# 支付互斥锁(asyncio 态——单进程
+# 内存集合; Redis 态走 SET NX)
+_PAY_LOCKS: set = set()
+
+PAY_LOCK_TTL_SECONDS = 60
+
+
+async def _claim_pay(order_id: int) -> bool:
+    """支付占位(并发双花防护
+    ——同订单同时仅一笔支付
+    进行中)
+
+    Redis 态: SET NX+TTL
+    (跨进程互斥); asyncio 态:
+    进程内集合。
+    """
+    oid = int(order_id)
+    if is_redis_mode():
+        client = await get_redis_client()
+        ok = await client.set(
+            _k("xx64", "paylock", oid),
+            "1", nx=True,
+            ex=PAY_LOCK_TTL_SECONDS)
+        return bool(ok)
+    if oid in _PAY_LOCKS:
+        return False
+    _PAY_LOCKS.add(oid)
+    return True
+
+
+async def _release_pay(order_id: int
+                      ) -> None:
+    """释放支付占位"""
+    oid = int(order_id)
+    if is_redis_mode():
+        client = await get_redis_client()
+        await client.delete(
+            _k("xx64", "paylock", oid))
+        return
+    _PAY_LOCKS.discard(oid)
 
 
 def current_mode() -> str:
@@ -150,107 +194,138 @@ class Xx64SettleService:
                 f"{trust_value}——"
                 f"R7 负值禁止)")
 
-        # 原子转移(借贷对——
-        # 贷方先落, 借方失败则
-        # 回滚删除贷方)
-        entry_id = await \
-            self.repo.next_entry_id()
-        credit_record = {
-            "entryId": entry_id,
-            "orderId": int(order_id),
-            "trustId": seller_id,
-            "direction":
-                DIRECTION_CREDIT,
-            "transferType":
-                TRANSFER_PAY,
-            "amount": trust_value,
-            "source": TRANSFER_SOURCE,
-            "balanceBefore": 0.0,
-            "balanceAfter": trust_value,
-            "note": f"卖方收入(订单 "
-                    f"{order_id} 信值"
-                    f"支付 {trust_value})",
-            "createdAt": ts(),
-        }
-        await self.repo.save_ledger(
-            credit_record)
+        # 并发双花防护(支付占位——
+        # 检查后转移前, 同订单同时
+        # 仅一笔进行; Redis 态
+        # SET NX 跨进程互斥)
+        if not await _claim_pay(
+                int(order_id)):
+            raise ValueError(
+                f"订单 {order_id} 支付"
+                f"处理中(并发双花防护)")
         try:
-            debit_record = {
+            # 原子转移(借贷对——
+            # 贷方先落, 借方失败则
+            # 回滚删除贷方)
+            entry_id = await \
+                self.repo.next_entry_id()
+            credit_record = {
                 "entryId": entry_id,
                 "orderId": int(order_id),
-                "trustId": trust_id,
+                "trustId": seller_id,
                 "direction":
-                    DIRECTION_DEBIT,
+                    DIRECTION_CREDIT,
                 "transferType":
                     TRANSFER_PAY,
-                "amount": -trust_value,
+                "amount": trust_value,
                 "source":
                     TRANSFER_SOURCE,
-                "balanceBefore": balance,
-                "balanceAfter": round(
-                    balance - trust_value,
-                    2),
-                "note": f"买方支付(订单 "
+                "balanceBefore": 0.0,
+                "balanceAfter":
+                    trust_value,
+                "note": f"卖方收入(订单 "
                         f"{order_id} 信值"
-                        f"扣减 "
+                        f"支付 "
                         f"{trust_value})",
                 "createdAt": ts(),
             }
             await self.repo.save_ledger(
-                debit_record)
-        except Exception as exc:  # noqa: BLE001
-            # 回滚: 标记贷方已回滚
-            await self.repo.save_ledger({
-                **credit_record,
-                "rolledBack": True,
-                "rollbackReason":
-                    str(exc)[:100],
-            })
-            raise ValueError(
-                f"转移失败已回滚: "
-                f"{str(exc)[:100]}") \
-                from exc
+                credit_record)
+            try:
+                debit_record = {
+                    "entryId": entry_id,
+                    "orderId":
+                        int(order_id),
+                    "trustId": trust_id,
+                    "direction":
+                        DIRECTION_DEBIT,
+                    "transferType":
+                        TRANSFER_PAY,
+                    "amount":
+                        -trust_value,
+                    "source":
+                        TRANSFER_SOURCE,
+                    "balanceBefore":
+                        balance,
+                    "balanceAfter":
+                        round(
+                            balance
+                            - trust_value,
+                            2),
+                    "note": f"买方支付(订单 "
+                            f"{order_id} 信值"
+                            f"扣减 "
+                            f"{trust_value})",
+                    "createdAt": ts(),
+                }
+                await self.repo \
+                    .save_ledger(
+                        debit_record)
+            except Exception as exc:  # noqa: BLE001
+                # 回滚: 标记贷方已回滚
+                await self.repo \
+                    .save_ledger({
+                        **credit_record,
+                        "rolledBack":
+                            True,
+                        "rollbackReason":
+                            str(exc)[:100],
+                    })
+                raise ValueError(
+                    f"转移失败已回滚: "
+                    f"{str(exc)[:100]}") \
+                    from exc
 
-        # 订单状态迁移
-        order.update({
-            "status": "paid",
-            "reserved": False,
-            "paidBy": str(
-                paid_by or "member"),
-            "paidAt": ts(),
-            "updatedAt": ts()})
-        await self.repo.save_order(
-            order, create=False)
-        await self._track("settle", {
-            "action": "pay",
-            "orderId": int(order_id),
-            "entryId": entry_id,
-            "buyerTrustId": trust_id,
-            "sellerId": seller_id,
-            "trustValue": trust_value,
-            "paidBy": paid_by,
-        })
-        return {
-            "success": True,
-            "orderId": int(order_id),
-            "status": "paid",
-            "entryId": entry_id,
-            "trustValue": trust_value,
-            "cashValue": order.get(
-                "cashValue"),
-            "transfer": {
-                "buyerDebit":
-                    -trust_value,
-                "sellerCredit":
+            # 订单状态迁移
+            order.update({
+                "status": "paid",
+                "reserved": False,
+                "paidBy": str(
+                    paid_by
+                    or "member"),
+                "paidAt": ts(),
+                "updatedAt": ts()})
+            await self.repo.save_order(
+                order, create=False)
+            await self._track("settle", {
+                "action": "pay",
+                "orderId": int(order_id),
+                "entryId": entry_id,
+                "buyerTrustId":
+                    trust_id,
+                "sellerId": seller_id,
+                "trustValue":
                     trust_value,
-                "source":
-                    TRANSFER_SOURCE,
-            },
-            "note": "支付完成——买扣卖增"
-                    "原子转移(借贷对 "
-                    f"entryId={entry_id})",
-            "paidAt": order["paidAt"],
-        }
+                "paidBy": paid_by,
+            })
+            return {
+                "success": True,
+                "orderId":
+                    int(order_id),
+                "status": "paid",
+                "entryId": entry_id,
+                "trustValue":
+                    trust_value,
+                "cashValue": order.get(
+                    "cashValue"),
+                "transfer": {
+                    "buyerDebit":
+                        -trust_value,
+                    "sellerCredit":
+                        trust_value,
+                    "source":
+                        TRANSFER_SOURCE,
+                },
+                "note": "支付完成——买扣卖增"
+                        "原子转移(借贷对 "
+                        f"entryId="
+                        f"{entry_id})",
+                "paidAt": order[
+                    "paidAt"],
+            }
+        finally:
+            await _release_pay(
+                int(order_id))
 
     # ============================================================
     # ② 退款(反向转移)

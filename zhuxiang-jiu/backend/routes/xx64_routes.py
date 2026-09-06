@@ -1,6 +1,7 @@
 """64号·信值兑换管理路由(P0-P5)
 
-端点(P4 24; 全期规划 24):
+端点(P5 26——全期收官; 规划 24
++model/status/ledger 观测扩充):
     GET  /api/xx64/registry        刚性规则自描述(admin, 观测面)
     POST /api/xx64/orders         创建订单+锁值(member/admin, 决策面 off 409)
     GET  /api/xx64/orders         订单列表(admin, 观测面)
@@ -25,7 +26,8 @@
     POST /api/xx64/appeals/{id}/review  申诉人工终审(admin, 不受开关影响·人工铁律)
     POST /api/xx64/feedback/collect     手动触发回流(admin, 不受开关影响)
     GET  /api/xx64/learn/status         回流状态+因子聚合(admin, 观测面)
-    # P5: GET /dashboard + POST /redteam
+    GET  /api/xx64/dashboard            四区看板(度量/订单/流通/防御, admin, 观测面)
+    POST /api/xx64/redteam              红队七向量(admin, 决策面 off 409)
 
 鉴权: X-Role: admin 或 member(订单
 创建面向会员——双角色口径)。
@@ -651,6 +653,46 @@ async def learn_status(
     return await (
         Xx64LearnService()
         .learn_status())
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """四区看板(P5——度量/订单/
+    流通/防御+宪法三开关;
+    观测面不受开关影响)"""
+    _require_admin(x_role)
+    from services.xx64_dashboard_service import (
+        Xx64DashboardService,
+    )
+    return await (
+        Xx64DashboardService()
+        .dashboard())
+
+
+@router.post("/redteam")
+async def redteam(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队七向量(P5——RT-01~07
+    攻击仿真+防御断言+自清理;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    from services.xx64_redteam_service import (
+        Xx64RedteamService,
+    )
+    from services.xx64_service import (
+        require_active_mode,
+    )
+    try:
+        require_active_mode()
+        return await (
+            Xx64RedteamService()
+            .run_all())
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_xx64_routes(app) -> None:
