@@ -1,6 +1,6 @@
-"""57号·AI智能知识库路由(P0-P1)
+"""57号·AI智能知识库路由(P0-P2)
 
-端点(P0 6 + P1 3 = 9):
+端点(P0 6 + P1 3 + P2 5 = 14):
     GET  /api/kb57/registry           注册表自描述(admin, 观测面)
     GET  /api/kb57/sources            采集源注册表(admin, 观测面)
     POST /api/kb57/sources/register   采集源注册(admin, 管理)
@@ -10,14 +10,21 @@
     POST /api/kb57/collect/run        定向采集运行(admin, 管理, P1)
     POST /api/kb57/resources/{id}/compliance 三重合规鉴别(admin, 管理, P1)
     GET  /api/kb57/compliance/{id}    合规鉴别报告(admin, 观测面, P1)
+    POST /api/kb57/seeds/craft         种子锻造(admin, 管理, P2)
+    GET  /api/kb57/seeds              种子列表(admin, 观测面, P2)
+    GET  /api/kb57/seeds/{id}         种子详情(admin, 观测面, P2)
+    POST /api/kb57/seeds/{id}/review   种子发布终审(admin, 终审, P2)
+    POST /api/kb57/seeds/{id}/recall   种子紧急召回(admin, 管理, P2)
 
 鉴权: 管理面 X-Role: admin(43-56号同款口径)。
 统一口径:
     - 观测面(registry/sources/gaps/model/status/
-      compliance)不受 KB57_MODE 影响
+      compliance/seeds)不受 KB57_MODE 影响
     - 决策面(gaps/scan+sources/register+collect/run
-      +resources/{id}/compliance): off=拒绝
-      (409——shadow/assist 开放)
+      +resources/{id}/compliance+seeds/craft):
+      off=拒绝(409——shadow/assist 开放)
+    - review/recall(发布链人工动作):
+      不受开关影响(终审人工铁律)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -281,6 +288,120 @@ async def compliance_detail(
             .get_compliance(int(compliance_id)))
     except KeyError as exc:
         raise HTTPException(status_code=404,
+                            detail=str(exc))
+
+
+@router.post("/seeds/craft")
+async def seeds_craft(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """种子锻造(compliant 资源→结构化认知种子
+    sandbox 态——无指纹不入库铁律; P2)"""
+    _require_admin(x_role)
+    from services.kb57_seed_service import (
+        Kb57SeedService,
+    )
+    try:
+        return await Kb57SeedService().craft(
+            gap_id=int(body.get("gapId") or 0),
+            resource_id=int(
+                body.get("resourceId") or 0),
+            seed_type=str(
+                body.get("type") or "text"),
+            value_tags=body.get("valueTags") or [])
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/seeds")
+async def seeds_list(
+        status: str = None,
+        seed_type: str = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """种子列表(版本化+八态状态机——观测面, P2)"""
+    _require_admin(x_role)
+    from services.kb57_seed_service import (
+        Kb57SeedService,
+    )
+    return await Kb57SeedService().list_seeds(
+        status=status, seed_type=seed_type)
+
+
+@router.get("/seeds/{seed_id}")
+async def seeds_detail(
+        seed_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """种子详情(合规指纹+KNOWLEDGE_REASON+多模态
+    content——观测面, P2)"""
+    _require_admin(x_role)
+    from services.kb57_seed_service import (
+        Kb57SeedService,
+    )
+    try:
+        return await Kb57SeedService().get_seed(
+            int(seed_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+
+
+@router.post("/seeds/{seed_id}/review")
+async def seeds_review(
+        seed_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """种子发布终审(published 唯一出口——
+    终审人工铁律不受开关影响; P2)"""
+    _require_admin(x_role)
+    from services.kb57_review_service import (
+        Kb57ReviewService,
+    )
+    try:
+        return await Kb57ReviewService().review(
+            int(seed_id),
+            reviewer=str(
+                body.get("reviewer") or ""),
+            approved=bool(body.get("approved")),
+            note=str(body.get("note") or ""))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/seeds/{seed_id}/recall")
+async def seeds_recall(
+        seed_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """种子紧急召回(误导/过期下架——
+    recalled+受影响用户补偿接口; P2)"""
+    _require_admin(x_role)
+    from services.kb57_review_service import (
+        Kb57ReviewService,
+    )
+    try:
+        return await Kb57ReviewService().recall(
+            int(seed_id),
+            reason=str(body.get("reason") or ""),
+            affected_members=body.get(
+                "affectedMembers") or [])
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
                             detail=str(exc))
 
 

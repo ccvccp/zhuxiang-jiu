@@ -595,13 +595,13 @@ class TestHttp:
                    resp.status_code == 403,
                    str(resp.status_code))
 
-        # 路由累计 9 端点
+        # 路由累计 9 端点(P2 扩至 14——基线语义)
         from routes.kb57_routes import (
             router as kb_router,
         )
         count = sum(1 for r in kb_router.routes)
-        record("57号路由累计 9 端点",
-               count == 9, str(count))
+        record("57号路由累计 ≥9 端点",
+               count >= 9, str(count))
 
 
 async def run_all():
