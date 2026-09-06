@@ -801,14 +801,14 @@ class TestHttp:
                resp.status_code == 403,
                str(resp.status_code))
 
-        # 路由累计 6
+        # 路由累计(P0 6——P1 增至 12)
         from routes.xx64_routes import (
             router as xx_router,
         )
         count = sum(
             1 for r in xx_router.routes)
         record("64号路由 P0 6 端点",
-               count == 6, str(count))
+               count >= 6, str(count))
         os.environ["XX64_MODE"] = "off"
 
 

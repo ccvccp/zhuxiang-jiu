@@ -286,7 +286,8 @@ class Xx64Repository:
             status=status)
 
     # --------------------------------------------------------
-    # 转移账本(entryId——借贷对)
+    # 转移账本(entryId+direction 复合主键
+    # ——借贷对两笔同 entryId 不覆盖)
     # --------------------------------------------------------
 
     async def next_entry_id(self) -> int:
@@ -295,14 +296,41 @@ class Xx64Repository:
     async def save_ledger(self, record: dict,
                           *, create: bool = True
                           ) -> dict:
-        return await self._save(
-            "ledger", record, "entryId",
-            create=create)
+        # 复合键: entryId:direction
+        # (借贷对两笔同 entryId 共存)
+        keyed = dict(record)
+        key = (f"{record['entryId']}:"
+               f"{record['direction']}")
+        table = self._table_of("ledger")
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(
+                transaction=False)
+            pipe.hset(_k("xx64", table, key),
+                      mapping=self._serialize(
+                          keyed))
+            if create:
+                pipe.lpush(
+                    _k("xx64",
+                       "ledger_all"), key)
+            await pipe.execute()
+            return keyed
+        self._ensure_store()
+        self.store[table][key] = dict(keyed)
+        if create:
+            self.store.setdefault(
+                "_xx64_ledger_all",
+                []).insert(0, key)
+        return keyed
 
-    async def get_ledger(self, entry_id: int
-                        ) -> dict | None:
+    async def get_ledger(self, entry_id: int,
+                         direction: str = None
+                         ) -> dict | None:
+        key = str(int(entry_id)) \
+            + (f":{direction}"
+               if direction else "")
         return await self._get(
-            "ledger", int(entry_id))
+            "ledger", key)
 
     async def list_ledger(self,
                           order_id: int = None,

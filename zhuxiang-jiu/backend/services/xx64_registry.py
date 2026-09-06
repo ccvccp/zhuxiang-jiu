@@ -141,7 +141,8 @@ def cumulative_quota(max_snapshot: float) -> float:
 def points_to_trust(points: int) -> float:
     """R6: 积分→信值换算(100:1 整数倍)"""
     points = int(points or 0)
-    if points < POINTS_PER_TRUST:
+    if points < POINTS_PER_TRUST \
+            or points % POINTS_PER_TRUST != 0:
         raise ValueError(
             f"积分兑换须为 {POINTS_PER_TRUST} 的"
             f"整数倍(实际 {points})")
