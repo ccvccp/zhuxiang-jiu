@@ -451,8 +451,11 @@ class TestHttp:
             router as aiup_router,
         )
         count = sum(1 for r in aiup_router.routes)
-        record("56号路由累计 5 端点",
-               count == 5, str(count))
+        # P1 新增 4 端点(plan/tasks/code/assets)
+        # → 5→9(基线语义: ≥5——P0 交付面不因
+        # P1 演进破坏)
+        record("56号路由累计 ≥5 端点(P1 扩至 9)",
+               count >= 5, str(count))
 
 
 class TestConstitution:

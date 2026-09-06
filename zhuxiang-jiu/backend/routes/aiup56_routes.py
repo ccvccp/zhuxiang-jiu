@@ -1,18 +1,22 @@
-"""56号·AI智能升级管理路由(P0)
+"""56号·AI智能升级管理路由(P0+P1)
 
-端点(P0 5):
-    GET  /api/aiup56/registry          注册表自描述(admin, 观测面)
-    POST /api/aiup56/signals/scan      信号采集+决策评估(admin, 管理)
-    GET  /api/aiup56/proposals         提案列表(admin, 观测面)
-    GET  /api/aiup56/proposal/{id}     提案详情(admin, 观测面)
-    GET  /api/aiup56/model/status      模型状态(admin, 观测面)
+端点(P0 5 + P1 4 = 9):
+    GET  /api/aiup56/registry            注册表自描述(admin, 观测面)
+    POST /api/aiup56/signals/scan        信号采集+决策评估(admin, 管理)
+    GET  /api/aiup56/proposals           提案列表(admin, 观测面)
+    GET  /api/aiup56/proposal/{id}       提案详情(admin, 观测面)
+    GET  /api/aiup56/model/status        模型状态(admin, 观测面)
+    POST /api/aiup56/proposals/{id}/plan 规划Agent(admin, P1)
+    GET  /api/aiup56/proposals/{id}/tasks 任务列表(admin, 观测面, P1)
+    POST /api/aiup56/proposals/{id}/code  编码Agent(admin, P1)
+    GET  /api/aiup56/proposals/{id}/assets 资产列表(admin, 观测面, P1)
 
 鉴权: 管理面 X-Role: admin(43-55号同款口径)。
 统一口径:
     - 观测面(registry/proposals/proposal/model/
-      status)不受 AIUP56_MODE 影响
-    - 决策面(signals/scan): off=拒绝(409——
-      shadow/assist 开放)
+      status/tasks/assets)不受 AIUP56_MODE 影响
+    - 决策面(signals/scan+plan+code):
+      off=拒绝(409——shadow/assist 开放)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -115,6 +119,82 @@ async def model_status(
     _require_admin(x_role)
     from services.aiup56_service import Aiup56Service
     return await Aiup56Service().model_status()
+
+
+@router.post("/proposals/{proposal_id}/plan")
+async def plan_proposal(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """规划Agent(任务拆解+依赖分析+信值预估+
+    回滚预案框架——mock/real 三态; off 409)"""
+    _require_admin(x_role)
+    from services.aiup56_plan_service import (
+        Aiup56PlanService,
+    )
+    try:
+        return await Aiup56PlanService().plan(
+            int(proposal_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/proposals/{proposal_id}/tasks")
+async def list_tasks(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """任务列表(规划产出——观测面)"""
+    _require_admin(x_role)
+    from services.aiup56_plan_service import (
+        Aiup56PlanService,
+    )
+    try:
+        return await Aiup56PlanService().list_tasks(
+            int(proposal_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+
+
+@router.post("/proposals/{proposal_id}/code")
+async def code_proposal(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """编码Agent(代码草稿+测试计划+VALUE_REASON
+    注释+资产版本化; off 409)"""
+    _require_admin(x_role)
+    from services.aiup56_code_service import (
+        Aiup56CodeService,
+    )
+    try:
+        return await Aiup56CodeService().code(
+            int(proposal_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/proposals/{proposal_id}/assets")
+async def list_assets(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """资产列表(版本化资产包——观测面)"""
+    _require_admin(x_role)
+    from services.aiup56_code_service import (
+        Aiup56CodeService,
+    )
+    return await Aiup56CodeService().list_assets(
+        int(proposal_id))
 
 
 def register_aiup56_routes(app) -> None:

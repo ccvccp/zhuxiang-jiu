@@ -47,9 +47,11 @@ class Aiup56Repository:
     _JSON_DICT_FIELDS = ("signalSnapshot", "context",
                          "scoring", "summary",
                          "riskAssessment", "detail",
-                         "factors")
+                         "factors", "rollbackPlan",
+                         "testPlan", "draftBundle")
     _JSON_LIST_FIELDS = ("tasks", "evidence",
-                         "confirmations")
+                         "confirmations", "drafts",
+                         "testPlans", "VALUE_REASONs")
     _BOOL_FIELDS = ("escalated", "dualReview")
 
     # 提案状态机九态(计划 §五)
