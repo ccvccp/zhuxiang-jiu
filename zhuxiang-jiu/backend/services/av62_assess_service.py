@@ -54,10 +54,14 @@ MODEL_VERSION = "v1-av62-assess"
 SCORER_ID = "asset_valuation"
 
 # 状态机: 评估允许源态(assessing 容留
-# ——中断重试幂等语义)
+# ——中断重试幂等语义; disputed 申诉
+# 重估唯一入口——P3; decaying/
+# reactivated/adjusted 全周期重估)
 ASSESS_FROM_STATES = (
     "registered", "assessing", "assessed",
-    "active", "pending_review")
+    "active", "pending_review",
+    "disputed", "decaying",
+    "reactivated", "adjusted")
 
 # 置信度三档(证据完整度阈值+系数)
 CONFIDENCE_HIGH = 0.8

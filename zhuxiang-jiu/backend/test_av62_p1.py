@@ -509,20 +509,21 @@ class TestStateMachine:
                == "active",
                str(r2.get("version")))
 
-        # 状态机拒绝(disputed)
+        # disputed 态评估容许
+        # (P3 语义——申诉重估唯一入口)
         asset = await repo.get_asset(
             a1["assetId"])
         asset["status"] = "disputed"
         await repo.save_asset(
             asset, create=False)
-        try:
-            await svc.assess_asset(
-                a1["assetId"])
-            ok, err = False, "未拒绝"
-        except ValueError:
-            ok, err = True, ""
-        record("disputed 态评估拒绝",
-               ok, err)
+        r3_disputed = await svc \
+            .assess_asset(a1["assetId"])
+        record("disputed 态评估容许"
+               "(申诉重估入口)",
+               r3_disputed.get(
+                   "version") == 3,
+               str(r3_disputed.get(
+                   "version")))
 
         # 不存在资产
         try:
@@ -539,8 +540,8 @@ class TestStateMachine:
             e for e in evs
             if e.get("eventType")
             == "assess"]
-        record("事件链(assess×2)",
-               len(assess_evs) == 2,
+        record("事件链(assess×3)",
+               len(assess_evs) == 3,
                str(len(assess_evs)))
         os.environ["AV62_MODE"] = "off"
 

@@ -1030,15 +1030,15 @@ class TestHttp:
                    resp.status_code == 403,
                    str(resp.status_code))
 
-        # 路由累计(P2——含场景折算
-        # convert 附加端点)
+        # 路由累计(P2 14——后续期
+        # 递增至 20+)
         from routes.av62_routes import (
             router as av_router,
         )
         count = sum(
             1 for r in av_router.routes)
         record("62号路由 P2 14 端点",
-               count == 14, str(count))
+               count >= 14, str(count))
         os.environ["AV62_MODE"] = "off"
 
 

@@ -63,7 +63,10 @@ class Av62Repository:
         "assessmentId", "appealCount",
         "version", "changeId",
         "idleDays", "halfLifeDays",
-        "frequencyCap", "usageCount")
+        "frequencyCap", "usageCount",
+        "sampleCount", "groupCount",
+        "originalAssessId",
+        "reestimatedAssessId")
     _FLOAT_FIELDS = (
         "contribution", "riskDeduction",
         "netContribution", "confidence",
@@ -75,23 +78,31 @@ class Av62Repository:
         "completeness", "groundedRate",
         "weightedScore", "scenarioValue",
         "deltaPct", "decayedValue",
-        "scenarioMultiplier", "factor")
+        "scenarioMultiplier", "factor",
+        "meanAll", "meanDiffRatio",
+        "passRateGap", "finalDelta",
+        "originalValue",
+        "reestimatedValue",
+        "finalValue")
     _JSON_DICT_FIELDS = (
         "evidence", "factors", "reason",
         "attribution", "detail", "context",
         "config", "thresholds", "result",
         "liquidity", "appeal", "correction",
         "extra", "stats", "snapshot",
-        "impact", "summary")
+        "impact", "summary",
+        "newEvidence", "originalEvidence")
     _JSON_LIST_FIELDS = (
         "auditTrail", "domains", "findings",
         "signals", "history", "tags",
-        "evidenceFields", "rejectedFields")
+        "evidenceFields", "rejectedFields",
+        "groups", "skippedGroups")
     _BOOL_FIELDS = (
         "negative", "grounded",
         "overturned", "pooled",
         "escalated", "spotCheck",
-        "verified")
+        "verified", "flagged",
+        "insufficient")
 
     _TABLE_BY_KIND = {
         "asset": TABLE_ASSETS,
@@ -219,6 +230,18 @@ class Av62Repository:
         rec = self.store[table].get(key)
         return dict(rec) if rec else None
 
+    # 表主键字段(排序依据——泛型
+    # _list 的倒序键; assessment 表
+    # 主键为 assessId 非 assessmentId)
+    _KEY_FIELD_BY_KIND = {
+        "asset": "assetId",
+        "assessment": "assessId",
+        "liquidity": "assetId",
+        "appeal": "appealId",
+        "fairness": "reportId",
+        "event": "eventId",
+    }
+
     async def _list(self, table_kind: str,
                     limit: int = 100,
                     **filters) -> list[dict]:
@@ -250,9 +273,12 @@ class Av62Repository:
                 result = [r for r in result
                           if r.get(field)
                           == value]
+        key_field = \
+            self._KEY_FIELD_BY_KIND.get(
+                table_kind,
+                f"{table_kind}Id")
         result.sort(key=lambda r: -(
-            int(r.get(f"{table_kind}Id")
-                or 0)))
+            int(r.get(key_field) or 0)))
         return result[:limit]
 
     # --------------------------------------------------------
@@ -384,6 +410,18 @@ class Av62Repository:
                            ) -> dict | None:
         return await self._get(
             "fairness", int(report_id))
+
+    async def list_fairness(self,
+                           limit: int = 10
+                           ) -> list[dict]:
+        """公平报告列表(reportId 倒序
+        ——P3 观测面/审计历史)"""
+        records = await self._list(
+            "fairness", int(limit or 10))
+        records.sort(
+            key=lambda r: -int(
+                r.get("reportId") or 0))
+        return records
 
     # --------------------------------------------------------
     # 阈值配置域(tier 键——P2)

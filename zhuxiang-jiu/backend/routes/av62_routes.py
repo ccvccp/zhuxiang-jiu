@@ -1,6 +1,6 @@
 """62号·AI智能无形资产估值路由(P0-P5)
 
-端点(P2 14; 全期规划):
+端点(P3 20; 全期规划):
     GET  /api/av62/registry          注册表自描述(admin, 观测面)
     POST /api/av62/assets            资产登记(admin, 决策面 off 409)
     GET  /api/av62/assets            资产列表(admin, 观测面)
@@ -15,7 +15,12 @@
     POST /api/av62/activate          衰减重激活(admin, 决策面 off 409)
     POST /api/av62/threshold/calibrate 阈值校准(管理+终审双模)
     GET  /api/av62/thresholds        阈值视图(admin, 观测面)
-    # P3: POST /appeals + /appeals/{id}/review + GET /fairness/report
+    POST /api/av62/appeals           申诉提交(不受开关影响)
+    GET  /api/av62/appeals           申诉列表(admin, 观测面)
+    GET  /api/av62/appeals/{id}      申诉详情(admin, 观测面)
+    POST /api/av62/appeals/{id}/review 申诉裁决(终审, 人工铁律)
+    GET  /api/av62/fairness/report   公平审计报告(admin, 观测面)
+    POST /api/av62/fairness/audit    触发公平审计(管理面)
     # P4: POST /feedback/collect
     # P5: GET /dashboard + POST /redteam
 
@@ -23,12 +28,13 @@
 统一口径(计划 §六):
     - 观测面(registry/assets 列表与
       详情/model status/assessments/
-      scenarios 表/thresholds)不受
-      AV62_MODE 影响
+      scenarios 表/thresholds/
+      fairness report)不受 AV62_MODE
+      影响
     - 决策面(资产登记/估值引擎/场景
       折算/压测/激活): off=拒绝(409)
-    - 后续: 申诉/终审/回流不受开关
-      影响(人工铁律)
+    - 申诉提交/裁决不受开关影响
+      (人工铁律)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -413,6 +419,157 @@ async def thresholds(
     )
     return await Av62ThresholdService() \
         .thresholds_view()
+
+
+@router.post("/appeals")
+async def submit_appeal(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """申诉提交(P3——异议+补充证据+
+    自动重估; 不受开关影响)
+
+    Body: {assetId, reason,
+    newEvidence? {封闭字段}, appealedBy?
+    (会员/管理员标识)}"""
+    _require_admin(x_role)
+    from services.av62_appeal_service import (
+        Av62AppealService,
+    )
+    try:
+        new_evidence = body.get(
+            "newEvidence")
+        return await (
+            Av62AppealService()
+            .submit_appeal(
+                asset_id=int(
+                    body.get("assetId")
+                    or 0),
+                reason=str(
+                    body.get("reason")
+                    or ""),
+                new_evidence=new_evidence
+                if isinstance(
+                    new_evidence, dict)
+                else {},
+                appealed_by=str(
+                    body.get("appealedBy")
+                    or "member")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/appeals/{appeal_id}/review")
+async def review_appeal(
+        appeal_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """申诉裁决(P3——终审人工铁律,
+    不受开关影响; uphold 维持/
+    overturn 翻转+留痕)
+
+    Body: {decision(uphold/overturn),
+    reviewedBy, reviewNote}"""
+    _require_admin(x_role)
+    from services.av62_appeal_service import (
+        Av62AppealService,
+    )
+    try:
+        return await (
+            Av62AppealService()
+            .review_appeal(
+                appeal_id=int(appeal_id),
+                decision=str(
+                    body.get("decision")
+                    or ""),
+                reviewed_by=str(
+                    body.get("reviewedBy")
+                    or ""),
+                review_note=str(
+                    body.get("reviewNote")
+                    or "")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/appeals")
+async def appeals(
+        asset_id: int = None,
+        status: str = None,
+        limit: int = 100,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """申诉列表(三态分布+翻转率
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.av62_appeal_service import (
+        Av62AppealService,
+    )
+    return await Av62AppealService() \
+        .list_appeals(
+            asset_id=asset_id,
+            status=status, limit=limit)
+
+
+@router.get("/appeals/{appeal_id}")
+async def get_appeal(
+        appeal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """申诉详情(原值/重估值/裁决留痕
+    ——观测面; 不存在 404)"""
+    _require_admin(x_role)
+    from services.av62_appeal_service import (
+        Av62AppealService,
+    )
+    try:
+        return await (
+            Av62AppealService()
+            .get_appeal(appeal_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+
+
+@router.get("/fairness/report")
+async def fairness_report(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """公平审计报告(分角色估值分布
+    ——46号 fairness 口径; 观测面)"""
+    _require_admin(x_role)
+    from services.av62_fairness_service import (
+        Av62FairnessService,
+    )
+    return await Av62FairnessService() \
+        .get_report()
+
+
+@router.post("/fairness/audit")
+async def fairness_audit(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """触发公平审计(P3——管理面
+    手动触发; 不受开关影响)"""
+    _require_admin(x_role)
+    from services.av62_fairness_service import (
+        Av62FairnessService,
+    )
+    return await Av62FairnessService() \
+        .run_audit(
+            triggered_by=str(
+                body.get("triggeredBy")
+                or "admin"))
 
 
 def register_av62_routes(app) -> None:
