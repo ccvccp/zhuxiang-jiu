@@ -6,15 +6,15 @@
 <title>竹香酒官网 · 64号信值兑换管理 六期全链交付可视化</title>
 <style>
     :root {
-        --green-dark: #355c44;
-        --green: #4a7c59;
-        --green-light: #6fa87f;
-        --accent: #c9a961;
-        --bg: #f7f8f6;
+        --green-dark: #1a4a3a;
+        --green: #3d7a5c;
+        --green-light: #7ab8a0;
+        --accent: #2e8b6e;
+        --bg: #f6f9f7;
         --card: #ffffff;
-        --border: #e3e7e1;
-        --text: #2c332b;
-        --text-light: #7a8279;
+        --border: #dfe9e3;
+        --text: #22322b;
+        --text-light: #758580;
         --danger: #c0564f;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -25,7 +25,7 @@
 
     /* ========= 横幅 ========= */
     .banner {
-        background: linear-gradient(135deg, #355c44 0%, #4a7c59 60%, #5d9270 100%);
+        background: linear-gradient(135deg, #123a2d 0%, #1a4a3a 45%, #2e8b6e 100%);
         color: #fff; padding: 44px 20px; text-align: center;
     }
     .banner h1 { font-size: 28px; letter-spacing: 2px; }
@@ -45,7 +45,7 @@
     }
     .stat {
         background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-        padding: 20px 10px; text-align: center; box-shadow: 0 4px 14px rgba(53,92,68,.08);
+        padding: 20px 10px; text-align: center; box-shadow: 0 4px 14px rgba(26,74,58,.08);
     }
     .stat .v { font-size: 30px; font-weight: 800; color: var(--green-dark); }
     .stat .l { font-size: 12px; color: var(--text-light); margin-top: 4px; }
@@ -61,7 +61,7 @@
     .section > .desc { font-size: 13px; color: var(--text-light); margin: -8px 0 16px 16px; }
     .card {
         background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-        padding: 22px; box-shadow: 0 2px 8px rgba(53,92,68,.05);
+        padding: 22px; box-shadow: 0 2px 8px rgba(26,74,58,.05);
     }
 
     /* ========= 六期时间线 ========= */
@@ -69,10 +69,10 @@
     .phase {
         flex: 1 1 150px; min-width: 150px; position: relative;
         border: 1px solid var(--border); border-radius: 10px;
-        padding: 16px 12px 14px; background: linear-gradient(180deg, #fff, #f6faf7);
+        padding: 16px 12px 14px; background: linear-gradient(180deg, #fff, #f2f8f4);
         transition: transform .2s, box-shadow .2s;
     }
-    .phase:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(53,92,68,.15); }
+    .phase:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(26,74,58,.15); }
     .phase .no {
         display: inline-flex; align-items: center; justify-content: center;
         width: 34px; height: 34px; border-radius: 50%;
@@ -98,9 +98,9 @@
         position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
         font-size: 11px; font-weight: 700; color: var(--green-dark); white-space: nowrap;
     }
-    .bar.a { background: linear-gradient(180deg, #6fa87f, #4a7c59); }
-    .bar.b { background: linear-gradient(180deg, #dcc489, #c9a961); }
-    .bar.b .tip { color: #a2823a; }
+    .bar.a { background: linear-gradient(180deg, #7ab8a0, #3d7a5c); }
+    .bar.b { background: linear-gradient(180deg, #52b28e, #2e8b6e); }
+    .bar.b .tip { color: #1f6b52; }
     .bar-label { margin-top: 8px; font-size: 12px; color: var(--text); font-weight: 600; }
     .bar-sub { font-size: 10px; color: var(--text-light); }
 
@@ -118,17 +118,17 @@
     .layer .ln { font-weight: 800; font-size: 13px; min-width: 64px; }
     .layer .lt { font-size: 13px; font-weight: 600; min-width: 110px; }
     .layer .ld { font-size: 11.5px; opacity: .92; flex: 1; }
-    .l5 { background: linear-gradient(90deg, #c9a961, #b8975a); }
-    .l4 { background: linear-gradient(90deg, #5d9270, #4a7c59); }
-    .l3 { background: linear-gradient(90deg, #4a7c59, #3d6c4c); }
-    .l2 { background: linear-gradient(90deg, #3d6c4c, #355c44); }
-    .l1 { background: linear-gradient(90deg, #355c44, #2c4d3a); }
-    .l0 { background: linear-gradient(90deg, #2c4d3a, #24402f); }
+    .l5 { background: linear-gradient(90deg, #3a9b7a, #2e8b6e); }
+    .l4 { background: linear-gradient(90deg, #2e8b6e, #3d7a5c); }
+    .l3 { background: linear-gradient(90deg, #3d7a5c, #2f6049); }
+    .l2 { background: linear-gradient(90deg, #2f6049, #24523f); }
+    .l1 { background: linear-gradient(90deg, #24523f, #1a4a3a); }
+    .l0 { background: linear-gradient(90deg, #1a4a3a, #123a2d); }
 
     /* ========= 红队向量 ========= */
     .rt-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
     .rt-table th {
-        background: #eef4ef; color: var(--green-dark); text-align: left;
+        background: #eaf4ee; color: var(--green-dark); text-align: left;
         padding: 10px 12px; border-bottom: 2px solid var(--border); font-size: 12px;
     }
     .rt-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
@@ -137,19 +137,19 @@
         display: inline-block; padding: 2px 10px; border-radius: 10px;
         font-size: 11px; font-weight: 700;
     }
-    .badge.ok { background: #e8f4ec; color: #2e7d4f; }
-    .badge.rule { background: #eef4ef; color: var(--green-dark); }
+    .badge.ok { background: #e6f4ec; color: #1f6b52; }
+    .badge.rule { background: #eaf4ee; color: var(--green-dark); }
 
     /* ========= 铁律矩阵 ========= */
     .matrix { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
     .mx {
         border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
-        background: #fdfefc; display: flex; gap: 12px; align-items: flex-start;
+        background: #fcfefc; display: flex; gap: 12px; align-items: flex-start;
     }
     .mx .ic {
         width: 34px; height: 34px; border-radius: 8px; flex: none;
         display: flex; align-items: center; justify-content: center;
-        background: #e8f4ec; color: var(--green-dark); font-size: 16px; font-weight: 800;
+        background: #e6f4ec; color: var(--green-dark); font-size: 16px; font-weight: 800;
     }
     .mx h4 { font-size: 13px; color: var(--green-dark); }
     .mx p { font-size: 11.5px; color: var(--text-light); margin-top: 3px; }
@@ -157,7 +157,7 @@
     /* ========= 结语 ========= */
     .footer-quote {
         margin-top: 46px; text-align: center; padding: 34px 20px;
-        background: linear-gradient(135deg, #355c44, #4a7c59);
+        background: linear-gradient(135deg, #1a4a3a, #3d7a5c);
         border-radius: 12px; color: #fff;
     }
     .footer-quote p { font-size: 16px; letter-spacing: 1px; }
@@ -239,8 +239,8 @@
         <h2>质量验证规模（专项断言 vs 实机验收）</h2>
         <div class="card">
             <div class="chart-legend">
-                <span><i style="background:#4a7c59"></i>专项测试断言（本地）</span>
-                <span><i style="background:#c9a961"></i>Docker 实机验收（真实 Redis 态 ×2 轮幂等）</span>
+                <span><i style="background:#3d7a5c"></i>专项测试断言（本地）</span>
+                <span><i style="background:#2e8b6e"></i>Docker 实机验收（真实 Redis 态 ×2 轮幂等）</span>
             </div>
             <div class="bars">
                 <div class="bar-group">
@@ -308,29 +308,29 @@
                 <text x="42" y="49"  font-size="10" fill="#7a8279" text-anchor="end">24</text>
                 <defs>
                     <linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stop-color="rgba(74,124,89,.30)"/>
-                        <stop offset="100%" stop-color="rgba(74,124,89,.02)"/>
+                        <stop offset="0%" stop-color="rgba(61,122,92,.30)"/>
+                        <stop offset="100%" stop-color="rgba(61,122,92,.02)"/>
                     </linearGradient>
                 </defs>
                 <path d="M80,180 L200,166.5 L320,157 L440,101.5 L560,21.5 L560,180 L80,180 Z" fill="url(#lg)"/>
                 <polyline points="80,180 200,166.5 320,157 440,101.5 560,21.5"
-                          fill="none" stroke="#4a7c59" stroke-width="2.5" stroke-linejoin="round"/>
-                <g fill="#4a7c59">
+                          fill="none" stroke="#3d7a5c" stroke-width="2.5" stroke-linejoin="round"/>
+                <g fill="#3d7a5c">
                     <circle cx="80"  cy="180"   r="4"/><circle cx="200" cy="166.5" r="4"/>
                     <circle cx="320" cy="157"   r="4"/><circle cx="440" cy="101.5" r="4"/>
-                    <circle cx="560" cy="21.5"  r="5" fill="#c9a961"/>
+                    <circle cx="560" cy="21.5"  r="5" fill="#2e8b6e"/>
                 </g>
-                <text x="80"  y="170" font-size="11" fill="#355c44" text-anchor="middle" font-weight="700">6</text>
-                <text x="200" y="156" font-size="11" fill="#355c44" text-anchor="middle" font-weight="700">12</text>
-                <text x="320" y="147" font-size="11" fill="#355c44" text-anchor="middle" font-weight="700">14</text>
-                <text x="440" y="91"  font-size="11" fill="#355c44" text-anchor="middle" font-weight="700">24</text>
-                <text x="560" y="12"  font-size="12" fill="#a2823a" text-anchor="middle" font-weight="800">26</text>
+                <text x="80"  y="170" font-size="11" fill="#1a4a3a" text-anchor="middle" font-weight="700">6</text>
+                <text x="200" y="156" font-size="11" fill="#1a4a3a" text-anchor="middle" font-weight="700">12</text>
+                <text x="320" y="147" font-size="11" fill="#1a4a3a" text-anchor="middle" font-weight="700">14</text>
+                <text x="440" y="91"  font-size="11" fill="#1a4a3a" text-anchor="middle" font-weight="700">24</text>
+                <text x="560" y="12"  font-size="12" fill="#1f6b52" text-anchor="middle" font-weight="800">26</text>
                 <text x="80"  y="198" font-size="11" fill="#7a8279" text-anchor="middle">P0</text>
                 <text x="200" y="198" font-size="11" fill="#7a8279" text-anchor="middle">P1</text>
                 <text x="320" y="198" font-size="11" fill="#7a8279" text-anchor="middle">P2</text>
                 <text x="440" y="198" font-size="11" fill="#7a8279" text-anchor="middle">P4</text>
                 <text x="560" y="198" font-size="11" fill="#7a8279" text-anchor="middle">P5 收官</text>
-                <text x="560" y="212" font-size="9" fill="#a2823a" text-anchor="middle">规划 24 + 观测扩充 2</text>
+                <text x="560" y="212" font-size="9" fill="#1f6b52" text-anchor="middle">规划 24 + 观测扩充 2</text>
             </svg>
         </div>
     </div>
