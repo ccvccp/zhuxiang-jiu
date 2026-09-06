@@ -1,4 +1,4 @@
-﻿"""46号·AI 治理与合规中枢 P5 专项测试(治理看板与干预通道)
+"""46号·AI 治理与合规中枢 P5 专项测试(治理看板与干预通道)
 
 运行方式:
     python test_ai_governance_p5.py
@@ -98,13 +98,13 @@ class TestZones:
 
         # ① 档案总览
         z = await svc._zone_registry()
-        record("①总数31", z["total"] == 31, str(z["total"]))
+        record("①总数32", z["total"] == 32, str(z["total"]))
         record("①active分布",
-               z["byStatus"]["active"] == 31
+               z["byStatus"]["active"] == 32
                and z["byStatus"]["frozen"] == 0,
                str(z["byStatus"]))
-        record("①batch覆盖15",
-               len(z["byBatch"]) == 15,
+        record("①batch覆盖16",
+               len(z["byBatch"]) == 16,
                str(len(z["byBatch"])))
         record("①无冻结档案",
                z["frozenScorers"] == [],
@@ -299,7 +299,7 @@ class TestFailSoft:
                    str(r["zones"]["fairness"])[:60])
             record("其余区块照常",
                    (r["zones"]["registry"] or {})
-                   .get("total") == 31,
+                   .get("total") == 32,
                    str(r["zones"].get("registry"))[:40])
         finally:
             svc._zone_fairness = orig

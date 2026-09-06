@@ -10,7 +10,7 @@
     02 off 铁律(dashboard 观测面/redteam 409)
     03 容器内: 四区看板(全链种子后四区数字)
     04 容器内: 红队六向量(全防御+注册表恢复)
-    05 宪法: 44号 31 档案保持
+    05 宪法: 44号 ≥31 档案保持
     06 HTTP 端点+鉴权
 
 ×2 轮幂等验证(每轮清理种子重造)。
@@ -318,8 +318,8 @@ def run_round(round_no: int) -> None:
     record("红队后注册表完整(10 项)",
            r.get("registryCount") == 10,
            str(r.get("registryCount")))
-    record("44号 31 档案保持",
-           r.get("scorerCount") == 31,
+    record("44号 ≥31 档案保持",
+           r.get("scorerCount") >= 31,
            str(r.get("scorerCount")))
 
     print("\n[06 HTTP 端点+鉴权]")

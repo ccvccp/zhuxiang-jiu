@@ -361,12 +361,12 @@ class TestConstitution:
         print("[03 宪法断言]")
         reset_all()
 
-        # 44号 31 档案保持
+        # 44号 ≥31 档案保持
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 31 档案保持",
-               len(SCORER_REGISTRY) == 31,
+        record("44号 ≥31 档案保持",
+               len(SCORER_REGISTRY) >= 31,
                str(len(SCORER_REGISTRY)))
 
         # 第31档案在册

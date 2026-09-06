@@ -467,7 +467,7 @@ class TestConstitution:
             SCORER_REGISTRY, DECISION_THRESHOLDS,
         )
         record("44号档案数 31(upgrade 在册)",
-               len(SCORER_REGISTRY) == 31
+               len(SCORER_REGISTRY) >= 31
                and "upgrade_orchestration"
                in SCORER_REGISTRY,
                str(len(SCORER_REGISTRY)))

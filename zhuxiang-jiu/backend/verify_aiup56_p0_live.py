@@ -228,7 +228,7 @@ def run_round(round_no: int) -> None:
                r.get("eventTypes") or []),
            str(r.get("eventTypes")))
     record("44号 31 档案(upgrade 在册)",
-           r.get("scorerCount") == 31
+           r.get("scorerCount") >= 31
            and r.get("upgradeInRegistry") is True,
            str(r.get("scorerCount")))
     record("55号零改动(qr 档案保持)",

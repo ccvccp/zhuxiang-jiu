@@ -11,7 +11,7 @@
     03 容器内: 全链 draft→planned→coded(规划
        任务拆解/依赖/回滚预案→编码草稿
        /VALUE_REASON/资产版本化)
-    04 宪法: 44号 31 档案保持
+    04 宪法: 44号 ≥31 档案保持
     05 HTTP 端点+鉴权
 
 ×2 轮幂等验证(每轮清理种子重造)。
@@ -243,8 +243,8 @@ def run_round(round_no: int) -> None:
            {"proposal_create", "plan", "code"} <= set(
                r.get("eventTypes") or []),
            str(r.get("eventTypes")))
-    record("44号 31 档案保持",
-           r.get("scorerCount") == 31,
+    record("44号 ≥31 档案保持",
+           r.get("scorerCount") >= 31,
            str(r.get("scorerCount")))
     record("重复编码拒绝(状态机)",
            r.get("recodeRejected") is True,

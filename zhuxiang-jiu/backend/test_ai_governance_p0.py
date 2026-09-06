@@ -1,4 +1,4 @@
-﻿"""46号·AI 治理与合规中枢 P0 专项测试
+"""46号·AI 治理与合规中枢 P0 专项测试
 
 运行方式:
     python test_ai_governance_p0.py
@@ -60,10 +60,10 @@ class TestSync:
         record("29档案全量入册",
                r["discovered"] == len(SCORER_REGISTRY)
                and r["added"] == len(SCORER_REGISTRY)
-               and len(SCORER_REGISTRY) == 31,
+               and len(SCORER_REGISTRY) == 32,
                f"added={r.get('added')} "
                f"total={len(SCORER_REGISTRY)}")
-        record("批次覆盖1-15", r["discovered"] == 31,
+        record("批次覆盖1-16", r["discovered"] == 32,
                str(r.get("discovered")))
 
         # 幂等: 再同步 diff 归零
@@ -75,11 +75,11 @@ class TestSync:
 
         # 台账分布
         reg = await svc.list_registry()
-        record("台账统计", reg["total"] == 31
-               and reg["byStatus"].get("active") == 31,
+        record("台账统计", reg["total"] == 32
+               and reg["byStatus"].get("active") == 32,
                str(reg.get("byStatus")))
         record("批次分布", sum(
-            (reg.get("byBatch") or {}).values()) == 31,
+            (reg.get("byBatch") or {}).values()) == 32,
                str(reg.get("byBatch")))
 
         # 治理状态保留: 手动 frozen 后重扫不覆盖
@@ -363,19 +363,19 @@ class TestHttp:
         record("同步缺Role403", resp.status_code == 403,
                str(resp.status_code))
 
-        # 同步 200(31 档案)
+        # 同步 200(32 档案)
         resp = client.post("/api/ai-gov/registry/sync",
                            headers=admin)
         body = resp.json()
         record("同步200", resp.status_code == 200
-               and body.get("added") == 31,
+               and body.get("added") == 32,
                str(body)[:70])
 
         # 台账 200 + 过滤
         resp = client.get("/api/ai-gov/registry",
                           headers=admin)
         record("台账200", resp.status_code == 200
-               and resp.json().get("total") == 31,
+               and resp.json().get("total") == 32,
                str(resp.json().get("total")))
         resp = client.get(
             "/api/ai-gov/registry?status=active&batch=12",

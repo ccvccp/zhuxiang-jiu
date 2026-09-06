@@ -11,7 +11,7 @@
     03 容器内: 全链 draft→planned→coded→tested
        (用例矩阵+三关全过)
     04 容器内: 预算熔断流(budget_halted→blocked)
-    05 宪法: 44号 31 档案保持
+    05 宪法: 44号 ≥31 档案保持
     06 HTTP 端点+鉴权
 
 ×2 轮幂等验证(每轮清理种子重造)。
@@ -245,8 +245,8 @@ def run_round(round_no: int) -> None:
             "test"} <= set(
                r.get("eventTypes") or []),
            str(r.get("eventTypes")))
-    record("44号 31 档案保持",
-           r.get("scorerCount") == 31,
+    record("44号 ≥31 档案保持",
+           r.get("scorerCount") >= 31,
            str(r.get("scorerCount")))
 
     print("\n[06 HTTP 端点+鉴权]")

@@ -12,7 +12,7 @@
        序列化读回)→语义回滚+45号 L2 补偿
     04 容器内: 决策回流(七类信号+44号池
        双写+幂等)
-    05 宪法: 44号 31 档案保持
+    05 宪法: 44号 ≥31 档案保持
     06 HTTP 端点+鉴权
 
 ×2 轮幂等验证(每轮清理种子重造)。
@@ -393,8 +393,8 @@ def run_round(round_no: int) -> None:
             "rollback", "learn_signal"} <= set(
                r.get("eventTypes") or []),
            str(r.get("eventTypes")))
-    record("44号 31 档案保持",
-           r.get("scorerCount") == 31,
+    record("44号 ≥31 档案保持",
+           r.get("scorerCount") >= 31,
            str(r.get("scorerCount")))
 
     print("\n[06 HTTP 端点+鉴权]")

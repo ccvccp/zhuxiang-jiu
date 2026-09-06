@@ -12,7 +12,7 @@
        +一票否决 mock 归因)
     04 容器内: 审批面板(强制确认+双人复核
        +批准/驳回流)
-    05 宪法: 44号 31 档案保持
+    05 宪法: 44号 ≥31 档案保持
     06 HTTP 端点+鉴权
 
 ×2 轮幂等验证(每轮清理种子重造)。
@@ -289,8 +289,8 @@ def run_round(round_no: int) -> None:
             "test", "audit", "approve"} <= set(
                r.get("eventTypes") or []),
            str(r.get("eventTypes")))
-    record("44号 31 档案保持",
-           r.get("scorerCount") == 31,
+    record("44号 ≥31 档案保持",
+           r.get("scorerCount") >= 31,
            str(r.get("scorerCount")))
 
     print("\n[06 HTTP 端点+鉴权]")
