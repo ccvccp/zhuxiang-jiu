@@ -1,6 +1,6 @@
-"""58号→59号·AI智能服务编排路由(P0-P1)
+"""58号→59号·AI智能服务编排路由(P0-P2)
 
-端点(P0 5 + P1 4 = 9):
+端点(P0 5 + P1 4 + P2 4 = 13):
     GET  /api/ii59/registry            注册表自描述(admin, 观测面)
     POST /api/ii59/sessions            开话(admin, 决策面 off 409)
     GET  /api/ii59/sessions/{id}        会话详情(admin, 观测面)
@@ -10,13 +10,21 @@
     POST /api/ii59/sessions/{id}/advance 步骤推进(admin, 决策面, P1)
     POST /api/ii59/sessions/{id}/escalate 人工接管(admin, 终审铁律, P1)
     POST /api/ii59/sessions/{id}/close  闭话+满意度(admin, 终审铁律, P1)
+    POST /api/ii59/search               语义检索(admin, 决策面, P2)
+    GET  /api/ii59/search/history       检索历史(admin, 观测面, P2)
+    POST /api/ii59/search/{logId}/adopt 采纳反馈(会员, 会员面, P2)
+    GET  /api/ii59/recommend            推荐流(会员, 会员面, P2)
 
-鉴权: 管理面 X-Role: admin(43-58号同款口径)。
+鉴权: 管理面 X-Role: admin(43-58号同款口径);
+会员面 X-Member-Id(48号惯例)。
 统一口径:
-    - 观测面(registry/sessions/model/status)
-      不受 II59_MODE 影响
-    - 决策面(sessions 开话/route/advance):
-      off=拒绝(409——shadow/assist 开放)
+    - 观测面(registry/sessions/model/status/
+      search/history)不受 II59_MODE 影响
+    - 决策面(sessions 开话/route/advance/
+      search): off=拒绝(409——shadow/assist
+      开放)
+    - 会员面(adopt/recommend): 需 assist
+      (off/shadow 409)
     - escalate/close(客服兜底人工铁律):
       不受开关影响
     - KeyError → 404 / ValueError → 409
@@ -32,6 +40,25 @@ def _require_admin(x_role: str | None) -> str:
     if not x_role or x_role != "admin":
         raise HTTPException(status_code=403,
                             detail="需要 X-Role: admin")
+
+
+def _require_member(x_member_id: str | None) -> int:
+    """会员面鉴权(X-Member-Id——48号惯例)"""
+    if not x_member_id:
+        raise HTTPException(
+            status_code=403,
+            detail="需要 X-Member-Id")
+    try:
+        member_id = int(x_member_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=403,
+            detail="X-Member-Id 需为整数")
+    if member_id <= 0:
+        raise HTTPException(
+            status_code=403,
+            detail="X-Member-Id 非法")
+    return member_id
 
 
 @router.get("/registry")
@@ -233,6 +260,106 @@ async def session_close(
         raise HTTPException(
             status_code=404,
             detail=f"会话 {session_id} 不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/search")
+async def search(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """语义检索(打分→tier 重排只调序不筛除
+    →多样性约束; 决策面 off 409, P2)
+
+    Body: {query, memberId?, category?,
+    topN?}"""
+    _require_admin(x_role)
+    from services.ii59_search_service import (
+        Ii59SearchService,
+    )
+    try:
+        member_id = body.get("memberId")
+        return await (
+            Ii59SearchService().search(
+                str(body.get("query") or ""),
+                member_id=int(member_id)
+                if member_id is not None
+                else None,
+                category=body.get("category"),
+                top_n=int(
+                    body.get("topN") or 10)))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/search/history")
+async def search_history(
+        member_id: int = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """检索/推荐历史(query+结果+采纳
+    ——观测面, P2)"""
+    _require_admin(x_role)
+    from services.ii59_search_service import (
+        Ii59SearchService,
+    )
+    return await (
+        Ii59SearchService().history(
+            member_id=member_id))
+
+
+@router.post("/search/{log_id}/adopt")
+async def search_adopt(
+        log_id: int,
+        body: dict = None,
+        x_member_id: str | None = Header(
+            default=None,
+            alias="X-Member-Id")):
+    """点击采纳反馈(回流真值源; 会员面需
+    assist, P2)
+
+    Body: {itemId}"""
+    member_id = _require_member(x_member_id)
+    from services.ii59_search_service import (
+        Ii59SearchService,
+    )
+    try:
+        return await (
+            Ii59SearchService().adopt(
+                int(log_id),
+                member_id=member_id,
+                item_id=int(
+                    (body or {}).get("itemId")
+                    or 0)))
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"检索日志 {log_id} 不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/recommend")
+async def recommend(
+        x_member_id: str | None = Header(
+            default=None,
+            alias="X-Member-Id"),
+        top_n: int = 10):
+    """个性推荐流(tier 联动策略+多样性
+    约束; 会员面需 assist, P2)"""
+    member_id = _require_member(x_member_id)
+    from services.ii59_search_service import (
+        Ii59SearchService,
+    )
+    try:
+        return await (
+            Ii59SearchService().recommend(
+                member_id=member_id,
+                top_n=int(top_n)))
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
