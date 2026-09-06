@@ -61,7 +61,9 @@ class Av62Repository:
         "reportId", "eventId", "memberId",
         "subjectId", "pooledFeedbackId",
         "assessmentId", "appealCount",
-        "version", "changeId")
+        "version", "changeId",
+        "idleDays", "halfLifeDays",
+        "frequencyCap", "usageCount")
     _FLOAT_FIELDS = (
         "contribution", "riskDeduction",
         "netContribution", "confidence",
@@ -71,7 +73,9 @@ class Av62Repository:
         "poolReward", "elementScore",
         "causalWeight", "confidenceCoef",
         "completeness", "groundedRate",
-        "weightedScore")
+        "weightedScore", "scenarioValue",
+        "deltaPct", "decayedValue",
+        "scenarioMultiplier", "factor")
     _JSON_DICT_FIELDS = (
         "evidence", "factors", "reason",
         "attribution", "detail", "context",

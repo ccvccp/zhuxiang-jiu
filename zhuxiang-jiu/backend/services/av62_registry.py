@@ -321,6 +321,155 @@ OBJECTIVE_MULTIPLIERS = {
     "growth": {"knowledge": 1.2, "growth": 1.2},
 }
 
+# ============================================================
+# 流动性评级三档(P2——§3.3)
+# high  : 标准化可验证(认证类)——使用
+#         限频+场景校验
+# medium: 需上下文解释(项目经验)
+# low   : 个性化/敏感(内部人脉)——仅
+#         自证不可流转
+# 铁律: risk 域(负资产)不可流转
+#       (none 档——不参与场景折算)
+# ============================================================
+
+LIQUIDITY_TIERS = (
+    "high", "medium", "low", "none")
+
+LIQUIDITY_META = {
+    "high": {
+        "label": "高流动(标准化可验证)",
+        "usage": "使用限频+场景校验",
+        "convertible": True,
+        "frequencyCap": 10,  # 次/日
+    },
+    "medium": {
+        "label": "中流动(需上下文解释)",
+        "usage": "上下文解释后可用",
+        "convertible": True,
+        "frequencyCap": 5,
+    },
+    "low": {
+        "label": "低流动(个性化/敏感)",
+        "usage": "仅自证不可流转",
+        "convertible": False,
+        "frequencyCap": 0,
+    },
+    "none": {
+        "label": "不可流转(负资产)",
+        "usage": "负资产仅扣减不参与折算",
+        "convertible": False,
+        "frequencyCap": 0,
+    },
+}
+
+# 资产域→流动性档(封闭映射——认证类
+# high/经验类 medium/关系类 low/risk none)
+DOMAIN_LIQUIDITY = {
+    "compliance": "high",
+    "capability": "high",
+    "knowledge": "medium",
+    "behavior": "medium",
+    "growth": "medium",
+    "social": "low",
+    "culture": "low",
+    "reputation": "low",
+    "risk": "none",
+}
+
+# ============================================================
+# 衰减模型(P2——§3.3)
+# decay = base × exp(-λ×idleDays)
+# 90 日半衰期: λ = ln2/90 ≈ 0.0077
+# (计划 λ=0.001 为笔误——按"90 日
+#  半衰期"语义口径实现; 半衰期经
+#  46号审批可校准 30-365)
+# ============================================================
+
+import math  # noqa: E402
+
+DECAY_HALF_LIFE_DAYS = 90
+DECAY_LAMBDA = round(
+    math.log(2) / DECAY_HALF_LIFE_DAYS, 6)
+
+# 半衰期校准域(46号审批——P2 阈值)
+HALF_LIFE_MIN = 30
+HALF_LIFE_MAX = 365
+
+# decaying 态门槛(衰减因子跌破
+# 该值→状态 decaying)
+DECAYING_THRESHOLD = 0.5
+
+
+def decay_factor(idle_days: int,
+                 half_life: int = None) -> float:
+    """衰减因子 exp(-λ×idleDays)
+
+    半衰期可校准(46号审批——默认
+    90 日: idle 90 天因子=0.5)
+    """
+    half_life = int(half_life
+                    or DECAY_HALF_LIFE_DAYS)
+    if half_life <= 0:
+        half_life = DECAY_HALF_LIFE_DAYS
+    lam = math.log(2) / half_life
+    idle = max(int(idle_days or 0), 0)
+    return round(
+        math.exp(-lam * idle), 6)
+
+
+def liquidity_of(domain: str) -> str:
+    """资产域→流动性档(域外 none)"""
+    return DOMAIN_LIQUIDITY.get(
+        str(domain), "none")
+
+
+# ============================================================
+# SCENARIO_FACTORS 场景折算表(P2——§3.3)
+# 场景×资产域系数(投标/融资/合作
+# 准入/免审接入)——未列域默认 1.0
+# 铁律: risk 域不参与折算(恒排除)
+# ============================================================
+
+SCENARIO_FACTORS = {
+    "bidding": {
+        "label": "投标",
+        "factors": {"compliance": 1.2,
+                    "capability": 1.1},
+    },
+    "financing": {
+        "label": "融资",
+        "factors": {"compliance": 1.1,
+                    "growth": 1.1},
+    },
+    "partnership": {
+        "label": "合作准入",
+        "factors": {"behavior": 1.2,
+                    "social": 1.1},
+    },
+    "expedited": {
+        "label": "免审接入",
+        "factors": {"compliance": 1.3,
+                    "capability": 1.15},
+    },
+}
+
+# 场景乘子校准域(46号审批——场景级
+# 附加乘子 0.5-1.5, 默认 1.0)
+SCENARIO_MULT_MIN = 0.5
+SCENARIO_MULT_MAX = 1.5
+
+
+def scenario_factor(scenario: str,
+                     domain: str) -> float:
+    """场景×域系数(域外场景/未列域
+    默认 1.0; risk 域恒排除)"""
+    entry = SCENARIO_FACTORS.get(
+        str(scenario)) or {}
+    return float(
+        (entry.get("factors")
+         or {}).get(str(domain), 1.0))
+
+
 
 def get_rule(role: str, domain: str) -> dict | None:
     """取要素因果规则(要素→结果→强度三元组)"""
@@ -365,6 +514,41 @@ def rules_view() -> dict:
         "note": "因果规则库——要素→结果→强度"
                 "三元组封闭注册(归因强制"
                 "绑定规则 ID)",
+    }
+
+
+def liquidity_view() -> dict:
+    """流动性+场景+衰减视图(P2 观测面)"""
+    return {
+        "success": True,
+        "liquidity": {
+            "tiers": list(LIQUIDITY_TIERS),
+            "meta": LIQUIDITY_META,
+            "domainMapping": DOMAIN_LIQUIDITY,
+        },
+        "decay": {
+            "halfLifeDays":
+                DECAY_HALF_LIFE_DAYS,
+            "lambda": DECAY_LAMBDA,
+            "formula": "decay = base × "
+                       "exp(-λ×idleDays)",
+            "decayingThreshold":
+                DECAYING_THRESHOLD,
+            "calibratable":
+                f"{HALF_LIFE_MIN}-{HALF_LIFE_MAX}"
+                f" 日(46号审批)",
+        },
+        "scenarios": {
+            name: {
+                "label": entry.get("label"),
+                "factors": entry.get(
+                    "factors"),
+            }
+            for name, entry in
+            SCENARIO_FACTORS.items()},
+        "note": "转化层——流动性三档+"
+                "衰减模型(90 日半衰期)+"
+                "场景折算表(四场景)",
     }
 
 
@@ -421,6 +605,65 @@ def _validate_causal_rules() -> None:
         "av62_causal_rules_validated rules=%s "
         "version=%s", len(CAUSAL_RULES),
         RULES_VERSION)
+
+
+def _validate_liquidity() -> None:
+    """P2 转化层自检(RuntimeError 宪法级)"""
+    errors = []
+    # 流动性映射域全覆盖
+    for domain in ALL_DOMAINS:
+        tier = DOMAIN_LIQUIDITY.get(domain)
+        if tier is None:
+            errors.append(
+                f"资产域 {domain} 缺流动性"
+                f"档映射")
+        elif tier not in LIQUIDITY_TIERS:
+            errors.append(
+                f"资产域 {domain} 流动性档"
+                f" {tier} 域外")
+    if DOMAIN_LIQUIDITY.get(
+            RISK_DOMAIN) != "none":
+        errors.append(
+            "risk 域流动性档必须 none"
+            "(负资产不可流转铁律)")
+    # 三档元数据
+    for tier in LIQUIDITY_TIERS:
+        if tier not in LIQUIDITY_META:
+            errors.append(
+                f"流动性档 {tier} 缺元数据")
+    # 衰减模型
+    if abs(decay_factor(90) - 0.5) > 0.01:
+        errors.append(
+            "衰减模型失效(90 日应半衰"
+            "——因子 0.5)")
+    if not HALF_LIFE_MIN \
+            <= DECAY_HALF_LIFE_DAYS \
+            <= HALF_LIFE_MAX:
+        errors.append(
+            "默认半衰期越出校准域")
+    # 场景折算表
+    for name, entry in \
+            SCENARIO_FACTORS.items():
+        for dom, f in (entry.get(
+                "factors") or {}).items():
+            if dom == RISK_DOMAIN:
+                errors.append(
+                    f"场景 {name} 不可含 risk"
+                    f" 域系数(恒排除铁律)")
+            if not 0.5 <= float(f) <= 1.5:
+                errors.append(
+                    f"场景 {name}/{dom} 系数"
+                    f"越界 {f}")
+    if errors:
+        raise RuntimeError(
+            "av62 liquidity 自检失败: "
+            + "; ".join(errors))
+    logger.info(
+        "av62_liquidity_validated tiers=%s "
+        "scenarios=%s halfLife=%s",
+        len(LIQUIDITY_TIERS),
+        len(SCENARIO_FACTORS),
+        DECAY_HALF_LIFE_DAYS)
 
 
 def current_mode() -> str:
@@ -625,3 +868,4 @@ def _validate_registry() -> None:
 
 _validate_registry()
 _validate_causal_rules()
+_validate_liquidity()
