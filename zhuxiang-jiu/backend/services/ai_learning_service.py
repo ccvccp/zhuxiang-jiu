@@ -104,6 +104,8 @@ SCORER_REGISTRY = {
     "service_orchestration":     {"label": "智能服务编排评分", "module": "59服务编排", "batch": 18},
     # ---- 第十九批(60号AI智能支付管理 P0: 支付编排评分) ----
     "payment_orchestration":     {"label": "智能支付编排评分", "module": "60智能支付", "batch": 19},
+    # ---- 第二十批(61号AI智能系统升级决策 P0: 升级决策编排评分) ----
+    "decision_orchestration":   {"label": "智能升级决策评分", "module": "61升级决策", "batch": 20},
     # ---- 第二十二批(63号AI智能后台管理 P0: 后台编排评分) ----
     "admin_orchestration":       {"label": "智能后台编排评分", "module": "63智能后台", "batch": 22},
 }
@@ -180,6 +182,12 @@ DECISION_THRESHOLDS = {
     # /observe 观察)
     "payment_orchestration": [(80.0, "urgent"), (50.0, "optimize"),
                               (0.0, "observe")],
+    # 61号AI智能系统升级决策(三级决策——计划 §四:
+    # 高分=高决策准确率+高预警有效 → optimize 优化执行
+    # (阈值与图谱回流) /urgent 紧急优化+决策复盘会
+    # /observe 观察(建议域收窄))
+    "decision_orchestration": [(80.0, "urgent"), (50.0, "optimize"),
+                               (0.0, "observe")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -277,6 +285,7 @@ def default_weights(scorer_id: str) -> dict:
         from services.ii59_scorer import Ii59Scorer
         from services.ab63_scorer import Ab63Scorer
         from services.pay60_scorer import Pay60Scorer
+        from services.dm61_scorer import Dm61Scorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -299,6 +308,7 @@ def default_weights(scorer_id: str) -> dict:
             "service_orchestration": Ii59Scorer,
             "admin_orchestration": Ab63Scorer,
             "payment_orchestration": Pay60Scorer,
+            "decision_orchestration": Dm61Scorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

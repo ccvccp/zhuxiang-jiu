@@ -323,6 +323,10 @@ register_ab63_routes(app)
 from routes.pay60_routes import register_pay60_routes
 register_pay60_routes(app)
 
+# AI智能系统升级决策(61号)
+from routes.dm61_routes import register_dm61_routes
+register_dm61_routes(app)
+
 
 # ============================================================
 # 静态媒体服务(35号 AI Hub P3: /media/voice|image/xxx, 本地卷持久化)

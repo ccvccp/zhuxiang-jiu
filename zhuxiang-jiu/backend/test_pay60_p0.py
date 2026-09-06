@@ -848,15 +848,15 @@ class TestConstitution:
 
     async def run(self):
         print("[09 宪法+QC]")
-        # ① 44号 36 档案(60号入册后)
+        # ① 44号 37 档案(61号入册后)
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 36 档案(60号入册)",
+        record("44号 37 档案(61号入册)",
                "payment_orchestration"
                in SCORER_REGISTRY
                and len(SCORER_REGISTRY)
-               == 36
+               == 37
                and SCORER_REGISTRY[
                    "payment_"
                    "orchestration"]

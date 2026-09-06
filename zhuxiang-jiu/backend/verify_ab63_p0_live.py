@@ -270,8 +270,8 @@ def run_round(round_no: int) -> None:
            r.get("sc_decision")
            in ("optimize", "urgent"),
            str(r.get("sc_decision")))
-    record("44号 35 档案",
-           r.get("reg_n") == 36,
+    record("44号 36 档案",
+           r.get("reg_n") == 37,
            str(r.get("reg_n")))
     record("admin_orchestration 在册",
            r.get("ao_in_reg") is True,
@@ -330,8 +330,8 @@ def run_round(round_no: int) -> None:
         count = int((out.stdout or "").strip())
     except ValueError:
         count = -1
-    record("63号路由累计 5 端点",
-           count == 5, str(count))
+    record("63号路由累计 21 端点",
+           count == 21, str(count))
 
 
 def main() -> int:

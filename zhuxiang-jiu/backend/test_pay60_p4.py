@@ -489,7 +489,7 @@ class TestConstitution:
                "payment_orchestration"
                in SCORER_REGISTRY
                and len(SCORER_REGISTRY)
-               == 36,
+               == 37,
                str(len(
                    SCORER_REGISTRY)))
 

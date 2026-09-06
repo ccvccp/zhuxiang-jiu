@@ -554,8 +554,8 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 35 档案在册",
-               len(SCORER_REGISTRY) == 36,
+        record("44号 36 档案在册",
+               len(SCORER_REGISTRY) == 37,
                str(len(SCORER_REGISTRY)))
         record("第38档案 admin_orchestration",
                "admin_orchestration"
