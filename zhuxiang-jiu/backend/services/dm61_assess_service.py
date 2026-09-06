@@ -243,6 +243,23 @@ class Dm61AssessService:
         # ---- L1/L2/L3 判定 ----
         tag = str(semantic.get("tag") or "")
         forced_l3_tag = tag in L3_FORCE_TAGS
+        # 生效阈值读取(P2 阈值域联动——
+        # 46号审批+人工终审后可校准;
+        # fail-soft 回落注册表常量)
+        from services.dm61_threshold_service import (
+            Dm61ThresholdService,
+        )
+        active_thresholds = \
+            await Dm61ThresholdService(
+            ).get_active()
+        l1_max_risk = float(
+            active_thresholds.get(
+                "l1MaxRisk")
+            or L1_MAX_RISK)
+        l3_min_risk = float(
+            active_thresholds.get(
+                "l3MinRisk")
+            or L3_MIN_RISK)
         # L1 判定(计划 §3.2 示例口径——
         # 观测类+影响≤1%+历史失败≤1%
         # +预算充足+低风险分)
@@ -252,12 +269,12 @@ class Dm61AssessService:
                 and error_budget
                 >= ERROR_BUDGET_HEALTHY
                 and risk_score
-                < L1_MAX_RISK
+                < l1_max_risk
                 and not forced_l3_tag):
             level = "L1"
         elif (forced_l3_tag
               or budget_forced_l3
-              or risk_score >= L3_MIN_RISK):
+              or risk_score >= l3_min_risk):
             level = "L3"
         else:
             level = "L2"

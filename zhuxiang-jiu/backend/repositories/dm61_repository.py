@@ -74,7 +74,9 @@ class Dm61Repository:
         "detail", "context", "options",
         "prior", "evidence", "config",
         "thresholds", "simResult", "result",
-        "dissent", "correction", "extra")
+        "dissent", "correction", "extra",
+        "staticGate", "replay",
+        "grayscale", "rollback")
     _JSON_LIST_FIELDS = (
         "affectedRoles", "affectedFeatures",
         "trustElements", "auditTrail",
