@@ -405,7 +405,7 @@ def run_round(round_no: int) -> None:
            str((r.get("rep_flag"),
                 r.get("rep_hist"))))
     record("44号 38 档案",
-           r.get("reg_n") == 39,
+           r.get("reg_n") == 40,
            str(r.get("reg_n")))
 
     print("\n[04 HTTP 端点+鉴权]")

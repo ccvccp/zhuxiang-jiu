@@ -1,4 +1,4 @@
-"""64号信值兑换管理 P5 Docker 实机验收
+﻿"""64号信值兑换管理 P5 Docker 实机验收
 (看板+红队+收官——全期终验)
 
 运行方式:
@@ -380,7 +380,7 @@ def run_round(round_no: int) -> None:
                 r.get("lock2"),
                 r.get("lock3"))))
     record("44号 39 档案",
-           r.get("reg_n") == 39,
+           r.get("reg_n") == 40,
            str(r.get("reg_n")))
 
     print("\n[06 HTTP 端点+鉴权]")

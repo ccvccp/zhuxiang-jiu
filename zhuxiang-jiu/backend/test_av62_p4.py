@@ -1,4 +1,4 @@
-"""62号·AI智能无形资产估值模块 P4 专项测试
+﻿"""62号·AI智能无形资产估值模块 P4 专项测试
 (业务结果验证回流+T+1 调度)
 
 运行方式:
@@ -729,7 +729,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 38 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
         record("第37档案 asset_valuation",
                SCORER_REGISTRY.get(

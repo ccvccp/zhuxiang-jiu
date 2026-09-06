@@ -898,7 +898,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
 
         from routes.xx64_routes import (

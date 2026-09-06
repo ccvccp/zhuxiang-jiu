@@ -1,4 +1,4 @@
-"""64号·信值兑换管理模块 P2 专项测试
+﻿"""64号·信值兑换管理模块 P2 专项测试
 (智能体验层)
 
 运行方式:
@@ -550,7 +550,7 @@ class TestConstitution:
         )
         record("44号 39 档案在册",
                len(SCORER_REGISTRY)
-               == 39,
+               == 40,
                str(len(
                    SCORER_REGISTRY)))
         record("LLM 不进判定链"

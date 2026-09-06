@@ -112,6 +112,8 @@ SCORER_REGISTRY = {
     "admin_orchestration":       {"label": "智能后台编排评分", "module": "63智能后台", "batch": 22},
     # ---- 第二十三批(64号信值兑换管理 P0: 兑换编排评分) ----
     "value_exchange":           {"label": "智能信值兑换评分", "module": "64信值兑换", "batch": 23},
+    # ---- 第二十四批(65号网店及商品AI智能管理 P0: 店铺经营评分) ----
+    "shop_operation":           {"label": "智能店铺经营评分", "module": "65网店管理", "batch": 24},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -201,6 +203,10 @@ DECISION_THRESHOLDS = {
     # 64号信值兑换(observe 观察(结算域收窄)/optimize 优化执行(规则与权重回流)
     # /urgent 紧急优化+兑换经济复盘会)
     "value_exchange": [(80.0, "urgent"), (50.0, "optimize"),
+                       (0.0, "observe")],
+    # 65号网店管理(observe 观察(内容域收窄)/optimize 优化执行(推荐策略回流)
+    # /urgent 紧急优化+店主经营复盘会)
+    "shop_operation": [(80.0, "urgent"), (50.0, "optimize"),
                        (0.0, "observe")],
 }
 
@@ -302,6 +308,7 @@ def default_weights(scorer_id: str) -> dict:
         from services.dm61_scorer import Dm61Scorer
         from services.av62_scorer import Av62Scorer
         from services.xx64_scorer import Xx64Scorer
+        from services.xx65_scorer import Xx65Scorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -327,6 +334,7 @@ def default_weights(scorer_id: str) -> dict:
             "decision_orchestration": Dm61Scorer,
             "asset_valuation": Av62Scorer,
             "value_exchange": Xx64Scorer,
+            "shop_operation": Xx65Scorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

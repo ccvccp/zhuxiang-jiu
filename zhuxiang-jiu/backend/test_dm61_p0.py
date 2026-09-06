@@ -1,4 +1,4 @@
-"""61号·AI智能系统升级决策模块 P0 专项测试
+﻿"""61号·AI智能系统升级决策模块 P0 专项测试
 (决策注册表+语义标签+请求底座+第36档案)
 
 运行方式:
@@ -490,7 +490,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 37 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
         record("第36档案 decision_orchestration",
                "decision_orchestration"

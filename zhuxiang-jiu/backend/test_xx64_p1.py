@@ -1,4 +1,4 @@
-"""64号·信值兑换管理模块 P1 专项测试
+﻿"""64号·信值兑换管理模块 P1 专项测试
 (支付结算引擎+积分兑换管道)
 
 运行方式:
@@ -785,7 +785,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
 
         # 积分模块零改动

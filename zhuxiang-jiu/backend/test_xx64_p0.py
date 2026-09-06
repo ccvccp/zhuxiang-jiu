@@ -1,4 +1,4 @@
-"""64号·信值兑换商品/服务AI智能管理模块
+﻿"""64号·信值兑换商品/服务AI智能管理模块
 P0 专项测试(刚性规则底座)
 
 运行方式:
@@ -601,7 +601,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
         record("第38档案 value_exchange"
                "(batch23)",

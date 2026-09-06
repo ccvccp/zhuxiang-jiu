@@ -1,4 +1,4 @@
-"""62号·AI智能无形资产估值模块 P3 专项测试
+﻿"""62号·AI智能无形资产估值模块 P3 专项测试
 (公平性审计+申诉通道)
 
 运行方式:
@@ -870,7 +870,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 38 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
 
         # 46号零改动(compute_metrics

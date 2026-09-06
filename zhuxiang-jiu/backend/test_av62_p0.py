@@ -1,4 +1,4 @@
-"""62号·AI智能无形资产估值模块 P0 专项测试
+﻿"""62号·AI智能无形资产估值模块 P0 专项测试
 (信任要素注册表+资产登记底座+第37档案)
 
 运行方式:
@@ -529,7 +529,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 38 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
         record("第37档案 asset_valuation",
                "asset_valuation"

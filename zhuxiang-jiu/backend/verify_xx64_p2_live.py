@@ -1,4 +1,4 @@
-"""64号信值兑换管理 P2 Docker 实机验收
+﻿"""64号信值兑换管理 P2 Docker 实机验收
 
 运行方式:
     python verify_xx64_p2_live.py [基址]
@@ -356,7 +356,7 @@ def run_round(round_no: int) -> None:
            r.get("exp_404") is True,
            str(r.get("exp_404")))
     record("44号 39 档案",
-           r.get("reg_n") == 39,
+           r.get("reg_n") == 40,
            str(r.get("reg_n")))
 
     print("\n[04 HTTP 端点+鉴权]")

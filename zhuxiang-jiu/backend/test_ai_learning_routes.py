@@ -87,7 +87,7 @@ async def main():
     # 1. 注册表与默认权重
     # ========================================================
     record("01_registry_covers_29_profiles",
-           len(SCORER_REGISTRY) == 39
+           len(SCORER_REGISTRY) == 40
            and "logistics_routing:cost" in SCORER_REGISTRY
            and "promo_hotspot" in SCORER_REGISTRY
            and "alliance_onboarding" in SCORER_REGISTRY

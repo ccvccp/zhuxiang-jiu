@@ -1,4 +1,4 @@
-"""61号·AI智能系统升级决策模块 P5 专项测试
+﻿"""61号·AI智能系统升级决策模块 P5 专项测试
 (四区看板+红队七向量+收官三件套)
 
 运行方式:
@@ -426,7 +426,7 @@ class TestConstitution:
         )
         # ① 44号 37 档案+第36档案
         record("宪法: 44号 37 档案",
-               len(SCORER_REGISTRY) == 39
+               len(SCORER_REGISTRY) == 40
                and SCORER_REGISTRY.get(
                    "decision_"
                    "orchestration",

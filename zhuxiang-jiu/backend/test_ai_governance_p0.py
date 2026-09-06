@@ -60,7 +60,7 @@ class TestSync:
         record("29档案全量入册",
                r["discovered"] == len(SCORER_REGISTRY)
                and r["added"] == len(SCORER_REGISTRY)
-               and len(SCORER_REGISTRY) == 39,
+               and len(SCORER_REGISTRY) == 40,
                f"added={r.get('added')} "
                f"total={len(SCORER_REGISTRY)}")
         record("批次覆盖1-22", r["discovered"] == 39,

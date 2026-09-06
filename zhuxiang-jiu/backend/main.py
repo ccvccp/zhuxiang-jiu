@@ -332,6 +332,9 @@ from routes.av62_routes import register_av62_routes
 register_av62_routes(app)
 from routes.xx64_routes import register_xx64_routes
 register_xx64_routes(app)
+# 网店及商品AI智能管理(65号)
+from routes.xx65_routes import register_xx65_routes
+register_xx65_routes(app)
 
 
 # ============================================================

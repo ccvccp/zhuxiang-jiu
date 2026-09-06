@@ -344,7 +344,7 @@ def run_round(round_no: int) -> None:
            r.get("rt_ev") == 1,
            str(r.get("rt_ev")))
     record("44号 38 档案",
-           r.get("reg_n") == 39,
+           r.get("reg_n") == 40,
            str(r.get("reg_n")))
     record("收官表 7 全量",
            r.get("tables_n") == 7,

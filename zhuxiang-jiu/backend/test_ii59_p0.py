@@ -1,4 +1,4 @@
-"""59号·AI智能服务编排模块 P0 专项测试
+﻿"""59号·AI智能服务编排模块 P0 专项测试
 (服务编排注册表+会话底座+第34档案)
 
 运行方式:
@@ -458,7 +458,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 35 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
         record("第34档案 service_orchestration",
                "service_orchestration"

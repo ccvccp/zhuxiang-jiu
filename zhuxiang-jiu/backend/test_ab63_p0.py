@@ -1,4 +1,4 @@
-"""63号·AI智能后台管理模块 P0 专项测试
+﻿"""63号·AI智能后台管理模块 P0 专项测试
 (后台注册表+角色感知底座+第38档案)
 
 运行方式:
@@ -555,7 +555,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 36 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
         record("第38档案 admin_orchestration",
                "admin_orchestration"

@@ -1,4 +1,4 @@
-"""61号·AI智能系统升级决策模块 P4 专项测试
+﻿"""61号·AI智能系统升级决策模块 P4 专项测试
 (RLHF 反馈闭环+回流+T+1 调度)
 
 运行方式:
@@ -607,7 +607,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 37 档案在册",
-               len(SCORER_REGISTRY) == 39,
+               len(SCORER_REGISTRY) == 40,
                str(len(SCORER_REGISTRY)))
         record("第36档案 batch20",
                SCORER_REGISTRY.get(
