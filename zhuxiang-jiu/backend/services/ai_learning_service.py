@@ -116,6 +116,8 @@ SCORER_REGISTRY = {
     "shop_operation":           {"label": "智能店铺经营评分", "module": "65网店管理", "batch": 24},
     # ---- 第二十五批(全站批次一·23号信用管理 AI 升级: 信用行为评分) ----
     "credit_scoring":           {"label": "智能信用行为评分", "module": "23信用管理", "batch": 25},
+    # ---- 第二十六批(全站批次二·13号老酒兑换 AI 升级: 回收估值议价评分) ----
+    "recycle_valuation":        {"label": "智能回收估值议价评分", "module": "13老酒兑换", "batch": 26},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -214,6 +216,10 @@ DECISION_THRESHOLDS = {
     # 高分=高风险 → high 拦截/medium 转人工/low 放行)
     "credit_scoring": [(60.0, "high"), (30.0, "medium"),
                        (0.0, "low")],
+    # 全站批次二·13号老酒兑换(议价三级——对齐 credit_scoring 范式:
+    # 高分=高议价风险 → high 拦截/medium 转人工复核/low 放行)
+    "recycle_valuation": [(60.0, "high"), (30.0, "medium"),
+                          (0.0, "low")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -316,6 +322,7 @@ def default_weights(scorer_id: str) -> dict:
         from services.xx64_scorer import Xx64Scorer
         from services.xx65_scorer import Xx65Scorer
         from services.credit_scorer import CreditScoringScorer
+        from services.recycle_scorer import RecycleValuationScorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -343,6 +350,7 @@ def default_weights(scorer_id: str) -> dict:
             "value_exchange": Xx64Scorer,
             "shop_operation": Xx65Scorer,
             "credit_scoring": CreditScoringScorer,
+            "recycle_valuation": RecycleValuationScorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

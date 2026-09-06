@@ -1,4 +1,4 @@
-"""65号·网店及商品AI智能管理模块
+﻿"""65号·网店及商品AI智能管理模块
 P0 专项测试(刚性规则底座)
 
 运行方式:
@@ -771,7 +771,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 40 档案在册",
-               len(SCORER_REGISTRY) == 41,
+               len(SCORER_REGISTRY) == 42,
                str(len(SCORER_REGISTRY)))
         record("第39档案 shop_operation"
                "(batch24)",

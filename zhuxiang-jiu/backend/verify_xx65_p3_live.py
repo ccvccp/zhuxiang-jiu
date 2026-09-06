@@ -1,4 +1,4 @@
-"""65号网店及商品AI智能管理 P3 Docker
+﻿"""65号网店及商品AI智能管理 P3 Docker
 实机验收(治理与成长层)
 
 运行方式:
@@ -421,7 +421,7 @@ def run_round(round_no: int) -> None:
            r.get("tips_n") == 3,
            str(r.get("tips_n")))
     record("44号 40 档案",
-           r.get("reg_n") == 41,
+           r.get("reg_n") == 42,
            str(r.get("reg_n")))
 
     print("\n[04 HTTP 端点+鉴权]")

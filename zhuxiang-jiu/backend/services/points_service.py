@@ -228,6 +228,24 @@ class PointsService:
             if month_earned + earned_points > MONTHLY_EARN_LIMIT:
                 raise ValueError(f"本月消费返分已达上限({MONTHLY_EARN_LIMIT}竹叶)")
 
+            # AI 决策门(全站批次二——03号积分主通道接线)
+            # v7.8 enforce_decision(points_risk): observe 模式仅评分
+            # 快照(行为 100% 兼容); enforce 模式 high 拦截/medium 转人工。
+            # 硬规则(单笔/每日/每月上限)已前置校验, AI 门为叠加层;
+            # fail-open 兜底。points:earn:{orderId} 贯穿快照与终态回流。
+            try:
+                from services.ai_enforcement_points import (
+                    enrich_points_channel, enforce_points_action,
+                )
+                ctx = await enrich_points_channel(
+                    user_id, "earn", earned_points)
+                await enforce_points_action(
+                    user_id, "earn", ctx, order_id)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞返分
+
             # 发放积分
             log_id = await self._earn_points(
                 user_id=user_id,
@@ -237,6 +255,16 @@ class PointsService:
                 ref_desc=f"订单消费返分(¥{order_amount:.2f} × {EARN_RATE_PER_YUAN} × {multiplier})"
                         + (f", 单笔上限截断至{PER_ORDER_EARN_LIMIT}" if capped_by_order else ""),
             )
+
+            # 回流钩子(03号积分决策门——返分终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_points_settled,
+                )
+                await on_points_settled(
+                    "earn", order_id, earned_points)
+            except Exception:
+                pass
 
             return {
                 "logId": log_id,
@@ -294,6 +322,24 @@ class PointsService:
             if available < deduct_points:
                 raise ValueError(f"积分不足(可用{available}, 需{deduct_points})")
 
+            # AI 决策门(全站批次二——03号积分主通道接线)
+            # v7.8 enforce_decision(points_risk): observe 模式仅评分
+            # 快照(行为 100% 兼容); enforce 模式 high 拦截/medium 转人工。
+            # 硬规则(最低抵扣/30%上限/余额)已前置校验, AI 门为叠加层;
+            # fail-open 兜底。points:deduct:{orderId} 贯穿快照与终态回流。
+            try:
+                from services.ai_enforcement_points import (
+                    enrich_points_channel, enforce_points_action,
+                )
+                ctx = await enrich_points_channel(
+                    user_id, "deduct", deduct_points)
+                await enforce_points_action(
+                    user_id, "deduct", ctx, order_id)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞抵现
+
             # FIFO 消耗过期批次
             batches = await self.repo.list_expiring_batches(user_id)
             remaining = deduct_points
@@ -342,6 +388,16 @@ class PointsService:
                 "status": LOG_STATUS_CONSUMED,
             })
 
+            # 回流钩子(03号积分决策门——抵现终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_points_settled,
+                )
+                await on_points_settled(
+                    "deduct", order_id, deduct_points)
+            except Exception:
+                pass
+
             return {
                 "logId": log_id,
                 "userId": user_id,
@@ -379,6 +435,24 @@ class PointsService:
             account = await self.repo.get_or_create_account(user_id)
             available = account.get("totalPoints", 0)
 
+            # AI 决策门(全站批次二——03号积分主通道接线)
+            # v7.8 enforce_decision(points_risk): observe 模式仅评分
+            # 快照(行为 100% 兼容); enforce 模式 high 拦截/medium 转人工。
+            # 硬规则(扣回参数校验)已前置, AI 门为叠加层;
+            # fail-open 兜底。points:refund:{orderId} 贯穿快照与终态回流。
+            try:
+                from services.ai_enforcement_points import (
+                    enrich_points_channel, enforce_points_action,
+                )
+                ctx = await enrich_points_channel(
+                    user_id, "refund", refund_points)
+                await enforce_points_action(
+                    user_id, "refund", ctx, order_id)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞退款扣回
+
             # 扣回积分(可扣到负数, 后续补回)
             actual_refund = min(refund_points, available + account.get("totalEarned", 0))
             account["totalPoints"] = available - refund_points
@@ -400,6 +474,16 @@ class PointsService:
                 "expireAt": None,
                 "status": LOG_STATUS_CONSUMED,
             })
+
+            # 回流钩子(03号积分决策门——退款终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_points_settled,
+                )
+                await on_points_settled(
+                    "refund", order_id, actual_refund)
+            except Exception:
+                pass
 
             return {
                 "logId": log_id,

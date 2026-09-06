@@ -923,6 +923,30 @@ class RecycleService:
             if current_round > MAX_NEGOTIATION_ROUNDS:
                 raise ValueError(f"议价轮次超限(最多{MAX_NEGOTIATION_ROUNDS}轮)")
 
+            # AI 决策门(全站批次二——13号老酒兑换 AI 升级)
+            # v7.8 enforce_decision(recycle_valuation): observe 模式
+            # 仅评分快照(行为 100% 兼容); enforce 模式 high 拦截/
+            # medium 转人工复核标记。硬规则(±10%系数/轮次/状态机)
+            # 已前置校验, AI 门为叠加层; fail-open 兜底。
+            # negotiation:{neg_id} 贯穿决策快照与议价终态——回流配对键一致
+            ai_review_required = False
+            try:
+                from services.ai_enforcement_recycle import (
+                    enrich_negotiation_risk, enforce_proposal,
+                )
+                neg_user = int(neg.get("userId") or 0)
+                ctx = await enrich_negotiation_risk(
+                    neg_user, neg, proposed_price)
+                gate = await enforce_proposal(
+                    neg_user, ctx, neg_id)
+                ai_review_required = bool(
+                    gate.get("reviewRequired"))
+            except ValueError:
+                # AI 拦截(enforce 模式)——拒绝本轮出价
+                raise
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞议价
+
             history = neg.get("history", [])
             history.append({
                 "round": current_round,
@@ -939,6 +963,7 @@ class RecycleService:
                 "negotiationRound": current_round,
                 "status": NEG_STATUS_USER_PROPOSED,
                 "history": history,
+                "aiReviewRequired": ai_review_required,
                 "updatedAt": ts(),
             })
             neg["currentPrice"] = proposed_price
@@ -1054,6 +1079,16 @@ class RecycleService:
             neg["status"] = NEG_STATUS_ACCEPTED
             neg["acceptedBy"] = accepted_by
             neg["history"] = history
+
+            # 回流钩子(13号议价决策门——终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_negotiation_settled,
+                )
+                await on_negotiation_settled(
+                    neg_id, True, float(final_price))
+            except Exception:
+                pass
             return neg
 
     async def reject_negotiation(self, neg_id: int, rejected_by: str = "user",
@@ -1100,6 +1135,16 @@ class RecycleService:
             neg["status"] = NEG_STATUS_REJECTED
             neg["rejectedBy"] = rejected_by
             neg["history"] = history
+
+            # 回流钩子(13号议价决策门——终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_negotiation_settled,
+                )
+                await on_negotiation_settled(
+                    neg_id, False, 0.0)
+            except Exception:
+                pass
             return neg
 
     async def complete_new_wine_recycle(self, neg_id: int, payout_method: str,

@@ -1,4 +1,4 @@
-"""65号网店及商品AI智能管理 P0 Docker
+﻿"""65号网店及商品AI智能管理 P0 Docker
 实机验收
 
 运行方式:
@@ -454,7 +454,7 @@ def run_round(round_no: int) -> None:
                "optimize", "urgent"),
            str(r.get("sc_dec")))
     record("44号 40 档案",
-           r.get("reg_n") == 41,
+           r.get("reg_n") == 42,
            str(r.get("reg_n")))
     record("shop_operation 在册",
            r.get("so_in") is True,

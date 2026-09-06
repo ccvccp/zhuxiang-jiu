@@ -1,4 +1,4 @@
-"""全站批次一·23号信用管理 AI 升级 Docker
+﻿"""全站批次一·23号信用管理 AI 升级 Docker
 实机验收(verify_credit_ai_live)
 
 运行方式:
@@ -365,7 +365,7 @@ def run_round(round_no: int) -> None:
 
     print("\n[02 44号注册表]")
     record("41 档案(credit_scoring batch25)",
-           seed.get("reg_n") == 41
+           seed.get("reg_n") == 42
            and seed.get("cs_in") is True,
            str(seed.get("reg_n")))
 

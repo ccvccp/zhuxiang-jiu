@@ -76,6 +76,10 @@ async def _invoke_scorer(scorer_id: str, ctx: dict) -> dict | None:
         if scorer_id == "credit_scoring":
             from services.credit_scorer import CreditScoringScorer
             return await CreditScoringScorer().score(ctx)
+        # 全站批次二·13号老酒兑换 AI 决策门
+        if scorer_id == "recycle_valuation":
+            from services.recycle_scorer import RecycleValuationScorer
+            return await RecycleValuationScorer().score(ctx)
     except Exception as exc:
         logger.warning("挂钩评分失败(scorer=%s): %s", scorer_id, exc)
     return None
@@ -471,3 +475,59 @@ async def on_paylater_repaid(order_no: str, overdue_days: int) -> None:
     except Exception as exc:
         logger.warning("on_paylater_repaid 挂钩失败(%s): %s",
                        order_no, exc)
+
+
+async def on_points_settled(action: str, order_id: str,
+                            points: float = 0) -> None:
+    """积分主通道终态(earn/deduct/refund 完成)
+    → 自动反馈(03号 points_risk 决策门回流, 全站批次二)
+
+    语义映射: 正常通道完成期望低风险(correct=decision==low);
+    business_key=points:{action}:{orderId} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "points_risk", f"points:{action}:{order_id}")
+        decision = (snapshot or {}).get("decision")
+        correct = (decision == "low") if decision else None
+        await record_outcome("points_risk",
+                            f"points:{action}:{order_id}",
+                            f"{action}_settled",
+                            correct=correct,
+                            note=f"points {action} "
+                                 f"{order_id} "
+                                 f"({points:+.0f})")
+    except Exception as exc:
+        logger.warning("on_points_settled 挂钩失败(%s/%s): %s",
+                       action, order_id, exc)
+
+
+async def on_negotiation_settled(neg_id: int, accepted: bool,
+                                 final_price: float = 0) -> None:
+    """议价终态(accepted/rejected) → 自动反馈
+    (13号 recycle_valuation 决策门回流, 全站批次二)
+
+    语义映射: 议价被接受期望低风险(定价合理);
+    拒绝期望非低风险(预警正确); business_key=
+    negotiation:{negId} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "recycle_valuation", f"negotiation:{neg_id}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = ((decision == "low") if accepted
+                       else (decision != "low"))
+        await record_outcome("recycle_valuation",
+                            f"negotiation:{neg_id}",
+                            "accepted" if accepted else "rejected",
+                            correct=correct,
+                            note=f"negotiation {neg_id} "
+                                 f"{'accepted' if accepted else 'rejected'}"
+                                 f" @¥{final_price:.0f}")
+    except Exception as exc:
+        logger.warning("on_negotiation_settled 挂钩失败(%s): %s",
+                       neg_id, exc)

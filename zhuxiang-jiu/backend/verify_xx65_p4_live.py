@@ -1,4 +1,4 @@
-"""65号网店及商品AI智能管理 P4 Docker
+﻿"""65号网店及商品AI智能管理 P4 Docker
 实机验收(回流+看板+红队+收官)
 
 运行方式:
@@ -478,7 +478,7 @@ def run_round(round_no: int) -> None:
             or 0) == 0,
            str(r.get("rt_residue")))
     record("44号 40 档案",
-           r.get("reg_n") == 41,
+           r.get("reg_n") == 42,
            str(r.get("reg_n")))
 
     print("\n[04 HTTP 端点+鉴权]")

@@ -550,7 +550,7 @@ class TestConstitution:
         )
         record("44号 39 档案在册",
                len(SCORER_REGISTRY)
-               == 41,
+               == 42,
                str(len(
                    SCORER_REGISTRY)))
         record("LLM 不进判定链"
