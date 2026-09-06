@@ -1,11 +1,11 @@
-"""56号·AI智能升级管理路由(P0-P4)
+"""56号·AI智能升级管理路由(P0-P5)
 
-端点(P0 5 + P1 4 + P2 2 + P3 3 + P4 4 = 18):
+端点(P0 5 + P1 4 + P2 2 + P3 3 + P4 4 + P5 2 = 20):
     GET  /api/aiup56/registry            注册表自描述(admin, 观测面)
     POST /api/aiup56/signals/scan        信号采集+决策评估(admin, 管理)
     GET  /api/aiup56/proposals           提案列表(admin, 观测面)
     GET  /api/aiup56/proposal/{id}       提案详情(admin, 观测面)
-    GET  /api/aiup56/model/status        模型状态(admin, 观测面)
+    GET  /api/aiup56/model/status         模型状态(admin, 观测面)
     POST /api/aiup56/proposals/{id}/plan 规划Agent(admin, P1)
     GET  /api/aiup56/proposals/{id}/tasks 任务列表(admin, 观测面, P1)
     POST /api/aiup56/proposals/{id}/code  编码Agent(admin, P1)
@@ -19,17 +19,21 @@
     POST /api/aiup56/proposals/{id}/rollback 语义回滚(admin, P4)
     POST /api/aiup56/feedback/collect     决策回流补标(admin, P4)
     GET  /api/aiup56/feedback/stats        回流统计(admin, 观测面, P4)
+    GET  /api/aiup56/dashboard             四区看板(admin, 观测面, P5)
+    POST /api/aiup56/redteam               红队六向量(admin, P5)
 
 鉴权: 管理面 X-Role: admin(43-55号同款口径)。
 统一口径:
     - 观测面(registry/proposals/proposal/model/
-      status/tasks/assets/sandboxes/panel/stats)
-      不受 AIUP56_MODE 影响
+      status/tasks/assets/sandboxes/panel/stats/
+      dashboard)不受 AIUP56_MODE 影响
     - 决策面(signals/scan+plan+code+test+
       audit): off=拒绝(409——shadow/assist 开放)
     - review/deliver/rollback(交付链人工动作):
       不受开关影响(终审人工铁律)
     - feedback/collect: 不受开关影响(回流管理面)
+    - redteam: 需决策面开放(off 409——
+      红队需攻击面)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -394,6 +398,36 @@ async def feedback_stats(
     )
     return await Aiup56FeedbackService(
     ).feedback_stats()
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """四区看板(提案漏斗/资产产出/审计合规/
+    回滚防御——观测面, P5)"""
+    _require_admin(x_role)
+    from services.aiup56_dashboard_service import (
+        Aiup56DashboardService,
+    )
+    return await Aiup56DashboardService().build()
+
+
+@router.post("/redteam")
+async def redteam(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队六向量验证(提案投毒/预算耗尽/审批绕过/
+    资产注入/信号伪造/回滚破坏; P5)"""
+    _require_admin(x_role)
+    from services.aiup56_redteam_service import (
+        Aiup56RedteamService,
+    )
+    try:
+        return await Aiup56RedteamService().run_all()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_aiup56_routes(app) -> None:

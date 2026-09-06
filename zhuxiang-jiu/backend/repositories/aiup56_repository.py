@@ -68,7 +68,9 @@ class Aiup56Repository:
                          "caseMatrix", "highlightItems",
                          # 语义回滚分步留痕(P4)
                          "rollbackSteps")
-    _BOOL_FIELDS = ("escalated", "dualReview")
+    _BOOL_FIELDS = ("escalated", "dualReview",
+                   # 审批记录(P5 看板)
+                   "approved")
 
     # 提案状态机九态(计划 §五)
     PROPOSAL_STATUSES = (
@@ -388,6 +390,70 @@ class Aiup56Repository:
 
     async def next_sandbox_id(self) -> int:
         return await self._next_seq("sandboxes")
+
+    # --------------------------------------------------------
+    # 审批记录(reviewId——P3 审批留痕/P5 看板)
+    # --------------------------------------------------------
+
+    async def save_review(self, record: dict,
+                           *, create: bool = True
+                           ) -> dict:
+        """审批记录落库(P3 服务留痕同键口径)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            pipe.hset(_k("aiup56", self.TABLE_REVIEWS,
+                        record["reviewId"]),
+                      mapping=self._serialize(record))
+            if create:
+                pipe.lpush(
+                    _k("aiup56", "reviews_all"),
+                    record["reviewId"])
+            await pipe.execute()
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_REVIEWS][
+            record["reviewId"]] = dict(record)
+        if create:
+            self.store.setdefault(
+                "_aiup56_reviews_all", []).insert(
+                0, record["reviewId"])
+        return record
+
+    async def list_reviews(self,
+                           proposal_id: int = None,
+                           limit: int = 100
+                           ) -> list[dict]:
+        """审批记录列表(最新在前; 提案过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.lrange(
+                _k("aiup56", "reviews_all"), 0, -1)
+            result = []
+            for i in range(0, len(ids), 500):
+                pipe = client.pipeline(
+                    transaction=False)
+                for rid in ids[i:i + 500]:
+                    pipe.hgetall(_k(
+                        "aiup56", self.TABLE_REVIEWS,
+                        int(rid)))
+                for data in await pipe.execute():
+                    if data:
+                        result.append(
+                            self._deserialize(data))
+        else:
+            self._ensure_store()
+            result = [dict(r) for r in
+                      self.store[
+                          self.TABLE_REVIEWS]
+                      .values()]
+        if proposal_id is not None:
+            result = [r for r in result
+                      if int(r.get("proposalId") or 0)
+                      == int(proposal_id)]
+        result.sort(key=lambda r: -int(
+            r.get("reviewId") or 0))
+        return result[:limit]
 
     # --------------------------------------------------------
     # 全链事件(eventId)
