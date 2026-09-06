@@ -1,6 +1,6 @@
-"""60号·AI智能支付管理路由(P0+P1)
+"""60号·AI智能支付管理路由(P0-P2)
 
-端点(P0+P1 7):
+端点(P0-P2 13):
     GET  /api/pay60/registry          支付注册表自描述(admin, 观测面)
     GET  /api/pay60/orders            支付订单列表(admin, 观测面)
     GET  /api/pay60/orders/{payId}    订单单条+归因链(admin, P0 观测面)
@@ -9,14 +9,21 @@
     POST /api/pay60/checkout/render   收银台上下文渲染(admin, P1 决策面 off 409)
     POST /api/pay60/orders/{payId}/recover  失败智能恢复(admin, P1 决策面 off 409——建议性)
     GET  /api/pay60/checkouts         收银台渲染留痕(admin, P1 观测面)
+    POST /api/pay60/orders/{payId}/verify   风控验证(admin, P2 决策面 off 409——riskTier 四级)
+    POST /api/pay60/orders/{payId}/confirm  验证令牌核销(会员面——需 assist)
+    POST /api/pay60/orders/{payId}/execute  渠道执行(admin, P2 决策面 off 409)
+    POST /api/pay60/threshold/calibrate    阈值校准(admin, P2——管理+终审双模)
+    GET  /api/pay60/thresholds             阈值视图(admin, P2 观测面)
+    GET  /api/pay60/verifications           验证事件视图(admin, P2 观测面)
 
 鉴权: 管理面 X-Role: admin(43-63号同款口径)。
 统一口径:
     - 观测面(registry/orders/model
-      status/checkouts)不受 PAY60_MODE
-      影响
-    - 决策面(订单/收银台/恢复): off=拒绝
-      (409——shadow/assist 开放)
+      status/checkouts/thresholds/
+      verifications)不受 PAY60_MODE 影响
+    - 决策面(订单/收银台/恢复/验证/
+      执行): off=拒绝(409)
+    - 会员面(confirm): 需 assist 态
     - KeyError → 404 / ValueError → 409
 """
 
@@ -38,7 +45,7 @@ async def registry(
                                     alias="X-Role")):
     """支付注册表自描述(定价三因子+
     分账合约+收银台上下文+九态状态机
-    +渠道三态——观测面)"""
+    +渠道三态+四级风控——观测面)"""
     _require_admin(x_role)
     from services.pay60_service import Pay60Service
     return Pay60Service.registry()
@@ -182,6 +189,202 @@ async def checkouts(
         Pay60CheckoutService()
         .checkout_view(
             member_id=member_id))
+
+
+@router.post("/orders/{pay_id}/verify")
+async def verify_order(
+        pay_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """风控验证(P2——riskTier 四级:
+    pass 无感直通/light OTP mock/
+    strong 屏幕码/block 阻断+整改指引;
+    决策面 off 409)
+
+    Body: {deviceTrusted?, behaviorSequence?,
+    complianceFlags?, deviceId?}"""
+    _require_admin(x_role)
+    from services.pay60_risk_service import (
+        Pay60RiskService,
+    )
+    try:
+        return await (
+            Pay60RiskService().verify(
+                pay_id=pay_id,
+                device_trusted=bool(
+                    body.get(
+                        "deviceTrusted")),
+                behavior_sequence=body.get(
+                    "behaviorSequence")
+                if isinstance(
+                    body.get(
+                        "behaviorSequence"),
+                    list) else None,
+                compliance_flags=body.get(
+                    "complianceFlags")
+                if isinstance(
+                    body.get(
+                        "complianceFlags"),
+                    list) else None,
+                device_id=str(
+                    body.get("deviceId")
+                    or "") or None))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/orders/{pay_id}/confirm")
+async def confirm_order(
+        pay_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """验证令牌核销(P2 会员面——48号
+    confirmToken 一次性消费语义;
+    需 assist 态)
+
+    Body: {verifyToken}"""
+    _require_admin(x_role)
+    from services.pay60_risk_service import (
+        Pay60RiskService,
+    )
+    try:
+        return await (
+            Pay60RiskService().confirm(
+                pay_id=pay_id,
+                verify_token=str(
+                    body.get("verifyToken")
+                    or "")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/orders/{pay_id}/execute")
+async def execute_order(
+        pay_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """渠道执行(P2——verified→executing
+    →success/failed+归因链附加渠道回执;
+    决策面 off 409)
+
+    Body: {channelMode?}"""
+    _require_admin(x_role)
+    from services.pay60_risk_service import (
+        Pay60RiskService,
+    )
+    try:
+        return await (
+            Pay60RiskService().execute(
+                pay_id=pay_id,
+                channel_mode=str(
+                    body.get("channelMode")
+                    or "") or None))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/threshold/calibrate")
+async def threshold_calibrate(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """阈值校准(P2——管理+终审双模)
+
+    Body: {mode: submit|apply,
+    passMaxAmount?, lightMaxAmount?,
+    changeId?, requestedBy?, reason?,
+    appliedBy?}
+
+    submit: 提交 46号审批(不直接生效)
+    apply: 46号裁决留痕后人工确认落库"""
+    _require_admin(x_role)
+    from services.pay60_risk_service import (
+        Pay60RiskService,
+    )
+    mode = str(body.get("mode") or "submit")
+    try:
+        if mode == "apply":
+            change_id = body.get("changeId")
+            return await (
+                Pay60RiskService()
+                .calibrate_apply(
+                    change_id=int(
+                        change_id)
+                    if change_id
+                    is not None else 0,
+                    applied_by=str(
+                        body.get("appliedBy")
+                        or "admin")))
+        return await (
+            Pay60RiskService()
+            .calibrate_submit(
+                pass_max=float(
+                    body.get(
+                        "passMaxAmount")
+                    or 0),
+                light_max=float(
+                    body.get(
+                        "lightMaxAmount")
+                    or 0),
+                requested_by=str(
+                    body.get("requestedBy")
+                    or "admin"),
+                reason=str(
+                    body.get("reason")
+                    or "")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/thresholds")
+async def thresholds(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """阈值视图(P2 观测面——当前生效值
+    +46号审批留痕)"""
+    _require_admin(x_role)
+    from services.pay60_risk_service import (
+        Pay60RiskService,
+    )
+    return await (
+        Pay60RiskService()
+        .thresholds_view())
+
+
+@router.get("/verifications")
+async def verifications(
+        pay_id: int = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """验证事件视图(P2 观测面——
+    riskTier 分布可审计)"""
+    _require_admin(x_role)
+    from services.pay60_risk_service import (
+        Pay60RiskService,
+    )
+    return await (
+        Pay60RiskService()
+        .verification_view(
+            pay_id=pay_id))
 
 
 @router.get("/orders")

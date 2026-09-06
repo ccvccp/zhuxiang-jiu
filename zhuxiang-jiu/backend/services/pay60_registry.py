@@ -423,6 +423,189 @@ def assert_transition(current: str,
 
 
 # ============================================================
+# 信值融合风控规则(P2——计划 §3.2)
+# ============================================================
+
+# riskTier 四级(摩擦感与信任等级成反比)
+RISK_TIERS = (
+    "pass",    # 无感直通(trusted+小额+设备可信)
+    "light",   # 轻量(OTP 语义 mock 码)
+    "strong",  # 强验证(屏幕码+二次确认)
+    "block",   # 阻断(拒绝+整改指引)
+)
+
+# 验证方式域(48号 confirmToken 语义复用)
+VERIFY_METHODS = (
+    "confirm_token",  # 轻确认(pass 档)
+    "otp_mock",       # OTP 语义 mock 码(light 档)
+    "screen_code",    # 屏幕码(FIDO 语义占位——strong 档)
+    "none",           # block 档无验证(直接拒绝)
+)
+
+# 金额阈值(默认——可经 46号审批校准)
+PASS_MAX_AMOUNT = 5000.0    # pass 档上限
+LIGHT_MAX_AMOUNT = 2000.0   # light 档独立线(单笔小额)
+
+# 行为序列前序域(支付前序操作——
+# 跳跃式操作升一档)
+BEHAVIOR_STEPS = (
+    "browse",    # 浏览
+    "order",     # 下单
+    "modify",    # 改单
+    "pay",       # 支付
+)
+
+# 合规禁令域(封闭——命中即 block)
+COMPLIANCE_BANS = (
+    "industry_ban",   # 行业禁令
+    "tax_violation",  # 税务违规
+    "sanction_list",  # 制裁名单
+)
+
+# AML 洗钱检测三规则(确定性——不依赖 GNN)
+AML_RULES = (
+    "fund_loop",          # A→B→A 资金环
+    "device_multi_account",  # 同设备多账户
+    "fast_in_fast_out",   # 快进快出
+)
+
+# 快进快出时间窗(秒——短于该窗的
+# 转入即转出)
+FAST_WINDOW_SECONDS = 300
+
+
+def assess_risk_tier(tier: str,
+                     amount: float,
+                     device_trusted: bool = False,
+                     behavior_sequence: list = None,
+                     compliance_flags: list = None,
+                     aml_hits: list = None
+                     ) -> dict:
+    """riskTier 三轴确定性评估
+    (信值×金额×行为——摩擦感与
+    信任等级成反比铁律)
+
+    判定序(最严优先):
+        ① 合规禁令/AML 命中 → block
+        ② tier=restricted → block
+        ③ tier=watched 或 amount>PASS
+           上限 → strong
+        ④ 行为跳跃(无 browse 直付)→
+           基础档升一档
+        ⑤ tier=trusted+amount≤PASS
+           上限+设备可信 → pass
+        ⑥ 其余(tier≥standard 或
+           amount≤LIGHT 线) → light
+    """
+    tier = str(tier or "standard")
+    amount = float(amount or 0)
+    compliance_flags = [
+        str(f) for f in
+        (compliance_flags or [])]
+    aml_hits = [
+        str(a) for a in (aml_hits or [])]
+
+    block_reasons = []
+    # ① 合规禁令+AML 三规则命中
+    for f in compliance_flags:
+        if f in COMPLIANCE_BANS:
+            block_reasons.append(
+                f"合规禁令命中({f})")
+    for a in aml_hits:
+        if a in AML_RULES:
+            block_reasons.append(
+                f"AML 命中({a})")
+    # ② restricted
+    if tier == "restricted":
+        block_reasons.append(
+            "tier=restricted(信值受限)")
+    if block_reasons:
+        return {
+            "riskTier": "block",
+            "verifyMethod": "none",
+            "reasons": block_reasons,
+            "escalatedBy": "",
+            "note": "阻断——拒绝+整改"
+                    "指引推送",
+        }
+
+    # ③ watched 或大额 → strong
+    reasons = []
+    escalated = ""
+    if tier == "watched":
+        reasons.append(
+            f"tier=watched(观察期)")
+    if amount > PASS_MAX_AMOUNT:
+        reasons.append(
+            f"金额 {amount}>"
+            f"{PASS_MAX_AMOUNT}(大额)")
+    if reasons:
+        return {
+            "riskTier": "strong",
+            "verifyMethod": "screen_code",
+            "reasons": reasons,
+            "escalatedBy": "",
+            "note": "强验证——屏幕码+"
+                    "二次确认(48号 "
+                    "confirmToken 流)",
+        }
+
+    # ⑤ pass 判定(trusted+小额+
+    #    设备可信)
+    if tier == "trusted" \
+            and amount \
+            <= PASS_MAX_AMOUNT \
+            and device_trusted:
+        return {
+            "riskTier": "pass",
+            "verifyMethod": "confirm_token",
+            "reasons": [
+                f"tier=trusted+金额"
+                f"{amount}≤{PASS_MAX_AMOUNT}"
+                f"+设备可信"],
+            "escalatedBy": "",
+            "note": "无感直通——confirmToken"
+                    " 轻确认",
+        }
+
+    # ④ 行为跳跃(无浏览直接支付)——
+    #    light 基础上升一档
+    seq = [str(s) for s in
+           (behavior_sequence or [])]
+    jumped = bool(seq) \
+        and seq[0] == "pay" \
+        and "browse" not in seq
+    if jumped:
+        return {
+            "riskTier": "strong",
+            "verifyMethod": "screen_code",
+            "reasons": [
+                "行为序列跳跃(无浏览"
+                "直接支付——升档)"],
+            "escalatedBy": "behavior_jump",
+            "note": "跳跃升档——强验证"
+                    "(行为轴)",
+        }
+
+    # ⑥ light(tier≥standard 或
+    #    单笔≤LIGHT 线)
+    return {
+        "riskTier": "light",
+        "verifyMethod": "otp_mock",
+        "reasons": [
+            f"tier={tier}"
+            + (f"+金额{amount}≤"
+               f"{LIGHT_MAX_AMOUNT}"
+               if amount
+               <= LIGHT_MAX_AMOUNT
+               else "")],
+        "escalatedBy": "",
+        "note": "轻量验证——OTP 语义"
+                "mock 码",
+    }
+
+
+# ============================================================
 # 注册表观测面
 # ============================================================
 
@@ -441,6 +624,18 @@ def registry_view() -> dict:
             CHECKOUT_CONTEXTS),
         "payMethods": len(PAY_METHODS),
         "orderStates": len(ORDER_STATES),
+        "risk": {
+            "riskTiers": list(RISK_TIERS),
+            "verifyMethods": list(
+                VERIFY_METHODS),
+            "passMaxAmount":
+                PASS_MAX_AMOUNT,
+            "lightMaxAmount":
+                LIGHT_MAX_AMOUNT,
+            "amlRules": list(AML_RULES),
+            "complianceBans": list(
+                COMPLIANCE_BANS),
+        },
         "meta": {
             "sceneDomains":
                 list(SCENE_DOMAINS),
@@ -460,7 +655,8 @@ def registry_view() -> dict:
         "note": "支付注册表——定价三因子"
                 "+分账合约+收银台上下文"
                 "+九态状态机+渠道三态"
-                "(信值驱动的价值交换引擎)",
+                "+四级风控(信值驱动的"
+                "价值交换引擎)",
     }
 
 
@@ -545,6 +741,32 @@ def _validate_registry() -> None:
         if ORDER_TRANSITIONS[terminal]:
             errors.append(
                 f"终态 {terminal} 不应有出边")
+    # ⑤ 风控规则域(P2)
+    if RISK_TIERS != ("pass", "light",
+                      "strong", "block"):
+        errors.append(
+            "riskTier 四级域非法")
+    if not 0 < LIGHT_MAX_AMOUNT \
+            < PASS_MAX_AMOUNT:
+        errors.append(
+            "金额阈值非法(LIGHT 须"
+            "小于 PASS)")
+    if set(VERIFY_METHODS) != {
+            "confirm_token", "otp_mock",
+            "screen_code", "none"}:
+        errors.append(
+            "验证方式域非法")
+    if len(AML_RULES) != 3:
+        errors.append(
+            "AML 三规则域非法")
+    if len(COMPLIANCE_BANS) != 3:
+        errors.append(
+            "合规禁令域非法")
+    for step in BEHAVIOR_STEPS:
+        if step not in ("browse", "order",
+                       "modify", "pay"):
+            errors.append(
+                f"行为序列步骤 {step} 域外")
     if errors:
         raise RuntimeError(
             "pay60 registry 自检失败: "
@@ -552,11 +774,13 @@ def _validate_registry() -> None:
     logger.info(
         "pay60_registry_validated "
         "pricing=%s contracts=%s "
-        "contexts=%s states=%s",
+        "contexts=%s states=%s "
+        "risk=%s",
         len(PRICING_RULES),
         len(SPLIT_CONTRACTS),
         len(CHECKOUT_CONTEXTS),
-        len(ORDER_STATES))
+        len(ORDER_STATES),
+        len(RISK_TIERS))
 
 
 _validate_registry()
