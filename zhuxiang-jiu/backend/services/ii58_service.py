@@ -265,7 +265,20 @@ class Ii58Service:
             "boundaryIntercepted": denied,
         })
 
-        # ⑨ 响应组装(按三态+合规裁决语义)
+        # ⑨ 主动学习: 低置信区间自动入标注队列
+        #    (0.4≤conf<0.7——fail-soft;
+        #    入队≠生效, pending 人工 decide)
+        try:
+            from services.ii58_feedback_service \
+                import Ii58FeedbackService
+            await Ii58FeedbackService(
+            ).enqueue_ambiguous(record)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ii58_auto_enqueue_failed: %s",
+                exc)
+
+        # ⑩ 响应组装(按三态+合规裁决语义)
         result = {
             "success": True,
             "evalId": eval_id,

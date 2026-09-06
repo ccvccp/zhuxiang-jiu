@@ -1,6 +1,6 @@
-"""58号·AI智能优化意图识别路由(P0-P2)
+"""58号·AI智能优化意图识别路由(P0-P3)
 
-端点(P0 5 + P1 6 + P2 2 = 13):
+端点(P0 5 + P1 6 + P2 2 + P3 3 = 16):
     GET  /api/ii58/registry            注册表自描述(admin, 观测面)
     POST /api/ii58/evaluate            意图识别评估(admin, 管理)
     GET  /api/ii58/evaluations         识别记录列表(admin, 观测面)
@@ -14,17 +14,23 @@
     GET  /api/ii58/confusables         易混淆对视图(admin, 观测面, P1)
     POST /api/ii58/threshold/calibrate 阈值校准(申请+终审双模, P2)
     GET  /api/ii58/thresholds          阈值全景(admin, 观测面, P2)
+    POST /api/ii58/feedback           显式反馈(会员, 会员面, P3)
+    GET  /api/ii58/labels              标注队列列表(admin, 观测面, P3)
+    POST /api/ii58/labels/{id}/decide  标注人工终审(admin, 终审, P3)
 
-鉴权: 管理面 X-Role: admin(43-57号同款口径)。
+鉴权: 管理面 X-Role: admin(43-57号同款口径);
+会员面 X-Member-Id(48号惯例)。
 统一口径:
     - 观测面(registry/evaluations/model/status/
-      corpus/confusables/thresholds)不受
+      corpus/confusables/thresholds/labels)不受
       II58_MODE 影响
     - 决策面(evaluate/ingest/mine/calibrate):
       off=拒绝(409——shadow/assist 开放)
+    - 会员面(feedback): 需 assist
+      (off/shadow 409)
     - review(语料终审)+calibrate 终审模
-      (changeId 请求): 不受开关影响
-      (优化永不自动生效——人工铁律)
+      (changeId 请求)+decide(标注终审):
+      不受开关影响(优化永不自动生效——人工铁律)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -38,6 +44,25 @@ def _require_admin(x_role: str | None) -> str:
     if not x_role or x_role != "admin":
         raise HTTPException(status_code=403,
                             detail="需要 X-Role: admin")
+
+
+def _require_member(x_member_id: str | None) -> int:
+    """会员面鉴权(X-Member-Id——48号惯例)"""
+    if not x_member_id:
+        raise HTTPException(
+            status_code=403,
+            detail="需要 X-Member-Id")
+    try:
+        member_id = int(x_member_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=403,
+            detail="X-Member-Id 需为整数")
+    if member_id <= 0:
+        raise HTTPException(
+            status_code=403,
+            detail="X-Member-Id 非法")
+    return member_id
 
 
 @router.get("/registry")
@@ -309,6 +334,94 @@ async def thresholds(
     _require_admin(x_role)
     from services.ii58_service import Ii58Service
     return await Ii58Service().thresholds_view()
+
+
+@router.post("/feedback")
+async def feedback(
+        body: dict,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """显式反馈(短期表单——识别后"不是这个";
+    会员面需 assist, P3)
+
+    Body: {evalId, text, correctedIntentId?,
+    note?}——高优先级入标注队列"""
+    member_id = _require_member(x_member_id)
+    from services.ii58_feedback_service import (
+        Ii58FeedbackService,
+    )
+    try:
+        return await (
+            Ii58FeedbackService().submit_feedback(
+                member_id=member_id,
+                eval_id=int(body.get("evalId") or 0),
+                text=str(body.get("text") or ""),
+                corrected_intent_id=body.get(
+                    "correctedIntentId"),
+                note=str(body.get("note") or "")))
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"识别记录 "
+                   f"{body.get('evalId')} 不存在")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/labels")
+async def labels(
+        status: str = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """标注队列列表(主动学习+双通道反馈
+    ——观测面, P3)"""
+    _require_admin(x_role)
+    from services.ii58_feedback_service import (
+        Ii58FeedbackService,
+    )
+    return await (
+        Ii58FeedbackService().list_labels(
+            status=status))
+
+
+@router.post("/labels/{label_id}/decide")
+async def label_decide(
+        label_id: int,
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """标注人工终审(pending→approved 语料回流
+    /rejected——不受开关影响的人工铁律, P3)
+
+    Body: {approve, reviewer?, note?,
+    targetSampleType?(positive/negative/
+    adversarial/boundary), targetIntentId?
+    (意图修正)"""
+    _require_admin(x_role)
+    from services.ii58_feedback_service import (
+        Ii58FeedbackService,
+    )
+    try:
+        return await (
+            Ii58FeedbackService().decide(
+                int(label_id),
+                approve=bool(body.get("approve")),
+                reviewer=str(
+                    body.get("reviewer") or "admin"),
+                note=str(body.get("note") or ""),
+                target_sample_type=str(
+                    body.get("targetSampleType")
+                    or "positive"),
+                target_intent_id=body.get(
+                    "targetIntentId")))
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"标注 {label_id} 不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_ii58_routes(app) -> None:

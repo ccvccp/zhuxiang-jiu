@@ -784,14 +784,14 @@ class TestHttp:
                    resp.status_code == 403,
                    str(resp.status_code))
 
-        # 路由累计 13 端点
+        # 路由累计 13 端点(P3 扩至 16——基线语义)
         from routes.ii58_routes import (
             router as ii_router,
         )
         count = sum(
             1 for r in ii_router.routes)
-        record("58号路由累计 13 端点",
-               count == 13, str(count))
+        record("58号路由累计 ≥13 端点",
+               count >= 13, str(count))
         os.environ["II58_MODE"] = "off"
 
 

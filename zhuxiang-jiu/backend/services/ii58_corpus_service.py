@@ -320,16 +320,23 @@ class Ii58CorpusService:
                      sample_type: str = "positive",
                      weight: float = 1.0,
                      confusable_target: str = None,
-                     source: str = "ops_register"
+                     source: str = "ops_register",
+                     terminal: bool = False
                      ) -> dict:
         """语料登记(运营注册轨——对抗/越界/合成
         数据 LLM 建议均走此入口, pending 人工审核)
+
+        Args:
+            terminal: 终审轨调用(decide 语料回流
+                ——不受开关影响的人工铁律; 运营
+                注册轨 False 走决策面门槛)
 
         Raises:
             ValueError: 决策面 off/字段非法/意图
                 不在册/样本类型非法
         """
-        _require_active_mode()
+        if not terminal:
+            _require_active_mode()
 
         from services.ii58_registry import (
             INTENT_REGISTRY,

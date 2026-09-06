@@ -193,19 +193,25 @@ class Ii58Repository:
         rec = self.store[table].get(key)
         return dict(rec) if rec else None
 
-    async def _list(self, kind: str,
+    async def _list(self, table_kind: str,
                     limit: int = 100,
                     **filters) -> list[dict]:
-        """列表(最新在前; 可选字段过滤)"""
-        table = self._table_of(kind)
+        """列表(最新在前; 可选字段过滤)
+
+        Args:
+            table_kind: 表短名(位置参数——与
+                记录字段 kind 同名的过滤项经
+                **filters 传入不冲突)
+        """
+        table = self._table_of(table_kind)
         if is_redis_mode():
             client = await get_redis_client()
             ids = await client.lrange(
-                _k("ii58", f"{kind}_all"), 0, -1)
+                _k("ii58", f"{table_kind}_all"),
+                0, -1)
             result = []
             for i in range(0, len(ids), 500):
-                pipe = client.pipeline(
-                    transaction=False)
+                pipe = client.pipeline(transaction=False)
                 for rid in ids[i:i + 500]:
                     pipe.hgetall(_k(
                         "ii58", table, rid))
@@ -223,9 +229,9 @@ class Ii58Repository:
                           if r.get(field) == value]
         # 主键倒序(int 字段名取 {kind}Id 或 tier)
         result.sort(key=lambda r: -(
-            int(r.get(f"{kind}Id") or 0)
+            int(r.get(f"{table_kind}Id") or 0)
             if isinstance(
-                r.get(f"{kind}Id"), int)
+                r.get(f"{table_kind}Id"), int)
             else 0))
         return result[:limit]
 
