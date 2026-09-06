@@ -29,7 +29,7 @@
         <div class="container">
             <div class="test-stats" id="statsBar">
                 <div class="stat-card">
-                    <div class="stat-value" id="statModules">27</div>
+                    <div class="stat-value" id="statModules">28</div>
                     <div class="stat-label">模块总数</div>
                 </div>
                 <div class="stat-card stat-passed">
@@ -555,7 +555,10 @@
                 + '📋 重构任务清单</a>'
                 + '<a href="docs/并发锁实施规范.md" target="_blank" rel="noopener" '
                 + 'style="color:#16a085;border:1px dashed #16a085;border-radius:4px;padding:2px 10px;margin-left:4px;">'
-                + '🔒 并发锁规范</a>';
+                + '🔒 并发锁规范</a>'
+                + '<a href="xx64-delivery-dashboard.html" target="_blank" rel="noopener" '
+                + 'style="color:#1a4a3a;border:1px dashed #2e8b6e;border-radius:4px;padding:2px 10px;margin-left:4px;">'
+                + '🎋 64号交付可视化</a>';
             const desktopNav = document.querySelector('#header .nav');
             if (desktopNav) desktopNav.insertAdjacentHTML('beforeend', docLinksHtml);
             const mobileNavList = document.querySelector('#header .mobile-nav-list');

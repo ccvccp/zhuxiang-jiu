@@ -546,6 +546,40 @@ const MODULES = [
             pluginPool: '自然语言/视觉/决策推理/多模态融合 4大类',
             pluginCount: 120, dynamicComposition: '≥20种能力动态组合'
         })
+    },
+    {
+        id: '64', name: '信值兑换商品/服务AI智能管理模块', domain: 'user', aiRate: '93%',
+        refs: '传统积分商城/央行数字货币/淘宝88VIP',
+        aiCapabilities: [
+            'AI刚性规则引擎',     // P0: R1-R7宪法(30/70混合+20%/40%限额+100:1积分)不可AI修改
+            'AI原子结算引擎',     // P1: 买扣卖增借贷对原子转移+T+1冻结+日限频+退款反向
+            'AI智能体验层',       // P2: 最优支付组合互斥对比+信值密度凑单+规则可视化可溯源
+            'AI动态风控层',       // P3: 五防检测(套利x2/积分冲击/价格操纵/流动性)+tier摩擦分级
+            'AI价值锚定治理',     // P4: 购买力指数通胀预警+申诉人工终审+回流1:1幂等+T+1调度
+            'AI看板与红队'        // P5: 四区看板+红队七向量7/7全防+支付占位锁双花防护
+        ],
+        desc: '信值消费流通层: 六期全链(P0-P5), 26端点/13服务/9表, 293断言+342实机验收全绿, 红队七向量全防',
+        testCases: [
+            { name: 'R1-R7刚性规则', expected: '30%信值+70%现付/整单互斥/单次≤快照20%/窗口累计≤最大快照40%/100:1积分/负值禁止', status: 'pending' },
+            { name: '原子转移借贷对', expected: '买扣卖增同entryId两笔, 贷方先落借方失败整体回滚, 来源标记consumption_transfer', status: 'pending' },
+            { name: '最优支付组合', expected: '方案A信值(积分缺口×100换算)vs方案B优惠互斥对比卡, 刚性30/70结构内最低现金支出', status: 'pending' },
+            { name: '五防检测', expected: 'ARB-HF高频/ARB-MA多账号/PTS-SHOCK冲击/PRICE-MANIP操纵/LIQ-CRUNCH流动性, 预警仅建议', status: 'pending' },
+            { name: '购买力指数', expected: '基准均价/当前均价日快照, 同日重算幂等, 通胀/通缩连续3日波幅>10%预警', status: 'pending' },
+            { name: '申诉人工终审', expected: '确定性重算三件套(precheck/explain/五防)展示, approve翻转disputed→paid, 48h过期不翻转', status: 'pending' },
+            { name: '回流幂等', expected: 'orderId 1:1(pooledFeedbackId回写), 双轮collect第二轮labeled=0, 44号第38档案', status: 'pending' },
+            { name: '红队七向量', expected: 'RT-01~07规则绕过/拆单/套利/操纵/双花/刷分/透支——全部防住(真实Redis态)', status: 'pending' },
+            { name: '支付占位锁', expected: 'SET NX+TTL跨进程互斥, 并发双花恰1成功, finally释放防异常泄漏', status: 'pending' }
+        ],
+        mock: () => ({
+            moduleRole: '信值消费流通层', aiRate: '93%', phases: 'P0-P5六期',
+            delivery: '13服务/9表/26端点/293断言/342实机验收×2轮幂等',
+            constitution: 'R1-R7刚性规则(LLM不可改)/三开关默认off/五模块零改动宪法',
+            layers: 'P0刚性基座→P1结算→P2体验→P3风控→P4锚定→P5看板红队',
+            redteam: 'RT-01~07七向量全防(真实Redis态)',
+            endpoints: 26, services: 13, tables: 9,
+            assertions: 293, liveChecks: 342,
+            docs: '实施计划+P3/P4详细设计+六期总结报告+交付可视化页(竹青雅韵)'
+        })
     }
 ];
 
