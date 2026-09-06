@@ -54,11 +54,12 @@ class Kb57Repository:
         "hits", "suggestedSources", "valueTags",
         "seedIds", "complianceReports",
         "maskedFields", "auditTrail",
-        "affectedMembers")
+        "affectedMembers", "results")
     _BOOL_FIELDS = (
         "humanVerified", "active", "completed",
         "reviewRequired", "deferred", "escalated",
-        "budgetHalted", "pooled")
+        "budgetHalted", "pooled",
+        "gapRecurrence")
 
     TABLE_SOURCES = "kb57_sources"
     TABLE_GAPS = "kb57_gaps"

@@ -1,6 +1,6 @@
-"""57号·AI智能知识库路由(P0-P3)
+"""57号·AI智能知识库路由(P0-P4)
 
-端点(P0 6 + P1 3 + P2 5 + P3 7 = 21):
+端点(P0 6 + P1 3 + P2 5 + P3 7 + P4 2 = 23):
     GET  /api/kb57/registry           注册表自描述(admin, 观测面)
     GET  /api/kb57/sources            采集源注册表(admin, 观测面)
     POST /api/kb57/sources/register   采集源注册(admin, 管理)
@@ -22,12 +22,15 @@
     POST /api/kb57/paths/{id}/advance  学习路径推进(会员, P3)
     GET  /api/kb57/my/learning         我的学习(会员, P3)
     POST /api/kb57/context/trigger     情境触发上报(会员, P3)
+    POST /api/kb57/feedback/collect    决策回流补标(admin, 回流, P4)
+    GET  /api/kb57/feedback/stats      回流统计(admin, 观测面, P4)
 
 鉴权: 管理面 X-Role: admin(43-56号同款口径);
 会员面 X-Member-Id(48号惯例)。
 统一口径:
     - 观测面(registry/sources/gaps/model/status/
-      compliance/seeds)不受 KB57_MODE 影响
+      compliance/seeds/feedback-stats)不受
+      KB57_MODE 影响
     - 决策面(gaps/scan+sources/register+collect/run
       +resources/{id}/compliance+seeds/craft):
       off=拒绝(409——shadow/assist 开放)
@@ -36,6 +39,7 @@
     - 会员面(feed/view/feedback/paths/
       my-learning/context-trigger):
       需 assist(种子暴露面——off/shadow 409)
+    - feedback/collect: 不受开关影响(回流管理面)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -591,6 +595,38 @@ async def member_context_trigger(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
+
+
+@router.post("/feedback/collect")
+async def feedback_collect(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """决策回流补标(六类信号真值+44号池双写
+    ——幂等 seedId 1:1; 不受开关影响; P4)"""
+    _require_admin(x_role)
+    from services.kb57_feedback_loop_service import (
+        Kb57FeedbackLoopService,
+    )
+    try:
+        return await (
+            Kb57FeedbackLoopService()
+            .collect_feedback())
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/feedback/stats")
+async def feedback_stats(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """回流统计(信号分布/池双写——观测面, P4)"""
+    _require_admin(x_role)
+    from services.kb57_feedback_loop_service import (
+        Kb57FeedbackLoopService,
+    )
+    return await (
+        Kb57FeedbackLoopService().feedback_stats())
 
 
 def register_kb57_routes(app) -> None:

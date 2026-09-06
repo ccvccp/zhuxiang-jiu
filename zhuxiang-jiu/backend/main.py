@@ -405,6 +405,12 @@ async def _on_startup():
     from services.aiup56_scheduler import (
         start_scheduler as start_aiup56_learn)
     start_aiup56_learn()
+    # 57号·AI智能知识库: 决策回流 T+1 补标调度
+    # (六类信号+44号池双写+有效期检查;
+    #  KB57_LEARN_MODE=on 开启, 默认 off)
+    from services.kb57_scheduler import (
+        start_scheduler as start_kb57_learn)
+    start_kb57_learn()
 
 
 @app.on_event("shutdown")
@@ -466,6 +472,10 @@ async def _on_shutdown():
     from services.aiup56_scheduler import (
         stop_scheduler as stop_aiup56_learn)
     stop_aiup56_learn()
+    # 57号·AI智能知识库学习调度器
+    from services.kb57_scheduler import (
+        stop_scheduler as stop_kb57_learn)
+    stop_kb57_learn()
     await close_redis_client()
     logger.info("清理完成")
 

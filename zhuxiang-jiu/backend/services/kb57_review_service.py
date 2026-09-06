@@ -174,14 +174,39 @@ class Kb57ReviewService:
         await self.repo.save_seed(
             seed, create=False)
 
-        # 受影响用户补偿(P4 联动接口预留——
-        # 45号 deposit 范式)
+        # 受影响用户补偿(P4 联动——45号 L2
+        # platform_conduct 正向抚慰)
         compensation = {
             "attempted": len(affected_members or []),
             "compensated": 0,
-            "note": "受影响用户补偿——P4 信值联动"
-                    "接入(45号 L2 deposit)",
+            "note": "受影响用户补偿——45号 L2"
+                    "正向抚慰(P4 联动)",
         }
+        if affected_members:
+            try:
+                from services.\
+                    kb57_feedback_loop_service import (
+                    Kb57FeedbackLoopService,
+                )
+                comp = await (
+                    Kb57FeedbackLoopService()
+                    .compensate_recall(
+                        affected_members,
+                        int(seed_id),
+                        seed["recallReason"]))
+                compensation = {
+                    "attempted":
+                        comp.get("attempted"),
+                    "compensated":
+                        comp.get("compensated"),
+                    "results": comp.get("results"),
+                    "note": "误导召回补偿——45号 L2 "
+                            "platform_conduct",
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "kb57_recall_compensate_"
+                    "failed: %s", exc)
 
         await self._track(
             int(seed.get("gapId") or 0),
