@@ -58,7 +58,7 @@ class Kb57Repository:
     _BOOL_FIELDS = (
         "humanVerified", "active", "completed",
         "reviewRequired", "deferred", "escalated",
-        "budgetHalted")
+        "budgetHalted", "pooled")
 
     TABLE_SOURCES = "kb57_sources"
     TABLE_GAPS = "kb57_gaps"

@@ -1,6 +1,6 @@
-"""57号·AI智能知识库路由(P0-P2)
+"""57号·AI智能知识库路由(P0-P3)
 
-端点(P0 6 + P1 3 + P2 5 = 14):
+端点(P0 6 + P1 3 + P2 5 + P3 7 = 21):
     GET  /api/kb57/registry           注册表自描述(admin, 观测面)
     GET  /api/kb57/sources            采集源注册表(admin, 观测面)
     POST /api/kb57/sources/register   采集源注册(admin, 管理)
@@ -15,8 +15,16 @@
     GET  /api/kb57/seeds/{id}         种子详情(admin, 观测面, P2)
     POST /api/kb57/seeds/{id}/review   种子发布终审(admin, 终审, P2)
     POST /api/kb57/seeds/{id}/recall   种子紧急召回(admin, 管理, P2)
+    GET  /api/kb57/feed                推荐流(会员, P3)
+    GET  /api/kb57/seeds/{id}/view     种子浏览(会员, 指纹校验, P3)
+    POST /api/kb57/seeds/{id}/feedback 种子反馈(会员, P3)
+    POST /api/kb57/paths               学习路径创建(会员, P3)
+    POST /api/kb57/paths/{id}/advance  学习路径推进(会员, P3)
+    GET  /api/kb57/my/learning         我的学习(会员, P3)
+    POST /api/kb57/context/trigger     情境触发上报(会员, P3)
 
-鉴权: 管理面 X-Role: admin(43-56号同款口径)。
+鉴权: 管理面 X-Role: admin(43-56号同款口径);
+会员面 X-Member-Id(48号惯例)。
 统一口径:
     - 观测面(registry/sources/gaps/model/status/
       compliance/seeds)不受 KB57_MODE 影响
@@ -25,6 +33,9 @@
       off=拒绝(409——shadow/assist 开放)
     - review/recall(发布链人工动作):
       不受开关影响(终审人工铁律)
+    - 会员面(feed/view/feedback/paths/
+      my-learning/context-trigger):
+      需 assist(种子暴露面——off/shadow 409)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -400,6 +411,183 @@ async def seeds_recall(
     except KeyError as exc:
         raise HTTPException(status_code=404,
                             detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+# ============================================================
+# 会员面(P3——X-Member-Id 48号惯例;
+# 需 KB57_MODE=assist 种子暴露面)
+# ============================================================
+
+def _require_member(x_member_id: str | None) -> int:
+    if not x_member_id:
+        raise HTTPException(
+            status_code=403, detail="需要 X-Member-Id")
+    try:
+        return int(x_member_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail="X-Member-Id 需为整数")
+
+
+@router.get("/feed")
+async def member_feed(
+        role: str = "citizen",
+        scene: str = "service",
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """推荐流(角色×场景×学习记录×预算——
+    确定性匹配; 会员面, P3)"""
+    member_id = _require_member(x_member_id)
+    from services.kb57_feed_service import (
+        Kb57FeedService,
+    )
+    try:
+        return await Kb57FeedService().feed(
+            int(member_id), role=role, scene=scene)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/seeds/{seed_id}/view")
+async def member_seed_view(
+        seed_id: int,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """种子浏览(合规指纹校验+预算计量
+    ——会员面唯一种子入口, P3)"""
+    member_id = _require_member(x_member_id)
+    from services.kb57_feed_service import (
+        Kb57FeedService,
+    )
+    try:
+        return await Kb57FeedService().view(
+            int(member_id), int(seed_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/seeds/{seed_id}/feedback")
+async def member_seed_feedback(
+        seed_id: int,
+        body: dict,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """种子使用反馈(positive/negative/ignored
+    ——P4 回流信号源; 会员面, P3)"""
+    member_id = _require_member(x_member_id)
+    from services.kb57_feed_service import (
+        Kb57FeedService,
+    )
+    try:
+        return await Kb57FeedService().feedback(
+            int(member_id), int(seed_id),
+            kind=str(body.get("kind") or ""),
+            comment=str(
+                body.get("comment") or ""))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/paths")
+async def member_create_path(
+        body: dict,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """学习路径创建(种子序列微课程; 会员面, P3)"""
+    member_id = _require_member(x_member_id)
+    from services.kb57_feed_service import (
+        Kb57FeedService,
+    )
+    try:
+        return await (
+            Kb57FeedService().create_path(
+                int(member_id),
+                seed_ids=body.get("seedIds") or [],
+                title=str(
+                    body.get("title") or "")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/paths/{path_id}/advance")
+async def member_advance_path(
+        path_id: int,
+        body: dict,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """学习路径推进(完成标记——全完成置
+    completed; 会员面, P3)"""
+    member_id = _require_member(x_member_id)
+    from services.kb57_feed_service import (
+        Kb57FeedService,
+    )
+    try:
+        return await (
+            Kb57FeedService().advance_path(
+                int(member_id), int(path_id),
+                int(body.get("seedId") or 0)))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/my/learning")
+async def member_my_learning(
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """我的学习(历史+微课程路径——仅属主;
+    会员面, P3)"""
+    member_id = _require_member(x_member_id)
+    from services.kb57_feed_service import (
+        Kb57FeedService,
+    )
+    try:
+        return await Kb57FeedService().my_learning(
+            int(member_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.post("/context/trigger")
+async def member_context_trigger(
+        body: dict,
+        x_member_id: str | None = Header(
+            default=None, alias="X-Member-Id")):
+    """情境触发上报(搜索无结果/操作卡点→
+    匹配种子+缺口采集建议; 会员面, P3)"""
+    member_id = _require_member(x_member_id)
+    from services.kb57_feed_service import (
+        Kb57FeedService,
+    )
+    try:
+        return await (
+            Kb57FeedService().context_trigger(
+                int(member_id),
+                trigger_type=str(
+                    body.get("triggerType") or ""),
+                query=str(
+                    body.get("query") or "")))
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))
