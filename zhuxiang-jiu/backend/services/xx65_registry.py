@@ -262,6 +262,154 @@ ORDER_WINDOW_CUMULATIVE_WARN = 0.35
 ELDER_AUDIENCE_MARKERS = (
     "老年", "长辈", "中老年", "银发")
 
+# ============================================================
+# P2·智能营销中枢——三因子规则库+ROI 双算+渠道适配(宪法级)
+# ============================================================
+
+# 三因子权重(店铺信值/商品热度/
+# 季节趋势——确定性线性加权)
+CAMPAIGN_FACTOR_WEIGHTS = {
+    "shop_trust": 0.40,
+    "product_heat": 0.35,
+    "season_trend": 0.25,
+}
+
+# 季度趋势(月→当季类目加成——
+# 确定性映射; 商品类目命中=1.0,
+# 未命中=0.5 中性)
+SEASON_TRENDS = {
+    1: ("apparel", "food"),
+    2: ("apparel", "handicraft"),
+    3: ("handicraft", "service"),
+    4: ("handicraft", "service"),
+    5: ("digital", "service"),
+    6: ("food", "digital"),
+    7: ("food", "digital"),
+    8: ("apparel", "digital"),
+    9: ("apparel", "general"),
+    10: ("food", "handicraft"),
+    11: ("apparel", "food"),
+    12: ("food", "handicraft"),
+}
+
+# 策略类型(推荐输出——流动性
+# 感知联动 64号 anchors/LIQ-CRUNCH)
+CAMPAIGN_STRATEGIES = {
+    # 信值专享爆款(购买力指数高
+    # →通缩倾向→促信值消耗)
+    "trust_exclusive": {
+        "label": "信值专享爆款",
+        "roiCashLift": 0.20,
+        "trustPortion": 0.30,
+        "channels": ("in_site", "community"),
+        "note": "信值支付专享价——"
+                "促进信值流通",
+    },
+    # 小额高频组合(流动性紧张
+    # →LIQ-CRUNCH 口径预警→
+    # 降低单笔信值消耗)
+    "small_high_freq": {
+        "label": "小额高频组合",
+        "roiCashLift": 0.12,
+        "trustPortion": 0.10,
+        "channels": ("in_site",),
+        "note": "低信值占比+"
+                "高频次——流动性友好",
+    },
+    # 新客专享(店铺信值因子高
+    # →扩张期获客)
+    "new_customer": {
+        "label": "新客专享",
+        "roiCashLift": 0.18,
+        "trustPortion": 0.30,
+        "channels": ("in_site", "community",
+                     "sms"),
+        "note": "首单立减+信值券"
+                "包——获客杠杆",
+    },
+    # 季节主推(类目命中当季
+    # 趋势)
+    "seasonal": {
+        "label": "季节主推",
+        "roiCashLift": 0.15,
+        "trustPortion": 0.30,
+        "channels": ("in_site", "community"),
+        "note": "当季类目加权"
+                "曝光",
+    },
+    # 清仓特卖(默认兜底)
+    "clearance": {
+        "label": "清仓特卖",
+        "roiCashLift": 0.25,
+        "trustPortion": 0.30,
+        "channels": ("in_site",),
+        "note": "去库存优先——"
+                "回笼现金",
+    },
+}
+
+# 流动性信号(对齐 64号 LIQ-CRUNCH
+# 40% 口径——只读感知不处置)
+LIQUIDITY_TENSION_RATIO = 0.40
+
+# 购买力指数信号(对齐 64号
+# anchors——指数高于该值=信值
+# 购买力强→推荐信值专享)
+ANCHOR_TRUST_SINK_THRESHOLD = 1.10
+
+# ROI 双算参数(确定性公式:
+# 预计现金GMV=价格×销量×
+# (1+lift); 预计信值消耗=
+# GMV×trustPortion)
+ROI_BASE_SALES = 20  # 预计销量基准(件)
+
+# 渠道适配表(跨渠道智能分发
+# ——确定性适配)
+CAMPAIGN_CHANNELS = {
+    "in_site": {
+        "label": "站内",
+        "maxLength": 60,
+        "voiceGuide": False,
+    },
+    "community": {
+        "label": "社群",
+        "maxLength": 120,
+        "voiceGuide": False,
+    },
+    "sms": {
+        "label": "短信",
+        "maxLength": 30,
+        "voiceGuide": False,
+    },
+}
+
+# 类目互补表(跨店联动——确定性
+# 映射; 仅建议, 执行经 46号)
+CATEGORY_COMPLEMENTS = {
+    "handicraft": ("apparel",
+                   "digital"),
+    "food": ("handicraft",),
+    "apparel": ("handicraft",),
+    "digital": ("handicraft",),
+    "service": ("digital",),
+    "general": ("food",),
+}
+
+# 活动状态机(active→revoked
+# 5min 窗口内/active→expired
+# 到期; revoked/expired 终态)
+CAMPAIGN_STATES = (
+    "active",    # 生效中
+    "revoked",   # 5 分钟窗口内撤销(S5)
+    "expired",   # 到期结束
+)
+
+CAMPAIGN_TRANSITIONS = {
+    "active": ("revoked", "expired"),
+    "revoked": (),
+    "expired": (),
+}
+
 
 def llm_mode() -> str:
     """LLM 文案轨开关(XX65_LLM_MODE,
@@ -391,10 +539,22 @@ def registry_view() -> dict:
             "pointsPerTrust":
                 POINTS_PER_TRUST_DISPLAY,
         },
-        "note": "P1 内容工坊: S1-S8 刚性"
-                "规则+店铺/草稿双状态机"
-                "+意图路由+信值准入+合规"
-                "三道防线+下单窗口双轨展示",
+        "campaignStates": CAMPAIGN_STATES,
+        "campaignStrategies": {
+            k: {"label": v["label"],
+                "trustPortion":
+                    v["trustPortion"],
+                "channels": list(
+                    v["channels"])}
+            for k, v in
+            CAMPAIGN_STRATEGIES.items()},
+        "campaignFactors":
+            CAMPAIGN_FACTOR_WEIGHTS,
+        "note": "P2 营销中枢: S1-S8 刚性"
+                "规则+店铺/草稿/活动三"
+                "状态机+三因子推荐+ROI"
+                "双算+S5 撤销窗口+64号"
+                "流动性感知(纯读取)",
     }
 
 
@@ -482,6 +642,79 @@ def _validate_registry() -> None:
         raise RuntimeError(
             "65号下单窗口预警阈值"
             "域非法")
+    # P2: 三因子权重归一
+    w_sum = sum(
+        CAMPAIGN_FACTOR_WEIGHTS
+        .values())
+    if abs(w_sum - 1.0) > 0.001:
+        raise RuntimeError(
+            f"65号三因子权重未归一: "
+            f"{w_sum}")
+    # P2: 季度趋势全月覆盖
+    for m in range(1, 13):
+        if m not in SEASON_TRENDS:
+            raise RuntimeError(
+                f"65号季度趋势缺月: "
+                f"{m}")
+        for cat in SEASON_TRENDS[m]:
+            if cat not in \
+                    CATEGORY_TEMPLATES:
+                raise RuntimeError(
+                    f"65号季度趋势类目"
+                    f"未注册: {cat}")
+    # P2: 策略参数域合法
+    for key, s in \
+            CAMPAIGN_STRATEGIES.items():
+        if not 0 < s["roiCashLift"] \
+                < 1:
+            raise RuntimeError(
+                f"65号策略 lift 越界: "
+                f"{key}")
+        if not 0 < s["trustPortion"] \
+                <= TRUST_DISPLAY_PORTION \
+                + 0.001:
+            raise RuntimeError(
+                f"65号策略信值占比越界: "
+                f"{key}")
+        for ch in s["channels"]:
+            if ch not in \
+                    CAMPAIGN_CHANNELS:
+                raise RuntimeError(
+                    f"65号策略渠道未注册: "
+                    f"{key}/{ch}")
+    # P2: 互补表类目闭环
+    for cat, comps in \
+            CATEGORY_COMPLEMENTS.items():
+        if cat not in \
+                CATEGORY_TEMPLATES:
+            raise RuntimeError(
+                f"65号互补表类目未注册: "
+                f"{cat}")
+        for c in comps:
+            if c not in \
+                    CATEGORY_TEMPLATES:
+                raise RuntimeError(
+                    f"65号互补表目标未注册: "
+                    f"{cat}→{c}")
+    # P2: 活动状态机可达
+    c_reach = {"active"}
+    for dst in \
+            CAMPAIGN_TRANSITIONS[
+                "active"]:
+        c_reach.add(dst)
+    c_missing = set(
+        CAMPAIGN_STATES) - c_reach
+    if c_missing:
+        raise RuntimeError(
+            f"65号活动状态机不可达: "
+            f"{c_missing}")
+    # P2: 流动性阈值对齐 64号
+    # LIQ-CRUNCH 40%
+    if LIQUIDITY_TENSION_RATIO \
+            != 0.40:
+        raise RuntimeError(
+            "65号流动性阈值未对齐"
+            "64号 LIQ-CRUNCH")
 
 
 # 模块导入即自检(宪法级)

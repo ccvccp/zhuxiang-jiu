@@ -68,7 +68,11 @@ class Xx65Repository:
         "cashPrice", "trustQuota",
         "baselinePrice", "score",
         "roiCash", "roiTrust",
-        "trustScore", "healthScore")
+        "trustScore", "healthScore",
+        "discountRate",
+        "estimatedGmv",
+        "estimatedTrust",
+        "revocableUntilTs")
     _JSON_DICT_FIELDS = (
         "snapshot", "detail", "context",
         "config", "result", "factors",
@@ -84,14 +88,17 @@ class Xx65Repository:
         "signals", "auditTrail",
         "matchedKeywords",
         "complianceQuestions",
-        "replacements")
+        "replacements",
+        "channels")
     _BOOL_FIELDS = (
         "activated", "frozen",
         "passed", "matched",
         "revocable", "pooled",
         "fallback",
         "requiresHumanReview",
-        "complianceFlag")
+        "complianceFlag",
+        "exclusive", "revoked",
+        "humanOverride")
 
     _TABLE_BY_KIND: ClassVar[dict] = {
         "shop": TABLE_SHOPS,

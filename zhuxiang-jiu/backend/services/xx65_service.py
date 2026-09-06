@@ -31,6 +31,7 @@
 
 import hashlib
 import logging
+import time
 
 from core.helpers import ts
 
@@ -1452,6 +1453,665 @@ class Xx65Service:
             "inspectedAt": ts(),
         }
 
+    # ============================================================
+    # P2·智能营销中枢
+    # ============================================================
+
+    async def recommend_campaign(
+            self, shop_id: int,
+            product_id: int = None
+    ) -> dict:
+        """活动策略推荐(观测面——
+        三因子确定性规则库+64号
+        流动性感知+ROI 信值双算)
+
+        三因子: 店铺信值(0.40)+
+        商品热度(0.35)+季节趋势
+        (0.25)——同输入同输出;
+        流动性信号(64号 anchors/
+        LIQ-CRUNCH 纯读取)仅
+        调整策略排序权重, 不改
+        数字口径(S3 服务端权威)
+
+        Raises:
+            KeyError: 店铺/商品不存在
+        """
+        shop = await self._get_shop(
+            int(shop_id))
+        product = None
+        if product_id:
+            product = await \
+                self.repo.get_product(
+                    int(product_id))
+            if not product:
+                raise KeyError(
+                    f"商品 {product_id}"
+                    f" 不存在")
+            if product.get("shopId") \
+                    != int(shop_id):
+                raise ValueError(
+                    f"商品 {product_id}"
+                    f" 不属于店铺 "
+                    f"{shop_id}")
+
+        from services.xx65_registry import (
+            CAMPAIGN_CHANNELS,
+            CAMPAIGN_FACTOR_WEIGHTS,
+            CAMPAIGN_STRATEGIES,
+            CATEGORY_COMPLEMENTS,
+            ROI_BASE_SALES,
+            SEASON_TRENDS,
+        )
+        category = shop.get(
+            "category") or "general"
+
+        # ① 店铺信值因子(quotaTier
+        #    映射: starter 0.4/
+        #    growth 0.7/premium 1.0)
+        tier_map = {
+            "starter": 0.4,
+            "growth": 0.7,
+            "premium": 1.0,
+        }
+        f_trust = tier_map.get(
+            shop.get("quotaTier")
+            or "starter", 0.4)
+
+        # ② 商品热度因子(价格带
+        #    确定性代理: 无商品
+        #    中性 0.5; 低价 0-50
+        #    元=引流款 1.0; 50-200
+        #    主力款 0.7; 200+ 旗舰
+        #    款 0.4——活动适配差异)
+        if product:
+            price = float(
+                product.get("cashPrice")
+                or 0.0)
+            if price <= 0:
+                f_heat = 0.5
+            elif price <= 50:
+                f_heat = 1.0
+            elif price <= 200:
+                f_heat = 0.7
+            else:
+                f_heat = 0.4
+        else:
+            f_heat = 0.5
+
+        # ③ 季节趋势因子(当月类目
+        #    命中=1.0, 未命中=0.5)
+        import datetime as _dt
+        month = _dt.datetime.now(
+        ).month
+        f_season = 1.0 if category \
+            in SEASON_TRENDS.get(
+                month, ()) else 0.5
+
+        heat_detail = (
+            f"价格带热度 {product.get('cashPrice')}"
+            if product else "无商品(中性)")
+        season_hit = f_season > 0.5
+        factors = {
+            "shop_trust": {
+                "score": f_trust,
+                "weight":
+                    CAMPAIGN_FACTOR_WEIGHTS[
+                        "shop_trust"],
+                "detail": f"店铺配额档 "
+                          f"{shop.get('quotaTier')}"
+                          f" 信值基线"},
+            "product_heat": {
+                "score": f_heat,
+                "weight":
+                    CAMPAIGN_FACTOR_WEIGHTS[
+                        "product_heat"],
+                "detail": heat_detail},
+            "season_trend": {
+                "score": f_season,
+                "weight":
+                    CAMPAIGN_FACTOR_WEIGHTS[
+                        "season_trend"],
+                "detail": f"{month} 月类目 "
+                          f"{category} 趋势"
+                          f"{'命中' if season_hit else '未命中'}"},
+        }
+        base_score = round(
+            sum(f["score"] * f["weight"]
+                for f in
+                factors.values()), 4)
+
+        # ④ 64号流动性感知(纯读取
+        #    ——fail-soft 中性)
+        liq = await \
+            self._liquidity_signals()
+
+        # 策略排序(确定性: 基础分
+        # +流动性信号加成)
+        ranked = []
+        for key in \
+                CAMPAIGN_STRATEGIES:
+            boost = 0.0
+            signals = []
+            if key == "trust_exclusive" \
+                    and liq["anchorHigh"]:
+                boost += 0.20
+                signals.append(
+                    "anchors 购买力指数高"
+                    "→促信值消耗")
+            if key == "small_high_freq" \
+                    and liq["tension"]:
+                boost += 0.25
+                signals.append(
+                    "LIQ-CRUNCH 口径紧张"
+                    "→小额高频")
+            if key == "seasonal" \
+                    and f_season > 0.5:
+                boost += 0.15
+                signals.append(
+                    "当季类目命中")
+            if key == "new_customer" \
+                    and f_trust >= 0.7:
+                boost += 0.10
+                signals.append(
+                    "店铺信值扩张期")
+            score = round(
+                base_score + boost, 4)
+            ranked.append(
+                (key, score, signals))
+        ranked.sort(
+            key=lambda x: (-x[1],
+                           x[0]))
+
+        # ROI 双算(确定性公式——
+        # 数字全来自计算层)
+        price = float(
+            (product or {}).get(
+                "cashPrice") or 0.0)
+        recs = []
+        for key, score, signals \
+                in ranked[:3]:
+            s = CAMPAIGN_STRATEGIES[
+                key]
+            gmv = round(
+                price * ROI_BASE_SALES
+                * (1 + s["roiCashLift"]),
+                2)
+            trust = round(
+                gmv * s["trustPortion"],
+                2)
+            recs.append({
+                "strategy": key,
+                "label": s["label"],
+                "score": score,
+                "signals": signals,
+                "roi": {
+                    "estimatedGmv": gmv,
+                    "estimatedTrust":
+                        trust,
+                    "cashLift":
+                        s["roiCashLift"],
+                    "trustPortion":
+                        s["trustPortion"],
+                    "formula":
+                        "GMV=价格×"
+                        f"{ROI_BASE_SALES}"
+                        "×(1+lift); "
+                        "信值=GMV×"
+                        "占比",
+                },
+                "channels": [
+                    {"channel": ch,
+                     "label":
+                         CAMPAIGN_CHANNELS[
+                             ch]["label"],
+                     "maxLength":
+                         CAMPAIGN_CHANNELS[
+                             ch][
+                             "maxLength"]}
+                    for ch in
+                    s["channels"]],
+                "note": s["note"],
+            })
+
+        # 跨店联动建议(类目互补
+        # ——确定性映射, 仅建议
+        # 执行经 46号)
+        complements = list(
+            CATEGORY_COMPLEMENTS.get(
+                category, ()))
+        cross_shop = []
+        if complements:
+            shops = await \
+                self.repo.list_shops(
+                    status="active",
+                    limit=200)
+            cross = [
+                {"shopId": s["shopId"],
+                 "category": s.get(
+                     "category"),
+                 "complementWith":
+                     category}
+                for s in shops
+                if s.get("category")
+                in complements
+                and s["shopId"]
+                != int(shop_id)]
+            cross_shop = cross[:3]
+
+        return {
+            "success": True,
+            "shopId": int(shop_id),
+            "productId":
+                int(product_id or 0),
+            "category": category,
+            "factors": factors,
+            "baseScore": base_score,
+            "liquidity": liq,
+            "recommendations": recs,
+            "crossShopSuggestions":
+                cross_shop,
+            "note": "活动策略推荐——"
+                    "三因子确定性加权"
+                    "(0.40/0.35/0.25)+"
+                    "64号流动性感知(纯"
+                    "读取); ROI 双算数字"
+                    "全来自计算层(S3)",
+            "generatedAt": ts(),
+        }
+
+    async def create_campaign(
+            self, shop_id: int,
+            product_id: int,
+            strategy: str,
+            name: str = "",
+            discount_rate: float = 0.0
+    ) -> dict:
+        """创建营销活动(决策面——
+        S7 活动配额+R2 互斥声明嵌入
+        +S1 合规扫描+S5 撤销窗口)
+
+        Raises:
+            KeyError: 店铺/商品不存在
+            ValueError: off 态/参数
+                非法/配额超限/合规
+                不过/未知策略
+        """
+        require_active_mode()
+        shop = await self._get_shop(
+            int(shop_id))
+        if shop.get("status") != "active":
+            raise ValueError(
+                f"店铺状态 "
+                f"{shop.get('status')}"
+                f" 不可创建活动"
+                f"(须 active)")
+        product = await \
+            self.repo.get_product(
+                int(product_id))
+        if not product:
+            raise KeyError(
+                f"商品 {product_id}"
+                f" 不存在")
+        if product.get("shopId") \
+                != int(shop_id):
+            raise ValueError(
+                f"商品 {product_id}"
+                f" 不属于店铺 "
+                f"{shop_id}")
+        if product.get("status") \
+                != "published":
+            raise ValueError(
+                "商品未上架"
+                "(须 published)")
+        from services.xx65_registry import (
+            AI_QUOTA_TIERS,
+            CAMPAIGN_STRATEGIES,
+            REVOKE_WINDOW_SECONDS,
+        )
+        if strategy not in \
+                CAMPAIGN_STRATEGIES:
+            raise ValueError(
+                f"未知策略 {strategy}"
+                f"(支持: {sorted(
+                    CAMPAIGN_STRATEGIES)})")
+        name = str(name or "").strip()
+        if not name:
+            s = CAMPAIGN_STRATEGIES[
+                strategy]
+            name = (
+                f"{product.get('productName', '')}"
+                f"·{s['label']}")
+        if len(name) > 60:
+            raise ValueError(
+                "活动名超长(≤60 字符)")
+        discount_rate = float(
+            discount_rate or 0.0)
+        if not 0 <= discount_rate \
+                < 0.50:
+            raise ValueError(
+                "折扣率域非法"
+                "(0≤rate<0.50——"
+                "营销让利上限 50%)")
+
+        # S7 活动配额
+        tier = shop.get("quotaTier") \
+            or "starter"
+        limit = AI_QUOTA_TIERS.get(
+            tier, AI_QUOTA_TIERS[
+                "starter"])["campaigns"]
+        used = int(
+            shop.get("quotaCampaign")
+            or 0)
+        active = [
+            c for c in
+            await self.repo
+            .list_campaigns(
+                shop_id=int(shop_id),
+                status="active",
+                limit=100)]
+        if len(active) >= limit:
+            raise ValueError(
+                f"S7 活动配额已满"
+                f"({len(active)}/"
+                f"{limit}, {tier} 档)")
+
+        # S1 合规扫描(营销承诺
+        # 也是内容——三道防线
+        # 同口径)
+        scan = self._compliance_scan(
+            name)
+        if scan["severeHits"] or \
+                not scan["passed"]:
+            raise ValueError(
+                f"S1 活动名合规未过"
+                f"(严重词 "
+                f"{scan['severeHits']}"
+                f"/得分 "
+                f"{scan['score']})")
+
+        # ROI 双算快照(创建时
+        # 固化——数字来自计算层)
+        from services.xx65_registry import (
+            ROI_BASE_SALES,
+        )
+        s = CAMPAIGN_STRATEGIES[
+            strategy]
+        price = float(
+            product.get("cashPrice")
+            or 0.0)
+        gmv = round(
+            price * ROI_BASE_SALES
+            * (1 + s["roiCashLift"]),
+            2)
+        est_trust = round(
+            gmv * s["trustPortion"],
+            2)
+
+        campaign_id = await \
+            self.repo \
+            .next_campaign_id()
+        now = time.time()
+        record = {
+            "campaignId": campaign_id,
+            "shopId": int(shop_id),
+            "productId":
+                int(product_id),
+            "strategy": strategy,
+            "name": name,
+            "discountRate":
+                discount_rate,
+            # R2 互斥声明嵌入(订单级
+            # ——信值支付订单不叠加
+            # 其他优惠, 活动侧固化)
+            "exclusive": True,
+            "channels": list(
+                s["channels"]),
+            "roiCash": gmv,
+            "roiTrust": est_trust,
+            "estimatedGmv": gmv,
+            "estimatedTrust":
+                est_trust,
+            "status": "active",
+            "revocable": True,
+            "revocableUntilTs":
+                now
+                + REVOKE_WINDOW_SECONDS,
+            "revoked": False,
+            "factors": {
+                "strategy": strategy,
+                "cashLift":
+                    s["roiCashLift"],
+                "trustPortion":
+                    s["trustPortion"],
+            },
+            "createdAt": ts(),
+            "updatedAt": ts(),
+        }
+        await self.repo.save_campaign(
+            record)
+        # S7 配额计数
+        shop["quotaCampaign"] = \
+            used + 1
+        shop["updatedAt"] = ts()
+        await self.repo.save_shop(
+            shop, create=False)
+        await self._track(
+            "campaign", {
+                "action": "create",
+                "campaignId": campaign_id,
+                "shopId": int(shop_id),
+                "strategy": strategy,
+                "exclusive": True,
+            })
+        return {
+            "success": True,
+            "campaignId": campaign_id,
+            "shopId": int(shop_id),
+            "productId":
+                int(product_id),
+            "strategy": strategy,
+            "name": name,
+            "status": "active",
+            "discountRate":
+                discount_rate,
+            "exclusive": True,
+            "r2Declaration":
+                "信值支付订单整单"
+                "互斥其他优惠"
+                "(64号 R2——活动侧"
+                "声明固化)",
+            "channels": record[
+                "channels"],
+            "roi": {
+                "estimatedGmv": gmv,
+                "estimatedTrust":
+                    est_trust,
+            },
+            "revocableUntilTs":
+                record[
+                    "revocableUntilTs"],
+            "revokeWindowSeconds":
+                REVOKE_WINDOW_SECONDS,
+            "compliance": scan,
+            "note": "活动创建——S7 "
+                    "配额校验+R2 互斥"
+                    "声明+S1 合规扫描"
+                    "+S5 撤销窗口 "
+                    f"{REVOKE_WINDOW_SECONDS}s",
+            "createdAt": ts(),
+        }
+
+    async def revoke_campaign(
+            self, campaign_id: int,
+            operator: str = "member"
+    ) -> dict:
+        """撤销营销活动(S5——
+        发布后 5 分钟内无理由撤销
+        +撤销留痕不可抹除; 决策面)
+
+        Raises:
+            KeyError: 活动不存在
+            ValueError: 窗口已过/
+                状态机拒绝
+        """
+        require_active_mode()
+        campaign = await \
+            self._get_campaign(
+                int(campaign_id))
+        from services.xx65_registry import (
+            CAMPAIGN_TRANSITIONS,
+            REVOKE_WINDOW_SECONDS,
+        )
+        if "revoked" not in \
+                CAMPAIGN_TRANSITIONS \
+                .get(
+                    campaign.get(
+                        "status"), ()):
+            raise ValueError(
+                f"活动状态 "
+                f"{campaign.get('status')}"
+                f" 不可撤销(须 active)")
+        now = time.time()
+        until = float(
+            campaign.get(
+                "revocableUntilTs")
+            or 0.0)
+        if now > until:
+            raise ValueError(
+                f"S5 撤销窗口已过"
+                f"(发布后 "
+                f"{REVOKE_WINDOW_SECONDS}s"
+                f" 内可无理由撤销; "
+                f"当前超窗 "
+                f"{round(now - until, 1)}s)"
+                f"——人工处置通道"
+                f"(S6)")
+        campaign.update({
+            "status": "revoked",
+            "revoked": True,
+            "revocable": False,
+            "revokedAt": ts(),
+            "revokedBy": str(
+                operator or "member"),
+            "updatedAt": ts(),
+        })
+        await self.repo.save_campaign(
+            campaign, create=False)
+        await self._track(
+            "campaign", {
+                "action": "revoke",
+                "campaignId":
+                    int(campaign_id),
+                "shopId": campaign[
+                    "shopId"],
+                "revokedBy": operator,
+                "windowSeconds":
+                    REVOKE_WINDOW_SECONDS,
+            })
+        return {
+            "success": True,
+            "campaignId":
+                int(campaign_id),
+            "status": "revoked",
+            "revokedBy": str(
+                operator or "member"),
+            "note": "活动撤销——S5 "
+                    "窗口内无理由撤销"
+                    "+留痕不可抹除",
+            "revokedAt": ts(),
+        }
+
+    async def campaign_report(
+            self, campaign_id: int
+    ) -> dict:
+        """效果归因复盘(观测面——
+        GMV/信值消耗双口径+R2
+        互斥声明+撤销审计)"""
+        campaign = await \
+            self._get_campaign(
+                int(campaign_id))
+        est_gmv = float(
+            campaign.get(
+                "estimatedGmv")
+            or 0.0)
+        est_trust = float(
+            campaign.get(
+                "estimatedTrust")
+            or 0.0)
+        return {
+            "success": True,
+            "campaignId":
+                int(campaign_id),
+            "shopId": campaign.get(
+                "shopId"),
+            "strategy": campaign.get(
+                "strategy"),
+            "status": campaign.get(
+                "status"),
+            "roi": {
+                "estimated": {
+                    "gmv": est_gmv,
+                    "trustConsumed":
+                        est_trust,
+                },
+                "actual": {
+                    "gmv": 0.0,
+                    "trustConsumed":
+                        0.0,
+                    "note":
+                        "实际归因经 64号"
+                        "订单回流(P4 "
+                        "learn——orderId "
+                        "1:1 幂等)",
+                },
+                "dualTrack":
+                    "现金 GMV+信值消耗"
+                    "双算——数字全来自"
+                    "计算层(S3)",
+            },
+            "exclusive": campaign.get(
+                "exclusive"),
+            "r2Note":
+                "信值支付订单整单互斥"
+                "其他优惠(64号 R2)"
+                if campaign.get(
+                    "exclusive") else "",
+            "revocation": {
+                "windowSeconds": 300,
+                "revoked": campaign.get(
+                    "revoked"),
+                "revokedAt": campaign.get(
+                    "revokedAt"),
+                "revokedBy": campaign.get(
+                    "revokedBy"),
+            },
+            "note": "活动复盘——预估"
+                    "双算固化于创建时; "
+                    "实际归因待 P4 回流",
+            "generatedAt": ts(),
+        }
+
+    async def campaigns_list(
+            self, shop_id: int = None,
+            status: str = None,
+            limit: int = 50
+    ) -> dict:
+        """活动列表(观测面)"""
+        campaigns = await \
+            self.repo.list_campaigns(
+                shop_id=shop_id,
+                status=status,
+                limit=limit)
+        return {
+            "success": True,
+            "total": len(campaigns),
+            "campaigns": campaigns,
+            "note": "活动列表(观测面"
+                    "——ROI 双算+R2 "
+                    "声明留痕)",
+            "generatedAt": ts(),
+        }
+
     # --------------------------------------------------------
     # 内部
     # --------------------------------------------------------
@@ -1477,6 +2137,101 @@ class Xx65Service:
             raise KeyError(
                 f"草稿 {draft_id} 不存在")
         return draft
+
+    async def _get_campaign(
+            self, campaign_id: int
+            ) -> dict:
+        """读取活动(KeyError 不存在)"""
+        campaign = await \
+            self.repo.get_campaign(
+                int(campaign_id))
+        if not campaign:
+            raise KeyError(
+                f"活动 {campaign_id}"
+                f" 不存在")
+        return campaign
+
+    async def _liquidity_signals(
+            self) -> dict:
+        """64号流动性感知(纯读取
+        ——fail-soft 中性; 65号
+        不写 64号任何表)
+
+        两路信号:
+        - anchors 购买力指数
+          (Xx64AnchorService.
+           anchors_view 观测面)
+        - LIQ-CRUNCH 口径
+          (Xx64RiskService.
+           detect_liq_crunch
+           只读推演)
+        """
+        from services.xx65_registry import (
+            ANCHOR_TRUST_SINK_THRESHOLD,
+            LIQUIDITY_TENSION_RATIO,
+        )
+        result = {
+            "anchorHigh": False,
+            "purchasingPower": None,
+            "tension": False,
+            "projectedRatio": None,
+            "source": "xx64-read-only",
+            "note": "64号流动性信号"
+                    "(纯读取 fail-soft)",
+        }
+        # ① anchors 购买力指数
+        try:
+            from services.xx64_anchor_service import (
+                Xx64AnchorService,
+            )
+            view = await (
+                Xx64AnchorService()
+                .anchors_view(limit=1))
+            latest = (view or {}).get(
+                "latest") or {}
+            pp = latest.get(
+                "purchasingPower")
+            if pp is not None:
+                pp = float(pp)
+                result[
+                    "purchasingPower"] = pp
+                result["anchorHigh"] = (
+                    pp
+                    >= ANCHOR_TRUST_SINK_THRESHOLD)
+        except Exception as exc:
+            logger.warning(
+                "xx65_anchor_signal"
+                "_skip: %s", exc)
+        # ② LIQ-CRUNCH 口径推演
+        try:
+            from services.xx64_risk_service import (
+                Xx64RiskService,
+            )
+            finding = await (
+                Xx64RiskService()
+                .detect_liq_crunch())
+            if finding:
+                detail = (finding
+                          .get("detail")
+                          or {})
+                ratio = detail.get(
+                    "projectedRatio")
+                if ratio is not None:
+                    ratio = float(ratio)
+                    result[
+                        "projectedRatio"] \
+                        = ratio
+                    result["tension"] = (
+                        ratio
+                        >= LIQUIDITY_TENSION_RATIO)
+            else:
+                result["projectedRatio"] \
+                    = 0.0
+        except Exception as exc:
+            logger.warning(
+                "xx65_liq_signal"
+                "_skip: %s", exc)
+        return result
 
     async def _questions(
             self, category: str

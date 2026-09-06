@@ -1,7 +1,7 @@
 """65号·网店及商品AI智能管理路由
-(P0+P1)
+(P0+P1+P2)
 
-端点(P0 9+P1 7=16; 全期规划 24):
+端点(P0 9+P1 7+P2 5=21; 全期规划 24):
     GET  /api/xx65/registry        刚性规则自描述(admin, 观测面)
     POST /api/xx65/intents/parse   意图解析(member/admin, 决策面 off 409)
     POST /api/xx65/shops/apply     开店申请+信值准入预检(member/admin, 决策面 off 409)
@@ -19,17 +19,24 @@
     GET  /api/xx65/products        商品列表(member/admin, 观测面)
     GET  /api/xx65/products/{id}/order-window 下单窗口(观测面·只读对接 64号)
     POST /api/xx65/products/inspect 上架后巡检(admin, 防御③不受开关影响·合规防线永不关停)
+    --- P2·智能营销中枢 ---
+    POST /api/xx65/campaigns/recommend 活动策略推荐(member/admin, 观测面·三因子+ROI 双算)
+    POST /api/xx65/campaigns            创建活动(member/admin, 决策面 off 409·S7+R2+S1+S5)
+    POST /api/xx65/campaigns/{id}/revoke 撤销活动(member/admin, 决策面·S5 5 分钟窗口)
+    GET  /api/xx65/campaigns            活动列表(member/admin, 观测面)
+    GET  /api/xx65/campaigns/{id}/report 效果归因复盘(member/admin, 观测面)
 
 鉴权: X-Role: admin 或 member(开店
 面向超级会员——双角色口径)。
 统一口径(计划 §七):
     - 观测面(registry/shops 列表
       与详情/model status/drafts
-      详情/products/order-window)
-      不受 XX65_MODE 影响
+      详情/products/order-window/
+      campaigns recommend+列表+
+      report)不受 XX65_MODE 影响
     - 决策面(意图解析/开店/认领/
-      激活/草稿生成/发布): off=
-      拒绝(409)
+      激活/草稿生成/发布/活动创建/
+      撤销): off=拒绝(409)
     - 关店不受开关影响(经营者
       退出权利); 人工兜底与巡检
       不受开关影响(S6 宪法+
@@ -456,6 +463,145 @@ async def inspect_products(
     return await (
         Xx65Service().inspect_products(
             shop_id=body.get("shopId")))
+
+
+# ============================================================
+# P2·智能营销中枢
+# ============================================================
+
+@router.post("/campaigns/recommend")
+async def recommend_campaign(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """活动策略推荐(观测面——三因子
+    确定性加权+64号流动性感知纯读取
+    +ROI 信值双算; 不受开关影响)
+
+    Body: {shopId, productId?}"""
+    _require_role(x_role)
+    from services.xx65_service import (
+        Xx65Service,
+    )
+    try:
+        return await (
+            Xx65Service()
+            .recommend_campaign(
+                shop_id=body.get("shopId"),
+                product_id=body.get(
+                    "productId")))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.post("/campaigns")
+async def create_campaign(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """创建营销活动(决策面——S7
+    活动配额+R2 互斥声明嵌入+S1
+    合规扫描+S5 撤销窗口; off 409)
+
+    Body: {shopId, productId,
+    strategy, name?, discountRate?}"""
+    _require_role(x_role)
+    from services.xx65_service import (
+        Xx65Service,
+    )
+    try:
+        return await (
+            Xx65Service().create_campaign(
+                shop_id=body.get("shopId"),
+                product_id=body.get(
+                    "productId"),
+                strategy=body.get(
+                    "strategy") or "",
+                name=body.get("name") or "",
+                discount_rate=body.get(
+                    "discountRate")
+                or 0.0))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.post("/campaigns/{campaign_id}/revoke")
+async def revoke_campaign(
+        campaign_id: int,
+        body: dict = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """撤销营销活动(S5——发布后
+    5 分钟内无理由撤销+留痕不可
+    抹除; 决策面 off 409)
+
+    Body: {operator?}"""
+    _require_role(x_role)
+    from services.xx65_service import (
+        Xx65Service,
+    )
+    body = body or {}
+    try:
+        return await (
+            Xx65Service().revoke_campaign(
+                campaign_id=campaign_id,
+                operator=body.get("operator")
+                or x_role))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.get("/campaigns")
+async def campaigns_list(
+        shop_id: int = None,
+        status: str = None,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """活动列表(观测面——ROI 双算
+    +R2 声明留痕)"""
+    _require_role(x_role)
+    from services.xx65_service import (
+        Xx65Service,
+    )
+    return await (
+        Xx65Service().campaigns_list(
+            shop_id=shop_id,
+            status=status,
+            limit=limit))
+
+
+@router.get("/campaigns/{campaign_id}/report")
+async def campaign_report(
+        campaign_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """效果归因复盘(观测面——GMV/
+    信值消耗双口径+R2 互斥声明
+    +撤销审计)"""
+    _require_role(x_role)
+    from services.xx65_service import (
+        Xx65Service,
+    )
+    try:
+        return await (
+            Xx65Service().campaign_report(
+                campaign_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
 
 
 def register_xx65_routes(app) -> None:

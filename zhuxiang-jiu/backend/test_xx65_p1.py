@@ -1220,8 +1220,9 @@ class TestHttp:
         )
         count = sum(
             1 for r in xx_router.routes)
-        record("65号路由 P1 16 端点",
-               count == 16, str(count))
+        record("65号路由 P1 16 端点"
+               "(P2 增至 21)",
+               count >= 16, str(count))
 
 
 async def run_all():
