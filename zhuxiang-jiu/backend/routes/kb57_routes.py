@@ -1,6 +1,7 @@
-"""57号·AI智能知识库路由(P0-P4)
+"""57号·AI智能知识库路由(P0-P5)
 
-端点(P0 6 + P1 3 + P2 5 + P3 7 + P4 2 = 23):
+端点(P0 6 + P1 3 + P2 5 + P3 7 + P4 2
++ P5 2 = 25):
     GET  /api/kb57/registry           注册表自描述(admin, 观测面)
     GET  /api/kb57/sources            采集源注册表(admin, 观测面)
     POST /api/kb57/sources/register   采集源注册(admin, 管理)
@@ -24,13 +25,15 @@
     POST /api/kb57/context/trigger     情境触发上报(会员, P3)
     POST /api/kb57/feedback/collect    决策回流补标(admin, 回流, P4)
     GET  /api/kb57/feedback/stats      回流统计(admin, 观测面, P4)
+    GET  /api/kb57/dashboard           四区看板(admin, 观测面, P5)
+    POST /api/kb57/redteam             红队七向量(admin, P5)
 
 鉴权: 管理面 X-Role: admin(43-56号同款口径);
 会员面 X-Member-Id(48号惯例)。
 统一口径:
     - 观测面(registry/sources/gaps/model/status/
-      compliance/seeds/feedback-stats)不受
-      KB57_MODE 影响
+      compliance/seeds/feedback-stats/dashboard)
+      不受 KB57_MODE 影响
     - 决策面(gaps/scan+sources/register+collect/run
       +resources/{id}/compliance+seeds/craft):
       off=拒绝(409——shadow/assist 开放)
@@ -40,6 +43,7 @@
       my-learning/context-trigger):
       需 assist(种子暴露面——off/shadow 409)
     - feedback/collect: 不受开关影响(回流管理面)
+    - redteam: 需决策面开放(off 409——红队需攻击面)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -627,6 +631,37 @@ async def feedback_stats(
     )
     return await (
         Kb57FeedbackLoopService().feedback_stats())
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """四区看板(度量五指标/种子库/合规/防御
+    ——观测面, P5)"""
+    _require_admin(x_role)
+    from services.kb57_dashboard_service import (
+        Kb57DashboardService,
+    )
+    return await Kb57DashboardService().build()
+
+
+@router.post("/redteam")
+async def redteam(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队七向量验证(知识投毒/白名单逃逸/PII
+    泄漏/种子污染/预算耗尽/越权/过期误导; P5)"""
+    _require_admin(x_role)
+    from services.kb57_redteam_service import (
+        Kb57RedteamService,
+    )
+    try:
+        return await (
+            Kb57RedteamService().run_all())
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
 
 
 def register_kb57_routes(app) -> None:
