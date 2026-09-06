@@ -1,4 +1,4 @@
-"""61号·AI智能系统升级决策模块 P3 专项测试
+﻿"""61号·AI智能系统升级决策模块 P3 专项测试
 (决策归因+反对意见+决策图谱)
 
 运行方式:
@@ -860,8 +860,8 @@ class TestHttp:
         )
         count = sum(
             1 for r in dm_router.routes)
-        record("61号路由累计 15 端点",
-               count == 15, str(count))
+        record("61号路由累计 17 端点",
+               count == 17, str(count))
 
 
 async def run_all():

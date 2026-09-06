@@ -1,6 +1,6 @@
 """61号·AI智能系统升级决策路由(P0-P5)
 
-端点(P0 5 + P1 3 + P2 3 + P3 3 + P4 1 = 15; 全期规划 17):
+端点(P0-P5 全期 17——收官):
     GET  /api/dm61/registry          注册表自描述(admin, 观测面)
     POST /api/dm61/requests          决策请求接收(admin, 决策面 off 409)
     GET  /api/dm61/requests          请求列表(admin, 观测面)
@@ -16,18 +16,21 @@
     POST /api/dm61/feedback          RLHF 反馈(admin, P3——不受开关影响·人工铁律)
     GET  /api/dm61/cases             决策图谱检索(admin, P3 观测面)
     POST /api/dm61/feedback/collect  反馈回流(admin, P4——不受开关影响·人工铁律)
-    # P5: GET /dashboard + POST /redteam
+    GET  /api/dm61/dashboard         四区看板(admin, P5 观测面——度量+请求+决策+防御)
+    POST /api/dm61/redteam           红队七向量(admin, P5——需 shadow/assist)
 
 鉴权: 管理面 X-Role: admin(43-63号同款口径)。
 统一口径(计划 §六):
     - 观测面(registry/requests 列表与
       详情/model status/thresholds/
-      cases)不受 DM61_MODE 影响
+      cases/dashboard)不受 DM61_MODE
+      影响
     - 决策面(请求接收/评估/推荐/推演):
       off=拒绝(409)
     - decide/dissent/feedback/collect 与
       threshold apply 不受开关影响
       (人工铁律+AI 安全机制)
+    - redteam 需决策面开放(off 409)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -516,6 +519,42 @@ async def feedback_collect(
                 limit=int(limit)
                 if limit is not None
                 else 500))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
+@router.get("/dashboard")
+async def dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """四区看板(P5 观测面——度量+请求
+    +决策+防御; 纯确定性聚合不受开关
+    影响)"""
+    _require_admin(x_role)
+    from services.dm61_dashboard_service import (
+        Dm61DashboardService,
+    )
+    return await (
+        Dm61DashboardService().dashboard())
+
+
+@router.post("/redteam")
+async def redteam(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队七向量(P5——标签伪造/矩阵
+    操纵/沙箱逃逸/先验投毒/裁决伪造/
+    反馈污染/图谱污染; 确定性离线
+    可复现——需 shadow/assist)"""
+    _require_admin(x_role)
+    from services.dm61_redteam_service import (
+        Dm61RedteamService,
+    )
+    try:
+        return await (
+            Dm61RedteamService().run_all())
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc))

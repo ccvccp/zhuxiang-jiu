@@ -1,4 +1,4 @@
-"""61号AI智能系统升级决策 P0 Docker 实机验收
+﻿"""61号AI智能系统升级决策 P0 Docker 实机验收
 
 运行方式:
     python verify_dm61_p0_live.py [基址]
@@ -394,8 +394,8 @@ def run_round(round_no: int) -> None:
         count = int((out.stdout or "").strip())
     except ValueError:
         count = -1
-    record("61号路由累计 15 端点",
-           count == 15, str(count))
+    record("61号路由累计 17 端点",
+           count == 17, str(count))
 
 
 def main() -> int:

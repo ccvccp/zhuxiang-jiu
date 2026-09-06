@@ -1,4 +1,4 @@
-"""61号AI智能系统升级决策 P1 Docker 实机验收
+﻿"""61号AI智能系统升级决策 P1 Docker 实机验收
 
 运行方式:
     $env:PAY60_MODE=""  # 无关
@@ -359,8 +359,8 @@ def run_round(round_no: int) -> None:
         count = int((out.stdout or "").strip())
     except ValueError:
         count = -1
-    record("61号路由累计 15 端点",
-           count == 15, str(count))
+    record("61号路由累计 17 端点",
+           count == 17, str(count))
 
 
 def main() -> int:
