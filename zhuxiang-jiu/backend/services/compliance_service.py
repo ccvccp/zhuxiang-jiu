@@ -116,6 +116,30 @@ class ComplianceService:
 
         lock_key = f"compliance:behavior:{module_name}:{behavior_type}"
         async with get_lock(lock_key):
+            # AI 决策门(全站批次四——24号合规监控 AI 升级)
+            # compliance_inspection 巡检门: observe 模式仅评分快照
+            # (不覆盖调用方 risk_level 传参——行为 100% 兼容);
+            # enforce 模式 high 拦截(高危行为不落监)。
+            # business_key 含时间戳保证多次巡检快照独立。
+            from core.helpers import ts as _ts
+            biz_key = (f"{module_name}:"
+                       f"{behavior_type}:"
+                       f"{_ts()}")
+            try:
+                from services.ai_enforcement_governance import (
+                    enrich_behavior_monitor,
+                    enforce_behavior_monitor,
+                )
+                ctx = await enrich_behavior_monitor(
+                    module_name, behavior_type,
+                    behavior_data)
+                await enforce_behavior_monitor(
+                    biz_key, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞巡检
+
             disposal = _level_to_disposal(risk_level)
             record = {
                 "moduleName": module_name,
@@ -146,6 +170,16 @@ class ComplianceService:
                 "txId": bc_hash(),
             }
             evidence_id = await self.repo.create_blockchain_evidence(evidence)
+
+            # 回流钩子(24号合规决策门——巡检终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_behavior_monitored,
+                )
+                await on_behavior_monitored(
+                    biz_key, risk_level)
+            except Exception:
+                pass
 
             return {
                 "id": record_id,

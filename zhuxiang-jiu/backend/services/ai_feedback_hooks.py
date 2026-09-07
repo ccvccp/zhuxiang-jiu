@@ -90,6 +90,16 @@ async def _invoke_scorer(scorer_id: str, ctx: dict) -> dict | None:
         if scorer_id == "ad_placement":
             from services.ad_placement_scorer import AdPlacementScorer
             return await AdPlacementScorer().score(ctx)
+        # 全站批次四·治理类三模块 AI 决策门
+        if scorer_id == "trace_integrity":
+            from services.trace_integrity_scorer import TraceIntegrityScorer
+            return await TraceIntegrityScorer().score(ctx)
+        if scorer_id == "compliance_inspection":
+            from services.compliance_inspection_scorer import ComplianceInspectionScorer
+            return await ComplianceInspectionScorer().score(ctx)
+        if scorer_id == "citystore_health":
+            from services.citystore_health_scorer import CitystoreHealthScorer
+            return await CitystoreHealthScorer().score(ctx)
     except Exception as exc:
         logger.warning("挂钩评分失败(scorer=%s): %s", scorer_id, exc)
     return None
@@ -627,3 +637,94 @@ async def on_ad_offline(ad_id: int,
     except Exception as exc:
         logger.warning("on_ad_offline 挂钩失败(%s): %s",
                        ad_id, exc)
+
+
+async def on_trace_penalized(agent_id: int,
+                              violation_level: str = "") -> None:
+    """窜货处罚终态(executed) → 自动反馈
+    (22号 trace_integrity 决策门回流, 全站批次四)
+
+    语义映射: 处罚=激活链路完整性失守的终局证据
+    ——预测 low 却出处罚=漏防, 预测非 low=预警正确;
+    business_key=activate:{最近处罚关联码} 由调用方
+    传入(处罚单无单一 life_code 锚点时跳过)
+    """
+    try:
+        repo = AiLearningRepository()
+        # 处罚为批次级终态: 按 agent 评分键域无法
+        # 精确配对单码快照——仅统计留痕供批次回放
+        await record_outcome(
+            "trace_integrity",
+            f"penalty:agent:{agent_id}",
+            f"penalized_{violation_level or 'unknown'}",
+            correct=None,
+            note=f"agent {agent_id} penalized"
+                 f"({violation_level})")
+    except Exception as exc:
+        logger.warning("on_trace_penalized 挂钩失败(%s): %s",
+                       agent_id, exc)
+
+
+async def on_behavior_monitored(business_key: str,
+                                risk_level: str) -> None:
+    """行为巡检终态(记录落监) → 自动反馈
+    (24号 compliance_inspection 决策门回流, 全站批次四)
+
+    语义映射: low 落监=放行正确; 非 low 落监
+    (调用方判定升级)=预警正确;
+    business_key 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "compliance_inspection",
+            f"behavior:{business_key}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = ((decision == "low")
+                       if risk_level == "low"
+                       else (decision != "low"))
+        await record_outcome(
+            "compliance_inspection",
+            f"behavior:{business_key}",
+            f"monitored_{risk_level}",
+            correct=correct,
+            note=f"behavior risk={risk_level}")
+    except Exception as exc:
+        logger.warning("on_behavior_monitored 挂钩失败(%s): %s",
+                       business_key, exc)
+
+
+async def on_store_assessed(store_code: str, month: str,
+                            qualification_status: int) -> None:
+    """月度考核终态 → 自动反馈
+    (25号 citystore_health 决策门回流, 全站批次四)
+
+    语义映射: 考核正常(qualification=1)=健康
+    预测正确(期望 low); 黄牌/取消=健康恶化
+    (期望非 low——预警正确);
+    business_key=assessment:{store}:{month}
+    与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "citystore_health",
+            f"assessment:{store_code}:{month}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            normal = (qualification_status == 1)
+            correct = ((decision == "low") if normal
+                       else (decision != "low"))
+        await record_outcome(
+            "citystore_health",
+            f"assessment:{store_code}:{month}",
+            f"qual_{qualification_status}",
+            correct=correct,
+            note=f"store {store_code} {month} "
+                 f"qual={qualification_status}")
+    except Exception as exc:
+        logger.warning("on_store_assessed 挂钩失败(%s/%s): %s",
+                       store_code, month, exc)

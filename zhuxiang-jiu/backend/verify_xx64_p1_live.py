@@ -408,7 +408,7 @@ def run_round(round_no: int) -> None:
                 r.get(
                     "pv_credited"))))
     record("44号 39 档案",
-           r.get("reg_n") == 45,
+           r.get("reg_n") == 48,
            str(r.get("reg_n")))
 
     print("\n[04 HTTP 端点+鉴权]")

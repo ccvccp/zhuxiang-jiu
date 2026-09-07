@@ -391,7 +391,7 @@ def run_round(round_no: int) -> None:
                "optimize", "urgent"),
            str(r.get("sc_dec")))
     record("44号 39 档案",
-           r.get("reg_n") == 45,
+           r.get("reg_n") == 48,
            str(r.get("reg_n")))
     record("value_exchange 在册",
            r.get("ve_in") is True,

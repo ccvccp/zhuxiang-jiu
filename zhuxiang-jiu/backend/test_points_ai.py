@@ -172,15 +172,17 @@ class TestChannels:
                "快照未被消费")
 
         # 单元级: 决策门快照留痕(无终态
-        # 消费路径——直接调门验证评分入池)
+        # 消费路径——直接调门验证评分入池;
+        # 用净账户用户保证确定性低风险)
         from services.ai_enforcement_points import (
             enrich_points_channel,
             enforce_points_action,
         )
+        await seed_points(4105)
         ctx = await enrich_points_channel(
-            4101, "earn", 50)
+            4105, "earn", 50)
         gate = await enforce_points_action(
-            4101, "earn", ctx, "O-GATE-U1")
+            4105, "earn", ctx, "O-GATE-U1")
         snap = await repo.get_decision_snapshot(
             "points_risk",
             "points:earn:O-GATE-U1")

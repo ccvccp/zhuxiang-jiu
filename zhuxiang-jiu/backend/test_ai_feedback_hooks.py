@@ -344,7 +344,7 @@ async def main():
         auth_entry = next((s for s in ov.get("scorers", [])
                            if s.get("scorerId") == "auth_risk"), {})
         record("27_overview_reports_auto_feedback",
-               ov.get("scorerCount") == 45
+               ov.get("scorerCount") == 48
                and auth_entry.get("autoFeedback24h", 0) >= 1
                and isinstance(ov.get("scheduler", {}).get("runs"), int),
                f"auto24h={auth_entry.get('autoFeedback24h')}")

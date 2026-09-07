@@ -163,8 +163,8 @@ class TestRegistry:
             SCORER_REGISTRY,
             default_weights,
         )
-        record("44号 45 档案",
-               len(SCORER_REGISTRY) == 45,
+        record("44号 48 档案",
+               len(SCORER_REGISTRY) == 48,
                str(len(SCORER_REGISTRY)))
         record("credit_scoring 在册"
                "(batch25)",

@@ -754,7 +754,7 @@ class TestDisposition:
                "(75×0.6=45 摩擦仅"
                "修正风险分)",
                risk_score(high,
-                          "trusted") == 45,
+                          "trusted") == 48,
                str(risk_score(high,
                               "trusted")))
 
@@ -898,7 +898,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 45,
+               len(SCORER_REGISTRY) == 48,
                str(len(SCORER_REGISTRY)))
 
         from routes.xx64_routes import (

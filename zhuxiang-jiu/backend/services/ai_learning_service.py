@@ -124,6 +124,12 @@ SCORER_REGISTRY = {
     "activity_risk":            {"label": "智能活动风控评分", "module": "09活动管理", "batch": 28},
     # ---- 第二十九批(全站批次三·10号广告投放 AI 升级: 广告投放评分) ----
     "ad_placement":             {"label": "智能广告投放评分", "module": "10广告投放", "batch": 29},
+    # ---- 第三十批(全站批次四·22号双码追溯 AI 升级: 追溯完整性评分) ----
+    "trace_integrity":          {"label": "智能追溯完整性评分", "module": "22双码追溯", "batch": 30},
+    # ---- 第三十一批(全站批次四·24号合规监控 AI 升级: 合规巡检评分) ----
+    "compliance_inspection":    {"label": "智能合规巡检评分", "module": "24合规监控", "batch": 31},
+    # ---- 第三十二批(全站批次四·25号市级网店 AI 升级: 网店健康评分) ----
+    "citystore_health":         {"label": "智能网店健康评分", "module": "25市级网店", "batch": 32},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -233,6 +239,13 @@ DECISION_THRESHOLDS = {
                       (0.0, "low")],
     "ad_placement": [(60.0, "high"), (30.0, "medium"),
                      (0.0, "low")],
+    # 全站批次四·治理类三级(激活/巡检/考核——对齐 credit_scoring 范式)
+    "trace_integrity": [(60.0, "high"), (30.0, "medium"),
+                         (0.0, "low")],
+    "compliance_inspection": [(60.0, "high"), (30.0, "medium"),
+                               (0.0, "low")],
+    "citystore_health": [(60.0, "high"), (30.0, "medium"),
+                         (0.0, "low")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -339,6 +352,9 @@ def default_weights(scorer_id: str) -> dict:
         from services.product_launch_scorer import ProductLaunchScorer
         from services.activity_risk_scorer import ActivityRiskScorer
         from services.ad_placement_scorer import AdPlacementScorer
+        from services.trace_integrity_scorer import TraceIntegrityScorer
+        from services.compliance_inspection_scorer import ComplianceInspectionScorer
+        from services.citystore_health_scorer import CitystoreHealthScorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -370,6 +386,9 @@ def default_weights(scorer_id: str) -> dict:
             "product_launch": ProductLaunchScorer,
             "activity_risk": ActivityRiskScorer,
             "ad_placement": AdPlacementScorer,
+            "trace_integrity": TraceIntegrityScorer,
+            "compliance_inspection": ComplianceInspectionScorer,
+            "citystore_health": CitystoreHealthScorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

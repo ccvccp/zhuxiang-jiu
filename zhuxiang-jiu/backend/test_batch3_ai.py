@@ -1,4 +1,4 @@
-"""全站批次三·内容类三模块 AI 升级 专项测试
+﻿"""全站批次三·内容类三模块 AI 升级 专项测试
 
 运行方式:
     python test_batch3_ai.py
@@ -173,7 +173,7 @@ class TestRegistry:
             default_weights,
         )
         record("45 档案",
-               len(SCORER_REGISTRY) == 45,
+               len(SCORER_REGISTRY) == 48,
                str(len(SCORER_REGISTRY)))
         for sid, batch, module in (
                 ("product_launch", 27, "01产品展示"),

@@ -636,6 +636,26 @@ class CityStoreService:
             monthly_purchase = await self.repo.sum_monthly_purchase(store_code, month)
             monthly_sales = await self.repo.sum_monthly_sales(store_code, month)
 
+            # AI 决策门(全站批次四——25号市级网店 AI 升级)
+            # citystore_health 考核门: observe 模式仅评分快照
+            # (双达标硬规则不变——行为 100% 兼容); enforce 模式
+            # high 拦截异常考核。assessment:{store}:{month}
+            # 贯穿快照与考核终态——回流配对键一致。
+            try:
+                from services.ai_enforcement_governance import (
+                    enrich_citystore_health,
+                    enforce_citystore_assessment,
+                )
+                ctx = await enrich_citystore_health(
+                    store, monthly_purchase,
+                    monthly_sales)
+                await enforce_citystore_assessment(
+                    store_code, month, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞考核
+
             # 达标判定
             purchase_qualified = 1 if monthly_purchase >= PURCHASE_TARGET else 0
             sales_qualified = 1 if monthly_sales >= SALES_TARGET else 0
@@ -705,6 +725,17 @@ class CityStoreService:
                     store["status"] = STORE_STATUS_WARNING
 
             await self.repo.save_store(store)
+
+            # 回流钩子(25号网店健康决策门——考核终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_store_assessed,
+                )
+                await on_store_assessed(
+                    store_code, month,
+                    qualification_status)
+            except Exception:
+                pass
 
             # 返回考核结果(含状态名称)
             result = dict(assessment)

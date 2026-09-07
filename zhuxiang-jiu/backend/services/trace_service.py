@@ -444,6 +444,26 @@ class TraceService:
             activation_date = date.today().isoformat()
             now = ts()
 
+            # AI 决策门(全站批次四——22号双码追溯 AI 升级)
+            # trace_integrity 首扫激活门: observe 模式仅评分快照
+            # (行为 100% 兼容); enforce 模式 high 拦截/medium 转人工
+            # 核验。一瓶一激活/状态机硬规则已前置校验, AI 门为叠加层;
+            # 不破坏 orderId 供 65号分润取数契约; fail-open 兜底。
+            try:
+                from services.ai_enforcement_governance import (
+                    enrich_trace_activation,
+                    enforce_trace_activation,
+                )
+                ctx = await enrich_trace_activation(
+                    life, user_id, order_id,
+                    purchase_channel, purchase_price)
+                await enforce_trace_activation(
+                    life_code, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞激活
+
             await self.repo.update_life_code(life["id"], {
                 "status": LIFE_STATUS_ACTIVE,
                 "firstActivationDate": activation_date,
@@ -1311,6 +1331,16 @@ class TraceService:
                         "rebate_deducted=%.2f deposit_deducted=%.2f terminated=%s",
                         agent_id, violation_level, cross_box_count,
                         rebate_deducted, deposit_deducted, terminated)
+
+            # 回流钩子(22号追溯决策门——处罚终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_trace_penalized,
+                )
+                await on_trace_penalized(
+                    agent_id, violation_level)
+            except Exception:
+                pass
             return penalty
 
     async def list_agent_penalties(self, agent_id: int = None,

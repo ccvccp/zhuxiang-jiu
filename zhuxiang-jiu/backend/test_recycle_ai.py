@@ -174,7 +174,7 @@ class TestRegistry:
             default_weights,
         )
         record("42 档案",
-               len(SCORER_REGISTRY) == 45,
+               len(SCORER_REGISTRY) == 48,
                str(len(SCORER_REGISTRY)))
         entry = SCORER_REGISTRY.get("recycle_valuation")
         record("batch26 入册",
