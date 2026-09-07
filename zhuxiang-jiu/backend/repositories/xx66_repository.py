@@ -8,6 +8,10 @@
                             红线: 情绪原文不落库)
     xx66_badges             虚拟勋章记录(P1——
                             服务终态满意度≥4 授予, 纯展示)
+    xx66_predictions        故障预测预警(P2——
+                            特征全量留痕可复现)
+    xx66_engineer_log       操作留痕哈希指纹链(P2——
+                            prev_hash 串联防篡改可审计)
 
 快照记录结构(P0):
     {snapshotId, zoneScores(JSON: 四区红黄绿灯 0/1/2),
@@ -53,10 +57,13 @@ class Xx66Repository:
     TABLE_SNAPSHOTS = "xx66_vitals_snapshots"
     TABLE_EMOTIONS = "xx66_emotions"
     TABLE_BADGES = "xx66_badges"
+    TABLE_PREDICTIONS = "xx66_predictions"
+    TABLE_LOGS = "xx66_engineer_log"
 
     _INT_FIELDS = ("snapshotId", "totalScore", "metricCount",
                    "statId", "satisfactionLinked",
-                   "badgeId", "memberId")
+                   "badgeId", "memberId",
+                   "predictionId", "logId")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -65,6 +72,8 @@ class Xx66Repository:
         self.store.setdefault(self.TABLE_SNAPSHOTS, {})
         self.store.setdefault(self.TABLE_EMOTIONS, {})
         self.store.setdefault(self.TABLE_BADGES, {})
+        self.store.setdefault(self.TABLE_PREDICTIONS, {})
+        self.store.setdefault(self.TABLE_LOGS, {})
 
     @staticmethod
     def _serialize(record: dict) -> dict:
@@ -87,12 +96,13 @@ class Xx66Repository:
             if k in ("snapshotId", "totalScore",
                      "metricCount", "statId",
                      "satisfactionLinked", "badgeId",
-                     "memberId"):
+                     "memberId", "predictionId", "logId"):
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
                     record[k] = v
-            elif k in ("zoneScores", "zoneDetails"):
+            elif k in ("zoneScores", "zoneDetails",
+                       "features", "payload"):
                 try:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
@@ -332,3 +342,128 @@ class Xx66Repository:
         rows.sort(key=lambda r: r.get("badgeId") or 0,
                   reverse=True)
         return rows[:limit]
+
+    # --------------------------------------------------------
+    # 故障预测预警(P2——特征全量留痕可复现)
+    # --------------------------------------------------------
+
+    async def next_prediction_id(self) -> int:
+        """预测自增 ID"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(
+                _k("xx66", self.TABLE_PREDICTIONS, "seq")))
+        self._ensure_store()
+        counter = self.store.setdefault(
+            f"_{self.TABLE_PREDICTIONS}_seq", 0)
+        counter += 1
+        self.store[f"_{self.TABLE_PREDICTIONS}_seq"] = counter
+        return counter
+
+    async def save_prediction(self, record: dict) -> dict:
+        """保存预警(同 metricKey open 态幂等由服务层把关)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("xx66", self.TABLE_PREDICTIONS,
+                   record["predictionId"]),
+                mapping=self._serialize(record))
+            await client.zadd(
+                _k("xx66", self.TABLE_PREDICTIONS, "index"),
+                {str(record["predictionId"]):
+                 record["predictionId"]})
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_PREDICTIONS][
+            record["predictionId"]] = dict(record)
+        return record
+
+    async def list_predictions(
+            self, limit: int = 50) -> list[dict]:
+        """预警列表(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.zrevrange(
+                _k("xx66", self.TABLE_PREDICTIONS,
+                   "index"), 0, max(0, limit - 1))
+            if not ids:
+                return []
+            async with client.pipeline(
+                    transaction=False) as pipe:
+                for pid in ids:
+                    pipe.hgetall(_k(
+                        "xx66", self.TABLE_PREDICTIONS,
+                        pid))
+                rows = await pipe.execute()
+            return [self._deserialize(r) for r in rows
+                    if r]
+        self._ensure_store()
+        rows = sorted(
+            self.store[self.TABLE_PREDICTIONS].values(),
+            key=lambda r: r.get("predictionId") or 0,
+            reverse=True)
+        return [dict(r) for r in rows[:limit]]
+
+    # --------------------------------------------------------
+    # engineer_log 哈希指纹链(P2——prev_hash 串联防篡改)
+    # --------------------------------------------------------
+
+    async def next_log_id(self) -> int:
+        """留痕自增 ID"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(
+                _k("xx66", self.TABLE_LOGS, "seq")))
+        self._ensure_store()
+        counter = self.store.setdefault(
+            f"_{self.TABLE_LOGS}_seq", 0)
+        counter += 1
+        self.store[f"_{self.TABLE_LOGS}_seq"] = counter
+        return counter
+
+    async def save_log(self, record: dict) -> dict:
+        """追加操作留痕(指纹链——只追加不修改)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("xx66", self.TABLE_LOGS,
+                   record["logId"]),
+                mapping=self._serialize(record))
+            await client.zadd(
+                _k("xx66", self.TABLE_LOGS, "index"),
+                {str(record["logId"]): record["logId"]})
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_LOGS][
+            record["logId"]] = dict(record)
+        return record
+
+    async def list_logs(
+            self, limit: int = 100) -> list[dict]:
+        """留痕列表(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.zrevrange(
+                _k("xx66", self.TABLE_LOGS, "index"),
+                0, max(0, limit - 1))
+            if not ids:
+                return []
+            async with client.pipeline(
+                    transaction=False) as pipe:
+                for lid in ids:
+                    pipe.hgetall(_k(
+                        "xx66", self.TABLE_LOGS, lid))
+                rows = await pipe.execute()
+            return [self._deserialize(r) for r in rows
+                    if r]
+        self._ensure_store()
+        rows = sorted(
+            self.store[self.TABLE_LOGS].values(),
+            key=lambda r: r.get("logId") or 0,
+            reverse=True)
+        return [dict(r) for r in rows[:limit]]
+
+    async def latest_log(self) -> dict | None:
+        """最近一条留痕(指纹链 prev_hash 锚点)"""
+        rows = await self.list_logs(limit=1)
+        return rows[0] if rows else None

@@ -34,6 +34,8 @@
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel as PydBaseModel, Field
 
+from core.helpers import ts
+
 router = APIRouter(prefix="/api/xx66",
                    tags=["AI智能工程师(66号)"])
 
@@ -235,6 +237,120 @@ async def xx66_explain(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc)) from exc
+
+
+# ============================================================
+# P2 诊断与自愈编排
+# ============================================================
+
+class DiagnoseRequest(PydBaseModel):
+    """根因分析请求"""
+    recoveryId: int = Field(..., ge=1,
+                            description="27号自愈记录 ID")
+
+
+class HealRequest(PydBaseModel):
+    """自愈编排请求"""
+    recoveryId: int = Field(..., ge=1,
+                            description="27号自愈记录 ID")
+
+
+@router.post("/diagnose")
+async def xx66_diagnose(
+    data: DiagnoseRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """根因分析(决策面: 规则知识库+LLM 归因描述[不产
+    数字]→engineer_log 留痕; XX66_MODE=off → 409)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_heal_service import (
+            Xx66HealService,
+        )
+        return await Xx66HealService().diagnose(
+            data.recoveryId)
+    except KeyError as exc:
+        msg = str(exc) if str(exc) else "自愈记录不存在"
+        if msg.startswith("'") and msg.endswith("'"):
+            msg = msg[1:-1]
+        raise HTTPException(status_code=404,
+                            detail=msg) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.post("/heal")
+async def xx66_heal(
+    data: HealRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """自愈编排(决策面: 27号 diagnose/attempt 补链
+    +动作白名单+沙箱预演; manual 级强制人工; shadow 态
+    建议书留痕; assist 态经预演走 27号任务轨——纯状态机
+    记录零执行; XX66_MODE=off → 409)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_heal_service import (
+            Xx66HealService,
+        )
+        return await Xx66HealService().heal(
+            data.recoveryId)
+    except KeyError as exc:
+        msg = str(exc) if str(exc) else "自愈记录不存在"
+        if msg.startswith("'") and msg.endswith("'"):
+            msg = msg[1:-1]
+        raise HTTPException(status_code=404,
+                            detail=msg) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.post("/predict")
+async def xx66_predict(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """故障预测扫描(决策面: 特征工程×三条件与预警——
+    确定性零 ML; 特征全量留痕可复现;
+    XX66_MODE=off → 409)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_heal_service import (
+            Xx66HealService,
+        )
+        return await Xx66HealService().predict()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.get("/predictions")
+async def xx66_predictions(
+    limit: int = 20,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """预测预警列表(观测面——永不关停)"""
+    _require_admin(x_role)
+    from repositories.xx66_repository import (
+        Xx66Repository,
+    )
+    rows = await Xx66Repository().list_predictions(
+        limit=max(1, min(int(limit or 20), 100)))
+    return {"success": True, "count": len(rows),
+            "predictions": rows,
+            "generatedAt": ts()}
+
+
+@router.get("/log/verify")
+async def xx66_log_verify(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """指纹链完整性校验(观测面——逐条 prev_hash 串联
+    核对, 防篡改可审计)"""
+    _require_admin(x_role)
+    from services.xx66_heal_service import Xx66HealService
+    return await Xx66HealService().verify_log_chain()
 
 
 def register_xx66_routes(app) -> None:
