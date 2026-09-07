@@ -329,8 +329,9 @@ class MemberRepository:
         keys = await client.keys(_k("member", "*"))
         result = []
         for key in keys:
-            # 排除 phone: 索引和 seq 序列
-            if ":phone:" in key or key.endswith(":member:seq"):
+            # 排除 phone: 索引、addresses: 地址簿子键和 seq 序列
+            if (":phone:" in key or ":addresses:" in key
+                    or key.endswith(":member:seq")):
                 continue
             data = await client.hgetall(key)
             if data:

@@ -94,8 +94,10 @@ ANOMALY_DWELL = "dwell_overdue"      # 超时滞留
 ANOMALY_QC_BLOCKED = "qc_blocked"    # 质检阻断后强闯
 
 _INT_FIELDS = ("stageId", "batchId", "punchId", "logId", "seq",
-               "memberId", "plannedQty", "currentStageSeq",
+               "stageSeq", "memberId", "plannedQty", "currentStageSeq",
                "maxDwellHours", "productId")
+
+_BOOL_FIELDS = ("isQcGate", "chainValid", "prodReleased")
 
 
 def _now_iso() -> str:
@@ -140,8 +142,13 @@ class TraceProdRepository:
     def _serialize(record: dict) -> dict:
         out = {}
         for k, v in record.items():
+            if v is None:
+                # None 跳过(Redis 不接受 None; 读回 .get 默认 None)
+                continue
             if isinstance(v, (dict, list)):
                 out[k] = json.dumps(v, ensure_ascii=False)
+            elif isinstance(v, bool):
+                out[k] = 1 if v else 0
             else:
                 out[k] = v
         return out
@@ -150,7 +157,9 @@ class TraceProdRepository:
     def _deserialize(data: dict) -> dict:
         record = {}
         for k, v in data.items():
-            if k in _INT_FIELDS:
+            if k in _BOOL_FIELDS:
+                record[k] = str(v) in ("1", "True", "true")
+            elif k in _INT_FIELDS:
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
@@ -213,6 +222,12 @@ class TraceProdRepository:
 
     async def list_stages(self) -> list[dict]:
         stages = await self._list("trace_stages", limit=50)
+        if not stages and is_redis_mode():
+            # Redis 冷启动自愈: 工段定义为静态种子, 表空时幂等补种
+            # (内存模式由 _ensure_store 兜底, 两端口径一致)
+            for s in SEED_STAGES:
+                await self._save("trace_stages", s["stageId"], dict(s))
+            stages = await self._list("trace_stages", limit=50)
         return sorted(stages, key=lambda x: x.get("seq", 0))
 
     async def get_stage_by_code(self, code: str) -> dict | None:
