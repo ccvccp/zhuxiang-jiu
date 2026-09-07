@@ -281,6 +281,26 @@ class GroupBuyService:
 
             # 8. 生成订单
             order_no = await self.repo.next_order_no()
+
+            # AI 资格门(全站批次五——14号团购接线补全)
+            # groupbuy_qualify 阈值类评分器: observe 模式仅评分快照
+            # (行为 100% 兼容); enforce 模式 rejected 档拦截。
+            # SVIP 资格/门槛/频次/年度限额硬规则已前置, AI 门为
+            # 叠加层; gb:{orderNo} 贯穿快照与审核终态——配对键一致。
+            try:
+                from services.ai_enforcement_wiring import (
+                    enrich_groupbuy_apply,
+                    enforce_groupbuy_apply,
+                )
+                ctx = await enrich_groupbuy_apply(
+                    user_id, items)
+                await enforce_groupbuy_apply(
+                    order_no, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞申请
+
             now = ts()
             order = {
                 "orderNo": order_no,
@@ -467,6 +487,17 @@ class GroupBuyService:
             order["auditUser"] = auditor
             order["updatedAt"] = now
             await self.repo.save_order(order)
+
+            # 回流钩子(14号团购资格决策门——审核终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_groupbuy_settled,
+                )
+                await on_groupbuy_settled(
+                    order_no,
+                    audit_result == AUDIT_RESULT_APPROVED)
+            except Exception:
+                pass
 
             return await self.get_order_detail(order_no)
 

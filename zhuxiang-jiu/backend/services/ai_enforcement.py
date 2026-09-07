@@ -53,8 +53,11 @@ ACCURACY_CACHE_TTL = 60          # 正确率缓存(秒), 避免每次决策全�
 BURST_MAX_BLOCK_RATIO = 0.30     # 熔断: 窗口内阻断率上限
 BURST_MIN_DECISIONS = 10         # 熔断: 窗口决策数低于此值不熔断(样本太少)
 
-# 决策动作 → 业务处置映射(阈值类评分器统一语义)
-BLOCK_ACTIONS = {"block", "high", "hold"}
+# 决策动作 → 业务处置映射(阈值类评分器统一语义;
+# rejected 为 14号 groupbuy_qualify 专属拒绝档——
+# 全站批次五接线补全纳入阻断集)
+BLOCK_ACTIONS = {"block", "high", "hold",
+                 "rejected"}
 REVIEW_ACTIONS = {"review", "medium", "challenge"}
 
 # 正确率进程内缓存: scorerId → (计算时间, 正确率/None)

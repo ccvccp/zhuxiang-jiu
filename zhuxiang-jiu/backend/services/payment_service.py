@@ -275,6 +275,22 @@ class PaymentService:
             await self.repo.save_order(order_data)
             logger.info("payment_created payNo=%s order=%s amount=%.2f channel=%s",
                         pay_no, order_id, actual_amount, pay_channel)
+
+            # AI 路由门(全站批次五——05号收款接线补全)
+            # payment_routing 路由类评分器: 评分+快照+渠道推荐,
+            # 永不阻断(推荐不拦截); pay:{payNo} 贯穿快照与支付终态
+            # ——回流配对键一致; fail-open 兜底。
+            try:
+                from services.ai_enforcement_wiring import (
+                    enrich_pay_routing, enforce_pay_create,
+                )
+                ctx = await enrich_pay_routing(
+                    actual_amount, scene_type,
+                    pay_channel)
+                await enforce_pay_create(pay_no, ctx)
+            except Exception:
+                pass  # 路由类永不阻断; 富化异常不阻塞支付
+
             return {
                 "success": True,
                 "payNo": pay_no,
@@ -439,6 +455,18 @@ class PaymentService:
             })
             logger.info("payment_paid payNo=%s channelTradeNo=%s amount=%.2f",
                         pay_no, channel_trade_no, order["actualAmount"])
+
+            # 回流钩子(05号支付路由决策门——paid 终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_pay_settled,
+                )
+                await on_pay_settled(
+                    pay_no, True,
+                    order.get("payChannel") or "")
+            except Exception:
+                pass
+
             return {
                 "success": True,
                 "payNo": pay_no,

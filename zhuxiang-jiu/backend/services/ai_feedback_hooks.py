@@ -100,6 +100,22 @@ async def _invoke_scorer(scorer_id: str, ctx: dict) -> dict | None:
         if scorer_id == "citystore_health":
             from services.citystore_health_scorer import CitystoreHealthScorer
             return await CitystoreHealthScorer().score(ctx)
+        # 全站批次五·半 AI 模块接线补全(5 个既有评分器接入决策门)
+        if scorer_id == "message_content":
+            from services.ai_scoring_ext_service import MessageContentScorer
+            return await MessageContentScorer().score(ctx)
+        if scorer_id == "groupbuy_qualify":
+            from services.ai_scoring_ext_service import GroupbuyQualifyScorer
+            return await GroupbuyQualifyScorer().score(ctx)
+        if scorer_id == "admin_operation":
+            from services.ai_scoring_ext_service import AdminOperationScorer
+            return await AdminOperationScorer().score(ctx)
+        if scorer_id == "agreement_risk":
+            from services.ai_scoring_ext_service import AgreementRiskScorer
+            return await AgreementRiskScorer().score(ctx)
+        if scorer_id == "finance_anomaly":
+            from services.ai_scoring_ext_service import FinanceAnomalyScorer
+            return await FinanceAnomalyScorer().score(ctx)
     except Exception as exc:
         logger.warning("挂钩评分失败(scorer=%s): %s", scorer_id, exc)
     return None
@@ -728,3 +744,207 @@ async def on_store_assessed(store_code: str, month: str,
     except Exception as exc:
         logger.warning("on_store_assessed 挂钩失败(%s/%s): %s",
                        store_code, month, exc)
+
+
+# ============================================================
+# 全站批次五·半 AI 模块接线回流(7 挂钩)
+# ============================================================
+
+async def on_pay_settled(pay_no: str, paid: bool,
+                         actual_channel: str = "") -> None:
+    """支付终态(paid) → 自动反馈
+    (05号 payment_routing 决策门回流, 全站批次五)
+
+    语义映射: 路由类——快照 decision 为推荐渠道编码,
+    与实际渠道一致=推荐正确; 未支付(correct=None 待标注);
+    business_key=pay:{payNo} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "payment_routing", f"pay:{pay_no}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision and paid:
+            correct = (decision == actual_channel)
+        await record_outcome(
+            "payment_routing", f"pay:{pay_no}",
+            "paid" if paid else "unpaid",
+            correct=correct,
+            note=f"pay {pay_no} via "
+                 f"{actual_channel or 'unknown'}")
+    except Exception as exc:
+        logger.warning("on_pay_settled 挂钩失败(%s): %s",
+                       pay_no, exc)
+
+
+async def on_waybill_signed(waybill_no: str,
+                            actual_carrier: str = "") -> None:
+    """运单签收终态(SIGNED) → 自动反馈
+    (06号 logistics_routing 决策门回流, 全站批次五)
+
+    语义映射: 路由类——快照 decision 为推荐承运商,
+    与实际承运商一致=推荐正确;
+    business_key=wb:{waybillNo} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "logistics_routing:balanced",
+            f"wb:{waybill_no}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = (decision == actual_carrier)
+        await record_outcome(
+            "logistics_routing:balanced",
+            f"wb:{waybill_no}", "signed",
+            correct=correct,
+            note=f"waybill {waybill_no} via "
+                 f"{actual_carrier or 'unknown'}")
+    except Exception as exc:
+        logger.warning("on_waybill_signed 挂钩失败(%s): %s",
+                       waybill_no, exc)
+
+
+async def on_message_settled(business_key: str,
+                             sent: bool = True) -> None:
+    """消息发送终态 → 自动反馈
+    (08号 message_content 决策门回流, 全站批次五)
+
+    语义映射: 正常发送期望低风险; 拦截后不发=预警正确;
+    business_key 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "message_content", f"msg:{business_key}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = ((decision == "low") if sent
+                       else (decision != "low"))
+        await record_outcome(
+            "message_content", f"msg:{business_key}",
+            "sent" if sent else "blocked",
+            correct=correct,
+            note=f"message {business_key} "
+                 f"{'sent' if sent else 'blocked'}")
+    except Exception as exc:
+        logger.warning("on_message_settled 挂钩失败(%s): %s",
+                       business_key, exc)
+
+
+async def on_groupbuy_settled(order_no: str,
+                              approved: bool) -> None:
+    """团购审核终态(approved/rejected) → 自动反馈
+    (14号 groupbuy_qualify 决策门回流, 全站批次五)
+
+    语义映射: 审核通过期望低风险; 拒绝期望非低风险(预警正确);
+    business_key=gb:{orderNo} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "groupbuy_qualify", f"gb:{order_no}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = ((decision == "low") if approved
+                       else (decision != "low"))
+        await record_outcome(
+            "groupbuy_qualify", f"gb:{order_no}",
+            "approved" if approved else "rejected",
+            correct=correct,
+            note=f"groupbuy {order_no} "
+                 f"{'approved' if approved else 'rejected'}")
+    except Exception as exc:
+        logger.warning("on_groupbuy_settled 挂钩失败(%s): %s",
+                       order_no, exc)
+
+
+async def on_admin_operation_settled(
+        business_key: str, executed: bool) -> None:
+    """后台敏感操作终态 → 自动反馈
+    (17号 admin_operation 决策门回流, 全站批次五)
+
+    语义映射: 操作执行成功期望低风险;
+    拒绝执行=预警正确;
+    business_key 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "admin_operation", f"adminop:{business_key}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = ((decision == "low") if executed
+                       else (decision != "low"))
+        await record_outcome(
+            "admin_operation",
+            f"adminop:{business_key}",
+            "executed" if executed else "rejected",
+            correct=correct,
+            note=f"adminop {business_key} "
+                 f"{'executed' if executed else 'rejected'}")
+    except Exception as exc:
+        logger.warning("on_admin_operation_settled 挂钩失败(%s): %s",
+                       business_key, exc)
+
+
+async def on_agreement_settled(
+        agreement_id: int, published: bool) -> None:
+    """条款发布终态 → 自动反馈
+    (18号 agreement_risk 决策门回流, 全站批次五)
+
+    语义映射: 发布成功期望低风险; 拒绝发布=预警正确;
+    business_key=agr:{agreementId} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "agreement_risk", f"agr:{agreement_id}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = ((decision == "low") if published
+                       else (decision != "low"))
+        await record_outcome(
+            "agreement_risk", f"agr:{agreement_id}",
+            "published" if published else "rejected",
+            correct=correct,
+            note=f"agreement {agreement_id} "
+                 f"{'published' if published else 'rejected'}")
+    except Exception as exc:
+        logger.warning("on_agreement_settled 挂钩失败(%s): %s",
+                       agreement_id, exc)
+
+
+async def on_voucher_posted(voucher_no: str,
+                            posted: bool = True) -> None:
+    """凭证过账终态 → 自动反馈
+    (19号 finance_anomaly 决策门回流, 全站批次五)
+
+    语义映射: 过账成功期望低风险(自动过账正确);
+    冻结/拒绝过账=预警正确;
+    business_key=fin:{voucherNo} 与决策门配对键一致
+    """
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            "finance_anomaly", f"fin:{voucher_no}")
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = ((decision == "low") if posted
+                       else (decision != "low"))
+        await record_outcome(
+            "finance_anomaly", f"fin:{voucher_no}",
+            "posted" if posted else "frozen",
+            correct=correct,
+            note=f"voucher {voucher_no} "
+                 f"{'posted' if posted else 'frozen'}")
+    except Exception as exc:
+        logger.warning("on_voucher_posted 挂钩失败(%s): %s",
+                       voucher_no, exc)

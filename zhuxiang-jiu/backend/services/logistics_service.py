@@ -407,6 +407,25 @@ class LogisticsService:
 
             saved = await self.repo.save_order(order_data)
             logger.info(f"物流下单成功 waybillNo={waybill_no} orderId={order_id} totalFee={total_fee}")
+
+            # AI 路由门(全站批次五——06号物流接线补全)
+            # logistics_routing:balanced 路由类评分器: 评分+快照+
+            # 承运商推荐, 永不阻断; wb:{waybillNo} 贯穿快照与签收终态
+            # ——回流配对键一致; fail-open 兜底。
+            try:
+                from services.ai_enforcement_wiring import (
+                    enrich_waybill_routing,
+                    enforce_waybill_create,
+                )
+                ctx = await enrich_waybill_routing(
+                    sender, receiver, weight,
+                    piece_count, insured_value,
+                    settle_mode)
+                await enforce_waybill_create(
+                    waybill_no, ctx)
+            except Exception:
+                pass  # 路由类永不阻断; 富化异常不阻塞下单
+
             return saved
 
     async def get_order(self, waybill_no: str) -> dict:
@@ -495,6 +514,19 @@ class LogisticsService:
             })
 
             logger.info(f"物流状态流转 {waybill_no}: {old_status} → {new_status}")
+
+            # 回流钩子(06号运单路由决策门——SIGNED 签收终态自动反馈)
+            if new_status == ORDER_STATUS_SIGNED:
+                try:
+                    from services.ai_feedback_hooks import (
+                        on_waybill_signed,
+                    )
+                    await on_waybill_signed(
+                        waybill_no,
+                        order.get("carrier") or "")
+                except Exception:
+                    pass
+
             return updated
 
     async def close_failed_order(self, waybill_no: str, reason: str = "") -> dict:

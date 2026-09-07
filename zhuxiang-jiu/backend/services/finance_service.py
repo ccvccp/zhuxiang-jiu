@@ -410,6 +410,26 @@ class FinanceService:
             now = ts()
             logs = []
 
+            # AI 审核门(全站批次五——19号财务接线补全)
+            # finance_anomaly 阈值类评分器: observe 模式仅评分快照
+            # (行为 100% 兼容); enforce 模式 high 拦截(借贷不平/
+            # 金额异常/凌晨记账)。状态机硬规则已前置, AI 门为
+            # 叠加层; fin:{voucherNo} 贯穿快照与过账终态——
+            # 配对键一致; fail-open 兜底。
+            try:
+                from services.ai_enforcement_wiring import (
+                    enrich_finance_audit,
+                    enforce_finance_audit,
+                )
+                ctx = await enrich_finance_audit(
+                    voucher)
+                await enforce_finance_audit(
+                    voucher_no, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞审核
+
             if current == VOUCHER_DRAFT:
                 # 草稿 → 已审核
                 new_status = VOUCHER_AUDITED
@@ -432,6 +452,16 @@ class FinanceService:
                 })
                 logs.append({"step": "过账", "level": "WARN",
                              "msg": f"凭证 {voucher_no}: 已审核 → 已过账"})
+
+                # 回流钩子(19号财务决策门——过账终态自动反馈)
+                try:
+                    from services.ai_feedback_hooks import (
+                        on_voucher_posted,
+                    )
+                    await on_voucher_posted(
+                        voucher_no, True)
+                except Exception:
+                    pass
             else:
                 raise ValueError(f"凭证状态异常: 已过账不可再审核, 当前 {current}")
 

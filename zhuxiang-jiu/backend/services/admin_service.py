@@ -859,8 +859,40 @@ class AdminService:
 
         lock_key = f"admin:user:{user_id}"
         async with get_lock(lock_key):
+            # AI 操作门(全站批次五——17号后台接线补全)
+            # admin_operation 阈值类评分器: observe 模式仅评分快照
+            # (行为 100% 兼容); enforce 模式 high 拦截(自我提权/
+            # 敏感时段/短窗高频)。角色校验硬规则已前置, AI 门为
+            # 叠加层; adminop:{op}:{user}:{ts} 预生成贯穿门与
+            # 操作终态——配对键一致; fail-open 兜底。
+            gate = None
+            try:
+                from services.ai_enforcement_wiring import (
+                    enrich_admin_assign,
+                    enforce_admin_assign,
+                )
+                ctx = await enrich_admin_assign(
+                    operator_id, user_id)
+                gate = await enforce_admin_assign(
+                    operator_id, user_id, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                gate = None  # fail-open: 富化异常不阻塞分配
+
             await self.repo.assign_user_roles(user_id, valid_role_ids,
                                                 granted_by=operator_id)
+
+            # 回流钩子(17号后台操作决策门——终态自动反馈)
+            if gate and gate.get("businessKey"):
+                try:
+                    from services.ai_feedback_hooks import (
+                        on_admin_operation_settled,
+                    )
+                    await on_admin_operation_settled(
+                        gate["businessKey"], True)
+                except Exception:
+                    pass
 
             permissions = await self.repo.get_user_permissions(user_id)
 

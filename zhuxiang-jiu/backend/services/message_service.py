@@ -288,6 +288,27 @@ class MessageService:
 
         # 本地时间: 与静默时段/频率检查同口径(用户视角), sentAt 前缀即发送日
         now = datetime.now().isoformat()
+
+        # AI 内容门(全站批次五——08号信息接线补全)
+        # message_content 阈值类评分器: observe 模式仅评分快照
+        # (行为 100% 兼容); enforce 模式 high 拦截(垃圾/敏感内容)。
+        # 防骚扰四重调控硬规则已前置, AI 门为叠加层; fail-open 兜底。
+        # msg:{userId}:{ts} 预生成贯穿门与发送终态——配对键一致。
+        biz_key = f"{user_id}:{now}"
+        try:
+            from services.ai_enforcement_wiring import (
+                enrich_message_content,
+                enforce_message_send,
+            )
+            ctx = await enrich_message_content(
+                user_id, content)
+            await enforce_message_send(
+                biz_key, ctx)
+        except ValueError:
+            raise  # AI 拦截(enforce 模式)
+        except Exception:
+            pass  # fail-open: 富化异常不阻塞发送
+
         message_id = await self.repo.add_message({
             "userId": user_id,
             "channel": channel,
@@ -302,6 +323,15 @@ class MessageService:
             "readAt": None,
             "createdAt": now,
         })
+
+        # 回流钩子(08号内容决策门——发送终态自动反馈)
+        try:
+            from services.ai_feedback_hooks import (
+                on_message_settled,
+            )
+            await on_message_settled(biz_key, True)
+        except Exception:
+            pass
 
         # 同步写入推送记录(便于统计)
         push_log_id = await self.repo.add_push_log({

@@ -147,6 +147,26 @@ class AgreementService:
                     f"当前状态({agreement['status']})不允许发布, 仅草稿可发布"
                 )
 
+            # AI 发布门(全站批次五——18号条款接线补全)
+            # agreement_risk 阈值类评分器: observe 模式仅评分快照
+            # (行为 100% 兼容); enforce 模式 high 拦截(免责密度/
+            # 违约金异常/关键条款缺失)。状态机硬规则已前置,
+            # AI 门为叠加层; agr:{agreementId} 贯穿快照与发布
+            # 终态——配对键一致; fail-open 兜底。
+            try:
+                from services.ai_enforcement_wiring import (
+                    enrich_agreement_publish,
+                    enforce_agreement_publish,
+                )
+                ctx = await enrich_agreement_publish(
+                    agreement)
+                await enforce_agreement_publish(
+                    agreement_id, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞发布
+
             # 归档当前版本(若有内容)
             if agreement.get("content"):
                 archived = {
@@ -161,6 +181,16 @@ class AgreementService:
             agreement["effectiveDate"] = effective_date or ts()
             agreement["updatedAt"] = ts()
             await self.repo.save_agreement(agreement)
+
+            # 回流钩子(18号条款发布决策门——终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_agreement_settled,
+                )
+                await on_agreement_settled(
+                    agreement_id, True)
+            except Exception:
+                pass
 
             return {
                 "agreementId": agreement_id,
