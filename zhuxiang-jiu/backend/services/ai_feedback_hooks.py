@@ -138,6 +138,10 @@ async def _invoke_scorer(scorer_id: str, ctx: dict) -> dict | None:
         if scorer_id == "self_healing":
             from services.longtail_scorers import SelfHealingScorer
             return await SelfHealingScorer().score(ctx)
+        # 66号·AI智能工程师大模块 AI 决策门(P1 服务路由)
+        if scorer_id == "engineer_service":
+            from services.xx66_scorer import EngineerServiceScorer
+            return await EngineerServiceScorer().score(ctx)
     except Exception as exc:
         logger.warning("挂钩评分失败(scorer=%s): %s", scorer_id, exc)
     return None
