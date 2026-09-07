@@ -70,6 +70,14 @@ const TraceViewPage: React.FC = () => {
 
   // 扫瓶码/批次码 → 溯源查询
   const handleScan = () => {
+    // H5 端(手机浏览器)无微信原生扫码能力——降级提示+聚焦输入框
+    if (process.env.TARO_ENV === 'h5') {
+      Taro.showToast({
+        title: '当前环境不支持扫码, 请手动输入批次号或瓶身码',
+        icon: 'none', duration: 2500,
+      });
+      return;
+    }
     Taro.scanCode({
       success: (res) => {
         const code = (res.result || '').trim();
@@ -79,6 +87,10 @@ const TraceViewPage: React.FC = () => {
         }
         setBatchNo(code);
         doQuery(code);
+      },
+      fail: (err) => {
+        console.error('[trace-view] scanCode failed:', err);
+        Taro.showToast({ title: '扫码取消或失败, 请手动输入', icon: 'none' });
       },
     });
   };
