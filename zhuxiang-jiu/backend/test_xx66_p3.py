@@ -73,6 +73,15 @@ class TestRecon:
         )
         svc = Xx66ReconService()
 
+        # off 态对账拒绝(决策面门槛)
+        try:
+            await svc.run_recon()
+            off_rejected = False
+        except ValueError:
+            off_rejected = True
+        record("off 态对账拒绝", off_rejected)
+        os.environ["XX66_MODE"] = "shadow"
+
         # 空站对账——四不变式全过
         r0 = await svc.run_recon()
         record("空站对账成功",
@@ -164,6 +173,7 @@ class TestRecon:
         report = await svc.recon_report()
         record("报告含历史",
                len(report["history"]) >= 2)
+        os.environ["XX66_MODE"] = "off"
 
 
 class TestReversal:
@@ -180,6 +190,7 @@ class TestReversal:
         )
         svc = Xx66ReconService()
         repo = Xx66Repository()
+        os.environ["XX66_MODE"] = "shadow"
 
         # 未知轮次 404
         try:
@@ -265,6 +276,7 @@ class TestReversal:
         record("冲正后对账回归平衡",
                r3["dangerCount"] == 0,
                str(r3["dangerList"]))
+        os.environ["XX66_MODE"] = "off"
 
 
 class TestDsl:

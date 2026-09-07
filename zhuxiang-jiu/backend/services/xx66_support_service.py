@@ -490,6 +490,16 @@ class Xx66SupportService:
             raise ValueError("满意度须为 1-5 整数")
         await self.repo.link_satisfaction(
             stat_id, satisfaction)
+        # 44号回流闭环(engineer_service 决策门)
+        try:
+            from services.ai_feedback_hooks import (
+                on_service_settled,
+            )
+            await on_service_settled(
+                stat_id, satisfaction)
+        except Exception as exc:
+            logger.warning(
+                "xx66_settle_hook_failsoft: %s", exc)
         badge = None
         if satisfaction >= 4 and member_id:
             badge = await self.repo.save_badge({

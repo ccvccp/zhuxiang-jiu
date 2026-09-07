@@ -692,7 +692,6 @@ async def on_trace_penalized(agent_id: int,
     传入(处罚单无单一 life_code 锚点时跳过)
     """
     try:
-        repo = AiLearningRepository()
         # 处罚为批次级终态: 按 agent 评分键域无法
         # 精确配对单码快照——仅统计留痕供批次回放
         await record_outcome(
@@ -1079,3 +1078,29 @@ async def on_recovery_completed(
         positive=recovered,
         note=f"recovery {recovery_id} "
              f"{'recovered' if recovered else 'failed'}")
+
+
+async def on_service_settled(
+        stat_id: int, satisfaction: int) -> None:
+    """66号支持服务终态(满意度回填) → 自动反馈
+    (engineer_service 决策门回流;
+    满意度 1-2=负面/4-5=正面——对齐
+    on_ticket_confirmed 口径)"""
+    await _longtail_settle(
+        "engineer_service", f"support:{stat_id}",
+        f"settled_s{satisfaction}",
+        positive=int(satisfaction) >= 4,
+        note=f"support stat {stat_id} "
+             f"sat={satisfaction}")
+
+
+async def on_heal_settled(
+        recovery_id: int, route: str) -> None:
+    """66号自愈编排终态(route: executed=正面/
+    advice_book|manual_handoff=中性) → 自动反馈
+    (engineer_service 决策门回流)"""
+    await _longtail_settle(
+        "engineer_service", f"heal:{recovery_id}",
+        f"heal_{route}",
+        positive=(route == "executed"),
+        note=f"heal {recovery_id} route={route}")

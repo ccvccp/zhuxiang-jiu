@@ -18,6 +18,8 @@
                             46号审批轨前置留痕)
     xx66_compensations      补偿记录(P3——DSL 因子
                             快照可复现审计)
+    xx66_cases              案例库四要素(P4——质量门
+                            +去重+淘汰+检索)
 
 快照记录结构(P0):
     {snapshotId, zoneScores(JSON: 四区红黄绿灯 0/1/2),
@@ -68,12 +70,14 @@ class Xx66Repository:
     TABLE_RECONS = "xx66_recon_runs"
     TABLE_ADVICE = "xx66_advice_books"
     TABLE_COMPENSATIONS = "xx66_compensations"
+    TABLE_CASES = "xx66_cases"
 
     _INT_FIELDS = ("snapshotId", "totalScore", "metricCount",
                    "statId", "satisfactionLinked",
                    "badgeId", "memberId",
                    "predictionId", "logId",
-                   "runId", "adviceId", "compensationId")
+                   "runId", "adviceId", "compensationId",
+                   "caseId")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -87,6 +91,7 @@ class Xx66Repository:
         self.store.setdefault(self.TABLE_RECONS, {})
         self.store.setdefault(self.TABLE_ADVICE, {})
         self.store.setdefault(self.TABLE_COMPENSATIONS, {})
+        self.store.setdefault(self.TABLE_CASES, {})
 
     @staticmethod
     def _serialize(record: dict) -> dict:
@@ -111,11 +116,17 @@ class Xx66Repository:
                      "satisfactionLinked", "badgeId",
                      "memberId", "predictionId", "logId",
                      "runId", "adviceId",
-                     "compensationId"):
+                     "compensationId", "caseId",
+                     "recurrence", "hitCount"):
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
                     record[k] = v
+            elif k in ("confidence",):
+                try:
+                    record[k] = float(v) if v != "" else 0.0
+                except (TypeError, ValueError):
+                    record[k] = 0.0
             elif k in ("zoneScores", "zoneDetails",
                        "features", "payload",
                        "invariants", "evaluation",
@@ -738,3 +749,70 @@ class Xx66Repository:
                    for r in rows
                    if str(r.get("createdAt") or "")
                    .startswith(month))
+
+    # --------------------------------------------------------
+    # 案例库(P4——四要素质量门+去重+淘汰+检索)
+    # --------------------------------------------------------
+
+    async def next_case_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(
+                _k("xx66", self.TABLE_CASES, "seq")))
+        self._ensure_store()
+        counter = self.store.setdefault(
+            f"_{self.TABLE_CASES}_seq", 0)
+        counter += 1
+        self.store[f"_{self.TABLE_CASES}_seq"] = counter
+        return counter
+
+    async def save_case(self, record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("xx66", self.TABLE_CASES,
+                   record["caseId"]),
+                mapping=self._serialize(record))
+            await client.zadd(
+                _k("xx66", self.TABLE_CASES, "index"),
+                {str(record["caseId"]):
+                 record["caseId"]})
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_CASES][
+            record["caseId"]] = dict(record)
+        return record
+
+    async def get_case(self, case_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k(
+                "xx66", self.TABLE_CASES, case_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_CASES].get(case_id)
+        return dict(rec) if rec else None
+
+    async def list_cases(
+            self, limit: int = 100) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.zrevrange(
+                _k("xx66", self.TABLE_CASES, "index"),
+                0, max(0, limit - 1))
+            if not ids:
+                return []
+            async with client.pipeline(
+                    transaction=False) as pipe:
+                for cid in ids:
+                    pipe.hgetall(_k(
+                        "xx66", self.TABLE_CASES, cid))
+                rows = await pipe.execute()
+            return [self._deserialize(r) for r in rows
+                    if r]
+        self._ensure_store()
+        rows = sorted(
+            self.store[self.TABLE_CASES].values(),
+            key=lambda r: r.get("caseId") or 0,
+            reverse=True)
+        return [dict(r) for r in rows[:limit]]

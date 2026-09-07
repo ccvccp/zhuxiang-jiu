@@ -442,6 +442,32 @@ class Xx66HealService:
             preview["details"]) \
             and bool(preview["details"])
 
+        # ⓪ engineer_service 评分门(挂门 heal——
+        #    business_key heal:{recovery_id}; 快照供
+        #    44号 on_heal_settled 回流配对。仅观测不
+        #    改路由——白名单/预演/模式三重红线不变)
+        try:
+            from services.ai_enforcement import (
+                enforce_decision,
+            )
+            await enforce_decision(
+                "engineer_service",
+                f"heal:{recovery_id}",
+                {"subjectKind": (
+                    "trust" if preview[
+                        "trustDomainTouched"]
+                    else "general"),
+                 "modulesInvolved": 1,
+                 "slaLevel": ("high" if level
+                              == "assisted" else "medium"),
+                 "emotionBand": "calm",
+                 "roleTier": "standard",
+                 "diagnoseConfidence": rule["confidence"]
+                 * 100})
+        except Exception as exc:
+            logger.warning(
+                "xx66_heal_gate_failsoft: %s", exc)
+
         # ③ 路由: 白名单外 / shadow 态 / 预演不过
         #    → 建议书留痕(P4 接 46号 submit_change)
         if not whitelisted or mode != "assist" \
@@ -498,6 +524,17 @@ class Xx66HealService:
                 "executedBy": "xx66",
                 "tasks": tasks_created},
             success=True)
+
+        # 44号回流闭环(heal 终态——engineer_service)
+        try:
+            from services.ai_feedback_hooks import (
+                on_heal_settled,
+            )
+            await on_heal_settled(
+                recovery_id, "executed")
+        except Exception as exc:
+            logger.warning(
+                "xx66_heal_hook_failsoft: %s", exc)
 
         await self._log("heal_executed", payload={
             "recoveryId": recovery_id,

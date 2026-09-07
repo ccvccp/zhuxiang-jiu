@@ -577,5 +577,147 @@ async def xx66_advice_approve(
                             detail=str(exc)) from exc
 
 
+# ============================================================
+# P4 知识进化+看板+自助+红队
+# ============================================================
+
+class CaseCreateRequest(PydBaseModel):
+    """案例入库请求(四要素)"""
+    problem: str = Field(..., min_length=1,
+                         max_length=500)
+    rootCause: str = Field(..., min_length=1,
+                           max_length=500)
+    solution: str = Field(..., min_length=1,
+                          max_length=500)
+    outcome: str = Field(..., min_length=1,
+                         max_length=500)
+    source: str = Field("manual", max_length=50)
+    valueLinked: bool = Field(False)
+    confidence: float = Field(0.5, ge=0, le=1)
+
+
+@router.post("/cases")
+async def xx66_case_create(
+    data: CaseCreateRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """案例入库(决策面: 四要素质量门+PII 脱敏+
+    valueLinked 数字红线+余弦去重; off → 409)"""
+    _require_admin(x_role)
+    from services.xx66_service import (
+        require_active_mode,
+    )
+    try:
+        require_active_mode()
+        from services.xx66_knowledge_service import (
+            Xx66KnowledgeService,
+        )
+        return await Xx66KnowledgeService() \
+            .create_case(
+                data.problem, data.rootCause,
+                data.solution, data.outcome,
+                source=data.source,
+                value_linked=data.valueLinked,
+                confidence=data.confidence)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.get("/cases/search")
+async def xx66_case_search(
+    q: str = "",
+    topK: int = 3,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """案例检索(观测面: n-gram 余弦 top-k+命中计数;
+    双未命中→57号缺口回写)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_knowledge_service import (
+            Xx66KnowledgeService,
+        )
+        return await Xx66KnowledgeService() \
+            .search_cases(q, topK)
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.get("/cases")
+async def xx66_case_list(
+    limit: int = 20,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """案例列表(观测面)"""
+    _require_admin(x_role)
+    from repositories.xx66_repository import (
+        Xx66Repository,
+    )
+    rows = await Xx66Repository().list_cases(
+        limit=max(1, min(int(limit or 20), 100)))
+    return {"success": True, "count": len(rows),
+            "cases": rows, "generatedAt": ts()}
+
+
+@router.get("/dashboard")
+async def xx66_dashboard(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """四区看板(观测面: 生命体征/服务/知识/信任
+    ——单端点聚合 fail-soft)"""
+    _require_admin(x_role)
+    from services.xx66_knowledge_service import (
+        Xx66KnowledgeService,
+    )
+    return await Xx66KnowledgeService().dashboard()
+
+
+@router.get("/proactive/{member_id}")
+async def xx66_proactive(
+    member_id: int,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """自助赋能(观测面: 店铺健康+信值使用优化+
+    高频自助向导——确定性规则)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_knowledge_service import (
+            Xx66KnowledgeService,
+        )
+        return await Xx66KnowledgeService() \
+            .proactive(member_id)
+    except KeyError as exc:
+        msg = str(exc) if str(exc) else "资源不存在"
+        if msg.startswith("'") and msg.endswith("'"):
+            msg = msg[1:-1]
+        raise HTTPException(status_code=404,
+                            detail=msg) from exc
+
+
+@router.post("/redteam")
+async def xx66_redteam(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """红队七向量(RT-01~07: 伪情绪骗补/补偿重放/
+    自愈越权/对账伪造/案例投毒/情绪绕过/审批旁路
+    ——确定性零 LLM; 隔离域 991x 种子用后清理;
+    XX66_MODE=off → 409)"""
+    _require_admin(x_role)
+    from services.xx66_service import (
+        require_active_mode,
+    )
+    from services.xx66_knowledge_service import (
+        Xx66KnowledgeService,
+    )
+    try:
+        require_active_mode()
+        return await Xx66KnowledgeService() \
+            .run_redteam()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
 def register_xx66_routes(app) -> None:
     app.include_router(router)
