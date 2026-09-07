@@ -1,4 +1,4 @@
-"""全站批次四·治理类三模块 AI 升级
+﻿"""全站批次四·治理类三模块 AI 升级
 Docker 实机验收(verify_batch4_ai_live)
 
 运行方式:
@@ -364,7 +364,7 @@ def run_round(round_no: int) -> None:
     print("\n[02 44号注册表]")
     reg = registry_check()
     record("48 档案(batch30-32 入册)",
-           reg.get("reg_n") == 48
+           reg.get("reg_n") == 55
            and reg.get("ti") is True
            and reg.get("ci") is True
            and reg.get("ch") is True,

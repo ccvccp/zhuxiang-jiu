@@ -254,6 +254,26 @@ class AgentService:
             if app["status"] != "pending":
                 raise ValueError(f"申请 {apply_id} 已处理(当前状态: {app['status']})")
 
+            # AI 决策门(全站批次六——16号代理商管理 AI 升级)
+            # agent_risk 审核门: observe 模式仅评分快照
+            # (行为 100% 兼容); enforce 模式 high 拦截(代理
+            # 风险画像异常)。audit:{applyId} 贯穿快照与提现
+            # 终态——配对键一致; fail-open 兜底。
+            try:
+                from services.ai_enforcement_longtail import (
+                    enrich_agent_audit,
+                    enforce_agent_audit,
+                )
+                ctx = await enrich_agent_audit(
+                    {"level": app.get("apply_level"),
+                     "creditScore": 70})
+                await enforce_agent_audit(
+                    apply_id, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞审核
+
             now = ts()
             logs = []
 
@@ -279,6 +299,8 @@ class AgentService:
                 "level": app["apply_level"],
                 "wallet": 0.0,
                 "status": STATUS_ACTIVE,
+                # 审核来源申请(批次六: AI 决策门回流配对键)
+                "applyId": apply_id,
                 "contact_name": app["contact_name"],
                 "contact_phone": app["contact_phone"],
                 "region": app["region"],
@@ -722,6 +744,18 @@ class AgentService:
                      "msg": f"返利 ¥{amount:.2f} 转入钱包, 余额 ¥{new_wallet:.2f}"}]
             logger.info("agent_rebate_withdraw agent_id=%r rebate_id=%s amount=%.2f",
                         agent_id, rebate_id, amount)
+
+            # 回流钩子(16号代理决策门——提现终态自动反馈;
+            # 经档案 applyId 反查审核快照配对键)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_rebate_withdrawn,
+                )
+                await on_rebate_withdrawn(
+                    int(agent.get("applyId") or 0))
+            except Exception:
+                pass
+
             return {
                 "success": True,
                 "agentId": agent_id,

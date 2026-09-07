@@ -380,7 +380,7 @@ def run_round(round_no: int) -> None:
                 r.get("lock2"),
                 r.get("lock3"))))
     record("44号 39 档案",
-           r.get("reg_n") == 48,
+           r.get("reg_n") == 55,
            str(r.get("reg_n")))
 
     print("\n[06 HTTP 端点+鉴权]")

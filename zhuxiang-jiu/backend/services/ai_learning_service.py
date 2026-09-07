@@ -130,6 +130,20 @@ SCORER_REGISTRY = {
     "compliance_inspection":    {"label": "智能合规巡检评分", "module": "24合规监控", "batch": 31},
     # ---- 第三十二批(全站批次四·25号市级网店 AI 升级: 网店健康评分) ----
     "citystore_health":         {"label": "智能网店健康评分", "module": "25市级网店", "batch": 32},
+    # ---- 第三十三批(全站批次六·07号客服工单 AI 升级: 工单质量评分) ----
+    "ticket_quality":           {"label": "智能客服工单质量评分", "module": "07客服工单", "batch": 33},
+    # ---- 第三十四批(全站批次六·15号合作接口 AI 升级: 合作方审核评分) ----
+    "partner_review":           {"label": "智能合作方审核评分", "module": "15合作接口", "batch": 34},
+    # ---- 第三十五批(全站批次六·16号代理商管理 AI 升级: 代理商风险评分) ----
+    "agent_risk":               {"label": "智能代理商风险评分", "module": "16代理商管理", "batch": 35},
+    # ---- 第三十六批(全站批次六·20号位置地图 AI 升级: 配送范围评分) ----
+    "delivery_zone":            {"label": "智能配送范围评分", "module": "20位置地图", "batch": 36},
+    # ---- 第三十七批(全站批次六·21号酒店合作商 AI 升级: 合作商风险评分) ----
+    "venue_partner":            {"label": "智能合作商风险评分", "module": "21酒店合作商", "batch": 37},
+    # ---- 第三十八批(全站批次六·26号智能监控 AI 升级: 告警分级评分) ----
+    "ops_alert":                {"label": "智能告警分级评分", "module": "26智能监控", "batch": 38},
+    # ---- 第三十九批(全站批次六·27号智能维护 AI 升级: 自愈决策评分) ----
+    "self_healing":             {"label": "智能自愈决策评分", "module": "27智能维护", "batch": 39},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -246,6 +260,21 @@ DECISION_THRESHOLDS = {
                                (0.0, "low")],
     "citystore_health": [(60.0, "high"), (30.0, "medium"),
                          (0.0, "low")],
+    # 全站批次六·长尾七档案三级(工单/合作/代理/配送/酒店/告警/自愈)
+    "ticket_quality": [(60.0, "high"), (30.0, "medium"),
+                       (0.0, "low")],
+    "partner_review": [(60.0, "high"), (30.0, "medium"),
+                       (0.0, "low")],
+    "agent_risk": [(60.0, "high"), (30.0, "medium"),
+                   (0.0, "low")],
+    "delivery_zone": [(60.0, "high"), (30.0, "medium"),
+                      (0.0, "low")],
+    "venue_partner": [(60.0, "high"), (30.0, "medium"),
+                      (0.0, "low")],
+    "ops_alert": [(60.0, "high"), (30.0, "medium"),
+                  (0.0, "low")],
+    "self_healing": [(60.0, "high"), (30.0, "medium"),
+                     (0.0, "low")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -355,6 +384,12 @@ def default_weights(scorer_id: str) -> dict:
         from services.trace_integrity_scorer import TraceIntegrityScorer
         from services.compliance_inspection_scorer import ComplianceInspectionScorer
         from services.citystore_health_scorer import CitystoreHealthScorer
+        from services.longtail_scorers import (
+            TicketQualityScorer, PartnerReviewScorer,
+            AgentRiskScorer, DeliveryZoneScorer,
+            VenuePartnerScorer, OpsAlertScorer,
+            SelfHealingScorer,
+        )
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -389,6 +424,13 @@ def default_weights(scorer_id: str) -> dict:
             "trace_integrity": TraceIntegrityScorer,
             "compliance_inspection": ComplianceInspectionScorer,
             "citystore_health": CitystoreHealthScorer,
+            "ticket_quality": TicketQualityScorer,
+            "partner_review": PartnerReviewScorer,
+            "agent_risk": AgentRiskScorer,
+            "delivery_zone": DeliveryZoneScorer,
+            "venue_partner": VenuePartnerScorer,
+            "ops_alert": OpsAlertScorer,
+            "self_healing": SelfHealingScorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

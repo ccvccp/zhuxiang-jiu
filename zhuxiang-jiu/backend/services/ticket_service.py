@@ -162,6 +162,26 @@ class TicketService:
             ticket_id = await self.repo.next_ticket_id()
             ticket["id"] = ticket_id
             ticket["ticketNo"] = self.repo.generate_ticket_no()
+
+            # AI 决策门(全站批次六——07号客服工单 AI 升级)
+            # ticket_quality 工单定级门: observe 模式仅评分快照
+            # (行为 100% 兼容); enforce 模式 high 拦截异常提交。
+            # 投诉/VIP 自动升紧急硬规则已前置, AI 门为叠加层;
+            # ticket:{ticketNo} 贯穿快照与确认终态——配对键一致。
+            try:
+                from services.ai_enforcement_longtail import (
+                    enrich_ticket_create,
+                    enforce_ticket_create,
+                )
+                ctx = await enrich_ticket_create(
+                    user_level, ticket_type, priority)
+                await enforce_ticket_create(
+                    ticket["ticketNo"], ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞建单
+
             await self.repo.create_ticket(ticket)
             return ticket
 
@@ -379,6 +399,17 @@ class TicketService:
             }
             await self.repo.update_ticket(ticket_no, updates)
             ticket.update(updates)
+
+            # 回流钩子(07号工单决策门——确认终态+满意度自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_ticket_confirmed,
+                )
+                await on_ticket_confirmed(
+                    ticket_no, satisfaction)
+            except Exception:
+                pass
+
             return self._public(ticket)
 
     async def close_ticket(self, ticket_no: str, operator: str = "admin",

@@ -219,6 +219,26 @@ class VenueService:
                     f"当前状态不允许审核(当前={current_status}, "
                     f"需 pending/reviewing)")
 
+            # AI 决策门(全站批次六——21号酒店合作商 AI 升级)
+            # venue_partner 审核门: observe 模式仅评分快照
+            # (行为 100% 兼容); enforce 模式 high 拦截(合作商
+            # 风险画像异常)。状态机硬规则已前置, AI 门为
+            # 叠加层; partner:{partnerId} 贯穿快照与结算
+            # 终态——配对键一致; fail-open 兜底。
+            try:
+                from services.ai_enforcement_longtail import (
+                    enrich_venue_audit,
+                    enforce_venue_audit,
+                )
+                ctx = await enrich_venue_audit(
+                    partner)
+                await enforce_venue_audit(
+                    partner_id, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞审核
+
             if action == "approve":
                 # 校验合同日期
                 if not contract_start or not contract_end:
@@ -707,6 +727,15 @@ class VenueService:
                 logger.warning("venue_ledger_record_failed partner=%r: %s",
                               partner_id, e)
                 result["ledgerRecorded"] = False
+
+            # 回流钩子(21号合作商决策门——结算终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_commission_settled,
+                )
+                await on_commission_settled(partner_id)
+            except Exception:
+                pass
 
             return result
 

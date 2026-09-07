@@ -423,6 +423,37 @@ class LocationService:
     async def check_delivery_point(self, longitude: float, latitude: float) -> dict:
         """检测坐标所在配送范围"""
         matched = await self.repo.check_delivery_point(longitude, latitude)
+
+        # AI 决策门(全站批次六——20号位置地图 AI 升级)
+        # delivery_zone 配送点门: observe 模式仅评分快照
+        # (行为 100% 兼容); enforce 模式 high 拦截(范围外/
+        # 区域异常需人工确认)。地理围栏硬规则保留,
+        # AI 门为叠加层; point:{lng}:{lat} 为配对键。
+        try:
+            from services.ai_enforcement_longtail import (
+                enrich_delivery_point,
+                enforce_delivery_point,
+            )
+            zone = matched[0] if matched else {}
+            dist = 0.0 if matched else 999.0
+            ctx = await enrich_delivery_point(
+                zone, dist)
+            point_key = (f"{round(longitude, 4)}:"
+                         f"{round(latitude, 4)}")
+            await enforce_delivery_point(
+                point_key, ctx)
+            # 回流钩子(20号配送决策门——判定即时反馈;
+            # 对齐 on_points_earned 即时配对范式)
+            from services.ai_feedback_hooks import (
+                on_delivery_checked,
+            )
+            await on_delivery_checked(
+                point_key, bool(matched))
+        except ValueError:
+            raise  # AI 拦截(enforce 模式)
+        except Exception:
+            pass  # fail-open: 富化异常不阻塞判定
+
         return {
             "longitude": longitude,
             "latitude": latitude,
@@ -459,6 +490,7 @@ class LocationService:
         }
         evidence_id = await self.repo.create_evidence(evidence)
         evidence["id"] = evidence_id
+
         return evidence
 
     async def verify_evidence_by_hash(self, evidence_hash: str) -> dict:

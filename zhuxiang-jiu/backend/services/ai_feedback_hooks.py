@@ -116,6 +116,28 @@ async def _invoke_scorer(scorer_id: str, ctx: dict) -> dict | None:
         if scorer_id == "finance_anomaly":
             from services.ai_scoring_ext_service import FinanceAnomalyScorer
             return await FinanceAnomalyScorer().score(ctx)
+        # 全站批次六·长尾七模块 AI 决策门
+        if scorer_id == "ticket_quality":
+            from services.longtail_scorers import TicketQualityScorer
+            return await TicketQualityScorer().score(ctx)
+        if scorer_id == "partner_review":
+            from services.longtail_scorers import PartnerReviewScorer
+            return await PartnerReviewScorer().score(ctx)
+        if scorer_id == "agent_risk":
+            from services.longtail_scorers import AgentRiskScorer
+            return await AgentRiskScorer().score(ctx)
+        if scorer_id == "delivery_zone":
+            from services.longtail_scorers import DeliveryZoneScorer
+            return await DeliveryZoneScorer().score(ctx)
+        if scorer_id == "venue_partner":
+            from services.longtail_scorers import VenuePartnerScorer
+            return await VenuePartnerScorer().score(ctx)
+        if scorer_id == "ops_alert":
+            from services.longtail_scorers import OpsAlertScorer
+            return await OpsAlertScorer().score(ctx)
+        if scorer_id == "self_healing":
+            from services.longtail_scorers import SelfHealingScorer
+            return await SelfHealingScorer().score(ctx)
     except Exception as exc:
         logger.warning("挂钩评分失败(scorer=%s): %s", scorer_id, exc)
     return None
@@ -948,3 +970,108 @@ async def on_voucher_posted(voucher_no: str,
     except Exception as exc:
         logger.warning("on_voucher_posted 挂钩失败(%s): %s",
                        voucher_no, exc)
+
+
+# ============================================================
+# 全站批次六·长尾七模块接线回流(7 挂钩)
+# 通用语义映射: 成功终态期望 low / 失败或拒绝终态
+# 期望非 low(预警正确); business_key 与决策门配对键一致
+# ============================================================
+
+async def _longtail_settle(scorer_id: str,
+                           business_key: str,
+                           outcome: str,
+                           positive: bool,
+                           note: str) -> None:
+    """长尾七模块通用回流(快照配对→语义标注→自动反馈)"""
+    try:
+        repo = AiLearningRepository()
+        snapshot = await repo.get_decision_snapshot(
+            scorer_id, business_key)
+        decision = (snapshot or {}).get("decision")
+        correct = None
+        if decision:
+            correct = ((decision == "low") if positive
+                       else (decision != "low"))
+        await record_outcome(
+            scorer_id, business_key, outcome,
+            correct=correct, note=note)
+    except Exception as exc:
+        logger.warning("_longtail_settle 挂钩失败(%s/%s): %s",
+                       scorer_id, business_key, exc)
+
+
+async def on_ticket_confirmed(ticket_no: str,
+                              satisfaction: int) -> None:
+    """07号工单确认终态(resolved+满意度) → 自动反馈
+    (ticket_quality 决策门回流; 满意度 1-2=负面)"""
+    await _longtail_settle(
+        "ticket_quality", f"ticket:{ticket_no}",
+        f"confirmed_s{satisfaction}",
+        positive=int(satisfaction) >= 4,
+        note=f"ticket {ticket_no} sat={satisfaction}")
+
+
+async def on_application_signed(
+        application_no: str) -> None:
+    """15号合作签约终态(approved→signed) → 自动反馈
+    (partner_review 决策门回流)"""
+    await _longtail_settle(
+        "partner_review", f"app:{application_no}",
+        "signed", positive=True,
+        note=f"application {application_no} signed")
+
+
+async def on_rebate_withdrawn(
+        apply_id: int) -> None:
+    """16号代理商返利提现终态(withdrawn) → 自动反馈
+    (agent_risk 决策门回流)"""
+    await _longtail_settle(
+        "agent_risk", f"audit:{apply_id}",
+        "withdrawn", positive=True,
+        note=f"agent apply {apply_id} withdrawn")
+
+
+async def on_delivery_checked(
+        point_key: str, matched: bool) -> None:
+    """20号配送点判定即时反馈
+    (delivery_zone 决策门回流——对齐
+    on_points_earned 即时配对范式:
+    判定即终态, 命中=期望 low/范围外=非 low)"""
+    await _longtail_settle(
+        "delivery_zone", f"point:{point_key}",
+        "checked" if matched else "out_of_range",
+        positive=matched,
+        note=f"delivery point {point_key} "
+             f"{'matched' if matched else 'out'}")
+
+
+async def on_commission_settled(
+        partner_id: int) -> None:
+    """21号合作商结算终态(已结算) → 自动反馈
+    (venue_partner 决策门回流)"""
+    await _longtail_settle(
+        "venue_partner", f"partner:{partner_id}",
+        "settled", positive=True,
+        note=f"venue partner {partner_id} settled")
+
+
+async def on_alert_resolved(alert_id: int) -> None:
+    """26号告警解决终态(resolved) → 自动反馈
+    (ops_alert 决策门回流)"""
+    await _longtail_settle(
+        "ops_alert", f"alert:{alert_id}",
+        "resolved", positive=True,
+        note=f"alert {alert_id} resolved")
+
+
+async def on_recovery_completed(
+        recovery_id: int, recovered: bool) -> None:
+    """27号自愈终态(recovered/failed) → 自动反馈
+    (self_healing 决策门回流)"""
+    await _longtail_settle(
+        "self_healing", f"recovery:{recovery_id}",
+        "recovered" if recovered else "failed",
+        positive=recovered,
+        note=f"recovery {recovery_id} "
+             f"{'recovered' if recovered else 'failed'}")

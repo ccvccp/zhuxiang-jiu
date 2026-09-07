@@ -601,7 +601,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 48,
+               len(SCORER_REGISTRY) == 55,
                str(len(SCORER_REGISTRY)))
         record("第38档案 value_exchange"
                "(batch23)",

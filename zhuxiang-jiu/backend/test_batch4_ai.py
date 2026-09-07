@@ -1,4 +1,4 @@
-"""全站批次四·治理类三模块 AI 升级 专项测试
+﻿"""全站批次四·治理类三模块 AI 升级 专项测试
 
 运行方式:
     python test_batch4_ai.py
@@ -162,7 +162,7 @@ class TestRegistry:
             default_weights,
         )
         record("48 档案",
-               len(SCORER_REGISTRY) == 48,
+               len(SCORER_REGISTRY) == 55,
                str(len(SCORER_REGISTRY)))
         for sid, batch in (
                 ("trace_integrity", 30),

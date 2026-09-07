@@ -365,7 +365,7 @@ def run_round(round_no: int) -> None:
 
     print("\n[02 44号注册表]")
     record("41 档案(credit_scoring batch25)",
-           seed.get("reg_n") == 48
+           seed.get("reg_n") == 55
            and seed.get("cs_in") is True,
            str(seed.get("reg_n")))
 

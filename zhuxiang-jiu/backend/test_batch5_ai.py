@@ -20,7 +20,7 @@
     - 19财务 finance_anomaly →
       audit_voucher + 过账终态回流
     - enforce 模式(阈值类拦截/路由类不拦)
-    - 宪法(48 档案不变——本批零新档案)
+    - 宪法(55 档案不变——本批零新档案)
 """
 
 import asyncio
@@ -603,8 +603,8 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("48 档案不变(零新档案)",
-               len(SCORER_REGISTRY) == 48,
+        record("55 档案不变(零新档案)",
+               len(SCORER_REGISTRY) == 55,
                str(len(SCORER_REGISTRY)))
 
         # 决策门默认 observe

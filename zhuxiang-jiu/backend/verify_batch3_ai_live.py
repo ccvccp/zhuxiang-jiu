@@ -438,7 +438,7 @@ def run_round(round_no: int) -> None:
     print("\n[02 44号注册表]")
     reg = registry_check()
     record("45 档案(batch27-29 入册)",
-           reg.get("reg_n") == 48
+           reg.get("reg_n") == 55
            and reg.get("pl") is True
            and reg.get("ar") is True
            and reg.get("ap") is True,

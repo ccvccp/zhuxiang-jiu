@@ -206,6 +206,29 @@ class MonitorService:
             }
             record_id = await self.repo.create_alert(record)
             record["id"] = record_id
+
+            # AI 决策门(全站批次六——26号智能监控 AI 升级)
+            # ops_alert 告警分级门: observe 模式仅评分快照
+            # (行为 100% 兼容); enforce 模式 high 拦截(异常
+            # 告警风暴)。alert:{id} 贯穿快照与解决终态
+            # ——配对键一致; fail-open 兜底。
+            try:
+                from services.ai_enforcement_longtail import (
+                    enrich_ops_alert,
+                    enforce_ops_alert,
+                )
+                thr = float(
+                    (threshold or {}).get("value") or 0)
+                ctx = await enrich_ops_alert(
+                    alert_level, current_value,
+                    thr, source)
+                await enforce_ops_alert(
+                    record_id, ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞告警
+
             return record
 
     async def acknowledge_alert(self, alert_id: int,
@@ -248,6 +271,16 @@ class MonitorService:
             }
             await self.repo.update_alert(alert_id, updates)
             record.update(updates)
+
+            # 回流钩子(26号告警决策门——解决终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_alert_resolved,
+                )
+                await on_alert_resolved(alert_id)
+            except Exception:
+                pass
+
             return record
 
     async def suppress_alert(self, alert_id: int,

@@ -345,6 +345,27 @@ class MaintenanceService:
         }
         record_id = await self.repo.create_recovery(record)
         record["id"] = record_id
+
+        # AI 决策门(全站批次六——27号智能维护 AI 升级)
+        # self_healing 自愈决策门: observe 模式仅评分快照
+        # (行为 100% 兼容); enforce 模式 high 拦截(高风险
+        # 故障强制人工介入)。recovery:{id} 贯穿快照与自愈
+        # 终态——配对键一致; fail-open 兜底。
+        try:
+            from services.ai_enforcement_longtail import (
+                enrich_self_healing,
+                enforce_self_healing,
+            )
+            ctx = await enrich_self_healing(
+                fault_type, recovery_level,
+                fault_source)
+            await enforce_self_healing(
+                record_id, ctx)
+        except ValueError:
+            raise  # AI 拦截(enforce 模式)
+        except Exception:
+            pass  # fail-open: 富化异常不阻塞检测
+
         return record
 
     async def diagnose_fault(self, recovery_id: int,
@@ -413,6 +434,17 @@ class MaintenanceService:
             record["executionResult"] = execution_result or {"status": final_status}
             if success:
                 record["recoveredAt"] = ts()
+
+            # 回流钩子(27号自愈决策门——自愈终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_recovery_completed,
+                )
+                await on_recovery_completed(
+                    recovery_id, success)
+            except Exception:
+                pass
+
             return record
 
     async def get_recovery(self, recovery_id: int) -> dict:

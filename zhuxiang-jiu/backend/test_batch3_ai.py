@@ -173,7 +173,7 @@ class TestRegistry:
             default_weights,
         )
         record("45 档案",
-               len(SCORER_REGISTRY) == 48,
+               len(SCORER_REGISTRY) == 55,
                str(len(SCORER_REGISTRY)))
         for sid, batch, module in (
                 ("product_launch", 27, "01产品展示"),

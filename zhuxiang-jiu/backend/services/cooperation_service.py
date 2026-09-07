@@ -240,6 +240,37 @@ class CooperationService:
 
             # 合规评分
             score = max(0, 100 - len(issues) * 20)
+
+            # AI 决策门(全站批次六——15号合作接口 AI 升级)
+            # partner_review 审核门: observe 模式仅评分快照
+            # (不覆盖既有规则评分——行为 100% 兼容); enforce 模式
+            # high 拦截(合作方资质异常)。app:{applicationNo}
+            # 贯穿快照与签约终态——配对键一致; fail-open 兜底。
+            try:
+                from services.ai_enforcement_longtail import (
+                    enrich_partner_review,
+                    enforce_partner_review,
+                )
+                partner = await self.repo.get_partner(
+                    app.get("partnerId"))
+                ctx = await enrich_partner_review(
+                    partner)
+                ctx.update(
+                    qualificationGap=max(
+                        0, MIN_QUALIFICATION_FILES
+                        - len(files)),
+                    reviewScore=float(score),
+                    estimatedAmount=float(
+                        app.get("estimatedAmount")
+                        or 0))
+                await enforce_partner_review(
+                    app.get("applicationNo")
+                    or f"ID{application_id}", ctx)
+            except ValueError:
+                raise  # AI 拦截(enforce 模式)
+            except Exception:
+                pass  # fail-open: 富化异常不阻塞审核
+
             # 缺少资质文件为严重违规, 直接驳回(不论评分)
             has_critical = any(i["type"] == "missing_qualification" for i in issues)
             result = "reject" if has_critical else "pass" if score >= AI_REVIEW_PASS_SCORE else "reject"
@@ -357,6 +388,17 @@ class CooperationService:
             app["contractId"] = contract_id
             app["updatedAt"] = ts()
             await self.repo.save_application(app)
+
+            # 回流钩子(15号合作决策门——签约终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_application_signed,
+                )
+                await on_application_signed(
+                    app.get("applicationNo")
+                    or f"ID{application_id}")
+            except Exception:
+                pass
 
             return {
                 "applicationId": application_id,
