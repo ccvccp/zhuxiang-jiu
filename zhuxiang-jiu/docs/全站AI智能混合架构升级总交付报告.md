@@ -76,10 +76,60 @@
 - 三门接线：activate_life_code 首扫激活门（不破坏 orderId 分润契约）/ monitor_behavior 巡检门（observe 不覆盖调用方 riskLevel 传参）/ run_assessment 考核门（双达标硬规则不变）；
 - 三回流（窜货处罚/巡检落监/考核终态语义配对）。
 
-### 批次五：半AI七模块接线（commit f2c06ee，零新档案）
+### 批次五：半AI七模块接线（commit f2c06ee，零新档案，+2228 行）
 
-- 05收款 payment_routing / 06物流 logistics_routing:balanced / 08信息 message_content / 14团购 groupbuy_qualify / 17后台 admin_operation / 18条款 agreement_risk / 19财务 finance_anomaly——batch2 已注册未接线的 7 个评分器全部接线补全（enrich+enforce 双函数+业务入口挂门+七终态回流钩子）；
-- 路由类评分器永不阻断 + 渠道/承运商推荐正确性标注；阈值类 observe 默认行为兼容/enforce 拦截。
+**背景**：05收款 / 06物流 / 08信息 / 14团购 / 17后台 / 18条款 / 19财务——batch2 已注册评分器但业务流零调用（"评分器已注册+业务流零调用"半 AI 态）。本批零新档案完成接线补全。
+
+#### 5.1 接线形态：enrich+enforce 双函数（`ai_enforcement_wiring.py` 新增 481 行）
+
+七对双函数，每对先富化业务上下文（enrich——确定性聚合现成数据）再挂决策门（enforce——调 `enforce_decision` 评分+快照）：
+
+| 模块 | 评分器 | 业务入口 | 门类型 | enforce 语义 |
+|------|--------|----------|--------|--------------|
+| 05收款 | payment_routing | create_pay | **路由类** | 评分+快照推荐渠道，**永不阻断**（推荐不拦截） |
+| 06物流 | logistics_routing:balanced | create_order | **路由类** | 承运商推荐编码，天然不阻断 |
+| 08信息 | message_content | send_message | 阈值类 | high 拦截垃圾内容 |
+| 14团购 | groupbuy_qualify | apply | 阈值类 | 高风险拒绝申请（rejected 专属档） |
+| 17后台 | admin_operation | assign_permissions | 阈值类 | 自我提权/敏感时段拦截 |
+| 18条款 | agreement_risk | publish_agreement | 阈值类 | 高危条款拒绝发布 |
+| 19财务 | finance_anomaly | audit_voucher | 阈值类 | 借贷不平/异常凭证冻结 |
+
+**enrich 富化示例**（支付路由门）：金额/场景类型/请求渠道 + 渠道画像清单（channelCode/channelType/feeRate/fixedFee/minAmount/maxAmount/dailyLimit/dailyAmount/status——从 PaymentRepository.list_active_channels 现成数据确定性聚合，零 LLM）。
+
+**挂门方式**：七业务服务（payment_service+28 / logistics_service+32 / message_service+30 / groupbuy_service+31 / admin_service+32 / agreement_service+30 / finance_service+30 行）在业务入口 try 包裹调用 enrich+enforce——**fail-soft：富化/评分异常不阻塞主流程**（如"路由类永不阻断; 富化异常不阻塞支付"）。
+
+#### 5.2 终态回流（`ai_feedback_hooks.py` 新增 220 行，七钩子）
+
+业务终态 → `submit_feedback` 语义配对，供 Hedge 在线学习：
+
+| 回流钩子 | 终态 | 标注语义 |
+|----------|------|----------|
+| on_pay_settled | 支付成功/失败 | 渠道推荐正确性（requestedChannel vs 实付渠道） |
+| on_waybill_signed | 运单签收 | 承运商推荐正确性（时效/成本命中） |
+| on_message_settled | 消息发送终态 | 内容审核正确性 |
+| on_groupbuy_settled | 团购审核终态 | 资格判定正确性 |
+| on_admin_operation_settled | 后台操作终态 | 操作风险判定正确性 |
+| on_agreement_settled | 条款发布终态 | 条款风险判定正确性 |
+| on_voucher_posted | 凭证过账终态 | 异常检测正确性 |
+
+#### 5.3 附带修复（接线前置缺口）
+
+- **`_invoke_scorer` 补 5 分支**：message_content / groupbuy_qualify / admin_operation / agreement_risk / finance_anomaly——此前评分器已注册但挂钩层不可达（五分支缺失导致 enrich 调用落地即断，为批次五接线前置缺口）；
+- **`BLOCK_ACTIONS` 补 rejected 档**：14号 groupbuy_qualify 专属拒绝动作纳入阻断集（v7.8 全站批次五接线补全口径）。
+
+#### 5.4 铁律（对齐批次一~四范式）
+
+- AI_ENFORCE_MODE 默认 observe——评分+快照供学习闭环，决策不生效（**行为 100% 兼容**）；
+- 各模块硬规则（SVIP 资格/门槛/频次/状态机/幂等）保留为**合规底线**，AI 门为叠加层不替代；
+- `enforce_decision` fail-open 兜底——决策设施故障不阻断业务；
+- 路由类评分器（payment/logistics）决策为推荐编码，天然不阻断。
+
+#### 5.5 验证
+
+- 专项：test_batch5 39/39；
+- 全模块回归：收款 89 / 物流 79 / 信息 67 / 团购 49 / 后台 102 / 条款 57 / 财务 pytest 94 / 执行 23 / 挂钩 30 / 治理 47 / 学习路由 40 / 扩展 51 / 批次三 45 / 批次四 41 全绿；
+- Docker 实机：verify_batch5 52/52 ×2 轮幂等（含红队 RT-01 支付渠道硬规则 + enforce 高风险拦截与路由类不拦对照 + 五评分器观测面 HTTP）；
+- 批次一~四实机回归 30/42/46/38 全绿 + 编译零错。
 
 ### 批次六：长尾七模块（commit 16e0bcd）
 
