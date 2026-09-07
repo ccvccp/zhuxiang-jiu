@@ -213,7 +213,7 @@ class TestRegistry:
             default_weights,
         )
         record("55 档案",
-               len(SCORER_REGISTRY) == 55,
+               len(SCORER_REGISTRY) == 56,
                str(len(SCORER_REGISTRY)))
         for sid, batch in (
                 ("ticket_quality", 33),
@@ -614,7 +614,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("55 档案(批次六+7)",
-               len(SCORER_REGISTRY) == 55,
+               len(SCORER_REGISTRY) == 56,
                str(len(SCORER_REGISTRY)))
         os.environ.pop("AI_ENFORCE_MODE", None)
         from services.ai_enforcement import (

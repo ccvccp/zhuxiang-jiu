@@ -338,6 +338,9 @@ register_xx65_routes(app)
 # 全站跨模块融合(批次七: 跨模块红队向量)
 from routes.crossmodule_routes import register_crossmodule_routes
 register_crossmodule_routes(app)
+# AI智能工程师大模块(66号: 全站运维中枢×角色护航引擎)
+from routes.xx66_routes import register_xx66_routes
+register_xx66_routes(app)
 
 
 # ============================================================

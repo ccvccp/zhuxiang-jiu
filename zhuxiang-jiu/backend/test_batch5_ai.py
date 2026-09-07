@@ -604,7 +604,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("55 档案不变(零新档案)",
-               len(SCORER_REGISTRY) == 55,
+               len(SCORER_REGISTRY) == 56,
                str(len(SCORER_REGISTRY)))
 
         # 决策门默认 observe

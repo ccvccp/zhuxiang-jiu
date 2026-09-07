@@ -162,7 +162,7 @@ class TestRegistry:
             default_weights,
         )
         record("48 档案",
-               len(SCORER_REGISTRY) == 55,
+               len(SCORER_REGISTRY) == 56,
                str(len(SCORER_REGISTRY)))
         for sid, batch in (
                 ("trace_integrity", 30),

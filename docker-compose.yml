@@ -209,6 +209,12 @@ services:
       # shadow=兑换观察期(订单留痕不转移); assist=辅助结算期(支付开放);
       #     off=决策面 409(观测面 registry/orders/quota/model 等不受影响)
       - XX64_MODE=${XX64_MODE:-off}
+      # ---- 66号 AI智能工程师大模块(P0: 生命体征底座, 默认 off——观测面 vitals/status/history 永不关停) ----
+      # shadow=巡检留痕期(快照+起链纯记录); assist=辅助执行期(P2 自愈编排经白名单+46号审批);
+      #     off=决策面 scan 409(观测面不受影响)
+      - XX66_MODE=${XX66_MODE:-off}
+      # LLM 辅助轨(P1 情绪识别/归因描述——仅产标签不产数字, 默认 off)
+      - XX66_LLM_MODE=${XX66_LLM_MODE:-off}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

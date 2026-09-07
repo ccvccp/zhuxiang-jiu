@@ -55,15 +55,15 @@ class TestPanorama:
         )
 
         p = await panorama()
-        record("全景评分器总数 55",
-               p["scorerCount"] == 55
+        record("全景评分器总数 56",
+               p["scorerCount"] == 56
                == len(SCORER_REGISTRY),
                f"got {p['scorerCount']}")
         record("模式分布计数守恒",
-               sum(p["modeDistribution"].values()) == 55,
+               sum(p["modeDistribution"].values()) == 56,
                str(p["modeDistribution"]))
         record("默认全 observe",
-               p["modeDistribution"]["observe"] == 55
+               p["modeDistribution"]["observe"] == 56
                and p["modeDistribution"]["shadow"] == 0
                and p["modeDistribution"]["enforce"] == 0,
                str(p["modeDistribution"]))
@@ -85,8 +85,8 @@ class TestPanorama:
                    "totalFeedback", "pendingFeedback",
                    "driftAlerts", "learnableScorers",
                    "schedulerRuns", "lastRunAt")))
-        record("可学习档案 44/55",
-               p["health"]["learnableScorers"] == 44,
+        record("可学习档案 45/56",
+               p["health"]["learnableScorers"] == 45,
                str(p["health"]["learnableScorers"]))
 
         # scope 边界: enforce+scopes → 分布变化
@@ -113,7 +113,7 @@ class TestPanorama:
 
         p3 = await panorama()
         record("模式恢复 observe",
-               p3["modeDistribution"]["observe"] == 55,
+               p3["modeDistribution"]["observe"] == 56,
                str(p3["modeDistribution"]))
 
 
@@ -152,8 +152,8 @@ class TestHub:
                    for z in ov["zones"]),
                str({z: ov["zones"][z] for z in ov["zones"]
                     if "error" in ov["zones"][z]}))
-        record("44号联动评分器 55",
-               ov["zones"]["linkage44"]["scorerCount"] == 55,
+        record("44号联动评分器 56",
+               ov["zones"]["linkage44"]["scorerCount"] == 56,
                str(ov["zones"]["linkage44"]))
         record("45号联动档案计数",
                isinstance(ov["zones"]["linkage45"]

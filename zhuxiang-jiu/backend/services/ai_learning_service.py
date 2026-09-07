@@ -144,6 +144,8 @@ SCORER_REGISTRY = {
     "ops_alert":                {"label": "智能告警分级评分", "module": "26智能监控", "batch": 38},
     # ---- 第三十九批(全站批次六·27号智能维护 AI 升级: 自愈决策评分) ----
     "self_healing":             {"label": "智能自愈决策评分", "module": "27智能维护", "batch": 39},
+    # ---- 第四十批(66号·AI智能工程师大模型 P0: 工程师服务评分) ----
+    "engineer_service":         {"label": "智能工程师服务评分", "module": "66号AI智能工程师", "batch": 40},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
@@ -275,6 +277,9 @@ DECISION_THRESHOLDS = {
                   (0.0, "low")],
     "self_healing": [(60.0, "high"), (30.0, "medium"),
                      (0.0, "low")],
+    # 66号·AI智能工程师三级(服务路由: 自助/AI诊断/升级人工)
+    "engineer_service": [(60.0, "high"), (30.0, "medium"),
+                         (0.0, "low")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -390,6 +395,7 @@ def default_weights(scorer_id: str) -> dict:
             VenuePartnerScorer, OpsAlertScorer,
             SelfHealingScorer,
         )
+        from services.xx66_scorer import EngineerServiceScorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -431,6 +437,7 @@ def default_weights(scorer_id: str) -> dict:
             "venue_partner": VenuePartnerScorer,
             "ops_alert": OpsAlertScorer,
             "self_healing": SelfHealingScorer,
+            "engineer_service": EngineerServiceScorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc
