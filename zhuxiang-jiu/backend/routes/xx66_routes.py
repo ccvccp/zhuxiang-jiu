@@ -353,5 +353,229 @@ async def xx66_log_verify(
     return await Xx66HealService().verify_log_chain()
 
 
+# ============================================================
+# P3 信值安全+补偿
+# ============================================================
+
+@router.post("/reconcile/run")
+async def xx66_reconcile_run(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """执行对账(决策面: 四不变式全量只读校验+差异
+    分级——danger 只生成建议书永不自动冻结;
+    XX66_MODE=off → 409)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_recon_service import (
+            Xx66ReconService,
+        )
+        return await Xx66ReconService().run_recon()
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.get("/reconcile/report")
+async def xx66_reconcile_report(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """对账报告(观测面——最近轮次+历史)"""
+    _require_admin(x_role)
+    from services.xx66_recon_service import (
+        Xx66ReconService,
+    )
+    return await Xx66ReconService().recon_report()
+
+
+class ReversalProposeRequest(PydBaseModel):
+    """冲正建议书请求"""
+    runId: int = Field(..., ge=1)
+    trustId: int = Field(..., ge=1)
+
+
+class AdviceIdRequest(PydBaseModel):
+    """建议书执行请求"""
+    adviceId: int = Field(..., ge=1)
+
+
+@router.post("/reconcile/reversal/propose")
+async def xx66_reversal_propose(
+    data: ReversalProposeRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """冲正建议书(决策面: 基于对账 I1 差异生成
+    direction/amount/reserve_ref 锚定; off → 409)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_recon_service import (
+            Xx66ReconService,
+        )
+        return await Xx66ReconService() \
+            .propose_reversal(data.runId, data.trustId)
+    except KeyError as exc:
+        msg = str(exc) if str(exc) else "对账轮次不存在"
+        if msg.startswith("'") and msg.endswith("'"):
+            msg = msg[1:-1]
+        raise HTTPException(status_code=404,
+                            detail=msg) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.post("/reconcile/reversal/apply")
+async def xx66_reversal_apply(
+    data: AdviceIdRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """执行冲正(前置 46号 approve——建议书状态
+    approved 才可执行; 45号 issue 轨锚定发行)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_recon_service import (
+            Xx66ReconService,
+        )
+        return await Xx66ReconService() \
+            .apply_reversal(data.adviceId)
+    except KeyError as exc:
+        msg = str(exc) if str(exc) else "建议书不存在"
+        if msg.startswith("'") and msg.endswith("'"):
+            msg = msg[1:-1]
+        raise HTTPException(status_code=404,
+                            detail=msg) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+class CompensationProposeRequest(PydBaseModel):
+    """补偿建议书请求"""
+    ruleId: str = Field(..., description=(
+        "trust_misdeduct|downtime_loss|ticket_severe"))
+    entityId: str = Field(..., min_length=1,
+                          description="申请实体(幂等域)")
+    incidentId: str = Field(
+        None, max_length=100,
+        description="事故事件 ID(幂等键, 与 ticketNo 二选一)")
+    ticketNo: str = Field(
+        None, max_length=100,
+        description="工单号(幂等键, 与 incidentId 二选一)")
+    lossAmount: float = Field(
+        0.0, ge=0, description="损失额(锚定基数)")
+    affectedUsers: int = Field(
+        0, ge=0, description="受影响角色数(宕机规则)")
+    roleTier: str = Field(
+        "standard", description="47号 tier")
+    emotionBand: str = Field(
+        "calm", description="情绪档(附加系数)")
+    deviceFingerprint: str = Field(
+        None, max_length=100,
+        description="设备指纹(多账号检测)")
+
+
+@router.post("/compensation/propose")
+async def xx66_compensation_propose(
+    data: CompensationProposeRequest,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """补偿建议书(决策面: DSL 确定性求值→反欺诈门
+    (幂等/连环/多账号/封顶/tier 终审)→留痕;
+    执行统一 46号审批——永不自动; off → 409)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_recon_service import (
+            Xx66ReconService,
+        )
+        svc = Xx66ReconService()
+        return await svc.propose_compensation(
+            data.ruleId,
+            {"entityId": data.entityId,
+             "incidentId": data.incidentId,
+             "ticketNo": data.ticketNo,
+             "lossAmount": data.lossAmount,
+             "affectedUsers": data.affectedUsers,
+             "roleTier": data.roleTier,
+             "emotionBand": data.emotionBand,
+             "deviceFingerprint":
+                 data.deviceFingerprint})
+    except KeyError as exc:
+        msg = str(exc) if str(exc) else "资源不存在"
+        if msg.startswith("'") and msg.endswith("'"):
+            msg = msg[1:-1]
+        raise HTTPException(status_code=404,
+                            detail=msg) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.get("/compensation/{advice_id}")
+async def xx66_compensation_detail(
+    advice_id: int,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """补偿详情(观测面——计算依据展开: base/tier 乘数/
+    情绪附加/封顶/DSL 版本, 透明化可审计)"""
+    _require_admin(x_role)
+    try:
+        from services.xx66_recon_service import (
+            Xx66ReconService,
+        )
+        return await Xx66ReconService() \
+            .get_compensation(advice_id)
+    except KeyError as exc:
+        msg = str(exc) if str(exc) else "建议书不存在"
+        if msg.startswith("'") and msg.endswith("'"):
+            msg = msg[1:-1]
+        raise HTTPException(status_code=404,
+                            detail=msg) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.post("/advice/{advice_id}/approve")
+async def xx66_advice_approve(
+    advice_id: int,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """建议书审批状态桥(46号 approve 效果对接点——
+    P3 以状态 approved 表征审批通过; P4 切换为
+    46号 submit_change 真轨; 不可逆状态推进)"""
+    _require_admin(x_role)
+    from repositories.xx66_repository import (
+        Xx66Repository,
+    )
+
+    async def _bridge():
+        book = await Xx66Repository() \
+            .get_advice_book(advice_id)
+        if book is None:
+            raise KeyError(f"建议书 {advice_id} 不存在")
+        if book.get("status") in ("executed",):
+            raise ValueError(
+                f"建议书已执行(状态 {book['status']}"
+                f" 不可逆)")
+        await Xx66Repository() \
+            .update_advice_status(advice_id, "approved")
+        return {"success": True,
+                "adviceId": advice_id,
+                "status": "approved",
+                "note": "46号 approve 效果桥——P4 切换"
+                        "submit_change 真轨",
+                "approvedAt": ts()}
+    try:
+        return await _bridge()
+    except KeyError as exc:
+        msg = str(exc) if str(exc) else "建议书不存在"
+        if msg.startswith("'") and msg.endswith("'"):
+            msg = msg[1:-1]
+        raise HTTPException(status_code=404,
+                            detail=msg) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
 def register_xx66_routes(app) -> None:
     app.include_router(router)

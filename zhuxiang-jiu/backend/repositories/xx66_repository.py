@@ -12,6 +12,12 @@
                             特征全量留痕可复现)
     xx66_engineer_log       操作留痕哈希指纹链(P2——
                             prev_hash 串联防篡改可审计)
+    xx66_recon_runs         对账轮次(P3——四不变式
+                            +差异分级+处置状态)
+    xx66_advice_books       建议书(P3——冲正/补偿,
+                            46号审批轨前置留痕)
+    xx66_compensations      补偿记录(P3——DSL 因子
+                            快照可复现审计)
 
 快照记录结构(P0):
     {snapshotId, zoneScores(JSON: 四区红黄绿灯 0/1/2),
@@ -59,11 +65,15 @@ class Xx66Repository:
     TABLE_BADGES = "xx66_badges"
     TABLE_PREDICTIONS = "xx66_predictions"
     TABLE_LOGS = "xx66_engineer_log"
+    TABLE_RECONS = "xx66_recon_runs"
+    TABLE_ADVICE = "xx66_advice_books"
+    TABLE_COMPENSATIONS = "xx66_compensations"
 
     _INT_FIELDS = ("snapshotId", "totalScore", "metricCount",
                    "statId", "satisfactionLinked",
                    "badgeId", "memberId",
-                   "predictionId", "logId")
+                   "predictionId", "logId",
+                   "runId", "adviceId", "compensationId")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -74,6 +84,9 @@ class Xx66Repository:
         self.store.setdefault(self.TABLE_BADGES, {})
         self.store.setdefault(self.TABLE_PREDICTIONS, {})
         self.store.setdefault(self.TABLE_LOGS, {})
+        self.store.setdefault(self.TABLE_RECONS, {})
+        self.store.setdefault(self.TABLE_ADVICE, {})
+        self.store.setdefault(self.TABLE_COMPENSATIONS, {})
 
     @staticmethod
     def _serialize(record: dict) -> dict:
@@ -96,17 +109,26 @@ class Xx66Repository:
             if k in ("snapshotId", "totalScore",
                      "metricCount", "statId",
                      "satisfactionLinked", "badgeId",
-                     "memberId", "predictionId", "logId"):
+                     "memberId", "predictionId", "logId",
+                     "runId", "adviceId",
+                     "compensationId"):
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
                     record[k] = v
             elif k in ("zoneScores", "zoneDetails",
-                       "features", "payload"):
+                       "features", "payload",
+                       "invariants", "evaluation",
+                       "fraudFlags", "dangerList"):
                 try:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):
                     record[k] = {}
+            elif k in ("amount",):
+                try:
+                    record[k] = float(v) if v != "" else 0.0
+                except (TypeError, ValueError):
+                    record[k] = 0.0
             else:
                 record[k] = v
         return record
@@ -467,3 +489,252 @@ class Xx66Repository:
         """最近一条留痕(指纹链 prev_hash 锚点)"""
         rows = await self.list_logs(limit=1)
         return rows[0] if rows else None
+
+    # --------------------------------------------------------
+    # 对账轮次(P3)
+    # --------------------------------------------------------
+
+    async def next_recon_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(
+                _k("xx66", self.TABLE_RECONS, "seq")))
+        self._ensure_store()
+        counter = self.store.setdefault(
+            f"_{self.TABLE_RECONS}_seq", 0)
+        counter += 1
+        self.store[f"_{self.TABLE_RECONS}_seq"] = counter
+        return counter
+
+    async def save_recon_run(self, record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("xx66", self.TABLE_RECONS,
+                   record["runId"]),
+                mapping=self._serialize(record))
+            await client.zadd(
+                _k("xx66", self.TABLE_RECONS, "index"),
+                {str(record["runId"]): record["runId"]})
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_RECONS][
+            record["runId"]] = dict(record)
+        return record
+
+    async def get_recon(self, run_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k(
+                "xx66", self.TABLE_RECONS, run_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_RECONS].get(run_id)
+        return dict(rec) if rec else None
+
+    async def list_recons(
+            self, limit: int = 10) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.zrevrange(
+                _k("xx66", self.TABLE_RECONS, "index"),
+                0, max(0, limit - 1))
+            if not ids:
+                return []
+            async with client.pipeline(
+                    transaction=False) as pipe:
+                for rid in ids:
+                    pipe.hgetall(_k(
+                        "xx66", self.TABLE_RECONS, rid))
+                rows = await pipe.execute()
+            return [self._deserialize(r) for r in rows
+                    if r]
+        self._ensure_store()
+        rows = sorted(
+            self.store[self.TABLE_RECONS].values(),
+            key=lambda r: r.get("runId") or 0,
+            reverse=True)
+        return [dict(r) for r in rows[:limit]]
+
+    async def latest_recon(self) -> dict | None:
+        rows = await self.list_recons(limit=1)
+        return rows[0] if rows else None
+
+    # --------------------------------------------------------
+    # 建议书(P3——冲正/补偿, 审批轨前置留痕)
+    # --------------------------------------------------------
+
+    async def next_advice_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(
+                _k("xx66", self.TABLE_ADVICE, "seq")))
+        self._ensure_store()
+        counter = self.store.setdefault(
+            f"_{self.TABLE_ADVICE}_seq", 0)
+        counter += 1
+        self.store[f"_{self.TABLE_ADVICE}_seq"] = counter
+        return counter
+
+    async def save_advice_book(self,
+                               record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("xx66", self.TABLE_ADVICE,
+                   record["adviceId"]),
+                mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_ADVICE][
+            record["adviceId"]] = dict(record)
+        return record
+
+    async def get_advice_book(
+            self, advice_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k(
+                "xx66", self.TABLE_ADVICE, advice_id))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_ADVICE].get(advice_id)
+        return dict(rec) if rec else None
+
+    async def update_advice_status(
+            self, advice_id: int, status: str) -> None:
+        rec = await self.get_advice_book(advice_id)
+        if rec is None:
+            raise KeyError(f"建议书 {advice_id} 不存在")
+        rec["status"] = status
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("xx66", self.TABLE_ADVICE, advice_id),
+                mapping=self._serialize(rec))
+        else:
+            self._ensure_store()
+            self.store[self.TABLE_ADVICE][
+                advice_id] = rec
+
+    # --------------------------------------------------------
+    # 补偿记录(P3——DSL 因子快照可复现审计)
+    # --------------------------------------------------------
+
+    async def next_compensation_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(
+                _k("xx66", self.TABLE_COMPENSATIONS,
+                   "seq")))
+        self._ensure_store()
+        counter = self.store.setdefault(
+            f"_{self.TABLE_COMPENSATIONS}_seq", 0)
+        counter += 1
+        self.store[f"_{self.TABLE_COMPENSATIONS}_seq"] = \
+            counter
+        return counter
+
+    async def save_compensation(self,
+                                record: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("xx66", self.TABLE_COMPENSATIONS,
+                   record["compensationId"]),
+                mapping=self._serialize(record))
+            await client.zadd(
+                _k("xx66", self.TABLE_COMPENSATIONS,
+                   "index"),
+                {str(record["compensationId"]):
+                 record["compensationId"]})
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_COMPENSATIONS][
+            record["compensationId"]] = dict(record)
+        return record
+
+    async def list_compensations(
+            self, entity_id: str = None,
+            limit: int = 100) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.zrevrange(
+                _k("xx66", self.TABLE_COMPENSATIONS,
+                   "index"), 0, max(0, limit - 1))
+            if not ids:
+                return []
+            async with client.pipeline(
+                    transaction=False) as pipe:
+                for cid in ids:
+                    pipe.hgetall(_k(
+                        "xx66", self.TABLE_COMPENSATIONS,
+                        cid))
+                rows = await pipe.execute()
+            rows = [self._deserialize(r)
+                    for r in rows if r]
+        else:
+            self._ensure_store()
+            rows = [dict(r) for r in
+                    self.store[
+                        self.TABLE_COMPENSATIONS]
+                    .values()]
+        if entity_id:
+            rows = [r for r in rows
+                    if r.get("entityId") == entity_id]
+        rows.sort(key=lambda r: r.get(
+            "compensationId") or 0, reverse=True)
+        return rows[:limit]
+
+    async def compensation_exists(
+            self, entity_id: str,
+            idem_key: str) -> bool:
+        rows = await self.list_compensations(
+            entity_id=entity_id, limit=500)
+        return any(r.get("idemKey") == idem_key
+                   for r in rows)
+
+    async def count_compensations(
+            self, entity_id: str,
+            days: int = 7) -> int:
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow()
+                  - timedelta(days=days)).strftime(
+            "%Y-%m-%dT%H:%M")
+        rows = await self.list_compensations(
+            entity_id=entity_id, limit=500)
+        return sum(1 for r in rows
+                   if str(r.get("createdAt") or "")
+                   >= cutoff)
+
+    async def count_fingerprint_accounts(
+            self, fingerprint: str,
+            days: int = 7) -> int:
+        """同指纹补偿申请实体数(简化: 全窗口)"""
+        rows = await self.list_compensations(
+            limit=500)
+        entities = {r.get("entityId") for r in rows
+                    if str(r.get("deviceFingerprint")
+                           or "") == fingerprint}
+        return len(entities)
+
+    async def sum_compensations_today(self) -> float:
+        import datetime as _dt
+        today = _dt.date.today().isoformat()
+        rows = await self.list_compensations(
+            limit=500)
+        return sum(float(r.get("amount") or 0)
+                   for r in rows
+                   if str(r.get("createdAt") or "")
+                   .startswith(today))
+
+    async def sum_compensations_month(
+            self, entity_id: str) -> float:
+        import datetime as _dt
+        month = _dt.date.today().strftime("%Y-%m")
+        rows = await self.list_compensations(
+            entity_id=entity_id, limit=500)
+        return sum(float(r.get("amount") or 0)
+                   for r in rows
+                   if str(r.get("createdAt") or "")
+                   .startswith(month))
