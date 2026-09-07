@@ -6,10 +6,12 @@
 import React from 'react';
 import { View, ScrollView } from '@tarojs/components';
 import styles from './agreement.module.scss';
+import NavBar from '@/components/NavBar';
 
 const AgreementPage: React.FC = () => {
   return (
     <View className={styles.page}>
+        <NavBar title="用户协议" />
       <ScrollView scrollY className={styles.content}>
         <View className={styles.title}>竹香酒小程序用户协议</View>
         <View className={styles.updateTime}>最后更新：2026年8月18日</View>

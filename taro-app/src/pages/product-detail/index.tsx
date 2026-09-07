@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import CheckoutService from '@/services/checkout-service';
 import { ProductAPI, ProductVO } from '@/api/product';
 import { PRODUCT_DEFAULTS, SERVICE_PHONE } from '@/config';
@@ -72,6 +73,7 @@ const ProductDetailPage: React.FC = () => {
   if (loading || !product) {
     return (
       <View className={styles.page}>
+        <NavBar title="商品详情" />
         <View className={styles.loading}>
           <View className={styles.loadingIcon}>🍶</View>
           <View className={styles.loadingText}>加载中...</View>
@@ -86,6 +88,7 @@ const ProductDetailPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="商品详情" />
       <ScrollView scrollY className={styles.scrollView}>
         {/* 商品大图区 */}
         <View className={styles.heroBox}>

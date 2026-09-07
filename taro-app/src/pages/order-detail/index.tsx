@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Textarea } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import { OrderAPI, OrderVO, ORDER_STATUS_NAME } from '@/api/order';
 
 // 状态 → 头部图标与提示
@@ -126,6 +127,7 @@ const OrderDetailPage: React.FC = () => {
   if (loading) {
     return (
       <View className={styles.page}>
+        <NavBar title="订单详情" />
         <View className={styles.empty}>
           <View className={styles.emptyIcon}>📦</View>
           <View className={styles.emptyText}>加载中...</View>
@@ -137,6 +139,7 @@ const OrderDetailPage: React.FC = () => {
   if (!order) {
     return (
       <View className={styles.page}>
+        <NavBar title="订单详情" />
         <View className={styles.empty}>
           <View className={styles.emptyIcon}>🔍</View>
           <View className={styles.emptyText}>订单不存在</View>
@@ -151,6 +154,7 @@ const OrderDetailPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="订单详情" />
       {/* 状态头部 */}
       <View className={styles.statusCard}>
         <View className={styles.statusIcon}>{meta.icon}</View>

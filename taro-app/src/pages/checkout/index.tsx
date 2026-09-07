@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, Checkbox } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import CheckoutService from '@/services/checkout-service';
 import { OrderAPI } from '@/api/order';
 
@@ -99,6 +100,7 @@ const CheckoutPage: React.FC = () => {
     const d = result.data;
     return (
       <View className={styles.page}>
+        <NavBar title="订单结算" />
         <View className={styles.card}>
           <View className={styles.resultBox}>
             <View className={styles.resultIcon}>✓</View>
@@ -157,6 +159,7 @@ const CheckoutPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="订单结算" />
       <View className={styles.card}>
         <View className={styles.cardTitle}>商品信息</View>
         <View className={styles.row}>

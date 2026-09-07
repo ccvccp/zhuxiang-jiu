@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import { PromotionAPI, ActivityAPI, ActivityVO } from '@/api/promotion';
 import { getMemberId } from '@/services/auth-service';
 
@@ -144,6 +145,7 @@ const ActivityPage: React.FC = () => {
   if (loading) {
     return (
       <View className={styles.page}>
+        <NavBar title="拼团活动" />
         <View className={styles.empty}>
           <View className={styles.emptyIcon}>🎁</View>
           <View className={styles.emptyText}>加载中...</View>
@@ -154,6 +156,7 @@ const ActivityPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="拼团活动" />
       {/* 概览头部 */}
       <View className={styles.heroCard}>
         <View className={styles.heroTitle}>活动中心</View>

@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import {
   PocketAPI,
   PocketSiteVO,
@@ -167,6 +168,7 @@ const PocketPage: React.FC = () => {
   if (loading) {
     return (
       <View className={styles.page}>
+        <NavBar title="口袋分红" />
         <View className={styles.loading}>加载中...</View>
       </View>
     );
@@ -174,6 +176,7 @@ const PocketPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="口袋分红" />
       {/* 收益概览 */}
       <View className={styles.heroCard}>
         <View className={styles.heroTop}>

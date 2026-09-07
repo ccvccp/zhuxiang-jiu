@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import { TraceProdAPI, PublicTraceVO } from '@/api/traceProd';
 
 // 7 工段静态元数据(与后端种子一致, 公开页免登录展示进度条)
@@ -88,6 +89,7 @@ const TraceViewPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="溯源验真" />
       <View className={styles.header}>
         <View className={styles.headerTitle}>🔍 竹香酒溯源</View>
         <View className={styles.headerDesc}>

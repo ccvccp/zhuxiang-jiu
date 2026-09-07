@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import { WalletAPI, WalletInfoVO, WalletTxVO, TX_TYPE_NAME } from '@/api/wallet';
 
 // 流水类型筛选
@@ -142,6 +143,7 @@ const WalletPage: React.FC = () => {
   if (state === 'loading') {
     return (
       <View className={styles.page}>
+        <NavBar title="钱包" />
         <View className={styles.empty}>
           <View className={styles.emptyIcon}>💰</View>
           <View className={styles.emptyText}>加载中...</View>
@@ -156,6 +158,7 @@ const WalletPage: React.FC = () => {
   if (state === 'not-open') {
     return (
       <View className={styles.page}>
+        <NavBar title="钱包" />
         <View className={styles.openCard}>
           <View className={styles.openIcon}>💰</View>
           <View className={styles.openTitle}>开通竹香钱包</View>
@@ -176,6 +179,7 @@ const WalletPage: React.FC = () => {
   // ============================================
   return (
     <View className={styles.page}>
+        <NavBar title="钱包" />
       {/* 余额卡片 */}
       <View className={styles.heroCard}>
         <View className={styles.heroTop}>

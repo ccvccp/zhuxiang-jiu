@@ -8,6 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Input, Textarea, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import { SiteThemeAPI, ThemeVO, ThemeColorsVO, ThemeAiCheckVO, ThemeLogVO, IconItemVO } from '@/api/siteTheme';
 import { MemberAPI } from '@/api/member';
 import { applyActiveTheme } from '@/services/theme-service';
@@ -341,6 +342,7 @@ const ThemeAdminPage: React.FC = () => {
   if (loading) {
     return (
       <View className={styles.page}>
+        <NavBar title="主题管理" />
         <View className={styles.loading}>加载中...</View>
       </View>
     );
@@ -350,6 +352,7 @@ const ThemeAdminPage: React.FC = () => {
   if (role !== 'admin') {
     return (
       <View className={styles.page}>
+        <NavBar title="主题管理" />
         <View className={styles.noPerm}>
           <View className={styles.noPermIcon}>🔒</View>
           <View className={styles.noPermTitle}>无管理权限</View>
@@ -363,6 +366,7 @@ const ThemeAdminPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="主题管理" />
       {/* 标题栏 */}
       <View className={styles.header}>
         <View>

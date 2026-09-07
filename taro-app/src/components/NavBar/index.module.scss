@@ -1,0 +1,75 @@
+@use '@/styles/variables.scss' as *;
+@use '@/styles/theme.scss' as *;
+
+// 导航栏高度(H5 端, 与常规移动端导航一致)
+$nav-height: 88rpx;
+
+.wrapper {
+  width: 100%;
+}
+
+.spacer {
+  height: $nav-height;
+}
+
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: $nav-height;
+  background: $color-primary;
+  // 顶部安全区适配(刘海屏)
+  padding-top: env(safe-area-inset-top);
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.12);
+}
+
+.backBtn {
+  position: absolute;
+  left: $spacing-sm;
+  display: flex;
+  align-items: center;
+  height: 64rpx;
+  padding: 0 $spacing-sm;
+  border-radius: $radius-round;
+  transition: opacity $transition-base;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.backBtnActive {
+  opacity: 0.7;
+}
+
+// 返回箭头(纯 CSS 绘制, 零图片依赖)
+.arrow {
+  width: 18rpx;
+  height: 18rpx;
+  border-left: 4rpx solid $color-text-white;
+  border-bottom: 4rpx solid $color-text-white;
+  transform: rotate(45deg);
+  margin-right: 8rpx;
+}
+
+.backText {
+  font-size: 26rpx;
+  color: $color-text-white;
+  line-height: 1;
+}
+
+.title {
+  max-width: 60%;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: $color-text-white;
+  // 长标题单行截断
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

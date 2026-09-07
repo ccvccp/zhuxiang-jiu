@@ -6,6 +6,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import { OrderAPI, OrderVO } from '@/api/order';
 
 // 状态筛选 tab(与后端状态码对齐)
@@ -133,6 +134,7 @@ const OrdersPage: React.FC = () => {
   if (loading && orders.length === 0) {
     return (
       <View className={styles.page}>
+        <NavBar title="我的订单" />
         <View className={styles.empty}>
           <View className={styles.emptyIcon}>📦</View>
           <View className={styles.emptyText}>加载中...</View>
@@ -143,6 +145,7 @@ const OrdersPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="我的订单" />
       {/* 状态筛选(横向滚动) */}
       <ScrollView scrollX className={styles.tabs} scrollWithAnimation>
         {STATUS_TABS.map(tab => (

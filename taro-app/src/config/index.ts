@@ -10,7 +10,7 @@
 // 真机预览: 用电脑局域网 IP(手机与电脑需连同一 WiFi)
 // H5 调试: 可改为 http://127.0.0.1:8000
 // 换环境后请同步检查后端 FastAPI 是否启动
-const LAN_HOST = '192.168.0.106';
+const LAN_HOST = '192.168.0.107';
 const API_PORT = '8000';
 
 export const API_BASE = `http://${LAN_HOST}:${API_PORT}`;

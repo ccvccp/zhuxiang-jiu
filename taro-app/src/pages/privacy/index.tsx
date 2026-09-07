@@ -6,10 +6,12 @@
 import React from 'react';
 import { View, ScrollView } from '@tarojs/components';
 import styles from './privacy.module.scss';
+import NavBar from '@/components/NavBar';
 
 const PrivacyPage: React.FC = () => {
   return (
     <View className={styles.page}>
+        <NavBar title="隐私政策" />
       <ScrollView scrollY className={styles.content}>
         <View className={styles.title}>竹香酒小程序隐私政策</View>
         <View className={styles.updateTime}>最后更新：2026年8月18日</View>

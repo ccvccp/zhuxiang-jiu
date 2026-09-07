@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, Input, Textarea, Canvas } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import { qrMatrix, renderQrMatrix } from '@/utils/qrcode';
 import {
   TraceProdAPI, TraceStageVO, TraceBatchVO, StagePunchVO, StageQrVO,
@@ -360,6 +361,7 @@ const TracePunchPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="产品溯源" />
       <View className={styles.header}>
         <View className={styles.headerTitle}>🍶 产品溯源</View>
         <View className={styles.headerDesc}>

@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Canvas } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import { qrMatrix, renderQrMatrix } from '@/utils/qrcode';
 import {
   PromoAPI,
@@ -145,6 +146,7 @@ const PromotionPage: React.FC = () => {
   if (loading) {
     return (
       <View className={styles.page}>
+        <NavBar title="促销返利" />
         <View className={styles.empty}>
           <View className={styles.emptyIcon}>🤝</View>
           <View className={styles.emptyText}>加载中...</View>
@@ -155,6 +157,7 @@ const PromotionPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="促销返利" />
       {/* 收益概览 */}
       <View className={styles.heroCard}>
         <View className={styles.heroTitle}>推广收益</View>

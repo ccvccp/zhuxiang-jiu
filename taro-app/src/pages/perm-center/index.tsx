@@ -8,6 +8,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, Textarea, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import {
   PermAPI, PermNodeVO, PermGrantVO, PermRequestVO, PermLogVO, PermScoreVO,
   PermDelegateVO, RoleRecommendVO,
@@ -396,6 +397,7 @@ const PermCenterPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="权限中心" />
       {/* 头部 */}
       <View className={styles.header}>
         <View className={styles.headerTitle}>🔐 权限中心</View>

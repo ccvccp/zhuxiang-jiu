@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
+import NavBar from '@/components/NavBar';
 import { AuthAPI } from '@/api/auth';
 
 type Mode = 'login' | 'register';
@@ -68,6 +69,7 @@ const LoginPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
+        <NavBar title="登录" />
       {/* 品牌头 */}
       <View className={styles.brand}>
         <View className={styles.brandIcon}>🍶</View>
