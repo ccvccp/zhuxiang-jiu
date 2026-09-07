@@ -37,6 +37,12 @@ P3 复核 2 + P4 看板 2):
                                       风险等级→46号公平性采样
                                       桥接(tier 维度上报;
                                       admin)
+    GET  /api/trust/risk/hub/overview  中枢统一调度总览(批次七:
+                                      消费方全景+tier 分布+三联动
+                                      子系统; admin)
+    POST /api/trust/risk/hub/dispatch  中枢统一调度执行(批次七:
+                                      分布扫描→协同→公平桥接→学习
+                                      域摘要; 零自动处置; admin)
 
 鉴权: 管理端 X-Role: admin(43-46号同款口径); 画像查询对
 管理端开放(角色自查走 45号档案视图, 按需再开); 复核申诉
@@ -144,6 +150,40 @@ async def fairness_bridge(
         )
         return await TrustRiskDashboardService(
         ).bridge_fairness()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 批次七·中枢统一调度(字面路由——须在 /{trust_id} 之前注册)
+# ============================================================
+
+@router.get("/hub/overview")
+async def hub_overview(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """中枢统一调度总览(批次七): 消费方全景(12+ 模块 tier
+    消费注册表) + tier 分层分布 + 45/44/46号三联动子系统
+    状态——fail-soft 分区"""
+    _require_admin(x_role)
+    try:
+        from services.trust_hub_service import TrustHubService
+        return await TrustHubService().hub_overview()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/hub/dispatch")
+async def hub_dispatch(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """中枢统一调度执行(批次七): 一键串联画像分布扫描→
+    P2 协同扫描→46号公平性桥接→44号学习域摘要(零自动
+    处置——画像不处罚红线不变)"""
+    _require_admin(x_role)
+    try:
+        from services.trust_hub_service import TrustHubService
+        return await TrustHubService().dispatch()
     except Exception as e:
         raise _handle(e) from e
 

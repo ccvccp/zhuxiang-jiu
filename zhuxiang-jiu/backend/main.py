@@ -335,6 +335,9 @@ register_xx64_routes(app)
 # 网店及商品AI智能管理(65号)
 from routes.xx65_routes import register_xx65_routes
 register_xx65_routes(app)
+# 全站跨模块融合(批次七: 跨模块红队向量)
+from routes.crossmodule_routes import register_crossmodule_routes
+register_crossmodule_routes(app)
 
 
 # ============================================================

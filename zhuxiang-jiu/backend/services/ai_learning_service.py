@@ -1195,6 +1195,83 @@ async def overview() -> dict:
             "generatedAt": ts()}
 
 
+async def panorama() -> dict:
+    """学习域全景(批次七·全站融合收官)
+
+    在 overview(学习状态)之上叠加三块全站聚合面:
+        - 决策门模式分布: 每个评分器当前 enforcement 模式
+          (observe/shadow/enforce, 运行时环境变量解析) + 全局模式统计
+        - 批次分布: 各批次评分器数(批次一~六推广 + 新范式区)
+        - 学习域健康度: 总反馈量/待学习反馈/漂移告警数汇总
+    """
+    import os
+
+    repo = AiLearningRepository()
+    scorers = []
+    mode_dist = {"observe": 0, "shadow": 0, "enforce": 0}
+    batch_dist: dict[str, int] = {}
+    total_feedback = 0
+    pending_total = 0
+    drift_alerts = 0
+    learnable = 0
+
+    from services.ai_enforcement import enforcement_mode
+    for scorer_id, meta in SCORER_REGISTRY.items():
+        profile = await repo.get_profile(scorer_id) or {}
+        champion = profile.get("champion") or {}
+        challenger = profile.get("challenger") or {}
+        drift = await repo.get_drift(scorer_id) or {}
+        pending = await repo.count_feedback(scorer_id, status="pending")
+        feedback_count = await repo.count_feedback(scorer_id)
+        mode = enforcement_mode(scorer_id)
+        mode_dist[mode] += 1
+        batch_key = str(meta["batch"])
+        batch_dist[batch_key] = batch_dist.get(batch_key, 0) + 1
+        drift_score = float(drift.get("driftScore") or 0.0)
+        drift_level = drift.get("driftLevel") or "low"
+        if drift_level in ("medium", "high"):
+            drift_alerts += 1
+        total_feedback += feedback_count
+        pending_total += pending
+        if DECISION_THRESHOLDS.get(scorer_id) is not None:
+            learnable += 1
+        scorers.append({
+            "scorerId": scorer_id, "label": meta["label"],
+            "module": meta["module"], "batch": meta["batch"],
+            "mode": mode,
+            "championVersion": champion.get("version", "v1"),
+            "championSource": champion.get("source", "default"),
+            "challengerVersion": challenger.get("version"),
+            "pendingFeedback": pending,
+            "totalFeedback": feedback_count,
+            "driftScore": drift_score,
+            "driftLevel": drift_level,
+        })
+
+    scheduler_stats = await repo.get_scheduler_stats() or {}
+    global_mode = os.environ.get("AI_ENFORCE_MODE", "observe").strip().lower()
+    scopes_raw = os.environ.get("AI_ENFORCE_SCOPES", "").strip()
+    return {
+        "success": True,
+        "scorerCount": len(scorers),
+        "scorers": scorers,
+        "modeDistribution": mode_dist,
+        "globalMode": global_mode,
+        "enforceScopes": [s.strip() for s in scopes_raw.split(",")
+                          if s.strip()],
+        "batchDistribution": batch_dist,
+        "health": {
+            "totalFeedback": total_feedback,
+            "pendingFeedback": pending_total,
+            "driftAlerts": drift_alerts,
+            "learnableScorers": learnable,
+            "schedulerRuns": scheduler_stats.get("runs", 0),
+            "lastRunAt": scheduler_stats.get("lastRunAt"),
+        },
+        "generatedAt": ts(),
+    }
+
+
 async def learning_report(scorer_id: str) -> dict:
     """学习效果报表: 按权重版本聚合反馈正确率 + 版本演进曲线
 

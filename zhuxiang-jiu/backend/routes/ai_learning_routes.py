@@ -9,6 +9,7 @@
 
 端点:
     GET  /api/ai-learning/overview            自学习状态总览(全部评分器)
+    GET  /api/ai-learning/panorama            学习域全景(批次七: 模式分布×批次分布×健康度)
     GET  /api/ai-learning/weights/{scorerId}  查看权重档案(冠军/挑战者/默认)
     PUT  /api/ai-learning/weights/{scorerId}  人工覆盖权重(立即生效)
     POST /api/ai-learning/feedback            提交决策反馈(真实结果标注)
@@ -105,6 +106,16 @@ async def learning_overview(x_role: str | None = Header(None, alias="X-Role")):
     _require_admin(x_role)
     try:
         return await svc.overview()
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/ai-learning/panorama", tags=["AI自学习层"])
+async def learning_panorama(x_role: str | None = Header(None, alias="X-Role")):
+    """学习域全景(批次七): 学习状态×决策门模式分布×批次分布×健康度全站聚合"""
+    _require_admin(x_role)
+    try:
+        return await svc.panorama()
     except Exception as exc:
         _handle(exc)
 

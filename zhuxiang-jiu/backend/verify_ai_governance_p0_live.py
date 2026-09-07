@@ -106,8 +106,8 @@ def main():
     print("\n[02 注册中心同步]")
     ok, (code, body) = call(
         "POST", "/api/ai-gov/registry/sync", headers=ADMIN)
-    record("同步28档案", code == 200
-           and body.get("added") == 28,
+    record("同步55档案", code == 200
+           and body.get("added") == 55,
            str(body)[:70])
     ok, (code, body) = call(
         "POST", "/api/ai-gov/registry/sync", headers=ADMIN)
@@ -119,7 +119,7 @@ def main():
         "GET", "/api/ai-gov/registry", headers=ADMIN)
     record("台账分布", code == 200
            and (body.get("byStatus") or {}).get("active")
-           == 28, str(body.get("byStatus")))
+           == 55, str(body.get("byStatus")))
 
     print("\n[03 变更审批总线]")
     ok, (code, body) = call("POST", "/api/ai-gov/changes", body={
