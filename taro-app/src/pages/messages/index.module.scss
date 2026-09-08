@@ -1,0 +1,167 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// 未读统计头部
+.headerCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.headerLeft {
+  flex: 1;
+}
+
+.headerTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.headerDesc {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.markAllBtn {
+  flex-shrink: 0;
+  margin-left: $spacing-md;
+  padding: $spacing-xs $spacing-lg;
+  font-size: $font-size-sm;
+  color: $color-primary;
+  background: rgba($color-primary, 0.08);
+  border-radius: $radius-button;
+  font-weight: $font-weight-medium;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+// 分类筛选
+.tabs {
+  display: flex;
+  white-space: nowrap;
+  margin-bottom: $spacing-md;
+}
+
+.tab {
+  display: inline-block;
+  padding: $spacing-xs $spacing-lg;
+  margin-right: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: $color-bg-card;
+  border-radius: $radius-button;
+  flex-shrink: 0;
+
+  &.tabActive {
+    color: $color-text-white;
+    background: $color-primary;
+    font-weight: $font-weight-medium;
+  }
+}
+
+// 消息卡片
+.msgCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.msgUnread {
+  border-left: 6rpx solid $color-primary;
+}
+
+.msgHead {
+  display: flex;
+  align-items: flex-start;
+}
+
+.msgIcon {
+  font-size: 44rpx;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+}
+
+.msgTitleWrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.msgTitle {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.unreadDot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  background: #e64340;
+  flex-shrink: 0;
+}
+
+.msgMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.msgContent {
+  margin-top: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+}
+
+// 收起时最多 2 行
+.msgClamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.empty {
+  padding: $spacing-xl 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 64rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}

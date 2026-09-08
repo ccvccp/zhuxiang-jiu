@@ -290,6 +290,56 @@ const MinePage: React.FC = () => {
           </View>
         )}
 
+        {/* 客服中心 */}
+        <View className={styles.section}>
+          <View className={styles.sectionTitle}>资产管理</View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/credit/index' })}>
+            <View className={styles.adminEntryIcon}>💳</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>信用先享后付</View>
+              <View className={styles.adminEntryDesc}>信用额度 · 免息期 · AI 智能授信</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/recycle/index' })}>
+            <View className={styles.adminEntryIcon}>🍶</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>老酒回收</View>
+              <View className={styles.adminEntryDesc}>AI 估值 · 兑换新酒 · 折现回收</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+        </View>
+
+        {/* 客服中心 */}
+        <View className={styles.section}>
+          <View className={styles.sectionTitle}>客服中心</View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/chat/index' })}>
+            <View className={styles.adminEntryIcon}>🎧</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>在线客服</View>
+              <View className={styles.adminEntryDesc}>AI 秒级应答 · 转人工 · 满意度评价</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/tickets/index' })}>
+            <View className={styles.adminEntryIcon}>📋</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>我的工单</View>
+              <View className={styles.adminEntryDesc}>问题追踪 · 处理记录 · 确认评价</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/messages/index' })}>
+            <View className={styles.adminEntryIcon}>📬</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>消息中心</View>
+              <View className={styles.adminEntryDesc}>订单/物流/活动通知 · 未读管理</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+        </View>
+
         {/* 个人信息管理 */}
         <View className={styles.section}>
           <View className={styles.sectionTitle}>个人信息管理</View>

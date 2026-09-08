@@ -1,0 +1,449 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// ============================================
+// 列表视图
+// ============================================
+.newBtn {
+  height: 84rpx;
+  background: $color-bg-card;
+  border: 1rpx dashed rgba($color-primary, 0.5);
+  border-radius: $radius-md;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+  margin-bottom: $spacing-md;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.tabs {
+  display: flex;
+  white-space: nowrap;
+  margin-bottom: $spacing-md;
+}
+
+.tab {
+  display: inline-block;
+  padding: $spacing-xs $spacing-lg;
+  margin-right: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: $color-bg-card;
+  border-radius: $radius-button;
+  flex-shrink: 0;
+
+  &.tabActive {
+    color: $color-text-white;
+    background: $color-primary;
+    font-weight: $font-weight-medium;
+  }
+}
+
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.ticketRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.ticketLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.ticketType {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.urgentTag {
+  font-size: $font-size-xs;
+  color: #e64340;
+  background: rgba(#e64340, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+.overdueTag {
+  font-size: $font-size-xs;
+  color: #c77d00;
+  background: rgba(#f5a623, 0.14);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+.ticketDesc {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  @include text-ellipsis;
+}
+
+.ticketMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.ticketRight {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+  margin-left: $spacing-sm;
+}
+
+.badge {
+  font-size: $font-size-xs;
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+  font-weight: $font-weight-normal;
+
+  &.pending {
+    color: $color-text-tertiary;
+    background: rgba($color-text-tertiary, 0.1);
+  }
+
+  &.processing {
+    color: $color-primary;
+    background: rgba($color-primary, 0.1);
+  }
+
+  &.confirm {
+    color: #c77d00;
+    background: rgba(#f5a623, 0.14);
+  }
+
+  &.resolved {
+    color: #2e7d32;
+    background: rgba(#2e7d32, 0.1);
+  }
+
+  &.closed {
+    color: $color-text-tertiary;
+    background: rgba($color-text-tertiary, 0.08);
+  }
+}
+
+.stars {
+  font-size: $font-size-xs;
+}
+
+.arrow {
+  font-size: $font-size-lg;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 创建视图
+// ============================================
+.typeGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-md;
+}
+
+.typeItem {
+  flex: 1 1 40%;
+  border: 1rpx solid rgba($color-primary, 0.2);
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  text-align: center;
+}
+
+.typeActive {
+  border-color: $color-primary;
+  background: rgba($color-primary, 0.06);
+}
+
+.typeLabel {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.typeDesc {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 200rpx;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  box-sizing: border-box;
+}
+
+.input {
+  height: 72rpx;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: 0 $spacing-md;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+}
+
+.note {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  text-align: center;
+  margin: $spacing-sm 0 $spacing-md;
+  line-height: $line-height-loose;
+}
+
+.submitBtn {
+  height: 88rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  box-shadow: $shadow-card-hover;
+  margin-bottom: $spacing-md;
+  @include button-reset;
+}
+
+// ============================================
+// 详情视图
+// ============================================
+.detailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-md;
+}
+
+.badgeLarge {
+  font-size: $font-size-md;
+  padding: $spacing-xs $spacing-md;
+  border-radius: $radius-sm;
+  color: $color-primary;
+  background: rgba($color-primary, 0.1);
+  font-weight: $font-weight-medium;
+}
+
+.detailNo {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.detailRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-sm 0;
+}
+
+.detailLabel {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.detailValue {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.detailDesc {
+  margin-top: $spacing-md;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  line-height: $line-height-loose;
+}
+
+.resolutionBox {
+  margin-top: $spacing-md;
+  padding: $spacing-md;
+  background: rgba($color-primary, 0.05);
+  border-radius: $radius-md;
+}
+
+.resolutionTitle {
+  font-size: $font-size-sm;
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+  margin-bottom: $spacing-xs;
+}
+
+.resolutionText {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  line-height: $line-height-loose;
+}
+
+// 处理记录
+.replyItem {
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.replyHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-xs;
+}
+
+.replyStaff {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba($color-primary, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+.replyUser {
+  font-size: $font-size-xs;
+  color: #c77d00;
+  background: rgba(#f5a623, 0.14);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+.replyTime {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.replyContent {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  line-height: $line-height-loose;
+}
+
+// 确认按钮
+.confirmBtn {
+  height: 88rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  box-shadow: $shadow-card-hover;
+  margin-bottom: $spacing-md;
+  @include button-reset;
+}
+
+.resolvedNote {
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-md;
+}
+
+// 补充输入
+.replyBar {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.replyBar .input {
+  flex: 1;
+}
+
+.sendBtn {
+  flex-shrink: 0;
+  min-width: 120rpx;
+  height: 72rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.sendDisabled {
+  opacity: 0.4;
+}
+
+.empty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 64rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}

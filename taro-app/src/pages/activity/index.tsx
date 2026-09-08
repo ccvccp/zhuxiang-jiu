@@ -1,7 +1,6 @@
 /**
  * 活动中心 · 活动列表/报名/取消
- * 数据来源: 后端 /api/activity/*
- * 我的报名状态: 本地存储记录(后端暂无用户端报名查询接口)
+ * 数据来源: 后端 /api/activity/*(报名状态后端化, 跨设备同步)
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text } from '@tarojs/components';
@@ -9,7 +8,6 @@ import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import { PromotionAPI, ActivityAPI, ActivityVO } from '@/api/promotion';
-import { getMemberId } from '@/services/auth-service';
 
 // 状态筛选 tab
 const STATUS_TABS = [
@@ -40,18 +38,6 @@ const TYPE_ICON: Record<string, string> = {
   presale: '📅',
 };
 
-// 报名状态本地存储 key(按会员隔离, 登录后动态取)
-const regStorageKey = (): string => `activity_reg_${getMemberId() || 'guest'}`;
-
-const loadRegisteredIds = (): Set<string> => {
-  const list = Taro.getStorageSync(regStorageKey()) as string[] || [];
-  return new Set(list.filter(id => id && !id.startsWith('mock-')));
-};
-
-const saveRegisteredIds = (ids: Set<string>) => {
-  Taro.setStorageSync(regStorageKey(), Array.from(ids));
-};
-
 const formatTime = (t?: string): string => {
   if (!t) return '';
   return t.slice(0, 16).replace('T', ' ');
@@ -63,6 +49,17 @@ const ActivityPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState<string>(''); // 正在操作的 activityId
   const [registeredIds, setRegisteredIds] = useState<Set<string>>(new Set());
+
+  // 我的报名(后端化: GET /api/activity/my-registrations)
+  const loadRegisteredIds = async (): Promise<Set<string>> => {
+    try {
+      const regs = await ActivityAPI.myRegistrations();
+      return new Set(regs.map(r => String(r.activityId)));
+    } catch (e) {
+      // 未登录/查询失败时按无报名处理
+      return new Set();
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -76,8 +73,10 @@ const ActivityPage: React.FC = () => {
   };
 
   useEffect(() => {
-    setRegisteredIds(loadRegisteredIds());
-    loadData();
+    (async () => {
+      await loadData();
+      setRegisteredIds(await loadRegisteredIds());
+    })();
   }, []);
 
   // 按状态筛选
@@ -108,11 +107,8 @@ const ActivityPage: React.FC = () => {
     setSubmitting(activityId);
     try {
       await ActivityAPI.register(activityId);
-      const next = new Set(registeredIds);
-      next.add(activityId);
-      setRegisteredIds(next);
-      saveRegisteredIds(next);
       Taro.showToast({ title: '报名成功', icon: 'success' });
+      setRegisteredIds(await loadRegisteredIds());
       refreshCount(activityId);
     } catch (e) {
       console.warn('[activity] 报名失败:', e);
@@ -129,11 +125,8 @@ const ActivityPage: React.FC = () => {
     setSubmitting(activityId);
     try {
       await ActivityAPI.cancelRegister(activityId);
-      const next = new Set(registeredIds);
-      next.delete(activityId);
-      setRegisteredIds(next);
-      saveRegisteredIds(next);
       Taro.showToast({ title: '已取消报名', icon: 'success' });
+      setRegisteredIds(await loadRegisteredIds());
       refreshCount(activityId);
     } catch (e) {
       console.warn('[activity] 取消失败:', e);

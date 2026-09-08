@@ -117,6 +117,20 @@ class KnowledgeUpdateRequest(PydBaseModel):
 # 会话接口(6)
 # ============================================================
 
+@router.get("/api/chat/my-sessions", tags=["AI智能客服聊天模块"])
+async def my_sessions(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    limit: int = Query(50, ge=1, le=200, description="返回数量"),
+):
+    """我的会话列表(用户端, 按创建时间倒序)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _service.list_user_sessions(int(user_id), limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
 @router.post("/api/chat/sessions", tags=["AI智能客服聊天模块"])
 async def create_session(
     data: CreateSessionRequest,

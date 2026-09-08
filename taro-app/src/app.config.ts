@@ -23,7 +23,13 @@ export default defineAppConfig({
     'pages/address-edit/index',
     'pages/points/index',
     'pages/invoice/index',
-    'pages/flashsale/index'
+    'pages/flashsale/index',
+    'pages/groupbuy/index',
+    'pages/chat/index',
+    'pages/tickets/index',
+    'pages/messages/index',
+    'pages/recycle/index',
+    'pages/credit/index'
   ],
   window: {
     backgroundTextStyle: 'light',

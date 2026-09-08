@@ -1,0 +1,506 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// ============================================
+// 估价视图
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $color-primary, rgba($color-primary, 0.82));
+  border-radius: $radius-lg;
+  padding: $spacing-xl $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card-hover;
+}
+
+.heroTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroDesc {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.85);
+  line-height: $line-height-loose;
+}
+
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.selCount {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  font-weight: $font-weight-normal;
+}
+
+// 表单
+.pickerBox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  margin-bottom: $spacing-md;
+}
+
+.pickerLabel {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  flex-shrink: 0;
+}
+
+.pickerValue {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  margin-left: $spacing-md;
+  text-align: right;
+  @include text-ellipsis;
+}
+
+.formRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  margin-bottom: $spacing-md;
+}
+
+.formLabel {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  flex-shrink: 0;
+}
+
+.formLabel2 {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-sm;
+}
+
+.formInput {
+  flex: 1;
+  margin-left: $spacing-md;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  text-align: right;
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+}
+
+// 品质分级
+.typeGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.typeItem {
+  flex: 1 1 22%;
+  border: 1rpx solid rgba($color-primary, 0.2);
+  border-radius: $radius-md;
+  padding: $spacing-sm;
+  text-align: center;
+}
+
+.typeActive {
+  border-color: $color-primary;
+  background: rgba($color-primary, 0.06);
+}
+
+.typeLabel {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.typeDesc {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.submitBtn {
+  height: 88rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  box-shadow: $shadow-card-hover;
+  margin-top: $spacing-md;
+  @include button-reset;
+}
+
+// 估价结果
+.calcRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-sm 0;
+}
+
+.calcLabel {
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+}
+
+.calcValue {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+}
+
+.calcTotal {
+  font-size: $font-size-xl;
+  color: $color-primary;
+  font-weight: $font-weight-bold;
+}
+
+.calcSave {
+  font-size: $font-size-md;
+  color: #e64340;
+  font-weight: $font-weight-medium;
+}
+
+.suggestion {
+  margin-top: $spacing-sm;
+  background: rgba($color-primary, 0.05);
+  border-radius: $radius-sm;
+  padding: $spacing-md;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.goMineBtn {
+  margin-top: $spacing-md;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+}
+
+// ============================================
+// 我的回收视图
+// ============================================
+.valRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md;
+  border: 1rpx solid rgba($color-primary, 0.1);
+  border-radius: $radius-md;
+  margin-bottom: $spacing-sm;
+
+  &.valChecked {
+    border-color: $color-primary;
+    background: rgba($color-primary, 0.04);
+  }
+
+  &.valUsed {
+    opacity: 0.55;
+  }
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.checkBox {
+  width: 40rpx;
+  height: 40rpx;
+  border: 2rpx solid rgba($color-primary, 0.4);
+  border-radius: $radius-xs;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-sm;
+  color: $color-text-white;
+  flex-shrink: 0;
+  margin-right: $spacing-md;
+
+  &.checked {
+    background: $color-primary;
+    border-color: $color-primary;
+  }
+
+  &.disabled {
+    background: rgba($color-text-tertiary, 0.15);
+    border-color: rgba($color-text-tertiary, 0.3);
+  }
+}
+
+.valInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.valProduct {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.valMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.usedTag {
+  flex-shrink: 0;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  background: rgba($color-text-tertiary, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+// 申请列表
+.appRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.appLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.appType {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.appRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+  margin-left: $spacing-sm;
+}
+
+.badge {
+  font-size: $font-size-xs;
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+  font-weight: $font-weight-normal;
+
+  &.pending {
+    color: $color-text-tertiary;
+    background: rgba($color-text-tertiary, 0.1);
+  }
+
+  &.processing {
+    color: $color-primary;
+    background: rgba($color-primary, 0.1);
+  }
+
+  &.confirm {
+    color: #c77d00;
+    background: rgba(#f5a623, 0.14);
+  }
+
+  &.resolved {
+    color: #2e7d32;
+    background: rgba(#2e7d32, 0.1);
+  }
+
+  &.closed {
+    color: $color-text-tertiary;
+    background: rgba($color-text-tertiary, 0.08);
+  }
+}
+
+.execBtn {
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  background: $color-primary;
+  padding: $spacing-xs $spacing-md;
+  border-radius: $radius-button;
+  font-weight: $font-weight-medium;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 申请弹层
+// ============================================
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+}
+
+.panel {
+  width: 100%;
+  background: $color-bg-card;
+  border-radius: $radius-lg $radius-lg 0 0;
+  padding: $spacing-lg;
+  padding-bottom: calc(#{$spacing-lg} + env(safe-area-inset-bottom));
+}
+
+.panelTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  text-align: center;
+  margin-bottom: $spacing-md;
+}
+
+.typeRow {
+  display: flex;
+  align-items: flex-start;
+  padding: $spacing-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+  border-radius: $radius-md;
+  margin-bottom: $spacing-sm;
+}
+
+.typeRadio {
+  font-size: $font-size-lg;
+  color: $color-primary;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+  line-height: $line-height-loose;
+}
+
+.typeInfo {
+  flex: 1;
+}
+
+.typeName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.typeDesc2 {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.panelBtn {
+  margin-top: $spacing-md;
+  height: 84rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 底部切换栏
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  border-top: 1rpx solid rgba($color-primary, 0.08);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tabBarItem {
+  flex: 1;
+  height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  position: relative;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.tabBarActive {
+  color: $color-primary;
+  font-weight: $font-weight-semibold;
+
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 48rpx;
+    height: 6rpx;
+    border-radius: $radius-button;
+    background: $color-primary;
+  }
+}
+
+.empty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 64rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}

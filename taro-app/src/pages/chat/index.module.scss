@@ -1,0 +1,413 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+// 聊天窗口: 固定视口高度, 消息区内部滚动, 输入栏固定底部
+.chatPage {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// ============================================
+// 会话列表视图
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $color-primary, rgba($color-primary, 0.82));
+  border-radius: $radius-lg;
+  padding: $spacing-xl $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card-hover;
+}
+
+.heroTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroDesc {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.85);
+  line-height: $line-height-loose;
+}
+
+.newBtn {
+  height: 84rpx;
+  background: $color-bg-card;
+  border: 1rpx dashed rgba($color-primary, 0.5);
+  border-radius: $radius-md;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+  margin-bottom: $spacing-md;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.sessionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.sessionLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.sessionType {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.sessionMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.sessionRight {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+}
+
+.badge {
+  font-size: $font-size-xs;
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+  font-weight: $font-weight-normal;
+
+  &.ai {
+    color: $color-primary;
+    background: rgba($color-primary, 0.1);
+  }
+
+  &.human {
+    color: #c77d00;
+    background: rgba(#f5a623, 0.14);
+  }
+
+  &.ended {
+    color: $color-text-tertiary;
+    background: rgba($color-text-tertiary, 0.1);
+  }
+}
+
+.sessionStars {
+  font-size: $font-size-xs;
+}
+
+.arrow {
+  font-size: $font-size-lg;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 新建会话弹层
+// ============================================
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+}
+
+.panel {
+  width: 100%;
+  background: $color-bg-card;
+  border-radius: $radius-lg $radius-lg 0 0;
+  padding: $spacing-lg;
+  padding-bottom: calc(#{$spacing-lg} + env(safe-area-inset-bottom));
+}
+
+.panelTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  text-align: center;
+  margin-bottom: $spacing-md;
+}
+
+.typeGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-md;
+}
+
+.typeItem {
+  flex: 1 1 40%;
+  border: 1rpx solid rgba($color-primary, 0.2);
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  text-align: center;
+}
+
+.typeActive {
+  border-color: $color-primary;
+  background: rgba($color-primary, 0.06);
+}
+
+.typeLabel {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.typeDesc {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.complianceTip {
+  margin-top: $spacing-md;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  text-align: center;
+  line-height: $line-height-loose;
+}
+
+.panelBtn {
+  margin-top: $spacing-md;
+  height: 84rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 聊天窗口视图
+// ============================================
+.statusBar {
+  display: flex;
+  align-items: center;
+  gap: $spacing-lg;
+  padding: $spacing-sm $spacing-lg;
+  background: rgba($color-primary, 0.06);
+  border-bottom: 1rpx solid rgba($color-primary, 0.1);
+}
+
+.statusEnded {
+  background: rgba($color-text-tertiary, 0.08);
+}
+
+.statusText {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+}
+
+.statusEnded .statusText {
+  color: $color-text-tertiary;
+}
+
+.statusAction {
+  font-size: $font-size-sm;
+  color: $color-primary;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.msgScroll {
+  flex: 1;
+  height: 0;
+}
+
+.msgList {
+  padding: $spacing-lg;
+}
+
+.msgRow {
+  display: flex;
+  margin-bottom: $spacing-md;
+
+  &.msgRight {
+    justify-content: flex-end;
+  }
+
+  &.msgLeft {
+    justify-content: flex-start;
+  }
+}
+
+.msgBubbleWrap {
+  max-width: 78%;
+  display: flex;
+  flex-direction: column;
+}
+
+.msgSender {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-xs * 0.5;
+}
+
+.msgBubble {
+  padding: $spacing-md;
+  border-radius: $radius-lg;
+  font-size: $font-size-md;
+  line-height: $line-height-loose;
+  word-break: break-all;
+}
+
+.bubbleUser {
+  background: $color-primary;
+  color: $color-text-white;
+  border-top-right-radius: $radius-xs;
+}
+
+.bubbleOther {
+  background: $color-bg-card;
+  color: $color-text-primary;
+  border-top-left-radius: $radius-xs;
+  box-shadow: $shadow-card;
+}
+
+.bubbleSystem {
+  align-self: center;
+  background: rgba($color-text-tertiary, 0.1);
+  color: $color-text-tertiary;
+  font-size: $font-size-xs;
+  border-radius: $radius-sm;
+}
+
+// 评价条
+.rateBar {
+  padding: $spacing-sm $spacing-lg;
+  background: rgba(#f5a623, 0.08);
+  text-align: center;
+}
+
+.rateLink {
+  font-size: $font-size-sm;
+  color: #c77d00;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.rateDone {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 输入区
+// ============================================
+.inputBar {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-lg;
+  padding-bottom: calc(#{$spacing-md} + env(safe-area-inset-bottom));
+  background: $color-bg-card;
+  border-top: 1rpx solid rgba($color-primary, 0.08);
+}
+
+.input {
+  flex: 1;
+  height: 72rpx;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: 0 $spacing-md;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+}
+
+.sendBtn {
+  flex-shrink: 0;
+  min-width: 128rpx;
+  height: 72rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.sendDisabled {
+  opacity: 0.4;
+}
+
+.empty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}

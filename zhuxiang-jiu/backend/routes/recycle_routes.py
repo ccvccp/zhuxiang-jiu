@@ -1,11 +1,11 @@
-"""老酒兑换及回收模块路由(20 端点)
+"""老酒兑换及回收模块路由(21 端点)
 
 鉴权:
     - 用户端: X-Member-Id 头标识当前会员(估价/申请/查询)
     - 管理端: X-Role: admin 头(审核/状态流转/完成/库存/统计)
 
 端点分布:
-    - 老酒估价(2):     submit-valuation / get-valuation
+    - 老酒估价(3):     submit-valuation / get-valuation / my-valuations
     - 老酒申请(3):     submit-application / review-application / list-applications
     - 老酒兑换(2):     exchange-new-wine / complete-exchange
     - 老酒回收(1):     recycle-for-cash
@@ -187,6 +187,20 @@ async def get_valuation(val_id: int):
     try:
         result = await _service.get_valuation(val_id)
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/my-valuations", tags=["老酒兑换回收模块"])
+async def my_valuations(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    limit: int = Query(100, ge=1, le=200, description="查询条数"),
+):
+    """我的估价记录列表(用户端, 按时间倒序)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _service.list_valuations(user_id=int(user_id), limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)
 

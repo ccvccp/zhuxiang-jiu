@@ -19,15 +19,21 @@ import styles from './index.module.scss';
 interface NavBarProps {
   /** 导航栏标题 */
   title: string;
+  /** 自定义返回回调(如页内视图切换); 缺省走页面栈返回 */
+  onBack?: () => void;
 }
 
-const NavBar: React.FC<NavBarProps> = ({ title }) => {
+const NavBar: React.FC<NavBarProps> = ({ title, onBack }) => {
   // weapp 端: 原生导航栏自带返回按钮, 不渲染自定义导航
   if (process.env.TARO_ENV !== 'h5') {
     return null;
   }
 
   const handleBack = () => {
+    if (onBack) {
+      onBack();
+      return;
+    }
     const pages = Taro.getCurrentPages();
     if (pages.length > 1) {
       Taro.navigateBack();

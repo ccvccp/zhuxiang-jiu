@@ -249,6 +249,9 @@ class TicketRepository:
             if not data:
                 continue
             t = json.loads(data)
+            # 跳过 seq 计数键等非工单数据(incr 的值为 int)
+            if not isinstance(t, dict):
+                continue
             if status and t.get("status") != status:
                 continue
             if ticket_type and t.get("type") != ticket_type:

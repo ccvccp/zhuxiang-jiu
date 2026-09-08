@@ -8,7 +8,6 @@ import { PromotionAPI, ActivityVO, GroupBuyTier } from '@/api/promotion';
 import { MemberAPI } from '@/api/member';
 import { applyActiveTheme, getQuickGridIcon } from '@/services/theme-service';
 import {
-  SERVICE_PHONE,
   SIGN_IN_REWARD_POINTS,
   SIGN_IN_STORAGE_KEY,
   NOTICE_INTERVAL_MS,
@@ -47,11 +46,11 @@ const QUICK_ENTRIES = [
   { key: 'signin', icon: '✅', label: '每日签到' },
   { key: 'flash', icon: '⚡', label: '限时秒杀' },
   { key: 'groupbuy', icon: '🛒', label: '组团团购' },
+  { key: 'recycle', icon: '🍶', label: '老酒回收' },
   { key: 'recharge', icon: '💰', label: '余额赚钱' },
   { key: 'activity', icon: '🎁', label: '活动中心' },
   { key: 'promotion', icon: '🤝', label: '扫码赚钱' },
   { key: 'pocket', icon: '🤲', label: '顺手赚钱' },
-  { key: 'member', icon: '👑', label: '会员权益' },
   { key: 'orders', icon: '📦', label: '我的订单' },
   { key: 'service', icon: '🎧', label: '在线客服' },
 ];
@@ -161,7 +160,10 @@ const IndexPage: React.FC = () => {
         Taro.navigateTo({ url: '/pages/flashsale/index' });
         break;
       case 'groupbuy':
-        Taro.showToast({ title: `团购咨询客服: ${SERVICE_PHONE}`, icon: 'none' });
+        Taro.navigateTo({ url: '/pages/groupbuy/index' });
+        break;
+      case 'recycle':
+        Taro.navigateTo({ url: '/pages/recycle/index' });
         break;
       case 'recharge':
         Taro.navigateTo({ url: '/pages/wallet/index' });
@@ -182,7 +184,7 @@ const IndexPage: React.FC = () => {
         Taro.navigateTo({ url: '/pages/orders/index' });
         break;
       case 'service':
-        Taro.showToast({ title: `客服热线: ${SERVICE_PHONE}`, icon: 'none' });
+        Taro.navigateTo({ url: '/pages/chat/index' });
         break;
     }
   };

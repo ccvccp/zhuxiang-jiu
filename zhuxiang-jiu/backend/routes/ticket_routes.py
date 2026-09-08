@@ -1,7 +1,7 @@
-"""客服工单模块路由(11 端点)
+"""客服工单模块路由(14 端点)
 
 鉴权:
-    - 用户端(2): 创建工单/确认+满意度(X-Member-Id 头)
+    - 用户端(5): 创建工单/确认+满意度/我的工单列表/我的工单详情/用户补充(X-Member-Id 头)
     - 客服/管理端(9): 分配/回复/解决/关闭/列表/详情/统计/补偿方案/补偿执行
       (X-Role 头, 放行 admin 与 cs_staff, 对应权限码 ticket:view/ticket:reply)
 
@@ -14,6 +14,7 @@
     - 工单(4):   create / detail / list / stats
     - 流转(4):   assign / reply / resolve / close
     - 确认(1):   confirm(用户, 含满意度)
+    - 用户端(3): my-list / my-detail / my-reply(P3B 用户工单自助)
     - 补偿(2):   compensation-propose / compensation-execute(P1-9 三级补偿)
 """
 
@@ -103,8 +104,72 @@ class CloseTicketRequest(PydBaseModel):
 
 
 # ============================================================
-# 用户端接口(2)
+# 用户端接口(5): create / confirm + my-list / my-detail / my-reply
+# 注: my-* 静态路径必须先于 /{ticket_no} 动态路由声明
 # ============================================================
+
+@router.get("/api/ticket/my-list", tags=["客服工单模块"])
+async def my_ticket_list(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    status: str = Query(None, description="状态筛选 pending/processing/wait_confirm/resolved/closed"),
+    limit: int = Query(50, ge=1, le=200, description="查询条数"),
+):
+    """我的工单列表(用户端, 仅本人)"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        result = await _service.list_tickets(
+            status=status, user_id=member_id, limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/ticket/my/{ticket_no}", tags=["客服工单模块"])
+async def my_ticket_detail(
+    ticket_no: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """我的工单详情(含处理记录; 仅所有者)"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        result = await _service.get_ticket(ticket_no)
+        if result.get("userId") != member_id:
+            raise HTTPException(status_code=403, detail="仅工单所有者可查看")
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _handle(e)
+
+
+class MyReplyRequest(PydBaseModel):
+    content: str = Field(..., min_length=1, max_length=2000, description="补充内容")
+
+
+@router.post("/api/ticket/my/{ticket_no}/reply", tags=["客服工单模块"])
+async def my_ticket_reply(
+    ticket_no: str,
+    data: MyReplyRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """用户补充工单信息(仅所有者; 已关闭不可补充)"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        ticket = await _service.get_ticket(ticket_no)
+        if ticket.get("userId") != member_id:
+            raise HTTPException(status_code=403, detail="仅工单所有者可补充")
+        result = await _service.reply_ticket(
+            ticket_no=ticket_no,
+            replier_id=member_id,
+            replier_role="user",
+            content=data.content,
+        )
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _handle(e)
+
 
 @router.post("/api/ticket/create", tags=["客服工单模块"])
 async def create_ticket(

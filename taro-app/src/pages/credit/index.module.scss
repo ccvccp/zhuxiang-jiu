@@ -1,0 +1,416 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// ============================================
+// 额度总览卡
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $color-primary, rgba($color-primary, 0.78));
+  border-radius: $radius-lg;
+  padding: $spacing-xl $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card-hover;
+}
+
+.heroTop {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xl;
+  margin-bottom: $spacing-lg;
+}
+
+.heroLevel {
+  font-size: 56rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: $radius-md;
+  padding: $spacing-xs $spacing-md;
+}
+
+.heroInfo {
+  flex: 1;
+}
+
+.heroLabel {
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.75);
+}
+
+.heroScore {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroAvailable {
+  margin-bottom: $spacing-sm;
+}
+
+.heroAvailLabel {
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.75);
+}
+
+.heroAvailValue {
+  margin-top: $spacing-xs * 0.5;
+  font-size: 72rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+  line-height: 1.2;
+}
+
+.quotaBar {
+  height: 12rpx;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: $radius-button;
+  overflow: hidden;
+}
+
+.quotaFill {
+  height: 100%;
+  background: #f5a623;
+  border-radius: $radius-button;
+  transition: width 0.3s ease;
+}
+
+.quotaMeta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.85);
+}
+
+.gateTip {
+  margin-top: $spacing-md;
+  padding: $spacing-sm $spacing-md;
+  background: rgba(#f5a623, 0.2);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: #ffe3b0;
+  line-height: $line-height-loose;
+}
+
+.heroBtn {
+  margin-top: $spacing-md;
+  height: 80rpx;
+  background: $color-text-white;
+  color: $color-primary;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 卡片
+// ============================================
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+// ============================================
+// 先享后付订单
+// ============================================
+.orderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.orderLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.orderNo {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.orderMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.riskFlag {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: #c77d00;
+}
+
+.orderRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+  margin-left: $spacing-sm;
+}
+
+.badge {
+  font-size: $font-size-xs;
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+  font-weight: $font-weight-normal;
+
+  &.review {
+    color: #c77d00;
+    background: rgba(#f5a623, 0.14);
+  }
+
+  &.active {
+    color: $color-primary;
+    background: rgba($color-primary, 0.1);
+  }
+
+  &.repaid {
+    color: #2e7d32;
+    background: rgba(#2e7d32, 0.1);
+  }
+
+  &.rejected {
+    color: $color-text-tertiary;
+    background: rgba($color-text-tertiary, 0.08);
+  }
+
+  &.overdue {
+    color: #e64340;
+    background: rgba(#e64340, 0.1);
+  }
+}
+
+.repayBtn {
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  background: $color-primary;
+  padding: $spacing-xs $spacing-lg;
+  border-radius: $radius-button;
+  font-weight: $font-weight-medium;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 信用流水
+// ============================================
+.logRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.logLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.logType {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.logReason {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  @include text-ellipsis;
+}
+
+.logTime {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.logDelta {
+  flex-shrink: 0;
+  margin-left: $spacing-md;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+}
+
+.logPlus {
+  color: #2e7d32;
+}
+
+.logMinus {
+  color: #e64340;
+}
+
+// ============================================
+// 规则说明
+// ============================================
+.noteCard {
+  background: rgba($color-primary, 0.04);
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.noteTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-primary;
+  margin-bottom: $spacing-xs;
+}
+
+.noteLine {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+// ============================================
+// 下单弹层
+// ============================================
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+}
+
+.panel {
+  width: 100%;
+  background: $color-bg-card;
+  border-radius: $radius-lg $radius-lg 0 0;
+  padding: $spacing-lg;
+  padding-bottom: calc(#{$spacing-lg} + env(safe-area-inset-bottom));
+}
+
+.panelTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  text-align: center;
+  margin-bottom: $spacing-sm;
+}
+
+.panelQuota {
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-lg;
+}
+
+.amountRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-lg $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+}
+
+.amountSymbol {
+  font-size: 56rpx;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+  margin-right: $spacing-md;
+}
+
+.amountInput {
+  flex: 1;
+  height: 88rpx;
+  font-size: 56rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.panelNote {
+  margin-top: $spacing-md;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+  text-align: center;
+}
+
+.panelBtn {
+  margin-top: $spacing-lg;
+  height: 88rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+  font-weight: $font-weight-normal;
+}
+
+.empty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 64rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}

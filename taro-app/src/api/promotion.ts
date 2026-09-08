@@ -267,4 +267,27 @@ export const ActivityAPI = {
       data: { activityId: Number(activityId), userId: Number(getMemberId()) },
     });
   },
+
+  /** 我的报名列表(后端化: 仅有效报名, 含已结束活动) */
+  async myRegistrations(): Promise<Array<{
+    registrationId: number;
+    activityId: number;
+    activityName: string;
+    activityStatus: string;
+    activityType: string;
+    participateTime: string;
+    registrationStatus: string;
+  }>> {
+    const res = await request<any>({ url: '/api/activity/my-registrations' });
+    const list = res.data || [];
+    return (Array.isArray(list) ? list : []).map((r: any) => ({
+      registrationId: r.registrationId ?? r.registration_id ?? 0,
+      activityId: Number(r.activityId ?? r.activity_id ?? 0),
+      activityName: r.activityName || r.activity_name || '',
+      activityStatus: r.activityStatus || r.activity_status || '',
+      activityType: r.activityType || r.activity_type || '',
+      participateTime: r.participateTime || r.participate_time || '',
+      registrationStatus: r.registrationStatus || r.registration_status || 'registered',
+    }));
+  },
 };
