@@ -129,6 +129,27 @@
   }
 }
 
+// 相册选择(次级按钮, 绕过 capture 低清帧链路)
+.albumBtn {
+  margin-top: $spacing-sm;
+  width: 100%;
+  height: $button-height-md;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: $color-bg-page;
+  color: $color-primary;
+  font-size: $font-size-md;
+  border-radius: $radius-button;
+  white-space: nowrap;
+  transition: all $transition-base;
+
+  &:active {
+    opacity: 0.8;
+    transform: scale(0.98);
+  }
+}
+
 .cancelBtn {
   margin-top: $spacing-md;
   padding: $spacing-xs $spacing-lg;

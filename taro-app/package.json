@@ -34,7 +34,8 @@
     "test:checkout:app": "node test/test-checkout-app.js",
     "test:all": "node test/test-checkout-h5.js && node test/test-checkout-wechat.js && node test/test-checkout-alipay.js && node test/test-checkout-app.js",
     "test:navbar": "node test/test-navbar.js",
-    "test:trace-scan": "node test/test-trace-scan.js"
+    "test:trace-scan": "node test/test-trace-scan.js",
+    "test:decode-repro": "node test/decode-repro.js"
   },
   "browserslist": [
     "last 3 versions",
