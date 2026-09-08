@@ -1,0 +1,219 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// 账户概览卡
+.accountCard {
+  background: linear-gradient(135deg, $color-primary 0%, $color-primary-light 100%);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+  color: $color-text-white;
+  box-shadow: $shadow-card;
+}
+
+.accountTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pointsValue {
+  font-size: 72rpx;
+  font-weight: $font-weight-bold;
+  line-height: 1.1;
+}
+
+.pointsLabel {
+  font-size: $font-size-sm;
+  opacity: 0.85;
+  margin-top: $spacing-xs;
+}
+
+.signinBtn {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: $radius-button;
+  padding: $spacing-xs $spacing-xl;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+
+  &:active {
+    opacity: 0.8;
+  }
+}
+
+.signed {
+  opacity: 0.7;
+}
+
+.accountStats {
+  display: flex;
+  margin-top: $spacing-lg;
+  padding-top: $spacing-lg;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.2);
+}
+
+.statItem {
+  flex: 1;
+  text-align: center;
+}
+
+.statValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+}
+
+.statLabel {
+  font-size: $font-size-xs;
+  opacity: 0.8;
+  margin-top: $spacing-xs * 0.5;
+}
+
+.expiringTip {
+  margin-top: $spacing-md;
+  font-size: $font-size-xs;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: $radius-xs;
+  padding: $spacing-sm $spacing-md;
+}
+
+// 签到日历卡
+.calendarCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.calendarRow {
+  display: flex;
+  justify-content: space-between;
+}
+
+.calendarItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.calendarDot {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  background: $color-bg-page;
+  color: $color-text-tertiary;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+}
+
+.signedDot {
+  background: rgba($color-primary, 0.15);
+  color: $color-primary;
+}
+
+.bonusDot {
+  background: rgba(#f5a623, 0.18);
+}
+
+.calendarDate {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.today {
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+}
+
+.calendarRule {
+  margin-top: $spacing-md;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  text-align: center;
+}
+
+// 积分流水
+.logsCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+}
+
+.logItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.logLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.logDesc {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.logDate {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.logPoints {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  margin-left: $spacing-md;
+}
+
+.earn {
+  color: $color-primary;
+}
+
+.spend {
+  color: #e64340;
+}
+
+.empty {
+  padding: $spacing-xl 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+  white-space: pre-line;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}

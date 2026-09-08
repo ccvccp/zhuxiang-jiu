@@ -1,0 +1,255 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// Tab 栏
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  padding: $spacing-xs;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.tabItem {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-sm 0;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  border-radius: $radius-md;
+}
+
+.tabActive {
+  background: $color-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-medium;
+}
+
+// 新增抬头表单
+.formCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.typeRow {
+  display: flex;
+  gap: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.typeBtn {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-sm 0;
+  border: 1rpx solid rgba($color-primary, 0.25);
+  border-radius: $radius-md;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+}
+
+.typeActive {
+  border-color: $color-primary;
+  color: $color-primary;
+  background: rgba($color-primary, 0.06);
+  font-weight: $font-weight-medium;
+}
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+}
+
+.fieldLabel {
+  flex-shrink: 0;
+  width: 140rpx;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+}
+
+.fieldInput {
+  flex: 1;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+}
+
+.formActions {
+  display: flex;
+  gap: $spacing-md;
+  margin-top: $spacing-lg;
+}
+
+.cancelBtn,
+.confirmBtn {
+  flex: 1;
+  height: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: $radius-button;
+  font-size: $font-size-md;
+  @include button-reset;
+}
+
+.cancelBtn {
+  background: $color-bg-page;
+  color: $color-text-secondary;
+}
+
+.confirmBtn {
+  background: $color-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-medium;
+}
+
+// 抬头卡片
+.titleCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.titleTop {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.titleName {
+  flex: 1;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.defaultTag {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba($color-primary, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+.titleMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.titleActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: $spacing-lg;
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1rpx solid rgba($color-primary, 0.06);
+}
+
+.actionBtn {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.danger {
+  color: #e64340;
+}
+
+// 发票卡片
+.invoiceCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.invoiceTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.invoiceNo {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.invoiceStatus {
+  font-size: $font-size-xs;
+  color: $color-primary;
+}
+
+.invoiceMeta {
+  margin-top: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+}
+
+.invoiceDate {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 空态
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: $spacing-xl * 2 0;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+  white-space: pre-line;
+  text-align: center;
+}
+
+.emptyIcon {
+  font-size: 96rpx;
+  margin-bottom: $spacing-md;
+  opacity: 0.5;
+}
+
+.emptySub {
+  margin-top: $spacing-xs;
+  font-size: $font-size-sm;
+}
+
+.addBtn {
+  margin-top: $spacing-lg;
+  align-self: center;
+  font-size: $font-size-md;
+  color: $color-primary;
+  border: 1rpx solid $color-primary;
+  border-radius: $radius-button;
+  padding: $spacing-xs $spacing-xl;
+  @include button-reset;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}

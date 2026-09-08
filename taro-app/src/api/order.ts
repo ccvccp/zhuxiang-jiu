@@ -170,6 +170,15 @@ export const OrderAPI = {
     });
   },
 
+  /** 申请退货 COMPLETED → RETURNING(reason 必填) */
+  async return(orderId: string, reason: string): Promise<any> {
+    return await request<any>({
+      url: `/api/order/${orderId}/return`,
+      method: 'POST',
+      data: { reason },
+    });
+  },
+
   /** 状态列表 */
   async statuses(): Promise<any> {
     return await request<any>({ url: '/api/order/statuses' });

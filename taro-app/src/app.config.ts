@@ -20,7 +20,9 @@ export default defineAppConfig({
     'pages/agreement/index',
     'pages/product-reviews/index',
     'pages/address/index',
-    'pages/address-edit/index'
+    'pages/address-edit/index',
+    'pages/points/index',
+    'pages/invoice/index'
   ],
   window: {
     backgroundTextStyle: 'light',

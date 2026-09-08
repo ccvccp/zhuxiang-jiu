@@ -4,7 +4,75 @@
   min-height: 100vh;
   background: $color-bg-page;
   padding: $spacing-lg;
-  padding-bottom: 160rpx;
+  padding-bottom: 200rpx;
+}
+
+// ============================================
+// 物流信息卡
+// ============================================
+.carrierTag {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba($color-primary, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+  margin-left: $spacing-sm;
+  font-weight: $font-weight-normal;
+}
+
+.waybillNo {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-sm;
+}
+
+.trackList {
+  padding-left: $spacing-xs;
+}
+
+.trackItem {
+  position: relative;
+  padding: 0 0 $spacing-md $spacing-lg;
+}
+
+.trackDot {
+  position: absolute;
+  left: 0;
+  top: 8rpx;
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  background: #d9d9d9;
+}
+
+.trackDotActive {
+  background: $color-primary;
+}
+
+.trackStatus {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.trackDetail {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+}
+
+.trackTime {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.trackEmpty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
 }
 
 // ============================================

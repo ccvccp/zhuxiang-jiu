@@ -1,13 +1,15 @@
 /**
- * 订单详情 · 商品明细/价格明细/地址/时间线/操作(支付/取消/确认收货/评价)
- * 数据来源: 后端 /api/order/{id}
+ * 订单详情 · 商品明细/价格明细/地址/物流轨迹/时间线/操作(支付/取消/确认收货/评价/退货/开票)
+ * 数据来源: 后端 /api/order/{id} + /api/logistics/* + /api/invoice/*
  */
 import React, { useState, useEffect } from 'react';
-import { View, Text, Textarea } from '@tarojs/components';
+import { View, Text, Textarea, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import { OrderAPI, OrderVO, ORDER_STATUS_NAME } from '@/api/order';
+import { LogisticsAPI, WaybillVO, TrackVO } from '@/api/logistics';
+import { InvoiceAPI } from '@/api/invoice';
 
 // 状态 → 头部图标与提示
 const STATUS_META: Record<string, { icon: string; tip: string }> = {
@@ -33,12 +35,33 @@ const OrderDetailPage: React.FC = () => {
   const [rating, setRating] = useState(5);
   const [reviewContent, setReviewContent] = useState('');
   const [showReview, setShowReview] = useState(false);
+  // 物流(发货后展示)
+  const [waybill, setWaybill] = useState<WaybillVO | null>(null);
+  const [tracks, setTracks] = useState<TrackVO[]>([]);
+  // 退货理由
+  const [returnReason, setReturnReason] = useState('');
+
+  // 发货及之后状态才拉物流
+  const NEEDS_LOGISTICS = ['SHIPPED', 'RECEIVED', 'COMPLETED', 'RETURNING'];
 
   const loadOrder = async () => {
     try {
       const o = await OrderAPI.detailVO(orderId);
       setOrder(o);
       setShowReview(o.status === 'RECEIVED');
+      // 物流加载(独立, 失败静默)
+      if (NEEDS_LOGISTICS.includes(o.status)) {
+        LogisticsAPI.orderByOrder(orderId)
+          .then(wb => {
+            setWaybill(wb);
+            if (wb) {
+              LogisticsAPI.tracks(wb.waybillNo, 20)
+                .then(setTracks)
+                .catch(() => setTracks([]));
+            }
+          })
+          .catch(() => setWaybill(null));
+      }
     } catch (e) {
       console.warn('[order-detail] 加载失败:', e);
     } finally {
@@ -119,6 +142,57 @@ const OrderDetailPage: React.FC = () => {
       reload();
     } catch (e) {
       console.warn('[order-detail] 评价失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 申请退货(COMPLETED → RETURNING, reason 必填)
+  const handleReturn = async () => {
+    if (submitting) return;
+    const res = await Taro.showModal({
+      title: '申请退货',
+      content: '确认对该订单发起退货申请吗? 审核通过后退款原路退回',
+      editable: true,             // 小程序/Taro 支持可编辑弹窗(H5 降级为普通确认)
+      placeholderText: '请填写退货原因',
+    });
+    if (!res.confirm) return;
+    const reason = (res.content || '').trim() || '用户申请退货';
+    setSubmitting(true);
+    try {
+      await OrderAPI.return(orderId, reason);
+      Taro.showToast({ title: '退货申请已提交', icon: 'success' });
+      reload();
+    } catch (e) {
+      console.warn('[order-detail] 退货失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 申请开票(用默认抬头; 无抬头引导去发票页维护)
+  const handleInvoice = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const titles = await InvoiceAPI.titles();
+      const def = titles.find(t => t.isDefault) || titles[0];
+      if (!def) {
+        Taro.showModal({
+          title: '尚未添加发票抬头',
+          content: '请先在「发票管理」中添加抬头后再申请开票',
+          confirmText: '去添加',
+          success: (r) => {
+            if (r.confirm) Taro.navigateTo({ url: '/pages/invoice/index' });
+          },
+        });
+        return;
+      }
+      await InvoiceAPI.requestInvoice(orderId, def.id);
+      Taro.showToast({ title: '开票申请已提交', icon: 'success' });
+    } catch (e) {
+      console.warn('[order-detail] 开票失败:', e);
+      Taro.showToast({ title: '开票失败,请稍后再试', icon: 'none' });
     } finally {
       setSubmitting(false);
     }
@@ -229,6 +303,39 @@ const OrderDetailPage: React.FC = () => {
         </View>
       </View>
 
+      {/* 物流轨迹(发货后展示) */}
+      {NEEDS_LOGISTICS.includes(order.status) ? (
+        <View className={styles.card}>
+          <View className={styles.cardTitle}>
+            物流信息
+            {waybill ? <Text className={styles.carrierTag}>{waybill.carrier || '快递'}</Text> : null}
+          </View>
+          {waybill ? (
+            <>
+              <View className={styles.waybillNo}>运单号: {waybill.waybillNo}</View>
+              {tracks.length > 0 ? (
+                <View className={styles.trackList}>
+                  {tracks.slice(0, 5).map((t, idx) => (
+                    <View key={t.id ?? idx} className={styles.trackItem}>
+                      <View className={`${styles.trackDot} ${idx === 0 ? styles.trackDotActive : ''}`} />
+                      <View className={styles.trackBody}>
+                        <View className={styles.trackStatus}>{t.status}{t.location ? ` · ${t.location}` : ''}</View>
+                        {t.detail ? <View className={styles.trackDetail}>{t.detail}</View> : null}
+                        <View className={styles.trackTime}>{formatTime(t.happenedAt)}</View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View className={styles.trackEmpty}>暂无轨迹更新</View>
+              )}
+            </>
+          ) : (
+            <View className={styles.trackEmpty}>暂无物流单,商家备货中</View>
+          )}
+        </View>
+      ) : null}
+
       {/* 订单时间线(倒序, 最新在前) */}
       {order.timeline.length > 0 ? (
         <View className={styles.card}>
@@ -309,6 +416,18 @@ const OrderDetailPage: React.FC = () => {
               {submitting ? '处理中' : '确认收货'}
             </View>
           )}
+        </View>
+      ) : null}
+
+      {/* 完成态操作行(退货/开票) */}
+      {order.status === 'COMPLETED' ? (
+        <View className={styles.footer}>
+          <View className={styles.ghostBtn} onClick={handleReturn}>
+            {submitting ? '处理中' : '申请退货'}
+          </View>
+          <View className={styles.ghostBtn} onClick={handleInvoice}>
+            {submitting ? '处理中' : '申请开票'}
+          </View>
         </View>
       ) : null}
     </View>

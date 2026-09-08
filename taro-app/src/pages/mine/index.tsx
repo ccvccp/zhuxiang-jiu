@@ -293,11 +293,27 @@ const MinePage: React.FC = () => {
         {/* 个人信息管理 */}
         <View className={styles.section}>
           <View className={styles.sectionTitle}>个人信息管理</View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/points/index' })}>
+            <View className={styles.adminEntryIcon}>✨</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>我的积分</View>
+              <View className={styles.adminEntryDesc}>签到日历 · 积分流水 · 过期提醒</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
           <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/address/index' })}>
             <View className={styles.adminEntryIcon}>📍</View>
             <View className={styles.adminEntryInfo}>
               <View className={styles.adminEntryName}>收货地址</View>
               <View className={styles.adminEntryDesc}>地址簿管理 · 默认地址 · 新增/编辑</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/invoice/index' })}>
+            <View className={styles.adminEntryIcon}>🧾</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>发票管理</View>
+              <View className={styles.adminEntryDesc}>发票抬头 · 无感开票 · 红冲申诉</View>
             </View>
             <View className={styles.adminEntryArrow}>›</View>
           </View>

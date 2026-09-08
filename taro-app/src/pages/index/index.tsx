@@ -6,7 +6,6 @@ import CheckoutService from '@/services/checkout-service';
 import { ProductAPI, ProductVO } from '@/api/product';
 import { PromotionAPI, ActivityVO, GroupBuyTier } from '@/api/promotion';
 import { MemberAPI } from '@/api/member';
-import { isLoggedIn } from '@/services/auth-service';
 import { applyActiveTheme, getQuickGridIcon } from '@/services/theme-service';
 import {
   SERVICE_PHONE,
@@ -14,6 +13,8 @@ import {
   SIGN_IN_STORAGE_KEY,
   NOTICE_INTERVAL_MS,
 } from '@/config';
+import { PointsAPI } from '@/api/points';
+import { getMemberId, isLoggedIn, requireLogin } from '@/services/auth-service';
 
 // 公告轮播文案(API 无公告接口,降级 mock)
 const MOCK_NOTICES = [
@@ -71,13 +72,33 @@ const IndexPage: React.FC = () => {
   const loadMemberData = async () => {
     if (!isLoggedIn()) {
       setPoints(0);
+      setSignedInToday(false);
       return;
     }
+    const memberId = Number(getMemberId());
     try {
-      const member = await MemberAPI.profile();
+      const [member, signinRecords] = await Promise.all([
+        MemberAPI.profile(),
+        // 签到今日状态以后端记录为准(本地存储仅离线兜底)
+        PointsAPI.signinRecords(memberId, 7).catch(() => null),
+      ]);
       setPoints(member.points || 0);
+      const today = new Date().toISOString().slice(0, 10);
+      const signedToday = (signinRecords || []).some(r => r.signDate === today);
+      if (signedToday) {
+        setSignedInToday(true);
+        Taro.setStorageSync(SIGN_IN_STORAGE_KEY, today);
+      } else {
+        // 后端记录未签 → 以本地记录兜底(后端不可达时不误判)
+        const lastSign = Taro.getStorageSync(SIGN_IN_STORAGE_KEY) as string;
+        setSignedInToday(lastSign === today);
+      }
     } catch (e) {
       console.warn('[index] 会员信息加载失败:', e);
+      // 会员态接口失败时本地兜底
+      const today = new Date().toISOString().slice(0, 10);
+      const lastSign = Taro.getStorageSync(SIGN_IN_STORAGE_KEY) as string;
+      setSignedInToday(lastSign === today);
     }
   };
 
@@ -104,10 +125,7 @@ const IndexPage: React.FC = () => {
       setTiers(groupTiers.tiers);
       setInitialized(true);
 
-      // 签到状态(本地存储)
-      const today = new Date().toISOString().slice(0, 10);
-      const lastSign = Taro.getStorageSync(SIGN_IN_STORAGE_KEY) as string;
-      if (lastSign === today) setSignedInToday(true);
+      // 签到今日状态由 loadMemberData(后端记录优先)接管
 
       // 主题图标覆盖: 主题拉取完成后强制刷新金刚区图标
       applyActiveTheme().then(() => setThemeTick(t => t + 1));
@@ -165,17 +183,44 @@ const IndexPage: React.FC = () => {
     }
   };
 
-  // 签到: 奖励积分(本地存储记录)
-  const handleSignIn = () => {
+  // 签到: 后端每日签到(连续签到+宝箱奖励+幂等防重); 失败时本地降级
+  const handleSignIn = async () => {
     if (signedInToday) {
       Taro.showToast({ title: '今日已签到', icon: 'none' });
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
-    Taro.setStorageSync(SIGN_IN_STORAGE_KEY, today);
-    setSignedInToday(true);
-    setPoints(p => p + SIGN_IN_REWARD_POINTS);
-    Taro.showToast({ title: `签到成功 +${SIGN_IN_REWARD_POINTS} 积分`, icon: 'success' });
+    if (!requireLogin()) return;
+    try {
+      const result = await PointsAPI.signin(Number(getMemberId()));
+      const today = new Date().toISOString().slice(0, 10);
+      Taro.setStorageSync(SIGN_IN_STORAGE_KEY, today);
+      setSignedInToday(true);
+      // 刷新积分余额(与后端账户对齐)
+      PointsAPI.account(Number(getMemberId()))
+        .then(acc => setPoints(acc.totalPoints))
+        .catch(() => setPoints(p => p + result.pointsEarned));
+      const bonusTip = result.isBonus ? ` · 宝箱日+${result.bonusPoints}` : '';
+      Taro.showToast({
+        title: `签到成功 +${result.pointsEarned} 积分${bonusTip}`,
+        icon: 'success',
+      });
+    } catch (e: any) {
+      // 后端幂等拒绝(今日已签) → 同步本地态
+      if (String(e?.message || e?.detail || '').includes('已签到')) {
+        const today = new Date().toISOString().slice(0, 10);
+        Taro.setStorageSync(SIGN_IN_STORAGE_KEY, today);
+        setSignedInToday(true);
+        Taro.showToast({ title: '今日已签到', icon: 'none' });
+        return;
+      }
+      console.warn('[index] 签到后端失败, 本地降级:', e);
+      // 降级: 本地记录 + 固定积分(离线兜底)
+      const today = new Date().toISOString().slice(0, 10);
+      Taro.setStorageSync(SIGN_IN_STORAGE_KEY, today);
+      setSignedInToday(true);
+      setPoints(p => p + SIGN_IN_REWARD_POINTS);
+      Taro.showToast({ title: `签到成功 +${SIGN_IN_REWARD_POINTS} 积分`, icon: 'success' });
+    }
   };
 
   // 跳转商品列表
@@ -229,7 +274,9 @@ const IndexPage: React.FC = () => {
             <View className={styles.signinDesc}>
               {signedInToday ? '今日已签到,明天再来' : '签到领积分 · 兑好礼'}
             </View>
-            <View className={styles.signinPoints}>我的积分: {points}</View>
+            <View className={styles.signinPoints} onClick={(e) => { e.stopPropagation(); Taro.navigateTo({ url: '/pages/points/index' }); }}>
+              我的积分: {points} ›
+            </View>
           </View>
           <View
             className={`${styles.signinBtn} ${signedInToday ? styles.signed : ''}`}
