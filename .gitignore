@@ -140,3 +140,6 @@ zhuxiang-jiu/backend/media/
 
 # zxjiu.com 部署包(package-zxjiu.ps1 生成的构建产物)
 taro-app/zxjiu-deploy.tar.gz
+
+# 部署打包临时 staging 目录(verify:deploy 预演等 Docker 构建残留)
+deploy-tmp/
