@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Button, ScrollView } from '@tarojs/components';
-import Taro from '@tarojs/taro';
+import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { MemberAPI } from '@/api/member';
@@ -31,6 +31,12 @@ const MinePage: React.FC = () => {
       },
     });
   };
+
+  // 页面每次显示时刷新(登录页 navigateBack 返回后同步已登录态,
+  // 无需手动刷新页面; refreshKey 兼容既有登出/清数据刷新路径)
+  useDidShow(() => {
+    setRefreshKey(k => k + 1);
+  });
 
   useEffect(() => {
     (async () => {

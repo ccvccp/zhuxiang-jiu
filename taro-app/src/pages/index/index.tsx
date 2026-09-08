@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Image } from '@tarojs/components';
-import Taro from '@tarojs/taro';
+import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { ProductAPI, ProductVO } from '@/api/product';
 import { PromotionAPI, ActivityVO, GroupBuyTier } from '@/api/promotion';
 import { MemberAPI } from '@/api/member';
+import { isLoggedIn } from '@/services/auth-service';
 import { applyActiveTheme, getQuickGridIcon } from '@/services/theme-service';
 import {
   SERVICE_PHONE,
@@ -63,6 +64,27 @@ const IndexPage: React.FC = () => {
   const [signedInToday, setSignedInToday] = useState(false);
   // 主题图标覆盖就绪标记(拉取到主题后触发重渲染)
   const [, setThemeTick] = useState(0);
+  // 页面级初始化只跑一次(商品/活动等公开数据)
+  const [initialized, setInitialized] = useState(false);
+
+  // 会员数据加载(登录态才拉——游客跳过, 避免 401 强制跳登录)
+  const loadMemberData = async () => {
+    if (!isLoggedIn()) {
+      setPoints(0);
+      return;
+    }
+    try {
+      const member = await MemberAPI.profile();
+      setPoints(member.points || 0);
+    } catch (e) {
+      console.warn('[index] 会员信息加载失败:', e);
+    }
+  };
+
+  // 页面每次显示时刷新会员数据(登录返回/切 tab 回来积分即时同步)
+  useDidShow(() => {
+    loadMemberData();
+  });
 
   useEffect(() => {
     (async () => {
@@ -71,17 +93,16 @@ const IndexPage: React.FC = () => {
       const db = CheckoutService.getMockDB();
       setProducts(db.products || []);
 
-      // 并行加载: 热销推荐 / 活动 / 团购阶梯 / 会员积分
-      const [hot, acts, groupTiers, member] = await Promise.all([
+      // 并行加载: 热销推荐 / 活动 / 团购阶梯(均公开接口)
+      const [hot, acts, groupTiers] = await Promise.all([
         ProductAPI.hot(4).catch(() => [] as ProductVO[]),
         PromotionAPI.activities({ limit: 3 }).catch(() => MOCK_ACTIVITIES),
         PromotionAPI.groupBuyTiers().catch(() => ({ tiers: [], rules: null })),
-        MemberAPI.profile().catch(() => null),
       ]);
       setHotProducts(hot);
       setActivities(acts.length > 0 ? acts : MOCK_ACTIVITIES);
       setTiers(groupTiers.tiers);
-      if (member) setPoints(member.points || 0);
+      setInitialized(true);
 
       // 签到状态(本地存储)
       const today = new Date().toISOString().slice(0, 10);
@@ -98,6 +119,11 @@ const IndexPage: React.FC = () => {
     }, NOTICE_INTERVAL_MS);
     return () => clearInterval(timer);
   }, []);
+
+  // 初始化完成后加载一次会员数据(与 useDidShow 首次触发互补)
+  useEffect(() => {
+    if (initialized) loadMemberData();
+  }, [initialized]);
 
   // 跳转商品详情
   const handleBuy = (product: { id: string }) => {
