@@ -7,13 +7,29 @@
 // ============================================================
 // 后端地址
 // ============================================================
-// 真机预览: 用电脑局域网 IP(手机与电脑需连同一 WiFi)
-// H5 调试: 可改为 http://127.0.0.1:8000
-// 换环境后请同步检查后端 FastAPI 是否启动
+// 生产域名(zxjiu.com): DNS 解析 → 服务器, nginx 同源部署
+//   (H5 静态产物 + /api 反代后端:8000), H5/weapp 统一走 https://zxjiu.com
+// 本地调试: 局域网 IP(手机与电脑连同一 WiFi), H5 端按页面域名自动判定,
+//   换环境无需改码重新构建
 const LAN_HOST = '192.168.0.107';
 const API_PORT = '8000';
 
-export const API_BASE = `http://${LAN_HOST}:${API_PORT}`;
+/** 生产域名(DNS 解析指向服务器, nginx 同源反代 /api) */
+export const PROD_DOMAIN = 'zxjiu.com';
+
+/** 是否生产域名主机(含 www 等子域) */
+const isProdHost = (host: string) =>
+  host === PROD_DOMAIN || host.endsWith(`.${PROD_DOMAIN}`);
+
+// weapp 无 window, 构建产物面向生产域名(小程序合法域名要求 https);
+// H5 按当前页面域名判定——局域网/localhost 调试走本地后端
+const onProd = process.env.TARO_ENV === 'h5'
+  ? (typeof window !== 'undefined' && isProdHost(window.location.hostname))
+  : true;
+
+export const API_BASE = onProd
+  ? `https://${PROD_DOMAIN}`
+  : `http://${LAN_HOST}:${API_PORT}`;
 
 // ============================================================
 // 会员身份(测试用, 接入真实登录后改为动态获取)
