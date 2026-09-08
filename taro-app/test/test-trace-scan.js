@@ -120,6 +120,9 @@ const MOCKS = {
   '@/components/NavBar': {
     __esModule: true, default: () => null,
   },
+  '@/components/ScanCode': {
+    __esModule: true, default: () => null,
+  },
   '@/api/traceProd': {
     __esModule: true, TraceProdAPI, PublicTraceVO: undefined,
   },
@@ -198,19 +201,17 @@ const record = (name, ok, detail = '') => {
   console.log('溯源验真页扫码查询 · 单元测试');
   console.log('='.repeat(60));
 
-  // ---------- [1] H5 扫码降级 ----------
+  // ---------- [1] H5 扫码打开扫码组件(替代旧 toast 降级) ----------
   reset();
   process.env.TARO_ENV = 'h5';
   let el = renderPage();
   let scanBtn = findByClass(el, 'ghostBtn-cls')[0];
   scanBtn.props.onClick();
-  record('H5 扫码降级 toast(引导手动输入)',
-    toasts.length === 1
-    && toasts[0] === '当前环境不支持扫码, 请手动输入批次号或瓶身码',
-    `toasts=${JSON.stringify(toasts)}`);
-  record('H5 降级不调用 scanCode',
+  record('H5 扫码打开扫码组件(scanVisible 态)',
+    stateSlots[3] === true, `slot3=${JSON.stringify(stateSlots[3])}`);
+  record('H5 扫码不调用原生 scanCode',
     scanCalls.length === 0);
-  record('H5 降级零 API 调用',
+  record('H5 扫码零 API 调用',
     apiCalls.publicTrace.length === 0
     && apiCalls.publicTraceByCode.length === 0);
 

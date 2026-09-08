@@ -8,6 +8,7 @@ import { View, Text, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
+import ScanCode from '@/components/ScanCode';
 import { TraceProdAPI, PublicTraceVO } from '@/api/traceProd';
 
 // 7 工段静态元数据(与后端种子一致, 公开页免登录展示进度条)
@@ -46,6 +47,8 @@ const TraceViewPage: React.FC = () => {
   const [batchNo, setBatchNo] = useState('');
   const [result, setResult] = useState<PublicTraceVO | null>(null);
   const [loading, setLoading] = useState(false);
+  // H5 扫码组件(实时扫码/拍照识别双模式)
+  const [scanVisible, setScanVisible] = useState(false);
 
   const doQuery = async (no: string) => {
     const target = no.trim();
@@ -69,30 +72,32 @@ const TraceViewPage: React.FC = () => {
   };
 
   // 扫瓶码/批次码 → 溯源查询
+  // H5 端打开扫码组件(HTTPS 实时扫码/HTTP 拍照识别双模式);
+  // weapp 端走微信原生 Taro.scanCode
   const handleScan = () => {
-    // H5 端(手机浏览器)无微信原生扫码能力——降级提示+聚焦输入框
     if (process.env.TARO_ENV === 'h5') {
-      Taro.showToast({
-        title: '当前环境不支持扫码, 请手动输入批次号或瓶身码',
-        icon: 'none', duration: 2500,
-      });
+      setScanVisible(true);
       return;
     }
     Taro.scanCode({
       success: (res) => {
-        const code = (res.result || '').trim();
-        if (code.startsWith('ZXBJ-TRACE')) {
-          Taro.showToast({ title: '这是工段打卡码, 请扫瓶身溯源码', icon: 'none' });
-          return;
-        }
-        setBatchNo(code);
-        doQuery(code);
+        handleScanResult((res.result || '').trim());
       },
       fail: (err) => {
         console.error('[trace-view] scanCode failed:', err);
         Taro.showToast({ title: '扫码取消或失败, 请手动输入', icon: 'none' });
       },
     });
+  };
+
+  // 扫码结果统一处理(工段打卡码拒扫; 其余回填+查询)
+  const handleScanResult = (code: string) => {
+    if (code.startsWith('ZXBJ-TRACE')) {
+      Taro.showToast({ title: '这是工段打卡码, 请扫瓶身溯源码', icon: 'none' });
+      return;
+    }
+    setBatchNo(code);
+    doQuery(code);
   };
 
   const healthScore = result?.health.score ?? 0;
@@ -274,6 +279,17 @@ const TraceViewPage: React.FC = () => {
           </View>
         </>
       )}
+
+      {/* H5 扫码(实时/拍照双模式, weapp 端组件返回 null) */}
+      <ScanCode
+        visible={scanVisible}
+        onClose={() => setScanVisible(false)}
+        onResult={(code) => {
+          setScanVisible(false);
+          handleScanResult(code);
+        }}
+        hint="将瓶身码/批次码二维码置于取景框内"
+      />
     </View>
   );
 };
