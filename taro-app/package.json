@@ -36,7 +36,8 @@
     "test:navbar": "node test/test-navbar.js",
     "test:trace-scan": "node test/test-trace-scan.js",
     "test:decode-repro": "node test/decode-repro.js",
-    "test:domain-config": "node test/test-domain-config.js"
+    "test:domain-config": "node test/test-domain-config.js",
+    "package:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-zxjiu.ps1"
   },
   "browserslist": [
     "last 3 versions",

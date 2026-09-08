@@ -137,3 +137,6 @@ zhuxiang-jiu/backend/coverage*.json
 #  AI Hub 媒体文件(35号 P3: 本地测试上传产物, 容器内走 hub-media 卷)
 # ============================================================
 zhuxiang-jiu/backend/media/
+
+# zxjiu.com 部署包(package-zxjiu.ps1 生成的构建产物)
+taro-app/zxjiu-deploy.tar.gz
