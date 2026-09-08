@@ -29,13 +29,21 @@ sudo test -f "${WEB_ROOT}/dist/index.html" || {
 echo "    产物就位: $(sudo du -sh ${WEB_ROOT}/dist | cut -f1)"
 
 echo "==> [2/4] 安装 nginx 站点配置"
-if [ -d /etc/nginx/sites-available ]; then
-  # Debian/Ubuntu 标准布局
-  sudo install -m 644 "${WEB_ROOT}/${NGINX_CONF_SRC}" /etc/nginx/sites-available/zxjiu.conf
-  sudo ln -sf /etc/nginx/sites-available/zxjiu.conf /etc/nginx/sites-enabled/zxjiu.conf
+# 幂等保护: 服务器现配置若已被 certbot 改造(含 443 块), 覆盖会灭掉 HTTPS——
+# 此时跳过配置覆盖, 仅更新产物(dist); 首次部署(无配置)才安装 HTTP 模板
+CONF_PATH="/etc/nginx/conf.d/zxjiu.conf"
+[ -d /etc/nginx/sites-available ] && CONF_PATH="/etc/nginx/sites-available/zxjiu.conf"
+if [ -f "${CONF_PATH}" ] && grep -q "managed by Certbot" "${CONF_PATH}"; then
+  echo "    检测到 certbot 已管理的 HTTPS 配置, 跳过覆盖(保留 443/证书)"
 else
-  # RHEL/CentOS 布局(单一 conf.d)
-  sudo install -m 644 "${WEB_ROOT}/${NGINX_CONF_SRC}" /etc/nginx/conf.d/zxjiu.conf
+  if [ -d /etc/nginx/sites-available ]; then
+    # Debian/Ubuntu 标准布局
+    sudo install -m 644 "${WEB_ROOT}/${NGINX_CONF_SRC}" /etc/nginx/sites-available/zxjiu.conf
+    sudo ln -sf /etc/nginx/sites-available/zxjiu.conf /etc/nginx/sites-enabled/zxjiu.conf
+  else
+    # RHEL/CentOS 布局(单一 conf.d)
+    sudo install -m 644 "${WEB_ROOT}/${NGINX_CONF_SRC}" /etc/nginx/conf.d/zxjiu.conf
+  fi
 fi
 
 echo "==> [3/4] nginx 语法检查并重载"
