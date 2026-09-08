@@ -168,6 +168,22 @@ async def list_registrations(
         _handle(e)
 
 
+@router.get("/api/activity/my-registrations", tags=["活动管理模块"])
+async def my_registrations(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """我的报名列表(用户端: 含已结束活动, 仅有效报名)
+
+    注: 必须注册在 /{activity_id} 之前, 否则会被路径参数吞掉
+    """
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _service.list_my_registrations(user_id)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/activity/{activity_id}", tags=["活动管理模块"])
 async def get_activity(
     activity_id: int,

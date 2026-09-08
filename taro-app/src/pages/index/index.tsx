@@ -45,6 +45,7 @@ const MOCK_ACTIVITIES: ActivityVO[] = [
 // 功能金刚区配置
 const QUICK_ENTRIES = [
   { key: 'signin', icon: '✅', label: '每日签到' },
+  { key: 'flash', icon: '⚡', label: '限时秒杀' },
   { key: 'groupbuy', icon: '🛒', label: '组团团购' },
   { key: 'recharge', icon: '💰', label: '余额赚钱' },
   { key: 'activity', icon: '🎁', label: '活动中心' },
@@ -155,6 +156,9 @@ const IndexPage: React.FC = () => {
     switch (key) {
       case 'signin':
         handleSignIn();
+        break;
+      case 'flash':
+        Taro.navigateTo({ url: '/pages/flashsale/index' });
         break;
       case 'groupbuy':
         Taro.showToast({ title: `团购咨询客服: ${SERVICE_PHONE}`, icon: 'none' });

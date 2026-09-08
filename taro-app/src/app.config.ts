@@ -22,7 +22,8 @@ export default defineAppConfig({
     'pages/address/index',
     'pages/address-edit/index',
     'pages/points/index',
-    'pages/invoice/index'
+    'pages/invoice/index',
+    'pages/flashsale/index'
   ],
   window: {
     backgroundTextStyle: 'light',

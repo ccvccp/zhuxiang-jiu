@@ -244,6 +244,30 @@ class ActivityService:
             reg["updatedAt"] = datetime.utcnow().isoformat()
             return reg
 
+    async def list_my_registrations(self, user_id: int) -> list[dict]:
+        """查询用户全部报名记录(用户端, 含已结束活动)
+
+        实现说明: 遍历全量活动逐条查报名(活动量级小, 双存储模式
+        均天然支持 get_registration, 无需新增索引/迁移)。
+        仅返回有效报名(REGISTERED), 取消记录不返回。
+        """
+        activities = await self.repo.list_admin_activities(limit=500)
+        results = []
+        for act in activities:
+            reg = await self.repo.get_registration(act["id"], user_id)
+            if not reg or reg.get("status") != REG_STATUS_REGISTERED:
+                continue
+            results.append({
+                "registrationId": reg.get("id"),
+                "activityId": act["id"],
+                "activityName": act.get("name", ""),
+                "activityStatus": act.get("status", ""),
+                "activityType": act.get("type", ""),
+                "participateTime": reg.get("participateTime", ""),
+                "registrationStatus": reg.get("status", REG_STATUS_REGISTERED),
+            })
+        return results
+
     # ============================================================
     # 6. 活动状态流转
     # ============================================================

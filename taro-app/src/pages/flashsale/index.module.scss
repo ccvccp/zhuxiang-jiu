@@ -1,0 +1,309 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #2b1d12 0%, $color-bg-page 45%);
+  display: flex;
+  flex-direction: column;
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// 场次横滑条
+.sessionBar {
+  white-space: nowrap;
+  margin-bottom: $spacing-md;
+}
+
+.sessionTab {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-lg;
+  margin-right: $spacing-sm;
+  min-width: 200rpx;
+  box-shadow: $shadow-card;
+}
+
+.sessionTabActive {
+  outline: 3rpx solid #f5a623;
+}
+
+.sessionTabName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.sessionTabPhase {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: #f5a623;
+}
+
+// 场次卡
+.sessionCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.sessionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-md;
+}
+
+.sessionName {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.phaseBadge {
+  font-size: $font-size-xs;
+  padding: 4rpx $spacing-md;
+  border-radius: $radius-round;
+  font-weight: $font-weight-medium;
+  background: rgba($color-primary, 0.1);
+  color: $color-primary;
+}
+
+.phase_inProgress {
+  background: rgba(#e64340, 0.1);
+  color: #e64340;
+}
+
+.phase_upcoming {
+  background: rgba(#f5a623, 0.14);
+  color: #c77d00;
+}
+
+// 秒杀商品卡
+.itemCard {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+}
+
+.itemIcon {
+  width: 128rpx;
+  height: 128rpx;
+  border-radius: $radius-md;
+  background: linear-gradient(135deg, #fde8d8 0%, #f8d8b8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 64rpx;
+  margin-right: $spacing-md;
+  flex-shrink: 0;
+}
+
+.itemBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.itemName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.itemPriceRow {
+  display: flex;
+  align-items: baseline;
+  gap: $spacing-sm;
+  margin-top: $spacing-xs;
+}
+
+.flashPrice {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: #e64340;
+}
+
+.originalPrice {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  text-decoration: line-through;
+}
+
+.stockRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-top: $spacing-xs;
+}
+
+.progressBar {
+  flex: 1;
+  height: 12rpx;
+  background: $color-bg-page;
+  border-radius: $radius-round;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #f5a623, #e64340);
+  border-radius: $radius-round;
+}
+
+.stockText {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  flex-shrink: 0;
+}
+
+.limitText {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.buyBtn {
+  flex-shrink: 0;
+  margin-left: $spacing-md;
+  background: linear-gradient(135deg, #e64340, #f5a623);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  padding: 0 $spacing-lg;
+  height: $button-height-sm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+}
+
+.buyBtnDisabled {
+  background: #d9d9d9;
+  color: $color-text-white;
+}
+
+.itemEmpty {
+  padding: $spacing-xl 0;
+  text-align: center;
+  color: $color-text-tertiary;
+  font-size: $font-size-md;
+}
+
+// 我的秒杀订单
+.ordersCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.orderItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.orderLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.orderName {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.orderMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.orderNoText {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.orderActions {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  flex-shrink: 0;
+}
+
+.orderCancel {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.orderPay {
+  font-size: $font-size-sm;
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+}
+
+.orderStatus {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  flex-shrink: 0;
+}
+
+.orderEmpty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+// 空态
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: $spacing-xl * 2 0;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 96rpx;
+  margin-bottom: $spacing-md;
+  opacity: 0.5;
+}
+
+.emptySub {
+  margin-top: $spacing-xs;
+  font-size: $font-size-sm;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}
