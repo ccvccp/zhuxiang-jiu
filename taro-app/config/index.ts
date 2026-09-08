@@ -1,4 +1,5 @@
 import { defineConfig, type UserConfigExport } from '@tarojs/cli';
+import path from 'path';
 import TsconfigPathsPlugin from 'tsconfig-paths-webpack-plugin';
 import devConfig from './dev';
 import prodConfig from './prod';
@@ -88,6 +89,28 @@ export default defineConfig<'webpack5'>(async (merge, { command, mode }) => {
       },
       webpackChain(chain) {
         chain.resolve.plugin('tsconfig-paths').use(TsconfigPathsPlugin);
+        // 公共依赖抽离: Taro 默认 chunks:'initial' 不覆盖异步页面 chunk,
+        // @tarojs/components(含 swiper)会在每个懒加载页面重复打包(总产物 5.9MB);
+        // 改为 'all' 后共享模块提取为单份公共 chunk, 页面 chunk 仅含自身代码
+        chain.optimization.splitChunks({
+          chunks: 'all',
+          minSize: 0,
+          cacheGroups: {
+            default: false,
+            defaultVendors: false,
+            common: { name: 'common', minChunks: 2, priority: 1 },
+            vendors: { name: 'vendors', minChunks: 2, test: /[\\/]node_modules[\\/]/, priority: 10 },
+            taro: { name: 'taro', test: /@tarojs[/\\/]/, priority: 40 },
+          },
+        });
+        // 项目未使用 Taro <Video> 组件(ScanCode 的 video 是原生 HTML 元素),
+        // 用桩模块替换 hls.js(Video 组件的动态依赖, 独占 610KB chunk)
+        chain.resolve.alias.set('hls.js', path.resolve(__dirname, 'hls-stub.js'));
+        // 体积护栏: app 入口(React+Taro 运行时)约 280KB 属合理水平;
+        // 阈值放宽到 400KB/1MB, 仍可拦截 hls 级别(610KB+)的依赖膨胀回归
+        chain.performance
+          .maxAssetSize(400 * 1024)
+          .maxEntrypointSize(1024 * 1024);
       },
     },
     rn: {
