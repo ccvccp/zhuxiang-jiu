@@ -7,10 +7,12 @@
 // ============================================================
 // 后端地址
 // ============================================================
-// 生产域名(zxjiu.com): DNS 解析 → 服务器, nginx 同源部署
-//   (H5 静态产物 + /api 反代后端:8000), H5/weapp 统一走 https://zxjiu.com
-// 本地调试: 局域网 IP(手机与电脑连同一 WiFi), H5 端按页面域名自动判定,
-//   换环境无需改码重新构建
+// 三级主机判定(H5 按页面域名自动选择, 换环境无需改码重新构建):
+//   1. 生产域名 zxjiu.com(含子域) → https://zxjiu.com(nginx 同源反代 /api)
+//   2. 本机调试(localhost/127.0.0.1) → http://192.168.0.107:8000(开发机后端)
+//   3. 其余主机(公网 IP 直访/任意部署主机) → 页面同源(window.location.origin,
+//      nginx 已同源反代 /api, 证书未就绪的 http 阶段同样可用)
+// weapp 无 window, 固定生产域名(小程序合法域名要求 https)
 const LAN_HOST = '192.168.0.107';
 const API_PORT = '8000';
 
@@ -21,15 +23,31 @@ export const PROD_DOMAIN = 'zxjiu.com';
 const isProdHost = (host: string) =>
   host === PROD_DOMAIN || host.endsWith(`.${PROD_DOMAIN}`);
 
-// weapp 无 window, 构建产物面向生产域名(小程序合法域名要求 https);
-// H5 按当前页面域名判定——局域网/localhost 调试走本地后端
-const onProd = process.env.TARO_ENV === 'h5'
-  ? (typeof window !== 'undefined' && isProdHost(window.location.hostname))
-  : true;
+/** 是否本机调试主机(dev 后端挂在开发机 LAN IP) */
+const isLocalDebugHost = (host: string) =>
+  ['localhost', '127.0.0.1'].includes(host);
 
-export const API_BASE = onProd
-  ? `https://${PROD_DOMAIN}`
-  : `http://${LAN_HOST}:${API_PORT}`;
+/** 是否私网 IP(局域网调试: 后端与静态服务同机, API 走 <host>:8000) */
+const isPrivateIpHost = (host: string) =>
+  /^10\./.test(host)
+  || /^192\.168\./.test(host)
+  || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+
+const resolveApiBase = (): string => {
+  if (process.env.TARO_ENV !== 'h5') {
+    return `https://${PROD_DOMAIN}`; // weapp: 固定生产域名
+  }
+  if (typeof window === 'undefined') {
+    return `http://${LAN_HOST}:${API_PORT}`; // SSR 边界安全默认
+  }
+  const { hostname, origin } = window.location;
+  if (isProdHost(hostname)) return `https://${PROD_DOMAIN}`;       // 生产域名
+  if (isLocalDebugHost(hostname)) return `http://${LAN_HOST}:${API_PORT}`; // 本机调试
+  if (isPrivateIpHost(hostname)) return `http://${hostname}:${API_PORT}`;  // 局域网真机调试
+  return origin; // 其余(公网 IP 直访等): 同源直连
+};
+
+export const API_BASE = resolveApiBase();
 
 // ============================================================
 // 会员身份(测试用, 接入真实登录后改为动态获取)

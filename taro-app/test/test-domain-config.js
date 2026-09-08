@@ -33,8 +33,8 @@ function record(name, ok, detail = '') {
   else { failed++; console.log(`  ✗ ${name}${detail ? ` → ${detail}` : ''}`); }
 }
 
-/** 在指定环境下加载 config 模块并返回导出 */
-function loadConfig(env, hostname) {
+/** 在指定环境下加载 config 模块并返回导出(带完整 origin 模拟) */
+function loadConfig(env, hostname, origin) {
   const { outputText } = ts.transpileModule(fs.readFileSync(SRC, 'utf8'), {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -44,11 +44,13 @@ function loadConfig(env, hostname) {
   // 构造隔离的沙盒域: TARO_ENV 编译常量 + window.location(可缺省)
   const sandbox = { module: { exports: {} }, exports: {}, require, console };
   sandbox.global = sandbox;
+  const loc = `({ hostname: ${JSON.stringify(hostname)}, origin: ${JSON.stringify(origin || `http://${hostname}`)} })`;
+  const windowDecl = typeof hostname === 'undefined'
+    ? 'var window = undefined;'
+    : `var window = { location: ${loc} };`;
   const wrapper = new Function('module', 'exports', 'require', 'console', 'globalThis',
     `"use strict"; var process = { env: { TARO_ENV: ${JSON.stringify(env)} } };
-     ${typeof hostname === 'undefined'
-       ? 'var window = undefined;'
-       : `var window = { location: { hostname: ${JSON.stringify(hostname)} } };`}
+     ${windowDecl}
      ${outputText}`);
   wrapper(sandbox.module, sandbox.module.exports, require, console, sandbox);
   return sandbox.module.exports;
@@ -58,7 +60,7 @@ console.log('域名感知 API_BASE 配置单元测试');
 console.log('='.repeat(52));
 
 // ---------- H5 端·按页面域名判定 ----------
-const h5 = (host) => loadConfig('h5', host).API_BASE;
+const h5 = (host) => loadConfig('h5', host, `http://${host}`).API_BASE;
 
 record('H5 主域 zxjiu.com → 生产 https',
   h5('zxjiu.com') === 'https://zxjiu.com', h5('zxjiu.com'));
@@ -66,14 +68,20 @@ record('H5 www.zxjiu.com → 生产 https',
   h5('www.zxjiu.com') === 'https://zxjiu.com', h5('www.zxjiu.com'));
 record('H5 任意子域 m.zxjiu.com → 生产 https',
   h5('m.zxjiu.com') === 'https://zxjiu.com', h5('m.zxjiu.com'));
-record('H5 局域网 192.168.0.107 → 调试后端',
+record('H5 局域网 192.168.0.107 → 同机后端 :8000',
   h5('192.168.0.107') === 'http://192.168.0.107:8000', h5('192.168.0.107'));
+record('H5 局域网 10.x → 同机后端 :8000',
+  h5('10.0.0.5') === 'http://10.0.0.5:8000', h5('10.0.0.5'));
+record('H5 局域网 172.16.x → 同机后端 :8000',
+  h5('172.16.3.9') === 'http://172.16.3.9:8000', h5('172.16.3.9'));
+record('H5 公网 IP 直访 47.236.61.117 → 同源直连',
+  h5('47.236.61.117') === 'http://47.236.61.117', h5('47.236.61.117'));
 record('H5 localhost → 调试后端',
   h5('localhost') === 'http://192.168.0.107:8000', h5('localhost'));
 record('H5 127.0.0.1 → 调试后端',
   h5('127.0.0.1') === 'http://192.168.0.107:8000', h5('127.0.0.1'));
-record('后缀伪造域 zxjiu.com.evil.com 不误判为生产',
-  h5('zxjiu.com.evil.com') === 'http://192.168.0.107:8000', h5('zxjiu.com.evil.com'));
+record('后缀伪造域 zxjiu.com.evil.com 不误判为生产(同源兜底)',
+  h5('zxjiu.com.evil.com') === 'http://zxjiu.com.evil.com', h5('zxjiu.com.evil.com'));
 record('H5 window 未定义(SSR 边界) → 安全默认调试后端',
   loadConfig('h5', undefined).API_BASE === 'http://192.168.0.107:8000');
 
