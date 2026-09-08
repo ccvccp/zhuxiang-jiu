@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, Checkbox } from '@tarojs/components';
-import Taro, { useRouter } from '@tarojs/taro';
+import Taro, { useRouter, useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import CheckoutService from '@/services/checkout-service';
 import { OrderAPI } from '@/api/order';
+import { MemberAPI, AddressVO } from '@/api/member';
+import { isLoggedIn } from '@/services/auth-service';
 
 // 姓名脱敏(张三→张*, 李四→李*) — 《个人信息保护法》第51条安全保护
 function maskName(name: string): string {
@@ -17,11 +19,47 @@ const CheckoutPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [agreed, setAgreed] = useState(false); // 隐私政策同意状态
+  const [address, setAddress] = useState<AddressVO | null>(null);
 
   const productId = Number(router.params.productId || '0');
   const productName = decodeURIComponent(router.params.productName || '竹香酒');
   const price = Number(router.params.price || '0');
   const qty = Number(router.params.qty || '1') || 1;
+
+  // 初始载入默认地址(登录态)
+  useEffect(() => {
+    (async () => {
+      if (!isLoggedIn()) return;
+      try {
+        const list = await MemberAPI.addresses.list();
+        const def = list.find(a => a.isDefault) || list[0];
+        if (def) setAddress(def);
+      } catch (e) {
+        console.warn('[checkout] 默认地址加载失败:', e);
+      }
+    })();
+  }, []);
+
+  // 地址簿选择返回时回填
+  useDidShow(() => {
+    try {
+      const cached = Taro.getStorageSync('checkout_selected_address');
+      if (cached) {
+        setAddress(JSON.parse(cached));
+        Taro.removeStorageSync('checkout_selected_address');
+      }
+    } catch (e) {
+      /* 忽略缓存解析异常 */
+    }
+  });
+
+  const handleSelectAddress = () => {
+    if (!isLoggedIn()) {
+      Taro.navigateTo({ url: '/pages/login/index' });
+      return;
+    }
+    Taro.navigateTo({ url: '/pages/address/index?mode=select' });
+  };
 
   // 价格估算(L5会员)
   const originalTotal = price * qty;
@@ -36,7 +74,7 @@ const CheckoutPage: React.FC = () => {
     }
     setSubmitting(true);
     try {
-      // 优先调真实后端 OrderAPI.create
+      // 优先调真实后端 OrderAPI.create(携带收货地址)
       try {
         const apiRes = await OrderAPI.create({
           items: [{
@@ -45,6 +83,14 @@ const CheckoutPage: React.FC = () => {
             quantity: qty,
             unitPrice: price,
           }],
+          address: address ? {
+            name: address.name,
+            phone: address.phone,
+            province: address.province,
+            city: address.city,
+            district: address.district,
+            detail: address.detail,
+          } : {},
           usePoints: 0,
           remark: '小程序下单',
         });
@@ -160,6 +206,34 @@ const CheckoutPage: React.FC = () => {
   return (
     <View className={styles.page}>
         <NavBar title="订单结算" />
+      {/* 收货地址卡 */}
+      <View className={styles.addressCard} onClick={handleSelectAddress}>
+        {address ? (
+          <>
+            <View className={styles.addressIcon}>📍</View>
+            <View className={styles.addressBody}>
+              <View className={styles.addressLine1}>
+                <Text className={styles.addressName}>{address.name}</Text>
+                <Text className={styles.addressPhone}>{address.phone}</Text>
+                {address.isDefault && <Text className={styles.addressDefaultTag}>默认</Text>}
+              </View>
+              <View className={styles.addressLine2}>
+                {address.province} {address.city} {address.district} {address.detail}
+              </View>
+            </View>
+            <View className={styles.addressArrow}>›</View>
+          </>
+        ) : (
+          <>
+            <View className={styles.addressIcon}>📍</View>
+            <View className={styles.addressBody}>
+              <View className={styles.addressEmptyText}>请选择收货地址</View>
+              <View className={styles.addressEmptySub}>点击从地址簿选择或新增</View>
+            </View>
+            <View className={styles.addressArrow}>›</View>
+          </>
+        )}
+      </View>
       <View className={styles.card}>
         <View className={styles.cardTitle}>商品信息</View>
         <View className={styles.row}>

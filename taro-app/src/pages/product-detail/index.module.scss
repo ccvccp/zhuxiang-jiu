@@ -124,6 +124,118 @@
   flex: 1;
 }
 
+// 用户评价
+.reviewSection {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin: $spacing-md $spacing-lg;
+}
+
+.reviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reviewMore {
+  font-size: $font-size-sm;
+  color: $color-primary;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.reviewScoreBar {
+  display: flex;
+  align-items: baseline;
+  gap: $spacing-sm;
+  padding: $spacing-sm 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.08);
+}
+
+.reviewScoreNum {
+  font-size: $font-size-xxl;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.reviewStars {
+  color: #f5a623;
+  font-size: $font-size-md;
+}
+
+.reviewStarsDim {
+  color: #d9d9d9;
+}
+
+.reviewCountText {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.reviewItem {
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.reviewItemTop {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.reviewAvatar {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 50%;
+  background: rgba($color-primary, 0.12);
+  color: $color-primary;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+}
+
+.reviewNickname {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+  flex: 1;
+}
+
+.reviewStarsSmall {
+  color: #f5a623;
+  font-size: $font-size-xs;
+}
+
+.reviewContent {
+  margin-top: $spacing-xs;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+}
+
+.reviewDate {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.reviewEmpty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
 // 商品描述
 .descSection {
   background: $color-bg-card;

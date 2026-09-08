@@ -14,6 +14,32 @@ export interface MemberVO {
   role?: string;
 }
 
+/** 收货地址 VO(后端 address 存储结构直映射) */
+export interface AddressVO {
+  id: string;
+  name: string;
+  phone: string;
+  province: string;
+  city: string;
+  district: string;
+  detail: string;
+  isDefault: boolean;
+}
+
+// 后端 address 字段 → 前端 VO
+function mapAddress(a: any): AddressVO {
+  return {
+    id: String(a.address_id ?? a.id ?? ''),
+    name: a.name || '',
+    phone: a.phone || '',
+    province: a.province || '',
+    city: a.city || '',
+    district: a.district || '',
+    detail: a.detail || '',
+    isDefault: Number(a.is_default) === 1,
+  };
+}
+
 export const MemberAPI = {
   /** 获取个人信息 */
   async profile(): Promise<MemberVO> {
@@ -44,5 +70,64 @@ export const MemberAPI = {
   /** 查询积分 */
   async points(): Promise<any> {
     return await request<any>({ url: '/api/member/points' });
+  },
+
+  /** 收货地址簿(列表/新增/修改/删除) */
+  addresses: {
+    /** 地址列表 */
+    async list(): Promise<AddressVO[]> {
+      const res = await request<any>({ url: '/api/member/addresses' });
+      return (res.addresses || []).map(mapAddress);
+    },
+
+    /** 新增地址(isDefault=true 时后端自动清除其他默认) */
+    async create(data: {
+      name: string; phone: string; province: string; city: string;
+      district: string; detail: string; isDefault?: boolean;
+    }): Promise<AddressVO> {
+      const res = await request<any>({
+        url: '/api/member/addresses',
+        method: 'POST',
+        data: {
+          name: data.name,
+          phone: data.phone,
+          province: data.province,
+          city: data.city,
+          district: data.district,
+          detail: data.detail,
+          is_default: data.isDefault ? 1 : 0,
+        },
+      });
+      return mapAddress(res.address || res);
+    },
+
+    /** 修改地址(传差量字段) */
+    async update(addressId: string, data: Partial<{
+      name: string; phone: string; province: string; city: string;
+      district: string; detail: string; isDefault: boolean;
+    }>): Promise<AddressVO> {
+      const body: Record<string, any> = {};
+      if (data.name !== undefined) body.name = data.name;
+      if (data.phone !== undefined) body.phone = data.phone;
+      if (data.province !== undefined) body.province = data.province;
+      if (data.city !== undefined) body.city = data.city;
+      if (data.district !== undefined) body.district = data.district;
+      if (data.detail !== undefined) body.detail = data.detail;
+      if (data.isDefault !== undefined) body.is_default = data.isDefault ? 1 : 0;
+      const res = await request<any>({
+        url: `/api/member/addresses/${addressId}`,
+        method: 'PUT',
+        data: body,
+      });
+      return mapAddress(res.address || res);
+    },
+
+    /** 删除地址 */
+    async remove(addressId: string): Promise<void> {
+      await request<any>({
+        url: `/api/member/addresses/${addressId}`,
+        method: 'DELETE',
+      });
+    },
   },
 };

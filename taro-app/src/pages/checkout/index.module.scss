@@ -17,6 +17,81 @@
   margin-bottom: $spacing-md;
 }
 
+// 收货地址卡
+.addressCard {
+  display: flex;
+  align-items: center;
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+
+  &:active {
+    box-shadow: $shadow-card-hover;
+  }
+}
+
+.addressIcon {
+  font-size: 48rpx;
+  margin-right: $spacing-md;
+}
+
+.addressBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.addressLine1 {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.addressName {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.addressPhone {
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+}
+
+.addressDefaultTag {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba($color-primary, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+.addressLine2 {
+  margin-top: $spacing-xs;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+}
+
+.addressEmptyText {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.addressEmptySub {
+  margin-top: $spacing-xs;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.addressArrow {
+  font-size: $font-size-xl;
+  color: $color-text-tertiary;
+  margin-left: $spacing-sm;
+}
+
 .cardTitle {
   font-size: $font-size-lg;
   font-weight: $font-weight-semibold;

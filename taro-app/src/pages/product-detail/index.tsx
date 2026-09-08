@@ -4,7 +4,7 @@ import Taro, { useRouter } from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import CheckoutService from '@/services/checkout-service';
-import { ProductAPI, ProductVO } from '@/api/product';
+import { ProductAPI, ProductVO, ReviewVO } from '@/api/product';
 import { PRODUCT_DEFAULTS, SERVICE_PHONE } from '@/config';
 
 // 兜底: API 失败时用 mock 数据
@@ -29,6 +29,10 @@ const ProductDetailPage: React.FC = () => {
   const [product, setProduct] = useState<ProductVO & { description?: string } | null>(null);
   const [qty, setQty] = useState(1);
   const [loading, setLoading] = useState(true);
+  // 评价摘要(失败静默, 空态展示"暂无评价")
+  const [reviewSummary, setReviewSummary] = useState<{
+    reviews: ReviewVO[]; ratingAvg: number; ratingCount: number;
+  }>({ reviews: [], ratingAvg: 0, ratingCount: 0 });
 
   const productId = router.params.id || '0';
 
@@ -52,8 +56,26 @@ const ProductDetailPage: React.FC = () => {
       } finally {
         setLoading(false);
       }
+      // 评价摘要(独立加载, 失败不影响商品展示)
+      try {
+        const r = await ProductAPI.reviews(productId, 1, 3);
+        setReviewSummary({
+          reviews: r.reviews,
+          ratingAvg: r.ratingAvg,
+          ratingCount: r.ratingCount,
+        });
+      } catch (e) {
+        console.warn('[product-detail] 评价加载失败:', e);
+      }
     })();
   }, [productId]);
+
+  // 查看全部评价
+  const handleViewAllReviews = () => {
+    Taro.navigateTo({
+      url: `/pages/product-reviews/index?id=${productId}&name=${encodeURIComponent(product?.name || '')}`
+    });
+  };
 
   const handleQtyMinus = () => setQty(q => Math.max(1, q - 1));
   const handleQtyPlus = () => setQty(q => Math.min(product?.stock || 1, q + 1));
@@ -128,6 +150,47 @@ const ProductDetailPage: React.FC = () => {
               <View className={styles.specValue}>{product.id}</View>
             </View>
           </View>
+        </View>
+
+        {/* 用户评价 */}
+        <View className={styles.reviewSection}>
+          <View className={styles.reviewHeader}>
+            <View className={styles.sectionTitle}>用户评价({reviewSummary.ratingCount})</View>
+            {reviewSummary.ratingCount > 0 && (
+              <View className={styles.reviewMore} onClick={handleViewAllReviews}>
+                查看全部 ›
+              </View>
+            )}
+          </View>
+          {reviewSummary.ratingCount > 0 ? (
+            <>
+              <View className={styles.reviewScoreBar}>
+                <View className={styles.reviewScoreNum}>{reviewSummary.ratingAvg}</View>
+                <View className={styles.reviewStars}>
+                  {'★★★★★'.slice(0, Math.round(reviewSummary.ratingAvg))}
+                  <Text className={styles.reviewStarsDim}>
+                    {'★★★★★'.slice(0, 5 - Math.round(reviewSummary.ratingAvg))}
+                  </Text>
+                </View>
+                <View className={styles.reviewCountText}>{reviewSummary.ratingCount} 条评价</View>
+              </View>
+              {reviewSummary.reviews.map(r => (
+                <View key={r.id} className={styles.reviewItem}>
+                  <View className={styles.reviewItemTop}>
+                    <View className={styles.reviewAvatar}>{r.nickname.slice(0, 1)}</View>
+                    <View className={styles.reviewNickname}>{r.nickname}</View>
+                    <View className={styles.reviewStarsSmall}>
+                      {'★'.repeat(r.rating)}
+                    </View>
+                  </View>
+                  <View className={styles.reviewContent}>{r.content}</View>
+                  <View className={styles.reviewDate}>{(r.createdAt || '').slice(0, 10)}</View>
+                </View>
+              ))}
+            </>
+          ) : (
+            <View className={styles.reviewEmpty}>暂无评价, 购买后快来抢首评吧</View>
+          )}
         </View>
 
         {/* 商品描述 */}

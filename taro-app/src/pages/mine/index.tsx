@@ -293,6 +293,14 @@ const MinePage: React.FC = () => {
         {/* 个人信息管理 */}
         <View className={styles.section}>
           <View className={styles.sectionTitle}>个人信息管理</View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/address/index' })}>
+            <View className={styles.adminEntryIcon}>📍</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>收货地址</View>
+              <View className={styles.adminEntryDesc}>地址簿管理 · 默认地址 · 新增/编辑</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
           <View className={styles.privacyDesc}>
             根据《个人信息保护法》，您有权查看、修改和删除个人信息。
           </View>

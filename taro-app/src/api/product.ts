@@ -20,6 +20,15 @@ export interface ProductVO {
   salesMonthly?: number;
 }
 
+/** 商品评价 VO(后端 reviews 存储结构直映射) */
+export interface ReviewVO {
+  id: string;
+  nickname: string;
+  rating: number;      // 1-5
+  content: string;
+  createdAt: string;
+}
+
 // 后端 product 字段 → 前端 VO
 function mapProduct(p: any): ProductVO {
   return {
@@ -81,5 +90,43 @@ export const ProductAPI = {
   async hot(limit = 6): Promise<ProductVO[]> {
     const res = await request<any>({ url: `/api/product/hot?limit=${limit}` });
     return (res.products || []).map(mapProduct);
+  },
+
+  /** 关键词搜索(匹配 name/subtitle/series/tags/scenes; 空关键词由调用方拦截) */
+  async search(keyword: string, page = 1, pageSize = 20): Promise<{
+    products: ProductVO[]; total: number; page: number; totalPages: number;
+  }> {
+    const qs = `?keyword=${encodeURIComponent(keyword)}&page=${page}&page_size=${pageSize}`;
+    const res = await request<any>({ url: `/api/product/search${qs}` });
+    return {
+      products: (res.products || []).map(mapProduct),
+      total: res.total || 0,
+      page: res.page || 1,
+      totalPages: res.totalPages || 1,
+    };
+  },
+
+  /** 商品评价列表(分页, 附评分汇总) */
+  async reviews(productId: string, page = 1, pageSize = 10): Promise<{
+    reviews: ReviewVO[]; total: number; totalPages: number;
+    ratingAvg: number; ratingCount: number; productName: string;
+  }> {
+    const res = await request<any>({
+      url: `/api/product/${productId}/reviews?page=${page}&page_size=${pageSize}`,
+    });
+    return {
+      reviews: (res.reviews || []).map((r: any) => ({
+        id: r.review_id,
+        nickname: r.member_nickname || '匿名会员',
+        rating: r.rating || 5,
+        content: r.content || '',
+        createdAt: r.created_at || '',
+      })),
+      total: res.total || 0,
+      totalPages: res.totalPages || 1,
+      ratingAvg: res.ratingAvg || 0,
+      ratingCount: res.ratingCount || 0,
+      productName: res.productName || '',
+    };
   },
 };

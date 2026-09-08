@@ -17,7 +17,10 @@ export default defineAppConfig({
     'pages/trace-punch/index',
     'pages/trace-view/index',
     'pages/privacy/index',
-    'pages/agreement/index'
+    'pages/agreement/index',
+    'pages/product-reviews/index',
+    'pages/address/index',
+    'pages/address-edit/index'
   ],
   window: {
     backgroundTextStyle: 'light',

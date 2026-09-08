@@ -37,6 +37,7 @@
     "test:trace-scan": "node test/test-trace-scan.js",
     "test:decode-repro": "node test/decode-repro.js",
     "test:domain-config": "node test/test-domain-config.js",
+    "test:address-form": "node test/test-address-form.js",
     "package:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-zxjiu.ps1",
     "verify:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deploy-local.ps1"
   },
