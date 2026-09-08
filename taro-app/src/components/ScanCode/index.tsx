@@ -266,17 +266,19 @@ const ScanCode: React.FC<ScanCodeProps> = ({
       if (!file) return;
       setDecoding(true);
       try {
-        let meta: { width: number; height: number; kb: number } | null = null;
-        const code = await decodeImageFile(file, (m) => { meta = m; });
+        // 闭包外赋值会被 TS 控制流收窄为初始类型, 用对象持有保住联合类型
+        const diag: { meta?: { width: number; height: number; kb: number } } = {};
+        const code = await decodeImageFile(file, (m) => { diag.meta = m; });
         if (code) {
           finish(code);
         } else {
           // 诊断留痕 + 低清图引导换相册入口(下次测试可直接定位设备交付质量)
+          const meta = diag.meta;
           console.warn('[ScanCode] 解码失败:', file.name, JSON.stringify(meta));
           const lowRes = !!meta && Math.max(meta.width, meta.height) < 1000;
           Taro.showToast({
             title: lowRes
-              ? `相机仅返回${meta!.width}×${meta!.height}低清图, 请改用「从相册选择」`
+              ? `相机仅返回${meta.width}×${meta.height}低清图, 请改用「从相册选择」`
               : '未识别到二维码: 请靠近拍摄、对焦清晰、避免反光',
             icon: 'none', duration: 3000,
           });
