@@ -37,7 +37,8 @@
     "test:trace-scan": "node test/test-trace-scan.js",
     "test:decode-repro": "node test/decode-repro.js",
     "test:domain-config": "node test/test-domain-config.js",
-    "package:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-zxjiu.ps1"
+    "package:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-zxjiu.ps1",
+    "verify:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deploy-local.ps1"
   },
   "browserslist": [
     "last 3 versions",
