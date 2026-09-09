@@ -37,7 +37,8 @@ export default defineAppConfig({
     'pages/venue/index',
     'pages/ride/index',
     'pages/agent-center/index',
-    'pages/cooperation/index'
+    'pages/cooperation/index',
+    'pages/help/index'
   ],
   window: {
     backgroundTextStyle: 'light',

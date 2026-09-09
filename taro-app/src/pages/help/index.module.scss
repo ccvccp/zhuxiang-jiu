@@ -1,0 +1,616 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+// ============================================
+// 信值概要卡
+// ============================================
+.trustCard {
+  background: linear-gradient(135deg, $color-primary, rgba($color-primary, 0.78));
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin: $spacing-lg;
+  box-shadow: $shadow-card-hover;
+}
+
+.trustHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.trustTitle {
+  font-size: $font-size-md;
+  color: rgba($color-text-white, 0.85);
+  font-weight: $font-weight-medium;
+}
+
+.trustTotal {
+  font-size: 56rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.trustGrid {
+  display: flex;
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.15);
+}
+
+.trustItem {
+  flex: 1;
+  text-align: center;
+}
+
+.trustValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.trustLabel {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.7);
+}
+
+.trustGate {
+  margin-top: $spacing-md;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.85);
+  text-align: center;
+}
+
+// ============================================
+// Tabs / 筛选
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-lg;
+  border-bottom: 1rpx solid rgba($color-primary, 0.08);
+}
+
+.tabItem {
+  flex: 1;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  position: relative;
+
+  &.tabItemActive {
+    color: $color-primary;
+    font-weight: $font-weight-semibold;
+
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 48rpx;
+      height: 6rpx;
+      border-radius: $radius-button;
+      background: $color-primary;
+    }
+  }
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-md $spacing-lg $spacing-lg;
+}
+
+.filterRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.filterItem {
+  padding: $spacing-xs $spacing-lg;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: $color-bg-card;
+  border-radius: $radius-button;
+  border: 1rpx solid rgba($color-primary, 0.1);
+
+  &.filterActive {
+    color: $color-text-white;
+    background: $color-primary;
+    border-color: $color-primary;
+    font-weight: $font-weight-medium;
+  }
+}
+
+.catBar {
+  white-space: nowrap;
+  margin-bottom: $spacing-md;
+  height: 60rpx;
+}
+
+.catItem {
+  display: inline-block;
+  padding: $spacing-xs $spacing-md;
+  margin-right: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: $color-bg-card;
+  border-radius: $radius-button;
+
+  &.catActive {
+    color: $color-primary;
+    background: rgba($color-primary, 0.1);
+    font-weight: $font-weight-medium;
+  }
+}
+
+// ============================================
+// 订单卡片(大厅/我的)
+// ============================================
+.orderCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.orderTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-sm;
+}
+
+.orderTitleRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-wrap: wrap;
+}
+
+.urgentBadge {
+  font-size: 20rpx;
+  color: $color-text-white;
+  background: #e64340;
+  padding: 2rpx $spacing-xs;
+  border-radius: $radius-xs;
+}
+
+.orderMode {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba($color-primary, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+  font-weight: $font-weight-medium;
+}
+
+.orderCat {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.statusBadge {
+  font-size: $font-size-xs;
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+  color: #c77d00;
+  background: rgba(#f5a623, 0.14);
+
+  &.statusDone {
+    color: #2e7d32;
+    background: rgba(#2e7d32, 0.1);
+  }
+}
+
+.acceptBtn {
+  padding: $spacing-xs $spacing-xl;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.orderTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  line-height: $line-height-loose;
+}
+
+.orderDesc {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.orderMeta {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.orderAddr {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1rpx solid rgba($color-primary, 0.06);
+}
+
+.flowBtn {
+  padding: $spacing-xs $spacing-lg;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.flowBtnGhost {
+  padding: $spacing-xs $spacing-lg;
+  color: $color-primary;
+  border: 1rpx solid rgba($color-primary, 0.4);
+  border-radius: $radius-button;
+  font-size: $font-size-xs;
+}
+
+.cancelLink {
+  margin-left: auto;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  text-decoration: underline;
+}
+
+// ============================================
+// 卡片/表单
+// ============================================
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.parseHint {
+  background: rgba(#f5a623, 0.1);
+  border: 1rpx solid rgba(#f5a623, 0.25);
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  font-size: $font-size-xs;
+  color: #c77d00;
+  line-height: $line-height-loose;
+  margin-bottom: $spacing-md;
+}
+
+.modeRow {
+  display: flex;
+  gap: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.modeItem {
+  flex: 1;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.12);
+  text-align: center;
+
+  &.modeActive {
+    background: rgba($color-primary, 0.1);
+    border-color: $color-primary;
+  }
+}
+
+.modeName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.modeDesc {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.inputRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+  margin-bottom: $spacing-md;
+}
+
+.input {
+  flex: 1;
+  height: 56rpx;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+}
+
+.textareaRow {
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 140rpx;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.pickerRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+  margin-bottom: $spacing-md;
+}
+
+.pickerLabel {
+  flex-shrink: 0;
+  width: 140rpx;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.pickerValue {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.pickerArrow {
+  flex-shrink: 0;
+  font-size: $font-size-lg;
+  color: $color-text-tertiary;
+}
+
+.urgencyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+  margin-bottom: $spacing-md;
+}
+
+.switchText {
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.publishBtn {
+  height: 92rpx;
+  background: linear-gradient(135deg, $color-primary, rgba($color-primary, 0.85));
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 信值流水
+// ============================================
+.ledgerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-sm 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.ledgerLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.ledgerReason {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  @include text-ellipsis;
+}
+
+.ledgerTime {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.ledgerDelta {
+  flex-shrink: 0;
+  margin-left: $spacing-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+}
+
+.deltaPlus {
+  color: #2e7d32;
+}
+
+.deltaMinus {
+  color: #e64340;
+}
+
+// ============================================
+// 空态/规则/弹层
+// ============================================
+.empty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 64rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.noteCard {
+  background: rgba($color-primary, 0.04);
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.noteTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-primary;
+  margin-bottom: $spacing-xs;
+}
+
+.noteLine {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}
+
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+}
+
+.sheet {
+  width: 100%;
+  background: $color-bg-card;
+  border-radius: $radius-lg $radius-lg 0 0;
+  padding: $spacing-lg;
+  padding-bottom: calc(#{$spacing-lg} + env(safe-area-inset-bottom));
+}
+
+.sheetTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  text-align: center;
+  margin-bottom: $spacing-sm;
+}
+
+.sheetDesc {
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-lg;
+}
+
+.scoreRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-lg;
+}
+
+.star {
+  font-size: 56rpx;
+  color: rgba($color-primary, 0.18);
+
+  &.starActive {
+    color: #f5a623;
+  }
+}
+
+.scoreText {
+  margin-left: $spacing-sm;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+}
+
+.sheetBtn {
+  height: 88rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}

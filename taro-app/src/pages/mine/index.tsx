@@ -378,6 +378,14 @@ const MinePage: React.FC = () => {
             </View>
             <View className={styles.adminEntryArrow}>›</View>
           </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/help/index' })}>
+            <View className={styles.adminEntryIcon}>🤝</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>AI智能叫帮</View>
+              <View className={styles.adminEntryDesc}>信值互助 · 公益100%/有偿10% · 零佣金</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
         </View>
 
         {/* 客服中心 */}

@@ -117,6 +117,8 @@ from routes import (
     register_ride_routes,
     # AI无感开票模块(42号·抬头簿+决策评分+自动开具/红冲)
     register_invoice_routes,
+    # AI智能叫帮模块(67号·信值互助网络: 公益100%/有偿10%双轨+LBS大厅)
+    register_help_routes,
 )
 
 __all__ = ["app", "_mock_store"]
@@ -272,6 +274,7 @@ register_blogger_routes(app)
 register_ride_routes(app)
 # AI无感开票模块(42号)
 register_invoice_routes(app)
+register_help_routes(app)
 register_security_routes(app)
 # AI智能API管理模块(44号)
 register_api_manager_routes(app)
