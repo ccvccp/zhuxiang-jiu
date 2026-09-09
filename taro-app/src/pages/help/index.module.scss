@@ -70,6 +70,18 @@
   text-align: center;
 }
 
+// P3: 碳减排展示行(信值卡内)
+.carbonRow {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(76, 175, 80, 0.22);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.92);
+  text-align: center;
+  line-height: 1.6;
+}
+
 // ============================================
 // Tabs / 筛选
 // ============================================
@@ -613,4 +625,285 @@
   &:active {
     opacity: 0.85;
   }
+}
+
+// ============================================
+// P1 · 智能调度层样式
+// ============================================
+
+// 大厅个性化命中徽章(✨ 您常接XX类互助)
+.fitBadge {
+  font-size: $font-size-xs;
+  color: #b8860b;
+  background: rgba(#f5a623, 0.12);
+  border-radius: $radius-sm;
+  padding: 2rpx 10rpx;
+  margin-right: $spacing-xs;
+}
+
+// 大厅捐赠入口
+.donateLink {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba($color-primary, 0.06);
+  border: 1rpx dashed rgba($color-primary, 0.35);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  text-align: center;
+  @include button-reset;
+
+  &:active {
+    background: rgba($color-primary, 0.12);
+  }
+}
+
+// 荣誉徽章行(信值卡内)
+.honorRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  margin-top: $spacing-md;
+  padding: $spacing-sm $spacing-md;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: $radius-sm;
+}
+
+.honorIcon {
+  font-size: 52rpx;
+  line-height: 1;
+}
+
+.honorInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.honorName {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-white;
+}
+
+.honorProgress {
+  margin-top: 6rpx;
+  height: 8rpx;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: $radius-round;
+  overflow: hidden;
+}
+
+.honorProgressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffd700, #f5a623);
+  border-radius: $radius-round;
+}
+
+.honorNext {
+  display: block;
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.7);
+}
+
+// 故事卡弹层
+.storyCard {
+  margin: $spacing-md 0;
+  padding: $spacing-lg;
+  background: linear-gradient(160deg, rgba($color-primary, 0.05), rgba(#f5a623, 0.06));
+  border: 1rpx solid rgba($color-primary, 0.15);
+  border-radius: $radius-lg;
+}
+
+.storyTheme {
+  font-size: $font-size-md;
+  color: $color-primary;
+  font-weight: $font-weight-semibold;
+  line-height: 1.6;
+  text-align: center;
+  margin-bottom: $spacing-md;
+}
+
+.storyTitle {
+  font-size: $font-size-lg;
+  color: $color-text-primary;
+  font-weight: $font-weight-semibold;
+  text-align: center;
+  margin-bottom: $spacing-sm;
+}
+
+.storyMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  text-align: center;
+  margin-bottom: $spacing-md;
+}
+
+.storyReview {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: 1.7;
+  padding: $spacing-sm 0;
+  border-top: 1rpx dashed rgba($color-primary, 0.15);
+
+  &:first-of-type {
+    border-top: none;
+  }
+}
+
+// 捐赠弹层
+.donateNote {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+  text-align: center;
+  margin-bottom: $spacing-lg;
+}
+
+.amountRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-lg;
+}
+
+.amountItem {
+  flex: 1;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: $color-bg-page;
+  border: 1rpx solid rgba($color-primary, 0.2);
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  @include button-reset;
+
+  &.amountActive {
+    background: rgba($color-primary, 0.1);
+    border-color: $color-primary;
+    color: $color-primary;
+    font-weight: $font-weight-medium;
+  }
+}
+
+// ============================================
+// P2 · 生态深化层样式(接力/传承)
+// ============================================
+
+// 大厅接力徽章
+.relayBadge {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba($color-primary, 0.1);
+  border-radius: $radius-sm;
+  padding: 2rpx 10rpx;
+  margin-right: $spacing-xs;
+}
+
+// 大厅接力当前段地址
+.relayAddr {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.5;
+}
+
+// 我的互助卡接力进度
+.relayProgress {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  margin-top: $spacing-xs;
+}
+
+.relayDot {
+  font-size: $font-size-xs;
+  color: rgba($color-primary, 0.25);
+}
+
+.relayDotDone {
+  color: $color-primary;
+}
+
+.relayText {
+  margin-left: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 信值传承入口卡(我的互助 tab)
+.heritageEntry {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-lg;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.heritageIcon {
+  font-size: 56rpx;
+  line-height: 1;
+}
+
+.heritageInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.heritageName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.heritageDesc {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.heritageArrow {
+  font-size: 44rpx;
+  color: rgba($color-primary, 0.35);
+  line-height: 1;
+}
+
+// 传承弹层区块
+.heritageSection {
+  margin-top: $spacing-lg;
+  padding-top: $spacing-md;
+  border-top: 1rpx solid rgba($color-primary, 0.08);
+}
+
+.heritageSectionTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.heritageRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+  padding: $spacing-sm 0;
+}
+
+.heritageRowInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.heritageRowMain {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
 }

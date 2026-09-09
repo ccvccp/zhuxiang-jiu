@@ -4,11 +4,17 @@
     help_orders       叫帮单主表
     help_trust_ledger 信值流水(公益100%/有偿10% 双轨)
     help_reviews      双向评价
+    help_donations    信值捐赠(P1: 高信值用户反哺公益单)
+    help_heritage     信值传承(P2: 公益信值继承给亲属)
+    help_csr_packages 企业信值包(P2: 企业 CSR 认捐池)
 
 Key 设计(对齐 backend._k):
     zhuxiang:help:order:{id}     Hash(dict JSON)
     zhuxiang:help:ledger:{id}    Hash(dict JSON)
-    zhuxiang:help:review:{id}    Hash(dict JSON)
+    zhuxiang:help:review:{id}   Hash(dict JSON)
+    zhuxiang:help:donation:{id}  Hash(dict JSON)
+    zhuxiang:help:heritage:{id}  Hash(dict JSON)
+    zhuxiang:help:csr:{id}       Hash(dict JSON)
     zhuxiang:help:{entity}:seq   String(自增序列)
 
 注意: keys() 通配须排除 :seq 序列键(36号 attract click:seq 教训)。
@@ -19,8 +25,6 @@ import json
 from repositories.backend import (
     is_redis_mode, get_redis_client, get_in_memory_store, _k,
 )
-
-import asyncio
 
 
 def _now_iso() -> str:
@@ -188,6 +192,130 @@ class HelpRepository:
         return reviews[:limit]
 
     # ============================================================
+    # 信值捐赠 CRUD(P1: 公益单捐赠池, 完成时奖励帮助者)
+    # ============================================================
+
+    async def save_donation(self, donation: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("help", "donation", donation["donationId"]),
+                             json.dumps(donation, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["help_donations"][donation["donationId"]] = donation
+        return donation
+
+    async def list_donations(self, order_id: int = None,
+                             donor_id: int = None,
+                             limit: int = 200) -> list[dict]:
+        donations = []
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("help", "donation", "*"))
+            for key in keys:
+                if str(key).endswith(":seq"):
+                    continue
+                data = await client.get(key)
+                if data:
+                    donations.append(json.loads(data))
+        else:
+            self._ensure_store()
+            donations = list(self.store["help_donations"].values())
+        if order_id is not None:
+            donations = [d for d in donations if d.get("orderId") == order_id]
+        if donor_id is not None:
+            donations = [d for d in donations if d.get("donorId") == donor_id]
+        donations.sort(key=lambda d: d.get("createdAt", ""), reverse=True)
+        return donations[:limit]
+
+    # ============================================================
+    # 信值传承 CRUD(P2: 公益信值继承, 双方确认划转)
+    # ============================================================
+
+    async def save_heritage(self, heritage: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("help", "heritage", heritage["heritageId"]),
+                             json.dumps(heritage, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["help_heritage"][heritage["heritageId"]] = heritage
+        return heritage
+
+    async def get_heritage(self, heritage_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(_k("help", "heritage", heritage_id))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store["help_heritage"].get(heritage_id)
+
+    async def list_heritage(self, owner_id: int = None,
+                            heir_id: int = None,
+                            limit: int = 100) -> list[dict]:
+        items = []
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("help", "heritage", "*"))
+            for key in keys:
+                if str(key).endswith(":seq"):
+                    continue
+                data = await client.get(key)
+                if data:
+                    items.append(json.loads(data))
+        else:
+            self._ensure_store()
+            items = list(self.store["help_heritage"].values())
+        if owner_id is not None:
+            items = [h for h in items if h.get("ownerId") == owner_id]
+        if heir_id is not None:
+            items = [h for h in items if h.get("heirId") == heir_id]
+        items.sort(key=lambda h: h.get("createdAt", ""), reverse=True)
+        return items[:limit]
+
+    # ============================================================
+    # 企业信值包 CRUD(P2: CSR 认捐池, 定向捐给公益单)
+    # ============================================================
+
+    async def save_csr_package(self, pkg: dict) -> dict:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("help", "csr", pkg["packageId"]),
+                             json.dumps(pkg, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["help_csr_packages"][pkg["packageId"]] = pkg
+        return pkg
+
+    async def get_csr_package(self, package_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(_k("help", "csr", package_id))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store["help_csr_packages"].get(package_id)
+
+    async def list_csr_packages(self, member_id: int = None,
+                                limit: int = 100) -> list[dict]:
+        pkgs = []
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("help", "csr", "*"))
+            for key in keys:
+                if str(key).endswith(":seq"):
+                    continue
+                data = await client.get(key)
+                if data:
+                    pkgs.append(json.loads(data))
+        else:
+            self._ensure_store()
+            pkgs = list(self.store["help_csr_packages"].values())
+        if member_id is not None:
+            pkgs = [p for p in pkgs if p.get("memberId") == member_id]
+        pkgs.sort(key=lambda p: p.get("createdAt", ""), reverse=True)
+        return pkgs[:limit]
+
+    # ============================================================
     # 内存模式 store 初始化
     # ============================================================
 
@@ -198,7 +326,14 @@ class HelpRepository:
             self.store["help_trust_ledger"] = {}
         if "help_reviews" not in self.store:
             self.store["help_reviews"] = {}
-        for entity in ("order", "ledger", "review"):
+        if "help_donations" not in self.store:
+            self.store["help_donations"] = {}
+        if "help_heritage" not in self.store:
+            self.store["help_heritage"] = {}
+        if "help_csr_packages" not in self.store:
+            self.store["help_csr_packages"] = {}
+        for entity in ("order", "ledger", "review", "donation",
+                       "heritage", "csr"):
             seq_key = f"_help_{entity}_seq"
             if seq_key not in self.store:
                 self.store[seq_key] = 0

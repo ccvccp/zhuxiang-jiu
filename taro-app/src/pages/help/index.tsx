@@ -1,7 +1,9 @@
 /**
  * AI智能叫帮 · 信值互助网络(67号)
- * 互助大厅(LBS) → 发布求助(AI 解析推荐) → 我的互助(履约流转+评价+信值档案)
+ * 互助大厅(LBS+个性化) → 发布求助(AI 解析推荐) → 我的互助(履约流转+评价+信值档案)
  * 公益 100% / 有偿 10% 信值双轨 · 平台零佣金
+ * P1 智能调度: 偏好推荐 · 信值捐赠 · 互助故事卡 · 荣誉徽章
+ * P2 生态深化: 互助接力 · 信值传承(数字功德碑)
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Input, Textarea, Picker } from '@tarojs/components';
@@ -9,7 +11,7 @@ import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import {
-  HelpAPI, HelpOrderVO, TrustProfileVO,
+  HelpAPI, HelpOrderVO, TrustProfileVO, StoryCardVO, HeritageVO,
   helpCategoryName, helpStatusName, HELP_CATEGORY_NAME,
 } from '@/api/help';
 import { requireLogin } from '@/services/auth-service';
@@ -66,6 +68,18 @@ const HelpPage: React.FC = () => {
   const [reviewOrder, setReviewOrder] = useState<HelpOrderVO | null>(null);
   const [reviewScore, setReviewScore] = useState(5);
   const [reviewContent, setReviewContent] = useState('');
+  // P1: 故事卡弹层 + 捐赠弹层
+  const [storyCard, setStoryCard] = useState<StoryCardVO | null>(null);
+  const [donateOrder, setDonateOrder] = useState<HelpOrderVO | null>(null);
+  const [donateAmount, setDonateAmount] = useState(5);
+  // P2: 接力发布 + 信值传承弹层
+  const [pubRelay, setPubRelay] = useState(false);
+  const [pubLegs, setPubLegs] = useState('3');
+  const [heritageOpen, setHeritageOpen] = useState(false);
+  const [heritageOut, setHeritageOut] = useState<HeritageVO[]>([]);
+  const [heritageIn, setHeritageIn] = useState<HeritageVO[]>([]);
+  const [heritageHeirId, setHeritageHeirId] = useState('');
+  const [heritageAmount, setHeritageAmount] = useState('');
 
   const myId = Number(getMemberId() || 0);
 
@@ -161,17 +175,22 @@ const HelpPage: React.FC = () => {
         durationMinutes: dur,
         price: pubMode === 'paid' ? Number(price) : 0,
         urgency: urgency ? 'urgent' : 'normal',
+        relay: pubRelay,
+        legs: pubRelay ? Number(pubLegs) : 0,
       });
       const modeText = pubMode === 'public'
         ? `公益互助, 完成后帮助者获得 ${order.trustValueReward} 信值(100% 记录)`
         : `有偿互助 ¥${order.price}, 完成后帮助者获得 ${order.trustValueReward} 信值(公益标准 10%)`;
+      const relayText = pubRelay
+        ? ` 接力模式 ${order.relayLegs?.length ?? 0} 段分段完成。` : '';
       Taro.showModal({
         title: '求助已发布',
-        content: `单号 ${order.orderId}, ${modeText}。`,
+        content: `单号 ${order.orderId}, ${modeText}。${relayText}`,
         showCancel: false,
       });
       setTitle(''); setDesc(''); setParseHint('');
       setPrice(''); setAddress('');
+      setPubRelay(false); setPubLegs('3');
       setTab('hall');
       await loadHall(catFilter, modeFilter);
       await loadMine();
@@ -272,28 +291,149 @@ const HelpPage: React.FC = () => {
     }
   };
 
+  // P1: 查看互助故事卡
+  const handleStory = async (o: HelpOrderVO) => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const card = await HelpAPI.storyCard(o.orderId);
+      setStoryCard(card);
+    } catch (e) {
+      console.warn('[help] 故事卡加载失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // P1: 信值捐赠
+  const handleDonate = async () => {
+    if (!donateOrder || submitting) return;
+    setSubmitting(true);
+    try {
+      const r = await HelpAPI.donate(donateOrder.orderId, donateAmount);
+      Taro.showModal({
+        title: '捐赠成功',
+        content: `已捐赠 ${donateAmount} 信值, 该求助完成时帮助者将额外获得社区捐赠。您剩余 ${r.donorTrustLeft} 信值。`,
+        showCancel: false,
+      });
+      setDonateOrder(null);
+      await loadHall(catFilter, modeFilter);
+      await loadMine();
+    } catch (e) {
+      console.warn('[help] 捐赠失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // P2: 打开信值传承弹层(拉取两向记录)
+  const openHeritage = async () => {
+    setHeritageOpen(true);
+    try {
+      const h = await HelpAPI.heritageMy();
+      setHeritageOut(h.outgoing);
+      setHeritageIn(h.incoming);
+    } catch (e) {
+      console.warn('[help] 传承记录加载失败:', e);
+    }
+  };
+
+  // P2: 发起传承
+  const handleHeritageApply = async () => {
+    if (submitting) return;
+    const heir = Number(heritageHeirId);
+    if (!heir || heir <= 0) {
+      Taro.showToast({ title: '请输入受让人成员ID', icon: 'none' });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const amount = heritageAmount ? Number(heritageAmount) : undefined;
+      await HelpAPI.heritageApply(heir, amount);
+      Taro.showToast({ title: '传承已发起, 待受让人确认', icon: 'success' });
+      setHeritageHeirId('');
+      setHeritageAmount('');
+      const h = await HelpAPI.heritageMy();
+      setHeritageOut(h.outgoing);
+      setHeritageIn(h.incoming);
+    } catch (e) {
+      console.warn('[help] 传承发起失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // P2: 确认受让传承
+  const handleHeritageAccept = async (h: HeritageVO) => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const r = await HelpAPI.heritageAccept(h.heritageId);
+      Taro.showModal({
+        title: '传承确认成功',
+        content: `已承继 ${r.transferred} 公益信值, 善行延续。`,
+        showCancel: false,
+      });
+      const hh = await HelpAPI.heritageMy();
+      setHeritageOut(hh.outgoing);
+      setHeritageIn(hh.incoming);
+      await loadMine();
+    } catch (e) {
+      console.warn('[help] 传承确认失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // 渲染订单卡片(大厅)
-  const renderHallCard = (o: HelpOrderVO) => (
-    <View key={o.orderId} className={styles.orderCard}>
-      <View className={styles.orderTop}>
-        <View className={styles.orderTitleRow}>
-          {o.urgency === 'urgent' && <Text className={styles.urgentBadge}>紧急</Text>}
-          <Text className={styles.orderMode}>{o.mode === 'public' ? '公益' : `有偿 ¥${o.price}`}</Text>
-          <Text className={styles.orderCat}>{helpCategoryName(o.category)}</Text>
+  const renderHallCard = (o: HelpOrderVO) => {
+    // P1: 捐赠入口(公益单 + 非发布者 + 高信值用户)
+    const canDonate = o.mode === 'public'
+      && o.publisherId !== myId
+      && trust != null
+      && (trust.donateGate ?? 50) <= trust.totalTrust;
+    return (
+      <View key={o.orderId} className={styles.orderCard}>
+        <View className={styles.orderTop}>
+          <View className={styles.orderTitleRow}>
+            {o.urgency === 'urgent' && <Text className={styles.urgentBadge}>紧急</Text>}
+            {o.isRelay && o.relayMeta && (
+              <Text className={styles.relayBadge}>接力 {o.relayMeta.completedLegs}/{o.relayMeta.totalLegs}段</Text>
+            )}
+            {o.fitScore === 1 && o.fitReason && (
+              <Text className={styles.fitBadge}>✨ {o.fitReason}</Text>
+            )}
+            <Text className={styles.orderMode}>{o.mode === 'public' ? '公益' : `有偿 ¥${o.price}`}</Text>
+            <Text className={styles.orderCat}>{helpCategoryName(o.category)}</Text>
+          </View>
+          {o.publisherId !== myId && (
+            <View className={styles.acceptBtn} onClick={() => handleAccept(o)}>接单</View>
+          )}
         </View>
-        {o.publisherId !== myId && (
-          <View className={styles.acceptBtn} onClick={() => handleAccept(o)}>接单</View>
+        <View className={styles.orderTitle}>{o.title}</View>
+        {o.description && <View className={styles.orderDesc}>{o.description}</View>}
+        <View className={styles.orderMeta}>
+          {helpCategoryName(o.category)} · {o.durationMinutes} 分钟 · 信值 +{o.trustValueReward}
+          {o.distanceKm != null ? ` · 距离 ${o.distanceKm}km` : ''}
+          {(o.donatedTrust ?? 0) > 0 ? ` · 💛 社区已捐 ${o.donatedTrust} 信值` : ''}
+        </View>
+        {o.isRelay && o.relayMeta && (
+          <View className={styles.relayAddr}>
+            🤝 当前第 {o.relayMeta.currentLegNo} 段: {o.relayMeta.currentLegAddress}
+          </View>
+        )}
+        {o.address && !o.isRelay && <View className={styles.orderAddr}>📍 {o.address}</View>}
+        {canDonate && (
+          <View
+            className={styles.donateLink}
+            onClick={() => { setDonateOrder(o); setDonateAmount(5); }}
+          >
+            💛 为这份公益捐赠信值
+          </View>
         )}
       </View>
-      <View className={styles.orderTitle}>{o.title}</View>
-      {o.description && <View className={styles.orderDesc}>{o.description}</View>}
-      <View className={styles.orderMeta}>
-        {helpCategoryName(o.category)} · {o.durationMinutes} 分钟 · 信值 +{o.trustValueReward}
-        {o.distanceKm != null ? ` · 距离 ${o.distanceKm}km` : ''}
-      </View>
-      {o.address && <View className={styles.orderAddr}>📍 {o.address}</View>}
-    </View>
-  );
+    );
+  };
 
   // 渲染我的互助卡片
   const renderMineCard = (o: HelpOrderVO, isHelper: boolean) => {
@@ -303,6 +443,7 @@ const HelpPage: React.FC = () => {
     const canCancel = o.status === 'published'
       || (o.status === 'matched' && (isHelper || o.publisherId === myId));
     const canReview = o.status === 'completed';
+    const canStory = o.status === 'completed';   // P1: 故事卡入口
     return (
       <View key={o.orderId} className={styles.orderCard}>
         <View className={styles.orderTop}>
@@ -318,7 +459,19 @@ const HelpPage: React.FC = () => {
           {helpCategoryName(o.category)} · {o.durationMinutes} 分钟 · 信值 {o.trustValueReward}
           {isHelper ? '(我帮助)' : '(我发布)'}
         </View>
-        {(canStart || canComplete || canCancel || canReview) && (
+        {o.isRelay && o.relayLegs && (
+          <View className={styles.relayProgress}>
+            {o.relayLegs.map(l => (
+              <Text key={l.legNo} className={`${styles.relayDot} ${l.status === 'completed' ? styles.relayDotDone : ''}`}>
+                {l.status === 'completed' ? '●' : '○'}
+              </Text>
+            ))}
+            <Text className={styles.relayText}>
+              接力 {o.relayLegs.filter(l => l.status === 'completed').length}/{o.relayLegs.length} 段
+            </Text>
+          </View>
+        )}
+        {(canStart || canComplete || canCancel || canReview || canStory) && (
           <View className={styles.actionRow}>
             {canStart && (
               <View className={styles.flowBtn} onClick={() => handleFlow(o, 'start')}>开始服务</View>
@@ -332,6 +485,9 @@ const HelpPage: React.FC = () => {
                 setReviewScore(5);
                 setReviewContent('');
               }}>评价</View>
+            )}
+            {canStory && (
+              <View className={styles.flowBtnGhost} onClick={() => handleStory(o)}>故事卡</View>
             )}
             {canCancel && (
               <View className={styles.cancelLink} onClick={() => handleCancel(o)}>取消</View>
@@ -352,6 +508,24 @@ const HelpPage: React.FC = () => {
             <Text className={styles.trustTitle}>我的互助信值</Text>
             <Text className={styles.trustTotal}>{trust.totalTrust}</Text>
           </View>
+          {trust.honor && (
+            <View className={styles.honorRow}>
+              <Text className={styles.honorIcon}>{trust.honor.icon}</Text>
+              <View className={styles.honorInfo}>
+                <Text className={styles.honorName}>{trust.honor.name}</Text>
+                {trust.honor.nextAt != null && (
+                  <View className={styles.honorProgress}>
+                    <View className={styles.honorProgressFill} style={{ width: `${Math.min(100, Math.round(trust.honor.progress * 100))}%` }} />
+                  </View>
+                )}
+                <Text className={styles.honorNext}>
+                  {trust.honor.nextAt != null
+                    ? `公益信值 ${trust.honor.nextAt} 晋升下一级`
+                    : '已达最高荣誉 · 数字功德碑'}
+                </Text>
+              </View>
+            </View>
+          )}
           <View className={styles.trustGrid}>
             <View className={styles.trustItem}>
               <View className={styles.trustValue}>{trust.publicTrust}</View>
@@ -368,6 +542,13 @@ const HelpPage: React.FC = () => {
               <View className={styles.trustLabel}>服务评分({trust.ratingCount})</View>
             </View>
           </View>
+          {(trust.carbonGrams ?? 0) > 0 && (
+            <View className={styles.carbonRow}>
+              🌱 互助碳减排 {(trust.carbonGrams ?? 0) >= 1000
+                ? `${((trust.carbonGrams ?? 0) / 1000).toFixed(1)}kg`
+                : `${trust.carbonGrams}g`} — 您的善行也在守护地球
+            </View>
+          )}
           {trust.totalTrust < trust.gates.paid && (
             <View className={styles.trustGate}>
               公益互助积累 {trust.gates.paid} 信值后解锁有偿接单
@@ -523,6 +704,25 @@ const HelpPage: React.FC = () => {
               <Text className={styles.pickerLabel}>紧急求助</Text>
               <Text className={styles.switchText}>{urgency ? '已开启(优先展示)' : '关闭'}</Text>
             </View>
+            {/* P2: 互助接力 */}
+            <View className={styles.urgencyRow} onClick={() => setPubRelay(!pubRelay)}>
+              <Text className={styles.pickerLabel}>互助接力</Text>
+              <Text className={styles.switchText}>{pubRelay ? '已开启(多人分段)' : '关闭'}</Text>
+            </View>
+            {pubRelay && (
+              <Picker
+                mode="selector"
+                range={['2 段', '3 段', '4 段', '5 段']}
+                value={Math.max(0, Number(pubLegs) - 2)}
+                onChange={(e) => setPubLegs(String(Number((e.detail as any).value) + 2))}
+              >
+                <View className={styles.pickerRow}>
+                  <Text className={styles.pickerLabel}>接力段数</Text>
+                  <Text className={styles.pickerValue}>{pubLegs} 段</Text>
+                  <Text className={styles.pickerArrow}>›</Text>
+                </View>
+              </Picker>
+            )}
             <View className={styles.publishBtn} onClick={handlePublish}>
               {submitting ? '发布中...' : '发布求助'}
             </View>
@@ -545,6 +745,15 @@ const HelpPage: React.FC = () => {
               {myPub.length === 0 ? (
                 <View className={styles.empty}>暂无发布记录</View>
               ) : myPub.map(o => renderMineCard(o, false))}
+            </View>
+            {/* P2: 信值传承入口(数字功德碑) */}
+            <View className={styles.heritageEntry} onClick={openHeritage}>
+              <Text className={styles.heritageIcon}>🌳</Text>
+              <View className={styles.heritageInfo}>
+                <View className={styles.heritageName}>信值传承 · 数字功德碑</View>
+                <View className={styles.heritageDesc}>公益信值可传承给亲属, 善行代代相传</View>
+              </View>
+              <View className={styles.heritageArrow}>›</View>
             </View>
             {/* 信值流水 */}
             {trust && trust.ledger.length > 0 && (
@@ -573,6 +782,7 @@ const HelpPage: React.FC = () => {
           <View className={styles.noteLine}>· 有偿互助: 双方协商价格, 平台零佣金; 信值按公益标准 10% 记录</View>
           <View className={styles.noteLine}>· 累计信值 ≥20 解锁有偿接单资格; 公益单发布者另获感谢信值</View>
           <View className={styles.noteLine}>· 接单后无故取消扣 2 信值; 服务差评(≤2星)扣 5 信值</View>
+          <View className={styles.noteLine}>· 互助接力多段完成; 公益信值可传承(数字功德碑); 高信值可捐赠</View>
           <View className={styles.noteLine}>· 违禁需求(代考/涉黄/赌博等)禁止发布, 全程规则可解释</View>
         </View>
         <View className={styles.bottomSpacer} />
@@ -609,6 +819,163 @@ const HelpPage: React.FC = () => {
             <View className={styles.sheetBtn} onClick={handleReview}>
               {submitting ? '提交中...' : '提交评价'}
             </View>
+          </View>
+        </View>
+      )}
+
+      {/* P1: 互助故事卡弹层 */}
+      {storyCard && (
+        <View className={styles.mask} onClick={() => setStoryCard(null)}>
+          <View className={styles.sheet} onClick={(e) => e.stopPropagation()}>
+            <View className={styles.sheetTitle}>互助故事卡</View>
+            <View className={styles.storyCard}>
+              <View className={styles.storyTheme}>{storyCard.theme}</View>
+              <View className={styles.storyTitle}>{storyCard.title}</View>
+              <View className={styles.storyMeta}>
+                {storyCard.categoryName} · {storyCard.date} · 帮助者获得 {storyCard.trustValueReward} 信值
+                {storyCard.donatedTrust > 0 ? `(含社区捐赠 ${storyCard.donatedTrust})` : ''}
+              </View>
+              {storyCard.publisherReview && (
+                <View className={styles.storyReview}>「{storyCard.publisherReview}」— 受助者</View>
+              )}
+              {storyCard.helperReview && (
+                <View className={styles.storyReview}>「{storyCard.helperReview}」— 帮助者</View>
+              )}
+            </View>
+            <View
+              className={styles.sheetBtn}
+              onClick={() => {
+                Taro.setClipboardData({ data: storyCard.shareText });
+                setStoryCard(null);
+              }}
+            >
+              复制分享文案
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* P1: 信值捐赠弹层 */}
+      {donateOrder && (
+        <View className={styles.mask} onClick={() => setDonateOrder(null)}>
+          <View className={styles.sheet} onClick={(e) => e.stopPropagation()}>
+            <View className={styles.sheetTitle}>为公益捐赠信值</View>
+            <View className={styles.sheetDesc}>{donateOrder.title}</View>
+            <View className={styles.donateNote}>
+              您的捐赠将在求助完成时额外奖励帮助者, 让善意流动。当前剩余 {trust?.totalTrust ?? 0} 信值。
+            </View>
+            <View className={styles.amountRow}>
+              {[1, 3, 5, 10].map(a => (
+                <View
+                  key={a}
+                  className={`${styles.amountItem} ${donateAmount === a ? styles.amountActive : ''}`}
+                  onClick={() => setDonateAmount(a)}
+                >
+                  {a} 信值
+                </View>
+              ))}
+            </View>
+            <View className={styles.sheetBtn} onClick={handleDonate}>
+              {submitting ? '捐赠中...' : `捐赠 ${donateAmount} 信值`}
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* P2: 信值传承弹层(数字功德碑) */}
+      {heritageOpen && (
+        <View className={styles.mask} onClick={() => setHeritageOpen(false)}>
+          <View className={styles.sheet} onClick={(e) => e.stopPropagation()}>
+            <View className={styles.sheetTitle}>信值传承 · 数字功德碑</View>
+            <View className={styles.sheetDesc}>仅公益信值可传承(≥10), 受让人确认后即时划转, 双边留痕</View>
+
+            {/* 待我确认的传承 */}
+            {heritageIn.filter(h => h.status === 'pending').length > 0 && (
+              <View className={styles.heritageSection}>
+                <View className={styles.heritageSectionTitle}>待我确认的传承</View>
+                {heritageIn.filter(h => h.status === 'pending').map(h => (
+                  <View key={h.heritageId} className={styles.heritageRow}>
+                    <View className={styles.heritageRowInfo}>
+                      <View className={styles.heritageRowMain}>
+                        成员 {h.ownerId} 传承给您 {h.declaredAmount} 公益信值
+                      </View>
+                      <View className={styles.ledgerTime}>{formatDate(h.createdAt)}</View>
+                    </View>
+                    <View className={styles.flowBtn} onClick={() => handleHeritageAccept(h)}>确认承继</View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* 发起传承 */}
+            <View className={styles.heritageSection}>
+              <View className={styles.heritageSectionTitle}>发起传承</View>
+              <View className={styles.inputRow}>
+                <Text className={styles.pickerLabel}>受让人ID</Text>
+                <Input
+                  className={styles.input}
+                  type="number"
+                  value={heritageHeirId}
+                  onInput={(e) => setHeritageHeirId((e.detail as any).value)}
+                  placeholder="受让人的成员编号"
+                  placeholderClass={styles.placeholder}
+                />
+              </View>
+              <View className={styles.inputRow}>
+                <Text className={styles.pickerLabel}>额度</Text>
+                <Input
+                  className={styles.input}
+                  type="digit"
+                  value={heritageAmount}
+                  onInput={(e) => setHeritageAmount((e.detail as any).value)}
+                  placeholder={`留空 = 全部公益信值(${trust?.publicTrust ?? 0})`}
+                  placeholderClass={styles.placeholder}
+                />
+              </View>
+              <View className={styles.sheetBtn} onClick={handleHeritageApply}>
+                {submitting ? '发起中...' : '发起传承'}
+              </View>
+            </View>
+
+            {/* 我的传承记录 */}
+            {heritageOut.length > 0 && (
+              <View className={styles.heritageSection}>
+                <View className={styles.heritageSectionTitle}>我发起的传承</View>
+                {heritageOut.map(h => (
+                  <View key={h.heritageId} className={styles.heritageRow}>
+                    <View className={styles.heritageRowInfo}>
+                      <View className={styles.heritageRowMain}>
+                        → 成员 {h.heirId} · {h.declaredAmount} 信值
+                      </View>
+                      <View className={styles.ledgerTime}>
+                        {h.status === 'done'
+                          ? `已划转 ${h.transferredAmount} (${formatDate(h.confirmedAt)})`
+                          : '待对方确认'}
+                      </View>
+                    </View>
+                    <Text className={h.status === 'done' ? styles.deltaPlus : styles.relayText}>
+                      {h.status === 'done' ? '已完成' : '待确认'}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {heritageIn.filter(h => h.status === 'done').length > 0 && (
+              <View className={styles.heritageSection}>
+                <View className={styles.heritageSectionTitle}>我承继的记录</View>
+                {heritageIn.filter(h => h.status === 'done').map(h => (
+                  <View key={h.heritageId} className={styles.heritageRow}>
+                    <View className={styles.heritageRowInfo}>
+                      <View className={styles.heritageRowMain}>
+                        ← 成员 {h.ownerId} · {h.transferredAmount} 信值
+                      </View>
+                      <View className={styles.ledgerTime}>{formatDate(h.confirmedAt)}</View>
+                    </View>
+                    <Text className={styles.deltaPlus}>已入账</Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         </View>
       )}
