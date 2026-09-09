@@ -35,7 +35,9 @@ export default defineAppConfig({
     'pages/alliance/index',
     'pages/pointsmall/index',
     'pages/venue/index',
-    'pages/ride/index'
+    'pages/ride/index',
+    'pages/agent-center/index',
+    'pages/cooperation/index'
   ],
   window: {
     backgroundTextStyle: 'light',

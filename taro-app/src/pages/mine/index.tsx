@@ -362,6 +362,22 @@ const MinePage: React.FC = () => {
             </View>
             <View className={styles.adminEntryArrow}>›</View>
           </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/agent-center/index' })}>
+            <View className={styles.adminEntryIcon}>🏪</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>代理商中心</View>
+              <View className={styles.adminEntryDesc}>五级代理 · 进货折扣 · 返利提现</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/cooperation/index' })}>
+            <View className={styles.adminEntryIcon}>💼</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>商务合作</View>
+              <View className={styles.adminEntryDesc}>企业/政府/经销 · AI 资质审核 · 签约</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
         </View>
 
         {/* 客服中心 */}

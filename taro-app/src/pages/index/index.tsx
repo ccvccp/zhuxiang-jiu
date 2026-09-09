@@ -6,6 +6,10 @@ import CheckoutService from '@/services/checkout-service';
 import { ProductAPI, ProductVO } from '@/api/product';
 import { PromotionAPI, ActivityVO, GroupBuyTier } from '@/api/promotion';
 import { MemberAPI } from '@/api/member';
+import { WalletAPI } from '@/api/wallet';
+import { CreditAPI } from '@/api/credit';
+import { LocationAPI, NearbyStoreVO } from '@/api/location';
+import { VenueAPI, VenuePartnerVO } from '@/api/venue';
 import { applyActiveTheme, getQuickGridIcon } from '@/services/theme-service';
 import {
   SIGN_IN_REWARD_POINTS,
@@ -50,16 +54,26 @@ const ACTIVITY_STATUS_TEXT: Record<string, string> = {
   cancelled: '已取消',
 };
 
-// 功能金刚区配置
+// 默认定位兜底(济南, 与代驾/场馆页预设一致; H5 定位失败/拒绝时)
+const DEFAULT_LNG = 117.1201;
+const DEFAULT_LAT = 36.6612;
+
+// 功能金刚区(3 行 × 5 = 15 入口)
+// Row1 高频交易 / Row2 生态联盟 / Row3 服务与赚钱
 const QUICK_ENTRIES = [
   { key: 'signin', icon: '✅', label: '每日签到' },
   { key: 'flash', icon: '⚡', label: '限时秒杀' },
   { key: 'groupbuy', icon: '🛒', label: '组团团购' },
   { key: 'recycle', icon: '🍶', label: '老酒回收' },
-  { key: 'recharge', icon: '💰', label: '余额赚钱' },
   { key: 'activity', icon: '🎁', label: '活动中心' },
-  { key: 'promotion', icon: '🤝', label: '扫码赚钱' },
+  { key: 'citystore', icon: '🏙️', label: '市级网店' },
+  { key: 'alliance', icon: '🤝', label: '同盟商城' },
+  { key: 'venue', icon: '🏨', label: '场馆合作' },
+  { key: 'ride', icon: '🚗', label: '代驾联盟' },
+  { key: 'trace', icon: '🔍', label: '溯源验真' },
+  { key: 'promotion', icon: '📱', label: '扫码赚钱' },
   { key: 'pocket', icon: '🤲', label: '顺手赚钱' },
+  { key: 'pointsmall', icon: '🎁', label: '积分商城' },
   { key: 'orders', icon: '📦', label: '我的订单' },
   { key: 'service', icon: '🎧', label: '在线客服' },
 ];
@@ -70,8 +84,14 @@ const IndexPage: React.FC = () => {
   const [activities, setActivities] = useState<ActivityVO[]>([]);
   const [tiers, setTiers] = useState<GroupBuyTier[]>([]);
   const [noticeIdx, setNoticeIdx] = useState(0);
-  const [points, setPoints] = useState<number>(0);
   const [signedInToday, setSignedInToday] = useState(false);
+  // 资产概览(登录态加载; 游客显示登录引导)
+  const [points, setPoints] = useState<number>(0);
+  const [balance, setBalance] = useState<number | null>(null);
+  const [creditQuota, setCreditQuota] = useState<number | null>(null);
+  // 附近推荐 / 好店推荐
+  const [nearbyStores, setNearbyStores] = useState<NearbyStoreVO[]>([]);
+  const [goodShops, setGoodShops] = useState<VenuePartnerVO[]>([]);
   // 主题图标覆盖就绪标记(拉取到主题后触发重渲染)
   const [, setThemeTick] = useState(0);
   // 页面级初始化只跑一次(商品/活动等公开数据)
@@ -81,17 +101,24 @@ const IndexPage: React.FC = () => {
   const loadMemberData = async () => {
     if (!isLoggedIn()) {
       setPoints(0);
+      setBalance(null);
+      setCreditQuota(null);
       setSignedInToday(false);
       return;
     }
     const memberId = Number(getMemberId());
     try {
-      const [member, signinRecords] = await Promise.all([
+      const [member, signinRecords, wallet, quota] = await Promise.all([
         MemberAPI.profile(),
         // 签到今日状态以后端记录为准(本地存储仅离线兜底)
         PointsAPI.signinRecords(memberId, 7).catch(() => null),
+        // 资产概览: 钱包余额 + 信用可用额度(失败不阻塞)
+        WalletAPI.info().catch(() => null),
+        CreditAPI.quota().catch(() => null),
       ]);
       setPoints(member.points || 0);
+      setBalance(wallet ? (wallet as any).currentBalance ?? null : null);
+      setCreditQuota(quota ? quota.availableQuota : null);
       const today = new Date().toISOString().slice(0, 10);
       const signedToday = (signinRecords || []).some(r => r.signDate === today);
       if (signedToday) {
@@ -111,10 +138,34 @@ const IndexPage: React.FC = () => {
     }
   };
 
-  // 页面每次显示时刷新会员数据(登录返回/切 tab 回来积分即时同步)
+  // 页面每次显示时刷新会员数据(登录返回/切 tab 回来资产即时同步)
   useDidShow(() => {
     loadMemberData();
   });
+
+  // 附近推荐: 定位(3s 超时兜底 + 默认坐标) → nearby 门店
+  // 独立异步流(不阻塞首屏主数据 —— H5 定位权限挂起时热销/活动仍正常渲染)
+  const loadNearbyStores = async () => {
+    let lng = DEFAULT_LNG;
+    let lat = DEFAULT_LAT;
+    try {
+      const loc = await Promise.race([
+        Taro.getLocation({ type: 'wgs84' }),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 3000)),
+      ]);
+      if (loc?.longitude && loc?.latitude) {
+        lng = loc.longitude;
+        lat = loc.latitude;
+      }
+    } catch (_) { /* 定位拒绝/失败/超时 → 默认坐标 */ }
+    try {
+      const stores = await LocationAPI.nearbyStores(lng, lat, 10, 10);
+      setNearbyStores(stores);
+    } catch (e) {
+      console.warn('[index] 附近门店加载失败:', e);
+      setNearbyStores([]);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -123,24 +174,29 @@ const IndexPage: React.FC = () => {
       const db = CheckoutService.getMockDB();
       setProducts(db.products || []);
 
-      // 并行加载: 热销推荐 / 活动 / 团购阶梯(均公开接口)
-      const [hot, acts, groupTiers] = await Promise.all([
+      // 并行加载: 热销推荐 / 活动 / 团购阶梯 / 好店推荐(均公开接口)
+      const [hot, acts, groupTiers, shops] = await Promise.all([
         ProductAPI.hot(4).catch(() => [] as ProductVO[]),
         PromotionAPI.activities({ limit: 3 }).catch(() => MOCK_ACTIVITIES),
         PromotionAPI.groupBuyTiers().catch(() => ({ tiers: [], rules: null })),
+        VenueAPI.partners().catch(() => [] as VenuePartnerVO[]),
       ]);
       setHotProducts(hot);
       setActivities(acts.length > 0 ? acts : MOCK_ACTIVITIES);
       setTiers(groupTiers.tiers);
+      setGoodShops(shops.slice(0, 10));
       setInitialized(true);
-
-      // 签到今日状态由 loadMemberData(后端记录优先)接管
 
       // 主题图标覆盖: 主题拉取完成后强制刷新金刚区图标
       applyActiveTheme().then(() => setThemeTick(t => t + 1));
-    })();
 
-    // 公告轮播
+      // 附近推荐独立加载(定位可能挂起, 不阻塞首屏)
+      loadNearbyStores();
+    })();
+  }, []);
+
+  // 公告轮播
+  useEffect(() => {
     const timer = setInterval(() => {
       setNoticeIdx(i => (i + 1) % MOCK_NOTICES.length);
     }, NOTICE_INTERVAL_MS);
@@ -159,6 +215,34 @@ const IndexPage: React.FC = () => {
     });
   };
 
+  // 签到
+  const handleSignIn = async () => {
+    if (signedInToday) {
+      Taro.showToast({ title: '今日已签到', icon: 'none' });
+      return;
+    }
+    try {
+      const result = await PointsAPI.signIn();
+      const bonusTip = result?.bonusPoints
+        ? `, 连续签到奖励 +${result.bonusPoints}` : '';
+      Taro.showToast({
+        title: `签到成功 +${result.pointsEarned} 积分${bonusTip}`,
+        icon: 'none',
+      });
+      setSignedInToday(true);
+      Taro.setStorageSync(SIGN_IN_STORAGE_KEY, new Date().toISOString().slice(0, 10));
+      await loadMemberData();
+    } catch (e) {
+      console.warn('[index] 签到失败:', e);
+      const today = new Date().toISOString().slice(0, 10);
+      const lastSign = Taro.getStorageSync(SIGN_IN_STORAGE_KEY) as string;
+      if (lastSign === today) {
+        setSignedInToday(true);
+        Taro.showToast({ title: '今日已签到', icon: 'none' });
+      }
+    }
+  };
+
   // 功能金刚区点击
   const handleQuickEntry = (key: string) => {
     switch (key) {
@@ -174,9 +258,6 @@ const IndexPage: React.FC = () => {
       case 'recycle':
         Taro.navigateTo({ url: '/pages/recycle/index' });
         break;
-      case 'recharge':
-        Taro.navigateTo({ url: '/pages/wallet/index' });
-        break;
       case 'activity':
         Taro.navigateTo({ url: '/pages/activity/index' });
         break;
@@ -186,8 +267,23 @@ const IndexPage: React.FC = () => {
       case 'pocket':
         Taro.navigateTo({ url: '/pages/pocket/index' });
         break;
-      case 'member':
-        Taro.switchTab({ url: '/pages/mine/index' });
+      case 'pointsmall':
+        Taro.navigateTo({ url: '/pages/pointsmall/index' });
+        break;
+      case 'citystore':
+        Taro.navigateTo({ url: '/pages/citystore/index' });
+        break;
+      case 'alliance':
+        Taro.navigateTo({ url: '/pages/alliance/index' });
+        break;
+      case 'venue':
+        Taro.navigateTo({ url: '/pages/venue/index' });
+        break;
+      case 'ride':
+        Taro.navigateTo({ url: '/pages/ride/index' });
+        break;
+      case 'trace':
+        Taro.navigateTo({ url: '/pages/trace-view/index' });
         break;
       case 'orders':
         Taro.navigateTo({ url: '/pages/orders/index' });
@@ -195,46 +291,6 @@ const IndexPage: React.FC = () => {
       case 'service':
         Taro.navigateTo({ url: '/pages/chat/index' });
         break;
-    }
-  };
-
-  // 签到: 后端每日签到(连续签到+宝箱奖励+幂等防重); 失败时本地降级
-  const handleSignIn = async () => {
-    if (signedInToday) {
-      Taro.showToast({ title: '今日已签到', icon: 'none' });
-      return;
-    }
-    if (!requireLogin()) return;
-    try {
-      const result = await PointsAPI.signin(Number(getMemberId()));
-      const today = new Date().toISOString().slice(0, 10);
-      Taro.setStorageSync(SIGN_IN_STORAGE_KEY, today);
-      setSignedInToday(true);
-      // 刷新积分余额(与后端账户对齐)
-      PointsAPI.account(Number(getMemberId()))
-        .then(acc => setPoints(acc.totalPoints))
-        .catch(() => setPoints(p => p + result.pointsEarned));
-      const bonusTip = result.isBonus ? ` · 宝箱日+${result.bonusPoints}` : '';
-      Taro.showToast({
-        title: `签到成功 +${result.pointsEarned} 积分${bonusTip}`,
-        icon: 'success',
-      });
-    } catch (e: any) {
-      // 后端幂等拒绝(今日已签) → 同步本地态
-      if (String(e?.message || e?.detail || '').includes('已签到')) {
-        const today = new Date().toISOString().slice(0, 10);
-        Taro.setStorageSync(SIGN_IN_STORAGE_KEY, today);
-        setSignedInToday(true);
-        Taro.showToast({ title: '今日已签到', icon: 'none' });
-        return;
-      }
-      console.warn('[index] 签到后端失败, 本地降级:', e);
-      // 降级: 本地记录 + 固定积分(离线兜底)
-      const today = new Date().toISOString().slice(0, 10);
-      Taro.setStorageSync(SIGN_IN_STORAGE_KEY, today);
-      setSignedInToday(true);
-      setPoints(p => p + SIGN_IN_REWARD_POINTS);
-      Taro.showToast({ title: `签到成功 +${SIGN_IN_REWARD_POINTS} 积分`, icon: 'success' });
     }
   };
 
@@ -259,7 +315,7 @@ const IndexPage: React.FC = () => {
           <Text className={styles.noticeText}>{MOCK_NOTICES[noticeIdx]}</Text>
         </View>
 
-        {/* 功能金刚区 */}
+        {/* 功能金刚区(3 行 15 入口) */}
         <View className={styles.quickGrid}>
           {QUICK_ENTRIES.map(item => {
             const iconVal = getQuickGridIcon(item.key, item.icon);
@@ -282,23 +338,121 @@ const IndexPage: React.FC = () => {
           })}
         </View>
 
-        {/* 签到卡片 */}
-        <View className={styles.signinCard}>
-          <View className={styles.signinLeft}>
-            <View className={styles.signinTitle}>每日签到</View>
-            <View className={styles.signinDesc}>
-              {signedInToday ? '今日已签到,明天再来' : '签到领积分 · 兑好礼'}
-            </View>
-            <View className={styles.signinPoints} onClick={(e) => { e.stopPropagation(); Taro.navigateTo({ url: '/pages/points/index' }); }}>
-              我的积分: {points} ›
-            </View>
+        {/* 资产概览卡(登录态展示; 游客引导登录) */}
+        <View className={styles.assetCard}>
+          <View className={styles.assetHeader}>
+            <Text className={styles.assetTitle}>我的资产</Text>
+            {isLoggedIn() && (
+              <Text
+                className={styles.assetMore}
+                onClick={() => Taro.navigateTo({ url: '/pages/wallet/index' })}
+              >
+                钱包 ›
+              </Text>
+            )}
           </View>
-          <View
-            className={`${styles.signinBtn} ${signedInToday ? styles.signed : ''}`}
-            onClick={handleSignIn}
-          >
-            {signedInToday ? '已签到' : '签到'}
+          {isLoggedIn() ? (
+            <View className={styles.assetGrid}>
+              <View
+                className={styles.assetItem}
+                onClick={() => Taro.navigateTo({ url: '/pages/pointsmall/index' })}
+              >
+                <View className={styles.assetValue}>{points}</View>
+                <View className={styles.assetLabel}>积分</View>
+              </View>
+              <View
+                className={styles.assetItem}
+                onClick={() => Taro.navigateTo({ url: '/pages/trust/index' })}
+              >
+                <View className={styles.assetValue}>开通</View>
+                <View className={styles.assetLabel}>信值</View>
+              </View>
+              <View
+                className={styles.assetItem}
+                onClick={() => Taro.navigateTo({ url: '/pages/wallet/index' })}
+              >
+                <View className={styles.assetValue}>
+                  {balance != null ? balance.toFixed(2) : '--'}
+                </View>
+                <View className={styles.assetLabel}>余额(元)</View>
+              </View>
+              <View
+                className={styles.assetItem}
+                onClick={() => Taro.navigateTo({ url: '/pages/credit/index' })}
+              >
+                <View className={styles.assetValue}>
+                  {creditQuota != null ? creditQuota.toFixed(0) : '--'}
+                </View>
+                <View className={styles.assetLabel}>信用额度</View>
+              </View>
+            </View>
+          ) : (
+            <View
+              className={styles.assetLoginBtn}
+              onClick={() => Taro.navigateTo({ url: '/pages/login/index' })}
+            >
+              登录查看积分 · 信值 · 余额 · 信用额度
+            </View>
+          )}
+        </View>
+
+        {/* 附近推荐(定位 → 附近门店, 距离排序) */}
+        <View className={styles.section}>
+          <View className={styles.sectionHeader}>
+            <Text className={styles.sectionTitle}>📍 附近推荐</Text>
           </View>
+          {nearbyStores.length === 0 ? (
+            <View className={styles.nearbyEmpty}>
+              门店网络建设中 · 更多竹香门店即将开业
+            </View>
+          ) : (
+            <ScrollView scrollX className={styles.nearbyScroll}>
+              {nearbyStores.map(s => (
+                <View key={s.id} className={styles.nearbyCard}>
+                  <View className={styles.nearbyName}>{s.storeName}</View>
+                  <View className={styles.nearbyMeta}>
+                    {s.storeType}{s.city ? ` · ${s.city}` : ''}
+                  </View>
+                  <View className={styles.nearbyAddr}>{s.address}</View>
+                  <View className={styles.nearbyDist}>{s.distance.toFixed(1)} km</View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+
+        {/* 好店推荐(合作场馆联盟) */}
+        <View className={styles.section}>
+          <View className={styles.sectionHeader}>
+            <Text className={styles.sectionTitle}>🏆 好店推荐</Text>
+            <Text
+              className={styles.sectionMore}
+              onClick={() => Taro.navigateTo({ url: '/pages/venue/index' })}
+            >
+              全部 ›
+            </Text>
+          </View>
+          {goodShops.length === 0 ? (
+            <View className={styles.nearbyEmpty}>
+              好店入驻中 · 酒店酒吧会所合作申请开放
+            </View>
+          ) : (
+            <ScrollView scrollX className={styles.nearbyScroll}>
+              {goodShops.map(p => (
+                <View
+                  key={p.id}
+                  className={styles.nearbyCard}
+                  onClick={() => Taro.navigateTo({ url: '/pages/venue/index' })}
+                >
+                  <View className={styles.nearbyName}>{p.partnerName}</View>
+                  <View className={styles.nearbyMeta}>
+                    {p.partnerLevel} 级合作 · 品鉴酒 {(p.tastingRate * 100).toFixed(0)}%
+                  </View>
+                  <View className={styles.nearbyAddr}>{p.contactAddress}</View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
         </View>
 
         {/* 活动横幅 */}

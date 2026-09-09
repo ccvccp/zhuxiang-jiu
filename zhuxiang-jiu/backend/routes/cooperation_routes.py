@@ -117,8 +117,12 @@ async def create_application(
     data: CreateApplicationRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """提交合作申请(用户端)"""
+    """提交合作申请(用户端; 记录 memberId 供本人查询)"""
     _require_member_id(x_member_id)
+    try:
+        member_id = int(x_member_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字")
     try:
         result = await _service.create_application(
             partner_name=data.partnerName, partner_type=data.partnerType,
@@ -128,8 +132,26 @@ async def create_application(
             contact_email=data.contactEmail,
             qualification_files=data.qualificationFiles,
             delivery_date=data.deliveryDate,
+            member_id=member_id,
         )
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/cooperation/my-applications", tags=["合作接口管理模块"])
+async def list_my_applications(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """我的合作申请(用户端, 仅本人提交记录)"""
+    _require_member_id(x_member_id)
+    try:
+        member_id = int(x_member_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字")
+    try:
+        result = await _service.list_my_applications(member_id)
+        return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)
 

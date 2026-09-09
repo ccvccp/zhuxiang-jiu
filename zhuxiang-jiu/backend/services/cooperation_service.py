@@ -89,7 +89,8 @@ class CooperationService:
                                   contact_phone: str = "",
                                   contact_email: str = "",
                                   qualification_files: list = None,
-                                  delivery_date: str = None) -> dict:
+                                  delivery_date: str = None,
+                                  member_id: int = None) -> dict:
         """提交合作申请
 
         规则:
@@ -138,6 +139,7 @@ class CooperationService:
         application = {
             "id": app_id,
             "applicationNo": app_no,
+            "memberId": member_id,
             "partnerId": partner_id,
             "partnerName": partner_name,
             "partnerNo": partner_no,
@@ -175,7 +177,13 @@ class CooperationService:
                                  partner_id: int = None,
                                  limit: int = 100) -> list[dict]:
         """查询申请列表"""
-        return await self.repo.list_applications(status, partner_id, limit)
+        return await self.repo.list_applications(status, partner_id,
+                                                 None, limit)
+
+    async def list_my_applications(self, member_id: int,
+                                    limit: int = 50) -> list[dict]:
+        """查询会员本人的合作申请(按提交时间倒序)"""
+        return await self.repo.list_applications(None, None, member_id, limit)
 
     # ============================================================
     # 2. AI资质审核

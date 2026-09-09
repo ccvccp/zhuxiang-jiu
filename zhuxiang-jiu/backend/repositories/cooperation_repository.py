@@ -145,10 +145,12 @@ class CooperationRepository:
 
     async def list_applications(self, status: str = None,
                                  partner_id: int = None,
+                                 member_id: int = None,
                                  limit: int = 100) -> list[dict]:
         if is_redis_mode():
-            return await self._redis_list_applications(status, partner_id, limit)
-        return self._mem_list_applications(status, partner_id, limit)
+            return await self._redis_list_applications(status, partner_id,
+                                                       member_id, limit)
+        return self._mem_list_applications(status, partner_id, member_id, limit)
 
     # ============================================================
     # 合作协议 CRUD
@@ -221,6 +223,7 @@ class CooperationRepository:
 
     def _mem_list_applications(self, status: str = None,
                                 partner_id: int = None,
+                                member_id: int = None,
                                 limit: int = 100) -> list[dict]:
         self._ensure_store()
         apps = list(self.store["cooperation_applications"].values())
@@ -228,6 +231,8 @@ class CooperationRepository:
             apps = [a for a in apps if a.get("status") == status]
         if partner_id:
             apps = [a for a in apps if a.get("partnerId") == partner_id]
+        if member_id is not None:
+            apps = [a for a in apps if a.get("memberId") == member_id]
         apps.sort(key=lambda a: a.get("createdAt", ""), reverse=True)
         return apps[:limit]
 
@@ -277,6 +282,9 @@ class CooperationRepository:
         keys = await client.keys(_k("cooperation", "partner", "*"))
         partners = []
         for key in keys:
+            # 排除自增序列键(36号 attract click:seq 教训)
+            if str(key).endswith(":seq"):
+                continue
             data = await client.get(key)
             if data:
                 p = json.loads(data)
@@ -304,17 +312,23 @@ class CooperationRepository:
 
     async def _redis_list_applications(self, status: str = None,
                                         partner_id: int = None,
+                                        member_id: int = None,
                                         limit: int = 100) -> list[dict]:
         client = await get_redis_client()
         keys = await client.keys(_k("cooperation", "application", "*"))
         apps = []
         for key in keys:
+            # 排除自增序列键(36号 attract click:seq 教训)
+            if str(key).endswith(":seq"):
+                continue
             data = await client.get(key)
             if data:
                 a = json.loads(data)
                 if status and a.get("status") != status:
                     continue
                 if partner_id and a.get("partnerId") != partner_id:
+                    continue
+                if member_id is not None and a.get("memberId") != member_id:
                     continue
                 apps.append(a)
         apps.sort(key=lambda a: a.get("createdAt", ""), reverse=True)
@@ -341,6 +355,9 @@ class CooperationRepository:
         keys = await client.keys(_k("cooperation", "contract", "*"))
         contracts = []
         for key in keys:
+            # 排除自增序列键(36号 attract click:seq 教训)
+            if str(key).endswith(":seq"):
+                continue
             data = await client.get(key)
             if data:
                 c = json.loads(data)

@@ -128,6 +128,135 @@
   box-shadow: $shadow-card;
 }
 
+// ============================================
+// 资产概览卡(积分/信值/余额/信用额度)
+// ============================================
+.assetCard {
+  background: linear-gradient(135deg, #fff8e7 0%, #ffe9c4 100%);
+  border-radius: $radius-md;
+  padding: $spacing-md $spacing-lg $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.assetHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-md;
+}
+
+.assetTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: #8b5a00;
+}
+
+.assetMore {
+  font-size: $font-size-xs;
+  color: #a87415;
+}
+
+.assetGrid {
+  display: flex;
+}
+
+.assetItem {
+  flex: 1;
+  text-align: center;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.assetValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: #8b5a00;
+  @include text-ellipsis;
+}
+
+.assetLabel {
+  margin-top: calc($spacing-xs / 2);
+  font-size: $font-size-xs;
+  color: #a87415;
+}
+
+.assetLoginBtn {
+  height: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f6a623 0%, #e67e22 100%);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 附近推荐 / 好店推荐(横滑卡片)
+// ============================================
+.nearbyEmpty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.nearbyScroll {
+  white-space: nowrap;
+}
+
+.nearbyCard {
+  display: inline-block;
+  vertical-align: top;
+  width: 320rpx;
+  margin-right: $spacing-md;
+  padding: $spacing-md;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+}
+
+.nearbyName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.nearbyMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-primary;
+}
+
+.nearbyAddr {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  white-space: normal;
+  line-height: $line-height-loose;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.nearbyDist {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: #c77d00;
+  font-weight: $font-weight-medium;
+}
+
 .signinLeft {
   flex: 1;
 }
