@@ -233,7 +233,9 @@ services:
     mem_reservation: 512m
     # 允许 OOM killer 杀死本容器(false=不禁用 OOM kill,即内存超限时本容器会被杀)
     oom_kill_disable: false
-    # 启动前先 seed Redis(幂等, 可重复执行)
+    # 启动前先 seed Redis(保护性幂等: marker 判定, 已初始化/已有数据则跳过,
+    # 容器重启不再清空运行期数据; 重置演示数据需显式进容器跑
+    # `python scripts/seed_redis.py --force`)
     # seed 失败不阻塞启动(后端重启时会再试)
     # 显式 cd /app 确保工作目录正确(Dockerfile 的 WORKDIR 会被某些场景覆盖)
     # 显式 exec 替换 sh 进程,让 uvicorn 成为 PID 1 接收 SIGTERM

@@ -3,7 +3,11 @@
 用途:
     - Phase 3 of Scheme B+: Redis 持久化存储迁移
     - 在启动后端服务前执行,确保 Redis 中有初始数据
-    - 幂等设计:可重复执行,会先清空旧数据再写入
+    - 保护性幂等(2026-09-09 修复): 以 marker 键 zhuxiang:_seed:done 判定,
+      已初始化(或检测到既有数据)则直接跳过, 不再清空——容器重启不会
+      抹掉运行期产生的数据(会员/市店/同盟/订单/钱包等)。
+    - 显式重置演示数据: 加 --force 参数(清空 zhuxiang: 前缀全部 key 后重写,
+      与旧行为一致; 仅在确要重置时使用)。
 
 数据来源:
     与 repositories/store.py 的 _mock_store 初始值完全一致,
@@ -14,20 +18,24 @@ Key 命名规范(对齐 repositories/backend.py 的 _k 函数):
     zhuxiang:inventory:{productId}   Hash(库存)
     zhuxiang:warehouse:slots         Hash(库位映射)
     zhuxiang:warehouse:inbound_log   List(入库日志, 初始为空)
-    zhuxiang:warehouse:outbound_log   List(出库日志, 初始为空)
+    zhuxiang:warehouse:outbound_log  List(出库日志, 初始为空)
     zhuxiang:orders                  List(订单, 初始为空)
     zhuxiang:shipping_claims         Hash(区域认领, 初始为空)
     zhuxiang:product:{productId}     Hash(产品主信息, 嵌套字段序列化为 JSON)
     zhuxiang:product:categories      List(产品分类树, 每元素为 JSON)
     zhuxiang:product:reviews:{pid}   List(产品评价, 每元素为 JSON)
+    zhuxiang:_seed:done              String(初始化 marker, ISO 时间戳)
 
 运行:
-    # 默认连接本地 Redis
+    # 默认连接本地 Redis(保护性幂等: 已初始化则跳过)
     py scripts/seed_redis.py
 
     # 指定 Redis 地址
     $env:REDIS_URL = "redis://127.0.0.1:6379/0"
     py scripts/seed_redis.py
+
+    # 强制重置演示数据(清空 zhuxiang: 前缀全部 key 后重写)
+    py scripts/seed_redis.py --force
 
     # Docker 环境
     docker-compose exec backend py scripts/seed_redis.py
@@ -36,7 +44,7 @@ Key 命名规范(对齐 repositories/backend.py 的 _k 函数):
     redis>=5.0.0 (redis-py 的 asyncio 客户端)
 
 退出码:
-    0 = 成功
+    0 = 成功(含跳过)
     1 = 连接失败 / 写入失败
 """
 
@@ -60,6 +68,10 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 KEY_PREFIX = "zhuxiang:"  # 必须与 repositories/backend.py 的 KEY_PREFIX 一致
+
+# 初始化 marker: 存在即视为已初始化, 后续启动直接跳过(保护运行期数据)。
+# 注意: 该键自身也带 zhuxiang: 前缀, --force 清空后会在重写完成时重建。
+SEED_MARKER_KEY = KEY_PREFIX + "_seed:done"
 
 
 def _k(entity: str, *parts) -> str:
@@ -695,12 +707,15 @@ async def verify_seed(client) -> dict:
     }
 
 
-async def seed() -> int:
-    """主流程:清空 → 写入 → 验证"""
+async def seed(force: bool = False) -> int:
+    """主流程(保护性幂等): 已初始化跳过 → (force 或全新库)清空 → 写入 → 验证"""
+    from datetime import datetime, timezone
+
     print("=" * 60)
     print("Redis 数据初始化(seed_redis.py)")
     print(f"  REDIS_URL: {REDIS_URL}")
     print(f"  KEY_PREFIX: {KEY_PREFIX}")
+    print(f"  force: {force}")
     print("=" * 60)
 
     # 懒导入 redis(脚本可能在没有 Redis 库的环境被误执行)
@@ -722,7 +737,31 @@ async def seed() -> int:
             return 1
         print("[OK] Redis 连接成功")
 
-        # 1. 清空旧数据
+        # ---- 0. 幂等保护(非 force): 已初始化则跳过, 绝不清空既有数据 ----
+        # 修复背景: 旧版以"清空 zhuxiang: 前缀再写入"实现幂等, 容器每次重启
+        # 都会抹掉运行期产生的全部数据。现改为 marker 制:
+        #   a) marker 存在              → 跳过(常规重启路径)
+        #   b) marker 不存在但库里有数据 → 保守视为已初始化, 补 marker 跳过
+        #   c) marker 不存在且库为空    → 首次初始化, 走完整 seed
+        # 需要重置演示数据时显式传 --force(保持旧行为: 清空后重写)。
+        if not force:
+            marker = await client.get(SEED_MARKER_KEY)
+            if marker:
+                print(f"[SKIP] 已初始化(marker={marker}), 跳过 seed —— 保护既有数据")
+                print("       如需重置演示数据: python scripts/seed_redis.py --force")
+                return 0
+            has_data = False
+            async for _key in client.scan_iter(f"{KEY_PREFIX}*", count=100):
+                has_data = True
+                break
+            if has_data:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                await client.set(SEED_MARKER_KEY, now_iso)
+                print("[SKIP] 检测到既有数据但无 marker, 补写 marker 并跳过 seed")
+                print("       (保护既有数据不被清空; 重置请用 --force)")
+                return 0
+
+        # 1. 清空旧数据(仅 force 或全新空库时执行)
         deleted = await clear_existing_data(client)
         print(f"[OK] 清空旧数据: 删除 {deleted} 个 key")
 
@@ -802,6 +841,11 @@ async def seed() -> int:
 
         print("=" * 60)
         print("[SUCCESS] Redis 数据初始化完成")
+
+        # 写入初始化 marker(此后容器重启将跳过 seed, 保护运行期数据)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await client.set(SEED_MARKER_KEY, now_iso)
+        print(f"[OK] 初始化 marker 已写入({SEED_MARKER_KEY}={now_iso})")
         print()
         print("后续步骤:")
         print("  1. 启动后端: uvicorn main:app --port 8000")
@@ -819,5 +863,7 @@ async def seed() -> int:
 
 
 if __name__ == "__main__":
-    exit_code = asyncio.run(seed())
+    # --force / -f: 显式重置(清空 zhuxiang: 前缀全部 key 后重写演示数据)
+    _force = "--force" in sys.argv or "-f" in sys.argv
+    exit_code = asyncio.run(seed(force=_force))
     sys.exit(exit_code)
