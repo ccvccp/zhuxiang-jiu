@@ -1,0 +1,696 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+// ============================================
+// 顶部 Tabs
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-lg;
+  border-bottom: 1rpx solid rgba($color-primary, 0.08);
+}
+
+.tabItem {
+  flex: 1;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  position: relative;
+
+  &.tabItemActive {
+    color: $color-primary;
+    font-weight: $font-weight-semibold;
+
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 48rpx;
+      height: 6rpx;
+      border-radius: $radius-button;
+      background: $color-primary;
+    }
+  }
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// ============================================
+// 类目筛选
+// ============================================
+.catBar {
+  white-space: nowrap;
+  margin-bottom: $spacing-md;
+  height: 64rpx;
+}
+
+.catItem {
+  display: inline-block;
+  padding: $spacing-xs $spacing-lg;
+  margin-right: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: $color-bg-card;
+  border-radius: $radius-button;
+  border: 1rpx solid rgba($color-primary, 0.1);
+
+  &.catItemActive {
+    color: $color-text-white;
+    background: $color-primary;
+    border-color: $color-primary;
+    font-weight: $font-weight-medium;
+  }
+}
+
+// ============================================
+// 商品卡片
+// ============================================
+.prodCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.prodTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-sm;
+}
+
+.prodCat {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  background: rgba($color-primary, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+.traceBadge {
+  font-size: $font-size-xs;
+  color: #2e7d32;
+  background: rgba(#2e7d32, 0.1);
+  padding: 2rpx $spacing-sm;
+  border-radius: $radius-xs;
+}
+
+.prodName {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.prodDesc {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.prodBottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: $spacing-md;
+}
+
+.prodPriceWrap {
+  display: flex;
+  align-items: baseline;
+  gap: $spacing-sm;
+  min-width: 0;
+}
+
+.prodPrice {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: #c0392b;
+}
+
+.prodStock {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.buyBtn {
+  flex-shrink: 0;
+  padding: $spacing-xs $spacing-xl;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 卡片(订单/商铺)
+// ============================================
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+// ============================================
+// 订单
+// ============================================
+.orderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.orderLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.orderName {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+  @include text-ellipsis;
+}
+
+.orderMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.orderRight {
+  flex-shrink: 0;
+  text-align: right;
+  margin-left: $spacing-sm;
+}
+
+.orderAmount {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-semibold;
+}
+
+.reviewBtn {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  background: $color-primary;
+  padding: $spacing-xs $spacing-lg;
+  border-radius: $radius-button;
+  font-weight: $font-weight-medium;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 我的商铺
+// ============================================
+.merchantTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-sm;
+}
+
+.merchantName {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.merchantBadge {
+  flex-shrink: 0;
+  font-size: $font-size-xs;
+  padding: 4rpx $spacing-sm;
+  border-radius: $radius-xs;
+  color: #c77d00;
+  background: rgba(#f5a623, 0.14);
+
+  &.badgeActive {
+    color: #2e7d32;
+    background: rgba(#2e7d32, 0.1);
+  }
+}
+
+.merchantMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+// ============================================
+// 空态/引导
+// ============================================
+.empty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 64rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.emptyText {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.emptySub {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.applyBtn {
+  margin-top: $spacing-md;
+  height: 88rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 规则说明
+// ============================================
+.noteCard {
+  background: rgba($color-primary, 0.04);
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.noteTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-primary;
+  margin-bottom: $spacing-xs;
+}
+
+.noteLine {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}
+
+// ============================================
+// 弹层
+// ============================================
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+}
+
+.sheet {
+  width: 100%;
+  background: $color-bg-card;
+  border-radius: $radius-lg $radius-lg 0 0;
+  padding: $spacing-lg;
+  padding-bottom: calc(#{$spacing-lg} + env(safe-area-inset-bottom));
+}
+
+.sheetTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  text-align: center;
+  margin-bottom: $spacing-sm;
+}
+
+.sheetDesc {
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-lg;
+}
+
+.sheetProd {
+  margin-bottom: $spacing-lg;
+}
+
+.sheetProdName {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.sheetProdMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.inputRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+  margin-bottom: $spacing-md;
+}
+
+.inputLabel {
+  flex-shrink: 0;
+  width: 100rpx;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.input {
+  flex: 1;
+  height: 56rpx;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+}
+
+.sheetTotal {
+  text-align: right;
+  font-size: $font-size-md;
+  color: #c0392b;
+  font-weight: $font-weight-semibold;
+  margin-bottom: $spacing-md;
+}
+
+.sheetBtn {
+  height: 88rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 评价星星
+// ============================================
+.scoreRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-lg;
+}
+
+.star {
+  font-size: 56rpx;
+  color: rgba($color-primary, 0.18);
+
+  &.starActive {
+    color: #f5a623;
+  }
+}
+
+.scoreText {
+  margin-left: $spacing-sm;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+}
+
+.textareaRow {
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+  padding: $spacing-md;
+  margin-bottom: $spacing-lg;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 140rpx;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+// ============================================
+// 入盟类目九宫格
+// ============================================
+.catGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-lg;
+}
+
+.catGridItem {
+  width: calc(25% - #{$spacing-sm * 0.75});
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.1);
+
+  &.catGridItemActive {
+    color: $color-text-white;
+    background: $color-primary;
+    border-color: $color-primary;
+    font-weight: $font-weight-medium;
+  }
+}
+
+// ============================================
+// 场景 tab(酒友小聚/定制需求)
+// ============================================
+.sceneTabs {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.sceneTab {
+  padding: $spacing-xs $spacing-lg;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: $color-bg-card;
+  border-radius: $radius-button;
+  border: 1rpx solid rgba($color-primary, 0.1);
+
+  &.sceneTabActive {
+    color: $color-text-white;
+    background: $color-primary;
+    border-color: $color-primary;
+    font-weight: $font-weight-medium;
+  }
+}
+
+.pickerRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+  margin-bottom: $spacing-md;
+}
+
+.pickerLabel {
+  flex-shrink: 0;
+  width: 140rpx;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.pickerValue {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.pickerPlaceholder {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.pickerArrow {
+  flex-shrink: 0;
+  font-size: $font-size-lg;
+  color: $color-text-tertiary;
+}
+
+.gatherRow {
+  display: flex;
+  gap: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.gatherField {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.15);
+
+  .pickerLabel {
+    width: 84rpx;
+  }
+}
+
+.gatherInput {
+  flex: 1;
+  height: 56rpx;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+// 场景单/定制单行
+.sceneRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.sceneLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.sceneTitle {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+  @include text-ellipsis;
+}
+
+.sceneMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.sceneCode {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+  @include text-ellipsis;
+}
+
+.sceneRight {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: $spacing-sm;
+  margin-left: $spacing-sm;
+}
+
+.sceneBadge {
+  font-size: $font-size-xs;
+  padding: 4rpx $spacing-sm;
+  border-radius: $radius-xs;
+  color: #c77d00;
+  background: rgba(#f5a623, 0.14);
+
+  &.sceneBadgeDone {
+    color: #2e7d32;
+    background: rgba(#2e7d32, 0.1);
+  }
+}
+
+.redeemBtn {
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  background: $color-primary;
+  padding: $spacing-xs $spacing-lg;
+  border-radius: $radius-button;
+  font-weight: $font-weight-medium;
+
+  &:active {
+    opacity: 0.85;
+  }
+}

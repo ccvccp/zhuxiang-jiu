@@ -1,0 +1,558 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+// ============================================
+// 顶部 Tabs
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-lg;
+  border-bottom: 1rpx solid rgba($color-primary, 0.08);
+}
+
+.tabItem {
+  flex: 1;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  position: relative;
+
+  &.tabItemActive {
+    color: $color-primary;
+    font-weight: $font-weight-semibold;
+
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 48rpx;
+      height: 6rpx;
+      border-radius: $radius-button;
+      background: $color-primary;
+    }
+  }
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+// ============================================
+// 券提示卡
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $color-primary, rgba($color-primary, 0.78));
+  border-radius: $radius-lg;
+  padding: $spacing-xl $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card-hover;
+}
+
+.heroLabel {
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.75);
+}
+
+.heroValue {
+  margin-top: $spacing-xs * 0.5;
+  font-size: 64rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+  line-height: 1.2;
+}
+
+.heroMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.75);
+}
+
+// ============================================
+// 卡片
+// ============================================
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+// ============================================
+// 叫代驾表单
+// ============================================
+.presetRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  margin-bottom: $spacing-sm;
+}
+
+.presetLabel {
+  flex-shrink: 0;
+  width: 110rpx;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.presetValue {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+  @include text-ellipsis;
+}
+
+.presetArrow {
+  flex-shrink: 0;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  padding: $spacing-xs $spacing-sm;
+  background: rgba($color-primary, 0.08);
+  border-radius: $radius-xs;
+}
+
+.inputRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  border: 1rpx solid rgba($color-primary, 0.12);
+  margin-bottom: $spacing-md;
+}
+
+.input {
+  flex: 1;
+  height: 56rpx;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+}
+
+.callBtn {
+  margin-top: $spacing-sm;
+  height: 92rpx;
+  background: linear-gradient(135deg, $color-primary, rgba($color-primary, 0.85));
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  letter-spacing: 4rpx;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 行程列表
+// ============================================
+.rideBlock {
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.rideRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+}
+
+.rideLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.rideTitle {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.rideMeta {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.rideRight {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-left: $spacing-sm;
+}
+
+.expandArrow {
+  font-size: $font-size-lg;
+  color: $color-text-tertiary;
+}
+
+.statusBadge {
+  font-size: $font-size-xs;
+  padding: 4rpx $spacing-sm;
+  border-radius: $radius-xs;
+  color: #c77d00;
+  background: rgba(#f5a623, 0.14);
+
+  &.badgeSettled {
+    color: #2e7d32;
+    background: rgba(#2e7d32, 0.1);
+  }
+
+  &.badgeCancelled {
+    color: $color-text-tertiary;
+    background: rgba($color-text-tertiary, 0.08);
+  }
+}
+
+.rideDetail {
+  padding: 0 0 $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.detailLine {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: $line-height-loose;
+}
+
+.cancelBtn {
+  margin-top: $spacing-sm;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid rgba(#e64340, 0.5);
+  color: #e64340;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+
+  &:active {
+    opacity: 0.8;
+  }
+}
+
+// ============================================
+// 券包
+// ============================================
+.pkgStats {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  margin-bottom: $spacing-sm;
+}
+
+.expiringTip {
+  font-size: $font-size-xs;
+  color: #c77d00;
+  background: rgba(#f5a623, 0.12);
+  border-radius: $radius-sm;
+  padding: $spacing-xs $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.couponRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx dashed rgba($color-primary, 0.15);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.couponLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.couponValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: #c0392b;
+}
+
+.couponCode {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.couponRight {
+  flex-shrink: 0;
+  text-align: right;
+  margin-left: $spacing-sm;
+}
+
+.couponBadge {
+  font-size: $font-size-xs;
+  padding: 4rpx $spacing-sm;
+  border-radius: $radius-xs;
+  color: $color-text-tertiary;
+  background: rgba($color-text-tertiary, 0.08);
+
+  &.couponOk {
+    color: $color-primary;
+    background: rgba($color-primary, 0.1);
+  }
+}
+
+.couponExp {
+  margin-top: $spacing-xs * 0.5;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 司机端
+// ============================================
+.driverStatusRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: $spacing-md;
+  border-bottom: 1rpx solid rgba($color-primary, 0.08);
+}
+
+.driverTitle {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.onlineBtns {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.miniBtn {
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  background: $color-primary;
+  padding: $spacing-xs $spacing-lg;
+  border-radius: $radius-button;
+  font-weight: $font-weight-medium;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.miniBtnGhost {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  border: 1rpx solid rgba($color-primary, 0.4);
+  padding: $spacing-xs $spacing-lg;
+  border-radius: $radius-button;
+}
+
+.venueSection {
+  margin-top: $spacing-md;
+}
+
+.sectionTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin: $spacing-sm 0;
+}
+
+.venueEmpty {
+  padding: $spacing-sm 0;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.driverRideRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md 0;
+  border-bottom: 1rpx solid rgba($color-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.driverActions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: $spacing-sm;
+  margin-left: $spacing-sm;
+}
+
+// ============================================
+// 空态/引导
+// ============================================
+.empty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 64rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.emptyText {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.emptySub {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.applyBtn {
+  margin-top: $spacing-md;
+  height: 88rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+// ============================================
+// 规则说明
+// ============================================
+.noteCard {
+  background: rgba($color-primary, 0.04);
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.noteTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-primary;
+  margin-bottom: $spacing-xs;
+}
+
+.noteLine {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}
+
+// ============================================
+// 司机申请弹层
+// ============================================
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+}
+
+.sheet {
+  width: 100%;
+  background: $color-bg-card;
+  border-radius: $radius-lg $radius-lg 0 0;
+  padding: $spacing-lg;
+  padding-bottom: calc(#{$spacing-lg} + env(safe-area-inset-bottom));
+}
+
+.sheetTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  text-align: center;
+  margin-bottom: $spacing-sm;
+}
+
+.sheetDesc {
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-lg;
+}
+
+.declRow {
+  font-size: $font-size-xs;
+  color: #c77d00;
+  text-align: center;
+  margin-bottom: $spacing-md;
+}
+
+.sheetBtn {
+  height: 88rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}

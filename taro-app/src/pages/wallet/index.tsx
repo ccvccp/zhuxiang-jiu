@@ -1,5 +1,5 @@
 /**
- * 钱包 · 余额/充值/提现/流水/收益预估
+ * 钱包 · 余额/充值/提现/定期存单/奖品/流水/收益预估
  * 数据来源: 后端 /api/wallet/*
  * 开通条件: 会员等级 ≥ L2(成长值 ≥ 500), 未开通时引导开通
  */
@@ -8,7 +8,10 @@ import { View, Text, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
-import { WalletAPI, WalletInfoVO, WalletTxVO, TX_TYPE_NAME } from '@/api/wallet';
+import {
+  WalletAPI, WalletInfoVO, WalletTxVO, WalletDepositVO, WalletRewardVO,
+  TX_TYPE_NAME, DEPOSIT_STATUS_NAME, REWARD_STATUS_NAME, DEPOSIT_TIERS,
+} from '@/api/wallet';
 
 // 流水类型筛选
 const TX_TABS = [
@@ -18,6 +21,7 @@ const TX_TABS = [
   { key: 'consume', label: '消费' },
   { key: 'interest', label: '收益' },
   { key: 'rebate', label: '返利' },
+  { key: 'transfer_regular', label: '定期' },
 ];
 
 // 快捷充值金额
@@ -26,6 +30,7 @@ const QUICK_AMOUNTS = [100, 500, 1000, 5000];
 type PageState = 'loading' | 'not-open' | 'ready';
 
 const formatTime = (t: string): string => (t ? t.slice(0, 19).replace('T', ' ') : '');
+const formatDate = (t: string): string => (t ? t.slice(0, 10) : '');
 
 const WalletPage: React.FC = () => {
   const [state, setState] = useState<PageState>('loading');
@@ -34,6 +39,9 @@ const WalletPage: React.FC = () => {
   const [txFilter, setTxFilter] = useState('');
   const [opening, setOpening] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // 定期与奖品
+  const [deposits, setDeposits] = useState<WalletDepositVO[]>([]);
+  const [rewards, setRewards] = useState<WalletRewardVO[]>([]);
 
   // 充值弹层状态
   const [showDeposit, setShowDeposit] = useState(false);
@@ -41,15 +49,23 @@ const WalletPage: React.FC = () => {
   // 提现弹层状态
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [wdAmount, setWdAmount] = useState('');
+  // 转定期弹层状态
+  const [showRegular, setShowRegular] = useState(false);
+  const [regAmount, setRegAmount] = useState('');
+  const [regPeriod, setRegPeriod] = useState(3);
 
   const loadAll = async () => {
     try {
-      const [w, t] = await Promise.all([
+      const [w, t, ds, rs] = await Promise.all([
         WalletAPI.info(),
         WalletAPI.transactions().catch((): WalletTxVO[] => []),
+        WalletAPI.deposits().catch((): WalletDepositVO[] => []),
+        WalletAPI.rewards().catch((): WalletRewardVO[] => []),
       ]);
       setInfo(w);
       setTxs(t);
+      setDeposits(ds);
+      setRewards(rs);
       setState('ready');
     } catch (e: any) {
       // 404 = 钱包未开通
@@ -137,6 +153,107 @@ const WalletPage: React.FC = () => {
     }
   };
 
+  // 转定期
+  const handleTransferRegular = async () => {
+    if (submitting) return;
+    const amount = Number(regAmount);
+    const tier = DEPOSIT_TIERS.find(t => t.period === regPeriod);
+    if (!amount || amount <= 0) {
+      Taro.showToast({ title: '请输入存入金额', icon: 'none' });
+      return;
+    }
+    if (tier && amount < tier.min) {
+      Taro.showToast({ title: `${regPeriod} 月档最低 ¥${tier.min}`, icon: 'none' });
+      return;
+    }
+    if (info && amount > info.currentBalance) {
+      Taro.showToast({ title: '超出活期余额', icon: 'none' });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await WalletAPI.transferRegular(amount, regPeriod);
+      Taro.showToast({ title: '转定期成功', icon: 'success' });
+      setShowRegular(false);
+      setRegAmount('');
+      loadAll();
+    } catch (e) {
+      console.warn('[wallet] 转定期失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 定期到期取出
+  const handleSettle = async (d: WalletDepositVO) => {
+    if (submitting) return;
+    const res = await Taro.showModal({
+      title: '到期取出',
+      content: `本金 ¥${d.amount.toFixed(2)} + 收益 ¥${d.expectedInterest.toFixed(2)} 将入活期, 奖品转为可领取。确认取出?`,
+    });
+    if (!res.confirm) return;
+    setSubmitting(true);
+    try {
+      await WalletAPI.settleDeposit(d.depositNo);
+      Taro.showToast({ title: '已取出', icon: 'success' });
+      loadAll();
+    } catch (e) {
+      console.warn('[wallet] 取出失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 定期提前取出
+  const handleEarlySettle = async (d: WalletDepositVO) => {
+    if (submitting) return;
+    const res = await Taro.showModal({
+      title: '提前取出确认',
+      content: `将收取 1% 手续费(¥${(d.amount * 0.01).toFixed(2)}), 并损失全部余额收益与奖品。确认提前取出?`,
+    });
+    if (!res.confirm) return;
+    setSubmitting(true);
+    try {
+      await WalletAPI.earlySettleDeposit(d.depositNo);
+      Taro.showToast({ title: '已提前取出', icon: 'success' });
+      loadAll();
+    } catch (e) {
+      console.warn('[wallet] 提前取出失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 领取奖品
+  const handleClaim = async (r: WalletRewardVO) => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await WalletAPI.claimReward(r.rewardNo);
+      Taro.showToast({ title: '已领取, 等待发货', icon: 'success' });
+      loadAll();
+    } catch (e) {
+      console.warn('[wallet] 领取失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 奖品签收
+  const handleSign = async (r: WalletRewardVO) => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await WalletAPI.signReward(r.rewardNo);
+      Taro.showToast({ title: '已签收', icon: 'success' });
+      loadAll();
+    } catch (e) {
+      console.warn('[wallet] 签收失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // ============================================
   // 加载中
   // ============================================
@@ -208,6 +325,7 @@ const WalletPage: React.FC = () => {
         <View className={styles.heroActions}>
           <View className={styles.heroBtn} onClick={() => setShowDeposit(true)}>充值</View>
           <View className={styles.heroBtnGhost} onClick={() => setShowWithdraw(true)}>提现</View>
+          <View className={styles.heroBtnGhost} onClick={() => setShowRegular(true)}>转定期</View>
         </View>
       </View>
 
@@ -232,6 +350,81 @@ const WalletPage: React.FC = () => {
             <View className={styles.statsLabel}>累计提现</View>
           </View>
         </View>
+      </View>
+
+      {/* 定期存单 */}
+      <View className={styles.section}>
+        <View className={styles.sectionTitle}>
+          定期存单
+          {deposits.length > 0 && <Text className={styles.sectionCount}>{deposits.length} 笔</Text>}
+        </View>
+        {deposits.length === 0 ? (
+          <View className={styles.empty}>
+            <View className={styles.emptyIcon}>🏦</View>
+            <View className={styles.emptyText}>暂无定期, 转定期享年化 3%-5%+奖品</View>
+          </View>
+        ) : (
+          deposits.map(d => (
+            <View key={d.depositNo} className={styles.depItem}>
+              <View className={styles.depLeft}>
+                <View className={styles.depTitle}>
+                  {d.period} 个月定期 · 年化 {(d.annualRate * 100).toFixed(1)}%
+                </View>
+                <View className={styles.depMeta}>
+                  ¥{d.amount.toFixed(2)} · {formatDate(d.startDate)} ~ {formatDate(d.endDate)}
+                </View>
+                <View className={styles.depMeta}>
+                  预计收益 ¥{d.expectedInterest.toFixed(2)}
+                  {d.rewardType ? ` · 奖品: ${d.rewardType}` : ''}
+                </View>
+              </View>
+              <View className={styles.depRight}>
+                <View className={`${styles.depBadge} ${d.matured || d.status === 'matured' ? styles.depBadgeMatured : ''}`}>
+                  {d.matured ? '已到期' : DEPOSIT_STATUS_NAME[d.status] || d.status}
+                </View>
+                {d.status === 'active' && (d.matured ? (
+                  <View className={styles.depAction} onClick={() => handleSettle(d)}>取出</View>
+                ) : (
+                  <View className={styles.depActionGhost} onClick={() => handleEarlySettle(d)}>提前取出</View>
+                ))}
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+
+      {/* 我的奖品 */}
+      <View className={styles.section}>
+        <View className={styles.sectionTitle}>
+          我的奖品
+          {rewards.length > 0 && <Text className={styles.sectionCount}>{rewards.length} 件</Text>}
+        </View>
+        {rewards.length === 0 ? (
+          <View className={styles.empty}>
+            <View className={styles.emptyIcon}>🎁</View>
+            <View className={styles.emptyText}>暂无奖品, 定期到期可获赠品</View>
+          </View>
+        ) : (
+          rewards.map(r => (
+            <View key={r.rewardNo} className={styles.depItem}>
+              <View className={styles.depLeft}>
+                <View className={styles.depTitle}>{r.rewardType}</View>
+                <View className={styles.depMeta}>
+                  价值 ¥{r.rewardValue.toFixed(2)} · {formatDate(r.createdAt)}
+                </View>
+              </View>
+              <View className={styles.depRight}>
+                <View className={styles.depBadge}>{REWARD_STATUS_NAME[r.status] || r.status}</View>
+                {r.status === 'claimable' && (
+                  <View className={styles.depAction} onClick={() => handleClaim(r)}>领取</View>
+                )}
+                {r.status === 'shipped' && (
+                  <View className={styles.depAction} onClick={() => handleSign(r)}>签收</View>
+                )}
+              </View>
+            </View>
+          ))
+        )}
       </View>
 
       {/* 交易流水 */}
@@ -341,6 +534,44 @@ const WalletPage: React.FC = () => {
             </View>
             <View className={styles.sheetBtn} onClick={handleWithdraw}>
               {submitting ? '提交中...' : '确认提现'}
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      {/* 转定期弹层 */}
+      {showRegular ? (
+        <View className={styles.mask} onClick={() => setShowRegular(false)}>
+          <View className={styles.sheet} onClick={(e) => e.stopPropagation()}>
+            <View className={styles.sheetTitle}>活期转定期</View>
+            <View className={styles.sheetDesc}>
+              活期余额 ¥{(info?.currentBalance ?? 0).toFixed(2)} · 到期返本金+收益, 另赠奖品
+            </View>
+            {/* 存期档位 */}
+            <View className={styles.quickRow}>
+              {DEPOSIT_TIERS.map(t => (
+                <View
+                  key={t.period}
+                  className={`${styles.quickItem} ${regPeriod === t.period ? styles.quickItemActive : ''}`}
+                  onClick={() => setRegPeriod(t.period)}
+                >
+                  <View>{t.period} 个月</View>
+                  <View className={styles.quickSub}>{t.rate} 年化</View>
+                </View>
+              ))}
+            </View>
+            <View className={styles.inputRow}>
+              <Text className={styles.inputPrefix}>¥</Text>
+              <Input
+                className={styles.amountInput}
+                type='digit'
+                value={regAmount}
+                placeholder={`最低 ${DEPOSIT_TIERS.find(t => t.period === regPeriod)?.min ?? 0} 元`}
+                onInput={(e) => setRegAmount(e.detail.value)}
+              />
+            </View>
+            <View className={styles.sheetBtn} onClick={handleTransferRegular}>
+              {submitting ? '转入中...' : '确认转入'}
             </View>
           </View>
         </View>

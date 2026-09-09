@@ -379,6 +379,34 @@ async def place_order(
         _handle(e)
 
 
+@router.get("/api/alliance/my-merchant", tags=["AI智能网站同盟模块"])
+async def get_my_merchant(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """我的同盟商铺档案(未入盟返回 null, 前端引导入盟)"""
+    member_id = _require_member(x_member_id)
+    try:
+        merchant = await _service.repo.find_merchant_by_member(member_id)
+        return {"success": True, "data": merchant}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/alliance/my-orders", tags=["AI智能网站同盟模块"])
+async def list_my_orders(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    status: str = Query(None, description="状态筛选"),
+):
+    """我的同盟订单列表(用户端, 仅本人购买记录)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.list_orders(buyer_id=member_id,
+                                            status=status)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/alliance/orders", tags=["AI智能网站同盟模块"])
 async def list_orders(
     x_role: str = Header(None, alias="X-Role"),
@@ -787,6 +815,22 @@ async def list_custom_demands(
         from services.alliance_scene_service import AllianceSceneService
         result = await AllianceSceneService().list_custom_demands(
             merchant_id=merchantId, status=status)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/alliance/my-demands", tags=["AI智能网站同盟模块"])
+async def list_my_demands(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    status: str = Query(None),
+):
+    """我的定制需求列表(用户端, 仅本人提交记录, 含报价状态)"""
+    member_id = _require_member(x_member_id)
+    try:
+        from services.alliance_scene_service import AllianceSceneService
+        result = await AllianceSceneService().list_custom_demands(
+            user_id=member_id, status=status)
         return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)

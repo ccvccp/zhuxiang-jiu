@@ -11,8 +11,8 @@
  *   2.  www.zxjiu.com    → https://zxjiu.com(生产 www 子域)
  *   3.  m.zxjiu.com      → https://zxjiu.com(任意子域均生产)
  *   4.  192.168.0.107   → http://192.168.0.107:8000(局域网真机回退)
- *   5.  localhost        → http://192.168.0.107:8000(本机调试回退)
- *   6.  127.0.0.1        → http://192.168.0.107:8000(本机调试回退)
+ *   5.  localhost        → http://localhost:8000(本机调试, 后端同host)
+ *   6.  127.0.0.1        → http://127.0.0.1:8000(本机调试, 后端同host)
  *   7.  同域子串不误判: zxjiu.com.evil.com → 调试后端(防后缀伪造)
  *   8.  window 未定义(H5 SSR 边界) → 调试后端(安全默认)
  *   [weapp 端·无 window 固定生产]
@@ -76,14 +76,14 @@ record('H5 局域网 172.16.x → 同机后端 :8000',
   h5('172.16.3.9') === 'http://172.16.3.9:8000', h5('172.16.3.9'));
 record('H5 公网 IP 直访 47.236.61.117 → 同源直连',
   h5('47.236.61.117') === 'http://47.236.61.117', h5('47.236.61.117'));
-record('H5 localhost → 调试后端',
-  h5('localhost') === 'http://192.168.0.107:8000', h5('localhost'));
-record('H5 127.0.0.1 → 调试后端',
-  h5('127.0.0.1') === 'http://192.168.0.107:8000', h5('127.0.0.1'));
+record('H5 localhost → 本机调试后端 localhost:8000',
+  h5('localhost') === 'http://localhost:8000', h5('localhost'));
+record('H5 127.0.0.1 → 本机调试后端 127.0.0.1:8000',
+  h5('127.0.0.1') === 'http://127.0.0.1:8000', h5('127.0.0.1'));
 record('后缀伪造域 zxjiu.com.evil.com 不误判为生产(同源兜底)',
   h5('zxjiu.com.evil.com') === 'http://zxjiu.com.evil.com', h5('zxjiu.com.evil.com'));
-record('H5 window 未定义(SSR 边界) → 安全默认调试后端',
-  loadConfig('h5', undefined).API_BASE === 'http://192.168.0.107:8000');
+record('H5 window 未定义(SSR 边界) → 安全默认本机调试后端',
+  loadConfig('h5', undefined).API_BASE === 'http://localhost:8000');
 
 // ---------- weapp 端 ----------
 record('weapp 构建(无 window) → 固定生产 https://zxjiu.com',

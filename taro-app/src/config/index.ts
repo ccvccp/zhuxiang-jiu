@@ -9,11 +9,11 @@
 // ============================================================
 // 三级主机判定(H5 按页面域名自动选择, 换环境无需改码重新构建):
 //   1. 生产域名 zxjiu.com(含子域) → https://zxjiu.com(nginx 同源反代 /api)
-//   2. 本机调试(localhost/127.0.0.1) → http://192.168.0.107:8000(开发机后端)
-//   3. 其余主机(公网 IP 直访/任意部署主机) → 页面同源(window.location.origin,
+//   2. 本机调试(localhost/127.0.0.1) → http://<同hostname>:8000(后端与本机同host)
+//   3. 局域网 IP 访问(真机调试) → http://<页面host>:8000(同网段开发机后端)
+//   4. 其余主机(公网 IP 直访/任意部署主机) → 页面同源(window.location.origin,
 //      nginx 已同源反代 /api, 证书未就绪的 http 阶段同样可用)
 // weapp 无 window, 固定生产域名(小程序合法域名要求 https)
-const LAN_HOST = '192.168.0.107';
 const API_PORT = '8000';
 
 /** 生产域名(DNS 解析指向服务器, nginx 同源反代 /api) */
@@ -38,11 +38,11 @@ const resolveApiBase = (): string => {
     return `https://${PROD_DOMAIN}`; // weapp: 固定生产域名
   }
   if (typeof window === 'undefined') {
-    return `http://${LAN_HOST}:${API_PORT}`; // SSR 边界安全默认
+    return `http://localhost:${API_PORT}`; // SSR 边界安全默认
   }
   const { hostname, origin } = window.location;
   if (isProdHost(hostname)) return `https://${PROD_DOMAIN}`;       // 生产域名
-  if (isLocalDebugHost(hostname)) return `http://${LAN_HOST}:${API_PORT}`; // 本机调试
+  if (isLocalDebugHost(hostname)) return `http://${hostname}:${API_PORT}`; // 本机调试(后端同机)
   if (isPrivateIpHost(hostname)) return `http://${hostname}:${API_PORT}`;  // 局域网真机调试
   return origin; // 其余(公网 IP 直访等): 同源直连
 };

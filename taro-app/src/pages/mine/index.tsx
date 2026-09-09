@@ -290,9 +290,17 @@ const MinePage: React.FC = () => {
           </View>
         )}
 
-        {/* 客服中心 */}
+        {/* 资产管理 */}
         <View className={styles.section}>
           <View className={styles.sectionTitle}>资产管理</View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/trust/index' })}>
+            <View className={styles.adminEntryIcon}>🧧</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>信值兑换</View>
+              <View className={styles.adminEntryDesc}>积分换信值 · 支付组合 · 1 信值 = 1 元</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
           <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/credit/index' })}>
             <View className={styles.adminEntryIcon}>💳</View>
             <View className={styles.adminEntryInfo}>
@@ -301,11 +309,56 @@ const MinePage: React.FC = () => {
             </View>
             <View className={styles.adminEntryArrow}>›</View>
           </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/wallet/index' })}>
+            <View className={styles.adminEntryIcon}>💰</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>钱包盈利</View>
+              <View className={styles.adminEntryDesc}>活期/定期收益 · 奖品 · 返利提现</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
           <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/recycle/index' })}>
             <View className={styles.adminEntryIcon}>🍶</View>
             <View className={styles.adminEntryInfo}>
               <View className={styles.adminEntryName}>老酒回收</View>
               <View className={styles.adminEntryDesc}>AI 估值 · 兑换新酒 · 折现回收</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+        </View>
+
+        {/* 经营活动 */}
+        <View className={styles.section}>
+          <View className={styles.sectionTitle}>经营活动</View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/citystore/index' })}>
+            <View className={styles.adminEntryIcon}>🏙️</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>市级网店</View>
+              <View className={styles.adminEntryDesc}>SVIP 开店 · 一城一店 · 月度考核折扣</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/alliance/index' })}>
+            <View className={styles.adminEntryIcon}>🤝</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>同盟商城</View>
+              <View className={styles.adminEntryDesc}>酒水不分家 · 八大类目 · 下单评价入盟</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/venue/index' })}>
+            <View className={styles.adminEntryIcon}>🏨</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>场馆合作联盟</View>
+              <View className={styles.adminEntryDesc}>酒店酒吧会所 · 品鉴酒配额 · 等级分润</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/ride/index' })}>
+            <View className={styles.adminEntryIcon}>🚗</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>代驾联盟</View>
+              <View className={styles.adminEntryDesc}>满额赠券 · 三轨派单 · 券抵扣车费</View>
             </View>
             <View className={styles.adminEntryArrow}>›</View>
           </View>
@@ -348,6 +401,14 @@ const MinePage: React.FC = () => {
             <View className={styles.adminEntryInfo}>
               <View className={styles.adminEntryName}>我的积分</View>
               <View className={styles.adminEntryDesc}>签到日历 · 积分流水 · 过期提醒</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/pointsmall/index' })}>
+            <View className={styles.adminEntryIcon}>🎁</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>积分商城</View>
+              <View className={styles.adminEntryDesc}>好酒好物 · 会员权益 · 兑现金 AI 推荐</View>
             </View>
             <View className={styles.adminEntryArrow}>›</View>
           </View>

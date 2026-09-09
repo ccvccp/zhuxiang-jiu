@@ -29,7 +29,13 @@ export default defineAppConfig({
     'pages/tickets/index',
     'pages/messages/index',
     'pages/recycle/index',
-    'pages/credit/index'
+    'pages/credit/index',
+    'pages/trust/index',
+    'pages/citystore/index',
+    'pages/alliance/index',
+    'pages/pointsmall/index',
+    'pages/venue/index',
+    'pages/ride/index'
   ],
   window: {
     backgroundTextStyle: 'light',

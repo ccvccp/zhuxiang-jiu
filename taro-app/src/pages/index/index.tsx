@@ -41,6 +41,15 @@ const MOCK_ACTIVITIES: ActivityVO[] = [
   },
 ];
 
+// 活动状态徽标中文映射(与活动中心页 STATUS_MAP 对齐)
+const ACTIVITY_STATUS_TEXT: Record<string, string> = {
+  draft: '筹备中',
+  registering: '报名中',
+  ongoing: '进行中',
+  ended: '已结束',
+  cancelled: '已取消',
+};
+
 // 功能金刚区配置
 const QUICK_ENTRIES = [
   { key: 'signin', icon: '✅', label: '每日签到' },
@@ -305,7 +314,7 @@ const IndexPage: React.FC = () => {
                 <View className={styles.activityDesc}>
                   {act.description || '精彩活动进行中'}
                 </View>
-                <View className={styles.activityBadge}>{act.status}</View>
+                <View className={styles.activityBadge}>{ACTIVITY_STATUS_TEXT[act.status] || act.status}</View>
               </View>
             ))}
           </ScrollView>

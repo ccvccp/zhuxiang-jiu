@@ -737,9 +737,11 @@ class AllianceService:
         return await self.repo.save_share_settings(settings)
 
     async def list_orders(self, merchant_id: int = None,
-                          status: str = None) -> list[dict]:
+                          status: str = None,
+                          buyer_id: int = None) -> list[dict]:
         return await self.repo.list_orders(merchant_id=merchant_id,
-                                           status=status)
+                                           status=status,
+                                           buyer_id=buyer_id)
 
     # ============================================================
     # 4. 评价信用(P0 基础版: 提交/查询/星级聚合/折叠)

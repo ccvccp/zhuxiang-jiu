@@ -339,6 +339,33 @@ async def recommend_exchange(
         _handle(e)
 
 
+@router.get("/api/credit/exchange/catalog", tags=["信用管理模块"])
+async def get_exchange_catalog():
+    """积分商城兑换目录(商品/权益/费率/上限, 公开)"""
+    try:
+        from repositories.credit_repository import (
+            EXCHANGE_CATALOG, EXCHANGE_RATES,
+            QUARTER_CASH_CAP, CASH_TAX_FREE_AMOUNT, CASH_TAX_RATE,
+        )
+        items = [
+            {"itemId": item_id, **item}
+            for item_id, item in EXCHANGE_CATALOG.items()
+        ]
+        return {
+            "success": True,
+            "data": {
+                "items": items,
+                "count": len(items),
+                "rates": EXCHANGE_RATES,
+                "quarterCashCap": QUARTER_CASH_CAP,
+                "cashTaxFreeAmount": CASH_TAX_FREE_AMOUNT,
+                "cashTaxRate": CASH_TAX_RATE,
+            },
+        }
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/credit/quarterly/{user_id}", tags=["信用管理模块"])
 async def list_quarterly_settlements(
     user_id: int,

@@ -57,6 +57,79 @@ const mapTx = (t: any): WalletTxVO => ({
   createdAt: t.createdAt || t.created_at || '',
 });
 
+/** 定期存单 */
+export interface WalletDepositVO {
+  depositNo: string;
+  amount: number;
+  period: number;            // 存期(月)
+  annualRate: number;
+  expectedInterest: number;
+  rewardType: string;
+  rewardValue: number;
+  startDate: string;
+  endDate: string;
+  status: string;            // active/matured/settled/early_settled
+  matured?: boolean;
+}
+
+/** 奖品 */
+export interface WalletRewardVO {
+  rewardNo: string;
+  depositNo: string;
+  rewardType: string;
+  rewardValue: number;
+  status: string;            // claimable/claimed/shipped/signed/expired
+  createdAt: string;
+}
+
+/** 定期状态 → 中文名 */
+export const DEPOSIT_STATUS_NAME: Record<string, string> = {
+  active: '存入中',
+  matured: '已到期',
+  settled: '已结清',
+  early_settled: '提前结清',
+};
+
+/** 奖品状态 → 中文名 */
+export const REWARD_STATUS_NAME: Record<string, string> = {
+  claimable: '可领取',
+  claimed: '待发货',
+  shipped: '配送中',
+  signed: '已签收',
+  expired: '已过期',
+};
+
+/** 定期档位(与后端 DEPOSIT_TIERS 对齐) */
+export const DEPOSIT_TIERS: Array<{ period: number; min: number; rate: string }> = [
+  { period: 3, min: 1000, rate: '3.0%' },
+  { period: 6, min: 2000, rate: '5.0%' },
+  { period: 12, min: 5000, rate: '3.0%' },
+  { period: 24, min: 10000, rate: '3.5%' },
+];
+
+const mapDeposit = (d: any): WalletDepositVO => ({
+  depositNo: d.depositNo || d.deposit_no || '',
+  amount: Number(d.amount || 0),
+  period: Number(d.period || 0),
+  annualRate: Number(d.annualRate ?? d.annual_rate ?? 0),
+  expectedInterest: Number(d.expectedInterest ?? d.expected_interest ?? 0),
+  rewardType: d.rewardType || d.reward_type || '',
+  rewardValue: Number(d.rewardValue ?? d.reward_value ?? 0),
+  startDate: d.startDate || d.start_date || '',
+  endDate: d.endDate || d.end_date || '',
+  status: d.status || 'active',
+  matured: Boolean(d.matured),
+});
+
+const mapReward = (r: any): WalletRewardVO => ({
+  rewardNo: r.rewardNo || r.reward_no || '',
+  depositNo: r.depositNo || r.deposit_no || '',
+  rewardType: r.rewardType || r.reward_type || '',
+  rewardValue: Number(r.rewardValue ?? r.reward_value ?? 0),
+  status: r.status || 'claimable',
+  createdAt: r.createdAt || r.created_at || '',
+});
+
 export const WalletAPI = {
   /** 开通钱包(等级 ≥ L2) */
   async open(): Promise<void> {
@@ -127,5 +200,64 @@ export const WalletAPI = {
   /** 收益规则(活期/定期档位) */
   async interestRules(): Promise<any> {
     return await request<any>({ url: '/api/wallet/interest/rules' });
+  },
+
+  /** 活期转定期(存期 3/6/12/24 月, 各档最低起存) */
+  async transferRegular(amount: number, period: number): Promise<any> {
+    return await request<any>({
+      url: '/api/wallet/transfer-regular',
+      method: 'POST',
+      data: { amount, period },
+    });
+  },
+
+  /** 我的定期存单列表 */
+  async deposits(status?: string, limit = 50): Promise<WalletDepositVO[]> {
+    const qs = status ? `?status=${status}&limit=${limit}` : `?limit=${limit}`;
+    const res = await request<any>({ url: `/api/wallet/deposits${qs}` });
+    return (res.deposits || []).map(mapDeposit);
+  },
+
+  /** 定期到期取出(本金+收益入账, 奖品转可领取) */
+  async settleDeposit(depositNo: string): Promise<any> {
+    return await request<any>({
+      url: `/api/wallet/deposit/${depositNo}/settle`,
+      method: 'POST',
+      data: {},
+    });
+  },
+
+  /** 定期提前取出(1% 手续费, 损失收益与奖品) */
+  async earlySettleDeposit(depositNo: string): Promise<any> {
+    return await request<any>({
+      url: `/api/wallet/deposit/${depositNo}/early-settle`,
+      method: 'POST',
+      data: {},
+    });
+  },
+
+  /** 我的奖品列表 */
+  async rewards(status?: string, limit = 50): Promise<WalletRewardVO[]> {
+    const qs = status ? `?status=${status}&limit=${limit}` : `?limit=${limit}`;
+    const res = await request<any>({ url: `/api/wallet/rewards${qs}` });
+    return (res.rewards || []).map(mapReward);
+  },
+
+  /** 领取奖品(claimable → claimed 等待发货; addressId=0 稍后填写) */
+  async claimReward(rewardNo: string, addressId = 0): Promise<any> {
+    return await request<any>({
+      url: `/api/wallet/reward/${rewardNo}/claim`,
+      method: 'POST',
+      data: { addressId },
+    });
+  },
+
+  /** 奖品签收(shipped → signed) */
+  async signReward(rewardNo: string): Promise<any> {
+    return await request<any>({
+      url: `/api/wallet/reward/${rewardNo}/sign`,
+      method: 'POST',
+      data: {},
+    });
   },
 };

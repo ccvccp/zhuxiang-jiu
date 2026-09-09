@@ -366,11 +366,15 @@ class AllianceRepository:
 
     async def list_orders(self, merchant_id: int = None,
                           status: str = None,
+                          buyer_id: int = None,
                           limit: int = 500) -> list[dict]:
         orders = await self._list("alliance_orders", limit * 5)
         if merchant_id is not None:
             orders = [o for o in orders
                       if o.get("merchantId") == merchant_id]
+        if buyer_id is not None:
+            orders = [o for o in orders
+                      if o.get("buyerId") == buyer_id]
         if status:
             orders = [o for o in orders if o.get("status") == status]
         return sorted(orders, key=lambda o: o.get("createdAt", ""),
