@@ -154,7 +154,7 @@ async def order_detail(order_id: int):
 @router.get("/api/help/categories", tags=["AI智能叫帮模块"])
 async def categories():
     """类型字典(公开, 含公益信值基准)"""
-    return {"success": True, "data": _service.categories()}
+    return {"success": True, "data": await _service.categories()}
 
 
 @router.get("/api/help/trust/{member_id}", tags=["AI智能叫帮模块"])
