@@ -344,6 +344,9 @@ register_crossmodule_routes(app)
 # AI智能工程师大模块(66号: 全站运维中枢×角色护航引擎)
 from routes.xx66_routes import register_xx66_routes
 register_xx66_routes(app)
+# 雷达2.0 全网实时价值侦测中枢(40号 P7a: 感知与聚合)
+from routes.radar_routes import register_radar_routes
+register_radar_routes(app)
 
 
 # ============================================================
