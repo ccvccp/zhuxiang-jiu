@@ -1851,6 +1851,148 @@ async def av_audit_decision(work_id: int,
         _handle(e)
 
 
+# ============================================================
+# P6e 自主合规转发引擎(双重授权 + 深审三档 + 二创溯源 +
+# 分润建议 + 撤回秒级下架, 设计文档《40号 P6 升级方案》§7)
+# ============================================================
+
+class FwdAuthRequest(PydBaseModel):
+    sourceKey: str = Field(..., min_length=1, max_length=200,
+                           description="来源键(作品唯一标识)")
+    platformAuth: str = Field(..., max_length=30,
+                              description="平台授权: cc/mcn/whitelist")
+    creatorName: str = Field(..., min_length=1, max_length=100,
+                             description="原作者名称")
+    contactChannel: str = Field(..., min_length=1,
+                                max_length=200,
+                                description="邀约联系方式(留痕)")
+    grantor: str = Field(..., min_length=1, max_length=100,
+                         description="授权方")
+    scope: str = Field("非商用转发", max_length=200,
+                       description="授权范围")
+    revenueShare: float = Field(0.3, ge=0, le=1,
+                                description="分润比例 [0,1]")
+    expiresAt: str = Field("", max_length=40,
+                           description="到期 ISO(空=永久)")
+
+
+class FwdDeepReviewRequest(PydBaseModel):
+    authId: int = Field(..., description="双重授权 ID")
+    originTitle: str = Field(..., min_length=1, max_length=200,
+                             description="原内容标题")
+    originSummary: str = Field("", max_length=500,
+                               description="原内容摘要")
+    sourceMeta: dict = Field(None,
+                            description="来源元数据 {originUrl, "
+                            "creatorVerified, platform}")
+
+
+class FwdMetricsRequest(PydBaseModel):
+    fwdId: int = Field(..., description="转发内容 ID")
+    playCount: int = Field(None, ge=0)
+    convertCount: int = Field(None, ge=0)
+
+
+def _fwd_service():
+    from services.blogger_fwd_service import BloggerFwdService
+    return BloggerFwdService()
+
+
+@router.post("/api/blogger/fwd/authorizations",
+             tags=["平台流量DV博主模块"])
+async def fwd_authorizations_add(req: FwdAuthRequest,
+                                 x_role: str = Header(None,
+                                                      alias="X-Role")):
+    """转发双重授权登记(平台+原作者, 哈希存证)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _fwd_service().register_auth(
+                    req.sourceKey, req.platformAuth,
+                    req.creatorName, req.contactChannel,
+                    req.grantor, scope=req.scope,
+                    revenue_share=req.revenueShare,
+                    expires_at=req.expiresAt)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/fwd/authorizations",
+            tags=["平台流量DV博主模块"])
+async def fwd_authorizations_list(status: str = None,
+                                  x_role: str = Header(None,
+                                                alias="X-Role")):
+    """转发授权列表(在役/已撤回)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _fwd_service().repo.list_fwd_auths(
+                    status=status)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/fwd/authorizations/{auth_id}/revoke",
+             tags=["平台流量DV博主模块"])
+async def fwd_authorizations_revoke(auth_id: int,
+                                    x_role: str = Header(None,
+                                                   alias="X-Role")):
+    """授权撤回(关联转发内容秒级下架)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _fwd_service().revoke_auth(auth_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/fwd/deep-review",
+             tags=["平台流量DV博主模块"])
+async def fwd_deep_review(req: FwdDeepReviewRequest,
+                          x_role: str = Header(None,
+                                               alias="X-Role")):
+    """多模态合规深审(≥90 自动二创/70-89 人工复审/<70 拒绝)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _fwd_service().deep_review(
+                    req.authId, req.originTitle,
+                    origin_summary=req.originSummary,
+                    source_meta=req.sourceMeta)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/fwd/metrics",
+             tags=["平台流量DV博主模块"])
+async def fwd_metrics(req: FwdMetricsRequest,
+                     x_role: str = Header(None,
+                                          alias="X-Role")):
+    """转发效果上报(播放/转化——分润依据)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _fwd_service().report_fwd_metrics(
+                    req.fwdId, play_count=req.playCount,
+                    convert_count=req.convertCount)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/fwd/{fwd_id}/revenue",
+             tags=["平台流量DV博主模块"])
+async def fwd_revenue(fwd_id: int,
+                      x_role: str = Header(None,
+                                           alias="X-Role")):
+    """分润结算建议书(pending——人工审批后方可给付, 永不自动)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _fwd_service().propose_revenue(fwd_id)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)

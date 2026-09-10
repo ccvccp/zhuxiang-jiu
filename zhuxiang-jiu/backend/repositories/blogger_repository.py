@@ -249,7 +249,10 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                # P6a 多模态自主学习引擎
                "elementId",
                # P6b 音视频自主创作工坊
-               "avWorkId", "scriptId", "personaId", "licenseId")
+               "avWorkId", "scriptId", "personaId", "licenseId",
+               # P6e 合规转发引擎
+               "authId", "fwdId", "deepScore", "playCount",
+               "convertCount", "proposalId")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust",
                  # P5a 自主学习引擎
@@ -403,7 +406,8 @@ class BloggerRepository:
                     "blogger_boosts", "blogger_interventions",
                     "blogger_banned_av", "blogger_av_scripts",
                     "blogger_personas", "blogger_av_licenses",
-                    "blogger_av_works"):
+                    "blogger_av_works", "blogger_fwd_auths",
+                    "blogger_fwd_contents"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -1364,3 +1368,85 @@ class BloggerRepository:
             parsed = dict(self.store["blogger_av_publish_windows"])
         return {k: v for k, v in parsed.items()
                 if k != "updatedAt"}
+
+    # ============================================================
+    # P6e 合规转发引擎: 双重授权 / 转发内容
+    # (设计文档《40号 P6 升级方案》§7/§8)
+    # ============================================================
+
+    TABLE_FWD_AUTHS = "blogger_fwd_auths"
+    TABLE_FWD_CONTENTS = "blogger_fwd_contents"
+
+    async def save_fwd_auth(self, record: dict) -> dict:
+        """保存转发双重授权({authId, sourceKey, platformAuth:
+        cc/mcn/whitelist, creatorName, contactChannel, grantor,
+        scope, revenueShare, expiresAt, status: active/revoked,
+        evidenceHash, createdAt, revokedAt})"""
+        return await self._save(self.TABLE_FWD_AUTHS,
+                                record["authId"], record)
+
+    async def get_fwd_auth(self, auth_id: int) -> dict | None:
+        return await self._get(self.TABLE_FWD_AUTHS, auth_id)
+
+    async def update_fwd_auth(self, auth_id: int,
+                              fields: dict) -> dict:
+        return await self._update(self.TABLE_FWD_AUTHS, auth_id,
+                                  fields)
+
+    async def list_fwd_auths(self, status: str = None,
+                             limit: int = 200) -> list[dict]:
+        records = await self._list(self.TABLE_FWD_AUTHS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("authId", 0),
+                      reverse=True)[:limit]
+
+    async def find_fwd_auth_by_source(self,
+                                       source_key: str
+                                       ) -> dict | None:
+        """按来源键查授权(唯一性——同源不重复登记)"""
+        for r in await self._list(self.TABLE_FWD_AUTHS,
+                                  limit=1000):
+            if r.get("sourceKey") == source_key:
+                return r
+        return None
+
+    async def save_fwd_content(self, record: dict) -> dict:
+        """保存转发内容({fwdId, authId, sourceKey, platform,
+        originTitle, deepScore, reviewStatus: auto/manual/rejected,
+        curated, hook, sourceLabel, publishStatus: published/
+        takedown, playCount, convertCount, revenueProposals,
+        createdAt, takedownAt})"""
+        return await self._save(self.TABLE_FWD_CONTENTS,
+                                record["fwdId"], record)
+
+    async def get_fwd_content(self, fwd_id: int) -> dict | None:
+        return await self._get(self.TABLE_FWD_CONTENTS, fwd_id)
+
+    async def update_fwd_content(self, fwd_id: int,
+                                 fields: dict) -> dict:
+        return await self._update(self.TABLE_FWD_CONTENTS, fwd_id,
+                                  fields)
+
+    async def list_fwd_contents(self, auth_id: int = None,
+                                publish_status: str = None,
+                                limit: int = 200) -> list[dict]:
+        records = await self._list(self.TABLE_FWD_CONTENTS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if auth_id is not None \
+                    and r.get("authId") != auth_id:
+                continue
+            if publish_status \
+                    and r.get("publishStatus") != publish_status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("fwdId", 0),
+                      reverse=True)[:limit]
