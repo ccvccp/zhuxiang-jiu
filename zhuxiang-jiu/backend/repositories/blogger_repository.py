@@ -474,6 +474,23 @@ class BloggerRepository:
                 record[k] = v
         return record
 
+    @staticmethod
+    def _deserialize_bools(record: dict,
+                           bool_fields: tuple) -> dict:
+        """bool 字段还原(Redis 存 1/0 读回字符串 "1"/"0"——
+        bool("0") 恒 True 的反序列化陷阱, Docker 实机 P6g-4 发现)
+
+        仅对值为 "0"/"1"/0/1 的指定字段做 bool 还原; 其余原样。
+        """
+        for k in bool_fields:
+            if k in record:
+                v = record[k]
+                if v in ("0", 0, "", None):
+                    record[k] = False if v in ("0", 0) else bool(v)
+                elif v in ("1", 1):
+                    record[k] = True
+        return record
+
     async def _save(self, table: str, record_id, record: dict) -> dict:
         if is_redis_mode():
             client = await get_redis_client()
@@ -1102,12 +1119,18 @@ class BloggerRepository:
         return data
 
     async def get_autonomy_state(self) -> dict:
-        """读取自治开关状态(空库返回缺省 running)"""
+        """读取自治开关状态(空库返回缺省 running)
+
+        Redis 模式: paused 字段经 _deserialize_bools 还原
+        (bool("0") 恒 True 的反序列化陷阱——P6g-4 实机发现)。
+        """
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.hgetall(
                 _k("blogger", "autonomy_state"))
             parsed = self._deserialize(data) if data else {}
+            parsed = self._deserialize_bools(
+                parsed, ("paused",))
         else:
             self._ensure_store()
             self.store.setdefault("blogger_autonomy_state", {})
