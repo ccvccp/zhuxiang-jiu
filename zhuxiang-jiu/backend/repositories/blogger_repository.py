@@ -1293,3 +1293,74 @@ class BloggerRepository:
         return sorted(result,
                       key=lambda x: x.get("avWorkId", 0),
                       reverse=True)[:limit]
+
+    # ============================================================
+    # P6c 发布调度器: 跨平台渲染参数表(Hash: platform → JSON)
+    # (设计文档《40号 P6 升级方案》§5.1/§8)
+    # ============================================================
+
+    TABLE_RENDER_PROFILES = "render_profiles"
+
+    async def save_render_profile(self, platform: str,
+                                  params: dict) -> dict:
+        """保存平台渲染参数({video, resolution, bitrateKbps,
+        audioKbps, durationRange, subtitleStyle})"""
+        data = {platform: params}
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("blogger", self.TABLE_RENDER_PROFILES),
+                              mapping=self._serialize(data))
+        else:
+            self._ensure_store()
+            self.store.setdefault(
+                "blogger_render_profiles", {}).update(data)
+        return params
+
+    async def get_render_profiles(self) -> dict:
+        """读取全平台渲染参数(空库返回空 dict)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("blogger", self.TABLE_RENDER_PROFILES))
+            return self._deserialize(data) if data else {}
+        self._ensure_store()
+        self.store.setdefault("blogger_render_profiles", {})
+        return dict(self.store["blogger_render_profiles"])
+
+    async def count_published_av_works(self, platform: str) -> int:
+        """指定平台已发布 AV 作品数(新平台首发审批线依据)"""
+        records = await self._list(self.TABLE_AV_WORKS,
+                                   limit=10000)
+        return sum(1 for r in records
+                   if r.get("platform") == platform
+                   and r.get("publishStatus") == "published")
+
+    TABLE_AV_WINDOWS = "av_publish_windows"
+
+    async def save_av_windows(self, mapping: dict) -> dict:
+        """保存 AV 时段曲线({platform:hour: 完播加权 EMA 值})"""
+        data = dict(mapping)
+        data["updatedAt"] = _now_iso()
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("blogger", self.TABLE_AV_WINDOWS),
+                              mapping=self._serialize(data))
+        else:
+            self._ensure_store()
+            self.store.setdefault("blogger_av_publish_windows", {}) \
+                .update(data)
+        return data
+
+    async def get_av_windows(self) -> dict:
+        """读取 AV 时段曲线(空库返回空 dict; 过滤 updatedAt 元键)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("blogger", self.TABLE_AV_WINDOWS))
+            parsed = self._deserialize(data) if data else {}
+        else:
+            self._ensure_store()
+            self.store.setdefault("blogger_av_publish_windows", {})
+            parsed = dict(self.store["blogger_av_publish_windows"])
+        return {k: v for k, v in parsed.items()
+                if k != "updatedAt"}

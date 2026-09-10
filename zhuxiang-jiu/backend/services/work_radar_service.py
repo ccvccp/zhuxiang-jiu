@@ -19,6 +19,7 @@
 
 import hashlib
 import logging
+import os
 import random
 from datetime import datetime, timedelta, UTC
 
@@ -71,10 +72,18 @@ def _mock_fetch(blogger: dict) -> list[dict]:
     去重), 跨槽位条目变化(演示"博主发了新作品")。
     """
     now = datetime.now(UTC)
-    slot = now.hour // 6
+    # mock 槽位/日期: UTC 6h 槽换血作品集, 种子含日期(每日新作品
+    # 语义); BLOGGER_MOCK_SLOT / BLOGGER_MOCK_DATE 可固定——测试
+    # 确定性(跨槽评分分布无三档保证, P0 档位覆盖断言在槽位/日期
+    # 切换后可能失配, 固定后任意时刻运行稳定)
+    slot = int(os.environ.get("BLOGGER_MOCK_SLOT")
+               if "BLOGGER_MOCK_SLOT" in os.environ
+               else now.hour // 6)
+    date_key = os.environ.get(
+        "BLOGGER_MOCK_DATE") or f"{now:%Y%m%d}"
     rng = random.Random(
         f"{blogger['platform']}|{blogger['bloggerId']}"
-        f"|{now:%Y%m%d}|{slot}")
+        f"|{date_key}|{slot}")
     # 确定性抽 3 条(排序保证遍历顺序稳定)
     idx_list = sorted(rng.sample(range(len(_TOPIC_POOL)), 3))
     # 博主互动基线(赞): 粉丝量 × 互动率(≥50 保底)

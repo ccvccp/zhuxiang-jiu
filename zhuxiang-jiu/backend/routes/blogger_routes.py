@@ -1607,6 +1607,158 @@ async def av_works_ab(req: AVExperimentRequest,
         _handle(e)
 
 
+# ============================================================
+# P6c 音视频自主发布调度器(渲染参数表 + 完播加权黄金时段 +
+# 首发审批 + 1h 互动自愈, 设计文档《40号 P6 升级方案》§5)
+# ============================================================
+
+class AVPublishRequest(PydBaseModel):
+    workId: int = Field(..., description="已渲染作品 ID")
+    publishAt: str = Field(None, max_length=40,
+                            description="发布时间 ISO(空=立即)")
+    approved: bool = Field(False,
+                           description="新平台首发人工放行标记")
+
+
+class AVPostcheckRequest(PydBaseModel):
+    workId: int = Field(..., description="已发布作品 ID")
+    danmaku: list = Field(None, description="弹幕样本(1h 窗)")
+    comments: list = Field(None, description="评论样本(1h 窗)")
+    playbackError: str = Field(None, max_length=200,
+                               description="播放回执错误(音画不同步轨)")
+
+
+class AVBoostRequest(PydBaseModel):
+    workId: int = Field(..., description="已发布作品 ID")
+    budget: float = Field(..., gt=0,
+                          description="推广预算(>100 须质押审批)")
+    reason: str = Field("", max_length=200)
+
+
+class AVMetricsRequest(PydBaseModel):
+    workId: int = Field(..., description="作品 ID")
+    clicks: int = Field(None, ge=0)
+    completionRate: float = Field(None, ge=0, le=1)
+    shareRate: float = Field(None, ge=0, le=1)
+
+
+def _av_publish_service():
+    from services.blogger_av_publish_service import \
+        BloggerAVPublishService
+    return BloggerAVPublishService()
+
+
+@router.get("/api/blogger/av/render/profiles",
+            tags=["平台流量DV博主模块"])
+async def av_render_profiles(
+        x_role: str = Header(None, alias="X-Role")):
+    """跨平台渲染参数表(六平台: 分辨率/码率/时长/字幕样式)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_publish_service()
+                .ensure_render_profiles()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/publish/schedule",
+             tags=["平台流量DV博主模块"])
+async def av_publish_schedule(
+        platform: str = Query(..., max_length=30),
+        x_role: str = Header(None, alias="X-Role")):
+    """黄金时段决策(完播加权 EMA TOP3; 冷启动回退静态窗)"""
+    _require_admin(x_role)
+    try:
+        svc = _av_publish_service()
+        return {"success": True, "data": {
+            "platform": platform,
+            "nextPublishAt": await svc.next_av_publish_time(
+                platform),
+            "bestSlots": await svc.best_av_slots(platform)}}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/publish/work",
+             tags=["平台流量DV博主模块"])
+async def av_publish_work(req: AVPublishRequest,
+                          x_role: str = Header(None,
+                                               alias="X-Role")):
+    """发布 AV 作品(新平台前 10 条须人工放行)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_publish_service().publish_av_work(
+                    req.workId, publish_at=req.publishAt,
+                    approved=req.approved)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/windows/learn",
+             tags=["平台流量DV博主模块"])
+async def av_windows_learn(x_role: str = Header(None,
+                                                alias="X-Role")):
+    """AV 时段曲线重算(完播加权 EMA)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_publish_service().learn_av_windows()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/works/metrics",
+             tags=["平台流量DV博主模块"])
+async def av_works_metrics(req: AVMetricsRequest,
+                           x_role: str = Header(None,
+                                                alias="X-Role")):
+    """AV 作品指标注入(平台回执落地/测试轨)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_publish_service()
+                .report_av_work_metrics(
+                    req.workId, clicks=req.clicks,
+                    completion_rate=req.completionRate,
+                    share_rate=req.shareRate)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/publish/postcheck",
+             tags=["平台流量DV博主模块"])
+async def av_publish_postcheck(req: AVPostcheckRequest,
+                               x_role: str = Header(None,
+                                                   alias="X-Role")):
+    """发布后 1h 互动自愈(推广建议/FAQ 置顶/负面仅建议/自愈重渲染)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_publish_service().postcheck_av(
+                    req.workId, danmaku=req.danmaku,
+                    comments=req.comments,
+                    playback_error=req.playbackError)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/publish/boost",
+             tags=["平台流量DV博主模块"])
+async def av_publish_boost(req: AVBoostRequest,
+                           x_role: str = Header(None,
+                                                alias="X-Role")):
+    """追加推广(≤100 自动 mock 轨 / >100 生成待审建议书)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_publish_service().execute_av_boost(
+                    req.workId, req.budget, reason=req.reason)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)

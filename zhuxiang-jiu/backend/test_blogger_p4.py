@@ -21,6 +21,9 @@ from datetime import datetime, UTC, timedelta
 
 
 os.environ["LOCK_MODE"] = "asyncio"
+# mock 槽位/日期固定(测试确定性: 跨槽评分分布无三档保证)
+os.environ["BLOGGER_MOCK_SLOT"] = "1"
+os.environ["BLOGGER_MOCK_DATE"] = "20260910"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
