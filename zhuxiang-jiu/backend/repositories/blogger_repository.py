@@ -238,11 +238,16 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "ageHours", "accountId",
                "commentHits", "commentMisses",
                # P5a 自主学习引擎
-               "signalId", "pollId", "answer", "optionIndex")
+               "signalId", "pollId", "answer", "optionIndex",
+               # P5b 自主创作工坊
+               "strategyId", "experimentId", "versionId", "assetId",
+               "useCount", "winCount", "winnerVersionId")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust",
                  # P5a 自主学习引擎
-                 "value", "confidence")
+                 "value", "confidence",
+                 # P5b 自主创作工坊
+                 "avgReward", "revenueAmount", "commissionRate")
 
 
 def _now_iso() -> str:
@@ -382,7 +387,9 @@ class BloggerRepository:
         for key in ("blogger_pool", "blogger_works",
                     "blogger_follows", "blogger_audits",
                     "blogger_accounts", "blogger_comments",
-                    "blogger_signals", "blogger_polls"):
+                    "blogger_signals", "blogger_polls",
+                    "blogger_strategies", "blogger_experiments",
+                    "blogger_ab_versions", "blogger_ugc_assets"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -824,3 +831,133 @@ class BloggerRepository:
         self._ensure_store()
         self.store.setdefault("blogger_reward_config", {})
         return dict(self.store["blogger_reward_config"])
+
+    # ============================================================
+    # P5b 自主创作工坊: 策略库 / AB实验 / UGC素材
+    # (设计文档《40号 P5 升级方案》§4/§7)
+    # ============================================================
+
+    TABLE_STRATEGIES = "blogger_strategies"
+    TABLE_EXPERIMENTS = "blogger_experiments"
+    TABLE_AB_VERSIONS = "blogger_ab_versions"
+    TABLE_UGC_ASSETS = "blogger_ugc_assets"
+
+    async def save_strategy(self, record: dict) -> dict:
+        """保存策略({strategyId, type: hook/structure, name,
+        winCount, useCount, avgReward, status, createdAt})"""
+        return await self._save(self.TABLE_STRATEGIES,
+                                record["strategyId"], record)
+
+    async def get_strategy(self, strategy_id: int) -> dict | None:
+        return await self._get(self.TABLE_STRATEGIES, strategy_id)
+
+    async def update_strategy(self, strategy_id: int,
+                              fields: dict) -> dict:
+        return await self._update(self.TABLE_STRATEGIES, strategy_id,
+                                  fields)
+
+    async def list_strategies(self, type: str = None,
+                             limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_STRATEGIES,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if type and r.get("type") != type:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: (-int(x.get("winCount") or 0),
+                                     -float(x.get("avgReward") or 0))
+                      )[:limit]
+
+    async def find_strategy(self, type: str, name: str) -> dict | None:
+        """按类型+名称查策略(唯一性)"""
+        for r in await self._list(self.TABLE_STRATEGIES,
+                                  limit=1000):
+            if r.get("type") == type and r.get("name") == name:
+                return r
+        return None
+
+    async def save_experiment(self, record: dict) -> dict:
+        """保存实验({experimentId, topic, audience, status:
+        running/promoted/aborted, winnerVersionId, versions, ...})"""
+        return await self._save(self.TABLE_EXPERIMENTS,
+                                record["experimentId"], record)
+
+    async def get_experiment(self, experiment_id: int) -> dict | None:
+        return await self._get(self.TABLE_EXPERIMENTS, experiment_id)
+
+    async def update_experiment(self, experiment_id: int,
+                                fields: dict) -> dict:
+        return await self._update(self.TABLE_EXPERIMENTS,
+                                  experiment_id, fields)
+
+    async def list_experiments(self, status: str = None,
+                              limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_EXPERIMENTS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("experimentId", 0),
+                      reverse=True)[:limit]
+
+    async def save_ab_version(self, record: dict) -> dict:
+        """保存实验版本({versionId, experimentId, hookType,
+        structureType, body, shortCode, complianceScore,
+        metrics: {clicks,...}, reward, status})"""
+        return await self._save(self.TABLE_AB_VERSIONS,
+                                record["versionId"], record)
+
+    async def get_ab_version(self, version_id: int) -> dict | None:
+        return await self._get(self.TABLE_AB_VERSIONS, version_id)
+
+    async def update_ab_version(self, version_id: int,
+                                fields: dict) -> dict:
+        return await self._update(self.TABLE_AB_VERSIONS, version_id,
+                                  fields)
+
+    async def list_ab_versions(self, experiment_id: int = None,
+                               limit: int = 200) -> list[dict]:
+        records = await self._list(self.TABLE_AB_VERSIONS,
+                                   limit=2000)
+        result = []
+        for r in records:
+            if experiment_id is not None \
+                    and r.get("experimentId") != experiment_id:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("versionId", 0),
+                      reverse=True)[:limit]
+
+    async def save_ugc_asset(self, record: dict) -> dict:
+        """保存UGC素材({assetId, ownerId, title, license,
+        commissionRate, useCount, revenueAmount, status,
+        revenueProposals, createdAt})"""
+        return await self._save(self.TABLE_UGC_ASSETS,
+                                record["assetId"], record)
+
+    async def get_ugc_asset(self, asset_id: int) -> dict | None:
+        return await self._get(self.TABLE_UGC_ASSETS, asset_id)
+
+    async def update_ugc_asset(self, asset_id: int,
+                               fields: dict) -> dict:
+        return await self._update(self.TABLE_UGC_ASSETS, asset_id,
+                                  fields)
+
+    async def list_ugc_assets(self, status: str = None,
+                              limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_UGC_ASSETS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("assetId", 0),
+                      reverse=True)[:limit]

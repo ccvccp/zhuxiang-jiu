@@ -912,6 +912,152 @@ async def auto_polls_pending(x_role: str = Header(None,
         _handle(e)
 
 
+# ============================================================
+# P5b 自主创作工坊(多版本生成 + AB实验 + 策略库 + UGC, 设计文档 P5 §4)
+# ============================================================
+
+class AutoGenerateRequest(PydBaseModel):
+    topic: str = Field(..., min_length=1, max_length=64,
+                       description="选题主题(如: 年货送礼攻略)")
+    audience: str = Field(..., description="人群画像: student/mom/"
+                                        "senior/business/wine_lover")
+    platform: str = Field("douyin", description="发布平台")
+
+
+class VersionMetricsRequest(PydBaseModel):
+    clicks: int = Field(None, ge=0, description="点击数(归因回填)")
+    registered: int = Field(None, ge=0, description="注册数")
+    ordered: int = Field(None, ge=0, description="下单数")
+
+
+class UgcAssetRequest(PydBaseModel):
+    ownerId: int = Field(..., description="素材归属会员(高信值用户)")
+    title: str = Field(..., min_length=1, max_length=64,
+                       description="素材标题")
+    license: str = Field(..., description="授权: authorized/cc_by/"
+                                        "purchased")
+    commissionRate: float = Field(0.05, ge=0, le=0.5,
+                                  description="分成比例[0,0.5]")
+
+
+class UgcRevenueRequest(PydBaseModel):
+    gmv: float = Field(..., gt=0, description="结算 GMV(元)")
+
+
+def _auto_create_service():
+    from services.blogger_auto_create_service import \
+        BloggerAutoCreateService
+    return BloggerAutoCreateService()
+
+
+@router.post("/api/blogger/auto/works/generate",
+             tags=["平台流量DV博主模块"])
+async def auto_works_generate(req: AutoGenerateRequest,
+                              x_role: str = Header(None,
+                                                   alias="X-Role")):
+    """多版本并行生成(人群钩子矩阵×结构, 每版独立追踪码+合规内生)"""
+    _require_admin(x_role)
+    try:
+        result = await _auto_create_service().generate_versions(
+            req.topic, req.audience, platform=req.platform)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/auto/experiments",
+            tags=["平台流量DV博主模块"])
+async def auto_experiments_list(
+        x_role: str = Header(None, alias="X-Role"),
+        status: str = Query(None, description="running/promoted/aborted")):
+    """实验列表(含版本指标摘要)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _auto_create_service().list_experiments(
+                    status=status)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/experiments/{experiment_id}/promote",
+             tags=["平台流量DV博主模块"])
+async def auto_experiments_promote(
+        experiment_id: int,
+        x_role: str = Header(None, alias="X-Role")):
+    """胜出评估+固化入策略库(样本≥50点击; 平局合规优先)"""
+    _require_admin(x_role)
+    try:
+        result = await _auto_create_service().promote_experiment(
+            experiment_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/auto/strategies",
+            tags=["平台流量DV博主模块"])
+async def auto_strategies_list(
+        x_role: str = Header(None, alias="X-Role"),
+        type: str = Query(None, description="hook/structure")):
+    """策略库排行(winCount → avgReward)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _auto_create_service().list_strategies(
+                    type=type)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/versions/{version_id}/metrics",
+             tags=["平台流量DV博主模块"])
+async def auto_version_metrics(version_id: int,
+                               req: VersionMetricsRequest,
+                               x_role: str = Header(None,
+                                                    alias="X-Role")):
+    """实验版本指标注入(attract 归因回填/测试轨; reward 就地重算)"""
+    _require_admin(x_role)
+    try:
+        result = await _auto_create_service().record_version_metrics(
+            version_id, clicks=req.clicks,
+            registered=req.registered, ordered=req.ordered)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/ugc/assets",
+             tags=["平台流量DV博主模块"])
+async def auto_ugc_assets(req: UgcAssetRequest,
+                         x_role: str = Header(None,
+                                              alias="X-Role")):
+    """UGC素材入库(授权登记; 高信值用户素材优先复用)"""
+    _require_admin(x_role)
+    try:
+        asset = await _auto_create_service().register_ugc_asset(
+            req.ownerId, req.title, req.license,
+            commission_rate=req.commissionRate)
+        return {"success": True, "data": asset}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/ugc/{asset_id}/revenue",
+             tags=["平台流量DV博主模块"])
+async def auto_ugc_revenue(asset_id: int, req: UgcRevenueRequest,
+                            x_role: str = Header(None,
+                                                 alias="X-Role")):
+    """分成结算建议(仅生成 pending 建议书——给付须人工审批, 永不自动)"""
+    _require_admin(x_role)
+    try:
+        asset = await _auto_create_service().propose_ugc_revenue(
+            asset_id, req.gmv)
+        return {"success": True, "data": asset}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)
