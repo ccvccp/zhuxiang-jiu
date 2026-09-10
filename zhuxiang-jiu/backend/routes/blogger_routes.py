@@ -1993,6 +1993,290 @@ async def fwd_revenue(fwd_id: int,
         _handle(e)
 
 
+# ============================================================
+# P6f-1 引流能力开放(超级会员租用 AI 引流员, 设计文档
+# 《40号 P6f 规划方案》§3——开放端点组走既有 X-API-Key 网关,
+# ownerId 命名空间隔离, 租金建议书永不自动)
+# ============================================================
+
+class RentalPersonaRequest(PydBaseModel):
+    name: str = Field(..., min_length=1, max_length=50)
+    voiceStyle: str = Field("medium", max_length=20)
+    toneStyle: str = Field("warm", max_length=20)
+
+
+class RentalScriptRequest(PydBaseModel):
+    topic: str = Field(..., min_length=1, max_length=200)
+    platform: str = Field(..., max_length=30)
+    personaId: int = Field(...)
+    hookType: str = Field(..., max_length=50)
+    style: str = Field("", max_length=30)
+
+
+class RentalRenderRequest(PydBaseModel):
+    scriptId: int = Field(...)
+    real: bool = Field(False, description="real 轨须 admin 预审")
+
+
+class RentalMetricsRequest(PydBaseModel):
+    workId: int = Field(...)
+    exposures: int = Field(None, ge=0)
+    clicks: int = Field(None, ge=0)
+    completionRate: float = Field(None, ge=0, le=1)
+    registered: int = Field(None, ge=0)
+    activated: int = Field(None, ge=0)
+    ordered: int = Field(None, ge=0)
+
+
+class RentalBillRequest(PydBaseModel):
+    memberId: int = Field(..., description="会员 ID")
+    unitPrice: float = Field(0.1, gt=0, le=100,
+                             description="计费单价(信值/单位)")
+
+
+def _rental_service():
+    from services.blogger_rental_service import \
+        BloggerRentalService
+    return BloggerRentalService()
+
+
+@router.get("/api/blogger/open/av/topics",
+            tags=["平台流量DV博主模块"])
+async def open_av_topics(
+        platform: str = None, domain: str = None,
+        x_api_key: str = Header(None, alias="X-Api-Key"),
+        x_app_code: str = Header(None, alias="X-App-Code")):
+    """租用选题推荐(只读——pause 降级不冻结观测)"""
+    v = await _gateway(x_api_key, x_app_code)
+    try:
+        return {"success": True, "data":
+                await _rental_service().recommend_topics(
+                    v["memberId"], platform=platform,
+                    domain=domain)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/open/av/personas",
+            tags=["平台流量DV博主模块"])
+async def open_av_personas(
+        x_api_key: str = Header(None, alias="X-Api-Key"),
+        x_app_code: str = Header(None, alias="X-App-Code")):
+    """租用者人设列表(仅自己的——ownerId 隔离)"""
+    v = await _gateway(x_api_key, x_app_code)
+    try:
+        return {"success": True, "data":
+                await _rental_service().renter_personas(
+                    v["memberId"])}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/open/av/personas",
+             tags=["平台流量DV博主模块"])
+async def open_av_personas_add(
+        req: RentalPersonaRequest,
+        x_api_key: str = Header(None, alias="X-Api-Key"),
+        x_app_code: str = Header(None, alias="X-App-Code")):
+    """租用者人设登记(原创 IP; 受控写——pause 冻结)"""
+    v = await _gateway(x_api_key, x_app_code)
+    try:
+        return {"success": True, "data":
+                await _rental_service()
+                .register_renter_persona(
+                    v["memberId"], req.name,
+                    voice_style=req.voiceStyle,
+                    tone_style=req.toneStyle)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/open/av/scripts",
+             tags=["平台流量DV博主模块"])
+async def open_av_scripts(
+        req: RentalScriptRequest,
+        x_api_key: str = Header(None, alias="X-Api-Key"),
+        x_app_code: str = Header(None, alias="X-App-Code")):
+    """租用脚本生成(复用 P6b 全链合规; 受控写+账本计费)"""
+    v = await _gateway(x_api_key, x_app_code)
+    try:
+        return {"success": True, "data":
+                await _rental_service()
+                .generate_rental_script(
+                    v["memberId"], req.topic, req.platform,
+                    req.personaId, req.hookType, style=req.style)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/open/av/renders",
+             tags=["平台流量DV博主模块"])
+async def open_av_renders(
+        req: RentalRenderRequest,
+        x_api_key: str = Header(None, alias="X-Api-Key"),
+        x_app_code: str = Header(None, alias="X-App-Code")):
+    """租用渲染(mock 默认; real 须 admin 预审双闸)"""
+    v = await _gateway(x_api_key, x_app_code)
+    try:
+        return {"success": True, "data":
+                await _rental_service().render_rental_work(
+                    v["memberId"], req.scriptId, real=req.real)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/open/av/works",
+            tags=["平台流量DV博主模块"])
+async def open_av_works(
+        x_api_key: str = Header(None, alias="X-Api-Key"),
+        x_app_code: str = Header(None, alias="X-App-Code")):
+    """租用者作品列表(仅自己的——观测面)"""
+    v = await _gateway(x_api_key, x_app_code)
+    try:
+        return {"success": True, "data":
+                await _rental_service().renter_works(
+                    v["memberId"])}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/open/av/funnel",
+            tags=["平台流量DV博主模块"])
+async def open_av_funnel(
+        x_api_key: str = Header(None, alias="X-Api-Key"),
+        x_app_code: str = Header(None, alias="X-App-Code")):
+    """租用者六层漏斗(仅自己作品聚合——观测面)"""
+    v = await _gateway(x_api_key, x_app_code)
+    try:
+        return {"success": True, "data":
+                await _rental_service().renter_funnel(
+                    v["memberId"])}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/open/av/works/metrics",
+             tags=["平台流量DV博主模块"])
+async def open_av_works_metrics(
+        req: RentalMetricsRequest,
+        x_api_key: str = Header(None, alias="X-Api-Key"),
+        x_app_code: str = Header(None, alias="X-App-Code")):
+    """租用者指标上报(仅自己作品; 滚动合并)"""
+    v = await _gateway(x_api_key, x_app_code)
+    try:
+        return {"success": True, "data":
+                await _rental_service()
+                .report_rental_metrics(
+                    v["memberId"], req.workId,
+                    exposures=req.exposures, clicks=req.clicks,
+                    completion_rate=req.completionRate,
+                    registered=req.registered,
+                    activated=req.activated,
+                    ordered=req.ordered)}
+    except Exception as e:
+        _handle(e)
+
+
+async def _gateway(x_api_key: str, x_app_code: str) -> dict:
+    """开放端点组网关鉴权(双头凭证 + pro 档租用硬门)
+
+    Raises:
+        HTTPException: 401 凭证无效 / 403 tier 不满足
+    """
+    if not x_api_key or not x_app_code:
+        raise HTTPException(
+            status_code=401,
+            detail="需要 X-Api-Key 与 X-App-Code 双头凭证")
+    from services.api_key_service import ApiKeyService
+    verdict = await ApiKeyService().validate_key(
+        x_api_key, x_app_code)
+    if not verdict.get("ok"):
+        raise HTTPException(status_code=401,
+                            detail=verdict.get("reason"))
+    if verdict.get("tier") != "pro":
+        raise HTTPException(
+            status_code=403,
+            detail="租用 AI 引流员须 pro 档 API Key"
+                   f"(当前{verdict.get('tier')})——超级会员专属")
+    return verdict
+
+
+@router.get("/api/blogger/admin/av/rental/ledger",
+            tags=["平台流量DV博主模块"])
+async def admin_rental_ledger(
+        member_id: int = Query(None, alias="memberId"),
+        x_role: str = Header(None, alias="X-Role")):
+    """租用账本查询(计费明细)"""
+    _require_admin(x_role)
+    try:
+        svc = _rental_service()
+        return {"success": True, "data":
+                await svc.repo.list_rental_entries(
+                    member_id=member_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/admin/av/rental/bills",
+             tags=["平台流量DV博主模块"])
+async def admin_rental_bills_generate(
+        req: RentalBillRequest,
+        x_role: str = Header(None, alias="X-Role")):
+    """生成月度租金建议书(pending——永不自动)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _rental_service().generate_rental_bill(
+                    req.memberId, unit_price=req.unitPrice)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/admin/av/rental/bills/{bill_id}/approve",
+             tags=["平台流量DV博主模块"])
+async def admin_rental_bills_approve(
+        bill_id: int, x_role: str = Header(None,
+                                           alias="X-Role")):
+    """审批租金建议书(approve——信值扣减经 47号执行)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _rental_service().approve_rental_bill(
+                    bill_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/admin/av/rental/bills/{bill_id}/reject",
+             tags=["平台流量DV博主模块"])
+async def admin_rental_bills_reject(
+        bill_id: int, x_role: str = Header(None,
+                                           alias="X-Role")):
+    """驳回租金建议书"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _rental_service().reject_rental_bill(
+                    bill_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/admin/av/rental/scripts/{script_id}/real-approve",
+             tags=["平台流量DV博主模块"])
+async def admin_rental_real_approve(
+        script_id: int, x_role: str = Header(None,
+                                             alias="X-Role")):
+    """审批 real 渲染轨(成本与合规双闸)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _rental_service()
+                .admin_approve_real_render(script_id)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)

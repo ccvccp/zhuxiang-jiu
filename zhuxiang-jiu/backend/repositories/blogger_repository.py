@@ -252,7 +252,10 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "avWorkId", "scriptId", "personaId", "licenseId",
                # P6e 合规转发引擎
                "authId", "fwdId", "deepScore", "playCount",
-               "convertCount", "proposalId")
+               "convertCount", "proposalId",
+               # P6f-1 引流能力开放
+               "ledgerId", "billId", "memberId", "units",
+               "scriptUnits", "renderUnits")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust",
                  # P5a 自主学习引擎
@@ -407,7 +410,8 @@ class BloggerRepository:
                     "blogger_banned_av", "blogger_av_scripts",
                     "blogger_personas", "blogger_av_licenses",
                     "blogger_av_works", "blogger_fwd_auths",
-                    "blogger_fwd_contents"):
+                    "blogger_fwd_contents", "blogger_rental_ledger",
+                    "blogger_rental_bills"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -1449,4 +1453,74 @@ class BloggerRepository:
             result.append(r)
         return sorted(result,
                       key=lambda x: x.get("fwdId", 0),
+                      reverse=True)[:limit]
+
+    # ============================================================
+    # P6f-1 引流能力开放: 租用账本 / 租金建议书
+    # (设计文档《40号 P6f 规划方案》§3/§7)
+    # ============================================================
+
+    TABLE_RENTAL_LEDGER = "blogger_rental_ledger"
+    TABLE_RENTAL_BILLS = "blogger_rental_bills"
+
+    async def save_rental_entry(self, record: dict) -> dict:
+        """保存租用账本条目({ledgerId, memberId, endpoint,
+        units, createdAt})"""
+        return await self._save(self.TABLE_RENTAL_LEDGER,
+                                record["ledgerId"], record)
+
+    async def list_rental_entries(self, member_id: int = None,
+                                   endpoint: str = None,
+                                   month_key: str = None,
+                                   limit: int = 500
+                                   ) -> list[dict]:
+        """租用账本查询(memberId/endpoint/月份过滤; 计费聚合源)"""
+        records = await self._list(self.TABLE_RENTAL_LEDGER,
+                                   limit=5000)
+        result = []
+        for r in records:
+            if member_id is not None \
+                    and r.get("memberId") != member_id:
+                continue
+            if endpoint and r.get("endpoint") != endpoint:
+                continue
+            if month_key and not str(
+                    r.get("createdAt", "")).startswith(month_key):
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("ledgerId", 0),
+                      reverse=True)[:limit]
+
+    async def save_rental_bill(self, record: dict) -> dict:
+        """保存租金建议书({billId, memberId, monthKey,
+        scriptUnits, renderUnits, totalUnits, unitPrice,
+        amount, status: pending/approved/rejected, note,
+        createdAt, approvedAt})"""
+        return await self._save(self.TABLE_RENTAL_BILLS,
+                                record["billId"], record)
+
+    async def get_rental_bill(self, bill_id: int) -> dict | None:
+        return await self._get(self.TABLE_RENTAL_BILLS, bill_id)
+
+    async def update_rental_bill(self, bill_id: int,
+                                 fields: dict) -> dict:
+        return await self._update(self.TABLE_RENTAL_BILLS, bill_id,
+                                  fields)
+
+    async def list_rental_bills(self, member_id: int = None,
+                                status: str = None,
+                                limit: int = 200) -> list[dict]:
+        records = await self._list(self.TABLE_RENTAL_BILLS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if member_id is not None \
+                    and r.get("memberId") != member_id:
+                continue
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("billId", 0),
                       reverse=True)[:limit]
