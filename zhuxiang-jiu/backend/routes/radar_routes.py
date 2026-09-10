@@ -1,7 +1,7 @@
-"""40号 P7a/P7b/P7c·雷达2.0 路由(感知聚合+三维价值评估+演化预测,
-设计文档《40号 P7 规划方案》§3/§4/§5/§9)
+"""40号 P7a-P7d·雷达2.0 路由(感知聚合+三维价值评估+演化预测+
+自主响应触发, 设计文档《40号 P7 规划方案》§3-§6/§9)
 
-端点(8):
+端点(10):
     POST /api/radar/channels        频道入库(admin 增量扩展)
     GET  /api/radar/channels        频道池列表(种子惰性灌入)
     POST /api/radar/events/collect  流式采集触发(mock 15min 槽位)
@@ -11,6 +11,8 @@
     GET  /api/radar/scores          评分快照查询(P7b)
     POST /api/radar/events/{id}/predict   演化预测+跨平台关联(P7c)
     POST /api/radar/events/{id}/rehearse  合规预演沙盘(P7c, L1 专用)
+    GET  /api/radar/tasks           L1 任务包队列(P7d)
+    POST /api/radar/tasks/{id}/confirm  L1 人工确认(P7d, 46号轨)
 
 鉴权: X-Role: admin(管理决策面)
 异常映射: KeyError→404 / ValueError→409(项目约定)
@@ -53,6 +55,11 @@ def _forecast_service():
     return RadarForecastService()
 
 
+def _task_service():
+    from services.radar_task_service import RadarTaskService
+    return RadarTaskService()
+
+
 class ChannelRequest(PydBaseModel):
     platform: str = Field("douyin", max_length=30)
     name: str = Field(..., min_length=1, max_length=60,
@@ -71,6 +78,16 @@ class CollectRequest(PydBaseModel):
 class ScoreRequest(PydBaseModel):
     eventIds: list = Field(None,
                            description="指定事件 ID 列表(空=全量)")
+
+
+class ConfirmRequest(PydBaseModel):
+    approve: bool = Field(..., description="确认/否决")
+    reviewer: str = Field("admin", max_length=60)
+    note: str = Field("", max_length=500)
+
+
+class TaskRequest(PydBaseModel):
+    eventId: int = Field(..., description="L1 事件 ID(已过预演)")
 
 
 @router.get("/api/radar/channels",
@@ -209,6 +226,54 @@ async def radar_scores_list(
                 await _score_service().list_scores(
                     event_id=event_id, category=category,
                     grade=grade, limit=limit)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/radar/tasks",
+            tags=["雷达2.0全网侦测中枢"])
+async def radar_tasks_list(
+        status: str = None, limit: int = 50,
+        x_role: str = Header(None, alias="X-Role")):
+    """L1 任务包队列(预演通过自动入队; 决策依据+预案四件套
+    随任务返回——确认界面数据面)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _task_service().list_tasks(
+                    status=status, limit=limit)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/radar/tasks",
+             tags=["雷达2.0全网侦测中枢"])
+async def radar_tasks_ensure(
+        req: TaskRequest,
+        x_role: str = Header(None, alias="X-Role")):
+    """任务包创建/补建(幂等——46号审批串行约束下的延迟创建轨;
+    L1+预演通过门槛)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _task_service().ensure_task(req.eventId)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/radar/tasks/{task_id}/confirm",
+             tags=["雷达2.0全网侦测中枢"])
+async def radar_tasks_confirm(
+        task_id: int, req: ConfirmRequest,
+        x_role: str = Header(None, alias="X-Role")):
+    """L1 人工确认(46号审批总线轨——永不自动执行;
+    确认后触发 P6b 创作轨派发, 派发失败 fail-soft 留痕不回滚)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _task_service().confirm_task(
+                    task_id, req.approve, req.reviewer,
+                    req.note)}
     except Exception as e:
         _handle(e)
 

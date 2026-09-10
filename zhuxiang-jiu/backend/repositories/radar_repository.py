@@ -53,6 +53,12 @@ GRADE_L3 = "L3"    # 观察储备(知识库, 不推送)
 GRADE_L4 = "L4"    # 风险屏蔽(原因留痕备查)
 GRADES = (GRADE_L1, GRADE_L2, GRADE_L3, GRADE_L4)
 
+# L1 任务状态(P7d 自主响应触发层)
+TASK_STATUS_PENDING = "pending"      # 待人工确认(46号留痕已建)
+TASK_STATUS_CONFIRMED = "confirmed"  # 已确认(派发失败留痕态)
+TASK_STATUS_REJECTED = "rejected"   # 已否决(决策回流 P7e)
+TASK_STATUS_DISPATCHED = "dispatched"  # 已派发(P6b 脚本回执)
+
 # 情绪通道
 EMOTION_POSITIVE = "positive"
 EMOTION_NEGATIVE = "negative"
@@ -66,13 +72,14 @@ def _now_iso() -> str:
 
 # 序列化类型清单(bool 陷阱还原——P6g-4 实机教训)
 _INT_FIELDS = ("channelId", "eventId", "slotId", "scoreId",
+               "taskId", "changeId", "dispatchScriptId",
                "heatBase", "heatValue", "danmakuCount",
                "commentCount", "botClusterCount", "totalSlots",
                "clicks", "registered", "activated")
 _FLOAT_FIELDS = ("emotionDensity", "botShare", "crowdEmotion",
                  "fit", "safety", "conversion", "valueScore")
 _BOOL_FIELDS = ("botFiltered", "aggregated", "rehearsalPassed",
-                "coordinatedHype")
+                "coordinatedHype", "dispatchExecuted")
 
 
 class RadarRepository:
@@ -82,6 +89,7 @@ class RadarRepository:
     TABLE_EVENTS = "radar_events"
     TABLE_SLOTS = "radar_event_slots"
     TABLE_SCORES = "radar_scores"
+    TABLE_TASKS = "radar_tasks"
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -137,7 +145,8 @@ class RadarRepository:
 
     def _ensure_store(self):
         for key in ("radar_channels", "radar_events",
-                    "radar_event_slots", "radar_scores"):
+                    "radar_event_slots", "radar_scores",
+                    "radar_tasks"):
             self.store.setdefault(key, {})
 
     async def next_id(self, kind: str) -> int:
@@ -348,3 +357,44 @@ class RadarRepository:
         return sorted(result,
                       key=lambda x: (-int(x.get("scoreId") or 0))
                       )[:limit]
+
+    # ============================================================
+    # L1 任务包(P7d 自主响应触发层)
+    # ============================================================
+
+    async def save_task(self, record: dict) -> dict:
+        """保存任务包({taskId, traceId, eventId, changeId(46号),
+        status: pending/confirmed/rejected/dispatched, plan(预案
+        四件套), decisionBasis(决策依据), downstream, dispatchError,
+        dispatchScriptId, dispatchExecuted, requestedBy, confirmedBy,
+        confirmNote, createdAt, confirmedAt})"""
+        return await self._save(self.TABLE_TASKS,
+                                record["taskId"], record)
+
+    async def get_task(self, task_id: int) -> dict | None:
+        return await self._get(self.TABLE_TASKS, task_id)
+
+    async def update_task(self, task_id: int,
+                         fields: dict) -> dict:
+        return await self._update(self.TABLE_TASKS, task_id, fields)
+
+    async def list_tasks(self, status: str = None,
+                         limit: int = 200) -> list[dict]:
+        records = await self._list(self.TABLE_TASKS, limit=2000)
+        result = []
+        for r in records:
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("taskId", 0))[:limit]
+
+    async def find_task_by_event(self, event_id: int,
+                                 statuses: tuple) -> dict | None:
+        """按事件查活跃任务(幂等——同事件 pending/confirmed/
+        dispatched 不重复建)"""
+        for r in await self._list(self.TABLE_TASKS, limit=2000):
+            if r.get("eventId") == event_id \
+                    and r.get("status") in statuses:
+                return r
+        return None

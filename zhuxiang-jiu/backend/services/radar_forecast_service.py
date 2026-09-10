@@ -462,5 +462,26 @@ class RadarForecastService:
         await self.repo.update_event(event_id, {
             "rehearsalPlan": plan, "rehearsedAt": _now_iso(),
             "rehearsalPassed": True})
+        # P7d 挂接: 预演通过 → 自动入执行队列(L1 任务包+
+        # 46号审批总线留痕——设计 §6 响应链)
+        # fail-soft: 46号 P0 每档案同时仅一个 pending——
+        # 总线串行约束下任务包延迟创建(管理面显式补建),
+        # 预演结果本身不受影响(预案已回写)
+        from services.radar_task_service import RadarTaskService
+        task_info = {"taskId": 0, "traceId": "", "changeId": 0,
+                     "status": "", "note": ""}
+        try:
+            task = await RadarTaskService(
+                repo=self.repo).ensure_task(event_id)
+            task_info.update({
+                "taskId": task["taskId"],
+                "traceId": task.get("traceId", ""),
+                "changeId": task.get("changeId", 0),
+                "status": task.get("status", "")})
+        except ValueError as exc:
+            logger.warning("p7d_task_deferred eventId=%s: %s",
+                           event_id, exc)
+            task_info["note"] = (
+                f"任务包延迟创建(46号审批串行约束): {exc}")
         return {"eventId": event_id, "passed": True,
-                "plan": plan}
+                "plan": plan, "task": task_info}
