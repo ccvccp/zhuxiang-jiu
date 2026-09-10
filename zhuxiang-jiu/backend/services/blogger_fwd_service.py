@@ -109,13 +109,17 @@ def compute_deep_score(origin_title: str, origin_summary: str,
 
     文本轨: 风险词一票否决(直接 0) + 价值观冲突大幅扣分;
     元数据轨: 来源真实性字段缺失扣分。
+    RT-03 防线: 文本先做攻击归一(去空白与标点)——拆词/
+    插符绕词表("疫?情")在归一后命中原词。
     Returns:
         (深审分 0-100, 拒绝原因列表)
     """
-    text = f"{origin_title or ''} {origin_summary or ''}"
+    raw = f"{origin_title or ''} {origin_summary or ''}"
+    # 攻击归一: 去空白+常见标点(确定性——无 LLM)
+    text = "".join(ch for ch in raw if ch.isalnum())
     reasons = []
     score = 100.0
-    # 一票否决: 风险词
+    # 一票否决: 风险词(归一后匹配)
     for w in RISK_HARD_BLOCK_WORDS:
         if w in text:
             reasons.append(f"风险词命中({w})——一票否决")
