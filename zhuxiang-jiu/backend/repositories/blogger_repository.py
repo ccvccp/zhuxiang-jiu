@@ -243,7 +243,9 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "strategyId", "experimentId", "versionId", "assetId",
                "useCount", "winCount", "winnerVersionId",
                # P5c 自主发布调度器
-               "boostId")
+               "boostId",
+               # P5d 自治理与进化层
+               "interventionId", "snapshotId", "recovered")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust",
                  # P5a 自主学习引擎
@@ -394,7 +396,7 @@ class BloggerRepository:
                     "blogger_signals", "blogger_polls",
                     "blogger_strategies", "blogger_experiments",
                     "blogger_ab_versions", "blogger_ugc_assets",
-                    "blogger_boosts"):
+                    "blogger_boosts", "blogger_interventions"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -1033,3 +1035,67 @@ class BloggerRepository:
         return sorted(result,
                       key=lambda x: x.get("boostId", 0),
                       reverse=True)[:limit]
+
+    # ============================================================
+    # P5d 自治理与进化层: 人类干预记录(设计文档 P5 §6/§7)
+    # ============================================================
+
+    TABLE_INTERVENTIONS = "blogger_interventions"
+
+    async def save_intervention(self, record: dict) -> dict:
+        """保存干预({interventionId, kind: pause/resume/rollback/
+        inject, snapshotId, payload, note, operator, evidenceHash,
+        txId, createdAt})"""
+        return await self._save(self.TABLE_INTERVENTIONS,
+                                record["interventionId"], record)
+
+    async def get_intervention(self,
+                               intervention_id: int) -> dict | None:
+        return await self._get(self.TABLE_INTERVENTIONS,
+                               intervention_id)
+
+    async def list_interventions(self, kind: str = None,
+                                 limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_INTERVENTIONS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if kind and r.get("kind") != kind:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("interventionId", 0),
+                      reverse=True)[:limit]
+
+    async def save_autonomy_state(self, record: dict) -> dict:
+        """保存自治开关状态({paused, reason, pausedBy, pausedAt,
+        strategySnapshots})"""
+        data = dict(record)
+        data["updatedAt"] = _now_iso()
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("blogger", "autonomy_state"),
+                              mapping=self._serialize(data))
+        else:
+            self._ensure_store()
+            self.store.setdefault("blogger_autonomy_state", {}) \
+                .update(data)
+        return data
+
+    async def get_autonomy_state(self) -> dict:
+        """读取自治开关状态(空库返回缺省 running)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("blogger", "autonomy_state"))
+            parsed = self._deserialize(data) if data else {}
+        else:
+            self._ensure_store()
+            self.store.setdefault("blogger_autonomy_state", {})
+            parsed = dict(self.store["blogger_autonomy_state"])
+        parsed.pop("updatedAt", None)
+        if not parsed:
+            parsed = {"paused": False, "reason": "",
+                      "pausedBy": "", "pausedAt": "",
+                      "strategySnapshots": {}}
+        return parsed

@@ -1155,6 +1155,119 @@ async def auto_publish_boost(req: BoostRequest,
         _handle(e)
 
 
+# ============================================================
+# P5d 自治理与进化层(自愈 + 透明度看板 + 干预通道, 设计文档 P5 §6)
+# ============================================================
+
+class PauseRequest(PydBaseModel):
+    reason: str = Field(..., min_length=1, max_length=200,
+                       description="暂停理由(留痕审计)")
+    operator: str = Field("admin", max_length=50)
+
+
+class RollbackRequest(PydBaseModel):
+    snapshotId: int = Field(None, description="指定快照(空则最新)")
+    operator: str = Field("admin", max_length=50)
+
+
+class InjectRequest(PydBaseModel):
+    rule: dict = Field(..., description="规则 {type, value, scope?}"
+                       "(type/value 必填, 即时生效留痕)")
+    operator: str = Field("admin", max_length=50)
+
+
+def _auto_govern_service():
+    from services.blogger_auto_govern_service import \
+        BloggerAutoGovernService
+    return BloggerAutoGovernService()
+
+
+@router.get("/api/blogger/auto/health/evolution",
+            tags=["平台流量DV博主模块"])
+async def auto_health_evolution(
+        x_role: str = Header(None, alias="X-Role")):
+    """进化透明度看板(自治开关/漏斗/策略排行/干预史/自愈流水)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _auto_govern_service().evolution_dashboard()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/intervention/pause",
+             tags=["平台流量DV博主模块"])
+async def auto_intervention_pause(req: PauseRequest,
+                                 x_role: str = Header(None,
+                                                      alias="X-Role")):
+    """人工暂停(最高优先级——冻结全部自主行为, 即时生效留痕)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _auto_govern_service().pause_autonomy(
+                    req.reason, operator=req.operator)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/intervention/resume",
+             tags=["平台流量DV博主模块"])
+async def auto_intervention_resume(
+        x_role: str = Header(None, alias="X-Role")):
+    """恢复自主行为(显式 resume——永不自动恢复)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _auto_govern_service().resume_autonomy()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/intervention/rollback",
+             tags=["平台流量DV博主模块"])
+async def auto_intervention_rollback(req: RollbackRequest,
+                                      x_role: str = Header(None,
+                                                          alias="X-Role")):
+    """策略库回滚(pause 时自动抓快照; 快照缺失即拒绝)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _auto_govern_service().rollback_strategies(
+                    req.snapshotId, operator=req.operator)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/intervention/inject",
+             tags=["平台流量DV博主模块"])
+async def auto_intervention_inject(req: InjectRequest,
+                                   x_role: str = Header(None,
+                                                       alias="X-Role")):
+    """规则注入(热更新——即时生效并留痕)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _auto_govern_service().inject_rule(
+                    req.rule, operator=req.operator)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/auto/audit/decision/{follow_id}",
+            tags=["平台流量DV博主模块"])
+async def auto_audit_decision(follow_id: int,
+                             x_role: str = Header(None,
+                                                  alias="X-Role")):
+    """决策可解释报告(规则命中链路回放——AI 为何这样决策)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _auto_govern_service().decision_explain(
+                    follow_id)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)

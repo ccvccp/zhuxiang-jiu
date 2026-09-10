@@ -306,8 +306,14 @@ class BloggerAutoCreateService:
 
         Raises:
             KeyError: 实验不存在
-            ValueError: 实验非 running / 样本不足
+            ValueError: 实验非 running / 样本不足 / 自主行为已暂停
         """
+        # P5d 铁律: pause 后自主行为一律拒绝(仲裁优先于调度)
+        from services.blogger_auto_govern_service import \
+            BloggerAutoGovernService
+        await BloggerAutoGovernService(
+            repo=self.repo, blogger_service=self.svc
+        ).require_running_async()
         experiment = await self.repo.get_experiment(experiment_id)
         if experiment is None:
             raise KeyError(f"实验不存在(experimentId={experiment_id})")

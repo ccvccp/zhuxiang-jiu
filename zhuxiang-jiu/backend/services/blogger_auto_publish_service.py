@@ -329,8 +329,17 @@ class BloggerAutoPublishService:
 
         Raises:
             KeyError: 跟随内容不存在
-            ValueError: 内容非已发布 / 预算非法 / 已有推广
+            ValueError: 内容非已发布 / 预算非法 / 已有推广 /
+                自主行为已暂停(低预算自动执行轨)
         """
+        # P5d 铁律: pause 后自主行为(低预算自动执行)拒绝;
+        # 高预算仅生成建议书非"行为", 不受限(给人工审批留通道)
+        from services.blogger_auto_govern_service import \
+            BloggerAutoGovernService
+        if float(budget) <= BOOST_AUTO_MAX:
+            await BloggerAutoGovernService(
+                repo=self.repo, blogger_service=self.svc
+            ).require_running_async()
         follow = await self.repo.get_follow(follow_id)
         if follow is None:
             raise KeyError(f"跟随内容不存在(followId={follow_id})")

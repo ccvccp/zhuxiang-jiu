@@ -363,8 +363,14 @@ class BloggerAutoLearnService:
         → 44号 submit_feedback(source: blogger_p5a) → 学习轮触发
 
         Raises:
-            ValueError: 无未消费信号
+            ValueError: 无未消费信号 / 自主行为已暂停
         """
+        # P5d 铁律: pause 后自主行为一律拒绝(仲裁优先于调度)
+        from services.blogger_auto_govern_service import \
+            BloggerAutoGovernService
+        await BloggerAutoGovernService(
+            repo=self.repo, blogger_service=self.svc
+        ).require_running_async()
         signals = await self.repo.list_signals(
             consumed=False, limit=1000)
         if not signals:
