@@ -2409,6 +2409,64 @@ async def industry_dataset():
         _handle(e)
 
 
+# ============================================================
+# P6f-4 AI 视听行为可信度评估(五因子 + 三检测器 + 分档联动,
+# 设计文档《40号 P6f 规划方案》§6——档位变更走建议书)
+# ============================================================
+
+def _trust_service():
+    from services.blogger_trust_service import \
+        BloggerTrustService
+    return BloggerTrustService()
+
+
+@router.get("/api/blogger/av/trust/subjects",
+            tags=["平台流量DV博主模块"])
+async def trust_subjects(
+        x_role: str = Header(None, alias="X-Role")):
+    """可信度主体清单(人设/创作者/租用会员——观测面)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _trust_service().list_subjects()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/trust/{subject_type}/{subject_id}",
+            tags=["平台流量DV博主模块"])
+async def trust_detail(
+        subject_type: str, subject_id: int,
+        x_role: str = Header(None, alias="X-Role")):
+    """可信度详情(五因子+总分+分档+联动系数)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _trust_service().evaluate(
+                    subject_type, subject_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/trust/recalculate",
+             tags=["平台流量DV博主模块"])
+async def trust_recalculate(
+        subject_type: str = Query(..., max_length=20),
+        subject_id: int = Query(...),
+        history: str = Query("", description="历史总分逗号串"),
+        x_role: str = Header(None, alias="X-Role")):
+    """可信度重算(带历史时序——三检测器)"""
+    _require_admin(x_role)
+    try:
+        hist = ([float(h) for h in history.split(",")
+                 if h.strip()] if history else [])
+        return {"success": True, "data":
+                await _trust_service().evaluate(
+                    subject_type, subject_id, history=hist)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)
