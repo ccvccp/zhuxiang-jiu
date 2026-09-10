@@ -2374,6 +2374,41 @@ async def admin_perf_reject(report_id: int,
         _handle(e)
 
 
+# ============================================================
+# P6f-3 行业合规标准输出(白皮书 + 开放数据集, 设计文档
+# 《40号 P6f 规划方案》§5——零 PII, 模板出数, 责任在人)
+# ============================================================
+
+def _whitepaper_service():
+    from services.blogger_whitepaper_service import \
+        BloggerWhitepaperService
+    return BloggerWhitepaperService()
+
+
+@router.get("/api/blogger/av/industry/whitepaper",
+            tags=["平台流量DV博主模块"])
+async def industry_whitepaper(
+        year: int = Query(None, description="年份(空=今年)")):
+    """年度白皮书(四章节: 框架/数据/红线案例/倡议——公开只读)"""
+    try:
+        return {"success": True, "data":
+                await _whitepaper_service().build_whitepaper(
+                    year=year)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/industry/dataset",
+            tags=["平台流量DV博主模块"])
+async def industry_dataset():
+    """开放数据集(脱敏聚合, CC BY-NC-SA; 样本门过滤)"""
+    try:
+        return {"success": True, "data":
+                await _whitepaper_service().open_dataset()}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)
