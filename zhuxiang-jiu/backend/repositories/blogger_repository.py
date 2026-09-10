@@ -236,9 +236,13 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "zeroTrafficStreak", "trafficInfluencerId",
                "probeRemaining", "commentId", "targetComments",
                "ageHours", "accountId",
-               "commentHits", "commentMisses")
+               "commentHits", "commentMisses",
+               # P5a 自主学习引擎
+               "signalId", "pollId", "answer", "optionIndex")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
-                 "overlapRatio", "weightBase", "weightAdjust")
+                 "overlapRatio", "weightBase", "weightAdjust",
+                 # P5a 自主学习引擎
+                 "value", "confidence")
 
 
 def _now_iso() -> str:
@@ -377,7 +381,8 @@ class BloggerRepository:
     def _ensure_store(self):
         for key in ("blogger_pool", "blogger_works",
                     "blogger_follows", "blogger_audits",
-                    "blogger_accounts", "blogger_comments"):
+                    "blogger_accounts", "blogger_comments",
+                    "blogger_signals", "blogger_polls"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -725,3 +730,97 @@ class BloggerRepository:
             if r.get("targetWorkKey") == target_work_key:
                 return r
         return None
+
+    # ============================================================
+    # P5a 自主学习引擎: 信号流 / 微调研 / 奖励参数
+    # (设计文档《40号 P5 升级方案》§3/§7)
+    # ============================================================
+
+    TABLE_SIGNALS = "blogger_signals"
+    TABLE_POLLS = "blogger_polls"
+    TABLE_REWARD = "reward_config"
+
+    async def save_signal(self, record: dict) -> dict:
+        """保存信号({signalId, followId, bloggerId, platform,
+        channel, kind, value, raw, consumed, createdAt})"""
+        return await self._save(self.TABLE_SIGNALS,
+                                record["signalId"], record)
+
+    async def get_signal(self, signal_id: int) -> dict | None:
+        return await self._get(self.TABLE_SIGNALS, signal_id)
+
+    async def update_signal(self, signal_id: int,
+                            fields: dict) -> dict:
+        return await self._update(self.TABLE_SIGNALS, signal_id,
+                                  fields)
+
+    async def list_signals(self, follow_id: int = None,
+                           channel: str = None,
+                           consumed: bool = None,
+                           limit: int = 500) -> list[dict]:
+        records = await self._list(self.TABLE_SIGNALS,
+                                   limit=5000)
+        result = []
+        for r in records:
+            if follow_id is not None \
+                    and r.get("followId") != follow_id:
+                continue
+            if channel and r.get("channel") != channel:
+                continue
+            if consumed is not None \
+                    and bool(r.get("consumed")) != consumed:
+                continue
+            result.append(r)
+        return sorted(result, key=lambda x: x.get("signalId", 0),
+                      reverse=True)[:limit]
+
+    async def save_poll(self, record: dict) -> dict:
+        """保存微调研({pollId, topic, scenario, question,
+        options, votes, answer, confidence, status, createdAt,
+        closedAt})"""
+        return await self._save(self.TABLE_POLLS,
+                                record["pollId"], record)
+
+    async def get_poll(self, poll_id: int) -> dict | None:
+        return await self._get(self.TABLE_POLLS, poll_id)
+
+    async def update_poll(self, poll_id: int,
+                          fields: dict) -> dict:
+        return await self._update(self.TABLE_POLLS, poll_id,
+                                  fields)
+
+    async def list_polls(self, status: str = None,
+                         limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_POLLS, limit=1000)
+        result = []
+        for r in records:
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result, key=lambda x: x.get("pollId", 0),
+                      reverse=True)[:limit]
+
+    async def save_reward_config(self, record: dict) -> dict:
+        """保存奖励参数(α/γ; β 为宪法域常量不入库)"""
+        data = dict(record)
+        data["updatedAt"] = _now_iso()
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("blogger", self.TABLE_REWARD),
+                              mapping=self._serialize(data))
+        else:
+            self._ensure_store()
+            self.store.setdefault("blogger_reward_config", {}) \
+                .update(data)
+        return data
+
+    async def get_reward_config(self) -> dict:
+        """读取奖励参数覆盖(空库返回空 dict)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("blogger", self.TABLE_REWARD))
+            return self._deserialize(data) if data else {}
+        self._ensure_store()
+        self.store.setdefault("blogger_reward_config", {})
+        return dict(self.store["blogger_reward_config"])

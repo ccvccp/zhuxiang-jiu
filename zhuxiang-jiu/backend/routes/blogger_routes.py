@@ -758,6 +758,160 @@ async def comment_attribution(
         _handle(e)
 
 
+# ============================================================
+# P5a 自主学习引擎(信号三通道 + 复合奖励 + 微调研, 设计文档 P5 §3)
+# ============================================================
+
+class SignalCollectRequest(PydBaseModel):
+    followId: int = Field(None, description="指定已发布内容(空则全量采集)")
+
+
+class NegativeReportRequest(PydBaseModel):
+    followId: int = Field(..., description="归属跟随内容")
+    reports: int = Field(0, ge=0, description="举报数")
+    complaints: int = Field(0, ge=0, description="投诉数")
+    comments: list = Field(None, description="评论文本列表"
+                                        "(负面词表密度判定)")
+    rateLimits: int = Field(0, ge=0, description="平台限流次数")
+
+
+class PollCreateRequest(PydBaseModel):
+    topic: str = Field(..., min_length=1, max_length=64,
+                       description="调研主题(如: 钩子风格选择)")
+    question: str = Field(..., min_length=1, max_length=200,
+                          description="调研问题")
+    options: list = Field(..., min_length=2, max_length=5,
+                          description="2-5 个选项")
+    confidence: float = Field(..., ge=0, le=1,
+                              description="当前决策置信度(须<0.8)")
+    scenario: str = Field("creation", max_length=32,
+                          description="场景: creation/publish/boost")
+
+
+class PollVoteRequest(PydBaseModel):
+    option: int = Field(..., ge=0, description="选项下标(0 起)")
+
+
+def _auto_learn_service():
+    from services.blogger_auto_learn_service import \
+        BloggerAutoLearnService
+    return BloggerAutoLearnService()
+
+
+@router.post("/api/blogger/auto/signals/collect",
+             tags=["平台流量DV博主模块"])
+async def auto_signals_collect(req: SignalCollectRequest,
+                               x_role: str = Header(None,
+                                                    alias="X-Role")):
+    """三通道信号采集(正向 attract 归因 + 合规三审分; 滚动采样)"""
+    _require_admin(x_role)
+    try:
+        result = await _auto_learn_service().collect_signals(
+            follow_id=req.followId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/auto/signals/status",
+            tags=["平台流量DV博主模块"])
+async def auto_signals_status(
+        x_role: str = Header(None, alias="X-Role")):
+    """信号统计视图(通道/种类计数 + 未消费数)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True,
+                "data": await _auto_learn_service().signals_status()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/signals/report-negative",
+             tags=["平台流量DV博主模块"])
+async def auto_signals_report_negative(
+        req: NegativeReportRequest,
+        x_role: str = Header(None, alias="X-Role")):
+    """负向信号上报(举报/投诉/评论负面情绪/限流——确定性词表判定)"""
+    _require_admin(x_role)
+    try:
+        result = await _auto_learn_service().report_negative(
+            req.followId, reports=req.reports,
+            complaints=req.complaints,
+            comments=req.comments, rate_limits=req.rateLimits)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/learn/run",
+             tags=["平台流量DV博主模块"])
+async def auto_learn_run(x_role: str = Header(None, alias="X-Role")):
+    """信号消费学习轮(聚合→复合奖励→44号 Hedge→学习轮触发)"""
+    _require_admin(x_role)
+    try:
+        result = await _auto_learn_service().run_learning()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/auto/reward/config",
+            tags=["平台流量DV博主模块"])
+async def auto_reward_config(
+        x_role: str = Header(None, alias="X-Role")):
+    """复合奖励参数只读(β 宪法域不可调整)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True,
+                "data": await _auto_learn_service().get_reward_config()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/polls/create",
+             tags=["平台流量DV博主模块"])
+async def auto_polls_create(req: PollCreateRequest,
+                            x_role: str = Header(None,
+                                                 alias="X-Role")):
+    """发起微调研(仅低置信<0.8 场景; 人机共学)"""
+    _require_admin(x_role)
+    try:
+        poll = await _auto_learn_service().create_poll(
+            req.topic, req.question, req.options,
+            req.confidence, scenario=req.scenario)
+        return {"success": True, "data": poll}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/polls/{poll_id}/vote",
+             tags=["平台流量DV博主模块"])
+async def auto_polls_vote(poll_id: int, req: PollVoteRequest,
+                          x_role: str = Header(None,
+                                               alias="X-Role")):
+    """运营投票(单票即定; 生成 human_feedback 信号留痕)"""
+    _require_admin(x_role)
+    try:
+        poll = await _auto_learn_service().vote_poll(
+            poll_id, req.option)
+        return {"success": True, "data": poll}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/auto/polls/pending",
+            tags=["平台流量DV博主模块"])
+async def auto_polls_pending(x_role: str = Header(None,
+                                                  alias="X-Role")):
+    """待调研列表(open)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _auto_learn_service().list_pending_polls()}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)
