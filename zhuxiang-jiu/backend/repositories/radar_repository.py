@@ -1,14 +1,18 @@
-"""40号 P7a·雷达2.0 数据访问层(双模式: 内存 + Redis)
+"""40号 P7a/P7b·雷达2.0 数据访问层(双模式: 内存 + Redis)
 
 表清单:
     radar_channels:    种子频道池(12 频道测试集——时政军事为主
                        构成 L4 合规测试语料)
     radar_events:      事件流(多模态字段/热度/情绪聚合/生命周期)
     radar_event_slots: 事件×槽位观测(热度/情绪密度时序——聚类聚合源)
+    radar_scores:      三维评分快照(契合/安全/转化+分级, P7b)
 
-设计对齐(《40号 P7 雷达2.0 规划方案》§3/§8):
+设计对齐(《40号 P7 雷达2.0 规划方案》§3/§4/§8):
     - 事件指纹去重: SHA256(平台+频道+事件主题规范化)——同一事件
       跨槽位/跨平台聚合(P0 作品指纹范式升级为事件级)
+    - 评分快照即转化统计源: radar_scores 携带漏斗结果字段
+      (clicks/registered/activated, 归因回流填充——P7d/P7e 闭环),
+      同类事件历史转化率由既往快照聚合(P7b 转化潜力口径)
     - bool 字段显式还原(P6g-4 Redis 实机教训)
     - 复杂字段(list/dict)注册序列化清单
 """
@@ -42,6 +46,13 @@ LIFECYCLE_RISING = "rising"    # 爆发/发酵期(P7c 判定)
 LIFECYCLE_PEAK = "peak"        # 峰值期
 LIFECYCLE_DECAY = "decay"      # 衰退期
 
+# 事件分级(P7b 三维价值评估产出; L4 屏蔽留痕永不静默丢弃)
+GRADE_L1 = "L1"    # 紧急高价值(任务包→46号人工确认)
+GRADE_L2 = "L2"    # 常规机会(待处理队列)
+GRADE_L3 = "L3"    # 观察储备(知识库, 不推送)
+GRADE_L4 = "L4"    # 风险屏蔽(原因留痕备查)
+GRADES = (GRADE_L1, GRADE_L2, GRADE_L3, GRADE_L4)
+
 # 情绪通道
 EMOTION_POSITIVE = "positive"
 EMOTION_NEGATIVE = "negative"
@@ -54,10 +65,12 @@ def _now_iso() -> str:
 
 
 # 序列化类型清单(bool 陷阱还原——P6g-4 实机教训)
-_INT_FIELDS = ("channelId", "eventId", "slotId", "heatBase",
-               "heatValue", "danmakuCount", "commentCount",
-               "botClusterCount", "totalSlots")
-_FLOAT_FIELDS = ("emotionDensity", "botShare", "crowdEmotion")
+_INT_FIELDS = ("channelId", "eventId", "slotId", "scoreId",
+               "heatBase", "heatValue", "danmakuCount",
+               "commentCount", "botClusterCount", "totalSlots",
+               "clicks", "registered", "activated")
+_FLOAT_FIELDS = ("emotionDensity", "botShare", "crowdEmotion",
+                 "fit", "safety", "conversion", "valueScore")
 _BOOL_FIELDS = ("botFiltered", "aggregated")
 
 
@@ -67,6 +80,7 @@ class RadarRepository:
     TABLE_CHANNELS = "radar_channels"
     TABLE_EVENTS = "radar_events"
     TABLE_SLOTS = "radar_event_slots"
+    TABLE_SCORES = "radar_scores"
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -122,7 +136,7 @@ class RadarRepository:
 
     def _ensure_store(self):
         for key in ("radar_channels", "radar_events",
-                    "radar_event_slots"):
+                    "radar_event_slots", "radar_scores"):
             self.store.setdefault(key, {})
 
     async def next_id(self, kind: str) -> int:
@@ -231,6 +245,7 @@ class RadarRepository:
     async def list_events(self, channel_id: int = None,
                           category: str = None,
                           lifecycle: str = None,
+                          grade: str = None,
                           limit: int = 200) -> list[dict]:
         records = await self._list(self.TABLE_EVENTS, limit=2000)
         result = []
@@ -241,6 +256,8 @@ class RadarRepository:
             if category and r.get("category") != category:
                 continue
             if lifecycle and r.get("lifecycle") != lifecycle:
+                continue
+            if grade and r.get("grade") != grade:
                 continue
             result.append(r)
         return sorted(result,
@@ -294,3 +311,39 @@ class RadarRepository:
                     and r.get("slotKey") == slot_key:
                 return r
         return None
+
+    # ============================================================
+    # 三维评分快照(P7b——同时是转化潜力的历史统计源)
+    # ============================================================
+
+    async def save_score(self, record: dict) -> dict:
+        """保存评分快照({scoreId, eventId, fingerprint, category,
+        title, fit, fitModules, safety, safetyReasons, conversion,
+        conversionSamples, valueScore, grade, blockedReasons,
+        lifecycle, heatBase, clicks, registered, activated,
+        scoredAt})——clicks/registered/activated 为漏斗结果字段
+        (归因回流填充, clicks>0 的历史快照构成转化统计样本)"""
+        return await self._save(self.TABLE_SCORES,
+                                record["scoreId"], record)
+
+    async def get_score(self, score_id: int) -> dict | None:
+        return await self._get(self.TABLE_SCORES, score_id)
+
+    async def list_scores(self, event_id: int = None,
+                          category: str = None,
+                          grade: str = None,
+                          limit: int = 200) -> list[dict]:
+        records = await self._list(self.TABLE_SCORES, limit=5000)
+        result = []
+        for r in records:
+            if event_id is not None \
+                    and r.get("eventId") != event_id:
+                continue
+            if category and r.get("category") != category:
+                continue
+            if grade and r.get("grade") != grade:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: (-int(x.get("scoreId") or 0))
+                      )[:limit]

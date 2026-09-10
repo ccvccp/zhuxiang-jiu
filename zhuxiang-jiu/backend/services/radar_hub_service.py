@@ -463,10 +463,12 @@ class RadarHubService:
 
     async def list_events(self, category: str = None,
                           lifecycle: str = None,
+                          grade: str = None,
                           limit: int = 50) -> list[dict]:
         """事件流查询(热度降序; 弹幕原文不返回——即用即弃铁律)"""
         events = await self.repo.list_events(
-            category=category, lifecycle=lifecycle, limit=limit)
+            category=category, lifecycle=lifecycle, grade=grade,
+            limit=limit)
         # 摘要化输出(多模态详情留 debug 面)
         return [{
             "eventId": e["eventId"],
@@ -479,6 +481,8 @@ class RadarHubService:
             "emotionDensity": e.get("emotionDensity", 0),
             "botFiltered": bool(e.get("botFiltered")),
             "lifecycle": e.get("lifecycle", ""),
+            "grade": e.get("grade", ""),
+            "valueScore": e.get("valueScore", 0),
             "totalSlots": e.get("totalSlots", 0),
             "lastSeenAt": e.get("lastSeenAt", ""),
         } for e in events]
