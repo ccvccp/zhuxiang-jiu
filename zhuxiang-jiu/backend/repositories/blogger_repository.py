@@ -241,13 +241,17 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "signalId", "pollId", "answer", "optionIndex",
                # P5b 自主创作工坊
                "strategyId", "experimentId", "versionId", "assetId",
-               "useCount", "winCount", "winnerVersionId")
+               "useCount", "winCount", "winnerVersionId",
+               # P5c 自主发布调度器
+               "boostId")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust",
                  # P5a 自主学习引擎
                  "value", "confidence",
                  # P5b 自主创作工坊
-                 "avgReward", "revenueAmount", "commissionRate")
+                 "avgReward", "revenueAmount", "commissionRate",
+                 # P5c 自主发布调度器
+                 "budget", "ema")
 
 
 def _now_iso() -> str:
@@ -389,7 +393,8 @@ class BloggerRepository:
                     "blogger_accounts", "blogger_comments",
                     "blogger_signals", "blogger_polls",
                     "blogger_strategies", "blogger_experiments",
-                    "blogger_ab_versions", "blogger_ugc_assets"):
+                    "blogger_ab_versions", "blogger_ugc_assets",
+                    "blogger_boosts"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -960,4 +965,71 @@ class BloggerRepository:
             result.append(r)
         return sorted(result,
                       key=lambda x: x.get("assetId", 0),
+                      reverse=True)[:limit]
+
+    # ============================================================
+    # P5c 自主发布调度器: 时段效果曲线 / 追加推广建议
+    # (设计文档《40号 P5 升级方案》§5/§7)
+    # ============================================================
+
+    TABLE_WINDOWS = "publish_windows"
+    TABLE_BOOSTS = "blogger_boosts"
+
+    async def save_publish_windows(self, mapping: dict) -> dict:
+        """保存时段曲线({platform:hour: EMA效果值}, Hash 结构)"""
+        data = dict(mapping)
+        data["updatedAt"] = _now_iso()
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("blogger", self.TABLE_WINDOWS),
+                              mapping=self._serialize(data))
+        else:
+            self._ensure_store()
+            self.store.setdefault("blogger_publish_windows", {}) \
+                .update(data)
+        return data
+
+    async def get_publish_windows(self) -> dict:
+        """读取时段曲线(空库返回空 dict; 过滤 updatedAt 元键)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("blogger", self.TABLE_WINDOWS))
+            parsed = self._deserialize(data) if data else {}
+        else:
+            self._ensure_store()
+            self.store.setdefault("blogger_publish_windows", {})
+            parsed = dict(self.store["blogger_publish_windows"])
+        return {k: v for k, v in parsed.items()
+                if k != "updatedAt"}
+
+    async def save_boost(self, record: dict) -> dict:
+        """保存追加推广({boostId, followId, budget, status:
+        pending/executed/rejected, reason, receipt, createdAt,
+        executedAt})"""
+        return await self._save(self.TABLE_BOOSTS,
+                                record["boostId"], record)
+
+    async def get_boost(self, boost_id: int) -> dict | None:
+        return await self._get(self.TABLE_BOOSTS, boost_id)
+
+    async def update_boost(self, boost_id: int,
+                           fields: dict) -> dict:
+        return await self._update(self.TABLE_BOOSTS, boost_id, fields)
+
+    async def list_boosts(self, follow_id: int = None,
+                          status: str = None,
+                          limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_BOOSTS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if follow_id is not None \
+                    and r.get("followId") != follow_id:
+                continue
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("boostId", 0),
                       reverse=True)[:limit]

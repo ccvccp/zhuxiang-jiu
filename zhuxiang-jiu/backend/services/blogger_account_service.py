@@ -68,8 +68,12 @@ class BloggerAccountService:
     # ============================================================
 
     async def create_account(self, platform: str, alias: str,
-                             note: str = "") -> dict:
+                             note: str = "",
+                             tags: list = None) -> dict:
         """新增发布账号
+
+        Args:
+            tags: 账号标签画像(P5c 协同调度: 内容钩子匹配选号)
 
         Raises:
             ValueError: 平台无效 / 别名空
@@ -91,6 +95,8 @@ class BloggerAccountService:
             "coolingUntil": "",
             "failStreak": 0,
             "totalPublished": 0,
+            "tags": [str(t).strip() for t in (tags or [])
+                     if str(t).strip()],
             "note": note,
             "createdAt": _now_iso(),
         }

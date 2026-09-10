@@ -108,6 +108,8 @@ class CreateAccountRequest(PydBaseModel):
     alias: str = Field(..., min_length=1, max_length=64,
                        description="账号别名(如 抖音主号A)")
     note: str = Field("", max_length=200, description="备注")
+    tags: list = Field(None, description="账号标签画像(P5c 协同调度: "
+                                   "deals/lifestyle/warm/business/tasting)")
 
 
 class GenerateCommentRequest(PydBaseModel):
@@ -520,7 +522,8 @@ async def create_account(req: CreateAccountRequest,
         from services.blogger_account_service import \
             BloggerAccountService
         account = await BloggerAccountService().create_account(
-            platform=req.platform, alias=req.alias, note=req.note)
+            platform=req.platform, alias=req.alias, note=req.note,
+            tags=req.tags)
         return {"success": True, "data": account}
     except Exception as e:
         _handle(e)
@@ -1054,6 +1057,100 @@ async def auto_ugc_revenue(asset_id: int, req: UgcRevenueRequest,
         asset = await _auto_create_service().propose_ugc_revenue(
             asset_id, req.gmv)
         return {"success": True, "data": asset}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P5c 自主发布调度器(动态时机 + 账号协同 + 1h后调控, 设计文档 P5 §5)
+# ============================================================
+
+class BoostRequest(PydBaseModel):
+    followId: int = Field(..., description="归属已发布内容")
+    budget: float = Field(..., gt=0, description="推广预算(元; "
+                                       "高预算>100须人工质押审批)")
+    reason: str = Field("", max_length=200, description="推广理由")
+
+
+def _auto_publish_service():
+    from services.blogger_auto_publish_service import \
+        BloggerAutoPublishService
+    return BloggerAutoPublishService()
+
+
+@router.get("/api/blogger/auto/publish/windows",
+            tags=["平台流量DV博主模块"])
+async def auto_publish_windows(
+        x_role: str = Header(None, alias="X-Role"),
+        platform: str = Query(None, description="平台过滤"),
+        smart: str = Query(None, description="传 1 附加动态决策"
+                                  "下一发布时间与TOP3时段")):
+    """时段效果曲线视图(平台×小时 EMA 期望点击)"""
+    _require_admin(x_role)
+    try:
+        svc = _auto_publish_service()
+        data = {"windows": await svc.get_windows(platform)}
+        if smart:
+            targets = ([platform] if platform
+                       else list(data["windows"].keys()))
+            data["smart"] = {
+                p: {"topSlots": await svc.best_slots(p),
+                    "nextPublishAt":
+                        await svc.next_smart_publish_time(p)}
+                for p in targets}
+        return {"success": True, "data": data}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/publish/windows/learn",
+             tags=["平台流量DV博主模块"])
+async def auto_publish_windows_learn(
+        x_role: str = Header(None, alias="X-Role")):
+    """时段曲线重算(已发布内容点击效果 EMA 增量收敛)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True,
+                "data": await _auto_publish_service().learn_windows()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/auto/publish/postcheck",
+            tags=["平台流量DV博主模块"])
+async def auto_publish_postcheck(
+        x_role: str = Header(None, alias="X-Role"),
+        followId: int = Query(None, description="指定已发布内容"
+                                                "(空则取最新一条)")):
+    """发布后 1h 调控视图(互动低迷→推广建议/高频疑问→FAQ置顶/
+    负面苗头→隐藏候选仅建议)"""
+    _require_admin(x_role)
+    try:
+        svc = _auto_publish_service()
+        if followId is None:
+            published = await svc.repo.list_follows(
+                status="published", limit=1)
+            if not published:
+                raise ValueError("无已发布内容可调控")
+            followId = published[0]["followId"]
+        return {"success": True,
+                "data": await svc.postcheck(followId)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/auto/publish/boost",
+             tags=["平台流量DV博主模块"])
+async def auto_publish_boost(req: BoostRequest,
+                            x_role: str = Header(None,
+                                                 alias="X-Role")):
+    """追加推广(低预算线内自动执行; 高预算仅生成待审建议书
+    ——质押审批, 永不自动执行)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                _auto_publish_service().execute_boost(
+                    req.followId, req.budget, reason=req.reason)}
     except Exception as e:
         _handle(e)
 
