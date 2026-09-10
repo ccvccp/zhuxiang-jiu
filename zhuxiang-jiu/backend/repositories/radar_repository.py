@@ -71,7 +71,8 @@ _INT_FIELDS = ("channelId", "eventId", "slotId", "scoreId",
                "clicks", "registered", "activated")
 _FLOAT_FIELDS = ("emotionDensity", "botShare", "crowdEmotion",
                  "fit", "safety", "conversion", "valueScore")
-_BOOL_FIELDS = ("botFiltered", "aggregated")
+_BOOL_FIELDS = ("botFiltered", "aggregated", "rehearsalPassed",
+                "coordinatedHype")
 
 
 class RadarRepository:

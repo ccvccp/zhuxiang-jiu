@@ -1,7 +1,7 @@
-"""40号 P7a/P7b·雷达2.0 路由(感知聚合+三维价值评估,
-设计文档《40号 P7 规划方案》§3/§4/§9)
+"""40号 P7a/P7b/P7c·雷达2.0 路由(感知聚合+三维价值评估+演化预测,
+设计文档《40号 P7 规划方案》§3/§4/§5/§9)
 
-端点(6):
+端点(8):
     POST /api/radar/channels        频道入库(admin 增量扩展)
     GET  /api/radar/channels        频道池列表(种子惰性灌入)
     POST /api/radar/events/collect  流式采集触发(mock 15min 槽位)
@@ -9,6 +9,8 @@
     GET  /api/radar/events/{id}     事件详情(多模态)
     POST /api/radar/events/score    三维评分批次执行(P7b)
     GET  /api/radar/scores          评分快照查询(P7b)
+    POST /api/radar/events/{id}/predict   演化预测+跨平台关联(P7c)
+    POST /api/radar/events/{id}/rehearse  合规预演沙盘(P7c, L1 专用)
 
 鉴权: X-Role: admin(管理决策面)
 异常映射: KeyError→404 / ValueError→409(项目约定)
@@ -43,6 +45,12 @@ def _service():
 def _score_service():
     from services.radar_score_service import RadarScoreService
     return RadarScoreService()
+
+
+def _forecast_service():
+    from services.radar_forecast_service import (
+        RadarForecastService)
+    return RadarForecastService()
 
 
 class ChannelRequest(PydBaseModel):
@@ -138,6 +146,36 @@ async def radar_events_detail(
     try:
         return {"success": True, "data":
                 await _service().event_detail(event_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/radar/events/{event_id}/predict",
+             tags=["雷达2.0全网侦测中枢"])
+async def radar_events_predict(
+        event_id: int,
+        x_role: str = Header(None, alias="X-Role")):
+    """事件演化预测(生命周期分段+峰值拐点预警+早期信号+
+    跨平台关联: 机会窗/叙事变异/联动造势——全确定性规则)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _forecast_service().predict_event(event_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/radar/events/{event_id}/rehearse",
+             tags=["雷达2.0全网侦测中枢"])
+async def radar_events_rehearse(
+        event_id: int,
+        x_role: str = Header(None, alias="X-Role")):
+    """合规预演沙盘(L1 候选专用——预案四件套: 推荐角度/
+    禁用表述/素材建议(仅授权库)/钩子方向; 过合规校验方入执行队列)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _forecast_service().rehearse_event(event_id)}
     except Exception as e:
         _handle(e)
 
