@@ -245,7 +245,9 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                # P5c 自主发布调度器
                "boostId",
                # P5d 自治理与进化层
-               "interventionId", "snapshotId", "recovered")
+               "interventionId", "snapshotId", "recovered",
+               # P6a 多模态自主学习引擎
+               "elementId")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust",
                  # P5a 自主学习引擎
@@ -396,7 +398,8 @@ class BloggerRepository:
                     "blogger_signals", "blogger_polls",
                     "blogger_strategies", "blogger_experiments",
                     "blogger_ab_versions", "blogger_ugc_assets",
-                    "blogger_boosts", "blogger_interventions"):
+                    "blogger_boosts", "blogger_interventions",
+                    "blogger_banned_av"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -1099,3 +1102,64 @@ class BloggerRepository:
                       "pausedBy": "", "pausedAt": "",
                       "strategySnapshots": {}}
         return parsed
+
+    # ============================================================
+    # P6a 多模态自主学习引擎: 封禁视听元素库 / AV 奖励参数
+    # (设计文档《40号 P6 升级方案》§3/§8)
+    # ============================================================
+
+    TABLE_BANNED_AV = "blogger_banned_av"
+    TABLE_AV_REWARD = "av_reward_config"
+
+    async def save_banned_element(self, record: dict) -> dict:
+        """保存封禁视听元素({elementId, kind: bgm/transition, value,
+        platform: 空=全平台, source, createdAt})"""
+        return await self._save(self.TABLE_BANNED_AV,
+                                record["elementId"], record)
+
+    async def get_banned_element(self,
+                                 element_id: int) -> dict | None:
+        return await self._get(self.TABLE_BANNED_AV, element_id)
+
+    async def list_banned_elements(self, platform: str = None,
+                                   kind: str = None,
+                                   limit: int = 200) -> list[dict]:
+        """封禁元素列表(platform 空返回全平台+指定平台并集)"""
+        records = await self._list(self.TABLE_BANNED_AV,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if kind and r.get("kind") != kind:
+                continue
+            plat = r.get("platform") or ""
+            if platform and plat not in ("", platform):
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("elementId", 0),
+                      reverse=True)[:limit]
+
+    async def save_av_reward_config(self, record: dict) -> dict:
+        """保存 AV 奖励参数覆盖(α/γ/δ; β 宪法域常量不入库)"""
+        data = dict(record)
+        data["updatedAt"] = _now_iso()
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(_k("blogger", self.TABLE_AV_REWARD),
+                              mapping=self._serialize(data))
+        else:
+            self._ensure_store()
+            self.store.setdefault("blogger_av_reward_config", {}) \
+                .update(data)
+        return data
+
+    async def get_av_reward_config(self) -> dict:
+        """读取 AV 奖励参数覆盖(空库返回空 dict)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("blogger", self.TABLE_AV_REWARD))
+            return self._deserialize(data) if data else {}
+        self._ensure_store()
+        self.store.setdefault("blogger_av_reward_config", {})
+        return dict(self.store["blogger_av_reward_config"])

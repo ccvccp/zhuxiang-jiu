@@ -1268,6 +1268,157 @@ async def auto_audit_decision(follow_id: int,
         _handle(e)
 
 
+# ============================================================
+# P6a 多模态自主学习引擎(视听信号 + 情感对齐奖励 γ≥α + 调性表
+# + 封禁元素库, 设计文档《40号 P6 升级方案》§3)
+# ============================================================
+
+class AVSignalReportRequest(PydBaseModel):
+    followId: int = Field(..., description="跟随内容 ID(已发布)")
+    completionRate: float = Field(None, ge=0, le=1,
+                                  description="完播率 [0,1]")
+    shareRate: float = Field(None, ge=0, le=1,
+                             description="分享率 [0,1]")
+    favoriteRate: float = Field(None, ge=0, le=1,
+                                description="收藏率 [0,1]")
+    danmaku: list = Field(None, description="弹幕样本(词表密度判定)")
+    comments: list = Field(None, description="评论样本(正面密度分量)")
+
+
+class AVSignalCollectRequest(PydBaseModel):
+    followId: int = Field(None, description="指定内容(空=全量批量)")
+
+
+class BannedElementRequest(PydBaseModel):
+    kind: str = Field(..., max_length=30,
+                      description="种类: bgm/transition")
+    value: str = Field(..., min_length=1, max_length=200,
+                      description="元素取值(BGM 名/转场名)")
+    platform: str = Field(None, max_length=30,
+                          description="平台(空=全平台封禁)")
+    source: str = Field("admin", max_length=50)
+
+
+def _av_learn_service():
+    from services.blogger_av_learn_service import BloggerAVLearnService
+    return BloggerAVLearnService()
+
+
+@router.post("/api/blogger/av/signals/report",
+             tags=["平台流量DV博主模块"])
+async def av_signals_report(req: AVSignalReportRequest,
+                            x_role: str = Header(None,
+                                                 alias="X-Role")):
+    """视听指标上报(上传轨——完播/分享/收藏/弹幕情感, 滚动采样)"""
+    _require_admin(x_role)
+    try:
+        result = await _av_learn_service().report_av_metrics(
+            req.followId, completion_rate=req.completionRate,
+            share_rate=req.shareRate,
+            favorite_rate=req.favoriteRate,
+            danmaku=req.danmaku, comments=req.comments)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/signals/collect",
+             tags=["平台流量DV博主模块"])
+async def av_signals_collect(req: AVSignalCollectRequest,
+                             x_role: str = Header(None,
+                                                  alias="X-Role")):
+    """视听信号批量采集(滚动轨——avMetrics 重采样)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_learn_service().collect_av_signals(
+                    req.followId)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/signals/status",
+            tags=["平台流量DV博主模块"])
+async def av_signals_status(
+        x_role: str = Header(None, alias="X-Role")):
+    """视听信号统计视图(AV kind 计数 + 未消费数)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_learn_service().av_signals_status()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/learn/run",
+             tags=["平台流量DV博主模块"])
+async def av_learn_run(x_role: str = Header(None, alias="X-Role")):
+    """视听信号消费学习轮(聚合→情感对齐奖励→44号 Hedge)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_learn_service().run_av_learning()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/reward/config",
+            tags=["平台流量DV博主模块"])
+async def av_reward_config(
+        x_role: str = Header(None, alias="X-Role")):
+    """情感对齐奖励参数只读(β/γ 宪法域: β 不可调, γ≥α 拒改)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_learn_service().get_av_reward_config()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/tone/{platform}",
+            tags=["平台流量DV博主模块"])
+async def av_tone(platform: str,
+                  x_role: str = Header(None, alias="X-Role")):
+    """平台调性参数视图(节奏/时长/密度 + 适用封禁元素)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_learn_service().get_tone(platform)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/banned",
+             tags=["平台流量DV博主模块"])
+async def av_banned_list(platform: str = None, kind: str = None,
+                         x_role: str = Header(None,
+                                              alias="X-Role")):
+    """封禁视听元素列表(全平台共享 + 平台增量)"""
+    _require_admin(x_role)
+    try:
+        elements = await _av_learn_service().repo.list_banned_elements(
+            platform=platform, kind=kind)
+        return {"success": True, "data": elements}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/banned",
+             tags=["平台流量DV博主模块"])
+async def av_banned_add(req: BannedElementRequest,
+                        x_role: str = Header(None,
+                                             alias="X-Role")):
+    """封禁视听元素登记(实时同步全平台约束库)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_learn_service().add_banned_element(
+                    req.kind, req.value, platform=req.platform,
+                    source=req.source)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)
