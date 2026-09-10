@@ -14,7 +14,7 @@ import {
 } from '@/api/blogger';
 import { requireLogin } from '@/services/auth-service';
 
-type Tab = 'overview' | 'pool' | 'works' | 'follows' | 'learning';
+type Tab = 'overview' | 'pool' | 'works' | 'follows' | 'learning' | 'autonomy';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: '总览' },
@@ -22,6 +22,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'works', label: '侦测' },
   { key: 'follows', label: '跟随' },
   { key: 'learning', label: '学习' },
+  { key: 'autonomy', label: '自主引擎' },
 ];
 
 const PLATFORM_KEYS = ['douyin', 'xiaohongshu', 'weibo', 'wechat_channels'];
@@ -60,6 +61,18 @@ const BloggerPage: React.FC = () => {
   // 跟随内容
   const [follows, setFollows] = useState<FollowVO[]>([]);
   const [followStatusIdx, setFollowStatusIdx] = useState(0);
+
+  // 自主引擎看板(P6g-1: 治理开关/P5 四引擎/P6 音视频/P6f 生态/干预史)
+  const [autoEvo, setAutoEvo] = useState<any>(null);
+  const [avEvo, setAvEvo] = useState<any>(null);
+  const [signalStat, setSignalStat] = useState<any>(null);
+  const [strategyList, setStrategyList] = useState<any[]>([]);
+  const [ledgerList, setLedgerList] = useState<any[]>([]);
+  const [perfList, setPerfList] = useState<any[]>([]);
+  const [trustList, setTrustList] = useState<any[]>([]);
+  const [pauseReason, setPauseReason] = useState('');
+  const [showPauseForm, setShowPauseForm] = useState(false);
+  const [operating, setOperating] = useState(false);
 
   // ---------- 数据加载 ----------
   const loadOverview = useCallback(async () => {
@@ -103,14 +116,41 @@ const BloggerPage: React.FC = () => {
     }
   }, []);
 
+  // 自主引擎看板加载(五分区并行拉取; 单源失败不阻断——catch null)
+  const loadAutonomy = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [evo, av, sig, strategies, ledger, perf, trust] =
+        await Promise.all([
+          BloggerAPI.autoEvolution().catch(() => null),
+          BloggerAPI.avEvolution().catch(() => null),
+          BloggerAPI.autoSignalsStatus().catch(() => null),
+          BloggerAPI.autoStrategies().catch(() => []),
+          BloggerAPI.rentalLedger().catch(() => []),
+          BloggerAPI.perfReports().catch(() => []),
+          BloggerAPI.trustSubjects().catch(() => []),
+        ]);
+      setAutoEvo(evo);
+      setAvEvo(av);
+      setSignalStat(sig);
+      setStrategyList(strategies);
+      setLedgerList(ledger);
+      setPerfList(perf);
+      setTrustList(trust);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // 按当前页签刷新数据
   const refresh = useCallback(() => {
     if (!requireLogin()) return;
     if (tab === 'overview' || tab === 'learning') loadOverview();
     else if (tab === 'pool') loadPool();
+    else if (tab === 'autonomy') loadAutonomy();
     else if (tab === 'works') loadWorks(WORK_STATUS_KEYS[workStatusIdx]);
     else if (tab === 'follows') loadFollows(FOLLOW_STATUS_KEYS[followStatusIdx]);
-  }, [tab, loadOverview, loadPool, loadWorks, loadFollows, workStatusIdx, followStatusIdx]);
+  }, [tab, loadOverview, loadPool, loadWorks, loadFollows, loadAutonomy, workStatusIdx, followStatusIdx]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -170,6 +210,44 @@ const BloggerPage: React.FC = () => {
       }
       await loadPool();
     } catch (_) { /* request 层已 toast */ }
+  };
+
+  // ---------- 自主引擎治理操作(P6g-1 唯一写口) ----------
+
+  /** 人工暂停(理由必填——留痕审计, 后端校验对齐) */
+  const handlePauseAutonomy = async () => {
+    if (operating) return;
+    const reason = pauseReason.trim();
+    if (!reason) {
+      Taro.showToast({ title: '暂停理由必填(留痕审计)', icon: 'none' });
+      return;
+    }
+    setOperating(true);
+    try {
+      await BloggerAPI.pauseAutonomy(reason);
+      Taro.showToast({ title: '已暂停全部自主行为', icon: 'success' });
+      setPauseReason('');
+      setShowPauseForm(false);
+      await loadAutonomy();
+    } catch (_) { /* request 层已 toast */ } finally {
+      setOperating(false);
+    }
+  };
+
+  /** 显式恢复(永不自动恢复) */
+  const handleResumeAutonomy = () => {
+    Taro.showModal({
+      title: '恢复自主行为',
+      content: '确认恢复 AI 全部自主行为? 恢复须显式操作(永不自动恢复)。',
+      success: async (res) => {
+        if (!res.confirm) return;
+        try {
+          await BloggerAPI.resumeAutonomy();
+          Taro.showToast({ title: '已恢复', icon: 'success' });
+          await loadAutonomy();
+        } catch (_) { /* request 层已 toast */ }
+      },
+    });
   };
 
   // ---------- 侦测操作 ----------
@@ -609,6 +687,156 @@ const BloggerPage: React.FC = () => {
               <View className={styles.noteTitle}>学习机制</View>
               <View className={styles.noteLine}>
                 已发布内容过 24h 沉淀窗口后可回流效果(引流量/注册/下单), 反馈驱动第21档案权重(Hedge)与博主权重自进化; 零引流连续多轮自动止损出池。
+              </View>
+            </View>
+          </>
+        )}
+
+        {/* ============ 自主引擎看板(P6g-1) ============ */}
+        {tab === 'autonomy' && !loading && (
+          <>
+            {/* 分区1: 治理开关(唯一写口) */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>治理开关</View>
+              {autoEvo?.autonomy ? (
+                <View className={styles.statGrid}>
+                  <View className={styles.statItem}>
+                    <Text className={styles.statValue}>
+                      {autoEvo.autonomy.paused ? '已暂停' : '运行中'}
+                    </Text>
+                    <Text className={styles.statLabel}>自主行为</Text>
+                  </View>
+                </View>
+              ) : <View className={styles.empty}>暂无数据</View>}
+              {autoEvo?.autonomy?.reason ? (
+                <View className={styles.noteLine} style={{ marginTop: '8rpx' }}>
+                  暂停理由: {autoEvo.autonomy.reason}
+                </View>
+              ) : null}
+              {!autoEvo?.autonomy?.paused ? (
+                <>
+                  <View className={styles.actionRow}>
+                    <View
+                      className={`${styles.miniBtn} ${styles.miniBtnWarn}`}
+                      onClick={() => setShowPauseForm(true)}
+                    >暂停自主行为</View>
+                  </View>
+                  {showPauseForm ? (
+                    <View className={styles.card} style={{ marginTop: '12rpx' }}>
+                      <View className={styles.cardTitle}>暂停理由(必填·留痕审计)</View>
+                      <Input
+                        className={styles.input}
+                        value={pauseReason}
+                        onInput={(e) => setPauseReason(e.detail.value)}
+                        placeholder="例: 例行巡检 / 舆情处置"
+                        maxlength={200}
+                      />
+                      <View className={styles.actionRow} style={{ marginTop: '12rpx' }}>
+                        <View className={styles.primaryBtn} onClick={handlePauseAutonomy}>
+                          {operating ? '提交中…' : '确认暂停'}
+                        </View>
+                      </View>
+                    </View>
+                  ) : null}
+                </>
+              ) : (
+                <View className={styles.actionRow}>
+                  <View className={styles.primaryBtn} onClick={handleResumeAutonomy}>
+                    恢复自主行为
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* 分区2: P5 四引擎(信号/策略) */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>P5 引擎(信号·策略)</View>
+              {signalStat ? (
+                <View className={styles.statGrid}>
+                  {renderStat('信号总数', signalStat.total ?? 0)}
+                  {renderStat('未消费', signalStat.unconsumed ?? 0)}
+                </View>
+              ) : <View className={styles.empty}>暂无数据</View>}
+              {strategyList.length ? (
+                <View style={{ marginTop: '12rpx' }}>
+                  <View className={styles.noteTitle}>策略排行 TOP</View>
+                  {strategyList.slice(0, 5).map((s: any) => (
+                    <View className={styles.rankRow} key={s.strategyId}>
+                      <Text className={styles.rankName}>
+                        {s.displayName || s.name}
+                      </Text>
+                      <Text className={styles.rankDelta}>
+                        胜{s.winCount ?? 0} · 均{(s.avgReward ?? 0).toFixed(2)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+
+            {/* 分区3: P6 音视频(六层漏斗/共鸣) */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>P6 音视频(六层漏斗)</View>
+              {avEvo?.funnel ? (
+                <View className={styles.statGrid}>
+                  {renderStat('已发布', avEvo.funnel.published ?? 0)}
+                  {renderStat('有曝光', avEvo.funnel.withExposure ?? 0)}
+                  {renderStat('有完播', avEvo.funnel.withCompletion ?? 0)}
+                  {renderStat('有点击', avEvo.funnel.withClicks ?? 0)}
+                  {renderStat('有注册', avEvo.funnel.withRegistered ?? 0)}
+                  {renderStat('有激活', avEvo.funnel.withActivated ?? 0)}
+                  {renderStat('有首单', avEvo.funnel.withOrdered ?? 0)}
+                </View>
+              ) : <View className={styles.empty}>暂无数据</View>}
+              {avEvo?.resonance ? (
+                <View className={styles.noteLine} style={{ marginTop: '8rpx' }}>
+                  平均共鸣 {avEvo.resonance.avgResonance ?? 0} · 低共鸣预警
+                  {' '}{(avEvo.resonance.lowResonanceWorks || []).length} 条
+                </View>
+              ) : null}
+            </View>
+
+            {/* 分区4: P6f 生态(租用/绩效/可信度) */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>P6f 生态</View>
+              <View className={styles.statGrid}>
+                {renderStat('租用计费条目', ledgerList.length)}
+                {renderStat('绩效月报', perfList.length)}
+                {renderStat('可信度主体', trustList.length)}
+              </View>
+              {trustList.length ? (
+                <View style={{ marginTop: '12rpx' }}>
+                  <View className={styles.noteTitle}>可信度主体</View>
+                  {trustList.slice(0, 5).map((t: any) => (
+                    <View className={styles.rankRow} key={`${t.subjectType}-${t.subjectId}`}>
+                      <Text className={styles.rankName}>{t.name}</Text>
+                      <Text className={styles.rankDelta}>
+                        {t.subjectType === 'persona' ? '人设' : t.subjectType === 'creator' ? '创作者' : '会员'}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+
+            {/* 分区5: 干预史(只读时间线) */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>干预史</View>
+              {(autoEvo?.interventions || []).length ? (
+                (autoEvo.interventions).slice(0, 10).map((i: any) => (
+                  <View className={styles.noteLine} key={i.interventionId}>
+                    [{i.kind}] {i.note || ''} — {i.operator || 'admin'}
+                    {' '}{(i.createdAt || '').slice(0, 19)}
+                  </View>
+                ))
+              ) : <View className={styles.empty}>暂无干预记录</View>}
+            </View>
+
+            <View className={styles.noteCard}>
+              <View className={styles.noteTitle}>治理机制</View>
+              <View className={styles.noteLine}>
+                暂停即时冻结全部自主行为(学习/创作/发布/自愈/租用受控写),
+                观测面不中断; 恢复须显式操作(永不自动); 干预留痕审计。
               </View>
             </View>
           </>

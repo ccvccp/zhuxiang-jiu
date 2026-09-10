@@ -404,4 +404,73 @@ export const BloggerAPI = {
       weightEvolution: d.weightEvolution || { top: [], bottom: [], autoPaused: [] },
     };
   },
+
+  // ================= P6g-1 自主引擎看板(第 6 页签) =================
+  // 治理开关 / P5 四引擎 / P6 音视频 / P6f 生态 / 干预史
+  // 全只读拉取 + 唯一写操作 pause/resume(理由必填——后端校验对齐)
+
+  /** P5 进化透明度看板(治理开关/漏斗/策略/干预史/自愈流水) */
+  async autoEvolution(): Promise<any> {
+    const res = await request<any>({ url: '/api/blogger/auto/health/evolution', headers: adminHeaders() });
+    return res.data || res;
+  },
+
+  /** P5 三通道信号统计 */
+  async autoSignalsStatus(): Promise<any> {
+    const res = await request<any>({ url: '/api/blogger/auto/signals/status', headers: adminHeaders() });
+    return res.data || res;
+  },
+
+  /** P5 策略库排行(TOP) */
+  async autoStrategies(): Promise<any[]> {
+    const res = await request<any>({ url: '/api/blogger/auto/strategies', headers: adminHeaders() });
+    const list = res.data || [];
+    return Array.isArray(list) ? list : [];
+  },
+
+  /** P6 AV 进化透明度看板(六层漏斗/共鸣度/自愈) */
+  async avEvolution(): Promise<any> {
+    const res = await request<any>({ url: '/api/blogger/av/health/evolution', headers: adminHeaders() });
+    return res.data || res;
+  },
+
+  /** P6f 租用账本(计费明细) */
+  async rentalLedger(memberId?: number): Promise<any[]> {
+    const q = memberId ? `?memberId=${memberId}` : '';
+    const res = await request<any>({ url: `/api/blogger/admin/av/rental/ledger${q}`, headers: adminHeaders() });
+    const list = res.data || [];
+    return Array.isArray(list) ? list : [];
+  },
+
+  /** P6f 绩效月报列表 */
+  async perfReports(): Promise<any[]> {
+    const res = await request<any>({ url: '/api/blogger/admin/av/performance/reports', headers: adminHeaders() });
+    const list = res.data || [];
+    return Array.isArray(list) ? list : [];
+  },
+
+  /** P6f 可信度主体清单(五因子观测面) */
+  async trustSubjects(): Promise<any[]> {
+    const res = await request<any>({ url: '/api/blogger/av/trust/subjects', headers: adminHeaders() });
+    const list = res.data || [];
+    return Array.isArray(list) ? list : [];
+  },
+
+  /** 治理干预: 人工暂停(理由必填——留痕审计) */
+  async pauseAutonomy(reason: string): Promise<any> {
+    const res = await request<any>({
+      url: '/api/blogger/auto/intervention/pause', method: 'POST',
+      data: { reason, operator: 'admin' }, headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 治理干预: 显式恢复(永不自动恢复) */
+  async resumeAutonomy(): Promise<any> {
+    const res = await request<any>({
+      url: '/api/blogger/auto/intervention/resume', method: 'POST',
+      data: { operator: 'admin' }, headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
 };
