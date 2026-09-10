@@ -1640,6 +1640,18 @@ class AVMetricsRequest(PydBaseModel):
     clicks: int = Field(None, ge=0)
     completionRate: float = Field(None, ge=0, le=1)
     shareRate: float = Field(None, ge=0, le=1)
+    exposures: int = Field(None, ge=0,
+                           description="曝光数(漏斗第 1 层)")
+    registered: int = Field(None, ge=0,
+                            description="注册数(漏斗第 4 层)")
+    activated: int = Field(None, ge=0,
+                          description="信值激活数(漏斗第 5 层)")
+    ordered: int = Field(None, ge=0,
+                         description="首单数(漏斗第 6 层)")
+    favoriteRate: float = Field(None, ge=0, le=1,
+                                description="收藏率(共鸣分量)")
+    commentPositive: float = Field(None, ge=0, le=1,
+                                   description="评论正面密度(共鸣分量)")
 
 
 def _av_publish_service():
@@ -1714,7 +1726,7 @@ async def av_windows_learn(x_role: str = Header(None,
 async def av_works_metrics(req: AVMetricsRequest,
                            x_role: str = Header(None,
                                                 alias="X-Role")):
-    """AV 作品指标注入(平台回执落地/测试轨)"""
+    """AV 作品指标注入(六层漏斗+共鸣分量字段)"""
     _require_admin(x_role)
     try:
         return {"success": True, "data":
@@ -1722,7 +1734,13 @@ async def av_works_metrics(req: AVMetricsRequest,
                 .report_av_work_metrics(
                     req.workId, clicks=req.clicks,
                     completion_rate=req.completionRate,
-                    share_rate=req.shareRate)}
+                    share_rate=req.shareRate,
+                    exposures=req.exposures,
+                    registered=req.registered,
+                    activated=req.activated,
+                    ordered=req.ordered,
+                    favorite_rate=req.favoriteRate,
+                    comment_positive=req.commentPositive)}
     except Exception as e:
         _handle(e)
 
@@ -1755,6 +1773,80 @@ async def av_publish_boost(req: AVBoostRequest,
         return {"success": True, "data":
                 await _av_publish_service().execute_av_boost(
                     req.workId, req.budget, reason=req.reason)}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P6d 自治理扩展(六层漏斗 + 共鸣度看板 + AV 专项自愈 + 可解释,
+# 设计文档《40号 P6 升级方案》§6)
+# ============================================================
+
+class AVHealRequest(PydBaseModel):
+    error: str = Field(..., min_length=1, max_length=200,
+                       description="失败回执错误(词表归因)")
+    attempt: int = Field(1, ge=1, le=99,
+                         description="重试档位(默认 1)")
+
+
+def _av_govern_service():
+    from services.blogger_av_govern_service import \
+        BloggerAVGovernService
+    return BloggerAVGovernService()
+
+
+@router.get("/api/blogger/av/health/evolution",
+            tags=["平台流量DV博主模块"])
+async def av_health_evolution(
+        x_role: str = Header(None, alias="X-Role")):
+    """AV 进化透明度看板(自治开关/六层漏斗/共鸣度/策略/干预/自愈)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_govern_service()
+                .av_evolution_dashboard()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/funnel",
+            tags=["平台流量DV博主模块"])
+async def av_funnel(x_role: str = Header(None,
+                                         alias="X-Role")):
+    """六层归因漏斗(曝光→完播→点击→注册→信值激活→首单)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_govern_service().av_funnel()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/heal/{work_id}",
+             tags=["平台流量DV博主模块"])
+async def av_heal(work_id: int, req: AVHealRequest,
+                  x_role: str = Header(None, alias="X-Role")):
+    """AV 专项自愈(转码/音画/上传词表分类; 耗尽转人工永不丢弃)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_govern_service().heal_av_failure(
+                    work_id, req.error, attempt=req.attempt)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/audit/decision/{work_id}",
+            tags=["平台流量DV博主模块"])
+async def av_audit_decision(work_id: int,
+                            x_role: str = Header(None,
+                                                 alias="X-Role")):
+    """AV 决策可解释报告(形式→人设→合规内生→渲染→发布链路回放)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_govern_service().av_decision_explain(
+                    work_id)}
     except Exception as e:
         _handle(e)
 

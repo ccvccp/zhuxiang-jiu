@@ -342,26 +342,45 @@ class BloggerAVPublishService:
     async def report_av_work_metrics(self, work_id: int,
                                      clicks: int = None,
                                      completion_rate: float = None,
-                                     share_rate: float = None
+                                     share_rate: float = None,
+                                     exposures: int = None,
+                                     registered: int = None,
+                                     activated: int = None,
+                                     ordered: int = None,
+                                     favorite_rate: float = None,
+                                     comment_positive: float = None
                                      ) -> dict:
         """AV 作品指标注入(平台回执落地/测试轨; 滚动合并)
 
+        六层漏斗字段: exposures(曝光) / completionRate(完播) /
+        clicks(点击) / registered(注册) / activated(信值激活) /
+        ordered(首单); 共鸣分量: shareRate / favoriteRate /
+        commentPositive(P6d 口径)。
+
         Raises:
             KeyError: 作品不存在
-            ValueError: 完播率越界
+            ValueError: 率字段越界 [0,1]
         """
-        if completion_rate is not None:
-            rate = float(completion_rate)
-            if not 0.0 <= rate <= 1.0:
+        for name, v in (("completionRate", completion_rate),
+                       ("shareRate", share_rate),
+                       ("favoriteRate", favorite_rate),
+                       ("commentPositive", comment_positive)):
+            if v is not None and not 0.0 <= float(v) <= 1.0:
                 raise ValueError(
-                    f"完播率须在 [0,1](当前{rate})")
+                    f"{name} 须在 [0,1](当前{v})")
         work = await self.repo.get_av_work(work_id)
         if work is None:
             raise KeyError(f"作品不存在(avWorkId={work_id})")
         metrics = dict(work.get("metrics") or {})
-        for k, v in (("clicks", clicks),
+        for k, v in (("exposures", exposures),
+                     ("clicks", clicks),
+                     ("registered", registered),
+                     ("activated", activated),
+                     ("ordered", ordered),
                      ("completionRate", completion_rate),
-                     ("shareRate", share_rate)):
+                     ("shareRate", share_rate),
+                     ("favoriteRate", favorite_rate),
+                     ("commentPositive", comment_positive)):
             if v is not None:
                 metrics[k] = v
         return await self.repo.update_av_work(
