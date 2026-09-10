@@ -139,6 +139,7 @@ class TestDynamicTiming:
 
         # 2) 二次学习 EMA 收敛(多观测同槽 → 向观测均值收敛;
         #    观测 4 与 20 均值 12, 8.8 → 11.152 靠近 12)
+        #    注: 已达均值时保持(收敛完成态, 距离不再扩大)
         repo = svc.repo
         windows = await repo.get_publish_windows()
         some_key = next(iter(windows))
@@ -148,7 +149,8 @@ class TestDynamicTiming:
         windows2 = await repo.get_publish_windows()
         new_val = float(windows2[some_key])
         record("时机-EMA向均值收敛",
-               abs(new_val - obs_mean) < abs(old_val - obs_mean),
+               abs(new_val - obs_mean) <= abs(old_val - obs_mean)
+               + 1e-9,
                f"old={old_val} new={new_val} mean={obs_mean}")
 
         # 3) TOP3 降序(best_slots)

@@ -2277,6 +2277,103 @@ async def admin_rental_real_approve(
         _handle(e)
 
 
+# ============================================================
+# P6f-2 AI 播客/主播信值绩效(五分项月报 + 分档 + 结算建议,
+# 设计文档《40号 P6f 规划方案》§4——结算永不自动)
+# ============================================================
+
+class PerfReportRequest(PydBaseModel):
+    subjectType: str = Field(..., max_length=20,
+                              description="persona/creator")
+    subjectId: int = Field(..., description="主体 ID")
+    subjectName: str = Field(..., min_length=1, max_length=100)
+    monthKey: str = Field(None, max_length=10,
+                          description="月份(空=当月)")
+
+
+def _perf_service():
+    from services.blogger_performance_service import \
+        BloggerPerformanceService
+    return BloggerPerformanceService()
+
+
+@router.post("/api/blogger/admin/av/performance/reports",
+             tags=["平台流量DV博主模块"])
+async def admin_perf_reports_generate(
+        req: PerfReportRequest,
+        x_role: str = Header(None, alias="X-Role")):
+    """生成主体月度绩效报告(五分项+总分+分档; 结算 pending)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _perf_service().generate_report(
+                    req.subjectType, req.subjectId,
+                    req.subjectName, month_key=req.monthKey)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/admin/av/performance/reports",
+            tags=["平台流量DV博主模块"])
+async def admin_perf_reports_list(
+        subject_type: str = Query(None, alias="subjectType"),
+        month_key: str = Query(None, alias="monthKey"),
+        status: str = None,
+        x_role: str = Header(None, alias="X-Role")):
+    """绩效月报查询(主体/月份/结算状态过滤)"""
+    _require_admin(x_role)
+    try:
+        svc = _perf_service()
+        return {"success": True, "data":
+                await svc.repo.list_perf_reports(
+                    subject_type=subject_type,
+                    month_key=month_key, status=status)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/admin/av/performance/{report_id}/settle",
+             tags=["平台流量DV博主模块"])
+async def admin_perf_settle(report_id: int,
+                            x_role: str = Header(None,
+                                                 alias="X-Role")):
+    """生成结算建议(pending——总分×0.1 信值; 待人工 approve)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _perf_service().settle_report(report_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/admin/av/performance/{report_id}/approve",
+             tags=["平台流量DV博主模块"])
+async def admin_perf_approve(report_id: int,
+                             x_role: str = Header(None,
+                                                   alias="X-Role")):
+    """审批绩效结算(approve——信值入账经 47号执行)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _perf_service().approve_report(report_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/admin/av/performance/{report_id}/reject",
+             tags=["平台流量DV博主模块"])
+async def admin_perf_reject(report_id: int,
+                            x_role: str = Header(None,
+                                                  alias="X-Role")):
+    """驳回绩效结算"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _perf_service().reject_report(report_id)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)

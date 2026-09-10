@@ -255,7 +255,10 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                "convertCount", "proposalId",
                # P6f-1 引流能力开放
                "ledgerId", "billId", "memberId", "units",
-               "scriptUnits", "renderUnits")
+               "scriptUnits", "renderUnits",
+               # P6f-2 信值绩效
+               "reportId", "funnelContrib", "resonanceQuality",
+               "complianceScore", "licenseContrib", "healStability")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust",
                  # P5a 自主学习引擎
@@ -411,7 +414,8 @@ class BloggerRepository:
                     "blogger_personas", "blogger_av_licenses",
                     "blogger_av_works", "blogger_fwd_auths",
                     "blogger_fwd_contents", "blogger_rental_ledger",
-                    "blogger_rental_bills"):
+                    "blogger_rental_bills",
+                    "blogger_perf_reports"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -1523,4 +1527,53 @@ class BloggerRepository:
             result.append(r)
         return sorted(result,
                       key=lambda x: x.get("billId", 0),
+                      reverse=True)[:limit]
+
+    # ============================================================
+    # P6f-2 信值绩效: AI 播客/主播绩效月报
+    # (设计文档《40号 P6f 规划方案》§4/§7)
+    # ============================================================
+
+    TABLE_PERF_REPORTS = "blogger_perf_reports"
+
+    async def save_perf_report(self, record: dict) -> dict:
+        """保存绩效月报({reportId, subjectType: persona/creator,
+        subjectId, subjectName, monthKey, funnelContrib,
+        resonanceQuality, complianceScore, licenseContrib,
+        healStability, totalScore, grade, settleStatus:
+        pending/approved/rejected, settleNote, createdAt})"""
+        return await self._save(self.TABLE_PERF_REPORTS,
+                                record["reportId"], record)
+
+    async def get_perf_report(self, report_id: int) -> dict | None:
+        return await self._get(self.TABLE_PERF_REPORTS, report_id)
+
+    async def update_perf_report(self, report_id: int,
+                                 fields: dict) -> dict:
+        return await self._update(self.TABLE_PERF_REPORTS,
+                                  report_id, fields)
+
+    async def list_perf_reports(self, subject_type: str = None,
+                                 subject_id: int = None,
+                                 month_key: str = None,
+                                 status: str = None,
+                                 limit: int = 200) -> list[dict]:
+        """绩效月报查询(主体/月份/结算状态过滤)"""
+        records = await self._list(self.TABLE_PERF_REPORTS,
+                                  limit=1000)
+        result = []
+        for r in records:
+            if subject_type \
+                    and r.get("subjectType") != subject_type:
+                continue
+            if subject_id is not None \
+                    and r.get("subjectId") != subject_id:
+                continue
+            if month_key and r.get("monthKey") != month_key:
+                continue
+            if status and r.get("settleStatus") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("reportId", 0),
                       reverse=True)[:limit]
