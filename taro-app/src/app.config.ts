@@ -38,7 +38,8 @@ export default defineAppConfig({
     'pages/ride/index',
     'pages/agent-center/index',
     'pages/cooperation/index',
-    'pages/help/index'
+    'pages/help/index',
+    'pages/blogger/index'
   ],
   window: {
     backgroundTextStyle: 'light',

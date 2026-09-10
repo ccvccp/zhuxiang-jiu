@@ -279,6 +279,14 @@ const MinePage: React.FC = () => {
         {member?.role === 'admin' && (
           <View className={styles.section}>
             <View className={styles.sectionTitle}>站点管理</View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/blogger/index' })}>
+              <View className={styles.adminEntryIcon}>📡</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>DV博主流量</View>
+                <View className={styles.adminEntryDesc}>博主池 · 雷达侦测 · 跟随发布 · 学习进化</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
             <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/theme-admin/index' })}>
               <View className={styles.adminEntryIcon}>🎨</View>
               <View className={styles.adminEntryInfo}>
