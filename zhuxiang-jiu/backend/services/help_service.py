@@ -1199,6 +1199,32 @@ class HelpService:
         incoming = await self.repo.list_heritage(heir_id=member_id)
         return {"outgoing": outgoing, "incoming": incoming}
 
+    async def heritage_cancel(self, heritage_id: int,
+                              operator_id: int) -> dict:
+        """发起人撤回待确认传承(v2: 双向退出权——受让人可拒收沉默, 发起人可反悔)
+
+        规则(确定性):
+            - 仅 pending 状态可撤回(done/cancelled 均拒绝)
+            - 仅发起人本人可撤回(受让人无权代撤)
+            - 撤回即时生效, 留痕不删除(审计口径)
+
+        Raises:
+            KeyError: 传承单不存在 / ValueError: 状态/身份非法
+        """
+        async with get_lock(f"help:heritage:{heritage_id}"):
+            heritage = await self.repo.get_heritage(heritage_id)
+            if heritage is None:
+                raise KeyError(f"传承单不存在(heritageId={heritage_id})")
+            if heritage["status"] != HERITAGE_STATUS_PENDING:
+                raise ValueError(
+                    f"仅待确认传承可撤回(当前 {heritage['status']})")
+            if operator_id != heritage.get("ownerId"):
+                raise ValueError("仅发起人可撤回传承")
+            heritage.update({"status": HERITAGE_STATUS_CANCELLED,
+                             "updatedAt": _now_iso()})
+            await self.repo.save_heritage(heritage)
+            return {"heritage": heritage}
+
     # ============================================================
     # 14. P2·企业信值包(CSR 认捐池: B 端反哺 C 端, 平台零资金流)
     # ============================================================

@@ -385,6 +385,28 @@ const HelpPage: React.FC = () => {
     }
   };
 
+  // v2: 发起人撤回待确认传承
+  const handleHeritageCancel = async (h: HeritageVO) => {
+    if (submitting) return;
+    const res = await Taro.showModal({
+      title: '确认撤回',
+      content: `撤回向成员 ${h.heirId} 传承 ${h.declaredAmount} 信值的申请?`,
+    });
+    if (!res.confirm) return;
+    setSubmitting(true);
+    try {
+      await HelpAPI.heritageCancel(h.heritageId);
+      Taro.showToast({ title: '已撤回', icon: 'success' });
+      const hh = await HelpAPI.heritageMy();
+      setHeritageOut(hh.outgoing);
+      setHeritageIn(hh.incoming);
+    } catch (e) {
+      console.warn('[help] 传承撤回失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // 渲染订单卡片(大厅)
   const renderHallCard = (o: HelpOrderVO) => {
     // P1: 捐赠入口(公益单 + 非发布者 + 高信值用户)
@@ -950,12 +972,16 @@ const HelpPage: React.FC = () => {
                       <View className={styles.ledgerTime}>
                         {h.status === 'done'
                           ? `已划转 ${h.transferredAmount} (${formatDate(h.confirmedAt)})`
-                          : '待对方确认'}
+                          : h.status === 'cancelled' ? '已撤回' : '待对方确认'}
                       </View>
                     </View>
-                    <Text className={h.status === 'done' ? styles.deltaPlus : styles.relayText}>
-                      {h.status === 'done' ? '已完成' : '待确认'}
-                    </Text>
+                    {h.status === 'pending' ? (
+                      <View className={styles.cancelLink} onClick={() => handleHeritageCancel(h)}>撤回</View>
+                    ) : (
+                      <Text className={h.status === 'done' ? styles.deltaPlus : styles.relayText}>
+                        {h.status === 'done' ? '已完成' : '已撤回'}
+                      </Text>
+                    )}
                   </View>
                 ))}
               </View>

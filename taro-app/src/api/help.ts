@@ -456,6 +456,14 @@ export const HelpAPI = {
     return { transferred: Number(d.transferred ?? 0) };
   },
 
+  /** 发起人撤回待确认传承(v2: 即时生效, 留痕不删除) */
+  async heritageCancel(heritageId: number): Promise<void> {
+    await request<any>({
+      url: `/api/help/heritage/${heritageId}/cancel`,
+      method: 'POST',
+    });
+  },
+
   /** 我的传承记录(发起 + 受让两向) */
   async heritageMy(): Promise<{ outgoing: HeritageVO[]; incoming: HeritageVO[] }> {
     const res = await request<any>({ url: '/api/help/heritage/my' });

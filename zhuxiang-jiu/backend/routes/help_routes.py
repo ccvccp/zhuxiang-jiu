@@ -1,4 +1,4 @@
-"""67号·AI智能叫帮模块路由(P0 13 + P1 5 + P2 6 + P3 4 = 28 端点)
+"""67号·AI智能叫帮模块路由(P0 13 + P1 5 + P2 7 + P3 4 = 29 端点)
 
 定位: 信值驱动的社会互助网络(公益优先/有偿为辅/平台零佣金)
 
@@ -24,7 +24,8 @@
     - P1(5):     GET /orders/{id}/match(三维匹配) / GET /preferences(偏好画像) /
                  GET /orders/{id}/story(故事卡) / GET /orders/{id}/guard(安全护航) /
                  POST /orders/{id}/donate(信值捐赠)
-    - P2(6):     POST /heritage/apply(发起传承) / POST /heritage/{id}/accept(确认传承) /
+    - P2(7):     POST /heritage/apply(发起传承) / POST /heritage/{id}/accept(确认传承) /
+                 POST /heritage/{id}/cancel(撤回传承, v2) /
                  GET /heritage/my(传承记录) / POST /csr/packages(创建企业包) /
                  GET /csr/my(企业包列表) / POST /csr/packages/{id}/donate(定向捐助)
     - P3(4):     GET /carbon/{member_id}(碳积分档案) / GET /whitepaper(年度白皮书) /
@@ -403,6 +404,20 @@ async def heritage_accept(
     member_id = _require_member(x_member_id)
     try:
         result = await _service.heritage_accept(heritage_id, member_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/help/heritage/{heritage_id}/cancel", tags=["AI智能叫帮模块"])
+async def heritage_cancel(
+    heritage_id: int,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """发起人撤回待确认传承(v2: 撤回即时生效, 留痕不删除)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.heritage_cancel(heritage_id, member_id)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
