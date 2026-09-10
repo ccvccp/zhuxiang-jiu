@@ -246,8 +246,8 @@ const TrustPage: React.FC = () => {
               <Text className={styles.planLabel}>{plan.planA.label}</Text>
               <Text className={styles.planValue}>
                 {plan.planA.feasible
-                  ? `信值 ${plan.planA.trustValue} + 现金 ¥${plan.planA.cash}`
-                  : `缺额 ${plan.planA.gap}(需积分 ${plan.planA.gapPoints})`}
+                  ? `信值 ${plan.planA.trustValue} + 现金 ¥${plan.planA.cash} · 省 ¥${plan.planA.saving}`
+                  : `需信值 ${plan.planA.trustValue} + 现金 ¥${plan.planA.cash} · 缺额 ${plan.planA.gap}(需积分 ${plan.planA.gapPoints})`}
               </Text>
             </View>
             <View className={styles.planRow}>
