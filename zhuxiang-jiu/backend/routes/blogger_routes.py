@@ -1419,6 +1419,194 @@ async def av_banned_add(req: BannedElementRequest,
         _handle(e)
 
 
+# ============================================================
+# P6b 音视频自主创作工坊(脚本生成 + 人设/授权管理 + 渲染 + AB,
+# 设计文档《40号 P6 升级方案》§4)
+# ============================================================
+
+class AVScriptGenerateRequest(PydBaseModel):
+    topic: str = Field(..., min_length=1, max_length=200,
+                       description="选题主题")
+    platform: str = Field(..., max_length=30,
+                          description="六平台之一")
+    personaId: int = Field(..., description="人设 ID")
+    hookType: str = Field(..., max_length=50,
+                          description="P5b 五类人群钩子")
+    structureType: str = Field(None, max_length=50,
+                               description="结构(空=痛点解法)")
+    style: str = Field("", max_length=30,
+                       description="风格指令(更温暖/更专业/更活泼)")
+    bgmLicenseId: int = Field(None, description="BGM 授权 ID")
+    materialSlots: list = Field(None,
+                                 description="素材槽授权 ID 列表")
+
+
+class PersonaRequest(PydBaseModel):
+    name: str = Field(..., min_length=1, max_length=50)
+    personaType: str = Field(..., max_length=30,
+                              description="original_ip/licensed")
+    voiceStyle: str = Field("medium", max_length=20,
+                            description="slow/medium/fast")
+    toneStyle: str = Field("warm", max_length=20,
+                           description="warm/professional/playful")
+    licenseId: int = Field(None,
+                           description="licensed 人设绑定的授权 ID")
+
+
+class LicenseRequest(PydBaseModel):
+    kind: str = Field(..., max_length=20,
+                      description="voice/likeness/bgm/material")
+    name: str = Field(..., min_length=1, max_length=200)
+    grantor: str = Field(..., min_length=1, max_length=100)
+    scope: str = Field("", max_length=200)
+    expiresAt: str = Field("", max_length=40,
+                           description="ISO(空=永久)")
+
+
+class AVRenderRequest(PydBaseModel):
+    scriptId: int = Field(..., description="脚本 ID")
+
+
+class AVExperimentRequest(PydBaseModel):
+    topic: str = Field(..., min_length=1, max_length=200)
+    platform: str = Field(..., max_length=30)
+    workIds: list = Field(..., description="已渲染作品 ID 列表(≥2)")
+
+
+def _av_create_service():
+    from services.blogger_av_create_service import \
+        BloggerAVCreateService
+    return BloggerAVCreateService()
+
+
+@router.post("/api/blogger/av/scripts/generate",
+             tags=["平台流量DV博主模块"])
+async def av_scripts_generate(req: AVScriptGenerateRequest,
+                              x_role: str = Header(None,
+                                                   alias="X-Role")):
+    """确定性脚本生成(形式决策+授权硬门+分镜列表+水印断言)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_create_service().generate_script(
+                    req.topic, req.platform, req.personaId,
+                    req.hookType, structure_type=req.structureType,
+                    style=req.style, bgm_license_id=req.bgmLicenseId,
+                    material_slots=req.materialSlots)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/personas",
+            tags=["平台流量DV博主模块"])
+async def av_personas_list(status: str = None,
+                           x_role: str = Header(None,
+                                                alias="X-Role")):
+    """人设库列表(原创 IP + 已授权声纹/肖像)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_create_service().repo.list_personas(
+                    status=status)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/personas",
+             tags=["平台流量DV博主模块"])
+async def av_personas_add(req: PersonaRequest,
+                          x_role: str = Header(None,
+                                               alias="X-Role")):
+    """人设入库(licensed 须绑定在役声纹/肖像授权)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_create_service().register_persona(
+                    req.name, req.personaType,
+                    voice_style=req.voiceStyle,
+                    tone_style=req.toneStyle,
+                    license_id=req.licenseId)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/licenses",
+             tags=["平台流量DV博主模块"])
+async def av_licenses_add(req: LicenseRequest,
+                          x_role: str = Header(None,
+                                              alias="X-Role")):
+    """授权记录登记(声纹/肖像/BGM/素材——哈希存证)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_create_service().register_license(
+                    req.kind, req.name, req.grantor, scope=req.scope,
+                    expires_at=req.expiresAt)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/licenses/{license_id}/revoke",
+             tags=["平台流量DV博主模块"])
+async def av_licenses_revoke(license_id: int,
+                             x_role: str = Header(None,
+                                                  alias="X-Role")):
+    """授权撤回(撤回后关联人设/脚本生成即拒绝——秒级联动)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_create_service().revoke_license(
+                    license_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/works/render",
+             tags=["平台流量DV博主模块"])
+async def av_works_render(req: AVRenderRequest,
+                          x_role: str = Header(None,
+                                               alias="X-Role")):
+    """音视频渲染(AV_CHANNEL_MODE 三态: mock/real/mock_fallback)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_create_service().render_work(
+                    req.scriptId)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/blogger/av/works/{work_id}",
+            tags=["平台流量DV博主模块"])
+async def av_works_detail(work_id: int,
+                          x_role: str = Header(None,
+                                              alias="X-Role")):
+    """作品详情(meta + 渲染状态)"""
+    _require_admin(x_role)
+    try:
+        work = await _av_create_service().repo.get_av_work(work_id)
+        if work is None:
+            raise KeyError(f"作品不存在(avWorkId={work_id})")
+        return {"success": True, "data": work}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/blogger/av/works/ab",
+             tags=["平台流量DV博主模块"])
+async def av_works_ab(req: AVExperimentRequest,
+                     x_role: str = Header(None,
+                                          alias="X-Role")):
+    """AV 作品入 A/B 实验(复用 P5b 实验状态机)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _av_create_service().create_av_experiment(
+                    req.topic, req.platform, req.workIds)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_blogger_routes(app) -> None:
     """注册40号路由(main.py startup 调用)"""
     app.include_router(router)

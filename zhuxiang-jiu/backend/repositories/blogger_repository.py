@@ -247,7 +247,9 @@ _INT_FIELDS = ("bloggerId", "workId", "followId", "auditId",
                # P5d 自治理与进化层
                "interventionId", "snapshotId", "recovered",
                # P6a 多模态自主学习引擎
-               "elementId")
+               "elementId",
+               # P6b 音视频自主创作工坊
+               "avWorkId", "scriptId", "personaId", "licenseId")
 _FLOAT_FIELDS = ("weight", "engagementRate", "score",
                  "overlapRatio", "weightBase", "weightAdjust",
                  # P5a 自主学习引擎
@@ -399,7 +401,9 @@ class BloggerRepository:
                     "blogger_strategies", "blogger_experiments",
                     "blogger_ab_versions", "blogger_ugc_assets",
                     "blogger_boosts", "blogger_interventions",
-                    "blogger_banned_av"):
+                    "blogger_banned_av", "blogger_av_scripts",
+                    "blogger_personas", "blogger_av_licenses",
+                    "blogger_av_works"):
             self.store.setdefault(key, {})
         # 种子博主(内存模式惰性灌入; Redis 模式惰性灌入)
         if not self.store["blogger_pool"]:
@@ -1163,3 +1167,129 @@ class BloggerRepository:
         self._ensure_store()
         self.store.setdefault("blogger_av_reward_config", {})
         return dict(self.store["blogger_av_reward_config"])
+
+    # ============================================================
+    # P6b 音视频自主创作工坊: 脚本 / 人设 / 授权 / 作品
+    # (设计文档《40号 P6 升级方案》§4/§8)
+    # ============================================================
+
+    TABLE_AV_SCRIPTS = "blogger_av_scripts"
+    TABLE_PERSONAS = "blogger_personas"
+    TABLE_AV_LICENSES = "blogger_av_licenses"
+    TABLE_AV_WORKS = "blogger_av_works"
+
+    async def save_av_script(self, record: dict) -> dict:
+        """保存脚本({scriptId, topic, platform, form, personaId,
+        hookType, structureType, style, emotion, voiceStyle,
+        storyboards, bgmLicenseId, materialSlots, aiWatermark,
+        watermarkHash, complianceScore, shortCode, createdAt})"""
+        return await self._save(self.TABLE_AV_SCRIPTS,
+                                record["scriptId"], record)
+
+    async def get_av_script(self, script_id: int) -> dict | None:
+        return await self._get(self.TABLE_AV_SCRIPTS, script_id)
+
+    async def update_av_script(self, script_id: int,
+                               fields: dict) -> dict:
+        return await self._update(self.TABLE_AV_SCRIPTS, script_id,
+                                  fields)
+
+    async def list_av_scripts(self, platform: str = None,
+                              limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_AV_SCRIPTS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if platform and r.get("platform") != platform:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("scriptId", 0),
+                      reverse=True)[:limit]
+
+    async def save_persona(self, record: dict) -> dict:
+        """保存人设({personaId, name, personaType: original_ip/
+        licensed, voiceStyle: slow/medium/fast, toneStyle: warm/
+        professional/playful, licenseId, status, createdAt})"""
+        return await self._save(self.TABLE_PERSONAS,
+                                record["personaId"], record)
+
+    async def get_persona(self, persona_id: int) -> dict | None:
+        return await self._get(self.TABLE_PERSONAS, persona_id)
+
+    async def update_persona(self, persona_id: int,
+                             fields: dict) -> dict:
+        return await self._update(self.TABLE_PERSONAS, persona_id,
+                                  fields)
+
+    async def list_personas(self, status: str = None,
+                            limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_PERSONAS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("personaId", 0),
+                      reverse=True)[:limit]
+
+    async def save_license(self, record: dict) -> dict:
+        """保存授权({licenseId, kind: voice/likeness/bgm/material,
+        name, grantor, scope, expiresAt, status: active/revoked,
+        evidenceHash, createdAt})"""
+        return await self._save(self.TABLE_AV_LICENSES,
+                                record["licenseId"], record)
+
+    async def get_license(self, license_id: int) -> dict | None:
+        return await self._get(self.TABLE_AV_LICENSES, license_id)
+
+    async def update_license(self, license_id: int,
+                             fields: dict) -> dict:
+        return await self._update(self.TABLE_AV_LICENSES, license_id,
+                                  fields)
+
+    async def list_licenses(self, kind: str = None,
+                            status: str = None,
+                            limit: int = 200) -> list[dict]:
+        records = await self._list(self.TABLE_AV_LICENSES,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if kind and r.get("kind") != kind:
+                continue
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("licenseId", 0),
+                      reverse=True)[:limit]
+
+    async def save_av_work(self, record: dict) -> dict:
+        """保存音视频作品({avWorkId, scriptId, platform, form,
+        personaId, shortCode, renderStatus, renderMode, meta,
+        receipt, createdAt})"""
+        return await self._save(self.TABLE_AV_WORKS,
+                                record["avWorkId"], record)
+
+    async def get_av_work(self, work_id: int) -> dict | None:
+        return await self._get(self.TABLE_AV_WORKS, work_id)
+
+    async def update_av_work(self, work_id: int,
+                             fields: dict) -> dict:
+        return await self._update(self.TABLE_AV_WORKS, work_id,
+                                  fields)
+
+    async def list_av_works(self, status: str = None,
+                            limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_AV_WORKS,
+                                   limit=1000)
+        result = []
+        for r in records:
+            if status and r.get("renderStatus") != status:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("avWorkId", 0),
+                      reverse=True)[:limit]
