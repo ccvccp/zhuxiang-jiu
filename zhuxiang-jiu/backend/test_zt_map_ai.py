@@ -354,7 +354,7 @@ def run_evolution(client):
                           "monthlyCost": 50000})
     b = r.json()["data"]
     check("沙盘-四因子+量化预测", r.status_code == 200
-          and b["score"] > 0
+          and 0 < b["score"] <= 100
           and "estMonthlyProfit" in b["prediction"]
           and b["prediction"]["risk"] in ("low", "medium", "high"))
     check("沙盘-建议书模式", "人工确认" in b["disposition"])

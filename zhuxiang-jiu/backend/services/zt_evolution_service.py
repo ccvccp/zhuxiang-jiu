@@ -135,7 +135,8 @@ class ZtEvolutionService:
             cost_score = 0.5
             near_wh_km = None
 
-        score = _round2(100 * (W_POPULATION * (population / 100)
+        # 人口因子归一: population = 周边评分均值×100, /500 → [0,1]
+        score = _round2(100 * (W_POPULATION * (population / 500)
                                + W_COMPETITION * competition
                                + W_CLUSTER * cluster
                                + W_COST * cost_score))
