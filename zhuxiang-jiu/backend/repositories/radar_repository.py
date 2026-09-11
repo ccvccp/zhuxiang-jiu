@@ -73,13 +73,19 @@ def _now_iso() -> str:
 # 序列化类型清单(bool 陷阱还原——P6g-4 实机教训)
 _INT_FIELDS = ("channelId", "eventId", "slotId", "scoreId",
                "taskId", "changeId", "dispatchScriptId",
+               "reportId", "oldLine", "newLine",
+               "funnelClicks", "funnelRegistered",
+               "funnelActivated",
                "heatBase", "heatValue", "danmakuCount",
                "commentCount", "botClusterCount", "totalSlots",
                "clicks", "registered", "activated")
 _FLOAT_FIELDS = ("emotionDensity", "botShare", "crowdEmotion",
-                 "fit", "safety", "conversion", "valueScore")
+                 "fit", "safety", "conversion", "valueScore",
+                 "violationRate", "baselineRate", "hitRate",
+                 "falsePositiveRate", "conversionRate")
 _BOOL_FIELDS = ("botFiltered", "aggregated", "rehearsalPassed",
-                "coordinatedHype", "dispatchExecuted")
+                "coordinatedHype", "dispatchExecuted",
+                "violationMarked")
 
 
 class RadarRepository:
@@ -90,6 +96,7 @@ class RadarRepository:
     TABLE_SLOTS = "radar_event_slots"
     TABLE_SCORES = "radar_scores"
     TABLE_TASKS = "radar_tasks"
+    TABLE_EFFICIENCY = "radar_efficiency"
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -146,7 +153,7 @@ class RadarRepository:
     def _ensure_store(self):
         for key in ("radar_channels", "radar_events",
                     "radar_event_slots", "radar_scores",
-                    "radar_tasks"):
+                    "radar_tasks", "radar_efficiency"):
             self.store.setdefault(key, {})
 
     async def next_id(self, kind: str) -> int:
@@ -398,3 +405,49 @@ class RadarRepository:
                     and r.get("status") in statuses:
                 return r
         return None
+
+    async def find_task_by_trace(self, trace_id: str) -> dict | None:
+        """按溯源 ID 查任务(P7e 归因闭环锚点)"""
+        for r in await self._list(self.TABLE_TASKS, limit=2000):
+            if r.get("traceId") == trace_id:
+                return r
+        return None
+
+    # ============================================================
+    # 效能周报与阈值留痕(P7e——kind 分型共用表)
+    # ============================================================
+
+    async def save_efficiency(self, record: dict) -> dict:
+        """保存效能记录({reportId, kind: weekly/threshold, ...})
+        weekly: 触发数/命中率/误报率/漏报案例库;
+        threshold: oldLine/newLine/违规率/基线/样本(只紧不松留痕)"""
+        return await self._save(self.TABLE_EFFICIENCY,
+                                record["reportId"], record)
+
+    async def get_efficiency(self, report_id: int) -> dict | None:
+        return await self._get(self.TABLE_EFFICIENCY, report_id)
+
+    async def list_efficiency(self, kind: str = None,
+                              limit: int = 100) -> list[dict]:
+        records = await self._list(self.TABLE_EFFICIENCY,
+                                   limit=2000)
+        result = []
+        for r in records:
+            if kind and r.get("kind") != kind:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: x.get("reportId", 0)
+                      )[:limit]
+
+    async def get_current_l1_line(self,
+                                  default: int = 75) -> int:
+        """当前 L1 价值阈值(最新 tighten 留痕的 newLine;
+        无留痕=默认 75——阈值只紧不松, 放宽须 46号建议书)"""
+        tightened = await self.list_efficiency(kind="threshold",
+                                               limit=1000)
+        if not tightened:
+            return default
+        latest = max(tightened,
+                     key=lambda x: x.get("reportId", 0))
+        return int(latest.get("newLine") or default)

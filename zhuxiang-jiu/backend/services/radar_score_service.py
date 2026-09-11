@@ -199,17 +199,23 @@ def compute_safety(event: dict,
 
 
 def grade_event(value: float, fit: int, safety: float,
-                lifecycle: str, blocked: list) -> str:
+                lifecycle: str, blocked: list,
+                l1_line: int = None) -> str:
     """L1-L4 分级(确定性阈值, 设计 §4.2)
 
     - L4 优先(硬闸短路: 屏蔽原因非空或安全<0.6——无论热度多高)
-    - L1 全条件: 价值≥75 且 契合≥70 且 安全≥0.8 且
+    - L1 全条件: 价值≥L1线 且 契合≥70 且 安全≥0.8 且
       生命周期=爆发/发酵期
     - L2: 价值≥50; L3: 其余(观察储备兜底档)
+
+    Args:
+        l1_line: L1 价值阈值(默认常量 75; P7e 收紧轨可传
+            当前生效线——只紧不松, 放宽须 46号建议书)
     """
+    line = L1_VALUE_LINE if l1_line is None else int(l1_line)
     if blocked or safety < SAFETY_HARD_GATE:
         return GRADE_L4
-    if (value >= L1_VALUE_LINE and fit >= L1_FIT_LINE
+    if (value >= line and fit >= L1_FIT_LINE
             and safety >= L1_SAFETY_LINE
             and lifecycle in L1_LIFECYCLES):
         return GRADE_L1
@@ -289,8 +295,11 @@ class RadarScoreService:
         # 硬闸短路: 屏蔽事件价值分直接 0(不进乘法)
         value = 0.0 if blocked else round(
             fit * safety * conversion, 1)
+        # P7e 收紧生效链: L1 线读当前留痕(默认 75, 只紧不松)
+        l1_line = await self.repo.get_current_l1_line()
         grade = grade_event(value, fit, safety,
-                            event.get("lifecycle", ""), blocked)
+                            event.get("lifecycle", ""), blocked,
+                            l1_line=l1_line)
         score_id = await self.repo.next_id("score")
         score = {
             "scoreId": score_id,

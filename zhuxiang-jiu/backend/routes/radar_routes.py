@@ -1,7 +1,6 @@
-"""40号 P7a-P7d·雷达2.0 路由(感知聚合+三维价值评估+演化预测+
-自主响应触发, 设计文档《40号 P7 规划方案》§3-§6/§9)
+"""40号 P7a-P7e·雷达2.0 路由(五引擎全链, 设计文档《40号 P7 规划方案》§3-§7/§9)
 
-端点(10):
+端点(14):
     POST /api/radar/channels        频道入库(admin 增量扩展)
     GET  /api/radar/channels        频道池列表(种子惰性灌入)
     POST /api/radar/events/collect  流式采集触发(mock 15min 槽位)
@@ -12,7 +11,12 @@
     POST /api/radar/events/{id}/predict   演化预测+跨平台关联(P7c)
     POST /api/radar/events/{id}/rehearse  合规预演沙盘(P7c, L1 专用)
     GET  /api/radar/tasks           L1 任务包队列(P7d)
+    POST /api/radar/tasks           任务包补建(P7d 延迟创建轨)
     POST /api/radar/tasks/{id}/confirm  L1 人工确认(P7d, 46号轨)
+    POST /api/radar/efficiency/weekly 效能周报生成(P7e)
+    GET  /api/radar/efficiency      效能记录查询(P7e)
+    POST /api/radar/threshold/tighten 阈值收紧(P7e, 只紧不松)
+    GET  /api/radar/dashboard       雷达中枢看板(P7e 四区聚合)
 
 鉴权: X-Role: admin(管理决策面)
 异常映射: KeyError→404 / ValueError→409(项目约定)
@@ -60,6 +64,11 @@ def _task_service():
     return RadarTaskService()
 
 
+def _govern_service():
+    from services.radar_govern_service import RadarGovernService
+    return RadarGovernService()
+
+
 class ChannelRequest(PydBaseModel):
     platform: str = Field("douyin", max_length=30)
     name: str = Field(..., min_length=1, max_length=60,
@@ -84,6 +93,10 @@ class ConfirmRequest(PydBaseModel):
     approve: bool = Field(..., description="确认/否决")
     reviewer: str = Field("admin", max_length=60)
     note: str = Field("", max_length=500)
+
+
+class TightenRequest(PydBaseModel):
+    reason: str = Field("", max_length=500)
 
 
 class TaskRequest(PydBaseModel):
@@ -274,6 +287,64 @@ async def radar_tasks_confirm(
                 await _task_service().confirm_task(
                     task_id, req.approve, req.reviewer,
                     req.note)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/radar/efficiency/weekly",
+             tags=["雷达2.0全网侦测中枢"])
+async def radar_efficiency_weekly(
+        x_role: str = Header(None, alias="X-Role")):
+    """效能周报生成(触发数/命中率/误报率/漏报案例库——
+    确定性聚合, LLM 禁入)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _govern_service().generate_weekly_report()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/radar/efficiency",
+            tags=["雷达2.0全网侦测中枢"])
+async def radar_efficiency_list(
+        kind: str = None, limit: int = 20,
+        x_role: str = Header(None, alias="X-Role")):
+    """效能记录查询(weekly 周报/threshold 阈值留痕)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _govern_service().list_reports(
+                    kind=kind, limit=limit)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/radar/threshold/tighten",
+             tags=["雷达2.0全网侦测中枢"])
+async def radar_threshold_tighten(
+        req: TightenRequest,
+        x_role: str = Header(None, alias="X-Role")):
+    """L1 阈值自适应收紧(违规率 ×3 且样本≥20 触发;
+    +10 封顶 95——只紧不松, 放宽须 46号建议书)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _govern_service().tighten_threshold(
+                    reason=req.reason)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/radar/dashboard",
+            tags=["雷达2.0全网侦测中枢"])
+async def radar_dashboard(
+        x_role: str = Header(None, alias="X-Role")):
+    """雷达中枢看板(事件/分级/任务/效能四区聚合——纯读取)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _govern_service().dashboard()}
     except Exception as e:
         _handle(e)
 
