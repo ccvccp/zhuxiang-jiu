@@ -1,0 +1,549 @@
+/**
+ * 智能推广工作台(36号)样式 · 棕金主题(对齐 xinzhi)+ 工作台范式
+ */
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 44px);
+}
+
+// 页签栏
+.tabBar {
+  display: flex;
+  align-items: center;
+  margin: $spacing-md $spacing-lg 0;
+  gap: $spacing-sm;
+}
+
+.tabItem {
+  position: relative;
+  flex: 1;
+  text-align: center;
+  padding: $spacing-sm 0;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  background: $color-bg-card;
+}
+
+.tabItemActive {
+  background: linear-gradient(135deg, #6b3410, #935116);
+  color: $color-text-white;
+  font-weight: $font-weight-medium;
+}
+
+.badge {
+  position: absolute;
+  top: -8rpx;
+  right: 4rpx;
+  font-size: 18rpx;
+  background: #c0392b;
+  color: $color-text-white;
+  border-radius: 999rpx;
+  padding: 0 8rpx;
+  min-width: 28rpx;
+  text-align: center;
+}
+
+.section {
+  padding: $spacing-md $spacing-lg $spacing-xl;
+}
+
+// 统计网格
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.statCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md $spacing-sm;
+  text-align: center;
+}
+
+.statNum {
+  font-size: 40rpx;
+  font-weight: $font-weight-bold;
+  color: #6b3410;
+}
+
+.statLabel {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+}
+
+// 通用行卡
+.cardRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.cardLabel {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.cardValue {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.cardValueWrap {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+// 提醒卡
+.alertCard {
+  background: rgba(192, 57, 43, 0.08);
+  border: 1rpx solid rgba(192, 57, 43, 0.25);
+  color: #c0392b;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  font-size: $font-size-xs;
+  line-height: 1.6;
+  margin-bottom: $spacing-md;
+}
+
+// 主操作按钮
+.actionBtn {
+  text-align: center;
+  background: linear-gradient(135deg, #6b3410, #935116);
+  color: $color-text-white;
+  border-radius: 999rpx;
+  padding: $spacing-md 0;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  margin-bottom: $spacing-md;
+
+  &:active {
+    opacity: 0.8;
+  }
+}
+
+.actionBtnDisabled {
+  opacity: 0.5;
+}
+
+// 子卡与标题
+.subCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.subTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin: $spacing-md 0 $spacing-sm;
+}
+
+// 裁决行
+.decideRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm 0;
+  border-bottom: 1rpx solid rgba(0, 0, 0, 0.04);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.decideInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.decideTitle {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decideReason {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+}
+
+.decideBtns {
+  display: flex;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+}
+
+.btnEngage {
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  background: #6b3410;
+  border-radius: 999rpx;
+  padding: 6rpx 24rpx;
+
+  &:active {
+    opacity: 0.8;
+  }
+}
+
+.btnPass {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: $color-bg-page;
+  border-radius: 999rpx;
+  padding: 6rpx 24rpx;
+
+  &:active {
+    opacity: 0.8;
+  }
+}
+
+.btnQueue {
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  background: #935116;
+  border-radius: 999rpx;
+  padding: 6rpx 24rpx;
+
+  &:active {
+    opacity: 0.8;
+  }
+}
+
+// 热点卡
+.hotspotCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.hotspotHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-sm;
+}
+
+.hotspotTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.hotspotSummary {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+  line-height: 1.6;
+}
+
+// 状态徽章
+.statusPill {
+  flex-shrink: 0;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: $color-bg-page;
+  border-radius: 999rpx;
+  padding: 4rpx 16rpx;
+}
+
+.pillEngaged {
+  color: #1e8449;
+  background: rgba(30, 132, 73, 0.1);
+}
+
+.pillDiscarded {
+  color: #c0392b;
+  background: rgba(192, 57, 43, 0.1);
+}
+
+// 评分条
+.scoreRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.scoreBar {
+  flex: 1;
+  height: 12rpx;
+  background: $color-bg-page;
+  border-radius: 999rpx;
+  overflow: hidden;
+}
+
+.scoreFill {
+  height: 100%;
+  background: linear-gradient(90deg, #935116, #6b3410);
+  border-radius: 999rpx;
+}
+
+.scoreNum {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: #6b3410;
+}
+
+// 表单行
+.formRow {
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.formLabel {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  flex-shrink: 0;
+  padding-top: 8rpx;
+}
+
+.hotspotPicker,
+.platformPicker {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.pickerItem {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: $color-bg-page;
+  border: 2rpx solid transparent;
+  border-radius: $radius-sm;
+  padding: 6rpx 16rpx;
+}
+
+.pickerItemActive {
+  border-color: #6b3410;
+  color: #6b3410;
+  background: rgba(107, 52, 16, 0.06);
+  font-weight: $font-weight-medium;
+}
+
+.pickerEmpty {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 内容卡
+.contentCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.contentMeta {
+  display: flex;
+  gap: $spacing-md;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+}
+
+.traceRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+  margin-top: $spacing-sm;
+}
+
+.traceBadge {
+  font-size: 20rpx;
+  color: #935116;
+  background: rgba(147, 81, 22, 0.1);
+  border-radius: $radius-sm;
+  padding: 2rpx 12rpx;
+}
+
+.contentActions {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.detailLink {
+  font-size: $font-size-xs;
+  color: #935116;
+  margin-top: $spacing-sm;
+}
+
+// 队列卡
+.queueCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.queueMeta {
+  display: flex;
+  justify-content: space-between;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+}
+
+.windowOk {
+  color: #1e8449;
+}
+
+.windowWait {
+  color: #935116;
+}
+
+// 通道徽章
+.modeBadge {
+  font-size: $font-size-xs;
+  border-radius: 999rpx;
+  padding: 4rpx 16rpx;
+}
+
+.modeMock {
+  color: $color-text-secondary;
+  background: $color-bg-page;
+}
+
+.modeReal {
+  color: #1e8449;
+  background: rgba(30, 132, 73, 0.1);
+}
+
+.modeFallback {
+  color: #c0392b;
+  background: rgba(192, 57, 43, 0.1);
+}
+
+.keyOk {
+  font-size: $font-size-xs;
+  color: #1e8449;
+}
+
+// 画像卡
+.profileCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.profileRow {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  margin-top: 6rpx;
+  line-height: 1.6;
+}
+
+// 空态/提示/脚注
+.empty {
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  padding: $spacing-xl 0;
+}
+
+.hint {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.7;
+  margin-top: $spacing-sm;
+}
+
+.footer {
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  padding: $spacing-lg 0 calc($spacing-xl + env(safe-area-inset-bottom));
+}
+
+// 详情弹层
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: $spacing-lg;
+}
+
+.detailPanel {
+  width: 100%;
+  max-height: 80vh;
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  display: flex;
+  flex-direction: column;
+}
+
+.detailTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  line-height: 1.5;
+}
+
+.detailMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin: $spacing-sm 0;
+}
+
+.detailBody {
+  flex: 1;
+  max-height: 50vh;
+}
+
+.detailText {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.detailSection {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.7;
+  margin-top: $spacing-md;
+  padding-top: $spacing-sm;
+  border-top: 1rpx solid rgba(0, 0, 0, 0.05);
+}
+
+.detailClose {
+  text-align: center;
+  font-size: $font-size-sm;
+  color: #935116;
+  padding: $spacing-sm 0 0;
+}

@@ -42,6 +42,7 @@
     "test:flash-countdown": "node test/test-flash-countdown.js",
     "test:xinzhi": "node test/test-xinzhi.js",
     "test:entry": "node test/test-entry.js",
+    "test:promo": "node test/test-promo.js",
     "package:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-zxjiu.ps1",
     "verify:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deploy-local.ps1"
   },

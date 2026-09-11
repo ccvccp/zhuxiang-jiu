@@ -287,6 +287,14 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/promo/index' })}>
+              <View className={styles.adminEntryIcon}>📈</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>智能推广</View>
+                <View className={styles.adminEntryDesc}>热点雷达 · Agent 工厂 · 发布中心 · 归因回流</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
             <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/theme-admin/index' })}>
               <View className={styles.adminEntryIcon}>🎨</View>
               <View className={styles.adminEntryInfo}>

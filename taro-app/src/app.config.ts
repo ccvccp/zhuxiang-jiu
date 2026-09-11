@@ -40,7 +40,8 @@ export default defineAppConfig({
     'pages/cooperation/index',
     'pages/help/index',
     'pages/blogger/index',
-    'pages/xinzhi/index'
+    'pages/xinzhi/index',
+    'pages/promo/index'
   ],
   window: {
     backgroundTextStyle: 'light',
