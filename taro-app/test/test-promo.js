@@ -170,6 +170,11 @@ const mockRequest = async (opts) => {
       { word: '沉浸开竹', rejectDocs: 2, rejectRate: 1.0,
         approveRate: 0.33, status: 'pending' }] };
   }
+  if (url.includes('/api/promo/evolution/risk-words')) {
+    return { success: true, data: [
+      { word: '低俗暗示', approvedBy: 'admin',
+        approvedAt: '2026-09-11T08:00:00' }] };
+  }
   return { success: true, data: {} };
 };
 
@@ -295,6 +300,10 @@ const mockPromoApi = {
         roi: 2.0 }] }),
     evolutionApproveWord: async () => {},
     evolutionRejectWord: async () => {},
+    evolutionActiveWords: async () => [
+      { word: '低俗暗示', approvedBy: 'admin',
+        approvedAt: '2026-09-11T08:00:00' }],
+    evolutionRevokeWord: async () => {},
   },
   hotspotStatusName: (s) => s,
   publishPlatformName: (p) => p,
@@ -577,9 +586,13 @@ const textOf = (node) => {
     && flatEvo.includes('0.48') && flatEvo.includes('商品详情页'));
   const riskRow = findAll(elEvo, n => String(n.props.className || '')
     .includes('decideRow'));
-  record('页面-风险词裁决行', riskRow.length === 1
+  record('页面-风险词裁决行', riskRow.length === 2
     && textOf(riskRow[0]).includes('沉浸开竹')
+    && textOf(riskRow[1]).includes('低俗暗示')
     && flatEvo.includes('永不自动阻断'));
+  record('页面-生效词撤销区', flatEvo.includes('已生效词(')
+    && flatEvo.includes('可撤销')
+    && textOf(riskRow[1]).includes('撤销'));
 
   // ---------- [22] 渲染确定性 ----------
   reactForPage.__test.states.length = 0;

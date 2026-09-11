@@ -1,8 +1,11 @@
-"""36号·AI智能推广模块·定时调度器(雷达扫描 + 发布出队)
+"""36号·AI智能推广模块·定时调度器(雷达扫描 + 发布出队 + 进化回归)
 
 调度策略(保守设计, 对齐既有调度器模式):
     - 雷达: 周期 15 分钟(PROMO_RADAR_INTERVAL_SECONDS 可调), 扫描→自动决策
     - 发布: 周期 5 分钟(PROMO_PUBLISH_INTERVAL_SECONDS 可调), 到期出队
+    - 进化: 周期 7 天(PROMO_EVOLUTION_INTERVAL_SECONDS 可调), 品类 ROI 回归
+      (PROMO_EVOLUTION_AUTO 默认 off——权重节奏控制权默认保留在人工,
+       开启后与运营手册 SOP-3 手动回归等效, 幂等可并存)
     - 单类任务失败不影响下一轮(异常吞掉记日志)
 
 环境开关:
@@ -10,12 +13,16 @@
     PROMO_RADAR_INTERVAL_SECONDS=N      雷达周期(默认 900)
     PROMO_PUBLISH_AUTO=off              关闭发布调度(默认关闭)
     PROMO_PUBLISH_INTERVAL_SECONDS=N    发布周期(默认 300)
+    PROMO_EVOLUTION_AUTO=off            关闭进化回归调度(默认关闭)
+    PROMO_EVOLUTION_INTERVAL_SECONDS=N  进化回归周期(默认 604800=7天)
 
 接入方式(main.py startup):
     from services.promo_scheduler import (
-        start_radar_scheduler, start_publish_scheduler)
+        start_radar_scheduler, start_publish_scheduler,
+        start_evolution_scheduler)
     start_radar_scheduler()
     start_publish_scheduler()
+    start_evolution_scheduler()
 """
 
 import asyncio
@@ -26,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 _RADAR_TASK: asyncio.Task | None = None
 _PUBLISH_TASK: asyncio.Task | None = None
+_EVOLUTION_TASK: asyncio.Task | None = None
 
 
 def radar_enabled() -> bool:
@@ -34,6 +42,10 @@ def radar_enabled() -> bool:
 
 def publish_enabled() -> bool:
     return os.environ.get("PROMO_PUBLISH_AUTO", "off").strip().lower() != "off"
+
+
+def evolution_enabled() -> bool:
+    return os.environ.get("PROMO_EVOLUTION_AUTO", "off").strip().lower() != "off"
 
 
 def _interval(env: str, default: int, floor: int = 60) -> int:
@@ -71,9 +83,27 @@ async def _publish_loop() -> None:
             logger.warning("发布调度异常(继续运行): %s", exc)
 
 
+async def _evolution_loop() -> None:
+    interval = _interval("PROMO_EVOLUTION_INTERVAL_SECONDS", 604800,
+                         floor=3600)
+    logger.info("promo_evolution_scheduler started interval=%ss", interval)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            from services.promo_evolution_service import PromoEvolutionService
+            result = await PromoEvolutionService().evolve_hotspot_weights()
+            logger.info("promo_evolution_scheduled adjustments=%s avgRoi=%s",
+                        len(result.get("adjustments", [])),
+                        result.get("avgRoi"))
+        except Exception as exc:
+            logger.warning("进化回归调度异常(继续运行): %s", exc)
+
+
 def _start(task_holder: str, coro) -> bool:
-    global _RADAR_TASK, _PUBLISH_TASK
-    current = _RADAR_TASK if task_holder == "radar" else _PUBLISH_TASK
+    global _RADAR_TASK, _PUBLISH_TASK, _EVOLUTION_TASK
+    holders = {"radar": "_RADAR_TASK", "publish": "_PUBLISH_TASK",
+               "evolution": "_EVOLUTION_TASK"}
+    current = globals().get(holders[task_holder])
     if current is not None and not current.done():
         return True
     try:
@@ -82,10 +112,7 @@ def _start(task_holder: str, coro) -> bool:
         except RuntimeError:
             loop = asyncio.get_event_loop()
         task = loop.create_task(coro)
-        if task_holder == "radar":
-            _RADAR_TASK = task
-        else:
-            _PUBLISH_TASK = task
+        globals()[holders[task_holder]] = task
         return True
     except RuntimeError as exc:
         logger.warning("调度器启动失败(无事件循环): %s", exc)
@@ -108,11 +135,21 @@ def start_publish_scheduler() -> bool:
     return _start("publish", _publish_loop())
 
 
+def start_evolution_scheduler() -> bool:
+    """启动进化回归调度(幂等; PROMO_EVOLUTION_AUTO=off 返回 False)"""
+    if not evolution_enabled():
+        logger.info("promo_evolution_scheduler disabled "
+                    "(PROMO_EVOLUTION_AUTO=off)")
+        return False
+    return _start("evolution", _evolution_loop())
+
+
 def stop_schedulers() -> None:
     """停止全部调度任务(测试清理/应用关闭用)"""
-    global _RADAR_TASK, _PUBLISH_TASK
-    for task in (_RADAR_TASK, _PUBLISH_TASK):
+    global _RADAR_TASK, _PUBLISH_TASK, _EVOLUTION_TASK
+    for task in (_RADAR_TASK, _PUBLISH_TASK, _EVOLUTION_TASK):
         if task is not None:
             task.cancel()
     _RADAR_TASK = None
     _PUBLISH_TASK = None
+    _EVOLUTION_TASK = None

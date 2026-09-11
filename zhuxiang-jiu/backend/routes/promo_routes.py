@@ -752,6 +752,36 @@ async def evolution_risk_word_reject(
         _handle(e)
 
 
+@router.get("/api/promo/evolution/risk-words", tags=["AI智能推广模块"])
+async def evolution_active_risk_words(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """引擎4: 已生效附加风险词明细(供撤销操作与审计)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().active_risk_words()
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/evolution/risk-words/{word}/revoke",
+             tags=["AI智能推广模块"])
+async def evolution_risk_word_revoke(
+    word: str,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """引擎4: 撤销已批准的风险词(误批回滚, 下一轮生成即不拦截; 全留痕)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().revoke_risk_word(word)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/promo/evolution/log", tags=["AI智能推广模块"])
 async def evolution_log(
     x_role: str = Header(None, alias="X-Role"),

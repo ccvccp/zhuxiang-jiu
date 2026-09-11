@@ -302,6 +302,29 @@ class TestEngine4Compliance:
                 record("引擎4-重复裁决拦截", False)
             except ValueError:
                 record("引擎4-重复裁决拦截", True)
+            # 撤销(误批回滚): 生效明细 → 撤销 → 不再拦截 + 候选终态留痕
+            active = await svc.active_risk_words()
+            record("引擎4-生效明细可见", any(
+                w["word"] == target for w in active))
+            revoked = await svc.revoke_risk_word(target)
+            record("引擎4-撤销回滚", revoked["status"] == "revoked"
+                   and target not in await svc.extra_risk_words()
+                   and not any(w["word"] == target
+                               for w in await svc.active_risk_words()))
+            cand = await svc.repo._get("promo_evo_risk_candidates", target)
+            record("引擎4-撤销终态留痕", cand.get("status") == "revoked"
+                   and cand.get("revokedBy") == "admin")
+            # 撤销后闸门不再拦截(target 不再计违规)
+            gate2 = PromoService.compliance_gate(
+                f"正文含{target}, 过量饮酒有害健康, 未满18周岁请勿饮酒")
+            record("引擎4-撤销后闸门放行", target not in gate2["violations"]
+                   and "缺少健康警示" not in gate2["violations"])
+            # 撤销不存在词 → KeyError 404 口径
+            try:
+                await svc.revoke_risk_word(target)
+                record("引擎4-重复撤销拦截", False)
+            except KeyError:
+                record("引擎4-重复撤销拦截", True)
         else:
             record("引擎4-批准生效", False, "无开竹候选")
 

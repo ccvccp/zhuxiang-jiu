@@ -224,6 +224,8 @@ services:
       # 雷达/发布自动调度: off=手动(工作台触发); on=定时(radar 15min/publish 5min)
       - PROMO_RADAR_AUTO=${PROMO_RADAR_AUTO:-off}
       - PROMO_PUBLISH_AUTO=${PROMO_PUBLISH_AUTO:-off}
+      # 进化回归自动调度: off=手动SOP-3(默认, 节奏控制权留人工); on=每周自动品类ROI回归
+      - PROMO_EVOLUTION_AUTO=${PROMO_EVOLUTION_AUTO:-off}
       # 发布通道凭证(留空=mock; real 模式下未配平台走 mock_fallback 可观测降级)
       - PROMO_CHANNEL_MODE=${PROMO_CHANNEL_MODE:-mock}
       - PROMO_CHANNEL_DOUYIN_KEY=${PROMO_CHANNEL_DOUYIN_KEY:-}

@@ -33,6 +33,7 @@ from datetime import datetime, UTC
 from repositories.promo_repository import (
     PromoRepository, BRAND_RELEVANCE_WORDS,
 )
+from repositories.backend import is_redis_mode, get_redis_client, _k
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ def _extract_ngrams(text: str) -> set[str]:
 # ============================================================
 
 class EvolutionRepository(PromoRepository):
-    """进化层数据表(复用 PromoRepository 通用 _save/_get/_list)"""
+    """进化层数据表(复用 PromoRepository 通用 _save/_get/_list + 撤销用 _delete)"""
 
     def _ensure_store(self) -> None:
         super()._ensure_store()
@@ -200,6 +201,16 @@ class EvolutionRepository(PromoRepository):
             self.store.setdefault(table, {})
         for key in ("_promo_evo_log_seq", "_promo_evo_candidate_seq"):
             self.store.setdefault(key, 0)
+
+    async def _delete(self, table: str, record_id) -> None:
+        """撤销生效词用: 删除记录(redis DEL / 内存 pop)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            key_id = record_id if isinstance(record_id, str) else str(record_id)
+            await client.delete(_k("promo", table, key_id))
+        else:
+            self._ensure_store()
+            self.store[table].pop(record_id, None)
 
 
 # ============================================================
@@ -604,6 +615,38 @@ class PromoEvolutionService:
         except Exception as exc:
             logger.warning("evo_extra_risk_words_failed(回退空): %s", exc)
             return []
+
+    async def active_risk_words(self) -> list[dict]:
+        """已生效附加风险词明细(词/批准人/批准时间; 供撤销操作)"""
+        rows = await self.repo._list("promo_evo_risk_words", 200)
+        return sorted((r for r in rows if r.get("word")),
+                      key=lambda r: str(r.get("approvedAt", "")),
+                      reverse=True)
+
+    async def revoke_risk_word(self, word: str,
+                                operator: str = "admin") -> dict:
+        """撤销已批准的风险词(误批回滚; 全留痕)
+
+        撤销 = 从生效表移除(下一轮生成/扫描即不再拦截), 候选记录
+        标记 revoked 终态(轨迹可审计)。与 approve 对称的人工操作。
+
+        Raises:
+            KeyError: 生效词不存在(未批准过)
+            ValueError: 候选记录状态异常
+        """
+        active = await self.repo._get("promo_evo_risk_words", word)
+        if active is None:
+            raise KeyError(f"生效风险词不存在({word})")
+        await self.repo._delete("promo_evo_risk_words", word)
+        candidate = await self.repo._get("promo_evo_risk_candidates", word)
+        if candidate is not None:
+            await self.repo._save("promo_evo_risk_candidates", word, {
+                **candidate, "status": "revoked",
+                "revokedBy": operator, "revokedAt": _now_iso()})
+        await self._log("compliance", "risk_word_revoked", {
+            "word": word, "operator": operator,
+            "approvedBy": active.get("approvedBy", "")})
+        return {"word": word, "status": "revoked", "operator": operator}
 
     # ========================================================
     # 商品拓展: 热点 × 全站商品库匹配

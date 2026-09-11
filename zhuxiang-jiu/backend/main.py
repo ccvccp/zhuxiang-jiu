@@ -388,11 +388,14 @@ async def _on_startup():
     from services.citystore_assessment_scheduler import (
         start_scheduler as start_citystore_assessment)
     start_citystore_assessment()
-    # 36号·AI智能推广: 热点雷达 + 发布出队(PROMO_RADAR_AUTO/PROMO_PUBLISH_AUTO=off 可关闭)
+    # 36号·AI智能推广: 热点雷达 + 发布出队 + 进化回归
+    # (PROMO_RADAR_AUTO/PROMO_PUBLISH_AUTO/PROMO_EVOLUTION_AUTO=off 可关闭)
     from services.promo_scheduler import (
-        start_radar_scheduler, start_publish_scheduler)
+        start_radar_scheduler, start_publish_scheduler,
+        start_evolution_scheduler)
     start_radar_scheduler()
     start_publish_scheduler()
+    start_evolution_scheduler()
     # 37号·AI智能网站同盟: T+1 结算(ALLIANCE_SETTLE_AUTO=off 可关闭)
     from services.alliance_settle_scheduler import start_scheduler as start_alliance_settle
     start_alliance_settle()

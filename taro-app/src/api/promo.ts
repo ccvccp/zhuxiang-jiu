@@ -582,6 +582,22 @@ export const PromoAPI = {
     });
   },
 
+  /** 引擎4: 已生效附加风险词明细(供撤销与审计) */
+  async evolutionActiveWords(): Promise<{ word: string; approvedBy?: string; approvedAt?: string }[]> {
+    const res = await request<any>({
+      url: '/api/promo/evolution/risk-words', headers: adminHeaders(),
+    });
+    return res.data || [];
+  },
+
+  /** 引擎4: 撤销已批准的风险词(误批回滚, 下一轮生成即不拦截) */
+  async evolutionRevokeWord(word: string): Promise<void> {
+    await request<any>({
+      url: `/api/promo/evolution/risk-words/${encodeURIComponent(word)}/revoke`,
+      method: 'POST', headers: adminHeaders(), data: {},
+    });
+  },
+
   /** 商品拓展: 热点 × 全站商品匹配 */
   async evolutionProductsMatch(hotspotId: number): Promise<ProductMatchVO[]> {
     const res = await request<any>({

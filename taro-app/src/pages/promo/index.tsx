@@ -70,12 +70,13 @@ const PromoPage: React.FC = () => {
   // 进化中枢(P3)
   const [evoStatus, setEvoStatus] = useState<EvolutionStatusVO | null>(null);
   const [riskCandidates, setRiskCandidates] = useState<RiskCandidateVO[]>([]);
+  const [activeWords, setActiveWords] = useState<{ word: string; approvedBy?: string; approvedAt?: string }[]>([]);
   const [runningRegress, setRunningRegress] = useState(false);
 
   // ---------- 数据加载 ----------
   const loadAll = useCallback(async () => {
     try {
-      const [ov, hs, pd, cs, q, ch, sp, ap, evo, rc] = await Promise.all([
+      const [ov, hs, pd, cs, q, ch, sp, ap, evo, rc, aw] = await Promise.all([
         PromoAPI.reportOverview().catch(() => null),
         PromoAPI.hotspots().catch(() => [] as HotspotVO[]),
         PromoAPI.decisions({ pendingOnly: true }).catch(() => [] as DecisionVO[]),
@@ -86,6 +87,7 @@ const PromoPage: React.FC = () => {
         PromoAPI.audienceProfiles().catch(() => [] as AudienceProfileVO[]),
         PromoAPI.evolutionStatus().catch(() => null),
         PromoAPI.evolutionRiskCandidates('pending').catch(() => [] as RiskCandidateVO[]),
+        PromoAPI.evolutionActiveWords().catch(() => []),
       ]);
       setOverview(ov);
       setHotspots(hs);
@@ -97,6 +99,7 @@ const PromoPage: React.FC = () => {
       setProfiles(ap);
       setEvoStatus(evo);
       setRiskCandidates(rc);
+      setActiveWords(aw);
       // 默认生成热点: 第一个已跟进
       if (!genHotspotId) {
         const engaged = hs.find((h) => h.status === 'engaged');
@@ -673,6 +676,38 @@ const PromoPage: React.FC = () => {
               <View className={styles.hint}>
                 候选词仅观察永不自动阻断; 人工批准后注入雷达与内容双闸门
               </View>
+              {activeWords.length > 0 && (
+                <View>
+                  <View className={styles.subTitle}>
+                    已生效词({activeWords.length}) · 可撤销
+                  </View>
+                  {activeWords.map((w) => (
+                    <View key={w.word} className={styles.decideRow}>
+                      <View className={styles.decideInfo}>
+                        <View className={styles.decideTitle}>{w.word}</View>
+                        <View className={styles.decideReason}>
+                          {w.approvedBy || 'admin'} 批准 · {(w.approvedAt || '').slice(0, 10)}
+                        </View>
+                      </View>
+                      <View className={styles.decideBtns}>
+                        <View
+                          className={styles.btnPass}
+                          onClick={async () => {
+                            try {
+                              await PromoAPI.evolutionRevokeWord(w.word);
+                              Taro.showToast({
+                                title: '已撤销, 下轮生成起不再拦截',
+                                icon: 'none', duration: 1800,
+                              });
+                              await loadAll();
+                            } catch (e) { console.warn('[evo] 撤销失败:', e); }
+                          }}
+                        >撤销</View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
 
             <View className={styles.cardRow}>
