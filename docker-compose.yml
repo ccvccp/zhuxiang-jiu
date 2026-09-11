@@ -213,8 +213,13 @@ services:
       # shadow=巡检留痕期(快照+起链纯记录); assist=辅助执行期(P2 自愈编排经白名单+46号审批);
       #     off=决策面 scan 409(观测面不受影响)
       - XX66_MODE=${XX66_MODE:-off}
-      # LLM 辅助轨(P1 情绪识别/归因描述——仅产标签不产数字, 默认 off)
+    # LLM 辅助轨(P1 情绪识别/归因描述——仅产标签不产数字, 默认 off)
       - XX66_LLM_MODE=${XX66_LLM_MODE:-off}
+      # ---- 68号 信值·臻选购物平台(P0-P5: 决策面三级灰度, 默认 off——存量购物/互助链路零影响) ----
+      # shadow=观察学习期(决策放行+留痕标记); assist=辅助生产期(决策生效);
+      #     off=决策面 409(观测面 radar/score/price/feedback/neighbor/carbon/
+      #     level/whitepaper 等不受影响——观测与纠错永不关停)
+      - XINZHI_MODE=${XINZHI_MODE:-off}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:
