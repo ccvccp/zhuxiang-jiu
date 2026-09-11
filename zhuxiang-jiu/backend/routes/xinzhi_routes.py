@@ -1,6 +1,6 @@
-"""68号 P0-P4·信值·臻选路由(雷达+货架+定价导购+互助+商家)
+"""68号 P0-P5·信值·臻选路由(雷达+货架+定价导购+互助+商家+灰度收官)
 
-端点(20):
+端点(25):
     GET  /api/xinzhi/radar               五维雷达(最新快照/即时计算)
     GET  /api/xinzhi/radar/history        90 日历史曲线
     POST /api/xinzhi/products/score       商品三维评分批次(P1)
@@ -9,18 +9,26 @@
     GET  /api/xinzhi/price/{id}           价格构成拆解(P2 透明定价)
     POST /api/xinzhi/feedback             反馈提交(标签路由 L1/L2/L3)
     GET  /api/xinzhi/feedback/{id}        反馈进度(透明)
-    POST /api/xinzhi/guide                导购应答(SOP五步法)
+    POST /api/xinzhi/guide                导购应答(SOP五步法)*
     GET  /api/xinzhi/guide/personas        导购人格卡片(能力公示)
     GET  /api/xinzhi/neighbor             邻里臻选(品类聚合, 零个体)
-    POST /api/xinzhi/groupbuy             发布邻里求购(P3)
+    POST /api/xinzhi/groupbuy             发布邻里求购(P3)*
     GET  /api/xinzhi/groupbuy             求购大厅(LBS 紧急→距离→新单)
-    POST /api/xinzhi/groupbuy/{id}/respond 求购响应(仅计数脱敏)
-    POST /api/xinzhi/groupbuy/{id}/close   求购关闭(发起人+碳折算)
+    POST /api/xinzhi/groupbuy/{id}/respond 求购响应(仅计数脱敏)*
+    POST /api/xinzhi/groupbuy/{id}/close   求购关闭(发起人+碳折算)*
     GET  /api/xinzhi/carbon/{member_id}    邻里购物碳档案(只读)
-    POST /api/xinzhi/merchant/apply       商家 4+2 认证(P4)
+    POST /api/xinzhi/merchant/apply       商家 4+2 认证(P4)*
     POST /api/xinzhi/merchant/simulate    预演沙盘(启航报告)
     GET  /api/xinzhi/merchant/{id}/level  评级查询(分数+归因+历史)
-    POST /api/xinzhi/merchant/{id}/regrade 评级重算(降级走 46号)
+    POST /api/xinzhi/merchant/{id}/regrade 评级重算(降级走 46号)*
+    GET  /api/xinzhi/mode                 灰度总览(观测面, 永不关停)
+    POST /api/xinzhi/mode/override        运行时切档(留痕)
+    POST /api/xinzhi/mode/guard           A/B 护栏检查(自动暂停)
+    POST /api/xinzhi/mode/resume          人工恢复(护栏暂停解除)
+    GET  /api/xinzhi/whitepaper           年度信值白皮书(四章节)
+
+    * 决策面(XINZHI_MODE=off 时 409; shadow 放行留痕;
+      观测面永不关停——宪法口径)
 
 鉴权: X-Member-Id(会员本人域; P0 与 /api/member/profile
 同口径)
@@ -88,6 +96,23 @@ def _merchant_service():
     from services.xinzhi_merchant_service import (
         XinzhiMerchantService)
     return XinzhiMerchantService()
+
+
+def _mode_service():
+    from services.xinzhi_mode_service import (
+        XinzhiModeService)
+    return XinzhiModeService()
+
+
+def _whitepaper_service():
+    from services.xinzhi_whitepaper_service import (
+        XinzhiWhitepaperService)
+    return XinzhiWhitepaperService()
+
+
+async def _require_decision_mode() -> dict:
+    """决策面灰度门槛(off→409; 全站范式)"""
+    return await _mode_service().require_decision_mode()
 
 
 class ScoreRequest(PydBaseModel):
@@ -302,9 +327,11 @@ async def xinzhi_guide_reply(
     履约跟进→价值沉淀; 数字全查询层, LLM 禁入判定)"""
     mid = _member_id(x_member_id)
     try:
-        return {"success": True, "data":
-                await _guide_service().guide_reply(
-                    mid, req.productId, req.query)}
+        mode = await _require_decision_mode()
+        data = await _guide_service().guide_reply(
+            mid, req.productId, req.query)
+        data["xinzhiMode"] = mode["mode"]
+        return {"success": True, "data": data}
     except Exception as e:
         _handle(e)
 
@@ -342,15 +369,17 @@ async def xinzhi_groupbuy_publish(
     """发布邻里求购(三单上限+违禁词预检——67号叫帮范式)"""
     mid = _member_id(x_member_id)
     try:
-        return {"success": True, "data":
-                await _neighbor_service().publish_groupbuy(
-                    mid, req.title,
-                    product_id=req.productId,
-                    quantity=req.quantity,
-                    urgency=req.urgency,
-                    longitude=req.longitude,
-                    latitude=req.latitude,
-                    address=req.address)}
+        mode = await _require_decision_mode()
+        data = await _neighbor_service().publish_groupbuy(
+            mid, req.title,
+            product_id=req.productId,
+            quantity=req.quantity,
+            urgency=req.urgency,
+            longitude=req.longitude,
+            latitude=req.latitude,
+            address=req.address)
+        data["xinzhiMode"] = mode["mode"]
+        return {"success": True, "data": data}
     except Exception as e:
         _handle(e)
 
@@ -380,9 +409,11 @@ async def xinzhi_groupbuy_respond(
     """响应邻里求购(仅计数+昵称脱敏——零个体数据红线)"""
     mid = _member_id(x_member_id)
     try:
-        return {"success": True, "data":
-                await _neighbor_service().respond_groupbuy(
-                    groupbuy_id, mid)}
+        mode = await _require_decision_mode()
+        data = await _neighbor_service().respond_groupbuy(
+            groupbuy_id, mid)
+        data["xinzhiMode"] = mode["mode"]
+        return {"success": True, "data": data}
     except Exception as e:
         _handle(e)
 
@@ -398,9 +429,11 @@ async def xinzhi_groupbuy_close(
     只读观测不可交易)"""
     mid = _member_id(x_member_id)
     try:
-        return {"success": True, "data":
-                await _neighbor_service().close_groupbuy(
-                    groupbuy_id, mid)}
+        mode = await _require_decision_mode()
+        data = await _neighbor_service().close_groupbuy(
+            groupbuy_id, mid)
+        data["xinzhiMode"] = mode["mode"]
+        return {"success": True, "data": data}
     except Exception as e:
         _handle(e)
 
@@ -429,13 +462,15 @@ async def xinzhi_merchant_apply(
     加分; 确定性评估+留痕)"""
     mid = _member_id(x_member_id)
     try:
-        return {"success": True, "data":
-                await _merchant_service(
-                ).apply_certification(
-                    mid, req.shopName, req.checks,
-                    bonuses=req.bonuses,
-                    alliance_merchant_id=(
-                        req.allianceMerchantId))}
+        mode = await _require_decision_mode()
+        data = await _merchant_service(
+        ).apply_certification(
+            mid, req.shopName, req.checks,
+            bonuses=req.bonuses,
+            alliance_merchant_id=(
+                req.allianceMerchantId))
+        data["xinzhiMode"] = mode["mode"]
+        return {"success": True, "data": data}
     except Exception as e:
         _handle(e)
 
@@ -483,9 +518,102 @@ async def xinzhi_merchant_regrade(
     降级仅生成 46号建议书——处罚永不自动)"""
     mid = _member_id(x_member_id)
     try:
+        mode = await _require_decision_mode()
+        data = await _merchant_service().regrade(
+            merchant_id, operator=f"m{mid}")
+        data["xinzhiMode"] = mode["mode"]
+        return {"success": True, "data": data}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/xinzhi/mode",
+            tags=["信值臻选购物平台"])
+async def xinzhi_mode_status():
+    """灰度总览(观测面永不关停: 三态/护栏/决策面清单公示)"""
+    try:
         return {"success": True, "data":
-                await _merchant_service().regrade(
-                    merchant_id, operator=f"m{mid}")}
+                await _mode_service().status_view()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/mode/override",
+             tags=["信值臻选购物平台"])
+async def xinzhi_mode_override(
+        mode: str,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """运行时切档(off/shadow/assist; 人工留痕;
+    空串清除 override 回落环境变量)"""
+    _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _mode_service().set_override(
+                    mode, operator=f"m{x_member_id}")}
+    except Exception as e:
+        _handle(e)
+
+
+class GuardCheckRequest(PydBaseModel):
+    refundRate: float = Field(0.05,
+                              description="当期退款率")
+    complaintRate: float = Field(0.02,
+                                description="当期客诉进线率")
+    uninstallRate: float = Field(0.01,
+                                description="当期卸载率")
+    baseline: dict = Field(None,
+                          description="基线三指标(可选)")
+
+
+@router.post("/api/xinzhi/mode/guard",
+             tags=["信值臻选购物平台"])
+async def xinzhi_mode_guard(
+        req: GuardCheckRequest,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """A/B 护栏检查(三指标恶化>3% 自动暂停; 指标留痕)"""
+    _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _mode_service().guard_check(
+                    refund_rate=req.refundRate,
+                    complaint_rate=req.complaintRate,
+                    uninstall_rate=req.uninstallRate,
+                    baseline=req.baseline)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/mode/resume",
+             tags=["信值臻选购物平台"])
+async def xinzhi_mode_resume(
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None,
+        note: str = ""):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _mode_service().resume(
+                    operator=f"m{x_member_id}",
+                    note=note)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/xinzhi/whitepaper",
+            tags=["信值臻选购物平台"])
+async def xinzhi_whitepaper(year: int = None):
+    """年度信值白皮书(四章节+PII 扫描兜底;
+    零个体数据——公开口径)"""
+    try:
+        return {"success": True, "data":
+                await _whitepaper_service(
+                ).build_whitepaper(year=year)}
     except Exception as e:
         _handle(e)
 

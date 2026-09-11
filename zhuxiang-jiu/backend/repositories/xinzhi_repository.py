@@ -9,6 +9,8 @@
         ——67号叫帮联动关联键)
     xinzhi_merchants: 商家信值档案(P4 商家体系
         ——4+2 认证/S-A-B-C-D 评级/预演沙盘报告)
+    xinzhi_grayscale: 灰度运行时态(P5 收官
+        ——三态 override/A-B 护栏暂停/指标留痕)
 
 设计对齐(《68号 信值臻选购物平台创新规划方案》§四):
     - 编排式只读聚合: 五维数据源全部来自既有模块(47/67/44/
@@ -65,7 +67,7 @@ _INT_FIELDS = ("snapshotId", "memberId", "scoreSeq",
                "responderCount", "orderCount",
                "merchantId", "simId", "leg",
                "simulatedOrders", "violations", "complaints",
-               "lateOrders", "allianceMerchantId")
+               "lateOrders", "allianceMerchantId", "stateId")
 _FLOAT_FIELDS = ("integrity", "mutual", "expert", "activity",
                  "growth", "totalScore", "daysSinceRegister",
                  "fit", "safety", "conversion", "valueScore",
@@ -82,13 +84,14 @@ _FLOAT_FIELDS = ("integrity", "mutual", "expert", "activity",
 _BOOL_FIELDS = ("circuitBroken", "coldStart", "bonusApplied",
                 "hardBlocked", "closed",
                 "certified", "ecoContribution",
-                "externalEndorsement")
+                "externalEndorsement", "paused")
 _LIST_FIELDS = ("integritySources", "mutualSources",
                 "expertSources", "activitySources",
                 "growthSources", "recentFactors",
                 "fitModules", "safetyReasons", "blockedReasons",
                 "responders", "gradeHistory", "trajectory",
-                "topRisks", "roadmap", "missingChecks")
+                "topRisks", "roadmap", "missingChecks",
+                "metrics", "breachTrail")
 
 
 class XinzhiRepository:
@@ -100,6 +103,7 @@ class XinzhiRepository:
     TABLE_FEEDBACK = "xinzhi_feedback"
     TABLE_GROUPBUYS = "xinzhi_groupbuys"
     TABLE_MERCHANTS = "xinzhi_merchants"
+    TABLE_GRAYSCALE = "xinzhi_grayscale"
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -162,6 +166,7 @@ class XinzhiRepository:
         self.store.setdefault(self.TABLE_FEEDBACK, {})
         self.store.setdefault(self.TABLE_GROUPBUYS, {})
         self.store.setdefault(self.TABLE_MERCHANTS, {})
+        self.store.setdefault(self.TABLE_GRAYSCALE, {})
 
     async def next_id(self, kind: str) -> int:
         if is_redis_mode():
@@ -476,3 +481,20 @@ class XinzhiRepository:
             if r.get("memberId") == member_id:
                 return r
         return None
+
+    # ============================================================
+    # 灰度运行时态(P5——三态 override/护栏暂停/指标留痕)
+    # ============================================================
+
+    STATE_ID = 1   # 全局单例(stateId=1)
+
+    async def load_state(self) -> dict | None:
+        return await self._get(self.TABLE_GRAYSCALE,
+                               self.STATE_ID)
+
+    async def save_state(self, record: dict) -> dict:
+        """保存运行时态({stateId, override, paused,
+        pausedReason, pausedAt, metrics, breachTrail,
+        updatedAt})"""
+        return await self._save(self.TABLE_GRAYSCALE,
+                                self.STATE_ID, record)
