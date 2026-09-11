@@ -14,6 +14,7 @@
     - attract: sitemap URL 结构复用({SITE_BASE_URL}/r/{code})
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -119,10 +120,8 @@ def _http_error_detail(exc: urllib.error.HTTPError) -> str:
     微博 403 → {"error":"auth by Null spi!","error_code":21301}。
     """
     raw = ""
-    try:
+    with contextlib.suppress(Exception):
         raw = exc.read().decode("utf-8", errors="replace")[:200]
-    except Exception:
-        pass
     if raw:
         try:
             parsed = json.loads(raw)
@@ -401,6 +400,20 @@ class PromoChannelService:
             date_key)
         pending_urls = [u for u in all_urls if u not in pushed]
         skipped = len(all_urls) - len(pending_urls)
+        if not pending_urls:
+            # 当日已全部推送(幂等跳过): 非失败, 落 ok 留痕防运维误报
+            push_id = await self.repo.next_id("seo_push")
+            record = {
+                "pushId": push_id, "dateKey": date_key, "mode": "skipped",
+                "urls": [], "submitted": 0, "skipped": skipped,
+                "success": 0, "failed": 0, "remain": 0,
+                "error": "", "status": SEO_PUSH_STATUS_OK,
+                "createdAt": _now_iso(),
+            }
+            await self.repo.save_seo_push(record)
+            logger.info("promo_seo_push skipped(当日已全量推送) "
+                        "skipped=%s", skipped)
+            return record
         result = await self.baidu_push(pending_urls)
         status = (SEO_PUSH_STATUS_OK
                   if not result["error"] else SEO_PUSH_STATUS_FAILED)
