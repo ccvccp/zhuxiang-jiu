@@ -40,6 +40,7 @@
     "test:address-form": "node test/test-address-form.js",
     "test:points-adapter": "node test/test-points-adapter.js",
     "test:flash-countdown": "node test/test-flash-countdown.js",
+    "test:xinzhi": "node test/test-xinzhi.js",
     "package:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-zxjiu.ps1",
     "verify:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deploy-local.ps1"
   },

@@ -1,0 +1,598 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 88rpx);
+}
+
+// ============================================
+// 一、信值雷达卡
+// ============================================
+.radarCard {
+  background: linear-gradient(135deg, #6b3410, #935116);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin: $spacing-md $spacing-lg 0;
+  box-shadow: $shadow-card-hover;
+}
+
+.radarHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.radarTitle {
+  font-size: $font-size-md;
+  color: rgba($color-text-white, 0.9);
+  font-weight: $font-weight-medium;
+}
+
+.radarSub {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.65);
+}
+
+.gradeBadge {
+  padding: 6rpx 20rpx;
+  border-radius: $radius-round;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.gradeS { background: rgba(249, 231, 159, 0.35); color: #f9e79f; }
+.gradeA { background: rgba(174, 214, 241, 0.3); }
+.gradeB { background: rgba(255, 255, 255, 0.18); }
+.gradeD { background: rgba(231, 76, 60, 0.4); }
+
+.radarTotal {
+  margin-top: $spacing-md;
+  display: flex;
+  align-items: baseline;
+  gap: 6rpx;
+}
+
+.radarTotalNum {
+  font-size: 64rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.radarTotalUnit {
+  font-size: $font-size-sm;
+  color: rgba($color-text-white, 0.7);
+}
+
+.circuitTip {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(231, 76, 60, 0.28);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.92);
+}
+
+.dimGrid {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.15);
+}
+
+.dimItem {
+  width: 33.33%;
+  text-align: center;
+  margin-bottom: $spacing-sm;
+}
+
+.dimScore {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.dimLabel {
+  margin-top: 2rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.7);
+}
+
+.dimBar {
+  margin: 8rpx 12rpx 0;
+  height: 8rpx;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: $radius-round;
+  overflow: hidden;
+}
+
+.dimBarFill {
+  height: 100%;
+  background: linear-gradient(90deg, #f0d9b5, #f9e79f);
+  border-radius: $radius-round;
+}
+
+.dimFactor {
+  margin-top: 6rpx;
+  font-size: 20rpx;
+  color: rgba($color-text-white, 0.55);
+  padding: 0 8rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loginTip {
+  margin-top: $spacing-lg;
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: rgba($color-text-white, 0.75);
+}
+
+.carbonRow {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(76, 175, 80, 0.22);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.92);
+}
+
+// ============================================
+// 标签栏 + 反馈
+// ============================================
+.tabBar {
+  display: flex;
+  align-items: center;
+  margin: $spacing-lg $spacing-lg 0;
+  gap: $spacing-sm;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-sm 0;
+  border-radius: $radius-button;
+  font-size: $font-size-md;
+  color: $color-text-secondary;
+  background: $color-bg-card;
+}
+
+.tabActive {
+  background: linear-gradient(135deg, #6b3410, #935116);
+  color: $color-text-white;
+  font-weight: $font-weight-medium;
+}
+
+.fbBtn {
+  padding: $spacing-sm $spacing-lg;
+  border-radius: $radius-button;
+  font-size: $font-size-md;
+  color: #935116;
+  background: rgba(147, 81, 22, 0.1);
+}
+
+.fbPanel {
+  margin: $spacing-md $spacing-lg 0;
+  padding: $spacing-md;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+}
+
+.fbScenes {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.fbScene {
+  padding: 8rpx 20rpx;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.fbSceneActive {
+  background: rgba(147, 81, 22, 0.15);
+  color: #935116;
+  font-weight: $font-weight-medium;
+}
+
+.fbInput {
+  width: 100%;
+  min-height: 120rpx;
+  padding: $spacing-sm;
+  background: $color-text-white;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  box-sizing: border-box;
+}
+
+.fbSubmit {
+  margin-top: $spacing-sm;
+  text-align: center;
+  padding: $spacing-sm 0;
+  background: linear-gradient(135deg, #6b3410, #935116);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+}
+
+.fbResult {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-success;
+  line-height: 1.6;
+}
+
+// ============================================
+// 二、臻选货架
+// ============================================
+.section {
+  padding: 0 $spacing-lg;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: baseline;
+  gap: $spacing-sm;
+  margin: $spacing-lg 0 $spacing-md;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.sectionNote {
+  font-size: $font-size-xs;
+  font-weight: normal;
+  color: $color-text-tertiary;
+}
+
+.empty {
+  padding: $spacing-xl 0;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.productCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.productHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.productName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  flex: 1;
+}
+
+.productGrade {
+  padding: 2rpx 16rpx;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+  background: $color-primary;
+}
+
+.scoreRow {
+  display: flex;
+  margin-top: $spacing-md;
+}
+
+.scoreItem {
+  flex: 1;
+  text-align: center;
+}
+
+.scoreNum {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: #935116;
+}
+
+.scoreLbl {
+  margin-top: 2rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.priceBtn {
+  margin-top: $spacing-md;
+  text-align: center;
+  padding: $spacing-sm 0;
+  border: 1rpx solid rgba(147, 81, 22, 0.4);
+  color: #935116;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+}
+
+// 价格构成弹层
+.pricePanel {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.pricePanelTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.priceRows {
+  background: $color-text-white;
+  border-radius: $radius-sm;
+  padding: $spacing-sm $spacing-md;
+}
+
+.priceRow {
+  display: flex;
+  justify-content: space-between;
+  padding: 10rpx 0;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.priceDeduct {
+  color: #e74c3c;
+}
+
+.priceFinal {
+  border-top: 1rpx solid rgba(0, 0, 0, 0.08);
+  margin-top: 6rpx;
+  padding-top: $spacing-sm;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: #6b3410;
+}
+
+.priceNote {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-warning;
+  line-height: 1.6;
+}
+
+.priceClose {
+  margin-top: $spacing-sm;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 导购
+.guideSection {
+  margin-top: $spacing-lg;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.guideTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.guideSub {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.guideInputRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.guideInput {
+  flex: 1;
+  padding: $spacing-sm $spacing-md;
+  background: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+}
+
+.guideBtn {
+  padding: $spacing-sm $spacing-lg;
+  background: linear-gradient(135deg, #6b3410, #935116);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+}
+
+.guideReply {
+  margin-top: $spacing-md;
+  padding: $spacing-md;
+  background: rgba(147, 81, 22, 0.06);
+  border-left: 6rpx solid #935116;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  line-height: 1.8;
+}
+
+.guideMode {
+  margin-top: $spacing-xs;
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 三、邻里社区
+// ============================================
+.nbGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.nbItem {
+  width: calc(50% - 8rpx);
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  box-sizing: border-box;
+}
+
+.nbSeries {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.nbCount {
+  margin-top: 8rpx;
+  font-size: $font-size-sm;
+  color: #935116;
+  font-weight: $font-weight-medium;
+}
+
+.nbOrders {
+  margin-top: 2rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 求购发布
+.gbPublish {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.gbInput {
+  width: 100%;
+  padding: $spacing-sm $spacing-md;
+  background: $color-text-white;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  box-sizing: border-box;
+}
+
+.gbPublishRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: $spacing-sm;
+}
+
+.urgentTag {
+  padding: 8rpx 24rpx;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  background: rgba(0, 0, 0, 0.04);
+  color: $color-text-secondary;
+}
+
+.urgentTagOn {
+  background: rgba(231, 76, 60, 0.12);
+  color: #e74c3c;
+  font-weight: $font-weight-medium;
+}
+
+.gbBtn {
+  padding: 8rpx $spacing-xl;
+  background: linear-gradient(135deg, #6b3410, #935116);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+}
+
+// 求购列表
+.gbCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.gbHead {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.gbUrgent {
+  padding: 2rpx 12rpx;
+  border-radius: $radius-xs;
+  background: #e74c3c;
+  color: $color-text-white;
+  font-size: 20rpx;
+  font-weight: $font-weight-medium;
+}
+
+.gbTitle {
+  flex: 1;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.gbDist {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.gbMeta {
+  margin-top: 8rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.gbRespondBtn {
+  margin-top: $spacing-sm;
+  text-align: center;
+  padding: $spacing-sm 0;
+  border: 1rpx solid rgba(46, 134, 93, 0.5);
+  color: $color-success;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+}
+
+.gbCarbon {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-success;
+}
+
+// 灰度脚注
+.modeFooter {
+  margin: $spacing-lg $spacing-lg $spacing-md;
+  padding: $spacing-md;
+  background: rgba(147, 81, 22, 0.05);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.8;
+  text-align: center;
+}
+
+.bottomSpace {
+  height: 48rpx;
+}

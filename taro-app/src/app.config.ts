@@ -39,7 +39,8 @@ export default defineAppConfig({
     'pages/agent-center/index',
     'pages/cooperation/index',
     'pages/help/index',
-    'pages/blogger/index'
+    'pages/blogger/index',
+    'pages/xinzhi/index'
   ],
   window: {
     backgroundTextStyle: 'light',
