@@ -7,6 +7,8 @@
         (契合×安全硬闸×转化 → L1臻选/L2优选/L3普通/L4风险)
     xinzhi_groupbuys: 邻里求购单(P3 互助购物生态
         ——67号叫帮联动关联键)
+    xinzhi_merchants: 商家信值档案(P4 商家体系
+        ——4+2 认证/S-A-B-C-D 评级/预演沙盘报告)
 
 设计对齐(《68号 信值臻选购物平台创新规划方案》§四):
     - 编排式只读聚合: 五维数据源全部来自既有模块(47/67/44/
@@ -60,7 +62,10 @@ def _now_iso() -> str:
 # 序列化类型清单(bool 陷阱还原——P6g-4 实机教训)
 _INT_FIELDS = ("snapshotId", "memberId", "scoreSeq",
                "detailSeq", "feedbackId", "groupbuyId",
-               "responderCount", "orderCount")
+               "responderCount", "orderCount",
+               "merchantId", "simId", "leg",
+               "simulatedOrders", "violations", "complaints",
+               "lateOrders", "allianceMerchantId")
 _FLOAT_FIELDS = ("integrity", "mutual", "expert", "activity",
                  "growth", "totalScore", "daysSinceRegister",
                  "fit", "safety", "conversion", "valueScore",
@@ -68,14 +73,22 @@ _FLOAT_FIELDS = ("integrity", "mutual", "expert", "activity",
                  "basePrice", "trustDiscount",
                "contributionDiscount", "promoFactor",
                "xinzhiCredit", "finalPrice", "priceDiff",
-                 "longitude", "latitude")
+                 "longitude", "latitude",
+                 "certScore", "fulfillmentScore",
+                 "merchantScore", "completionRate",
+                 "praiseRate", "fulfillmentRate",
+                 "complaintRate", "onTimeRate",
+                 "dailyOrders", "cumulativeScore")
 _BOOL_FIELDS = ("circuitBroken", "coldStart", "bonusApplied",
-                "hardBlocked", "closed")
+                "hardBlocked", "closed",
+                "certified", "ecoContribution",
+                "externalEndorsement")
 _LIST_FIELDS = ("integritySources", "mutualSources",
                 "expertSources", "activitySources",
                 "growthSources", "recentFactors",
                 "fitModules", "safetyReasons", "blockedReasons",
-                "responders")
+                "responders", "gradeHistory", "trajectory",
+                "topRisks", "roadmap", "missingChecks")
 
 
 class XinzhiRepository:
@@ -86,6 +99,7 @@ class XinzhiRepository:
     TABLE_PRICE_DETAILS = "xinzhi_price_details"
     TABLE_FEEDBACK = "xinzhi_feedback"
     TABLE_GROUPBUYS = "xinzhi_groupbuys"
+    TABLE_MERCHANTS = "xinzhi_merchants"
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -147,6 +161,7 @@ class XinzhiRepository:
         self.store.setdefault(self.TABLE_PRICE_DETAILS, {})
         self.store.setdefault(self.TABLE_FEEDBACK, {})
         self.store.setdefault(self.TABLE_GROUPBUYS, {})
+        self.store.setdefault(self.TABLE_MERCHANTS, {})
 
     async def next_id(self, kind: str) -> int:
         if is_redis_mode():
@@ -405,3 +420,59 @@ class XinzhiRepository:
             result,
             key=lambda x: -int(x.get("groupbuyId") or 0)
         )[:limit]
+
+    # ============================================================
+    # 商家信值档案(P4——4+2 认证/动态评级/预演沙盘)
+    # ============================================================
+
+    async def save_merchant(self, record: dict) -> dict:
+        """保存商家档案({merchantId, memberId, shopName,
+        category, checks(四必查), bonuses(两加分), certScore,
+        certified, status, grade, merchantScore,
+        fulfillmentScore, gradeHistory, simulation, ...})"""
+        return await self._save(self.TABLE_MERCHANTS,
+                                record["merchantId"], record)
+
+    async def get_merchant(self,
+                           merchant_id: int) -> dict | None:
+        return await self._get(self.TABLE_MERCHANTS,
+                               merchant_id)
+
+    async def update_merchant(self, merchant_id: int,
+                              fields: dict) -> dict:
+        record = await self.get_merchant(merchant_id)
+        if record is None:
+            raise KeyError(merchant_id)
+        record.update(fields)
+        return await self._save(self.TABLE_MERCHANTS,
+                                merchant_id, record)
+
+    async def list_merchants(self, member_id: int = None,
+                             grade: str = None,
+                             status: str = None,
+                             limit: int = 200) -> list[dict]:
+        """商家档案查询(最新优先)"""
+        result = []
+        for r in await self._list(self.TABLE_MERCHANTS,
+                                  limit=5000):
+            if member_id is not None \
+                    and r.get("memberId") != member_id:
+                continue
+            if grade and r.get("grade") != grade:
+                continue
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(
+            result,
+            key=lambda x: -int(x.get("merchantId") or 0)
+        )[:limit]
+
+    async def find_merchant_by_member(
+            self, member_id: int) -> dict | None:
+        """按会员查档案(幂等锚——一人一档)"""
+        for r in await self._list(self.TABLE_MERCHANTS,
+                                  limit=5000):
+            if r.get("memberId") == member_id:
+                return r
+        return None

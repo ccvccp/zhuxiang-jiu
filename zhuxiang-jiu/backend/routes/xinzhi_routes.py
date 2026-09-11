@@ -1,6 +1,6 @@
-"""68号 P0-P3·信值·臻选路由(雷达+货架+定价导购+互助生态)
+"""68号 P0-P4·信值·臻选路由(雷达+货架+定价导购+互助+商家)
 
-端点(15):
+端点(20):
     GET  /api/xinzhi/radar               五维雷达(最新快照/即时计算)
     GET  /api/xinzhi/radar/history        90 日历史曲线
     POST /api/xinzhi/products/score       商品三维评分批次(P1)
@@ -15,7 +15,12 @@
     POST /api/xinzhi/groupbuy             发布邻里求购(P3)
     GET  /api/xinzhi/groupbuy             求购大厅(LBS 紧急→距离→新单)
     POST /api/xinzhi/groupbuy/{id}/respond 求购响应(仅计数脱敏)
+    POST /api/xinzhi/groupbuy/{id}/close   求购关闭(发起人+碳折算)
     GET  /api/xinzhi/carbon/{member_id}    邻里购物碳档案(只读)
+    POST /api/xinzhi/merchant/apply       商家 4+2 认证(P4)
+    POST /api/xinzhi/merchant/simulate    预演沙盘(启航报告)
+    GET  /api/xinzhi/merchant/{id}/level  评级查询(分数+归因+历史)
+    POST /api/xinzhi/merchant/{id}/regrade 评级重算(降级走 46号)
 
 鉴权: X-Member-Id(会员本人域; P0 与 /api/member/profile
 同口径)
@@ -79,6 +84,12 @@ def _neighbor_service():
     return XinzhiNeighborService()
 
 
+def _merchant_service():
+    from services.xinzhi_merchant_service import (
+        XinzhiMerchantService)
+    return XinzhiMerchantService()
+
+
 class ScoreRequest(PydBaseModel):
     productIds: list = Field(None,
                              description="指定商品(空=全量)")
@@ -107,6 +118,34 @@ class GroupbuyRequest(PydBaseModel):
     longitude: float = Field(0.0, description="经度")
     latitude: float = Field(0.0, description="纬度")
     address: str = Field("", description="位置描述")
+
+
+class MerchantApplyRequest(PydBaseModel):
+    shopName: str = Field(..., description="店铺名称")
+    checks: dict = Field(...,
+                         description="四必查 {entity,"
+                         "fulfillment,service,backend}")
+    bonuses: dict = Field(None,
+                          description="两加分 {eco_"
+                          "contribution,external_"
+                          "endorsement}")
+    allianceMerchantId: int = Field(None,
+                                    description="37号同盟商"
+                                    "ID(履约数据关联)")
+
+
+class MerchantSimulateRequest(PydBaseModel):
+    merchantId: int = Field(None,
+                            description="已认证商家(空=纯申报)")
+    dailyOrders: int = Field(50, description="日均单量")
+    fulfillmentRate: float = Field(0.95,
+                                  description="申报履约率")
+    complaintRate: float = Field(0.03,
+                                description="申报客诉率")
+    onTimeRate: float = Field(0.92,
+                              description="申报时效达标率")
+    certScore: float = Field(None,
+                             description="纯申报模式认证分")
 
 
 @router.get("/api/xinzhi/radar",
@@ -375,6 +414,78 @@ async def xinzhi_carbon_profile(member_id: int):
         return {"success": True, "data":
                 await _neighbor_service().carbon_profile(
                     member_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/merchant/apply",
+             tags=["信值臻选购物平台"])
+async def xinzhi_merchant_apply(
+        req: MerchantApplyRequest,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """商家 4+2 认证(四必查缺一拒; 生态贡献/外部背书
+    加分; 确定性评估+留痕)"""
+    mid = _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _merchant_service(
+                ).apply_certification(
+                    mid, req.shopName, req.checks,
+                    bonuses=req.bonuses,
+                    alliance_merchant_id=(
+                        req.allianceMerchantId))}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/merchant/simulate",
+             tags=["信值臻选购物平台"])
+async def xinzhi_merchant_simulate(req: MerchantSimulateRequest):
+    """预演沙盘(申报配置→模拟1000单→信值轨迹→
+    《启航报告》TOP3风险+成长路线图; 确定性推演)"""
+    try:
+        return {"success": True, "data":
+                await _merchant_service(
+                ).simulate_voyage(
+                    merchant_id=req.merchantId,
+                    daily_orders=req.dailyOrders,
+                    fulfillment_rate=req.fulfillmentRate,
+                    complaint_rate=req.complaintRate,
+                    on_time_rate=req.onTimeRate,
+                    cert_score=req.certScore)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/xinzhi/merchant/{merchant_id}/level",
+            tags=["信值臻选购物平台"])
+async def xinzhi_merchant_level(merchant_id: int):
+    """商家评级查询(S-A-B-C-D; 分数+归因+
+    升降级历史; 降级须 46号裁决公示)"""
+    try:
+        return {"success": True, "data":
+                await _merchant_service().level_view(
+                    merchant_id)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/merchant/{merchant_id}/regrade",
+             tags=["信值臻选购物平台"])
+async def xinzhi_merchant_regrade(
+        merchant_id: int,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """评级重算(37号履约只读聚合; 升级自动生效留痕,
+    降级仅生成 46号建议书——处罚永不自动)"""
+    mid = _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _merchant_service().regrade(
+                    merchant_id, operator=f"m{mid}")}
     except Exception as e:
         _handle(e)
 
