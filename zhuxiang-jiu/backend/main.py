@@ -105,6 +105,7 @@ from routes import (
     register_ai_learning_routes,
     # AI智能推广模块(36号·热点雷达+GLM-5.3 Agent内容工厂)
     register_promo_routes,
+    register_zy_routes,
     # AI智能网站同盟模块(37号·酒水不分家商户同盟平台)
     register_alliance_routes,
     # AI智能产品管理模块(38号·权限审核×上下架×图片设计更换)
@@ -262,6 +263,8 @@ register_ai_scoring_auth_routes(app)
 register_ai_learning_routes(app)
 # AI智能推广模块(36号)
 register_promo_routes(app)
+# 智启元·AI智能财务大模型(财务管理模块升级更名)
+register_zy_routes(app)
 # AI智能网站同盟模块(37号)
 register_alliance_routes(app)
 # AI智能产品管理模块(38号)

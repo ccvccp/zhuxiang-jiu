@@ -75,6 +75,8 @@ from routes.knowledge_routes import register_knowledge_routes
 from routes.hub_routes import register_hub_routes
 # AI智能推广模块(36号·热点雷达+GLM-5.3 Agent内容工厂)
 from routes.promo_routes import register_promo_routes
+# 智启元·AI智能财务大模型(财务管理模块升级更名)
+from routes.zy_routes import register_zy_routes
 # AI智能网站同盟模块(37号·酒水不分家商户同盟平台)
 from routes.alliance_routes import register_alliance_routes
 # AI智能产品管理模块(38号·权限审核×上下架×图片设计更换)

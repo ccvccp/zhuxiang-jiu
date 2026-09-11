@@ -43,6 +43,7 @@
     "test:xinzhi": "node test/test-xinzhi.js",
     "test:entry": "node test/test-entry.js",
     "test:promo": "node test/test-promo.js",
+    "test:zy": "node test/test-zy.js",
     "package:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-zxjiu.ps1",
     "verify:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deploy-local.ps1"
   },

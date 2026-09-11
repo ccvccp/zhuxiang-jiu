@@ -1,0 +1,876 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 88rpx);
+}
+
+// ============================================
+// 页签栏
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-sm;
+  border-bottom: 1rpx solid $color-border;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-md 0;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  position: relative;
+}
+
+.tabActive {
+  color: $color-primary;
+  font-weight: $font-weight-bold;
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    width: 40rpx;
+    height: 4rpx;
+    border-radius: $radius-round;
+    background: $color-primary;
+  }
+}
+
+.section {
+  padding: $spacing-md $spacing-lg $spacing-xl;
+}
+
+.cardTitle {
+  margin: $spacing-lg 0 $spacing-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.empty {
+  padding: $spacing-lg;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+}
+
+// ============================================
+// 总览 · Hero 卡
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, #1d3b2f, #355c44);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  box-shadow: $shadow-card-hover;
+}
+
+.heroTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroSub {
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.65);
+}
+
+.heroStats {
+  display: flex;
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.15);
+}
+
+.heroStat {
+  flex: 1;
+  text-align: center;
+}
+
+.heroNum {
+  font-size: 40rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroLbl {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.65);
+}
+
+.heroNote {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.5);
+}
+
+// 异常卡
+.alertCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+  border-left: 6rpx solid $color-warning;
+}
+
+.alertHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.alertTag {
+  padding: 4rpx 16rpx;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.sevHigh { background: $color-error; }
+.sevMid { background: $color-warning; }
+.sevLow { background: $color-success; }
+
+.alertMonth {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.alertDetail {
+  margin-top: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.alertDisp {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 反馈流
+.fbItem {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.fbRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fbTarget {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.fbAdopted { color: $color-success; font-size: $font-size-sm; font-weight: $font-weight-bold; }
+.fbRejected { color: $color-error; font-size: $font-size-sm; font-weight: $font-weight-bold; }
+.fbCorrected { color: $color-warning; font-size: $font-size-sm; font-weight: $font-weight-bold; }
+
+.fbWeight {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 问答
+// ============================================
+.qaSub {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-bottom: $spacing-sm;
+}
+
+.qaInputRow {
+  display: flex;
+  gap: $spacing-sm;
+  align-items: center;
+}
+
+.qaInput {
+  flex: 1;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-sm;
+}
+
+.qaBtn {
+  padding: $spacing-sm $spacing-lg;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.qaAnswerCard {
+  margin-top: $spacing-md;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  border-left: 6rpx solid $color-primary;
+}
+
+.qaIntent {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.qaAnswer {
+  margin-top: $spacing-sm;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  line-height: 1.6;
+}
+
+.qaReason {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-sm;
+  border-top: 1rpx dashed $color-divider;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.qaFooter {
+  margin-top: $spacing-md;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 分析
+// ============================================
+.healthCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.healthHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-md;
+}
+
+.healthGrade {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.healthScore {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.dimRow {
+  margin-bottom: $spacing-sm;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-wrap: wrap;
+}
+
+.dimName {
+  width: 120rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.dimBar {
+  flex: 1;
+  min-width: 200rpx;
+  height: 12rpx;
+  background: $color-bg-page;
+  border-radius: $radius-round;
+  overflow: hidden;
+}
+
+.dimBarFill {
+  height: 100%;
+  background: linear-gradient(90deg, #355c44, #6b9c7f);
+  border-radius: $radius-round;
+}
+
+.dimScoreVal {
+  width: 70rpx;
+  text-align: right;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.dimExplain {
+  width: 100%;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 杜邦
+.dupontCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.roeRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.roeLabel {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.roeVal {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.roeFormula {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.roeInterp {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-sm;
+  border-top: 1rpx dashed $color-divider;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+}
+
+// 归因
+.attribCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.attribDelta {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.attribRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-xs 0;
+  border-bottom: 1rpx solid $color-border;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.attribFactor {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.attribEffect {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+}
+
+.effPos { color: $color-success; }
+.effNeg { color: $color-error; }
+
+// ============================================
+// 预测
+// ============================================
+.fcCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.fcRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-xs 0;
+  border-bottom: 1rpx solid $color-border;
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+}
+
+.fcStep {
+  width: 110rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.fcNet {
+  flex: 1;
+  text-align: right;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.fcProfit {
+  width: 300rpx;
+  text-align: right;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.fcBasis {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-sm;
+  border-top: 1rpx dashed $color-divider;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 沙盘
+.scenGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.scenBtn {
+  padding: $spacing-xs $spacing-lg;
+  background: $color-bg-card;
+  border: 1rpx solid $color-primary;
+  color: $color-primary;
+  border-radius: $radius-round;
+  font-size: $font-size-sm;
+}
+
+.sbCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.sbBase {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  padding-bottom: $spacing-sm;
+  border-bottom: 1rpx dashed $color-divider;
+}
+
+.sbImpactRow {
+  display: flex;
+  margin-top: $spacing-sm;
+}
+
+.sbImpact {
+  flex: 1;
+  text-align: center;
+}
+
+.sbNum {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.sbLbl {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.sbMitigation {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-sm;
+  border-top: 1rpx dashed $color-divider;
+}
+
+.sbMitItem {
+  font-size: $font-size-xs;
+  color: $color-warning;
+  line-height: 1.8;
+}
+
+// 驱动因素
+.drvCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.drvRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.drvName {
+  width: 150rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.drvBar {
+  flex: 1;
+  height: 10rpx;
+  background: $color-bg-page;
+  border-radius: $radius-round;
+  overflow: hidden;
+}
+
+.drvBarFill {
+  height: 100%;
+  background: $color-primary;
+  border-radius: $radius-round;
+}
+
+.drvCorr {
+  width: 160rpx;
+  text-align: right;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 税务
+// ============================================
+.taxCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.taxRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-sm 0;
+  border-bottom: 1rpx solid $color-border;
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+}
+
+.taxBest {
+  background: rgba(53, 92, 68, 0.08);
+  border-radius: $radius-sm;
+  padding-left: $spacing-xs;
+}
+
+.taxName {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.taxTotal {
+  width: 220rpx;
+  text-align: right;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.taxRate {
+  width: 140rpx;
+  text-align: right;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.taxRec {
+  margin-top: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-primary;
+  font-weight: $font-weight-bold;
+}
+
+.taxNote {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 热力图
+.hmCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.hmRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+  align-items: flex-start;
+}
+
+.hmTag {
+  flex-shrink: 0;
+  padding: 4rpx 14rpx;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: $color-text-white;
+  font-weight: $font-weight-bold;
+}
+
+.hmBody {
+  flex: 1;
+}
+
+.hmRisk {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.hmDetail {
+  margin-top: 2rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.hmOverall {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-sm;
+  border-top: 1rpx dashed $color-divider;
+  font-size: $font-size-sm;
+  color: $color-warning;
+  font-weight: $font-weight-bold;
+}
+
+// 政策
+.polCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.polItem {
+  padding: $spacing-sm 0;
+  border-bottom: 1rpx solid $color-border;
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+}
+
+.polHit {
+  border-left: 4rpx solid $color-success;
+  padding-left: $spacing-sm;
+}
+
+.polTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.polContent {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.6;
+}
+
+.polCond {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.polSugg {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-success;
+}
+
+.polNote {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 进化
+// ============================================
+.evoPanel {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.evoRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-sm 0;
+}
+
+.evoLbl {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.evoBtns {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.evoBtn {
+  padding: $spacing-xs $spacing-lg;
+  border: 1rpx solid $color-primary;
+  color: $color-primary;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+}
+
+.evoHint {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-sm;
+  border-top: 1rpx dashed $color-divider;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 资金调度
+.cashCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.cashStats {
+  display: flex;
+}
+
+.cashStat {
+  flex: 1;
+  text-align: center;
+}
+
+.cashNum {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.cashLbl {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.cashSugg {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-warning;
+  line-height: 1.7;
+}
+
+.cashNote {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 备忘录
+.memoBtn {
+  margin-bottom: $spacing-md;
+  padding: $spacing-sm 0;
+  text-align: center;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.memoCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  border-left: 6rpx solid $color-primary;
+}
+
+.memoNpv {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.npvPos { color: $color-success; font-weight: $font-weight-bold; }
+.npvNeg { color: $color-error; font-weight: $font-weight-bold; }
+
+.memoPayback {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.memoConclusion {
+  margin-top: $spacing-sm;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-bold;
+}
+
+.memoSens {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.memoAssume {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-sm;
+  border-top: 1rpx dashed $color-divider;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+}
+
+.evoFooter {
+  margin-top: $spacing-lg;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.bottomSpace {
+  height: 40rpx;
+}
+
