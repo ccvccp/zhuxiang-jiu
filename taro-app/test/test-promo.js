@@ -134,6 +134,42 @@ const mockRequest = async (opts) => {
         format: '15-45s 短视频脚本', scenes: ['剧情'],
         productTones: ['口粮酒'] }] };
   }
+  // ---- P3 进化引擎层 ----
+  if (url.includes('/api/promo/evolution/status')) {
+    return { success: true, data: {
+      engines: {
+        hotspotWeights: { name: '热点价值评估进化', evolved: true,
+          categories: [
+            { category: 'scene', categoryName: '场景类', weight: 0.48,
+              base: 0.4, samples: 5, clicks: 2500, ordered: 50, gmv: 25000 },
+            { category: 'culture', categoryName: '文化类', weight: 0.24,
+              base: 0.3, samples: 3, clicks: 0, ordered: 0, gmv: 0 }] },
+        styleChampion: { name: '内容风格自适应进化', champion: '场景故事型',
+          styles: [
+            { styleKey: 'scene', name: '场景故事型', toneHint: '故事化',
+              variants: 4, clicks: 800, orders: 40, ctr: 0.2,
+              orderRate: 0.05, champion: true },
+            { styleKey: 'culture', name: '文化科普型', toneHint: '科普',
+              variants: 4, clicks: 20, orders: 0, ctr: 0.005,
+              orderRate: 0, champion: false }] },
+        landingBandit: { name: '承接页智能路由进化', arms: [
+          { arm: 'product_page', name: '商品详情页', intent: '转化导向',
+            path: '/pages/product-detail/index', pulls: 3,
+            meanReward: 0.3, ucb: 0.9 },
+          { arm: 'culture_topic', name: '文化专题页', intent: '种草导向',
+            path: '/pages/promotion/index', pulls: 3,
+            meanReward: 0.001, ucb: 0.6 }] },
+        compliance: { name: '合规与平台适配进化',
+          pendingCandidates: 2, activeExtraWords: 1 },
+      },
+      productExpansion: { name: '全站商品拓展',
+        library: '02号商品库(实时匹配, 热销兜底)' } } };
+  }
+  if (url.includes('/api/promo/evolution/risk-candidates')) {
+    return { success: true, data: [
+      { word: '沉浸开竹', rejectDocs: 2, rejectRate: 1.0,
+        approveRate: 0.33, status: 'pending' }] };
+  }
   return { success: true, data: {} };
 };
 
@@ -231,6 +267,34 @@ const mockPromoApi = {
     seoPushes: async () => [{ status: 'ok', urls: ['/sitemap.xml'], pushedAt: '09-11' }],
     audienceProfiles: async () => [
       { platform: 'douyin', audience: '18-35', tone: '快节奏', format: '短视频' }],
+    evolutionStatus: async () => ({
+      engines: {
+        hotspotWeights: { name: '热点价值评估进化', evolved: true,
+          categories: [
+            { category: 'scene', categoryName: '场景类', weight: 0.48,
+              base: 0.4, samples: 5, clicks: 2500, ordered: 50, gmv: 25000 }] },
+        styleChampion: { name: '内容风格自适应进化', champion: '场景故事型',
+          styles: [
+            { styleKey: 'scene', name: '场景故事型', toneHint: '故事化',
+              variants: 4, clicks: 800, orders: 40, ctr: 0.2,
+              orderRate: 0.05, champion: true }] },
+        landingBandit: { name: '承接页智能路由进化', arms: [
+          { arm: 'product_page', name: '商品详情页', intent: '转化导向',
+            path: '/p', pulls: 3, meanReward: 0.3, ucb: 0.9 }] },
+        compliance: { name: '合规与平台适配进化',
+          pendingCandidates: 2, activeExtraWords: 1 },
+      },
+      productExpansion: { name: '全站商品拓展',
+        library: '02号商品库(实时匹配, 热销兜底)' } }),
+    evolutionRiskCandidates: async () => [
+      { word: '沉浸开竹', rejectDocs: 2, rejectRate: 1.0,
+        approveRate: 0.33, status: 'pending' }],
+    evolutionWeightsRun: async () => ({
+      avgRoi: 1.25, adjustments: [{ category: 'scene',
+        categoryName: '场景类', oldWeight: 0.4, newWeight: 0.48,
+        roi: 2.0 }] }),
+    evolutionApproveWord: async () => {},
+    evolutionRejectWord: async () => {},
   },
   hotspotStatusName: (s) => s,
   publishPlatformName: (p) => p,
@@ -492,6 +556,30 @@ const textOf = (node) => {
   record('页面-通道三色徽章', flatCh.includes('modeMock')
     && flatCh.includes('modeReal') && flatCh.includes('modeFallback')
     && flatCh.includes('百度 SEO 推送') && flatCh.includes('平台受众画像'));
+
+  // ---------- [21b] 进化中枢页签(交互切换) ----------
+  const evoTab = tabs.find(t => textOf(t).includes('进化中枢'));
+  await evoTab.props.onClick();
+  await new Promise(r => setTimeout(r, 20));
+  const elEvo = reactForPage.__test.rerender();
+  const flatEvo = JSON.stringify(elEvo);
+  record('页面-进化中枢四引擎', flatEvo.includes('引擎1 · 热点价值评估进化')
+    && flatEvo.includes('引擎2 · 内容风格自适应进化')
+    && flatEvo.includes('引擎3 · 承接页智能路由(UCB1)')
+    && flatEvo.includes('引擎4 · 合规进化'));
+  const championTags = findAll(elEvo, n => String(n.props.className || '')
+    .includes('championTag'));
+  record('页面-风格冠军徽章', championTags.length === 1
+    && textOf(championTags[0]) === '冠军');
+  const evoRows = findAll(elEvo, n => String(n.props.className || '')
+    .includes('evoRow'));
+  record('页面-品类权重老虎机行', evoRows.length >= 3
+    && flatEvo.includes('0.48') && flatEvo.includes('商品详情页'));
+  const riskRow = findAll(elEvo, n => String(n.props.className || '')
+    .includes('decideRow'));
+  record('页面-风险词裁决行', riskRow.length === 1
+    && textOf(riskRow[0]).includes('沉浸开竹')
+    && flatEvo.includes('永不自动阻断'));
 
   // ---------- [22] 渲染确定性 ----------
   reactForPage.__test.states.length = 0;

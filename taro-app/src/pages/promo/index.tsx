@@ -18,12 +18,13 @@ import NavBar from '@/components/NavBar';
 import {
   PromoAPI, HotspotVO, DecisionVO, PromoContentVO,
   PublishQueueVO, PromoOverviewVO, ChannelVO, SeoPushVO,
-  AudienceProfileVO,
+  AudienceProfileVO, EvolutionStatusVO, RiskCandidateVO,
   hotspotStatusName, publishPlatformName, contentStatusName,
   channelModeName,
 } from '@/api/promo';
 
-type Tab = 'overview' | 'radar' | 'studio' | 'publish' | 'channels';
+type Tab = 'overview' | 'radar' | 'studio' | 'publish' | 'channels'
+  | 'evolution';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: '总览' },
@@ -31,6 +32,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'studio', label: '内容工厂' },
   { key: 'publish', label: '发布中心' },
   { key: 'channels', label: '通道画像' },
+  { key: 'evolution', label: '进化中枢' },
 ];
 
 /** 发布平台多选项 */
@@ -65,11 +67,15 @@ const PromoPage: React.FC = () => {
   const [channels, setChannels] = useState<ChannelVO[]>([]);
   const [seoPushes, setSeoPushes] = useState<SeoPushVO[]>([]);
   const [profiles, setProfiles] = useState<AudienceProfileVO[]>([]);
+  // 进化中枢(P3)
+  const [evoStatus, setEvoStatus] = useState<EvolutionStatusVO | null>(null);
+  const [riskCandidates, setRiskCandidates] = useState<RiskCandidateVO[]>([]);
+  const [runningRegress, setRunningRegress] = useState(false);
 
   // ---------- 数据加载 ----------
   const loadAll = useCallback(async () => {
     try {
-      const [ov, hs, pd, cs, q, ch, sp, ap] = await Promise.all([
+      const [ov, hs, pd, cs, q, ch, sp, ap, evo, rc] = await Promise.all([
         PromoAPI.reportOverview().catch(() => null),
         PromoAPI.hotspots().catch(() => [] as HotspotVO[]),
         PromoAPI.decisions({ pendingOnly: true }).catch(() => [] as DecisionVO[]),
@@ -78,6 +84,8 @@ const PromoPage: React.FC = () => {
         PromoAPI.channelsStatus().catch(() => [] as ChannelVO[]),
         PromoAPI.seoPushes().catch(() => [] as SeoPushVO[]),
         PromoAPI.audienceProfiles().catch(() => [] as AudienceProfileVO[]),
+        PromoAPI.evolutionStatus().catch(() => null),
+        PromoAPI.evolutionRiskCandidates('pending').catch(() => [] as RiskCandidateVO[]),
       ]);
       setOverview(ov);
       setHotspots(hs);
@@ -87,6 +95,8 @@ const PromoPage: React.FC = () => {
       setChannels(ch);
       setSeoPushes(sp);
       setProfiles(ap);
+      setEvoStatus(evo);
+      setRiskCandidates(rc);
       // 默认生成热点: 第一个已跟进
       if (!genHotspotId) {
         const engaged = hs.find((h) => h.status === 'engaged');
@@ -542,7 +552,142 @@ const PromoPage: React.FC = () => {
           </View>
         )}
 
-        <View className={styles.footer}>36号·AI智能推广 · 热点雷达×Agent工厂×三审合规×归因回流</View>
+        {/* ============ 进化中枢(P3) ============ */}
+        {tab === 'evolution' && !loading && evoStatus && (
+          <View className={styles.section}>
+            <View className={styles.hint}>
+              反馈驱动进化: 数据回流 → 策略参数自调 → 全量留痕可审计
+            </View>
+
+            {/* 引擎1 品类权重 */}
+            <View className={styles.subCard}>
+              <View className={styles.subTitle}>引擎1 · 热点价值评估进化</View>
+              {evoStatus.engines.hotspotWeights.categories.map((c) => (
+                <View key={c.category} className={styles.evoRow}>
+                  <View className={styles.cardLabel}>{c.categoryName}</View>
+                  <View className={styles.evoValueWrap}>
+                    <Text className={styles.evoWeight}>{c.weight.toFixed(2)}</Text>
+                    <Text className={styles.evoBase}>(基线{c.base})</Text>
+                    <Text className={styles.evoSamples}>{c.samples}样本</Text>
+                  </View>
+                </View>
+              ))}
+              <View
+                className={`${styles.actionBtn} ${runningRegress ? styles.actionBtnDisabled : ''}`}
+                onClick={async () => {
+                  if (runningRegress) return;
+                  setRunningRegress(true);
+                  try {
+                    const r = await PromoAPI.evolutionWeightsRun();
+                    Taro.showToast({
+                      title: r.adjustments.length
+                        ? `回归完成: ${r.adjustments.length} 品类调整`
+                        : '回归完成(样本不足品类跳过)',
+                      icon: 'none', duration: 1800,
+                    });
+                    await loadAll();
+                  } catch (e) {
+                    console.warn('[evo] 回归失败:', e);
+                  } finally {
+                    setRunningRegress(false);
+                  }
+                }}
+              >
+                {runningRegress ? '回归中...' : '运行品类 ROI 回归'}
+              </View>
+            </View>
+
+            {/* 引擎2 风格 A/B */}
+            <View className={styles.subCard}>
+              <View className={styles.subTitle}>引擎2 · 内容风格自适应进化</View>
+              {evoStatus.engines.styleChampion.styles.map((s) => (
+                <View key={s.styleKey} className={styles.evoRow}>
+                  <View className={styles.cardLabel}>
+                    {s.name}
+                    {s.champion && <Text className={styles.championTag}>冠军</Text>}
+                  </View>
+                  <View className={styles.evoValueWrap}>
+                    <Text>{s.variants}变体</Text>
+                    <Text>CTR {s.ctr.toFixed(3)}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {/* 引擎3 老虎机 */}
+            <View className={styles.subCard}>
+              <View className={styles.subTitle}>引擎3 · 承接页智能路由(UCB1)</View>
+              {evoStatus.engines.landingBandit.arms.map((a) => (
+                <View key={a.arm} className={styles.evoRow}>
+                  <View className={styles.cardLabel}>
+                    {a.name}
+                    <Text className={styles.evoIntent}>{a.intent}</Text>
+                  </View>
+                  <View className={styles.evoValueWrap}>
+                    <Text>{a.pulls}次</Text>
+                    <Text>均值 {a.meanReward.toFixed(3)}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {/* 引擎4 风险词候选 */}
+            <View className={styles.subCard}>
+              <View className={styles.subTitle}>
+                引擎4 · 合规进化(候选 {riskCandidates.length})
+              </View>
+              {riskCandidates.length === 0 ? (
+                <View className={styles.empty}>暂无候选(审核反馈录入后提取)</View>
+              ) : riskCandidates.map((c) => (
+                <View key={c.word} className={styles.decideRow}>
+                  <View className={styles.decideInfo}>
+                    <View className={styles.decideTitle}>{c.word}</View>
+                    <View className={styles.decideReason}>
+                      拒绝文档 {c.rejectDocs} 条 · 拒绝率 {c.rejectRate}
+                    </View>
+                  </View>
+                  <View className={styles.decideBtns}>
+                    <View
+                      className={styles.btnEngage}
+                      onClick={async () => {
+                        try {
+                          await PromoAPI.evolutionApproveWord(c.word);
+                          Taro.showToast({ title: '已批准生效', icon: 'none' });
+                          await loadAll();
+                        } catch (e) { console.warn('[evo] 批准失败:', e); }
+                      }}
+                    >批准</View>
+                    <View
+                      className={styles.btnPass}
+                      onClick={async () => {
+                        try {
+                          await PromoAPI.evolutionRejectWord(c.word);
+                          Taro.showToast({ title: '已拒绝(误报)', icon: 'none' });
+                          await loadAll();
+                        } catch (e) { console.warn('[evo] 拒绝失败:', e); }
+                      }}
+                    >拒绝</View>
+                  </View>
+                </View>
+              ))}
+              <View className={styles.hint}>
+                候选词仅观察永不自动阻断; 人工批准后注入雷达与内容双闸门
+              </View>
+            </View>
+
+            <View className={styles.cardRow}>
+              <View className={styles.cardLabel}>商品拓展</View>
+              <View className={styles.cardValue}>
+                {evoStatus.productExpansion.library}
+              </View>
+            </View>
+          </View>
+        )}
+        {tab === 'evolution' && !loading && !evoStatus && (
+          <View className={styles.empty}>进化引擎数据加载失败, 请重试</View>
+        )}
+
+        <View className={styles.footer}>36号·AI智能推广 · 热点雷达×Agent工厂×三审合规×归因回流×进化引擎</View>
       </ScrollView>
 
       {/* 内容详情弹层 */}

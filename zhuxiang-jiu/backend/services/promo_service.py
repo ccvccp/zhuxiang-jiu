@@ -176,13 +176,15 @@ class PromoService:
     # ============================================================
 
     @staticmethod
-    def compliance_gate(body: str) -> dict:
+    def compliance_gate(body: str, extra_risk_words: tuple = ()) -> dict:
         """三审闸门(生成即预审, 结果决定内容初始状态)
 
         一审(规则审, 硬): 饮酒动作/权威背书/功效暗示/极限词 → 直接拒绝
         二审(AI 审): 100 - 极限词×30 - 缺警示×35 - 缺年龄×35
             ≥80 通过(待人工) / 60-79 强制人工 / <60 拒绝
         三审(人工审): review 端点 approve/reject
+        P3 进化层: extra_risk_words 为引擎4 人工批准的附加风险词
+        (默认空 = 纯静态词库, 进化层故障零影响)
 
         Returns:
             {"hardFail": [...], "score": int, "violations": [...],
@@ -194,7 +196,8 @@ class PromoService:
                      + [w for w in EFFICACY_CLAIM_WORDS if w in text])
         violations = list(hard_fail)
         score = 100
-        banned_hits = [w for w in BANNED_WORDS if w in text]
+        banned_hits = ([w for w in BANNED_WORDS if w in text]
+                       + [w for w in extra_risk_words if w in text])
         if banned_hits:
             score -= len(banned_hits) * 30
             violations.extend(banned_hits)
@@ -254,13 +257,41 @@ class PromoService:
             citations = await self.authority.retrieve(
                 f"{hotspot.get('title', '')} "
                 f"{''.join(hotspot.get('brandHits') or [])}")
+            # P3 进化层: 风格 A/B 分配(确定性轮转) + tone 反哺
+            # (冠军风格优先占首变体, 其余保持探索分配) + 商品匹配 + 落地臂
+            from services.promo_evolution_service import (
+                PromoEvolutionService, assign_style, STYLE_LIBRARY,
+            )
+            evolution = PromoEvolutionService()
+            champion = await evolution.champion_style()
+            landing = await evolution.route_landing()
+            products = await evolution.match_products(hotspot)
+            focus_products = "、".join(p["name"] for p in products[:3])
+            for idx, platform in enumerate(platforms):
+                style_key = (champion["styleKey"] if (champion and idx == 0)
+                             else assign_style(idx))
+                tone_hint = STYLE_LIBRARY.get(style_key, {}).get(
+                    "toneHint", "")
+                base_tone = str(profiles[platform].get("tone", ""))
+                profiles[platform] = {
+                    **profiles[platform],
+                    "tone": f"{base_tone}; {tone_hint}".strip("; "),
+                    "styleKey": style_key,
+                }
             drafts = await self.agent.generate_platform_contents(
-                hotspot, platforms=tuple(platforms),
+                {**hotspot, **({"summary": f"{hotspot.get('summary', '')}"
+                                f"(建议关联商品: {focus_products})"}
+                               if focus_products else {})},
+                platforms=tuple(platforms),
                 profiles=profiles, citations=citations)
             contents = []
+            # 引擎4 附加风险词(人工批准生效; 每轮生成加载一次)
+            extra_words = tuple(
+                await PromoEvolutionService().extra_risk_words())
             for draft in drafts:
                 content_id = await self.repo.next_id("content")
-                gate = self.compliance_gate(draft["body"])
+                gate = self.compliance_gate(draft["body"],
+                                            extra_risk_words=extra_words)
                 # P1: 数字溯源校验(引用池为 draft 携带快照)
                 pool = draft.get("citations") or citations or []
                 provenance = self.authority.provenance_check(
@@ -279,6 +310,12 @@ class PromoService:
                     "hashtags": draft.get("hashtags", ""),
                     "cta": draft.get("cta", ""),
                     "coverHint": draft.get("coverHint", ""),
+                    # P3 进化层: 风格/落地臂/关联商品/审核反馈
+                    "styleKey": (profiles.get(draft["platform"], {})
+                                 .get("styleKey", "")),
+                    "landingArm": landing.get("arm", ""),
+                    "productIds": [p["productId"] for p in products[:3]],
+                    "auditOutcome": "",
                     "complianceScore": gate["score"],
                     "complianceViolations": gate["violations"],
                     "hardFail": gate["hardFail"],
@@ -546,7 +583,7 @@ class PromoService:
                 f"仅已发布内容可回流效果(当前{content.get('status')})")
         if content.get("learningFed"):
             raise ValueError(
-                f"内容已回流过效果(learningFed), 幂等不重复提交")
+                "内容已回流过效果(learningFed), 幂等不重复提交")
         # clicks 未指定 → 自动归因聚合
         if clicks is None:
             metrics = await self._link_metrics(
@@ -592,6 +629,16 @@ class PromoService:
             "learningFedAt": _now_iso(),
         })
         await self.repo.save_content(content)
+        # P3 进化层: 同步喂品类/风格/老虎机三路统计(best-effort)
+        try:
+            from services.promo_evolution_service import (
+                PromoEvolutionService,
+            )
+            await PromoEvolutionService().feed_metrics(
+                content, hotspot, content["learningMetrics"])
+        except Exception as exc:
+            logger.warning("promo_evo_feed_failed content=%s: %s",
+                           content_id, exc)
         logger.info("promo_learning_feedback content=%s clicks=%s "
                     "correct=%s", content_id, clicks, correct)
         return result

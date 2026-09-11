@@ -292,10 +292,15 @@ class PromoRadarService:
         }
 
     @staticmethod
-    def check_risk(item: dict) -> list[str]:
-        """风险一票否决检查: 返回命中的风险词(空列表=通过)"""
+    def check_risk(item: dict, extra_words: tuple = ()) -> list[str]:
+        """风险一票否决检查: 返回命中的风险词(空列表=通过)
+
+        P3 进化层: extra_words 为引擎4 人工批准的附加风险词
+        (默认空 = 纯静态词库, 进化层故障零影响)
+        """
         text = f"{item.get('title', '')} {item.get('summary', '')}"
-        return [w for w in RISK_BLOCK_WORDS if w in text]
+        return ([w for w in RISK_BLOCK_WORDS if w in text]
+                + [w for w in extra_words if w in text])
 
     # ============================================================
     # 扫描
@@ -313,6 +318,17 @@ class PromoRadarService:
         new_hotspots = []
         # P2: 生效权重一次加载(整轮共享; champion 学习结果即时体现)
         weights = await self.get_effective_weights()
+        # P3 进化层: 附加风险词一次加载(引擎4 人工批准生效)
+        extra_words: tuple = ()
+        try:
+            from services.promo_evolution_service import (
+                PromoEvolutionService,
+            )
+            extra_words = tuple(await PromoEvolutionService(
+            ).extra_risk_words())
+        except Exception as exc:
+            logger.warning("radar_extra_risk_words_failed(回退静态): %s",
+                           exc)
         for platform in targets:
             items = _fetch_real(platform)
             if items is None:
@@ -324,7 +340,7 @@ class PromoRadarService:
                 if not await self.repo.check_and_mark_fingerprint(fingerprint):
                     skipped += 1
                     continue
-                risk_flags = self.check_risk(item)
+                risk_flags = self.check_risk(item, extra_words)
                 scoring = self.score_hotspot(item, weights=weights)
                 hotspot_id = await self.repo.next_id("hotspot")
                 hotspot = {

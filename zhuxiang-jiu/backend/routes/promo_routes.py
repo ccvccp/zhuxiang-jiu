@@ -577,6 +577,217 @@ async def report_content_group(
         _handle(e)
 
 
+# ============================================================
+# P3: 进化引擎层(自适应进化, 设计文档 §升级方案——反馈驱动)
+# ============================================================
+
+class AuditFeedbackRequest(PydBaseModel):
+    contentId: int = Field(..., ge=1, description="内容ID(已发布)")
+    outcome: str = Field(..., description="平台审核结果: rejected|limited|removed")
+    note: str = Field("", max_length=200)
+
+
+@router.get("/api/promo/evolution/status", tags=["AI智能推广模块"])
+async def evolution_status(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """四引擎 + 商品拓展总览(品类权重/风格冠军/老虎机/风险词队列)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().status()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/evolution/hotspot-weights/run",
+             tags=["AI智能推广模块"])
+async def evolution_weights_run(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """引擎1: 品类 ROI 回归 → 权重安全阀内自调(全留痕)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().evolve_hotspot_weights()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/evolution/hotspot-priority",
+            tags=["AI智能推广模块"])
+async def evolution_priority(
+    x_role: str = Header(None, alias="X-Role"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """引擎1: 高价值热点优先级清单(品类权重 × 热点评分)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().hotspot_priority(limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/evolution/styles", tags=["AI智能推广模块"])
+async def evolution_styles(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """引擎2: 风格 A/B 统计 + 冠军标记 + 高转化 SOP"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        svc = PromoEvolutionService()
+        return {"success": True, "data": {
+            "styles": await svc.style_stats(),
+            "sop": await svc.sop_report(),
+        }}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/evolution/bandit", tags=["AI智能推广模块"])
+async def evolution_bandit(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """引擎3: 承接页 UCB1 老虎机三臂状态"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().bandit_stats()
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/evolution/bandit/route",
+             tags=["AI智能推广模块"])
+async def evolution_bandit_route(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """引擎3: UCB1 选臂决策(生成时自动调用; 此端点供预览/排障)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().route_landing()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/evolution/audit-feedback",
+             tags=["AI智能推广模块"])
+async def evolution_audit_feedback(
+    data: AuditFeedbackRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """引擎4: 平台审核反馈录入 → n-gram 候选风险词提取(仅观察)
+
+    同时回写内容 auditOutcome 留痕(供语料对比复用)
+    """
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        content = await _service.repo.get_content(data.contentId)
+        if content is None:
+            raise KeyError(f"内容不存在(contentId={data.contentId})")
+        result = await PromoEvolutionService().record_audit_feedback(
+            content, data.outcome, data.note)
+        content["auditOutcome"] = data.outcome
+        await _service.repo.save_content(content)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/evolution/risk-candidates",
+            tags=["AI智能推广模块"])
+async def evolution_risk_candidates(
+    x_role: str = Header(None, alias="X-Role"),
+    status: str = Query(None, description="pending|approved|rejected"),
+):
+    """引擎4: 候选风险词队列(待人工裁决)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().list_risk_candidates(
+            status=status)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/evolution/risk-words/{word}/approve",
+             tags=["AI智能推广模块"])
+async def evolution_risk_word_approve(
+    word: str,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """引擎4: 人工批准候选词 → 生效(永不自动, 全留痕)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().approve_risk_word(word)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/promo/evolution/risk-words/{word}/reject",
+             tags=["AI智能推广模块"])
+async def evolution_risk_word_reject(
+    word: str,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """引擎4: 人工拒绝候选词(误报处理, 全留痕)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().reject_risk_word(word)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/evolution/log", tags=["AI智能推广模块"])
+async def evolution_log(
+    x_role: str = Header(None, alias="X-Role"),
+    engine: str = Query(None, description="hotspot_weights|compliance"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """进化日志(全量留痕, 月度运营+法务审计用)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        result = await PromoEvolutionService().list_log(
+            engine=engine, limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/promo/evolution/products/match",
+            tags=["AI智能推广模块"])
+async def evolution_products_match(
+    x_role: str = Header(None, alias="X-Role"),
+    hotspotId: int = Query(..., ge=1),
+):
+    """商品拓展: 热点 × 全站商品库匹配(top3, 热销兜底)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_evolution_service import PromoEvolutionService
+        hotspot = await _service.repo.get_hotspot(hotspotId)
+        if hotspot is None:
+            raise KeyError(f"热点不存在(hotspotId={hotspotId})")
+        result = await PromoEvolutionService().match_products(hotspot)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
 def register_promo_routes(app):
     """注册36号·AI智能推广模块路由"""
     app.include_router(router)

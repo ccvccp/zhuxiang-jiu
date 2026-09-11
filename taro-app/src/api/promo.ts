@@ -210,6 +210,102 @@ export interface AudienceProfileVO {
 }
 
 // ============================================================
+// P3 进化引擎层 VO
+// ============================================================
+
+/** 品类权重行(引擎1) */
+export interface CategoryWeightVO {
+  category: string;
+  categoryName: string;
+  weight: number;
+  base: number;
+  samples: number;
+  clicks: number;
+  ordered: number;
+  gmv: number;
+}
+
+/** 高价值热点优先级清单行(引擎1) */
+export interface HotspotPriorityVO {
+  hotspotId: number;
+  title: string;
+  platform: string;
+  score: number;
+  category: string;
+  categoryName: string;
+  priorityScore: number;
+}
+
+/** 风格统计行(引擎2) */
+export interface StyleStatVO {
+  styleKey: string;
+  name: string;
+  toneHint: string;
+  variants: number;
+  clicks: number;
+  orders: number;
+  ctr: number;
+  orderRate: number;
+  champion: boolean;
+}
+
+/** 老虎机臂行(引擎3) */
+export interface BanditArmVO {
+  arm: string;
+  name: string;
+  intent: string;
+  path: string;
+  pulls: number;
+  meanReward: number;
+  ucb: number;
+}
+
+/** 候选风险词(引擎4) */
+export interface RiskCandidateVO {
+  word: string;
+  rejectDocs: number;
+  rejectRate: number;
+  approveRate: number;
+  status: string;
+  createdAt?: string;
+}
+
+/** 进化总览(P3) */
+export interface EvolutionStatusVO {
+  engines: {
+    hotspotWeights: {
+      name: string;
+      categories: CategoryWeightVO[];
+      evolved: boolean;
+    };
+    styleChampion: {
+      name: string;
+      champion: string;
+      styles: StyleStatVO[];
+    };
+    landingBandit: {
+      name: string;
+      arms: BanditArmVO[];
+    };
+    compliance: {
+      name: string;
+      pendingCandidates: number;
+      activeExtraWords: number;
+    };
+  };
+  productExpansion: { name: string; library: string };
+}
+
+/** 商品匹配行(商品拓展) */
+export interface ProductMatchVO {
+  productId: string | number;
+  name: string;
+  series?: string;
+  matchHits: number;
+  salesMonthly: number;
+}
+
+// ============================================================
 // 管理端请求头(X-Role: admin, 对齐 blogger.ts 范式)
 // ============================================================
 
@@ -405,6 +501,92 @@ export const PromoAPI = {
   async reportPlatform(): Promise<PlatformReportVO[]> {
     const res = await request<any>({
       url: '/api/promo/report/platform', headers: adminHeaders(),
+    });
+    return res.data || [];
+  },
+
+  // ---------- P3 进化引擎层 ----------
+
+  /** 进化总览(四引擎 + 商品拓展) */
+  async evolutionStatus(): Promise<EvolutionStatusVO> {
+    const res = await request<any>({
+      url: '/api/promo/evolution/status', headers: adminHeaders(),
+    });
+    return res.data;
+  },
+
+  /** 引擎1: 触发品类 ROI 回归(安全阀内自调) */
+  async evolutionWeightsRun(): Promise<{
+    avgRoi: number;
+    adjustments: { category: string; categoryName: string;
+      oldWeight: number; newWeight: number; roi: number }[];
+  }> {
+    const res = await request<any>({
+      url: '/api/promo/evolution/hotspot-weights/run',
+      method: 'POST', headers: adminHeaders(), data: {},
+    });
+    return res.data;
+  },
+
+  /** 引擎1: 高价值热点优先级清单 */
+  async evolutionPriority(): Promise<HotspotPriorityVO[]> {
+    const res = await request<any>({
+      url: '/api/promo/evolution/hotspot-priority',
+      headers: adminHeaders(),
+    });
+    return res.data || [];
+  },
+
+  /** 引擎2: 风格 A/B 统计 + SOP */
+  async evolutionStyles(): Promise<{
+    styles: StyleStatVO[];
+    sop: { championStyle: StyleStatVO | null; sop: string; policy: string };
+  }> {
+    const res = await request<any>({
+      url: '/api/promo/evolution/styles', headers: adminHeaders(),
+    });
+    return res.data;
+  },
+
+  /** 引擎3: 老虎机三臂状态 */
+  async evolutionBandit(): Promise<BanditArmVO[]> {
+    const res = await request<any>({
+      url: '/api/promo/evolution/bandit', headers: adminHeaders(),
+    });
+    return res.data || [];
+  },
+
+  /** 引擎4: 候选风险词队列 */
+  async evolutionRiskCandidates(status?: string): Promise<RiskCandidateVO[]> {
+    const qs = status ? `?status=${status}` : '';
+    const res = await request<any>({
+      url: `/api/promo/evolution/risk-candidates${qs}`,
+      headers: adminHeaders(),
+    });
+    return res.data || [];
+  },
+
+  /** 引擎4: 人工批准候选词(永不自动, 生效入闸门) */
+  async evolutionApproveWord(word: string): Promise<void> {
+    await request<any>({
+      url: `/api/promo/evolution/risk-words/${encodeURIComponent(word)}/approve`,
+      method: 'POST', headers: adminHeaders(), data: {},
+    });
+  },
+
+  /** 引擎4: 人工拒绝候选词(误报处理) */
+  async evolutionRejectWord(word: string): Promise<void> {
+    await request<any>({
+      url: `/api/promo/evolution/risk-words/${encodeURIComponent(word)}/reject`,
+      method: 'POST', headers: adminHeaders(), data: {},
+    });
+  },
+
+  /** 商品拓展: 热点 × 全站商品匹配 */
+  async evolutionProductsMatch(hotspotId: number): Promise<ProductMatchVO[]> {
+    const res = await request<any>({
+      url: `/api/promo/evolution/products/match?hotspotId=${hotspotId}`,
+      headers: adminHeaders(),
     });
     return res.data || [];
   },
