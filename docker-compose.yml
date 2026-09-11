@@ -220,6 +220,31 @@ services:
       #     off=决策面 409(观测面 radar/score/price/feedback/neighbor/carbon/
       #     level/whitepaper 等不受影响——观测与纠错永不关停)
       - XINZHI_MODE=${XINZHI_MODE:-off}
+      # ---- 36号 AI智能推广模块(调度与真实化凭证, 默认全零影响) ----
+      # 雷达/发布自动调度: off=手动(工作台触发); on=定时(radar 15min/publish 5min)
+      - PROMO_RADAR_AUTO=${PROMO_RADAR_AUTO:-off}
+      - PROMO_PUBLISH_AUTO=${PROMO_PUBLISH_AUTO:-off}
+      # 发布通道凭证(留空=mock; real 模式下未配平台走 mock_fallback 可观测降级)
+      - PROMO_CHANNEL_MODE=${PROMO_CHANNEL_MODE:-mock}
+      - PROMO_CHANNEL_DOUYIN_KEY=${PROMO_CHANNEL_DOUYIN_KEY:-}
+      - PROMO_CHANNEL_XIAOHONGSHU_KEY=${PROMO_CHANNEL_XIAOHONGSHU_KEY:-}
+      - PROMO_CHANNEL_WEIBO_KEY=${PROMO_CHANNEL_WEIBO_KEY:-}
+      - PROMO_CHANNEL_WECHAT_MOMENTS_KEY=${PROMO_CHANNEL_WECHAT_MOMENTS_KEY:-}
+      - PROMO_CHANNEL_WECHAT_CHANNELS_KEY=${PROMO_CHANNEL_WECHAT_CHANNELS_KEY:-}
+      # 百度 SEO 推送(ziyan.baidu.com 站点验证后申请; 两者须同时配置)
+      - BAIDU_PUSH_SITE=${BAIDU_PUSH_SITE:-}
+      - BAIDU_PUSH_TOKEN=${BAIDU_PUSH_TOKEN:-}
+      # 热点源真实抓取(第三方聚合 API: KEY+URL 均配置时真实抓取, 失败回退 mock)
+      - HOTSPOT_BAIDU_API_KEY=${HOTSPOT_BAIDU_API_KEY:-}
+      - HOTSPOT_BAIDU_URL=${HOTSPOT_BAIDU_URL:-}
+      - HOTSPOT_DOUYIN_API_KEY=${HOTSPOT_DOUYIN_API_KEY:-}
+      - HOTSPOT_DOUYIN_URL=${HOTSPOT_DOUYIN_URL:-}
+      - HOTSPOT_WEIBO_API_KEY=${HOTSPOT_WEIBO_API_KEY:-}
+      - HOTSPOT_WEIBO_URL=${HOTSPOT_WEIBO_URL:-}
+      - HOTSPOT_ZHIHU_API_KEY=${HOTSPOT_ZHIHU_API_KEY:-}
+      - HOTSPOT_ZHIHU_URL=${HOTSPOT_ZHIHU_URL:-}
+      - HOTSPOT_XIAOHONGSHU_API_KEY=${HOTSPOT_XIAOHONGSHU_API_KEY:-}
+      - HOTSPOT_XIAOHONGSHU_URL=${HOTSPOT_XIAOHONGSHU_URL:-}
       # PYTHONUNBUFFERED 已在 Dockerfile 中设置(ENV),此处无需重复
     depends_on:
       redis:

@@ -13,9 +13,11 @@
     - 蹭点决策由 promo_service 编排(本模块只管"发现与评分")
 """
 
+import json
 import logging
 import os
 import random
+import urllib.request
 from datetime import datetime, UTC
 
 from repositories.promo_repository import (
@@ -104,14 +106,125 @@ def _mock_fetch(platform: str) -> list[dict]:
 
 
 def _fetch_real(platform: str) -> list[dict] | None:
-    """真实热榜抓取(P2 预留: 已配置凭证时返回条目, 失败返回 None 回退 mock)
+    """真实热榜抓取(凭证+URL 均配置时走真实 API, 任一失败返回 None 回退 mock)
 
-    P0 不实现具体协议, 仅保留档位判断接口。
+    Mock-first 铁律: 未配置/请求失败/解析异常/空结果 → None(调用方回退
+    确定性模拟源, 产出不中断)。
+
+    环境变量口径(对齐 promo_channel_service 的 URL 校准范式):
+        HOTSPOT_{X}_API_KEY  聚合热榜服务凭证(如聚合数据/天行数据)
+        HOTSPOT_{X}_URL      抓取端点(五大平台热榜均不直接开放,
+                             经第三方聚合服务; key 作 query 参数)
     """
     env = HOTSPOT_API_KEY_ENV.get(platform, "")
-    if not env or not os.environ.get(env, "").strip():
+    if not env:
         return None
-    return None   # P2: 接入真实平台开放 API
+    key = os.environ.get(env, "").strip()
+    if not key:
+        return None
+    url = (os.environ.get(env[:-8] + "_URL", "") or "").strip()
+    if not url:
+        return None   # 有 KEY 无 URL: 未指定端点, 回退 mock
+    separator = "&" if "?" in url else "?"
+    request_url = f"{url}{separator}key={key}"
+    try:
+        req = urllib.request.Request(
+            request_url, headers={"User-Agent": "zhuxiang-promo-radar/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        logger.warning("hotspot_fetch_failed(platform=%s): %s", platform, exc)
+        return None
+    items = _parse_hotspot_items(platform, body)
+    if not items:
+        logger.warning("hotspot_fetch_empty(platform=%s): 响应无可解析条目",
+                       platform)
+        return None
+    return items
+
+
+# 条目列表字段候选(聚合 API 通行格式: 按序探测第一个列表型字段)
+_ITEM_LIST_KEYS = ("data", "list", "items", "newslist", "result")
+# 标题/摘要/热度字段别名(各服务命名差异兼容)
+_TITLE_KEYS = ("title", "word", "name", "hotword")
+_SUMMARY_KEYS = ("summary", "desc", "description")
+_HEAT_KEYS = ("hot", "heat", "hotvalue", "num", "score")
+# 未知热度/速度/持续时长缺省(评分公式容忍: velocity 0.5 中位,
+# persistence 12h 常规热点水位, 保持与 mock 轨字段口径一致)
+_DEFAULT_VELOCITY = 0.5
+_DEFAULT_PERSISTENCE = 12
+
+
+def _parse_hotspot_items(platform: str, body) -> list[dict]:
+    """聚合热榜响应 → 雷达条目(平台格式差异兼容)
+
+    兼容格式:
+        聚合数据: {"reason":..., "result": {"data": [...]}} 或 result 直接列表
+        天行数据: {"code":200, "newslist": [...]}
+        通用:     顶层列表 / {"data": [...]} / {"list": [...]}
+
+    Returns:
+        条目列表(title 必有, 缺标题条目跳过); 空列表=无可解析条目
+    """
+    rows = None
+    if isinstance(body, list):
+        rows = body
+    elif isinstance(body, dict):
+        for field in _ITEM_LIST_KEYS:
+            value = body.get(field)
+            if isinstance(value, list):
+                rows = value
+                break
+            if isinstance(value, dict):
+                nested = _parse_hotspot_items(platform, value)
+                if nested:
+                    return nested
+    if not rows:
+        return []
+    items = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        title = ""
+        for field in _TITLE_KEYS:
+            value = row.get(field)
+            if isinstance(value, str) and value.strip():
+                title = value.strip()
+                break
+        if not title:
+            continue   # 无标题条目无法指纹去重, 跳过
+        summary = ""
+        for field in _SUMMARY_KEYS:
+            value = row.get(field)
+            if isinstance(value, str) and value.strip():
+                summary = value.strip()
+                break
+        heat = 0.0
+        for field in _HEAT_KEYS:
+            value = row.get(field)
+            try:
+                if value is not None and not isinstance(value, str):
+                    heat = float(value)
+                elif isinstance(value, str) and value.strip():
+                    heat = float(value.strip())
+                if heat:
+                    break
+            except (TypeError, ValueError):
+                continue
+        # 原始计数口径(如微博 hot 值)与万级口径差异: >500 视为原始
+        # 计数, 归一到万(评分层 HEAT_BASE_WAN=500 万满分)
+        if heat > 100_000:
+            heat = round(heat / 10_000, 1)
+        items.append({
+            "platform": platform,
+            "title": title,
+            "summary": summary or f"[{platform}热榜] {title}",
+            "heat": heat,
+            "velocity": _DEFAULT_VELOCITY,
+            "persistenceHours": _DEFAULT_PERSISTENCE,
+            "riskWord": None,   # 风险词由 check_risk 统一否决(不依赖此字段)
+        })
+    return items
 
 
 class PromoRadarService:
