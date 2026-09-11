@@ -77,6 +77,7 @@ const QUICK_ENTRIES = [
   { key: 'orders', icon: '📦', label: '我的订单' },
   { key: 'service', icon: '🎧', label: '在线客服' },
   { key: 'xinzhi', icon: '🏅', label: '信值臻选' },
+  { key: 'map', icon: '🗺️', label: '智图地图' },
 ];
 
 const IndexPage: React.FC = () => {
@@ -294,6 +295,9 @@ const IndexPage: React.FC = () => {
         break;
       case 'xinzhi':
         Taro.navigateTo({ url: '/pages/xinzhi/index' });
+        break;
+      case 'map':
+        Taro.navigateTo({ url: '/pages/zt/index' });
         break;
     }
   };

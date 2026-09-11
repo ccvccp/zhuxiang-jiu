@@ -81,6 +81,8 @@ from routes.zy_routes import register_zy_routes
 from routes.zf_routes import register_zf_routes
 # 智运·AI智能物流大模型(物流接口管理模块升级更名·智能调度中枢)
 from routes.zw_routes import register_zw_routes
+# 智图·AI智能地图大模型(位置地图模块升级更名·全域角色时空服务中枢)
+from routes.zt_routes import register_zt_routes
 # AI智能网站同盟模块(37号·酒水不分家商户同盟平台)
 from routes.alliance_routes import register_alliance_routes
 # AI智能产品管理模块(38号·权限审核×上下架×图片设计更换)
@@ -151,6 +153,7 @@ __all__ = [
     "register_zy_routes",
     "register_zf_routes",
     "register_zw_routes",
+    "register_zt_routes",
     "register_alliance_routes",
     "register_pdm_routes",
     "register_entry_routes",
