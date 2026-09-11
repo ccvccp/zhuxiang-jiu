@@ -10,11 +10,13 @@ import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import {
   BloggerAPI, BloggerVO, WorkVO, FollowVO, ReportOverviewVO, LearningStatusVO,
+  RadarAPI, RadarEventVO, RadarTaskVO, RadarDashboardVO,
   platformName, domainName, workStatusName, followStatusName,
+  radarCategoryName, radarGradeName, radarLifecycleName, radarTaskStatusName,
 } from '@/api/blogger';
 import { requireLogin } from '@/services/auth-service';
 
-type Tab = 'overview' | 'pool' | 'works' | 'follows' | 'learning' | 'autonomy';
+type Tab = 'overview' | 'pool' | 'works' | 'follows' | 'learning' | 'autonomy' | 'radar';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: '总览' },
@@ -23,12 +25,16 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'follows', label: '跟随' },
   { key: 'learning', label: '学习' },
   { key: 'autonomy', label: '自主引擎' },
+  { key: 'radar', label: '雷达' },
 ];
 
 const PLATFORM_KEYS = ['douyin', 'xiaohongshu', 'weibo', 'wechat_channels'];
 const DOMAIN_KEYS = ['wine', 'food', 'gift', 'lifestyle'];
 const WORK_STATUS_KEYS = ['detected', 'auto_follow', 'manual_queue', 'following', 'passed'];
 const FOLLOW_STATUS_KEYS = ['pending', 'approved', 'queued', 'published', 'rejected'];
+// P7 雷达分级过滤(全部/L1/L2/L3/L4)
+const RADAR_GRADE_KEYS = ['', 'L1', 'L2', 'L3', 'L4'];
+const RADAR_GRADE_FILTER_NAME: Record<string, string> = { '': '全部分级' };
 
 const formatNumber = (n: number): string => {
   if (n >= 10000) return `${(n / 10000).toFixed(1)}w`;
@@ -73,6 +79,13 @@ const BloggerPage: React.FC = () => {
   const [pauseReason, setPauseReason] = useState('');
   const [showPauseForm, setShowPauseForm] = useState(false);
   const [operating, setOperating] = useState(false);
+
+  // 雷达2.0 工作台(P7: 看板/事件流/L1 任务确认)
+  const [radarDash, setRadarDash] = useState<RadarDashboardVO | null>(null);
+  const [radarEvents, setRadarEvents] = useState<RadarEventVO[]>([]);
+  const [radarTasks, setRadarTasks] = useState<RadarTaskVO[]>([]);
+  const [radarGradeIdx, setRadarGradeIdx] = useState(0);
+  const [radarBusy, setRadarBusy] = useState(false);
 
   // ---------- 数据加载 ----------
   const loadOverview = useCallback(async () => {
@@ -142,15 +155,33 @@ const BloggerPage: React.FC = () => {
     }
   }, []);
 
+  // 雷达工作台加载(看板+事件流+任务队列并行; 单源失败不阻断)
+  const loadRadar = useCallback(async (grade?: string) => {
+    setLoading(true);
+    try {
+      const [dash, events, tasks] = await Promise.all([
+        RadarAPI.dashboard().catch(() => null),
+        RadarAPI.listEvents(grade ? { grade } : undefined).catch(() => []),
+        RadarAPI.listTasks().catch(() => []),
+      ]);
+      setRadarDash(dash);
+      setRadarEvents(events);
+      setRadarTasks(tasks);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // 按当前页签刷新数据
   const refresh = useCallback(() => {
     if (!requireLogin()) return;
     if (tab === 'overview' || tab === 'learning') loadOverview();
     else if (tab === 'pool') loadPool();
     else if (tab === 'autonomy') loadAutonomy();
+    else if (tab === 'radar') loadRadar(RADAR_GRADE_KEYS[radarGradeIdx]);
     else if (tab === 'works') loadWorks(WORK_STATUS_KEYS[workStatusIdx]);
     else if (tab === 'follows') loadFollows(FOLLOW_STATUS_KEYS[followStatusIdx]);
-  }, [tab, loadOverview, loadPool, loadWorks, loadFollows, loadAutonomy, workStatusIdx, followStatusIdx]);
+  }, [tab, loadOverview, loadPool, loadWorks, loadFollows, loadAutonomy, loadRadar, workStatusIdx, followStatusIdx, radarGradeIdx]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -343,6 +374,110 @@ const BloggerPage: React.FC = () => {
       Taro.showToast({ title: '学习轮次完成', icon: 'success' });
       await loadOverview();
     } catch (_) { /* request 层已 toast(409=反馈不足) */ }
+  };
+
+  // ---------- 雷达2.0 操作(P7 五引擎管理面) ----------
+
+  /** 流式采集(15min 槽位 · 聚类去重+情绪场域+刷量过滤) */
+  const handleRadarCollect = async () => {
+    if (radarBusy) return;
+    setRadarBusy(true);
+    try {
+      const r = await RadarAPI.collectEvents();
+      Taro.showModal({
+        title: '采集完成',
+        content: `${r.channels} 频道扫描: 采集 ${r.collected} 条 · 聚合 ${r.aggregated} 条 · 幂等跳过 ${r.duplicates} 条(同槽位) · 刷量过滤 ${r.botFiltered} 条。`,
+        showCancel: false,
+      });
+      await loadRadar(RADAR_GRADE_KEYS[radarGradeIdx]);
+    } catch (_) { /* request 层已 toast */ } finally {
+      setRadarBusy(false);
+    }
+  };
+
+  /** 三维评分批次(契合×安全×转化 → L1-L4; 安全<0.6 硬闸 L4) */
+  const handleRadarScore = async () => {
+    if (radarBusy) return;
+    setRadarBusy(true);
+    try {
+      const r = await RadarAPI.scoreEvents();
+      const g = r.grades || {};
+      Taro.showModal({
+        title: `评分完成(${r.scored} 条)`,
+        content: `L1 紧急 ${g.L1 || 0} · L2 常规 ${g.L2 || 0} · L3 观察 ${g.L3 || 0} · L4 屏蔽 ${g.L4 || 0}(政治军事类硬闸拦截, 屏蔽原因留痕备查)。`,
+        showCancel: false,
+      });
+      await loadRadar(RADAR_GRADE_KEYS[radarGradeIdx]);
+    } catch (_) { /* request 层已 toast */ } finally {
+      setRadarBusy(false);
+    }
+  };
+
+  /** 事件演化预测(生命周期分段+跨平台关联) */
+  const handleRadarPredict = (e: RadarEventVO) => {
+    Taro.showLoading({ title: '预测中' });
+    RadarAPI.predictEvent(e.eventId)
+      .then((p: any) => {
+        Taro.hideLoading();
+        const cross = p.crossPlatform || {};
+        const opp = cross.opportunity || {};
+        const hype = cross.coordinatedHype || {};
+        Taro.showModal({
+          title: `${p.phase || '新侦测'} · ${radarLifecycleName(p.lifecycle || 'new')}`,
+          content: [
+            (p.signals || []).join('; ') || '无预警信号',
+            (p.advice || '').slice(0, 30),
+            opp.windows ? `机会窗: ${opp.windows.join('/')}(沉默平台差异化切入)` : '',
+            hype.suspected ? '疑似操纵性流量(情绪已降权)' : '',
+          ].filter(Boolean).join('\n'),
+          showCancel: false,
+        });
+      })
+      .catch(() => Taro.hideLoading());
+  };
+
+  /** L1 任务人工确认(46号审批总线轨 · 确认后派发 P6b 创作轨) */
+  const handleRadarConfirm = (t: RadarTaskVO, approve: boolean) => {
+    const basis = t.decisionBasis || {};
+    Taro.showModal({
+      title: approve ? '确认 L1 高价值任务' : '否决任务',
+      content: approve
+        ? `《${(t.plan as any)?.recommendedAngles?.[0]?.slice(0, 24) || '雷达任务'}》\n`
+          + `价值分 ${basis.valueScore ?? '-'} · 契合 ${basis.fit ?? '-'} · 安全 ${basis.safety ?? '-'}\n`
+          + `确认后将派发 P6b 创作轨生成脚本。`
+        : `否决溯源 ${t.traceId}? 决策回流效能周报(误报率)。`,
+      success: async (res) => {
+        if (!res.confirm) return;
+        try {
+          const r = await RadarAPI.confirmTask(t.taskId, approve);
+          Taro.showModal({
+            title: r.dispatched ? '已派发创作轨' : '已确认',
+            content: r.dispatched
+              ? `脚本 #${r.task?.dispatchScriptId ?? 0} 已生成(P6b 五层合规内生)。`
+              : `任务 ${approve ? '已确认(派发失败留痕待重试)' : '已否决(46号留痕)'}。`,
+            showCancel: false,
+          });
+          await loadRadar(RADAR_GRADE_KEYS[radarGradeIdx]);
+        } catch (_) { /* request 层已 toast */ }
+      },
+    });
+  };
+
+  /** 效能周报生成(触发/命中率/误报率/漏报案例库) */
+  const handleRadarWeekly = async () => {
+    if (radarBusy) return;
+    setRadarBusy(true);
+    try {
+      const w: any = await RadarAPI.generateWeeklyReport();
+      Taro.showModal({
+        title: `周报 #${w.reportId}`,
+        content: `触发 ${w.triggered ?? 0} · 派发 ${w.dispatched ?? 0} · 命中率 ${(Number(w.hitRate ?? 0) * 100).toFixed(0)}% · 误报率 ${(Number(w.falsePositiveRate ?? 0) * 100).toFixed(0)}% · 漏报案例 ${(w.missedCases || []).length} 条。`,
+        showCancel: false,
+      });
+      await loadRadar(RADAR_GRADE_KEYS[radarGradeIdx]);
+    } catch (_) { /* request 层已 toast */ } finally {
+      setRadarBusy(false);
+    }
   };
 
   // ---------- 渲染 ----------
@@ -837,6 +972,148 @@ const BloggerPage: React.FC = () => {
               <View className={styles.noteLine}>
                 暂停即时冻结全部自主行为(学习/创作/发布/自愈/租用受控写),
                 观测面不中断; 恢复须显式操作(永不自动); 干预留痕审计。
+              </View>
+            </View>
+          </>
+        )}
+
+        {/* ============ 雷达2.0 工作台(P7) ============ */}
+        {tab === 'radar' && !loading && (
+          <>
+            {/* 分区1: 中枢看板五区 */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>雷达中枢看板</View>
+              <View className={styles.statGrid}>
+                {renderStat('事件总数', radarDash?.events.total ?? 0)}
+                {renderStat('L1 紧急', radarDash?.events.byGrade.L1 ?? 0, '任务包待确认')}
+                {renderStat('L4 屏蔽', radarDash?.events.byGrade.L4 ?? 0, '留痕备查')}
+                {renderStat('任务总数', radarDash?.tasks.total ?? 0)}
+                {renderStat('违规标记', radarDash?.tasks.violations ?? 0)}
+              </View>
+            </View>
+            <View className={styles.noteCard}>
+              <View className={styles.noteTitle}>阈值状态(只紧不松)</View>
+              <View className={styles.noteLine}>
+                当前 L1 价值线 {radarDash?.threshold.currentL1Line ?? 75} · 封顶 {radarDash?.threshold.cap ?? 95} · 收紧史 {radarDash?.threshold.tightenHistory ?? 0} 次
+                (违规率 ×3 且样本≥20 自动 +10; 放宽须 46号建议书)
+              </View>
+            </View>
+
+            {/* 分区2: 引擎操作 */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>五引擎操作</View>
+              <View className={styles.actionRow}>
+                <View className={styles.primaryBtn} onClick={handleRadarCollect}>
+                  {radarBusy ? '采集中...' : '① 采集事件流'}
+                </View>
+                <View className={styles.miniBtn} onClick={handleRadarScore}>
+                  {radarBusy ? '评分中...' : '② 三维评分'}
+                </View>
+              </View>
+              <View className={styles.actionRow}>
+                <View className={styles.miniBtn} onClick={handleRadarWeekly}>
+                  生成效能周报
+                </View>
+              </View>
+              <View className={styles.noteLine}>
+                采集(15min 槽位·聚类去重·情绪场域) → 评分(契合×安全硬闸×转化→L1-L4)
+                → 预测(点击事件查看) → 任务确认(派发 P6b 创作轨) → 周报(归因闭环)
+              </View>
+            </View>
+
+            {/* 分区3: L1 任务包队列(46号人工确认轨) */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>L1 任务包(人工确认轨)</View>
+              {radarTasks.length ? radarTasks.slice(0, 10).map(t => (
+                <View className={styles.noteCard} key={t.taskId} style={{ marginBottom: '8px' }}>
+                  <View className={styles.noteTitle}>
+                    {t.traceId} · {radarTaskStatusName(t.status)}
+                    {t.dispatchExecuted ? `(脚本 #${t.dispatchScriptId})` : ''}
+                  </View>
+                  {t.decisionBasis ? (
+                    <View className={styles.noteLine}>
+                      价值 {t.decisionBasis.valueScore ?? '-'} · 契合 {t.decisionBasis.fit ?? '-'} ·
+                      安全 {t.decisionBasis.safety ?? '-'} · 转化 {t.decisionBasis.conversion ?? '-'} ·
+                      {radarLifecycleName(t.decisionBasis.lifecycle || 'new')}
+                    </View>
+                  ) : null}
+                  {t.dispatchError ? (
+                    <View className={styles.riskLine}>派发留痕: {t.dispatchError.slice(0, 40)}</View>
+                  ) : null}
+                  {t.status === 'pending' ? (
+                    <View className={styles.actionRow}>
+                      <View className={styles.primaryBtn} onClick={() => handleRadarConfirm(t, true)}>
+                        确认并派发
+                      </View>
+                      <View className={styles.miniBtn} onClick={() => handleRadarConfirm(t, false)}>
+                        否决
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+              )) : <View className={styles.empty}>暂无任务(L1 事件经预演后自动入队)</View>}
+            </View>
+
+            {/* 分区4: 事件流(分级过滤) */}
+            <View className={styles.card}>
+              <View className={styles.pickerRow}>
+                <Text className={styles.pickerLabel}>分级</Text>
+                <Picker
+                  mode="selector"
+                  range={RADAR_GRADE_KEYS.map(g => RADAR_GRADE_FILTER_NAME[g] || (g ? `${g} ${radarGradeName(g)}` : '全部分级'))}
+                  value={radarGradeIdx}
+                  onChange={e => {
+                    const idx = Number(e.detail.value);
+                    setRadarGradeIdx(idx);
+                    loadRadar(RADAR_GRADE_KEYS[idx]);
+                  }}
+                >
+                  <View className={styles.pickerValue}>
+                    {RADAR_GRADE_KEYS[radarGradeIdx]
+                      ? `${RADAR_GRADE_KEYS[radarGradeIdx]} ${radarGradeName(RADAR_GRADE_KEYS[radarGradeIdx])}`
+                      : '全部分级'} ▾
+                  </View>
+                </Picker>
+              </View>
+              {radarEvents.length ? radarEvents.map(e => (
+                <View
+                  className={styles.noteCard}
+                  key={e.eventId}
+                  style={{ marginBottom: '8px' }}
+                  onClick={() => handleRadarPredict(e)}
+                >
+                  <View className={styles.noteTitle}>
+                    {e.title}
+                    <Text className={styles.badge} style={{ marginLeft: '6px' }}>
+                      {e.grade || '未评分'}
+                    </Text>
+                  </View>
+                  <View className={styles.noteLine}>
+                    {radarCategoryName(e.category)} · {platformName(e.platform)} ·
+                    热度 {formatNumber(e.heatBase)} · {radarLifecycleName(e.lifecycle)}
+                    {e.grade ? ` · 价值分 ${e.valueScore}` : ''}
+                    {e.botFiltered ? ' · 刷量过滤' : ''}
+                  </View>
+                  {e.grade === 'L4' ? (
+                    <View className={styles.riskLine}>风险屏蔽(类别硬映射/政策词, 留痕备查)</View>
+                  ) : null}
+                  <View className={styles.noteLine} style={{ opacity: 0.55 }}>
+                    点击查看演化预测(生命周期/机会窗/联动造势)
+                  </View>
+                </View>
+              )) : (
+                <View className={styles.empty}>
+                  暂无事件(空库或该分级无事件——先执行「① 采集事件流」)
+                </View>
+              )}
+            </View>
+
+            <View className={styles.noteCard}>
+              <View className={styles.noteTitle}>雷达红线(宪法域)</View>
+              <View className={styles.noteLine}>
+                政治军事类→L4 禁区 · 安全系数&lt;0.6 无条件拦截(不进乘法) ·
+                L1 须经 46号人工确认 · 阈值只紧不松 · 情绪原文即用即弃 ·
+                LLM 禁入判定链
               </View>
             </View>
           </>
