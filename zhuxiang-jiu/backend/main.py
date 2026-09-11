@@ -347,6 +347,9 @@ register_xx66_routes(app)
 # 雷达2.0 全网实时价值侦测中枢(40号 P7a: 感知与聚合)
 from routes.radar_routes import register_radar_routes
 register_radar_routes(app)
+# 信值·臻选购物平台(68号 P0: 信值账户聚合层)
+from routes.xinzhi_routes import register_xinzhi_routes
+register_xinzhi_routes(app)
 
 
 # ============================================================
