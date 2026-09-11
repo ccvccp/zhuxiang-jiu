@@ -9,6 +9,10 @@ services:
       - path: .env
         required: false
     environment:
+      # 时区: 中国业务口径(2026-09-12 生产启用)——黄金时段发布窗口/消息静默时段/
+      # 日界(dateKey)等裸 datetime.now() 逻辑按北京时间; 显式 datetime.now(UTC)
+      # 调用不受影响。镜像内 tzdata 已就位(python:3.12-slim 实测含 zoneinfo)。
+      - TZ=Asia/Shanghai
       - REDIS_URL=redis://redis:6379/0
       - LOCK_MODE=redis
       - STORE_MODE=redis
