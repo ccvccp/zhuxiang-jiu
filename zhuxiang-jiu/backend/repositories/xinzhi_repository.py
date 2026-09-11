@@ -1,18 +1,22 @@
 """68号·信值·臻选购物平台 数据访问层(双模式: 内存 + Redis)
 
-表清单(P0/P1):
+表清单(P0-P3):
     xinzhi_radar_snapshots: 用户信值五维快照
         (总分/五维分/归因/审计留痕/计算指纹——防重复计算)
     xinzhi_product_scores: 商品三维评分快照(P1 臻选货架)
         (契合×安全硬闸×转化 → L1臻选/L2优选/L3普通/L4风险)
+    xinzhi_groupbuys: 邻里求购单(P3 互助购物生态
+        ——67号叫帮联动关联键)
 
 设计对齐(《68号 信值臻选购物平台创新规划方案》§四):
     - 编排式只读聚合: 五维数据源全部来自既有模块(47/67/44/
       订单/62号), 本表仅存聚合结果快照, 不复制原始数据
     - 快照即审计: 每次计算留痕(原始输入/归一化中间值/最终分
-      /解释文本——文档"审计友好"要求, 全链路可追溯)
+        /解释文本——文档"审计友好"要求, 全链路可追溯)
     - bool 字段显式还原(P6g-4 Redis 实机教训)
     - 复杂字段(list/dict)注册序列化清单
+    - 邻里频道零个体数据(P3 红线): 求购单仅存聚合展示所需
+      字段+发起人脱敏昵称, 求购响应仅计数不留个人明细
 """
 
 import json
@@ -55,20 +59,23 @@ def _now_iso() -> str:
 
 # 序列化类型清单(bool 陷阱还原——P6g-4 实机教训)
 _INT_FIELDS = ("snapshotId", "memberId", "scoreSeq",
-               "detailSeq", "feedbackId")
+               "detailSeq", "feedbackId", "groupbuyId",
+               "responderCount", "orderCount")
 _FLOAT_FIELDS = ("integrity", "mutual", "expert", "activity",
                  "growth", "totalScore", "daysSinceRegister",
                  "fit", "safety", "conversion", "valueScore",
                  "finalRank", "baseScore",
                  "basePrice", "trustDiscount",
-                 "contributionDiscount", "promoFactor",
-                 "xinzhiCredit", "finalPrice", "priceDiff")
+               "contributionDiscount", "promoFactor",
+               "xinzhiCredit", "finalPrice", "priceDiff",
+                 "longitude", "latitude")
 _BOOL_FIELDS = ("circuitBroken", "coldStart", "bonusApplied",
-                "hardBlocked")
+                "hardBlocked", "closed")
 _LIST_FIELDS = ("integritySources", "mutualSources",
                 "expertSources", "activitySources",
                 "growthSources", "recentFactors",
-                "fitModules", "safetyReasons", "blockedReasons")
+                "fitModules", "safetyReasons", "blockedReasons",
+                "responders")
 
 
 class XinzhiRepository:
@@ -78,6 +85,7 @@ class XinzhiRepository:
     TABLE_PRODUCT_SCORES = "xinzhi_product_scores"
     TABLE_PRICE_DETAILS = "xinzhi_price_details"
     TABLE_FEEDBACK = "xinzhi_feedback"
+    TABLE_GROUPBUYS = "xinzhi_groupbuys"
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -138,6 +146,7 @@ class XinzhiRepository:
         self.store.setdefault(self.TABLE_PRODUCT_SCORES, {})
         self.store.setdefault(self.TABLE_PRICE_DETAILS, {})
         self.store.setdefault(self.TABLE_FEEDBACK, {})
+        self.store.setdefault(self.TABLE_GROUPBUYS, {})
 
     async def next_id(self, kind: str) -> int:
         if is_redis_mode():
@@ -351,4 +360,48 @@ class XinzhiRepository:
         return sorted(
             result,
             key=lambda x: -int(x.get("feedbackId") or 0)
+        )[:limit]
+
+    # ============================================================
+    # 邻里求购(P3 互助购物生态——67号叫帮联动)
+    # ============================================================
+
+    async def save_groupbuy(self, record: dict) -> dict:
+        """保存求购单({groupbuyId, memberId, title, productId,
+        series, quantity, mode, urgency, longitude, latitude,
+        address, status, responderCount, responders, closed,
+        createdAt, updatedAt})"""
+        return await self._save(self.TABLE_GROUPBUYS,
+                                record["groupbuyId"], record)
+
+    async def get_groupbuy(self,
+                           groupbuy_id: int) -> dict | None:
+        return await self._get(self.TABLE_GROUPBUYS,
+                               groupbuy_id)
+
+    async def update_groupbuy(self, groupbuy_id: int,
+                              fields: dict) -> dict:
+        record = await self.get_groupbuy(groupbuy_id)
+        if record is None:
+            raise KeyError(groupbuy_id)
+        record.update(fields)
+        return await self._save(self.TABLE_GROUPBUYS,
+                                groupbuy_id, record)
+
+    async def list_groupbuys(self, status: str = None,
+                             member_id: int = None,
+                             limit: int = 200) -> list[dict]:
+        """求购单查询(最新优先)"""
+        result = []
+        for r in await self._list(self.TABLE_GROUPBUYS,
+                                  limit=5000):
+            if status and r.get("status") != status:
+                continue
+            if member_id is not None \
+                    and r.get("memberId") != member_id:
+                continue
+            result.append(r)
+        return sorted(
+            result,
+            key=lambda x: -int(x.get("groupbuyId") or 0)
         )[:limit]

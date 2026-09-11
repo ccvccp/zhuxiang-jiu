@@ -1,6 +1,6 @@
-"""68号 P0-P2·信值·臻选路由(五维雷达+臻选货架+透明定价导购)
+"""68号 P0-P3·信值·臻选路由(雷达+货架+定价导购+互助生态)
 
-端点(10):
+端点(15):
     GET  /api/xinzhi/radar               五维雷达(最新快照/即时计算)
     GET  /api/xinzhi/radar/history        90 日历史曲线
     POST /api/xinzhi/products/score       商品三维评分批次(P1)
@@ -11,6 +11,11 @@
     GET  /api/xinzhi/feedback/{id}        反馈进度(透明)
     POST /api/xinzhi/guide                导购应答(SOP五步法)
     GET  /api/xinzhi/guide/personas        导购人格卡片(能力公示)
+    GET  /api/xinzhi/neighbor             邻里臻选(品类聚合, 零个体)
+    POST /api/xinzhi/groupbuy             发布邻里求购(P3)
+    GET  /api/xinzhi/groupbuy             求购大厅(LBS 紧急→距离→新单)
+    POST /api/xinzhi/groupbuy/{id}/respond 求购响应(仅计数脱敏)
+    GET  /api/xinzhi/carbon/{member_id}    邻里购物碳档案(只读)
 
 鉴权: X-Member-Id(会员本人域; P0 与 /api/member/profile
 同口径)
@@ -68,6 +73,12 @@ def _guide_service():
     return XinzhiGuideService()
 
 
+def _neighbor_service():
+    from services.xinzhi_neighbor_service import (
+        XinzhiNeighborService)
+    return XinzhiNeighborService()
+
+
 class ScoreRequest(PydBaseModel):
     productIds: list = Field(None,
                              description="指定商品(空=全量)")
@@ -85,6 +96,17 @@ class GuideRequest(PydBaseModel):
     productId: str = Field(...,
                             description="商品ID")
     query: str = Field("", description="用户咨询(意图锚定)")
+
+
+class GroupbuyRequest(PydBaseModel):
+    title: str = Field(..., description="求购标题")
+    productId: str = Field("", description="指定商品(可选)")
+    quantity: int = Field(1, description="数量 1-99")
+    urgency: str = Field("normal",
+                         description="normal/urgent")
+    longitude: float = Field(0.0, description="经度")
+    latitude: float = Field(0.0, description="纬度")
+    address: str = Field("", description="位置描述")
 
 
 @router.get("/api/xinzhi/radar",
@@ -255,6 +277,106 @@ async def xinzhi_guide_personas():
     无需登录, 能力透明)"""
     return {"success": True, "data":
             _guide_service().persona_card()}
+
+
+@router.get("/api/xinzhi/neighbor",
+            tags=["信值臻选购物平台"])
+async def xinzhi_neighbor_shelf(
+        city: str = None):
+    """邻里臻选频道(同城市民在买什么——品类聚合,
+    零个体数据红线: <5 人品类不展示)"""
+    try:
+        return {"success": True, "data":
+                await _neighbor_service().neighbor_shelf(
+                    city=city)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/groupbuy",
+             tags=["信值臻选购物平台"])
+async def xinzhi_groupbuy_publish(
+        req: GroupbuyRequest,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """发布邻里求购(三单上限+违禁词预检——67号叫帮范式)"""
+    mid = _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _neighbor_service().publish_groupbuy(
+                    mid, req.title,
+                    product_id=req.productId,
+                    quantity=req.quantity,
+                    urgency=req.urgency,
+                    longitude=req.longitude,
+                    latitude=req.latitude,
+                    address=req.address)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/xinzhi/groupbuy",
+            tags=["信值臻选购物平台"])
+async def xinzhi_groupbuy_hall(
+        longitude: float = 0.0,
+        latitude: float = 0.0,
+        limit: int = 50):
+    """求购大厅(20km LBS; 紧急→距离→新单——67号排序范式)"""
+    try:
+        return {"success": True, "data":
+                await _neighbor_service().groupbuy_hall(
+                    longitude, latitude, limit=limit)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/groupbuy/{groupbuy_id}/respond",
+             tags=["信值臻选购物平台"])
+async def xinzhi_groupbuy_respond(
+        groupbuy_id: int,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """响应邻里求购(仅计数+昵称脱敏——零个体数据红线)"""
+    mid = _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _neighbor_service().respond_groupbuy(
+                    groupbuy_id, mid)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/groupbuy/{groupbuy_id}/close",
+             tags=["信值臻选购物平台"])
+async def xinzhi_groupbuy_close(
+        groupbuy_id: int,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """关闭求购(发起人确认; 碳折算 500g×参与人数,
+    只读观测不可交易)"""
+    mid = _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _neighbor_service().close_groupbuy(
+                    groupbuy_id, mid)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/xinzhi/carbon/{member_id}",
+            tags=["信值臻选购物平台"])
+async def xinzhi_carbon_profile(member_id: int):
+    """邻里购物碳档案(67号互助碳+68号求购碳合并;
+    不可交易——宪法口径防金融化)"""
+    try:
+        return {"success": True, "data":
+                await _neighbor_service().carbon_profile(
+                    member_id)}
+    except Exception as e:
+        _handle(e)
 
 
 def register_xinzhi_routes(app) -> None:
