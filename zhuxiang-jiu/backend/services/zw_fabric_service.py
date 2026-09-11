@@ -26,6 +26,12 @@ ZW_TABLES = (
     "route_decisions", "eta_records", "anomalies",
     "risk_assess", "inspect_receipts", "claims",
     "feedbacks",
+    # 智酿运通二代(P4-P7)
+    "carrier_registry", "feature_routes",     # P4a 语义调配
+    "capacity_reports",                       # P4b 熔断异常报告
+    "capacity_plans", "tri_codes", "reverse_plans",   # P5 深度绑定
+    "alerts",                                 # P6 角色提醒
+    "preferences", "strategy_suggestions",    # P7 进化2.0
 )
 
 

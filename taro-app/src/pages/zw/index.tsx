@@ -1,6 +1,7 @@
 /**
  * 智运·AI智能物流大模型 · 前端管理工作台
- * 六页签: 总览 → 路由(P0) → 轨迹(P1) → 风控(P2) → 分析(P3) → 进化(P3)
+ * 八页签: 总览 → 路由(P0) → 轨迹(P1) → 风控(P2) → 分析(P3) → 进化(P3)
+ *        → 调配(P4 语义+熔断) → 协同(P5-P7 绑定/提醒/进化2.0)
  * 口径: 智能调度中枢 · 全链确定性 · 建议/切换永不自动执行
  */
 import React, { useState, useEffect, useCallback } from 'react';
@@ -15,7 +16,8 @@ import {
   zwInspectResultName,
 } from '@/api/zw';
 
-type Tab = 'overview' | 'route' | 'track' | 'risk' | 'analysis' | 'evo';
+type Tab = 'overview' | 'route' | 'track' | 'risk' | 'analysis' | 'evo'
+  | 'dispatch' | 'nexus';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: '总览' },
@@ -24,6 +26,8 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'risk', label: '风控' },
   { key: 'analysis', label: '分析' },
   { key: 'evo', label: '进化' },
+  { key: 'dispatch', label: '调配' },
+  { key: 'nexus', label: '协同' },
 ];
 
 // 路由决策预设
@@ -60,6 +64,22 @@ const ZhiYunPage: React.FC = () => {
   const [forecast, setForecast] = useState<any>(null);
   // 进化
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
+  // 调配(P4)
+  const [normResult, setNormResult] = useState<any>(null);
+  const [carriersList, setCarriersList] = useState<any[]>([]);
+  const [fRoute, setFRoute] = useState<any>(null);
+  const [circuit, setCircuit] = useState<any>(null);
+  // 协同(P5-P7)
+  const [capPlan, setCapPlan] = useState<any>(null);
+  const [bindForm, setBindForm] = useState({
+    waybillNo: '', orderId: '', batchCode: 'BATCH-2026-09', antiFakeCode: '',
+  });
+  const [verifyCodeVal, setVerifyCodeVal] = useState('');
+  const [verifyResult, setVerifyResult] = useState<any>(null);
+  const [reverseResult, setReverseResult] = useState<any>(null);
+  const [alertList, setAlertList] = useState<any[]>([]);
+  const [carbonData, setCarbonData] = useState<any>(null);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -86,6 +106,13 @@ const ZhiYunPage: React.FC = () => {
     }
     if (key === 'evo' && feedbacks.length === 0) {
       setFeedbacks(await ZwAPI.feedbacks(10).catch(() => []));
+    }
+    if (key === 'dispatch' && !circuit) {
+      setCircuit(await ZwAPI.circuitStatus().catch(() => null));
+      setCarriersList(await ZwAPI.carriers().catch(() => []));
+    }
+    if (key === 'nexus' && alertList.length === 0) {
+      setAlertList(await ZwAPI.alerts().catch(() => []));
     }
   };
 
@@ -154,6 +181,168 @@ const ZhiYunPage: React.FC = () => {
       Taro.showToast({ title: '已标记', icon: 'success' });
       setFeedbacks(await ZwAPI.feedbacks(10).catch(() => []));
       setStatus(await ZwAPI.status().catch(() => null));
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  // ============ 智酿运通 P4: 调配 ============
+
+  /** 语义归一化演示(SF 方言回单) */
+  const runNormalize = async () => {
+    try {
+      setNormResult(await ZwAPI.normalize('SF', {
+        bill_no: 'SF-DEMO-009', parcel_weight: 5.2,
+        state: '已签收', recv_name: '王先生',
+        recv_mobile: '13800001234', unknown_extra: 'x',
+      }));
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 四维画像 + 特征路由(高货值礼盒预设) */
+  const runProfileRoute = async () => {
+    try {
+      const p = await ZwAPI.orderProfile({
+        orderType: 'retail', weight: 5, pieceCount: 2,
+        insuredValue: 12800,
+        receiver: { province: '广东', city: '深圳' },
+      });
+      setFRoute({ profile: p, route: await ZwAPI.featureRoute(p) });
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 生成运力异常报告 */
+  const runCircuitReport = async () => {
+    try {
+      const r = await ZwAPI.circuitReport();
+      setCircuit(await ZwAPI.circuitStatus().catch(() => null));
+      Taro.showToast({
+        title: `已生成(open=${r.openCount})`, icon: 'success',
+      });
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  // ============ 智酿运通 P5-P7: 协同 ============
+
+  /** 舱位预约建议书 */
+  const runCapacity = async () => {
+    try {
+      setCapPlan(await ZwAPI.capacityPlan());
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 三码合一绑定 */
+  const runTriCode = async () => {
+    const { waybillNo, orderId, batchCode, antiFakeCode } = bindForm;
+    if (!waybillNo.trim() || !orderId.trim() || !antiFakeCode.trim()) {
+      Taro.showToast({ title: '运单号/订单号/防伪码必填', icon: 'none' });
+      return;
+    }
+    try {
+      await ZwAPI.triCodeBind({
+        waybillNo: waybillNo.trim(), orderId: orderId.trim(),
+        batchCode: batchCode.trim() || 'BATCH-DEFAULT',
+        antiFakeCode: antiFakeCode.trim(),
+      });
+      Taro.showToast({ title: '三码绑定成功', icon: 'success' });
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 扫码验真(公开端点) */
+  const runVerify = async () => {
+    if (!verifyCodeVal.trim()) {
+      Taro.showToast({ title: '请输入任一码(防伪/批次/运单)', icon: 'none' });
+      return;
+    }
+    try {
+      setVerifyResult(await ZwAPI.verifyCode(verifyCodeVal.trim()));
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 逆向物流路径匹配 */
+  const runReverse = async (condition: string) => {
+    if (!bindForm.orderId.trim()) {
+      Taro.showToast({ title: '请先填写订单号', icon: 'none' });
+      return;
+    }
+    try {
+      setReverseResult(await ZwAPI.reverseBind(bindForm.orderId.trim(), condition));
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 五角色扫描 */
+  const runAlertScan = async () => {
+    try {
+      const r = await ZwAPI.alertScan();
+      setAlertList(await ZwAPI.alerts().catch(() => []));
+      Taro.showToast({ title: `出稿 ${r.generated} 条`, icon: 'success' });
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 提醒确认/驳回 */
+  const runAlertAck = async (alertId: number, disposition: string) => {
+    try {
+      await ZwAPI.alertAck(alertId, disposition);
+      setAlertList(await ZwAPI.alerts().catch(() => []));
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 碳足迹 */
+  const runCarbon = async () => {
+    try {
+      setCarbonData(await ZwAPI.carbon());
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 策略建议 + 裁决 */
+  const runSuggest = async () => {
+    try {
+      const r = await ZwAPI.suggest();
+      setSuggestions(r.suggestions || []);
+      Taro.showToast({ title: `生成 ${r.generated} 条`, icon: 'success' });
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  const runSuggestionDecide = async (suggestionId: number, verdict: string) => {
+    try {
+      await ZwAPI.decideSuggestion(suggestionId, verdict);
+      setSuggestions(await ZwAPI.suggestions().catch(() => []));
+      Taro.showToast({ title: verdict === 'adopted' ? '已采纳' : '已拒绝(负样本)', icon: 'success' });
+    } catch (e: any) {
+      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+    }
+  };
+
+  /** 偏好登记演示 */
+  const runPreference = async () => {
+    try {
+      await ZwAPI.savePreference({
+        memberId: 3, scope: 'b2b',
+        prefs: { weekdayOnly: true, contactPerson: '李采购' },
+      });
+      Taro.showToast({ title: 'B端偏好已登记', icon: 'success' });
     } catch (e: any) {
       Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
     }
@@ -438,6 +627,270 @@ const ZhiYunPage: React.FC = () => {
                 ))}
               </>
             )}
+          </View>
+        )}
+
+        {/* ============ 七、调配 P4(智酿运通) ============ */}
+        {tab === 'dispatch' && (
+          <View className={styles.section}>
+            <View className={styles.cardTitle}>统一语义层(渠道方言翻译)</View>
+            <View className={styles.runBtn} onClick={runNormalize}>
+              归一化顺丰方言回单(bill_no/state)
+            </View>
+            {normResult && (
+              <View className={styles.resultCard}>
+                <View className={styles.resItem}>
+                  归一化 {normResult.mappedFields} 字段 ·
+                  未映射 {normResult.unmappedFields?.length} 项
+                </View>
+                <View className={styles.resItem}>
+                  运单 {normResult.normalized?.waybillNo} ·
+                  重量 {normResult.normalized?.weight}kg ·
+                  状态 {normResult.normalized?.status}
+                </View>
+              </View>
+            )}
+            {carriersList.length > 0 && (
+              <View className={styles.resultCard}>
+                <View className={styles.cardTitle}>渠道注册表</View>
+                {carriersList.map(c => (
+                  <View key={c.carrier} className={styles.candRow}>
+                    <Text>{c.carrierName}</Text>
+                    <Text className={styles.candScores}>
+                      {c.builtin ? '内置' : '配置接入'} ·
+                      {(c.conditions || []).join('/') || '—'}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View className={styles.cardTitle}>四维画像 + 特征路由</View>
+            <View className={styles.runBtn} onClick={runProfileRoute}>
+              高货值礼盒画像(¥12,800 零售)
+            </View>
+            {fRoute && (
+              <View className={styles.resultCard}>
+                <View className={styles.resItem}>
+                  品类 {fRoute.profile?.categoryName} ·
+                  包装 {fRoute.profile?.packaging} ·
+                  风险 {fRoute.profile?.riskLevel}
+                </View>
+                <View className={styles.resItem}>
+                  优先 {fRoute.route?.priority?.carrierName}
+                  ({fRoute.route?.priority?.service}) ·
+                  备选 {fRoute.route?.backup?.carrierName}
+                </View>
+                <View className={styles.resItem}>
+                  进化信号: {(fRoute.route?.feedbackSignals || []).join('/')}
+                </View>
+              </View>
+            )}
+
+            <View className={styles.cardTitle}>渠道熔断(三指标)</View>
+            {circuit && circuit.carriers?.map((c: any) => (
+              <View key={c.carrier} className={styles.alertCard}>
+                <View className={styles.resHead}>
+                  <View className={`${styles.alertTag} ${
+                    c.state === 'open' ? styles.sevHigh
+                    : c.state === 'half_open' ? styles.sevMid : styles.sevLow
+                  }`}>
+                    {c.carrierName} {c.stateName}
+                  </View>
+                </View>
+                <View className={styles.resItem}>
+                  揽收率 {((c.pickupRate ?? 0) * 100).toFixed(0)}% ·
+                  中转 {c.avgTransitHours ?? 0}h ·
+                  异常率 {((c.anomalyRate ?? 0) * 100).toFixed(0)}%
+                  (样本 {c.sample})
+                </View>
+                {(c.reasons || []).length > 0 && (
+                  <View className={styles.resItem}>
+                    {(c.reasons || []).join('; ')}
+                  </View>
+                )}
+              </View>
+            ))}
+            <View className={styles.runBtn} onClick={runCircuitReport}>
+              生成《运力异常报告》(open 渠道切换建议)
+            </View>
+            <View className={styles.footNote}>
+              熔断为观测态 · 流量切换建议书永不自动执行
+            </View>
+          </View>
+        )}
+
+        {/* ============ 八、协同 P5-P7(智酿运通) ============ */}
+        {tab === 'nexus' && (
+          <View className={styles.section}>
+            <View className={styles.cardTitle}>运力舱位预约建议书</View>
+            <View className={styles.runBtn} onClick={runCapacity}>
+              未来 3 天分渠道预约(安全系数 1.2)
+            </View>
+            {capPlan && (
+              <View className={styles.resultCard}>
+                <View className={styles.resItem}>
+                  日均预测 {capPlan.dailyForecastOrders} 单 ·
+                  窗口 {capPlan.windowDays} 天
+                </View>
+                {(capPlan.allocations || []).map((a: any) => (
+                  <View key={a.carrier} className={styles.candRow}>
+                    <Text>{a.carrier}</Text>
+                    <Text className={styles.candScores}>
+                      日均 {a.dailyForecast} → 建议预约 {a.suggestBooking}
+                    </Text>
+                  </View>
+                ))}
+                <View className={styles.resWarn}>
+                  建议书: 人工确认后向渠道预约, 永不自动执行
+                </View>
+              </View>
+            )}
+
+            <View className={styles.cardTitle}>三码合一 + 扫码验真</View>
+            <View className={styles.qaInputRow}>
+              <Input
+                className={styles.qaInput}
+                value={bindForm.waybillNo}
+                onInput={e => setBindForm({ ...bindForm, waybillNo: e.detail.value })}
+                placeholder="运单号" maxlength={40}
+              />
+              <Input
+                className={styles.qaInput}
+                value={bindForm.orderId}
+                onInput={e => setBindForm({ ...bindForm, orderId: e.detail.value })}
+                placeholder="订单号" maxlength={40}
+              />
+            </View>
+            <View className={styles.qaInputRow}>
+              <Input
+                className={styles.qaInput}
+                value={bindForm.antiFakeCode}
+                onInput={e => setBindForm({ ...bindForm, antiFakeCode: e.detail.value })}
+                placeholder="防伪码" maxlength={40}
+              />
+              <View className={styles.qaBtn} onClick={runTriCode}>绑定</View>
+            </View>
+            <View className={styles.qaInputRow}>
+              <Input
+                className={styles.qaInput}
+                value={verifyCodeVal}
+                onInput={e => setVerifyCodeVal(e.detail.value)}
+                placeholder="验真: 输入任一码(公开端点)"
+                maxlength={60}
+              />
+              <View className={styles.qaBtn} onClick={runVerify}>验真</View>
+            </View>
+            {verifyResult && (
+              <View className={styles.resultCard}>
+                <View className={styles.resOk}>
+                  验真通过 · 批次 {verifyResult.product?.batchCode}
+                </View>
+                <View className={styles.resItem}>
+                  {verifyResult.journey?.iotNote}
+                </View>
+              </View>
+            )}
+
+            <View className={styles.cardTitle}>逆向物流(状态→路径)</View>
+            <View className={styles.evoBtns}>
+              <View className={styles.evoBtn} onClick={() => runReverse('unopened')}>未开封</View>
+              <View className={styles.evoBtn} onClick={() => runReverse('opened')}>已开封</View>
+              <View className={styles.evoBtn} onClick={() => runReverse('damaged')}>破损</View>
+            </View>
+            {reverseResult && (
+              <View className={styles.resultCard}>
+                <View className={styles.resItem}>
+                  {reverseResult.conditionName} → {reverseResult.matchedPathName}
+                </View>
+                <View className={styles.resItem}>
+                  {reverseResult.protocol?.body?.slice(0, 50)}…
+                </View>
+                <View className={styles.resWarn}>
+                  处置协议: 人工确认后执行, 永不自动
+                </View>
+              </View>
+            )}
+
+            <View className={styles.cardTitle}>五角色智能提醒</View>
+            <View className={styles.runBtn} onClick={runAlertScan}>
+              扫描触发面(延误/异常/爆仓/成本/KPI)
+            </View>
+            {alertList.slice(0, 6).map(a => (
+              <View key={a.alertId} className={styles.alertCard}>
+                <View className={styles.resHead}>
+                  <View className={`${styles.alertTag} ${sevColor(
+                    a.status === 'pending' ? 'medium' : 'low'
+                  )}`}>
+                    {a.roleName}
+                  </View>
+                  <View className={styles.resBatch}>{a.status}</View>
+                </View>
+                <View className={styles.resItem}>{a.title}</View>
+                <View className={styles.resItem}>
+                  {String(a.body || '').slice(0, 40)}…
+                </View>
+                {a.status === 'pending' && (
+                  <View className={styles.evoBtns}>
+                    <View className={styles.evoBtn} onClick={() => runAlertAck(a.alertId, 'acked')}>确认</View>
+                    <View className={styles.evoBtn} onClick={() => runAlertAck(a.alertId, 'dismissed')}>驳回</View>
+                  </View>
+                )}
+              </View>
+            ))}
+
+            <View className={styles.cardTitle}>碳足迹(排放因子法)</View>
+            <View className={styles.runBtn} onClick={runCarbon}>
+              核算总排(渠道占比+绿色切换)
+            </View>
+            {carbonData && (
+              <View className={styles.resultCard}>
+                <View className={styles.resItem}>
+                  总排 {carbonData.totalCarbonKg}kg ·
+                  单均 {carbonData.avgCarbonKg}kg
+                </View>
+                {(carbonData.byCarrier || []).map((c: any) => (
+                  <View key={c.carrier} className={styles.candRow}>
+                    <Text>{c.carrierName}</Text>
+                    <Text className={styles.candScores}>
+                      {c.totalKg}kg · 占比 {c.sharePct}%
+                    </Text>
+                  </View>
+                ))}
+                <View className={styles.resItem}>
+                  {carbonData.greenSuggestion?.body?.slice(0, 60)}…
+                </View>
+              </View>
+            )}
+
+            <View className={styles.cardTitle}>人机协同(策略裁决)</View>
+            <View className={styles.evoBtns}>
+              <View className={styles.evoBtn} onClick={runSuggest}>生成建议</View>
+              <View className={styles.evoBtn} onClick={runPreference}>登记B端偏好</View>
+            </View>
+            {suggestions.map(s => (
+              <View key={s.suggestionId} className={styles.alertCard}>
+                <View className={styles.resHead}>
+                  <View className={`${styles.alertTag} ${styles.sevMid}`}>
+                    {s.typeName}
+                  </View>
+                  <View className={styles.resBatch}>{s.status}</View>
+                </View>
+                <View className={styles.resItem}>{s.title}</View>
+                <View className={styles.resItem}>
+                  {String(s.body || '').slice(0, 45)}…
+                </View>
+                {s.status === 'pending' && (
+                  <View className={styles.evoBtns}>
+                    <View className={styles.evoBtn} onClick={() => runSuggestionDecide(s.suggestionId, 'adopted')}>采纳</View>
+                    <View className={styles.evoBtn} onClick={() => runSuggestionDecide(s.suggestionId, 'rejected')}>拒绝</View>
+                  </View>
+                )}
+              </View>
+            ))}
+            <View className={styles.footNote}>
+              拒绝记负样本回流 · 决策权永在人工
+            </View>
           </View>
         )}
 

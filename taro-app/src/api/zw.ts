@@ -359,4 +359,197 @@ export const ZwAPI = {
       },
     };
   },
+
+  // ================= 智酿运通 P4a: 语义调配 =================
+
+  /** 统一语义层: 异构回单归一化(演示) */
+  async normalize(carrier: string, payload: Record<string, any>): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/semantic/normalize', method: 'POST',
+      data: { carrier, payload }, headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 渠道注册表(内置+配置化接入) */
+  async carriers(): Promise<any[]> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/semantic/carriers', headers: adminHeaders(),
+    });
+    const list = res.data || [];
+    return Array.isArray(list) ? list : [];
+  },
+
+  /** 四维订单画像(品类+包装+时效+风险) */
+  async orderProfile(params: {
+    orderType?: string; weight: number; pieceCount: number;
+    insuredValue?: number; urgent?: boolean;
+    receiver?: Record<string, any>;
+  }): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/semantic/order-profile', method: 'POST',
+      data: params, headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 特征路由策略表(优先+备选) */
+  async featureRoute(profile: Record<string, any>): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/semantic/feature-route', method: 'POST',
+      data: { profile }, headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  // ================= 智酿运通 P4b: 渠道熔断 =================
+
+  /** 熔断状态总览(揽收率/中转/异常率) */
+  async circuitStatus(): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/circuit/status', headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 生成《运力异常报告》 */
+  async circuitReport(): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/circuit/report', method: 'POST',
+      headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  // ================= 智酿运通 P5: 深度绑定 =================
+
+  /** 生产-物流联动: 分渠道舱位预约建议书 */
+  async capacityPlan(): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/binding/capacity-plan', headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 三码合一绑定 */
+  async triCodeBind(params: {
+    waybillNo: string; orderId: string;
+    batchCode: string; antiFakeCode: string;
+  }): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/binding/tri-code', method: 'POST',
+      data: params, headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 逆向物流: 状态→退回路径+处置协议 */
+  async reverseBind(orderId: string, condition: string): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/binding/reverse', method: 'POST',
+      data: { orderId, condition, reason: '工作台演示' },
+      headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 消费者扫码验真(公开端点, 无需鉴权, 脱敏输出) */
+  async verifyCode(code: string): Promise<any> {
+    const res = await request<any>({
+      url: `/api/logistics-ai/binding/verify/${encodeURIComponent(code)}`,
+    });
+    return res.data || res;
+  },
+
+  // ================= 智酿运通 P6: 角色提醒 =================
+
+  /** 五角色触发面扫描 */
+  async alertScan(): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/alert/scan', method: 'POST',
+      headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 提醒列表(角色过滤) */
+  async alerts(role?: string): Promise<any[]> {
+    const url = role
+      ? `/api/logistics-ai/alerts?role=${role}`
+      : '/api/logistics-ai/alerts';
+    const res = await request<any>({
+      url, headers: adminHeaders(),
+    });
+    const list = res.data || [];
+    return Array.isArray(list) ? list : [];
+  },
+
+  /** 提醒确认/驳回(负样本回流) */
+  async alertAck(alertId: number, disposition: string): Promise<any> {
+    const res = await request<any>({
+      url: `/api/logistics-ai/alerts/${alertId}/ack`, method: 'POST',
+      data: { disposition }, headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  // ================= 智酿运通 P7: 进化 2.0 =================
+
+  /** 偏好登记(B端/C端) */
+  async savePreference(params: {
+    memberId: number; scope: string; prefs: Record<string, any>;
+  }): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/evolution2/preference', method: 'POST',
+      data: params, headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 异常模式聚类(渠道×类型) */
+  async anomalyPatterns(): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/evolution2/anomaly-patterns',
+      headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 碳足迹总览(排放因子法) */
+  async carbon(): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/evolution2/carbon', headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 生成策略建议(熔断+碳排+模式聚合) */
+  async suggest(): Promise<any> {
+    const res = await request<any>({
+      url: '/api/logistics-ai/evolution2/suggest', method: 'POST',
+      headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 人机协同裁决(采纳/拒绝) */
+  async decideSuggestion(suggestionId: number, verdict: string): Promise<any> {
+    const res = await request<any>({
+      url: `/api/logistics-ai/evolution2/suggestions/${suggestionId}/decide`,
+      method: 'POST', data: { verdict }, headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
+  /** 策略建议列表 */
+  async suggestions(status?: string): Promise<any[]> {
+    const url = status
+      ? `/api/logistics-ai/evolution2/suggestions?status=${status}`
+      : '/api/logistics-ai/evolution2/suggestions';
+    const res = await request<any>({
+      url, headers: adminHeaders(),
+    });
+    const list = res.data || [];
+    return Array.isArray(list) ? list : [];
+  },
 };
