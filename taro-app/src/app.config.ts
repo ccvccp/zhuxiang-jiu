@@ -43,7 +43,8 @@ export default defineAppConfig({
     'pages/xinzhi/index',
     'pages/promo/index',
     'pages/zy/index',
-    'pages/zf/index'
+    'pages/zf/index',
+    'pages/zw/index'
   ],
   window: {
     backgroundTextStyle: 'light',

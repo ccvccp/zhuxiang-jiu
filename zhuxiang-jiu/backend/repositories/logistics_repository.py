@@ -23,7 +23,7 @@ import logging
 
 from core.helpers import ts
 from repositories.backend import (
-    is_redis_mode, get_redis_client, get_in_memory_store, _k,
+    is_redis_mode, get_redis_client, get_in_memory_store, _k, KEY_PREFIX,
 )
 
 logger = logging.getLogger(__name__)
@@ -290,12 +290,16 @@ class LogisticsRepository:
                 waybill_nos = list(waybill_nos)
             else:
                 # 扫描所有物流订单 key
+                # (注意: _k("x:*") 会带尾随冒号导致 match 失配, 此处直接拼 KEY_PREFIX)
                 waybill_nos = []
-                async for key in client.scan_iter(match=_k("logistics:order:*"), count=100):
+                async for key in client.scan_iter(
+                        match=KEY_PREFIX + "logistics:order:*", count=100):
                     # 提取 waybillNo(跳过 index: 开头的)
+                    # 键格式: zhuxiang:logistics:order:{waybillNo}
+                    #        / zhuxiang:logistics:order:index:status:{s}
                     parts = key.split(":")
-                    if len(parts) >= 3 and parts[2] != "index":
-                        waybill_nos.append(parts[2])
+                    if len(parts) >= 4 and parts[3] != "index":
+                        waybill_nos.append(parts[3])
             items = []
             for wn in waybill_nos[:limit]:
                 order = await self.get_order(wn)

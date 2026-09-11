@@ -311,6 +311,14 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/zw/index' })}>
+              <View className={styles.adminEntryIcon}>🚚</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>智运AI物流</View>
+                <View className={styles.adminEntryDesc}>智能路由 · 轨迹预测 · 四防风控 · 成本分析</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
             <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/theme-admin/index' })}>
               <View className={styles.adminEntryIcon}>🎨</View>
               <View className={styles.adminEntryInfo}>
