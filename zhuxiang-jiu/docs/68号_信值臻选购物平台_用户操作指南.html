@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>信值·臻选购物平台 · 用户操作指南</title>
+<style>
+  :root {
+    --primary: #7d6608;
+    --accent: #b7950b;
+    --bg: #fdfbf5;
+    --card: #ffffff;
+    --border: #e8e2cf;
+    --text: #4a4030;
+    --muted: #857a63;
+    --pass: #1e8449;
+    --warn: #b9770e;
+    --danger: #922b21;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg); color: var(--text);
+    line-height: 1.8; font-size: 15px;
+  }
+  .page { max-width: 1000px; margin: 0 auto; padding: 32px 24px 64px; }
+  header.hero {
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    color: #fff; border-radius: 14px; padding: 36px 34px; margin-bottom: 28px;
+  }
+  header.hero h1 { font-size: 24px; letter-spacing: 1px; margin-bottom: 10px; }
+  header.hero .meta { font-size: 14px; opacity: .95; line-height: 1.9; }
+  h2.section {
+    font-size: 19px; color: var(--primary);
+    border-left: 6px solid var(--accent); padding-left: 12px;
+    margin: 34px 0 14px;
+  }
+  h3.engine { font-size: 15.5px; color: var(--accent); margin: 18px 0 8px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 24px; margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(80,60,20,.05);
+  }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+  th { background: var(--primary); color: #fff; padding: 8px 10px; text-align: left; font-weight: 600; }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: #faf7ec; }
+  code {
+    font-family: Consolas, "Courier New", monospace; font-size: 12.5px;
+    background: #f5f0e1; color: var(--danger); padding: 1px 6px;
+    border-radius: 4px; white-space: nowrap;
+  }
+  .price-box {
+    background: #16222e; color: #d6e4f0; border-radius: 10px;
+    padding: 18px 24px; font-family: Consolas, "Courier New", monospace;
+    font-size: 13.5px; line-height: 2.1; margin: 10px 0; white-space: pre;
+  }
+  .price-box .minus { color: #ec7063; }
+  .price-box .total { color: #f9e79f; font-weight: bold; }
+  ul.clean { padding-left: 22px; }
+  ul.clean li { margin-bottom: 6px; }
+  ol.steps { padding-left: 24px; }
+  ol.steps li { margin-bottom: 8px; }
+  .note {
+    background: #fef9e7; border-left: 4px solid var(--warn);
+    padding: 12px 16px; border-radius: 8px; margin: 12px 0; font-size: 13.5px;
+  }
+  .privacy {
+    background: #eafaf1; border-left: 4px solid var(--pass);
+    padding: 12px 16px; border-radius: 8px; margin: 12px 0; font-size: 13.5px;
+  }
+  .redline {
+    background: #fdedec; border-left: 4px solid var(--danger);
+    padding: 12px 16px; border-radius: 8px; margin: 12px 0; font-size: 13.5px;
+  }
+  .faq-q { font-weight: 700; color: var(--primary); margin-top: 12px; }
+  .faq-a { margin: 4px 0 0 2px; }
+  footer.finale {
+    background: linear-gradient(135deg, #7d6608, #b7950b); color: #fff;
+    border-radius: 12px; padding: 22px 26px; margin-top: 30px;
+    font-size: 14.5px; line-height: 2;
+  }
+  footer.finale strong { color: #fef9e7; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="hero">
+  <h1>信值·臻选购物平台 · 用户操作指南</h1>
+  <div class="meta">
+    在这里， 您的诚信不是口号， 而是<strong>看得见的资产</strong>——它决定您看到什么好物、享受多少抵扣、被邻里如何信任。<br>
+    我们承诺：<strong>价格构成全透明， 永不大数据杀熟</strong>。
+  </div>
+</header>
+
+<!-- 一 -->
+<h2 class="section">一、这是什么？</h2>
+<div class="card">
+<p>信值·臻选是建立在您<strong>真实信用</strong>之上的购物平台：</p>
+<table>
+<tr><th>概念</th><th>说明</th></tr>
+<tr><td><strong>信值雷达</strong></td><td>您的五维信用画像（诚信/互助/专业/活跃/成长）， 0-100 分</td></tr>
+<tr><td><strong>信值等级</strong></td><td>S（≥90）/A（80-89）/B（70-79）/C（60-69）/D（&lt;60）五档</td></tr>
+<tr><td><strong>臻选货架</strong></td><td>只展示通过安全硬闸的好物， 高契合商品优先</td></tr>
+<tr><td><strong>信值抵扣</strong></td><td>等级越高， 购物抵扣越多（S 级享基准价 15% 信值抵扣）</td></tr>
+<tr><td><strong>邻里臻选</strong></td><td>看看同城市民在买什么（仅聚合数据， 无人可见您的购买）</td></tr>
+</table>
+<div class="redline"><strong>核心承诺（红线公示）</strong>：① 价格构成强制公示：原价−信值抵扣−平台折扣=实付， 每一项可追溯； ② 同一商品对不同信值用户的价差不超过 20%， 超线自动进入审计通道； ③ 您的信值抵扣永远受地板保护， 单笔抵扣不超过商品价的 30%； ④ 观测与反馈通道<strong>永不关停</strong>——您的意见随时可提。</div>
+</div>
+
+<!-- 二 -->
+<h2 class="section">二、信值雷达：您的信用画像</h2>
+<div class="card">
+<h3 class="engine">2.1 五个维度怎么来？</h3>
+<table>
+<tr><th>维度</th><th>权重</th><th>数据来源（零手工申报， 全部真实行为）</th></tr>
+<tr><td>诚信度</td><td>30%</td><td>风险档案（违规记录按 90 天半衰期衰减）</td></tr>
+<tr><td>互助值</td><td>25%</td><td>67号叫帮互助信值 + 帮助质量评价</td></tr>
+<tr><td>专业度</td><td>20%</td><td>44号评分体系（您贡献的评分质量）</td></tr>
+<tr><td>活跃度</td><td>15%</td><td>登录与订单流水（自然使用）</td></tr>
+<tr><td>成长力</td><td>10%</td><td>资产估值斜率（62号）</td></tr>
+</table>
+<h3 class="engine">2.2 看懂您的雷达</h3>
+<ul class="clean">
+<li><strong>总分 0-100</strong>：分段曲线计分（及格线 50， 卓越线趋近 100）</li>
+<li><strong>硬熔断</strong>：任一维 &lt; 40 → 总分封顶 59（单维短板会拖累整体）</li>
+<li><strong>软奖励</strong>：连续 6 个月无违规 + 互助活跃前 10% → 总分 +5</li>
+<li><strong>新用户保护</strong>：注册 30 天内冷启动权重（活跃度权重上调， 诚信度下调）——新人不因"没记录"被低估</li>
+</ul>
+<h3 class="engine">2.3 每维"影响因素 TOP3"</h3>
+<p>雷达页每一维都展示最具体的影响因素， 例如：</p>
+<div class="note">诚信度 ↓： 因上周 1 笔订单超时 / 风险信号命中 2 次</div>
+<p><strong>如何提分（确定性路径， 无捷径）</strong>：守约（诚信）/ 参与邻里互助（互助提升最快）/ 发布高质量评价（专业）/ 自然活跃（活跃）/ 持续使用（成长）。</p>
+</div>
+
+<!-- 三 -->
+<h2 class="section">三、臻选货架：选好物</h2>
+<div class="card">
+<h3 class="engine">3.1 商品为什么排前面？</h3>
+<p>每个商品经过三维评估， <strong>总分公示</strong>：</p>
+<table>
+<tr><th>维度</th><th>说明</th></tr>
+<tr><td>契合度</td><td>商品特征×您的画像（您常参与互助→宴请/礼品类更契合）</td></tr>
+<tr><td>安全系数</td><td>硬闸检查（在售状态/违禁词/差评观察）——低于 0.6 直接拦截</td></tr>
+<tr><td>转化潜力</td><td>同类商品的历史成交表现</td></tr>
+</table>
+<p>分级：<strong>L1 臻选位</strong>（≥75， 货架前排）/ L2 优选（≥50）/ L3 普通 / L4 风险（拦截留痕， 详情页如实告知拦截原因——<strong>永不静默丢弃</strong>）。</p>
+<h3 class="engine">3.2 商品详情页看什么？</h3>
+<ul class="clean">
+<li><strong>三维分明细</strong>：契合 X × 安全 X × 转化 X = 价值分 X（等级）+ 解释文本</li>
+<li><strong>信值加权排序分</strong>：高信值用户看到的排序更贴合自身画像</li>
+</ul>
+</div>
+
+<!-- 四 -->
+<h2 class="section">四、透明定价：看清每一分钱</h2>
+<div class="card">
+<h3 class="engine">4.1 价格构成卡（每个商品详情页强制公示）</h3>
+<div class="price-box">原价 ¥268
+<span class="minus">- 信值抵扣 ¥38.19（等级S α=0.15）</span>
+<span class="minus">- 三因子折扣 ¥13.40（信任×贡献×活动）</span>
+─────────────────
+<span class="total">= 实付 ¥216.41</span></div>
+<p><strong>您的等级越高， 信值抵扣越多</strong>：</p>
+<table>
+<tr><th>等级</th><th>抵扣系数 α</th><th>例（¥268 基准价）</th></tr>
+<tr><td>S</td><td>15%</td><td>约抵 ¥38</td></tr>
+<tr><td>A</td><td>12%</td><td>约抵 ¥30</td></tr>
+<tr><td>B</td><td>8%</td><td>约抵 ¥20</td></tr>
+<tr><td>C/D</td><td>0</td><td>无抵扣</td></tr>
+</table>
+<h3 class="engine">4.2 三重保护（平台红线）</h3>
+<ol class="steps">
+<li><strong>抵扣上限</strong>：单笔信值抵扣 ≤ 商品价 30%（防恶意套现）</li>
+<li><strong>地板保护</strong>：折上折再深， 实付也不低于基准价 7 折（68号 α 不可击穿 60号三因子地板）</li>
+<li><strong>杀熟审计</strong>：同商品跨用户价差 &gt;20% 自动留痕进入审计通道（大数据杀熟零容忍）</li>
+</ol>
+</div>
+
+<!-- 五 -->
+<h2 class="section">五、小竹导购：问不踩坑</h2>
+<div class="card">
+<p>在商品页向小竹提问， 她按 <strong>SOP 五步法</strong>回答：</p>
+<ol class="steps">
+<li><strong>意图锚定</strong>——听懂您问价格/求推荐/还是有疑问</li>
+<li><strong>信值佐证</strong>——"您当前信值等级 S（雷达总分 95）， 等级决定臻选抵扣权益"</li>
+<li><strong>透明解释</strong>——逐项拆解价格构成， 数字全部实时查询（无预测性数字）</li>
+<li><strong>履约跟进</strong>——商品口碑（月销/评分）如实展示， 风险商品直接告知</li>
+<li><strong>价值沉淀</strong>——指出您最弱维度， 给出确定性成长建议</li>
+</ol>
+<div class="note"><strong>边界公示</strong>（导购人格卡片 <code>GET /api/xinzhi/guide/personas</code>）：小竹是<strong>解释者而非推销者</strong>——不承诺降价、不诱导消费； 一切数字来自实时查询层。</div>
+</div>
+
+<!-- 六 -->
+<h2 class="section">六、邻里臻选与求购：社区一起买</h2>
+<div class="card">
+<h3 class="engine">6.1 邻里臻选频道</h3>
+<p>展示<strong>同城市民在买的品类聚合</strong>（多少人买过/多少单）：</p>
+<div class="privacy"><strong>隐私红线</strong>：仅平台×品类聚合， 单品类不足 5 人不展示（您的个人购买<strong>任何人</strong>不可见）。</div>
+<h3 class="engine">6.2 邻里求购（三步）</h3>
+<ol class="steps">
+<li><strong>发布</strong>：说明想买什么（可指定商品/数量/紧急度/位置）——限 3 单在途； 违禁内容（刷单/办证等）直接拒绝</li>
+<li><strong>响应</strong>：看到邻居的求购可以搭把手（您的响应仅显示脱敏昵称， <strong>不留任何联系方式</strong>——安全靠平台撮合， 不靠交换隐私）</li>
+<li><strong>关闭</strong>：发起人确认解决后关闭， 记录邻里拼单碳减排（500g×参与人数， 并入您的碳档案）</li>
+</ol>
+<h3 class="engine">6.3 碳积分档案</h3>
+<p>您的碳积分 = 67号互助碳（公益 100%/有偿 50%/接力均摊）+ 求购拼单碳。<strong>只读观测， 不可交易</strong>——它是对您环保行为的荣誉记录， 不是货币。</p>
+</div>
+
+<!-- 七 -->
+<h2 class="section">七、商家入驻：信值认证</h2>
+<div class="card">
+<h3 class="engine">7.1 4+2 认证</h3>
+<table>
+<tr><th>项目</th><th>性质</th><th>说明</th></tr>
+<tr><td>主体资质</td><td><strong>必查</strong></td><td>营业执照/许可证</td></tr>
+<tr><td>履约能力</td><td><strong>必查</strong></td><td>仓储/物流/供货证明</td></tr>
+<tr><td>服务保障</td><td><strong>必查</strong></td><td>售后/客服体系</td></tr>
+<tr><td>后台系统</td><td><strong>必查</strong></td><td>库存/订单系统对接</td></tr>
+<tr><td>生态贡献</td><td>加分（+8）</td><td>平台生态共建</td></tr>
+<tr><td>外部背书</td><td>加分（+6）</td><td>第三方权威认证</td></tr>
+</table>
+<p><strong>四必查缺一即拒</strong>（确定性规则， 提前补齐再申请， 省时间）。</p>
+<h3 class="engine">7.2 预演沙盘（入驻前先"试运营"）</h3>
+<p>申报预期指标（日均单量/履约率/客诉率/时效达标率）→ 系统模拟 1000 单履约 → 生成<strong>《启航报告》</strong>：</p>
+<ul class="clean">
+<li><strong>信值轨迹预测</strong>（10 段爬坡至稳态）</li>
+<li><strong>TOP3 风险</strong>（按模拟绝对量排序：违约/客诉/迟发）</li>
+<li><strong>成长路线图</strong>（每项提升的分数弹性）</li>
+</ul>
+<div class="note">沙盘为确定性推演（非承诺）； 建议履约率 98%/客诉 ≤1%/时效 95% 即可稳定进入 A-S 档。</div>
+<h3 class="engine">7.3 商家评级 S-A-B-C-D</h3>
+<p>评级分 = 认证分 + 履约分（订单结算率×28 + 好评率×18， 全平台只读聚合——刷不出来）：</p>
+<ul class="clean">
+<li><strong>升级</strong>：履约表现提升自动生效（历史留痕）</li>
+<li><strong>降级</strong>：<strong>永不自动</strong>——仅生成平台内部建议书， 经人工审批总线裁决（给商家申诉与改进窗口， 处罚透明）</li>
+</ul>
+</div>
+
+<!-- 八 -->
+<h2 class="section">八、反馈通道：意见直达（永不关停）</h2>
+<div class="card">
+<p>遇到问题随手反馈， 平台按标签<strong>自动分流</strong>：</p>
+<table>
+<tr><th>级别</th><th>触发</th><th>响应承诺</th></tr>
+<tr><td><strong>L3 紧急</strong></td><td>涉及诈骗/隐私泄露/人身安全等关键词</td><td><strong>15 分钟</strong>专人响应</td></tr>
+<tr><td><strong>L2 工单</strong></td><td>物流/分数/客服/价格/商品/互助类明确问题</td><td>24 小时内</td></tr>
+<tr><td><strong>L1 安抚</strong></td><td>情绪/无效表达</td><td>即时自动回复（已记录）</td></tr>
+</table>
+<p>提交后可随时查询进度（<code>GET /api/xinzhi/feedback/{id}</code>， 仅本人可见）。</p>
+</div>
+
+<!-- 九 -->
+<h2 class="section">九、灰度说明（为什么有的功能暂不可用？）</h2>
+<div class="card">
+<p>平台新功能按<strong>三态灰度</strong>渐进开放：观察（shadow）→ 辅助（assist）。</p>
+<ul class="clean">
+<li>若提示"决策面关闭"（409）：功能处于灰度观察期， 数据在积累， 观察达标后开放</li>
+<li><strong>观测面永不关停</strong>：您的雷达/评分/价格构成/反馈/碳档案/白皮书在任何阶段都可正常查看——信用透明是宪法， 不是功能</li>
+</ul>
+</div>
+
+<!-- 十 -->
+<h2 class="section">十、常见问题</h2>
+<div class="card">
+<p class="faq-q">Q1：我的信值分为什么比朋友低？</p>
+<p class="faq-a">A：五维来源不同（互助活跃度/评价质量/守约记录）， 雷达页每维 TOP3 影响因素写得清清楚楚——全部可解释， 无黑箱。</p>
+<p class="faq-q">Q2：同一商品我和朋友价格不一样， 是杀熟吗？</p>
+<p class="faq-a">A：信值抵扣因等级而异（这是透明激励， 构成卡公示每一项）； 但价差超过 20% 会自动触发审计——<strong>平台对大数据杀熟零容忍</strong>， 超线记录会被核查。</p>
+<p class="faq-q">Q3：信值能买卖吗？</p>
+<p class="faq-a">A：不能。信值与碳积分均为<strong>只读信用资产</strong>， 不可交易不可转让（防金融化红线）。</p>
+<p class="faq-q">Q4：商家被降级有救济吗？</p>
+<p class="faq-a">A：有。降级永不自动执行——必须经人工审批， 且全程留痕可申诉。</p>
+<p class="faq-q">Q5：邻里能看到我买了什么吗？</p>
+<p class="faq-a">A：永远不能。邻里频道仅展示品类聚合（&lt;5 人品类不展示）， 个体购买数据对任何人不可见。</p>
+</div>
+
+<!-- 附录 -->
+<h2 class="section">附录：端点速查（技术读者）</h2>
+<div class="card">
+<table>
+<tr><th>功能</th><th>端点</th><th>鉴权</th></tr>
+<tr><td>我的雷达</td><td><code>GET /api/xinzhi/radar</code></td><td>X-Member-Id</td></tr>
+<tr><td>90 日曲线</td><td><code>GET /api/xinzhi/radar/history</code></td><td>X-Member-Id</td></tr>
+<tr><td>臻选货架</td><td><code>GET /api/xinzhi/prime</code></td><td>X-Member-Id</td></tr>
+<tr><td>商品评分明细</td><td><code>GET /api/xinzhi/products/{id}/score</code></td><td>X-Member-Id</td></tr>
+<tr><td>价格构成</td><td><code>GET /api/xinzhi/price/{id}</code></td><td>X-Member-Id</td></tr>
+<tr><td>导购问答</td><td><code>POST /api/xinzhi/guide</code></td><td>X-Member-Id</td></tr>
+<tr><td>导购人格卡</td><td><code>GET /api/xinzhi/guide/personas</code></td><td>公开</td></tr>
+<tr><td>邻里臻选</td><td><code>GET /api/xinzhi/neighbor</code></td><td>公开</td></tr>
+<tr><td>求购大厅</td><td><code>GET /api/xinzhi/groupbuy</code></td><td>公开</td></tr>
+<tr><td>求购发布/响应/关闭</td><td><code>POST /api/xinzhi/groupbuy</code> + <code>/{id}/respond</code> + <code>/{id}/close</code></td><td>X-Member-Id</td></tr>
+<tr><td>我的碳档案</td><td><code>GET /api/xinzhi/carbon/{member_id}</code></td><td>公开只读</td></tr>
+<tr><td>反馈提交/进度</td><td><code>POST /api/xinzhi/feedback</code> + <code>GET /{id}</code></td><td>X-Member-Id</td></tr>
+<tr><td>商家认证/沙盘/评级</td><td><code>POST /api/xinzhi/merchant/apply</code> + <code>/simulate</code> + <code>GET /{id}/level</code> + <code>POST /{id}/regrade</code></td><td>X-Member-Id</td></tr>
+<tr><td>年度白皮书</td><td><code>GET /api/xinzhi/whitepaper</code></td><td>公开</td></tr>
+</table>
+</div>
+
+<footer class="finale">
+  <strong>结语</strong>：信值·臻选——让每一次守约、每一次互助、每一条真实评价， 都成为您看得见的购物权益。<strong>价格透明是底线， 信用资产是您自己的。</strong>
+</footer>
+
+</div>
+</body>
+</html>
