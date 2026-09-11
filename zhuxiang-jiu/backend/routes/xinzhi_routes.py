@@ -1,11 +1,16 @@
-"""68号 P0/P1·信值·臻选路由(五维雷达+臻选货架)
+"""68号 P0-P2·信值·臻选路由(五维雷达+臻选货架+透明定价导购)
 
-端点(5):
+端点(10):
     GET  /api/xinzhi/radar               五维雷达(最新快照/即时计算)
     GET  /api/xinzhi/radar/history        90 日历史曲线
     POST /api/xinzhi/products/score       商品三维评分批次(P1)
     GET  /api/xinzhi/prime                臻选货架 L1(信值加权排序)
     GET  /api/xinzhi/products/{id}/score  商品评分明细(可解释)
+    GET  /api/xinzhi/price/{id}           价格构成拆解(P2 透明定价)
+    POST /api/xinzhi/feedback             反馈提交(标签路由 L1/L2/L3)
+    GET  /api/xinzhi/feedback/{id}        反馈进度(透明)
+    POST /api/xinzhi/guide                导购应答(SOP五步法)
+    GET  /api/xinzhi/guide/personas        导购人格卡片(能力公示)
 
 鉴权: X-Member-Id(会员本人域; P0 与 /api/member/profile
 同口径)
@@ -28,7 +33,7 @@ def _member_id(x_member_id: str | None) -> int:
         return int(x_member_id)
     except ValueError:
         raise HTTPException(status_code=401,
-                            detail="X-Member-Id 非法")
+                            detail="X-Member-Id 非法") from None
 
 
 def _handle(e: Exception):
@@ -51,9 +56,35 @@ def _prime_service():
     return XinzhiPrimeService()
 
 
+def _pricing_service():
+    from services.xinzhi_pricing_service import (
+        XinzhiPricingService)
+    return XinzhiPricingService()
+
+
+def _guide_service():
+    from services.xinzhi_guide_service import (
+        XinzhiGuideService)
+    return XinzhiGuideService()
+
+
 class ScoreRequest(PydBaseModel):
     productIds: list = Field(None,
                              description="指定商品(空=全量)")
+
+
+class FeedbackRequest(PydBaseModel):
+    scene: str = Field("product",
+                       description="场景(product/logistics/"
+                                   "radar/service/guide)")
+    tags: list = Field(None, description="场景标签")
+    content: str = Field("", description="反馈文本(≤500字)")
+
+
+class GuideRequest(PydBaseModel):
+    productId: str = Field(...,
+                            description="商品ID")
+    query: str = Field("", description="用户咨询(意图锚定)")
 
 
 @router.get("/api/xinzhi/radar",
@@ -138,6 +169,92 @@ async def xinzhi_product_detail(
                     mid, product_id)}
     except Exception as e:
         _handle(e)
+
+
+@router.get("/api/xinzhi/price/{product_id}",
+            tags=["信值臻选购物平台"])
+async def xinzhi_price_breakdown(
+        product_id: str,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None,
+        promo: float = 1.0):
+    """价格构成拆解(原价-信值抵扣-三因子折扣=实付,
+    强制公示; 杀熟价差>20% 留痕审计)"""
+    mid = _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _pricing_service().price_breakdown(
+                    mid, product_id,
+                    promo_factor=promo)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/feedback",
+             tags=["信值臻选购物平台"])
+async def xinzhi_feedback_submit(
+        req: FeedbackRequest,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """反馈提交(标签路由: L1安抚自动回复/L2工单24h/
+    L3紧急15分钟——文档四步闭环)"""
+    mid = _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _pricing_service().submit_feedback(
+                    mid, req.scene, req.tags or [],
+                    req.content)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/xinzhi/feedback/{feedback_id}",
+            tags=["信值臻选购物平台"])
+async def xinzhi_feedback_status(
+        feedback_id: int,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """反馈进度(状态透明——文档"用户可见状态")"""
+    mid = _member_id(x_member_id)
+    try:
+        fb = await _pricing_service().feedback_status(
+            feedback_id)
+        if fb.get("memberId") != mid:
+            raise KeyError(
+                f"反馈不存在(feedbackId={feedback_id})")
+        return {"success": True, "data": fb}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/xinzhi/guide",
+             tags=["信值臻选购物平台"])
+async def xinzhi_guide_reply(
+        req: GuideRequest,
+        x_member_id: Annotated[str | None,
+                               Header(alias="X-Member-Id")]
+        = None):
+    """导购应答(SOP五步法: 意图锚定→信值佐证→透明解释→
+    履约跟进→价值沉淀; 数字全查询层, LLM 禁入判定)"""
+    mid = _member_id(x_member_id)
+    try:
+        return {"success": True, "data":
+                await _guide_service().guide_reply(
+                    mid, req.productId, req.query)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/xinzhi/guide/personas",
+            tags=["信值臻选购物平台"])
+async def xinzhi_guide_personas():
+    """导购人格卡片(SOP步骤/意图域/红线公示——
+    无需登录, 能力透明)"""
+    return {"success": True, "data":
+            _guide_service().persona_card()}
 
 
 def register_xinzhi_routes(app) -> None:

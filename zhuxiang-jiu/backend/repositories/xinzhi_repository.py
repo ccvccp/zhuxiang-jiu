@@ -54,11 +54,15 @@ def _now_iso() -> str:
 
 
 # 序列化类型清单(bool 陷阱还原——P6g-4 实机教训)
-_INT_FIELDS = ("snapshotId", "memberId", "scoreSeq")
+_INT_FIELDS = ("snapshotId", "memberId", "scoreSeq",
+               "detailSeq", "feedbackId")
 _FLOAT_FIELDS = ("integrity", "mutual", "expert", "activity",
                  "growth", "totalScore", "daysSinceRegister",
                  "fit", "safety", "conversion", "valueScore",
-                 "finalRank", "baseScore")
+                 "finalRank", "baseScore",
+                 "basePrice", "trustDiscount",
+                 "contributionDiscount", "promoFactor",
+                 "xinzhiCredit", "finalPrice", "priceDiff")
 _BOOL_FIELDS = ("circuitBroken", "coldStart", "bonusApplied",
                 "hardBlocked")
 _LIST_FIELDS = ("integritySources", "mutualSources",
@@ -72,6 +76,8 @@ class XinzhiRepository:
 
     TABLE_SNAPSHOTS = "xinzhi_radar_snapshots"
     TABLE_PRODUCT_SCORES = "xinzhi_product_scores"
+    TABLE_PRICE_DETAILS = "xinzhi_price_details"
+    TABLE_FEEDBACK = "xinzhi_feedback"
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -116,12 +122,9 @@ class XinzhiRepository:
                     record[k] = True
                 else:
                     record[k] = bool(v)
-            elif k in _LIST_FIELDS and isinstance(v, str):
-                try:
-                    record[k] = json.loads(v)
-                except ValueError:
-                    record[k] = v
-            elif isinstance(v, str) and v.startswith(("{", "[")):
+            elif isinstance(v, str) and (
+                    k in _LIST_FIELDS
+                    or v.startswith(("{", "["))):
                 try:
                     record[k] = json.loads(v)
                 except ValueError:
@@ -133,6 +136,8 @@ class XinzhiRepository:
     def _ensure_store(self):
         self.store.setdefault(self.TABLE_SNAPSHOTS, {})
         self.store.setdefault(self.TABLE_PRODUCT_SCORES, {})
+        self.store.setdefault(self.TABLE_PRICE_DETAILS, {})
+        self.store.setdefault(self.TABLE_FEEDBACK, {})
 
     async def next_id(self, kind: str) -> int:
         if is_redis_mode():
@@ -270,3 +275,80 @@ class XinzhiRepository:
                     and r.get("memberId") == member_id:
                 return r
         return None
+
+    # ============================================================
+    # 价格构成拆解(P2 透明定价——杀熟审计源)
+    # ============================================================
+
+    async def save_price_detail(self, record: dict) -> dict:
+        """保存价格构成({detailSeq, productId, memberId,
+        basePrice, trustDiscount, contributionDiscount,
+        promoFactor, xinzhiCredit(α 抵扣), finalPrice,
+        breakdownLine, floored, pricedAt})"""
+        return await self._save(self.TABLE_PRICE_DETAILS,
+                                record["detailSeq"], record)
+
+    async def list_price_details(self,
+                                 product_id: str = None,
+                                 member_id: int = None,
+                                 limit: int = 200
+                                 ) -> list[dict]:
+        """价格构成查询(同商品跨会员价差审计源)"""
+        result = []
+        for r in await self._list(self.TABLE_PRICE_DETAILS,
+                                  limit=5000):
+            if product_id is not None \
+                    and r.get("productId") != product_id:
+                continue
+            if member_id is not None \
+                    and r.get("memberId") != member_id:
+                continue
+            result.append(r)
+        return sorted(
+            result,
+            key=lambda x: -int(x.get("detailSeq") or 0)
+        )[:limit]
+
+    # ============================================================
+    # 反馈闭环(P2——标签路由 L1/L2/L3 分流)
+    # ============================================================
+
+    async def save_feedback(self, record: dict) -> dict:
+        """保存反馈({feedbackId, memberId, scene, tags,
+        content, level(L1安抚/L2工单/L3紧急), status,
+        routedTo, respondedAt, resolvedNote, createdAt})"""
+        return await self._save(self.TABLE_FEEDBACK,
+                                record["feedbackId"], record)
+
+    async def get_feedback(self,
+                           feedback_id: int) -> dict | None:
+        return await self._get(self.TABLE_FEEDBACK, feedback_id)
+
+    async def update_feedback(self, feedback_id: int,
+                              fields: dict) -> dict:
+        record = await self.get_feedback(feedback_id)
+        if record is None:
+            raise KeyError(feedback_id)
+        record.update(fields)
+        return await self._save(self.TABLE_FEEDBACK,
+                                feedback_id, record)
+
+    async def list_feedback(self, member_id: int = None,
+                            level: str = None,
+                            status: str = None,
+                            limit: int = 100) -> list[dict]:
+        result = []
+        for r in await self._list(self.TABLE_FEEDBACK,
+                                  limit=5000):
+            if member_id is not None \
+                    and r.get("memberId") != member_id:
+                continue
+            if level and r.get("level") != level:
+                continue
+            if status and r.get("status") != status:
+                continue
+            result.append(r)
+        return sorted(
+            result,
+            key=lambda x: -int(x.get("feedbackId") or 0)
+        )[:limit]
