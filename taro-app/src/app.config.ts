@@ -42,7 +42,8 @@ export default defineAppConfig({
     'pages/blogger/index',
     'pages/xinzhi/index',
     'pages/promo/index',
-    'pages/zy/index'
+    'pages/zy/index',
+    'pages/zf/index'
   ],
   window: {
     backgroundTextStyle: 'light',

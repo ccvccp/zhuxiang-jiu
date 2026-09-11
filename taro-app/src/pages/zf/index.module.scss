@@ -1,0 +1,419 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 88rpx);
+}
+
+// ============================================
+// 页签栏
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-xs;
+  border-bottom: 1rpx solid $color-border;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-md 0;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  position: relative;
+}
+
+.tabActive {
+  color: $color-primary;
+  font-weight: $font-weight-bold;
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    width: 36rpx;
+    height: 4rpx;
+    border-radius: $radius-round;
+    background: $color-primary;
+  }
+}
+
+.section {
+  padding: $spacing-md $spacing-lg $spacing-xl;
+}
+
+.cardTitle {
+  margin: $spacing-lg 0 $spacing-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.runBtn {
+  margin-bottom: $spacing-md;
+  padding: $spacing-sm 0;
+  text-align: center;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.footNote {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 总览 hero
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, #2a2f4a, #4a4266);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  box-shadow: $shadow-card-hover;
+}
+
+.heroTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroSub {
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.65);
+}
+
+.heroStats {
+  display: flex;
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.15);
+}
+
+.heroStat {
+  flex: 1;
+  text-align: center;
+}
+
+.heroNum {
+  font-size: 40rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroLbl {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.65);
+}
+
+// 孪生卡
+.twinCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.dimRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.dimName {
+  width: 180rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.dimBar {
+  flex: 1;
+  height: 12rpx;
+  background: $color-bg-page;
+  border-radius: $radius-round;
+  overflow: hidden;
+}
+
+.dimBarFill {
+  height: 100%;
+  background: linear-gradient(90deg, #2a2f4a, #7c73b8);
+  border-radius: $radius-round;
+}
+
+.dimScoreVal {
+  width: 80rpx;
+  text-align: right;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+// ============================================
+// 结果卡(通用)
+// ============================================
+.resultCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.resHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-sm;
+}
+
+.resBatch {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.resScore {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.resItem {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+}
+
+.resOk {
+  padding: $spacing-xs $spacing-md;
+  background: rgba(0, 180, 42, 0.08);
+  color: $color-success;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+}
+
+.resWarn {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(245, 63, 63, 0.08);
+  color: $color-error;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  line-height: 1.6;
+}
+
+.alertTag {
+  padding: 4rpx 16rpx;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.sevHigh { background: $color-error; }
+.sevMid { background: $color-warning; }
+.sevLow { background: $color-success; }
+
+.gradeBadge {
+  padding: 4rpx 20rpx;
+  border-radius: $radius-round;
+  background: $color-primary;
+  color: $color-text-white;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+}
+
+// 工单/合约卡
+.woCard {
+  margin-top: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  border-left: 6rpx solid $color-warning;
+}
+
+.woTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.woSugg {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.6;
+}
+
+.woDisp {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-warning;
+}
+
+.contractCard {
+  margin-top: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-sm;
+  border-left: 6rpx solid $color-primary;
+}
+
+// 等级行(数据分级)
+.lvRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-xs 0;
+  border-bottom: 1rpx solid $color-divider;
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+}
+
+.lvTag {
+  width: 60rpx;
+  padding: 2rpx 0;
+  text-align: center;
+  border-radius: $radius-xs;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.lvField {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.lvCat {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 进化
+// ============================================
+.evoPanel {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.evoRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-sm 0;
+}
+
+.evoLbl {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.evoBtns {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.evoBtn {
+  padding: $spacing-xs $spacing-lg;
+  border: 1rpx solid $color-primary;
+  color: $color-primary;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+}
+
+.evoHint {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-sm;
+  border-top: 1rpx dashed $color-divider;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 判例卡
+.pcCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+  border-left: 6rpx solid $color-error;
+}
+
+.pcHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pcId {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.pcName {
+  margin-top: 4rpx;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.pcSugg {
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  line-height: 1.6;
+}
+
+// 反馈留痕
+.fbItem {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.fbRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.fbAdopted { color: $color-success; font-weight: $font-weight-bold; font-size: $font-size-sm; }
+.fbRejected { color: $color-error; font-weight: $font-weight-bold; font-size: $font-size-sm; }
+.fbCorrected { color: $color-warning; font-weight: $font-weight-bold; font-size: $font-size-sm; }
+
+.fbWeight {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.bottomSpace {
+  height: 40rpx;
+}

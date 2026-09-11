@@ -77,6 +77,8 @@ from routes.hub_routes import register_hub_routes
 from routes.promo_routes import register_promo_routes
 # 智启元·AI智能财务大模型(财务管理模块升级更名)
 from routes.zy_routes import register_zy_routes
+# 智法·AI智能法务大模型(24号合规合法智能监控模块升级更名·产销法一体化)
+from routes.zf_routes import register_zf_routes
 # AI智能网站同盟模块(37号·酒水不分家商户同盟平台)
 from routes.alliance_routes import register_alliance_routes
 # AI智能产品管理模块(38号·权限审核×上下架×图片设计更换)
@@ -144,6 +146,8 @@ __all__ = [
     "register_knowledge_routes",
     "register_hub_routes",
     "register_promo_routes",
+    "register_zy_routes",
+    "register_zf_routes",
     "register_alliance_routes",
     "register_pdm_routes",
     "register_entry_routes",
