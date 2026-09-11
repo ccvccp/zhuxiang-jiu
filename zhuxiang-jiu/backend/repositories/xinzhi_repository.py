@@ -1,8 +1,10 @@
 """68号·信值·臻选购物平台 数据访问层(双模式: 内存 + Redis)
 
-表清单(P0):
+表清单(P0/P1):
     xinzhi_radar_snapshots: 用户信值五维快照
         (总分/五维分/归因/审计留痕/计算指纹——防重复计算)
+    xinzhi_product_scores: 商品三维评分快照(P1 臻选货架)
+        (契合×安全硬闸×转化 → L1臻选/L2优选/L3普通/L4风险)
 
 设计对齐(《68号 信值臻选购物平台创新规划方案》§四):
     - 编排式只读聚合: 五维数据源全部来自既有模块(47/67/44/
@@ -52,19 +54,24 @@ def _now_iso() -> str:
 
 
 # 序列化类型清单(bool 陷阱还原——P6g-4 实机教训)
-_INT_FIELDS = ("snapshotId", "memberId")
+_INT_FIELDS = ("snapshotId", "memberId", "scoreSeq")
 _FLOAT_FIELDS = ("integrity", "mutual", "expert", "activity",
-                 "growth", "totalScore", "daysSinceRegister")
-_BOOL_FIELDS = ("circuitBroken", "coldStart", "bonusApplied")
+                 "growth", "totalScore", "daysSinceRegister",
+                 "fit", "safety", "conversion", "valueScore",
+                 "finalRank", "baseScore")
+_BOOL_FIELDS = ("circuitBroken", "coldStart", "bonusApplied",
+                "hardBlocked")
 _LIST_FIELDS = ("integritySources", "mutualSources",
                 "expertSources", "activitySources",
-                "growthSources", "recentFactors")
+                "growthSources", "recentFactors",
+                "fitModules", "safetyReasons", "blockedReasons")
 
 
 class XinzhiRepository:
     """68号 P0·信值臻选数据访问层"""
 
     TABLE_SNAPSHOTS = "xinzhi_radar_snapshots"
+    TABLE_PRODUCT_SCORES = "xinzhi_product_scores"
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -125,6 +132,7 @@ class XinzhiRepository:
 
     def _ensure_store(self):
         self.store.setdefault(self.TABLE_SNAPSHOTS, {})
+        self.store.setdefault(self.TABLE_PRODUCT_SCORES, {})
 
     async def next_id(self, kind: str) -> int:
         if is_redis_mode():
@@ -212,5 +220,53 @@ class XinzhiRepository:
                 continue
             result.append(r)
         return sorted(result,
-                       key=lambda x: x.get("snapshotId", 0)
-                       )[:limit]
+                      key=lambda x: x.get("snapshotId", 0)
+                      )[:limit]
+
+    # ============================================================
+    # 商品三维评分(P1 臻选货架)
+    # ============================================================
+
+    async def save_product_score(self, record: dict) -> dict:
+        """保存商品评分({scoreSeq, productId, memberId(个性化),
+        fit, fitModules, safety, safetyReasons, conversion,
+        valueScore, grade, blockedReasons, hardBlocked,
+        baseScore, finalRank, scoredAt})"""
+        return await self._save(self.TABLE_PRODUCT_SCORES,
+                                record["scoreSeq"], record)
+
+    async def get_product_score(self, score_seq: int) -> dict | None:
+        return await self._get(self.TABLE_PRODUCT_SCORES,
+                               score_seq)
+
+    async def list_product_scores(self,
+                                  product_id: str = None,
+                                  member_id: int = None,
+                                  grade: str = None,
+                                  limit: int = 200) -> list[dict]:
+        """评分查询(最新优先; 商品/会员/分级过滤)"""
+        result = []
+        for r in await self._list(self.TABLE_PRODUCT_SCORES,
+                                  limit=5000):
+            if product_id is not None \
+                    and r.get("productId") != product_id:
+                continue
+            if member_id is not None \
+                    and r.get("memberId") != member_id:
+                continue
+            if grade and r.get("grade") != grade:
+                continue
+            result.append(r)
+        return sorted(result,
+                      key=lambda x: -int(x.get("scoreSeq") or 0)
+                      )[:limit]
+
+    async def find_product_score(self, product_id: str,
+                                 member_id: int) -> dict | None:
+        """按商品+会员查最新评分(幂等锚)"""
+        for r in await self._list(self.TABLE_PRODUCT_SCORES,
+                                  limit=5000):
+            if r.get("productId") == product_id \
+                    and r.get("memberId") == member_id:
+                return r
+        return None
