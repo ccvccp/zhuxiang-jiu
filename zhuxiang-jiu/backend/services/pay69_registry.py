@@ -207,6 +207,75 @@ MAX_FEE_RATE = 0.006
 
 
 # ============================================================
+# P2 风险熵引擎(六轴确定性——LLM 禁入)
+# ============================================================
+
+# 六轴域(封闭——熵计算确定性查表)
+ENTROPY_AXES = (
+    "amount",       # 金额轴(越大熵越高)
+    "trust",        # 信值轴(45号等级——越高熵越低)
+    "behavior",     # 行为轴(基线偏离度)
+    "environment",  # 环境轴(设备/时段/地点)
+    "channel",      # 通道轴(通道风险等级)
+    "history",      # 历史轴(支付异常史)
+)
+
+# 六轴权重(封闭注册——变更走慢环 46号
+# 审批; 历史误拦截回流→轴权重建议书)
+ENTROPY_WEIGHTS: dict = {
+    "amount": 0.20,
+    "trust": 0.25,
+    "behavior": 0.20,
+    "environment": 0.15,
+    "channel": 0.10,
+    "history": 0.10,
+}
+
+# 熵值→认证步进梯度(封闭四档——
+# 摩擦感与信任等级成反比铁律, 60号
+# P2 惯例继承)
+STEP_LADDER = (
+    ("free", 0.30, "免密支付", "light"),
+    ("otp", 0.50, "短信验证码+滑动验证", "standard"),
+    ("biometric", 0.70, "生物特征强验证", "strong"),
+    ("dual", 1.01, "双人复核(高安全)", "enhanced"),
+)
+
+# 60号 riskTier 语义对齐声明(纯映射
+# 消费——60号代码零改动)
+# free↔light / otp↔standard /
+# biometric↔strong / dual↔enhanced
+
+# 金额轴分档(封闭——确定性查表)
+AMOUNT_BANDS = (
+    (100, 0.10),      # ≤¥100 → 0.10
+    (1000, 0.30),     # ≤¥1000 → 0.30
+    (5000, 0.50),     # ≤¥5000 → 0.50
+    (20000, 0.70),    # ≤¥20000 → 0.70
+    (float("inf"), 0.95),  # >¥20000 → 0.95
+)
+
+# 信值轴分档(45号 tier 口径)
+TRUST_BANDS = {
+    "S": 0.10, "A": 0.30, "B": 0.60,
+    "C": 0.60, "D": 0.90,
+    "trusted": 0.10, "standard": 0.30,
+    "watched": 0.60, "restricted": 0.90,
+}
+
+# 通道轴风险等级(封闭映射)
+CHANNEL_RISK = {
+    "biometric": 0.20,
+    "bank": 0.30,
+    "wechat": 0.40,
+    "alipay": 0.40,
+    "unionpay": 0.40,
+    "qr": 0.50,
+    "credit_tv": 0.60,
+}
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -266,6 +335,40 @@ def _validate_registry() -> None:
     if abs(total - 1.0) > 1e-9:
         raise RuntimeError(
             f"pay69 路由权重和≠1.0: {total}")
+    # ⑨ 熵六轴权重封闭+和=1.0
+    if set(ENTROPY_WEIGHTS) != set(ENTROPY_AXES):
+        raise RuntimeError("pay69 熵轴与权重不闭合")
+    etotal = sum(ENTROPY_WEIGHTS.values())
+    if abs(etotal - 1.0) > 1e-9:
+        raise RuntimeError(
+            f"pay69 熵权重和≠1.0: {etotal}")
+    # ⑩ 步进梯度四档封闭+阈值递增+
+    #    riskTier 语义对齐(60号四级)
+    steps = tuple(s[0] for s in STEP_LADDER)
+    if steps != ("free", "otp", "biometric",
+                 "dual"):
+        raise RuntimeError(f"pay69 步进梯度非法: {steps}")
+    tiers = tuple(s[3] for s in STEP_LADDER)
+    if tiers != ("light", "standard",
+                 "strong", "enhanced"):
+        raise RuntimeError(
+            f"pay69 riskTier 对齐非法: {tiers}")
+    for i in range(1, len(STEP_LADDER)):
+        if STEP_LADDER[i][1] \
+                <= STEP_LADDER[i - 1][1]:
+            raise RuntimeError("pay69 步进阈值非递增")
+    # ⑪ 通道轴风险映射覆盖全通道
+    if set(CHANNEL_RISK) != expected:
+        raise RuntimeError("pay69 通道风险映射不齐备")
+    # ⑫ 金额分档递增+信值分档域合法
+    for i in range(1, len(AMOUNT_BANDS)):
+        if AMOUNT_BANDS[i][1] \
+                <= AMOUNT_BANDS[i - 1][1]:
+            raise RuntimeError("pay69 金额分档非递增")
+    for tier, v in TRUST_BANDS.items():
+        if not (0 <= v <= 1):
+            raise RuntimeError(
+                f"pay69 信值分档域外: {tier}={v}")
 
 
 _validate_registry()

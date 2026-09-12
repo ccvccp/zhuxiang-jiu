@@ -31,18 +31,21 @@ _WINDOW = 100
 
 
 class Pay69Repository:
-    """69号五表仓储(双模式——asyncio/Redis)"""
+    """69号七表仓储(双模式——asyncio/Redis)"""
 
     TABLE_CHANNELS = "pay69_channels"
     TABLE_INTENTS = "pay69_intents"
     TABLE_EVENTS = "pay69_events"
     TABLE_FLOWS = "pay69_flows"
     TABLE_HABITS = "pay69_habits"
+    TABLE_ENTROPY = "pay69_entropy"
+    TABLE_BEHAVIOR = "pay69_behavior"
 
     _ALL_TABLES = (
         TABLE_CHANNELS, TABLE_INTENTS,
         TABLE_EVENTS, TABLE_FLOWS,
-        TABLE_HABITS)
+        TABLE_HABITS, TABLE_ENTROPY,
+        TABLE_BEHAVIOR)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -425,3 +428,171 @@ class Pay69Repository:
         return dict(
             self.store[self.TABLE_HABITS]
             .get(member_id, {}))
+
+    # ============================================================
+    # 熵评估留痕(pay69_entropy——P2)
+    # ============================================================
+
+    async def next_entropy_seq(self) -> int:
+        """熵评估序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay69", "entropy", "seq"))
+        self._ensure_store()
+        self.store["_pay69_entropy_seq"] = \
+            self.store.get("_pay69_entropy_seq", 0) + 1
+        return self.store["_pay69_entropy_seq"]
+
+    async def save_entropy(self, record: dict) -> dict:
+        """保存熵评估留痕(全局流+会员流)"""
+        seq = await self.next_entropy_seq()
+        record["entropySeq"] = seq
+        payload = json.dumps(
+            record, ensure_ascii=False)
+        mid = str(record.get("memberId") or 0)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(
+                _k("pay69", "entropy", "all"),
+                payload)
+            await client.ltrim(
+                _k("pay69", "entropy", "all"),
+                0, 999)
+            await client.lpush(
+                _k("pay69", "entropy", "member",
+                   mid), payload)
+            await client.ltrim(
+                _k("pay69", "entropy", "member",
+                   mid), 0, 199)
+            return record
+        self._ensure_store()
+        table = self.store[self.TABLE_ENTROPY]
+        table.setdefault("all", [])\
+            .insert(0, dict(record))
+        del table["all"][1000:]
+        table.setdefault(
+            "by_member", {}
+        ).setdefault(mid, [])\
+            .insert(0, dict(record))
+        del table["by_member"][mid][200:]
+        return record
+
+    async def list_entropy(
+            self, member_id: int = None,
+            limit: int = 50) -> list[dict]:
+        """熵评估留痕列表(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if member_id:
+                data = await client.lrange(
+                    _k("pay69", "entropy", "member",
+                       member_id), 0, limit - 1)
+            else:
+                data = await client.lrange(
+                    _k("pay69", "entropy", "all"),
+                    0, limit - 1)
+            return [json.loads(x) for x in data]
+        self._ensure_store()
+        table = self.store[self.TABLE_ENTROPY]
+        recs = (table.get("by_member", {})
+                .get(str(member_id), [])
+                if member_id is not None
+                else table.get("all", []))
+        return [dict(r) for r in recs[:limit]]
+
+    # ============================================================
+    # 行为基线(pay69_behavior——P2 快环)
+    # ============================================================
+
+    async def get_baseline(
+            self, member_id: int) -> dict | None:
+        """会员行为基线(无则 None)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay69", "behavior", member_id))
+            if not data:
+                return None
+            out = {}
+            for k, v in data.items():
+                try:
+                    out[k] = float(v)
+                except (TypeError, ValueError):
+                    out[k] = v
+            if "samples" in out:
+                with contextlib.suppress(
+                        TypeError, ValueError):
+                    out["samples"] = int(
+                        float(out["samples"]))
+            return out
+        self._ensure_store()
+        rec = self.store[self.TABLE_BEHAVIOR]\
+            .get(member_id)
+        return dict(rec) if rec else None
+
+    async def save_baseline(
+            self, member_id: int,
+            record: dict) -> dict:
+        """保存会员行为基线"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            mapping = {}
+            for k, v in record.items():
+                if isinstance(v, (int, float)):
+                    mapping[k] = v
+                else:
+                    mapping[k] = json.dumps(
+                        v, ensure_ascii=False)
+            await client.hset(
+                _k("pay69", "behavior", member_id),
+                mapping=mapping)
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_BEHAVIOR][member_id] \
+            = dict(record)
+        return record
+
+    async def update_baseline(
+            self, member_id: int,
+            interval_ms: float,
+            typing_speed_ms: float) -> dict:
+        """行为基线增量更新(快环——EMA 指数
+        移动平均, 确定性; 首样本直建基线)
+
+        EMA α=0.3(新样本权重——平滑适应
+        自然漂移, 60号惯例口径)
+        """
+        alpha = 0.3
+        existing = await self.get_baseline(
+            member_id)
+        if not existing \
+                or not existing.get("samples"):
+            record = {
+                "memberId": member_id,
+                "avgIntervalMs": round(
+                    float(interval_ms), 1),
+                "avgTypingMs": round(
+                    float(typing_speed_ms), 1),
+                "samples": 1,
+            }
+        else:
+            n = int(existing.get("samples", 1))
+            record = {
+                "memberId": member_id,
+                "avgIntervalMs": round(
+                    existing.get(
+                        "avgIntervalMs", 0)
+                    * (1 - alpha)
+                    + float(interval_ms) * alpha, 1),
+                "avgTypingMs": round(
+                    existing.get(
+                        "avgTypingMs", 0)
+                    * (1 - alpha)
+                    + float(typing_speed_ms)
+                    * alpha, 1),
+                "samples": n + 1,
+            }
+        await self.save_baseline(
+            member_id, record)
+        return record

@@ -1,6 +1,6 @@
-"""69号·AI智能支付大模型路由(P0-P1)
+"""69号·AI智能支付大模型路由(P0-P2)
 
-端点(P0 8 + P1 7 = 15):
+端点(P0 8 + P1 7 + P2 6 = 21):
     GET  /api/pay69/channels            七通道字典公示(admin, 观测面)
     GET  /api/pay69/channels/{id}       单通道详情(admin, 观测面)
     GET  /api/pay69/health              健康度观测面(admin, 观测面)
@@ -16,13 +16,21 @@
     GET  /api/pay69/route/habits/{id}   会员习惯视图(admin, 观测面——P1)
     GET  /api/pay69/route/flows         路由执行留痕视图(admin, 观测面——P1)
     GET  /api/pay69/route/window        通道滚动窗口统计(admin, 观测面——P1)
+    GET  /api/pay69/entropy/dict        熵引擎字典公示(admin, 观测面——P2)
+    POST /api/pay69/entropy/compute     六轴熵计算+步进梯度(admin, 决策面 off 409——P2)
+    POST /api/pay69/behavior/report     行为样本上报(admin, 快环 EMA 基线——P2)
+    GET  /api/pay69/behavior/baseline/{id} 行为基线视图(admin, 观测面——P2)
+    POST /api/pay69/behavior/deviation 行为偏离度预览(admin, 决策面 off 409——P2)
+    GET  /api/pay69/entropy/records     熵评估留痕视图(admin, 观测面——P2)
 
 鉴权: 管理面 X-Role: admin(60号同款口径)。
 统一口径(60号范式):
     - 观测面不受 PAY69_MODE 影响
     - 快环观测上报(health report/
-      habit report)不受开关影响
-    - 决策面(compute/intents parse):
+      habit report/behavior report)
+      不受开关影响
+    - 决策面(compute/intents parse/
+      entropy compute/deviation):
       off=拒绝(409)
     - 执行面(execute): 需 assist
       (影子期不执行)
@@ -406,3 +414,177 @@ async def route_window(
     )
     return await Pay69RouterService()\
         .window_view()
+
+
+# ============================================================
+# P2 认证步进(6 端点)
+# ============================================================
+
+class EntropyComputeBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    amount: float = Field(gt=0,
+                          description="支付金额(元)")
+    trustTier: str = Field(
+        default="",
+        description="信值等级(45号口径: S/A/B/C/D 或 trusted/standard/watched/restricted)")
+    channelId: str = Field(default="",
+                          description="支付通道 ID")
+    newDevice: bool = Field(
+        default=False, description="新设备")
+    oddHour: bool = Field(
+        default=False, description="异常时段(0-6 点)")
+    newLocation: bool = Field(
+        default=False, description="异常地点")
+    anomalyRate: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="历史支付异常率(0-1)")
+    intervalMs: float = Field(
+        default=0, ge=0,
+        description="本次操作间隔(ms)——行为轴")
+    typingSpeedMs: float = Field(
+        default=0, ge=0,
+        description="本次按键间隔(ms)——行为轴")
+
+
+class BehaviorReportBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    intervalMs: float = Field(gt=0,
+                              description="操作间隔(ms)")
+    typingSpeedMs: float = Field(gt=0,
+                                 description="按键间隔(ms)")
+
+
+@router.get("/entropy/dict")
+async def entropy_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """熵引擎字典公示(六轴+权重+步进
+    梯度——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_entropy_service import (
+        Pay69EntropyService,
+    )
+    return Pay69EntropyService().entropy_dict()
+
+
+@router.post("/entropy/compute")
+async def entropy_compute(
+        body: EntropyComputeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """六轴熵计算+步进梯度解析(决策面
+    ——off 409; 六轴数值明细留痕,
+    fail-soft 引擎故障→light 档)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_entropy_service import (
+        Pay69EntropyService,
+    )
+    try:
+        return await Pay69EntropyService()\
+            .compute_entropy(
+                body.memberId, body.amount,
+                trust_tier=body.trustTier,
+                channel_id=body.channelId,
+                new_device=body.newDevice,
+                odd_hour=body.oddHour,
+                new_location=body.newLocation,
+                anomaly_rate=body.anomalyRate,
+                interval_ms=body.intervalMs,
+                typing_speed_ms=body.typingSpeedMs,
+                fail_soft=True)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/behavior/report")
+async def behavior_report(
+        body: BehaviorReportBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """行为样本上报(快环——EMA 基线
+    增量更新, 不受 PAY69_MODE 影响)"""
+    _require_admin(x_role)
+    from services.pay69_entropy_service import (
+        Pay69EntropyService,
+    )
+    try:
+        return await Pay69EntropyService()\
+            .report_behavior(
+                body.memberId, body.intervalMs,
+                body.typingSpeedMs)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/behavior/baseline/{member_id}")
+async def behavior_baseline(
+        member_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """会员行为基线视图(观测面)"""
+    _require_admin(x_role)
+    from services.pay69_entropy_service import (
+        Pay69EntropyService,
+    )
+    return await Pay69EntropyService()\
+        .baseline_view(member_id)
+
+
+@router.post("/behavior/deviation")
+async def behavior_deviation(
+        body: BehaviorReportBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """行为偏离度预览(决策面——off 409;
+    不落基线, 供收银台实时预演)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_entropy_service import (
+        Pay69EntropyService,
+    )
+    svc = Pay69EntropyService()
+    baseline = await svc.repo.get_baseline(
+        body.memberId)
+    deviation = svc.deviation_of(
+        baseline, body.intervalMs,
+        body.typingSpeedMs)
+    return {
+        "memberId": body.memberId,
+        "deviation": deviation,
+        "axisScore": svc._behavior_axis(
+            deviation),
+        "established": bool(
+            baseline and baseline.get(
+                "samples")),
+    }
+
+
+@router.get("/entropy/records")
+async def entropy_records(
+        memberId: int | None = None,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """熵评估留痕视图(观测面——全局/
+    会员双口径)"""
+    _require_admin(x_role)
+    from services.pay69_entropy_service import (
+        Pay69EntropyService,
+    )
+    return await Pay69EntropyService()\
+        .entropy_view(memberId, limit=limit)
