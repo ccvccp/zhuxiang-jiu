@@ -33,6 +33,13 @@
     POST /api/pay71/allocation/external/report 外部信号登记+建议书(admin, 快环摄取——不受开关——P3)
     POST /api/pay71/allocation/external/{seq}/decide 外部信号终审(admin, 人工——不受开关——P3)
     GET  /api/pay71/allocation/external 外部信号建议书视图(admin, 观测面——P3)
+    GET  /api/pay71/recon/dict          对账自愈字典公示(admin, 观测面——P4)
+    POST /api/pay71/recon/verify        T+0 三向核验(admin, 决策面 off 409——P4)
+    GET  /api/pay71/recon/verifies      核验留痕视图(admin, 观测面——P4)
+    POST /api/pay71/recon/heal          差错处置入口(幂等补单/转人工)(admin, 决策面 off 409——P4)
+    POST /api/pay71/recon/retry         补单重试结果上报(admin, 决策面 off 409——P4)
+    GET  /api/pay71/recon/records       补单账本视图(admin, 观测面——P4)
+    GET  /api/pay71/recon/baseline      渠道对账延迟差错基线(admin, 观测面——P4)
 
 鉴权: 管理面 X-Role: admin(69号同款口径)。
 统一口径(69号范式):
@@ -45,7 +52,8 @@
       影响——保护方向永续铁律(规划 §4.1)
     - 决策面(predict compute/revoke/
       split propose/confirm/allocation
-      compute)off=409
+      compute/recon verify/heal/retry)
+      off=409
     - KeyError → 404 / ValueError → 409
 """
 
@@ -190,6 +198,36 @@ class ExternalReportBody(BaseModel):
 
 class ExternalDecideBody(BaseModel):
     approve: bool = Field(description="批准/驳回")
+
+
+class ReconVerifyBody(BaseModel):
+    orderId: str = Field(description="订单号")
+    orderAmount: float = Field(
+        gt=0, description="订单金额(元)")
+    flowAmount: float = Field(
+        gt=0, description="流水金额(元)")
+    receiptAmount: float = Field(
+        gt=0, description="回执金额(元)")
+    portId: str = Field(
+        default="", description="端口 ID")
+    flowAt: str = Field(
+        default="", description="流水时间"
+                              "(ISO——空=不校验)")
+    receiptAt: str = Field(
+        default="", description="回执时间"
+                              "(ISO——空=不校验)")
+
+
+class ReconHealBody(BaseModel):
+    verifySeq: int = Field(
+        description="核验留痕序号")
+
+
+class ReconRetryBody(BaseModel):
+    reconSeq: int = Field(
+        description="补单记录序号")
+    success: bool = Field(
+        description="重试结果(成功/失败)")
 
 
 # ============================================================
@@ -820,6 +858,138 @@ async def allocation_external(
     )
     return await Pay71P3Service().external_view(
         context=context or None, limit=limit)
+
+
+# ============================================================
+# P4 端点(对账自愈)
+# ============================================================
+
+@router.get("/recon/dict")
+async def recon_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """对账自愈字典公示(核验源/差错
+    分类/补单状态机/资金铁律声明
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p4_service import (
+        Pay71P4Service,
+    )
+    return Pay71P4Service().dict_view()
+
+
+@router.post("/recon/verify")
+async def recon_verify(
+        body: ReconVerifyBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """T+0 笔级三向核验(订单/流水/回执
+    ——金额+时间窗确定性匹配, 差异自动
+    分类; 决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p4_service import (
+        Pay71P4Service,
+    )
+    try:
+        return await Pay71P4Service()\
+            .verify(
+                body.orderId,
+                body.orderAmount,
+                body.flowAmount,
+                body.receiptAmount,
+                port_id=body.portId,
+                flow_at=body.flowAt,
+                receipt_at=body.receiptAt)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/recon/verifies")
+async def recon_verifies(
+        state: str = "",
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """核验留痕视图(可按结果过滤
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p4_service import (
+        Pay71P4Service,
+    )
+    return await Pay71P4Service().verify_view(
+        state=state or None, limit=limit)
+
+
+@router.post("/recon/heal")
+async def recon_heal(
+        body: ReconHealBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """差错处置入口(幂等修复类→自动
+    重试补单; 资金类→直接转 60号 P3
+    人工终审——冲正/退款永不自动铁律;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p4_service import (
+        Pay71P4Service,
+    )
+    try:
+        return await Pay71P4Service()\
+            .heal(body.verifySeq)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/recon/retry")
+async def recon_retry(
+        body: ReconRetryBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """补单重试结果上报(成功→auto_
+    healed; 失败→退避重试或上限耗尽
+    转人工; 决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p4_service import (
+        Pay71P4Service,
+    )
+    try:
+        return await Pay71P4Service()\
+            .retry(body.reconSeq,
+                   body.success)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/recon/records")
+async def recon_records(
+        state: str = "",
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """补单账本视图(可按状态过滤
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p4_service import (
+        Pay71P4Service,
+    )
+    return await Pay71P4Service().recon_view(
+        state=state or None, limit=limit)
+
+
+@router.get("/recon/baseline")
+async def recon_baseline(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """渠道对账延迟差错基线视图(延迟档
+    +差错分布——快环观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p4_service import (
+        Pay71P4Service,
+    )
+    return await Pay71P4Service().baseline_view()
 
 
 def register_pay71_routes(app) -> None:

@@ -342,6 +342,74 @@ EXTERNAL_STATES = (
     "rejected",    # admin 拒绝留痕
 )
 
+# ============================================================
+# P4 对账自愈(T+0 笔级三向核验+幂等域
+# 自动重试补单——冲正/退款/大额终审
+# 永远 60号 P3 人工铁律)
+# ============================================================
+
+# 三向核验源(封闭——平台订单/支付
+# 流水/渠道回执)
+VERIFY_SOURCES = (
+    "order",       # 平台订单(60号
+                   # 归因链)
+    "flow",        # 支付流水(60号
+                   # pay60_flows)
+    "receipt",     # 渠道回执(60号
+                   # 渠道回执)
+)
+
+# 核验结果域(封闭)
+VERIFY_STATES = (
+    "matched",     # 三方匹配(一致)
+    "mismatch",    # 差异(需分类处置)
+)
+
+# 差错分类域(封闭——消费 60号 P3
+# 分类范式: 金额/订单号/时间窗三方
+# 匹配的确定性分类)
+DISCREPANCY_KINDS = (
+    "amount_diff",        # 金额不符
+    "timeout_no_callback",  # 超时未回调
+    "duplicate_charge",   # 重复扣款
+    "partial_refund",     # 部分退款
+)
+
+# 补单状态机(封闭——幂等域自动
+# + 留痕; 冲正/退款走 60号 P3 人工)
+RECON_STATES = (
+    "pending",      # 差异待处置
+    "retrying",     # 幂等重试中
+    "auto_healed",  # 自动补单成功
+    "manual_referral",  # 转人工
+                       # (60号 P3)
+    "failed",       # 重试上限耗尽
+                    # (转人工)
+)
+
+# 幂等重试上限(对齐 60号 P3 补单
+# 重试惯例——上限 3 次)
+RECON_RETRY_MAX = 3
+
+# 幂等重试退避(秒——确定性序列)
+RECON_RETRY_BACKOFF_S = (60, 300, 900)
+
+# 差错自动处置映射(封闭——仅幂等
+# 修复类可自动: timeout_no_callback
+# 走重试补单; 其余全部转 60号 P3
+# 人工终审铁律)
+RECON_AUTO_KINDS = (
+    "timeout_no_callback",
+)
+
+# 渠道对账延迟基线观测档(封闭——
+# 快环统计口径; 阈值变更走慢环审批)
+RECON_DELAY_BANDS = (
+    (60, "instant"),        # ≤60s 即时
+    (3600, "fast"),         # ≤1h 快速
+    (float("inf"), "slow"),  # >1h 缓慢
+)
+
 
 # ============================================================
 # 启动自检(宪法级)
@@ -562,6 +630,64 @@ def _validate_registry() -> None:
             "rejected"}:
         raise RuntimeError(
             "pay71 外部信号状态机非法")
+    # ⑬ P4 对账自愈: 核验源/结果域/
+    #     差错分类/补单状态机/重试参数/
+    #     自动处置映射/延迟档合法
+    if set(VERIFY_SOURCES) != {
+            "order", "flow", "receipt"}:
+        raise RuntimeError(
+            "pay71 三向核验源域非法")
+    if set(VERIFY_STATES) != {
+            "matched", "mismatch"}:
+        raise RuntimeError(
+            "pay71 核验结果域非法")
+    if set(DISCREPANCY_KINDS) != {
+            "amount_diff",
+            "timeout_no_callback",
+            "duplicate_charge",
+            "partial_refund"}:
+        raise RuntimeError(
+            "pay71 差错分类域非法")
+    if set(RECON_STATES) != {
+            "pending", "retrying",
+            "auto_healed",
+            "manual_referral",
+            "failed"}:
+        raise RuntimeError(
+            "pay71 补单状态机非法")
+    if not (1 <= RECON_RETRY_MAX <= 10):
+        raise RuntimeError(
+            "pay71 补单重试上限域外")
+    if not RECON_RETRY_BACKOFF_S or any(
+            b <= 0 for b in
+            RECON_RETRY_BACKOFF_S):
+        raise RuntimeError(
+            "pay71 补单重试退避非法")
+    for i in range(
+            1, len(RECON_RETRY_BACKOFF_S)):
+        if RECON_RETRY_BACKOFF_S[i] \
+                <= RECON_RETRY_BACKOFF_S[
+                    i - 1]:
+            raise RuntimeError(
+                "pay71 补单退避序列非递增")
+    if not set(RECON_AUTO_KINDS) \
+            <= set(DISCREPANCY_KINDS):
+        raise RuntimeError(
+            "pay71 自动处置映射域外")
+    if "duplicate_charge" in \
+            RECON_AUTO_KINDS \
+            or "amount_diff" \
+            in RECON_AUTO_KINDS:
+        raise RuntimeError(
+            "pay71 资金类差错永不自动"
+            "——铁律违反")
+    for i in range(
+            1, len(RECON_DELAY_BANDS)):
+        if RECON_DELAY_BANDS[i][0] \
+                <= RECON_DELAY_BANDS[
+                    i - 1][0]:
+            raise RuntimeError(
+                "pay71 对账延迟档非递增")
 
 
 _validate_registry()

@@ -38,6 +38,14 @@
         pay71_overrides   情境权重覆盖
                           (P3——外部信号
                           批准后激活)
+        pay71_verifies    T+0 三向核验
+                          留痕(P4)
+        pay71_recons      差错补单
+                          账本(P4——幂等
+                          域自动+留痕)
+        pay71_reconbase  渠道对账延迟
+                          差错基线统计
+                          (P4——快环)
 
 69号仓储范式平移:
     - 通用读写基元(_save/_get/_list)
@@ -80,6 +88,9 @@ class Pay71Repository:
     TABLE_ALLOCATIONS = "pay71_allocations"
     TABLE_EXTERNAL = "pay71_external"
     TABLE_OVERRIDES = "pay71_overrides"
+    TABLE_VERIFIES = "pay71_verifies"
+    TABLE_RECONS = "pay71_recons"
+    TABLE_RECONBASE = "pay71_reconbase"
 
     _ALL_TABLES = (
         TABLE_PORTS, TABLE_SIGNALS,
@@ -88,7 +99,8 @@ class Pay71Repository:
         TABLE_TRACES, TABLE_PREDICTIONS,
         TABLE_SPLITS, TABLE_RETRIES,
         TABLE_ALLOCATIONS, TABLE_EXTERNAL,
-        TABLE_OVERRIDES)
+        TABLE_OVERRIDES, TABLE_VERIFIES,
+        TABLE_RECONS, TABLE_RECONBASE)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -100,9 +112,12 @@ class Pay71Repository:
         "proposalSeq", "traceSeq",
         "predictionSeq", "splitSeq",
         "allocationSeq", "externalSeq",
+        "verifySeq", "reconSeq",
         "sampleCount", "probeStreak",
         "probeRequired", "memberId",
-        "retryCount")
+        "retryCount", "retryAttempt",
+        "healCount", "diffCount",
+        "totalCount")
     _FLOAT_FIELDS = (
         "avgLatencyMs", "errorRate",
         "successRate", "precursorScore",
@@ -110,13 +125,18 @@ class Pay71Repository:
         "successRateDelta", "callbackMs",
         "windowScore", "daysElapsed",
         "amount", "totalAmount", "entropy",
-        "weightedScore", "delta")
+        "weightedScore", "delta",
+        "orderAmount", "flowAmount",
+        "receiptAmount", "diffSeconds",
+        "avgCallbackSeconds")
     _BOOL_FIELDS = (
         "alerted", "observed", "recovered",
         "probeSuccess", "eligible",
         "revoked", "freeTier", "executed",
         "amountWithinLimit", "advisoryOnly",
-        "onFront")
+        "onFront", "amountMatch",
+        "orderIdMatch", "timeMatch",
+        "idempotentKey")
     _JSON_DICT_FIELDS = (
         "windows", "meta", "detail",
         "signals", "trigger", "evidence",
@@ -125,7 +145,7 @@ class Pay71Repository:
         "disposition", "scores",
         "weightsUsed", "impact",
         "suggestedWeights", "front",
-        "weights")
+        "weights", "mismatch")
     _JSON_LIST_FIELDS = (
         "traits", "parts", "candidates",
         "paretoFront", "affectedPorts")
@@ -1299,3 +1319,294 @@ class Pay71Repository:
             self.store[
                 self.TABLE_OVERRIDES].values()
         ]
+
+    # ============================================================
+    # T+0 三向核验留痕(pay71_verifies——P4)
+    # ============================================================
+
+    async def next_verify_seq(self) -> int:
+        """核验序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "verify", "seq"))
+        self._ensure_store()
+        self.store["_pay71_verify_seq"] = \
+            self.store.get(
+                "_pay71_verify_seq", 0) + 1
+        return self.store["_pay71_verify_seq"]
+
+    async def save_verify(self,
+                          record: dict) -> dict:
+        """保存核验留痕(T+0 三向)"""
+        seq = await self.next_verify_seq()
+        record["verifySeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "verify", str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_VERIFIES][
+            str(seq)] = dict(record)
+        return record
+
+    async def get_verify(
+            self, verify_seq: int) -> dict | None:
+        """按序号查核验留痕"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("pay71", "verify",
+                    str(verify_seq)))
+            if not raw:
+                return None
+            with contextlib.suppress(
+                    ValueError, TypeError):
+                return self._deserialize(
+                    json.loads(raw))
+            return None
+        self._ensure_store()
+        rec = self.store[self.TABLE_VERIFIES]\
+            .get(str(verify_seq))
+        return dict(rec) if rec else None
+
+    async def list_verifies(
+            self, state: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出核验留痕(可按结果过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "verify", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "verify", str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if state is None \
+                        or rec.get("state") == state:
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[self.TABLE_VERIFIES]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_VERIFIES][str(s)])
+            for s in seqs
+        ]
+        if state is not None:
+            records = [
+                r for r in records
+                if r.get("state") == state]
+        return records[:limit]
+
+    # ============================================================
+    # 差错补单账本(pay71_recons——P4)
+    # ============================================================
+
+    async def next_recon_seq(self) -> int:
+        """补单序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "recon", "seq"))
+        self._ensure_store()
+        self.store["_pay71_recon_seq"] = \
+            self.store.get(
+                "_pay71_recon_seq", 0) + 1
+        return self.store["_pay71_recon_seq"]
+
+    async def save_recon(self,
+                         record: dict) -> dict:
+        """保存补单记录(幂等域自动+留痕)"""
+        seq = await self.next_recon_seq()
+        record["reconSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "recon", str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_RECONS][
+            str(seq)] = dict(record)
+        return record
+
+    async def get_recon(
+            self, recon_seq: int) -> dict | None:
+        """按序号查补单记录"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("pay71", "recon",
+                    str(recon_seq)))
+            if not raw:
+                return None
+            with contextlib.suppress(
+                    ValueError, TypeError):
+                return self._deserialize(
+                    json.loads(raw))
+            return None
+        self._ensure_store()
+        rec = self.store[self.TABLE_RECONS]\
+            .get(str(recon_seq))
+        return dict(rec) if rec else None
+
+    async def update_recon(self, recon_seq: int,
+                          record: dict) -> dict:
+        """更新补单记录(重试/转人工留痕)"""
+        record["reconSeq"] = int(recon_seq)
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "recon",
+                     str(recon_seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_RECONS][
+            str(recon_seq)] = dict(record)
+        return record
+
+    async def list_recons(
+            self, state: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出补单记录(可按状态过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "recon", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "recon", str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if state is None \
+                        or rec.get("state") == state:
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[self.TABLE_RECONS]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_RECONS][str(s)])
+            for s in seqs
+        ]
+        if state is not None:
+            records = [
+                r for r in records
+                if r.get("state") == state]
+        return records[:limit]
+
+    # ============================================================
+    # 渠道对账延迟差错基线(pay71_reconbase
+    # ——P4 快环统计)
+    # ============================================================
+
+    async def bump_recon_stat(
+            self, port_id: str,
+            field: str,
+            value: float = 1) -> float:
+        """渠道核验统计累加(healCount/
+        diffCount/totalCount/回调秒
+        ——HINCRBYFLOAT 原子)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.hincrbyfloat(
+                _k("pay71", "reconbase",
+                   port_id),
+                field, float(value))
+        self._ensure_store()
+        stats = self.store[
+            self.TABLE_RECONBASE]\
+            .setdefault(port_id, {})
+        stats[field] = round(
+            stats.get(field, 0)
+            + float(value), 4)
+        return stats[field]
+
+    async def get_recon_stats(
+            self, port_id: str) -> dict:
+        """渠道核验统计视图(单端口)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay71", "reconbase",
+                   port_id))
+            out = {}
+            for k, v in data.items():
+                with contextlib.suppress(
+                        ValueError, TypeError):
+                    out[k] = float(v)
+            return out
+        self._ensure_store()
+        return dict(
+            self.store[
+                self.TABLE_RECONBASE].get(
+                port_id, {}))
+
+    async def list_recon_stats(self) -> dict:
+        """全部渠道核验统计视图"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "reconbase", "*"))
+            result = {}
+            for key in keys:
+                pid = key.split(":")[-1]
+                data = await client.hgetall(key)
+                stats = {}
+                for k, v in data.items():
+                    with contextlib.suppress(
+                            ValueError, TypeError):
+                        stats[k] = float(v)
+                result[pid] = stats
+            return result
+        self._ensure_store()
+        return {
+            pid: dict(stats) for pid, stats
+            in self.store[
+                self.TABLE_RECONBASE].items()
+        }
