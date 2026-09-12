@@ -197,6 +197,44 @@ SELFHEAL_ACTIONS = (
 )
 
 # ============================================================
+# P2 预判式支付(预载可撤销观测域+资金
+# 永不自动铁律——用户显式触发)
+# ============================================================
+
+# 习惯样本下限(69号 habits 计数——不足
+# 则退化为费率优选默认建议)
+PREDICT_MIN_SAMPLES = 3
+
+# 大额拆分阈值(元——对齐 69号 AMOUNT_
+# BANDS ¥5000 档; ≥阈值可发起拆分建议书)
+SPLIT_THRESHOLD = 5000.0
+
+# 拆分份数上限(并行度——对齐 69号
+# AMOUNT_BANDS ¥20000 档: 2 万内 2 份
+# /2 万以上 3 份)
+SPLIT_MAX_PARTS = 3
+
+# 拆分确认令牌 TTL(秒——单次消费口径)
+SPLIT_CONFIRM_TTL = 1800
+
+# 拆分建议书状态机(封闭——确认仅生成
+# 建议包 executed=False, 资金执行永远
+# 60号收银台显式调用铁律)
+SPLIT_STATES = (
+    "proposed",    # 已建议(待用户确认)
+    "confirmed",   # 用户已确认(令牌
+                   # 已消费——建议包)
+    "rejected",   # 用户已拒绝(留痕)
+)
+
+# 重试退避序列(确定性毫秒——支付失败
+# 案例重试策略, 避免无效请求堆积)
+RETRY_BACKOFF_MS = (800, 1600, 3200)
+
+# 重试上限(与 60号 P3 补单重试对齐)
+RETRY_MAX_ATTEMPTS = 3
+
+# ============================================================
 # 四维调配目标域(P3 帕累托口径预注册
 # ——确定性向量评分, LLM 禁入)
 # ============================================================
@@ -345,6 +383,39 @@ def _validate_registry() -> None:
             "no_change"}:
         raise RuntimeError(
             "pay71 自愈动作域非法")
+    # ⑪ P2 预判: 拆分参数/状态机/退避
+    #     序列/习惯样本下限合法
+    if SPLIT_THRESHOLD <= 0:
+        raise RuntimeError(
+            "pay71 拆分阈值域外")
+    if not (2 <= SPLIT_MAX_PARTS <= 5):
+        raise RuntimeError(
+            "pay71 拆分份数上限域外")
+    if not (60 <= SPLIT_CONFIRM_TTL
+            <= 86400):
+        raise RuntimeError(
+            "pay71 拆分确认 TTL 域外")
+    if set(SPLIT_STATES) != {
+            "proposed", "confirmed",
+            "rejected"}:
+        raise RuntimeError(
+            "pay71 拆分状态机非法")
+    if not RETRY_BACKOFF_MS or any(
+            b <= 0 for b in
+            RETRY_BACKOFF_MS):
+        raise RuntimeError(
+            "pay71 重试退避序列非法")
+    for i in range(1, len(RETRY_BACKOFF_MS)):
+        if RETRY_BACKOFF_MS[i] \
+                <= RETRY_BACKOFF_MS[i - 1]:
+            raise RuntimeError(
+                "pay71 重试退避序列非递增")
+    if RETRY_MAX_ATTEMPTS < 1:
+        raise RuntimeError(
+            "pay71 重试上限域外")
+    if PREDICT_MIN_SAMPLES < 1:
+        raise RuntimeError(
+            "pay71 习惯样本下限域外")
 
 
 _validate_registry()

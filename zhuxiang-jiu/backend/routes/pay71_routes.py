@@ -1,6 +1,6 @@
-"""71号·AI智能支付端口大模型路由(P0-P1)
+"""71号·AI智能支付端口大模型路由(P0-P2)
 
-端点(P0 8 + P1 8):
+端点(P0 8 + P1 8 + P2 8):
     GET  /api/pay71/ports               端口池字典公示(admin, 观测面)
     GET  /api/pay71/ports/{id}          单端口详情(admin, 观测面)
     GET  /api/pay71/panorama            健康度全景(admin, 观测面——聚合 69号 P0 只读)
@@ -17,16 +17,27 @@
     POST /api/pay71/selfheal/propose    转正/摘牌建议书发起(admin, 人工面——P1)
     POST /api/pay71/selfheal/proposals/{seq}/decide 建议书终审(admin, 人工——不受开关——P1)
     GET  /api/pay71/selfheal/traces     自愈轨迹视图(admin, 观测面——P1)
+    GET  /api/pay71/predict/dict        预判字典公示(admin, 观测面——P2)
+    POST /api/pay71/predict/compute     意图预判+预载建议(admin, 决策面 off 409——P2)
+    POST /api/pay71/predict/{seq}/revoke 预载撤销(admin, 决策面 off 409——P2)
+    GET  /api/pay71/predict/records     预判留痕视图(admin, 观测面——P2)
+    POST /api/pay71/predict/split/propose 大额拆分建议书(admin, 决策面 off 409——P2)
+    POST /api/pay71/predict/split/{seq}/confirm 拆分确认(令牌单次)(admin, 决策面 off 409——P2)
+    GET  /api/pay71/predict/splits      拆分建议书视图(admin, 观测面——P2)
+    POST /api/pay71/predict/retry/report 端口失败重试上报(admin, 快环——不受开关——P2)
+    GET  /api/pay71/predict/retries     重试统计视图(admin, 观测面——P2)
 
 鉴权: 管理面 X-Role: admin(69号同款口径)。
 统一口径(69号范式):
     - 观测面不受 PAY71_MODE 影响
-    - 快环观测上报(signals report)
+    - 快环观测上报(signals/retry report)
       不受开关影响
     - 人工面(port state/onboard/propose/
       decide)不受开关影响
     - 保护面(orchestrate/probe)不受开关
       影响——保护方向永续铁律(规划 §4.1)
+    - 决策面(predict compute/revoke/
+      split propose/confirm)off=409
     - KeyError → 404 / ValueError → 409
 """
 
@@ -104,6 +115,45 @@ class ProposeBody(BaseModel):
 
 class DecideBody(BaseModel):
     approve: bool = Field(description="批准/驳回")
+
+
+class PredictComputeBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    amount: float = Field(gt=0, description="金额(元)")
+    trustTier: str = Field(
+        default="", description="信值档(45号)")
+    newDevice: bool = Field(
+        default=False, description="陌生设备")
+    oddHour: bool = Field(
+        default=False, description="凌晨时段")
+    newLocation: bool = Field(
+        default=False, description="异常地点")
+    tvEligible: bool = Field(
+        default=False,
+        description="credit_tv 信值资格"
+                    "(69号 P1 资格门范式)")
+
+
+class SplitProposeBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    totalAmount: float = Field(
+        gt=0, description="总金额(元)")
+    tvEligible: bool = Field(
+        default=False,
+        description="credit_tv 信值资格")
+
+
+class SplitConfirmBody(BaseModel):
+    confirmToken: str = Field(
+        description="确认令牌(单次消费)")
+    approve: bool = Field(
+        default=True, description="确认/拒绝")
+
+
+class RetryReportBody(BaseModel):
+    portId: str = Field(description="端口 ID")
+    failCount: int = Field(
+        default=1, ge=1, description="失败次数")
 
 
 # ============================================================
@@ -418,6 +468,193 @@ async def selfheal_traces(
     )
     return await Pay71P1Service().trace_view(
         port_id=portId or None, limit=limit)
+
+
+# ============================================================
+# P2 端点(预判式支付)
+# ============================================================
+
+@router.get("/predict/dict")
+async def predict_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """预判字典公示(拆分阈值/梯度对齐/
+    退避序列——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p2_service import (
+        Pay71P2Service,
+    )
+    return Pay71P2Service().dict_view()
+
+
+def _require_decision_plane() -> None:
+    """决策面开关(69号范式——off=409)"""
+    from services.pay71_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY71_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+
+
+@router.post("/predict/compute")
+async def predict_compute(
+        body: PredictComputeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """意图预判+通道预载建议(可撤销
+    观测域——不锁定资金铁律; 决策面
+    off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p2_service import (
+        Pay71P2Service,
+    )
+    try:
+        return await Pay71P2Service()\
+            .predict(
+                body.memberId, body.amount,
+                trust_tier=body.trustTier,
+                new_device=body.newDevice,
+                odd_hour=body.oddHour,
+                new_location=body.newLocation,
+                tv_eligible=body.tvEligible)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/predict/{prediction_seq}/revoke")
+async def predict_revoke(
+        prediction_seq: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """预载撤销(可撤销观测域的撤销面
+    ——显式留痕; 决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p2_service import (
+        Pay71P2Service,
+    )
+    try:
+        return await Pay71P2Service()\
+            .revoke(prediction_seq)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/predict/records")
+async def predict_records(
+        memberId: int = 0,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """预判留痕视图(观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p2_service import (
+        Pay71P2Service,
+    )
+    return await Pay71P2Service().records_view(
+        member_id=memberId or None,
+        limit=limit)
+
+
+@router.post("/predict/split/propose")
+async def split_propose(
+        body: SplitProposeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """大额拆分建议书发起(金额/通道
+    组合/到账时效三要素+确认令牌——
+    用户显式确认流; 决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p2_service import (
+        Pay71P2Service,
+    )
+    try:
+        return await Pay71P2Service()\
+            .split_propose(
+                body.memberId,
+                body.totalAmount,
+                tv_eligible=body.tvEligible)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/predict/split/{split_seq}/confirm")
+async def split_confirm(
+        split_seq: int,
+        body: SplitConfirmBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """拆分建议书确认(令牌单次消费+总额
+    回显——executed=False 建议包, 资金
+    执行永远 60号收银台显式调用铁律;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p2_service import (
+        Pay71P2Service,
+    )
+    try:
+        return await Pay71P2Service()\
+            .split_confirm(
+                split_seq,
+                body.confirmToken,
+                body.approve)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/predict/splits")
+async def predict_splits(
+        memberId: int = 0,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """拆分建议书视图(令牌不外泄
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p2_service import (
+        Pay71P2Service,
+    )
+    return await Pay71P2Service().splits_view(
+        member_id=memberId or None,
+        limit=limit)
+
+
+@router.post("/predict/retry/report")
+async def retry_report(
+        body: RetryReportBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """端口失败重试上报(快环观测——
+    退避序列确定性, 不受 PAY71_MODE
+    影响)"""
+    _require_admin(x_role)
+    from services.pay71_p2_service import (
+        Pay71P2Service,
+    )
+    try:
+        return await Pay71P2Service()\
+            .retry_report(
+                body.portId, body.failCount)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/predict/retries")
+async def predict_retries(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """重试统计视图(快环观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p2_service import (
+        Pay71P2Service,
+    )
+    return await Pay71P2Service().retries_view()
 
 
 def register_pay71_routes(app) -> None:

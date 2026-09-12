@@ -1,9 +1,9 @@
 """71号·AI智能支付端口大模型 仓储
-(pay71_repository, P0-P1)
+(pay71_repository, P0-P2)
 
 规划(docs/71号_AI智能支付端口大模型_创新规划方案.md
-§七 P0/P1):
-    7 表(前缀 pay71):
+§七 P0/P1/P2):
+    10 表(前缀 pay71):
         pay71_ports       端口态观测记录
                           (三态+前兆评分)
         pay71_signals     前兆信号留痕
@@ -20,6 +20,15 @@
         pay71_traces      自愈编排轨迹
                           (P1——触发窗口/
                           动作/恢复证据)
+        pay71_predictions 预判留痕+预载
+                          建议(P2——可撤销
+                          观测域)
+        pay71_splits      大额拆分建议书
+                          (P2——令牌单次
+                          消费确认流)
+        pay71_retries     重试策略快环
+                          统计(P2——端口
+                          失败计数)
 
 69号仓储范式平移:
     - 通用读写基元(_save/_get/_list)
@@ -56,12 +65,16 @@ class Pay71Repository:
     TABLE_SHADOWS = "pay71_shadows"
     TABLE_PROPOSALS = "pay71_proposals"
     TABLE_TRACES = "pay71_traces"
+    TABLE_PREDICTIONS = "pay71_predictions"
+    TABLE_SPLITS = "pay71_splits"
+    TABLE_RETRIES = "pay71_retries"
 
     _ALL_TABLES = (
         TABLE_PORTS, TABLE_SIGNALS,
         TABLE_EVENTS, TABLE_PROBES,
         TABLE_SHADOWS, TABLE_PROPOSALS,
-        TABLE_TRACES)
+        TABLE_TRACES, TABLE_PREDICTIONS,
+        TABLE_SPLITS, TABLE_RETRIES)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -71,22 +84,30 @@ class Pay71Repository:
         "portSeq", "signalSeq", "eventSeq",
         "probeSeq", "shadowSeq",
         "proposalSeq", "traceSeq",
+        "predictionSeq", "splitSeq",
         "sampleCount", "probeStreak",
-        "probeRequired")
+        "probeRequired", "memberId",
+        "retryCount")
     _FLOAT_FIELDS = (
         "avgLatencyMs", "errorRate",
         "successRate", "precursorScore",
         "latencyDelta", "errorRateDelta",
         "successRateDelta", "callbackMs",
-        "windowScore", "daysElapsed")
+        "windowScore", "daysElapsed",
+        "amount", "totalAmount", "entropy")
     _BOOL_FIELDS = (
         "alerted", "observed", "recovered",
-        "probeSuccess", "eligible")
+        "probeSuccess", "eligible",
+        "revoked", "freeTier", "executed",
+        "amountWithinLimit")
     _JSON_DICT_FIELDS = (
         "windows", "meta", "detail",
         "signals", "trigger", "evidence",
-        "fromTo", "shadowCriteria")
-    _JSON_LIST_FIELDS = ("traits",)
+        "fromTo", "shadowCriteria",
+        "preloadCheck", "reason",
+        "disposition")
+    _JSON_LIST_FIELDS = (
+        "traits", "parts", "candidates")
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -684,3 +705,293 @@ class Pay71Repository:
                 r for r in records
                 if r.get("portId") == port_id]
         return records[:limit]
+
+    # ============================================================
+    # 预判留痕+预载建议(pay71_predictions——P2)
+    # ============================================================
+
+    async def next_prediction_seq(self) -> int:
+        """预判序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "prediction", "seq"))
+        self._ensure_store()
+        self.store["_pay71_prediction_seq"] = \
+            self.store.get(
+                "_pay71_prediction_seq", 0) + 1
+        return self.store[
+            "_pay71_prediction_seq"]
+
+    async def save_prediction(self,
+                             record: dict) -> dict:
+        """保存预判留痕(预载建议)"""
+        seq = await self.next_prediction_seq()
+        record["predictionSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "prediction",
+                     str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_PREDICTIONS][
+            str(seq)] = dict(record)
+        return record
+
+    async def get_prediction(
+            self, prediction_seq: int) -> dict | None:
+        """按序号查预判记录"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("pay71", "prediction",
+                    str(prediction_seq)))
+            if not raw:
+                return None
+            with contextlib.suppress(
+                    ValueError, TypeError):
+                return self._deserialize(
+                    json.loads(raw))
+            return None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_PREDICTIONS].get(
+            str(prediction_seq))
+        return dict(rec) if rec else None
+
+    async def update_prediction(
+            self, prediction_seq: int,
+            record: dict) -> dict:
+        """更新预判记录(撤销留痕)"""
+        record["predictionSeq"] = \
+            int(prediction_seq)
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "prediction",
+                     str(prediction_seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_PREDICTIONS][
+            str(prediction_seq)] = \
+            dict(record)
+        return record
+
+    async def list_predictions(
+            self, member_id: int = None,
+            limit: int = 50) -> list[dict]:
+        """列出预判留痕(可按会员过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "prediction", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "prediction",
+                        str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if member_id is None \
+                        or rec.get(
+                            "memberId") \
+                        == int(member_id):
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[
+                 self.TABLE_PREDICTIONS]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_PREDICTIONS][str(s)])
+            for s in seqs
+        ]
+        if member_id is not None:
+            records = [
+                r for r in records
+                if r.get("memberId")
+                == int(member_id)]
+        return records[:limit]
+
+    # ============================================================
+    # 大额拆分建议书(pay71_splits——P2)
+    # ============================================================
+
+    async def next_split_seq(self) -> int:
+        """拆分建议书序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "split", "seq"))
+        self._ensure_store()
+        self.store["_pay71_split_seq"] = \
+            self.store.get(
+                "_pay71_split_seq", 0) + 1
+        return self.store["_pay71_split_seq"]
+
+    async def save_split(self,
+                         record: dict) -> dict:
+        """保存拆分建议书"""
+        seq = await self.next_split_seq()
+        record["splitSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "split", str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_SPLITS][
+            str(seq)] = dict(record)
+        return record
+
+    async def get_split(
+            self, split_seq: int) -> dict | None:
+        """按序号查拆分建议书"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("pay71", "split",
+                    str(split_seq)))
+            if not raw:
+                return None
+            with contextlib.suppress(
+                    ValueError, TypeError):
+                return self._deserialize(
+                    json.loads(raw))
+            return None
+        self._ensure_store()
+        rec = self.store[self.TABLE_SPLITS]\
+            .get(str(split_seq))
+        return dict(rec) if rec else None
+
+    async def update_split(self, split_seq: int,
+                          record: dict) -> dict:
+        """更新拆分建议书(确认/拒绝留痕)"""
+        record["splitSeq"] = int(split_seq)
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "split",
+                     str(split_seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_SPLITS][
+            str(split_seq)] = dict(record)
+        return record
+
+    async def list_splits(
+            self, member_id: int = None,
+            limit: int = 50) -> list[dict]:
+        """列出拆分建议书(可按会员过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "split", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "split",
+                        str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if member_id is None \
+                        or rec.get(
+                            "memberId") \
+                        == int(member_id):
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[self.TABLE_SPLITS]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_SPLITS][str(s)])
+            for s in seqs
+        ]
+        if member_id is not None:
+            records = [
+                r for r in records
+                if r.get("memberId")
+                == int(member_id)]
+        return records[:limit]
+
+    # ============================================================
+    # 重试策略快环统计(pay71_retries——P2)
+    # ============================================================
+
+    async def bump_retry(
+            self, port_id: str,
+            fail_count: int = 1) -> int:
+        """端口失败计数累加(快环观测——
+        HINCRBY 原子)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.hincrby(
+                _k("pay71", "retries"),
+                port_id, int(fail_count))
+        self._ensure_store()
+        self.store[self.TABLE_RETRIES][
+            port_id] = \
+            self.store[self.TABLE_RETRIES].get(
+                port_id, 0) + int(fail_count)
+        return self.store[
+            self.TABLE_RETRIES][port_id]
+
+    async def get_retries(self) -> dict:
+        """端口失败计数视图(快环统计)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay71", "retries"))
+            return {k: int(v)
+                    for k, v in data.items()}
+        self._ensure_store()
+        return {
+            k: int(v) for k, v in
+            dict(self.store[
+                self.TABLE_RETRIES]).items()
+        }
