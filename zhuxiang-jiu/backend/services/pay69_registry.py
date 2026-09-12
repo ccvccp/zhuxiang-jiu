@@ -498,6 +498,93 @@ CHANNEL_KEYWORDS: dict = {
 
 
 # ============================================================
+# P7 自进化引擎(慢环——建议书→46号审批
+# →版本化发布→回滚; 快环漂移检测)
+# ============================================================
+
+# 治理分级域(封闭——L0 观察学习默认/
+# L1 受限进化(低风险统计参数)/L2 协同
+# 进化(权重类))
+EVOLUTION_LEVELS = (
+    "L0",   # 观察学习: 仅漂移检测+
+            # 假设生成(不提交 46号)
+    "L1",   # 受限进化: 低风险参数建议书
+            # 可提交 46号(仍需人工审批)
+    "L2",   # 协同进化: 全参数域建议书
+            # 可提交 46号(权重类)
+)
+
+# 可进化参数白名单(封闭——版本化
+# 基线管理域; 每项含风险级/类型与
+# 出厂默认; kind: weights=权重和=1.0
+# 宪法校验/dict=普通对象/scalar=标量)
+EVOLVABLE_PARAMS: dict = {
+    "healthThresholds": {
+        "riskLevel": "low",       # L1 可提
+        "kind": "dict",
+        "factory": {"healthy": 0.99,
+                    "degraded": 0.90},
+        "domain": "通道健康度阈值",
+    },
+    "routeWeights": {
+        "riskLevel": "high",      # L2 才可提
+        "kind": "weights",
+        "factory": {
+            "fee": 0.15, "health": 0.35,
+            "affinity": 0.35, "habit": 0.15},
+        "domain": "路由评分权重",
+    },
+    "entropyWeights": {
+        "riskLevel": "high",
+        "kind": "weights",
+        "factory": {
+            "amount": 0.20, "trust": 0.25,
+            "behavior": 0.20,
+            "environment": 0.15,
+            "channel": 0.10,
+            "history": 0.10},
+        "domain": "熵引擎六轴权重",
+    },
+    "coercionThreshold": {
+        "riskLevel": "high",
+        "kind": "scalar",
+        "factory": 0.60,
+        "domain": "胁迫降级阈值",
+    },
+    "smartcodeChallengeThreshold": {
+        "riskLevel": "low",
+        "kind": "scalar",
+        "factory": 0.50,
+        "domain": "情境码挑战阈值",
+    },
+}
+
+# 漂移检测阈值(封闭——快环统计口径)
+DRIFT_THRESHOLDS = {
+    "channelSuccess": 0.05,   # 通道成功率
+                              # 偏离幅度
+    "groupDirectRate": 0.20,  # 群体直出率
+                              # 异常幅度
+    "minSamples": 20,         # 最小样本量
+                              # (不足不判定)
+}
+
+# 参数版本状态机(封闭——52号基线管理
+# 灰度范式: draft→shadow→active→retired)
+PARAM_VERSION_STATUSES = (
+    "draft",    # 草稿(假设附带)
+    "shadow",   # 影子(对照≥7天——
+                # 本期状态占位)
+    "active",   # 生效(消费口径)
+    "retired",  # 退役(可回滚目标)
+)
+
+# 46号档案口径(第42批——submit_change
+# 前置入册)
+EVOLUTION_SCORER_ID = "payment_intelligence"
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -684,6 +771,40 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 f"pay69 通道关键词非法: "
                 f"{ch}")
+    # ⑲ P7 进化: 分级/参数白名单/版本
+    #     状态机封闭+漂移阈值合法
+    if set(EVOLUTION_LEVELS) != {
+            "L0", "L1", "L2"}:
+        raise RuntimeError(
+            "pay69 进化分级域非法")
+    if not EVOLVABLE_PARAMS:
+        raise RuntimeError(
+            "pay69 可进化参数白名单为空")
+    for pid, meta in EVOLVABLE_PARAMS.items():
+        if meta.get("riskLevel") not in (
+                "low", "high"):
+            raise RuntimeError(
+                f"pay69 参数风险级非法: "
+                f"{pid}")
+        if meta.get("kind") not in (
+                "weights", "dict", "scalar"):
+            raise RuntimeError(
+                f"pay69 参数类型非法: "
+                f"{pid}")
+        if "factory" not in meta:
+            raise RuntimeError(
+                f"pay69 参数缺出厂默认: "
+                f"{pid}")
+    if set(PARAM_VERSION_STATUSES) != {
+            "draft", "shadow", "active",
+            "retired"}:
+        raise RuntimeError(
+            "pay69 参数版本状态域非法")
+    for k, v in DRIFT_THRESHOLDS.items():
+        if not (0 < v <= 1) and k != "minSamples":
+            raise RuntimeError(
+                f"pay69 漂移阈值域外: "
+                f"{k}={v}")
 
 
 _validate_registry()

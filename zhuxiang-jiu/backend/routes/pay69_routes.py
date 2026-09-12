@@ -1,6 +1,6 @@
-"""69号·AI智能支付大模型路由(P0-P6)
+"""69号·AI智能支付大模型路由(P0-P7)
 
-端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 + P5 6 + P6 6 = 46):
+端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 + P5 6 + P6 6 + P7 10 = 56):
     GET  /api/pay69/channels            七通道字典公示(admin, 观测面)
     GET  /api/pay69/channels/{id}       单通道详情(admin, 观测面)
     GET  /api/pay69/health              健康度观测面(admin, 观测面)
@@ -47,6 +47,16 @@
     POST /api/pay69/modality/confirm/pay 确认支付(admin, 决策面 off 409——P6)
     GET  /api/pay69/modality/events     多模态事件视图(admin, 观测面——P6)
     GET  /api/pay69/modality/stats      群体模态统计(admin, 观测面——P6)
+    GET  /api/pay69/evolution/dict      进化引擎字典公示(admin, 观测面——P7)
+    POST /api/pay69/evolution/drift/detect  快环漂移检测(admin, 快环——不受开关影响——P7)
+    POST /api/pay69/evolution/hypothesis/propose 进化假设生成(admin, 决策面 off 409——P7)
+    POST /api/pay69/evolution/hypothesis/{id}/submit 46号审批提交(admin, 决策面 off 409——P7)
+    POST /api/pay69/evolution/hypothesis/{id}/reject  46号驳回留痕(admin, 人工——不受开关——P7)
+    POST /api/pay69/evolution/params/{v}/publish 参数版本发布(admin, 决策面 off 409——P7)
+    POST /api/pay69/evolution/params/{v}/rollback 版本回滚(admin, 决策面 off 409——P7)
+    POST /api/pay69/evolution/kill     紧急制动(admin, 人工——不受开关——P7)
+    GET  /api/pay69/evolution/hypotheses 假设视图(admin, 观测面——P7)
+    GET  /api/pay69/evolution/governance L0-L2 治理观测(admin, 观测面——P7)
 
 鉴权: 管理面 X-Role: admin(60号同款口径)。
 统一口径(60号范式):
@@ -1307,3 +1317,246 @@ async def modality_stats(
     )
     return await Pay69ModalityService()\
         .group_stats_view()
+
+
+# ============================================================
+# P7 自进化引擎(9 端点)
+# ============================================================
+
+class HypothesisProposeBody(BaseModel):
+    paramId: str = Field(description="参数 ID(白名单)")
+    proposedValue: object = Field(
+        description="建议值(权重类须对象且和=1.0)")
+    reason: str = Field(description="进化理由")
+    expectedGain: str = Field(
+        default="", description="预期收益")
+    riskAssessment: str = Field(
+        default="", description="风险评估")
+    proposedBy: str = Field(
+        default="admin", description="发起方")
+
+
+class VersionPublishBody(BaseModel):
+    shadowFirst: bool = Field(
+        default=False,
+        description="先影子态(灰度范式)")
+
+
+class KillBody(BaseModel):
+    activate: bool = Field(description="激活/解除制动(数据面)")
+
+
+@router.get("/evolution/dict")
+async def evolution_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """进化引擎字典公示(分级/参数白名单
+    /版本状态机/漂移阈值——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    return Pay69EvolutionService()\
+        .evolution_dict()
+
+
+@router.post("/evolution/drift/detect")
+async def evolution_drift_detect(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """快环漂移检测(三域确定性统计——
+    不受 PAY69_MODE 影响; 仅产生信号,
+    不含任何参数变更)"""
+    _require_admin(x_role)
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    return await Pay69EvolutionService()\
+        .detect_drift()
+
+
+@router.post("/evolution/hypothesis/propose")
+async def evolution_hypothesis_propose(
+        body: HypothesisProposeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """进化假设生成(决策面——off 409;
+    disposition 四要素+draft 参数版本;
+    高风险参数权重和=1.0 宪法校验)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    try:
+        return await Pay69EvolutionService()\
+            .propose_hypothesis(
+                body.paramId,
+                body.proposedValue,
+                body.reason,
+                body.expectedGain,
+                body.riskAssessment,
+                body.proposedBy)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post(
+    "/evolution/hypothesis/{hyp_id}/submit")
+async def evolution_hypothesis_submit(
+        hyp_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """假设提交 46号审批总线(决策面——
+    off 409; L0 禁止/L1 低风险/L2 全域
+    分级门控; submit_change 纯调用)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    try:
+        return await Pay69EvolutionService()\
+            .submit_to_governance(hyp_id)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post(
+    "/evolution/hypothesis/{hyp_id}/reject")
+async def evolution_hypothesis_reject(
+        hyp_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """46号驳回留痕(假设 submitted→
+    rejected; draft 版本随退——不受
+    开关影响, 治理留痕人工动作)"""
+    _require_admin(x_role)
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    try:
+        return await Pay69EvolutionService()\
+            .mark_rejected(hyp_id)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post(
+    "/evolution/params/{version}/publish")
+async def evolution_params_publish(
+        version: int,
+        body: VersionPublishBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """参数版本发布(决策面——off 409;
+    46号审批通过后的显式动作; active
+    互斥: 同参数旧版自动 retired)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    try:
+        return await Pay69EvolutionService()\
+            .publish_version(
+                version,
+                shadow_first=body.shadowFirst)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post(
+    "/evolution/params/{version}/rollback")
+async def evolution_params_rollback(
+        version: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """版本回滚(决策面——off 409; 指定
+    retired 历史版本→active, 当前
+    active→retired——可回滚铁律)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    try:
+        return await Pay69EvolutionService()\
+            .rollback_version(version)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/evolution/kill")
+async def evolution_kill(
+        body: KillBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """紧急制动(admin 人工——不受开关
+    影响; 数据面: 全 active/shadow 版本
+    退役退回出厂; 进程级 PAY69_KILL=1
+    由运维并行设置双保险)"""
+    _require_admin(x_role)
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    return await Pay69EvolutionService()\
+        .kill_switch(body.activate)
+
+
+@router.get("/evolution/hypotheses")
+async def evolution_hypotheses(
+        status: str | None = None,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """假设建议书视图(观测面)"""
+    _require_admin(x_role)
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    return await Pay69EvolutionService()\
+        .hypotheses_view(
+            status=status, limit=limit)
+
+
+@router.get("/evolution/governance")
+async def evolution_governance(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """L0-L2 分级治理观测(当前级/
+    假设与版本统计——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_evolution_service import (
+        Pay69EvolutionService,
+    )
+    return await Pay69EvolutionService()\
+        .governance_view()
