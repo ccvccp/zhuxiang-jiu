@@ -746,14 +746,33 @@ class WalletRepository:
     # ---------- 钱包账户(Redis) ----------
 
     async def _redis_open_account(self, user_id, account_data: dict) -> dict:
+        """开通钱包账户(Redis 态)
+
+        修复(相对旧版 SETNX+HSET 两步覆盖):
+        - 旧版 SETNX 建 string 占位再 HSET 覆盖, 中途异常留下 string
+          脏键, 该用户钱包永久 WRONGTYPE 不可用; 本版对旧脏键(值恒为
+          "{}"——真实字段从未成功落库)自动清除重建, 其余异常类型诚实
+          拒绝待人工核查;
+        - 唯一性以"键上已有真实字段"为准(覆盖 save_account 等一切建户
+          途径; 字段级占位方案在真实账户上会误判为新开通导致数据重置,
+          已弃用), 开通为单条 HSET 原子写入, 无占位中间态, 无崩溃窗口。
+        """
         client = await get_redis_client()
         key = _k("wallet", user_id)
-        # 用 SETNX 保证 user_id 唯一(已存在则报错)
-        acquired = await client.setnx(key, "{}")  # 先占位
-        if not acquired:
+        ktype = await client.type(key)
+        if ktype == "string":
+            # 旧版 SETNX 脏键: 值恒为 "{}", 清除无数据损失
+            if await client.get(key) != "{}":
+                raise ValueError(f"用户 {user_id} 钱包键类型异常, 需人工核查")
+            await client.delete(key)
+            ktype = "none"
+        if ktype not in ("none", "hash"):
+            raise ValueError(
+                f"用户 {user_id} 钱包键类型异常({ktype}), 需人工核查")
+        if ktype == "hash" and await client.hgetall(key):
             raise ValueError(f"用户 {user_id} 已开通钱包")
         account_data["userId"] = user_id
-        # 覆盖占位数据为真实账户
+        # 单条 HSET 原子写入完整初始账户
         await client.hset(key, mapping=self._serialize_hash(account_data))
         # 加入全局索引
         await client.sadd(_k("wallet", "index"), user_id)
@@ -761,7 +780,18 @@ class WalletRepository:
 
     async def _redis_get_account(self, user_id) -> dict | None:
         client = await get_redis_client()
-        data = await client.hgetall(_k("wallet", user_id))
+        key = _k("wallet", user_id)
+        ktype = await client.type(key)
+        if ktype == "none":
+            return None
+        if ktype != "hash":
+            # 旧版 SETNX 脏键(string, 值恒为 "{}"): 视为未开通(开通时
+            # 自动清除重建); 其余类型诚实上抛待人工核查
+            if ktype == "string" and await client.get(key) == "{}":
+                return None
+            raise ValueError(
+                f"用户 {user_id} 钱包键类型异常({ktype}), 需人工核查")
+        data = await client.hgetall(key)
         if not data:
             return None
         return self._deserialize_account(data)
