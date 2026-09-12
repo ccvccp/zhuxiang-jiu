@@ -1,6 +1,6 @@
-"""69号·AI智能支付大模型路由(P0-P8)
+"""69号·AI智能支付大模型路由(P0-P9)
 
-端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 + P5 6 + P6 6 + P7 10 + P8 7 = 63):
+端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 + P5 6 + P6 6 + P7 10 + P8 7 + P9 3 = 66):
     GET  /api/pay69/channels            七通道字典公示(admin, 观测面)
     GET  /api/pay69/channels/{id}       单通道详情(admin, 观测面)
     GET  /api/pay69/health              健康度观测面(admin, 观测面)
@@ -64,6 +64,9 @@
     POST /api/pay69/immunity/unfreeze   解冻(admin, 人工专属——P8)
     POST /api/pay69/immunity/redteam    红队四向量执行(admin, 决策面 off 409——P8)
     GET  /api/pay69/immunity/redteam/runs 红队批次历史(admin, 观测面——P8)
+    GET  /api/pay69/crossborder/dict    跨境规则库公示(admin, 观测面——P9)
+    POST /api/pay69/crossborder/preview  跨境合规预演(admin, 决策面 off 409——P9 沙盘)
+    GET  /api/pay69/crossborder/track    监管政策追踪(admin, 观测面——P9)
 
 鉴权: 管理面 X-Role: admin(60号同款口径)。
 统一口径(60号范式):
@@ -1698,3 +1701,74 @@ async def immunity_redteam_runs(
         "count": len(runs),
         "runs": runs,
     }
+
+
+# ============================================================
+# P9 跨境预研沙盘(3 端点——远期,
+# 全合成数据, 永不实接渠道)
+# ============================================================
+
+class CrossborderPreviewBody(BaseModel):
+    currency: str = Field(description="币种(CNY/USD/EUR/JPY/GBP/HKD)")
+    jurisdiction: str = Field(
+        description="管辖区(CN/US/EU/JP/UK/HK)")
+    amountCny: float = Field(gt=0,
+                            description="金额(人民币本位, 元)")
+
+
+@router.get("/crossborder/dict")
+async def crossborder_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """跨境规则库公示(币种/管辖区/
+    沙盘汇率/对冲档——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_crossborder_service import (
+        Pay69CrossborderService,
+    )
+    return Pay69CrossborderService()\
+        .crossborder_dict()
+
+
+@router.post("/crossborder/preview")
+async def crossborder_preview(
+        body: CrossborderPreviewBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """跨境合规预演(决策面——off 409;
+    沙盘全合成——管辖区规则库查表+
+    汇率换算+对冲建议; 永不实接渠道)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_crossborder_service import (
+        Pay69CrossborderService,
+    )
+    try:
+        return await Pay69CrossborderService()\
+            .compliance_preview(
+                body.currency,
+                body.jurisdiction,
+                body.amountCny)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/crossborder/track")
+async def crossborder_track(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """监管政策追踪观测面(预演事件流
+    +规则库变更通道说明)"""
+    _require_admin(x_role)
+    from services.pay69_crossborder_service import (
+        Pay69CrossborderService,
+    )
+    return await Pay69CrossborderService()\
+        .policy_track_view()

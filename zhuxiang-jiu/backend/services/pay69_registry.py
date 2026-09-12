@@ -624,6 +624,130 @@ REDTEAM_PASS_ALL = "allDefended"
 
 
 # ============================================================
+# P9 跨境预研(合规沙盘——规划 §4.7:
+# 仅预研不实接渠道, 数据全合成)
+# ============================================================
+
+# 币种域(封闭——沙盘预研口径)
+CROSSBORDER_CURRENCIES = (
+    "CNY",   # 人民币(本位)
+    "USD",   # 美元
+    "EUR",   # 欧元
+    "JPY",   # 日元
+    "GBP",   # 英镑
+    "HKD",   # 港元(管辖区 HK 对应)
+)
+
+# 管辖区域(封闭——规则库草案键)
+JURISDICTIONS = (
+    "CN",    # 中国大陆(本位)
+    "US",    # 美国
+    "EU",    # 欧盟
+    "JP",    # 日本
+    "UK",    # 英国
+    "HK",    # 中国香港
+)
+
+# 管辖区合规要求草案(封闭注册——
+# 沙盘规则库; 变更走慢环 46号审批)
+JURISDICTION_RULES: dict = {
+    "CN": {
+        "label": "中国大陆",
+        "fxControl": "strict",   # 严格外汇
+        "digitalCurrency": (
+            "pilot_only"),        # 数字人民币
+                                  # 仅试点
+        "requiresDocs": (
+            "trade_invoice",
+            "customs_declaration"),
+        "sandboxNote":
+            "跨境人民币结算走 "
+            "CIPS 通道(沙盘预研)",
+    },
+    "US": {
+        "label": "美国",
+        "fxControl": "moderate",
+        "digitalCurrency":
+            "state_by_state",
+        "requiresDocs": (
+            "trade_invoice",),
+        "sandboxNote":
+            "FinCEN MSB 登记"
+            "前置(沙盘预研)",
+    },
+    "EU": {
+        "label": "欧盟",
+        "fxControl": "free",
+        "digitalCurrency":
+            "MiCA_licensed",
+        "requiresDocs": (
+            "trade_invoice",
+            "vat_number"),
+        "sandboxNote":
+            "MiCA 框架牌照制"
+            "(沙盘预研)",
+    },
+    "JP": {
+        "label": "日本",
+        "fxControl": "moderate",
+        "digitalCurrency":
+            "FSA_registered",
+        "requiresDocs": (
+            "trade_invoice",),
+        "sandboxNote":
+            "FSA 交换业登记"
+            "(沙盘预研)",
+    },
+    "UK": {
+        "label": "英国",
+        "fxControl": "free",
+        "digitalCurrency":
+            "FCA_authorized",
+        "requiresDocs": (
+            "trade_invoice",),
+        "sandboxNote":
+            "FCA EMI/ASPR 授权"
+            "(沙盘预研)",
+    },
+    "HK": {
+        "label": "中国香港",
+        "fxControl": "free",
+        "digitalCurrency":
+            "SFC_VASP",
+        "requiresDocs": (
+            "trade_invoice",),
+        "sandboxNote":
+            "SFC VASP 发牌制"
+            "(沙盘预研)",
+    },
+}
+
+# 沙盘合成汇率(封闭注册——非实时,
+# 确定性; 生产实接走外部行情商)
+SANDBOX_FX_RATES: dict = {
+    ("CNY", "USD"): 0.14,
+    ("CNY", "EUR"): 0.13,
+    ("CNY", "JPY"): 21.0,
+    ("CNY", "GBP"): 0.11,
+    ("CNY", "HKD"): 1.09,
+}
+
+# 对冲建议档位(封闭——确定性查表)
+HEDGE_TIERS = (
+    (10000.0, "spot_only",
+     "即期结算(金额小无对冲必要)"),
+    (100000.0, "forward_30d",
+     "30 天远期锁汇(中额敞口)"),
+    (float("inf"), "forward_90d_ndp",
+     "90 天远期+自然对冲(大额敞口)"),
+)
+
+# 沙盘标志(全链恒 True——铁律:
+# P9 永不实接真实渠道)
+SANDBOX_ONLY = True
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -856,6 +980,48 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 f"pay69 免疫冻结规则非法: "
                 f"{k}={v}")
+    # ㉑ P9 跨境沙盘: 币种/管辖区
+    #     域封闭+规则库闭合+汇率对
+    #     键+对冲档递增+沙盘标志恒真
+    if len(set(CROSSBORDER_CURRENCIES)) \
+            != 6:
+        raise RuntimeError(
+            "pay69 币种域非法")
+    if set(JURISDICTION_RULES) \
+            != set(JURISDICTIONS):
+        raise RuntimeError(
+            "pay69 管辖区与规则库不闭合")
+    for j, rule in \
+            JURISDICTION_RULES.items():
+        if not rule.get(
+                "requiresDocs"):
+            raise RuntimeError(
+                f"pay69 管辖区 {j} "
+                f"缺单证要求")
+        if rule.get("fxControl") not in (
+                "strict", "moderate",
+                "free"):
+            raise RuntimeError(
+                f"pay69 管辖区 {j} "
+                f"外汇管制级非法")
+    for (base, quote) in \
+            SANDBOX_FX_RATES:
+        if base != "CNY" \
+                or quote \
+                not in CROSSBORDER_CURRENCIES:
+            raise RuntimeError(
+                f"pay69 沙盘汇率对非法: "
+                f"{base}/{quote}")
+    for i in range(
+            1, len(HEDGE_TIERS)):
+        if HEDGE_TIERS[i][0] \
+                <= HEDGE_TIERS[i - 1][0]:
+            raise RuntimeError(
+                "pay69 对冲档金额非递增")
+    if not SANDBOX_ONLY:
+        raise RuntimeError(
+            "pay69 沙盘标志被关闭——"
+            "P9 永不实接渠道铁律")
     for k, v in DRIFT_THRESHOLDS.items():
         if not (0 < v <= 1) and k != "minSamples":
             raise RuntimeError(
