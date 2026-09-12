@@ -1,2 +1,3 @@
 dist-weapp
 .env
+private.*.key

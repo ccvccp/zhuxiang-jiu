@@ -23,6 +23,11 @@ const TABS: { key: Tab; label: string }[] = [
 // 春熙路商圈坐标(演示锚点)
 const CENTER = { longitude: 104.081, latitude: 30.660 };
 
+// 百度 JS API 仅 H5 可用(依赖 window/document 动态插入 script);
+// 小程序端走诚实降级, 不渲染空地图占位
+const H5_ENV = process.env.TARO_ENV === 'h5';
+const MAP_ON = H5_ENV && !!BAIDU_MAP_AK;
+
 const ZhiTuPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>('intent');
   const [mapReady, setMapReady] = useState(false);
@@ -31,7 +36,7 @@ const ZhiTuPage: React.FC = () => {
 
   // ============ 百度地图底座(AK 降级) ============
   useEffect(() => {
-    if (!BAIDU_MAP_AK || mapReady) return;
+    if (!MAP_ON || mapReady) return;
     // H5 动态加载百度 JS API
     if (typeof window === 'undefined') return;
     const existed = document.getElementById('bmap-sdk');
@@ -204,9 +209,9 @@ const ZhiTuPage: React.FC = () => {
         {/* ============ 地图底座(全域) ============ */}
         <View className={styles.section}>
           <View className={styles.cardTitle}>
-            百度地图底座 {BAIDU_MAP_AK ? '(已接入)' : '(未配 AK·列表降级)'}
+            百度地图底座 {MAP_ON ? '(已接入)' : H5_ENV ? '(未配 AK·列表降级)' : '(H5 端能力)'}
           </View>
-          {BAIDU_MAP_AK ? (
+          {MAP_ON ? (
             <View>
               <View
                 ref={mapDivRef as any}
@@ -218,8 +223,9 @@ const ZhiTuPage: React.FC = () => {
             </View>
           ) : (
             <View className={styles.footNote}>
-              百度地图 AK 未配置(TARO_APP_BAIDU_MAP_AK), 诚实降级为
-              列表+距离视图——不伪造地图渲染; 配置后自动恢复地图底座
+              {H5_ENV
+                ? '百度地图 AK 未配置(TARO_APP_BAIDU_MAP_AK), 诚实降级为 列表+距离视图——不伪造地图渲染; 配置后自动恢复地图底座'
+                : '地图底座为 H5 端能力(百度 JS API); 小程序端诚实降级为列表+距离视图'}
             </View>
           )}
         </View>

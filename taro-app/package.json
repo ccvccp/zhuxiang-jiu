@@ -47,7 +47,8 @@
     "test:zf": "node test/test-zf.js",
     "test:zw": "node test/test-zw.js",
     "package:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-zxjiu.ps1",
-    "verify:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deploy-local.ps1"
+    "verify:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deploy-local.ps1",
+    "upload:weapp": "node scripts/upload-weapp.js"
   },
   "browserslist": [
     "last 3 versions",
@@ -97,6 +98,7 @@
     "eslint-plugin-import": "^2.12.0",
     "eslint-plugin-react": "^7.8.2",
     "eslint-plugin-react-hooks": "^4.2.0",
+    "miniprogram-ci": "^2.1.31",
     "postcss": "^8.4.18",
     "react-refresh": "^0.11.0",
     "stylelint": "^14.4.0",
