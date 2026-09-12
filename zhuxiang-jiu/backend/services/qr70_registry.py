@@ -150,8 +150,25 @@ CODE_REGISTRY: dict = {
         "scenes": ("consumer",),
         "ttlSeconds": 120,
         "consumePolicy": "once",
-        "requiredRole": "",       # 免登录
+        "requiredRole": "",
         "params": ["deviceHint"],
+        "riskLevel": "high",
+        "phase": "P2",
+        "status": "active",
+    },
+    "auth-session": {
+        "kind": "auth",
+        "label": "统一认证会话码",
+        "description": "三认证链统一承接面"
+                       "(39号扫码登录/48号"
+                       "confirmToken/69号"
+                       "FIDO——绑定通道+指纹"
+                       "漂移观测)",
+        "scenes": ("consumer",),
+        "ttlSeconds": 300,
+        "consumePolicy": "session",
+        "requiredRole": "member",
+        "params": ["channel", "fingerprint"],
         "riskLevel": "high",
         "phase": "P2",
         "status": "active",
@@ -161,12 +178,13 @@ CODE_REGISTRY: dict = {
         "kind": "trace",
         "label": "消费者瓶码",
         "description": "免登录公开溯源(22号"
-                       "BLC 瓶级生命码——人人可扫)",
+                       "BLC 瓶级生命码——人人可扫;"
+                       "P1 签名化绑定 blc)",
         "scenes": ("consumer",),
         "ttlSeconds": 2592000,    # 30 天长效
         "consumePolicy": "public",
         "requiredRole": "",       # 免登录公开
-        "params": ["batchNo", "stage"],
+        "params": ["batchNo", "stage", "blc"],
         "riskLevel": "low",
         "phase": "P1",
         "status": "active",
@@ -191,12 +209,13 @@ CODE_REGISTRY: dict = {
         "kind": "shipping",
         "label": "仓配交接码",
         "description": "扫码绑定物流节点同步"
-                       "上下游(warehouse 出库核销)",
+                       "上下游(warehouse 出库"
+                       "核销; P4 载荷绑定 orderId)",
         "scenes": ("warehouse", "logistics"),
         "ttlSeconds": 86400,
         "consumePolicy": "once",
         "requiredRole": "perm",   # 仓管权限点
-        "params": ["waveNo", "carrier"],
+        "params": ["waveNo", "carrier", "orderId"],
         "riskLevel": "medium",
         "phase": "P4",
         "status": "active",
@@ -206,12 +225,14 @@ CODE_REGISTRY: dict = {
         "kind": "collect",
         "label": "商户收款码",
         "description": "场景化智能收款(69号 P5"
-                       "情境码范式——复用不重建)",
+                       "情境码范式——复用不重建; "
+                       "P6 载荷嵌挑战标记)",
         "scenes": ("storefront", "street"),
         "ttlSeconds": 3600,
         "consumePolicy": "once",
         "requiredRole": "merchant",
-        "params": ["amount", "sceneNote"],
+        "params": ["amount", "sceneNote",
+                   "challenge"],
         "riskLevel": "high",
         "phase": "P6",
         "status": "active",

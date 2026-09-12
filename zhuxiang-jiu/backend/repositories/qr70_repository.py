@@ -27,14 +27,17 @@ from repositories.backend import (
 
 
 class Qr70Repository:
-    """70号三表仓储(双模式——asyncio/Redis)"""
+    """70号五表仓储(双模式——asyncio/Redis)"""
 
     TABLE_CODES = "qr70_codes"
     TABLE_EVENTS = "qr70_events"
     TABLE_JOY = "qr70_joy"
+    TABLE_HYPOTHESES = "qr70_hypotheses"
+    TABLE_PARAMS = "qr70_params"
 
     _ALL_TABLES = (TABLE_CODES, TABLE_EVENTS,
-                   TABLE_JOY)
+                   TABLE_JOY, TABLE_HYPOTHESES,
+                   TABLE_PARAMS)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -48,8 +51,11 @@ class Qr70Repository:
     _FLOAT_FIELDS = ("avgDurationMs", "completeRate")
     _BOOL_FIELDS = ("completed", "misTouch",
                     "redeemed", "scanned")
-    _JSON_DICT_FIELDS = ("detail", "params")
-    _JSON_LIST_FIELDS = ("scenes",)
+    _JSON_DICT_FIELDS = ("detail", "params",
+                         "ribbons")
+    _JSON_LIST_FIELDS = ("scenes", "skuNames",
+                         "layoutBadges",
+                         "confusionPairs")
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -311,3 +317,202 @@ class Qr70Repository:
                 r.get("joySeq") or 0),
             reverse=True)
         return [dict(r) for r in recs[:limit]]
+
+    # ============================================================
+    # 进化假设建议书(qr70_hypotheses——P7
+    # 决策优化层; proposed→submitted/
+    # rejected, 46号审批回执留痕)
+    # ============================================================
+
+    async def next_hypothesis_id(self) -> int:
+        """假设建议书 ID"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("qr70", "hyp", "seq"))
+        self._ensure_store()
+        self.store["_qr70_hyp_seq"] = \
+            self.store.get(
+                "_qr70_hyp_seq", 0) + 1
+        return self.store["_qr70_hyp_seq"]
+
+    async def save_hypothesis(
+            self, hyp_id: int,
+            record: dict) -> dict:
+        """保存假设建议书(索引入册)"""
+        record["hypothesisId"] = hyp_id
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("qr70", "hyp", hyp_id),
+                json.dumps(record,
+                           ensure_ascii=False))
+            await client.sadd(
+                _k("qr70", "hyp", "index"),
+                str(hyp_id))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_HYPOTHESES]\
+            .setdefault(
+                "by_id", {})[hyp_id] \
+            = dict(record)
+        return record
+
+    async def get_hypothesis(
+            self, hyp_id: int) -> dict | None:
+        """按 ID 查假设建议书"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(
+                _k("qr70", "hyp", hyp_id))
+            return json.loads(data) \
+                if data else None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_HYPOTHESES]\
+            .get("by_id", {}).get(hyp_id)
+        return dict(rec) if rec else None
+
+    async def list_hypotheses(
+            self, status: str = None,
+            limit: int = 50) -> list[dict]:
+        """假设建议书列表(倒序; 状态过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.smembers(
+                _k("qr70", "hyp", "index"))
+            result = []
+            for i in sorted(
+                    (int(x) for x in ids),
+                    reverse=True)[:limit * 3]:
+                rec = await self.get_hypothesis(i)
+                if not rec:
+                    continue
+                if status and rec.get(
+                        "status") != status:
+                    continue
+                result.append(rec)
+                if len(result) >= limit:
+                    break
+            return result
+        self._ensure_store()
+        recs = list(
+            self.store[
+                self.TABLE_HYPOTHESES]
+            .get("by_id", {}).values())
+        recs.sort(key=lambda r: r.get(
+            "hypothesisId", 0),
+            reverse=True)
+        if status:
+            recs = [r for r in recs
+                    if r.get("status")
+                    == status]
+        return [dict(r)
+                for r in recs[:limit]]
+
+    # ============================================================
+    # 参数版本基线(qr70_params——P7;
+    # draft→shadow→active→retired)
+    # ============================================================
+
+    async def next_param_version(self) -> int:
+        """参数版本号(全局递增)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("qr70", "param", "ver"))
+        self._ensure_store()
+        self.store[
+            "_qr70_param_ver"] = \
+            self.store.get(
+                "_qr70_param_ver", 0) + 1
+        return self.store[
+            "_qr70_param_ver"]
+
+    async def save_param_version(
+            self, version: int,
+            record: dict) -> dict:
+        """保存参数版本(索引入册)"""
+        record["version"] = version
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("qr70", "param", "v",
+                   version),
+                json.dumps(record,
+                           ensure_ascii=False))
+            await client.sadd(
+                _k("qr70", "param", "index"),
+                str(version))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_PARAMS]\
+            .setdefault(
+                "by_version", {})[version] \
+            = dict(record)
+        return record
+
+    async def get_param_version(
+            self, version: int) -> dict | None:
+        """按版本号查参数"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(
+                _k("qr70", "param", "v",
+                   version))
+            return json.loads(data) \
+                if data else None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_PARAMS]\
+            .get("by_version", {}
+                 ).get(version)
+        return dict(rec) if rec else None
+
+    async def list_param_versions(
+            self, param_id: str = None,
+            status: str = None,
+            limit: int = 50) -> list[dict]:
+        """参数版本列表(倒序; 参数域/
+        状态过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            versions = await client.smembers(
+                _k("qr70", "param", "index"))
+            result = []
+            for v in sorted(
+                    (int(x) for x in versions),
+                    reverse=True)[:limit * 3]:
+                rec = await self\
+                    .get_param_version(v)
+                if not rec:
+                    continue
+                if param_id and rec.get(
+                        "paramId") != param_id:
+                    continue
+                if status and rec.get(
+                        "status") != status:
+                    continue
+                result.append(rec)
+                if len(result) >= limit:
+                    break
+            return result
+        self._ensure_store()
+        recs = list(
+            self.store[
+                self.TABLE_PARAMS]
+            .get("by_version",
+                 {}).values())
+        recs.sort(key=lambda r: r.get(
+            "version", 0),
+            reverse=True)
+        if param_id:
+            recs = [r for r in recs
+                    if r.get("paramId")
+                    == param_id]
+        if status:
+            recs = [r for r in recs
+                    if r.get("status")
+                    == status]
+        return [dict(r)
+                for r in recs[:limit]]
