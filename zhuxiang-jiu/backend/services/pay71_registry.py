@@ -410,6 +410,111 @@ RECON_DELAY_BANDS = (
     (float("inf"), "slow"),  # >1h 缓慢
 )
 
+# ============================================================
+# P5 风控叙事(69号 P2 熵判定之上的
+# 认知解释层——判定零重复; 叙事数字
+# 100% 查询层插值, LLM 不产数字)
+# ============================================================
+
+# 因果规则表(封闭——环境/情境模式
+# →合法解释 vs 谨慎归因; 区分"真欺诈"
+# 与"异常但合法"; 变更走慢环 46号审批)
+CAUSAL_RULES: dict = {
+    "night_virtual_new_device": {
+        "label": "凌晨+陌生设备",
+        "signals": ("odd_hour",
+                    "new_device"),
+        "verdict": "caution",
+        "note": "凌晨时段+陌生设备——"
+                "凭证盗用高发组合",
+    },
+    "business_trip": {
+        "label": "差旅场景",
+        "signals": ("new_location",),
+        "verdict": "legitimate",
+        "note": "IP 突变+差旅——出差"
+                "常致异地支付(异常但合法)",
+    },
+    "family_gift": {
+        "label": "节日送礼",
+        "signals": ("odd_hour",),
+        "verdict": "legitimate",
+        "note": "夜间大额——节日前"
+                "为家人购礼常见",
+    },
+    "new_device_only": {
+        "label": "新设备登录",
+        "signals": ("new_device",),
+        "verdict": "caution",
+        "note": "陌生设备——建议"
+                "二次确认",
+    },
+}
+
+# 因果判定域(封闭二值)
+CAUSAL_VERDICTS = (
+    "caution",       # 谨慎(真欺诈
+                     # 方向信号)
+    "legitimate",    # 合法(异常但
+                     # 合法解释)
+)
+
+# 欺诈手法域(封闭——案例库归档分类)
+FRAUD_PATTERNS = (
+    "credential_theft",   # 凭证盗用
+    "account_takeover",   # 账户接管
+    "collusive_cashout",  # 串通套现
+    "stolen_device",      # 设备盗用
+)
+
+# 案例状态机(封闭)
+INCIDENT_STATES = (
+    "pending",            # 待核实
+    "confirmed_fraud",    # 已确认欺诈
+    "confirmed_legit",    # 已确认合法
+                          # (误拦平反)
+)
+
+# 误拦归因类型域(封闭——回流观测;
+# 熵轴权重建议书走 P7→46号审批)
+MISJUDGE_KINDS = (
+    "context_blind",     # 情境盲(差旅/
+                         # 送礼被拦)
+    "baseline_stale",    # 基线过期
+                         # (新习惯)
+    "threshold_high",    # 阈值偏高
+)
+
+# 脱敏前缀(案例归档——memberId 哈希
+# 化, 原始身份永不入库铁律)
+MASK_PREFIX = "m-"
+MASK_LENGTH = 8
+
+# 叙事模板(封闭——确定性模板拼接;
+# 占位符由查询层数值插值):
+#   {amount}/{entropy}/{step}/{axis}
+#   {channel}/{tier}/{verdict}
+NARRATIVE_TEMPLATES: dict = {
+    "free": (
+        "会员 {member} 金额 ¥{amount} 经"
+        "通道 {channel} 评估: 风险熵 "
+        "{entropy}(信值档 {tier}), 六轴"
+        "中金额轴 {amount_axis}/环境轴"
+        " {env_axis}; 判定档位 {step}"
+        "(免密)——情境 {verdict}。"
+        "依据: 低熵小额+无环境异常。"),
+    "elevated": (
+        "会员 {member} 金额 ¥{amount} 经"
+        "通道 {channel} 评估: 风险熵 "
+        "{entropy}(信值档 {tier}), 六轴"
+        "中金额轴 {amount_axis}/环境轴"
+        " {env_axis}/行为轴 {behavior_axis}"
+        "; 判定档位 {step}(增强认证)。"
+        "情境 {verdict}——环境信号"
+        "{signals} 命中因果规则"
+        " {causal}。依据: {note}"),
+}
+
 
 # ============================================================
 # 启动自检(宪法级)
@@ -688,6 +793,69 @@ def _validate_registry() -> None:
                     i - 1][0]:
             raise RuntimeError(
                 "pay71 对账延迟档非递增")
+    # ⑭ P5 风控叙事: 因果规则域封闭
+    #     (signals 环境标志域内+verdict
+    #     域内)+手法/案例/误拦域封闭+
+    #     模板占位符合法
+    _env_flags = {
+        "odd_hour", "new_device",
+        "new_location"}
+    if set(CAUSAL_VERDICTS) != {
+            "caution", "legitimate"}:
+        raise RuntimeError(
+            "pay71 因果判定域非法")
+    for rid, rule in \
+            CAUSAL_RULES.items():
+        if not set(rule["signals"]) \
+                <= _env_flags:
+            raise RuntimeError(
+                f"pay71 因果规则 {rid} "
+                f"环境信号域外")
+        if rule["verdict"] \
+                not in CAUSAL_VERDICTS:
+            raise RuntimeError(
+                f"pay71 因果规则 {rid} "
+                f"判定域外")
+        if not rule.get("note"):
+            raise RuntimeError(
+                f"pay71 因果规则 {rid} "
+                f"缺依据说明")
+    # 双信号规则须先于单信号匹配
+    # (特异性优先——确定性顺序)
+    _sizes = [len(r["signals"])
+              for r in
+              CAUSAL_RULES.values()]
+    if _sizes != sorted(
+            _sizes, reverse=True):
+        raise RuntimeError(
+            "pay71 因果规则须按特异性"
+            "降序排列")
+    if set(FRAUD_PATTERNS) != {
+            "credential_theft",
+            "account_takeover",
+            "collusive_cashout",
+            "stolen_device"}:
+        raise RuntimeError(
+            "pay71 欺诈手法域非法")
+    if set(INCIDENT_STATES) != {
+            "pending",
+            "confirmed_fraud",
+            "confirmed_legit"}:
+        raise RuntimeError(
+            "pay71 案例状态机非法")
+    if set(MISJUDGE_KINDS) != {
+            "context_blind",
+            "baseline_stale",
+            "threshold_high"}:
+        raise RuntimeError(
+            "pay71 误拦归因域非法")
+    if not (4 <= MASK_LENGTH <= 16):
+        raise RuntimeError(
+            "pay71 脱敏长度域外")
+    if set(NARRATIVE_TEMPLATES) != {
+            "free", "elevated"}:
+        raise RuntimeError(
+            "pay71 叙事模板域非法")
 
 
 _validate_registry()

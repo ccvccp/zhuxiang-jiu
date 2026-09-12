@@ -40,20 +40,29 @@
     POST /api/pay71/recon/retry         补单重试结果上报(admin, 决策面 off 409——P4)
     GET  /api/pay71/recon/records       补单账本视图(admin, 观测面——P4)
     GET  /api/pay71/recon/baseline      渠道对账延迟差错基线(admin, 观测面——P4)
+    GET  /api/pay71/narrative/dict      风控叙事字典公示(admin, 观测面——P5)
+    POST /api/pay71/narrative/generate  风控叙事生成(admin, 决策面 off 409——P5)
+    GET  /api/pay71/narrative/records    叙事留痕视图(admin, 观测面——P5)
+    POST /api/pay71/narrative/incident/report 欺诈案例归档(admin, 快环摄取——不受开关——P5)
+    POST /api/pay71/narrative/incident/{seq}/verify 案例核实(admin, 人工——不受开关——P5)
+    POST /api/pay71/narrative/misjudge/report 误拦归因回流(admin, 快环摄取——不受开关——P5)
+    GET  /api/pay71/narrative/library   案例库+误拦统计视图(admin, 观测面——P5)
 
 鉴权: 管理面 X-Role: admin(69号同款口径)。
 统一口径(69号范式):
     - 观测面不受 PAY71_MODE 影响
     - 快环观测上报(signals/retry report/
-      external report)不受开关影响
+      external report/incident report/
+      misjudge report)不受开关影响
     - 人工面(port state/onboard/propose/
-      decide/external decide)不受开关影响
+      decide/external decide/incident
+      verify)不受开关影响
     - 保护面(orchestrate/probe)不受开关
       影响——保护方向永续铁律(规划 §4.1)
     - 决策面(predict compute/revoke/
       split propose/confirm/allocation
-      compute/recon verify/heal/retry)
-      off=409
+      compute/recon verify/heal/retry/
+      narrative generate)off=409
     - KeyError → 404 / ValueError → 409
 """
 
@@ -228,6 +237,55 @@ class ReconRetryBody(BaseModel):
         description="补单记录序号")
     success: bool = Field(
         description="重试结果(成功/失败)")
+
+
+class NarrativeGenerateBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    amount: float = Field(gt=0, description="金额(元)")
+    trustTier: str = Field(
+        default="", description="信值档(45号)")
+    channelId: str = Field(
+        default="", description="通道 ID")
+    newDevice: bool = Field(
+        default=False, description="陌生设备")
+    oddHour: bool = Field(
+        default=False, description="凌晨时段")
+    newLocation: bool = Field(
+        default=False, description="异常地点")
+
+
+class IncidentReportBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    pattern: str = Field(description="欺诈手法"
+                         "(credential_theft/"
+                         "account_takeover/"
+                         "collusive_cashout/"
+                         "stolen_device)")
+    summary: str = Field(
+        default="", description="案例摘要")
+    entropyAxes: dict = Field(
+        default_factory=dict,
+        description="熵轴指纹(查询层原值)")
+    deviceClues: dict = Field(
+        default_factory=dict,
+        description="设备线索(脱敏后)")
+
+
+class IncidentVerifyBody(BaseModel):
+    confirmedFraud: bool = Field(
+        description="核实结果(欺诈/合法)")
+
+
+class MisjudgeReportBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    kind: str = Field(description="归因类型"
+                      "(context_blind/"
+                      "baseline_stale/"
+                      "threshold_high)")
+    narrativeSeq: int = Field(
+        default=0, description="关联叙事序号")
+    note: str = Field(
+        default="", description="备注")
 
 
 # ============================================================
@@ -990,6 +1048,148 @@ async def recon_baseline(
         Pay71P4Service,
     )
     return await Pay71P4Service().baseline_view()
+
+
+# ============================================================
+# P5 端点(风控叙事)
+# ============================================================
+
+@router.get("/narrative/dict")
+async def narrative_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """风控叙事字典公示(因果规则/手法
+    域/状态机/铁律声明——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p5_service import (
+        Pay71P5Service,
+    )
+    return Pay71P5Service().dict_view()
+
+
+@router.post("/narrative/generate")
+async def narrative_generate(
+        body: NarrativeGenerateBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """风控叙事生成(69号 P2 熵引擎纯
+    调用之上的解释层——判定零重复;
+    叙事数字 100% 查询层插值; 决策面
+    off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p5_service import (
+        Pay71P5Service,
+    )
+    try:
+        return await Pay71P5Service()\
+            .narrate(
+                body.memberId, body.amount,
+                trust_tier=body.trustTier,
+                channel_id=body.channelId,
+                new_device=body.newDevice,
+                odd_hour=body.oddHour,
+                new_location=body.newLocation)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/narrative/records")
+async def narrative_records(
+        memberId: int = 0,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """叙事留痕视图(可按会员过滤
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p5_service import (
+        Pay71P5Service,
+    )
+    return await Pay71P5Service().records_view(
+        member_id=memberId or None,
+        limit=limit)
+
+
+@router.post("/narrative/incident/report")
+async def narrative_incident_report(
+        body: IncidentReportBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """欺诈案例归档(已确认案例回流
+    ——memberId 哈希脱敏铁律; 快环
+    摄取不受 PAY71_MODE 影响)"""
+    _require_admin(x_role)
+    from services.pay71_p5_service import (
+        Pay71P5Service,
+    )
+    try:
+        return await Pay71P5Service()\
+            .report_incident(
+                body.memberId, body.pattern,
+                summary=body.summary,
+                entropy_axes=body.entropyAxes,
+                device_clues=body.deviceClues)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/narrative/incident/"
+             "{incident_seq}/verify")
+async def narrative_incident_verify(
+        incident_seq: int,
+        body: IncidentVerifyBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """案例核实(pending→confirmed_
+    fraud/confirmed_legit——误拦平反
+    通道; 人工动作不受开关影响)"""
+    _require_admin(x_role)
+    from services.pay71_p5_service import (
+        Pay71P5Service,
+    )
+    try:
+        return await Pay71P5Service()\
+            .verify_incident(
+                incident_seq,
+                body.confirmedFraud)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/narrative/misjudge/report")
+async def narrative_misjudge_report(
+        body: MisjudgeReportBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """误拦归因回流(观测管道——熵轴
+    权重建议书走 P7 慢环→46号审批;
+    快环摄取不受 PAY71_MODE 影响)"""
+    _require_admin(x_role)
+    from services.pay71_p5_service import (
+        Pay71P5Service,
+    )
+    try:
+        return await Pay71P5Service()\
+            .report_misjudge(
+                body.memberId, body.kind,
+                narrative_seq=body.narrativeSeq,
+                note=body.note)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/narrative/library")
+async def narrative_library(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """案例库+误拦归因统计视图
+    (观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p5_service import (
+        Pay71P5Service,
+    )
+    return await Pay71P5Service().library_view()
 
 
 def register_pay71_routes(app) -> None:

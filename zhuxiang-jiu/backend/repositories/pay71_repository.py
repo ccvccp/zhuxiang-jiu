@@ -46,6 +46,13 @@
         pay71_reconbase  渠道对账延迟
                           差错基线统计
                           (P4——快环)
+        pay71_narratives  风控叙事留痕
+                          (P5——归因字段
+                          +模板插值)
+        pay71_incidents   欺诈手法案例库
+                          (P5——脱敏归档)
+        pay71_misjudges   误拦归因留痕
+                          (P5——回流观测)
 
 69号仓储范式平移:
     - 通用读写基元(_save/_get/_list)
@@ -91,6 +98,9 @@ class Pay71Repository:
     TABLE_VERIFIES = "pay71_verifies"
     TABLE_RECONS = "pay71_recons"
     TABLE_RECONBASE = "pay71_reconbase"
+    TABLE_NARRATIVES = "pay71_narratives"
+    TABLE_INCIDENTS = "pay71_incidents"
+    TABLE_MISJUDGES = "pay71_misjudges"
 
     _ALL_TABLES = (
         TABLE_PORTS, TABLE_SIGNALS,
@@ -100,7 +110,9 @@ class Pay71Repository:
         TABLE_SPLITS, TABLE_RETRIES,
         TABLE_ALLOCATIONS, TABLE_EXTERNAL,
         TABLE_OVERRIDES, TABLE_VERIFIES,
-        TABLE_RECONS, TABLE_RECONBASE)
+        TABLE_RECONS, TABLE_RECONBASE,
+        TABLE_NARRATIVES, TABLE_INCIDENTS,
+        TABLE_MISJUDGES)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -113,11 +125,13 @@ class Pay71Repository:
         "predictionSeq", "splitSeq",
         "allocationSeq", "externalSeq",
         "verifySeq", "reconSeq",
+        "narrativeSeq", "incidentSeq",
+        "misjudgeSeq",
         "sampleCount", "probeStreak",
         "probeRequired", "memberId",
         "retryCount", "retryAttempt",
         "healCount", "diffCount",
-        "totalCount")
+        "totalCount", "entropySeq")
     _FLOAT_FIELDS = (
         "avgLatencyMs", "errorRate",
         "successRate", "precursorScore",
@@ -128,7 +142,7 @@ class Pay71Repository:
         "weightedScore", "delta",
         "orderAmount", "flowAmount",
         "receiptAmount", "diffSeconds",
-        "avgCallbackSeconds")
+        "avgCallbackSeconds", "deviation")
     _BOOL_FIELDS = (
         "alerted", "observed", "recovered",
         "probeSuccess", "eligible",
@@ -136,7 +150,9 @@ class Pay71Repository:
         "amountWithinLimit", "advisoryOnly",
         "onFront", "amountMatch",
         "orderIdMatch", "timeMatch",
-        "idempotentKey")
+        "idempotentKey", "newDevice",
+        "oddHour", "newLocation",
+        "redacted")
     _JSON_DICT_FIELDS = (
         "windows", "meta", "detail",
         "signals", "trigger", "evidence",
@@ -145,7 +161,9 @@ class Pay71Repository:
         "disposition", "scores",
         "weightsUsed", "impact",
         "suggestedWeights", "front",
-        "weights", "mismatch")
+        "weights", "mismatch",
+        "attribution", "axes",
+        "entropyAxes", "deviceClues")
     _JSON_LIST_FIELDS = (
         "traits", "parts", "candidates",
         "paretoFront", "affectedPorts")
@@ -1610,3 +1628,315 @@ class Pay71Repository:
             in self.store[
                 self.TABLE_RECONBASE].items()
         }
+
+    # ============================================================
+    # 风控叙事留痕(pay71_narratives——P5)
+    # ============================================================
+
+    async def next_narrative_seq(self) -> int:
+        """叙事序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "narrative", "seq"))
+        self._ensure_store()
+        self.store["_pay71_narrative_seq"] = \
+            self.store.get(
+                "_pay71_narrative_seq", 0) + 1
+        return self.store[
+            "_pay71_narrative_seq"]
+
+    async def save_narrative(self,
+                            record: dict) -> dict:
+        """保存叙事留痕(归因字段+模板
+        插值文本)"""
+        seq = await self.next_narrative_seq()
+        record["narrativeSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "narrative",
+                     str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_NARRATIVES][
+            str(seq)] = dict(record)
+        return record
+
+    async def list_narratives(
+            self, member_id: int = None,
+            limit: int = 50) -> list[dict]:
+        """列出叙事留痕(可按会员过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "narrative", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "narrative",
+                        str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if member_id is None \
+                        or rec.get(
+                            "memberId") \
+                        == int(member_id):
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[
+                 self.TABLE_NARRATIVES]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_NARRATIVES][str(s)])
+            for s in seqs
+        ]
+        if member_id is not None:
+            records = [
+                r for r in records
+                if r.get("memberId")
+                == int(member_id)]
+        return records[:limit]
+
+    # ============================================================
+    # 欺诈手法案例库(pay71_incidents——P5)
+    # ============================================================
+
+    async def next_incident_seq(self) -> int:
+        """案例序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "incident", "seq"))
+        self._ensure_store()
+        self.store["_pay71_incident_seq"] = \
+            self.store.get(
+                "_pay71_incident_seq", 0) + 1
+        return self.store[
+            "_pay71_incident_seq"]
+
+    async def save_incident(self,
+                            record: dict) -> dict:
+        """保存欺诈案例(脱敏归档)"""
+        seq = await self.next_incident_seq()
+        record["incidentSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "incident",
+                     str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_INCIDENTS][
+            str(seq)] = dict(record)
+        return record
+
+    async def get_incident(
+            self, incident_seq: int) -> dict | None:
+        """按序号查案例"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("pay71", "incident",
+                    str(incident_seq)))
+            if not raw:
+                return None
+            with contextlib.suppress(
+                    ValueError, TypeError):
+                return self._deserialize(
+                    json.loads(raw))
+            return None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_INCIDENTS].get(
+            str(incident_seq))
+        return dict(rec) if rec else None
+
+    async def update_incident(
+            self, incident_seq: int,
+            record: dict) -> dict:
+        """更新案例(核实状态流转留痕)"""
+        record["incidentSeq"] = \
+            int(incident_seq)
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "incident",
+                     str(incident_seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_INCIDENTS][
+            str(incident_seq)] = \
+            dict(record)
+        return record
+
+    async def list_incidents(
+            self, pattern: str = None,
+            state: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出案例(可按手法/状态过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "incident", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "incident",
+                        str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if pattern is not None \
+                        and rec.get(
+                            "pattern") != pattern:
+                    continue
+                if state is not None \
+                        and rec.get(
+                            "state") != state:
+                    continue
+                result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[
+                 self.TABLE_INCIDENTS]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_INCIDENTS][str(s)])
+            for s in seqs
+        ]
+        if pattern is not None:
+            records = [
+                r for r in records
+                if r.get("pattern") == pattern]
+        if state is not None:
+            records = [
+                r for r in records
+                if r.get("state") == state]
+        return records[:limit]
+
+    # ============================================================
+    # 误拦归因留痕(pay71_misjudges——P5)
+    # ============================================================
+
+    async def next_misjudge_seq(self) -> int:
+        """误拦序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "misjudge", "seq"))
+        self._ensure_store()
+        self.store["_pay71_misjudge_seq"] = \
+            self.store.get(
+                "_pay71_misjudge_seq", 0) + 1
+        return self.store[
+            "_pay71_misjudge_seq"]
+
+    async def save_misjudge(self,
+                            record: dict) -> dict:
+        """保存误拦归因留痕(回流观测)"""
+        seq = await self.next_misjudge_seq()
+        record["misjudgeSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "misjudge",
+                     str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_MISJUDGES][
+            str(seq)] = dict(record)
+        return record
+
+    async def list_misjudges(
+            self, kind: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出误拦留痕(可按归因类型过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "misjudge", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "misjudge",
+                        str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if kind is None \
+                        or rec.get("kind") == kind:
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[
+                 self.TABLE_MISJUDGES]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_MISJUDGES][str(s)])
+            for s in seqs
+        ]
+        if kind is not None:
+            records = [
+                r for r in records
+                if r.get("kind") == kind]
+        return records[:limit]
