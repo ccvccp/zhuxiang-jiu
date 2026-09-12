@@ -78,6 +78,8 @@ const QUICK_ENTRIES = [
   { key: 'service', icon: '🎧', label: '在线客服' },
   { key: 'xinzhi', icon: '🏅', label: '信值臻选' },
   { key: 'map', icon: '🗺️', label: '智图地图' },
+  { key: 'zhidan', icon: '📦', label: '智单订单' },
+  { key: 'zhike', icon: '👑', label: '智客会员' },
 ];
 
 const IndexPage: React.FC = () => {
@@ -298,6 +300,12 @@ const IndexPage: React.FC = () => {
         break;
       case 'map':
         Taro.navigateTo({ url: '/pages/zt/index' });
+        break;
+      case 'zhidan':
+        Taro.navigateTo({ url: '/pages/zd/index' });
+        break;
+      case 'zhike':
+        Taro.navigateTo({ url: '/pages/zk/index' });
         break;
     }
   };

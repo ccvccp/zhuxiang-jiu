@@ -1,0 +1,409 @@
+@use '@/styles/variables.scss' as *;
+
+// ============================================
+// 智客独立主题: 紫罗兰/贵族紫
+// (区别于智图棕金与智单藏蓝; 移动端优先, 全 rpx 布局)
+// ============================================
+$zk-primary: #5b3a8e;
+$zk-primary-dark: #43296b;
+$zk-primary-light: #7c5bb0;
+$zk-hero-from: #3a2260;
+$zk-hero-to: #5b3a8e;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 88rpx);
+}
+
+// ============================================
+// 头部 hero(模块标题与口径声明)
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $zk-hero-from, $zk-hero-to);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin: $spacing-md $spacing-lg 0;
+  box-shadow: $shadow-card-hover;
+}
+
+.heroTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroSub {
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.68);
+}
+
+// ============================================
+// 页签栏
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  margin-top: $spacing-sm;
+  padding: 0 $spacing-xs;
+  border-bottom: 1rpx solid $color-border;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-md 0;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  position: relative;
+}
+
+.tabActive {
+  color: $zk-primary;
+  font-weight: $font-weight-bold;
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    width: 36rpx;
+    height: 4rpx;
+    border-radius: $radius-round;
+    background: $zk-primary;
+  }
+}
+
+.section {
+  padding: $spacing-md $spacing-lg $spacing-xl;
+}
+
+.cardTitle {
+  margin: $spacing-lg 0 $spacing-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.runBtn {
+  margin-bottom: $spacing-md;
+  padding: $spacing-sm 0;
+  text-align: center;
+  background: $zk-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.busyBar {
+  margin: $spacing-xs $spacing-lg;
+  padding: $spacing-xs $spacing-md;
+  text-align: center;
+  background: rgba(91, 58, 142, 0.08);
+  color: $zk-primary;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+}
+
+.footNote {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.empty {
+  padding: $spacing-lg;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+}
+
+// ============================================
+// 统计网格(总览/扫描/唤醒四格)
+// ============================================
+.statGrid {
+  display: flex;
+  margin-bottom: $spacing-sm;
+  padding: $spacing-sm 0;
+  background: $color-bg-hover;
+  border-radius: $radius-sm;
+}
+
+.statCell {
+  flex: 1;
+  text-align: center;
+}
+
+.statNum {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $zk-primary;
+}
+
+.statLbl {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 结果卡(通用)
+// ============================================
+.resultCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.resHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-sm;
+}
+
+.resBatch {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.resScore {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $zk-primary;
+}
+
+.resItem {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+}
+
+.resOk {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(0, 180, 42, 0.08);
+  color: $color-success;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  line-height: 1.6;
+}
+
+.resWarn {
+  margin-bottom: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(245, 63, 63, 0.08);
+  color: $color-error;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+}
+
+// 推理链可解释: formula 小字灰底
+.formulaBox {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: $color-bg-hover;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+}
+
+// disposition: 「建议书」标签样式(紫描边胶囊)
+.dispTag {
+  display: inline-block;
+  margin-top: $spacing-sm;
+  padding: 4rpx 20rpx;
+  border: 1rpx solid $zk-primary;
+  color: $zk-primary;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+}
+
+// LTV 假设标注列表
+.assumpItem {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+}
+
+// 永不自动发送(醒目红线横幅)
+.neverSend {
+  margin-bottom: $spacing-md;
+  padding: $spacing-sm $spacing-md;
+  background: rgba(245, 63, 63, 0.10);
+  border: 1rpx dashed $color-error;
+  color: $color-error;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  line-height: 1.6;
+}
+
+// ============================================
+// 分级标签(红/黄/绿 + 唤醒三级)
+// ============================================
+.alertTag {
+  padding: 4rpx 16rpx;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.sevHigh { background: $color-error; }
+.sevMid { background: $color-warning; }
+.sevLow { background: $color-success; }
+
+.gradeBadge {
+  padding: 4rpx 20rpx;
+  border-radius: $radius-round;
+  background: $zk-primary;
+  color: $color-text-white;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+}
+
+// 候选行(健康五维/RFM/LTV 因子等)
+.candRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-xs 0;
+  border-bottom: 1rpx solid $color-divider;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+}
+
+.candScores {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  text-align: right;
+}
+
+// 预警卡(流失/唤醒/检测)
+.alertCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+  border-left: 6rpx solid $zk-primary-light;
+}
+
+// 输入行(会员 ID/沙盘参数/备注)
+.qaInputRow {
+  display: flex;
+  gap: $spacing-sm;
+  align-items: center;
+  margin-bottom: $spacing-md;
+}
+
+.qaInput {
+  flex: 1;
+  min-width: 0;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-sm;
+}
+
+.qaBtn {
+  padding: $spacing-sm $spacing-lg;
+  background: $zk-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  white-space: nowrap;
+}
+
+// ============================================
+// 进化面板(反馈/备忘录操作区)
+// ============================================
+.evoPanel {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.evoLbl {
+  margin: $spacing-sm 0 $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.evoBtns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.evoBtn {
+  padding: $spacing-xs $spacing-lg;
+  border: 1rpx solid $zk-primary;
+  color: $zk-primary;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+}
+
+.evoBtnActive {
+  background: $zk-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-medium;
+}
+
+.fbItem {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.fbRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.fbAdopted { color: $color-success; font-weight: $font-weight-bold; font-size: $font-size-sm; }
+.fbRejected { color: $color-error; font-weight: $font-weight-bold; font-size: $font-size-sm; }
+.fbCorrected { color: $color-warning; font-weight: $font-weight-bold; font-size: $font-size-sm; }
+
+.fbWeight {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.bottomSpace {
+  height: 40rpx;
+}

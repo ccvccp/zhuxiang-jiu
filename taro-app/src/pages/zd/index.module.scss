@@ -1,0 +1,401 @@
+@use '@/styles/variables.scss' as *;
+
+// ============================================
+// 智单主题: 藏蓝/商务蓝(区别于智图棕金/竹香绿)
+// ============================================
+$zd-primary: #1e3a5f;        // 藏蓝主色
+$zd-primary-light: #2f5a8f;  // 商务蓝亮色
+$zd-primary-dark: #142a45;   // 深藏蓝
+$zd-primary-bg: rgba(30, 58, 95, 0.06);
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 88rpx);
+}
+
+// ============================================
+// 页签栏(吸顶)
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-xs;
+  border-bottom: 1rpx solid $color-border;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: $shadow-card;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-md 0;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  position: relative;
+}
+
+.tabActive {
+  color: $zd-primary;
+  font-weight: $font-weight-bold;
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    width: 36rpx;
+    height: 4rpx;
+    border-radius: $radius-round;
+    background: $zd-primary;
+  }
+}
+
+.section {
+  padding: $spacing-md $spacing-lg $spacing-xl;
+}
+
+.cardTitle {
+  margin: $spacing-lg 0 $spacing-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.runBtn {
+  margin-bottom: $spacing-md;
+  padding: $spacing-sm 0;
+  text-align: center;
+  background: $zd-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  box-shadow: 0 4rpx 12rpx rgba(30, 58, 95, 0.25);
+}
+
+.footNote {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.empty {
+  padding: $spacing-lg;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+}
+
+// ============================================
+// hero 头卡(藏蓝渐变)
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $zd-primary-dark, $zd-primary-light);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  box-shadow: $shadow-card-hover;
+}
+
+.heroTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroSub {
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.65);
+}
+
+// ============================================
+// 统计格(织物总览)
+// ============================================
+.statGrid {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: $spacing-sm;
+}
+
+.statCell {
+  width: 50%;
+  box-sizing: border-box;
+  padding: $spacing-xs $spacing-sm;
+}
+
+.statNum {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $zd-primary;
+}
+
+.statLbl {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 结果卡(通用)
+// ============================================
+.resultCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.resHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-sm;
+}
+
+.resBatch {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.resScore {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $zd-primary;
+}
+
+.resItem {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+}
+
+.resWarn {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(245, 63, 63, 0.08);
+  color: $color-error;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+}
+
+// formula 推理链(小字灰底, 可解释)
+.formulaBox {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: $color-bg-hover;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.7;
+}
+
+// 建议书标签(disposition 一律建议书呈现)
+.adviceRow {
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-xs;
+  margin-top: $spacing-sm;
+}
+
+.adviceTag {
+  flex-shrink: 0;
+  padding: 2rpx 14rpx;
+  border-radius: $radius-round;
+  background: $zd-primary;
+  color: $color-text-white;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-bold;
+}
+
+.adviceText {
+  flex: 1;
+  font-size: $font-size-xs;
+  color: $zd-primary;
+  line-height: 1.7;
+}
+
+.alertTag {
+  padding: 4rpx 16rpx;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.sevHigh { background: $color-error; }
+.sevMid { background: $color-warning; }
+.sevLow { background: $color-success; }
+
+.gradeBadge {
+  padding: 4rpx 20rpx;
+  border-radius: $radius-round;
+  background: $zd-primary;
+  color: $color-text-white;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+}
+
+// 候选行
+.candRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-xs 0;
+  border-bottom: 1rpx solid $color-divider;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+}
+
+.candScores {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 异常卡
+.alertCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+  border-left: 6rpx solid $color-warning;
+  box-shadow: $shadow-card;
+}
+
+// ============================================
+// 输入行(问答/裁决/What-if)
+// ============================================
+.qaInputRow {
+  display: flex;
+  gap: $spacing-sm;
+  align-items: center;
+  margin-bottom: $spacing-md;
+}
+
+.inputLbl {
+  flex-shrink: 0;
+  width: 150rpx;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.qaInput {
+  flex: 1;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-sm;
+  border: 1rpx solid $color-border;
+}
+
+.qaBtn {
+  flex-shrink: 0;
+  padding: $spacing-sm $spacing-lg;
+  background: $zd-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+}
+
+// ============================================
+// 选块(chip 单选: 反馈目标/裁决/备忘主题)
+// ============================================
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.chip {
+  padding: $spacing-xs $spacing-lg;
+  border: 1rpx solid $color-border;
+  color: $color-text-secondary;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  background: $color-bg-card;
+}
+
+.chipActive {
+  border-color: $zd-primary;
+  color: $color-text-white;
+  background: $zd-primary;
+  font-weight: $font-weight-bold;
+}
+
+// ============================================
+// 进化面板与留痕
+// ============================================
+.evoPanel {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.evoRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: $spacing-sm 0;
+}
+
+.evoLbl {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.evoBtns {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.evoBtn {
+  padding: $spacing-xs $spacing-lg;
+  border: 1rpx solid $zd-primary;
+  color: $zd-primary;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+}
+
+.fbItem {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  margin-bottom: $spacing-sm;
+  box-shadow: $shadow-card;
+}
+
+.fbRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.bottomSpace {
+  height: 40rpx;
+}
