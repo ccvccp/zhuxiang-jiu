@@ -46,6 +46,7 @@
     "test:zy": "node test/test-zy.js",
     "test:zf": "node test/test-zf.js",
     "test:zw": "node test/test-zw.js",
+    "test:qr": "node test/test-qr.js",
     "package:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-zxjiu.ps1",
     "verify:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-deploy-local.ps1",
     "upload:weapp": "node scripts/upload-weapp.js"

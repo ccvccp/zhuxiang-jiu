@@ -48,7 +48,8 @@ export default defineAppConfig({
     'pages/zt/index',
     'pages/zd/index',
     'pages/zk/index',
-    'pages/zp/index'
+    'pages/zp/index',
+    'pages/qr/index'
   ],
   window: {
     backgroundTextStyle: 'light',

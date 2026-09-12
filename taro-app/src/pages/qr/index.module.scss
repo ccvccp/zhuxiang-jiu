@@ -1,0 +1,326 @@
+@use '@/styles/variables.scss' as *;
+
+// ============================================
+// 智码主题: 靛蓝/扫码蓝(区别于智付翡翠绿)
+// ============================================
+$qr-primary: #3b4eb8;        // 靛蓝主色
+$qr-primary-light: #5570d8;  // 亮蓝
+$qr-primary-dark: #26348a;   // 深靛蓝
+$qr-primary-bg: rgba(59, 78, 184, 0.06);
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 88rpx);
+}
+
+// ============================================
+// 页签栏(吸顶)
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-xs;
+  border-bottom: 1rpx solid $color-border;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: $shadow-card;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-md 0;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  position: relative;
+}
+
+.tabActive {
+  color: $qr-primary;
+  font-weight: $font-weight-bold;
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    width: 36rpx;
+    height: 4rpx;
+    border-radius: $radius-round;
+    background: $qr-primary;
+  }
+}
+
+.section {
+  padding: $spacing-md $spacing-lg $spacing-xl;
+}
+
+// ============================================
+// hero 头卡(靛蓝渐变)
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $qr-primary-dark, $qr-primary-light);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  box-shadow: $shadow-card-hover;
+}
+
+.heroTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.heroDesc {
+  margin-top: 6rpx;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.75);
+}
+
+.heroMeta {
+  display: flex;
+  gap: $spacing-lg;
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.9);
+  font-weight: $font-weight-medium;
+}
+
+.heroRule {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba($color-text-white, 0.12);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.85);
+  line-height: 1.7;
+}
+
+// ============================================
+// 标题与按钮
+// ============================================
+.cardTitle {
+  margin: $spacing-lg 0 $spacing-sm;
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.loadBtn {
+  margin-bottom: $spacing-md;
+  padding: $spacing-sm 0;
+  text-align: center;
+  border: 1rpx solid $qr-primary;
+  color: $qr-primary;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.runBtn {
+  margin-bottom: $spacing-md;
+  padding: $spacing-sm 0;
+  text-align: center;
+  background: $qr-primary;
+  color: $color-text-white;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  box-shadow: 0 4rpx 12rpx rgba(59, 78, 184, 0.25);
+}
+
+.footNote {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+}
+
+.empty {
+  padding: $spacing-lg;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+}
+
+// ============================================
+// 统计格
+// ============================================
+.statGrid {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.statItem {
+  flex: 1;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md $spacing-sm;
+  text-align: center;
+  box-shadow: $shadow-card;
+}
+
+.statNum {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $qr-primary;
+}
+
+.statLabel {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 行卡(注册表/码实例/假设)
+// ============================================
+.rowCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+  box-shadow: $shadow-card;
+}
+
+.rowHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-xs;
+}
+
+.rowTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.rowDesc {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+}
+
+.badge {
+  padding: 2rpx 16rpx;
+  border-radius: $radius-round;
+  background: $qr-primary-bg;
+  color: $qr-primary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+}
+
+// ============================================
+// 输入行
+// ============================================
+.inputRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.inputLabel {
+  flex-shrink: 0;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.input {
+  flex: 1;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-sm;
+  border: 1rpx solid $color-border;
+}
+
+// ============================================
+// 选块(chip 单选)
+// ============================================
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.chip {
+  padding: $spacing-xs $spacing-lg;
+  border: 1rpx solid $color-border;
+  color: $color-text-secondary;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  background: $color-bg-card;
+}
+
+.chipActive {
+  border-color: $qr-primary;
+  color: $color-text-white;
+  background: $qr-primary;
+  font-weight: $font-weight-bold;
+}
+
+// ============================================
+// 结果卡
+// ============================================
+.resultCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.resultLine {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+}
+
+.resultCode {
+  margin-top: $spacing-xs;
+  padding: $spacing-xs $spacing-md;
+  background: $color-bg-hover;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  word-break: break-all;
+}
+
+.resultWarn {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(245, 63, 63, 0.08);
+  color: $color-error;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+}
+
+.resultOk {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: $qr-primary-bg;
+  color: $qr-primary;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+}
