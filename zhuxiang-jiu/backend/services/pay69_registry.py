@@ -406,6 +406,98 @@ SMARTCODE_SERVICE_ID = "pay69-smart"
 
 
 # ============================================================
+# P6 多模态普惠(无障碍——LLM 仅澄清,
+# 资金确认永远显式铁律)
+# ============================================================
+
+# 模态域(封闭——多模态入口)
+MODALITIES = (
+    "voice",      # 语音
+    "gesture",    # 手势
+    "eyegaze",    # 眼动
+    "text",       # 文本(对照/键盘)
+)
+
+# 无障碍群体域(封闭)
+ACCESS_GROUPS = (
+    "elderly",           # 老年(大字体/
+                         # 语音确认优先)
+    "motor_impaired",    # 运动障碍
+                         # (手势优先)
+    "visually_impaired",  # 视觉障碍
+                         # (语音播报优先)
+    "standard",          # 标准
+)
+
+# 无障碍渲染档案(封闭——群体→适配)
+ACCESSIBILITY_PROFILES: dict = {
+    "elderly": {
+        "fontScale": 1.5,
+        "voiceConfirm": True,
+        "slowPace": True,
+        "simplifyUI": True,
+        "gesturePriority": False,
+    },
+    "motor_impaired": {
+        "fontScale": 1.0,
+        "voiceConfirm": True,
+        "slowPace": False,
+        "simplifyUI": True,
+        "gesturePriority": True,
+    },
+    "visually_impaired": {
+        "fontScale": 1.2,
+        "voiceConfirm": True,
+        "slowPace": True,
+        "simplifyUI": False,
+        "gesturePriority": False,
+    },
+    "standard": {
+        "fontScale": 1.0,
+        "voiceConfirm": False,
+        "slowPace": False,
+        "simplifyUI": False,
+        "gesturePriority": False,
+    },
+}
+
+# 意图解析三态(55号 P0 意图引擎范式)
+INTENT_OUTCOMES = (
+    "direct",    # 完整意图(金额+商品/
+                 # 方式明确)→直出参数
+    "confirm",   # 金额明确, 商品/方式
+                 # 待确认→确认清单
+    "clarify",   # 关键信息缺失
+                 # →澄清问句
+)
+
+# 确认词域(封闭——资金确认显式铁律)
+CONFIRM_WORDS = (
+    "确认支付",   # 标准确认词
+    "确认",
+)
+
+# 确认令牌 TTL(秒)
+MODALITY_CONFIRM_TTL = 180
+
+# 商品关键词域(规则轨——封闭注册)
+PRODUCT_KEYWORDS = (
+    "竹香经典", "竹香典藏", "竹香尊享",
+    "翠竹小酌", "竹香小酌", "竹香",
+)
+
+# 通道偏好关键词(规则轨——封闭映射)
+CHANNEL_KEYWORDS: dict = {
+    "wechat": ("微信",),
+    "alipay": ("支付宝",),
+    "bank": ("银行卡", "那张卡", "刷卡"),
+    "unionpay": ("云闪付",),
+    "credit_tv": ("信值", "抵扣", "赊"),
+    "biometric": ("刷脸", "指纹",),
+}
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -566,6 +658,32 @@ def _validate_registry() -> None:
             "expired"}:
         raise RuntimeError(
             "pay69 情境码状态域非法")
+    # ⑱ P6 多模态: 模态/群体/三态域
+    #     封闭+档案闭合+确认词非空
+    if set(MODALITIES) != {
+            "voice", "gesture",
+            "eyegaze", "text"}:
+        raise RuntimeError("pay69 模态域非法")
+    if set(ACCESS_GROUPS) != set(
+            ACCESSIBILITY_PROFILES):
+        raise RuntimeError(
+            "pay69 群体与档案不闭合")
+    if set(INTENT_OUTCOMES) != {
+            "direct", "confirm", "clarify"}:
+        raise RuntimeError(
+            "pay69 意图三态域非法")
+    if not CONFIRM_WORDS:
+        raise RuntimeError(
+            "pay69 确认词域为空")
+    if not (0 < MODALITY_CONFIRM_TTL
+            <= 600):
+        raise RuntimeError(
+            "pay69 确认 TTL 域外")
+    for ch, kws in CHANNEL_KEYWORDS.items():
+        if ch not in expected or not kws:
+            raise RuntimeError(
+                f"pay69 通道关键词非法: "
+                f"{ch}")
 
 
 _validate_registry()

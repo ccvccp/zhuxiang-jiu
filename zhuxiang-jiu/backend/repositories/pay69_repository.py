@@ -37,7 +37,7 @@ def _now_ts() -> float:
 
 
 class Pay69Repository:
-    """69号十二表仓储(双模式——asyncio/Redis)"""
+    """69号十三表仓储(双模式——asyncio/Redis)"""
 
     TABLE_CHANNELS = "pay69_channels"
     TABLE_INTENTS = "pay69_intents"
@@ -51,6 +51,7 @@ class Pay69Repository:
     TABLE_BIO = "pay69_bio"
     TABLE_TEMPLATES = "pay69_templates"
     TABLE_SMARTCODE = "pay69_smartcode"
+    TABLE_MODALITY = "pay69_modality"
 
     _ALL_TABLES = (
         TABLE_CHANNELS, TABLE_INTENTS,
@@ -59,7 +60,8 @@ class Pay69Repository:
         TABLE_BEHAVIOR, TABLE_CREDIT,
         TABLE_REPAY, TABLE_BIO,
         TABLE_TEMPLATES,
-        TABLE_SMARTCODE)
+        TABLE_SMARTCODE,
+        TABLE_MODALITY)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -1036,6 +1038,206 @@ class Pay69Repository:
             if rec.get("nonce") == nonce:
                 return rec
         return None
+
+    # ============================================================
+    # 多模态事件+确认令牌+群体统计
+    # (pay69_modality——P6)
+    # ============================================================
+
+    async def next_modality_seq(self) -> int:
+        """多模态事件序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay69", "modality", "seq"))
+        self._ensure_store()
+        self.store["_pay69_modality_seq"] = \
+            self.store.get(
+                "_pay69_modality_seq", 0) + 1
+        return self.store[
+            "_pay69_modality_seq"]
+
+    async def save_modality_event(
+            self, record: dict) -> dict:
+        """保存多模态事件(全局流+会员流)"""
+        seq = await self.next_modality_seq()
+        record["modalitySeq"] = seq
+        payload = json.dumps(
+            record, ensure_ascii=False)
+        mid = str(record.get("memberId")
+                  or 0)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(
+                _k("pay69", "modality", "all"),
+                payload)
+            await client.ltrim(
+                _k("pay69", "modality", "all"),
+                0, 999)
+            await client.lpush(
+                _k("pay69", "modality",
+                   "member", mid), payload)
+            await client.ltrim(
+                _k("pay69", "modality",
+                   "member", mid), 0, 199)
+            return record
+        self._ensure_store()
+        table = self.store[
+            self.TABLE_MODALITY]
+        table.setdefault("all", [])\
+            .insert(0, dict(record))
+        del table["all"][1000:]
+        table.setdefault(
+            "by_member", {}
+        ).setdefault(mid, [])\
+            .insert(0, dict(record))
+        del table["by_member"][mid][200:]
+        return record
+
+    async def list_modality_events(
+            self, member_id: int = None,
+            limit: int = 50) -> list[dict]:
+        """多模态事件列表(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if member_id is not None:
+                data = await client.lrange(
+                    _k("pay69", "modality",
+                       "member", member_id),
+                    0, limit - 1)
+            else:
+                data = await client.lrange(
+                    _k("pay69", "modality",
+                       "all"), 0, limit - 1)
+            return [json.loads(x)
+                    for x in data]
+        self._ensure_store()
+        table = self.store[
+            self.TABLE_MODALITY]
+        recs = (table.get("by_member", {})
+                .get(str(member_id), [])
+                if member_id is not None
+                else table.get("all", []))
+        return [dict(r)
+                for r in recs[:limit]]
+
+    # ---------- 确认令牌(TTL 单次) ----------
+
+    async def save_confirm_token(
+            self, token: str,
+            record: dict,
+            ttl: int = 180) -> dict:
+        """保存确认令牌(资金确认显式
+        ——TTL 秒, 单次消费)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("pay69", "mconfirm", token),
+                json.dumps(record,
+                           ensure_ascii=False),
+                ex=ttl)
+            return record
+        self._ensure_store()
+        record["expiresAt"] = (
+            _now_ts() + ttl)
+        self.store[self.TABLE_MODALITY]\
+            .setdefault(
+                "confirm_tokens", {})[token] \
+            = dict(record)
+        return record
+
+    async def peek_confirm_token(
+            self, token: str) -> dict | None:
+        """查确认令牌(不消费——词不匹配
+        允许重试; 令牌随机 32 字节+TTL
+        为防伪核心)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(
+                _k("pay69", "mconfirm", token))
+            return json.loads(data) \
+                if data else None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_MODALITY]\
+            .get("confirm_tokens", {})\
+            .get(token)
+        if not rec:
+            return None
+        if rec.get("expiresAt", 0) \
+                < _now_ts():
+            return None
+        return dict(rec)
+
+    async def pop_confirm_token(
+            self, token: str) -> dict | None:
+        """消费确认令牌(仅确认成功时
+        调用——单次防重放)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.getdel(
+                _k("pay69", "mconfirm", token))
+            return json.loads(data) \
+                if data else None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_MODALITY]\
+            .get("confirm_tokens", {})\
+            .pop(token, None)
+        if not rec:
+            return None
+        if rec.get("expiresAt", 0) \
+                < _now_ts():
+            return None
+        return rec
+
+    # ---------- 群体×模态统计(快环) ----------
+
+    async def bump_group_stat(
+            self, group: str, modality: str,
+            outcome: str) -> None:
+        """群体统计累加(HINCRBY 原子——
+        群体×模态×结果三轴计数)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hincrby(
+                _k("pay69", "mstat", group),
+                f"{modality}:{outcome}", 1)
+            return
+        self._ensure_store()
+        stats = self.store[
+            self.TABLE_MODALITY]\
+            .setdefault(
+                "group_stats", {})
+        key = (group, modality, outcome)
+        stats[key] = stats.get(key, 0) + 1
+
+    async def get_group_stats(self) -> dict:
+        """群体统计视图({group: {modality:
+        outcome: count}})"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay69", "mstat", "*"))
+            result = {}
+            for key in keys:
+                group = key.rsplit(
+                    ":", 1)[-1]
+                data = await client.hgetall(key)
+                result[group] = {
+                    k: int(v)
+                    for k, v in
+                    data.items()}
+            return result
+        self._ensure_store()
+        raw = self.store[
+            self.TABLE_MODALITY]\
+            .get("group_stats", {})
+        result = {}
+        for (g, m, o), v in raw.items():
+            result.setdefault(
+                g, {})[f"{m}:{o}"] = v
+        return result
 
     async def save_baseline(
             self, member_id: int,

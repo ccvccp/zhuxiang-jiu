@@ -1,6 +1,6 @@
-"""69号·AI智能支付大模型路由(P0-P5)
+"""69号·AI智能支付大模型路由(P0-P6)
 
-端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 + P5 6 = 40):
+端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 + P5 6 + P6 6 = 46):
     GET  /api/pay69/channels            七通道字典公示(admin, 观测面)
     GET  /api/pay69/channels/{id}       单通道详情(admin, 观测面)
     GET  /api/pay69/health              健康度观测面(admin, 观测面)
@@ -41,6 +41,12 @@
     GET  /api/pay69/smartcode/events    情境码事件视图(admin, 观测面——P5)
     GET  /api/pay69/smartcode/merchant/{id}/summary 商户对账摘要(admin, 观测面——P5)
     GET  /api/pay69/smartcode/stats     情境风险统计(admin, 观测面——P5)
+    GET  /api/pay69/modality/dict       多模态字典公示(admin, 观测面——P6)
+    POST /api/pay69/modality/parse      多模态意图解析(admin, 决策面 off 409——P6)
+    POST /api/pay69/modality/confirm/request 确认请求(admin, 决策面 off 409——P6)
+    POST /api/pay69/modality/confirm/pay 确认支付(admin, 决策面 off 409——P6)
+    GET  /api/pay69/modality/events     多模态事件视图(admin, 观测面——P6)
+    GET  /api/pay69/modality/stats      群体模态统计(admin, 观测面——P6)
 
 鉴权: 管理面 X-Role: admin(60号同款口径)。
 统一口径(60号范式):
@@ -1130,3 +1136,174 @@ async def smartcode_stats(
     )
     return await Pay69SmartcodeService()\
         .context_stats()
+
+
+# ============================================================
+# P6 多模态普惠(6 端点)
+# ============================================================
+
+class ModalityParseBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    text: str = Field(description="模态转写文本(语音识别/手势映射)")
+    modality: str = Field(
+        default="voice",
+        description="模态(voice/gesture/eyegaze/text)")
+    accessGroup: str = Field(
+        default="standard",
+        description="无障碍群体(elderly/motor_impaired/visually_impaired/standard)")
+
+
+class ConfirmRequestBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    amount: float = Field(gt=0,
+                          description="支付金额(元——回显)")
+    product: str = Field(default="",
+                         description="商品名(回显)")
+    channelId: str = Field(default="",
+                          description="通道偏好")
+    modality: str = Field(
+        default="voice",
+        description="模态(voice/gesture/eyegaze/text)")
+    accessGroup: str = Field(
+        default="standard",
+        description="无障碍群体")
+
+
+class ConfirmPaymentBody(BaseModel):
+    confirmToken: str = Field(description="确认令牌")
+    word: str = Field(description="确认词(含 确认支付)")
+
+
+@router.get("/modality/dict")
+async def modality_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """多模态字典公示(模态/群体/三态
+    +无障碍档案+确认词——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_modality_service import (
+        Pay69ModalityService,
+    )
+    return Pay69ModalityService()\
+        .modality_dict()
+
+
+@router.post("/modality/parse")
+async def modality_parse(
+        body: ModalityParseBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """多模态意图解析(决策面——off 409;
+    规则轨三态 direct/confirm/clarify
+    +无障碍适配, LLM 禁入判定链)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_modality_service import (
+        Pay69ModalityService,
+    )
+    try:
+        return await Pay69ModalityService()\
+            .parse_logged(
+                body.memberId, body.text,
+                body.modality,
+                body.accessGroup)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/modality/confirm/request")
+async def modality_confirm_request(
+        body: ConfirmRequestBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """确认请求(决策面——off 409; 金额
+    回显+确认令牌——资金确认显式铁律
+    第一步)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_modality_service import (
+        Pay69ModalityService,
+    )
+    try:
+        return await Pay69ModalityService()\
+            .request_confirmation(
+                body.memberId, body.amount,
+                body.product, body.channelId,
+                body.modality,
+                body.accessGroup)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/modality/confirm/pay")
+async def modality_confirm_pay(
+        body: ConfirmPaymentBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """确认支付(决策面——off 409; 确认词
+    匹配+令牌单次消费; 确认后仅生成 60号
+    开单建议包——实际开单由 60号收银台
+    显式调用, 资金永不自动)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_modality_service import (
+        Pay69ModalityService,
+    )
+    try:
+        return await Pay69ModalityService()\
+            .confirm_payment(
+                body.confirmToken, body.word)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/modality/events")
+async def modality_events(
+        memberId: int | None = None,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """多模态事件视图(观测面——全局/
+    会员双口径)"""
+    _require_admin(x_role)
+    from services.pay69_modality_service import (
+        Pay69ModalityService,
+    )
+    return await Pay69ModalityService()\
+        .modality_events_view(
+            memberId, limit=limit)
+
+
+@router.get("/modality/stats")
+async def modality_stats(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """群体×模态×结果三轴统计+直出率
+    (快环基线——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_modality_service import (
+        Pay69ModalityService,
+    )
+    return await Pay69ModalityService()\
+        .group_stats_view()
