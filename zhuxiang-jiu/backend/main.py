@@ -358,6 +358,10 @@ register_pay60_routes(app)
 from routes.pay69_routes import register_pay69_routes
 register_pay69_routes(app)
 
+# AI智能二维码大模型(70号 P0 码语义中枢)
+from routes.qr70_routes import register_qr70_routes
+register_qr70_routes(app)
+
 # AI智能系统升级决策(61号)
 from routes.dm61_routes import register_dm61_routes
 register_dm61_routes(app)
