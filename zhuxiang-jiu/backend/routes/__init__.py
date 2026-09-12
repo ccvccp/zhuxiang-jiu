@@ -87,6 +87,9 @@ from routes.zt_routes import register_zt_routes
 from routes.zd_routes import register_zd_routes
 # 智客·AI智能会员大模型(会员管理模块升级·会员智能运营中枢)
 from routes.zk_routes import register_zk_routes
+# 信值臻选68号·平台化升级(P6店铺/P7铺货 + P8购物/P9结算)
+from routes.xinzhi_shop_routes import register_xinzhi_shop_routes
+from routes.xinzhi_trade_routes import register_xinzhi_trade_routes
 # AI智能网站同盟模块(37号·酒水不分家商户同盟平台)
 from routes.alliance_routes import register_alliance_routes
 # AI智能产品管理模块(38号·权限审核×上下架×图片设计更换)
@@ -160,6 +163,8 @@ __all__ = [
     "register_zt_routes",
     "register_zd_routes",
     "register_zk_routes",
+    "register_xinzhi_shop_routes",
+    "register_xinzhi_trade_routes",
     "register_alliance_routes",
     "register_pdm_routes",
     "register_entry_routes",

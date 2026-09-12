@@ -116,6 +116,9 @@ from routes import (
     register_zd_routes,
     # 智客·AI智能会员大模型(会员管理模块升级·会员智能运营中枢)
     register_zk_routes,
+    # 信值臻选68号·平台化升级(P6店铺/P7铺货 + P8购物/P9结算)
+    register_xinzhi_shop_routes,
+    register_xinzhi_trade_routes,
     # AI智能网站同盟模块(37号·酒水不分家商户同盟平台)
     register_alliance_routes,
     # AI智能产品管理模块(38号·权限审核×上下架×图片设计更换)
@@ -284,6 +287,9 @@ register_zt_routes(app)
 register_zd_routes(app)
 # 智客·AI智能会员大模型(会员管理模块升级)
 register_zk_routes(app)
+# 信值臻选68号·平台化升级(P6-P9)
+register_xinzhi_shop_routes(app)
+register_xinzhi_trade_routes(app)
 # AI智能网站同盟模块(37号)
 register_alliance_routes(app)
 # AI智能产品管理模块(38号)

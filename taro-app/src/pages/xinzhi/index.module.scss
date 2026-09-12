@@ -596,3 +596,548 @@
 .bottomSpace {
   height: 48rpx;
 }
+
+// ============================================
+// 四、店铺(P6/P7 平台化)
+// ============================================
+// 状态徽章(六色: 活跃绿/信息蓝/待办棕/警示琥珀/危险红/灰)
+.stBadge {
+  padding: 2rpx 16rpx;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+  background: #95a5a6;
+  flex-shrink: 0;
+}
+
+.stActive { background: #2e865d; }
+.stInfo { background: #2980b9; }
+.stPending { background: #b9770e; }
+.stWarn { background: #d68910; }
+.stDanger { background: #c0392b; }
+.stMuted { background: #95a5a6; }
+
+// 建议书面板(审核/预警类响应——处罚永不自动执行)
+.advicePanel {
+  margin-bottom: $spacing-md;
+  padding: $spacing-md;
+  background: rgba(243, 156, 18, 0.08);
+  border-left: 6rpx solid #d68910;
+  border-radius: $radius-sm;
+}
+
+.adviceTag {
+  display: inline-block;
+  padding: 2rpx 14rpx;
+  background: #d68910;
+  color: $color-text-white;
+  border-radius: $radius-xs;
+  font-size: 20rpx;
+  font-weight: $font-weight-bold;
+}
+
+.adviceNote {
+  margin-top: 10rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.6;
+}
+
+// 我的店铺卡
+.shopCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.shopHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.shopName {
+  flex: 1;
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.shopMeta {
+  margin-top: 10rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.shopIntro {
+  margin-top: 10rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.6;
+}
+
+.snapRow {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(147, 81, 22, 0.06);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: #935116;
+}
+
+.shopCloseBtn {
+  margin-top: $spacing-sm;
+  text-align: center;
+  padding: $spacing-sm 0;
+  border: 1rpx solid rgba(231, 76, 60, 0.5);
+  color: #e74c3c;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+}
+
+// 通用表单卡(开店申请/铺货提交/下单)
+.applyCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.subTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.formInput {
+  width: 100%;
+  padding: $spacing-sm $spacing-md;
+  background: $color-text-white;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  box-sizing: border-box;
+  margin-bottom: $spacing-sm;
+}
+
+.formArea {
+  width: 100%;
+  min-height: 100rpx;
+  padding: $spacing-sm $spacing-md;
+  background: $color-text-white;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  box-sizing: border-box;
+  margin-bottom: $spacing-sm;
+}
+
+.formBtn {
+  text-align: center;
+  padding: $spacing-sm 0;
+  background: linear-gradient(135deg, #6b3410, #935116);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-sm;
+}
+
+.catRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.catChip {
+  padding: 8rpx 24rpx;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.catChipOn {
+  background: rgba(147, 81, 22, 0.15);
+  color: #935116;
+  font-weight: $font-weight-medium;
+}
+
+.gateNote {
+  margin-top: $spacing-sm;
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+}
+
+// 我的铺货
+.listingCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.listingHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.listingName {
+  flex: 1;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.listingMeta {
+  margin-top: 8rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.listingBtn {
+  margin-top: $spacing-sm;
+  text-align: center;
+  padding: $spacing-xs 0;
+  border: 1rpx solid rgba(147, 81, 22, 0.4);
+  color: #935116;
+  border-radius: $radius-button;
+  font-size: $font-size-xs;
+}
+
+// 铺货选品
+.pickRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.pickChip {
+  padding: 8rpx 20rpx;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.pickChipOn {
+  background: rgba(147, 81, 22, 0.18);
+  color: #6b3410;
+  font-weight: $font-weight-bold;
+}
+
+.pickPrice {
+  margin-bottom: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(46, 134, 93, 0.08);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: #2e865d;
+}
+
+// 公开货架
+.shelfGroup {
+  margin-bottom: $spacing-md;
+}
+
+.shelfCat {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: #935116;
+  margin-bottom: $spacing-sm;
+}
+
+.shelfItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.shelfInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.shelfName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.shelfShop {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: #935116;
+}
+
+.shelfPrice {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.addCartBtn {
+  padding: 10rpx 28rpx;
+  background: linear-gradient(135deg, #6b3410, #935116);
+  color: $color-text-white;
+  border-radius: $radius-button;
+  font-size: $font-size-xs;
+  flex-shrink: 0;
+}
+
+// 店铺主页弹层
+.shopViewPanel {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.shopViewTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+// ============================================
+// 五、购物车·订单(P8/P9 平台化)
+// ============================================
+.cartItem {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.cartHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.cartName {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.qtyCtrl {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+}
+
+.qtyBtn {
+  width: 48rpx;
+  height: 48rpx;
+  line-height: 48rpx;
+  text-align: center;
+  border-radius: 50%;
+  background: rgba(147, 81, 22, 0.1);
+  color: #935116;
+  font-size: $font-size-md;
+}
+
+.qtyNum {
+  min-width: 48rpx;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.cartPrice {
+  margin-top: 10rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.cartDeduct {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: #e74c3c;
+}
+
+.cartDel {
+  margin-top: 8rpx;
+  text-align: right;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  text-decoration: underline;
+}
+
+// 结算预览
+.previewPanel {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.previewTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+// 年龄门
+.ageRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.ageCheck {
+  font-size: $font-size-lg;
+  color: #935116;
+  flex-shrink: 0;
+}
+
+.ageText {
+  flex: 1;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+// 订单卡
+.orderCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.orderHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.orderId {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  font-weight: $font-weight-medium;
+  @include text-ellipsis;
+}
+
+.orderMeta {
+  margin-top: 8rpx;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.orderDeduct {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: #e74c3c;
+}
+
+// 支付三通道
+.payRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.payChip {
+  flex: 1;
+  text-align: center;
+  padding: 8rpx 0;
+  border-radius: $radius-button;
+  font-size: 20rpx;
+  color: $color-text-secondary;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.payChipOn {
+  background: rgba(147, 81, 22, 0.15);
+  color: #935116;
+  font-weight: $font-weight-bold;
+}
+
+.cancelBtn {
+  margin-top: $spacing-sm;
+  text-align: center;
+  padding: $spacing-xs 0;
+  border: 1rpx solid rgba(149, 165, 166, 0.6);
+  color: $color-text-secondary;
+  border-radius: $radius-button;
+  font-size: $font-size-xs;
+}
+
+// 评价星
+.rateRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.starBtn {
+  flex: 1;
+  text-align: center;
+  padding: 8rpx 0;
+  background: rgba(243, 156, 18, 0.12);
+  color: #d68910;
+  border-radius: $radius-button;
+  font-size: $font-size-xs;
+}
+
+// 结算卡
+.settleCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.settleHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.settleId {
+  flex: 1;
+  min-width: 0;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+// admin 面板
+.adminPanel {
+  background: rgba(147, 81, 22, 0.05);
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.adminNote {
+  margin-top: $spacing-sm;
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+}
