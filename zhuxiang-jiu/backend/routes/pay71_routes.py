@@ -47,6 +47,15 @@
     POST /api/pay71/narrative/incident/{seq}/verify 案例核实(admin, 人工——不受开关——P5)
     POST /api/pay71/narrative/misjudge/report 误拦归因回流(admin, 快环摄取——不受开关——P5)
     GET  /api/pay71/narrative/library   案例库+误拦统计视图(admin, 观测面——P5)
+    GET  /api/pay71/audit/dict         审计透明字典公示(admin, 观测面——P6)
+    GET  /api/pay71/audit/tracegraph   决策链路图(admin, 观测面——P6)
+    POST /api/pay71/audit/evidence/assemble 证据链组装(admin, 决策面 off 409——P6)
+    POST /api/pay71/audit/evidence/{seq}/export 证据链导出(admin, 人工——不受开关——P6)
+    POST /api/pay71/audit/evidence/{seq}/verify 链哈希校验(admin, 观测面——P6)
+    GET  /api/pay71/audit/evidence      证据链视图(admin, 观测面——P6)
+    POST /api/pay71/audit/report/generate 合规健康报告生成(admin, 观测面——P6)
+    POST /api/pay71/audit/report/{seq}/publish 报告发布(admin, 人工——不受开关——P6)
+    GET  /api/pay71/audit/report        报告视图(admin, 观测面——P6)
 
 鉴权: 管理面 X-Role: admin(69号同款口径)。
 统一口径(69号范式):
@@ -56,13 +65,15 @@
       misjudge report)不受开关影响
     - 人工面(port state/onboard/propose/
       decide/external decide/incident
-      verify)不受开关影响
+      verify/evidence export/report
+      publish)不受开关影响
     - 保护面(orchestrate/probe)不受开关
       影响——保护方向永续铁律(规划 §4.1)
     - 决策面(predict compute/revoke/
       split propose/confirm/allocation
       compute/recon verify/heal/retry/
-      narrative generate)off=409
+      narrative generate/evidence
+      assemble)off=409
     - KeyError → 404 / ValueError → 409
 """
 
@@ -286,6 +297,19 @@ class MisjudgeReportBody(BaseModel):
         default=0, description="关联叙事序号")
     note: str = Field(
         default="", description="备注")
+
+
+class EvidenceAssembleBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    limit: int = Field(
+        default=20, ge=1, le=100,
+        description="每节点留痕上限")
+
+
+class ReportGenerateBody(BaseModel):
+    period: str = Field(
+        default="daily",
+        description="报告周期(daily/weekly)")
 
 
 # ============================================================
@@ -1190,6 +1214,166 @@ async def narrative_library(
         Pay71P5Service,
     )
     return await Pay71P5Service().library_view()
+
+
+# ============================================================
+# P6 端点(审计透明)
+# ============================================================
+
+@router.get("/audit/dict")
+async def audit_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """审计透明字典公示(证据链节点/
+    锚字段/链路图域/报告维度/铁律声明
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p6_service import (
+        Pay71P6Service,
+    )
+    return Pay71P6Service().dict_view()
+
+
+@router.get("/audit/tracegraph")
+async def audit_tracegraph(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """决策链路图(治理/自愈/调配/核验/
+    叙事五域——结构化只读导出, 观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p6_service import (
+        Pay71P6Service,
+    )
+    return await Pay71P6Service().tracegraph()
+
+
+@router.post("/audit/evidence/assemble")
+async def audit_evidence_assemble(
+        body: EvidenceAssembleBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """证据链组装(按会员聚合五节点留痕
+    ——sha256 哈希锚定; 组装副本永不改
+    原始留痕; 决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p6_service import (
+        Pay71P6Service,
+    )
+    try:
+        return await Pay71P6Service()\
+            .assemble_evidence(
+                body.memberId,
+                limit=body.limit)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/audit/evidence/"
+             "{evidence_seq}/export")
+async def audit_evidence_export(
+        evidence_seq: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """证据链导出(监管问询——exported
+    留痕, 只读; 人工动作不受开关影响)"""
+    _require_admin(x_role)
+    from services.pay71_p6_service import (
+        Pay71P6Service,
+    )
+    try:
+        return await Pay71P6Service()\
+            .export_evidence(evidence_seq)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/audit/evidence/"
+             "{evidence_seq}/verify")
+async def audit_evidence_verify(
+        evidence_seq: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """证据链哈希校验(重组节点哈希
+    对比 chainHash——篡改可检出)"""
+    _require_admin(x_role)
+    from services.pay71_p6_service import (
+        Pay71P6Service,
+    )
+    try:
+        return await Pay71P6Service()\
+            .verify_chain(evidence_seq)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/audit/evidence")
+async def audit_evidence(
+        state: str = "",
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """证据链视图(可按状态过滤
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p6_service import (
+        Pay71P6Service,
+    )
+    return await Pay71P6Service().evidence_view(
+        state=state or None, limit=limit)
+
+
+@router.post("/audit/report/generate")
+async def audit_report_generate(
+        body: ReportGenerateBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """合规健康报告生成(五维确定性统计
+    ——红线触碰恒 0 宪法断言; 观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p6_service import (
+        Pay71P6Service,
+    )
+    try:
+        return await Pay71P6Service()\
+            .generate_report(body.period)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/audit/report/"
+             "{report_seq}/publish")
+async def audit_report_publish(
+        report_seq: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """报告发布(drafted→published
+    ——留痕非资金动作, 人工不受开关)"""
+    _require_admin(x_role)
+    from services.pay71_p6_service import (
+        Pay71P6Service,
+    )
+    try:
+        return await Pay71P6Service()\
+            .publish_report(report_seq)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/audit/report")
+async def audit_report(
+        period: str = "",
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """合规健康报告视图(可按周期过滤
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p6_service import (
+        Pay71P6Service,
+    )
+    return await Pay71P6Service().report_view(
+        period=period or None, limit=limit)
 
 
 def register_pay71_routes(app) -> None:

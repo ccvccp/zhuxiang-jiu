@@ -515,6 +515,94 @@ NARRATIVE_TEMPLATES: dict = {
         " {causal}。依据: {note}"),
 }
 
+# ============================================================
+# P6 审计透明(决策链路图+监管证据链
+# 哈希锚定+合规健康报告——只读导出,
+# 永不修改原始留痕铁律)
+# ============================================================
+
+# 证据链节点域(封闭——71号决策链
+# 全链节点: 意图→预判→调配→执行参考
+# →核验→叙事)
+EVIDENCE_NODES = (
+    "intent",      # 意图预判(P2
+                   # prediction)
+    "allocation",  # 帕累托调配(P3)
+    "entropy",     # 熵判定参考(69号
+                   # P2——只读)
+    "verify",      # 三向核验(P4)
+    "narrative",   # 风控叙事(P5)
+)
+
+# 证据链哈希锚字段(封闭——每节点
+# 参与锚定的确定性字段)
+EVIDENCE_HASH_FIELDS: dict = {
+    "intent": ("predictionSeq",
+               "recommendedChannel",
+               "amount", "engine"),
+    "allocation": ("allocationSeq",
+                   "recommended",
+                   "context",
+                   "weightsSource"),
+    "entropy": ("entropySeq", "entropy",
+                "step", "riskTier"),
+    "verify": ("verifySeq", "state",
+               "discrepancyKind"),
+    "narrative": ("narrativeSeq",
+                  "narrativeRefEntropy",
+                  "causalVerdict"),
+}
+
+# 证据链状态域(封闭)
+EVIDENCE_STATES = (
+    "assembled",   # 已组装(哈希锚定)
+    "exported",     # 已导出(监管
+                    # 留痕)
+)
+
+# 链路图节点域(封闭——治理/自愈/
+# 调配/核验/叙事五域)
+TRACEGRAPH_DOMAINS = (
+    "governance",   # 治理(纳管/建议书
+                    # /外部信号)
+    "selfheal",     # 自愈(端口态
+                    # /轨迹)
+    "allocation",    # 调配(四维
+                    # /帕累托)
+    "recon",        # 核验(三向
+                    # /补单)
+    "narrative",    # 叙事(归因
+                    # /案例)
+)
+
+# 合规健康报告状态机(封闭)
+REPORT_STATES = (
+    "drafted",    # 已生成(观测)
+    "published",  # 已发布(留痕
+                  # ——非资金动作)
+)
+
+# 报告周期(封闭——观测口径)
+REPORT_PERIODS = (
+    "daily",    # 日报
+    "weekly",   # 周报
+)
+
+# 合规健康报告维度(封闭——五维
+# 确定性统计)
+REPORT_DIMENSIONS = (
+    "portCompliance",   # 端口合规分布
+                        # (冻结/降级/
+                        # 熔断计数)
+    "selfhealActions",  # 自愈动作分布
+    "reconOutcome",     # 对账结果分布
+    "narrativeVerdicts",  # 叙事判定
+                          # 分布
+    "redLineTouches",   # 红线触碰
+                        # (宪法级——
+                        # 恒 0 断言)
+)
+
 
 # ============================================================
 # 启动自检(宪法级)
@@ -856,6 +944,53 @@ def _validate_registry() -> None:
             "free", "elevated"}:
         raise RuntimeError(
             "pay71 叙事模板域非法")
+    # ⑮ P6 审计透明: 证据链节点域/
+    #     锚字段闭合/状态机/链路图域/
+    #     报告状态机+周期+维度封闭
+    if set(EVIDENCE_NODES) != {
+            "intent", "allocation",
+            "entropy", "verify",
+            "narrative"}:
+        raise RuntimeError(
+            "pay71 证据链节点域非法")
+    if set(EVIDENCE_HASH_FIELDS) \
+            != set(EVIDENCE_NODES):
+        raise RuntimeError(
+            "pay71 证据链锚字段不闭合")
+    for node, fields in \
+            EVIDENCE_HASH_FIELDS.items():
+        if not fields or not all(
+                isinstance(f, str)
+                for f in fields):
+            raise RuntimeError(
+                f"pay71 证据链 {node} "
+                f"锚字段非法")
+    if set(EVIDENCE_STATES) != {
+            "assembled", "exported"}:
+        raise RuntimeError(
+            "pay71 证据链状态域非法")
+    if set(TRACEGRAPH_DOMAINS) != {
+            "governance", "selfheal",
+            "allocation", "recon",
+            "narrative"}:
+        raise RuntimeError(
+            "pay71 链路图节点域非法")
+    if set(REPORT_STATES) != {
+            "drafted", "published"}:
+        raise RuntimeError(
+            "pay71 报告状态机非法")
+    if set(REPORT_PERIODS) != {
+            "daily", "weekly"}:
+        raise RuntimeError(
+            "pay71 报告周期域非法")
+    if set(REPORT_DIMENSIONS) != {
+            "portCompliance",
+            "selfhealActions",
+            "reconOutcome",
+            "narrativeVerdicts",
+            "redLineTouches"}:
+        raise RuntimeError(
+            "pay71 报告维度域非法")
 
 
 _validate_registry()
