@@ -31,7 +31,7 @@ _WINDOW = 100
 
 
 class Pay69Repository:
-    """69号七表仓储(双模式——asyncio/Redis)"""
+    """69号九表仓储(双模式——asyncio/Redis)"""
 
     TABLE_CHANNELS = "pay69_channels"
     TABLE_INTENTS = "pay69_intents"
@@ -40,12 +40,15 @@ class Pay69Repository:
     TABLE_HABITS = "pay69_habits"
     TABLE_ENTROPY = "pay69_entropy"
     TABLE_BEHAVIOR = "pay69_behavior"
+    TABLE_CREDIT = "pay69_credit"
+    TABLE_REPAY = "pay69_repay"
 
     _ALL_TABLES = (
         TABLE_CHANNELS, TABLE_INTENTS,
         TABLE_EVENTS, TABLE_FLOWS,
         TABLE_HABITS, TABLE_ENTROPY,
-        TABLE_BEHAVIOR)
+        TABLE_BEHAVIOR, TABLE_CREDIT,
+        TABLE_REPAY)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -530,6 +533,212 @@ class Pay69Repository:
         rec = self.store[self.TABLE_BEHAVIOR]\
             .get(member_id)
         return dict(rec) if rec else None
+
+    # ============================================================
+    # 授信留痕+调额建议书(pay69_credit——P3)
+    # ============================================================
+
+    async def next_credit_seq(self) -> int:
+        """授信/调额序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay69", "credit", "seq"))
+        self._ensure_store()
+        self.store["_pay69_credit_seq"] = \
+            self.store.get("_pay69_credit_seq", 0) + 1
+        return self.store["_pay69_credit_seq"]
+
+    async def save_credit(self, record: dict) -> dict:
+        """保存授信评估留痕(全局+会员)"""
+        seq = await self.next_credit_seq()
+        record["creditSeq"] = seq
+        payload = json.dumps(
+            record, ensure_ascii=False)
+        mid = str(record.get("memberId") or 0)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(
+                _k("pay69", "credit", "all"),
+                payload)
+            await client.ltrim(
+                _k("pay69", "credit", "all"),
+                0, 999)
+            await client.lpush(
+                _k("pay69", "credit", "member",
+                   mid), payload)
+            await client.ltrim(
+                _k("pay69", "credit", "member",
+                   mid), 0, 199)
+            return record
+        self._ensure_store()
+        table = self.store[self.TABLE_CREDIT]
+        table.setdefault("all", [])\
+            .insert(0, dict(record))
+        del table["all"][1000:]
+        table.setdefault(
+            "by_member", {}
+        ).setdefault(mid, [])\
+            .insert(0, dict(record))
+        del table["by_member"][mid][200:]
+        return record
+
+    async def list_credit(
+            self, member_id: int = None,
+            limit: int = 50) -> list[dict]:
+        """授信留痕列表(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if member_id:
+                data = await client.lrange(
+                    _k("pay69", "credit", "member",
+                       member_id), 0, limit - 1)
+            else:
+                data = await client.lrange(
+                    _k("pay69", "credit", "all"),
+                    0, limit - 1)
+            return [json.loads(x) for x in data]
+        self._ensure_store()
+        table = self.store[self.TABLE_CREDIT]
+        recs = (table.get("by_member", {})
+                .get(str(member_id), [])
+                if member_id is not None
+                else table.get("all", []))
+        return [dict(r) for r in recs[:limit]]
+
+    # ---------- 调额建议书(Hash 单键) ----------
+
+    async def next_adjust_seq(self) -> int:
+        """调额建议书独立序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay69", "adjust", "seq"))
+        self._ensure_store()
+        self.store["_pay69_adjust_seq"] = \
+            self.store.get("_pay69_adjust_seq", 0) + 1
+        return self.store["_pay69_adjust_seq"]
+
+    async def save_adjustment(
+            self, adj_id: int,
+            record: dict) -> dict:
+        """保存调额建议书(索引入册)"""
+        record["adjustmentId"] = adj_id
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("pay69", "adjust", adj_id),
+                json.dumps(record,
+                           ensure_ascii=False))
+            await client.sadd(
+                _k("pay69", "adjust", "index"),
+                str(adj_id))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_CREDIT]\
+            .setdefault("adjustments", {})[adj_id] \
+            = dict(record)
+        return record
+
+    async def get_adjustment(
+            self, adj_id: int) -> dict | None:
+        """按 ID 查调额建议书"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(
+                _k("pay69", "adjust", adj_id))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        rec = self.store[self.TABLE_CREDIT]\
+            .get("adjustments", {}).get(adj_id)
+        return dict(rec) if rec else None
+
+    async def list_adjustments(
+            self, status: str = None,
+            member_id: int = None,
+            limit: int = 50) -> list[dict]:
+        """调额建议书列表(倒序; 可按
+        状态/会员过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.smembers(
+                _k("pay69", "adjust", "index"))
+            result = []
+            for i in sorted(
+                    (int(x) for x in ids),
+                    reverse=True)[:limit * 5]:
+                rec = await self.get_adjustment(i)
+                if not rec:
+                    continue
+                if status and rec.get(
+                        "status") != status:
+                    continue
+                if member_id is not None and rec.get(
+                        "memberId") != member_id:
+                    continue
+                result.append(rec)
+                if len(result) >= limit:
+                    break
+            return result
+        self._ensure_store()
+        recs = list(
+            self.store[self.TABLE_CREDIT]
+            .get("adjustments", {}).values())
+        recs.sort(key=lambda r: r.get(
+            "adjustmentId", 0), reverse=True)
+        if status:
+            recs = [r for r in recs
+                    if r.get("status") == status]
+        if member_id is not None:
+            recs = [r for r in recs
+                    if r.get("memberId")
+                    == member_id]
+        return [dict(r) for r in recs[:limit]]
+
+    # ============================================================
+    # 还款回流统计(pay69_repay——P3 快环)
+    # ============================================================
+
+    async def report_repayment(
+            self, member_id: int,
+            event_type: str) -> dict:
+        """还款事件回流计数(ontime/late/
+        early——HINCRBY 原子, 快环)
+
+        Returns: 更新后的统计视图
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hincrby(
+                _k("pay69", "repay", member_id),
+                event_type, 1)
+            return await self.get_repay_stats(
+                member_id)
+        self._ensure_store()
+        stats = self.store[self.TABLE_REPAY]\
+            .setdefault(member_id,
+                        {"ontime": 0, "late": 0,
+                         "early": 0})
+        stats[event_type] = \
+            stats.get(event_type, 0) + 1
+        return dict(stats)
+
+    async def get_repay_stats(
+            self, member_id: int) -> dict:
+        """会员还款统计视图(ontime/late/
+        early; 无记录全 0)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay69", "repay", member_id))
+            return {k: int(v)
+                    for k, v in data.items()}
+        self._ensure_store()
+        return dict(
+            self.store[self.TABLE_REPAY]
+            .get(member_id, {"ontime": 0,
+                             "late": 0,
+                             "early": 0}))
 
     async def save_baseline(
             self, member_id: int,

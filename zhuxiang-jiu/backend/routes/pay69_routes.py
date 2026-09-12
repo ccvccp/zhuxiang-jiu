@@ -1,6 +1,6 @@
-"""69号·AI智能支付大模型路由(P0-P2)
+"""69号·AI智能支付大模型路由(P0-P3)
 
-端点(P0 8 + P1 7 + P2 6 = 21):
+端点(P0 8 + P1 7 + P2 6 + P3 7 = 28):
     GET  /api/pay69/channels            七通道字典公示(admin, 观测面)
     GET  /api/pay69/channels/{id}       单通道详情(admin, 观测面)
     GET  /api/pay69/health              健康度观测面(admin, 观测面)
@@ -22,6 +22,13 @@
     GET  /api/pay69/behavior/baseline/{id} 行为基线视图(admin, 观测面——P2)
     POST /api/pay69/behavior/deviation 行为偏离度预览(admin, 决策面 off 409——P2)
     GET  /api/pay69/entropy/records     熵评估留痕视图(admin, 观测面——P2)
+    GET  /api/pay69/credit/dict         授信规则表公示(admin, 观测面——P3)
+    POST /api/pay69/credit/evaluate     交易级授信评估(admin, 决策面 off 409——P3)
+    POST /api/pay69/credit/adjustment/propose  调额建议书发起(admin, 决策面 off 409——P3)
+    POST /api/pay69/credit/adjustment/{id}/decide 调额终审(admin, 人工——不受开关影响——P3)
+    POST /api/pay69/credit/repayment/report 还款事件回流(admin, 快环——P3)
+    GET  /api/pay69/credit/records      授信留痕视图(admin, 观测面——P3)
+    GET  /api/pay69/credit/adjustments  调额建议书视图(admin, 观测面——P3)
 
 鉴权: 管理面 X-Role: admin(60号同款口径)。
 统一口径(60号范式):
@@ -588,3 +595,201 @@ async def entropy_records(
     )
     return await Pay69EntropyService()\
         .entropy_view(memberId, limit=limit)
+
+
+# ============================================================
+# P3 交易级授信(6 端点)
+# ============================================================
+
+class CreditEvaluateBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    amount: float = Field(gt=0,
+                          description="交易金额(元)")
+    trustTier: str = Field(
+        default="",
+        description="信值等级(45号口径: S/A/B/C/D)")
+    cashflowIndex: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="现金流指数(0-1, 60号预测/调用方口径)")
+    baseLimit: float | None = Field(
+        default=None,
+        description="现行额度(缺省取等级映射; 调额生效后传生效值)")
+
+
+class AdjustmentProposeBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    requestedLimit: float = Field(gt=0,
+                                  description="目标额度(元)")
+    trustTier: str = Field(
+        default="",
+        description="信值等级(S/A/B/C/D——额度域)")
+    reason: str = Field(default="",
+                       description="调额理由")
+    proposedBy: str = Field(
+        default="admin",
+        description="发起方(admin/member)")
+
+
+class AdjustmentDecideBody(BaseModel):
+    approve: bool = Field(description="批准/拒绝")
+    decidedBy: str = Field(
+        default="admin", description="终审人")
+
+
+class RepaymentReportBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    eventType: str = Field(
+        description="还款事件(ontime/late/early)")
+
+
+@router.get("/credit/dict")
+async def credit_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """授信规则表公示(四轴+评级+利率表
+    +调额状态机——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_credit_service import (
+        Pay69CreditService,
+    )
+    return Pay69CreditService().credit_dict()
+
+
+@router.post("/credit/evaluate")
+async def credit_evaluate(
+        body: CreditEvaluateBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """交易级授信评估(决策面——off 409;
+    四轴确定性+评级+分期方案利率查表,
+    LLM 禁定价)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_credit_service import (
+        Pay69CreditService,
+    )
+    try:
+        return await Pay69CreditService()\
+            .evaluate_credit(
+                body.memberId, body.amount,
+                trust_tier=body.trustTier,
+                cashflow_index=body.cashflowIndex,
+                base_limit=body.baseLimit)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/credit/adjustment/propose")
+async def credit_adjustment_propose(
+        body: AdjustmentProposeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """调额建议书发起(决策面——off 409;
+    proposed 态永不直接生效, 资金域
+    永不自动铁律)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_credit_service import (
+        Pay69CreditService,
+    )
+    try:
+        return await Pay69CreditService()\
+            .propose_adjustment(
+                body.memberId,
+                body.requestedLimit,
+                trust_tier=body.trustTier,
+                reason=body.reason,
+                proposed_by=body.proposedBy)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/credit/adjustment/{adj_id}/decide")
+async def credit_adjustment_decide(
+        adj_id: int,
+        body: AdjustmentDecideBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """调额终审(admin 人工——不受开关
+    影响, 资金操作人工铁律; approved 即
+    生效并覆盖现行额度)"""
+    _require_admin(x_role)
+    from services.pay69_credit_service import (
+        Pay69CreditService,
+    )
+    try:
+        return await Pay69CreditService()\
+            .decide_adjustment(
+                adj_id, body.approve,
+                decided_by=body.decidedBy)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/credit/repayment/report")
+async def credit_repayment_report(
+        body: RepaymentReportBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """还款事件回流(快环——不受开关
+    影响; ontime/late/early 计数,
+    履约轴数据源)"""
+    _require_admin(x_role)
+    from services.pay69_credit_service import (
+        Pay69CreditService,
+    )
+    try:
+        return await Pay69CreditService()\
+            .report_repayment(
+                body.memberId, body.eventType)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/credit/records")
+async def credit_records(
+        memberId: int | None = None,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """授信评估留痕视图(观测面)"""
+    _require_admin(x_role)
+    from services.pay69_credit_service import (
+        Pay69CreditService,
+    )
+    return await Pay69CreditService()\
+        .credit_records_view(
+            memberId, limit=limit)
+
+
+@router.get("/credit/adjustments")
+async def credit_adjustments(
+        status: str | None = None,
+        memberId: int | None = None,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """调额建议书视图(观测面——可按
+    状态/会员过滤)"""
+    _require_admin(x_role)
+    from services.pay69_credit_service import (
+        Pay69CreditService,
+    )
+    return await Pay69CreditService()\
+        .adjustments_view(
+            status=status,
+            member_id=memberId, limit=limit)

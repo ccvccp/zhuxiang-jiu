@@ -276,6 +276,69 @@ CHANNEL_RISK = {
 
 
 # ============================================================
+# P3 交易级授信(确定性规则表——LLM 禁定价)
+# ============================================================
+
+# 授信评级域(封闭五档)
+CREDIT_GRADES = (
+    "excellent",  # 优秀(0.80+)
+    "good",       # 良好(0.65-0.80)
+    "fair",       # 一般(0.50-0.65)
+    "cautious",   # 谨慎(0.35-0.50)
+    "rejected",   # 拒绝(<0.35)
+)
+
+# 授信因子域(封闭四轴——评估确定性查表)
+CREDIT_FACTORS = (
+    "trust",       # 信值轴(45号等级)
+    "cashflow",    # 现金流轴(60号预测/统计)
+    "repayment",   # 履约轴(还款回流统计)
+    "pressure",    # 金额压力轴(交易级)
+)
+
+# 四轴权重(封闭注册——变更走慢环审批)
+CREDIT_WEIGHTS: dict = {
+    "trust": 0.30,
+    "cashflow": 0.25,
+    "repayment": 0.25,
+    "pressure": 0.20,
+}
+
+# 信值等级→基础授信额度(封闭映射)
+CREDIT_BASE_LIMITS = {
+    "S": 50000.0, "A": 30000.0,
+    "B": 15000.0, "C": 8000.0, "D": 0.0,
+    "trusted": 50000.0, "standard": 15000.0,
+    "watched": 5000.0, "restricted": 0.0,
+}
+
+# 分期利率规则表(封闭——期数×利率,
+# 确定性查表; 变更走慢环审批)
+INSTALLMENT_RATES: dict = {
+    3: 0.030,    # 3 期 3.0%
+    6: 0.045,    # 6 期 4.5%
+    12: 0.060,   # 12 期 6.0%
+}
+
+# 评级→可分期上限(封闭)
+GRADE_INSTALLMENTS = {
+    "excellent": (3, 6, 12),
+    "good": (3, 6),
+    "fair": (3,),
+    "cautious": (),
+    "rejected": (),
+}
+
+# 调额建议书状态机(封闭——资金域
+# 永不自动: proposed→approved/rejected)
+ADJUSTMENT_STATES = (
+    "proposed",   # 已建议(待终审)
+    "approved",   # admin 确认生效
+    "rejected",   # admin 拒绝留痕
+)
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -369,6 +432,39 @@ def _validate_registry() -> None:
         if not (0 <= v <= 1):
             raise RuntimeError(
                 f"pay69 信值分档域外: {tier}={v}")
+    # ⑬ P3 授信: 因子权重封闭+和=1.0
+    if set(CREDIT_WEIGHTS) != set(CREDIT_FACTORS):
+        raise RuntimeError("pay69 授信因子与权重不闭合")
+    ctotal = sum(CREDIT_WEIGHTS.values())
+    if abs(ctotal - 1.0) > 1e-9:
+        raise RuntimeError(
+            f"pay69 授信权重和≠1.0: {ctotal}")
+    # ⑭ 分期利率表键在分期上限域内+利率递增
+    for grade, inst in GRADE_INSTALLMENTS.items():
+        if grade not in CREDIT_GRADES:
+            raise RuntimeError(
+                f"pay69 分期上限评级域外: {grade}")
+        for n in inst:
+            if n not in INSTALLMENT_RATES:
+                raise RuntimeError(
+                    f"pay69 评级 {grade} 分期 {n}"
+                    f"期不在利率表")
+    for i in (3, 6, 12):
+        if i not in INSTALLMENT_RATES:
+            raise RuntimeError(f"pay69 利率表缺 {i} 期")
+    rates = [INSTALLMENT_RATES[k]
+             for k in (3, 6, 12)]
+    if not (rates[0] < rates[1] < rates[2]):
+        raise RuntimeError("pay69 分期利率非递增")
+    # ⑮ 额度映射非负+调额状态机封闭
+    for tier, lv in CREDIT_BASE_LIMITS.items():
+        if lv < 0:
+            raise RuntimeError(
+                f"pay69 额度映射为负: {tier}={lv}")
+    if set(ADJUSTMENT_STATES) != {
+            "proposed", "approved",
+            "rejected"}:
+        raise RuntimeError("pay69 调额状态机非法")
 
 
 _validate_registry()
