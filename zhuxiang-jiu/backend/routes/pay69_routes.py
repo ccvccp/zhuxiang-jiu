@@ -1,6 +1,6 @@
-"""69号·AI智能支付大模型路由(P0)
+"""69号·AI智能支付大模型路由(P0-P1)
 
-端点(P0 6):
+端点(P0 8 + P1 7 = 15):
     GET  /api/pay69/channels            七通道字典公示(admin, 观测面)
     GET  /api/pay69/channels/{id}       单通道详情(admin, 观测面)
     GET  /api/pay69/health              健康度观测面(admin, 观测面)
@@ -9,15 +9,23 @@
     GET  /api/pay69/intents             意图留痕视图(admin, 观测面)
     POST /api/pay69/intents/parse       意图标签解析+留痕(admin, 决策面 off 409)
     GET  /api/pay69/model/status        模型状态(admin, 观测面)
+    GET  /api/pay69/route/dict          路由字典公示(admin, 观测面——P1)
+    POST /api/pay69/route/compute       多因子评分选道(admin, 决策面 off 409——P1)
+    POST /api/pay69/route/execute       沙盘执行+静默备选(admin, 执行面需 assist——P1)
+    POST /api/pay69/route/habit/report  会员通道习惯上报(admin, 快环——P1)
+    GET  /api/pay69/route/habits/{id}   会员习惯视图(admin, 观测面——P1)
+    GET  /api/pay69/route/flows         路由执行留痕视图(admin, 观测面——P1)
+    GET  /api/pay69/route/window        通道滚动窗口统计(admin, 观测面——P1)
 
 鉴权: 管理面 X-Role: admin(60号同款口径)。
 统一口径(60号范式):
-    - 观测面(channels/health/intents/
-      model status)不受 PAY69_MODE 影响
-    - 观测上报(health report)不受开关
-      影响(纯统计基线——快环)
-    - 决策面(intents/parse——产生可
-      消费数据): off=拒绝(409)
+    - 观测面不受 PAY69_MODE 影响
+    - 快环观测上报(health report/
+      habit report)不受开关影响
+    - 决策面(compute/intents parse):
+      off=拒绝(409)
+    - 执行面(execute): 需 assist
+      (影子期不执行)
     - KeyError → 404 / ValueError → 409
 """
 
@@ -228,3 +236,173 @@ async def model_status(
 def register_pay69_routes(app) -> None:
     """注册69号路由(main.py startup 调用)"""
     app.include_router(router)
+
+
+# ============================================================
+# P1 智能路由(7 端点)
+# ============================================================
+
+class RouteComputeBody(BaseModel):
+    memberId: int = Field(default=0,
+                          description="会员 ID")
+    amount: float = Field(gt=0,
+                          description="支付金额(元)")
+    tags: list[str] = Field(
+        default_factory=list,
+        description="意图标签(显式——P0 八类)")
+    intentText: str = Field(default="",
+                            description="意图文本(无标签时规则轨解析)")
+    tvEligible: bool = Field(
+        default=False,
+        description="信值资格(credit_tv 参评前置——45号 TV 资金源)")
+
+
+class RouteExecuteBody(RouteComputeBody):
+    simulateFail: list[str] = Field(
+        default_factory=list,
+        description="沙盘失败注入通道(测试钩子)")
+
+
+class HabitReportBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    channelId: str = Field(description="通道 ID")
+    count: int = Field(default=1, gt=0,
+                       description="使用次数")
+
+
+@router.get("/route/dict")
+async def route_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """路由字典公示(权重+因子口径+窗口
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_router_service import (
+        Pay69RouterService,
+    )
+    return Pay69RouterService().route_dict()
+
+
+@router.post("/route/compute")
+async def route_compute(
+        body: RouteComputeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """多因子确定性评分选道(决策面——
+    off 409; routeScore 四因子数值明细
+    留痕, LLM 禁入)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_router_service import (
+        Pay69RouterService,
+    )
+    try:
+        return await Pay69RouterService()\
+            .compute_route(
+                body.memberId, body.amount,
+                body.tags, body.intentText,
+                tv_eligible=body.tvEligible)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/route/execute")
+async def route_execute(
+        body: RouteExecuteBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """路由沙盘执行+静默备选重试(执行面
+    ——需 assist; 首选失败自动尝试次优,
+    全程留痕 flows 供快环窗口消费)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() != "assist":
+        raise HTTPException(
+            status_code=409,
+            detail=f"PAY69_MODE={current_mode()}"
+                  f"(执行面需 assist——影子期"
+                  f"不执行)")
+    from services.pay69_router_service import (
+        Pay69RouterService,
+    )
+    try:
+        return await Pay69RouterService()\
+            .execute_route(
+                body.memberId, body.amount,
+                body.tags, body.intentText,
+                body.simulateFail,
+                tv_eligible=body.tvEligible)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/route/habit/report")
+async def route_habit_report(
+        body: HabitReportBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """会员通道习惯上报(快环观测——
+    不受 PAY69_MODE 影响)"""
+    _require_admin(x_role)
+    from services.pay69_router_service import (
+        Pay69RouterService,
+    )
+    try:
+        return await Pay69RouterService()\
+            .habit_report(
+                body.memberId, body.channelId,
+                body.count)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/route/habits/{member_id}")
+async def route_habits(
+        member_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """会员通道习惯视图(观测面)"""
+    _require_admin(x_role)
+    from services.pay69_router_service import (
+        Pay69RouterService,
+    )
+    return await Pay69RouterService()\
+        .habits_view(member_id)
+
+
+@router.get("/route/flows")
+async def route_flows(
+        channelId: str | None = None,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """路由执行留痕视图(观测面)"""
+    _require_admin(x_role)
+    from services.pay69_router_service import (
+        Pay69RouterService,
+    )
+    return await Pay69RouterService()\
+        .flows_view(channelId, limit=limit)
+
+
+@router.get("/route/window")
+async def route_window(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """七通道滚动窗口统计(快环基线
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_router_service import (
+        Pay69RouterService,
+    )
+    return await Pay69RouterService()\
+        .window_view()

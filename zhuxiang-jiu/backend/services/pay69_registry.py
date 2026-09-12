@@ -188,6 +188,25 @@ INTENT_AFFINITY: dict = {
 
 
 # ============================================================
+# 路由评分权重(P1——封闭注册, 变更走
+# 慢环 46号审批)
+# ============================================================
+
+ROUTE_WEIGHTS: dict = {
+    "fee": 0.15,       # 费率因子(越低越优)
+    "health": 0.35,    # 健康度因子(滚动窗口)
+    "affinity": 0.35,  # 意图亲和因子(对齐主导)
+    "habit": 0.15,     # 会员习惯因子
+}
+
+# 滚动窗口容量(快环——每通道最近 N 次执行)
+ROUTE_WINDOW_SIZE = 50
+
+# 费率归一化上限(注册表最高费率 0.006)
+MAX_FEE_RATE = 0.006
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -239,6 +258,14 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 f"pay69 意图 {tag} 亲和通道域外: "
                 f"{unknown}")
+    # ⑧ 路由权重键域封闭+和=1.0
+    if set(ROUTE_WEIGHTS) != {
+            "fee", "health", "affinity", "habit"}:
+        raise RuntimeError("pay69 路由权重键域非法")
+    total = sum(ROUTE_WEIGHTS.values())
+    if abs(total - 1.0) > 1e-9:
+        raise RuntimeError(
+            f"pay69 路由权重和≠1.0: {total}")
 
 
 _validate_registry()

@@ -25,17 +25,24 @@ from repositories.backend import (
     is_redis_mode, _k,
 )
 
+# 通道流滚动窗口截断倍数(容量×2——
+# 窗口统计上限之外的余量)
+_WINDOW = 100
+
 
 class Pay69Repository:
-    """69号三表仓储(双模式——asyncio/Redis)"""
+    """69号五表仓储(双模式——asyncio/Redis)"""
 
     TABLE_CHANNELS = "pay69_channels"
     TABLE_INTENTS = "pay69_intents"
     TABLE_EVENTS = "pay69_events"
+    TABLE_FLOWS = "pay69_flows"
+    TABLE_HABITS = "pay69_habits"
 
     _ALL_TABLES = (
         TABLE_CHANNELS, TABLE_INTENTS,
-        TABLE_EVENTS)
+        TABLE_EVENTS, TABLE_FLOWS,
+        TABLE_HABITS)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -285,3 +292,136 @@ class Pay69Repository:
             key=lambda r: r.get("eventSeq", 0),
             reverse=True)[:limit]
         return [dict(r) for r in recs]
+
+    # ============================================================
+    # 路由执行留痕(pay69_flows——P1)
+    # LIST 结构: 全局流 + 通道流(滚动
+    # 窗口口径), JSON 字符串存取双模式
+    # 同形(免五清单陷阱)
+    # ============================================================
+
+    async def next_flow_seq(self) -> int:
+        """路由执行序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay69", "flow", "seq"))
+        self._ensure_store()
+        self.store["_pay69_flow_seq"] = \
+            self.store.get("_pay69_flow_seq", 0) + 1
+        return self.store["_pay69_flow_seq"]
+
+    async def save_flow(self, record: dict) -> dict:
+        """保存路由执行留痕(通道流滚动
+        窗口 2×容量截断, 全局流 1000 条)"""
+        seq = await self.next_flow_seq()
+        record["flowSeq"] = seq
+        payload = json.dumps(
+            record, ensure_ascii=False)
+        cid = str(record.get("channelId")
+                  or "unknown")
+        if is_redis_mode():
+            client = await get_redis_client()
+            ch_key = _k("pay69", "flow",
+                        "ch", cid)
+            await client.lpush(ch_key, payload)
+            await client.ltrim(
+                ch_key, 0, 2 * _WINDOW - 1)
+            all_key = _k("pay69", "flow", "all")
+            await client.lpush(all_key, payload)
+            await client.ltrim(all_key, 0, 999)
+            return record
+        self._ensure_store()
+        flows = self.store[self.TABLE_FLOWS]
+        flows.setdefault("all", [])\
+            .insert(0, dict(record))
+        del flows["all"][1000:]
+        by_ch = flows.setdefault(
+            "by_channel", {})
+        by_ch.setdefault(cid, [])\
+            .insert(0, dict(record))
+        del by_ch[cid][2 * _WINDOW:]
+        return record
+
+    async def list_flows(
+            self, channel_id: str = None,
+            limit: int = 50) -> list[dict]:
+        """路由执行留痕列表(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if channel_id:
+                data = await client.lrange(
+                    _k("pay69", "flow", "ch",
+                       channel_id), 0, limit - 1)
+            else:
+                data = await client.lrange(
+                    _k("pay69", "flow", "all"),
+                    0, limit - 1)
+            return [json.loads(x) for x in data]
+        self._ensure_store()
+        flows = self.store[self.TABLE_FLOWS]
+        recs = (flows.get("by_channel", {})
+                .get(channel_id, []) if channel_id
+                else flows.get("all", []))
+        return [dict(r) for r in recs[:limit]]
+
+    async def window_of(
+            self, channel_id: str,
+            size: int = None) -> dict:
+        """通道滚动窗口统计(最近 N 次
+        执行——快环确定性基线; 无留痕
+        successRate=None)"""
+        from services.pay69_registry import (
+            ROUTE_WINDOW_SIZE,
+        )
+        n = size or ROUTE_WINDOW_SIZE
+        flows = await self.list_flows(
+            channel_id, limit=n)
+        attempt = len(flows)
+        success = sum(
+            1 for f in flows if f.get("success"))
+        return {
+            "channelId": channel_id,
+            "attemptCount": attempt,
+            "successCount": success,
+            "successRate": (round(
+                success / attempt, 4)
+                if attempt else None),
+        }
+
+    # ============================================================
+    # 会员通道习惯(pay69_habits——P1 快环)
+    # ============================================================
+
+    async def bump_habit(
+            self, member_id: int,
+            channel_id: str,
+            count: int = 1) -> dict:
+        """会员通道使用计数累加(快环观测
+        ——HINCRBY 原子)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hincrby(
+                _k("pay69", "habit", member_id),
+                channel_id, int(count))
+            return await self.get_habits(member_id)
+        self._ensure_store()
+        habits = self.store[self.TABLE_HABITS]\
+            .setdefault(member_id, {})
+        habits[channel_id] = \
+            habits.get(channel_id, 0) + int(count)
+        return dict(habits)
+
+    async def get_habits(
+            self, member_id: int) -> dict:
+        """会员通道使用计数视图"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay69", "habit", member_id))
+            return {k: int(v)
+                    for k, v in data.items()}
+        self._ensure_store()
+        return dict(
+            self.store[self.TABLE_HABITS]
+            .get(member_id, {}))
