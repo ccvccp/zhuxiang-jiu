@@ -1,9 +1,9 @@
 """71号·AI智能支付端口大模型 仓储
-(pay71_repository, P0)
+(pay71_repository, P0-P1)
 
 规划(docs/71号_AI智能支付端口大模型_创新规划方案.md
-§七 P0):
-    3 表(前缀 pay71):
+§七 P0/P1):
+    7 表(前缀 pay71):
         pay71_ports       端口态观测记录
                           (三态+前兆评分)
         pay71_signals     前兆信号留痕
@@ -11,6 +11,15 @@
         pay71_events      全链事件埋点
                           (P1 自愈/P3 调配
                           共享)
+        pay71_probes      半开探测记录
+                          (P1——恢复证据)
+        pay71_shadows     影子冷启动账本
+                          (P1——纳管生命周期)
+        pay71_proposals   转正/摘牌建议书
+                          (P1——人工终审)
+        pay71_traces      自愈编排轨迹
+                          (P1——触发窗口/
+                          动作/恢复证据)
 
 69号仓储范式平移:
     - 通用读写基元(_save/_get/_list)
@@ -43,10 +52,16 @@ class Pay71Repository:
     TABLE_PORTS = "pay71_ports"
     TABLE_SIGNALS = "pay71_signals"
     TABLE_EVENTS = "pay71_events"
+    TABLE_PROBES = "pay71_probes"
+    TABLE_SHADOWS = "pay71_shadows"
+    TABLE_PROPOSALS = "pay71_proposals"
+    TABLE_TRACES = "pay71_traces"
 
     _ALL_TABLES = (
         TABLE_PORTS, TABLE_SIGNALS,
-        TABLE_EVENTS)
+        TABLE_EVENTS, TABLE_PROBES,
+        TABLE_SHADOWS, TABLE_PROPOSALS,
+        TABLE_TRACES)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -54,16 +69,23 @@ class Pay71Repository:
 
     _INT_FIELDS = (
         "portSeq", "signalSeq", "eventSeq",
-        "sampleCount")
+        "probeSeq", "shadowSeq",
+        "proposalSeq", "traceSeq",
+        "sampleCount", "probeStreak",
+        "probeRequired")
     _FLOAT_FIELDS = (
         "avgLatencyMs", "errorRate",
         "successRate", "precursorScore",
         "latencyDelta", "errorRateDelta",
-        "successRateDelta", "callbackMs")
-    _BOOL_FIELDS = ("alerted", "observed")
+        "successRateDelta", "callbackMs",
+        "windowScore", "daysElapsed")
+    _BOOL_FIELDS = (
+        "alerted", "observed", "recovered",
+        "probeSuccess", "eligible")
     _JSON_DICT_FIELDS = (
         "windows", "meta", "detail",
-        "signals")
+        "signals", "trigger", "evidence",
+        "fromTo", "shadowCriteria")
     _JSON_LIST_FIELDS = ("traits",)
 
     def __init__(self, store: dict = None):
@@ -212,8 +234,10 @@ class Pay71Repository:
         return record
 
     async def list_signals(
-            self, limit: int = 50) -> list[dict]:
-        """列出前兆信号留痕(近 limit 条)"""
+            self, limit: int = 50,
+            port_id: str = None) -> list[dict]:
+        """列出前兆信号留痕(近 limit 条——
+        可按端口过滤, P1 滚动窗口消费)"""
         if is_redis_mode():
             client = await get_redis_client()
             keys = await client.keys(
@@ -225,26 +249,38 @@ class Pay71Repository:
                     seqs.append(int(tail))
             seqs.sort(reverse=True)
             result = []
-            for seq in seqs[:limit]:
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
                 raw = await client.get(
                     _k("pay71", "signal", str(seq)))
-                if raw:
-                    with contextlib.suppress(
-                            ValueError, TypeError):
-                        result.append(
-                            self._deserialize(
-                                json.loads(raw)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if port_id is None \
+                        or rec.get(
+                            "portId") == port_id:
+                    result.append(rec)
             return result
         self._ensure_store()
         seqs = sorted(
             (int(s) for s in
              self.store[self.TABLE_SIGNALS]),
             reverse=True)
-        return [
+        records = [
             dict(self.store[
                 self.TABLE_SIGNALS][str(s)])
-            for s in seqs[:limit]
+            for s in seqs
         ]
+        if port_id is not None:
+            records = [
+                r for r in records
+                if r.get("portId") == port_id]
+        return records[:limit]
 
     # ============================================================
     # 全链事件埋点(pay71_events)
@@ -313,3 +349,338 @@ class Pay71Repository:
                 self.TABLE_EVENTS][str(s)])
             for s in seqs[:limit]
         ]
+
+    # ============================================================
+    # 半开探测记录(pay71_probes——P1)
+    # ============================================================
+
+    async def next_probe_seq(self) -> int:
+        """探针序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "probe", "seq"))
+        self._ensure_store()
+        self.store["_pay71_probe_seq"] = \
+            self.store.get("_pay71_probe_seq", 0) + 1
+        return self.store["_pay71_probe_seq"]
+
+    async def save_probe(self, record: dict) -> dict:
+        """保存探针记录(恢复证据链)"""
+        seq = await self.next_probe_seq()
+        record["probeSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "probe", str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_PROBES][str(seq)] \
+            = dict(record)
+        return record
+
+    async def list_probes(
+            self, port_id: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出探针记录(可按端口过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "probe", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "probe", str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if port_id is None \
+                        or rec.get(
+                            "portId") == port_id:
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[self.TABLE_PROBES]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_PROBES][str(s)])
+            for s in seqs
+        ]
+        if port_id is not None:
+            records = [
+                r for r in records
+                if r.get("portId") == port_id]
+        return records[:limit]
+
+    # ============================================================
+    # 影子冷启动账本(pay71_shadows——P1)
+    # ============================================================
+
+    async def get_shadow(self, port_id: str) -> dict | None:
+        """按端口查影子账本(内存态存取同形)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay71", "shadow", port_id))
+            if not data:
+                return None
+            return self._deserialize(data)
+        self._ensure_store()
+        rec = self.store[self.TABLE_SHADOWS]\
+            .get(port_id)
+        return dict(rec) if rec else None
+
+    async def save_shadow(self, port_id: str,
+                         record: dict) -> dict:
+        """保存/覆盖影子账本"""
+        record["portId"] = port_id
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "shadow", port_id)
+            await client.hset(
+                key, mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_SHADOWS][port_id] \
+            = dict(record)
+        return record
+
+    async def list_shadows(self) -> list[dict]:
+        """列出全部影子账本(纳管端口)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "shadow", "*"))
+            result = []
+            for key in keys:
+                data = await client.hgetall(key)
+                if data:
+                    result.append(
+                        self._deserialize(data))
+            return result
+        self._ensure_store()
+        return [
+            dict(rec) for rec in
+            self.store[self.TABLE_SHADOWS].values()
+        ]
+
+    # ============================================================
+    # 转正/摘牌建议书(pay71_proposals——P1)
+    # ============================================================
+
+    async def next_proposal_seq(self) -> int:
+        """建议书序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "proposal", "seq"))
+        self._ensure_store()
+        self.store["_pay71_proposal_seq"] = \
+            self.store.get("_pay71_proposal_seq", 0) + 1
+        return self.store["_pay71_proposal_seq"]
+
+    async def save_proposal(self,
+                            record: dict) -> dict:
+        """保存建议书"""
+        seq = await self.next_proposal_seq()
+        record["proposalSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "proposal",
+                     str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_PROPOSALS][str(seq)] \
+            = dict(record)
+        return record
+
+    async def get_proposal(
+            self, proposal_seq: int) -> dict | None:
+        """按序号查建议书"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("pay71", "proposal",
+                    str(proposal_seq)))
+            if not raw:
+                return None
+            with contextlib.suppress(
+                    ValueError, TypeError):
+                return self._deserialize(
+                    json.loads(raw))
+            return None
+        self._ensure_store()
+        rec = self.store[self.TABLE_PROPOSALS]\
+            .get(str(proposal_seq))
+        return dict(rec) if rec else None
+
+    async def update_proposal(
+            self, proposal_seq: int,
+            record: dict) -> dict:
+        """更新建议书(终审留痕)"""
+        record["proposalSeq"] = int(proposal_seq)
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "proposal",
+                     str(proposal_seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_PROPOSALS][
+            str(proposal_seq)] = dict(record)
+        return record
+
+    async def list_proposals(
+            self, port_id: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出建议书(可按端口过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "proposal", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "proposal",
+                        str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if port_id is None \
+                        or rec.get(
+                            "portId") == port_id:
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[self.TABLE_PROPOSALS]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_PROPOSALS][str(s)])
+            for s in seqs
+        ]
+        if port_id is not None:
+            records = [
+                r for r in records
+                if r.get("portId") == port_id]
+        return records[:limit]
+
+    # ============================================================
+    # 自愈编排轨迹(pay71_traces——P1 全留痕)
+    # ============================================================
+
+    async def next_trace_seq(self) -> int:
+        """轨迹序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "trace", "seq"))
+        self._ensure_store()
+        self.store["_pay71_trace_seq"] = \
+            self.store.get("_pay71_trace_seq", 0) + 1
+        return self.store["_pay71_trace_seq"]
+
+    async def save_trace(self, record: dict) -> dict:
+        """保存自愈轨迹(触发窗口/动作/
+        恢复证据三要素全留痕)"""
+        seq = await self.next_trace_seq()
+        record["traceSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "trace", str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_TRACES][str(seq)] \
+            = dict(record)
+        return record
+
+    async def list_traces(
+            self, port_id: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出自愈轨迹(可按端口过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "trace", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "trace", str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if port_id is None \
+                        or rec.get(
+                            "portId") == port_id:
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[self.TABLE_TRACES]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_TRACES][str(s)])
+            for s in seqs
+        ]
+        if port_id is not None:
+            records = [
+                r for r in records
+                if r.get("portId") == port_id]
+        return records[:limit]

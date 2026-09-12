@@ -131,6 +131,72 @@ PRECURSOR_WEIGHTS: dict = {
 PRECURSOR_ALERT_THRESHOLD = 0.50
 
 # ============================================================
+# P1 端口自愈编排(保护方向分级动作
+# ——熔断/恢复可自动+全留痕铁律)
+# ============================================================
+
+# 前兆滚动窗口容量(P1——每端口最近
+# N 条信号去重叠加; 变更走慢环审批)
+SELFHEAL_WINDOW_SIZE = 10
+
+# 熔断阈值(窗口多信号叠加≥0.80
+# →broken 摘除——保护方向自动)
+PRECURSOR_FUSE_THRESHOLD = 0.80
+
+# 降级阈值(窗口叠加≥0.50 或 69号
+# critical →degraded 降权)
+# = P0 PRECURSOR_ALERT_THRESHOLD(同源)
+
+# 半开探测恢复条件(broken 态连续
+# N 次探针成功→healthy)
+PROBE_REQUIRED_SUCCESSES = 3
+
+# 影子冷启动期(天——新端口接入只观测
+# 不参与调配; 达标后转正建议书)
+SHADOW_DAYS = 7
+
+# 端口治理生命周期域(封闭——影子
+# 冷启动/转正/摘牌全链; 正式启停
+# 永远走建议书+admin 终审铁律)
+GOVERNANCE_STATES = (
+    "ungoverned",   # 未纳管(默认)
+    "shadow",       # 影子冷启动期
+    "active",       # 转正(参与调配
+                    # ——P3 消费)
+    "offboarded",   # 摘牌(经建议书
+                    # 人工终审)
+)
+
+# 转正/摘牌建议书状态机(封闭——端口
+# 正式启停永不自动: proposed→approved/
+# rejected, admin 终审)
+PROPOSAL_STATES = (
+    "proposed",   # 已建议(待终审)
+    "approved",   # admin 确认生效
+    "rejected",   # admin 拒绝留痕
+)
+
+# 建议书种类域(封闭)
+PROPOSAL_KINDS = (
+    "promote",    # 转正(shadow→active)
+    "offboard",   # 摘牌(active→
+                  # offboarded)
+)
+
+# 自愈动作域(封闭——全留痕口径)
+SELFHEAL_ACTIONS = (
+    "degrade",      # 降级(healthy→
+                    # degraded, 保护)
+    "fuse",         # 熔断(→broken,
+                    # 保护)
+    "recover",      # 恢复(→healthy,
+                    # 保护)
+    "probe_pass",   # 探针通过(计数)
+    "probe_fail",   # 探针失败(清零)
+    "no_change",    # 评估无变更
+)
+
+# ============================================================
 # 四维调配目标域(P3 帕累托口径预注册
 # ——确定性向量评分, LLM 禁入)
 # ============================================================
@@ -243,6 +309,42 @@ def _validate_registry() -> None:
     if set(MODE_VALUES) != {
             "off", "shadow", "assist"}:
         raise RuntimeError("pay71 模式三态域非法")
+    # ⑩ P1 自愈: 熔断阈值>预警阈值
+    #     (分级单调)+窗口/探测/影子参数
+    #     合法+治理/建议书/动作域封闭
+    if not (PRECURSOR_ALERT_THRESHOLD
+            < PRECURSOR_FUSE_THRESHOLD <= 1):
+        raise RuntimeError(
+            "pay71 自愈阈值分级非单调递增")
+    if not (1 <= SELFHEAL_WINDOW_SIZE <= 100):
+        raise RuntimeError(
+            "pay71 前兆滚动窗口容量域外")
+    if not (1 <= PROBE_REQUIRED_SUCCESSES <= 10):
+        raise RuntimeError(
+            "pay71 半开探测次数域外")
+    if not (1 <= SHADOW_DAYS <= 30):
+        raise RuntimeError(
+            "pay71 影子冷启动天数域外")
+    if set(GOVERNANCE_STATES) != {
+            "ungoverned", "shadow",
+            "active", "offboarded"}:
+        raise RuntimeError(
+            "pay71 端口治理生命周期域非法")
+    if set(PROPOSAL_STATES) != {
+            "proposed", "approved",
+            "rejected"}:
+        raise RuntimeError(
+            "pay71 建议书状态机非法")
+    if set(PROPOSAL_KINDS) != {
+            "promote", "offboard"}:
+        raise RuntimeError(
+            "pay71 建议书种类域非法")
+    if set(SELFHEAL_ACTIONS) != {
+            "degrade", "fuse", "recover",
+            "probe_pass", "probe_fail",
+            "no_change"}:
+        raise RuntimeError(
+            "pay71 自愈动作域非法")
 
 
 _validate_registry()
