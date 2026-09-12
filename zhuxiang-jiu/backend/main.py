@@ -354,6 +354,10 @@ register_ab63_routes(app)
 from routes.pay60_routes import register_pay60_routes
 register_pay60_routes(app)
 
+# AI智能支付大模型(69号 P0 认知中枢底座)
+from routes.pay69_routes import register_pay69_routes
+register_pay69_routes(app)
+
 # AI智能系统升级决策(61号)
 from routes.dm61_routes import register_dm61_routes
 register_dm61_routes(app)
