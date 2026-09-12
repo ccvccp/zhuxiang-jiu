@@ -59,6 +59,13 @@
         pay71_reports     合规健康报告
                           (P6——五维
                           确定性统计)
+        pay71_hypotheses  进化假设建议书
+                          (P7——disposition
+                          四要素)
+        pay71_params      参数版本账本
+                          (P7——draft→
+                          shadow→active→
+                          retired)
 
 69号仓储范式平移:
     - 通用读写基元(_save/_get/_list)
@@ -109,6 +116,8 @@ class Pay71Repository:
     TABLE_MISJUDGES = "pay71_misjudges"
     TABLE_EVIDENCE = "pay71_evidence"
     TABLE_REPORTS = "pay71_reports"
+    TABLE_HYPOTHESES = "pay71_hypotheses"
+    TABLE_PARAMS = "pay71_params"
 
     _ALL_TABLES = (
         TABLE_PORTS, TABLE_SIGNALS,
@@ -121,7 +130,8 @@ class Pay71Repository:
         TABLE_RECONS, TABLE_RECONBASE,
         TABLE_NARRATIVES, TABLE_INCIDENTS,
         TABLE_MISJUDGES, TABLE_EVIDENCE,
-        TABLE_REPORTS)
+        TABLE_REPORTS, TABLE_HYPOTHESES,
+        TABLE_PARAMS)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -136,7 +146,8 @@ class Pay71Repository:
         "verifySeq", "reconSeq",
         "narrativeSeq", "incidentSeq",
         "misjudgeSeq", "evidenceSeq",
-        "reportSeq",
+        "reportSeq", "hypothesisId",
+        "changeId", "version",
         "sampleCount", "probeStreak",
         "probeRequired", "memberId",
         "retryCount", "retryAttempt",
@@ -175,7 +186,9 @@ class Pay71Repository:
         "attribution", "axes",
         "entropyAxes", "deviceClues",
         "nodes", "chain", "metrics",
-        "dimensions", "nodeHashes")
+        "dimensions", "nodeHashes",
+        "proposedAction", "factoryValue",
+        "proposedValue")
     _JSON_LIST_FIELDS = (
         "traits", "parts", "candidates",
         "paretoFront", "affectedPorts")
@@ -2202,4 +2215,226 @@ class Pay71Repository:
             records = [
                 r for r in records
                 if r.get("period") == period]
+        return records[:limit]
+
+    # ============================================================
+    # 进化假设建议书(pay71_hypotheses——P7)
+    # ============================================================
+
+    async def next_hypothesis_seq(self) -> int:
+        """假设序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "hypothesis", "seq"))
+        self._ensure_store()
+        self.store["_pay71_hypothesis_seq"] = \
+            self.store.get(
+                "_pay71_hypothesis_seq", 0) + 1
+        return self.store[
+            "_pay71_hypothesis_seq"]
+
+    async def save_hypothesis(
+            self, hyp_id: int,
+            record: dict) -> dict:
+        """保存假设建议书"""
+        record["hypothesisId"] = int(hyp_id)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("pay71", "hypothesis",
+                   str(hyp_id)),
+                json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_HYPOTHESES][
+            str(hyp_id)] = dict(record)
+        return record
+
+    async def get_hypothesis(
+            self, hyp_id: int) -> dict | None:
+        """按序号查假设"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("pay71", "hypothesis",
+                    str(hyp_id)))
+            if not raw:
+                return None
+            with contextlib.suppress(
+                    ValueError, TypeError):
+                return self._deserialize(
+                    json.loads(raw))
+            return None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_HYPOTHESES].get(
+            str(hyp_id))
+        return dict(rec) if rec else None
+
+    async def list_hypotheses(
+            self, status: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出假设(可按状态过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "hypothesis", "*"))
+            ids: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    ids.append(int(tail))
+            ids.sort(reverse=True)
+            result = []
+            for hid in ids[:limit]:
+                raw = await client.get(
+                    _k("pay71", "hypothesis",
+                        str(hid)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if status is None \
+                        or rec.get(
+                            "status") == status:
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        ids = sorted(
+            (int(s) for s in
+             self.store[
+                 self.TABLE_HYPOTHESES]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_HYPOTHESES][str(s)])
+            for s in ids[:limit]
+        ]
+        if status is not None:
+            records = [
+                r for r in records
+                if r.get("status") == status]
+        return records[:limit]
+
+    # ============================================================
+    # 参数版本账本(pay71_params——P7)
+    # ============================================================
+
+    async def next_param_version(self) -> int:
+        """参数版本号(全局递增)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "param", "ver"))
+        self._ensure_store()
+        self.store["_pay71_param_version"] = \
+            self.store.get(
+                "_pay71_param_version", 0) + 1
+        return self.store[
+            "_pay71_param_version"]
+
+    async def save_param_version(
+            self, version: int,
+            record: dict) -> dict:
+        """保存参数版本"""
+        record["version"] = int(version)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("pay71", "param",
+                   str(version)),
+                json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_PARAMS][
+            str(version)] = dict(record)
+        return record
+
+    async def get_param_version(
+            self, version: int) -> dict | None:
+        """按版本号查参数版本"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("pay71", "param",
+                    str(version)))
+            if not raw:
+                return None
+            with contextlib.suppress(
+                    ValueError, TypeError):
+                return self._deserialize(
+                    json.loads(raw))
+            return None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_PARAMS].get(
+            str(version))
+        return dict(rec) if rec else None
+
+    async def list_param_versions(
+            self, param_id: str = None,
+            status: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出参数版本(可按参数/状态过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "param", "*"))
+            versions: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    versions.append(int(tail))
+            versions.sort(reverse=True)
+            result = []
+            for v in versions:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "param",
+                        str(v)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if param_id is not None \
+                        and rec.get(
+                            "paramId") != param_id:
+                    continue
+                if status is not None \
+                        and rec.get(
+                            "status") != status:
+                    continue
+                result.append(rec)
+            return result
+        self._ensure_store()
+        versions = sorted(
+            (int(s) for s in
+             self.store[self.TABLE_PARAMS]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_PARAMS][str(v)])
+            for v in versions
+        ]
+        if param_id is not None:
+            records = [
+                r for r in records
+                if r.get("paramId")
+                == param_id]
+        if status is not None:
+            records = [
+                r for r in records
+                if r.get("status") == status]
         return records[:limit]

@@ -56,24 +56,38 @@
     POST /api/pay71/audit/report/generate 合规健康报告生成(admin, 观测面——P6)
     POST /api/pay71/audit/report/{seq}/publish 报告发布(admin, 人工——不受开关——P6)
     GET  /api/pay71/audit/report        报告视图(admin, 观测面——P6)
+    GET  /api/pay71/evolution/dict      进化引擎字典公示(admin, 观测面——P7)
+    POST /api/pay71/evolution/drift/detect 快适应层漂移检测(admin, 快环——不受开关——P7)
+    POST /api/pay71/evolution/hypothesis/propose 进化假设生成(admin, 决策面 off 409——P7)
+    POST /api/pay71/evolution/hypothesis/{id}/submit 46号审批提交(admin, 决策面 off 409——P7)
+    POST /api/pay71/evolution/hypothesis/{id}/reject 46号驳回留痕(admin, 人工——不受开关——P7)
+    POST /api/pay71/evolution/params/{version}/publish 参数版本发布(admin, 决策面 off 409——P7)
+    POST /api/pay71/evolution/params/{version}/rollback 版本回滚(admin, 决策面 off 409——P7)
+    POST /api/pay71/evolution/kill     紧急制动(admin, 人工——不受开关——P7)
+    GET  /api/pay71/evolution/hypotheses 假设视图(admin, 观测面——P7)
+    GET  /api/pay71/evolution/params   参数版本视图(admin, 观测面——P7)
+    GET  /api/pay71/evolution/governance L0-L2 治理观测(admin, 观测面——P7)
 
 鉴权: 管理面 X-Role: admin(69号同款口径)。
 统一口径(69号范式):
     - 观测面不受 PAY71_MODE 影响
     - 快环观测上报(signals/retry report/
       external report/incident report/
-      misjudge report)不受开关影响
+      misjudge report/drift detect)
+      不受开关影响
     - 人工面(port state/onboard/propose/
       decide/external decide/incident
       verify/evidence export/report
-      publish)不受开关影响
+      publish/hypothesis reject/kill)
+      不受开关影响
     - 保护面(orchestrate/probe)不受开关
       影响——保护方向永续铁律(规划 §4.1)
     - 决策面(predict compute/revoke/
       split propose/confirm/allocation
       compute/recon verify/heal/retry/
       narrative generate/evidence
-      assemble)off=409
+      assemble/hypothesis propose/
+      submit/publish/rollback)off=409
     - KeyError → 404 / ValueError → 409
 """
 
@@ -310,6 +324,30 @@ class ReportGenerateBody(BaseModel):
     period: str = Field(
         default="daily",
         description="报告周期(daily/weekly)")
+
+
+class HypothesisProposeBody(BaseModel):
+    paramId: str = Field(description="参数 ID"
+                          "(白名单)")
+    proposedValue: float = Field(
+        description="建议新值(标量)")
+    reason: str = Field(
+        min_length=1, description="动因")
+    expectedGain: str = Field(
+        default="", description="预期收益")
+    riskAssessment: str = Field(
+        default="", description="风险评估")
+
+
+class ParamPublishBody(BaseModel):
+    shadowFirst: bool = Field(
+        default=False,
+        description="先发布 shadow 态")
+
+
+class KillBody2(BaseModel):
+    activate: bool = Field(
+        description="激活/解除制动")
 
 
 # ============================================================
@@ -1374,6 +1412,219 @@ async def audit_report(
     )
     return await Pay71P6Service().report_view(
         period=period or None, limit=limit)
+
+
+# ============================================================
+# P7 端点(三层进化引擎)
+# ============================================================
+
+@router.get("/evolution/dict")
+async def evolution_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """进化引擎字典公示(分级/参数
+    白名单/版本状态机/漂移阈值
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    return Pay71P7Service().evolution_dict()
+
+
+@router.post("/evolution/drift/detect")
+async def evolution_drift_detect(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """快适应层漂移检测(两域确定性
+    统计信号——仅观测, 不含参数变更;
+    快环不受 PAY71_MODE 影响)"""
+    _require_admin(x_role)
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    return await Pay71P7Service()\
+        .detect_drift()
+
+
+@router.post("/evolution/hypothesis/propose")
+async def evolution_hypothesis_propose(
+        body: HypothesisProposeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """深反思层进化假设生成(disposition
+    四要素+附 draft 参数版本; 决策面
+    off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    try:
+        return await Pay71P7Service()\
+            .propose_hypothesis(
+                body.paramId,
+                body.proposedValue,
+                body.reason,
+                expected_gain=body.expectedGain,
+                risk_assessment=body.riskAssessment)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/evolution/hypothesis/"
+             "{hyp_id}/submit")
+async def evolution_hypothesis_submit(
+        hyp_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """假设提交 46号审批总线(纯调用
+    ——46号零改动; L1/L2 分级门控;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    try:
+        return await Pay71P7Service()\
+            .submit_to_governance(hyp_id)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/evolution/hypothesis/"
+             "{hyp_id}/reject")
+async def evolution_hypothesis_reject(
+        hyp_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """46号驳回留痕(submitted→
+    rejected; draft 版本随退——人工
+    面不受开关影响)"""
+    _require_admin(x_role)
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    try:
+        return await Pay71P7Service()\
+            .mark_rejected(hyp_id)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/evolution/params/"
+             "{version}/publish")
+async def evolution_param_publish(
+        version: int,
+        body: ParamPublishBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """参数版本发布(46号审批通过后
+    显式动作——draft→shadow/active,
+    active 互斥; 决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    try:
+        return await Pay71P7Service()\
+            .publish_version(
+                version,
+                shadow_first=body.shadowFirst)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/evolution/params/"
+             "{version}/rollback")
+async def evolution_param_rollback(
+        version: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """版本回滚(retired 历史→active;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    try:
+        return await Pay71P7Service()\
+            .rollback_version(version)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/evolution/kill")
+async def evolution_kill(
+        body: KillBody2,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """紧急制动(数据面: 全 active/shadow
+    参数版本退役退回出厂; 环境变量
+    PAY71_KILL=1 运维双保险——人工
+    面不受开关影响)"""
+    _require_admin(x_role)
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    return await Pay71P7Service()\
+        .kill_switch(body.activate)
+
+
+@router.get("/evolution/hypotheses")
+async def evolution_hypotheses(
+        status: str = "",
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """假设建议书视图(可按状态过滤
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    return await Pay71P7Service()\
+        .hypotheses_view(
+            status=status or None,
+            limit=limit)
+
+
+@router.get("/evolution/params")
+async def evolution_params(
+        paramId: str = "",
+        status: str = "",
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """参数版本视图(active 互斥可见
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    return await Pay71P7Service()\
+        .params_view(
+            param_id=paramId or None,
+            status=status or None,
+            limit=limit)
+
+
+@router.get("/evolution/governance")
+async def evolution_governance(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """L0-L2 分级治理观测+元认知
+    自省报告(三层统计+漂移信号+KILL
+    态——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p7_service import (
+        Pay71P7Service,
+    )
+    return await Pay71P7Service()\
+        .governance_view()
 
 
 def register_pay71_routes(app) -> None:

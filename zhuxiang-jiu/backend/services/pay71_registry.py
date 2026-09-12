@@ -600,7 +600,109 @@ REPORT_DIMENSIONS = (
                           # 分布
     "redLineTouches",   # 红线触碰
                         # (宪法级——
-                        # 恒 0 断言)
+                        # 恒 0 断言
+)
+
+# ============================================================
+# P7 三层进化引擎(快适应/深反思/元
+# 认知——69号 P7 双环范式平移+三层
+# 宪法化; 进化永不自动生效铁律)
+# ============================================================
+
+# 治理分级域(封闭——L0 观察默认/
+# L1 受限(低风险)/L2 协同(权重类))
+EVOLUTION_LEVELS = (
+    "L0",   # 观察学习: 漂移检测+
+            # 假设生成(不提交 46号)
+    "L1",   # 受限进化: 低风险参数
+            # 建议书可提交 46号
+            # (仍需人工审批)
+    "L2",   # 协同进化: 全参数域
+            # 建议书可提交 46号
+)
+
+
+def current_level() -> str:
+    """治理分级(PAY71_EVOLUTION_LEVEL,
+    默认 L0)"""
+    lv = os.environ.get(
+        "PAY71_EVOLUTION_LEVEL") or "L0"
+    return lv if lv in EVOLUTION_LEVELS \
+        else "L0"
+
+
+# 可进化参数白名单(封闭——版本化
+# 基线管理域; kind: weights=权重
+# 和=1.0 宪法校验/dict=同键对象/
+# scalar=域内标量)
+EVOLVABLE_PARAMS: dict = {
+    "allocationContextWeights": {
+        "riskLevel": "high",   # L2 才可提
+        "kind": "weights-family",
+        "factory": None,   # 四情境各自
+                           # 独立(见
+                           # ALLOCATION_
+                           # CONTEXT_
+                           # WEIGHTS)
+        "domain": "帕累托情境权重"
+                  "(与 P3 外部信号覆盖"
+                  "互斥——进化走 P3 轨)",
+    },
+    "precursorFuseThreshold": {
+        "riskLevel": "high",
+        "kind": "scalar",
+        "factory": 0.80,
+        "domain": "端口熔断阈值",
+        "vmin": 0.50, "vmax": 1.0,
+    },
+    "probeRequiredSuccesses": {
+        "riskLevel": "low",    # L1 可提
+        "kind": "scalar",
+        "factory": 3,
+        "domain": "半开探测恢复次数",
+        "vmin": 1, "vmax": 10,
+    },
+    "reconRetryMax": {
+        "riskLevel": "low",
+        "kind": "scalar",
+        "factory": 3,
+        "domain": "补单重试上限",
+        "vmin": 1, "vmax": 10,
+    },
+}
+
+# 参数版本状态机(封闭——52号基线
+# 管理灰度范式)
+PARAM_VERSION_STATUSES = (
+    "draft",    # 草稿(假设附带)
+    "shadow",   # 影子(对照——状态
+                # 占位)
+    "active",   # 生效(消费口径)
+    "retired",  # 退役(可回滚目标)
+)
+
+# 漂移检测阈值(封闭——快适应层
+# 确定性统计口径)
+DRIFT_THRESHOLDS: dict = {
+    "channelSuccess": 0.05,  # 通道成功
+                             # 率偏离幅度
+    "misjudgeRate": 0.10,    # 误拦率
+                             # 异常幅度
+    "minSamples": 20,        # 最小
+                             # 样本量
+}
+
+# 46号档案口径(第43批——submit_
+# change 前置入册)
+EVOLUTION_SCORER_ID = \
+    "payment_port_intelligence"
+
+# 假设状态机(封闭)
+HYPOTHESIS_STATUSES = (
+    "proposed",    # 已建议(待提交)
+    "submitted",   # 已提交 46号审批
+    "published",   # 已发布(版本生效)
+    "rejected",    # 46号驳回留痕
 )
 
 
@@ -991,6 +1093,57 @@ def _validate_registry() -> None:
             "redLineTouches"}:
         raise RuntimeError(
             "pay71 报告维度域非法")
+    # ⑯ P7 进化引擎: 分级/参数白名单/
+    #     版本状态机/漂移阈值/假设状态
+    if set(EVOLUTION_LEVELS) != {
+            "L0", "L1", "L2"}:
+        raise RuntimeError(
+            "pay71 进化分级域非法")
+    if not EVOLVABLE_PARAMS:
+        raise RuntimeError(
+            "pay71 可进化参数白名单为空")
+    for pid, meta in \
+            EVOLVABLE_PARAMS.items():
+        if meta.get("riskLevel") not in (
+                "low", "high"):
+            raise RuntimeError(
+                f"pay71 参数风险级非法: "
+                f"{pid}")
+        if meta.get("kind") not in (
+                "weights-family",
+                "scalar"):
+            raise RuntimeError(
+                f"pay71 参数类型非法: "
+                f"{pid}")
+        if meta.get("kind") == "scalar":
+            if "factory" not in meta:
+                raise RuntimeError(
+                    f"pay71 参数缺出厂默认: "
+                    f"{pid}")
+            if not (meta.get("vmin")
+                    < meta.get("vmax")):
+                raise RuntimeError(
+                    f"pay71 参数值域非法: "
+                    f"{pid}")
+    if set(PARAM_VERSION_STATUSES) != {
+            "draft", "shadow",
+            "active", "retired"}:
+        raise RuntimeError(
+            "pay71 参数版本状态域非法")
+    for k, v in DRIFT_THRESHOLDS.items():
+        if not (0 < v <= 1) \
+                and k != "minSamples":
+            raise RuntimeError(
+                f"pay71 漂移阈值域外: "
+                f"{k}={v}")
+    if DRIFT_THRESHOLDS["minSamples"] < 1:
+        raise RuntimeError(
+            "pay71 漂移最小样本量域外")
+    if set(HYPOTHESIS_STATUSES) != {
+            "proposed", "submitted",
+            "published", "rejected"}:
+        raise RuntimeError(
+            "pay71 假设状态机非法")
 
 
 _validate_registry()
