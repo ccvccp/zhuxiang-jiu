@@ -81,8 +81,9 @@ async def main():
            == set(reg.CODE_KINDS)
            and len(reg.CODE_KINDS) == 6,
            str(reg.CODE_KINDS))
-    record("每类至少一码型(注册 6 码型)",
-           len(reg.CODE_REGISTRY) == 6
+    record("每类至少一码型(注册≥6——"
+           "P1/P2 加法式扩充)",
+           len(reg.CODE_REGISTRY) >= 6
            and all(
                len(reg.codes_of_kind(k)) >= 1
                for k in reg.CODE_KINDS))
@@ -325,9 +326,9 @@ async def main():
 
     r = client.get(f"{BASE}/dict", headers=ADMIN)
     body = r.json()
-    record("注册表公示 200+6类6码型",
+    record("注册表公示 200+6类≥6码型",
            r.status_code == 200
-           and body.get("codeCount") == 6
+           and body.get("codeCount") >= 6
            and len(body.get("codeKinds")
                    or []) == 6,
            f"s={r.status_code}")

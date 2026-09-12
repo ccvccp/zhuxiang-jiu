@@ -150,6 +150,8 @@ SCORER_REGISTRY = {
     "xinzhi_merchant":          {"label": "臻选商家信值评级", "module": "68号信值臻选", "batch": 41},
     # ---- 第四十二批(69号·AI智能支付大模型 P7: 自进化引擎治理档案) ----
     "payment_intelligence":     {"label": "智能支付大模型评分", "module": "69智能支付大模型", "batch": 42},
+    # ---- 第四十三批(70号·AI智能二维码大模型 P7: 愉悦度引擎治理档案) ----
+    "qr_code_experience":       {"label": "智能码愉悦度评分", "module": "70智能二维码大模型", "batch": 43},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)

@@ -1,4 +1,4 @@
-﻿"""46号·AI 治理与合规中枢 P5 专项测试(治理看板与干预通道)
+"""46号·AI 治理与合规中枢 P5 专项测试(治理看板与干预通道)
 
 运行方式:
     python test_ai_governance_p5.py
@@ -54,6 +54,15 @@ async def seed_registry():
     await AiGovernanceService().sync_registry()
 
 
+def _n_scorers() -> int:
+    """注册表档案数(注册表驱动——加法式
+    扩充兼容)"""
+    from services.ai_learning_service import (
+        SCORER_REGISTRY,
+    )
+    return len(SCORER_REGISTRY)
+
+
 class TestDashboardStructure:
     async def run(self):
         print("[01 看板聚合结构]")
@@ -96,15 +105,17 @@ class TestZones:
         )
         svc = AiGovernanceDashboardService()
 
-        # ① 档案总览
+        # ① 档案总览(注册表驱动)
         z = await svc._zone_registry()
-        record("①总数36", z["total"] == 39, str(z["total"]))
+        n = _n_scorers()
+        record("①总数(注册表驱动)",
+               z["total"] == n, str(z["total"]))
         record("①active分布",
-               z["byStatus"]["active"] == 39
+               z["byStatus"]["active"] == n
                and z["byStatus"]["frozen"] == 0,
                str(z["byStatus"]))
-        record("①batch覆盖23",
-               len(z["byBatch"]) == 23,
+        record("①batch覆盖(≥23)",
+               len(z["byBatch"]) >= 23,
                str(len(z["byBatch"])))
         record("①无冻结档案",
                z["frozenScorers"] == [],
@@ -299,7 +310,7 @@ class TestFailSoft:
                    str(r["zones"]["fairness"])[:60])
             record("其余区块照常",
                    (r["zones"]["registry"] or {})
-                   .get("total") == 39,
+                   .get("total") == _n_scorers(),
                    str(r["zones"].get("registry"))[:40])
         finally:
             svc._zone_fairness = orig
