@@ -585,6 +585,45 @@ EVOLUTION_SCORER_ID = "payment_intelligence"
 
 
 # ============================================================
+# P8 安全免疫(红队四向量+分布监控冻结
+# ——55号 redteam 范式, 规划 §六)
+# ============================================================
+
+# 红队向量域(封闭四向量)
+REDTEAM_VECTORS = (
+    "RT-01",  # 路由欺骗(标签注入/习惯
+              # 洪流/金额伪造)
+    "RT-02",  # 熵绕过(分批小额/环境
+              # 伪造/通道轴留空)
+    "RT-03",  # 模板投毒(版本跳变/回滚/
+              # 置信度伪造)
+    "RT-04",  # 胁迫伪造(降级跳过重放/
+              # 置信度超域/线索伪造)
+)
+
+# 免疫冻结状态域(封闭——冻结自动
+# (安全方向, 规划 §六"异常漂移自动
+# 冻结进化并告警")/解冻人工专属)
+IMMUNITY_STATES = (
+    "active",     # 免疫监控正常
+    "frozen",     # 进化冻结(分布异常
+                  # 自动/红队发现自动)
+)
+
+# 分布监控阈值(封闭——critical 通道
+# 数达到即冻结进化)
+IMMUNITY_FREEZE_RULES = {
+    "criticalChannels": 2,   # critical 态
+                             # 通道数≥2
+    "driftSignalCount": 3,   # 漂移信号
+                             # 总数≥3
+}
+
+# 红队通过判定(全向量 allDefended)
+REDTEAM_PASS_ALL = "allDefended"
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -800,6 +839,23 @@ def _validate_registry() -> None:
             "retired"}:
         raise RuntimeError(
             "pay69 参数版本状态域非法")
+    # ⑳ P8 免疫: 红队向量/冻结状态域
+    #     封闭+冻结规则合法
+    if set(REDTEAM_VECTORS) != {
+            "RT-01", "RT-02",
+            "RT-03", "RT-04"}:
+        raise RuntimeError(
+            "pay69 红队向量域非法")
+    if set(IMMUNITY_STATES) != {
+            "active", "frozen"}:
+        raise RuntimeError(
+            "pay69 免疫冻结状态域非法")
+    for k, v in IMMUNITY_FREEZE_RULES.items():
+        if not (isinstance(v, int)
+                and v >= 1):
+            raise RuntimeError(
+                f"pay69 免疫冻结规则非法: "
+                f"{k}={v}")
     for k, v in DRIFT_THRESHOLDS.items():
         if not (0 < v <= 1) and k != "minSamples":
             raise RuntimeError(

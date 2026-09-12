@@ -37,7 +37,7 @@ def _now_ts() -> float:
 
 
 class Pay69Repository:
-    """69号十五表仓储(双模式——asyncio/Redis)"""
+    """69号十六表仓储(双模式——asyncio/Redis)"""
 
     TABLE_CHANNELS = "pay69_channels"
     TABLE_INTENTS = "pay69_intents"
@@ -54,6 +54,7 @@ class Pay69Repository:
     TABLE_MODALITY = "pay69_modality"
     TABLE_HYPOTHESES = "pay69_hypotheses"
     TABLE_PARAMS = "pay69_params"
+    TABLE_IMMUNITY = "pay69_immunity"
 
     _ALL_TABLES = (
         TABLE_CHANNELS, TABLE_INTENTS,
@@ -64,7 +65,8 @@ class Pay69Repository:
         TABLE_TEMPLATES,
         TABLE_SMARTCODE,
         TABLE_MODALITY,
-        TABLE_HYPOTHESES, TABLE_PARAMS)
+        TABLE_HYPOTHESES, TABLE_PARAMS,
+        TABLE_IMMUNITY)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -1442,6 +1444,117 @@ class Pay69Repository:
                     == status]
         return [dict(r)
                 for r in recs[:limit]]
+
+    # ============================================================
+    # 免疫域(pay69_immunity——P8: 冻结
+    # 状态+红队结果)
+    # ============================================================
+
+    async def get_immunity_state(self) -> dict | None:
+        """免疫冻结状态(单例键)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay69", "immunity",
+                   "state"))
+            return data if data else None
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_IMMUNITY]\
+            .get("state")
+        return dict(rec) if rec else None
+
+    async def save_immunity_state(
+            self, record: dict) -> dict:
+        """保存免疫冻结状态(单例覆盖)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            mapping = {}
+            for k, v in record.items():
+                if isinstance(v, bool):
+                    mapping[k] = int(v)
+                elif isinstance(
+                        v, (int, float)):
+                    mapping[k] = v
+                else:
+                    mapping[k] = str(v)
+            await client.hset(
+                _k("pay69", "immunity",
+                   "state"),
+                mapping=mapping)
+            return record
+        self._ensure_store()
+        self.store[
+            self.TABLE_IMMUNITY][
+            "state"] = dict(record)
+        return record
+
+    async def next_redteam_seq(self) -> int:
+        """红队批次序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay69", "redteam", "seq"))
+        self._ensure_store()
+        self.store[
+            "_pay69_redteam_seq"] = \
+            self.store.get(
+                "_pay69_redteam_seq", 0) + 1
+        return self.store[
+            "_pay69_redteam_seq"]
+
+    async def save_redteam_run(
+            self, run_id: int,
+            record: dict) -> dict:
+        """保存红队批次结果"""
+        record["runId"] = run_id
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("pay69", "redteam", run_id),
+                json.dumps(record,
+                           ensure_ascii=False))
+            await client.sadd(
+                _k("pay69", "redteam",
+                   "index"), str(run_id))
+            return record
+        self._ensure_store()
+        self.store[
+            self.TABLE_IMMUNITY]\
+            .setdefault(
+                "redteam_runs", {}
+            )[run_id] = dict(record)
+        return record
+
+    async def list_redteam_runs(
+            self, limit: int = 20
+    ) -> list[dict]:
+        """红队批次列表(倒序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.smembers(
+                _k("pay69", "redteam",
+                   "index"))
+            result = []
+            for i in sorted(
+                    (int(x) for x in ids),
+                    reverse=True)[:limit]:
+                data = await client.get(
+                    _k("pay69", "redteam", i))
+                if data:
+                    result.append(
+                        json.loads(data))
+            return result
+        self._ensure_store()
+        runs = list(
+            self.store[
+                self.TABLE_IMMUNITY]
+            .get("redteam_runs", {})
+            .values())
+        runs.sort(key=lambda r: r.get(
+            "runId", 0), reverse=True)
+        return [dict(r)
+                for r in runs[:limit]]
 
     async def save_baseline(
             self, member_id: int,

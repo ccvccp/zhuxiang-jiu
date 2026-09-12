@@ -1,6 +1,6 @@
-"""69号·AI智能支付大模型路由(P0-P7)
+"""69号·AI智能支付大模型路由(P0-P8)
 
-端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 + P5 6 + P6 6 + P7 10 = 56):
+端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 + P5 6 + P6 6 + P7 10 + P8 7 = 63):
     GET  /api/pay69/channels            七通道字典公示(admin, 观测面)
     GET  /api/pay69/channels/{id}       单通道详情(admin, 观测面)
     GET  /api/pay69/health              健康度观测面(admin, 观测面)
@@ -57,6 +57,13 @@
     POST /api/pay69/evolution/kill     紧急制动(admin, 人工——不受开关——P7)
     GET  /api/pay69/evolution/hypotheses 假设视图(admin, 观测面——P7)
     GET  /api/pay69/evolution/governance L0-L2 治理观测(admin, 观测面——P7)
+    GET  /api/pay69/immunity/dict      免疫字典公示(admin, 观测面——P8)
+    GET  /api/pay69/immunity            免疫看板(admin, 观测面——P8)
+    POST /api/pay69/immunity/monitor    分布监控+自动冻结(admin, 快环——不受开关——P8)
+    POST /api/pay69/immunity/freeze     人工冻结进化(admin, 人工——不受开关——P8)
+    POST /api/pay69/immunity/unfreeze   解冻(admin, 人工专属——P8)
+    POST /api/pay69/immunity/redteam    红队四向量执行(admin, 决策面 off 409——P8)
+    GET  /api/pay69/immunity/redteam/runs 红队批次历史(admin, 观测面——P8)
 
 鉴权: 管理面 X-Role: admin(60号同款口径)。
 统一口径(60号范式):
@@ -1560,3 +1567,134 @@ async def evolution_governance(
     )
     return await Pay69EvolutionService()\
         .governance_view()
+
+
+# ============================================================
+# P8 安全免疫(7 端点)
+# ============================================================
+
+class UnfreezeBody(BaseModel):
+    by: str = Field(
+        default="admin",
+        description="解冻人(人工专属)")
+
+
+@router.get("/immunity/dict")
+async def immunity_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """免疫字典公示(红队向量/冻结
+    规则——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_immunity_service import (
+        Pay69ImmunityService,
+    )
+    return Pay69ImmunityService()\
+        .immunity_dict()
+
+
+@router.get("/immunity")
+async def immunity_view(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """免疫看板(冻结状态+红队史——
+    观测面)"""
+    _require_admin(x_role)
+    from services.pay69_immunity_service import (
+        Pay69ImmunityService,
+    )
+    return await Pay69ImmunityService()\
+        .immunity_view()
+
+
+@router.post("/immunity/monitor")
+async def immunity_monitor(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """分布监控+自动冻结(快环——不受
+    开关影响; critical 通道≥2 或漂移
+    信号≥3 自动冻结进化+告警)"""
+    _require_admin(x_role)
+    from services.pay69_immunity_service import (
+        Pay69ImmunityService,
+    )
+    return await Pay69ImmunityService()\
+        .monitor_and_freeze()
+
+
+@router.post("/immunity/freeze")
+async def immunity_freeze(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """人工冻结进化(admin 人工——不受
+    开关影响; 安全方向动作, 全留痕)"""
+    _require_admin(x_role)
+    from services.pay69_immunity_service import (
+        Pay69ImmunityService,
+    )
+    return await Pay69ImmunityService()\
+        .freeze_evolution(
+            "人工冻结(admin)", "admin")
+
+
+@router.post("/immunity/unfreeze")
+async def immunity_unfreeze(
+        body: UnfreezeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """解冻(人工专属——免疫自动永不
+    解冻铁律; admin 显式动作)"""
+    _require_admin(x_role)
+    from services.pay69_immunity_service import (
+        Pay69ImmunityService,
+    )
+    try:
+        return await Pay69ImmunityService()\
+            .unfreeze_evolution(body.by)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/immunity/redteam")
+async def immunity_redteam(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队四向量执行(决策面——off 409;
+    RT-01 路由欺骗/RT-02 熵绕过/RT-03
+    模板投毒/RT-04 胁迫伪造; 未防御
+    向量→自动冻结进化)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 红队无攻击面)")
+    from services.pay69_immunity_service import (
+        Pay69ImmunityService,
+    )
+    try:
+        return await Pay69ImmunityService()\
+            .run_redteam()
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/immunity/redteam/runs")
+async def immunity_redteam_runs(
+        limit: int = 20,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队批次历史(观测面)"""
+    _require_admin(x_role)
+    from repositories.pay69_repository import (
+        Pay69Repository,
+    )
+    runs = await Pay69Repository()\
+        .list_redteam_runs(limit=limit)
+    return {
+        "count": len(runs),
+        "runs": runs,
+    }

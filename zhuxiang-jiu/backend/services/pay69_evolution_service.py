@@ -189,6 +189,16 @@ class Pay69EvolutionService:
             raise ValueError(
                 "PAY69_KILL 制动中——进化"
                 "假设生成拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动——分布
+        # 异常/红队发现自动冻结)
+        from services.pay69_immunity_service \
+            import Pay69ImmunityService
+        if await Pay69ImmunityService()\
+                .is_frozen():
+            raise ValueError(
+                "进化已冻结(免疫监控——分布"
+                "异常或红队发现; 解冻需人工"
+                " unfreeze)")
         meta = EVOLVABLE_PARAMS.get(param_id)
         if meta is None:
             raise KeyError(
@@ -308,6 +318,14 @@ class Pay69EvolutionService:
             raise ValueError(
                 "PAY69_KILL 制动中——提交"
                 "拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动)
+        from services.pay69_immunity_service \
+            import Pay69ImmunityService
+        if await Pay69ImmunityService()\
+                .is_frozen():
+            raise ValueError(
+                "进化已冻结(免疫监控)——"
+                "提交拒绝")
         record = await self.repo\
             .get_hypothesis(hyp_id)
         if not record:
@@ -387,6 +405,14 @@ class Pay69EvolutionService:
             raise ValueError(
                 "PAY69_KILL 制动中——发布"
                 "拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动)
+        from services.pay69_immunity_service \
+            import Pay69ImmunityService
+        if await Pay69ImmunityService()\
+                .is_frozen():
+            raise ValueError(
+                "进化已冻结(免疫监控)——"
+                "发布拒绝")
         rec = await self.repo\
             .get_param_version(version)
         if not rec:
@@ -484,6 +510,15 @@ class Pay69EvolutionService:
             raise ValueError(
                 "PAY69_KILL 制动中——回滚"
                 "拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动——
+        # 回滚亦是变更动作)
+        from services.pay69_immunity_service \
+            import Pay69ImmunityService
+        if await Pay69ImmunityService()\
+                .is_frozen():
+            raise ValueError(
+                "进化已冻结(免疫监控)——"
+                "回滚拒绝")
         rec = await self.repo\
             .get_param_version(version)
         if not rec:
