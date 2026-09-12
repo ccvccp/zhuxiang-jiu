@@ -160,6 +160,8 @@ async def wallet_info(
         return await _service.get_info(member_id)
     except KeyError as e:
         raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
 
 
 # ============================================================
@@ -324,6 +326,8 @@ async def wallet_transactions(
         return await _service.list_transactions(member_id, tx_type=type, limit=limit)
     except KeyError as e:
         raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
 
 
 # ============================================================
@@ -340,6 +344,8 @@ async def daily_interest(
         return await _service.calc_daily_interest(member_id)
     except KeyError as e:
         raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
 
 
 @router.post("/api/wallet/interest/settle-monthly", tags=["钱包盈利"])
@@ -433,6 +439,8 @@ async def list_deposits(
         return await _service.list_deposits(member_id, status=status, limit=limit)
     except KeyError as e:
         raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
 
 
 @router.post("/api/wallet/deposit/{deposit_no}/settle", tags=["钱包盈利"])
@@ -484,6 +492,8 @@ async def list_rewards(
         return await _service.list_rewards(member_id, status=status, limit=limit)
     except KeyError as e:
         raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
 
 
 @router.post("/api/wallet/reward/{reward_no}/claim", tags=["钱包盈利"])
