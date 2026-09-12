@@ -362,6 +362,10 @@ register_pay69_routes(app)
 from routes.qr70_routes import register_qr70_routes
 register_qr70_routes(app)
 
+# AI智能支付端口大模型(71号 P0 端口中枢底座)
+from routes.pay71_routes import register_pay71_routes
+register_pay71_routes(app)
+
 # AI智能系统升级决策(61号)
 from routes.dm61_routes import register_dm61_routes
 register_dm61_routes(app)
