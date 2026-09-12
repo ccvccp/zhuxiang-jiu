@@ -326,6 +326,14 @@ class Qr70JoyService:
             raise ValueError(
                 "QR70_KILL 制动中——进化"
                 "假设拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动)
+        from services.qr70_immunity_service \
+            import Qr70ImmunityService
+        if Qr70ImmunityService()\
+                .is_frozen():
+            raise ValueError(
+                "进化已冻结(免疫监控)"
+                "——假设拒绝")
         param_id = str(param_id or "")
         if param_id \
                 not in EVOLVABLE_PARAMS:
@@ -375,6 +383,14 @@ class Qr70JoyService:
             raise ValueError(
                 "QR70_KILL 制动中——提交"
                 "拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动)
+        from services.qr70_immunity_service \
+            import Qr70ImmunityService
+        if Qr70ImmunityService()\
+                .is_frozen():
+            raise ValueError(
+                "进化已冻结(免疫监控)"
+                "——提交拒绝")
         record = await self.repo\
             .get_hypothesis(hyp_id)
         if not record:
@@ -504,6 +520,14 @@ class Qr70JoyService:
             raise ValueError(
                 "QR70_KILL 制动中——发布"
                 "拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动)
+        from services.qr70_immunity_service \
+            import Qr70ImmunityService
+        if Qr70ImmunityService()\
+                .is_frozen():
+            raise ValueError(
+                "进化已冻结(免疫监控)"
+                "——发布拒绝")
         rec = await self.repo\
             .get_param_version(version)
         if not rec:

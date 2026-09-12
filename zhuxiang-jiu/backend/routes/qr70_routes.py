@@ -1288,6 +1288,123 @@ async def joy_knowledge(
     return Qr70JoyService().knowledge_view()
 
 
+# ============================================================
+# P8 安全免疫(红队四向量+分布监控冻结)
+# ============================================================
+
+class RedteamBody(BaseModel):
+    vector: str = Field(description="向量(forged_code/replay_flood/whitelist_bypass/render_poison)")
+    code: str = Field(default="",
+                      description="目标码(RT-01/RT-02 可选)")
+    params: dict = Field(default_factory=dict,
+                         description="攻击载荷(RT-03/RT-04)")
+
+
+@router.get("/immunity/dict")
+async def immunity_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """免疫字典(向量域+阈值公示
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.qr70_immunity_service import (
+        Qr70ImmunityService,
+    )
+    return Qr70ImmunityService().dict_view()
+
+
+@router.get("/immunity")
+async def immunity_dashboard(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """免疫看板(冻结态+红队历史
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.qr70_immunity_service import (
+        Qr70ImmunityService,
+    )
+    return await Qr70ImmunityService()\
+        .dashboard()
+
+
+@router.post("/immunity/monitor")
+async def immunity_monitor():
+    """分布监控+自动冻结(快环
+    ——不受开关影响; 漂移预警→
+    自动冻结进化)"""
+    from services.qr70_immunity_service import (
+        Qr70ImmunityService,
+    )
+    return await Qr70ImmunityService()\
+        .monitor()
+
+
+@router.post("/immunity/freeze")
+async def immunity_freeze(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """人工冻结进化(安全方向动作
+    ——不受开关影响)"""
+    _require_admin(x_role)
+    from services.qr70_immunity_service import (
+        Qr70ImmunityService,
+    )
+    return await Qr70ImmunityService().freeze(
+        reason="人工冻结(管理台)",
+        manual=True)
+
+
+@router.post("/immunity/unfreeze")
+async def immunity_unfreeze(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """解冻(人工专属铁律——永不
+    自动; 不受开关影响)"""
+    _require_admin(x_role)
+    from services.qr70_immunity_service import (
+        Qr70ImmunityService,
+    )
+    try:
+        return await Qr70ImmunityService()\
+            .unfreeze()
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/immunity/redteam")
+async def immunity_redteam(
+        body: RedteamBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队四向量执行(决策面 off 409
+    ——确定性服务层直击)"""
+    _require_admin(x_role)
+    _require_decision_mode()
+    from services.qr70_immunity_service import (
+        Qr70ImmunityService,
+    )
+    try:
+        return await Qr70ImmunityService()\
+            .redteam(body.vector,
+                     body.code,
+                     body.params)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/immunity/redteam/runs")
+async def immunity_redteam_runs(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队批次历史(观测面)"""
+    _require_admin(x_role)
+    from services.qr70_immunity_service import (
+        Qr70ImmunityService,
+    )
+    return await Qr70ImmunityService()\
+        .dashboard()
+
+
 def register_qr70_routes(app) -> None:
     """注册70号路由(main.py startup 调用)"""
     app.include_router(router)
