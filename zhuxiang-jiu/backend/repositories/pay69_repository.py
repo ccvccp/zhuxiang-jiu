@@ -19,6 +19,7 @@
 
 import contextlib
 import json
+import time
 
 from repositories.backend import (
     get_in_memory_store, get_redis_client,
@@ -30,8 +31,13 @@ from repositories.backend import (
 _WINDOW = 100
 
 
+def _now_ts() -> float:
+    """当前 Unix 秒(内存态 TTL 模拟)"""
+    return time.time()
+
+
 class Pay69Repository:
-    """69号九表仓储(双模式——asyncio/Redis)"""
+    """69号十一表仓储(双模式——asyncio/Redis)"""
 
     TABLE_CHANNELS = "pay69_channels"
     TABLE_INTENTS = "pay69_intents"
@@ -42,13 +48,16 @@ class Pay69Repository:
     TABLE_BEHAVIOR = "pay69_behavior"
     TABLE_CREDIT = "pay69_credit"
     TABLE_REPAY = "pay69_repay"
+    TABLE_BIO = "pay69_bio"
+    TABLE_TEMPLATES = "pay69_templates"
 
     _ALL_TABLES = (
         TABLE_CHANNELS, TABLE_INTENTS,
         TABLE_EVENTS, TABLE_FLOWS,
         TABLE_HABITS, TABLE_ENTROPY,
         TABLE_BEHAVIOR, TABLE_CREDIT,
-        TABLE_REPAY)
+        TABLE_REPAY, TABLE_BIO,
+        TABLE_TEMPLATES)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -739,6 +748,186 @@ class Pay69Repository:
             .get(member_id, {"ontime": 0,
                              "late": 0,
                              "early": 0}))
+
+    # ============================================================
+    # 生物验证审计(pay69_bio——P4)
+    # ============================================================
+
+    async def next_bio_seq(self) -> int:
+        """生物验证事件序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay69", "bio", "seq"))
+        self._ensure_store()
+        self.store["_pay69_bio_seq"] = \
+            self.store.get("_pay69_bio_seq", 0) + 1
+        return self.store["_pay69_bio_seq"]
+
+    async def save_bio_event(
+            self, record: dict) -> dict:
+        """保存生物验证事件(全局+会员)"""
+        seq = await self.next_bio_seq()
+        record["bioSeq"] = seq
+        payload = json.dumps(
+            record, ensure_ascii=False)
+        mid = str(record.get("memberId") or 0)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(
+                _k("pay69", "bio", "all"),
+                payload)
+            await client.ltrim(
+                _k("pay69", "bio", "all"),
+                0, 999)
+            await client.lpush(
+                _k("pay69", "bio", "member", mid),
+                payload)
+            await client.ltrim(
+                _k("pay69", "bio", "member", mid),
+                0, 199)
+            return record
+        self._ensure_store()
+        table = self.store[self.TABLE_BIO]
+        table.setdefault("all", [])\
+            .insert(0, dict(record))
+        del table["all"][1000:]
+        table.setdefault(
+            "by_member", {}
+        ).setdefault(mid, [])\
+            .insert(0, dict(record))
+        del table["by_member"][mid][200:]
+        return record
+
+    async def list_bio_events(
+            self, member_id: int = None,
+            limit: int = 50) -> list[dict]:
+        """生物验证事件列表(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if member_id:
+                data = await client.lrange(
+                    _k("pay69", "bio", "member",
+                       member_id), 0, limit - 1)
+            else:
+                data = await client.lrange(
+                    _k("pay69", "bio", "all"),
+                    0, limit - 1)
+            return [json.loads(x) for x in data]
+        self._ensure_store()
+        table = self.store[self.TABLE_BIO]
+        recs = (table.get("by_member", {})
+                .get(str(member_id), [])
+                if member_id is not None
+                else table.get("all", []))
+        return [dict(r) for r in recs[:limit]]
+
+    # ---------- FIDO 挑战(短期 String) ----------
+
+    async def save_challenge(
+            self, challenge: str,
+            record: dict, ttl: int = 120) -> dict:
+        """保存 FIDO 挑战(TTL 秒——48号
+        confirmToken 语义)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("pay69", "challenge",
+                   challenge),
+                json.dumps(record,
+                           ensure_ascii=False),
+                ex=ttl)
+            return record
+        self._ensure_store()
+        record["expiresAt"] = (
+            _now_ts() + ttl)
+        self.store[self.TABLE_BIO]\
+            .setdefault("challenges", {})[
+            challenge] = dict(record)
+        return record
+
+    async def pop_challenge(
+            self, challenge: str) -> dict | None:
+        """取回并消费挑战(一次性——GETDEL
+        语义防重放)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.getdel(
+                _k("pay69", "challenge",
+                   challenge))
+            return json.loads(data) if data \
+                else None
+        self._ensure_store()
+        store = self.store[self.TABLE_BIO]\
+            .get("challenges", {})
+        rec = store.pop(challenge, None)
+        if not rec:
+            return None
+        # 内存态 TTL 模拟(过期即失效)
+        if rec.get("expiresAt", 0) \
+                < _now_ts():
+            return None
+        return rec
+
+    # ============================================================
+    # 端侧模板版本账本(pay69_templates
+    # ——P4; 原始特征永不上传, 仅置信度
+    # 哈希+版本计数)
+    # ============================================================
+
+    async def get_template(
+            self, member_id: int,
+            method: str) -> dict | None:
+        """模板版本账本(无则 None)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay69", "template",
+                   member_id, method))
+            if not data:
+                return None
+            out = dict(data)
+            if "version" in out:
+                with contextlib.suppress(
+                        TypeError, ValueError):
+                    out["version"] = int(
+                        float(out["version"]))
+            if "confidence" in out:
+                with contextlib.suppress(
+                        TypeError, ValueError):
+                    out["confidence"] = float(
+                        out["confidence"])
+            return out
+        self._ensure_store()
+        rec = self.store[self.TABLE_TEMPLATES]\
+            .get((member_id, method))
+        return dict(rec) if rec else None
+
+    async def save_template(
+            self, member_id: int,
+            method: str,
+            record: dict) -> dict:
+        """保存模板版本账本"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            mapping = {}
+            for k, v in record.items():
+                if isinstance(v, bool):
+                    mapping[k] = int(v)
+                elif isinstance(
+                        v, (int, float)):
+                    mapping[k] = v
+                else:
+                    mapping[k] = str(v)
+            await client.hset(
+                _k("pay69", "template",
+                   member_id, method),
+                mapping=mapping)
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_TEMPLATES][
+            (member_id, method)] = dict(record)
+        return record
 
     async def save_baseline(
             self, member_id: int,

@@ -1,6 +1,6 @@
-"""69号·AI智能支付大模型路由(P0-P3)
+"""69号·AI智能支付大模型路由(P0-P4)
 
-端点(P0 8 + P1 7 + P2 6 + P3 7 = 28):
+端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 = 34):
     GET  /api/pay69/channels            七通道字典公示(admin, 观测面)
     GET  /api/pay69/channels/{id}       单通道详情(admin, 观测面)
     GET  /api/pay69/health              健康度观测面(admin, 观测面)
@@ -29,6 +29,12 @@
     POST /api/pay69/credit/repayment/report 还款事件回流(admin, 快环——P3)
     GET  /api/pay69/credit/records      授信留痕视图(admin, 观测面——P3)
     GET  /api/pay69/credit/adjustments  调额建议书视图(admin, 观测面——P3)
+    GET  /api/pay69/biometric/dict      生物字典公示(admin, 观测面——P4)
+    POST /api/pay69/biometric/challenge  FIDO 挑战发起(admin, 决策面 off 409——P4)
+    POST /api/pay69/biometric/verify     生物验证(挑战+胁迫判定)(admin, 决策面 off 409——P4)
+    POST /api/pay69/biometric/template/register 端侧模板版本登记(admin, 决策面 off 409——P4)
+    GET  /api/pay69/biometric/template/{id} 模板账本视图(admin, 观测面——P4)
+    GET  /api/pay69/biometric/events    生物事件视图(admin, 观测面——P4)
 
 鉴权: 管理面 X-Role: admin(60号同款口径)。
 统一口径(60号范式):
@@ -793,3 +799,178 @@ async def credit_adjustments(
         .adjustments_view(
             status=status,
             member_id=memberId, limit=limit)
+
+
+# ============================================================
+# P4 生物特征(7 端点)
+# ============================================================
+
+class ChallengeBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    method: str = Field(
+        default="face",
+        description="生物方式(face/fingerprint)")
+
+
+class BiometricVerifyBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    challenge: str = Field(description="FIDO 挑战码")
+    match: bool = Field(
+        description="特征匹配结果(端侧判定)")
+    signs: list[str] = Field(
+        default_factory=list,
+        description="胁迫语义线索(命中列表)")
+    confidence: float = Field(
+        default=1.0, ge=0.0, le=1.0,
+        description="匹配置信度(0-1)")
+
+
+class TemplateRegisterBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    method: str = Field(
+        default="face",
+        description="生物方式(face/fingerprint)")
+    templateVersion: int | None = Field(
+        default=None,
+        description="端侧新版本号(顺序+1 校验; 首登记须 1)")
+    confidenceHash: str = Field(
+        default="",
+        description="置信度哈希(原始特征单向哈希——永不上传原始数据)")
+    confidence: float = Field(
+        default=1.0, ge=0.0, le=1.0,
+        description="模板置信度(0-1)")
+
+
+@router.get("/biometric/dict")
+async def biometric_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """生物特征字典公示(方式/结果/胁迫
+    线索表+阈值——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_biometric_service import (
+        Pay69BiometricService,
+    )
+    return Pay69BiometricService()\
+        .biometric_dict()
+
+
+@router.post("/biometric/challenge")
+async def biometric_challenge(
+        body: ChallengeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """FIDO 挑战发起(决策面——off 409;
+    一次性+TTL+防重放, 48号 confirmToken
+    语义)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_biometric_service import (
+        Pay69BiometricService,
+    )
+    try:
+        return await Pay69BiometricService()\
+            .issue_challenge(
+                body.memberId, body.method)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/biometric/verify")
+async def biometric_verify(
+        body: BiometricVerifyBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """生物验证(决策面——off 409; 挑战
+    一次性消费+特征匹配+胁迫判定; 胁迫
+    →degraded 静默降级+人工留痕)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_biometric_service import (
+        Pay69BiometricService,
+    )
+    try:
+        return await Pay69BiometricService()\
+            .verify(
+                body.memberId, body.challenge,
+                body.match, body.signs,
+                body.confidence)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/biometric/template/register")
+async def biometric_template_register(
+        body: TemplateRegisterBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """端侧模板版本登记/增量(决策面——
+    off 409; 版本顺序+1 防回滚; 原始
+    特征永不上传——仅版本+置信度哈希)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_biometric_service import (
+        Pay69BiometricService,
+    )
+    try:
+        return await Pay69BiometricService()\
+            .register_template(
+                body.memberId, body.method,
+                body.templateVersion,
+                body.confidenceHash,
+                body.confidence)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/biometric/template/{member_id}")
+async def biometric_template_view(
+        member_id: int,
+        method: str = "face",
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """模板版本账本视图(观测面——服务端
+    仅版本+哈希, 无原始特征)"""
+    _require_admin(x_role)
+    from services.pay69_biometric_service import (
+        Pay69BiometricService,
+    )
+    return await Pay69BiometricService()\
+        .template_view(member_id, method)
+
+
+@router.get("/biometric/events")
+async def biometric_events(
+        memberId: int | None = None,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """生物验证事件视图(观测面——全局/
+    会员双口径)"""
+    _require_admin(x_role)
+    from services.pay69_biometric_service import (
+        Pay69BiometricService,
+    )
+    return await Pay69BiometricService()\
+        .bio_events_view(memberId, limit=limit)

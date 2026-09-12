@@ -339,6 +339,44 @@ ADJUSTMENT_STATES = (
 
 
 # ============================================================
+# P4 生物特征(活体意图验证——原始特征
+# 永不上传铁律)
+# ============================================================
+
+# 生物验证方式域(封闭)
+BIOMETRIC_METHODS = (
+    "face",       # 刷脸
+    "fingerprint",  # 指纹
+)
+
+# 生物验证结果域(封闭)
+BIOMETRIC_RESULTS = (
+    "verified",    # 通过(特征匹配+无胁迫)
+    "degraded",    # 降级(胁迫线索→密码验证)
+    "failed",      # 失败(特征不匹配)
+    "challenge_expired",  # 挑战过期
+)
+
+# 胁迫语义线索域(封闭——确定性特征表,
+# 每项含权重; 命中≥阈值→degraded)
+COERCION_SIGNS = {
+    "facial_stiffness": 0.45,   # 面部僵硬
+    "voice_tremor": 0.40,        # 语音颤抖
+    "avoid_eyeball": 0.35,       # 眼神回避
+    "abnormal_blink": 0.30,      # 异常眨眼频率
+    "delayed_response": 0.25,   # 响应迟滞
+}
+COERCION_THRESHOLD = 0.60
+
+# 模板版本上限(端侧增量——防无限膨胀)
+TEMPLATE_VERSION_MAX = 65535
+
+# FIDO 挑战 TTL(秒——48号 CONFIRM_TTL
+# 同款口径)
+BIOMETRIC_CHALLENGE_TTL = 120
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -465,6 +503,23 @@ def _validate_registry() -> None:
             "proposed", "approved",
             "rejected"}:
         raise RuntimeError("pay69 调额状态机非法")
+    # ⑯ P4 生物: 方式/结果域封闭+胁迫
+    #     线索阈值合法
+    if set(BIOMETRIC_METHODS) != {
+            "face", "fingerprint"}:
+        raise RuntimeError("pay69 生物方式域非法")
+    if set(BIOMETRIC_RESULTS) != {
+            "verified", "degraded",
+            "failed", "challenge_expired"}:
+        raise RuntimeError("pay69 生物结果域非法")
+    if not (0 < COERCION_THRESHOLD <= 1):
+        raise RuntimeError(
+            "pay69 胁迫阈值域外")
+    for sign, w in COERCION_SIGNS.items():
+        if not (0 < w <= 1):
+            raise RuntimeError(
+                f"pay69 胁迫线索权重域外: "
+                f"{sign}={w}")
 
 
 _validate_registry()
