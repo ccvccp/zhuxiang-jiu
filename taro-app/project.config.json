@@ -1,5 +1,5 @@
 {
-  "miniprogramRoot": "dist/",
+  "miniprogramRoot": "dist-weapp/",
   "cloudfunctionRoot": "cloudfunctions/",
   "projectname": "taro_template",
   "description": "taro_template",
