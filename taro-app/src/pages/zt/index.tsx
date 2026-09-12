@@ -46,10 +46,15 @@ const ZhiTuPage: React.FC = () => {
       }
     };
     if (existed) { init(); return; }
+    // 百度 v3.0 loader 默认 document.write 拉主库——页面已加载完毕时
+    // 会被浏览器忽略; 须用 callback 参数(JSONP)触发异步加载
+    (window as any).__bmapReady = init;
     const script = document.createElement('script');
     script.id = 'bmap-sdk';
-    script.src = `https://api.map.baidu.com/api?v=3.0&ak=${BAIDU_MAP_AK}`;
-    script.onload = init;
+    script.src = `https://api.map.baidu.com/api?v=3.0&ak=${BAIDU_MAP_AK}&callback=__bmapReady`;
+    script.onerror = () => {
+      console.warn('百度地图 JS API 加载失败(检查 AK 白名单)');
+    };
     document.head.appendChild(script);
   }, [mapReady]);
 

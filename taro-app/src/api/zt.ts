@@ -15,10 +15,11 @@ const adminHeaders = (): Record<string, string> => {
   return headers;
 };
 
-/** 百度地图 AK(env 注入; 未配置→前端降级列表视图, 不伪造地图) */
+/** 百度地图 AK(Taro 构建期注入 TARO_APP_ 前缀; 未配置→前端降级列表视图,
+ *  不伪造地图。注意: 必须直接静态引用 process.env.X, 防御式
+ *  typeof process 守卫会破坏 DefinePlugin 整表达式替换) */
 export const BAIDU_MAP_AK: string =
-  (typeof process !== 'undefined'
-    && (process.env?.TARO_APP_BAIDU_MAP_AK as string)) || '';
+  process.env.TARO_APP_BAIDU_MAP_AK || '';
 
 export const ZtAPI = {
   // ================= P0: 意图引擎 =================
