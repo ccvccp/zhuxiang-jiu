@@ -1,6 +1,6 @@
-"""69号·AI智能支付大模型路由(P0-P4)
+"""69号·AI智能支付大模型路由(P0-P5)
 
-端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 = 34):
+端点(P0 8 + P1 7 + P2 6 + P3 7 + P4 6 + P5 6 = 40):
     GET  /api/pay69/channels            七通道字典公示(admin, 观测面)
     GET  /api/pay69/channels/{id}       单通道详情(admin, 观测面)
     GET  /api/pay69/health              健康度观测面(admin, 观测面)
@@ -35,6 +35,12 @@
     POST /api/pay69/biometric/template/register 端侧模板版本登记(admin, 决策面 off 409——P4)
     GET  /api/pay69/biometric/template/{id} 模板账本视图(admin, 观测面——P4)
     GET  /api/pay69/biometric/events    生物事件视图(admin, 观测面——P4)
+    GET  /api/pay69/smartcode/dict      情境码字典公示(admin, 观测面——P5)
+    POST /api/pay69/smartcode/generate  情境码生成(admin, 决策面 off 409——P5)
+    POST /api/pay69/smartcode/redeem    码核销(admin, 决策面 off 409——P5)
+    GET  /api/pay69/smartcode/events    情境码事件视图(admin, 观测面——P5)
+    GET  /api/pay69/smartcode/merchant/{id}/summary 商户对账摘要(admin, 观测面——P5)
+    GET  /api/pay69/smartcode/stats     情境风险统计(admin, 观测面——P5)
 
 鉴权: 管理面 X-Role: admin(60号同款口径)。
 统一口径(60号范式):
@@ -974,3 +980,153 @@ async def biometric_events(
     )
     return await Pay69BiometricService()\
         .bio_events_view(memberId, limit=limit)
+
+
+# ============================================================
+# P5 情境智能码(6 端点)
+# ============================================================
+
+class SmartcodeGenerateBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    merchantId: int = Field(description="商户 ID")
+    amount: float = Field(gt=0,
+                          description="交易金额(元)")
+    productType: str = Field(
+        default="",
+        description="商品类型(码内参数)")
+    hour: int = Field(
+        default=12, ge=0, le=23,
+        description="当前时段(0-23——0-6 为夜间)")
+    newDevice: bool = Field(
+        default=False, description="陌生设备")
+    remoteLocation: bool = Field(
+        default=False, description="异常地点")
+    tags: list[str] = Field(
+        default_factory=list,
+        description="意图标签(推荐方式亲和)")
+
+
+class SmartcodeRedeemBody(BaseModel):
+    merchantId: int = Field(description="商户 ID")
+    code: str = Field(description="完整码值")
+
+
+@router.get("/smartcode/dict")
+async def smartcode_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """情境码字典公示(风险因素+阈值
+    +状态域+55号口径——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_smartcode_service import (
+        Pay69SmartcodeService,
+    )
+    return Pay69SmartcodeService()\
+        .smartcode_dict()
+
+
+@router.post("/smartcode/generate")
+async def smartcode_generate(
+        body: SmartcodeGenerateBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """情境智能码生成(决策面——off 409;
+    用户/商户主动触发; 55号签名链+
+    情境挑战判定+防伪水印)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_smartcode_service import (
+        Pay69SmartcodeService,
+    )
+    try:
+        return await Pay69SmartcodeService()\
+            .generate(
+                body.memberId, body.merchantId,
+                body.amount,
+                product_type=body.productType,
+                hour=body.hour,
+                new_device=body.newDevice,
+                remote_location=body.remoteLocation,
+                tags=body.tags)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/smartcode/redeem")
+async def smartcode_redeem(
+        body: SmartcodeRedeemBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """码核销(商户主动——决策面 off 409;
+    55号验签四态+归属商户校验+状态机
+    generated→redeemed/expired)"""
+    _require_admin(x_role)
+    from services.pay69_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="PAY69_MODE=off(默认 off——"
+                  "决策面关闭, 观测面不受影响)")
+    from services.pay69_smartcode_service import (
+        Pay69SmartcodeService,
+    )
+    try:
+        return await Pay69SmartcodeService()\
+            .redeem(body.merchantId, body.code)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/smartcode/events")
+async def smartcode_events(
+        merchantId: int | None = None,
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """情境码事件视图(观测面——完整码值
+    脱敏)"""
+    _require_admin(x_role)
+    from services.pay69_smartcode_service import (
+        Pay69SmartcodeService,
+    )
+    return await Pay69SmartcodeService()\
+        .smartcode_events_view(
+            merchantId, limit=limit)
+
+
+@router.get("/smartcode/merchant/{merchant_id}/summary")
+async def smartcode_merchant_summary(
+        merchant_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """商户对账摘要(核销/金额/挑战统计
+    聚合——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_smartcode_service import (
+        Pay69SmartcodeService,
+    )
+    return await Pay69SmartcodeService()\
+        .merchant_summary(merchant_id)
+
+
+@router.get("/smartcode/stats")
+async def smartcode_stats(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """情境风险快环统计(因素命中率×
+    挑战率——观测面)"""
+    _require_admin(x_role)
+    from services.pay69_smartcode_service import (
+        Pay69SmartcodeService,
+    )
+    return await Pay69SmartcodeService()\
+        .context_stats()

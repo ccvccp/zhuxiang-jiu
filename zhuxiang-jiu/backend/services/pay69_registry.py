@@ -377,6 +377,35 @@ BIOMETRIC_CHALLENGE_TTL = 120
 
 
 # ============================================================
+# P5 情境智能码(55号调用方——生成/
+# 核销走 qr55_crypto 纯函数, 55号零改动)
+# ============================================================
+
+# 情境风险因素表(封闭——确定性权重;
+# 叠加≥阈值→码内嵌二次验证挑战)
+SMARTCODE_CONTEXT_RISKS = {
+    "night_hours": 0.35,      # 夜间时段(0-6 点)
+    "new_device": 0.30,       # 陌生设备
+    "remote_location": 0.25,  # 异常地点
+}
+SMARTCODE_CHALLENGE_THRESHOLD = 0.50
+
+# 码事件状态域(封闭)
+SMARTCODE_STATUSES = (
+    "generated",   # 已生成
+    "redeemed",    # 已核销
+    "expired",     # 已过期
+)
+
+# 防伪水印长度(载荷哈希派生——确定性)
+WATERMARK_LENGTH = 6
+
+# 55号 serviceId 口径(P5 调用 qr55_
+# crypto.generate_code 的服务标识)
+SMARTCODE_SERVICE_ID = "pay69-smart"
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -520,6 +549,23 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 f"pay69 胁迫线索权重域外: "
                 f"{sign}={w}")
+    # ⑰ P5 情境码: 风险因素阈值合法+
+    #     状态域封闭
+    if not (0 < SMARTCODE_CHALLENGE_THRESHOLD
+            <= 1):
+        raise RuntimeError(
+            "pay69 情境挑战阈值域外")
+    for factor, w in SMARTCODE_CONTEXT_RISKS\
+            .items():
+        if not (0 < w <= 1):
+            raise RuntimeError(
+                f"pay69 情境风险权重域外: "
+                f"{factor}={w}")
+    if set(SMARTCODE_STATUSES) != {
+            "generated", "redeemed",
+            "expired"}:
+        raise RuntimeError(
+            "pay69 情境码状态域非法")
 
 
 _validate_registry()

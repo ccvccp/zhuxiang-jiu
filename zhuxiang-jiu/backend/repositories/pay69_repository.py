@@ -37,7 +37,7 @@ def _now_ts() -> float:
 
 
 class Pay69Repository:
-    """69号十一表仓储(双模式——asyncio/Redis)"""
+    """69号十二表仓储(双模式——asyncio/Redis)"""
 
     TABLE_CHANNELS = "pay69_channels"
     TABLE_INTENTS = "pay69_intents"
@@ -50,6 +50,7 @@ class Pay69Repository:
     TABLE_REPAY = "pay69_repay"
     TABLE_BIO = "pay69_bio"
     TABLE_TEMPLATES = "pay69_templates"
+    TABLE_SMARTCODE = "pay69_smartcode"
 
     _ALL_TABLES = (
         TABLE_CHANNELS, TABLE_INTENTS,
@@ -57,7 +58,8 @@ class Pay69Repository:
         TABLE_HABITS, TABLE_ENTROPY,
         TABLE_BEHAVIOR, TABLE_CREDIT,
         TABLE_REPAY, TABLE_BIO,
-        TABLE_TEMPLATES)
+        TABLE_TEMPLATES,
+        TABLE_SMARTCODE)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -928,6 +930,112 @@ class Pay69Repository:
         self.store[self.TABLE_TEMPLATES][
             (member_id, method)] = dict(record)
         return record
+
+    # ============================================================
+    # 情境智能码事件(pay69_smartcode——P5;
+    # LIST 结构双模式同形, 商户对账
+    # 聚合消费)
+    # ============================================================
+
+    async def next_code_seq(self) -> int:
+        """情境码事件序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay69", "smartcode", "seq"))
+        self._ensure_store()
+        self.store["_pay69_code_seq"] = \
+            self.store.get("_pay69_code_seq", 0) + 1
+        return self.store["_pay69_code_seq"]
+
+    async def save_smartcode(
+            self, record: dict) -> dict:
+        """保存情境码事件(全局+商户流)"""
+        seq = await self.next_code_seq()
+        record["codeSeq"] = seq
+        payload = json.dumps(
+            record, ensure_ascii=False)
+        mch = str(record.get("merchantId")
+                  or 0)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(
+                _k("pay69", "smartcode", "all"),
+                payload)
+            await client.ltrim(
+                _k("pay69", "smartcode", "all"),
+                0, 999)
+            await client.lpush(
+                _k("pay69", "smartcode",
+                   "mch", mch), payload)
+            await client.ltrim(
+                _k("pay69", "smartcode",
+                   "mch", mch), 0, 499)
+            return record
+        self._ensure_store()
+        table = self.store[self.TABLE_SMARTCODE]
+        table.setdefault("all", [])\
+            .insert(0, dict(record))
+        del table["all"][1000:]
+        table.setdefault(
+            "by_merchant", {}
+        ).setdefault(mch, [])\
+            .insert(0, dict(record))
+        del table["by_merchant"][mch][500:]
+        return record
+
+    async def list_smartcodes(
+            self, merchant_id: int = None,
+            limit: int = 50) -> list[dict]:
+        """情境码事件列表(最新在前; nonce
+        去重——状态更新重插后保留最新态)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if merchant_id is not None:
+                data = await client.lrange(
+                    _k("pay69", "smartcode",
+                       "mch", merchant_id),
+                    0, max(limit * 3, 200))
+            else:
+                data = await client.lrange(
+                    _k("pay69", "smartcode",
+                       "all"),
+                    0, max(limit * 3, 200))
+            records = [json.loads(x)
+                       for x in data]
+        else:
+            self._ensure_store()
+            table = self.store[
+                self.TABLE_SMARTCODE]
+            records = (
+                table.get("by_merchant", {})
+                .get(str(merchant_id), [])
+                if merchant_id is not None
+                else table.get("all", []))
+            records = [dict(r)
+                       for r in records]
+        seen = set()
+        result = []
+        for r in records:
+            nonce = r.get("nonce")
+            if nonce:
+                if nonce in seen:
+                    continue
+                seen.add(nonce)
+            result.append(r)
+            if len(result) >= limit:
+                break
+        return result
+
+    async def find_smartcode_by_nonce(
+            self, nonce: str) -> dict | None:
+        """按 55号 nonce 查码事件(核销
+        定位——全表线性扫描, 事件域≤1000)"""
+        for rec in await self.list_smartcodes(
+                limit=1000):
+            if rec.get("nonce") == nonce:
+                return rec
+        return None
 
     async def save_baseline(
             self, member_id: int,
