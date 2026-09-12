@@ -45,8 +45,11 @@ DEFAULT_SETTINGS = {
 }
 
 _INT_FIELDS = ("siteId", "memberId", "checkinCount", "consecutiveDays",
-               "aiScoreLatest", "checkinId", "aiScore")
-_FLOAT_FIELDS = ("rewardAmount",)
+               "aiScoreLatest", "checkinId", "aiScore",
+               "maxActiveSites", "aiScoreThreshold", "durationDays",
+               "minAddressLen")
+_FLOAT_FIELDS = ("rewardAmount", "checkinReward", "monthRewardPoster",
+                 "monthRewardSticker")
 
 
 def _now_iso() -> str:
