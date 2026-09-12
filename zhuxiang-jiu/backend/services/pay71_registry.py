@@ -267,6 +267,81 @@ ALLOCATION_CONTEXTS = (
     "balanced",           # 均衡(默认)
 )
 
+# ============================================================
+# P3 帕累托调配(四维向量+支配分析
+# ——确定性, LLM 禁入; 调配结果仅作
+# 建议注入 69号 P1 路由情境参考,
+# 永不直接执行路由铁律)
+# ============================================================
+
+# 情境权重规则表(封闭——每档四维权重
+# 和=1.0; 变更走外部信号建议书+admin
+# 终审, 永不自动)
+ALLOCATION_CONTEXT_WEIGHTS: dict = {
+    "price_sensitive": {
+        "cost": 0.45, "success": 0.30,
+        "experience": 0.10,
+        "compliance": 0.15},
+    "high_value": {
+        "cost": 0.15, "success": 0.30,
+        "experience": 0.40,
+        "compliance": 0.15},
+    "large_amount": {
+        "cost": 0.05, "success": 0.30,
+        "experience": 0.15,
+        "compliance": 0.50},
+    "balanced": {
+        "cost": 0.25, "success": 0.35,
+        "experience": 0.20,
+        "compliance": 0.20},
+}
+
+# 合规维评分(封闭——端口×确定性规则表;
+# 大额场景合规维主导时 bank/unionpay 优)
+ALLOCATION_COMPLIANCE: dict = {
+    "qr": 0.75,
+    "wechat": 0.85,
+    "alipay": 0.85,
+    "bank": 0.95,
+    "unionpay": 0.90,
+    "credit_tv": 0.70,
+    "biometric": 0.80,
+}
+
+# 体验维时效封顶(小时——settleHours
+# ≥此值体验分为 0; 69号注册表最慢 24h)
+ALLOCATION_SETTLE_CAP_HOURS = 24
+
+# 外部信号种类域(封闭——费率调整/
+# 汇率波动/渠道政策变化)
+EXTERNAL_SIGNAL_KINDS = (
+    "fee_change",       # 费率调整
+    "fx_fluctuation",  # 汇率波动
+    "policy_change",    # 渠道政策变化
+)
+
+# 外部信号→情境维度偏移(封闭映射
+# ——确定性建议: 目标维+delta 且从
+# 最大其他维扣减, 权重和守恒)
+EXTERNAL_SIGNAL_SHIFTS: dict = {
+    "fee_change": (
+        "price_sensitive", "cost", 0.05),
+    "fx_fluctuation": (
+        "balanced", "cost", 0.05),
+    "policy_change": (
+        "large_amount", "compliance", 0.05),
+}
+
+# 外部信号建议书状态机(封闭——外部
+# 信号→建议书→admin 终审, 权重变更
+# 永不自动铁律)
+EXTERNAL_STATES = (
+    "proposed",    # 已建议(待终审)
+    "approved",    # admin 确认生效
+                   #(权重覆盖激活)
+    "rejected",    # admin 拒绝留痕
+)
+
 
 # ============================================================
 # 启动自检(宪法级)
@@ -416,6 +491,77 @@ def _validate_registry() -> None:
     if PREDICT_MIN_SAMPLES < 1:
         raise RuntimeError(
             "pay71 习惯样本下限域外")
+    # ⑫ P3 帕累托: 情境权重表闭合(每档
+    #     和=1.0+维度域一致)+合规分覆盖
+    #     全端口+外部信号映射合法
+    if set(ALLOCATION_CONTEXT_WEIGHTS) \
+            != set(ALLOCATION_CONTEXTS):
+        raise RuntimeError(
+            "pay71 情境权重表与档位域不闭合")
+    for ctx, weights in \
+            ALLOCATION_CONTEXT_WEIGHTS.items():
+        if set(weights) \
+                != set(ALLOCATION_DIMENSIONS):
+            raise RuntimeError(
+                f"pay71 情境 {ctx} 权重维度"
+                f"域非法")
+        wtotal = sum(weights.values())
+        if abs(wtotal - 1.0) > 1e-9:
+            raise RuntimeError(
+                f"pay71 情境 {ctx} 权重和"
+                f"≠1.0: {wtotal}")
+        for dim, w in weights.items():
+            if not (0 < w < 1):
+                raise RuntimeError(
+                    f"pay71 情境 {ctx} 权重"
+                    f"域外: {dim}={w}")
+    from services.pay69_registry import (
+        CHANNEL_IDS as _p69_ids,
+    )
+    if set(ALLOCATION_COMPLIANCE) \
+            != set(_p69_ids):
+        raise RuntimeError(
+            "pay71 合规评分表不覆盖全端口")
+    for pid, score in \
+            ALLOCATION_COMPLIANCE.items():
+        if not (0 < score <= 1):
+            raise RuntimeError(
+                f"pay71 合规分域外: "
+                f"{pid}={score}")
+    if not (1 <= ALLOCATION_SETTLE_CAP_HOURS
+            <= 48):
+        raise RuntimeError(
+            "pay71 体验维时效封顶域外")
+    if set(EXTERNAL_SIGNAL_KINDS) != {
+            "fee_change",
+            "fx_fluctuation",
+            "policy_change"}:
+        raise RuntimeError(
+            "pay71 外部信号种类域非法")
+    if set(EXTERNAL_SIGNAL_SHIFTS) \
+            != set(EXTERNAL_SIGNAL_KINDS):
+        raise RuntimeError(
+            "pay71 外部信号映射不闭合")
+    for kind, (ctx, dim, delta) in \
+            EXTERNAL_SIGNAL_SHIFTS.items():
+        if ctx not in \
+                ALLOCATION_CONTEXT_WEIGHTS:
+            raise RuntimeError(
+                f"pay71 外部信号 {kind} "
+                f"情境域外: {ctx}")
+        if dim not in ALLOCATION_DIMENSIONS:
+            raise RuntimeError(
+                f"pay71 外部信号 {kind} "
+                f"维度域外: {dim}")
+        if not (0 < delta <= 0.10):
+            raise RuntimeError(
+                f"pay71 外部信号 {kind} "
+                f"偏移量域外: {delta}")
+    if set(EXTERNAL_STATES) != {
+            "proposed", "approved",
+            "rejected"}:
+        raise RuntimeError(
+            "pay71 外部信号状态机非法")
 
 
 _validate_registry()

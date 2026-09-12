@@ -26,18 +26,26 @@
     GET  /api/pay71/predict/splits      拆分建议书视图(admin, 观测面——P2)
     POST /api/pay71/predict/retry/report 端口失败重试上报(admin, 快环——不受开关——P2)
     GET  /api/pay71/predict/retries     重试统计视图(admin, 观测面——P2)
+    GET  /api/pay71/allocation/dict     调配字典公示(admin, 观测面——P3)
+    POST /api/pay71/allocation/compute  帕累托调配计算(admin, 决策面 off 409——P3)
+    GET  /api/pay71/allocation/records  调配留痕视图(admin, 观测面——P3)
+    GET  /api/pay71/allocation/weights  激活权重视图(出厂+覆盖——P3)
+    POST /api/pay71/allocation/external/report 外部信号登记+建议书(admin, 快环摄取——不受开关——P3)
+    POST /api/pay71/allocation/external/{seq}/decide 外部信号终审(admin, 人工——不受开关——P3)
+    GET  /api/pay71/allocation/external 外部信号建议书视图(admin, 观测面——P3)
 
 鉴权: 管理面 X-Role: admin(69号同款口径)。
 统一口径(69号范式):
     - 观测面不受 PAY71_MODE 影响
-    - 快环观测上报(signals/retry report)
-      不受开关影响
+    - 快环观测上报(signals/retry report/
+      external report)不受开关影响
     - 人工面(port state/onboard/propose/
-      decide)不受开关影响
+      decide/external decide)不受开关影响
     - 保护面(orchestrate/probe)不受开关
       影响——保护方向永续铁律(规划 §4.1)
     - 决策面(predict compute/revoke/
-      split propose/confirm)off=409
+      split propose/confirm/allocation
+      compute)off=409
     - KeyError → 404 / ValueError → 409
 """
 
@@ -154,6 +162,34 @@ class RetryReportBody(BaseModel):
     portId: str = Field(description="端口 ID")
     failCount: int = Field(
         default=1, ge=1, description="失败次数")
+
+
+class AllocationComputeBody(BaseModel):
+    memberId: int = Field(description="会员 ID")
+    amount: float = Field(gt=0, description="金额(元)")
+    context: str = Field(
+        default="balanced",
+        description="情境档(price_sensitive/"
+                    "high_value/large_amount/"
+                    "balanced)")
+    tvEligible: bool = Field(
+        default=False,
+        description="credit_tv 信值资格")
+
+
+class ExternalReportBody(BaseModel):
+    kind: str = Field(description="信号种类"
+                      "(fee_change/fx_fluctuation"
+                      "/policy_change)")
+    note: str = Field(
+        default="", description="信号备注")
+    affectedPorts: list[str] = Field(
+        default_factory=list,
+        description="受影响端口(观测留痕)")
+
+
+class ExternalDecideBody(BaseModel):
+    approve: bool = Field(description="批准/驳回")
 
 
 # ============================================================
@@ -655,6 +691,135 @@ async def predict_retries(
         Pay71P2Service,
     )
     return await Pay71P2Service().retries_view()
+
+
+# ============================================================
+# P3 端点(帕累托调配)
+# ============================================================
+
+@router.get("/allocation/dict")
+async def allocation_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """调配字典公示(维度/情境权重/合规
+    分/支配定义/铁律声明——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p3_service import (
+        Pay71P3Service,
+    )
+    return Pay71P3Service().dict_view()
+
+
+@router.post("/allocation/compute")
+async def allocation_compute(
+        body: AllocationComputeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """帕累托调配计算(四维向量评分→
+    支配分析→情境选解——建议注入 69号
+    P1 路由情境参考, 永不直接执行路由;
+    决策面 off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p3_service import (
+        Pay71P3Service,
+    )
+    try:
+        return await Pay71P3Service()\
+            .allocate(
+                body.memberId, body.amount,
+                context=body.context,
+                tv_eligible=body.tvEligible)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/allocation/records")
+async def allocation_records(
+        context: str = "",
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """调配留痕视图(可按情境过滤
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p3_service import (
+        Pay71P3Service,
+    )
+    return await Pay71P3Service().records_view(
+        context=context or None, limit=limit)
+
+
+@router.get("/allocation/weights")
+async def allocation_weights(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """激活权重视图(出厂+覆盖全量
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p3_service import (
+        Pay71P3Service,
+    )
+    return await Pay71P3Service().weights_view()
+
+
+@router.post("/allocation/external/report")
+async def allocation_external_report(
+        body: ExternalReportBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """外部信号登记+影响分析+权重建议书
+    (快环摄取——不受 PAY71_MODE 影响;
+    权重变更永不自动, 仅生成 proposed
+    建议书待 admin 终审)"""
+    _require_admin(x_role)
+    from services.pay71_p3_service import (
+        Pay71P3Service,
+    )
+    try:
+        return await Pay71P3Service()\
+            .external_report(
+                body.kind, body.note,
+                tuple(body.affectedPorts))
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/allocation/external/"
+             "{external_seq}/decide")
+async def allocation_external_decide(
+        external_seq: int,
+        body: ExternalDecideBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """外部信号建议书终审(admin 人工
+    ——权重覆盖激活唯一入口, 不受
+    开关影响)"""
+    _require_admin(x_role)
+    from services.pay71_p3_service import (
+        Pay71P3Service,
+    )
+    try:
+        return await Pay71P3Service()\
+            .external_decide(
+                external_seq, body.approve)
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/allocation/external")
+async def allocation_external(
+        context: str = "",
+        limit: int = 50,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """外部信号建议书视图(观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p3_service import (
+        Pay71P3Service,
+    )
+    return await Pay71P3Service().external_view(
+        context=context or None, limit=limit)
 
 
 def register_pay71_routes(app) -> None:

@@ -29,6 +29,15 @@
         pay71_retries     重试策略快环
                           统计(P2——端口
                           失败计数)
+        pay71_allocations 帕累托调配留痕
+                          (P3——四维向量
+                          +支配分析)
+        pay71_external    外部信号建议书
+                          (P3——费率/汇率/
+                          政策→admin 终审)
+        pay71_overrides   情境权重覆盖
+                          (P3——外部信号
+                          批准后激活)
 
 69号仓储范式平移:
     - 通用读写基元(_save/_get/_list)
@@ -68,13 +77,18 @@ class Pay71Repository:
     TABLE_PREDICTIONS = "pay71_predictions"
     TABLE_SPLITS = "pay71_splits"
     TABLE_RETRIES = "pay71_retries"
+    TABLE_ALLOCATIONS = "pay71_allocations"
+    TABLE_EXTERNAL = "pay71_external"
+    TABLE_OVERRIDES = "pay71_overrides"
 
     _ALL_TABLES = (
         TABLE_PORTS, TABLE_SIGNALS,
         TABLE_EVENTS, TABLE_PROBES,
         TABLE_SHADOWS, TABLE_PROPOSALS,
         TABLE_TRACES, TABLE_PREDICTIONS,
-        TABLE_SPLITS, TABLE_RETRIES)
+        TABLE_SPLITS, TABLE_RETRIES,
+        TABLE_ALLOCATIONS, TABLE_EXTERNAL,
+        TABLE_OVERRIDES)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -85,6 +99,7 @@ class Pay71Repository:
         "probeSeq", "shadowSeq",
         "proposalSeq", "traceSeq",
         "predictionSeq", "splitSeq",
+        "allocationSeq", "externalSeq",
         "sampleCount", "probeStreak",
         "probeRequired", "memberId",
         "retryCount")
@@ -94,20 +109,26 @@ class Pay71Repository:
         "latencyDelta", "errorRateDelta",
         "successRateDelta", "callbackMs",
         "windowScore", "daysElapsed",
-        "amount", "totalAmount", "entropy")
+        "amount", "totalAmount", "entropy",
+        "weightedScore", "delta")
     _BOOL_FIELDS = (
         "alerted", "observed", "recovered",
         "probeSuccess", "eligible",
         "revoked", "freeTier", "executed",
-        "amountWithinLimit")
+        "amountWithinLimit", "advisoryOnly",
+        "onFront")
     _JSON_DICT_FIELDS = (
         "windows", "meta", "detail",
         "signals", "trigger", "evidence",
         "fromTo", "shadowCriteria",
         "preloadCheck", "reason",
-        "disposition")
+        "disposition", "scores",
+        "weightsUsed", "impact",
+        "suggestedWeights", "front",
+        "weights")
     _JSON_LIST_FIELDS = (
-        "traits", "parts", "candidates")
+        "traits", "parts", "candidates",
+        "paretoFront", "affectedPorts")
 
     def __init__(self, store: dict = None):
         self.store = (store if store is not None
@@ -995,3 +1016,286 @@ class Pay71Repository:
             dict(self.store[
                 self.TABLE_RETRIES]).items()
         }
+
+    # ============================================================
+    # 帕累托调配留痕(pay71_allocations——P3)
+    # ============================================================
+
+    async def next_allocation_seq(self) -> int:
+        """调配序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "allocation", "seq"))
+        self._ensure_store()
+        self.store["_pay71_allocation_seq"] = \
+            self.store.get(
+                "_pay71_allocation_seq", 0) + 1
+        return self.store[
+            "_pay71_allocation_seq"]
+
+    async def save_allocation(self,
+                              record: dict) -> dict:
+        """保存调配留痕(四维向量+支配
+        分析+情境选解全留痕)"""
+        seq = await self.next_allocation_seq()
+        record["allocationSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "allocation",
+                     str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_ALLOCATIONS][
+            str(seq)] = dict(record)
+        return record
+
+    async def list_allocations(
+            self, context: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出调配留痕(可按情境过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "allocation", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "allocation",
+                        str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if context is None \
+                        or rec.get(
+                            "context") == context:
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[
+                 self.TABLE_ALLOCATIONS]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_ALLOCATIONS][str(s)])
+            for s in seqs
+        ]
+        if context is not None:
+            records = [
+                r for r in records
+                if r.get("context") == context]
+        return records[:limit]
+
+    # ============================================================
+    # 外部信号建议书(pay71_external——P3)
+    # ============================================================
+
+    async def next_external_seq(self) -> int:
+        """外部信号序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "external", "seq"))
+        self._ensure_store()
+        self.store["_pay71_external_seq"] = \
+            self.store.get(
+                "_pay71_external_seq", 0) + 1
+        return self.store["_pay71_external_seq"]
+
+    async def save_external(self,
+                            record: dict) -> dict:
+        """保存外部信号建议书"""
+        seq = await self.next_external_seq()
+        record["externalSeq"] = seq
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "external",
+                     str(seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_EXTERNAL][
+            str(seq)] = dict(record)
+        return record
+
+    async def get_external(
+            self, external_seq: int) -> dict | None:
+        """按序号查外部信号建议书"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("pay71", "external",
+                    str(external_seq)))
+            if not raw:
+                return None
+            with contextlib.suppress(
+                    ValueError, TypeError):
+                return self._deserialize(
+                    json.loads(raw))
+            return None
+        self._ensure_store()
+        rec = self.store[self.TABLE_EXTERNAL]\
+            .get(str(external_seq))
+        return dict(rec) if rec else None
+
+    async def update_external(
+            self, external_seq: int,
+            record: dict) -> dict:
+        """更新外部信号建议书(终审留痕)"""
+        record["externalSeq"] = \
+            int(external_seq)
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "external",
+                     str(external_seq))
+            await client.set(
+                key, json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_EXTERNAL][
+            str(external_seq)] = dict(record)
+        return record
+
+    async def list_external(
+            self, context: str = None,
+            limit: int = 50) -> list[dict]:
+        """列出外部信号建议书(可按情境过滤)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "external", "*"))
+            seqs: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    seqs.append(int(tail))
+            seqs.sort(reverse=True)
+            result = []
+            for seq in seqs:
+                if len(result) >= limit:
+                    break
+                raw = await client.get(
+                    _k("pay71", "external",
+                        str(seq)))
+                if not raw:
+                    continue
+                try:
+                    rec = self._deserialize(
+                        json.loads(raw))
+                except (ValueError, TypeError):
+                    continue
+                if context is None \
+                        or rec.get(
+                            "context") == context:
+                    result.append(rec)
+            return result
+        self._ensure_store()
+        seqs = sorted(
+            (int(s) for s in
+             self.store[self.TABLE_EXTERNAL]),
+            reverse=True)
+        records = [
+            dict(self.store[
+                self.TABLE_EXTERNAL][str(s)])
+            for s in seqs
+        ]
+        if context is not None:
+            records = [
+                r for r in records
+                if r.get("context") == context]
+        return records[:limit]
+
+    # ============================================================
+    # 情境权重覆盖(pay71_overrides——P3)
+    # ============================================================
+
+    async def get_override(
+            self, context: str) -> dict | None:
+        """按情境查权重覆盖(内存态存取
+        同形)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay71", "override", context))
+            if not data:
+                return None
+            return self._deserialize(data)
+        self._ensure_store()
+        rec = self.store[self.TABLE_OVERRIDES]\
+            .get(context)
+        return dict(rec) if rec else None
+
+    async def save_override(self, context: str,
+                           record: dict) -> dict:
+        """保存/覆盖情境权重(外部信号
+        批准后激活; 回滚=删除覆盖回出厂)"""
+        record["context"] = context
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "override",
+                     context)
+            await client.hset(
+                key, mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_OVERRIDES][
+            context] = dict(record)
+        return record
+
+    async def delete_override(
+            self, context: str) -> bool:
+        """删除情境权重覆盖(回滚至出厂)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            deleted = await client.delete(
+                _k("pay71", "override", context))
+            return bool(deleted)
+        self._ensure_store()
+        existed = context in \
+            self.store[self.TABLE_OVERRIDES]
+        self.store[self.TABLE_OVERRIDES].pop(
+            context, None)
+        return existed
+
+    async def list_overrides(self) -> list[dict]:
+        """列出全部激活的权重覆盖"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "override", "*"))
+            result = []
+            for key in keys:
+                data = await client.hgetall(key)
+                if data:
+                    result.append(
+                        self._deserialize(data))
+            return result
+        self._ensure_store()
+        return [
+            dict(rec) for rec in
+            self.store[
+                self.TABLE_OVERRIDES].values()
+        ]
