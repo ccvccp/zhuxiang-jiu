@@ -66,6 +66,12 @@
                           (P7——draft→
                           shadow→active→
                           retired)
+        pay71_immunity    免疫冻结状态
+                          (P8——分布监控
+                          自动/解冻人工)
+        pay71_redteam     红队批次留痕
+                          (P8——四向量
+                          构造→断言→留痕)
 
 69号仓储范式平移:
     - 通用读写基元(_save/_get/_list)
@@ -118,6 +124,8 @@ class Pay71Repository:
     TABLE_REPORTS = "pay71_reports"
     TABLE_HYPOTHESES = "pay71_hypotheses"
     TABLE_PARAMS = "pay71_params"
+    TABLE_IMMUNITY = "pay71_immunity"
+    TABLE_REDTEAM = "pay71_redteam"
 
     _ALL_TABLES = (
         TABLE_PORTS, TABLE_SIGNALS,
@@ -131,7 +139,8 @@ class Pay71Repository:
         TABLE_NARRATIVES, TABLE_INCIDENTS,
         TABLE_MISJUDGES, TABLE_EVIDENCE,
         TABLE_REPORTS, TABLE_HYPOTHESES,
-        TABLE_PARAMS)
+        TABLE_PARAMS, TABLE_IMMUNITY,
+        TABLE_REDTEAM)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -148,6 +157,7 @@ class Pay71Repository:
         "misjudgeSeq", "evidenceSeq",
         "reportSeq", "hypothesisId",
         "changeId", "version",
+        "runId",
         "sampleCount", "probeStreak",
         "probeRequired", "memberId",
         "retryCount", "retryAttempt",
@@ -173,7 +183,8 @@ class Pay71Repository:
         "orderIdMatch", "timeMatch",
         "idempotentKey", "newDevice",
         "oddHour", "newLocation",
-        "redacted")
+        "redacted", "frozen",
+        "allDefended")
     _JSON_DICT_FIELDS = (
         "windows", "meta", "detail",
         "signals", "trigger", "evidence",
@@ -188,7 +199,7 @@ class Pay71Repository:
         "nodes", "chain", "metrics",
         "dimensions", "nodeHashes",
         "proposedAction", "factoryValue",
-        "proposedValue")
+        "proposedValue", "vectors")
     _JSON_LIST_FIELDS = (
         "traits", "parts", "candidates",
         "paretoFront", "affectedPorts")
@@ -2438,3 +2449,115 @@ class Pay71Repository:
                 r for r in records
                 if r.get("status") == status]
         return records[:limit]
+
+    # ============================================================
+    # 免疫冻结状态(pay71_immunity——P8)
+    # ============================================================
+
+    async def get_immunity_state(self) -> dict | None:
+        """读免疫状态(缺省 active——
+        内存态存取同形)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pay71", "immunity",
+                   "state"))
+            if not data:
+                return None
+            return self._deserialize(data)
+        self._ensure_store()
+        rec = self.store[
+            self.TABLE_IMMUNITY].get(
+            "state")
+        return dict(rec) if rec else None
+
+    async def save_immunity_state(
+            self, record: dict) -> dict:
+        """保存免疫状态(冻结/解冻留痕)"""
+        record["_key"] = "state"
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("pay71", "immunity",
+                     "state")
+            await client.hset(
+                key, mapping=self._serialize(
+                    record))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_IMMUNITY][
+            "state"] = dict(record)
+        return record
+
+    # ============================================================
+    # 红队批次留痕(pay71_redteam——P8)
+    # ============================================================
+
+    async def next_redteam_seq(self) -> int:
+        """红队批次序列"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.incr(
+                _k("pay71", "redteam", "seq"))
+        self._ensure_store()
+        self.store["_pay71_redteam_seq"] = \
+            self.store.get(
+                "_pay71_redteam_seq", 0) + 1
+        return self.store[
+            "_pay71_redteam_seq"]
+
+    async def save_redteam_run(
+            self, run_id: int,
+            record: dict) -> dict:
+        """保存红队批次留痕"""
+        record["runId"] = int(run_id)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("pay71", "redteam",
+                   str(run_id)),
+                json.dumps(
+                    self._serialize(record),
+                    ensure_ascii=False))
+            return record
+        self._ensure_store()
+        self.store[self.TABLE_REDTEAM][
+            str(run_id)] = dict(record)
+        return record
+
+    async def list_redteam_runs(
+            self, limit: int = 10
+            ) -> list[dict]:
+        """列出红队批次(最新在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(
+                _k("pay71", "redteam", "*"))
+            ids: list[int] = []
+            for key in keys:
+                tail = key.split(":")[-1]
+                if tail.isdigit():
+                    ids.append(int(tail))
+            ids.sort(reverse=True)
+            result = []
+            for rid in ids[:limit]:
+                raw = await client.get(
+                    _k("pay71", "redteam",
+                        str(rid)))
+                if not raw:
+                    continue
+                with contextlib.suppress(
+                        ValueError, TypeError):
+                    result.append(
+                        self._deserialize(
+                            json.loads(raw)))
+            return result
+        self._ensure_store()
+        ids = sorted(
+            (int(s) for s in
+             self.store[self.TABLE_REDTEAM]),
+            reverse=True)
+        return [
+            dict(self.store[
+                self.TABLE_REDTEAM][str(s)])
+            for s in ids[:limit]
+        ]

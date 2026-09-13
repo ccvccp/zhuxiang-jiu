@@ -49,6 +49,20 @@ from services.pay71_registry import (
 logger = logging.getLogger("pay71_p7_service")
 
 
+async def _guard_frozen() -> None:
+    """免疫冻结守卫(P8 联动——分布
+    异常/红队发现自动冻结后, P7 四
+    操作全部拒绝; 懒加载防循环导入)"""
+    from services.pay71_p8_service import (
+        Pay71P8Service,
+    )
+    if await Pay71P8Service().is_frozen():
+        raise ValueError(
+            "进化已冻结(免疫监控——分布"
+            "异常或红队发现; 解冻需人工"
+            " unfreeze+PAY71_IMMUNITY=1)")
+
+
 class Pay71P7Service:
     """71号三层进化引擎(P7)"""
 
@@ -186,6 +200,8 @@ class Pay71P7Service:
             raise ValueError(
                 "PAY71_KILL 制动中——进化"
                 "假设生成拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动)
+        await _guard_frozen()
         meta = EVOLVABLE_PARAMS.get(
             param_id)
         if meta is None:
@@ -303,6 +319,8 @@ class Pay71P7Service:
             raise ValueError(
                 "PAY71_KILL 制动中——提交"
                 "拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动)
+        await _guard_frozen()
         record = await self.repo\
             .get_hypothesis(hyp_id)
         if not record:
@@ -384,6 +402,8 @@ class Pay71P7Service:
             raise ValueError(
                 "PAY71_KILL 制动中——发布"
                 "拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动)
+        await _guard_frozen()
         rec = await self.repo\
             .get_param_version(version)
         if not rec:
@@ -486,6 +506,9 @@ class Pay71P7Service:
             raise ValueError(
                 "PAY71_KILL 制动中——回滚"
                 "拒绝(安全方向)")
+        # 免疫冻结前置(P8 联动——
+        # 回滚亦是变更动作)
+        await _guard_frozen()
         rec = await self.repo\
             .get_param_version(version)
         if not rec:

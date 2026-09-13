@@ -67,19 +67,27 @@
     GET  /api/pay71/evolution/hypotheses 假设视图(admin, 观测面——P7)
     GET  /api/pay71/evolution/params   参数版本视图(admin, 观测面——P7)
     GET  /api/pay71/evolution/governance L0-L2 治理观测(admin, 观测面——P7)
+    GET  /api/pay71/immunity/dict      免疫字典公示(admin, 观测面——P8)
+    GET  /api/pay71/immunity            免疫看板(admin, 观测面——P8)
+    POST /api/pay71/immunity/monitor    分布监控+自动冻结(admin, 快环——不受开关——P8)
+    POST /api/pay71/immunity/freeze     人工冻结进化(admin, 人工——不受开关——P8)
+    POST /api/pay71/immunity/unfreeze   解冻(admin, 人工专属+环境变量双保险——P8)
+    POST /api/pay71/immunity/redteam    红队四向量执行(admin, 决策面 off 409——P8)
+    GET  /api/pay71/immunity/redteam/runs 红队批次历史(admin, 观测面——P8)
 
 鉴权: 管理面 X-Role: admin(69号同款口径)。
 统一口径(69号范式):
     - 观测面不受 PAY71_MODE 影响
     - 快环观测上报(signals/retry report/
       external report/incident report/
-      misjudge report/drift detect)
-      不受开关影响
+      misjudge report/drift detect/
+      immunity monitor)不受开关影响
     - 人工面(port state/onboard/propose/
       decide/external decide/incident
       verify/evidence export/report
-      publish/hypothesis reject/kill)
-      不受开关影响
+      publish/hypothesis reject/kill/
+      immunity freeze/unfreeze)不受
+      开关影响
     - 保护面(orchestrate/probe)不受开关
       影响——保护方向永续铁律(规划 §4.1)
     - 决策面(predict compute/revoke/
@@ -87,7 +95,8 @@
       compute/recon verify/heal/retry/
       narrative generate/evidence
       assemble/hypothesis propose/
-      submit/publish/rollback)off=409
+      submit/publish/rollback/redteam)
+      off=409
     - KeyError → 404 / ValueError → 409
 """
 
@@ -348,6 +357,12 @@ class ParamPublishBody(BaseModel):
 class KillBody2(BaseModel):
     activate: bool = Field(
         description="激活/解除制动")
+
+
+class ImmunityFreezeBody(BaseModel):
+    reason: str = Field(
+        min_length=1,
+        description="冻结原因")
 
 
 # ============================================================
@@ -1625,6 +1640,126 @@ async def evolution_governance(
     )
     return await Pay71P7Service()\
         .governance_view()
+
+
+# ============================================================
+# P8 端点(安全免疫)
+# ============================================================
+
+@router.get("/immunity/dict")
+async def immunity_dict(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """免疫字典公示(向量/状态域/冻结
+    规则/铁律声明——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p8_service import (
+        Pay71P8Service,
+    )
+    return Pay71P8Service().immunity_dict()
+
+
+@router.get("/immunity")
+async def immunity_view(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """免疫看板(状态+红队史+防御计数
+    ——观测面)"""
+    _require_admin(x_role)
+    from services.pay71_p8_service import (
+        Pay71P8Service,
+    )
+    return await Pay71P8Service()\
+        .immunity_view()
+
+
+@router.post("/immunity/monitor")
+async def immunity_monitor(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """分布监控+自动冻结(critical 端口
+    ≥2 或漂移信号≥3→冻结进化——安全
+    方向自动+全留痕; 快环不受
+    PAY71_MODE 影响)"""
+    _require_admin(x_role)
+    from services.pay71_p8_service import (
+        Pay71P8Service,
+    )
+    return await Pay71P8Service()\
+        .monitor_and_freeze()
+
+
+@router.post("/immunity/freeze")
+async def immunity_freeze(
+        body: ImmunityFreezeBody,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """人工冻结进化(安全方向——人工
+    面不受开关影响; P7 四守卫联动)"""
+    _require_admin(x_role)
+    from services.pay71_p8_service import (
+        Pay71P8Service,
+    )
+    return await Pay71P8Service()\
+        .freeze_evolution(
+            body.reason, by="admin(human)")
+
+
+@router.post("/immunity/unfreeze")
+async def immunity_unfreeze(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """解冻(人工专属——免疫自动永不
+    解冻铁律; PAY71_IMMUNITY=1 运维
+    授权双保险)"""
+    _require_admin(x_role)
+    from services.pay71_p8_service import (
+        Pay71P8Service,
+    )
+    try:
+        return await Pay71P8Service()\
+            .unfreeze_evolution(
+                by="admin(human)")
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.post("/immunity/redteam")
+async def immunity_redteam(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队四向量执行(端口域: 伪造回执
+    /重放洪泛/绕过熔断/调配投毒——构造
+    →断言→留痕全确定性; 决策面
+    off 409)"""
+    _require_admin(x_role)
+    _require_decision_plane()
+    from services.pay71_p8_service import (
+        Pay71P8Service,
+    )
+    try:
+        return await Pay71P8Service()\
+            .run_redteam()
+    except Exception as e:
+        raise _map(e) from e
+
+
+@router.get("/immunity/redteam/runs")
+async def immunity_redteam_runs(
+        limit: int = 10,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """红队批次历史(观测面)"""
+    _require_admin(x_role)
+    from repositories.pay71_repository import (
+        Pay71Repository,
+    )
+    runs = await Pay71Repository()\
+        .list_redteam_runs(limit=limit)
+    return {
+        "count": len(runs),
+        "runs": runs,
+    }
 
 
 def register_pay71_routes(app) -> None:

@@ -705,6 +705,48 @@ HYPOTHESIS_STATUSES = (
     "rejected",    # 46号驳回留痕
 )
 
+# ============================================================
+# P8 安全免疫(端口域红队四向量+分布
+# 监控自动冻结——69号 P8 范式平移;
+# 解冻人工专属铁律)
+# ============================================================
+
+# 红队向量域(封闭四向量——端口域)
+REDTEAM_VECTORS = (
+    "RT-01",  # 伪造回执(对账投毒:
+              # 伪造流水/回执金额)
+    "RT-02",  # 重放洪泛(核验轰炸:
+              # 幂等补单重放)
+    "RT-03",  # 绕过熔断(带病端口
+              # 复入调配/预判)
+    "RT-04",  # 调配投毒(外部信号
+              # 伪造直接改权重)
+)
+
+# 免疫冻结状态域(封闭——冻结自动
+# (安全方向)/解冻人工专属)
+IMMUNITY_STATES = (
+    "active",     # 免疫监控正常
+    "frozen",     # 进化冻结(分布
+                  # 异常自动/红队
+                  # 发现自动)
+)
+
+# 分布监控冻结规则(封闭——critical
+# 端口数/漂移信号数达到即冻结进化)
+IMMUNITY_FREEZE_RULES = {
+    "criticalPorts": 2,    # critical 态
+                           # 端口数≥2
+    "driftSignalCount": 3,  # 漂移信号
+                            # 总数≥3
+}
+
+# 解冻人工专属双保险(环境变量
+# PAY71_IMMUNITY=1——对齐 70号
+# QR70_IMMUNITY 惯例: 免疫自动
+# 永不解冻+运维显式授权)
+IMMUNITY_UNFREEZE_ENV = "PAY71_IMMUNITY"
+
 
 # ============================================================
 # 启动自检(宪法级)
@@ -1144,6 +1186,23 @@ def _validate_registry() -> None:
             "published", "rejected"}:
         raise RuntimeError(
             "pay71 假设状态机非法")
+    # ⑰ P8 免疫: 红队向量/冻结状态域
+    #     封闭+冻结规则合法
+    if set(REDTEAM_VECTORS) != {
+            "RT-01", "RT-02",
+            "RT-03", "RT-04"}:
+        raise RuntimeError(
+            "pay71 红队向量域非法")
+    if set(IMMUNITY_STATES) != {
+            "active", "frozen"}:
+        raise RuntimeError(
+            "pay71 免疫冻结状态域非法")
+    for k, v in IMMUNITY_FREEZE_RULES.items():
+        if not (isinstance(v, int)
+                and v >= 1):
+            raise RuntimeError(
+                f"pay71 免疫冻结规则非法: "
+                f"{k}={v}")
 
 
 _validate_registry()
