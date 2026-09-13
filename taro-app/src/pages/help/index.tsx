@@ -613,8 +613,8 @@ const HelpPage: React.FC = () => {
                 </View>
               ))}
             </View>
-            {/* 类目筛选 */}
-            <ScrollView scrollX className={styles.catBar}>
+            {/* 类目筛选(换行平铺: 桌面端横向滚动条不可见会裁剪) */}
+            <View className={styles.catBar}>
               {CAT_TABS.map(c => (
                 <View
                   key={c || 'all'}
@@ -624,7 +624,7 @@ const HelpPage: React.FC = () => {
                   {c ? helpCategoryName(c) : '全部'}
                 </View>
               ))}
-            </ScrollView>
+            </View>
             {orders.length === 0 ? (
               <View className={styles.empty}>
                 <View className={styles.emptyIcon}>🤝</View>

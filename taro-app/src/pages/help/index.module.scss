@@ -148,15 +148,14 @@
 }
 
 .catBar {
-  white-space: nowrap;
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
   margin-bottom: $spacing-md;
-  height: 60rpx;
 }
 
 .catItem {
-  display: inline-block;
   padding: $spacing-xs $spacing-md;
-  margin-right: $spacing-sm;
   font-size: $font-size-xs;
   color: $color-text-secondary;
   background: $color-bg-card;

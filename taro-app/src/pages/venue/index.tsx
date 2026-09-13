@@ -215,8 +215,8 @@ const VenuePage: React.FC = () => {
           <View className={styles.empty}>加载中...</View>
         ) : tab === 'browse' ? (
           <>
-            {/* 类型筛选 */}
-            <ScrollView scrollX className={styles.typeBar}>
+            {/* 类型筛选(换行平铺: 桌面端无触摸滑动, 横向滚动条不可见会导致类型被裁剪看不全) */}
+            <View className={styles.typeBar}>
               {TYPE_TABS.map(t => (
                 <View
                   key={t || 'all'}
@@ -226,7 +226,7 @@ const VenuePage: React.FC = () => {
                   {t ? partnerTypeName(t) : '全部'}
                 </View>
               ))}
-            </ScrollView>
+            </View>
 
             {/* 合作商卡片 */}
             {partners.length === 0 ? (

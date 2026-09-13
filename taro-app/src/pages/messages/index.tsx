@@ -121,8 +121,8 @@ const MessagesPage: React.FC = () => {
           </View>
         </View>
 
-        {/* 分类筛选 */}
-        <ScrollView scrollX className={styles.tabs} showScrollbar={false}>
+        {/* 分类筛选(换行平铺: 桌面端横向滚动条不可见会裁剪) */}
+        <View className={styles.tabs}>
           {CATEGORY_TABS.map(tab => (
             <View
               key={tab.key}
@@ -132,7 +132,7 @@ const MessagesPage: React.FC = () => {
               {tab.label}
             </View>
           ))}
-        </ScrollView>
+        </View>
 
         {/* 消息列表 */}
         {loading ? (

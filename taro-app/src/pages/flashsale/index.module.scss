@@ -12,18 +12,18 @@
   padding: $spacing-lg;
 }
 
-// 场次横滑条
+// 场次条(换行平铺: 全量可见, 桌面/移动端均无需横向滑动)
 .sessionBar {
-  white-space: nowrap;
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
   margin-bottom: $spacing-md;
 }
 
 .sessionTab {
-  display: inline-block;
   background: rgba(255, 255, 255, 0.92);
   border-radius: $radius-md;
   padding: $spacing-sm $spacing-lg;
-  margin-right: $spacing-sm;
   min-width: 200rpx;
   box-shadow: $shadow-card;
 }

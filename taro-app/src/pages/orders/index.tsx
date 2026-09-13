@@ -3,7 +3,7 @@
  * 数据来源: 后端 /api/order/my
  */
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, ScrollView } from '@tarojs/components';
+import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
@@ -146,8 +146,8 @@ const OrdersPage: React.FC = () => {
   return (
     <View className={styles.page}>
         <NavBar title="我的订单" />
-      {/* 状态筛选(横向滚动) */}
-      <ScrollView scrollX className={styles.tabs} scrollWithAnimation>
+      {/* 状态筛选(换行平铺: 桌面端横向滚动条不可见会裁剪) */}
+      <View className={styles.tabs}>
         {STATUS_TABS.map(tab => (
           <View
             key={tab.key}
@@ -157,7 +157,7 @@ const OrdersPage: React.FC = () => {
             {tab.label}
           </View>
         ))}
-      </ScrollView>
+      </View>
 
       {/* 订单列表 */}
       {orders.length === 0 ? (

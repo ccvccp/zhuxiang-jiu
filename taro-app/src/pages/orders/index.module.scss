@@ -12,7 +12,8 @@
 // ============================================
 .tabs {
   display: flex;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  gap: 8rpx;
   background: $color-bg-card;
   border-radius: $radius-md;
   padding: 8rpx;
@@ -21,12 +22,10 @@
 }
 
 .tab {
-  display: inline-block;
   font-size: $font-size-sm;
   color: $color-text-secondary;
   padding: $spacing-sm 32rpx;
   border-radius: $radius-sm;
-  margin-right: 8rpx;
 }
 
 .tabActive {

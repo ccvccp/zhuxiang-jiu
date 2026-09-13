@@ -136,9 +136,9 @@ const ProductsPage: React.FC = () => {
         </View>
       </View>
 
-      {/* 分类筛选栏(搜索结果模式下隐藏) */}
+      {/* 分类筛选栏(搜索结果模式下隐藏; 换行平铺: 桌面端横向滚动条不可见会裁剪) */}
       {searched === null && (
-        <ScrollView className={styles.categoryBar} scrollX>
+        <View className={styles.categoryBar}>
           {categories.map(cat => (
             <View
               key={cat}
@@ -148,7 +148,7 @@ const ProductsPage: React.FC = () => {
               {cat}
             </View>
           ))}
-        </ScrollView>
+        </View>
       )}
 
       {/* 搜索结果提示 */}

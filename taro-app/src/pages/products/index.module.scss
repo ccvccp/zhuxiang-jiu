@@ -106,18 +106,18 @@
   padding: $spacing-xs $spacing-xl;
 }
 
-// 分类筛选栏
+// 分类筛选栏(换行平铺: 全量可见, 桌面/移动端均无需横向滑动)
 .categoryBar {
-  white-space: nowrap;
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
   background: $color-bg-card;
   padding: $spacing-md $spacing-lg;
   box-shadow: $shadow-float;
 }
 
 .categoryItem {
-  display: inline-block;
   padding: $spacing-xs $spacing-md;
-  margin-right: $spacing-sm;
   font-size: $font-size-md;
   color: $color-text-secondary;
   background: $color-bg-page;

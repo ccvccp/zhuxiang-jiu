@@ -55,22 +55,20 @@
   }
 }
 
-// 分类筛选
+// 分类筛选(换行平铺: 全量可见, 桌面/移动端均无需横向滑动)
 .tabs {
   display: flex;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
   margin-bottom: $spacing-md;
 }
 
 .tab {
-  display: inline-block;
   padding: $spacing-xs $spacing-lg;
-  margin-right: $spacing-sm;
   font-size: $font-size-sm;
   color: $color-text-secondary;
   background: $color-bg-card;
   border-radius: $radius-button;
-  flex-shrink: 0;
 
   &.tabActive {
     color: $color-text-white;

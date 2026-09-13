@@ -180,8 +180,8 @@ const TicketsPage: React.FC = () => {
           ＋ 提交工单
         </View>
 
-        {/* 状态筛选 */}
-        <ScrollView scrollX className={styles.tabs} showScrollbar={false}>
+        {/* 状态筛选(换行平铺: 桌面端横向滚动条不可见会裁剪) */}
+        <View className={styles.tabs}>
           {STATUS_TABS.map(tab => (
             <View
               key={tab.key}
@@ -191,7 +191,7 @@ const TicketsPage: React.FC = () => {
               {tab.label}
             </View>
           ))}
-        </ScrollView>
+        </View>
 
         {/* 工单列表 */}
         {loading ? (

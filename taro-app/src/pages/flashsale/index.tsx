@@ -151,7 +151,7 @@ const FlashsalePage: React.FC = () => {
           </View>
         ) : (
           <>
-            <ScrollView scrollX className={styles.sessionBar}>
+            <View className={styles.sessionBar}>
               {sessions.map(s => {
                 const phase = phaseOf(s.startTime, s.endTime);
                 return (
@@ -167,7 +167,7 @@ const FlashsalePage: React.FC = () => {
                   </View>
                 );
               })}
-            </ScrollView>
+            </View>
 
             {/* 场次卡 */}
             {activeSession && (
