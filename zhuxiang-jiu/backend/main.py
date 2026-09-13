@@ -366,6 +366,14 @@ register_qr70_routes(app)
 from routes.pay71_routes import register_pay71_routes
 register_pay71_routes(app)
 
+# AI智能自动引流大模型(72号 P1 感知跃迁)
+from routes.attract72_routes import register_attract72_routes
+register_attract72_routes(app)
+
+# AI智能会员体验大模型(73号 P1 视野与唤醒)
+from routes.member73_routes import register_member73_routes
+register_member73_routes(app)
+
 # AI智能系统升级决策(61号)
 from routes.dm61_routes import register_dm61_routes
 register_dm61_routes(app)
