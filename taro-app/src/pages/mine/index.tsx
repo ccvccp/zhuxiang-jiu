@@ -172,14 +172,14 @@ const MinePage: React.FC = () => {
             ) : null}
           </View>
           <View className={styles.memberStats}>
-            <View className={styles.statItem}>
+            <View className={styles.statItem} onClick={() => Taro.navigateTo({ url: '/pages/points/index' })}>
               <View className={styles.statValue}>{member.points}</View>
-              <View className={styles.statLabel}>积分</View>
+              <View className={styles.statLabel}>积分 ›</View>
             </View>
             <View className={styles.statDivider} />
-            <View className={styles.statItem}>
+            <View className={styles.statItem} onClick={() => Taro.navigateTo({ url: '/pages/orders/index' })}>
               <View className={styles.statValue}>{orders.length}</View>
-              <View className={styles.statLabel}>订单</View>
+              <View className={styles.statLabel}>订单 ›</View>
             </View>
             <View className={styles.statDivider} />
             <View className={styles.statItem}>
@@ -369,6 +369,14 @@ const MinePage: React.FC = () => {
         {/* 资产管理 */}
         <View className={styles.section}>
           <View className={styles.sectionTitle}>资产管理</View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/points/index' })}>
+            <View className={styles.adminEntryIcon}>✨</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>我的积分</View>
+              <View className={styles.adminEntryDesc}>签到日历 · 积分流水 · 过期提醒</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
           <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/trust/index' })}>
             <View className={styles.adminEntryIcon}>🧧</View>
             <View className={styles.adminEntryInfo}>
@@ -496,14 +504,6 @@ const MinePage: React.FC = () => {
         {/* 个人信息管理 */}
         <View className={styles.section}>
           <View className={styles.sectionTitle}>个人信息管理</View>
-          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/points/index' })}>
-            <View className={styles.adminEntryIcon}>✨</View>
-            <View className={styles.adminEntryInfo}>
-              <View className={styles.adminEntryName}>我的积分</View>
-              <View className={styles.adminEntryDesc}>签到日历 · 积分流水 · 过期提醒</View>
-            </View>
-            <View className={styles.adminEntryArrow}>›</View>
-          </View>
           <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/pointsmall/index' })}>
             <View className={styles.adminEntryIcon}>🎁</View>
             <View className={styles.adminEntryInfo}>
