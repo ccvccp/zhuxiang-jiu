@@ -270,6 +270,16 @@ class Nexus74P3Service:
             raise ValueError(
                 "NEXUSFLOW74_MODE=off——"
                 "发布面关闭(观测面不受影响)")
+        # 免疫冻结(P5 联动——保护方向:
+        # 发布面关闭, 观测面保留)
+        immunity = await self.repo \
+            .get_immunity()
+        if (immunity or {}).get(
+                "status") == "frozen":
+            raise ValueError(
+                "免疫冻结中——发布面关闭"
+                "(先解冻: NEXUSFLOW74_"
+                "IMMUNITY=1 双保险)")
         if platform not in PLATFORMS:
             raise ValueError(
                 f"平台域外({platform})")
@@ -356,6 +366,17 @@ class Nexus74P3Service:
                 publication_id, platform)
             return record
 
+        # 越权自主前置(A 档 auto 仅
+        # full 档——先于保护检查, 判定
+        # 确定性; B 档 auto 语义=忽略
+        # [平台操作永远人工])
+        if auto and tier == "A" \
+                and mode != "full":
+            raise ValueError(
+                "auto 自主发布仅 full 档"
+                "(A 档低风险域——assist "
+                "须人工显式调用)")
+
         # 前置保护(仅真实发布):
         # 静默窗→每日封顶
         if await self._in_silence(now):
@@ -389,11 +410,6 @@ class Nexus74P3Service:
 
         # A 档直连(微信)
         if auto:
-            if mode != "full":
-                raise ValueError(
-                    "auto 自主发布仅 full 档"
-                    "(A 档低风险域——assist "
-                    "须人工显式调用)")
             if record["complianceState"] \
                     != "pass":
                 raise ValueError(
@@ -457,6 +473,15 @@ class Nexus74P3Service:
             raise ValueError(
                 "影子期不执行适配器"
                 "(留痕不派发)")
+        # 免疫冻结(P5 联动——保护方向)
+        immunity = await self.repo \
+            .get_immunity()
+        if (immunity or {}).get(
+                "status") == "frozen":
+            raise ValueError(
+                "免疫冻结中——重试关闭"
+                "(先解冻: NEXUSFLOW74_"
+                "IMMUNITY=1 双保险)")
         pub = await self.repo \
             .get_publication(publication_id)
         if not pub:

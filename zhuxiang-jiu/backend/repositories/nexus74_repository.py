@@ -454,3 +454,51 @@ class Nexus74Repository:
                        if r.get("kind")
                        == kind]
         return records
+
+    # ============================================================
+    # P5 元认知(免疫/红队/进化日志)
+    # ============================================================
+
+    async def save_immunity(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_IMMUNITY,
+            "default", record)
+
+    async def get_immunity(
+            self) -> dict | None:
+        return await self._get(
+            self.TABLE_IMMUNITY,
+            "default")
+
+    async def save_redteam(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_REDTEAM,
+            record["runId"], record)
+
+    async def list_redteams(
+            self, limit: int = 50
+    ) -> list[dict]:
+        return await self._list(
+            self.TABLE_REDTEAM,
+            limit=limit)
+
+    async def save_evolog(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_EVOLOG,
+            record["evoLogId"], record)
+
+    async def list_evologs(
+            self, kind: str = None,
+            limit: int = 200
+    ) -> list[dict]:
+        records = await self._list(
+            self.TABLE_EVOLOG,
+            limit=limit)
+        if kind:
+            records = [r for r in records
+                       if r.get("kind")
+                       == kind]
+        return records

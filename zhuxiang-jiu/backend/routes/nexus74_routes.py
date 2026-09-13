@@ -929,41 +929,212 @@ async def register_metrics(
 
 
 # ============================================================
-# 模型状态(观测面——P5 完整版预占位)
+# P5 元认知收官(观测/快环/保护面/
+# 决策面——漂移/免疫/红队/进化日志)
+# ============================================================
+
+@router.post("/meta/drift")
+async def drift_detect(
+        day: str = "",
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """漂移检测(三信号——快环,
+    不受 MODE 影响)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p5_service import (
+            Nexus74P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P5Service()
+                .drift_detect(day=day)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/immunity")
+async def immunity_view(
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """免疫看板(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p5_service import (
+            Nexus74P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P5Service()
+                .immunity_view()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/immunity/monitor")
+async def immunity_monitor(
+        day: str = "",
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """分布监控+自动冻结(快环——
+    信号数≥规则线自动冻结[保护方向])"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p5_service import (
+            Nexus74P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P5Service()
+                .monitor_immunity(
+                    day=day)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/immunity/freeze")
+async def immunity_freeze(
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """人工冻结(保护面——不受 MODE)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p5_service import (
+            Nexus74P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P5Service()
+                .freeze_manual(
+                    by="admin")}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/immunity/unfreeze")
+async def immunity_unfreeze(
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """解冻(人工专属+环境变量双保险
+    ——NEXUSFLOW74_IMMUNITY=1)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p5_service import (
+            Nexus74P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P5Service()
+                .unfreeze(by="admin")}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/redteam")
+async def redteam(
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """红队四向量执行(决策面 off 409
+    ——构造→断言→留痕; 失守→冻结)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_registry import (
+            current_mode,
+        )
+        if current_mode() == "off":
+            raise HTTPException(
+                status_code=409,
+                detail="NEXUSFLOW74_MODE"
+                      "=off(默认 off——决策面"
+                      "关闭, 观测面不受影响)")
+        from services.nexus74_p5_service import (
+            Nexus74P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P5Service()
+                .redteam()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/redteam/runs")
+async def redteam_runs(
+        limit: int = 50,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """红队批次历史(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p5_service import (
+            Nexus74P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P5Service()
+                .list_redteams(
+                    limit=limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/evolution/log")
+async def evolution_log(
+        kind: str = "",
+        limit: int = 100,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """进化日志(观测面——七类留痕)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p5_service import (
+            Nexus74P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P5Service()
+                .evolution_log(
+                    kind=kind or None,
+                    limit=limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# 模型状态(观测面——P5 完整版)
 # ============================================================
 
 @router.get("/model/status")
 async def model_status(
         x_role: str = Header(
             default=None, alias="X-Role")):
-    """模型状态(mode/kill/版本——
-    观测面)"""
+    """模型状态(mode/kill/免疫/平台/
+    红线/适配器分级——观测面)"""
     try:
         _require_admin(x_role)
-        from services.nexus74_registry import (
-            IMMUNITY_UNFREEZE_ENV,
-            MODEL_VERSION,
-            PLATFORMS, REDLINES,
-            current_mode, is_kill,
+        from services.nexus74_p5_service import (
+            Nexus74P5Service,
         )
         return {"code": 0,
-                "data": {
-                    "modelVersion":
-                        MODEL_VERSION,
-                    "mode": current_mode(),
-                    "kill": is_kill(),
-                    "platformCount": len(
-                        PLATFORMS),
-                    "redlines": list(
-                        REDLINES),
-                    "unfreezeEnv":
-                        f"{IMMUNITY_UNFREEZE_ENV}"
-                        f"=1",
-                    "note": ("P1-P3 已交付"
-                             "(规则中枢/适配"
-                             "管线/发布编排); "
-                             "P4 数据回流+P5 "
-                             "元认知待交付")}}
+                "data": await
+                Nexus74P5Service()
+                .model_status()}
     except HTTPException:
         raise
     except Exception as exc:
