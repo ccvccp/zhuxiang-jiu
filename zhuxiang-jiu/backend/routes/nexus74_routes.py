@@ -240,6 +240,15 @@ class AuditReflowRequest(BaseModel):
         description="平台审核信息")
 
 
+class RetroGroupRequest(BaseModel):
+    platform: str = Field(
+        "", description="平台(与 intent "
+                       "至少其一)")
+    intent: str = Field(
+        "", description="意图(与 platform "
+                       "至少其一)")
+
+
 # ============================================================
 # ① 合规规则库(观测面——常开)
 # ============================================================
@@ -922,6 +931,105 @@ async def register_metrics(
                     publication_id=publication_id,
                     metrics=body
                     .model_dump())}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P6 发布后复盘(观测面——不受 MODE)
+# 注: 固定路径(/retro/dict, /retro/group)
+# 须先于参数路径(/retro/{id}) 注册——
+# FastAPI 按注册序匹配
+# ============================================================
+
+@router.get("/retro/dict")
+async def retro_dict(
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """复盘字典公示(结论五态/建议码/
+    阈值域)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p6_service import (
+            Nexus74P6Service,
+        )
+        return {"code": 0,
+                "data":
+                    Nexus74P6Service()
+                    .retro_dict()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/retro/group")
+async def retro_group(
+        body: RetroGroupRequest,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """分组复盘(平台×意图聚合——
+    组合策略三态)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p6_service import (
+            Nexus74P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P6Service()
+                .retro_group(
+                    platform=body.platform,
+                    intent=body.intent)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/retro/{publication_id}")
+async def retro_publication(
+        publication_id: int,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """单篇发布复盘(四维合成——
+    结论五态+确定性建议)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p6_service import (
+            Nexus74P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P6Service()
+                .retro_publication(
+                    publication_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/retrospects")
+async def list_retrospects(
+        scope: str = "",
+        limit: int = 100,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """复盘留痕列表(观测面——scope 筛选)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p6_service import (
+            Nexus74P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P6Service()
+                .list_retrospects(
+                    scope=scope,
+                    limit=limit)}
     except HTTPException:
         raise
     except Exception as exc:

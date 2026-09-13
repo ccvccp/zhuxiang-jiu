@@ -563,6 +563,52 @@ NEGATIVE_TRIGGER_CONSECUTIVE = 2
 GOVERNANCE_SCORER_ID = "nexus_publishing"
 
 # ============================================================
+# P6 发布后复盘域(运营与对齐层)
+# ============================================================
+
+# 复盘范围域(单篇/分组)
+RETRO_SCOPES: tuple = (
+    "single",    # 单篇发布复盘
+    "group",     # 平台×意图分组复盘
+)
+
+# 复盘结论域(确定性阈值——复用 P4
+# 互动率线 HIGH/LOW_ENGAGEMENT_LINE)
+RETRO_VERDICTS: tuple = (
+    "effective",     # 高效传播(≥HIGH)
+    "neutral",       # 中性观察(LOW–HIGH)
+    "ineffective",   # 低效传播(<LOW)
+    "blocked",       # 传播受阻(驳回/限流)
+    "pending_data",  # 数据未回流
+)
+
+RETRO_VERDICT_LABELS: dict = {
+    "effective": "高效传播",
+    "neutral": "中性观察",
+    "ineffective": "低效传播",
+    "blocked": "传播受阻",
+    "pending_data": "数据未回流",
+}
+
+# 复盘建议码域(确定性建议——LLM 禁入,
+# 模板拼接+数字插值)
+RETRO_ADVICE_CODES: tuple = (
+    "reinforce_form",            # 强化形式组合
+    "keep_observing",            # 继续观察
+    "adjust_form_ab",            # 形式 A/B 调整
+    "adjust_content_direction",  # 内容方向调整(驳回)
+    "adjust_timing_frequency",   # 时机/频次调整(限流)
+    "reflow_metrics",            # 登记数据回流
+    "scale_up_combination",      # 组合放大(分组)
+    "maintain_observation",      # 维持观察(分组)
+    "change_form_strategy",      # 形式变革(分组)
+)
+
+# 分组复盘最小指标样本(策略判定线——
+# 不足时附加"继续积累"建议)
+RETRO_GROUP_MIN_PUBLISHED = 3
+
+# ============================================================
 # 合规规则库种子(对象化 Schema——P1 播种)
 # ============================================================
 
@@ -964,6 +1010,37 @@ def _validate_registry() -> None:
             "redteam"}:
         raise RuntimeError(
             "nexus74 进化日志域非法")
+    # ⑬ P6 复盘域校验
+    if set(RETRO_SCOPES) != {
+            "single", "group"}:
+        raise RuntimeError(
+            "nexus74 复盘范围域非法")
+    if set(RETRO_VERDICTS) != {
+            "effective", "neutral",
+            "ineffective", "blocked",
+            "pending_data"}:
+        raise RuntimeError(
+            "nexus74 复盘结论域非法")
+    if set(RETRO_VERDICT_LABELS) \
+            != set(RETRO_VERDICTS):
+        raise RuntimeError(
+            "nexus74 复盘结论标签不闭合")
+    if set(RETRO_ADVICE_CODES) != {
+            "reinforce_form",
+            "keep_observing",
+            "adjust_form_ab",
+            "adjust_content_direction",
+            "adjust_timing_frequency",
+            "reflow_metrics",
+            "scale_up_combination",
+            "maintain_observation",
+            "change_form_strategy"}:
+        raise RuntimeError(
+            "nexus74 复盘建议码域非法")
+    if not (1 <= RETRO_GROUP_MIN_PUBLISHED
+            <= 10):
+        raise RuntimeError(
+            "nexus74 分组样本线域外")
     logger.info(
         "nexus74_registry_validated "
         "platforms=%s rules=%s "

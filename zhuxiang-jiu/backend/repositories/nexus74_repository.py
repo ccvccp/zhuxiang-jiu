@@ -44,6 +44,7 @@ class Nexus74Repository:
     TABLE_METRICS = "nexus_metrics"
     TABLE_AUDITS = "nexus_audits"
     TABLE_LEARNINGS = "nexus_learnings"
+    TABLE_RETROSPECTS = "nexus_retrospects"
     TABLE_IMMUNITY = "nexus_immunity"
     TABLE_REDTEAM = "nexus_redteam"
     TABLE_EVOLOG = "nexus_evolution_log"
@@ -57,6 +58,7 @@ class Nexus74Repository:
                    TABLE_METRICS,
                    TABLE_AUDITS,
                    TABLE_LEARNINGS,
+                   TABLE_RETROSPECTS,
                    TABLE_IMMUNITY,
                    TABLE_REDTEAM,
                    TABLE_EVOLOG)
@@ -74,6 +76,7 @@ class Nexus74Repository:
         "readCount", "likeCount",
         "commentCount", "shareCount",
         "proposedChangeId",
+        "retroId",
         "runId", "evoLogId",
         "emojiDensity",
     )
@@ -100,6 +103,7 @@ class Nexus74Repository:
         "vectors", "signals",
         "hits", "keywords", "tags",
         "hours", "evidence",
+        "advices",
     )
 
     def __init__(self, store: dict = None):
@@ -470,6 +474,35 @@ class Nexus74Repository:
             records = [r for r in records
                        if r.get("kind")
                        == kind]
+        return records
+
+    # ============================================================
+    # P6 发布后复盘
+    # ============================================================
+
+    async def save_retro(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_RETROSPECTS,
+            record["retroId"], record)
+
+    async def get_retro(
+            self, retro_id) -> dict | None:
+        return await self._get(
+            self.TABLE_RETROSPECTS,
+            retro_id)
+
+    async def list_retrospects(
+            self, scope: str = None,
+            limit: int = 200
+    ) -> list[dict]:
+        records = await self._list(
+            self.TABLE_RETROSPECTS,
+            limit=limit)
+        if scope:
+            records = [r for r in records
+                       if r.get("scope")
+                       == scope]
         return records
 
     # ============================================================
