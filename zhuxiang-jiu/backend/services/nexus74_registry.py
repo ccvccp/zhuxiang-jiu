@@ -357,6 +357,120 @@ PERSONA_SEEDS: list = [
 ]
 
 # ============================================================
+# P2 内容适配管线(决策面——确定性模板)
+# ============================================================
+
+# 平台标题字符上限(结构校验)
+TITLE_MAX_LEN: dict = {
+    "wechat_mp": 64,
+    "douyin": 55,
+    "xiaohongshu": 20,
+    "zhihu": 50,
+    "bilibili": 80,
+    "toutiao": 30,
+}
+
+# 意图×开头钩子(确定性选择)
+HOOK_WORDS: dict = {
+    "news": "1分钟看懂",
+    "tutorial": "干货教程",
+    "seeding": "真实测评",
+    "opinion": "深度观点",
+}
+
+# 意图×品类词(B站标题用)
+CATEGORY_WORDS: dict = {
+    "news": "酒圈资讯",
+    "tutorial": "品鉴教学",
+    "seeding": "好物开箱",
+    "opinion": "行业观察",
+}
+
+# 平台标题模板(确定性拼接——占位符
+# {title}/{hook}/{emoji}/{exclaim}/
+# {category}/{keypoint})
+TITLE_TEMPLATES: dict = {
+    "wechat_mp": "深度｜{title}",
+    "douyin": "{title}｜{hook}",
+    "xiaohongshu": "{emoji} {title}{exclaim}",
+    "zhihu": "如何理性看待：{title}？",
+    "bilibili": "【{category}】{title}",
+    "toutiao": "{title}，{keypoint}",
+}
+
+# 摘要截取长度(确定性 digest)
+DIGEST_LEN = 60
+
+# 平台摘要模板
+SUMMARY_TEMPLATES: dict = {
+    "wechat_mp": "导读：{digest}",
+    "douyin": "黄金3秒开头：{digest}",
+    "xiaohongshu": "{digest}",
+    "zhihu": "核心观点：{digest}",
+    "bilibili": "本期看点：{digest}",
+    "toutiao": "摘要：{digest}",
+}
+
+# 意图×基础标签域(标签拼接素材)
+TAG_BASES: dict = {
+    "news": ("酒类资讯", "行业动态"),
+    "tutorial": ("品鉴教程", "入门指南"),
+    "seeding": ("好物分享", "真实测评"),
+    "opinion": ("行业观察", "理性讨论"),
+}
+
+# 平台标签上限(0=不产标签——
+# 依赖标题/目录的形态)
+TAG_LIMITS: dict = {
+    "wechat_mp": 0,
+    "douyin": 5,
+    "xiaohongshu": 8,
+    "zhihu": 0,
+    "bilibili": 5,
+    "toutiao": 3,
+}
+
+# 平台标签前缀
+TAG_PREFIX: dict = {
+    "douyin": "#",
+    "xiaohongshu": "#",
+    "toutiao": "#",
+}
+
+# Emoji 合规集(按 emojiDensity 消费;
+# 不含碰杯/干杯类画面——R1/R2 合规)
+EMOJI_SETS: dict = {
+    "wechat_mp": (),
+    "douyin": ("🔥",),
+    "xiaohongshu": ("🍷", "✨", "🌿"),
+    "zhihu": (),
+    "bilibili": ("▶️",),
+    "toutiao": (),
+}
+
+# 感叹收尾(小红书——情绪化)
+EXCLAIM_MARK = "！"
+
+# 人设状态×话术包(记忆人设层——
+# 确定性模板, LLM 禁入)
+TALKING_POINTS: dict = {
+    "professional": {
+        "opening": "从专业角度看，",
+        "closing": "以上内容供参考，"
+                   "欢迎交流。",
+    },
+    "observer": {
+        "opening": "理性观察：",
+        "closing": "欢迎理性讨论，"
+                   "共同探讨。",
+    },
+    "companion": {
+        "opening": "朋友们，",
+        "closing": "咱们评论区见～",
+    },
+}
+
+# ============================================================
 # 合规规则库种子(对象化 Schema——P1 播种)
 # ============================================================
 
@@ -625,7 +739,32 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 "nexus74 人格种子"
                 "状态域外")
-    # ⑧ 规则种子域校验
+    # ⑧ P2 适配模板域校验
+    for domain in (TITLE_MAX_LEN,
+                   TITLE_TEMPLATES,
+                   SUMMARY_TEMPLATES,
+                   TAG_LIMITS, EMOJI_SETS):
+        if set(domain) != set(PLATFORMS):
+            raise RuntimeError(
+                "nexus74 适配模板平台列"
+                "不闭合")
+    if (set(HOOK_WORDS)
+            != set(INTENT_TYPES)
+            or set(CATEGORY_WORDS)
+            != set(INTENT_TYPES)
+            or set(TAG_BASES)
+            != set(INTENT_TYPES)):
+        raise RuntimeError(
+            "nexus74 意图素材行缺失")
+    for t in TITLE_MAX_LEN.values():
+        if not (0 < t <= 100):
+            raise RuntimeError(
+                "nexus74 标题上限域外")
+    if set(TALKING_POINTS) \
+            != set(PERSONA_STATES):
+        raise RuntimeError(
+            "nexus74 话术包状态不闭合")
+    # ⑨ 规则种子域校验
     for seed in RULE_SEEDS:
         if seed["ruleType"] \
                 not in RULE_TYPES:
@@ -643,7 +782,7 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 "nexus74 规则种子"
                 "置信度域外")
-    # ⑨ P5 预定义域封闭
+    # ⑩ P5 预定义域封闭
     if set(DRIFT_SIGNALS) != {
             "publish_anomaly",
             "rejection_anomaly",

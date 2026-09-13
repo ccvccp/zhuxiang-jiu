@@ -131,6 +131,50 @@ class WarningInjectRequest(BaseModel):
         description="待注入文本")
 
 
+class SourceCreateRequest(BaseModel):
+    title: str = Field(
+        ..., max_length=200,
+        description="源标题")
+    body: str = Field(
+        ..., max_length=20000,
+        description="源正文")
+    intent: str = Field(
+        ..., description="意图: news/"
+                         "tutorial/seeding/"
+                         "opinion")
+    keywords: list = Field(
+        default_factory=list,
+        description="关键词"
+                    "(上限 10)")
+    hasImage: bool = Field(
+        False, description="含图素材")
+    hasVideo: bool = Field(
+        False, description="含视频素材")
+
+
+class AdaptRequest(BaseModel):
+    sourceId: int = Field(
+        ..., gt=0,
+        description="源内容 ID")
+    platform: str = Field(
+        ..., description="目标平台")
+    personaState: str = Field(
+        "", description="人设状态覆盖"
+                       "(可空: professional/"
+                       "observer/companion)")
+
+
+class AdaptBatchRequest(BaseModel):
+    sourceId: int = Field(
+        ..., gt=0,
+        description="源内容 ID")
+    personaState: str = Field(
+        "", description="人设状态覆盖")
+    topN: int = Field(
+        0, ge=0, le=6,
+        description="Top-N(0=默认 3)")
+
+
 # ============================================================
 # ① 合规规则库(观测面——常开)
 # ============================================================
@@ -313,6 +357,199 @@ async def persona_state(
         return {"code": 0,
                 "data": await _service()
                 .persona_state(platform)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P2 ② 源内容登记(观测面——常开)
+# ============================================================
+
+@router.post("/sources")
+async def create_source(
+        body: SourceCreateRequest,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """源内容登记(intent 感知分类)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p2_service import (
+            Nexus74P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P2Service()
+                .create_source(
+                    body.model_dump())}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/sources/{source_id}")
+async def get_source(
+        source_id: int,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """源内容详情(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p2_service import (
+            Nexus74P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P2Service()
+                .get_source(source_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/sources")
+async def list_sources(
+        limit: int = 50,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """源内容列表(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p2_service import (
+            Nexus74P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P2Service()
+                .list_sources(
+                    limit=limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P2 ③ 平台选择矩阵(观测面——常开)
+# ============================================================
+
+@router.get("/platform/matrix")
+async def platform_matrix(
+        intent: str = "",
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """平台选择矩阵(intent×平台
+    适配分——Top-N)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p2_service import (
+            Nexus74P2Service,
+        )
+        return {"code": 0,
+                "data":
+                    Nexus74P2Service()
+                    .platform_matrix(
+                        intent=intent)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P2 ④ 内容适配(决策面——MODE 门控)
+# ============================================================
+
+def _require_decision_plane():
+    """适配面 MODE 门控(off=409——
+    决策面关闭, 观测面不受影响)"""
+    from services.nexus74_registry import (
+        current_mode,
+    )
+    mode = current_mode()
+    if mode == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="NEXUSFLOW74_MODE=off"
+                  "(默认 off——适配决策面"
+                  "关闭, 观测面不受影响)")
+    return mode
+
+
+@router.post("/adapt")
+async def adapt(
+        body: AdaptRequest,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """单平台内容适配(标题/摘要/标签/
+    话术包——合规前置+确定性模板)"""
+    try:
+        _require_admin(x_role)
+        _require_decision_plane()
+        from services.nexus74_p2_service import (
+            Nexus74P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P2Service()
+                .adapt(
+                    source_id=body.sourceId,
+                    platform=body.platform,
+                    persona_state=body
+                    .personaState)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/adapt/batch")
+async def adapt_batch(
+        body: AdaptBatchRequest,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """多平台批量适配(矩阵驱动
+    Top-N——适配分降序)"""
+    try:
+        _require_admin(x_role)
+        _require_decision_plane()
+        from services.nexus74_p2_service import (
+            Nexus74P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P2Service()
+                .adapt_batch(
+                    source_id=body.sourceId,
+                    persona_state=body
+                    .personaState,
+                    top_n=body.topN)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/adaptations")
+async def list_adaptations(
+        sourceId: int = 0,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """适配版本列表(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p2_service import (
+            Nexus74P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P2Service()
+                .list_adaptations(
+                    source_id=sourceId
+                    or None)}
     except HTTPException:
         raise
     except Exception as exc:

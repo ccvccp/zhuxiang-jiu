@@ -37,12 +37,16 @@ class Nexus74Repository:
 
     TABLE_PERSONAS = "nexus_personas"
     TABLE_RULES = "nexus_rules"
+    TABLE_SOURCES = "nexus_sources"
+    TABLE_ADAPTATIONS = "nexus_adaptations"
     TABLE_IMMUNITY = "nexus_immunity"
     TABLE_REDTEAM = "nexus_redteam"
     TABLE_EVOLOG = "nexus_evolution_log"
 
     _ALL_TABLES = (TABLE_PERSONAS,
                    TABLE_RULES,
+                   TABLE_SOURCES,
+                   TABLE_ADAPTATIONS,
                    TABLE_IMMUNITY,
                    TABLE_REDTEAM,
                    TABLE_EVOLOG)
@@ -53,24 +57,29 @@ class Nexus74Repository:
 
     _INT_FIELDS = (
         "personaId", "ruleId",
+        "sourceId", "adaptationId",
         "runId", "evoLogId",
         "emojiDensity",
     )
     _FLOAT_FIELDS = (
-        "confidence",
+        "confidence", "matrixScore",
     )
     _BOOL_FIELDS = (
         "enabled", "harborApplied",
-        "allDefended",
+        "allDefended", "hasImage",
+        "hasVideo", "warningInjected",
+        "delivered", "needsReview",
+        "shadow", "hasWarning",
     )
     _JSON_DICT_FIELDS = (
         "testCases", "context",
-        "detail",
+        "detail", "talkingPoints",
+        "compliance",
     )
     _JSON_LIST_FIELDS = (
         "patterns", "safeHarbor",
         "vectors", "signals",
-        "hits",
+        "hits", "keywords", "tags",
     )
 
     def __init__(self, store: dict = None):
@@ -263,3 +272,53 @@ class Nexus74Repository:
                           rule_id) -> bool:
         return await self._delete(
             self.TABLE_RULES, rule_id)
+
+    # ============================================================
+    # P2 源内容登记
+    # ============================================================
+
+    async def save_source(self,
+                          record: dict) -> dict:
+        return await self._save(
+            self.TABLE_SOURCES,
+            record["sourceId"], record)
+
+    async def get_source(
+            self, source_id) -> dict | None:
+        return await self._get(
+            self.TABLE_SOURCES, source_id)
+
+    async def list_sources(
+            self, limit: int = 100
+    ) -> list[dict]:
+        return await self._list(
+            self.TABLE_SOURCES, limit=limit)
+
+    # ============================================================
+    # P2 适配版本
+    # ============================================================
+
+    async def save_adaptation(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_ADAPTATIONS,
+            record["adaptationId"], record)
+
+    async def get_adaptation(
+            self, adaptation_id) -> dict | None:
+        return await self._get(
+            self.TABLE_ADAPTATIONS,
+            adaptation_id)
+
+    async def list_adaptations(
+            self, source_id=None,
+            limit: int = 200
+    ) -> list[dict]:
+        records = await self._list(
+            self.TABLE_ADAPTATIONS,
+            limit=limit)
+        if source_id is not None:
+            records = [r for r in records
+                       if r.get("sourceId")
+                       == source_id]
+        return records
