@@ -25,7 +25,6 @@
 
 import contextlib
 import logging
-import os
 
 from core.locks import get_lock
 from core.helpers import ts
@@ -33,7 +32,8 @@ from repositories.chat_repository import (
     ChatRepository,
     # 会话状态
     SESSION_STATUS_AI, SESSION_STATUS_HUMAN,
-    SESSION_STATUS_ENDED, SESSION_TYPE_PRESALE, SENDER_USER, SENDER_AI, SENDER_SYSTEM,
+    SESSION_STATUS_ENDED, SESSION_TYPE_PRESALE, SENDER_USER, SENDER_AI,
+    SENDER_SYSTEM, SENDER_CUSTOMER_SERVICE,
     # 消息类型
     MESSAGE_TYPE_TEXT,
     # 知识库
@@ -43,6 +43,8 @@ from repositories.chat_repository import (
 from services.ai_scoring_ext_service import MessageContentScorer
 # 知识库训练模块(检索消费方: 新库优先, 旧FAQ兜底, 未命中回写缺口)
 from services.knowledge_service import KnowledgeService
+# P3 三态灰度(LLM 轨 off/shadow/assist + 护栏)
+from services.chat_mode_service import ChatModeService
 
 SENSITIVE_WORDS = MessageContentScorer.SENSITIVE_WORDS
 
@@ -73,10 +75,8 @@ REFUND_KEYWORDS = ("退款", "退货", "换货", "售后", "退钱", "仅退款"
 COMPLEX_KEYWORDS = ("定制", "团购", "代理", "加盟", "贴牌", "企业采购")
 # VIP 会员等级阈值(L4/L5/SVIP 直接人工, 设计文档 5.1)
 VIP_MEMBER_LEVEL = 4
-# 情绪风险阈值(复用 role 满意度预测: riskScore>=60 干预)
-from repositories.role_repository import SATISFACTION_RISK_THRESHOLD  # noqa: E402
 # 情绪负向关键词(复用 role 词库: 情绪愤怒触发)
-from repositories.role_repository import NEGATIVE_EMOTION_KEYWORDS  # noqa: E402
+from repositories.role_repository import NEGATIVE_EMOTION_KEYWORDS
 # 默认客服ID(简化: 轮询分配, 此处固定)
 DEFAULT_CUSTOMER_SERVICE_ID = 1
 
@@ -90,6 +90,7 @@ class ChatService:
     def __init__(self, repo: ChatRepository = ChatRepository()):
         self.repo = repo
         self.knowledge_svc = KnowledgeService()
+        self.mode_svc = ChatModeService()
 
     # ============================================================
     # 1. 创建会话
@@ -374,6 +375,8 @@ class ChatService:
                 # P3.2: RAG 引用溯源(旧 FAQ 兜底时为空列表)
                 "citations": knowledge.get("citations") or [],
                 "ragMode": knowledge.get("ragMode") or "legacy",
+                # P3 shadow: LLM 答案留痕(不呈现, admin 审计)
+                "shadowLlm": knowledge.get("shadowLlm"),
             }
         else:
             # 未命中: 兜底回复 + 未解决计数+1 + 记录知识缺口(飞轮)
@@ -401,6 +404,8 @@ class ChatService:
             "mediaUrl": None, "mediaThumb": None, "mediaSize": 0, "duration": 0,
             "aiConfidence": reply["aiConfidence"],
             "isRead": False, "readAt": None,
+            # P3 shadow: LLM 答案随消息落库留痕(admin 经消息接口审计)
+            "shadowLlm": reply.get("shadowLlm"),
         })
         reply["messageId"] = message_id
         return reply
@@ -423,9 +428,10 @@ class ChatService:
             ticket_no = dispatch.get("ticketNo", "")
             if dispatch.get("assigneeId"):
                 assigned_id = dispatch["assigneeId"]
-        except Exception:
-            # 调度中枢异常不影响转接主流程(回退默认客服)
-            pass
+        except Exception as exc:
+            # P4: 调度中枢异常留痕(日志+会话字段), 不影响转接主流程
+            logger.exception("chat_dispatch_customer_service_failed")
+            session["dispatchError"] = str(exc)[:200]
 
         session["status"] = SESSION_STATUS_HUMAN
         session["customerServiceId"] = assigned_id
@@ -565,8 +571,9 @@ class ChatService:
             raise KeyError(f"会话不存在(sessionId={session_id})")
         return session
 
-    async def list_messages(self, session_id: str, limit: int = 100) -> list[dict]:
-        """查询会话消息
+    async def list_messages(self, session_id: str, limit: int = 100,
+                            since_message_id: int = None) -> list[dict]:
+        """查询会话消息(since_message_id 增量模式, 缺省全量)
 
         Raises:
             KeyError: 会话不存在
@@ -574,7 +581,20 @@ class ChatService:
         session = await self.repo.get_session(session_id)
         if session is None:
             raise KeyError(f"会话不存在(sessionId={session_id})")
-        return await self.repo.list_messages(session_id, limit)
+        return await self.repo.list_messages(session_id, limit, since_message_id)
+
+    async def mark_session_read(self, session_id: str) -> dict:
+        """标记会话已读(会员视角: AI/客服消息置为已读, P1 实时配套)
+
+        Raises:
+            KeyError: 会话不存在
+        """
+        session = await self.repo.get_session(session_id)
+        if session is None:
+            raise KeyError(f"会话不存在(sessionId={session_id})")
+        count = (await self.repo.mark_read(session_id, SENDER_AI)
+                 + await self.repo.mark_read(session_id, SENDER_CUSTOMER_SERVICE))
+        return {"sessionId": session_id, "marked": count}
 
     async def list_user_sessions(self, user_id: int, limit: int = 50) -> list[dict]:
         """查询用户会话列表"""
@@ -586,31 +606,165 @@ class ChatService:
         return await self.repo.list_all_sessions(status, session_type, limit)
 
     # ============================================================
+    # 6.2 客服工作台(P2: 排队/接入/回复)
+    # ============================================================
+
+    async def cs_queue(self, status: str = SESSION_STATUS_HUMAN,
+                       limit: int = 100) -> list[dict]:
+        """客服排队列表(按状态筛选: waiting/human_chatting/transferring)"""
+        return await self.repo.list_all_sessions(status=status, limit=limit)
+
+    async def cs_accept(self, session_id: str) -> dict:
+        """客服接入会话(human_chatting 会话; 已接入幂等返回)
+
+        语义: 转人工时调度中枢已预分配 customerServiceId,
+        "接入"是客服工作台的显式动作(csAccepted 标记 + 接入系统消息)。
+
+        Raises:
+            KeyError: 会话不存在
+            ValueError: 会话已关闭/非人工态
+        """
+        lock_key = f"chat:session:{session_id}"
+        async with get_lock(lock_key):
+            session = await self.repo.get_session(session_id)
+            if session is None:
+                raise KeyError(f"会话不存在(sessionId={session_id})")
+            if session["status"] == SESSION_STATUS_ENDED:
+                raise ValueError("会话已关闭, 无法接入")
+            if session["status"] != SESSION_STATUS_HUMAN:
+                raise ValueError(
+                    f"会话非人工对话中(当前{session['status']}), 无法接入")
+            if session.get("csAccepted"):
+                # 已接入: 幂等返回(重复接入不报错)
+                return {
+                    "sessionId": session_id,
+                    "customerServiceId": session["customerServiceId"],
+                    "acceptedAt": session.get("acceptedAt", ""),
+                    "alreadyAssigned": True,
+                }
+            session["csAccepted"] = True
+            session["customerServiceId"] = (session.get("customerServiceId")
+                                            or DEFAULT_CUSTOMER_SERVICE_ID)
+            session["acceptedAt"] = ts()
+            await self.repo.save_session(session)
+            await self.repo.add_message({
+                "sessionId": session_id,
+                "senderType": SENDER_SYSTEM,
+                "senderId": 0,
+                "messageType": MESSAGE_TYPE_TEXT,
+                "content": "人工客服已接入, 请问有什么可以帮您?",
+                "mediaUrl": None, "mediaThumb": None, "mediaSize": 0,
+                "duration": 0,
+                "aiConfidence": None, "isRead": False, "readAt": None,
+            })
+            return {
+                "sessionId": session_id,
+                "customerServiceId": session["customerServiceId"],
+                "acceptedAt": session["acceptedAt"],
+                "alreadyAssigned": False,
+            }
+
+    async def cs_reply(self, session_id: str, customer_service_id: int,
+                      content: str, message_type: str = MESSAGE_TYPE_TEXT) -> dict:
+        """客服回复消息(走敏感词过滤, 不触发 AI 自动回复)
+
+        Raises:
+            KeyError: 会话不存在
+            ValueError: 会话已关闭/非人工态/含敏感词
+        """
+        # 敏感词过滤(写入前拦截, 与用户消息同口径)
+        if content:
+            hit = next((w for w in SENSITIVE_WORDS if w in content), None)
+            if hit:
+                raise ValueError("消息包含敏感词, 发送被拒绝(请修改后重发)")
+
+        lock_key = f"chat:session:{session_id}"
+        async with get_lock(lock_key):
+            session = await self.repo.get_session(session_id)
+            if session is None:
+                raise KeyError(f"会话不存在(sessionId={session_id})")
+            if session["status"] == SESSION_STATUS_ENDED:
+                raise ValueError("会话已关闭, 无法回复")
+            if session["status"] != SESSION_STATUS_HUMAN:
+                raise ValueError(
+                    f"会话非人工对话中(当前{session['status']}), 无法回复")
+            if not session.get("csAccepted"):
+                raise ValueError("会话未被客服接入, 请先 accept")
+
+            message_id = await self.repo.add_message({
+                "sessionId": session_id,
+                "senderType": SENDER_CUSTOMER_SERVICE,
+                "senderId": customer_service_id,
+                "messageType": message_type,
+                "content": content,
+                "mediaUrl": None, "mediaThumb": None, "mediaSize": 0,
+                "duration": 0,
+                "aiConfidence": None, "isRead": False, "readAt": None,
+            })
+            return {
+                "sessionId": session_id,
+                "messageId": message_id,
+                "customerServiceId": customer_service_id,
+            }
+
+    # ============================================================
     # 6.5 知识库检索消费方(新知识库模块优先, 旧FAQ兜底)
     # ============================================================
 
     async def _search_knowledge(self, user_content: str) -> dict | None:
-        """统一知识检索(P3.2, D-18): RAG 问答优先(direct/synthesized
-        带引用溯源), 旧 chat_knowledge(关键词匹配)兜底。
+        """统一知识检索(P3 升级: 三态灰度 CHAT_LLM_MODE=off/shadow/assist)
+
+        - off:    rule 轨(新库 rule 合成 + 旧 FAQ 兜底), 零影响——默认
+        - shadow: rule 轨照常返回, 并行 best-effort LLM 答案写入
+                  shadowLlm 字段留痕(不呈现, admin 可审计)
+        - assist: LLM 轨(未配置 key/失败自动回退 rule 轨, 行为同 off)
+                  旧 KNOWLEDGE_CHAT_LLM=on 映射为 assist(兼容)。
 
         RAG unsolved 或新库异常不阻断对话(best-effort 降级旧库)。
-
-        P3.3 联动: KNOWLEDGE_CHAT_LLM=on 且 llm_client 可用时,
-        synthesized 态走大模型合成(未配置 key/失败自动回退 rule 轨,
-        行为与关闭开关一致); 默认 off 保持 rule 轨零成本。
         """
+        mode = (await self.mode_svc.current_mode())["mode"]
+        provider = "llm" if mode == "assist" else "rule"
+
+        def _rag_to_knowledge(rag: dict) -> dict:
+            return {"id": rag["citations"][0]["entryId"],
+                    "answer": rag["answer"],
+                    "citations": rag["citations"],
+                    "confidence": rag["confidence"],
+                    "ragMode": rag["mode"]}
+
+        if mode == "shadow":
+            # 影子期: rule 轨为主(用户可见), LLM 答案并行留痕(不呈现)
+            knowledge = None
+            try:
+                rag = await self.knowledge_svc.rag_answer(
+                    user_content, provider="rule")
+                if rag["mode"] != "unsolved" and rag["answer"]:
+                    knowledge = _rag_to_knowledge(rag)
+            except Exception:
+                pass
+            if knowledge is None:
+                legacy = await self.repo.search_knowledge(user_content, limit=1)
+                knowledge = legacy[0] if legacy else None
+            # best-effort LLM 留痕(失败静默——影子对比不阻断主流程)
+            try:
+                llm_rag = await self.knowledge_svc.rag_answer(
+                    user_content, provider="llm")
+                if llm_rag.get("answer") and knowledge is not None:
+                    knowledge["shadowLlm"] = {
+                        "answer": llm_rag["answer"],
+                        "confidence": llm_rag.get("confidence"),
+                        "ragMode": llm_rag.get("mode"),
+                        "citations": llm_rag.get("citations") or [],
+                    }
+            except Exception:
+                pass
+            return knowledge
+
         try:
-            provider = ("llm" if os.environ.get(
-                "KNOWLEDGE_CHAT_LLM", "off").strip().lower() == "on"
-                else "rule")
             rag = await self.knowledge_svc.rag_answer(
                 user_content, provider=provider)
             if rag["mode"] != "unsolved" and rag["answer"]:
-                return {"id": rag["citations"][0]["entryId"],
-                        "answer": rag["answer"],
-                        "citations": rag["citations"],
-                        "confidence": rag["confidence"],
-                        "ragMode": rag["mode"]}
+                return _rag_to_knowledge(rag)
         except Exception:
             pass
         # 旧 FAQ 兜底(迁移过渡期)

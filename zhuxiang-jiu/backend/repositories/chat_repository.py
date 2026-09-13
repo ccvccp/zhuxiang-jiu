@@ -189,11 +189,16 @@ class ChatRepository:
             return await self._redis_get_message(message_id)
         return self._mem_get_message(message_id)
 
-    async def list_messages(self, session_id: str, limit: int = 100) -> list[dict]:
-        """查询会话消息(按时间正序)"""
+    async def list_messages(self, session_id: str, limit: int = 100,
+                            since_message_id: int = None) -> list[dict]:
+        """查询会话消息(按时间正序; since_message_id 增量模式)
+
+        since_message_id 非空时仅返回 id 大于该值的消息(P1 实时轮询增量游标),
+        缺省保持全量行为(兼容旧调用)。
+        """
         if is_redis_mode():
-            return await self._redis_list_messages(session_id, limit)
-        return self._mem_list_messages(session_id, limit)
+            return await self._redis_list_messages(session_id, limit, since_message_id)
+        return self._mem_list_messages(session_id, limit, since_message_id)
 
     async def mark_read(self, session_id: str, sender_type: str) -> int:
         """将会话中某方消息标记已读, 返回更新条数"""
@@ -326,9 +331,12 @@ class ChatRepository:
         self._ensure_store()
         return self.store["chat_messages"].get(message_id)
 
-    def _mem_list_messages(self, session_id: str, limit: int = 100) -> list[dict]:
+    def _mem_list_messages(self, session_id: str, limit: int = 100,
+                           since_message_id: int = None) -> list[dict]:
         self._ensure_store()
         ids = self.store["chat_messages_by_session"].get(session_id, [])
+        if since_message_id is not None:
+            ids = [mid for mid in ids if mid > since_message_id]
         msgs = [self.store["chat_messages"][mid] for mid in ids
                 if mid in self.store["chat_messages"]]
         msgs.sort(key=lambda m: m.get("createdAt", ""))
@@ -419,6 +427,8 @@ class ChatRepository:
         await client.set(_k("chat", "session", session_id),
                          json.dumps(session, ensure_ascii=False))
         if is_new:
+            # P4 性能: 会话索引集(替代管理端 KEYS * 全量扫描)
+            await client.sadd(_k("chat", "session_index"), session_id)
             user_id = session.get("userId")
             if user_id is not None:
                 await client.lpush(_k("chat", "sessions_by_user", user_id), session_id)
@@ -435,18 +445,31 @@ class ChatRepository:
 
     async def _redis_list_all_sessions(self, status: str = None, session_type: str = None,
                                         limit: int = 100) -> list[dict]:
+        """P4 性能修复: 索引集反查(替代 KEYS * 全量扫描)
+
+        索引集为空时(存量数据未建索引)回退一次全量扫描并回填索引。
+        """
         client = await get_redis_client()
-        keys = await client.keys(_k("chat", "session", "*"))
+        keys = await client.smembers(_k("chat", "session_index"))
+        if not keys:
+            # 存量兜底: 一次 KEYS 扫描 + 回填索引(此后不再全量扫描)
+            keys = await client.keys(_k("chat", "session", "*"))
+            for key in keys:
+                await client.sadd(
+                    _k("chat", "session_index"),
+                    key.decode() if isinstance(key, bytes) else key)
         sessions = []
         for key in keys:
-            data = await client.get(key)
-            if data:
-                s = json.loads(data)
-                if status and s.get("status") != status:
-                    continue
-                if session_type and s.get("sessionType") != session_type:
-                    continue
-                sessions.append(s)
+            session_id = (key.decode() if isinstance(key, bytes) else key)
+            data = await client.get(_k("chat", "session", session_id))
+            if not data:
+                continue
+            s = json.loads(data)
+            if status and s.get("status") != status:
+                continue
+            if session_type and s.get("sessionType") != session_type:
+                continue
+            sessions.append(s)
         sessions.sort(key=lambda s: s.get("createdAt", ""), reverse=True)
         return sessions[:limit]
 
@@ -467,10 +490,13 @@ class ChatRepository:
             return None
         return json.loads(data)
 
-    async def _redis_list_messages(self, session_id: str, limit: int = 100) -> list[dict]:
+    async def _redis_list_messages(self, session_id: str, limit: int = 100,
+                                  since_message_id: int = None) -> list[dict]:
         client = await get_redis_client()
         # lpush 写入为倒序, 取 limit 后反转
         ids = await client.lrange(_k("chat", "messages_by_session", session_id), 0, limit - 1)
+        if since_message_id is not None:
+            ids = [mid for mid in ids if int(mid) > since_message_id]
         msgs = []
         for mid in ids:
             data = await client.get(_k("chat", "message", mid))
