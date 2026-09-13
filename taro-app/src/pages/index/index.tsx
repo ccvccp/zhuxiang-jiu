@@ -80,6 +80,7 @@ const QUICK_ENTRIES = [
   { key: 'map', icon: '🗺️', label: '智图地图' },
   { key: 'zhidan', icon: '📦', label: '智单订单' },
   { key: 'zhike', icon: '👑', label: '智客会员' },
+  { key: 'asset', icon: '💎', label: '资产估值' },
 ];
 
 const IndexPage: React.FC = () => {
@@ -306,6 +307,9 @@ const IndexPage: React.FC = () => {
         break;
       case 'zhike':
         Taro.navigateTo({ url: '/pages/zk/index' });
+        break;
+      case 'asset':
+        Taro.navigateTo({ url: '/pages/av62/index' });
         break;
     }
   };

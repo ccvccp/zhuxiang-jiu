@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<!--
+    62号·AI智能无形资产估值模型 v1.0 · 估值工作台
+    页面: ai-asset-dashboard.html(配套脚本 js/asset-dashboard.js)
+    依赖: css/style.css(主题变量) / 后端 62号 av62_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    鉴权: X-Role: admin(全部管理端区块)
+    区块: ①模型状态(第37档案/八因子) ②四区看板(度量/资产/评估/防御)
+          ③资产列表(三角色×九域+负资产) ④评估流水(版本链/置信度/净贡献)
+    说明: 观测面不受 AV62_MODE 影响; 资产登记/估值等决策面操作
+          经 API 直接调用(off 态 409)
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>62号·无形资产估值工作台</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#3f5f4f,#6fa08a);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #3f5f4f;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    table.matrix{width:100%;border-collapse:collapse;font-size:12px}
+    table.matrix th,table.matrix td{border:1px solid
+        var(--color-border,#e5e5e5);padding:6px 8px;text-align:left}
+    table.matrix th{background:var(--color-bg-secondary,#f7f7f7)}
+    .badge{display:inline-block;padding:1px 8px;border-radius:9px;
+        font-size:11px;white-space:nowrap}
+    .badge.green{background:#e6f7e6;color:#2c7a2c}
+    .badge.yellow{background:#fff7e0;color:#a37400}
+    .badge.red{background:#fdeaea;color:#c0392b}
+    .badge.weak{background:#eee;color:#666}
+    .badge.blue{background:#e8f1fb;color:#24619c}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:10px}
+    .ov-cell{background:var(--color-bg-secondary,#f7f9f7);border-radius:6px;
+        padding:10px 12px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:4px}
+    .ov-cell .v{font-size:20px;font-weight:600;color:#3f5f4f}
+    .ov-cell .s{font-size:11px;color:#999;margin-top:2px}
+    .kv-grid{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(200px,1fr));gap:8px}
+    .kv{background:var(--color-bg-secondary,#f7f9f7);border-radius:5px;
+        padding:8px 10px;font-size:12px}
+    .kv b{display:block;color:#555;font-weight:600;margin-bottom:2px}
+    .dash-empty{color:#999;font-size:12px;padding:14px;text-align:center}
+    .note-bar{font-size:11px;color:#999;padding:10px 4px;
+        border-top:1px solid var(--color-border,#eee);margin-top:16px}
+    .zone-block{margin-bottom:14px}
+    .zone-block h4{font-size:13px;margin:0 0 8px;color:#3f5f4f}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>62号·无形资产估值工作台</h1>
+    <p>信任要素登记 · 因果估值 · 版本链 · 红队防御（观测面不受开关影响）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="refreshData()">手动刷新</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+        </div>
+    </div>
+
+    <!-- ① 模型状态 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 模型状态（第37档案 · 八因子）</h3>
+                <span id="modeBadge" class="badge weak">…</span></div>
+            <div id="modelCells" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            <div id="factorGrid" class="kv-grid" style="margin-top:10px"></div>
+        </div>
+    </div>
+
+    <!-- ② 四区看板 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② 四区看板（度量 / 资产 / 评估 / 防御）</h3></div>
+            <div class="zone-block">
+                <h4>度量区</h4>
+                <div id="zoneMetrics" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            </div>
+            <div class="zone-block">
+                <h4>资产区（三角色 × 九域 + 负资产）</h4>
+                <div id="zoneAssets" class="kv-grid"><div class="dash-empty">加载中…</div></div>
+            </div>
+            <div class="zone-block">
+                <h4>评估区（版本链 · 置信度三档）</h4>
+                <div id="zoneAssess" class="kv-grid"><div class="dash-empty">加载中…</div></div>
+            </div>
+            <div class="zone-block">
+                <h4>防御区（红队七向量）</h4>
+                <div id="zoneDefense" class="kv-grid"><div class="dash-empty">加载中…</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ③ 资产列表 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head">
+                <h3>③ 资产列表</h3>
+                <div class="dash-toolbar">
+                    <select id="roleSel" onchange="loadAssets()">
+                        <option value="">全部角色</option>
+                        <option value="enterprise">企业</option>
+                        <option value="organization">组织</option>
+                        <option value="personal">个人</option>
+                    </select>
+                    <select id="domainSel" onchange="loadAssets()">
+                        <option value="">全部域</option>
+                    </select>
+                </div>
+            </div>
+            <table class="matrix" id="assetTable">
+                <thead><tr><th>资产ID</th><th>主体</th><th>角色</th>
+                    <th>域</th><th>标签</th><th>状态</th><th>负资产</th>
+                    <th>登记时间</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="assetEmpty" style="display:none">暂无资产</div>
+        </div>
+    </div>
+
+    <!-- ④ 评估流水 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>④ 评估流水（因果估值 · 净贡献 · 置信度）</h3></div>
+            <table class="matrix" id="assessTable">
+                <thead><tr><th>评估ID</th><th>资产</th><th>域</th>
+                    <th>版本</th><th>置信档</th><th>要素分</th>
+                    <th>净贡献</th><th>基准值</th><th>归因规则</th>
+                    <th>时间</th></tr></thead>
+                <tbody></tbody></table>
+            <div class="dash-empty" id="assessEmpty" style="display:none">暂无评估</div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        观测面不受 AV62_MODE 影响 · 资产登记/估值/压力测试/阈值校准等决策面操作
+        经 API 调用(off 态 409) · 红队七向量: POST /api/av62/redteam
+    </div>
+</div>
+
+<script src="js/asset-dashboard.js"></script>
+</body>
+</html>
