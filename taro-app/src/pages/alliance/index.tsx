@@ -438,8 +438,8 @@ const AlliancePage: React.FC = () => {
           <View className={styles.empty}>加载中...</View>
         ) : tab === 'mall' ? (
           <>
-            {/* 类目筛选 */}
-            <ScrollView scrollX className={styles.catBar}>
+            {/* 类目筛选(换行平铺: 桌面端无触摸滑动, 横向滚动条不可见会导致类目被裁剪看不全) */}
+            <View className={styles.catBar}>
               {CATEGORY_TABS.map(c => (
                 <View
                   key={c || 'all'}
@@ -449,7 +449,7 @@ const AlliancePage: React.FC = () => {
                   {c ? categoryName(c) : '全部'}
                 </View>
               ))}
-            </ScrollView>
+            </View>
 
             {/* 商品列表 */}
             {products.length === 0 ? (
