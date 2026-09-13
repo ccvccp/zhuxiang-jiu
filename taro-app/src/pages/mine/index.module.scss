@@ -200,6 +200,14 @@
   color: $color-text-tertiary;
 }
 
+// 订单区折叠开关(标题行内: "(N) ▸" / "▾")
+.orderToggle {
+  margin-left: $spacing-xs;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-normal;
+  color: $color-text-tertiary;
+}
+
 // 订单列表
 .orderList {
   display: flex;

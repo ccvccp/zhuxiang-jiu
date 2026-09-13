@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Button, ScrollView } from '@tarojs/components';
+import { View, Text, Button, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { MemberAPI } from '@/api/member';
-import { OrderAPI } from '@/api/order';
+import { OrderAPI, ORDER_STATUS_NAME } from '@/api/order';
 import { AuthAPI } from '@/api/auth';
 import { clearSession, getMemberId, isLoggedIn } from '@/services/auth-service';
 import { PointsAPI } from '@/api/points';
@@ -14,6 +14,8 @@ const MinePage: React.FC = () => {
   const [member, setMember] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  // 订单区默认折叠: 会员卡与工作台等内容优先可见, 点标题展开
+  const [ordersCollapsed, setOrdersCollapsed] = useState(true);
 
   // 退出登录
   const handleLogout = () => {
@@ -72,7 +74,8 @@ const MinePage: React.FC = () => {
         const res = await OrderAPI.myOrders();
         const orderList = (res.orders || res || []).map((o: any) => ({
           order_no: o.orderId || o.order_id || o.order_no || '',
-          status: o.status || '待付款',
+          // 状态中文化: 后端原始码 PENDING/PAID/... → 待付款/待发货/...
+          status: o.statusName || ORDER_STATUS_NAME[o.status] || o.status || '待付款',
           items: (o.items || []).map((i: any) => ({
             name: i.productName || i.name || '',
             qty: i.quantity || i.qty || 1,
@@ -204,10 +207,23 @@ const MinePage: React.FC = () => {
 
         {/* 我的订单 */}
         <View className={styles.section}>
-          <View className={styles.sectionHeader}>
-            <View className={styles.sectionTitle}>我的订单</View>
+          <View
+            className={styles.sectionHeader}
+            onClick={() => orders.length > 0 && setOrdersCollapsed(c => !c)}
+          >
+            <View className={styles.sectionTitle}>
+              我的订单{orders.length > 0 && (
+                <Text className={styles.orderToggle}>{ordersCollapsed ? ` (${orders.length}) ▸` : ' ▾'}</Text>
+              )}
+            </View>
             {orders.length > 0 && (
-              <View className={styles.orderCount} onClick={() => Taro.navigateTo({ url: '/pages/orders/index' })}>
+              <View
+                className={styles.orderCount}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  Taro.navigateTo({ url: '/pages/orders/index' });
+                }}
+              >
                 共 {orders.length} 单 · 全部订单 ›
               </View>
             )}
@@ -218,7 +234,7 @@ const MinePage: React.FC = () => {
               <View className={styles.emptyText}>暂无订单</View>
               <Button className={styles.goShoppingBtn} onClick={handleGoShopping}>去购物</Button>
             </View>
-          ) : (
+          ) : ordersCollapsed ? null : (
             <View className={styles.orderList}>
               {orders.slice().reverse().map((order: any) => (
                 <View key={order.order_no} className={styles.orderCard} onClick={() => handleViewOrder(order)}>

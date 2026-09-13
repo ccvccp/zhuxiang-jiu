@@ -378,7 +378,7 @@ const IndexPage: React.FC = () => {
             <View className={styles.assetGrid}>
               <View
                 className={styles.assetItem}
-                onClick={() => Taro.navigateTo({ url: '/pages/pointsmall/index' })}
+                onClick={() => Taro.navigateTo({ url: '/pages/points/index' })}
               >
                 <View className={styles.assetValue}>{points}</View>
                 <View className={styles.assetLabel}>积分</View>
