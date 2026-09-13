@@ -15,6 +15,7 @@ import {
   SIGN_IN_REWARD_POINTS,
   SIGN_IN_STORAGE_KEY,
   NOTICE_INTERVAL_MS,
+  beijingToday,
 } from '@/config';
 import { PointsAPI } from '@/api/points';
 import { getMemberId, isLoggedIn, requireLogin } from '@/services/auth-service';
@@ -124,7 +125,7 @@ const IndexPage: React.FC = () => {
       setPoints(member.points || 0);
       setBalance(wallet ? (wallet as any).currentBalance ?? null : null);
       setCreditQuota(quota ? quota.availableQuota : null);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = beijingToday();
       const signedToday = (signinRecords || []).some(r => r.signDate === today);
       if (signedToday) {
         setSignedInToday(true);
@@ -137,7 +138,7 @@ const IndexPage: React.FC = () => {
     } catch (e) {
       console.warn('[index] 会员信息加载失败:', e);
       // 会员态接口失败时本地兜底
-      const today = new Date().toISOString().slice(0, 10);
+      const today = beijingToday();
       const lastSign = Taro.getStorageSync(SIGN_IN_STORAGE_KEY) as string;
       setSignedInToday(lastSign === today);
     }
@@ -227,7 +228,7 @@ const IndexPage: React.FC = () => {
       return;
     }
     try {
-      const result = await PointsAPI.signIn();
+      const result = await PointsAPI.signin(Number(getMemberId()));
       const bonusTip = result?.bonusPoints
         ? `, 连续签到奖励 +${result.bonusPoints}` : '';
       Taro.showToast({
@@ -235,11 +236,11 @@ const IndexPage: React.FC = () => {
         icon: 'none',
       });
       setSignedInToday(true);
-      Taro.setStorageSync(SIGN_IN_STORAGE_KEY, new Date().toISOString().slice(0, 10));
+      Taro.setStorageSync(SIGN_IN_STORAGE_KEY, beijingToday());
       await loadMemberData();
     } catch (e) {
       console.warn('[index] 签到失败:', e);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = beijingToday();
       const lastSign = Taro.getStorageSync(SIGN_IN_STORAGE_KEY) as string;
       if (lastSign === today) {
         setSignedInToday(true);

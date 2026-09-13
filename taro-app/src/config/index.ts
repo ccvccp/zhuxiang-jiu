@@ -68,6 +68,20 @@ export const SIGN_IN_REWARD_POINTS = 5;
 /** 签到日期本地存储 key(存储当日日期字符串, 如 2026-08-27) */
 export const SIGN_IN_STORAGE_KEY = 'last_signin_date';
 
+/**
+ * 签到"今日"口径: 北京日期(UTC+8), 与后端 date.today() 一致
+ * (后端容器 TZ=Asia/Shanghai; 前端 toISOString 是 UTC 日期,
+ *  北京 0-8 点两者差一天, 会把已签误判为未签/未签误判为已签)
+ */
+export const beijingToday = (): string =>
+  new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+
+/** 北京日期口径下往前偏移 N 天的日期字符串(签到日历用) */
+export const beijingDateOffset = (days: number): string =>
+  new Date(Date.now() + 8 * 3600 * 1000 - days * 86400 * 1000)
+    .toISOString()
+    .slice(0, 10);
+
 // ============================================================
 // 首页公告轮播
 // ============================================================

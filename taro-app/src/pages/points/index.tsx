@@ -5,6 +5,7 @@ import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import { PointsAPI, PointsAccountVO, PointsLogVO, SigninResultVO } from '@/api/points';
 import { getMemberId, isLoggedIn, requireLogin } from '@/services/auth-service';
+import { beijingToday, beijingDateOffset } from '@/config';
 
 /**
  * 积分中心页 · 对接 GET /api/points/account + logs + signin 记录
@@ -46,20 +47,19 @@ const PointsPage: React.FC = () => {
     if (isLoggedIn()) loadData();
   });
 
-  // 近 7 日签到日历(周一→周日 = 今天往前 6 天)
+  // 近 7 日签到日历(周一→周日 = 今天往前 6 天; 北京日期口径与后端一致)
   const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    const dateStr = d.toISOString().slice(0, 10);
+    const dateStr = beijingDateOffset(6 - i);
+    const d = new Date(Date.now() + 8 * 3600 * 1000 - (6 - i) * 86400 * 1000);
     const rec = signRecords.find(r => r.signDate === dateStr);
     return {
       dateStr,
-      label: `${d.getMonth() + 1}/${d.getDate()}`,
+      label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`,
       signed: Boolean(rec),
       bonus: Boolean(rec?.isBonus),
     };
   });
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = beijingToday();
   const signedToday = signRecords.some(r => r.signDate === todayStr);
 
   const handleSignIn = () => {

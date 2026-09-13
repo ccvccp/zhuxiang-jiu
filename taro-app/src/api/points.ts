@@ -38,12 +38,14 @@ export const PointsAPI = {
       method: 'POST',
       data: { userId },
     });
+    // 后端响应壳 {success, data}: 解包取业务体(失败时返回 null)
+    const d = (res && res.data) || {};
     return {
-      signDate: res.signDate || '',
-      continuousDays: res.continuousDays || 1,
-      pointsEarned: res.pointsEarned || 0,
-      isBonus: Number(res.isBonus) === 1,
-      bonusPoints: res.bonusPoints || 0,
+      signDate: d.signDate || '',
+      continuousDays: d.continuousDays || 1,
+      pointsEarned: d.pointsEarned || 0,
+      isBonus: d.isBonus === true || Number(d.isBonus) === 1,
+      bonusPoints: d.bonusPoints || 0,
     };
   },
 
