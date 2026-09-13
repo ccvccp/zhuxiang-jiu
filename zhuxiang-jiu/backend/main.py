@@ -374,6 +374,10 @@ register_attract72_routes(app)
 from routes.member73_routes import register_member73_routes
 register_member73_routes(app)
 
+# NexusFlow智枢·流 AI智能全域发布大模型(74号 P1 规则中枢)
+from routes.nexus74_routes import register_nexus74_routes
+register_nexus74_routes(app)
+
 # AI智能系统升级决策(61号)
 from routes.dm61_routes import register_dm61_routes
 register_dm61_routes(app)
