@@ -6,7 +6,8 @@ import CheckoutService from '@/services/checkout-service';
 import { MemberAPI } from '@/api/member';
 import { OrderAPI } from '@/api/order';
 import { AuthAPI } from '@/api/auth';
-import { clearSession, isLoggedIn } from '@/services/auth-service';
+import { clearSession, getMemberId, isLoggedIn } from '@/services/auth-service';
+import { PointsAPI } from '@/api/points';
 import { LEVEL_NAME, NEXT_LEVEL_POINTS, statusColor, DANGER_COLOR } from '@/config';
 
 const MinePage: React.FC = () => {
@@ -49,10 +50,13 @@ const MinePage: React.FC = () => {
       // 优先调真实后端 API 获取会员信息
       try {
         const m = await MemberAPI.profile();
+        // 积分显示以积分账本为准(member.points 为遗留字段, 签到不回写)
+        const accountId = m.id ?? Number(getMemberId());
+        const account = await PointsAPI.account(accountId).catch(() => null);
         setMember({
           id: m.id,
           name: m.name,
-          points: m.points,
+          points: account ? account.totalPoints : m.points,
           level: m.level,
           role: (m as any).role || 'member',
         });

@@ -66,12 +66,14 @@ export const PointsAPI = {
   /** 积分账户(不存在自动创建) */
   async account(userId: number): Promise<PointsAccountVO> {
     const res = await request<any>({ url: `/api/points/account/${userId}` });
+    // 后端响应壳 {success, data}: 解包取业务体
+    const d = (res && res.data) || {};
     return {
-      totalPoints: res.totalPoints || 0,
-      frozenPoints: res.frozenPoints || 0,
-      totalEarned: res.totalEarned || 0,
-      totalSpent: res.totalSpent || 0,
-      expiringPoints: res.expiringPoints || 0,
+      totalPoints: d.totalPoints || 0,
+      frozenPoints: d.frozenPoints || 0,
+      totalEarned: d.totalEarned || 0,
+      totalSpent: d.totalSpent || 0,
+      expiringPoints: d.expiringPoints || 0,
     };
   },
 

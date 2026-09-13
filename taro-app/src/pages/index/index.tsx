@@ -114,15 +114,17 @@ const IndexPage: React.FC = () => {
     }
     const memberId = Number(getMemberId());
     try {
-      const [member, signinRecords, wallet, quota] = await Promise.all([
+      const [member, pointsAccount, signinRecords, wallet, quota] = await Promise.all([
         MemberAPI.profile(),
+        // 积分显示以积分账本为准(member.points 为遗留字段, 签到不回写)
+        PointsAPI.account(memberId).catch(() => null),
         // 签到今日状态以后端记录为准(本地存储仅离线兜底)
         PointsAPI.signinRecords(memberId, 7).catch(() => null),
         // 资产概览: 钱包余额 + 信用可用额度(失败不阻塞)
         WalletAPI.info().catch(() => null),
         CreditAPI.quota().catch(() => null),
       ]);
-      setPoints(member.points || 0);
+      setPoints(pointsAccount ? pointsAccount.totalPoints : (member.points || 0));
       setBalance(wallet ? (wallet as any).currentBalance ?? null : null);
       setCreditQuota(quota ? quota.availableQuota : null);
       const today = beijingToday();
