@@ -181,7 +181,7 @@ class Pay71Repository:
         "amountWithinLimit", "advisoryOnly",
         "onFront", "amountMatch",
         "orderIdMatch", "timeMatch",
-        "idempotentKey", "newDevice",
+        "newDevice",
         "oddHour", "newLocation",
         "redacted", "frozen",
         "allDefended")

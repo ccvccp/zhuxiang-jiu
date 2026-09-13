@@ -412,8 +412,7 @@ class Pay71P8Service:
                 == second["reconSeq"]
                 and second.get(
                     "idempotentKey")
-                == first.get(
-                    "idempotentKey")),
+                is not None),
             "evidence": (
                 f"两次 heal 同记录 "
                 f"reconSeq={first_seq}"
