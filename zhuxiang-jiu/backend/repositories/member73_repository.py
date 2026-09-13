@@ -197,13 +197,31 @@ class Member73Repository:
                 _k("member73",
                    table.rsplit("_", 1)[-1],
                    "*"))
+            # 仅数字尾键为记录(71号 isdigit
+            # 范式)——排除 seq 发号器
+            # (redteam 表尾与 seq 实体同名:
+            #  member73:redteam:seq 命中
+            #  redteam:* 通配符→dict(int)
+            #  TypeError[潜在——生产跑红队
+            #  即触发]; immunity 的 default
+            #  键走 _get 不受影响)
+            id_keys = sorted(
+                (str(k) for k in keys
+                 if str(k).rsplit(":", 1)[-1]
+                 .isdigit()),
+                key=lambda k: int(
+                    k.rsplit(":", 1)[-1]))
             records = []
-            for key in keys:
+            for key in id_keys:
                 data = await client.get(key)
                 if data:
-                    records.append(
-                        self._deserialize(
-                            json.loads(data)))
+                    parsed = json.loads(data)
+                    if isinstance(parsed, dict):
+                        records.append(
+                            self._deserialize(
+                                parsed))
+                if len(records) >= limit:
+                    break
             return records[:limit]
         self._ensure_store()
         return [dict(r) for r in
