@@ -2,9 +2,9 @@
  * AI 智能客服 · 会话列表 + 聊天窗口
  * 数据来源: 后端 /api/chat/*(AI 优先接待, 知识库自动回复, 触发规则转人工)
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, Input } from '@tarojs/components';
-import Taro from '@tarojs/taro';
+import Taro, { useDidShow, useDidHide } from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import {
@@ -27,12 +27,16 @@ const STATUS_BADGE: Record<string, string> = {
 const TYPE_NAME: Record<string, string> = SESSION_TYPES.reduce(
   (acc, t) => ({ ...acc, [t.key]: t.label }), {} as Record<string, string>
 );
-
+// 发送方显示名
 const SENDER_NAME: Record<string, string> = {
   ai: 'AI 助手',
   customer_service: '人工客服',
   system: '系统',
 };
+
+// P1 实时轮询: 3 秒间隔, 仅人工/转接/排队态轮询(AI 态 send 同步返回回复)
+const POLL_INTERVAL = 3000;
+const POLL_STATUSES = ['human_chatting', 'transferring', 'waiting'];
 
 const formatTime = (t?: string): string => {
   if (!t) return '';
@@ -55,6 +59,11 @@ const ChatPage: React.FC = () => {
   const [rated, setRated] = useState(false);
   // 滚动锚点(state 驱动, ScrollView scrollIntoView 生效)
   const [scrollAnchor, setScrollAnchor] = useState('');
+  // P1 实时: 增量轮询游标(最大消息 id)与页面可见性
+  const lastMessageId = useRef(0);
+  const [visible, setVisible] = useState(true);
+  useDidShow(() => setVisible(true));
+  useDidHide(() => setVisible(false));
 
   const loadSessions = useCallback(async () => {
     try {
@@ -75,12 +84,37 @@ const ChatPage: React.FC = () => {
     }
   }, [loadSessions]);
 
-  // 消息变化 → 锚定最后一条(驱动滚动到底部)
+  // 消息变化 → 锚定最后一条(驱动滚动到底部) + 更新轮询游标
   useEffect(() => {
     if (messages.length > 0) {
       setScrollAnchor(`msg-${messages.length - 1}`);
+      const maxId = messages.reduce((mx, m) => (m.id > mx ? m.id : mx), 0);
+      if (maxId > lastMessageId.current) {
+        lastMessageId.current = maxId;
+      }
     }
   }, [messages]);
+
+  // P1 实时: 增量轮询(仅人工/转接/排队态且页面可见; AI 态不轮询)
+  useEffect(() => {
+    const sid = activeSession?.sessionId;
+    const st = activeSession?.status || '';
+    if (view !== 'chat' || !sid || !visible || !POLL_STATUSES.includes(st)) {
+      return;
+    }
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await ChatAPI.messagesSince(sid, lastMessageId.current);
+        if (fresh.length > 0) {
+          setMessages(prev => [...prev, ...fresh]);
+          ChatAPI.markRead(sid).catch(() => undefined);
+        }
+      } catch (_) {
+        // best-effort: 轮询失败静默(下轮重试)
+      }
+    }, POLL_INTERVAL);
+    return () => clearInterval(timer);
+  }, [view, visible, activeSession?.sessionId, activeSession?.status]);
 
   // 打开会话
   const openSession = async (s: ChatSessionVO) => {

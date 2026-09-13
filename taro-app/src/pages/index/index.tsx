@@ -18,7 +18,7 @@ import {
   beijingToday,
 } from '@/config';
 import { PointsAPI } from '@/api/points';
-import { getMemberId, isLoggedIn, requireLogin } from '@/services/auth-service';
+import { getMemberId, isLoggedIn, requireLogin, getSession } from '@/services/auth-service';
 
 // 公告轮播文案(API 无公告接口,降级 mock)
 const MOCK_NOTICES = [
@@ -83,6 +83,7 @@ const QUICK_ENTRIES = [
   { key: 'zhike', icon: '👑', label: '智客会员' },
   { key: 'asset', icon: '💎', label: '资产估值' },
   { key: 'attract', icon: '📡', label: '智能引流' },
+  { key: 'cswork', icon: '🎧', label: '客服工作台' },
 ];
 
 const IndexPage: React.FC = () => {
@@ -318,6 +319,9 @@ const IndexPage: React.FC = () => {
       case 'attract':
         Taro.navigateTo({ url: '/pages/attract72/index' });
         break;
+      case 'cswork':
+        Taro.navigateTo({ url: '/pages/cs-workbench/index' });
+        break;
     }
   };
 
@@ -342,9 +346,9 @@ const IndexPage: React.FC = () => {
           <Text className={styles.noticeText}>{MOCK_NOTICES[noticeIdx]}</Text>
         </View>
 
-        {/* 功能金刚区(3 行 15 入口) */}
+        {/* 功能金刚区(3 行 15 入口; 客服工作台仅 admin 可见) */}
         <View className={styles.quickGrid}>
-          {QUICK_ENTRIES.map(item => {
+          {QUICK_ENTRIES.filter(item => item.key !== 'cswork' || getSession()?.role === 'admin').map(item => {
             const iconVal = getQuickGridIcon(item.key, item.icon);
             const isImg = typeof iconVal === 'string'
               && (iconVal.startsWith('data:image/') || iconVal.startsWith('http'));

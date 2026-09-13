@@ -125,6 +125,26 @@ export const ChatAPI = {
     return (Array.isArray(list) ? list : []).map(toMessage);
   },
 
+  /** 增量拉取新消息(P1 实时轮询: 仅返回 id 大于游标的消息) */
+  async messagesSince(sessionId: string, sinceMessageId: number, limit = 100): Promise<ChatMessageVO[]> {
+    const res = await request<any>({
+      url: `/api/chat/sessions/${sessionId}/messages?limit=${limit}&since_message_id=${sinceMessageId}`,
+    });
+    const list = res.data || [];
+    return (Array.isArray(list) ? list : []).map(toMessage);
+  },
+
+  /** 标记会话已读(会员视角: AI/客服消息置为已读) */
+  async markRead(sessionId: string): Promise<number> {
+    const res = await request<any>({
+      url: `/api/chat/sessions/${sessionId}/read`,
+      method: 'POST',
+      data: {},
+    });
+    const d = res.data || res;
+    return Number(d.marked ?? 0);
+  },
+
   /** 发送消息(用户消息触发 AI 自动回复) */
   async send(sessionId: string, content: string): Promise<SendResultVO> {
     const res = await request<any>({

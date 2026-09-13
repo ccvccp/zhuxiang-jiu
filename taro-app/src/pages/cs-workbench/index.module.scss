@@ -1,0 +1,334 @@
+@use '@/styles/variables.scss' as *;
+
+// ============================================
+// 客服工作台主题: 靛蓝(区别于用户端客服绿)
+// ============================================
+$cs-primary: #3f5c88;
+$cs-primary-light: #54719e;
+$cs-primary-bg: rgba(63, 92, 136, 0.07);
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 88rpx);
+}
+
+// 页签栏(吸顶)
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-xs;
+  border-bottom: 1rpx solid $color-border;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: $shadow-card;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-md 0;
+  font-size: 26rpx;
+  color: $color-text-secondary;
+}
+
+.tabActive {
+  color: $cs-primary;
+  font-weight: 600;
+  border-bottom: 4rpx solid $cs-primary;
+}
+
+.section {
+  padding: $spacing-md $spacing-lg 0;
+}
+
+.cardTitle {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+  word-break: break-all;
+}
+
+.runBtn {
+  display: inline-block;
+  font-size: 22rpx;
+  color: #fff;
+  background: $cs-primary;
+  border-radius: 8rpx;
+  padding: $spacing-xs $spacing-lg;
+  margin-bottom: $spacing-sm;
+}
+
+.footNote {
+  padding: $spacing-lg;
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+}
+
+.empty {
+  padding: $spacing-xl 0;
+  text-align: center;
+  font-size: 24rpx;
+  color: $color-text-tertiary;
+}
+
+// 头部卡
+.heroCard {
+  background: linear-gradient(135deg, $cs-primary, $cs-primary-light);
+  border-radius: 16rpx;
+  padding: $spacing-lg $spacing-xl;
+  color: #fff;
+}
+
+.heroTitle {
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.heroSub {
+  font-size: 22rpx;
+  opacity: 0.85;
+  margin-top: $spacing-xs;
+}
+
+// 筛选 chip
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+}
+
+.chip {
+  font-size: 22rpx;
+  color: $color-text-secondary;
+  background: $color-bg-hover;
+  border-radius: 24rpx;
+  padding: $spacing-xs $spacing-lg;
+}
+
+.chipActive {
+  color: #fff;
+  background: $cs-primary;
+}
+
+// 会话行
+.sessionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+  border-bottom: 1rpx solid $color-border;
+  padding: $spacing-sm 0;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.sessionLeft {
+  flex: 1;
+  min-width: 0;
+}
+
+.sessionType {
+  font-size: 24rpx;
+  color: $color-text-primary;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.sessionMeta {
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+}
+
+.sessionRight {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  flex-shrink: 0;
+}
+
+.badge {
+  font-size: 18rpx;
+  color: #fff;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+}
+
+.badgeHuman {
+  background: $cs-primary;
+}
+
+.acceptBtn {
+  font-size: 20rpx;
+  color: #fff;
+  background: $color-success;
+  border-radius: 8rpx;
+  padding: $spacing-xs $spacing-md;
+}
+
+// 聊天窗
+.chatWindow {
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 12rpx;
+  padding: $spacing-md;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.msgRow {
+  display: flex;
+  margin-bottom: $spacing-sm;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.msgMine {
+  justify-content: flex-end;
+}
+
+.msgOther {
+  justify-content: flex-start;
+}
+
+.msgBubble {
+  max-width: 80%;
+  background: $color-bg-hover;
+  border-radius: 12rpx;
+  padding: $spacing-sm $spacing-md;
+}
+
+.msgMine .msgBubble {
+  background: $cs-primary-bg;
+}
+
+.msgSender {
+  font-size: 18rpx;
+  color: $cs-primary;
+  font-weight: 600;
+}
+
+.msgContent {
+  font-size: 24rpx;
+  color: $color-text-primary;
+  line-height: 1.6;
+  margin-top: 2rpx;
+  word-break: break-all;
+}
+
+.msgTime {
+  font-size: 18rpx;
+  color: $color-text-tertiary;
+  margin-top: 2rpx;
+}
+
+// 输入行
+.inputRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  margin-top: $spacing-sm;
+}
+
+.input {
+  flex: 1;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 8rpx;
+  padding: $spacing-sm $spacing-md;
+  font-size: 24rpx;
+}
+
+.sendBtn {
+  font-size: 22rpx;
+  color: #fff;
+  background: $cs-primary;
+  border-radius: 8rpx;
+  padding: $spacing-sm $spacing-md;
+  flex-shrink: 0;
+}
+
+.sendDisabled {
+  opacity: 0.5;
+}
+
+.closeBtn {
+  font-size: 22rpx;
+  color: $color-error;
+  border: 1rpx solid $color-error;
+  border-radius: 8rpx;
+  padding: $spacing-sm $spacing-md;
+  flex-shrink: 0;
+}
+
+// 统计网格
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.statCell {
+  background: $cs-primary-bg;
+  border-radius: 10rpx;
+  padding: $spacing-sm;
+  text-align: center;
+}
+
+.statNum {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: $cs-primary;
+  word-break: break-all;
+}
+
+.statLbl {
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+}
+
+// 结果卡
+.resultCard {
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 12rpx;
+  padding: $spacing-md;
+}
+
+.resHead {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: $cs-primary;
+  margin: $spacing-sm 0 $spacing-xs;
+  border-left: 6rpx solid $cs-primary;
+  padding-left: $spacing-sm;
+}
+
+.resItem {
+  font-size: 22rpx;
+  color: $color-text-secondary;
+  line-height: 1.7;
+  padding: 2rpx 0;
+  word-break: break-all;
+}
+
+.bottomSpace {
+  height: 60rpx;
+}

@@ -51,7 +51,8 @@ export default defineAppConfig({
     'pages/zp/index',
     'pages/qr/index',
     'pages/av62/index',
-    'pages/attract72/index'
+    'pages/attract72/index',
+    'pages/cs-workbench/index'
   ],
   window: {
     backgroundTextStyle: 'light',
