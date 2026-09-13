@@ -1,0 +1,305 @@
+@use '@/styles/variables.scss' as *;
+
+// ============================================
+// 72号主题: 靛青(智能引流——区别于62号古铜金/
+// 竹香绿)
+// ============================================
+$at-primary: #3d5a80;         // 靛青主色
+$at-primary-light: #5b7ba8;   // 亮靛青
+$at-primary-bg: rgba(61, 90, 128, 0.07);
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 88rpx);
+}
+
+// ============================================
+// 页签栏(吸顶)
+// ============================================
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-xs;
+  border-bottom: 1rpx solid $color-border;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: $shadow-card;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-md 0;
+  font-size: 26rpx;
+  color: $color-text-secondary;
+}
+
+.tabActive {
+  color: $at-primary;
+  font-weight: 600;
+  border-bottom: 4rpx solid $at-primary;
+}
+
+.section {
+  padding: $spacing-md $spacing-lg 0;
+}
+
+.cardTitle {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.runBtn {
+  display: inline-block;
+  font-size: 22rpx;
+  color: #fff;
+  background: $at-primary;
+  border-radius: 8rpx;
+  padding: $spacing-xs $spacing-lg;
+  margin: 0 $spacing-sm $spacing-sm 0;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.footNote {
+  padding: $spacing-lg;
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+}
+
+.empty {
+  padding: $spacing-xl 0;
+  text-align: center;
+  font-size: 24rpx;
+  color: $color-text-tertiary;
+}
+
+// ============================================
+// 头部卡
+// ============================================
+.heroCard {
+  background: linear-gradient(135deg, $at-primary, $at-primary-light);
+  border-radius: 16rpx;
+  padding: $spacing-lg $spacing-xl;
+  color: #fff;
+}
+
+.heroTitle {
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.heroSub {
+  font-size: 22rpx;
+  opacity: 0.85;
+  margin-top: $spacing-xs;
+}
+
+// ============================================
+// 统计网格
+// ============================================
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.statCell {
+  background: $at-primary-bg;
+  border-radius: 10rpx;
+  padding: $spacing-sm;
+  text-align: center;
+}
+
+.statNum {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: $at-primary;
+  word-break: break-all;
+}
+
+.statLbl {
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+}
+
+// ============================================
+// 结果卡
+// ============================================
+.resultCard {
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 12rpx;
+  padding: $spacing-md;
+}
+
+.resHead {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: $at-primary;
+  margin: $spacing-sm 0 $spacing-xs;
+  border-left: 6rpx solid $at-primary;
+  padding-left: $spacing-sm;
+}
+
+.resItem {
+  font-size: 22rpx;
+  color: $color-text-secondary;
+  line-height: 1.7;
+  padding: 2rpx 0;
+  word-break: break-all;
+}
+
+// ============================================
+// 筛选 chip
+// ============================================
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+}
+
+.chip {
+  font-size: 22rpx;
+  color: $color-text-secondary;
+  background: $color-bg-hover;
+  border-radius: 24rpx;
+  padding: $spacing-xs $spacing-lg;
+}
+
+.chipActive {
+  color: #fff;
+  background: $at-primary;
+}
+
+// ============================================
+// 画像/信号/洞察/定律/预算行
+// ============================================
+.row {
+  border-bottom: 1rpx solid $color-border;
+  padding: $spacing-sm 0;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.rowHead {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  flex-wrap: wrap;
+}
+
+.rowId {
+  font-size: 22rpx;
+  color: $at-primary;
+  font-weight: 600;
+}
+
+.rowLabel {
+  font-size: 24rpx;
+  color: $color-text-primary;
+  font-weight: 500;
+}
+
+.rowMeta {
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+// 效果徽标(驱动/流失/中性)
+.effectBadge {
+  font-size: 18rpx;
+  color: #fff;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+}
+
+.effectDriver {
+  background: $color-success;
+}
+
+.effectLoss {
+  background: $color-error;
+}
+
+.effectNeutral {
+  background: $color-text-tertiary;
+}
+
+// 状态徽标
+.statusBadge {
+  font-size: 18rpx;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  color: #fff;
+  background: $color-text-tertiary;
+}
+
+.statusActive {
+  background: $color-success;
+}
+
+.statusSubmitted {
+  background: $color-warning;
+}
+
+.statusDraft {
+  background: $color-text-tertiary;
+}
+
+// 查询输入框
+.queryRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.queryInput {
+  flex: 1;
+  height: 64rpx;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 8rpx;
+  padding: 0 $spacing-md;
+  font-size: 24rpx;
+  color: $color-text-primary;
+}
+
+.answerCard {
+  background: $at-primary-bg;
+  border-radius: 10rpx;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.answerText {
+  font-size: 24rpx;
+  color: $color-text-primary;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+.bottomSpace {
+  height: $spacing-xl;
+}

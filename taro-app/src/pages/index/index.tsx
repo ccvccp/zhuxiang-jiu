@@ -82,6 +82,7 @@ const QUICK_ENTRIES = [
   { key: 'zhidan', icon: '📦', label: '智单订单' },
   { key: 'zhike', icon: '👑', label: '智客会员' },
   { key: 'asset', icon: '💎', label: '资产估值' },
+  { key: 'attract', icon: '📡', label: '智能引流' },
 ];
 
 const IndexPage: React.FC = () => {
@@ -313,6 +314,9 @@ const IndexPage: React.FC = () => {
         break;
       case 'asset':
         Taro.navigateTo({ url: '/pages/av62/index' });
+        break;
+      case 'attract':
+        Taro.navigateTo({ url: '/pages/attract72/index' });
         break;
     }
   };
