@@ -395,17 +395,13 @@ class AttractService:
             elif code_type == CODE_TYPE_INFLUENCER:
                 from repositories.traffic_repository import TrafficRepository
                 traffic_repo = TrafficRepository()
-                influencer_code = None
-                # KOL码格式 KOL{id}_{platform}_{hex}: 逐博主反查
-                for inf in await traffic_repo.list_influencers(limit=1000):
-                    for pc in (inf.get("promoCodes") or []):
-                        if pc.get("code") == code:
-                            influencer_code = inf
-                            break
-                    if influencer_code:
-                        break
-                if influencer_code:
-                    influencer_id = influencer_code.get("id")
+                # KOL码格式 KOL{id}_{platform}_{hex}: 按码反查
+                # (get_influencer_code_by_code 唯一索引——逐博主
+                #  扫描 list_influencers 不内嵌 promoCodes 属死路)
+                code_record = await traffic_repo.get_influencer_code_by_code(
+                    code.strip())
+                if code_record:
+                    influencer_id = code_record.get("influencerId")
         except Exception as e:
             logger.warning("attract_resolve_owner_failed code=%s: %s",
                            code, e)

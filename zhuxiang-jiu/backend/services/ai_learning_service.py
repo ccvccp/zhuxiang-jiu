@@ -154,6 +154,10 @@ SCORER_REGISTRY = {
     "qr_code_experience":       {"label": "智能码愉悦度评分", "module": "70智能二维码大模型", "batch": 43},
     # ---- 第四十四批(71号·AI智能支付端口大模型 P7: 三层进化引擎治理档案) ----
     "payment_port_intelligence": {"label": "智能支付端口大模型评分", "module": "71智能支付端口大模型", "batch": 44},
+    # ---- 第四十五批(72号·AI智能自动引流大模型 P2: 增长定律治理档案) ----
+    "growth_intelligence": {"label": "智能增长定律评分", "module": "72智能自动引流大模型", "batch": 45},
+    # ---- 第四十六批(72号·AI智能自动引流大模型 P3: 预算系数治理档案) ----
+    "growth_budget": {"label": "智能增长预算评分", "module": "72智能自动引流大模型", "batch": 46},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)

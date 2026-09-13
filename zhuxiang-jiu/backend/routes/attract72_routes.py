@@ -1,0 +1,582 @@
+"""72号·AI智能自动引流大模型路由(P1 感知跃迁 + P2 因果认知)
+
+端点(P1 6 个——观测面常开, 不受 ATTRACT72_MODE
+影响; 感知层为观测/快环口径):
+    GET  /api/attract72/personas              画像列表(admin, 观测面)
+    POST /api/attract72/personas/sync        感知面同步(画像生成+信号摄取)(admin, 观测面)
+    GET  /api/attract72/personas/{id}        画像详情(admin, 观测面)
+    POST /api/attract72/clicks/enrich        点击补意图快照(admin, 快环)
+    GET  /api/attract72/signals              信号流列表(admin, 观测面)
+    GET  /api/attract72/intent/{click_id}    意图快照查询(admin, 观测面)
+
+端点(P2 7 个——因果推理为观测/快环; 结晶/发布
+为决策面 off 409):
+    POST /api/attract72/causal/run           反事实对照推理(admin, 观测/快环)
+    GET  /api/attract72/causal/insights      因果洞察列表(admin, 观测面)
+    POST /api/attract72/knowledge/crystallize  洞察→定律结晶(admin, 决策面 off 409)
+    POST /api/attract72/knowledge/laws/{id}/publish  定律发布(admin, 决策面 off 409)
+    GET  /api/attract72/knowledge/laws       定律台账(admin, 观测面)
+    GET  /api/attract72/knowledge/anti       反知识清单(admin, 观测面)
+    POST /api/attract72/knowledge/query      自然语言查询(admin, 观测面)
+
+端点(P3 6 个——生成/建议/执行=决策面 off 409;
+偏差重博弈=快环域内自动):
+    POST /api/attract72/budget/forecast/generate  72h 预分配生成(admin, 决策面 off 409)
+    GET  /api/attract72/budget/forecast      方案+偏差+历史(admin, 观测面)
+    POST /api/attract72/budget/rebalance/auto 偏差重博弈(admin, 快环——不受 MODE)
+    GET  /api/attract72/budget/exploration   探索基金状态(admin, 观测面)
+    POST /api/attract72/budget/rates/propose 系数建议→46号(admin, 决策面 off 409)
+    POST /api/attract72/budget/rates/apply    系数执行·显式动作(admin, 决策面 off 409)
+
+鉴权: 管理面 X-Role: admin(71号同款口径)。
+统一口径(71号范式):
+    - 感知层/因果推理/偏差重博弈全部为观测面/快环
+      ——off 档常开(重博弈仅受 KILL 制动)
+    - 决策面(结晶/发布/预分配生成/系数建议/执行)
+      off=409; 观测面不受影响
+    - KeyError → 404 / ValueError → 409
+    - 同步请求可携带 today(YYYY-MM-DD,
+      演示/测试口径——空则系统当前日期);
+      预分配 anchor/偏差度量 now 同为演示口径
+"""
+
+from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel, Field
+
+from services.attract72_p1_service import (
+    Attract72P1Service,
+)
+
+router = APIRouter(
+    prefix="/api/attract72",
+    tags=["AI智能自动引流大模型(72号)"],
+)
+
+_service = Attract72P1Service()
+
+
+def _require_admin(x_role: str | None) -> None:
+    if not x_role or x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要 X-Role: admin")
+
+
+def _map(exc: Exception) -> HTTPException:
+    """统一异常映射(71号口径)"""
+    if isinstance(exc, KeyError):
+        msg = str(exc) if str(exc) else "资源不存在"
+        if msg.startswith("'") and msg.endswith("'"):
+            msg = msg[1:-1]
+        return HTTPException(status_code=404,
+                             detail=msg)
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=409,
+                             detail=str(exc))
+    return HTTPException(status_code=500,
+                         detail=str(exc))
+
+
+# ============================================================
+# 请求模型
+# ============================================================
+
+class PersonaSyncRequest(BaseModel):
+    today: str = Field(
+        "", max_length=10,
+        description="同步基准日(YYYY-MM-DD, 空=今天——演示口径)")
+
+
+class ClickEnrichRequest(BaseModel):
+    clickId: int = Field(..., gt=0,
+                         description="attract v1.0 点击 ID")
+    deviceFingerprint: str = Field(
+        "", max_length=64,
+        description="设备指纹(空则 UA 哈希脱敏)")
+    userAgent: str = Field(
+        "", max_length=300,
+        description="User-Agent(指纹兜底源)")
+    dwellSeconds: float = Field(
+        0.0, ge=0, le=86400,
+        description="落地页停留秒数")
+    text: str = Field(
+        "", max_length=500,
+        description="行为文本素材(评论/搜索词, 可选)")
+
+
+class CrystallizeRequest(BaseModel):
+    insightId: int = Field(..., gt=0,
+                           description="洞察 ID(须 verified)")
+
+
+class KnowledgeQueryRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=200,
+                          description="自然语言问题(确定性关键词路由)")
+
+
+class ForecastGenerateRequest(BaseModel):
+    anchor: str = Field(
+        "", max_length=30,
+        description="窗口锚点(ISO 8601, 空=当前时刻——演示/测试口径)")
+
+
+class RebalanceRequest(BaseModel):
+    now: str = Field(
+        "", max_length=30,
+        description="偏差度量时刻(ISO 8601, 空=当前——演示/测试口径)")
+
+
+# ============================================================
+# ① 渠道人格画像(观测面)
+# ============================================================
+
+@router.get("/personas")
+async def list_personas(
+        subjectType: str = "",
+        personaType: str = "",
+        limit: int = 100,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """画像列表(按主体/人格筛选)"""
+    try:
+        _require_admin(x_role)
+        return {
+            "code": 0,
+            "data": await _service.list_personas(
+                subject_type=subjectType or None,
+                persona_type=personaType or None,
+                limit=limit),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/personas/sync")
+async def sync_personas(
+        req: PersonaSyncRequest = None,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """感知面同步(博主/会员画像生成+信号总线摄取)"""
+    try:
+        _require_admin(x_role)
+        body = req or PersonaSyncRequest()
+        return {"code": 0,
+                "data": await _service.sync_personas(
+                    today=body.today)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/personas/{persona_id}")
+async def get_persona(
+        persona_id: int,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """画像详情(含 stats/history)"""
+    try:
+        _require_admin(x_role)
+        return {"code": 0,
+                "data": await _service.get_persona(
+                    persona_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# ② 意图快照(观测面/快环)
+# ============================================================
+
+@router.post("/clicks/enrich")
+async def enrich_click(
+        req: ClickEnrichRequest,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """点击补意图快照(词表密度确定性解析)"""
+    try:
+        _require_admin(x_role)
+        return {"code": 0,
+                "data": await _service
+                .enrich_click_intent(
+                    click_id=req.clickId,
+                    device_fingerprint=(
+                        req.deviceFingerprint),
+                    user_agent=req.userAgent,
+                    dwell_seconds=req.dwellSeconds,
+                    text=req.text)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/intent/{click_id}")
+async def get_intent(
+        click_id: int,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """意图快照查询"""
+    try:
+        _require_admin(x_role)
+        return {"code": 0,
+                "data": await _service.get_intent(
+                    click_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# ③ 外部信号总线(观测面)
+# ============================================================
+
+@router.get("/signals")
+async def list_signals(
+        type: str = "",
+        limit: int = 100,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """信号流列表(节日/雷达事件)"""
+    try:
+        _require_admin(x_role)
+        return {
+            "code": 0,
+            "data": await _service.list_signals(
+                signal_type=type or None,
+                limit=limit),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P2 ④ 因果推理引擎(观测面/快环——不受 MODE 影响)
+# ============================================================
+
+@router.post("/causal/run")
+async def run_causal(
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """反事实对照推理(要素×出现/不出现分组
+    ——确定性公式全留痕)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p2_service import (
+            Attract72P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P2Service().run_causal()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/causal/insights")
+async def list_causal_insights(
+        dimension: str = "",
+        effectType: str = "",
+        status: str = "",
+        limit: int = 100,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """因果洞察列表(驱动/流失/中性)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p2_service import (
+            Attract72P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P2Service()
+                .list_insights(
+                    dimension=dimension or None,
+                    effect_type=effectType or None,
+                    status=status or None,
+                    limit=limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P2 ⑤ 定律结晶与知识(结晶/发布=决策面 off 409)
+# ============================================================
+
+def _require_decision_plane() -> None:
+    """决策面开关(71号范式——off=409)"""
+    from services.attract72_registry import (
+        current_mode,
+    )
+    if current_mode() == "off":
+        raise HTTPException(
+            status_code=409,
+            detail="ATTRACT72_MODE=off(默认 off"
+                  "——决策面关闭, 观测面不受"
+                  "影响)")
+
+
+@router.post("/knowledge/crystallize")
+async def crystallize(
+        body: CrystallizeRequest,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """洞察 → 定律结晶(46号建议书纯调用;
+    driver→law / loss→anti)"""
+    try:
+        _require_admin(x_role)
+        _require_decision_plane()
+        from services.attract72_p2_service import (
+            Attract72P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P2Service().crystallize(
+                    body.insightId)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/knowledge/laws/{law_id}/publish")
+async def publish_law(
+        law_id: int,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """定律发布(46号 approved 前置的显式
+    动作; 57号知识库同步 best-effort)"""
+    try:
+        _require_admin(x_role)
+        _require_decision_plane()
+        from services.attract72_p2_service import (
+            Attract72P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P2Service().publish_law(
+                    law_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/knowledge/laws")
+async def list_laws(
+        kind: str = "",
+        status: str = "",
+        limit: int = 100,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """定律台账(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p2_service import (
+            Attract72P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P2Service().list_laws(
+                    kind=kind or None,
+                    status=status or None,
+                    limit=limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/knowledge/anti")
+async def list_anti_laws(
+        limit: int = 100,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """反知识清单(anti 定律——验证无效的
+    要素组合结晶, 防重复试错)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p2_service import (
+            Attract72P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P2Service().list_laws(
+                    kind="anti", limit=limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/knowledge/query")
+async def knowledge_query(
+        body: KnowledgeQueryRequest,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """自然语言查询(确定性关键词路由——
+    数字 100% 查询层插值)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p2_service import (
+            Attract72P2Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P2Service().nl_query(
+                    body.question)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P3 ⑥ 预算预判(生成/建议/执行=决策面 off 409;
+# 偏差重博弈=快环域内自动; 状态/基金=观测面)
+# ============================================================
+
+@router.post("/budget/forecast/generate")
+async def generate_forecast(
+        body: ForecastGenerateRequest = None,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """生成 72h 预分配(历史分布×雷达提升×
+    定律助推+探索基金——确定性公式)"""
+    try:
+        _require_admin(x_role)
+        _require_decision_plane()
+        from services.attract72_p3_service import (
+            Attract72P3Service,
+        )
+        req = body or ForecastGenerateRequest()
+        return {"code": 0,
+                "data": await
+                Attract72P3Service()
+                .generate_forecast(
+                    anchor=req.anchor)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/budget/forecast")
+async def forecast_status(
+        now: str = "",
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """当前方案+偏差+历史(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p3_service import (
+            Attract72P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P3Service()
+                .forecast_status(now=now)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/budget/rebalance/auto")
+async def rebalance_auto(
+        body: RebalanceRequest = None,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """偏差重博弈(>15% 域内自动——快环,
+    不受 MODE 影响; 系数变更永不自动)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p3_service import (
+            Attract72P3Service,
+        )
+        req = body or RebalanceRequest()
+        return {"code": 0,
+                "data": await
+                Attract72P3Service()
+                .rebalance_auto(now=req.now)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/budget/exploration")
+async def exploration_status(
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """探索基金状态(5%-15% 浮动+候选渠道)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p3_service import (
+            Attract72P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P3Service()
+                .exploration_status()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/budget/rates/propose")
+async def propose_rates(
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """系数建议 → 46号建议书(纯调用——
+    奖励系数变更永不自动铁律)"""
+    try:
+        _require_admin(x_role)
+        _require_decision_plane()
+        from services.attract72_p3_service import (
+            Attract72P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P3Service()
+                .propose_rates()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/budget/rates/apply")
+async def apply_rates(
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """系数执行(46号留痕后的 admin 显式
+    动作——v1.0 currentRate 双轨变更)"""
+    try:
+        _require_admin(x_role)
+        _require_decision_plane()
+        from services.attract72_p3_service import (
+            Attract72P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P3Service().apply_rates()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+def register_attract72_routes(app) -> None:
+    """路由注册(main.py 挂载)"""
+    app.include_router(router)
