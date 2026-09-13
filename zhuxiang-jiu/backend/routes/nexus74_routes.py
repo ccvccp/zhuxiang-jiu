@@ -175,6 +175,47 @@ class AdaptBatchRequest(BaseModel):
         description="Top-N(0=默认 3)")
 
 
+class PublishRequest(BaseModel):
+    sourceId: int = Field(
+        ..., gt=0,
+        description="源内容 ID")
+    platform: str = Field(
+        ..., description="目标平台")
+    adaptationId: int = Field(
+        0, ge=0,
+        description="适配版本 ID"
+                    "(0=取最新)")
+    auto: bool = Field(
+        False, description="自主发布"
+                       "(仅 full 档 A 档)")
+    now: str = Field(
+        "", description="时刻(ISO 8601——"
+                       "测试确定性)")
+
+
+class ReceiptRequest(BaseModel):
+    result: str = Field(
+        ..., description="回执结果: "
+                         "published/rejected/"
+                         "throttled")
+    message: str = Field(
+        "", max_length=500,
+        description="平台返回信息")
+    externalId: str = Field(
+        "", max_length=100,
+        description="平台内容 ID")
+    now: str = Field(
+        "", description="时刻(测试确定性)")
+
+
+class SilenceRequest(BaseModel):
+    enabled: bool = Field(
+        True, description="静默窗开关")
+    hours: list = Field(
+        ..., description="静默时段"
+                        "(0-23 整数列表)")
+
+
 # ============================================================
 # ① 合规规则库(观测面——常开)
 # ============================================================
@@ -557,6 +598,208 @@ async def list_adaptations(
 
 
 # ============================================================
+# P3 ⑤ 发布编排(决策面——MODE 门控)
+# ============================================================
+
+@router.post("/publish")
+async def publish(
+        body: PublishRequest,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """发布执行(A 档直连/B 档适配包
+    ——shadow 留痕不派发)"""
+    try:
+        _require_admin(x_role)
+        _require_decision_plane()
+        from services.nexus74_p3_service import (
+            Nexus74P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P3Service()
+                .publish(
+                    source_id=body.sourceId,
+                    platform=body.platform,
+                    adaptation_id=body
+                    .adaptationId,
+                    auto=body.auto,
+                    now=body.now)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/publications")
+async def list_publications(
+        platform: str = "",
+        status: str = "",
+        limit: int = 100,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """发布记录列表(观测面——筛选)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p3_service import (
+            Nexus74P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P3Service()
+                .list_publications(
+                    platform=platform,
+                    status=status,
+                    limit=limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/publications/{publication_id}")
+async def get_publication(
+        publication_id: int,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """发布详情(含 error 归因——观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p3_service import (
+            Nexus74P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P3Service()
+                .get_publication(
+                    publication_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/publications/{publication_id}"
+             "/retry")
+async def retry_publication(
+        publication_id: int,
+        now: str = "",
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """自愈重试(A 档 failed——指数退避/
+    换档建议)"""
+    try:
+        _require_admin(x_role)
+        _require_decision_plane()
+        from services.nexus74_p3_service import (
+            Nexus74P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P3Service()
+                .retry(
+                    publication_id=publication_id,
+                    now=now)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/publications/{publication_id}"
+             "/receipt")
+async def register_receipt(
+        publication_id: int,
+        body: ReceiptRequest,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """B 档人工回执登记(数据诚实——
+    未登记视为未发布, 不受 MODE)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p3_service import (
+            Nexus74P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P3Service()
+                .receipt(
+                    publication_id=publication_id,
+                    result=body.result,
+                    message=body.message,
+                    external_id=body.externalId,
+                    now=body.now)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/quota/status")
+async def quota_status(
+        now: str = "",
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """频次封顶/静默窗状态(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p3_service import (
+            Nexus74P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P3Service()
+                .quota_status(now=now)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/silence")
+async def set_silence(
+        body: SilenceRequest,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """静默窗设置(北京时间夜间免打扰)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p3_service import (
+            Nexus74P3Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P3Service()
+                .set_silence(
+                    enabled=body.enabled,
+                    hours=body.hours)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/healthz")
+async def adapter_healthz(
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """适配器健康(A 档连通性——
+    诚实工程)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p3_service import (
+            Nexus74P3Service,
+        )
+        return {"code": 0,
+                "data":
+                    Nexus74P3Service()
+                    .healthz()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
 # 模型状态(观测面——P5 完整版预占位)
 # ============================================================
 
@@ -587,9 +830,11 @@ async def model_status(
                     "unfreezeEnv":
                         f"{IMMUNITY_UNFREEZE_ENV}"
                         f"=1",
-                    "note": ("P1 规则中枢"
-                             "已交付; 发布"
-                             "面随 P3 上线")}}
+                    "note": ("P1-P3 已交付"
+                             "(规则中枢/适配"
+                             "管线/发布编排); "
+                             "P4 数据回流+P5 "
+                             "元认知待交付")}}
     except HTTPException:
         raise
     except Exception as exc:

@@ -471,6 +471,62 @@ TALKING_POINTS: dict = {
 }
 
 # ============================================================
+# P3 发布编排与自愈域(执行与工具层)
+# ============================================================
+
+# 发布状态机(六态——shadowed 仅影子期)
+PUBLISH_STATES: tuple = (
+    "shadowed",         # 影子留痕(不派发)
+    "awaiting_manual",  # B 档待人工操作
+    "published",        # 已发布(直连/回执确认)
+    "rejected",         # 平台驳回(负样本)
+    "throttled",        # 平台限流(负样本)
+    "failed",           # A 档直连失败(可自愈)
+)
+
+# B 档回执结果域(数据诚实铁律——
+# 未登记视为未发布)
+RECEIPT_RESULTS: tuple = (
+    "published", "rejected", "throttled",
+)
+
+# 错误归因域(自愈决策依据)
+ERROR_KINDS: tuple = (
+    "content_violation",  # 内容违规(不可自动重试)
+    "api_transient",      # 接口临时故障(指数退避)
+    "auth_expired",       # 凭证缺失(换档建议)
+    "quota_exceeded",     # 配额超限
+    "unknown",
+)
+
+# 归因→处置/换档建议
+TIER_ADVICE: dict = {
+    "content_violation":
+        "fix_content_readapt",
+    "api_transient":
+        "backoff_retry",
+    "auth_expired":
+        "configure_credentials_or_switch_B",
+    "quota_exceeded":
+        "backoff_retry",
+    "unknown": "manual_inspect",
+}
+
+# 自愈重试上限+指数退避基秒
+# (退避序列: 60→120→240→480)
+MAX_PUBLISH_RETRY = 3
+RETRY_BACKOFF_BASE = 60
+
+# 单平台每日发布封顶(打扰保护)
+DAILY_PUBLISH_CAP = 3
+
+# 静默窗默认时段(北京时间——
+# 夜间免打扰)
+SILENCE_HOURS_DEFAULT: tuple = (
+    23, 0, 1, 2, 3, 4, 5, 6,
+)
+
+# ============================================================
 # 合规规则库种子(对象化 Schema——P1 播种)
 # ============================================================
 
@@ -782,7 +838,46 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 "nexus74 规则种子"
                 "置信度域外")
-    # ⑩ P5 预定义域封闭
+    # ⑩ P3 发布编排域校验
+    if set(PUBLISH_STATES) != {
+            "shadowed", "awaiting_manual",
+            "published", "rejected",
+            "throttled", "failed"}:
+        raise RuntimeError(
+            "nexus74 发布状态机域非法")
+    if set(RECEIPT_RESULTS) != {
+            "published", "rejected",
+            "throttled"}:
+        raise RuntimeError(
+            "nexus74 回执结果域非法")
+    if set(ERROR_KINDS) != {
+            "content_violation",
+            "api_transient",
+            "auth_expired",
+            "quota_exceeded",
+            "unknown"}:
+        raise RuntimeError(
+            "nexus74 错误归因域非法")
+    if set(TIER_ADVICE) \
+            != set(ERROR_KINDS):
+        raise RuntimeError(
+            "nexus74 处置建议与归因"
+            "不闭合")
+    if not (0 < MAX_PUBLISH_RETRY
+            <= 5):
+        raise RuntimeError(
+            "nexus74 重试上限域外")
+    if RETRY_BACKOFF_BASE <= 0:
+        raise RuntimeError(
+            "nexus74 退避基秒域外")
+    if DAILY_PUBLISH_CAP <= 0:
+        raise RuntimeError(
+            "nexus74 每日封顶域外")
+    if not (set(SILENCE_HOURS_DEFAULT)
+            <= set(range(24))):
+        raise RuntimeError(
+            "nexus74 静默时段域外")
+    # ⑪ P5 预定义域封闭
     if set(DRIFT_SIGNALS) != {
             "publish_anomaly",
             "rejection_anomaly",

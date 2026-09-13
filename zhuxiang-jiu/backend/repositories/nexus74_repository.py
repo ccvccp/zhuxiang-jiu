@@ -39,6 +39,8 @@ class Nexus74Repository:
     TABLE_RULES = "nexus_rules"
     TABLE_SOURCES = "nexus_sources"
     TABLE_ADAPTATIONS = "nexus_adaptations"
+    TABLE_PUBLICATIONS = "nexus_publications"
+    TABLE_SILENCE = "nexus_silence"
     TABLE_IMMUNITY = "nexus_immunity"
     TABLE_REDTEAM = "nexus_redteam"
     TABLE_EVOLOG = "nexus_evolution_log"
@@ -47,6 +49,8 @@ class Nexus74Repository:
                    TABLE_RULES,
                    TABLE_SOURCES,
                    TABLE_ADAPTATIONS,
+                   TABLE_PUBLICATIONS,
+                   TABLE_SILENCE,
                    TABLE_IMMUNITY,
                    TABLE_REDTEAM,
                    TABLE_EVOLOG)
@@ -58,6 +62,8 @@ class Nexus74Repository:
     _INT_FIELDS = (
         "personaId", "ruleId",
         "sourceId", "adaptationId",
+        "publicationId", "retryCount",
+        "backoffSeconds",
         "runId", "evoLogId",
         "emojiDensity",
     )
@@ -70,16 +76,19 @@ class Nexus74Repository:
         "hasVideo", "warningInjected",
         "delivered", "needsReview",
         "shadow", "hasWarning",
+        "autoPublished", "silenceEnabled",
     )
     _JSON_DICT_FIELDS = (
         "testCases", "context",
         "detail", "talkingPoints",
-        "compliance",
+        "compliance", "error",
+        "receipt", "package",
     )
     _JSON_LIST_FIELDS = (
         "patterns", "safeHarbor",
         "vectors", "signals",
         "hits", "keywords", "tags",
+        "hours",
     )
 
     def __init__(self, store: dict = None):
@@ -322,3 +331,50 @@ class Nexus74Repository:
                        if r.get("sourceId")
                        == source_id]
         return records
+
+    # ============================================================
+    # P3 发布记录+静默窗
+    # ============================================================
+
+    async def save_publication(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_PUBLICATIONS,
+            record["publicationId"],
+            record)
+
+    async def get_publication(
+            self, publication_id) -> dict | None:
+        return await self._get(
+            self.TABLE_PUBLICATIONS,
+            publication_id)
+
+    async def list_publications(
+            self, platform: str = None,
+            status: str = None,
+            limit: int = 200
+    ) -> list[dict]:
+        records = await self._list(
+            self.TABLE_PUBLICATIONS,
+            limit=limit)
+        if platform:
+            records = [r for r in records
+                       if r.get("platform")
+                       == platform]
+        if status:
+            records = [r for r in records
+                       if r.get("status")
+                       == status]
+        return records
+
+    async def save_silence(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_SILENCE,
+            record.get("id", "default"),
+            record)
+
+    async def get_silence(
+            self) -> dict | None:
+        return await self._get(
+            self.TABLE_SILENCE, "default")
