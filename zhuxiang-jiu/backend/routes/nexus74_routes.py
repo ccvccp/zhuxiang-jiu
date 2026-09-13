@@ -216,6 +216,30 @@ class SilenceRequest(BaseModel):
                         "(0-23 整数列表)")
 
 
+class MetricsRequest(BaseModel):
+    readCount: int = Field(
+        0, ge=0, description="阅读数")
+    likeCount: int = Field(
+        0, ge=0, description="点赞数")
+    commentCount: int = Field(
+        0, ge=0, description="评论数")
+    shareCount: int = Field(
+        0, ge=0, description="分享数")
+
+
+class AuditReflowRequest(BaseModel):
+    publicationId: int = Field(
+        ..., gt=0,
+        description="发布记录 ID")
+    result: str = Field(
+        ..., description="审核结果: "
+                         "passed/rejected/"
+                         "throttled")
+    message: str = Field(
+        "", max_length=500,
+        description="平台审核信息")
+
+
 # ============================================================
 # ① 合规规则库(观测面——常开)
 # ============================================================
@@ -793,6 +817,111 @@ async def adapter_healthz(
                 "data":
                     Nexus74P3Service()
                     .healthz()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P4 数据回流与学习进化(观测面——不受 MODE)
+# ============================================================
+# 注: 固定路径(/metrics/audit, /metrics/
+# summary)须先于参数路径(/metrics/{id})
+# 注册——FastAPI 按注册序匹配
+
+@router.post("/metrics/audit")
+async def audit_reflow(
+        body: AuditReflowRequest,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """审核结果回流(驳回/限流→负样本
+    学习+达线提 46号规则强化)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p4_service import (
+            Nexus74P4Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P4Service()
+                .audit_reflow(
+                    publication_id=body
+                    .publicationId,
+                    result=body.result,
+                    message=body.message)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/metrics/summary")
+async def metrics_summary(
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """全域数据汇总(平台聚合+审核分布
+    ——观测面常开)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p4_service import (
+            Nexus74P4Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P4Service()
+                .metrics_summary()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/learnings")
+async def list_learnings(
+        kind: str = "",
+        limit: int = 100,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """学习留痕列表(形式学习/负样本/
+    规则强化——观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p4_service import (
+            Nexus74P4Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P4Service()
+                .learnings(
+                    kind=kind,
+                    limit=limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/metrics/{publication_id}")
+async def register_metrics(
+        publication_id: int,
+        body: MetricsRequest,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """指标回流登记(read/like/comment/
+    share——触发形式学习)"""
+    try:
+        _require_admin(x_role)
+        from services.nexus74_p4_service import (
+            Nexus74P4Service,
+        )
+        return {"code": 0,
+                "data": await
+                Nexus74P4Service()
+                .register_metrics(
+                    publication_id=publication_id,
+                    metrics=body
+                    .model_dump())}
     except HTTPException:
         raise
     except Exception as exc:

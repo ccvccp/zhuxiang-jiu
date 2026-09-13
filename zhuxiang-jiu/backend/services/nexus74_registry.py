@@ -527,6 +527,42 @@ SILENCE_HOURS_DEFAULT: tuple = (
 )
 
 # ============================================================
+# P4 数据回流与学习进化域(进化与对齐层)
+# ============================================================
+
+# 指标类型域(四类——数据回流)
+METRIC_TYPES: tuple = (
+    "read", "like", "comment", "share",
+)
+
+# 审核结果域(平台回流——
+# rejected/throttled 为负样本)
+AUDIT_RESULTS: tuple = (
+    "passed", "rejected", "throttled",
+)
+
+# 学习域(三类留痕)
+LEARNING_KINDS: tuple = (
+    "form_learning",      # 形式学习(互动率)
+    "negative_feedback",  # 负样本(驳回/限流)
+    "rule_reinforce",     # 规则强化(46号提案)
+)
+
+# 形式学习阈值
+# (互动率=(like+comment+share)/read)
+FORM_LEARNING_MIN_SAMPLES = 3
+HIGH_ENGAGEMENT_LINE = 0.15
+LOW_ENGAGEMENT_LINE = 0.03
+
+# 负反馈强化触发(同平台连续
+# 驳回/限流次数——达线提 46号)
+NEGATIVE_TRIGGER_CONSECUTIVE = 2
+
+# 46号审批链档案(进化不自动生效
+# 铁律——提案 pending 人工签核)
+GOVERNANCE_SCORER_ID = "nexus_publishing"
+
+# ============================================================
 # 合规规则库种子(对象化 Schema——P1 播种)
 # ============================================================
 
@@ -877,7 +913,37 @@ def _validate_registry() -> None:
             <= set(range(24))):
         raise RuntimeError(
             "nexus74 静默时段域外")
-    # ⑪ P5 预定义域封闭
+    # ⑪ P4 学习进化域校验
+    if set(METRIC_TYPES) != {
+            "read", "like",
+            "comment", "share"}:
+        raise RuntimeError(
+            "nexus74 指标类型域非法")
+    if set(AUDIT_RESULTS) != {
+            "passed", "rejected",
+            "throttled"}:
+        raise RuntimeError(
+            "nexus74 审核结果域非法")
+    if set(LEARNING_KINDS) != {
+            "form_learning",
+            "negative_feedback",
+            "rule_reinforce"}:
+        raise RuntimeError(
+            "nexus74 学习域非法")
+    if not (1 <= FORM_LEARNING_MIN_SAMPLES
+            <= 10):
+        raise RuntimeError(
+            "nexus74 形式学习最小"
+            "样本域外")
+    if not (0 < LOW_ENGAGEMENT_LINE
+            < HIGH_ENGAGEMENT_LINE < 1):
+        raise RuntimeError(
+            "nexus74 互动率阈值"
+            "单调性非法")
+    if NEGATIVE_TRIGGER_CONSECUTIVE < 2:
+        raise RuntimeError(
+            "nexus74 负反馈触发线域外")
+    # ⑫ P5 预定义域封闭
     if set(DRIFT_SIGNALS) != {
             "publish_anomaly",
             "rejection_anomaly",

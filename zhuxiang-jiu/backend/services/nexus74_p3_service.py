@@ -318,6 +318,9 @@ class Nexus74P3Service:
             "platform": platform,
             "platformName": PLATFORM_NAMES[
                 platform],
+            "intent": source["intent"],
+            "intentLabel": source[
+                "intentLabel"],
             "adapterTier": tier,
             "mode": mode,
             "autoPublished": False,

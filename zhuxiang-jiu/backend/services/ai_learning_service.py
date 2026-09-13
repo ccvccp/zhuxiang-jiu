@@ -158,6 +158,8 @@ SCORER_REGISTRY = {
     "growth_intelligence": {"label": "智能增长定律评分", "module": "72智能自动引流大模型", "batch": 45},
     # ---- 第四十六批(72号·AI智能自动引流大模型 P3: 预算系数治理档案) ----
     "growth_budget": {"label": "智能增长预算评分", "module": "72智能自动引流大模型", "batch": 46},
+    # ---- 第四十七批(74号·NexusFlow智枢·流全域发布大模型 P4: 数据回流与学习进化治理档案) ----
+    "nexus_publishing": {"label": "智能全域发布大模型评分", "module": "74NexusFlow智枢流全域发布大模型", "batch": 47},
 }
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)

@@ -41,6 +41,9 @@ class Nexus74Repository:
     TABLE_ADAPTATIONS = "nexus_adaptations"
     TABLE_PUBLICATIONS = "nexus_publications"
     TABLE_SILENCE = "nexus_silence"
+    TABLE_METRICS = "nexus_metrics"
+    TABLE_AUDITS = "nexus_audits"
+    TABLE_LEARNINGS = "nexus_learnings"
     TABLE_IMMUNITY = "nexus_immunity"
     TABLE_REDTEAM = "nexus_redteam"
     TABLE_EVOLOG = "nexus_evolution_log"
@@ -51,6 +54,9 @@ class Nexus74Repository:
                    TABLE_ADAPTATIONS,
                    TABLE_PUBLICATIONS,
                    TABLE_SILENCE,
+                   TABLE_METRICS,
+                   TABLE_AUDITS,
+                   TABLE_LEARNINGS,
                    TABLE_IMMUNITY,
                    TABLE_REDTEAM,
                    TABLE_EVOLOG)
@@ -64,11 +70,16 @@ class Nexus74Repository:
         "sourceId", "adaptationId",
         "publicationId", "retryCount",
         "backoffSeconds",
+        "auditId", "learningId",
+        "readCount", "likeCount",
+        "commentCount", "shareCount",
+        "proposedChangeId",
         "runId", "evoLogId",
         "emojiDensity",
     )
     _FLOAT_FIELDS = (
         "confidence", "matrixScore",
+        "engagementRate", "avgEngagement",
     )
     _BOOL_FIELDS = (
         "enabled", "harborApplied",
@@ -88,7 +99,7 @@ class Nexus74Repository:
         "patterns", "safeHarbor",
         "vectors", "signals",
         "hits", "keywords", "tags",
-        "hours",
+        "hours", "evidence",
     )
 
     def __init__(self, store: dict = None):
@@ -378,3 +389,68 @@ class Nexus74Repository:
             self) -> dict | None:
         return await self._get(
             self.TABLE_SILENCE, "default")
+
+    # ============================================================
+    # P4 数据回流(指标/审核/学习)
+    # ============================================================
+
+    async def save_metrics(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_METRICS,
+            record["publicationId"],
+            record)
+
+    async def get_metrics(
+            self, publication_id) -> dict | None:
+        return await self._get(
+            self.TABLE_METRICS,
+            publication_id)
+
+    async def list_metrics(
+            self, limit: int = 500
+    ) -> list[dict]:
+        return await self._list(
+            self.TABLE_METRICS, limit=limit)
+
+    async def save_audit(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_AUDITS,
+            record["auditId"], record)
+
+    async def get_audit(
+            self, audit_id) -> dict | None:
+        return await self._get(
+            self.TABLE_AUDITS, audit_id)
+
+    async def list_audits(
+            self, platform: str = None,
+            limit: int = 500
+    ) -> list[dict]:
+        records = await self._list(
+            self.TABLE_AUDITS, limit=limit)
+        if platform:
+            records = [r for r in records
+                       if r.get("platform")
+                       == platform]
+        return records
+
+    async def save_learning(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_LEARNINGS,
+            record["learningId"], record)
+
+    async def list_learnings(
+            self, kind: str = None,
+            limit: int = 200
+    ) -> list[dict]:
+        records = await self._list(
+            self.TABLE_LEARNINGS,
+            limit=limit)
+        if kind:
+            records = [r for r in records
+                       if r.get("kind")
+                       == kind]
+        return records
