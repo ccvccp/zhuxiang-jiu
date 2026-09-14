@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/**
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/**
  * test-promo.js · 36号 AI智能推广模块 前端单元测试
  * ============================================================
  * 范式: 纯 Node 脚本(对齐 test-xinzhi.js, 零外部测试框架)
@@ -552,6 +552,12 @@ const textOf = (node) => {
   record('页面-统计六卡', statCards.length === 6
     && statTexts.includes('热点总数') && statTexts.includes('待人工裁决')
     && statTexts.includes('已发布') && statTexts.includes('归因GMV'));
+
+  // ---------- [14b] 限额口径标注 + 累计发布行 ----------
+  const flatOv = JSON.stringify(el);
+  record('页面-限额口径标注', flatOv.includes('单日发布限额(今日发布+入队)')
+    && flatOv.includes('累计已发布')
+    && flatOv.includes('条'));
 
   // ---------- [15] 待裁决提醒卡 ----------
   const alert = findAll(el, n => String(n.props.className).includes('alertCard'));

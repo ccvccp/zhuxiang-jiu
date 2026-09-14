@@ -285,9 +285,17 @@ const PromoPage: React.FC = () => {
               </View>
             </View>
             <View className={styles.cardRow}>
-              <View className={styles.cardLabel}>单日发布限额</View>
+              <View className={styles.cardLabel}>
+                单日发布限额(今日发布+入队)
+              </View>
               <View className={styles.cardValue}>
                 {overview.dailyCap.used} / {overview.dailyCap.limit}
+              </View>
+            </View>
+            <View className={styles.cardRow}>
+              <View className={styles.cardLabel}>累计已发布</View>
+              <View className={styles.cardValue}>
+                {overview.contents.published} 条
               </View>
             </View>
             {overview.hotspots.pendingManual > 0 && (
