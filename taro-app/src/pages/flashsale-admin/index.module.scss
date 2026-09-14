@@ -1,0 +1,271 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+// 页签(换行平铺——桌面/移动端均无横向滑动)
+.tabBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-lg 0;
+}
+
+.tab {
+  padding: $spacing-xs $spacing-lg;
+  border-radius: $radius-button;
+  background: $color-bg-card;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  @include button-reset;
+}
+
+.tabActive {
+  background: $color-primary;
+  color: $color-text-white;
+  font-weight: $font-weight-medium;
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.cardTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.subTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  margin: $spacing-lg 0 $spacing-sm;
+}
+
+// 表单
+.formRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.formLabel {
+  min-width: 128rpx;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.formInput {
+  flex: 1;
+  height: 72rpx;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: 0 $spacing-md;
+  font-size: $font-size-sm;
+}
+
+.formUnit {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+}
+
+// 场次列表
+.sessionRow {
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+  @include button-reset;
+}
+
+.sessionRowActive {
+  outline: 3rpx solid $color-primary;
+}
+
+.sessionRowHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sessionName {
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.sessionMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.statusPill {
+  padding: 2rpx 16rpx;
+  border-radius: $radius-button;
+  font-size: $font-size-xs;
+}
+
+.pilldraft {
+  background: rgba(212, 136, 6, 0.12);
+  color: #d48806;
+}
+
+.pillpublished {
+  background: rgba(82, 196, 26, 0.12);
+  color: #52c41a;
+}
+
+.pillcancelled {
+  background: rgba(0, 0, 0, 0.06);
+  color: $color-text-tertiary;
+}
+
+// 商品行
+.itemRow {
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.itemName {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.itemMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+// 按钮
+.btnPrimary {
+  margin-top: $spacing-md;
+  height: 80rpx;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  font-weight: $font-weight-medium;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.btnDanger {
+  margin-top: $spacing-md;
+  height: 80rpx;
+  background: transparent;
+  color: #e02020;
+  border: 1rpx solid #e02020;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.btnRow {
+  margin-top: $spacing-sm;
+}
+
+// 参数开关行
+.switchRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+  @include button-reset;
+}
+
+.switchVal {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-primary;
+}
+
+// 统计
+.statRow {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.statBox {
+  flex: 1;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-md 0;
+  text-align: center;
+}
+
+.statNum {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-primary;
+}
+
+.statLabel {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+// 空态
+.empty {
+  padding: $spacing-lg 0;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 64rpx;
+  margin-bottom: $spacing-sm;
+}
+
+.emptyText {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+}
+
+.bottomSpacer {
+  height: $spacing-xl;
+}

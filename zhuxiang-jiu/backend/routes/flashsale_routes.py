@@ -14,7 +14,8 @@
     - 场次(2 公开):  sessions / sessions/{sessionId}
     - 抢购(4 会员):  order / my/orders / orders/{orderNo} / orders/{orderNo}/pay
     - 订单取消(1):   orders/{orderNo}/cancel
-    - 管理端(8):     sessions(建)/items/publish/cancel/settings(2)/stats/expire-cancel
+    - 管理端(9):     sessions(列表含草稿/建)/items/publish/cancel/
+                     settings(2)/stats/expire-cancel
 """
 
 
@@ -212,6 +213,18 @@ async def cancel_order(order_no: str,
 # ============================================================
 # 管理端: 场次管理(静态路径优先声明)
 # ============================================================
+
+@router.get("/api/flash/admin/sessions", tags=["限时秒杀模块"])
+async def admin_list_sessions(x_role: str | None = Header(None, alias="X-Role")):
+    """管理场次列表(含草稿/已取消——区别于公开列表仅已发布)"""
+    _require_admin(x_role)
+    try:
+        sessions = await _service.list_sessions(
+            only_published=False)
+        return _ok(sessions=sessions, count=len(sessions))
+    except Exception as exc:
+        _handle(exc)
+
 
 @router.post("/api/flash/admin/sessions", tags=["限时秒杀模块"])
 async def create_session(data: CreateSessionRequest,

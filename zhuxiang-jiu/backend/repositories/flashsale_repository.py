@@ -256,7 +256,10 @@ class FlashSaleRepository:
             self._ensure_store()
             orders = [o for o in self.store["flash_orders"].values()
                       if o.get("memberId") == member_id]
-        orders.sort(key=lambda o: o.get("createdAt", ""), reverse=True)
+        # 双键稳定倒序: createdAt 同秒时按 orderNo(含日+自增序列)
+        # 次级区分——单键 createdAt 在同秒两单下排序不稳定
+        orders.sort(key=lambda o: (o.get("createdAt", ""),
+                                   o.get("orderNo", "")), reverse=True)
         return orders
 
     async def list_orders_by_item(self, item_id: str,

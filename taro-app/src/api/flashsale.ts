@@ -129,3 +129,139 @@ export const FlashAPI = {
     });
   },
 };
+
+// ============================================================
+// 管理端(admin 面向——场次配置/发布/风控参数/统计)
+// ============================================================
+
+/** 秒杀风控参数 */
+export interface FlashSettingsVO {
+  enabled: boolean;
+  minRegisterHours: number;
+  minMemberLevel: number;
+  orderExpireMinutes: number;
+  maxQuantityPerOrder: number;
+  updatedAt?: string;
+}
+
+/** 全局销售统计(按场次聚合) */
+export interface FlashStatsVO {
+  sessionCount: number;
+  orderCount: number;
+  paidAmount: number;
+  sessions?: any[];
+  [k: string]: any;
+}
+
+function adminHeaders(): Record<string, string> {
+  return { 'X-Role': 'admin' };
+}
+
+function mapSettings(s: any): FlashSettingsVO {
+  return {
+    enabled: s.enabled !== false,
+    minRegisterHours: s.minRegisterHours ?? 0,
+    minMemberLevel: s.minMemberLevel ?? 0,
+    orderExpireMinutes: s.orderExpireMinutes ?? 15,
+    maxQuantityPerOrder: s.maxQuantityPerOrder ?? 1,
+    updatedAt: s.updatedAt || s.updated_at || '',
+  };
+}
+
+export const FlashAdminAPI = {
+  /** 管理场次列表(含草稿/已取消——区别于公开列表) */
+  async listSessions(): Promise<FlashSessionVO[]> {
+    const res = await request<any>({
+      url: '/api/flash/admin/sessions',
+      headers: adminHeaders(),
+    });
+    return (res.sessions || []).map(mapSession);
+  },
+
+  /** 创建秒杀场次(草稿) */
+  async createSession(name: string, startTime: string,
+                      endTime: string): Promise<FlashSessionVO> {
+    const res = await request<any>({
+      url: '/api/flash/admin/sessions',
+      method: 'POST',
+      headers: adminHeaders(),
+      data: { name, startTime, endTime },
+    });
+    return mapSession(res.session || res);
+  },
+
+  /** 添加秒杀商品(仅草稿场次; 秒杀价须低于原价) */
+  async addItem(sessionId: string, productId: string,
+                 flashPrice: number, flashStock: number,
+                 limitPerMember: number): Promise<FlashItemVO> {
+    const res = await request<any>({
+      url: `/api/flash/admin/sessions/${sessionId}/items`,
+      method: 'POST',
+      headers: adminHeaders(),
+      data: { productId, flashPrice, flashStock, limitPerMember },
+    });
+    return mapItem(res.item || res);
+  },
+
+  /** 发布场次(用户侧可见) */
+  async publishSession(sessionId: string): Promise<FlashSessionVO> {
+    const res = await request<any>({
+      url: `/api/flash/admin/sessions/${sessionId}/publish`,
+      method: 'POST',
+      headers: adminHeaders(),
+      data: {},
+    });
+    return mapSession(res.session || res);
+  },
+
+  /** 取消场次(联动取消待支付订单并回补库存) */
+  async cancelSession(sessionId: string): Promise<FlashSessionVO> {
+    const res = await request<any>({
+      url: `/api/flash/admin/sessions/${sessionId}/cancel`,
+      method: 'POST',
+      headers: adminHeaders(),
+      data: {},
+    });
+    return mapSession(res.session || res);
+  },
+
+  /** 查询秒杀风控参数 */
+  async getSettings(): Promise<FlashSettingsVO> {
+    const res = await request<any>({
+      url: '/api/flash/admin/settings',
+      headers: adminHeaders(),
+    });
+    return mapSettings(res.settings || res);
+  },
+
+  /** 修改秒杀风控参数(白名单字段, 即时生效) */
+  async updateSettings(patch: Partial<FlashSettingsVO>): Promise<FlashSettingsVO> {
+    const res = await request<any>({
+      url: '/api/flash/admin/settings',
+      method: 'POST',
+      headers: adminHeaders(),
+      data: patch,
+    });
+    return mapSettings(res.settings || res);
+  },
+
+  /** 全局销售统计 */
+  async stats(): Promise<FlashStatsVO> {
+    const res = await request<any>({
+      url: '/api/flash/admin/stats',
+      headers: adminHeaders(),
+    });
+    return res.stats || res;
+  },
+
+  /** 批量取消超时未支付订单(回补库存) */
+  async expireCancel(): Promise<{ cancelled: number }> {
+    const res = await request<any>({
+      url: '/api/flash/admin/orders/expire-cancel',
+      method: 'POST',
+      headers: adminHeaders(),
+      data: {},
+    });
+    return { cancelled: Number(res.cancelled ?? 0) };
+  },
+};

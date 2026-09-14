@@ -202,6 +202,18 @@ def main():
            r.status_code == 200 and r.json().get("count") == 0,
            f"status={r.status_code}, body={r.json()}")
 
+    # 管理列表含草稿(区别于公开列表) + 鉴权
+    r = client.get("/api/flash/admin/sessions", headers=ADMIN)
+    admin_sessions = r.json().get("sessions", [])
+    record("14a_admin_list_includes_drafts",
+           r.status_code == 200 and r.json().get("count") == 2
+           and all(s.get("status") == "draft"
+                   for s in admin_sessions),
+           f"status={r.status_code}, count={r.json().get('count')}")
+    r = client.get("/api/flash/admin/sessions")
+    record("14b_admin_list_requires_admin_role",
+           r.status_code == 403, f"status={r.status_code}")
+
     r = client.post(f"/api/flash/admin/sessions/{S1['sessionId']}/publish",
                     headers=ADMIN)
     record("15_publish_session_success",
