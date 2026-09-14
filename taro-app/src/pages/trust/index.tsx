@@ -1,21 +1,34 @@
 /**
- * 信值兑换 · 建档 + 余额 + 积分兑换 + 支付组合试算 + 限额
+ * 信值兑换 · 建档 + 余额 + 积分兑换 + 支付组合试算 + 限额 + 订单·申诉
  * 数据来源: 后端 /api/xx64/*(64号会员面) + /api/trust/*(45号)
- * 注: 决策面端点(兑换/下单)受 XX64_MODE 控制; 档案 ID 建档后本地持久化
+ * 注: 决策面端点(兑换/下单)受 XX64_MODE 控制; 档案 ID 建档后本地持久化;
+ *     申诉通道不受开关影响(观测与纠错永不关停——宪法口径)
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Input } from '@tarojs/components';
+import { View, Text, ScrollView, Input, Textarea } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import {
   Xx64API, PointsPreviewVO, PlanVO, QuotaVO,
+  Xx64MyOrderVO, Xx64AppealResultVO,
+  ORDER_STATUS_NAME, APPEAL_STATUS_NAME,
   getCachedTrustId, myTrustId,
 } from '@/api/xx64';
 import { PointsAPI } from '@/api/points';
 import { requireLogin } from '@/services/auth-service';
 
 type Panel = null | 'exchange' | 'plan' | 'create';
+
+/** 申诉终态(可再次申诉) */
+const APPEAL_TERMINAL = ['approved', 'rejected', 'expired'];
+
+/** 订单是否可申诉(非 initiated 且无进行中申诉) */
+const appealable = (o: Xx64MyOrderVO): boolean => {
+  if (o.status === 'initiated') return false;
+  if (o.appeal && !APPEAL_TERMINAL.includes(o.appeal.status)) return false;
+  return true;
+};
 
 const TrustPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -26,6 +39,8 @@ const TrustPage: React.FC = () => {
   const [preview, setPreview] = useState<PointsPreviewVO | null>(null);
   const [quota, setQuota] = useState<QuotaVO | null>(null);
   const [points, setPoints] = useState(0);
+  // 订单·申诉
+  const [myOrders, setMyOrders] = useState<Xx64MyOrderVO[]>([]);
   // 面板
   const [panel, setPanel] = useState<Panel>(null);
   const [exPoints, setExPoints] = useState('');
@@ -34,12 +49,23 @@ const TrustPage: React.FC = () => {
   // 建档表单
   const [crName, setCrName] = useState('');
   const [crIdNumber, setCrIdNumber] = useState('');
+  // 申诉弹层
+  const [appealOrder, setAppealOrder] = useState<Xx64MyOrderVO | null>(null);
+  const [appealReason, setAppealReason] = useState('');
+  const [appealBusy, setAppealBusy] = useState(false);
+  const [appealResult, setAppealResult] = useState<Xx64AppealResultVO | null>(null);
+
+  const loadOrders = useCallback(async () => {
+    const os = await Xx64API.myOrders(20).catch(() => [] as Xx64MyOrderVO[]);
+    setMyOrders(os);
+  }, []);
 
   const loadData = useCallback(async (tid?: number | null) => {
     const id = tid ?? getCachedTrustId();
     try {
       const pts = await PointsAPI.account(Number(myTrustId()) || 0).catch(() => null);
       if (pts) setPoints(pts.totalPoints ?? 0);
+      loadOrders();
       if (id) {
         const [bal, prev, qt] = await Promise.all([
           Xx64API.trustBalance(id).catch(() => null),
@@ -60,7 +86,7 @@ const TrustPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadOrders]);
 
   useEffect(() => {
     if (requireLogin()) {
@@ -153,6 +179,54 @@ const TrustPage: React.FC = () => {
       console.warn('[trust] 试算失败:', e);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // ============ 订单申诉(不受开关影响) ============
+  const openAppeal = (o: Xx64MyOrderVO) => {
+    setAppealOrder(o);
+    setAppealReason('');
+    setAppealResult(null);
+  };
+
+  const closeAppeal = () => {
+    setAppealOrder(null);
+    setAppealReason('');
+    setAppealResult(null);
+    loadOrders();
+  };
+
+  const handleAppeal = async () => {
+    if (appealBusy || !appealOrder) return;
+    const reason = appealReason.trim();
+    if (!reason) {
+      Taro.showToast({ title: '请填写申诉理由', icon: 'none' });
+      return;
+    }
+    if (reason.length > 500) {
+      Taro.showToast({ title: '申诉理由须 1-500 字', icon: 'none' });
+      return;
+    }
+    setAppealBusy(true);
+    try {
+      const r = await Xx64API.appeal(appealOrder.orderId, reason);
+      const d = r?.data ?? r;
+      setAppealResult({
+        appealId: Number(d?.appealId ?? 0),
+        orderId: Number(d?.orderId ?? appealOrder.orderId),
+        status: String(d?.status || 'recalculated'),
+        expiresAt: String(d?.expiresAt || ''),
+        note: String(d?.note || ''),
+      });
+    } catch (e: any) {
+      const msg = String(e?.message || e?.errMsg || '');
+      Taro.showModal({
+        title: '申诉未提交',
+        content: msg || '请稍后重试',
+        showCancel: false,
+      });
+    } finally {
+      setAppealBusy(false);
     }
   };
 
@@ -260,6 +334,62 @@ const TrustPage: React.FC = () => {
     </View>
   );
 
+  // ============ 申诉面板 ============
+  const renderAppealPanel = () => appealOrder && (
+    <View className={styles.mask} onClick={() => { if (!appealBusy) closeAppeal(); }}>
+      <View className={styles.panel} onClick={e => e.stopPropagation()}>
+        <View className={styles.panelTitle}>订单申诉</View>
+        {appealResult ? (
+          <>
+            <View className={styles.planResult}>
+              <View className={styles.planRow}>
+                <Text className={styles.planLabel}>申诉编号</Text>
+                <Text className={styles.planValue}>#{appealResult.appealId}</Text>
+              </View>
+              <View className={styles.planRow}>
+                <Text className={styles.planLabel}>状态</Text>
+                <Text className={styles.planValue}>
+                  {APPEAL_STATUS_NAME[appealResult.status] || appealResult.status}
+                </Text>
+              </View>
+              <View className={styles.planRow}>
+                <Text className={styles.planLabel}>终审截止</Text>
+                <Text className={styles.planValue}>
+                  {(appealResult.expiresAt || '').slice(0, 16).replace('T', ' ')}
+                </Text>
+              </View>
+            </View>
+            <View className={styles.panelNote}>
+              {appealResult.note || '重算结果仅展示, 终审为人工决定, 终审前订单现状不变'}
+            </View>
+            <View className={styles.panelBtn} onClick={closeAppeal}>知道了</View>
+          </>
+        ) : (
+          <>
+            <View className={styles.panelRate}>
+              订单 #{appealOrder.orderId} · {appealOrder.product || '信值订单'} · ¥{appealOrder.price}
+            </View>
+            <View className={styles.panelRate}>
+              提交后触发确定性重算(预校验四查+规则解释+五防检测)——重算仅展示, 终审由人工完成, 终审前订单现状不变
+            </View>
+            <Textarea
+              className={styles.appealTextarea}
+              value={appealReason}
+              onInput={e => setAppealReason(e.detail.value)}
+              maxlength={500}
+              placeholder="请填写申诉理由(1-500 字)"
+              placeholderClass={styles.placeholder}
+            />
+            <View className={styles.panelNote}>{appealReason.length}/500</View>
+            <View className={styles.panelBtn} onClick={handleAppeal}>
+              {appealBusy ? '提交中...' : '提交申诉'}
+            </View>
+          </>
+        )}
+      </View>
+    </View>
+  );
+
   return (
     <View className={styles.page}>
       <NavBar title="信值兑换" />
@@ -321,6 +451,50 @@ const TrustPage: React.FC = () => {
                 </View>
               </View>
             )}
+
+            {/* 订单·申诉卡 */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>订单·申诉</View>
+              {myOrders.length === 0 && (
+                <View className={styles.empty}>暂无兑换订单</View>
+              )}
+              {myOrders.map(o => (
+                <View key={o.orderId} className={styles.orderCard}>
+                  <View className={styles.orderHead}>
+                    <Text className={styles.orderIdText}>#{o.orderId} {o.product || '信值订单'}</Text>
+                    <Text className={styles.orderStatus}>
+                      {ORDER_STATUS_NAME[o.status] || o.status}
+                    </Text>
+                  </View>
+                  <View className={styles.calcRow}>
+                    <Text className={styles.calcLabel}>金额</Text>
+                    <Text className={styles.calcValue}>¥{o.price}</Text>
+                  </View>
+                  <View className={styles.appealMeta}>
+                    {(o.createdAt || '').slice(0, 16).replace('T', ' ')}
+                  </View>
+                  {o.appeal ? (
+                    <View className={styles.appealRow}>
+                      <Text
+                        className={`${styles.appealStatusText} ${
+                          APPEAL_TERMINAL.includes(o.appeal.status) ? styles.appealStatusDone : ''
+                        }`}
+                      >
+                        申诉#{o.appeal.appealId} · {APPEAL_STATUS_NAME[o.appeal.status] || o.appeal.status}
+                      </Text>
+                      {appealable(o) && (
+                        <Text className={styles.appealBtn} onClick={() => openAppeal(o)}>再次申诉</Text>
+                      )}
+                    </View>
+                  ) : appealable(o) ? (
+                    <View className={styles.appealRow}>
+                      <Text className={styles.appealMeta}>对订单有异议? 可提交申诉</Text>
+                      <Text className={styles.appealBtn} onClick={() => openAppeal(o)}>申诉</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ))}
+            </View>
           </>
         ) : (
           // 未建档
@@ -345,12 +519,14 @@ const TrustPage: React.FC = () => {
           <View className={styles.noteLine}>· 支付刚性结构: 信值最多抵扣 30%, 现金至少 70%</View>
           <View className={styles.noteLine}>· 1 信值 = 1 元购买力, 可兑换商品/服务(不可兑现)</View>
           <View className={styles.noteLine}>· 兑换限额: 单次余额 20% / 30 日窗口余额 40%</View>
+          <View className={styles.noteLine}>· 申诉通道永不关闭: 确定性重算仅展示, 终审人工(48h 内), 翻转可获补偿</View>
         </View>
         <View className={styles.bottomSpacer} />
       </ScrollView>
       {panel === 'create' && renderCreatePanel()}
       {panel === 'exchange' && renderExchangePanel()}
       {panel === 'plan' && renderPlanPanel()}
+      {appealOrder && renderAppealPanel()}
     </View>
   );
 };

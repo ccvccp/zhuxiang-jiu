@@ -17,6 +17,14 @@ export const ORDER_STATUS_NAME: Record<string, string> = {
   disputed: '申诉中',
 };
 
+/** 申诉状态(64号 P4: recalc→人工终审) */
+export const APPEAL_STATUS_NAME: Record<string, string> = {
+  recalculated: '重算完成·待终审',
+  approved: '终审通过·已翻转',
+  rejected: '终审维持',
+  expired: '超期未审·维持',
+};
+
 /** 会员 ID(建档与查询默认身份) */
 export function myTrustId(): number {
   return Number(getMemberId()) || 0;
@@ -42,6 +50,30 @@ export interface Xx64OrderVO {
   product: string;
   status: string;
   createdAt: string;
+}
+
+/** 申诉进度(联查在订单上) */
+export interface Xx64AppealVO {
+  appealId: number;
+  status: string;
+  decision: string;
+  submittedAt: string;
+  reviewedAt: string;
+  expiresAt: string;
+}
+
+/** 我的订单(含申诉进度) */
+export interface Xx64MyOrderVO extends Xx64OrderVO {
+  appeal: Xx64AppealVO | null;
+}
+
+/** 申诉提交结果(重算仅展示, 终审人工) */
+export interface Xx64AppealResultVO {
+  appealId: number;
+  orderId: number;
+  status: string;
+  expiresAt: string;
+  note: string;
 }
 
 export interface PointsPreviewVO {
@@ -276,6 +308,33 @@ export const Xx64API = {
       headers: memberHeaders(),
       data: { orderId, reason, submittedBy: 'member' },
     });
+  },
+
+  /** 我的订单+申诉状态联查(观测面; 申诉入口数据源) */
+  async myOrders(limit = 20): Promise<Xx64MyOrderVO[]> {
+    const res = await request<any>({
+      url: `/api/xx64/my-orders?buyer_id=${myTrustId()}&limit=${limit}`,
+      headers: memberHeaders(),
+    });
+    const d = res.data || res;
+    return (d.orders || []).map((x: any) => ({
+      orderId: Number(x.orderId ?? 0),
+      buyerId: Number(x.buyerId ?? 0),
+      sellerId: Number(x.sellerId ?? 0),
+      trustId: Number(x.trustId ?? 0),
+      price: Number(x.price ?? 0),
+      product: String(x.product || ''),
+      status: String(x.status || ''),
+      createdAt: String(x.createdAt || ''),
+      appeal: x.appeal ? {
+        appealId: Number(x.appeal.appealId ?? 0),
+        status: String(x.appeal.status || ''),
+        decision: String(x.appeal.decision || ''),
+        submittedAt: String(x.appeal.submittedAt || ''),
+        reviewedAt: String(x.appeal.reviewedAt || ''),
+        expiresAt: String(x.appeal.expiresAt || ''),
+      } : null,
+    }));
   },
 
   /** 信值余额视图(45号: 可用/冻结/兑换上限; 档案不存在返回 null) */

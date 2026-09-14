@@ -318,3 +318,78 @@
 .bottomSpacer {
   height: $spacing-xl;
 }
+
+// ============================================
+// 订单·申诉区块
+// ============================================
+.orderCard {
+  margin-top: $spacing-sm;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.orderHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.orderIdText {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.orderStatus {
+  font-size: $font-size-xs;
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+}
+
+.appealMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-loose;
+}
+
+.appealRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: $spacing-sm;
+}
+
+.appealStatusText {
+  font-size: $font-size-xs;
+  color: #d48806;
+  line-height: $line-height-loose;
+}
+
+.appealStatusDone {
+  color: $color-text-tertiary;
+}
+
+.appealBtn {
+  padding: 6rpx 24rpx;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  border: 1rpx solid $color-primary;
+  border-radius: $radius-button;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.appealTextarea {
+  margin-top: $spacing-sm;
+  width: 100%;
+  min-height: 160rpx;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-sm;
+  font-size: $font-size-sm;
+  box-sizing: border-box;
+}
