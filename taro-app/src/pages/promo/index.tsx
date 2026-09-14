@@ -230,6 +230,8 @@ const PromoPage: React.FC = () => {
       : m === 'mock_fallback' ? styles.modeFallback : styles.modeMock;
 
   const engagedHotspots = hotspots.filter((h) => h.status === 'engaged');
+  /** 已发布内容(发布中心历史区, 带回执) */
+  const publishedContents = contents.filter((c) => c.status === 'published');
 
   return (
     <View className={styles.page}>
@@ -505,6 +507,45 @@ const PromoPage: React.FC = () => {
             ))}
             {queue.length === 0 && (
               <View className={styles.empty}>队列为空, 内容工厂审核通过后入队</View>
+            )}
+
+            {/* 已发布历史(出队内容 + 发布回执) */}
+            <View className={styles.subTitle}>
+              已发布内容({publishedContents.length})
+            </View>
+            {publishedContents.map((c) => (
+              <View key={c.contentId} className={styles.queueCard}>
+                <View className={styles.hotspotHead}>
+                  <View className={styles.hotspotTitle}>
+                    #{c.contentId} {c.title || ''}
+                  </View>
+                  <View
+                    className={`${styles.statusPill} ${styles.pillEngaged}`}
+                  >
+                    {publishPlatformName(c.platform)}
+                  </View>
+                </View>
+                <View className={styles.queueMeta}>
+                  <Text>
+                    {(c.publishedAt || '').slice(0, 16).replace('T', ' ')}
+                  </Text>
+                  {c.shortCode && <Text>短码 {c.shortCode}</Text>}
+                </View>
+                {c.receipt && (
+                  <View className={styles.queueMeta}>
+                    <Text className={styles.windowOk}>
+                      {channelModeName(c.receipt.mode || 'mock')}
+                    </Text>
+                    {c.receipt.publishId && <Text>{c.receipt.publishId}</Text>}
+                    {c.receipt.exposureEstimate != null && (
+                      <Text>曝光预估 {c.receipt.exposureEstimate}</Text>
+                    )}
+                  </View>
+                )}
+              </View>
+            ))}
+            {publishedContents.length === 0 && (
+              <View className={styles.empty}>暂无已发布内容</View>
             )}
             <View className={styles.hint}>
               黄金时段调度 · 单日上限防刷屏 · mock 轨回执含曝光预估

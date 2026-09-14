@@ -170,6 +170,15 @@ export interface DecisionVO {
   createdAt?: string;
 }
 
+/** 发布回执(已发布内容携带) */
+export interface ContentReceiptVO {
+  mode?: string;
+  platform?: string;
+  publishId?: string;
+  exposureEstimate?: number;
+  error?: string;
+}
+
 /** 生成内容(Agent 产物) */
 export interface PromoContentVO {
   contentId: number;
@@ -185,6 +194,8 @@ export interface PromoContentVO {
   agentTrace?: string[];
   authorityRefs?: string[];
   provenanceViolations?: string[];
+  publishedAt?: string;
+  receipt?: ContentReceiptVO;
   createdAt?: string;
 }
 

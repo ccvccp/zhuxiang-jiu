@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿/**
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/**
  * test-promo.js · 36号 AI智能推广模块 前端单元测试
  * ============================================================
  * 范式: 纯 Node 脚本(对齐 test-xinzhi.js, 零外部测试框架)
@@ -109,7 +109,13 @@ const mockRequest = async (opts) => {
           step3Generate: 'rule', step4SelfCheck: 'rule' } },
       { contentId: 12, hotspotId: 1, platform: 'xiaohongshu',
         title: '竹香酒宴席笔记', status: 'approved',
-        complianceScore: 92, contentGroupId: 7 }] };
+        complianceScore: 92, contentGroupId: 7 },
+      { contentId: 13, hotspotId: 1, platform: 'weibo',
+        title: '国风音乐节笔记', status: 'published',
+        complianceScore: 96, contentGroupId: 8, shortCode: 'A-PUB888',
+        publishedAt: '2026-09-11T18:04:41',
+        receipt: { mode: 'mock', platform: 'weibo',
+          publishId: 'PUB-weibo-13', exposureEstimate: 912000, error: '' } }] };
   }
   if (url.includes('/api/promo/publish/queue')) {
     return { success: true, data: [
@@ -273,7 +279,12 @@ const mockPromoApi = {
     contents: async () => [
       { contentId: 11, platform: 'douyin', title: '中秋竹香礼赠指南',
         status: 'pending', complianceScore: 100, contentGroupId: 7,
-        shortCode: 'A-3f2k1', agentTrace: ['glm-5.3', 'glm-5.3', 'glm-5.3', 'glm-5.3'] }],
+        shortCode: 'A-3f2k1', agentTrace: ['glm-5.3', 'glm-5.3', 'glm-5.3', 'glm-5.3'] },
+      { contentId: 13, platform: 'weibo', title: '国风音乐节笔记',
+        status: 'published', complianceScore: 96, contentGroupId: 8,
+        shortCode: 'A-PUB888', publishedAt: '2026-09-11T18:04:41',
+        receipt: { mode: 'mock', platform: 'weibo',
+          publishId: 'PUB-weibo-13', exposureEstimate: 912000, error: '' } }],
     publishQueue: async () => [
       { contentId: 12, platform: 'xiaohongshu', title: '竹香酒宴席笔记',
         scheduledAt: '18:30', inWindow: true, windowHint: '黄金时段' }],
@@ -455,12 +466,21 @@ const textOf = (node) => {
 
   // ---------- [7] 内容列表 ----------
   const cs = await PromoAPI.contents();
-  record('API-内容映射', cs.length === 2
+  record('API-内容映射', cs.length === 3
     && cs[0].complianceScore === 100 && cs[0].shortCode === 'A-3f2k1'
     && Array.isArray(cs[0].agentTrace) && cs[0].agentTrace.length === 4
     && cs[0].agentTrace[0] === '分析·glm-5.3'
     && cs[1].status === 'approved' && Array.isArray(cs[1].agentTrace)
     && cs[1].agentTrace.length === 0);
+
+  // ---------- [7c] 已发布内容回执透传 ----------
+  const pub = cs.find((c) => c.status === 'published');
+  record('API-回执透传', !!pub
+    && pub.receipt?.mode === 'mock'
+    && pub.receipt?.publishId === 'PUB-weibo-13'
+    && pub.receipt?.exposureEstimate === 912000
+    && pub.shortCode === 'A-PUB888'
+    && (pub.publishedAt || '').startsWith('2026-09-11'));
 
   // ---------- [7b] 内容详情(轨迹 join/标签 map 不崩溃) ----------
   const det = await PromoAPI.contentDetail(11);
@@ -572,19 +592,31 @@ const textOf = (node) => {
   // ---------- [19] 内容卡(徽章/轨迹/操作) ----------
   const cCards = findAll(elStudio, n => String(n.props.className).includes('contentCard'));
   const traces = findAll(elStudio, n => String(n.props.className).includes('traceBadge'));
-  record('页面-内容卡轨迹', cCards.length === 1 && traces.length === 4
+  record('页面-内容卡轨迹', cCards.length === 2 && traces.length === 4
     && textOf(cCards[0]).includes('中秋竹香礼赠指南')
     && textOf(cCards[0]).includes('A-3f2k1'));
 
-  // ---------- [20] 发布中心队列卡 ----------
+  // ---------- [20] 发布中心队列卡(1 待发 + 1 已发布历史) ----------
   const pubTab = tabs.find(t => textOf(t).includes('发布中心'));
   await pubTab.props.onClick();
   await new Promise(r => setTimeout(r, 20));
   const elPub = reactForPage.__test.rerender();
   const qCards = findAll(elPub, n => String(n.props.className).includes('queueCard'));
-  record('页面-队列黄金时段', qCards.length === 1
+  record('页面-队列黄金时段', qCards.length === 2
     && textOf(qCards[0]).includes('黄金时段')
     && JSON.stringify(elPub).includes('处理到期发布'));
+
+  // ---------- [20b] 发布中心已发布历史区 ----------
+  const flatPub = JSON.stringify(elPub);
+  const pubCards = qCards.filter((c) => textOf(c).includes('A-PUB888'));
+  record('页面-已发布历史区', flatPub.includes('已发布内容(')
+    && flatPub.includes('暂无已发布内容') === false
+    && pubCards.length === 1
+    && textOf(pubCards[0]).includes('短码')
+    && textOf(pubCards[0]).includes('A-PUB888')
+    && textOf(pubCards[0]).includes('PUB-weibo-13')
+    && textOf(pubCards[0]).includes('曝光预估')
+    && textOf(pubCards[0]).includes('912000'));
 
   // ---------- [21] 通道徽章三色 ----------
   const chTab = tabs.find(t => textOf(t).includes('通道画像'));
