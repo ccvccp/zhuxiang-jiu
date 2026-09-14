@@ -24,6 +24,7 @@
 
 import json
 import logging
+import os
 import re
 import time
 from datetime import datetime
@@ -664,10 +665,19 @@ class KnowledgeService:
     # ============================================================
 
     RAG_TOP_K = 3                    # 召回条数
-    # 直接引用阈值(同义改写级); 实测校准: 完全同文本约 0.51
-    # (entry 向量含 keywords ×2 加权, 余弦低于 1.0), 0.50 恰好放行
+    # ---- n-gram 回退轨阈值(embedding 关闭/向量化失败时) ----
+    # 实测校准(n-gram): 完全同文本约 0.51(entry 向量含 keywords
+    # ×2 加权, 余弦低于 1.0), 0.50 恰好放行
     RAG_DIRECT_SIMILARITY = 0.50
     RAG_SYNTH_SIMILARITY = 0.25     # 融合生成下限(相关补充级)
+    # ---- embedding 语义轨阈值(2026-09-14 生产实测校准) ----
+    # 分布: 无关问题噪声顶 0.5425 / 真实口语改写命中底 0.79 /
+    #       次级相关条目带 0.65-0.78; 旧值 0.50/0.25 为 n-gram
+    # 量纲, 在语义轨低于噪声顶 → 无关问题被直接引用/融合
+    RAG_DIRECT_SIMILARITY_EMB = float(os.environ.get(
+        "RAG_DIRECT_SIMILARITY_EMB", "0.72"))
+    RAG_SYNTH_SIMILARITY_EMB = float(os.environ.get(
+        "RAG_SYNTH_SIMILARITY_EMB", "0.60"))
     RAG_DUP_THRESHOLD = 0.85        # 融合时条目间同义去重阈值
     RAG_ANSWER_MAX_LEN = 200         # 单条目答案截断长度
 
@@ -937,9 +947,11 @@ class KnowledgeService:
                           provider: str = "rule") -> dict:
         """RAG 问答(P3.1, D-18): 检索增强问答统一入口
 
-        置信分级路由(按 top-1 相似度):
-            - direct(≥0.55): 单条目精确命中, 直接返回答案
-            - synthesized(≥0.25): 多条目去重融合, 答案带引用
+        置信分级路由(按 top-1 相似度, 阈值分轨):
+            - direct(语义轨≥0.72 / n-gram 轨≥0.50):
+              单条目精确命中, 直接返回答案
+            - synthesized(语义轨≥0.60 / n-gram 轨≥0.25):
+              多条目去重融合, 答案带引用
             - unsolved: 低置信不融合(低相似条目融合引入噪声),
               有最近邻时计 miss
 
@@ -952,8 +964,10 @@ class KnowledgeService:
         计数联动对两条轨道完全一致。
 
         P3.5: embedding 模式开时检索走语义路径(相似度为稠密
-        向量余弦), embed 失败自动回退 2-gram; 阈值沿用
-        (语义相似度分布偏高, 生产实测后可另行校准)。
+        向量余弦), embed 失败自动回退 2-gram。分级阈值分轨:
+        语义轨 RAG_*_SIMILARITY_EMB(2026-09-14 生产实测校准,
+        env 可覆盖), n-gram 回退轨沿用 RAG_*_SIMILARITY——
+        两轨相似度量纲不同, 单一阈值无法兼顾。
 
         P4.2 结果缓存: 60 秒内同问题同轨直接复用(chat 高频
         重复问场景降低检索+合成成本); 命中打点 rag_cache_hits
@@ -988,16 +1002,25 @@ class KnowledgeService:
         """RAG 问答主链路(rag_answer 的无缓存实现)"""
         # top-k 召回(不过滤阈值, 由分级路由判定; P3.7 重排精排)
         query_vec = tokenize(question)
+        # 语义轨判定: 查询向量化成功 → embedding 分级阈值,
+        # 失败/关闭(None → 2-gram) → n-gram 分级阈值(量纲不同)
+        q_emb = self._query_embedding(question)
         results = await self.repo.search_published(
             query_vec, None,
             max(self.RAG_TOP_K, self.RERANK_POOL_K),
-            query_embedding=self._query_embedding(question))
+            query_embedding=q_emb)
         results = self._rerank_results(question, results, self.RAG_TOP_K)
+        if q_emb is not None:
+            direct_th = self.RAG_DIRECT_SIMILARITY_EMB
+            synth_th = self.RAG_SYNTH_SIMILARITY_EMB
+        else:
+            direct_th = self.RAG_DIRECT_SIMILARITY
+            synth_th = self.RAG_SYNTH_SIMILARITY
         if not results:
             return {"answer": "", "mode": "unsolved",
                     "citations": [], "confidence": 0.0}
         top_entry, top_sim = results[0]
-        if top_sim < self.RAG_SYNTH_SIMILARITY:
+        if top_sim < synth_th:
             # 低置信: 最近邻计 miss, 不融合
             await self.repo.record_miss(top_entry["id"])
             return {"answer": "", "mode": "unsolved",
@@ -1008,11 +1031,11 @@ class KnowledgeService:
                  "source": e.get("source", SOURCE_MANUAL),
                  "hitCount": int(e.get("hitCount", 0))}
                 for e, sim in results
-                if sim >= self.RAG_SYNTH_SIMILARITY]
+                if sim >= synth_th]
         citations = [{k: h[k] for k in
                       ("entryId", "question", "similarity", "source")}
                      for h in hits]
-        if top_sim >= self.RAG_DIRECT_SIMILARITY:
+        if top_sim >= direct_th:
             # 直接引用: 仅 top-1 条目(单条引用, D-18)
             answer = top_entry["answer"]
             mode = "direct"
