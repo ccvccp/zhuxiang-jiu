@@ -61,13 +61,42 @@ const PocketPage: React.FC = () => {
 
   useEffect(() => { loadData(); }, []);
 
-  // 选择打卡照片(本地临时路径作为凭证)
+  // 选择打卡照片 → 读 base64 → 上传服务器(落库可审计, 修复本地临时路径缺陷)
   const choosePhoto = () => {
+    if (busy) return;
     Taro.chooseImage({
       count: 1,
       sizeType: ['compressed'],
+      sourceType: ['album', 'camera'],
       success: res => {
-        setPhotoUrl(res.tempFilePaths[0] || '');
+        const path = res.tempFilePaths?.[0];
+        if (!path) return;
+        setBusy(true);
+        Taro.showToast({ title: '照片上传中...', icon: 'none' });
+        const fsm = Taro.getFileSystemManager();
+        fsm.readFile({
+          filePath: path,
+          encoding: 'base64',
+          success: async readRes => {
+            try {
+              const ext = (path.split('.').pop() || 'jpg').toLowerCase();
+              const mime = ext === 'jpg' ? 'jpeg' : ext;
+              const url = await PocketAPI.uploadPhoto(
+                `data:image/${mime};base64,${readRes.data}`);
+              setPhotoUrl(url);
+              Taro.showToast({ title: '照片已上传', icon: 'success' });
+            } catch (e) {
+              console.warn('[pocket] 照片上传失败:', e);
+              Taro.showToast({ title: '照片上传失败, 请重试', icon: 'none' });
+            } finally {
+              setBusy(false);
+            }
+          },
+          fail: () => {
+            setBusy(false);
+            Taro.showToast({ title: '读取照片失败', icon: 'none' });
+          },
+        });
       },
     });
   };
@@ -99,33 +128,45 @@ const PocketPage: React.FC = () => {
     }
   };
 
-  // 每日打卡
-  const handleCheckin = async (site: PocketSiteVO) => {
+  // 每日打卡(拍照 → 上传 → 打卡)
+  const handleCheckin = (site: PocketSiteVO) => {
     if (busy) return;
     setBusy(true);
-    try {
-      // 重新拍摄打卡照片
-      Taro.chooseImage({
-        count: 1,
-        sizeType: ['compressed'],
-        success: async res => {
-          const url = res.tempFilePaths[0] || '';
-          try {
-            await PocketAPI.checkin(site.siteId, url);
-            Taro.showToast({ title: `打卡成功 +¥${stats.checkinReward}`, icon: 'success' });
-            loadData();
-          } catch (err) {
-            console.warn('[pocket] 打卡失败:', err);
-          } finally {
+    Taro.chooseImage({
+      count: 1,
+      sizeType: ['compressed'],
+      sourceType: ['album', 'camera'],
+      success: res => {
+        const path = res.tempFilePaths?.[0];
+        if (!path) { setBusy(false); return; }
+        Taro.showToast({ title: '照片上传中...', icon: 'none' });
+        const fsm = Taro.getFileSystemManager();
+        fsm.readFile({
+          filePath: path,
+          encoding: 'base64',
+          success: async readRes => {
+            try {
+              const ext = (path.split('.').pop() || 'jpg').toLowerCase();
+              const mime = ext === 'jpg' ? 'jpeg' : ext;
+              const url = await PocketAPI.uploadPhoto(
+                `data:image/${mime};base64,${readRes.data}`);
+              await PocketAPI.checkin(site.siteId, url);
+              Taro.showToast({ title: `打卡成功 +¥${stats.checkinReward}`, icon: 'success' });
+              loadData();
+            } catch (err) {
+              console.warn('[pocket] 打卡失败:', err);
+            } finally {
+              setBusy(false);
+            }
+          },
+          fail: () => {
             setBusy(false);
-          }
-        },
-        fail: () => setBusy(false),
-      });
-    } catch (e) {
-      console.warn('[pocket] 打卡失败:', e);
-      setBusy(false);
-    }
+            Taro.showToast({ title: '读取照片失败', icon: 'none' });
+          },
+        });
+      },
+      fail: () => setBusy(false),
+    });
   };
 
   // 领取满月存续奖

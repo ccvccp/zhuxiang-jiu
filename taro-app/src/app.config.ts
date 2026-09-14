@@ -25,6 +25,7 @@ export default defineAppConfig({
     'pages/invoice/index',
     'pages/flashsale/index',
     'pages/flashsale-admin/index',
+    'pages/pocket-admin/index',
     'pages/groupbuy/index',
     'pages/chat/index',
     'pages/tickets/index',

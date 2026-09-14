@@ -191,4 +191,139 @@ export const PocketAPI = {
       rewardNote: res.rewardNote || '',
     };
   },
+
+  /**
+   * 上传打卡照片(base64 JSON 惯例, 复用 35号媒体端点)
+   * 返回服务器静态 URL(/media/image/xxx)——落库可审计
+   */
+  async uploadPhoto(dataUrl: string): Promise<string> {
+    const commaIdx = dataUrl.indexOf(',');
+    const dataB64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+    const fmtMatch = /^data:image\/(\w+)/.exec(dataUrl);
+    const fmt = fmtMatch ? fmtMatch[1].replace('jpeg', 'jpg') : 'jpg';
+    const res = await request<any>({
+      url: '/api/hub/media/image',
+      method: 'POST',
+      data: { data_b64: dataB64, fmt },
+    });
+    if (!res.url) throw new Error(res.error || '照片上传失败');
+    return String(res.url);
+  },
+};
+
+// ============================================================
+// 管理端(admin——点位管理/参数配置)
+// ============================================================
+
+/** 模块参数 */
+export interface PocketAdminSettingsVO {
+  enabled: boolean;
+  checkinReward: number;
+  monthRewardPoster: number;
+  monthRewardSticker: number;
+  maxActiveSites: number;
+  aiScoreThreshold: number;
+  durationDays: number;
+  minAddressLen: number;
+  updatedAt?: string;
+}
+
+/** 管理端点位(含会员ID/照片/时间原始字段) */
+export interface PocketAdminSiteVO {
+  siteId: number;
+  memberId: number;
+  scene: string;
+  posterType: string;
+  address: string;
+  photoUrl: string;
+  postedAt: string;
+  lastCheckinAt: string;
+  checkinCount: number;
+  consecutiveDays: number;
+  status: string;
+  monthRewardClaimed: boolean;
+  aiScoreLatest: number;
+}
+
+function adminHeaders(): Record<string, string> {
+  return { 'X-Role': 'admin' };
+}
+
+function mapAdminSettings(s: any): PocketAdminSettingsVO {
+  return {
+    enabled: s.enabled !== false,
+    checkinReward: Number(s.checkinReward ?? 2),
+    monthRewardPoster: Number(s.monthRewardPoster ?? 20),
+    monthRewardSticker: Number(s.monthRewardSticker ?? 30),
+    maxActiveSites: Number(s.maxActiveSites ?? 5),
+    aiScoreThreshold: Number(s.aiScoreThreshold ?? 60),
+    durationDays: Number(s.durationDays ?? 30),
+    minAddressLen: Number(s.minAddressLen ?? 5),
+    updatedAt: s.updatedAt || '',
+  };
+}
+
+function mapAdminSite(s: any): PocketAdminSiteVO {
+  return {
+    siteId: Number(s.siteId || 0),
+    memberId: Number(s.memberId || 0),
+    scene: s.scene || '',
+    posterType: s.posterType || 'poster',
+    address: s.address || '',
+    photoUrl: s.photoUrl || '',
+    postedAt: s.postedAt || '',
+    lastCheckinAt: s.lastCheckinAt || '',
+    checkinCount: Number(s.checkinCount || 0),
+    consecutiveDays: Number(s.consecutiveDays || 0),
+    status: s.status || 'active',
+    monthRewardClaimed: !!s.monthRewardClaimed,
+    aiScoreLatest: Number(s.aiScoreLatest || 0),
+  };
+}
+
+export const PocketAdminAPI = {
+  /** 点位列表(全量, 可按会员/场景/状态过滤) */
+  async listSites(q: { memberId?: number; scene?: string; status?: string } = {}): Promise<PocketAdminSiteVO[]> {
+    const params: string[] = [];
+    if (q.memberId) params.push(`member_id=${q.memberId}`);
+    if (q.scene) params.push(`scene=${encodeURIComponent(q.scene)}`);
+    if (q.status) params.push(`status=${encodeURIComponent(q.status)}`);
+    const qs = params.length ? `?${params.join('&')}` : '';
+    const res = await request<any>({
+      url: `/api/pocket/admin/sites${qs}`,
+      headers: adminHeaders(),
+    });
+    return (res.sites || []).map(mapAdminSite);
+  },
+
+  /** 作废点位(违规处理) */
+  async invalidateSite(siteId: number, reason: string): Promise<{ success: boolean }> {
+    const res = await request<any>({
+      url: `/api/pocket/admin/sites/${siteId}/invalidate`,
+      method: 'POST',
+      headers: adminHeaders(),
+      data: { reason },
+    });
+    return { success: !!res.success };
+  },
+
+  /** 查询模块参数 */
+  async getSettings(): Promise<PocketAdminSettingsVO> {
+    const res = await request<any>({
+      url: '/api/pocket/admin/settings',
+      headers: adminHeaders(),
+    });
+    return mapAdminSettings(res.settings || res);
+  },
+
+  /** 修改模块参数(白名单字段, 即时生效) */
+  async updateSettings(patch: Partial<PocketAdminSettingsVO>): Promise<PocketAdminSettingsVO> {
+    const res = await request<any>({
+      url: '/api/pocket/admin/settings',
+      method: 'PUT',
+      headers: adminHeaders(),
+      data: patch,
+    });
+    return mapAdminSettings(res.settings || res);
+  },
 };
