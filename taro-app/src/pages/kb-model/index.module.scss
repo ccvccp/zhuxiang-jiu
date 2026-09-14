@@ -1,0 +1,263 @@
+@use '@/styles/variables.scss' as *;
+
+// ============================================
+// 智能知识库训练模型主题: 竹青绿(知识域)
+// ============================================
+$kb-primary: #2e7d5b;
+$kb-primary-light: #3f9e74;
+$kb-primary-bg: rgba(46, 125, 91, 0.07);
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.body {
+  flex: 1;
+  height: calc(100vh - 88rpx);
+}
+
+// 页签栏(吸顶)
+.tabBar {
+  display: flex;
+  background: $color-bg-card;
+  padding: 0 $spacing-xs;
+  border-bottom: 1rpx solid $color-border;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: $shadow-card;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: $spacing-md 0;
+  font-size: 26rpx;
+  color: $color-text-secondary;
+}
+
+.tabActive {
+  color: $kb-primary;
+  font-weight: 600;
+  border-bottom: 4rpx solid $kb-primary;
+}
+
+.section {
+  padding: $spacing-md $spacing-lg 0;
+}
+
+.cardTitle {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.runBtn {
+  display: inline-block;
+  font-size: 22rpx;
+  color: #fff;
+  background: $kb-primary;
+  border-radius: 8rpx;
+  padding: $spacing-xs $spacing-lg;
+  margin-bottom: $spacing-sm;
+}
+
+.runDisabled {
+  opacity: 0.5;
+}
+
+.footNote {
+  padding: $spacing-lg;
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  line-height: 1.6;
+}
+
+.empty {
+  padding: $spacing-xl 0;
+  text-align: center;
+  font-size: 24rpx;
+  color: $color-text-tertiary;
+}
+
+// 头部卡
+.heroCard {
+  background: linear-gradient(135deg, $kb-primary, $kb-primary-light);
+  border-radius: 16rpx;
+  padding: $spacing-lg $spacing-xl;
+  color: #fff;
+}
+
+.heroTitle {
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.heroSub {
+  font-size: 22rpx;
+  opacity: 0.85;
+  margin-top: $spacing-xs;
+}
+
+// 筛选 chip
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+}
+
+.chip {
+  font-size: 22rpx;
+  color: $color-text-secondary;
+  background: $color-bg-hover;
+  border-radius: 24rpx;
+  padding: $spacing-xs $spacing-lg;
+}
+
+.chipActive {
+  color: #fff;
+  background: $kb-primary;
+}
+
+// 统计网格
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.statCell {
+  background: $kb-primary-bg;
+  border-radius: 10rpx;
+  padding: $spacing-sm;
+  text-align: center;
+}
+
+.statNum {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: $kb-primary;
+  word-break: break-all;
+}
+
+.statLbl {
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+}
+
+// 结果卡
+.resultCard {
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 12rpx;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.resHead {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: $kb-primary;
+  margin: $spacing-sm 0 $spacing-xs;
+  border-left: 6rpx solid $kb-primary;
+  padding-left: $spacing-sm;
+}
+
+.resItem {
+  font-size: 22rpx;
+  color: $color-text-secondary;
+  line-height: 1.7;
+  padding: 2rpx 0;
+  word-break: break-all;
+}
+
+// 行卡(条目/缺口/样本)
+.rowCard {
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 12rpx;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.rowHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-xs;
+}
+
+.rowBadge {
+  font-size: 20rpx;
+  color: #fff;
+  background: $kb-primary;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+}
+
+.rowScore {
+  font-size: 20rpx;
+  color: $color-text-tertiary;
+}
+
+.rowQ {
+  font-size: 24rpx;
+  color: $color-text-primary;
+  font-weight: 500;
+  margin-top: $spacing-xs;
+  word-break: break-all;
+}
+
+.rowA {
+  font-size: 22rpx;
+  color: $color-text-tertiary;
+  margin-top: 4rpx;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.actionRow {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.actionBtn {
+  font-size: 20rpx;
+  color: #fff;
+  background: $kb-primary;
+  border-radius: 8rpx;
+  padding: $spacing-xs $spacing-md;
+}
+
+.actionWarn {
+  font-size: 20rpx;
+  color: $color-error;
+  border: 1rpx solid $color-error;
+  border-radius: 8rpx;
+  padding: $spacing-xs $spacing-md;
+}
+
+// 问答输入
+.askInput {
+  width: 100%;
+  min-height: 120rpx;
+  background: $color-bg-card;
+  border: 1rpx solid $color-border;
+  border-radius: 12rpx;
+  padding: $spacing-sm $spacing-md;
+  font-size: 24rpx;
+  margin-bottom: $spacing-sm;
+  box-sizing: border-box;
+}
+
+.bottomSpace {
+  height: 60rpx;
+}

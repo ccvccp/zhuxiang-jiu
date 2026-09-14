@@ -52,7 +52,8 @@ export default defineAppConfig({
     'pages/qr/index',
     'pages/av62/index',
     'pages/attract72/index',
-    'pages/cs-workbench/index'
+    'pages/cs-workbench/index',
+    'pages/kb-model/index'
   ],
   window: {
     backgroundTextStyle: 'light',

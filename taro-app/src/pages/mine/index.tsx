@@ -315,6 +315,22 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/cs-workbench/index' })}>
+              <View className={styles.adminEntryIcon}>🎧</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>人工客服工作台</View>
+                <View className={styles.adminEntryDesc}>排队接入 · 实时收发 · 会话统计</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/kb-model/index' })}>
+              <View className={styles.adminEntryIcon}>📚</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>智能知识库训练模型</View>
+                <View className={styles.adminEntryDesc}>双师引擎 · 知识治理 · 缺口队列 · 问答测试</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
             <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/promo/index' })}>
               <View className={styles.adminEntryIcon}>📈</View>
               <View className={styles.adminEntryInfo}>
