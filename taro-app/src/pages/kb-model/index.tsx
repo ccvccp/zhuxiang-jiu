@@ -3,7 +3,7 @@
  * 四页签: 双师引擎(灰度/统计/样本) → 知识库(条目治理) → 缺口队列 → 问答测试
  * 口径: 观测面永不关停 · 样本仅为建议(流转必经人工) · 宪法域不可校准
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, Input, Textarea } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
@@ -46,7 +46,6 @@ const KbModelPage: React.FC = () => {
         KbModelAPI.dualSamples(sampleKind),
       ]);
       setDualMode(m); setDualStats(s); setSamples(list);
-      Taro.showToast({ title: '已刷新', icon: 'none' });
     } catch (e) {
       Taro.showToast({ title: errMsg(e), icon: 'none' });
     }
@@ -63,8 +62,10 @@ const KbModelPage: React.FC = () => {
   // ---- 知识库页 ----
   const [statusFilter, setStatusFilter] = useState('');
   const [entries, setEntries] = useState<any[]>([]);
+  const [entriesLoading, setEntriesLoading] = useState(false);
   const [stats, setStats] = useState<any>(null);
   const loadEntries = async (status = statusFilter) => {
+    setEntriesLoading(true);
     try {
       const [list, s] = await Promise.all([
         KbModelAPI.entries(status || undefined),
@@ -73,6 +74,8 @@ const KbModelPage: React.FC = () => {
       setEntries(list); setStats(s);
     } catch (e) {
       Taro.showToast({ title: errMsg(e), icon: 'none' });
+    } finally {
+      setEntriesLoading(false);
     }
   };
   const handleEntryAction = async (e2: any, action: 'review' | 'publish' | 'retire') => {
@@ -128,6 +131,16 @@ const KbModelPage: React.FC = () => {
     }
   };
 
+  /** 页签切换(自动加载对应数据, 无须手动点刷新) */
+  const switchTab = (key: Tab) => {
+    setTab(key);
+    if (key === 'dual') loadDual();
+    else if (key === 'entries') loadEntries();
+    else if (key === 'gaps') loadGaps();
+  };
+
+  useEffect(() => { switchTab('dual'); }, []);
+
   return (
     <View className={styles.page}>
       <NavBar title="智能知识库训练模型" />
@@ -147,7 +160,7 @@ const KbModelPage: React.FC = () => {
             <View
               key={t.key}
               className={`${styles.tab} ${tab === t.key ? styles.tabActive : ''}`}
-              onClick={() => { setTab(t.key); }}
+              onClick={() => switchTab(t.key)}
             >
               {t.label}
             </View>
@@ -246,7 +259,9 @@ const KbModelPage: React.FC = () => {
               ))}
             </View>
             {entries.length === 0 ? (
-              <View className={styles.empty}>暂无条目</View>
+              <View className={styles.empty}>
+                {entriesLoading ? '加载中...' : '暂无条目'}
+              </View>
             ) : entries.map(e => (
               <View key={e.id} className={styles.rowCard}>
                 <View className={styles.rowHead}>
