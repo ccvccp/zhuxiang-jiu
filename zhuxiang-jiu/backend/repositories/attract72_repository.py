@@ -84,6 +84,7 @@ class Attract72Repository:
         "variantId", "impressions",
         "conversions",
         "decisionId", "radarEventId",
+        "windowBaseClicks",
         # P6
         "experimentId", "checkId",
         "runId", "sampleSize",
@@ -100,11 +101,12 @@ class Attract72Repository:
         "explorationRatio",
         "explorationAmount", "expectedRoi",
         "actualDeviation", "monthlyReserve",
-        # P4/P5
+        # P4/P5(注: 决策记录 potential 为四维
+        # dict——走 _JSON_DICT_FIELDS, 勿入本清单)
         "matchScore", "conversionRate",
         "timeliness", "relevance",
-        "safety", "conversionPotential",
-        "potential", "actualRoi",
+        "safety", "actualRoi",
+        "avgDwell",
         # P6
         "diversityIndex", "matchAccuracy",
         "forecastMape", "budget",
@@ -125,7 +127,8 @@ class Attract72Repository:
                          "plan", "outcome",
                          "distribution",
                          # P6
-                         "result", "scope")
+                         "result", "scope",
+                         "thresholds")
     _JSON_LIST_FIELDS = (
         "platforms", "intentTags", "sceneTags",
         "hesitationSignals", "impactChannels",
@@ -245,9 +248,14 @@ class Attract72Repository:
             for key in keys:
                 data = await client.get(key)
                 if data:
+                    parsed = json.loads(data)
+                    # next_id 序列键(如 health:seq)
+                    # 落在同一通配域——非对象值
+                    # 跳过(生产实测 500 防御)
+                    if not isinstance(parsed, dict):
+                        continue
                     records.append(
-                        self._deserialize(
-                            json.loads(data)))
+                        self._deserialize(parsed))
             return records[:limit]
         self._ensure_store()
         return [dict(r) for r in
