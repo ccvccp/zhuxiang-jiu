@@ -1,4 +1,4 @@
-﻿"""64号·信值兑换管理模块 P4 专项测试
+"""64号·信值兑换管理模块 P4 专项测试
 (价值锚定与治理层)
 
 运行方式:
@@ -783,8 +783,10 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 55,
+        # 档案数随全站模块注册演进(39→55→64),
+        # 每新增评分器批次后同步本基线
+        record("44号 64 档案在册",
+               len(SCORER_REGISTRY) == 64,
                str(len(SCORER_REGISTRY)))
 
         from routes.xx64_routes import (
