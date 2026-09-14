@@ -19,6 +19,19 @@
     - 分润(2):  share-settings(GET/PUT) / share-preview
     - 评价(3):  review(POST) / reviews / rating
     - 报表(2):  overview / category
+
+大模型治理层(P3 升级——全站范式 68/71/73/74 号同款):
+    - 三态灰度 ALLIANCE37_MODE(off/shadow/assist, 默认 assist
+      ——业务在线铁律, 升级不阻断既有交易)
+    - 读取链: 护栏暂停 > 运行时 override > 环境变量 > 默认 assist
+    - 观测面永不关停(全部 GET 查询: 商户/商品/评价/结算/报表/
+      考核/范围/就近/定制列表/白皮书)
+    - 决策面 off 拒绝(409): 入盟/审批/商户状态/商品上下架/下单/
+      结算/冲正/分润配置/评价提交/折叠/考核执行/范围申请/
+      场景编排/核销/定制全链(23 端点)
+    - 护栏: 退款率/客诉进线率/商户清退率任一恶化>3% 自动暂停
+    - 治理端点(5): mode / mode/override / mode/guard /
+      mode/resume / whitepaper
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -59,6 +72,23 @@ def _handle(exc: Exception):
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=409, detail=str(exc))
     raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ============================================================
+# 大模型治理层辅助(P3 升级)
+# ============================================================
+
+def _mode_service():
+    """灰度治理服务(懒加载——避免启动期循环依赖)"""
+    from services.alliance_mode_service import (
+        AllianceModeService,
+    )
+    return AllianceModeService()
+
+
+async def _require_decision_mode() -> dict:
+    """决策面灰度门槛(off→409; 全站范式)"""
+    return await _mode_service().require_decision_mode()
 
 
 # ============================================================
@@ -155,6 +185,7 @@ class QuoteRequest(PydBaseModel):
 async def apply(data: ApplyRequest):
     """超级会员入盟申请(自动 AI 预审: ≥80快车道/60-79人工审/<60拒)"""
     try:
+        await _require_decision_mode()
         result = await _service.apply(
             member_id=data.memberId, category=data.category,
             shop_name=data.shopName, credentials=data.credentials,
@@ -188,6 +219,7 @@ async def audit_application(
     """人工终审(通过→签约建档; 拒→rejected 触发 90 天冷却)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.audit_application(
             application_id=application_id, approved=data.approved,
             reviewer=data.reviewer, note=data.note)
@@ -221,6 +253,7 @@ async def activate_merchant(
     """激活试用期(signed→probation, 90 天)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.activate_merchant(merchant_id)
         return {"success": True, "data": result}
     except Exception as e:
@@ -236,6 +269,7 @@ async def confirm_merchant(
     """试用转正(probation→active)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.confirm_merchant(merchant_id)
         return {"success": True, "data": result}
     except Exception as e:
@@ -252,6 +286,7 @@ async def suspend_merchant(
     """暂停商户(在售商品自动下架)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.suspend_merchant(merchant_id, reason=reason)
         return {"success": True, "data": result}
     except Exception as e:
@@ -268,6 +303,7 @@ async def terminate_merchant(
     """终止商户(主动退出/强制清退; 90 天冷却)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.terminate_merchant(merchant_id, reason=reason)
         return {"success": True, "data": result}
     except Exception as e:
@@ -300,6 +336,7 @@ async def create_product(
     """商品上架(三道门禁: 资质/溯源/合规; 酒类须挂已放行批次)"""
     member_id = _require_member(x_member_id)
     try:
+        await _require_decision_mode()
         # 以申请人会员身份定位其商铺
         merchant = await _service.repo.find_merchant_by_member(member_id)
         if merchant is None:
@@ -349,6 +386,7 @@ async def offline_product(
     """商户下架自己的商品"""
     member_id = _require_member(x_member_id)
     try:
+        await _require_decision_mode()
         product = await _service.get_product(product_id)
         merchant = await _service.repo.find_merchant_by_member(member_id)
         if merchant is None or merchant["merchantId"] != product["merchantId"]:
@@ -371,6 +409,7 @@ async def place_order(
     """同盟商品下单(原子扣库存; 支付口径 P0=下单即付)"""
     member_id = _require_member(x_member_id)
     try:
+        await _require_decision_mode()
         result = await _service.place_order(
             product_id=data.productId, buyer_id=member_id,
             quantity=data.quantity)
@@ -432,6 +471,7 @@ async def settle_order(
     """订单结算(15%抽佣五方拆账+总账双写+货款入账; 幂等)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.settle_order(order_id)
         return {"success": True, "data": result}
     except Exception as e:
@@ -448,6 +488,7 @@ async def reverse_settlement(
     """结算冲正(退款场景)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.reverse_settlement(order_id, reason=reason)
         return {"success": True, "data": result}
     except Exception as e:
@@ -490,6 +531,7 @@ async def run_scheduled_settlement(
     """触发 T+1 定时结算(调度器同款; 手动运维通道)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.run_scheduled_settlement()
         return {"success": True, "data": result}
     except Exception as e:
@@ -517,6 +559,7 @@ async def update_share_settings(
     """更新分润配置(比例合计须=1)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.update_share_settings(
             commission_rate=data.commissionRate,
             share_rates=data.shareRates)
@@ -551,6 +594,7 @@ async def submit_review(
     """消费者评价商户(结算后一单一评, 1-5星)"""
     member_id = _require_member(x_member_id)
     try:
+        await _require_decision_mode()
         result = await _service.submit_review(
             order_id=data.orderId, reviewer_id=member_id,
             score=data.score, content=data.content)
@@ -594,6 +638,7 @@ async def fold_review(
     """折叠违规评价(P1 接 AI 语义审评自动折叠)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         result = await _service.fold_review(review_id, reason=data.reason)
         return {"success": True, "data": result}
     except Exception as e:
@@ -649,6 +694,7 @@ async def apply_coverage(
     """申请服务范围(密度上限仲裁: 同网格同类目<gridCap 优质优先)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         from services.alliance_geo_service import AllianceGeoService
         result = await AllianceGeoService().apply_coverage(
             merchant_id=merchant_id, level=data.level,
@@ -705,6 +751,7 @@ async def run_assessment(
     """执行月度考核(GMV/星级→S/A/B/C→连续C级暂停/清退)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         from services.alliance_geo_service import AllianceAssessmentService
         result = await AllianceAssessmentService().run_monthly(
             month=month, merchant_id=merchantId)
@@ -743,6 +790,7 @@ async def create_gathering(
     """酒友小聚编排出单(选酒→配菜→订境, 一单三子单+核销码)"""
     member_id = _require_member(x_member_id)
     try:
+        await _require_decision_mode()
         from services.alliance_scene_service import AllianceSceneService
         result = await AllianceSceneService().create_gathering(
             user_id=member_id, party_size=data.partySize,
@@ -777,6 +825,7 @@ async def redeem(
 ):
     """线下核销(到店扫码; 三子单立即结算分润, 幂等+72h有效)"""
     try:
+        await _require_decision_mode()
         from services.alliance_scene_service import AllianceSceneService
         result = await AllianceSceneService().redeem(data.code)
         return {"success": True, "data": result}
@@ -793,6 +842,7 @@ async def create_custom_demand(
     """提交定制需求(酒具刻字/私宴定制/封坛定制)"""
     member_id = _require_member(x_member_id)
     try:
+        await _require_decision_mode()
         from services.alliance_scene_service import AllianceSceneService
         result = await AllianceSceneService().create_custom_demand(
             user_id=member_id, merchant_id=data.merchantId,
@@ -846,6 +896,7 @@ async def quote_custom_demand(
     """商户报价(demand→quoted)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         from services.alliance_scene_service import AllianceSceneService
         result = await AllianceSceneService().quote_custom_demand(
             demand_id, quoted_price=data.quotedPrice)
@@ -863,6 +914,7 @@ async def confirm_custom_demand(
     """用户确认报价(quoted→confirmed; 须本人)"""
     member_id = _require_member(x_member_id)
     try:
+        await _require_decision_mode()
         from services.alliance_scene_service import AllianceSceneService
         result = await AllianceSceneService().confirm_custom_demand(
             demand_id, user_id=member_id)
@@ -881,9 +933,100 @@ async def advance_custom_demand(
     """推进定制(商户/管理侧)"""
     _require_admin(x_role)
     try:
+        await _require_decision_mode()
         from services.alliance_scene_service import AllianceSceneService
         result = await AllianceSceneService().advance_custom_demand(
             demand_id, target=target)
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P3: 大模型治理层(三态灰度/护栏/白皮书——全站范式)
+# ============================================================
+
+@router.get("/api/alliance/mode",
+            tags=["AI智能网站同盟模块"])
+async def alliance_mode_status():
+    """灰度总览(观测面永不关停: 三态/护栏/决策面清单公示)"""
+    try:
+        return {"success": True, "data":
+                await _mode_service().status_view()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/alliance/mode/override",
+             tags=["AI智能网站同盟模块"])
+async def alliance_mode_override(
+    mode: str = Query(..., description="目标灰度态: off/shadow/assist(空串清除)"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """运行时切档(人工留痕; 免容器重建; 空串清除回落环境变量)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _mode_service().set_override(
+                    mode, operator="admin")}
+    except Exception as e:
+        _handle(e)
+
+
+class AllianceGuardRequest(PydBaseModel):
+    refundRate: float = Field(0.05, description="当期退款率")
+    complaintRate: float = Field(0.02, description="当期客诉进线率")
+    terminationRate: float = Field(0.03, description="当期商户清退率")
+    baseline: dict = Field(None, description="基线三指标(可选)")
+
+
+@router.post("/api/alliance/mode/guard",
+             tags=["AI智能网站同盟模块"])
+async def alliance_mode_guard(
+    data: AllianceGuardRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """护栏检查(三指标恶化>3% 自动暂停; 指标留痕)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _mode_service().guard_check(
+                    refund_rate=data.refundRate,
+                    complaint_rate=data.complaintRate,
+                    termination_rate=data.terminationRate,
+                    baseline=data.baseline)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/alliance/mode/resume",
+             tags=["AI智能网站同盟模块"])
+async def alliance_mode_resume(
+    x_role: str = Header(None, alias="X-Role"),
+    note: str = Query("", description="恢复说明(决策留痕)"),
+):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _mode_service().resume(
+                    operator="admin", note=note)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/alliance/whitepaper",
+            tags=["AI智能网站同盟模块"])
+async def alliance_whitepaper(
+    year: int = Query(None, description="年度(空=当年)"),
+):
+    """年度同盟生态白皮书(四章节固定结构; 零个体数据; 观测面永不关停)"""
+    try:
+        from services.alliance_whitepaper_service import (
+            AllianceWhitepaperService,
+        )
+        return {"success": True, "data":
+                await AllianceWhitepaperService()
+                .whitepaper(year)}
     except Exception as e:
         _handle(e)

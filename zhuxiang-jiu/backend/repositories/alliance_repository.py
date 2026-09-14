@@ -550,6 +550,24 @@ class AllianceRepository:
                       reverse=True)[:limit]
 
     # ============================================================
+    # P3: 大模型治理层——灰度态存储(单例 stateId=1)
+    # ============================================================
+
+    GRAYSCALE_TABLE = "alliance_grayscale"
+    STATE_ID = 1
+
+    async def load_state(self) -> dict | None:
+        return await self._get(self.GRAYSCALE_TABLE,
+                               self.STATE_ID)
+
+    async def save_state(self, record: dict) -> dict:
+        """保存运行时态({stateId, override, paused,
+        pausedReason, pausedAt, metrics, breachTrail,
+        updatedAt})"""
+        return await self._save(self.GRAYSCALE_TABLE,
+                                self.STATE_ID, record)
+
+    # ============================================================
     # 通用存储(内存/Redis)
     # ============================================================
 
@@ -611,6 +629,7 @@ class AllianceRepository:
             self.store["alliance_scenes"] = {}            # P2: 场景订单
             self.store["alliance_redeem_codes"] = {}      # P2: 核销码
             self.store["alliance_custom_demands"] = {}    # P2: 定制服务
+            self.store["alliance_grayscale"] = {}        # P3: 大模型治理灰度态
             self.store["_alliance_merchant_seq"] = 0
             self.store["_alliance_application_seq"] = 0
             self.store["_alliance_product_seq"] = 0
