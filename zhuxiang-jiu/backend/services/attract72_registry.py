@@ -472,6 +472,70 @@ BUDGET_SCORER_ID = "growth_budget"
 
 
 # ============================================================
+# P4 短链记忆域(规划 §四 4.2——ctx 上下文/
+# 动态落地页/跨会话记忆/反作弊)
+# ============================================================
+
+# 落地页变体域(封闭——画像×变体匹配分查表)
+LANDING_VARIANTS = (
+    "trust_first",     # 新用户强化信任
+    "benefit_first",   # 老用户直显权益
+    "default",         # 兜底(v1.0 一致)
+)
+
+# 反作弊状态机(封闭)
+ANTIFRAUD_STATES = (
+    "normal",      # 正常
+    "isolated",    # 已隔离(分布异常)
+    "released",    # 人工解冻
+)
+
+# 指纹频次线(窗口内点击超此值→分布异常
+# 候选隔离)
+FINGERPRINT_RATE_LIMIT = 50
+
+# 隔离窗(秒——隔离后此窗口内拒服务)
+FINGERPRINT_ISOLATE_SECONDS = 3600.0
+
+# ctx 有效期(秒——超期降级 default)
+CTX_TTL_SECONDS = 3600.0
+
+
+# ============================================================
+# P5 热点卡位域(规划 §四 4.6——雷达联动
+# 四维势能/卡位决策/结果回流)
+# ============================================================
+
+# 四维势能权重(和为 1)
+POTENTIAL_WEIGHT_TIMELINESS = 0.25
+POTENTIAL_WEIGHT_RELEVANCE = 0.25
+POTENTIAL_WEIGHT_SAFETY = 0.30
+POTENTIAL_WEIGHT_CONVERSION = 0.20
+
+# 热点安全下限(安全性 < 此值 → 高风险自动拒追,
+# "热点安全硬编码"铁律)
+HOTSPOT_SAFETY_FLOOR = 0.5
+
+# 追投势能阈值(综合势能 > 此值 → chase)
+HOTSPOT_CHASE_THRESHOLD = 0.6
+
+# 热点裁决域(封闭)
+HOTSPOT_VERDICTS = (
+    "chase",     # 卡位追投
+    "observe",   # 观察
+    "reject",    # 拒追(高风险/低势能)
+)
+
+# 卡位决策状态机(封闭)
+HOTSPOT_DECISION_STATUSES = (
+    "pending",    # shadow 落档
+    "confirmed",  # assist 人工确认
+    "executed",   # 已推送执行
+    "closed",     # 结果回流闭环
+)
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -714,6 +778,45 @@ def _validate_registry() -> None:
     if BUDGET_SCORER_ID != "growth_budget":
         raise RuntimeError(
             "attract72 预算治理档案口径非法")
+    # ⑯ P4 短链记忆: 变体/反作弊/记忆域封闭
+    if set(LANDING_VARIANTS) != {
+            "trust_first", "benefit_first",
+            "default"}:
+        raise RuntimeError(
+            "attract72 落地页变体域非法")
+    if set(ANTIFRAUD_STATES) != {
+            "normal", "isolated", "released"}:
+        raise RuntimeError(
+            "attract72 反作弊状态机非法")
+    if FINGERPRINT_RATE_LIMIT < 1:
+        raise RuntimeError(
+            "attract72 指纹频次线域外")
+    if FINGERPRINT_ISOLATE_SECONDS <= 0:
+        raise RuntimeError(
+            "attract72 隔离窗域外")
+    # ⑰ P5 热点: 势能权重/阈值/裁决域封闭
+    _pw = (POTENTIAL_WEIGHT_TIMELINESS
+           + POTENTIAL_WEIGHT_RELEVANCE
+           + POTENTIAL_WEIGHT_SAFETY
+           + POTENTIAL_WEIGHT_CONVERSION)
+    if abs(_pw - 1.0) > 0.001:
+        raise RuntimeError(
+            "attract72 四维势能权重和非 1")
+    if not (0 <= HOTSPOT_SAFETY_FLOOR <= 1):
+        raise RuntimeError(
+            "attract72 热点安全下限域外")
+    if not (0 <= HOTSPOT_CHASE_THRESHOLD <= 1):
+        raise RuntimeError(
+            "attract72 追投势能阈值域外")
+    if set(HOTSPOT_VERDICTS) != {
+            "chase", "observe", "reject"}:
+        raise RuntimeError(
+            "attract72 热点裁决域非法")
+    if set(HOTSPOT_DECISION_STATUSES) != {
+            "pending", "confirmed",
+            "executed", "closed"}:
+        raise RuntimeError(
+            "attract72 卡位状态机非法")
 
 
 _validate_registry()

@@ -40,7 +40,8 @@
       预分配 anchor/偏差度量 now 同为演示口径
 """
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import (APIRouter, Header,
+                     HTTPException, Query)
 from pydantic import BaseModel, Field
 
 from services.attract72_p1_service import (
@@ -580,3 +581,288 @@ async def apply_rates(
 def register_attract72_routes(app) -> None:
     """路由注册(main.py 挂载)"""
     app.include_router(router)
+
+
+# ============================================================
+# P4 短链记忆(观测/快环——不受 MODE 门控)
+# ============================================================
+
+class LandingDecideRequest(BaseModel):
+    code: str = Field(..., min_length=1, max_length=64,
+                      description="短链码(v1.0 兼容)")
+    fingerprint: str = Field("", max_length=64,
+                             description="设备指纹(空则 ctx)")
+    ctx: str = Field("", max_length=512,
+                     description="base64 上下文(可选)")
+
+
+class VisitRecordRequest(BaseModel):
+    fingerprint: str = Field(..., min_length=8, max_length=64,
+                             description="设备指纹")
+    dwellSeconds: float = Field(0.0, ge=0, le=86400,
+                                description="停留秒数")
+    converted: bool = Field(False, description="是否转化")
+    registered: bool = Field(False, description="是否注册(归并)")
+
+
+@router.post("/landing/dynamic")
+async def landing_dynamic(
+        body: LandingDecideRequest,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """动态落地页决策(观测面——变体查表,
+    反作弊隔离态降级 default)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p4_service import (
+            Attract72P4Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P4Service()
+                .decide_landing(code=body.code,
+                                fingerprint=body.fingerprint,
+                                ctx=body.ctx)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/memory/visit")
+async def memory_visit(
+        body: VisitRecordRequest,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """跨会话记忆累积(快环——指纹 upsert,
+    频次超线自动隔离)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p4_service import (
+            Attract72P4Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P4Service()
+                .record_visit(fingerprint=body.fingerprint,
+                              dwell_seconds=body.dwellSeconds,
+                              converted=body.converted,
+                              registered=body.registered)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/memory/{fingerprint}")
+async def memory_query(
+        fingerprint: str,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """跨会话画像查询(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p4_service import (
+            Attract72P4Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P4Service()
+                .get_memory(fingerprint)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/memory/{fingerprint}/release")
+async def memory_release(
+        fingerprint: str,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """反作弊人工解冻(admin——解冻人工专属)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p4_service import (
+            Attract72P4Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P4Service()
+                .release_fingerprint(fingerprint)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/landing/variants")
+async def landing_variants(
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """变体分布台账(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p4_service import (
+            Attract72P4Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P4Service()
+                .list_variants()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P5 热点卡位(机会=观测面; 决策=决策面 off 409)
+# ============================================================
+
+class HotspotDecideRequest(BaseModel):
+    radarEventId: int = Field(..., gt=0,
+                              description="雷达事件 ID")
+
+
+class HotspotOutcomeRequest(BaseModel):
+    impressions: int = Field(0, ge=0,
+                             description="实际曝光")
+    conversions: int = Field(0, ge=0,
+                             description="实际转化")
+    actualRoi: float = Field(0.0, ge=0,
+                             description="实际 ROI")
+
+
+@router.get("/hotspot/opportunities")
+async def hotspot_opportunities(
+        limit: int = Query(20, ge=1, le=100),
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """热点机会清单(观测面——雷达×四维势能)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p5_service import (
+            Attract72P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P5Service()
+                .list_opportunities(limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/hotspot/decide")
+async def hotspot_decide(
+        body: HotspotDecideRequest,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """卡位决策(决策面——shadow 落档/assist
+    方案+人工确认; 高风险自动拒追)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p5_service import (
+            Attract72P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P5Service()
+                .decide(body.radarEventId)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/hotspot/decisions")
+async def hotspot_decisions(
+        verdict: str = Query(None),
+        status: str = Query(None),
+        limit: int = Query(100, ge=1, le=500),
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """卡位决策台账(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p5_service import (
+            Attract72P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P5Service()
+                .list_decisions(verdict, status, limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/hotspot/{decision_id}/confirm")
+async def hotspot_confirm(
+        decision_id: int,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """卡位人工确认(assist 档——shadow 期拒绝)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p5_service import (
+            Attract72P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P5Service()
+                .confirm_decision(decision_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/hotspot/{decision_id}/execute")
+async def hotspot_execute(
+        decision_id: int,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """卡位执行(方案注入 40号创作情境参考——
+    永不直接操作账号铁律)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p5_service import (
+            Attract72P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P5Service()
+                .execute_decision(decision_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/hotspot/{decision_id}/outcome")
+async def hotspot_outcome(
+        decision_id: int,
+        body: HotspotOutcomeRequest,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """结果回流(预期 vs 实际闭环——观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p5_service import (
+            Attract72P5Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P5Service()
+                .record_outcome(decision_id,
+                                body.impressions,
+                                body.conversions,
+                                body.actualRoi)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc

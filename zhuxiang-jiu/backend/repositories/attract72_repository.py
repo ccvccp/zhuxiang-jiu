@@ -47,10 +47,15 @@ class Attract72Repository:
     TABLE_INSIGHTS = "attract72_causal_insights"
     TABLE_LAWS = "attract72_growth_laws"
     TABLE_FORECASTS = "attract72_budget_forecasts"
+    TABLE_MEMORY = "attract72_device_memory"
+    TABLE_VARIANTS = "attract72_landing_variants"
+    TABLE_DECISIONS = "attract72_hotspot_decisions"
 
     _ALL_TABLES = (TABLE_PERSONAS, TABLE_INTENTS,
                    TABLE_SIGNALS, TABLE_INSIGHTS,
-                   TABLE_LAWS, TABLE_FORECASTS)
+                   TABLE_LAWS, TABLE_FORECASTS,
+                   TABLE_MEMORY, TABLE_VARIANTS,
+                   TABLE_DECISIONS)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -68,6 +73,11 @@ class Attract72Repository:
         "sampleSize", "baseSampleSize",
         "observedCount", "validatedCount",
         "decayCount", "version",
+        # P4/P5
+        "memoryId", "clicksTotal",
+        "variantId", "impressions",
+        "conversions",
+        "decisionId", "radarEventId",
     )
     _FLOAT_FIELDS = (
         "engagementRate", "conversionRate",
@@ -81,18 +91,33 @@ class Attract72Repository:
         "explorationRatio",
         "explorationAmount", "expectedRoi",
         "actualDeviation", "monthlyReserve",
+        # P4/P5
+        "matchScore", "conversionRate",
+        "timeliness", "relevance",
+        "safety", "conversionPotential",
+        "potential", "actualRoi",
     )
     _BOOL_FIELDS = ("verified", "consumed",
-                    "syncedToKB")
+                    "syncedToKB",
+                    # P4/P5
+                    "registered", "isolated",
+                    "executed")
     _JSON_DICT_FIELDS = ("stats", "payload",
                          "conditions",
                          "demandSignals",
-                         "timeScales")
+                         "timeScales",
+                         # P4/P5
+                         "ctx", "potential",
+                         "plan", "outcome",
+                         "distribution")
     _JSON_LIST_FIELDS = (
         "platforms", "intentTags", "sceneTags",
         "hesitationSignals", "impactChannels",
         "history", "evidence",
         "allocations",
+        # P4/P5
+        "seenVariants", "variants",
+        "timeWindow",
     )
 
     def __init__(self, store: dict = None):
@@ -422,6 +447,110 @@ class Attract72Repository:
                     and l.get("status") == "active":
                 return l
         return None
+
+    # ============================================================
+    # P4 跨会话记忆(attract72_device_memory,
+    # fingerprint 唯一 upsert)
+    # ============================================================
+
+    async def save_memory(self,
+                           record: dict) -> dict:
+        return await self._save(
+            self.TABLE_MEMORY,
+            record["deviceFingerprint"],
+            record)
+
+    async def get_memory(
+            self, fingerprint: str) -> dict | None:
+        return await self._get(
+            self.TABLE_MEMORY, fingerprint)
+
+    async def list_memories(
+            self, limit: int = 200) -> list[dict]:
+        memories = await self._list(
+            self.TABLE_MEMORY, limit)
+        return sorted(
+            memories,
+            key=lambda m: -m.get("clicksTotal", 0)
+        )[:limit]
+
+    # ============================================================
+    # P4 落地页变体分布(attract72_landing_variants,
+    # variant 唯一)
+    # ============================================================
+
+    async def save_variant(self,
+                           record: dict) -> dict:
+        return await self._save(
+            self.TABLE_VARIANTS,
+            record["variantId"], record)
+
+    async def get_variant(
+            self, variant_id: int) -> dict | None:
+        return await self._get(
+            self.TABLE_VARIANTS, variant_id)
+
+    async def find_variant_by_name(
+            self, variant: str) -> dict | None:
+        for v in await self._list(
+                self.TABLE_VARIANTS, 200):
+            if v.get("variant") == variant:
+                return v
+        return None
+
+    async def list_variants(
+            self, limit: int = 100) -> list[dict]:
+        return await self._list(
+            self.TABLE_VARIANTS, limit)
+
+    # ============================================================
+    # P5 热点卡位决策(attract72_hotspot_decisions,
+    # radarEventId 唯一 upsert)
+    # ============================================================
+
+    async def save_decision(self,
+                            record: dict) -> dict:
+        return await self._save(
+            self.TABLE_DECISIONS,
+            record["decisionId"], record)
+
+    async def get_decision(
+            self, decision_id: int) -> dict | None:
+        return await self._get(
+            self.TABLE_DECISIONS, decision_id)
+
+    async def find_decision_by_radar(
+            self, radar_event_id: int) -> dict | None:
+        for d in await self._list(
+                self.TABLE_DECISIONS, 2000):
+            if d.get("radarEventId") \
+                    == radar_event_id:
+                return d
+        return None
+
+    async def list_decisions(
+            self, verdict: str = None,
+            status: str = None,
+            limit: int = 100) -> list[dict]:
+        decisions = await self._list(
+            self.TABLE_DECISIONS, 2000)
+        if verdict:
+            decisions = [d for d in decisions
+                         if d.get("verdict")
+                         == verdict]
+        if status:
+            decisions = [d for d in decisions
+                         if d.get("status")
+                         == status]
+        return sorted(decisions,
+                      key=lambda d: (
+                          -d.get("potential", 0.0)
+                          if isinstance(
+                              d.get("potential"),
+                              (int, float))
+                          else -0.0,
+                          d.get("decisionId", 0))
+                      )[:limit]
 
     # ============================================================
     # 预算预分配(attract72_budget_forecasts,
