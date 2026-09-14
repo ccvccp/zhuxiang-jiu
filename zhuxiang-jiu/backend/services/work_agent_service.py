@@ -302,7 +302,14 @@ class WorkAgentService:
                 f"跟随调性: {audience.get('tone', '')}\n"
                 f"挂链短码: {short_link}")
         data, track = self._chat_json(system, user)
-        if data is None or not (data.get("body") or "").strip():
+        # LLM 字段规约校验(生产实证 2026-09-14: title/body 偶发 dict 形态,
+        # (dict or "").strip() 崩溃炸掉整轮雷达 auto_follow 生成——其余
+        # 作品被孤儿化; 非字符串/空标题正文即回退规则轨, 全字段归一为 str)
+        def _s(v):
+            return v.strip() if isinstance(v, str) else ""
+
+        if (data is None or not _s(data.get("body"))
+                or not _s(data.get("title"))):
             platform = blogger.get("platform", "")
             body = _RULE_TEMPLATES.get(
                 platform, _RULE_TEMPLATES[PLATFORM_DOUYIN]).format(
@@ -320,6 +327,18 @@ class WorkAgentService:
                 "hashtags": f"#竹香型白酒 #{domain_label}",
                 "cta": "点击链接了解详情",
                 "imageChoice": "product",
+            }
+        else:
+            data = {
+                "title": _s(data["title"]),
+                "body": _s(data["body"]),
+                "hashtags": _s(data.get("hashtags"))
+                or f"#竹香型白酒 #{domain_label}",
+                "cta": _s(data.get("cta")) or "点击链接了解详情",
+                "imageChoice": (
+                    data.get("imageChoice")
+                    if isinstance(data.get("imageChoice"), str)
+                    else "product"),
             }
         return data, track
 

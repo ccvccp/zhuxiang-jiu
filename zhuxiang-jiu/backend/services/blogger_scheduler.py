@@ -67,16 +67,25 @@ async def _radar_loop() -> None:
             result = await service.scan()
             logger.info("blogger_radar_scheduled new=%s discarded=%s",
                         result.get("new"), result.get("discarded"))
-            # auto_follow 作品自动生成跟随(P0 全自动闭环)
+            # auto_follow 作品自动生成跟随(P0 全自动闭环;
+            # 逐作品容错——单件异常仅跳过自身, 不阻断同轮其余作品,
+            # 防孤儿化: 生产实证 2026-09-14 work=55 生成异常炸掉
+            # 整轮循环, 剩余 17 件 auto_follow 无 radar 决策可再触达)
             for decision in result.get("decisions", []):
                 work = decision.get("work") or {}
                 if work.get("status") == "auto_follow":
-                    follow = await service.generate_follow(
-                        work["workId"])
-                    logger.info(
-                        "blogger_auto_follow work=%s follow=%s "
-                        "status=%s", work["workId"],
-                        follow["followId"], follow["status"])
+                    try:
+                        follow = await service.generate_follow(
+                            work["workId"])
+                        logger.info(
+                            "blogger_auto_follow work=%s follow=%s "
+                            "status=%s", work["workId"],
+                            follow["followId"], follow["status"])
+                    except Exception as exc:
+                        logger.warning(
+                            "auto_follow 生成失败(跳过该作品, 同轮其余"
+                            "继续): work=%s %s",
+                            work.get("workId"), exc)
         except Exception as exc:
             logger.warning("雷达调度异常(继续运行): %s", exc)
 

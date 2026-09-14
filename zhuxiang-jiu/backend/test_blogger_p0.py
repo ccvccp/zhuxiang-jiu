@@ -656,6 +656,73 @@ class TestHttpRoutes:
         record("HTTP-单博主归因404", resp.status_code == 404)
 
 
+class TestAgentFieldNormalize:
+    """LLM 字段规约归一化专项(生产实证 2026-09-14 work=55:
+    LLM 返回 dict 形态 title/body → .strip() 崩溃炸掉整轮雷达
+    auto_follow 生成, 剩余作品孤儿化; 修复: 非字符串/空回退规则轨,
+    全字段归一为 str)"""
+
+    async def run(self):
+        work = {"workId": 901, "title": "中秋团圆宴白酒清单",
+                "summary": "团圆宴用酒推荐清单", "coverUrl": "",
+                "extWorkId": "EXT-901", "platform": "douyin",
+                "likeCount": 100, "commentCount": 20,
+                "shareCount": 10, "publishedAt": "2026-09-14T10:00:00"}
+        blogger = {"bloggerId": 901, "platform": "douyin",
+                   "domain": "wine", "account": "测试博主",
+                   "nickname": "测试博主", "fansWan": 10.0}
+
+        def _agent_with(step3_payload):
+            agent = WorkAgentService()
+            calls = {"n": 0}
+
+            def fake_chat(system, user):
+                calls["n"] += 1
+                if calls["n"] >= 3:          # step3 生成
+                    return step3_payload, "glm-5.3"
+                return None, "llm"          # step1/2 走规则轨
+            agent._chat_json = fake_chat
+            return agent
+
+        # A: title/body 均为 dict(生产 work=55 崩溃场景) → 规则轨兜底
+        agent = _agent_with({"title": {"text": "嵌套标题"},
+                             "body": {"parts": []}})
+        d1 = await agent.generate_follow_content(
+            work, blogger, short_link="https://zxjiu.com/r/A-T1")
+        record("Agent-dict字段回退规则轨(崩溃修复)",
+               isinstance(d1["title"], str) and d1["title"].strip() != ""
+               and isinstance(d1["body"], str) and d1["body"].strip() != "")
+
+        # B: 合法标题正文 + dict 附属字段(hashtags/cta/imageChoice) → 归一化
+        agent = _agent_with({
+            "title": "合规跟随标题",
+            "body": "【转述】测试正文【致敬】@测试博主 声明"
+                    "【引荐】竹香型白酒",
+            "hashtags": {"tags": []}, "cta": 123,
+            "imageChoice": {"kind": "ai"}})
+        d2 = await agent.generate_follow_content(
+            work, blogger, short_link="https://zxjiu.com/r/A-T2")
+        record("Agent-附属dict字段归一化",
+               d2["title"] == "合规跟随标题"
+               and isinstance(d2["hashtags"], str) and d2["hashtags"]
+               and isinstance(d2["cta"], str) and d2["cta"]
+               and d2["imageChoice"] == "product")
+
+        # C: 全合法载荷 → 原样透传
+        agent = _agent_with({
+            "title": "透传标题",
+            "body": "【转述】x【致敬】@测试博主 声明【引荐】竹香型白酒",
+            "hashtags": "#竹香型白酒 #测试",
+            "cta": "点击了解", "imageChoice": "ai_generated"})
+        d3 = await agent.generate_follow_content(
+            work, blogger, short_link="https://zxjiu.com/r/A-T3")
+        record("Agent-合法载荷原样透传",
+               d3["title"] == "透传标题"
+               and d3["hashtags"] == "#竹香型白酒 #测试"
+               and d3["cta"] == "点击了解"
+               and d3["imageChoice"] == "ai_generated")
+
+
 async def main():
     test_classes = [
         ("种子池与权重分档", TestSeedPool),
@@ -668,6 +735,7 @@ async def main():
         ("归因闭环与报表", TestAttribution),
         ("博主池CRUD", TestPoolCrud),
         ("HTTP层19端点", TestHttpRoutes),
+        ("Agent字段规约归一化(生产崩溃修复)", TestAgentFieldNormalize),
     ]
     print("=" * 62)
     print("40号·平台流量DV博主模块 P0 核心闭环专项测试")
