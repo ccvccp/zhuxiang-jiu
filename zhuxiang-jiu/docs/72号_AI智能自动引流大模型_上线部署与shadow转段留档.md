@@ -125,3 +125,35 @@ bash /opt/zhuxiang/zhuxiang-jiu/backend/scripts/attract72_transfer.sh off
 assist 观察期后，经影子期评估模板 §七 判据（红队全防御+健康度非冻结+L1 零越界+逐档+签核）执行 `bash attract72_transfer.sh full`（脚本含三重门控机检）。
 
 **全站模型终态更新**：73号会员体验（full）、74号NexusFlow（full）、68号信值/71号支付端口/72号自动引流（assist）。
+
+---
+
+## 八、40号自动调度开启留档（2026-09-14 14:28 补记）
+
+### 8.1 开启内容（雷达→创作→发布→回流 无人值守循环）
+
+| 开关 | 值 | 周期 |
+|---|---|---|
+| BLOGGER_RADAR_AUTO | on | 900s（雷达扫描→评分→auto_follow 生成） |
+| BLOGGER_PUBLISH_AUTO | on | 300s（到期发布出队，按黄金时段） |
+| BLOGGER_LEARNING_AUTO | on | 3600s（效果回流+Hedge 学习） |
+
+原始备份：`.env.bak-blogger-auto-off`；回滚 `sed -i 's/^BLOGGER_.*_AUTO=.*/&/' `→置 off 后 `docker compose up -d backend`。
+
+### 8.2 安全边界（自动≠失控——三道闸门保持）
+
+1. **评分三档**：≥70 auto_follow 全自动 / 50-70 manual_queue **人工确认队列** / <50 pass 留痕；雷达层风险否决直接 discarded
+2. **三审闸门**（生成即预审）：硬性违规/合规分不足 → REJECTED；HITL 预警带 → PENDING **人工审核**；全过 → APPROVED
+3. **发布三限**：黄金时段窗口 + 单日上限 + 同博主冷却 + 间隔错峰；发布仅出队**已 review approve 入队**的跟随内容——人工审核位保留
+
+### 8.3 首轮执行实证（14:29 手动触发）
+
+- 扫描 new=21 / discarded=3（风险否决）
+- 三档分流正确：auto_follow 97.5/94.2/85.2/79.3 分全自动跟随，69.9 分入人工队列
+- 台账 48 作品：auto_follow 25 / manual_queue 12 / discarded 10 / following 1
+- 跟随流水线：合规分 100、零硬违规、approved 入发布队列
+- 调度器日志：`blogger_radar_scheduler started interval=900s` ×3 全部启动 ✓
+
+### 8.4 与 72号联动口径
+
+72号（assist）机会清单 chase 裁决经 admin 确认执行后，方案注入 40号创作情境参考；40号雷达独立扫描发现的平台热点经评分闸门自动跟随——两轨并行，选题撞车经 topic_dedup 去重降档人工裁决。
