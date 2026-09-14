@@ -80,6 +80,54 @@ export interface HotspotVO {
   createdAt?: string;
 }
 
+/**
+ * agentTrace 归一化: 后端为四步字典
+ * {step1Analysis, step2Audience, step3Generate, step4SelfCheck}(值为 glm-5.3/glm-4-flash/rule),
+ * 统一转为可读轨迹数组; 兼容旧数组形态。
+ */
+const TRACE_STEP_NAME: Record<string, string> = {
+  step1Analysis: '分析',
+  step2Audience: '受众',
+  step3Generate: '生成',
+  step4SelfCheck: '自查',
+};
+
+function toTraceArray(trace: any): string[] {
+  if (Array.isArray(trace)) return trace.map((t) => String(t));
+  if (trace && typeof trace === 'object') {
+    return Object.entries<any>(trace).map(
+      ([k, v]) => `${TRACE_STEP_NAME[k] || k}·${String(v)}`,
+    );
+  }
+  return [];
+}
+
+/**
+ * hashtags 归一化: 后端为空格分隔字符串(如 "#竹香型白酒 #热点"),
+ * 统一转为数组; 兼容数组形态。
+ */
+function toTagArray(tags: any): string[] {
+  if (Array.isArray(tags)) return tags.map((t) => String(t));
+  if (typeof tags === 'string' && tags.trim()) {
+    return tags.trim().split(/\s+/);
+  }
+  return [];
+}
+
+/** 生成内容 → VO(agentTrace/hashtags 归一化, 防字符串/对象形态 .map 崩溃白屏) */
+function toContent(c: any): PromoContentVO {
+  return {
+    ...c,
+    contentId: Number(c.contentId || 0),
+    hotspotId: Number(c.hotspotId || 0),
+    platform: String(c.platform || ''),
+    title: String(c.title || ''),
+    status: String(c.status || ''),
+    agentTrace: toTraceArray(c.agentTrace),
+    hashtags: toTagArray(c.hashtags),
+  };
+}
+
 /** 后端热点 → VO(字符串数字数值化, 对齐 xinzhi 范式) */
 function toHotspot(h: any): HotspotVO {
   return {
@@ -389,7 +437,7 @@ export const PromoAPI = {
       headers: adminHeaders(),
       data: { hotspotId: params.hotspotId, platforms: params.platforms },
     });
-    return res.data || [];
+    return (res.data || []).map(toContent);
   },
 
   /** 内容列表 */
@@ -405,7 +453,7 @@ export const PromoAPI = {
     const res = await request<any>({
       url: `/api/promo/contents${qs}`, headers: adminHeaders(),
     });
-    return res.data || [];
+    return (res.data || []).map(toContent);
   },
 
   /** 内容详情(agentTrace/合规报告/短码映射) */
@@ -413,7 +461,7 @@ export const PromoAPI = {
     const res = await request<any>({
       url: `/api/promo/contents/${contentId}`, headers: adminHeaders(),
     });
-    return res.data;
+    return toContent(res.data);
   },
 
   /** 人工审核(三审 HITL) */
@@ -424,7 +472,7 @@ export const PromoAPI = {
       headers: adminHeaders(),
       data: { approved, reviewer: 'admin' },
     });
-    return res.data;
+    return toContent(res.data);
   },
 
   // ---------- 发布调度 ----------

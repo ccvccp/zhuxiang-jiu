@@ -1,4 +1,4 @@
-﻿/**
+﻿﻿﻿﻿﻿﻿/**
  * test-promo.js · 36号 AI智能推广模块 前端单元测试
  * ============================================================
  * 范式: 纯 Node 脚本(对齐 test-xinzhi.js, 零外部测试框架)
@@ -77,7 +77,9 @@ const mockRequest = async (opts) => {
       { contentId: 11, hotspotId: 1, platform: 'douyin', title: '中秋竹香礼赠指南',
         body: '正文...', hashtags: ['#中秋送礼#'],
         status: 'pending', complianceScore: 100, contentGroupId: 7,
-        shortCode: 'A-3f2k1', agentTrace: ['glm-5.3', 'glm-5.3', 'glm-5.3', 'glm-5.3'],
+        shortCode: 'A-3f2k1',
+        agentTrace: { step1Analysis: 'glm-5.3', step2Audience: 'glm-4-flash',
+          step3Generate: 'rule', step4SelfCheck: 'rule' },
         authorityRefs: ['GB/T 10781'] }] };
   }
   // 专匹配须在 /api/promo/contents 宽匹配之前(review/publish 均含 contents 前缀)
@@ -89,12 +91,22 @@ const mockRequest = async (opts) => {
       scheduledAt: '2026-09-11T18:30:00', inWindow: true,
       windowHint: '黄金时段 18:00-22:00' } };
   }
+  if (/\/api\/promo\/contents\/\d+$/.test(url)) {
+    return { success: true, data: { contentId: 11, hotspotId: 1,
+      platform: 'douyin', title: '中秋竹香礼赠指南', status: 'pending',
+      complianceScore: 100, contentGroupId: 7, shortCode: 'A-3f2k1',
+      body: '正文...', hashtags: '#竹香型白酒 #中秋送礼',
+      authorityRefs: ['GB/T 10781'],
+      agentTrace: { step1Analysis: 'glm-5.3', step2Audience: 'glm-4-flash',
+        step3Generate: 'rule', step4SelfCheck: 'rule' } } };
+  }
   if (url.includes('/api/promo/contents')) {
     return { success: true, data: [
       { contentId: 11, hotspotId: 1, platform: 'douyin',
         title: '中秋竹香礼赠指南', status: 'pending',
         complianceScore: 100, contentGroupId: 7, shortCode: 'A-3f2k1',
-        agentTrace: ['glm-5.3', 'glm-5.3', 'glm-5.3', 'glm-5.3'] },
+        agentTrace: { step1Analysis: 'glm-5.3', step2Audience: 'glm-4-flash',
+          step3Generate: 'rule', step4SelfCheck: 'rule' } },
       { contentId: 12, hotspotId: 1, platform: 'xiaohongshu',
         title: '竹香酒宴席笔记', status: 'approved',
         complianceScore: 92, contentGroupId: 7 }] };
@@ -427,21 +439,39 @@ const textOf = (node) => {
     && requests[0].data.engage === true
     && requests[0].data.note === '测试备注');
 
-  // ---------- [6] 生成载荷 ----------
+  // ---------- [6] 生成载荷 + 轨迹字典归一化 ----------
   requests.length = 0;
-  await PromoAPI.generate({ hotspotId: 1, platforms: ['douyin', 'weibo'] });
+  const gen = await PromoAPI.generate({ hotspotId: 1, platforms: ['douyin', 'weibo'] });
   record('API-生成载荷', requests.length === 1
     && requests[0].url === '/api/promo/contents/generate'
     && requests[0].data.hotspotId === 1
     && JSON.stringify(requests[0].data.platforms)
       === JSON.stringify(['douyin', 'weibo']));
+  record('API-生成轨迹字典归一化(白屏修复)', Array.isArray(gen[0].agentTrace)
+    && gen[0].agentTrace.length === 4
+    && gen[0].agentTrace[0] === '分析·glm-5.3'
+    && gen[0].agentTrace.includes('受众·glm-4-flash')
+    && gen[0].agentTrace.includes('自查·rule'));
 
   // ---------- [7] 内容列表 ----------
   const cs = await PromoAPI.contents();
   record('API-内容映射', cs.length === 2
     && cs[0].complianceScore === 100 && cs[0].shortCode === 'A-3f2k1'
-    && cs[0].agentTrace.length === 4
-    && cs[1].status === 'approved');
+    && Array.isArray(cs[0].agentTrace) && cs[0].agentTrace.length === 4
+    && cs[0].agentTrace[0] === '分析·glm-5.3'
+    && cs[1].status === 'approved' && Array.isArray(cs[1].agentTrace)
+    && cs[1].agentTrace.length === 0);
+
+  // ---------- [7b] 内容详情(轨迹 join/标签 map 不崩溃) ----------
+  const det = await PromoAPI.contentDetail(11);
+  record('API-详情轨迹归一化', Array.isArray(det.agentTrace)
+    && det.agentTrace.length === 4
+    && det.agentTrace.join(' → ').includes('生成·rule')
+    && det.authorityRefs[0] === 'GB/T 10781');
+  record('API-详情标签字符串归一化(白屏修复2)', Array.isArray(det.hashtags)
+    && det.hashtags.length === 2
+    && det.hashtags[0] === '#竹香型白酒'
+    && det.hashtags[1] === '#中秋送礼');
 
   // ---------- [8] 审核载荷 ----------
   requests.length = 0;
