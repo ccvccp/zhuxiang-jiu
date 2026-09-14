@@ -1,4 +1,4 @@
-"""AI智能知识库训练模块数据访问层(双模式: 内存 + Redis)
+"""智能知识库训练模型数据访问层(双模式: 内存 + Redis)
 
 表清单:
     knowledge_entries(知识条目) + knowledge_versions(版本历史)
@@ -154,6 +154,62 @@ class KnowledgeRepository:
         self._ensure_store()
         self.store["_knowledge_gap_seq"] += 1
         return self.store["_knowledge_gap_seq"]
+
+    # ============================================================
+    # 双师样本库(P1: 否决负例 / 黄金标准——仅为建议数据)
+    # ============================================================
+
+    async def next_dual_sample_id(self) -> int:
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.incr(
+                _k("knowledge", "dual_sample", "seq")))
+        self._ensure_store()
+        self.store["_knowledge_dual_sample_seq"] += 1
+        return self.store["_knowledge_dual_sample_seq"]
+
+    async def save_dual_sample(self, sample: dict) -> int:
+        """保存双师样本(负例/黄金标准)
+
+        铁律口径: 样本仅为建议数据, 不参与自动流转——
+        黄金标准须经人工 review/publish, 负例须经人工 retire。
+        """
+        sample_id = await self.next_dual_sample_id()
+        sample["id"] = sample_id
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("knowledge", "dual_sample", sample_id),
+                             json.dumps(sample, ensure_ascii=False))
+            await client.lpush(_k("knowledge", "dual_sample_list"),
+                               sample_id)
+        else:
+            self._ensure_store()
+            self.store["knowledge_dual_samples"][sample_id] = sample
+        return sample_id
+
+    async def list_dual_samples(self, kind: str = None,
+                                 limit: int = 100) -> list[dict]:
+        """查询双师样本(按 kind 筛选: negative/golden, 倒序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ids = await client.lrange(
+                _k("knowledge", "dual_sample_list"), 0, limit - 1)
+            samples = []
+            for sid in ids:
+                raw = await client.get(
+                    _k("knowledge", "dual_sample", int(sid)))
+                if raw:
+                    s = json.loads(raw)
+                    if kind and s.get("kind") != kind:
+                        continue
+                    samples.append(s)
+            return samples
+        self._ensure_store()
+        samples = list(self.store["knowledge_dual_samples"].values())
+        if kind:
+            samples = [s for s in samples if s.get("kind") == kind]
+        samples.sort(key=lambda s: s.get("createdAt") or "", reverse=True)
+        return samples[:limit]
 
     # ============================================================
     # 知识条目 CRUD
@@ -755,6 +811,9 @@ class KnowledgeRepository:
             "knowledge_teach_sessions": {},
             "knowledge_documents": {},
             "knowledge_crawl_sources": {},
+            # 双师样本库(P1): 否决负例/黄金标准
+            "knowledge_dual_samples": {},
+            "_knowledge_dual_sample_seq": 0,
             # 倒排索引(P3 检索升级): token → set(entry_id)
             "knowledge_inverted": {},
             "_knowledge_inv_count": 0,

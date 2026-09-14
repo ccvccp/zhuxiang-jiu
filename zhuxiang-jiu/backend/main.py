@@ -89,7 +89,7 @@ from routes import (
     register_role_routes,
     # AI智能自动引流模块
     register_attract_routes,
-    # AI智能知识库训练模块
+    # 智能知识库训练模型
     register_knowledge_routes,
     # AI智能中枢模块(35号·全站AI大模型总调度)
     register_hub_routes,

@@ -1,4 +1,4 @@
-"""AI智能知识库训练模块路由(P0+P1+P2+P3: 知识底座+三源接入+智能进化+RAG问答+检索索引, 34 端点)
+"""智能知识库训练模型路由(P0+P1+P2+P3: 知识底座+三源接入+智能进化+RAG问答+检索索引, 34 端点)
 
 鉴权:
     - 管理端(32): X-Role: admin 头(条目治理/缺口处置/迁移/种子/统计/
@@ -41,9 +41,16 @@ from services.knowledge_service import (
     ENTRY_STATUS_PUBLISHED, ENTRY_STATUS_REJECTED, ENTRY_STATUS_RETIRED,
     GAP_STATUS_OPEN, GAP_STATUS_RESOLVED, GAP_STATUS_IGNORED,
 )
+from services.knowledge_dual_mode_service import KnowledgeDualModeService
 
 router = APIRouter()
 _service = KnowledgeService()
+_dual_mode_service = KnowledgeDualModeService()
+
+
+class ModeOverrideRequest(PydBaseModel):
+    """双师灰度运行时切档请求(全站范式)"""
+    mode: str = Field(..., description="目标灰度态: off/shadow/assist")
 
 # 合法状态/来源(参数校验用)
 _VALID_STATUSES = (ENTRY_STATUS_PENDING, ENTRY_STATUS_APPROVED,
@@ -113,7 +120,7 @@ class SearchRequest(PydBaseModel):
 class AskRequest(PydBaseModel):
     """RAG 问答请求(P3.1, D-18)"""
     question: str = Field(..., min_length=1, description="用户问题")
-    provider: str = Field("rule", description="生成轨: rule/llm(llm 未接入自动回退 rule)")
+    provider: str = Field("rule", description="生成轨: rule/llm/dual(双师对抗-协同, 失败自动回退单轨)")
 
 
 # ---- P1 三源接入 ----
@@ -184,7 +191,7 @@ class CrawlRunRequest(PydBaseModel):
 # 条目(5)
 # ============================================================
 
-@router.post("/api/knowledge/entries", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/entries", tags=["智能知识库训练模型"])
 async def create_entry(
     data: CreateEntryRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -200,7 +207,7 @@ async def create_entry(
         _handle(exc)
 
 
-@router.get("/api/knowledge/entries", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/entries", tags=["智能知识库训练模型"])
 async def list_entries(
     status: str = Query(None, description="状态筛选"),
     category: str = Query(None, description="分类筛选"),
@@ -225,7 +232,7 @@ async def list_entries(
         _handle(exc)
 
 
-@router.get("/api/knowledge/entries/{entry_id}", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/entries/{entry_id}", tags=["智能知识库训练模型"])
 async def get_entry(
     entry_id: int,
     x_role: str = Header(None, alias="X-Role"),
@@ -239,7 +246,7 @@ async def get_entry(
         _handle(exc)
 
 
-@router.put("/api/knowledge/entries/{entry_id}", tags=["AI智能知识库训练模块"])
+@router.put("/api/knowledge/entries/{entry_id}", tags=["智能知识库训练模型"])
 async def update_entry(
     entry_id: int,
     data: UpdateEntryRequest,
@@ -257,7 +264,7 @@ async def update_entry(
 
 
 @router.get("/api/knowledge/entries/{entry_id}/versions",
-            tags=["AI智能知识库训练模块"])
+            tags=["智能知识库训练模型"])
 async def list_versions(
     entry_id: int,
     x_role: str = Header(None, alias="X-Role"),
@@ -276,7 +283,7 @@ async def list_versions(
 # ============================================================
 
 @router.post("/api/knowledge/entries/{entry_id}/review",
-             tags=["AI智能知识库训练模块"])
+             tags=["智能知识库训练模型"])
 async def review_entry(
     entry_id: int,
     data: ReviewRequest,
@@ -295,7 +302,7 @@ async def review_entry(
 
 
 @router.post("/api/knowledge/entries/{entry_id}/publish",
-             tags=["AI智能知识库训练模块"])
+             tags=["智能知识库训练模型"])
 async def publish_entry(
     entry_id: int,
     x_role: str = Header(None, alias="X-Role"),
@@ -312,7 +319,7 @@ async def publish_entry(
 
 
 @router.post("/api/knowledge/entries/{entry_id}/retire",
-             tags=["AI智能知识库训练模块"])
+             tags=["智能知识库训练模型"])
 async def retire_entry(
     entry_id: int,
     x_role: str = Header(None, alias="X-Role"),
@@ -330,7 +337,7 @@ async def retire_entry(
 # 缺口(2)
 # ============================================================
 
-@router.get("/api/knowledge/gaps", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/gaps", tags=["智能知识库训练模型"])
 async def list_gaps(
     status: str = Query(None, description="open/resolved/ignored"),
     limit: int = Query(100, ge=1, le=500),
@@ -349,7 +356,7 @@ async def list_gaps(
 
 
 @router.post("/api/knowledge/gaps/{gap_id}/resolve",
-             tags=["AI智能知识库训练模块"])
+             tags=["智能知识库训练模型"])
 async def resolve_gap(
     gap_id: int,
     data: ResolveGapRequest,
@@ -369,7 +376,7 @@ async def resolve_gap(
 # 迁移(1)
 # ============================================================
 
-@router.post("/api/knowledge/migrate-chat", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/migrate-chat", tags=["智能知识库训练模型"])
 async def migrate_chat_faq(
     x_role: str = Header(None, alias="X-Role"),
 ):
@@ -382,7 +389,7 @@ async def migrate_chat_faq(
         _handle(exc)
 
 
-@router.post("/api/knowledge/seed-brand", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/seed-brand", tags=["智能知识库训练模型"])
 async def seed_brand_knowledge(
     x_role: str = Header(None, alias="X-Role"),
 ):
@@ -403,7 +410,7 @@ async def seed_brand_knowledge(
 # 统计(1) + 检索(1)
 # ============================================================
 
-@router.get("/api/knowledge/stats", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/stats", tags=["智能知识库训练模型"])
 async def stats(
     x_role: str = Header(None, alias="X-Role"),
 ):
@@ -415,7 +422,7 @@ async def stats(
         _handle(exc)
 
 
-@router.post("/api/knowledge/search", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/search", tags=["智能知识库训练模型"])
 async def search(
     data: SearchRequest,
 ):
@@ -429,7 +436,7 @@ async def search(
         _handle(exc)
 
 
-@router.post("/api/knowledge/ask", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/ask", tags=["智能知识库训练模型"])
 async def ask(
     data: AskRequest,
 ):
@@ -447,7 +454,7 @@ async def ask(
 
 
 @router.post("/api/knowledge/search/rebuild-index",
-            tags=["AI智能知识库训练模块"])
+            tags=["智能知识库训练模型"])
 async def rebuild_search_index(
     x_role: str = Header(None, alias="X-Role"),
 ):
@@ -461,10 +468,104 @@ async def rebuild_search_index(
 
 
 # ============================================================
+# 双师对抗-协同引擎观测面(P2: 灰度/统计/样本——观测面永不关停)
+# ============================================================
+
+class DualGuardRequest(PydBaseModel):
+    rejectionRate: float = Field(..., ge=0, le=1,
+                                 description="当前生成器否决率(0-1)")
+
+
+@router.get("/api/knowledge/dual/mode", tags=["智能知识库训练模型"])
+async def dual_get_mode(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """双师灰度态(观测面; 读取链: 暂停>override>env>off)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _dual_mode_service.current_mode()}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/dual/mode/override",
+             tags=["智能知识库训练模型"])
+async def dual_mode_override(
+    data: ModeOverrideRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """双师运行时切档(免容器重建留痕; 空串清除)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _dual_mode_service.set_override(data.mode)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/dual/guard", tags=["智能知识库训练模型"])
+async def dual_guard(
+    data: DualGuardRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """对抗平衡护栏检测(否决率健康带 50%±10%, 超带自动降档 off)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _dual_mode_service.guard_check(
+                    data.rejectionRate)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/knowledge/dual/resume", tags=["智能知识库训练模型"])
+async def dual_resume(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """双师人工恢复(护栏暂停解除——决策留痕)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _dual_mode_service.resume()}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/knowledge/dual/stats", tags=["智能知识库训练模型"])
+async def dual_stats(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """双师统计(否决率/黄金数/负例数/评分直方图——观测面)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.dual_stats()}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/knowledge/dual/samples", tags=["智能知识库训练模型"])
+async def dual_samples(
+    kind: str = Query(None, description="样本类型: negative/golden"),
+    limit: int = Query(50, ge=1, le=200, description="查询条数"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """双师样本列表(负例/黄金标准——仅为建议数据, 流转须人工)"""
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "msg": "ok",
+                "data": await _service.repo.list_dual_samples(
+                    kind=kind, limit=limit)}
+    except Exception as exc:
+        _handle(exc)
+
+
+# ============================================================
 # P1 三源接入: 教学(4)
 # ============================================================
 
-@router.post("/api/knowledge/teach/sessions", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/teach/sessions", tags=["智能知识库训练模型"])
 async def create_teach_session(
     data: CreateTeachSessionRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -480,7 +581,7 @@ async def create_teach_session(
         _handle(exc)
 
 
-@router.get("/api/knowledge/teach/sessions", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/teach/sessions", tags=["智能知识库训练模型"])
 async def list_teach_sessions(
     limit: int = Query(50, ge=1, le=200),
     x_role: str = Header(None, alias="X-Role"),
@@ -495,7 +596,7 @@ async def list_teach_sessions(
 
 
 @router.post("/api/knowledge/teach/sessions/{session_id}/ask",
-             tags=["AI智能知识库训练模块"])
+             tags=["智能知识库训练模型"])
 async def teach_ask(
     session_id: int,
     data: TeachAskRequest,
@@ -512,7 +613,7 @@ async def teach_ask(
 
 
 @router.post("/api/knowledge/teach/sessions/{session_id}/teach",
-             tags=["AI智能知识库训练模块"])
+             tags=["智能知识库训练模型"])
 async def teach_submit(
     session_id: int,
     data: TeachSubmitRequest,
@@ -534,7 +635,7 @@ async def teach_submit(
 # 文档(2)
 # ============================================================
 
-@router.post("/api/knowledge/documents", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/documents", tags=["智能知识库训练模型"])
 async def ingest_document(
     data: IngestDocumentRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -550,7 +651,7 @@ async def ingest_document(
         _handle(exc)
 
 
-@router.get("/api/knowledge/documents", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/documents", tags=["智能知识库训练模型"])
 async def list_documents(
     limit: int = Query(50, ge=1, le=200),
     x_role: str = Header(None, alias="X-Role"),
@@ -568,7 +669,7 @@ async def list_documents(
 # 多模态(2, D-14; provider 双轨: rule 人工 / llm 视觉理解)
 # ============================================================
 
-@router.post("/api/knowledge/media/image", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/media/image", tags=["智能知识库训练模型"])
 async def ingest_image(
     data: IngestImageRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -585,7 +686,7 @@ async def ingest_image(
         _handle(exc)
 
 
-@router.post("/api/knowledge/media/video", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/media/video", tags=["智能知识库训练模型"])
 async def ingest_video(
     data: IngestVideoRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -607,7 +708,7 @@ async def ingest_video(
 # 全网抓取(4, D-15 白名单制)
 # ============================================================
 
-@router.post("/api/knowledge/crawl/sources", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/crawl/sources", tags=["智能知识库训练模型"])
 async def add_crawl_source(
     data: AddCrawlSourceRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -622,7 +723,7 @@ async def add_crawl_source(
         _handle(exc)
 
 
-@router.get("/api/knowledge/crawl/sources", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/crawl/sources", tags=["智能知识库训练模型"])
 async def list_crawl_sources(
     limit: int = Query(50, ge=1, le=200),
     x_role: str = Header(None, alias="X-Role"),
@@ -636,7 +737,7 @@ async def list_crawl_sources(
         _handle(exc)
 
 
-@router.post("/api/knowledge/crawl/ingest", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/crawl/ingest", tags=["智能知识库训练模型"])
 async def crawl_ingest(
     data: CrawlIngestRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -652,7 +753,7 @@ async def crawl_ingest(
         _handle(exc)
 
 
-@router.post("/api/knowledge/crawl/run", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/crawl/run", tags=["智能知识库训练模型"])
 async def crawl_run(
     data: CrawlRunRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -671,7 +772,7 @@ async def crawl_run(
 # P2 智能进化: 质量(2) + 缺口摘要(1) + 自动过审(1) + 分发(1)
 # ============================================================
 
-@router.post("/api/knowledge/quality/sweep", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/quality/sweep", tags=["智能知识库训练模型"])
 async def quality_sweep(
     x_role: str = Header(None, alias="X-Role"),
 ):
@@ -684,7 +785,7 @@ async def quality_sweep(
         _handle(exc)
 
 
-@router.get("/api/knowledge/quality/report", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/quality/report", tags=["智能知识库训练模型"])
 async def quality_report(
     x_role: str = Header(None, alias="X-Role"),
 ):
@@ -697,7 +798,7 @@ async def quality_report(
         _handle(exc)
 
 
-@router.get("/api/knowledge/gaps/summary", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/gaps/summary", tags=["智能知识库训练模型"])
 async def gaps_summary(
     x_role: str = Header(None, alias="X-Role"),
 ):
@@ -710,7 +811,7 @@ async def gaps_summary(
         _handle(exc)
 
 
-@router.post("/api/knowledge/auto-approve/run", tags=["AI智能知识库训练模块"])
+@router.post("/api/knowledge/auto-approve/run", tags=["智能知识库训练模型"])
 async def auto_approve_run(
     x_role: str = Header(None, alias="X-Role"),
 ):
@@ -724,7 +825,7 @@ async def auto_approve_run(
 
 
 @router.get("/api/knowledge/distribution/suggest",
-            tags=["AI智能知识库训练模块"])
+            tags=["智能知识库训练模型"])
 async def distribution_suggest(
     consumer: str = Query(..., description="消费方: product/attract/chat"),
     limit: int = Query(10, ge=1, le=50),
@@ -740,7 +841,7 @@ async def distribution_suggest(
         _handle(exc)
 
 
-@router.get("/api/knowledge/quality/status", tags=["AI智能知识库训练模块"])
+@router.get("/api/knowledge/quality/status", tags=["智能知识库训练模型"])
 async def quality_scheduler_status(
     x_role: str = Header(None, alias="X-Role"),
 ):

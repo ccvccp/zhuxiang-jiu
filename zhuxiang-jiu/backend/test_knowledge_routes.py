@@ -1,4 +1,4 @@
-"""AI智能知识库训练模块 P0 端到端测试(Service 层, 无需 Docker)
+"""智能知识库训练模型 P0 端到端测试(Service 层, 无需 Docker)
 
 直接调用 KnowledgeService/ChatService 方法, 覆盖 13 端点的业务逻辑。
 使用 asyncio 内存模式(LOCK_MODE=asyncio, STORE_MODE=asyncio)。

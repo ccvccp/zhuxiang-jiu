@@ -1,4 +1,4 @@
-"""AI智能知识库训练模块业务逻辑层(P0: 知识底座)
+"""智能知识库训练模型业务逻辑层(P0: 知识底座)
 
 核心业务(设计文档 v1.0 第三章):
     - 知识条目治理流水线: 创建(合规筛查+相似去重) → 审核 → 发布(版本留痕)
@@ -717,6 +717,222 @@ class KnowledgeService:
                 "请用简洁中文回答(200字内), 引用标注保留 [编号]。")
         return provider_client.chat(system, user)
 
+    # ============================================================
+    # 2.7 双师对抗-协同引擎(P0/P1: 生成器×判别器, 治理规则即奖励函数)
+    # ============================================================
+
+    # 判别器四维加权(P1 治理规则数字化——总 100 分, <60 否决)
+    DUAL_WEIGHT_COMPLIANCE = 40     # 合规性(宪法域硬门槛)
+    DUAL_WEIGHT_FACTUAL = 30        # 事实一致性(与资料相符)
+    DUAL_WEIGHT_STRUCTURE = 15      # 结构化质量(引用/简洁)
+    DUAL_WEIGHT_CITATION = 15      # 引用完备
+    DUAL_PASS_SCORE = 60            # 胜出阈值
+    DUAL_GOLDEN_SCORE = 80          # 黄金标准阈值(双师一致高分)
+    DUAL_JUDGE_MODEL_ENV = "LLM_MODEL_JUDGE"   # 判别器模型(空=同模型双角色)
+
+    def _dual_generate(self, question: str,
+                       hits: list[dict]) -> list[dict]:
+        """生成器轨: 双候选生成(稳健 0.2 + 探索 0.8, 各附推理链)
+
+        幻觉治理口径与 _rag_llm_synthesize 一致(仅依据编号资料)。
+        失败返回空列表(调用方回退单轨)。
+        """
+        from services.llm_client import provider_client
+        context = "\n".join(
+            f"[{i}] 问题: {h['question']}\n    内容: {h['answer']}"
+            for i, h in enumerate(hits, start=1))
+        system = ("你是知识库问答助手。仅依据给定的编号资料回答用户问题, "
+                  "回答开头用 [编号] 标注引用的资料, "
+                  "不得编造资料以外的信息; 若资料不足以回答请如实说明。")
+        candidates = []
+        for label, temp in (("稳健", 0.2), ("探索", 0.8)):
+            user = (f"参考资料:\n{context}\n\n用户问题: {question}\n"
+                    "请用简洁中文回答(200字内), 引用标注保留 [编号]。")
+            answer = provider_client.chat(system, user, temperature=temp)
+            if answer and str(answer).strip():
+                candidates.append({
+                    "label": label,
+                    "temperature": temp,
+                    "answer": str(answer).strip(),
+                })
+        return candidates
+
+    def _dual_judge(self, question: str, hits: list[dict],
+                    candidates: list[dict]) -> list[dict]:
+        """判别器轨: 四维打分(治理规则即奖励函数)
+
+        宪法域硬编码层(不可校准): 合规性先走本地
+        compliance_score(≥70)+违禁词硬筛——规则否决不可被 LLM 推翻。
+        LLM 判别 JSON 解析失败 → 回退本地启发式评分(防单点)。
+        """
+        from services.llm_client import provider_client
+        import os as _os
+        context = "\n".join(
+            f"[{i}] 问题: {h['question']}\n    内容: {h['answer']}"
+            for i, h in enumerate(hits, start=1))
+        judge_model = _os.environ.get(self.DUAL_JUDGE_MODEL_ENV, "").strip()
+        scored = []
+        for cand in candidates:
+            # 宪法域硬门槛(本地确定性, LLM 不可推翻)
+            c_score = compliance_score(question, cand["answer"])
+            taboo = brand_taboo_error(question, cand["answer"])
+            constitution_pass = c_score >= 70 and taboo is None
+            # LLM 判别(四维 0-100)
+            dims = self._dual_llm_judge(
+                provider_client, judge_model, question, context,
+                cand["answer"])
+            total = (
+                self.DUAL_WEIGHT_COMPLIANCE * (c_score / 100.0
+                                              if constitution_pass else 0.0)
+                + self.DUAL_WEIGHT_FACTUAL * dims["factual"] / 100.0
+                + self.DUAL_WEIGHT_STRUCTURE * dims["structure"] / 100.0
+                + self.DUAL_WEIGHT_CITATION * dims["citation"] / 100.0
+            )
+            scored.append({
+                "label": cand["label"],
+                "answer": cand["answer"],
+                "constitutionPass": constitution_pass,
+                "complianceScore": c_score,
+                "dims": dims,
+                "totalScore": round(total, 1),
+                "verdict": "pass" if (constitution_pass
+                                       and total >= self.DUAL_PASS_SCORE)
+                else "reject",
+            })
+        return scored
+
+    def _dual_llm_judge(self, provider_client, judge_model: str,
+                        question: str, context: str,
+                        answer: str) -> dict:
+        """LLM 判别单候选四维评分(失败回退本地启发式)"""
+        system = ("你是知识库答案质量判别器。对给定答案按四个维度打分"
+                  "(0-100 整数), 仅输出 JSON, 格式: "
+                  '{"factual": 分数, "structure": 分数, '
+                  '"citation": 分数}\n'
+                  "factual=与资料事实一致性; structure=表达结构与简洁度; "
+                  "citation=[编号]引用完备性。")
+        user = (f"参考资料:\n{context}\n\n用户问题: {question}\n"
+                f"待判答案: {answer}")
+        raw = provider_client.chat(
+            system, user, model=judge_model) if judge_model \
+            else provider_client.chat(system, user)
+        if raw:
+            try:
+                import re as _re
+                m = _re.search(r"\{[^}]*\}", str(raw), _re.DOTALL)
+                if m:
+                    d = json.loads(m.group(0))
+                    return {
+                        "factual": max(0, min(100, int(d["factual"]))),
+                        "structure": max(0, min(100, int(d["structure"]))),
+                        "citation": max(0, min(100, int(d["citation"]))),
+                    }
+            except Exception:
+                pass
+        # 本地启发式回退(确定性: 资料词覆盖 + 引用标注 + 长度)
+        text = answer or ""
+        cited = sum(1 for i in (1, 2, 3, 4, 5) if f"[{i}]" in text)
+        words = [w for w in _norm_text(text) if len(w) >= 2][:60]
+        covered = sum(1 for w in words if w in (context or "")) or 1
+        coverage = min(100, int(covered / max(1, len(words)) * 200))
+        return {
+            "factual": coverage,
+            "structure": 70 if 20 <= len(text) <= 300 else 50,
+            "citation": min(100, cited * 50),
+        }
+
+    async def rag_answer_dual(self, question: str,
+                              hits: list[dict]) -> dict | None:
+        """双师对抗-协同问答(P0 主入口, 调用方为 rag_answer provider=dual)
+
+        Returns:
+            {answer, mode: "dual", citations, confidence, dual: {...}};
+            生成器无候选/判别全否决 → None(调用方回退单轨)。
+            样本落库(P1): 否决入负例库, 双师一致高分入黄金标准库
+            (样本仅为建议数据, 不自动流转——人工 review/publish 铁律)。
+        """
+        candidates = self._dual_generate(question, hits)
+        if not candidates:
+            return None
+        scored = self._dual_judge(question, hits, candidates)
+        winners = [s for s in scored if s["verdict"] == "pass"]
+        # 样本落库(best-effort, 失败不阻断)
+        await self._dual_record_samples(question, scored, bool(winners))
+        if not winners:
+            return None    # 全否决 → 回退单轨(rule/llm)
+        best = max(winners, key=lambda s: s["totalScore"])
+        citations = [{k: h[k] for k in
+                      ("entryId", "question", "similarity", "source")}
+                     for h in hits]
+        confidence = round(min(0.95, best["totalScore"] / 100.0), 4)
+        return {
+            "answer": best["answer"],
+            "mode": "dual",
+            "citations": citations,
+            "confidence": confidence,
+            "dual": {
+                "generatorCandidates": len(candidates),
+                "verdict": best["verdict"],
+                "winnerLabel": best["label"],
+                "scores": scored,
+            },
+        }
+
+    async def _dual_record_samples(self, question: str,
+                                   scored: list[dict],
+                                   has_winner: bool) -> None:
+        """双师样本落库(P1: 否决→负例, 一致高分→黄金标准)
+
+        铁律: 样本仅为建议数据——黄金标准不自动发布、
+        负例不自动退役, 流转必经既有 review/publish 人工链路。
+        """
+        import contextlib
+        for s in scored:
+            if s["verdict"] == "reject":
+                with contextlib.suppress(Exception):
+                    await self.repo.save_dual_sample({
+                        "kind": "negative",
+                        "question": question,
+                        "answer": s["answer"],
+                        "scores": s,
+                        "createdAt": datetime.utcnow().isoformat(),
+                    })
+            elif (has_winner and s["totalScore"] >= self.DUAL_GOLDEN_SCORE
+                    and s["constitutionPass"]):
+                with contextlib.suppress(Exception):
+                    await self.repo.save_dual_sample({
+                        "kind": "golden",
+                        "question": question,
+                        "answer": s["answer"],
+                        "scores": s,
+                        "createdAt": datetime.utcnow().isoformat(),
+                    })
+
+    async def dual_stats(self) -> dict:
+        """双师观测面统计(P2: 否决率/胜率比/样本数/延迟直方图)"""
+        samples = await self.repo.list_dual_samples(limit=1000)
+        negatives = [s for s in samples if s.get("kind") == "negative"]
+        goldens = [s for s in samples if s.get("kind") == "golden"]
+        total = len(samples)
+        rejection_rate = (len(negatives) / total) if total else 0.0
+        # 评分 5 桶直方图(漂移监控的分布统计口径)
+        buckets = [0] * 5
+        for s in samples:
+            score = (s.get("scores") or {}).get("totalScore", 0)
+            idx = min(4, int(score // 20))
+            buckets[idx] += 1
+        return {
+            "totalSamples": total,
+            "negativeCount": len(negatives),
+            "goldenCount": len(goldens),
+            "rejectionRate": round(rejection_rate, 4),
+            "healthyBand": [0.40, 0.60],
+            "scoreHistogram": buckets,
+            "modelVersion": "v1-knowledge-dual-mode",
+        }
+
+
+
     async def rag_answer(self, question: str,
                           provider: str = "rule") -> dict:
         """RAG 问答(P3.1, D-18): 检索增强问答统一入口
@@ -749,8 +965,8 @@ class KnowledgeService:
         question = (question or "").strip()
         if not question:
             raise ValueError("问题不能为空")
-        if provider not in ("rule", "llm"):
-            raise ValueError(f"非法 provider({provider}), 须为 rule/llm")
+        if provider not in ("rule", "llm", "dual"):
+            raise ValueError(f"非法 provider({provider}), 须为 rule/llm/dual")
         # P4.2 结果缓存命中: 复用未过期结果(引用溯源结构一并缓存)
         from core.metrics import rag_cache_hits_total
         cache = _CACHES["result"]
@@ -805,6 +1021,13 @@ class KnowledgeService:
         else:
             mode = "synthesized"
             answer = None
+            if provider == "dual":
+                # 双师对抗-协同(P0): 全否决/无候选回退单轨
+                dual_result = await self.rag_answer_dual(question, hits)
+                if dual_result is not None:
+                    await self.repo.record_hit(top_entry["id"])
+                    return dual_result
+                logger.info("knowledge_dual_fallback_single_track")
             if provider == "llm":
                 answer = self._rag_llm_synthesize(question, hits)
                 if answer is None:
