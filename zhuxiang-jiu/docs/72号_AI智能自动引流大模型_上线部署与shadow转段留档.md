@@ -78,3 +78,50 @@ assist 转段命令（届时）：
 sed -i 's/^ATTRACT72_MODE=.*/ATTRACT72_MODE=assist/' /opt/zhuxiang/.env
 cd /opt/zhuxiang && docker compose up -d backend
 ```
+
+---
+
+## 七、assist 转段留档（2026-09-14 13:35 补记）
+
+### 7.1 影子期快速评估（转段前置）
+
+| 判据 | 实测 | 判定 |
+|---|---|---|
+| 观测面数据完整 | 画像 5(sharer 1/newcomer 4)/信号 5 零 ref 重复/变体曝光 7 | ✓ |
+| 决策面零 5xx | docker logs 统计 =0 | ✓ |
+| shadow 落档完整 | 决策 1 条 chase, executed=False, 势能五字段全 | ✓ |
+| 健康度 | healthy（insufficient=3 小样本不判定）, 零冻结 | ✓ |
+| 红队 | 4/4 全防御（runId=1） | ✓ |
+| 用户签核 | 用户明确批准（"执行吧"） | ✓ |
+
+### 7.2 转段执行
+
+| 项 | 值 |
+|---|---|
+| assist 起点 | 2026-09-14 13:33（UTC+8） |
+| 执行链 | .env `ATTRACT72_MODE=shadow→assist` + `docker compose up -d backend` |
+| 三层自验 | 容器 healthy + printenv=assist + 本地 health 200 + 公网 mode=assist ✓ |
+
+### 7.3 assist 语义实证（6/6）
+
+| # | 验证 | 结果 |
+|---|---|---|
+| 1 | 卡位决策（radar=8） | 200 decisionId=4 chase **pending（方案产出待确认）** |
+| 2 | shadow 期决策（id=3）confirm | **409**（影子期签核铁律——转段后旧决策仍不可确认） |
+| 3 | assist 决策人工确认 | 200 confirmed |
+| 4 | 执行 | 200 executed=True（情境参考注入——永不直接操作 40号账号） |
+| 5 | 实验提案 | 200 experimentId=1 changeId=3（46号 pending 建议书） |
+| 6 | 红队 assist 档复跑 | 200 **4/4 防御**（full 转段核验最新在案） |
+
+### 7.4 assist 回滚
+
+```bash
+bash /opt/zhuxiang/zhuxiang-jiu/backend/scripts/attract72_transfer.sh off
+# 或: sed -i 's/^ATTRACT72_MODE=.*/ATTRACT72_MODE=off/' /opt/zhuxiang/.env && cd /opt/zhuxiang && docker compose up -d backend
+```
+
+### 7.5 后续（full 档）
+
+assist 观察期后，经影子期评估模板 §七 判据（红队全防御+健康度非冻结+L1 零越界+逐档+签核）执行 `bash attract72_transfer.sh full`（脚本含三重门控机检）。
+
+**全站模型终态更新**：73号会员体验（full）、74号NexusFlow（full）、68号信值/71号支付端口/72号自动引流（assist）。
