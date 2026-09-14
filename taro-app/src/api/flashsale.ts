@@ -190,6 +190,19 @@ export const FlashAdminAPI = {
     return mapSession(res.session || res);
   },
 
+  /** 编辑场次(仅草稿态; 局部更新——未传字段沿用现值) */
+  async updateSession(sessionId: string,
+                      patch: { name?: string; startTime?: string;
+                               endTime?: string }): Promise<FlashSessionVO> {
+    const res = await request<any>({
+      url: `/api/flash/admin/sessions/${sessionId}`,
+      method: 'PUT',
+      headers: adminHeaders(),
+      data: patch,
+    });
+    return mapSession(res.session || res);
+  },
+
   /** 添加秒杀商品(仅草稿场次; 秒杀价须低于原价) */
   async addItem(sessionId: string, productId: string,
                  flashPrice: number, flashStock: number,

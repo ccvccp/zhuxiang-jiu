@@ -229,6 +229,53 @@ def main():
            r.status_code == 409 and "仅草稿" in r.json().get("error", ""),
            f"status={r.status_code}, body={r.json()}")
 
+    # ---- 场次编辑(仅草稿态; 局部更新; 状态机保护) ----
+    r = client.put(f"/api/flash/admin/sessions/{S2['sessionId']}",
+                   headers=ADMIN,
+                   json={"name": "晚9点改期场",
+                         "startTime": iso(now + timedelta(hours=2)),
+                         "endTime": iso(now + timedelta(hours=4))})
+    upd = r.json().get("session", {})
+    record("16a_edit_draft_session_success",
+           r.status_code == 200 and upd.get("name") == "晚9点改期场"
+           and upd.get("status") == "draft",
+           f"status={r.status_code}, body={r.json()}")
+
+    r = client.put(f"/api/flash/admin/sessions/{S1['sessionId']}",
+                   headers=ADMIN,
+                   json={"name": "改已发布"})
+    record("16b_edit_published_rejected_409",
+           r.status_code == 409 and "仅草稿" in r.json().get("error", ""),
+           f"status={r.status_code}, body={r.json()}")
+
+    r = client.put(f"/api/flash/admin/sessions/{S2['sessionId']}",
+                   headers=ADMIN,
+                   json={"startTime": iso(now + timedelta(hours=4)),
+                         "endTime": iso(now + timedelta(hours=2))})
+    record("16c_edit_invalid_range_rejected_409",
+           r.status_code == 409 and "晚于" in r.json().get("error", ""),
+           f"status={r.status_code}, body={r.json()}")
+
+    r = client.put(f"/api/flash/admin/sessions/{S2['sessionId']}",
+                   headers=ADMIN, json={})
+    record("16d_edit_noop_patch_rejected_409",
+           r.status_code == 409 and "无可更新" in r.json().get("error", ""),
+           f"status={r.status_code}, body={r.json()}")
+
+    r = client.put(f"/api/flash/admin/sessions/{S2['sessionId']}",
+                   json={"name": "未授权编辑"})
+    record("16e_edit_requires_admin_role",
+           r.status_code == 403, f"status={r.status_code}")
+
+    # 局部更新: 只改名不动时间(沿用现值)
+    r = client.put(f"/api/flash/admin/sessions/{S2['sessionId']}",
+                   headers=ADMIN, json={"name": "只改名场"})
+    partial = r.json().get("session", {})
+    record("16f_edit_partial_keeps_time",
+           r.status_code == 200 and partial.get("name") == "只改名场"
+           and partial.get("startTime") == upd.get("startTime"),
+           f"body={r.json()}")
+
     # --------------------------------------------------------
     # 3. 公开浏览(游客)
     # --------------------------------------------------------

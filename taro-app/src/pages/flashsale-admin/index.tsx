@@ -54,8 +54,9 @@ const FlashAdminPage: React.FC = () => {
   const [sessions, setSessions] = useState<FlashSessionVO[]>([]);
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<FlashSessionVO | null>(null);
-  // 建场次表单
+  // 建场次/编辑场次表单(editingId 空=创建模式, 非空=编辑草稿)
   const [form, setForm] = useState({ name: '', start: '', end: '' });
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // 加商品表单
   const [itemForm, setItemForm] = useState({
@@ -115,20 +116,45 @@ const FlashAdminPage: React.FC = () => {
     Taro.showToast({ title, icon, duration: 2000 });
 
   // ---- 场次操作 ----
-  const handleCreate = async () => {
+  /** 编辑草稿(表单回填, 切编辑模式) */
+  const openEdit = (s: FlashSessionVO) => {
+    setEditingId(s.sessionId);
+    setForm({
+      name: s.name,
+      start: fmtTime(s.startTime),
+      end: fmtTime(s.endTime),
+    });
+  };
+
+  /** 退出编辑回创建模式 */
+  const resetForm = () => {
+    setEditingId(null);
+    setForm({ name: '', start: '', end: '' });
+  };
+
+  /** 提交(创建/编辑双模式——editingId 分流) */
+  const handleSubmit = async () => {
     if (busy) return;
     if (!form.name.trim()) return toast('请输入场次名称', 'none');
     if (!form.start || !form.end) return toast('请填写起止时间', 'none');
     setBusy(true);
     try {
-      const s = await FlashAdminAPI.createSession(
-        form.name.trim(), toIsoBJ(form.start), toIsoBJ(form.end));
-      toast('场次已创建(草稿)');
-      setForm({ name: '', start: '', end: '' });
+      if (editingId) {
+        await FlashAdminAPI.updateSession(editingId, {
+          name: form.name.trim(),
+          startTime: toIsoBJ(form.start),
+          endTime: toIsoBJ(form.end),
+        });
+        toast('场次已保存');
+      } else {
+        await FlashAdminAPI.createSession(
+          form.name.trim(), toIsoBJ(form.start), toIsoBJ(form.end));
+        toast('场次已创建(草稿)');
+      }
+      resetForm();
       await loadSessions();
-      setActive(s);
     } catch (e: any) {
-      toast(String(e?.message || e?.errMsg || '创建失败'), 'none');
+      toast(String(e?.message || e?.errMsg || '保存失败'), 'none');
     } finally {
       setBusy(false);
     }
@@ -241,9 +267,11 @@ const FlashAdminPage: React.FC = () => {
         {/* ============ 场次管理 ============ */}
         {tab === 'sessions' && (
           <>
-            {/* 建场次 */}
+            {/* 建场次/编辑场次(双模式表单) */}
             <View className={styles.card}>
-              <View className={styles.cardTitle}>创建秒杀场次</View>
+              <View className={styles.cardTitle}>
+                {editingId ? '编辑草稿场次' : '创建秒杀场次'}
+              </View>
               <View className={styles.formRow}>
                 <Text className={styles.formLabel}>名称</Text>
                 <Input
@@ -274,8 +302,21 @@ const FlashAdminPage: React.FC = () => {
                   placeholderClass={styles.placeholder}
                 />
               </View>
-              <View className={styles.btnPrimary} onClick={handleCreate}>
-                {busy ? '创建中...' : '创建场次(草稿)'}
+              {editingId && (
+                <View className={styles.sessionMeta}>
+                  仅草稿场次可编辑, 保存后仍为草稿态
+                </View>
+              )}
+              <View className={styles.btnRow}>
+                <View className={styles.btnPrimary} onClick={handleSubmit}>
+                  {busy ? '保存中...'
+                    : editingId ? '保存修改' : '创建场次(草稿)'}
+                </View>
+                {editingId && (
+                  <View className={styles.btnGhost} onClick={resetForm}>
+                    取消编辑
+                  </View>
+                )}
               </View>
             </View>
 
@@ -298,9 +339,19 @@ const FlashAdminPage: React.FC = () => {
                 >
                   <View className={styles.sessionRowHead}>
                     <Text className={styles.sessionName}>{s.name}</Text>
-                    <Text className={`${styles.statusPill} ${pillClass(s.status)}`}>
-                      {statusName(s.status)}
-                    </Text>
+                    <View className={styles.headBtns}>
+                      {s.status === 'DRAFT' && (
+                        <Text
+                          className={styles.miniBtn}
+                          onClick={e => { e.stopPropagation(); openEdit(s); }}
+                        >
+                          编辑
+                        </Text>
+                      )}
+                      <Text className={`${styles.statusPill} ${pillClass(s.status)}`}>
+                        {statusName(s.status)}
+                      </Text>
+                    </View>
                   </View>
                   <View className={styles.sessionMeta}>
                     #{s.sessionId} · {fmtTime(s.startTime)} ~ {fmtTime(s.endTime)} · 商品 {s.itemCount}

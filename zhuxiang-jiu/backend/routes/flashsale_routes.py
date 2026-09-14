@@ -14,8 +14,8 @@
     - 场次(2 公开):  sessions / sessions/{sessionId}
     - 抢购(4 会员):  order / my/orders / orders/{orderNo} / orders/{orderNo}/pay
     - 订单取消(1):   orders/{orderNo}/cancel
-    - 管理端(9):     sessions(列表含草稿/建)/items/publish/cancel/
-                     settings(2)/stats/expire-cancel
+    - 管理端(10):    sessions(列表含草稿/建/PUT编辑)/items/
+                     publish/cancel/settings(2)/stats/expire-cancel
 """
 
 
@@ -91,6 +91,16 @@ class CreateSessionRequest(PydBaseModel):
     name: str = Field(..., min_length=1, description="场次名称")
     startTime: str = Field(..., description="开始时间 ISO8601")
     endTime: str = Field(..., description="结束时间 ISO8601")
+
+
+class UpdateSessionRequest(PydBaseModel):
+    """场次编辑(仅草稿态; 局部更新——未传字段沿用现值)"""
+    name: str | None = Field(None, min_length=1,
+                             description="场次名称(可选)")
+    startTime: str | None = Field(None,
+                                  description="开始时间 ISO8601(可选)")
+    endTime: str | None = Field(None,
+                                description="结束时间 ISO8601(可选)")
 
 
 class AddItemRequest(PydBaseModel):
@@ -234,6 +244,22 @@ async def create_session(data: CreateSessionRequest,
     try:
         session = await _service.create_session(data.name, data.startTime,
                                                 data.endTime)
+        return _ok(session=session)
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.put("/api/flash/admin/sessions/{session_id}",
+            tags=["限时秒杀模块"])
+async def update_session(session_id: str, data: UpdateSessionRequest,
+                         x_role: str | None = Header(None, alias="X-Role")):
+    """编辑场次(仅草稿态——已发布/已取消不可改, 状态机保护;
+    局部更新: 未传字段沿用现值; 时间成对校验)"""
+    _require_admin(x_role)
+    try:
+        session = await _service.update_session(
+            session_id, name=data.name,
+            start_time=data.startTime, end_time=data.endTime)
         return _ok(session=session)
     except Exception as exc:
         _handle(exc)

@@ -50,6 +50,14 @@ const mockRequest = async (opts) => {
       startTime: '2026-09-17T20:00:00+08:00', endTime: '2026-09-17T22:00:00+08:00',
       runtimeStatus: 'UPCOMING', runtimeStatusName: '未开始', itemCount: 0 } };
   }
+  const pu = url.match(/^\/api\/flash\/admin\/sessions\/([^/]+)$/);
+  if (pu && opts.method === 'PUT') {
+    return { success: true, session: { sessionId: pu[1],
+      name: opts.data.name || '原名', status: 'draft',
+      startTime: opts.data.startTime || '2026-09-16T20:00:00+08:00',
+      endTime: opts.data.endTime || '2026-09-16T22:00:00+08:00',
+      runtimeStatus: 'UPCOMING', runtimeStatusName: '未开始', itemCount: 0 } };
+  }
   if (m && m[2] === 'items') {
     return { success: true, item: { itemId: 'FI9', productId: 'ZX42-2026L07',
       productName: '竹香酒', originalPrice: 88, flashPrice: 58, flashStock: 50,
@@ -167,6 +175,17 @@ const record = (name, ok, detail = '') => {
   record('cancelSession URL+POST',
     r4.url === '/api/flash/admin/sessions/FS001/cancel' && r4.method === 'POST');
 
+  // 4b. updateSession(编辑草稿)
+  await FlashAdminAPI.updateSession('FS001', {
+    name: '改名场', startTime: '2026-09-18T20:00:00+08:00' });
+  const up = requests[requests.length - 1];
+  record('updateSession PUT+局部补丁',
+    up.url === '/api/flash/admin/sessions/FS001' && up.method === 'PUT'
+    && up.data.name === '改名场'
+    && up.data.startTime === '2026-09-18T20:00:00+08:00'
+    && !('endTime' in up.data),
+    JSON.stringify(up.data));
+
   // 5-6. settings
   const st = await FlashAdminAPI.getSettings();
   record('getSettings 映射',
@@ -183,6 +202,12 @@ const record = (name, ok, detail = '') => {
   record('三页签结构',
     pageCode.includes('场次管理') && pageCode.includes('风控参数')
     && pageCode.includes('运营统计'));
+  record('双模式表单(创建/编辑)',
+    pageCode.includes('创建秒杀场次') && pageCode.includes('编辑草稿场次')
+    && pageCode.includes('editingId'));
+  record('草稿编辑按钮+取消编辑',
+    pageCode.includes('openEdit') && pageCode.includes('取消编辑')
+    && pageCode.includes('保存修改'));
   record('建场次+加商品表单',
     pageCode.includes('创建秒杀场次') && pageCode.includes('添加秒杀商品')
     && pageCode.includes('flashPrice'));

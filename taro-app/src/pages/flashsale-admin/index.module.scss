@@ -108,6 +108,25 @@
   align-items: center;
 }
 
+.headBtns {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.miniBtn {
+  padding: 2rpx 20rpx;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  border: 1rpx solid $color-primary;
+  border-radius: $radius-button;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
 .sessionName {
   font-size: $font-size-md;
   font-weight: $font-weight-medium;
@@ -188,6 +207,24 @@
   background: transparent;
   color: #e02020;
   border: 1rpx solid #e02020;
+  border-radius: $radius-button;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-md;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.btnGhost {
+  margin-top: $spacing-md;
+  height: 80rpx;
+  background: transparent;
+  color: $color-text-secondary;
+  border: 1rpx solid $color-border;
   border-radius: $radius-button;
   display: flex;
   align-items: center;

@@ -117,6 +117,54 @@ class FlashSaleService:
         logger.info("flash_session_created session=%s name=%s", session_id, name)
         return self._session_view(session)
 
+    async def update_session(self, session_id: str,
+                              name: str | None = None,
+                              start_time: str | None = None,
+                              end_time: str | None = None) -> dict:
+        """编辑场次(仅草稿态; 已发布/已取消不可改——状态机保护)
+
+        校验口径与创建一致(名称非空/ISO8601/结束晚于开始
+        且晚于当前)。局部更新: 仅传入字段生效。
+
+        Raises:
+            KeyError: 场次不存在
+            ValueError: 状态非法/字段非法
+        """
+        session = await self.flash_repo.get_session(session_id)
+        if not session:
+            raise KeyError(f"秒杀场次 {session_id} 不存在")
+        if session.get("status") != SESSION_STATUS_DRAFT:
+            raise ValueError(
+                f"仅草稿场次可编辑(当前 {session.get('status')})")
+        if name is None and start_time is None and end_time is None:
+            raise ValueError("无可更新字段(至少提供名称或起止时间之一)")
+
+        fields: dict = {}
+        if name is not None:
+            name = (name or "").strip()
+            if not name:
+                raise ValueError("场次名称不能为空")
+            fields["name"] = name
+
+        # 时间成对校验(未传则沿用现值)
+        start = (parse_iso(start_time) if start_time is not None
+                 else parse_iso(session["startTime"]))
+        end = (parse_iso(end_time) if end_time is not None
+               else parse_iso(session["endTime"]))
+        if end <= start:
+            raise ValueError("结束时间必须晚于开始时间")
+        if end <= datetime.now(UTC):
+            raise ValueError("结束时间必须晚于当前时间")
+        fields["startTime"] = start.isoformat()
+        fields["endTime"] = end.isoformat()
+
+        fields["updatedAt"] = _now_iso()
+        await self.flash_repo.update_session_fields(session_id, fields)
+        logger.info("flash_session_updated session=%s fields=%s",
+                    session_id, list(fields))
+        updated = await self.flash_repo.get_session(session_id)
+        return self._session_view(updated)
+
     async def add_item(self, session_id: str, product_id: str,
                        flash_price: float, flash_stock: int,
                        limit_per_member: int) -> dict:
