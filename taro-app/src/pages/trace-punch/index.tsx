@@ -4,11 +4,11 @@
  * 工段二维码内容 = 工段码(STG-BREW 等), 扫码即定位工段
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, Input, Textarea, Canvas } from '@tarojs/components';
+import { View, Text, Input, Textarea, Canvas, Image } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
-import { qrMatrix, renderQrMatrix } from '@/utils/qrcode';
+import { qrMatrix, renderQrMatrix, qrMatrixToDataUrl } from '@/utils/qrcode';
 import {
   TraceProdAPI, TraceStageVO, TraceBatchVO, StagePunchVO, StageQrVO,
 } from '@/api/traceProd';
@@ -17,6 +17,8 @@ import { getSession } from '@/services/auth-service';
 const STATUS_NAME: Record<string, string> = {
   producing: '生产中', released: '已出库', blocked: '质检阻断',
 };
+
+const IS_H5 = process.env.TARO_ENV === 'h5';
 const ANOMALY_NAME: Record<string, string> = {
   skip_stage: '跳工段', time_backflow: '时间倒流',
   dwell_overdue: '超时滞留', qc_blocked: '质检阻断强闯',
@@ -194,7 +196,23 @@ const TracePunchPage: React.FC = () => {
   };
 
   // ============ P2: 工段码绘制与保存 ============
+  // H5: 离屏 2d canvas → PNG data URL(旧版 createCanvasContext
+  // 在 H5/电脑浏览器下 ctx.draw() 静默失败); 小程序: 旧版 canvasId
+  const [qrUrls, setQrUrls] = useState<Record<number, string>>({});
+
   const drawStageQrs = useCallback((qrs: StageQrVO[]) => {
+    if (IS_H5) {
+      try {
+        const map: Record<number, string> = {};
+        for (const q of qrs) {
+          map[q.seq] = qrMatrixToDataUrl(qrMatrix(q.payload), 360);
+        }
+        setQrUrls(map);
+      } catch (e) {
+        console.warn('[trace] 工段码生成失败:', e);
+      }
+      return;
+    }
     Taro.nextTick(() => {
       setTimeout(() => {
         try {
@@ -219,6 +237,24 @@ const TracePunchPage: React.FC = () => {
   }, [tab, stageQrs, drawStageQrs]);
 
   const handleSaveStageQr = (seq: number, name: string) => {
+    if (IS_H5) {
+      const url = qrUrls[seq];
+      if (!url) {
+        Taro.showToast({ title: '工段码尚未生成', icon: 'none' });
+        return;
+      }
+      try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name}-工段码.png`;
+        a.click();
+        Taro.showToast({ title: '工段码已开始下载', icon: 'success' });
+      } catch (e) {
+        console.warn('[trace] 工段码下载失败:', e);
+        Taro.showToast({ title: '下载失败,可长按二维码另存', icon: 'none' });
+      }
+      return;
+    }
     Taro.canvasToTempFilePath({
       canvasId: `stageQr${seq}`,
       success: r => {
@@ -517,8 +553,16 @@ const TracePunchPage: React.FC = () => {
                 </Text>
               </View>
               <View className={styles.qrCard}>
-                <Canvas canvasId={`stageQr${q.seq}`}
-                  className={styles.qrCanvas} />
+                {IS_H5 ? (
+                  qrUrls[q.seq] ? (
+                    <Image src={qrUrls[q.seq]} className={styles.qrCanvas} mode="aspectFit" />
+                  ) : (
+                    <View className={styles.qrCanvas}>二维码生成中...</View>
+                  )
+                ) : (
+                  <Canvas canvasId={`stageQr${q.seq}`}
+                    className={styles.qrCanvas} />
+                )}
                 <View className={styles.qrPayload}>{q.payload}</View>
                 <View className={styles.stageMeta}>
                   {q.desc}

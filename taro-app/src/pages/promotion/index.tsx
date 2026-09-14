@@ -3,11 +3,11 @@
  * 数据来源: 后端 /api/promotion/*
  */
 import React, { useState, useEffect } from 'react';
-import { View, Text, Canvas } from '@tarojs/components';
+import { View, Text, Canvas, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
-import { qrMatrix, renderQrMatrix } from '@/utils/qrcode';
+import { qrMatrix, renderQrMatrix, qrMatrixToDataUrl } from '@/utils/qrcode';
 import {
   PromoAPI,
   PromotionStatsVO,
@@ -36,6 +36,8 @@ const EMPTY_STATS: PromotionStatsVO = {
   rewardBalance: 0, wineQualifyAvailable: 0, walletRewardCycles: 0,
 };
 
+const IS_H5 = process.env.TARO_ENV === 'h5';
+
 const PromotionPage: React.FC = () => {
   const [stats, setStats] = useState<PromotionStatsVO>(EMPTY_STATS);
   const [promoCode, setPromoCode] = useState<string>('');
@@ -44,6 +46,9 @@ const PromotionPage: React.FC = () => {
   const [rewards, setRewards] = useState<RewardVO[]>([]);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(false);
+  // H5 专用: 二维码 PNG data URL(离屏 2d canvas——旧版
+  // createCanvasContext 在 H5/电脑浏览器下 ctx.draw() 静默失败)
+  const [qrUrl, setQrUrl] = useState<string>('');
 
   const loadData = async () => {
     try {
@@ -82,8 +87,20 @@ const PromotionPage: React.FC = () => {
     }
   };
 
-  // 绘制推广二维码(旧版 canvasId 模式, 不依赖节点查询)
+  // 绘制推广二维码
+  // H5: 离屏 2d canvas → PNG data URL(电脑/手机浏览器确定性出图,
+  //     渲染尺寸固定 480px 与视口解耦, CSS rpx 负责显示尺寸)
+  // 小程序: 旧版 canvasId 模式(不依赖节点查询)
   const drawQr = (code: string) => {
+    if (IS_H5) {
+      try {
+        setQrUrl(qrMatrixToDataUrl(qrMatrix(code), 480));
+      } catch (e) {
+        console.warn('[promotion] 二维码生成失败:', e);
+        Taro.showToast({ title: '二维码生成失败', icon: 'none' });
+      }
+      return;
+    }
     Taro.nextTick(() => {
       setTimeout(() => {
         try {
@@ -105,8 +122,25 @@ const PromotionPage: React.FC = () => {
     if (promoCode) drawQr(promoCode);
   }, [promoCode]);
 
-  // 保存二维码到相册
+  // 保存二维码到相册(H5: 触发浏览器下载; 小程序: 相册)
   const handleSaveQr = () => {
+    if (IS_H5) {
+      if (!qrUrl) {
+        Taro.showToast({ title: '二维码尚未生成', icon: 'none' });
+        return;
+      }
+      try {
+        const a = document.createElement('a');
+        a.href = qrUrl;
+        a.download = `推广码-${promoCode}.png`;
+        a.click();
+        Taro.showToast({ title: '二维码已开始下载', icon: 'success' });
+      } catch (e) {
+        console.warn('[promotion] 二维码下载失败:', e);
+        Taro.showToast({ title: '下载失败,可长按二维码另存', icon: 'none' });
+      }
+      return;
+    }
     Taro.canvasToTempFilePath({
       canvasId: 'promoQr',
       success: r => {
@@ -189,7 +223,15 @@ const PromotionPage: React.FC = () => {
         {promoCode ? (
           <View className={styles.codeCard}>
             <View className={styles.qrWrap}>
-              <Canvas canvasId="promoQr" className={styles.qrCanvas} />
+              {IS_H5 ? (
+                qrUrl ? (
+                  <Image src={qrUrl} className={styles.qrCanvas} mode="aspectFit" />
+                ) : (
+                  <View className={styles.qrCanvas}>二维码生成中...</View>
+                )
+              ) : (
+                <Canvas canvasId="promoQr" className={styles.qrCanvas} />
+              )}
             </View>
             <View className={styles.codeValue}>{promoCode}</View>
             <View className={styles.codeDesc}>好友扫码识别推广码,注册即绑定为你下线</View>

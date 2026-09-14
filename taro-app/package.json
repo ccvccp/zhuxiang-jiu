@@ -48,6 +48,7 @@
     "test:zw": "node test/test-zw.js",
     "test:qr": "node test/test-qr.js",
     "test:attract72": "node test/test-attract72.js",
+    "test:qrcode-h5": "node test/test-qrcode-h5.js",
     "test:points": "node test/test-points.js",
     "test:av62": "node test/test-av62.js",
     "test:alliance-venue": "node test/test-alliance-venue.js",

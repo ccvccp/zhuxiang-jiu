@@ -388,3 +388,21 @@ export function renderQrMatrix(ctx: any, matrix: boolean[][], sizePx: number): v
     }
   }
 }
+
+/**
+ * 矩阵 → PNG data URL(H5 专用)
+ *
+ * 根因: 旧版 Taro.createCanvasContext 为小程序 API, 在 H5(尤其
+ * 电脑浏览器)下 canvas 元素由 H5 渲染层接管, ctx.draw() 静默失败
+ * → 画布空白。本函数走离屏 2d canvas(标准 DOM API), 全平台浏览器
+ * 确定性出图; 渲染尺寸与视口解耦(固定 px, CSS 负责显示尺寸)。
+ */
+export function qrMatrixToDataUrl(matrix: boolean[][], sizePx: number): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = sizePx;
+  canvas.height = sizePx;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('canvas 2d context unavailable');
+  renderQrMatrix(ctx, matrix, sizePx);
+  return canvas.toDataURL('image/png');
+}
