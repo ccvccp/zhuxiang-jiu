@@ -536,6 +536,100 @@ HOTSPOT_DECISION_STATUSES = (
 
 
 # ============================================================
+# P6 元认知与治理域(规划 §五 5.3/§六——
+# 健康度三指标/红队四向量/沙箱实验/
+# L1 白名单/转段)
+# ============================================================
+
+# 健康度三指标阈值(封闭——任一越界
+# → verdict=frozen 自动冻结进化并告警)
+HEALTH_DIVERSITY_FLOOR = 0.30   # 内容多样性指数
+                                 # 下限(归一熵)
+HEALTH_MATCH_FLOOR = 0.40       # 渠道匹配准确率
+                                 # 下限
+HEALTH_MAPE_CEIL = 0.30         # 预判偏差率
+                                 # MAPE 上限
+
+# 健康度样本下限(低于此样本量该指标
+# 不判定——防小样本误冻结)
+HEALTH_MIN_SAMPLES = 5
+
+# 健康度裁决域(封闭)
+HEALTH_VERDICTS = (
+    "healthy",   # 三指标全在域内
+    "degraded",  # 预警带(接近阈值)
+    "frozen",    # 冻结进化(越界
+                 # 自动/解冻人工专属)
+)
+
+# 冻结联动域(封闭——frozen 时拒绝的
+# 进化动作面; 观测面不受影响)
+HEALTH_FROZEN_DOMAINS = (
+    "experiment_propose",   # 沙箱实验提案
+    "mode_transfer_up",      # 模式升档
+)
+
+# 红队四向量(引流域封闭——71号 P8 范式
+# 首次移植非资金域)
+REDTEAM_VECTORS = (
+    "RT-01",  # 刷量注入(伪造点击流)
+    "RT-02",  # 归因投毒(伪造归并请求)
+    "RT-03",  # 博弈操纵(伪造消耗
+              # 骗取重博弈倾斜)
+    "RT-04",  # 人格漂移(画像异常突变)
+)
+
+# 解冻人工专属双保险(环境变量——免疫
+# 自动永不解冻铁律; 对齐 PAY71_IMMUNITY)
+IMMUNITY_UNFREEZE_ENV = "ATTRACT72_IMMUNITY"
+
+# 实验状态机(封闭——提案→46号→结论)
+EXPERIMENT_STATUSES = (
+    "proposed",   # 提案(46号 pending)
+    "concluded",  # 已结论(双向结晶)
+    "rejected",   # 46号驳回留痕
+)
+
+# 实验结论域(封闭——success 结晶知识/
+# failure 结晶反知识/无定论)
+EXPERIMENT_OUTCOMES = (
+    "success", "failure", "inconclusive",
+)
+
+# 沙箱约束(铁律八: 非核心渠道/小预算/
+# 灰度流量——失败不影响主业务)
+SANDBOX_CHANNELS = (
+    "kuaishou",   # 非核心渠道
+    "bilibili",
+    "seo",
+)
+SANDBOX_MAX_BUDGET = 50.0     # 小预算上限(元)
+SANDBOX_MIN_SAMPLES = 100     # 灰度流量最小样本
+
+# L1 白名单(full 档可开放参数——封闭)
+FULL_AUTONOMY_PARAMS = (
+    "exploration_ratio",       # 探索基金占比
+    "landing_variant_weight",  # 落地页变体权重
+    "topic_queue_threshold",   # 选题入队阈值
+)
+
+# full 档不可开放域(公示——奖励系数/
+# 定律边界/合规参数永不可自主)
+FULL_FORBIDDEN_DOMAINS = (
+    "reward_rate",    # 奖励系数
+    "law_boundary",   # 定律边界
+    "compliance",     # 合规参数
+)
+
+# 46号档案口径(第48批——submit_change
+# 前置入册)
+EXPERIMENT_SCORER_ID = "growth_experiment"
+
+# 进化日志窗口(条)
+EVOLUTION_LOG_LIMIT = 50
+
+
+# ============================================================
 # 启动自检(宪法级)
 # ============================================================
 
@@ -817,6 +911,63 @@ def _validate_registry() -> None:
             "executed", "closed"}:
         raise RuntimeError(
             "attract72 卡位状态机非法")
+    # ⑱ P6 元认知: 健康度/红队/沙箱/
+    #     L1 白名单域封闭
+    if set(HEALTH_VERDICTS) != {
+            "healthy", "degraded", "frozen"}:
+        raise RuntimeError(
+            "attract72 健康度裁决域非法")
+    for th in (HEALTH_DIVERSITY_FLOOR,
+               HEALTH_MATCH_FLOOR,
+               HEALTH_MAPE_CEIL):
+        if not (0 < th < 1):
+            raise RuntimeError(
+                "attract72 健康度阈值域外")
+    if HEALTH_MIN_SAMPLES < 1:
+        raise RuntimeError(
+            "attract72 健康度样本下限域外")
+    if set(HEALTH_FROZEN_DOMAINS) != {
+            "experiment_propose",
+            "mode_transfer_up"}:
+        raise RuntimeError(
+            "attract72 冻结联动域非法")
+    if set(REDTEAM_VECTORS) != {
+            "RT-01", "RT-02",
+            "RT-03", "RT-04"}:
+        raise RuntimeError(
+            "attract72 红队四向量域非法")
+    if set(EXPERIMENT_STATUSES) != {
+            "proposed", "concluded",
+            "rejected"}:
+        raise RuntimeError(
+            "attract72 实验状态机非法")
+    if set(EXPERIMENT_OUTCOMES) != {
+            "success", "failure",
+            "inconclusive"}:
+        raise RuntimeError(
+            "attract72 实验结论域非法")
+    if SANDBOX_MAX_BUDGET <= 0 \
+            or SANDBOX_MIN_SAMPLES < 1:
+        raise RuntimeError(
+            "attract72 沙箱约束域外")
+    if set(SANDBOX_CHANNELS) & {
+            "douyin", "xiaohongshu",
+            "wechat", "direct"}:
+        raise RuntimeError(
+            "attract72 沙箱渠道含核心"
+            "渠道(铁律八违反)")
+    if not FULL_AUTONOMY_PARAMS:
+        raise RuntimeError(
+            "attract72 L1 白名单为空")
+    if set(FULL_AUTONOMY_PARAMS) & \
+            set(FULL_FORBIDDEN_DOMAINS):
+        raise RuntimeError(
+            "attract72 L1 白名单与不可"
+            "开放域重叠")
+    if EXPERIMENT_SCORER_ID != \
+            "growth_experiment":
+        raise RuntimeError(
+            "attract72 实验治理档案口径非法")
 
 
 _validate_registry()

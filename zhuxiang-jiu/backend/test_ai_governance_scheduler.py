@@ -151,8 +151,8 @@ class TestQuietRound:
         record("调度执行成功", r.get("runs") == 1,
                str(r)[:60])
         scan = r.get("lastScan") or {}
-        record("巡检执行(31档案)",
-               scan.get("scorerCount") == 39
+        record("巡检执行(batch48=64档案)",
+               scan.get("scorerCount") == 64
                and scan.get("scanId") is not None,
                str(scan)[:60])
         record("零新告警", scan.get("alertsNew") == 0,
@@ -243,6 +243,25 @@ class TestAlertRound:
         record("普通会员不收", len(m_msgs) == 0,
                f"{len(m_msgs)}条")
 
+        # 触达会产生 message_content 的 auto 反馈
+        # (发信即被消息评分器回流)——补足窗口内
+        # 反馈至 min_feedback, 隔离"触达→枯竭"自激
+        from repositories.ai_learning_repository import (
+            AiLearningRepository,
+        )
+        lrepo = AiLearningRepository()
+        for _ in range(10):
+            await lrepo.add_feedback({
+                "scorerId": "message_content",
+                "weightVersion": "v1",
+                "scoreAtDecision": 80.0,
+                "actualAction": "pass",
+                "expectedAction": "pass",
+                "correct": True,
+                "factors": [], "note": "",
+                "source": "manual",
+                "createdAt": datetime.now(UTC).isoformat()})
+
         # 同日再跑: 告警当日去重→零新告警零通知
         r2 = await run_scheduled_governance_tasks()
         scan2 = r2.get("lastScan") or {}
@@ -294,7 +313,7 @@ class TestFailSoft:
         r = await sched.run_scheduled_governance_tasks()
         record("恢复后正常巡检",
                (r.get("lastScan") or {})
-               .get("scorerCount") == 39,
+               .get("scorerCount") == 64,
                str(r.get("lastScan"))[:60])
 
 

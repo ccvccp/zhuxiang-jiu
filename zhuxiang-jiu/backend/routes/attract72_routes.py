@@ -28,6 +28,19 @@
     POST /api/attract72/budget/rates/propose 系数建议→46号(admin, 决策面 off 409)
     POST /api/attract72/budget/rates/apply    系数执行·显式动作(admin, 决策面 off 409)
 
+端点(P6 10 个——元认知收官; 实验/红队/转段
+=决策面 off 409; 健康度/日志/台账=观测面):
+    POST /api/attract72/experiment/propose   沙箱实验提案→46号(admin, 决策面 off 409)
+    GET  /api/attract72/experiments          实验台账(admin, 观测面)
+    POST /api/attract72/experiment/{id}/conclude  实验结论·双向结晶(admin, 决策面 off 409)
+    GET  /api/attract72/meta/health          健康度三指标(?refresh=1 触发快环检查)(admin, 观测面)
+    POST /api/attract72/meta/unfreeze       健康度人工解冻(admin+环境变量双保险)
+    GET  /api/attract72/evolution/log        进化日志(admin, 观测面)
+    POST /api/attract72/redteam/run          红队四向量执行(admin, 决策面 off 409)
+    GET  /api/attract72/redteam              红队台账(admin, 观测面)
+    GET  /api/attract72/model/status         模型状态(admin, 观测面)
+    POST /api/attract72/mode/{target}        转段四档(admin+confirm)
+
 鉴权: 管理面 X-Role: admin(71号同款口径)。
 统一口径(71号范式):
     - 感知层/因果推理/偏差重博弈全部为观测面/快环
@@ -862,6 +875,284 @@ async def hotspot_outcome(
                                 body.impressions,
                                 body.conversions,
                                 body.actualRoi)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# P6 元认知与治理(健康度+红队+沙箱实验
+# +进化日志+转段)
+# ============================================================
+
+class ExperimentProposeRequest(BaseModel):
+    hypothesis: str = Field(
+        ..., min_length=1, max_length=500,
+        description="实验假设(元认知盲区)")
+    variable: str = Field(
+        ..., max_length=64,
+        description="实验变量(L1 白名单域)")
+    channels: list[str] = Field(
+        None, description="沙箱渠道(空=全部"
+                          "非核心渠道)")
+    budget: float = Field(
+        0.0, ge=0, le=10000,
+        description="实验预算(≤50 元)")
+    sampleSize: int = Field(
+        0, ge=0, description="灰度样本量(≥100)")
+    successCriteria: str = Field(
+        ..., min_length=1, max_length=200,
+        description="成功标准")
+    proposedBy: str = Field(
+        "ai", description="提案方(ai/human)")
+
+
+class ExperimentConcludeRequest(BaseModel):
+    outcome: str = Field(
+        ..., max_length=20,
+        description="结论(success/failure/"
+                    "inconclusive)")
+    note: str = Field("", max_length=200,
+                      description="结论备注")
+
+
+@router.post("/experiment/propose")
+async def experiment_propose(
+        body: ExperimentProposeRequest,
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """沙箱实验提案(决策面 off 409; L1
+    白名单外变量拒绝; 46号建议书留痕)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P6Service()
+                .propose_experiment(
+                    hypothesis=body.hypothesis,
+                    variable=body.variable,
+                    channels=body.channels,
+                    budget=body.budget,
+                    sample_size=body.sampleSize,
+                    success_criteria=
+                    body.successCriteria,
+                    proposed_by=body.proposedBy)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/experiments")
+async def experiments_list(
+        status: str = Query(None),
+        limit: int = Query(100, ge=1, le=500),
+        x_role: str = Header(default=None,
+                             alias="X-Role")):
+    """实验台账(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P6Service()
+                .list_experiments(status, limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/experiment/{experiment_id}/conclude")
+async def experiment_conclude(
+        experiment_id: int,
+        body: ExperimentConcludeRequest,
+        x_role: str = Header(default=None,
+                             alias="X-Role")):
+    """实验结论·双向结晶(决策面 off 409;
+    success→知识/failure→反知识)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P6Service()
+                .conclude_experiment(
+                    experiment_id,
+                    body.outcome,
+                    body.note)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/meta/health")
+async def meta_health(
+        refresh: int = Query(
+            0, ge=0, le=1,
+            description="1=触发快环检查"
+                        "(默认读最近)"),
+        x_role: str = Header(default=None,
+                             alias="X-Role")):
+    """健康度三指标(观测面; refresh=1
+    触发检查——任一越界自动冻结)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        svc = Attract72P6Service()
+        if refresh:
+            data = await svc.check_health()
+        else:
+            data = await svc.repo \
+                .latest_health()
+            if data is None:
+                data = await svc.check_health()
+        return {"code": 0, "data": data}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/meta/unfreeze")
+async def meta_unfreeze(
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """健康度人工解冻(admin + 环境变量
+    ATTRACT72_IMMUNITY=1 双保险——免疫
+    自动永不解冻铁律)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P6Service()
+                .unfreeze()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/evolution/log")
+async def evolution_log(
+        limit: int = Query(50, ge=1, le=200),
+        x_role: str = Header(default=None,
+                             alias="X-Role")):
+    """进化日志(观测面——定律/实验/卡位/
+    预算/红队/健康度聚合)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P6Service()
+                .evolution_log(limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/redteam/run")
+async def redteam_run(
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """红队四向量执行(决策面 off 409——
+    刷量注入/归因投毒/博弈操纵/人格漂移;
+    未防御自动冻结)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P6Service()
+                .run_redteam()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/redteam")
+async def redteam_list(
+        limit: int = Query(20, ge=1, le=100),
+        x_role: str = Header(default=None,
+                             alias="X-Role")):
+    """红队台账(观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P6Service()
+                .list_redteam_runs(limit)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.get("/model/status")
+async def model_status(
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """模型状态(mode/健康/红队/L1 白名单
+    公示——观测面)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P6Service()
+                .model_status()}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+@router.post("/mode/{target}")
+async def mode_transfer(
+        target: str,
+        confirm: bool = Query(
+            False,
+            description="二次确认(必填 true)"),
+        x_role: str = Header(default=None,
+                              alias="X-Role")):
+    """转段四档(off/shadow/assist/full;
+    admin+confirm——升档逐档+健康度门控
+    +assist→full 须红队全防御)"""
+    try:
+        _require_admin(x_role)
+        from services.attract72_p6_service import (
+            Attract72P6Service,
+        )
+        return {"code": 0,
+                "data": await
+                Attract72P6Service()
+                .transfer(target, confirm)}
     except HTTPException:
         raise
     except Exception as exc:

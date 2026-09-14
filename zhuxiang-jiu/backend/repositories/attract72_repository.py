@@ -50,12 +50,18 @@ class Attract72Repository:
     TABLE_MEMORY = "attract72_device_memory"
     TABLE_VARIANTS = "attract72_landing_variants"
     TABLE_DECISIONS = "attract72_hotspot_decisions"
+    TABLE_EXPERIMENTS = "attract72_experiments"
+    TABLE_HEALTH = "attract72_meta_health"
+    TABLE_REDTEAM = "attract72_redteam"
+    TABLE_MODE = "attract72_mode_state"
 
     _ALL_TABLES = (TABLE_PERSONAS, TABLE_INTENTS,
                    TABLE_SIGNALS, TABLE_INSIGHTS,
                    TABLE_LAWS, TABLE_FORECASTS,
                    TABLE_MEMORY, TABLE_VARIANTS,
-                   TABLE_DECISIONS)
+                   TABLE_DECISIONS,
+                   TABLE_EXPERIMENTS, TABLE_HEALTH,
+                   TABLE_REDTEAM, TABLE_MODE)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -78,6 +84,9 @@ class Attract72Repository:
         "variantId", "impressions",
         "conversions",
         "decisionId", "radarEventId",
+        # P6
+        "experimentId", "checkId",
+        "runId", "sampleSize",
     )
     _FLOAT_FIELDS = (
         "engagementRate", "conversionRate",
@@ -96,12 +105,17 @@ class Attract72Repository:
         "timeliness", "relevance",
         "safety", "conversionPotential",
         "potential", "actualRoi",
+        # P6
+        "diversityIndex", "matchAccuracy",
+        "forecastMape", "budget",
     )
     _BOOL_FIELDS = ("verified", "consumed",
                     "syncedToKB",
                     # P4/P5
                     "registered", "isolated",
-                    "executed")
+                    "executed",
+                    # P6
+                    "allDefended", "confirmed")
     _JSON_DICT_FIELDS = ("stats", "payload",
                          "conditions",
                          "demandSignals",
@@ -109,7 +123,9 @@ class Attract72Repository:
                          # P4/P5
                          "ctx", "potential",
                          "plan", "outcome",
-                         "distribution")
+                         "distribution",
+                         # P6
+                         "result", "scope")
     _JSON_LIST_FIELDS = (
         "platforms", "intentTags", "sceneTags",
         "hesitationSignals", "impactChannels",
@@ -118,6 +134,10 @@ class Attract72Repository:
         # P4/P5
         "seenVariants", "variants",
         "timeWindow",
+        # P6
+        "channels", "vectors",
+        "actions", "frozenDomains",
+        "insufficient",
     )
 
     def __init__(self, store: dict = None):
@@ -589,3 +609,79 @@ class Attract72Repository:
             if f.get("status") == "active":
                 return f
         return None
+
+    # ============================================================
+    # P6 元认知与治理(attract72_experiments
+    # /attract72_meta_health/attract72_redteam
+    # /attract72_mode_state)
+    # ============================================================
+
+    async def save_experiment(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_EXPERIMENTS,
+            record["experimentId"], record)
+
+    async def get_experiment(
+            self, experiment_id: int) -> dict | None:
+        return await self._get(
+            self.TABLE_EXPERIMENTS,
+            experiment_id)
+
+    async def list_experiments(
+            self, status: str = None,
+            limit: int = 100) -> list[dict]:
+        experiments = await self._list(
+            self.TABLE_EXPERIMENTS, 2000)
+        if status:
+            experiments = [e for e in experiments
+                           if e.get("status")
+                           == status]
+        return sorted(experiments,
+                      key=lambda e: -e.get(
+                          "experimentId", 0)
+                      )[:limit]
+
+    async def save_health(self,
+                          record: dict) -> dict:
+        return await self._save(
+            self.TABLE_HEALTH,
+            record["checkId"], record)
+
+    async def list_health(
+            self, limit: int = 100) -> list[dict]:
+        records = await self._list(
+            self.TABLE_HEALTH, 2000)
+        return sorted(records,
+                      key=lambda h: -h.get(
+                          "checkId", 0)
+                      )[:limit]
+
+    async def latest_health(self) -> dict | None:
+        records = await self.list_health(
+            limit=1)
+        return records[0] if records else None
+
+    async def save_redteam_run(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_REDTEAM,
+            record["runId"], record)
+
+    async def list_redteam_runs(
+            self, limit: int = 20) -> list[dict]:
+        records = await self._list(
+            self.TABLE_REDTEAM, 2000)
+        return sorted(records,
+                      key=lambda r: -r.get(
+                          "runId", 0)
+                      )[:limit]
+
+    async def save_mode_state(
+            self, record: dict) -> dict:
+        return await self._save(
+            self.TABLE_MODE, "mode", record)
+
+    async def get_mode_state(self) -> dict | None:
+        return await self._get(
+            self.TABLE_MODE, "mode")
