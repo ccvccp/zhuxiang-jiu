@@ -6,6 +6,7 @@
     POST /api/xx64/orders         创建订单+锁值(member/admin, 决策面 off 409)
     GET  /api/xx64/orders         订单列表(admin, 观测面)
     GET  /api/xx64/orders/{id}    订单详情(admin, 观测面)
+    GET  /api/xx64/my-orders      我的订单+申诉状态联查(member/admin, 观测面——申诉入口数据源)
     GET  /api/xx64/quota          限额状态(admin, 观测面)
     GET  /api/xx64/model/status   模型状态(admin, 观测面)
     POST /api/xx64/orders/{id}/pay     订单支付(member/admin, 决策面 off 409)
@@ -140,6 +141,61 @@ async def orders(
             buyer_id=buyer_id,
             seller_id=seller_id,
             status=status, limit=limit)
+
+
+@router.get("/my-orders")
+async def my_orders(
+        buyer_id: int = Query(..., ge=1,
+                              description="会员ID(本人订单)"),
+        status: str = None,
+        limit: int = Query(50, ge=1, le=200),
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """我的订单+申诉状态联查(会员面——观测面;
+    供前端申诉入口: 每单附最新申诉进度)"""
+    _require_role(x_role)
+    from services.xx64_service import (
+        Xx64Service,
+    )
+    result = await Xx64Service() \
+        .list_orders(buyer_id=buyer_id,
+                     status=status, limit=limit)
+    # 申诉状态联查(同订单取最新——
+    # 观测面口径, 不受开关影响)
+    from repositories.xx64_repository import (
+        Xx64Repository,
+    )
+    appeals = await Xx64Repository() \
+        .list_appeals(limit=500)
+    latest: dict = {}
+    for a in appeals:
+        oid = int(a.get("orderId") or 0)
+        if int(a.get("appealId") or 0) > \
+                int(latest.get(oid, {})
+                    .get("appealId") or 0):
+            latest[oid] = a
+    orders_out = []
+    for o in result.get("orders") or []:
+        oid = int(o.get("orderId") or 0)
+        ap = latest.get(oid)
+        orders_out.append({
+            **o,
+            "appeal": ({
+                "appealId": ap.get("appealId"),
+                "status": ap.get("status"),
+                "decision": ap.get("decision"),
+                "submittedAt": ap.get(
+                    "submittedAt"),
+                "reviewedAt": ap.get(
+                    "reviewedAt"),
+                "expiresAt": ap.get(
+                    "expiresAt"),
+            } if ap else None),
+        })
+    result["orders"] = orders_out
+    result["note"] = ("我的订单——每单附最新"
+                      "申诉进度(观测面)")
+    return result
 
 
 @router.get("/orders/{order_id}")
