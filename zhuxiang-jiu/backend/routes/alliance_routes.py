@@ -999,6 +999,31 @@ async def alliance_mode_guard(
         _handle(e)
 
 
+class AllianceGuardAutoRequest(PydBaseModel):
+    windowDays: int = Field(30, ge=1, le=365,
+                            description="滚动窗口天数(默认30)")
+    baseline: dict = Field(None, description="基线三指标(可选)")
+
+
+@router.post("/api/alliance/mode/guard/auto",
+             tags=["AI智能网站同盟模块"])
+async def alliance_mode_guard_auto(
+    data: AllianceGuardAutoRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """实测护栏检查(纯同盟域自动聚合: 退款=冲正结算占比/
+    客诉=差评进线占比/清退=终止商户占比; 样本门防误暂停;
+    确定性公式——LLM 禁入)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data":
+                await _mode_service().auto_guard_check(
+                    window_days=data.windowDays,
+                    baseline=data.baseline)}
+    except Exception as e:
+        _handle(e)
+
+
 @router.post("/api/alliance/mode/resume",
              tags=["AI智能网站同盟模块"])
 async def alliance_mode_resume(

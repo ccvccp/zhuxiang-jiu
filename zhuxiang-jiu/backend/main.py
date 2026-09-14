@@ -451,6 +451,9 @@ async def _on_startup():
     # 37号·AI智能网站同盟: T+1 结算(ALLIANCE_SETTLE_AUTO=off 可关闭)
     from services.alliance_settle_scheduler import start_scheduler as start_alliance_settle
     start_alliance_settle()
+    # 37号·同盟大模型治理层: 护栏实测自动巡检(ALLIANCE37_GUARD_AUTO=off 可关闭)
+    from services.alliance_guard_scheduler import start_scheduler as start_alliance_guard
+    start_alliance_guard()
     # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
     from services.blogger_scheduler import (
         start_radar_scheduler as start_blogger_radar,

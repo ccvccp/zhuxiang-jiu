@@ -267,6 +267,140 @@ class TestWhitepaper:
                    wp["annualData"]))
 
 
+class TestAutoGuard:
+    async def run(self):
+        print("[05 实测护栏自动聚合]")
+        reset_all()
+        svc = AllianceModeService()
+        repo = AllianceRepository()
+
+        # 空库: 三指标全 0 + 全部样本门关闭
+        computed = await svc.auto_metrics()
+        record("空库三指标全0",
+               computed["metrics"] == {
+                   "refundRate": 0.0,
+                   "complaintRate": 0.0,
+                   "terminationRate": 0.0})
+        record("空库样本门全关",
+               all(computed["gated"].values()))
+
+        # 空库实测护栏: 无恶化不暂停
+        result = await svc.auto_guard_check()
+        record("空库实测不暂停",
+               not result["guard"]["breached"])
+
+        # 窗口参数非法拒绝
+        try:
+            await svc.auto_metrics(0)
+            record("窗口0拒绝", False)
+        except ValueError:
+            record("窗口0拒绝", True)
+
+        # 造数据: 6 结算(1 冲正) + 6 评价(2 差评) + 4 商户(1 终止)
+        now = "2026-09-15T00:00:00+00:00"
+        for i in range(5):
+            await repo.save_settlement({
+                "settlementId": i + 1,
+                "orderId": f"ALO{i + 1}",
+                "merchantId": 1, "orderAmount": 10.0,
+                "commission": 1.5, "merchantProceeds": 8.5,
+                "status": "settled", "settledAt": now})
+        await repo.save_settlement({
+            "settlementId": 6, "orderId": "ALO6",
+            "merchantId": 1, "orderAmount": 10.0,
+            "commission": 1.5, "merchantProceeds": 8.5,
+            "status": "reversed",
+            "reversedAt": now})
+        for i in range(4):
+            await repo.save_review({
+                "reviewId": i + 1, "orderId": f"ALO{i + 1}",
+                "merchantId": 1, "reviewerId": 999,
+                "score": 5, "content": "好",
+                "folded": False, "createdAt": now})
+        for i in range(2):
+            await repo.save_review({
+                "reviewId": 5 + i, "orderId": f"ALO{5 + i}",
+                "merchantId": 1, "reviewerId": 998,
+                "score": 1, "content": "差",
+                "folded": False, "createdAt": now})
+        for i in range(3):
+            await repo.save_merchant({
+                "merchantId": i + 1, "memberId": 100 + i,
+                "category": "tea", "shopName": f"商铺{i}",
+                "status": "active", "createdAt": now})
+        await repo.save_merchant({
+            "merchantId": 4, "memberId": 104,
+            "category": "tea", "shopName": "终止铺",
+            "status": "terminated",
+            "terminatedAt": now})
+
+        computed = await svc.auto_metrics()
+        m = computed["metrics"]
+        record("退款率聚合(1/6)",
+               abs(m["refundRate"] - 1 / 6) < 0.001,
+               str(m["refundRate"]))
+        record("客诉率聚合(2/6)",
+               abs(m["complaintRate"] - 2 / 6) < 0.001,
+               str(m["complaintRate"]))
+        record("清退率聚合(1/4)",
+               abs(m["terminationRate"] - 0.25) < 0.001,
+               str(m["terminationRate"]))
+        record("样本门全开",
+               not any(computed["gated"].values()))
+
+        # 差评 33% >> 基线 2%×1.03 → 恶化自动暂停
+        result = await svc.auto_guard_check()
+        record("差评恶化实测自动暂停",
+               result["guard"]["breached"]
+               and result["guard"]["pausedNow"])
+        state = await svc.current_mode()
+        record("实测暂停后等效off",
+               state["mode"] == "off"
+               and state["source"] == "guard_pause")
+
+        # resume 恢复
+        await svc.resume(note="实测测试恢复")
+
+        # 窗口外数据不计入(老结算单排除)
+        old = "2025-01-01T00:00:00+00:00"
+        await repo.save_settlement({
+            "settlementId": 7, "orderId": "ALO7",
+            "merchantId": 1, "orderAmount": 10.0,
+            "commission": 1.5, "merchantProceeds": 8.5,
+            "status": "reversed", "reversedAt": old})
+        computed = await svc.auto_metrics()
+        record("窗口外冲正不计入",
+               abs(computed["metrics"]["refundRate"]
+                   - 1 / 6) < 0.001)
+
+        # HTTP: 实测护栏端点
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from routes.alliance_routes import (
+            register_alliance_routes,
+        )
+        app = FastAPI()
+        register_alliance_routes(app)
+        client = TestClient(app)
+        admin = {"X-Role": "admin"}
+
+        resp = client.post(
+            "/api/alliance/mode/guard/auto",
+            json={"windowDays": 30}, headers=admin)
+        body = resp.json()["data"]
+        record("guard/auto端点200",
+               resp.status_code == 200
+               and body["computed"]["windowDays"] == 30)
+        record("guard/auto同链路",
+               "breaches" in body["guard"])
+
+        resp = client.post(
+            "/api/alliance/mode/guard/auto",
+            json={"windowDays": 30})
+        record("guard/auto缺Role403",
+               resp.status_code == 403)
+
+
 class TestHttp:
     async def run(self):
         print("[04 HTTP 层]")
@@ -398,6 +532,7 @@ async def main():
     await TestDecisionGate().run()
     await TestWhitepaper().run()
     await TestHttp().run()
+    await TestAutoGuard().run()
     print()
     print(f"通过: {PASS} / 失败: {FAIL} / 总计: {PASS + FAIL}")
     for line in RESULTS:

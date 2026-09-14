@@ -35,7 +35,7 @@
 
 import logging
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 
 from repositories.alliance_repository import (
     AllianceRepository,
@@ -69,6 +69,18 @@ GUARD_DETERIORATION = 0.03
 
 # 指标留痕上限(防无限膨胀)
 GUARD_METRICS_MAX = 50
+
+# ============================================================
+# 实测指标聚合常量(护栏自动源——确定性, LLM 禁入)
+# ============================================================
+
+# 滚动窗口(天)
+GUARD_WINDOW_DAYS = 30
+
+# 样本门(窗口内样本不足不出数——防小样本误暂停)
+GUARD_REFUND_SAMPLE_GATE = 5      # 结算单数
+GUARD_COMPLAINT_SAMPLE_GATE = 5   # 评价数
+GUARD_TERMINATION_SAMPLE_GATE = 3  # 商户数
 
 
 def _now_iso() -> str:
@@ -259,6 +271,130 @@ class AllianceModeService:
         await self.repo.save_state(st)
         result["pausedNow"] = bool(breaches)
         return result
+
+    # ============================================================
+    # 实测指标自动聚合(护栏自动源——确定性, LLM 禁入)
+    # ============================================================
+
+    @staticmethod
+    def _in_window(iso: str, since_dt: datetime) -> bool:
+        """ISO 时间戳容错解析+窗口判定(空/畸形→False)"""
+        if not iso:
+            return False
+        try:
+            dt = datetime.fromisoformat(
+                str(iso).replace("Z", "+00:00"))
+            return dt >= since_dt
+        except ValueError:
+            return False
+
+    async def auto_metrics(
+            self, window_days: int = None) -> dict:
+        """实测三指标聚合(纯同盟域——确定性公式)
+
+        指标口径:
+            refundRate 退款率 = 窗口内冲正结算单 /
+                (窗口内已结算+冲正结算单)
+            complaintRate 客诉进线率 = 窗口内差评
+                (score≤2) / 窗口内总评价
+            terminationRate 商户清退率 = 窗口内终止
+                商户 / 全量商户
+
+        样本门(防小样本误暂停): 结算单 <5 / 评价 <5 /
+        商户 <3 → 对应指标记 0 且标记 gated。
+        """
+        days = int(GUARD_WINDOW_DAYS if window_days is None
+                   else window_days)
+        if days <= 0:
+            raise ValueError("窗口天数必须为正整数")
+        since = datetime.now(UTC) - timedelta(days=days)
+
+        # ① 退款率(结算单冲正占比)
+        settlements = await self.repo.list_settlements(
+            limit=100000)
+        w_settled = [
+            s for s in settlements
+            if s.get("status") == "settled"
+            and self._in_window(s.get("settledAt"),
+                                since)]
+        w_reversed = [
+            s for s in settlements
+            if s.get("status") == "reversed"
+            and self._in_window(s.get("reversedAt"),
+                                since)]
+        s_total = len(w_settled) + len(w_reversed)
+        refund_gated = s_total < GUARD_REFUND_SAMPLE_GATE
+        refund_rate = (0.0 if refund_gated else
+                       len(w_reversed) / s_total
+                       if s_total else 0.0)
+
+        # ② 客诉进线率(差评进线占比)
+        reviews = await self.repo.list_reviews(
+            limit=100000)
+        w_reviews = [
+            r for r in reviews
+            if self._in_window(r.get("createdAt"), since)]
+        w_complaints = [
+            r for r in w_reviews
+            if int(r.get("score") or 0) <= 2]
+        r_total = len(w_reviews)
+        complaint_gated = (r_total
+                           < GUARD_COMPLAINT_SAMPLE_GATE)
+        complaint_rate = (0.0 if complaint_gated else
+                          len(w_complaints) / r_total
+                          if r_total else 0.0)
+
+        # ③ 商户清退率(终止商户占比)
+        merchants = await self.repo.list_merchants(
+            limit=100000)
+        w_terminated = [
+            m for m in merchants
+            if m.get("status") == "terminated"
+            and self._in_window(m.get("terminatedAt"),
+                                since)]
+        m_total = len(merchants)
+        term_gated = m_total < GUARD_TERMINATION_SAMPLE_GATE
+        termination_rate = (0.0 if term_gated else
+                            len(w_terminated) / m_total
+                            if m_total else 0.0)
+
+        return {
+            "windowDays": days,
+            "metrics": {
+                "refundRate": round(refund_rate, 4),
+                "complaintRate": round(complaint_rate, 4),
+                "terminationRate": round(
+                    termination_rate, 4),
+            },
+            "samples": {
+                "settlements": s_total,
+                "reviews": r_total,
+                "merchants": m_total,
+            },
+            "gated": {
+                "refundRate": refund_gated,
+                "complaintRate": complaint_gated,
+                "terminationRate": term_gated,
+            },
+            "source": "alliance-domain-auto",
+        }
+
+    async def auto_guard_check(
+            self, window_days: int = None,
+            baseline: dict = None) -> dict:
+        """实测护栏检查(自动源聚合→guard_check)
+
+        恶化>3% 自动暂停(与手动口径同一条链路,
+        差异仅在于指标来源为实测聚合)。
+        """
+        computed = await self.auto_metrics(window_days)
+        m = computed["metrics"]
+        guard = await self.guard_check(
+            refund_rate=m["refundRate"],
+            complaint_rate=m["complaintRate"],
+            termination_rate=m["terminationRate"],
+            baseline=baseline)
+        return {"computed": computed, "guard": guard}
 
     async def resume(self, operator: str = "admin",
                      note: str = "") -> dict:
