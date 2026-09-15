@@ -313,6 +313,11 @@ const WalletPage: React.FC = () => {
           </View>
           <View className={styles.heroStatDivider} />
           <View className={styles.heroStatItem}>
+            <View className={styles.heroStatValue}>{(info?.rewardBalance ?? 0).toFixed(2)}</View>
+            <View className={styles.heroStatLabel}>奖励(仅购物)</View>
+          </View>
+          <View className={styles.heroStatDivider} />
+          <View className={styles.heroStatItem}>
             <View className={styles.heroStatValue}>{(info?.regularTotal ?? 0).toFixed(2)}</View>
             <View className={styles.heroStatLabel}>定期</View>
           </View>

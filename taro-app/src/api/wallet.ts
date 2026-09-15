@@ -9,8 +9,9 @@ export interface WalletInfoVO {
   userId: string;
   status: string;            // active/frozen
   statusName: string;        // 正常/冻结
-  totalAssets: number;       // 总资产 = 活期 + 定期 + 待结收益
+  totalAssets: number;       // 总资产 = 活期 + 奖励 + 定期 + 待结收益
   currentBalance: number;    // 活期余额(可消费/可提现)
+  rewardBalance: number;     // 奖励余额(扫码/顺手等激励——仅可购物不可提现)
   regularTotal: number;      // 定期总额
   pendingInterest: number;   // 待结收益
   totalDeposit: number;      // 累计充值
@@ -145,6 +146,7 @@ export const WalletAPI = {
       statusName: res.statusName || '正常',
       totalAssets: res.totalAssets || 0,
       currentBalance: res.currentBalance || 0,
+      rewardBalance: Number(res.rewardBalance ?? 0) || 0,
       regularTotal: res.regularTotal || 0,
       pendingInterest: res.pendingInterest || 0,
       totalDeposit: res.totalDeposit || 0,

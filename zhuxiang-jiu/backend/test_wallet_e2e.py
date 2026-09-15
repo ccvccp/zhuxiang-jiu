@@ -132,6 +132,26 @@ async def run_e2e():
     check("info currentBalance 0", r["currentBalance"] == 0)
     check("info claimableRewardCount 0", r["claimableRewardCount"] == 0)
 
+    # 1.4b 奖励余额入总资产 + 提现隔离(扫码/顺手激励专用购物账户)
+    print("[Test 1.4b] 奖励余额总和与提现隔离")
+    r = await svc.deposit_reward(user_id, 10.0, "扫码赚钱测试奖励")
+    check("奖励入账 success", r["success"] is True)
+    info = await svc.get_info(user_id)
+    check("info rewardBalance 10", info["rewardBalance"] == 10.0,
+          f"actual={info.get('rewardBalance')}")
+    check("info totalAssets 含奖励", info["totalAssets"] == 10.0,
+          f"actual={info.get('totalAssets')}")
+    check("info currentBalance 不含奖励", info["currentBalance"] == 0)
+    try:
+        await svc.withdraw(user_id, 5.0, "bank", "6222000112345679")
+        check("奖励不可提现(余额不足拒绝)", False)
+    except ValueError:
+        check("奖励不可提现(余额不足拒绝)", True)
+    await svc.pay_with_reward(user_id, 10.0, description="奖励核销清理")
+    info = await svc.get_info(user_id)
+    check("奖励核销后归零", info["rewardBalance"] == 0.0,
+          f"actual={info.get('rewardBalance')}")
+
     # ============================================================
     # 2. 充值提现(4 接口)
     # ============================================================

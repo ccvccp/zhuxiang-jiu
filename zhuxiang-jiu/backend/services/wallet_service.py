@@ -299,8 +299,11 @@ class WalletService:
         rewards = await self.wallet_repo.list_claimable_rewards(user_id)
 
         balance = float(account.get("balance", 0))
+        reward = float(account.get("rewardBalance", 0))
         pending = float(account.get("pendingInterest", 0))
-        total_assets = balance + regular_total + pending
+        # 总资产含奖励余额(扫码/顺手等营销激励——专用购物账户):
+        # 显示为总和, 但 rewardBalance 不可提现(withdraw 仅操作 balance)
+        total_assets = balance + reward + regular_total + pending
 
         return {
             "success": True,
@@ -309,6 +312,7 @@ class WalletService:
             "statusName": STATUS_NAMES.get(account.get("status"), "未知"),
             "totalAssets": round(total_assets, 2),
             "currentBalance": balance,
+            "rewardBalance": reward,
             "regularTotal": round(regular_total, 2),
             "pendingInterest": pending,
             "totalDeposit": float(account.get("totalDeposit", 0)),
