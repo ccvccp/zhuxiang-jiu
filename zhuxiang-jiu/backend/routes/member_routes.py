@@ -439,10 +439,10 @@ async def admin_list_members(
         "phone": str(m.get("phone", ""))[:3] + "****" + str(m.get("phone", ""))[-4:],
         "level": m.get("level", 1),
         "levelName": _LEVEL_NAMES.get(m.get("level", 1), "竹芽会员"),
-        "growthValue": m.get("growthValue", 0),
+        "growthValue": m.get("growth_value", 0) or m.get("growthValue", 0),
         "periodConsume": float(m.get("periodConsume", 0) or 0),
-        "status": m.get("status", "active"),
-        "createdAt": m.get("createdAt", ""),
+        "status": "disabled" if m.get("status") == 0 else "active",
+        "createdAt": m.get("created_at", "") or m.get("createdAt", ""),
     } for m in members[:limit]]
     return {"success": True, "total": len(members), "data": items}
 
@@ -467,14 +467,16 @@ async def admin_member_detail(
                 "phone": str(member.get("phone", ""))[:3] + "****" + str(member.get("phone", ""))[-4:],
                 "level": member.get("level", 1),
                 "levelName": _LEVEL_NAMES.get(member.get("level", 1), "竹芽会员"),
-                "growthValue": member.get("growthValue", 0),
-                "status": member.get("status", "active"),
+                "growthValue": member.get("growth_value", 0) or member.get("growthValue", 0),
+                "status": "disabled" if member.get("status") == 0 else "active",
                 "regSource": member.get("reg_source", ""),
                 "keepLevel": progress,
                 "levelDowngradedAt": member.get("levelDowngradedAt", ""),
                 "levelDowngradedFrom": member.get("levelDowngradedFrom"),
+                "svipPurchasedAt": member.get("svipPurchasedAt", ""),
+                "svipPurchasedFromLevel": member.get("svipPurchasedFromLevel"),
                 "svipRenewedAt": member.get("svipRenewedAt", ""),
-                "createdAt": member.get("createdAt", ""),
+                "createdAt": member.get("created_at", "") or member.get("createdAt", ""),
             },
         }
     except KeyError as e:
