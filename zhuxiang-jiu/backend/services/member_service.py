@@ -590,11 +590,14 @@ class MemberService:
                     "validMonths": LEVEL_VALID_MONTHS}
 
     async def create_svip_pay(self, member_id, pay_channel: str = "wechat",
-                              pay_method: str = "h5") -> dict:
+                              pay_method: str = None) -> dict:
         """SVIP 支付单创建(¥99/年, 真实收款前置; 升级由支付回调分发完成)
 
         流程: 创建支付单(order_type=member_svip) → 前端发起渠道支付
         → 回调成功 → renew_svip() 开通(L1-L4)/续费(L5)。
+
+        Args:
+            pay_method: 支付方式(缺省按渠道映射: alipay→wap, 其余→h5)
 
         Raises:
             KeyError: 会员不存在
@@ -603,7 +606,11 @@ class MemberService:
         if not member:
             raise KeyError(f"会员 {member_id} 不存在")
 
-        from services.payment_service import PaymentService
+        from services.payment_service import (
+            PaymentService, default_pay_method,
+        )
+        if pay_method is None:
+            pay_method = default_pay_method(pay_channel)
         order_id = f"SVIP-{member_id}-{int(datetime.now(UTC).timestamp() * 1000)}"
         return await PaymentService().create_pay(
             user_id=member_id,

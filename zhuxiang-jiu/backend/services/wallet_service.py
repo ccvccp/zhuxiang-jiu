@@ -402,7 +402,7 @@ class WalletService:
 
     async def create_deposit_pay(self, user_id, amount: float,
                                  pay_channel: str = "alipay",
-                                 pay_method: str = "h5") -> dict:
+                                 pay_method: str = None) -> dict:
         """充值支付单创建(真实收款前置; 入账由支付回调分发完成)
 
         流程: 校验钱包状态/金额 → 创建支付单(order_type=wallet_deposit)
@@ -412,7 +412,7 @@ class WalletService:
             user_id: 用户ID
             amount: 充值金额(≥ ¥100)
             pay_channel: 支付渠道 alipay/wechat/bank
-            pay_method: 支付方式 native/jsapi/h5
+            pay_method: 支付方式(缺省按渠道映射: alipay→wap, 其余→h5)
 
         Raises:
             KeyError: 钱包未开通
@@ -431,7 +431,11 @@ class WalletService:
                 f"钱包状态异常(当前: {STATUS_NAMES.get(account['status'])}), 无法充值"
             )
 
-        from services.payment_service import PaymentService
+        from services.payment_service import (
+            PaymentService, default_pay_method,
+        )
+        if pay_method is None:
+            pay_method = default_pay_method(pay_channel)
         order_id = f"WD-{user_id}-{int(datetime.now(UTC).timestamp() * 1000)}"
         return await PaymentService().create_pay(
             user_id=user_id,

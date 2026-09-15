@@ -103,8 +103,13 @@ PAY_EXPIRE_SECONDS = 30 * 60
 # 支持的支付渠道
 SUPPORTED_CHANNELS = {"wechat", "alipay", "unionpay", "bank", "aggregate"}
 
-# 支持的支付方式(按渠道细分)
-SUPPORTED_METHODS = {"native", "jsapi", "h5", "page", "transfer"}
+# 支持的支付方式(按渠道细分; wap 为支付宝手机网站支付)
+SUPPORTED_METHODS = {"native", "jsapi", "h5", "wap", "page", "transfer"}
+
+
+def default_pay_method(pay_channel: str) -> str:
+    """渠道默认支付方式(H5 端): 支付宝→wap(手机网站), 其余→h5"""
+    return "wap" if (pay_channel or "").lower() == "alipay" else "h5"
 
 # 场景类型(与已有模块联动; guest_order_pay 为游客扫码付免登录场景)
 SUPPORTED_SCENES = {"order_pay", "wallet_deposit", "agent_purchase",

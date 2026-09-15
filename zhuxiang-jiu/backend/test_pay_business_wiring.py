@@ -136,23 +136,37 @@ async def run_service():
     check("SVIP: 重复回调幂等", cb.get("idempotent") is True)
 
     # ============================================================
-    # 5. real 模式(fail-hard: 不自动落账, 等真实渠道回调)
+    # 5. real 模式(P0-1 渠道执行器: 凭证缺失 fail-hard, 不入账)
     # ============================================================
     os.environ["PAY60_CHANNEL_MODE"] = "real"
-    dp2 = await ws.create_deposit_pay(mid, 300.0, "bank")
-    s4 = await ps.start_pay(dp2["payNo"])
+    dp2 = await ws.create_deposit_pay(mid, 300.0, "wechat")
+    try:
+        await ps.start_pay(dp2["payNo"])
+        check("real: 凭证缺失 fail-hard", False)
+    except ValueError as e:
+        check("real: 凭证缺失 fail-hard", "PAY60_CHANNEL_KEY" in str(e))
     bal3 = (await ws.get_info(mid))["currentBalance"]
-    check("real: start 返回 paying 不入账",
-          s4["status"] == "paying" and bal3 == 500.0,
-          f"status={s4['status']} bal={bal3}")
-    cb = await ps.pay_callback(f"REAL{dp2['payNo']}",
-                               {"channel": "real_gateway"},
-                               pay_no=dp2["payNo"])
-    bal4 = (await ws.get_info(mid))["currentBalance"]
-    check("real: 真实回调后入账 300",
-          (cb.get("dispatch") or {}).get("granted") is True and bal4 == 800.0,
-          f"bal={bal4}")
+    check("real: 无凭证不入账", bal3 == 500.0, f"bal={bal3}")
+    # real + stub 执行器 + 真实回调入账路径见 test_pay_gateway_executor.py
     os.environ.pop("PAY60_CHANNEL_MODE", None)
+
+    # ============================================================
+    # 7. 支付方式渠道映射(A1/A2 前置适配: alipay→wap, 其余→h5)
+    # ============================================================
+    from services.payment_service import default_pay_method
+    check("映射: default_pay_method 单元",
+          default_pay_method("alipay") == "wap"
+          and default_pay_method("wechat") == "h5"
+          and default_pay_method("bank") == "h5")
+    r = await ws.create_deposit_pay(mid, 100.0, "alipay")
+    check("映射: 支付宝充值单 method=wap",
+          r.get("payMethod") == "wap", f"got {r.get('payMethod')}")
+    r = await ws.create_deposit_pay(mid, 100.0, "wechat")
+    check("映射: 微信充值单 method=h5",
+          r.get("payMethod") == "h5", f"got {r.get('payMethod')}")
+    r = await ms.create_svip_pay(mid)   # 默认 wechat
+    check("映射: SVIP 默认 method=h5",
+          r.get("payMethod") == "h5", f"got {r.get('payMethod')}")
 
     # ============================================================
     # 6. 未接线场景(retail 仅记账不分发)
