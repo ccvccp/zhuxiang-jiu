@@ -13,6 +13,7 @@
     - 奖励余额(rewardBalance)挂在钱包模块, 本层不涉及
 """
 
+import contextlib
 import json
 from datetime import datetime, UTC
 
@@ -122,8 +123,13 @@ class PromotionRepository:
             data = await client.hgetall(_k("promotion", "codes", code))
             if not data:
                 return None
-            return {k: (json.loads(v) if v.startswith(("[", "{")) else v)
-                    for k, v in data.items()}
+            record = {k: (json.loads(v) if v.startswith(("[", "{")) else v)
+                      for k, v in data.items()}
+            # boundCount 数值还原(与内存模式行为一致)
+            if "boundCount" in record:
+                with contextlib.suppress(TypeError, ValueError):
+                    record["boundCount"] = int(record["boundCount"])
+            return record
         self._ensure_store()
         return self.store["promotion_codes"].get(code)
 

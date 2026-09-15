@@ -126,7 +126,9 @@ export const PromoAPI = {
     return (res.codes || []).map((c: any): PromoCodeVO => ({
       code: c.code,
       channel: c.channel,
-      boundCount: c.boundCount || 0,
+      // Number 强转——Redis 反序列化 boundCount 为字符串("0"),
+      // "0" 为 truthy, `|| 0` 失效且类型不诚实
+      boundCount: Number(c.boundCount ?? 0) || 0,
     }));
   },
 
