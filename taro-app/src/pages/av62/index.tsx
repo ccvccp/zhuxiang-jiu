@@ -24,8 +24,14 @@ const TABS: { key: Tab; label: string }[] = [
 const pctStr = (v: any): string =>
   v == null ? '—' : `${(Number(v) * 100).toFixed(1)}%`;
 
-const errMsg = (e: any): string =>
-  String(e?.message || e).slice(0, 30);
+/** 错误友好化(大模型三态: 决策面 off/guard_pause 409 → 友好提示;
+ *  观测面不受影响——对齐 trust/zw 页同款降级) */
+const errMsg = (e: any): string => {
+  const msg = String(e?.message || e);
+  return msg.includes('409') || msg.includes('决策面关闭') || msg.includes('AV62_MODE')
+    ? '估值决策功能暂未开放(决策面关闭), 敬请期待'
+    : msg.slice(0, 30);
+};
 
 /** 分布对象 → "k:v · k:v" 行文案 */
 const distStr = (d: any): string =>
