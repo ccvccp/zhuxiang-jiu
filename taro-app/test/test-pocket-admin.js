@@ -189,8 +189,12 @@ const record = (name, ok, detail = '') => {
   console.log('[用户页 pocket]');
   const userCode = fs.readFileSync(POCKET_SRC, 'utf-8');
   const readerCode = fs.readFileSync(READER_SRC, 'utf-8');
-  // 9. 现场拍照(camera only)+指纹链路
-  record('现场拍照(camera only 禁相册)',
+  // 9. 现场拍照(H5 getUserMedia 取景 + 小程序 camera only)+指纹链路
+  record('H5 摄像头取景(getUserMedia——无文件选择入口)',
+    userCode.includes('getUserMedia')
+    && userCode.includes('camOpen') && userCode.includes('captureFrame')
+    && userCode.includes('pocket-cam-box'));
+  record('小程序端 camera only(禁相册)',
     /sourceType:\s*\['camera'\]/.test(userCode)
     && !/sourceType:\s*\['album'/.test(userCode));
   record('拍照→指纹→打卡链路',

@@ -3,7 +3,7 @@
  * 数据来源: 后端 /api/pocket/*
  * 玩法: 张贴海报/车贴 → 每日打卡(AI评估¥2/次) → 满30天领存续奖(海报¥20/车贴¥30)
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
@@ -46,6 +46,11 @@ const PocketPage: React.FC = () => {
   const [scene, setScene] = useState<PocketScene>('hotel');
   const [address, setAddress] = useState('');
   const [photoHash, setPhotoHash] = useState('');
+  // H5 现场拍照层(getUserMedia 实时取景)
+  const [camOpen, setCamOpen] = useState(false);
+  const videoElRef = useRef<any>(null);
+  const streamRef = useRef<any>(null);
+  const onHashRef = useRef<((hash: string) => Promise<void>) | null>(null);
 
   const loadData = async () => {
     try {
@@ -62,10 +67,111 @@ const PocketPage: React.FC = () => {
 
   useEffect(() => { loadData(); }, []);
 
-  // 现场拍照 → 生成指纹(防刷: 图片本体不上传, 仅提交 SHA-256 指纹;
-  // 相册选图禁用——sourceType 仅 camera, 防旧图/网图复用)
+  // ============================================================
+  // 现场拍照 → 生成指纹(防刷: 图片本体不上传, 仅提交 SHA-256 指纹)
+  // H5: getUserMedia 实时取景(电脑调摄像头/手机调相机——
+  //     桌面浏览器 chooseImage 会退化为文件上传框, 破坏现场口径)
+  // 小程序: chooseImage camera only(禁相册)
+  // ============================================================
+
+  /** 关闭摄像头并释放 */
+  const stopCamera = () => {
+    try {
+      streamRef.current?.getTracks?.().forEach((t: any) => t.stop());
+    } catch (_) { /* 已释放 */ }
+    streamRef.current = null;
+    if (videoElRef.current) {
+      videoElRef.current.remove?.();
+      videoElRef.current = null;
+    }
+    setCamOpen(false);
+  };
+
+  /** 打开摄像头实时取景(H5) */
+  const startCamera = async (onHash: (hash: string) => Promise<void>) => {
+    onHashRef.current = onHash;
+    const md = typeof navigator !== 'undefined'
+      && (navigator as any).mediaDevices;
+    if (!md?.getUserMedia) {
+      Taro.showToast({
+        title: '当前环境不支持拍照, 请用手机打开本页现场拍照',
+        icon: 'none', duration: 3000,
+      });
+      return;
+    }
+    try {
+      const stream = await md.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCamOpen(true);
+      // 等 DOM 渲染后挂载 video 元素
+      setTimeout(() => {
+        const box = document.getElementById('pocket-cam-box');
+        if (!box) { stopCamera(); return; }
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        video.style.width = '100%';
+        video.style.height = '100%';
+        video.style.objectFit = 'cover';
+        video.srcObject = stream;
+        videoElRef.current = video;
+        box.appendChild(video);
+        video.play?.().catch(() => { /* autoplay 容错 */ });
+      }, 80);
+    } catch (e: any) {
+      console.warn('[pocket] 摄像头打开失败:', e);
+      Taro.showToast({
+        title: '摄像头打开失败(请允许相机权限), 或用手机现场拍照',
+        icon: 'none', duration: 3000,
+      });
+    }
+  };
+
+  /** 快门: 取景帧 → dataUrl → 指纹 → 回调 */
+  const captureFrame = async () => {
+    const video = videoElRef.current;
+    if (!video || !video.videoWidth) {
+      Taro.showToast({ title: '摄像头未就绪, 请稍候', icon: 'none' });
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d')?.drawImage(
+      video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    const onHash = onHashRef.current;
+    stopCamera();
+    if (!onHash) return;
+    setBusy(true);
+    Taro.showToast({ title: '指纹生成中...', icon: 'none' });
+    try {
+      const hash = await dataUrlToSha256(dataUrl);
+      await onHash(hash);
+    } catch (e: any) {
+      console.warn('[pocket] 打卡失败:', e);
+      Taro.showToast({
+        title: String(e?.message || e || '打卡失败').slice(0, 30),
+        icon: 'none',
+      });
+    } finally {
+      setBusy(false);
+      onHashRef.current = null;
+    }
+  };
+
+  /** 统一拍照入口 */
   const takePhoto = (onHash: (hash: string) => Promise<void>) => {
     if (busy) return;
+    if (process.env.TARO_ENV === 'h5') {
+      startCamera(onHash);
+      return;
+    }
+    // 小程序端: chooseImage 仅相机(禁相册)
     Taro.chooseImage({
       count: 1,
       sizeType: ['compressed'],
@@ -91,6 +197,9 @@ const PocketPage: React.FC = () => {
       fail: () => setBusy(false),
     });
   };
+
+  // 组件卸载时释放摄像头
+  useEffect(() => () => stopCamera(), []);
 
   // 张贴打卡弹层: 现场拍照留存指纹
   const choosePhoto = () => takePhoto(async hash => {
@@ -335,6 +444,21 @@ const PocketPage: React.FC = () => {
             <View className={styles.submitBtn} onClick={handleReport}>
               {busy ? '提交中...' : `张贴打卡 +¥${stats.checkinReward}`}
             </View>
+          </View>
+        </View>
+      )}
+
+      {/* H5 现场拍照层(getUserMedia 实时取景——无文件选择入口) */}
+      {camOpen && (
+        <View className={styles.camMask}>
+          <View className={styles.camHead}>现场拍照打卡</View>
+          <View id="pocket-cam-box" className={styles.camBox} />
+          <View className={styles.camTips}>
+            对准张贴物料拍摄 · 照片仅本地生成指纹, 不上传服务器
+          </View>
+          <View className={styles.camActions}>
+            <View className={styles.camCancel} onClick={stopCamera}>取消</View>
+            <View className={styles.camShutter} onClick={captureFrame}>📸 拍照</View>
           </View>
         </View>
       )}
