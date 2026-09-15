@@ -158,14 +158,23 @@ export const WalletAPI = {
     };
   },
 
-  /** 充值(最低 ¥100, 进入活期) */
-  async deposit(amount: number, payChannel = 'wechat'): Promise<{ balanceAfter: number }> {
+  /** 充值·创建支付单(最低 ¥100; 支付成功回调后自动入账活期) */
+  async deposit(amount: number, payChannel = 'wechat'): Promise<{
+    payNo: string; orderId: string; actualAmount: number;
+    status: string; statusName: string;
+  }> {
     const res = await request<any>({
       url: '/api/wallet/deposit',
       method: 'POST',
       data: { amount, payChannel },
     });
-    return { balanceAfter: res.balanceAfter || 0 };
+    return {
+      payNo: res.payNo || '',
+      orderId: res.orderId || '',
+      actualAmount: Number(res.actualAmount ?? amount),
+      status: res.status || '',
+      statusName: res.statusName || '',
+    };
   },
 
   /** 提现申请(<5000 自动通过, ≥5000 需审核) */

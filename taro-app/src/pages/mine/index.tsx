@@ -4,6 +4,7 @@ import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { MemberAPI } from '@/api/member';
+import { completePay } from '@/api/payment';
 import { OrderAPI, ORDER_STATUS_NAME } from '@/api/order';
 import { AuthAPI } from '@/api/auth';
 import { clearSession, getMemberId, isLoggedIn } from '@/services/auth-service';
@@ -154,6 +155,7 @@ const MinePage: React.FC = () => {
   };
 
   // SVIP 付费(¥99/年): L1-L4 直接购买开通 / L5 续费(周期重开 12 个月)
+  // 流程: 创建支付单 → 渠道支付 → 支付成功回调后自动开通/续费
   const handleSvipPay = () => {
     if (renewing) return;
     const kl = levelInfo?.keepLevel || {};
@@ -171,12 +173,20 @@ const MinePage: React.FC = () => {
         setRenewing(true);
         try {
           const r = await MemberAPI.renewSvip();
-          Taro.showToast({
-            title: (r as any)?.action === 'purchased'
-              ? '已升级竹海 SVIP' : '续费成功, 新周期已生效',
-            icon: 'success',
-          });
-          setRefreshKey(k => k + 1);
+          const fin = await completePay(r.payNo);
+          if (fin.paid) {
+            const action = fin.dispatch?.business?.action;
+            Taro.showToast({
+              title: action === 'purchased'
+                ? '已升级竹海 SVIP' : '续费成功, 新周期已生效',
+              icon: 'success',
+            });
+            setRefreshKey(k => k + 1);
+          } else if (fin.status === 'timeout') {
+            Taro.showToast({ title: '支付确认中, 到账后自动开通', icon: 'none' });
+          } else {
+            Taro.showToast({ title: '支付未完成', icon: 'none' });
+          }
         } catch (e) {
           console.warn('[mine] SVIP 付费失败:', e);
         } finally {

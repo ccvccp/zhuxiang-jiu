@@ -534,16 +534,17 @@ class MemberService:
                                      -w["remainingAmount"]))
         return warnings[:limit]
 
-    async def renew_svip(self, member_id) -> dict:
+    async def renew_svip(self, member_id, pay_no: str = "") -> dict:
         """SVIP 付费开通/续费(¥99/年, 设计文档 4.4 SVIP 特例)
 
         - L5: 续费——周期重开 12 个月(action=renewed);
         - L1-L4: 直接购买开通——升级 L5, 周期起算(action=purchased);
           (协议口径: SVIP 升级条件 = 累计消费 ≥ ¥9999 或付费 ¥99/年)
         - 留痕: svipPurchasedAt/svipPurchasedFromLevel(购买)·
-          svipRenewedAt(续费)
-        - 实际扣费由收款模块下单支付, 本方法只做等级周期处理(测试/演示
-          直接调用; 生产应挂在支付回调成功后)。
+          svipRenewedAt(续费)·svipPayNo(关联支付单)
+        - 铁律: HTTP 层不再直接升级——对外走 create_svip_pay 创建
+          支付单, 支付回调成功(payment_service._dispatch_business)
+          后才调用本方法。测试/演示可直接调用。
 
         Raises:
             KeyError: 会员不存在
@@ -554,15 +555,16 @@ class MemberService:
                 raise KeyError(f"会员 {member_id} 不存在")
             level = member.get("level", 1)
             now_iso = _now_iso()
+            pay_trace = {"svipPayNo": pay_no} if pay_no else {}
 
             if level == 5:
                 # L5 续费: 周期重开
                 await self.member_repo.update_fields(member_id, {
                     "levelUpdatedAt": now_iso, "periodConsume": 0.0,
-                    "svipRenewedAt": now_iso,
+                    "svipRenewedAt": now_iso, **pay_trace,
                 })
-                logger.info("svip_renewed member_id=%r fee=%.2f", member_id,
-                            LEVEL_RENEW_FEE)
+                logger.info("svip_renewed member_id=%r fee=%.2f pay=%s",
+                            member_id, LEVEL_RENEW_FEE, pay_no or "-")
                 return {"success": True, "memberId": member_id,
                         "action": "renewed",
                         "level": 5, "levelName": LEVEL_NAMES[5],
@@ -575,10 +577,10 @@ class MemberService:
             await self.member_repo.update_fields(member_id, {
                 "levelUpdatedAt": now_iso, "periodConsume": 0.0,
                 "svipPurchasedAt": now_iso,
-                "svipPurchasedFromLevel": level,
+                "svipPurchasedFromLevel": level, **pay_trace,
             })
-            logger.info("svip_purchased member_id=%r %s->5 fee=%.2f",
-                        member_id, level, LEVEL_RENEW_FEE)
+            logger.info("svip_purchased member_id=%r %s->5 fee=%.2f pay=%s",
+                        member_id, level, LEVEL_RENEW_FEE, pay_no or "-")
             return {"success": True, "memberId": member_id,
                     "action": "purchased",
                     "fromLevel": level,
@@ -586,6 +588,32 @@ class MemberService:
                     "renewFee": LEVEL_RENEW_FEE,
                     "newPeriodStart": now_iso,
                     "validMonths": LEVEL_VALID_MONTHS}
+
+    async def create_svip_pay(self, member_id, pay_channel: str = "wechat",
+                              pay_method: str = "h5") -> dict:
+        """SVIP 支付单创建(¥99/年, 真实收款前置; 升级由支付回调分发完成)
+
+        流程: 创建支付单(order_type=member_svip) → 前端发起渠道支付
+        → 回调成功 → renew_svip() 开通(L1-L4)/续费(L5)。
+
+        Raises:
+            KeyError: 会员不存在
+        """
+        member = await self.member_repo.get_by_id(member_id)
+        if not member:
+            raise KeyError(f"会员 {member_id} 不存在")
+
+        from services.payment_service import PaymentService
+        order_id = f"SVIP-{member_id}-{int(datetime.now(UTC).timestamp() * 1000)}"
+        return await PaymentService().create_pay(
+            user_id=member_id,
+            order_id=order_id,
+            order_type="member_svip",
+            total_amount=LEVEL_RENEW_FEE,
+            pay_channel=pay_channel,
+            pay_method=pay_method,
+            scene_type="member_svip",
+        )
 
     async def recover_level(self, member_id) -> dict:
         """降级缓冲期恢复(降级后 30 天内补足消费可恢复, 设计文档 智能降级AI层)

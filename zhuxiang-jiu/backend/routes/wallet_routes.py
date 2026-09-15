@@ -173,10 +173,16 @@ async def wallet_deposit(
     req: DepositRequest,
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """充值(资金进入活期钱包, 最低 ¥100)"""
+    """充值·创建支付单(最低 ¥100; 支付成功回调后自动入账活期钱包)
+
+    铁律: 本端点只创建支付单不直接入账——入账由支付回调分发
+    (payment_service._dispatch_business → wallet deposit)完成。
+    返回 payNo 后由前端发起渠道支付(POST /api/payment/{pay_no}/start)。
+    """
     member_id = _require_member_id(x_member_id)
     try:
-        return await _service.deposit(member_id, req.amount, req.payChannel)
+        return await _service.create_deposit_pay(
+            member_id, req.amount, req.payChannel)
     except KeyError as e:
         raise _map_key_error(e) from e
     except ValueError as e:

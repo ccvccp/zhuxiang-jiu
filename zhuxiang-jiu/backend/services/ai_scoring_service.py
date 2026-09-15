@@ -196,6 +196,8 @@ _SCENE_TYPE_FIT = {
     "order_pay":      {"third_party": 1.0, "aggregate": 0.8, "bank": 0.5},
     "wallet_deposit": {"bank": 1.0, "third_party": 0.7, "aggregate": 0.6},
     "agent_purchase": {"bank": 1.0, "aggregate": 0.8, "third_party": 0.6},
+    # SVIP 会员费(¥99/年小额标准品): 第三方扫码最优
+    "member_svip":    {"third_party": 1.0, "aggregate": 0.8, "bank": 0.4},
 }
 
 

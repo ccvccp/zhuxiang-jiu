@@ -335,17 +335,35 @@ def run_http():
     check("HTTP 进度: 200 含 keepLevel", r.status_code == 200
           and "keepLevel" in r.json(), f"{r.status_code} {r.text[:120]}")
 
-    # SVIP 付费: 低级会员直接购买开通(200 purchased)
+    # SVIP 付费: 支付单创建(不再直接升级) → 渠道支付 → 回调分发开通
     r = client.post("/api/member/level/renew-svip", headers=M)
     body = r.json()
-    check("HTTP SVIP: 低级会员购买开通 200", r.status_code == 200
-          and body.get("action") == "purchased" and body.get("level") == 5,
+    pay_no = body.get("payNo", "")
+    check("HTTP SVIP: 购买单创建 200", r.status_code == 200 and pay_no
+          and body.get("status") == "pending"
+          and body.get("actualAmount") == 99.0,
           f"{r.status_code} {r.text[:120]}")
-    # L5 后再次付费 → 续费(renewed)
-    r = client.post("/api/member/level/renew-svip", headers=M)
+    # 未支付不开通(权益只随支付回调发放)
+    r = client.get("/api/member/level", headers=M)
+    check("HTTP SVIP: 未支付不开通", r.json().get("level") == 1,
+          f"level={r.json().get('level')}")
+    # 发起渠道支付(mock 自动落账 + 业务分发开通)
+    r = client.post(f"/api/payment/{pay_no}/start", headers=M)
     body = r.json()
+    d = (body.get("dispatch") or {}).get("business") or {}
+    check("HTTP SVIP: 支付后分发开通", r.status_code == 200
+          and body.get("status") == "paid" and d.get("action") == "purchased",
+          f"{r.status_code} {r.text[:150]}")
+    r = client.get("/api/member/level", headers=M)
+    check("HTTP SVIP: 等级升 L5", r.json().get("level") == 5,
+          f"level={r.json().get('level')}")
+    # L5 后再次付费 → 支付后分发续费(renewed)
+    r = client.post("/api/member/level/renew-svip", headers=M)
+    pay_no2 = r.json().get("payNo", "")
+    r = client.post(f"/api/payment/{pay_no2}/start", headers=M)
+    d2 = (r.json().get("dispatch") or {}).get("business") or {}
     check("HTTP SVIP: L5 续费 renewed", r.status_code == 200
-          and body.get("action") == "renewed", f"{r.status_code}")
+          and d2.get("action") == "renewed", f"{r.status_code}")
     r = client.post("/api/member/level/renew-svip")
     check("HTTP SVIP: 无头 401", r.status_code == 401)
 

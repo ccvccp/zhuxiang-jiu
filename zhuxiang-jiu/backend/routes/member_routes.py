@@ -276,17 +276,18 @@ async def level_expiry_check(
 async def level_renew_svip(
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """SVIP 付费开通/续费(¥99/年, 开新 12 个月周期)
+    """SVIP 购买/续费·创建支付单(¥99/年, 支付成功回调后开通)
 
-    - L5 会员: 续费保级(action=renewed)
-    - L1-L4 会员: 直接购买开通 SVIP, 升级 L5(action=purchased)
+    铁律: 本端点只创建支付单不直接升级——开通/续费由支付回调分发
+    (payment_service._dispatch_business → renew_svip)完成。
+    - L5 会员: 支付成功后续费保级(action=renewed)
+    - L1-L4 会员: 支付成功后购买开通, 升级 L5(action=purchased)
       (协议口径: SVIP 升级条件 = 累计消费 ≥ ¥9999 或付费 ¥99/年)
-
-    生产环境: 实际扣费由收款模块下单支付, 支付成功回调后触发本操作。
+    返回 payNo 后由前端发起渠道支付(POST /api/payment/{pay_no}/start)。
     """
     member_id = _require_member_id(x_member_id)
     try:
-        return await _member_service.renew_svip(member_id)
+        return await _member_service.create_svip_pay(member_id)
     except KeyError as e:
         raise _map_key_error(e) from e
     except ValueError as e:

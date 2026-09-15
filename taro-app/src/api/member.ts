@@ -118,13 +118,23 @@ export const MemberAPI = {
     return toLevelInfo(res);
   },
 
-  /** L5 SVIP 付费续费保级(¥99/年, 续费即开新 12 个月周期; 仅 L5 可调) */
-  async renewSvip(): Promise<any> {
-    return await request<any>({
+  /** SVIP 购买/续费·创建支付单(¥99/年; 支付成功回调后开通/续费) */
+  async renewSvip(): Promise<{
+    payNo: string; orderId: string; actualAmount: number;
+    status: string; statusName: string;
+  }> {
+    const res = await request<any>({
       url: '/api/member/level/renew-svip',
       method: 'POST',
       data: {},
     });
+    return {
+      payNo: res.payNo || '',
+      orderId: res.orderId || '',
+      actualAmount: Number(res.actualAmount ?? 99),
+      status: res.status || '',
+      statusName: res.statusName || '',
+    };
   },
 
   /** 查询积分 */

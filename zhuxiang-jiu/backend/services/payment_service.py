@@ -22,7 +22,9 @@
 注: 跨模块联动(订单/钱包/财务)由路由层或事件回调处理, 本服务保持单一职责
 """
 
+import contextlib
 import logging
+import os
 
 from core.helpers import ts
 from core.locks import get_lock
@@ -106,7 +108,7 @@ SUPPORTED_METHODS = {"native", "jsapi", "h5", "page", "transfer"}
 
 # 场景类型(与已有模块联动; guest_order_pay 为游客扫码付免登录场景)
 SUPPORTED_SCENES = {"order_pay", "wallet_deposit", "agent_purchase",
-                    "guest_order_pay"}
+                    "guest_order_pay", "member_svip"}
 
 # 游客扫码付规则(设计文档 2.7.3/2.7.8: P0 一期核心)
 GUEST_SCENE = "guest_order_pay"
@@ -337,10 +339,16 @@ class PaymentService:
         }
 
     async def start_pay(self, pay_no: str) -> dict:
-        """发起渠道支付(待支付/失败 → 支付中)
+        """发起渠道支付(待支付/失败 → 支付中 → 业务场景按渠道三态落账)
 
-        实际场景: 调用渠道 SDK 生成预支付订单, 返回支付参数
-        本实现: 仅更新状态为 paying
+        业务接线场景(wallet_deposit/member_svip)按渠道三态落账
+        (PAY60_CHANNEL_MODE, 默认 mock):
+            - mock/mock_fallback: 确定性回执自动落账——返回即 paid
+              且携带业务分发结果(dispatch), 与 pay60 渠道适配层
+              同源口径(金额>0 即成功, 回执含渠道参考号);
+            - real: 返回 paying + payParams, 等待真实渠道回调
+              (fail-hard, 凭证经 .env 注入)。
+        未接线场景(order_pay 等)保持 paying 等待渠道回调。
 
         状态机:
             - pending → paying(首次发起)
@@ -364,7 +372,7 @@ class PaymentService:
                 "updatedAt": ts(),
             })
             logger.info("payment_paying payNo=%s channel=%s", pay_no, order["payChannel"])
-            return {
+            result = {
                 "success": True,
                 "payNo": pay_no,
                 "status": PAY_STATUS_PAYING,
@@ -376,6 +384,43 @@ class PaymentService:
                     "expireTime": order.get("expireTime", ""),
                 },
             }
+            # 业务接线场景(钱包充值/SVIP): 前端 UX 需同步完成支付闭环
+            auto_complete = order.get("orderType") in (
+                "wallet_deposit", "member_svip")
+
+        # 渠道三态(PAY60_CHANNEL_MODE 同源口径, 41号 DRIDE 范式),
+        # 仅作用于业务接线场景(wallet_deposit/member_svip):
+        #   - mock(默认)/mock_fallback: 模拟渠道回调自动落账——
+        #     确定性回执(金额>0 即成功), 立即 paid + 业务分发,
+        #     回执含渠道参考号, 全链留痕可审计;
+        #   - real: fail-hard——不自动落账, 等待真实渠道回调
+        #     (凭证经 .env 注入, 未接入前绝不静默降级)。
+        # 未接线场景(order_pay/agent_purchase 等)保持 paying
+        # 等待渠道回调/测试显式回调, 存量语义零影响。
+        # 注意: 必须在锁外调用 pay_callback(其内部获取同一
+        # payment:order:pay:{payNo} 锁, 锁内重入会死锁)。
+        channel_mode = os.environ.get("PAY60_CHANNEL_MODE") or "mock"
+        if auto_complete and channel_mode != "real":
+            cb = await self.pay_callback(
+                channel_trade_no=f"MOCK{pay_no}",
+                callback_content={
+                    "channel": "mock", "mode": channel_mode,
+                    "autoCompleted": True,
+                },
+                pay_no=pay_no,
+            )
+            if cb.get("success"):
+                return {
+                    "success": True,
+                    "payNo": pay_no,
+                    "status": PAY_STATUS_PAID,
+                    "statusName": PAY_STATUS_NAMES[PAY_STATUS_PAID],
+                    "channelMode": channel_mode,
+                    "dispatch": cb.get("dispatch"),
+                    "payParams": result["payParams"],
+                }
+            # 回调未成功(状态竞态等) → 保持 paying 返回, 留待渠道回调/重试
+        return result
 
     async def pay_callback(self, channel_trade_no: str, callback_content: dict,
                             pay_no: str = None) -> dict:
@@ -467,6 +512,9 @@ class PaymentService:
             except Exception:
                 pass
 
+            # 业务分发(paid 终态触发一次; 幂等由状态机+回调锁双保险)
+            dispatch = await self._dispatch_business(order)
+
             return {
                 "success": True,
                 "payNo": pay_no,
@@ -475,7 +523,47 @@ class PaymentService:
                 "userId": order["userId"],
                 "amount": order["actualAmount"],
                 "channel": order["payChannel"],
+                "dispatch": dispatch,
             }
+
+    async def _dispatch_business(self, order: dict) -> dict:
+        """支付成功业务分发(仅 paid 终态触发一次)
+
+        铁律: 权益/资金发放只发生在支付回调成功之后——
+            - wallet_deposit → 钱包活期入账(替代旧直充通道)
+            - member_svip    → SVIP 开通(L1-L4)/续费(L5)
+        其他订单类型仅记账不分发。
+
+        分发失败: fail-loud——记 dispatchError 留痕并返回
+        granted=False(渠道可重推, 幂等锁防重复入账; 管理端
+        可凭 dispatchError 人工补发)。
+        """
+        order_type = order.get("orderType", "")
+        user_id = order.get("userId", "")
+        try:
+            if order_type == "wallet_deposit":
+                from services.wallet_service import WalletService
+                r = await WalletService().deposit(
+                    int(user_id), float(order.get("actualAmount", 0)),
+                    order.get("payChannel", "alipay"),
+                    pay_no=order["payNo"])
+                return {"granted": True, "business": r}
+            if order_type == "member_svip":
+                from services.member_service import MemberService
+                r = await MemberService().renew_svip(
+                    int(user_id), pay_no=order["payNo"])
+                return {"granted": True, "business": r}
+            return {"granted": False, "business": None,
+                    "msg": f"订单类型 {order_type} 无业务分发(仅记账)"}
+        except Exception as e:
+            logger.critical("payment_dispatch_failed payNo=%s type=%s err=%s",
+                            order.get("payNo"), order_type, e)
+            with contextlib.suppress(Exception):
+                await self.repo.update_order_fields(order["payNo"], {
+                    "dispatchError": str(e)[:500],
+                    "updatedAt": ts(),
+                })
+            return {"granted": False, "business": None, "error": str(e)}
 
     async def close_pay(self, pay_no: str, reason: str = "USER_CANCEL") -> dict:
         """关闭支付单(待支付/支付中 → 已关闭)

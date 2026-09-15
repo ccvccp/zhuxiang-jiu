@@ -12,6 +12,7 @@ import {
   WalletAPI, WalletInfoVO, WalletTxVO, WalletDepositVO, WalletRewardVO,
   TX_TYPE_NAME, DEPOSIT_STATUS_NAME, REWARD_STATUS_NAME, DEPOSIT_TIERS,
 } from '@/api/wallet';
+import { completePay } from '@/api/payment';
 
 // 流水类型筛选
 const TX_TABS = [
@@ -103,7 +104,7 @@ const WalletPage: React.FC = () => {
     }
   };
 
-  // 充值
+  // 充值(创建支付单 → 渠道支付 → 回调入账)
   const handleDeposit = async () => {
     if (submitting) return;
     const amount = Number(depAmount);
@@ -113,11 +114,18 @@ const WalletPage: React.FC = () => {
     }
     setSubmitting(true);
     try {
-      await WalletAPI.deposit(amount);
-      Taro.showToast({ title: '充值成功', icon: 'success' });
-      setShowDeposit(false);
-      setDepAmount('');
-      loadAll();
+      const dep = await WalletAPI.deposit(amount);
+      const fin = await completePay(dep.payNo);
+      if (fin.paid) {
+        Taro.showToast({ title: '充值成功', icon: 'success' });
+        setShowDeposit(false);
+        setDepAmount('');
+        loadAll();
+      } else if (fin.status === 'timeout') {
+        Taro.showToast({ title: '支付确认中, 到账后自动更新', icon: 'none' });
+      } else {
+        Taro.showToast({ title: '支付未完成', icon: 'none' });
+      }
     } catch (e) {
       console.warn('[wallet] 充值失败:', e);
     } finally {

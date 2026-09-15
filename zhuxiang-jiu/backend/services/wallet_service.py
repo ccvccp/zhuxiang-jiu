@@ -329,13 +329,19 @@ class WalletService:
     # ============================================================
 
     async def deposit(self, user_id, amount: float,
-                       pay_channel: str = "alipay") -> dict:
-        """充值: 资金进入活期钱包
+                       pay_channel: str = "alipay",
+                       pay_no: str = "") -> dict:
+        """充值入账: 资金进入活期钱包(由支付回调分发调用)
+
+        铁律: HTTP 层不再直接入账——对外充值走 create_deposit_pay
+        创建支付单, 支付回调成功(payment_service._dispatch_business)
+        后才调用本方法入账。测试/演示可直接调用。
 
         Args:
             user_id: 用户ID
             amount: 充值金额(≥ ¥100)
             pay_channel: 支付渠道 alipay/wechat/bank
+            pay_no: 关联支付单号(回调分发传入, 留痕到交易流水)
 
         Raises:
             KeyError: 钱包未开通
@@ -362,7 +368,7 @@ class WalletService:
                 "totalDeposit": float(account.get("totalDeposit", 0)) + amount,
                 "updatedAt": ts(),
             })
-            # 3. 记录交易流水
+            # 3. 记录交易流水(orderId 留痕关联支付单)
             tx_no = await self.wallet_repo.next_tx_no()
             await self.wallet_repo.save_transaction({
                 "txNo": tx_no,
@@ -372,16 +378,17 @@ class WalletService:
                 "amount": amount,
                 "balanceAfter": new_balance,
                 "payChannel": pay_channel,
-                "orderId": "",
+                "orderId": pay_no or "",
                 "depositNo": "",
                 "withdrawNo": "",
                 "status": "success",
-                "description": f"{pay_channel} 充值 ¥{amount:.2f}",
+                "description": f"{pay_channel} 充值 ¥{amount:.2f}" + (
+                    f"(支付单 {pay_no})" if pay_no else ""),
                 "createdAt": ts(),
             })
 
-            logger.info("wallet_deposit user_id=%r amount=%.2f tx=%s",
-                        user_id, amount, tx_no)
+            logger.info("wallet_deposit user_id=%r amount=%.2f tx=%s pay=%s",
+                        user_id, amount, tx_no, pay_no or "-")
             return {
                 "success": True,
                 "userId": user_id,
@@ -392,6 +399,49 @@ class WalletService:
                 "logs": [{"step": "充值", "level": "INFO",
                           "msg": f"充值 ¥{amount:.2f}, 余额 ¥{new_balance:.2f}"}],
             }
+
+    async def create_deposit_pay(self, user_id, amount: float,
+                                 pay_channel: str = "alipay",
+                                 pay_method: str = "h5") -> dict:
+        """充值支付单创建(真实收款前置; 入账由支付回调分发完成)
+
+        流程: 校验钱包状态/金额 → 创建支付单(order_type=wallet_deposit)
+        → 前端发起渠道支付 → 回调成功 → deposit() 入账。
+
+        Args:
+            user_id: 用户ID
+            amount: 充值金额(≥ ¥100)
+            pay_channel: 支付渠道 alipay/wechat/bank
+            pay_method: 支付方式 native/jsapi/h5
+
+        Raises:
+            KeyError: 钱包未开通
+            ValueError: 金额非法 / 钱包冻结 / 渠道非法
+        """
+        if amount < MIN_DEPOSIT:
+            raise ValueError(f"充值金额须 ≥ ¥{MIN_DEPOSIT}")
+        if pay_channel not in ("alipay", "wechat", "bank"):
+            raise ValueError(f"支付渠道非法: {pay_channel}")
+
+        account = await self.wallet_repo.get_account(user_id)
+        if not account:
+            raise KeyError(f"用户 {user_id} 未开通钱包")
+        if account.get("status") != STATUS_ACTIVE:
+            raise ValueError(
+                f"钱包状态异常(当前: {STATUS_NAMES.get(account['status'])}), 无法充值"
+            )
+
+        from services.payment_service import PaymentService
+        order_id = f"WD-{user_id}-{int(datetime.now(UTC).timestamp() * 1000)}"
+        return await PaymentService().create_pay(
+            user_id=user_id,
+            order_id=order_id,
+            order_type="wallet_deposit",
+            total_amount=float(amount),
+            pay_channel=pay_channel,
+            pay_method=pay_method,
+            scene_type="wallet_deposit",
+        )
 
     # ============================================================
     # P0: 奖励余额(推广奖励, 只可购物不可提现)
