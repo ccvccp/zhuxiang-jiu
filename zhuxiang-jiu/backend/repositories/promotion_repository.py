@@ -475,8 +475,15 @@ class PromotionRepository:
 
     @staticmethod
     def _serialize_settings(settings: dict) -> dict:
+        """Redis 写入序列化(bool/None 必须 JSON 化——redis-py 拒绝
+        bool 与 None 直传: "Invalid input of type: 'bool'/None")
+
+        生产实证: settings 键不存在时 get_settings 初始化路径
+        hset(enabled=True) 直接 500, 全部读参数端点不可用。
+        """
         return {k: json.dumps(v, ensure_ascii=False)
-                if isinstance(v, (dict, list)) else v
+                if isinstance(v, (bool, dict, list)) or v is None
+                else v
                 for k, v in settings.items()}
 
     @staticmethod
@@ -488,6 +495,12 @@ class PromotionRepository:
                     result[k] = json.loads(v)
                 except ValueError:
                     result[k] = v
+            elif v == "true":
+                result[k] = True
+            elif v == "false":
+                result[k] = False
+            elif v == "null":
+                result[k] = None
             else:
                 result[k] = v
         return result

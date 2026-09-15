@@ -607,6 +607,25 @@ async def main():
     await TestAdmin().run()
     await TestStats().run()
 
+    # 序列化往返(Redis 模式 bool/None 修复回归——
+    # 生产实证: settings 键不存在时 hset(enabled=True) 直接 500)
+    from repositories.promotion_repository import PromotionRepository
+    roundtrip = PromotionRepository._deserialize_settings(
+        PromotionRepository._serialize_settings({
+            "enabled": True, "eligibleProductIds": None,
+            "level1Threshold": 10, "level1RewardAmount": 20.0,
+        }))
+    record("settings_serialize_roundtrip(bool/None/int/float)",
+           roundtrip["enabled"] is True
+           and roundtrip["eligibleProductIds"] is None
+           and roundtrip["level1Threshold"] == 10
+           and roundtrip["level1RewardAmount"] == 20.0,
+           f"roundtrip={roundtrip}")
+    record("settings_serialize_bool_not_raw(Redis 拒绝 bool 直传)",
+           isinstance(PromotionRepository._serialize_settings(
+               {"enabled": False})["enabled"], str),
+           "bool 未 JSON 化")
+
     print()
     for line in RESULTS:
         print(line)
