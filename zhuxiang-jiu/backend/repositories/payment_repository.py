@@ -246,6 +246,47 @@ class PaymentRepository:
             return await self._redis_list_by_order(order_id, order_type, limit)
         return self._mem_list_by_order(order_id, order_type, limit)
 
+    async def list_active_orders(self, limit: int = 200) -> list[dict]:
+        """列出全局进行中的支付单(pending/paying/failed——超时扫描用)
+
+        超时自动关闭调度器(P2-4)用: 返回所有用户的待支付/支付中/
+        支付失败单, 由调度器按 expireTime 判定超时后关闭。
+        不含 paid/refunding(终态或资金在途不受超时影响)与 closed/refunded。
+
+        Redis 实现: SCAN 支付单键(排除 index 索引键), 兼容无全局
+        索引的历史数据; mem 实现: 全表扫描。
+        """
+        if is_redis_mode():
+            return await self._redis_list_active_orders(limit)
+        return self._mem_list_active_orders(limit)
+
+    def _mem_list_active_orders(self, limit: int) -> list[dict]:
+        self._ensure_store()
+        table = self.store.get("payment_orders", {})
+        active = {PAY_STATUS_PENDING, PAY_STATUS_PAYING, PAY_STATUS_FAILED}
+        result = [o for o in table.values()
+                  if o and o.get("status") in active]
+        result.sort(key=lambda x: x.get("createdAt", ""))
+        return result[:limit]
+
+    async def _redis_list_active_orders(self, limit: int) -> list[dict]:
+        client = await get_redis_client()
+        active = {PAY_STATUS_PENDING, PAY_STATUS_PAYING, PAY_STATUS_FAILED}
+        result = []
+        async for key in client.scan_iter(
+                match=_k("payment", "order", "*"), count=200):
+            key = key.decode() if isinstance(key, bytes) else key
+            if ":index:" in key:
+                continue  # 用户/订单索引集合键, 非支付单哈希
+            data = await client.hgetall(key)
+            if not data:
+                continue
+            o = self._deserialize_order(data)
+            if o.get("status") in active:
+                result.append(o)
+        result.sort(key=lambda x: x.get("createdAt", ""))
+        return result[:limit]
+
     async def find_active_by_order(self, order_id: str,
                                     order_type: str = None) -> dict | None:
         """查找订单的活跃支付单(非 closed/refunded 状态)

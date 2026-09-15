@@ -432,6 +432,9 @@ async def _on_startup():
     # 订单超时自动处理(P1-13, ORDER_TIMEOUT_AUTO=off 可关闭)
     from services.order_timeout_scheduler import start_scheduler as start_order_timeout
     start_order_timeout()
+    # 支付单超时自动关闭(05号收款 P2-4, PAY_EXPIRE_AUTO=off 可关闭)
+    from services.payment_expire_scheduler import start_scheduler as start_payment_expire
+    start_payment_expire()
     # 知识库质量进化调度(P2, KNOWLEDGE_QUALITY_AUTO=off 可关闭)
     from services.knowledge_quality_scheduler import (
         start_scheduler as start_knowledge_quality)
