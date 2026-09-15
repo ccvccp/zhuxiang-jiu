@@ -87,10 +87,29 @@
 from fastapi import APIRouter, Header, HTTPException, Query
 
 from services.trust_scoring_service import TrustProfileService
+from services.trust45_mode_service import (
+    Trust45ModeService, MODE_VALUES,
+)
 
 router = APIRouter(prefix="/api/trust",
                    tags=["信值模块(45号)"])
 _service = TrustProfileService()
+
+
+async def _gate() -> dict:
+    """决策面门控(TRUST45_MODE=off → 409; shadow/assist 放行)
+
+    返回当前灰度态(供响应标记)。
+    """
+    return await Trust45ModeService().require_decision_mode()
+
+
+def _mark(data, mode_state: dict):
+    """shadow/assist 响应留痕标记(trust45Mode 字段——68号同款)"""
+    if isinstance(data, dict) \
+            and mode_state.get("mode") in MODE_VALUES[1:]:
+        data["trust45Mode"] = mode_state["mode"]
+    return data
 
 
 def _require_admin(x_role: str | None):
@@ -120,10 +139,11 @@ async def create_role(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
-        return await _service.create_role(
+        mode = await _gate()
+        return _mark(await _service.create_role(
             str(body.get("role") or ""),
             str(body.get("name") or ""),
-            str(body.get("idNumber") or ""))
+            str(body.get("idNumber") or "")), mode)
     except Exception as e:
         raise _handle(e) from e
 
@@ -141,7 +161,8 @@ async def get_role(trust_id: int):
 async def rescore_role(trust_id: int):
     """触发重算(熔断判定 → 三层评分 → 锁档 → 落盘)"""
     try:
-        return await _service.compute_score(trust_id)
+        mode = await _gate()
+        return _mark(await _service.compute_score(trust_id), mode)
     except Exception as e:
         raise _handle(e) from e
 
@@ -165,7 +186,8 @@ async def record_role_event(
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
-        return await _service.record_event(
+        mode = await _gate()
+        return _mark(await _service.record_event(
             trust_id,
             layer=str(body.get("layer") or ""),
             factor=str(body.get("factor") or ""),
@@ -174,7 +196,7 @@ async def record_role_event(
             source="manual",
             summary=str(body.get("summary") or ""),
             consistency=body.get("consistency"),
-            self_promotion=body.get("selfPromotion"))
+            self_promotion=body.get("selfPromotion")), mode)
     except Exception as e:
         raise _handle(e) from e
 
@@ -191,8 +213,10 @@ async def radar_scan(trust_id: int):
     API 凭证待办。公开域数据天然多源权威——跨源关直判。
     """
     try:
+        mode = await _gate()
         from services.trust_radar_service import TrustRadarService
-        return await TrustRadarService().scan_public(trust_id)
+        return _mark(await TrustRadarService().scan_public(
+            trust_id), mode)
     except Exception as e:
         raise _handle(e) from e
 
@@ -207,11 +231,12 @@ async def register_probe(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_radar_service import TrustRadarService
-        return await TrustRadarService().register_probe(
+        return _mark(await TrustRadarService().register_probe(
             int(body.get("trustId") or 0),
             str(body.get("provider") or ""),
-            str(body.get("scope") or "credit_score"))
+            str(body.get("scope") or "credit_score")), mode)
     except (TypeError, ValueError) as e:
         if "int()" in str(e):
             raise HTTPException(
@@ -247,8 +272,9 @@ async def submit_deposit(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_radar_service import TrustRadarService
-        return await TrustRadarService().submit_deposit(
+        return _mark(await TrustRadarService().submit_deposit(
             int(body.get("trustId") or 0),
             layer=str(body.get("layer") or ""),
             factor=str(body.get("factor") or ""),
@@ -258,7 +284,7 @@ async def submit_deposit(body: dict):
             summary=str(body.get("summary") or ""),
             sources=body.get("sources"),
             voluntary=body.get("voluntary"),
-            verify_mode=str(body.get("verifyMode") or "v1"))
+            verify_mode=str(body.get("verifyMode") or "v1")), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -293,15 +319,16 @@ async def submit_repair(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_repair_service import (
             TrustRepairService,
         )
-        return await TrustRepairService().submit_repair(
+        return _mark(await TrustRepairService().submit_repair(
             int(body.get("trustId") or 0),
             int(body.get("violationEventId") or 0),
             body.get("repairs") or [],
             sources=body.get("sources"),
-            verify_mode=str(body.get("verifyMode") or "v1"))
+            verify_mode=str(body.get("verifyMode") or "v1")), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -337,11 +364,12 @@ async def repair_detail(repair_id: int):
 async def repair_verify(repair_id: int):
     """触发验真(验真明细回放——提交时已同步完成三道关)"""
     try:
+        mode = await _gate()
         from services.trust_repair_service import (
             TrustRepairService,
         )
-        return await TrustRepairService().trigger_verify(
-            repair_id)
+        return _mark(await TrustRepairService().trigger_verify(
+            repair_id), mode)
     except Exception as e:
         raise _handle(e) from e
 
@@ -373,14 +401,15 @@ async def trust_redeem(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_asset_service import (
             TrustAssetService,
         )
-        return await TrustAssetService().redeem(
+        return _mark(await TrustAssetService().redeem(
             int(body.get("trustId") or 0),
             body.get("amount") or 0,
             str(body.get("merchant") or ""),
-            str(body.get("goods") or ""))
+            str(body.get("goods") or "")), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -399,11 +428,12 @@ async def trust_redeem_confirm(
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_asset_service import (
             TrustAssetService,
         )
-        return await TrustAssetService().redeem_confirm(
-            redeem_id, str(body.get("merchant") or ""))
+        return _mark(await TrustAssetService().redeem_confirm(
+            redeem_id, str(body.get("merchant") or "")), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -420,13 +450,14 @@ async def trust_convert(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_asset_service import (
             TrustAssetService,
         )
-        return await TrustAssetService().convert(
+        return _mark(await TrustAssetService().convert(
             int(body.get("trustId") or 0),
             int(body.get("userId") or 0),
-            body.get("creditPoints") or 0)
+            body.get("creditPoints") or 0), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -456,12 +487,13 @@ async def merchant_deposit(body: dict,
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_asset_service import (
             TrustAssetService,
         )
-        return await TrustAssetService().merchant_deposit_add(
+        return _mark(await TrustAssetService().merchant_deposit_add(
             str(body.get("merchant") or ""),
-            body.get("amount") or 0)
+            body.get("amount") or 0), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -567,14 +599,16 @@ async def learning_collect(
 
 @router.post("/learning/run")
 async def learning_run(
-    x_role: str = Header(default="", alias="X-Role")):
+        x_role: str = Header(default="", alias="X-Role")):
     """触发一轮 Hedge 学习(第28档案; 层内宪法护栏)"""
     _require_admin(x_role)
     try:
+        mode = await _gate()
         from services.trust_learning_service import (
             TrustLearningService,
         )
-        return await TrustLearningService().run_learning()
+        return _mark(await TrustLearningService().run_learning(),
+                     mode)
     except Exception as e:
         raise _handle(e) from e
 
@@ -606,13 +640,14 @@ async def apply_patch(body: dict,
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_learning_service import (
             TrustPatchService,
         )
-        return await TrustPatchService().apply_patch(
+        return _mark(await TrustPatchService().apply_patch(
             str(body.get("kind") or ""),
             body.get("payload") or {},
-            str(body.get("note") or ""))
+            str(body.get("note") or "")), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -669,16 +704,17 @@ async def open_redeem_confirm(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_gateway_service import (
             TrustGatewayService,
         )
-        return await TrustGatewayService(
+        return _mark(await TrustGatewayService(
         ).open_redeem_confirm(
             int(body.get("redeemId") or 0),
             str(body.get("merchant") or ""),
             str(body.get("idempotencyKey") or ""),
             str(body.get("nonce") or ""),
-            body.get("timestamp") or 0)
+            body.get("timestamp") or 0), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -696,10 +732,11 @@ async def open_deposits(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_gateway_service import (
             TrustGatewayService,
         )
-        return await TrustGatewayService().open_deposit(
+        return _mark(await TrustGatewayService().open_deposit(
             int(body.get("trustId") or 0),
             layer=str(body.get("layer") or ""),
             factor=str(body.get("factor") or ""),
@@ -707,7 +744,7 @@ async def open_deposits(body: dict):
             peer_baseline=body.get("peerBaseline") or 0,
             evidence=str(body.get("evidence") or ""),
             summary=str(body.get("summary") or ""),
-            sources=body.get("sources"))
+            sources=body.get("sources")), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -724,15 +761,16 @@ async def open_convert(body: dict):
     if not isinstance(body, dict):
         raise HTTPException(status_code=409, detail="请求体需为对象")
     try:
+        mode = await _gate()
         from services.trust_gateway_service import (
             TrustGatewayService,
         )
-        return await TrustGatewayService().open_convert(
+        return _mark(await TrustGatewayService().open_convert(
             int(body.get("trustId") or 0),
             int(body.get("userId") or 0),
             body.get("creditPoints") or 0,
             str(body.get("nonce") or ""),
-            body.get("timestamp") or 0)
+            body.get("timestamp") or 0), mode)
     except (TypeError, ValueError) as e:
         raise _handle(e) from e
     except Exception as e:
@@ -767,6 +805,68 @@ async def open_dashboard():
             TrustGatewayService,
         )
         return await TrustGatewayService().dashboard()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 大模型控制面(三态灰度 + 护栏——观测面永不关停)
+# ============================================================
+
+@router.get("/mode")
+async def trust45_mode():
+    """灰度总览(模式/读取链/护栏/红线公示——只读, 永不关停)"""
+    try:
+        return await Trust45ModeService().status_view()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/mode/override")
+async def trust45_mode_override(
+    mode: str = Query("", description="off/shadow/assist; 空串清除回落 env"),
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """运行时切档(免容器重建, 人工留痕; 空串清除回落环境变量)"""
+    try:
+        operator = f"m{x_member_id}" if x_member_id else "admin"
+        return await Trust45ModeService().set_override(
+            mode, operator=operator)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/mode/guard")
+async def trust45_mode_guard(body: dict,
+                             x_member_id: str = Header(
+                                 default="", alias="X-Member-Id")):
+    """护栏检查(三指标恶化 >3% 自动暂停; baseline 可选覆盖)
+
+    body: {appealOverturnRate, circuitRate, redeemRejectRate,
+           baseline?{同三键}}
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        return await Trust45ModeService().guard_check(
+            body.get("appealOverturnRate"),
+            body.get("circuitRate"),
+            body.get("redeemRejectRate"),
+            baseline=body.get("baseline"))
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/mode/resume")
+async def trust45_mode_resume(
+    note: str = Query("", description="恢复备注(决策留痕)"),
+    x_member_id: str = Header(default="", alias="X-Member-Id"),
+):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    try:
+        operator = f"m{x_member_id}" if x_member_id else "admin"
+        return await Trust45ModeService().resume(
+            operator=operator, note=note)
     except Exception as e:
         raise _handle(e) from e
 

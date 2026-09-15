@@ -25,6 +25,7 @@ os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
+os.environ["TRUST45_MODE"] = "assist"
 os.environ.pop("TRUST_RADAR_MODE", None)
 
 PASS = 0

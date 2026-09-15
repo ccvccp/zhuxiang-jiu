@@ -23,8 +23,6 @@
 
 import hashlib
 
-from core.helpers import ts
-
 from repositories.backend import (
     is_redis_mode, get_redis_client, get_in_memory_store, _k,
 )
@@ -280,3 +278,36 @@ class TrustValue45Repository:
                   and (e.get("ts") or "") >= cutoff]
         result.sort(key=lambda e: (e.get("ts") or ""))
         return result
+
+    # --------------------------------------------------------
+    # 大模型灰度运行时态(三态模式层——68号 xinzhi_grayscale 范式)
+    # --------------------------------------------------------
+
+    TABLE_GRAYSCALE = "trust45_grayscale"
+    STATE_ID = 1   # 全局单例(stateId=1)
+
+    async def load_trust45_state(self) -> dict | None:
+        """读取灰度运行时态(缺省 None——服务层创建)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k(
+                "trust45", self.TABLE_GRAYSCALE, self.STATE_ID))
+            return self._deserialize(data) if data else None
+        self._ensure_store()
+        rec = self.store.setdefault(
+            self.TABLE_GRAYSCALE, {}).get(self.STATE_ID)
+        return dict(rec) if rec else None
+
+    async def save_trust45_state(self, record: dict) -> dict:
+        """保存灰度运行时态({stateId, override, paused, pausedReason,
+        pausedAt, metrics, breachTrail, updatedAt})"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("trust45", self.TABLE_GRAYSCALE, self.STATE_ID),
+                mapping=self._serialize(record))
+            return record
+        self._ensure_store()
+        self.store.setdefault(
+            self.TABLE_GRAYSCALE, {})[self.STATE_ID] = dict(record)
+        return record
