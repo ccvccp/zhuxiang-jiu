@@ -8,7 +8,16 @@ import { OrderAPI, ORDER_STATUS_NAME } from '@/api/order';
 import { AuthAPI } from '@/api/auth';
 import { clearSession, getMemberId, isLoggedIn } from '@/services/auth-service';
 import { PointsAPI } from '@/api/points';
-import { LEVEL_NAME, NEXT_LEVEL_POINTS, statusColor, DANGER_COLOR } from '@/config';
+import { statusColor, DANGER_COLOR } from '@/config';
+
+// 会员等级名(与后端 member_service.LEVEL_NAMES 对齐)
+const MEMBER_LEVEL_NAME: Record<string, string> = {
+  L1: '竹芽会员', L2: '竹叶会员', L3: '竹林会员', L4: '竹海 VIP', L5: '竹海 SVIP',
+};
+// 升下一级所需成长值(累计消费元, 与后端 LEVEL_THRESHOLDS 对齐)
+const NEXT_LEVEL_GROWTH: Record<string, number> = {
+  L1: 500, L2: 3000, L3: 6999, L4: 9999, L5: 9999,
+};
 
 const MinePage: React.FC = () => {
   const [member, setMember] = useState<any>(null);
@@ -53,13 +62,15 @@ const MinePage: React.FC = () => {
       try {
         const m = await MemberAPI.profile();
         // 积分显示以积分账本为准(member.points 为遗留字段, 签到不回写)
-        const accountId = m.id ?? Number(getMemberId());
+        const accountId = Number(m.id || getMemberId() || 0);
         const account = await PointsAPI.account(accountId).catch(() => null);
         setMember({
           id: m.id,
           name: m.name,
           points: account ? account.totalPoints : m.points,
           level: m.level,
+          levelName: m.levelName || '',
+          growthValue: Number(m.growthValue ?? 0),
           role: (m as any).role || 'member',
         });
       } catch (e) {
@@ -144,9 +155,12 @@ const MinePage: React.FC = () => {
   const levelKey = String(member.level || 'L1').toUpperCase().startsWith('L')
     ? String(member.level).toUpperCase()
     : `L${member.level}`;
-  const levelName = LEVEL_NAME[levelKey] || '普通会员';
-  const nextPoints = NEXT_LEVEL_POINTS[levelKey] || 10000;
-  const progress = levelKey === 'L5' ? 100 : Math.min(100, Math.round((member.points / nextPoints) * 100));
+  // 等级名: 优先后端 levelName, 兜底本地字典
+  const levelName = member.levelName || MEMBER_LEVEL_NAME[levelKey] || '竹芽会员';
+  // 升级进度按成长值(累计消费), 与后端 LEVEL_THRESHOLDS 对齐
+  const growth = Number(member.growthValue ?? member.growth ?? 0);
+  const nextGrowth = NEXT_LEVEL_GROWTH[levelKey] || 9999;
+  const progress = levelKey === 'L5' ? 100 : Math.min(100, Math.round((growth / nextGrowth) * 100));
 
   return (
     <View className={styles.page}>
@@ -196,7 +210,7 @@ const MinePage: React.FC = () => {
                 <View className={styles.progressFill} style={{ width: `${progress}%` }} />
               </View>
               <View className={styles.progressText}>
-                距{LEVEL_NAME['L' + (Number(levelKey.slice(1)) + 1)] || '下一等级'}还差 {nextPoints - member.points} 积分
+                距{MEMBER_LEVEL_NAME['L' + (Number(levelKey.slice(1)) + 1)] || '下一等级'}还差 ¥{Math.max(0, nextGrowth - growth)} 累计消费
               </View>
             </View>
           )}

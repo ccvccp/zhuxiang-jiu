@@ -8,8 +8,9 @@ export interface MemberVO {
   name: string;
   phone?: string;
   level: string;
+  levelName?: string;
   points: number;
-  growth?: number;
+  growthValue?: number;
   avatar?: string;
   role?: string;
 }
@@ -55,8 +56,9 @@ export const MemberAPI = {
       name: m.nickname || m.name || '会员',
       phone: m.phone,
       level,
+      levelName: m.levelName || '',
       points: m.points || 0,
-      growth: m.growth,
+      growthValue: Number(m.growthValue ?? m.growth_value ?? m.growth ?? 0),
       avatar: m.avatar,
       role: m.role || 'member',
     };
