@@ -547,6 +547,13 @@ async def _on_startup():
     from services.av62_scheduler import (
         start_scheduler as start_av62_learn)
     start_av62_learn()
+    # 13号·老酒兑换: 新酒议价 48h 无动作自动失效调度
+    # (活跃态议价 updatedAt 超 48h → expired 终态
+    #  +history 留痕+回流钩子; 幂等双保险;
+    #  RECYCLE_NEG_EXPIRE_AUTO=off 关闭, 默认开启)
+    from services.recycle_negotiation_scheduler import (
+        start_scheduler as start_recycle_neg_expire)
+    start_recycle_neg_expire()
 
 
 @app.on_event("shutdown")
@@ -616,6 +623,10 @@ async def _on_shutdown():
     from services.ii58_scheduler import (
         stop_scheduler as stop_ii58_learn)
     stop_ii58_learn()
+    # 13号·老酒兑换: 新酒议价过期自动失效调度器
+    from services.recycle_negotiation_scheduler import (
+        stop_scheduler as stop_recycle_neg_expire)
+    stop_recycle_neg_expire()
     await close_redis_client()
     logger.info("清理完成")
 

@@ -212,6 +212,9 @@ const record = (name, ok, detail = '') => {
 
   console.log('[页面层 pages/recycle]');
   const pageCode = fs.readFileSync(PAGE_SRC, 'utf-8');
+  // 状态字典(过期失效动作留痕展示)
+  record('议价历史动作字典(含超时失效)',
+    pageCode.includes("expire: '超时失效'"));
   // 8. 三视图结构
   record('三视图结构(老酒估价/新酒议价/我的回收)',
     pageCode.includes("'newwine'") && pageCode.includes('renderNewWine')

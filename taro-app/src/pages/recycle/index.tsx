@@ -53,6 +53,7 @@ const NEG_ACTION_NAME: Record<string, string> = {
   ai_counter: 'AI 反价',
   accept: '接受成交',
   reject: '拒绝',
+  expire: '超时失效',
 };
 
 const formatTime = (t?: string): string => {

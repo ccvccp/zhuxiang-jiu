@@ -42,7 +42,8 @@ from repositories.recycle_repository import (
     WINE_AGE_CATEGORY_MAP, WINE_AGE_CATEGORY_NAMES, NEW_WINE_DISCOUNT_RATES,
     # 议价状态
     NEG_STATUS_PENDING, NEG_STATUS_USER_PROPOSED, NEG_STATUS_AI_COUNTER,
-    NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED, MAX_NEGOTIATION_ROUNDS,
+    NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED, NEG_STATUS_EXPIRED,
+    MAX_NEGOTIATION_ROUNDS,
     NEGOTIATION_COEFFICIENT_MIN, NEGOTIATION_COEFFICIENT_MAX,
 )
 from repositories.trace_repository import (
@@ -91,6 +92,8 @@ POINTS_PER_YUAN = 10
 EXCHANGE_REWARD_POINTS = 50
 # 回收奖励积分
 RECYCLE_REWARD_POINTS = 30
+# 议价失效时效: 48h 无动作(以 updatedAt 为基准)自动过期
+NEGOTIATION_EXPIRY_HOURS = 48
 
 
 class RecycleService:
@@ -1137,6 +1140,62 @@ class RecycleService:
             neg["history"] = history
 
             # 回流钩子(13号议价决策门——终态自动反馈)
+            try:
+                from services.ai_feedback_hooks import (
+                    on_negotiation_settled,
+                )
+                await on_negotiation_settled(
+                    neg_id, False, 0.0)
+            except Exception:
+                pass
+            return neg
+
+    async def expire_negotiation(self, neg_id: int,
+                                  expired_by: str = "system") -> dict:
+        """过期议价(调度器 48h 无动作自动失效)
+
+        规则:
+            - 状态须为 pending/user_proposed/ai_counter
+            - 状态置为 expired, history 留痕(expire 动作)
+            - 回流钩子与 reject 一致(议价失败终态)
+
+        Returns:
+            更新后的议价记录
+
+        Raises:
+            KeyError: 议价记录不存在
+            ValueError: 状态非法(终态不可过期)
+        """
+        lock_key = f"recycle:negotiate:{neg_id}"
+        async with get_lock(lock_key):
+            neg = await self.repo.get_negotiation(neg_id)
+            if neg is None:
+                raise KeyError(f"议价记录不存在(negId={neg_id})")
+
+            if neg["status"] not in (NEG_STATUS_PENDING, NEG_STATUS_USER_PROPOSED, NEG_STATUS_AI_COUNTER):
+                raise ValueError(f"议价状态非法(当前{neg['status']}, 须为pending/user_proposed/ai_counter)")
+
+            history = neg.get("history", [])
+            history.append({
+                "round": neg.get("negotiationRound", 0),
+                "role": expired_by,
+                "action": "expire",
+                "reason": "超过48小时无响应, 自动失效",
+                "timestamp": ts(),
+            })
+
+            await self.repo.update_negotiation(neg_id, {
+                "status": NEG_STATUS_EXPIRED,
+                "expiredBy": expired_by,
+                "expiredAt": ts(),
+                "history": history,
+                "updatedAt": ts(),
+            })
+            neg["status"] = NEG_STATUS_EXPIRED
+            neg["expiredBy"] = expired_by
+            neg["history"] = history
+
+            # 回流钩子(13号议价决策门——终态自动反馈, 与 reject 同轨)
             try:
                 from services.ai_feedback_hooks import (
                     on_negotiation_settled,

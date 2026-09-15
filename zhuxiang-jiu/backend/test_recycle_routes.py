@@ -19,6 +19,7 @@
     9. 议价(5):          get_negotiation / list_negotiations / user_propose / ai_counter / accept
     10. 议价拒绝(1):     reject_negotiation
     11. 新酒回收(1):     complete_new_wine_recycle
+    12. 议价过期(1):     expire_negotiation(48h 无动作自动失效+调度扫描)
 """
 
 import asyncio
@@ -46,7 +47,7 @@ from repositories.recycle_repository import (
     WINE_AGE_CURRENT, WINE_AGE_ONE_YEAR, WINE_AGE_TWO_YEARS, WINE_AGE_THREE_YEARS,
     WINE_AGE_CATEGORY_MAP, WINE_AGE_CATEGORY_NAMES, NEW_WINE_DISCOUNT_RATES,
     NEG_STATUS_PENDING, NEG_STATUS_USER_PROPOSED, NEG_STATUS_AI_COUNTER,
-    NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED,
+    NEG_STATUS_ACCEPTED, NEG_STATUS_REJECTED, NEG_STATUS_EXPIRED,
     MAX_NEGOTIATION_ROUNDS,
     NEGOTIATION_COEFFICIENT_MIN, NEGOTIATION_COEFFICIENT_MAX,
 )
@@ -917,6 +918,100 @@ class TestNewWineRecycle:
                f"expected >=2, got {stock}")
 
 
+class TestNegotiationExpiry:
+    """议价过期自动失效测试(48h 无动作 + 调度扫描)"""
+
+    async def run(self, svc):
+        from datetime import datetime as _dt
+        from services.recycle_negotiation_scheduler import (
+            run_expiry_scan,
+        )
+
+        # --- 服务方法层 ---
+        # test 77: 过期成功(pending 态 → expired)
+        neg = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(0), GRADE_A, 1
+        )
+        result = await svc.expire_negotiation(neg["id"])
+        record("test_77_expire_pending",
+               result["status"] == NEG_STATUS_EXPIRED
+               and result.get("expiredBy") == "system",
+               f"expected {NEG_STATUS_EXPIRED}/system, got {result['status']}/{result.get('expiredBy')}")
+
+        # test 78: history 留痕(初始 + expire = 2 条)
+        record("test_78_expire_history",
+               len(result["history"]) == 2
+               and result["history"][-1]["action"] == "expire",
+               f"expected 2/expire, got {len(result['history'])}/{result['history'][-1].get('action')}")
+
+        # test 79: 过期后不能再出价(终态锁定)
+        try:
+            await svc.user_propose_price(neg["id"], round(neg["aiBasePrice"] * 1.05, 2))
+            record("test_79_expired_no_propose", False, "应抛出ValueError")
+        except ValueError:
+            record("test_79_expired_no_propose", True)
+
+        # test 80: 过期后不能再接受(终态锁定)
+        try:
+            await svc.accept_negotiation(neg["id"], "user")
+            record("test_80_expired_no_accept", False, "应抛出ValueError")
+        except ValueError:
+            record("test_80_expired_no_accept", True)
+
+        # test 81: 已过期记录重复过期拒绝(幂等)
+        try:
+            await svc.expire_negotiation(neg["id"])
+            record("test_81_expired_no_reexpire", False, "应抛出ValueError")
+        except ValueError:
+            record("test_81_expired_no_reexpire", True)
+
+        # test 82: 已接受的议价不能过期(终态保护)
+        neg_ok = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(1), GRADE_A, 1
+        )
+        await svc.accept_negotiation(neg_ok["id"], "user")
+        try:
+            await svc.expire_negotiation(neg_ok["id"])
+            record("test_82_accepted_no_expire", False, "应抛出ValueError")
+        except ValueError:
+            record("test_82_accepted_no_expire", True)
+
+        # --- 调度扫描层 ---
+        # test 83: 超时议价被扫描过期(updatedAt 置 49h 前)
+        neg_stale = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_1, 1000.0, _new_purchase_date(0), GRADE_A, 1
+        )
+        stale_at = (_dt.utcnow() - timedelta(hours=49)).isoformat()
+        await svc.repo.update_negotiation(neg_stale["id"], {"updatedAt": stale_at})
+        # 未超时的对照记录(pending, updatedAt=now)
+        neg_fresh = await svc.submit_new_wine_valuation(
+            USER_ID_1, PRODUCT_ID_2, 1000.0, _new_purchase_date(0), GRADE_A, 1
+        )
+        scan = await run_expiry_scan()
+        record("test_83_scan_expires_stale",
+               neg_stale["id"] in scan["expired"]
+               and scan["expiredCount"] == 1,
+               f"expired={scan['expired']}")
+
+        # test 84: 未超时议价不被过期(48h 内)
+        fresh = await svc.repo.get_negotiation(neg_fresh["id"])
+        record("test_84_scan_keeps_fresh",
+               fresh["status"] == NEG_STATUS_PENDING,
+               f"expected {NEG_STATUS_PENDING}, got {fresh['status']}")
+
+        # test 85: 终态记录不被扫描处理(accepted 不在活跃集)
+        accepted = await svc.repo.get_negotiation(neg_ok["id"])
+        record("test_85_scan_ignores_terminal",
+               accepted["status"] == NEG_STATUS_ACCEPTED,
+               f"expected {NEG_STATUS_ACCEPTED}, got {accepted['status']}")
+
+        # test 86: 扫描幂等(已过期记录下轮跳过, expiredCount=0)
+        scan2 = await run_expiry_scan()
+        record("test_86_scan_idempotent",
+               scan2["expiredCount"] == 0,
+               f"expected 0, got {scan2['expiredCount']}")
+
+
 # ============================================================
 # 测试运行
 # ============================================================
@@ -941,6 +1036,7 @@ async def main():
         TestNegotiation,
         TestNegotiationEdgeCases,
         TestNewWineRecycle,
+        TestNegotiationExpiry,
     ]
 
     for cls in test_classes:
