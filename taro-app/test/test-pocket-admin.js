@@ -28,6 +28,8 @@ const ts = require('typescript');
 const API_SRC = path.resolve(__dirname, '..', 'src', 'api', 'pocket.ts');
 const PAGE_SRC = path.resolve(__dirname, '..', 'src', 'pages', 'pocket-admin', 'index.tsx');
 const POCKET_SRC = path.resolve(__dirname, '..', 'src', 'pages', 'pocket', 'index.tsx');
+const READER_SRC = path.resolve(__dirname, '..', 'src', 'utils', 'image-reader.ts');
+const THEME_SRC = path.resolve(__dirname, '..', 'src', 'pages', 'theme-admin', 'index.tsx');
 
 const requests = [];
 
@@ -176,11 +178,53 @@ const record = (name, ok, detail = '') => {
 
   console.log('[用户页 pocket]');
   const userCode = fs.readFileSync(POCKET_SRC, 'utf-8');
-  // 11. 上传链路
+  const readerCode = fs.readFileSync(READER_SRC, 'utf-8');
+  // 11. 上传链路(跨端读取)
   record('打卡照片上传链路(先上传后提交)',
-    userCode.includes('uploadPhoto') && userCode.includes("readFile")
-    && userCode.includes('getFileSystemManager')
+    userCode.includes('uploadPhoto')
     && userCode.indexOf('PocketAPI.uploadPhoto') < userCode.indexOf('PocketAPI.checkin'));
+  record('跨端读取工具(H5 FileReader + 小程序 FSM 双轨)',
+    readerCode.includes('originalFileObj')
+    && readerCode.includes('readAsDataURL')
+    && readerCode.includes('getFileSystemManager')
+    && readerCode.includes("typeof fsm?.readFile !== 'function'"));
+  record('用户页已接入跨端工具(不再直调 FSM)',
+    userCode.includes('chooseImageAsDataUrl')
+    && !userCode.includes('Taro.getFileSystemManager'));
+  const themeCode = fs.readFileSync(THEME_SRC, 'utf-8');
+  record('theme-admin 图标上传同款修复',
+    themeCode.includes('chooseImageAsDataUrl')
+    && !themeCode.includes('Taro.getFileSystemManager'));
+
+  console.log('[行为层 utils/image-reader]');
+  // 15. H5 路径: originalFileObj + FileReader
+  const readerMod = compileTs(READER_SRC, 'image-reader.js');
+  const { chooseImageAsDataUrl } = readerMod;
+  global.FileReader = class {
+    constructor() { this.result = 'data:image/png;base64,AAAA'; }
+    readAsDataURL() { setTimeout(() => this.onload && this.onload(), 0); }
+    onerror = null; onload = null;
+  };
+  const h5Res = await chooseImageAsDataUrl({
+    tempFilePaths: ['blob:https://zxjiu.com/xyz'],
+    tempFiles: [{ path: 'blob:https://zxjiu.com/xyz', size: 100,
+                  originalFileObj: { name: 'a.png' } }],
+  });
+  record('H5 路径(originalFileObj→FileReader→dataUrl)',
+    h5Res === 'data:image/png;base64,AAAA', String(h5Res));
+
+  // 16. FSM 桩防护: getFileSystemManager 返回 Promise(H5 生产桩行为)
+  // 编译后经 taro_1.default 引用(Module._load 拦截返回 { default: mockTaro })
+  const taroPkg = require('@tarojs/taro');
+  taroPkg.default.getFileSystemManager = () => Promise.resolve({});
+  let rejected = null;
+  await chooseImageAsDataUrl({
+    tempFilePaths: ['wxfile://tmp/a.jpg'],
+    tempFiles: [{ path: 'wxfile://tmp/a.jpg', size: 100 }],
+  }).catch(e => { rejected = e; });
+  record('FSM 桩防护(Promise 无 readFile→受控 reject)',
+    rejected && rejected.name === 'ImageReadError', String(rejected));
+  delete taroPkg.default.getFileSystemManager;
 
   console.log('\n通过: ' + PASS + ' / 失败: ' + FAIL + ' / 总计: ' + (PASS + FAIL));
   process.exit(FAIL === 0 ? 0 : 1);

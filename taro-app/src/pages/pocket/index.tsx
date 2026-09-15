@@ -16,6 +16,7 @@ import {
   SCENE_NAME,
   SCENE_ICON,
 } from '@/api/pocket';
+import { chooseImageAsDataUrl } from '@/utils/image-reader';
 
 // 场景筛选
 const FILTERS = [
@@ -62,41 +63,28 @@ const PocketPage: React.FC = () => {
   useEffect(() => { loadData(); }, []);
 
   // 选择打卡照片 → 读 base64 → 上传服务器(落库可审计, 修复本地临时路径缺陷)
+  // H5 端 getFileSystemManager 不可用(Taro 桩), 走 FileReader(见 utils/image-reader)
   const choosePhoto = () => {
     if (busy) return;
     Taro.chooseImage({
       count: 1,
       sizeType: ['compressed'],
       sourceType: ['album', 'camera'],
-      success: res => {
-        const path = res.tempFilePaths?.[0];
-        if (!path) return;
+      success: async res => {
+        if (!res.tempFilePaths?.[0] && !res.tempFiles?.length) return;
         setBusy(true);
         Taro.showToast({ title: '照片上传中...', icon: 'none' });
-        const fsm = Taro.getFileSystemManager();
-        fsm.readFile({
-          filePath: path,
-          encoding: 'base64',
-          success: async readRes => {
-            try {
-              const ext = (path.split('.').pop() || 'jpg').toLowerCase();
-              const mime = ext === 'jpg' ? 'jpeg' : ext;
-              const url = await PocketAPI.uploadPhoto(
-                `data:image/${mime};base64,${readRes.data}`);
-              setPhotoUrl(url);
-              Taro.showToast({ title: '照片已上传', icon: 'success' });
-            } catch (e) {
-              console.warn('[pocket] 照片上传失败:', e);
-              Taro.showToast({ title: '照片上传失败, 请重试', icon: 'none' });
-            } finally {
-              setBusy(false);
-            }
-          },
-          fail: () => {
-            setBusy(false);
-            Taro.showToast({ title: '读取照片失败', icon: 'none' });
-          },
-        });
+        try {
+          const dataUrl = await chooseImageAsDataUrl(res as any);
+          const url = await PocketAPI.uploadPhoto(dataUrl);
+          setPhotoUrl(url);
+          Taro.showToast({ title: '照片已上传', icon: 'success' });
+        } catch (e) {
+          console.warn('[pocket] 照片上传失败:', e);
+          Taro.showToast({ title: '照片上传失败, 请重试', icon: 'none' });
+        } finally {
+          setBusy(false);
+        }
       },
     });
   };
@@ -128,7 +116,7 @@ const PocketPage: React.FC = () => {
     }
   };
 
-  // 每日打卡(拍照 → 上传 → 打卡)
+  // 每日打卡(拍照 → 上传 → 打卡; H5 走 FileReader 跨端读取)
   const handleCheckin = (site: PocketSiteVO) => {
     if (busy) return;
     setBusy(true);
@@ -136,34 +124,23 @@ const PocketPage: React.FC = () => {
       count: 1,
       sizeType: ['compressed'],
       sourceType: ['album', 'camera'],
-      success: res => {
-        const path = res.tempFilePaths?.[0];
-        if (!path) { setBusy(false); return; }
+      success: async res => {
+        if (!res.tempFilePaths?.[0] && !res.tempFiles?.length) {
+          setBusy(false);
+          return;
+        }
         Taro.showToast({ title: '照片上传中...', icon: 'none' });
-        const fsm = Taro.getFileSystemManager();
-        fsm.readFile({
-          filePath: path,
-          encoding: 'base64',
-          success: async readRes => {
-            try {
-              const ext = (path.split('.').pop() || 'jpg').toLowerCase();
-              const mime = ext === 'jpg' ? 'jpeg' : ext;
-              const url = await PocketAPI.uploadPhoto(
-                `data:image/${mime};base64,${readRes.data}`);
-              await PocketAPI.checkin(site.siteId, url);
-              Taro.showToast({ title: `打卡成功 +¥${stats.checkinReward}`, icon: 'success' });
-              loadData();
-            } catch (err) {
-              console.warn('[pocket] 打卡失败:', err);
-            } finally {
-              setBusy(false);
-            }
-          },
-          fail: () => {
-            setBusy(false);
-            Taro.showToast({ title: '读取照片失败', icon: 'none' });
-          },
-        });
+        try {
+          const dataUrl = await chooseImageAsDataUrl(res as any);
+          const url = await PocketAPI.uploadPhoto(dataUrl);
+          await PocketAPI.checkin(site.siteId, url);
+          Taro.showToast({ title: `打卡成功 +¥${stats.checkinReward}`, icon: 'success' });
+          loadData();
+        } catch (err) {
+          console.warn('[pocket] 打卡失败:', err);
+        } finally {
+          setBusy(false);
+        }
       },
       fail: () => setBusy(false),
     });

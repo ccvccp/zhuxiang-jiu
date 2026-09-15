@@ -13,6 +13,7 @@ import { SiteThemeAPI, ThemeVO, ThemeColorsVO, ThemeAiCheckVO, ThemeLogVO, IconI
 import { MemberAPI } from '@/api/member';
 import { applyActiveTheme } from '@/services/theme-service';
 import { getSession, setSession } from '@/services/auth-service';
+import { chooseImageAsDataUrl } from '@/utils/image-reader';
 
 /** 图标值是否为图片(data URL / http) */
 const isImageIcon = (v: string): boolean =>
@@ -255,46 +256,34 @@ const ThemeAdminPage: React.FC = () => {
   };
 
   // 从相册/拍照选图 → 读 base64 → 上传图标库(applyTo: null=仅入库, 有值=应用到图标位)
+  // H5 端 getFileSystemManager 不可用(Taro 桩), 走 FileReader(见 utils/image-reader)
   const handleUploadIcon = (applyTo: string | null) => {
     if (uploading) return;
     Taro.chooseImage({
       count: 1,
       sizeType: ['compressed'],
       sourceType: ['album', 'camera'],
-      success: res => {
-        const path = res.tempFilePaths?.[0];
-        if (!path) return;
+      success: async res => {
+        if (!res.tempFilePaths?.[0] && !res.tempFiles?.length) return;
         setUploading(true);
-        const fsm = Taro.getFileSystemManager();
-        fsm.readFile({
-          filePath: path,
-          encoding: 'base64',
-          success: async readRes => {
-            try {
-              const ext = (path.split('.').pop() || 'png').toLowerCase();
-              const mime = ext === 'jpg' ? 'jpeg' : ext;
-              const dataUrl = `data:image/${mime};base64,${readRes.data}`;
-              const icon = await SiteThemeAPI.uploadIcon(dataUrl);
-              setIconLibrary(prev => [...prev, icon]);
-              Taro.showToast({ title: '上传成功', icon: 'success' });
-              // 应用到指定图标位(编辑器内触发时)
-              if (applyTo && editor) {
-                const grid = { ...editor.quickGrid };
-                grid[applyTo] = icon.url;
-                setEditor({ ...editor, quickGrid: grid });
-                setIconPickerKey(null);
-              }
-            } catch (e) {
-              console.warn('[theme-admin] 图标上传失败:', e);
-            } finally {
-              setUploading(false);
-            }
-          },
-          fail: () => {
-            setUploading(false);
-            Taro.showToast({ title: '读取图片失败', icon: 'none' });
-          },
-        });
+        try {
+          const dataUrl = await chooseImageAsDataUrl(res as any);
+          const icon = await SiteThemeAPI.uploadIcon(dataUrl);
+          setIconLibrary(prev => [...prev, icon]);
+          Taro.showToast({ title: '上传成功', icon: 'success' });
+          // 应用到指定图标位(编辑器内触发时)
+          if (applyTo && editor) {
+            const grid = { ...editor.quickGrid };
+            grid[applyTo] = icon.url;
+            setEditor({ ...editor, quickGrid: grid });
+            setIconPickerKey(null);
+          }
+        } catch (e) {
+          console.warn('[theme-admin] 图标上传失败:', e);
+          Taro.showToast({ title: '读取/上传图片失败', icon: 'none' });
+        } finally {
+          setUploading(false);
+        }
       },
     });
   };
