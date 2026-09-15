@@ -695,6 +695,14 @@ const MinePage: React.FC = () => {
             </View>
             <View className={styles.adminEntryArrow}>›</View>
           </View>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/member73-trust/index' })}>
+            <View className={styles.adminEntryIcon}>🛡️</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>信任面板</View>
+              <View className={styles.adminEntryDesc}>AI 为我做了什么 · 授权管理 · 画像遗忘权</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
           <View className={styles.privacyDesc}>
             根据《个人信息保护法》，您有权查看、修改和删除个人信息。
           </View>
