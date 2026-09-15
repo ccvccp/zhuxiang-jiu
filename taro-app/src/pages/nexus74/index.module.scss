@@ -1,0 +1,411 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+.tabs {
+  display: flex;
+  background: $color-bg-card;
+  border-bottom: 1px solid rgba($color-text-primary, 0.06);
+}
+
+.tab {
+  flex: 1;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  position: relative;
+}
+
+.tabActive {
+  color: $color-primary;
+  font-weight: $font-weight-bold;
+
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 48rpx;
+    height: 6rpx;
+    border-radius: 6rpx;
+    background: $color-primary;
+  }
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.cardTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-md;
+}
+
+.sectionCount {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.empty {
+  padding: $spacing-xl 0;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+// ============================================
+// 总览
+// ============================================
+.modeCard {
+  background: linear-gradient(135deg, $color-primary, rgba($color-primary, 0.78));
+  border-radius: $radius-lg;
+  padding: $spacing-xl $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card-hover;
+}
+
+.modeLabel {
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.85);
+}
+
+.modeValue {
+  margin-top: $spacing-xs;
+  font-size: 52rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.modeMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.75);
+  line-height: 1.7;
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  padding: $spacing-sm 0;
+  font-size: $font-size-sm;
+}
+
+.kvKey {
+  color: $color-text-secondary;
+}
+
+.kvVal {
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.quotaBar {
+  height: 12rpx;
+  border-radius: 12rpx;
+  background: rgba($color-text-primary, 0.08);
+  overflow: hidden;
+  margin-top: $spacing-xs;
+}
+
+.quotaFill {
+  height: 100%;
+  border-radius: 12rpx;
+  background: $color-primary;
+}
+
+.silenceWarn {
+  margin-top: $spacing-sm;
+  padding: $spacing-md;
+  background: rgba(#e6a23c, 0.08);
+  border-radius: $radius-md;
+  font-size: $font-size-xs;
+  color: #b88230;
+}
+
+// ============================================
+// 素材/合规
+// ============================================
+.sourceItem {
+  padding: $spacing-md 0;
+  border-bottom: 1px solid rgba($color-text-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.sourceTitle {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.sourceMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.6;
+}
+
+.intentBadge {
+  display: inline-block;
+  padding: 2rpx 16rpx;
+  margin-right: $spacing-sm;
+  border-radius: $radius-round;
+  background: rgba($color-primary, 0.1);
+  color: $color-primary;
+  font-size: $font-size-xs;
+}
+
+.stateBadge {
+  display: inline-block;
+  padding: 4rpx 20rpx;
+  border-radius: $radius-round;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.statePass {
+  background: rgba($color-success, 0.12);
+  color: $color-success;
+}
+
+.stateReview {
+  background: rgba(#e6a23c, 0.12);
+  color: #b88230;
+}
+
+.stateBlock {
+  background: rgba(#f56c6c, 0.1);
+  color: #f56c6c;
+}
+
+.hitItem {
+  margin-top: $spacing-sm;
+  padding: $spacing-md;
+  background: rgba(#f56c6c, 0.05);
+  border-radius: $radius-md;
+  font-size: $font-size-xs;
+  color: #c45656;
+  line-height: 1.6;
+}
+
+.checkNote {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: 1.5;
+}
+
+.fixBtn {
+  margin-top: $spacing-md;
+  height: 64rpx;
+  border-radius: $radius-button;
+  background: rgba($color-primary, 0.08);
+  color: $color-primary;
+  font-size: $font-size-sm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+// ============================================
+// 适配发布
+// ============================================
+.selectRow {
+  display: flex;
+  gap: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.selectCol {
+  flex: 1;
+}
+
+.selectLabel {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  margin-bottom: $spacing-sm;
+}
+
+.pillGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.pill {
+  padding: 8rpx 24rpx;
+  border-radius: $radius-round;
+  background: $color-bg-page;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.pillActive {
+  background: $color-primary;
+  color: $color-text-white;
+}
+
+.primaryBtn {
+  height: 80rpx;
+  border-radius: $radius-button;
+  background: $color-primary;
+  color: $color-text-white;
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: $spacing-md;
+}
+
+.btnDisabled {
+  background: rgba($color-text-primary, 0.12);
+  color: $color-text-secondary;
+}
+
+.adaptPreview {
+  margin-top: $spacing-md;
+  padding: $spacing-lg;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+}
+
+.adaptTitle {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  font-weight: $font-weight-bold;
+  line-height: 1.6;
+}
+
+.adaptSummary {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: 1.7;
+}
+
+.pubItem {
+  padding: $spacing-md 0;
+  border-bottom: 1px solid rgba($color-text-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.pubHead {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-wrap: wrap;
+}
+
+.tierBadge {
+  padding: 2rpx 14rpx;
+  border-radius: $radius-round;
+  font-size: $font-size-xs;
+  background: rgba($color-info, 0.12);
+  color: $color-info;
+}
+
+.miniBtn {
+  height: 52rpx;
+  padding: 0 20rpx;
+  border-radius: $radius-button;
+  font-size: $font-size-xs;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.miniPrimary {
+  background: rgba($color-primary, 0.08);
+  color: $color-primary;
+}
+
+.miniWarn {
+  background: rgba(#e6a23c, 0.1);
+  color: #b88230;
+}
+
+// ============================================
+// 指标复盘
+// ============================================
+.metricGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-md;
+}
+
+.metricItem {
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+.metricValue {
+  font-size: 44rpx;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.metricLabel {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.retroItem {
+  padding: $spacing-md 0;
+  border-bottom: 1px solid rgba($color-text-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.adviceItem {
+  margin-top: $spacing-sm;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+  line-height: 1.6;
+}
+
+.footerNote {
+  padding: $spacing-lg 0 $spacing-xl;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}

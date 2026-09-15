@@ -522,6 +522,14 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/nexus74/index' })}>
+              <View className={styles.adminEntryIcon}>📡</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>NexusFlow 发布工作台</View>
+                <View className={styles.adminEntryDesc}>素材合规 · 平台适配 · 发布管理 · 指标复盘</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
             <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/theme-admin/index' })}>
               <View className={styles.adminEntryIcon}>🎨</View>
               <View className={styles.adminEntryInfo}>
