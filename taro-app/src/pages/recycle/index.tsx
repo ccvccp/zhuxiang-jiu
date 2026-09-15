@@ -8,8 +8,8 @@ import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import {
-  RecycleAPI, ValuationVO, ApplicationVO,
-  CONDITION_GRADES, appStatusName,
+  RecycleAPI, ValuationVO, ApplicationVO, NegotiationVO,
+  CONDITION_GRADES, appStatusName, negStatusName,
 } from '@/api/recycle';
 import { ProductAPI, ProductVO } from '@/api/product';
 import { MemberAPI } from '@/api/member';
@@ -35,14 +35,33 @@ const TYPE_NAME: Record<string, string> = {
   recycle: '折现回收',
 };
 
+// 议价状态 → 徽标样式
+const NEG_CLS: Record<string, string> = {
+  pending: 'processing',
+  user_proposed: 'pending',
+  ai_counter: 'pending',
+  accepted: 'resolved',
+  rejected: 'closed',
+  expired: 'closed',
+};
+
+// 议价历史动作 → 显示名
+const NEG_ACTION_NAME: Record<string, string> = {
+  initial_valuation: 'AI 基准估价',
+  user_propose: '您出价',
+  ai_counter: 'AI 反价',
+  accept: '接受成交',
+  reject: '拒绝',
+};
+
 const formatTime = (t?: string): string => {
   if (!t) return '';
   return t.slice(0, 10);
 };
 
 const RecyclePage: React.FC = () => {
-  // 视图: valuation=估价表单, mine=我的回收
-  const [view, setView] = useState<'valuation' | 'mine'>('valuation');
+  // 视图: valuation=估价表单, newwine=新酒议价, mine=我的回收
+  const [view, setView] = useState<'valuation' | 'newwine' | 'mine'>('valuation');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   // 估价表单
@@ -63,6 +82,16 @@ const RecyclePage: React.FC = () => {
   const [appType, setAppType] = useState<'exchange' | 'recycle'>('exchange');
   const [newProductIdx, setNewProductIdx] = useState(0);
   const [payoutAccount, setPayoutAccount] = useState('');
+  // 新酒议价
+  const [negs, setNegs] = useState<NegotiationVO[]>([]);
+  const [nwPrice, setNwPrice] = useState('');
+  const [nwDate, setNwDate] = useState('');
+  const [nwGrade, setNwGrade] = useState('A');
+  const [nwBottles, setNwBottles] = useState(1);
+  const [negPanel, setNegPanel] = useState<NegotiationVO | null>(null);
+  const [proposePrice, setProposePrice] = useState('');
+  const [payoutPanel, setPayoutPanel] = useState<NegotiationVO | null>(null);
+  const [negPayoutAccount, setNegPayoutAccount] = useState('');
 
   // 加载产品与会员等级
   useEffect(() => {
@@ -108,6 +137,153 @@ const RecyclePage: React.FC = () => {
   useEffect(() => {
     if (view === 'mine') loadMine();
   }, [view, loadMine]);
+
+  // 新酒议价数据
+  const loadNegs = useCallback(async () => {
+    try {
+      const list = await RecycleAPI.myNegotiations()
+        .catch(() => [] as NegotiationVO[]);
+      setNegs(list);
+    } catch (e) {
+      console.warn('[recycle] 议价记录加载失败:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view === 'newwine') loadNegs();
+  }, [view, loadNegs]);
+
+  // ============ 新酒议价动作 ============
+
+  /** 提交新酒估价(自动创建议价, AI 给基准价) */
+  const handleNewWineValuate = async () => {
+    if (submitting) return;
+    if (products.length === 0) {
+      Taro.showToast({ title: '暂无可选产品', icon: 'none' });
+      return;
+    }
+    const p = Number(nwPrice);
+    if (!p || p <= 0) {
+      Taro.showToast({ title: '请输入购买原价', icon: 'none' });
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nwDate)) {
+      Taro.showToast({ title: '请选择购买日期', icon: 'none' });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const neg = await RecycleAPI.submitNewWineValuation({
+        productId: products[productIdx].id,
+        purchasePrice: p,
+        purchaseDate: nwDate,
+        conditionGrade: nwGrade,
+        bottleCount: nwBottles,
+      });
+      Taro.showToast({
+        title: `AI 基准价 ¥${neg.aiBasePrice.toFixed(2)}`,
+        icon: 'none', duration: 2500,
+      });
+      setNwPrice(''); setNwDate(''); setNwGrade('A'); setNwBottles(1);
+      await loadNegs();
+      openNegPanel(neg);
+    } catch (e) {
+      console.warn('[recycle] 新酒估价失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /** 打开议价详情弹层 */
+  const openNegPanel = (n: NegotiationVO) => {
+    setNegPanel(n);
+    setProposePrice(n.currentPrice ? n.currentPrice.toFixed(0) : '');
+  };
+
+  /** 用户出价(±10% 窗口) */
+  const handlePropose = async () => {
+    if (submitting || !negPanel) return;
+    const p = Number(proposePrice);
+    if (!p || p <= 0) {
+      Taro.showToast({ title: '请输入出价金额', icon: 'none' });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const updated = await RecycleAPI.proposePrice(negPanel.id, p);
+      Taro.showToast({ title: '出价已提交', icon: 'success' });
+      setNegPanel(updated);
+      await loadNegs();
+    } catch (e) {
+      console.warn('[recycle] 出价失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /** 接受当前价(议价成功) */
+  const handleAcceptNeg = async (n: NegotiationVO) => {
+    if (submitting) return;
+    const res = await Taro.showModal({
+      title: '接受议价',
+      content: `按当前价 ¥${n.currentPrice.toFixed(2)} 成交? 成交后可发起回收打款。`,
+    });
+    if (!res.confirm) return;
+    setSubmitting(true);
+    try {
+      await RecycleAPI.acceptNegotiation(n.id);
+      Taro.showToast({ title: '议价成功', icon: 'success' });
+      setNegPanel(null);
+      await loadNegs();
+    } catch (e) {
+      console.warn('[recycle] 接受议价失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /** 拒绝议价 */
+  const handleRejectNeg = async (n: NegotiationVO) => {
+    if (submitting) return;
+    const res = await Taro.showModal({
+      title: '拒绝议价',
+      content: '拒绝后本次议价终止, 确认拒绝?',
+    });
+    if (!res.confirm) return;
+    setSubmitting(true);
+    try {
+      await RecycleAPI.rejectNegotiation(n.id, '用户放弃');
+      Taro.showToast({ title: '已拒绝', icon: 'none' });
+      setNegPanel(null);
+      await loadNegs();
+    } catch (e) {
+      console.warn('[recycle] 拒绝议价失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /** 完成议价回收(打款) */
+  const handleNegRecycle = async () => {
+    if (submitting || !payoutPanel) return;
+    if (!negPayoutAccount.trim()) {
+      Taro.showToast({ title: '请填写收款账户', icon: 'none' });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await RecycleAPI.recycleNewWine(
+        payoutPanel.id, 'wechat', negPayoutAccount.trim());
+      Taro.showToast({ title: '回收完成, 待打款', icon: 'success' });
+      setPayoutPanel(null);
+      setNegPayoutAccount('');
+      await loadNegs();
+    } catch (e) {
+      console.warn('[recycle] 议价回收失败:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // 提交估价
   const handleValuate = async () => {
@@ -249,6 +425,261 @@ const RecyclePage: React.FC = () => {
     }
   };
 
+  // ============ 新酒议价视图 ============
+  const renderNewWine = () => (
+    <View className={styles.page}>
+      <NavBar title="新酒议价回收" />
+      <ScrollView scrollY className={styles.scrollView}>
+        <View className={styles.heroCard}>
+          <View className={styles.heroTitle}>新酒议价回收 · AI 智能议价</View>
+          <View className={styles.heroDesc}>
+            酒龄 0-3 年 · AI 基准价 ±10% 议价 · 最多 3 轮 · 成交后折现打款
+          </View>
+        </View>
+
+        {/* 新酒估价表单 */}
+        <View className={styles.card}>
+          <View className={styles.cardTitle}>新酒信息</View>
+          {products.length > 0 ? (
+            <Picker
+              mode="selector"
+              range={products.map(p => `${p.name} · ¥${p.price}`)}
+              value={productIdx}
+              onChange={(e) => setProductIdx(Number(e.detail.value))}
+            >
+              <View className={styles.pickerBox}>
+                <Text className={styles.pickerLabel}>新酒产品</Text>
+                <Text className={styles.pickerValue}>{products[productIdx].name} ›</Text>
+              </View>
+            </Picker>
+          ) : (
+            <View className={styles.pickerBox}>
+              <Text className={styles.pickerLabel}>新酒产品</Text>
+              <Text className={styles.pickerValue}>加载中...</Text>
+            </View>
+          )}
+
+          <View className={styles.formRow}>
+            <Text className={styles.formLabel}>购买原价</Text>
+            <Input
+              className={styles.formInput}
+              type="digit"
+              value={nwPrice}
+              onInput={(e) => setNwPrice(e.detail.value)}
+              placeholder="¥ 0.00"
+              placeholderClass={styles.placeholder}
+            />
+          </View>
+
+          <Picker
+            mode="date"
+            value={nwDate}
+            onChange={(e) => setNwDate(e.detail.value)}
+            end={new Date().toISOString().slice(0, 10)}
+          >
+            <View className={styles.pickerBox}>
+              <Text className={styles.pickerLabel}>购买日期</Text>
+              <Text className={styles.pickerValue}>{nwDate || '选择日期(0-3年内) ›'}</Text>
+            </View>
+          </Picker>
+
+          <View className={styles.formLabel2}>品质分级</View>
+          <View className={styles.typeGrid}>
+            {CONDITION_GRADES.map(g => (
+              <View
+                key={g.key}
+                className={`${styles.typeItem} ${nwGrade === g.key ? styles.typeActive : ''}`}
+                onClick={() => setNwGrade(g.key)}
+              >
+                <View className={styles.typeLabel}>{g.label}</View>
+                <View className={styles.typeDesc}>{g.desc}</View>
+              </View>
+            ))}
+          </View>
+
+          <View className={styles.formLabel2}>回收数量</View>
+          <View className={styles.typeGrid}>
+            {[1, 2, 3].map(b => (
+              <View
+                key={b}
+                className={`${styles.typeItem} ${nwBottles === b ? styles.typeActive : ''}`}
+                onClick={() => setNwBottles(b)}
+              >
+                <View className={styles.typeLabel}>{b} 瓶</View>
+              </View>
+            ))}
+          </View>
+
+          <View className={styles.submitBtn} onClick={handleNewWineValuate}>
+            {submitting ? '估价中...' : 'AI 估价并发起议价'}
+          </View>
+        </View>
+
+        {/* 我的议价记录 */}
+        <View className={styles.card}>
+          <View className={styles.cardTitle}>我的议价({negs.length})</View>
+          {negs.length === 0 ? (
+            <View className={styles.empty}>
+              <View className={styles.emptyIcon}>🤝</View>
+              <View>暂无议价记录, 提交新酒估价后开始议价</View>
+            </View>
+          ) : (
+            negs.map(n => (
+              <View key={n.id} className={styles.appRow}>
+                <View className={styles.appLeft}>
+                  <View className={styles.appType}>
+                    {n.productId} · {n.wineAgeCategoryName} · {n.bottleCount} 瓶
+                  </View>
+                  <View className={styles.valMeta}>
+                    AI 基准 ¥{n.aiBasePrice.toFixed(2)} · 当前 ¥{n.currentPrice.toFixed(2)}
+                  </View>
+                  <View className={styles.valMeta}>
+                    第 {n.negotiationRound}/{n.maxRounds} 轮 · #{n.id} · {formatTime(n.createdAt)}
+                  </View>
+                </View>
+                <View className={styles.appRight}>
+                  <View className={`${styles.badge} ${styles[NEG_CLS[n.status] || 'closed']}`}>
+                    {negStatusName(n.status)}
+                  </View>
+                  {['pending', 'user_proposed', 'ai_counter'].includes(n.status) && (
+                    <View className={styles.execBtn} onClick={() => openNegPanel(n)}>
+                      议价
+                    </View>
+                  )}
+                  {n.status === 'accepted' && (
+                    <View className={styles.execBtn} onClick={() => setPayoutPanel(n)}>
+                      回收打款
+                    </View>
+                  )}
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+        <View className={styles.bottomSpacer} />
+      </ScrollView>
+
+      {/* 底部视图切换(三格) */}
+      <View className={styles.tabBar}>
+        <View
+          className={`${styles.tabBarItem} ${view === 'valuation' ? styles.tabBarActive : ''}`}
+          onClick={() => setView('valuation')}
+        >
+          老酒估价
+        </View>
+        <View
+          className={`${styles.tabBarItem} ${view === 'newwine' ? styles.tabBarActive : ''}`}
+          onClick={() => setView('newwine')}
+        >
+          新酒议价
+        </View>
+        <View
+          className={`${styles.tabBarItem} ${view === 'mine' ? styles.tabBarActive : ''}`}
+          onClick={() => setView('mine')}
+        >
+          我的回收
+        </View>
+      </View>
+
+      {/* 议价详情弹层 */}
+      {negPanel && (
+        <View className={styles.mask} onClick={() => setNegPanel(null)}>
+          <View className={styles.panel} onClick={(e) => e.stopPropagation()}>
+            <View className={styles.panelTitle}>
+              议价 #{negPanel.id} · {negStatusName(negPanel.status)}
+            </View>
+
+            <View className={styles.calcRow}>
+              <Text className={styles.calcLabel}>AI 基准价</Text>
+              <Text className={styles.calcValue}>¥{negPanel.aiBasePrice.toFixed(2)}</Text>
+            </View>
+            <View className={styles.calcRow}>
+              <Text className={styles.calcLabel}>当前价</Text>
+              <Text className={styles.calcTotal}>¥{negPanel.currentPrice.toFixed(2)}</Text>
+            </View>
+            <View className={styles.calcRow}>
+              <Text className={styles.calcLabel}>议价窗口</Text>
+              <Text className={styles.calcValue}>
+                ¥{(negPanel.aiBasePrice * 0.9).toFixed(2)} ~ ¥{(negPanel.aiBasePrice * 1.1).toFixed(2)}
+              </Text>
+            </View>
+
+            {/* 议价历史 */}
+            <View className={styles.formLabel2}>
+              议价过程(第 {negPanel.negotiationRound}/{negPanel.maxRounds} 轮)
+            </View>
+            {negPanel.history.map((h, i) => (
+              <View key={i} className={styles.valMeta}>
+                [轮{h.round}] {NEG_ACTION_NAME[h.action] || h.action}:
+                ¥{Number(h.price).toFixed(2)}
+                {h.coefficient != null && ` (系数 ${Number(h.coefficient).toFixed(2)})`}
+              </View>
+            ))}
+
+            {/* 出价(仅待议价/已反价态) */}
+            {['pending', 'ai_counter'].includes(negPanel.status) && (
+              <>
+                <View className={styles.formLabel2}>您的出价(±10% 内)</View>
+                <View className={styles.formRow}>
+                  <Text className={styles.formLabel}>出价金额</Text>
+                  <Input
+                    className={styles.formInput}
+                    type="digit"
+                    value={proposePrice}
+                    onInput={(e) => setProposePrice(e.detail.value)}
+                    placeholder="¥ 0.00"
+                    placeholderClass={styles.placeholder}
+                  />
+                </View>
+                <View className={styles.panelBtn} onClick={handlePropose}>
+                  {submitting ? '提交中...' : '提交出价'}
+                </View>
+              </>
+            )}
+
+            {/* 接受/拒绝(待议价/已出价/已反价态均可接受) */}
+            {['pending', 'user_proposed', 'ai_counter'].includes(negPanel.status) && (
+              <View className={styles.typeGrid}>
+                <View className={styles.typeItem} onClick={() => handleAcceptNeg(negPanel)}>
+                  <View className={styles.typeLabel}>接受当前价</View>
+                </View>
+                <View className={styles.typeItem} onClick={() => handleRejectNeg(negPanel)}>
+                  <View className={styles.typeLabel}>拒绝议价</View>
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+
+      {/* 议价回收打款弹层 */}
+      {payoutPanel && (
+        <View className={styles.mask} onClick={() => setPayoutPanel(null)}>
+          <View className={styles.panel} onClick={(e) => e.stopPropagation()}>
+            <View className={styles.panelTitle}>议价回收 · 折现打款</View>
+            <View className={styles.calcRow}>
+              <Text className={styles.calcLabel}>成交价</Text>
+              <Text className={styles.calcTotal}>¥{payoutPanel.currentPrice.toFixed(2)}</Text>
+            </View>
+            <View className={styles.formRow}>
+              <Text className={styles.formLabel}>收款账户</Text>
+              <Input
+                className={styles.formInput}
+                value={negPayoutAccount}
+                onInput={(e) => setNegPayoutAccount(e.detail.value)}
+                placeholder="微信/支付宝账号"
+                placeholderClass={styles.placeholder}
+              />
+            </View>
+            <View className={styles.panelBtn} onClick={handleNegRecycle}>
+              {submitting ? '提交中...' : '确认回收'}
+            </View>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+
   // ============ 估价视图 ============
   const renderValuation = () => (
     <View className={styles.page}>
@@ -360,13 +791,19 @@ const RecyclePage: React.FC = () => {
         <View className={styles.bottomSpacer} />
       </ScrollView>
 
-      {/* 底部视图切换 */}
+      {/* 底部视图切换(三格) */}
       <View className={styles.tabBar}>
         <View
           className={`${styles.tabBarItem} ${view === 'valuation' ? styles.tabBarActive : ''}`}
           onClick={() => setView('valuation')}
         >
           老酒估价
+        </View>
+        <View
+          className={`${styles.tabBarItem} ${view === 'newwine' ? styles.tabBarActive : ''}`}
+          onClick={() => setView('newwine')}
+        >
+          新酒议价
         </View>
         <View
           className={`${styles.tabBarItem} ${view === 'mine' ? styles.tabBarActive : ''}`}
@@ -464,13 +901,19 @@ const RecyclePage: React.FC = () => {
         <View className={styles.bottomSpacer} />
       </ScrollView>
 
-      {/* 底部视图切换 */}
+      {/* 底部视图切换(三格) */}
       <View className={styles.tabBar}>
         <View
           className={`${styles.tabBarItem} ${view === 'valuation' ? styles.tabBarActive : ''}`}
           onClick={() => setView('valuation')}
         >
           老酒估价
+        </View>
+        <View
+          className={`${styles.tabBarItem} ${view === 'newwine' ? styles.tabBarActive : ''}`}
+          onClick={() => setView('newwine')}
+        >
+          新酒议价
         </View>
         <View
           className={`${styles.tabBarItem} ${view === 'mine' ? styles.tabBarActive : ''}`}
@@ -540,6 +983,7 @@ const RecyclePage: React.FC = () => {
     </View>
   );
 
+  if (view === 'newwine') return renderNewWine();
   return view === 'mine' ? renderMine() : renderValuation();
 };
 

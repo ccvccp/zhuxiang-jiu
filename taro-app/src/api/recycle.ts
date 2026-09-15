@@ -127,6 +127,90 @@ function toExchange(e: any): ExchangeVO {
   };
 }
 
+// ============================================================
+// 新酒议价回收(酒龄 0-3 年 · AI 基准价 ±10% · 最多 3 轮)
+// ============================================================
+
+/** 议价状态 */
+export const NEG_STATUS_NAME: Record<string, string> = {
+  pending: '待议价',
+  user_proposed: '已出价',
+  ai_counter: 'AI已反价',
+  accepted: '议价成功',
+  rejected: '已拒绝',
+  expired: '已过期',
+};
+
+/** 议价轮次历史条目 */
+export interface NegHistoryItemVO {
+  round: number;
+  role: string;        // ai / user
+  price: number;
+  action: string;      // initial_valuation / user_propose / ai_counter / accept / reject
+  coefficient?: number;
+  reason?: string;
+  timestamp: string;
+}
+
+/** 新酒议价记录 */
+export interface NegotiationVO {
+  id: number;
+  userId: number;
+  productId: string;
+  purchasePrice: number;
+  purchaseDate: string;
+  wineAge: number;
+  wineAgeCategory: string;
+  wineAgeCategoryName: string;
+  conditionGrade: string;
+  bottleCount: number;
+  aiBasePrice: number;
+  currentPrice: number;
+  finalPrice: number | null;
+  negotiationRound: number;
+  maxRounds: number;
+  status: string;
+  history: NegHistoryItemVO[];
+  aiReviewRequired?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const negStatusName = (s: string): string => NEG_STATUS_NAME[s] || s;
+
+function toNegotiation(n: any): NegotiationVO {
+  return {
+    id: n.id ?? 0,
+    userId: Number(n.userId ?? 0),
+    productId: n.productId || '',
+    purchasePrice: Number(n.purchasePrice ?? 0),
+    purchaseDate: n.purchaseDate || '',
+    wineAge: Number(n.wineAge ?? 0),
+    wineAgeCategory: n.wineAgeCategory || '',
+    wineAgeCategoryName: n.wineAgeCategoryName || '',
+    conditionGrade: n.conditionGrade || 'A',
+    bottleCount: Number(n.bottleCount ?? 1),
+    aiBasePrice: Number(n.aiBasePrice ?? 0),
+    currentPrice: Number(n.currentPrice ?? 0),
+    finalPrice: n.finalPrice != null ? Number(n.finalPrice) : null,
+    negotiationRound: Number(n.negotiationRound ?? 0),
+    maxRounds: Number(n.maxRounds ?? 3),
+    status: n.status || 'pending',
+    history: (n.history || []).map((h: any): NegHistoryItemVO => ({
+      round: Number(h.round ?? 0),
+      role: h.role || '',
+      price: Number(h.price ?? 0),
+      action: h.action || '',
+      coefficient: h.coefficient != null ? Number(h.coefficient) : undefined,
+      reason: h.reason || '',
+      timestamp: h.timestamp || '',
+    })),
+    aiReviewRequired: !!n.aiReviewRequired,
+    createdAt: n.createdAt || '',
+    updatedAt: n.updatedAt || '',
+  };
+}
+
 export const RecycleAPI = {
   /** 提交老酒估价(酒龄≥3年; 返回增值率/老酒价值/折现值) */
   async submitValuation(params: {
@@ -225,5 +309,82 @@ export const RecycleAPI = {
     const res = await request<any>({ url: `/api/recycle/exchanges?user_id=${uid}&limit=${limit}` });
     const list = res.data || [];
     return (Array.isArray(list) ? list : []).map(toExchange);
+  },
+
+  // ============================================================
+  // 新酒议价回收(酒龄 0-3 年)
+  // ============================================================
+
+  /** 提交新酒估价(自动创建议价记录, AI 给出基准价) */
+  async submitNewWineValuation(params: {
+    productId: string;
+    purchasePrice: number;
+    purchaseDate: string;
+    conditionGrade?: string;
+    bottleCount?: number;
+  }): Promise<NegotiationVO> {
+    const res = await request<any>({
+      url: '/api/recycle/new-wine/valuation',
+      method: 'POST',
+      data: {
+        userId: Number(getMemberId()),
+        productId: params.productId,
+        purchasePrice: params.purchasePrice,
+        purchaseDate: params.purchaseDate,
+        conditionGrade: params.conditionGrade || 'A',
+        bottleCount: params.bottleCount ?? 1,
+      },
+    });
+    return toNegotiation(res.data || res);
+  },
+
+  /** 我的议价记录列表 */
+  async myNegotiations(limit = 50): Promise<NegotiationVO[]> {
+    const uid = encodeURIComponent(getMemberId() || '0');
+    const res = await request<any>({
+      url: `/api/recycle/negotiations?user_id=${uid}&limit=${limit}`,
+    });
+    const list = res.data || [];
+    return (Array.isArray(list) ? list : []).map(toNegotiation);
+  },
+
+  /** 用户出价(第 N 轮议价; 须在 AI 基准价 ±10% 内) */
+  async proposePrice(negId: number, proposedPrice: number, reason = ''): Promise<NegotiationVO> {
+    const res = await request<any>({
+      url: `/api/recycle/negotiation/${negId}/propose`,
+      method: 'POST',
+      data: { proposedPrice, reason },
+    });
+    return toNegotiation(res.data || res);
+  },
+
+  /** 接受议价(按当前价成交) */
+  async acceptNegotiation(negId: number, finalPrice?: number): Promise<NegotiationVO> {
+    const res = await request<any>({
+      url: `/api/recycle/negotiation/${negId}/accept`,
+      method: 'POST',
+      data: { acceptedBy: 'user', finalPrice: finalPrice ?? null },
+    });
+    return toNegotiation(res.data || res);
+  },
+
+  /** 拒绝议价(议价失败) */
+  async rejectNegotiation(negId: number, reason = ''): Promise<NegotiationVO> {
+    const res = await request<any>({
+      url: `/api/recycle/negotiation/${negId}/reject`,
+      method: 'POST',
+      data: { rejectedBy: 'user', reason },
+    });
+    return toNegotiation(res.data || res);
+  },
+
+  /** 完成新酒议价回收(议价成功后执行; 老酒入库+折现打款) */
+  async recycleNewWine(negId: number, payoutMethod: string, payoutAccount: string): Promise<any> {
+    const res = await request<any>({
+      url: `/api/recycle/new-wine/${negId}/recycle`,
+      method: 'POST',
+      data: { payoutMethod, payoutAccount },
+    });
+    return res.data || res;
   },
 };
