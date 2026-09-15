@@ -262,8 +262,12 @@ async def main():
 
     # 注册默认静默开启 → 白天也走
     # night 档(silenced 优先)
+    # now=NOW(与 decide 同日——打扰余量计数
+    # 按当日; 漏传会用真实今天, 与 NOW 漂移致 0)
+    from urllib.parse import quote as _q
     r = client.get(
-        f"{BASE}/adapt/{MID_A}?hour=14",
+        f"{BASE}/adapt/{MID_A}"
+        f"?hour=14&now={_q(NOW)}",
         headers=ADMIN)
     ad = r.json()["data"]
     record("默认静默→白天也 night 档",

@@ -133,15 +133,21 @@ async def main():
 
     # 会员 A: L1 成长值 400(缺口 80%),
     # 注册 10 天前, 周期 340 天前(临期)
-    from datetime import datetime, UTC
+    from datetime import datetime, UTC, timedelta
+    _now = datetime.now(UTC)
+
+    def _rel(**kw) -> str:
+        """相对当前时刻的 ISO 日期(防时间漂移——
+        固定日期断言会随真实时间腐化)"""
+        return (_now + timedelta(**kw)).isoformat()
+
     m_a = await member_repo.create({
         "phone": "13900000001",
         "password": "test123456",
         "nickname": "视野测试A",
         "level": 1, "growth_value": 400,
         "points": 0, "status": 1,
-        "created_at":
-            "2026-09-03T12:00:00+00:00",
+        "created_at": _rel(days=-10, hours=6),
         "levelUpdatedAt":
             "2025-10-08T12:00:00+00:00",
         "periodConsume": 100.0,
@@ -154,8 +160,7 @@ async def main():
         "nickname": "影子测试B",
         "level": 1, "growth_value": 400,
         "points": 0, "status": 1,
-        "created_at":
-            "2026-09-11T12:00:00+00:00",
+        "created_at": _rel(days=-2, hours=6),
     })
     MID_B = m_b["id"]
     # 会员 C: L5 顶级
@@ -174,16 +179,16 @@ async def main():
     MID_C = m_c["id"]
     # 会员 D: L2 保级风险窗(周期临期
     # 且消费未足——requirement 300)
+    # levelUpdatedAt=now-340d → 到期=+360d →
+    # daysRemaining 恒为 20(临期<30)
     m_d = await member_repo.create({
         "phone": "13900000004",
         "password": "test123456",
         "nickname": "保级测试D",
         "level": 2, "growth_value": 400,
         "points": 0, "status": 1,
-        "created_at":
-            "2026-09-03T12:00:00+00:00",
-        "levelUpdatedAt":
-            "2025-10-08T12:00:00+00:00",
+        "created_at": _rel(days=-10),
+        "levelUpdatedAt": _rel(days=-340, hours=6),
         "periodConsume": 100.0,
     })
     MID_D = m_d["id"]
@@ -199,10 +204,8 @@ async def main():
         "status": "PAID",
         "priceDetail": {"actualAmount": 500},
         "payment": {"paidAt":
-                    "2026-09-10T10:00:00"
-                    "+00:00"},
-        "createdAt":
-            "2026-09-10T10:00:00+00:00",
+                    _rel(days=-5)},
+        "createdAt": _rel(days=-5),
     })
 
     print("[03 鉴权(本人/越权/admin)]")
