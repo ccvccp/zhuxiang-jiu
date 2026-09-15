@@ -19,6 +19,15 @@ import {
 type Tab = 'overview' | 'route' | 'track' | 'risk' | 'analysis' | 'evo'
   | 'dispatch' | 'nexus';
 
+/** 决策面错误友好化(大模型三态: off/guard_pause 409 → 友好提示)
+ *  对齐 trust 页同款降级——观测面不受影响, 仅决策 POST 触发 */
+const zwDecisionErr = (e: any): string => {
+  const msg = String(e?.message || e);
+  return msg.includes('409') || msg.includes('决策面关闭') || msg.includes('ZW_MODE')
+    ? '智运决策功能暂未开放(决策面关闭), 敬请期待'
+    : (msg || '请稍后重试').slice(0, 30);
+};
+
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: '总览' },
   { key: 'route', label: '路由' },
@@ -123,7 +132,7 @@ const ZhiYunPage: React.FC = () => {
       setDecision(d);
       setScores(await ZwAPI.carrierScores());
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -136,7 +145,7 @@ const ZhiYunPage: React.FC = () => {
     try {
       setEta(await ZwAPI.eta(waybill.trim()));
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -145,7 +154,7 @@ const ZhiYunPage: React.FC = () => {
     try {
       setRisk(await ZwAPI.riskAssess(RISK_PRESET));
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -158,7 +167,7 @@ const ZhiYunPage: React.FC = () => {
         description: '瓶身破损(工作台演示)',
       }));
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -170,7 +179,7 @@ const ZhiYunPage: React.FC = () => {
       ]);
       setCost(c); setForecast(f);
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -182,7 +191,7 @@ const ZhiYunPage: React.FC = () => {
       setFeedbacks(await ZwAPI.feedbacks(10).catch(() => []));
       setStatus(await ZwAPI.status().catch(() => null));
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -197,7 +206,7 @@ const ZhiYunPage: React.FC = () => {
         recv_mobile: '13800001234', unknown_extra: 'x',
       }));
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -211,7 +220,7 @@ const ZhiYunPage: React.FC = () => {
       });
       setFRoute({ profile: p, route: await ZwAPI.featureRoute(p) });
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -224,7 +233,7 @@ const ZhiYunPage: React.FC = () => {
         title: `已生成(open=${r.openCount})`, icon: 'success',
       });
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -235,7 +244,7 @@ const ZhiYunPage: React.FC = () => {
     try {
       setCapPlan(await ZwAPI.capacityPlan());
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -254,7 +263,7 @@ const ZhiYunPage: React.FC = () => {
       });
       Taro.showToast({ title: '三码绑定成功', icon: 'success' });
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -267,7 +276,7 @@ const ZhiYunPage: React.FC = () => {
     try {
       setVerifyResult(await ZwAPI.verifyCode(verifyCodeVal.trim()));
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -280,7 +289,7 @@ const ZhiYunPage: React.FC = () => {
     try {
       setReverseResult(await ZwAPI.reverseBind(bindForm.orderId.trim(), condition));
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -291,7 +300,7 @@ const ZhiYunPage: React.FC = () => {
       setAlertList(await ZwAPI.alerts().catch(() => []));
       Taro.showToast({ title: `出稿 ${r.generated} 条`, icon: 'success' });
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -301,7 +310,7 @@ const ZhiYunPage: React.FC = () => {
       await ZwAPI.alertAck(alertId, disposition);
       setAlertList(await ZwAPI.alerts().catch(() => []));
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -310,7 +319,7 @@ const ZhiYunPage: React.FC = () => {
     try {
       setCarbonData(await ZwAPI.carbon());
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -321,7 +330,7 @@ const ZhiYunPage: React.FC = () => {
       setSuggestions(r.suggestions || []);
       Taro.showToast({ title: `生成 ${r.generated} 条`, icon: 'success' });
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -331,7 +340,7 @@ const ZhiYunPage: React.FC = () => {
       setSuggestions(await ZwAPI.suggestions().catch(() => []));
       Taro.showToast({ title: verdict === 'adopted' ? '已采纳' : '已拒绝(负样本)', icon: 'success' });
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
@@ -344,7 +353,7 @@ const ZhiYunPage: React.FC = () => {
       });
       Taro.showToast({ title: 'B端偏好已登记', icon: 'success' });
     } catch (e: any) {
-      Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
+      Taro.showToast({ title: zwDecisionErr(e), icon: 'none' });
     }
   };
 
