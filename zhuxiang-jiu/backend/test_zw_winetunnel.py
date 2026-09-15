@@ -22,6 +22,8 @@ import sys
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ["AUTH_MODE"] = "compat"
+# 大模型三态灰度: 决策端点需 assist 放行(P4-P7 大量为 POST 决策)
+os.environ["ZW_MODE"] = "assist"
 
 from repositories.store import _mock_store
 

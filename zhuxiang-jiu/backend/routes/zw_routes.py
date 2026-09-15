@@ -43,6 +43,7 @@ from services.zw_circuit_service import ZwCircuitService
 from services.zw_binding_service import ZwBindingService
 from services.zw_alert_service import ZwAlertService
 from services.zw_evolution2_service import ZwEvolution2Service
+from services.zw_mode_service import ZwModeService
 
 router = APIRouter()
 _store = _ZwStore()
@@ -73,6 +74,39 @@ def _handle(exc: Exception):
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=409, detail=str(exc))
     raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ============================================================
+# 大模型三态灰度(全站范式): 决策面门控 + 响应留痕标记
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(ZW_MODE=off → 409; shadow/assist 放行)"""
+    return await ZwModeService().require_decision_mode()
+
+
+def _decision(fn):
+    """决策端点装饰器: 门控(off 409) + shadow/assist 标记(zwMode)
+
+    基础物流 18 端点(/api/logistics/*)不受影响——mode 仅作用于
+    AI 决策面(智运 17 个 POST 端点)。
+    """
+    import functools
+    from services.zw_mode_service import MODE_VALUES
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            mode_state = await _gate()
+        except ValueError as e:
+            raise HTTPException(
+                status_code=409, detail=str(e)) from e
+        result = await fn(*args, **kwargs)
+        if isinstance(result, dict) \
+                and mode_state.get("mode") in MODE_VALUES[1:]:
+            result = {**result, "zwMode": mode_state["mode"]}
+        return result
+    return wrapper
 
 
 # ============================================================
@@ -129,6 +163,7 @@ class FeedbackRequest(PydBaseModel):
 
 @router.post("/api/logistics-ai/route/decide",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def route_decide(data: RouteDecideRequest,
                        x_role: str = Header(None, alias="X-Role")):
     """多维路由决策(规则基座+质量评分, 决策留痕)"""
@@ -230,6 +265,7 @@ async def track_delays(x_role: str = Header(None, alias="X-Role"),
 
 @router.post("/api/logistics-ai/risk/assess",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def risk_assess(data: RiskAssessRequest,
                       x_role: str = Header(None, alias="X-Role")):
     """下单前四防风控评分(防破损/防丢失/防延误/前置四级)"""
@@ -248,6 +284,7 @@ async def risk_assess(data: RiskAssessRequest,
 
 @router.post("/api/logistics-ai/risk/inspect-receipt",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def inspect_receipt(data: InspectReceiptRequest,
                           x_role: str = Header(None, alias="X-Role")):
     """团购开箱验货回执(差异→补寄工单建议, 永不自动)"""
@@ -264,6 +301,7 @@ async def inspect_receipt(data: InspectReceiptRequest,
 
 @router.post("/api/logistics-ai/risk/claims",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def create_claim(data: ClaimRequest,
                        x_role: str = Header(None, alias="X-Role")):
     """创建理赔工单(四类; 赔付审批须人工, 建议书)"""
@@ -324,6 +362,7 @@ async def volume_forecast(x_role: str = Header(None, alias="X-Role"),
 
 @router.post("/api/logistics-ai/evolution/feedback",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def evolution_feedback(data: FeedbackRequest,
                              x_role: str = Header(None,
                                                   alias="X-Role")):
@@ -386,6 +425,7 @@ class FeatureRouteRequest(PydBaseModel):
 
 @router.post("/api/logistics-ai/semantic/normalize",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def semantic_normalize(data: NormalizeRequest,
                               x_role: str = Header(None, alias="X-Role")):
     """统一语义层: 异构渠道回单 → 平台标准数据模型"""
@@ -413,6 +453,7 @@ async def semantic_carriers(
 
 @router.post("/api/logistics-ai/semantic/register-carrier",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def semantic_register_carrier(
         data: RegisterCarrierRequest,
         x_role: str = Header(None, alias="X-Role")):
@@ -430,6 +471,7 @@ async def semantic_register_carrier(
 
 @router.post("/api/logistics-ai/semantic/order-profile",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def semantic_order_profile(
         data: OrderProfileRequest,
         x_role: str = Header(None, alias="X-Role")):
@@ -448,6 +490,7 @@ async def semantic_order_profile(
 
 @router.post("/api/logistics-ai/semantic/feature-route",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def semantic_feature_route(
         data: FeatureRouteRequest,
         x_role: str = Header(None, alias="X-Role")):
@@ -492,6 +535,7 @@ async def circuit_status(x_role: str = Header(None, alias="X-Role")):
 
 @router.post("/api/logistics-ai/circuit/report",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def circuit_report(x_role: str = Header(None, alias="X-Role")):
     """生成《运力异常报告》(open 渠道切换建议, 人工确认)"""
     _require_admin(x_role)
@@ -561,6 +605,7 @@ async def binding_capacity_plans(
 
 @router.post("/api/logistics-ai/binding/tri-code",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def binding_tri_code(data: TriCodeRequest,
                            x_role: str = Header(None, alias="X-Role")):
     """三码合一绑定(运单号+批次码+防伪码)"""
@@ -601,6 +646,7 @@ async def binding_verify(code: str):
 
 @router.post("/api/logistics-ai/binding/reverse",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def binding_reverse(data: ReverseRequest,
                           x_role: str = Header(None, alias="X-Role")):
     """逆向物流: 商品状态→最优退回路径+《退货处置协议》"""
@@ -633,6 +679,7 @@ async def binding_reverses(x_role: str = Header(None, alias="X-Role"),
 
 @router.post("/api/logistics-ai/alert/scan",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def alert_scan(x_role: str = Header(None, alias="X-Role")):
     """五角色触发面扫描(延误/异常/爆仓/成本/KPI→草稿+建议)"""
     _require_admin(x_role)
@@ -663,6 +710,7 @@ class AlertAckRequest(PydBaseModel):
 
 @router.post("/api/logistics-ai/alerts/{alert_id}/ack",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def alert_ack(alert_id: int, data: AlertAckRequest,
                     x_role: str = Header(None, alias="X-Role")):
     """提醒确认闭环(驳回记负样本留痕)"""
@@ -687,6 +735,7 @@ class PreferenceRequest(PydBaseModel):
 
 @router.post("/api/logistics-ai/evolution2/preference",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def evolution2_preference(
         data: PreferenceRequest,
         x_role: str = Header(None, alias="X-Role")):
@@ -742,6 +791,7 @@ async def evolution2_carbon(x_role: str = Header(None, alias="X-Role")):
 
 @router.post("/api/logistics-ai/evolution2/suggest",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def evolution2_suggest(x_role: str = Header(None, alias="X-Role")):
     """生成策略建议(熔断+碳排+异常模式聚合, 人工裁决)"""
     _require_admin(x_role)
@@ -772,6 +822,7 @@ class SuggestionDecideRequest(PydBaseModel):
 
 @router.post("/api/logistics-ai/evolution2/suggestions/{sid}/decide",
              tags=["智运AI智能物流大模型"])
+@_decision
 async def evolution2_decide(sid: int, data: SuggestionDecideRequest,
                             x_role: str = Header(None, alias="X-Role")):
     """人机协同裁决(采纳生效留痕/拒绝记负样本回流)"""
@@ -791,6 +842,73 @@ async def status(x_role: str = Header(None, alias="X-Role")):
     try:
         result = await _analysis.status()
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 大模型控制面(全站范式 4 端点)
+# ============================================================
+
+@router.get("/api/logistics-ai/mode",
+            tags=["智运AI智能物流大模型"])
+async def zw_mode():
+    """灰度总览(模式/读取链/护栏/红线公示——观测面永不关停)"""
+    return {"success": True,
+            "data": await ZwModeService().status_view()}
+
+
+@router.post("/api/logistics-ai/mode/override",
+             tags=["智运AI智能物流大模型"])
+async def zw_mode_override(mode: str = Query(
+        "", description="运行时切档(空串清除回落 env)"),
+        x_member_id: str = Header(default="",
+                                  alias="X-Member-Id")):
+    """运行时切档(免容器重建, 人工留痕)"""
+    try:
+        operator = ("m" + x_member_id) if x_member_id else "admin"
+        return {"success": True,
+                "data": await ZwModeService().set_override(
+                    mode, operator=operator)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/logistics-ai/mode/guard",
+             tags=["智运AI智能物流大模型"])
+async def zw_mode_guard(body: dict,
+                        x_member_id: str = Header(
+                            default="", alias="X-Member-Id")):
+    """护栏检查(三指标恶化 >3% 自动暂停; baseline 可选覆盖)
+
+    body: {delayRate, anomalyRate, circuitBreakRate,
+           baseline?{同三键}}
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        return {"success": True,
+                "data": await ZwModeService().guard_check(
+                    body.get("delayRate"),
+                    body.get("anomalyRate"),
+                    body.get("circuitBreakRate"),
+                    baseline=body.get("baseline"))}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/logistics-ai/mode/resume",
+             tags=["智运AI智能物流大模型"])
+async def zw_mode_resume(
+        note: str = Query("", description="恢复备注(决策留痕)"),
+        x_member_id: str = Header(default="",
+                                 alias="X-Member-Id")):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    try:
+        operator = ("m" + x_member_id) if x_member_id else "admin"
+        return {"success": True,
+                "data": await ZwModeService().resume(
+                    operator=operator, note=note)}
     except Exception as e:
         _handle(e)
 
