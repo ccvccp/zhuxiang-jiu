@@ -4,7 +4,8 @@ import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
 import { MemberAPI } from '@/api/member';
-import { completePay } from '@/api/payment';
+import { PaymentAPI, completePay, resumePendingPay } from '@/api/payment';
+import PayQrModal from '@/components/PayQrModal';
 import { OrderAPI, ORDER_STATUS_NAME } from '@/api/order';
 import { AuthAPI } from '@/api/auth';
 import { clearSession, getMemberId, isLoggedIn } from '@/services/auth-service';
@@ -27,6 +28,8 @@ const MinePage: React.FC = () => {
   // 等级信息(keepLevel 保级进度, L5 SVIP 续费用)
   const [levelInfo, setLevelInfo] = useState<any>(null);
   const [renewing, setRenewing] = useState(false);
+  // 扫码支付弹层(SVIP ¥99, 微信 native / 支付宝 qr)
+  const [payQr, setPayQr] = useState<{ code: string; payNo: string } | null>(null);
   // 订单区默认折叠: 会员卡与工作台等内容优先可见, 点标题展开
   const [ordersCollapsed, setOrdersCollapsed] = useState(true);
 
@@ -52,6 +55,13 @@ const MinePage: React.FC = () => {
   // 无需手动刷新页面; refreshKey 兼容既有登出/清数据刷新路径)
   useDidShow(() => {
     setRefreshKey(k => k + 1);
+    // H5 跳转支付(微信 h5/支付宝)返回后恢复轮询确认 SVIP 开通
+    resumePendingPay().then(r => {
+      if (r?.paid) {
+        Taro.showToast({ title: '支付成功, SVIP 权益已生效', icon: 'success' });
+        setRefreshKey(k => k + 1);
+      }
+    }).catch(() => { /* 恢复失败静默 */ });
   });
 
   useEffect(() => {
@@ -173,8 +183,11 @@ const MinePage: React.FC = () => {
         setRenewing(true);
         try {
           const r = await MemberAPI.renewSvip();
-          const fin = await completePay(r.payNo);
+          const fin = await completePay(r.payNo, {
+            onQrCode: code => setPayQr({ code, payNo: r.payNo }),
+          });
           if (fin.paid) {
+            setPayQr(null);
             const action = fin.dispatch?.business?.action;
             Taro.showToast({
               title: action === 'purchased'
@@ -185,6 +198,7 @@ const MinePage: React.FC = () => {
           } else if (fin.status === 'timeout') {
             Taro.showToast({ title: '支付确认中, 到账后自动开通', icon: 'none' });
           } else {
+            setPayQr(null);
             Taro.showToast({ title: '支付未完成', icon: 'none' });
           }
         } catch (e) {
@@ -681,6 +695,21 @@ const MinePage: React.FC = () => {
           </Button>
         </View>
       </ScrollView>
+
+      {/* 扫码支付弹层(SVIP ¥99, 微信 native / 支付宝 qr) */}
+      <PayQrModal
+        visible={!!payQr}
+        code={payQr?.code || ''}
+        amount={99}
+        tip="SVIP 购买/续费"
+        onClose={() => {
+          const q = payQr;
+          setPayQr(null);
+          if (q?.payNo) {
+            PaymentAPI.closePay(q.payNo, 'USER_CANCEL').catch(() => {});
+          }
+        }}
+      />
     </View>
   );
 };

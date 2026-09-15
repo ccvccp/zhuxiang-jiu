@@ -12,7 +12,8 @@ import {
   WalletAPI, WalletInfoVO, WalletTxVO, WalletDepositVO, WalletRewardVO,
   TX_TYPE_NAME, DEPOSIT_STATUS_NAME, REWARD_STATUS_NAME, DEPOSIT_TIERS,
 } from '@/api/wallet';
-import { completePay } from '@/api/payment';
+import { PaymentAPI, completePay, resumePendingPay } from '@/api/payment';
+import PayQrModal from '@/components/PayQrModal';
 
 // 流水类型筛选
 const TX_TABS = [
@@ -47,6 +48,8 @@ const WalletPage: React.FC = () => {
   // 充值弹层状态
   const [showDeposit, setShowDeposit] = useState(false);
   const [depAmount, setDepAmount] = useState('');
+  // 扫码支付弹层(微信 native / 支付宝 qr)
+  const [payQr, setPayQr] = useState<{ code: string; amount: number; payNo: string } | null>(null);
   // 提现弹层状态
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [wdAmount, setWdAmount] = useState('');
@@ -104,7 +107,7 @@ const WalletPage: React.FC = () => {
     }
   };
 
-  // 充值(创建支付单 → 渠道支付 → 回调入账)
+  // 充值(创建支付单 → 按方式拉起支付 → 轮询回调入账)
   const handleDeposit = async () => {
     if (submitting) return;
     const amount = Number(depAmount);
@@ -115,8 +118,11 @@ const WalletPage: React.FC = () => {
     setSubmitting(true);
     try {
       const dep = await WalletAPI.deposit(amount);
-      const fin = await completePay(dep.payNo);
+      const fin = await completePay(dep.payNo, {
+        onQrCode: code => setPayQr({ code, amount, payNo: dep.payNo }),
+      });
       if (fin.paid) {
+        setPayQr(null);
         Taro.showToast({ title: '充值成功', icon: 'success' });
         setShowDeposit(false);
         setDepAmount('');
@@ -124,6 +130,7 @@ const WalletPage: React.FC = () => {
       } else if (fin.status === 'timeout') {
         Taro.showToast({ title: '支付确认中, 到账后自动更新', icon: 'none' });
       } else {
+        setPayQr(null);
         Taro.showToast({ title: '支付未完成', icon: 'none' });
       }
     } catch (e) {
@@ -132,6 +139,25 @@ const WalletPage: React.FC = () => {
       setSubmitting(false);
     }
   };
+
+  // 放弃扫码支付(关闭支付单, completePay 轮询将感知 closed)
+  const handleQrClose = () => {
+    const q = payQr;
+    setPayQr(null);
+    if (q?.payNo) {
+      PaymentAPI.closePay(q.payNo, 'USER_CANCEL').catch(() => {});
+    }
+  };
+
+  // H5 跳转支付(微信 h5/支付宝)返回后恢复轮询确认到账
+  Taro.useDidShow(() => {
+    resumePendingPay().then(r => {
+      if (r?.paid) {
+        Taro.showToast({ title: '充值成功', icon: 'success' });
+        loadAll();
+      }
+    }).catch(() => { /* 恢复失败静默 */ });
+  });
 
   // 提现
   const handleWithdraw = async () => {
@@ -589,6 +615,15 @@ const WalletPage: React.FC = () => {
           </View>
         </View>
       ) : null}
+
+      {/* 扫码支付弹层(微信 native / 支付宝 qr) */}
+      <PayQrModal
+        visible={!!payQr}
+        code={payQr?.code || ''}
+        amount={payQr?.amount}
+        tip="扫码充值"
+        onClose={handleQrClose}
+      />
     </View>
   );
 };

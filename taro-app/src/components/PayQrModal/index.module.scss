@@ -1,0 +1,89 @@
+@use '@/styles/variables.scss' as *;
+@use '@/styles/theme.scss' as *;
+
+.mask {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  width: 560rpx;
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  padding: $spacing-lg $spacing-lg $spacing-md;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.title {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.amount {
+  font-size: 52rpx;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+  margin: $spacing-sm 0 $spacing-md;
+}
+
+.qrWrap {
+  background: #fff;
+  border: 2rpx solid $color-divider;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.qrImage {
+  width: 320rpx;
+  height: 320rpx;
+  display: block;
+}
+
+.qrCanvas {
+  width: 320rpx;
+  height: 320rpx;
+  display: block;
+}
+
+.qrPlaceholder {
+  width: 320rpx;
+  height: 320rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.tip {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.tipSub {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+}
+
+.closeBtn {
+  margin-top: $spacing-lg;
+  padding: $spacing-sm $spacing-xl;
+  font-size: $font-size-md;
+  color: $color-text-tertiary;
+  border-top: 2rpx solid $color-divider;
+  width: 100%;
+  text-align: center;
+}
