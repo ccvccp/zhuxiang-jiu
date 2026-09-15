@@ -10,6 +10,8 @@
     3. override: 设值优先 / 清除回落 / 非法值拒绝
     4. 护栏: 未恶化不暂停 / 恶化暂停留痕 / 基线0规则 / baseline 覆盖 /
        resume 人工恢复 / 未暂停恢复拒绝 / 指标留痕
+    4.5 Redis 序列化往返: paused 布尔位 / metrics JSON 列表
+       (P0 修复回归——bool 清单漏注册致 "0" 真值误判 guard_pause)
     5. HTTP 决策面: off 下 17 端点全 409(决策面关闭)
     6. HTTP 观测面: off 下 mode/dashboard/learning-status 200
     7. HTTP 豁免面: off 下 appeals/collect/attribution 不受门控
@@ -170,6 +172,48 @@ async def run_service():
         record("观测: status_view 形状",
                v["modeValues"] == list(MODE_VALUES)
                and "guard" in v and "modelVersion" in v)
+
+    # ============================================================
+    # 3.5 Redis 序列化往返(P0 修复回归:
+    #     paused 布尔位 + metrics/breachTrail JSON 列表)
+    # ============================================================
+    with _EnvGuard("assist"):
+        reset_store()
+        svc = Trust45ModeService()
+        st = await svc._state()          # 缺省态: paused=False
+        st["metrics"].append({"checkedAt": "t", "breaches": 0})
+        await svc.repo.save_trust45_state(st)
+        # Redis 模式即 _serialize→hset→hgetall→_deserialize;
+        # 内存模式直接模拟同一往返
+        from repositories.trust_value_repository import (
+            TrustValue45Repository,
+        )
+        _repo = TrustValue45Repository()
+        raw = _repo._serialize(st)
+        back = _repo._deserialize(raw)
+        record("序列化: paused=False 往返仍为 falsy",
+               back.get("paused") is False,
+               f"paused={back.get('paused')!r}")
+        record("序列化: metrics 往返仍为 list",
+               isinstance(back.get("metrics"), list)
+               and len(back["metrics"]) == 1,
+               f"metrics={back.get('metrics')!r:.80}")
+        record("序列化: breachTrail 往返仍为 list",
+               isinstance(back.get("breachTrail"), list)
+               and back["breachTrail"] == [])
+        # 往返后决策面不误判 guard_pause
+        m = await svc.current_mode()
+        record("序列化: 往返后不误判暂停",
+               m["mode"] == "assist" and m["source"] == "env",
+               str(m)[:80])
+        # 暂停位往返后仍可正确读取(True)
+        st2 = await svc._state()
+        st2["paused"] = True
+        st2["pausedReason"] = "r"
+        raw2 = _repo._serialize(st2)
+        back2 = _repo._deserialize(raw2)
+        record("序列化: paused=True 往返仍为 True",
+               back2.get("paused") is True)
 
 
 # ============================================================

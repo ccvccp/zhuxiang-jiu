@@ -50,7 +50,9 @@ class TrustValue45Repository:
     TABLE_EVENTS = "trust45_events"
 
     _INT_FIELDS = ("trustId", "eventId")
-    _BOOL_FIELDS = ("fused", "frozen")
+    # paused: 灰度态护栏暂停位(P0 修复——bool 清单漏注册致 Redis
+    # 读回字符串 "0" 为真值, 决策面永久误判 guard_pause)
+    _BOOL_FIELDS = ("fused", "frozen", "paused")
     _FLOAT_FIELDS = ("score", "rawScore", "delta",
                      "scoreBefore", "scoreAfter")
 
@@ -103,6 +105,14 @@ class TrustValue45Repository:
                     record[k] = {}
             elif k == "sources":
                 # 47号P2: 存证数据源数组(含互证引用)
+                try:
+                    record[k] = json.loads(v) if v else []
+                except (TypeError, ValueError):
+                    record[k] = []
+            elif k in ("metrics", "breachTrail"):
+                # P0 修复: 灰度态 JSON 列表未反序列化时, 字符串
+                # "[]" 被 list() 拆字符(checkCount 假象)——
+                # 68号 xinzhi_repository 序列化清单口径
                 try:
                     record[k] = json.loads(v) if v else []
                 except (TypeError, ValueError):
