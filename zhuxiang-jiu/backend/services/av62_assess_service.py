@@ -39,7 +39,6 @@
 """
 
 import logging
-import os
 
 from core.helpers import ts
 
@@ -112,18 +111,19 @@ DEFAULT_OBJECTIVE = "stability"
 
 
 def current_mode() -> str:
-    """模块开关(AV62_MODE——同底座口径)"""
-    return os.environ.get(
-        "AV62_MODE", "off")
+    """模块开关(集中模式层同步桥接: 强制>暂停>override>env)"""
+    from services.av62_mode_service import (
+        legacy_current_mode,
+    )
+    return legacy_current_mode()
 
 
 def require_active_mode() -> None:
-    """决策面门槛(off 拒绝)"""
-    mode = current_mode()
-    if mode == "off":
-        raise ValueError(
-            f"AV62_MODE={mode}(默认 off——"
-            f"决策面关闭, 观测面不受影响)")
+    """决策面门槛(off 拒绝——集中模式层桥接)"""
+    from services.av62_mode_service import (
+        legacy_require_active_mode,
+    )
+    legacy_require_active_mode()
 
 
 def _clamp(value: float, low: float,
@@ -300,10 +300,7 @@ class Av62AssessService:
 
         # ⑥ 终态(high 直接生效/medium
         #    抽检/low 强制人工)
-        if negative:
-            asset_status = "active"
-            spot_check = False
-        elif tier == "high":
+        if negative or tier == "high":
             asset_status = "active"
             spot_check = False
         elif tier == "medium":
@@ -764,7 +761,7 @@ class Av62AssessService:
                 )
                 if obj in OBJECTIVE_VALUES:
                     return str(obj)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "av62_objective_failsoft: %s",
                 exc)
@@ -823,8 +820,8 @@ class Av62AssessService:
         latest = await self.repo \
             .list_assessments(
                 asset_id=asset_id, limit=1)
-        return int((latest[0].get("version")
-                    if latest else 0)) + 1
+        return int(latest[0].get("version")
+                    if latest else 0) + 1
 
     async def _track(self, event_type: str,
                      detail: dict) -> None:
@@ -840,7 +837,7 @@ class Av62AssessService:
                 "detail": detail,
                 "createdAt": ts(),
             })
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "av62_track_failed %s: %s",
                 event_type, exc)

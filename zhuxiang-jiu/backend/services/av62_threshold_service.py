@@ -27,7 +27,6 @@
 """
 
 import logging
-import os
 
 from core.helpers import ts
 
@@ -43,18 +42,19 @@ SCORER_ID = "asset_valuation"
 
 
 def current_mode() -> str:
-    """模块开关(AV62_MODE——同底座口径)"""
-    return os.environ.get(
-        "AV62_MODE", "off")
+    """模块开关(集中模式层同步桥接: 强制>暂停>override>env)"""
+    from services.av62_mode_service import (
+        legacy_current_mode,
+    )
+    return legacy_current_mode()
 
 
 def require_active_mode() -> None:
-    """决策面门槛(off 拒绝)"""
-    mode = current_mode()
-    if mode == "off":
-        raise ValueError(
-            f"AV62_MODE={mode}(默认 off——"
-            f"决策面关闭, 观测面不受影响)")
+    """决策面门槛(off 拒绝——集中模式层桥接)"""
+    from services.av62_mode_service import (
+        legacy_require_active_mode,
+    )
+    legacy_require_active_mode()
 
 
 class Av62ThresholdService:
@@ -320,7 +320,7 @@ class Av62ThresholdService:
                 "detail": detail,
                 "createdAt": ts(),
             })
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "av62_threshold_track_failed: %s",
                 exc)

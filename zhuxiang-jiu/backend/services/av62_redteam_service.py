@@ -30,7 +30,6 @@
 """
 
 import logging
-import os
 
 from core.helpers import ts
 
@@ -68,8 +67,10 @@ class Av62RedteamService:
         前置: AV62_MODE=shadow/assist
         (决策面开放——off 态无攻击面)。
         """
-        mode = os.environ.get(
-            "AV62_MODE", "off")
+        from services.av62_mode_service import (
+            legacy_current_mode,
+        )
+        mode = legacy_current_mode()
         if mode == "off":
             raise ValueError(
                 f"AV62_MODE={mode}(off 态"
@@ -102,7 +103,7 @@ class Av62RedteamService:
                 all_defended = all_defended \
                     and vector.get(
                         "defended")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 results.append({
                     "vector": name,
                     "defended": False,
@@ -497,7 +498,7 @@ class Av62RedteamService:
                 },
                 "createdAt": ts(),
             })
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "av62_redteam_track_failed: %s",
                 exc)

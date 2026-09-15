@@ -30,7 +30,6 @@
 """
 
 import logging
-import os
 from datetime import datetime, UTC
 
 from core.helpers import ts
@@ -63,18 +62,19 @@ DEPOSIT_FACTOR = "platform_conduct"
 
 
 def current_mode() -> str:
-    """模块开关(AV62_MODE——同底座口径)"""
-    return os.environ.get(
-        "AV62_MODE", "off")
+    """模块开关(集中模式层同步桥接: 强制>暂停>override>env)"""
+    from services.av62_mode_service import (
+        legacy_current_mode,
+    )
+    return legacy_current_mode()
 
 
 def require_active_mode() -> None:
-    """决策面门槛(off 拒绝)"""
-    mode = current_mode()
-    if mode == "off":
-        raise ValueError(
-            f"AV62_MODE={mode}(默认 off——"
-            f"决策面关闭, 观测面不受影响)")
+    """决策面门槛(off 拒绝——集中模式层桥接)"""
+    from services.av62_mode_service import (
+        legacy_require_active_mode,
+    )
+    legacy_require_active_mode()
 
 
 def _days_since(iso_ts: str) -> int:
@@ -358,7 +358,6 @@ class Av62LiquidityService:
         from services.av62_registry import (
             LIQUIDITY_META,
             SCENARIO_FACTORS,
-            RISK_DOMAIN,
             decay_factor,
             liquidity_of,
             scenario_factor,
@@ -664,7 +663,7 @@ class Av62LiquidityService:
                     sources=["av62_liquidity"],
                     voluntary=False,
                     verify_mode="v1"))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "av62_deposit45_failed %s: %s",
                 subject_id, exc)
@@ -694,7 +693,7 @@ class Av62LiquidityService:
                         <= days \
                         <= HALF_LIFE_MAX:
                     return days
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "av62_halflife_failsoft: %s",
                 exc)
@@ -724,7 +723,7 @@ class Av62LiquidityService:
                         <= m \
                         <= SCENARIO_MULT_MAX:
                     return m
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "av62_scenmult_failsoft: %s",
                 exc)
@@ -744,7 +743,7 @@ class Av62LiquidityService:
                 "detail": detail,
                 "createdAt": ts(),
             })
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "av62_track_failed %s: %s",
                 event_type, exc)

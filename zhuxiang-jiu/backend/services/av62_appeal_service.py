@@ -33,7 +33,6 @@
 """
 
 import logging
-import os
 
 from core.helpers import ts
 
@@ -66,12 +65,6 @@ APPEAL_FROM_STATES = (
     "active", "assessed",
     "pending_review", "decaying",
     "reactivated", "adjusted")
-
-
-def _restore_mode(prev: str) -> None:
-    """恢复模块开关(mode save/restore
-    范式——申诉不受开关影响铁律)"""
-    os.environ["AV62_MODE"] = prev
 
 
 class Av62AppealService:
@@ -246,10 +239,11 @@ class Av62AppealService:
 
         # 自动重估(mode save/restore——
         # 申诉不受开关影响)
-        prev_mode = os.environ.get(
-            "AV62_MODE", "off")
-        os.environ["AV62_MODE"] = \
-            "shadow"
+        from services.av62_mode_service import (
+            legacy_forced,
+        )
+        _fctx = legacy_forced("shadow")
+        _fctx.__enter__()
         try:
             from services.av62_assess_service import (
                 Av62AssessService,
@@ -261,7 +255,7 @@ class Av62AppealService:
                     assessed_by="appeal-"
                                 "pipeline"))
         finally:
-            _restore_mode(prev_mode)
+            _fctx.__exit__(None, None, None)
 
         new_value = float(
             reassess.get("baseValue") or 0)
@@ -373,10 +367,11 @@ class Av62AppealService:
 
         # 裁决执行(mode save/restore——
         # 终审不受开关影响)
-        prev_mode = os.environ.get(
-            "AV62_MODE", "off")
-        os.environ["AV62_MODE"] = \
-            "shadow"
+        from services.av62_mode_service import (
+            legacy_forced,
+        )
+        _fctx = legacy_forced("shadow")
+        _fctx.__enter__()
         try:
             if decision == "uphold":
                 # 维持原值: 恢复原证据
@@ -418,7 +413,7 @@ class Av62AppealService:
                             "appeal-"
                             "overturn")))
         finally:
-            _restore_mode(prev_mode)
+            _fctx.__exit__(None, None, None)
 
         final_value = float(
             final.get("baseValue") or 0)
@@ -560,7 +555,7 @@ class Av62AppealService:
                 "detail": detail,
                 "createdAt": ts(),
             })
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "av62_track_failed %s: %s",
                 event_type, exc)

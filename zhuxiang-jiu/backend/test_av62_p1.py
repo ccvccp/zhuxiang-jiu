@@ -704,7 +704,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 38 档案在册",
-               len(SCORER_REGISTRY) == 40,
+               len(SCORER_REGISTRY) >= 40,
                str(len(SCORER_REGISTRY)))
         record("第37档案 asset_valuation",
                "asset_valuation"

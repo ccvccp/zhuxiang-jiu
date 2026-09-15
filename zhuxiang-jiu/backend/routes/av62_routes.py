@@ -41,10 +41,46 @@
     - KeyError → 404 / ValueError → 409
 """
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 
 router = APIRouter(prefix="/api/av62",
                    tags=["AI智能无形资产估值(62号)"])
+
+
+# ============================================================
+# 大模型三态灰度(全站范式): 决策面门控 + 响应留痕标记
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(AV62_MODE=off → 409; shadow/assist 放行)"""
+    from services.av62_mode_service import (
+        Av62ModeService,
+    )
+    return await Av62ModeService().require_decision_mode()
+
+
+def _decision(fn):
+    """决策端点装饰器: 门控(off 409) + shadow/assist 标记(av62Mode)
+
+    观测面/纠错面(申诉/裁决/回流)不受影响; 服务层同步桥接
+    require_active_mode 与本门控读取同一集中模式层。
+    """
+    import functools
+    from services.av62_mode_service import MODE_VALUES
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            mode_state = await _gate()
+        except ValueError as e:
+            raise HTTPException(
+                status_code=409, detail=str(e)) from e
+        result = await fn(*args, **kwargs)
+        if isinstance(result, dict) \
+                and mode_state.get("mode") in MODE_VALUES[1:]:
+            result = {**result, "av62Mode": mode_state["mode"]}
+        return result
+    return wrapper
 
 
 def _require_admin(x_role: str | None) -> str:
@@ -65,6 +101,7 @@ async def registry(
 
 
 @router.post("/assets")
+@_decision
 async def register_asset(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -100,7 +137,7 @@ async def register_asset(
                     or "admin")))
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/assets")
@@ -134,7 +171,7 @@ async def get_asset(
             asset_id=asset_id)
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/model/status")
@@ -149,6 +186,7 @@ async def model_status(
 
 
 @router.post("/assess")
+@_decision
 async def assess(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -189,10 +227,10 @@ async def assess(
                     or "admin")))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/assessments")
@@ -228,10 +266,11 @@ async def get_assessment(
             .get_assessment(assess_id))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/scenarios/convert")
+@_decision
 async def convert_scenario(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -265,7 +304,7 @@ async def convert_scenario(
                     or "admin")))
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/scenarios")
@@ -295,6 +334,7 @@ async def scenarios(
 
 
 @router.post("/stress")
+@_decision
 async def stress(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -321,10 +361,11 @@ async def stress(
                     "removeDomains")))
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/activate")
+@_decision
 async def activate(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -353,13 +394,14 @@ async def activate(
                     or "admin")))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/threshold/calibrate")
+@_decision
 async def threshold_calibrate(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -404,10 +446,10 @@ async def threshold_calibrate(
                 body.get("reason") or ""))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/thresholds")
@@ -460,10 +502,10 @@ async def submit_appeal(
                     or "member")))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/appeals/{appeal_id}/review")
@@ -498,10 +540,10 @@ async def review_appeal(
                     or "")))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/appeals")
@@ -540,7 +582,7 @@ async def get_appeal(
             .get_appeal(appeal_id))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/fairness/report")
@@ -600,10 +642,10 @@ async def submit_verification(
                     or "admin")))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/feedback/collect")
@@ -651,6 +693,7 @@ async def dashboard(
 
 
 @router.post("/redteam")
+@_decision
 async def redteam(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -669,7 +712,85 @@ async def redteam(
             .run_all())
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
+
+
+
+# ============================================================
+# 大模型控制面(全站范式 4 端点)
+# ============================================================
+
+@router.get("/mode")
+async def av62_mode():
+    """灰度总览(模式/读取链/护栏/红线公示——观测面永不关停)"""
+    from services.av62_mode_service import (
+        Av62ModeService,
+    )
+    return {"success": True,
+            "data": await Av62ModeService().status_view()}
+
+
+@router.post("/mode/override")
+async def av62_mode_override(
+        mode: str = Query(
+            "", description="运行时切档(空串清除回落 env)"),
+        x_member_id: str = Header(default="",
+                                  alias="X-Member-Id")):
+    """运行时切档(免容器重建, 人工留痕)"""
+    from services.av62_mode_service import (
+        Av62ModeService,
+    )
+    try:
+        operator = ("m" + x_member_id) if x_member_id else "admin"
+        return {"success": True,
+                "data": await Av62ModeService().set_override(
+                    mode, operator=operator)}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/mode/guard")
+async def av62_mode_guard(
+        body: dict,
+        x_member_id: str = Header(default="",
+                                 alias="X-Member-Id")):
+    """护栏检查(三指标恶化 >3% 自动暂停; baseline 可选覆盖)
+
+    body: {appealOverturnRate, stressFailRate,
+           fairnessAnomalyRate, baseline?{同三键}}
+    """
+    from services.av62_mode_service import (
+        Av62ModeService,
+    )
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=409, detail="请求体需为对象")
+    try:
+        return {"success": True,
+                "data": await Av62ModeService().guard_check(
+                    body.get("appealOverturnRate"),
+                    body.get("stressFailRate"),
+                    body.get("fairnessAnomalyRate"),
+                    baseline=body.get("baseline"))}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/mode/resume")
+async def av62_mode_resume(
+        note: str = Query("", description="恢复备注(决策留痕)"),
+        x_member_id: str = Header(default="",
+                                 alias="X-Member-Id")):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    from services.av62_mode_service import (
+        Av62ModeService,
+    )
+    try:
+        operator = ("m" + x_member_id) if x_member_id else "admin"
+        return {"success": True,
+                "data": await Av62ModeService().resume(
+                    operator=operator, note=note)}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def register_av62_routes(app) -> None:

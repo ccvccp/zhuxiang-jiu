@@ -29,7 +29,6 @@
 """
 
 import logging
-import os
 
 logger = logging.getLogger("av62_registry")
 
@@ -385,7 +384,7 @@ DOMAIN_LIQUIDITY = {
 #  46号审批可校准 30-365)
 # ============================================================
 
-import math  # noqa: E402
+import math
 
 DECAY_HALF_LIFE_DAYS = 90
 DECAY_LAMBDA = round(
@@ -667,12 +666,13 @@ def _validate_liquidity() -> None:
 
 
 def current_mode() -> str:
-    """模块开关(AV62_MODE, 默认 off——
-    决策面关闭: off=仅观测面; shadow=
-    影子估值期(评估留痕); assist=
-    辅助估值期(登记开放)"""
-    mode = os.environ.get("AV62_MODE") or DEFAULT_MODE
-    return mode if mode in MODE_VALUES else DEFAULT_MODE
+    """模块开关(集中模式层同步桥接:
+    强制>暂停>override>env; off=仅观测面;
+    shadow=影子估值期; assist=辅助估值期)"""
+    from services.av62_mode_service import (
+        legacy_current_mode,
+    )
+    return legacy_current_mode()
 
 
 def get_element(role: str, domain: str
@@ -721,23 +721,23 @@ def validate_evidence(role: str, domain: str,
             rejected.append(k)
     # 负资产域证据必填(处罚记录
     # 不可缺省——防漏报洗白)
-    if is_negative(role, domain):
-        if "penaltyRecords" in schema \
-                and "penaltyRecords" \
-                not in cleaned \
-                and "complaintRate" \
-                not in cleaned:
-            return {
-                "valid": False,
-                "cleaned": cleaned,
-                "missing":
-                    ["penaltyRecords"],
-                "rejectedFields":
-                    rejected,
-                "error": "负资产域证据"
-                         "必填(处罚/投诉"
-                         "不可缺省)",
-            }
+    if is_negative(role, domain) \
+            and "penaltyRecords" in schema \
+            and "penaltyRecords" \
+            not in cleaned \
+            and "complaintRate" \
+            not in cleaned:
+        return {
+            "valid": False,
+            "cleaned": cleaned,
+            "missing":
+                ["penaltyRecords"],
+            "rejectedFields":
+                rejected,
+            "error": "负资产域证据"
+                     "必填(处罚/投诉"
+                     "不可缺省)",
+        }
     return {
         "valid": not rejected,
         "cleaned": cleaned,
@@ -749,7 +749,7 @@ def validate_evidence(role: str, domain: str,
 def registry_view() -> dict:
     """注册表自描述(观测面)"""
     by_role: dict = {}
-    for (role, domain), el in \
+    for (role, domain), _el in \
             TRUST_ELEMENTS.items():
         by_role.setdefault(
             role, []).append(domain)

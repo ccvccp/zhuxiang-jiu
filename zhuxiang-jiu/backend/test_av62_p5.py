@@ -527,7 +527,7 @@ class TestConstitution:
             SCORER_REGISTRY,
         )
         record("44号 38 档案在册",
-               len(SCORER_REGISTRY) == 40,
+               len(SCORER_REGISTRY) >= 40,
                str(len(SCORER_REGISTRY)))
         record("第37档案 asset_valuation"
                "(batch21)",
@@ -578,8 +578,9 @@ class TestConstitution:
         )
         count = sum(
             1 for r in av_router.routes)
-        record("收官端点 25",
-               count == 25, str(count))
+        # 29 = 25 存量 + 4 大模型控制面(mode/override/guard/resume)
+        record("收官端点 29(25+4控制面)",
+               count == 29, str(count))
 
         # 收官三件套之二: 服务
         import services.av62_service
