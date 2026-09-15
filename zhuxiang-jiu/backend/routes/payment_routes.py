@@ -3,7 +3,8 @@
 鉴权:
     - 用户端(9 接口): X-Member-Id 头标识会员(创建支付/查询/发起支付/关闭/退款申请/撤回/退款列表)
     - 管理端(17 接口): X-Role: admin 头(退款/付款审批 + P1 对账/渠道管理)
-    - 渠道回调(3 接口): 支付/退款/打款回调(由渠道调用, 鉴权由签名/Token 保证, 此处简化)
+    - 渠道回调(3 接口): 支付回调验签已实施(P0-2: 微信平台证书+APIv3/
+      支付宝 RSA2; real/mock_fallback 强制); 退款/打款回调验签待接(P2)
     - 公开(3 接口): 启用的渠道列表/渠道详情/对账批次查询(P1)
 
 异常映射(遵循项目约定):
@@ -27,11 +28,21 @@
 """
 
 from typing import Annotated
+import json
+import logging
+from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.payment_service import PaymentService
+from services.pay_gateway_service import (
+    CallbackVerificationError, callback_verification_required,
+    verify_wechat_callback, verify_alipay_callback,
+)
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -313,17 +324,27 @@ async def start_reconciliation(
 @router.post("/api/payment/{pay_no}/start", tags=["收款管理"])
 async def start_pay(
     pay_no: str,
+    request: Request,
     x_member_id: str | None = Header(None, alias="X-Member-Id"),
     x_role: str | None = Header(None, alias="X-Role"),
 ):
-    """发起渠道支付(待支付 → 支付中; 归属会员/admin, 游客单凭单号)"""
+    """发起渠道支付(待支付 → 支付中 → 渠道三态; 归属会员/admin, 游客单凭单号)
+
+    - mock(默认): 业务场景确定性回执自动落账;
+    - real(P0-1 渠道执行器): 微信 V3/支付宝统一下单, 返回真实预支付
+      参数(凭证缺失 409 fail-hard), 等待渠道回调落账;
+    - 微信 h5 场景取 X-Forwarded-For 客户端 IP 透传网关。
+    """
     try:
         pay = await _service.get_pay(pay_no)
     except KeyError as e:
         raise _map_key_error(e) from e
     _check_pay_access(pay, x_member_id, x_role)
+    # 客户端 IP(微信 h5 统一下单必填; nginx 反代后取 X-Forwarded-For 首段)
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0]
+    client_ip = forwarded.strip() or (request.client.host if request.client else "")
     try:
-        return await _service.start_pay(pay_no)
+        return await _service.start_pay(pay_no, client_ip=client_ip)
     except KeyError as e:
         raise _map_key_error(e) from e
     except ValueError as e:
@@ -352,19 +373,93 @@ async def close_pay(
 
 
 @router.post("/api/payment/callback/pay", tags=["收款管理"])
-async def pay_callback(req: PayCallbackRequest):
+async def pay_callback(request: Request):
     """支付回调(渠道推送, 幂等: 重复回调返回成功)
 
-    实际场景: 由支付渠道(微信/支付宝)调用, 通过签名/Token 鉴权
+    P0-2 验签(PAY60_CHANNEL_MODE=real/mock_fallback 强制; mock 开放):
+        - 微信 V3(JSON + Wechatpay-* 签名头): 平台证书验签 + 时间窗
+          防重放(±300s) + APIv3 GCM 解密 resource
+        - 支付宝(form 异步通知): RSA2 公钥验签 + app_id 校验
+        - 归一化内部载荷(JSON 无签名头): mock 兼容通道(测试/内部),
+          验签模式下拒绝(401)
+    验签失败: 401 + 疑似伪造告警留痕。
     """
+    raw = await request.body()
+    content_type = (request.headers.get("content-type") or "").lower()
     try:
+        if "application/x-www-form-urlencoded" in content_type:
+            return await _handle_alipay_callback(raw)
+        if request.headers.get("Wechatpay-Signature"):
+            return await _handle_wechat_callback(request.headers, raw)
+        if callback_verification_required():
+            raise CallbackVerificationError(
+                "real/mock_fallback 模式仅接受渠道签名回调"
+                "(归一化内部载荷拒绝)")
+        body = json.loads(raw)
+        req = PayCallbackRequest(**body)
         return await _service.pay_callback(
             req.channelTradeNo, req.callbackContent, req.payNo,
         )
+    except CallbackVerificationError as e:
+        logger.warning("payment_callback_forge_suspect err=%s", e)
+        raise HTTPException(
+            status_code=401, detail=f"回调验签失败: {e}") from e
     except KeyError as e:
         raise _map_key_error(e) from e
     except ValueError as e:
         raise _map_value_error(e) from e
+
+
+async def _validate_callback_order(pay_no: str, channel: str,
+                                    amount_yuan: float) -> dict:
+    """回调定位与归属校验: 渠道匹配 + 金额一致(防串单/金额篡改)
+
+    Raises:
+        CallbackVerificationError: 渠道不匹配(401)
+        KeyError: 支付单不存在(404)
+        ValueError: 金额不一致(409)
+    """
+    pay = await _service.get_pay(pay_no)
+    if (pay.get("payChannel") or "").lower() != channel:
+        raise CallbackVerificationError(
+            f"回调渠道不匹配(订单 {pay.get('payChannel')}, 回调 {channel})")
+    if abs(float(pay.get("actualAmount") or 0) - amount_yuan) > 0.005:
+        raise ValueError(
+            f"回调金额不一致(订单 ¥{pay.get('actualAmount')}, "
+            f"回调 ¥{amount_yuan:.2f})")
+    return pay
+
+
+async def _handle_wechat_callback(headers, raw: bytes):
+    """微信 V3 异步通知: 先验签(全部事件), 仅 TRANSACTION.SUCCESS 落账"""
+    content = await verify_wechat_callback(headers, raw)
+    body = json.loads(raw)
+    if body.get("event_type") != "TRANSACTION.SUCCESS":
+        return {"code": "SUCCESS", "message": "事件已确认(非支付成功)"}
+    if content.get("trade_state") != "SUCCESS":
+        return {"code": "SUCCESS", "message": "非成功态已确认"}
+    pay_no = content.get("out_trade_no", "")
+    trade_no = content.get("transaction_id", "")
+    total_cents = int((content.get("amount") or {}).get("total") or 0)
+    await _validate_callback_order(pay_no, "wechat", total_cents / 100.0)
+    r = await _service.pay_callback(trade_no, content, pay_no)
+    return {"code": "SUCCESS", "message": "OK",
+            "payNo": r.get("payNo", "")}
+
+
+async def _handle_alipay_callback(raw: bytes):
+    """支付宝异步通知(form): 验签后仅 TRADE_SUCCESS/FINISHED 落账"""
+    form = {k: v[-1] for k, v in
+            parse_qs(raw.decode("utf-8")).items()}
+    verify_alipay_callback(form)
+    if form.get("trade_status") not in ("TRADE_SUCCESS", "TRADE_FINISHED"):
+        return PlainTextResponse("success")
+    pay_no = form.get("out_trade_no", "")
+    trade_no = form.get("trade_no", "")
+    await _validate_callback_order(
+        pay_no, "alipay", float(form.get("total_amount") or 0))
+    await _service.pay_callback(trade_no, form, pay_no)
+    return PlainTextResponse("success")
 
 
 # ============================================================

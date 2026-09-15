@@ -338,17 +338,19 @@ class PaymentService:
             ],
         }
 
-    async def start_pay(self, pay_no: str) -> dict:
-        """发起渠道支付(待支付/失败 → 支付中 → 业务场景按渠道三态落账)
+    async def start_pay(self, pay_no: str, client_ip: str = "",
+                        openid: str = "") -> dict:
+        """发起渠道支付(待支付/失败 → 支付中 → 渠道三态)
 
-        业务接线场景(wallet_deposit/member_svip)按渠道三态落账
-        (PAY60_CHANNEL_MODE, 默认 mock):
-            - mock/mock_fallback: 确定性回执自动落账——返回即 paid
-              且携带业务分发结果(dispatch), 与 pay60 渠道适配层
-              同源口径(金额>0 即成功, 回执含渠道参考号);
-            - real: 返回 paying + payParams, 等待真实渠道回调
-              (fail-hard, 凭证经 .env 注入)。
-        未接线场景(order_pay 等)保持 paying 等待渠道回调。
+        渠道三态(PAY60_CHANNEL_MODE, 默认 mock):
+            - mock: 业务场景(wallet_deposit/member_svip)确定性回执
+              自动落账——返回即 paid 且携带业务分发结果(dispatch);
+            - mock_fallback: 业务场景先尝试 real 统一下单, 失败回退
+              mock 自动落账(回调留痕 fallback/fallbackReason);
+            - real: 统一下单(P0-1 渠道执行器)回填真实预支付参数
+              (jsapi 五元组/h5 链接/扫码码/支付宝跳转), 返回 paying
+              等待真实渠道回调落账; 凭证缺失 fail-hard(ValueError)。
+        未接线场景(order_pay 等)mock 下保持 paying 等待显式回调。
 
         状态机:
             - pending → paying(首次发起)
@@ -356,7 +358,7 @@ class PaymentService:
 
         Raises:
             KeyError: 支付单不存在
-            ValueError: 状态非法(非 pending/failed)
+            ValueError: 状态非法(非 pending/failed) / real 凭证缺失 / 网关拒绝
         """
         async with get_lock(f"payment:order:pay:{pay_no}"):
             order = await self.repo.get_order(pay_no)
@@ -388,25 +390,36 @@ class PaymentService:
             auto_complete = order.get("orderType") in (
                 "wallet_deposit", "member_svip")
 
-        # 渠道三态(PAY60_CHANNEL_MODE 同源口径, 41号 DRIDE 范式),
-        # 仅作用于业务接线场景(wallet_deposit/member_svip):
-        #   - mock(默认)/mock_fallback: 模拟渠道回调自动落账——
-        #     确定性回执(金额>0 即成功), 立即 paid + 业务分发,
-        #     回执含渠道参考号, 全链留痕可审计;
-        #   - real: fail-hard——不自动落账, 等待真实渠道回调
-        #     (凭证经 .env 注入, 未接入前绝不静默降级)。
-        # 未接线场景(order_pay/agent_purchase 等)保持 paying
-        # 等待渠道回调/测试显式回调, 存量语义零影响。
-        # 注意: 必须在锁外调用 pay_callback(其内部获取同一
+        # 注意: 必须在锁外调用 pay_callback/网关执行器(其内部获取同一
         # payment:order:pay:{payNo} 锁, 锁内重入会死锁)。
         channel_mode = os.environ.get("PAY60_CHANNEL_MODE") or "mock"
+
+        if channel_mode == "real":
+            # P0-1: real 渠道——统一下单回填真实预支付参数(fail-hard)
+            return await self._execute_real_prepay(
+                pay_no, result, client_ip, openid)
+
+        fallback_reason = ""
+        if channel_mode == "mock_fallback" and auto_complete:
+            # 灰度档: 先尝试 real 统一下单, 失败回退 mock(留痕)
+            try:
+                return await self._execute_real_prepay(
+                    pay_no, result, client_ip, openid)
+            except Exception as e:
+                logger.warning(
+                    "pay_mock_fallback payNo=%s real 失败回退 mock: %s",
+                    pay_no, e)
+                fallback_reason = str(e)[:200]
+
         if auto_complete and channel_mode != "real":
+            content = {"channel": "mock", "mode": channel_mode,
+                       "autoCompleted": True}
+            if fallback_reason:
+                content["fallback"] = True
+                content["fallbackReason"] = fallback_reason
             cb = await self.pay_callback(
                 channel_trade_no=f"MOCK{pay_no}",
-                callback_content={
-                    "channel": "mock", "mode": channel_mode,
-                    "autoCompleted": True,
-                },
+                callback_content=content,
                 pay_no=pay_no,
             )
             if cb.get("success"):
@@ -420,6 +433,31 @@ class PaymentService:
                     "payParams": result["payParams"],
                 }
             # 回调未成功(状态竞态等) → 保持 paying 返回, 留待渠道回调/重试
+        return result
+
+    async def _execute_real_prepay(self, pay_no: str, result: dict,
+                                   client_ip: str = "",
+                                   openid: str = "") -> dict:
+        """P0-1 real 渠道执行器: 统一下单回填真实预支付参数
+
+        - 微信 V3: jsapi 五元组 / h5 链接 / native 扫码码
+        - 支付宝: wap/page 跳转链接 / qr 码
+        - 预下单参数留痕支付单 channelPrepay(审计可回溯);
+          渠道交易号由回调终态写入 channelTradeNo。
+
+        Raises:
+            ValueError: 凭证缺失 / 渠道不支持 / 网关拒绝(路由层 409)
+        """
+        from services.pay_gateway_service import PayGatewayService
+        order = await self.repo.get_order(pay_no)
+        gw = await PayGatewayService().execute(order, client_ip, openid)
+        await self.repo.update_order_fields(pay_no, {
+            "channelPrepay": _safe_json_dumps(gw.get("prepay") or {}),
+            "updatedAt": ts(),
+        })
+        result["channelMode"] = "real"
+        result["payParams"] = {**result.get("payParams", {}),
+                              **gw.get("payParams", {})}
         return result
 
     async def pay_callback(self, channel_trade_no: str, callback_content: dict,
