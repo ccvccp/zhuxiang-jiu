@@ -12,7 +12,9 @@
     5. SVIP 续费: L5 renew 开新周期 / 非 L5 拒绝
     6. 降级缓冲恢复: 30 天内补足消费可恢复 / 未补足拒绝 / 无降级记录拒绝
     7. 全量考核: 多会员批量(kept/downgraded/skipped 统计)
-    8. HTTP 层: 进度查询/续费/恢复/到期考核(401/403/200/409)
+    8. 临期预警+调度扫描: list_near_expiry(≤30天且未达标)/run_level_expiry_scan 聚合
+    9. HTTP 层: 进度查询/续费/恢复/到期考核(401/403/200/409)
+       +管理端 4 面(admin/list 等级筛选·admin/{id} 详情·expiry/run·expiry/preview)
 """
 import asyncio
 import os
@@ -220,6 +222,52 @@ async def run_service():
     check("批量: L1 不入批次(total=3+seed)", r["total"] == 4)
     check("批量: failed=0", r["failed"] == 0)
 
+    # ============================================================
+    # 8. 临期预警 + 调度扫描(list_near_expiry / run_level_expiry_scan)
+    # ============================================================
+    reset_store()
+    near_mid = await _mk_member("13700000021")
+    await repo.update_fields(near_mid, {
+        "level": 3, "growth_value": 3000, "nickname": "临期未达标",
+        "levelUpdatedAt": (datetime.now(UTC) - timedelta(days=335)).isoformat(),  # 剩25天
+        "periodConsume": 500.0,   # L3 保级需 2000 → 25%
+    })
+    ok_mid = await _mk_member("13700000022")
+    await repo.update_fields(ok_mid, {
+        "level": 3, "growth_value": 3000, "nickname": "临期已达标",
+        "levelUpdatedAt": (datetime.now(UTC) - timedelta(days=340)).isoformat(),  # 剩20天
+        "periodConsume": 2500.0,  # ≥2000 → 100% 不入预警
+    })
+    far_mid = await _mk_member("13700000023")
+    await repo.update_fields(far_mid, {
+        "level": 2, "growth_value": 500, "nickname": "远期未达标",
+        "levelUpdatedAt": (datetime.now(UTC) - timedelta(days=10)).isoformat(),   # 剩350天
+        "periodConsume": 0.0,
+    })
+    l1_mid = await _mk_member("13700000024")  # L1 → 不列
+
+    warnings = await svc.list_near_expiry(days=30)
+    warn_ids = [w["memberId"] for w in warnings]
+    check("预警: 临期未达标在列", near_mid in warn_ids)
+    check("预警: 临期已达标不入列", ok_mid not in warn_ids)
+    check("预警: 远期不入列", far_mid not in warn_ids)
+    check("预警: L1 不入列", l1_mid not in warn_ids)
+    near_w = next(w for w in warnings if w["memberId"] == near_mid)
+    check("预警: 字段齐全(等级/进度/到期日)",
+          near_w["level"] == 3 and near_w["requirement"] == 2000
+          and near_w["progressPercent"] == 25.0
+          and "expireAt" in near_w and "daysRemaining" in near_w)
+
+    # 调度扫描(全量考核 + 预警快照聚合; 复用 run_level_expiry_check 锁)
+    from services.member_level_scheduler import run_level_expiry_scan
+    scan = await run_level_expiry_scan()
+    check("扫描: 聚合含考核统计", "kept" in scan["expiry"]
+          and "downgraded" in scan["expiry"])
+    scan_warn_ids = [w["memberId"] for w in scan["nearExpiry"]]
+    check("扫描: 预警快照含临期会员", near_mid in scan_warn_ids)
+    check("扫描: 留痕字段(scannedAt/nearExpiryCount)",
+          "scannedAt" in scan and scan["nearExpiryCount"] >= 1)
+
 
 def run_http():
     global PASS, FAIL
@@ -253,6 +301,58 @@ def run_http():
     body = r.json()
     check("HTTP 考核: admin 200", r.status_code == 200
           and body.get("success") is True, f"{r.status_code} {r.text[:150]}")
+
+    # ============================================================
+    # 9. 管理端会员面(admin/list · admin/{id} · expiry/run · expiry/preview)
+    # ============================================================
+    # 列表: 非管理员 403 / admin 200
+    r = client.get("/api/member/admin/list")
+    check("HTTP 管理列表: 无权限 403", r.status_code == 403)
+    r = client.get("/api/member/admin/list", headers=ADMIN)
+    body = r.json()
+    check("HTTP 管理列表: admin 200", r.status_code == 200
+          and body.get("success") is True and body.get("total", 0) >= 1,
+          f"{r.status_code} {r.text[:120]}")
+    first = (body.get("data") or [{}])[0]
+    check("HTTP 管理列表: 字段齐全(脱敏手机号)",
+          "memberId" in first and "level" in first
+          and "****" in first.get("phone", ""), str(first)[:120])
+    # 等级筛选
+    r = client.get("/api/member/admin/list?level=5", headers=ADMIN)
+    body = r.json()
+    check("HTTP 管理列表: 等级筛选生效",
+          r.status_code == 200
+          and all(m.get("level") == 5 for m in body.get("data", [])),
+          f"{r.text[:120]}")
+
+    # 详情: admin 200(含保级进度) / 不存在 404
+    r = client.get("/api/member/admin/1", headers=ADMIN)
+    body = r.json()
+    check("HTTP 管理详情: 200 含 keepLevel",
+          r.status_code == 200 and "keepLevel" in body.get("data", {}),
+          f"{r.status_code} {r.text[:120]}")
+    r = client.get("/api/member/admin/99999", headers=ADMIN)
+    check("HTTP 管理详情: 不存在 404", r.status_code == 404)
+
+    # 全量考核(管理端): 非管理员 403 / admin 200
+    r = client.post("/api/member/admin/level-expiry/run")
+    check("HTTP 手动考核: 无权限 403", r.status_code == 403)
+    r = client.post("/api/member/admin/level-expiry/run", headers=ADMIN)
+    body = r.json()
+    check("HTTP 手动考核: admin 200", r.status_code == 200
+          and "kept" in body and "downgraded" in body,
+          f"{r.status_code} {r.text[:120]}")
+
+    # 临期预警: 无权限 403 / admin 200(观测面)
+    r = client.get("/api/member/admin/level-expiry/preview")
+    check("HTTP 临期预警: 无权限 403", r.status_code == 403)
+    r = client.get("/api/member/admin/level-expiry/preview?days=30",
+                    headers=ADMIN)
+    body = r.json()
+    check("HTTP 临期预警: admin 200(含 days/count)",
+          r.status_code == 200 and body.get("days") == 30
+          and "count" in body and "data" in body,
+          f"{r.status_code} {r.text[:120]}")
 
 
 def main():

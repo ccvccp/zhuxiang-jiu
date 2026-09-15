@@ -554,6 +554,13 @@ async def _on_startup():
     from services.recycle_negotiation_scheduler import (
         start_scheduler as start_recycle_neg_expire)
     start_recycle_neg_expire()
+    # P1·会员管理: 等级到期每日自动考核调度
+    # (level≥2 到期考核: 保级/降一级+30天缓冲恢复;
+    #  临期≤30天保级未达预警快照; 幂等;
+    #  MEMBER_LEVEL_EXPIRE_AUTO=off 关闭, 默认开启)
+    from services.member_level_scheduler import (
+        start_scheduler as start_member_level_expire)
+    start_member_level_expire()
 
 
 @app.on_event("shutdown")
@@ -627,6 +634,10 @@ async def _on_shutdown():
     from services.recycle_negotiation_scheduler import (
         stop_scheduler as stop_recycle_neg_expire)
     stop_recycle_neg_expire()
+    # P1·会员管理: 等级到期考核调度器
+    from services.member_level_scheduler import (
+        stop_scheduler as stop_member_level_expire)
+    stop_member_level_expire()
     await close_redis_client()
     logger.info("清理完成")
 

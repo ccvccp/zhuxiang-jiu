@@ -490,13 +490,48 @@ class MemberService:
                 else:
                     skipped += 1
                 results.append(r)
-            except Exception as exc:  # noqa: BLE001 单会员失败不中断
+            except Exception as exc:
                 failed += 1
                 results.append({"memberId": m.get("id"), "action": "error",
                                 "reason": str(exc)})
         return {"success": True, "total": len(results), "kept": kept,
                 "downgraded": downgraded, "skipped": skipped,
                 "failed": failed, "results": results}
+
+    async def list_near_expiry(self, days: int = 30,
+                               limit: int = 100) -> list[dict]:
+        """临期预警清单(观测面, 不落库)
+
+        规则: level≥2 且等级周期剩余天数 ≤ days 且保级进度 < 100%
+        的会员——到期降级风险清单, 供管理端预警/调度留痕。
+        (纯读计算, 复用 _level_period_progress)
+        """
+        members = await self.member_repo.list_all()
+        warnings = []
+        for m in members:
+            if m.get("level", 1) < 2:
+                continue
+            progress = self._level_period_progress(m)
+            days_remaining = progress.get("daysRemaining")
+            if days_remaining is None or days_remaining > days:
+                continue
+            if progress.get("progressPercent", 0) >= 100:
+                continue  # 已达保级额, 到期将自动保级
+            warnings.append({
+                "memberId": m.get("id"),
+                "nickname": m.get("nickname", ""),
+                "level": m.get("level", 1),
+                "levelName": LEVEL_NAMES.get(m.get("level", 1), ""),
+                "periodConsume": progress["periodConsume"],
+                "requirement": progress["requirement"],
+                "remainingAmount": progress["remainingAmount"],
+                "progressPercent": progress["progressPercent"],
+                "expireAt": progress["expireAt"],
+                "daysRemaining": days_remaining,
+            })
+        warnings.sort(key=lambda w: (w["daysRemaining"],
+                                     -w["remainingAmount"]))
+        return warnings[:limit]
 
     async def renew_svip(self, member_id) -> dict:
         """L5 SVIP 付费续费保级(¥99/年, 设计文档 4.4 SVIP 特例)

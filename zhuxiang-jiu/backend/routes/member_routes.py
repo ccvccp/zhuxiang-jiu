@@ -1,6 +1,6 @@
 """会员管理路由
 
-端点(14 个):
+端点(18 个):
     POST   /api/member/register            手机号注册
     POST   /api/member/login               密码登录
     POST   /api/member/login/bonus         每日登录奖励
@@ -8,17 +8,26 @@
     PUT    /api/member/profile             修改个人信息
     PUT    /api/member/password            修改密码
     GET    /api/member/level               查询等级
-    POST   /api/member/consume             消费(成长值+积分+自动升级)
-    GET    /api/member/points              查询积分
+    POST   /api/member/level/expiry-check  单会员等级到期考核
+    POST   /api/member/level/renew-svip    L5 付费续费保级
+    POST   /api/member/level/recover       降级缓冲期恢复
+    POST   /api/member/consume            消费(成长值+积分+自动升级)
+    GET    /api/member/points             查询积分
     POST   /api/member/points/deduct       积分抵扣
     GET    /api/member/addresses           地址列表
     POST   /api/member/addresses           新增地址
     PUT    /api/member/addresses/{addr_id} 修改地址
     DELETE /api/member/addresses/{addr_id} 删除地址
+    管理端(X-Role: admin):
+    GET    /api/member/admin/list                   会员列表(等级筛选)
+    GET    /api/member/admin/{member_id}            会员详情(保级进度)
+    POST   /api/member/admin/level-expiry/run       手动全量到期考核
+    GET    /api/member/admin/level-expiry/preview    临期预警清单
 
 鉴权:
     - 注册/登录: 无需登录态
     - 其他接口: 需 X-Member-Id 头标识当前会员(Mock 模式)
+    - 管理端: 需 X-Role: admin 头
 
 异常映射:
     KeyError  → 404(资源不存在)
@@ -30,7 +39,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel as PydBaseModel, Field
 
-from services.member_service import MemberService
+from services.member_service import MemberService, LEVEL_NAMES as _LEVEL_NAMES
 
 router = APIRouter()
 
@@ -135,6 +144,12 @@ def _require_member_id(x_member_id: str | None) -> int:
         return int(x_member_id)
     except (TypeError, ValueError):
         raise HTTPException(status_code=401, detail="X-Member-Id 格式不正确") from None
+
+
+def _require_admin(x_role: str | None):
+    """管理端鉴权(X-Role: admin)"""
+    if not x_role or x_role != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限(X-Role: admin)")
 
 
 # ============================================================
@@ -397,6 +412,90 @@ async def delete_address(
         return await _member_service.delete_address(member_id, address_id)
     except KeyError as e:
         raise _map_key_error(e) from e
+
+
+# ============================================================
+#  管理端(会员管理面, X-Role: admin)
+# ============================================================
+
+@router.get("/api/member/admin/list", tags=["会员管理(管理端)"])
+async def admin_list_members(
+    level: int | None = None,
+    limit: int = 50,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """会员列表(等级筛选, 管理端)"""
+    _require_admin(x_role)
+    members = await _member_service.member_repo.list_all()
+    if level is not None:
+        members = [m for m in members if m.get("level", 1) == level]
+    items = [{
+        "memberId": m.get("id"),
+        "nickname": m.get("nickname", ""),
+        "phone": str(m.get("phone", ""))[:3] + "****" + str(m.get("phone", ""))[-4:],
+        "level": m.get("level", 1),
+        "levelName": _LEVEL_NAMES.get(m.get("level", 1), "竹芽会员"),
+        "growthValue": m.get("growthValue", 0),
+        "periodConsume": float(m.get("periodConsume", 0) or 0),
+        "status": m.get("status", "active"),
+        "createdAt": m.get("createdAt", ""),
+    } for m in members[:limit]]
+    return {"success": True, "total": len(members), "data": items}
+
+
+@router.get("/api/member/admin/{member_id}", tags=["会员管理(管理端)"])
+async def admin_member_detail(
+    member_id: int,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """会员详情(含等级周期/保级进度, 管理端)"""
+    _require_admin(x_role)
+    try:
+        member = await _member_service.member_repo.get_by_id(member_id)
+        if not member:
+            raise KeyError(f"会员 {member_id} 不存在")
+        progress = _member_service._level_period_progress(member)
+        return {
+            "success": True,
+            "data": {
+                "memberId": member.get("id"),
+                "nickname": member.get("nickname", ""),
+                "phone": str(member.get("phone", ""))[:3] + "****" + str(member.get("phone", ""))[-4:],
+                "level": member.get("level", 1),
+                "levelName": _LEVEL_NAMES.get(member.get("level", 1), "竹芽会员"),
+                "growthValue": member.get("growthValue", 0),
+                "status": member.get("status", "active"),
+                "regSource": member.get("reg_source", ""),
+                "keepLevel": progress,
+                "levelDowngradedAt": member.get("levelDowngradedAt", ""),
+                "levelDowngradedFrom": member.get("levelDowngradedFrom"),
+                "svipRenewedAt": member.get("svipRenewedAt", ""),
+                "createdAt": member.get("createdAt", ""),
+            },
+        }
+    except KeyError as e:
+        raise _map_key_error(e) from e
+
+
+@router.post("/api/member/admin/level-expiry/run", tags=["会员管理(管理端)"])
+async def admin_run_level_expiry(
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """手动触发全量等级到期考核(保级/降级, 管理端)"""
+    _require_admin(x_role)
+    return await _member_service.run_level_expiry_check()
+
+
+@router.get("/api/member/admin/level-expiry/preview", tags=["会员管理(管理端)"])
+async def admin_near_expiry_preview(
+    days: int = 30,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """临期预警清单(≤N 天到期且保级未达标, 管理端观测面)"""
+    _require_admin(x_role)
+    warnings = await _member_service.list_near_expiry(days=days)
+    return {"success": True, "days": days,
+            "count": len(warnings), "data": warnings}
 
 
 # ============================================================
