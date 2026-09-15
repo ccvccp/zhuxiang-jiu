@@ -173,6 +173,30 @@
   border-radius: $radius-sm;
 }
 
+// L5 SVIP 续费区(周期信息 + 按钮)
+.svipBox {
+  margin-top: $spacing-sm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: $spacing-xs;
+}
+
+.svipTip {
+  font-size: $font-size-xs;
+  opacity: 0.9;
+  text-align: center;
+}
+
+.svipRenewBtn {
+  font-size: $font-size-sm;
+  color: #fff;
+  background: linear-gradient(90deg, #b8860b 0%, #ffd700 100%);
+  padding: $spacing-xs $spacing-lg;
+  border-radius: $radius-round;
+  font-weight: 500;
+}
+
 // 通用 section
 .section {
   background: $color-bg-card;

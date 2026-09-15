@@ -23,6 +23,9 @@ const MinePage: React.FC = () => {
   const [member, setMember] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  // 等级信息(keepLevel 保级进度, L5 SVIP 续费用)
+  const [levelInfo, setLevelInfo] = useState<any>(null);
+  const [renewing, setRenewing] = useState(false);
   // 订单区默认折叠: 会员卡与工作台等内容优先可见, 点标题展开
   const [ordersCollapsed, setOrdersCollapsed] = useState(true);
 
@@ -78,6 +81,15 @@ const MinePage: React.FC = () => {
         const db = CheckoutService.getMockDB();
         const m = (db.members || []).find((x: any) => x.id === 2) || db.members?.[0];
         setMember(m);
+      }
+
+      // 等级信息(keepLevel 保级进度/到期日/SVIP 续费标记, 失败静默)
+      try {
+        const lv = await MemberAPI.level();
+        setLevelInfo(lv);
+      } catch (e) {
+        console.warn('[mine] 等级API失败:', e);
+        setLevelInfo(null);
       }
 
       // 优先调真实后端 API 获取订单列表
@@ -139,6 +151,31 @@ const MinePage: React.FC = () => {
 
   const handleGoShopping = () => {
     Taro.switchTab({ url: '/pages/products/index' });
+  };
+
+  // L5 SVIP 付费续费(¥99/年, 续费即开新 12 个月周期)
+  const handleRenewSvip = () => {
+    if (renewing) return;
+    const kl = levelInfo?.keepLevel || {};
+    Taro.showModal({
+      title: 'SVIP 付费续费',
+      content: `续费 ¥99/年, 续费成功后等级周期重新起算 12 个月(当前周期${
+        kl.daysRemaining != null ? `剩余 ${kl.daysRemaining} 天` : '即将到期'
+      })。确认续费?`,
+      success: async (res) => {
+        if (!res.confirm) return;
+        setRenewing(true);
+        try {
+          await MemberAPI.renewSvip();
+          Taro.showToast({ title: '续费成功, 新周期已生效', icon: 'success' });
+          setRefreshKey(k => k + 1);
+        } catch (e) {
+          console.warn('[mine] SVIP 续费失败:', e);
+        } finally {
+          setRenewing(false);
+        }
+      },
+    });
   };
 
   if (!member) {
@@ -215,7 +252,21 @@ const MinePage: React.FC = () => {
             </View>
           )}
           {levelKey === 'L5' && (
-            <View className={styles.maxLevelTip}>已达最高等级</View>
+            <>
+              <View className={styles.maxLevelTip}>已达最高等级 · 竹海 SVIP</View>
+              {/* SVIP 续费区(周期信息 + ¥99/年付费续费, 仅 L5) */}
+              <View className={styles.svipBox}>
+                {levelInfo?.keepLevel?.daysRemaining != null && (
+                  <View className={styles.svipTip}>
+                    当前周期剩余 {levelInfo.keepLevel.daysRemaining} 天
+                    (到期 {(levelInfo.keepLevel.expireAt || '').slice(0, 10)})
+                  </View>
+                )}
+                <View className={styles.svipRenewBtn} onClick={handleRenewSvip}>
+                  {renewing ? '续费中...' : 'SVIP 续费 ¥99/年'}
+                </View>
+              </View>
+            </>
           )}
         </View>
 

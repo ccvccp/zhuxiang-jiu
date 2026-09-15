@@ -15,6 +15,54 @@ export interface MemberVO {
   role?: string;
 }
 
+/** 等级保级进度(后端 get_level.keepLevel 直映射) */
+export interface KeepLevelVO {
+  periodConsume: number;       // 本周期消费
+  requirement: number;         // 保级要求
+  remainingAmount: number;    // 距保级还差
+  progressPercent: number;    // 保级进度 %
+  levelUpdatedAt: string;     // 周期起算日
+  expireAt: string;           // 到期日
+  daysRemaining: number | null; // 剩余天数
+  renewable: boolean;         // SVIP 可付费续费
+  renewFee: number;           // 续费费(¥99/年)
+}
+
+/** 等级信息 VO(后端 get_level 直映射) */
+export interface LevelInfoVO {
+  memberId: string;
+  level: number;
+  levelName: string;
+  growthValue: number;
+  nextLevelGrowth: number | null;
+  thresholds: Record<string, number>;
+  keepLevel: KeepLevelVO;
+}
+
+// 后端 level → 前端 VO
+function toLevelInfo(d: any): LevelInfoVO {
+  const k = d.keepLevel || {};
+  return {
+    memberId: String(d.memberId ?? ''),
+    level: Number(d.level ?? 1),
+    levelName: d.levelName || '',
+    growthValue: Number(d.growthValue ?? 0),
+    nextLevelGrowth: d.nextLevelGrowth ?? null,
+    thresholds: d.thresholds || {},
+    keepLevel: {
+      periodConsume: Number(k.periodConsume ?? 0),
+      requirement: Number(k.requirement ?? 0),
+      remainingAmount: Number(k.remainingAmount ?? 0),
+      progressPercent: Number(k.progressPercent ?? 0),
+      levelUpdatedAt: k.levelUpdatedAt || '',
+      expireAt: k.expireAt || '',
+      daysRemaining: k.daysRemaining ?? null,
+      renewable: !!k.renewable,
+      renewFee: Number(k.renewFee ?? 0),
+    },
+  };
+}
+
 /** 收货地址 VO(后端 address 存储结构直映射) */
 export interface AddressVO {
   id: string;
@@ -64,9 +112,19 @@ export const MemberAPI = {
     };
   },
 
-  /** 查询等级 */
-  async level(): Promise<any> {
-    return await request<any>({ url: '/api/member/level' });
+  /** 查询等级(含 keepLevel 保级进度: 周期消费/到期日/剩余天数/renewable) */
+  async level(): Promise<LevelInfoVO> {
+    const res = await request<any>({ url: '/api/member/level' });
+    return toLevelInfo(res);
+  },
+
+  /** L5 SVIP 付费续费保级(¥99/年, 续费即开新 12 个月周期; 仅 L5 可调) */
+  async renewSvip(): Promise<any> {
+    return await request<any>({
+      url: '/api/member/level/renew-svip',
+      method: 'POST',
+      data: {},
+    });
   },
 
   /** 查询积分 */
