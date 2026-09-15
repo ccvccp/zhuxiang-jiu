@@ -688,6 +688,61 @@ class MemberService:
                 "logs": logs,
             }
 
+    async def record_order_consume(self, member_id, amount: float) -> dict:
+        """订单支付消费入账(成长值 + 保级周期 + 自动升级判定)
+
+        供 order_service.pay 复用——与 consume() 的差异:
+        积分返分由订单流程自行处理(以订单号为流水引用), 此处
+        仅做成长值累加/等级周期累计/自动升级判定, 修复订单支付
+        只加成长值不升等级不累计保级消费的缺口。
+
+        Raises:
+            KeyError: 会员不存在
+            ValueError: 金额非法
+        """
+        if amount <= 0:
+            raise ValueError("消费金额必须大于 0")
+
+        async with get_lock(f"member:{member_id}"):
+            member = await self.member_repo.get_by_id(member_id)
+            if not member:
+                raise KeyError(f"会员 {member_id} 不存在")
+
+            growth_add = int(amount)  # 每元 1 成长值
+            old_level = member.get("level", 1)
+            new_growth = await self.member_repo.add_growth(
+                member_id, growth_add)
+
+            # 自动升级判定(与 consume() 同口径)
+            new_level = _calc_level(new_growth)
+            if new_level > old_level:
+                await self.member_repo.update_level(member_id, new_level)
+                # 升级日重置等级周期(有效期 12 个月自此起算)
+                await self.member_repo.update_fields(member_id, {
+                    "levelUpdatedAt": _now_iso(),
+                    "periodConsume": round(amount, 2),
+                })
+                logger.info("level_up member_id=%r %s->%s growth=%d "
+                            "source=order_pay",
+                            member_id, old_level, new_level, new_growth)
+            elif new_level == old_level and old_level >= 2:
+                # 同级消费累计入保级周期
+                period = float(member.get("periodConsume", 0) or 0)
+                await self.member_repo.update_fields(member_id, {
+                    "periodConsume": round(period + amount, 2),
+                })
+
+            return {
+                "success": True,
+                "memberId": member_id,
+                "amount": amount,
+                "growthValue": new_growth,
+                "fromLevel": old_level,
+                "toLevel": new_level,
+                "levelName": LEVEL_NAMES[new_level],
+                "leveledUp": new_level > old_level,
+            }
+
     # ============================================================
     #  积分
     # ============================================================

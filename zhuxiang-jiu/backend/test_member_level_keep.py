@@ -15,6 +15,7 @@
     8. 临期预警+调度扫描: list_near_expiry(≤30天且未达标)/run_level_expiry_scan 聚合
     9. HTTP 层: 进度查询/续费/恢复/到期考核(401/403/200/409)
        +管理端 4 面(admin/list 等级筛选·admin/{id} 详情·expiry/run·expiry/preview)
+    10. 订单支付消费入账: record_order_consume(升级/同级累计/L1 不累计/连续跨级)
 """
 import asyncio
 import os
@@ -267,6 +268,38 @@ async def run_service():
     check("扫描: 预警快照含临期会员", near_mid in scan_warn_ids)
     check("扫描: 留痕字段(scannedAt/nearExpiryCount)",
           "scannedAt" in scan and scan["nearExpiryCount"] >= 1)
+
+    # ============================================================
+    # 10. 订单支付消费入账(record_order_consume——order pay 链路)
+    # ============================================================
+    reset_store()
+    # 10a. 升级路径: L1 消费 500 → L2 + 周期落库
+    oc_mid = await _mk_member("13700000025")
+    r = await svc.record_order_consume(oc_mid, 500)
+    check("订单入账: L1→L2 升级", r["leveledUp"] is True
+          and r["toLevel"] == 2 and r["fromLevel"] == 1)
+    m = await repo.get_by_id(oc_mid)
+    check("订单入账: 升级周期落库", bool(m.get("levelUpdatedAt"))
+          and m.get("periodConsume") == 500.0)
+    check("订单入账: 成长值 500", m.get("growth_value") == 500)
+    # 10b. 同级消费累计保级周期
+    r = await svc.record_order_consume(oc_mid, 100)
+    m = await repo.get_by_id(oc_mid)
+    check("订单入账: 同级累计 600", r["leveledUp"] is False
+          and m.get("periodConsume") == 600.0)
+    # 10c. L1 同级不累计周期(无保级要求)
+    oc_l1 = await _mk_member("13700000026")
+    r = await svc.record_order_consume(oc_l1, 50)
+    m = await repo.get_by_id(oc_l1)
+    check("订单入账: L1 不累计周期", r["toLevel"] == 1
+          and not m.get("periodConsume"))
+    # 10d. 连续两笔跨级(450+60=510 → L2)
+    oc_two = await _mk_member("13700000027")
+    await svc.record_order_consume(oc_two, 450)
+    r = await svc.record_order_consume(oc_two, 60)
+    m = await repo.get_by_id(oc_two)
+    check("订单入账: 第二笔跨门槛升级", r["leveledUp"] is True
+          and m.get("level") == 2 and m.get("periodConsume") == 60.0)
 
 
 def run_http():

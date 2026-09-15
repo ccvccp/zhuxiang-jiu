@@ -403,14 +403,19 @@ class OrderService:
             if consume_amount > 0:
                 member = await self.member_repo.get_by_id(order["memberId"])
                 if member:
-                    new_growth = await self.member_repo.add_growth(
+                    # 成长值+保级周期+自动升级(member_service 统一口径,
+                    # 修复订单支付只加成长值不升等级不累计保级消费的缺口)
+                    from services.member_service import MemberService
+                    consume_r = await MemberService().record_order_consume(
                         order["memberId"], consume_amount)
+                    new_growth = consume_r["growthValue"]
                     # 消费返分 best-effort: 触达日/月/单笔上限不阻断支付主流程
+                    # (本单返分按支付前等级倍数; 升级自下一单生效)
                     try:
                         earn_result = await PointsService().earn_order_points(
                             user_id=order["memberId"], order_id=order_id,
                             order_amount=actual_amount,
-                            member_level=member.get("level", 1))
+                            member_level=consume_r["fromLevel"])
                         earned_points = earn_result.get("earnedPoints", 0)
                     except ValueError as exc:
                         logger.warning("order_earn_points_skipped order=%s "
@@ -420,6 +425,10 @@ class OrderService:
                     logs.append({"step": "会员消费", "level": "INFO",
                                  "msg": f"+{consume_amount} 成长值(累计 {new_growth}), "
                                         f"+{earned_points} 竹叶"})
+                    if consume_r.get("leveledUp"):
+                        logs.append({"step": "等级提升", "level": "WARN",
+                                     "msg": f"升级为 {consume_r['levelName']}"
+                                            "(下一单享新等级权益)"})
 
             # 更新订单
             order["status"] = PAID
