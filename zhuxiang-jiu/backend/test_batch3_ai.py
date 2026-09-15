@@ -172,8 +172,9 @@ class TestRegistry:
             SCORER_REGISTRY, DECISION_THRESHOLDS,
             default_weights,
         )
+        # 下限断言(62号教训: 精确计数随后续模块注册腐化)
         record("45 档案",
-               len(SCORER_REGISTRY) == 56,
+               len(SCORER_REGISTRY) >= 56,
                str(len(SCORER_REGISTRY)))
         for sid, batch, module in (
                 ("product_launch", 27, "01产品展示"),

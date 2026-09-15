@@ -55,15 +55,18 @@ class TestPanorama:
         )
 
         p = await panorama()
-        record("全景评分器总数 56",
-               p["scorerCount"] == 56
-               == len(SCORER_REGISTRY),
+        # 守恒+下限断言(62号教训: 精确计数随后续模块注册腐化)
+        record("全景评分器总数(注册表守恒)",
+               p["scorerCount"] == len(SCORER_REGISTRY)
+               and len(SCORER_REGISTRY) >= 56,
                f"got {p['scorerCount']}")
         record("模式分布计数守恒",
-               sum(p["modeDistribution"].values()) == 56,
+               sum(p["modeDistribution"].values())
+               == len(SCORER_REGISTRY),
                str(p["modeDistribution"]))
         record("默认全 observe",
-               p["modeDistribution"]["observe"] == 56
+               p["modeDistribution"]["observe"]
+               == len(SCORER_REGISTRY)
                and p["modeDistribution"]["shadow"] == 0
                and p["modeDistribution"]["enforce"] == 0,
                str(p["modeDistribution"]))
@@ -113,7 +116,8 @@ class TestPanorama:
 
         p3 = await panorama()
         record("模式恢复 observe",
-               p3["modeDistribution"]["observe"] == 56,
+               p3["modeDistribution"]["observe"]
+               == len(SCORER_REGISTRY),
                str(p3["modeDistribution"]))
 
 
@@ -152,8 +156,8 @@ class TestHub:
                    for z in ov["zones"]),
                str({z: ov["zones"][z] for z in ov["zones"]
                     if "error" in ov["zones"][z]}))
-        record("44号联动评分器 56",
-               ov["zones"]["linkage44"]["scorerCount"] == 56,
+        record("44号联动评分器(下限)",
+               ov["zones"]["linkage44"]["scorerCount"] >= 56,
                str(ov["zones"]["linkage44"]))
         record("45号联动档案计数",
                isinstance(ov["zones"]["linkage45"]

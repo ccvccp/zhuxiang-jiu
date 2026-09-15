@@ -161,8 +161,9 @@ class TestRegistry:
             SCORER_REGISTRY, DECISION_THRESHOLDS,
             default_weights,
         )
+        # 下限断言(62号教训: 精确计数随后续模块注册腐化)
         record("48 档案",
-               len(SCORER_REGISTRY) == 56,
+               len(SCORER_REGISTRY) >= 56,
                str(len(SCORER_REGISTRY)))
         for sid, batch in (
                 ("trace_integrity", 30),
