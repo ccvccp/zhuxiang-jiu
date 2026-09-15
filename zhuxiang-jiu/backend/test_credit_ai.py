@@ -163,8 +163,9 @@ class TestRegistry:
             SCORER_REGISTRY,
             default_weights,
         )
+        # 下限断言(62号教训: 精确计数随后续模块注册腐化)
         record("44号 55 档案",
-               len(SCORER_REGISTRY) == 55,
+               len(SCORER_REGISTRY) >= 55,
                str(len(SCORER_REGISTRY)))
         record("credit_scoring 在册"
                "(batch25)",
