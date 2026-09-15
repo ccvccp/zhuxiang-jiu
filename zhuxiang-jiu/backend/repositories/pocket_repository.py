@@ -264,6 +264,17 @@ class PocketRepository:
         return sorted(result, key=lambda x: x.get("createdAt", ""),
                       reverse=True)[:limit]
 
+    async def checkin_photo_exists(self, member_id: int,
+                                   photo: str) -> bool:
+        """同会员打卡照片指纹是否已存在(防刷: 同一照片不可复用打卡)
+
+        口径: 图片本体不上传服务器——photoUrl 存 SHA-256 指纹;
+        每日最多 maxActiveSites(5) 次打卡, limit=500 覆盖数月记录。
+        """
+        checkins = await self.list_checkins(
+            member_id=member_id, limit=500)
+        return any(c.get("photoUrl") == photo for c in checkins)
+
     # ============================================================
     # 参数配置(单例)
     # ============================================================

@@ -3,21 +3,23 @@
  * ============================================================
  * 范式: 纯 Node 脚本(对齐 test-flash-admin.js) + TS 内存编译 + Module._load mock
  *
- * 覆盖(顺手赚钱升级):
+ * 覆盖(顺手赚钱·现场拍照指纹防刷):
  *   [API 层 api/pocket.ts]
- *   1. PocketAPI.uploadPhoto 请求体(data_b64 snake_case + fmt 提取)与 URL 返回
- *   2. PocketAdminAPI.listSites URL+admin 头+status 过滤参数
- *   3. PocketAdminAPI.invalidateSite URL+POST+reason 请求体
- *   4. PocketAdminAPI.getSettings 映射(数值化+enabled 布尔化)
- *   5. PocketAdminAPI.updateSettings PUT+字段透传
- *   6. mapAdminSite 字段映射(点位原始字段)
+ *   1. 不再上传图片本体(无 uploadPhoto 方法)
+ *   2. reportSite/checkin 提交 photoUrl=指纹(sha256:hex64)
+ *   3. PocketAdminAPI.listSites URL+admin 头+status 过滤参数
+ *   4. PocketAdminAPI.invalidateSite URL+POST+reason 请求体
+ *   5. PocketAdminAPI.getSettings 映射(数值化+enabled 布尔化)
+ *   6. PocketAdminAPI.updateSettings PUT+字段透传
  *   [页面层 pages/pocket-admin]
  *   7. 两页签结构(点位管理/参数配置)
- *   8. 状态筛选(换行平铺)与作废操作
- *   9. 参数配置表单(奖励/阈值/天数)
- *   10. 照片缩略+预览
+ *   8. 指纹徽章(点击复制)+状态筛选+作废
  *   [用户页 pages/pocket]
- *   11. 打卡照片上传链路(choosePhoto 上传后再提交)
+ *   9. 现场拍照(camera only)+指纹链路(dataUrlToSha256)
+ *   [行为层 utils/image-reader]
+ *   10. dataUrlToSha256 真实哈希(与 Node crypto 对账)
+ *   11. H5 路径 originalFileObj→FileReader→dataUrl
+ *   12. FSM 桩防护(Promise 无 readFile→受控 reject)
  */
 const fs = require('fs');
 const path = require('path');
@@ -36,15 +38,22 @@ const requests = [];
 const mockRequest = async (opts) => {
   requests.push(opts);
   const url = opts.url || '';
-  if (url === '/api/hub/media/image') {
-    return { success: true, url: '/media/image/20260915-abc123def456.jpg',
-             size: 10240, mediaType: 'image' };
+  if (url === '/api/pocket/site/report' && opts.method === 'POST') {
+    return { success: true, site: { siteId: 9, scene: opts.data.scene,
+      posterType: 'poster', address: opts.data.address,
+      photoUrl: opts.data.photoUrl, checkinCount: 1, consecutiveDays: 1,
+      status: 'active', monthRewardClaimed: false, aiScoreLatest: 65 } };
+  }
+  if (/^\/api\/pocket\/site\/\d+\/checkin$/.test(url) && opts.method === 'POST') {
+    return { success: true, checkin: { checkinId: 1,
+      photoUrl: opts.data.photoUrl, aiScore: 65, rewardAmount: 2 } };
   }
   if (url.startsWith('/api/pocket/admin/sites')
       && !opts.method && !/\/sites\/\d+/.test(url)) {
     return { sites: [
       { siteId: 1, memberId: 8, scene: 'hotel', posterType: 'poster',
-        address: '某市某路某酒店大堂', photoUrl: '/media/image/a1.jpg',
+        address: '某市某路某酒店大堂',
+        photoUrl: 'sha256:' + 'a1'.repeat(32),
         postedAt: '2026-09-10T10:00:00+00:00', lastCheckinAt: '2026-09-14T09:00:00+00:00',
         checkinCount: 5, consecutiveDays: 5, status: 'active',
         monthRewardClaimed: false, aiScoreLatest: 90 },
@@ -114,45 +123,52 @@ const record = (name, ok, detail = '') => {
   const { PocketAPI, PocketAdminAPI } = api;
 
   console.log('[API 层 pocket.ts]');
-  // 1. uploadPhoto
-  const mediaUrl = await PocketAPI.uploadPhoto(
-    'data:image/jpeg;base64,/9j/4AAQSkZJRg==');
-  const up = requests[requests.length - 1];
-  record('uploadPhoto 请求体(data_b64 snake_case+fmt)',
-    up.url === '/api/hub/media/image' && up.method === 'POST'
-    && up.data.data_b64 === '/9j/4AAQSkZJRg=='
-    && up.data.fmt === 'jpg',
-    JSON.stringify(up.data));
-  record('uploadPhoto 返回静态 URL',
-    mediaUrl === '/media/image/20260915-abc123def456.jpg');
+  // 1. 不再上传图片本体(无 uploadPhoto 方法)
+  record('无 uploadPhoto(图片本体不上传)',
+    typeof PocketAPI.uploadPhoto === 'undefined');
 
-  // 2. listSites
+  // 2. reportSite/checkin 提交指纹
+  await PocketAPI.reportSite('hotel', 'XX市酒店大堂', 'sha256:' + 'ab'.repeat(32));
+  const rp = requests[requests.length - 1];
+  record('reportSite 提交 photoUrl=指纹',
+    rp.url === '/api/pocket/site/report' && rp.method === 'POST'
+    && rp.data.photoUrl === 'sha256:' + 'ab'.repeat(32)
+    && rp.data.scene === 'hotel',
+    JSON.stringify(rp.data));
+  await PocketAPI.checkin(3, 'sha256:' + 'cd'.repeat(32));
+  const ck = requests[requests.length - 1];
+  record('checkin 提交 photoUrl=指纹',
+    ck.url === '/api/pocket/site/3/checkin' && ck.method === 'POST'
+    && ck.data.photoUrl === 'sha256:' + 'cd'.repeat(32),
+    JSON.stringify(ck.data));
+
+  // 3. listSites
   const sites = await PocketAdminAPI.listSites({ status: 'active' });
   const ls = requests[requests.length - 1];
   record('listSites URL+admin 头+状态过滤',
     ls.url === '/api/pocket/admin/sites?status=active'
     && ls.headers['X-Role'] === 'admin');
-  record('listSites 字段映射',
+  record('listSites 字段映射(指纹透传)',
     sites.length === 2 && sites[0].siteId === 1 && sites[0].memberId === 8
-    && sites[0].photoUrl === '/media/image/a1.jpg'
+    && sites[0].photoUrl === 'sha256:' + 'a1'.repeat(32)
     && sites[1].status === 'invalid' && sites[1].monthRewardClaimed === true,
     JSON.stringify(sites[0]));
 
-  // 3. invalidateSite
+  // 4. invalidateSite
   await PocketAdminAPI.invalidateSite(1, '照片造假');
   const inv = requests[requests.length - 1];
   record('invalidateSite URL+POST+reason',
     inv.url === '/api/pocket/admin/sites/1/invalidate' && inv.method === 'POST'
     && inv.data.reason === '照片造假' && inv.headers['X-Role'] === 'admin');
 
-  // 4. getSettings
+  // 5. getSettings
   const st = await PocketAdminAPI.getSettings();
   record('getSettings 映射(数值化)',
     st.enabled === true && st.checkinReward === 2
     && st.aiScoreThreshold === 60 && st.minAddressLen === 5
     && typeof st.maxActiveSites === 'number');
 
-  // 5. updateSettings
+  // 6. updateSettings
   const st2 = await PocketAdminAPI.updateSettings({ checkinReward: 3 });
   const su = requests[requests.length - 1];
   record('updateSettings PUT+透传',
@@ -164,42 +180,54 @@ const record = (name, ok, detail = '') => {
   // 7. 两页签
   record('两页签结构',
     pageCode.includes('点位管理') && pageCode.includes('参数配置'));
-  // 8. 筛选+作废
-  record('状态筛选+作废操作',
-    pageCode.includes('STATUS_FILTERS') && pageCode.includes('invalidateSite')
-    && pageCode.includes('filterActive'));
-  // 9. 参数表单
-  record('参数配置表单(奖励/阈值/天数)',
-    pageCode.includes('checkinReward') && pageCode.includes('aiScoreThreshold')
-    && pageCode.includes('durationDays') && pageCode.includes('minAddressLen'));
-  // 10. 照片缩略+预览
-  record('照片缩略+预览',
-    pageCode.includes('photoThumb') && pageCode.includes('previewImage'));
+  // 8. 指纹徽章+筛选+作废
+  record('指纹徽章(点击复制)+筛选+作废',
+    pageCode.includes('hashBadge') && pageCode.includes('copyHash')
+    && pageCode.includes('STATUS_FILTERS') && pageCode.includes('invalidateSite')
+    && !pageCode.includes('previewImage'));
 
   console.log('[用户页 pocket]');
   const userCode = fs.readFileSync(POCKET_SRC, 'utf-8');
   const readerCode = fs.readFileSync(READER_SRC, 'utf-8');
-  // 11. 上传链路(跨端读取)
-  record('打卡照片上传链路(先上传后提交)',
-    userCode.includes('uploadPhoto')
-    && userCode.indexOf('PocketAPI.uploadPhoto') < userCode.indexOf('PocketAPI.checkin'));
+  // 9. 现场拍照(camera only)+指纹链路
+  record('现场拍照(camera only 禁相册)',
+    /sourceType:\s*\['camera'\]/.test(userCode)
+    && !/sourceType:\s*\['album'/.test(userCode));
+  record('拍照→指纹→打卡链路',
+    userCode.includes('dataUrlToSha256')
+    && userCode.includes('chooseImageAsDataUrl')
+    && !userCode.includes('uploadPhoto')
+    && !userCode.includes('hub/media/image'));
   record('跨端读取工具(H5 FileReader + 小程序 FSM 双轨)',
     readerCode.includes('originalFileObj')
     && readerCode.includes('readAsDataURL')
     && readerCode.includes('getFileSystemManager')
     && readerCode.includes("typeof fsm?.readFile !== 'function'"));
-  record('用户页已接入跨端工具(不再直调 FSM)',
-    userCode.includes('chooseImageAsDataUrl')
-    && !userCode.includes('Taro.getFileSystemManager'));
+  record('用户页不再直调 FSM',
+    !userCode.includes('Taro.getFileSystemManager'));
   const themeCode = fs.readFileSync(THEME_SRC, 'utf-8');
-  record('theme-admin 图标上传同款修复',
+  record('theme-admin 图标上传仍走跨端工具(不受影响)',
     themeCode.includes('chooseImageAsDataUrl')
     && !themeCode.includes('Taro.getFileSystemManager'));
 
   console.log('[行为层 utils/image-reader]');
-  // 15. H5 路径: originalFileObj + FileReader
   const readerMod = compileTs(READER_SRC, 'image-reader.js');
-  const { chooseImageAsDataUrl } = readerMod;
+  const { chooseImageAsDataUrl, dataUrlToSha256 } = readerMod;
+
+  // 10. dataUrlToSha256 真实哈希(与 Node crypto 对账)
+  // (Node 18 全局无 webcrypto——浏览器原生有, 测试以 webcrypto 注入模拟)
+  const nodeCrypto = require('crypto');
+  if (typeof globalThis.crypto === 'undefined' || !globalThis.crypto?.subtle) {
+    globalThis.crypto = nodeCrypto.webcrypto;
+  }
+  const expected = 'sha256:' + nodeCrypto.createHash('sha256')
+    .update(Buffer.from([0, 0, 0])).digest('hex');
+  const actual = await dataUrlToSha256('data:image/png;base64,AAAA');
+  record('dataUrlToSha256 真实哈希(Node crypto 对账)',
+    actual === expected && /^sha256:[0-9a-f]{64}$/.test(actual),
+    `${actual} vs ${expected}`);
+
+  // 11. H5 路径: originalFileObj + FileReader
   global.FileReader = class {
     constructor() { this.result = 'data:image/png;base64,AAAA'; }
     readAsDataURL() { setTimeout(() => this.onload && this.onload(), 0); }
@@ -213,7 +241,7 @@ const record = (name, ok, detail = '') => {
   record('H5 路径(originalFileObj→FileReader→dataUrl)',
     h5Res === 'data:image/png;base64,AAAA', String(h5Res));
 
-  // 16. FSM 桩防护: getFileSystemManager 返回 Promise(H5 生产桩行为)
+  // 12. FSM 桩防护: getFileSystemManager 返回 Promise(H5 生产桩行为)
   // 编译后经 taro_1.default 引用(Module._load 拦截返回 { default: mockTaro })
   const taroPkg = require('@tarojs/taro');
   taroPkg.default.getFileSystemManager = () => Promise.resolve({});

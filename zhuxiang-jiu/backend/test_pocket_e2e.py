@@ -5,13 +5,17 @@
     python test_pocket_e2e.py
 
 覆盖:
-    1. 张贴打卡(5):  成功发首奖/非法场景/地址过短/照片缺失/超在贴点位上限
-    2. 每日打卡(5):  成功发奖/当日重复拒绝/非本人点位/已撤销拒绝/隔天连续
+    1. 张贴打卡(5):  成功发首奖/非法场景/地址过短/凭证缺失/超在贴点位上限
+    2. 每日打卡(5+4): 成功发奖/当日重复拒绝/非本人点位/已撤销拒绝/隔天连续
+                     +指纹格式非法/指纹长度非法/同会员指纹复用拒绝(防刷)
     3. 存续奖励(6):  未满30天拒绝/海报满月¥20/车贴满月¥30/重复领取拒绝/
                      已撤销拒绝/满月可领标记
     4. 撤销作废(3):  撤销成功/撤销后打卡拒绝/管理端作废
     5. 统计记录(3):  stats完整性/点位列表/打卡记录
     6. 参数管理(4):  默认值/修改/非法值/规则接口
+
+打卡凭证口径: 图片本体不上传服务器——photoUrl 为 SHA-256 指纹
+(sha256:hex64, 现场拍照生成); 同一会员指纹全局去重。
 """
 
 import asyncio
@@ -55,6 +59,13 @@ async def _mk_member(member_repo, phone, nickname=""):
         "level": 3, "growth_value": 600, "points": 0,
         "created_at": datetime.now(UTC).isoformat(),
     })
+
+
+def _hash(tag: str) -> str:
+    """打卡照片指纹(tag 派生 sha256:hex64——模拟现场拍照生成)"""
+    import hashlib
+    return "sha256:" + hashlib.sha256(
+        tag.encode("utf-8")).hexdigest()
 
 
 async def _expect_value_error(coro, keyword=""):
@@ -104,7 +115,7 @@ async def main():
 
     # test 1: 张贴打卡成功(酒店海报), 首打卡发 ¥2
     r = await svc.report_site(m_id, "hotel", "XX市XX区迎宾路1号 如家酒店大堂",
-                              "https://cdn.example.com/p1.jpg")
+                              _hash("p1"))
     record("test_01_report_site_success",
            r["success"] and r["site"]["scene"] == "hotel"
            and r["site"]["posterType"] == "poster"
@@ -115,25 +126,25 @@ async def main():
 
     # test 2: 非法场景拒绝
     ok, msg = await _expect_value_error(
-        svc.report_site(m_id, "subway", "某地铁站", "p.jpg"), "场景非法")
+        svc.report_site(m_id, "subway", "某地铁站", _hash("p2")), "场景非法")
     record("test_02_invalid_scene_rejected", ok, msg)
 
     # test 3: 地址过短拒绝
     ok, msg = await _expect_value_error(
-        svc.report_site(m_id, "hotel", "路口", "p.jpg"), "地址过短")
+        svc.report_site(m_id, "hotel", "路口", _hash("p3")), "地址过短")
     record("test_03_short_address_rejected", ok, msg)
 
-    # test 4: 照片缺失拒绝
+    # test 4: 凭证缺失拒绝
     ok, msg = await _expect_value_error(
-        svc.report_site(m_id, "hotel", "XX超市入口", ""), "照片")
+        svc.report_site(m_id, "hotel", "XX超市入口", ""), "凭证")
     record("test_04_missing_photo_rejected", ok, msg)
 
     # test 5: 在贴点位上限(默认5个), 第6个拒绝
     for i in range(4):
         await svc.report_site(m_id, "supermarket", f"XX市第{i + 2}号超市收银台",
-                              f"https://cdn.example.com/s{i}.jpg")
+                              _hash(f"s{i}"))
     ok, msg = await _expect_value_error(
-        svc.report_site(m_id, "community", "XX小区1单元公告栏", "p6.jpg"),
+        svc.report_site(m_id, "community", "XX小区1单元公告栏", _hash("p6")),
         "上限")
     record("test_05_max_sites_reached", ok, msg)
 
@@ -152,18 +163,18 @@ async def main():
 
     # 准备一个干净的点位
     r2 = await svc.report_site(m_id, "taxi_rear", "鲁AT·12345 出租车后窗",
-                               "https://cdn.example.com/taxi1.jpg")
+                               _hash("taxi1"))
     site_id = r2["site"]["siteId"]
 
     # test 6: 当日重复打卡拒绝
     ok, msg = await _expect_value_error(
-        svc.checkin_site(m_id, site_id, "again.jpg"), "今日已打卡")
+        svc.checkin_site(m_id, site_id, _hash("again")), "今日已打卡")
     record("test_06_duplicate_daily_checkin_rejected", ok, msg)
 
     # test 7: 隔天打卡成功(连续天数+1, 发 ¥2)
     await repo.update_site(site_id, {
         "lastCheckinAt": _days_ago(1)})
-    r3 = await svc.checkin_site(m_id, site_id, "taxi-day2.jpg")
+    r3 = await svc.checkin_site(m_id, site_id, _hash("taxi-day2"))
     record("test_07_next_day_checkin_success",
            r3["success"] and r3["checkin"]["rewardAmount"] == 2.0,
            f"result={r3}")
@@ -175,16 +186,44 @@ async def main():
     # test 8: 非本人点位打卡拒绝
     other = await _mk_member(member_repo, "13900000012", "路人乙")
     ok, msg = await _expect_value_error(
-        svc.checkin_site(other["id"], site_id, "x.jpg"), "只能打卡自己")
+        svc.checkin_site(other["id"], site_id, _hash("other-x")),
+        "只能打卡自己")
     record("test_08_not_owner_rejected", ok, msg)
 
-    # test 9: 照片缺失打卡拒绝
+    # test 9: 凭证缺失打卡拒绝
     ok, msg = await _expect_value_error(
-        svc.checkin_site(m_id, site_id, ""), "照片")
+        svc.checkin_site(m_id, site_id, ""), "凭证")
     record("test_09_checkin_photo_required", ok, msg)
 
+    # test 9b: 指纹格式非法(非 sha256 前缀——如直传图片 URL)
+    ok, msg = await _expect_value_error(
+        svc.checkin_site(m_id, site_id, "https://cdn.example.com/x.jpg"),
+        "凭证非法")
+    record("test_09b_invalid_hash_prefix_rejected", ok, msg)
+
+    # test 9c: 指纹长度非法(不足 64 位 hex)
+    ok, msg = await _expect_value_error(
+        svc.checkin_site(m_id, site_id, "sha256:abc123"), "格式非法")
+    record("test_09c_invalid_hash_length_rejected", ok, msg)
+
+    # test 9d: 同会员指纹复用拒绝(防刷核心——同一照片跨点位不可复用)
+    dup = _hash("dup-photo")
+    r_dup = await svc.report_site(m_id, "community", "XX社区3期快递柜旁", dup)
+    ok, msg = await _expect_value_error(
+        svc.report_site(m_id, "hotel", "XX快捷酒店前台", dup), "已用于打卡")
+    record("test_09d_duplicate_photo_hash_rejected", ok, msg)
+
+    # test 9e: 同会员指纹复用拒绝(每日打卡路径——先错开当日)
+    await repo.update_site(r_dup["site"]["siteId"],
+                           {"lastCheckinAt": _days_ago(1)})
+    ok, msg = await _expect_value_error(
+        svc.checkin_site(m_id, r_dup["site"]["siteId"],
+                         _hash("taxi1")), "已用于打卡")
+    record("test_09e_duplicate_hash_checkin_rejected", ok, msg)
+
     # test 10: 点位不存在
-    ok, _ = await _expect_key_error(svc.checkin_site(m_id, 99999, "x.jpg"))
+    ok, _ = await _expect_key_error(
+        svc.checkin_site(m_id, 99999, _hash("notfound")))
     record("test_10_site_not_found", ok)
 
     # ========================================================
@@ -199,7 +238,7 @@ async def main():
 
     # test 12: 海报满 30 天领 ¥20
     poster = await svc.report_site(m_id, "restaurant", "XX市好吃来饭店收银台",
-                                   "rest.jpg")
+                                   _hash("rest"))
     poster_id = poster["site"]["siteId"]
     await repo.update_site(poster_id, {"postedAt": _days_ago(31)})
     r4 = await svc.claim_month_reward(m_id, poster_id)
@@ -221,7 +260,7 @@ async def main():
 
     # test 15: 撤销后领取拒绝
     tmp = await svc.report_site(m_id, "community", "XX小区2单元宣传栏",
-                                "c2.jpg")
+                                _hash("c2"))
     tmp_id = tmp["site"]["siteId"]
     await repo.update_site(tmp_id, {"postedAt": _days_ago(35)})
     r6 = await svc.remove_site(m_id, tmp_id)
@@ -238,11 +277,11 @@ async def main():
 
     # test 17: 撤销后打卡拒绝
     ok, msg = await _expect_value_error(
-        svc.checkin_site(m_id, tmp_id, "x.jpg"), "撤销")
+        svc.checkin_site(m_id, tmp_id, _hash("removed-x")), "撤销")
     record("test_17_checkin_after_remove_rejected", ok, msg)
 
     # test 18: 管理端作废点位
-    bad = await svc.report_site(m_id, "hotel", "XX酒店后巷隐蔽处", "bad.jpg")
+    bad = await svc.report_site(m_id, "hotel", "XX酒店后巷隐蔽处", _hash("bad"))
     r7 = await svc.admin_invalidate_site(bad["site"]["siteId"], "位置不显眼")
     record("test_18_admin_invalidate_site",
            r7["success"] and r7["status"] == "invalid", f"result={r7}")

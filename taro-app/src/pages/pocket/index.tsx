@@ -16,7 +16,7 @@ import {
   SCENE_NAME,
   SCENE_ICON,
 } from '@/api/pocket';
-import { chooseImageAsDataUrl } from '@/utils/image-reader';
+import { chooseImageAsDataUrl, dataUrlToSha256 } from '@/utils/image-reader';
 
 // 场景筛选
 const FILTERS = [
@@ -45,7 +45,7 @@ const PocketPage: React.FC = () => {
   const [showReport, setShowReport] = useState(false);
   const [scene, setScene] = useState<PocketScene>('hotel');
   const [address, setAddress] = useState('');
-  const [photoUrl, setPhotoUrl] = useState('');
+  const [photoHash, setPhotoHash] = useState('');
 
   const loadData = async () => {
     try {
@@ -62,32 +62,41 @@ const PocketPage: React.FC = () => {
 
   useEffect(() => { loadData(); }, []);
 
-  // 选择打卡照片 → 读 base64 → 上传服务器(落库可审计, 修复本地临时路径缺陷)
-  // H5 端 getFileSystemManager 不可用(Taro 桩), 走 FileReader(见 utils/image-reader)
-  const choosePhoto = () => {
+  // 现场拍照 → 生成指纹(防刷: 图片本体不上传, 仅提交 SHA-256 指纹;
+  // 相册选图禁用——sourceType 仅 camera, 防旧图/网图复用)
+  const takePhoto = (onHash: (hash: string) => Promise<void>) => {
     if (busy) return;
     Taro.chooseImage({
       count: 1,
       sizeType: ['compressed'],
-      sourceType: ['album', 'camera'],
+      sourceType: ['camera'],
       success: async res => {
         if (!res.tempFilePaths?.[0] && !res.tempFiles?.length) return;
         setBusy(true);
-        Taro.showToast({ title: '照片上传中...', icon: 'none' });
+        Taro.showToast({ title: '指纹生成中...', icon: 'none' });
         try {
           const dataUrl = await chooseImageAsDataUrl(res as any);
-          const url = await PocketAPI.uploadPhoto(dataUrl);
-          setPhotoUrl(url);
-          Taro.showToast({ title: '照片已上传', icon: 'success' });
-        } catch (e) {
-          console.warn('[pocket] 照片上传失败:', e);
-          Taro.showToast({ title: '照片上传失败, 请重试', icon: 'none' });
+          const hash = await dataUrlToSha256(dataUrl);
+          await onHash(hash);
+        } catch (e: any) {
+          console.warn('[pocket] 打卡失败:', e);
+          Taro.showToast({
+            title: String(e?.message || e || '打卡失败').slice(0, 30),
+            icon: 'none',
+          });
         } finally {
           setBusy(false);
         }
       },
+      fail: () => setBusy(false),
     });
   };
+
+  // 张贴打卡弹层: 现场拍照留存指纹
+  const choosePhoto = () => takePhoto(async hash => {
+    setPhotoHash(hash);
+    Taro.showToast({ title: '拍照指纹已生成', icon: 'success' });
+  });
 
   // 张贴打卡(创建点位+首打卡)
   const handleReport = async () => {
@@ -96,17 +105,17 @@ const PocketPage: React.FC = () => {
       Taro.showToast({ title: '请填写至少5个字的张贴地址', icon: 'none' });
       return;
     }
-    if (!photoUrl) {
-      Taro.showToast({ title: '请先拍摄打卡照片', icon: 'none' });
+    if (!photoHash) {
+      Taro.showToast({ title: '请先现场拍照生成凭证', icon: 'none' });
       return;
     }
     setBusy(true);
     try {
-      await PocketAPI.reportSite(scene, address.trim(), photoUrl);
+      await PocketAPI.reportSite(scene, address.trim(), photoHash);
       Taro.showToast({ title: `张贴成功 +¥${stats.checkinReward}`, icon: 'success' });
       setShowReport(false);
       setAddress('');
-      setPhotoUrl('');
+      setPhotoHash('');
       setScene('hotel');
       loadData();
     } catch (e) {
@@ -116,35 +125,12 @@ const PocketPage: React.FC = () => {
     }
   };
 
-  // 每日打卡(拍照 → 上传 → 打卡; H5 走 FileReader 跨端读取)
-  const handleCheckin = (site: PocketSiteVO) => {
-    if (busy) return;
-    setBusy(true);
-    Taro.chooseImage({
-      count: 1,
-      sizeType: ['compressed'],
-      sourceType: ['album', 'camera'],
-      success: async res => {
-        if (!res.tempFilePaths?.[0] && !res.tempFiles?.length) {
-          setBusy(false);
-          return;
-        }
-        Taro.showToast({ title: '照片上传中...', icon: 'none' });
-        try {
-          const dataUrl = await chooseImageAsDataUrl(res as any);
-          const url = await PocketAPI.uploadPhoto(dataUrl);
-          await PocketAPI.checkin(site.siteId, url);
-          Taro.showToast({ title: `打卡成功 +¥${stats.checkinReward}`, icon: 'success' });
-          loadData();
-        } catch (err) {
-          console.warn('[pocket] 打卡失败:', err);
-        } finally {
-          setBusy(false);
-        }
-      },
-      fail: () => setBusy(false),
-    });
-  };
+  // 每日打卡(现场拍照 → 指纹 → 打卡一步完成)
+  const handleCheckin = (site: PocketSiteVO) => takePhoto(async hash => {
+    await PocketAPI.checkin(site.siteId, hash);
+    Taro.showToast({ title: `打卡成功 +¥${stats.checkinReward}`, icon: 'success' });
+    loadData();
+  });
 
   // 领取满月存续奖
   const handleClaimMonth = async (site: PocketSiteVO) => {
@@ -307,12 +293,13 @@ const PocketPage: React.FC = () => {
         <View className={styles.sectionTitle}>玩法说明</View>
         <View className={styles.rulesCard}>
           <View className={styles.ruleItem}>1. 在酒店/超市等显眼位置张贴海报,出租车后窗贴车贴</View>
-          <View className={styles.ruleItem}>2. 每日拍照打卡, AI 评估通过每次得 ¥{stats.checkinReward}(购物金)</View>
+          <View className={styles.ruleItem}>2. 每日现场拍照打卡, AI 评估通过每次得 ¥{stats.checkinReward}(购物金)</View>
           <View className={styles.ruleItem}>
             3. 海报在贴满 {stats.durationDays} 天领 ¥{stats.monthRewardPoster},车贴满 {stats.durationDays} 天领 ¥{stats.monthRewardSticker}
           </View>
           <View className={styles.ruleItem}>4. 物料印你的推广码,新人扫码注册奖励同「扫码赚钱」</View>
           <View className={styles.ruleItem}>5. 每人同时在贴点位上限 {stats.maxActiveSites} 个,奖励仅可购买本站商品</View>
+          <View className={styles.ruleItem}>6. 防刷: 须现场拍照(照片指纹凭证), 同一照片不可重复打卡; 照片不上传服务器</View>
         </View>
       </View>
 
@@ -341,9 +328,9 @@ const PocketPage: React.FC = () => {
               onInput={e => setAddress(e.detail.value)}
               maxlength={60}
             />
-            <View className={styles.sheetLabel}>打卡照片</View>
+            <View className={styles.sheetLabel}>打卡凭证(现场拍照)</View>
             <View className={styles.photoBtn} onClick={choosePhoto}>
-              {photoUrl ? '✅ 已拍摄,点击重拍' : '📷 拍摄打卡照片'}
+              {photoHash ? '✅ 指纹已生成, 重拍' : '📷 现场拍照生成凭证'}
             </View>
             <View className={styles.submitBtn} onClick={handleReport}>
               {busy ? '提交中...' : `张贴打卡 +¥${stats.checkinReward}`}

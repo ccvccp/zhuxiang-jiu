@@ -1,9 +1,10 @@
 /**
  * 顺手赚钱管理工作台(admin) · 对接 /api/pocket/admin/*
- * 两页签: 点位管理(列表/照片审计/作废) · 参数配置(奖励/防刷阈值)
+ * 两页签: 点位管理(列表/指纹审计/作废) · 参数配置(奖励/防刷阈值)
+ * 口径: 打卡图片本体不上传——photoUrl 为 SHA-256 指纹(sha256:hex64)
  */
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, Input, Switch, Image } from '@tarojs/components';
+import { View, Text, ScrollView, Input, Switch } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
@@ -96,10 +97,13 @@ const PocketAdminPage: React.FC = () => {
     loadSites(key);
   };
 
-  /** 照片预览(完整 URL 拼域名) */
-  const previewPhoto = (url: string) => {
-    if (!url) return;
-    Taro.previewImage({ urls: [url] });
+  /** 指纹复制(管理端留档——图片本体不上传, photoUrl 为 SHA-256 指纹) */
+  const copyHash = (hash: string) => {
+    if (!hash) return;
+    Taro.setClipboardData({
+      data: hash,
+      success: () => Taro.showToast({ title: '指纹已复制', icon: 'none' }),
+    });
   };
 
   /** 作废点位(确认弹层+理由) */
@@ -216,14 +220,16 @@ const PocketAdminPage: React.FC = () => {
                 </View>
                 <View className={styles.siteFoot}>
                   {s.photoUrl ? (
-                    <Image
-                      className={styles.photoThumb}
-                      src={s.photoUrl}
-                      mode="aspectFill"
-                      onClick={() => previewPhoto(s.photoUrl)}
-                    />
+                    <View
+                      className={`${styles.hashBadge} ${s.photoUrl.startsWith('sha256:') ? '' : styles.hashLegacy}`}
+                      onClick={() => copyHash(s.photoUrl)}
+                    >
+                      🔒 {s.photoUrl.startsWith('sha256:')
+                        ? `${s.photoUrl.slice(0, 21)}…${s.photoUrl.slice(-8)}`
+                        : '历史凭证'}
+                    </View>
                   ) : (
-                    <Text className={styles.noPhoto}>无照片记录</Text>
+                    <Text className={styles.noPhoto}>无打卡凭证</Text>
                   )}
                   {s.status === 'active' && (
                     <View className={styles.miniBtnDanger} onClick={() => invalidateSite(s)}>

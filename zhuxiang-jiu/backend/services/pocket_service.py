@@ -48,9 +48,13 @@ class PocketService:
                           photo_url: str) -> dict:
         """张贴打卡: 登记新张贴点位并完成首次打卡(发首打卡奖励)
 
+        photo_url 为打卡照片指纹(sha256:hex64, 现场拍照生成)——
+        图片本体不上传服务器, 防刷: 同一会员指纹全局去重。
+
         Raises:
             KeyError: 会员不存在
-            ValueError: 场景非法/地址过短/照片缺失/超在贴点位上限
+            ValueError: 场景非法/地址过短/指纹非法/指纹已用/
+                超在贴点位上限
         """
         settings = await self.pocket_repo.get_settings()
         if not settings.get("enabled", True):
@@ -62,8 +66,7 @@ class PocketService:
                 settings.get("minAddressLen", 5)):
             raise ValueError(
                 f"张贴地址过短(至少{settings.get('minAddressLen', 5)}个字符)")
-        if not photo_url or not photo_url.strip():
-            raise ValueError("请上传打卡照片")
+        photo_hash = self._valid_photo_hash(photo_url)
 
         member = await self.member_repo.get_by_id(member_id)
         if not member:
@@ -75,6 +78,10 @@ class PocketService:
                 raise ValueError(
                     f"在贴点位已达上限({settings.get('maxActiveSites', 5)}个), "
                     "请先撤销旧点位")
+            if await self.pocket_repo.checkin_photo_exists(
+                    member_id, photo_hash):
+                raise ValueError(
+                    "该照片指纹已用于打卡, 每次打卡须现场新拍")
 
             site_id = await self.pocket_repo.next_site_id()
             now = self._now()
@@ -84,7 +91,7 @@ class PocketService:
                 "scene": scene,
                 "posterType": SCENES[scene],
                 "address": address.strip(),
-                "photoUrl": photo_url.strip(),
+                "photoUrl": photo_hash,
                 "postedAt": now,
                 "lastCheckinAt": now,
                 "checkinCount": 1,
@@ -118,17 +125,22 @@ class PocketService:
                            photo_url: str) -> dict:
         """张贴点每日打卡(AI 评估, 每点位每日限 1 次)
 
+        photo_url 为打卡照片指纹(sha256:hex64, 现场拍照生成)——
+        图片本体不上传服务器, 防刷: 同一会员指纹全局去重。
+        锁粒度为会员级(同会员打卡串行——当日去重与指纹去重
+        并发安全; 不同会员互不阻塞)。
+
         Raises:
             KeyError: 点位不存在
-            ValueError: 非本人点位/已撤/今日已打卡/照片缺失/评分不足
+            ValueError: 非本人点位/已撤/今日已打卡/指纹非法/
+                指纹已用/评分不足
         """
         settings = await self.pocket_repo.get_settings()
         if not settings.get("enabled", True):
             raise ValueError("顺手赚钱模块已停用")
-        if not photo_url or not photo_url.strip():
-            raise ValueError("请上传打卡照片")
+        photo_hash = self._valid_photo_hash(photo_url)
 
-        async with get_lock(f"pocket:checkin:{site_id}"):
+        async with get_lock(f"pocket:checkin:{member_id}"):
             site = await self.pocket_repo.get_site(site_id)
             if not site:
                 raise KeyError(f"张贴点位 {site_id} 不存在")
@@ -141,6 +153,10 @@ class PocketService:
             last = site.get("lastCheckinAt") or ""
             if last[:10] == now[:10]:
                 raise ValueError("该点位今日已打卡, 明天再来")
+            if await self.pocket_repo.checkin_photo_exists(
+                    member_id, photo_hash):
+                raise ValueError(
+                    "该照片指纹已用于打卡, 每次打卡须现场新拍")
 
             # 连续打卡统计(隔天 +1, 断签归 1)
             try:
@@ -173,7 +189,7 @@ class PocketService:
                 "aiScoreLatest": score,
             })
 
-            checkin = await self._do_checkin(member_id, site, photo_url,
+            checkin = await self._do_checkin(member_id, site, photo_hash,
                                              score, settings)
             return {"success": True, "checkin": checkin}
 
@@ -399,14 +415,33 @@ class PocketService:
         return settings
 
     # ============================================================
-    # 内部: AI 评估 / 打卡落库发奖
+    # 内部: 指纹校验 / AI 评估 / 打卡落库发奖
     # ============================================================
+
+    @staticmethod
+    def _valid_photo_hash(value: str) -> str:
+        """打卡照片指纹校验(sha256: + 64位hex)
+
+        防刷口径: 图片本体不上传服务器——前端现场拍照后仅提交
+        SHA-256 内容指纹; 同一会员指纹全局去重(同一照片不可
+        复用打卡, 见 repository.checkin_photo_exists)。
+        """
+        v = str(value or "").strip()
+        if not v.startswith("sha256:"):
+            raise ValueError(
+                "打卡凭证非法(须现场拍照生成指纹)")
+        hex_part = v[7:]
+        if len(hex_part) != 64 or any(
+                c not in "0123456789abcdef" for c in hex_part):
+            raise ValueError("打卡指纹格式非法")
+        return v
 
     def _ai_evaluate(self, site: dict, now: str) -> int:
         """AI 智能评估打卡质量(B级规则引擎, 0-100 确定性评分)
 
         照片完整度(55) + 拍摄时段(10) + 连续打卡(20) + 点位存续(15)
-        说明: 有照片的打卡最低 60 分(55+5), 保证张贴/每日打卡可达阈值;
+        说明: photoUrl 为打卡指纹(sha256:hex64)——有指纹即视为
+        现场拍照完整凭证(最低 60 分保证可达阈值);
         评分权重为图像识别 AI 升级预留(规划: 对比首次照片判物料在位)
         """
         score = 0

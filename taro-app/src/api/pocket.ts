@@ -1,6 +1,8 @@
 /**
  * 顺手赚钱 API · 对接后端 /api/pocket/*
- * 张贴广告物料(海报/车贴) → 打卡上传 → AI 评估 → 奖励入余额(仅可购物)
+ * 张贴广告物料(海报/车贴) → 现场拍照(指纹凭证) → AI 评估 → 奖励入余额(仅可购物)
+ * 防刷口径: 图片本体不上传服务器——photoUrl 字段提交 SHA-256 指纹
+ * (sha256:hex64, 现场拍照生成); 服务端同会员指纹全局去重。
  */
 import { request } from './request';
 
@@ -60,7 +62,7 @@ export interface PocketStatsVO {
 export interface PocketCheckinVO {
   checkinId: number;
   siteId: number;
-  photoUrl: string;
+  photoUrl: string;           // 打卡照片指纹(sha256:hex64)
   aiScore: number;
   rewardAmount: number;
   createdAt: string;
@@ -133,12 +135,12 @@ export const PocketAPI = {
     }));
   },
 
-  /** 张贴打卡(创建点位+首打卡发奖) */
-  async reportSite(scene: PocketScene, address: string, photoUrl: string): Promise<{ success: boolean; site: PocketSiteVO }> {
+  /** 张贴打卡(创建点位+首打卡发奖; photoHash=现场拍照指纹) */
+  async reportSite(scene: PocketScene, address: string, photoHash: string): Promise<{ success: boolean; site: PocketSiteVO }> {
     const res = await request<any>({
       url: '/api/pocket/site/report',
       method: 'POST',
-      data: { scene, address, photoUrl },
+      data: { scene, address, photoUrl: photoHash },
     });
     return {
       success: !!res.success,
@@ -146,12 +148,12 @@ export const PocketAPI = {
     };
   },
 
-  /** 点位每日打卡 */
-  async checkin(siteId: number, photoUrl: string): Promise<{ success: boolean }> {
+  /** 点位每日打卡(photoHash=现场拍照指纹) */
+  async checkin(siteId: number, photoHash: string): Promise<{ success: boolean }> {
     const res = await request<any>({
       url: `/api/pocket/site/${siteId}/checkin`,
       method: 'POST',
-      data: { photoUrl },
+      data: { photoUrl: photoHash },
     });
     return { success: !!res.success };
   },
@@ -190,24 +192,6 @@ export const PocketAPI = {
       scanRewardTip: res.scanRewardTip || '',
       rewardNote: res.rewardNote || '',
     };
-  },
-
-  /**
-   * 上传打卡照片(base64 JSON 惯例, 复用 35号媒体端点)
-   * 返回服务器静态 URL(/media/image/xxx)——落库可审计
-   */
-  async uploadPhoto(dataUrl: string): Promise<string> {
-    const commaIdx = dataUrl.indexOf(',');
-    const dataB64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
-    const fmtMatch = /^data:image\/(\w+)/.exec(dataUrl);
-    const fmt = fmtMatch ? fmtMatch[1].replace('jpeg', 'jpg') : 'jpg';
-    const res = await request<any>({
-      url: '/api/hub/media/image',
-      method: 'POST',
-      data: { data_b64: dataB64, fmt },
-    });
-    if (!res.url) throw new Error(res.error || '照片上传失败');
-    return String(res.url);
   },
 };
 

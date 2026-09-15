@@ -64,3 +64,25 @@ export const chooseImageAsDataUrl = (res: Taro.chooseImage.SuccessCallbackResult
       reject(new ImageReadError('读取图片失败'));
     }
   });
+
+/**
+ * data URL → SHA-256 内容指纹(sha256:hex64)
+ *
+ * 防刷口径: 图片本体不上传服务器——仅提交内容指纹;
+ * 服务端同会员指纹全局去重(同一照片不可复用打卡)。
+ */
+export const dataUrlToSha256 = async (dataUrl: string): Promise<string> => {
+  if (typeof crypto === 'undefined' || !crypto?.subtle) {
+    throw new ImageReadError('当前环境不支持指纹生成');
+  }
+  const commaIdx = dataUrl.indexOf(',');
+  const b64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const hex = Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+  return `sha256:${hex}`;
+};

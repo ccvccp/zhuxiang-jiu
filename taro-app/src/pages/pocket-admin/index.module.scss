@@ -141,11 +141,25 @@
   gap: $spacing-sm;
 }
 
-.photoThumb {
-  width: 128rpx;
-  height: 96rpx;
+// 打卡指纹徽章(图片本体不上传——photoUrl 为 SHA-256 指纹)
+.hashBadge {
+  flex: 1;
+  padding: $spacing-xs $spacing-md;
+  background: rgba(53, 92, 68, 0.08);
   border-radius: $radius-md;
-  background: $color-bg-card;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  word-break: break-all;
+  @include button-reset;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.hashLegacy {
+  color: $color-text-tertiary;
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .noPhoto {

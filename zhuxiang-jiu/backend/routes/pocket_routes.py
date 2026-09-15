@@ -64,12 +64,14 @@ class ReportSiteRequest(PydBaseModel):
     address: str = Field(..., min_length=1, max_length=120,
                          description="张贴地址(≥5字符)")
     photoUrl: str = Field(..., min_length=1, max_length=500,
-                          description="打卡照片URL")
+                          description="打卡照片指纹(sha256:hex64, "
+                                      "现场拍照生成——图片本体不上传)")
 
 
 class CheckinRequest(PydBaseModel):
     photoUrl: str = Field(..., min_length=1, max_length=500,
-                          description="打卡照片URL")
+                          description="打卡照片指纹(sha256:hex64, "
+                                      "现场拍照生成——图片本体不上传)")
 
 
 class InvalidateSiteRequest(PydBaseModel):
