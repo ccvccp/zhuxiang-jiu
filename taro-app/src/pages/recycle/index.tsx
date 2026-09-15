@@ -15,6 +15,7 @@ import { ProductAPI, ProductVO } from '@/api/product';
 import { MemberAPI } from '@/api/member';
 import { levelToInt } from '@/api/groupbuy';
 import { requireLogin } from '@/services/auth-service';
+import { TODAY_LOCAL, THREE_YEARS_AGO, calcWineAge } from '@/utils/wine-age';
 
 // 状态 → 徽标样式
 const STATUS_CLS: Record<string, string> = {
@@ -171,6 +172,14 @@ const RecyclePage: React.FC = () => {
       Taro.showToast({ title: '请选择购买日期', icon: 'none' });
       return;
     }
+    const nwAge = calcWineAge(nwDate);
+    if (nwAge > 3) {
+      Taro.showToast({
+        title: `酒龄${nwAge}年超过新酒范围(0-3年), 满三年请走老酒估价`,
+        icon: 'none', duration: 2500,
+      });
+      return;
+    }
     setSubmitting(true);
     try {
       const neg = await RecycleAPI.submitNewWineValuation({
@@ -299,6 +308,14 @@ const RecyclePage: React.FC = () => {
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
       Taro.showToast({ title: '请选择购买日期', icon: 'none' });
+      return;
+    }
+    const age = calcWineAge(dateStr);
+    if (age < 3) {
+      Taro.showToast({
+        title: `酒龄未满3年(当前${age}年), 未满3年请走「新酒议价」`,
+        icon: 'none', duration: 2500,
+      });
       return;
     }
     setSubmitting(true);
@@ -475,7 +492,8 @@ const RecyclePage: React.FC = () => {
             mode="date"
             value={nwDate}
             onChange={(e) => setNwDate(e.detail.value)}
-            end={new Date().toISOString().slice(0, 10)}
+            start={THREE_YEARS_AGO}
+            end={TODAY_LOCAL}
           >
             <View className={styles.pickerBox}>
               <Text className={styles.pickerLabel}>购买日期</Text>
@@ -727,16 +745,16 @@ const RecyclePage: React.FC = () => {
             />
           </View>
 
-          {/* 购买日期 */}
+          {/* 购买日期(老酒须满3年, 上限3年前; 空值时轮盘落3年前边界而非1970) */}
           <Picker
             mode="date"
-            value={dateStr}
+            value={dateStr || THREE_YEARS_AGO}
             onChange={(e) => setDateStr(e.detail.value)}
-            end={new Date().toISOString().slice(0, 10)}
+            end={THREE_YEARS_AGO}
           >
             <View className={styles.pickerBox}>
               <Text className={styles.pickerLabel}>购买日期</Text>
-              <Text className={styles.pickerValue}>{dateStr || '选择日期(酒龄基准) ›'}</Text>
+              <Text className={styles.pickerValue}>{dateStr || `选择日期(须${THREE_YEARS_AGO}前) ›`}</Text>
             </View>
           </Picker>
 

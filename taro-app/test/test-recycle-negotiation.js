@@ -16,6 +16,13 @@
  *   8. 三视图结构(老酒估价/新酒议价/我的回收)
  *   9. 议价弹层(出价输入/±10% 窗口提示/轮次历史/接受拒绝)
  *   10. 议价回收打款弹层
+ *   [日期边界层 utils/wine-age.ts]
+ *   11. minusYears 整年回推
+ *   12. minusYears 2/29 溢出回退
+ *   13. toLocalDateStr 本地时区(UTC 偏移防护)
+ *   14. calcWineAge 整年边界(3年/2年/0年)
+ *   15. 页面日期边界接线(老酒 end / 新酒 start+end)
+ *   16. 页面酒龄预检提示(老酒<3年 → 新酒议价 / 新酒>3年 → 老酒)
  */
 const fs = require('fs');
 const path = require('path');
@@ -25,6 +32,7 @@ const ts = require('typescript');
 
 const API_SRC = path.resolve(__dirname, '..', 'src', 'api', 'recycle.ts');
 const PAGE_SRC = path.resolve(__dirname, '..', 'src', 'pages', 'recycle', 'index.tsx');
+const AGE_SRC = path.resolve(__dirname, '..', 'src', 'utils', 'wine-age.ts');
 
 const requests = [];
 let memberSeq = 42;
@@ -217,6 +225,45 @@ const record = (name, ok, detail = '') => {
   record('议价回收打款弹层',
     pageCode.includes('payoutPanel') && pageCode.includes('handleNegRecycle')
     && pageCode.includes('确认回收'));
+
+  console.log('[日期边界层 utils/wine-age.ts]');
+  const age = compileTs(AGE_SRC, 'wine-age.js');
+  const { toLocalDateStr, minusYears, calcWineAge, TODAY_LOCAL, THREE_YEARS_AGO } = age;
+
+  // 11. minusYears 常规(同月日整年回推)
+  record('minusYears 常规(2026-09-15 → 2023-09-15)',
+    toLocalDateStr(minusYears(new Date(2026, 8, 15), 3)) === '2023-09-15');
+
+  // 12. minusYears 2/29 溢出回退(2028-02-29 → 2025-02-28, 非 3/1)
+  record('minusYears 2/29 溢出回退一天',
+    toLocalDateStr(minusYears(new Date(2028, 1, 29), 3)) === '2025-02-28');
+
+  // 13. toLocalDateStr 无 UTC 偏移(本地午夜不受 toISOString 影响)
+  record('toLocalDateStr 本地时区(非 UTC)',
+    toLocalDateStr(new Date(2026, 8, 15, 23, 30)) === '2026-09-15'
+    && new Date(2026, 8, 15, 0, 30).toISOString().slice(0, 10) !== '2026-09-15');
+
+  // 14. 酒龄整年边界(满3年当天=3, 次日=2, 今天=0)
+  const now2026 = new Date(2026, 8, 15);
+  record('calcWineAge 整年边界(3年前=3/3年+1天=2/今天=0)',
+    calcWineAge('2023-09-15', now2026) === 3
+    && calcWineAge('2023-09-16', now2026) === 2
+    && calcWineAge('2026-09-15', now2026) === 0
+    && calcWineAge('2025-09-16', now2026) === 0);
+
+  // 15. 模块常量与页面接线
+  record('页面日期边界接线(老酒 end=3年前/新酒 start=3年前+end=今天)',
+    pageCode.includes('end={THREE_YEARS_AGO}')
+    && pageCode.includes('start={THREE_YEARS_AGO}')
+    && pageCode.includes('end={TODAY_LOCAL}')
+    && pageCode.includes('value={dateStr || THREE_YEARS_AGO}')
+    && !pageCode.includes('toISOString'));
+
+  // 16. 页面酒龄预检(老酒<3年/新酒>3年 友好提示, 免打后端 409)
+  record('页面酒龄预检提示(老酒未满3年/新酒超3年)',
+    pageCode.includes('未满3年请走「新酒议价」')
+    && pageCode.includes('满三年请走老酒估价')
+    && pageCode.includes('calcWineAge'));
 
   console.log('\n通过: ' + PASS + ' / 失败: ' + FAIL + ' / 总计: ' + (PASS + FAIL));
   process.exit(FAIL === 0 ? 0 : 1);
