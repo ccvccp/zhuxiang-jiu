@@ -9,7 +9,7 @@
     2. 保级进度: get_level 返回 keepLevel(周期消费/要求/剩余/百分比/到期日)
     3. 到期考核: 未到期 not_expired / 达标 kept(周期重置) / 未达标 downgraded(降一级)
     4. L1 不考核 / 无周期记录跳过
-    5. SVIP 续费: L5 renew 开新周期 / 非 L5 拒绝
+    5. SVIP 付费: L5 续费开新周期 / L1-L4 直接购买开通(升级 L5)
     6. 降级缓冲恢复: 30 天内补足消费可恢复 / 未补足拒绝 / 无降级记录拒绝
     7. 全量考核: 多会员批量(kept/downgraded/skipped 统计)
     8. 临期预警+调度扫描: list_near_expiry(≤30天且未达标)/run_level_expiry_scan 聚合
@@ -90,7 +90,8 @@ async def run_service():
           and kl["remainingAmount"] == 0)
     check("进度: 剩余天数≈360", kl["daysRemaining"] is not None
           and 350 <= kl["daysRemaining"] <= 360)
-    check("进度: L2 不可续费", kl["renewable"] is False)
+    check("进度: SVIP 付费全等级可用", kl["renewable"] is True
+          and kl["renewFee"] == 99.0)
 
     # ============================================================
     # 3. 到期考核三分支
@@ -154,12 +155,29 @@ async def run_service():
     # 续费后考核不再到期
     r = await svc.check_level_expiry(mid5)
     check("续费: 考核 not_expired", r["action"] == "not_expired")
-    # 非 L5 拒绝
-    try:
-        await svc.renew_svip(mid)
-        check("续费: 非 L5 拒绝", False)
-    except ValueError as e:
-        check("续费: 非 L5 拒绝", "L5" in str(e))
+    # 低级会员直接购买开通(L2 → L5)
+    r = await svc.renew_svip(mid)      # mid 当前 L2(3b kept 后)
+    check("购买: L2 直接开通 SVIP", r["success"] is True
+          and r["action"] == "purchased" and r["level"] == 5
+          and r["fromLevel"] == 2 and r["renewFee"] == 99.0)
+    m = await repo.get_by_id(mid)
+    check("购买: 等级/周期/留痕落库", m.get("level") == 5
+          and m.get("periodConsume") == 0.0
+          and bool(m.get("svipPurchasedAt"))
+          and m.get("svipPurchasedFromLevel") == 2)
+    check("购买: 成长值不虚标(仍 600)", m.get("growth_value") == 600)
+    # 购买后新周期 not_expired
+    r = await svc.check_level_expiry(mid)
+    check("购买: 考核 not_expired", r["action"] == "not_expired")
+    # 购买后(L5)再次付费 → 续费
+    r = await svc.renew_svip(mid)
+    check("购买后再付费为续费", r["action"] == "renewed")
+    m = await repo.get_by_id(mid)
+    check("续费: svipRenewedAt 留痕", bool(m.get("svipRenewedAt")))
+    # L1 最低等级直接购买开通
+    r = await svc.renew_svip(mid3)      # mid3 L1
+    check("购买: L1 直接开通 SVIP", r["action"] == "purchased"
+          and r["fromLevel"] == 1)
 
     # ============================================================
     # 6. 降级缓冲恢复
@@ -317,11 +335,19 @@ def run_http():
     check("HTTP 进度: 200 含 keepLevel", r.status_code == 200
           and "keepLevel" in r.json(), f"{r.status_code} {r.text[:120]}")
 
-    # 续费: 会员 1 非 L5 → 409
+    # SVIP 付费: 低级会员直接购买开通(200 purchased)
     r = client.post("/api/member/level/renew-svip", headers=M)
-    check("HTTP 续费: 非 L5 409", r.status_code == 409, f"got {r.status_code}")
+    body = r.json()
+    check("HTTP SVIP: 低级会员购买开通 200", r.status_code == 200
+          and body.get("action") == "purchased" and body.get("level") == 5,
+          f"{r.status_code} {r.text[:120]}")
+    # L5 后再次付费 → 续费(renewed)
+    r = client.post("/api/member/level/renew-svip", headers=M)
+    body = r.json()
+    check("HTTP SVIP: L5 续费 renewed", r.status_code == 200
+          and body.get("action") == "renewed", f"{r.status_code}")
     r = client.post("/api/member/level/renew-svip")
-    check("HTTP 续费: 无头 401", r.status_code == 401)
+    check("HTTP SVIP: 无头 401", r.status_code == 401)
 
     # 恢复: 无降级记录 → 409
     r = client.post("/api/member/level/recover", headers=M)

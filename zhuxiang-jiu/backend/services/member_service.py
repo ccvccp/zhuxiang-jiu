@@ -352,8 +352,9 @@ class MemberService:
                 "levelUpdatedAt": progress["levelUpdatedAt"],
                 "expireAt": progress["expireAt"],
                 "daysRemaining": progress["daysRemaining"],
-                "renewable": level == 5,   # SVIP 付费续费特例
-                "renewFee": LEVEL_RENEW_FEE if level == 5 else 0,
+                # SVIP 付费(开通/续费)全等级可用: L1-L4 购买开通 / L5 续费
+                "renewable": True,
+                "renewFee": LEVEL_RENEW_FEE,
             },
         }
 
@@ -534,30 +535,53 @@ class MemberService:
         return warnings[:limit]
 
     async def renew_svip(self, member_id) -> dict:
-        """L5 SVIP 付费续费保级(¥99/年, 设计文档 4.4 SVIP 特例)
+        """SVIP 付费开通/续费(¥99/年, 设计文档 4.4 SVIP 特例)
 
-        续费即开新周期; 非 L5 调用 409。
-        实际扣费由收款模块下单支付, 本方法只做等级周期处理(测试/演示
-        直接调用; 生产应挂在支付回调成功后)。
+        - L5: 续费——周期重开 12 个月(action=renewed);
+        - L1-L4: 直接购买开通——升级 L5, 周期起算(action=purchased);
+          (协议口径: SVIP 升级条件 = 累计消费 ≥ ¥9999 或付费 ¥99/年)
+        - 留痕: svipPurchasedAt/svipPurchasedFromLevel(购买)·
+          svipRenewedAt(续费)
+        - 实际扣费由收款模块下单支付, 本方法只做等级周期处理(测试/演示
+          直接调用; 生产应挂在支付回调成功后)。
 
         Raises:
             KeyError: 会员不存在
-            ValueError: 非 L5 会员
         """
         async with get_lock(f"member:level:{member_id}"):
             member = await self.member_repo.get_by_id(member_id)
             if not member:
                 raise KeyError(f"会员 {member_id} 不存在")
-            if member.get("level", 1) != 5:
-                raise ValueError("仅 L5 竹海 SVIP 支持付费续费保级")
+            level = member.get("level", 1)
             now_iso = _now_iso()
+
+            if level == 5:
+                # L5 续费: 周期重开
+                await self.member_repo.update_fields(member_id, {
+                    "levelUpdatedAt": now_iso, "periodConsume": 0.0,
+                    "svipRenewedAt": now_iso,
+                })
+                logger.info("svip_renewed member_id=%r fee=%.2f", member_id,
+                            LEVEL_RENEW_FEE)
+                return {"success": True, "memberId": member_id,
+                        "action": "renewed",
+                        "level": 5, "levelName": LEVEL_NAMES[5],
+                        "renewFee": LEVEL_RENEW_FEE,
+                        "newPeriodStart": now_iso,
+                        "validMonths": LEVEL_VALID_MONTHS}
+
+            # L1-L4 购买开通: 直接升级 L5
+            await self.member_repo.update_level(member_id, 5)
             await self.member_repo.update_fields(member_id, {
                 "levelUpdatedAt": now_iso, "periodConsume": 0.0,
-                "svipRenewedAt": now_iso,
+                "svipPurchasedAt": now_iso,
+                "svipPurchasedFromLevel": level,
             })
-            logger.info("svip_renewed member_id=%r fee=%.2f", member_id,
-                        LEVEL_RENEW_FEE)
+            logger.info("svip_purchased member_id=%r %s->5 fee=%.2f",
+                        member_id, level, LEVEL_RENEW_FEE)
             return {"success": True, "memberId": member_id,
+                    "action": "purchased",
+                    "fromLevel": level,
                     "level": 5, "levelName": LEVEL_NAMES[5],
                     "renewFee": LEVEL_RENEW_FEE,
                     "newPeriodStart": now_iso,

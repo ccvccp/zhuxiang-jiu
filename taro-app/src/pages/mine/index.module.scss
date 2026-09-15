@@ -197,6 +197,14 @@
   font-weight: 500;
 }
 
+// L1-L4 直接购买 SVIP 入口(金色小字链接)
+.svipBuyLink {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: #ffd700;
+  text-align: center;
+}
+
 // 通用 section
 .section {
   background: $color-bg-card;

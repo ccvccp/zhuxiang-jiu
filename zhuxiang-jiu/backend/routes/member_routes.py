@@ -276,7 +276,11 @@ async def level_expiry_check(
 async def level_renew_svip(
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
-    """L5 SVIP 付费续费保级(¥99/年, 开新 12 个月周期)
+    """SVIP 付费开通/续费(¥99/年, 开新 12 个月周期)
+
+    - L5 会员: 续费保级(action=renewed)
+    - L1-L4 会员: 直接购买开通 SVIP, 升级 L5(action=purchased)
+      (协议口径: SVIP 升级条件 = 累计消费 ≥ ¥9999 或付费 ¥99/年)
 
     生产环境: 实际扣费由收款模块下单支付, 支付成功回调后触发本操作。
     """

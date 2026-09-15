@@ -153,24 +153,32 @@ const MinePage: React.FC = () => {
     Taro.switchTab({ url: '/pages/products/index' });
   };
 
-  // L5 SVIP 付费续费(¥99/年, 续费即开新 12 个月周期)
-  const handleRenewSvip = () => {
+  // SVIP 付费(¥99/年): L1-L4 直接购买开通 / L5 续费(周期重开 12 个月)
+  const handleSvipPay = () => {
     if (renewing) return;
     const kl = levelInfo?.keepLevel || {};
+    const isL5 = levelKey === 'L5';
+    const content = isL5
+      ? `续费 ¥99/年, 续费成功后等级周期重新起算 12 个月(当前周期${
+          kl.daysRemaining != null ? `剩余 ${kl.daysRemaining} 天` : '即将到期'
+        })。确认续费?`
+      : '支付 ¥99/年, 立即升级为竹海 SVIP(8 折购物 / ×3.0 返分 / 城主店资格), 等级周期 12 个月起算。确认购买?';
     Taro.showModal({
-      title: 'SVIP 付费续费',
-      content: `续费 ¥99/年, 续费成功后等级周期重新起算 12 个月(当前周期${
-        kl.daysRemaining != null ? `剩余 ${kl.daysRemaining} 天` : '即将到期'
-      })。确认续费?`,
+      title: isL5 ? 'SVIP 付费续费' : '购买 SVIP',
+      content,
       success: async (res) => {
         if (!res.confirm) return;
         setRenewing(true);
         try {
-          await MemberAPI.renewSvip();
-          Taro.showToast({ title: '续费成功, 新周期已生效', icon: 'success' });
+          const r = await MemberAPI.renewSvip();
+          Taro.showToast({
+            title: (r as any)?.action === 'purchased'
+              ? '已升级竹海 SVIP' : '续费成功, 新周期已生效',
+            icon: 'success',
+          });
           setRefreshKey(k => k + 1);
         } catch (e) {
-          console.warn('[mine] SVIP 续费失败:', e);
+          console.warn('[mine] SVIP 付费失败:', e);
         } finally {
           setRenewing(false);
         }
@@ -242,14 +250,20 @@ const MinePage: React.FC = () => {
             </View>
           </View>
           {levelKey !== 'L5' && (
-            <View className={styles.progressBox}>
-              <View className={styles.progressBar}>
-                <View className={styles.progressFill} style={{ width: `${progress}%` }} />
+            <>
+              <View className={styles.progressBox}>
+                <View className={styles.progressBar}>
+                  <View className={styles.progressFill} style={{ width: `${progress}%` }} />
+                </View>
+                <View className={styles.progressText}>
+                  距{MEMBER_LEVEL_NAME['L' + (Number(levelKey.slice(1)) + 1)] || '下一等级'}还差 ¥{Math.max(0, nextGrowth - growth)} 累计消费
+                </View>
               </View>
-              <View className={styles.progressText}>
-                距{MEMBER_LEVEL_NAME['L' + (Number(levelKey.slice(1)) + 1)] || '下一等级'}还差 ¥{Math.max(0, nextGrowth - growth)} 累计消费
+              {/* SVIP 直接购买入口(L1-L4, ¥99/年立即升级) */}
+              <View className={styles.svipBuyLink} onClick={handleSvipPay}>
+                {renewing ? '处理中...' : '不想等? 直接购买 SVIP ¥99/年 ›'}
               </View>
-            </View>
+            </>
           )}
           {levelKey === 'L5' && (
             <>
@@ -262,7 +276,7 @@ const MinePage: React.FC = () => {
                     (到期 {(levelInfo.keepLevel.expireAt || '').slice(0, 10)})
                   </View>
                 )}
-                <View className={styles.svipRenewBtn} onClick={handleRenewSvip}>
+                <View className={styles.svipRenewBtn} onClick={handleSvipPay}>
                   {renewing ? '续费中...' : 'SVIP 续费 ¥99/年'}
                 </View>
               </View>
