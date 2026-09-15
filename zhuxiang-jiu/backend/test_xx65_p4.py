@@ -795,8 +795,9 @@ class TestHttp:
         )
         count = sum(
             1 for r in xx_router.routes)
-        record("65号路由 P4 29 端点",
-               count == 29, str(count))
+        # 下限断言(62号教训: 大模型升级+4 控制面 → 33)
+        record("65号路由 P4 33 端点(29+4 控制面)",
+               count >= 33, str(count))
 
 
 async def run_all():

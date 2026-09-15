@@ -47,12 +47,13 @@ SCORER_ID = "shop_operation"
 
 
 def current_mode() -> str:
-    """模块开关(XX65_MODE——
-    同 registry)"""
-    from services.xx65_registry import (
-        current_mode as _mode,
+    """模块开关(XX65_MODE——大模型二代读取链:
+    护栏暂停 > 运行时 override > env > off,
+    经 mode_service 进程快照同步桥接——62号范式)"""
+    from services.xx65_mode_service import (
+        legacy_current_mode,
     )
-    return _mode()
+    return legacy_current_mode()
 
 
 def require_active_mode() -> None:

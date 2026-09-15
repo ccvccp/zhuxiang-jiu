@@ -86,6 +86,52 @@ def _require_admin(x_role: str | None) -> str:
             detail="需要 X-Role: admin")
 
 
+async def _gate() -> dict:
+    """决策面门槛(XX65_MODE=off → 409;
+    shadow/assist 放行——大模型二代读取链:
+    护栏暂停 > 运行时 override > env)"""
+    from services.xx65_mode_service import (
+        Xx65ModeService,
+    )
+    return await Xx65ModeService() \
+        .require_decision_mode()
+
+
+def _decision(fn):
+    """决策端点装饰器: 门控(off 409) +
+    shadow/assist 标记(xx65Mode)
+
+    宪法豁免面(关店/人工兜底/巡检/回流 collect)
+    与观测面不加本装饰器——永不关停。
+    """
+    import functools
+    from services.xx65_mode_service import (
+        MODE_VALUES,
+    )
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        # 鉴权优先(403 before 409): 无/非法角色
+        # 直接放行函数体触发 403——不预判门控
+        x_role = kwargs.get("x_role")
+        mode_state = None
+        if x_role in ("admin", "member"):
+            try:
+                mode_state = await _gate()
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=409,
+                    detail=str(e)) from e
+        result = await fn(*args, **kwargs)
+        if isinstance(result, dict) and mode_state \
+                and mode_state.get("mode") \
+                in MODE_VALUES[1:]:
+            result = {**result,
+                      "xx65Mode": mode_state["mode"]}
+        return result
+    return wrapper
+
+
 @router.get("/registry")
 async def registry(
         x_role: str | None = Header(default=None,
@@ -100,6 +146,7 @@ async def registry(
 
 
 @router.post("/intents/parse")
+@_decision
 async def parse_intent(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -127,6 +174,7 @@ async def parse_intent(
 
 
 @router.post("/shops/apply")
+@_decision
 async def apply_shop(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -159,6 +207,7 @@ async def apply_shop(
 
 
 @router.post("/shops/{shop_id}/claim")
+@_decision
 async def claim_shop(
         shop_id: int,
         body: dict,
@@ -188,6 +237,7 @@ async def claim_shop(
 
 
 @router.post("/shops/{shop_id}/activate")
+@_decision
 async def activate_shop(
         shop_id: int,
         x_role: str | None = Header(default=None,
@@ -298,6 +348,7 @@ async def model_status(
 # ============================================================
 
 @router.post("/products/draft")
+@_decision
 async def create_draft(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -350,6 +401,7 @@ async def get_draft(
 
 
 @router.post("/drafts/{draft_id}/publish")
+@_decision
 async def publish_draft(
         draft_id: int,
         body: dict = None,
@@ -513,6 +565,7 @@ async def recommend_campaign(
 
 
 @router.post("/campaigns")
+@_decision
 async def create_campaign(
         body: dict,
         x_role: str | None = Header(default=None,
@@ -548,6 +601,7 @@ async def create_campaign(
 
 
 @router.post("/campaigns/{campaign_id}/revoke")
+@_decision
 async def revoke_campaign(
         campaign_id: int,
         body: dict = None,
@@ -672,6 +726,7 @@ async def coach_tips(
 
 
 @router.post("/shops/{shop_id}/quota-adjust")
+@_decision
 async def quota_adjust(
         shop_id: int,
         body: dict,
@@ -704,6 +759,7 @@ async def quota_adjust(
 
 
 @router.post("/shops/{shop_id}/dispute-assist")
+@_decision
 async def dispute_assist(
         shop_id: int,
         body: dict = None,
@@ -794,6 +850,7 @@ async def dashboard(
 
 
 @router.post("/redteam")
+@_decision
 async def redteam(
         x_role: str | None = Header(default=None,
                                     alias="X-Role")):
@@ -815,6 +872,105 @@ async def redteam(
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc)) from exc
+
+
+# ============================================================
+# 控制面(大模型二代——全站范式 4 端点)
+# ============================================================
+
+@router.get("/mode")
+async def mode_status(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """灰度总览(观测面——模式+护栏+红线公示;
+    不受开关影响)"""
+    _require_admin(x_role)
+    from services.xx65_mode_service import (
+        Xx65ModeService,
+    )
+    return await Xx65ModeService().status_view()
+
+
+@router.post("/mode/override")
+async def mode_override(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """运行时切档(免容器重建——人工留痕)
+
+    Body: {mode: off/shadow/assist(空串清除),
+           operator?}"""
+    _require_admin(x_role)
+    mode = str(body.get("mode") or "").strip()
+    operator = str(body.get("operator")
+                   or "admin")
+    from services.xx65_mode_service import (
+        Xx65ModeService,
+    )
+    try:
+        return {
+            "success": True,
+            "data": await Xx65ModeService()
+            .set_override(mode, operator),
+        }
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc)) from exc
+
+
+@router.post("/mode/guard")
+async def mode_guard(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """护栏检查(决策面——三指标恶化
+    >3% 自动暂停留痕)
+
+    Body: {complianceBlockRate, shopViolationRate,
+           campaignRevokeRate, baseline?}"""
+    _require_admin(x_role)
+    from services.xx65_mode_service import (
+        Xx65ModeService,
+    )
+    return {
+        "success": True,
+        "data": await Xx65ModeService().guard_check(
+            float(body.get("complianceBlockRate")
+                  or 0),
+            float(body.get("shopViolationRate")
+                  or 0),
+            float(body.get("campaignRevokeRate")
+                  or 0),
+            baseline=body.get("baseline")
+            or None),
+    }
+
+
+@router.post("/mode/resume")
+async def mode_resume(
+        body: dict,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """人工恢复(护栏暂停解除——决策留痕)
+
+    Body: {operator?, note?}"""
+    _require_admin(x_role)
+    from services.xx65_mode_service import (
+        Xx65ModeService,
+    )
+    try:
+        return {
+            "success": True,
+            "data": await Xx65ModeService().resume(
+                operator=str(body.get("operator")
+                             or "admin"),
+                note=str(body.get("note") or "")),
+        }
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc)) from exc
 
 
 def register_xx65_routes(app) -> None:

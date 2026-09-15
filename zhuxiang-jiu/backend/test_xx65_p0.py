@@ -770,8 +770,9 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
+        # 下限断言(62号教训: 精确计数随后续模块注册腐化)
         record("44号 40 档案在册",
-               len(SCORER_REGISTRY) == 55,
+               len(SCORER_REGISTRY) >= 55,
                str(len(SCORER_REGISTRY)))
         record("第39档案 shop_operation"
                "(batch24)",
