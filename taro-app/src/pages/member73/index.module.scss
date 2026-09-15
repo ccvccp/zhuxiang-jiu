@@ -1,0 +1,386 @@
+@use '@/styles/variables.scss' as *;
+
+.page {
+  min-height: 100vh;
+  background: $color-bg-page;
+  display: flex;
+  flex-direction: column;
+}
+
+// 页签
+.tabs {
+  display: flex;
+  background: $color-bg-card;
+  border-bottom: 1px solid rgba($color-text-primary, 0.06);
+}
+
+.tab {
+  flex: 1;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  position: relative;
+}
+
+.tabActive {
+  color: $color-primary;
+  font-weight: $font-weight-bold;
+
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 48rpx;
+    height: 6rpx;
+    border-radius: 6rpx;
+    background: $color-primary;
+  }
+}
+
+.scrollView {
+  flex: 1;
+  padding: $spacing-lg;
+}
+
+.card {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card;
+}
+
+.cardTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-md;
+}
+
+.sectionCount {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.empty {
+  padding: $spacing-xl 0;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+// ============================================
+// 地平线
+// ============================================
+.levelCard {
+  background: linear-gradient(135deg, $color-primary, rgba($color-primary, 0.78));
+  border-radius: $radius-lg;
+  padding: $spacing-xl $spacing-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-card-hover;
+}
+
+.levelLabel {
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.85);
+}
+
+.levelName {
+  margin-top: $spacing-xs;
+  font-size: 56rpx;
+  font-weight: $font-weight-bold;
+  color: $color-text-white;
+}
+
+.levelMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: rgba($color-text-white, 0.75);
+  line-height: 1.6;
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  padding: $spacing-sm 0;
+  font-size: $font-size-sm;
+}
+
+.kvKey {
+  color: $color-text-secondary;
+}
+
+.kvVal {
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.riskWarn {
+  margin-top: $spacing-sm;
+  padding: $spacing-md;
+  background: rgba(#e6a23c, 0.08);
+  border-radius: $radius-md;
+  font-size: $font-size-xs;
+  color: #b88230;
+  line-height: 1.6;
+}
+
+.gapBar {
+  height: 16rpx;
+  border-radius: 16rpx;
+  background: rgba($color-text-primary, 0.08);
+  overflow: hidden;
+  margin-top: $spacing-sm;
+}
+
+.gapFill {
+  height: 100%;
+  border-radius: 16rpx;
+  background: $color-primary;
+}
+
+// ============================================
+// 导师时刻
+// ============================================
+.momentItem {
+  padding: $spacing-md 0;
+  border-bottom: 1px solid rgba($color-text-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.momentHead {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.momentType {
+  padding: 4rpx 16rpx;
+  border-radius: $radius-round;
+  background: rgba($color-primary, 0.1);
+  color: $color-primary;
+  font-size: $font-size-xs;
+}
+
+.momentDecision {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.momentHint {
+  margin-top: $spacing-sm;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  line-height: 1.6;
+}
+
+.momentMeta {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.respondRow {
+  display: flex;
+  gap: $spacing-md;
+  margin-top: $spacing-sm;
+}
+
+.respondBtn {
+  flex: 1;
+  height: 56rpx;
+  border-radius: $radius-button;
+  background: rgba($color-primary, 0.08);
+  color: $color-primary;
+  font-size: $font-size-xs;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.respondedTag {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-success;
+}
+
+// ============================================
+// 权益
+// ============================================
+.previewRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-sm 0;
+  border-bottom: 1px solid rgba($color-text-primary, 0.04);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.previewName {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.previewFrom {
+  width: 160rpx;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
+.previewTo {
+  width: 160rpx;
+  text-align: center;
+  font-size: $font-size-sm;
+  color: $color-primary;
+  font-weight: $font-weight-medium;
+}
+
+.revealItem {
+  padding: $spacing-md 0;
+  border-bottom: 1px solid rgba($color-text-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+// ============================================
+// 代办
+// ============================================
+.predictCard {
+  background: linear-gradient(135deg, rgba($color-primary, 0.12), rgba($color-primary, 0.04));
+  border: 1px solid rgba($color-primary, 0.25);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.predictLabel {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.predictAction {
+  margin-top: $spacing-xs;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+}
+
+.predictReason {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.actionItem {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  padding: $spacing-md 0;
+  border-bottom: 1px solid rgba($color-text-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.actionInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.actionName {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.actionDesc {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.actionBtns {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.miniBtn {
+  height: 56rpx;
+  padding: 0 24rpx;
+  border-radius: $radius-button;
+  font-size: $font-size-xs;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btnGrant {
+  background: $color-primary;
+  color: $color-text-white;
+}
+
+.btnExec {
+  background: rgba($color-success, 0.12);
+  color: $color-success;
+}
+
+.btnRevoke {
+  background: rgba(#f56c6c, 0.1);
+  color: #f56c6c;
+}
+
+.btnDisabled {
+  background: rgba($color-text-primary, 0.08);
+  color: $color-text-secondary;
+}
+
+.execResult {
+  margin-top: $spacing-sm;
+  padding: $spacing-md;
+  background: $color-bg-page;
+  border-radius: $radius-md;
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+  line-height: 1.6;
+}
+
+.logItem {
+  padding: $spacing-md 0;
+  border-bottom: 1px solid rgba($color-text-primary, 0.06);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.footerNote {
+  padding: $spacing-lg 0 $spacing-xl;
+  text-align: center;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}

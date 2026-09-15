@@ -236,10 +236,18 @@ async def list_moments(
         decision: str = "",
         limit: int = 100,
         x_role: str = Header(default=None,
-                             alias="X-Role")):
-    """时机留痕(观测面)"""
+                             alias="X-Role"),
+        x_member_id: str = Header(
+            default=None,
+            alias="X-Member-Id")):
+    """时机留痕(观测面; memberId 指定
+    时本人可查——用户权利面板口径)"""
     try:
-        _require_admin(x_role)
+        if memberId:
+            _require_self_or_admin(
+                x_role, x_member_id, memberId)
+        else:
+            _require_admin(x_role)
         return {"code": 0,
                 "data": await
                 _service.list_moments(
@@ -346,10 +354,18 @@ async def list_reveals(
         memberId: int = 0,
         limit: int = 100,
         x_role: str = Header(default=None,
-                             alias="X-Role")):
-    """告知留痕(观测面)"""
+                             alias="X-Role"),
+        x_member_id: str = Header(
+            default=None,
+            alias="X-Member-Id")):
+    """告知留痕(观测面; memberId 指定
+    时本人可查——用户权利面板口径)"""
     try:
-        _require_admin(x_role)
+        if memberId:
+            _require_self_or_admin(
+                x_role, x_member_id, memberId)
+        else:
+            _require_admin(x_role)
         return {"code": 0,
                 "data": await
                 _service.list_reveals(
@@ -644,10 +660,18 @@ async def delegate_logs(
         memberId: int = 0,
         limit: int = 100,
         x_role: str = Header(default=None,
-                             alias="X-Role")):
-    """代办执行留痕(观测面)"""
+                             alias="X-Role"),
+        x_member_id: str = Header(
+            default=None,
+            alias="X-Member-Id")):
+    """代办执行留痕(观测面; memberId
+    指定时本人可查——用户权利面板口径)"""
     try:
-        _require_admin(x_role)
+        if memberId:
+            _require_self_or_admin(
+                x_role, x_member_id, memberId)
+        else:
+            _require_admin(x_role)
         from services.member73_p3_service import (
             Member73P3Service,
         )
