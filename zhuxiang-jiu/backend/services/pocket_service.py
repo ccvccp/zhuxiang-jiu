@@ -9,6 +9,8 @@
 
 防刷: 每人同时在贴点位 ≤ maxActiveSites(默认5) / 照片必传 / 地址 ≥ 5 字符
 奖励资金: 全部入钱包奖励余额(仅可购物不可提现)
+原子性: 钱包前置校验快速失败 + 落库后发奖失败回滚
+    (report 删点位 / checkin 恢复打卡计数——当日打卡不被消耗)
 
 异常约定(遵循项目约定):
     - KeyError(message)  → 路由层映射为 404
@@ -23,6 +25,7 @@ from repositories.pocket_repository import (
     PocketRepository, SCENES,
 )
 from repositories.member_repository import MemberRepository
+from repositories.wallet_repository import STATUS_ACTIVE
 from services.wallet_service import WalletService
 
 logger = logging.getLogger(__name__)
@@ -71,6 +74,9 @@ class PocketService:
         member = await self.member_repo.get_by_id(member_id)
         if not member:
             raise KeyError(f"会员 {member_id} 不存在")
+        # 前置: 钱包就绪校验(避免落库后发奖失败——
+        # 先查后发仍有极小竞窗, 由落库后回滚兜底)
+        await self._ensure_wallet_ready(member_id)
 
         async with get_lock(f"pocket:site:{member_id}"):
             active_count = await self.pocket_repo.count_active_sites(member_id)
@@ -107,8 +113,15 @@ class PocketService:
             site["aiScoreLatest"] = score
             await self.pocket_repo.save_site(site)
 
-            checkin = await self._do_checkin(member_id, site, photo_url,
-                                             score, settings)
+            try:
+                checkin = await self._do_checkin(member_id, site,
+                                                 photo_hash,
+                                                 score, settings)
+            except Exception:
+                # 发奖失败回滚: 删除点位(不留孤儿; 指纹未入
+                # 打卡记录, 修复后可原指纹重试)
+                await self.pocket_repo.delete_site(site_id)
+                raise
             return {
                 "success": True,
                 "site": site,
@@ -182,6 +195,18 @@ class PocketService:
                     f"打卡照片 AI 评分 {score} 分未达 "
                     f"{settings.get('aiScoreThreshold', 60)} 分, 请重新拍摄")
 
+            # 前置: 钱包就绪校验(全部校验通过后、落库前——
+            # 保持既有错误优先级: 归属/当日/指纹等业务校验先行)
+            await self._ensure_wallet_ready(member_id)
+
+            # 回滚锚点(发奖失败时恢复——当日打卡不被消耗)
+            prev_fields = {
+                "consecutiveDays": site.get("consecutiveDays", 0),
+                "lastCheckinAt": last,
+                "checkinCount": int(site.get("checkinCount", 0)),
+                "aiScoreLatest": site.get("aiScoreLatest", 0),
+            }
+
             await self.pocket_repo.update_site(site_id, {
                 "consecutiveDays": consecutive,
                 "lastCheckinAt": now,
@@ -189,8 +214,14 @@ class PocketService:
                 "aiScoreLatest": score,
             })
 
-            checkin = await self._do_checkin(member_id, site, photo_hash,
-                                             score, settings)
+            try:
+                checkin = await self._do_checkin(member_id, site,
+                                                 photo_hash,
+                                                 score, settings)
+            except Exception:
+                # 发奖失败回滚: 恢复打卡前状态(当日可重拍补卡)
+                await self.pocket_repo.update_site(site_id, prev_fields)
+                raise
             return {"success": True, "checkin": checkin}
 
     # ============================================================
@@ -415,8 +446,26 @@ class PocketService:
         return settings
 
     # ============================================================
-    # 内部: 指纹校验 / AI 评估 / 打卡落库发奖
+    # 内部: 钱包就绪校验 / 指纹校验 / AI 评估 / 打卡落库发奖
     # ============================================================
+
+    async def _ensure_wallet_ready(self, member_id: int) -> None:
+        """发奖前置校验(与 deposit_reward 同口径: 已开通 + 状态正常)
+
+        原子性保障第一层: 未开通/冻结即快速失败, 点位与打卡
+        计数均不落库; 先查后发仍有极小竞窗(查后关钱包), 由
+        调用方落库后回滚兜底(第二层)。
+
+        Raises:
+            KeyError: 钱包未开通(路由层 404)
+            ValueError: 钱包状态异常(路由层 409)
+        """
+        account = await self.wallet_service.wallet_repo \
+            .get_account(member_id)
+        if not account:
+            raise KeyError(f"用户 {member_id} 未开通钱包")
+        if account.get("status") != STATUS_ACTIVE:
+            raise ValueError("钱包状态异常, 无法发放奖励")
 
     @staticmethod
     def _valid_photo_hash(value: str) -> str:

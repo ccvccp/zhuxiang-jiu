@@ -222,6 +222,27 @@ class PocketRepository:
         sites = await self.list_sites_by_member(member_id, status="active")
         return len(sites)
 
+    async def delete_site(self, site_id: int) -> None:
+        """删除点位(发奖失败回滚用——不留孤儿数据)
+
+        Redis 模式: 删 hash 键 + 从会员点位索引集移除;
+        内存模式: 直接出栈(无索引集)。
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("pocket", "sites", site_id))
+            if not data:
+                return
+            member_id = data.get("memberId")
+            await client.delete(_k("pocket", "sites", site_id))
+            if member_id:
+                await client.srem(
+                    _k("pocket", "member_sites", member_id), site_id)
+            return
+        self._ensure_store()
+        self.store["pocket_sites"].pop(site_id, None)
+
     # ============================================================
     # 打卡记录 CRUD
     # ============================================================

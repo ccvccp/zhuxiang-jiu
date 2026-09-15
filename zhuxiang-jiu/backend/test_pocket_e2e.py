@@ -13,6 +13,9 @@
     4. 撤销作废(3):  撤销成功/撤销后打卡拒绝/管理端作废
     5. 统计记录(3):  stats完整性/点位列表/打卡记录
     6. 参数管理(4):  默认值/修改/非法值/规则接口
+    7. 发奖原子性(7): 钱包未开通前置拦截无孤儿/开通后成功/
+                     发奖故障report回滚删点位/发奖故障checkin回滚
+                     恢复计数/通道恢复后当日打卡正常
 
 打卡凭证口径: 图片本体不上传服务器——photoUrl 为 SHA-256 指纹
 (sha256:hex64, 现场拍照生成); 同一会员指纹全局去重。
@@ -356,6 +359,78 @@ async def main():
     await svc.admin_update_settings({"checkinReward": 2.0,
                                      "monthRewardSticker": 30.0},
                                     updated_by="tester")
+
+    # ========================================================
+    # 7. 发奖原子性(先落库后发奖——前置校验+回滚)
+    # ========================================================
+    print("\n========== 7. 发奖原子性 ==========")
+
+    # test 26: 钱包未开通 → report 前置拦截, 不落库(无孤儿点位)
+    m2 = await _mk_member(member_repo, "13900000013", "无钱包会员")
+    ok, msg = await _expect_key_error(
+        svc.report_site(m2["id"], "hotel", "XX市无钱包路1号酒店",
+                        _hash("nowallet")))
+    record("test_26_no_wallet_report_rejected", ok, msg)
+    sites_m2 = await repo.list_sites_by_member(m2["id"])
+    record("test_26b_no_wallet_no_orphan_site",
+           len(sites_m2) == 0, f"sites={len(sites_m2)}")
+
+    # test 27: 开通钱包后 report 成功(前置校验不误伤)
+    await wallet.open(m2["id"])
+    r8 = await svc.report_site(m2["id"], "hotel",
+                               "XX市无钱包路1号酒店", _hash("nowallet"))
+    record("test_27_after_open_wallet_report_ok",
+           r8["success"] and r8["checkin"]["rewardAmount"] == 2.0,
+           f"result={r8['success']}")
+
+    # test 28: 发奖通道故障(report) → 回滚删点位, 无孤儿
+    # (用 m2——m_id 名下点位已超 maxActiveSites=5, 会先被上限拦截)
+    sites_before = await repo.list_sites_by_member(m2["id"])
+    orig_deposit = svc.wallet_service.deposit_reward
+
+    async def _failing_deposit(*args, **kwargs):
+        raise RuntimeError("mock: 发奖通道故障")
+
+    svc.wallet_service.deposit_reward = _failing_deposit
+    raised = None
+    try:
+        await svc.report_site(m2["id"], "hotel", "XX市回滚测试路1号酒店",
+                              _hash("rollback"))
+    except Exception as e:
+        raised = e
+    record("test_28a_deposit_fail_report_raises",
+           isinstance(raised, RuntimeError), f"raised={raised}")
+    sites_after = await repo.list_sites_by_member(m2["id"])
+    record("test_28b_report_rolled_back_no_orphan",
+           len(sites_after) == len(sites_before),
+           f"before={len(sites_before)} after={len(sites_after)}")
+
+    # test 29: 发奖通道故障(checkin) → 回滚打卡计数, 当日打卡不被消耗
+    await repo.update_site(site_id, {"lastCheckinAt": _days_ago(1)})
+    site_before = await repo.get_site(site_id)
+    raised = None
+    try:
+        await svc.checkin_site(m_id, site_id, _hash("mock-fail"))
+    except Exception as e:
+        raised = e
+    record("test_29a_deposit_fail_checkin_raises",
+           isinstance(raised, RuntimeError), f"raised={raised}")
+    site_rolled = await repo.get_site(site_id)
+    record("test_29b_checkin_rolled_back",
+           site_rolled["lastCheckinAt"] == site_before["lastCheckinAt"]
+           and site_rolled["checkinCount"] == site_before["checkinCount"]
+           and site_rolled["consecutiveDays"]
+           == site_before["consecutiveDays"],
+           f"before={site_before['lastCheckinAt'][:10]} "
+           f"after={site_rolled['lastCheckinAt'][:10]} "
+           f"cnt={site_before['checkinCount']}→{site_rolled['checkinCount']}")
+
+    # test 30: 通道恢复后当日打卡正常(回滚未消耗当日额度)
+    svc.wallet_service.deposit_reward = orig_deposit
+    r9 = await svc.checkin_site(m_id, site_id, _hash("recover-ok"))
+    record("test_30_after_recover_checkin_ok",
+           r9["success"] and r9["checkin"]["rewardAmount"] == 2.0,
+           f"result={r9['success']}")
 
     # ========================================================
     # 汇总
