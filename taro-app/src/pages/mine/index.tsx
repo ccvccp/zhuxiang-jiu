@@ -514,6 +514,14 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/trust/index' })}>
+              <View className={styles.adminEntryIcon}>🧧</View>
+              <View className={styles.adminEntryInfo}>
+                <View className={styles.adminEntryName}>信值大模型</View>
+                <View className={styles.adminEntryDesc}>信值档案 · 三层评分 · 1信值=1元兑换 · 三态灰度</View>
+              </View>
+              <View className={styles.adminEntryArrow}>›</View>
+            </View>
             <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/theme-admin/index' })}>
               <View className={styles.adminEntryIcon}>🎨</View>
               <View className={styles.adminEntryInfo}>

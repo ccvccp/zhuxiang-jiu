@@ -78,6 +78,7 @@ const QUICK_ENTRIES = [
   { key: 'orders', icon: '📦', label: '我的订单' },
   { key: 'service', icon: '🎧', label: '在线客服' },
   { key: 'xinzhi', icon: '🏅', label: '信值臻选' },
+  { key: 'trust', icon: '🧧', label: '信值兑换' },
   { key: 'map', icon: '🗺️', label: '智图地图' },
   { key: 'zhidan', icon: '📦', label: '智单订单' },
   { key: 'zhike', icon: '👑', label: '智客会员' },
@@ -304,6 +305,9 @@ const IndexPage: React.FC = () => {
       case 'xinzhi':
         Taro.navigateTo({ url: '/pages/xinzhi/index' });
         break;
+      case 'trust':
+        Taro.navigateTo({ url: '/pages/trust/index' });
+        break;
       case 'map':
         Taro.navigateTo({ url: '/pages/zt/index' });
         break;
@@ -346,7 +350,7 @@ const IndexPage: React.FC = () => {
           <Text className={styles.noticeText}>{MOCK_NOTICES[noticeIdx]}</Text>
         </View>
 
-        {/* 功能金刚区(3 行 15 入口; 客服工作台仅 admin 可见) */}
+        {/* 功能金刚区(23 入口; 客服工作台仅 admin 可见) */}
         <View className={styles.quickGrid}>
           {QUICK_ENTRIES.filter(item => item.key !== 'cswork' || getSession()?.role === 'admin').map(item => {
             const iconVal = getQuickGridIcon(item.key, item.icon);
