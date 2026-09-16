@@ -1,8 +1,16 @@
-"""网站条款及角色协议管理模块路由(10 端点)
+"""网站条款及角色协议管理模块路由(15 端点)
 
 鉴权:
     - 用户端(2 接口): 同意条款/检查同意(X-Member-Id)
     - 管理端(8 接口): X-Role: admin 头(条款CRUD/发布/角色协议/统计)
+
+大模型二代·三态灰度(AGREEMENT_MODE, 全站范式):
+    - 决策面(4 POST): @/_decision 门控——off 拒绝(409)
+      + shadow/assist 响应标记(agreementMode)
+    - 用户同意权豁免(1): consent——永不关停
+      (签署条款是用户法律行为)
+    - 观测面(6 GET): 永不关停
+    - 控制面(4): mode/override/guard/resume
 
 异常映射:
     - KeyError → 404(条款/协议不存在)
@@ -16,6 +24,7 @@
     - 角色协议(2): 创建/列表
     - 历史(1):  条款历史版本
     - 统计(1):  管理端统计
+    - 控制面(4): mode/override/guard/resume
 """
 
 
@@ -64,6 +73,67 @@ def _handle(exc: Exception):
 
 
 # ============================================================
+# 大模型二代·三态灰度门控(AGREEMENT_MODE, 全站范式)
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(AGREEMENT_MODE=off → 409;
+    shadow/assist 放行——大模型二代读取链:
+    护栏暂停 > 运行时 override > env)"""
+    from services.agreement_mode_service import (
+        AgreementModeService,
+    )
+    return await AgreementModeService() \
+        .require_decision_mode()
+
+
+def _decision(fn=None, *, admin=True):
+    """决策端点装饰器: 门控(off 409) +
+    shadow/assist 标记(agreementMode)
+
+    参数(鉴权优先——403 before 409, 小竹/钱包/信用范式):
+        admin=True(默认) 管理端(X-Role 非 admin
+                       放行函数体触发 403)
+
+    用户同意权(consent)不加本装饰器——签署条款是
+    用户法律行为, 永不关停。
+    观测面(GET)不加——永不关停。
+    """
+    import functools
+    from services.agreement_mode_service import (
+        MODE_VALUES,
+    )
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            # 鉴权优先: 无效/缺失凭据放行
+            # 函数体触发 403——不预判门控
+            x_role = kwargs.get("x_role")
+            gate_needed = not (admin and x_role != "admin")
+            mode_state = None
+            if gate_needed:
+                try:
+                    mode_state = await _gate()
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=str(e)) from e
+            result = await fn(*args, **kwargs)
+            if isinstance(result, dict) \
+                    and mode_state \
+                    and mode_state.get("mode") \
+                    in MODE_VALUES[1:]:
+                result = {**result,
+                          "agreementMode":
+                              mode_state["mode"]}
+            return result
+        return wrapper
+
+    return deco(fn) if fn else deco
+
+
+# ============================================================
 # 请求模型
 # ============================================================
 
@@ -103,6 +173,7 @@ class CreateProtocolRequest(PydBaseModel):
 # ============================================================
 
 @router.post("/api/agreements", tags=["条款协议模块"])
+@_decision
 async def create_agreement(
     data: CreateAgreementRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -136,16 +207,12 @@ async def list_agreements(
         _handle(e)
 
 
-@router.get("/api/agreements/{agreement_id}", tags=["条款协议模块"])
-async def get_agreement(
-    agreement_id: int,
-):
-    """查询条款详情"""
-    try:
-        result = await _service.get_agreement(agreement_id)
-        return {"success": True, "data": result}
-    except Exception as e:
-        _handle(e)
+# 条款详情路由移至文件后部(所有单段字面路径之后)——
+# 防 int 路径参数先注册吞掉 consents/role-protocols/
+# mode 等字面量(422 路由冲突, 存量缺陷修复)
+
+
+
 
 
 # ============================================================
@@ -153,6 +220,7 @@ async def get_agreement(
 # ============================================================
 
 @router.post("/api/agreements/{agreement_id}/publish", tags=["条款协议模块"])
+@_decision
 async def publish_agreement(
     agreement_id: int,
     data: PublishRequest = None,
@@ -169,6 +237,7 @@ async def publish_agreement(
 
 
 @router.post("/api/agreements/{agreement_id}/versions", tags=["条款协议模块"])
+@_decision
 async def new_version(
     agreement_id: int,
     data: NewVersionRequest,
@@ -215,7 +284,11 @@ async def list_consents(
     limit: int = Query(100, ge=1, le=500, description="查询条数"),
     x_role: str = Header(None, alias="X-Role"),
 ):
-    """查询同意记录(管理端)"""
+    """查询同意记录(管理端)
+
+    注: 本路由须先于 /{agreement_id} 注册——防 int 路径
+    参数吞字面量(422 路由冲突, 存量缺陷修复)。
+    """
     _require_admin(x_role)
     try:
         result = await _service.list_consents(user_id, agreement_id, limit)
@@ -229,6 +302,7 @@ async def list_consents(
 # ============================================================
 
 @router.post("/api/agreements/role-protocols", tags=["条款协议模块"])
+@_decision
 async def create_protocol(
     data: CreateProtocolRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -287,6 +361,117 @@ async def get_stats(
     _require_admin(x_role)
     try:
         result = await _service.get_stats()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 控制面(4, admin 门禁——大模型二代全站范式)
+# ============================================================
+
+@router.get("/api/agreements/mode", tags=["条款协议模块"])
+async def agreement_mode_status(
+    x_role: str = Header(None, alias="X-Role")):
+    """灰度总览(模式/读取链/护栏/红线公示——观测面永不关停)"""
+    _require_admin(x_role)
+    from services.agreement_mode_service import (
+        AgreementModeService,
+    )
+    return await AgreementModeService().status_view()
+
+
+@router.post("/api/agreements/mode/override",
+             tags=["条款协议模块"])
+async def agreement_mode_override(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role")):
+    """运行时切档(免容器重建; 空 mode=清除 override)"""
+    _require_admin(x_role)
+    from services.agreement_mode_service import (
+        AgreementModeService,
+    )
+    body = data or {}
+    try:
+        result = await AgreementModeService().set_override(
+            str(body.get("mode") or ""),
+            operator="admin")
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
+
+
+@router.post("/api/agreements/mode/guard",
+              tags=["条款协议模块"])
+async def agreement_mode_guard(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role")):
+    """护栏检查(三指标恶化 >3% 自动暂停)
+
+    body: {agreementInactiveRate, protocolInactiveRate,
+           versionMismatchRate, baseline?{同三键}}
+    ——缺省时按条款协议仓储实时聚合(确定性, LLM 禁入)。
+    """
+    _require_admin(x_role)
+    from services.agreement_mode_service import (
+        AgreementModeService,
+    )
+    if not isinstance(data, dict) or not data:
+        # 缺省: 巡检聚合(确定性)
+        from services.agreement_scheduler import (
+            run_guard_patrol,
+        )
+        r = await run_guard_patrol()
+        return {"success": True,
+                "data": {"metrics": r["metrics"],
+                         "samples": r["samples"],
+                         "breached": r["breached"],
+                         "breaches": r["breaches"],
+                         "pausedNow": r["pausedNow"]}}
+    try:
+        result = await AgreementModeService().guard_check(
+            float(data.get("agreementInactiveRate") or 0),
+            float(data.get("protocolInactiveRate") or 0),
+            float(data.get("versionMismatchRate") or 0),
+            baseline=data.get("baseline"))
+        return {"success": True, "data": result}
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
+
+
+@router.post("/api/agreements/mode/resume",
+             tags=["条款协议模块"])
+async def agreement_mode_resume(
+    note: str = Query("", description="恢复备注(决策留痕)"),
+    x_role: str = Header(None, alias="X-Role")):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    _require_admin(x_role)
+    from services.agreement_mode_service import (
+        AgreementModeService,
+    )
+    try:
+        result = await AgreementModeService().resume(
+            operator="admin", note=note)
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
+
+
+@router.get("/api/agreements/{agreement_id}", tags=["条款协议模块"])
+async def get_agreement(
+    agreement_id: int,
+):
+    """查询条款详情
+
+    注: 位于全部单段字面路径(consents/role-protocols/
+    mode 及控制面)之后注册——防 int 路径参数吞字面量
+    (422 路由冲突, 存量缺陷修复)。
+    """
+    try:
+        result = await _service.get_agreement(agreement_id)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

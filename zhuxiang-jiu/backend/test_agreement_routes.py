@@ -31,6 +31,9 @@ import sys
 # 确保使用内存模式
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+# 大模型二代: 决策面放行态(4 写端点 @_decision 门控;
+# AGREEMENT_MODE 默认 off 会 409 拦截存量业务断言)
+os.environ["AGREEMENT_MODE"] = "assist"
 
 from services.agreement_service import AgreementService
 from repositories.agreement_repository import (
