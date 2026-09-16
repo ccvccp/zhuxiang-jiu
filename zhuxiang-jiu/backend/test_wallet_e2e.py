@@ -372,14 +372,16 @@ async def run_e2e():
     r = await svc.transfer_to_regular(user_id, 5000.0, 12)
     check("转定期成功", r["success"] is True)
     check("定期编号", r["depositNo"].startswith("DP"))
-    check("12 月收益 150", r["expectedInterest"] == 150.0,
+    check("12 月收益 175", r["expectedInterest"] == 175.0,
           f"actual={r.get('expectedInterest')}")
-    check("年化 3%", r["annualRate"] == 0.03)
-    check("奖品匹配", "竹香经典" in r.get("rewardName", ""))
-    check("LPR 合规", r["compliance"]["compliant"] is True)
-    # 综合收益率 = (150 + 536) / 5000 = 13.72%
-    expected_rate = (150 + 536) / 5000
-    check("综合收益率 13.72%", abs(r["compliance"]["actualRate"] - expected_rate) < 0.001)
+    check("年化 3.5%", r["annualRate"] == 0.035)
+    # 3.5% 使 (175+536)/5000=14.22% 超 LPR 4倍(13.8%)——
+    # 主推档触发合规自动降档(奖品取消, 业务方核定接受)
+    check("LPR 超限降档", r["compliance"]["compliant"] is False
+          and r["compliance"]["action"] == "degraded")
+    check("奖品降档取消", r.get("rewardName") == "")
+    expected_rate = (175 + 536) / 5000
+    check("综合收益率 14.22%", abs(r["compliance"]["actualRate"] - expected_rate) < 0.001)
     dp_no = r["depositNo"]
 
     # 6.2 定期列表
@@ -401,18 +403,20 @@ async def run_e2e():
     check("提前取出成功", r["success"] is True)
     check("手续费 50(5000×1%)", r["fee"] == 50.0, f"actual={r.get('fee')}")
     check("到账 4950", r["actualAmount"] == 4950.0, f"actual={r.get('actualAmount')}")
-    check("损失收益", r["lossInterest"] == 150.0)
-    check("损失奖品", r["lossReward"] is True)
+    check("损失收益", r["lossInterest"] == 175.0)
+    check("无奖品可损失(降档后)", r["lossReward"] is False)
 
     # ============================================================
     # 7. 奖品管理(2 接口) + 定期到期产生奖品
     # ============================================================
     print("\n========== 7. 奖品管理(2 接口) ==========")
 
-    # 7.1 转定期用于到期取出(产生奖品)
-    print("[Test 7.1] 转定期 ¥5000/12 月(用于到期)")
-    await svc.deposit(user_id, 5000.0, "bank")
-    r = await svc.transfer_to_regular(user_id, 5000.0, 12)
+    # 7.1 转定期用于到期取出(产生奖品)——用 ¥20,000/12 月
+    #     合规档((700+1888)/20000=12.94% ≤13.8%, 奖品保留;
+    #     ¥5,000 主推档 3.5% 已触发 LPR 降档取消奖品)
+    print("[Test 7.1] 转定期 ¥20000/12 月(用于到期, 合规档)")
+    await svc.deposit(user_id, 20000.0, "bank")
+    r = await svc.transfer_to_regular(user_id, 20000.0, 12)
     dp_no2 = r["depositNo"]
 
     # 修改到期日为昨天(模拟到期)
@@ -424,10 +428,10 @@ async def run_e2e():
     print("[Test 7.2] 定期到期取出(产生奖品)")
     r = await svc.settle_deposit(user_id, dp_no2)
     check("到期取出成功", r["success"] is True)
-    check("本金 5000", r["amount"] == 5000.0)
-    check("收益 150", r["interest"] == 150.0)
+    check("本金 20000", r["amount"] == 20000.0)
+    check("收益 700", r["interest"] == 700.0)
     check("奖品编号", r["rewardNo"] != "" and r["rewardNo"].startswith("RW"))
-    check("奖品名称", "竹香经典" in r["rewardName"])
+    check("奖品名称", "竹香尊享礼盒" in r["rewardName"])
     rw_no = r["rewardNo"]
 
     # 7.3 奖品列表
@@ -512,9 +516,10 @@ async def run_e2e():
 
     # 9.7 奖品过期
     print("[Test 9.7] 奖品过期(应 ValueError)")
-    # 创建一个奖品并修改过期时间
-    await svc.deposit(user_id, 5000.0, "bank")
-    r = await svc.transfer_to_regular(user_id, 5000.0, 12)
+    # 创建一个奖品并修改过期时间——用 ¥20,000/12 月合规档
+    # (¥5,000 主推档 3.5% 已 LPR 降档无奖品)
+    await svc.deposit(user_id, 20000.0, "bank")
+    r = await svc.transfer_to_regular(user_id, 20000.0, 12)
     dp_no3 = r["depositNo"]
     yesterday_str = (datetime.now() - timedelta(days=1)).isoformat()
     await repo.update_deposit_fields(dp_no3, {"endDate": yesterday_str})
