@@ -48,10 +48,12 @@ def scheduler_interval_seconds() -> int:
 
 
 async def run_scheduled_tasks() -> dict:
-    """执行一轮 T+1 补标+有效期检查
-    (可独立调用——测试与手动触发)"""
+    """执行一轮 T+1 补标+有效期检查+
+    语义轨巡检(可独立调用——测试与手动触发)"""
     result = {"collect": None,
-              "freshness": None, "errors": []}
+              "freshness": None,
+              "semantic": None,
+              "errors": []}
     try:
         from services.kb57_feedback_loop_service import (
             Kb57FeedbackLoopService,
@@ -66,7 +68,7 @@ async def run_scheduled_tasks() -> dict:
                 collect.get("poolSubmitted"),
             "signals": collect.get("signals"),
         }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
             "kb57_sched_collect_failed: %s", exc)
         result["errors"].append(f"collect:{exc}")
@@ -82,10 +84,52 @@ async def run_scheduled_tasks() -> dict:
             "expired": fresh.get("expired"),
             "demoted": fresh.get("demoted"),
         }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
             "kb57_sched_fresh_failed: %s", exc)
         result["errors"].append(f"freshness:{exc}")
+
+    # ③ 语义轨巡检(P7 生产观测——命中率/
+    # 误召回率周期性留痕+异常告警)
+    try:
+        from services.kb57_embedding_service import (
+            read_sem_stats,
+        )
+        counts = await read_sem_stats()
+        searches = int(counts.get("searches") or 0)
+        empty = int(counts.get("empty") or 0)
+        hits = int(counts.get("hits") or 0)
+        failed = int(counts.get("failed") or 0)
+        disabled = int(counts.get("disabled") or 0)
+        avg_hits = round(hits / searches, 2) \
+            if searches else None
+        hit_rate = round(
+            (searches - empty) / searches, 4) \
+            if searches else None
+        warnings = []
+        if avg_hits is not None and avg_hits > 3.0:
+            warnings.append(
+                f"avgHitsPerSearch={avg_hits} 偏高"
+                f"(误召回信号——阈值可上调)")
+        total_runs = searches + failed + disabled
+        if total_runs and \
+                failed / total_runs > 0.5:
+            warnings.append(
+                f"failed 占比 {failed}/{total_runs} "
+                f"偏高(embed 轨不稳)")
+        result["semantic"] = {
+            "counts": counts,
+            "hitRate": hit_rate,
+            "avgHitsPerSearch": avg_hits,
+            "warnings": warnings,
+        }
+        for w in warnings:
+            logger.warning(
+                "kb57_semantic_patrol: %s", w)
+    except Exception as exc:
+        logger.warning(
+            "kb57_sched_semantic_failed: %s", exc)
+        result["errors"].append(f"semantic:{exc}")
 
     # 调度层留痕
     try:
@@ -101,18 +145,20 @@ async def run_scheduled_tasks() -> dict:
             "detail": {
                 "collect": result["collect"],
                 "freshness": result["freshness"],
+                "semantic": result["semantic"],
                 "errors": result["errors"][-10:],
             },
             "createdAt": ts(),
         })
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
             "kb57_sched_event_failed: %s", exc)
 
     logger.info("kb57_scheduler_done collect=%s "
-                "freshness=%s",
+                "freshness=%s semantic=%s",
                 result["collect"],
-                result["freshness"])
+                result["freshness"],
+                result["semantic"])
     return result
 
 
@@ -124,7 +170,7 @@ async def _scheduler_loop() -> None:
         await asyncio.sleep(interval)
         try:
             await run_scheduled_tasks()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "学习调度异常(继续运行): %s", exc)
 

@@ -376,11 +376,66 @@ class TestObservability:
         os.environ["KB57_MODE"] = "off"
 
 
+class TestPatrol:
+    """05 语义轨例行巡检(调度器第三任务)"""
+
+    async def run(self):
+        print("[05 例行巡检]")
+        reset_all()
+        import services.kb57_embedding_service \
+            as emb_mod
+
+        # 预置计数: 2 检索 8 命中(avg=4>3 → 预警)
+        emb_mod._sem_stats_mem.clear()
+        emb_mod._sem_stats_mem.update({
+            "searches": 2, "hits": 8})
+
+        from services.kb57_scheduler import (
+            run_scheduled_tasks,
+        )
+        r = await run_scheduled_tasks()
+        sem = r.get("semantic")
+        record("巡检: semantic 字段结构",
+               isinstance(sem, dict)
+               and "hitRate" in sem
+               and "avgHitsPerSearch" in sem
+               and "warnings" in sem,
+               str(sem)[:60])
+        record("巡检: avgHitsPerSearch=4.0",
+               (sem or {}).get(
+                   "avgHitsPerSearch") == 4.0,
+               str((sem or {})
+                   .get("avgHitsPerSearch")))
+        record("巡检: 误召回预警触发(avg>3)",
+               any("偏高" in w for w in
+                   (sem or {}).get("warnings")
+                   or []),
+               str((sem or {}).get("warnings")))
+
+        # 事件留痕(scheduler_run detail 含 semantic)
+        from repositories.kb57_repository import (
+            Kb57Repository,
+        )
+        events = await (
+            Kb57Repository().list_events(limit=20)
+        )
+        sched = [e for e in events
+                 if e.get("eventType")
+                 == "scheduler_run"]
+        record("巡检: 调度事件留痕含 semantic",
+               bool(sched) and "semantic"
+               in (sched[-1].get("detail")
+                   or {}),
+               str(len(sched)))
+        emb_mod._sem_stats_mem.clear()
+
+
 async def run_all():
     await TestEmbedSearch().run()
     await TestFallback().run()
     await TestSemanticFill().run()
     await TestObservability().run()
+    await TestPatrol().run()
 
 
 def main():
