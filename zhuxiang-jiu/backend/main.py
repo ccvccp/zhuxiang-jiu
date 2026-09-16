@@ -465,6 +465,10 @@ async def _on_startup():
     # (XXIAOZHU_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
     from services.xiaozhu_scheduler import start_guard_loop as start_xiaozhu_guard
     start_xiaozhu_guard()
+    # 钱包盈利大模型: 护栏指标自动巡检
+    # (WALLET_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
+    from services.wallet_scheduler import start_guard_loop as start_wallet_guard
+    start_wallet_guard()
     # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
     from services.blogger_scheduler import (
         start_radar_scheduler as start_blogger_radar,

@@ -24,6 +24,7 @@ import sys
 # 确保使用内存模式
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["WALLET_MODE"] = "assist"
 
 from services.wallet_service import (
     WalletService,

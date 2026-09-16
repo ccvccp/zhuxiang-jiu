@@ -89,6 +89,78 @@ def _handle(exc):
 
 
 # ============================================================
+# 大模型二代·三态灰度门控(WALLET_MODE, 全站范式)
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(WALLET_MODE=off → 409;
+    shadow/assist 放行——大模型二代读取链:
+    护栏暂停 > 运行时 override > env)"""
+    from services.wallet_mode_service import (
+        WalletModeService,
+    )
+    return await WalletModeService() \
+        .require_decision_mode()
+
+
+def _decision(fn=None, *, strict=False,
+              admin=False):
+    """决策端点装饰器: 门控(off 409) +
+    shadow/assist 标记(walletMode)
+
+    参数(鉴权优先——401/403 before 409, 小竹范式):
+        strict=True  用户端(X-Member-Id 缺失
+                     放行函数体触发 401)
+        admin=True   管理端(X-Role 非 admin
+                     放行函数体触发 403)
+        默认         直接门控
+
+    宪法豁免面(资金红线——永不关停)不加本装饰器:
+    withdraw 提现申请(资金退出权)/withdrawal
+    approve+paid(在途审核链)/refund 退款/
+    deposit settle+early-settle(本金取出权)/
+    reward claim+sign(奖品领取与签收权)。
+    观测面(GET)不加——永不关停。
+    """
+    import functools
+    from services.wallet_mode_service import (
+        MODE_VALUES,
+    )
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            # 鉴权优先: 无效/缺失凭据放行
+            # 函数体触发 401/403——不预判门控
+            x_role = kwargs.get("x_role")
+            x_member_id = kwargs.get(
+                "x_member_id")
+            gate_needed = not (
+                (admin and x_role != "admin")
+                or (strict and not x_member_id))
+            mode_state = None
+            if gate_needed:
+                try:
+                    mode_state = await _gate()
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=str(e)) from e
+            result = await fn(*args, **kwargs)
+            if isinstance(result, dict) \
+                    and mode_state \
+                    and mode_state.get("mode") \
+                    in MODE_VALUES[1:]:
+                result = {**result,
+                          "walletMode":
+                              mode_state["mode"]}
+            return result
+        return wrapper
+
+    return deco(fn) if fn else deco
+
+
+# ============================================================
 # 请求模型
 # ============================================================
 
@@ -137,6 +209,7 @@ class ShipRewardRequest(PydBaseModel):
 # ============================================================
 
 @router.post("/api/wallet/open", tags=["钱包盈利"])
+@_decision(strict=True)
 async def wallet_open(
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
@@ -169,6 +242,7 @@ async def wallet_info(
 # ============================================================
 
 @router.post("/api/wallet/deposit", tags=["钱包盈利"])
+@_decision(strict=True)
 async def wallet_deposit(
     req: DepositRequest,
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
@@ -288,6 +362,7 @@ async def mark_withdrawal_paid(
 # ============================================================
 
 @router.post("/api/wallet/pay", tags=["钱包盈利"])
+@_decision(strict=True)
 async def wallet_pay(
     req: PayRequest,
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
@@ -355,6 +430,7 @@ async def daily_interest(
 
 
 @router.post("/api/wallet/interest/settle-monthly", tags=["钱包盈利"])
+@_decision(strict=True)
 async def settle_monthly_interest(
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
 ):
@@ -416,6 +492,7 @@ async def interest_rules():
 # ============================================================
 
 @router.post("/api/wallet/transfer-regular", tags=["钱包盈利"])
+@_decision(strict=True)
 async def transfer_to_regular(
     req: TransferRegularRequest,
     x_member_id: Annotated[str | None, Header(alias="X-Member-Id")] = None,
@@ -523,6 +600,7 @@ async def claim_reward(
 # ============================================================
 
 @router.post("/api/wallet/reward/{reward_no}/ship", tags=["钱包盈利"])
+@_decision(admin=True)
 async def ship_reward(
     reward_no: str,
     req: ShipRewardRequest,
@@ -554,8 +632,100 @@ async def sign_reward(
 
 
 # ============================================================
-# 路由注册
+# 控制面(大模型二代——全站范式 4 端点)
 # ============================================================
+
+@router.get("/api/wallet/mode", tags=["钱包盈利"])
+async def wallet_mode_status(
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """灰度总览(观测面——模式+护栏+红线公示;
+    不受开关影响)"""
+    _require_admin(x_role)
+    from services.wallet_mode_service import (
+        WalletModeService,
+    )
+    return await WalletModeService().status_view()
+
+
+@router.post("/api/wallet/mode/override", tags=["钱包盈利"])
+async def wallet_mode_override(
+    body: dict = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """运行时切档(免容器重建; 空 mode=清除 override)"""
+    _require_admin(x_role)
+    body = body or {}
+    from services.wallet_mode_service import (
+        WalletModeService,
+    )
+    try:
+        return await WalletModeService().set_override(
+            str(body.get("mode") or ""),
+            operator="admin")
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/wallet/mode/guard", tags=["钱包盈利"])
+async def wallet_mode_guard(
+    body: dict = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """护栏手动检查(三指标恶化 >3% 自动暂停)
+
+    body 可选 {withdrawRejRate, earlySettleRate,
+    accountFrozenRate}——缺省从仓储层实时聚合
+    (rejected 提现占比/提前取出定期占比/frozen 账户占比)。
+    """
+    _require_admin(x_role)
+    body = body or {}
+    from services.wallet_mode_service import (
+        WalletModeService,
+    )
+    try:
+        if any(k in body for k in (
+                "withdrawRejRate",
+                "earlySettleRate",
+                "accountFrozenRate")):
+            return await WalletModeService(
+            ).guard_check(
+                float(body.get("withdrawRejRate") or 0),
+                float(body.get(
+                    "earlySettleRate") or 0),
+                float(body.get(
+                    "accountFrozenRate") or 0))
+        from services.wallet_scheduler import (
+            run_guard_patrol,
+        )
+        r = await run_guard_patrol()
+        return {"success": True,
+                "metrics": r.get("metrics"),
+                "samples": r.get("samples"),
+                "breached": r.get("breached"),
+                "pausedNow": r.get("pausedNow"),
+                "breaches": r.get("breaches") or []}
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/wallet/mode/resume", tags=["钱包盈利"])
+async def wallet_mode_resume(
+    body: dict = None,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    _require_admin(x_role)
+    body = body or {}
+    from services.wallet_mode_service import (
+        WalletModeService,
+    )
+    try:
+        return await WalletModeService().resume(
+            note=str(body.get("note") or ""))
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
 
 def register_wallet_routes(app):
     """注册钱包盈利模块路由"""
