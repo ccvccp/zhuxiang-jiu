@@ -141,8 +141,13 @@ const AssetPage: React.FC = () => {
   };
 
   // 角色→域联动(封闭注册: byRole)+选中要素证据字段
+  // + 域码中文名(动态字典源——registry meta.domainNames)
   const regDomains: string[] =
     regRegistry?.meta?.byRole?.[regRole] || [];
+  const regDomainNames: Record<string, string> =
+    regRegistry?.meta?.domainNames || {};
+  const domainCn = (d: string): string =>
+    regDomainNames[d] || d;
   const regElement =
     regRegistry?.elementDetails?.[`${regRole}.${regDomain}`] || null;
   const regSchema: string[] = regElement?.evidenceSchema || [];
@@ -369,7 +374,7 @@ const AssetPage: React.FC = () => {
                       className={`${styles.chip} ${regDomain === d ? styles.chipActive : ''}`}
                       onClick={() => pickRegDomain(d)}
                     >
-                      {d}{d === 'risk' ? '(负)' : ''}
+                      {domainCn(d)}
                     </View>
                   ))}
                 </View>
@@ -410,7 +415,7 @@ const AssetPage: React.FC = () => {
                     </View>
                     <View className={styles.resItem}>
                       {regResult.label} · 主体 {regSubject} ·
-                      {roleName(regRole)} · {regDomain}
+                      {roleName(regRole)} · {domainCn(regDomain)}
                       {regResult.negative ? ' · 负资产' : ''}
                     </View>
                     {regResult.av62Mode ? (

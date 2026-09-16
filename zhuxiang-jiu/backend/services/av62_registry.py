@@ -60,6 +60,19 @@ DOMAINS = (
     "growth",        # 成长
 )
 
+# 域码中文名(封闭九域——登记表单动态字典源)
+DOMAIN_NAMES = {
+    "compliance": "合规",
+    "knowledge": "知识",
+    "behavior": "行为",
+    "social": "社会资本",
+    "culture": "文化",
+    "capability": "能力",
+    "reputation": "声誉",
+    "growth": "成长",
+    "risk": "负资产",
+}
+
 # 负资产域(铁律: 时效衰减不适用)
 RISK_DOMAIN = "risk"
 
@@ -689,6 +702,10 @@ def _validate_liquidity() -> None:
     errors = []
     # 流动性映射域全覆盖
     for domain in ALL_DOMAINS:
+        if domain not in DOMAIN_NAMES:
+            errors.append(
+                f"资产域 {domain} 缺中文名"
+                f"(domainNames 封闭域)")
         tier = DOMAIN_LIQUIDITY.get(domain)
         if tier is None:
             errors.append(
@@ -886,6 +903,7 @@ def registry_view() -> dict:
             "domains": list(DOMAINS),
             "allDomains":
                 list(ALL_DOMAINS),
+            "domainNames": dict(DOMAIN_NAMES),
             "states":
                 list(ASSET_STATES),
             "evidenceFields":

@@ -122,6 +122,11 @@ const MOCK_REGISTRY = {
   meta: {
     byRole: { enterprise: ['behavior', 'compliance', 'knowledge', 'risk'] },
     roleDomains: ['enterprise', 'organization', 'personal'],
+    domainNames: {
+      behavior: '行为', compliance: '合规', knowledge: '知识',
+      risk: '负资产', capability: '能力', reputation: '声誉',
+      growth: '成长', social: '社会资本', culture: '文化',
+    },
   },
 };
 const MOCK_REGISTER_RESULT = {
@@ -416,14 +421,16 @@ const textOf = (node) => {
   record('页面-登记字典加载', requests.some(r =>
     r.url === '/api/av62/registry'));
   const regText = textOf(elReg);
-  record('页面-登记表单渲染(角色域联动)', regText.includes('登记主体 ID')
-    && regText.includes('资产域(按角色封闭 4 域)')
-    && regText.includes('选择资产域后填写证据快照'));
-  // 选 compliance 域 → 证据字段动态渲染
-  const domChip = findAll(elReg, n =>
+  const domNameChips = findAll(elReg, n =>
     typeof n.props.className === 'string'
-    && n.props.className.includes('chip') && textOf(n) === 'compliance')[0];
-  domChip.props.onClick();
+    && n.props.className.includes('chip')
+    && textOf(n) === '合规');
+  record('页面-登记表单渲染(角色域中文化)', regText.includes('登记主体 ID')
+    && regText.includes('资产域(按角色封闭 4 域)')
+    && domNameChips.length === 1
+    && regText.includes('选择资产域后填写证据快照'));
+  // 选 compliance(合规)域 → 证据字段动态渲染
+  domNameChips[0].props.onClick();
   await waitTick(30);
   const elDom = reactP.__test.rerender();
   const domText = textOf(elDom);
