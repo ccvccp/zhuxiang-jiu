@@ -56,6 +56,7 @@ export default defineAppConfig({
     'pages/member73-trust/index',
     'pages/member73/index',
     'pages/nexus74/index',
+    'pages/xx65/index',
     'pages/attract72/index',
     'pages/cs-workbench/index',
     'pages/kb-model/index'

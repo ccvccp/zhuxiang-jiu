@@ -297,9 +297,22 @@ async def shops_list(
         status: str = None,
         limit: int = 50,
         x_role: str | None = Header(default=None,
-                                    alias="X-Role")):
-    """店铺列表(admin, 观测面)"""
-    _require_admin(x_role)
+                                    alias="X-Role"),
+        x_member_id: int = Header(default=0,
+                                 alias="X-Member-Id")):
+    """店铺列表(admin 全量; member+
+    owner_id 指定本人可查——用户权利
+    面板口径, 73号范式)
+
+    member 不带 owner_id / 查他人 → 403。
+    """
+    if x_role == "member" \
+            and owner_id is not None \
+            and int(owner_id) \
+            == int(x_member_id or 0):
+        pass  # 本人店铺查询放行(观测面)
+    else:
+        _require_admin(x_role)
     from services.xx65_service import (
         Xx65Service,
     )
