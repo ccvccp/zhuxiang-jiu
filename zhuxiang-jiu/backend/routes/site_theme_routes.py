@@ -1,10 +1,19 @@
-"""网站图标智能管理模块路由(11 端点)
+"""网站图标智能管理模块路由(16 端点)
 
 鉴权(v8.1 升级为 JWT 强校验, 堵死伪造 X-Role 头绕过):
     - 管理端(9 接口): Authorization: Bearer <token> + token 角色 admin
       (复用 auth_routes.require_admin 依赖: 无 Token/无效 Token → 401,
        角色非 admin → 403; 操作人从 Token 载荷提取, 不可伪造)
     - 公开(2 接口): 激活主题(C 端运行时换肤) / 图标库只读
+
+大模型二代·三态灰度(SITE_THEME_MODE, 全站范式):
+    - 决策面(7 写): @/_decision 门控——off 拒绝(409)
+      + shadow/assist 响应标记(themeMode)
+      (require_admin 为 FastAPI Depends——401/403 天然
+       先于装饰器门控 409)
+    - C 端运行时换肤(2 公开): active/icons 永不关停
+    - 观测面(3 管理端 GET): 永不关停
+    - 控制面(4): mode/override/guard/resume
 
 异常映射(遵循项目约定):
     - KeyError → 404(主题/日志不存在)
@@ -42,6 +51,55 @@ def _handle(exc: Exception):
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=409, detail=str(exc))
     raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ============================================================
+# 大模型二代·三态灰度门控(SITE_THEME_MODE, 全站范式)
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(SITE_THEME_MODE=off → 409;
+    shadow/assist 放行——大模型二代读取链:
+    护栏暂停 > 运行时 override > env)"""
+    from services.site_theme_mode_service import (
+        SiteThemeModeService,
+    )
+    return await SiteThemeModeService() \
+        .require_decision_mode()
+
+
+def _decision(fn):
+    """决策端点装饰器: 门控(off 409) +
+    shadow/assist 标记(themeMode)
+
+    鉴权优先: require_admin 为 FastAPI Depends——
+    401/403 在进入本装饰器前完成(参数解析阶段),
+    天然优先于门控 409。
+    C 端运行时换肤(active/icons 公开端)不加——
+    永不关停; 观测面(GET)不加——永不关停。
+    """
+    import functools
+    from services.site_theme_mode_service import (
+        MODE_VALUES,
+    )
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            mode_state = await _gate()
+        except ValueError as e:
+            raise HTTPException(
+                status_code=409,
+                detail=str(e)) from e
+        result = await fn(*args, **kwargs)
+        if isinstance(result, dict) \
+                and mode_state.get("mode") \
+                in MODE_VALUES[1:]:
+            result = {**result,
+                      "themeMode":
+                          mode_state["mode"]}
+        return result
+    return wrapper
 
 
 # ============================================================
@@ -89,6 +147,7 @@ class CreateIconRequest(PydBaseModel):
 # ============================================================
 
 @router.post("/api/site-theme/themes", tags=["网站图标智能管理"])
+@_decision
 async def create_theme(
     data: CreateThemeRequest,
     admin: dict = Depends(require_admin),
@@ -111,6 +170,7 @@ async def list_themes(
 
 
 @router.put("/api/site-theme/themes/{theme_id}", tags=["网站图标智能管理"])
+@_decision
 async def update_theme(
     theme_id: int,
     data: UpdateThemeRequest,
@@ -128,6 +188,7 @@ async def update_theme(
 
 @router.post("/api/site-theme/themes/{theme_id}/ai-check",
              tags=["网站图标智能管理"])
+@_decision
 async def ai_check(
     theme_id: int,
     admin: dict = Depends(require_admin),
@@ -141,6 +202,7 @@ async def ai_check(
 
 @router.post("/api/site-theme/themes/{theme_id}/activate",
              tags=["网站图标智能管理"])
+@_decision
 async def activate_theme(
     theme_id: int,
     admin: dict = Depends(require_admin),
@@ -155,6 +217,7 @@ async def activate_theme(
 
 @router.post("/api/site-theme/themes/{theme_id}/archive",
              tags=["网站图标智能管理"])
+@_decision
 async def archive_theme(
     theme_id: int,
     admin: dict = Depends(require_admin),
@@ -180,6 +243,7 @@ async def list_logs(
 
 @router.post("/api/site-theme/admin/logs/{log_id}/rollback",
              tags=["网站图标智能管理"])
+@_decision
 async def rollback(
     log_id: int,
     admin: dict = Depends(require_admin),
@@ -219,6 +283,7 @@ async def list_icons(
 
 
 @router.post("/api/site-theme/admin/icons", tags=["网站图标智能管理"])
+@_decision
 async def create_icon(
     data: CreateIconRequest,
     admin: dict = Depends(require_admin),
@@ -230,6 +295,101 @@ async def create_icon(
             name=data.name)
     except Exception as exc:
         _handle(exc)
+
+
+# ============================================================
+# 控制面(4, admin 门禁——大模型二代全站范式)
+# ============================================================
+
+@router.get("/api/site-theme/mode", tags=["网站图标智能管理"])
+async def site_theme_mode_status(
+    admin: dict = Depends(require_admin),
+):
+    """灰度总览(模式/读取链/护栏/红线公示——观测面永不关停)"""
+    from services.site_theme_mode_service import (
+        SiteThemeModeService,
+    )
+    return await SiteThemeModeService().status_view()
+
+
+@router.post("/api/site-theme/mode/override",
+             tags=["网站图标智能管理"])
+async def site_theme_mode_override(
+    data: dict = None,
+    admin: dict = Depends(require_admin),
+):
+    """运行时切档(免容器重建; 空 mode=清除 override)"""
+    body = data or {}
+    from services.site_theme_mode_service import (
+        SiteThemeModeService,
+    )
+    try:
+        result = await SiteThemeModeService().set_override(
+            str(body.get("mode") or ""),
+            operator=f"admin:{_admin_id(admin)}")
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
+
+
+@router.post("/api/site-theme/mode/guard",
+             tags=["网站图标智能管理"])
+async def site_theme_mode_guard(
+    data: dict = None,
+    admin: dict = Depends(require_admin),
+):
+    """护栏检查(三指标恶化 >3% 自动暂停)
+
+    body: {aiLowScoreRate, rollbackRate,
+           brokenIconRefRate, baseline?{同三键}}
+    ——缺省时按图标主题仓储实时聚合(确定性, LLM 禁入)。
+    """
+    from services.site_theme_mode_service import (
+        SiteThemeModeService,
+    )
+    if not isinstance(data, dict) or not data:
+        # 缺省: 巡检聚合(确定性)
+        from services.site_theme_scheduler import (
+            run_guard_patrol,
+        )
+        r = await run_guard_patrol()
+        return {"success": True,
+                "data": {"metrics": r["metrics"],
+                         "samples": r["samples"],
+                         "breached": r["breached"],
+                         "breaches": r["breaches"],
+                         "pausedNow": r["pausedNow"]}}
+    try:
+        result = await SiteThemeModeService().guard_check(
+            float(data.get("aiLowScoreRate") or 0),
+            float(data.get("rollbackRate") or 0),
+            float(data.get("brokenIconRefRate") or 0),
+            baseline=data.get("baseline"))
+        return {"success": True, "data": result}
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
+
+
+@router.post("/api/site-theme/mode/resume",
+             tags=["网站图标智能管理"])
+async def site_theme_mode_resume(
+    note: str = Query("", description="恢复备注(决策留痕)"),
+    admin: dict = Depends(require_admin),
+):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    from services.site_theme_mode_service import (
+        SiteThemeModeService,
+    )
+    try:
+        result = await SiteThemeModeService().resume(
+            operator=f"admin:{_admin_id(admin)}",
+            note=note)
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
 
 
 def register_site_theme_routes(app) -> None:

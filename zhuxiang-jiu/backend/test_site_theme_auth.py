@@ -22,6 +22,9 @@ import sys
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ.setdefault("AUTH_MODE", "compat")
+# 大模型二代: 决策面放行态(7 写端点 @_decision 门控;
+# SITE_THEME_MODE 默认 off 会 409 拦截存量业务断言)
+os.environ.setdefault("SITE_THEME_MODE", "assist")
 
 from fastapi.testclient import TestClient
 
