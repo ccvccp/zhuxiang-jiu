@@ -67,6 +67,75 @@ def _handle(exc: Exception):
 
 
 # ============================================================
+# 大模型二代·三态灰度门控(CREDIT_MODE, 全站范式)
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(CREDIT_MODE=off → 409;
+    shadow/assist 放行——大模型二代读取链:
+    护栏暂停 > 运行时 override > env)"""
+    from services.credit_mode_service import (
+        CreditModeService,
+    )
+    return await CreditModeService() \
+        .require_decision_mode()
+
+
+def _decision(fn=None, *, strict=False,
+              admin=False):
+    """决策端点装饰器: 门控(off 409) +
+    shadow/assist 标记(creditMode)
+
+    参数(鉴权优先——401/403 before 409, 小竹/钱包范式):
+        strict=True  用户端(X-Member-Id 缺失
+                     放行函数体触发 401)
+        admin=True   管理端(X-Role 非 admin
+                     放行函数体触发 403)
+        默认         直接门控
+
+    宪法豁免面(履约与兑换权——永不关停)不加本装饰器:
+    paylater repay(还款履约权)/exchange(积分兑换权)。
+    观测面(GET)不加——永不关停。
+    """
+    import functools
+    from services.credit_mode_service import (
+        MODE_VALUES,
+    )
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            # 鉴权优先: 无效/缺失凭据放行
+            # 函数体触发 401/403——不预判门控
+            x_role = kwargs.get("x_role")
+            x_member_id = kwargs.get(
+                "x_member_id")
+            gate_needed = not (
+                (admin and x_role != "admin")
+                or (strict and not x_member_id))
+            mode_state = None
+            if gate_needed:
+                try:
+                    mode_state = await _gate()
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=str(e)) from e
+            result = await fn(*args, **kwargs)
+            if isinstance(result, dict) \
+                    and mode_state \
+                    and mode_state.get("mode") \
+                    in MODE_VALUES[1:]:
+                result = {**result,
+                          "creditMode":
+                              mode_state["mode"]}
+            return result
+        return wrapper
+
+    return deco(fn) if fn else deco
+
+
+# ============================================================
 # 请求模型
 # ============================================================
 
@@ -213,6 +282,7 @@ async def get_score(
 # --- 操作接口 ---
 
 @router.post("/api/credit/adjust", tags=["信用管理模块"])
+@_decision(admin=True)
 async def adjust_score(
     data: AdjustScoreRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -233,6 +303,7 @@ async def adjust_score(
 
 
 @router.post("/api/credit/upgrade", tags=["信用管理模块"])
+@_decision(admin=True)
 async def upgrade_level(
     data: UpgradeRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -252,6 +323,7 @@ async def upgrade_level(
 
 
 @router.post("/api/credit/downgrade", tags=["信用管理模块"])
+@_decision(admin=True)
 async def downgrade_level(
     data: DowngradeRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -271,6 +343,7 @@ async def downgrade_level(
 
 
 @router.post("/api/credit/blacklist", tags=["信用管理模块"])
+@_decision(admin=True)
 async def add_to_blacklist(
     data: BlacklistRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -289,6 +362,7 @@ async def add_to_blacklist(
 
 
 @router.post("/api/credit/restore", tags=["信用管理模块"])
+@_decision(admin=True)
 async def restore_credit(
     data: RestoreRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -414,6 +488,7 @@ async def list_paylater_orders(
 
 
 @router.post("/api/credit/paylater/order", tags=["信用管理模块"])
+@_decision(strict=True)
 async def create_paylater_order(
     data: PaylaterOrderRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
@@ -451,6 +526,7 @@ async def repay_paylater_order(
 
 
 @router.post("/api/credit/paylater/review", tags=["信用管理模块"])
+@_decision(admin=True)
 async def review_paylater_order(
     data: PaylaterReviewRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -469,6 +545,7 @@ async def review_paylater_order(
 
 
 @router.post("/api/credit/quarterly/settle", tags=["信用管理模块"])
+@_decision(admin=True)
 async def settle_quarter(
     data: QuarterlySettleRequest,
     x_role: str = Header(None, alias="X-Role"),
@@ -504,6 +581,102 @@ async def exchange_rewards(
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
+
+
+# ============================================================
+# 控制面(大模型二代——全站范式 4 端点)
+# ============================================================
+
+@router.get("/api/credit/mode", tags=["信用管理模块"])
+async def credit_mode_status(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """灰度总览(观测面——模式+护栏+红线公示;
+    不受开关影响)"""
+    _require_admin(x_role)
+    from services.credit_mode_service import (
+        CreditModeService,
+    )
+    return await CreditModeService().status_view()
+
+
+@router.post("/api/credit/mode/override", tags=["信用管理模块"])
+async def credit_mode_override(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """运行时切档(免容器重建; 空 mode=清除 override)"""
+    _require_admin(x_role)
+    data = data or {}
+    from services.credit_mode_service import (
+        CreditModeService,
+    )
+    try:
+        return await CreditModeService().set_override(
+            str(data.get("mode") or ""),
+            operator="admin")
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/credit/mode/guard", tags=["信用管理模块"])
+async def credit_mode_guard(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """护栏手动检查(三指标恶化 >3% 自动暂停)
+
+    body 可选 {overdueRepayRate, paylaterRejectRate,
+    blacklistRate}——缺省从仓储层实时聚合
+    (逾期终态占比/rejected 订单占比/黑名单账户占比)。
+    """
+    _require_admin(x_role)
+    data = data or {}
+    from services.credit_mode_service import (
+        CreditModeService,
+    )
+    try:
+        if any(k in data for k in (
+                "overdueRepayRate",
+                "paylaterRejectRate",
+                "blacklistRate")):
+            return await CreditModeService(
+            ).guard_check(
+                float(data.get("overdueRepayRate") or 0),
+                float(data.get(
+                    "paylaterRejectRate") or 0),
+                float(data.get(
+                    "blacklistRate") or 0))
+        from services.credit_scheduler import (
+            run_guard_patrol,
+        )
+        r = await run_guard_patrol()
+        return {"success": True,
+                "metrics": r.get("metrics"),
+                "samples": r.get("samples"),
+                "breached": r.get("breached"),
+                "pausedNow": r.get("pausedNow"),
+                "breaches": r.get("breaches") or []}
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/credit/mode/resume", tags=["信用管理模块"])
+async def credit_mode_resume(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    _require_admin(x_role)
+    data = data or {}
+    from services.credit_mode_service import (
+        CreditModeService,
+    )
+    try:
+        return await CreditModeService().resume(
+            note=str(data.get("note") or ""))
+    except ValueError as e:
+        raise _map_value_error(e) from e
 
 
 def register_credit_routes(app):

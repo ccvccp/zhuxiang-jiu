@@ -33,6 +33,7 @@ from datetime import datetime, timedelta
 # 确保使用内存模式
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["CREDIT_MODE"] = "assist"
 
 from services.credit_service import CreditService
 from repositories.credit_repository import (
