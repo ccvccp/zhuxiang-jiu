@@ -35,6 +35,47 @@ logger = logging.getLogger("kb57_embedding")
 # 推荐池状态(与 feed 服务同源)
 FEEDABLE_STATUSES = ("published", "boosted")
 
+# --------------------------------------------------------
+# 语义轨观测计数(P7 生产观测——命中率/回落分布)
+# 双模式: Redis HINCRBY / 内存 dict(测试)
+# --------------------------------------------------------
+_sem_stats_mem: dict = {}
+
+
+async def bump_sem_stat(field: str, n: int = 1
+                        ) -> None:
+    """语义轨指标打点(失败静默——观测不阻塞检索)"""
+    try:
+        from repositories.backend import (
+            is_redis_mode, get_redis_client, _k,
+        )
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hincrby(
+                _k("kb57", "sem_stats"), field, n)
+        else:
+            _sem_stats_mem[field] = \
+                _sem_stats_mem.get(field, 0) + n
+    except Exception:
+        pass
+
+
+async def read_sem_stats() -> dict:
+    """语义轨计数读取(观测面消费)"""
+    try:
+        from repositories.backend import (
+            is_redis_mode, get_redis_client, _k,
+        )
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(
+                _k("kb57", "sem_stats"))
+            return {k: int(v)
+                    for k, v in (data or {}).items()}
+        return dict(_sem_stats_mem)
+    except Exception:
+        return {}
+
 # 语义相似度阈值(低于不命中——embedding-3 中文
 # 相关对实测分布 0.43-0.60, 不相关对 ≤0.44,
 # 0.45 为分界; 误召回代价高于漏召回时可上调)
@@ -129,22 +170,26 @@ class Kb57EmbeddingService:
         return seed
 
     async def _backfill_vectors(
-            self, pool: list[dict]) -> None:
-        """批量回填(检索时对无向量种子惰性补)"""
+            self, pool: list[dict]) -> int:
+        """批量回填(检索时对无向量种子惰性补)
+
+        Returns: 回填种子数(0=无需/失败)
+        """
         pending = [
             s for s in pool
             if s.get("status")
             in FEEDABLE_STATUSES
             and not s.get("embedding")]
         if not pending:
-            return
+            return 0
         try:
             vecs = _embed_texts(
                 [_seed_text(s) for s in pending])
             if not vecs \
                     or len(vecs) != len(pending):
-                return
-            for s, v in zip(pending, vecs, strict=False):
+                return 0
+            for s, v in zip(pending, vecs,
+                            strict=False):
                 s["embedding"] = [
                     round(x, 6) for x in v]
                 await self.repo.save_seed(
@@ -152,9 +197,11 @@ class Kb57EmbeddingService:
             logger.info(
                 "kb57_seed_backfilled count=%s",
                 len(pending))
+            return len(pending)
         except Exception as exc:
             logger.warning(
                 "kb57_backfill_failed: %s", exc)
+            return 0
 
     # --------------------------------------------------------
     # 语义检索
@@ -173,6 +220,7 @@ class Kb57EmbeddingService:
             (调用方回落确定性轨)。
         """
         if not embed_search_enabled():
+            await bump_sem_stat("disabled")
             return None
         q = str(query or "").strip()
         if len(q) < 2:
@@ -188,7 +236,11 @@ class Kb57EmbeddingService:
             return None
 
         # 存量回填(无向量种子惰性补)
-        await self._backfill_vectors(pool)
+        backfilled = await self._backfill_vectors(
+            pool)
+        if backfilled:
+            await bump_sem_stat(
+                "backfilled", backfilled)
         embedded = [
             s for s in pool if s.get("embedding")]
         if not embedded:
@@ -197,6 +249,7 @@ class Kb57EmbeddingService:
         # 查询向量(5 分钟缓存)
         qvec = self._query_vector(q)
         if qvec is None:
+            await bump_sem_stat("failed")
             return None
 
         # 余弦排序 top-K
@@ -207,6 +260,13 @@ class Kb57EmbeddingService:
             if sim >= SIMILARITY_THRESHOLD:
                 scored.append((sim, s))
         scored.sort(key=lambda kv: -kv[0])
+
+        await bump_sem_stat("searches")
+        if not scored:
+            await bump_sem_stat("empty")
+        else:
+            await bump_sem_stat(
+                "hits", len(scored[:limit]))
 
         return [
             {"seed": s,

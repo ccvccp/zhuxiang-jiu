@@ -304,10 +304,83 @@ class TestSemanticFill:
         os.environ["KB57_MODE"] = "off"
 
 
+class TestObservability:
+    """04 语义轨观测打点"""
+
+    async def run(self):
+        print("[04 观测打点]")
+        reset_all()
+        import services.kb57_embedding_service \
+            as emb_mod
+        from services.kb57_embedding_service import (
+            Kb57EmbeddingService,
+            read_sem_stats,
+        )
+        os.environ["LLM_API_KEY"] = "test-key"
+        os.environ["LLM_ENABLED"] = "on"
+        os.environ["KNOWLEDGE_EMBEDDING"] = "on"
+        os.environ["KB57_EMBED_SEARCH"] = "on"
+
+        await make_seed(
+            "味觉·甘冽", "舌尖清甜如山泉回甘")
+        emb_mod._sem_stats_mem.clear()
+        emb_mod._query_cache.clear()
+
+        # 种子向量 [1,0]; query 命中轴 [1,0],
+        # 无关轴 [0,1](正交 → 空)
+        def fake_embed(texts):
+            return [[1.0, 0.0]
+                    if "甘" in t or "清甜" in t
+                    else [0.0, 1.0]
+                    for t in texts]
+
+        emb_mod._embed_texts = fake_embed
+        svc = Kb57EmbeddingService()
+
+        # 命中轨
+        await svc.semantic_search(
+            "清甜的口感", limit=2)
+        # 空轨(正交)
+        await svc.semantic_search(
+            "zz无关词", limit=2)
+        stats = await read_sem_stats()
+        record("打点: searches=2",
+               stats.get("searches") == 2,
+               str(stats))
+        record("打点: hits 计数",
+               int(stats.get("hits") or 0) >= 1,
+               str(stats.get("hits")))
+        record("打点: empty 计数",
+               int(stats.get("empty") or 0) == 1,
+               str(stats.get("empty")))
+
+        # 观测面 HTTP(内存态计数读取)
+        from fastapi.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        resp = client.get(
+            "/api/kb57/semantics/stats",
+            headers={"X-Role": "admin"})
+        body = resp.json() or {}
+        record("HTTP 观测面 200+结构",
+               resp.status_code == 200
+               and "counts" in body
+               and "threshold" in body
+               and body.get("threshold") == 0.45,
+               str(resp.status_code))
+
+        # 还原
+        emb_mod._query_cache.clear()
+        os.environ.pop("LLM_API_KEY", None)
+        os.environ["LLM_ENABLED"] = "off"
+        os.environ["KB57_MODE"] = "off"
+
+
 async def run_all():
     await TestEmbedSearch().run()
     await TestFallback().run()
     await TestSemanticFill().run()
+    await TestObservability().run()
 
 
 def main():

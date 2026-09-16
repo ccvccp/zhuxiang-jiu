@@ -104,7 +104,7 @@ async def register_source(
         require_active_mode()
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
     from services.kb57_registry import (
         SOURCE_TYPES, CREDIBILITY_REVIEW_LINE,
@@ -132,7 +132,7 @@ async def register_source(
         credibility = float(credibility or 0)
     except (TypeError, ValueError):
         raise HTTPException(
-            status_code=422, detail="credibility 须为数值")
+            status_code=422, detail="credibility 须为数值") from None
     if not 0 <= credibility <= 1:
         raise HTTPException(
             status_code=422,
@@ -210,7 +210,7 @@ async def scan_gaps(
         return await Kb57Service().diagnose_and_plan()
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/gaps")
@@ -256,16 +256,16 @@ async def collect_run(
             except (TypeError, ValueError):
                 raise HTTPException(
                     status_code=422,
-                    detail="gapId 须为整数")
+                    detail="gapId 须为整数") from None
     try:
         return await Kb57CollectService().run_collect(
             gap_id=gap_id)
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/resources/{resource_id}/compliance")
@@ -285,10 +285,10 @@ async def resource_compliance(
             .run_compliance(int(resource_id)))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/compliance/{compliance_id}")
@@ -307,7 +307,7 @@ async def compliance_detail(
             .get_compliance(int(compliance_id)))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/seeds/craft")
@@ -331,10 +331,10 @@ async def seeds_craft(
             value_tags=body.get("valueTags") or [])
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/seeds")
@@ -368,7 +368,7 @@ async def seeds_detail(
             int(seed_id))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/seeds/{seed_id}/review")
@@ -392,10 +392,10 @@ async def seeds_review(
             note=str(body.get("note") or ""))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/seeds/{seed_id}/recall")
@@ -418,10 +418,10 @@ async def seeds_recall(
                 "affectedMembers") or [])
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 # ============================================================
@@ -438,7 +438,7 @@ def _require_member(x_member_id: str | None) -> int:
     except ValueError:
         raise HTTPException(
             status_code=403,
-            detail="X-Member-Id 需为整数")
+            detail="X-Member-Id 需为整数") from None
 
 
 @router.get("/feed")
@@ -458,7 +458,7 @@ async def member_feed(
             int(member_id), role=role, scene=scene)
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/seeds/{seed_id}/view")
@@ -477,10 +477,10 @@ async def member_seed_view(
             int(member_id), int(seed_id))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/seeds/{seed_id}/feedback")
@@ -503,10 +503,10 @@ async def member_seed_feedback(
                 body.get("comment") or ""))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/paths")
@@ -528,10 +528,10 @@ async def member_create_path(
                     body.get("title") or "")))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/paths/{path_id}/advance")
@@ -553,10 +553,10 @@ async def member_advance_path(
                 int(body.get("seedId") or 0)))
     except KeyError as exc:
         raise HTTPException(status_code=404,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/my/learning")
@@ -574,7 +574,7 @@ async def member_my_learning(
             int(member_id))
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/context/trigger")
@@ -598,7 +598,7 @@ async def member_context_trigger(
                     body.get("query") or "")))
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.post("/feedback/collect")
@@ -617,7 +617,7 @@ async def feedback_collect(
             .collect_feedback())
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 @router.get("/feedback/stats")
@@ -646,6 +646,39 @@ async def dashboard(
     return await Kb57DashboardService().build()
 
 
+@router.get("/semantics/stats")
+async def semantics_stats(
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """语义轨观测面(P7——命中率/回落分布/
+    最近语义命中样本; 阈值调参依据)"""
+    _require_admin(x_role)
+    from services.kb57_embedding_service import (
+        read_sem_stats, SIMILARITY_THRESHOLD,
+    )
+    counts = await read_sem_stats()
+    searches = int(counts.get("searches") or 0)
+    empty = int(counts.get("empty") or 0)
+    return {
+        "success": True,
+        "counts": counts,
+        "derived": {
+            "hitRate": round(
+                (searches - empty) / searches, 4)
+            if searches else None,
+            "avgHitsPerSearch": round(
+                int(counts.get("hits") or 0)
+                / searches, 2)
+            if searches else None,
+        },
+        "threshold": SIMILARITY_THRESHOLD,
+        "note": "语义轨生产观测——hitRate 为命中率, "
+                "avgHitsPerSearch 偏高即误召回信号"
+                "(阈值调参依据); disabled/failed "
+                "为回落分布",
+    }
+
+
 @router.post("/redteam")
 async def redteam(
         x_role: str | None = Header(default=None,
@@ -661,7 +694,7 @@ async def redteam(
             Kb57RedteamService().run_all())
     except ValueError as exc:
         raise HTTPException(status_code=409,
-                            detail=str(exc))
+                            detail=str(exc)) from exc
 
 
 def register_kb57_routes(app) -> None:
