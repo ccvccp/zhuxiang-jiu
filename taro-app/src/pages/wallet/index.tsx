@@ -44,6 +44,8 @@ const WalletPage: React.FC = () => {
   // 定期与奖品
   const [deposits, setDeposits] = useState<WalletDepositVO[]>([]);
   const [rewards, setRewards] = useState<WalletRewardVO[]>([]);
+  // 定期档位(兜底常量; 运行时取 interest/rules 动态利率防硬编码漂移)
+  const [regularTiers, setRegularTiers] = useState(DEPOSIT_TIERS);
 
   // 充值弹层状态
   const [showDeposit, setShowDeposit] = useState(false);
@@ -77,6 +79,19 @@ const WalletPage: React.FC = () => {
       setState(notOpen ? 'not-open' : 'ready');
       if (!notOpen) console.warn('[wallet] 加载失败:', e);
     }
+    // 定期档位动态利率(非阻塞; 失败回落常量兜底)
+    WalletAPI.interestRules().then((r: any) => {
+      const reg = (r?.regular || []) as Array<{
+        period: number; minAmount: number; annualRate: number;
+      }>;
+      if (reg.length) {
+        setRegularTiers(reg.map(x => ({
+          period: Number(x.period),
+          min: Number(x.minAmount || 0),
+          rate: `${(Number(x.annualRate) * 100).toFixed(1)}%`,
+        })));
+      }
+    }).catch((): void => { /* 回落常量兜底 */ });
   };
 
   useEffect(() => { loadAll(); }, []);
@@ -191,7 +206,7 @@ const WalletPage: React.FC = () => {
   const handleTransferRegular = async () => {
     if (submitting) return;
     const amount = Number(regAmount);
-    const tier = DEPOSIT_TIERS.find(t => t.period === regPeriod);
+    const tier = regularTiers.find(t => t.period === regPeriod);
     if (!amount || amount <= 0) {
       Taro.showToast({ title: '请输入存入金额', icon: 'none' });
       return;
@@ -400,7 +415,7 @@ const WalletPage: React.FC = () => {
         {deposits.length === 0 ? (
           <View className={styles.empty}>
             <View className={styles.emptyIcon}>🏦</View>
-            <View className={styles.emptyText}>暂无定期, 转定期享年化 3%-5%+奖品</View>
+            <View className={styles.emptyText}>暂无定期, 转定期享年化 3%-3.8%+奖品</View>
           </View>
         ) : (
           deposits.map(d => (
@@ -588,7 +603,7 @@ const WalletPage: React.FC = () => {
             </View>
             {/* 存期档位 */}
             <View className={styles.quickRow}>
-              {DEPOSIT_TIERS.map(t => (
+              {regularTiers.map(t => (
                 <View
                   key={t.period}
                   className={`${styles.quickItem} ${regPeriod === t.period ? styles.quickItemActive : ''}`}
@@ -605,7 +620,7 @@ const WalletPage: React.FC = () => {
                 className={styles.amountInput}
                 type='digit'
                 value={regAmount}
-                placeholder={`最低 ${DEPOSIT_TIERS.find(t => t.period === regPeriod)?.min ?? 0} 元`}
+                placeholder={`最低 ${regularTiers.find(t => t.period === regPeriod)?.min ?? 0} 元`}
                 onInput={(e) => setRegAmount(e.detail.value)}
               />
             </View>

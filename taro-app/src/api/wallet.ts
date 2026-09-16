@@ -100,12 +100,14 @@ export const REWARD_STATUS_NAME: Record<string, string> = {
   expired: '已过期',
 };
 
-/** 定期档位(与后端 DEPOSIT_TIERS 对齐) */
+/** 定期档位(兜底展示; 运行时优先取 /api/wallet/interest/rules 动态利率,
+ *  避免后端调利率时前端硬编码漂移——2026-09-16 事故:
+ *  后端两轮调息(倒挂修复+单调递增)前端常量均漏改) */
 export const DEPOSIT_TIERS: Array<{ period: number; min: number; rate: string }> = [
   { period: 3, min: 1000, rate: '3.0%' },
-  { period: 6, min: 2000, rate: '5.0%' },
-  { period: 12, min: 5000, rate: '3.0%' },
-  { period: 24, min: 10000, rate: '3.5%' },
+  { period: 6, min: 2000, rate: '3.3%' },
+  { period: 12, min: 5000, rate: '3.5%' },
+  { period: 24, min: 10000, rate: '3.8%' },
 ];
 
 const mapDeposit = (d: any): WalletDepositVO => ({
