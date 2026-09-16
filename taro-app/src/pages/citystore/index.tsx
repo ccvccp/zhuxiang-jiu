@@ -79,10 +79,17 @@ const CityStorePage: React.FC = () => {
   // 打开开店面板(拉取可用城市)
   const openApply = async () => {
     if (memberLevel < 5) {
+      // SVIP 招募闭环: 提示升级并一键引导至我的页 SVIP 开通区
       Taro.showModal({
         title: '暂不可申请',
-        content: `市级网店为 SVIP 专属权益, 当前等级 L${memberLevel}。升级 SVIP 会员后即可开店。`,
-        showCancel: false,
+        content: `市级网店为 SVIP 专属权益, 当前等级 L${memberLevel}。升级 SVIP 会员后即可开店(¥99/年, 含 8 折购物 / ×3.0 返分 / 城主店资格)。`,
+        confirmText: '去升级 SVIP',
+        cancelText: '暂不',
+        success: (res) => {
+          if (res.confirm) {
+            Taro.switchTab({ url: '/pages/mine/index' });
+          }
+        },
       });
       return;
     }
