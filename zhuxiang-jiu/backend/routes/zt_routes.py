@@ -1,9 +1,15 @@
-"""智图·AI智能地图大模型路由(P0-P3 全量, 22 端点)
+"""智图·AI智能地图大模型路由(P0-P3 全量, 28 端点)
 
 位置地图管理模块升级: 智图·AI智能地图大模型(全域角色时空服务中枢)。
 鉴权: 全部管理端 X-Role: admin(时空调度敏感域)。
 既有 /api/location/* 13 端点保留零改动(叠加式升级)。
 地图底座: 百度地图(前端测试期接入, AK 经 env 注入)。
+
+大模型二代·三态灰度(ZT_MODE, 全站范式):
+    - 决策面(11 POST): @/_decision 门控——off 拒绝(409)
+      + shadow/assist 响应标记(ztMode)
+    - 观测面(13 GET): 永不关停
+    - 控制面(4): mode/override/guard/resume(admin 门禁)
 
 端点分布:
     - P0 意图引擎: intent/parse / intent/ontology / intent/search
@@ -17,6 +23,7 @@
     - P3 进化闭环: evolution/behavior / evolution/behaviors
                    / evolution/sandbox / evolution/performance
                    / evolution/feedback / evolution/feedbacks
+    - 控制面(4): mode / mode/override / mode/guard / mode/resume
 
 异常映射: KeyError → 404 / ValueError → 409
 """
@@ -39,8 +46,69 @@ _evo = ZtEvolutionService(store=_store)
 
 
 def _require_admin(x_role: str | None):
+    """校验管理员权限, 失败返回 403"""
     if x_role != "admin":
         raise HTTPException(status_code=403, detail="需要管理员权限")
+
+
+# ============================================================
+# 大模型二代·三态灰度门控(ZT_MODE, 全站范式)
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(ZT_MODE=off → 409;
+    shadow/assist 放行——大模型二代读取链:
+    护栏暂停 > 运行时 override > env)"""
+    from services.zt_map_mode_service import (
+        ZtMapModeService,
+    )
+    return await ZtMapModeService() \
+        .require_decision_mode()
+
+
+def _decision(fn=None, *, admin=True):
+    """决策端点装饰器: 门控(off 409) +
+    shadow/assist 标记(ztMode)
+
+    参数(鉴权优先——403 before 409, 小竹/钱包/信用范式):
+        admin=True(默认) 管理端(X-Role 非 admin
+                       放行函数体触发 403)
+
+    智图全部决策端点为管理端(X-Role: admin)。
+    观测面(GET)不加——永不关停。
+    """
+    import functools
+    from services.zt_map_mode_service import (
+        MODE_VALUES,
+    )
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            # 鉴权优先: 无效/缺失凭据放行
+            # 函数体触发 403——不预判门控
+            x_role = kwargs.get("x_role")
+            gate_needed = not (admin and x_role != "admin")
+            mode_state = None
+            if gate_needed:
+                try:
+                    mode_state = await _gate()
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=str(e)) from e
+            result = await fn(*args, **kwargs)
+            if isinstance(result, dict) \
+                    and mode_state \
+                    and mode_state.get("mode") \
+                    in MODE_VALUES[1:]:
+                result = {**result,
+                          "ztMode":
+                              mode_state["mode"]}
+            return result
+        return wrapper
+
+    return deco(fn) if fn else deco
 
 
 def _handle(exc: Exception):
@@ -134,6 +202,7 @@ class TicketAckRequest(PydBaseModel):
 # ============================================================
 
 @router.post("/api/map-ai/intent/parse", tags=["智图AI智能地图大模型"])
+@_decision
 async def intent_parse(data: IntentParseRequest,
                        x_role: str = Header(None, alias="X-Role")):
     """自然语言→复合意图(确定性本体分词)"""
@@ -153,6 +222,7 @@ async def intent_ontology(x_role: str = Header(None, alias="X-Role")):
 
 
 @router.post("/api/map-ai/intent/search", tags=["智图AI智能地图大模型"])
+@_decision
 async def intent_search(data: IntentSearchRequest,
                         x_role: str = Header(None, alias="X-Role")):
     """复合意图时空搜索(能力 AND 匹配+四因子加权)"""
@@ -176,6 +246,7 @@ async def intent_roles(x_role: str = Header(None, alias="X-Role")):
 
 @router.post("/api/map-ai/intent/behavior-hints",
              tags=["智图AI智能地图大模型"])
+@_decision
 async def behavior_hints(data: BehaviorHintRequest,
                          x_role: str = Header(None, alias="X-Role")):
     """角色主动服务提示(视图入口建议)"""
@@ -224,6 +295,7 @@ async def list_pois(x_role: str = Header(None, alias="X-Role"),
 
 
 @router.post("/api/map-ai/poi/register", tags=["智图AI智能地图大模型"])
+@_decision
 async def poi_register(data: PoiRegisterRequest,
                        x_role: str = Header(None, alias="X-Role")):
     """配置化 POI 注册(建议书制: 投产须人工确认)"""
@@ -243,6 +315,7 @@ async def poi_register(data: PoiRegisterRequest,
 
 @router.post("/api/map-ai/supplier/dock-booking",
              tags=["智图AI智能地图大模型"])
+@_decision
 async def dock_booking(data: DockBookingRequest,
                        x_role: str = Header(None, alias="X-Role")):
     """供货商月台预约(排队最短分配建议)"""
@@ -270,6 +343,7 @@ async def dock_status(x_role: str = Header(None, alias="X-Role")):
 
 @router.post("/api/map-ai/b2b/warehouse-match",
              tags=["智图AI智能地图大模型"])
+@_decision
 async def warehouse_match(data: WarehouseMatchRequest,
                           x_role: str = Header(None, alias="X-Role")):
     """B 端多仓货源匹配(库存/距离/时效+成本测算)"""
@@ -311,6 +385,7 @@ async def situation(x_role: str = Header(None, alias="X-Role")):
 
 
 @router.post("/api/map-ai/command/scan", tags=["智图AI智能地图大模型"])
+@_decision
 async def command_scan(x_role: str = Header(None, alias="X-Role")):
     """异常扫描→《处置预案工单》草稿(人工确认)"""
     _require_admin(x_role)
@@ -334,6 +409,7 @@ async def tickets(x_role: str = Header(None, alias="X-Role"),
 
 @router.post("/api/map-ai/command/tickets/{ticket_id}/ack",
              tags=["智图AI智能地图大模型"])
+@_decision
 async def ticket_ack(ticket_id: int, data: TicketAckRequest,
                      x_role: str = Header(None, alias="X-Role")):
     """工单确认闭环(驳回记负样本)"""
@@ -374,6 +450,7 @@ async def risk_radar(x_role: str = Header(None, alias="X-Role")):
 
 @router.post("/api/map-ai/evolution/behavior",
              tags=["智图AI智能地图大模型"])
+@_decision
 async def save_behavior(data: BehaviorRequest,
                         x_role: str = Header(None, alias="X-Role")):
     """行为流留痕(搜索→下单→核销→评价)"""
@@ -407,6 +484,7 @@ async def behaviors(x_role: str = Header(None, alias="X-Role"),
 
 @router.post("/api/map-ai/evolution/sandbox",
              tags=["智图AI智能地图大模型"])
+@_decision
 async def sandbox(data: SandboxRequest,
                  x_role: str = Header(None, alias="X-Role")):
     """时空战略沙盘(选址模拟, 确定性因子加权)"""
@@ -434,6 +512,7 @@ async def performance(x_role: str = Header(None, alias="X-Role")):
 
 @router.post("/api/map-ai/evolution/feedback",
              tags=["智图AI智能地图大模型"])
+@_decision
 async def evolution_feedback(data: FeedbackRequest,
                               x_role: str = Header(None, alias="X-Role")):
     """反馈闭环(拒绝记负样本回流)"""
@@ -459,6 +538,100 @@ async def evolution_feedbacks(
         return {"success": True, "data": rows, "count": len(rows)}
     except Exception as e:
         _handle(e)
+
+
+# ============================================================
+# 控制面(4, admin 门禁——大模型二代全站范式)
+# ============================================================
+
+@router.get("/api/map-ai/mode", tags=["智图AI智能地图大模型"])
+async def zt_mode_status(x_role: str = Header(None, alias="X-Role")):
+    """灰度总览(模式/读取链/护栏/红线公示——观测面永不关停)"""
+    _require_admin(x_role)
+    from services.zt_map_mode_service import (
+        ZtMapModeService,
+    )
+    return await ZtMapModeService().status_view()
+
+
+@router.post("/api/map-ai/mode/override",
+             tags=["智图AI智能地图大模型"])
+async def zt_mode_override(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role")):
+    """运行时切档(免容器重建; 空 mode=清除 override)"""
+    _require_admin(x_role)
+    from services.zt_map_mode_service import (
+        ZtMapModeService,
+    )
+    body = data or {}
+    try:
+        result = await ZtMapModeService().set_override(
+            str(body.get("mode") or ""),
+            operator="admin")
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
+
+
+@router.post("/api/map-ai/mode/guard",
+             tags=["智图AI智能地图大模型"])
+async def zt_mode_guard(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role")):
+    """护栏检查(三指标恶化 >3% 自动暂停)
+
+    body: {rejectRate, falseAlarmRate,
+           dockSaturationRate, baseline?{同三键}}
+    ——缺省时按智图共享表实时聚合
+    (确定性, LLM 禁入)。
+    """
+    _require_admin(x_role)
+    from services.zt_map_mode_service import (
+        ZtMapModeService,
+    )
+    if not isinstance(data, dict) or not data:
+        # 缺省: 巡检聚合(确定性)
+        from services.zt_map_scheduler import (
+            run_guard_patrol,
+        )
+        r = await run_guard_patrol()
+        return {"success": True,
+                "data": {"metrics": r["metrics"],
+                         "samples": r["samples"],
+                         "breached": r["breached"],
+                         "breaches": r["breaches"],
+                         "pausedNow": r["pausedNow"]}}
+    try:
+        result = await ZtMapModeService().guard_check(
+            float(data.get("rejectRate") or 0),
+            float(data.get("falseAlarmRate") or 0),
+            float(data.get("dockSaturationRate") or 0),
+            baseline=data.get("baseline"))
+        return {"success": True, "data": result}
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
+
+
+@router.post("/api/map-ai/mode/resume",
+             tags=["智图AI智能地图大模型"])
+async def zt_mode_resume(
+    note: str = Query("", description="恢复备注(决策留痕)"),
+    x_role: str = Header(None, alias="X-Role")):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    _require_admin(x_role)
+    from services.zt_map_mode_service import (
+        ZtMapModeService,
+    )
+    try:
+        result = await ZtMapModeService().resume(
+            operator="admin", note=note)
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
 
 
 def register_zt_routes(app):

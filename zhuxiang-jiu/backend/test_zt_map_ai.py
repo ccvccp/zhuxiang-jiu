@@ -22,6 +22,9 @@ import sys
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ["AUTH_MODE"] = "compat"
+# 大模型二代: 决策面放行态(11 POST @_decision 门控;
+# ZT_MODE 默认 off 会 409 拦截存量业务断言)
+os.environ["ZT_MODE"] = "assist"
 
 from repositories.store import _mock_store
 
