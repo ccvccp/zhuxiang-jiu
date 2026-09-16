@@ -20,7 +20,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'evo', label: '进化' },
 ];
 
-// 春熙路商圈坐标(演示锚点)
+// 春熙路商圈坐标(演示锚点——定位失败/未定位时的降级中心)
 const CENTER = { longitude: 104.081, latitude: 30.660 };
 
 // 百度 JS API 仅 H5 可用(依赖 window/document 动态插入 script);
@@ -33,6 +33,63 @@ const ZhiTuPage: React.FC = () => {
   const [mapReady, setMapReady] = useState(false);
   const mapDivRef = useRef<HTMLDivElement>(null);
   const bmapRef = useRef<any>(null);
+
+  // ============ 定位中心(真实位置优先, 演示锚点降级) ============
+  const [center, setCenter] = useState({ ...CENTER });
+  const [located, setLocated] = useState(false);
+
+  /** 应用定位中心: 更新 state + 地图 panTo + 标记"我的位置" */
+  const applyCenter = (lng: number, lat: number, src: string) => {
+    setCenter({ longitude: lng, latitude: lat });
+    setLocated(true);
+    if (MAP_ON && bmapRef.current && window.BMap) {
+      bmapRef.current.panTo(
+        new window.BMap.Point(lng, lat));
+      const mk = new window.BMap.Marker(
+        new window.BMap.Point(lng, lat));
+      mk.setTitle('我的位置');
+      bmapRef.current.addOverlay(mk);
+    }
+    Taro.showToast({ title: `${src}定位成功`, icon: 'success' });
+  };
+
+  /** H5 原生定位降级(WGS84——列表距离口径够用) */
+  const fallbackH5Locate = () => {
+    const nav: any = typeof navigator !== 'undefined'
+      ? navigator : null;
+    if (nav && nav.geolocation) {
+      nav.geolocation.getCurrentPosition(
+        (pos: any) => applyCenter(
+          pos.coords.longitude, pos.coords.latitude, 'H5'),
+        (err: any) => Taro.showToast({
+          title: `定位失败: ${String(err?.message || '')
+            .slice(0, 24) || '权限拒绝'}`,
+          icon: 'none' }),
+        { enableHighAccuracy: true, timeout: 8000 });
+    } else {
+      Taro.showToast({
+        title: '当前环境不支持定位(需 HTTPS+授权)',
+        icon: 'none' });
+    }
+  };
+
+  /** 定位当前位置: 优先百度 Geolocation(BD09 与地图/POI 同坐标系),
+   *  未配 AK 或不可用时降级 H5 原生定位 */
+  const locate = () => {
+    if (MAP_ON && window.BMap && window.BMap.Geolocation) {
+      const gl = new window.BMap.Geolocation();
+      gl.getCurrentPosition((r: any) => {
+        if (r && r.point
+            && isFinite(r.point.lng) && isFinite(r.point.lat)) {
+          applyCenter(r.point.lng, r.point.lat, '百度');
+        } else {
+          fallbackH5Locate();
+        }
+      }, { enableHighAccuracy: true });
+    } else {
+      fallbackH5Locate();
+    }
+  };
 
   // ============ 百度地图底座(AK 降级) ============
   useEffect(() => {
@@ -94,8 +151,8 @@ const ZhiTuPage: React.FC = () => {
   const runSearch = async () => {
     try {
       setSearchResult(await ZtAPI.search({
-        text: query, longitude: CENTER.longitude,
-        latitude: CENTER.latitude, radiusKm: 20,
+        text: query, longitude: center.longitude,
+        latitude: center.latitude, radiusKm: 20,
       }));
     } catch (e: any) {
       Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
@@ -114,7 +171,7 @@ const ZhiTuPage: React.FC = () => {
 
   const runNearby = async () => {
     setNearby(await ZtAPI.nearby({
-      longitude: CENTER.longitude, latitude: CENTER.latitude,
+      longitude: center.longitude, latitude: center.latitude,
       radiusKm: 20,
     }).catch(() => null));
   };
@@ -131,7 +188,7 @@ const ZhiTuPage: React.FC = () => {
   const runWarehouse = async () => {
     try {
       setWarehouse(await ZtAPI.warehouseMatch({
-        longitude: CENTER.longitude, latitude: CENTER.latitude,
+        longitude: center.longitude, latitude: center.latitude,
         quantity: 500,
       }));
     } catch (e: any) {
@@ -174,8 +231,8 @@ const ZhiTuPage: React.FC = () => {
   const runSandbox = async () => {
     try {
       setSandbox(await ZtAPI.sandbox({
-        name: sbName || '选址方案', longitude: CENTER.longitude,
-        latitude: CENTER.latitude, monthlyCost: 50000,
+        name: sbName || '选址方案', longitude: center.longitude,
+        latitude: center.latitude, monthlyCost: 50000,
       }));
     } catch (e: any) {
       Taro.showToast({ title: String(e?.message || e).slice(0, 30), icon: 'none' });
@@ -211,15 +268,27 @@ const ZhiTuPage: React.FC = () => {
           <View className={styles.cardTitle}>
             百度地图底座 {MAP_ON ? '(已接入)' : H5_ENV ? '(未配 AK·列表降级)' : '(H5 端能力)'}
           </View>
+          <View className={styles.evoBtns}>
+            <View className={styles.evoBtn} onClick={locate}>
+              {located ? '重新定位' : '定位当前位置'}
+            </View>
+            {MAP_ON && (
+              <View className={styles.evoBtn} onClick={plotPois}>
+                标注全业务 POI
+              </View>
+            )}
+          </View>
+          <View className={styles.resItem}>
+            {located
+              ? `已定位: ${center.longitude.toFixed(4)}, ${center.latitude.toFixed(4)}`
+              : '未定位——时空搜索/附近 POI/多仓/沙盘将使用演示锚点(春熙路)'}
+          </View>
           {MAP_ON ? (
             <View>
               <View
                 ref={mapDivRef as any}
                 style={{ width: '100%', height: '300px', borderRadius: '8px' }}
               />
-              <View className={styles.runBtn} onClick={plotPois}>
-                标注全业务 POI
-              </View>
             </View>
           ) : (
             <View className={styles.footNote}>
@@ -294,7 +363,7 @@ const ZhiTuPage: React.FC = () => {
           <View className={styles.section}>
             <View className={styles.cardTitle}>附近 POI(全业务)</View>
             <View className={styles.runBtn} onClick={runNearby}>
-              春熙路 20km 圈扫描
+              {located ? '当前位置' : '春熙路(演示)'} 20km 圈扫描
             </View>
             {nearby && (nearby.pois || []).map((p: any) => (
               <View key={p.poiCode} className={styles.candRow}>
