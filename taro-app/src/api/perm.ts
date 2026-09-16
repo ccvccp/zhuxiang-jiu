@@ -5,13 +5,15 @@
 import { request } from './request';
 import { getSession } from '@/services/auth-service';
 
-/** 权限树节点(生产流程 7 环节 × 4 操作级) */
+/** 权限树节点(双权限中心: 生产 8 域 + 网站后台 5 域 × 4 操作级) */
 export interface PermNodeVO {
   nodeId: number;
   code: string;          // 如 production.operate
   name: string;          // 酿造生产·操作
   stage: string;
   stageName: string;
+  center?: string;        // production(生产权限中心)/site(网站权限中心)
+  centerName?: string;    // 生产权限中心/网站权限中心
   level: string;         // view/operate/approve/manage
   levelName: string;
   sensitivity: string;   // normal/important/core
@@ -19,6 +21,12 @@ export interface PermNodeVO {
   duties: string[];      // 责任清单(权责共存)
   conflictWith: string[]; // SoD 互斥权限码
   defaultDays: number;
+}
+
+/** 双权限中心分组(中心名 + 环节→权限点) */
+export interface PermCenterVO {
+  name: string;  // 网站权限中心(后台权限)/生产权限中心
+  stages: Record<string, PermNodeVO[]>;
 }
 
 /** 授权实例 */
@@ -144,12 +152,28 @@ const authHeaders = (): Record<string, string> => {
 };
 
 export const PermAPI = {
-  /** 权限树(按生产环节分组) */
+  /** 权限树(按生产环节分组, 兼容视图) */
   async nodes(): Promise<Record<string, PermNodeVO[]>> {
     const res = await request<any>({
       url: '/api/perm/nodes', headers: authHeaders(),
     });
     return (res.stages || {}) as Record<string, PermNodeVO[]>;
+  },
+
+  /** 权限树(双权限中心分组: 网站权限中心后台域 + 生产权限中心生产域) */
+  async nodeCenters(): Promise<Record<string, PermCenterVO>> {
+    const res = await request<any>({
+      url: '/api/perm/nodes', headers: authHeaders(),
+    });
+    const centers: Record<string, PermCenterVO> = {};
+    const raw = res.centers || {};
+    Object.keys(raw).forEach((key) => {
+      centers[key] = {
+        name: (raw[key] && raw[key].name) || key,
+        stages: (raw[key] && raw[key].stages) || {},
+      };
+    });
+    return centers;
   },
 
   /** 角色模板列表 */

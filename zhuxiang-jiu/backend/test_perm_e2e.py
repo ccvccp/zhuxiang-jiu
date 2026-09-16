@@ -90,7 +90,23 @@ async def main():
 
     nodes = await svc.list_nodes()
     # 38号追加 product 域 4 权限点(28→32)
-    record("test_01_seed_28_nodes", len(nodes) == 32, f"got {len(nodes)}")
+    record("test_01_seed_nodes", len(nodes) >= 32, f"got {len(nodes)}")
+
+    # 双权限中心: 网站权限中心(后台 5 域, nodeId 33-52) + 生产权限中心(8 域)
+    site_nodes = [n for n in nodes if n.get("center") == "site"]
+    prod_nodes = [n for n in nodes if n.get("center") == "production"]
+    order_op = next(n for n in nodes if n["code"] == "order.operate")
+    record("test_01b_dual_center",
+           len(nodes) >= 52
+           and len(site_nodes) >= 20 and len(prod_nodes) >= 32
+           and all(n.get("centerName") == "网站权限中心"
+                   for n in site_nodes)
+           and all(n.get("centerName") == "生产权限中心"
+                   for n in prod_nodes)
+           # 网站中心 SoD: 订单后台操作 与 订单审核 不可同人持有
+           and "order.approve" in order_op["conflictWith"],
+           f"total={len(nodes)} site={len(site_nodes)} "
+           f"prod={len(prod_nodes)}")
 
     view_node = next(n for n in nodes if n["code"] == "production.view")
     manage_node = next(n for n in nodes if n["code"] == "production.manage")

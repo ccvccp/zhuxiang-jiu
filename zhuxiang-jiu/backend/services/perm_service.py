@@ -228,7 +228,7 @@ class PermService:
         if not name or len(name.strip()) > 30:
             raise ValueError("角色名称非法(1-30字)")
         if stage not in STAGES:
-            raise ValueError(f"生产环节非法(须为 {'/'.join(STAGES)})")
+            raise ValueError(f"权限环节非法(须为 {'/'.join(STAGES)})")
         if not node_codes:
             raise ValueError("权限码集合不能为空")
         for code in node_codes:

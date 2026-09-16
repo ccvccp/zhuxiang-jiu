@@ -20,10 +20,11 @@ from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_
 
 
 # ============================================================
-# 权限树种子(生产流程 7 环节 × 4 操作级)
+# 权限树种子(双权限中心: 生产 8 域 + 网站 5 域 × 4 操作级)
 # ============================================================
 
-STAGES = {
+# 生产权限中心(生产链路域, nodeId 1-32)
+PRODUCTION_STAGES = {
     "purchase": "原料采购",
     "production": "酿造生产",
     "storage": "灌装仓储",
@@ -33,6 +34,31 @@ STAGES = {
     "finance": "财务管理",
     # 38号·AI智能产品管理(追加于末尾, 不影响既有 nodeId 1-28 编号)
     "product": "产品管理",
+}
+
+# 网站权限中心(网站后台管理域——主要分配后台权限,
+# nodeId 33-52 追加于末尾, 不影响既有编号)
+SITE_STAGES = {
+    "order": "订单后台",
+    "member": "会员后台",
+    "content": "内容后台",
+    "data": "数据后台",
+    "system": "系统后台",
+}
+
+# 合并视图(兼容既有 import)
+STAGES = {**PRODUCTION_STAGES, **SITE_STAGES}
+
+# 双中心名
+CENTER_NAMES = {
+    "production": "生产权限中心",
+    "site": "网站权限中心",
+}
+
+# 域→中心映射
+STAGE_CENTER = {
+    **{s: "production" for s in PRODUCTION_STAGES},
+    **{s: "site" for s in SITE_STAGES},
 }
 
 LEVELS = {
@@ -67,58 +93,69 @@ _DUTIES_BY_LEVEL = {
 }
 
 # SoD 职责分离矩阵: 互斥权限对(收付款操作 与 收款审核 不可同人持有;
-# 38号: 商品编辑操作 与 商品审核 不可同人持有——编辑≠审核)
+# 38号: 商品编辑操作 与 商品审核 不可同人持有——编辑≠审核;
+# 网站中心: 订单后台操作 与 订单审核 不可同人持有)
 _SOD_PAIRS = [
     ("finance.operate", "finance.approve"),
     ("product.operate", "product.approve"),
+    ("order.operate", "order.approve"),
 ]
 
 
 def _build_seed_nodes() -> dict[int, dict]:
-    """构建权限点种子(nodeId 1-28 生产流程 + 29-32 product 域)"""
+    """构建权限点种子(双权限中心: 生产 8 域 nodeId 1-32
+    + 网站 5 域 nodeId 33-52)"""
     nodes = {}
     node_id = 0
-    for stage, stage_cn in STAGES.items():
-        for level, level_cn in LEVELS.items():
-            node_id += 1
-            # 敏感级: 查看/操作=一般, 审批=重要, 管理=核心
-            # 例外: 财务操作(收付款)为核心
-            if level == "view":
-                sensitivity = "normal"
-            elif level == "operate":
-                sensitivity = "core" if stage == "finance" else "normal"
-            elif level == "approve":
-                sensitivity = "important"
-            else:  # manage
-                sensitivity = "core"
-            # 互斥权限(SoD 矩阵)
-            conflict = []
-            for a, b in _SOD_PAIRS:
-                code = f"{stage}.{level}"
-                if code == a:
-                    conflict.append(b)
-                elif code == b:
-                    conflict.append(a)
-            nodes[node_id] = {
-                "nodeId": node_id,
-                "code": f"{stage}.{level}",
-                "name": f"{stage_cn}·{level_cn}",
-                "stage": stage,
-                "stageName": stage_cn,
-                "level": level,
-                "levelName": level_cn,
-                "sensitivity": sensitivity,
-                "sensitivityName": {"normal": "一般", "important": "重要",
-                                    "core": "核心"}[sensitivity],
-                "duties": list(_DUTIES_BY_LEVEL[level]),
-                "conflictWith": conflict,
-                # 默认授权期限(天): 一般/重要 30, 核心 7(高危短周期)
-                "defaultDays": 30 if sensitivity in ("normal", "important") else 7,
-            }
+    for stages_group, center in (
+            (PRODUCTION_STAGES, "production"),
+            (SITE_STAGES, "site")):
+        for stage, stage_cn in stages_group.items():
+            for level, level_cn in LEVELS.items():
+                node_id += 1
+                # 敏感级: 查看/操作=一般, 审批=重要, 管理=核心
+                # 例外: 财务操作(收付款)为核心
+                if level == "view":
+                    sensitivity = "normal"
+                elif level == "operate":
+                    sensitivity = "core" if stage == "finance" else "normal"
+                elif level == "approve":
+                    sensitivity = "important"
+                else:  # manage
+                    sensitivity = "core"
+                # 互斥权限(SoD 矩阵)
+                conflict = []
+                for a, b in _SOD_PAIRS:
+                    code = f"{stage}.{level}"
+                    if code == a:
+                        conflict.append(b)
+                    elif code == b:
+                        conflict.append(a)
+                nodes[node_id] = {
+                    "nodeId": node_id,
+                    "code": f"{stage}.{level}",
+                    "name": f"{stage_cn}·{level_cn}",
+                    "stage": stage,
+                    "stageName": stage_cn,
+                    "center": center,
+                    "centerName": CENTER_NAMES[center],
+                    "level": level,
+                    "levelName": level_cn,
+                    "sensitivity": sensitivity,
+                    "sensitivityName": {"normal": "一般", "important": "重要",
+                                        "core": "核心"}[sensitivity],
+                    "duties": list(_DUTIES_BY_LEVEL[level]),
+                    "conflictWith": conflict,
+                    # 默认授权期限(天): 一般/重要 30, 核心 7(高危短周期)
+                    "defaultDays": 30 if sensitivity in ("normal", "important") else 7,
+                }
     return nodes
 
 
 _SEED_NODES = _build_seed_nodes()
+
+# Redis 种子同步进程级标记(漂移修复幂等跑一次)
+_NODES_SYNCED = False
 
 _INT_FIELDS = ("nodeId", "roleId", "grantId", "requestId", "logId",
                "memberId", "grantedBy", "applicantId", "durationDays",
@@ -229,7 +266,7 @@ class PermRepository:
         if is_redis_mode():
             # 38号实机发现: Redis 模式 perm_nodes 从未种子化(_ensure_store
             # 仅内存路径调用) → 权限树为空, 授权/审批全部不可用。
-            # 惰性种子: perm_nodes 首读为空时灌入 32 权限点。
+            # 惰性种子: 进程级幂等同步(首读灌入 + 双中心升级漂移修复)。
             if table == "perm_nodes":
                 await self._ensure_nodes_seeded_redis()
             client = await get_redis_client()
@@ -245,16 +282,41 @@ class PermRepository:
         return result[:limit]
 
     async def _ensure_nodes_seeded_redis(self) -> None:
-        """Redis 模式权限树惰性种子(幂等: 已有数据不重灌)"""
-        if not is_redis_mode():
+        """Redis 模式权限树种子同步(幂等, 进程级跑一次)
+
+        双权限中心升级漂移修复:
+            - 存量节点(如生产 8 域 32 点)缺 center/centerName 字段 → 回填
+            - 新增种子节点(如网站中心 5 域 20 点)按 code 比对追加
+            - 已有节点其余字段不覆盖(幂等, 重复执行零副作用)
+        """
+        global _NODES_SYNCED
+        if not is_redis_mode() or _NODES_SYNCED:
             return
         client = await get_redis_client()
         keys = await client.keys(_k("perm", "perm_nodes", "*"))
-        if keys:
-            return
+        existing: dict[str, str] = {}
+        for key in keys:
+            data = await client.hgetall(key)
+            if data:
+                node = self._deserialize(data)
+                existing[node.get("code", "")] = key
         for nid, node in _SEED_NODES.items():
-            await client.hset(_k("perm", "perm_nodes", nid),
-                              mapping=self._serialize(node))
+            code = node["code"]
+            if code not in existing:
+                # 追加缺失种子节点(全量字段)
+                await client.hset(_k("perm", "perm_nodes", nid),
+                                  mapping=self._serialize(node))
+            else:
+                # 存量节点回填中心维度字段(其余字段保持不动)
+                key = existing[code]
+                data = await client.hgetall(key)
+                old = self._deserialize(data) if data else {}
+                if (old.get("center") != node["center"]
+                        or old.get("centerName") != node["centerName"]):
+                    merged = {**old, "center": node["center"],
+                              "centerName": node["centerName"]}
+                    await client.hset(key, mapping=self._serialize(merged))
+        _NODES_SYNCED = True
 
     async def _update(self, table: str, record_id, fields: dict) -> dict:
         record = await self._get(table, record_id)

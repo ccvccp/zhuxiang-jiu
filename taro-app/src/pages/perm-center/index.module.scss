@@ -173,8 +173,22 @@
 }
 
 // ============================================
-// 申请表单
+// 申请表单(双权限中心分组)
 // ============================================
+.centerGroup {
+  margin-bottom: $spacing-lg;
+}
+
+.centerTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: $color-primary;
+  background: rgba(53, 92, 68, 0.06);
+  border-radius: $radius-sm;
+  padding: 10rpx $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
 .stageGroup {
   margin-bottom: $spacing-md;
 }

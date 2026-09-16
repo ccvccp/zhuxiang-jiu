@@ -1,5 +1,7 @@
 /**
- * 权限中心 · 权限AI智能管理(P0 核心闭环)
+ * 权限中心 · 权限AI智能管理(P0 核心闭环, 双权限中心)
+ * 双中心: 网站权限中心(订单/会员/内容/数据/系统后台域——主要分配后台权限)
+ *        + 生产权限中心(采购/酿造/仓储/物流/销售/售后/财务/产品生产域)
  * 功能: 我的权限(到期倒计时/责任书签署) / 权限申请(AI预检) /
  *       我的申请(审批链时间线) / 待我审批(逐级审批) / 超管分配直授
  * 权责共存: 未签署责任书的权限阻断行使, 前端明示「享此权, 担此责」
@@ -11,7 +13,7 @@ import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import {
   PermAPI, PermNodeVO, PermGrantVO, PermRequestVO, PermLogVO, PermScoreVO,
-  PermDelegateVO, RoleRecommendVO,
+  PermDelegateVO, RoleRecommendVO, PermCenterVO,
 } from '@/api/perm';
 import { getSession } from '@/services/auth-service';
 
@@ -50,7 +52,8 @@ const PermCenterPage: React.FC = () => {
   const [role, setRole] = useState('');
   const [tab, setTab] = useState<TabKey>('grants');
   const [grants, setGrants] = useState<PermGrantVO[]>([]);
-  const [stages, setStages] = useState<Record<string, PermNodeVO[]>>({});
+  const [centers, setCenters] =
+    useState<Record<string, PermCenterVO>>({});
   const [selected, setSelected] = useState<PermNodeVO | null>(null);
   const [reason, setReason] = useState('');
   const [days, setDays] = useState<number>(0);
@@ -78,11 +81,11 @@ const PermCenterPage: React.FC = () => {
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [g, s, r] = await Promise.all([
-        PermAPI.myGrants(), PermAPI.nodes(), PermAPI.requests(),
+      const [g, c, r] = await Promise.all([
+        PermAPI.myGrants(), PermAPI.nodeCenters(), PermAPI.requests(),
       ]);
       setGrants(g);
-      setStages(s);
+      setCenters(c);
       setMine(r.mine);
       setToApprove(r.toApprove);
       setMyScoreList(await PermAPI.myScores());
@@ -382,7 +385,10 @@ const PermCenterPage: React.FC = () => {
     );
   };
 
-  const allNodes: PermNodeVO[] = Object.values(stages).flat();
+  // 全量权限点(双中心展平, 网站中心优先排列)
+  const allNodes: PermNodeVO[] = ['site', 'production']
+    .flatMap(ck => Object.values((centers[ck] || {}).stages || {}))
+    .flat();
 
   const tabs: Array<{ key: TabKey; label: string; badge?: number }> = [
     { key: 'grants', label: '我的权限' },
@@ -429,7 +435,7 @@ const PermCenterPage: React.FC = () => {
           </View>
           {grants.length === 0 && (
             <View className={styles.empty}>
-              暂无权限{'\n'}到「申请权限」按生产流程申请
+              暂无权限{'\n'}到「申请权限」按权限中心申请
             </View>
           )}
           {grants.map(g => (
@@ -473,30 +479,43 @@ const PermCenterPage: React.FC = () => {
       {/* ============ 申请权限 ============ */}
       {tab === 'apply' && !loading && (
         <View className={styles.section}>
-          <View className={styles.sectionTitle}>按生产流程选择权限</View>
+          <View className={styles.sectionTitle}>
+            按权限中心选择(网站中心分配后台权限)
+          </View>
           {selected && (
             <View className={styles.selectedNode}>
               <View className={styles.selectedNodeName}>{selected.name}</View>
               <View className={styles.selectedNodeMeta}>
-                {selected.code} · 敏感级 {selected.sensitivityName} ·
+                {(selected.centerName ? `${selected.centerName} · ` : '') +
+                  selected.code} · 敏感级 {selected.sensitivityName} ·
                 默认期限 {selected.defaultDays} 天
                 {(selected.conflictWith || []).length > 0
-                  ? ' · 与收款审核互斥(SoD)' : ''}
+                  ? ' · 互斥权限(SoD)' : ''}
               </View>
             </View>
           )}
-          {Object.entries(stages).map(([stageName, nodes]) => (
-            <View className={styles.stageGroup} key={stageName}>
-              <View className={styles.stageName}>{stageName}</View>
-              <View className={styles.nodeGrid}>
-                {nodes.map(n => (
-                  <View
-                    key={n.code}
-                    className={`${styles.nodeChip} ${selected?.code === n.code ? styles.nodeChipActive : ''}`}
-                    onClick={() => handleSelectNode(n)}
-                  >{n.levelName}</View>
-                ))}
+          {Object.entries(centers)
+            .sort(([a], [b]) =>
+              (a === 'site' ? 0 : 1) - (b === 'site' ? 0 : 1))
+            .map(([centerKey, center]) => (
+            <View className={styles.centerGroup} key={centerKey}>
+              <View className={styles.centerTitle}>
+                {center.name}{centerKey === 'site' ? ' · 后台权限' : ''}
               </View>
+              {Object.entries(center.stages).map(([stageName, nodes]) => (
+                <View className={styles.stageGroup} key={stageName}>
+                  <View className={styles.stageName}>{stageName}</View>
+                  <View className={styles.nodeGrid}>
+                    {nodes.map(n => (
+                      <View
+                        key={n.code}
+                        className={`${styles.nodeChip} ${selected?.code === n.code ? styles.nodeChipActive : ''}`}
+                        onClick={() => handleSelectNode(n)}
+                      >{n.levelName}</View>
+                    ))}
+                  </View>
+                </View>
+              ))}
             </View>
           ))}
           {selected && (

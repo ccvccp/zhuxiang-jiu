@@ -108,12 +108,20 @@ class SetDelegateRequest(PydBaseModel):
 
 @router.get("/api/perm/nodes", tags=["权限AI智能管理"])
 async def list_nodes(member: dict = Depends(get_current_member)):
-    """权限树(生产流程 7 环节 × 4 操作级, 按环节分组展示)"""
+    """权限树(双权限中心: 网站权限中心后台域 + 生产权限中心生产域,
+    按中心→环节分组展示; stages 为全量域兼容视图)"""
     nodes = await _service.list_nodes()
     grouped: dict[str, list[dict]] = {}
     for n in nodes:
         grouped.setdefault(n["stageName"], []).append(n)
-    return {"total": len(nodes), "stages": grouped}
+    centers: dict[str, dict] = {}
+    for n in nodes:
+        c = centers.setdefault(
+            n.get("center", "production"),
+            {"name": n.get("centerName", "生产权限中心"),
+             "stages": {}})
+        c["stages"].setdefault(n["stageName"], []).append(n)
+    return {"total": len(nodes), "stages": grouped, "centers": centers}
 
 
 @router.get("/api/perm/roles", tags=["权限AI智能管理"])
