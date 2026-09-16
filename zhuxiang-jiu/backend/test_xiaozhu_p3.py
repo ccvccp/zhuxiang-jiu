@@ -27,6 +27,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"

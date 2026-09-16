@@ -24,6 +24,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -157,7 +158,7 @@ class TestL2Behaviors:
             "sessionId"]
         # 构造直接调用(避免攻击词进入指令路由兜底路径
         # ——钩子在成功指令后; 用 _voice50_polite 单测)
-        session = await svc._require_open(sid2)
+        await svc._require_open(sid2)
         await svc._voice50_polite(
             __import__(
                 "services.xiaozhu_voice50_service",

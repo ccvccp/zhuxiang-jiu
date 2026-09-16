@@ -59,9 +59,9 @@ def _require_member(x_member_id: str | None) -> int:
     信值类指令由 P1 绑定表补强身份)"""
     try:
         return int(x_member_id) if x_member_id else 0
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=401,
-                            detail="X-Member-Id 需为整数")
+                            detail="X-Member-Id 需为整数") from exc
 
 
 def _require_member_strict(x_member_id: str | None) -> int:
@@ -71,9 +71,9 @@ def _require_member_strict(x_member_id: str | None) -> int:
                             detail="需要 X-Member-Id")
     try:
         return int(x_member_id)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=401,
-                            detail="X-Member-Id 需为整数")
+                            detail="X-Member-Id 需为整数") from exc
 
 
 def _handle(exc: Exception):
@@ -87,7 +87,79 @@ def _handle(exc: Exception):
     raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ============================================================
+# 大模型二代·三态灰度门控(XIAOZHU_MODE, 全站范式)
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(XIAOZHU_MODE=off → 409;
+    shadow/assist 放行——大模型二代读取链:
+    护栏暂停 > 运行时 override > env)"""
+    from services.xiaozhu_mode_service import (
+        XiaozhuModeService,
+    )
+    return await XiaozhuModeService() \
+        .require_decision_mode()
+
+
+def _decision(fn=None, *, strict=False,
+              admin=False):
+    """决策端点装饰器: 门控(off 409) +
+    shadow/assist 标记(xiaoMode)
+
+    参数(鉴权优先——401/403 before 409, 65号范式):
+        strict=True  strict member 面(X-Member-Id
+                     缺失放行函数体触发 401)
+        admin=True   admin 面(X-Role 非 admin
+                     放行函数体触发 403)
+        默认         低门槛 member 面(游客 0
+                     合法)直接门控
+
+    宪法豁免面(sessions 删除/privacy
+    preferences/confirm 核销/voice50
+    appeal)与观测面(GET)不加本装饰器
+    ——永不关停。
+    """
+    import functools
+    from services.xiaozhu_mode_service import (
+        MODE_VALUES,
+    )
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            # 鉴权优先: 无效/缺失凭据放行
+            # 函数体触发 401/403——不预判门控
+            x_role = kwargs.get("x_role")
+            x_member_id = kwargs.get(
+                "x_member_id")
+            gate_needed = not (
+                (admin and x_role != "admin")
+                or (strict and not x_member_id))
+            mode_state = None
+            if gate_needed:
+                try:
+                    mode_state = await _gate()
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=str(e)) from e
+            result = await fn(*args, **kwargs)
+            if isinstance(result, dict) \
+                    and mode_state \
+                    and mode_state.get("mode") \
+                    in MODE_VALUES[1:]:
+                result = {**result,
+                          "xiaoMode":
+                              mode_state["mode"]}
+            return result
+        return wrapper
+
+    return deco(fn) if fn else deco
+
+
 @router.post("/sessions")
+@_decision
 async def open_session(
     body: dict = None,
     x_member_id: str | None = Header(
@@ -107,6 +179,7 @@ async def open_session(
 
 
 @router.post("/sessions/{session_id}/voice")
+@_decision
 async def voice_turn(session_id: int, body: dict,
                      x_member_id: str | None = Header(
                          None, alias="X-Member-Id"),
@@ -124,9 +197,9 @@ async def voice_turn(session_id: int, body: dict,
     try:
         audio_bytes = base64.b64decode(
             str(body["audioBase64"]))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
         raise HTTPException(
-            status_code=409, detail="audioBase64 编码非法")
+            status_code=409, detail="audioBase64 编码非法") from exc
     try:
         from services.xiaozhu_service import XiaozhuService
         return await XiaozhuService().handle_voice(
@@ -139,6 +212,7 @@ async def voice_turn(session_id: int, body: dict,
 
 
 @router.post("/sessions/{session_id}/text")
+@_decision
 async def text_turn(session_id: int, body: dict):
     """文本轮次(键盘兜底/无障碍入口——与语音同链)"""
     if not isinstance(body, dict):
@@ -188,6 +262,7 @@ async def get_commands():
 # ============================================================
 
 @router.post("/bindings")
+@_decision(strict=True)
 async def bind_trust(body: dict,
                      x_member_id: str | None = Header(
                          None, alias="X-Member-Id")):
@@ -205,14 +280,15 @@ async def bind_trust(body: dict,
         return await XiaozhuService().bind_trust(
             member_id, int(body["trustId"]),
             note=str(body.get("note") or ""))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=409,
-                            detail="trustId 需为整数")
+                            detail="trustId 需为整数") from exc
     except Exception as e:
         raise _handle(e) from e
 
 
 @router.delete("/bindings")
+@_decision(strict=True)
 async def unbind_trust(
     x_member_id: str | None = Header(
         None, alias="X-Member-Id"),
@@ -269,7 +345,7 @@ async def confirm_action(token: str, body: dict,
     高敏操作不可纯语音完成红线——数字码为准(语音念码
     不算, 须屏幕输入)。body: {code(必填 4 位数字)}
     """
-    member_id = _require_member_strict(x_member_id)
+    _require_member_strict(x_member_id)
     if not isinstance(body, dict) \
             or not body.get("code"):
         raise HTTPException(
@@ -337,6 +413,7 @@ async def points_view(
 
 
 @router.post("/points/redeem")
+@_decision(strict=True)
 async def points_redeem(
     x_member_id: str | None = Header(
         None, alias="X-Member-Id"),
@@ -355,6 +432,7 @@ async def points_redeem(
 
 
 @router.post("/commands/custom")
+@_decision(strict=True)
 async def submit_custom(body: dict,
                        x_member_id: str | None = Header(
                            None, alias="X-Member-Id"),
@@ -398,6 +476,7 @@ async def custom_view(
 
 
 @router.post("/commands/custom/{cmd_id}/review")
+@_decision(admin=True)
 async def review_custom(cmd_id: int, body: dict,
                        x_role: str = Header(
                            default="", alias="X-Role"),
@@ -423,6 +502,7 @@ async def review_custom(cmd_id: int, body: dict,
 
 
 @router.post("/proactive/scan")
+@_decision(admin=True)
 async def proactive_scan(
     x_role: str = Header(default="", alias="X-Role"),
 ):
@@ -486,6 +566,7 @@ async def xiaozhu_dashboard(
 
 
 @router.post("/dashboard/fairness-bridge")
+@_decision(admin=True)
 async def fairness_bridge(
     x_role: str = Header(default="", alias="X-Role"),
 ):
@@ -577,6 +658,7 @@ async def privacy_set_preference(
 # ============================================================
 
 @router.post("/fc/redteam")
+@_decision(admin=True)
 async def fc_redteam_run(
     x_role: str = Header(default="", alias="X-Role"),
 ):
@@ -652,6 +734,7 @@ async def voice50_rules(
 
 
 @router.put("/voice50/rules/{behavior}")
+@_decision(admin=True)
 async def voice50_update_rule(
     behavior: str,
     body: dict,
@@ -676,6 +759,7 @@ async def voice50_update_rule(
 
 
 @router.post("/voice50/settle")
+@_decision(admin=True)
 async def voice50_settle(
     body: dict = None,
     x_role: str = Header(default="", alias="X-Role"),
@@ -726,6 +810,7 @@ async def voice50_settlements(
 # ============================================================
 
 @router.post("/voice50/evidence")
+@_decision(strict=True)
 async def voice50_evidence(
     body: dict,
     x_member_id: str | None = Header(
@@ -752,6 +837,7 @@ async def voice50_evidence(
 
 
 @router.post("/voice50/corpus")
+@_decision(strict=True)
 async def voice50_corpus_submit(
     body: dict,
     x_member_id: str | None = Header(
@@ -776,6 +862,7 @@ async def voice50_corpus_submit(
 
 
 @router.post("/voice50/corpus/{corpus_id}/review")
+@_decision(admin=True)
 async def voice50_corpus_review(
     corpus_id: int,
     body: dict,
@@ -802,6 +889,7 @@ async def voice50_corpus_review(
 
 
 @router.post("/voice50/qa")
+@_decision(strict=True)
 async def voice50_qa(
     body: dict,
     x_member_id: str | None = Header(
@@ -826,6 +914,7 @@ async def voice50_qa(
 
 
 @router.post("/voice50/companion/check")
+@_decision(strict=True)
 async def voice50_companion_check(
     x_member_id: str | None = Header(
         None, alias="X-Member-Id"),
@@ -844,6 +933,7 @@ async def voice50_companion_check(
 
 
 @router.post("/voice50/fairness-bridge")
+@_decision(admin=True)
 async def voice50_fairness_bridge(
     x_role: str = Header(default="", alias="X-Role"),
 ):
@@ -891,6 +981,7 @@ async def voice50_appeal(
 
 
 @router.post("/voice50/adjudications/{adj_id}/decide")
+@_decision(admin=True)
 async def voice50_decide(
     adj_id: int,
     body: dict,
@@ -943,6 +1034,7 @@ async def voice50_adjudications(
 # ============================================================
 
 @router.put("/voice50/group-profile")
+@_decision(admin=True)
 async def voice50_group_profile(
     body: dict,
     x_role: str = Header(default="", alias="X-Role"),
@@ -971,6 +1063,7 @@ async def voice50_group_profile(
 
 
 @router.post("/voice50/decay")
+@_decision(admin=True)
 async def voice50_decay(
     x_role: str = Header(default="", alias="X-Role"),
 ):
@@ -989,6 +1082,7 @@ async def voice50_decay(
 
 
 @router.post("/voice50/offset")
+@_decision(strict=True)
 async def voice50_offset(
     body: dict,
     x_member_id: str | None = Header(
@@ -1014,6 +1108,7 @@ async def voice50_offset(
 
 
 @router.post("/voice50/unfreeze")
+@_decision(admin=True)
 async def voice50_unfreeze(
     body: dict,
     x_role: str = Header(default="", alias="X-Role"),
@@ -1036,6 +1131,113 @@ async def voice50_unfreeze(
             note=str(body.get("note") or ""))
     except Exception as e:
         raise _handle(e) from e
+
+
+# ============================================================
+# 控制面(大模型二代——全站范式 4 端点)
+# ============================================================
+
+@router.get("/mode")
+async def xiaozhu_mode_status(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """灰度总览(观测面——模式+护栏+红线公示;
+    不受开关影响)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    from services.xiaozhu_mode_service import (
+        XiaozhuModeService,
+    )
+    return await XiaozhuModeService().status_view()
+
+
+@router.post("/mode/override")
+async def xiaozhu_mode_override(
+    body: dict = None,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """运行时切档(免容器重建; 空 mode=清除 override)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    body = body or {}
+    from services.xiaozhu_mode_service import (
+        XiaozhuModeService,
+    )
+    try:
+        return await XiaozhuModeService().set_override(
+            str(body.get("mode") or ""),
+            operator="admin")
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                            detail=str(e)) from e
+
+
+@router.post("/mode/guard")
+async def xiaozhu_mode_guard(
+    body: dict = None,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """护栏手动检查(三指标恶化 >3% 自动暂停)
+
+    body 可选 {asrFailRate, adjudicationRate,
+    corpusRejectRate}——缺省从仓储层实时聚合
+    (asr_failed 轮次占比/P50 处置密度/语料拒审占比)。
+    """
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    body = body or {}
+    from services.xiaozhu_mode_service import (
+        XiaozhuModeService,
+    )
+    try:
+        if any(k in body for k in (
+                "asrFailRate",
+                "adjudicationRate",
+                "corpusRejectRate")):
+            return await XiaozhuModeService(
+            ).guard_check(
+                float(body.get("asrFailRate") or 0),
+                float(body.get(
+                    "adjudicationRate") or 0),
+                float(body.get(
+                    "corpusRejectRate") or 0))
+        from services.xiaozhu_scheduler import (
+            run_guard_patrol,
+        )
+        r = await run_guard_patrol()
+        return {"success": True,
+                "metrics": r.get("metrics"),
+                "samples": r.get("samples"),
+                "breached": r.get("breached"),
+                "pausedNow": r.get("pausedNow"),
+                "breaches": r.get("breaches") or []}
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                            detail=str(e)) from e
+
+
+@router.post("/mode/resume")
+async def xiaozhu_mode_resume(
+    body: dict = None,
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    body = body or {}
+    from services.xiaozhu_mode_service import (
+        XiaozhuModeService,
+    )
+    try:
+        return await XiaozhuModeService().resume(
+            note=str(body.get("note") or ""))
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                            detail=str(e)) from e
 
 
 def register_xiaozhu_routes(app) -> None:

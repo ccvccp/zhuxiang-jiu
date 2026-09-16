@@ -24,6 +24,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -413,7 +414,7 @@ class TestLlmInjection:
         from services.xiaozhu_fc_registry import (
             build_tool_prompt,
         )
-        prompt = build_tool_prompt()
+        build_tool_prompt()
         # 猴子补 llm_client 捕获 system prompt
         import services.llm_client as lc
         captured = {}

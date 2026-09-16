@@ -25,6 +25,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -219,7 +220,7 @@ class TestCap:
                     for r in capped[:2]]))
         # 池只收 capped+overflow
         v = await svc.my_view(5201)
-        events_sum = sum(
+        sum(
             r["cappedScore"] + r["overflowScore"]
             for r in results)
         # my_view recent 只取 8 条——用事件对账替代
@@ -321,7 +322,7 @@ class TestRefAndLedger:
                evs[-1]["ref"] == r["ref"]
                and evs[-1]["evId"] == r["evId"])
         # L2/L3 事件 pending(T+1 结算资格)
-        r2 = await svc.record_behavior(
+        await svc.record_behavior(
             5401, "voice_clear_intent", quality=0.9)
         evs = await Voice50Repository().list_events(
             member_id=5401)

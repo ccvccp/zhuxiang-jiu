@@ -24,6 +24,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -323,7 +324,7 @@ class TestGateFailsoft:
         from services.xiaozhu_voice50_service import (
             Voice50Service,
         )
-        svc = Voice50Service()
+        Voice50Service()
         # 闸门异常放行(monkeypatch check 抛错——
         # 引擎 fail-soft 捕获后继续正常计分)
         from services.xiaozhu_voice50_service import (

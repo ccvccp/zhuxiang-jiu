@@ -25,6 +25,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -82,9 +83,9 @@ class TestRefBuild:
             import (build_ref, extract_business_id,
                     broadcast_of, EXPLAINABLE_ACTIONS)
         record("可解释动作集(4 写/高敏)",
-               EXPLAINABLE_ACTIONS == {
+               {
                    "trust.convert", "repair.execute",
-                   "cart.submit", "trust.bind"})
+                   "cart.submit", "trust.bind"} == EXPLAINABLE_ACTIONS)
         record("业务 id 提取(ledgerId 优先序)",
                extract_business_id("trust.convert",
                                    {"ledgerId": 5}) == 5
@@ -231,8 +232,8 @@ class TestExplanationCommand:
             source="admin", summary="违规测试")
         events = await TrustValue45Repository(
         ).list_events_by_trust(tid)
-        vid = [e for e in events
-               if (e.get("delta") or 0) < 0][0]["eventId"]
+        vid = next(e for e in events
+               if (e.get("delta") or 0) < 0)["eventId"]
         svc = XiaozhuService()
         await _bind(82, tid)
         sid = (await svc.open_session(82))["sessionId"]

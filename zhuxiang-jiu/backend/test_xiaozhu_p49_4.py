@@ -19,9 +19,11 @@
 import asyncio
 import os
 import sys
+import contextlib
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -131,11 +133,9 @@ class TestConsentRejects:
         ex = get_executor()
         # notFound
         before = ex.consent_stats()["notFound"]
-        try:
+        with contextlib.suppress(KeyError):
             ex.validate_consent_token("ct-nope", 1,
                                       "trust.convert")
-        except KeyError:
-            pass
         record("notFound 计数(伪造)",
                ex.consent_stats()["notFound"] == before + 1)
         # expired(手动过期)
@@ -267,7 +267,7 @@ class TestDashboardFc:
                .get("fc", {}).get("error"),
                str(board2.get("zoneErrors")))
         record("fail-soft 其余区块正常",
-               len((board2.get("zones") or {})) == 8
+               len(board2.get("zones") or {}) == 8
                and "usage" in (board2.get("zones")
                                or {}))
 

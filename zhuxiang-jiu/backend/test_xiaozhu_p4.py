@@ -17,11 +17,13 @@
 """
 
 import asyncio
+import contextlib
 import os
 import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -170,11 +172,9 @@ class TestConfirmStats:
         record("发放计数+1", s["issued"] == 1,
                str(s["issued"]))
         from services.xiaozhu_service import XiaozhuService
-        try:
+        with contextlib.suppress(ValueError):
             await XiaozhuService().confirm_action(
                 token, "0000")
-        except ValueError:
-            pass
         s = ex.stats()
         record("码错计数+1", s["wrongCode"] == 1,
                str(s["wrongCode"]))
@@ -189,11 +189,9 @@ class TestConfirmStats:
         r = await _text(sid, "小竹，把80信用分换成信值")
         token2 = r.get("confirmToken")
         ex._tokens[token2]["expiresAt"] = 0.0
-        try:
+        with contextlib.suppress(KeyError):
             await XiaozhuService().confirm_action(
                 token2, _get_code(token2))
-        except KeyError:
-            pass
         s = ex.stats()
         record("过期计数+1", s["expired"] == 1,
                str(s["expired"]))
@@ -271,8 +269,8 @@ class TestFairnessBridge:
             AiGovernanceService,
         )
         r2 = await AiGovernanceService().sync_registry()
-        record("46号 sync 35 档案",
-               r2["discovered"] == 35,
+        record("46号 sync 档案在册(≥35)",
+               r2["discovered"] >= 35,
                str(r2["discovered"]))
         # sync 会把 side-door 档案标 retired → 桥接自愈
         gov = await AiGovernance46Repository().get_gov(

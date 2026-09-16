@@ -24,6 +24,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -285,7 +286,7 @@ class TestVoiceCommand:
                and card.get("preference") == 1.0
                and card.get("effectiveLimit") == 1.0)
         # 预算均等红线: 两会员(不同等级)同权
-        r2 = await _text(sid, "小竹，查我的信值")
+        await _text(sid, "小竹，查我的信值")
         v1 = await XiaozhuPrivacyService().budget_view(1)
         v2 = await XiaozhuPrivacyService().budget_view(75)
         record("预算均等(与信值等级无关)",

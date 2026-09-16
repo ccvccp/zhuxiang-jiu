@@ -24,6 +24,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -181,7 +182,7 @@ class TestConfirmLimits:
         token = r.get("confirmToken")
         from services.xiaozhu_service import XiaozhuService
         # 码错 3 次 → 作废
-        for i in range(3):
+        for _i in range(3):
             try:
                 await XiaozhuService().confirm_action(
                     token, "0000")
@@ -216,7 +217,7 @@ class TestIdempotent:
         reset_all()
         sid = await _session(32)
         await _bind(32, await _new_trust())
-        r1 = await _issue_convert(sid)
+        await _issue_convert(sid)
         r2 = await _issue_convert(sid)
         record("同指令 10s 窗去重",
                r2.get("duplicate") is True

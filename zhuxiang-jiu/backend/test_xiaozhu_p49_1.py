@@ -27,6 +27,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -154,7 +155,7 @@ class TestDualFactor:
         r2 = await gw.call_tool(
             {"sessionId": 1, "memberId": 60},
             "trust.convert", {"creditPoints": 200})
-        token2 = r2.get("confirmToken")
+        r2.get("confirmToken")
         hit3 = ex.mark_voice_confirmation(
             60, "小竹，看新品")
         record("无关语句不标记", hit3 is None)
@@ -247,7 +248,7 @@ class TestConfirmIssues:
         # 走文本指令 → confirmToken
         r = await _text(sid, "小竹，把100信用分换成信值")
         token = r.get("confirmToken")
-        ex = get_executor()
+        get_executor()
         # 场景A: 纯屏幕码 → 执行但不签发 consent_token
         rA = await svc.confirm_action(
             token, _get_code(token))
@@ -361,8 +362,8 @@ class TestRepairFullFlow:
             source="admin", summary="违规测试")
         events = await TrustValue45Repository(
         ).list_events_by_trust(tid)
-        vid = [e for e in events
-               if (e.get("delta") or 0) < 0][0]["eventId"]
+        vid = next(e for e in events
+               if (e.get("delta") or 0) < 0)["eventId"]
         sid = await _session(64)
         await _bind(64, tid)
         session = await svc._require_open(sid)
@@ -400,9 +401,9 @@ class TestRepairFullFlow:
             source="admin", summary="违规测试2")
         events2 = await TrustValue45Repository(
         ).list_events_by_trust(tid)
-        vid2 = [e for e in events2
+        vid2 = next(e for e in events2
                 if (e.get("delta") or 0) < 0
-                and e.get("eventId") != vid][0]["eventId"]
+                and e.get("eventId") != vid)["eventId"]
         r4 = await gw.call_tool(
             session, "repair.execute", {
                 "violationEventId": vid2,

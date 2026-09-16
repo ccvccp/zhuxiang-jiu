@@ -23,6 +23,7 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ["XIAOZHU_MODE"] = "assist"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
 os.environ["XIAOZHU_LLM_MODE"] = "off"
@@ -213,9 +214,9 @@ class TestOffset:
             source="admin", summary="违规测试")
         events = await TrustValue45Repository(
         ).list_events_by_trust(tid)
-        vid = [e for e in events
+        vid = next(e for e in events
                if (e.get("delta") or 0) < 0
-               ][0]["eventId"]
+               )["eventId"]
         # 灌池(50 分)
         for _ in range(2):
             await svc.record_behavior(
