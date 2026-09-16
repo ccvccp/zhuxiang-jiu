@@ -64,6 +64,12 @@ $kb-primary-bg: rgba(46, 125, 91, 0.07);
   border-radius: 8rpx;
   padding: $spacing-xs $spacing-lg;
   margin-bottom: $spacing-sm;
+
+  /* 按压即时反馈(无 loading 期零反馈观感修复) */
+  &:active {
+    opacity: 0.7;
+    transform: scale(0.97);
+  }
 }
 
 .runDisabled {

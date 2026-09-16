@@ -38,7 +38,10 @@ const KbModelPage: React.FC = () => {
   const [dualStats, setDualStats] = useState<any>(null);
   const [samples, setSamples] = useState<any[]>([]);
   const [sampleKind, setSampleKind] = useState('golden');
+  const [dualLoading, setDualLoading] = useState(false);
   const loadDual = async () => {
+    if (dualLoading) return;
+    setDualLoading(true);
     try {
       const [m, s, list] = await Promise.all([
         KbModelAPI.dualMode(),
@@ -46,8 +49,11 @@ const KbModelPage: React.FC = () => {
         KbModelAPI.dualSamples(sampleKind),
       ]);
       setDualMode(m); setDualStats(s); setSamples(list);
+      Taro.showToast({ title: '已刷新', icon: 'success' });
     } catch (e) {
       Taro.showToast({ title: errMsg(e), icon: 'none' });
+    } finally {
+      setDualLoading(false);
     }
   };
   const pickSampleKind = async (k: string) => {
@@ -97,11 +103,17 @@ const KbModelPage: React.FC = () => {
 
   // ---- 缺口页 ----
   const [gaps, setGaps] = useState<any[]>([]);
+  const [gapsLoading, setGapsLoading] = useState(false);
   const loadGaps = async () => {
+    if (gapsLoading) return;
+    setGapsLoading(true);
     try {
       setGaps(await KbModelAPI.gaps());
+      Taro.showToast({ title: '已刷新', icon: 'success' });
     } catch (e) {
       Taro.showToast({ title: errMsg(e), icon: 'none' });
+    } finally {
+      setGapsLoading(false);
     }
   };
   const handleGap = async (g: any, action: 'ignore') => {
@@ -171,7 +183,9 @@ const KbModelPage: React.FC = () => {
         {tab === 'dual' && (
           <View className={styles.section}>
             <View className={styles.cardTitle}>双师对抗-协同引擎</View>
-            <View className={styles.runBtn} onClick={loadDual}>刷新引擎状态</View>
+            <View className={styles.runBtn} onClick={loadDual}>
+              {dualLoading ? '刷新中…' : '刷新引擎状态'}
+            </View>
             {dualMode && (
               <View className={styles.resultCard}>
                 <View className={styles.statGrid}>
@@ -290,8 +304,12 @@ const KbModelPage: React.FC = () => {
         {tab === 'gaps' && (
           <View className={styles.section}>
             <View className={styles.cardTitle}>知识缺口队列(高频优先)</View>
-            <View className={styles.runBtn} onClick={loadGaps}>刷新缺口</View>
-            {gaps.length === 0 ? (
+            <View className={styles.runBtn} onClick={loadGaps}>
+              {gapsLoading ? '刷新中…' : '刷新缺口'}
+            </View>
+            {gapsLoading && gaps.length === 0 ? (
+              <View className={styles.empty}>缺口加载中…</View>
+            ) : gaps.length === 0 ? (
               <View className={styles.empty}>暂无待处理缺口</View>
             ) : gaps.map(g => (
               <View key={g.id} className={styles.rowCard}>
