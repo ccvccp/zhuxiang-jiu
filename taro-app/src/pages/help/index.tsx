@@ -42,6 +42,15 @@ const LOC_IDX = 1;
 
 const formatDate = (t?: string): string => (t ? t.slice(0, 16).replace('T', ' ') : '');
 
+/** 错误友好化(大模型三态: 决策面 off/guard_pause 409 → 友好提示;
+ *  观测面/履约豁免面不受影响——对齐 trust/zw/av62 页同款降级) */
+const helpErrMsg = (e: any): string => {
+  const msg = String(e?.message || e);
+  return msg.includes('409') || msg.includes('决策面关闭') || msg.includes('HELP_MODE')
+    ? '叫帮决策功能暂未开放(决策面关闭), 敬请期待'
+    : msg.slice(0, 30);
+};
+
 const HelpPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>('hall');
   const [loading, setLoading] = useState(true);
@@ -195,6 +204,7 @@ const HelpPage: React.FC = () => {
       await loadHall(catFilter, modeFilter);
       await loadMine();
     } catch (e) {
+      Taro.showToast({ title: helpErrMsg(e), icon: 'none' });
       console.warn('[help] 发布失败:', e);
     } finally {
       setSubmitting(false);
@@ -320,6 +330,7 @@ const HelpPage: React.FC = () => {
       await loadHall(catFilter, modeFilter);
       await loadMine();
     } catch (e) {
+      Taro.showToast({ title: helpErrMsg(e), icon: 'none' });
       console.warn('[help] 捐赠失败:', e);
     } finally {
       setSubmitting(false);
@@ -357,6 +368,7 @@ const HelpPage: React.FC = () => {
       setHeritageOut(h.outgoing);
       setHeritageIn(h.incoming);
     } catch (e) {
+      Taro.showToast({ title: helpErrMsg(e), icon: 'none' });
       console.warn('[help] 传承发起失败:', e);
     } finally {
       setSubmitting(false);
@@ -379,6 +391,7 @@ const HelpPage: React.FC = () => {
       setHeritageIn(hh.incoming);
       await loadMine();
     } catch (e) {
+      Taro.showToast({ title: helpErrMsg(e), icon: 'none' });
       console.warn('[help] 传承确认失败:', e);
     } finally {
       setSubmitting(false);
@@ -401,6 +414,7 @@ const HelpPage: React.FC = () => {
       setHeritageOut(hh.outgoing);
       setHeritageIn(hh.incoming);
     } catch (e) {
+      Taro.showToast({ title: helpErrMsg(e), icon: 'none' });
       console.warn('[help] 传承撤回失败:', e);
     } finally {
       setSubmitting(false);

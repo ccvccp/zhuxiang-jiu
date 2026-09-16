@@ -13,6 +13,18 @@
     - ValueError → 409(违禁词/门槛不足/状态非法/在忙等)
     - 未登录     → 401
 
+大模型三态灰度(HELP_MODE, 全站范式; 33 方法级端点):
+    - 决策面(7, off 409): 发布求助 / 信值捐赠 / 传承 apply+accept+cancel /
+      CSR 企业包创建+定向捐助——仅锁"新增互助入口"
+    - 宪法豁免面(6, 永不关停): accept / start / complete / cancel / review
+      ——存量互助履约流转(接单权/履约结算权/撤回权/评价回流不可设障)
+    - 观测面(17, 永不关停): parse(发布前置辅助, 纯推荐不落库) /
+      大厅/类目/详情/信值档案/我的/匹配/偏好/故事/护航/
+      传承记录/CSR列表/碳积分/白皮书/信任指数/开放统计
+    - 控制面(4, X-Member-Id+X-Role: admin):
+      GET /mode / POST /mode/override / POST /mode/guard / POST /mode/resume
+    鉴权 401 优先于门控 409(全站铁律, 装饰器 kwargs 预检)
+
 端点分布:
     - 解析(1):   POST /parse(需求智能解析: 类型+模式推荐+安全预检)
     - 发布(1):   POST /orders(P2 支持 relay 接力多段)
@@ -30,6 +42,7 @@
                  GET /csr/my(企业包列表) / POST /csr/packages/{id}/donate(定向捐助)
     - P3(4):     GET /carbon/{member_id}(碳积分档案) / GET /whitepaper(年度白皮书) /
                  GET /trust-index(社会信任指数) / GET /open/stats(开放统计摘要)
+    - 控制面(4): GET /mode / POST /mode/override+guard+resume
 """
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -39,6 +52,48 @@ from services.help_service import HelpService
 
 router = APIRouter()
 _service = HelpService()
+
+
+# ============================================================
+# 大模型三态灰度(全站范式): 决策面门控 + 响应留痕标记
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(HELP_MODE=off → 409; shadow/assist 放行)"""
+    from services.help_mode_service import HelpModeService
+    return await HelpModeService().require_decision_mode()
+
+
+def _decision(fn):
+    """决策端点装饰器: 鉴权 401 优先(铁律) + 门控(off 409)
+    + shadow/assist 标记(helpMode)
+
+    决策面 = 新增互助入口(发布求助/信值捐赠/传承/CSR)——
+    off 只锁新增; 存量履约流转(accept/start/complete/cancel/
+    review)为宪法豁免面永不关停(已建立互助承诺不可设障);
+    parse 为发布前置辅助(纯推荐不落库)归观测面。
+    """
+    import functools
+    from services.help_mode_service import MODE_VALUES
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        # 鉴权优先于门控(全站铁律: 401 先于 409)
+        if not kwargs.get("x_member_id"):
+            raise HTTPException(
+                status_code=401,
+                detail="未登录: 请提供 X-Member-Id 头")
+        try:
+            mode_state = await _gate()
+        except ValueError as e:
+            raise HTTPException(
+                status_code=409, detail=str(e)) from e
+        result = await fn(*args, **kwargs)
+        if isinstance(result, dict) \
+                and mode_state.get("mode") in MODE_VALUES[1:]:
+            result = {**result, "helpMode": mode_state["mode"]}
+        return result
+    return wrapper
 
 
 # ============================================================
@@ -52,7 +107,9 @@ def _require_member(x_member_id: str | None) -> int:
     try:
         return int(x_member_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字")
+        raise HTTPException(
+            status_code=401,
+            detail="X-Member-Id 须为数字") from None
 
 
 def _handle(exc: Exception):
@@ -118,11 +175,14 @@ async def parse_demand(data: ParseRequest):
 # ============================================================
 
 @router.post("/api/help/orders", tags=["AI智能叫帮模块"])
+@_decision
 async def publish(
     data: PublishRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """发布求助(公益100%/有偿10%信值预计算 + 安全预检; P2 支持接力)"""
+    """发布求助(公益100%/有偿10%信值预计算 + 安全预检; P2 支持接力)
+
+    大模型决策面: HELP_MODE=off → 409(新增互助入口)"""
     member_id = _require_member(x_member_id)
     try:
         result = await _service.publish(
@@ -192,7 +252,11 @@ async def trust_profile(member_id: int):
 
 
 # ============================================================
-# 履约流转(接单/开始/完成/取消)
+# 履约流转(接单/开始/完成/取消/评价)
+# 大模型宪法豁免面: 永不关停(HELP_MODE 不影响)——
+# 已发布求助的匹配与履约是已建立的互助承诺:
+# 接单权/履约结算权/发布人撤回权/互信评价回流不可设障
+# (对齐钱包"off 只锁新增盈利入口, 存量资金退出零影响"范式)
 # ============================================================
 
 @router.post("/api/help/orders/{order_id}/accept", tags=["AI智能叫帮模块"])
@@ -357,12 +421,15 @@ class DonateRequest(PydBaseModel):
 
 
 @router.post("/api/help/orders/{order_id}/donate", tags=["AI智能叫帮模块"])
+@_decision
 async def donate(
     order_id: int,
     data: DonateRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """信值捐赠(高信值用户 ≥50 反哺公益单; 完成时奖励帮助者; 每单限一次)"""
+    """信值捐赠(高信值用户 ≥50 反哺公益单; 完成时奖励帮助者; 每单限一次)
+
+    大模型决策面: HELP_MODE=off → 409(新增捐赠入口)"""
     member_id = _require_member(x_member_id)
     try:
         result = await _service.donate(order_id, member_id, data.amount)
@@ -381,11 +448,14 @@ class HeritageApplyRequest(PydBaseModel):
 
 
 @router.post("/api/help/heritage/apply", tags=["AI智能叫帮模块"])
+@_decision
 async def heritage_apply(
     data: HeritageApplyRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """发起信值传承(数字功德碑: 仅公益信值, 受让人确认后划转)"""
+    """发起信值传承(数字功德碑: 仅公益信值, 受让人确认后划转)
+
+    大模型决策面: HELP_MODE=off → 409(新增传承入口)"""
     member_id = _require_member(x_member_id)
     try:
         result = await _service.heritage_apply(
@@ -396,11 +466,14 @@ async def heritage_apply(
 
 
 @router.post("/api/help/heritage/{heritage_id}/accept", tags=["AI智能叫帮模块"])
+@_decision
 async def heritage_accept(
     heritage_id: int,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """受让人确认传承(划转即时生效, 双边流水留痕)"""
+    """受让人确认传承(划转即时生效, 双边流水留痕)
+
+    大模型决策面: HELP_MODE=off → 409(新增传承划转)"""
     member_id = _require_member(x_member_id)
     try:
         result = await _service.heritage_accept(heritage_id, member_id)
@@ -410,11 +483,14 @@ async def heritage_accept(
 
 
 @router.post("/api/help/heritage/{heritage_id}/cancel", tags=["AI智能叫帮模块"])
+@_decision
 async def heritage_cancel(
     heritage_id: int,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """发起人撤回待确认传承(v2: 撤回即时生效, 留痕不删除)"""
+    """发起人撤回待确认传承(v2: 撤回即时生效, 留痕不删除)
+
+    大模型决策面: HELP_MODE=off → 409(新增传承撤回)"""
     member_id = _require_member(x_member_id)
     try:
         result = await _service.heritage_cancel(heritage_id, member_id)
@@ -443,11 +519,14 @@ class CsrPackageRequest(PydBaseModel):
 
 
 @router.post("/api/help/csr/packages", tags=["AI智能叫帮模块"])
+@_decision
 async def csr_create_package(
     data: CsrPackageRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """创建企业信值包(CSR 认捐留痕; 平台零资金流)"""
+    """创建企业信值包(CSR 认捐留痕; 平台零资金流)
+
+    大模型决策面: HELP_MODE=off → 409(新增CSR入口)"""
     member_id = _require_member(x_member_id)
     try:
         result = await _service.csr_create_package(
@@ -476,12 +555,15 @@ class CsrDonateRequest(PydBaseModel):
 
 
 @router.post("/api/help/csr/packages/{package_id}/donate", tags=["AI智能叫帮模块"])
+@_decision
 async def csr_donate(
     package_id: int,
     data: CsrDonateRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """企业包定向捐助公益单(入单捐赠池, 完成时奖励帮助者; 每包每单限一次)"""
+    """企业包定向捐助公益单(入单捐赠池, 完成时奖励帮助者; 每包每单限一次)
+
+    大模型决策面: HELP_MODE=off → 409(新增定向捐助)"""
     member_id = _require_member(x_member_id)
     try:
         result = await _service.csr_donate(
@@ -533,6 +615,89 @@ async def open_stats():
         return {"success": True, "data": await _service.open_stats()}
     except Exception as e:
         _handle(e)
+
+
+# ============================================================
+# 大模型控制面(4 端点: mode/override/guard/resume)
+# 鉴权: X-Member-Id + X-Role: admin(运维面)
+# ============================================================
+
+def _require_mode_admin(x_member_id: str,
+                        x_role: str) -> None:
+    """控制面鉴权(登录 + 管理员)"""
+    if not x_member_id:
+        raise HTTPException(
+            status_code=401,
+            detail="未登录: 请提供 X-Member-Id 头")
+    if x_role != "admin":
+        raise HTTPException(
+            status_code=403, detail="需要 X-Role: admin")
+
+
+@router.get("/api/help/mode", tags=["AI智能叫帮模块"])
+async def mode_status(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """大模型灰度总览(模式+护栏状态+指标留痕+豁免面公示)"""
+    _require_mode_admin(x_member_id, x_role)
+    from services.help_mode_service import HelpModeService
+    return {"success": True,
+            "data": await HelpModeService().status_view()}
+
+
+class ModeOverrideRequest(PydBaseModel):
+    mode: str = Field("", description="off/shadow/assist(空串清除)")
+
+
+@router.post("/api/help/mode/override", tags=["AI智能叫帮模块"])
+async def mode_override(
+    data: ModeOverrideRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """运行时切档(留痕; 空串清除回落 env)"""
+    _require_mode_admin(x_member_id, x_role)
+    from services.help_mode_service import HelpModeService
+    try:
+        return {"success": True, "data": await
+                HelpModeService().set_override(data.mode)}
+    except ValueError as e:
+        raise HTTPException(
+            status_code=409, detail=str(e)) from e
+
+
+@router.post("/api/help/mode/guard", tags=["AI智能叫帮模块"])
+async def mode_guard(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """护栏巡检(确定性聚合三指标 + 恶化>3% 自动暂停)"""
+    _require_mode_admin(x_member_id, x_role)
+    from services.help_mode_service import HelpModeService
+    return {"success": True, "data": await
+            HelpModeService().patrol()}
+
+
+class ModeResumeRequest(PydBaseModel):
+    note: str = Field("", max_length=200, description="恢复说明")
+
+
+@router.post("/api/help/mode/resume", tags=["AI智能叫帮模块"])
+async def mode_resume(
+    data: ModeResumeRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """护栏暂停人工恢复(决策留痕)"""
+    _require_mode_admin(x_member_id, x_role)
+    from services.help_mode_service import HelpModeService
+    try:
+        return {"success": True, "data": await
+                HelpModeService().resume(note=data.note)}
+    except ValueError as e:
+        raise HTTPException(
+            status_code=409, detail=str(e)) from e
 
 
 def register_help_routes(app):

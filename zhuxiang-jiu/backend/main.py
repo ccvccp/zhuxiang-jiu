@@ -489,6 +489,10 @@ async def _on_startup():
     # (SITE_THEME_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
     from services.site_theme_scheduler import start_guard_loop as start_site_theme_guard
     start_site_theme_guard()
+    # AI智能叫帮大模型(67号): 护栏指标自动巡检
+    # (HELP_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
+    from services.help_scheduler import start_guard_loop as start_help_guard
+    start_help_guard()
     # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
     from services.blogger_scheduler import (
         start_radar_scheduler as start_blogger_radar,
