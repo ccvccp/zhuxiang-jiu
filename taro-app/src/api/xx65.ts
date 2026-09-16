@@ -393,4 +393,36 @@ export const Xx65API = {
       body: String(t.body || ''),
     }));
   },
+
+  /** 下单窗口(观测面——S4 双轨定价展示, 扣减以 64号为准) */
+  async orderWindow(productId: number): Promise<any> {
+    const res = await request<any>({
+      url: `/api/xx65/products/${productId}/order-window?trust_id=${memberId()}`,
+      headers: roleHeaders(),
+    });
+    return res && (res.data || res);
+  },
+
+  /** S7 配额升降档(admin 决策面——经 46号审批轨) */
+  async quotaAdjust(shopId: number,
+                    direction: 'uplift' | 'downgrade'): Promise<any> {
+    const res = await request<any>({
+      url: `/api/xx65/shops/${shopId}/quota-adjust`,
+      method: 'POST',
+      data: { direction },
+      headers: { 'X-Role': 'admin' },
+    });
+    return res && (res.data || res);
+  },
+
+  /** 红队七向量(admin 决策面——RT-01~07 攻击仿真) */
+  async redteam(): Promise<any> {
+    const res = await request<any>({
+      url: '/api/xx65/redteam',
+      method: 'POST',
+      data: {},
+      headers: { 'X-Role': 'admin' },
+    });
+    return res && (res.data || res);
+  },
 };

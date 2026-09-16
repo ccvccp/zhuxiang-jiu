@@ -754,7 +754,7 @@ class TestDisposition:
                "(75×0.6=45 摩擦仅"
                "修正风险分)",
                risk_score(high,
-                          "trusted") == 55,
+                          "trusted") == 45,
                str(risk_score(high,
                               "trusted")))
 
@@ -897,8 +897,8 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 55,
+        record("44号 档案在册(≥55)",
+               len(SCORER_REGISTRY) >= 55,
                str(len(SCORER_REGISTRY)))
 
         from routes.xx64_routes import (

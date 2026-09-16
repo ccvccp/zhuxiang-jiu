@@ -11,6 +11,7 @@ import { View, Text, ScrollView, Input, Textarea } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
+import { getSession } from '@/services/auth-service';
 import {
   Xx65API, IntentVO, ShopVO, DraftVO, ProductVO,
   RecommendationVO, CampaignVO, CoachTipVO,
@@ -59,6 +60,11 @@ const Xx65WorkbenchPage: React.FC = () => {
   // 治理
   const [health, setHealth] = useState<any>(null);
   const [tips, setTips] = useState<CoachTipVO[]>([]);
+  // 下单窗口(S4 双轨展示) / 治理 admin 区
+  const [orderWin, setOrderWin] = useState<any>(null);
+  const [orderWinPid, setOrderWinPid] = useState(0);
+  const [rtResult, setRtResult] = useState<any>(null);
+  const isAdmin = getSession()?.role === 'admin';
 
   const shopId = myShop?.shopId || 0;
 
@@ -232,6 +238,46 @@ const Xx65WorkbenchPage: React.FC = () => {
       await Xx65API.revokeCampaign(cid);
       Taro.showToast({ title: '已撤销(S5 窗口)', icon: 'success' });
       setCampaigns(await Xx65API.campaigns(shopId).catch(() => []));
+    } catch (e: any) {
+      Taro.showToast({ title: decisionErr(e), icon: 'none' });
+    } finally { setBusy(false); }
+  };
+
+  // ---------- 下单窗口(S4 双轨展示) ----------
+  const handleOrderWindow = async (pid: number) => {
+    if (busy) return;
+    if (orderWinPid === pid) { setOrderWinPid(0); setOrderWin(null); return; }
+    setBusy(true);
+    try {
+      setOrderWin(await Xx65API.orderWindow(pid));
+      setOrderWinPid(pid);
+    } catch (e: any) {
+      Taro.showToast({
+        title: String(e?.message || e).slice(0, 40), icon: 'none' });
+    } finally { setBusy(false); }
+  };
+
+  // ---------- 治理 admin 区 ----------
+  const handleQuotaAdjust = async (
+    direction: 'uplift' | 'downgrade') => {
+    if (busy || !shopId) return;
+    setBusy(true);
+    try {
+      await Xx65API.quotaAdjust(shopId, direction);
+      Taro.showToast({
+        title: `已提交${direction === 'uplift' ? '升档' : '降档'}建议(经 46号审批轨)`,
+        icon: 'none' });
+    } catch (e: any) {
+      Taro.showToast({ title: decisionErr(e), icon: 'none' });
+    } finally { setBusy(false); }
+  };
+
+  const handleRedteam = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      setRtResult(await Xx65API.redteam());
+      Taro.showToast({ title: '红队七向量仿真完成', icon: 'success' });
     } catch (e: any) {
       Taro.showToast({ title: decisionErr(e), icon: 'none' });
     } finally { setBusy(false); }
@@ -425,13 +471,48 @@ const Xx65WorkbenchPage: React.FC = () => {
                 <View className={styles.empty}>暂无商品——生成草稿并发布</View>
               )}
               {products.map((p) => (
-                <View key={p.productId} className={styles.listItem}>
-                  <View className={styles.listMain}>
-                    <View className={styles.listTitle}>{p.productName}</View>
-                    <View className={styles.listDesc}>
-                      ¥{p.price} · {p.status === 'published' ? '已发布' : p.status}
+                <View key={p.productId}>
+                  <View
+                    className={styles.listItem}
+                    onClick={() => p.status === 'published'
+                      && handleOrderWindow(p.productId)}
+                  >
+                    <View className={styles.listMain}>
+                      <View className={styles.listTitle}>
+                        {p.productName}
+                        {p.status === 'published' && (
+                          <Text className={styles.tag}>下单窗口</Text>
+                        )}
+                      </View>
+                      <View className={styles.listDesc}>
+                        ¥{p.price} · {p.status === 'published' ? '已发布' : p.status}
+                      </View>
                     </View>
                   </View>
+                  {orderWinPid === p.productId && orderWin && (
+                    <View className={styles.resultCard}>
+                      <View className={styles.rowBetween}>
+                        <Text className={styles.metricValue}>双轨定价(S4)</Text>
+                        <Text className={styles.note}>扣减以 64号为准(S3)</Text>
+                      </View>
+                      <View className={styles.note}>
+                        现金 ¥{orderWin.dualTrack?.cashValue ?? '--'} +
+                        信值 {orderWin.dualTrack?.trustValue ?? '--'}
+                        (30% 对齐 64号 R1)
+                      </View>
+                      <View className={styles.note}>
+                        单次占比 {orderWin.quotaProgress?.singleRatio != null
+                          ? `${Math.round(orderWin.quotaProgress.singleRatio * 100)}%` : '--'}
+                        · 累计占比 {orderWin.quotaProgress?.cumulativeRatio != null
+                          ? `${Math.round(orderWin.quotaProgress.cumulativeRatio * 100)}%` : '--'}
+                      </View>
+                      {(orderWin.warnings || []).length > 0 && (
+                        <View className={styles.note}>
+                          ⚠️ {(orderWin.warnings || []).join('；')}
+                        </View>
+                      )}
+                    </View>
+                  )}
                 </View>
               ))}
             </View>
@@ -550,6 +631,39 @@ const Xx65WorkbenchPage: React.FC = () => {
                 </View>
               ))}
             </View>
+
+            {/* admin 运营区(S7 配额升降档 + 红队七向量) */}
+            {isAdmin && (
+              <View className={styles.card}>
+                <View className={styles.cardTitle}>运营管理(admin)</View>
+                {activeShop && (
+                  <View>
+                    <View className={styles.note}>
+                      S7 配额升降档——仅生成 46号审批建议书, 惩罚性降档永不自动执行
+                    </View>
+                    <View className={styles.btnPrimary} onClick={() => handleQuotaAdjust('uplift')}>
+                      建议升档(健康度 ≥85)
+                    </View>
+                    <View className={styles.btnGhost} onClick={() => handleQuotaAdjust('downgrade')}>
+                      建议降档(健康度 ≤50, 经 46号审批)
+                    </View>
+                  </View>
+                )}
+                <View className={styles.btnPrimary} onClick={handleRedteam}>
+                  {busy ? '仿真中…' : '红队七向量仿真(RT-01~07)'}
+                </View>
+                {rtResult && (
+                  <View className={styles.resultCard}>
+                    <View className={styles.note}>
+                      红队完成: {rtResult.defended ?? rtResult.passed ?? '--'} 通过 /
+                      {' '}{rtResult.total ?? rtResult.vectors?.length ?? '--'} 向量
+                      {rtResult.allDefended !== undefined
+                        ? ` · 防御: ${rtResult.allDefended ? '全部防住' : '存在失守'}` : ''}
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
 
             <View className={styles.footer}>
               智能开店工作台 · S1-S8 刚性规则 · 判定链 LLM 禁入(全确定性) ·

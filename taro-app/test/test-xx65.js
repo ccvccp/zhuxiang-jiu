@@ -102,6 +102,20 @@ const mockRequest = async (opts) => {
   if (url.startsWith('/api/xx65/shops/1/coach')) {
     return { code: 0, data: { total: 0, tips: [] } };
   }
+  if (url.startsWith('/api/xx65/products/9/order-window')) {
+    return { code: 0, data: {
+      productId: 9, productName: '木雕摆件',
+      dualTrack: { cashValue: 70, trustValue: 30, note: 'S4' },
+      quotaProgress: { balance: 100, singleQuota: 300,
+        singleRatio: 0.1, cumulativeRatio: 0.2 },
+      warnings: [], elder: false } };
+  }
+  if (url === '/api/xx65/shops/1/quota-adjust') {
+    return { code: 0, data: { submitted: true, kind: 'patch' } };
+  }
+  if (url === '/api/xx65/redteam') {
+    return { code: 0, data: { defended: 7, total: 7, allDefended: true } };
+  }
   if (url.startsWith('/api/xx65/model/status')) {
     return { code: 0, data: { mode: 'assist' } };
   }
@@ -238,6 +252,34 @@ const record = (name, ok, detail = '') => {
     && Object.keys(DRAFT_STATES).length === 4
     && DRAFT_STATES.pending_review === '人工审核中');
 
+  // 9b. orderWindow
+  const ow = await Xx65API.orderWindow(9);
+  const lastW = requests[requests.length - 1];
+  record('orderWindow URL+双轨映射(S4)',
+    lastW.url === '/api/xx65/products/9/order-window?trust_id=3'
+    && ow.dualTrack.cashValue === 70
+    && ow.dualTrack.trustValue === 30
+    && ow.quotaProgress.singleRatio === 0.1,
+    lastW.url);
+
+  // 9c. quotaAdjust
+  await Xx65API.quotaAdjust(1, 'uplift');
+  const lastQ = requests[requests.length - 1];
+  record('quotaAdjust 请求体+admin 头(S7)',
+    lastQ.url === '/api/xx65/shops/1/quota-adjust'
+    && lastQ.data.direction === 'uplift'
+    && lastQ.headers['X-Role'] === 'admin',
+    JSON.stringify(lastQ.data || {}));
+
+  // 9d. redteam
+  const rt = await Xx65API.redteam();
+  const lastR = requests[requests.length - 1];
+  record('redteam 请求+映射(admin)',
+    lastR.url === '/api/xx65/redteam'
+    && lastR.headers['X-Role'] === 'admin'
+    && rt.defended === 7 && rt.allDefended === true,
+    lastR.url);
+
   console.log('[页面层 pages/xx65]');
   const pageSrc = fs.readFileSync(PAGE_SRC, 'utf-8');
   // 10. 四页签
@@ -264,6 +306,16 @@ const record = (name, ok, detail = '') => {
   record('S5 撤销窗口提示',
     pageSrc.includes('S5 五分钟撤销窗口')
     && pageSrc.includes('handleRevoke'));
+  // 16. 下单窗口+admin 运营区
+  record('下单窗口(S4 双轨)+admin 运营区(quota/红队)',
+    pageSrc.includes('handleOrderWindow')
+    && pageSrc.includes('双轨定价(S4)')
+    && pageSrc.includes('运营管理(admin)')
+    && pageSrc.includes('handleQuotaAdjust')
+    && pageSrc.includes('handleRedteam')
+    && pageSrc.includes('46号审批')
+    && pageSrc.includes('rtResult.defended')
+    && pageSrc.includes('全部防住'));
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
   console.log('------------------------------------------------------------');

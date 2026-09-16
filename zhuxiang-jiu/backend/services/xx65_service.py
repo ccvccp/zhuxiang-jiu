@@ -1956,48 +1956,61 @@ class Xx65Service:
                 状态机拒绝
         """
         require_active_mode()
-        campaign = await \
-            self._get_campaign(
-                int(campaign_id))
-        from services.xx65_registry import (
-            CAMPAIGN_TRANSITIONS,
-            REVOKE_WINDOW_SECONDS,
-        )
-        if "revoked" not in \
-                CAMPAIGN_TRANSITIONS \
-                .get(
-                    campaign.get(
-                        "status"), ()):
-            raise ValueError(
-                f"活动状态 "
-                f"{campaign.get('status')}"
-                f" 不可撤销(须 active)")
-        now = time.time()
-        until = float(
-            campaign.get(
-                "revocableUntilTs")
-            or 0.0)
-        if now > until:
-            raise ValueError(
-                f"S5 撤销窗口已过"
-                f"(发布后 "
-                f"{REVOKE_WINDOW_SECONDS}s"
-                f" 内可无理由撤销; "
-                f"当前超窗 "
-                f"{round(now - until, 1)}s)"
-                f"——人工处置通道"
-                f"(S6)")
-        campaign.update({
-            "status": "revoked",
-            "revoked": True,
-            "revocable": False,
-            "revokedAt": ts(),
-            "revokedBy": str(
-                operator or "member"),
-            "updatedAt": ts(),
-        })
-        await self.repo.save_campaign(
-            campaign, create=False)
+        # 活动级互斥锁(读-检查-写
+        # 原子化——防并发双撤销
+        # 竞态; Redis 生产模式
+        # 双并发均读到 active 致
+        # 双写 revoked, 单进程
+        # asyncio 序列化掩盖了
+        # 该缺陷, RT-07 实机
+        # 暴露)
+        from core.locks import get_lock
+        async with get_lock(
+                "xx65:campaign:"
+                f"{int(campaign_id)}:"
+                "revoke"):
+            campaign = await \
+                self._get_campaign(
+                    int(campaign_id))
+            from services.xx65_registry import (
+                CAMPAIGN_TRANSITIONS,
+                REVOKE_WINDOW_SECONDS,
+            )
+            if "revoked" not in \
+                    CAMPAIGN_TRANSITIONS \
+                    .get(
+                        campaign.get(
+                            "status"), ()):
+                raise ValueError(
+                    f"活动状态 "
+                    f"{campaign.get('status')}"
+                    f" 不可撤销(须 active)")
+            now = time.time()
+            until = float(
+                campaign.get(
+                    "revocableUntilTs")
+                or 0.0)
+            if now > until:
+                raise ValueError(
+                    f"S5 撤销窗口已过"
+                    f"(发布后 "
+                    f"{REVOKE_WINDOW_SECONDS}s"
+                    f" 内可无理由撤销; "
+                    f"当前超窗 "
+                    f"{round(now - until, 1)}s)"
+                    f"——人工处置通道"
+                    f"(S6)")
+            campaign.update({
+                "status": "revoked",
+                "revoked": True,
+                "revocable": False,
+                "revokedAt": ts(),
+                "revokedBy": str(
+                    operator or "member"),
+                "updatedAt": ts(),
+            })
+            await self.repo.save_campaign(
+                campaign, create=False)
         await self._track(
             "campaign", {
                 "action": "revoke",

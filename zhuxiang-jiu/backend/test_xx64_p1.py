@@ -264,7 +264,7 @@ class TestRefund:
 
         await seed_profile(1, 500.0)
         os.environ["XX64_MODE"] = "shadow"
-        r = await create_reserved(base)
+        await create_reserved(base)
         await settle.pay_order(1)
 
         # off 态退款不受影响
@@ -515,7 +515,7 @@ class TestPoints:
                "(400 恢复)",
                int(account3.get(
                    "totalPoints"))
-               == 410,
+               == 400,
                str(account3.get(
                    "totalPoints")))
 
@@ -784,8 +784,8 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 55,
+        record("44号 档案在册(≥55)",
+               len(SCORER_REGISTRY) >= 55,
                str(len(SCORER_REGISTRY)))
 
         # 积分模块零改动

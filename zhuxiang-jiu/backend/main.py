@@ -457,6 +457,10 @@ async def _on_startup():
     # 37号·同盟大模型治理层: 护栏实测自动巡检(ALLIANCE37_GUARD_AUTO=off 可关闭)
     from services.alliance_guard_scheduler import start_scheduler as start_alliance_guard
     start_alliance_guard()
+    # 65号·网店及商品大模型: 护栏指标自动巡检
+    # (XX65_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
+    from services.xx65_scheduler import start_guard_loop as start_xx65_guard
+    start_xx65_guard()
     # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
     from services.blogger_scheduler import (
         start_radar_scheduler as start_blogger_radar,

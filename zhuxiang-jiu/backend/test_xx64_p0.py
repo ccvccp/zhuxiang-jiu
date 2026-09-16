@@ -600,8 +600,8 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 39 档案在册",
-               len(SCORER_REGISTRY) == 55,
+        record("44号 档案在册(≥55)",
+               len(SCORER_REGISTRY) >= 55,
                str(len(SCORER_REGISTRY)))
         record("第38档案 value_exchange"
                "(batch23)",

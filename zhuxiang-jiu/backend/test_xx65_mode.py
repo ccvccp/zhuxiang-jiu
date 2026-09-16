@@ -278,6 +278,97 @@ async def run_service():
     # 快照复位(避免影响后续 HTTP 段)
     _refresh_legacy({"override": "", "paused": False})
 
+    # ============================================================
+    # 6b. 护栏自动巡检(调度器——确定性指标计算+guard_check)
+    # ============================================================
+    with _EnvGuard("assist"):
+        reset_store()
+        from services.xx65_scheduler import (
+            run_guard_patrol,
+            guard_patrol_enabled,
+            guard_interval_seconds,
+        )
+        record("巡检: 开关默认 on",
+               guard_patrol_enabled() is True)
+        record("巡检: 间隔默认 3600s",
+               guard_interval_seconds() == 3600)
+        # 冷启动(空库)——三指标全 0 不误判
+        p = await run_guard_patrol()
+        record("巡检: 冷启动零指标不暂停",
+               p["metrics"]["complianceBlockRate"] == 0
+               and p["metrics"]["shopViolationRate"] == 0
+               and p["metrics"]["campaignRevokeRate"] == 0
+               and p["breached"] is False)
+        # 造数: rejected 草稿 2/3(0.667>0.10 基线) → 暂停
+        from repositories.xx65_repository import (
+            Xx65Repository,
+        )
+        repo = Xx65Repository()
+        for i, st in enumerate(
+                ("rejected", "rejected",
+                 "published")):
+            await repo.save_draft({
+                "draftId":
+                    await repo.next_draft_id(),
+                "shopId": 1,
+                "productName": f"巡检{i}",
+                "description": "d", "price": 10,
+                "status": st,
+                "llmTrack": "rule",
+                "replacements": [],
+                "createdAt": "2026-09-16T00:00:00"})
+        p = await run_guard_patrol()
+        record("巡检: 恶化指标触发暂停",
+               p["metrics"]["complianceBlockRate"]
+               > 0.10
+               and p["breached"] is True
+               and p["pausedNow"] is True)
+        m = await Xx65ModeService() \
+            .current_mode()
+        record("巡检: 暂停生效(guard_pause)",
+               m["mode"] == "off"
+               and m["source"] == "guard_pause")
+        await Xx65ModeService().resume(
+            note="巡检测试恢复")
+        # 红队隔离域排除(ownerId≥9881
+        # 攻击仿真数据不计入巡检——
+        # 防 admin 红队自 DoS 决策面)
+        await repo.save_shop({
+            "shopId": 9882,
+            "ownerId": 9882,
+            "trustId": 9882,
+            "intentId": 0,
+            "category": "handicraft",
+            "status": "closed",
+            "quotaTier": "growth",
+            "createdAt": "2026-09-16T00:00:00",
+            "updatedAt": "2026-09-16T00:00:00"})
+        await repo.save_draft({
+            "draftId":
+                await repo.next_draft_id(),
+            "shopId": 9882,
+            "productName": "rt-attack",
+            "description": "d", "price": 10,
+            "status": "rejected",
+            "llmTrack": "rule",
+            "replacements": [],
+            "createdAt": "2026-09-16T00:00:00"})
+        p = await run_guard_patrol()
+        record("巡检: 红队草稿不计入分母",
+               p["samples"]["drafts"]["total"]
+               == 3
+               and p["metrics"]
+               ["complianceBlockRate"]
+               == round(2 / 3, 4),
+               str((p["samples"]["drafts"],
+                    p["metrics"]
+                    ["complianceBlockRate"])))
+        record("巡检: 红队店铺不计入违规率",
+               p["samples"]["shops"]["active"]
+               == 0,
+               str(p["samples"]["shops"]))
+    _refresh_legacy({"override": "", "paused": False})
+
 
 async def run_http():
     global PASS, FAIL

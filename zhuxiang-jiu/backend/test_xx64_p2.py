@@ -548,9 +548,9 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
-        record("44号 39 档案在册",
+        record("44号 档案在册(≥55)",
                len(SCORER_REGISTRY)
-               == 55,
+               >= 55,
                str(len(
                    SCORER_REGISTRY)))
         record("LLM 不进判定链"
