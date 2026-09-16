@@ -45,16 +45,30 @@ FEEDABLE_STATUSES = ("published", "boosted")
 # 角色受众标签映射(角色→种子 valueTags 加成域)
 ROLE_TAG_AFFINITY = {
     "citizen": ("elderly_service", "policy",
-                "accessibility"),
-    "staff": ("sop", "workflow", "policy"),
-    "developer": ("tutorial", "api"),
+                "accessibility",
+                # 品鉴域(本站核心——消费者
+                # 品鉴文化/感官语言/意境审美)
+                "品鉴", "感官语言", "文化审美",
+                "品鉴会"),
+    "staff": ("sop", "workflow", "policy",
+              # 品鉴域(导购/客服解说+质检实操)
+              "实操方法", "质检", "缺陷识别",
+              "感官语言"),
+    "developer": ("tutorial", "api",
+                  "感官语言"),
 }
 
 # 场景标签加成
 SCENE_TAG_BONUS = {
-    "service": ("policy", "elderly_service"),
-    "learning": ("tutorial", "sop"),
-    "troubleshooting": ("sop", "workflow"),
+    "service": ("policy", "elderly_service",
+                # 导购服务场景品鉴解说
+                "品鉴", "感官语言"),
+    "learning": ("tutorial", "sop",
+                # 学习场景品鉴知识/文化审美
+                "品鉴", "文化审美", "感官语言"),
+    "troubleshooting": ("sop", "workflow",
+                        # 质检排障场景缺陷识别
+                        "质检", "缺陷识别"),
 }
 
 # feed 推荐数上限
@@ -508,7 +522,8 @@ class Kb57FeedService:
                 f"(合法值: search_miss/"
                 f"operation_stuck)")
 
-        # 匹配种子(按 query 关键词×标签)
+        # 匹配种子(query 关键词×标签+中文子串
+        # 双向——中文无空格分词, 须子串命中)
         matched_seeds = []
         if query:
             pool = []
@@ -516,18 +531,28 @@ class Kb57FeedService:
                 pool.extend(
                     await self.repo.list_seeds(
                         status=status, limit=200))
-            keywords = set(
-                query.lower().split())
+            q = str(query).strip().lower()
+            keywords = {k for k in q.split() if k}
             for seed in pool:
                 tags = set(
                     t.lower() for t in
                     (seed.get("valueTags") or []))
                 title = str(
                     seed.get("title") or "").lower()
-                if tags & keywords \
-                        or any(
-                            k in title
-                            for k in keywords):
+                content = str(
+                    (seed.get("content")
+                     or {}).get("text")
+                    or "").lower()
+                hit = bool(tags & keywords) \
+                    or any(
+                        k in title or k in content
+                        for k in keywords) \
+                    or (len(q) >= 2
+                        and (q in title
+                             or q in content)) \
+                    or any(
+                        t and t in q for t in tags)
+                if hit:
                     matched_seeds.append(
                         seed.get("seedId"))
                     if len(matched_seeds) >= 3:
@@ -609,7 +634,7 @@ class Kb57FeedService:
             remaining = float(
                 view.get("remaining") or 0)
             return remaining >= VIEW_COST
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "kb57_budget_check_failed: %s", exc)
             return True   # fail-soft 直通
@@ -627,7 +652,7 @@ class Kb57FeedService:
                     int(member_id), VIEW_COST))
         except ValueError:
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "kb57_spend_failed: %s", exc)
 
@@ -647,6 +672,6 @@ class Kb57FeedService:
                 "detail": detail,
                 "createdAt": ts(),
             })
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "kb57_feed_track_failed: %s", exc)

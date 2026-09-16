@@ -74,8 +74,7 @@ async def seed_published_seed(
     })
     if fingerprint is None:
         fingerprint = ("sha256:" + hashlib.sha256(
-            f"p3-{gap_id}-{ts()}".encode(
-                "utf-8")).hexdigest()[:32])
+            f"p3-{gap_id}-{ts()}".encode()).hexdigest()[:32])
     seed_id = await repo.next_seed_id()
     await repo.save_seed({
         "seedId": seed_id,
@@ -149,7 +148,7 @@ class TestFeed:
         sid_staff = await seed_published_seed(
             ["sop", "workflow"],
             title="社工操作手册")
-        sid_dev = await seed_published_seed(
+        await seed_published_seed(
             ["tutorial", "api"],
             title="开发者接入文档")
 
@@ -587,6 +586,63 @@ class TestContextTrigger:
         os.environ["KB57_MODE"] = "off"
 
 
+class TestTasting:
+    """05b 品鉴域优化(映射域扩展+中文子串检索)"""
+
+    async def run(self):
+        print("[05b 品鉴域]")
+        reset_all()
+        from services.kb57_feed_service import (
+            Kb57FeedService,
+        )
+        feed_svc = Kb57FeedService()
+        os.environ["KB57_MODE"] = "assist"
+
+        # 品鉴种子+无关种子对照
+        pid = await seed_published_seed(
+            ["品鉴", "感官语言", "文化审美"],
+            title="竹香酒品鉴·嗅觉维度")
+        nid = await seed_published_seed(
+            ["unrelated_domain"],
+            title="无关种子")
+
+        # ① 推荐面: 品鉴种子获角色/场景映射分
+        r = await feed_svc.feed(
+            MEMBER, role="citizen", scene="learning")
+        recs = r.get("recommendations") or []
+        p_score = next((x.get("score") for x in recs
+                        if x.get("seedId") == pid),
+                       None)
+        n_score = next((x.get("score") for x in recs
+                        if x.get("seedId") == nid),
+                       None)
+        record("品鉴种子获推荐分(≥15)",
+               p_score is not None and p_score >= 15.0,
+               str(p_score))
+        record("品鉴种子排序高于无关种子",
+               p_score is not None
+               and n_score is not None
+               and p_score > n_score,
+               f"{p_score}>{n_score}")
+
+        # ② 中文整句检索(无空格——标签子串命中)
+        r = await feed_svc.context_trigger(
+            MEMBER, trigger_type="search_miss",
+            query="怎么品鉴竹香酒的香气")
+        record("中文整句检索命中品鉴种子",
+               pid in (r.get("matchedSeeds") or []),
+               str(r.get("matchedSeeds")))
+
+        # ③ 标题子串检索(中文两字片段)
+        r = await feed_svc.context_trigger(
+            MEMBER, trigger_type="search_miss",
+            query="嗅觉维度")
+        record("标题子串命中",
+               pid in (r.get("matchedSeeds") or []),
+               str(r.get("matchedSeeds")))
+        os.environ["KB57_MODE"] = "off"
+
+
 class TestHttp:
     """06 HTTP 层"""
 
@@ -596,7 +652,6 @@ class TestHttp:
         from fastapi.testclient import TestClient
         from main import app
         client = TestClient(app)
-        admin = {"X-Role": "admin"}
         member = {"X-Member-Id": str(MEMBER)}
 
         sid = await seed_published_seed(
@@ -749,6 +804,7 @@ async def run_all():
     await TestFeedback().run()
     await TestPath().run()
     await TestContextTrigger().run()
+    await TestTasting().run()
     await TestHttp().run()
 
 
