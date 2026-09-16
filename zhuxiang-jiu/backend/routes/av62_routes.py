@@ -1,12 +1,14 @@
 """62号·AI智能无形资产估值路由(P0-P5)
 
-端点(P3 20; 全期规划):
-    GET  /api/av62/registry          注册表自描述(admin, 观测面)
-    POST /api/av62/assets            资产登记(admin, 决策面 off 409)
+端点(P3 31; 全期规划):
+    GET  /api/av62/registry          注册表自描述(admin, 观测面, 含 elementDetails+creditRules)
+    POST /api/av62/assets            资产登记(admin, 决策面 off 409; legalStatus 权属态)
     GET  /api/av62/assets            资产列表(admin, 观测面)
     GET  /api/av62/assets/{id}       资产详情(admin, 观测面)
     GET  /api/av62/model/status      模型状态(admin, 观测面)
     POST /api/av62/assess            估值引擎(admin, 决策面 off 409)
+    POST /api/av62/assets/{id}/credit/assess 信值评估(admin, 决策面 off 409; P3)
+    GET  /api/av62/assets/{id}/credit 信值报告(admin, 观测面; P3)
     GET  /api/av62/assessments      评估列表(admin, 观测面)
     GET  /api/av62/assessments/{id}  评估详情(admin, 观测面)
     POST /api/av62/scenarios/convert 场景折算(admin, 决策面 off 409)
@@ -112,7 +114,10 @@ async def register_asset(
     Body: {subjectId, role
     (enterprise/organization/personal),
     domain(九正域+risk), evidence
-    {封闭字段}, label?, registeredBy?}"""
+    {封闭字段}, label?, registeredBy?,
+    legalStatus?(clean/pledged/litigated/
+    disputed/unverified——P3 信值 β 系数
+    依据, 缺省 unverified)}"""
     _require_admin(x_role)
     from services.av62_service import Av62Service
     try:
@@ -134,7 +139,10 @@ async def register_asset(
                     body.get("label") or ""),
                 registered_by=str(
                     body.get("registeredBy")
-                    or "admin")))
+                    or "admin"),
+                legal_status=str(
+                    body.get("legalStatus")
+                    or "unverified")))
     except ValueError as exc:
         raise HTTPException(status_code=409,
                             detail=str(exc)) from exc
@@ -230,6 +238,58 @@ async def assess(
                             detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.post("/assets/{asset_id}/credit/assess")
+@_decision
+async def credit_assess(
+        asset_id: int,
+        body: dict = None,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """信值评估(P3 信值调整分支——V_credit =
+    V_fair × α流动性 × β权属 × γ稳定性;
+    三主体差异化 + 信值报告三章节; 决策面 off 409)
+
+    Body: {assessedBy?}(可空)
+    前置: 须先完成公允估值(assess)"""
+    _require_admin(x_role)
+    from services.av62_credit_service import (
+        Av62CreditService,
+    )
+    body = body or {}
+    try:
+        return await Av62CreditService() \
+            .credit_assess(
+                int(asset_id),
+                assessed_by=str(
+                    body.get("assessedBy")
+                    or "admin"))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from exc
+
+
+@router.get("/assets/{asset_id}/credit")
+async def credit_report(
+        asset_id: int,
+        x_role: str | None = Header(default=None,
+                                     alias="X-Role")):
+    """信值评估报告(最新——观测面: 三系数/
+    有效性/审计因子链/信值报告三章节)"""
+    _require_admin(x_role)
+    from services.av62_credit_service import (
+        Av62CreditService,
+    )
+    try:
+        return await Av62CreditService() \
+            .get_credit(int(asset_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
                             detail=str(exc)) from exc
 
 

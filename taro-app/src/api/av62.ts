@@ -118,6 +118,26 @@ export const Av62API = {
     return res.data || res;
   },
 
+  /** 信值评估(决策面: P3 信值调整分支
+   *  V_credit = V_fair × α流动性 × β权属 × γ稳定性;
+   *  前置须先完成公允估值 assess) */
+  async creditAssess(assetId: number): Promise<any> {
+    const res = await request<any>({
+      url: `/api/av62/assets/${assetId}/credit/assess`,
+      method: 'POST', headers: adminHeaders(), data: {},
+    });
+    return res.data || res;
+  },
+
+  /** 信值评估报告(观测面: 三系数/有效性/审计因子链) */
+  async creditReport(assetId: number): Promise<any> {
+    const res = await request<any>({
+      url: `/api/av62/assets/${assetId}/credit`,
+      headers: adminHeaders(),
+    });
+    return res.data || res;
+  },
+
   /** 信任要素注册表自描述(三角色×九域+负资产域) */
   async registry(): Promise<any> {
     const res = await request<any>({

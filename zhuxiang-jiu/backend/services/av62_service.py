@@ -102,7 +102,8 @@ class Av62Service:
                              domain: str,
                              evidence: dict,
                              label: str = "",
-                             registered_by: str = "admin"
+                             registered_by: str = "admin",
+                             legal_status: str = "unverified"
                              ) -> dict:
         """资产登记(主体×角色×要素域+
         证据快照——封闭注册校验)
@@ -120,11 +121,16 @@ class Av62Service:
                 (封闭字段域校验)
             label: 资产标签(可读名)
             registered_by: 登记人
+            legal_status: 权属确定性态
+                (clean/pledged/litigated/
+                disputed/unverified——
+                P3 信值 β 系数依据;
+                缺省 unverified 保守)
 
         Raises:
             ValueError: off 态/要素域外/
                 证据字段域外/负资产证据
-                缺省
+                缺省/权属态域外
         """
         require_active_mode()
         role = str(role or "").strip()
@@ -133,6 +139,7 @@ class Av62Service:
             ROLE_DOMAINS, ALL_DOMAINS,
             get_element,
             is_negative, validate_evidence,
+            LEGAL_STATUS_VALUES,
         )
         if role not in ROLE_DOMAINS:
             raise ValueError(
@@ -144,6 +151,13 @@ class Av62Service:
                 f"资产域 {domain} 域外"
                 f"(合法: {'/'.join(
                     ALL_DOMAINS)})")
+        legal_status = str(
+            legal_status or "unverified").strip()
+        if legal_status not in LEGAL_STATUS_VALUES:
+            raise ValueError(
+                f"权属态 {legal_status} 域外"
+                f"(合法: {'/'.join(
+                    LEGAL_STATUS_VALUES)})")
         element = get_element(role, domain)
         if element is None:
             raise ValueError(
@@ -190,6 +204,7 @@ class Av62Service:
             "label": str(label or
                          element.get("label")),
             "negative": negative,
+            "legalStatus": legal_status,
             "evidence": check.get(
                 "cleaned") or {},
             "weight": float(
@@ -215,6 +230,7 @@ class Av62Service:
             "assetId": asset_id,
             "status": "registered",
             "negative": negative,
+            "legalStatus": legal_status,
             "label": record["label"],
             "weight": record["weight"],
             "evidenceSchema": element[

@@ -28,6 +28,7 @@
 """
 
 import json
+from typing import ClassVar
 
 from repositories.backend import (
     get_in_memory_store, get_redis_client,
@@ -45,12 +46,13 @@ class Av62Repository:
     TABLE_FAIRNESS = "av62_fairness"
     TABLE_THRESHOLDS = "av62_thresholds"
     TABLE_EVENTS = "av62_events"
+    TABLE_CREDITS = "av62_credits"
 
     _ALL_TABLES = (
         TABLE_ASSETS, TABLE_ASSESSMENTS,
         TABLE_LIQUIDITY, TABLE_APPEALS,
         TABLE_FAIRNESS, TABLE_THRESHOLDS,
-        TABLE_EVENTS)
+        TABLE_EVENTS, TABLE_CREDITS)
 
     # ============================================================
     # 序列化字段清单(五清单)
@@ -66,7 +68,7 @@ class Av62Repository:
         "frequencyCap", "usageCount",
         "sampleCount", "groupCount",
         "originalAssessId",
-        "reestimatedAssessId")
+        "reestimatedAssessId", "creditId")
     _FLOAT_FIELDS = (
         "contribution", "riskDeduction",
         "netContribution", "confidence",
@@ -83,7 +85,9 @@ class Av62Repository:
         "passRateGap", "finalDelta",
         "originalValue",
         "reestimatedValue",
-        "finalValue")
+        "finalValue",
+        "vCredit", "vFair",
+        "alpha", "beta", "gamma", "product")
     _JSON_DICT_FIELDS = (
         "evidence", "factors", "reason",
         "attribution", "detail", "context",
@@ -92,20 +96,21 @@ class Av62Repository:
         "extra", "stats", "snapshot",
         "impact", "summary",
         "newEvidence", "originalEvidence",
-        "verification")
+        "verification", "report")
     _JSON_LIST_FIELDS = (
         "auditTrail", "domains", "findings",
         "signals", "history", "tags",
         "evidenceFields", "rejectedFields",
-        "groups", "skippedGroups")
+        "groups", "skippedGroups",
+        "invalidReasons")
     _BOOL_FIELDS = (
         "negative", "grounded",
         "overturned", "pooled",
         "escalated", "spotCheck",
         "verified", "flagged",
-        "insufficient")
+        "insufficient", "valid")
 
-    _TABLE_BY_KIND = {
+    _TABLE_BY_KIND: ClassVar[dict] = {
         "asset": TABLE_ASSETS,
         "assessment": TABLE_ASSESSMENTS,
         "liquidity": TABLE_LIQUIDITY,
@@ -113,6 +118,7 @@ class Av62Repository:
         "fairness": TABLE_FAIRNESS,
         "threshold": TABLE_THRESHOLDS,
         "event": TABLE_EVENTS,
+        "credit": TABLE_CREDITS,
     }
 
     def __init__(self):
@@ -234,13 +240,14 @@ class Av62Repository:
     # 表主键字段(排序依据——泛型
     # _list 的倒序键; assessment 表
     # 主键为 assessId 非 assessmentId)
-    _KEY_FIELD_BY_KIND = {
+    _KEY_FIELD_BY_KIND: ClassVar[dict] = {
         "asset": "assetId",
         "assessment": "assessId",
         "liquidity": "assetId",
         "appeal": "appealId",
         "fairness": "reportId",
         "event": "eventId",
+        "credit": "creditId",
     }
 
     async def _list(self, table_kind: str,
@@ -312,6 +319,35 @@ class Av62Repository:
             "asset", limit,
             subjectId=subject_id, role=role,
             domain=domain, status=status)
+
+    # --------------------------------------------------------
+    # 信值评估记录(creditId——P3 信值调整分支)
+    # --------------------------------------------------------
+
+    async def next_credit_id(self) -> int:
+        return await self._next_seq("credit")
+
+    async def save_credit(self, record: dict,
+                          *, create: bool = True
+                          ) -> dict:
+        return await self._save(
+            "credit", record, "creditId",
+            create=create)
+
+    async def get_credit(self, credit_id: int
+                         ) -> dict | None:
+        return await self._get(
+            "credit", int(credit_id))
+
+    async def list_credits(self,
+                           asset_id: int = None,
+                           subject_id: int = None,
+                           limit: int = 100
+                           ) -> list[dict]:
+        return await self._list(
+            "credit", limit,
+            assetId=asset_id,
+            subjectId=subject_id)
 
     # --------------------------------------------------------
     # 评估记录(assessId——P1)

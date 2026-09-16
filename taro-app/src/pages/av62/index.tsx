@@ -91,6 +91,26 @@ const AssetPage: React.FC = () => {
     }
   };
 
+  // ============ 信值评估(P3 信值调整分支) ============
+  const [creditResult, setCreditResult] = useState<any>(null);
+  const [creditBusy, setCreditBusy] = useState(false);
+  const runCreditAssess = async (assetId: number) => {
+    if (creditBusy) return;
+    setCreditBusy(true);
+    try {
+      const r = await Av62API.creditAssess(assetId);
+      setCreditResult(r);
+      Taro.showToast({
+        title: `信值 ${r.vCredit}(有效: ${r.valid ? '是' : '否'})`,
+        icon: 'none',
+      });
+    } catch (e: any) {
+      Taro.showToast({ title: errMsg(e), icon: 'none' });
+    } finally {
+      setCreditBusy(false);
+    }
+  };
+
   // ============ 登记页(信任要素登记入口·决策面) ============
   const [regRegistry, setRegRegistry] = useState<any>(null);
   const [regRole, setRegRole] = useState('enterprise');
@@ -483,9 +503,42 @@ const AssetPage: React.FC = () => {
                       基准值 {a.baseValue} · 归因{' '}
                       {a.ruleId || '—'}
                     </View>
+                    <View
+                      className={styles.runBtn}
+                      onClick={() => runCreditAssess(a.assetId)}
+                    >
+                      {creditBusy ? '评估中...' : '信值评估(V_credit)'}
+                    </View>
                   </View>
                 ))}
                 {!assesses.length && <View className={styles.empty}>暂无评估</View>}
+                {creditResult ? (
+                  <View className={styles.resultCard}>
+                    <View className={styles.cardTitle}>
+                      信值评估报告(资产#{creditResult.assetId})
+                    </View>
+                    <View className={styles.resItem}>
+                      V_credit {creditResult.vCredit} = 公允{' '}
+                      {creditResult.vFair} × α{creditResult.alpha} ×
+                      β{creditResult.beta} × γ{creditResult.gamma}
+                    </View>
+                    <View className={styles.resItem}>
+                      有效性 {creditResult.valid ? '有效' : '无效'}
+                      {creditResult.valid
+                        ? ''
+                        : `(${(creditResult.invalidReasons || []).join('; ')})`}
+                    </View>
+                    <View className={styles.resItem}>
+                      权属 {creditResult.factors?.beta?.legalStatus} ·
+                      流动档 {creditResult.factors?.alpha?.tier}
+                      {creditResult.factors?.roleRule?.note
+                        ? ` · ${creditResult.factors.roleRule.note}` : ''}
+                    </View>
+                    <View className={styles.footNote}>
+                      {creditResult.report?.disclaimer}
+                    </View>
+                  </View>
+                ) : null}
               </View>
             ) : <View className={styles.empty}>点击刷新加载</View>}
           </View>

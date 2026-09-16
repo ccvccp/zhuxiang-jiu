@@ -321,6 +321,84 @@ OBJECTIVE_MULTIPLIERS = {
 }
 
 # ============================================================
+# 信值导向估值(P3——信值调整分支, 2026-09-16 创新升级)
+# 公式: V_credit = V_fair × α_liquidity × β_legal × γ_stability
+# 估值与信值解耦: 信值分支只算调整因子, 不参与公允价值计算
+# ============================================================
+
+# 权属确定性封闭域(β 系数——质押/诉讼/争议折减, 未确权保守)
+LEGAL_STATUS_VALUES = (
+    "clean",        # 权属洁净
+    "pledged",      # 已质押
+    "litigated",    # 诉讼未决
+    "disputed",     # 共有人争议
+    "unverified",   # 未确权(登记缺省——保守)
+)
+
+CREDIT_BETA_BY_LEGAL = {
+    "clean": 1.00,
+    "pledged": 0.70,
+    "litigated": 0.40,
+    "disputed": 0.30,
+    "unverified": 0.80,
+}
+
+# 流动性折扣(α 系数——信值场景下无法快速变现的资产大幅折减;
+# 基于既有 DOMAIN_LIQUIDITY 域映射档)
+CREDIT_ALPHA_BY_TIER = {
+    "high": 0.95,
+    "medium": 0.85,
+    "low": 0.60,
+    "none": 0.00,
+}
+
+# 价值稳定性(γ 系数——置信档映射, 高波动资产保守处理)
+CREDIT_GAMMA_BY_TIER = {
+    "high": 0.95,
+    "medium": 0.85,
+    "low": 0.60,
+}
+
+# 信值有效性门槛(三系数乘积低于该值 → 信值无效)
+CREDIT_VALID_THRESHOLD = 0.10
+
+# 三主体差异化信值规则(封闭注册——事业单位合规优先/
+# 企业偿债覆盖/个人可执行性; 规则键须为已注册要素
+# (role, domain)——启动自检强制; 规则项:
+#   alphaCap   流动性折扣强制上限(α 不得高于该值)
+#   vCreditCap 信值上限占公允价值比例(V_credit ≤ V_fair×该值)
+#   note       规则依据(审计留痕)
+CREDIT_ROLE_RULES = {
+    # ---- organization 事业单位: 合规优先 + 公共效用货币化 ----
+    ("organization", "compliance"): {
+        "alphaCap": 0.60,
+        "note": "特许经营/团体合规类: 剩余期限不足时"
+                "公共属性剥离, 仅计市场化增值部分"},
+    # ---- enterprise 企业: 偿债覆盖 + 动态压力测试 ----
+    ("enterprise", "knowledge"): {
+        "alphaCap": 0.85,
+        "note": "技术类: 核心技术人员依赖度高时"
+                "附加流失风险折扣"},
+    ("enterprise", "behavior"): {
+        "vCreditCap": 0.50,
+        "note": "客户关系(行为资产): 单一客户收入"
+                "占比>30%时信值权重减半"},
+    # ---- personal 个人: 可执行性 + 隐私合规边界 ----
+    ("personal", "capability"): {
+        "alphaCap": 0.30,
+        "note": "资质认证: 不可转让资质原则上不计入信值, "
+                "仅与经营性债务直接挂钩时按收入贡献折算"},
+    ("personal", "knowledge"): {
+        "alphaCap": 0.20,
+        "note": "自媒体/数字内容: 未实名认证且平台不允许转让时"
+                "流动性折扣≥80%"},
+    ("personal", "reputation"): {
+        "alphaCap": 0.20,
+        "note": "个人IP/肖像权: 未绑定MCN或工作室时"
+                "流动性折扣≥80%, 负面舆情超阈值自动归零"},
+}
+
+# ============================================================
 # 流动性评级三档(P2——§3.3)
 # high  : 标准化可验证(认证类)——使用
 #         限频+场景校验
@@ -769,6 +847,28 @@ def registry_view() -> dict:
         }
         for (role, domain), el
         in TRUST_ELEMENTS.items()}
+    # 信值规则自描述(P3 信值调整分支——
+    # 公式/三系数域/三主体差异化规则)
+    credit_rules = {
+        "formula": "V_credit = V_fair × "
+                   "alpha_liquidity × beta_legal "
+                   "× gamma_stability",
+        "legalStatusValues":
+            list(LEGAL_STATUS_VALUES),
+        "betaByLegal": CREDIT_BETA_BY_LEGAL,
+        "alphaByTier": CREDIT_ALPHA_BY_TIER,
+        "gammaByTier": CREDIT_GAMMA_BY_TIER,
+        "validThreshold": CREDIT_VALID_THRESHOLD,
+        "roleRules": {
+            f"{r}.{d}": {
+                **rule,
+            }
+            for (r, d), rule
+            in CREDIT_ROLE_RULES.items()},
+        "note": "信值导向估值——估值与信值解耦, "
+                "信值分支仅算调整因子不参与公允价值"
+                "计算; 负资产(risk)不参与信值",
+    }
     return {
         "success": True,
         "modelVersion": MODEL_VERSION,
@@ -779,6 +879,7 @@ def registry_view() -> dict:
         "riskDomain": RISK_DOMAIN,
         "elements": len(TRUST_ELEMENTS),
         "elementDetails": element_details,
+        "creditRules": credit_rules,
         "meta": {
             "roleDomains":
                 list(ROLE_DOMAINS),
@@ -808,6 +909,24 @@ def registry_view() -> dict:
 def _validate_registry() -> None:
     """启动自检(RuntimeError 宪法级)"""
     errors = []
+    # 信值规则域校验(P3 信值调整分支)
+    for (role, domain) in CREDIT_ROLE_RULES:
+        if role not in ROLE_DOMAINS:
+            errors.append(
+                f"信值规则角色 {role} 域外")
+        if (role, domain) not in TRUST_ELEMENTS:
+            errors.append(
+                f"信值规则 {role}/{domain} "
+                f"要素未注册(规则须锚定"
+                f"已注册要素)")
+    for status in CREDIT_BETA_BY_LEGAL:
+        if status not in LEGAL_STATUS_VALUES:
+            errors.append(
+                f"β 系数权属态 {status} 封闭域外")
+    if len(CREDIT_BETA_BY_LEGAL) \
+            != len(LEGAL_STATUS_VALUES):
+        errors.append(
+            "β 系数与权属态封闭域不对齐")
     # 角色域全覆盖(每角色至少 3 域)
     for role in ROLE_DOMAINS:
         domains = [d for (r, d)
