@@ -7,19 +7,21 @@
  *   [API 层 api/av62.ts]
  *   1. 字典完整性(三角色/置信三档/估值目标)
  *   2. 映射函数回落(未知键原样)
- *   3. 方法完备(8 只读端点)
+ *   3. 方法完备(8 只读端点 + 登记决策 1)
  *   4. admin 头注入(X-Role + Bearer)
  *   5. URL 正确性(状态/看板/资产/详情/评估/注册表/公平性/回流)
- *   6. 资产筛选 query(role 拼接)
- *   7. 响应解包({success,data}壳)
+ *   6. 资产筛选 query(role 拼接) + 登记POST载荷
+ *   7. 响应解包({success,data}壳) + 注册表要素明细解包
  *   [页面层 pages/av62/index.tsx]
- *   8. 四页签结构(状态/看板/资产/评估)
+ *   8. 五页签结构(状态/看板/登记/资产/评估)
  *   9. hero 卡与脚注治理口径(观测面/决策面 409)
  *   10. 状态页流(点刷新 → 模式/版本/八因子网格)
  *   11. 看板页流(四区: 估值准确率/资产分布/评估版本链/红队)
- *   12. 资产页流(角色筛选 chips + 行渲染 + 负资产徽标)
- *   13. 评估页流(置信档徽标类名 + 要素/净贡献/基准值)
- *   14. 组件确定性
+ *   12. 登记页流(要素字典加载 → 角色域联动 → 证据字段动态渲染
+ *       → 提交POST载荷 → 成功回显模式标记)
+ *   13. 资产页流(角色筛选 chips + 行渲染 + 负资产徽标)
+ *   14. 评估页流(置信档徽标类名 + 要素/净贡献/基准值)
+ *   15. 组件确定性
  */
 const fs = require('fs');
 const path = require('path');
@@ -96,15 +98,50 @@ const MOCK_ASSESSMENTS = {
   ],
 };
 
+const MOCK_REGISTRY = {
+  roles: 3, positiveDomains: 8, riskDomain: 'risk', elements: 13,
+  elementDetails: {
+    'enterprise.compliance': {
+      label: '企业合规资产', weight: 0.25, negative: false,
+      evidenceSchema: ['licenseCount', 'auditResults', 'esgDisclosure'],
+      note: '资质证照/审计结果/ESG',
+    },
+    'enterprise.knowledge': {
+      label: '企业知识资产', weight: 0.2, negative: false,
+      evidenceSchema: ['sopDocs', 'techContribs', 'codeCommits'],
+    },
+    'enterprise.behavior': {
+      label: '企业行为资产', weight: 0.15, negative: false,
+      evidenceSchema: ['operationCompliance', 'collabLatency', 'dataSharing'],
+    },
+    'enterprise.risk': {
+      label: '企业负资产', weight: -0.3, negative: true,
+      evidenceSchema: ['penaltyRecords', 'complaintRate'],
+    },
+  },
+  meta: {
+    byRole: { enterprise: ['behavior', 'compliance', 'knowledge', 'risk'] },
+    roleDomains: ['enterprise', 'organization', 'personal'],
+  },
+};
+const MOCK_REGISTER_RESULT = {
+  assetId: 9, subjectId: 1001, role: 'enterprise', domain: 'compliance',
+  label: '企业合规资产', status: 'registered', negative: false,
+  av62Mode: 'assist',
+};
+
 const mockRequest = async (opts) => {
   requests.push(opts);
   const url = opts.url || '';
   if (url === '/api/av62/model/status') return { success: true, data: MOCK_STATUS };
   if (url === '/api/av62/dashboard') return { success: true, data: MOCK_DASHBOARD };
+  if (url === '/api/av62/assets' && opts.method === 'POST') {
+    return { success: true, data: MOCK_REGISTER_RESULT };
+  }
   if (url.startsWith('/api/av62/assets/')) return { success: true, data: MOCK_ASSET_DETAIL };
   if (url.startsWith('/api/av62/assets')) return { success: true, data: MOCK_ASSETS };
   if (url.startsWith('/api/av62/assessments')) return { success: true, data: MOCK_ASSESSMENTS };
-  if (url === '/api/av62/registry') return { success: true, data: { roles: 3, domains: 9 } };
+  if (url === '/api/av62/registry') return { success: true, data: MOCK_REGISTRY };
   if (url === '/api/av62/fairness/report') return { success: true, data: { ok: true } };
   if (url === '/api/av62/learn/status') return { success: true, data: { batch: 41 } };
   return { success: true, data: {} };
@@ -195,6 +232,7 @@ const MOCKS = {
   react: reactRef.current,
   '@tarojs/components': Object.assign(Object.create(null), {
     __esModule: true, View: 'View', Text: 'Text', ScrollView: 'ScrollView',
+    Input: 'Input',
   }),
   '@tarojs/taro': Object.assign(Object.create(null), {
     __esModule: true, default: mockTaro, ...mockTaro,
@@ -269,22 +307,26 @@ const textOf = (node) => {
     && apiMod.objectiveName('z') === 'z');
 
   // ---------- [3-7] API 层 ----------
-  const METHODS = ['status', 'dashboard', 'assets', 'asset', 'assessments',
-    'registry', 'fairness', 'learnStatus'];
-  record('API-方法8个', METHODS.length === 8
+  const METHODS = ['status', 'dashboard', 'assets', 'registerAsset', 'asset',
+    'assessments', 'registry', 'fairness', 'learnStatus'];
+  record('API-方法9个(含登记)', METHODS.length === 9
     && METHODS.every(m => typeof Av62API[m] === 'function'));
 
   requests.length = 0;
   const st = await Av62API.status();
   await Av62API.dashboard();
   await Av62API.assets({ role: 'enterprise' });
+  const regCall = await Av62API.registerAsset({
+    subjectId: 1001, role: 'enterprise', domain: 'compliance',
+    evidence: { licenseCount: 3 }, label: '企业合规资产',
+  });
   await Av62API.asset(1);
   await Av62API.assessments(50);
-  await Av62API.registry();
+  const regDict = await Av62API.registry();
   await Av62API.fairness();
   await Av62API.learnStatus();
   const exact = (u) => requests.find(r => r.url === u);
-  record('URL-八端点正确', !!exact('/api/av62/model/status')
+  record('URL-九端点正确', !!exact('/api/av62/model/status')
     && !!exact('/api/av62/dashboard')
     && !!exact('/api/av62/assets?role=enterprise')
     && !!exact('/api/av62/assets/1')
@@ -292,6 +334,14 @@ const textOf = (node) => {
     && !!exact('/api/av62/registry')
     && !!exact('/api/av62/fairness/report')
     && !!exact('/api/av62/learn/status'));
+  record('API-登记POST载荷', !!requests.find(r =>
+    r.url === '/api/av62/assets' && r.method === 'POST'
+    && r.headers['X-Role'] === 'admin'
+    && r.data.subjectId === 1001
+    && r.data.role === 'enterprise'
+    && r.data.domain === 'compliance'
+    && r.data.evidence.licenseCount === 3)
+    && regCall.assetId === 9 && regCall.av62Mode === 'assist');
   record('API-admin头注入', exact('/api/av62/model/status').headers['X-Role'] === 'admin'
     && exact('/api/av62/model/status').headers.Authorization === 'Bearer tk-av62');
   record('映射-响应解包', st.status.mode === 'off'
@@ -300,6 +350,9 @@ const textOf = (node) => {
   const assetsRes = await Av62API.assets();
   record('映射-资产解包', assetsRes.total === 2 && assetsRes.negative === 1
     && assetsRes.assets[0].label === '酿造工艺专利');
+  record('映射-注册表要素明细解包', regDict.elementDetails
+    && regDict.elementDetails['enterprise.compliance'].evidenceSchema.length === 3
+    && Array.isArray(regDict.meta.byRole.enterprise));
 
   // ---------- [8-14] 页面层 ----------
   const reactP = miniReact();
@@ -314,8 +367,8 @@ const textOf = (node) => {
     return !!t;
   };
 
-  record('页面-四页签', flat.includes('状态') && flat.includes('看板')
-    && flat.includes('资产') && flat.includes('评估'));
+  record('页面-五页签', flat.includes('状态') && flat.includes('看板')
+    && flat.includes('登记') && flat.includes('资产') && flat.includes('评估'));
   const heroEl = findAll(el, n => n.props.className === 'heroCard');
   const footEl = findAll(el, n => n.props.className === 'footNote');
   record('页面-hero与脚注口径', heroEl.length === 1
@@ -352,7 +405,57 @@ const textOf = (node) => {
     && boardText.includes('红队 6 轮')
     && boardText.includes('全防御'));
 
-  // [12] 资产页流(筛选 + 负徽标)
+  // [12] 登记页流(信任要素登记入口·决策面)
+  clickBtn(elBoard, '登记');
+  await waitTick(30);
+  const elRegTab = reactP.__test.rerender();
+  requests.length = 0;
+  clickBtn(elRegTab, '加载要素字典(三角色 × 九域)');
+  await waitTick(60);
+  const elReg = reactP.__test.rerender();
+  record('页面-登记字典加载', requests.some(r =>
+    r.url === '/api/av62/registry'));
+  const regText = textOf(elReg);
+  record('页面-登记表单渲染(角色域联动)', regText.includes('登记主体 ID')
+    && regText.includes('资产域(按角色封闭 4 域)')
+    && regText.includes('选择资产域后填写证据快照'));
+  // 选 compliance 域 → 证据字段动态渲染
+  const domChip = findAll(elReg, n =>
+    typeof n.props.className === 'string'
+    && n.props.className.includes('chip') && textOf(n) === 'compliance')[0];
+  domChip.props.onClick();
+  await waitTick(30);
+  const elDom = reactP.__test.rerender();
+  const domText = textOf(elDom);
+  const phInputs = findAll(elDom, n => n.type === 'Input'
+    && typeof n.props.placeholder === 'string');
+  record('页面-证据字段动态渲染', domText.includes('企业合规资产(权重 0.25)')
+    && phInputs.some(n => n.props.placeholder === '证据 licenseCount')
+    && phInputs.some(n => n.props.placeholder === '证据 auditResults')
+    && phInputs.some(n => n.props.placeholder === '证据 esgDisclosure')
+    && phInputs.some(n => n.props.placeholder === '企业合规资产')
+    && domText.includes('标签(可选'));
+  // 填主体ID+证据 → 提交登记
+  const regInputs = findAll(elDom, n => n.type === 'Input');
+  regInputs[0].props.onInput({ detail: { value: '1001' } });
+  regInputs[1].props.onInput({ detail: { value: '3' } });
+  await waitTick(30);
+  const elFilled = reactP.__test.rerender();
+  requests.length = 0;
+  clickBtn(elFilled, '提交登记');
+  await waitTick(60);
+  const regPost = requests.find(r =>
+    r.url === '/api/av62/assets' && r.method === 'POST');
+  record('页面-提交登记(POST载荷)', !!regPost
+    && regPost.data.subjectId === 1001
+    && regPost.data.role === 'enterprise'
+    && regPost.data.domain === 'compliance'
+    && regPost.data.evidence.licenseCount === 3);
+  const elDone = reactP.__test.rerender();
+  record('页面-登记成功回显(模式标记)', textOf(elDone).includes('登记 #9')
+    && textOf(elDone).includes('模式标记 assist'));
+
+  // [13] 资产页流(筛选 + 负徽标)
   clickBtn(elBoard, '资产');
   await waitTick(30);
   const elAssetTab = reactP.__test.rerender();

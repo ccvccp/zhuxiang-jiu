@@ -77,6 +77,30 @@ export const Av62API = {
     return res.data || res;
   },
 
+  /** 信任要素登记(决策面: off 态 409; shadow/assist 放行+av62Mode 标记)
+   *  payload.evidence 字段须在该 (role, domain) 要素的
+   *  registry.elementDetails evidenceSchema 封闭域内 */
+  async registerAsset(payload: {
+    subjectId: number;
+    role: string;
+    domain: string;
+    evidence: Record<string, number>;
+    label?: string;
+  }): Promise<any> {
+    const res = await request<any>({
+      url: '/api/av62/assets', method: 'POST',
+      headers: adminHeaders(),
+      data: {
+        subjectId: payload.subjectId,
+        role: payload.role,
+        domain: payload.domain,
+        evidence: payload.evidence,
+        label: payload.label || undefined,
+      },
+    });
+    return res.data || res;
+  },
+
   /** 资产详情(证据快照+要素定义) */
   async asset(assetId: number): Promise<any> {
     const res = await request<any>({

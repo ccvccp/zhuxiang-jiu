@@ -753,6 +753,22 @@ def registry_view() -> dict:
             TRUST_ELEMENTS.items():
         by_role.setdefault(
             role, []).append(domain)
+    # 要素明细(登记表单动态字典源——
+    # 前端按 (role, domain) 取
+    # evidenceSchema 渲染证据字段,
+    # 避免前端硬编码漂移)
+    element_details = {
+        f"{role}.{domain}": {
+            "label": el.get("label"),
+            "weight": el.get("weight"),
+            "evidenceSchema": list(
+                el.get("evidenceSchema") or []),
+            "note": el.get("note", ""),
+            "negative": bool(
+                el.get("negative")),
+        }
+        for (role, domain), el
+        in TRUST_ELEMENTS.items()}
     return {
         "success": True,
         "modelVersion": MODEL_VERSION,
@@ -762,6 +778,7 @@ def registry_view() -> dict:
             len(DOMAINS),
         "riskDomain": RISK_DOMAIN,
         "elements": len(TRUST_ELEMENTS),
+        "elementDetails": element_details,
         "meta": {
             "roleDomains":
                 list(ROLE_DOMAINS),

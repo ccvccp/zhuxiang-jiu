@@ -69,6 +69,16 @@ $av-primary-bg: rgba(138, 109, 59, 0.07);
   margin-bottom: $spacing-sm;
 }
 
+// 登记表单输入框(信任要素登记入口)
+.input {
+  font-size: 26rpx;
+  border: 1rpx solid $color-border;
+  border-radius: 8rpx;
+  padding: $spacing-xs $spacing-sm;
+  margin-bottom: $spacing-sm;
+  width: auto;
+}
+
 .footNote {
   padding: $spacing-lg;
   font-size: 20rpx;
