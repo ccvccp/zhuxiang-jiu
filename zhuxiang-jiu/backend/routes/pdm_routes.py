@@ -1,4 +1,4 @@
-"""38号·AI智能产品管理模块路由(P0, 19 端点)
+"""38号·AI智能产品管理模块路由(P0-P2 全量, 30 端点)
 
 鉴权(设计文档 §4):
     - 全部端点须登录(X-Member-Id + X-Role, JWT 中间件注入)
@@ -6,6 +6,14 @@
     - operator(product.operate): 创建/编辑/提交/图片/上下架
     - auditor(product.approve): 人工终审
     - manage(product.manage): draft 直通上架/紧急下架
+
+大模型二代·三态灰度(PDM_MODE, 全站范式):
+    - 决策面(16 写): @/_decision 门控——off 拒绝(409)
+      + shadow/assist 响应标记(pdmMode)
+    - 安全阀豁免(1): force-delist 紧急下架——永不关停
+      (违规商品即刻下架的安全处置权)
+    - 观测面(9 GET): 永不关停
+    - 控制面(4): mode/override/guard/resume
 
 异常映射(遵循项目约定):
     - KeyError → 404(商品/版本/图片不存在)
@@ -34,8 +42,7 @@ def _require_member(x_member_id: str | None) -> int:
     try:
         return int(x_member_id)
     except ValueError:
-        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字")
-
+        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字") from None
 
 def _handle(exc: Exception):
     if isinstance(exc, KeyError):
@@ -48,6 +55,68 @@ def _handle(exc: Exception):
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=409, detail=str(exc))
     raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ============================================================
+# 大模型二代·三态灰度门控(PDM_MODE, 全站范式)
+# ============================================================
+
+async def _gate() -> dict:
+    """决策面门槛(PDM_MODE=off → 409;
+    shadow/assist 放行——大模型二代读取链:
+    护栏暂停 > 运行时 override > env)"""
+    from services.pdm_mode_service import (
+        PdmModeService,
+    )
+    return await PdmModeService() \
+        .require_decision_mode()
+
+
+def _decision(fn=None, *, strict=True):
+    """决策端点装饰器: 门控(off 409) +
+    shadow/assist 标记(pdmMode)
+
+    参数(鉴权优先——401/403 before 409, 小竹/钱包/信用范式):
+        strict=True(默认) 用户端(X-Member-Id 缺失
+                       放行函数体触发 401; 服务层
+                       perm_grants 403 自然发生)
+
+    宪法安全阀(force-delist 紧急下架)不加本装饰器——
+    违规商品即刻下架的安全处置权永不关停。
+    观测面(GET)不加——永不关停。
+    """
+    import functools
+    from services.pdm_mode_service import (
+        MODE_VALUES,
+    )
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            # 鉴权优先: 无效/缺失凭据放行
+            # 函数体触发 401/403——不预判门控
+            x_member_id = kwargs.get("x_member_id")
+            gate_needed = not (strict and not x_member_id)
+            mode_state = None
+            if gate_needed:
+                try:
+                    mode_state = await _gate()
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=str(e)) from e
+            result = await fn(*args, **kwargs)
+            if isinstance(result, dict) \
+                    and mode_state \
+                    and mode_state.get("mode") \
+                    in MODE_VALUES[1:]:
+                result = {**result,
+                          "pdmMode":
+                              mode_state["mode"]}
+            return result
+        return wrapper
+
+    return deco(fn) if fn else deco
 
 
 # ============================================================
@@ -130,6 +199,7 @@ class VersionRollbackRequest(PydBaseModel):
 # ============================================================
 
 @router.post("/api/pdm/products", tags=["AI智能产品管理模块"])
+@_decision
 async def create_product(
     data: ProductCreateRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
@@ -184,6 +254,7 @@ async def get_product(
 
 @router.put("/api/pdm/products/{product_id}",
             tags=["AI智能产品管理模块"])
+@_decision
 async def update_product(
     product_id: str,
     data: ProductUpdateRequest,
@@ -205,6 +276,7 @@ async def update_product(
 
 @router.post("/api/pdm/products/{product_id}/submit",
              tags=["AI智能产品管理模块"])
+@_decision
 async def submit_product(
     product_id: str,
     x_member_id: str = Header(None, alias="X-Member-Id"),
@@ -222,6 +294,7 @@ async def submit_product(
 
 @router.post("/api/pdm/products/{product_id}/ai-precheck",
              tags=["AI智能产品管理模块"])
+@_decision
 async def ai_precheck(
     product_id: str,
     x_member_id: str = Header(None, alias="X-Member-Id"),
@@ -260,6 +333,7 @@ async def list_pending_reviews(
 
 @router.post("/api/pdm/products/{product_id}/review",
              tags=["AI智能产品管理模块"])
+@_decision
 async def review_product(
     product_id: str,
     data: ReviewRequest,
@@ -282,6 +356,7 @@ async def review_product(
 
 @router.post("/api/pdm/products/{product_id}/list",
              tags=["AI智能产品管理模块"])
+@_decision
 async def put_on_sale(
     product_id: str,
     x_member_id: str = Header(None, alias="X-Member-Id"),
@@ -299,6 +374,7 @@ async def put_on_sale(
 
 @router.post("/api/pdm/products/{product_id}/delist",
              tags=["AI智能产品管理模块"])
+@_decision
 async def take_off_sale(
     product_id: str,
     data: DelistRequest,
@@ -356,6 +432,7 @@ async def list_versions(
 
 @router.post("/api/pdm/products/{product_id}/versions/rollback",
              tags=["AI智能产品管理模块"])
+@_decision
 async def rollback_version(
     product_id: str,
     data: VersionRollbackRequest,
@@ -377,6 +454,7 @@ async def rollback_version(
 # ============================================================
 
 @router.post("/api/pdm/images", tags=["AI智能产品管理模块"])
+@_decision
 async def upload_image(
     data: ImageUploadRequest,
     x_member_id: str = Header(None, alias="X-Member-Id"),
@@ -399,6 +477,7 @@ async def upload_image(
 
 @router.post("/api/pdm/images/{image_id}/reupload",
              tags=["AI智能产品管理模块"])
+@_decision
 async def reupload_image(
     image_id: int,
     data: ImageReuploadRequest,
@@ -417,6 +496,7 @@ async def reupload_image(
 
 @router.post("/api/pdm/images/{image_id}/destroy",
              tags=["AI智能产品管理模块"])
+@_decision
 async def destroy_image(
     image_id: int,
     x_member_id: str = Header(None, alias="X-Member-Id"),
@@ -451,6 +531,7 @@ async def listing_advice(
 
 @router.post("/api/pdm/products/{product_id}/learning-feedback",
              tags=["AI智能产品管理模块"])
+@_decision
 async def submit_learning_feedback(
     product_id: str,
     data: LearningFeedbackRequest,
@@ -474,6 +555,7 @@ async def submit_learning_feedback(
 
 @router.post("/api/pdm/products/{product_id}/design/generate-main-image",
              tags=["AI智能产品管理模块"])
+@_decision
 async def generate_main_image(
     product_id: str,
     x_member_id: str = Header(None, alias="X-Member-Id"),
@@ -494,6 +576,7 @@ async def generate_main_image(
 
 @router.post("/api/pdm/products/{product_id}/design/copy-optimize",
              tags=["AI智能产品管理模块"])
+@_decision
 async def optimize_copy(
     product_id: str,
     x_member_id: str = Header(None, alias="X-Member-Id"),
@@ -562,6 +645,7 @@ async def get_image(
 
 @router.put("/api/pdm/products/{product_id}/images",
             tags=["AI智能产品管理模块"])
+@_decision
 async def update_images(
     product_id: str,
     data: ImagesUpdateRequest,
@@ -580,6 +664,7 @@ async def update_images(
 
 @router.post("/api/pdm/products/{product_id}/images/rollback",
              tags=["AI智能产品管理模块"])
+@_decision
 async def rollback_images(
     product_id: str,
     data: ImageRollbackRequest,
@@ -614,6 +699,106 @@ async def report_overview(
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
+
+
+# ============================================================
+# 控制面(4, admin 门禁——大模型二代全站范式)
+# ============================================================
+
+def _require_admin_role(x_role: str | None):
+    """控制面管理员校验(403)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+
+
+@router.get("/api/pdm/mode", tags=["AI智能产品管理模块"])
+async def pdm_mode_status(x_role: str = Header(None, alias="X-Role")):
+    """灰度总览(模式/读取链/护栏/红线公示——观测面永不关停)"""
+    _require_admin_role(x_role)
+    from services.pdm_mode_service import (
+        PdmModeService,
+    )
+    return await PdmModeService().status_view()
+
+
+@router.post("/api/pdm/mode/override",
+             tags=["AI智能产品管理模块"])
+async def pdm_mode_override(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role")):
+    """运行时切档(免容器重建; 空 mode=清除 override)"""
+    _require_admin_role(x_role)
+    from services.pdm_mode_service import (
+        PdmModeService,
+    )
+    body = data or {}
+    try:
+        result = await PdmModeService().set_override(
+            str(body.get("mode") or ""),
+            operator="admin")
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
+
+
+@router.post("/api/pdm/mode/guard",
+             tags=["AI智能产品管理模块"])
+async def pdm_mode_guard(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role")):
+    """护栏检查(三指标恶化 >3% 自动暂停)
+
+    body: {manualRejectRate, imageFlagRate,
+           aiRejectRate, baseline?{同三键}}
+    ——缺省时按 PDM 仓储实时聚合(确定性, LLM 禁入)。
+    """
+    _require_admin_role(x_role)
+    from services.pdm_mode_service import (
+        PdmModeService,
+    )
+    if not isinstance(data, dict) or not data:
+        # 缺省: 巡检聚合(确定性)
+        from services.pdm_scheduler import (
+            run_guard_patrol,
+        )
+        r = await run_guard_patrol()
+        return {"success": True,
+                "data": {"metrics": r["metrics"],
+                         "samples": r["samples"],
+                         "breached": r["breached"],
+                         "breaches": r["breaches"],
+                         "pausedNow": r["pausedNow"]}}
+    try:
+        result = await PdmModeService().guard_check(
+            float(data.get("manualRejectRate") or 0),
+            float(data.get("imageFlagRate") or 0),
+            float(data.get("aiRejectRate") or 0),
+            baseline=data.get("baseline"))
+        return {"success": True, "data": result}
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
+
+
+@router.post("/api/pdm/mode/resume",
+             tags=["AI智能产品管理模块"])
+async def pdm_mode_resume(
+    note: str = Query("", description="恢复备注(决策留痕)"),
+    x_role: str = Header(None, alias="X-Role")):
+    """人工恢复(护栏暂停解除——决策留痕)"""
+    _require_admin_role(x_role)
+    from services.pdm_mode_service import (
+        PdmModeService,
+    )
+    try:
+        result = await PdmModeService().resume(
+            operator="admin", note=note)
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=409,
+                             detail=str(e)) from e
 
 
 def register_pdm_routes(app):

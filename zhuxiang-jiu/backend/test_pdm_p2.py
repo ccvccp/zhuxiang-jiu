@@ -24,6 +24,9 @@ os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ.pop("LLM_API_KEY", None)
 os.environ["LLM_ENABLED"] = "off"
+# 大模型二代: 决策面放行态(16 写端点 @_decision 门控;
+# PDM_MODE 默认 off 会 409 拦截存量业务断言)
+os.environ["PDM_MODE"] = "assist"
 
 from services.pdm_service import PdmService
 from services.pdm_design_service import (
@@ -87,7 +90,6 @@ async def main():
     design_svc = PdmDesignService()
     perm_svc = PermService()
     member_repo = MemberRepository()
-    pdm_repo = PdmRepository()
 
     SUPER = 2
     operator = await _add_member(member_repo, "运营P2")
