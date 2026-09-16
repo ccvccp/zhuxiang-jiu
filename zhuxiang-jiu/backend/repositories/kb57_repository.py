@@ -19,6 +19,8 @@
 
 import json
 
+from typing import ClassVar
+
 from repositories.backend import (
     is_redis_mode, get_redis_client, get_in_memory_store, _k,
 )
@@ -54,7 +56,9 @@ class Kb57Repository:
         "hits", "suggestedSources", "valueTags",
         "seedIds", "complianceReports",
         "maskedFields", "auditTrail",
-        "affectedMembers", "results")
+        "affectedMembers", "results",
+        # 语义向量(P7 embedding——float list)
+        "embedding")
     _BOOL_FIELDS = (
         "humanVerified", "active", "completed",
         "reviewRequired", "deferred", "escalated",
@@ -162,7 +166,7 @@ class Kb57Repository:
 
     # kind → 表名显式映射(compliance/feedback 等
     # 不规则复数词——通用 f"{kind}s" 推导会断裂)
-    _TABLE_BY_KIND = {
+    _TABLE_BY_KIND: ClassVar[dict] = {
         "source": TABLE_SOURCES,
         "gap": TABLE_GAPS,
         "resource": TABLE_RESOURCES,

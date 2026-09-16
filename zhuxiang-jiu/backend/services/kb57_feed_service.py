@@ -558,6 +558,31 @@ class Kb57FeedService:
                     if len(matched_seeds) >= 3:
                         break
 
+        # 语义补位(P7——确定性命中不足时
+        # 语义轨补足; LLM 失败/关闭零影响)
+        semantic_ids = []
+        if query and len(matched_seeds) < 3:
+            try:
+                from services.kb57_embedding_service import (
+                    Kb57EmbeddingService,
+                )
+                sem = await (
+                    Kb57EmbeddingService()
+                    .semantic_search(
+                        query, limit=3))
+                for item in (sem or []):
+                    sid = (item.get("seed")
+                           or {}).get("seedId")
+                    if sid not in matched_seeds:
+                        matched_seeds.append(sid)
+                        semantic_ids.append(sid)
+                        if len(
+                                matched_seeds) \
+                                >= 3:
+                            break
+            except Exception:
+                pass   # fail-open 确定性轨独存
+
         # 匹配缺口(open 态——生成采集建议)
         gaps = await self.repo.list_gaps(
             status="open", limit=100)
@@ -569,6 +594,7 @@ class Kb57FeedService:
             "triggerType": trigger_type,
             "query": query[:64],
             "matchedSeeds": matched_seeds,
+            "semanticMatched": semantic_ids,
             "matchedGaps": matched_gaps,
         })
 
@@ -577,9 +603,11 @@ class Kb57FeedService:
             "memberId": int(member_id),
             "triggerType": trigger_type,
             "matchedSeeds": matched_seeds,
+            "semanticMatched": semantic_ids,
             "matchedGaps": matched_gaps,
             "note": "情境触发已上报——匹配种子推荐+"
-                    "缺口采集建议(P0 诊断联动)",
+                    "缺口采集建议(P0 诊断联动"
+                    "; 语义轨补位见 semanticMatched)",
             "triggeredAt": ts(),
         }
 

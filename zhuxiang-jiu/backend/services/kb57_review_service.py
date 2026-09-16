@@ -18,7 +18,6 @@
 """
 
 import logging
-import os
 
 from core.helpers import ts
 
@@ -109,6 +108,18 @@ class Kb57ReviewService:
         seed["updatedAt"] = ts()
         await self.repo.save_seed(
             seed, create=False)
+
+        # 语义向量化(P7——发布时注入;
+        # 失败不阻断, 检索时批量回填兜底)
+        try:
+            from services.kb57_embedding_service import (
+                Kb57EmbeddingService,
+            )
+            await (
+                Kb57EmbeddingService()
+                .ensure_seed_vector(seed))
+        except Exception:
+            pass
 
         # 版本化联动: 旧版自动降权不删除
         from services.kb57_seed_service import (
@@ -203,7 +214,7 @@ class Kb57ReviewService:
                     "note": "误导召回补偿——45号 L2 "
                             "platform_conduct",
                 }
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(
                     "kb57_recall_compensate_"
                     "failed: %s", exc)
@@ -246,6 +257,6 @@ class Kb57ReviewService:
                 "detail": detail,
                 "createdAt": ts(),
             })
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning(
                 "kb57_review_track_failed: %s", exc)
