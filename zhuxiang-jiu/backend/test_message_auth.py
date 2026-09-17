@@ -135,10 +135,11 @@ def run(client):
     # ============================================================
     # 5. POST /api/message/mark-read/{id}
     # ============================================================
-    # 造一条 1001 的新未读消息
+    # 造一条 1001 的新未读消息(用必需类 system: 营销类 coupon
+    # 在静默时段 22:00-08:00 会被防骚扰门 409 拦截, 致列表空)
     r = client.post("/api/message/send", headers=ADMIN, json={
         "userId": 1001, "channel": "popup",
-        "title": "未读", "content": "待标记", "category": "coupon"})
+        "title": "未读", "content": "待标记", "category": "system"})
     new_id = r.json()["data"]["id"] if isinstance(r.json().get("data"), dict) \
         else r.json()["data"][0]["id"] if isinstance(r.json().get("data"), list) \
         else None

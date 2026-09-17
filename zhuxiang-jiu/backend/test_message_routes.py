@@ -43,6 +43,21 @@ from repositories.message_repository import (
 )
 from repositories.store import _mock_store, reset_store as _reset_store_impl
 
+
+# ============================================================
+# 时间无关化: 本套件覆盖路由/CRUD 语义, 防骚扰四重调控由
+# test_message_antispam 专项覆盖——固定放行发送门控, 消除
+# 静默时段(默认 22:00-08:00)与营销频率上限对发送类用例的
+# 时间依赖(原测试仅在日间时段可全绿)。
+# ============================================================
+
+async def _gate_allow_all(self, user_id, channel, category, priority,
+                          now=None):
+    return {"allowed": True, "reason": ""}
+
+
+MessageService._check_send_allowed = _gate_allow_all
+
 # 测试结果收集
 PASS = 0
 FAIL = 0

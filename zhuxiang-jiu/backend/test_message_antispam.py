@@ -158,14 +158,18 @@ async def run_service():
     await svc.update_subscription(U, silent_enabled=True)
 
     # ============================================================
-    # 4. 频率限制(白天发送, 避开静默)
+    # 4. 频率限制(关闭静默 + 校验时刻取真实当日, 时间无关化:
+    #    send_message 以 datetime.now() 打 sentAt 戳, 计数按当日
+    #    归集——校验时刻须同日才能命中计数; 原硬编码 2026-09-01
+    #    仅当日可全绿)
     # ============================================================
     for k in list(_mock_store.keys()):
         if "message" in k:
             del _mock_store[k]
     await svc.update_subscription(U, channels=None, categories=None,
-                                  silent_start="03:00", silent_end="04:00")
-    day = datetime(2026, 9, 1, 12, 0)
+                                  silent_enabled=False)
+    day = datetime.now().replace(hour=12, minute=0,
+                                  second=0, microsecond=0)
     # activity 每日 1 条
     await svc.send_message(U, CHANNEL_INMAIL, "活动1", "c", CATEGORY_ACTIVITY)
     r = await svc._check_send_allowed(U, CHANNEL_INMAIL, CATEGORY_ACTIVITY, "P2", day)
