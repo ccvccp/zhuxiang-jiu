@@ -17,7 +17,8 @@ const POINTS_DEDUCT_MAX_RATE = 0.30;
 const EARN_RATE = 0.1;
 const LEVEL_BOOST: Record<string, number> = { L1: 1.0, L2: 1.0, L3: 1.02, L4: 1.05, L5: 1.08 };
 const PROFIT_SPLIT = { platform: 0.80, hotel: 0.20 };
-const FREE_SHIPPING_QTY = 2; // 购买两瓶免运费
+const FREE_SHIPPING_THRESHOLD = 99; // 满 99 免运费(统一 order 链口径)
+const SHIPPING_FEE = 10;             // 未满门槛运费
 
 interface OrderItem {
   id: number;
@@ -284,9 +285,8 @@ export const CheckoutService = {
       }
       const finalAmount = round2(afterCoupon - pointsDeduct);
 
-      // 运费(购买两瓶免运费)
-      const totalQty = ctx.items.reduce((s: number, i: OrderItem) => s + i.qty, 0);
-      const shipping = totalQty >= FREE_SHIPPING_QTY ? 0 : 12;
+      // 运费(折后满 99 免, 统一 order 链口径)
+      const shipping = finalAmount >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_FEE;
 
       ctx.priceResult = {
         originalTotal, memberDiscount: memberDiscountAmount, couponDiscount,

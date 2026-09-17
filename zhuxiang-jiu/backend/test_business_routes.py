@@ -236,7 +236,7 @@ class TestCheckoutSubmit:
         assert data["success"] is True
         assert data["orderNo"].startswith("ZX")
         d = data["details"]
-        # 价格计算: 1198 → L3 92 折=1102.16 → 满1000减80 → 积分抵1 → 运费0(2瓶免)
+        # 价格计算: 1198 → L3 92 折=1102.16 → 满1000减80 → 积分抵1 → 运费0(折后满99免)
         assert d["originalTotal"] == 1198
         assert d["finalAmount"] == round(1198 * 0.92 - 80 - 1.0, 2)
         assert d["pointsUsed"] == 100
@@ -245,6 +245,23 @@ class TestCheckoutSubmit:
         # 兼容字段
         assert data["orderId"] == data["orderNo"]
         assert data["status"] == "已付款"
+
+    def test_submit_shipping_fee_below_threshold(self):
+        """低价单运费: 折后不满 99 收 ¥10(统一 order 链口径)
+
+        原 checkout 链按数量(2瓶免/¥15), 与 order 链(满99免/¥10)
+        不一致——统一为折后金额门槛。
+        """
+        response = client.post("/api/checkout/submit", json={
+            "items": [{"id": "ZX42-2026L07", "name": "竹香经典",
+                       "price": 50, "qty": 1}],
+        })
+        data = response.json()
+        assert data["success"] is True
+        d = data["details"]
+        # L1 无折扣无券无积分: 折后 50 < 99 → 运费 10 → 实付 60
+        assert d["shipping"] == 10
+        assert d["finalAmount"] == 60.0
 
     def test_submit_empty_items_aborts(self):
         """空购物车: preflight 中止(对齐前端契约)"""

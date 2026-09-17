@@ -52,8 +52,8 @@ class CheckoutConfig:
     MEMBER_DISCOUNT: ClassVar[dict] = {"L1": 1.00, "L2": 0.95, "L3": 0.92, "L4": 0.90, "L5": 0.85}
     FULL_REDUCTION: ClassVar[list] = [(500, 30), (1000, 80), (3000, 300)]   # 满 threshold 减 reduction
     PROFIT_SPLIT: ClassVar[dict] = {"platform": 0.80, "hotel": 0.20}
-    SHIPPING_FREE_QTY = 2         # 两瓶免运费
-    SHIPPING_BASE = 15
+    SHIPPING_FREE_THRESHOLD = 99  # 满 99 免运费(统一主站 order 链口径)
+    SHIPPING_BASE = 10
 
 
 def _round2(v: float) -> float:
@@ -86,8 +86,9 @@ def calculate_order_price(main_price: float, total_qty: int,
     max_deduct = _round2(original_total * CheckoutConfig.POINTS_DEDUCT_MAX)
     points_applied = _round2(min(points_value, max_deduct, discounted))
     discounted = _round2(discounted - points_applied)
-    # 运费 + 实付
-    shipping = 0 if total_qty >= CheckoutConfig.SHIPPING_FREE_QTY else CheckoutConfig.SHIPPING_BASE
+    # 运费 + 实付(折后满 99 免, 与 order_service._calc_price 同口径)
+    shipping = (0 if discounted >= CheckoutConfig.SHIPPING_FREE_THRESHOLD
+                else CheckoutConfig.SHIPPING_BASE)
     final_amount = _round2(discounted + shipping)
     return {
         "originalTotal": original_total,
