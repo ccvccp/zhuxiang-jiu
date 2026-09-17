@@ -653,6 +653,63 @@ class TestOrderReview:
         )
         assert resp.status_code == 409
 
+    async def test_review_syncs_product_reviews(self, client):
+        """缺陷修复: 订单评价同步商品评价列表(打通评价体系断裂)
+
+        E2E 发现订单评价只写订单字段+返积分, 商品页评价区
+        (product:reviews)永远看不到——修复后订单评价循环
+        items 逐商品 best-effort 同步, 复用防重与评分聚合。
+        """
+        order_id = await _create(client)
+        await _to_received(client, order_id)
+        resp = await client.post(
+            f"/api/order/{order_id}/review",
+            json={"rating": 5, "content": "好酒"},
+            headers=MEMBER_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reviewSynced"] == 1
+
+        # mock store: 商品评价列表落库(同订单同产品仅一条)
+        reviews = _mock_store["product_reviews"].get("ZX42-2026L07", [])
+        matched = [r for r in reviews if r.get("order_id") == order_id]
+        assert len(matched) == 1
+        assert str(matched[0]["member_id"]) == "1"
+        assert matched[0]["rating"] == 5
+        assert matched[0]["content"] == "好酒"
+
+        # 公开商品评价端点可见(修复目标: 商品页评价区)
+        pub = await client.get(
+            "/api/product/ZX42-2026L07/reviews",
+            params={"page": 1, "pageSize": 100},
+        )
+        assert pub.status_code == 200
+        assert any(r.get("order_id") == order_id
+                   for r in pub.json()["reviews"])
+
+    async def test_review_sync_multi_items(self, client):
+        """多商品订单: 逐商品同步(每商品一条评价)"""
+        items = [
+            {"productId": "ZX42-2026L07", "productName": "竹奕42",
+             "quantity": 1, "unitPrice": 268.00},
+            {"productId": "ZX42-2026B01", "productName": "竹香大曲",
+             "quantity": 1, "unitPrice": 88.00},
+        ]
+        order_id = await _create(client, items=items)
+        await _to_received(client, order_id)
+        resp = await client.post(
+            f"/api/order/{order_id}/review",
+            json={"rating": 4, "content": "两瓶都不错"},
+            headers=MEMBER_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reviewSynced"] == 2
+        for pid in ("ZX42-2026L07", "ZX42-2026B01"):
+            matched = [r for r in _mock_store["product_reviews"].get(pid, [])
+                       if r.get("order_id") == order_id]
+            assert len(matched) == 1, pid
+            assert matched[0]["rating"] == 4
+
 
 # ============================================================
 # 9. 申请退货: POST /api/order/{orderId}/return

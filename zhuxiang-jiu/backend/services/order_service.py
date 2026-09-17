@@ -605,12 +605,43 @@ class OrderService:
             logs.append({"step": "评价完成", "level": "INFO",
                          "msg": f"订单已完成, {rating} 星评价"})
 
+            # 评价同步商品评价列表(打通链路——商品页评价区可见)
+            # best-effort: 同步失败不阻断订单评价主流程;
+            # 复用商品评价体系防重(同订单同产品仅一次)与评分聚合
+            synced, sync_err = 0, ""
+            try:
+                from services.product_service import (
+                    ProductService,
+                )
+                for it in order.get("items", []):
+                    pid = str(it.get("productId") or "")
+                    if not pid:
+                        continue
+                    await ProductService().add_review(
+                        pid,
+                        member_id=order["memberId"],
+                        member_nickname="",
+                        rating=rating,
+                        content=(content or "").strip()
+                        or "此用户未填写评价内容",
+                        order_id=order_id)
+                    synced += 1
+                logs.append({"step": "评价同步", "level": "INFO",
+                             "msg": f"已同步 {synced} 个商品评价列表"})
+            except Exception as exc:
+                sync_err = str(exc)[:80]
+                logger.warning(
+                    "order_review_sync_failed: %s", exc)
+                logs.append({"step": "评价同步", "level": "WARN",
+                             "msg": f"商品评价同步失败: {sync_err}"})
+
             return {
                 "success": True,
                 "orderId": order_id,
                 "status": COMPLETED,
                 "statusName": STATUS_CN[COMPLETED],
                 "rewardPoints": reward_points,
+                "reviewSynced": synced,
                 "logs": logs,
             }
 
