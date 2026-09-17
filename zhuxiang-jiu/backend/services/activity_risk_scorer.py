@@ -49,9 +49,9 @@ class ActivityRiskScorer:
     """09号活动 AI 评分器(第44档案)"""
 
     # 高敏感类型(营销合规红线邻域)
-    SENSITIVE_TYPES = {"lottery": 70.0,
-                       "seckill": 70.0,
-                       "presale": 50.0}
+    SENSITIVE_TYPES: ClassVar[dict] = {"lottery": 70.0,
+                                      "seckill": 70.0,
+                                      "presale": 50.0}
 
     WEIGHTS: ClassVar[dict] = {
         "budget_scale": 0.20,

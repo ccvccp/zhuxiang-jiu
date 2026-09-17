@@ -541,7 +541,7 @@ class ActivityService:
             KeyError: 活动不存在
             ValueError: 类型不符 / 概率非法 / 价值超限
         """
-        from repositories.activity_repository import PRIZE_COUPON, PRIZE_POINTS
+        from repositories.activity_repository import PRIZE_COUPON
         activity = await self.repo.get_activity(activity_id)
         if activity is None:
             raise KeyError(f"活动不存在(activityId={activity_id})")
@@ -615,9 +615,7 @@ class ActivityService:
         import random
         from datetime import datetime as _dt
         from repositories.activity_repository import (
-            PRIZE_POINTS, PRIZE_COUPON, PRIZE_PRODUCT, PRIZE_CASH,
-            PRIZE_BENEFIT, PRIZE_BANQUET_WINE, PRIZE_MASCOT,
-            PRIZE_STATUS_PENDING, PRIZE_STATUS_ISSUED,
+            PRIZE_POINTS, PRIZE_COUPON, PRIZE_BENEFIT, PRIZE_STATUS_PENDING, PRIZE_STATUS_ISSUED,
         )
 
         async with get_lock(f"activity:lottery:{activity_id}:{user_id}"):
