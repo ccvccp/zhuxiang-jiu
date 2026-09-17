@@ -71,6 +71,7 @@ const KbModelPage: React.FC = () => {
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [stats, setStats] = useState<any>(null);
   const loadEntries = async (status = statusFilter) => {
+    if (entriesLoading) return;
     setEntriesLoading(true);
     try {
       const [list, s] = await Promise.all([
@@ -78,6 +79,7 @@ const KbModelPage: React.FC = () => {
         KbModelAPI.stats(),
       ]);
       setEntries(list); setStats(s);
+      Taro.showToast({ title: '已刷新', icon: 'success' });
     } catch (e) {
       Taro.showToast({ title: errMsg(e), icon: 'none' });
     } finally {
@@ -242,7 +244,9 @@ const KbModelPage: React.FC = () => {
         {tab === 'entries' && (
           <View className={styles.section}>
             <View className={styles.cardTitle}>知识条目治理</View>
-            <View className={styles.runBtn} onClick={() => loadEntries()}>刷新列表</View>
+            <View className={styles.runBtn} onClick={() => loadEntries()}>
+              {entriesLoading ? '刷新中…' : '刷新列表'}
+            </View>
             {stats && (
               <View className={styles.resultCard}>
                 <View className={styles.statGrid}>
