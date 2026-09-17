@@ -166,6 +166,23 @@ async def list_ads(
         _handle(e)
 
 
+@router.get("/api/ads/slots", tags=["广告管理模块"])
+async def list_slots(
+    status: str = Query(None, description="按状态筛选"),
+    limit: int = Query(100, ge=1, le=500, description="查询条数"),
+):
+    """查询广告位列表(公开)
+
+    注: 必须注册在 /api/ads/{ad_id} 之前, 否则 "slots" 被当作
+    ad_id 捕获(int 转换失败恒 422)。
+    """
+    try:
+        result = await _service.list_slots(status, limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/ads/{ad_id}", tags=["广告管理模块"])
 async def get_ad(
     ad_id: int,
@@ -327,19 +344,6 @@ async def create_slot(
             daily_estimate_impressions=data.dailyEstimateImpressions,
         )
         return {"success": True, "data": result}
-    except Exception as e:
-        _handle(e)
-
-
-@router.get("/api/ads/slots", tags=["广告管理模块"])
-async def list_slots(
-    status: str = Query(None, description="按状态筛选"),
-    limit: int = Query(100, ge=1, le=500, description="查询条数"),
-):
-    """查询广告位列表(公开)"""
-    try:
-        result = await _service.list_slots(status, limit)
-        return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)
 

@@ -425,6 +425,9 @@ class AdRepository:
         keys = await client.keys(_k("ad", "ad", "*"))
         ads = []
         for key in keys:
+            # 跳过 seq 计数器(值为 int, json 解析后排序 .get 崩溃)
+            if key.endswith(":seq"):
+                continue
             data = await client.get(key)
             if data:
                 a = json.loads(data)
@@ -496,6 +499,9 @@ class AdRepository:
             keys = await client.keys(_k("ad", "placement", "*"))
             placements = []
             for key in keys:
+                # 跳过 seq 计数器(值为 int, json 解析后排序 .get 崩溃)
+                if key.endswith(":seq"):
+                    continue
                 data = await client.get(key)
                 if data:
                     placements.append(json.loads(data))
