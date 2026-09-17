@@ -25,6 +25,8 @@ from datetime import date
 
 import logging
 
+from typing import ClassVar
+
 from core.locks import get_lock
 from core.helpers import ts, bc_hash
 from repositories.trace_repository import (
@@ -924,10 +926,9 @@ class TraceService:
         async with get_lock(f"trace:agent_outbound:{agent_id}"):
             for code in box_codes:
                 box = await self.repo.get_box_by_code(code)
-                if box is None:
-                    if code.startswith(BOX_BOTTOM_PREFIX):
-                        tbc = code.replace(BOX_BOTTOM_PREFIX, BOX_TOP_PREFIX, 1)
-                        box = await self.repo.get_box_by_code(tbc)
+                if box is None and code.startswith(BOX_BOTTOM_PREFIX):
+                    tbc = code.replace(BOX_BOTTOM_PREFIX, BOX_TOP_PREFIX, 1)
+                    box = await self.repo.get_box_by_code(tbc)
                 if box is None:
                     results.append({"boxCode": code, "status": "rejected",
                                     "reason": "箱码不存在"})
@@ -1114,14 +1115,13 @@ class TraceService:
             })
 
         # 2. 积压滞留 / 3. 临期回收
-        now = ts()
         overstock, near_expiry = [], []
         for b in in_stock:
             inbound_at = b.get("inboundAt") or b.get("createdAt") or ""
             if not inbound_at:
                 continue
             try:
-                from datetime import datetime, timedelta
+                from datetime import datetime
                 inbound_dt = datetime.fromisoformat(inbound_at)
                 age_days = (datetime.utcnow() - inbound_dt).days
             except (ValueError, TypeError):
@@ -1169,14 +1169,17 @@ class TraceService:
                             PENALTY_SEVERE, PENALTY_EXTREME)
 
     # 各级返利扣减比例 / 保证金扣减比例
-    PENALTY_REBATE_RATES = {PENALTY_MINOR: 0.0, PENALTY_MODERATE: 0.10,
-                            PENALTY_SEVERE: 0.30, PENALTY_EXTREME: 1.0}
-    PENALTY_DEPOSIT_RATES = {PENALTY_MINOR: 0.0, PENALTY_MODERATE: 0.20,
-                             PENALTY_SEVERE: 0.50, PENALTY_EXTREME: 1.0}
+    PENALTY_REBATE_RATES: ClassVar[dict] = {
+        PENALTY_MINOR: 0.0, PENALTY_MODERATE: 0.10,
+        PENALTY_SEVERE: 0.30, PENALTY_EXTREME: 1.0}
+    PENALTY_DEPOSIT_RATES: ClassVar[dict] = {
+        PENALTY_MINOR: 0.0, PENALTY_MODERATE: 0.20,
+        PENALTY_SEVERE: 0.50, PENALTY_EXTREME: 1.0}
 
     # 保证金默认基准(按代理商等级, 档案未显式设置时初始化)
-    DEFAULT_DEPOSIT_BY_LEVEL = {"S": 100000.0, "A": 60000.0, "B": 40000.0,
-                                "C": 20000.0, "D": 10000.0}
+    DEFAULT_DEPOSIT_BY_LEVEL: ClassVar[dict] = {
+        "S": 100000.0, "A": 60000.0, "B": 40000.0,
+        "C": 20000.0, "D": 10000.0}
 
     # 信用分扣减(信用管理文档: 区门外窜货 -30/次)
     CREDIT_DELTA_PER_PENALTY = -30
