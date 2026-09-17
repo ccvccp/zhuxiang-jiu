@@ -146,7 +146,9 @@ class PromotionService:
             if code_record.get("status") != "active":
                 raise ValueError("推广码已失效")
             inviter_id = code_record["ownerMemberId"]
-            if inviter_id == invitee_member_id:
+            # 类型归一比较: hash 存储的 ownerMemberId 为字符串, 与 int
+            # invitee 直接 == 恒 False 会绕过自绑拦截(E2E 实证)
+            if str(inviter_id) == str(invitee_member_id):
                 raise ValueError("不能绑定自己的推广码")
 
             existing = await self.promo_repo.get_relation(invitee_member_id)
@@ -216,7 +218,8 @@ class PromotionService:
             if not relation:
                 return
             current = relation["inviterMemberId"]
-            if current == invitee_member_id:
+            # 类型归一比较(同自绑拦截: hash 存储为字符串)
+            if str(current) == str(invitee_member_id):
                 raise ValueError("绑定失败: 推广关系成环")
 
     # ============================================================
