@@ -121,8 +121,8 @@ async def create_application(
     _require_member_id(x_member_id)
     try:
         member_id = int(x_member_id)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字") from exc
     try:
         result = await _service.create_application(
             partner_name=data.partnerName, partner_type=data.partnerType,
@@ -147,8 +147,8 @@ async def list_my_applications(
     _require_member_id(x_member_id)
     try:
         member_id = int(x_member_id)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="X-Member-Id 须为数字") from exc
     try:
         result = await _service.list_my_applications(member_id)
         return {"success": True, "data": result, "count": len(result)}
