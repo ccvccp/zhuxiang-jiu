@@ -253,6 +253,49 @@ class TestOrderCreate:
         )
         assert resp.status_code == 401
 
+    async def test_create_missing_unit_price(self, client):
+        """缺陷修复: items 缺 unitPrice 原裸 KeyError→404 无提示,
+        现前置校验 ValueError→409 带行号与字段名"""
+        items = [{
+            "productId": "ZX42-2026L07", "productName": "竹奕42",
+            "quantity": 1,
+        }]
+        resp = await client.post(
+            "/api/order/create",
+            json={"items": items, "address": ADDRESS,
+                  "usePoints": 0, "remark": ""},
+            headers=MEMBER_HEADERS,
+        )
+        assert resp.status_code == 409
+        assert "缺少必填字段 unitPrice" in resp.json()["error"]
+
+    async def test_create_quantity_not_number(self, client):
+        """数量非数字: 原裸 ValueError(int 字面量)/TypeError 冒泡,
+        现友好 409"""
+        items = [{
+            "productId": "ZX42-2026L07", "productName": "竹奕42",
+            "quantity": "abc", "unitPrice": 268.00,
+        }]
+        resp = await client.post(
+            "/api/order/create",
+            json={"items": items, "address": ADDRESS,
+                  "usePoints": 0, "remark": ""},
+            headers=MEMBER_HEADERS,
+        )
+        assert resp.status_code == 409
+        assert "须为数字" in resp.json()["error"]
+
+    async def test_create_empty_items(self, client):
+        """空商品列表: 原可创建 0 元订单(隐藏缺陷), 现 409 拦截"""
+        resp = await client.post(
+            "/api/order/create",
+            json={"items": [], "address": ADDRESS,
+                  "usePoints": 0, "remark": ""},
+            headers=MEMBER_HEADERS,
+        )
+        assert resp.status_code == 409
+        assert "商品列表不能为空" in resp.json()["error"]
+
 
 class TestOrderAgeGate:
     """酒类合规年龄门(P0-1): 未声明拒绝 / 首次声明放行并回写 / 未成年硬拦截"""
@@ -375,6 +418,20 @@ class TestOrderPricePreview:
             headers={"X-Member-Id": "999"},
         )
         assert resp.status_code == 404
+
+    async def test_preview_missing_unit_price(self, client):
+        """缺陷修复: 试算载荷缺 unitPrice 原裸 KeyError, 现友好 409"""
+        items = [{
+            "productId": "ZX42-2026L07", "productName": "竹奕42",
+            "quantity": 1,
+        }]
+        resp = await client.post(
+            "/api/order/price/preview",
+            json={"items": items, "usePoints": 0},
+            headers=MEMBER_HEADERS,
+        )
+        assert resp.status_code == 409
+        assert "缺少必填字段 unitPrice" in resp.json()["error"]
 
 
 # ============================================================

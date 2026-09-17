@@ -76,6 +76,36 @@ POINTS_DISCOUNT_CAP = 0.30     # 积分抵扣上限 30%
 COUPON_THRESHOLD = 1000
 COUPON_DISCOUNT = 50
 
+# 订单行必填字段
+ITEM_REQUIRED_FIELDS = ("productId", "quantity", "unitPrice")
+
+
+def _validate_items(items: list) -> None:
+    """校验订单行必填字段与类型(载荷缺陷时给友好提示, 防裸 KeyError/TypeError)
+
+    E2E 缺陷修复: items 缺 unitPrice 时原直接下标访问冒泡
+    KeyError("'unitPrice'") → 404 语义错误且无提示; 前置校验统一
+    抛 ValueError(带行号与字段名) → 路由层映射 409。
+
+    Raises:
+        ValueError: 商品列表为空 / 行格式错误 / 缺必填字段 / 数量单价非数字
+    """
+    if not isinstance(items, list) or not items:
+        raise ValueError("商品列表不能为空")
+    for idx, item in enumerate(items, 1):
+        if not isinstance(item, dict):
+            raise ValueError(f"第 {idx} 个商品行格式错误(须为对象)")
+        for field in ITEM_REQUIRED_FIELDS:
+            if field not in item or item[field] is None:
+                raise ValueError(f"第 {idx} 个商品行缺少必填字段 {field}")
+        try:
+            int(item["quantity"])
+            float(item["unitPrice"])
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"第 {idx} 个商品行 quantity/unitPrice 须为数字"
+            ) from None
+
 
 def _gen_order_id() -> str:
     """生成订单号: RT + 时间戳 + 随机数"""
@@ -161,6 +191,7 @@ class OrderService:
     async def preview_price(self, member_id, items: list,
                             use_points: int = 0) -> dict:
         """价格试算(不创建订单,不扣减库存/积分)"""
+        _validate_items(items)
         member = await self.member_repo.get_by_id(member_id)
         if not member:
             raise KeyError(f"会员 {member_id} 不存在")
@@ -200,8 +231,9 @@ class OrderService:
 
         Raises:
             KeyError: 会员不存在
-            ValueError: 商品不存在/库存不足/积分不足/年龄校验失败
+            ValueError: 商品行字段缺陷/商品不存在/库存不足/积分不足/年龄校验失败
         """
+        _validate_items(items)
         async with get_lock(f"member:{member_id}"):
             # 1. 校验会员
             member = await self.member_repo.get_by_id(member_id)
