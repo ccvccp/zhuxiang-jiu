@@ -455,6 +455,9 @@ class RoleRepository:
             client = await get_redis_client()
             keys = await client.keys(_k("role", "dispatch", "*"))
             for key in keys:
+                # 跳过 seq 计数器(值为 int, json 解析后 .get 崩溃)
+                if key.endswith(":seq"):
+                    continue
                 data = await client.get(key)
                 if data:
                     d = json.loads(data)
@@ -474,6 +477,9 @@ class RoleRepository:
             keys = await client.keys(_k("role", "dispatch", "*"))
             dispatches = []
             for key in keys:
+                # 跳过 seq 计数器(值为 int, json 解析后 .get 崩溃)
+                if key.endswith(":seq"):
+                    continue
                 data = await client.get(key)
                 if data:
                     dispatches.append(json.loads(data))

@@ -448,19 +448,31 @@ class ChatRepository:
         """P4 性能修复: 索引集反查(替代 KEYS * 全量扫描)
 
         索引集为空时(存量数据未建索引)回退一次全量扫描并回填索引。
+        修复: ①回填/遍历统一裸会话ID(旧版回填全键致 _k 二次加前缀
+        查询落空——存量会话管理端不可见); ②跳过 :seq 计数器
+        (值为 int, json 解析后 .get 崩溃, 对齐 traffic 模块教训);
+        ③兼容历史全键成员(strip 前缀自愈)。
         """
         client = await get_redis_client()
+        prefix = _k("chat", "session", "")
         keys = await client.smembers(_k("chat", "session_index"))
         if not keys:
             # 存量兜底: 一次 KEYS 扫描 + 回填索引(此后不再全量扫描)
-            keys = await client.keys(_k("chat", "session", "*"))
-            for key in keys:
-                await client.sadd(
-                    _k("chat", "session_index"),
-                    key.decode() if isinstance(key, bytes) else key)
+            for key in await client.keys(_k("chat", "session", "*")):
+                k = key.decode() if isinstance(key, bytes) else key
+                if k.endswith(":seq"):
+                    continue  # seq 计数器不入索引
+                await client.sadd(_k("chat", "session_index"),
+                                  k[len(prefix):])
+            keys = await client.smembers(_k("chat", "session_index"))
         sessions = []
         for key in keys:
-            session_id = (key.decode() if isinstance(key, bytes) else key)
+            member = key.decode() if isinstance(key, bytes) else key
+            if member.endswith(":seq"):
+                continue  # 全键式 seq 成员(旧回填遗留)
+            # 兼容历史全键成员(strip 前缀自愈), 新成员为裸 ID
+            session_id = (member[len(prefix):]
+                          if member.startswith(prefix) else member)
             data = await client.get(_k("chat", "session", session_id))
             if not data:
                 continue
@@ -551,6 +563,8 @@ class ChatRepository:
     async def _redis_delete_knowledge(self, knowledge_id: int) -> None:
         client = await get_redis_client()
         await client.delete(_k("chat", "knowledge", knowledge_id))
+        # 同步清理列表索引(防悬挂条目随删除无限累积)
+        await client.lrem(_k("chat", "knowledge_list"), 0, knowledge_id)
 
     async def _redis_list_knowledge(self, category: str = None, status: str = None,
                                      limit: int = 100) -> list[dict]:
