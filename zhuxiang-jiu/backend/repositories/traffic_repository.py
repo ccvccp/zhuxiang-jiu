@@ -782,7 +782,8 @@ class TrafficRepository:
         keys = await client.keys(_k("traffic", "promoter", "*"))
         promoters = []
         for key in keys:
-            if "promoter_by_code" in key:
+            # promoter:seq 为自增计数器(值为 int), 跳过防 json 解析后 .get 崩溃
+            if "promoter_by_code" in key or key.endswith(":seq"):
                 continue
             data = await client.get(key)
             if data:
