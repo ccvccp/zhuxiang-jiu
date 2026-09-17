@@ -13,6 +13,7 @@
 """
 
 import logging
+import contextlib
 import os
 import tempfile
 import uuid
@@ -20,7 +21,7 @@ from datetime import datetime, UTC
 
 from repositories.hub_repository import (
     HubRepository, classify_intent_rule, ROLE_PANELS, HUB_ROLES,
-    ROLE_GUEST, INTENT_CHAT_GENERAL, INTENTS,
+    ROLE_GUEST, INTENT_CHAT_GENERAL,
 )
 
 logger = logging.getLogger("hub_service")
@@ -104,15 +105,13 @@ class HubService:
                 tmp_path = f.name
             from services.llm_client import provider_client
             text = provider_client.transcribe(tmp_path)
-        except Exception as exc:  # noqa: BLE001 降级链兜底
+        except Exception as exc:
             logger.warning("hub_asr_exception: %s", exc)
             text = None
         finally:
             if tmp_path and os.path.exists(tmp_path):
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
-                except OSError:
-                    pass
 
         if not text:
             from services.llm_client import llm_enabled
@@ -133,7 +132,7 @@ class HubService:
         intent = classify_intent_rule(text)
         try:
             count = await self.repo.bump_intent(intent)
-        except Exception as exc:  # noqa: BLE001 统计失败不影响主链路
+        except Exception as exc:
             logger.warning("hub_intent_stat_failed: %s", exc)
             count = 0
         return {"intent": intent,
@@ -157,7 +156,7 @@ class HubService:
         try:
             from services.llm_client import llm_enabled
             return llm_enabled()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
 
     # ============================================================

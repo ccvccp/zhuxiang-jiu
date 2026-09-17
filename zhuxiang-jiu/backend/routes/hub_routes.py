@@ -265,7 +265,7 @@ async def retrigger_learning(
                                 detail=f"未知评分器: {req.scorerId}")
     try:
         result = await hub_service.retrigger_learning(req.scorerId)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _handle(exc)
     return {"success": True, **result}
 
@@ -298,7 +298,7 @@ async def approve_promotion(scorer_id: str,
     _require_admin(x_role)
     try:
         return await hub_service.approve_promotion(scorer_id)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _handle(exc)
 
 
@@ -309,7 +309,7 @@ async def reject_promotion(scorer_id: str, req: RejectRequest,
     _require_admin(x_role)
     try:
         return await hub_service.reject_promotion(scorer_id, req.reason)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _handle(exc)
 
 

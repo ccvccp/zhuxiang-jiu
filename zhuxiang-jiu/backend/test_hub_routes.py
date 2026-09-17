@@ -259,7 +259,7 @@ async def test_chat_voice_compat():
                                      age_confirmed=True)
         sid = s["sessionId"] if isinstance(s, dict) else s.sessionId
         record("chat 会话建立(voice 容器)", bool(sid))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         record("chat 会话建立(voice 容器)", False, str(exc))
 
 
@@ -450,9 +450,12 @@ async def test_learning_retrigger():
     """15. P2 学习周期管理: 单评分器 / 全量(反馈不足跳过) / 未知 404"""
     svc = HubService()
     # 15a. 全量: 无反馈 → 全部 skipped(非错误)
+    # 注: 评分器注册表随模块上线动态增长(21→64+), 断言动态化
     r = await svc.retrigger_learning()
-    record("重跑: 全量 total=19", r["total"] == 21, f"got {r['total']}")
-    record("重跑: 无反馈全 skipped", r["learned"] == 0 and r["skipped"] == 21)
+    record("重跑: 全量 total>=21(注册表动态)",
+           r["total"] >= 21, f"got {r['total']}")
+    record("重跑: 无反馈全 skipped",
+           r["learned"] == 0 and r["skipped"] == r["total"])
     record("重跑: 结果含状态字段", all("status" in x for x in r["results"]))
     # 15b. 单评分器
     r = await svc.retrigger_learning("order_risk")
@@ -489,7 +492,7 @@ def test_http_p2():
                     headers={"X-Role": "admin"})
     body = r.json()
     record("HTTP P2 重跑全量", r.status_code == 200 and body["success"] is True
-           and body["total"] == 21, f"{r.status_code} {body}")
+           and body["total"] >= 21, f"{r.status_code} total={body.get('total')}")
     # 未知评分器 → 404
     r = client.post("/api/hub/ops/learning/retrigger",
                     json={"scorerId": "not-exist"}, headers={"X-Role": "admin"})
@@ -549,7 +552,6 @@ async def test_media():
     r = await svc.save_media("voice", b"fake-webm-audio", "webm")
     record("媒体: 语音上传成功", r["success"] is True
            and r["url"].startswith("/media/voice/"), f"got {r}")
-    voice_url = r.get("url")
     # 17b. 图片正常上传
     r = await svc.save_media("image", b"fake-jpeg-data", ".jpg")
     record("媒体: 图片上传成功", r["success"] is True
@@ -617,7 +619,8 @@ async def test_usage():
            and day["errors"] == 1, f"got {day}")
     record("用量: 成本为正", day and day["cost"] > 0)
     record("用量: 汇总口径一致", ov["totals"]["calls"] >= 6)
-    # 18c. metrics 埋点联动(llm_timer)
+    # 18c. metrics 埋点联动(llm_timer)——core.metrics 用本地时间日期键,
+    # 与 UTC 日期在凌晨/早晨错配(时间依赖修正, 须同基取键)
     from core.metrics import llm_timer
     with llm_timer("chat"):
         pass
@@ -627,8 +630,12 @@ async def test_usage():
     except RuntimeError:
         pass
     m = llm_daily_counts()
-    record("用量: llm_timer 日计数", m.get(today, {}).get("chat", {}).get("ok", 0) >= 1
-           and m.get(today, {}).get("embed", {}).get("error", 0) >= 1)
+    import time as _time
+    local_today = _time.strftime("%Y%m%d")
+    record("用量: llm_timer 日计数",
+           m.get(local_today, {}).get("chat", {}).get("ok", 0) >= 1
+           and m.get(local_today, {}).get("embed", {}).get("error", 0) >= 1,
+           f"local={local_today} utc={today} keys={sorted(m.keys())}")
     reset_metrics()
 
 
