@@ -39,7 +39,7 @@ const AgreementPage: React.FC = () => {
           <View className={styles.list}>
             <View className={styles.listItem}>1. 订单结算：9 阶段事务（预检→订单→库存→券→积分→分润→支付→提交）</View>
             <View className={styles.listItem}>2. 发货方路由：认领区域→该代理商发货+售后；未认领区域→厂家直供</View>
-            <View className={styles.listItem}>3. 运费规则：购买两瓶免运费，否则 ¥12 运费</View>
+            <View className={styles.listItem}>3. 运费规则：订单实付满 ¥99 免运费，未满收取 ¥10 运费</View>
             <View className={styles.listItem}>4. 厂家→代理商服务费：订单金额 5% 同品分润（认领区域）</View>
           </View>
         </View>

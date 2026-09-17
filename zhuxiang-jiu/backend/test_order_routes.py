@@ -296,6 +296,32 @@ class TestOrderCreate:
         assert resp.status_code == 409
         assert "商品列表不能为空" in resp.json()["error"]
 
+    async def test_create_stock_consistency_list_detail(self, client):
+        """库存口径回归: 下单前后列表与详情 stock 同刻一致
+
+        E2E 曾观察"列表/详情 stock 口径差 N 件", 经 mock+生产双证为
+        时序观察误差(预扣发生在两次查询之间); 固化同刻一致性断言,
+        防止列表/详情两条库存注入路径将来分叉。
+        """
+        async def _two_stocks():
+            detail = (await client.get("/api/product/ZX42-2026L07")).json()
+            lst = (await client.get(
+                "/api/product/list",
+                params={"page": 1, "pageSize": 50},
+            )).json()
+            p = next(x for x in lst["products"]
+                     if x["product_id"] == "ZX42-2026L07")
+            return detail["product"]["stock"], p["stock"]
+
+        d0, l0 = await _two_stocks()
+        assert d0 == l0 == 500
+
+        await _create(client)  # 预扣 2 件
+
+        d1, l1 = await _two_stocks()
+        assert d1 == l1 == 498
+        assert d1 - d0 == l1 - l0 == -2
+
 
 class TestOrderAgeGate:
     """酒类合规年龄门(P0-1): 未声明拒绝 / 首次声明放行并回写 / 未成年硬拦截"""

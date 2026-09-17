@@ -110,6 +110,21 @@ export const OrderAPI = {
     });
   },
 
+  /** 价格试算(不落库不扣库存, 返回 priceDetail 含运费/实付) */
+  async pricePreview(params: {
+    items: OrderItemInput[];
+    usePoints?: number;
+  }): Promise<any> {
+    return await request<any>({
+      url: '/api/order/price/preview',
+      method: 'POST',
+      data: {
+        items: params.items,
+        usePoints: params.usePoints || 0,
+      },
+    });
+  },
+
   /** 我的订单(可按状态筛选, 返回类型化列表) */
   async myList(status?: string): Promise<OrderVO[]> {
     const qs = status ? `?status=${status}` : '';

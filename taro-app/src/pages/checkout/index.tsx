@@ -25,8 +25,10 @@ const CheckoutPage: React.FC = () => {
   const productName = decodeURIComponent(router.params.productName || '竹香酒');
   const price = Number(router.params.price || '0');
   const qty = Number(router.params.qty || '1') || 1;
+  const [priceDetail, setPriceDetail] = useState<any>(null); // 后端实时试算(含运费)
+  const [memberLevel, setMemberLevel] = useState<any>(null); // 试算回传会员等级
 
-  // 初始载入默认地址(登录态)
+  // 初始载入默认地址(登录态) + 价格试算(实时运费/会员折扣)
   useEffect(() => {
     (async () => {
       if (!isLoggedIn()) return;
@@ -36,6 +38,18 @@ const CheckoutPage: React.FC = () => {
         if (def) setAddress(def);
       } catch (e) {
         console.warn('[checkout] 默认地址加载失败:', e);
+      }
+      try {
+        const res = await OrderAPI.pricePreview({
+          items: [{ productId: String(productId), productName,
+                    quantity: qty, unitPrice: price }],
+        });
+        if (res && res.priceDetail) {
+          setPriceDetail(res.priceDetail);
+          setMemberLevel(res.memberLevel);
+        }
+      } catch (e) {
+        console.warn('[checkout] 价格试算失败, 回落本地估算:', e);
       }
     })();
   }, []);
@@ -61,10 +75,18 @@ const CheckoutPage: React.FC = () => {
     Taro.navigateTo({ url: '/pages/address/index?mode=select' });
   };
 
-  // 价格估算(L5会员)
+  // 本地回落估算(试算接口不可用时; 以下单结算为准)
   const originalTotal = price * qty;
-  const memberDiscount = Math.round(originalTotal * 0.15 * 100) / 100;
-  const finalAmount = Math.round((originalTotal - memberDiscount) * 100) / 100;
+  const estDiscount = Math.round(originalTotal * 0.15 * 100) / 100;
+  const estShipping = (originalTotal - estDiscount) >= 99 ? 0 : 10; // 满99免运费
+  const finalAmount = Math.round((originalTotal - estDiscount + estShipping) * 100) / 100;
+  // 展示口径: 优先后端实时试算(真实会员等级+运费), 回落本地估算
+  const pd = priceDetail;
+  const showGoodsTotal = pd ? pd.goodsTotal : originalTotal;
+  const showDiscount = pd ? Math.abs(pd.memberDiscount) : estDiscount;
+  const showShipping = pd ? pd.shippingFee : estShipping;
+  const showActual = pd ? pd.actualAmount : finalAmount;
+  const discountLabel = pd ? `会员折扣(L${memberLevel})` : '会员折扣(估算)';
 
   const handleSubmit = async () => {
     // 《个人信息保护法》第14条: 收集个人信息前需取得用户同意
@@ -250,18 +272,24 @@ const CheckoutPage: React.FC = () => {
         </View>
       </View>
       <View className={styles.card}>
-        <View className={styles.cardTitle}>价格明细</View>
+        <View className={styles.cardTitle}>价格明细{pd ? '' : '(估算, 以下单结算为准)'}</View>
         <View className={styles.row}>
           <Text className={styles.rowLabel}>原价</Text>
-          <Text className={styles.rowValue}>¥{originalTotal}</Text>
+          <Text className={styles.rowValue}>¥{showGoodsTotal}</Text>
         </View>
         <View className={styles.row}>
-          <Text className={styles.rowLabel}>L5会员折扣(15%)</Text>
-          <Text className={styles.rowValue}>-¥{memberDiscount}</Text>
+          <Text className={styles.rowLabel}>{discountLabel}</Text>
+          <Text className={styles.rowValue}>-¥{showDiscount}</Text>
+        </View>
+        <View className={styles.row}>
+          <Text className={styles.rowLabel}>运费(满¥99免)</Text>
+          <Text className={styles.rowValue}>
+            {showShipping === 0 ? '免运费' : `¥${showShipping}`}
+          </Text>
         </View>
         <View className={styles.row}>
           <Text className={styles.rowLabel}>实付</Text>
-          <Text className={styles.priceHighlight}>¥{finalAmount}</Text>
+          <Text className={styles.priceHighlight}>¥{showActual}</Text>
         </View>
       </View>
       <View className={styles.card}>

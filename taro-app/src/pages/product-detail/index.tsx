@@ -127,6 +127,7 @@ const ProductDetailPage: React.FC = () => {
           </View>
           <View className={styles.productName}>{product.name}</View>
           <View className={styles.stockInfo}>{stockLabel}</View>
+          <View className={styles.shippingTip}>🚚 满 ¥99 免运费 · 未满加 ¥10 运费</View>
         </View>
 
         {/* 规格参数 */}

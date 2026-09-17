@@ -84,6 +84,13 @@
   color: $color-text-tertiary;
 }
 
+// 运费规则提示(对齐后端: 满99免运费/未满10元)
+.shippingTip {
+  margin-top: 4px;
+  font-size: $font-size-sm;
+  color: $color-text-tertiary;
+}
+
 // 规格参数
 .specSection {
   background: $color-bg-card;
