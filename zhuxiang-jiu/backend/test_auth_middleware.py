@@ -410,6 +410,18 @@ class TestStrictMode:
             record("test_25_strict_legacy_header_rejected",
                    status == 401 and not reached,
                    f"status={status}, reached={reached}")
+
+            # test 25b: strict 下第三方回调端点放行(微信/支付宝/物流
+            # 服务器回调无本站 JWT, 安全性由自有验签保障)
+            for cb_path in ("/api/payment/callback/pay",
+                            "/api/payment/callback/refund",
+                            "/api/payment/callback/payout",
+                            "/api/logistics/callback/track"):
+                status, _, reached = await invoke(
+                    mw, make_scope("POST", cb_path))
+                record(f"test_25b_strict_callback_allowed({cb_path})",
+                       reached and status == 200,
+                       f"reached={reached}, status={status}")
         finally:
             os.environ["AUTH_MODE"] = "compat"
 

@@ -80,6 +80,13 @@ PUBLIC_EXACT = {
     # 39号 P1: 生物凭证挑战/验证(登录前, 凭一次性 challenge)
     "/api/entry/bio/challenge",
     "/api/entry/bio/verify",
+    # 第三方服务器回调(微信/支付宝/物流平台服务器发起, 无本站 JWT;
+    # 安全性由各回调自有验签保障: 微信APIv3 / 支付宝RSA2 /
+    # 物流渠道签名, 详见 payment_routes._verify_callback 族)
+    "/api/payment/callback/pay",      # 支付回调(资金链路)
+    "/api/payment/callback/refund",   # 退款回调
+    "/api/payment/callback/payout",   # 付款回调
+    "/api/logistics/callback/track",  # 物流轨迹回调
     # 健康检查(Docker healthcheck / K8s 探针)
     "/api/decision/health",
     "/api/monitor/health",
