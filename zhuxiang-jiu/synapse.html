@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<!--
+    synapse.html · 76号·织智 Synapse-Weave C端织造工作台(自包含, 零外部依赖)
+    ============================================================
+    部署: 生产 dist 根 /var/www/zxjiu/dist/synapse.html(nginx try_files 直 serve)
+    定位: 织智品牌内容织造入口(URL 直达 https://zxjiu.com/synapse.html)
+    主题: 织智品牌色彩系统(文档《品牌资产交付包》)——
+          经线/逻辑 #0F4C81 深邃蓝 × 纬线/温度 #E6A85C 匠人金 × 宣纸白 #F8F9FA
+    数据源:
+        游客(公开白名单 GET): /api/synapse/persona 人格经线 +
+            /api/synapse/router/rules 经纬规则 + /api/synapse/diary 织智日记
+        登录(JWT): POST /api/synapse/weave 织造 + /api/synapse/hotspot/rewrite
+            热点重织 + /api/synapse/feedback 反馈
+    鉴权: 精简 JWT 链——login → localStorage 'zhuxiang.auth' →
+          apiFetch(401 → refresh → retry 一次自愈)
+    呈现: 织造结果含 Meta-Router 权重可视化(经线蓝/纬线金双色条) +
+          双维评分徽标 + PDS + 交叉验证状态
+    本地调试: synapse.html?api=http://localhost:8001 覆盖 API base。
+    ============================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0F4C81">
+<title>织智 Synapse-Weave · 品牌内容织造 - 竹香酒</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+            "Helvetica Neue", "Microsoft YaHei", sans-serif;
+        background: #F8F9FA; color: #2b3a49; line-height: 1.65;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 0 14px 40px; }
+
+    /* 顶栏(经线蓝) */
+    .topbar {
+        position: sticky; top: 0; z-index: 20;
+        background: linear-gradient(135deg, #0F4C81, #0a3560);
+        color: #fff; padding: 12px 16px;
+        display: flex; align-items: center; justify-content: space-between;
+        box-shadow: 0 2px 8px rgba(15,76,129,.25);
+    }
+    .brand { font-size: 17px; font-weight: 600; letter-spacing: 1px; }
+    .brand small { font-weight: 400; opacity: .75; font-size: 11px; display: block; letter-spacing: 0; }
+    .brand .gold { color: #E6A85C; }
+    .auth-box { text-align: right; }
+    .btn {
+        border: none; border-radius: 6px; cursor: pointer; font-size: 13px;
+        padding: 7px 14px; background: rgba(255,255,255,.16); color: #fff;
+    }
+    .btn:active { opacity: .8; }
+    .btn.primary { background: #0F4C81; color: #fff; }
+    .btn.gold { background: #E6A85C; color: #3d2b12; }
+    .btn.ghost { background: #fff; color: #0F4C81; border: 1px solid #c8d6e4; }
+    .btn.mini { padding: 4px 10px; font-size: 11px; border-radius: 5px; }
+    .user-chip { font-size: 12px; opacity: .9; margin-bottom: 4px; }
+
+    /* hero */
+    .hero {
+        background: #fff; border-radius: 12px; margin: 14px 0;
+        padding: 18px 16px; box-shadow: 0 1px 4px rgba(15,76,129,.07);
+    }
+    .hero h1 { font-size: 18px; color: #0a3560; margin-bottom: 6px; }
+    .hero p { font-size: 12.5px; color: #5b6b7c; }
+    .hero .anchors { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag {
+        display: inline-block; font-size: 10.5px; border-radius: 4px;
+        padding: 2px 8px;
+    }
+    .tag.warp { background: #e8eff6; color: #0F4C81; }
+    .tag.weft { background: #faf0e0; color: #9c6f2e; }
+
+    /* 织造区 */
+    .weave-card {
+        background: #fff; border-radius: 12px; padding: 16px;
+        box-shadow: 0 1px 4px rgba(15,76,129,.07); margin-bottom: 14px;
+    }
+    .weave-card h2 { font-size: 15px; color: #0a3560; margin-bottom: 10px; }
+    .field { margin-bottom: 10px; }
+    .field label { font-size: 12px; color: #5b6b7c; display: block; margin-bottom: 4px; }
+    .field input, .field textarea, .field select {
+        width: 100%; border: 1px solid #c8d6e4; border-radius: 8px;
+        padding: 10px 12px; font-size: 14px; outline: none;
+        background: #fff; font-family: inherit;
+    }
+    .field input:focus, .field textarea:focus { border-color: #0F4C81; }
+    .field textarea { resize: vertical; min-height: 64px; }
+    .login-hint { font-size: 12.5px; color: #8a97a5; margin-top: 10px; }
+    .login-hint a { color: #0F4C81; cursor: pointer; text-decoration: underline; }
+
+    /* 织造结果流 */
+    .msg { margin: 12px 0; }
+    .msg .who { font-size: 11px; color: #8a97a5; margin-bottom: 3px; }
+    .bubble { border-radius: 10px; padding: 11px 13px; font-size: 13.5px; }
+    .bubble.user { background: #0F4C81; color: #fff; margin-left: 15%; }
+    .bubble.bot { background: #fff; box-shadow: 0 1px 3px rgba(15,76,129,.08); margin-right: 4%; }
+    .bubble .cites { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .bubble .meta { margin-top: 6px; font-size: 10.5px; color: #9aa7b5; }
+
+    /* 权重可视化(经纬双色条) */
+    .wbar { margin-top: 9px; }
+    .wbar .labels {
+        display: flex; justify-content: space-between; font-size: 10px;
+        color: #8a97a5; margin-bottom: 3px;
+    }
+    .wbar .track { display: flex; height: 8px; border-radius: 4px; overflow: hidden; }
+    .wbar .warp-bar { background: #0F4C81; }
+    .wbar .weft-bar { background: #E6A85C; }
+
+    .route-pill {
+        display: inline-block; font-size: 10px; border-radius: 8px;
+        padding: 1px 8px; margin-bottom: 6px; font-weight: 600;
+    }
+    .route-pill.reasoning { background: #e8eff6; color: #0F4C81; }
+    .route-pill.empathy { background: #faf0e0; color: #9c6f2e; }
+    .route-pill.creative { background: #eef0e8; color: #5a7040; }
+    .route-pill.compliance { background: #f3e8e8; color: #a05252; }
+    .route-pill.general { background: #eceef0; color: #5b6b7c; }
+    .score-row { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .score-chip {
+        font-size: 10px; border-radius: 3px; padding: 1px 6px;
+        background: #f0f4f8; color: #3a5a7c;
+    }
+    .score-chip.warn { background: #fff4e0; color: #9c6f2e; }
+    .score-chip.fail { background: #fdeaea; color: #c0392b; }
+    .fb-row { margin-top: 9px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .thinking { color: #8a97a5; font-size: 12px; padding: 6px 2px; }
+
+    /* 游客面板 */
+    .sec-title {
+        font-size: 15px; color: #0a3560; margin: 20px 0 10px;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .sec-title:before { content: ""; width: 4px; height: 16px;
+        background: #0F4C81; border-radius: 2px; display: inline-block; }
+    .panel {
+        background: #fff; border-radius: 10px; margin-bottom: 10px;
+        box-shadow: 0 1px 3px rgba(15,76,129,.06); padding: 14px;
+    }
+    .panel h4 { font-size: 13.5px; color: #0a3560; margin-bottom: 6px; }
+    .panel p { font-size: 12.5px; color: #4c5a68; }
+    .rules-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    .rules-table td, .rules-table th {
+        padding: 5px 6px; border-bottom: 1px solid #eef2f6; text-align: left;
+    }
+    .rules-table th { color: #8a97a5; font-weight: 600; }
+    .diary-box { font-size: 12.5px; color: #4c5a68; white-space: pre-line; }
+
+    /* 登录抽屉 */
+    .drawer-mask {
+        display: none; position: fixed; inset: 0; z-index: 30;
+        background: rgba(10,26,43,.45);
+    }
+    .drawer-mask.show { display: block; }
+    .drawer {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 31;
+        background: #fff; border-radius: 16px 16px 0 0; padding: 20px 18px 28px;
+        display: none; max-width: 680px; margin: 0 auto;
+    }
+    .drawer.show { display: block; }
+    .drawer h3 { font-size: 16px; color: #0a3560; margin-bottom: 4px; }
+    .drawer .sub { font-size: 12px; color: #8a97a5; margin-bottom: 14px; }
+    .form-err { color: #c0392b; font-size: 12px; min-height: 16px; margin-bottom: 6px; }
+
+    footer {
+        text-align: center; font-size: 11px; color: #9aa7b5;
+        padding: 18px 10px 8px; line-height: 1.8;
+    }
+    footer a { color: #0F4C81; text-decoration: none; }
+    .toast {
+        position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%);
+        background: rgba(10,53,96,.92); color: #fff; font-size: 12.5px;
+        border-radius: 18px; padding: 8px 18px; z-index: 40;
+        opacity: 0; transition: opacity .25s; pointer-events: none;
+        max-width: 80%;
+    }
+    .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <div class="brand">织智 <span class="gold">Synapse-Weave</span><small>品牌内容织造 · 经纬交织</small></div>
+    <div class="auth-box" id="authBox"></div>
+</div>
+
+<div class="wrap">
+
+    <div class="hero">
+        <h1>双师织机 · 为你织一段品牌内容</h1>
+        <p>经线是逻辑（要点结构），纬线是温度（竹香匠人人设）。织智依据你的任务自动配比经纬权重——推理分析偏蓝，情感共鸣偏金，创意表达蓝金交织。</p>
+        <div class="anchors">
+            <span class="tag warp">经线 · 逻辑 #0F4C81</span>
+            <span class="tag weft">纬线 · 温度 #E6A85C</span>
+            <span class="tag weft">人设 · 竹香匠人</span>
+        </div>
+    </div>
+
+    <!-- 织造区 -->
+    <div class="weave-card">
+        <h2>织机织造</h2>
+        <div class="field">
+            <label>任务（含关键词供路由判定：如"分析/安慰/文案创作"）</label>
+            <input id="taskInput" maxlength="2000"
+                placeholder="如：用竹酒工艺比喻人生写一段品牌文案">
+        </div>
+        <div class="field">
+            <label>要点（可选，每行一条——缺省自动从任务提取）</label>
+            <textarea id="pointsInput" maxlength="2000"
+                placeholder="竹有节&#10;人有度&#10;慢工出细活"></textarea>
+        </div>
+        <div class="field">
+            <label>关联热点（可选——热点共生织造）</label>
+            <select id="hotspotSelect"><option value="">不关联</option></select>
+        </div>
+        <button class="btn primary" style="width:100%;padding:11px" id="weaveBtn"
+            onclick="sendWeave()">织 造</button>
+        <div class="login-hint" id="loginHint"></div>
+        <div id="weaveFlow"></div>
+    </div>
+
+    <!-- 游客面: 人格经线 -->
+    <div class="sec-title">人格经线 · 品牌主轴</div>
+    <div id="personaPanel"><div class="panel"><p>加载中…</p></div></div>
+
+    <!-- 游客面: 经纬规则 -->
+    <div class="sec-title">Meta-Router · 经纬权重规则</div>
+    <div class="panel" id="rulesPanel">
+        <table class="rules-table">
+            <thead><tr><th>任务域</th><th>经线(逻辑)</th><th>纬线(温度)</th></tr></thead>
+            <tbody id="rulesRows"><tr><td colspan="3">加载中…</td></tr></tbody>
+        </table>
+    </div>
+
+    <!-- 游客面: 织智日记 -->
+    <div class="sec-title">织智日记 · 品牌语言</div>
+    <div class="panel"><div class="diary-box" id="diaryBox">加载中…</div></div>
+
+    <footer>
+        织智为确定性织造（LLM 禁入守门与护栏）· 红线漏网护栏自动暂停 ·
+        人格经线/知识结晶永不自主<br>
+        <a href="zyh.html">🎋 竹酒知识问答（竹韵·智衡）</a> ·
+        健康警示：过量饮酒有害健康
+    </footer>
+</div>
+
+<!-- 登录抽屉 -->
+<div class="drawer-mask" id="drawerMask" onclick="toggleDrawer(false)"></div>
+<div class="drawer" id="loginDrawer">
+    <h3>登录解锁织造</h3>
+    <div class="sub">会员账号登录后可使用织机织造与热点重织</div>
+    <div class="field">
+        <label>手机号</label>
+        <input id="phoneInput" type="tel" maxlength="11" placeholder="13800000001">
+    </div>
+    <div class="field">
+        <label>密码</label>
+        <input id="pwdInput" type="password" placeholder="登录密码">
+    </div>
+    <div class="form-err" id="formErr"></div>
+    <button class="btn primary" style="width:100%;padding:11px" onclick="doLogin()">登 录</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+    'use strict';
+
+    /* ---------- API base(同域反代; ?api= 覆盖供本地调试) ---------- */
+    var API = (function () {
+        var m = location.search.match(/[?&]api=([^&]+)/);
+        if (m) { return decodeURIComponent(m[1]).replace(/\/+$/, ''); }
+        return '';
+    })();
+
+    var AUTH_KEY = 'zhuxiang.auth';
+
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                     '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function toast(msg) {
+        var t = $('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(function () { t.classList.remove('show'); }, 2200);
+    }
+
+    /* ---------- 会话(精简 JWT 链——同 zyh.html) ---------- */
+
+    function session() {
+        try { return JSON.parse(localStorage.getItem(AUTH_KEY)) || null; }
+        catch (e) { return null; }
+    }
+    function saveSession(body) {
+        localStorage.setItem(AUTH_KEY, JSON.stringify({
+            token: body.accessToken,
+            refreshToken: body.refreshToken || null,
+            memberId: body.memberId || null,
+            name: body.name || body.nickname || null,
+            savedAt: Date.now(),
+        }));
+    }
+    function clearSession() { localStorage.removeItem(AUTH_KEY); }
+
+    async function apiFetch(path, options) {
+        var s = session();
+        var opts = options || {};
+        if (s && s.token) {
+            opts.headers = Object.assign({}, opts.headers, {
+                'Authorization': 'Bearer ' + s.token,
+            });
+        }
+        var res = await fetch(API + path, opts);
+        if (res.status === 401 && s && s.refreshToken && !opts._retried) {
+            var ok = await refresh();
+            if (ok) {
+                opts._retried = true;
+                return apiFetch(path, opts);
+            }
+            clearSession();
+            renderAuth();
+            throw new Error('登录已过期，请重新登录');
+        }
+        return res;
+    }
+
+    async function refresh() {
+        var s = session();
+        if (!s || !s.refreshToken) { return false; }
+        try {
+            var res = await fetch(API + '/api/auth/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken: s.refreshToken }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.accessToken) {
+                saveSession(body);
+                return true;
+            }
+        } catch (e) { /* 网络异常按失败处理 */ }
+        return false;
+    }
+
+    /* ---------- 顶栏渲染 ---------- */
+
+    function renderAuth() {
+        var s = session();
+        var box = $('authBox');
+        var hint = $('loginHint');
+        if (s && s.token) {
+            box.innerHTML = '<div class="user-chip">会员 '
+                + esc(s.name || (s.memberId != null ? '#' + s.memberId : ''))
+                + '</div><button class="btn" onclick="doLogout()">退出</button>';
+            hint.innerHTML = '已登录——织造经守门交叉验证'
+                + '（红线词/事实保真/人设一致性）产出。';
+        } else {
+            box.innerHTML = '<button class="btn" onclick="toggleDrawer(true)">登录</button>';
+            hint.innerHTML = '游客可浏览人格经线/经纬规则/织智日记；'
+                + '<a onclick="toggleDrawer(true)">登录</a> 后解锁织造。';
+        }
+    }
+
+    window.toggleDrawer = function (show) {
+        $('loginDrawer').classList.toggle('show', show);
+        $('drawerMask').classList.toggle('show', show);
+        if (!show) { $('formErr').textContent = ''; }
+    };
+
+    window.doLogin = async function () {
+        var phone = $('phoneInput').value.trim();
+        var pwd = $('pwdInput').value;
+        if (!/^1\d{10}$/.test(phone)) {
+            $('formErr').textContent = '请输入 11 位手机号'; return;
+        }
+        if (!pwd) { $('formErr').textContent = '请输入密码'; return; }
+        try {
+            var res = await fetch(API + '/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: phone, password: pwd }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.accessToken) {
+                saveSession(body);
+                toggleDrawer(false);
+                renderAuth();
+                toast('登录成功，开始织造');
+            } else {
+                $('formErr').textContent = (body && (body.detail || body.message))
+                    || '登录失败，请检查手机号与密码';
+            }
+        } catch (e) {
+            $('formErr').textContent = '网络异常，请稍后重试';
+        }
+    };
+
+    window.doLogout = function () {
+        clearSession();
+        renderAuth();
+        toast('已退出登录');
+    };
+
+    /* ---------- 织造(决策面 POST /api/synapse/weave) ---------- */
+
+    window.sendWeave = async function () {
+        var task = $('taskInput').value.trim();
+        var pointsRaw = $('pointsInput').value.trim();
+        var hotspotId = $('hotspotSelect').value || null;
+        if (!task) { toast('请输入任务'); return; }
+        if (!(session() || {}).token) {
+            toggleDrawer(true);
+            toast('请先登录再织造');
+            return;
+        }
+        var points = pointsRaw ? pointsRaw.split(/\n+/)
+            .map(function (s) { return s.trim(); })
+            .filter(Boolean).slice(0, 10) : null;
+        var payload = { task: task };
+        if (points) { payload.points = points; }
+        if (hotspotId) { payload.hotspotId = hotspotId; }
+
+        $('taskInput').value = '';
+        $('pointsInput').value = '';
+        appendUser('「' + task + '」'
+            + (points ? ' · ' + points.length + ' 要点' : '')
+            + (hotspotId ? ' · 热点' : ''));
+        var holder = appendThinking('织智调配经纬，织造中…');
+        var wid = null;
+        try {
+            var res = await apiFetch('/api/synapse/weave', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            var body = await res.json();
+            holder.remove();
+            if (res.status === 409) {
+                appendBlocked(wid, '织造暂未开放（灰度关闭中），'
+                    + '人格与规则公示可正常浏览。', null);
+                return;
+            }
+            if (!res.ok) {
+                appendBlocked(wid, '请求失败(' + res.status + ')：'
+                    + ((body && (body.detail || body.message)) || '请稍后重试'), null);
+                return;
+            }
+            wid = body.weaveId;
+            appendWeave(body);
+        } catch (e) {
+            holder.remove();
+            appendBlocked(wid, e.message || '网络异常', null);
+        }
+    };
+
+    function appendUser(text) {
+        var div = document.createElement('div');
+        div.className = 'msg';
+        div.innerHTML = '<div class="who">我</div>'
+            + '<div class="bubble user">' + esc(text) + '</div>';
+        $('weaveFlow').appendChild(div);
+        div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        return div;
+    }
+
+    function appendThinking(text) {
+        var div = document.createElement('div');
+        div.className = 'msg';
+        div.innerHTML = '<div class="bubble bot thinking" style="margin-left:4%">'
+            + esc(text) + '</div>';
+        $('weaveFlow').appendChild(div);
+        return div;
+    }
+
+    function appendBlocked(wid, msg, body) {
+        var div = document.createElement('div');
+        div.className = 'msg';
+        div.innerHTML = '<div class="who">织智 · 提示</div>'
+            + '<div class="bubble bot" style="background:#fff8f0;'
+            + 'border:1px solid #e8c998">' + esc(msg) + '</div>';
+        $('weaveFlow').appendChild(div);
+        div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        return div;
+    }
+
+    function appendWeave(b) {
+        var route = b.route || {};
+        var w = route.weights || { logic: 0.5, human: 0.5 };
+        var v = b.validation || {};
+        var logicPct = Math.round((w.logic || 0) * 100);
+
+        var html = '<div class="who">织智 · ' + esc(route.label || '织造')
+            + '（#' + esc(b.weaveId) + '）</div>'
+            + '<div class="bubble bot">'
+            + '<span class="route-pill ' + esc(route.domain || 'general') + '">'
+            + esc(route.domain || 'general') + '</span>'
+            + '<div>' + esc(b.text || '').replace(/\n/g, '<br>') + '</div>'
+            + '<div class="wbar">'
+            + '<div class="labels"><span>经线·逻辑 ' + logicPct + '%</span>'
+            + '<span>纬线·温度 ' + (100 - logicPct) + '%</span></div>'
+            + '<div class="track">'
+            + '<div class="warp-bar" style="width:' + logicPct + '%"></div>'
+            + '<div class="weft-bar" style="width:' + (100 - logicPct) + '%"></div>'
+            + '</div></div>'
+            + '<div class="score-row">'
+            + scoreChip('逻辑', b.scoreLogic)
+            + scoreChip('温度', b.scoreHuman)
+            + scoreChip('人格张力 PDS', b.pds)
+            + (b.hotspotSymbiosis
+                ? scoreChip('热点共生', b.hotspotSymbiosis) : '')
+            + validationChip(v)
+            + (b.synapseMode ? '<span class="score-chip">灰度 '
+                + esc(b.synapseMode) + '</span>' : '')
+            + '</div>'
+            + fbButtons(b.weaveId)
+            + '</div>';
+
+        var div = document.createElement('div');
+        div.className = 'msg';
+        div.innerHTML = html;
+        $('weaveFlow').appendChild(div);
+        div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function scoreChip(label, val) {
+        if (val == null) { return ''; }
+        var pct = Math.round(val * 100);
+        var cls = 'score-chip';
+        if (pct < 50) { cls += ' fail'; }
+        else if (pct < 70) { cls += ' warn'; }
+        return '<span class="' + cls + '">' + esc(label) + ' '
+            + pct + '</span>';
+    }
+
+    function validationChip(v) {
+        if (!v || Object.keys(v).length === 0) { return ''; }
+        if (v.complianceHit) {
+            return '<span class="score-chip fail">红线拦截: '
+                + esc(v.complianceHit) + '</span>';
+        }
+        if (v.passed) {
+            return '<span class="score-chip">验证通过</span>';
+        }
+        var bits = [];
+        if (!v.factFidelity) { bits.push('事实保真未过'); }
+        if (!v.personaConsistency) { bits.push('人格一致性未过'); }
+        return '<span class="score-chip warn">'
+            + esc(bits.join('·') || '未通过') + '</span>';
+    }
+
+    function fbButtons(wid) {
+        return '<div class="fb-row">'
+            + '<button class="btn mini gold" onclick="sendFeedback(' + wid
+            + ', \'like\')">👍 有用</button>'
+            + '<button class="btn mini ghost" onclick="sendFeedback(' + wid
+            + ', \'dislike\')">👎 不佳</button>'
+            + '<button class="btn mini ghost" onclick="sendFeedback(' + wid
+            + ', \'rewrite\')">✍ 需重织</button>'
+            + '<button class="btn mini ghost" onclick="sendFeedback(' + wid
+            + ', \'follow_up\')">💬 追问</button>'
+            + '</div>';
+    }
+
+    window.sendFeedback = async function (wid, type) {
+        if (!wid) { return; }
+        try {
+            var res = await apiFetch('/api/synapse/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ weaveId: wid,
+                                        feedbackType: type }),
+            });
+            if (res.ok) { toast('反馈已留痕（' + type + '）'); }
+            else { toast('反馈失败(' + res.status + ')'); }
+        } catch (e) { toast(e.message || '网络异常'); }
+    };
+
+    /* ---------- 游客面加载 ---------- */
+
+    function loadPersona() {
+        fetch(API + '/api/synapse/persona').then(function (r) {
+            return r.json();
+        }).then(function (d) {
+            var p = d.persona || {};
+            $('personaPanel').innerHTML =
+                '<div class="panel"><h4>' + esc(p.name || '人格经线')
+                + ' · ' + esc(p.id || '') + '</h4>'
+                + '<p>' + esc(p.description || '') + '</p>'
+                + '<p style="margin-top:8px;font-size:11px;color:#8a97a5">'
+                + '人格经线为品牌主轴——变更永不自主（full 档亦人工）· '
+                + '红线词 ' + ((d.redLineWords || []).length) + ' 条在册</p></div>';
+        }).catch(function () {
+            $('personaPanel').innerHTML =
+                '<div class="panel"><p>加载失败，请刷新重试</p></div>';
+        });
+    }
+
+    function loadRules() {
+        fetch(API + '/api/synapse/router/rules').then(function (r) {
+            return r.json();
+        }).then(function (d) {
+            var rows = (d.rules || []).map(function (r) {
+                var w = r.weights || {};
+                return '<tr><td>' + esc(r.label || r.domain)
+                    + '</td><td>' + Math.round((w.logic || 0) * 100)
+                    + '%</td><td>' + Math.round((w.human || 0) * 100)
+                    + '%</td></tr>';
+            }).join('');
+            $('rulesRows').innerHTML = rows
+                || '<tr><td colspan="3">暂无数据</td></tr>';
+        }).catch(function () {
+            $('rulesRows').innerHTML =
+                '<tr><td colspan="3">加载失败</td></tr>';
+        });
+    }
+
+    function loadDiary() {
+        fetch(API + '/api/synapse/diary').then(function (r) {
+            return r.json();
+        }).then(function (d) {
+            var diary = d.diary || {};
+            $('diaryBox').textContent = diary.diaryText
+                || '今日日记尚未生成。';
+        }).catch(function () {
+            $('diaryBox').textContent = '加载失败，请刷新重试';
+        });
+    }
+
+    function loadHotspots() {
+        fetch(API + '/api/synapse/hotspots').then(function (r) {
+            return r.json();
+        }).then(function (d) {
+            var sel = $('hotspotSelect');
+            (d.items || []).forEach(function (h) {
+                var opt = document.createElement('option');
+                opt.value = h.hotspotId;
+                opt.textContent = '「' + (h.title || h.hotspotId) + '」';
+                sel.appendChild(opt);
+            });
+        }).catch(function () { /* 热点加载失败不阻断 */ });
+    }
+
+    renderAuth();
+    loadPersona();
+    loadRules();
+    loadDiary();
+    loadHotspots();
+})();
+</script>
+</body>
+</html>

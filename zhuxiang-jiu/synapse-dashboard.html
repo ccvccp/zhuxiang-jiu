@@ -1,0 +1,191 @@
+<!--
+    76号·织智 Synapse-Weave 大模型 治理看板(六区块)
+    页面: synapse-dashboard.html(配套脚本 js/synapse-dashboard.js)
+    依赖: css/style.css(主题变量) / 后端 76号 synapse_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    数据源: 全公开观测面 GET(游客白名单, 零鉴权):
+        /api/synapse/mode     灰度态+护栏+full自主域
+        /api/synapse/metrics  织造统计(护栏/路由/反馈)
+        /api/synapse/hotspots 热点源
+        /api/synapse/evolution 织补+黄金语料
+        /api/synapse/diary    织智日记
+        /api/synapse/persona  人格经线
+    区块: ①灰度态与护栏(四档/自主巡检计数/巡检留痕)
+          ②Router 任务域分布 ③织造统计(护栏/反馈)
+          ④热点源 ⑤织补式进化(织补史+语料计数) ⑥织智日记
+    红线: 人格经线定义/织补回滚/红线词库/知识结晶——
+          full 档亦永不自主; LLM 禁入(全确定性)。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>76号·织智Synapse-Weave治理看板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#0F4C81,#0a3560);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner .gold { color:#E6A85C; }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #0F4C81;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:8px}
+    .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
+        padding:8px 10px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .v{font-size:17px;font-weight:600}
+    .ov-cell .v.red{color:#c0392b}
+    .ov-cell .v.green{color:#2f9e44}
+    .ov-cell .v.blue{color:#0F4C81}
+    .ov-cell .v.yellow{color:#a37400}
+    table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
+    .dash-table th{text-align:left;padding:6px 8px;background:
+        var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
+        var(--color-border,#ddd);white-space:nowrap}
+    .dash-table td{padding:5px 8px;border-bottom:1px solid
+        var(--color-border,#eee);vertical-align:top}
+    .grade-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600}
+    .grade-pill.full{background:#e8eff6;color:#0F4C81}
+    .grade-pill.assist{background:#e9f0f8;color:#24619c}
+    .grade-pill.shadow{background:#f0ecf8;color:#6747c9}
+    .grade-pill.off{background:#eee;color:#777}
+    .grade-pill.paused{background:#c0392b;color:#fff}
+    .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
+        padding:8px 12px;border-radius:5px;margin-bottom:14px;
+        font-size:11px}
+    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    .kv-line{font-size:11px;color:#666;margin-top:8px;line-height:1.7}
+    .diary-box{font-size:12px;color:#4c5a68;white-space:pre-line;
+        max-height:260px;overflow:auto;background:var(--color-bg-sub,#f7f9fb);
+        border-radius:6px;padding:12px}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>76号·织智 <span class="gold">Synapse-Weave</span> 治理看板</h1>
+    <p>双师织机融合（经线逻辑 × 纬线温度）· 热点人格化 · 织补式进化 · 四档灰度（off/shadow/assist/full）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div class="redline-bar">
+                ⚠️ 永不自主铁律(full 档亦人工)：人格经线定义 · 织补回滚 ·
+                红线词库 · 知识结晶。LLM 禁入守门与护栏——全确定性；
+                护栏口径只计漏网（拦截=守门成功）。
+            </div>
+        </div>
+    </div>
+
+    <!-- ① 灰度态与护栏 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 灰度态与护栏（四档 · full 自主域 · 巡检留痕）</h3></div>
+            <div id="ovMode" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            <div id="modeDetail" class="kv-line"></div>
+        </div>
+    </div>
+
+    <!-- ② Router 分布 + ③ 织造统计 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② Meta-Router 任务域分布｜③ 织造统计（护栏 / 反馈）</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovRouter" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888">
+                        推理 [0.85,0.15] · 情感 [0.10,0.90] · 创意 [0.45,0.55]
+                        · 合规 [0.70,0.30] · 通用 [0.50,0.50]（+情绪修正）。
+                    </div>
+                </div>
+                <div>
+                    <div id="ovStats" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888">
+                        护栏三指标：事实失真 0.10 / 人格漂移 0.05（漏网防线）/
+                        合规违规 0.05（漏网防线）——恶化 &gt;3% 自动暂停。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ④ 热点源 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>④ 热点源（热点人格化重织素材）</h3></div>
+            <div style="max-height:220px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr><th>ID</th><th>标题</th><th>采集日</th></tr></thead>
+                    <tbody id="hotspotRows"><tr><td colspan="3"
+                        class="dash-empty">加载中…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑤ 织补式进化 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑤ 织补式进化（损伤定位 → 修复 → 缝合验证）</h3></div>
+            <div id="ovEvolution" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            <div style="max-height:200px;overflow:auto;margin-top:10px">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>ID</th><th>任务域</th><th>修复</th><th>缝合率</th><th>建议项</th>
+                    </tr></thead>
+                    <tbody id="patchRows"><tr><td colspan="5"
+                        class="dash-empty">暂无织补记录</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑥ 织智日记 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑥ 织智日记（品牌语言 · 指标转译）</h3>
+                <button class="dash-btn ghost" onclick="loadDiary()">刷新日记</button>
+            </div>
+            <div class="diary-box" id="diaryBox">加载中…</div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        全公开观测面 GET(游客白名单, 零鉴权只读) ·
+        C 端入口: <a href="synapse.html" target="_blank">synapse.html 织造工作台</a> ·
+        文档: docs/76号_织智SynapseWeave大模型_full转段交付总结.md
+    </div>
+</div>
+
+<script src="js/synapse-dashboard.js?v=1"></script>
+</body>
+</html>
