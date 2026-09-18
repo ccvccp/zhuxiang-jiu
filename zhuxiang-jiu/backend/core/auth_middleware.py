@@ -94,6 +94,8 @@ PUBLIC_EXACT = {
 }
 
 # 公开前缀(仅 GET): 游客浏览类接口
+# 注: GET 前缀公开后, 管理类子路径(如 site-theme/admin/*)仍由
+# 路由层 _require_admin 拦截(无注入头 → 403), 安全性不降级
 PUBLIC_GET_PREFIXES = (
     "/api/product",                 # 产品列表/详情/搜索/评价查看
     "/api/activity/list",           # 活动列表
@@ -105,6 +107,11 @@ PUBLIC_GET_PREFIXES = (
     "/api/groupbuy/tiers",          # 团购阶梯
     "/api/payment/channels/active", # 可用支付方式
     "/api/entry/qr/",               # 39号: 扫码状态轮询(GET, qrId 段)
+    # strict 切换后 nginx 401 实证补录(2026-09-18, 游客浏览面):
+    "/api/site-theme/",             # C端运行时换肤(active/icons/themes)
+                                    # ——换肤铁律: 永不关停
+    "/api/venue/partners",          # 酒店酒吧合作商列表(C端合作页浏览)
+    "/api/venue/venues",           # 合作场地列表(C端浏览)
 )
 
 
