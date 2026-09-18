@@ -1,6 +1,6 @@
 # 75号·竹韵·智衡竹奕酒智能大模型 full 转段交付总结
 
-> 文档版本：v1.0 · 2026-09-18
+> 文档版本：v1.1 · 2026-09-18（v1.1 补充第四章「代码变更明细」——4 文件变更点/行号/核心逻辑/兼容性影响面）
 > 转段动作：ZYH_MODE assist → full（四档灰度范式升档 + L1 自主域开放）
 > 前置文档：75号 SDD V3.0（工艺宪法/守门三层/DTDAE 范式）· 全周期交付（off→shadow→assist）
 > 关联提交：8aaad87（feat(zyh): 75号升full档——四档灰度范式+L1自主域auto_patrol）
@@ -67,7 +67,120 @@
 
 ---
 
-## 四、full 期语义验证矩阵（生产 23/23）
+## 四、代码变更明细（4 文件 · +194/-21 · 提交 8aaad87）
+
+### 4.1 services/zyh_mode_service.py —— 四档升格核心
+
+| 变更点 | 位置 | 内容 |
+|---|---|---|
+| 模式域升格 | L65 | `MODE_VALUES = ("off", "shadow", "assist", "full")`——三态升四档封闭（`_valid_mode` 消费同一元组，非法值回落 off） |
+| L1 自主域 | L68-70 | `L1_AUTONOMY_DOMAINS = ("auto_patrol",)`——封闭白名单，注释载明永不扩容铁律（知识条目/守门规则/resume/cache clear 永不入列） |
+| 节流常量 | L72 | `AUTO_PATROL_EVERY = 10`——决策面每 N 次调用巡检一次 |
+| 状态字段 | L135 | `_state()` 初始 dict 新增 `"decisionSeq": 0`——决策调用累计计数（存于 mode_state 单键 JSON，与 override/paused/metrics 同址） |
+| 自主巡检方法 | L175-203 | 新增 `note_decision_and_maybe_patrol() -> dict \| None`（核心新增，见下） |
+| 灰度总览公示 | L355-393 | `status_view()` 新增两个公示键（见下） |
+| 模块 docstring | L1-30 | 三态改写为四档语义说明 + L1 自主域定义 + 永不自主铁律清单 |
+
+**新增方法核心逻辑**（L175-203，节选）：
+
+```python
+async def note_decision_and_maybe_patrol(self) -> dict | None:
+    state = await self.current_mode()
+    if state["mode"] != "full":      # 前置档位检查:
+        return None                  #   非 full 档零副作用(不计数)
+    st = await self._state()
+    seq = int(st.get("decisionSeq") or 0) + 1   # 决策计数 +1
+    st["decisionSeq"] = seq
+    await self._save_state(st)
+    if seq % AUTO_PATROL_EVERY != 0: # 节流: 非 10 倍数不巡检
+        return None
+    result = await self.patrol()     # 复用既有护栏巡检
+    result["autoPatrol"] = True      # 自主巡检留痕标记
+    result["decisionSeq"] = seq
+    logger.info("zyh_auto_patrol seq=%s breaches=%s", ...)
+    return result
+```
+
+设计要点：
+1. **档位前置**——非 full 档在计数前即返回，assist/shadow 期 decisionSeq 不增长（人工巡检范式不受污染）
+2. **巡检零新造**——`patrol()` 为既有护栏链（`aggregate_guard_metrics()` 确定性聚合 guard/cache 统计 → 三指标 → 恶化 >3% 自动 guard_pause），自主巡检不新增任何判定路径
+3. **小样本保护继承**——分母 <10 指标留痕不判恶化（护栏既有行为，自主触发同样受保护）
+4. **恶化即熔断**——自主巡检发现恶化仍走自动暂停（等效 off），恢复须人工 resume（永不自主铁律）
+
+**status_view() 新增公示键**（L355-393）：
+
+| 键 | 内容 |
+|---|---|
+| `fullAutonomy` | `{"domains": ["auto_patrol"], "autoPatrolEvery": 10, "decisionSeq": <n>, "note": "full 档低风险自主域(封闭白名单); assist 期巡检须人工 POST /mode/guard"}` |
+| `neverAutonomous` | 四条红线文案：knowledge upsert(单一事实源)/守门规则变更/护栏 resume(人工留痕)/cache clear(管理面)——full 档亦永不自主 |
+
+### 4.2 routes/zyh_routes.py —— 决策装饰器接入
+
+| 变更点 | 位置 | 内容 |
+|---|---|---|
+| `_decision` 装饰器 | L72-109 | full 档决策响应后触发 `note_decision_and_maybe_patrol()`（L99-107） |
+| 巡检异常隔离 | L101-107 | `except Exception: logger.warning("zyh_auto_patrol_failed", exc_info=True)`——巡检异常只告警留痕，**不阻断决策响应**（自主域故障不伤决策面可用性） |
+| `ModeOverrideRequest` | L137-141 | 描述更新 `off/shadow/assist` → `off/shadow/assist/full`（运行时切档接口同步支持 full） |
+| 端点区块标题 | L68-70 | "三态灰度" → "四档灰度(全站范式·73/74 同源)" |
+| 文件头 docstring | L4 | 融合优化描述同步四档 |
+
+**装饰器执行序**（语义时点，L85-108）：
+
+```
+1. require_decision_mode()   → off 409 门控(鉴权 401/403 由
+                                JWT 中间件先行——铁律不变)
+2. await fn(*args, **kwargs) → 业务执行
+3. zyhMode 留痕注入          → shadow/assist/full 三档均注入
+4. full 档专属               → note_decision_and_maybe_patrol()
+                                (try/except 包裹, 只告警)
+```
+
+### 4.3 test_zyh.py —— 67 → 77 项
+
+`test_mode()` 新增 8 项（L275-318）：
+
+| 断言项 | 验证内容 |
+|---|---|
+| 四档封闭 | `MODE_VALUES == ("off", "shadow", "assist", "full")` |
+| full 放行 | `require_decision_mode()` 返回 mode=full |
+| assist 档不自主巡检 | `note_decision_and_maybe_patrol()` 返回 None（零副作用） |
+| 节流前 9 次不巡检 | 连续 9 次调用全返回 None |
+| 第 10 次自主巡检 | 返回 `autoPatrol=True` 且 `guard.checkCount` 恰好 +1（对照巡检前后快照） |
+| 自主域白名单封闭 | `L1_AUTONOMY_DOMAINS == {"auto_patrol"}` |
+| 永不自主红线公示 | `"resume" in neverAutonomous` |
+| 非法档拒绝 | `set_override("super")` → ValueError |
+
+`test_http()` 更新 1 项 + 新增 2 项：
+
+| 断言项 | 验证内容 |
+|---|---|
+| HTTP mode(四档公示)（更新） | modeValues 四值 + `fullAutonomy.domains` 含 auto_patrol |
+| HTTP chat full 放行（新增） | env=full 下 chat 200 + `zyhMode=full` 留痕 |
+| HTTP full 自主巡检计数留痕（新增） | 10 次决策调用后 `decisionSeq >= 10` |
+
+### 4.4 prod_zyh_gradation_verify.py —— 四档自适应 + full 矩阵
+
+| 变更点 | 位置 | 内容 |
+|---|---|---|
+| 灰度态断言 | L56-58 | 合法档位集合扩为 `("off", "shadow", "assist", "full")` |
+| 观测面 mode 断言 | L75-77 | `modeValues == ["off", "shadow", "assist", "full"]` |
+| **full 专属验证块** | L172-198 | `if mode == "full":` 分支——三项新增（见"五、验证矩阵"加粗行） |
+| 零破坏设计 | L182-192 | auto_patrol 实证用同 query 重复调用（语义缓存命中）——**零知识写入、零守门计数污染**，checkCount 快照对照 before/after |
+
+full 专属块实证逻辑：记录 `guard.checkCount` 快照 → 10 次同 query chat（决策计数 +10，必跨节流边界触发至少一次自主巡检）→ 复查 checkCount ≥ before+1。
+
+### 4.5 兼容性与影响面
+
+| 面 | 影响 |
+|---|---|
+| 既有三档行为 | 零变化——off 409 / shadow 留痕 / assist 决策生效语义原样（`MODE_VALUES[1:]` 留痕判断天然含 full） |
+| 护栏/守门/缓存 | 零改动——`patrol()`/`guard_check()`/守门三层/知识内核未触碰 |
+| 存储结构 | mode_state 单键 JSON 向后兼容——旧 state 无 decisionSeq 键时 `int(st.get("decisionSeq") or 0)` 缺省 0，无需迁移 |
+| 前端/其他模块 | 零耦合——75号观测面响应为超集扩展（新增键），无破坏性字段变更 |
+
+---
+
+## 五、full 期语义验证矩阵（生产 23/23）
 
 | 验证面 | 端点/方法 | 结果 |
 |---|---|---|
@@ -91,7 +204,7 @@
 
 ---
 
-## 五、L1 自主域语义（自主域边界）
+## 六、L1 自主域语义（自主域边界）
 
 | 域 | 自主语义 | 风险级 |
 |---|---|---|
@@ -110,7 +223,7 @@
 
 ---
 
-## 六、运营机制
+## 七、运营机制
 
 **full 期巡检节奏**：
 
@@ -138,7 +251,7 @@ curl -X POST https://zxjiu.com/api/zyh/mode/override \
 
 ---
 
-## 七、转段终态
+## 八、转段终态
 
 | 项 | 终态 |
 |---|---|
