@@ -447,20 +447,37 @@ async def test_ops_overview():
 
 
 async def test_learning_retrigger():
-    """15. P2 学习周期管理: 单评分器 / 全量(反馈不足跳过) / 未知 404"""
+    """15. P2 学习周期管理: 单评分器 / 全量(反馈不足跳过) / 治理档案型 / 未知 404"""
+    from services.ai_learning_service import (
+        GOVERNANCE_ONLY_SCORERS, SCORER_REGISTRY, validate_registry,
+    )
     svc = HubService()
-    # 15a. 全量: 无反馈 → 全部 skipped(非错误)
+    # 15a. 注册表一致性: 治理型 ID 无悬挂 + 阈值表不泄漏
+    check = validate_registry()
+    record("重跑: 注册表一致(ok 无悬挂)", check["ok"] is True, f"{check}")
+    record("重跑: 治理型 8 项入册",
+           check["governanceOnly"] == 8
+           and SCORER_REGISTRY.keys() >= GOVERNANCE_ONLY_SCORERS)
+    # 15b. 全量: 无反馈 → 可学习型全 skipped(非错误), 治理型被过滤
     # 注: 评分器注册表随模块上线动态增长(21→64+), 断言动态化
     r = await svc.retrigger_learning()
-    record("重跑: 全量 total>=21(注册表动态)",
-           r["total"] >= 21, f"got {r['total']}")
+    record("重跑: 全量 total==可学习数",
+           r["total"] == check["learnable"], f"got {r['total']}")
     record("重跑: 无反馈全 skipped",
            r["learned"] == 0 and r["skipped"] == r["total"])
+    record("重跑: 全量 unknown 归零(治理型已过滤)",
+           all(x["status"] != "unknown" for x in r["results"]))
+    record("重跑: governanceOnly 计数透明", r["governanceOnly"] == 8)
     record("重跑: 结果含状态字段", all("status" in x for x in r["results"]))
-    # 15b. 单评分器
+    # 15c. 单评分器(可学习型)
     r = await svc.retrigger_learning("order_risk")
     record("重跑: 单评分器 total=1", r["total"] == 1
            and r["results"][0]["scorer"] == "order_risk")
+    # 15d. 单评分器(治理档案型) → governance_only 语义(非 unknown)
+    r = await svc.retrigger_learning("xinzhi_merchant")
+    record("重跑: 治理档案型 governance_only",
+           r["results"][0]["status"] == "governance_only"
+           and r["governanceOnly"] == 1, f"{r['results'][0]}")
 
 
 def test_http_p2():
@@ -487,12 +504,22 @@ def test_http_p2():
     # 16b. 学习重跑: 无权限 → 403
     r = client.post("/api/hub/ops/learning/retrigger", json={})
     record("HTTP P2 重跑无权限 403", r.status_code == 403)
-    # admin + 全量 → 200 (16 档案全 skipped 也算成功)
+    # admin + 全量 → 200 (可学习档案全 skipped 也算成功; 治理型过滤)
     r = client.post("/api/hub/ops/learning/retrigger", json={},
                     headers={"X-Role": "admin"})
     body = r.json()
     record("HTTP P2 重跑全量", r.status_code == 200 and body["success"] is True
-           and body["total"] >= 21, f"{r.status_code} total={body.get('total')}")
+           and body["total"] >= 21 and body["governanceOnly"] == 8,
+           f"{r.status_code} total={body.get('total')}")
+    record("HTTP P2 重跑全量 unknown 归零",
+           all(x["status"] != "unknown" for x in body["results"]))
+    # 治理档案型单指定 → 200 + governance_only(注册表内非未知)
+    r = client.post("/api/hub/ops/learning/retrigger",
+                    json={"scorerId": "growth_budget"},
+                    headers={"X-Role": "admin"})
+    record("HTTP P2 重跑治理档案型",
+           r.status_code == 200
+           and r.json()["results"][0]["status"] == "governance_only")
     # 未知评分器 → 404
     r = client.post("/api/hub/ops/learning/retrigger",
                     json={"scorerId": "not-exist"}, headers={"X-Role": "admin"})

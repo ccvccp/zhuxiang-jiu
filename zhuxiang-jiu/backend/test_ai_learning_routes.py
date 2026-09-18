@@ -86,18 +86,25 @@ async def main():
     # ========================================================
     # 1. 注册表与默认权重
     # ========================================================
+    # 注册表随批次动态增长(64 = 56 可学习 + 8 治理档案型), 断言动态化:
+    # 治理型(46号审批总线)无 default_weights 映射属设计内
+    from services.ai_learning_service import (
+        GOVERNANCE_ONLY_SCORERS, is_learnable,
+    )
+    learnable_ids = [sid for sid in SCORER_REGISTRY if is_learnable(sid)]
     record("01_registry_covers_29_profiles",
-           len(SCORER_REGISTRY) == 56
+           len(SCORER_REGISTRY) == len(learnable_ids) + len(GOVERNANCE_ONLY_SCORERS)
+           and len(learnable_ids) >= 56
            and "logistics_routing:cost" in SCORER_REGISTRY
            and "promo_hotspot" in SCORER_REGISTRY
            and "alliance_onboarding" in SCORER_REGISTRY
            and "alliance_review" in SCORER_REGISTRY
            and "product_gate" in SCORER_REGISTRY
            and "login_orchestration" in SCORER_REGISTRY,
-           f"count={len(SCORER_REGISTRY)}")
+           f"count={len(SCORER_REGISTRY)} learnable={len(learnable_ids)}")
 
     sums_ok = True
-    for sid in SCORER_REGISTRY:
+    for sid in learnable_ids:
         dw = default_weights(sid)
         target = 0.5 if sid.startswith("logistics_routing:") else 1.0
         if abs(sum(dw.values()) - target) > 0.01 or not dw:
@@ -105,6 +112,10 @@ async def main():
             break
     record("02_default_weights_valid_for_all", sums_ok,
            f"scorer={sid if not sums_ok else '-'}, sum={sum(dw.values()):.4f}")
+    # 治理档案型: default_weights 无映射(KeyError 设计内)——is_learnable False
+    record("02b_governance_only_not_learnable",
+           all(sid in GOVERNANCE_ONLY_SCORERS
+               for sid in SCORER_REGISTRY if not is_learnable(sid)))
 
     w = await load_effective_weights("member_profile",
                                      default_weights("member_profile"))
@@ -385,9 +396,15 @@ async def main():
 
     resp = client.get("/api/ai-learning/overview", headers={"X-Role": "admin"})
     body = resp.json()
+    # overview 列全部注册表档案(含治理档案型), 断言动态化 +
+    # registryCheck 透出可学习/治理型分型
     record("30_http_overview_lists_all_scorers",
-           resp.status_code == 200 and body.get("scorerCount") == 56
-           and len(body.get("scorers", [])) == 56,
+           resp.status_code == 200
+           and body.get("scorerCount") == len(SCORER_REGISTRY)
+           and len(body.get("scorers", [])) == len(SCORER_REGISTRY)
+           and body.get("registryCheck", {}).get("ok") is True
+           and sum(1 for s in body["scorers"] if s.get("learnable"))
+           == len(learnable_ids),
            f"status={resp.status_code}, count={body.get('scorerCount')}")
 
     resp = client.get("/api/ai-learning/weights/no_such_scorer",

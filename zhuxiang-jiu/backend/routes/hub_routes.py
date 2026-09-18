@@ -95,9 +95,9 @@ class OrchestrateHubRequest(BaseModel):
 
 
 class RetriggerRequest(BaseModel):
-    """学习周期重跑请求(空 scorerId = 全部 16 个评分器档案)"""
+    """学习周期重跑请求(空 scorerId = 全部可学习评分器档案, 注册表动态增长)"""
     scorerId: str | None = Field(default=None,
-                                 description="评分器ID; 缺省重跑全部")
+                                 description="评分器ID; 缺省重跑全部可学习档案")
 
 
 class MediaUploadRequest(BaseModel):
@@ -253,8 +253,10 @@ async def retrigger_learning(
     req: RetriggerRequest,
     x_role: str | None = Header(None, alias="X-Role"),
 ):
-    """学习周期管理(admin): 重跑 AI 自学习(单评分器或全部 17 个档案)
+    """学习周期管理(admin): 重跑 AI 自学习(单评分器或全部可学习档案)
 
+    注册表动态增长(以 registryCheck.total 为准); 治理档案型评分器
+    (46号审批总线, 8 项)全量重跑自动跳过, 单指定返回 governance_only。
     反馈不足的评分器 status=skipped(非错误); 未知评分器 → 404。
     """
     _require_admin(x_role)
@@ -286,7 +288,7 @@ async def get_usage_overview(
 
 @router.get("/api/hub/ops/learning/approvals")
 async def list_approvals(x_role: str | None = Header(None, alias="X-Role")):
-    """待审批挑战者清单(admin; 16 档案中带 challenger 的)"""
+    """待审批挑战者清单(admin; 全部档案中带 challenger 的)"""
     _require_admin(x_role)
     return await hub_service.list_approvals()
 

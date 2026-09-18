@@ -332,16 +332,38 @@ class HubService:
         }
 
     async def retrigger_learning(self, scorer_id: str | None = None) -> dict:
-        """学习周期管理: 重跑 AI 自学习(单评分器或全部, P2 对接 16 评分器档案体系)
+        """学习周期管理: 重跑 AI 自学习(单评分器或全部可学习档案)
+
+        注册表混装两类评分器(见 ai_learning_service.SCORER_REGISTRY 头注释):
+            - 可学习型: 参与 Hedge 学习周期(全量重跑目标)
+            - 治理档案型(GOVERNANCE_ONLY_SCORERS): 走 46号治理审批总线,
+              不参与学习——全量重跑自动跳过, 单指定返回 governance_only
 
         Args:
-            scorer_id: 指定评分器; None 时遍历全部(反馈不足的跳过不报错)
+            scorer_id: 指定评分器; None 时遍历全部可学习档案
+                (反馈不足的跳过不报错)
         """
         from services import ai_learning_service
-        from services.ai_learning_service import SCORER_REGISTRY
+        from services.ai_learning_service import (
+            GOVERNANCE_ONLY_SCORERS, is_learnable,
+        )
 
-        targets = ([scorer_id] if scorer_id
-                   else list(SCORER_REGISTRY.keys()))
+        if scorer_id:
+            if (scorer_id in GOVERNANCE_ONLY_SCORERS):
+                # 治理档案型: 46号审批总线域, 学习周期不适用(语义准确
+                # 于旧的 KeyError→unknown)
+                return {
+                    "total": 1, "learned": 0, "skipped": 1,
+                    "governanceOnly": 1,
+                    "results": [{"scorer": scorer_id,
+                                 "status": "governance_only",
+                                 "reason": "治理档案型评分器(46号审批总线), "
+                                           "不参与 Hedge 学习周期"}],
+                }
+            targets = [scorer_id]
+        else:
+            targets = [sid for sid in ai_learning_service.SCORER_REGISTRY
+                       if is_learnable(sid)]
         results = []
         for sid in targets:
             try:
@@ -355,7 +377,10 @@ class HubService:
                 results.append({"scorer": sid, "status": "unknown"})
         learned = sum(1 for r in results if r["status"] == "learned")
         return {"total": len(targets), "learned": learned,
-                "skipped": len(targets) - learned, "results": results}
+                "skipped": len(targets) - learned,
+                "governanceOnly": (len(GOVERNANCE_ONLY_SCORERS)
+                                   if not scorer_id else 0),
+                "results": results}
 
     # ============================================================
     # 媒体上传(P3, 设计文档 6 章: 本地卷 hub-media, URL 走静态服务)

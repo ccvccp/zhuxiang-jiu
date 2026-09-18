@@ -45,8 +45,15 @@ logger = logging.getLogger(__name__)
 MODEL_VERSION = "v1-learning"
 
 # ============================================================
-# 评分器注册表(13 评分器 + 物流路由 3 个策略子键 + 36号热点蹭点
-# = 17 个可学习档案)
+# 评分器注册表(随批次动态增长, 以 len(SCORER_REGISTRY) 为准)
+#
+# 注册表混装两类评分器:
+#   - 可学习型: 有 WEIGHTS 类映射(default_weights 可解析),
+#     参与 Hedge 学习周期(retrigger/调度器自动学习)
+#   - 治理档案型(GOVERNANCE_ONLY_SCORERS): 走 46号治理审批总线
+#     (submit_change 建议书), 权重机制在各模块自己的 registry
+#     (如 pay71 参数版本状态机), 不参与 Hedge 学习周期;
+#     入册本表仅为 46号治理元数据(label/module/batch)
 # ============================================================
 
 SCORER_REGISTRY = {
@@ -163,6 +170,54 @@ SCORER_REGISTRY = {
     # ---- 第四十八批(72号·AI智能自动引流大模型 P6: 自主实验沙箱治理档案) ----
     "growth_experiment": {"label": "智能增长实验评分", "module": "72智能自动引流大模型", "batch": 48},
 }
+
+# 治理档案型评分器(46号审批总线档案, 不参与 Hedge 学习周期)。
+# 批次 41-48: 权重/进化机制在各模块自己的 registry
+# (xinzhi_merchant_service / pay69_registry / qr70_joy_service /
+#  pay71_registry / nexus74_registry / attract72_registry),
+# 入册 SCORER_REGISTRY 仅为 46号治理元数据。
+GOVERNANCE_ONLY_SCORERS = frozenset({
+    "xinzhi_merchant",            # 68号 P4 商家信值评级(batch 41)
+    "payment_intelligence",       # 69号 P7 自进化引擎(batch 42)
+    "qr_code_experience",         # 70号 P7 愉悦度引擎(batch 43)
+    "payment_port_intelligence",  # 71号 P7 三层进化引擎(batch 44)
+    "growth_intelligence",        # 72号 P2 增长定律(batch 45)
+    "growth_budget",              # 72号 P3 预算系数(batch 46)
+    "nexus_publishing",           # 74号 P4 全域发布(batch 47)
+    "growth_experiment",          # 72号 P6 实验沙箱(batch 48)
+})
+
+
+def is_learnable(scorer_id: str) -> bool:
+    """评分器是否参与 Hedge 学习周期(注册表内且非治理档案型)"""
+    return (scorer_id in SCORER_REGISTRY
+            and scorer_id not in GOVERNANCE_ONLY_SCORERS)
+
+
+def validate_registry() -> dict:
+    """注册表一致性校验(静态不变量, 供 overview/巡检透出)
+
+    不变量:
+        1. GOVERNANCE_ONLY_SCORERS ⊆ SCORER_REGISTRY(治理型 ID 拼写错误
+           会悬挂为"第三类"——既不可学习也无档案元数据)
+        2. DECISION_THRESHOLDS 键 ⊆ 可学习集(阈值表不得出现治理型
+           ——治理型不走 Hedge 回放评估)
+    """
+    dangling = sorted(GOVERNANCE_ONLY_SCORERS - SCORER_REGISTRY.keys())
+    learnable_keys = SCORER_REGISTRY.keys() - GOVERNANCE_ONLY_SCORERS
+    threshold_leak = sorted(set(DECISION_THRESHOLDS) - learnable_keys)
+    ok = not dangling and not threshold_leak
+    if not ok:
+        logger.warning("ai_registry_inconsistent dangling=%s "
+                       "threshold_leak=%s", dangling, threshold_leak)
+    return {"ok": ok, "dangling": dangling,
+            "thresholdLeak": threshold_leak,
+            "total": len(SCORER_REGISTRY),
+            "learnable": len(learnable_keys),
+            "governanceOnly": len(
+                GOVERNANCE_ONLY_SCORERS & SCORER_REGISTRY.keys())}
+
+
 
 # 决策阈值表(用于冠军/挑战者回放评估: 因子快照 × 权重 → 模拟动作 → 与期望动作比对)
 # 与各评分器 score() 内的等级映射保持一致; 路由类评分器(payment/logistics)无阈值,
@@ -1205,11 +1260,15 @@ async def overview() -> dict:
             "driftScore": drift.get("driftScore", 0.0),
             "driftLevel": drift.get("driftLevel", "low"),
             "autoApply": config["auto_apply"],
+            # 可学习口径统一为 is_learnable()(含治理档案型判定);
+            # learnableThreshold 保留(阈值表覆盖情况, 回放评估可用性)
+            "learnable": is_learnable(scorer_id),
             "learnableThreshold": DECISION_THRESHOLDS.get(scorer_id) is not None,
         })
     scheduler_stats = await repo.get_scheduler_stats() or {}
     return {"success": True, "scorerCount": len(scorers),
             "scorers": scorers,
+            "registryCheck": validate_registry(),
             "scheduler": {
                 "runs": scheduler_stats.get("runs", 0),
                 "lastRunAt": scheduler_stats.get("lastRunAt"),
