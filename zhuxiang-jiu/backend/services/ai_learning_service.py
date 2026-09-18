@@ -173,6 +173,8 @@ SCORER_REGISTRY = {
     "zhuyun_cognition": {"label": "竹韵智衡认知护城河评分", "module": "75竹韵智衡大模型", "batch": 49},
     # ---- 第五十批(76号·织智Synapse-Weave大模型 P0: 织造质量评分) ----
     "synapse_weave": {"label": "织智Synapse织造质量评分", "module": "76织智Synapse-Weave大模型", "batch": 50},
+    # ---- 第五十一批(77号·竹鉴BambooVerify大模型 P0: 质检引证评分) ----
+    "bamboo_verify": {"label": "竹鉴BambooVerify质检引证评分", "module": "77竹鉴BambooVerify大模型", "batch": 51},
 }
 
 # 治理档案型评分器(46号审批总线档案, 不参与 Hedge 学习周期)。
@@ -360,6 +362,8 @@ DECISION_THRESHOLDS = {
                          (0.0, "urgent")],
     "synapse_weave": [(80.0, "observe"), (60.0, "optimize"),
                       (0.0, "urgent")],
+    "bamboo_verify": [(80.0, "observe"), (60.0, "optimize"),
+                      (0.0, "urgent")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -434,6 +438,10 @@ def default_weights(scorer_id: str) -> dict:
         # 76号织智·Synapse-Weave: 织造质量五因子, 单一事实源在评分器类
         from services.synapse_scorer import SynapseWeaveScorer
         return dict(SynapseWeaveScorer.WEIGHTS)
+    if scorer_id == "bamboo_verify":
+        # 77号竹鉴·BambooVerify: 质检引证五因子, 单一事实源在评分器类
+        from services.zjian_scorer import BambooVerifyScorer
+        return dict(BambooVerifyScorer.WEIGHTS)
     if scorer_id == "trust_value":
         # 45号信值模块: 三层九因子, 单一事实源在评分器类
         # (层间 50/30/20 为宪法常量, 学习域仅限层内相对权重)

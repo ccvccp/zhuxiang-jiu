@@ -107,6 +107,7 @@ from routes.help_routes import register_help_routes
 # 竹韵·智衡·竹奕酒智能大模型(75号·工艺宪法守门+知识内核+韧性推演)
 from routes.zyh_routes import register_zyh_routes
 from routes.synapse_routes import register_synapse_routes
+from routes.zjian_routes import register_zjian_routes
 # AI智能安全管理模块(43号·安全网关+威胁评分+挑战验证+申诉)
 from routes.security_routes import register_security_routes
 
@@ -177,5 +178,6 @@ __all__ = [
     "register_help_routes",
     "register_zyh_routes",
     "register_synapse_routes",
+    "register_zjian_routes",
     "register_security_routes",
 ]
