@@ -112,6 +112,8 @@ PUBLIC_GET_PREFIXES = (
                                     # ——换肤铁律: 永不关停
     "/api/venue/partners",          # 酒店酒吧合作商列表(C端合作页浏览)
     "/api/venue/venues",           # 合作场地列表(C端浏览)
+    "/api/location/stores",        # 附近门店/门店详情(C端浏览,
+                                    # 401 日志持续新增实证 2026-09-18)
 )
 
 
