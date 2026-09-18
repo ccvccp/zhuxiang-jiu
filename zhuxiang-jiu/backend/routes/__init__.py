@@ -104,6 +104,8 @@ from routes.ride_routes import register_ride_routes
 from routes.invoice_routes import register_invoice_routes
 # AI智能叫帮模块(67号·信值互助网络: 公益100%/有偿10%双轨+LBS大厅)
 from routes.help_routes import register_help_routes
+# 竹韵·智衡·竹奕酒智能大模型(75号·工艺宪法守门+知识内核+韧性推演)
+from routes.zyh_routes import register_zyh_routes
 # AI智能安全管理模块(43号·安全网关+威胁评分+挑战验证+申诉)
 from routes.security_routes import register_security_routes
 
@@ -172,5 +174,6 @@ __all__ = [
     "register_ride_routes",
     "register_invoice_routes",
     "register_help_routes",
+    "register_zyh_routes",
     "register_security_routes",
 ]

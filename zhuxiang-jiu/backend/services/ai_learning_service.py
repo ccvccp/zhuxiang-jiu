@@ -169,6 +169,8 @@ SCORER_REGISTRY = {
     "nexus_publishing": {"label": "智能全域发布大模型评分", "module": "74NexusFlow智枢流全域发布大模型", "batch": 47},
     # ---- 第四十八批(72号·AI智能自动引流大模型 P6: 自主实验沙箱治理档案) ----
     "growth_experiment": {"label": "智能增长实验评分", "module": "72智能自动引流大模型", "batch": 48},
+    # ---- 第四十九批(75号·竹韵·智衡竹奕酒智能大模型 P0: 认知护城河评分) ----
+    "zhuyun_cognition": {"label": "竹韵智衡认知护城河评分", "module": "75竹韵智衡大模型", "batch": 49},
 }
 
 # 治理档案型评分器(46号审批总线档案, 不参与 Hedge 学习周期)。
@@ -351,6 +353,9 @@ DECISION_THRESHOLDS = {
     # 66号·AI智能工程师三级(服务路由: 自助/AI诊断/升级人工)
     "engineer_service": [(60.0, "high"), (30.0, "medium"),
                          (0.0, "low")],
+    # 75号·竹韵·智衡三级(认知护城河: observe/optimize/urgent)
+    "zhuyun_cognition": [(80.0, "observe"), (60.0, "optimize"),
+                         (0.0, "urgent")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -417,6 +422,10 @@ def default_weights(scorer_id: str) -> dict:
         # 44号API管理: API健康五因子, 单一事实源在评分器类
         from services.api_usage_service import ApiHealthScorer
         return dict(ApiHealthScorer.WEIGHTS)
+    if scorer_id == "zhuyun_cognition":
+        # 75号竹韵·智衡: 认知护城河五因子, 单一事实源在评分器类
+        from services.zyh_scorer import ZhuyunCognitionScorer
+        return dict(ZhuyunCognitionScorer.WEIGHTS)
     if scorer_id == "trust_value":
         # 45号信值模块: 三层九因子, 单一事实源在评分器类
         # (层间 50/30/20 为宪法常量, 学习域仅限层内相对权重)

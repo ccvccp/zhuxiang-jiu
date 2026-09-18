@@ -133,6 +133,8 @@ from routes import (
     register_invoice_routes,
     # AI智能叫帮模块(67号·信值互助网络: 公益100%/有偿10%双轨+LBS大厅)
     register_help_routes,
+    # 竹韵·智衡·竹奕酒智能大模型(75号·工艺宪法守门+知识内核+韧性推演)
+    register_zyh_routes,
 )
 
 __all__ = ["app", "_mock_store"]
@@ -303,6 +305,8 @@ register_ride_routes(app)
 # AI无感开票模块(42号)
 register_invoice_routes(app)
 register_help_routes(app)
+# 竹韵·智衡·竹奕酒智能大模型(75号)
+register_zyh_routes(app)
 register_security_routes(app)
 # AI智能API管理模块(44号)
 register_api_manager_routes(app)
