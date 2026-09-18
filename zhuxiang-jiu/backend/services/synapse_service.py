@@ -315,11 +315,13 @@ class SynapseService:
         if not validation["factFidelity"]:
             await self.repo.bump_stat(
                 "guard", "fact_fail")
-        # 人格漂移口径: 仅人文域(empathy/creative)低 PDS
-        # 计漂移——逻辑域低人格张力是任务特性非漂移
-        if (not validation["personaConsistency"]
-                and route["domain"] in
-                ("empathy", "creative")):
+        # 人格漂移口径(漏网防线——同 compliance 逻辑):
+        # 仅"验证放行但人格失格"计数(结构上 passed 蕴含
+        # PDS>=0.7, 故正常恒零; 一旦非零=守门被绕过, 立即
+        # 护栏暂停)。人文域低 PDS 被 passed=False 拦截是
+        # 守门成功, 不计漂移
+        if (validation["passed"]
+                and not validation["personaConsistency"]):
             await self.repo.bump_stat(
                 "guard", "persona_fail")
         # 合规违规口径: 红线漏网(输出含红线词且验证
