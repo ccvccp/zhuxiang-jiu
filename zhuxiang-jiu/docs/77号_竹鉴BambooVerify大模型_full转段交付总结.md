@@ -1,6 +1,6 @@
 # 77号·竹鉴 BambooVerify 大模型 full 转段交付总结
 
-> 文档版本：v1.0 · 2026-09-19
+> 文档版本：v1.1 · 2026-09-19（v1.1 补充第四章「代码架构与变更明细」——各文件关键组件/行号/核心逻辑；终态表新增前端现状）
 > 转段动作：ZJIAN_MODE off → shadow → assist → full（单会话全周期：方向裁定 → 开发 → 上线 → 四档灰度贯通）
 > 设计依据：D:\竹奕酒的资料 双检测报告工程化裁剪（ZZ26SW1489303A 52%vol 型 / ZZ26SW1489404B 42%vol 型，山东中质华检测试检验有限公司，判定依据 Q/SRQ 0001S-2023 / GB 2760-2024 / GB 7718-2025，签发 2026-06-25）
 > 方向授权：用户授权自主设计（D 盘零新增文档源裁定）
@@ -45,7 +45,7 @@
 | 规格比对 | 双型全 15 项指标对照表（52 型 51.3%vol/总酸 0.84/总酯 1.40 vs 42 型 41.7%vol/0.78/1.10） |
 | 四档灰度 | ZJIAN_MODE(off/shadow/assist/full) + L1 自主域 auto_patrol + 护栏（漏网口径铁律） |
 
-## 四、代码架构（9 文件）
+## 四、代码架构与变更明细（9 文件）
 
 | 文件 | 职责 |
 |---|---|
@@ -56,6 +56,41 @@
 | routes/zjian_routes.py | 11 端点（观测 6 GET 白名单 + 决策 verify/compare + 管理 anchor/override/guard/resume） |
 | ai_learning_service.py / main.py / routes/__init__.py / auth_middleware.py | 注册入册 + /api/zjian/ 公开白名单 |
 | test_zjian.py + prod_zjian_gradation_verify.py | 59 项本地 + 四档生产矩阵 |
+
+### 4.1 services/zjian_service.py——核心服务（486 行）
+
+| 组件 | 位置 | 内容 |
+|---|---|---|
+| `_METRIC_TPL` | L40 | 15 项指标模板（名称/单位/技术要求/检测方法 GB 5009 系/未检出定量限）——双报告通用字段 |
+| `REPORTS` | L120 | 双规格典藏种子：ZZ26SW1489303A 52%vol 型（酒精度 51.3/总酸 0.84/总酯 1.40/固形物 0.23）+ ZZ26SW1489404B 42%vol 型（41.7/0.78/1.10/0.21）——含机构/判定依据/签发/检测期元数据 |
+| `METRIC_KEYWORDS` | L189 | 15 项指标关键词域（酒精度/甲醇/氰化物/铅/防腐剂×2/甜味剂×2/二氧化硫/标签/锰/总酸/总酯/固形物/杂醇油）——**规格数字 52/42 不入指标域**（消歧专用，防"42 型甲醇"误命中酒精度） |
+| `SAFETY_KEYS` | L206 | 安全域聚合 8 项（甲醇/氰化物/铅/苯甲酸/山梨酸/糖精钠/甜蜜素/二氧化硫）——"安全性"一词触发 |
+| `BLOCK_PATTERNS` | L211 | 合规拦截正则：medical（治病/疗效/降血压/包治）+ exaggerate（最好/第一/唯一/绝对安全/零风险）——检测数据不得医用 |
+| `_match_metrics` | L246 | 问题→指标键检索（保序去重）+ 安全域聚合重排 |
+| `_match_spec` | L262 | 规格消歧：含"52"→单 52 型 / 含"42"→单 42 型 / 缺省双型并列 |
+| `verify_chat` | L283 | 决策面主链：合规拦截 → 指标检索 → 引证应答（值+要求+判定+方法+报告号）→ 留痕 |
+| `_render_answer` | L385 | 确定性渲染：`[规格] 指标: 实测 X(技术要求 Y, 符合); 检测方法 Z; 报告 W` |
+| `compare` | L410 | 双规格 15 项对照表 |
+
+### 4.2 services/zjian_mode_service.py——四档灰度（75/76 同源）
+
+MODE_VALUES 四档封闭（L1 自主域 auto_patrol / 每 10 次决策节流巡检）+ 护栏三指标（aggregate_guard_metrics 聚合 guard stats → 漏网口径：bench_leak/cite_miss/out_context 均为放行后失格计数——结构恒零防线）+ status_view 公示（fullAutonomy/neverAutonomous）。
+
+### 4.3 routes/zjian_routes.py——11 端点
+
+| 区 | 端点 | 位置 |
+|---|---|---|
+| 观测 6 GET（白名单） | reports / reports/{rid} / metrics / catalog / asks / mode | L116-150 |
+| 决策 2 POST（@_decision 门控） | verify 质检问答 / compare 规格比对 | L159+ |
+| 管理 4 POST | **reports/anchor（典藏锚定——field 仅限 conclusion/signDate，metrics 拒绝 409）** / mode/override / mode/guard / mode/resume | 管理区 |
+
+`_decision` 装饰器（L55）：off 409 门控 + 三档 zjianMode 留痕 + full 档 auto_patrol 触发（异常只告警不阻断）。
+
+### 4.4 评分器与注册
+
+- zjian_scorer.py：bamboo_verify 四因子（引证覆盖 0.30 / 指标准确 0.30 / 拦截有效 0.20 / 检索命中 0.20）→ observe/optimize/urgent 三级
+- ai_learning_service.py 三处入册：SCORER_REGISTRY（batch51）/ DECISION_THRESHOLDS / default_weights 分支
+- auth_middleware.py：PUBLIC_GET_PREFIXES 加 `/api/zjian/`（GET only——典藏公示游客可查，POST 决策面 JWT+门控）
 
 **护栏三指标（漏网口径铁律）**：判定失真率 0.10（应答与典藏不符）/ 引证错失率 0.05（放行技术应答缺引证——恒零防线）/ 断章率 0.05（引证偏离问题域——恒零防线），恶化 >3% 自动 guard_pause。
 
@@ -98,6 +133,7 @@ cd /opt/zhuxiang && docker compose up -d backend
 | 自主域 | auto_patrol 节流巡检运行 |
 | 红线 | LLM 禁入 · 典藏锚定永不自主 · 检测数据不作医疗/夸大宣传 |
 | 评分器 | bamboo_verify（batch51）在册 46号学习总线 |
+| **前端现状** | **纯后端零消费面**（与 75/76 接入前同状态）——观测面已入公开白名单（游客可查报告/指标目录），C 端质检查询页接入为后续项（可复制 zyh/synapse 模式） |
 | 全站位次 | 十八模型 full 档第五位（73/74/75/76/**77**） |
 
 **结论**：77号竹鉴 BambooVerify 单会话完成"素材审计 → 方向裁定 → 开发（9 文件）→ 测试（59/59 + 回归）→ 四档灰度贯通 → full 17/17"全周期。双检测报告 15 项指标全量典藏 + 引证式问答 + 规格比对落地，竹香酒产品域三闭环（75 工艺 / 76 内容 / 77 品质）齐备；全站十八大模型 full 档序列 73/74/75/76/77。
