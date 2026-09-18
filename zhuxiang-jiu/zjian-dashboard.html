@@ -1,0 +1,186 @@
+<!--
+    77号·竹鉴 BambooVerify 大模型 治理看板(六区块)
+    页面: zjian-dashboard.html(配套脚本 js/zjian-dashboard.js)
+    数据源: 全公开观测面 GET(游客白名单, 零鉴权):
+        /api/zjian/mode 灰度态+护栏 /api/zjian/metrics 指标目录+统计
+        /api/zjian/reports 双报告典藏 /api/zjian/asks 问答留痕
+    区块: ①灰度态与护栏 ②典藏统计 ③指标命中分布
+          ④问答留痕 ⑤双报告典藏 ⑥指标目录
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>77号·竹鉴BambooVerify治理看板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#14665B,#0d4a42);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner .seal{color:#e8a9a0;}
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #14665B;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:8px}
+    .ov-cell{background:var(--color-bg-sub,#f4f7f6);border-radius:6px;
+        padding:8px 10px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .v{font-size:17px;font-weight:600}
+    .ov-cell .v.red{color:#B5453C}
+    .ov-cell .v.green{color:#2f9e44}
+    .ov-cell .v.blue{color:#14665B}
+    table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
+    .dash-table th{text-align:left;padding:6px 8px;background:
+        var(--color-bg-sub,#eef4f2);border-bottom:1px solid
+        var(--color-border,#ddd);white-space:nowrap}
+    .dash-table td{padding:5px 8px;border-bottom:1px solid
+        var(--color-border,#eee);vertical-align:top}
+    .grade-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600}
+    .grade-pill.full{background:#e3efec;color:#14665B}
+    .grade-pill.assist{background:#e9f0f8;color:#24619c}
+    .grade-pill.shadow{background:#f0ecf8;color:#6747c9}
+    .grade-pill.off{background:#eee;color:#777}
+    .grade-pill.paused{background:#B5453C;color:#fff}
+    .redline-bar{background:#fdf6f0;border:1px solid #e8a30c;color:#8a5a00;
+        padding:8px 12px;border-radius:5px;margin-bottom:14px;font-size:11px}
+    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    .kv-line{font-size:11px;color:#666;margin-top:8px;line-height:1.7}
+    .cite-tag{display:inline-block;background:#f8e9e7;color:#B5453C;
+        border-radius:4px;padding:0 6px;font-size:10px;margin:1px 2px}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>77号·竹鉴 <span class="seal">BambooVerify</span> 治理看板</h1>
+    <p>质检典藏（双规格检测报告 15 项指标）· 引证式问答 · 规格比对 · 四档灰度（off/shadow/assist/full）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div class="redline-bar">
+                ⚠️ 永不自主铁律(full 档亦人工)：报告典藏锚定(检测数据
+                人工录入——原文事实源)·护栏恢复 resume。LLM 禁入——
+                全确定性；护栏只计漏网(拦截=守门成功)。
+            </div>
+        </div>
+    </div>
+
+    <!-- ① 灰度态与护栏 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 灰度态与护栏（四档 · full 自主域 · 巡检留痕）</h3></div>
+            <div id="ovMode" class="ov-cells"><div class="dash-empty" style="color:#999;font-size:12px">加载中…</div></div>
+            <div id="modeDetail" class="kv-line"></div>
+        </div>
+    </div>
+
+    <!-- ② 典藏统计 + ③ 指标命中分布 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② 典藏统计｜③ 指标命中分布</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovStats" class="ov-cells"><div style="color:#999;font-size:12px">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888">
+                        双规格报告典藏: ZZ26SW1489303A(52%vol) /
+                        ZZ26SW1489404B(42%vol)·判定依据
+                        Q/SRQ 0001S-2023 / GB 2760-2024 / GB 7718-2025。
+                    </div>
+                </div>
+                <div>
+                    <div id="ovMetricHits" class="ov-cells"><div style="color:#999;font-size:12px">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888">
+                        指标命中: 问答触达的检测指标域分布(酒精度/安全
+                        聚合 8 项/理化等)。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ④ 问答留痕 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>④ 质检问答留痕（引证流量）</h3></div>
+            <div style="max-height:240px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>ID</th><th>问题</th><th>指标</th><th>规格</th>
+                    </tr></thead>
+                    <tbody id="askRows"><tr><td colspan="4"
+                        style="color:#999;font-size:12px;text-align:center;padding:12px">暂无留痕</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑤ 双报告典藏 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑤ 双规格报告典藏（原文事实源）</h3></div>
+            <div style="max-height:240px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>报告编号</th><th>规格</th><th>机构</th><th>签发</th>
+                    </tr></thead>
+                    <tbody id="reportRows"><tr><td colspan="4"
+                        style="color:#999;font-size:12px;text-align:center;padding:12px">加载中…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑥ 指标目录 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑥ 检测指标目录（15 项）</h3></div>
+            <div style="max-height:280px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>指标</th><th>技术要求</th><th>单位</th><th>检测方法</th>
+                    </tr></thead>
+                    <tbody id="catalogRows"><tr><td colspan="4"
+                        style="color:#999;font-size:12px;text-align:center;padding:12px">加载中…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        全公开观测面 GET(游客白名单, 零鉴权只读) ·
+        C 端入口: <a href="zjian.html" target="_blank">zjian.html 质检查询</a> ·
+        文档: docs/77号_竹鉴BambooVerify大模型_full转段交付总结.md
+    </div>
+</div>
+
+<script src="js/zjian-dashboard.js?v=1"></script>
+</body>
+</html>
