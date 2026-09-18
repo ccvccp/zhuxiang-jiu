@@ -14,8 +14,9 @@
     6. L3 溯源: 技术断言缺引用拦截(负测)
     7. 韧性压力推演: 三情景(含量化增强)/未知 409
     8. 探针辩题生成
-    9. 三态灰度: off 409 / shadow 标记 / assist 生效 /
-       override 切换 / 护栏恶化自动暂停 / resume
+    9. 四档灰度: off 409 / shadow 标记 / assist 生效 /
+       full 自主(auto_patrol 节流巡检) / override 切换 /
+       护栏恶化自动暂停 / resume
     10. 评分器 zhuyun_cognition: 入册(batch49)/权重解析/
         五因子评分/阈值动作
     11. 路由 HTTP 层: 14 端点注册 + 观测面无鉴权 + 决策面门控
@@ -271,6 +272,49 @@ async def test_mode():
     record("巡检小样本跳过(确定性口径)",
            len(r.get("skippedSmallSample") or []) >= 1,
            f"{r.get('skippedSmallSample')}")
+    # ---- full 档(四档范式·73/74 同源) ----
+    from services.zyh_mode_service import (
+        MODE_VALUES, L1_AUTONOMY_DOMAINS, AUTO_PATROL_EVERY,
+    )
+    record("四档封闭(off/shadow/assist/full)",
+           MODE_VALUES == ("off", "shadow", "assist",
+                           "full"))
+    os.environ["ZYH_MODE"] = "full"
+    st = await ms.require_decision_mode()
+    record("full 放行", st["mode"] == "full")
+    # assist 档不自主(巡检须人工)
+    await ms.set_override("assist")
+    r = await ms.note_decision_and_maybe_patrol()
+    record("assist 档不自主巡检", r is None)
+    # full 档 auto_patrol 节流(前 9 次不巡, 第 10 次巡)
+    await ms.set_override("full")
+    view = await ms.status_view()
+    base_checks = view["guard"]["checkCount"]
+    r = None
+    for _ in range(AUTO_PATROL_EVERY - 1):
+        r = await ms.note_decision_and_maybe_patrol()
+    record(f"full 节流前{AUTO_PATROL_EVERY - 1}次不巡检",
+           r is None)
+    r = await ms.note_decision_and_maybe_patrol()
+    view = await ms.status_view()
+    record("full 第10次自主巡检(auto_patrol)",
+           isinstance(r, dict)
+           and r.get("autoPatrol") is True
+           and view["guard"]["checkCount"]
+           == base_checks + 1,
+           f"checkCount={view['guard']['checkCount']}")
+    record("自主域白名单封闭(auto_patrol)",
+           set(L1_AUTONOMY_DOMAINS)
+           == {"auto_patrol"})
+    record("永不自主红线公示",
+           "resume" in view.get("neverAutonomous", ""))
+    # 非法档拒绝
+    try:
+        await ms.set_override("super")
+        record("非法档拒绝", False)
+    except ValueError:
+        record("非法档拒绝", True)
+    await ms.set_override("")
     os.environ["ZYH_MODE"] = "off"
 
 
@@ -329,9 +373,12 @@ def test_http():
     r = client.get("/api/zyh/cache/stats")
     record("HTTP cache stats", r.status_code == 200)
     r = client.get("/api/zyh/mode")
-    record("HTTP mode", r.status_code == 200
+    record("HTTP mode(四档公示)",
+           r.status_code == 200
            and r.json().get("modeValues")
-           == ["off", "shadow", "assist"])
+           == ["off", "shadow", "assist", "full"]
+           and "auto_patrol" in r.json().get(
+               "fullAutonomy", {}).get("domains", []))
     r = client.get("/api/zyh/knowledge/not-exist")
     record("HTTP 未知知识 404", r.status_code == 404)
     r = client.get("/api/zyh/qa")
@@ -359,6 +406,24 @@ def test_http():
                     json={"count": 2})
     record("HTTP probe/debate", r.status_code == 200
            and r.json().get("total") == 2)
+    # full 档: 放行 + zyhMode=full 留痕 + 自主巡检计数推进
+    os.environ["ZYH_MODE"] = "full"
+    r = client.post("/api/zyh/chat",
+                    json={"prompt": "竹奕酒的全竹原料是什么"})
+    record("HTTP chat full 放行(zyhMode=full)",
+           r.status_code == 200
+           and r.json().get("zyhMode") == "full",
+           f"{r.status_code}")
+    for _ in range(9):
+        client.post("/api/zyh/chat",
+                    json={"prompt": "竹香香型是什么"})
+    r = client.get("/api/zyh/mode").json()
+    fa_view = r.get("fullAutonomy") or {}
+    record("HTTP full 自主巡检计数留痕",
+           fa_view.get("decisionSeq", 0) >= 10,
+           f"seq={fa_view.get('decisionSeq')}")
+    # 恢复 shadow(管理面 override 清除断言依赖 env)
+    os.environ["ZYH_MODE"] = "shadow"
     # 管理面
     r = client.post("/api/zyh/mode/override",
                     json={"mode": "assist"})

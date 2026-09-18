@@ -1,13 +1,24 @@
-"""竹韵·智衡·竹奕酒智能大模型(75号)——三态灰度与护栏服务
+"""竹韵·智衡·竹奕酒智能大模型(75号)——四档灰度与护栏服务
 
 依据: SDD V3.0 §6.2 成本熔断 + 全站大模型转段标准
-(图标主题/条款协议/PDM/智图/叫帮模式层范式同源)。
+(73/74 四档范式同源——member73/nexus74 full 档先例)。
 
-三态灰度(ZYH_MODE, zyh 前缀):
+四档灰度(ZYH_MODE, zyh 前缀):
     off(默认)    决策面关闭(409)——仅锁"新增生成入口"
     shadow       观察学习期(决策放行+响应留痕 zyhMode)
     assist       辅助生产期(决策生效)
+    full         自主生产期(决策生效+低风险域自主——
+                 护栏自动巡检 auto_patrol, 无需人工定期触发)
     读取链: 护栏暂停 > 运行时 override > 环境变量 ZYH_MODE > off
+
+full 档 L1 自主域(封闭白名单——73号 L1_AUTONOMY_DOMAINS 范式):
+    auto_patrol   护栏自动巡检(决策面每 10 次调用节流触发
+                  一次 patrol——确定性聚合+阈值比较, LLM 禁入;
+                  assist 档须人工显式 POST /mode/guard)
+永不自主铁律(高风险域——full 档亦然):
+    知识条目 upsert(单一事实源——专利/企标人工锚定)、
+    守门规则变更(L1/L2/L3)、护栏恢复 resume(人工决策留痕)、
+    缓存清空 cache/clear(管理面 X-Role)。
 
 宪法豁免面(永不关停——对齐叫帮/钱包"off 只锁新增"范式):
     知识条目/工艺图谱/守门规则/统计/缓存指标/灰度总览——
@@ -51,8 +62,14 @@ logger = logging.getLogger(__name__)
 
 MODEL_VERSION = "v1-zyh-mode"
 
-MODE_VALUES = ("off", "shadow", "assist")
+MODE_VALUES = ("off", "shadow", "assist", "full")
 DEFAULT_MODE = "off"
+
+# full 档 L1 自主域(封闭白名单——永不扩容铁律:
+# 知识条目/守门规则/resume/cache clear 永不入白名单)
+L1_AUTONOMY_DOMAINS = ("auto_patrol",)
+# full 档自主巡检节流: 决策面每 N 次调用巡检一次
+AUTO_PATROL_EVERY = 10
 
 _STATE_KEY_REDIS = "zhuxiang:zyh:mode_state"
 _STATE_KEY_MEM = "zyh_mode_state"
@@ -80,7 +97,7 @@ def _valid_mode(mode: str) -> str:
 
 
 class ZyhModeService:
-    """竹韵·智衡三态灰度 + 护栏"""
+    """竹韵·智衡四档灰度 + 护栏"""
 
     def __init__(self):
         self._store = get_in_memory_store()
@@ -115,6 +132,7 @@ class ZyhModeService:
                 "paused": False,
                 "pausedReason": "",
                 "pausedAt": "",
+                "decisionSeq": 0,
                 "metrics": [],
                 "breachTrail": [],
                 "updatedAt": _now_iso(),
@@ -154,6 +172,35 @@ class ZyhModeService:
                 f"决策面关闭(问答/推演/辩题生成入口), "
                 f"知识内核观测面不受影响)")
         return state
+
+    async def note_decision_and_maybe_patrol(
+            self) -> dict | None:
+        """full 档自主巡检(L1 自主域 auto_patrol——74号
+        "A 档 auto 仅 full" 范式同源)
+
+        决策面每次调用计数 +1; 每 AUTO_PATROL_EVERY 次
+        触发一次护栏自动巡检(确定性聚合+阈值比较,
+        LLM 禁入)。assist/shadow 档不自主(巡检须人工
+        POST /mode/guard)。巡检恶化仍走自动暂停+人工恢复
+        (resume 永不自主铁律)。
+        """
+        state = await self.current_mode()
+        if state["mode"] != "full":
+            return None
+        st = await self._state()
+        seq = int(st.get("decisionSeq") or 0) + 1
+        st["decisionSeq"] = seq
+        st["updatedAt"] = _now_iso()
+        await self._save_state(st)
+        if seq % AUTO_PATROL_EVERY != 0:
+            return None
+        result = await self.patrol()
+        result["autoPatrol"] = True
+        result["decisionSeq"] = seq
+        logger.info(
+            "zyh_auto_patrol seq=%s breaches=%s",
+            seq, result.get("breaches"))
+        return result
 
     async def set_override(self, mode: str,
                            operator: str = "admin") -> dict:
@@ -306,12 +353,25 @@ class ZyhModeService:
         return result
 
     async def status_view(self) -> dict:
-        """灰度总览(模式+护栏+红线公示)"""
+        """灰度总览(模式+护栏+full 自主域+红线公示)"""
         state = await self.current_mode()
         st = await self._state()
         return {
             **state,
             "modeValues": list(MODE_VALUES),
+            "fullAutonomy": {
+                "domains": list(L1_AUTONOMY_DOMAINS),
+                "autoPatrolEvery": AUTO_PATROL_EVERY,
+                "decisionSeq": int(
+                    st.get("decisionSeq") or 0),
+                "note": ("full 档低风险自主域(封闭白名单); "
+                         "assist 期巡检须人工 POST "
+                         "/mode/guard"),
+            },
+            "neverAutonomous": (
+                "knowledge upsert(单一事实源)/守门规则变更"
+                "/护栏 resume(人工留痕)/cache clear"
+                "(管理面)——full 档亦永不自主"),
             "observablesNeverOff": (
                 "knowledge/graph/rules/stats/cache/mode"
                 "——知识内核观测面永不关停"),

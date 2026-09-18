@@ -1,7 +1,7 @@
 """竹韵·智衡·竹奕酒智能大模型(75号)路由层
 
 设计依据: 《"竹韵·智衡"竹奕酒 SDD V3.0》(DTDAE 范式工程化裁剪)
-—— 全站融合优化落地(三态灰度/护栏/决策门控/评分器入册)。
+—— 全站融合优化落地(四档灰度/护栏/决策门控/评分器入册)。
 
 端点(14):
     观测面 GET(永不关停——知识内核为公开事实锚点):
@@ -66,30 +66,45 @@ def _handle(exc: Exception):
 
 
 # ============================================================
-# 大模型三态灰度(全站范式): 决策面门控
+# 大模型四档灰度(全站范式·73/74 同源): 决策面门控
 # ============================================================
 
 def _decision(fn):
-    """决策端点装饰器: 门控(off 409) + shadow/assist 留痕(zyhMode)
+    """决策端点装饰器: 门控(off 409) + shadow/assist/full
+    留痕(zyhMode) + full 档自主巡检(auto_patrol)
 
     决策面 = 新增生成入口(chat 问答/推演/辩题)——off 只锁生成;
     知识内核观测面永不关停(公开事实锚点语义)。
     鉴权 401/403 优先于门控 409(JWT 中间件注入在前)。
+    full 档(74号 "A 档 auto 仅 full" 范式同源): 决策调用后
+    节流触发护栏自动巡检(每 10 次 1 巡, LLM 禁入——
+    巡检异常不阻断决策响应, 只告警留痕)。
     """
     from services.zyh_mode_service import MODE_VALUES
 
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
         try:
-            mode_state = await ZyhModeService(
-            ).require_decision_mode()
+            mode_svc = ZyhModeService()
+            mode_state = await mode_svc \
+                .require_decision_mode()
         except ValueError as e:
             raise HTTPException(
                 status_code=409, detail=str(e)) from e
         result = await fn(*args, **kwargs)
         if isinstance(result, dict) \
                 and mode_state.get("mode") in MODE_VALUES[1:]:
-            result = {**result, "zyhMode": mode_state["mode"]}
+            result = {**result,
+                      "zyhMode": mode_state["mode"]}
+        # full 档自主巡检(L1 自主域 auto_patrol)
+        if mode_state.get("mode") == "full":
+            try:
+                await mode_svc \
+                    .note_decision_and_maybe_patrol()
+            except Exception:
+                logger.warning(
+                    "zyh_auto_patrol_failed",
+                    exc_info=True)
         return result
     return wrapper
 
@@ -121,7 +136,8 @@ class DebateRequest(BaseModel):
 
 class ModeOverrideRequest(BaseModel):
     mode: str = Field(...,
-                      description="目标灰度态(off/shadow/assist; "
+                      description="目标灰度态(off/shadow/"
+                                  "assist/full; "
                                   "空串清除 override)")
 
 

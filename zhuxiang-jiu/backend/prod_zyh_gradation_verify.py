@@ -1,4 +1,4 @@
-"""竹韵·智衡(75号)灰度启用后验证脚本——三档自适应零破坏验证
+"""竹韵·智衡(75号)灰度启用后验证脚本——四档自适应零破坏验证
 
 用法(生产容器内):
     docker exec zhuxiang-backend-1 python prod_zyh_gradation_verify.py
@@ -12,6 +12,9 @@
     [shadow] 决策面 200 + zyhMode=shadow 留痕标记 + 守门三层抽查
              + 实体消歧 + 语义缓存命中 + 韧性推演量化
     [assist] 同 shadow(zyhMode=assist)
+    [full]   同 assist(zyhMode=full) + 四档公示 + full 自主域
+             (auto_patrol 节流巡检实证: 10 次决策后 checkCount
+             自增, 全缓存命中探测——零知识写入)
 
 零破坏原则:
     - 只读观测面 + 少量 chat 探测(留痕无害, 不清生产缓存
@@ -52,12 +55,12 @@ with httpx.Client(base_url="http://127.0.0.1:8000", timeout=30) as c:
     source = mode_state.get("source", "?")
     record(f"灰度态读取: {mode}({source})",
            r.status_code == 200 and mode in ("off", "shadow",
-                                             "assist"))
+                                             "assist", "full"))
     if mode_state.get("paused"):
         print(f"  ⚠ 护栏暂停中: {mode_state.get('pausedReason')}")
 
     # ============================================================
-    # 二、观测面 8 GET(白名单, 三档均永不关停)
+    # 二、观测面 8 GET(白名单, 四档均永不关停)
     # ============================================================
     OBS = [
         ("/api/zyh/knowledge", "knowledge", lambda b:
@@ -70,7 +73,8 @@ with httpx.Client(base_url="http://127.0.0.1:8000", timeout=30) as c:
         ("/api/zyh/cache/stats", "cache/stats", lambda b:
          "hitRate" in b),
         ("/api/zyh/mode", "mode", lambda b:
-         b.get("modeValues") == ["off", "shadow", "assist"]),
+         b.get("modeValues")
+         == ["off", "shadow", "assist", "full"]),
         ("/api/zyh/qa", "qa", lambda b: "items" in b),
         ("/api/zyh/knowledge/aroma_type", "knowledge单条",
          lambda b: "item" in b),
@@ -164,6 +168,34 @@ with httpx.Client(base_url="http://127.0.0.1:8000", timeout=30) as c:
                    headers=member)
         record("辩题生成", r.status_code == 200
                and r.json().get("total") == 2)
+
+        if mode == "full":
+            # full 档专属: 自主域公示 + auto_patrol 节流实证
+            fa = mode_state.get("fullAutonomy") or {}
+            record("full 自主域公示(auto_patrol)",
+                   fa.get("domains") == ["auto_patrol"]
+                   and fa.get("autoPatrolEvery") == 10)
+            record("永不自主红线公示",
+                   "resume" in (
+                       mode_state.get("neverAutonomous")
+                       or ""))
+            # auto_patrol 实证: 10 次决策必跨节流边界
+            # (缓存命中探测——零知识写入)
+            before = (c.get("/api/zyh/mode").json()
+                      .get("guard", {})
+                      .get("checkCount", 0))
+            q = "竹香香型的定义和依据标准是什么"
+            c.post("/api/zyh/chat", json={"prompt": q},
+                   headers=member)
+            for _ in range(9):
+                c.post("/api/zyh/chat",
+                       json={"prompt": q}, headers=member)
+            after = (c.get("/api/zyh/mode").json()
+                     .get("guard", {})
+                     .get("checkCount", 0))
+            record("auto_patrol 自主巡检实证",
+                   after >= before + 1,
+                   f"checkCount {before}→{after}")
 
     # ============================================================
     # 四、管理面 + 护栏(只读巡检, 不改档)
