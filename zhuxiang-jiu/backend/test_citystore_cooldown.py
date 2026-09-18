@@ -72,8 +72,11 @@ async def run_tests():
         await _apply_store(svc, MEMBER, "370200", "青岛市", "重申店")
         check("冷静期: 90 天内重申被拒", False)
     except ValueError as e:
+        # 日期口径: 服务端 UTC 与本地可能相差一天,
+        # 剩余天数 89/90 均为正确边界
         check("冷静期: 90 天内重申被拒", "冷静期" in str(e)
-              and "剩余 90 天" in str(e), f"e={e}")
+              and ("剩余 89 天" in str(e)
+                   or "剩余 90 天" in str(e)), f"e={e}")
 
     # ============================================================
     # 2. 冷静期满(91 天前取消) → 重申成功

@@ -82,6 +82,18 @@ class CityStoreService:
         if member_level != 5:
             raise ValueError("市级网店为 SVIP 专属权益, 请先开通 SVIP 会员")
 
+        # 1b. 城市合法性校验(cityCode 须在全国行政区划册)
+        from services.citystore_regions import get_city
+        city_ref = get_city(city_code)
+        if city_ref is None:
+            raise ValueError(
+                f"城市行政区划码无效: {city_code}"
+                "(须从 GET /api/citystore/cities/available 选择)")
+        # 名码一致性(防脏数据——以区划册为准)
+        city_name = city_ref["cityName"]
+        province_code = city_ref["provinceCode"]
+        province_name = city_ref["provinceName"]
+
         # 2. 资质校验
         if not business_license:
             raise ValueError("营业执照号必填")
@@ -185,37 +197,37 @@ class CityStoreService:
             "count": len(stores),
         }
 
-    async def list_available_cities(self) -> dict:
-        """查询可用城市列表(未被独占的城市)"""
-        # 预定义城市列表(实际应从位置地图模块获取)
-        all_cities = self._get_predefined_cities()
+    async def list_available_cities(
+            self, province_code: str = None) -> dict:
+        """查询可用城市列表(未被独占的城市; 可按省筛选)
+
+        城市源: 全国省级行政区+地级行政区全量
+        (citystore_regions, 34 省 344 市——GB/T 2260)。
+        """
+        from services import citystore_regions
+        if province_code:
+            if province_code not in \
+                    citystore_regions.PROVINCES:
+                raise ValueError(
+                    f"省份码无效: {province_code}")
+            all_cities = citystore_regions \
+                .cities_by_province(province_code)
+        else:
+            all_cities = citystore_regions.all_cities()
         occupied = set(await self.repo.list_occupied_cities())
-        available = [c for c in all_cities if c["cityCode"] not in occupied]
+        available = [c for c in all_cities
+                     if c["cityCode"] not in occupied]
         return {
             "cities": available,
             "count": len(available),
+            "totalCount": len(all_cities),
             "occupiedCount": len(occupied),
         }
 
     def _get_predefined_cities(self) -> list[dict]:
-        """预定义城市列表(简化版, 实际应从位置地图模块获取)"""
-        return [
-            {"cityCode": "370100", "cityName": "济南市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "370200", "cityName": "青岛市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "370300", "cityName": "淄博市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "370400", "cityName": "枣庄市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "370500", "cityName": "东营市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "370600", "cityName": "烟台市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "370700", "cityName": "潍坊市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "370800", "cityName": "济宁市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "370900", "cityName": "泰安市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "371000", "cityName": "威海市", "provinceCode": "370000", "provinceName": "山东省"},
-            {"cityCode": "110100", "cityName": "北京市", "provinceCode": "110000", "provinceName": "北京市"},
-            {"cityCode": "310100", "cityName": "上海市", "provinceCode": "310000", "provinceName": "上海市"},
-            {"cityCode": "440100", "cityName": "广州市", "provinceCode": "440000", "provinceName": "广东省"},
-            {"cityCode": "440300", "cityName": "深圳市", "provinceCode": "440000", "provinceName": "广东省"},
-            {"cityCode": "330100", "cityName": "杭州市", "provinceCode": "330000", "provinceName": "浙江省"},
-        ]
+        """预定义城市列表(全国全量——GB/T 2260 口径)"""
+        from services.citystore_regions import all_cities
+        return all_cities()
 
     # ============================================================
     # 下单入口决策(市级网店优先原则)

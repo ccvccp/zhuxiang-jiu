@@ -260,11 +260,44 @@ class TestCityStoreQuery:
                result["count"] >= 1,
                f"列表数量错误: {result['count']}")
 
-        # test 14: 可用城市列表(15 预定义 - 1 已占 = 14)
+        # test 14: 可用城市列表(全国全量 344 - 1 已占 = 343)
         cities = await svc.list_available_cities()
         record("test_14_available_cities",
-               cities["count"] == 14 and cities["occupiedCount"] == 1,
-               f"可用城市数量错误: {cities['count']}, occupied={cities['occupiedCount']}")
+               cities["count"] == 343 and cities["occupiedCount"] == 1
+               and cities.get("totalCount") == 344,
+               f"可用城市数量错误: {cities['count']}, "
+               f"total={cities.get('totalCount')}, "
+               f"occupied={cities['occupiedCount']}")
+
+        # test 14b: 省份筛选(山东省 16 地市 - 济南已占 = 15)
+        sd = await svc.list_available_cities(province_code="370000")
+        record("test_14b_available_cities_by_province",
+               sd["count"] == 15
+               and all(c["provinceCode"] == "370000"
+                       for c in sd["cities"]),
+               f"山东省可用数错误: {sd['count']}")
+
+        # test 14c: 无效省份码 409
+        try:
+            await svc.list_available_cities(
+                province_code="990000")
+            record("test_14c_invalid_province_409", False)
+        except ValueError:
+            record("test_14c_invalid_province_409", True)
+
+        # test 14d: apply 城市合法性(无效码拒绝)
+        try:
+            await svc.apply(member_id=991, member_level=5,
+                            store_name="脏数据店",
+                            city_code="999999",
+                            city_name="无效市",
+                            province_code="990000",
+                            province_name="无效省",
+                            business_license="BL991",
+                            food_license="FL991")
+            record("test_14d_apply_invalid_city_409", False)
+        except ValueError:
+            record("test_14d_apply_invalid_city_409", True)
 
         # test 15: 已占城市不在可用列表中
         occupied_codes = [c["cityCode"] for c in cities["cities"]]

@@ -153,11 +153,19 @@ async def apply(
 @router.get("/api/citystore/cities/available", tags=["市级网店模块"])
 async def list_available_cities(
     x_member_id: str = Header(None, alias="X-Member-Id"),
+    province: str | None = Query(
+        None, max_length=6,
+        description="省份码筛选(如 370000=山东省; 缺省全量)"),
 ):
-    """查询可用城市列表(未被独占的城市)"""
+    """查询可用城市列表(未被独占的城市)
+
+    城市源: 全国 34 省级行政区 + 344 地级行政区全量
+    (GB/T 2260)——申请开店城市选择数据源。
+    """
     _require_member_id(x_member_id)
     try:
-        result = await _service.list_available_cities()
+        result = await _service.list_available_cities(
+            province_code=province)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
