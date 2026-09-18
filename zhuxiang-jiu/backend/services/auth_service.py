@@ -16,6 +16,7 @@
     - AuthError  → 401(Token 无效/过期/被吊销/权限不足)
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -253,9 +254,23 @@ class AuthService:
 
         code = f"{random.randint(0, 999999):06d}"
         await self.auth_repo.save_sms_code(phone, code, self.SMS_CODE_TTL)
-        # 短信服务商未接入(纯标准库约定): 日志模拟通道; 生产接阿里云短信后替换此行
-        logger.info("sms_code_sent phone=%s code=%s ttl=%ds(当日第 %d 次)",
-                    phone, code, self.SMS_CODE_TTL, count)
+        # 短信通道: 阿里云凭据齐备(SMS_ALIYUN_* 四环境变量)走真实通道
+        # (to_thread 包装同步 urllib, 不阻塞事件循环);
+        # 未配置回退日志模拟通道(本地开发零影响)
+        from services import sms_aliyun
+        if sms_aliyun.is_configured():
+            try:
+                await asyncio.to_thread(sms_aliyun.send_code, phone, code)
+            except sms_aliyun.SmsError as exc:
+                logger.warning("sms_aliyun_send_failed phone=%s "
+                               "code=%s msg=%s", phone, exc.code,
+                               exc.message)
+                raise ValueError(
+                    f"短信发送失败: {exc.message}") from exc
+        else:
+            logger.info("sms_code_sent phone=%s code=%s ttl=%ds"
+                        "(当日第 %d 次, 模拟通道)",
+                        phone, code, self.SMS_CODE_TTL, count)
         return {"success": True, "phone": phone,
                 "expireSeconds": self.SMS_CODE_TTL,
                 "msg": "验证码已发送, 请查收短信"}
