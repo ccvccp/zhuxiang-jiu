@@ -1,10 +1,10 @@
 # 75号·竹韵·智衡竹奕酒智能大模型 full 转段交付总结
 
-> 文档版本：v1.1 · 2026-09-18（v1.1 补充第四章「代码变更明细」——4 文件变更点/行号/核心逻辑/兼容性影响面）
-> 转段动作：ZYH_MODE assist → full（四档灰度范式升档 + L1 自主域开放）
+> 文档版本：v1.2 · 2026-09-18（v1.1 补充第四章「代码变更明细」；v1.2 补充第七章「前端三面接入」——C端问答页生产上线/B端治理看板/产品页知识卡）
+> 转段动作：ZYH_MODE assist → full（四档灰度范式升档 + L1 自主域开放）+ 前端三面接入（C 端可达性闭环）
 > 前置文档：75号 SDD V3.0（工艺宪法/守门三层/DTDAE 范式）· 全周期交付（off→shadow→assist）
-> 关联提交：8aaad87（feat(zyh): 75号升full档——四档灰度范式+L1自主域auto_patrol）
-> 验证脚本：backend/prod_zyh_gradation_verify.py（四档自适应零破坏矩阵）
+> 关联提交：8aaad87（full 档四档范式升格）· 2703052（前端三面接入，+1040 行）
+> 验证脚本：backend/prod_zyh_gradation_verify.py（四档自适应零破坏矩阵）· backend/verify_zyh_front_auth.py（401 自愈链等价验证）
 
 ---
 
@@ -12,14 +12,14 @@
 
 | 维度 | 数据 |
 |---|---|
-| 转段时间 | 2026-09-18 21:50（Asia/Shanghai） |
+| 转段时间 | 2026-09-18 21:50（Asia/Shanghai）· 前端接入 22:29 |
 | 转段方向 | assist → full（四档范式最高档） |
 | 开放域 | L1 自主域白名单：auto_patrol（护栏自主巡检） |
 | 保留域 | 知识 upsert / 守门规则变更 / resume / cache clear——full 档亦人工（铁律） |
 | 范式依据 | 73/74 四档先例（member73 L1_AUTONOMY_DOMAINS / nexus74"A 档 auto 仅 full"） |
-| 生产状态 | zxjiu.com 公网 mode=full(env) · 容器 healthy |
-| 验证结论 | 本地 77/77 全绿 · 生产 23/23 全绿 |
-| 全站意义 | 十六模型中第三位 full 档（73 会员体验 / 74 NexusFlow / 75 竹韵·智衡） |
+| 生产状态 | zxjiu.com 公网 mode=full(env) · 容器 healthy · **C 端 zyh.html 已上线** |
+| 验证结论 | 本地 77/77 全绿 · 生产 23/23 全绿 · 前端公网四链全通 |
+| 全站意义 | 十六模型中第三位 full 档（73 会员体验 / 74 NexusFlow / 75 竹韵·智衡），且为首个前端三面齐备的 full 档模型 |
 
 ---
 
@@ -223,7 +223,63 @@ full 专属块实证逻辑：记录 `guard.checkCount` 快照 → 10 次同 quer
 
 ---
 
-## 七、运营机制
+## 七、前端三面接入（full 档 C 端可达性闭环 · 提交 2703052）
+
+### 7.0 接入背景与部署结构裁定
+
+full 档后端就绪后检查发现**前端零消费面**（本地面板站与生产 Taro dist 均无 /api/zyh 引用）。部署结构裁定：
+
+| 面 | 结构 | 接入方案 |
+|---|---|---|
+| 生产 C 端 | /var/www/zxjiu/dist 为 Taro H5 编译产物（**无源码工程**，改 chunk 高风险） | **独立静态页放 dist 根**——nginx `location / { try_files $uri ...; }` 直接 serve，零 Taro 依赖（备份 dist.bak-zyhfront） |
+| 本地面板站 | zhuxiang-jiu 根 HTML（40+ dashboard，不部署生产） | 惯例新增 zyh-dashboard.html |
+
+### 7.1 C 端 · zyh.html——竹酒知识问答页（**已上线 https://zxjiu.com/zyh.html**）
+
+自包含单文件（内联 CSS/JS 零外部依赖，移动端优先，竹香绿 #355c44 主题）：
+
+| 面 | 能力 | 实现要点 |
+|---|---|---|
+| 游客面 | 知识内核 8 卡折叠浏览 + 守门三层公示 | 公开白名单 GET（零鉴权成本） |
+| 登录面 | 底部抽屉登录（手机号+密码）→ 解锁问答框 | `POST /api/auth/login` → localStorage `zhuxiang.auth` |
+| 问答面 | `POST /api/zyh/chat`（Enter/按钮发送） | 精简 JWT 链：apiFetch **401 → refresh → retry 一次自愈**（对齐全站 401 自愈铁律） |
+| 守门友好化 | L1/L2 拦截渲染为"守门提示卡"（纠正话术+守门层标记+引用徽标），不报错 | guardrailsTriggered 分支 |
+| 合规 | 页脚健康警示"过量饮酒有害健康"·不作医疗宣传 | 企标合规三规则 |
+| 本地调试 | `zyh.html?api=http://localhost:8001` 覆盖 API base | 同域反代为生产默认 |
+
+### 7.2 B 端 · zyh-dashboard.html + js/zyh-dashboard.js——治理看板
+
+六区块全公开观测面只读（零鉴权、零管理面写操作）：①灰度态与护栏（四档 pill/decisionSeq/checkCount）②守门三层拦截分布 ③语义缓存（命中率/条目）④知识内核 ⑤工艺图谱 ⑥QA 留痕。script 引用加 `?v=2` 防浏览器缓存。
+
+### 7.3 产品详情页 · 知识卡联动
+
+product-detail.html 新增"竹酒知识内核"区块（工艺宪法/竹香香型/竹筒酒对立 3 锚点卡 + patent/standard 引用徽标）+ "问竹韵·智衡"入口按钮；后端不可达时静默降级（不阻断页面）。
+
+### 7.4 前端验证矩阵
+
+| 环境 | 链路 | 结果 |
+|---|---|---|
+| 本地（8001 后端 + 8080 静态） | 游客知识 8 卡 / 守门公示 | ✓（公示 213 字符含双证号） |
+| 本地 | 登录 → 问答"竹筒酒区别" | ✓ competitor_contrast 锚 + 双引用 + full 留痕 |
+| 本地 | L1 旧工艺提问 | ✓ 守门提示卡"守门层 L1 已纠正" |
+| 本地 | 401 自愈链等价验证（verify_zyh_front_auth.py） | ✓ 4/4（login→无效 token 401→refresh→retry 200） |
+| 本地 | 看板六区块 + 产品页知识卡 3 张 + 入口 | ✓ |
+| **生产公网** | 游客知识 8 卡 + 守门公示 | ✓ |
+| **生产公网** | member3 登录 → 竹香问答 | ✓ aroma_type 锚 + 企标 ZZ26SW1489404B + **灰度 full 留痕** |
+| **生产公网** | L1 旧工艺提问 | ✓ 纠正话术 + L1 已纠正 + 双引用 |
+
+### 7.5 过程修复沉淀
+
+| 问题 | 修复 |
+|---|---|
+| zyh.html loadRules 多行字符串拼接** ASI 陷阱**（行尾漏 `+` → 后续行成独立表达式静默截断，无报错） | 每行尾补显式 `+` |
+| 看板 pill 徽标被 esc() 转义为源码文本 | cell() 增加 raw 参数 |
+| 看板 JS 被浏览器缓存（改版不生效） | script 引用加 `?v=2` |
+| 本地 8000 端口为 WSL 转发旧服务（无 zyh 路由 404） | 本地后端改用 8001 新端口 |
+
+---
+
+## 八、运营机制
 
 **full 期巡检节奏**：
 
@@ -251,7 +307,7 @@ curl -X POST https://zxjiu.com/api/zyh/mode/override \
 
 ---
 
-## 八、转段终态
+## 九、转段终态
 
 | 项 | 终态 |
 |---|---|
@@ -260,6 +316,8 @@ curl -X POST https://zxjiu.com/api/zyh/mode/override \
 | 自主域 | auto_patrol 节流巡检运行（每 10 次决策 1 巡） |
 | 红线 | LLM 禁入守门与护栏（全确定性）· 守门三层随知识查询常开 |
 | 评分器 | zhuyun_cognition（batch49）在册 46号学习总线 |
+| **C 端** | **zyh.html 已上线（zxjiu.com/zyh.html）——游客知识+登录问答+守门友好化，URL 直达** |
+| **B 端** | zyh-dashboard.html 治理看板（六区块观测面只读） |
 | 全站位次 | 十六模型 full 档第三位（73/74/75），其余 assist 运行 |
 
-**结论**：75号竹韵·智衡 full 转段完成，四档灰度范式（off/shadow/assist/full）与 73/74 全站对齐；自主域严格收敛于低风险巡检动作（auto_patrol），知识内核/守门规则/护栏恢复四条永不自主红线全部保留人工显式性；本地 77/77 + 生产 23/23 双全绿验证通过，模块转入 full 档自主生产期。
+**结论**：75号竹韵·智衡 full 转段完成，四档灰度范式（off/shadow/assist/full）与 73/74 全站对齐；自主域严格收敛于低风险巡检动作（auto_patrol），知识内核/守门规则/护栏恢复四条永不自主红线全部保留人工显式性。**前后端完整闭环**——后端 15 端点 full 档生产运行（本地 77/77 + 生产 23/23 双全绿），C 端 zyh.html 知识问答页上线（游客零鉴权浏览 + 登录问答 401 自愈 + 守门拦截友好化，公网四链验证全通），B 端治理看板与产品详情页知识卡联动齐备。75号为全站十六模型中首个 full 档 + 前端三面（C端/B端/产品页）完整接入的模型。
