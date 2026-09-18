@@ -213,8 +213,9 @@ class ZyhRepository:
     async def cache_count(self) -> int:
         if is_redis_mode():
             client = await get_redis_client()
-            return sum(1 async for _ in client.scan_iter(
-                self._k("cache:*")))
+            keys = [k async for k in client.scan_iter(
+                self._k("cache:*"))]
+            return len(keys)
         return sum(1 for k in self._mem
                    if k.startswith(self._k("cache:")))
 

@@ -114,6 +114,10 @@ PUBLIC_GET_PREFIXES = (
     "/api/venue/venues",           # 合作场地列表(C端浏览)
     "/api/location/stores",        # 附近门店/门店详情(C端浏览,
                                     # 401 日志持续新增实证 2026-09-18)
+    "/api/zyh/",                  # 竹韵·智衡观测面 GET(75号知识内核
+                                    # 公开事实锚点: 工艺宪法/图谱/守门
+                                    # 规则——工艺科普游客可查; POST
+                                    # 决策面仍 JWT+门控)
 )
 
 
