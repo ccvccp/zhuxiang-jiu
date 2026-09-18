@@ -221,14 +221,20 @@
     </div>
 </div>
 
+<script src="js/auth.js"></script>
 <script>
 'use strict';
 
 var API_BASE_KEY = 'xiaozhuRt.apiBase';
 var state = { apiBase: localStorage.getItem(API_BASE_KEY)
               || 'http://localhost:8000' };
-var ADMIN_HEADERS = { 'X-Role': 'admin',
-                      'Content-Type': 'application/json' };
+/* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式), 未登录保留 compat 兼容头 */
+function adminHeaders() {
+    var h = { 'X-Role': 'admin',
+              'Content-Type': 'application/json' };
+    var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+    return auth ? Object.assign(h, auth) : h;
+}
 
 /* 攻击向量元数据(四类) */
 var VECTORS = {
@@ -340,7 +346,7 @@ async function runRedteam() {
     try {
         showInfo('红队用例集执行中(四类向量 14 用例跑真网关, 约 10-30 秒)…');
         var b = await fetchJson(api('/api/xiaozhu/fc/redteam'),
-            { method: 'POST', headers: ADMIN_HEADERS }, '红队用例集');
+            { method: 'POST', headers: adminHeaders() }, '红队用例集');
         document.getElementById('infoBar').style.display = 'none';
         document.getElementById('lastRun').textContent =
             '报告生成于 ' + new Date().toLocaleString();

@@ -50,10 +50,14 @@ async function xzFetch(url, options, label) {
     }
 }
 
+/* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式),
+   未登录保留 compat 兼容头(浮动组件宿主页可能未引 auth.js) */
 function xzHeaders() {
-    return {
+    var h = {
         'X-Member-Id': XIAOZHU_STATE.memberId || '0',
     };
+    var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+    return auth ? Object.assign(h, auth) : h;
 }
 
 /* ---- 卡片渲染(P0 六类: product_list/product_detail/

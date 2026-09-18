@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 47号·L2/L3 信值验真风控看板(P0-P4 五区块)
  * 范式: js/trust-dashboard.js(45号)平移——ES5、localStorage
  * 连接、区块化加载(手动刷新, 不进自动刷新)。
@@ -10,8 +10,12 @@
 var API_BASE_KEY = 'trustRiskDash.apiBase';
 var state = { apiBase: localStorage.getItem(API_BASE_KEY)
               || 'http://localhost:8000' };
-var ADMIN_HEADERS = { 'X-Role': 'admin',
-                      'Content-Type': 'application/json' };
+/* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式), 未登录保留 compat 兼容头 */
+function adminHeaders() {
+    var h = { 'X-Role': 'admin', 'Content-Type': 'application/json' };
+    var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+    return auth ? Object.assign(h, auth) : h;
+}
 
 function api(path) { return state.apiBase + path; }
 
@@ -98,7 +102,7 @@ function sigChips(hitCounts) {
 async function loadAll() {
     try {
         var b = await fetchJson(api('/api/trust/risk/dashboard'),
-            { headers: ADMIN_HEADERS }, '风控看板');
+            { headers: adminHeaders() }, '风控看板');
         var zones = b.zones || {};
         markUpdate();
 
@@ -258,7 +262,7 @@ async function runFairnessBridge() {
     try {
         var r = await fetchJson(
             api('/api/trust/risk/dashboard/fairness-bridge'),
-            { method: 'POST', headers: ADMIN_HEADERS },
+            { method: 'POST', headers: adminHeaders() },
             '公平性桥接');
         showInfo('公平性桥接完成: 上报 ' + (r.bridged || 0) +
             ' 个分组(' + (r.groups || []).join(', ') +
@@ -280,7 +284,7 @@ async function loadAudit() {
     }
     try {
         var p = await fetchJson(api('/api/trust/risk/' + tid),
-            { headers: ADMIN_HEADERS }, '画像查询');
+            { headers: adminHeaders() }, '画像查询');
         cells('ovPrior', [
             { k: 'trustId', v: p.trustId, cls: 'blue' },
             { k: '分层', v: p.tier, cls: p.tier === 'trusted'

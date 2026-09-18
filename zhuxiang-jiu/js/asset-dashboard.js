@@ -9,7 +9,12 @@ var state = {
     registryDomains: [],
 };
 
-function headers() { return { 'X-Role': 'admin' }; }
+/* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式), 未登录保留 compat 兼容头 */
+function headers() {
+    var h = { 'X-Role': 'admin' };
+    var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+    return auth ? Object.assign(h, auth) : h;
+}
 
 async function fetchJson(url, options, label) {
     var opts = Object.assign({ headers: headers() }, options || {});

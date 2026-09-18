@@ -72,8 +72,12 @@ var AIHubWidget = (function () {
     /* ========= API ========= */
     async function apiJson(path, options) {
         options = options || {};
+        /* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式),
+           未登录保留 compat 兼容头(浮动组件宿主页可能未引 auth.js) */
         var headers = { 'Content-Type': 'application/json', 'X-Member-Id': memberId() };
         if (state.role === 'admin') headers['X-Role'] = 'admin';
+        var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+        if (auth) { Object.assign(headers, auth); }
         var init = { method: options.method || 'GET', headers: headers };
         if (options.body) init.body = JSON.stringify(options.body);
         var res = await fetch(apiBase() + path, init);
@@ -157,9 +161,12 @@ var AIHubWidget = (function () {
         /* 路由决策(埋点已内含: route 内部 bump_intent);
            失败返回 null, 调用方回退 chat 旧轨(降级不阻断) */
         try {
+            var headers = { 'Content-Type': 'application/json', 'X-Member-Id': memberId() };
+            var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+            if (auth) { Object.assign(headers, auth); }
             var res = await fetch(apiBase() + '/api/hub/route', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Member-Id': memberId() },
+                headers: headers,
                 body: JSON.stringify({ text: text, role: state.role }),
             });
             if (!res.ok) return null;
@@ -379,9 +386,12 @@ var AIHubWidget = (function () {
         appendMessage('system', '🎙️ 语音识别中…（' + Math.round(dur / 1000) + '″）');
         try {
             var b64 = await blobToBase64(blob);
+            var asrHeaders = { 'Content-Type': 'application/json', 'X-Member-Id': memberId() };
+            var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+            if (auth) { Object.assign(asrHeaders, auth); }
             var res = await fetch(apiBase() + '/api/hub/asr', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Member-Id': memberId() },
+                headers: asrHeaders,
                 body: JSON.stringify({ audio_b64: b64, fmt: 'webm' }),
             });
             var body = null;

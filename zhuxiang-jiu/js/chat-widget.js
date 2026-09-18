@@ -67,7 +67,11 @@ var ChatWidget = (function () {
     /* ========= API ========= */
     async function apiJson(path, options) {
         options = options || {};
+        /* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式),
+           未登录保留 compat 兼容头(浮动组件宿主页可能未引 auth.js) */
         var headers = { 'Content-Type': 'application/json', 'X-Member-Id': memberId() };
+        var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+        if (auth) { Object.assign(headers, auth); }
         var init = { method: options.method || 'GET', headers: headers };
         if (options.body) init.body = JSON.stringify(options.body);
         var res = await fetch(apiBase() + path, init);

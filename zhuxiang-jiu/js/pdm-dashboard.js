@@ -18,11 +18,14 @@ var state = {
 
 function $(id) { return document.getElementById(id); }
 
+/* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式), 未登录保留 compat 兼容头 */
 function headers() {
-    return {
+    var h = {
         'X-Member-Id': state.memberId,
         'X-Role': state.role,
     };
+    var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+    return auth ? Object.assign(h, auth) : h;
 }
 
 async function fetchJson(url, options, label) {

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
  * 范式: js/trust-risk-dashboard.js(47号)平移——ES5、localStorage
  * 连接、区块化加载(手动刷新, 不进自动刷新)。
@@ -11,8 +11,12 @@
 var API_BASE_KEY = 'xiaozhuDash.apiBase';
 var state = { apiBase: localStorage.getItem(API_BASE_KEY)
               || 'http://localhost:8000' };
-var ADMIN_HEADERS = { 'X-Role': 'admin',
-                      'Content-Type': 'application/json' };
+/* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式), 未登录保留 compat 兼容头 */
+function adminHeaders() {
+    var h = { 'X-Role': 'admin', 'Content-Type': 'application/json' };
+    var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+    return auth ? Object.assign(h, auth) : h;
+}
 
 function api(path) { return state.apiBase + path; }
 
@@ -98,7 +102,7 @@ function kindChips(counts) {
 async function loadAll() {
     try {
         var b = await fetchJson(api('/api/xiaozhu/dashboard'),
-            { headers: ADMIN_HEADERS }, '语音中枢看板');
+            { headers: adminHeaders() }, '语音中枢看板');
         var zones = b.zones || {};
         markUpdate();
         if ((b.zoneErrors || []).length) {
@@ -304,7 +308,7 @@ async function reviewCustom(cmdId, approve) {
     try {
         await fetchJson(
             api('/api/xiaozhu/commands/custom/' + cmdId + '/review'),
-            { method: 'POST', headers: ADMIN_HEADERS,
+            { method: 'POST', headers: adminHeaders(),
               body: JSON.stringify({ approve: approve,
                                      note: '看板一键' +
                                            (approve ? '上架' : '驳回') }) },
@@ -321,7 +325,7 @@ async function runFairnessBridge() {
     try {
         var b = await fetchJson(
             api('/api/xiaozhu/dashboard/fairness-bridge'),
-            { method: 'POST', headers: ADMIN_HEADERS }, '公平性桥接');
+            { method: 'POST', headers: adminHeaders() }, '公平性桥接');
         showInfo('桥接完成: 上报 ' + (b.bridged || 0) + ' 组(' +
                  ((b.groups || []).join(', ') || '无有效分组') + ')');
         loadAll();
@@ -334,7 +338,7 @@ async function runRedteam() {
     try {
         showInfo('红队用例集执行中(四类向量 14 用例跑真网关)…');
         var b = await fetchJson(api('/api/xiaozhu/fc/redteam'),
-            { method: 'POST', headers: ADMIN_HEADERS }, '红队复跑');
+            { method: 'POST', headers: adminHeaders() }, '红队复跑');
         if ((b.breached || 0) > 0) {
             var names = (b.cases || []).filter(function (c) {
                 return !c.blocked;

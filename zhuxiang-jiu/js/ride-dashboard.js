@@ -9,9 +9,11 @@ var state = {
     timer: null,
 };
 
+/* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式), 未登录保留 compat 兼容头 */
 function headers(admin) {
-    if (admin) return { 'X-Role': 'admin' };
-    return { 'X-Member-Id': state.memberId };
+    var h = admin ? { 'X-Role': 'admin' } : { 'X-Member-Id': state.memberId };
+    var auth = (typeof Auth !== 'undefined') ? Auth.apiHeaders() : null;
+    return auth ? Object.assign(h, auth) : h;
 }
 
 async function fetchJson(url, options, label, admin) {
