@@ -33,6 +33,26 @@
             <div id="productDesc" style="max-width:800px;margin:0 auto;line-height:2;color:var(--color-text);"></div>
         </section>
 
+        <!-- 75号·竹韵·智衡 知识内核联动(游客白名单 GET /api/zyh/knowledge) -->
+        <section class="section" style="background:#fff;border-radius:16px;padding:40px;margin-bottom:30px;">
+            <div class="section-title">
+                <h2>竹酒<span>知识内核</span></h2>
+                <div class="deco-line"></div>
+            </div>
+            <div id="zyhKnowledge" style="max-width:800px;margin:0 auto;color:var(--color-text);">
+                <p style="color:#999;font-size:14px;">加载中…（75号·竹韵·智衡 事实锚点）</p>
+            </div>
+            <div style="text-align:center;margin-top:24px;">
+                <a href="zyh.html" style="display:inline-block;padding:10px 28px;border-radius:22px;
+                    background:var(--color-primary,#355c44);color:#fff;text-decoration:none;font-size:14px;">
+                    🎋 问竹韵·智衡（工艺 / 香型 / 竞品对比）
+                </a>
+                <p style="font-size:11px;color:#aaa;margin-top:8px;">
+                    智能问答经守门三层（L1 正则 / L2 分类 / L3 溯源）应答 · 健康警示：过量饮酒有害健康
+                </p>
+            </div>
+        </section>
+
         <!-- 相关推荐 -->
         <section class="section">
             <div class="section-title">
@@ -144,6 +164,41 @@
         // 相关推荐（同系列的其他产品）
         const related = PRODUCTS.filter(p => p.id !== product.id && (p.series === product.series || p.category === product.category)).slice(0, 4);
         document.getElementById('relatedProducts').innerHTML = related.map(renderProductCard).join('');
+
+        // 75号·竹韵·智衡 知识内核联动(游客白名单 GET /api/zyh/knowledge)
+        // 取工艺宪法 + 竹香香型两条事实锚点渲染; 后端不可达时静默降级(不阻断页面)
+        (function loadZyhKnowledge() {
+            const apiBase = localStorage.getItem('knowledgeDash.apiBase')
+                || localStorage.getItem('aiLearningDash.apiBase')
+                || 'http://localhost:8000';
+            const WANT = ['craft_constitution', 'aroma_type', 'competitor_contrast'];
+            fetch(apiBase + '/api/zyh/knowledge').then(r => r.ok ? r.json() : null)
+                .then(d => {
+                    const box = document.getElementById('zyhKnowledge');
+                    if (!d || !Array.isArray(d.items) || !d.items.length) {
+                        box.innerHTML = '<p style="color:#999;font-size:13px;">'
+                            + '知识内核暂不可达——可直接访问 <a href="zyh.html" '
+                            + 'style="color:var(--color-primary,#355c44);">竹韵·智衡问答</a>。</p>';
+                        return;
+                    }
+                    const items = WANT.map(id => d.items.find(it => it.id === id))
+                        .filter(Boolean);
+                    box.innerHTML = items.map(it => `
+                        <div style="border:1px solid var(--color-border,#e4e9e6);border-radius:10px;
+                            padding:16px 18px;margin-bottom:14px;">
+                            <h4 style="margin:0 0 6px;color:var(--color-primary-dark,#24422f);">
+                                🎋 ${it.title}</h4>
+                            <p style="margin:0;font-size:14px;line-height:1.9;">${it.content}</p>
+                            <div style="margin-top:8px;">
+                                ${(it.citations || []).map(c =>
+                                    `<span style="display:inline-block;font-size:11px;background:#eef4f0;
+                                        color:#2f6b4f;border-radius:4px;padding:1px 8px;margin-right:4px;">
+                                        ${c.type} · ${c.id}</span>`).join('')}
+                            </div>
+                        </div>`).join('');
+                })
+                .catch(() => { /* 静默降级——保持占位文案 */ });
+        })();
 
         // 数量增减
         function changeQty(delta) {

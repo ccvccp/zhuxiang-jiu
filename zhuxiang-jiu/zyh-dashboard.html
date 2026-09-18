@@ -1,0 +1,194 @@
+<!--
+    75号·竹韵·智衡竹奕酒智能大模型 治理看板(六区块)
+    页面: zyh-dashboard.html(配套脚本 js/zyh-dashboard.js)
+    依赖: css/style.css(主题变量) / 后端 75号 zyh_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    数据源: 全公开观测面 GET(游客白名单, 零鉴权):
+        /api/zyh/mode   灰度态+护栏+full自主域  /api/zyh/stats 守门/缓存统计
+        /api/zyh/qa     问答留痕               /api/zyh/knowledge 知识内核
+        /api/zyh/graph  工艺图谱
+    区块: ①灰度态与护栏(四档/自主巡检决策计数/巡检留痕)
+          ②守门三层拦截分布 ③语义缓存 ④知识内核(8条事实锚点)
+          ⑤工艺图谱(节点+关系) ⑥问答留痕(最近N条)
+    红线: 知识 upsert/守门规则/resume/cache clear 永不自主(full档亦人工);
+          LLM 禁入守门与护栏(全确定性)。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>75号·竹韵·智衡治理看板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#355c44,#1f3a2a);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #2d3748;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:8px}
+    .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
+        padding:8px 10px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .v{font-size:17px;font-weight:600}
+    .ov-cell .v.red{color:#c0392b}
+    .ov-cell .v.green{color:#2f9e44}
+    .ov-cell .v.blue{color:#24619c}
+    .ov-cell .v.yellow{color:#a37400}
+    table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
+    .dash-table th{text-align:left;padding:6px 8px;background:
+        var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
+        var(--color-border,#ddd);white-space:nowrap}
+    .dash-table td{padding:5px 8px;border-bottom:1px solid
+        var(--color-border,#eee);vertical-align:top}
+    .grade-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600}
+    .grade-pill.full{background:#e8f2ec;color:#2f9e44}
+    .grade-pill.assist{background:#e9f0f8;color:#24619c}
+    .grade-pill.shadow{background:#f0ecf8;color:#6747c9}
+    .grade-pill.off{background:#eee;color:#777}
+    .grade-pill.paused{background:#c0392b;color:#fff}
+    .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
+        padding:8px 12px;border-radius:5px;margin-bottom:14px;
+        font-size:11px}
+    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    .kv-line{font-size:11px;color:#666;margin-top:8px;line-height:1.7}
+    .cite-tag{display:inline-block;background:#eef4f0;color:#2f6b4f;
+        border-radius:4px;padding:0 6px;font-size:10px;margin:1px 2px}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>75号·竹韵·智衡治理看板</h1>
+    <p>竹奕酒工艺宪法守门 + 知识内核 + 语义缓存 + 四档灰度（off/shadow/assist/full）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div class="redline-bar">
+                ⚠️ 永不自主铁律(full 档亦人工)：知识条目 upsert(单一事实源)·
+                守门规则变更(L1/L2/L3)·护栏恢复 resume(人工留痕)·
+                缓存清空(管理面)。LLM 禁入守门与护栏——全确定性。
+            </div>
+        </div>
+    </div>
+
+    <!-- ① 灰度态与护栏 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 灰度态与护栏（四档 · full 自主域 · 巡检留痕）</h3></div>
+            <div id="ovMode" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            <div id="modeDetail" class="kv-line"></div>
+        </div>
+    </div>
+
+    <!-- ② 守门三层拦截分布 + ③ 语义缓存 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② 守门三层拦截分布｜③ 语义缓存</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovGuard" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888">
+                        L1 正则网关(旧工艺/医疗/注入) → L2 规则分类(混淆/等同/
+                        医疗断言/无引用) → L3 溯源(专利 ZZ26SW1489303A /
+                        企标 ZZ26SW1489404B)。
+                    </div>
+                </div>
+                <div>
+                    <div id="ovCache" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888">
+                        语义缓存: 归一化 query → 应答, TTL 7 天; 命中即返回
+                        (cacheHit 留痕)。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ④ 知识内核 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>④ 知识内核（单一事实源 · 专利/企标锚定）</h3></div>
+            <div style="max-height:300px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr><th>条目</th><th>标题</th><th>引用锚点</th></tr></thead>
+                    <tbody id="knowledgeRows"><tr><td colspan="3"
+                        class="dash-empty">加载中…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑤ 工艺图谱 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑤ 工艺图谱（SDD §4.1 Schema · 节点 + 关系）</h3></div>
+            <div id="ovGraph" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            <div id="graphEdges" class="kv-line"></div>
+        </div>
+    </div>
+
+    <!-- ⑥ 问答留痕 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑥ 问答留痕（决策流量 · 守门分布 · 缓存命中）</h3>
+                <div class="dash-toolbar">
+                    <select id="qaLimit">
+                        <option value="10" selected>最近 10 条</option>
+                        <option value="20">最近 20 条</option>
+                        <option value="50">最近 50 条</option>
+                    </select>
+                    <button class="dash-btn ghost" onclick="loadQa()">刷新留痕</button>
+                </div>
+            </div>
+            <div style="max-height:280px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>ID</th><th>问题</th><th>守门层</th><th>知识命中</th><th>缓存</th>
+                    </tr></thead>
+                    <tbody id="qaRows"><tr><td colspan="5"
+                        class="dash-empty">加载中…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        全公开观测面 GET(游客白名单, 本看板零鉴权只读) ·
+        C 端入口: <a href="zyh.html" target="_blank">zyh.html 竹酒知识问答</a> ·
+        文档: docs/75号_竹韵智衡竹奕酒智能大模型_full转段交付总结.md
+    </div>
+</div>
+
+<script src="js/zyh-dashboard.js?v=2"></script>
+</body>
+</html>

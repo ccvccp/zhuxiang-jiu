@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<!--
+    zyh.html · 75号·竹韵·智衡 C端竹酒知识问答页(自包含, 零外部依赖)
+    ============================================================
+    部署: 生产 dist 根 /var/www/zxjiu/dist/zyh.html(nginx try_files 直 serve)
+    定位: Taro H5 之外的独立静态页——URL 直达(https://zxjiu.com/zyh.html)
+    数据源:
+        游客(公开白名单 GET): /api/zyh/knowledge 知识内核 + /api/zyh/rules 守门公示
+        登录(JWT): POST /api/zyh/chat 决策面问答
+    鉴权: 精简 JWT 链——login → localStorage 'zhuxiang.auth' →
+          apiFetch(401 → refresh → retry 一次自愈)
+    合规: 守门拦截响应友好化(guardrailsTriggered → 守门提示卡, 不报错);
+          页脚健康警示"过量饮酒有害健康"(企标合规三规则)。
+    本地调试: zyh.html?api=http://localhost:8000 覆盖 API base。
+    ============================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#355c44">
+<title>竹韵·智衡 · 竹奕酒知识问答 - 竹香酒</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+            "Helvetica Neue", "Microsoft YaHei", sans-serif;
+        background: #f2f5f3; color: #2c3a31; line-height: 1.65;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 0 14px 40px; }
+
+    /* 顶栏 */
+    .topbar {
+        position: sticky; top: 0; z-index: 20;
+        background: linear-gradient(135deg, #355c44, #24422f);
+        color: #fff; padding: 12px 16px;
+        display: flex; align-items: center; justify-content: space-between;
+        box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    }
+    .brand { font-size: 17px; font-weight: 600; letter-spacing: 1px; }
+    .brand small { font-weight: 400; opacity: .75; font-size: 11px; display:block; letter-spacing: 0; }
+    .auth-box { text-align: right; }
+    .btn {
+        border: none; border-radius: 6px; cursor: pointer; font-size: 13px;
+        padding: 7px 14px; background: rgba(255,255,255,.16); color: #fff;
+    }
+    .btn:active { opacity: .8; }
+    .btn.primary { background: #355c44; color: #fff; }
+    .btn.ghost { background: #fff; color: #355c44; border: 1px solid #cfdcd4; }
+    .user-chip { font-size: 12px; opacity: .9; margin-bottom: 4px; }
+
+    /* hero */
+    .hero {
+        background: #fff; border-radius: 12px; margin: 14px 0;
+        padding: 18px 16px; box-shadow: 0 1px 4px rgba(44,58,49,.06);
+    }
+    .hero h1 { font-size: 18px; color: #24422f; margin-bottom: 6px; }
+    .hero p { font-size: 12.5px; color: #5b6b60; }
+    .hero .anchors { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag {
+        display: inline-block; font-size: 10.5px; border-radius: 4px;
+        background: #eef4f0; color: #2f6b4f; padding: 2px 8px;
+    }
+
+    /* 问答区 */
+    .chat-card {
+        background: #fff; border-radius: 12px; padding: 16px;
+        box-shadow: 0 1px 4px rgba(44,58,49,.06); margin-bottom: 14px;
+    }
+    .chat-card h2 { font-size: 15px; color: #24422f; margin-bottom: 10px; }
+    .chat-input-row { display: flex; gap: 8px; }
+    .chat-input-row input {
+        flex: 1; border: 1px solid #cfdcd4; border-radius: 8px;
+        padding: 10px 12px; font-size: 14px; outline: none;
+    }
+    .chat-input-row input:focus { border-color: #355c44; }
+    .login-hint { font-size: 12.5px; color: #8a978e; margin-top: 10px; }
+    .login-hint a { color: #2f6b4f; cursor: pointer; text-decoration: underline; }
+
+    /* 会话流 */
+    .msg { margin: 12px 0; }
+    .msg .who { font-size: 11px; color: #8a978e; margin-bottom: 3px; }
+    .bubble { border-radius: 10px; padding: 10px 13px; font-size: 13.5px; }
+    .bubble.user { background: #355c44; color: #fff; margin-left: 15%; }
+    .bubble.bot { background: #fff; box-shadow: 0 1px 3px rgba(44,58,49,.07); margin-right: 4%; }
+    .bubble.bot.blocked { background: #fff8f0; border: 1px solid #e8c998; }
+    .bubble .cites { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .bubble .cite { font-size: 10px; background: #eef4f0; color: #2f6b4f;
+        border-radius: 3px; padding: 1px 6px; }
+    .bubble .meta { margin-top: 6px; font-size: 10.5px; color: #9aa79e; }
+    .bubble .meta .ok { color: #2f9e44; }
+    .guard-line { font-size: 11px; color: #8a5a00; margin-top: 6px; }
+    .thinking { color: #8a978e; font-size: 12px; padding: 6px 2px; }
+
+    /* 登录抽屉 */
+    .drawer-mask {
+        display: none; position: fixed; inset: 0; z-index: 30;
+        background: rgba(20,28,23,.45);
+    }
+    .drawer-mask.show { display: block; }
+    .drawer {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 31;
+        background: #fff; border-radius: 16px 16px 0 0; padding: 20px 18px 28px;
+        display: none; max-width: 680px; margin: 0 auto;
+    }
+    .drawer.show { display: block; }
+    .drawer h3 { font-size: 16px; color: #24422f; margin-bottom: 4px; }
+    .drawer .sub { font-size: 12px; color: #8a978e; margin-bottom: 14px; }
+    .field { margin-bottom: 12px; }
+    .field label { font-size: 12px; color: #5b6b60; display: block; margin-bottom: 4px; }
+    .field input {
+        width: 100%; border: 1px solid #cfdcd4; border-radius: 8px;
+        padding: 10px 12px; font-size: 14px; outline: none;
+    }
+    .field input:focus { border-color: #355c44; }
+    .form-err { color: #c0392b; font-size: 12px; min-height: 16px; margin-bottom: 6px; }
+
+    /* 知识内核 */
+    .sec-title {
+        font-size: 15px; color: #24422f; margin: 20px 0 10px;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .sec-title:before { content: ""; width: 4px; height: 16px;
+        background: #355c44; border-radius: 2px; display: inline-block; }
+    .kcard {
+        background: #fff; border-radius: 10px; margin-bottom: 10px;
+        box-shadow: 0 1px 3px rgba(44,58,49,.05); overflow: hidden;
+    }
+    .kcard .khead {
+        padding: 12px 14px; display: flex; justify-content: space-between;
+        align-items: center; cursor: pointer;
+    }
+    .kcard .khead h4 { font-size: 13.5px; color: #2c3a31; font-weight: 600; }
+    .kcard .khead .arrow { color: #8a978e; font-size: 12px; transition: transform .2s; }
+    .kcard.open .khead .arrow { transform: rotate(90deg); }
+    .kcard .kbody { display: none; padding: 0 14px 12px; }
+    .kcard.open .kbody { display: block; }
+    .kcard .kbody p { font-size: 12.5px; color: #4c5a50; }
+    .kcard .kbody .cites { margin-top: 8px; }
+
+    /* 守门公示 */
+    .rules-box {
+        background: #fff; border-radius: 10px; padding: 14px;
+        font-size: 12px; color: #4c5a50; line-height: 1.8;
+        box-shadow: 0 1px 3px rgba(44,58,49,.05);
+    }
+    .rules-box b { color: #24422f; }
+
+    footer {
+        text-align: center; font-size: 11px; color: #9aa79e;
+        padding: 18px 10px 8px; line-height: 1.8;
+    }
+    .toast {
+        position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%);
+        background: rgba(36,66,47,.92); color: #fff; font-size: 12.5px;
+        border-radius: 18px; padding: 8px 18px; z-index: 40;
+        opacity: 0; transition: opacity .25s; pointer-events: none;
+        max-width: 80%;
+    }
+    .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <div class="brand">竹韵·智衡<small>竹奕酒智能问答 · 工艺宪法守门</small></div>
+    <div class="auth-box" id="authBox"></div>
+</div>
+
+<div class="wrap">
+
+    <div class="hero">
+        <h1>竹奕酒 · 全竹发酵蒸馏</h1>
+        <p>以全竹竹材（竹秆、竹叶、竹根）为发酵原料，经微生物发酵、多轮蒸馏而得的蒸馏酒。竹香为瑞麒竹奕酒企标定义的专属法定香型，与竹筒酒（基酒注入竹腔浸泡）工艺本质不同。</p>
+        <div class="anchors">
+            <span class="tag">专利 ZZ26SW1489303A</span>
+            <span class="tag">竹香企标 ZZ26SW1489404B</span>
+            <span class="tag">竹筒酒 ≠ 竹奕酒</span>
+        </div>
+    </div>
+
+    <!-- 问答区 -->
+    <div class="chat-card">
+        <h2>问问竹韵·智衡</h2>
+        <div id="chatZone">
+            <div class="chat-input-row">
+                <input id="promptInput" maxlength="2000"
+                    placeholder="如：竹奕酒的工艺和竹筒酒有什么区别？">
+                <button class="btn primary" id="sendBtn" onclick="sendChat()">发送</button>
+            </div>
+            <div class="login-hint" id="loginHint"></div>
+        </div>
+        <div id="chatFlow"></div>
+    </div>
+
+    <!-- 知识内核 -->
+    <div class="sec-title">知识内核 · 事实锚点</div>
+    <div id="knowledgeList">
+        <div class="kcard"><div class="khead"><h4>加载中…</h4></div></div>
+    </div>
+
+    <!-- 守门公示 -->
+    <div class="sec-title">守门三层 · 合规公示</div>
+    <div class="rules-box" id="rulesBox">加载中…</div>
+
+    <footer>
+        竹韵·智衡为确定性知识问答（LLM 禁入守门与护栏）·
+        不作医疗功效宣传<br>
+        健康警示：过量饮酒有害健康 · 未成年人禁止饮酒
+    </footer>
+</div>
+
+<!-- 登录抽屉 -->
+<div class="drawer-mask" id="drawerMask" onclick="toggleDrawer(false)"></div>
+<div class="drawer" id="loginDrawer">
+    <h3>登录解锁智能问答</h3>
+    <div class="sub">会员账号登录后可向竹韵·智衡提问（工艺 / 香型 / 竞品对比 / 合规）</div>
+    <div class="field">
+        <label>手机号</label>
+        <input id="phoneInput" type="tel" maxlength="11" placeholder="13800000001">
+    </div>
+    <div class="field">
+        <label>密码</label>
+        <input id="pwdInput" type="password" placeholder="登录密码">
+    </div>
+    <div class="form-err" id="formErr"></div>
+    <button class="btn primary" style="width:100%;padding:11px" onclick="doLogin()">登 录</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+    'use strict';
+
+    /* ---------- API base(同域反代; ?api= 覆盖供本地调试) ---------- */
+    var API = (function () {
+        var m = location.search.match(/[?&]api=([^&]+)/);
+        if (m) { return decodeURIComponent(m[1]).replace(/\/+$/, ''); }
+        return '';  // 生产同域
+    })();
+
+    var AUTH_KEY = 'zhuxiang.auth';
+
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                     '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function toast(msg) {
+        var t = $('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(function () { t.classList.remove('show'); }, 2200);
+    }
+
+    /* ---------- 会话(精简 JWT 链) ---------- */
+
+    function session() {
+        try { return JSON.parse(localStorage.getItem(AUTH_KEY)) || null; }
+        catch (e) { return null; }
+    }
+    function saveSession(body) {
+        localStorage.setItem(AUTH_KEY, JSON.stringify({
+            token: body.accessToken,
+            refreshToken: body.refreshToken || null,
+            memberId: body.memberId || null,
+            name: body.name || body.nickname || null,
+            savedAt: Date.now(),
+        }));
+    }
+    function clearSession() { localStorage.removeItem(AUTH_KEY); }
+
+    async function apiFetch(path, options) {
+        var s = session();
+        var opts = options || {};
+        if (s && s.token) {
+            opts.headers = Object.assign({}, opts.headers, {
+                'Authorization': 'Bearer ' + s.token,
+            });
+        }
+        var res = await fetch(API + path, opts);
+        // 401 → refresh → retry 一次(自愈)
+        if (res.status === 401 && s && s.refreshToken && !opts._retried) {
+            var ok = await refresh();
+            if (ok) {
+                opts._retried = true;
+                return apiFetch(path, opts);
+            }
+            clearSession();
+            renderAuth();
+            throw new Error('登录已过期，请重新登录');
+        }
+        return res;
+    }
+
+    async function refresh() {
+        var s = session();
+        if (!s || !s.refreshToken) { return false; }
+        try {
+            var res = await fetch(API + '/api/auth/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken: s.refreshToken }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.accessToken) {
+                saveSession(body);
+                return true;
+            }
+        } catch (e) { /* 网络异常按失败处理 */ }
+        return false;
+    }
+
+    /* ---------- 顶栏渲染 ---------- */
+
+    function renderAuth() {
+        var s = session();
+        var box = $('authBox');
+        var hint = $('loginHint');
+        if (s && s.token) {
+            box.innerHTML = '<div class="user-chip">会员 '
+                + esc(s.name || (s.memberId != null ? '#' + s.memberId : ''))
+                + '</div><button class="btn" onclick="doLogout()">退出</button>';
+            hint.innerHTML = '已登录——提问将经守门三层（L1 正则 / L2 分类 / L3 溯源）应答。';
+        } else {
+            box.innerHTML = '<button class="btn" onclick="toggleDrawer(true)">登录</button>';
+            hint.innerHTML = '游客可浏览知识内核与守门公示；'
+                + '<a onclick="toggleDrawer(true)">登录</a> 后解锁智能问答。';
+        }
+    }
+
+    window.toggleDrawer = function (show) {
+        $('loginDrawer').classList.toggle('show', show);
+        $('drawerMask').classList.toggle('show', show);
+        if (!show) { $('formErr').textContent = ''; }
+    };
+
+    window.doLogin = async function () {
+        var phone = $('phoneInput').value.trim();
+        var pwd = $('pwdInput').value;
+        if (!/^1\d{10}$/.test(phone)) {
+            $('formErr').textContent = '请输入 11 位手机号'; return;
+        }
+        if (!pwd) { $('formErr').textContent = '请输入密码'; return; }
+        try {
+            var res = await fetch(API + '/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: phone, password: pwd }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.accessToken) {
+                saveSession(body);
+                toggleDrawer(false);
+                renderAuth();
+                toast('登录成功，欢迎提问');
+            } else {
+                $('formErr').textContent = (body && (body.detail || body.message))
+                    || '登录失败，请检查手机号与密码';
+            }
+        } catch (e) {
+            $('formErr').textContent = '网络异常，请稍后重试';
+        }
+    };
+
+    window.doLogout = function () {
+        clearSession();
+        renderAuth();
+        toast('已退出登录');
+    };
+
+    /* ---------- 问答(决策面 POST /api/zyh/chat) ---------- */
+
+    window.sendChat = async function () {
+        var input = $('promptInput');
+        var prompt = input.value.trim();
+        if (!prompt) { toast('请输入问题'); return; }
+        if (!(session() || {}).token) {
+            toggleDrawer(true);
+            toast('请先登录再提问');
+            return;
+        }
+        input.value = '';
+        appendMsg('user', prompt);
+        var holder = appendMsg('thinking', '竹韵·智衡思考中…');
+
+        try {
+            var res = await apiFetch('/api/zyh/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: prompt }),
+            });
+            var body = await res.json();
+            holder.remove();
+            if (res.status === 409) {
+                appendMsg('bot-blocked', null, {
+                    content: '智能问答暂未开放（灰度关闭中），知识内核可正常浏览。',
+                });
+                return;
+            }
+            if (!res.ok) {
+                appendMsg('bot-blocked', null, {
+                    content: '请求失败(' + res.status + ')：'
+                        + ((body && (body.detail || body.message)) || '请稍后重试'),
+                });
+                return;
+            }
+            appendMsg(body.guardrailsTriggered ? 'bot-blocked' : 'bot', null, body);
+        } catch (e) {
+            holder.remove();
+            appendMsg('bot-blocked', null, { content: e.message || '网络异常' });
+        }
+    };
+
+    function appendMsg(kind, text, body) {
+        var flow = $('chatFlow');
+        var div = document.createElement('div');
+        div.className = 'msg';
+        if (kind === 'user') {
+            div.innerHTML = '<div class="who">我</div>'
+                + '<div class="bubble user">' + esc(text) + '</div>';
+        } else if (kind === 'thinking') {
+            div.innerHTML = '<div class="bubble bot thinking" style="margin-left:4%">'
+                + esc(text) + '</div>';
+        } else if (kind === 'bot-blocked') {
+            var b = body || {};
+            var html = '<div class="who">竹韵·智衡 · 守门提示</div>'
+                + '<div class="bubble bot blocked">' + esc(b.content || '')
+                + (b.guardLayer
+                    ? '<div class="guard-line">守门层 L' + esc(b.guardLayer) + ' 已纠正</div>'
+                    : '')
+                + citeHtml(b) + metaHtml(b, true) + '</div>';
+            div.innerHTML = html;
+        } else {
+            var b2 = body || {};
+            div.innerHTML = '<div class="who">竹韵·智衡</div>'
+                + '<div class="bubble bot">' + esc(b2.content || '')
+                + citeHtml(b2) + metaHtml(b2, false) + '</div>';
+        }
+        flow.appendChild(div);
+        div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        return div;
+    }
+
+    function citeHtml(b) {
+        var cites = b.citations || [];
+        if (!cites.length) { return ''; }
+        var tags = cites.map(function (c) {
+            return '<span class="cite">' + esc(c.type || 'ref') + ' · '
+                + esc(c.id || '') + '</span>';
+        }).join('');
+        return '<div class="cites">' + tags + '</div>';
+    }
+
+    function metaHtml(b, blocked) {
+        var bits = [];
+        if (b.cacheHit) { bits.push('<span class="ok">语义缓存命中</span>'); }
+        if (b.zyhMode) { bits.push('灰度 ' + esc(b.zyhMode)); }
+        if (!blocked && b.knowledgeId) { bits.push('知识锚 ' + esc(b.knowledgeId)); }
+        if (!bits.length) { return ''; }
+        return '<div class="meta">' + bits.join(' · ') + '</div>';
+    }
+
+    $('promptInput').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { sendChat(); }
+    });
+
+    /* ---------- 游客面: 知识内核 + 守门公示 ---------- */
+
+    function loadKnowledge() {
+        fetch(API + '/api/zyh/knowledge').then(function (r) { return r.json(); })
+            .then(function (d) {
+                var items = d.items || [];
+                if (!items.length) {
+                    $('knowledgeList').innerHTML =
+                        '<div class="kcard"><div class="khead"><h4>暂无数据</h4></div></div>';
+                    return;
+                }
+                $('knowledgeList').innerHTML = items.map(function (it, i) {
+                    var cites = (it.citations || []).map(function (c) {
+                        return '<span class="cite">' + esc(c.type) + ' · '
+                            + esc(c.id) + '</span>';
+                    }).join('');
+                    return '<div class="kcard' + (i === 0 ? ' open' : '') + '">'
+                        + '<div class="khead" onclick="this.parentNode.classList'
+                        + '.toggle(\'open\')"><h4>' + esc(it.title)
+                        + '</h4><span class="arrow">▸</span></div>'
+                        + '<div class="kbody"><p>' + esc(it.content) + '</p>'
+                        + '<div class="cites">' + cites + '</div></div></div>';
+                }).join('');
+            })
+            .catch(function () {
+                $('knowledgeList').innerHTML =
+                    '<div class="kcard"><div class="khead"><h4>加载失败，请刷新重试</h4></div></div>';
+            });
+    }
+
+    function loadRules() {
+        fetch(API + '/api/zyh/rules').then(function (r) { return r.json(); })
+            .then(function (d) {
+                var l3 = d.l3 || {};
+                var cite = d.citation || {};
+                $('rulesBox').innerHTML =
+                    '<b>L1 正则网关</b>：旧工艺表述（活竹种酒/注入/竹腔陈化）· '
+                    + '医疗功效 · 指令注入 → 拦截并输出合规纠正话术<br>'
+                    + '<b>L2 规则分类</b>：工艺混淆 · 他企等同化（竹筒酒=竹奕酒）· '
+                    + '医疗断言 · 无引用断言 → 拦截<br>'
+                    + '<b>L3 溯源校验</b>：' + esc(l3.craftClaim || '') + '；'
+                    + esc(l3.aromaClaim || '') + '<br>'
+                    + '<b>事实锚点</b>：专利 ' + esc(cite.patent || '')
+                    + ' · 企标 ' + esc(cite.standard || '')
+                    + '（技术断言必含引用，无引用不出断言）';
+            })
+            .catch(function () {
+                $('rulesBox').textContent = '加载失败，请刷新重试';
+            });
+    }
+
+    renderAuth();
+    loadKnowledge();
+    loadRules();
+})();
+</script>
+</body>
+</html>
