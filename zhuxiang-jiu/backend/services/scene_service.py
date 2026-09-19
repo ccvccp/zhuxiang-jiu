@@ -234,11 +234,14 @@ class SceneService:
             background: 动态背景码(festival/snowy/rainy/foggy/night/
             sunny/cloudy/day)——前端渐变主题切换
         """
-        from core.helpers import ts
+        # 北京时间(UTC+8 固定偏移, 中国无夏令时)——时段与节日判定
+        # 须用用户本地时钟: ts() 是 UTC, 直接取小时对中国用户错位 8h
+        # (早 7 点被问候"夜深了"), 节日凌晨 0-8 点亦会按前一天漏判
+        from datetime import UTC, datetime, timedelta
 
-        now = ts()
-        today = date or now[:10]
-        hour = int(now[11:13])
+        now_cn = datetime.now(UTC) + timedelta(hours=8)
+        today = date or now_cn.strftime("%Y-%m-%d")
+        hour = now_cn.hour
         if 5 <= hour < 9:
             period, greet = "morning", "早上好"
         elif 9 <= hour < 12:

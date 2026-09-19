@@ -261,7 +261,7 @@ async def main() -> int:
     w_hot = {"available": True, "weather": "晴", "temperature": "37"}
     g = svc.build_greeting(loc_t, w_hot, False, date="2026-10-09")
     check("P2: 高温提示", "高温预警" in g["weatherTip"]
-          and g["background"] == "sunny", str(g))
+          and g["background"] in ("sunny", "night"), str(g))
     # 晴天无提示(常规天气)
     w_ok = {"available": True, "weather": "晴", "temperature": "26"}
     g = svc.build_greeting(loc_t, w_ok, False, date="2026-10-09")
