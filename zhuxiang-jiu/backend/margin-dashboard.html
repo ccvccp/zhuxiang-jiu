@@ -153,7 +153,8 @@ code{background:var(--sub);border-radius:4px;padding:1px 6px;font-size:11px}
       <b>金额/期限</b>: ¥1000 × 一年(自确认开业日起算) ·
       <b>到期结算</b>: rate=min(1, 年进货/50000), 退=1000×rate ·
       <b>中途取消</b>: 按已运营期折算目标 · <b>驳回</b>: 全额退 ·
-      <b>提醒</b>: 30/7/1 天三档梯度站内信(remindedSteps 幂等)<br>
+      <b>提醒</b>: 30/7/1 天三档梯度站内信+短信(remindedSteps 幂等,
+      短信 best-effort——阿里云通知模板未配置时模拟留痕)<br>
       <b>运维命令</b>(容器内):
       <code>python margin_ops.py stats</code>
       <code>audit</code>

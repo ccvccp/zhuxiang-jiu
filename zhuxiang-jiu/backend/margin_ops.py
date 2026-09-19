@@ -197,6 +197,17 @@ async def main() -> int:
                   f"{s['step']} 天档(剩余 {s['daysLeft']} 天)")
         for f in result["failed"]:
             print(f"  [失败] {f['storeCode']}: {f['error']}")
+        # 短信联动(补充通道: mock 模拟留痕/aliyun 真实通道)
+        print(f"[短信联动] 发送 {len(result.get('smsSent', []))} | "
+              f"跳过 {len(result.get('smsSkipped', []))} | "
+              f"失败 {len(result.get('smsFailed', []))}")
+        for s in result.get("smsSent", []):
+            print(f"  {s['storeCode']} | {s['channel']} | {s.get('phone')}"
+                  + (f" | bizId={s['bizId']}" if s.get("bizId") else ""))
+        for s in result.get("smsSkipped", []):
+            print(f"  [跳过] {s['storeCode']}: {s.get('reason')}")
+        for s in result.get("smsFailed", []):
+            print(f"  [失败] {s['storeCode']}: {s.get('error')}")
         return 0
 
     # ---------- audit ----------

@@ -257,6 +257,44 @@ async def main() -> int:
     s7 = [x for x in result["sent"] if x["storeCode"] == sc7]
     check("提醒: 未开业跳过", len(s7) == 0, str(s7))
 
+    # ---------- 8b. 到期短信联动(补充通道, mock 模拟留痕) ----------
+    from repositories.member_repository import MemberRepository
+    member_repo = MemberRepository()
+
+    # 有手机号会员 → mock 通道发送(脱敏留痕)
+    r = await _apply(svc, wallet, 7206, "110114", "短信联动店")
+    sc9 = r["storeCode"]
+    await svc.audit_store(sc9, "admin", True)
+    await member_repo.save(7206, {"id": 7206, "phone": "13900007206",
+                                  "nickname": "短信店主", "status": 1})
+    m = await repo.get_margin_by_store(sc9)
+    m["startDate"] = (date.today() - timedelta(days=340)).isoformat()
+    m["endDate"] = (date.today() + timedelta(days=25)).isoformat()
+    await repo.save_margin(m)
+
+    # 无 member 记录 → 跳过(会员无手机号)
+    r = await _apply(svc, wallet, 7207, "110115", "无手机号店")
+    sc10 = r["storeCode"]
+    await svc.audit_store(sc10, "admin", True)
+    m = await repo.get_margin_by_store(sc10)
+    m["startDate"] = (date.today() - timedelta(days=340)).isoformat()
+    m["endDate"] = (date.today() + timedelta(days=25)).isoformat()
+    await repo.save_margin(m)
+
+    result = await svc.run_margin_reminder_round()
+    s9 = [x for x in result["sent"] if x["storeCode"] == sc9]
+    sms9 = [x for x in result["smsSent"] if x["storeCode"] == sc9]
+    check("短信: 同档联动发送", len(s9) == 1 and len(sms9) == 1
+          and sms9[0]["channel"] == "mock"
+          and sms9[0]["phone"] == "139****7206", str(sms9))
+    sms10 = [x for x in result["smsSkipped"] if x["storeCode"] == sc10]
+    check("短信: 无手机号跳过", len(sms10) == 1
+          and sms10[0]["reason"] == "会员无手机号", str(sms10))
+    # 幂等: 同档重跑不重发(站内信+短信同档位标记)
+    result = await svc.run_margin_reminder_round()
+    sms9 = [x for x in result["smsSent"] if x["storeCode"] == sc9]
+    check("短信: 同档幂等", len(sms9) == 0, str(sms9))
+
     # ============ 9. 开业审计幂等(预置起止不被重审重置) ============
     r = await _apply(svc, wallet, 7108, "110113", "审计幂等店")
     sc8 = r["storeCode"]

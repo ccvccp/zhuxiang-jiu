@@ -10,8 +10,15 @@
         SMS_ALIYUN_ACCESS_KEY_SECRET   RAM 子账号 SK
         SMS_ALIYUN_SIGN_NAME           已审核签名
         SMS_ALIYUN_TEMPLATE_CODE       验证码模板(SMS_xxx)
+        SMS_ALIYUN_MARGIN_TEMPLATE_CODE 保证金到期通知模板(可选)
     - is_configured() 四凭据齐备判定: 缺一回退模拟通道
       (auth_service 日志通道, 本地开发零影响)
+    - is_margin_configured() 基础四凭据 + 通知模板码判定:
+      保证金到期短信通知联动用(未配置回退模拟留痕)
+
+保证金到期通知模板(阿里云控制台申请, 变量五枚):
+    尊敬的店主：您的网店${name}保证金将于${date}到期（剩余${days}天），
+    年任务完成率${rate}%，按当前进度预计退还${refund}元。详情请登录平台查看。
 
 异常约定:
     SmsError → 阿里云业务错误(Code/Message 结构化:
@@ -45,6 +52,8 @@ ENV_KEYS = (
     "SMS_ALIYUN_TEMPLATE_CODE",
 )
 
+MARGIN_TEMPLATE_ENV = "SMS_ALIYUN_MARGIN_TEMPLATE_CODE"
+
 
 class SmsError(Exception):
     """阿里云短信发送失败(Code/Message 结构化)"""
@@ -58,6 +67,11 @@ class SmsError(Exception):
 def is_configured() -> bool:
     """四凭据齐备判定(缺一回退 auth_service 模拟通道)"""
     return all(os.environ.get(k) for k in ENV_KEYS)
+
+
+def is_margin_configured() -> bool:
+    """保证金通知模板判定(基础四凭据 + 通知模板码)"""
+    return is_configured() and bool(os.environ.get(MARGIN_TEMPLATE_ENV))
 
 
 def _percent_encode(value: str) -> str:
@@ -91,12 +105,8 @@ def _sign(params: dict, access_key_secret: str) -> str:
     return base64.b64encode(digest).decode("utf-8")
 
 
-def send_code(phone: str, code: str) -> dict:
-    """发送验证码短信(同步阻塞; async 调用方用 asyncio.to_thread)
-
-    Args:
-        phone: 11 位手机号(校验由 auth_service 负责)
-        code: 6 位验证码(模板变量 ${code})
+def _send(phone: str, template_code: str, template_param: dict) -> dict:
+    """发送模板短信(同步阻塞; async 调用方用 asyncio.to_thread)
 
     Returns:
         {"success": True, "bizId": "..."}(阿里云回执ID, 对账排查用)
@@ -115,8 +125,8 @@ def send_code(phone: str, code: str) -> dict:
         "SignatureNonce": uuid.uuid4().hex,
         "SignatureVersion": "1.0",
         "SignName": os.environ["SMS_ALIYUN_SIGN_NAME"],
-        "TemplateCode": os.environ["SMS_ALIYUN_TEMPLATE_CODE"],
-        "TemplateParam": json.dumps({"code": code}, ensure_ascii=False),
+        "TemplateCode": template_code,
+        "TemplateParam": json.dumps(template_param, ensure_ascii=False),
         "Timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "Version": API_VERSION,
     }
@@ -148,3 +158,27 @@ def send_code(phone: str, code: str) -> dict:
     logger.info("sms_aliyun_sent phone=%s bizId=%s",
                 phone, result.get("BizId"))
     return {"success": True, "bizId": result.get("BizId")}
+
+
+def send_code(phone: str, code: str) -> dict:
+    """发送验证码短信(同步阻塞; async 调用方用 asyncio.to_thread)
+
+    Args:
+        phone: 11 位手机号(校验由 auth_service 负责)
+        code: 6 位验证码(模板变量 ${code})
+    """
+    return _send(phone, os.environ["SMS_ALIYUN_TEMPLATE_CODE"],
+                 {"code": code})
+
+
+def send_margin_reminder(phone: str, name: str, date: str, days: int,
+                        rate: str, refund: str) -> dict:
+    """发送保证金到期通知短信(同步阻塞; async 用 asyncio.to_thread)
+
+    模板变量五枚: ${name}/${date}/${days}/${rate}/${refund}
+    (模板文案见模块头注释——阿里云控制台申请 SMS_ALIYUN_MARGIN_TEMPLATE_CODE)
+    """
+    return _send(phone, os.environ[MARGIN_TEMPLATE_ENV], {
+        "name": str(name), "date": str(date), "days": str(days),
+        "rate": str(rate), "refund": str(refund),
+    })

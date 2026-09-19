@@ -940,6 +940,7 @@ class CityStoreService:
         margins = await self.repo.list_all_margins(
             status=MARGIN_STATUS_LOCKED)
         sent, failed = [], []
+        sms_sent, sms_skipped, sms_failed = [], [], []
         skipped = 0
         for m in margins:
             if not m.get("endDate") or not m.get("startDate"):
@@ -993,6 +994,17 @@ class CityStoreService:
                     f"扣除 ¥{deducted:,.2f}。{tip}\n"
                     "请前往「保证金进度」页面查看详情。",
                     category=CATEGORY_SYSTEM)
+                # 短信联动(补充通道, best-effort——失败不影响档位标记,
+                # 站内信已触达且下档位仍会再发)
+                sms = await self._send_margin_reminder_sms(
+                    m, store.get("storeName") or store_code,
+                    days_left, rate, refund)
+                if sms.get("status") == "sent":
+                    sms_sent.append(sms)
+                elif sms.get("status") == "skipped":
+                    sms_skipped.append(sms)
+                else:
+                    sms_failed.append(sms)
                 # 标记已发档位(当前档及更松档一并标记, 防降档重发)
                 m["remindedSteps"] = ",".join(
                     str(s) for s in self.MARGIN_REMINDER_STEPS
@@ -1008,10 +1020,55 @@ class CityStoreService:
                                store_code, exc)
         if sent:
             logger.info("[保证金提醒] scanned=%d sent=%d skipped=%d "
-                        "failed=%d", len(margins), len(sent), skipped,
-                        len(failed))
+                        "failed=%d sms_sent=%d sms_skipped=%d "
+                        "sms_failed=%d", len(margins), len(sent), skipped,
+                        len(failed), len(sms_sent), len(sms_skipped),
+                        len(sms_failed))
         return {"scanned": len(margins), "sent": sent,
-                "skipped": skipped, "failed": failed}
+                "skipped": skipped, "failed": failed,
+                "smsSent": sms_sent, "smsSkipped": sms_skipped,
+                "smsFailed": sms_failed}
+
+    async def _send_margin_reminder_sms(self, m: dict, store_name: str,
+                                        days_left: int, rate: float,
+                                        refund: float) -> dict:
+        """保证金到期短信通知(站内信补充通道, best-effort)
+
+        阿里云通知模板(SMS_ALIYUN_MARGIN_TEMPLATE_CODE)未配置时
+        回退日志模拟留痕(与验证码通道同款回退模式)。
+        Returns: {"storeCode", "status": sent|skipped|failed, ...}
+        """
+        import asyncio as _aio
+        from repositories.member_repository import MemberRepository
+        from services import sms_aliyun
+
+        member = await MemberRepository().get_by_id(m.get("userId"))
+        phone = str((member or {}).get("phone") or "")
+        if not phone:
+            return {"storeCode": m["storeCode"], "status": "skipped",
+                    "reason": "会员无手机号"}
+        payload = {"name": store_name, "date": m.get("endDate") or "",
+                   "days": days_left, "rate": f"{rate * 100:.1f}",
+                   "refund": f"{refund:.2f}"}
+        masked = phone[:3] + "****" + phone[-4:]
+        if sms_aliyun.is_margin_configured():
+            try:
+                r = await _aio.to_thread(
+                    sms_aliyun.send_margin_reminder, phone, **payload)
+                return {"storeCode": m["storeCode"], "status": "sent",
+                        "channel": "aliyun", "bizId": r.get("bizId"),
+                        "phone": masked}
+            except sms_aliyun.SmsError as exc:
+                logger.warning("[保证金短信] 发送失败 %s: [%s] %s",
+                               m["storeCode"], exc.code, exc.message)
+                return {"storeCode": m["storeCode"], "status": "failed",
+                        "channel": "aliyun", "phone": masked,
+                        "error": f"[{exc.code}] {exc.message}"}
+        # 模拟留痕(模板未配置——生产配置后自动切真实通道)
+        logger.info("[保证金短信·模拟] %s phone=%s 模板变量=%s",
+                    m["storeCode"], masked, payload)
+        return {"storeCode": m["storeCode"], "status": "sent",
+                "channel": "mock", "phone": masked}
 
     # ============================================================
     # 保证金治理(管理端: 总览/清单/对账)
