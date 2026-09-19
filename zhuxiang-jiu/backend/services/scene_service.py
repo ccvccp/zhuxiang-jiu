@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import time
+from typing import ClassVar
 
 from repositories.backend import (
     is_redis_mode, get_redis_client, _k)
@@ -188,15 +189,56 @@ class SceneService:
         }
 
     # ============================================================
-    # 情景引擎(时间×空间×用户 规则表, P0 最小集)
+    # 情景引擎(时间×空间×用户×节日×天气 规则表)
     # ============================================================
 
+    # 主要节日表(公历日期; 农历节日按年硬编码 2026-2027——
+    # 问候文案级精度, 个别农历日差一天无业务影响)
+    HOLIDAYS: ClassVar[dict[str, str]] = {
+        # ---- 2026 ----
+        "2026-01-01": "元旦",
+        "2026-02-16": "除夕", "2026-02-17": "春节", "2026-02-18": "春节",
+        "2026-02-19": "春节", "2026-02-20": "春节", "2026-02-21": "春节",
+        "2026-02-22": "春节", "2026-02-23": "春节",
+        "2026-03-03": "元宵节", "2026-03-04": "元宵节",
+        "2026-04-05": "清明节", "2026-05-01": "劳动节", "2026-05-02": "劳动节",
+        "2026-05-03": "劳动节", "2026-06-19": "端午节", "2026-06-20": "端午节",
+        "2026-08-19": "七夕", "2026-09-25": "中秋节", "2026-09-26": "中秋节",
+        "2026-10-01": "国庆节", "2026-10-02": "国庆节", "2026-10-03": "国庆节",
+        "2026-10-04": "国庆节", "2026-10-05": "国庆节", "2026-10-06": "国庆节",
+        "2026-10-07": "国庆节", "2026-10-18": "重阳节",
+        "2026-11-11": "双十一", "2026-12-12": "双十二",
+        # ---- 2027 ----
+        "2027-01-01": "元旦",
+        "2027-02-05": "除夕", "2027-02-06": "春节", "2027-02-07": "春节",
+        "2027-02-08": "春节", "2027-02-09": "春节", "2027-02-10": "春节",
+        "2027-02-11": "春节", "2027-02-12": "春节",
+        "2027-02-20": "元宵节", "2027-02-21": "元宵节",
+        "2027-04-05": "清明节", "2027-05-01": "劳动节", "2027-05-02": "劳动节",
+        "2027-05-03": "劳动节", "2027-06-09": "端午节", "2027-06-10": "端午节",
+        "2027-08-08": "七夕", "2027-09-15": "中秋节", "2027-09-16": "中秋节",
+        "2027-10-01": "国庆节", "2027-10-02": "国庆节", "2027-10-03": "国庆节",
+        "2027-10-04": "国庆节", "2027-10-05": "国庆节", "2027-10-06": "国庆节",
+        "2027-10-07": "国庆节", "2027-10-08": "重阳节",
+        "2027-11-11": "双十一", "2027-12-12": "双十二",
+    }
+
     def build_greeting(self, location: dict, weather: dict,
-                       is_member: bool) -> dict:
-        """生成个性化问候(确定性规则——LLM 增强位预留 P2)"""
+                       is_member: bool, date: str = None) -> dict:
+        """生成个性化问候(规则表: 节日>时段 × 城市 × 新老客 × 天气)
+
+        Args:
+            date: 日期注入(YYYY-MM-DD, 测试用; 缺省今天)
+        Returns:
+            {greeting, sub, weatherTip, period, festival, background}
+            background: 动态背景码(festival/snowy/rainy/foggy/night/
+            sunny/cloudy/day)——前端渐变主题切换
+        """
         from core.helpers import ts
 
-        hour = int(ts()[11:13])
+        now = ts()
+        today = date or now[:10]
+        hour = int(now[11:13])
         if 5 <= hour < 9:
             period, greet = "morning", "早上好"
         elif 9 <= hour < 12:
@@ -219,16 +261,65 @@ class SceneService:
         else:
             where = ""
         who = "老朋友" if is_member else "朋友"
-        greeting = f"{greet}，欢迎{where}{who}！"
 
-        # 天气行(高德中文天气文本直用)
+        # 节日问候(优先于时段——节日情绪压倒日常)
+        festival = self.HOLIDAYS.get(today) or ""
+        greet_word = f"{festival}快乐" if festival else greet
+        greeting = f"{greet_word}，欢迎{where}{who}！"
+
+        # 天气行 + 天气关怀提示
         sub = ""
         if weather.get("available"):
             sub = (f"{city} · {weather.get('weather')} · "
                    f"{weather.get('temperature')}°C")
             if weather.get("humidity"):
                 sub += f" · 湿度{weather['humidity']}%"
-        return {"greeting": greeting, "sub": sub, "period": period}
+        weather_tip = self._weather_tip(city, weather)
+
+        # 动态背景码
+        background = self._background(period, weather, bool(festival))
+        return {"greeting": greeting, "sub": sub, "weatherTip": weather_tip,
+                "period": period, "festival": festival,
+                "background": background}
+
+    @staticmethod
+    def _weather_tip(city: str, weather: dict) -> str:
+        """天气关怀提示(雨雪/高温/严寒——设计稿情景规则)"""
+        if not weather.get("available"):
+            return ""
+        text = weather.get("weather") or ""
+        try:
+            temp = float(weather.get("temperature") or "")
+        except (TypeError, ValueError):
+            temp = None
+        if "雪" in text:
+            return f"{city}今日有雪，注意保暖，宜温一壶竹香酒"
+        if "雨" in text:
+            return f"{city}今天有雨，出门备伞，宜在家小酌"
+        if temp is not None and temp >= 35:
+            return f"{city}高温预警，注意防暑降温，冰镇竹香更爽口"
+        if temp is not None and temp <= 0:
+            return f"{city}天寒地冻，注意保暖"
+        return ""
+
+    @staticmethod
+    def _background(period: str, weather: dict, festival: bool) -> str:
+        """动态背景码(节日>天气>昼夜>默认)"""
+        if festival:
+            return "festival"
+        if weather.get("available"):
+            text = weather.get("weather") or ""
+            if "雪" in text:
+                return "snowy"
+            if "雨" in text:
+                return "rainy"
+            if "雾" in text or "霾" in text:
+                return "foggy"
+            if "晴" in text:
+                return "sunny" if period != "night" else "night"
+            if "云" in text or "阴" in text:
+                return "cloudy"
+        return "night" if period == "night" else "day"
 
     # ============================================================
     # 聚合

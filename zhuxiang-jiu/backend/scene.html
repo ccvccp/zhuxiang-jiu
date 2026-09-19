@@ -11,7 +11,16 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:
      var(--bg);color:var(--tx);min-height:100vh;display:flex;
-     flex-direction:column;align-items:center;padding:28px 16px}
+     flex-direction:column;align-items:center;padding:28px 16px;
+     transition:background .6s ease}
+/* 动态背景(P2: 情景渐变主题——节日/天气/昼夜) */
+body[data-bg="sunny"]{background:linear-gradient(165deg,#fdf6e3,#eaf4ec)}
+body[data-bg="rainy"]{background:linear-gradient(165deg,#dfe7ef,#c9d6e2)}
+body[data-bg="snowy"]{background:linear-gradient(165deg,#eef4fa,#dbe7f0)}
+body[data-bg="foggy"]{background:linear-gradient(165deg,#eceff1,#dfe4e8)}
+body[data-bg="cloudy"]{background:linear-gradient(165deg,#eef1f2,#e2e8ea)}
+body[data-bg="festival"]{background:linear-gradient(165deg,#f9e8dc,#f3d9c4)}
+body[data-bg="night"]{background:linear-gradient(165deg,#1c2b3b,#16222f)}
 .wrap{width:100%;max-width:680px}
 h1{font-size:17px;text-align:center;color:var(--green-deep);
    margin-bottom:6px}
@@ -26,6 +35,8 @@ h1 small{display:block;font-size:11px;color:var(--tx2);
             background:var(--green-soft);text-align:center;line-height:24px;
             margin-right:6px;font-size:15px}
 .sub .na{color:var(--tx2);font-size:13px}
+.tip{font-size:13px;color:var(--green-deep);background:var(--green-soft);
+     border-radius:6px;padding:8px 12px;margin:-6px 0 14px;line-height:1.7}
 .loc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
          font-size:13px;color:var(--tx2)}
 .loc-row b{color:var(--tx)}
@@ -35,9 +46,13 @@ select{padding:5px 8px;border:1px solid var(--bd);border-radius:6px;
        border-radius:8px;font-size:13px;line-height:1.8}
 .agent .ttl{font-weight:600;color:var(--green-deep)}
 .agent .desc{color:var(--tx)}
-.agent-none{margin-top:14px;padding:12px 14px;border:1px dashed var(--bd);
-           border-radius:8px;font-size:12.5px;color:var(--tx2);line-height:1.8}
-.agent-none a{color:var(--gold)}
+.agent-none{margin-top:14px;padding:12px 14px;border:1px dashed var(--gold);
+           border-radius:8px;font-size:12.5px;color:var(--tx2);line-height:1.9}
+.agent-none b{color:var(--tx);font-size:13px}
+.agent-none .benefit{color:var(--tx)}
+.agent-none a.apply{display:inline-block;margin-top:6px;padding:6px 16px;
+  border-radius:6px;background:var(--gold);color:#fff;text-decoration:none;
+  font-weight:600;font-size:12.5px}
 .debug{font-size:11.5px;color:var(--tx2);line-height:1.8;
        background:#fafcfb;border:1px solid var(--bd);border-radius:8px;
        padding:10px 14px;white-space:pre-wrap;word-break:break-all;
@@ -57,6 +72,7 @@ select{padding:5px 8px;border:1px solid var(--bd);border-radius:6px;
 <div class="card">
   <div id="greet" class="greet">正在感知您的时空情景…</div>
   <div id="sub" class="sub"><span class="na">天气获取中…</span></div>
+  <div id="weatherTip" class="tip" style="display:none"></div>
   <div class="loc-row">
     <span>当前感知位置: <b id="loc">…</b></span><span class="pill" id="srcPill">IP 定位</span>
     <select id="citySel" onchange="switchCity(this.value)">
@@ -124,11 +140,20 @@ function render(j) {
       + '<br><span class="desc">下单自动归属: 订单城市将关联该服务商(收货地址优先 · IP 兜底)</span></div>';
   } else if (loc.cityCode) {
     ab.innerHTML = '<div class="agent-none">'
-      + esc((loc.province || "") + (loc.city || "")) + " 暂未开通城市代理服务。"
-      + "欢迎申请成为城市代理(市级网店)，享受一市一店独占权益。</div>";
+      + "<b>" + esc((loc.province || "") + (loc.city || "")) + " 暂未开通城市代理服务</b><br>"
+      + '<span class="benefit">城市代理权益: 一市一店独占 · 平台直供 · 月度考核三档折扣(70/80/90)</span><br>'
+      + '<span class="benefit">保证金 ¥1000 一年期 · 年任务进货 ¥50000</span><br>'
+      + '<a class="apply" href="/index.html#/pages/citystore/index">申请成为城市代理 →</a>'
+      + "</div>";
   } else {
     ab.innerHTML = "";
   }
+  /* 天气关怀提示 + 动态背景(P2) */
+  var g = d.greeting || {};
+  var tip = g.weatherTip || "";
+  document.getElementById("weatherTip").textContent = tip;
+  document.getElementById("weatherTip").style.display = tip ? "block" : "none";
+  document.body.setAttribute("data-bg", g.background || "day");
   document.getElementById("policy").textContent = d.policy || "";
   document.getElementById("debug").textContent = JSON.stringify(d, null, 2);
 }

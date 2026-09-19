@@ -228,6 +228,46 @@ async def main() -> int:
           and r.get("citySource") is None
           and "未获取到位置" in r["reason"], str(r)[:150])
 
+    # ============ 9. 情景规则全量(P2: 节日/天气提示/背景码) ============
+    loc_t = {"matched": True, "province": "山东省", "city": "泰安市"}
+    # 节日问候(国庆注入)优先于时段
+    g = svc.build_greeting(loc_t, {"available": False}, False,
+                           date="2026-10-01")
+    check("P2: 国庆问候", "国庆节快乐" in g["greeting"]
+          and g["festival"] == "国庆节"
+          and g["background"] == "festival", str(g))
+    # 春节
+    g = svc.build_greeting(loc_t, {"available": False}, True,
+                           date="2026-02-17")
+    check("P2: 春节老客", "春节快乐" in g["greeting"]
+          and "老朋友" in g["greeting"] and g["festival"] == "春节",
+          str(g))
+    # 非节日——正常时段问候
+    g = svc.build_greeting(loc_t, {"available": False}, False,
+                           date="2026-10-09")
+    check("P2: 非节日常态", g["festival"] == ""
+          and "快乐" not in g["greeting"], str(g))
+    # 雪天提示 + snowy 背景
+    w_snow = {"available": True, "weather": "小雪", "temperature": "-2"}
+    g = svc.build_greeting(loc_t, w_snow, False, date="2026-10-09")
+    check("P2: 雪天提示", "泰安市今日有雪" in g["weatherTip"]
+          and g["background"] == "snowy", str(g))
+    # 雨天提示 + rainy 背景
+    w_rain = {"available": True, "weather": "中雨", "temperature": "18"}
+    g = svc.build_greeting(loc_t, w_rain, False, date="2026-10-09")
+    check("P2: 雨天提示", "今天有雨" in g["weatherTip"]
+          and g["background"] == "rainy", str(g))
+    # 高温提示
+    w_hot = {"available": True, "weather": "晴", "temperature": "37"}
+    g = svc.build_greeting(loc_t, w_hot, False, date="2026-10-09")
+    check("P2: 高温提示", "高温预警" in g["weatherTip"]
+          and g["background"] == "sunny", str(g))
+    # 晴天无提示(常规天气)
+    w_ok = {"available": True, "weather": "晴", "temperature": "26"}
+    g = svc.build_greeting(loc_t, w_ok, False, date="2026-10-09")
+    check("P2: 常规无提示", g["weatherTip"] == ""
+          and g["background"] in ("sunny", "day", "night"), str(g))
+
     print("=" * 60)
     print("时空情景感知模块测试".center(50))
     print("=" * 60)
