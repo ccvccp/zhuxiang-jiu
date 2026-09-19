@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>保证金进度 · 县（区）网店</title>
+<style>
+:root {
+  --green: #2a7d5c;
+  --green-dark: #1d5a42;
+  --green-light: #e8f4ef;
+  --gold: #c9a86a;
+  --bg: #f6f8f7;
+  --card: #ffffff;
+  --text: #2d3a34;
+  --muted: #7a8a82;
+  --line: #e2eae5;
+  --red: #b5543c;
+  --radius: 14px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 16px; max-width: 640px; margin: 0 auto; }
+.header { text-align: center; padding: 22px 0 6px; }
+.header h1 { font-size: 22px; color: var(--green-dark); letter-spacing: 2px; }
+.header .sub { font-size: 12px; color: var(--muted); margin-top: 6px; letter-spacing: 1px; }
+.card { background: var(--card); border-radius: var(--radius); padding: 18px; margin: 14px 0; box-shadow: 0 1px 6px rgba(42, 125, 92, .06); }
+.card h3 { font-size: 14px; color: var(--green-dark); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+.card h3::before { content: ""; width: 3px; height: 14px; background: var(--green); border-radius: 2px; display: inline-block; }
+/* 登录 */
+.field { margin-bottom: 12px; }
+.field input { width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 15px; outline: none; }
+.field input:focus { border-color: var(--green); }
+.btn { display: block; width: 100%; padding: 13px; background: var(--green); color: #fff; border: none; border-radius: 10px; font-size: 16px; cursor: pointer; margin-top: 6px; }
+.btn:active { background: var(--green-dark); }
+.btn.ghost { background: var(--green-light); color: var(--green-dark); }
+.tip { font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 10px; }
+/* 店铺选择 */
+.store-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.store-pill { padding: 8px 14px; background: var(--green-light); color: var(--green-dark); border-radius: 20px; font-size: 13px; cursor: pointer; border: 1.5px solid transparent; }
+.store-pill.active { border-color: var(--green); background: #fff; }
+/* 保证金主卡 */
+.amount-row { display: flex; align-items: baseline; gap: 10px; }
+.amount { font-size: 38px; font-weight: 700; color: var(--green-dark); }
+.amount-unit { font-size: 15px; color: var(--muted); }
+.pill { font-size: 12px; padding: 4px 12px; border-radius: 12px; font-weight: 500; }
+.pill.locked { background: #fff4e2; color: #a06b1c; }
+.pill.settled { background: var(--green-light); color: var(--green-dark); }
+.meta { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.meta b { color: var(--text); font-weight: 500; }
+/* 进度条 */
+.progress-wrap { margin-top: 14px; }
+.progress-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 7px; }
+.progress-label .val { color: var(--green-dark); font-weight: 600; }
+.progress { height: 10px; background: var(--green-light); border-radius: 6px; overflow: hidden; }
+.progress > div { height: 100%; background: linear-gradient(90deg, var(--green), #4caf87); border-radius: 6px; transition: width .6s; }
+.progress-note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+/* 详情行 */
+.row { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.row:last-child { border-bottom: none; }
+.row .k { color: var(--muted); }
+.row .v { color: var(--text); font-weight: 500; }
+.row .v.green { color: var(--green-dark); }
+.row .v.red { color: var(--red); }
+/* 空态/加载 */
+.empty { text-align: center; padding: 30px 0; color: var(--muted); font-size: 14px; line-height: 1.8; }
+.loading { text-align: center; padding: 30px 0; color: var(--muted); font-size: 13px; }
+.toast { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); background: rgba(45, 58, 52, .88); color: #fff; padding: 10px 22px; border-radius: 8px; font-size: 13px; z-index: 99; display: none; }
+.hidden { display: none !important; }
+.footer { text-align: center; font-size: 11px; color: var(--muted); padding: 18px 0 8px; line-height: 1.8; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>保证金进度</h1>
+  <div class="sub">县（区）网店 · 预存 ¥1000 一年期 · 到期按年任务完成度退还</div>
+</div>
+
+<!-- 登录卡 -->
+<div class="card" id="loginCard">
+  <h3>店主登录</h3>
+  <div class="field"><input id="phone" type="tel" maxlength="11" placeholder="手机号"></div>
+  <div class="field"><input id="pwd" type="password" placeholder="密码"></div>
+  <button class="btn" onclick="doLogin()">登 录</button>
+  <div class="tip">登录后可查看您网店的保证金状态与年任务实时进度。</div>
+</div>
+
+<!-- 主内容 -->
+<div id="main" class="hidden">
+  <div class="card">
+    <h3>我的网店</h3>
+    <div class="store-bar" id="storeBar"><div class="loading">加载中...</div></div>
+  </div>
+
+  <div class="card" id="marginCard">
+    <div class="loading" id="marginLoading">保证金加载中...</div>
+    <div id="marginBody" class="hidden">
+      <div class="amount-row">
+        <span class="amount" id="mAmount">¥1000</span>
+        <span class="amount-unit">保证金</span>
+        <span class="pill locked" id="mStatus">锁定中</span>
+      </div>
+      <div class="meta">
+        <span>编号 <b id="mNo">-</b></span>
+        <span>状态 <b id="mStatusName">-</b></span>
+      </div>
+
+      <!-- locked: 年任务实时进度 -->
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-label">
+          <span>年进货任务进度</span>
+          <span class="val" id="pRate">0%</span>
+        </div>
+        <div class="progress"><div id="pBar" style="width:0%"></div></div>
+        <div class="progress-note" id="pNote">已进货 ¥0 / 目标 ¥50000</div>
+      </div>
+
+      <!-- 详情 -->
+      <div id="detailLocked" style="margin-top:14px">
+        <div class="row"><span class="k">锁定期起</span><span class="v" id="dStart">-</span></div>
+        <div class="row"><span class="k">锁定期止（到期日）</span><span class="v" id="dEnd">-</span></div>
+        <div class="row"><span class="k">距到期</span><span class="v" id="dLeft">-</span></div>
+      </div>
+      <div id="detailSettled" style="margin-top:14px" class="hidden">
+        <div class="row"><span class="k">结算时间</span><span class="v" id="dSettledAt">-</span></div>
+        <div class="row"><span class="k">结算原因</span><span class="v" id="dReason">-</span></div>
+        <div class="row"><span class="k">年任务完成率</span><span class="v" id="dRate">-</span></div>
+        <div class="row"><span class="k">退还金额</span><span class="v green" id="dRefund">-</span></div>
+        <div class="row"><span class="k">扣除金额</span><span class="v red" id="dDeduct">-</span></div>
+        <div class="row"><span class="k">结算期进货额</span><span class="v" id="dPurchased">-</span></div>
+      </div>
+    </div>
+    <div class="empty hidden" id="marginEmpty">该店无保证金记录</div>
+  </div>
+
+  <div class="card">
+    <h3>保证金规则</h3>
+    <div class="tip" style="margin-top:0">
+      · 申请开店时从钱包预存 ¥1000, 一年期锁定, 不可提前取现<br>
+      · 到期按年任务完成度退还: 完成 80% 退 ¥800 扣 ¥200; 完成 ≥100% 全额退<br>
+      · 中途取消资格按已运营期折算目标结算; 平台驳回全额退还<br>
+      · 年任务 = 年进货额 ¥50000（月度考核线 ¥4167 / ¥2315）
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="footer">竹香网 · 县（区）网店保证金进度<br>本站为总店, 网店为分店, 网站备案即为分店备案</div>
+
+<script>
+/* ===== 精简 JWT 链(login → localStorage → apiFetch 401 自愈) ===== */
+var AUTH_KEY = "zhuxiang.auth";
+function getAuth() {
+  try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch (e) { return null; }
+}
+function setAuth(a) { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); }
+function clearAuth() { localStorage.removeItem(AUTH_KEY); }
+
+function showToast(msg) {
+  var t = document.getElementById("toast");
+  t.textContent = msg; t.style.display = "block";
+  setTimeout(function () { t.style.display = "none"; }, 2200);
+}
+
+function doLogin() {
+  var phone = document.getElementById("phone").value.trim();
+  var pwd = document.getElementById("pwd").value;
+  if (!phone || !pwd) { showToast("请输入手机号和密码"); return; }
+  fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone: phone, password: pwd })
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    var token = j && (j.accessToken || (j.data && j.data.accessToken));
+    if (token) {
+      setAuth({ token: token, refreshToken: j.refreshToken || (j.data && j.data.refreshToken) || "" });
+      enterMain();
+    } else {
+      showToast((j && (j.error || j.detail)) || "登录失败");
+    }
+  }).catch(function () { showToast("网络异常, 请重试"); });
+}
+
+/* apiFetch: 401 → refresh → retry 一次 */
+function apiFetch(path, opts) {
+  opts = opts || {};
+  var auth = getAuth();
+  var headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+  if (auth && auth.token) headers["Authorization"] = "Bearer " + auth.token;
+  return fetch(path, Object.assign({}, opts, { headers: headers })).then(function (r) {
+    if (r.status === 401 && auth && auth.refreshToken && !opts.__retried) {
+      return fetch("/api/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: auth.refreshToken })
+      }).then(function (r2) { return r2.json(); }).then(function (j2) {
+        var nt = j2 && (j2.accessToken || (j2.data && j2.data.accessToken));
+        if (nt) {
+          setAuth(Object.assign(auth, { token: nt }));
+          return apiFetch(path, Object.assign({}, opts, { __retried: true }));
+        }
+        clearAuth(); showLogin();
+        throw new Error("登录已过期");
+      });
+    }
+    return r.json();
+  });
+}
+
+function fmtMoney(v) { return "¥" + (Number(v || 0)).toFixed(2).replace(/\.00$/, ""); }
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
+
+var REASONS = { expired: "满一年到期", cancelled: "中途取消资格", rejected: "平台驳回" };
+
+/* ===== 主流程 ===== */
+var stores = [], curStore = "";
+
+function showLogin() {
+  document.getElementById("loginCard").classList.remove("hidden");
+  document.getElementById("main").classList.add("hidden");
+}
+function enterMain() {
+  document.getElementById("loginCard").classList.add("hidden");
+  document.getElementById("main").classList.remove("hidden");
+  loadStores();
+}
+
+function loadStores() {
+  apiFetch("/api/citystore/list").then(function (j) {
+    if (j.success === false) { showToast(j.error || "加载失败"); return; }
+    stores = (j.data && j.data.stores) || [];
+    renderStores();
+  }).catch(function (e) { showToast(e.message || "加载失败"); });
+}
+
+function renderStores() {
+  var bar = document.getElementById("storeBar");
+  if (!stores.length) {
+    bar.innerHTML = '<div class="empty">您还没有网店<br>请先在「市级网店」页申请开店</div>';
+    document.getElementById("marginCard").classList.add("hidden");
+    return;
+  }
+  document.getElementById("marginCard").classList.remove("hidden");
+  bar.innerHTML = stores.map(function (s, i) {
+    return '<span class="store-pill' + (i === 0 ? " active" : "") + '" onclick="pickStore(\'' + esc(s.storeCode) + '\', this)">'
+      + esc(s.districtName ? (s.cityName + " · " + s.districtName) : (s.provinceName + " · " + s.cityName))
+      + '（' + esc(s.statusName || s.status) + '）</span>';
+  }).join("");
+  curStore = stores[0].storeCode;
+  loadMargin();
+}
+
+function pickStore(code, el) {
+  curStore = code;
+  var pills = document.querySelectorAll(".store-pill");
+  for (var i = 0; i < pills.length; i++) pills[i].classList.remove("active");
+  el.classList.add("active");
+  loadMargin();
+}
+
+function loadMargin() {
+  var loading = document.getElementById("marginLoading");
+  var body = document.getElementById("marginBody");
+  var empty = document.getElementById("marginEmpty");
+  loading.classList.remove("hidden"); body.classList.add("hidden"); empty.classList.add("hidden");
+  apiFetch("/api/citystore/" + encodeURIComponent(curStore) + "/margin").then(function (j) {
+    loading.classList.add("hidden");
+    if (!j.success && j.detail) {
+      if (String(j.detail).indexOf("不存在") >= 0) { empty.classList.remove("hidden"); return; }
+      showToast(j.detail || "加载失败"); return;
+    }
+    var m = j.data || j;
+    if (!m || !m.marginNo) { empty.classList.remove("hidden"); return; }
+    renderMargin(m);
+    body.classList.remove("hidden");
+  }).catch(function (e) { loading.classList.add("hidden"); showToast(e.message || "加载失败"); });
+}
+
+function renderMargin(m) {
+  document.getElementById("mAmount").textContent = fmtMoney(m.amount);
+  var st = document.getElementById("mStatus");
+  var locked = m.status === "locked";
+  st.textContent = locked ? "锁定中" : "已结算";
+  st.className = "pill " + (locked ? "locked" : "settled");
+  document.getElementById("mNo").textContent = m.marginNo || "-";
+  document.getElementById("mStatusName").textContent = locked ? "预存锁定" : ("已结算·" + (REASONS[m.settleReason] || m.settleReason || "-"));
+
+  document.getElementById("progressWrap").classList.toggle("hidden", !locked);
+  document.getElementById("detailLocked").classList.toggle("hidden", !locked);
+  document.getElementById("detailSettled").classList.toggle("hidden", locked);
+
+  if (locked) {
+    var target = Number(m.annualTarget || 50000);
+    var purchased = Number(m.annualPurchasedLive || 0);
+    var rate = Number(m.completionRateLive || 0);
+    document.getElementById("pRate").textContent = (rate * 100).toFixed(1) + "%";
+    document.getElementById("pBar").style.width = Math.min(100, rate * 100) + "%";
+    document.getElementById("pNote").textContent = "已进货 " + fmtMoney(purchased) + " / 目标 " + fmtMoney(target);
+    document.getElementById("dStart").textContent = m.startDate || "待平台确认开业";
+    document.getElementById("dEnd").textContent = m.endDate || "-";
+    if (m.endDate) {
+      var days = Math.ceil((new Date(m.endDate) - new Date(m.startDate || m.endDate)) / 86400000);
+      document.getElementById("dLeft").textContent = days > 0 ? days + " 天" : "已到期";
+    } else {
+      document.getElementById("dLeft").textContent = "-";
+    }
+  } else {
+    document.getElementById("dSettledAt").textContent = (m.settledAt || "").replace("T", " ").slice(0, 19);
+    document.getElementById("dReason").textContent = REASONS[m.settleReason] || m.settleReason || "-";
+    document.getElementById("dRate").textContent = m.completionRate != null ? (m.completionRate * 100).toFixed(1) + "%" : "-";
+    document.getElementById("dRefund").textContent = fmtMoney(m.refundAmount) + "（已退回钱包）";
+    document.getElementById("dDeduct").textContent = fmtMoney(m.deductedAmount);
+    document.getElementById("dPurchased").textContent = fmtMoney(m.annualPurchased);
+  }
+}
+
+/* init */
+(function () {
+  var auth = getAuth();
+  if (auth && auth.token) enterMain(); else showLogin();
+})();
+</script>
+</body>
+</html>
