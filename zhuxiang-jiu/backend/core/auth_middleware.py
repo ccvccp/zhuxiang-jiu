@@ -91,6 +91,10 @@ PUBLIC_EXACT = {
     "/api/decision/health",
     "/api/monitor/health",
     "/api/maintenance/health",
+    # 开店申请城市/区县选择数据源(游客浏览申请页所需——344 市/3028 区县
+    # 区划册只读; 时空情景感知 scene.html 切换城市同源)
+    "/api/citystore/cities/available",
+    "/api/citystore/districts/available",
 }
 
 # 公开前缀(仅 GET): 游客浏览类接口
@@ -118,6 +122,9 @@ PUBLIC_GET_PREFIXES = (
                                     # 公开事实锚点: 工艺宪法/图谱/守门
                                     # 规则——工艺科普游客可查; POST
                                     # 决策面仍 JWT+门控)
+    "/api/scene/",                # 时空情景感知(P0: IP 城市解析+天气+
+                                    # 代理权益+情景问候——游客可用,
+                                    # 仅城市级粒度, IP 不落库)
     "/api/synapse/",              # 织智观测面 GET(76号人格经线/
                                     # 路由规则/指标/日记——品牌资产
                                     # 公示游客可查; POST 决策面

@@ -139,6 +139,8 @@ from routes import (
     register_synapse_routes,
     # 竹鉴·BambooVerify智能大模型(77号·质检典藏+引证问答+规格比对)
     register_zjian_routes,
+    # 时空情景感知模块(P0: IP 城市解析+天气+代理权益+情景问候)
+    register_scene_routes,
 )
 
 __all__ = ["app", "_mock_store"]
@@ -313,6 +315,8 @@ register_help_routes(app)
 register_zyh_routes(app)
 register_synapse_routes(app)
 register_zjian_routes(app)
+# 时空情景感知模块(P0: IP 城市解析+天气+代理权益+情景问候)
+register_scene_routes(app)
 register_security_routes(app)
 # AI智能API管理模块(44号)
 register_api_manager_routes(app)

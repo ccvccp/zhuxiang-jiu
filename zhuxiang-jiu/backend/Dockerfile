@@ -34,6 +34,8 @@ COPY repositories   /app/repositories
 COPY routes         /app/routes
 COPY services       /app/services
 COPY scripts        /app/scripts
+# 静态数据资源(时空情景感知: ip2region.xdb 离线 IP 库 ~11MB)
+COPY data           /app/data
 
 # 验证关键文件已 COPY(构建时断言,失败立即报错)
 # 用 ls -la 显示实际内容, 方便定位哪个文件丢失

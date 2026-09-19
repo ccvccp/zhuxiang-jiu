@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>时空情景感知 · 竹香网</title>
+<style>
+:root{--green:#2f7d52;--green-deep:#1d5a39;--green-soft:#e8f4ec;
+      --gold:#c98a2d;--tx:#1f2d3d;--tx2:#6b7a8d;--bd:#dfe7e2;
+      --card:#fff;--bg:#f4f7f5}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:
+     var(--bg);color:var(--tx);min-height:100vh;display:flex;
+     flex-direction:column;align-items:center;padding:28px 16px}
+.wrap{width:100%;max-width:680px}
+h1{font-size:17px;text-align:center;color:var(--green-deep);
+   margin-bottom:6px}
+h1 small{display:block;font-size:11px;color:var(--tx2);
+         font-weight:400;margin-top:4px}
+.card{background:var(--card);border:1px solid var(--bd);
+      border-radius:12px;padding:22px 24px;margin-bottom:14px}
+.greet{font-size:19px;font-weight:600;color:var(--green-deep);
+       line-height:1.5;margin-bottom:10px}
+.sub{font-size:15px;color:var(--tx);margin-bottom:16px}
+.sub .w-ico{display:inline-block;width:24px;height:24px;border-radius:6px;
+            background:var(--green-soft);text-align:center;line-height:24px;
+            margin-right:6px;font-size:15px}
+.sub .na{color:var(--tx2);font-size:13px}
+.loc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+         font-size:13px;color:var(--tx2)}
+.loc-row b{color:var(--tx)}
+select{padding:5px 8px;border:1px solid var(--bd);border-radius:6px;
+       font-size:12px;max-width:200px;background:#fff;color:var(--tx)}
+.agent{margin-top:14px;padding:12px 14px;background:var(--green-soft);
+       border-radius:8px;font-size:13px;line-height:1.8}
+.agent .ttl{font-weight:600;color:var(--green-deep)}
+.agent .desc{color:var(--tx)}
+.agent-none{margin-top:14px;padding:12px 14px;border:1px dashed var(--bd);
+           border-radius:8px;font-size:12.5px;color:var(--tx2);line-height:1.8}
+.agent-none a{color:var(--gold)}
+.debug{font-size:11.5px;color:var(--tx2);line-height:1.8;
+       background:#fafcfb;border:1px solid var(--bd);border-radius:8px;
+       padding:10px 14px;white-space:pre-wrap;word-break:break-all;
+       font-family:Consolas,monospace;max-height:220px;overflow:auto}
+.foot{font-size:11px;color:var(--tx2);text-align:center;
+      line-height:1.8;margin-top:4px;padding:0 12px}
+.pill{display:inline-block;padding:1px 10px;border-radius:10px;
+      font-size:11px;font-weight:600;background:var(--green-soft);
+      color:var(--green-deep);margin-left:6px}
+.tag-src{font-size:10px;color:var(--tx2);margin-left:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>时空情景感知<small>IP 定位 · 城市天气 · 代理权益 · 个性问候（P0 验证页）</small></h1>
+
+<div class="card">
+  <div id="greet" class="greet">正在感知您的时空情景…</div>
+  <div id="sub" class="sub"><span class="na">天气获取中…</span></div>
+  <div class="loc-row">
+    <span>当前感知位置: <b id="loc">…</b></span><span class="pill" id="srcPill">IP 定位</span>
+    <select id="citySel" onchange="switchCity(this.value)">
+      <option value="">— 切换城市 —</option>
+    </select>
+  </div>
+  <div id="agentBox"></div>
+</div>
+
+<div class="card">
+  <div style="font-size:12px;color:var(--tx2);margin-bottom:8px">
+    感知上下文（JSON · 验证面板）</div>
+  <div id="debug" class="debug">…</div>
+</div>
+
+<div class="foot" id="policy">…</div>
+</div>
+
+<script>
+/* ===== 情景感知验证页(P0): 聚合接口 + 手动切换城市 ===== */
+var lastCity = "";
+
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
+
+function weatherIcon(w) {
+  w = w || "";
+  if (w.indexOf("雪") >= 0) return "❄";
+  if (w.indexOf("雨") >= 0) return "🌧";
+  if (w.indexOf("雾") >= 0 || w.indexOf("霾") >= 0) return "🌫";
+  if (w.indexOf("阴") >= 0) return "☁";
+  if (w.indexOf("云") >= 0) return "⛅";
+  if (w.indexOf("晴") >= 0) return "☀";
+  return "🌡";
+}
+
+function render(j) {
+  var d = j.data || j;
+  document.getElementById("greet").textContent =
+    (d.greeting && d.greeting.greeting) || "您好，欢迎！";
+  var sub = document.getElementById("sub");
+  var w = d.weather || {};
+  if (w.available) {
+    sub.innerHTML = '<span class="w-ico">' + weatherIcon(w.weather) + "</span>"
+      + esc(w.city) + " · " + esc(w.weather) + " · "
+      + esc(w.temperature) + "°C"
+      + (w.humidity ? " · 湿度 " + esc(w.humidity) + "%" : "")
+      + (w.wind ? " · 风 " + esc(w.wind) : "")
+      + '<span class="tag-src">(' + esc(w.source) + ")</span>";
+  } else {
+    var why = w.source === "unconfigured"
+      ? "天气通道未配置(高德 Key 注入即激活)" : "该城市暂无天气";
+    sub.innerHTML = '<span class="na">' + esc(why) + "</span>";
+  }
+  var loc = d.location || {};
+  document.getElementById("loc").textContent =
+    (loc.province || "") + (loc.city || "") || "未感知到城市(可手动切换)";
+  document.getElementById("srcPill").textContent =
+    loc.manual ? "手动切换" : (loc.matched ? "IP 定位" : "IP 未命中");
+  var ab = document.getElementById("agentBox");
+  if (d.agent) {
+    ab.innerHTML = '<div class="agent"><span class="ttl">您的专属城市服务商</span><br>'
+      + "「" + esc(d.agent.storeName) + "」 · "
+      + esc(d.agent.provinceName || "") + esc(d.agent.cityName || "")
+      + '<br><span class="desc">本地服务 · 市级网店(城市代理)体系</span></div>';
+  } else if (loc.cityCode) {
+    ab.innerHTML = '<div class="agent-none">'
+      + esc((loc.province || "") + (loc.city || "")) + " 暂未开通城市代理服务。"
+      + "欢迎申请成为城市代理(市级网店)，享受一市一店独占权益。</div>";
+  } else {
+    ab.innerHTML = "";
+  }
+  document.getElementById("policy").textContent = d.policy || "";
+  document.getElementById("debug").textContent = JSON.stringify(d, null, 2);
+}
+
+function loadContext(cityCode) {
+  var url = "/api/scene/context";
+  if (cityCode) url += "?city_code=" + encodeURIComponent(cityCode);
+  fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+    if (j.success === false) {
+      document.getElementById("greet").textContent = "感知失败: "
+        + (j.error || "");
+      return;
+    }
+    render(j);
+  }).catch(function (e) {
+    document.getElementById("greet").textContent = "网络异常: " + e.message;
+  });
+}
+
+function switchCity(code) {
+  if (code) { lastCity = code; loadContext(code); }
+  else if (lastCity) { lastCity = ""; loadContext(); }
+}
+
+/* 城市切换下拉(公开接口全量 344 市) */
+function loadCities() {
+  fetch("/api/citystore/cities/available").then(function (r) {
+    return r.json();
+  }).then(function (j) {
+    var list = (j.data && j.data.cities) || j.data || [];
+    if (!Array.isArray(list) || !list.length) return;
+    var sel = document.getElementById("citySel");
+    var html = '<option value="">— 切换城市 —</option>';
+    list.forEach(function (c) {
+      var name = (c.provinceName || "") + " · " + (c.cityName || "");
+      html += '<option value="' + esc(c.cityCode) + '">'
+        + esc(name) + "</option>";
+    });
+    sel.innerHTML = html;
+  }).catch(function (e) {
+    /* 切换入口非关键路径——显式留痕避免静默回归 */
+    console.warn("城市列表加载失败(切换入口不可用):", e && e.message);
+  });
+}
+
+(function () {
+  loadContext();
+  loadCities();
+})();
+</script>
+</body>
+</html>

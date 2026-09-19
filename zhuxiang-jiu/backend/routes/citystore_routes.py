@@ -159,7 +159,6 @@ async def apply(
 
 @router.get("/api/citystore/districts/available", tags=["县区网店模块"])
 async def list_available_districts(
-    x_member_id: str = Header(None, alias="X-Member-Id"),
     city: str | None = Query(
         None, max_length=6,
         description="市码筛选(如 370100=济南市; 缺省全量——前端三级联动一次性预载)"),
@@ -169,8 +168,9 @@ async def list_available_districts(
     区县源: 全国县级行政区 3028 条(GB/T 2260, 挂靠 344 市——
     直辖市并挂单市条目/省直辖县级市自身单条目/港澳台不收录)。
     上级市被存量市级网店覆盖时该市区县仍返回但 apply 拦截。
+
+    游客可用(公开白名单——申请开店页/情景切换城市同源数据)。
     """
-    _require_member_id(x_member_id)
     try:
         result = await _service.list_available_districts(city_code=city)
         return {"success": True, "data": result}
@@ -180,7 +180,6 @@ async def list_available_districts(
 
 @router.get("/api/citystore/cities/available", tags=["县区网店模块"])
 async def list_available_cities(
-    x_member_id: str = Header(None, alias="X-Member-Id"),
     province: str | None = Query(
         None, max_length=6,
         description="省份码筛选(如 370000=山东省; 缺省全量)"),
@@ -189,8 +188,9 @@ async def list_available_cities(
 
     城市源: 全国 34 省级行政区 + 344 地级行政区全量
     (GB/T 2260)——申请开店城市选择数据源。
+
+    游客可用(公开白名单——申请开店页/情景切换城市同源数据)。
     """
-    _require_member_id(x_member_id)
     try:
         result = await _service.list_available_cities(
             province_code=province)
