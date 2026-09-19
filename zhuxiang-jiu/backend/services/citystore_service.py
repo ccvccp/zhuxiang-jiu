@@ -47,6 +47,7 @@ from repositories.citystore_repository import (
     CHANNEL_MINIPROGRAM, calc_discount,
 )
 from repositories.wallet_repository import WalletRepository
+from services.scene_service import SceneService
 
 
 logger = logging.getLogger(__name__)
@@ -362,6 +363,7 @@ class CityStoreService:
         latitude: float = None,
         member_id: int = None,
         nearby_radius_km: float = 50.0,
+        caller_ip: str = None,
     ) -> dict:
         """下单入口决策: 所在城市有营业中的市级网店 → 市店入口, 否则 → 本站入口
 
@@ -371,7 +373,8 @@ class CityStoreService:
             3. cityName(城市名匹配市店表)
             4. longitude+latitude(附近 loc_stores 门店推断城市, 限 radius_km 内)
             5. memberId 默认收货地址的 city/adcode
-            6. 全部缺失 → 本站入口(未获取到位置)
+            6. caller_ip(GeoIP 离线库解析——时空情景感知 P1 兜底)
+            7. 全部缺失 → 本站入口(未获取到位置)
 
         Args:
             city_code: 地级市行政区划码(如 "110100")
@@ -381,6 +384,7 @@ class CityStoreService:
             longitude/latitude: 地图定位经纬度
             member_id: 会员ID(取默认收货地址兜底)
             nearby_radius_km: 经纬度模式附近门店搜索半径(km)
+            caller_ip: 调用方 IP(XFF 提取——最后兜底)
 
         Returns:
             {
@@ -471,6 +475,19 @@ class CityStoreService:
                 logger.info(
                     "[下单入口决策] 会员默认地址兜底失败: memberId=%s 无可用地址"
                     "(无地址或地址缺 adcode/city)", member_id)
+
+        # 调用方 IP 兜底(GeoIP 离线库——时空情景感知 P1; 地址优先原则)
+        if resolved is None and caller_ip:
+            loc = SceneService().resolve_city(caller_ip)
+            if loc.get("matched"):
+                resolved = (loc["cityCode"], loc["city"], loc["province"], "ip")
+                logger.info(
+                    "[下单入口决策] 城市判定走 IP 兜底: %s → %s(%s)",
+                    caller_ip, loc["city"], loc["cityCode"])
+            else:
+                logger.info(
+                    "[下单入口决策] IP 兜底未命中区划册: %s → %r",
+                    caller_ip, loc.get("city"))
 
         # ---------- 2. 无城市信息 → 本站入口 ----------
         if resolved is None:
@@ -575,6 +592,75 @@ class CityStoreService:
         if len(adcode) < 4 or not adcode[:4].isdigit():
             return adcode
         return adcode[:4] + "00"
+
+    async def resolve_order_ownership(self, address: dict,
+                                        caller_ip: str = None) -> dict:
+        """订单城市归属判定(时空情景感知 P1: 代理权益锁定下单位置)
+
+        双重判定(设计文档原则——收货地址优先, 避免 IP 定位偏差
+        导致的权益纠纷; IP 为补充兜底):
+            1. 收货地址(adcode 精确 → city 城市名匹配区划册)
+            2. caller_ip GeoIP 离线库解析
+        归属城市命中市级网店 → agentStoreCode(城市代理权益归属);
+        无店/无城市 → 总部(agentStoreCode 空)。
+
+        Returns:
+            {cityCode, cityName, provinceName, source, agentStoreCode,
+             agentStoreName}
+        """
+        from services import citystore_regions
+
+        code, name, province, source = "", "", "", "none"
+        address = address or {}
+        adcode = str(address.get("adcode") or "").strip()
+        city = str(address.get("city") or "").strip()
+        # 1. 地址 adcode 精确(转市级码)
+        if adcode:
+            code = self._adcode_to_city_code(adcode)
+            ref = citystore_regions.get_city(code)
+            if ref:
+                name, province = ref["cityName"], ref["provinceName"]
+                source = "addressAdcode"
+        # 2. 地址城市名匹配区划册
+        if not code and city:
+            ref = self._city_by_name(city)
+            if ref:
+                code = ref["cityCode"]
+                name, province = ref["cityName"], ref["provinceName"]
+                source = "addressCity"
+        # 3. IP 兜底(GeoIP)
+        if not code and caller_ip:
+            loc = SceneService().resolve_city(caller_ip)
+            if loc.get("matched"):
+                code = loc["cityCode"]
+                name = loc["city"]
+                province = loc["province"]
+                source = "ip"
+
+        ownership = {"cityCode": code, "cityName": name,
+                     "provinceName": province, "source": source,
+                     "agentStoreCode": "", "agentStoreName": ""}
+        if code:
+            store = await self.repo.get_by_city(code)
+            if store:
+                ownership["agentStoreCode"] = store.get("storeCode", "")
+                ownership["agentStoreName"] = store.get("storeName", "")
+        logger.info("[订单城市归属] source=%s city=%s(%s) agent=%s",
+                    source, name, code, ownership["agentStoreCode"] or "总部")
+        return ownership
+
+    @staticmethod
+    def _city_by_name(city_name: str) -> dict | None:
+        """城市名查区划册(去"市"后缀宽松比对——订单地址快照口径)"""
+        from services import citystore_regions
+
+        target = (city_name or "").strip().rstrip("市")
+        if not target:
+            return None
+        for c in citystore_regions.all_cities():
+            if c["cityName"].rstrip("市") == target:
+                return c
+        return None
 
     async def _resolve_city_from_default_address(self, member_id: int):
         """取会员默认收货地址解析城市(无默认取最新一条)"""

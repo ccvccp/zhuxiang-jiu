@@ -29,7 +29,7 @@
 """
 
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.citystore_service import CityStoreService
@@ -289,19 +289,26 @@ class OrderEntryDecideRequest(PydBaseModel):
 @router.post("/api/citystore/order-entry/decide", tags=["县区网店模块"])
 async def decide_order_entry(
     data: OrderEntryDecideRequest,
+    request: Request,
     x_member_id: str | None = Header(None, alias="X-Member-Id"),
 ):
     """下单入口决策(市级网店优先原则)
 
     根据地图位置判定: 所在城市有营业中的市级网店 → 返回市店下单入口
     (含 storeCode/折扣), 无市店或市店未营业 → 返回本站下单入口。
-    城市判定优先级: cityCode > adcode > cityName > 经纬度附近门店 > 默认收货地址。
+    城市判定优先级: cityCode > adcode > cityName > 经纬度附近门店
+    > 默认收货地址 > 调用方 IP(GeoIP 兜底, 时空情景感知 P1)。
     """
     try:
         try:
             member_id = int(x_member_id) if x_member_id else None
         except (TypeError, ValueError):
             member_id = None  # 非数字头视为未登录(仅失去地址兜底, 不影响决策)
+        # 调用方 IP(XFF > X-Real-IP——GeoIP 兜底入口)
+        xff = request.headers.get("x-forwarded-for") or ""
+        caller_ip = (xff.split(",")[0].strip() if xff else
+                     (request.headers.get("x-real-ip")
+                      or (request.client.host if request.client else "")))
         result = await _service.decide_order_entry(
             city_code=data.cityCode,
             adcode=data.adcode,
@@ -311,6 +318,7 @@ async def decide_order_entry(
             latitude=data.latitude,
             member_id=member_id,
             nearby_radius_km=data.nearbyRadiusKm,
+            caller_ip=caller_ip,
         )
         return {"success": True, **result}
     except Exception as e:

@@ -159,6 +159,75 @@ async def main() -> int:
     check("聚合: 老客问候", "老朋友" in ctx["greeting"]["greeting"],
           ctx["greeting"]["greeting"])
 
+    # ============ 7. 订单城市归属(P1: 地址优先/IP 兜底/代理权益) ============
+    from services.citystore_service import CityStoreService
+    from repositories.citystore_repository import (
+        CityStoreRepository, STORE_STATUS_OPERATING)
+
+    cs = CityStoreService()
+    cs_repo = CityStoreRepository()
+
+    # 地址 adcode 优先(泰安地址 + 南京 IP → 泰安)
+    own = await cs.resolve_order_ownership(
+        {"adcode": "370902", "city": "泰安市"},
+        caller_ip="114.114.114.114")
+    check("归属: adcode 优先", own["cityCode"] == "370900"
+          and own["source"] == "addressAdcode"
+          and own["cityName"] == "泰安市", str(own))
+
+    # 地址城市名(无 adcode; "泰安" 无市后缀亦命中)
+    own = await cs.resolve_order_ownership({"city": "泰安"})
+    check("归属: 城市名宽松匹配", own["cityCode"] == "370900"
+          and own["source"] == "addressCity", str(own))
+
+    # IP 兜底(空地址 + 南京 IP)
+    own = await cs.resolve_order_ownership(
+        {}, caller_ip="114.114.114.114")
+    check("归属: IP 兜底", own["cityCode"] == "320100"
+          and own["source"] == "ip" and own["cityName"] == "南京市",
+          str(own))
+
+    # 全空 → 总部(空归属)
+    own = await cs.resolve_order_ownership({})
+    check("归属: 空归总部", own["cityCode"] == ""
+          and own["agentStoreCode"] == "" and own["source"] == "none",
+          str(own))
+
+    # 代理归属命中(造市级网店——城市代理)
+    await cs_repo.save_store({
+        "storeCode": "CS-370900-T1", "storeName": "泰安城市代理店",
+        "memberId": 7301, "districtCode": "", "districtName": "",
+        "cityCode": "370900", "cityName": "泰安市",
+        "provinceCode": "370000", "provinceName": "山东省",
+        "status": STORE_STATUS_OPERATING, "currentDiscount": 90,
+        "createdAt": "2026-09-19T00:00:00",
+        "updatedAt": "2026-09-19T00:00:00"})
+    own = await cs.resolve_order_ownership({"adcode": "370902"})
+    check("归属: 城市代理命中", own["agentStoreCode"] == "CS-370900-T1"
+          and own["agentStoreName"] == "泰安城市代理店", str(own))
+    # IP 兜底亦可命中代理(收货地址空)
+    own = await cs.resolve_order_ownership(
+        {"city": "未知城市"}, caller_ip="112.234.56.78")  # 临沂
+    check("归属: 无地址归 IP 城", own["cityCode"] == "371300"
+          and own["source"] == "ip", str(own))
+
+    # ============ 8. decide_order_entry IP 兜底(P1) ============
+    # 无任何位置输入 + 南京 IP → IP 兜底判定(本站入口, 城市信息含南京)
+    r = await cs.decide_order_entry(caller_ip="114.114.114.114")
+    check("决策: IP 兜底生效", r["citySource"] == "ip"
+          and (r.get("city") or {}).get("cityCode") == "320100"
+          and r["entry"] == "site", str(r.get("citySource")) + str(r.get("entry")))
+    # 显式输入优先于 IP(cityCode 泰安 + 南京 IP → 泰安)
+    r = await cs.decide_order_entry(
+        city_code="370900", caller_ip="114.114.114.114")
+    check("决策: 显式输入优先", (r.get("store") or {}).get("storeCode")
+          == "CS-370900-T1" and r["entry"] == "citystore", str(r)[:200])
+    # 无 IP 无输入 → 未获取到位置
+    r = await cs.decide_order_entry()
+    check("决策: 无输入本站", r["entry"] == "site"
+          and r.get("citySource") is None
+          and "未获取到位置" in r["reason"], str(r)[:150])
+
     print("=" * 60)
     print("时空情景感知模块测试".center(50))
     print("=" * 60)

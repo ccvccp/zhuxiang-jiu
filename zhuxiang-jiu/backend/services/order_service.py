@@ -213,7 +213,8 @@ class OrderService:
 
     async def create(self, member_id, items: list, address: dict,
                      use_points: int = 0, remark: str = "",
-                     age_confirmed: bool = False) -> dict:
+                     age_confirmed: bool = False,
+                     caller_ip: str = None) -> dict:
         """创建订单
 
         流程:
@@ -332,6 +333,10 @@ class OrderService:
                 "consumedPoints": 0,  # 支付后赠送的积分(退款时扣回)
                 "timeline": [{"status": PENDING, "time": now,
                               "action": "创建订单"}],
+                # 城市归属(时空情景感知 P1: 收货地址优先/IP 兜底,
+                # 命中市级网店即代理权益归属; 不落库 IP 原文)
+                "cityOwnership": await self._resolve_ownership(
+                    address, caller_ip),
                 "createdAt": now,
                 "updatedAt": now,
             }
@@ -351,6 +356,19 @@ class OrderService:
     # ============================================================
     # 查询
     # ============================================================
+
+    @staticmethod
+    async def _resolve_ownership(address: dict, caller_ip: str) -> dict:
+        """订单城市归属(异常不阻断下单——最坏空归属归总部)"""
+        try:
+            from services.citystore_service import CityStoreService
+            return await CityStoreService().resolve_order_ownership(
+                address, caller_ip=caller_ip)
+        except Exception as exc:
+            logger.warning("[订单城市归属] 解析异常(归总部): %s", exc)
+            return {"cityCode": "", "cityName": "", "provinceName": "",
+                    "source": "error", "agentStoreCode": "",
+                    "agentStoreName": ""}
 
     async def get_by_id(self, order_id: str) -> dict:
         """订单详情"""

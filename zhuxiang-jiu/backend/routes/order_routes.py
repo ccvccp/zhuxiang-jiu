@@ -10,7 +10,7 @@
     - 权限校验 → 401/403
 """
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from services import ai_feedback_hooks as ai_hooks
 from services.order_service import OrderService
@@ -52,6 +52,7 @@ def _handle(exc):
 @router.post("/create")
 async def create_order(
     body: dict,
+    request: Request,
     x_member_id: str = Header(default="", alias="X-Member-Id"),
 ):
     """创建订单
@@ -67,14 +68,20 @@ async def create_order(
         }
     """
     member_id = _require_member(x_member_id)
+    # 调用方 IP(时空情景感知 P1: 订单城市归属 IP 兜底; XFF > X-Real-IP)
+    xff = request.headers.get("x-forwarded-for") or ""
+    caller_ip = (xff.split(",")[0].strip() if xff else
+                 (request.headers.get("x-real-ip")
+                  or (request.client.host if request.client else "")))
     try:
         result = await _service.create(
             member_id,
             items=body.get("items", []),
             address=body.get("address", {}),
             use_points=int(body.get("usePoints", 0)),
-            remark=body.get("remark", ""),
+            remark=str(body.get("remark", "")),
             age_confirmed=bool(body.get("ageConfirmed", False)),
+            caller_ip=caller_ip,
         )
         # v7.6 自动反馈: 订单风控观察评分 + 决策快照(不阻断业务)
         # v7.8 输入富化: 传入地址/备注, 信用与行为画像由富化层查询

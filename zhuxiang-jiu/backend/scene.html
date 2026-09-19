@@ -120,7 +120,8 @@ function render(j) {
     ab.innerHTML = '<div class="agent"><span class="ttl">您的专属城市服务商</span><br>'
       + "「" + esc(d.agent.storeName) + "」 · "
       + esc(d.agent.provinceName || "") + esc(d.agent.cityName || "")
-      + '<br><span class="desc">本地服务 · 市级网店(城市代理)体系</span></div>';
+      + '<br><span class="desc">本地发货预计 1-2 天送达 · 月度考核三档折扣(70/80/90) · 一市一店独占服务</span>'
+      + '<br><span class="desc">下单自动归属: 订单城市将关联该服务商(收货地址优先 · IP 兜底)</span></div>';
   } else if (loc.cityCode) {
     ab.innerHTML = '<div class="agent-none">'
       + esc((loc.province || "") + (loc.city || "")) + " 暂未开通城市代理服务。"
