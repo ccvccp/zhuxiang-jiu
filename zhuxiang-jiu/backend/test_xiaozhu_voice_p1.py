@@ -51,8 +51,10 @@ async def main():
 
     print("[01 指令注册]")
     actions = [c["action"] for c in COMMANDS]
-    record("COMMANDS 16 项含 cart.add",
-           len(COMMANDS) == 16 and "cart.add" in actions,
+    record("COMMANDS 17 项含 cart.add/order.query",
+           len(COMMANDS) == 17
+           and "cart.add" in actions
+           and "order.query" in actions,
            f"{len(COMMANDS)}|{actions[-3:]}")
 
     svc = XiaozhuService()
@@ -149,6 +151,42 @@ async def main():
                 or "订单" in str(r.get("reply"))),
            f"{turn.get('intent')}|{str(r.get('reply'))[:60]}")
     await svc.delete_session(sid6)
+
+    print("[08 订单查询(P2 order.query)]")
+    # 17 项指令
+    record("COMMANDS 17 项含 order.query",
+           len(COMMANDS) == 17
+           and "order.query" in [c["action"] for c in COMMANDS],
+           str(len(COMMANDS)))
+    # 下单后查单: 成单→最近订单卡
+    sid7 = await _open(1)
+    await svc.handle_text(sid7, "小竹，看新品")
+    await svc.handle_text(sid7, "小竹，把这个加入购物车")
+    await svc.handle_text(sid7, "小竹，结算")
+    r = await svc.handle_text(sid7, "小竹，查我的订单")
+    turn = r.get("turn") or {}
+    card = r.get("card") or {}
+    record("查订单→order_list 卡(最近单含物流栏)",
+           turn.get("intent") == "order.query"
+           and card.get("type") == "order_list"
+           and len(card.get("items") or []) >= 1
+           and "waybill" in (card.get("items") or [{}])[0]
+           and r.get("jump") == "/order-list.html",
+           f"{turn.get('intent')}|{str(card)[:80]}")
+    # 物流说法同义
+    r = await svc.handle_text(sid7, "小竹，我的订单到哪了")
+    record("物流说法同义命中",
+           (r.get("turn") or {}).get("intent")
+           == "order.query",
+           str((r.get("turn") or {}).get("intent")))
+    await svc.delete_session(sid7)
+    # 游客引导
+    sid8 = await _open(0)
+    r = await svc.handle_text(sid8, "小竹，查我的订单")
+    record("游客查单→登录引导",
+           "登录" in str(r.get("reply")),
+           str(r.get("reply"))[:50])
+    await svc.delete_session(sid8)
 
     print("-" * 64)
     print(f"通过 {PASS} 项 / 失败 {FAIL} 项")

@@ -204,6 +204,14 @@ COMMANDS = [
         "examples": ["小竹，今天有什么优惠"],
     },
     {
+        "action": "order.query",
+        "label": "查订单/物流",
+        "patterns": ["查订单", "我的订单", "订单查询", "订单号",
+                     "订单到哪", "到哪了", "物流", "快递",
+                     "最近的订单", "订单状态"],
+        "examples": ["小竹，查我的订单", "小竹，我的订单到哪了"],
+    },
+    {
         "action": "chat.human",
         "label": "转人工",
         "patterns": ["转人工", "人工客服", "找真人",
@@ -865,6 +873,9 @@ class XiaozhuService:
                 return self._exec_nav(text)
             if action == "promo.query":
                 return await self._exec_promo()
+            if action == "order.query":
+                return await self._exec_order_query(
+                    session, member_id)
             if action == "chat.human":
                 return self._exec_human()
             if action == "xiaozhu.help":
@@ -1240,6 +1251,75 @@ class XiaozhuService:
                      "subject": subject,
                      "items": [dict(p, price=p.get("price"))]},
             "jump": None,
+        }
+
+    async def _exec_order_query(self, session: dict,
+                               member_id: int) -> dict:
+        """P2 订单查询: 双源合并只读(语音侧零新采集)
+
+        ① 本会话 order_done 轮次——语音刚结算的单(45号
+           结算域, 无 memberId 不可按会员查, 会话留痕即源)
+        ② 11号订单域 get_my_orders——商城正常下的单
+        """
+        if not member_id:
+            return {"reply": "查询订单需先登录——登录后说"
+                            "「查我的订单」",
+                    "card": None}
+        cards = []
+        # ① 会话内语音单(最近一笔)
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        for t in reversed(turns):
+            card = t.get("card") or {}
+            if card.get("type") == "order_done" \
+                    and card.get("orderId"):
+                cards.append({
+                    "name": "语音下单 · 刚提交",
+                    "orderId": card["orderId"],
+                    "amount": None, "waybill": "待发货"})
+                break
+        # ② 订单域最近单(商城正常下的)
+        domain_count = 0
+        try:
+            from services.order_service import (
+                OrderService,
+            )
+            r = await OrderService().get_my_orders(
+                member_id)
+            domain_count = r.get("count") or 0
+            for o in (r.get("orders") or [])[:3]:
+                lg = o.get("logistics") or {}
+                waybill = " ".join(
+                    w for w in (lg.get("carrier"),
+                                lg.get("waybillNo")) if w)
+                cards.append({
+                    "name": o.get("statusName")
+                            or o.get("status"),
+                    "orderId": o.get("orderId"),
+                    "amount": ((o.get("priceDetail") or {})
+                               .get("actualAmount")),
+                    "waybill": waybill or "待发货",
+                })
+        except Exception as exc:
+            logger.debug("voice48_order_query_skip: %s", exc)
+        if not cards:
+            return {"reply": "您还没有订单——说「看新品」"
+                            "选中后「就它了」加购, 一句"
+                            "「结算」即可下单",
+                    "card": None}
+        cards = cards[:3]
+        first = cards[0]
+        n = len(cards) + max(0, domain_count - 2)
+        return {
+            "reply": f"最近 {n} 笔订单, 最新一笔"
+                     f"{first['name']}"
+                     + (f"(¥{first['amount']})"
+                        if first.get("amount") is not None
+                        else "")
+                     + "——详情可前往订单页查看",
+            "card": {"type": "order_list",
+                     "subject": "最近订单", "items": cards},
+            "jump": "/order-list.html",
         }
 
     async def _exec_trust(self, member_id: int,
