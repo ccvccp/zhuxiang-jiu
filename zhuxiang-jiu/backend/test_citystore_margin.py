@@ -187,6 +187,91 @@ async def main() -> int:
     except ValueError:
         check("原因非法拦截", True)
 
+    # ============ 8. 到期提醒(30/7/1 三档梯度站内信) ============
+    from repositories.message_repository import (
+        MessageRepository, CHANNEL_INMAIL, CATEGORY_SYSTEM)
+
+    msg_repo = MessageRepository()
+
+    r = await _apply(svc, wallet, 7106, "110111", "提醒店")
+    sc6 = r["storeCode"]
+    await svc.audit_store(sc6, "admin", True)
+    m = await repo.get_margin_by_store(sc6)
+    # 剩 20 天 → 触发 30 档
+    m["startDate"] = (date.today() - timedelta(days=345)).isoformat()
+    m["endDate"] = (date.today() + timedelta(days=20)).isoformat()
+    await repo.save_margin(m)
+    await _add_orders(repo, sc6, 20000.0, 1, "2026-09-10T10:00:00")
+
+    result = await svc.run_margin_reminder_round()
+    s6 = [x for x in result["sent"] if x["storeCode"] == sc6]
+    check("提醒: 30 档触发", len(s6) == 1 and s6[0]["step"] == 30,
+          str(result.get("sent")))
+
+    msgs = await msg_repo.list_messages(7106, channel=CHANNEL_INMAIL)
+    rem = [x for x in msgs if "保证金到期提醒" in (x.get("title") or "")]
+    check("提醒: 站内信落库", len(rem) == 1
+          and "30 天后到期" in rem[0]["title"]
+          and rem[0].get("category") == CATEGORY_SYSTEM,
+          str(rem[:1]))
+    check("提醒: 内容含进度与预估", "完成率 40.0%" in rem[0]["content"]
+          and "退还 ¥400.00" in rem[0]["content"]
+          and "扣除 ¥600.00" in rem[0]["content"],
+          rem[0]["content"] if rem else "")
+    m = await repo.get_margin_by_store(sc6)
+    check("提醒: 档位标记", m.get("remindedSteps") == "30",
+          str(m.get("remindedSteps")))
+
+    # 幂等: 同档重跑不重发
+    result = await svc.run_margin_reminder_round()
+    s6 = [x for x in result["sent"] if x["storeCode"] == sc6]
+    check("提醒: 同档幂等", len(s6) == 0, str(result.get("sent")))
+
+    # 剩 5 天 → 7 档(30 已标)
+    m["endDate"] = (date.today() + timedelta(days=5)).isoformat()
+    await repo.save_margin(m)
+    result = await svc.run_margin_reminder_round()
+    s6 = [x for x in result["sent"] if x["storeCode"] == sc6]
+    check("提醒: 降档 7 天触发", len(s6) == 1 and s6[0]["step"] == 7,
+          str(s6))
+    m = await repo.get_margin_by_store(sc6)
+    check("提醒: 档位累计 7,30", m.get("remindedSteps") == "7,30",
+          str(m.get("remindedSteps")))
+
+    # 剩 1 天 → 1 档; settled 后不再提醒
+    m["endDate"] = (date.today() + timedelta(days=1)).isoformat()
+    await repo.save_margin(m)
+    result = await svc.run_margin_reminder_round()
+    s6 = [x for x in result["sent"] if x["storeCode"] == sc6]
+    check("提醒: 1 天档触发", len(s6) == 1 and s6[0]["step"] == 1,
+          str(s6))
+    await svc.settle_margin(sc6, "expired")
+    result = await svc.run_margin_reminder_round()
+    s6 = [x for x in result["sent"] if x["storeCode"] == sc6]
+    check("提醒: settled 跳过", len(s6) == 0, str(s6))
+
+    # 未开业(pending 无起止)不提醒
+    r = await _apply(svc, wallet, 7107, "110112", "未开业提醒店")
+    sc7 = r["storeCode"]
+    result = await svc.run_margin_reminder_round()
+    s7 = [x for x in result["sent"] if x["storeCode"] == sc7]
+    check("提醒: 未开业跳过", len(s7) == 0, str(s7))
+
+    # ============ 9. 开业审计幂等(预置起止不被重审重置) ============
+    r = await _apply(svc, wallet, 7108, "110113", "审计幂等店")
+    sc8 = r["storeCode"]
+    m = await repo.get_margin_by_store(sc8)
+    # 外部预置起止(运营造数场景: 剩 20 天)
+    m["startDate"] = (date.today() - timedelta(days=345)).isoformat()
+    m["endDate"] = (date.today() + timedelta(days=20)).isoformat()
+    await repo.save_margin(m)
+    await svc.audit_store(sc8, "admin", True)
+    m = await repo.get_margin_by_store(sc8)
+    check("审计: 预置起止不被开业重置",
+          m["startDate"] == (date.today() - timedelta(days=345)).isoformat()
+          and m["endDate"] == (date.today() + timedelta(days=20)).isoformat(),
+          f"{m.get('startDate')}~{m.get('endDate')}")
+
     print("=" * 60)
     print("县（区）网店保证金子系统测试".center(50))
     print("=" * 60)

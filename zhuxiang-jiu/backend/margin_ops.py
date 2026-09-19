@@ -11,6 +11,7 @@
     settle <store_code> <reason>   手动结算(reason: expired|cancelled|rejected, 幂等)
     tx <user_id> [条数]            会员保证金钱包流水(双 type, 默认 10 条)
     stats                          保证金统计概览(状态分布/金额汇总/待结算)
+    remind                         手动触发一轮到期提醒(30/7/1 天档位站内信)
 
 注意:
     - settle 与调度器并发安全(锁内双重检查, 重复调用幂等不双退)
@@ -152,6 +153,19 @@ async def main() -> int:
         print(f"  到期待结算({today}): {len(due)} 条")
         for m in due:
             print("    " + _fmt_margin(m))
+        return 0
+
+    # ---------- remind ----------
+    if cmd == "remind":
+        result = await svc.run_margin_reminder_round()
+        print(f"[到期提醒轮] 扫描 {result['scanned']} 条 locked, "
+              f"发送 {len(result['sent'])} 条, 跳过 {result['skipped']}, "
+              f"失败 {len(result['failed'])}")
+        for s in result["sent"]:
+            print(f"  {s['marginNo']} | {s['storeCode']} | "
+                  f"{s['step']} 天档(剩余 {s['daysLeft']} 天)")
+        for f in result["failed"]:
+            print(f"  [失败] {f['storeCode']}: {f['error']}")
         return 0
 
     print(f"未知命令: {cmd} (help 查看用法)")

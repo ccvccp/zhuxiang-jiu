@@ -65,6 +65,14 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 16
 .empty { text-align: center; padding: 30px 0; color: var(--muted); font-size: 14px; line-height: 1.8; }
 .loading { text-align: center; padding: 30px 0; color: var(--muted); font-size: 13px; }
 .toast { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); background: rgba(45, 58, 52, .88); color: #fff; padding: 10px 22px; border-radius: 8px; font-size: 13px; z-index: 99; display: none; }
+/* 到期提醒横幅 */
+.notice-bar { background: #fff8e8; border: 1px solid #f0dcae; border-radius: var(--radius); padding: 12px 14px; margin: 14px 0; cursor: pointer; }
+.notice-bar .nb-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: #8a6412; font-weight: 600; }
+.notice-bar .nb-badge { background: #e8b93c; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 9px; flex-shrink: 0; }
+.notice-bar .nb-date { margin-left: auto; font-size: 11px; color: #b39760; font-weight: 400; flex-shrink: 0; }
+.notice-bar .nb-body { font-size: 12.5px; color: #6f5a26; line-height: 1.75; margin-top: 8px; white-space: pre-line; display: none; }
+.notice-bar.open .nb-body { display: block; }
+.notice-bar .nb-hint { font-size: 11px; color: #b39760; margin-top: 6px; }
 .hidden { display: none !important; }
 .footer { text-align: center; font-size: 11px; color: var(--muted); padding: 18px 0 8px; line-height: 1.8; }
 </style>
@@ -87,6 +95,11 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 16
 
 <!-- 主内容 -->
 <div id="main" class="hidden">
+  <div class="notice-bar hidden" id="noticeBar" onclick="this.classList.toggle('open')">
+    <div class="nb-head"><span class="nb-badge">到期提醒</span><span id="nbTitle">-</span><span class="nb-date" id="nbDate">-</span></div>
+    <div class="nb-body" id="nbBody">-</div>
+    <div class="nb-hint">点击展开 / 收起详情</div>
+  </div>
   <div class="card">
     <h3>我的网店</h3>
     <div class="store-bar" id="storeBar"><div class="loading">加载中...</div></div>
@@ -173,7 +186,7 @@ function doLogin() {
   }).then(function (r) { return r.json(); }).then(function (j) {
     var token = j && (j.accessToken || (j.data && j.data.accessToken));
     if (token) {
-      setAuth({ token: token, refreshToken: j.refreshToken || (j.data && j.data.refreshToken) || "" });
+      setAuth({ token: token, refreshToken: j.refreshToken || (j.data && j.data.refreshToken) || "", uid: j.memberId || (j.data && j.data.memberId) || 0 });
       enterMain();
     } else {
       showToast((j && (j.error || j.detail)) || "登录失败");
@@ -223,6 +236,26 @@ function enterMain() {
   document.getElementById("loginCard").classList.add("hidden");
   document.getElementById("main").classList.remove("hidden");
   loadStores();
+  loadNotices();
+}
+
+/* 拉取未读系统消息中的保证金到期提醒, 顶部横幅展示 */
+function loadNotices() {
+  var auth = getAuth();
+  if (!auth || !auth.uid) return;
+  apiFetch("/api/message/list?user_id=" + auth.uid + "&category=system&status=unread&limit=10")
+    .then(function (j) {
+      if (!j || j.success === false) return;
+      var list = (j.data || []).filter(function (m) {
+        return (m.title || "").indexOf("保证金") >= 0;
+      });
+      if (!list.length) return;
+      var latest = list[0];
+      document.getElementById("nbTitle").textContent = latest.title;
+      document.getElementById("nbDate").textContent = (latest.sentAt || "").slice(5, 16).replace("T", " ");
+      document.getElementById("nbBody").textContent = latest.content || "";
+      document.getElementById("noticeBar").classList.remove("hidden");
+    }).catch(function () { /* 提醒横幅非关键路径, 静默 */ });
 }
 
 function loadStores() {
@@ -277,6 +310,12 @@ function loadMargin() {
 }
 
 function renderMargin(m) {
+  /* 旧登录态无 uid 时从保证金归属回填(提醒横幅依赖 uid 拉取) */
+  var _a = getAuth();
+  if (_a && _a.token && !_a.uid && m.userId) {
+    setAuth(Object.assign(_a, { uid: m.userId }));
+    loadNotices();
+  }
   document.getElementById("mAmount").textContent = fmtMoney(m.amount);
   var st = document.getElementById("mStatus");
   var locked = m.status === "locked";
@@ -299,7 +338,9 @@ function renderMargin(m) {
     document.getElementById("dStart").textContent = m.startDate || "待平台确认开业";
     document.getElementById("dEnd").textContent = m.endDate || "-";
     if (m.endDate) {
-      var days = Math.ceil((new Date(m.endDate) - new Date(m.startDate || m.endDate)) / 86400000);
+      var end = new Date(m.endDate + "T00:00:00");
+      var today = new Date(); today.setHours(0, 0, 0, 0);
+      var days = Math.round((end - today) / 86400000);
       document.getElementById("dLeft").textContent = days > 0 ? days + " 天" : "已到期";
     } else {
       document.getElementById("dLeft").textContent = "-";

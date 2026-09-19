@@ -696,14 +696,15 @@ class CityStoreService:
             # 保证金联动: 确认开业补锁定期起止 / 驳回全额退还
             margin = await self.repo.get_margin_by_store(store_code)
             if margin and margin.get("status") == MARGIN_STATUS_LOCKED:
-                if approved:
+                # 仅首次开业补写起止(幂等——外部预置的起止不被重审重置)
+                if approved and not margin.get("startDate"):
                     margin["startDate"] = today
                     margin["endDate"] = (
                         date.fromisoformat(today)
                         + timedelta(days=MARGIN_TERM_DAYS)).isoformat()
                     margin["updatedAt"] = now
                     await self.repo.save_margin(margin)
-                else:
+                elif not approved:
                     await self.settle_margin(store_code, "rejected")
 
             return await self.get_store_detail(store_code)
@@ -915,6 +916,102 @@ class CityStoreService:
             else:
                 skipped.append(m["marginNo"])
         return {"due": len(due), "settled": settled, "skipped": skipped}
+
+    # 提醒档位: 到期前 N 天(最紧急优先——daysLeft ≤ 档位触发)
+    MARGIN_REMINDER_STEPS = (1, 7, 30)
+
+    async def run_margin_reminder_round(self) -> dict:
+        """保证金到期提醒轮(幂等: 每档位每店只发一次)
+
+        30/7/1 天三档梯度提醒, 站内信(CATEGORY_SYSTEM 强制投递类,
+        不受订阅/静默/频率限制); remindedSteps 逗号标记已发档位,
+        已到期(结算轮负责)/未开业(无 endDate)跳过。
+
+        提醒内容含实时年任务进度与按当前进度的到期预估结算
+        (退还/扣除), 便于店主冲刺任务或知悉结算金额。
+        """
+        from core.helpers import ts as _ts
+        from services.message_service import MessageService
+        from repositories.message_repository import (
+            CHANNEL_INMAIL, CATEGORY_SYSTEM)
+
+        msg = MessageService()
+        today = _ts()[:10]
+        margins = await self.repo.list_all_margins(
+            status=MARGIN_STATUS_LOCKED)
+        sent, failed = [], []
+        skipped = 0
+        for m in margins:
+            if not m.get("endDate") or not m.get("startDate"):
+                skipped += 1
+                continue
+            days_left = (date.fromisoformat(m["endDate"])
+                         - date.fromisoformat(today)).days
+            if days_left < 0:  # 已到期——结算轮负责
+                skipped += 1
+                continue
+            done = {int(x) for x in
+                    str(m.get("remindedSteps") or "").split(",")
+                    if x.strip().isdigit()}
+            pending = [s for s in self.MARGIN_REMINDER_STEPS
+                       if days_left <= s and s not in done]
+            if not pending:
+                continue
+            step = min(pending)  # 最紧急未发档
+            store_code = m["storeCode"]
+            try:
+                # 实时进度与到期预估(与 settle_margin expired 同口径)
+                purchased = await self.repo.sum_purchase_between(
+                    store_code, m["startDate"], m["endDate"])
+                target = float(m.get("annualTarget")
+                               or ANNUAL_PURCHASE_TARGET)
+                amount = float(m.get("amount") or MARGIN_AMOUNT)
+                rate = (min(1.0, purchased / target)
+                        if target > 0 else 1.0)
+                refund = round(amount * rate, 2)
+                deducted = round(amount - refund, 2)
+                store = await self.repo.get_store(store_code) or {}
+                if rate >= 1.0:
+                    tip = "年任务已达标, 到期将全额退还。"
+                elif rate >= 0.8:
+                    tip = (f"再进货 ¥{target - purchased:,.2f}"
+                           " 可全额退还。")
+                else:
+                    tip = (f"完成 80%(¥{target * 0.8:,.2f})"
+                           f"可退 ¥{amount * 0.8:,.2f}, "
+                           "否则按完成比例扣除。")
+                await msg.send_message(
+                    m.get("userId"), CHANNEL_INMAIL,
+                    f"保证金到期提醒({step} 天后到期)",
+                    f"尊敬的店主: 您的网店「{store.get('storeName')
+                                               or store_code}」保证金 "
+                    f"¥{amount:.0f} 将于 {m['endDate']} 到期"
+                    f"(剩余 {days_left} 天)。\n"
+                    f"当前年任务完成率 {rate * 100:.1f}%"
+                    f"(已进货 ¥{purchased:,.2f} / 目标 ¥{target:,.0f}), "
+                    f"按当前进度到期预计退还 ¥{refund:,.2f}、"
+                    f"扣除 ¥{deducted:,.2f}。{tip}\n"
+                    "请前往「保证金进度」页面查看详情。",
+                    category=CATEGORY_SYSTEM)
+                # 标记已发档位(当前档及更松档一并标记, 防降档重发)
+                m["remindedSteps"] = ",".join(
+                    str(s) for s in self.MARGIN_REMINDER_STEPS
+                    if days_left <= s)
+                await self.repo.save_margin(m)
+                sent.append({"storeCode": store_code,
+                             "marginNo": m["marginNo"],
+                             "step": step, "daysLeft": days_left})
+            except Exception as exc:
+                failed.append({"storeCode": store_code,
+                               "error": str(exc)})
+                logger.warning("[保证金提醒] 发送失败 %s: %s",
+                               store_code, exc)
+        if sent:
+            logger.info("[保证金提醒] scanned=%d sent=%d skipped=%d "
+                        "failed=%d", len(margins), len(sent), skipped,
+                        len(failed))
+        return {"scanned": len(margins), "sent": sent,
+                "skipped": skipped, "failed": failed}
 
     # ============================================================
     # 区县列表(县区网店三级联动数据源)

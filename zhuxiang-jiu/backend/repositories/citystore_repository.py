@@ -237,7 +237,10 @@ class CityStoreRepository:
     # ============================================================
 
     async def add_order(self, order: dict) -> None:
-        """新增网店订单关联"""
+        """新增网店订单关联(createdAt 缺失时补当前时间——防直调漏传致统计失真)"""
+        if not order.get("createdAt"):
+            from core.helpers import ts
+            order["createdAt"] = ts()
         if is_redis_mode():
             await self._redis_add_order(order)
         else:

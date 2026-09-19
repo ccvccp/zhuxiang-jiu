@@ -168,8 +168,23 @@ async def run_margin_settlement_round() -> dict:
     return result
 
 
+async def run_margin_reminder_round() -> dict:
+    """执行一轮保证金到期提醒(可独立调用, 便于测试/手动补跑)
+
+    30/7/1 天三档梯度站内信提醒(remindedSteps 档位标记幂等),
+    与结算轮同频逐小时扫描。
+    """
+    from services.citystore_service import CityStoreService
+
+    result = await CityStoreService().run_margin_reminder_round()
+    if result.get("sent"):
+        logger.info("citystore_margin_reminder scanned=%d sent=%d",
+                    result.get("scanned", 0), len(result["sent"]))
+    return result
+
+
 async def _scheduler_loop() -> None:
-    """后台循环: 周期性检查考核窗口并执行 + 保证金到期结算"""
+    """后台循环: 周期性检查考核窗口并执行 + 保证金到期结算/提醒"""
     interval = scheduler_interval_seconds()
     logger.info("citystore_assessment_scheduler started interval=%ss", interval)
     while True:
@@ -183,6 +198,11 @@ async def _scheduler_loop() -> None:
             await run_margin_settlement_round()
         except Exception as exc:
             logger.warning("保证金结算调度异常(继续运行): %s", exc)
+        # 保证金到期提醒(30/7/1 天三档梯度站内信)
+        try:
+            await run_margin_reminder_round()
+        except Exception as exc:
+            logger.warning("保证金提醒调度异常(继续运行): %s", exc)
 
 
 _scheduler_task: asyncio.Task | None = None
