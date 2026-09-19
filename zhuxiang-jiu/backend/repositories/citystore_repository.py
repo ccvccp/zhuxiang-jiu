@@ -316,6 +316,12 @@ class CityStoreRepository:
             return await self._redis_list_due_margins(today)
         return self._mem_list_due_margins(today)
 
+    async def list_all_margins(self, status: str = None) -> list[dict]:
+        """全量保证金清单(可按状态筛选)——运维对账/速查用"""
+        if is_redis_mode():
+            return await self._redis_list_all_margins(status)
+        return self._mem_list_all_margins(status)
+
     # ============================================================
     # 内存模式实现
     # ============================================================
@@ -468,6 +474,14 @@ class CityStoreRepository:
                 if m.get("status") == MARGIN_STATUS_LOCKED
                 and m.get("endDate") and m["endDate"] <= today]
 
+    def _mem_list_all_margins(self, status: str = None) -> list[dict]:
+        self._ensure_store()
+        margins = list(self.store["city_store_margins"].values())
+        if status:
+            margins = [m for m in margins if m.get("status") == status]
+        margins.sort(key=lambda m: m.get("createdAt", ""), reverse=True)
+        return margins
+
     # ============================================================
     # Redis 模式实现
     # ============================================================
@@ -615,3 +629,12 @@ class CityStoreRepository:
         return [m for m in margins
                 if m.get("status") == MARGIN_STATUS_LOCKED
                 and m.get("endDate") and m["endDate"] <= today]
+
+    async def _redis_list_all_margins(self, status: str = None) -> list[dict]:
+        client = await get_redis_client()
+        all_data = await client.hgetall(_k("citystore", "margins"))
+        margins = [json.loads(v) for v in all_data.values()]
+        if status:
+            margins = [m for m in margins if m.get("status") == status]
+        margins.sort(key=lambda m: m.get("createdAt", ""), reverse=True)
+        return margins
