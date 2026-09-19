@@ -1014,6 +1014,131 @@ class CityStoreService:
                 "skipped": skipped, "failed": failed}
 
     # ============================================================
+    # 保证金治理(管理端: 总览/清单/对账)
+    # ============================================================
+
+    async def margin_admin_overview(self) -> dict:
+        """保证金治理总览(管理端): 统计 + 到期预警 + 滞留监控 + 对账
+
+        Returns:
+            {total, locked, settled, inLockAmount, refundedAmount,
+             deductedAmount, upcoming30, overdue[], reconciliation}
+        """
+        from core.helpers import ts as _ts
+        today = _ts()[:10]
+        margins = await self.repo.list_all_margins()
+        locked = [m for m in margins if m.get("status") == MARGIN_STATUS_LOCKED]
+        settled = [m for m in margins if m.get("status") == MARGIN_STATUS_SETTLED]
+        # 到期预警(30 天内到期 locked)与滞留(endDate 已过仍 locked——
+        # 调度器结算轮兜底, 非空即调度异常信号)
+        upcoming30 = 0
+        overdue = []
+        for m in locked:
+            if not m.get("endDate"):
+                continue
+            days_left = (date.fromisoformat(m["endDate"])
+                         - date.fromisoformat(today)).days
+            if 0 <= days_left <= 30:
+                upcoming30 += 1
+            if days_left < 0:
+                overdue.append({"marginNo": m["marginNo"],
+                                "storeCode": m["storeCode"],
+                                "endDate": m["endDate"],
+                                "daysOver": -days_left})
+        return {
+            "total": len(margins),
+            "locked": len(locked),
+            "settled": len(settled),
+            "inLockAmount": round(sum(
+                float(m.get("amount", 0)) for m in locked), 2),
+            "refundedAmount": round(sum(
+                float(m.get("refundAmount") or 0) for m in settled), 2),
+            "deductedAmount": round(sum(
+                float(m.get("deductedAmount") or 0) for m in settled), 2),
+            "upcoming30": upcoming30,
+            "overdue": overdue,
+            "reconciliation": await self.margin_reconciliation(),
+        }
+
+    async def margin_admin_list(self, status: str = None,
+                                days: int = None) -> dict:
+        """保证金治理清单(管理端): 含实时进度/剩余天数/已提醒档位
+
+        Args:
+            status: 筛选 locked|settled(缺省全部)
+            days: 仅 locked 时有效——剩余天数 ≤ N 的即将到期清单
+        """
+        from core.helpers import ts as _ts
+        today = _ts()[:10]
+        margins = await self.repo.list_all_margins(status=status)
+        items = []
+        for m in margins:
+            item = dict(m)
+            if m.get("status") == MARGIN_STATUS_LOCKED:
+                if m.get("endDate"):
+                    item["daysLeft"] = (date.fromisoformat(m["endDate"])
+                                        - date.fromisoformat(today)).days
+                    if days is not None and item["daysLeft"] > days:
+                        continue
+                if m.get("startDate"):
+                    # 实时进度(轻量计算, 不落库)
+                    purchased = await self.repo.sum_purchase_between(
+                        m["storeCode"], m["startDate"],
+                        m.get("endDate") or "9999-12-31")
+                    target = float(m.get("annualTarget")
+                                   or ANNUAL_PURCHASE_TARGET)
+                    item["annualPurchasedLive"] = round(purchased, 2)
+                    item["completionRateLive"] = round(
+                        min(1.0, purchased / target) if target > 0 else 1.0,
+                        4)
+            items.append(item)
+        return {"margins": items, "count": len(items)}
+
+    async def margin_reconciliation(self) -> dict:
+        """保证金对账恒等式(账实核验)
+
+        内部恒等式: Σ全部.amount ≡ 在锁金额 + Σ退还 + Σ扣除
+        钱包恒等式: Σlock 流水 ≡ Σ全部.amount; Σsettle 流水 ≡ Σ退还
+        (流水按保证金用户集拉取; refund=0 的结算无流水亦恒等)
+        """
+        margins = await self.repo.list_all_margins()
+        total_amount = sum(float(m.get("amount", 0)) for m in margins)
+        locked_amount = sum(
+            float(m.get("amount", 0))
+            for m in margins if m.get("status") == MARGIN_STATUS_LOCKED)
+        refunded = sum(
+            float(m.get("refundAmount") or 0)
+            for m in margins if m.get("status") == MARGIN_STATUS_SETTLED)
+        deducted = sum(
+            float(m.get("deductedAmount") or 0)
+            for m in margins if m.get("status") == MARGIN_STATUS_SETTLED)
+
+        # 钱包流水侧(保证金用户去重集, 双 type 逐用户汇总)
+        tx_lock, tx_settle = 0.0, 0.0
+        for uid in {m.get("userId") for m in margins if m.get("userId")}:
+            for t in await self.wallet_repo.list_transactions(
+                    uid, tx_type="citystore_margin_lock", limit=100000):
+                tx_lock += float(t.get("amount", 0))
+            for t in await self.wallet_repo.list_transactions(
+                    uid, tx_type="citystore_margin_settle", limit=100000):
+                tx_settle += float(t.get("amount", 0))
+
+        internal_ok = abs(total_amount
+                          - (locked_amount + refunded + deducted)) < 0.01
+        lock_ok = abs(tx_lock - total_amount) < 0.01
+        settle_ok = abs(tx_settle - refunded) < 0.01
+        return {
+            "internal": {"ok": internal_ok, "totalAmount": round(total_amount, 2),
+                         "inLockAmount": round(locked_amount, 2),
+                         "refundedAmount": round(refunded, 2),
+                         "deductedAmount": round(deducted, 2)},
+            "walletTx": {"ok": lock_ok and settle_ok,
+                         "lockTxSum": round(tx_lock, 2),
+                         "settleTxSum": round(tx_settle, 2)},
+            "ok": internal_ok and lock_ok and settle_ok,
+        }
+
+    # ============================================================
     # 区县列表(县区网店三级联动数据源)
     # ============================================================
 

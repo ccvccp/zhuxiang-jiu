@@ -757,6 +757,31 @@ class TestCityStoreAdmin:
                stats["totalStores"] >= 3 and stats["pendingStores"] >= 2 and stats["operatingStores"] >= 1,
                f"统计值错误: {stats}")
 
+        # test 60: 保证金治理总览(字段齐全)
+        ov = await svc.margin_admin_overview()
+        record("test_60_margin_overview_fields",
+               all(k in ov for k in [
+                   "total", "locked", "settled", "inLockAmount",
+                   "refundedAmount", "deductedAmount", "upcoming30",
+                   "overdue", "reconciliation",
+               ]),
+               f"总览字段缺失: {ov}")
+
+        # test 61: 保证金治理总览(统计值与对账)
+        record("test_61_margin_overview_values",
+               ov["total"] >= 1 and ov["locked"] >= 1
+               and ov["inLockAmount"] >= 1000
+               and ov["reconciliation"]["ok"] is True,
+               f"总览值错误: {ov}")
+
+        # test 62: 保证金治理清单(locked 含实时进度)
+        lst = await svc.margin_admin_list(status="locked")
+        record("test_62_margin_admin_list",
+               lst["count"] >= 1 and all(
+                   "completionRateLive" in m for m in lst["margins"]
+                   if m.get("startDate")),
+               f"清单错误: {lst}")
+
 
 # ============================================================
 # 测试运行

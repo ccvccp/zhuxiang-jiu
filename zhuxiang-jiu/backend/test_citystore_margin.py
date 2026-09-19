@@ -272,6 +272,52 @@ async def main() -> int:
           and m["endDate"] == (date.today() + timedelta(days=20)).isoformat(),
           f"{m.get('startDate')}~{m.get('endDate')}")
 
+    # ============ 10. 保证金治理(管理端总览/清单/对账) ============
+    # 10a. 总览: 统计 + 到期预警(sc8 剩 20 天) + 滞留(临时造过期 locked)
+    ov = await svc.margin_admin_overview()
+    check("治理: 总览统计", ov["total"] >= 8 and ov["locked"] >= 2
+          and ov["settled"] >= 5, str({k: ov[k] for k in
+                                       ("total", "locked", "settled")}))
+    check("治理: 30 天内到期计数", ov["upcoming30"] >= 1,
+          str(ov["upcoming30"]))
+    m7 = await repo.get_margin_by_store(sc7)
+    m7["startDate"] = (date.today() - timedelta(days=400)).isoformat()
+    m7["endDate"] = (date.today() - timedelta(days=1)).isoformat()
+    await repo.save_margin(m7)
+    ov = await svc.margin_admin_overview()
+    od7 = [x for x in ov["overdue"] if x["storeCode"] == sc7]
+    check("治理: 滞留监控检出", len(od7) == 1 and od7[0]["daysOver"] == 1,
+          str(ov["overdue"]))
+    m7["startDate"], m7["endDate"] = "", ""  # 还原(未开业)
+    await repo.save_margin(m7)
+
+    # 10b. 清单: locked 含剩余天数与实时进度; days 筛选
+    lst = await svc.margin_admin_list(status="locked")
+    l8 = [x for x in lst["margins"] if x["storeCode"] == sc8]
+    check("治理: locked 清单字段", l8 and l8[0]["daysLeft"] == 20
+          and l8[0].get("completionRateLive") == 0.0,
+          str(l8[:1]))
+    lst = await svc.margin_admin_list(status="locked", days=10)
+    check("治理: days 筛选排除", all(x.get("daysLeft") is None
+                                    or x["daysLeft"] > 10
+                                    for x in lst["margins"]),
+          str([x.get("daysLeft") for x in lst["margins"]]))
+
+    # 10c. 对账: 恒等式平衡 → 脏数据失配 → 还原复平
+    rec = await svc.margin_reconciliation()
+    check("治理: 对账恒等式平衡", rec["ok"] is True
+          and rec["internal"]["ok"] and rec["walletTx"]["ok"], str(rec))
+    m = await repo.get_margin_by_store(sc8)
+    m["amount"] = 2000.0  # 模拟脏数据(锁定流水仍 1000)
+    await repo.save_margin(m)
+    rec = await svc.margin_reconciliation()
+    check("治理: 钱包失配检出", rec["ok"] is False
+          and rec["walletTx"]["ok"] is False, str(rec["walletTx"]))
+    m["amount"] = 1000.0
+    await repo.save_margin(m)
+    rec = await svc.margin_reconciliation()
+    check("治理: 还原复平", rec["ok"] is True, str(rec["ok"]))
+
     print("=" * 60)
     print("县（区）网店保证金子系统测试".center(50))
     print("=" * 60)

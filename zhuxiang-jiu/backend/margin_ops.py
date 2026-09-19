@@ -5,13 +5,14 @@
     docker exec zhuxiang-backend-1 python /app/margin_ops.py <命令> [参数]
 
 命令:
-    status <store_code>            查某店保证金(含实时年任务进度)
+    status <store_code|margin_no>    查保证金(含实时年任务进度; 兼容店编号/保证金编号)
     list [locked|settled]          全量保证金清单(可按状态筛, 默认全部)
-    due                            到期待结算扫描(dry-run, 只查不结算)
+    due [N]                        到期待结算扫描(dry-run); due N=剩余 N 天内到期预警清单
     settle <store_code> <reason>   手动结算(reason: expired|cancelled|rejected, 幂等)
     tx <user_id> [条数]            会员保证金钱包流水(双 type, 默认 10 条)
     stats                          保证金统计概览(状态分布/金额汇总/待结算)
     remind                         手动触发一轮到期提醒(30/7/1 天档位站内信)
+    audit                          保证金对账恒等式(内部+钱包流水双口径)
 
 注意:
     - settle 与调度器并发安全(锁内双重检查, 重复调用幂等不双退)
@@ -20,6 +21,12 @@
 import asyncio
 import json
 import sys
+from datetime import date as _date
+
+
+def _iso(s: str) -> _date:
+    """YYYY-MM-DD → date"""
+    return _date.fromisoformat(s[:10])
 
 
 def _fmt_margin(m: dict, verbose: bool = False) -> str:
@@ -60,12 +67,19 @@ async def main() -> int:
     # ---------- status ----------
     if cmd == "status":
         if len(argv) < 2:
-            print("用法: status <store_code>")
+            print("用法: status <store_code|margin_no>")
             return 1
-        sc = argv[1]
-        m = await repo.get_margin_by_store(sc)
+        code = argv[1]
+        # 兼容保证金编号(CD 开头——转店编号; 店编号 CS 开头直查)
+        m = None
+        if code[:2].upper() == "CD":
+            m = await repo.get_margin(code)
+            sc = (m or {}).get("storeCode", "")
+        else:
+            sc = code
+            m = await repo.get_margin_by_store(sc)
         if m is None:
-            print(f"[无记录] {sc} 无保证金(存量市级店无保证金)")
+            print(f"[无记录] {code} 无保证金(存量市级店无保证金)")
             return 0
         # 实时进度(复用 service 逻辑——locked 且有起止)
         result = await svc.get_margin(sc)
@@ -85,8 +99,25 @@ async def main() -> int:
             print("  " + _fmt_margin(m))
         return 0
 
-    # ---------- due ----------
+    # ---------- due [N] ----------
     if cmd == "due":
+        # due N: 剩余 N 天内到期的 locked 预警清单(运营视角)
+        if len(argv) > 1 and argv[1].isdigit():
+            n = int(argv[1])
+            locked = await repo.list_all_margins(MARGIN_STATUS_LOCKED)
+            upcoming = []
+            for m in locked:
+                if not m.get("endDate"):
+                    continue
+                days_left = (_iso(m["endDate"]) - _iso(today)).days
+                if 0 <= days_left <= n:
+                    upcoming.append((m, days_left))
+            print(f"[到期预警] {today} 剩余 ≤{n} 天到期的 locked 共 "
+                  f"{len(upcoming)} 条:")
+            for m, dl in upcoming:
+                print(f"  {_fmt_margin(m)} | 剩 {dl} 天"
+                      f" | 已提醒档位 {m.get('remindedSteps') or '-'}")
+            return 0
         due = await repo.list_due_margins(today)
         print(f"[到期待结算] {today} 共 {len(due)} 条:")
         for m in due:
@@ -166,6 +197,24 @@ async def main() -> int:
                   f"{s['step']} 天档(剩余 {s['daysLeft']} 天)")
         for f in result["failed"]:
             print(f"  [失败] {f['storeCode']}: {f['error']}")
+        return 0
+
+    # ---------- audit ----------
+    if cmd == "audit":
+        result = await svc.margin_reconciliation()
+        i, w = result["internal"], result["walletTx"]
+        print("[对账恒等式]")
+        print(f"  内部: 总锁定 ¥{i['totalAmount']} ≡ 在锁 ¥{i['inLockAmount']}"
+              f" + 已退 ¥{i['refundedAmount']} + 已扣 ¥{i['deductedAmount']}"
+              f"  {'✓ 平衡' if i['ok'] else '✗ 不平衡'}")
+        print(f"  钱包: 锁定流水 ¥{w['lockTxSum']} ≡ 总锁定"
+              f" ¥{i['totalAmount']} | 结算流水 ¥{w['settleTxSum']}"
+              f" ≡ 已退 ¥{i['refundedAmount']}"
+              f"  {'✓ 平衡' if w['ok'] else '✗ 不平衡'}")
+        if not result["ok"]:
+            print("  [告警] 恒等式失配——核查 margin 记录与钱包流水")
+            return 1
+        print("  全部平衡 ✓")
         return 0
 
     print(f"未知命令: {cmd} (help 查看用法)")

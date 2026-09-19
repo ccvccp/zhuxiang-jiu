@@ -245,6 +245,35 @@ async def get_stats(
         _handle(e)
 
 
+@router.get("/api/citystore/margin/overview", tags=["县区网店模块"])
+async def get_margin_overview(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """保证金治理总览(管理端): 统计 + 到期预警 + 滞留监控 + 对账恒等式"""
+    _require_admin(x_role)
+    try:
+        result = await _service.margin_admin_overview()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/citystore/margin/list", tags=["县区网店模块"])
+async def get_margin_list(
+    x_role: str = Header(None, alias="X-Role"),
+    status: str = Query(None, description="筛选: locked|settled(缺省全部)"),
+    days: int = Query(None, ge=0, le=365,
+                      description="仅 locked: 剩余天数 ≤ N 的即将到期清单"),
+):
+    """保证金治理清单(管理端): 含实时进度/剩余天数/已提醒档位"""
+    _require_admin(x_role)
+    try:
+        result = await _service.margin_admin_list(status=status, days=days)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 class OrderEntryDecideRequest(PydBaseModel):
     """下单入口决策请求(市级网店优先原则)"""
     cityCode: str | None = Field(None, description="地级市行政区划码(如 110100)")

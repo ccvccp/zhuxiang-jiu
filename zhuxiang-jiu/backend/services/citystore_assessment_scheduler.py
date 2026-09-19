@@ -183,8 +183,35 @@ async def run_margin_reminder_round() -> dict:
     return result
 
 
+async def run_margin_reconciliation_check() -> dict:
+    """保证金对账巡检(每天一次; 恒等式异常即告警——内部+钱包流水双口径)
+
+    异常不打断调度(下一轮自然重试), logger.error 告警供日志告警接入。
+    """
+    from core.helpers import ts
+    from services.citystore_service import CityStoreService
+
+    today = ts()[:10]
+    if getattr(run_margin_reconciliation_check, "_last_date", None) == today:
+        return {"skipped": True}  # 当天已巡检
+    run_margin_reconciliation_check._last_date = today
+
+    result = await CityStoreService().margin_reconciliation()
+    if result.get("ok"):
+        logger.info("citystore_margin_reconciliation ok "
+                    "total=%.2f lockTx=%.2f settleTx=%.2f",
+                    result["internal"]["totalAmount"],
+                    result["walletTx"]["lockTxSum"],
+                    result["walletTx"]["settleTxSum"])
+    else:
+        logger.error("citystore_margin_reconciliation FAILED "
+                     "internal=%s walletTx=%s detail=%s",
+                     result["internal"], result["walletTx"], result)
+    return result
+
+
 async def _scheduler_loop() -> None:
-    """后台循环: 周期性检查考核窗口并执行 + 保证金到期结算/提醒"""
+    """后台循环: 周期性检查考核窗口并执行 + 保证金到期结算/提醒/对账"""
     interval = scheduler_interval_seconds()
     logger.info("citystore_assessment_scheduler started interval=%ss", interval)
     while True:
@@ -203,6 +230,11 @@ async def _scheduler_loop() -> None:
             await run_margin_reminder_round()
         except Exception as exc:
             logger.warning("保证金提醒调度异常(继续运行): %s", exc)
+        # 保证金对账巡检(每日一次, 恒等式异常 logger.error 告警)
+        try:
+            await run_margin_reconciliation_check()
+        except Exception as exc:
+            logger.warning("保证金对账巡检异常(继续运行): %s", exc)
 
 
 _scheduler_task: asyncio.Task | None = None
