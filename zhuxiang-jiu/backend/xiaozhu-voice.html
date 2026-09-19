@@ -77,7 +77,8 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
 .chat::-webkit-scrollbar{width:5px}
 .chat::-webkit-scrollbar-thumb{background:#c8d4cd;border-radius:3px}
 .chat::-webkit-scrollbar-track{background:transparent}
-.msg{display:flex;margin-bottom:14px}
+@keyframes msgin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.msg{display:flex;margin-bottom:14px;animation:msgin .25s ease}
 .msg.user{justify-content:flex-end}
 .avatar{width:34px;height:34px;border-radius:50%;flex-shrink:0;
       background:linear-gradient(135deg,#3a9664,#1d5a39);color:#fff;
@@ -89,8 +90,8 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
 .msg.bot .bubble{background:var(--green-soft);color:var(--tx);
       border-top-left-radius:4px;margin-left:8px;position:relative}
 .msg.err .bubble{background:#fbeeec;color:var(--red)}
-/* TTS 播报中指示 */
-.bubble.speaking{box-shadow:0 0 0 2px rgba(201,138,45,.55)}
+/* TTS 播报中指示(点击气泡可停止播报) */
+.bubble.speaking{box-shadow:0 0 0 2px rgba(201,138,45,.55);cursor:pointer}
 .bubble.speaking::after{content:"🔊 播报中";position:absolute;top:-9px;
       right:10px;font-size:10px;background:var(--gold);color:#fff;
       padding:1px 8px;border-radius:8px;animation:blink 1.2s infinite}
@@ -111,7 +112,7 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
       30%{transform:translateY(-5px);opacity:1}}
 /* ---- 引导卡(空态) ---- */
 .guide{margin:6px 0 12px 42px;padding:14px;border:1.5px dashed #bcd4c5;
-      border-radius:12px;text-align:center}
+      border-radius:12px;text-align:center;animation:msgin .25s ease}
 .guide .gt{font-size:12.5px;color:var(--tx2);margin-bottom:10px}
 .guide .grow{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 .gbtn{padding:8px 14px;border-radius:8px;background:var(--green-soft);
@@ -157,9 +158,15 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
 .chip:hover{border-color:var(--green);background:var(--green-soft)}
 .chip:active{transform:scale(.96)}
 /* ---- 输入区(常驻底部) ---- */
-.composer{background:var(--card);border:1px solid var(--bd);
+.composer{position:relative;background:var(--card);border:1px solid var(--bd);
       border-radius:12px;padding:12px 16px;
       padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+/* 回到最新(消息流离底时浮现) */
+.downbtn{position:absolute;top:-46px;right:14px;width:36px;height:36px;
+      border-radius:50%;border:1px solid var(--bd);background:var(--card);
+      color:var(--green-deep);font-size:15px;cursor:pointer;display:none;
+      box-shadow:0 2px 8px rgba(0,0,0,.14);z-index:5}
+.downbtn.show{display:block;animation:msgin .2s ease}
 .modes{display:flex;gap:6px;margin-bottom:10px;align-items:center}
 .seg{display:flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
 .seg button{padding:5px 12px;border:none;background:#fff;font-size:12px;
@@ -174,8 +181,10 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
       background:var(--green);color:#fff;font-size:24px;flex-shrink:0;
       box-shadow:0 4px 12px rgba(47,125,82,.35);position:relative;
       display:flex;align-items:center;justify-content:center;
-      transition:background .2s}
+      transition:background .2s;touch-action:none;user-select:none;
+      -webkit-user-select:none;-webkit-tap-highlight-color:transparent}
 .mic.on{background:var(--red);animation:pulse 1.2s infinite}
+.mic.off{background:#b8c4bd;box-shadow:none;pointer-events:none}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(181,69,60,.45)}
       70%{box-shadow:0 0 0 16px rgba(181,69,60,0)}
       100%{box-shadow:0 0 0 0 rgba(181,69,60,0)}}
@@ -194,6 +203,8 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
 .wave i:nth-child(7){height:17px;animation-delay:.72s}
 .wave i:nth-child(8){height:11px;animation-delay:.84s}
 .wave.red i{background:var(--red)}
+/* 真实音量驱动态(云端录音 AnalyserNode RMS → --amp) */
+.wave.live i{animation:none;transform:scaleY(var(--amp,.3))}
 @keyframes wv{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
 .status{font-size:12px;color:var(--tx2);line-height:1.6;
       white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -277,6 +288,7 @@ body.kb .composer{padding-bottom:12px}
   <div class="chips" id="chips"></div>
 
   <div class="composer">
+    <button class="downbtn" id="downBtn" title="回到最新" onclick="scrollChat()">↓</button>
     <div class="modes">
       <div class="seg">
         <button id="segBrowser" class="on" onclick="setMode('browser')">浏览器识别</button>
@@ -436,6 +448,7 @@ function loadContext() {
 
 /* ===== 会话生命周期 ===== */
 function openSession() {
+  document.getElementById("mic").classList.add("off");
   apiFetch("/api/xiaozhu/sessions", {
     method: "POST", body: JSON.stringify({ channel: "voice" })
   }).then(function (j) {
@@ -443,6 +456,7 @@ function openSession() {
     S.sid = j.sessionId; S.turnCount = 0; S.woken = false;
     document.getElementById("sid").textContent = "#" + j.sessionId;
     document.getElementById("tcount").textContent = "0";
+    document.getElementById("mic").classList.remove("off");
     updateWakePill();
     appendBot("您好，我是小竹 🎋 说「小竹，看新品」试试——5 分钟内免唤醒可连续对话。",
               null, "会话已开启 #" + j.sessionId + (j.xiaoMode ? " · " + j.xiaoMode : ""));
@@ -482,7 +496,14 @@ function updateWakePill() {
   else { p.textContent = "待唤醒"; p.className = "pill gray"; }
 }
 
-/* ===== 快捷指令 chips(单行横滑) ===== */
+/* ===== 快捷指令 chips(单行横滑·带语义图标) ===== */
+var CHIP_ICONS = {
+  "product.new": "🆕", "product.price": "💰", "trust.balance": "🎖",
+  "trust.score": "🏅", "explanation.report": "📋", "nav.page": "🧭",
+  "promo.query": "🎁", "chat.human": "🧑‍💼", "trust.exchange": "🔁",
+  "trust.repair": "🛠", "xiaozhu.help": "❓", "privacy.budget": "🛡",
+  "voice.score": "📶", "cart.submit": "🧺", "trust.convert": "🔄"
+};
 function loadCommands() {
   apiFetch("/api/xiaozhu/commands").then(function (j) {
     if (!j || j.success === false) return;
@@ -492,7 +513,7 @@ function loadCommands() {
       if (!c.examples || !c.examples.length) return;
       var chip = document.createElement("button");
       chip.className = "chip";
-      chip.textContent = c.examples[0];
+      chip.textContent = (CHIP_ICONS[c.action] || "🎋") + " " + c.examples[0];
       chip.onclick = (function (t) { return function () { sendText(t); }; })(c.examples[0]);
       box.appendChild(chip);
     });
@@ -644,6 +665,7 @@ function setPending(on) {
   var b = document.getElementById("sendBtn");
   b.disabled = on;
   b.textContent = on ? "…" : "发送";
+  document.getElementById("mic").classList.toggle("off", on || !S.sid);
 }
 function sendFromInput() {
   var inp = document.getElementById("tinput");
@@ -706,6 +728,20 @@ document.addEventListener("keydown", function (ev) {
 document.addEventListener("click", function (ev) {
   var b = ev.target && ev.target.closest ? ev.target.closest("[data-cftoken]") : null;
   if (b) doConfirm(b);
+});
+/* TTS 播报中: 点击气泡立即停止播报 */
+document.addEventListener("click", function (ev) {
+  var b = ev.target && ev.target.closest ? ev.target.closest(".bubble.speaking") : null;
+  if (b && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+    b.classList.remove("speaking");
+    showToast("已停止播报");
+  }
+});
+/* 消息流离底浮现"回到最新" */
+document.getElementById("chat").addEventListener("scroll", function () {
+  var away = this.scrollHeight - this.scrollTop - this.clientHeight > 100;
+  document.getElementById("downBtn").classList.toggle("show", away && S.turnCount > 2);
 });
 function doConfirm(btn) {
   var box = btn.closest(".confirmbox");
@@ -770,8 +806,10 @@ function setMode(m) {
   document.getElementById("segBrowser").className = m === "browser" ? "on" : "";
   document.getElementById("segCloud").className = m === "cloud" ? "on" : "";
   setMicStatus(m === "browser"
-    ? "🎤 点击麦克风说话 · 说完自动结束（浏览器本地识别）"
-    : "⏺ 点击麦克风开始录音 · 再点一次结束发送（云端识别）");
+    ? (IS_TOUCH ? "🎤 按住麦克风说话 · 松开发送（浏览器本地识别）"
+                : "🎤 点击麦克风说话 · 说完自动结束（浏览器本地识别）")
+    : (IS_TOUCH ? "⏺ 按住麦克风录音 · 松开发送（云端识别）"
+                : "⏺ 点击麦克风开始录音 · 再点一次结束发送（云端识别）"));
 }
 function setMicStatus(html) { document.getElementById("micStatus").innerHTML = html; }
 function setWave(on, red) {
@@ -782,14 +820,52 @@ function setWave(on, red) {
 }
 
 function micClick() {
-  if (S.pending) { showToast("上一轮处理中…"); return; }
+  if (IS_TOUCH) return; /* 触屏走长按流(pointer), 忽略派生 click */
+  if (S.pending || !S.sid) { showToast(S.pending ? "上一轮处理中…" : "会话开启中…"); return; }
   if (S.mode === "browser") return browserToggle();
   return cloudToggle();
+}
+
+/* ---- 长按说话(push-to-talk): 触屏按住录音/识别, 松开发送 ---- */
+var IS_TOUCH = !!(window.matchMedia && window.matchMedia("(pointer:coarse)").matches);
+(function bindMicHold() {
+  var mic = document.getElementById("mic");
+  var holding = false;
+  mic.addEventListener("pointerdown", function (ev) {
+    if (!IS_TOUCH || ev.pointerType !== "touch") return;
+    ev.preventDefault();
+    holding = true;
+    micDown();
+  });
+  mic.addEventListener("pointerup", function () {
+    if (!holding) return;
+    holding = false;
+    micUp();
+  });
+  mic.addEventListener("pointercancel", function () {
+    if (!holding) return;
+    holding = false;
+    micUp();
+  });
+})();
+function micDown() {
+  if (S.pending) { showToast("上一轮处理中…"); return; }
+  if (!S.sid) { showToast("会话开启中…"); return; }
+  if (S.mode === "browser") { if (!recActive) browserStart(); }
+  else if (!cloudActive) cloudStart();
+}
+function micUp() {
+  if (S.mode === "browser") {
+    if (recActive) { try { rec.stop(); } catch (e) {} }
+  } else if (cloudActive) cloudStop();
 }
 
 /* ---- 浏览器识别: SpeechRecognition zh-CN, interim 实时上屏 ---- */
 function browserToggle() {
   if (recActive) { rec.stop(); return; }
+  browserStart();
+}
+function browserStart() {
   try {
     rec = new SR();
   } catch (e) { showToast("识别器初始化失败"); return; }
@@ -820,12 +896,13 @@ function browserToggle() {
   };
   rec.start(); recActive = true; fin = "";
   setWave(true, false);
-  setMicStatus('<b>聆听中</b> · 请说话， 说完自动结束…');
+  setMicStatus('<b>聆听中</b> · ' + (IS_TOUCH ? "按住说话 · 松开发送" : "请说话，说完自动结束…"));
 }
 
 /* ---- 云端识别: getUserMedia → PCM → WAV → base64 → POST /voice ---- */
 var audioCtx = null, srcNode = null, procNode = null, recStream = null;
 var pcmChunks = [], recStart = 0, cloudActive = false, recTimer = null;
+var analyser = null, volRaf = 0;
 function cloudToggle() {
   if (cloudActive) { cloudStop(); return; }
   cloudStart();
@@ -850,12 +927,32 @@ function cloudStart() {
     };
     srcNode.connect(procNode);
     procNode.connect(audioCtx.destination);
+    /* 真实音量可视化: AnalyserNode RMS → --amp 驱动波纹 scaleY */
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    srcNode.connect(analyser);
+    var waveEl = document.getElementById("wave");
+    var abuf = new Uint8Array(analyser.fftSize);
+    waveEl.classList.add("live");
+    (function vtick() {
+      volRaf = requestAnimationFrame(vtick);
+      if (!analyser) return;
+      analyser.getByteTimeDomainData(abuf);
+      var sum = 0;
+      for (var i = 0; i < abuf.length; i++) {
+        var d = (abuf[i] - 128) / 128;
+        sum += d * d;
+      }
+      var rms = Math.sqrt(sum / abuf.length);
+      waveEl.style.setProperty("--amp",
+        Math.max(0.12, Math.min(1, rms * 3.4)).toFixed(3));
+    })();
     recStart = Date.now();
     cloudActive = true;
     setWave(true, true);
     recTimer = setInterval(function () {
       setMicStatus('<b class="rec">● 录音中 ' + fmtSec((Date.now() - recStart) / 1000) +
-        '</b> · 点击麦克风结束发送');
+        '</b> · ' + (IS_TOUCH ? "松开发送" : "点击麦克风结束发送"));
     }, 500);
   }).catch(function (e) {
     setMicStatus("麦克风不可用: " + (e && e.name ? e.name : "未知") + "——可用文字输入");
@@ -864,6 +961,11 @@ function cloudStart() {
 }
 function cloudStop() {
   if (recTimer) { clearInterval(recTimer); recTimer = null; }
+  if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }
+  analyser = null;
+  var waveEl = document.getElementById("wave");
+  waveEl.classList.remove("live");
+  waveEl.style.removeProperty("--amp");
   if (procNode) { try { procNode.disconnect(); } catch (e) {} }
   if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
   if (recStream) { recStream.getTracks().forEach(function (t) { t.stop(); }); }
