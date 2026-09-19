@@ -247,6 +247,16 @@ COMMANDS = [
         "examples": ["小竹，我的语音积分"],
     },
     {
+        "action": "cart.add",
+        "label": "加入购物清单",
+        "patterns": ["加入购物车", "加入购物清单", "加购",
+                     "放进购物车", "放到购物车", "来一件",
+                     "来一个", "要一件", "要一个", "买这个",
+                     "就它了", "就要这个"],
+        "examples": ["小竹，把这个加入购物车",
+                     "小竹，来一件竹韵佳酿"],
+    },
+    {
         "action": "cart.submit",
         "label": "结算下单",
         "patterns": ["结算", "下单", "买下", "提交订单",
@@ -865,6 +875,9 @@ class XiaozhuService:
             if action == "voice.score":
                 return await self._exec_voice50_score(
                     member_id)
+            if action == "cart.add":
+                return await self._exec_cart_add(
+                    session, text)
             if action == "explanation.report":
                 return await self._exec_explanation_report(
                     session, member_id)
@@ -979,9 +992,62 @@ class XiaozhuService:
                       str(text or ""))
         return float(m.group(1)) if m else None
 
-    async def _resolve_cart_items(self,
-                                  session: dict) -> list:
-        """结算对象: 上一轮商品卡片条目"""
+    async def _exec_cart_add(self, session: dict,
+                            text: str) -> dict:
+        """P1 语音选品: 指代/关键词→商品→会话购物清单
+
+        清单落 cart_added 卡片轮次(零新存储)——结算时
+        _resolve_cart_items 聚合全量加购项多件下单。
+        会话级非资金动作: 不经沙箱/确认(结算仍是 confirm 面)。
+        """
+        # ① 目标解析: 剥指令词后商品词非空→搜索优先;
+        #    纯指代(就它了/来一件)→最近商品卡(上游指代
+        #    消解已把"这个"展开为商品名, 两条路径一致)
+        kw = re.sub(
+            r"(加入购物车|加入购物清单|放进?到?购物车|"
+            r"加购|来一[件个]|要一[件个]|买这个|就它了|"
+            r"就要这个)", "", str(text or "")).strip()
+        product = None
+        if kw:
+            product = await self._search_first_product(kw)
+            if product is None:
+                # 指代展开词(完整商品名)搜索 miss →
+                # 上轮商品卡兜底(语义一致: 展开源即上轮卡)
+                product = await self._resolve_last_product(
+                    session)
+        else:
+            product = await self._resolve_last_product(
+                session)
+        if product is None:
+            return {"reply": "想加购哪款? 说「来一件竹韵"
+                            "佳酿」, 或先「看新品」后说"
+                            "「就它了」",
+                    "card": None, "clarify": "product"}
+        pid = (product.get("id")
+               or product.get("productId")
+               or product.get("product_id"))
+        name = product.get("name") or "商品"
+        price = product.get("price")
+        # 清单件数(本会话 cart_added 轮次, 含本次)
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        count = sum(
+            1 for t in turns
+            if (t.get("card") or {}).get("type")
+            == "cart_added") + 1
+        return {
+            "reply": f"已把「{name}」加入购物清单"
+                     f"(¥{price})——当前清单 {count} 件, "
+                     "说「结算」一键下单",
+            "card": {"type": "cart_added",
+                     "subject": name, "productId": pid,
+                     "price": price, "quantity": 1,
+                     "cartCount": count},
+            "executed": True}
+
+    async def _resolve_last_product(
+            self, session: dict) -> dict | None:
+        """最近一轮商品卡首件(product_list/product_detail)"""
         turns = await self.repo.list_turns(
             session["sessionId"])
         for t in reversed(turns):
@@ -990,8 +1056,47 @@ class XiaozhuService:
                                      "product_detail"):
                 items = card.get("items") or []
                 if items:
-                    pid = (items[0].get("id")
-                           or items[0].get("productId"))
+                    return items[0]
+        return None
+
+    @staticmethod
+    async def _search_first_product(
+            keyword: str) -> dict | None:
+        """关键词搜索取首个商品"""
+        from services.product_service import (
+            ProductService,
+        )
+        r = await ProductService().search(
+            keyword, page=1, page_size=1)
+        items = (r.get("products")
+                 or r.get("items") or [])[:1]
+        return items[0] if items else None
+
+    async def _resolve_cart_items(self,
+                                  session: dict) -> list:
+        """结算对象: P1 聚合会话购物清单(cart_added 轮次
+        全量多件); P0 兼容——无加购轮时取最近商品卡首件"""
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        items = []
+        for t in turns:
+            card = t.get("card") or {}
+            if card.get("type") == "cart_added" \
+                    and card.get("productId"):
+                items.append({
+                    "productId": str(card["productId"]),
+                    "quantity": int(
+                        card.get("quantity") or 1)})
+        if items:
+            return items
+        for t in reversed(turns):
+            card = t.get("card") or {}
+            if card.get("type") in ("product_list",
+                                     "product_detail"):
+                src = card.get("items") or []
+                if src:
+                    pid = (src[0].get("id")
+                           or src[0].get("productId"))
                     if pid:
                         return [{
                             "productId": str(pid),
