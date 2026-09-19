@@ -218,6 +218,32 @@
         </div>
     </div>
 
+    <!-- ⑧ 支付安全观测(三期 L1-L3 shadow 观察期) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑧ 支付安全观测（三期 L1-L3：档位 / 拦截分布 / L3 提级 / shadow 放行 / 成单）</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovVoicepay" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="vpRules"></div>
+                </div>
+                <div>
+                    <div style="max-height:220px;overflow:auto">
+                        <table class="dash-table">
+                            <thead><tr>
+                                <th>时间</th><th>会员</th><th>决策</th>
+                                <th>L2分</th><th>L3</th><th>备注</th>
+                            </tr></thead>
+                            <tbody id="vpLog"><tr><td colspan="6"
+                                class="dash-empty">暂无风控留痕</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="note-bar">
         后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
         管理端 X-Role: admin · 计划: docs/48号_小竹智能语音中枢实施计划.md

@@ -287,6 +287,71 @@ async def main():
            f"{r.get('clarify')}|{str(r.get('reply'))[:50]}")
     await svc.delete_session(sid3)
 
+    print("[08 观测面(三期 overview)]")
+    gw2 = get_gateway()
+    ov = gw2.overview()
+    record("overview 结构(档位/统计/留痕/规则/评分器)",
+           ov.get("success") is True
+           and ov.get("mode") in ("off", "shadow",
+                                 "assist")
+           and set(ov.get("stats") or {}).issuperset({
+               "attempts", "l1Blocked", "l2Blocked",
+               "l2Review", "l3Escalated",
+               "shadowOverrides", "confirmIssued",
+               "paid"})
+           and isinstance(ov.get("log"), list)
+           and (ov.get("rules") or {}).get("freqMax")
+           == FREQ_MAX
+           and (ov.get("scorer") or {}).get("batch")
+           == 52,
+           str(ov.get("stats")))
+    # 埋点: 端到端已跑(attempts/confirmIssued/paid≥1)
+    st = ov.get("stats") or {}
+    record("埋点计数(指令/4位码/成单 ≥1)",
+           st.get("attempts", 0) >= 1
+           and st.get("confirmIssued", 0) >= 1
+           and st.get("paid", 0) >= 1,
+           str(st))
+    record("留痕列表非空(端到端轮次)",
+           len(ov.get("log") or []) >= 1,
+           str(len(ov.get("log") or [])))
+    # L1 拦截埋点(shadow 下 attempts 与 override 计数)
+    os.environ["VOICEPAY_MODE"] = "shadow"
+    sid9 = (await svc.open_session(1))["sessionId"]
+    await _mk_pending_order(1, 9000.0)   # 超限单
+    before = dict(gw2._stats)
+    r = await svc.handle_text(sid9, "小竹，支付订单")
+    after = gw2._stats
+    record("shadow 超限单: 留痕放行+shadowOverride 计数",
+           r.get("confirmRequired") is True
+           and after["shadowOverrides"]
+           == before["shadowOverrides"] + 1,
+           f"{after['shadowOverrides']}")
+    await svc.delete_session(sid9)
+    os.environ["VOICEPAY_MODE"] = "assist"
+
+    # HTTP 端点: admin 200 / 非 admin 403
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes.xiaozhu_routes import (
+        register_xiaozhu_routes,
+    )
+    app = FastAPI()
+    register_xiaozhu_routes(app)
+    client = TestClient(app)
+    resp = client.get("/api/xiaozhu/voicepay/overview")
+    record("HTTP overview 非 admin 403",
+           resp.status_code == 403,
+           str(resp.status_code))
+    resp = client.get("/api/xiaozhu/voicepay/overview",
+                      headers={"X-Role": "admin"})
+    body = resp.json()
+    record("HTTP overview admin 200",
+           resp.status_code == 200
+           and body.get("success") is True
+           and body.get("scorer", {}).get("batch") == 52,
+           f"{resp.status_code}")
+
     print("-" * 64)
     print(f"通过 {PASS} 项 / 失败 {FAIL} 项")
     return 1 if FAIL else 0

@@ -2,7 +2,8 @@
 
 端点(P0 共 6 + P1 4 + P2 2 + P3 7 + P4 2 + 49号P0 1
      + 49号P2 2 + 49号P4 1 + 50号P0 5 + 50号P2 2
-     + 50号P3 6 + 50号P4 3 + 50号P5 3 = 44):
+     + 50号P3 6 + 50号P4 3 + 50号P5 3 + 三期观测 1
+     = 45):
     POST /api/xiaozhu/sessions              开启会话
     POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
@@ -34,6 +35,7 @@
     PUT  /api/xiaozhu/voice50/group-profile  群体画像设置(50号P5, admin)
     POST /api/xiaozhu/voice50/decay          激励池月度衰减(50号P5, admin)
     POST /api/xiaozhu/voice50/offset         池对冲修复(50号P5)
+    GET  /api/xiaozhu/voicepay/overview      支付安全观测(三期, admin)
 
 鉴权: X-Member-Id(会员标识, 35号 Hub 同款惯例);
 管理端 X-Role: admin(43-47号同款口径)。
@@ -563,6 +565,25 @@ async def xiaozhu_dashboard(
         return await XiaozhuDashboardService().build()
     except Exception as e:
         raise _handle(e) from e
+
+
+@router.get("/voicepay/overview")
+async def voicepay_overview(
+    x_role: str = Header(default="", alias="X-Role"),
+):
+    """支付安全观测面(三期 L1-L3——shadow 观察期数据源)
+
+    档位/统计(尝试/拦截分布/L3 提级/shadow 放行/成单)/
+    最近 20 条风控留痕/规则常量。资金敏感数据不进公开
+    白名单(admin 鉴权——zjian 观测面同款口径)。
+    """
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    from services.xiaozhu_voicepay_service import (
+        get_gateway,
+    )
+    return get_gateway().overview()
 
 
 @router.post("/dashboard/fairness-bridge")

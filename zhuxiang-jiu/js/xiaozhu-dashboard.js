@@ -1,4 +1,4 @@
-﻿/**
+﻿﻿﻿﻿﻿/**
  * 48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
  * 范式: js/trust-risk-dashboard.js(47号)平移——ES5、localStorage
  * 连接、区块化加载(手动刷新, 不进自动刷新)。
@@ -297,6 +297,70 @@ async function loadAll() {
         }
     } catch (e) {
         showError(e.message);
+    }
+    // ⑧ 支付安全观测(三期独立端点——分区 fail-soft 不阻塞主区块)
+    loadVoicepay();
+}
+
+/* ============================================================
+ * ⑧ 支付安全观测(三期 L1-L3 shadow 观察期数据源)
+ * ============================================================ */
+
+async function loadVoicepay() {
+    try {
+        var b = await fetchJson(
+            api('/api/xiaozhu/voicepay/overview'),
+            { headers: adminHeaders() }, '支付安全观测');
+        var s = b.stats || {};
+        cells('ovVoicepay', [
+            { k: '档位', v: b.mode || 'off',
+              cls: b.mode === 'assist' ? 'green'
+                : (b.mode === 'shadow' ? 'yellow' : 'gray') },
+            { k: '支付指令', v: s.attempts || 0 },
+            { k: 'L1 拦截', v: s.l1Blocked || 0,
+              cls: (s.l1Blocked || 0) > 0 ? 'red' : '' },
+            { k: 'L2 拦截', v: s.l2Blocked || 0,
+              cls: (s.l2Blocked || 0) > 0 ? 'red' : '' },
+            { k: 'L2 边缘复核', v: s.l2Review || 0, cls: 'yellow' },
+            { k: 'L3 提级', v: s.l3Escalated || 0,
+              cls: (s.l3Escalated || 0) > 0 ? 'red' : '' },
+            { k: 'shadow 放行', v: s.shadowOverrides || 0,
+              cls: 'blue' },
+            { k: '4 位码发出', v: s.confirmIssued || 0 },
+            { k: '核销成单', v: s.paid || 0, cls: 'green' },
+        ]);
+        var r = b.rules || {};
+        document.getElementById('vpRules').textContent =
+            'L1 规则: 频次 ' + (r.freqMax || '-') + ' 次/'
+            + ((r.freqWindowSec || 0) / 60) + '分钟 · 单笔限额 日 ¥'
+            + (r.amountLimitDay || '-') + ' / 深夜(' + (r.nightHours || '')
+            + '时) ¥' + (r.amountLimitNight || '-')
+            + ' · L2 ' + ((b.scorer || {}).id || '') + '(batch '
+            + ((b.scorer || {}).batch || '') + ')';
+        var log = b.log || [];
+        var rows = log.slice().reverse().map(function (x) {
+            var note = [];
+            if (x.shadowOverride) { note.push('shadow放行'); }
+            if ((x.l1Rules || []).length) {
+                note.push('L1:' + x.l1Rules.join('+'));
+            }
+            if (x.l3Verdict) { note.push('L3:' + x.l3Verdict); }
+            return '<tr><td>' + esc((x.ts || '').slice(5, 19))
+                + '</td><td>' + esc(x.memberId) + '</td><td>'
+                + esc(x.decision) + '</td><td>'
+                + esc(x.l2Score == null ? '—' : x.l2Score)
+                + '</td><td>' + esc(x.l3Verdict || '—')
+                + '</td><td>' + esc(note.join(' · ') || '—')
+                + '</td></tr>';
+        }).join('');
+        document.getElementById('vpLog').innerHTML = rows
+            || '<tr><td colspan="6" class="dash-empty">'
+              + '暂无风控留痕</td></tr>';
+    } catch (e) {
+        cells('ovVoicepay', [{ k: '支付安全观测',
+            v: '区块异常', cls: 'red' }]);
+        document.getElementById('vpRules').textContent =
+            String(e.message || e);
     }
 }
 

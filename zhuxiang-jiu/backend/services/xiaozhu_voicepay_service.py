@@ -289,6 +289,77 @@ class VoicePayGateway:
     def __init__(self):
         # member_id -> [尝试时间戳](滑窗)
         self._attempts: dict = {}
+        # 观测留痕(进程级——executor _stats 同口径, 重启归零)
+        self._stats: dict = {
+            "attempts": 0,        # 支付指令发起数(有单)
+            "l1Blocked": 0,       # L1 硬规则拦截
+            "l2Review": 0,        # L2 边缘复核
+            "l2Blocked": 0,       # L2 评分拦截
+            "l3Escalated": 0,      # L3 提级(只拦不放)
+            "shadowOverrides": 0,  # shadow 档留痕放行
+            "confirmIssued": 0,    # 进入 4 位码确认流
+            "paid": 0,            # 核销支付成功
+        }
+        # 风控留痕环形列表(最近 50 条——shadow 观察期数据源)
+        self._log: list = []
+
+    # ---------- 观测面(shadow 档数据落点) ----------
+
+    def _record(self, risk: dict, member_id: int,
+                order_id: str = "") -> None:
+        """风控留痕(环形 50 条)+ 分布计数"""
+        l1 = risk.get("l1") or {}
+        l2 = risk.get("l2") or {}
+        decision = risk.get("decision")
+        if decision == "block":
+            if l1.get("action") == "block":
+                self._stats["l1Blocked"] += 1
+            else:
+                self._stats["l2Blocked"] += 1
+        elif decision == "review":
+            self._stats["l2Review"] += 1
+        if risk.get("shadowOverride"):
+            self._stats["shadowOverrides"] += 1
+        self._log.append({
+            "ts": datetime.now(UTC).isoformat(),
+            "memberId": member_id, "orderId": order_id,
+            "decision": decision,
+            "l1Rules": [r.get("rule") for r in
+                        (l1.get("rules") or [])
+                        if r.get("action") == "block"],
+            "l2Score": l2.get("score"),
+            "l2Decision": l2.get("decision"),
+            "l3Verdict": (risk.get("l3") or {}).get(
+                "verdict"),
+            "shadowOverride": risk.get("shadowOverride"),
+        })
+        if len(self._log) > 50:
+            del self._log[:len(self._log) - 50]
+
+    def overview(self) -> dict:
+        """观测面视图(B 端 shadow 观察期数据源)"""
+        return {
+            "success": True,
+            "mode": voicepay_mode(),
+            "stats": dict(self._stats),
+            "log": list(self._log[-20:]),
+            "rules": {
+                "freqWindowSec": FREQ_WINDOW_SEC,
+                "freqMax": FREQ_MAX,
+                "amountLimitDay": AMOUNT_LIMIT_DAY,
+                "amountLimitNight": AMOUNT_LIMIT_NIGHT,
+                "nightHours": "0-5",
+            },
+            "scorer": {
+                "id": SCORER_ID, "batch": 52,
+                "weights": dict(
+                    VoicePayRiskScorer.WEIGHTS),
+            },
+        }
+
+    def mark_paid(self) -> None:
+        """核销支付成功计数(execute_pay 回调)"""
+        self._stats["paid"] += 1
 
     # ---------- 频次(R2 数据源) ----------
 
@@ -366,10 +437,13 @@ class VoicePayGateway:
         l1 = await self.check_l1(member_id, amount)
         if l1["action"] == "block":
             # shadow 档: 硬规则留痕亦不拦(观察期全量留痕)
-            return {"decision": "block", "l1": l1,
+            risk = {"decision": "block", "l1": l1,
                     "l2": None, "l3": None,
                     "shadowOverride":
                         not _mode_effective_block()}
+            self._record(risk, member_id,
+                         order.get("orderId") or "")
+            return risk
         # ② L2 评分器
         vp_verified = await self._voiceprint_verified(
             session, member_id)
@@ -389,6 +463,7 @@ class VoicePayGateway:
             l3["verdict"] = verdict
             if verdict == "risky":
                 # 提级 block(只拦不放——唯一加拦路径)
+                self._stats["l3Escalated"] += 1
                 l2 = {**l2, "decision": DECISION_BLOCK,
                       "decisionName": DECISION_NAMES[
                           DECISION_BLOCK] + "(L3提级)",
@@ -400,8 +475,11 @@ class VoicePayGateway:
         if decision == "block" \
                 and not _mode_effective_block():
             shadow_override = True
-        return {"decision": decision, "l1": l1, "l2": l2,
+        risk = {"decision": decision, "l1": l1, "l2": l2,
                 "l3": l3, "shadowOverride": shadow_override}
+        self._record(risk, member_id,
+                     order.get("orderId") or "")
+        return risk
 
     @staticmethod
     def _risk_summary(l2: dict, amount: float) -> str:
@@ -445,6 +523,7 @@ class VoicePayGateway:
         if order is None:
             return {"clarify": "没有待支付订单——先说"
                                "「结算」下单, 再说「支付订单」"}
+        self._stats["attempts"] += 1
         amount = float(
             (order.get("priceDetail") or {}).get(
                 "actualAmount") or 0)
@@ -475,12 +554,15 @@ class VoicePayGateway:
             "voicepay_precheck_passed member=%s "
             "decision=%s shadow=%s", member_id,
             risk["decision"], risk["shadowOverride"])
-        return await get_executor().execute(
+        out = await get_executor().execute(
             session, "order.pay",
             {"orderId": order.get("orderId"),
              "amount": amount,
              "riskDecision": risk["decision"],
              "voicePayRisk": risk})
+        if out.get("confirmRequired"):
+            self._stats["confirmIssued"] += 1
+        return out
 
     @staticmethod
     def _block_reason(risk: dict) -> str:
@@ -516,6 +598,9 @@ async def execute_pay(params: dict,
     执行); 数字(金额/返分)全部来自订单域返回值。
     """
     from services.order_service import OrderService
-    return await OrderService().pay(
+    result = await OrderService().pay(
         str(params.get("orderId")),
         str(params.get("paymentMethod") or "wechat"))
+    if result.get("success"):
+        get_gateway().mark_paid()
+    return result
