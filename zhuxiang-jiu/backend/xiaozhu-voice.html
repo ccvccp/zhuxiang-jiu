@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
 <title>小竹智能语音精灵 · 竹香网</title>
 <style>
 :root{--green:#2f7d52;--green-deep:#1d5a39;--green-soft:#e8f4ec;
@@ -30,8 +30,9 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
       padding:18px 20px;margin-bottom:12px}
 .hidden{display:none!important}
 /* ---- 登录卡 ---- */
-.card input{width:100%;padding:10px 12px;border:1px solid var(--bd);
-      border-radius:8px;font-size:14px;margin-bottom:10px}
+.card input{width:100%;height:44px;padding:0 12px;border:1px solid var(--bd);
+      border-radius:8px;font-size:14px;margin-bottom:10px;
+      -webkit-appearance:none;appearance:none}
 .btn{display:inline-block;padding:10px 18px;border:none;border-radius:8px;
       background:var(--green);color:#fff;font-size:14px;cursor:pointer;
       transition:transform .08s ease}
@@ -202,8 +203,9 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
       line-height:1.5}
 .interim b{color:var(--gold)}
 .trow{display:flex;gap:10px;margin-top:10px}
-.trow input{flex:1;padding:10px 12px;border:1px solid var(--bd);
-      border-radius:8px;font-size:14px;transition:border-color .15s}
+.trow input{flex:1;height:44px;padding:0 12px;border:1px solid var(--bd);
+      border-radius:8px;font-size:14px;transition:border-color .15s;
+      -webkit-appearance:none;appearance:none}
 .trow input:focus{border-color:var(--green);outline:none}
 .toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);
       background:rgba(31,45,61,.92);color:#fff;padding:9px 20px;
@@ -228,6 +230,13 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
   .mic{width:46px;height:46px;font-size:18px}
   .composer{padding:8px 14px}
 }
+/* iOS 触屏输入修复: 字号≥16px 防 Safari 聚焦自动缩放(输入框视觉"异常变大"根因) */
+@media (hover:none) and (pointer:coarse){
+  .trow input,.card input{font-size:16px}
+  .ccell{font-size:22px}
+}
+/* 软键盘弹起态(VV 适配 JS 加 .kb): 释放 safe-area 底部增量防 composer 异常增高 */
+body.kb .composer{padding-bottom:12px}
 </style>
 </head>
 <body>
@@ -903,6 +912,31 @@ function arrayBufferToBase64(buf) {
   }
   return btoa(s);
 }
+
+/* ===== iOS/移动端键盘适配: visualViewport 实时跟随 =====
+   iOS Safari 软键盘弹起不改 layout viewport——100dvh 布局下输入框
+   会被键盘遮挡/挤压异常。以 VV 高度实时收紧 body, 并标记 .kb 态
+   释放 composer 的 safe-area 底部增量。 */
+(function () {
+  var vv = window.visualViewport;
+  if (!vv) return;
+  var fit = function () {
+    document.body.style.height = Math.round(vv.height) + "px";
+    /* 键盘弹起判定: 视觉视口显著小于布局视口 */
+    document.body.classList.toggle("kb", vv.height < window.innerHeight * 0.78);
+    if (document.activeElement && document.activeElement.tagName === "INPUT") {
+      setTimeout(scrollChat, 60);
+    }
+  };
+  vv.addEventListener("resize", fit);
+  fit();
+})();
+/* 输入框聚焦: 键盘弹起动画后消息流滚到底(保持输入框可见) */
+document.addEventListener("focusin", function (ev) {
+  if (ev.target && ev.target.tagName === "INPUT") {
+    setTimeout(scrollChat, 350);
+  }
+});
 
 /* ===== 启动 ===== */
 (function () {
