@@ -224,8 +224,8 @@ async def enrich_citystore_health(
             float(monthly_purchase or 0),
         "monthlySales":
             float(monthly_sales or 0),
-        "purchaseTarget": 9000.0,
-        "salesTarget": 5000.0,
+        "purchaseTarget": 4167.0,
+        "salesTarget": 2315.0,
         "consecutiveBelow": max(
             int(store.get(
                 "consecutiveBelowPurchase")

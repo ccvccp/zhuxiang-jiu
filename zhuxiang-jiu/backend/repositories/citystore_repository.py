@@ -73,17 +73,29 @@ QUAL_STATUS_NAMES = {
 # 阶梯折扣
 # ============================================================
 
-DISCOUNT_EXCELLENT = 70     # 优秀(月销>9000)
-DISCOUNT_QUALIFIED = 80     # 达标(月销5000-9000)
-DISCOUNT_UNQUALIFIED = 90   # 未达标(月销<5000)
+DISCOUNT_EXCELLENT = 70     # 优秀(月销>4167)
+DISCOUNT_QUALIFIED = 80     # 达标(月销2315-4167)
+DISCOUNT_UNQUALIFIED = 90   # 未达标(月销<2315)
 
-# 月度考核指标
-PURCHASE_TARGET = 9000.0    # 进货达标线
-SALES_TARGET = 5000.0       # 销售达标线
+# 县(区)网店年度任务: 年进货额 5 万(月均 4166.67)
+ANNUAL_PURCHASE_TARGET = 50000.0  # 年进货任务(保证金结算基准)
+# 月度考核指标(50000/12=4166.67 取整; 销售线按 50000/108000 等比)
+PURCHASE_TARGET = 4167.0    # 进货达标线
+SALES_TARGET = 2315.0       # 销售达标线
 MAX_CONSECUTIVE_BELOW = 3   # 连续不达标上限(超过则取消资格)
 
 # 资格取消后冷静期天数(设计文档 8.3: 90 天内不可重新申请)
 COOLDOWN_DAYS = 90
+
+# 保证金(县区网店: 预存钱包一年期, 到期按年任务完成度退还)
+MARGIN_AMOUNT = 1000.0      # 保证金金额
+MARGIN_STATUS_LOCKED = "locked"    # 锁定中
+MARGIN_STATUS_SETTLED = "settled"  # 已结算(退还/扣罚完成)
+MARGIN_SETTLE_REASONS = {
+    "expired",    # 满一年到期(按年任务完成度结算)
+    "cancelled",  # 中途取消资格(按已运营期折算目标结算)
+    "rejected",   # 平台驳回(未开业, 全额退还)
+}
 
 # 销售渠道
 CHANNEL_LIVE = 1            # 直播
@@ -102,9 +114,9 @@ def calc_discount(monthly_sales: float) -> int:
     Returns:
         折扣率(70/80/90)
     """
-    if monthly_sales > 9000:
+    if monthly_sales > PURCHASE_TARGET:
         return DISCOUNT_EXCELLENT
-    elif monthly_sales >= 5000:
+    elif monthly_sales >= SALES_TARGET:
         return DISCOUNT_QUALIFIED
     else:
         return DISCOUNT_UNQUALIFIED
@@ -249,6 +261,61 @@ class CityStoreRepository:
             return await self._redis_sum_monthly_purchase(store_code, month)
         return self._mem_sum_monthly_purchase(store_code, month)
 
+    async def sum_purchase_between(self, store_code: str,
+                                   start_date: str, end_date: str) -> float:
+        """统计网店日期间进货额(按订单总金额; createdAt 日期 ∈ [start, end))
+
+        保证金年度任务结算口径(与月度考核同源同口径)。
+        """
+        if is_redis_mode():
+            return await self._redis_sum_purchase_between(
+                store_code, start_date, end_date)
+        return self._mem_sum_purchase_between(
+            store_code, start_date, end_date)
+
+    # ============================================================
+    # 保证金 CRUD(县区网店: 预存钱包一年期)
+    # ============================================================
+
+    async def next_margin_no(self) -> str:
+        """生成保证金编号: CD+YYYYMMDD+4位序号"""
+        from core.helpers import ts
+        date_part = ts()[:10].replace("-", "")
+        prefix = f"CD{date_part}"
+        if is_redis_mode():
+            client = await get_redis_client()
+            n = await client.incr(_k("citystore", "margin_seq", prefix))
+            return f"{prefix}{n:04d}"
+        self._ensure_store()
+        self.store["_citystore_margin_seq"] = \
+            self.store.get("_citystore_margin_seq", 0) + 1
+        return f"{prefix}{self.store['_citystore_margin_seq']:04d}"
+
+    async def save_margin(self, margin: dict) -> None:
+        """保存保证金(新建/更新, 含 store 索引)"""
+        if is_redis_mode():
+            await self._redis_save_margin(margin)
+        else:
+            self._mem_save_margin(margin)
+
+    async def get_margin(self, margin_no: str) -> dict | None:
+        """按保证金编号查询"""
+        if is_redis_mode():
+            return await self._redis_get_margin(margin_no)
+        return self._mem_get_margin(margin_no)
+
+    async def get_margin_by_store(self, store_code: str) -> dict | None:
+        """按网店编号查询保证金(最新一条)"""
+        if is_redis_mode():
+            return await self._redis_get_margin_by_store(store_code)
+        return self._mem_get_margin_by_store(store_code)
+
+    async def list_due_margins(self, today: str) -> list[dict]:
+        """查询到期待结算保证金(locked 且 endDate 非空且 ≤ today)"""
+        if is_redis_mode():
+            return await self._redis_list_due_margins(today)
+        return self._mem_list_due_margins(today)
+
     # ============================================================
     # 内存模式实现
     # ============================================================
@@ -262,15 +329,20 @@ class CityStoreRepository:
             self.store["_citystore_seq"] = 0
             self.store["_citystore_city_index"] = {}               # cityCode → storeCode
             self.store["_citystore_member_index"] = {}              # memberId → storeCode
+        if "city_store_margins" not in self.store:
+            self.store["city_store_margins"] = {}                 # marginNo → margin
+            self.store["_citystore_margin_seq"] = 0
+            self.store["_citystore_margin_index"] = {}             # storeCode → marginNo
 
     def _mem_save_store(self, store: dict) -> None:
         self._ensure_store()
         store_code = store["storeCode"]
         self.store["city_stores"][store_code] = store
-        # 维护索引
-        city_code = store.get("cityCode")
-        if city_code:
-            self.store["_citystore_city_index"][city_code] = store_code
+        # 维护独占索引(区县店占区县码, 存量市级店占市码——
+        # 区县店不得占用上级市码, 否则同市其他区县全被误拦)
+        occupy_code = store.get("districtCode") or store.get("cityCode")
+        if occupy_code:
+            self.store["_citystore_city_index"][occupy_code] = store_code
         member_id = store.get("memberId")
         if member_id is not None:
             self.store["_citystore_member_index"][member_id] = store_code
@@ -317,7 +389,10 @@ class CityStoreRepository:
         occupied = []
         for store in self.store["city_stores"].values():
             if store.get("status") != STORE_STATUS_CANCELLED:
-                occupied.append(store.get("cityCode"))
+                # 独占码: 区县店占区县码, 存量市级店占市码
+                occupy = store.get("districtCode") or store.get("cityCode")
+                if occupy:
+                    occupied.append(occupy)
         return occupied
 
     def _mem_save_assessment(self, assessment: dict) -> None:
@@ -363,6 +438,36 @@ class CityStoreRepository:
         # 进货额 = 订单总金额(平台向网店主的结算价)
         return sum(float(o.get("totalAmount", 0)) for o in orders)
 
+    def _mem_sum_purchase_between(self, store_code: str,
+                                   start_date: str, end_date: str) -> float:
+        self._ensure_store()
+        orders = self._mem_list_orders(store_code)
+        return sum(float(o.get("totalAmount", 0)) for o in orders
+                   if start_date <= o.get("createdAt", "")[:10] < end_date)
+
+    def _mem_save_margin(self, margin: dict) -> None:
+        self._ensure_store()
+        self.store["city_store_margins"][margin["marginNo"]] = margin
+        self.store["_citystore_margin_index"][margin["storeCode"]] = \
+            margin["marginNo"]
+
+    def _mem_get_margin(self, margin_no: str) -> dict | None:
+        self._ensure_store()
+        return self.store["city_store_margins"].get(margin_no)
+
+    def _mem_get_margin_by_store(self, store_code: str) -> dict | None:
+        self._ensure_store()
+        margin_no = self.store["_citystore_margin_index"].get(store_code)
+        if not margin_no:
+            return None
+        return self.store["city_store_margins"].get(margin_no)
+
+    def _mem_list_due_margins(self, today: str) -> list[dict]:
+        self._ensure_store()
+        return [m for m in self.store["city_store_margins"].values()
+                if m.get("status") == MARGIN_STATUS_LOCKED
+                and m.get("endDate") and m["endDate"] <= today]
+
     # ============================================================
     # Redis 模式实现
     # ============================================================
@@ -372,9 +477,10 @@ class CityStoreRepository:
         store_code = store["storeCode"]
         await client.hset(_k("citystore", "stores"), store_code,
                           json.dumps(store, ensure_ascii=False))
-        city_code = store.get("cityCode")
-        if city_code:
-            await client.hset(_k("citystore", "city_index"), city_code, store_code)
+        # 独占索引(区县店占区县码, 存量市级店占市码)
+        occupy_code = store.get("districtCode") or store.get("cityCode")
+        if occupy_code:
+            await client.hset(_k("citystore", "city_index"), occupy_code, store_code)
         member_id = store.get("memberId")
         if member_id is not None:
             await client.hset(_k("citystore", "member_index"), str(member_id), store_code)
@@ -425,7 +531,9 @@ class CityStoreRepository:
 
     async def _redis_list_occupied_cities(self) -> list[str]:
         stores = await self._redis_list_stores(limit=10000)
-        return [s["cityCode"] for s in stores if s.get("status") != STORE_STATUS_CANCELLED]
+        # 独占码: 区县店占区县码, 存量市级店占市码
+        return [s.get("districtCode") or s["cityCode"]
+                for s in stores if s.get("status") != STORE_STATUS_CANCELLED]
 
     async def _redis_save_assessment(self, assessment: dict) -> None:
         client = await get_redis_client()
@@ -470,3 +578,40 @@ class CityStoreRepository:
     async def _redis_sum_monthly_purchase(self, store_code: str, month: str) -> float:
         orders = await self._redis_list_orders(store_code, month)
         return sum(float(o.get("totalAmount", 0)) for o in orders)
+
+    async def _redis_sum_purchase_between(self, store_code: str,
+                                           start_date: str,
+                                           end_date: str) -> float:
+        orders = await self._redis_list_orders(store_code)
+        return sum(float(o.get("totalAmount", 0)) for o in orders
+                   if start_date <= o.get("createdAt", "")[:10] < end_date)
+
+    # ---------- 保证金 Redis 模式 ----------
+
+    async def _redis_save_margin(self, margin: dict) -> None:
+        client = await get_redis_client()
+        await client.hset(_k("citystore", "margins"), margin["marginNo"],
+                          json.dumps(margin, ensure_ascii=False))
+        await client.hset(_k("citystore", "margin_index"),
+                          margin["storeCode"], margin["marginNo"])
+
+    async def _redis_get_margin(self, margin_no: str) -> dict | None:
+        client = await get_redis_client()
+        raw = await client.hget(_k("citystore", "margins"), margin_no)
+        return json.loads(raw) if raw else None
+
+    async def _redis_get_margin_by_store(self, store_code: str) -> dict | None:
+        client = await get_redis_client()
+        margin_no = await client.hget(_k("citystore", "margin_index"),
+                                      store_code)
+        if not margin_no:
+            return None
+        return await self._redis_get_margin(margin_no)
+
+    async def _redis_list_due_margins(self, today: str) -> list[dict]:
+        client = await get_redis_client()
+        all_data = await client.hgetall(_k("citystore", "margins"))
+        margins = [json.loads(v) for v in all_data.values()]
+        return [m for m in margins
+                if m.get("status") == MARGIN_STATUS_LOCKED
+                and m.get("endDate") and m["endDate"] <= today]

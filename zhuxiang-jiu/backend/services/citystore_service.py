@@ -1,25 +1,30 @@
-"""市级网店模块业务逻辑层
+"""县（区）网店模块业务逻辑层
 
-核心业务:
-    - 开店申请(SVIP 资格校验 + 城市独占校验 + 资质校验
-      + 90 天冷静期校验(P1-11: 运营后被取消的网店 90 天内不可重申))
-    - 审核流程(待审核 → 运营中/已取消)
+核心业务(市级网店规则改造为县区网店——分店定位):
+    - 开店申请(SVIP 资格校验 + 区县独占校验 + 身份证/签名确认
+      + 保证金预存锁定(钱包 1000 元一年期) + 90 天冷静期)
+    - 确认开业(轻审核: 平台一键确认开业/驳回; 驳回全额退保证金)
+    - 保证金结算(满一年按年任务完成度退还/中途取消按已运营期
+      折算/驳回全额退——不可提前取现)
     - 月度考核(进货/销售达标 + 连续不达标 + 折扣调整)
     - 状态流转(运营 → 预警/暂停 → 取消)
     - 订单关联(销售额统计)
 
-锁保护:
+锁保护(单向嵌套, 无死锁):
     - 申请: lock:citystore:apply:{memberId}  (防重复申请)
-    - 城市独占: lock:citystore:city:{cityCode}  (防并发申请同一城市)
+    - 区县独占: lock:citystore:city:{districtCode}  (防并发申请同一区县)
+    - 保证金: lock:citystore:margin:{marginNo}  (防并发结算)
+    - 钱包: lock:wallet:{userId}  (资金 RMW——最深一层)
     - 考核: lock:citystore:assessment:{storeCode}:{month}  (防重复考核)
     - 状态流转: lock:citystore:status:{storeCode}  (防并发状态变更)
 
 异常约定:
     - KeyError → 404(资源不存在)
-    - ValueError → 409(业务冲突: 资格不符/城市被占/状态非法等)
+    - ValueError → 409(业务冲突: 资格不符/区县被占/状态非法等)
 """
 
 import logging
+from datetime import date, timedelta
 from typing import ClassVar
 
 from core.locks import get_lock
@@ -32,103 +37,214 @@ from repositories.citystore_repository import (
     STORE_STATUS_NAMES, STORE_STATUS_FLOW,
     QUAL_STATUS_NORMAL, QUAL_STATUS_WARNING, QUAL_STATUS_YELLOW_CARD, QUAL_STATUS_CANCELLED,
     QUAL_STATUS_NAMES,
-    # 阶梯折扣
+    # 阶梯折扣与考核
     DISCOUNT_UNQUALIFIED,
     PURCHASE_TARGET, SALES_TARGET, MAX_CONSECUTIVE_BELOW, COOLDOWN_DAYS,
+    # 保证金
+    MARGIN_AMOUNT, ANNUAL_PURCHASE_TARGET,
+    MARGIN_STATUS_LOCKED, MARGIN_STATUS_SETTLED, MARGIN_SETTLE_REASONS,
     # 销售渠道
     CHANNEL_MINIPROGRAM, calc_discount,
 )
+from repositories.wallet_repository import WalletRepository
 
 
 logger = logging.getLogger(__name__)
 
+# 保证金一年期天数
+MARGIN_TERM_DAYS = 365
+
+
+def _validate_id_number(id_number: str) -> None:
+    """身份证号校验(GB 11643-1999, 18 位)
+
+    Raises:
+        ValueError: 格式/出生日期/校验码不符
+    """
+    id_number = (id_number or "").strip().upper()
+    if len(id_number) != 18:
+        raise ValueError("身份证号须为 18 位")
+    body, check = id_number[:17], id_number[17]
+    if not body.isdigit() or check not in "0123456789X":
+        raise ValueError("身份证号格式无效")
+    # 出生日期段合法性
+    try:
+        birth = date(int(body[6:10]), int(body[10:12]), int(body[11:13]))
+    except ValueError:
+        raise ValueError("身份证号出生日期段无效") from None
+    if not (date(1900, 1, 1) <= birth <= date.today()):
+        raise ValueError("身份证号出生日期段无效")
+    # MOD 11-2 校验码
+    weights = (7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2)
+    mapping = "10X98765432"
+    total = sum(int(c) * w for c, w in zip(body, weights, strict=True))
+    if mapping[total % 11] != check:
+        raise ValueError("身份证号校验码不符")
+
 
 class CityStoreService:
-    """市级网店业务逻辑(双模式存储, 锁保护 RMW)"""
+    """县（区）网店业务逻辑(双模式存储, 锁保护 RMW)"""
 
     def __init__(self, repo: CityStoreRepository = CityStoreRepository()):
         self.repo = repo
+        self.wallet_repo = WalletRepository()
 
     # ============================================================
     # 开店申请
     # ============================================================
 
     async def apply(self, member_id: int, member_level: int,
-                    store_name: str, city_code: str, city_name: str,
-                    province_code: str, province_name: str,
-                    business_license: str = "", food_license: str = "",
-                    tax_reg_no: str = "") -> dict:
-        """申请开店(含 SVIP 资格校验 + 城市独占校验 + 资质校验)
+                    store_name: str, district_code: str,
+                    id_name: str = "", id_number: str = "",
+                    signature_confirm: bool = False,
+                    city_code: str = "", city_name: str = "",
+                    province_code: str = "", province_name: str = "") -> dict:
+        """申请开县（区）网店(分店定位——本站为总店, 网站备案即为分店备案)
+
+        申请材料: 身份证(姓名+号码) + 确认签名 + 保证金预存
+        (取代原营业执照+食品卫生许可证审核)。
 
         Args:
             member_id: 会员ID
             member_level: 会员等级(必须为 5 = SVIP)
             store_name: 网店名称
-            city_code: 地级市行政区划码
-            city_name: 城市名称
-            province_code: 省份码
-            province_name: 省份名称
-            business_license: 营业执照号
-            food_license: 食品经营许可证号
-            tax_reg_no: 税务登记号
+            district_code: 区县行政区划码(6 位, 须从 districts/available 选择)
+            id_name: 身份证姓名(2-30 位)
+            id_number: 身份证号(18 位 GB 11643 校验)
+            signature_confirm: 确认签名(必须 True——已阅读并同意保证金协议)
+            city_code/city_name/province_code/province_name:
+                上级市/省信息(以区划册覆盖, 可不传)
 
         Returns:
             网店详情(含 storeCode)
 
         Raises:
-            ValueError: 资格不符/城市被占/重复申请/资质缺失
+            ValueError: 资格不符/区县被占/重复申请/身份证不符/
+                签名未确认/保证金不足
         """
         # 1. 资格校验: 仅 SVIP(L5) 可申请
         if member_level != 5:
-            raise ValueError("市级网店为 SVIP 专属权益, 请先开通 SVIP 会员")
+            raise ValueError("县（区）网店为 SVIP 专属权益, 请先开通 SVIP 会员")
 
-        # 1b. 城市合法性校验(cityCode 须在全国行政区划册)
-        from services.citystore_regions import get_city
-        city_ref = get_city(city_code)
-        if city_ref is None:
+        # 2. 区县合法性校验(districtCode 须在全国区县区划册)
+        from services.citystore_districts import get_district
+        district_ref = get_district(district_code)
+        if district_ref is None:
             raise ValueError(
-                f"城市行政区划码无效: {city_code}"
-                "(须从 GET /api/citystore/cities/available 选择)")
+                f"区县行政区划码无效: {district_code}"
+                "(须从 GET /api/citystore/districts/available 选择)")
         # 名码一致性(防脏数据——以区划册为准)
-        city_name = city_ref["cityName"]
-        province_code = city_ref["provinceCode"]
-        province_name = city_ref["provinceName"]
+        district_name = district_ref["districtName"]
+        city_code = district_ref["cityCode"]
+        city_name = district_ref["cityName"]
+        province_code = district_ref["provinceCode"]
+        province_name = district_ref["provinceName"]
 
-        # 2. 资质校验
-        if not business_license:
-            raise ValueError("营业执照号必填")
-        if not food_license:
-            raise ValueError("食品经营许可证号必填")
+        # 3. 上级市店拦截(存量市级网店独占地级市, 其下区县不再开放)
+        city_store = await self.repo.get_by_city(city_code)
+        if city_store:
+            raise ValueError(
+                f"城市 {city_name} 已由市级网店覆盖"
+                f"({city_store.get('storeName', '')}), 不可在其区县开店")
 
-        # 3. 防重复申请(同一会员有非取消状态的网店)
+        # 4. 身份证与签名确认(取代营业执照/食品卫生许可证审核)
+        id_name = (id_name or "").strip()
+        if not (2 <= len(id_name) <= 30):
+            raise ValueError("身份证姓名必填(2-30 位)")
+        _validate_id_number(id_number)
+        if not signature_confirm:
+            raise ValueError("须勾选确认签名(已阅读并同意县（区）网店保证金协议)")
+
+        # 5. 保证金前置校验(锁外快速失败——防恶意申请空跑锁)
+        account = await self.wallet_repo.get_account(member_id)
+        if account is None:
+            raise ValueError(
+                "县（区）网店须预存保证金 ¥1000, 请先开通钱包账户")
+        if account.get("status") != "active":
+            raise ValueError("钱包账户状态异常, 无法预存保证金")
+        if float(account.get("balance", 0)) < MARGIN_AMOUNT:
+            raise ValueError(
+                f"钱包余额不足 ¥{MARGIN_AMOUNT:.0f}, 请先充值预存保证金"
+                "(一年期满按年任务完成度退还, 不可提前取现)")
+
+        # 6. 防重复申请(同一会员有非取消状态的网店)
         async with get_lock(f"citystore:apply:{member_id}"):
             existing = await self.repo.get_by_member(member_id)
             if existing:
                 raise ValueError("您已有一家网店, 不可重复开店")
 
-            # 3b. 90 天冷静期校验(P1-11, 设计文档 8.3)
+            # 6b. 90 天冷静期校验(P1-11, 设计文档 8.3)
             await self._check_cooldown(member_id)
 
-            # 4. 城市独占校验(一城一店)
-            async with get_lock(f"citystore:city:{city_code}"):
-                city_store = await self.repo.get_by_city(city_code)
-                if city_store:
-                    raise ValueError(f"城市 {city_name} 已有网店, 不可重复开店")
+            # 7. 区县独占校验(一区县一店)
+            async with get_lock(f"citystore:city:{district_code}"):
+                district_store = await self.repo.get_by_city(district_code)
+                if district_store:
+                    raise ValueError(
+                        f"区县 {district_name} 已有网店, 不可重复开店")
 
-                # 5. 生成网店编号
-                store_code = await self.repo.next_store_code(city_code)
-                now = ts()
+                # 8. 保证金锁定(钱包扣款 1000 → 保证金记录)
+                margin_no = await self.repo.next_margin_no()
+                async with get_lock(f"wallet:{member_id}"):
+                    new_balance = await self.wallet_repo.add_balance(
+                        member_id, -MARGIN_AMOUNT)
+                    now = ts()
+                    margin = {
+                        "marginNo": margin_no,
+                        "userId": member_id,
+                        "storeCode": "",  # storeCode 在下一步回填
+                        "amount": MARGIN_AMOUNT,
+                        "annualTarget": ANNUAL_PURCHASE_TARGET,
+                        "startDate": "",   # 确认开业时补
+                        "endDate": "",     # 确认开业时补(=startDate+365 天)
+                        "status": MARGIN_STATUS_LOCKED,
+                        "settledAt": None,
+                        "refundAmount": None,
+                        "deductedAmount": None,
+                        "completionRate": None,
+                        "annualPurchased": None,
+                        "settleReason": None,
+                        "createdAt": now,
+                        "updatedAt": now,
+                    }
+                    await self.wallet_repo.save_transaction({
+                        "txNo": await self.wallet_repo.next_tx_no(),
+                        "userId": member_id,
+                        "type": "citystore_margin_lock",
+                        "direction": "OUT",
+                        "amount": MARGIN_AMOUNT,
+                        "balanceAfter": new_balance,
+                        "payChannel": "",
+                        "orderId": "",
+                        "depositNo": "",
+                        "withdrawNo": "",
+                        "status": "success",
+                        "description": "县（区）网店保证金预存锁定"
+                                       f" ¥{MARGIN_AMOUNT:.2f}"
+                                       "(一年期, 不可提前取现)",
+                        "createdAt": now,
+                    })
+
+                # 9. 生成网店编号(CS-{区县码}-{3位序号})
+                store_code = await self.repo.next_store_code(district_code)
+                margin["storeCode"] = store_code
+                await self.repo.save_margin(margin)
                 store = {
                     "storeCode": store_code,
                     "storeName": store_name,
                     "memberId": member_id,
+                    "districtCode": district_code,
+                    "districtName": district_name,
                     "cityCode": city_code,
                     "cityName": city_name,
                     "provinceCode": province_code,
                     "provinceName": province_name,
-                    "businessLicense": business_license,
-                    "foodLicense": food_license,
-                    "taxRegNo": tax_reg_no,
+                    "idName": id_name,
+                    "idNumber": id_number,
+                    "signatureConfirm": True,
+                    "signedAt": now,
+                    "marginNo": margin_no,
+                    "annualTarget": ANNUAL_PURCHASE_TARGET,
                     "status": STORE_STATUS_PENDING,
                     "openDate": None,
                     "closeDate": None,
@@ -300,10 +416,21 @@ class CityStoreService:
             resolved = (city_code, city_name or "", province_name or "", "cityCode")
             logger.info("[下单入口决策] 城市判定走 cityCode 路径: %s", city_code)
         elif adcode:
-            city_code_converted = self._adcode_to_city_code(adcode)
-            resolved = (city_code_converted, "", "", "adcode")
-            logger.info("[下单入口决策] 城市判定走 adcode 路径: %s → 市级码 %s",
-                        adcode, city_code_converted)
+            # 区县级码: 先精确命中区县店, miss 后转市级码回退存量市店
+            district_store = await self.repo.get_by_city(adcode)
+            if district_store:
+                resolved = (adcode,
+                            district_store.get("cityName", ""),
+                            district_store.get("provinceName", ""), "adcode")
+                logger.info(
+                    "[下单入口决策] 城市判定走 adcode 路径(区县店精确命中): %s",
+                    adcode)
+            else:
+                city_code_converted = self._adcode_to_city_code(adcode)
+                resolved = (city_code_converted, "", "", "adcode")
+                logger.info(
+                    "[下单入口决策] 城市判定走 adcode 路径: %s → 市级码 %s",
+                    adcode, city_code_converted)
         elif city_name:
             resolved = ("", city_name, province_name or "", "cityName")
             logger.info("[下单入口决策] 城市判定走 cityName 路径: %r (省份=%r)",
@@ -468,7 +595,11 @@ class CityStoreService:
     @staticmethod
     def _match_store_by_name(stores: list[dict], city_name: str,
                              province_name: str = None) -> dict | None:
-        """按城市名匹配市店(去"市"后缀宽松比对; 省份一致优先)"""
+        """按城市/区县名匹配网店(去"市"后缀宽松比对; 省份一致优先)
+
+        区县店优先比对 districtName(前端定位可能传区县名),
+        再比对 cityName(市级口径)。
+        """
         def normalize(name: str) -> str:
             return (name or "").strip().rstrip("市")
 
@@ -477,7 +608,8 @@ class CityStoreService:
             return None
         candidates = []
         for s in stores:
-            if normalize(s.get("cityName", "")) == target:
+            if (normalize(s.get("districtName", "")) == target
+                    or normalize(s.get("cityName", "")) == target):
                 if province_name and normalize(s.get("provinceName", "")) == \
                         normalize(province_name):
                     return s  # 省市都一致, 直接命中
@@ -514,21 +646,25 @@ class CityStoreService:
         }
 
     # ============================================================
-    # 审核流程
+    # 确认开业(轻审核: 取代原营业执照/食品卫生许可证材料审核)
     # ============================================================
 
     async def audit_store(self, store_code: str, auditor: str,
                            approved: bool, remark: str = "") -> dict:
-        """审核开店申请(待审核 → 运营中/已取消)
+        """平台确认开业/驳回(待审核 → 运营中/已取消)
+
+        轻审核语义: 防恶意注册的一键确认(非材料审核)。
+            - approved=True: 确认开业 → 运营中, 保证金锁定期自开业日起算
+            - approved=False: 驳回 → 已取消, 保证金全额退还(rejected)
 
         Args:
             store_code: 网店编号
-            auditor: 审核人
-            approved: 是否通过(True 通过/False 驳回)
-            remark: 审核备注
+            auditor: 操作人
+            approved: True 确认开业 / False 驳回
+            remark: 备注
 
         Returns:
-            审核后的网店详情
+            网店详情
 
         Raises:
             KeyError: 网店不存在
@@ -541,7 +677,7 @@ class CityStoreService:
 
             if store["status"] != STORE_STATUS_PENDING:
                 raise ValueError(
-                    f"网店状态非法, 当前 {STORE_STATUS_NAMES.get(store['status'], '')}, 仅待审核网店可审核"
+                    f"网店状态非法, 当前 {STORE_STATUS_NAMES.get(store['status'], '')}, 仅待确认网店可操作"
                 )
 
             # 确定新状态
@@ -556,6 +692,19 @@ class CityStoreService:
             else:
                 store["closeDate"] = today
             await self.repo.save_store(store)
+
+            # 保证金联动: 确认开业补锁定期起止 / 驳回全额退还
+            margin = await self.repo.get_margin_by_store(store_code)
+            if margin and margin.get("status") == MARGIN_STATUS_LOCKED:
+                if approved:
+                    margin["startDate"] = today
+                    margin["endDate"] = (
+                        date.fromisoformat(today)
+                        + timedelta(days=MARGIN_TERM_DAYS)).isoformat()
+                    margin["updatedAt"] = now
+                    await self.repo.save_margin(margin)
+                else:
+                    await self.settle_margin(store_code, "rejected")
 
             return await self.get_store_detail(store_code)
 
@@ -595,6 +744,10 @@ class CityStoreService:
                 store["closeDate"] = today
             await self.repo.save_store(store)
 
+            # 取消时联动保证金中途结算(按已运营期折算目标)
+            if new_status == STORE_STATUS_CANCELLED:
+                await self.settle_margin(store_code, "cancelled")
+
             return await self.get_store_detail(store_code)
 
     def _validate_status_transition(self, current: int, new_status: int) -> None:
@@ -615,6 +768,190 @@ class CityStoreService:
                 f"状态流转非法: {STORE_STATUS_NAMES.get(current, current)} 不可直接流转到 "
                 f"{STORE_STATUS_NAMES.get(new_status, new_status)}, 允许: {allowed_names}"
             )
+
+    # ============================================================
+    # 保证金(预存钱包 1000 元一年期, 不可提前取现)
+    # ============================================================
+
+    async def get_margin(self, store_code: str) -> dict:
+        """查询网店保证金(含年任务进度)
+
+        Raises:
+            KeyError: 保证金不存在
+        """
+        margin = await self.repo.get_margin_by_store(store_code)
+        if margin is None:
+            raise KeyError(f"保证金记录不存在: 网店 {store_code}")
+        result = dict(margin)
+        # 实时年任务进度(运营中)
+        if result.get("status") == MARGIN_STATUS_LOCKED and result.get("startDate"):
+            purchased = await self.repo.sum_purchase_between(
+                store_code, result["startDate"], result.get("endDate") or "9999-12-31")
+            result["annualPurchasedLive"] = round(purchased, 2)
+            target = float(result.get("annualTarget") or ANNUAL_PURCHASE_TARGET)
+            result["completionRateLive"] = round(
+                min(1.0, purchased / target) if target > 0 else 1.0, 4)
+        return result
+
+    async def settle_margin(self, store_code: str, reason: str) -> dict | None:
+        """结算保证金(幂等——非 locked 直接返回当前记录)
+
+        结算口径:
+            - rejected(平台驳回, 未开业): 全额退还
+            - expired(满一年): 按年任务完成度退还
+              rate = min(1, 年进货额 / 50000), refund = round(1000 × rate, 2)
+            - cancelled(中途取消资格): 按已运营期折算目标退还
+              rate = min(1, 年进货额 / (50000 × 已运营天数 / 365))
+
+        资金路径: wallet:{userId} 锁内 add_balance(+refund) + 流水
+        (citystore_margin_settle, IN——WALLET_MODE 豁免面外, 资金退出红线)
+
+        Args:
+            store_code: 网店编号
+            reason: expired | cancelled | rejected
+
+        Raises:
+            ValueError: reason 非法
+        """
+        if reason not in MARGIN_SETTLE_REASONS:
+            raise ValueError(f"保证金结算原因非法: {reason}")
+
+        margin = await self.repo.get_margin_by_store(store_code)
+        if margin is None:
+            return None
+        margin_no = margin["marginNo"]
+
+        # 锁内双重检查(防调度器与手动结算并发双重退款)
+        async with get_lock(f"citystore:margin:{margin_no}"):
+            margin = await self.repo.get_margin(margin_no)
+            if margin is None or margin.get("status") != MARGIN_STATUS_LOCKED:
+                return margin
+
+            amount = float(margin.get("amount") or MARGIN_AMOUNT)
+            target = float(margin.get("annualTarget") or ANNUAL_PURCHASE_TARGET)
+            user_id = margin.get("userId")
+            today = ts()[:10]
+
+            start = margin.get("startDate") or ""
+            if reason == "rejected" or not start:
+                # 未开业(驳回/异常未开业取消): 全额退还
+                rate = 1.0
+                annual_purchased = 0.0
+            else:
+                end = margin.get("endDate") or today
+                annual_purchased = await self.repo.sum_purchase_between(
+                    store_code, start, end)
+                if reason == "expired":
+                    # 满一年: 按年任务完成度
+                    rate = (min(1.0, annual_purchased / target)
+                            if target > 0 else 1.0)
+                else:
+                    # 中途取消: 按已运营期折算目标
+                    end_d = date.fromisoformat(min(today, end))
+                    elapsed = max((end_d - date.fromisoformat(start)).days, 0)
+                    prorated = target * elapsed / 365
+                    rate = (min(1.0, annual_purchased / prorated)
+                            if prorated > 0 else 1.0)
+
+            refund = round(amount * rate, 2)
+            deducted = round(amount - refund, 2)
+            now = ts()
+
+            # 资金退还(钱包锁内; refund=0 时不产生流水——全额扣除)
+            if refund > 0:
+                async with get_lock(f"wallet:{user_id}"):
+                    new_balance = await self.wallet_repo.add_balance(
+                        user_id, refund)
+                    await self.wallet_repo.save_transaction({
+                        "txNo": await self.wallet_repo.next_tx_no(),
+                        "userId": user_id,
+                        "type": "citystore_margin_settle",
+                        "direction": "IN",
+                        "amount": refund,
+                        "balanceAfter": new_balance,
+                        "payChannel": "",
+                        "orderId": "",
+                        "depositNo": "",
+                        "withdrawNo": "",
+                        "status": "success",
+                        "description": (
+                            "县（区）网店保证金驳回全额退还 ¥"
+                            f"{refund:.2f}" if reason == "rejected" else
+                            f"县（区）网店保证金结算退还 ¥{refund:.2f}"
+                            f"(年任务完成率 {rate * 100:.1f}%, 扣除 ¥{deducted:.2f})"),
+                        "createdAt": now,
+                    })
+
+            margin.update({
+                "status": MARGIN_STATUS_SETTLED,
+                "settledAt": now,
+                "refundAmount": refund,
+                "deductedAmount": deducted,
+                "completionRate": round(rate, 4),
+                "annualPurchased": round(annual_purchased, 2),
+                "settleReason": reason,
+                "updatedAt": now,
+            })
+            await self.repo.save_margin(margin)
+            logger.info(
+                "[保证金结算] %s reason=%s 退还 ¥%.2f 扣除 ¥%.2f "
+                "完成率 %.4f 年进货 ¥%.2f",
+                margin_no, reason, refund, deducted, rate, annual_purchased)
+            return margin
+
+    async def run_margin_settlement(self) -> dict:
+        """到期保证金批量结算(调度器小时级轮询, 幂等)
+
+        扫描 status=locked 且 endDate 非空且 ≤ today 的保证金逐个结算。
+        """
+        from core.helpers import ts as _ts
+        today = _ts()[:10]
+        due = await self.repo.list_due_margins(today)
+        settled, skipped = [], []
+        for m in due:
+            result = await self.settle_margin(m["storeCode"], "expired")
+            if result and result.get("status") == MARGIN_STATUS_SETTLED:
+                settled.append(result["marginNo"])
+            else:
+                skipped.append(m["marginNo"])
+        return {"due": len(due), "settled": settled, "skipped": skipped}
+
+    # ============================================================
+    # 区县列表(县区网店三级联动数据源)
+    # ============================================================
+
+    async def list_available_districts(self, city_code: str = None) -> dict:
+        """查询可开网店区县(未被独占; 可按市筛选)
+
+        Args:
+            city_code: 市码(可选——为空返回全量, 前端三级联动一次性预载)
+
+        Raises:
+            ValueError: 市码无效
+        """
+        from services import citystore_districts
+        if city_code:
+            all_districts = citystore_districts.districts_by_city(city_code)
+            if not all_districts:
+                raise ValueError(
+                    f"市码无效或该市无区县数据: {city_code}"
+                    "(港澳台暂不开放区县级网店)")
+        else:
+            all_districts = citystore_districts.all_districts()
+        occupied = set(await self.repo.list_occupied_cities())
+        available = [d for d in all_districts
+                     if d["districtCode"] not in occupied]
+        # 上级市店拦截标记(该市被存量市级网店覆盖时前端提示)
+        blocked_cities = set()
+        for d in all_districts:
+            if d["cityCode"] in occupied and d["districtCode"] not in occupied:
+                blocked_cities.add(d["cityCode"])
+        return {
+            "districts": available,
+            "count": len(available),
+            "totalCount": len(all_districts),
+            "blockedCityCount": len(blocked_cities),
+        }
 
     # ============================================================
     # 月度考核
@@ -737,6 +1074,10 @@ class CityStoreService:
                     store["status"] = STORE_STATUS_WARNING
 
             await self.repo.save_store(store)
+
+            # 取消资格时联动保证金中途结算(按已运营期折算目标)
+            if qualification_status == QUAL_STATUS_CANCELLED:
+                await self.settle_margin(store_code, "cancelled")
 
             # 回流钩子(25号网店健康决策门——考核终态自动反馈)
             try:

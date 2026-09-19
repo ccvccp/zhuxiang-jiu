@@ -74,9 +74,18 @@ def record(name, passed, detail=""):
         RESULTS.append(f"  ✗ {name} — {detail}")
 
 
-def reset_store():
-    """重置内存存储, 保证测试隔离"""
+async def reset_store(svc=None):
+    """重置内存存储 + 预置测试会员钱包(active, 余额 5000), 保证测试隔离"""
     _reset_store_impl()
+    from repositories.wallet_repository import WalletRepository
+    wallet = (svc.wallet_repo if svc is not None else WalletRepository())
+    for mid in (991, 1001, 1002, 2001, 2002, 3001, 4001, 4002, 4003,
+                4004, 5001, 5002, 5003, 6001, 6002, 6003, 6004, 6005,
+                7001, 8001, 8002, 8003):
+        if await wallet.get_account(mid) is None:
+            await wallet.open_account(mid, {
+                "userId": mid, "status": "active", "balance": 0.0})
+        await wallet.add_balance(mid, 5000.0)
 
 
 def current_month() -> str:
@@ -96,24 +105,23 @@ MEMBER_LEVEL_SVIP = 5
 MEMBER_ID_NON_SVIP = 1002
 MEMBER_LEVEL_NON_SVIP = 3
 
-# 测试城市 1: 济南市
-CITY_CODE_JN = "370100"
-CITY_NAME_JN = "济南市"
+# 测试区县 1: 济南市历下区
+DISTRICT_JN = "370102"
+CITY_CODE_JN = "370100"   # 上级市(城市列表测试用)
 PROVINCE_CODE_SD = "370000"
 PROVINCE_NAME_SD = "山东省"
 
-# 测试城市 2: 青岛市
+# 测试区县 2: 青岛市市南区
+DISTRICT_QD = "370202"
 CITY_CODE_QD = "370200"
-CITY_NAME_QD = "青岛市"
 
-# 测试城市 3: 淄博市
+# 测试区县 3: 淄博市淄川区
+DISTRICT_ZB = "370302"
 CITY_CODE_ZB = "370300"
-CITY_NAME_ZB = "淄博市"
 
-# 资质
-BUSINESS_LICENSE = "91370100MA00001XX"
-FOOD_LICENSE = "JY13701001234567"
-TAX_REG_NO = "91370100MA00001XX"
+# 身份证(取代营业执照/食品卫生许可证)
+ID_NAME = "测试店主"
+ID_NUMBER = "11010519491231002X"
 
 # 产品
 PRODUCT_ID = "ZX42-2026L07"
@@ -133,9 +141,9 @@ class TestCityStoreApply:
         try:
             await svc.apply(
                 member_id=MEMBER_ID_NON_SVIP, member_level=MEMBER_LEVEL_NON_SVIP,
-                store_name="非 SVIP 网店", city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+                store_name="非 SVIP 网店", district_code=DISTRICT_JN,
                 province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-                business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
+                id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
             )
             record("test_01_non_svip_blocked", False, "应抛出 ValueError")
         except ValueError:
@@ -145,36 +153,35 @@ class TestCityStoreApply:
         try:
             await svc.apply(
                 member_id=MEMBER_ID_SVIP, member_level=MEMBER_LEVEL_SVIP,
-                store_name="无照网店", city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+                store_name="无身份证网店", district_code=DISTRICT_JN,
                 province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-                business_license="", food_license=FOOD_LICENSE,
+                id_name=ID_NAME, id_number="", signature_confirm=True,
             )
-            record("test_02_no_business_license", False, "应抛出 ValueError")
+            record("test_02_no_id_number", False, "应抛出 ValueError")
         except ValueError:
-            record("test_02_no_business_license", True)
+            record("test_02_no_id_number", True)
 
         # test 03: 食品许可证缺失被拒
         try:
             await svc.apply(
                 member_id=MEMBER_ID_SVIP, member_level=MEMBER_LEVEL_SVIP,
-                store_name="无证网店", city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+                store_name="未签名网店", district_code=DISTRICT_JN,
                 province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-                business_license=BUSINESS_LICENSE, food_license="",
+                id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=False,
             )
-            record("test_03_no_food_license", False, "应抛出 ValueError")
+            record("test_03_no_signature", False, "应抛出 ValueError")
         except ValueError:
-            record("test_03_no_food_license", True)
+            record("test_03_no_signature", True)
 
         # test 04: SVIP 申请成功
         store = await svc.apply(
             member_id=MEMBER_ID_SVIP, member_level=MEMBER_LEVEL_SVIP,
-            store_name="竹香济南网店", city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+            store_name="竹香济南网店", district_code=DISTRICT_JN,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
-            tax_reg_no=TAX_REG_NO,
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         record("test_04_apply_success",
-               store["storeCode"].startswith(f"CS-{CITY_CODE_JN}-"),
+               store["storeCode"].startswith(f"CS-{DISTRICT_JN}-"),
                f"storeCode 格式错误: {store['storeCode']}")
 
         # test 05: 状态为待审核
@@ -196,9 +203,9 @@ class TestCityStoreApply:
         try:
             await svc.apply(
                 member_id=MEMBER_ID_SVIP, member_level=MEMBER_LEVEL_SVIP,
-                store_name="第二家店", city_code=CITY_CODE_QD, city_name=CITY_NAME_QD,
+                store_name="第二家店", district_code=DISTRICT_QD,
                 province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-                business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
+                id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
             )
             record("test_08_duplicate_member_blocked", False, "应抛出 ValueError")
         except ValueError:
@@ -208,9 +215,9 @@ class TestCityStoreApply:
         try:
             await svc.apply(
                 member_id=2001, member_level=MEMBER_LEVEL_SVIP,
-                store_name="抢占济南", city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+                store_name="抢占济南", district_code=DISTRICT_JN,
                 province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-                business_license="91370100MA00002YY", food_license="JY13701007654321",
+                id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
             )
             record("test_09_city_occupied_blocked", False, "应抛出 ValueError")
         except ValueError:
@@ -219,12 +226,12 @@ class TestCityStoreApply:
         # test 10: 不同城市可申请(另一 SVIP 会员)
         store2 = await svc.apply(
             member_id=2002, member_level=MEMBER_LEVEL_SVIP,
-            store_name="竹香青岛网店", city_code=CITY_CODE_QD, city_name=CITY_NAME_QD,
+            store_name="竹香青岛网店", district_code=DISTRICT_QD,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license="91370200MA00003ZZ", food_license="JY13702001122334",
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         record("test_10_different_city_success",
-               store2["storeCode"].startswith(f"CS-{CITY_CODE_QD}-"),
+               store2["storeCode"].startswith(f"CS-{DISTRICT_QD}-"),
                f"不同城市申请失败: {store2.get('storeCode')}")
 
 
@@ -235,9 +242,9 @@ class TestCityStoreQuery:
         # 创建测试网店
         store = await svc.apply(
             member_id=MEMBER_ID_SVIP, member_level=MEMBER_LEVEL_SVIP,
-            store_name="济南查询测试", city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+            store_name="济南查询测试", district_code=DISTRICT_JN,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         store_code = store["storeCode"]
 
@@ -260,19 +267,19 @@ class TestCityStoreQuery:
                result["count"] >= 1,
                f"列表数量错误: {result['count']}")
 
-        # test 14: 可用城市列表(全国全量 344 - 1 已占 = 343)
+        # test 14: 可用城市列表(区县店不占市码——344 城全可用)
         cities = await svc.list_available_cities()
         record("test_14_available_cities",
-               cities["count"] == 343 and cities["occupiedCount"] == 1
+               cities["count"] == 344 and cities["occupiedCount"] == 1
                and cities.get("totalCount") == 344,
                f"可用城市数量错误: {cities['count']}, "
                f"total={cities.get('totalCount')}, "
                f"occupied={cities['occupiedCount']}")
 
-        # test 14b: 省份筛选(山东省 16 地市 - 济南已占 = 15)
+        # test 14b: 省份筛选(山东省 16 地市全可用——区县店不占市码)
         sd = await svc.list_available_cities(province_code="370000")
         record("test_14b_available_cities_by_province",
-               sd["count"] == 15
+               sd["count"] == 16
                and all(c["provinceCode"] == "370000"
                        for c in sd["cities"]),
                f"山东省可用数错误: {sd['count']}")
@@ -285,25 +292,23 @@ class TestCityStoreQuery:
         except ValueError:
             record("test_14c_invalid_province_409", True)
 
-        # test 14d: apply 城市合法性(无效码拒绝)
+        # test 14d: apply 区县合法性(无效码拒绝)
         try:
             await svc.apply(member_id=991, member_level=5,
                             store_name="脏数据店",
-                            city_code="999999",
-                            city_name="无效市",
-                            province_code="990000",
-                            province_name="无效省",
-                            business_license="BL991",
-                            food_license="FL991")
+                            district_code="999999",
+                            id_name=ID_NAME,
+                            id_number=ID_NUMBER, signature_confirm=True)
             record("test_14d_apply_invalid_city_409", False)
         except ValueError:
             record("test_14d_apply_invalid_city_409", True)
 
-        # test 15: 已占城市不在可用列表中
-        occupied_codes = [c["cityCode"] for c in cities["cities"]]
+        # test 15: 已占区县不在可用区县列表中
+        districts = await svc.list_available_districts()
+        district_codes = [d["districtCode"] for d in districts["districts"]]
         record("test_15_occupied_excluded",
-               CITY_CODE_JN not in occupied_codes,
-               "已占城市仍出现在可用列表中")
+               DISTRICT_JN not in district_codes,
+               "已占区县仍出现在可用区县列表中")
 
 
 class TestCityStoreAudit:
@@ -313,9 +318,9 @@ class TestCityStoreAudit:
         # test 16: 审核通过(待审核 → 运营中)
         store = await svc.apply(
             member_id=MEMBER_ID_SVIP, member_level=MEMBER_LEVEL_SVIP,
-            store_name="济南审核通过", city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+            store_name="济南审核通过", district_code=DISTRICT_JN,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         approved = await svc.audit_store(
             store_code=store["storeCode"], auditor="admin01",
@@ -331,9 +336,9 @@ class TestCityStoreAudit:
         # test 18: 审核驳回(待审核 → 已取消)
         store2 = await svc.apply(
             member_id=3001, member_level=MEMBER_LEVEL_SVIP,
-            store_name="青岛审核驳回", city_code=CITY_CODE_QD, city_name=CITY_NAME_QD,
+            store_name="青岛审核驳回", district_code=DISTRICT_QD,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license="91370200MA00004AA", food_license="JY13702009988776",
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         rejected = await svc.audit_store(
             store_code=store2["storeCode"], auditor="admin01",
@@ -371,14 +376,14 @@ class TestCityStoreStatusFlow:
     """状态流转测试"""
 
     async def _create_operating_store(self, svc, member_id=MEMBER_ID_SVIP,
-                                       city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+                                       district_code=DISTRICT_JN,
                                        store_name="状态流转测试"):
         """辅助: 创建并审核通过的运营中网店"""
         store = await svc.apply(
             member_id=member_id, member_level=MEMBER_LEVEL_SVIP,
-            store_name=store_name, city_code=city_code, city_name=city_name,
+            store_name=store_name, district_code=district_code,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         await svc.audit_store(
             store_code=store["storeCode"], auditor="admin01",
@@ -388,7 +393,7 @@ class TestCityStoreStatusFlow:
 
     async def run(self, svc):
         # test 22: 运营 → 预警
-        sc = await self._create_operating_store(svc, 4001, CITY_CODE_JN, CITY_NAME_JN, "运营转预警")
+        sc = await self._create_operating_store(svc, 4001, DISTRICT_JN, "运营转预警")
         result = await svc.update_status(sc, STORE_STATUS_WARNING, operator="admin01")
         record("test_22_operating_to_warning",
                result["status"] == STORE_STATUS_WARNING,
@@ -401,7 +406,7 @@ class TestCityStoreStatusFlow:
                f"状态错误: {result.get('status')}")
 
         # test 24: 运营 → 暂停
-        sc2 = await self._create_operating_store(svc, 4002, CITY_CODE_QD, CITY_NAME_QD, "运营转暂停")
+        sc2 = await self._create_operating_store(svc, 4002, DISTRICT_QD, "运营转暂停")
         result = await svc.update_status(sc2, STORE_STATUS_SUSPENDED, operator="admin01")
         record("test_24_operating_to_suspended",
                result["status"] == STORE_STATUS_SUSPENDED,
@@ -414,7 +419,7 @@ class TestCityStoreStatusFlow:
                f"状态错误: {result.get('status')}")
 
         # test 26: 运营 → 取消
-        sc3 = await self._create_operating_store(svc, 4003, CITY_CODE_ZB, CITY_NAME_ZB, "运营转取消")
+        sc3 = await self._create_operating_store(svc, 4003, DISTRICT_ZB, "运营转取消")
         result = await svc.update_status(sc3, STORE_STATUS_CANCELLED, operator="admin01")
         record("test_26_operating_to_cancelled",
                result["status"] == STORE_STATUS_CANCELLED,
@@ -433,9 +438,9 @@ class TestCityStoreStatusFlow:
         # test 29: 非法流转(待审核 → 预警, 不可直接跳过审核)
         store = await svc.apply(
             member_id=4004, member_level=MEMBER_LEVEL_SVIP,
-            store_name="非法流转测试", city_code="370400", city_name="枣庄市",
+            store_name="非法流转测试", district_code="370402",
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license="91370400MA00005BB", food_license="JY13704005566778",
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         try:
             await svc.update_status(store["storeCode"], STORE_STATUS_WARNING, operator="admin01")
@@ -454,13 +459,13 @@ class TestCityStoreStatusFlow:
 class TestCityStoreAssessment:
     """月度考核测试"""
 
-    async def _create_operating_store(self, svc, member_id, city_code, city_name, store_name):
+    async def _create_operating_store(self, svc, member_id, district_code, store_name):
         """辅助: 创建并审核通过的运营中网店"""
         store = await svc.apply(
             member_id=member_id, member_level=MEMBER_LEVEL_SVIP,
-            store_name=store_name, city_code=city_code, city_name=city_name,
+            store_name=store_name, district_code=district_code,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         await svc.audit_store(
             store_code=store["storeCode"], auditor="admin01",
@@ -471,9 +476,9 @@ class TestCityStoreAssessment:
     async def run(self, svc):
         month = current_month()
 
-        # test 31: 月销 > 9000 → 70 折(优秀)
-        sc1 = await self._create_operating_store(svc, 5001, CITY_CODE_JN, CITY_NAME_JN, "优秀考核")
-        # 添加订单(总额 10000 > 9000)
+        # test 31: 月销 > 4167 → 70 折(优秀)
+        sc1 = await self._create_operating_store(svc, 5001, DISTRICT_JN, "优秀考核")
+        # 添加订单(总额 10000 > 4167)
         await svc.add_order(
             store_code=sc1, order_no="ORD-EXCEL-001",
             product_id=PRODUCT_ID, product_name=PRODUCT_NAME,
@@ -488,12 +493,12 @@ class TestCityStoreAssessment:
                result["purchaseQualified"] == 1 and result["salesQualified"] == 1,
                f"达标错误: purchase={result.get('purchaseQualified')}, sales={result.get('salesQualified')}")
 
-        # test 33: 月销 5000-9000 → 80 折(达标)
-        sc2 = await self._create_operating_store(svc, 5002, CITY_CODE_QD, CITY_NAME_QD, "达标考核")
+        # test 33: 月销 2315-4167 → 80 折(达标)
+        sc2 = await self._create_operating_store(svc, 5002, DISTRICT_QD, "达标考核")
         await svc.add_order(
             store_code=sc2, order_no="ORD-QUAL-001",
             product_id=PRODUCT_ID, product_name=PRODUCT_NAME,
-            quantity=22, retail_price=RETAIL_PRICE, total_amount=6000.0,
+            quantity=22, retail_price=RETAIL_PRICE, total_amount=3000.0,
             sales_channel=CHANNEL_LIVE,
         )
         result = await svc.run_assessment(sc2, month)
@@ -504,12 +509,12 @@ class TestCityStoreAssessment:
                result["purchaseQualified"] == 0 and result["salesQualified"] == 1,
                f"达标错误: purchase={result.get('purchaseQualified')}, sales={result.get('salesQualified')}")
 
-        # test 35: 月销 < 5000 → 90 折(未达标)
-        sc3 = await self._create_operating_store(svc, 5003, CITY_CODE_ZB, CITY_NAME_ZB, "未达标考核")
+        # test 35: 月销 < 2315 → 90 折(未达标)
+        sc3 = await self._create_operating_store(svc, 5003, DISTRICT_ZB, "未达标考核")
         await svc.add_order(
             store_code=sc3, order_no="ORD-UNQUAL-001",
             product_id=PRODUCT_ID, product_name=PRODUCT_NAME,
-            quantity=10, retail_price=RETAIL_PRICE, total_amount=2680.0,
+            quantity=10, retail_price=RETAIL_PRICE, total_amount=1000.0,
             sales_channel=CHANNEL_COMMUNITY,
         )
         result = await svc.run_assessment(sc3, month)
@@ -557,13 +562,13 @@ class TestCityStoreAssessment:
 class TestCityStoreConsecutiveBelow:
     """连续不达标考核测试(3 月自动取消资格)"""
 
-    async def _create_operating_store(self, svc, member_id, city_code, city_name, store_name):
+    async def _create_operating_store(self, svc, member_id, district_code, store_name):
         """辅助: 创建并审核通过的运营中网店"""
         store = await svc.apply(
             member_id=member_id, member_level=MEMBER_LEVEL_SVIP,
-            store_name=store_name, city_code=city_code, city_name=city_name,
+            store_name=store_name, district_code=district_code,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         await svc.audit_store(
             store_code=store["storeCode"], auditor="admin01",
@@ -572,7 +577,7 @@ class TestCityStoreConsecutiveBelow:
         return store["storeCode"]
 
     async def run(self, svc):
-        sc = await self._create_operating_store(svc, 6001, CITY_CODE_JN, CITY_NAME_JN, "连续不达标测试")
+        sc = await self._create_operating_store(svc, 6001, DISTRICT_JN, "连续不达标测试")
 
         # 第 1 月: 无订单 → 未达标(连续 1 月 → 预警)
         result1 = await svc.run_assessment(sc, "2026-01")
@@ -608,7 +613,7 @@ class TestCityStoreConsecutiveBelow:
                f"网店状态错误: {result3.get('storeStatus')}")
 
         # test 50: 达标后连续不达标计数清零
-        sc2 = await self._create_operating_store(svc, 6002, CITY_CODE_QD, CITY_NAME_QD, "达标重置测试")
+        sc2 = await self._create_operating_store(svc, 6002, DISTRICT_QD, "达标重置测试")
         # 第 1 月不达标(无订单 → 状态变预警)
         await svc.run_assessment(sc2, "2026-01")
         # 恢复运营状态后再添加订单(预警 → 运营是合法流转)
@@ -637,9 +642,9 @@ class TestCityStoreOrders:
         # 创建运营中网店
         store = await svc.apply(
             member_id=MEMBER_ID_SVIP, member_level=MEMBER_LEVEL_SVIP,
-            store_name="济南订单测试", city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+            store_name="济南订单测试", district_code=DISTRICT_JN,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         await svc.audit_store(
             store_code=store["storeCode"], auditor="admin01", approved=True,
@@ -680,9 +685,9 @@ class TestCityStoreOrders:
         # test 55: 网店非运营状态不可关联订单
         store2 = await svc.apply(
             member_id=7001, member_level=MEMBER_LEVEL_SVIP,
-            store_name="青岛待审核订单", city_code=CITY_CODE_QD, city_name=CITY_NAME_QD,
+            store_name="青岛待审核订单", district_code=DISTRICT_QD,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license="91370200MA00006CC", food_license="JY13702003344556",
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         try:
             await svc.add_order(
@@ -714,23 +719,23 @@ class TestCityStoreAdmin:
         # 1. 待审核
         await svc.apply(
             member_id=8001, member_level=MEMBER_LEVEL_SVIP,
-            store_name="济南待审核1", city_code=CITY_CODE_JN, city_name=CITY_NAME_JN,
+            store_name="济南待审核1", district_code=DISTRICT_JN,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license=BUSINESS_LICENSE, food_license=FOOD_LICENSE,
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         # 2. 待审核
         await svc.apply(
             member_id=8002, member_level=MEMBER_LEVEL_SVIP,
-            store_name="青岛待审核2", city_code=CITY_CODE_QD, city_name=CITY_NAME_QD,
+            store_name="青岛待审核2", district_code=DISTRICT_QD,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license="91370200MA00007DD", food_license="JY13702002233445",
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         # 3. 已审核通过
         store3 = await svc.apply(
             member_id=8003, member_level=MEMBER_LEVEL_SVIP,
-            store_name="淄博运营中", city_code=CITY_CODE_ZB, city_name=CITY_NAME_ZB,
+            store_name="淄博运营中", district_code=DISTRICT_ZB,
             province_code=PROVINCE_CODE_SD, province_name=PROVINCE_NAME_SD,
-            business_license="91370300MA00008EE", food_license="JY13703001122334",
+            id_name=ID_NAME, id_number=ID_NUMBER, signature_confirm=True,
         )
         await svc.audit_store(store3["storeCode"], "admin01", approved=True)
 
@@ -775,8 +780,8 @@ async def main():
     ]
 
     for name, cls in test_classes:
-        reset_store()
         svc = CityStoreService()
+        await reset_store(svc)
         print(f"\n[{name}]")
         instance = cls()
         await instance.run(svc)

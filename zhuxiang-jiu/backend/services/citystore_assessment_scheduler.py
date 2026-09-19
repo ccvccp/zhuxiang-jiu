@@ -153,8 +153,23 @@ def scheduler_stats() -> list[dict]:
     return list(_scheduler_stats)
 
 
+async def run_margin_settlement_round() -> dict:
+    """执行一轮保证金到期结算(可独立调用, 便于测试/手动补跑)
+
+    保证金到期日按各店开业日全年分布, 不能只靠月初窗口——
+    并入小时级循环逐轮扫描(settle_margin 幂等)。
+    """
+    from services.citystore_service import CityStoreService
+
+    result = await CityStoreService().run_margin_settlement()
+    if result.get("settled"):
+        logger.info("citystore_margin_settlement due=%d settled=%d",
+                    result.get("due", 0), len(result["settled"]))
+    return result
+
+
 async def _scheduler_loop() -> None:
-    """后台循环: 周期性检查考核窗口并执行"""
+    """后台循环: 周期性检查考核窗口并执行 + 保证金到期结算"""
     interval = scheduler_interval_seconds()
     logger.info("citystore_assessment_scheduler started interval=%ss", interval)
     while True:
@@ -163,6 +178,11 @@ async def _scheduler_loop() -> None:
             await run_monthly_assessment()
         except Exception as exc:
             logger.warning("月度考核调度异常(继续运行): %s", exc)
+        # 保证金到期结算(每小时轮询——到期日全年分布, 不限月初窗口)
+        try:
+            await run_margin_settlement_round()
+        except Exception as exc:
+            logger.warning("保证金结算调度异常(继续运行): %s", exc)
 
 
 _scheduler_task: asyncio.Task | None = None

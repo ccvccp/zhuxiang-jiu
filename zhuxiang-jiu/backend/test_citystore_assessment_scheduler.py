@@ -53,32 +53,40 @@ MONTH = "2026-08"
 
 
 async def _seed_stores(svc, n=3):
-    """创建 n 家运营中网店(不同城市)+1 待审核+1 已取消"""
-    cities = [("370100", "济南市"), ("370200", "青岛市"), ("370300", "淄博市")]
+    """创建 n 家运营中县区网店(不同区县)+1 待审核+1 已取消"""
+    districts = [("370102",), ("370202",), ("370302",)]
     codes = []
     for i in range(n):
+        wallet = await svc.wallet_repo.get_account(MEMBER + i)
+        if wallet is None:
+            await svc.wallet_repo.open_account(MEMBER + i, {
+                "userId": MEMBER + i, "status": "active", "balance": 0.0})
+        await svc.wallet_repo.add_balance(MEMBER + i, 5000.0)
         store = await svc.apply(
             member_id=MEMBER + i, member_level=5,
-            store_name=f"调度考核店{i}", city_code=cities[i][0],
-            city_name=cities[i][1], province_code="370000",
-            province_name="山东省",
-            business_license=f"91370100MA0000{i}XX",
-            food_license=f"JY1370100123456{i}")
+            store_name=f"调度考核店{i}",
+            district_code=districts[i][0],
+            id_name="测试店主", id_number="11010519491231002X",
+            signature_confirm=True)
         await svc.audit_store(store_code=store["storeCode"],
                               auditor="admin01", approved=True)
         codes.append(store["storeCode"])
     # 待审核(不参与考核)
+    for mid in (MEMBER + 90, MEMBER + 91):
+        acc = await svc.wallet_repo.get_account(mid)
+        if acc is None:
+            await svc.wallet_repo.open_account(mid, {
+                "userId": mid, "status": "active", "balance": 0.0})
+        await svc.wallet_repo.add_balance(mid, 5000.0)
     pending = await svc.apply(
         member_id=MEMBER + 90, member_level=5, store_name="待审核店",
-        city_code="370400", city_name="枣庄市", province_code="370000",
-        province_name="山东省", business_license="91370100MA00009X1",
-        food_license="JY13701001234569")
+        district_code="370402", id_name="测试店主",
+        id_number="11010519491231002X", signature_confirm=True)
     # 已取消(不参与考核)
     cancelled = await svc.apply(
         member_id=MEMBER + 91, member_level=5, store_name="已取消店",
-        city_code="370500", city_name="东营市", province_code="370000",
-        province_name="山东省", business_license="91370100MA00009X2",
-        food_license="JY13701001234570")
+        district_code="370502", id_name="测试店主",
+        id_number="11010519491231002X", signature_confirm=True)
     await svc.audit_store(store_code=cancelled["storeCode"],
                           auditor="admin01", approved=True)
     await svc.update_status(cancelled["storeCode"], 4, operator="admin01")
