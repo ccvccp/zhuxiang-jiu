@@ -175,6 +175,8 @@ SCORER_REGISTRY = {
     "synapse_weave": {"label": "织智Synapse织造质量评分", "module": "76织智Synapse-Weave大模型", "batch": 50},
     # ---- 第五十一批(77号·竹鉴BambooVerify大模型 P0: 质检引证评分) ----
     "bamboo_verify": {"label": "竹鉴BambooVerify质检引证评分", "module": "77竹鉴BambooVerify大模型", "batch": 51},
+    # ---- 第五十二批(48号·小竹智能语音大模型三期: 语音支付风险评分) ----
+    "voicepay_risk": {"label": "小竹语音支付风险评分", "module": "48小竹智能语音大模型", "batch": 52},
 }
 
 # 治理档案型评分器(46号审批总线档案, 不参与 Hedge 学习周期)。
@@ -402,6 +404,12 @@ def default_weights(scorer_id: str) -> dict:
         # 38号产品管理: 上架预审五因子, 单一事实源在评分器类
         from services.ai_scoring_service import ProductGateScorer
         return dict(ProductGateScorer.WEIGHTS)
+    if scorer_id == "voicepay_risk":
+        # 48号三期: 语音支付风险四因子, 单一事实源在评分器类
+        from services.xiaozhu_voicepay_service import (
+            VoicePayRiskScorer,
+        )
+        return dict(VoicePayRiskScorer.WEIGHTS)
     if scorer_id == "blogger_work_gate":
         # 40号博主引流: 作品跟随价值五因子, 单一事实源在评分器类
         from services.ai_scoring_service import BloggerWorkScorer

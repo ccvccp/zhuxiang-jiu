@@ -272,6 +272,14 @@ COMMANDS = [
         "examples": ["小竹，结算这个", "小竹，买下它"],
     },
     {
+        "action": "order.pay",
+        "label": "支付订单",
+        "patterns": ["支付订单", "订单支付", "付款",
+                     "付一下", "支付一下", "把钱付了",
+                     "支付这个订单", "付款吧"],
+        "examples": ["小竹，支付订单", "小竹，付一下"],
+    },
+    {
         "action": "trust.convert",
         "label": "信用分换信值",
         "patterns": ["信用分换", "换成信值", "换信值",
@@ -853,7 +861,8 @@ class XiaozhuService:
         member_id = session.get("memberId")
         context = await self.build_context(member_id)
         # P2 沙箱: 写/高敏动作经统一执行器
-        if action in ("cart.submit", "trust.convert"):
+        if action in ("cart.submit", "trust.convert",
+                      "order.pay"):
             return await self._exec_sandbox(
                 session, action, text, context)
         try:
@@ -916,6 +925,12 @@ class XiaozhuService:
                         "card": None,
                         "clarify": "creditPoints"}
             r = await ex.try_convert_flow(session, credit)
+        elif action == "order.pay":
+            # 三期: 语音支付(L1-L3 前置风控 → 高敏 confirm)
+            from services.xiaozhu_voicepay_service import (
+                get_gateway,
+            )
+            r = await get_gateway().try_pay_flow(session)
         else:   # cart.submit
             items = await self._resolve_cart_items(session)
             if not items:
@@ -927,6 +942,17 @@ class XiaozhuService:
                 context.get("levelTitle") and
                 f"L{context.get('level') or 1}" or "L1")
         # 沙箱结果 → 统一回包
+        if r.get("clarify"):
+            return {"reply": str(r.get("reply")
+                                 or r["clarify"]),
+                    "card": None,
+                    "clarify": r["clarify"]}
+        if r.get("blocked"):
+            # 三期: 支付风控拦截(留痕透传)
+            return {"reply": r.get("reply"),
+                    "card": None,
+                    "blocked": True,
+                    "voicePayRisk": r.get("voicePayRisk")}
         if r.get("duplicate"):
             return {"reply": r.get("note",
                                    "同指令已受理"),
@@ -974,6 +1000,29 @@ class XiaozhuService:
                             + str(result.get("detail")
                                   or result.get("error")
                                   or "余额/参数问题"),
+                    "card": None}
+        if action == "order.pay":
+            if result.get("success"):
+                return {
+                    "reply": f"支付成功——订单 "
+                             f"{result.get('orderId')} 已"
+                             f"{result.get('statusName')}"
+                             + (f", 返 {result.get('consumedPoints')}"
+                                " 竹叶" if result.get(
+                                    "consumedPoints")
+                                else ""),
+                    "card": {"type": "order_paid",
+                             "subject": "支付成功",
+                             "orderId": result.get("orderId"),
+                             "status":
+                                 result.get("statusName")},
+                    "executed": True}
+            return {"reply": "支付未完成: "
+                            + str(result.get("logs")
+                                  and (result.get("logs") or
+                                       [{}])[-1].get("msg")
+                                  or result.get("error")
+                                  or "订单状态异常")[:100],
                     "card": None}
         # cart.submit
         if result.get("success") or result.get("orderId"):

@@ -66,7 +66,8 @@ SAFE_READONLY = {"product.new", "product.price",
                  "voice.score"}   # 50号P0 语音积分查询
 SAFE_WRITE = {"cart.submit"}          # 一般写: 执行+播报
 SENSITIVE = {"trust.convert",        # 高敏: confirmToken 流
-             "repair.execute"}       # 49号P0: 修复执行同高敏流
+             "repair.execute",       # 49号P0: 修复执行同高敏流
+             "order.pay"}            # 三期: 语音支付(L1-L3 前置)
 
 
 def _now() -> float:
@@ -376,6 +377,13 @@ class XiaozhuExecutor:
         if action == "repair.execute":
             return await self._exec_repair(params,
                                            member_id)
+        if action == "order.pay":
+            # 三期: 语音支付(L1-L3 已在 try_pay_flow 前置,
+            # 60s token 窗口内执行真实支付)
+            from services.xiaozhu_voicepay_service import (
+                execute_pay,
+            )
+            return await execute_pay(params, member_id)
         raise ValueError(f"未知高敏动作 {action}")
 
     async def _exec_repair(self, params: dict,
@@ -512,6 +520,10 @@ class XiaozhuExecutor:
             return (f"将扣除 {params.get('creditPoints')}"
                     f" 信用分, 按当前汇率折算信值"
                     f"(到账金额以执行结果为准)")
+        if action == "order.pay":
+            return (f"将支付订单 {params.get('orderId')}"
+                    f"(单笔 ¥{params.get('amount', '?')}"
+                    f"——以订单页为准)")
         if action == "repair.execute":
             items = params.get("repairs") or []
             kinds = "、".join(str(i.get("kind"))

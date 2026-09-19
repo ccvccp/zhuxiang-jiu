@@ -129,9 +129,9 @@ def main():
     print("[05 指令集 + 角色上下文]")
     r = client.get("/api/xiaozhu/commands", headers=h)
     body = r.json()
-    record("GET commands(17 指令+唤醒词+窗口)",
+    record("GET commands(18 指令+唤醒词+窗口)",
            r.status_code == 200
-           and len(body.get("commands") or []) == 17
+           and len(body.get("commands") or []) == 18
            and body.get("wakeWords") == ["小竹"]
            and body.get("wakeFreeWindowSeconds") == 300,
            f"{r.status_code}|{len(body.get('commands') or [])}")
