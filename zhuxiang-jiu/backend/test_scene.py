@@ -262,6 +262,12 @@ async def main() -> int:
     g = svc.build_greeting(loc_t, w_hot, False, date="2026-10-09")
     check("P2: 高温提示", "高温预警" in g["weatherTip"]
           and g["background"] in ("sunny", "night"), str(g))
+    # 严寒提示(≤0°C 无雪雨)
+    w_cold = {"available": True, "weather": "晴", "temperature": "-5"}
+    g = svc.build_greeting(loc_t, w_cold, False, date="2026-10-09")
+    check("P2: 严寒提示", "天寒地冻" in g["weatherTip"]
+          and "注意保暖" in g["weatherTip"]
+          and g["background"] in ("sunny", "night"), str(g))
     # 晴天无提示(常规天气)
     w_ok = {"available": True, "weather": "晴", "temperature": "26"}
     g = svc.build_greeting(loc_t, w_ok, False, date="2026-10-09")
