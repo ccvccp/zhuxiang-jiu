@@ -9,7 +9,7 @@
   "use strict";
   var b = document.createElement("a");
   b.id = "xiaozhu-entry-ball";
-  b.href = "/xiaozhu-voice.html?v=6";
+  b.href = "/xiaozhu-voice.html?v=7";
   b.setAttribute("aria-label", "小竹语音精灵");
   b.style.cssText = [
     "position:fixed", "right:16px", "bottom:84px", "z-index:2147483000",

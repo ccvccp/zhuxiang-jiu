@@ -290,12 +290,9 @@ body.kb .composer{padding-bottom:12px}
   <div class="composer">
     <button class="downbtn" id="downBtn" title="回到最新" onclick="scrollChat()">↓</button>
     <div class="modes">
-      <div class="seg">
-        <button id="segBrowser" class="on" onclick="setMode('browser')">浏览器识别</button>
-        <button id="segCloud" onclick="setMode('cloud')">云端识别</button>
-      </div>
+      <span class="tts" id="hfBtn" onclick="toggleHandfree()" style="cursor:pointer">🎧 免提开</span>
       <span class="sp"></span>
-      <span class="tts" id="ttsBtn" onclick="toggleTts()">🔊 播报开</span>
+      <span class="tts" id="ttsBtn" onclick="toggleTts()" style="cursor:pointer">🔊 播报开</span>
     </div>
     <div class="microw">
       <button class="mic" id="mic" onclick="micClick()">🎤</button>
@@ -395,7 +392,8 @@ function nowHM() {
 
 /* ===== 全局状态 ===== */
 var S = { sid: null, turnCount: 0, woken: false, pending: false,
-          mode: "cloud", micState: "idle", tts: true };
+          mode: "cloud", micState: "idle", tts: true,
+          handfree: true, ttsPlaying: false, vadSpoke: false };
 
 /* ===== 主流程 ===== */
 function showLogin() {
@@ -462,6 +460,9 @@ function openSession() {
               null, "会话已开启 #" + j.sessionId + (j.xiaoMode ? " · " + j.xiaoMode : ""));
     appendGuide();
     if (j.xiaoMode) document.getElementById("modePill").textContent = j.xiaoMode;
+    /* 会话就绪 → 自动进入免提聆听(直接说话即可; iOS 首次无手势被拒时引导点击) */
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，停顿 1 秒自动发送");
+    scheduleHandfree(800);
   }).catch(function (e) { showToast(e.message || "会话开启失败"); });
 }
 function newSession() {
@@ -700,7 +701,7 @@ function sendVoice(b64, durationSec) {
     if (!j || j.success === false) { appendBot((j && (j.error || j.detail)) || "语音链路失败", null, null, "__err__"); return; }
     appendUser(((j.turn || {}).rawText || "(语音)"), "voice");
     handleTurn(j, "voice");
-  }).catch(function (e) { setPending(false); removeTyping(); setMicStatus("云端识别失败"); turnError(e); });
+  }).catch(function (e) { setPending(false); removeTyping(); setMicStatus("云端识别失败"); turnError(e); scheduleHandfree(1200); });
 }
 
 /* ===== 确认码分格输入 + 核销(POST /api/xiaozhu/confirm/{token}) ===== */
@@ -772,18 +773,31 @@ function doConfirm(btn) {
 
 /* ===== 语音播报 TTS(speechSynthesis, 播报状态可视化) ===== */
 function speak(text, bubbleEl) {
-  if (!S.tts || !text || !window.speechSynthesis) return;
+  if (!S.tts || !text || !window.speechSynthesis) {
+    /* TTS 关闭时直接恢复免提聆听(无播报间隔) */
+    S.ttsPlaying = false; scheduleHandfree(300);
+    return;
+  }
   try {
     var u = new SpeechSynthesisUtterance(String(text).slice(0, 200));
     u.lang = "zh-CN"; u.rate = 1.05;
-    if (bubbleEl) {
-      u.onstart = function () { bubbleEl.classList.add("speaking"); };
-      u.onend = function () { bubbleEl.classList.remove("speaking"); };
-      u.onerror = function () { bubbleEl.classList.remove("speaking"); };
-    }
+    var done = function () {
+      if (bubbleEl) bubbleEl.classList.remove("speaking");
+      S.ttsPlaying = false;
+      scheduleHandfree(800); /* 播报完 0.8s 恢复免提聆听 */
+    };
+    S.ttsPlaying = true;
+    u.onstart = function () { if (bubbleEl) bubbleEl.classList.add("speaking"); };
+    u.onend = done;
+    u.onerror = done;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
-  } catch (e) { /* TTS 非关键路径 */ }
+    /* TTS 无事件兜底: 估算时长+3s 强制恢复(防 onend 不触发卡死免提) */
+    var estMs = Math.min(20000, 800 + String(text).length * 260);
+    setTimeout(function () { if (S.ttsPlaying) done(); }, estMs);
+  } catch (e) { /* TTS 非关键路径 */
+    S.ttsPlaying = false; scheduleHandfree(300);
+  }
 }
 function toggleTts() {
   S.tts = !S.tts;
@@ -794,6 +808,46 @@ function toggleTts() {
       b.classList.remove("speaking");
     });
   }
+}
+
+/* ===== 免提连续对话: 自动聆听→VAD静音断句→发送→播报完续听 ===== */
+function scheduleHandfree(delay) {
+  if (!S.handfree || S.pending || S.ttsPlaying || !S.sid) return;
+  clearTimeout(S.hfTimer);
+  S.hfTimer = setTimeout(function () {
+    if (S.handfree && !S.pending && !S.ttsPlaying && S.sid
+        && !cloudActive) cloudStart();
+  }, delay || 600);
+}
+function toggleHandfree() {
+  S.handfree = !S.handfree;
+  document.getElementById("hfBtn").textContent
+    = S.handfree ? "🎧 免提开" : "🎧 免提关";
+  if (S.handfree) {
+    showToast("免提对话已开启——直接说话即可");
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，停顿 1 秒自动发送");
+    scheduleHandfree(400);
+  } else {
+    clearTimeout(S.hfTimer);
+    if (cloudActive) { cloudActive = false; hardStopCloud(); }
+    showToast("免提已关——点击麦克风手动说话");
+    setMicStatus(IS_TOUCH ? "⏺ 按住麦克风录音 · 松开发送"
+                          : "⏺ 点击麦克风开始录音 · 再点一次结束发送");
+  }
+}
+/* 硬停录音且不发送(免提关闭时丢弃当前未完成语音) */
+function hardStopCloud() {
+  if (recTimer) { clearInterval(recTimer); recTimer = null; }
+  if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }
+  analyser = null;
+  var waveEl = document.getElementById("wave");
+  waveEl.classList.remove("live");
+  waveEl.style.removeProperty("--amp");
+  if (procNode) { try { procNode.disconnect(); } catch (e) {} }
+  if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
+  if (recStream) { recStream.getTracks().forEach(function (t) { t.stop(); }); }
+  if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+  setWave(false);
 }
 
 /* ===== 模式切换: 浏览器识别(Web Speech API) / 云端识别(录音上传 ASR) ===== */
@@ -933,13 +987,16 @@ function cloudStart() {
     };
     srcNode.connect(procNode);
     procNode.connect(audioCtx.destination);
-    /* 真实音量可视化: AnalyserNode RMS → --amp 驱动波纹 scaleY */
+    /* 真实音量可视化: AnalyserNode RMS → --amp 驱动波纹 scaleY
+       + 免提 VAD: 检测说话(rms>阈值)→静音1.3s自动断句发送 */
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 512;
     srcNode.connect(analyser);
     var waveEl = document.getElementById("wave");
     var abuf = new Uint8Array(analyser.fftSize);
     waveEl.classList.add("live");
+    var vadSilentAt = 0;
+    S.vadSpoke = false;
     (function vtick() {
       volRaf = requestAnimationFrame(vtick);
       if (!analyser) return;
@@ -952,17 +1009,36 @@ function cloudStart() {
       var rms = Math.sqrt(sum / abuf.length);
       waveEl.style.setProperty("--amp",
         Math.max(0.12, Math.min(1, rms * 3.4)).toFixed(3));
+      /* --- 免提 VAD 断句 --- */
+      if (S.handfree) {
+        var now = Date.now();
+        if (rms > 0.055) {
+          S.vadSpoke = true; vadSilentAt = 0;
+        } else if (S.vadSpoke && !vadSilentAt) {
+          vadSilentAt = now;
+        }
+        if (S.vadSpoke && vadSilentAt && now - vadSilentAt > 1300) {
+          cloudStop(); /* 静音1.3s → 自动结束本句并发送 */
+          return;
+        }
+      }
     })();
     recStart = Date.now();
     cloudActive = true;
     setWave(true, true);
     recTimer = setInterval(function () {
-      setMicStatus('<b class="rec">● 录音中 ' + fmtSec((Date.now() - recStart) / 1000) +
-        '</b> · ' + (IS_TOUCH ? "松开发送" : "点击麦克风结束发送"));
+      var sec = (Date.now() - recStart) / 1000;
+      setMicStatus(S.handfree
+        ? '<b class="rec">🎧 免提聆听 ' + fmtSec(sec) + '</b> · 直接说话，停顿自动发送'
+        : '<b class="rec">● 录音中 ' + fmtSec(sec) + '</b> · '
+          + (IS_TOUCH ? "松开发送" : "点击麦克风结束发送"));
+      /* 免提 30s 硬上限(智谱 ASR 单段≤30s) */
+      if (S.handfree && sec >= 30) { cloudStop(); }
     }, 500);
   }).catch(function (e) {
-    setMicStatus("麦克风不可用: " + (e && e.name ? e.name : "未知") + "——可用文字输入");
-    showToast("麦克风获取失败，请检查授权");
+    setMicStatus("麦克风不可用: " + (e && e.name ? e.name : "未知")
+      + (S.handfree ? "——<b>点击一次麦克风</b>授权后自动恢复免提" : "——可用文字输入"));
+    showToast("麦克风获取失败" + (S.handfree ? "，点击麦克风授权重试" : ""));
   });
 }
 function cloudStop() {
@@ -982,6 +1058,13 @@ function cloudStop() {
   var dur = (Date.now() - recStart) / 1000;
   if (!pcmChunks.length || dur < 0.5) {
     setMicStatus("录音太短，未发送");
+    scheduleHandfree(600);
+    return;
+  }
+  /* 免提模式: 整段无有效语音(环境静音/30s硬停) → 丢弃不发送, 继续聆听 */
+  if (S.handfree && !S.vadSpoke) {
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，停顿 1 秒自动发送");
+    scheduleHandfree(300);
     return;
   }
   setMicStatus("编码 WAV…");
@@ -990,6 +1073,7 @@ function cloudStop() {
     sendVoice(arrayBufferToBase64(wav), dur);
   } catch (e) {
     setMicStatus("编码失败: " + (e && e.message ? e.message : e));
+    scheduleHandfree(600);
   }
 }
 /* Float32 单声道块 → 16bit PCM WAV */
