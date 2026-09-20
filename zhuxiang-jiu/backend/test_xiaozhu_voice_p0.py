@@ -131,7 +131,7 @@ def main():
     body = r.json()
     record("GET commands(18 指令+唤醒词+窗口)",
            r.status_code == 200
-           and len(body.get("commands") or []) == 18
+           and len(body.get("commands") or []) == 19
            and body.get("wakeWords") == ["小竹"]
            and body.get("wakeFreeWindowSeconds") == 300,
            f"{r.status_code}|{len(body.get('commands') or [])}")

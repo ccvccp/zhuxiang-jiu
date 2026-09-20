@@ -189,6 +189,13 @@ COMMANDS = [
         "examples": ["小竹，打开修复说明"],
     },
     {
+        "action": "page.goto",
+        "label": "前往查看",
+        "patterns": ["前往查看", "去查看", "去看看",
+                     "就去看", "查详情", "看详情"],
+        "examples": ["小竹，前往查看", "小竹，去看看"],
+    },
+    {
         "action": "nav.page",
         "label": "页面导航",
         "patterns": ["打开", "带我去", "跳转到", "去个人",
@@ -879,6 +886,8 @@ class XiaozhuService:
                     session, text, context)
             if action == "trust.repair":
                 return await self._exec_repair(context)
+            if action == "page.goto":
+                return await self._exec_page_goto(session)
             if action == "nav.page":
                 return self._exec_nav(text)
             if action == "promo.query":
@@ -1302,6 +1311,28 @@ class XiaozhuService:
                      "items": [dict(p, price=p.get("price"))]},
             "jump": None,
         }
+
+    async def _exec_page_goto(self, session: dict) -> dict:
+        """语音跟随跳转: 取会话最近一条带 jump 的轮次自动前往
+
+        配合 autoJump 前端语义——回复播报后自动导航(浮层
+        postMessage / 独立页直跳), 免手动点「前往查看」。
+        """
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        for t in reversed(turns):
+            j = t.get("jump")
+            if j:
+                return {
+                    "reply": "好的——正在为您打开",
+                    "card": None,
+                    "jump": j,
+                    "autoJump": True,
+                }
+        return {
+            "reply": "想看什么? 先说「看看有什么新品」"
+                     "「查订单」, 再说「前往查看」",
+            "card": None, "clarify": "goto-target"}
 
     async def _exec_order_query(self, session: dict,
                                member_id: int) -> dict:
@@ -2000,6 +2031,7 @@ class XiaozhuService:
             "reply": turn["reply"],
             "card": turn["card"] or None,
             "jump": turn["jump"],
+            "autoJump": result.get("autoJump", False),
             "wakeHint": extras.get("wakeHint", False),
             "track": extras.get("track", "rule"),
             "fallbackHint": (result.get("fallbackHint")

@@ -669,6 +669,19 @@ function handleTurn(j, channel) {
   }
   updateWakePill();
   speak(j.reply || "", bubble);
+  /* 语音跟随跳转(page.goto): 播报"正在打开"后自动导航
+     ——浮层 postMessage 请求父窗口跳, 独立页直接跳 */
+  if (j.autoJump && j.jump) {
+    var gotoHref = j.jump;
+    setTimeout(function () {
+      if (document.body.classList.contains("embed")) {
+        window.parent.postMessage(
+          { type: "xz-jump", href: gotoHref }, "*");
+      } else {
+        window.location.href = gotoHref;
+      }
+    }, 1600);
+  }
 }
 function turnError(e) {
   appendBot("⚠️ 请求失败：" + (e && e.message ? e.message : "网络/服务异常"), null, null, "__err__");
