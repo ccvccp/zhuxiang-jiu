@@ -668,7 +668,7 @@ function handleTurn(j, channel) {
     S.woken = true;
   }
   var bubble = appendBot(j.reply || "(无应答)", j.card || null, badges + wakeWarn,
-                         null, j.jump || null);
+                         null, j.autoJump ? null : (j.jump || null));
   if (j.fallbackHint === "keyboard") {
     appendBot("语音转写未成功——可用下方文字输入继续（同一条链路）。", null, '<span class="pill gray">ASR 降级</span>');
   }

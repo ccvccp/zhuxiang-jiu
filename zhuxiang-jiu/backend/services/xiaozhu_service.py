@@ -1324,7 +1324,7 @@ class XiaozhuService:
             j = t.get("jump")
             if j:
                 return {
-                    "reply": "好的——正在为您打开",
+                    "reply": "正在为您打开",
                     "card": None,
                     "jump": j,
                     "autoJump": True,
