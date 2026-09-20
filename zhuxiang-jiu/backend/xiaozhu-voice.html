@@ -398,7 +398,8 @@ function nowHM() {
 var S = { sid: null, turnCount: 0, woken: false, pending: false,
           mode: "cloud", micState: "idle", tts: true,
           handfree: true, ttsPlaying: false, vadSpoke: false,
-          hidden: false, lastSpoken: "" };
+          hidden: false, lastSpoken: "",
+          ttsCtx: null, ttsSrc: null };
 
 /* ===== 主流程 ===== */
 function showLogin() {
@@ -917,13 +918,15 @@ function toggleTts() {
   document.getElementById("ttsBtn").textContent = S.tts ? "🔊 播报开" : "🔇 播报关";
   if (!S.tts) {
     if (window.speechSynthesis) window.speechSynthesis.cancel();
-    try { if (S.ttsAudio) { S.ttsAudio.pause(); } } catch (e) {}
+    try { if (S.ttsSrc) { S.ttsSrc.stop(); } } catch (e) {}
     document.querySelectorAll(".bubble.speaking").forEach(function (b) {
       b.classList.remove("speaking");
     });
   }
 }
-/* 服务端 TTS(微信 X5 无系统 TTS——cogtts 合成 WAV 播放) */
+/* 服务端 TTS(微信 X5 无系统 TTS——cogtts 合成 WAV,
+   Web Audio 播放: X5 拒绝非手势 Audio.play() 且 Audio 元素
+   onended 偶发不触发卡死免提——BufferSource 双可靠) */
 function speakCloud(text, bubbleEl) {
   S.ttsPlaying = true;
   S.lastSpoken = String(text);
@@ -941,20 +944,47 @@ function speakCloud(text, bubbleEl) {
     headers: hdrs
   }).then(function (r) {
     if (!r.ok) throw new Error("tts " + r.status);
-    return r.blob();
-  }).then(function (blob) {
+    return r.arrayBuffer();
+  }).then(function (buf) {
     if (S.lastSpoken !== String(text)) return done();
-    var url = URL.createObjectURL(blob);
-    var au = new Audio(url);
-    S.ttsAudio = au;
+    var AC = window.AudioContext
+      || window.webkitAudioContext;
+    if (!AC) throw new Error("no webaudio");
+    /* 播放 ctx 优先复用录音 audioCtx(用户手势+麦克风授权
+       后创建, 免提流复用常驻 running——X5 无手势新建 ctx
+       会 suspended 且 resume 被拒, 与 Audio.play() 同困) */
+    var ctx = (typeof audioCtx !== "undefined"
+               && audioCtx
+               && audioCtx.state !== "closed")
+      ? audioCtx
+      : (S.ttsCtx && S.ttsCtx.state !== "closed"
+         ? S.ttsCtx : null);
+    if (!ctx) { S.ttsCtx = new AC(); ctx = S.ttsCtx; }
+    S.ttsPlayCtx = ctx;
+    var go = function () {
+      return new Promise(function (res, rej) {
+        ctx.decodeAudioData(buf, res, rej);
+      });
+    };
+    if (ctx.state === "suspended") {
+      return ctx.resume().then(go, go);
+    }
+    return go();
+  }).then(function (decoded) {
+    if (S.lastSpoken !== String(text)) return done();
+    var ctx = S.ttsPlayCtx;
+    var src = ctx.createBufferSource();
+    src.buffer = decoded;
+    src.connect(ctx.destination);
+    S.ttsSrc = src;
     if (el) el.classList.add("speaking");
-    au.onended = done;
-    au.onerror = done;
-    au.play().catch(function () { done(); });
-    /* 兜底: 25s 强制恢复(防 onend 丢失卡死免提) */
+    src.onended = done;
+    src.onerror = done;
+    src.start();
+    /* 兜底: 时长+3s 强制恢复(防 onended 丢失卡死免提) */
     setTimeout(function () {
-      if (S.ttsPlaying && S.ttsAudio === au) done();
-    }, 25000);
+      if (S.ttsPlaying) done();
+    }, decoded.duration * 1000 + 3000);
   }).catch(function () {
     S.ttsPlaying = false; scheduleHandfree(600);
   });
@@ -997,7 +1027,7 @@ function pauseVoiceForHidden() {
   if (window.speechSynthesis) {
     try { window.speechSynthesis.cancel(); } catch (e) {}
   }
-  try { if (S.ttsAudio) { S.ttsAudio.pause(); } } catch (e) {}
+  try { if (S.ttsSrc) { S.ttsSrc.stop(); } } catch (e) {}
   S.ttsPlaying = false; /* 隐藏页不再播报(防占音频焦点) */
   if (S.handfree) setMicStatus(
     "🎧 浮层已隐藏 · 需要继续请点右下角<b>小竹</b>");
