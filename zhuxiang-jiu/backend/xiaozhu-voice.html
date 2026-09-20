@@ -241,6 +241,8 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
   .mic{width:46px;height:46px;font-size:18px}
   .composer{padding:8px 14px}
 }
+/* embed 模式(全站浮层iframe): 隐藏页脚声明省空间 */
+body.embed .footer{display:none}
 /* iOS 触屏输入修复: 字号≥16px 防 Safari 聚焦自动缩放(输入框视觉"异常变大"根因) */
 @media (hover:none) and (pointer:coarse){
   .trow input,.card input{font-size:16px}
@@ -542,7 +544,10 @@ function appendBot(reply, card, badgesHtml, extra, jump) {
   d.className = "msg bot" + (extra === "__err__" ? " err" : "");
   var h = '<div class="avatar">竹</div><div class="bubble">' + esc(reply || "");
   if (card) h += renderCard(card);
-  if (jump) h += '<a class="jumpbtn" href="' + esc(jump) + '">前往查看 →</a>';
+  if (jump) h += '<a class="jumpbtn" href="' + esc(jump) + '"'
+    + (document.body.classList.contains("embed")
+       ? ' target="_parent"' : "")
+    + '>前往查看 →</a>';
   h += '<div class="badges">' + (badgesHtml || "") +
     '<span class="t">' + nowHM() + "</span></div>";
   h += "</div>";
@@ -857,8 +862,6 @@ function setMode(m) {
   if (S.micState !== "idle") { showToast("请先停止当前语音输入"); return; }
   if (m === "browser" && !SR) { showToast("当前浏览器不支持 Web Speech API，已切换云端识别"); m = "cloud"; }
   S.mode = m;
-  document.getElementById("segBrowser").className = m === "browser" ? "on" : "";
-  document.getElementById("segCloud").className = m === "cloud" ? "on" : "";
   setMicStatus(m === "browser"
     ? (IS_TOUCH ? "🎤 按住麦克风说话 · 松开发送（浏览器本地识别）"
                 : "🎤 点击麦克风说话 · 说完自动结束（浏览器本地识别）")
@@ -1152,6 +1155,10 @@ document.addEventListener("focusin", function (ev) {
   /* 默认云端识别(自有智谱ASR链路, 国内可用);
      浏览器识别依赖厂商云端服务(Chrome→Google), 国内网络普遍不可达, 降级为用户主动选择 */
   setMode("cloud");
+  /* embed 模式(全站浮层 iframe): 隐藏页脚声明, jump 导航父窗口(主站) */
+  if (/[?&]embed=1/.test(location.search)) {
+    document.body.classList.add("embed");
+  }
   var auth = getAuth();
   if (auth && auth.token) enterMain(); else showLogin();
 })();
