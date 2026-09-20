@@ -395,7 +395,7 @@ function nowHM() {
 
 /* ===== 全局状态 ===== */
 var S = { sid: null, turnCount: 0, woken: false, pending: false,
-          mode: "browser", micState: "idle", tts: true };
+          mode: "cloud", micState: "idle", tts: true };
 
 /* ===== 主流程 ===== */
 function showLogin() {
@@ -889,9 +889,15 @@ function browserStart() {
   };
   rec.onerror = function (ev) {
     recActive = false; setWave(false);
+    if (ev.error === "network") {
+      /* 浏览器识别服务不可达(国内网络常见)——自动切云端识别并引导重试 */
+      setMode("cloud");
+      showToast("浏览器识别服务不可达，已切换云端识别，请重试");
+      setMicStatus("⚠️ 浏览器识别服务不可达——已自动切换<b>云端识别</b>，请重新说话");
+      return;
+    }
     var m = { "not-allowed": "麦克风权限被拒绝——请在浏览器地址栏授权",
-              "no-speech": "没有听到声音，请再试一次",
-              "network": "识别网络异常" }[ev.error] || ("识别失败: " + ev.error);
+              "no-speech": "没有听到声音，请再试一次" }[ev.error] || ("识别失败: " + ev.error);
     setMicStatus(m); showToast(m);
   };
   rec.start(); recActive = true; fin = "";
@@ -1042,7 +1048,9 @@ document.addEventListener("focusin", function (ev) {
 
 /* ===== 启动 ===== */
 (function () {
-  if (!SR) setMode("cloud"); else setMode("browser");
+  /* 默认云端识别(自有智谱ASR链路, 国内可用);
+     浏览器识别依赖厂商云端服务(Chrome→Google), 国内网络普遍不可达, 降级为用户主动选择 */
+  setMode("cloud");
   var auth = getAuth();
   if (auth && auth.token) enterMain(); else showLogin();
 })();
