@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=21";
+  var VER = "v=22";
 
   var css = document.createElement("style");
   css.textContent = [
@@ -47,8 +47,19 @@
   panel.appendChild(wrap);
   document.body.appendChild(panel);
 
-  function openPanel() { panel.classList.add("open"); }
-  function closePanel() { panel.classList.remove("open"); }
+  function openPanel() {
+    panel.classList.add("open");
+    notifyFrame("show"); /* 通知语音页恢复免提聆听 */
+  }
+  function closePanel() {
+    panel.classList.remove("open");
+    notifyFrame("hide"); /* 通知语音页暂停监听/停TTS(防烧额度+杂音污染) */
+  }
+  function notifyFrame(state) {
+    try {
+      fr.contentWindow.postMessage({ type: "xz-panel-" + state }, "*");
+    } catch (e) { /* iframe 未就绪忽略 */ }
+  }
 
   var b = document.createElement("button");
   b.id = "xiaozhu-entry-ball";

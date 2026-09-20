@@ -397,7 +397,8 @@ function nowHM() {
 /* ===== 全局状态 ===== */
 var S = { sid: null, turnCount: 0, woken: false, pending: false,
           mode: "cloud", micState: "idle", tts: true,
-          handfree: true, ttsPlaying: false, vadSpoke: false };
+          handfree: true, ttsPlaying: false, vadSpoke: false,
+          hidden: false };
 
 /* ===== 主流程 ===== */
 function showLogin() {
@@ -878,11 +879,12 @@ function toggleTts() {
 
 /* ===== 免提连续对话: 自动聆听→VAD静音断句→发送→播报完续听 ===== */
 function scheduleHandfree(delay) {
-  if (!S.handfree || S.pending || S.ttsPlaying || !S.sid) return;
+  if (!S.handfree || S.pending || S.ttsPlaying || !S.sid
+      || S.hidden) return;
   clearTimeout(S.hfTimer);
   S.hfTimer = setTimeout(function () {
     if (S.handfree && !S.pending && !S.ttsPlaying && S.sid
-        && !cloudActive) cloudStart();
+        && !S.hidden && !cloudActive) cloudStart();
   }, delay || 600);
 }
 function toggleHandfree() {
@@ -901,6 +903,41 @@ function toggleHandfree() {
                           : "⏺ 点击麦克风开始录音 · 再点一次结束发送");
   }
 }
+/* ===== 浮层隐藏暂停/重开恢复(跳转/关闭浮层后) =====
+   隐藏的 iframe 若继续免提监听: 环境杂音污染会话(# 转写/
+   旁人对话误触发) + 空烧每日额度 + 隐藏页 TTS 占音频焦点
+   干扰后续录音——隐藏即暂停, 重开自动恢复聆听 */
+function pauseVoiceForHidden() {
+  S.hidden = true;
+  clearTimeout(S.hfTimer); /* 停续听排程 */
+  if (cloudActive) { cloudActive = false; hardStopCloud(); } /* 丢弃未完成段 */
+  if (window.speechSynthesis) {
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+  }
+  S.ttsPlaying = false; /* 隐藏页不再播报(防占音频焦点) */
+  if (S.handfree) setMicStatus(
+    "🎧 浮层已隐藏 · 需要继续请点右下角<b>小竹</b>");
+}
+function resumeVoiceFromHidden() {
+  if (!S.hidden) return;
+  S.hidden = false;
+  if (S.handfree && S.sid && !S.pending && !S.ttsPlaying) {
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
+    scheduleHandfree(400);
+  }
+}
+/* 机制①: 页面可见性(浮层 display:none 时 iframe 变 hidden) */
+document.addEventListener("visibilitychange", function () {
+  if (document.visibilityState === "hidden") pauseVoiceForHidden();
+  else resumeVoiceFromHidden();
+});
+/* 机制②: 父窗口浮层开合通知(兼容不触发 visibilitychange 的内核) */
+window.addEventListener("message", function (ev) {
+  var d = ev && ev.data;
+  if (!d || !d.type) return;
+  if (d.type === "xz-panel-hide") pauseVoiceForHidden();
+  else if (d.type === "xz-panel-show") resumeVoiceFromHidden();
+});
 /* 硬停录音且不发送(免提关闭时丢弃当前未完成语音) */
 function hardStopCloud() {
   if (recTimer) { clearInterval(recTimer); recTimer = null; }
@@ -1036,6 +1073,7 @@ function fmtSec(s) {
   return m + ":" + (ss < 10 ? "0" : "") + ss;
 }
 function cloudStart() {
+  if (S.hidden) return; /* 浮层隐藏期不录音(双保险) */
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia ||
       !(window.AudioContext || window.webkitAudioContext)) {
     setMicStatus("当前浏览器不支持录音（可改用浏览器识别或文字输入）"); return;
