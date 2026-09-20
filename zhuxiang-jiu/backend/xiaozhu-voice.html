@@ -890,7 +890,11 @@ function speak(text, bubbleEl) {
     u.onend = done;
     u.onerror = done;
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
+    /* X5 队列缓冲: cancel 后紧接 speak 偶发丢失(引擎竞态),
+       60ms 后入队稳定 */
+    setTimeout(function () {
+      if (S.ttsPlaying) window.speechSynthesis.speak(u);
+    }, 60);
     /* TTS 无事件兜底: 估算时长+3s 强制恢复(防 onend 不触发卡死免提) */
     var estMs = Math.min(20000, 800 + String(text).length * 260);
     setTimeout(function () { if (S.ttsPlaying) done(); }, estMs);
@@ -1120,7 +1124,12 @@ function cloudStart() {
       !(window.AudioContext || window.webkitAudioContext)) {
     setMicStatus("当前浏览器不支持录音（可改用浏览器识别或文字输入）"); return;
   }
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+  /* 关 AEC: 开麦不切"通话模式"音频焦点——否则 X5 全程压制
+     speechSynthesis 媒体音量致播报无声(真机实证 v23 流复用
+     麦克风常驻后 TTS 静音); 回环由文本层 isEchoOfTTS 兜底 */
+  navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false }
+  }).then(function (stream) {
     recStream = stream;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     wireCloudCapture();
