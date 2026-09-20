@@ -1069,32 +1069,49 @@ function cloudStop() {
   }
   setMicStatus("编码 WAV…");
   try {
-    var wav = encodeWav(pcmChunks, rate);
+    var wav = encodeWav(pcmChunks, rate, 16000);
     sendVoice(arrayBufferToBase64(wav), dur);
   } catch (e) {
     setMicStatus("编码失败: " + (e && e.message ? e.message : e));
     scheduleHandfree(600);
   }
 }
-/* Float32 单声道块 → 16bit PCM WAV */
-function encodeWav(chunks, sampleRate) {
-  var len = 0;
-  chunks.forEach(function (c) { len += c.length; });
+/* Float32 单声道块 → (线性降采样) → 16bit PCM WAV
+   targetRate: 目标采样率——16kHz 为 ASR 足够精度, 48kHz 录音降 3 倍体积
+   (防语音上传 base64 超 nginx body 限制返回 HTML 错误页) */
+function encodeWav(chunks, sampleRate, targetRate) {
+  targetRate = targetRate || sampleRate;
+  var srcLen = 0;
+  chunks.forEach(function (c) { srcLen += c.length; });
+  var src = new Float32Array(srcLen);
+  var so = 0;
+  chunks.forEach(function (c) { src.set(c, so); so += c.length; });
+  var data = src, rate = sampleRate;
+  if (targetRate < sampleRate) {
+    var outLen = Math.floor(src.length * targetRate / sampleRate);
+    data = new Float32Array(outLen);
+    var ratio = sampleRate / targetRate;
+    for (var i = 0; i < outLen; i++) {
+      var p = i * ratio, i0 = Math.floor(p);
+      var i1 = Math.min(i0 + 1, src.length - 1);
+      data[i] = src[i0] + (src[i1] - src[i0]) * (p - i0);
+    }
+    rate = targetRate;
+  }
+  var len = data.length;
   var buf = new ArrayBuffer(44 + len * 2);
   var v = new DataView(buf);
   function ws(o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); }
   ws(0, "RIFF"); v.setUint32(4, 36 + len * 2, true); ws(8, "WAVE");
   ws(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
-  v.setUint16(22, 1, true); v.setUint32(24, sampleRate, true);
-  v.setUint32(28, sampleRate * 2, true); v.setUint16(32, 2, true);
+  v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true);
   v.setUint16(34, 16, true); ws(36, "data"); v.setUint32(40, len * 2, true);
   var off = 44;
-  chunks.forEach(function (c) {
-    for (var i = 0; i < c.length; i++, off += 2) {
-      var s = Math.max(-1, Math.min(1, c[i]));
-      v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-    }
-  });
+  for (var j = 0; j < len; j++, off += 2) {
+    var s = Math.max(-1, Math.min(1, data[j]));
+    v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
   return buf;
 }
 function arrayBufferToBase64(buf) {
