@@ -399,7 +399,7 @@ var S = { sid: null, turnCount: 0, woken: false, pending: false,
           mode: "cloud", micState: "idle", tts: true,
           handfree: true, ttsPlaying: false, vadSpoke: false,
           hidden: false, lastSpoken: "",
-          ttsCtx: null, ttsSrc: null };
+          ttsCtx: null, ttsSrc: null, packTTS: null };
 
 /* ===== 主流程 ===== */
 function showLogin() {
@@ -425,6 +425,8 @@ function preheatTTS() {
     ["在呢！", "好的"].forEach(function (t) {
       fetch("/api/xiaozhu/tts?text="
             + encodeURIComponent(t), { headers: h })
+        .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
+        .then(function (b) { if (b) (S.packTTS = S.packTTS || {})[t] = b; })
         .catch(function () {});
     });
   } catch (e) { /* 预热失败无碍 */ }
@@ -956,14 +958,19 @@ function speakCloud(text, bubbleEl) {
   var auth = getAuth() || {};
   var hdrs = { "X-Member-Id": String(auth.uid || "") };
   if (auth.token) hdrs["Authorization"] = "Bearer " + auth.token;
-  setMicStatus("🎙 语音合成中…（首次约 2 秒，同句即时）");
-  fetch("/api/xiaozhu/tts?text=" + encodeURIComponent(
-      String(text).slice(0, 200)), {
-    headers: hdrs
-  }).then(function (r) {
-    if (!r.ok) throw new Error("tts " + r.status);
-    return r.arrayBuffer();
-  }).then(function (buf) {
+  /* 高频短句内存直播(preheatTTS 预取——"在呢!"零网络
+     零合成, 唤醒应答只剩 ASR 延迟) */
+  var packed = (S.packTTS || {})[String(text)];
+  var fetched = packed
+    ? Promise.resolve(packed)
+    : fetch("/api/xiaozhu/tts?text=" + encodeURIComponent(
+        String(text).slice(0, 200)), { headers: hdrs })
+        .then(function (r) {
+          if (!r.ok) throw new Error("tts " + r.status);
+          return r.arrayBuffer();
+        });
+  if (!packed) setMicStatus("🎙 语音合成中…（首次约 2 秒，同句即时）");
+  fetched.then(function (buf) {
     if (S.lastSpoken !== String(text)) return done();
     var AC = window.AudioContext
       || window.webkitAudioContext;
