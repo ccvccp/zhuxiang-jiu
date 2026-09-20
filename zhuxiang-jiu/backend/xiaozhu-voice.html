@@ -405,7 +405,10 @@ function showLogin() {
 function enterMain() {
   document.getElementById("loginCard").classList.add("hidden");
   document.getElementById("main").classList.remove("hidden");
-  loadScene(); loadContext(); loadCommands(); openSession();
+  loadScene(); loadContext(); loadCommands();
+  /* 跳转返回恢复: 有未关闭会话存档(跳转前保存)则恢复,
+     免每次跳转回来都开新会话丢上下文 */
+  if (!tryRestoreChat()) openSession();
 }
 
 /* ===== 时空情景问候(公开 GET /api/scene/context) ===== */
@@ -670,9 +673,12 @@ function handleTurn(j, channel) {
   updateWakePill();
   speak(j.reply || "", bubble);
   /* 语音跟随跳转(page.goto): 播报"正在打开"后自动导航
-     ——浮层 postMessage 请求父窗口跳, 独立页直接跳 */
+     ——浮层 postMessage 请求父窗口跳, 独立页直接跳
+     跳转前保存聊天状态(sessionStorage 同 tab 存活,
+     主窗口导航后浮层重载可恢复会话与消息) */
   if (j.autoJump && j.jump) {
     var gotoHref = j.jump;
+    saveChatState();
     setTimeout(function () {
       if (document.body.classList.contains("embed")) {
         window.parent.postMessage(
@@ -682,6 +688,31 @@ function handleTurn(j, channel) {
       }
     }, 1600);
   }
+}
+/* 聊天状态保存/恢复(跨页面跳转——浮层 iframe 随主窗口
+   导航销毁重建, sessionStorage 同 tab 存活用于恢复) */
+function saveChatState() {
+  try {
+    sessionStorage.setItem("xz.chat",
+      document.getElementById("chat").innerHTML);
+    sessionStorage.setItem("xz.sid", S.sid || "");
+  } catch (e) { /* 隐私模式等存储失败——跳过恢复 */ }
+}
+function tryRestoreChat() {
+  try {
+    var sid = sessionStorage.getItem("xz.sid");
+    var html = sessionStorage.getItem("xz.chat");
+    if (sid && html) {
+      S.sid = sid;
+      document.getElementById("sid").textContent = "#" + sid;
+      document.getElementById("chat").innerHTML = html;
+      document.getElementById("mic").classList.remove("off");
+      appendBot("已恢复对话——继续说即可（语音球全程在线）",
+                null, "会话恢复 #" + sid);
+      return true;
+    }
+  } catch (e) { /* 恢复失败走新会话 */ }
+  return false;
 }
 function turnError(e) {
   appendBot("⚠️ 请求失败：" + (e && e.message ? e.message : "网络/服务异常"), null, null, "__err__");
