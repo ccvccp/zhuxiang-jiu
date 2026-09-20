@@ -617,6 +617,39 @@ class XiaozhuService:
             return await self._bind_flow(
                 session, channel, text, trust_id, audio_meta)
         cmd = match_command(resolved)
+        # 否定语义拦截(先于共创/LLM/兜底): "不要这款"误中
+        # "要这款"加购 pattern; 纯否定词("不需要")无 pattern
+        # ——商品语境统一转下一款推荐(对话循环: 推荐→不要→
+        # 再推荐), 无商品语境温和引导
+        if re.match(r"^不(要|需要|想|喜欢|买)",
+                    command_text) \
+                and (cmd is None
+                     or cmd["action"] == "cart.add"):
+            _turns_pre = await self.repo.list_turns(
+                session_id)
+            _has_product = any(
+                (t.get("card") or {}).get("type")
+                in ("product_list", "product_detail")
+                for t in _turns_pre)
+            if _has_product:
+                context = await self.build_context(
+                    session.get("memberId"))
+                r = await self._exec_product_new(
+                    context, session, "换一款")
+                r["reply"] = str(r["reply"]).replace(
+                    "好的——我为您推荐下一款",
+                    "好的，不要这款——我再为您推荐", 1)
+                return await self._save_turn(
+                    session, channel, text, "product.new",
+                    r, {"audioMeta": audio_meta,
+                        "commandText": command_text})
+            return await self._save_turn(
+                session, channel, text, "general",
+                {"reply": "好的，那就不加这款。想看看"
+                          "新品，或直接说「查订单」也行",
+                 "card": None},
+                {"audioMeta": audio_meta,
+                 "commandText": command_text})
         track = "rule"
         if cmd is None:
             # P3 共创短语匹配(已上架的自定义指令)
@@ -655,6 +688,38 @@ class XiaozhuService:
                 {"reply": "这个我还不会——试试「看新品」"
                           "「问价格」「查信值」「查优惠」或"
                           "「你能干什么」"},
+                {"audioMeta": audio_meta,
+                 "commandText": command_text})
+        # 否定语义拦截(先于指令执行): "不要这款/不需要"含加购
+        # pattern 子串("要这款")会误加购——商品语境转下一款
+        # 推荐("好的，不要这款——我再为您推荐…"), 无语境温和
+        # 引导(对话式导购节奏: 推荐→不要→再推荐循环)
+        if cmd["action"] == "cart.add" and re.search(
+                r"不(要|需要|想|喜欢|买)",
+                command_text):
+            _turns_pre = await self.repo.list_turns(
+                session_id)
+            _has_product = any(
+                (t.get("card") or {}).get("type")
+                in ("product_list", "product_detail")
+                for t in _turns_pre)
+            if _has_product:
+                context = await self.build_context(
+                    session.get("memberId"))
+                r = await self._exec_product_new(
+                    context, session, "换一款")
+                r["reply"] = str(r["reply"]).replace(
+                    "好的——我为您推荐下一款",
+                    "好的，不要这款——我再为您推荐", 1)
+                return await self._save_turn(
+                    session, channel, text, "product.new",
+                    r, {"audioMeta": audio_meta,
+                        "commandText": command_text})
+            return await self._save_turn(
+                session, channel, text, "general",
+                {"reply": "好的，那就不加这款。想看看"
+                          "新品，或直接说「查订单」也行",
+                 "card": None},
                 {"audioMeta": audio_meta,
                  "commandText": command_text})
         result = await self._execute(
