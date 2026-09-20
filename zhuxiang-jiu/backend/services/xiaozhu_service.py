@@ -74,7 +74,8 @@ DIALECT_MARKERS = ("咋办", "俺们", "晓得", "唔该", "梗系",
                    "得劲", "唠嗑", "侬好", "伐啦")
 
 # 非指令轮次(50号P2 连贯性判定——与看板口径一致)
-NON_ACTION_INTENTS = {"not_woken", "general", "asr_failed"}
+NON_ACTION_INTENTS = {"not_woken", "general", "asr_failed",
+                      "wakeup"}
 
 
 def _detect_inclusive(text: str) -> bool:
@@ -208,7 +209,8 @@ COMMANDS = [
         "label": "看新品",
         "patterns": ["新上线", "新品", "新产品", "新出的",
                      "新货", "有什么新的", "新款", "新上架",
-                     "上新"],
+                     "换一款", "换一个", "还有吗",
+                     "下一款", "下一个"],
         "examples": ["小竹，看看有什么新上线产品",
                      "小竹，有什么新品适合我"],
     },
@@ -322,7 +324,9 @@ COMMANDS = [
         "patterns": ["加入购物车", "加入购物清单", "加购",
                      "放进购物车", "放到购物车", "来一件",
                      "来一个", "要一件", "要一个", "买这个",
-                     "就它了", "就要这个"],
+                     "就它了", "就要这个", "需要这款",
+                     "要这款", "就要这款", "需要这个",
+                     "来一瓶", "来一箱"],
         "examples": ["小竹，把这个加入购物车",
                      "小竹，来一件竹韵佳酿"],
     },
@@ -578,6 +582,16 @@ class XiaozhuService:
                 {"reply": "我在——请以「小竹」开头唤我"
                           "(或先唤醒一次, 5 分钟内可免唤醒)"},
                 {"wakeHint": True,
+                 "audioMeta": audio_meta})
+        # 唤醒应答: 只叫"小竹"无指令 → "在呢!"(对话存在感
+        # ——真机反馈: 叫了没回音不知道听没听到)
+        if not command_text.strip():
+            return await self._save_turn(
+                session, channel, text, "wakeup",
+                {"reply": "在呢！——想看新品、查价格、"
+                          "查订单，直接说就行",
+                 "card": None},
+                {"commandText": command_text,
                  "audioMeta": audio_meta})
 
         # ③ 指代消解(免唤醒连续对话: "这个多少钱")
@@ -934,7 +948,8 @@ class XiaozhuService:
                 session, action, text, context)
         try:
             if action == "product.new":
-                return await self._exec_product_new(context)
+                return await self._exec_product_new(
+                    context, session, text)
             if action == "product.price":
                 return await self._exec_product_price(text)
             if action in ("trust.score", "trust.balance"):
@@ -1162,7 +1177,7 @@ class XiaozhuService:
             r"(加入购物车|加入购物清单|放进?到?购物车|"
             r"加购|来[一二两三四五六七八九十\d]*[件个瓶]|"
             r"要[一二两三四五六七八九十\d]*[件个瓶]|"
-            r"买这个|就它了|就要这个)", "",
+            r"买这个|就它了|就要这个|需要)", "",
             str(text or "")).strip()
         kw = _QTY_RE.sub("", kw).strip()  # 剥残余数量词
         kw = kw.rstrip("儿")  # 儿化音尾("两件儿")
@@ -1201,9 +1216,9 @@ class XiaozhuService:
         except (TypeError, ValueError):
             total_s = f"¥{price}×{qty}"
         return {
-            "reply": f"已把「{name}」×{qty} 加入购物清单"
-                     f"({total_s})——当前清单 {count} 件, "
-                     "说「结算」一键下单",
+            "reply": f"好的，已为您加入「{name}」×{qty} "
+                     f"({total_s})——当前清单 {count} 件。"
+                     "还需要看看别的吗？或说「结算」下单",
             "card": {"type": "cart_added",
                      "subject": name, "productId": pid,
                      "price": price, "quantity": qty,
@@ -1212,7 +1227,11 @@ class XiaozhuService:
 
     async def _resolve_last_product(
             self, session: dict) -> dict | None:
-        """最近一轮商品卡首件(product_list/product_detail)"""
+        """最近一轮商品卡当前推荐款(product_list/detail)
+
+        subject=对话游标当前款(换一款推进后同步), 无 subject
+        匹配回退首件(真机实证: 推荐第二款后"需要这款"曾误加
+        首款——兜底只取 items[0] 忽略游标)。"""
         turns = await self.repo.list_turns(
             session["sessionId"])
         for t in reversed(turns):
@@ -1221,6 +1240,10 @@ class XiaozhuService:
                                      "product_detail"):
                 items = card.get("items") or []
                 if items:
+                    subj = card.get("subject")
+                    for it in items:
+                        if subj and it.get("name") == subj:
+                            return it
                     return items[0]
         return None
 
@@ -1372,8 +1395,9 @@ class XiaozhuService:
     # 执行器(只读直达——全部调既有业务 API)
     # --------------------------------------------------------
 
-    async def _exec_product_new(self,
-                               context: dict = None) -> dict:
+    async def _exec_product_new(self, context: dict = None,
+                               session: dict = None,
+                               text: str = "") -> dict:
         from services.product_service import ProductService
         r = await ProductService().list_products(
             filters=None, sort="new", page=1, page_size=8)
@@ -1400,17 +1424,49 @@ class XiaozhuService:
         } for p in items]
         subject = (cards[0].get("name")
                    if cards else "新品")
+        # 对话式导购游标: "换一款/还有吗"逐款推进(会话级
+        # prodCursor), 新查询重置 0
+        cursor = 0
+        is_next = bool(re.search(r"换一[款个]|还有吗|下一[款个]",
+                                 str(text or "")))
+        if session is not None:
+            if is_next:
+                cursor = int(session.get("prodCursor")
+                             or 0) + 1
+            session["prodCursor"] = cursor
+            try:
+                await self.repo.save_session(session)
+            except Exception as exc:
+                logger.debug("voice48_cursor_skip: %s", exc)
+        if cursor >= len(cards):
+            cursor = 0
+            if session is not None:
+                session["prodCursor"] = 0
+        first = (cards[cursor] if 0 <= cursor < len(cards)
+                 else cards[0] if cards else {})
         # P1 角色注入: 等级敬语变体
         title = (context or {}).get("levelTitle") or ""
         greet = (f"{title}您好——" if title else "")
-        if prefs:
-            greet += f"按您偏好的 {('、'.join(prefs))} 排序, "
+        # 对话式导购(真机反馈: 一次报 5 款信息过载听不清
+        # 且无后续节奏)——播报只报一款+反问引导; 屏幕卡片
+        # 仍全量 5 款供浏览, 说「换一款」逐款继续
+        if first:
+            sub = first.get("subtitle") or ""
+            reply = (greet + "好的——我为您"
+                     + ("推荐下一款" if is_next else
+                        "查到一款新品酒")
+                     + f"「{first.get('name')}」，"
+                     f"价格 ¥{first.get('price')}"
+                     + (f"，{sub}" if sub else "")
+                     + "。需要这款吗？")
+        else:
+            reply = greet + "暂时没有查到新品"
         return {
-            "reply": greet + f"为您找到 {len(cards)} 款新品"
-                     + (f", 主推「{subject}」"
-                        if subject != "新品" else ""),
+            "reply": reply,
             "card": {"type": "product_list",
-                     "subject": subject, "items": cards,
+                     "subject": first.get("name")
+                     if first else subject,
+                     "items": cards,
                      "preferenceApplied": prefs},
             "jump": "/#/pages/products/index?sort=new"}
 
