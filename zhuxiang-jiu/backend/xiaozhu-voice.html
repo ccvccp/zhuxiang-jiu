@@ -1074,6 +1074,16 @@ function fmtSec(s) {
 }
 function cloudStart() {
   if (S.hidden) return; /* 浮层隐藏期不录音(双保险) */
+  /* 免提续听流复用: 已授权流与上下文存活时直接重挂采集节点
+     ——X5/微信重取 getUserMedia 耗时数秒, 每轮重取致句首
+     丢字("小竹看新品"→"长期刚见"/唤醒词被裁) */
+  if (recStream && audioCtx && audioCtx.state !== "closed") {
+    if (audioCtx.state === "suspended") {
+      try { audioCtx.resume(); } catch (e) {}
+    }
+    wireCloudCapture();
+    return;
+  }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia ||
       !(window.AudioContext || window.webkitAudioContext)) {
     setMicStatus("当前浏览器不支持录音（可改用浏览器识别或文字输入）"); return;
@@ -1081,7 +1091,16 @@ function cloudStart() {
   navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
     recStream = stream;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    srcNode = audioCtx.createMediaStreamSource(stream);
+    wireCloudCapture();
+  }).catch(function (e) {
+    setMicStatus("麦克风不可用: " + (e && e.name ? e.name : "未知")
+      + (S.handfree ? "——<b>点击一次麦克风</b>授权后自动恢复免提" : "——可用文字输入"));
+    showToast("麦克风获取失败" + (S.handfree ? "，点击麦克风授权重试" : ""));
+  });
+}
+/* 采集节点搭建(新流/复用流共用): 源→处理器→波形/免提VAD */
+function wireCloudCapture() {
+    srcNode = audioCtx.createMediaStreamSource(recStream);
     procNode = audioCtx.createScriptProcessor(4096, 1, 1);
     pcmChunks = [];
     procNode.onaudioprocess = function (e) {
@@ -1141,11 +1160,6 @@ function cloudStart() {
         cloudStop();
       }
     }, 500);
-  }).catch(function (e) {
-    setMicStatus("麦克风不可用: " + (e && e.name ? e.name : "未知")
-      + (S.handfree ? "——<b>点击一次麦克风</b>授权后自动恢复免提" : "——可用文字输入"));
-    showToast("麦克风获取失败" + (S.handfree ? "，点击麦克风授权重试" : ""));
-  });
 }
 function cloudStop() {
   if (recTimer) { clearInterval(recTimer); recTimer = null; }
@@ -1156,9 +1170,16 @@ function cloudStop() {
   waveEl.style.removeProperty("--amp");
   if (procNode) { try { procNode.disconnect(); } catch (e) {} }
   if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
-  if (recStream) { recStream.getTracks().forEach(function (t) { t.stop(); }); }
   var rate = audioCtx ? audioCtx.sampleRate : 48000;
-  if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+  /* 免提续听: 保留已授权流与上下文(下轮 cloudStart 复用, 省
+     getUserMedia 数秒防句首丢字); 手动模式每轮释放 */
+  if (!S.handfree) {
+    if (recStream) {
+      recStream.getTracks().forEach(function (t) { t.stop(); });
+      recStream = null;
+    }
+    if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+  }
   cloudActive = false;
   setWave(false);
   var dur = (Date.now() - recStart) / 1000;

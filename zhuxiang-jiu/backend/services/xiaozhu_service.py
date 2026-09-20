@@ -107,6 +107,8 @@ def detect_wake(text: str) -> tuple[bool, str]:
 
     前缀容错: 允许"小竹，/小竹 /小竹竹,"等标点空格紧随;
     叠词("小竹竹")按"小竹"唤醒后再剥离残余"竹"字头。
+    句中容错: 唤醒词不在开头(录音开头丢字/先说指令后补
+    称呼——真机 ASR 常态)时, 从句中唤醒词后截取指令。
     """
     t = str(text or "").strip()
     for w in sorted(WAKE_WORDS, key=len, reverse=True):
@@ -120,6 +122,14 @@ def detect_wake(text: str) -> tuple[bool, str]:
         if rest.startswith("竹"):
             rest = rest[1:].lstrip("，, 。.！!？? \t")
         return True, rest
+    # 句中唤醒: "看看新产品。小猪，看看新产品"——开头丢字
+    # 致唤醒词落句中, 从首个唤醒词后截取继续指令匹配
+    for w in sorted(WAKE_WORDS, key=len, reverse=True):
+        idx = t.find(w)
+        if idx > 0:
+            rest = t[idx + len(w):].lstrip("，, 。.！!？? \t")
+            if rest:
+                return True, rest
     return False, t
 
 
@@ -153,8 +163,9 @@ COMMANDS = [
     {
         "action": "product.new",
         "label": "看新品",
-        "patterns": ["新上线", "新品", "新出的", "新货",
-                     "有什么新的", "新款", "新上架"],
+        "patterns": ["新上线", "新品", "新产品", "新出的",
+                     "新货", "有什么新的", "新款", "新上架",
+                     "上新"],
         "examples": ["小竹，看看有什么新上线产品",
                      "小竹，有什么新品适合我"],
     },
