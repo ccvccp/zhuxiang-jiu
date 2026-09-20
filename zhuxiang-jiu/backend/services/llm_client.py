@@ -428,5 +428,49 @@ class LLMProviderClient:
         ranked.sort(key=lambda x: x[1], reverse=True)
         return ranked or None
 
+    def synthesize(self, text: str) -> bytes | None:
+        """语音合成 TTS(智谱 cogtts, WAV 返回)
+
+        微信 X5 无系统 TTS 引擎(speechSynthesis 入队无声)
+        ——服务端合成兜底: 电脑走浏览器 TTS, 微信走本接口。
+        失败/未配置返回 None(前端静默降级不播报)。
+        """
+        t = str(text or "").strip()
+        if not t:
+            return None
+        if "LLM_API_KEY" not in os.environ:
+            return None
+        from core.metrics import llm_timer
+        api_key = os.environ["LLM_API_KEY"].strip()
+        base_url = os.environ.get(
+            "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
+        ).rstrip("/")
+        payload = json.dumps(
+            {"model": os.environ.get("TTS_MODEL", "cogtts"),
+             "input": t[:200],
+             "voice": os.environ.get("TTS_VOICE", "tongtong"),
+             "response_format": "wav"},
+            ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            f"{base_url}/audio/speech", data=payload,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {api_key}"},
+            method="POST")
+        try:
+            with llm_timer("synthesize"), urllib.request.urlopen(
+                    request, timeout=_TIMEOUT) as resp:
+                data = resp.read()
+                ctype = resp.headers.get("Content-Type", "")
+            if (ctype.startswith("audio/")
+                    and isinstance(data, bytes)
+                    and len(data) > 500):
+                return data
+            logger.warning("llm_tts_bad_response ct=%s len=%s",
+                           ctype, len(data) if data else 0)
+            return None
+        except Exception as exc:
+            logger.warning("llm_tts_failed(跳过播报): %s", exc)
+            return None
+
 
 provider_client = LLMProviderClient()

@@ -869,10 +869,20 @@ function doConfirm(btn) {
   }).catch(function (e) { removeTyping(); turnError(e); });
 }
 
-/* ===== 语音播报 TTS(speechSynthesis, 播报状态可视化) ===== */
+/* ===== 语音播报 TTS 双轨 =====
+   电脑: speechSynthesis(免费即时);
+   微信 X5: 无系统 TTS 引擎(入队无声)——服务端 cogtts
+   合成 WAV 经 Audio 播放(UA 确定性分流) */
+var IS_WX = /MicroMessenger/i.test(
+  navigator.userAgent || "");
 function speak(text, bubbleEl) {
-  if (!S.tts || !text || !window.speechSynthesis) {
+  if (!S.tts || !text) {
     /* TTS 关闭时直接恢复免提聆听(无播报间隔) */
+    S.ttsPlaying = false; scheduleHandfree(300);
+    return;
+  }
+  if (IS_WX) return speakCloud(text, bubbleEl);
+  if (!window.speechSynthesis) {
     S.ttsPlaying = false; scheduleHandfree(300);
     return;
   }
@@ -905,12 +915,49 @@ function speak(text, bubbleEl) {
 function toggleTts() {
   S.tts = !S.tts;
   document.getElementById("ttsBtn").textContent = S.tts ? "🔊 播报开" : "🔇 播报关";
-  if (!S.tts && window.speechSynthesis) {
-    window.speechSynthesis.cancel();
+  if (!S.tts) {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    try { if (S.ttsAudio) { S.ttsAudio.pause(); } } catch (e) {}
     document.querySelectorAll(".bubble.speaking").forEach(function (b) {
       b.classList.remove("speaking");
     });
   }
+}
+/* 服务端 TTS(微信 X5 无系统 TTS——cogtts 合成 WAV 播放) */
+function speakCloud(text, bubbleEl) {
+  S.ttsPlaying = true;
+  S.lastSpoken = String(text);
+  var el = bubbleEl;
+  var done = function () {
+    if (el) el.classList.remove("speaking");
+    S.ttsPlaying = false;
+    scheduleHandfree(1200);
+  };
+  var auth = getAuth() || {};
+  var hdrs = { "X-Member-Id": String(auth.uid || "") };
+  if (auth.token) hdrs["Authorization"] = "Bearer " + auth.token;
+  fetch("/api/xiaozhu/tts?text=" + encodeURIComponent(
+      String(text).slice(0, 200)), {
+    headers: hdrs
+  }).then(function (r) {
+    if (!r.ok) throw new Error("tts " + r.status);
+    return r.blob();
+  }).then(function (blob) {
+    if (S.lastSpoken !== String(text)) return done();
+    var url = URL.createObjectURL(blob);
+    var au = new Audio(url);
+    S.ttsAudio = au;
+    if (el) el.classList.add("speaking");
+    au.onended = done;
+    au.onerror = done;
+    au.play().catch(function () { done(); });
+    /* 兜底: 25s 强制恢复(防 onend 丢失卡死免提) */
+    setTimeout(function () {
+      if (S.ttsPlaying && S.ttsAudio === au) done();
+    }, 25000);
+  }).catch(function () {
+    S.ttsPlaying = false; scheduleHandfree(600);
+  });
 }
 
 /* ===== 免提连续对话: 自动聆听→VAD静音断句→发送→播报完续听 ===== */
@@ -950,6 +997,7 @@ function pauseVoiceForHidden() {
   if (window.speechSynthesis) {
     try { window.speechSynthesis.cancel(); } catch (e) {}
   }
+  try { if (S.ttsAudio) { S.ttsAudio.pause(); } } catch (e) {}
   S.ttsPlaying = false; /* 隐藏页不再播报(防占音频焦点) */
   if (S.handfree) setMicStatus(
     "🎧 浮层已隐藏 · 需要继续请点右下角<b>小竹</b>");

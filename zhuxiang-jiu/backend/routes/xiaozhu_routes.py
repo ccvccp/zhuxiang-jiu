@@ -49,8 +49,12 @@
 """
 
 import base64
+import logging
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import Response
+
+logger = logging.getLogger("xiaozhu_routes")
 
 router = APIRouter(prefix="/api/xiaozhu",
                    tags=["小竹智能语音中枢(48号)"])
@@ -257,6 +261,59 @@ async def get_commands():
             "commands": list_commands(),
             "wakeWords": ["小竹"],
             "wakeFreeWindowSeconds": 300}
+
+
+@router.get("/tts")
+async def get_tts(text: str = "",
+                  x_member_id: str | None = Header(
+                      None, alias="X-Member-Id")):
+    """语音合成播报(微信 X5 无系统 TTS 引擎——服务端兜底)
+
+    GET /api/xiaozhu/tts?text=...  → audio/wav 二进制
+    鉴权: X-Member-Id(登录会员); Redis 缓存 10 分钟(同文本
+    去重防刷——计费友好); 文本限 200 字。
+    """
+    _require_member_strict(x_member_id)
+    t = str(text or "").strip()[:200]
+    if not t:
+        raise HTTPException(status_code=409,
+                            detail="text 不能为空")
+    import base64 as _b64
+    import hashlib as _hl
+    cache_key = ("xiaozhu:tts:"
+                 + _hl.sha256(
+                     t.encode("utf-8")).hexdigest()[:24])
+    try:
+        from repositories.backend import (
+            is_redis_mode, get_redis_client,
+        )
+        if is_redis_mode():
+            client = await get_redis_client()
+            hit = await client.get(cache_key)
+            if hit:
+                return Response(
+                    content=_b64.b64decode(hit),
+                    media_type="audio/wav")
+    except Exception as e:
+        logger.debug("tts_cache_read_skip: %s", e)
+    from services.llm_client import provider_client
+    wav = provider_client.synthesize(t)
+    if not wav:
+        raise HTTPException(
+            status_code=503,
+            detail="语音合成暂不可用(不影响文字交互)")
+    try:
+        from repositories.backend import (
+            is_redis_mode, get_redis_client,
+        )
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                cache_key, _b64.b64encode(wav).decode(),
+                ex=600)
+    except Exception as e:
+        logger.debug("tts_cache_write_skip: %s", e)
+    return Response(content=wav, media_type="audio/wav")
 
 
 # ============================================================
