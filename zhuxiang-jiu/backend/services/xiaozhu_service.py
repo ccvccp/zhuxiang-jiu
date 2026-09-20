@@ -314,24 +314,25 @@ def list_commands() -> list[dict]:
 
 
 # 页面导航注册表(nav.page 的 jump 目标白名单)
+# 目标为主站 Taro H5 hash 路由(/#/pages/...——原 P0 本地旧站路径
+# 生产 dist 未部署, 点击后回落 SPA 无 hash 路由形同无反应, 已全部重映射)
 NAV_PAGES = {
-    "购物车": "/cart.html",
-    "首页": "/index.html",
-    "首页": "/index.html",
-    "个人中心": "/member.html",
-    "会员中心": "/member.html",
-    "订单": "/order-list.html",
-    "订单列表": "/order-list.html",
-    "产品": "/product-list.html",
-    "产品列表": "/product-list.html",
-    "商品列表": "/product-list.html",
-    "登录": "/login.html",
-    "信值": "/trust-dashboard.html",
-    "信值看板": "/trust-dashboard.html",
-    "风控看板": "/trust-risk-dashboard.html",
-    "AI中枢": "/ai-hub-dashboard.html",
-    "治理看板": "/ai-governance-dashboard.html",
-    "知识库": "/knowledge-dashboard.html",
+    "购物车": "/#/pages/checkout/index",
+    "首页": "/#/pages/index/index",
+    "个人中心": "/#/pages/mine/index",
+    "会员中心": "/#/pages/mine/index",
+    "订单": "/#/pages/orders/index",
+    "订单列表": "/#/pages/orders/index",
+    "产品": "/#/pages/products/index",
+    "产品列表": "/#/pages/products/index",
+    "商品列表": "/#/pages/products/index",
+    "登录": "/#/pages/login/index",
+    "信值": "/#/pages/member73-trust/index",
+    "信值看板": "/#/pages/member73-trust/index",
+    "风控看板": "/#/pages/member73-trust/index",
+    "AI中枢": "/#/pages/index/index",
+    "治理看板": "/#/pages/index/index",
+    "知识库": "/#/pages/index/index",
 }
 
 
@@ -1269,7 +1270,7 @@ class XiaozhuService:
             "card": {"type": "product_list",
                      "subject": subject, "items": cards,
                      "preferenceApplied": prefs},
-            "jump": "/product-list.html?sort=new"}
+            "jump": "/#/pages/products/index?sort=new"}
 
     async def _exec_product_price(self,
                                   text: str) -> dict:
@@ -1368,7 +1369,7 @@ class XiaozhuService:
                      + "——详情可前往订单页查看",
             "card": {"type": "order_list",
                      "subject": "最近订单", "items": cards},
-            "jump": "/order-list.html",
+            "jump": "/#/pages/orders/index",
         }
 
     async def _exec_trust(self, member_id: int,
@@ -1383,7 +1384,7 @@ class XiaozhuService:
                 "card": {"type": "guide",
                          "subject": "绑定信值档案",
                          "guide": "trust-bind"},
-                "jump": "/trust-dashboard.html",
+                "jump": "/#/pages/member73-trust/index",
             }
         trust_id = context["trustId"]
         if action == "trust.balance":
@@ -1423,7 +1424,7 @@ class XiaozhuService:
                      "grade": p.get("grade"),
                      "fused": p.get("fused"),
                      "rawScore": p.get("rawScore")},
-            "jump": "/trust-dashboard.html",
+            "jump": "/#/pages/member73-trust/index",
         }
 
     async def _exec_exchange(self, session: dict,
@@ -1466,7 +1467,7 @@ class XiaozhuService:
                 "card": {"type": "guide",
                          "subject": "绑定信值档案",
                          "guide": "trust-bind"},
-                "jump": "/trust-dashboard.html",
+                "jump": "/#/pages/member73-trust/index",
             }
         balance = context.get("trustBalance") or 0.0
         if balance >= price:
@@ -1498,7 +1499,7 @@ class XiaozhuService:
                 "card": {"type": "guide",
                          "subject": "绑定信值档案",
                          "guide": "trust-bind"},
-                "jump": "/trust-dashboard.html",
+                "jump": "/#/pages/member73-trust/index",
             }
         from services.trust_repair_service import (
             TrustRepairService,
@@ -1530,7 +1531,7 @@ class XiaozhuService:
                           "items": (p.get("items")
                                     or [])[:3]}
                          for p in plans[:3]]},
-            "jump": "/trust-dashboard.html",
+            "jump": "/#/pages/member73-trust/index",
         }
 
     async def _exec_privacy_budget(self,
@@ -1651,7 +1652,7 @@ class XiaozhuService:
                      "mode": r.get("mode"),
                      "report": r.get("report"),
                      "replayNote": r.get("replayNote")},
-            "jump": "/trust-dashboard.html",
+            "jump": "/#/pages/member73-trust/index",
         }
 
     def _exec_nav(self, text: str) -> dict:

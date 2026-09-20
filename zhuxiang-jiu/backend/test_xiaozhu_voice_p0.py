@@ -100,7 +100,7 @@ def main():
            r.status_code == 200 and body.get("reply")
            and (body.get("card") or {}).get("type")
            == "product_list"
-           and body.get("jump") == "/product-list.html?sort=new",
+           and body.get("jump") == "/#/pages/products/index?sort=new",
            f"{r.status_code}|{str(body)[:100]}")
     record("轮次 turn.wake 留痕",
            (body.get("turn") or {}).get("wake") is True)

@@ -118,7 +118,7 @@ def main():
            and (body.get("card") or {}).get("type")
            == "product_list"
            and body.get("jump")
-           == "/product-list.html?sort=new"
+           == "/#/pages/products/index?sort=new"
            and len((body.get("card") or {})
                    .get("items") or []) >= 1,
            str(body.get("reply"))[:50])
@@ -151,7 +151,7 @@ def main():
             ("小竹，我的信值余额",
              lambda b: "绑定" in b.get("reply", "")),
             ("小竹，打开购物车",
-             lambda b: b.get("jump") == "/cart.html"),
+             lambda b: b.get("jump") == "/#/pages/checkout/index"),
             ("小竹，转人工客服",
              lambda b: "人工" in b.get("reply", "")),
             ("小竹，你能干什么",

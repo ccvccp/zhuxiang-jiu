@@ -179,7 +179,7 @@ class TestCommands:
                and "新品" in r["reply"]
                and (r["card"] or {}).get("type")
                == "product_list"
-               and r["jump"] == "/product-list.html?sort=new",
+               and r["jump"] == "/#/pages/products/index?sort=new",
                str(r)[:90])
 
         # 指代消解→product.price
@@ -206,18 +206,18 @@ class TestCommands:
                    "绑定" in r["reply"]
                    and (r["card"] or {}).get("guide")
                    == "trust-bind"
-                   and r["jump"] == "/trust-dashboard.html",
+                   and r["jump"] == "/#/pages/member73-trust/index",
                    r["reply"][:40])
 
         # nav.page
         r = await _text(sid, "小竹，打开购物车")
         record("导航直达(购物车)",
-               r["jump"] == "/cart.html"
+               r["jump"] == "/#/pages/checkout/index"
                and (r["card"] or {}).get("type") == "nav",
                str(r["jump"]))
         r = await _text(sid, "小竹，去个人中心")
         record("导航直达(个人中心)",
-               r["jump"] == "/member.html")
+               r["jump"] == "/#/pages/mine/index")
         r = await _text(sid, "小竹，打开火星基地")
         record("导航白名单外引导",
                "没听清" in r["reply"], r["reply"][:30])
@@ -352,7 +352,7 @@ class TestHttp:
                str(resp.status_code))
         record("回包含 jump 直达",
                body.get("jump")
-               == "/product-list.html?sort=new")
+               == "/#/pages/products/index?sort=new")
 
         resp = client.get(
             f"/api/xiaozhu/sessions/{sid}")

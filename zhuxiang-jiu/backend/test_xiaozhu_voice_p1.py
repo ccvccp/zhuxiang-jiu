@@ -172,7 +172,7 @@ async def main():
            and card.get("type") == "order_list"
            and len(card.get("items") or []) >= 1
            and "waybill" in (card.get("items") or [{}])[0]
-           and r.get("jump") == "/order-list.html",
+           and r.get("jump") == "/#/pages/orders/index",
            f"{turn.get('intent')}|{str(card)[:80]}")
     # 物流说法同义
     r = await svc.handle_text(sid7, "小竹，我的订单到哪了")
