@@ -694,6 +694,16 @@ function handleTurn(j, channel) {
       }
     }, 1600);
   }
+  /* 交易类回复自动弹回全屏(mini 小条看不清加购了什么——
+     用户不敢下单; 看清卡片再决定结算) */
+  if (document.body.classList.contains("embed")
+      && { "cart.add": 1, "cart.submit": 1,
+           "order.pay": 1 }[(j.turn || {}).intent]) {
+    try {
+      window.parent.postMessage(
+        { type: "xz-panel-maximize" }, "*");
+    } catch (e) { /* 跨域兜底(理论不达) */ }
+  }
 }
 /* 聊天状态保存/恢复(跨页面跳转——浮层 iframe 随主窗口
    导航销毁重建, sessionStorage 同 tab 存活用于恢复) */

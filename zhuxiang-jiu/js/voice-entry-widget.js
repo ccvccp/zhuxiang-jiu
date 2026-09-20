@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=25";
+  var VER = "v=26";
 
   var css = document.createElement("style");
   css.textContent = [
@@ -128,12 +128,18 @@
     if (ev.key === "Escape" && panel.classList.contains("open")) closePanel();
   });
 
-  /* 语音页(iframe) jump 导航请求: postMessage 机制(微信 WebView 拦截
-     iframe 直接改 parent.location, 由父窗口自身执行导航绕开限制);
-     跳转后浮层迷你化(不隐藏)保持语音持续在线 */
+  /* 语音页(iframe) 请求: jump 导航(postMessage 机制——微信 WebView
+     拦截 iframe 直接改 parent.location, 由父窗口自身执行导航绕开
+     限制; 跳转后浮层迷你化保持语音持续在线) + 交易类回复自动
+     弹回全屏(mini 小条看不清加购卡片, 用户不敢下单) */
   window.addEventListener("message", function (ev) {
     var d = ev && ev.data;
-    if (!d || d.type !== "xz-jump" || !d.href) return;
+    if (!d || !d.type) return;
+    if (d.type === "xz-panel-maximize") {
+      maximizePanel();
+      return;
+    }
+    if (d.type !== "xz-jump" || !d.href) return;
     try {
       /* 仅接受同源相对/锚点路径, 防注入外链 */
       if (!/^\/#?\//.test(String(d.href))) return;
