@@ -1095,15 +1095,22 @@ function cloudStop() {
   setMicStatus("编码 WAV…");
   try {
     var wav = encodeWav(pcmChunks, rate, 16000);
+    if (!wav) {
+      /* 裁剪后无有效语音(全程静音) → 丢弃续听 */
+      setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
+      scheduleHandfree(300);
+      return;
+    }
     sendVoice(arrayBufferToBase64(wav), dur);
   } catch (e) {
     setMicStatus("编码失败: " + (e && e.message ? e.message : e));
     scheduleHandfree(600);
   }
 }
-/* Float32 单声道块 → (线性降采样) → 16bit PCM WAV
+/* Float32 单声道块 → (有效语音段裁剪+线性降采样) → 16bit PCM WAV
    targetRate: 目标采样率——16kHz 为 ASR 足够精度, 48kHz 录音降 3 倍体积
-   (防语音上传 base64 超 nginx body 限制返回 HTML 错误页) */
+   裁剪: 头/尾静音裁掉(留 0.3s 余量)——VAD 断句慢时长段尾部大量
+   静音/噪音致 ASR 失败转"#", 裁剪后只送有效语音; 全静音返回 null */
 function encodeWav(chunks, sampleRate, targetRate) {
   targetRate = targetRate || sampleRate;
   var srcLen = 0;
@@ -1111,6 +1118,30 @@ function encodeWav(chunks, sampleRate, targetRate) {
   var src = new Float32Array(srcLen);
   var so = 0;
   chunks.forEach(function (c) { src.set(c, so); so += c.length; });
+
+  /* --- 有效语音段检测(100ms 窗 RMS, 阈值 0.02) --- */
+  var win = Math.floor(sampleRate * 0.1);
+  var nWin = Math.floor(src.length / win);
+  var first = -1, last = -1;
+  for (var wi = 0; wi < nWin; wi++) {
+    var s = 0;
+    for (var j = wi * win; j < (wi + 1) * win; j++) s += src[j] * src[j];
+    if (Math.sqrt(s / win) > 0.02) {
+      if (first < 0) first = wi;
+      last = wi;
+    }
+  }
+  if (first < 0) return null; /* 全程静音 → 无有效语音 */
+  var pad = Math.floor(sampleRate * 0.3);
+  var st = Math.max(0, first * win - pad);
+  var en = Math.min(src.length, (last + 1) * win + pad);
+  if (st > 0 || en < src.length) {
+    var trimmed = new Float32Array(en - st);
+    trimmed.set(src.subarray(st, en));
+    src = trimmed;
+    srcLen = src.length;
+  }
+
   var data = src, rate = sampleRate;
   if (targetRate < sampleRate) {
     var outLen = Math.floor(src.length * targetRate / sampleRate);
@@ -1133,9 +1164,9 @@ function encodeWav(chunks, sampleRate, targetRate) {
   v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true);
   v.setUint16(34, 16, true); ws(36, "data"); v.setUint32(40, len * 2, true);
   var off = 44;
-  for (var j = 0; j < len; j++, off += 2) {
-    var s = Math.max(-1, Math.min(1, data[j]));
-    v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  for (var k = 0; k < len; k++, off += 2) {
+    var s2 = Math.max(-1, Math.min(1, data[k]));
+    v.setInt16(off, s2 < 0 ? s2 * 0x8000 : s2 * 0x7FFF, true);
   }
   return buf;
 }
