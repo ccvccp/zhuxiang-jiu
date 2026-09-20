@@ -690,38 +690,6 @@ class XiaozhuService:
                           "「你能干什么」"},
                 {"audioMeta": audio_meta,
                  "commandText": command_text})
-        # 否定语义拦截(先于指令执行): "不要这款/不需要"含加购
-        # pattern 子串("要这款")会误加购——商品语境转下一款
-        # 推荐("好的，不要这款——我再为您推荐…"), 无语境温和
-        # 引导(对话式导购节奏: 推荐→不要→再推荐循环)
-        if cmd["action"] == "cart.add" and re.search(
-                r"不(要|需要|想|喜欢|买)",
-                command_text):
-            _turns_pre = await self.repo.list_turns(
-                session_id)
-            _has_product = any(
-                (t.get("card") or {}).get("type")
-                in ("product_list", "product_detail")
-                for t in _turns_pre)
-            if _has_product:
-                context = await self.build_context(
-                    session.get("memberId"))
-                r = await self._exec_product_new(
-                    context, session, "换一款")
-                r["reply"] = str(r["reply"]).replace(
-                    "好的——我为您推荐下一款",
-                    "好的，不要这款——我再为您推荐", 1)
-                return await self._save_turn(
-                    session, channel, text, "product.new",
-                    r, {"audioMeta": audio_meta,
-                        "commandText": command_text})
-            return await self._save_turn(
-                session, channel, text, "general",
-                {"reply": "好的，那就不加这款。想看看"
-                          "新品，或直接说「查订单」也行",
-                 "card": None},
-                {"audioMeta": audio_meta,
-                 "commandText": command_text})
         result = await self._execute(
             session, cmd, resolved, member_id_hint=True)
         latency = round((time.monotonic() - started)
@@ -1281,9 +1249,8 @@ class XiaozhuService:
         except (TypeError, ValueError):
             total_s = f"¥{price}×{qty}"
         return {
-            "reply": f"好的，已为您加入「{name}」×{qty} "
-                     f"({total_s})——当前清单 {count} 件。"
-                     "还需要看看别的吗？或说「结算」下单",
+            "reply": f"已加「{name}」×{qty}，{total_s}，"
+                     f"清单{count}件。还要吗？或说「结算」",
             "card": {"type": "cart_added",
                      "subject": name, "productId": pid,
                      "price": price, "quantity": qty,
@@ -1516,14 +1483,12 @@ class XiaozhuService:
         # 且无后续节奏)——播报只报一款+反问引导; 屏幕卡片
         # 仍全量 5 款供浏览, 说「换一款」逐款继续
         if first:
-            sub = first.get("subtitle") or ""
-            reply = (greet + "好的——我为您"
-                     + ("推荐下一款" if is_next else
-                        "查到一款新品酒")
+            # 播报短句(合成快/下载小/播放短/残响短——全链
+            # 提速; 卖点详情交给屏幕卡片展示)
+            reply = (greet + "好的，"
+                     + ("下一款，" if is_next else "新品，")
                      + f"「{first.get('name')}」，"
-                     f"价格 ¥{first.get('price')}"
-                     + (f"，{sub}" if sub else "")
-                     + "。需要这款吗？")
+                     f"¥{first.get('price')}，需要吗？")
         else:
             reply = greet + "暂时没有查到新品"
         return {
