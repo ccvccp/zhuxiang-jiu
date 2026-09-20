@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=15";
+  var VER = "v=16";
 
   var css = document.createElement("style");
   css.textContent = [

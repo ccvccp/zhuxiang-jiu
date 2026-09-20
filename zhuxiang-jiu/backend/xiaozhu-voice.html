@@ -1037,7 +1037,7 @@ function cloudStart() {
       /* --- 免提 VAD 断句 --- */
       if (S.handfree) {
         var now = Date.now();
-        if (rms > 0.055) {
+        if (rms > 0.035) {
           S.vadSpoke = true; vadSilentAt = 0;
         } else if (S.vadSpoke && !vadSilentAt) {
           vadSilentAt = now;
@@ -1096,8 +1096,9 @@ function cloudStop() {
   try {
     var wav = encodeWav(pcmChunks, rate, 16000);
     if (!wav) {
-      /* 裁剪后无有效语音(全程静音) → 丢弃续听 */
-      setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
+      /* 裁剪后无有效语音(全程静音) → 明确提示(不静默丢弃) */
+      showToast("没听到声音——请离麦克风近一点再说");
+      setMicStatus("🎧 免提聆听中 · 请<b>靠近一点直接说话</b>");
       scheduleHandfree(300);
       return;
     }
@@ -1119,14 +1120,14 @@ function encodeWav(chunks, sampleRate, targetRate) {
   var so = 0;
   chunks.forEach(function (c) { src.set(c, so); so += c.length; });
 
-  /* --- 有效语音段检测(100ms 窗 RMS, 阈值 0.02) --- */
+  /* --- 有效语音段检测(100ms 窗 RMS, 阈值 0.012 低于 VAD 判定) --- */
   var win = Math.floor(sampleRate * 0.1);
   var nWin = Math.floor(src.length / win);
   var first = -1, last = -1;
   for (var wi = 0; wi < nWin; wi++) {
     var s = 0;
     for (var j = wi * win; j < (wi + 1) * win; j++) s += src[j] * src[j];
-    if (Math.sqrt(s / win) > 0.02) {
+    if (Math.sqrt(s / win) > 0.012) {
       if (first < 0) first = wi;
       last = wi;
     }
