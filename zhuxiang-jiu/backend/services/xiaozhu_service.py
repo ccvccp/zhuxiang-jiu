@@ -118,6 +118,33 @@ def fix_asr_mishear(text: str) -> str:
     return t
 
 
+# 数量词解析(加购多件): 中文数字/阿拉伯数字 + 件/瓶/箱/个/提/听
+_QTY_MAP = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4,
+            "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_QTY_RE = re.compile(
+    r"([一二两三四五六七八九十\d]+)\s*(件|瓶|箱|个|提|听)")
+
+
+def _parse_qty(text: str) -> int:
+    """数量词解析: '加购两件儿'→2, '来3瓶'→3; 默认 1
+
+    上限 9(十=10 拒绝防误加); 解析失败/超限回退 1。
+    """
+    m = _QTY_RE.search(str(text or ""))
+    if not m:
+        return 1
+    tok = m.group(1)
+    if tok.isdigit():
+        n = int(tok)
+    elif tok == "十":
+        return 1  # 10 件超上限, 防误加回退
+    elif len(tok) == 1:
+        n = _QTY_MAP.get(tok, 1)
+    else:
+        return 1  # 复合数字(二十三等)不支持, 回退
+    return n if 1 <= n <= 9 else 1
+
+
 def detect_wake(text: str) -> tuple[bool, str]:
     """唤醒判定: 前缀匹配(含近似音)→(是否唤醒, 剥离后指令)
 
@@ -219,7 +246,8 @@ COMMANDS = [
         "action": "page.goto",
         "label": "前往查看",
         "patterns": ["前往查看", "去查看", "去看看",
-                     "就去看", "查详情", "看详情"],
+                     "就去看", "查详情", "看详情",
+                     "全部查看"],
         "examples": ["小竹，前往查看", "小竹，去看看"],
     },
     {
@@ -1104,10 +1132,17 @@ class XiaozhuService:
         # ① 目标解析: 剥指令词后商品词非空→搜索优先;
         #    纯指代(就它了/来一件)→最近商品卡(上游指代
         #    消解已把"这个"展开为商品名, 两条路径一致)
+        # 数量词解析: "加购两件儿"→2(留痕实证说两件只加
+        # 1 件); 中文数字+件/瓶/箱/个/提, 上限 9 防误加
+        qty = _parse_qty(text)
         kw = re.sub(
             r"(加入购物车|加入购物清单|放进?到?购物车|"
-            r"加购|来一[件个]|要一[件个]|买这个|就它了|"
-            r"就要这个)", "", str(text or "")).strip()
+            r"加购|来[一二两三四五六七八九十\d]*[件个瓶]|"
+            r"要[一二两三四五六七八九十\d]*[件个瓶]|"
+            r"买这个|就它了|就要这个)", "",
+            str(text or "")).strip()
+        kw = _QTY_RE.sub("", kw).strip()  # 剥残余数量词
+        kw = kw.rstrip("儿")  # 儿化音尾("两件儿")
         product = None
         if kw:
             product = await self._search_first_product(kw)
@@ -1129,20 +1164,26 @@ class XiaozhuService:
                or product.get("product_id"))
         name = product.get("name") or "商品"
         price = product.get("price")
-        # 清单件数(本会话 cart_added 轮次, 含本次)
+        # 清单件数(会话 cart_added 轮次按 quantity 聚合)
         turns = await self.repo.list_turns(
             session["sessionId"])
         count = sum(
-            1 for t in turns
+            int((t.get("card") or {}).get("quantity") or 1)
+            for t in turns
             if (t.get("card") or {}).get("type")
-            == "cart_added") + 1
+            == "cart_added") + qty
+        try:
+            total = round(float(price) * qty, 2)
+            total_s = f"¥{total:g}"
+        except (TypeError, ValueError):
+            total_s = f"¥{price}×{qty}"
         return {
-            "reply": f"已把「{name}」加入购物清单"
-                     f"(¥{price})——当前清单 {count} 件, "
+            "reply": f"已把「{name}」×{qty} 加入购物清单"
+                     f"({total_s})——当前清单 {count} 件, "
                      "说「结算」一键下单",
             "card": {"type": "cart_added",
                      "subject": name, "productId": pid,
-                     "price": price, "quantity": 1,
+                     "price": price, "quantity": qty,
                      "cartCount": count},
             "executed": True}
 
