@@ -64,10 +64,13 @@ SAFE_READONLY = {"product.new", "product.price",
                  "trust.bind", "privacy.budget",
                  "explanation.report",
                  "voice.score"}   # 50号P0 语音积分查询
-SAFE_WRITE = {"cart.submit"}          # 一般写: 执行+播报
+SAFE_WRITE: set[str] = set()        # 一般写: 执行+播报(现空)
 SENSITIVE = {"trust.convert",        # 高敏: confirmToken 流
              "repair.execute",       # 49号P0: 修复执行同高敏流
-             "order.pay"}            # 三期: 语音支付(L1-L3 前置)
+             "order.pay",           # 三期: 语音支付(L1-L3 前置)
+             "cart.submit"}         # 结算下单升高敏(真机实证
+                                    # "下单两件"口误直接成单——
+                                    # 资金面须确认短语+4位码节奏)
 
 
 def _now() -> float:
@@ -363,9 +366,6 @@ class XiaozhuExecutor:
 
     async def _exec_write(self, action: str, params: dict,
                           member_id: int) -> dict:
-        if action == "cart.submit":
-            return await self._exec_checkout(params,
-                                             member_id)
         raise ValueError(f"未知写动作 {action}")
 
     async def _exec_sensitive(self, action: str,
@@ -384,6 +384,9 @@ class XiaozhuExecutor:
                 execute_pay,
             )
             return await execute_pay(params, member_id)
+        if action == "cart.submit":
+            return await self._exec_checkout(params,
+                                             member_id)
         raise ValueError(f"未知高敏动作 {action}")
 
     async def _exec_repair(self, params: dict,
@@ -516,6 +519,22 @@ class XiaozhuExecutor:
 
     @staticmethod
     def _summarize(action: str, params: dict) -> str:
+        if action == "cart.submit":
+            items = params.get("items") or []
+            qty = sum(int(i.get("quantity") or 1)
+                      for i in items if isinstance(i, dict))
+            try:
+                total = round(sum(
+                    float(i.get("price") or 0)
+                    * int(i.get("quantity") or 1)
+                    for i in items
+                    if isinstance(i, dict)), 2)
+                return (f"将提交订单: {len(items)} 款 {qty} 件, "
+                        f"合计约 ¥{total:g}"
+                        "(折扣/运费以结算引擎为准)")
+            except (TypeError, ValueError):
+                return (f"将提交订单: {len(items)} 款 {qty} 件"
+                        "(金额以结算引擎为准)")
         if action == "trust.convert":
             return (f"将扣除 {params.get('creditPoints')}"
                     f" 信用分, 按当前汇率折算信值"

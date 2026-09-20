@@ -120,15 +120,27 @@ async def main():
            == 2,
            f"{(r1.get('card') or {}).get('cartCount')}"
            f"→{(r2.get('card') or {}).get('cartCount')}")
-    # 结算: 聚合 2 件(45号 checkout 通道)
+    # 结算: 聚合 2 件 → 高敏确认流(cart.submit 升级 SENSITIVE)
     r = await svc.handle_text(sid4, "小竹，结算")
     turn = r.get("turn") or {}
     card = r.get("card") or {}
-    record("多件结算→订单提交",
+    record("多件结算→高敏确认流",
            turn.get("intent") == "cart.submit"
-           and (card.get("type") == "order_done"
-                or "订单已提交" in str(r.get("reply"))),
-           f"{turn.get('intent')}|{str(r.get('reply'))[:60]}")
+           and r.get("confirmRequired") is True
+           and card.get("type") == "confirm"
+           and "件" in str(card.get("subject") or ""),
+           f"{turn.get('intent')}|"
+           f"{str(card.get('subject'))[:60]}")
+    # 核销 4 位码 → 订单真实创建(后续查订单用例依赖)
+    from services.xiaozhu_executor import get_executor
+    tok = r.get("confirmToken")
+    real_code = get_executor()._tokens[tok]["code"]
+    r2 = await svc.confirm_action(tok, real_code)
+    record("确认核销→订单创建+金额回填",
+           (r2.get("executed") is True
+            or "订单已提交" in str(r2.get("reply")))
+           and "金额 -" not in str(r2.get("reply")),
+           str(r2.get("reply"))[:60])
     await svc.delete_session(sid4)
 
     print("[06 澄清(无目标直说加购)]")
@@ -163,7 +175,13 @@ async def main():
     sid7 = await _open(1)
     await svc.handle_text(sid7, "小竹，看新品")
     await svc.handle_text(sid7, "小竹，把这个加入购物车")
-    await svc.handle_text(sid7, "小竹，结算")
+    # 结算升高敏: 发确认令牌后核销 4 位码成单
+    r0 = await svc.handle_text(sid7, "小竹，结算")
+    from services.xiaozhu_executor import get_executor as _ge
+    _tok = r0.get("confirmToken")
+    if _tok:
+        await svc.confirm_action(
+            _tok, _ge()._tokens[_tok]["code"])
     r = await svc.handle_text(sid7, "小竹，查我的订单")
     turn = r.get("turn") or {}
     card = r.get("card") or {}

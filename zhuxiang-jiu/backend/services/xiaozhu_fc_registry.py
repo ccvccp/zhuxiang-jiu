@@ -220,13 +220,17 @@ TOOL_REGISTRY = {
     "cart.submit": {
         "operationId": "submit_checkout",
         "summary": "结算下单",
-        "description": "【写操作】当用户确认购买说「结算/"
-                      "下单」时调用。❌ 禁止无商品语境时"
-                      "调用; 金额数字须来自结算引擎返回。"
-                      "🔒 privacy_cost: 0.05",
-        "tier": TIER_WRITE,
-        "privacyCost": 0.05,
-        "requiresConsent": False,   # 一般写: 执行+播报(P2 口径)
+        "description": "【写操作·高危】当用户确认购买说"
+                      "「结算/下单」时调用, 须先清晰说出"
+                      "确认短语并通过 4 位数字码双因子确认"
+                      "(真机实证: 口误'下单两件'曾直接成单"
+                      "——资金面必须走确认节奏)。❌ 禁止无商品"
+                      "语境时调用; 金额数字须来自结算引擎返回。"
+                      "🔒 privacy_cost: 0.08",
+        "tier": TIER_SENSITIVE,
+        "privacyCost": 0.08,
+        "requiresConsent": True,   # 高敏: confirmToken 流(升级)
+        "consentPhrase": "确认提交订单",
         "safeMessage": "结算暂时未能完成, 购物车未受影响, "
                        "请稍后再试。" + _HUMAN_ESCORT,
     },

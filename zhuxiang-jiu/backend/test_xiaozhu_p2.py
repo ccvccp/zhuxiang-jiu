@@ -104,7 +104,7 @@ class TestSandboxWhitelist:
         )
         record("三级分级就位",
                "product.new" in SAFE_READONLY
-               and "cart.submit" in SAFE_WRITE
+               and "cart.submit" in SENSITIVE
                and "trust.convert" in SENSITIVE)
         ex = XiaozhuExecutor()
         session = {"sessionId": 1, "memberId": 30}

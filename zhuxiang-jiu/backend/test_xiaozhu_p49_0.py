@@ -95,10 +95,9 @@ class TestRegistry:
         from collections import Counter
         tiers = dict(Counter(
             t["tier"] for t in TOOL_REGISTRY.values()))
-        record("三级分布(14只读/1写/2高敏)",
+        record("三级分布(14只读/0写/3高敏)",
                tiers == {TIER_READONLY: 14,
-                         TIER_WRITE: 1,
-                         TIER_SENSITIVE: 2}, str(tiers))
+                         TIER_SENSITIVE: 3}, str(tiers))
 
         # 沙箱对齐自检(模块导入已校验——再显式断言)
         from services.xiaozhu_executor import (
@@ -118,8 +117,9 @@ class TestRegistry:
         consent = [a for a, t in
                    TOOL_REGISTRY.items()
                    if t.get("requiresConsent")]
-        record("consent 只在两个高敏工具",
-               sorted(consent) == ["repair.execute",
+        record("consent 只在三个高敏工具",
+               sorted(consent) == ["cart.submit",
+                                   "repair.execute",
                                    "trust.convert"],
                str(consent))
 

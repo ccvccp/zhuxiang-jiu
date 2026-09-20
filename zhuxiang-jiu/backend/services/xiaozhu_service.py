@@ -247,7 +247,7 @@ COMMANDS = [
         "label": "前往查看",
         "patterns": ["前往查看", "去查看", "去看看",
                      "就去看", "查详情", "看详情",
-                     "全部查看"],
+                     "全部查看", "全网查看"],
         "examples": ["小竹，前往查看", "小竹，去看看"],
     },
     {
@@ -1001,6 +1001,22 @@ class XiaozhuService:
             )
             r = await get_gateway().try_pay_flow(session)
         else:   # cart.submit
+            # "下单两件"含数量词: 先补齐加购清单再结算
+            # (真机实证"帮我下单两件"直接成单丢数量——加购
+            # 后走结算确认节奏)
+            if _parse_qty(text) > 1:
+                add_r = await self._exec_cart_add(session, text)
+                if not add_r.get("executed"):
+                    return add_r  # 加购失败(无商品等)透传
+                # 加购轮落库(_resolve_cart_items 聚合源——
+                # _exec_cart_add 只返回不落 turn)
+                try:
+                    await self._save_turn(
+                        session, "voice", text, "cart.add",
+                        add_r, {})
+                except Exception as exc:
+                    logger.debug(
+                        "voice48_qtyadd_turn_skip: %s", exc)
             items = await self._resolve_cart_items(session)
             if not items:
                 return {"reply": "想结算哪些商品? 先说"
@@ -1095,14 +1111,21 @@ class XiaozhuService:
                     "card": None}
         # cart.submit
         if result.get("success") or result.get("orderId"):
+            # 金额: checkout 返回 details.finalAmount(真机
+            # 实证旧字段名不匹配致"金额 - 元")
+            _det = result.get("details") or {}
+            _amount = (_det.get("finalAmount")
+                       or result.get("totalPrice")
+                       or result.get("amount"))
             return {
                 "reply": f"订单已提交(单号 "
                          f"{result.get('orderId') or '-'})——"
-                         f"金额 {result.get('totalPrice') or
-                                result.get('amount') or '-'} 元",
+                         f"金额 {_amount if _amount is not None
+                                else '-'} 元",
                 "card": {"type": "order_done",
                          "subject": "订单已提交",
-                         "orderId": result.get("orderId")},
+                         "orderId": result.get("orderId"),
+                         "totalPrice": _amount},
                 "executed": True}
         return {"reply": "结算未完成: "
                         + str(result.get("message")
@@ -1227,6 +1250,8 @@ class XiaozhuService:
                     and card.get("productId"):
                 items.append({
                     "productId": str(card["productId"]),
+                    "name": card.get("subject"),
+                    "price": card.get("price"),
                     "quantity": int(
                         card.get("quantity") or 1)})
         if items:
@@ -1299,6 +1324,42 @@ class XiaozhuService:
                           f"{result.get('amount')} TV"
                           f"(余额 {result.get('balance')})"
                           + broadcast),
+                "result": result, **extra}
+        if r.get("action") == "cart.submit" and (
+                result.get("success")
+                or result.get("orderId")):
+            # 核销成单: 落 order_done 轮次(查订单①源+会话
+            # 可见)+完整回包(单号/金额——checkout 返回
+            # details.finalAmount)
+            _det = result.get("details") or {}
+            _amount = (_det.get("finalAmount")
+                       or result.get("totalPrice")
+                       or result.get("amount"))
+            if _sid:
+                try:
+                    _s = await self.repo.get_session(_sid)
+                    if _s:
+                        await self._save_turn(
+                            _s, "voice", "确认提交订单",
+                            "cart.submit",
+                            {"reply": "订单已提交",
+                             "card": {
+                                 "type": "order_done",
+                                 "subject": "订单已提交",
+                                 "orderId": result.get(
+                                     "orderId"),
+                                 "totalPrice": _amount}},
+                            {})
+                except Exception as exc:
+                    logger.debug(
+                        "voice48_confirm_turn_skip: %s", exc)
+            return {
+                "success": True, "executed": True,
+                "reply": (f"订单已提交(单号 "
+                          f"{result.get('orderId') or '-'})"
+                          f"——金额 "
+                          f"{_amount if _amount is not None
+                            else '-'} 元" + broadcast),
                 "result": result, **extra}
         return {"success": bool(result.get("success")),
                 "executed": True,
