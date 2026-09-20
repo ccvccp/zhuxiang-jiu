@@ -398,7 +398,7 @@ function nowHM() {
 var S = { sid: null, turnCount: 0, woken: false, pending: false,
           mode: "cloud", micState: "idle", tts: true,
           handfree: true, ttsPlaying: false, vadSpoke: false,
-          hidden: false };
+          hidden: false, lastSpoken: "" };
 
 /* ===== 主流程 ===== */
 function showLogin() {
@@ -766,9 +766,30 @@ function sendVoice(b64, durationSec) {
     setPending(false); removeTyping();
     setMicStatus("云端识别完成");
     if (!j || j.success === false) { appendBot((j && (j.error || j.detail)) || "语音链路失败", null, null, "__err__"); return; }
-    appendUser(((j.turn || {}).rawText || "(语音)"), "voice");
+    var rt = (j.turn || {}).rawText || "";
+    if (isEchoOfTTS(rt)) {
+      /* TTS 回声(免提麦克风录到自己播报——微信真机 AEC
+         不覆盖 speechSynthesis, 留痕实证"还不会"6连回环):
+         静默丢弃防"播报→录回→再回复"无限循环 */
+      appendUser("(自己播报的回声，已忽略)", "voice");
+      scheduleHandfree(400);
+      return;
+    }
+    appendUser(rt || "(语音)", "voice");
     handleTurn(j, "voice");
   }).catch(function (e) { setPending(false); removeTyping(); setMicStatus("云端识别失败"); turnError(e); scheduleHandfree(1200); });
+}
+/* TTS 回声判定: 转写为最近播报文本的子串(归一化去标点;
+   限 2-12 字——长转写几乎不可能是纯回声, 防误杀) */
+function isEchoOfTTS(t) {
+  var last = S.lastSpoken || "";
+  if (!last || !t) return false;
+  var norm = function (s) {
+    return String(s).replace(
+      /[\s，。？！、,.?!:：；;「」『』（）()\-—…·]/g, "");
+  };
+  var a = norm(t), b = norm(last);
+  return a.length >= 2 && a.length <= 12 && b.indexOf(a) >= 0;
 }
 
 /* ===== 确认码分格输入 + 核销(POST /api/xiaozhu/confirm/{token}) ===== */
@@ -851,9 +872,10 @@ function speak(text, bubbleEl) {
     var done = function () {
       if (bubbleEl) bubbleEl.classList.remove("speaking");
       S.ttsPlaying = false;
-      scheduleHandfree(800); /* 播报完 0.8s 恢复免提聆听 */
+      scheduleHandfree(1200); /* 播报完 1.2s 恢复免提聆听(回声尾音衰减) */
     };
     S.ttsPlaying = true;
+    S.lastSpoken = String(text); /* 回声判定基准(isEchoOfTTS) */
     u.onstart = function () { if (bubbleEl) bubbleEl.classList.add("speaking"); };
     u.onend = done;
     u.onerror = done;

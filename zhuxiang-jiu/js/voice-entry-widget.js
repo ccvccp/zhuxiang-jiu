@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=23";
+  var VER = "v=25";
 
   var css = document.createElement("style");
   css.textContent = [
@@ -24,7 +24,21 @@
     "@media(min-width:768px){#xiaozhu-voice-panel .xwrap{width:430px;",
     "height:82vh;border-radius:16px;overflow:hidden;",
     "box-shadow:0 12px 40px rgba(0,0,0,.3)}}",
-    "#xiaozhu-voice-panel iframe{width:100%;height:100%;border:0}"
+    "#xiaozhu-voice-panel iframe{width:100%;height:100%;border:0}",
+    "/* 迷你态: 跳转后浮层缩为底部小条——iframe 保持可见(录音",
+    "质量保障)免提持续在线, 点小竹/展开钮恢复全屏 */",
+    "#xiaozhu-voice-panel.mini{pointer-events:none;",
+    "align-items:flex-end;background:transparent}",
+    "#xiaozhu-voice-panel.mini .xwrap{pointer-events:auto;",
+    "height:104px;border-radius:14px 14px 0 0;",
+    "box-shadow:0 -4px 20px rgba(0,0,0,.22)}",
+    "@media(min-width:768px){#xiaozhu-voice-panel.mini .xwrap{",
+    "width:330px;height:104px;border-radius:14px;margin-bottom:100px}}",
+    "#xiaozhu-voice-panel .xexpand{position:absolute;top:8px;right:52px;",
+    "z-index:6;display:none;height:28px;padding:0 14px;border-radius:14px;",
+    "border:0;background:rgba(53,92,68,.92);color:#fff;font-size:13px;",
+    "cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)}",
+    "#xiaozhu-voice-panel.mini .xexpand{display:block}"
   ].join("");
   document.head.appendChild(css);
 
@@ -38,22 +52,39 @@
   x.setAttribute("aria-label", "关闭语音精灵");
   x.textContent = "×";
   x.onclick = closePanel;
+  var xe = document.createElement("button");
+  xe.type = "button";
+  xe.className = "xexpand";
+  xe.textContent = "🎙 展开对话";
+  xe.onclick = maximizePanel;
   var fr = document.createElement("iframe");
   fr.src = "/xiaozhu-voice.html?" + VER + "&embed=1";
   fr.setAttribute("allow", "microphone");
   fr.setAttribute("title", "小竹语音精灵");
   wrap.appendChild(fr);
   wrap.appendChild(x);
+  wrap.appendChild(xe);
   panel.appendChild(wrap);
   document.body.appendChild(panel);
 
   function openPanel() {
     panel.classList.add("open");
+    panel.classList.remove("mini");
     notifyFrame("show"); /* 通知语音页恢复免提聆听 */
   }
   function closePanel() {
     panel.classList.remove("open");
+    panel.classList.remove("mini");
     notifyFrame("hide"); /* 通知语音页暂停监听/停TTS(防烧额度+杂音污染) */
+  }
+  /* 跳转迷你化: 缩为底部小条保持 iframe 可见与免提在线
+     (隐藏 iframe 在 X5 录音降权为不可懂音频致转写"#") */
+  function minimizePanel() {
+    panel.classList.add("open");
+    panel.classList.add("mini");
+  }
+  function maximizePanel() {
+    panel.classList.remove("mini");
   }
   function notifyFrame(state) {
     try {
@@ -78,6 +109,10 @@
   b.innerHTML = '<span style="font-size:18px;line-height:1">🎤</span>'
     + "<span>小竹</span>";
   b.onclick = function () {
+    if (panel.classList.contains("mini")) {
+      maximizePanel(); /* 迷你态点球 = 恢复全屏对话 */
+      return;
+    }
     panel.classList.contains("open") ? closePanel() : openPanel();
   };
   b.onmouseenter = function () { b.style.transform = "scale(1.08)"; };
@@ -94,14 +129,15 @@
   });
 
   /* 语音页(iframe) jump 导航请求: postMessage 机制(微信 WebView 拦截
-     iframe 直接改 parent.location, 由父窗口自身执行导航绕开限制) */
+     iframe 直接改 parent.location, 由父窗口自身执行导航绕开限制);
+     跳转后浮层迷你化(不隐藏)保持语音持续在线 */
   window.addEventListener("message", function (ev) {
     var d = ev && ev.data;
     if (!d || d.type !== "xz-jump" || !d.href) return;
     try {
       /* 仅接受同源相对/锚点路径, 防注入外链 */
       if (!/^\/#?\//.test(String(d.href))) return;
-      closePanel();
+      minimizePanel();
       window.location.href = d.href;
     } catch (e) { /* 导航异常忽略 */ }
   });

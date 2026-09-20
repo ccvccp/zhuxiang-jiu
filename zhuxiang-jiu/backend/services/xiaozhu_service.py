@@ -102,6 +102,22 @@ def mask_pii(text: str) -> str:
     return out
 
 
+# ASR 常见误听修正(真机留痕实证的音近变体, 整词替换零误伤)
+ASR_MISHEAR_FIXES = (("请我查看", "前往查看"),)
+
+
+def fix_asr_mishear(text: str) -> str:
+    """ASR 误听修正: 音近整词替换(仅语音渠道应用)
+
+    真机留痕: 用户说"前往查看"被 glm-asr 转写"请我查看"
+    (session 58 seq 5)→ 指令不中需说两次; 整词精确替换。
+    """
+    t = str(text or "")
+    for wrong, right in ASR_MISHEAR_FIXES:
+        t = t.replace(wrong, right)
+    return t
+
+
 def detect_wake(text: str) -> tuple[bool, str]:
     """唤醒判定: 前缀匹配(含近似音)→(是否唤醒, 剥离后指令)
 
@@ -510,6 +526,10 @@ class XiaozhuService:
         import time
         started = time.monotonic()
         session_id = session["sessionId"]
+
+        # ⓪ ASR 误听修正(音近整词, 仅语音渠道——键盘输入无此噪)
+        if channel == "voice":
+            text = fix_asr_mishear(text)
 
         # ① 唤醒判定(前缀含近似音容错)
         woken, command_text = detect_wake(text)
