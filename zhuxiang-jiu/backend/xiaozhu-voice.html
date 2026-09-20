@@ -410,9 +410,24 @@ function enterMain() {
   document.getElementById("loginCard").classList.add("hidden");
   document.getElementById("main").classList.remove("hidden");
   loadScene(); loadContext(); loadCommands();
+  /* TTS 缓存预热: 唤醒应答/常用短句预合成(微信服务端 TTS
+     首次合成 2-4s——预取后唤醒"在呢!"秒回) */
+  setTimeout(preheatTTS, 2500);
   /* 跳转返回恢复: 有未关闭会话存档(跳转前保存)则恢复,
      免每次跳转回来都开新会话丢上下文 */
   if (!tryRestoreChat()) openSession();
+}
+function preheatTTS() {
+  try {
+    var a = getAuth() || {};
+    var h = { "X-Member-Id": String(a.uid || "") };
+    if (a.token) h["Authorization"] = "Bearer " + a.token;
+    ["在呢！", "好的"].forEach(function (t) {
+      fetch("/api/xiaozhu/tts?text="
+            + encodeURIComponent(t), { headers: h })
+        .catch(function () {});
+    });
+  } catch (e) { /* 预热失败无碍 */ }
 }
 
 /* ===== 时空情景问候(公开 GET /api/scene/context) ===== */

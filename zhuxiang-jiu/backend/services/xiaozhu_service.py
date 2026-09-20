@@ -584,12 +584,12 @@ class XiaozhuService:
                 {"wakeHint": True,
                  "audioMeta": audio_meta})
         # 唤醒应答: 只叫"小竹"无指令 → "在呢!"(对话存在感
-        # ——真机反馈: 叫了没回音不知道听没听到)
+        # ——真机反馈: 叫了没回音不知道听没听到; 短句秒播,
+        # 长句合成+下载+播放慢——引导交给界面快捷指令)
         if not command_text.strip():
             return await self._save_turn(
                 session, channel, text, "wakeup",
-                {"reply": "在呢！——想看新品、查价格、"
-                          "查订单，直接说就行",
+                {"reply": "在呢！",
                  "card": None},
                 {"commandText": command_text,
                  "audioMeta": audio_meta})
