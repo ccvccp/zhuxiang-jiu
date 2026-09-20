@@ -544,10 +544,19 @@ function appendBot(reply, card, badgesHtml, extra, jump) {
   d.className = "msg bot" + (extra === "__err__" ? " err" : "");
   var h = '<div class="avatar">竹</div><div class="bubble">' + esc(reply || "");
   if (card) h += renderCard(card);
-  if (jump) h += '<a class="jumpbtn" href="' + esc(jump) + '"'
-    + (document.body.classList.contains("embed")
-       ? ' target="_parent"' : "")
-    + '>前往查看 →</a>';
+  if (jump) {
+    var jhref = esc(jump);
+    if (document.body.classList.contains("embed")) {
+      /* 嵌入浮层: JS 强制导航父窗口(部分 WebView 对 target=_parent
+         属性不生效, onclick 兜底; href 仍提供中键/新窗打开能力) */
+      h += '<a class="jumpbtn" href="' + jhref
+        + '" target="_parent" onclick="event.preventDefault();'
+        + 'window.parent.location.href=\'' + jhref + '\'">'
+        + "前往查看 →</a>";
+    } else {
+      h += '<a class="jumpbtn" href="' + jhref + '">前往查看 →</a>';
+    }
+  }
   h += '<div class="badges">' + (badgesHtml || "") +
     '<span class="t">' + nowHM() + "</span></div>";
   h += "</div>";
