@@ -130,10 +130,11 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
 .prow .nm{flex:1}
 .prow .pr{color:var(--red);font-weight:600}
 .prow .pr small{color:var(--tx2);font-weight:400}
-.jumpbtn{display:block;width:fit-content;margin:10px 0 4px;
-      padding:5px 14px;
+.jumpline{margin:2px 0 14px 42px}
+.jumpbtn{display:inline-block;padding:5px 14px;
       border-radius:6px;background:var(--gold);color:#fff;
-      font-size:12.5px;cursor:pointer;text-decoration:none}
+      font-size:12.5px;cursor:pointer;text-decoration:none;
+      box-shadow:0 2px 6px rgba(201,138,45,.3)}
 .jumpbtn:hover{filter:brightness(1.08)}
 /* ---- 确认码分格 ---- */
 .confirmbox{margin-top:10px;background:#fff;border:1px solid var(--gold);
@@ -548,24 +549,27 @@ function appendBot(reply, card, badgesHtml, extra, jump) {
   d.className = "msg bot" + (extra === "__err__" ? " err" : "");
   var h = '<div class="avatar">竹</div><div class="bubble">' + esc(reply || "");
   if (card) h += renderCard(card);
-  if (jump) {
-    var jhref = esc(jump);
-    if (document.body.classList.contains("embed")) {
-      /* 嵌入浮层: postMessage 请求父窗口导航(微信 WebView 拦截
-         iframe 直接改 parent.location, 消息机制由父窗口自己导航) */
-      h += '<a class="jumpbtn" href="' + jhref
-        + '" onclick="event.preventDefault();'
-        + "window.parent.postMessage({type:'xz-jump',href:'"
-        + jhref + "'},'*')\">前往查看 →</a>";
-    } else {
-      h += '<a class="jumpbtn" href="' + jhref + '">前往查看 →</a>';
-    }
-  }
   h += '<div class="badges">' + (badgesHtml || "") +
     '<span class="t">' + nowHM() + "</span></div>";
   h += "</div>";
   d.innerHTML = h;
-  c.appendChild(d); scrollChat();
+  c.appendChild(d);
+  /* jump 独立消息行(气泡外——彻底脱离 bubble/kcard 布局,
+     规避 X5 内核行盒重叠与 fit-content 兼容问题) */
+  if (jump) {
+    var jhref = esc(jump);
+    var jl = document.createElement("div");
+    jl.className = "jumpline";
+    jl.innerHTML = (document.body.classList.contains("embed"))
+      ? '<a class="jumpbtn" href="' + jhref
+        + '" onclick="event.preventDefault();'
+        + "window.parent.postMessage({type:'xz-jump',href:'"
+        + jhref + "'},\'*\')\">前往查看 →</a>"
+      : '<a class="jumpbtn" href="' + jhref
+        + '">前往查看 →</a>';
+    c.appendChild(jl);
+  }
+  scrollChat();
   return d.querySelector(".bubble");
 }
 /* 空态引导卡: 三条示例指令大按钮 */
