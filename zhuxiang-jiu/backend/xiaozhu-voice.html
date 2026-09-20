@@ -461,7 +461,7 @@ function openSession() {
     appendGuide();
     if (j.xiaoMode) document.getElementById("modePill").textContent = j.xiaoMode;
     /* 会话就绪 → 自动进入免提聆听(直接说话即可; iOS 首次无手势被拒时引导点击) */
-    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，停顿 1 秒自动发送");
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
     scheduleHandfree(800);
   }).catch(function (e) { showToast(e.message || "会话开启失败"); });
 }
@@ -825,7 +825,7 @@ function toggleHandfree() {
     = S.handfree ? "🎧 免提开" : "🎧 免提关";
   if (S.handfree) {
     showToast("免提对话已开启——直接说话即可");
-    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，停顿 1 秒自动发送");
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
     scheduleHandfree(400);
   } else {
     clearTimeout(S.hfTimer);
@@ -1017,8 +1017,8 @@ function cloudStart() {
         } else if (S.vadSpoke && !vadSilentAt) {
           vadSilentAt = now;
         }
-        if (S.vadSpoke && vadSilentAt && now - vadSilentAt > 1300) {
-          cloudStop(); /* 静音1.3s → 自动结束本句并发送 */
+        if (S.vadSpoke && vadSilentAt && now - vadSilentAt > 800) {
+          cloudStop(); /* 静音0.8s → 自动结束本句并发送(真机反馈断句跟手) */
           return;
         }
       }
@@ -1063,7 +1063,7 @@ function cloudStop() {
   }
   /* 免提模式: 整段无有效语音(环境静音/30s硬停) → 丢弃不发送, 继续聆听 */
   if (S.handfree && !S.vadSpoke) {
-    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，停顿 1 秒自动发送");
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
     scheduleHandfree(300);
     return;
   }
