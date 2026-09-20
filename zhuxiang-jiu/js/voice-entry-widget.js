@@ -8,7 +8,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=12";
+  var VER = "v=13";
 
   var css = document.createElement("style");
   css.textContent = [
@@ -80,6 +80,19 @@
 
   document.addEventListener("keydown", function (ev) {
     if (ev.key === "Escape" && panel.classList.contains("open")) closePanel();
+  });
+
+  /* 语音页(iframe) jump 导航请求: postMessage 机制(微信 WebView 拦截
+     iframe 直接改 parent.location, 由父窗口自身执行导航绕开限制) */
+  window.addEventListener("message", function (ev) {
+    var d = ev && ev.data;
+    if (!d || d.type !== "xz-jump" || !d.href) return;
+    try {
+      /* 仅接受同源相对/锚点路径, 防注入外链 */
+      if (!/^\/#?\//.test(String(d.href))) return;
+      closePanel();
+      window.location.href = d.href;
+    } catch (e) { /* 导航异常忽略 */ }
   });
 
   document.body.appendChild(b);

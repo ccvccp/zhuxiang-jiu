@@ -547,12 +547,12 @@ function appendBot(reply, card, badgesHtml, extra, jump) {
   if (jump) {
     var jhref = esc(jump);
     if (document.body.classList.contains("embed")) {
-      /* 嵌入浮层: JS 强制导航父窗口(部分 WebView 对 target=_parent
-         属性不生效, onclick 兜底; href 仍提供中键/新窗打开能力) */
+      /* 嵌入浮层: postMessage 请求父窗口导航(微信 WebView 拦截
+         iframe 直接改 parent.location, 消息机制由父窗口自己导航) */
       h += '<a class="jumpbtn" href="' + jhref
-        + '" target="_parent" onclick="event.preventDefault();'
-        + 'window.parent.location.href=\'' + jhref + '\'">'
-        + "前往查看 →</a>";
+        + '" onclick="event.preventDefault();'
+        + "window.parent.postMessage({type:'xz-jump',href:'"
+        + jhref + "'},'*')\">前往查看 →</a>";
     } else {
       h += '<a class="jumpbtn" href="' + jhref + '">前往查看 →</a>';
     }
