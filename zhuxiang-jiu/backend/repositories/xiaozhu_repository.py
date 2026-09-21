@@ -410,6 +410,92 @@ class Xiaozhu48Repository:
                 "xiaozhu_asr_fixes", {})[wrong] = dict(rec)
 
     # --------------------------------------------------------
+    # 学习进化队列(P3: zhuxiang:xiaozhu:learn_queue hash,
+    # field=sessionId:seq 天然防重, value=JSON 轮次上下文+状态)
+    # --------------------------------------------------------
+
+    _LEARN_MAX = 200   # 队列上限(防膨胀——运营消化后腾位)
+
+    def _learn_queue_key(self):
+        return _k("xiaozhu", "learn_queue")
+
+    async def enqueue_learn(self, entry: dict) -> bool:
+        """👎 轮次入学习队列(防重: 同轮次只入一次)
+
+        Returns: True=入队; False=已存在或超上限
+        """
+        key = f"{entry.get('sessionId')}:{entry.get('seq')}"
+        if is_redis_mode():
+            client = await get_redis_client()
+            if await client.hlen(self._learn_queue_key()) \
+                    >= self._LEARN_MAX:
+                return False
+            added = await client.hsetnx(
+                self._learn_queue_key(), key,
+                json.dumps(entry, ensure_ascii=False))
+            return bool(added)
+        self._ensure_store()
+        store = self.store.setdefault("xiaozhu_learn_queue", {})
+        if len(store) >= self._LEARN_MAX:
+            return False
+        if key in store:
+            return False
+        store[key] = dict(entry)
+        return True
+
+    async def list_learn_queue(
+            self, status: str = None) -> dict[str, dict]:
+        """学习队列 {key: entry}(status 过滤 pending/adopted/
+        dismissed; None=全量, 时间倒序——最新反馈在前)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.hgetall(self._learn_queue_key())
+        else:
+            self._ensure_store()
+            raw = {k: json.dumps(v) for k, v in dict(
+                self.store.get("xiaozhu_learn_queue", {})).items()}
+        out = {}
+        for k, val in (raw or {}).items():
+            try:
+                entry = json.loads(val)
+            except (TypeError, ValueError):
+                continue
+            if status is None \
+                    or entry.get("status") == status:
+                out[k] = entry
+        return dict(sorted(
+            out.items(),
+            key=lambda kv: str(kv[1].get("feedbackAt") or ""),
+            reverse=True))
+
+    async def resolve_learn(self, key: str, status: str,
+                            patch: dict = None) -> bool:
+        """队列条目处置(adopted/dismissed + 建议字段合并)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.hget(self._learn_queue_key(), key)
+            if not raw:
+                return False
+            entry = json.loads(raw)
+            entry.update(patch or {})
+            entry["status"] = status
+            entry["resolvedAt"] = ts()
+            await client.hset(self._learn_queue_key(), key,
+                              json.dumps(entry,
+                                         ensure_ascii=False))
+            return True
+        self._ensure_store()
+        store = self.store.setdefault("xiaozhu_learn_queue", {})
+        if key not in store:
+            return False
+        entry = dict(store[key])
+        entry.update(patch or {})
+        entry["status"] = status
+        entry["resolvedAt"] = ts()
+        store[key] = entry
+        return True
+
+    # --------------------------------------------------------
     # P4 看板聚合扫描(全表只读——六区块数据源)
     # --------------------------------------------------------
 

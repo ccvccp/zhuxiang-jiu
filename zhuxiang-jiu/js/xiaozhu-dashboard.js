@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿/**
+﻿﻿﻿﻿﻿﻿﻿﻿/**
  * 48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
  * 范式: js/trust-risk-dashboard.js(47号)平移——ES5、localStorage
  * 连接、区块化加载(手动刷新, 不进自动刷新)。
@@ -336,6 +336,128 @@ async function loadAll() {
     }
     // ⑧ 支付安全观测(三期独立端点——分区 fail-soft 不阻塞主区块)
     loadVoicepay();
+    // ⑪ 学习进化队列(P3 独立端点——fail-soft 不阻塞主区块)
+    loadLearnQueue();
+}
+
+/* ============================================================
+ * ⑪ 学习进化队列(P3: 👎→队列→建议→采纳→词条生效)
+ * ============================================================ */
+
+async function loadLearnQueue() {
+    try {
+        var filter = document.getElementById('learnFilter');
+        var status = filter ? filter.value : 'pending';
+        var j = await fetchJson(api(
+            '/api/xiaozhu/dashboard/learn-queue?status=' + status),
+            { headers: adminHeaders() });
+        var stats = j.stats || {};
+        document.getElementById('learnStats').textContent =
+            '待处理 ' + (stats.pending || 0) + ' · 已采纳 '
+            + (stats.adopted || 0) + ' · 已忽略 '
+            + (stats.dismissed || 0);
+        document.getElementById('learnLlmState').textContent =
+            j.llmSuggestOn ? 'AI建议: 开' : 'AI建议: 关(env XIAOZHU_LEARN_LLM)';
+        renderLearnQueue(j.queue || {});
+    } catch (e) { /* fail-soft: 区块失败不阻塞 */ }
+}
+
+function renderLearnQueue(queue) {
+    var body = document.getElementById('learnQueueBody');
+    var entries = Object.keys(queue);
+    if (!entries.length) {
+        body.innerHTML = '<tr><td colspan="6" class="dash-empty">' +
+            '暂无学习条目——用户点👎后自动入队</td></tr>';
+        return;
+    }
+    body.innerHTML = entries.slice(0, 50).map(function (k) {
+        var q = queue[k];
+        var sug = q.suggestion || null;
+        var adopted = q.adopted || null;
+        var pending = q.status === 'pending';
+        var t = (q.feedbackAt || '').replace('T', ' ').slice(5, 16);
+        var sugCell = adopted
+            ? '<b style="color:#355c44">' + esc(adopted.wrong) + '→'
+              + esc(adopted.right) + '</b>(已生效)'
+            : (sug
+                ? '<b>' + esc(sug.wrong) + '→' + esc(sug.right)
+                  + '</b><span style="color:#888">(置信'
+                  + Math.round((sug.confidence || 0) * 100) + '%)</span>'
+                : '<span style="color:#aaa">—</span>');
+        var ops = '';
+        if (pending) {
+            ops = '<button onclick="suggestLearn(\'' + esc(k)
+                  + '\')" style="padding:2px 8px;border:1px solid #355c44;'
+                  + 'border-radius:4px;background:#fff;color:#355c44;'
+                  + 'font-size:11px;cursor:pointer">AI建议</button> '
+                  + '<button onclick="adoptLearn(\'' + esc(k) + '\', '
+                  + (sug ? '\'' + esc(sug.wrong) + '\', \''
+                         + esc(sug.right) + '\'' : 'null, null')
+                  + ')" style="padding:2px 8px;border:1px solid #355c44;'
+                  + 'border-radius:4px;background:#355c44;color:#fff;'
+                  + 'font-size:11px;cursor:pointer">'
+                  + (sug ? '采纳建议' : '采纳') + '</button> '
+                  + '<button onclick="dismissLearn(\'' + esc(k)
+                  + '\')" style="padding:2px 8px;border:1px solid #999;'
+                  + 'border-radius:4px;background:#fff;color:#666;'
+                  + 'font-size:11px;cursor:pointer">忽略</button>';
+        } else {
+            ops = '<span style="color:#aaa">'
+                  + (q.status === 'adopted' ? '已采纳' : '已忽略') + '</span>';
+        }
+        return '<tr><td>' + esc(t) + '</td><td>'
+            + esc(q.rawText || '') + '</td><td>'
+            + esc(q.intent || '') + '</td><td>'
+            + esc((q.reply || '').slice(0, 40)) + '</td><td>'
+            + sugCell + '</td><td>' + ops + '</td></tr>';
+    }).join('');
+}
+
+async function suggestLearn(key) {
+    try {
+        var j = await fetchJson(
+            api('/api/xiaozhu/dashboard/learn-queue/' + key
+                + '/suggest'),
+            { method: 'POST', headers: adminHeaders() });
+        var r = j.result || {};
+        if (r.error) { showError(r.error); return; }
+        if (!r.suggestion) {
+            showError(r.note || 'AI 未给出建议(该轮可能非误听)');
+            return;
+        }
+        showInfo ? showInfo('AI 建议: ' + r.suggestion.wrong + '→'
+            + r.suggestion.right) : null;
+        loadLearnQueue();
+    } catch (e) { showError(e.message); }
+}
+
+async function adoptLearn(key, wrong, right) {
+    if (!wrong || !right) {
+        var w = prompt('误听词(ASR 原文子串):', '');
+        if (!w) return;
+        var r2 = prompt('修正词(正确说法):', '');
+        if (!r2) return;
+        wrong = w;
+        right = r2;
+    }
+    try {
+        await fetchJson(
+            api('/api/xiaozhu/dashboard/learn-queue/' + key
+                + '/adopt'),
+            { method: 'POST', headers: adminHeaders(),
+              body: JSON.stringify({ wrong: wrong, right: right }) });
+        loadLearnQueue();
+    } catch (e) { showError(e.message); }
+}
+
+async function dismissLearn(key) {
+    try {
+        await fetchJson(
+            api('/api/xiaozhu/dashboard/learn-queue/' + key
+                + '/dismiss'),
+            { method: 'POST', headers: adminHeaders() });
+        loadLearnQueue();
+    } catch (e) { showError(e.message); }
 }
 
 /* ============================================================

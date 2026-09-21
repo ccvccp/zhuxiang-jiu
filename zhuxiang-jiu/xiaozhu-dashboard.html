@@ -297,6 +297,35 @@
         </div>
     </div>
 
+    <!-- ⑪ 学习进化(P3: 👎→队列→建议→采纳→词条生效) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑪ 学习进化（P3：👎 自动入队 →
+                AI 建议/人工判定 → 采纳即词条+热词双生效）</h3></div>
+            <div style="display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:11px;color:#888">
+                <span id="learnStats">加载中…</span>
+                <span id="learnLlmState"></span>
+                <select id="learnFilter" onchange="loadLearnQueue()"
+                    style="padding:4px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px">
+                    <option value="pending">待处理</option>
+                    <option value="adopted">已采纳</option>
+                    <option value="dismissed">已忽略</option>
+                    <option value="all">全部</option>
+                </select>
+            </div>
+            <div style="max-height:280px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>时间</th><th>用户说(ASR原文)</th><th>小竹理解</th>
+                        <th>回复摘要</th><th>AI建议/采纳</th><th>操作</th>
+                    </tr></thead>
+                    <tbody id="learnQueueBody"><tr><td colspan="6"
+                        class="dash-empty">暂无学习条目——用户点👎后自动入队</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div class="note-bar">
         后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
         管理端 X-Role: admin · 计划: docs/48号_小竹智能语音中枢实施计划.md

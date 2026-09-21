@@ -33,6 +33,7 @@
     - 默认零影响: XIAOZHU_LLM_MODE 默认 off(规则轨兜底)
 """
 
+import json
 import logging
 import os
 import re
@@ -2324,6 +2325,140 @@ class XiaozhuService:
                 "card": {"type": "history_list",
                          "items": items[-8:],
                          "subject": f"最近{len(shown)}步操作"}}
+
+    # --------------------------------------------------------
+    # 学习进化(P3: 👎 反馈→学习队列→LLM 建议→人工采纳→词条生效)
+    # 红线: 词条必须管理员审核后生效(零误伤——自动采纳可能
+    # 误伤普通话表达); LLM 只产建议不直接入表。
+    # --------------------------------------------------------
+
+    async def learn_enqueue(self, session: dict, turn: dict,
+                            rating: str) -> bool:
+        """👎 轮次入学习队列(含轮次上下文, 同轮次防重)
+
+        fail-soft: 队列满/异常只打日志不阻断反馈落痕。
+        """
+        if rating != "down":
+            return False
+        entry = {
+            "turnId": turn.get("turnId"),
+            "sessionId": turn.get("sessionId"),
+            "seq": turn.get("seq"),
+            "memberId": session.get("memberId"),
+            "channel": turn.get("channel"),
+            "rawText": str(turn.get("rawText") or "")[:200],
+            "intent": turn.get("intent"),
+            "action": turn.get("action"),
+            "reply": str(turn.get("reply") or "")[:200],
+            "feedbackAt": ts(),
+            "status": "pending",
+            "suggestion": None,
+        }
+        try:
+            added = await self.repo.enqueue_learn(entry)
+            if not added:
+                logger.debug("voice48_learn_enqueue_skipped"
+                             "(dup/full) sid=%s seq=%s",
+                             entry["sessionId"], entry["seq"])
+            return added
+        except Exception as exc:
+            logger.warning("voice48_learn_enqueue_failed: %s", exc)
+            return False
+
+    async def learn_suggest(self, key: str) -> dict | None:
+        """LLM 修正建议(P3 学习辅助——管理员手动触发, 建议不
+        直接生效): 分析 👎 轮转写文本给出音近误听候选
+
+        开关 XIAOZHU_LEARN_LLM(默认 off)+ 智谱 key; 失败/
+        未配置返回 None(调用方给明确提示)。
+        """
+        if os.environ.get(
+                "XIAOZHU_LEARN_LLM", "off").lower() \
+                not in ("on", "1", "true"):
+            return {"error": "LLM 建议轨未开启"
+                           "(XIAOZHU_LEARN_LLM=on)"}
+        queue = await self.repo.list_learn_queue()
+        entry = queue.get(key)
+        if not entry:
+            return {"error": "队列条目不存在"}
+        raw_text = str(entry.get("rawText") or "").strip()
+        if not raw_text:
+            return {"error": "该轮无转写文本(识别失败轮)"
+                           "——无法推断误听词"}
+        from services.llm_client import provider_client
+        system = (
+            "你是语音购物助手的ASR误听分析器。用户语音被转写成"
+            "文本后对回复点了踩(可能存在ASR误听)。根据上下文"
+            "推断转写文本中最可能是误听的词, 只输出一个 JSON "
+            "对象不要其他文字:\n"
+            '{"wrong": "<误听词, 原文子串, 2-12字>", '
+            '"right": "<正确词, 2-12字>", '
+            '"confidence": <0-1小数>}\n'
+            "规则:\n"
+            "- wrong 必须是转写文本中出现的连续子串\n"
+            "- right 是该词的正确说法(指令词/商品词/普通话)\n"
+            "- 若无法可靠推断(闲聊不满/回复错而非误听), "
+            "输出 {\"wrong\": \"\"}\n"
+            "- 本站商品: 竹香/竹奕/竹韵佳酿; 指令词: 看新品/"
+            "问价格/查订单/查优惠/结算/加入购物车"
+        )
+        user = (f"转写文本: {raw_text}\n"
+                f"小竹理解为: {entry.get('intent')}"
+                f"(action={entry.get('action')})\n"
+                f"小竹回复: {str(entry.get('reply'))[:120]}")
+        try:
+            out = provider_client.chat(system, user)
+        except Exception as exc:
+            logger.warning("voice48_learn_suggest_failed: %s", exc)
+            return {"error": "LLM 调用失败"}
+        if not out:
+            return {"error": "LLM 未配置或调用失败"}
+        try:
+            data = json.loads(out.strip())
+        except (TypeError, ValueError):
+            return {"error": "LLM 输出解析失败"}
+        wrong = str(data.get("wrong") or "").strip()
+        right = str(data.get("right") or "").strip()
+        if not wrong or not right or wrong not in raw_text:
+            return {"suggestion": None,
+                    "note": "LLM 判断该轮非误听问题"}
+        suggestion = {"wrong": wrong[:12], "right": right[:12],
+                      "confidence": data.get("confidence")}
+        await self.repo.resolve_learn(
+            key, "pending", patch={"suggestion": suggestion})
+        return {"suggestion": suggestion}
+
+    async def learn_adopt(self, key: str, wrong: str,
+                          right: str) -> dict:
+        """采纳学习条目: 词条落误听表(source=learn, 可删可改)
+        + 队列标记 adopted——下一轮语音即生效(修正+热词)
+
+        Raises: ValueError(词条非法/队列条目不存在)
+        """
+        wrong = str(wrong or "").strip()
+        right = str(right or "").strip()
+        if not wrong or not right:
+            raise ValueError("需含 wrong/right")
+        if len(wrong) > 12 or len(right) > 12:
+            raise ValueError("词条过长(≤12 字)")
+        if wrong == right:
+            raise ValueError("误听词与修正词相同")
+        queue = await self.repo.list_learn_queue()
+        if key not in queue:
+            raise KeyError("队列条目不存在")
+        fixes = await self.repo.list_asr_fixes()
+        rec = fixes.get(right) or {}
+        if rec.get("to") == wrong:
+            raise ValueError(f"循环修正拒绝: 「{right}」已指向"
+                             f"「{wrong}」")
+        record = await self.repo.save_asr_fix(
+            wrong, right, source="learn")
+        await self.repo.resolve_learn(
+            key, "adopted",
+            patch={"adopted": {"wrong": wrong, "right": right}})
+        logger.info("voice48_learn_adopted %s→%s (key=%s)",
+                    wrong, right, key)
+        return record
 
     async def _asr_hotwords(self) -> list[str]:
         """ASR 热词表(P0 Fun-ASR: system 实体词表数据源)

@@ -58,6 +58,7 @@ import base64
 import contextlib
 import json
 import logging
+import os
 
 from fastapi import (
     APIRouter, Header, HTTPException, WebSocket,
@@ -597,6 +598,14 @@ async def turn_feedback(
         await repo.save_turn_feedback(
             session_id, int(target.get("seq") or 0),
             str(body["rating"]))
+        # P3 学习进化: 👎 自动入学习队列(fail-soft——
+        # 队列异常不阻断反馈落痕; 👍 不入队)
+        try:
+            from services.xiaozhu_service import XiaozhuService
+            await XiaozhuService().learn_enqueue(
+                session, target, str(body["rating"]))
+        except Exception as e:
+            logger.warning("learn_enqueue_route_skip: %s", e)
         return {"success": True, "turnId": turn_id,
                 "seq": target.get("seq"),
                 "rating": body["rating"]}
@@ -899,6 +908,101 @@ async def asr_fixes_delete(
         return {"success": True, "removed": removed}
     except HTTPException:
         raise
+    except Exception as e:
+        raise _handle(e) from e
+
+
+# ============================================================
+# 学习进化队列(P3: 👎→队列→建议→采纳→词条生效)
+# ============================================================
+
+@router.get("/dashboard/learn-queue")
+async def learn_queue_list(
+        status: str = "pending",
+        x_role: str = Header(default="", alias="X-Role")):
+    """学习进化队列(P3——👎 轮上下文+处置状态, admin)
+
+    query status: pending(默认)/adopted/dismissed/all
+    """
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from repositories.xiaozhu_repository import (
+            Xiaozhu48Repository,
+        )
+        repo = Xiaozhu48Repository()
+        status = status if status in ("pending", "adopted",
+                                      "dismissed") else None
+        queue = await repo.list_learn_queue(status)
+        stats = {"pending": 0, "adopted": 0, "dismissed": 0}
+        for entry in (await repo.list_learn_queue()).values():
+            s = entry.get("status")
+            if s in stats:
+                stats[s] += 1
+        return {"success": True, "queue": queue,
+                "stats": stats,
+                "llmSuggestOn": os.environ.get(
+                    "XIAOZHU_LEARN_LLM", "off").lower()
+                in ("on", "1", "true")}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/dashboard/learn-queue/{key}/suggest")
+async def learn_queue_suggest(
+        key: str,
+        x_role: str = Header(default="", alias="X-Role")):
+    """LLM 修正建议(P3 辅助——手动触发, 建议不直接生效)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_service import XiaozhuService
+        return {"success": True,
+                "result": await XiaozhuService().learn_suggest(
+                    str(key))}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/dashboard/learn-queue/{key}/adopt")
+async def learn_queue_adopt(
+        key: str, body: dict,
+        x_role: str = Header(default="", alias="X-Role")):
+    """采纳学习条目(P3 闭环: 词条落误听表 source=learn,
+    队列标记 adopted——下一轮语音即生效)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from services.xiaozhu_service import XiaozhuService
+        record = await XiaozhuService().learn_adopt(
+            str(key),
+            str((body or {}).get("wrong") or ""),
+            str((body or {}).get("right") or ""))
+        return {"success": True, "record": record}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/dashboard/learn-queue/{key}/dismiss")
+async def learn_queue_dismiss(
+        key: str,
+        x_role: str = Header(default="", alias="X-Role")):
+    """忽略学习条目(非误听问题——闲聊不满/回复错等)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from repositories.xiaozhu_repository import (
+            Xiaozhu48Repository,
+        )
+        resolved = await Xiaozhu48Repository().resolve_learn(
+            str(key), "dismissed")
+        if not resolved:
+            raise KeyError("队列条目不存在")
+        return {"success": True}
     except Exception as e:
         raise _handle(e) from e
 
