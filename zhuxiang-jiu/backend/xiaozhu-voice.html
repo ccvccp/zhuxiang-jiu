@@ -1066,7 +1066,22 @@ function sendVoice(b64, durationSec) {
          免唤醒直接执行("给我买42度500ml的酒"不再要求叫小竹);
          免提后台聆听不传——反语音霸权红线不变 */
       mode: S.handfree ? undefined : "tap" })
-  }).then(function (j) {
+  }).then(handleVoiceResp).catch(function (e) { setPending(false); removeTyping(); setMicStatus("云端识别失败"); turnError(e); scheduleHandfree(1200); });
+}
+/* P1 流式轨提交: 转写已在流式会话完成(说完了就出字),
+   只 POST 最终文本+流式统计——跳过重复转写与音频上传 */
+function postVoiceTranscript(text, durationSec) {
+  setPending(true);
+  showTyping();
+  apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
+    method: "POST",
+    body: JSON.stringify({ textTranscript: text, filename: "audio.wav",
+      durationSec: Math.round(durationSec * 10) / 10,
+      streamBytes: stBytes, mode: S.handfree ? undefined : "tap" })
+  }).then(handleVoiceResp).catch(function (e) { setPending(false); removeTyping(); setMicStatus("提交失败"); turnError(e); scheduleHandfree(1200); });
+}
+/* 语音轮次响应处理(整段轨/流式轨共用) */
+function handleVoiceResp(j) {
     setPending(false); removeTyping();
     setMicStatus("云端识别完成");
     if (!j || j.success === false) { appendBot((j && (j.error || j.detail)) || "语音链路失败", null, null, "__err__"); return; }
@@ -1107,7 +1122,95 @@ function sendVoice(b64, durationSec) {
     }
     appendUser(rt || "(语音)", "voice");
     handleTurn(j, "voice");
-  }).catch(function (e) { setPending(false); removeTyping(); setMicStatus("云端识别失败"); turnError(e); scheduleHandfree(1200); });
+}
+/* ===== P1 流式识别轨(PCM→WS→百炼实时识别→partial 实时显示) ===== */
+var stWS = null, stOn = true, stAccum = new Float32Array(0),
+    stBytes = 0, stPhase = 0, stFinalCb = null, stSent = 0;
+function streamConnect() {
+  /* 每轮新建(简单可靠); 失败一次本轮+后续自动回退整段上传轨 */
+  stAccum = new Float32Array(0); stBytes = 0; stPhase = 0; stSent = 0;
+  stFinalCb = null;
+  try {
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    stWS = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
+    stWS.binaryType = "arraybuffer";
+  } catch (e) { stWS = null; return; }
+  var failTimer = setTimeout(function () {
+    if (stWS && stWS.readyState !== 1) { stOn = false; streamTeardown(); }
+  }, 5000);
+  stWS.onopen = function () {
+    stWS.send(JSON.stringify({ type: "auth", token: (getAuth() || {}).token || "" }));
+  };
+  stWS.onmessage = function (e) {
+    if (typeof e.data !== "string") return;
+    var m;
+    try { m = JSON.parse(e.data); } catch (ex) { return; }
+    if (m.type === "partial" && m.text) {
+      /* 边说边出字: 麦克风状态区实时显示中间结果(自纠错) */
+      setMicStatus('🗣 <b class="rec">' + m.text + "</b>");
+    } else if (m.type === "final") {
+      var cb = stFinalCb; stFinalCb = null;
+      if (cb) cb(m.text || "");
+    } else if (m.type === "error") {
+      stOn = false; streamTeardown();
+      if (m.fallback === "upload" && stFinalCb) {
+        var cb2 = stFinalCb; stFinalCb = null; cb2("");
+      }
+    }
+  };
+  stWS.onclose = function () {
+    clearTimeout(failTimer);
+    if (stFinalCb) { var cb = stFinalCb; stFinalCb = null; cb(""); }
+    if (stWS) stWS = null;
+  };
+  stWS.onerror = function () { /* onclose 兜底处理 */ };
+}
+function streamTeardown() {
+  if (stWS) { try { stWS.close(); } catch (e) {} stWS = null; }
+}
+/* 采集块(源采样率)→线性重采样 16k→攒 200ms 帧→Int16 发送 */
+function streamFeed(f32) {
+  if (!stWS || stWS.readyState !== 1) return;
+  var srcRate = audioCtx.sampleRate, dstRate = 16000;
+  var ratio = srcRate / dstRate;
+  var out = [];
+  for (var i = stPhase; i < f32.length; i += ratio) {
+    var i0 = Math.floor(i), frac = i - i0;
+    var v = f32[i0] * (1 - frac);
+    if (i0 + 1 < f32.length) v += f32[i0 + 1] * frac;
+    out.push(v);
+  }
+  stPhase = i - f32.length;
+  var merged = new Float32Array(stAccum.length + out.length);
+  merged.set(stAccum); merged.set(out, stAccum.length);
+  stAccum = merged;
+  stBytes += out.length * 2;
+  /* 3200 样本 = 200ms@16k(6.4KB/帧——百炼 ≤16KB 约束内) */
+  while (stAccum.length >= 3200) {
+    var i16 = new Int16Array(3200);
+    for (var k = 0; k < 3200; k++) {
+      var s = Math.max(-1, Math.min(1, stAccum[k]));
+      i16[k] = s < 0 ? s * 32768 : s * 32767;
+    }
+    try { stWS.send(i16.buffer); stSent++; } catch (e) { return; }
+    stAccum = stAccum.slice(3200);
+  }
+}
+/* cloudStop 流式优先收尾: finish→final→直接提交文本;
+   final 空/超时(4s)→cb("") 回退整段 WAV 上传轨 */
+function streamFinish(cb) {
+  if (!stWS || stWS.readyState !== 1 || !stSent) { cb(""); return; }
+  setMicStatus("整理语音…");
+  var to = setTimeout(function () {
+    if (stFinalCb) { var f = stFinalCb; stFinalCb = null; f(""); }
+  }, 4000);
+  stFinalCb = function (final) {
+    clearTimeout(to);
+    if (stWS) { try { stWS.close(); } catch (e) {} stWS = null; }
+    cb(final);
+  };
+  try { stWS.send(JSON.stringify({ type: "finish" })); }
+  catch (e) { clearTimeout(to); stFinalCb = null; cb(""); }
 }
 /* TTS 回声判定: 转写为最近播报文本的子串(归一化去标点;
    限 2-12 字——长转写几乎不可能是纯回声, 防误杀) */
@@ -1544,6 +1647,9 @@ function cloudStart() {
   /* v2 打断: 开麦即停旧轮播报/合成(用户开口优先于
      喇叭还嘴——连续对话时旧轮话音立即让位) */
   if (S.ttsPlaying || S.ttsAbort) stopTtsNow();
+  /* P1 流式轨: 开麦即建 WS(百炼实时识别, 边说边出字);
+     建连失败本轮+后续自动回退整段上传轨 */
+  if (stOn) streamConnect();
   /* 免提续听流复用: 已授权流与上下文存活时直接重挂采集节点
      ——X5/微信重取 getUserMedia 耗时数秒, 每轮重取致句首
      丢字("小竹看新品"→"长期刚见"/唤醒词被裁) */
@@ -1596,7 +1702,10 @@ function wireCloudCapture() {
     procNode = audioCtx.createScriptProcessor(4096, 1, 1);
     pcmChunks = [];
     procNode.onaudioprocess = function (e) {
-      pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      var f32 = new Float32Array(e.inputBuffer.getChannelData(0));
+      pcmChunks.push(f32);
+      /* P1 流式轨: 边采集边重采样转发(WS 未就绪时零开销) */
+      streamFeed(f32);
     };
     srcNode.connect(procNode);
     procNode.connect(audioCtx.destination);
@@ -1692,6 +1801,7 @@ function cloudStop() {
   var dur = (Date.now() - recStart) / 1000;
   if (!pcmChunks.length || dur < 0.5) {
     setMicStatus("录音太短，未发送");
+    streamTeardown();
     scheduleHandfree(600);
     return;
   }
@@ -1699,24 +1809,34 @@ function cloudStop() {
   if (S.handfree && !S.vadSpoke) {
     showToast("没听到声音——请离麦克风近一点再说");
     setMicStatus("🎧 免提聆听中 · 请<b>靠近一点直接说话</b>，说完自动发送");
+    streamTeardown();
     scheduleHandfree(300);
     return;
   }
-  setMicStatus("编码 WAV…");
-  try {
-    var wav = encodeWav(pcmChunks, rate, 16000);
-    if (!wav) {
-      /* 裁剪后无有效语音(全程静音) → 明确提示(不静默丢弃) */
-      showToast("没听到声音——请离麦克风近一点再说");
-      setMicStatus("🎧 免提聆听中 · 请<b>靠近一点直接说话</b>");
-      scheduleHandfree(300);
+  /* P1 流式轨优先: 说完直接提交已转写文本(零重复转写零上传);
+     final 空/超时 → 回退整段 WAV 上传轨 */
+  streamFinish(function (finalText) {
+    if (finalText && finalText.trim()) {
+      postVoiceTranscript(finalText.trim(), dur);
       return;
     }
-    sendVoice(arrayBufferToBase64(wav), dur);
-  } catch (e) {
-    setMicStatus("编码失败: " + (e && e.message ? e.message : e));
-    scheduleHandfree(600);
-  }
+    streamTeardown();
+    setMicStatus("编码 WAV…");
+    try {
+      var wav = encodeWav(pcmChunks, rate, 16000);
+      if (!wav) {
+        /* 裁剪后无有效语音(全程静音) → 明确提示(不静默丢弃) */
+        showToast("没听到声音——请离麦克风近一点再说");
+        setMicStatus("🎧 免提聆听中 · 请<b>靠近一点直接说话</b>");
+        scheduleHandfree(300);
+        return;
+      }
+      sendVoice(arrayBufferToBase64(wav), dur);
+    } catch (e) {
+      setMicStatus("编码失败: " + (e && e.message ? e.message : e));
+      scheduleHandfree(600);
+    }
+  });
 }
 /* Float32 单声道块 → (有效语音段裁剪+线性降采样) → 16bit PCM WAV
    targetRate: 目标采样率——16kHz 为 ASR 足够精度, 48kHz 录音降 3 倍体积

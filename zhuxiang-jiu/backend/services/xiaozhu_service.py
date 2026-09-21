@@ -782,6 +782,8 @@ class XiaozhuService:
                            filename: str = "audio.webm",
                            duration_sec: float = None,
                            wakeup_free: bool = False,
+                           transcript: str = None,
+                           stream_bytes: int = 0,
                            ) -> dict:
         """语音轮次全链: ASR(35号复用)→唤醒→指令路由→直达
 
@@ -792,31 +794,56 @@ class XiaozhuService:
         = 明确交互意图(与键盘输入同级), 跳过唤醒词要求;
         H5 免提后台录音不传此参——反语音霸权红线不变。
 
+        transcript(P1 流式轨): 百炼实时识别的最终文本——跳过
+        重复转写直进指令链(误听修正/唤醒/audioMeta 全保留);
+        stream_bytes 为流式 PCM 累计字节(audioMeta 观测用)。
+
         Raises:
             KeyError: 会话不存在/已关闭
         """
         session = await self._require_open(session_id)
         audio_meta = {
-            "sizeBytes": len(audio_bytes or b""),
+            "sizeBytes": (int(stream_bytes)
+                          if stream_bytes else len(audio_bytes or b"")),
             "durationSec": (round(float(duration_sec), 1)
                             if duration_sec else None),
         }
-        # ASR 转写(35号链路整段复用: 限流/降级/临时文件即删;
-        # 热词三源注入——百炼 Fun-ASR 轨经 system 实体词表生效,
-        # 智谱轨忽略该参数零开销)
         import time as _t
         _asr_t0 = _t.monotonic()
-        from services.hub_service import HubService
-        asr = await HubService().transcribe_upload(
-            audio_bytes, filename=filename,
-            member_id=member_id,
-            hotwords=await self._asr_hotwords())
+        if transcript:
+            # P1 流式轨: 转写已在流式会话完成, 同享日限流
+            # (HUB_ASR_DAILY_LIMIT 红线不因通道而绕过)
+            from services.hub_service import _asr_daily_limit
+            from repositories.hub_repository import HubRepository
+            limit = _asr_daily_limit()
+            if member_id:
+                _, over = await HubRepository().bump_asr_usage(
+                    member_id, limit)
+                if over:
+                    return await self._save_turn(
+                        session, "voice", "", "asr_failed",
+                        {"reply": f"今日语音额度已用完"
+                                  f"(限 {limit} 次/日)",
+                         "fallbackHint": "keyboard"},
+                        {"audioMeta": audio_meta})
+            asr = {"success": True, "text": transcript}
+        else:
+            # ASR 转写(35号链路整段复用: 限流/降级/临时文件即删;
+            # 热词三源注入——百炼 Fun-ASR 轨经即时热词 vocabulary
+            # 生效, 智谱轨忽略该参数零开销)
+            from services.hub_service import HubService
+            asr = await HubService().transcribe_upload(
+                audio_bytes, filename=filename,
+                member_id=member_id,
+                hotwords=await self._asr_hotwords())
         logger.info("voice48_timing sid=%s asr_ms=%d "
-                    "audio_bytes=%d dur_s=%s",
+                    "audio_bytes=%d dur_s=%s%s",
                     session_id,
                     round((_t.monotonic() - _asr_t0) * 1000),
-                    len(audio_bytes or b""),
-                    duration_sec)
+                    (int(stream_bytes) if stream_bytes
+                     else len(audio_bytes or b"")),
+                    duration_sec,
+                    " stream=1" if transcript else "")
         if not asr.get("success"):
             return await self._save_turn(
                 session, "voice", "", "asr_failed",

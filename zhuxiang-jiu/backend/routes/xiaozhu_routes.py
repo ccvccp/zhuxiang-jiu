@@ -5,8 +5,13 @@
      + 50号P3 6 + 50号P4 3 + 50号P5 3 + 三期观测 1
      = 45):
     POST /api/xiaozhu/sessions              开启会话
-    POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链)
+    POST /api/xiaozhu/sessions/{id}/voice   语音轮次(音频全链;
+                                             P1 流式轨传 textTranscript
+                                             跳过重复转写)
     POST /api/xiaozhu/sessions/{id}/text    文本轮次(同链)
+    WS   /api/xiaozhu/ws/asr                流式语音识别代理(P1:
+                                             H5 PCM 帧→百炼实时
+                                             识别→partial 流式推回)
     GET  /api/xiaozhu/sessions/{id}          会话视图(轮次历史)
     DELETE /api/xiaozhu/sessions/{id}       一键清除(级联轮次)
     GET  /api/xiaozhu/commands              指令集自描述
@@ -48,10 +53,15 @@
     - KeyError → 404 / ValueError → 409(44-47号同款)
 """
 
+import asyncio
 import base64
+import contextlib
+import json
 import logging
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import (
+    APIRouter, Header, HTTPException, WebSocket,
+)
 from fastapi.responses import Response
 
 logger = logging.getLogger("xiaozhu_routes")
@@ -192,22 +202,30 @@ async def voice_turn(session_id: int, body: dict,
 ):
     """语音轮次: 音频→ASR(35号链路)→唤醒判定→指令直达
 
-    body: {audioBase64(必填), filename?, durationSec?,
-           mode?='tap'(点击录音——用户主动按下麦克风=明确
-           交互, 免唤醒词; H5 免提后台录音不传)}
+    body: {audioBase64(整段轨) 或 textTranscript(P1 流式轨,
+           二选一), filename?, durationSec?, streamBytes?(流式
+           PCM 累计字节), mode?='tap'(点击录音——用户主动按下
+           麦克风=明确交互, 免唤醒词; H5 免提后台录音不传)}
     音频即转即删(临时文件在 hub 层删除, 小竹只落元信息)
     """
     member_id = _require_member(x_member_id)
-    if not isinstance(body, dict) \
-            or not body.get("audioBase64"):
+    if not isinstance(body, dict):
         raise HTTPException(
-            status_code=409, detail="请求体需含 audioBase64")
-    try:
-        audio_bytes = base64.b64decode(
-            str(body["audioBase64"]))
-    except (ValueError, TypeError) as exc:
-        raise HTTPException(
-            status_code=409, detail="audioBase64 编码非法") from exc
+            status_code=409, detail="请求体需为对象")
+    transcript = str(body.get("textTranscript") or "").strip()
+    audio_bytes = b""
+    if not transcript:
+        if not body.get("audioBase64"):
+            raise HTTPException(
+                status_code=409,
+                detail="请求体需含 audioBase64 或 textTranscript")
+        try:
+            audio_bytes = base64.b64decode(
+                str(body["audioBase64"]))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="audioBase64 编码非法") from exc
     try:
         from services.xiaozhu_service import XiaozhuService
         return await XiaozhuService().handle_voice(
@@ -216,7 +234,9 @@ async def voice_turn(session_id: int, body: dict,
                          or "audio.webm"),
             duration_sec=body.get("durationSec"),
             wakeup_free=(str(body.get("mode") or "")
-                         == "tap"))
+                         == "tap"),
+            transcript=transcript or None,
+            stream_bytes=int(body.get("streamBytes") or 0))
     except Exception as e:
         raise _handle(e) from e
 
@@ -234,6 +254,98 @@ async def text_turn(session_id: int, body: dict):
             session_id, str(body.get("text") or ""))
     except Exception as e:
         raise _handle(e) from e
+
+
+# ============================================================
+# 流式语音识别代理(P1: H5 PCM 帧→百炼实时识别→partial 推回)
+# ============================================================
+
+@router.websocket("/ws/asr")
+async def ws_asr(ws: WebSocket):
+    """流式 ASR 代理(首条消息鉴权——浏览器 WS 不能自定义 header)
+
+    协议(H5 ↔ 后端):
+        → {"type":"auth","token":"<JWT>"}     鉴权
+        ← {"type":"ready"}                     就绪(可发音频)
+        → 二进制帧(16k 16bit mono PCM, ~200ms) 音频
+        ← {"type":"partial","text":"..."}      中间结果(流式)
+        → {"type":"finish"}                    说完
+        ← {"type":"final","text":"..."}        最终文本
+        ← {"type":"error","error":"...","fallback":"upload"}
+        (任何失败 H5 回退整段上传轨)
+    """
+    await ws.accept()
+    try:
+        # ① 首条消息鉴权(JWT 中间件不拦 WS——type=websocket)
+        raw = await asyncio.wait_for(
+            ws.receive_text(), timeout=5)
+        auth = json.loads(raw)
+        from services.auth_service import AuthService
+        member = await AuthService().get_current_member(
+            str(auth.get("token") or ""))
+        if not member:
+            raise ValueError("会员不存在")
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            await ws.send_json({"type": "error",
+                                "error": f"鉴权失败: {e}"})
+        await ws.close()
+        return
+
+    # ② 并发上限(资源红线)
+    from services.asr_stream_service import (
+        AsrStreamSession, _max_conns, active_conns,
+    )
+    if active_conns() >= _max_conns():
+        await ws.send_json({"type": "error",
+                           "error": "流式通道繁忙, 请稍后重试",
+                           "fallback": "upload"})
+        await ws.close()
+        return
+
+    # ③ 热词三源 + 建百炼流式连
+    from services.xiaozhu_service import XiaozhuService
+    session = AsrStreamSession(ws.send_json)
+    try:
+        if not await session.start(
+                await XiaozhuService()._asr_hotwords()):
+            await ws.send_json({"type": "error",
+                                "error": "流式识别不可用",
+                                "fallback": "upload"})
+            await ws.close()
+            return
+        await ws.send_json({"type": "ready"})
+        # ④ 消息泵: 二进制帧→feed / finish→final
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            if msg.get("bytes"):
+                await session.feed(msg["bytes"])
+                continue
+            text = msg.get("text")
+            if not text:
+                continue
+            try:
+                m = json.loads(text)
+            except (ValueError, TypeError):
+                continue
+            if m.get("type") == "finish":
+                final = await session.finish()
+                if final is None:
+                    await ws.send_json(
+                        {"type": "error",
+                         "error": session.failed
+                         or "流式识别未出结果",
+                         "fallback": "upload"})
+                else:
+                    await ws.send_json({"type": "final",
+                                        "text": final})
+                break
+    except Exception as e:
+        logger.warning("ws_asr_error: %s", e)
+    finally:
+        await session.close()
 
 
 @router.get("/sessions/{session_id}")
