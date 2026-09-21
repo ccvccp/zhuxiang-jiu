@@ -220,7 +220,8 @@
         活动解释权归竹香酒官方所有 · 奖品概率公示符合合规要求<br>
         <a href="zyh.html">🎋 竹酒知识问答（竹韵·智衡）</a> ·
         <a href="synapse.html">🧵 品牌内容织造（织智）</a> ·
-        <a href="zjian.html">🔬 品质检测查询（竹鉴）</a><br>
+        <a href="zjian.html">🔬 品质检测查询（竹鉴）</a> ·
+        <a href="activity-dashboard.html">⚙️ 活动管理后台</a><br>
         健康警示：过量饮酒有害健康 · 未成年人禁止饮酒
     </footer>
 </div>
@@ -331,6 +332,7 @@
             refreshToken: body.refreshToken || null,
             memberId: body.memberId || null,
             name: body.name || body.nickname || null,
+            role: body.role || 'member',
             savedAt: Date.now(),
         }));
     }
@@ -376,14 +378,34 @@
         return false;
     }
 
-    /* ---------- 顶栏渲染 ---------- */
+    /* ---------- 顶栏渲染(admin 角色显示管理后台直达) ---------- */
+
+    /* 会话角色: 新会话直读; 老会话未存 role 时解析 JWT payload 兜底
+       (仅前端展示用途, 真实权限始终由服务端 JWT 校验决定) */
+    function sessionRole(s) {
+        if (s && s.role) { return s.role; }
+        try {
+            var part = String(s.token).split('.')[1]
+                .replace(/-/g, '+').replace(/_/g, '/');
+            var payload = JSON.parse(atob(part));
+            return payload.role || 'member';
+        } catch (e) { return 'member'; }
+    }
+
     function renderAuth() {
         var s = session();
         if (s && s.token) {
+            var isAdmin = sessionRole(s) === 'admin';
             $('authBox').innerHTML =
                 '<div class="user-chip">会员 '
                 + esc(s.name || (s.memberId != null ? '#' + s.memberId : ''))
-                + '</div><button class="btn" onclick="doLogout()">退出</button>';
+                + (isAdmin ? '（管理员）' : '')
+                + '</div>'
+                + (isAdmin
+                    ? '<button class="btn" style="margin-bottom:4px" '
+                      + 'onclick="location.href=\'activity-dashboard.html\'">管理后台</button>'
+                    : '')
+                + '<button class="btn" onclick="doLogout()">退出</button>';
         } else {
             $('authBox').innerHTML =
                 '<button class="btn" onclick="toggleDrawer(true)">登录</button>';
