@@ -1,7 +1,8 @@
 """活动管理模块路由(20 端点)
 
 鉴权:
-    - 用户端(6接口): X-Member-Id 头标识当前会员
+    - 用户端(6接口): X-Member-Id 头标识当前会员(报名/取消/抽奖
+      要求头与 body.userId 一致——仅本人可操作)
     - 管理端(8接口): X-Role: admin 头(创建/编辑/状态流转/审核/管理端列表等)
     - 抽奖发奖(6, P1-12): 奖品池配置/查询公示(公开)/抽奖/我的奖品/
       实物发货登记(admin)/签收确认(中奖人)/管理端发奖记录列表
@@ -193,7 +194,7 @@ async def my_registrations(
 
     注: 必须注册在 /{activity_id} 之前, 否则会被路径参数吞掉
     """
-    user_id = _require_member_id(x_member_id)
+    user_id = int(_require_member_id(x_member_id))
     try:
         result = await _service.list_my_registrations(user_id)
         return {"success": True, "data": result, "count": len(result)}
@@ -219,7 +220,9 @@ async def register(
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
     """活动报名(幂等防重, 同一用户对同一活动仅可报名一次)"""
-    _require_member_id(x_member_id)
+    member_id = _require_member_id(x_member_id)
+    if str(member_id) != str(data.userId):
+        raise HTTPException(status_code=403, detail="仅本人可报名")
     try:
         result = await _service.register(
             activity_id=data.activityId,
@@ -237,7 +240,9 @@ async def cancel_registration(
     x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
     """取消报名(报名中/进行中状态可取消)"""
-    _require_member_id(x_member_id)
+    member_id = _require_member_id(x_member_id)
+    if str(member_id) != str(data.userId):
+        raise HTTPException(status_code=403, detail="仅本人可取消报名")
     try:
         result = await _service.cancel_registration(data.activityId, data.userId)
         return {"success": True, "data": result}

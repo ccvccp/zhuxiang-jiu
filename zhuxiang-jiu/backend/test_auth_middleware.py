@@ -203,6 +203,25 @@ class TestPathPolicy:
                    "/api/maintenance/health")),
                "健康检查端点未全部列入公开清单")
 
+        # test 8: 活动详情 GET 动态路径公开(C端活动详情页游客可浏览)
+        status, _, reached = await invoke(
+            mw, make_scope("GET", "/api/activity/5"))
+        record("test_08_public_get_activity_detail",
+               reached and status == 200,
+               f"reached={reached}, status={status}")
+
+        # test 9: 奖品池公示 GET 公开(概率公示合规要求; POST draw 不公开)
+        record("test_09_public_get_lottery_prizes",
+               is_public_path("/api/activity/lottery/3/prizes", "GET")
+               and not is_public_path("/api/activity/lottery/draw", "POST"),
+               "奖品池 GET 应公开, 抽奖 POST 应鉴权")
+
+        # test 10: 会员私有 GET 端点不可公开(防伪造 X-Member-Id 越权)
+        record("test_10_member_private_get_not_public",
+               not is_public_path("/api/activity/my-registrations", "GET")
+               and not is_public_path("/api/activity/prizes/mine", "GET"),
+               "my-registrations/prizes-mine 被误判为公开")
+
 
 # ============================================================
 # 2. JWT 校验与身份注入

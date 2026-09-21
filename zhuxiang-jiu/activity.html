@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<!--
+    activity.html · 09号·活动中心 C端活动列表页(自包含, 零外部依赖)
+    ============================================================
+    部署: 生产 dist 根 /var/www/zxjiu/dist/activity.html(nginx try_files 直 serve)
+    定位: 活动中心 C端入口(URL 直达 https://zxjiu.com/activity.html)——
+          游客可浏览全部非草稿活动; 会员登录后可报名/取消
+    主题: 竹绿 #355c44 × #4a7c59 × 金 #c9a961(对齐 activity-dashboard)
+    数据源:
+        游客(公开 GET 白名单): /api/activity/list 活动列表
+        登录(JWT): /api/activity/my-registrations 我的报名 +
+            POST /api/activity/cancel 取消报名
+    鉴权: 精简 JWT 链——login → localStorage 'zhuxiang.auth' →
+          apiFetch(401 → refresh → retry 一次自愈)
+    姊妹页: activity-detail.html 活动详情(报名/奖品池/擂台榜);
+            activity-dashboard.html B端管理后台
+    本地调试: activity.html?api=http://localhost:8001 覆盖 API base。
+    ============================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#355c44">
+<title>活动中心 · 竹香酒</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+            "Helvetica Neue", "Microsoft YaHei", sans-serif;
+        background: #f6f4ee; color: #2c2c2c; line-height: 1.65;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 0 14px 40px; }
+
+    /* 顶栏(竹绿) */
+    .topbar {
+        position: sticky; top: 0; z-index: 20;
+        background: linear-gradient(135deg, #355c44, #4a7c59);
+        color: #fff; padding: 12px 16px;
+        display: flex; align-items: center; justify-content: space-between;
+        box-shadow: 0 2px 8px rgba(53,92,68,.25);
+    }
+    .brand { font-size: 17px; font-weight: 600; letter-spacing: 1px; }
+    .brand small { font-weight: 400; opacity: .75; font-size: 11px; display: block; letter-spacing: 0; }
+    .brand .seal { color: #e6cf9f; }
+    .auth-box { text-align: right; }
+    .btn {
+        border: none; border-radius: 6px; cursor: pointer; font-size: 13px;
+        padding: 7px 14px; background: rgba(255,255,255,.16); color: #fff;
+    }
+    .btn:active { opacity: .8; }
+    .btn.primary { background: #4a7c59; color: #fff; }
+    .btn.gold { background: #c9a961; color: #fff; }
+    .btn.ghost { background: #fff; color: #355c44; border: 1px solid #c3d4c8; }
+    .user-chip { font-size: 12px; opacity: .9; margin-bottom: 4px; }
+
+    /* 提示卡 */
+    .hero {
+        margin: 14px 0; background: #fff; border-radius: 12px; padding: 16px;
+        box-shadow: 0 1px 4px rgba(53,92,68,.08); border-top: 3px solid #4a7c59;
+    }
+    .hero h1 { font-size: 16px; color: #355c44; margin-bottom: 4px; }
+    .hero p { font-size: 12.5px; color: #6b6b6b; }
+    .hero .tagline { color: #8a6d2f; }
+
+    /* 筛选区 */
+    .filter-card {
+        background: #fff; border-radius: 12px; padding: 14px 16px;
+        box-shadow: 0 1px 4px rgba(53,92,68,.08); margin-bottom: 14px;
+    }
+    .filter-row-label { font-size: 12px; color: #8a978f; margin: 4px 0 6px; }
+    .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pill {
+        border: 1px solid #c3d4c8; background: #f4f7f5; color: #355c44;
+        border-radius: 999px; padding: 3px 12px; font-size: 12px; cursor: pointer;
+        transition: all .15s;
+    }
+    .pill.active { background: #355c44; color: #fff; border-color: #355c44; }
+
+    /* 活动卡列表 */
+    .sec-title {
+        font-size: 15px; color: #355c44; margin: 20px 0 10px;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .sec-title:before { content: ""; width: 4px; height: 16px;
+        background: #4a7c59; border-radius: 2px; display: inline-block; }
+    .act-list { display: grid; gap: 10px; }
+    .act-card {
+        background: #fff; border-radius: 12px; padding: 14px 16px;
+        box-shadow: 0 1px 4px rgba(53,92,68,.08); cursor: pointer;
+        border-left: 3px solid #4a7c59; transition: transform .12s;
+    }
+    .act-card:active { transform: scale(.99); }
+    .act-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .act-name { font-size: 15px; font-weight: 600; color: #2c3e33; flex: 1; }
+    .badge {
+        display: inline-block; border-radius: 999px; padding: 2px 9px;
+        font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+    }
+    .badge.blue { background: #eef2fb; color: #3b5998; }
+    .badge.green { background: #e8f4ec; color: #2e8b57; }
+    .badge.gold { background: rgba(201,169,97,.15); color: #8a6d2f; }
+    .badge.red { background: #fdecea; color: #c0392b; }
+    .badge.weak { background: #f4f4f4; color: #999; }
+    .act-meta { font-size: 11.5px; color: #8a978f; margin-top: 5px; }
+    .act-meta .num { color: #355c44; font-weight: 600; }
+    .act-desc {
+        font-size: 12.5px; color: #5b6b66; margin-top: 6px;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .type-chip {
+        display: inline-block; font-size: 10px; border-radius: 4px;
+        background: #eef4f1; color: #4a7c59; padding: 1px 7px; margin-right: 5px;
+    }
+
+    /* 我的报名 */
+    .myreg-card {
+        background: #fff; border-radius: 12px; padding: 14px 16px;
+        box-shadow: 0 1px 4px rgba(53,92,68,.08); margin-bottom: 14px;
+    }
+    .reg-row {
+        display: flex; align-items: center; gap: 8px;
+        padding: 9px 0; border-bottom: 1px solid #eef3ef; font-size: 13px;
+    }
+    .reg-row:last-child { border-bottom: none; }
+    .reg-row .info { flex: 1; min-width: 0; }
+    .reg-row .name { font-weight: 600; color: #2c3e33; font-size: 13.5px; }
+    .reg-row .time { font-size: 11px; color: #8a978f; }
+    .btn-mini {
+        border: 1px solid #c0392b; background: #fff; color: #c0392b;
+        border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+    }
+    .btn-mini:active { background: #fdf1ef; }
+
+    /* 空态/加载态 */
+    .empty {
+        text-align: center; color: #9aa7a0; font-size: 13px;
+        padding: 34px 10px; background: #fff; border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(53,92,68,.05);
+    }
+
+    /* 登录抽屉 */
+    .drawer-mask { display: none; position: fixed; inset: 0; z-index: 30;
+        background: rgba(18,32,26,.45); }
+    .drawer-mask.show { display: block; }
+    .drawer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 31;
+        background: #fff; border-radius: 16px 16px 0 0; padding: 20px 18px 28px;
+        display: none; max-width: 680px; margin: 0 auto; }
+    .drawer.show { display: block; }
+    .drawer h3 { font-size: 16px; color: #355c44; margin-bottom: 4px; }
+    .drawer .sub { font-size: 12px; color: #8a978f; margin-bottom: 14px; }
+    .field { margin-bottom: 12px; }
+    .field label { font-size: 12px; color: #5b6b66; display: block; margin-bottom: 4px; }
+    .field input { width: 100%; border: 1px solid #c3d4c8; border-radius: 8px;
+        padding: 10px 12px; font-size: 14px; outline: none; }
+    .field input:focus { border-color: #4a7c59; }
+    .form-err { color: #c0392b; font-size: 12px; min-height: 16px; margin-bottom: 6px; }
+
+    footer { text-align: center; font-size: 11px; color: #9aa7a0;
+        padding: 18px 10px 8px; line-height: 1.8; }
+    footer a { color: #4a7c59; text-decoration: none; }
+    .toast { position: fixed; left: 50%; bottom: 90px;
+        transform: translateX(-50%); background: rgba(53,92,68,.92);
+        color: #fff; font-size: 12.5px; border-radius: 18px; padding: 8px 18px;
+        z-index: 40; opacity: 0; transition: opacity .25s; pointer-events: none;
+        max-width: 80%; }
+    .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <div class="brand">活动中心 <span class="seal">ActivityHub</span><small>竹香酒 · 官方活动 · 报名抽奖擂台赛</small></div>
+    <div class="auth-box" id="authBox"></div>
+</div>
+
+<div class="wrap">
+
+    <!-- 提示卡 -->
+    <div class="hero">
+        <h1>🎁 竹香酒官方活动</h1>
+        <p>促销 · 抽奖 · 竞赛 · 擂台赛 · 互动 · 拼团 · 秒杀 · 预售——<span class="tagline">游客可浏览全部活动，登录会员可报名参与、抽奖赢好礼。</span></p>
+    </div>
+
+    <!-- 我的报名(登录后) -->
+    <div class="sec-title" id="myRegTitle" style="display:none">我的报名</div>
+    <div class="myreg-card" id="myRegCard" style="display:none"></div>
+
+    <!-- 活动筛选 -->
+    <div class="filter-card">
+        <div class="filter-row-label">活动状态</div>
+        <div class="pills" id="statusPills">
+            <span class="pill active" data-v="">全部</span>
+            <span class="pill" data-v="registering">报名中</span>
+            <span class="pill" data-v="ongoing">进行中</span>
+            <span class="pill" data-v="ended">已结束</span>
+        </div>
+        <div class="filter-row-label" style="margin-top:8px">活动类型</div>
+        <div class="pills" id="typePills">
+            <span class="pill active" data-v="">全部</span>
+            <span class="pill" data-v="promotion">促销</span>
+            <span class="pill" data-v="lottery">抽奖</span>
+            <span class="pill" data-v="competition">竞赛</span>
+            <span class="pill" data-v="arena">擂台赛</span>
+            <span class="pill" data-v="interactive">互动</span>
+            <span class="pill" data-v="groupbuy">拼团</span>
+            <span class="pill" data-v="seckill">秒杀</span>
+            <span class="pill" data-v="presale">预售</span>
+        </div>
+    </div>
+
+    <!-- 活动列表 -->
+    <div class="sec-title">全部活动</div>
+    <div class="act-list" id="actList">
+        <div class="empty">加载中…</div>
+    </div>
+
+    <footer>
+        活动解释权归竹香酒官方所有 · 奖品概率公示符合合规要求<br>
+        <a href="zyh.html">🎋 竹酒知识问答（竹韵·智衡）</a> ·
+        <a href="synapse.html">🧵 品牌内容织造（织智）</a> ·
+        <a href="zjian.html">🔬 品质检测查询（竹鉴）</a><br>
+        健康警示：过量饮酒有害健康 · 未成年人禁止饮酒
+    </footer>
+</div>
+
+<!-- 登录抽屉 -->
+<div class="drawer-mask" id="drawerMask" onclick="toggleDrawer(false)"></div>
+<div class="drawer" id="loginDrawer">
+    <h3>登录解锁活动报名</h3>
+    <div class="sub">会员登录后可报名活动、参与抽奖与擂台赛</div>
+    <div class="field">
+        <label>手机号</label>
+        <input id="phoneInput" type="tel" maxlength="11" placeholder="13800000001">
+    </div>
+    <div class="field">
+        <label>密码</label>
+        <input id="pwdInput" type="password" placeholder="登录密码">
+    </div>
+    <div class="form-err" id="formErr"></div>
+    <button class="btn primary" style="width:100%;padding:11px" onclick="doLogin()">登 录</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+    'use strict';
+
+    /* ---------- API base(同域反代; ?api= 覆盖供本地调试) ---------- */
+    var API = (function () {
+        var m = location.search.match(/[?&]api=([^&]+)/);
+        if (m) { return decodeURIComponent(m[1]).replace(/\/+$/, ''); }
+        return '';
+    })();
+
+    var AUTH_KEY = 'zhuxiang.auth';
+
+    /* 本地调试 ?api= 透传给详情页(生产同源无此参数, 自然不带) */
+    var API_QS = (function () {
+        var m = location.search.match(/[?&]api=([^&]+)/);
+        return m ? '&api=' + m[1] : '';
+    })();
+
+    /* 后端错误体字段兼容: 全局异常处理器 {success,error} /
+       FastAPI HTTPException {detail} / 旧版 {message} */
+    function errMsg(body, fallback) {
+        return (body && (body.error || body.detail || body.message))
+            || fallback;
+    }
+
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                     '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function toast(msg) {
+        var t = $('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(function () { t.classList.remove('show'); }, 2200);
+    }
+
+    /* ---------- 字典 ---------- */
+    var TYPE_LABELS = {
+        promotion: '促销', lottery: '抽奖', competition: '竞赛', arena: '擂台赛',
+        interactive: '互动', groupbuy: '拼团', seckill: '秒杀', presale: '预售',
+    };
+    var STATUS_LABELS = {
+        draft: ['草稿', 'weak'], registering: ['报名中', 'blue'],
+        ongoing: ['进行中', 'green'], ended: ['已结束', 'gold'],
+        cancelled: ['已取消', 'red'],
+    };
+    var ARENA_NAMES = {
+        L01: '引流', L02: '体验', L03: '销售', L04: '金点子',
+        L05: '内容', L06: '品鉴', L07: '服务', L08: '传承',
+    };
+    var REG_ACT_STATUS = {
+        registering: ['报名中', 'blue'], ongoing: ['进行中', 'green'],
+        ended: ['已结束', 'gold'], cancelled: ['已取消', 'red'],
+    };
+
+    function typeLabel(t) { return TYPE_LABELS[t] || t || '--'; }
+    function statusBadge(s) {
+        var pair = STATUS_LABELS[s] || [s || '--', 'weak'];
+        return '<span class="badge ' + pair[1] + '">' + pair[0] + '</span>';
+    }
+    function fmtTime(iso) {
+        if (!iso) { return '--'; }
+        return String(iso).replace('T', ' ').slice(0, 16);
+    }
+
+    /* ---------- 状态 ---------- */
+    var state = {
+        status: '',       // 状态筛选('' = 全部)
+        type: '',         // 类型筛选('' = 全部)
+        myRegs: [],       // 我的报名(登录后)
+    };
+
+    /* ---------- 会话(精简 JWT 链——同 zjian/synapse) ---------- */
+    function session() {
+        try { return JSON.parse(localStorage.getItem(AUTH_KEY)) || null; }
+        catch (e) { return null; }
+    }
+    function saveSession(body) {
+        localStorage.setItem(AUTH_KEY, JSON.stringify({
+            token: body.accessToken,
+            refreshToken: body.refreshToken || null,
+            memberId: body.memberId || null,
+            name: body.name || body.nickname || null,
+            savedAt: Date.now(),
+        }));
+    }
+    function clearSession() { localStorage.removeItem(AUTH_KEY); }
+
+    async function apiFetch(path, options) {
+        var s = session();
+        var opts = options || {};
+        if (s && s.token) {
+            opts.headers = Object.assign({}, opts.headers, {
+                'Authorization': 'Bearer ' + s.token,
+            });
+        }
+        var res = await fetch(API + path, opts);
+        if (res.status === 401 && s && s.refreshToken && !opts._retried) {
+            var ok = await refresh();
+            if (ok) {
+                opts._retried = true;
+                return apiFetch(path, opts);
+            }
+            clearSession();
+            renderAuth();
+            throw new Error('登录已过期，请重新登录');
+        }
+        return res;
+    }
+
+    async function refresh() {
+        var s = session();
+        if (!s || !s.refreshToken) { return false; }
+        try {
+            var res = await fetch(API + '/api/auth/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken: s.refreshToken }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.accessToken) {
+                saveSession(body);
+                return true;
+            }
+        } catch (e) { /* 网络异常按失败处理 */ }
+        return false;
+    }
+
+    /* ---------- 顶栏渲染 ---------- */
+    function renderAuth() {
+        var s = session();
+        if (s && s.token) {
+            $('authBox').innerHTML =
+                '<div class="user-chip">会员 '
+                + esc(s.name || (s.memberId != null ? '#' + s.memberId : ''))
+                + '</div><button class="btn" onclick="doLogout()">退出</button>';
+        } else {
+            $('authBox').innerHTML =
+                '<button class="btn" onclick="toggleDrawer(true)">登录</button>';
+        }
+    }
+
+    window.toggleDrawer = function (show) {
+        $('loginDrawer').classList.toggle('show', show);
+        $('drawerMask').classList.toggle('show', show);
+        if (!show) { $('formErr').textContent = ''; }
+    };
+
+    window.doLogin = async function () {
+        var phone = $('phoneInput').value.trim();
+        var pwd = $('pwdInput').value;
+        if (!/^1\d{10}$/.test(phone)) {
+            $('formErr').textContent = '请输入 11 位手机号'; return;
+        }
+        if (!pwd) { $('formErr').textContent = '请输入密码'; return; }
+        try {
+            var res = await fetch(API + '/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: phone, password: pwd }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.accessToken) {
+                saveSession(body);
+                toggleDrawer(false);
+                renderAuth();
+                toast('登录成功，欢迎参与活动');
+                loadMyRegs();
+            } else {
+                $('formErr').textContent = errMsg(
+                    body, '登录失败(HTTP ' + res.status + ')');
+            }
+        } catch (e) {
+            $('formErr').textContent = '网络错误: ' + e.message;
+        }
+    };
+
+    window.doLogout = function () {
+        clearSession();
+        renderAuth();
+        state.myRegs = [];
+        renderMyRegs();
+        toast('已退出登录');
+    };
+
+    /* ---------- 活动列表 ---------- */
+    async function loadList() {
+        var box = $('actList');
+        box.innerHTML = '<div class="empty">加载中…</div>';
+        try {
+            var q = '?limit=100';
+            if (state.status) { q += '&status=' + encodeURIComponent(state.status); }
+            if (state.type) { q += '&type=' + encodeURIComponent(state.type); }
+            var res = await fetch(API + '/api/activity/list' + q);
+            var body = await res.json();
+            if (!res.ok || !body || !body.success) {
+                box.innerHTML = '<div class="empty">加载失败: '
+                    + esc(errMsg(body, 'HTTP ' + res.status)) + '</div>';
+                return;
+            }
+            renderList(body.data || []);
+        } catch (e) {
+            box.innerHTML = '<div class="empty">网络错误: ' + esc(e.message) + '</div>';
+        }
+    }
+
+    function renderList(acts) {
+        var box = $('actList');
+        if (!acts.length) {
+            box.innerHTML = '<div class="empty">暂无'
+                + (state.status || state.type ? '符合筛选条件的' : '')
+                + '活动——敬请期待新活动上线 🎋</div>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < acts.length; i++) {
+            var a = acts[i];
+            var arenaTag = a.type === 'arena' && a.subType && ARENA_NAMES[a.subType]
+                ? '（' + ARENA_NAMES[a.subType] + '）' : '';
+            var registered = false;
+            for (var j = 0; j < state.myRegs.length; j++) {
+                if (state.myRegs[j].activityId === a.id) { registered = true; break; }
+            }
+            html += '<div class="act-card" onclick="location.href=\'activity-detail.html?id='
+                + a.id + API_QS + '\'">'
+                + '<div class="act-head"><div class="act-name">'
+                + esc(a.name) + '</div>' + statusBadge(a.status) + '</div>'
+                + '<div class="act-meta">'
+                + '<span class="type-chip">' + typeLabel(a.type) + arenaTag + '</span>'
+                + (a.startTime || a.endTime
+                    ? '🕐 ' + fmtTime(a.startTime) + ' ~ ' + fmtTime(a.endTime) + ' · '
+                    : '')
+                + '👥 <span class="num">' + (a.registrationCount || 0) + '</span> 人已报名'
+                + (registered ? ' · <span style="color:#4a7c59;font-weight:600">✓ 我已报名</span>' : '')
+                + '</div>'
+                + (a.description
+                    ? '<div class="act-desc">' + esc(a.description) + '</div>' : '')
+                + '</div>';
+        }
+        box.innerHTML = html;
+    }
+
+    /* ---------- 我的报名 ---------- */
+    async function loadMyRegs() {
+        if (!session()) {
+            state.myRegs = [];
+            renderMyRegs();
+            return;
+        }
+        try {
+            var res = await apiFetch('/api/activity/my-registrations');
+            var body = await res.json();
+            if (res.ok && body && body.success) {
+                state.myRegs = body.data || [];
+            } else {
+                state.myRegs = [];
+            }
+        } catch (e) {
+            state.myRegs = [];
+        }
+        renderMyRegs();
+        /* 列表卡上的"我已报名"标记需要重渲染 */
+        loadList();
+    }
+
+    function renderMyRegs() {
+        var title = $('myRegTitle');
+        var card = $('myRegCard');
+        if (!state.myRegs.length) {
+            title.style.display = 'none';
+            card.style.display = 'none';
+            return;
+        }
+        title.style.display = '';
+        card.style.display = '';
+        var html = '';
+        for (var i = 0; i < state.myRegs.length; i++) {
+            var r = state.myRegs[i];
+            var pair = REG_ACT_STATUS[r.activityStatus] || [r.activityStatus, 'weak'];
+            html += '<div class="reg-row">'
+                + '<div class="info">'
+                + '<div class="name">' + esc(r.activityName) + '</div>'
+                + '<div class="time">报名于 ' + fmtTime(r.participateTime) + '</div>'
+                + '</div>'
+                + '<span class="badge ' + pair[1] + '">' + pair[0] + '</span>'
+                + (r.activityStatus === 'registering' || r.activityStatus === 'ongoing'
+                    ? '<button class="btn-mini" onclick="cancelReg(' + r.activityId
+                      + ',\'' + esc(r.activityName).replace(/'/g, '&#39;') + '\')">取消报名</button>'
+                    : '')
+                + '<button class="btn-mini" style="border-color:#4a7c59;color:#4a7c59" '
+                + 'onclick="location.href=\'activity-detail.html?id=' + r.activityId + API_QS + '\'">详情</button>'
+                + '</div>';
+        }
+        card.innerHTML = html;
+    }
+
+    window.cancelReg = async function (activityId, name) {
+        var s = session();
+        if (!s || s.memberId == null) {
+            toggleDrawer(true);
+            return;
+        }
+        if (!window.confirm('确认取消报名「' + name + '」？')) { return; }
+        try {
+            var res = await apiFetch('/api/activity/cancel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activityId: activityId, userId: Number(s.memberId),
+                }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.success) {
+                toast('已取消报名');
+                loadMyRegs();
+            } else {
+                toast(errMsg(body, '取消失败'));
+            }
+        } catch (e) {
+            toast('网络错误: ' + e.message);
+        }
+    };
+
+    /* ---------- 筛选交互 ---------- */
+    function bindPills(containerId, key) {
+        var pills = $(containerId).querySelectorAll('.pill');
+        for (var i = 0; i < pills.length; i++) {
+            (function (el) {
+                el.onclick = function () {
+                    for (var k = 0; k < pills.length; k++) {
+                        pills[k].classList.remove('active');
+                    }
+                    el.classList.add('active');
+                    state[key] = el.getAttribute('data-v') || '';
+                    loadList();
+                };
+            })(pills[i]);
+        }
+    }
+
+    /* ---------- 启动 ---------- */
+    bindPills('statusPills', 'status');
+    bindPills('typePills', 'type');
+    renderAuth();
+    loadList();
+    loadMyRegs();
+})();
+</script>
+</body>
+</html>

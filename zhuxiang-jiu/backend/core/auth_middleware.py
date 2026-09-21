@@ -34,6 +34,7 @@
 import json
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,18 @@ PUBLIC_GET_PREFIXES = (
                                     # 报告/指标目录——检测数据
                                     # 公示游客可查; POST 决策面
                                     # 仍 JWT+门控)
+    "/api/activity/lottery/",     # 奖品池概率公示 GET(合规要求:
+                                    # §3.3.3 游客可查; POST /draw
+                                    # 抽奖不受 GET 前缀影响)
+)
+
+# 公开 GET 正则(动态路径, 无法用前缀表达)
+# 活动详情 GET /api/activity/{id}——C端活动详情页游客可浏览
+# 注意: 不能放宽为前缀 /api/activity/——那会把 my-registrations/
+# prizes/mine 变为中间件层公开, 其路由层仅校验头存在性(无 JWT
+# 注入对照), 存在伪造 X-Member-Id 越权读取的风险
+PUBLIC_GET_PATTERNS = (
+    re.compile(r"^/api/activity/\d+$"),
 )
 
 
@@ -141,7 +154,9 @@ def is_public_path(path: str, method: str) -> bool:
     if path in PUBLIC_EXACT:
         return True
     if method == "GET":
-        return any(path.startswith(prefix) for prefix in PUBLIC_GET_PREFIXES)
+        if any(path.startswith(prefix) for prefix in PUBLIC_GET_PREFIXES):
+            return True
+        return any(p.match(path) for p in PUBLIC_GET_PATTERNS)
     return False
 
 

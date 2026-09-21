@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<!--
+    activity-detail.html · 09号·活动中心 C端活动详情页(自包含, 零外部依赖)
+    ============================================================
+    部署: 生产 dist 根 /var/www/zxjiu/dist/activity-detail.html
+    入参: ?id={activityId}——从 activity.html 活动卡/我的报名进入
+    定位: 活动详情 + 参与闭环(报名/取消/抽奖/签收) +
+          类型化扩展区块(抽奖→奖品池公示+抽奖; 擂台赛→排行榜)
+    主题: 竹绿 #355c44 × #4a7c59 × 金 #c9a961(对齐 activity.html)
+    数据源:
+        游客(公开 GET 白名单): /api/activity/{id} 详情 +
+            /api/activity/lottery/{id}/prizes 奖品池概率公示 +
+            /api/activity/leaderboard/{id} 擂台榜
+        登录(JWT): /api/activity/my-registrations 我的报名 +
+            POST /api/activity/register 报名 +
+            POST /api/activity/cancel 取消报名 +
+            POST /api/activity/lottery/draw 抽奖(每日3次) +
+            /api/activity/prizes/mine 我的奖品 +
+            POST /api/activity/prize/{recordNo}/confirm 签收确认
+    鉴权: 精简 JWT 链——login → localStorage 'zhuxiang.auth' →
+          apiFetch(401 → refresh → retry 一次自愈)
+    姊妹页: activity.html 列表页; activity-dashboard.html B端管理后台
+    本地调试: activity-detail.html?id=1&api=http://localhost:8001
+    ============================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#355c44">
+<title>活动详情 · 竹香酒</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+            "Helvetica Neue", "Microsoft YaHei", sans-serif;
+        background: #f6f4ee; color: #2c2c2c; line-height: 1.65;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 0 14px 40px; }
+
+    /* 顶栏(竹绿) */
+    .topbar {
+        position: sticky; top: 0; z-index: 20;
+        background: linear-gradient(135deg, #355c44, #4a7c59);
+        color: #fff; padding: 12px 16px;
+        display: flex; align-items: center; justify-content: space-between;
+        box-shadow: 0 2px 8px rgba(53,92,68,.25);
+    }
+    .brand { font-size: 16px; font-weight: 600; letter-spacing: 1px; cursor: pointer; }
+    .brand small { font-weight: 400; opacity: .75; font-size: 11px; display: block; letter-spacing: 0; }
+    .auth-box { text-align: right; }
+    .btn {
+        border: none; border-radius: 6px; cursor: pointer; font-size: 13px;
+        padding: 7px 14px; background: rgba(255,255,255,.16); color: #fff;
+    }
+    .btn:active { opacity: .8; }
+    .btn.primary { background: #4a7c59; color: #fff; }
+    .btn.gold { background: #c9a961; color: #fff; }
+    .btn.big { width: 100%; padding: 12px; font-size: 15px; font-weight: 600; }
+    .btn.ghost { background: #fff; color: #355c44; border: 1px solid #c3d4c8; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .user-chip { font-size: 12px; opacity: .9; margin-bottom: 4px; }
+
+    /* 详情头卡 */
+    .head-card {
+        margin: 14px 0; background: #fff; border-radius: 12px; padding: 16px;
+        box-shadow: 0 1px 4px rgba(53,92,68,.08); border-top: 3px solid #4a7c59;
+    }
+    .head-card h1 { font-size: 18px; color: #2c3e33; margin-bottom: 8px; line-height: 1.45; }
+    .badge {
+        display: inline-block; border-radius: 999px; padding: 2px 9px;
+        font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        vertical-align: 2px; margin-left: 6px;
+    }
+    .badge.blue { background: #eef2fb; color: #3b5998; }
+    .badge.green { background: #e8f4ec; color: #2e8b57; }
+    .badge.gold { background: rgba(201,169,97,.15); color: #8a6d2f; }
+    .badge.red { background: #fdecea; color: #c0392b; }
+    .badge.weak { background: #f4f4f4; color: #999; }
+    .type-chip {
+        display: inline-block; font-size: 11px; border-radius: 4px;
+        background: #eef4f1; color: #4a7c59; padding: 1px 8px;
+    }
+    .kv { font-size: 12.5px; color: #5b6b66; margin-top: 6px; }
+    .kv b { color: #355c44; font-weight: 600; }
+    .act-no { font-size: 11px; color: #9aa7a0; margin-top: 8px;
+        font-family: Consolas, monospace; }
+
+    /* 区块 */
+    .sec-title {
+        font-size: 15px; color: #355c44; margin: 20px 0 10px;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .sec-title:before { content: ""; width: 4px; height: 16px;
+        background: #4a7c59; border-radius: 2px; display: inline-block; }
+    .panel {
+        background: #fff; border-radius: 12px; padding: 14px 16px;
+        box-shadow: 0 1px 4px rgba(53,92,68,.08); margin-bottom: 14px;
+    }
+    .panel h2 { font-size: 14.5px; color: #355c44; margin-bottom: 8px; }
+    .desc-text { font-size: 13.5px; color: #445; white-space: pre-wrap; word-break: break-word; }
+
+    /* 表格 */
+    table.dtable { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .dtable th { background: #eef4f1; color: #355c44; padding: 6px 8px;
+        text-align: left; white-space: nowrap; }
+    .dtable td { padding: 5px 8px; border-bottom: 1px solid #eef3ef; }
+    .dtable td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .dtable .mono { font-family: Consolas, monospace; font-size: 11px; color: #8a978f; }
+
+    /* 报名区块 */
+    .reg-status-row { display: flex; align-items: center; gap: 8px; margin-top: 10px;
+        font-size: 12.5px; color: #5b6b66; flex-wrap: wrap; }
+    .reg-ok { color: #2e8b57; font-weight: 600; }
+    .btn-mini {
+        border: 1px solid #c0392b; background: #fff; color: #c0392b;
+        border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+    }
+    .btn-mini:active { background: #fdf1ef; }
+    .btn-mini.green { border-color: #4a7c59; color: #4a7c59; }
+
+    /* 抽奖结果横幅 */
+    .draw-result {
+        border-radius: 10px; padding: 12px 14px; font-size: 13.5px;
+        margin-top: 10px; display: none;
+    }
+    .draw-result.show { display: block; }
+    .draw-result.won { background: #fdf3e3; border: 1px solid #e8d5a8; color: #8a6d2f; }
+    .draw-result.lost { background: #eef4f1; border: 1px solid #c9dbcf; color: #4a7c59; }
+    .draw-result b { font-size: 15px; }
+
+    /* 我的奖品行 */
+    .prize-row { display: flex; align-items: center; gap: 8px;
+        padding: 9px 0; border-bottom: 1px solid #eef3ef; font-size: 13px; }
+    .prize-row:last-child { border-bottom: none; }
+    .prize-row .info { flex: 1; min-width: 0; }
+    .prize-row .name { font-weight: 600; color: #2c3e33; }
+    .prize-row .meta { font-size: 11px; color: #8a978f;
+        font-family: Consolas, monospace; }
+
+    /* 空态/加载态/错误 */
+    .empty {
+        text-align: center; color: #9aa7a0; font-size: 13px;
+        padding: 26px 10px;
+    }
+    .err-card {
+        margin: 14px 0; background: #fdecea; border: 1px solid #f5c6c0;
+        border-radius: 12px; padding: 20px; text-align: center; color: #c0392b;
+        font-size: 14px;
+    }
+
+    /* 登录抽屉 */
+    .drawer-mask { display: none; position: fixed; inset: 0; z-index: 30;
+        background: rgba(18,32,26,.45); }
+    .drawer-mask.show { display: block; }
+    .drawer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 31;
+        background: #fff; border-radius: 16px 16px 0 0; padding: 20px 18px 28px;
+        display: none; max-width: 680px; margin: 0 auto; }
+    .drawer.show { display: block; }
+    .drawer h3 { font-size: 16px; color: #355c44; margin-bottom: 4px; }
+    .drawer .sub { font-size: 12px; color: #8a978f; margin-bottom: 14px; }
+    .field { margin-bottom: 12px; }
+    .field label { font-size: 12px; color: #5b6b66; display: block; margin-bottom: 4px; }
+    .field input { width: 100%; border: 1px solid #c3d4c8; border-radius: 8px;
+        padding: 10px 12px; font-size: 14px; outline: none; }
+    .field input:focus { border-color: #4a7c59; }
+    .form-err { color: #c0392b; font-size: 12px; min-height: 16px; margin-bottom: 6px; }
+
+    footer { text-align: center; font-size: 11px; color: #9aa7a0;
+        padding: 18px 10px 8px; line-height: 1.8; }
+    footer a { color: #4a7c59; text-decoration: none; }
+    .toast { position: fixed; left: 50%; bottom: 90px;
+        transform: translateX(-50%); background: rgba(53,92,68,.92);
+        color: #fff; font-size: 12.5px; border-radius: 18px; padding: 8px 18px;
+        z-index: 40; opacity: 0; transition: opacity .25s; pointer-events: none;
+        max-width: 80%; }
+    .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <div class="brand" id="backBrand">
+        <span style="cursor:pointer">← 活动中心</span>
+        <small>竹香酒 · 官方活动详情</small>
+    </div>
+    <div class="auth-box" id="authBox"></div>
+</div>
+
+<div class="wrap">
+
+    <div id="errBox"></div>
+
+    <!-- 详情头卡 -->
+    <div class="head-card" id="headCard" style="display:none">
+        <h1 id="actName"></h1>
+        <div id="actBadges"></div>
+        <div class="kv" id="actTime"></div>
+        <div class="kv" id="actRegCount"></div>
+        <div class="act-no" id="actNo"></div>
+    </div>
+
+    <!-- 报名/参与区块 -->
+    <div class="panel" id="joinPanel" style="display:none">
+        <h2>参与报名</h2>
+        <div id="joinBody"></div>
+        <div class="reg-status-row" id="regStatusRow"></div>
+    </div>
+
+    <!-- 活动介绍 -->
+    <div class="panel" id="descPanel" style="display:none">
+        <h2>活动介绍</h2>
+        <div class="desc-text" id="descText"></div>
+    </div>
+
+    <!-- 活动规则 -->
+    <div class="panel" id="rulesPanel" style="display:none">
+        <h2>活动规则</h2>
+        <div class="desc-text" id="rulesText" style="font-size:12px;font-family:Consolas,monospace;white-space:pre-wrap"></div>
+    </div>
+
+    <!-- 奖品池公示(抽奖) -->
+    <div id="lotterySection" style="display:none">
+        <div class="sec-title">🎁 奖品池公示（概率合规）</div>
+        <div class="panel" style="overflow-x:auto">
+            <table class="dtable">
+                <thead><tr>
+                    <th>奖品</th><th>类型</th><th>价值</th>
+                    <th class="num">概率</th><th class="num">剩余/总量</th>
+                </tr></thead>
+                <tbody id="prizeRows"><tr><td colspan="5">加载中…</td></tr></tbody>
+            </table>
+            <div style="font-size:11px;color:#9aa7a0;margin-top:8px">
+                概率公示为合规要求 · 服务端计算 · 每位会员每日可抽 3 次
+            </div>
+        </div>
+        <div class="panel" id="drawPanel" style="display:none">
+            <h2>🍀 立即抽奖</h2>
+            <button class="btn gold big" id="btnDraw" onclick="drawLottery()">抽 奖</button>
+            <div class="draw-result" id="drawResult"></div>
+        </div>
+        <div id="myPrizeSection" style="display:none">
+            <div class="sec-title">🏆 我在本活动赢得的奖品</div>
+            <div class="panel" id="myPrizeCard"></div>
+        </div>
+    </div>
+
+    <!-- 擂台榜(擂台赛) -->
+    <div id="arenaSection" style="display:none">
+        <div class="sec-title">⚔️ 擂台排行榜</div>
+        <div class="panel" style="overflow-x:auto">
+            <table class="dtable">
+                <thead><tr>
+                    <th>排名</th><th>参赛人</th><th class="num">分数</th>
+                </tr></thead>
+                <tbody id="boardRows"><tr><td colspan="3">加载中…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <footer>
+        活动解释权归竹香酒官方所有 · 中奖自动发放(积分/优惠券)或线下邮寄<br>
+        <a href="activity.html" id="backFooter">🎁 返回活动中心</a> ·
+        <a href="zyh.html">🎋 竹酒知识问答</a> ·
+        <a href="synapse.html">🧵 品牌内容织造</a><br>
+        健康警示：过量饮酒有害健康 · 未成年人禁止饮酒
+    </footer>
+</div>
+
+<!-- 登录抽屉 -->
+<div class="drawer-mask" id="drawerMask" onclick="toggleDrawer(false)"></div>
+<div class="drawer" id="loginDrawer">
+    <h3>登录解锁活动参与</h3>
+    <div class="sub">会员登录后可报名活动、参与抽奖与擂台赛</div>
+    <div class="field">
+        <label>手机号</label>
+        <input id="phoneInput" type="tel" maxlength="11" placeholder="13800000001">
+    </div>
+    <div class="field">
+        <label>密码</label>
+        <input id="pwdInput" type="password" placeholder="登录密码">
+    </div>
+    <div class="form-err" id="formErr"></div>
+    <button class="btn primary" style="width:100%;padding:11px" onclick="doLogin()">登 录</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+    'use strict';
+
+    /* ---------- API base(同域反代; ?api= 覆盖供本地调试) ---------- */
+    var API = (function () {
+        var m = location.search.match(/[?&]api=([^&]+)/);
+        if (m) { return decodeURIComponent(m[1]).replace(/\/+$/, ''); }
+        return '';
+    })();
+
+    var AUTH_KEY = 'zhuxiang.auth';
+
+    /* 本地调试 ?api= 透传回列表页(生产同源无此参数, 自然不带) */
+    var API_QS = (function () {
+        var m = location.search.match(/[?&]api=([^&]+)/);
+        return m ? '?api=' + m[1] : '';
+    })();
+
+    /* 后端错误体字段兼容: 全局异常处理器 {success,error} /
+       FastAPI HTTPException {detail} / 旧版 {message} */
+    function errMsg(body, fallback) {
+        return (body && (body.error || body.detail || body.message))
+            || fallback;
+    }
+
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                     '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+    function toast(msg) {
+        var t = $('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(function () { t.classList.remove('show'); }, 2400);
+    }
+    function fmtTime(iso) {
+        if (!iso) { return '--'; }
+        return String(iso).replace('T', ' ').slice(0, 16);
+    }
+
+    /* ---------- 字典 ---------- */
+    var TYPE_LABELS = {
+        promotion: '促销', lottery: '抽奖', competition: '竞赛', arena: '擂台赛',
+        interactive: '互动', groupbuy: '拼团', seckill: '秒杀', presale: '预售',
+    };
+    var STATUS_LABELS = {
+        draft: ['草稿', 'weak'], registering: ['报名中', 'blue'],
+        ongoing: ['进行中', 'green'], ended: ['已结束', 'gold'],
+        cancelled: ['已取消', 'red'],
+    };
+    var ARENA_NAMES = {
+        L01: '引流', L02: '体验', L03: '销售', L04: '金点子',
+        L05: '内容', L06: '品鉴', L07: '服务', L08: '传承',
+    };
+    var PRIZE_TYPE_LABELS = {
+        coupon: '优惠券', points: '积分', product: '实物', cash: '现金',
+        benefit: '权益', banquet_wine: '喜宴用酒', mascot: '吉祥物',
+    };
+    var RECORD_STATUS_LABELS = {
+        pending: ['待发放', 'gold'], issued: ['已发放', 'green'],
+        shipped: ['已发货', 'blue'], signed: ['已签收', 'weak'],
+        expired: ['已过期', 'red'],
+    };
+
+    /* ---------- 状态 ---------- */
+    var state = {
+        id: null,          // 活动 ID(URL ?id=)
+        act: null,         // 活动详情
+        myReg: null,       // 我在本活动的报名(null = 未报名)
+        loggedIn: false,
+    };
+
+    /* ---------- 会话(精简 JWT 链——同 zjian/synapse) ---------- */
+    function session() {
+        try { return JSON.parse(localStorage.getItem(AUTH_KEY)) || null; }
+        catch (e) { return null; }
+    }
+    function saveSession(body) {
+        localStorage.setItem(AUTH_KEY, JSON.stringify({
+            token: body.accessToken,
+            refreshToken: body.refreshToken || null,
+            memberId: body.memberId || null,
+            name: body.name || body.nickname || null,
+            savedAt: Date.now(),
+        }));
+    }
+    function clearSession() { localStorage.removeItem(AUTH_KEY); }
+
+    async function apiFetch(path, options) {
+        var s = session();
+        var opts = options || {};
+        if (s && s.token) {
+            opts.headers = Object.assign({}, opts.headers, {
+                'Authorization': 'Bearer ' + s.token,
+            });
+        }
+        var res = await fetch(API + path, opts);
+        if (res.status === 401 && s && s.refreshToken && !opts._retried) {
+            var ok = await refresh();
+            if (ok) {
+                opts._retried = true;
+                return apiFetch(path, opts);
+            }
+            clearSession();
+            renderAuth();
+            throw new Error('登录已过期，请重新登录');
+        }
+        return res;
+    }
+
+    async function refresh() {
+        var s = session();
+        if (!s || !s.refreshToken) { return false; }
+        try {
+            var res = await fetch(API + '/api/auth/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken: s.refreshToken }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.accessToken) {
+                saveSession(body);
+                return true;
+            }
+        } catch (e) { /* 网络异常按失败处理 */ }
+        return false;
+    }
+
+    /* ---------- 顶栏渲染 ---------- */
+    function renderAuth() {
+        var s = session();
+        state.loggedIn = !!(s && s.token);
+        if (state.loggedIn) {
+            $('authBox').innerHTML =
+                '<div class="user-chip">会员 '
+                + esc(s.name || (s.memberId != null ? '#' + s.memberId : ''))
+                + '</div><button class="btn" onclick="doLogout()">退出</button>';
+        } else {
+            $('authBox').innerHTML =
+                '<button class="btn" onclick="toggleDrawer(true)">登录</button>';
+        }
+    }
+
+    window.toggleDrawer = function (show) {
+        $('loginDrawer').classList.toggle('show', show);
+        $('drawerMask').classList.toggle('show', show);
+        if (!show) { $('formErr').textContent = ''; }
+    };
+
+    window.doLogin = async function () {
+        var phone = $('phoneInput').value.trim();
+        var pwd = $('pwdInput').value;
+        if (!/^1\d{10}$/.test(phone)) {
+            $('formErr').textContent = '请输入 11 位手机号'; return;
+        }
+        if (!pwd) { $('formErr').textContent = '请输入密码'; return; }
+        try {
+            var res = await fetch(API + '/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: phone, password: pwd }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.accessToken) {
+                saveSession(body);
+                toggleDrawer(false);
+                renderAuth();
+                toast('登录成功');
+                bootstrapMemberData();
+            } else {
+                $('formErr').textContent = errMsg(
+                    body, '登录失败(HTTP ' + res.status + ')');
+            }
+        } catch (e) {
+            $('formErr').textContent = '网络错误: ' + e.message;
+        }
+    };
+
+    window.doLogout = function () {
+        clearSession();
+        renderAuth();
+        state.myReg = null;
+        renderJoin();
+        renderMyPrizes([]);
+        toast('已退出登录');
+    };
+
+    /* ---------- 活动详情 ---------- */
+    async function loadActivity() {
+        try {
+            var res = await fetch(API + '/api/activity/' + state.id);
+            var body = await res.json();
+            if (!res.ok || !body || !body.success) {
+                $('errBox').innerHTML = '<div class="err-card">活动加载失败: '
+                    + esc(errMsg(body, 'HTTP ' + res.status))
+                    + '<br><a href="activity.html" style="color:#355c44">← 返回活动中心</a></div>';
+                return;
+            }
+            state.act = body.data;
+            renderHead();
+            renderJoin();
+            if (state.act.type === 'lottery') {
+                $('lotterySection').style.display = '';
+                loadPrizes();
+                loadMyPrizes();
+            }
+            if (state.act.type === 'arena') {
+                $('arenaSection').style.display = '';
+                loadLeaderboard();
+            }
+        } catch (e) {
+            $('errBox').innerHTML = '<div class="err-card">网络错误: '
+                + esc(e.message) + '</div>';
+        }
+    }
+
+    function renderHead() {
+        var a = state.act;
+        $('headCard').style.display = '';
+        $('actName').innerHTML = esc(a.name);
+        var pair = STATUS_LABELS[a.status] || [a.status, 'weak'];
+        var arenaTag = a.type === 'arena' && a.subType && ARENA_NAMES[a.subType]
+            ? '（' + ARENA_NAMES[a.subType] + '）' : '';
+        $('actBadges').innerHTML =
+            '<span class="type-chip">' + esc(TYPE_LABELS[a.type] || a.type) + arenaTag + '</span>'
+            + '<span class="badge ' + pair[1] + '">' + pair[0] + '</span>';
+        $('actTime').innerHTML = '🕐 活动时间：<b>' + fmtTime(a.startTime)
+            + '</b> ~ <b>' + fmtTime(a.endTime) + '</b>';
+        $('actRegCount').innerHTML = '👥 已报名：<b>' + (a.registrationCount || 0) + '</b> 人';
+        $('actNo').textContent = '编号 ' + (a.activityNo || a.id);
+        if (a.description) {
+            $('descPanel').style.display = '';
+            $('descText').textContent = a.description;
+        }
+        if (a.rules && Object.keys(a.rules).length) {
+            $('rulesPanel').style.display = '';
+            try {
+                $('rulesText').textContent = JSON.stringify(a.rules, null, 2);
+            } catch (e) {
+                $('rulesText').textContent = String(a.rules);
+            }
+        }
+    }
+
+    /* ---------- 报名区块 ---------- */
+    function renderJoin() {
+        var a = state.act;
+        if (!a) { return; }
+        var panel = $('joinPanel');
+        var body = $('joinBody');
+        var row = $('regStatusRow');
+        panel.style.display = '';
+
+        if (a.status === 'registering') {
+            if (state.myReg) {
+                body.innerHTML = '<button class="btn big" style="background:#e8f4ec;color:#2e8b57;border:1px solid #bcd9c6" disabled>✓ 已报名</button>';
+                row.innerHTML = ''
+                    + '<button class="btn-mini" onclick="cancelReg()">取消报名</button>'
+                    + '<span>报名于 ' + esc(fmtTime(state.myReg.participateTime)) + '</span>';
+            } else if (state.loggedIn) {
+                body.innerHTML = '<button class="btn primary big" onclick="doRegister()">立即报名</button>';
+                row.innerHTML = '<span>报名后可在活动进行中参与</span>';
+            } else {
+                body.innerHTML = '<button class="btn gold big" onclick="toggleDrawer(true)">登录后报名</button>';
+                row.innerHTML = '<span>游客可浏览 · <a style="color:#4a7c59;cursor:pointer" onclick="toggleDrawer(true)">登录</a> 后即可报名</span>';
+            }
+        } else if (a.status === 'ongoing') {
+            if (state.myReg) {
+                body.innerHTML = '<div class="empty" style="padding:10px">🎉 活动进行中——你已报名，尽情参与！</div>';
+                row.innerHTML = '<button class="btn-mini" onclick="cancelReg()">取消报名</button>'
+                    + '<span>报名于 ' + esc(fmtTime(state.myReg.participateTime)) + '</span>';
+            } else if (state.loggedIn) {
+                body.innerHTML = '<div class="empty" style="padding:10px">⏳ 活动进行中（报名期已过）</div>';
+                row.innerHTML = '';
+            } else {
+                body.innerHTML = '<div class="empty" style="padding:10px">⏳ 活动进行中 · <a style="color:#4a7c59;cursor:pointer" onclick="toggleDrawer(true)">登录</a> 后可查看你的参与记录</div>';
+                row.innerHTML = '';
+            }
+        } else if (a.status === 'ended') {
+            body.innerHTML = '<div class="empty" style="padding:10px">🏁 本活动已结束——感谢关注，敬请期待下期</div>';
+            row.innerHTML = '';
+        } else {
+            body.innerHTML = '<div class="empty" style="padding:10px">本活动已取消或暂不可参与</div>';
+            row.innerHTML = '';
+        }
+    }
+
+    window.doRegister = async function () {
+        var s = session();
+        if (!s || s.memberId == null) {
+            toggleDrawer(true);
+            return;
+        }
+        try {
+            var res = await apiFetch('/api/activity/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activityId: state.id,
+                    userId: Number(s.memberId),
+                    participateData: {},
+                }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.success) {
+                toast('报名成功！');
+                state.myReg = {
+                    activityId: state.id,
+                    participateTime: (body.data && body.data.participateTime) || '',
+                };
+                state.act.registrationCount = (state.act.registrationCount || 0) + 1;
+                renderHead();
+                renderJoin();
+            } else {
+                toast(errMsg(body, '报名失败'));
+            }
+        } catch (e) {
+            toast('网络错误: ' + e.message);
+        }
+    };
+
+    window.cancelReg = async function () {
+        var s = session();
+        if (!s || s.memberId == null) {
+            toggleDrawer(true);
+            return;
+        }
+        if (!window.confirm('确认取消报名本活动？')) { return; }
+        try {
+            var res = await apiFetch('/api/activity/cancel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activityId: state.id, userId: Number(s.memberId),
+                }),
+            });
+            var body = await res.json();
+            if (res.ok && body && body.success) {
+                toast('已取消报名');
+                state.myReg = null;
+                if (state.act.registrationCount > 0) {
+                    state.act.registrationCount -= 1;
+                }
+                renderHead();
+                renderJoin();
+            } else {
+                toast(errMsg(body, '取消失败'));
+            }
+        } catch (e) {
+            toast('网络错误: ' + e.message);
+        }
+    };
+
+    /* ---------- 奖品池公示 ---------- */
+    async function loadPrizes() {
+        try {
+            var res = await fetch(API + '/api/activity/lottery/' + state.id + '/prizes');
+            var body = await res.json();
+            var rows = $('prizeRows');
+            if (!res.ok || !body || !body.success) {
+                rows.innerHTML = '<tr><td colspan="5">奖品池未配置或加载失败</td></tr>';
+                return;
+            }
+            var prizes = body.data || [];
+            if (!prizes.length) {
+                rows.innerHTML = '<tr><td colspan="5">奖品池未配置</td></tr>';
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < prizes.length; i++) {
+                var p = prizes[i];
+                html += '<tr>'
+                    + '<td>' + esc(p.prizeName) + '</td>'
+                    + '<td>' + esc(PRIZE_TYPE_LABELS[p.prizeType] || p.prizeType) + '</td>'
+                    + '<td class="num">' + (p.prizeValue ? '¥' + p.prizeValue : '--') + '</td>'
+                    + '<td class="num">' + p.probability + '%</td>'
+                    + '<td class="num">' + (p.remaining != null ? p.remaining : '--')
+                    + ' / ' + p.totalLimit + '</td>'
+                    + '</tr>';
+            }
+            rows.innerHTML = html;
+        } catch (e) {
+            $('prizeRows').innerHTML = '<tr><td colspan="5">加载失败</td></tr>';
+        }
+        /* 抽奖面板: 仅 lottery + ongoing + 登录 */
+        var a = state.act;
+        if (a && a.status === 'ongoing') {
+            $('drawPanel').style.display = '';
+        }
+    }
+
+    /* ---------- 抽奖 ---------- */
+    window.drawLottery = async function () {
+        var s = session();
+        if (!s || s.memberId == null) {
+            toggleDrawer(true);
+            return;
+        }
+        var btn = $('btnDraw');
+        btn.disabled = true;
+        btn.textContent = '抽奖中…';
+        try {
+            var res = await apiFetch('/api/activity/lottery/draw', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activityId: state.id, userId: Number(s.memberId),
+                }),
+            });
+            var body = await res.json();
+            if (!res.ok || !body || !body.success) {
+                toast(errMsg(body, '抽奖失败'));
+                return;
+            }
+            var d = body.data;
+            var box = $('drawResult');
+            if (d.won) {
+                box.className = 'draw-result show won';
+                box.innerHTML = '🎉 <b>恭喜中奖：' + esc(d.prizeName) + '</b><br>'
+                    + '奖品类型：' + esc(PRIZE_TYPE_LABELS[d.prizeType] || d.prizeType)
+                    + (d.prizeValue ? ' · 价值 ¥' + d.prizeValue : '') + '<br>'
+                    + (d.couponNo ? '券号 <span class="mono">' + esc(d.couponNo) + '</span> · ' : '')
+                    + '今日剩余 ' + d.drawsRemainingToday + ' 次';
+            } else {
+                box.className = 'draw-result show lost';
+                box.textContent = '🍀 ' + (d.msg || '谢谢参与')
+                    + ' ——今日剩余 ' + d.drawsRemainingToday + ' 次';
+            }
+            loadPrizes();
+            loadMyPrizes();
+        } catch (e) {
+            toast('网络错误: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '抽 奖';
+        }
+    };
+
+    /* ---------- 我的奖品(本活动) ---------- */
+    async function loadMyPrizes() {
+        var sec = $('myPrizeSection');
+        var s = session();
+        if (!s) { renderMyPrizes([]); return; }
+        try {
+            var res = await apiFetch('/api/activity/prizes/mine');
+            var body = await res.json();
+            if (res.ok && body && body.success) {
+                var mine = (body.data && body.data.prizes) || [];
+                var list = [];
+                for (var i = 0; i < mine.length; i++) {
+                    if (mine[i].activityId === state.id) { list.push(mine[i]); }
+                }
+                renderMyPrizes(list);
+            } else {
+                renderMyPrizes([]);
+            }
+        } catch (e) {
+            renderMyPrizes([]);
+        }
+    }
+
+    function renderMyPrizes(list) {
+        var sec = $('myPrizeSection');
+        var card = $('myPrizeCard');
+        if (state.act && state.act.type === 'lottery' && session()) {
+            sec.style.display = '';
+        } else {
+            sec.style.display = 'none';
+            return;
+        }
+        if (!list || !list.length) {
+            card.innerHTML = '<div class="empty">暂无中奖记录——抽奖试试手气 🍀</div>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < list.length; i++) {
+            var r = list[i];
+            var pair = RECORD_STATUS_LABELS[r.status] || [r.status, 'weak'];
+            html += '<div class="prize-row">'
+                + '<div class="info">'
+                + '<div class="name">🎁 ' + esc(r.prizeName) + '</div>'
+                + '<div class="meta">' + esc(r.recordNo)
+                + (r.prizeValue ? ' · ¥' + r.prizeValue : '')
+                + (r.waybillNo ? ' · 运单 ' + esc(r.waybillNo) : '')
+                + '</div>'
+                + '</div>'
+                + '<span class="badge ' + pair[1] + '">' + pair[0] + '</span>'
+                + (r.status === 'shipped'
+                    ? '<button class="btn-mini green" onclick="confirmPrize(\'' + esc(r.recordNo) + '\')">确认签收</button>'
+                    : '')
+                + '</div>';
+        }
+        card.innerHTML = html;
+    }
+
+    window.confirmPrize = async function (recordNo) {
+        if (!window.confirm('确认已收到奖品「' + recordNo + '」？')) { return; }
+        try {
+            var res = await apiFetch('/api/activity/prize/' + encodeURIComponent(recordNo) + '/confirm', {
+                method: 'POST',
+            });
+            var body = await res.json();
+            if (res.ok && body && body.success) {
+                toast('签收确认成功');
+                loadMyPrizes();
+            } else {
+                toast(errMsg(body, '确认失败'));
+            }
+        } catch (e) {
+            toast('网络错误: ' + e.message);
+        }
+    };
+
+    /* ---------- 擂台榜 ---------- */
+    async function loadLeaderboard() {
+        try {
+            var res = await fetch(API + '/api/activity/leaderboard/' + state.id + '?limit=50');
+            var body = await res.json();
+            var rows = $('boardRows');
+            if (!res.ok || !body || !body.success) {
+                rows.innerHTML = '<tr><td colspan="3">暂无排名数据</td></tr>';
+                return;
+            }
+            var list = body.data || [];
+            if (!list.length) {
+                rows.innerHTML = '<tr><td colspan="3">暂无排名数据</td></tr>';
+                return;
+            }
+            var medals = ['🥇', '🥈', '🥉'];
+            var html = '';
+            for (var i = 0; i < list.length; i++) {
+                var e = list[i];
+                html += '<tr>'
+                    + '<td>' + (medals[i] || (e.rank || (i + 1))) + '</td>'
+                    + '<td>' + esc(e.realName || ('会员 #' + e.userId)) + '</td>'
+                    + '<td class="num">' + e.score + '</td>'
+                    + '</tr>';
+            }
+            rows.innerHTML = html;
+        } catch (e) {
+            $('boardRows').innerHTML = '<tr><td colspan="3">加载失败</td></tr>';
+        }
+    }
+
+    /* ---------- 登录后会员数据(我的报名) ---------- */
+    async function loadMyReg() {
+        var s = session();
+        if (!s) { return; }
+        try {
+            var res = await apiFetch('/api/activity/my-registrations');
+            var body = await res.json();
+            if (res.ok && body && body.success) {
+                var list = body.data || [];
+                for (var i = 0; i < list.length; i++) {
+                    if (list[i].activityId === state.id) {
+                        state.myReg = list[i];
+                        break;
+                    }
+                }
+            }
+        } catch (e) { /* 静默 */ }
+        renderJoin();
+    }
+
+    function bootstrapMemberData() {
+        loadMyReg();
+        if (state.act && state.act.type === 'lottery') {
+            loadMyPrizes();
+        }
+    }
+
+    /* ---------- 启动 ---------- */
+    /* 返回列表页(透传本地调试 ?api=) */
+    $('backBrand').onclick = function () {
+        location.href = 'activity.html' + API_QS;
+    };
+    $('backFooter').href = 'activity.html' + API_QS;
+
+    var idMatch = location.search.match(/[?&]id=(\d+)/);
+    if (!idMatch) {
+        $('errBox').innerHTML = '<div class="err-card">缺少活动 ID——请从 '
+            + '<a href="activity.html" style="color:#355c44">活动中心</a> 进入</div>';
+    } else {
+        state.id = Number(idMatch[1]);
+        renderAuth();
+        loadActivity().then(loadMyReg);
+    }
+})();
+</script>
+</body>
+</html>
