@@ -147,16 +147,27 @@ class ActivityService:
 
     async def list_activities(self, status: str = None, type_: str = None,
                               limit: int = 50) -> list[dict]:
-        """查询活动列表(默认仅查非草稿状态)"""
+        """查询活动列表(默认仅查非草稿状态)
+
+        registrationCount 实时重算(存储字段为创建时快照 0, 报名/取消
+        不回写活动文档——对齐 get_activity 口径, 防 C端列表计数失真)。
+        """
         if status is None:
             # 默认过滤掉草稿
             activities = await self.repo.list_activities(status=status, type_=type_, limit=limit)
-            return [a for a in activities if a.get("status") != STATUS_DRAFT]
-        return await self.repo.list_activities(status=status, type_=type_, limit=limit)
+            activities = [a for a in activities if a.get("status") != STATUS_DRAFT]
+        else:
+            activities = await self.repo.list_activities(status=status, type_=type_, limit=limit)
+        for a in activities:
+            a["registrationCount"] = await self.repo.count_registrations(a["id"])
+        return activities
 
     async def list_admin_activities(self, status: str = None, limit: int = 50) -> list[dict]:
-        """管理端查询活动列表(含草稿)"""
-        return await self.repo.list_admin_activities(status=status, limit=limit)
+        """管理端查询活动列表(含草稿; registrationCount 实时重算)"""
+        activities = await self.repo.list_admin_activities(status=status, limit=limit)
+        for a in activities:
+            a["registrationCount"] = await self.repo.count_registrations(a["id"])
+        return activities
 
     # ============================================================
     # 3. 查询活动详情
