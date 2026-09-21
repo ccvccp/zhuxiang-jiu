@@ -269,6 +269,34 @@ class ActivityRepository:
         records.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
         return records[:limit]
 
+    async def list_prize_records(self, status: str = None,
+                                 limit: int = 100) -> list[dict]:
+        """管理端查询全量发奖记录(可选状态过滤, 按时间降序)
+
+        用于发货登记面板(待发放列表); 记录量级小(新功能冷启动),
+        keys 扫描与 _redis_list_activities 同模式。
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("activity", "prize_record", "*"))
+            records = []
+            for key in keys:
+                raw = await client.get(key)
+                if not raw:
+                    continue
+                record = json.loads(raw)
+                if status and record.get("status") != status:
+                    continue
+                records.append(record)
+            records.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+            return records[:limit]
+        self._ensure_store()
+        records = list(self.store.get("activity_prize_records", {}).values())
+        if status:
+            records = [r for r in records if r.get("status") == status]
+        records.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+        return records[:limit]
+
     # ============================================================
     # 活动 CRUD
     # ============================================================

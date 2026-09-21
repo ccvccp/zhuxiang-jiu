@@ -1,19 +1,20 @@
-"""活动管理模块路由(18 端点)
+"""活动管理模块路由(20 端点)
 
 鉴权:
     - 用户端(6接口): X-Member-Id 头标识当前会员
-    - 管理端(6接口): X-Role: admin 头(创建/状态流转/审核/管理端列表等)
+    - 管理端(8接口): X-Role: admin 头(创建/编辑/状态流转/审核/管理端列表等)
     - 抽奖发奖(6, P1-12): 奖品池配置/查询公示(公开)/抽奖/我的奖品/
-      实物发货登记(admin)/签收确认(中奖人)
+      实物发货登记(admin)/签收确认(中奖人)/管理端发奖记录列表
 
 异常映射:
     - KeyError → 404(活动/报名不存在)
     - ValueError → 409(业务冲突)
     - 权限校验 → 401(未登录) / 403(无权操作)
 
-端点分布(18个):
+端点分布(20个):
     - 用户端(6): 查询列表/查询详情/报名/取消报名/擂台赛排名/活动统计
-    - 管理端(6): 创建活动/活动状态流转/活动审核/管理端列表/提交擂台赛分数/查询报名列表
+    - 管理端(8): 创建活动/编辑活动/活动状态流转/活动审核/管理端列表/
+      提交擂台赛分数/查询报名列表/管理端发奖记录列表
     - 抽奖发奖(6): 配置奖品池/奖品池公示/抽奖执行/我的奖品/发货登记/签收确认
 """
 
@@ -77,6 +78,22 @@ class CreateActivityRequest(PydBaseModel):
     rules: dict = Field(default_factory=dict, description="活动规则(JSON)")
     applicableScope: dict = Field(default_factory=dict, description="适用范围(JSON)")
     createdBy: int = Field(0, description="创建人ID")
+
+
+class UpdateActivityRequest(PydBaseModel):
+    """编辑活动(仅草稿可编辑; 未传字段保持原值)
+
+    注意: 不含 type/status/usedBudget 等字段——模型级防误改
+    (type 不可改: draft 抽奖活动可能已配奖品池, 改 type 产生孤儿数据)
+    """
+    name: str = Field(None, description="活动名称")
+    subType: str = Field(None, description="子类型(如擂台赛L01-L08)")
+    description: str = Field(None, description="活动描述")
+    startTime: str = Field(None, description="开始时间")
+    endTime: str = Field(None, description="结束时间")
+    budget: float = Field(None, ge=0, description="活动预算")
+    rules: dict = Field(None, description="活动规则(JSON)")
+    applicableScope: dict = Field(None, description="适用范围(JSON)")
 
 
 class RegisterRequest(PydBaseModel):
@@ -274,6 +291,24 @@ async def create_activity(
         _handle(e)
 
 
+@router.put("/api/activity/admin/update/{activity_id}", tags=["活动管理模块"])
+async def update_activity(
+    activity_id: int,
+    data: UpdateActivityRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """编辑活动(仅草稿可编辑; 部分更新, 未传字段保持原值)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.update_activity(
+            activity_id=activity_id,
+            updates=data.dict(exclude_unset=True),
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/activity/admin/list", tags=["活动管理模块"])
 async def list_admin_activities(
     status: str = Query(None, description="按状态筛选"),
@@ -410,6 +445,21 @@ async def list_my_prizes(
     try:
         result = await _service.list_my_prizes(int(member_id))
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/activity/admin/prize-records", tags=["活动管理模块"])
+async def list_admin_prize_records(
+    status: str = Query(None, description="按状态筛选: pending/issued/shipped/signed/expired"),
+    limit: int = Query(100, ge=1, le=500, description="查询条数"),
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """管理端查询全量发奖记录(发货登记面板, 默认查全部)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.list_prize_records(status=status, limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)
 

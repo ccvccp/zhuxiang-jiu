@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-title" content="竹香酒">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="format-detection" content="telephone=no">
-    <title>竹香酒官网 · 27大模块初测仪表盘 v6.0</title>
+    <title>竹香酒官网 · 29大模块初测仪表盘 v6.0</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/module-test.css">
 </head>
@@ -19,7 +19,7 @@
     <!-- 页面标题 -->
     <section class="section" style="background:linear-gradient(135deg,#355c44,#4a7c59);color:#fff;padding:40px 0;">
         <div class="container">
-            <h1 style="font-size:28px;text-align:center;">竹香酒官网 · 27大模块初测仪表盘</h1>
+            <h1 id="pageTitle" style="font-size:28px;text-align:center;">竹香酒官网 · 29大模块初测仪表盘</h1>
             <p style="text-align:center;margin-top:8px;opacity:0.9;">v6.0 AI智能优化版 · 业务/AI/数据/合规 四中台 · 90%自动化 · 合作模块合并</p>
         </div>
     </section>
@@ -29,7 +29,7 @@
         <div class="container">
             <div class="test-stats" id="statsBar">
                 <div class="stat-card">
-                    <div class="stat-value" id="statModules">28</div>
+                    <div class="stat-value" id="statModules">29</div>
                     <div class="stat-label">模块总数</div>
                 </div>
                 <div class="stat-card stat-passed">
@@ -85,7 +85,7 @@
     <section class="section" style="background:var(--color-bg);">
         <div class="container">
             <div class="section-title">
-                <h2>24大<span>模块</span>初测</h2>
+                <h2 id="sectionTitle">29大<span>模块</span>初测</h2>
                 <p>点击"执行初测"按钮运行各模块测试</p>
                 <div class="deco-line"></div>
             </div>
@@ -475,12 +475,12 @@
                 <div style="text-align:center;padding:20px;border-radius:8px;background:#e8f5e9;border:2px solid #4a7c59;">
                     <div style="font-size:32px;">🏢</div>
                     <h3 style="color:#355c44;margin:8px 0;">业务中台</h3>
-                    <p style="font-size:12px;color:#666;">6大域 · 24模块</p>
+                    <p style="font-size:12px;color:#666;" id="bizStat">6大域 · 29模块</p>
                 </div>
                 <div style="text-align:center;padding:20px;border-radius:8px;background:#fff3e0;border:2px solid #e67e22;">
                     <div style="font-size:32px;">🤖</div>
                     <h3 style="color:#e67e22;margin:8px 0;">AI智能中台</h3>
-                    <p style="font-size:12px;color:#666;">24大AI能力 · 90%</p>
+                    <p style="font-size:12px;color:#666;" id="aiStat">29大AI能力 · 90%</p>
                 </div>
                 <div style="text-align:center;padding:20px;border-radius:8px;background:#e3f2fd;border:2px solid #3498db;">
                     <div style="font-size:32px;">📊</div>
@@ -540,6 +540,20 @@
             document.getElementById('header').innerHTML = renderHeader('test');
             document.getElementById('footer').innerHTML = renderFooter();
 
+            // 模块数口径统一: 以 MODULES 数组为唯一事实源动态同步(防文案漂移)
+            const modCount = MODULES.length;
+            const domainCount = new Set(MODULES.map(m => m.domain)).size;
+            document.title = `竹香酒官网 · ${modCount}大模块初测仪表盘 v6.0`;
+            document.getElementById('pageTitle').textContent =
+                `竹香酒官网 · ${modCount}大模块初测仪表盘`;
+            document.getElementById('statModules').textContent = modCount;
+            document.getElementById('sectionTitle').innerHTML =
+                `${modCount}大<span>模块</span>初测`;
+            document.getElementById('bizStat').textContent =
+                `${domainCount}大域 · ${modCount}模块`;
+            document.getElementById('aiStat').textContent =
+                `${modCount}大AI能力 · 90%`;
+
             // 在主导航追加开发文档入口(仅 module-test.html,不影响其他页面)
             const docLinksHtml = '<a href="docs/并发控制与事务一致性技术文档.md" target="_blank" rel="noopener" '
                 + 'style="color:#f39c12;border:1px dashed #f39c12;border-radius:4px;padding:2px 10px;margin-left:4px;">'
@@ -558,7 +572,10 @@
                 + '🔒 并发锁规范</a>'
                 + '<a href="xx64-delivery-dashboard.html" target="_blank" rel="noopener" '
                 + 'style="color:#1a4a3a;border:1px dashed #2e8b6e;border-radius:4px;padding:2px 10px;margin-left:4px;">'
-                + '🎋 64号交付可视化</a>';
+                + '🎋 64号交付可视化</a>'
+                + '<a href="activity-dashboard.html" target="_blank" rel="noopener" '
+                + 'style="color:#8a6d2f;border:1px dashed #b8860b;border-radius:4px;padding:2px 10px;margin-left:4px;">'
+                + '🎪 活动管理后台</a>';
             const desktopNav = document.querySelector('#header .nav');
             if (desktopNav) desktopNav.insertAdjacentHTML('beforeend', docLinksHtml);
             const mobileNavList = document.querySelector('#header .mobile-nav-list');

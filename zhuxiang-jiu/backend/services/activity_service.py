@@ -24,6 +24,7 @@
 import json
 import logging
 from datetime import datetime
+from typing import ClassVar
 
 from core.locks import get_lock
 from repositories.activity_repository import (
@@ -148,6 +149,55 @@ class ActivityService:
         # 附加报名数
         activity["registrationCount"] = await self.repo.count_registrations(activity_id)
         return activity
+
+    # ============================================================
+    # 3.5 编辑活动(管理端)
+    # ============================================================
+
+    # 可编辑字段白名单: type 不可改(draft 抽奖活动可能已配奖品池、
+    # 擂台赛可能有排行榜数据, 改 type 会产生孤儿数据);
+    # status/usedBudget 由状态机/发奖流程管理, 禁止直改
+    EDITABLE_FIELDS: ClassVar[set] = {"name", "subType", "description",
+                                      "startTime", "endTime", "budget",
+                                      "rules", "applicableScope"}
+
+    async def update_activity(self, activity_id: int, updates: dict) -> dict:
+        """编辑活动(仅草稿可编辑; 白名单字段部分更新)
+
+        与 transition/audit 共用状态锁, 防止编辑与审核/流转并发
+        导致 RMW 互相覆盖。
+
+        Returns:
+            更新后活动详情(附加 registrationCount)
+
+        Raises:
+            KeyError: 活动不存在
+            ValueError: 非草稿状态不允许编辑
+        """
+        lock_key = f"activity:status:{activity_id}"
+
+        async with get_lock(lock_key):
+            activity = await self.repo.get_activity(activity_id)
+            if activity is None:
+                raise KeyError(f"活动不存在(activityId={activity_id})")
+
+            if activity.get("status") != STATUS_DRAFT:
+                raise ValueError(
+                    f"仅草稿状态可编辑(当前: {activity.get('status')})"
+                )
+
+            # 白名单过滤: 忽略 type/status/usedBudget 等越权字段
+            for field, value in updates.items():
+                if field in self.EDITABLE_FIELDS:
+                    activity[field] = value
+
+            activity["updatedAt"] = datetime.utcnow().isoformat()
+            await self.repo.save_activity(activity)
+
+            # 附加报名数(对齐 get_activity 返回形态)
+            activity["registrationCount"] = await self.repo.count_registrations(
+                activity_id)
+            return activity
 
     # ============================================================
     # 4. 报名
@@ -784,6 +834,11 @@ class ActivityService:
             grouped.setdefault(r.get("status", "unknown"), []).append(r)
         return {"userId": user_id, "total": len(records), "prizes": records,
                 "byStatus": grouped}
+
+    async def list_prize_records(self, status: str = None,
+                                 limit: int = 100) -> list[dict]:
+        """管理端查询全量发奖记录(发货登记面板数据源)"""
+        return await self.repo.list_prize_records(status=status, limit=limit)
 
     async def deliver_prize(self, record_no: str, waybill_no: str,
                              operator: str = "admin") -> dict:

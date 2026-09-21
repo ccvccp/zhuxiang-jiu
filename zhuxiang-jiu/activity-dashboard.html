@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<!--
+    活动中心 · 管理后台(活动发布与管理)——生产自包含单文件
+    页面: activity-dashboard.html(JS 全内联, 对齐 margin.html/zjian.html 部署惯例,
+          无外部 js 依赖; 唯一外部引用 css/style.css)
+    后端: 09号活动管理模块 activity_routes(默认同源自适应——生产
+          https://zxjiu.com 走 nginx /api 反代, 本地开发 localhost:8000)
+    鉴权: strict 模式(生产)需管理员登录——页面内置登录面板(手机号+密码,
+          POST /api/auth/login), 并自动复用同浏览器商城(Taro H5 auth_session)
+          登录态; compat 模式(本地)X-Role: admin 直连
+    区块: ①活动总览 ②发布/编辑表单 ③活动管理列表(行展开: 详情/统计/报名)
+          ④抽奖奖品池配置 ⑤发奖记录与发货登记 + 登录面板(401 时出现)
+    发布路径: 创建(draft) → 审核发布(audit, AI 风控门) → registering →
+              ongoing → ended; 拒绝/取消 → cancelled
+-->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · 活动中心 · 管理后台</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* ========= 主题变量内联(生产自包含; 本地有 css/style.css 时叠加不冲突) ========= */
+        :root {
+            --color-primary: #4a7c59;        /* 竹绿主色 */
+            --color-primary-dark: #355c44;   /* 深竹绿 */
+            --color-primary-light: #6b9b7c;  /* 浅竹绿 */
+            --color-accent: #c9a961;         /* 金色辅色 */
+            --color-bg: #f8f6f0;             /* 米白背景 */
+            --color-bg-card: #ffffff;        /* 卡片背景 */
+            --color-text: #2c2c2c;           /* 正文文字 */
+            --color-text-light: #6b6b6b;     /* 辅助文字 */
+            --color-border: #e5e0d5;         /* 边框色 */
+            --color-danger: #c0392b;         /* 警告/价格 */
+            --shadow-sm: 0 2px 8px rgba(74, 124, 89, 0.08);
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --container-width: 1200px;
+            --transition: all 0.3s ease;
+        }
+        body {
+            font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+            color: var(--color-text);
+            background-color: var(--color-bg);
+            line-height: 1.6;
+            font-size: 14px;
+        }
+        .container {
+            max-width: var(--container-width);
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        /* ========= 活动管理后台专属样式(复用主题变量) ========= */
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+        .banner-link {
+            color: #fff; text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.55);
+            border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px;
+            white-space: nowrap; transition: var(--transition);
+        }
+        .banner-link:hover { background: rgba(255, 255, 255, 0.15); }
+
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+
+        /* 工具栏 */
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            transition: var(--transition);
+        }
+        .dash-btn:hover { background: var(--color-primary-dark); }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
+        .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+
+        /* 错误/提示横幅 */
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .dash-info {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+
+        /* 卡片头 */
+        .card-head {
+            display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--color-border);
+        }
+        .card-head b { font-size: 14px; }
+        .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .card-head select {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; background: #fff;
+        }
+
+        /* 总览 cells */
+        .ov-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; padding: 14px 16px; }
+        .ov-cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 8px 10px; }
+        .ov-cell .k { font-size: 11px; color: var(--color-text-light); margin-bottom: 3px; }
+        .ov-cell .v { font-size: 17px; font-weight: 600; }
+
+        /* 发布/编辑表单(纵向堆叠 + 字段网格) */
+        .act-form { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+        .form-grid .full { grid-column: 1 / -1; }
+        .act-form label { display: block; font-size: 13px; color: var(--color-text-light); margin-bottom: 5px; }
+        .act-form input[type="text"], .act-form input[type="number"],
+        .act-form input[type="datetime-local"], .act-form select, .act-form textarea {
+            width: 100%; box-sizing: border-box; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; background: #fff;
+        }
+        .act-form textarea { min-height: 72px; resize: vertical; line-height: 1.7; font-family: inherit; }
+        .act-form textarea.json { font-family: Consolas, monospace; font-size: 12px; }
+        .json-err { font-size: 12px; color: var(--color-danger); }
+        .form-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .form-hint { font-size: 12px; color: var(--color-text-light); }
+
+        /* 状态筛选 pill */
+        .pill-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px 4px; }
+        .pill {
+            border: 1px solid var(--color-border); border-radius: 999px; padding: 4px 14px;
+            font-size: 12px; cursor: pointer; background: #fff; color: var(--color-text-light);
+            transition: var(--transition);
+        }
+        .pill:hover { border-color: var(--color-primary); color: var(--color-primary); }
+        .pill.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+
+        /* 表格 */
+        .matrix-wrap { overflow-x: auto; }
+        table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .matrix th, .matrix td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+        .matrix th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        .matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .matrix .mono { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
+
+        /* 徽章 */
+        .badge {
+            display: inline-block; border-radius: 999px; padding: 2px 10px;
+            font-size: 11px; white-space: nowrap; border: 1px solid transparent;
+        }
+        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.yellow { background: #fdf3e3; color: #a06b00; }
+        .badge.red { background: #fdecea; color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: #999; }
+        .badge.blue { background: #eef2fb; color: #3b5998; }
+        .badge.gold { background: rgba(201, 169, 97, 0.15); color: #8a6d2f; }
+
+        /* 小按钮 */
+        .btn-mini {
+            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
+            cursor: pointer; transition: var(--transition); margin: 1px 2px;
+        }
+        .btn-mini:hover { background: rgba(74, 124, 89, 0.08); }
+        .btn-mini.danger { border-color: var(--color-danger); color: var(--color-danger); }
+        .btn-mini.danger:hover { background: rgba(192, 57, 43, 0.06); }
+        .btn-mini.ghost { border-color: var(--color-border); color: var(--color-text-light); }
+
+        /* 行展开(详情/统计/报名) */
+        .row-toggle { cursor: pointer; }
+        .row-toggle:hover { background: rgba(74, 124, 89, 0.04); }
+        .exp-arrow { color: var(--color-text-light); font-size: 11px; display: inline-block; width: 12px; }
+        tr.detail-row > td { background: var(--color-bg); padding: 0 16px; white-space: normal; }
+        .detail-box { padding: 14px 0; display: flex; flex-direction: column; gap: 12px; }
+        .detail-body {
+            background: #fff; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 12px 14px;
+            font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
+        }
+        .detail-body.json { font-family: Consolas, monospace; font-size: 12px; }
+        .detail-label { font-size: 12px; color: var(--color-text-light); margin-bottom: 4px; }
+        .sub-table { width: 100%; border-collapse: collapse; font-size: 12px; background: #fff; }
+        .sub-table th { padding: 6px 8px; border-bottom: 1px solid var(--color-border); text-align: left; color: var(--color-text-light); }
+        .sub-table td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); }
+
+        /* 奖品池行编辑器 */
+        .prize-edit-wrap { padding: 14px 16px; }
+        .prize-target { font-size: 13px; margin-bottom: 10px; color: var(--color-text-light); }
+        .prize-target b { color: var(--color-text); }
+        .prize-rows { display: flex; flex-direction: column; gap: 8px; }
+        .prize-row { display: grid; grid-template-columns: 2fr 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr auto; gap: 8px; align-items: center; }
+        .prize-row input {
+            width: 100%; box-sizing: border-box; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 6px 8px; font-size: 12px; background: #fff;
+        }
+        .prize-row select {
+            width: 100%; box-sizing: border-box; border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm); padding: 6px 4px; font-size: 12px; background: #fff;
+        }
+        .prob-total { font-size: 13px; margin-top: 10px; }
+        .prob-total.over { color: var(--color-danger); font-weight: 600; }
+
+        /* 发货行内运单输入 */
+        .deliver-input {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 3px 8px; font-size: 12px; width: 130px; background: #fff;
+        }
+
+        /* 提示行 */
+        .note-bar {
+            padding: 10px 16px; font-size: 11px; color: var(--color-text-light);
+            line-height: 1.7; border-top: 1px solid var(--color-border);
+        }
+
+        /* 页脚说明 */
+        .dash-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+        .dash-footer code {
+            background: var(--color-bg); border: 1px solid var(--color-border);
+            border-radius: 3px; padding: 1px 6px; font-size: 11px;
+        }
+
+        @media (max-width: 640px) {
+            .dash-toolbar input[type="text"] { width: 100%; }
+            .dash-last-update { margin-left: 0; width: 100%; }
+            .banner-link { display: none; }
+            .form-grid { grid-template-columns: 1fr; }
+            .prize-row { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页头横幅 -->
+    <header class="dash-banner">
+        <div class="container" style="display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+                <h1>活动中心 · 管理后台</h1>
+                <p>09号活动管理模块 · 8类活动(促销/抽奖/竞赛/擂台赛/互动/拼团/秒杀/预售) · 发布与全生命周期管理 · 抽奖奖品池与发奖发货</p>
+            </div>
+            <a class="banner-link" href="module-test.html">← 模块初测</a>
+            <div id="authBadge" style="display:flex;align-items:center;"></div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 工具栏: API 地址 / 刷新 / 自动刷新 -->
+        <section class="dash-section">
+            <div class="dash-card dash-toolbar">
+                <label for="apiBase">后端地址</label>
+                <input type="text" id="apiBase" placeholder="http://localhost:8000">
+                <button class="dash-btn ghost" id="btnSaveApi" onclick="saveApiBase()">保存</button>
+                <button class="dash-btn" id="btnRefresh" onclick="refreshData()">刷新</button>
+                <label style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" id="autoRefresh" checked onchange="toggleAutoRefresh()"> 自动刷新(30s)
+                </label>
+                <span class="dash-last-update" id="lastUpdate">尚未加载</span>
+            </div>
+            <div class="dash-error" id="errorBanner"></div>
+            <div class="dash-info" id="infoBanner"></div>
+        </section>
+
+        <!-- 管理员登录面板(strict 模式 401 时出现; 登录后隐藏) -->
+        <section class="dash-section" id="loginSection" style="display:none;">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>管理员登录</b>
+                    <span class="form-hint">strict 模式: 管理操作须登录管理员会员账号(role=admin)</span>
+                </div>
+                <div class="act-form">
+                    <div class="form-grid">
+                        <div>
+                            <label for="loginPhone">手机号 *</label>
+                            <input type="text" id="loginPhone" placeholder="管理员会员手机号">
+                        </div>
+                        <div>
+                            <label for="loginPassword">密码 *</label>
+                            <input type="password" id="loginPassword" placeholder="登录密码">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button class="dash-btn" id="btnLogin" onclick="doLogin()">登录</button>
+                        <span class="form-hint">同一浏览器登录过商城(H5)时自动复用其登录态; 管理列表将自动加载</span>
+                    </div>
+                    <div class="json-err" id="loginErr"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ① 活动总览 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>① 活动总览</b></div>
+                <div class="ov-cells" id="ovCells">
+                    <div class="ov-cell"><div class="k">加载中…</div></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ② 发布/编辑表单 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b id="formTitle">② 发布活动</b>
+                    <span class="form-hint" id="formHint">创建后为草稿(draft), 经「审核发布」进入报名中</span>
+                </div>
+                <div class="act-form">
+                    <div class="form-grid">
+                        <div>
+                            <label for="actName">活动名称 *</label>
+                            <input type="text" id="actName" placeholder="如: 竹香开酿节·品鉴擂台赛">
+                        </div>
+                        <div>
+                            <label for="actType">活动类型 *</label>
+                            <select id="actType" onchange="onTypeChange()">
+                                <option value="promotion">促销活动</option>
+                                <option value="lottery">抽奖活动</option>
+                                <option value="competition">竞赛活动</option>
+                                <option value="arena">擂台赛</option>
+                                <option value="interactive">互动活动</option>
+                                <option value="groupbuy">拼团</option>
+                                <option value="seckill">秒杀</option>
+                                <option value="presale">预售</option>
+                            </select>
+                        </div>
+                        <div id="subTypeBox" style="display:none;">
+                            <label for="actSubType">擂台赛类型</label>
+                            <select id="actSubType">
+                                <option value="L01">L01 引流擂台赛</option>
+                                <option value="L02">L02 体验擂台赛</option>
+                                <option value="L03">L03 销售擂台赛</option>
+                                <option value="L04">L04 金点子擂台赛</option>
+                                <option value="L05">L05 内容擂台赛</option>
+                                <option value="L06">L06 品鉴擂台赛</option>
+                                <option value="L07">L07 服务擂台赛</option>
+                                <option value="L08">L08 传承擂台赛</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="actBudget">活动预算(元)</label>
+                            <input type="number" id="actBudget" min="0" step="0.01" value="0">
+                        </div>
+                        <div>
+                            <label for="actStart">开始时间</label>
+                            <input type="datetime-local" id="actStart">
+                        </div>
+                        <div>
+                            <label for="actEnd">结束时间</label>
+                            <input type="datetime-local" id="actEnd">
+                        </div>
+                        <div class="full">
+                            <label for="actDescription">活动描述</label>
+                            <textarea id="actDescription" placeholder="面向用户展示的活动说明(规则要点、参与方式、奖品说明等)"></textarea>
+                        </div>
+                        <div>
+                            <label for="actRules">活动规则(JSON, 可空)</label>
+                            <textarea id="actRules" class="json" placeholder='{"报名上限": 100, "奖品": "…"}'></textarea>
+                            <div class="json-err" id="rulesErr"></div>
+                        </div>
+                        <div>
+                            <label for="actScope">适用范围(JSON, 可空)</label>
+                            <textarea id="actScope" class="json" placeholder='{"scope": "all"}'></textarea>
+                            <div class="json-err" id="scopeErr"></div>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button class="dash-btn" id="btnSubmit" onclick="submitForm()">创建活动</button>
+                        <button class="dash-btn ghost" id="btnCancelEdit" style="display:none;" onclick="exitEditMode()">取消编辑</button>
+                        <span class="form-hint">* 必填; JSON 失焦校验, 空 = 不设</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ③ 活动管理列表 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>③ 活动管理列表</b></div>
+                <div class="pill-bar" id="statusPills"></div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th></th><th>ID</th><th>活动号</th><th>名称</th><th>类型</th>
+                                <th>状态</th><th>起止时间</th><th>预算(已用/总)</th>
+                                <th>报名</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activityBody">
+                            <tr><td colspan="10" style="color:#999;font-size:12px;padding:16px;">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    状态机: <span class="badge weak">draft 草稿</span> →
+                    审核发布 → <span class="badge blue">registering 报名中</span> →
+                    开始 → <span class="badge green">ongoing 进行中</span> →
+                    结束 → <span class="badge gold">ended 已结束</span>;
+                    拒绝/取消 → <span class="badge red">cancelled 已取消</span>(终态)。
+                    发布走审核轨(audit, 含 AI 风控门), 非裸流转。
+                </div>
+            </div>
+        </section>
+
+        <!-- ④ 抽奖奖品池配置 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head"><b>④ 抽奖奖品池配置</b></div>
+                <div class="prize-edit-wrap">
+                    <div class="prize-target" id="prizeTarget">在上方列表中对 lottery(抽奖) 活动点击「奖品池」进入配置。</div>
+                    <div class="prize-rows" id="prizeRows"></div>
+                    <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                        <button class="dash-btn ghost" onclick="addPrizeRow()">+ 添加奖品</button>
+                        <button class="dash-btn" id="btnSavePrizes" onclick="savePrizes()">保存奖品池</button>
+                        <span class="prob-total" id="probTotal">概率合计 0%</span>
+                    </div>
+                </div>
+                <div class="note-bar">
+                    合规: 概率总和 ≤ 100%; 单奖价值 ≤ ¥5,000; 每日每人抽奖 3 次;
+                    奖品类型 7 种: coupon 优惠券 / points 积分(自动到账) /
+                    product 实物 / cash 现金 / benefit 权益 / banquet_wine 喜宴用酒 / mascot 吉祥物。
+                </div>
+            </div>
+        </section>
+
+        <!-- ⑤ 发奖记录与发货登记 -->
+        <section class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>⑤ 发奖记录与发货登记</b>
+                    <div class="head-actions">
+                        <select id="prizeStatusFilter" onchange="loadPrizeRecords()">
+                            <option value="">全部状态</option>
+                            <option value="pending" selected>待发放</option>
+                            <option value="issued">已发放(自动到账)</option>
+                            <option value="shipped">已发货</option>
+                            <option value="signed">已签收</option>
+                            <option value="expired">已过期</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>记录号</th><th>活动ID</th><th>用户</th><th>奖品</th>
+                                <th>类型</th><th>价值</th><th>状态</th>
+                                <th>运单号</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prizeRecordBody">
+                            <tr><td colspan="9" style="color:#999;font-size:12px;padding:16px;">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    邮寄类(product/banquet_wine/mascot)中奖后为「待发放」, 填运单号发货;
+                    积分/优惠券/权益类自动到账(已发放); 中奖人在 C 端确认签收。
+                </div>
+            </div>
+        </section>
+
+        <footer class="dash-footer">
+            数据源: 09号活动管理模块 <code>activity_routes</code>(20 端点)。
+            鉴权: <code>strict</code>(生产) 内置登录面板——手机号+密码换 JWT;
+            <code>compat</code>(本地) 以 <code>X-Role: admin</code> 兼容头直连。
+            发布链: 创建(draft) → 审核发布(audit, AI 风控门) → 报名中 → 进行中 → 已结束。
+        </footer>
+    </main>
+
+    <script>
+    /**
+     * 活动中心管理后台(全内联, 无外部 js 依赖)
+     * 后端: 09号活动管理模块 activity_routes(20 端点):
+     *   POST /api/activity/admin/create           创建活动(初始 draft)
+     *   PUT  /api/activity/admin/update/{id}       编辑活动(仅草稿, 部分更新)
+     *   GET  /api/activity/admin/list              管理端列表(含草稿)
+     *   POST /api/activity/admin/audit/{id}        审核发布/拒绝(AI 风控门)
+     *   POST /api/activity/admin/transition/{id}   状态流转(开始/结束/取消)
+     *   GET  /api/activity/stats/{id}              活动统计
+     *   GET  /api/activity/registrations/{id}      报名列表
+     *   POST /api/activity/admin/prizes/{id}       配置奖品池
+     *   GET  /api/activity/lottery/{id}/prizes     奖品池公示
+     *   GET  /api/activity/admin/prize-records     管理端发奖记录
+     *   POST /api/activity/admin/prize/{no}/deliver 实物发货登记
+     * 鉴权: strict 模式(生产) Bearer JWT(内置登录面板/复用商城 H5 登录态);
+     *       compat 模式(本地) X-Role: admin 兼容头直连
+     */
+    (function () {
+        'use strict';
+
+        var KEY = 'activityDash.apiBase';
+
+        // ---------- 状态 ----------
+        var state = {
+            filter: '',              // 当前状态筛选('' = 全部)
+            editingId: null,          // 编辑中的活动 ID(null = 新建)
+            expanded: {},            // 展开态: {activityId: {...}}
+            prizeActivityId: null,    // 奖品池配置中的活动 ID
+            prizeActivityName: '',
+            prizes: [],              // 奖品行编辑数据
+            activities: [],          // 列表数据(供行展开复用)
+            timer: null,
+            loginPending: false,     // 登录面板可见时暂停自动刷新
+        };
+
+        // 字典: 类型/状态/奖品类型/发奖状态
+        var TYPE_LABELS = {
+            promotion: '促销', lottery: '抽奖', competition: '竞赛', arena: '擂台赛',
+            interactive: '互动', groupbuy: '拼团', seckill: '秒杀', presale: '预售',
+        };
+        var STATUS_LABELS = {
+            draft: ['草稿', 'weak'], registering: ['报名中', 'blue'],
+            ongoing: ['进行中', 'green'], ended: ['已结束', 'gold'],
+            cancelled: ['已取消', 'red'],
+        };
+        var PRIZE_TYPE_LABELS = {
+            coupon: '优惠券', points: '积分', product: '实物', cash: '现金',
+            benefit: '权益', banquet_wine: '喜宴用酒', mascot: '吉祥物',
+        };
+        var RECORD_STATUS_LABELS = {
+            pending: ['待发放', 'yellow'], issued: ['已发放', 'green'],
+            shipped: ['已发货', 'blue'], signed: ['已签收', 'gold'],
+            expired: ['已过期', 'weak'],
+        };
+        var MAILABLE = { product: 1, banquet_wine: 1, mascot: 1 };
+
+        // ---------- 基础工具 ----------
+        function $(id) { return document.getElementById(id); }
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                         '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+
+        function apiBase() {
+            // 显式保存 > 相邻页约定 > 同源自适应(生产 https://zxjiu.com) > 本地开发
+            if (localStorage.getItem(KEY)) { return localStorage.getItem(KEY); }
+            if (localStorage.getItem('promoDash.apiBase')) {
+                return localStorage.getItem('promoDash.apiBase');
+            }
+            if (location.protocol.indexOf('http') === 0
+                && !/^(localhost|127\.)/.test(location.hostname)) {
+                return location.origin;  // 生产同源(nginx /api 反代)
+            }
+            return 'http://localhost:8000';
+        }
+
+        // ---------- 内置鉴权(替代 js/auth.js 依赖) ----------
+        /* 读取登录令牌:
+           1) 本页登录面板保存的会话('zhuxiang.auth', 与全站 auth.js 同构)
+           2) 同浏览器商城(Taro H5)登录态('auth_session', Taro 存储为 {"data":{...}}) */
+        function readStoredToken() {
+            try {
+                var s = JSON.parse(localStorage.getItem('zhuxiang.auth') || 'null');
+                if (s && s.token
+                    && (!s.expiresAt || s.expiresAt > Date.now() + 60000)) {
+                    return s.token;
+                }
+            } catch (e) { /* 忽略解析失败 */ }
+            try {
+                var w = JSON.parse(localStorage.getItem('auth_session') || 'null');
+                var d = (w && w.data) ? w.data : w;
+                if (d && d.accessToken) { return d.accessToken; }
+            } catch (e) { /* 忽略解析失败 */ }
+            return null;
+        }
+
+        function readStoredInfo() {
+            try {
+                var s = JSON.parse(localStorage.getItem('zhuxiang.auth') || 'null');
+                if (s && s.token) { return s; }
+            } catch (e) { /* 忽略 */ }
+            try {
+                var w = JSON.parse(localStorage.getItem('auth_session') || 'null');
+                var d = (w && w.data) ? w.data : w;
+                if (d && d.accessToken) {
+                    return { token: d.accessToken, nickname: d.nickname,
+                             role: d.role, phone: d.phone };
+                }
+            } catch (e) { /* 忽略 */ }
+            return null;
+        }
+
+        /* 请求头: compat 下 X-Role 兼容头; 有令牌时叠加 Bearer(strict) */
+        function apiHeaders() {
+            var h = { 'X-Role': 'admin', 'Content-Type': 'application/json' };
+            var t = readStoredToken();
+            if (t) { h['Authorization'] = 'Bearer ' + t; }
+            return h;
+        }
+
+        function showLoginCard() {
+            state.loginPending = true;
+            $('loginSection').style.display = '';
+            updateAuthBadge();
+        }
+
+        function hideLoginCard() {
+            state.loginPending = false;
+            $('loginSection').style.display = 'none';
+        }
+
+        /* 内置登录: 手机号+密码 → POST /api/auth/login → 存 'zhuxiang.auth' */
+        async function doLogin() {
+            var phone = $('loginPhone').value.trim();
+            var password = $('loginPassword').value;
+            $('loginErr').textContent = '';
+            if (!phone || !password) {
+                $('loginErr').textContent = '请填写手机号和密码';
+                return;
+            }
+            var btn = $('btnLogin');
+            btn.disabled = true; btn.textContent = '登录中…';
+            try {
+                var res = await fetch(apiBase() + '/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: phone, password: password }),
+                });
+                var body = null;
+                try { body = await res.json(); } catch (e) { /* 非 JSON */ }
+                if (!res.ok || !body || !body.success || !body.accessToken) {
+                    $('loginErr').textContent = (body && (body.detail || body.error))
+                        || ('登录失败(HTTP ' + res.status + ')');
+                    return;
+                }
+                localStorage.setItem('zhuxiang.auth', JSON.stringify({
+                    token: body.accessToken,
+                    refreshToken: body.refreshToken || null,
+                    memberId: body.memberId,
+                    nickname: body.nickname || '',
+                    role: body.role || 'member',
+                    phone: body.phone || phone,
+                    expiresAt: Date.now() + (body.expiresIn || 7200) * 1000,
+                }));
+                hideLoginCard();
+                $('loginPassword').value = '';
+                updateAuthBadge();
+                showBanner('infoBanner', '登录成功'
+                    + (body.role === 'admin' ? '(管理员)' : ''));
+                refreshData();
+            } catch (err) {
+                $('loginErr').textContent = '网络错误: ' + err.message;
+            } finally {
+                btn.disabled = false; btn.textContent = '登录';
+            }
+        }
+
+        /* 页头登录态徽章(昵称/管理员标记 + 退出) */
+        function updateAuthBadge() {
+            var box = $('authBadge');
+            if (!box) { return; }
+            box.innerHTML = '';
+            var info = readStoredInfo();
+            if (!info) { return; }
+            var wrap = document.createElement('span');
+            wrap.style.cssText = 'display:inline-flex;align-items:center;gap:8px;'
+                + 'font-size:12px;color:#fff;opacity:.92;';
+            var name = document.createElement('span');
+            name.textContent = (info.nickname || info.phone || '已登录')
+                + (info.role === 'admin' ? '(管理员)' : '');
+            var btn = document.createElement('button');
+            btn.textContent = '退出';
+            btn.style.cssText = 'background:rgba(255,255,255,.18);border:1px solid '
+                + 'rgba(255,255,255,.45);color:#fff;border-radius:6px;'
+                + 'padding:2px 10px;font-size:11px;cursor:pointer;';
+            btn.onclick = function () {
+                localStorage.removeItem('zhuxiang.auth');
+                updateAuthBadge();
+                showLoginCard();
+                refreshData();
+            };
+            wrap.appendChild(name);
+            wrap.appendChild(btn);
+            box.appendChild(wrap);
+        }
+
+        /* 统一请求: 解包 {"success": true, "data": ...}; 失败抛出含 detail 的错误 */
+        async function fetchJson(url, options) {
+            var res = await fetch(url, Object.assign({ headers: apiHeaders() }, options || {}));
+            if (res.status === 401) {
+                showLoginCard();  // strict 模式未登录/过期 → 内置登录面板
+                throw new Error('未登录或登录已过期');
+            }
+            var body = null;
+            try { body = await res.json(); } catch (e) { /* 非 JSON 错误体 */ }
+            if (!res.ok) {
+                var msg = body && (body.detail || body.error || body.message)
+                    ? (body.detail || body.error || body.message) : ('HTTP ' + res.status);
+                throw new Error(msg);
+            }
+            if (!body || body.success !== true) {
+                throw new Error((body && (body.detail || body.error)) || '响应格式异常');
+            }
+            return body.data;
+        }
+
+        function showBanner(id, msg) {
+            var el = $(id);
+            el.textContent = msg;
+            el.style.display = 'block';
+            setTimeout(function () { el.style.display = 'none'; }, 5000);
+        }
+
+        function fail(context, err) {
+            showBanner('errorBanner', context + '失败: ' + (err && err.message ? err.message : err));
+        }
+
+        function fmtTime(t) {
+            if (!t) { return '--'; }
+            return String(t).slice(0, 16).replace('T', ' ');
+        }
+
+        // ---------- ① 总览 ----------
+        function renderOverview(list) {
+            var counts = { draft: 0, registering: 0, ongoing: 0, ended: 0, cancelled: 0 };
+            list.forEach(function (a) {
+                if (counts[a.status] != null) { counts[a.status]++; }
+            });
+            var html = '';
+            [['草稿', 'draft'], ['报名中', 'registering'], ['进行中', 'ongoing'],
+             ['已结束', 'ended'], ['已取消', 'cancelled']].forEach(function (p) {
+                html += '<div class="ov-cell"><div class="k">' + p[0]
+                    + '</div><div class="v">' + counts[p[1]] + '</div></div>';
+            });
+            html += '<div class="ov-cell"><div class="k">活动总数</div><div class="v">'
+                + list.length + '</div></div>';
+            $('ovCells').innerHTML = html;
+        }
+
+        // ---------- ② 发布/编辑表单 ----------
+        function onTypeChange() {
+            $('subTypeBox').style.display = $('actType').value === 'arena' ? '' : 'none';
+        }
+
+        /* JSON 文本域失焦校验: 空 → {}; 非法 → 红字并返回 null */
+        function parseJsonField(textId, errId) {
+            var raw = $(textId).value.trim();
+            var errEl = $(errId);
+            errEl.textContent = '';
+            if (!raw) { return {}; }
+            try {
+                var v = JSON.parse(raw);
+                if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+                    throw new Error('须为 JSON 对象');
+                }
+                return v;
+            } catch (e) {
+                errEl.textContent = 'JSON 非法: ' + e.message;
+                return null;
+            }
+        }
+
+        function fillForm(a) {
+            $('actName').value = a.name || '';
+            $('actType').value = a.type || 'promotion';
+            onTypeChange();
+            $('actSubType').value = a.subType || 'L01';
+            $('actDescription').value = a.description || '';
+            $('actStart').value = (a.startTime || '').slice(0, 16);
+            $('actEnd').value = (a.endTime || '').slice(0, 16);
+            $('actBudget').value = a.budget != null ? a.budget : 0;
+            $('actRules').value = a.rules && Object.keys(a.rules).length
+                ? JSON.stringify(a.rules, null, 2) : '';
+            $('actScope').value = a.applicableScope && Object.keys(a.applicableScope).length
+                ? JSON.stringify(a.applicableScope, null, 2) : '';
+            $('rulesErr').textContent = '';
+            $('scopeErr').textContent = '';
+        }
+
+        function resetForm() {
+            ['actName', 'actDescription', 'actRules', 'actScope'].forEach(function (id) { $(id).value = ''; });
+            $('actType').value = 'promotion';
+            $('actSubType').value = 'L01';
+            $('actStart').value = '';
+            $('actEnd').value = '';
+            $('actBudget').value = 0;
+            $('rulesErr').textContent = '';
+            $('scopeErr').textContent = '';
+            onTypeChange();
+        }
+
+        function enterEditMode(a) {
+            state.editingId = a.id;
+            fillForm(a);
+            $('formTitle').textContent = '② 编辑活动 #' + a.id + '(' + (a.activityNo || '') + ')';
+            $('formHint').textContent = '仅草稿可编辑; type 不可改(防奖品池/排行榜孤儿数据)';
+            $('actType').disabled = true;
+            $('btnSubmit').textContent = '保存修改';
+            $('btnCancelEdit').style.display = '';
+            try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { /* 旧浏览器 */ }
+        }
+
+        function exitEditMode() {
+            state.editingId = null;
+            resetForm();
+            $('formTitle').textContent = '② 发布活动';
+            $('formHint').textContent = '创建后为草稿(draft), 经「审核发布」进入报名中';
+            $('actType').disabled = false;
+            $('btnSubmit').textContent = '创建活动';
+            $('btnCancelEdit').style.display = 'none';
+        }
+
+        async function submitForm() {
+            var name = $('actName').value.trim();
+            if (!name) { showBanner('errorBanner', '请填写活动名称'); return; }
+            var rules = parseJsonField('actRules', 'rulesErr');
+            if (rules === null) { return; }
+            var scope = parseJsonField('actScope', 'scopeErr');
+            if (scope === null) { return; }
+
+            var type = $('actType').value;
+            var payload = {
+                name: name,
+                description: $('actDescription').value.trim(),
+                startTime: $('actStart').value,
+                endTime: $('actEnd').value,
+                budget: parseFloat($('actBudget').value) || 0,
+                rules: rules,
+                applicableScope: scope,
+            };
+
+            var btn = $('btnSubmit');
+            btn.disabled = true;
+            try {
+                if (state.editingId) {
+                    await fetchJson(apiBase() + '/api/activity/admin/update/' + state.editingId, {
+                        method: 'PUT', body: JSON.stringify(payload),
+                    });
+                    showBanner('infoBanner', '活动 #' + state.editingId + ' 已保存修改');
+                    exitEditMode();
+                } else {
+                    payload.type = type;
+                    payload.subType = type === 'arena' ? $('actSubType').value : '';
+                    var created = await fetchJson(apiBase() + '/api/activity/admin/create', {
+                        method: 'POST', body: JSON.stringify(payload),
+                    });
+                    showBanner('infoBanner', '活动已创建(草稿 #' + created.id + '), 可在列表中「审核发布」');
+                    resetForm();
+                }
+                await loadActivities();
+            } catch (err) {
+                fail(state.editingId ? '保存修改' : '创建活动', err);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ---------- ③ 管理列表 ----------
+        function renderStatusPills() {
+            var defs = [['', '全部'], ['draft', '草稿'], ['registering', '报名中'],
+                        ['ongoing', '进行中'], ['ended', '已结束'], ['cancelled', '已取消']];
+            $('statusPills').innerHTML = defs.map(function (d) {
+                return '<span class="pill' + (state.filter === d[0] ? ' active' : '')
+                    + '" onclick="setFilter(\'' + d[0] + '\')">' + d[1] + '</span>';
+            }).join('');
+        }
+
+        function setFilter(f) {
+            state.filter = f;
+            renderStatusPills();
+            loadActivities();
+        }
+
+        function badge(type, label) {
+            return '<span class="badge ' + type + '">' + esc(label) + '</span>';
+        }
+
+        function typeBadge(a) {
+            var label = TYPE_LABELS[a.type] || a.type;
+            if (a.type === 'arena' && a.subType) { label += '·' + a.subType; }
+            return badge('gold', label);
+        }
+
+        function statusBadge(s) {
+            var d = STATUS_LABELS[s] || [s, 'weak'];
+            return badge(d[1], d[0]);
+        }
+
+        /* 行操作按钮(按状态机显隐; audit 是唯一发布路径) */
+        function rowActions(a) {
+            var s = a.status, isLottery = a.type === 'lottery';
+            var html = '';
+            if (s === 'draft') {
+                html += '<button class="btn-mini" onclick="editActivity(' + a.id + ')">编辑</button>';
+                html += '<button class="btn-mini" onclick="auditActivity(' + a.id + ', true)">审核发布</button>';
+                html += '<button class="btn-mini danger" onclick="auditActivity(' + a.id + ', false)">拒绝</button>';
+            }
+            if (s === 'registering') {
+                html += '<button class="btn-mini" onclick="transitionActivity(' + a.id + ', \'ongoing\')">开始</button>';
+                html += '<button class="btn-mini danger" onclick="transitionActivity(' + a.id + ', \'cancelled\')">取消</button>';
+            }
+            if (s === 'ongoing') {
+                html += '<button class="btn-mini" onclick="transitionActivity(' + a.id + ', \'ended\')">结束</button>';
+                html += '<button class="btn-mini danger" onclick="transitionActivity(' + a.id + ', \'cancelled\')">取消</button>';
+            }
+            if (s === 'registering' || s === 'ongoing' || s === 'ended' || s === 'cancelled') {
+                html += '<button class="btn-mini ghost" onclick="toggleDetail(' + a.id + ')">详情</button>';
+            }
+            if (isLottery && (s === 'registering' || s === 'ongoing')) {
+                html += '<button class="btn-mini" onclick="openPrizeConfig(' + a.id + ')">奖品池</button>';
+            }
+            return html;
+        }
+
+        function renderActivities() {
+            var list = state.activities;
+            renderOverview(list);
+            if (!list.length) {
+                $('activityBody').innerHTML = '<tr><td colspan="10" style="color:#999;'
+                    + 'font-size:12px;padding:16px;">暂无活动——用上方「② 发布活动」创建第一个。</td></tr>';
+                return;
+            }
+            var html = '';
+            list.forEach(function (a) {
+                var isOpen = !!state.expanded[a.id];
+                html += '<tr class="row-toggle" onclick="toggleDetail(' + a.id + ')">'
+                    + '<td><span class="exp-arrow">' + (isOpen ? '▼' : '▶') + '</span></td>'
+                    + '<td class="mono">' + a.id + '</td>'
+                    + '<td class="mono">' + esc(a.activityNo || '--') + '</td>'
+                    + '<td style="white-space:normal;min-width:140px;">' + esc(a.name) + '</td>'
+                    + '<td>' + typeBadge(a) + '</td>'
+                    + '<td>' + statusBadge(a.status) + '</td>'
+                    + '<td style="font-size:12px;">' + esc(fmtTime(a.startTime))
+                    + '<br>→ ' + esc(fmtTime(a.endTime)) + '</td>'
+                    + '<td class="num">¥' + (a.usedBudget || 0) + ' / ¥' + (a.budget || 0) + '</td>'
+                    + '<td class="num">' + (a.registrationCount != null ? a.registrationCount : '--') + '</td>'
+                    + '<td style="white-space:normal;" onclick="event.stopPropagation()">' + rowActions(a) + '</td>'
+                    + '</tr>';
+                if (isOpen) {
+                    html += detailRowHtml(a);
+                }
+            });
+            $('activityBody').innerHTML = html;
+            // 展开行异步填充统计与报名
+            Object.keys(state.expanded).forEach(function (id) {
+                loadDetailData(parseInt(id, 10));
+            });
+        }
+
+        /* 行展开: 详情/统计/报名(先渲染骨架, 异步填充) */
+        function detailRowHtml(a) {
+            return '<tr class="detail-row"><td colspan="10">'
+                + '<div class="detail-box" id="detailBox' + a.id + '">'
+                + '<div><div class="detail-label">活动描述</div>'
+                + '<div class="detail-body">' + esc(a.description || '(未填写)') + '</div></div>'
+                + '<div><div class="detail-label">活动规则 / 适用范围</div>'
+                + '<div class="detail-body json">规则: ' + esc(JSON.stringify(a.rules || {}))
+                + '\n范围: ' + esc(JSON.stringify(a.applicableScope || {})) + '</div></div>'
+                + '<div id="statsBox' + a.id + '"><div class="detail-label">统计</div>'
+                + '<div class="detail-body">统计加载中…</div></div>'
+                + '<div id="regsBox' + a.id + '"><div class="detail-label">报名列表</div>'
+                + '<div class="detail-body">报名加载中…</div></div>'
+                + '</div></td></tr>';
+        }
+
+        async function loadDetailData(id) {
+            // 统计
+            try {
+                var s = await fetchJson(apiBase() + '/api/activity/stats/' + id);
+                var sBox = $('statsBox' + id);
+                if (sBox) {
+                    sBox.innerHTML = '<div class="detail-label">统计</div>'
+                        + '<div class="detail-body">报名 <b>' + (s.registrationCount || 0)
+                        + '</b> 人(取消 ' + (s.cancelledCount || 0) + ')'
+                        + ' · 预算已用 ¥' + (s.usedBudget || 0) + ' / ¥' + (s.budget || 0)
+                        + '(' + Math.round((s.budgetUsageRate || 0) * 100) + '%)'
+                        + (s.leaderboardCount ? ' · 擂台赛参与者 ' + s.leaderboardCount : '')
+                        + '</div>';
+                }
+            } catch (err) { /* 统计失败不阻塞 */ }
+            // 报名列表
+            try {
+                var regs = await fetchJson(apiBase() + '/api/activity/registrations/' + id + '?limit=200');
+                var rBox = $('regsBox' + id);
+                if (rBox) {
+                    if (!regs || !regs.length) {
+                        rBox.innerHTML = '<div class="detail-label">报名列表</div>'
+                            + '<div class="detail-body">暂无报名</div>';
+                    } else {
+                        var rows = regs.map(function (r) {
+                            return '<tr><td>' + esc(r.id) + '</td><td>' + esc(r.userId)
+                                + '</td><td>' + esc(fmtTime(r.participateTime)) + '</td><td>'
+                                + (r.status === 'registered'
+                                    ? badge('green', '已报名') : badge('weak', '已取消'))
+                                + '</td></tr>';
+                        }).join('');
+                        rBox.innerHTML = '<div class="detail-label">报名列表(' + regs.length + ')</div>'
+                            + '<table class="sub-table"><thead><tr><th>报名ID</th>'
+                            + '<th>用户ID</th><th>时间</th><th>状态</th></tr></thead>'
+                            + '<tbody>' + rows + '</tbody></table>';
+                    }
+                }
+            } catch (err) { /* 报名失败不阻塞 */ }
+        }
+
+        function toggleDetail(id) {
+            if (state.expanded[id]) {
+                delete state.expanded[id];
+            } else {
+                state.expanded[id] = {};
+            }
+            renderActivities();
+        }
+
+        async function loadActivities() {
+            var btn = $('btnRefresh');
+            btn.disabled = true; btn.textContent = '刷新中…';
+            try {
+                var url = apiBase() + '/api/activity/admin/list?limit=100';
+                if (state.filter) { url += '&status=' + encodeURIComponent(state.filter); }
+                var list = await fetchJson(url);
+                state.activities = list || [];
+                renderActivities();
+                $('lastUpdate').textContent = '最近更新: ' + new Date().toLocaleTimeString();
+            } catch (err) {
+                $('activityBody').innerHTML = '<tr><td colspan="10" style="color:#c33;'
+                    + 'font-size:12px;padding:16px;">加载失败: ' + esc(err.message) + '</td></tr>';
+                fail('加载活动列表', err);
+            } finally {
+                btn.disabled = false; btn.textContent = '刷新';
+            }
+        }
+
+        // ---------- 编辑入口 ----------
+        function editActivity(id) {
+            var a = state.activities.find(function (x) { return x.id === id; });
+            if (!a) { return; }
+            enterEditMode(a);
+        }
+
+        // ---------- 审核发布/拒绝(audit, AI 风控门) ----------
+        async function auditActivity(id, approve) {
+            var a = state.activities.find(function (x) { return x.id === id; });
+            var name = a ? a.name : '#' + id;
+            var reason = '';
+            if (approve) {
+                if (!window.confirm('确认审核发布「' + name + '」?\n发布后进入报名中, 用户可见可报名。')) { return; }
+            } else {
+                reason = window.prompt('拒绝「' + name + '」的审核理由(将留痕):', '') || '';
+                if (!window.confirm('确认拒绝?\n活动将转为「已取消」(终态), 不可恢复!')) { return; }
+            }
+            try {
+                await fetchJson(apiBase() + '/api/activity/admin/audit/' + id, {
+                    method: 'POST',
+                    body: JSON.stringify({ approve: approve, auditor: 0, reason: reason }),
+                });
+                showBanner('infoBanner', approve
+                    ? '「' + name + '」已审核发布, 进入报名中'
+                    : '「' + name + '」已被拒绝(已取消)');
+                await loadActivities();
+            } catch (err) {
+                fail(approve ? '审核发布' : '拒绝', err);
+            }
+        }
+
+        // ---------- 状态流转(开始/结束/取消) ----------
+        async function transitionActivity(id, target) {
+            var a = state.activities.find(function (x) { return x.id === id; });
+            var name = a ? a.name : '#' + id;
+            var labels = { ongoing: '开始(进入进行中)', ended: '结束(进入已结束, 终态)',
+                           cancelled: '取消(进入已取消, 终态)' };
+            if (!window.confirm('确认对「' + name + '」执行 ' + labels[target] + ' ?')) { return; }
+            try {
+                await fetchJson(apiBase() + '/api/activity/admin/transition/' + id, {
+                    method: 'POST',
+                    body: JSON.stringify({ targetStatus: target, operator: 0 }),
+                });
+                showBanner('infoBanner', '「' + name + '」已' + labels[target].split('(')[0]);
+                await loadActivities();
+            } catch (err) {
+                fail('状态流转', err);
+            }
+        }
+
+        // ---------- ④ 奖品池配置 ----------
+        function openPrizeConfig(id) {
+            var a = state.activities.find(function (x) { return x.id === id; });
+            if (!a) { return; }
+            state.prizeActivityId = id;
+            state.prizeActivityName = a.name;
+            $('prizeTarget').innerHTML = '正在配置: <b>' + esc(a.name) + '</b>(#' + id + ')';
+            // 回填现有奖品池
+            fetchJson(apiBase() + '/api/activity/lottery/' + id + '/prizes').then(function (pool) {
+                state.prizes = (pool || []).map(function (p) {
+                    return {
+                        prizeName: p.prizeName || '', prizeType: p.prizeType || 'coupon',
+                        prizeValue: p.prizeValue || 0, probability: p.probability || 0,
+                        dailyLimit: p.dailyLimit || 0, totalLimit: p.totalLimit || 1,
+                    };
+                });
+                renderPrizeRows();
+            }).catch(function (err) {
+                state.prizes = [];
+                renderPrizeRows();
+                fail('加载奖品池', err);
+            });
+            try {
+                $('prizeTarget').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (e) { /* 旧浏览器 */ }
+        }
+
+        function addPrizeRow() {
+            state.prizes.push({ prizeName: '', prizeType: 'coupon', prizeValue: 0,
+                                probability: 0, dailyLimit: 0, totalLimit: 1 });
+            renderPrizeRows();
+        }
+
+        function removePrizeRow(idx) {
+            state.prizes.splice(idx, 1);
+            renderPrizeRows();
+        }
+
+        /* 输入变更(带索引防串行) */
+        function onPrizeInput(idx, field, value) {
+            if (!state.prizes[idx]) { return; }
+            state.prizes[idx][field] = (field === 'prizeName' || field === 'prizeType')
+                ? value : (parseFloat(value) || 0);
+            if (field === 'probability') { updateProbTotal(); }
+        }
+
+        function renderPrizeRows() {
+            if (!state.prizes.length) {
+                state.prizes = [{ prizeName: '', prizeType: 'coupon', prizeValue: 0,
+                                  probability: 0, dailyLimit: 0, totalLimit: 1 }];
+            }
+            var typeOpts = Object.keys(PRIZE_TYPE_LABELS).map(function (t) {
+                return '<option value="' + t + '">' + PRIZE_TYPE_LABELS[t] + '</option>';
+            }).join('');
+            var html = state.prizes.map(function (p, i) {
+                return '<div class="prize-row">'
+                    + '<input type="text" placeholder="奖品名称" value="' + esc(p.prizeName)
+                    + '" oninput="onPrizeInput(' + i + ', \'prizeName\', this.value)">'
+                    + '<select onchange="onPrizeInput(' + i + ', \'prizeType\', this.value)">'
+                    + typeOpts.replace('value="' + esc(p.prizeType) + '"',
+                                        'value="' + esc(p.prizeType) + '" selected') + '</select>'
+                    + '<input type="number" placeholder="价值" min="0" step="0.01" value="' + p.prizeValue
+                    + '" oninput="onPrizeInput(' + i + ', \'prizeValue\', this.value)">'
+                    + '<input type="number" placeholder="概率%" min="0" max="100" step="0.01" value="' + p.probability
+                    + '" oninput="onPrizeInput(' + i + ', \'probability\', this.value)">'
+                    + '<input type="number" placeholder="日限量" min="0" value="' + (p.dailyLimit || 0)
+                    + '" oninput="onPrizeInput(' + i + ', \'dailyLimit\', this.value)">'
+                    + '<input type="number" placeholder="总限量" min="1" value="' + (p.totalLimit || 1)
+                    + '" oninput="onPrizeInput(' + i + ', \'totalLimit\', this.value)">'
+                    + '<button class="btn-mini danger" onclick="removePrizeRow(' + i + ')">删</button>'
+                    + '</div>';
+            }).join('');
+            $('prizeRows').innerHTML = html;
+            updateProbTotal();
+        }
+
+        function probSum() {
+            return state.prizes.reduce(function (acc, p) {
+                return acc + (parseFloat(p.probability) || 0);
+            }, 0);
+        }
+
+        function updateProbTotal() {
+            var sum = probSum();
+            var el = $('probTotal');
+            el.textContent = '概率合计 ' + (Math.round(sum * 100) / 100) + '%';
+            el.className = 'prob-total' + (sum > 100 ? ' over' : '');
+            $('btnSavePrizes').disabled = sum > 100;
+        }
+
+        async function savePrizes() {
+            if (!state.prizeActivityId) {
+                showBanner('errorBanner', '请先在列表中对抽奖活动点击「奖品池」');
+                return;
+            }
+            var sum = probSum();
+            if (sum > 100) { showBanner('errorBanner', '概率合计 ' + sum + '% 超过 100%'); return; }
+            for (var i = 0; i < state.prizes.length; i++) {
+                var p = state.prizes[i];
+                if (!p.prizeName.trim()) {
+                    showBanner('errorBanner', '奖品 ' + (i + 1) + ' 名称不能为空'); return;
+                }
+                if (!(p.totalLimit >= 1)) {
+                    showBanner('errorBanner', '奖品「' + p.prizeName + '」总限量须 ≥ 1'); return;
+                }
+            }
+            var btn = $('btnSavePrizes');
+            btn.disabled = true;
+            try {
+                await fetchJson(apiBase() + '/api/activity/admin/prizes/' + state.prizeActivityId, {
+                    method: 'POST', body: JSON.stringify({ prizes: state.prizes }),
+                });
+                showBanner('infoBanner', '「' + state.prizeActivityName + '」奖品池已保存(概率合计 '
+                    + (Math.round(sum * 100) / 100) + '%)');
+            } catch (err) {
+                fail('保存奖品池', err);
+            } finally {
+                btn.disabled = false;
+                updateProbTotal();  // 恢复按钮态(概率合法时)
+            }
+        }
+
+        // ---------- ⑤ 发奖记录与发货 ----------
+        function recordStatusBadge(s) {
+            var d = RECORD_STATUS_LABELS[s] || [s, 'weak'];
+            return badge(d[1], d[0]);
+        }
+
+        async function loadPrizeRecords() {
+            try {
+                var url = apiBase() + '/api/activity/admin/prize-records?limit=200';
+                var st = $('prizeStatusFilter').value;
+                if (st) { url += '&status=' + encodeURIComponent(st); }
+                var records = await fetchJson(url);
+                if (!records || !records.length) {
+                    $('prizeRecordBody').innerHTML = '<tr><td colspan="9" style="color:#999;'
+                        + 'font-size:12px;padding:16px;">暂无发奖记录。</td></tr>';
+                    return;
+                }
+                var html = records.map(function (r) {
+                    var canDeliver = r.status === 'pending' && MAILABLE[r.prizeType];
+                    return '<tr>'
+                        + '<td class="mono">' + esc(r.recordNo) + '</td>'
+                        + '<td class="mono">' + esc(r.activityId) + '</td>'
+                        + '<td class="mono">' + esc(r.userId) + '</td>'
+                        + '<td>' + esc(r.prizeName) + '</td>'
+                        + '<td>' + esc(PRIZE_TYPE_LABELS[r.prizeType] || r.prizeType) + '</td>'
+                        + '<td class="num">¥' + esc(r.prizeValue) + '</td>'
+                        + '<td>' + recordStatusBadge(r.status) + '</td>'
+                        + '<td class="mono">' + esc(r.waybillNo || '--') + '</td>'
+                        + '<td>' + (canDeliver
+                            ? '<input class="deliver-input" id="wb-' + esc(r.recordNo)
+                            + '" placeholder="运单号">'
+                            + '<button class="btn-mini" onclick="deliverPrize(\'' + esc(r.recordNo) + '\')">发货</button>'
+                            : '--')
+                        + '</td></tr>';
+                }).join('');
+                $('prizeRecordBody').innerHTML = html;
+            } catch (err) {
+                $('prizeRecordBody').innerHTML = '<tr><td colspan="9" style="color:#c33;'
+                    + 'font-size:12px;padding:16px;">加载失败: ' + esc(err.message) + '</td></tr>';
+            }
+        }
+
+        async function deliverPrize(recordNo) {
+            var input = $('wb-' + recordNo);
+            var waybill = input ? input.value.trim() : '';
+            if (!waybill) { showBanner('errorBanner', '请先填写运单号'); return; }
+            if (!window.confirm('确认登记发货?\n记录 ' + recordNo + ' · 运单号 ' + waybill)) { return; }
+            try {
+                await fetchJson(apiBase() + '/api/activity/admin/prize/' + recordNo + '/deliver', {
+                    method: 'POST', body: JSON.stringify({ waybillNo: waybill }),
+                });
+                showBanner('infoBanner', '奖品 ' + recordNo + ' 已发货(运单 ' + waybill + ')');
+                await loadPrizeRecords();
+            } catch (err) {
+                fail('发货登记', err);
+            }
+        }
+
+        // ---------- 连接与刷新 ----------
+        function saveApiBase() {
+            var v = $('apiBase').value.trim();
+            if (v) { localStorage.setItem(KEY, v); }
+            refreshData();
+        }
+
+        async function refreshData() {
+            await Promise.all([loadActivities(), loadPrizeRecords()]);
+        }
+
+        function toggleAutoRefresh() {
+            if (state.timer) {
+                clearInterval(state.timer);
+                state.timer = null;
+            }
+            if ($('autoRefresh').checked) {
+                state.timer = setInterval(function () {
+                    // 只重渲染表格数据, 不触碰表单输入与展开态;
+                    // 登录面板可见时暂停(避免 401 轰炸)
+                    if (state.loginPending) { return; }
+                    loadActivities();
+                    loadPrizeRecords();
+                }, 30000);
+            }
+        }
+
+        // ---------- 初始化 ----------
+        function init() {
+            $('apiBase').value = apiBase();
+            renderStatusPills();
+            renderPrizeRows();
+            updateAuthBadge();
+            refreshData();
+            toggleAutoRefresh();
+        }
+
+        // 挂载到全局(HTML onclick 直调)
+        window.saveApiBase = saveApiBase;
+        window.refreshData = refreshData;
+        window.toggleAutoRefresh = toggleAutoRefresh;
+        window.onTypeChange = onTypeChange;
+        window.submitForm = submitForm;
+        window.exitEditMode = exitEditMode;
+        window.setFilter = setFilter;
+        window.toggleDetail = toggleDetail;
+        window.editActivity = editActivity;
+        window.auditActivity = auditActivity;
+        window.transitionActivity = transitionActivity;
+        window.openPrizeConfig = openPrizeConfig;
+        window.addPrizeRow = addPrizeRow;
+        window.removePrizeRow = removePrizeRow;
+        window.onPrizeInput = onPrizeInput;
+        window.savePrizes = savePrizes;
+        window.loadPrizeRecords = loadPrizeRecords;
+        window.deliverPrize = deliverPrize;
+        window.doLogin = doLogin;
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    })();
+    </script>
+</body>
+</html>
