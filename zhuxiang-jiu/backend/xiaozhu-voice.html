@@ -747,8 +747,13 @@ function renderPanel(card) {
     el.innerHTML = img +
       '<div class="pinfo"><div class="pname">' + esc(cur.name || "商品") + "</div>" +
       '<div class="ptags">' +
-      (cur.alcohol ? '<span class="ptag">' + esc(cur.alcohol) + "°</span>" : "") +
-      (cur.volume ? '<span class="ptag">' + esc(cur.volume) + "</span>" : "") +
+      /* 规格去重: 商品名常已含度数/容量(如"竹香便携 42°
+         250ml")——名称已有则不再重复拼标签(真机实证面板
+         显示"42° 250ml 42° 250ml") */
+      (cur.alcohol && String(cur.name || "").indexOf(String(cur.alcohol)) < 0
+        ? '<span class="ptag">' + esc(cur.alcohol) + "°</span>" : "") +
+      (cur.volume && String(cur.name || "").indexOf(String(cur.volume)) < 0
+        ? '<span class="ptag">' + esc(cur.volume) + "</span>" : "") +
       (cur.subtitle ? '<span class="ptag graytag">' + esc(cur.subtitle) + "</span>" : "") +
       "</div>" +
       (cur.price != null ? '<div class="pprice">¥' + esc(cur.price) + "</div>" : "") +
@@ -1501,9 +1506,26 @@ function cloudStart() {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     wireCloudCapture();
   }).catch(function (e) {
-    setMicStatus("麦克风不可用: " + (e && e.name ? e.name : "未知")
-      + (S.handfree ? "——<b>点击一次麦克风</b>授权后自动恢复免提" : "——可用文字输入"));
-    showToast("麦克风获取失败" + (S.handfree ? "，点击麦克风授权重试" : ""));
+    /* 错误友好化: 不直显英文错误码(真机反馈"具体报错"
+       即此类原始码——NotAllowedError 等对用户无意义) */
+    var micErrMap = {
+      NotAllowedError: "麦克风权限被拒",
+      NotFoundError: "没有检测到麦克风",
+      NotReadableError: "麦克风被其他应用占用",
+      AbortError: "麦克风启动被中断",
+      SecurityError: "需 HTTPS 环境才能录音",
+      OverconstrainedError: "录音参数不支持"};
+    var en = (e && e.name) || "";
+    var mmsg = micErrMap[en] || (en || "未知原因");
+    setMicStatus("🎙 " + mmsg
+      + (en === "NotAllowedError"
+         ? "——微信内: 右上角「···」→ 设置 → 打开麦克风权限"
+         : "")
+      + (S.handfree
+         ? "；<b>点击一次麦克风</b>授权后自动恢复免提"
+         : "；可用下方文字输入"));
+    showToast("🎙 " + mmsg
+      + (S.handfree ? "，点击麦克风重试" : ""));
   });
 }
 /* 采集节点搭建(新流/复用流共用): 源→处理器→波形/免提VAD */
