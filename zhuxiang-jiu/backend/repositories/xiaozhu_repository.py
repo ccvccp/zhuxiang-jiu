@@ -496,6 +496,38 @@ class Xiaozhu48Repository:
         return True
 
     # --------------------------------------------------------
+    # 语音周报快照(P4: 最近生成报告——dashboard 展示+幂等)
+    # --------------------------------------------------------
+
+    def _weekly_snapshot_key(self):
+        return _k("xiaozhu", "weekly_snapshot")
+
+    async def save_weekly_snapshot(self, report: dict) -> None:
+        """存最近周报快照(覆盖式)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(self._weekly_snapshot_key(),
+                             json.dumps(report, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store["xiaozhu_weekly_snapshot"] = dict(report)
+
+    async def load_weekly_snapshot(self) -> dict | None:
+        """取最近周报快照(无则 None)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(self._weekly_snapshot_key())
+            if not raw:
+                return None
+            try:
+                return json.loads(raw)
+            except (TypeError, ValueError):
+                return None
+        self._ensure_store()
+        snap = self.store.get("xiaozhu_weekly_snapshot")
+        return dict(snap) if snap else None
+
+    # --------------------------------------------------------
     # P4 看板聚合扫描(全表只读——六区块数据源)
     # --------------------------------------------------------
 

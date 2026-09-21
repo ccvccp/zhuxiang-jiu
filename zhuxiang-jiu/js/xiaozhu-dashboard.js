@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿/**
+﻿﻿﻿﻿﻿﻿﻿﻿﻿/**
  * 48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
  * 范式: js/trust-risk-dashboard.js(47号)平移——ES5、localStorage
  * 连接、区块化加载(手动刷新, 不进自动刷新)。
@@ -458,6 +458,72 @@ async function dismissLearn(key) {
             { method: 'POST', headers: adminHeaders() });
         loadLearnQueue();
     } catch (e) { showError(e.message); }
+}
+
+/* ============================================================
+ * ⑫ 语音数据周报(P4: 近 7 天聚合+环比)
+ * ============================================================ */
+
+async function loadWeekly() {
+    var box = document.getElementById('weeklyBody');
+    box.innerHTML = '<div class="dash-empty">统计中…</div>';
+    try {
+        var j = await fetchJson(
+            api('/api/xiaozhu/dashboard/voice-weekly'),
+            { headers: adminHeaders() });
+        var r = j.report;
+        if (!r) {
+            box.innerHTML = '<div class="dash-empty">暂无数据</div>';
+            return;
+        }
+        document.getElementById('weeklyMeta').textContent =
+            '窗口: ' + (r.window.from || '').slice(0, 10) + ' ~ '
+            + (r.window.to || '').slice(0, 10);
+        var u = r.usage || {}, a = r.asr || {}, f = r.feedback || {},
+            lr = r.learning || {}, fx = r.fixes || {},
+            mom = r.mom || {};
+        var pct = function (v) {
+            return v === null || v === undefined
+                ? '—' : (v > 0 ? '+' : '') + v + '%';
+        };
+        var intents = (r.intents || {}).top || [];
+        var hits = fx.topHits || [];
+        box.innerHTML =
+            '<table class="dash-table"><thead><tr>'
+            + '<th>指标</th><th>本周</th><th>环比</th>'
+            + '<th>指标</th><th>数值</th></tr></thead><tbody>'
+            + '<tr><td>语音会话</td><td>' + (u.sessions || 0)
+            + '</td><td>' + pct(mom.sessions) + '</td>'
+            + '<td>识别失败率</td><td>'
+            + ((a.failRate || 0) * 100).toFixed(1) + '%</td></tr>'
+            + '<tr><td>语音轮次</td><td>' + (u.voiceTurns || 0)
+            + '</td><td>' + pct(mom.voiceTurns) + '</td>'
+            + '<td>平均延迟</td><td>' + (a.avgLatencyMs || 0)
+            + 'ms(峰 ' + (a.maxLatencyMs || 0) + ')</td></tr>'
+            + '<tr><td>参与会员</td><td>' + (u.members || 0)
+            + '</td><td>—</td>'
+            + '<td>踩率(👎/总反馈)</td><td>'
+            + ((f.downRate || 0) * 100).toFixed(1) + '% (👍'
+            + (f.up || 0) + '/👎' + (f.down || 0) + ')</td></tr>'
+            + '<tr><td>文本轮次</td><td>' + (u.textTurns || 0)
+            + '</td><td>—</td>'
+            + '<td>学习队列</td><td>待审 ' + (lr.pending || 0)
+            + ' · 已采纳 ' + (lr.adopted || 0) + '</td></tr>'
+            + '<tr><td>意图 top3</td><td colspan="2">'
+            + (intents.slice(0, 3).map(function (i) {
+                return i.intent + '×' + i.count;
+            }).join('、') || '—')
+            + '</td><td>误听词条</td><td>共 ' + (fx.total || 0)
+            + ' 条 · 学习命中累计 ' + (fx.learnHits || 0) + '</td></tr>'
+            + '<tr><td>热词命中 top3</td><td colspan="4">'
+            + (hits.slice(0, 3).map(function (h) {
+                return h.wrong + '→' + h.right + '(×' + h.hits + ')';
+            }).join('、') || '—') + '</td></tr>'
+            + '</tbody></table>';
+    } catch (e) {
+        box.innerHTML = '<div class="dash-empty">生成失败: '
+            + esc(e.message) + '</div>';
+    }
 }
 
 /* ============================================================

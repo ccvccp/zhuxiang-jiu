@@ -326,6 +326,20 @@
         </div>
     </div>
 
+    <!-- ⑫ 语音数据周报(P4) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑫ 语音数据周报（P4：近 7 天聚合 · 周一自动站内信 ·
+                学习进化效果观测）</h3></div>
+            <div style="display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:11px;color:#888">
+                <button onclick="loadWeekly()"
+                    style="padding:5px 14px;border:none;border-radius:5px;background:#355c44;color:#fff;font-size:11px;cursor:pointer">生成周报</button>
+                <span id="weeklyMeta"></span>
+            </div>
+            <div id="weeklyBody" style="padding:0 14px 12px"><div class="dash-empty">点击"生成周报"查看近 7 天语音数据</div></div>
+        </div>
+    </div>
+
     <div class="note-bar">
         后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
         管理端 X-Role: admin · 计划: docs/48号_小竹智能语音中枢实施计划.md

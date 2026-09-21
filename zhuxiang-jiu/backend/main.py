@@ -479,6 +479,10 @@ async def _on_startup():
     # (XXIAOZHU_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
     from services.xiaozhu_scheduler import start_guard_loop as start_xiaozhu_guard
     start_xiaozhu_guard()
+    # 小竹 P4: 语音数据周报(周一 08:00 后自动生成+管理员站内信,
+    # XXIAOZHU_WEEKLY_AUTO=off 可关闭)
+    from services.xiaozhu_scheduler import start_weekly_loop
+    start_weekly_loop()
     # 钱包盈利大模型: 护栏指标自动巡检
     # (WALLET_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
     from services.wallet_scheduler import start_guard_loop as start_wallet_guard

@@ -1007,6 +1007,43 @@ async def learn_queue_dismiss(
         raise _handle(e) from e
 
 
+# ============================================================
+# 语音数据周报(P4: 近 7 天聚合+环比, 周一自动站内信)
+# ============================================================
+
+@router.get("/dashboard/voice-weekly")
+async def voice_weekly(
+        snapshot: str = "",
+        x_role: str = Header(default="", alias="X-Role")):
+    """语音数据周报(P4——近 7 天聚合, admin)
+
+    默认即时现算(只读不动快照——周一自动站内信的幂等不受
+    手动查看影响); query snapshot=1 返回最近一次自动生成的
+    快照(含站内信触达结果)。
+    """
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        if snapshot == "1":
+            from repositories.xiaozhu_repository import (
+                Xiaozhu48Repository,
+            )
+            snap = await Xiaozhu48Repository() \
+                .load_weekly_snapshot()
+            return {"success": True, "generated": False,
+                    "report": snap}
+        from services.xiaozhu_weekly_service import (
+            XiaozhuWeeklyService,
+        )
+        report = await XiaozhuWeeklyService() \
+            .build_weekly_report()
+        return {"success": True, "generated": True,
+                "report": report}
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.get("/voicepay/overview")
 async def voicepay_overview(
     x_role: str = Header(default="", alias="X-Role"),

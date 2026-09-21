@@ -175,3 +175,59 @@ def start_guard_loop() -> bool:
                 "interval=%ss",
                 guard_interval_seconds())
     return True
+
+
+# ============================================================
+# 语音数据周报(P4: 周一 08:00 后自动生成+管理员站内信)
+# ============================================================
+
+_WEEKLY_TASK = None
+
+
+def weekly_enabled() -> bool:
+    """周报开关(XXIAOZHU_WEEKLY_AUTO, 默认 on)"""
+    return os.environ.get(
+        "XXIAOZHU_WEEKLY_AUTO",
+        "on").lower() == "on"
+
+
+async def _weekly_maybe_run() -> None:
+    """小时轮检查: 周一 08:00(本地)后且当日未生成→跑一轮"""
+    from datetime import datetime
+
+    now = datetime.now()
+    if now.weekday() != 0 or now.hour < 8:
+        return
+    from services.xiaozhu_weekly_service import (
+        XiaozhuWeeklyService,
+    )
+    r = await XiaozhuWeeklyService() \
+        .run_weekly_round(force=False)
+    if r.get("generated"):
+        logger.info("xiaozhu_weekly_auto_generated")
+    else:
+        logger.debug("xiaozhu_weekly_auto_skip: %s",
+                     r.get("skipReason"))
+
+
+async def _weekly_loop() -> None:
+    """周报检查循环(每小时看一眼, 整轮异常不退出)"""
+    while True:
+        try:
+            await _weekly_maybe_run()
+        except Exception as exc:
+            logger.error("xiaozhu_weekly_loop_fail: %s", exc)
+        await asyncio.sleep(3600)
+
+
+def start_weekly_loop() -> bool:
+    """启动周报循环(幂等; 未启用返回 False)"""
+    if not weekly_enabled():
+        return False
+    global _WEEKLY_TASK
+    if _WEEKLY_TASK and not _WEEKLY_TASK.done():
+        return True
+    _WEEKLY_TASK = asyncio.get_event_loop() \
+        .create_task(_weekly_loop())
+    logger.info("xiaozhu_weekly_loop_started")
+    return True
