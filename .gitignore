@@ -29,6 +29,7 @@ test-version-check-report.json
 # ============================================================
 .vscode/
 .idea/
+.trae/
 *.swp
 *.swo
 
