@@ -13,6 +13,7 @@
 """
 
 import logging
+import asyncio
 import contextlib
 import os
 import tempfile
@@ -104,7 +105,11 @@ class HubService:
                 f.write(audio_bytes)
                 tmp_path = f.name
             from services.llm_client import provider_client
-            text = provider_client.transcribe(tmp_path)
+            # v2 并发修复: ASR 为同步 urllib——直调阻塞事件循环,
+            # 单 worker 下全后端被串行冻结(真机"整轮滞后"根因);
+            # 线程池执行, 让 ASR/TTS/LLM 并行不互相排队
+            text = await asyncio.to_thread(
+                provider_client.transcribe, tmp_path)
         except Exception as exc:
             logger.warning("hub_asr_exception: %s", exc)
             text = None

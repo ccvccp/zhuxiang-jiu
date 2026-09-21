@@ -314,8 +314,12 @@ async def get_tts(text: str = "",
     except Exception as e:
         logger.debug("tts_cache_read_skip: %s", e)
     from services.llm_client import provider_client
-    audio = provider_client.synthesize_mp3(
-        t, speed=spd, voice=(voice or None))
+    # v2 并发修复: 合成是同步 urllib(2-5s)——直调阻塞事件循环
+    # 冻结全后端(含 /voice ASR 轮), 线程池执行解除串行
+    import asyncio as _aio
+    audio = await _aio.to_thread(
+        provider_client.synthesize_mp3, t,
+        spd, (voice or None))
     if not audio:
         raise HTTPException(
             status_code=503,

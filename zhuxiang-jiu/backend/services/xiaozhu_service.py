@@ -1269,9 +1269,12 @@ class XiaozhuService:
             from services.llm_client import provider_client
             import time as _t
             _llm_t0 = _t.monotonic()
-            result = provider_client \
-                .classify_dialog_intent(command_text,
-                                        context_desc)
+            # v2 并发修复: LLM 分类为同步 urllib——线程池执行,
+            # 不阻塞事件循环(与 ASR/TTS 并行不排队)
+            import asyncio as _aio
+            result = await _aio.to_thread(
+                provider_client.classify_dialog_intent,
+                command_text, context_desc)
             logger.info("voice48_timing llm_dialog_ms=%d",
                         round((_t.monotonic() - _llm_t0)
                               * 1000))
