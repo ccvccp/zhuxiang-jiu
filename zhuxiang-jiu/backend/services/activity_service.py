@@ -64,6 +64,28 @@ class ActivityService:
     def __init__(self, repo: ActivityRepository = ActivityRepository()):
         self.repo = repo
 
+    @staticmethod
+    def _validate_time_window(start_time: str, end_time: str) -> None:
+        """校验起止时间: 非空时须为合法 ISO 时间且结束晚于开始
+
+        允许为空(草稿可不完整, C端显示 --); 两值齐备时强制先后顺序。
+
+        Raises:
+            ValueError: 格式非法或结束不晚于开始
+        """
+        if not start_time and not end_time:
+            return
+        try:
+            s = datetime.fromisoformat(start_time) if start_time else None
+            e = datetime.fromisoformat(end_time) if end_time else None
+        except ValueError:
+            raise ValueError(
+                "起止时间格式非法(须为 ISO 格式, 如 2026-10-01T00:00)"
+            ) from None
+        if s and e and e <= s:
+            raise ValueError(
+                f"结束时间({end_time})须晚于开始时间({start_time})")
+
     # ============================================================
     # 1. 创建活动
     # ============================================================
@@ -85,6 +107,9 @@ class ActivityService:
                        TYPE_INTERACTIVE, TYPE_GROUPBUY, TYPE_SECKILL, TYPE_PRESALE}
         if type_ not in valid_types:
             raise ValueError(f"无效活动类型: {type_}")
+
+        # 起止时间校验(非空时: 格式合法 + 结束晚于开始)
+        self._validate_time_window(start_time, end_time)
 
         lock_key = f"activity:create:{type_}"
 
@@ -185,6 +210,12 @@ class ActivityService:
                 raise ValueError(
                     f"仅草稿状态可编辑(当前: {activity.get('status')})"
                 )
+
+            # 起止时间校验(按合并后的最终时间窗——仅改其一也须先后一致;
+            # 先校验后应用: 校验失败时非法值不落库)
+            self._validate_time_window(
+                updates.get("startTime", activity.get("startTime", "")),
+                updates.get("endTime", activity.get("endTime", "")))
 
             # 白名单过滤: 忽略 type/status/usedBudget 等越权字段
             for field, value in updates.items():

@@ -815,6 +815,12 @@
         async function submitForm() {
             var name = $('actName').value.trim();
             if (!name) { showBanner('errorBanner', '请填写活动名称'); return; }
+            // 起止时间即时校验(与后端 _validate_time_window 同口径)
+            var vSt = $('actStart').value, vEt = $('actEnd').value;
+            if (vSt && vEt && vEt <= vSt) {
+                showBanner('errorBanner', '结束时间须晚于开始时间');
+                return;
+            }
             var rules = parseJsonField('actRules', 'rulesErr');
             if (rules === null) { return; }
             var scope = parseJsonField('actScope', 'scopeErr');
