@@ -1,10 +1,11 @@
-"""小竹 P0 Fun-ASR(阿里百炼千问3-ASR-Flash)接入测试
+"""小竹 P0 Fun-ASR(阿里百炼 qwen-audio-3.0-asr-flash)接入测试
 
 覆盖:
     - provider 分发: 默认 zhipu / aliyun 无 key 回退 / aliyun+key 启用
-    - 百炼轨请求构造: base64 data URI(wav/mp3)、热词 system 实体
-      词表、asr_options.language、OpenAI 兼容端点与鉴权头
-    - 响应解析 / 异常 / 空响应 / 空文件 / 超大文件守卫
+    - 百炼轨请求构造: base64 data URI(wav/mp3)、即时热词
+      parameters.vocabulary(带权重)、DashScope 原生端点与鉴权头
+    - 响应解析(sentence/choices 双结构) / 异常 / 空响应 /
+      空文件 / 超大文件守卫
     - 双轨互备: aliyun 失败自动回退 zhipu, 智谱轨忽略 hotwords
     - hub 透传: hotwords 经 transcribe_upload 传入 + model 随 provider
     - 小竹三源热词聚合: env 种子 + 在售产品名 + 误听修正右词
@@ -52,12 +53,14 @@ def check(name, cond, detail=""):
 
 # ------------------------------------------------------------
 # mock 网络层: 手工替换 urllib.request.urlopen
+# (百炼原生响应结构: output.output.sentence.text)
 # ------------------------------------------------------------
 CAP = {}
 _orig_urlopen = urllib.request.urlopen
 
 
-def _fake_urlopen_factory(resp_body=None, exc=None):
+def _fake_urlopen_factory(sentence_text="小竹，来一瓶竹香",
+                           exc=None):
     def _fake(req, timeout=None):
         CAP["url"] = req.full_url
         CAP["headers"] = dict(req.header_items())
@@ -68,7 +71,9 @@ def _fake_urlopen_factory(resp_body=None, exc=None):
 
         class _Resp:
             def read(self):
-                return json.dumps(resp_body).encode("utf-8")
+                return json.dumps({
+                    "output": {"output": {"sentence": {
+                        "text": sentence_text}}}}).encode("utf-8")
 
             def __enter__(self):
                 return self
@@ -105,7 +110,7 @@ def run_sync_tests():
     check("P3 aliyun+key 启用", lc.asr_provider() == "aliyun",
           f"got {lc.asr_provider()}")
     check("P4b aliyun 模型名",
-          lc.current_asr_model() == "qwen3-asr-flash",
+          lc.current_asr_model() == "qwen-audio-3.0-asr-flash",
           f"got {lc.current_asr_model()}")
     check("P5b asr_ready aliyun 轨 True(LLM off 仍 True)",
           lc.asr_ready() is True)
@@ -119,59 +124,83 @@ def run_sync_tests():
     # ============================================================
     print("[A 百炼轨请求构造]")
     wav = _write_audio(".wav", b"RIFF-fake-wav-bytes")
-    urllib.request.urlopen = _fake_urlopen_factory(
-        {"choices": [{"message": {"content": "小竹，来一瓶竹香"}}]})
+    urllib.request.urlopen = _fake_urlopen_factory()
     CAP.clear()
     out = client._transcribe_aliyun(wav, ["竹香", "竹奕"])
-    check("A1 转写文本解析", out == "小竹，来一瓶竹香", f"out={out}")
-    check("A2 OpenAI 兼容端点",
+    check("A1 转写文本解析(sentence 结构)",
+          out == "小竹，来一瓶竹香", f"out={out}")
+    check("A2 DashScope 原生端点",
           CAP["url"].endswith(
-              "/compatible-mode/v1/chat/completions"), CAP["url"])
+              "/api/v1/services/aigc/multimodal-generation/generation"),
+          CAP["url"])
     check("A3 Bearer 鉴权头",
           CAP["headers"].get("Authorization") == "Bearer sk-test",
           str(CAP["headers"]))
     body = CAP["body"]
-    check("A4 model/stream/language",
-          body["model"] == "qwen3-asr-flash" and body["stream"] is False
-          and body["asr_options"]["language"] == "zh", str(body))
-    msgs = body["messages"]
-    check("A5 system 热词词表 + user 音频",
-          len(msgs) == 2 and msgs[0]["role"] == "system"
-          and "竹香" in msgs[0]["content"] and "竹奕" in msgs[0]["content"]
-          and msgs[1]["role"] == "user"
-          and msgs[1]["content"][0]["type"] == "input_audio")
-    data_uri = msgs[1]["content"][0]["input_audio"]["data"]
+    check("A4 model/format/sample_rate",
+          body["model"] == "qwen-audio-3.0-asr-flash"
+          and body["parameters"]["format"] == "wav"
+          and body["parameters"]["sample_rate"] == 16000, str(body))
+    check("A5 即时热词 vocabulary(权重 5)",
+          body["parameters"]["vocabulary"] == {"竹香": 5, "竹奕": 5},
+          str(body["parameters"].get("vocabulary")))
+    msg = body["input"]["messages"][0]
+    data_uri = msg["content"][0]["input_audio"]["data"]
     check("A6 wav data URI 前缀+base64 还原",
-          data_uri.startswith("data:audio/wav;base64,")
+          msg["role"] == "user"
+          and data_uri.startswith("data:audio/wav;base64,")
           and base64.b64decode(
               data_uri.split(",", 1)[1]) == b"RIFF-fake-wav-bytes")
 
     mp3 = _write_audio(".mp3", b"ID3-fake-mp3")
-    urllib.request.urlopen = _fake_urlopen_factory(
-        {"choices": [{"message": {"content": "ok"}}]})
+    urllib.request.urlopen = _fake_urlopen_factory("ok")
     CAP.clear()
     client._transcribe_aliyun(mp3, None)
-    m2 = CAP["body"]["messages"]
-    check("A7 mp3 mediatype + 无热词无 system",
-          m2[0]["content"][0]["input_audio"]["data"].startswith(
-              "data:audio/mpeg;base64,")
-          and len(m2) == 1 and m2[0]["role"] == "user")
+    body = CAP["body"]
+    check("A7 mp3 format + 无热词无 vocabulary",
+          body["parameters"]["format"] == "mp3"
+          and "vocabulary" not in body["parameters"]
+          and len(body["input"]["messages"]) == 1, str(body["parameters"]))
+    check("A7b mp3 data URI 前缀",
+          body["input"]["messages"][0]["content"][0][
+              "input_audio"]["data"].startswith("data:audio/mp3;base64,"))
 
-    urllib.request.urlopen = _fake_urlopen_factory(
-        exc=RuntimeError("network-down"))
-    check("A8 网络异常 None(上层回退)",
-          client._transcribe_aliyun(wav, None) is None)
-    urllib.request.urlopen = _fake_urlopen_factory(
-        {"choices": [{"message": {"content": "   "}}]})
+    # choices 结构兜底解析(multimodal 通用格式)
+    def _fake_choices(req, timeout=None):
+        class _Resp:
+            def read(self):
+                return json.dumps({"output": {"choices": [
+                    {"message": {"content": [
+                        {"text": "小竹，"}, {"text": "结算"}]}}]}}).encode(
+                            "utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        return _Resp()
+    urllib.request.urlopen = _fake_choices
+    check("A8 choices 结构兜底解析(拼接)",
+          client._transcribe_aliyun(wav, None) == "小竹，结算")
+
+    # sentence 结构的空文本 → None
+    urllib.request.urlopen = _fake_urlopen_factory("   ")
     check("A9 空转写 None", client._transcribe_aliyun(wav, None) is None)
+    # 网络异常 → None
+    urllib.request.urlopen = _fake_urlopen_factory(exc=RuntimeError("x"))
+    check("A10 网络异常 None(上层回退)",
+          client._transcribe_aliyun(wav, None) is None)
+    # 空文件 → None 不发请求
     empty = _write_audio(".wav", b"")
     CAP["calls"] = 0
-    check("A10 空文件 None 不发请求",
+    check("A11 空文件 None 不发请求",
           client._transcribe_aliyun(empty, None) is None
           and CAP["calls"] == 0)
+    # 超大文件 → None 不发请求
     big = _write_audio(".wav", b"x" * (7 * 1024 * 1024 + 1))
     CAP["calls"] = 0
-    check("A11 超 7MB 拒发 None",
+    check("A12 超 7MB 拒发 None",
           client._transcribe_aliyun(big, None) is None
           and CAP["calls"] == 0)
     urllib.request.urlopen = _orig_urlopen
@@ -251,7 +280,8 @@ async def run_async_tests():
               and r.get("text") == "小竹，来两件竹奕"
               and rec["hotwords"] == ["竹香", "竹奕"], str(r))
         check("H2 model 随 provider",
-              r.get("model") == "qwen3-asr-flash", str(r.get("model")))
+              r.get("model") == "qwen-audio-3.0-asr-flash",
+              str(r.get("model")))
     finally:
         del lc.provider_client.transcribe
 

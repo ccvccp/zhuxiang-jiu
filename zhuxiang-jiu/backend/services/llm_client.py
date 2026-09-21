@@ -34,10 +34,11 @@ ASR 双 provider(P0 小竹 Fun-ASR 接入):
                          配置 DASHSCOPE_API_KEY 才启用, 否则
                          自动回退智谱轨——key 未注入零风险上线)
     DASHSCOPE_API_KEY    阿里云百炼 API Key(百炼控制台开通)
-    DASHSCOPE_ASR_MODEL  百炼模型名(默认 qwen3-asr-flash,
-                         Fun-ASR 家族; OpenAI 兼容端点 base64
-                         直传本地音频同步返回, 热词走调用方
-                         hotwords 参数 → system 实体词表)
+    DASHSCOPE_ASR_MODEL  百炼模型名(默认 qwen-audio-3.0-asr-
+                         flash, Fun-ASR 家族; DashScope 原生
+                         multimodal-generation 端点 base64 直传
+                         本地音频同步返回, 热词走调用方
+                         hotwords 参数 → 即时热词 vocabulary)
     DASHSCOPE_BASE_URL   百炼端点(默认 https://dashscope.aliyuncs.com)
     ASR_HOTWORDS         静态热词种子(逗号分隔品牌词; 动态词
                          由小竹服务层注入产品名+误听修正词)
@@ -154,7 +155,7 @@ def current_asr_model() -> str:
     """当前生效的 ASR 模型名(随 provider 切换)"""
     if asr_provider() == "aliyun":
         return os.environ.get(
-            "DASHSCOPE_ASR_MODEL", "qwen3-asr-flash")
+            "DASHSCOPE_ASR_MODEL", "qwen-audio-3.0-asr-flash")
     return os.environ.get("ASR_MODEL", "glm-asr-2512")
 
 
@@ -438,9 +439,9 @@ class LLMProviderClient:
         """语音转文本(双 provider: 百炼 Fun-ASR / 智谱 GLM-ASR)
 
         ASR_PROVIDER=aliyun 且配置 DASHSCOPE_API_KEY 时走百炼
-        qwen3-asr-flash(OpenAI 兼容, base64 直传, hotwords 经
-        system 实体词表注入热词上下文); 其余情况及百炼失败时
-        回退智谱 multipart 轨。
+        qwen-audio-3.0-asr-flash(DashScope 原生协议, base64 直传,
+        hotwords 经即时热词 vocabulary 注入); 其余情况及百炼失败
+        时回退智谱 multipart 轨。
 
         Args:
             audio_path: 本地音频文件路径(wav/mp3)
@@ -461,18 +462,20 @@ class LLMProviderClient:
     def _transcribe_aliyun(self, audio_path: str,
                            hotwords: list[str] | None = None,
                            ) -> str | None:
-        """百炼 Fun-ASR(千问3-ASR-Flash)转写: base64 直传本地音频
+        """百炼 Fun-ASR 转写: base64 直传本地音频(DashScope 原生协议)
 
-        OpenAI 兼容 /chat/completions 端点(纯标准库 JSON POST,
-        同步返回); 热词机制为 system 实体词表上下文(官方 Context
-        能力——动态词即时生效, 无云端词表同步环节); 失败返回
-        None(上层 transcribe 回退智谱轨)。
+        端点 /multimodal-generation/generation 同步返回; 热词机制为
+        即时热词 parameters.vocabulary(带权重键值对, 请求内联传入,
+        官方"提升识别准确率"主推方式——无需云端词表注册, dashboard
+        误听词增删下一轮即生效); 失败返回 None(上层 transcribe
+        回退智谱轨)。
         """
         import base64
+
         from core.metrics import llm_timer
         api_key = os.environ["DASHSCOPE_API_KEY"].strip()
         model = os.environ.get(
-            "DASHSCOPE_ASR_MODEL", "qwen3-asr-flash")
+            "DASHSCOPE_ASR_MODEL", "qwen-audio-3.0-asr-flash")
         base_url = os.environ.get(
             "DASHSCOPE_BASE_URL",
             "https://dashscope.aliyuncs.com").rstrip("/")
@@ -489,29 +492,26 @@ class LLMProviderClient:
         if len(audio) > 7 * 1024 * 1024:
             logger.warning("aliyun_asr_oversize: %d bytes", len(audio))
             return None
-        mime = ("audio/wav" if audio_path.lower().endswith(".wav")
-                else "audio/mpeg")
-        data_uri = ("data:" + mime + ";base64,"
+        fmt = "wav" if audio_path.lower().endswith(".wav") else "mp3"
+        data_uri = ("data:audio/" + fmt + ";base64,"
                     + base64.b64encode(audio).decode("ascii"))
-        messages = []
+        # 即时热词(权重 5=普通档最高; 超级热词 50 留作调优档)
         words = [str(w).strip() for w in (hotwords or [])
                  if str(w).strip()]
+        params = {"format": fmt, "sample_rate": 16000}
         if words:
-            messages.append({
-                "role": "system",
-                "content": "语音识别参考词表——识别结果优先匹配以下"
-                           "专有名词: " + "、".join(words[:120])})
-        messages.append({
-            "role": "user",
-            "content": [{"type": "input_audio",
-                         "input_audio": {"data": data_uri}}]})
+            params["vocabulary"] = {w: 5 for w in words[:120]}
         payload = json.dumps({
-            "model": model, "messages": messages, "stream": False,
-            "asr_options": {"language": "zh"},
+            "model": model,
+            "input": {"messages": [{
+                "role": "user",
+                "content": [{"type": "input_audio",
+                             "input_audio": {"data": data_uri}}]}]},
+            "parameters": params,
         }, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
-            f"{base_url}/compatible-mode/v1/chat/completions",
-            data=payload,
+            f"{base_url}/api/v1/services/aigc/multimodal-generation"
+            "/generation", data=payload,
             headers={"Content-Type": "application/json",
                      "Authorization": f"Bearer {api_key}"},
             method="POST")
@@ -522,11 +522,35 @@ class LLMProviderClient:
         except Exception as exc:
             logger.warning("aliyun_asr_failed(回退zhipu): %s", exc)
             return None
-        content = (body.get("choices") or [{}])[0].get(
-            "message", {}).get("content")
-        if isinstance(content, str) and content.strip():
-            return content.strip()
+        text = self._parse_aliyun_asr(body)
+        if text:
+            return text
         logger.warning("aliyun_asr_empty_response model=%s", model)
+        return None
+
+    @staticmethod
+    def _parse_aliyun_asr(body: dict) -> str | None:
+        """解析百炼原生转写响应(兼容 sentence 与 choices 两种结构)
+
+        实测 qwen-audio-3.0-asr-flash 返回 output.output.sentence;
+        multimodal 通用结构 output.choices[].message.content 兜底。
+        """
+        out = body.get("output") or {}
+        inner = out.get("output") or {}
+        sent = inner.get("sentence") or {}
+        text = str(sent.get("text") or "").strip()
+        if text:
+            return text
+        for choice in out.get("choices") or []:
+            content = (choice.get("message") or {}).get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+            if isinstance(content, list):
+                joined = "".join(
+                    str(p.get("text") or "") for p in content
+                    if isinstance(p, dict)).strip()
+                if joined:
+                    return joined
         return None
 
     def _transcribe_zhipu(self, audio_path: str) -> str | None:
