@@ -801,13 +801,16 @@ class XiaozhuService:
             "durationSec": (round(float(duration_sec), 1)
                             if duration_sec else None),
         }
-        # ASR 转写(35号链路整段复用: 限流/降级/临时文件即删)
+        # ASR 转写(35号链路整段复用: 限流/降级/临时文件即删;
+        # 热词三源注入——百炼 Fun-ASR 轨经 system 实体词表生效,
+        # 智谱轨忽略该参数零开销)
         import time as _t
         _asr_t0 = _t.monotonic()
         from services.hub_service import HubService
         asr = await HubService().transcribe_upload(
             audio_bytes, filename=filename,
-            member_id=member_id)
+            member_id=member_id,
+            hotwords=await self._asr_hotwords())
         logger.info("voice48_timing sid=%s asr_ms=%d "
                     "audio_bytes=%d dur_s=%s",
                     session_id,
@@ -2281,6 +2284,42 @@ class XiaozhuService:
                 "card": {"type": "history_list",
                          "items": items[-8:],
                          "subject": f"最近{len(shown)}步操作"}}
+
+    async def _asr_hotwords(self) -> list[str]:
+        """ASR 热词表(P0 Fun-ASR: system 实体词表数据源)
+
+        三源合一去重: ASR_HOTWORDS 静态种子(品牌词) + 在售
+        产品名 + 误听修正表右词(运营动态词); 智谱轨不使用该
+        参数(零开销); fail-soft: 任一源失败只降词不阻断转写。
+        """
+        words: list[str] = []
+        seen: set[str] = set()
+
+        def _add(w) -> None:
+            w = str(w or "").strip()
+            # 超长词作上下文无意义且拖慢请求, 截 20 字符
+            if w and len(w) <= 20 and w not in seen:
+                seen.add(w)
+                words.append(w)
+
+        for w in os.environ.get(
+                "ASR_HOTWORDS", "").replace("，", ",").split(","):
+            _add(w)
+        try:
+            from repositories.product_repository import (
+                ProductRepository,
+            )
+            for p in await ProductRepository().list_all():
+                if p.get("status") == "on_sale":
+                    _add(p.get("name"))
+        except Exception:
+            pass
+        try:
+            for rec in (await self.repo.list_asr_fixes()).values():
+                _add((rec or {}).get("to"))
+        except Exception:
+            pass
+        return words[:120]
 
     async def _fix_asr_mishear(self, text: str) -> str:
         """ASR 误听修正(v2 C: builtin 种子 + Redis 运行时表)

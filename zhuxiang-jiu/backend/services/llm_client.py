@@ -29,6 +29,19 @@ P3.5 embedding 语义向量(检索升级):
     ASR_MODEL            转写模型名(默认 glm-asr-2512, 智谱;
                          单文件 ≤25MB/≤30s, 由调用方分段)
 
+ASR 双 provider(P0 小竹 Fun-ASR 接入):
+    ASR_PROVIDER         zhipu|aliyun(默认 zhipu; aliyun 且
+                         配置 DASHSCOPE_API_KEY 才启用, 否则
+                         自动回退智谱轨——key 未注入零风险上线)
+    DASHSCOPE_API_KEY    阿里云百炼 API Key(百炼控制台开通)
+    DASHSCOPE_ASR_MODEL  百炼模型名(默认 qwen3-asr-flash,
+                         Fun-ASR 家族; OpenAI 兼容端点 base64
+                         直传本地音频同步返回, 热词走调用方
+                         hotwords 参数 → system 实体词表)
+    DASHSCOPE_BASE_URL   百炼端点(默认 https://dashscope.aliyuncs.com)
+    ASR_HOTWORDS         静态热词种子(逗号分隔品牌词; 动态词
+                         由小竹服务层注入产品名+误听修正词)
+
 检索重排 Rerank(P3.7):
     KNOWLEDGE_RERANK     开关(默认 off, on 时检索结果经重排模型精排)
     RERANK_MODEL         重排模型名(默认 rerank, 智谱;
@@ -118,6 +131,33 @@ def rerank_enabled() -> bool:
         "KNOWLEDGE_RERANK", "off").strip().lower() == "on"
 
 
+def asr_provider() -> str:
+    """ASR provider 选择(P0 双 provider)
+
+    ASR_PROVIDER=aliyun 且配置 DASHSCOPE_API_KEY 时走百炼
+    Fun-ASR(qwen3-asr-flash)轨; 其余一切情况(默认/拼错/key
+    缺失)均回退智谱——key 未注入即零风险上线。
+    """
+    if (os.environ.get("ASR_PROVIDER", "zhipu").strip().lower()
+            == "aliyun"
+            and os.environ.get("DASHSCOPE_API_KEY", "").strip()):
+        return "aliyun"
+    return "zhipu"
+
+
+def asr_ready() -> bool:
+    """ASR 任一 provider 可用(供 hub 转写失败原因区分)"""
+    return asr_provider() == "aliyun" or llm_enabled()
+
+
+def current_asr_model() -> str:
+    """当前生效的 ASR 模型名(随 provider 切换)"""
+    if asr_provider() == "aliyun":
+        return os.environ.get(
+            "DASHSCOPE_ASR_MODEL", "qwen3-asr-flash")
+    return os.environ.get("ASR_MODEL", "glm-asr-2512")
+
+
 def log_feature_status() -> None:
     """启动时输出各轨开关状态(P4.1 部署加固)
 
@@ -131,6 +171,8 @@ def log_feature_status() -> None:
     logger.info("  LLM_API_KEY       : %s",
                 "已配置" if key_set else "未配置(llm 轨全部关闭)")
     logger.info("  LLM_ENABLED       : %s (总开关)", master)
+    logger.info("  ASR provider      : %s (model=%s)",
+                asr_provider(), current_asr_model())
     if key_set:
         tracks = [
             ("RAG llm 合成", "KNOWLEDGE_CHAT_LLM",
@@ -391,8 +433,104 @@ class LLMProviderClient:
             logger.warning("llm_vision_failed(回退rule): %s", exc)
             return None
 
-    def transcribe(self, audio_path: str) -> str | None:
-        """语音转文本(GLM-ASR), multipart 上传本地音频文件
+    def transcribe(self, audio_path: str,
+                   hotwords: list[str] | None = None) -> str | None:
+        """语音转文本(双 provider: 百炼 Fun-ASR / 智谱 GLM-ASR)
+
+        ASR_PROVIDER=aliyun 且配置 DASHSCOPE_API_KEY 时走百炼
+        qwen3-asr-flash(OpenAI 兼容, base64 直传, hotwords 经
+        system 实体词表注入热词上下文); 其余情况及百炼失败时
+        回退智谱 multipart 轨。
+
+        Args:
+            audio_path: 本地音频文件路径(wav/mp3)
+            hotwords: 热词上下文(品牌词/产品名/误听修正词;
+                仅百炼轨使用——智谱轨无此参数, 传了也忽略)
+
+        Returns:
+            转写文本; 未配置 key、文件读取失败、请求失败、
+            响应异常、空转写均返回 None。
+        """
+        if asr_provider() == "aliyun":
+            text = self._transcribe_aliyun(audio_path, hotwords)
+            if text:
+                return text
+            logger.warning("aliyun_asr_unavailable(回退zhipu轨)")
+        return self._transcribe_zhipu(audio_path)
+
+    def _transcribe_aliyun(self, audio_path: str,
+                           hotwords: list[str] | None = None,
+                           ) -> str | None:
+        """百炼 Fun-ASR(千问3-ASR-Flash)转写: base64 直传本地音频
+
+        OpenAI 兼容 /chat/completions 端点(纯标准库 JSON POST,
+        同步返回); 热词机制为 system 实体词表上下文(官方 Context
+        能力——动态词即时生效, 无云端词表同步环节); 失败返回
+        None(上层 transcribe 回退智谱轨)。
+        """
+        import base64
+        from core.metrics import llm_timer
+        api_key = os.environ["DASHSCOPE_API_KEY"].strip()
+        model = os.environ.get(
+            "DASHSCOPE_ASR_MODEL", "qwen3-asr-flash")
+        base_url = os.environ.get(
+            "DASHSCOPE_BASE_URL",
+            "https://dashscope.aliyuncs.com").rstrip("/")
+        try:
+            with open(audio_path, "rb") as f:
+                audio = f.read()
+        except OSError as exc:
+            logger.warning("aliyun_asr_read_failed: %s", exc)
+            return None
+        if not audio:
+            return None
+        # base64 膨胀 4/3——原文件超 7MB 放弃(编码后逼近百炼
+        # 10MB 上限; 调用方约束 2MB, 此为防御性兜底)
+        if len(audio) > 7 * 1024 * 1024:
+            logger.warning("aliyun_asr_oversize: %d bytes", len(audio))
+            return None
+        mime = ("audio/wav" if audio_path.lower().endswith(".wav")
+                else "audio/mpeg")
+        data_uri = ("data:" + mime + ";base64,"
+                    + base64.b64encode(audio).decode("ascii"))
+        messages = []
+        words = [str(w).strip() for w in (hotwords or [])
+                 if str(w).strip()]
+        if words:
+            messages.append({
+                "role": "system",
+                "content": "语音识别参考词表——识别结果优先匹配以下"
+                           "专有名词: " + "、".join(words[:120])})
+        messages.append({
+            "role": "user",
+            "content": [{"type": "input_audio",
+                         "input_audio": {"data": data_uri}}]})
+        payload = json.dumps({
+            "model": model, "messages": messages, "stream": False,
+            "asr_options": {"language": "zh"},
+        }, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            f"{base_url}/compatible-mode/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {api_key}"},
+            method="POST")
+        try:
+            with llm_timer("transcribe"), urllib.request.urlopen(
+                    request, timeout=_TIMEOUT) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            logger.warning("aliyun_asr_failed(回退zhipu): %s", exc)
+            return None
+        content = (body.get("choices") or [{}])[0].get(
+            "message", {}).get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        logger.warning("aliyun_asr_empty_response model=%s", model)
+        return None
+
+    def _transcribe_zhipu(self, audio_path: str) -> str | None:
+        """智谱 GLM-ASR 转写: multipart 上传本地音频文件
 
         纯标准库手工构造 multipart/form-data(不引入 requests);
         单文件限制 ≤25MB/≤30s 由调用方分段(对齐智谱约束);

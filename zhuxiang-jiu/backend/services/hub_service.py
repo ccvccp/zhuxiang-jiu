@@ -65,12 +65,17 @@ class HubService:
     async def transcribe_upload(self, audio_bytes: bytes,
                                 filename: str = "audio.webm",
                                 member_id: int | None = None,
+                                hotwords: list[str] | None = None,
                                 ) -> dict:
         """语音转文字入口(限流 + 降级链)
 
         链路: 用量限流 → 临时落盘 → llm_client.transcribe() → 结构化结果
         降级: 未配置 LLM key / 转写失败 → success=False + 明确 reason,
               前端提示改用键盘输入(不白屏不阻断)。
+
+        Args:
+            hotwords: ASR 热词上下文(小竹注入品牌词/产品名/误听
+                修正词; 仅百炼 Fun-ASR 轨使用, 智谱轨忽略)
 
         Returns:
             {"success": True, "text": ..., "model": ..., "duration_ms": ...}
@@ -109,7 +114,7 @@ class HubService:
             # 单 worker 下全后端被串行冻结(真机"整轮滞后"根因);
             # 线程池执行, 让 ASR/TTS/LLM 并行不互相排队
             text = await asyncio.to_thread(
-                provider_client.transcribe, tmp_path)
+                provider_client.transcribe, tmp_path, hotwords)
         except Exception as exc:
             logger.warning("hub_asr_exception: %s", exc)
             text = None
@@ -119,14 +124,16 @@ class HubService:
                     os.unlink(tmp_path)
 
         if not text:
-            from services.llm_client import llm_enabled
-            reason = ("语音服务未配置(LLM_API_KEY 缺失)"
-                      if not llm_enabled() else "语音转写失败, 请重试或改用键盘输入")
+            from services.llm_client import asr_ready
+            reason = ("语音服务未配置(LLM_API_KEY/DASHSCOPE_API_KEY 均缺失)"
+                      if not asr_ready()
+                      else "语音转写失败, 请重试或改用键盘输入")
             return {"success": False, "error": reason,
                     "fallback_hint": "keyboard"}
 
+        from services.llm_client import current_asr_model
         return {"success": True, "text": text,
-                "model": os.environ.get("ASR_MODEL", "glm-asr-2512")}
+                "model": current_asr_model()}
 
     # ============================================================
     # 意图分类(设计文档 5.2.3: 规则轨优先, LLM 轨 P1)
