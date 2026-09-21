@@ -25,6 +25,7 @@ import {
   XiaozhuAPI, XzCard, XzTurnResp,
 } from '@/api/xiaozhu';
 import { requireLogin } from '@/services/auth-service';
+import { haptic } from '@/utils/haptic';
 
 // ============ 类型 ============
 
@@ -35,6 +36,10 @@ interface VoiceMsg {
   card?: XzCard | null;
   /** H5 跳转路径(需映射) */
   jump?: string;
+  /** 轮次 ID(v2 A: 反馈评价落痕定位) */
+  turnId?: string;
+  /** 反馈态(本地锁定; null=未评/失败回弹) */
+  feedback?: 'up' | 'down' | null;
 }
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -56,6 +61,9 @@ const nextMsgId = () => ++msgSeq;
 // 录音计时上限展示(60s 自动停)
 const REC_MAX_MS = 60000;
 
+// v2 F: 短录音提示节流(10s 内只提示一次)
+let lastShortToastAt = 0;
+
 // ============ 页面 ============
 
 const VoicePage: React.FC = () => {
@@ -72,6 +80,19 @@ const VoicePage: React.FC = () => {
   const [verifying, setVerifying] = useState(false);
   /** 免提连续对话开关(播报完自动续听) */
   const [handsFree, setHandsFree] = useState(true);
+  /** v2 G: 播报语速(慢0.8/标准1/快1.2——本地存储, cogtts 生效) */
+  const [ttsSpeed, setTtsSpeedState] = useState(
+    () => Number(Taro.getStorageSync('xz_tts_speed')) || 1);
+
+  const cycleTtsSpeed = useCallback(() => {
+    // 标准 1 → 快 1.2 → 慢 0.8 → 标准(循环)
+    const next = ttsSpeed === 1 ? 1.2
+      : ttsSpeed === 1.2 ? 0.8 : 1;
+    setTtsSpeedState(next);
+    Taro.setStorageSync('xz_tts_speed', next);
+    const label = next === 1 ? '标准' : next === 1.2 ? '快' : '慢';
+    Taro.showToast({ title: `语速：${label}`, icon: 'none' });
+  }, [ttsSpeed]);
 
   // ---- refs(事件回调里访问最新态, 避免闭包陷阱) ----
   const sessionIdRef = useRef<number>(0);
@@ -171,7 +192,20 @@ const VoicePage: React.FC = () => {
 
   const handleResponse = useCallback((resp: XzTurnResp) => {
     const card = resp.card || null;
-    pushMsg({ role: 'bot', text: resp.reply, card, jump: resp.jump });
+    const turnId = (resp as any)?.turn?.turnId;
+    pushMsg({
+      role: 'bot', text: resp.reply, card, jump: resp.jump,
+      turnId, feedback: null,
+    });
+    // v2 D: 触觉反馈三档(高敏重震/结算中震/普通轻触)
+    if (resp.confirmRequired || card?.type === 'confirm') {
+      haptic('heavy');
+    } else if (card?.type === 'order_done'
+               || card?.type === 'order_paid') {
+      haptic('medium');
+    } else {
+      haptic('light');
+    }
     // TTS 分支预合成(推荐轮带两分支文本)——后台预下载
     // → 用户答"需要"/"不要这款"时本地缓存命中秒播
     const preheat = (resp as any).ttsPreheat;
@@ -192,6 +226,22 @@ const VoicePage: React.FC = () => {
       setPhaseSafe('idle');
     }
   }, [pushMsg, speak, setPhaseSafe]);
+
+  // ============ v2 A: 轮次反馈(👍/👎) ============
+
+  const sendFeedback = useCallback((
+    msgId: number, turnId: string, rating: 'up' | 'down',
+  ) => {
+    // 本地即时锁定, 失败回弹
+    setMessages(prev => prev.map(m =>
+      m.id === msgId ? { ...m, feedback: rating } : m));
+    XiaozhuAPI.turnFeedback(sessionIdRef.current, turnId, rating)
+      .catch(() => {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? { ...m, feedback: null } : m));
+        Taro.showToast({ title: '反馈没送出去', icon: 'none' });
+      });
+  }, []);
 
   // ============ 发送指令(文本/语音统一入口) ============
 
@@ -305,6 +355,17 @@ const VoicePage: React.FC = () => {
         handleRecording(res.tempFilePath, dur);
       } else {
         setPhaseSafe('idle');
+        // v2 F: 短录音温和提示(10s 节流——非零时长才提示,
+        // 纯误触 0ms 静默)
+        const tnow = Date.now();
+        if ((res.duration || 0) > 0
+            && tnow - lastShortToastAt > 10000) {
+          lastShortToastAt = tnow;
+          Taro.showToast({
+            title: '没听清，请靠近麦克风再说一次',
+            icon: 'none', duration: 2500,
+          });
+        }
       }
     });
     recorder.onError((err: { errCode?: number; errMsg?: string }) => {
@@ -576,10 +637,49 @@ const VoicePage: React.FC = () => {
                     前往查看 ›
                   </View>
                 )}
+                {/* v2 A: 轮次反馈(👍/👎——仅 bot 真实轮, 可切换) */}
+                {m.role === 'bot' && m.turnId && (
+                  <View style={{ display: 'flex', flexDirection: 'row', gap: '6px', marginTop: '6px' }}>
+                    {([['up', '👍'], ['down', '👎']] as const).map(([r, icon]) => (
+                      <Text
+                        key={r}
+                        style={{
+                          fontSize: '12px', lineHeight: '20px',
+                          padding: '0 10px', borderRadius: '10px',
+                          border: `1px solid ${m.feedback === r ? '#355c44' : 'rgba(53,92,68,.25)'}`,
+                          background: m.feedback === r ? '#355c44' : '#fff',
+                          color: m.feedback === r ? '#fff' : '#888',
+                        }}
+                        onClick={() => sendFeedback(m.id, m.turnId!, r)}
+                      >
+                        {icon}
+                      </Text>
+                    ))}
+                  </View>
+                )}
               </View>
             </View>
           ))}
         </View>
+        {/* v2 F: 空态引导卡(对齐 H5 appendGuide——三条示例指令) */}
+        {phase === 'idle' && messages.length <= 1 && (
+          <View style={{ padding: '14px 16px' }}>
+            <Text style={{ display: 'block', textAlign: 'center', fontSize: '12px', color: '#999', marginBottom: '10px' }}>
+              🎋 试试对小竹说（点击直接发送）
+            </Text>
+            <View style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {['小竹，看看有什么新品', '小竹，今天有什么优惠', '小竹，你能干什么'].map(g => (
+                <View
+                  key={g}
+                  style={{ border: '1px dashed #355c44', borderRadius: '8px', padding: '10px', textAlign: 'center' }}
+                  onClick={() => sendCmd(g)}
+                >
+                  <Text style={{ fontSize: '13px', color: '#355c44' }}>「{g}」</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
         <View className={styles.bottomSpacer} />
       </ScrollView>
 
@@ -608,6 +708,14 @@ const VoicePage: React.FC = () => {
               onClick={() => setHandsFree(v => !v)}
             >
               免提 {handsFree ? '开' : '关'}
+            </Text>
+          )}
+          {phase === 'idle' && (
+            <Text
+              className={styles.hfOn}
+              onClick={cycleTtsSpeed}
+            >
+              语速 {ttsSpeed === 1 ? '标准' : ttsSpeed === 1.2 ? '快' : '慢'}
             </Text>
           )}
         </View>

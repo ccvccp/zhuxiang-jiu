@@ -244,6 +244,59 @@
         </div>
     </div>
 
+    <!-- ⑨ 反馈评价(v2 A 👍/👎 落痕) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑨ 反馈评价（v2：👍/👎 落痕 / 负反馈 top intent / 最近负反馈轮）</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovFeedback" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="feedbackNote"></div>
+                </div>
+                <div>
+                    <div style="max-height:220px;overflow:auto">
+                        <table class="dash-table">
+                            <thead><tr>
+                                <th>seq</th><th>intent</th><th>用户说</th>
+                                <th>小竹回</th><th>反馈时间</th>
+                            </tr></thead>
+                            <tbody id="negList"><tr><td colspan="5"
+                                class="dash-empty">暂无负反馈</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑩ ASR 误听自学习(v2 C 运营) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑩ ASR 误听自学习（词条运营：真机留痕 → 修正词 即时生效；builtin 不可删）</h3></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;align-items:center">
+                <input id="fixWrong" placeholder="误听词(如: 加入国五车)"
+                    style="padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;width:180px">
+                <span style="color:#888">→</span>
+                <input id="fixRight" placeholder="修正词(如: 加入购物车)"
+                    style="padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;width:180px">
+                <button onclick="addAsrFix()"
+                    style="padding:6px 14px;border:none;border-radius:5px;background:#355c44;color:#fff;font-size:12px;cursor:pointer">添加词条</button>
+                <span style="font-size:11px;color:#888">负反馈轮的"用户说"即 ASR 原文——肉眼断定误听后在此加词条</span>
+            </div>
+            <div style="max-height:240px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>误听词</th><th>修正词</th><th>命中</th>
+                        <th>来源</th><th>操作</th>
+                    </tr></thead>
+                    <tbody id="asrFixBody"><tr><td colspan="5"
+                        class="dash-empty">暂无词条</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div class="note-bar">
         后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
         管理端 X-Role: admin · 计划: docs/48号_小竹智能语音中枢实施计划.md

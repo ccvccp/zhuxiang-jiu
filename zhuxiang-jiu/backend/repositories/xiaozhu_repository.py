@@ -319,6 +319,96 @@ class Xiaozhu48Repository:
         result.sort(key=lambda t: (t.get("seq") or 0))
         return result[:limit]
 
+    async def save_turn_feedback(self, session_id: int, seq: int,
+                                 rating: str) -> None:
+        """轮次反馈落痕(v2 A 项: 👍/👎 写 turn hash, 覆盖式)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("voice48", self.TABLE_TURNS, session_id, seq),
+                mapping={"feedback": rating,
+                         "feedbackAt": ts()})
+            return
+        self._ensure_store()
+        turn = self.store[self.TABLE_TURNS].get(
+            (session_id, seq))
+        if turn is not None:
+            turn["feedback"] = rating
+            turn["feedbackAt"] = ts()
+
+    # --------------------------------------------------------
+    # ASR 误听自学习表(v2 C 项: zhuxiang:xiaozhu:asr_fixes
+    # hash, field=误听词, value=JSON{to,hits,source,addedAt})
+    # --------------------------------------------------------
+
+    def _asr_fixes_key(self):
+        return _k("xiaozhu", "asr_fixes")
+
+    async def list_asr_fixes(self) -> dict[str, dict]:
+        """全量误听修正表 {误听词: {to,hits,source,addedAt}}"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.hgetall(self._asr_fixes_key())
+            out = {}
+            for wrong, val in (raw or {}).items():
+                try:
+                    out[wrong] = json.loads(val)
+                except (TypeError, ValueError):
+                    continue
+            return out
+        self._ensure_store()
+        raw = self.store.get("xiaozhu_asr_fixes", {})
+        out = {}
+        for wrong, val in dict(raw).items():
+            try:
+                out[wrong] = dict(val)
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    async def save_asr_fix(self, wrong: str, right: str,
+                           source: str = "manual") -> dict:
+        """写入/更新误听词条(保留已有 hits)"""
+        existing = (await self.list_asr_fixes()).get(wrong) or {}
+        record = {"to": right, "hits": existing.get("hits", 0),
+                  "source": existing.get("source", source),
+                  "addedAt": existing.get("addedAt", ts())}
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(self._asr_fixes_key(), wrong,
+                              json.dumps(record, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store.setdefault(
+                "xiaozhu_asr_fixes", {})[wrong] = dict(record)
+        return record
+
+    async def delete_asr_fix(self, wrong: str) -> bool:
+        """删除误听词条(builtin 来源由路由层拦截)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return bool(await client.hdel(
+                self._asr_fixes_key(), wrong))
+        self._ensure_store()
+        return self.store.get(
+            "xiaozhu_asr_fixes", {}).pop(wrong, None) is not None
+
+    async def hit_asr_fix(self, wrong: str) -> None:
+        """命中计数递增(运营观测误听频次)"""
+        fixes = await self.list_asr_fixes()
+        rec = fixes.get(wrong)
+        if not rec:
+            return
+        rec["hits"] = int(rec.get("hits", 0)) + 1
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(self._asr_fixes_key(), wrong,
+                              json.dumps(rec, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store.setdefault(
+                "xiaozhu_asr_fixes", {})[wrong] = dict(rec)
+
     # --------------------------------------------------------
     # P4 看板聚合扫描(全表只读——六区块数据源)
     # --------------------------------------------------------

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿/**
+﻿﻿﻿﻿﻿﻿/**
  * 48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
  * 范式: js/trust-risk-dashboard.js(47号)平移——ES5、localStorage
  * 连接、区块化加载(手动刷新, 不进自动刷新)。
@@ -295,11 +295,113 @@ async function loadAll() {
             document.getElementById('fcToolChips').innerHTML =
                 kindChips(fc.byKind) + ' · ' + kindChips(fc.byTool);
         }
+
+        // ⑨ 反馈评价(v2 A——👍/👎 落痕聚合)
+        var fb = zones.feedback || {};
+        if (fb.error) {
+            cells('ovFeedback', [{ k: '反馈评价', v: '区块异常',
+                cls: 'red' }]);
+        } else {
+            cells('ovFeedback', [
+                { k: '👍 有帮助', v: fb.up || 0, cls: 'green' },
+                { k: '👎 没帮助', v: fb.down || 0, cls: 'red' },
+                { k: '负反馈占比', v: pct(fb.downShare),
+                  cls: fb.downShare != null && fb.downShare > 40
+                      ? 'red' : 'green' },
+                { k: '反馈总数', v: fb.total || 0, cls: 'blue' },
+            ]);
+            document.getElementById('feedbackNote').textContent =
+                fb.note || '';
+            document.getElementById('negList').innerHTML =
+                (fb.recentNegative || []).map(function (n) {
+                    return '<tr><td>' + esc(n.seq) + '</td><td>' +
+                        '<span class="kind-pill">' + esc(n.intent) +
+                        '</span></td><td>' + esc(n.rawText) +
+                        '</td><td>' + esc(n.reply) + '</td><td>' +
+                        esc(n.feedbackAt || '') + '</td></tr>';
+                }).join('') ||
+                '<tr><td colspan="5" class="dash-empty">' +
+                '暂无负反馈</td></tr>';
+        }
+
+        // ⑩ ASR 误听自学习(v2 C——词条/命中数观测)
+        var af = zones.asrfixes || {};
+        if (af.error) {
+            renderAsrFixes(null);
+        } else {
+            renderAsrFixes(af.fixes || []);
+        }
     } catch (e) {
         showError(e.message);
     }
     // ⑧ 支付安全观测(三期独立端点——分区 fail-soft 不阻塞主区块)
     loadVoicepay();
+}
+
+/* ============================================================
+ * ⑩ ASR 误听词条管理(v2 C——增删, 即时生效)
+ * ============================================================ */
+
+function renderAsrFixes(fixes) {
+    var body = document.getElementById('asrFixBody');
+    if (fixes === null) {
+        body.innerHTML = '<tr><td colspan="5" class="dash-empty">' +
+            '区块异常</td></tr>';
+        return;
+    }
+    body.innerHTML = fixes.map(function (f) {
+        var builtin = f.source === 'builtin';
+        return '<tr><td>' + esc(f.wrong) + '</td><td>' + esc(f.to) +
+            '</td><td>' + esc(f.hits || 0) + '</td><td>' +
+            (builtin ? 'builtin' : 'manual') + '</td><td>' +
+            (builtin ? '—'
+                : '<button onclick="delAsrFix(\'' +
+                  esc(f.wrong) + '\')" style="padding:2px 8px;' +
+                  'border:1px solid #c0392b;border-radius:4px;' +
+                  'background:#fff;color:#c0392b;font-size:11px;' +
+                  'cursor:pointer">删除</button>') +
+            '</td></tr>';
+    }).join('') ||
+        '<tr><td colspan="5" class="dash-empty">暂无词条</td></tr>';
+}
+
+async function addAsrFix() {
+    var wrong = document.getElementById('fixWrong').value.trim();
+    var right = document.getElementById('fixRight').value.trim();
+    if (!wrong || !right) {
+        showError('请填写误听词和修正词');
+        return;
+    }
+    try {
+        await fetchJson(
+            api('/api/xiaozhu/dashboard/asr-fixes'),
+            { method: 'POST',
+              headers: adminHeaders(),
+              body: JSON.stringify({ wrong: wrong, right: right }) },
+            '添加误听词条');
+        showInfo('词条已添加: ' + wrong + ' → ' + right
+                 + '（即时生效）');
+        document.getElementById('fixWrong').value = '';
+        document.getElementById('fixRight').value = '';
+        loadAll();
+    } catch (e) {
+        showError(e.message);
+    }
+}
+
+async function delAsrFix(wrong) {
+    if (!window.confirm('确认删除词条「' + wrong + '」?')) return;
+    try {
+        await fetchJson(
+            api('/api/xiaozhu/dashboard/asr-fixes?wrong='
+                + encodeURIComponent(wrong)),
+            { method: 'DELETE', headers: adminHeaders() },
+            '删除误听词条');
+        showInfo('词条已删除: ' + wrong);
+        loadAll();
+    } catch (e) {
+        showError(e.message);
+    }
 }
 
 /* ============================================================

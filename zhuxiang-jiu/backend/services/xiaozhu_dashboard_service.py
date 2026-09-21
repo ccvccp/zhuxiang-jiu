@@ -87,6 +87,10 @@ class XiaozhuDashboardService:
         # 50号P5: 语音积分分区(发放分布/结算批次/
         # 反作弊处置计数——fail-soft)
         await _zone("voice50", self._zone_voice50)
+        # v2 A: 反馈评价分区(👍/👎 落痕聚合——负反馈 top intent)
+        await _zone("feedback", self._zone_feedback)
+        # v2 C: ASR 误听自学习表(词条/命中数——运营观测)
+        await _zone("asrfixes", self._zone_asrfixes)
 
         return {
             "success": True,
@@ -183,6 +187,71 @@ class XiaozhuDashboardService:
                              if considered else None),
             "note": "兜底率高=指令集缺覆盖——配合⑤失败"
                     "聚类补 pattern",
+        }
+
+    async def _zone_feedback(self) -> dict:
+        """v2 A: 反馈评价聚合(👍/👎 落痕——轮次 scan_turns)
+
+        正负总数/负反馈 top intent/最近 10 条负反馈轮摘要
+        (rawText 落痕时已过 mask_pii, 无隐私增量)。
+        """
+        turns = await self.repo.scan_turns()
+        up = down = 0
+        neg_by_intent: dict = {}
+        recent_neg = []
+        for t in turns:
+            fb = t.get("feedback")
+            if fb == "up":
+                up += 1
+            elif fb == "down":
+                down += 1
+                intent = t.get("intent") or "unknown"
+                neg_by_intent[intent] = \
+                    neg_by_intent.get(intent, 0) + 1
+                recent_neg.append({
+                    "seq": t.get("seq"),
+                    "intent": intent,
+                    "rawText": str(
+                        t.get("rawText") or "")[:40],
+                    "reply": str(
+                        t.get("reply") or "")[:50],
+                    "feedbackAt": t.get("feedbackAt")})
+        recent_neg = recent_neg[-10:]
+        neg_ranked = [{"intent": i, "count": n}
+                      for i, n in sorted(
+                          neg_by_intent.items(),
+                          key=lambda kv: -kv[1])][:5]
+        total = up + down
+        return {
+            "up": up, "down": down,
+            "total": total,
+            "downShare": (round(down / total * 100, 1)
+                          if total else None),
+            "topNegativeIntents": neg_ranked,
+            "recentNegative": list(reversed(recent_neg)),
+            "note": "负反馈 top intent=优化方向; 最近负反馈轮"
+                    "供误听/意图误判人工断定(联动 asrfixes)",
+        }
+
+    async def _zone_asrfixes(self) -> dict:
+        """v2 C: ASR 误听自学习表观测(词条/命中数/来源)"""
+        fixes = await self.repo.list_asr_fixes()
+        items = [{"wrong": w,
+                  "to": r.get("to"),
+                  "hits": r.get("hits", 0),
+                  "source": r.get("source", "manual")}
+                 for w, r in sorted(
+                     fixes.items(),
+                     key=lambda kv: -int(
+                         kv[1].get("hits") or 0))]
+        return {
+            "count": len(items),
+            "builtin": sum(1 for i in items
+                           if i["source"] == "builtin"),
+            "totalHits": sum(int(i["hits"]) for i in items),
+            "fixes": items,
+            "note": "词条经 POST /api/xiaozhu/dashboard/"
+                    "asr-fixes 运营; builtin 不可删",
         }
 
     async def _zone_confirm(self) -> dict:

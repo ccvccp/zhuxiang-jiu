@@ -508,12 +508,15 @@ class LLMProviderClient:
         ranked.sort(key=lambda x: x[1], reverse=True)
         return ranked or None
 
-    def synthesize(self, text: str) -> bytes | None:
+    def synthesize(self, text: str, speed: float = None,
+                   voice: str = None) -> bytes | None:
         """语音合成 TTS(智谱 cogtts, WAV 返回)
 
         微信 X5 无系统 TTS 引擎(speechSynthesis 入队无声)
         ——服务端合成兜底: 电脑走浏览器 TTS, 微信走本接口。
         失败/未配置返回 None(前端静默降级不播报)。
+        v2 G: speed(0.5-2.0, spike 实证 cogtts 语速生效)
+        /voice per-call 透传——None 走环境变量默认。
         """
         t = str(text or "").strip()
         if not t:
@@ -525,12 +528,17 @@ class LLMProviderClient:
         base_url = os.environ.get(
             "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
         ).rstrip("/")
+        payload_dict = {
+            "model": os.environ.get("TTS_MODEL", "cogtts"),
+            "input": t[:200],
+            "voice": voice
+            or os.environ.get("TTS_VOICE", "tongtong"),
+            "response_format": "wav"}
+        if speed is not None:
+            payload_dict["speed"] = max(
+                0.5, min(2.0, float(speed)))
         payload = json.dumps(
-            {"model": os.environ.get("TTS_MODEL", "cogtts"),
-             "input": t[:200],
-             "voice": os.environ.get("TTS_VOICE", "tongtong"),
-             "response_format": "wav"},
-            ensure_ascii=False).encode("utf-8")
+            payload_dict, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             f"{base_url}/audio/speech", data=payload,
             headers={"Content-Type": "application/json",
@@ -552,14 +560,16 @@ class LLMProviderClient:
             logger.warning("llm_tts_failed(跳过播报): %s", exc)
             return None
 
-    def synthesize_mp3(self, text: str) -> bytes | None:
+    def synthesize_mp3(self, text: str, speed: float = None,
+                       voice: str = None) -> bytes | None:
         """语音合成 MP3(智谱 cogtts 仅支持 wav → lameenc 转码)
 
         小程序 InnerAudioContext 对 wav 兼容差(Android 无声)
         ——mp3 双端兼容(小程序原生 / H5 WebAudio decodeAudioData)。
         lameenc 未安装/转码失败 → 回退 wav(调用方按 wav 处理)。
+        v2 G: speed/voice 透传(synthesize 同口径)。
         """
-        wav = self.synthesize(text)
+        wav = self.synthesize(text, speed=speed, voice=voice)
         if not wav:
             return None
         return _wav_to_mp3(wav) or wav

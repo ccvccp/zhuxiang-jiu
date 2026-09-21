@@ -269,27 +269,37 @@ async def get_commands():
 
 @router.get("/tts")
 async def get_tts(text: str = "",
+                  speed: float = 1.0,
+                  voice: str = "",
                   x_member_id: str | None = Header(
                       None, alias="X-Member-Id")):
     """语音合成播报(微信 X5 无系统 TTS 引擎——服务端兜底)
 
-    GET /api/xiaozhu/tts?text=...  → audio/mpeg(mp3) 二进制
+    GET /api/xiaozhu/tts?text=...&speed=...&voice=...
+    → audio/mpeg(mp3) 二进制
     鉴权: X-Member-Id(登录会员); Redis 缓存 10 分钟(同文本
     去重防刷——计费友好); 文本限 200 字。
-    小程序 InnerAudioContext 对 wav 兼容差(Android 无声)
-    ——mp3 双端兼容(H5 WebAudio decodeAudioData 同样支持)。
+    speed 0.5-2.0(v2 G: spike 实证 cogtts 语速生效——0.6≈
+    11.3s/1.0≈8.3s/1.5≈5.3s 单调); voice 透传音色。
+    缓存键含 speed/voice 维度(防语速串台)。
     """
     _require_member_strict(x_member_id)
     t = str(text or "").strip()[:200]
     if not t:
         raise HTTPException(status_code=409,
                             detail="text 不能为空")
+    # 语速合法域(超出取边界——参数错误不 500)
+    spd = 0.5 if speed < 0.5 else (
+        2.0 if speed > 2.0 else speed)
     import base64 as _b64
     import hashlib as _hl
-    # :mp3 后缀版本隔离(旧缓存为 wav 字节, 不能当 mp3 播)
+    # :mp3 后缀版本隔离(旧缓存为 wav 字节, 不能当 mp3 播);
+    # v2 G: 键扩维 text|voice|speed(防语速串台)
     cache_key = ("xiaozhu:tts:mp3:"
                  + _hl.sha256(
-                     t.encode("utf-8")).hexdigest()[:24])
+                     (t + "|" + str(voice or "")
+                      + "|" + f"{spd:g}").encode(
+                          "utf-8")).hexdigest()[:24])
     try:
         from repositories.backend import (
             is_redis_mode, get_redis_client,
@@ -304,7 +314,8 @@ async def get_tts(text: str = "",
     except Exception as e:
         logger.debug("tts_cache_read_skip: %s", e)
     from services.llm_client import provider_client
-    audio = provider_client.synthesize_mp3(t)
+    audio = provider_client.synthesize_mp3(
+        t, speed=spd, voice=(voice or None))
     if not audio:
         raise HTTPException(
             status_code=503,
@@ -433,15 +444,67 @@ async def confirm_action(token: str, body: dict,
         raise _handle(e) from e
 
 
+@router.post("/sessions/{session_id}/turns/{turn_id}/feedback")
+async def turn_feedback(
+        session_id: int, turn_id: str, body: dict,
+        x_member_id: str | None = Header(
+            None, alias="X-Member-Id")):
+    """轮次反馈落痕(v2 A: 👍/👎——turn hash feedback 字段)
+
+    覆盖式(最后一次为准, up/down 可切换); 不触发 TTS、
+    不产生新轮次(不污染对话流与清单聚合)。
+    鉴权: 会话归属校验(仅本人可反馈自己会话的轮次)。
+    """
+    member_id = _require_member_strict(x_member_id)
+    if (not isinstance(body, dict)
+            or body.get("rating") not in ("up", "down")):
+        raise HTTPException(status_code=409,
+                            detail="rating 需为 up/down")
+    try:
+        from repositories.xiaozhu_repository import (
+            Xiaozhu48Repository,
+        )
+        repo = Xiaozhu48Repository()
+        session = await repo.get_session(session_id)
+        if session is None:
+            raise KeyError("会话不存在")
+        if session.get("memberId") != member_id:
+            raise HTTPException(
+                status_code=403,
+                detail="仅会话归属人可反馈")
+        # turnId 反查轮次(会话内轮次量级小, 线性可接受)
+        turns = await repo.list_turns(session_id)
+        target = next((t for t in turns
+                       if t.get("turnId") == turn_id), None)
+        if target is None:
+            raise KeyError("轮次不存在")
+        await repo.save_turn_feedback(
+            session_id, int(target.get("seq") or 0),
+            str(body["rating"]))
+        return {"success": True, "turnId": turn_id,
+                "seq": target.get("seq"),
+                "rating": body["rating"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.get("/sessions/{session_id}/actions")
 async def list_actions(session_id: int,
                        x_member_id: str | None = Header(
                            None, alias="X-Member-Id"),
                        ):
-    """执行留痕回溯("我刚才做了什么")——写/高敏轮次视图"""
+    """执行留痕回溯("我刚才做了什么")——写/高敏轮次视图
+
+    v2 B1: 过滤集扩为 _AUDIT_INTENTS(含 cart.add/setqty/
+    decqty/undo——此前只含三类高敏, 普通加购不可回溯)。
+    """
     _require_member_strict(x_member_id)
     try:
-        from services.xiaozhu_service import XiaozhuService
+        from services.xiaozhu_service import (
+            XiaozhuService, _AUDIT_INTENTS,
+        )
         view = await XiaozhuService().get_session(
             session_id)
         actions = [
@@ -450,9 +513,7 @@ async def list_actions(session_id: int,
              "reply": t.get("reply"),
              "card": t.get("card") or {}}
             for t in view.get("turns") or []
-            if t.get("intent") in (
-                "cart.submit", "trust.convert",
-                "trust.bind")]
+            if t.get("intent") in _AUDIT_INTENTS]
         return {"success": True,
                 "sessionId": session_id,
                 "actions": actions,
@@ -631,6 +692,95 @@ async def xiaozhu_dashboard(
             XiaozhuDashboardService,
         )
         return await XiaozhuDashboardService().build()
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/dashboard/asr-fixes")
+async def asr_fixes_list(
+        x_role: str = Header(default="", alias="X-Role")):
+    """ASR 误听自学习表(v2 C——运营查询, 含命中计数)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from repositories.xiaozhu_repository import (
+            Xiaozhu48Repository,
+        )
+        fixes = await Xiaozhu48Repository().list_asr_fixes()
+        return {"success": True, "fixes": fixes,
+                "count": len(fixes)}
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.post("/dashboard/asr-fixes")
+async def asr_fixes_add(
+        body: dict,
+        x_role: str = Header(default="", alias="X-Role")):
+    """新增/更新误听词条(v2 C——真机留痕转运营即时生效)
+
+    body: {wrong: 误听词, right: 修正词}; 校验: 词条≤12 字、
+    wrong≠right、循环修正拒绝(A→B 且 B→A)。
+    """
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    wrong = str((body or {}).get("wrong") or "").strip()
+    right = str((body or {}).get("right") or "").strip()
+    if not wrong or not right:
+        raise HTTPException(status_code=409,
+                            detail="需含 wrong/right")
+    if len(wrong) > 12 or len(right) > 12:
+        raise HTTPException(status_code=409,
+                            detail="词条过长(≤12 字)")
+    if wrong == right:
+        raise HTTPException(status_code=409,
+                            detail="误听词与修正词相同")
+    try:
+        from repositories.xiaozhu_repository import (
+            Xiaozhu48Repository,
+        )
+        repo = Xiaozhu48Repository()
+        existing = await repo.list_asr_fixes()
+        rec = existing.get(right) or {}
+        if rec.get("to") == wrong:
+            raise HTTPException(
+                status_code=409,
+                detail=f"循环修正拒绝: 「{right}」已指向"
+                       f"「{wrong}」")
+        record = await repo.save_asr_fix(wrong, right)
+        return {"success": True, "wrong": wrong,
+                "record": record}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.delete("/dashboard/asr-fixes")
+async def asr_fixes_delete(
+        wrong: str,
+        x_role: str = Header(default="", alias="X-Role")):
+    """删除误听词条(builtin 来源拒绝删除——真机实证基线)"""
+    if x_role != "admin":
+        raise HTTPException(status_code=403,
+                            detail="需要管理员权限")
+    try:
+        from repositories.xiaozhu_repository import (
+            Xiaozhu48Repository,
+        )
+        repo = Xiaozhu48Repository()
+        existing = await repo.list_asr_fixes()
+        rec = existing.get(wrong) or {}
+        if rec.get("source") == "builtin":
+            raise HTTPException(
+                status_code=409,
+                detail="builtin 词条不可删除(真机实证基线)")
+        removed = await repo.delete_asr_fix(wrong)
+        return {"success": True, "removed": removed}
+    except HTTPException:
+        raise
     except Exception as e:
         raise _handle(e) from e
 

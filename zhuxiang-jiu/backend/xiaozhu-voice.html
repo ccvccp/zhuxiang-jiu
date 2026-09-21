@@ -276,6 +276,14 @@ body.kb .composer{padding-bottom:12px}
   .ppanel .pbtns .btn{padding:4px 8px;font-size:11px}
 }
 @media (max-height:560px){ .ppanel{display:none} }
+/* v2 A: 气泡反馈条 */
+.fbbar{display:flex;gap:6px;margin-top:8px;padding-top:6px;
+  border-top:1px dashed rgba(53,92,68,.18)}
+.fb{border:1px solid rgba(53,92,68,.25);background:#fff;
+  border-radius:14px;padding:1px 10px;font-size:13px;
+  cursor:pointer;line-height:1.5;color:#555}
+.fb:hover{border-color:#355c44}
+.fb.on{background:#355c44;color:#fff;border-color:#355c44}
 </style>
 </head>
 <body>
@@ -325,6 +333,11 @@ body.kb .composer{padding-bottom:12px}
       <span class="tts" id="hfBtn" onclick="toggleHandfree()" style="cursor:pointer">🎧 免提开</span>
       <span class="sp"></span>
       <span class="tts" id="ttsBtn" onclick="toggleTts()" style="cursor:pointer">🔊 播报开</span>
+      <span class="sp"></span>
+      <span class="tts" style="cursor:default" title="播报语速">语速
+        <select id="speedSel" onchange="setTtsSpeed(this.value)" style="border:none;background:transparent;color:inherit;font-size:12px;cursor:pointer;padding:0">
+          <option value="0.8">慢</option><option value="1" selected>标准</option><option value="1.2">快</option>
+        </select></span>
     </div>
     <div class="microw">
       <button class="mic" id="mic" onclick="micClick()">🎤</button>
@@ -456,8 +469,7 @@ function preheatTTS() {
      "这个我还不会——试试「看新品」「问价格」「查信值」「查优惠」或「你能干什么」",
      "我在——请以「小竹」开头唤我(或先唤醒一次, 5 分钟内可免唤醒)"]
       .forEach(function (t) {
-      fetch("/api/xiaozhu/tts?text="
-            + encodeURIComponent(t), { headers: h })
+      fetch(ttsUrl(t), { headers: h })
         .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
         .then(function (b) { if (b) (S.packTTS = S.packTTS || {})[t] = b; })
         .catch(function () {});
@@ -774,6 +786,71 @@ function renderPanel(card) {
   /* confirm/order_done 等流程卡: 面板不动(保持上一态) */
 }
 
+/* ===== v2 工具: 触觉/反馈条/语速 ===== */
+/* v2 D: 触觉反馈(navigator.vibrate——安卓 Chrome 生效,
+   iOS/X5 无此 API 静默跳过, 纯增强零风险) */
+function buzz(ms) {
+  try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* 静默 */ }
+}
+/* v2 G: 语速(本地偏好——慢 0.8/标准 1/快 1.2, cogtts spike
+   实证服务端 speed 生效; 桌面 speechSynthesis 同步缩放) */
+function ttsSpeedVal() {
+  var v = parseFloat(localStorage.getItem("xz.ttsSpeed") || "1");
+  return (v === 0.8 || v === 1.2) ? v : 1;
+}
+function setTtsSpeed(v) {
+  localStorage.setItem("xz.ttsSpeed", String(v));
+  setMicStatus("语速已设为 " + ({0.8: "慢", 1: "标准", 1.2: "快"}[v] || v)
+    + "（下一条播报生效）");
+}
+function ttsUrl(text) {
+  return "/api/xiaozhu/tts?text=" + encodeURIComponent(
+    String(text).slice(0, 200))
+    + "&speed=" + ttsSpeedVal();
+}
+/* v2 A: 气泡反馈条(👍/👎——POST 落 turn hash, 覆盖式可切换;
+   失败本地回弹; 仅登录态真实轮) */
+function attachFeedback(bubble, turnId) {
+  if (!bubble || !turnId || !S.sid) return;
+  if (bubble.querySelector(".fbbar")) return;
+  var auth = getAuth() || {};
+  if (!auth.uid) return;
+  var bar = document.createElement("div");
+  bar.className = "fbbar";
+  bar.innerHTML = '<button class="fb up" aria-label="这条回复有帮助">👍</button>'
+    + '<button class="fb down" aria-label="这条回复没帮助">👎</button>';
+  var setLock = function (rating) {
+    bar.querySelectorAll(".fb").forEach(function (b) {
+      b.classList.toggle("on",
+        (rating === "up" && b.classList.contains("up"))
+        || (rating === "down" && b.classList.contains("down")));
+    });
+  };
+  bar.querySelectorAll(".fb").forEach(function (b) {
+    b.onclick = function (ev) {
+      ev.stopPropagation();
+      var rating = b.classList.contains("up") ? "up" : "down";
+      setLock(rating); /* 本地即时锁定, 失败回弹 */
+      var hh = { "Content-Type": "application/json",
+                 "X-Member-Id": String(auth.uid || "") };
+      if (auth.token) hh["Authorization"] = "Bearer " + auth.token;
+      fetch("/api/xiaozhu/sessions/" + S.sid
+            + "/turns/" + encodeURIComponent(turnId)
+            + "/feedback",
+            { method: "POST", headers: hh,
+              body: JSON.stringify({ rating: rating }) })
+        .then(function (r) {
+          if (!r.ok) throw new Error("fb " + r.status);
+        })
+        .catch(function () {
+          setLock(null); /* 失败回弹 */
+          setMicStatus("反馈没送出去——网络问题，不影响使用");
+        });
+    };
+  });
+  bubble.appendChild(bar);
+}
+
 /* ===== 轮次响应处理(语音/文本同链) ===== */
 function handleTurn(j, channel) {
   S.turnCount++;
@@ -793,6 +870,11 @@ function handleTurn(j, channel) {
                          null, j.autoJump ? null : (j.jump || null));
   /* 商品面板同步: 推荐款/清单态常驻展示(购物氛围入口) */
   try { renderPanel(j.card || null); } catch (e) { /* 面板 fail-soft */ }
+  /* v2 A: 轮次反馈条(👍/👎——落 turn hash, 可切换; 仅真实轮) */
+  if (tr.turnId) attachFeedback(bubble, tr.turnId);
+  /* v2 D: 触觉反馈(安卓 Chrome 尽力而为, iOS/X5 静默跳过);
+     高敏确认重震感, 普通回复轻触 */
+  buzz((j.confirmRequired || ((j.card || {}).type === "confirm")) ? 80 : 15);
   if (j.fallbackHint === "keyboard") {
     appendBot("语音转写未成功——可用下方文字输入继续（同一条链路）。", null, '<span class="pill gray">ASR 降级</span>');
   }
@@ -827,9 +909,7 @@ function handleTurn(j, channel) {
       if (a.token) hh["Authorization"] = "Bearer " + a.token;
       j.ttsPreheat.forEach(function (t) {
         if (!t || (S.packTTS || {})[t]) return;
-        fetch("/api/xiaozhu/tts?text="
-              + encodeURIComponent(String(t).slice(0, 200)),
-              { headers: hh })
+        fetch(ttsUrl(t), { headers: hh })
           .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
           .then(function (b) {
             if (b) (S.packTTS = S.packTTS || {})[t] = b;
@@ -1091,7 +1171,7 @@ function speak(text, bubbleEl) {
   }
   try {
     var u = new SpeechSynthesisUtterance(String(text).slice(0, 200));
-    u.lang = "zh-CN"; u.rate = 1.05;
+    u.lang = "zh-CN"; u.rate = 1.05 * ttsSpeedVal(); /* v2 G: 语速偏好同步缩放 */
     var done = function () {
       if (bubbleEl) bubbleEl.classList.remove("speaking");
       S.ttsPlaying = false;
@@ -1148,8 +1228,7 @@ function speakCloud(text, bubbleEl) {
   var packed = (S.packTTS || {})[String(text)];
   var fetched = packed
     ? Promise.resolve(packed)
-    : fetch("/api/xiaozhu/tts?text=" + encodeURIComponent(
-        String(text).slice(0, 200)), { headers: hdrs })
+    : fetch(ttsUrl(text), { headers: hdrs })
         .then(function (r) {
           if (!r.ok) throw new Error("tts " + r.status);
           return r.arrayBuffer();
@@ -1489,6 +1568,14 @@ function wireCloudCapture() {
         ? '<b class="rec">🎧 免提聆听 ' + fmtSec(sec) + '</b> · 直接说话，停顿自动发送'
         : '<b class="rec">● 录音中 ' + fmtSec(sec) + '</b> · '
           + (IS_TOUCH ? "松开发送" : "点击麦克风结束发送"));
+      /* v2 F: 免提静默 5s 温和问候一次(纯文字不走 TTS——
+         防自录回声、防 VAD 误判破坏 12s 重置; 每会话仅一次) */
+      if (S.handfree && !S.vadSpoke && sec >= 5
+          && !S.greeted) {
+        S.greeted = true;
+        appendBot("我在这儿呢，想买点什么直接说～", null,
+                  null, null, null);
+      }
       /* 免提上限: 未检测到说话 12s 即重置聆听(降空转等待),
          已说话 30s 硬上限(智谱 ASR 单段≤30s) */
       if (S.handfree

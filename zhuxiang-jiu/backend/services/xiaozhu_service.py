@@ -608,7 +608,30 @@ COMMANDS = [
                      "把.*信用分", "兑换信值"],
         "examples": ["小竹，把100信用分换成信值"],
     },
+    {
+        # v2 B2: 撤销刚才的加购(一步回滚——真机诉求"反悔了")
+        "action": "cart.undo",
+        "label": "撤销加购",
+        "patterns": ["撤销", "反悔了", "不要刚才那款",
+                     "刚才那步不算", "撤回刚才"],
+        "examples": ["小竹，撤销刚才的加购", "小竹，反悔了"],
+    },
+    {
+        # v2 B1: 历史回溯("我刚才做了什么"——执行留痕播报)
+        "action": "session.history",
+        "label": "我刚才做了什么",
+        "patterns": ["我刚才做了什么", "刚才做了什么",
+                     "我做了什么", "刚买了什么",
+                     "我都干了什么", "刚才买什么了"],
+        "examples": ["小竹，我刚才做了什么"],
+    },
 ]
+
+# 执行留痕回溯口径(v2 B1: "我刚才做了什么"聚合的 intent 集合
+# ——路由 list_actions 与服务 audit_recent 共用同一常量)
+_AUDIT_INTENTS = ("cart.add", "cart.setqty", "cart.decqty",
+                  "cart.undo", "cart.submit", "trust.convert",
+                  "trust.bind")
 
 COMMAND_ACTIONS = tuple(c["action"] for c in COMMANDS)
 
@@ -842,9 +865,10 @@ class XiaozhuService:
         started = time.monotonic()
         session_id = session["sessionId"]
 
-        # ⓪ ASR 误听修正(音近整词, 仅语音渠道——键盘输入无此噪)
+        # ⓪ ASR 误听修正(音近整词, 仅语音渠道——键盘输入无此噪;
+        # v2 C: builtin 种子 + Redis 运行时表, dashboard 可运营)
         if channel == "voice":
-            text = fix_asr_mishear(text)
+            text = await self._fix_asr_mishear(text)
 
         # ① 唤醒判定(前缀含近似音容错)
         # 点击录音模式(wakeup_free): 用户按下麦克风=明确
@@ -1171,7 +1195,7 @@ class XiaozhuService:
         """LLM 对话意图分类(XIAOZHU_LLM_MODE on 或
         Redis 运行时开关 zhuxiang:xiaozhu:llm_dialog=on 时)
 
-        上下文注入最近 2 轮(反问/商品语境)——分类
+        上下文注入最近 5 轮(v2 E, 反问/商品语境)——分类
         affirm/negate/next/command/chat/unknown。
         失败/关闭返回 None(回退规则轨兜底)。
         """
@@ -1195,7 +1219,9 @@ class XiaozhuService:
             turns = await self.repo.list_turns(
                 session["sessionId"])
             ctx_lines = []
-            for t in (turns or [])[-2:]:
+            # v2 E: 2 轮 → 5 轮(设计文档 §3.1.4 上下文记忆;
+            # 每轮 rawText 30 字/reply 40 字截断=成本上界)
+            for t in (turns or [])[-5:]:
                 card_t = (t.get("card") or {}).get("type")
                 ctx_lines.append(
                     f"- 用户说: "
@@ -1696,6 +1722,11 @@ class XiaozhuService:
             if action == "cart.add":
                 return await self._exec_cart_add(
                     session, text)
+            if action == "cart.undo":
+                return await self._exec_cart_undo(
+                    session, text)
+            if action == "session.history":
+                return await self._audit_recent(session)
             if action == "explanation.report":
                 return await self._exec_explanation_report(
                     session, member_id)
@@ -2017,7 +2048,8 @@ class XiaozhuService:
 
     async def _exec_cart_decqty(self, session: dict,
                                 text: str,
-                                qty_override: int = None
+                                qty_override: int = None,
+                                product_override: dict = None
                                 ) -> dict | None:
         """清单减量执行器("少一件/去掉一瓶/减两件"——相对减,
         减到 0 移除该款; 真机实证会话 136: 清单失控无法减回)
@@ -2025,19 +2057,22 @@ class XiaozhuService:
         实现为"现量-N 后落 cart_setqty"——复用聚合层语义。
         目标款: 剥减量词后含商品词→搜索指定款; 无→最近清单款
         (无清单款时回退最近推荐款)。
+        product_override: 指定目标款(v2 B2 undo 复用——跳过
+        关键词搜索与游标解析)。
         """
         n = int(qty_override) if qty_override \
             else _parse_dec_qty(text)
         if not n:
             return None
-        kw = re.sub(
-            r"少|去掉|减去?|退掉?|拿掉|划掉"
-            r"|[一二两三四五六七八九\d]+\s*[件瓶箱个听提]"
-            r"|[的儿呀啊哦吧呗。,.!！?？]|[这那]款?|它",
-            "", str(text or "")).strip()
-        product = None
-        if kw:
-            product = await self._search_first_product(kw)
+        product = product_override
+        if product is None:
+            kw = re.sub(
+                r"少|去掉|减去?|退掉?|拿掉|划掉"
+                r"|[一二两三四五六七八九\d]+\s*[件瓶箱个听提]"
+                r"|[的儿呀啊哦吧呗。,.!！?？]|[这那]款?|它",
+                "", str(text or "")).strip()
+            if kw:
+                product = await self._search_first_product(kw)
         if product is None:
             product = await self._resolve_last_cart_product(
                 session)
@@ -2089,6 +2124,191 @@ class XiaozhuService:
                      "cartCount": count,
                      "cartDetail": detail},
             "executed": True}
+
+    async def _exec_cart_undo(self, session: dict,
+                              text: str) -> dict:
+        """撤销刚才的加购(v2 B2——一步回滚最近一次加购轮)
+
+        语义: 反向定位最近一条未被 undoOfSeq 标记的 cart_added
+        轮, 按其原始数量复用减量逻辑回滚(减到 0 移除)。
+        连续「撤销」逐步回退倒数第二、第三次加购。
+        边界: 只撤 cart.add 轮(改量轮是显式操作不撤); 已结算
+        拒绝(不碰订单域); 高敏确认窗口内引导走「取消」。
+        """
+        member_id = session.get("memberId")
+        # 高敏确认窗口: 不代执行, 引导既有取消路径(防绕过确认码)
+        if member_id:
+            try:
+                from services.xiaozhu_executor import (
+                    get_executor,
+                )
+                if get_executor().has_pending_confirm(
+                        member_id):
+                    return {"reply": "订单正在等待确认——说"
+                                      "「取消」可撤销本次结算,"
+                                      " 或说「确认提交订单」并"
+                                      "输入屏幕上的 4 位确认码",
+                            "card": None}
+            except Exception:  # noqa: BLE001
+                pass
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        # 已结算拒绝(order_done 卡=确认核销成单, 不碰订单域)
+        if any((t.get("card") or {}).get("type")
+               == "order_done" for t in turns):
+            return {"reply": "清单已提交结算——如需退回请到"
+                             "「订单管理」处理, 或对我说"
+                             "「查订单」",
+                    "card": None}
+        # 已被撤销的加购轮 seq 集合(支持连续回退)
+        undone_seqs = set()
+        for t in turns:
+            if t.get("intent") == "cart.undo":
+                seq = (t.get("card") or {}).get("undoOfSeq")
+                if seq is not None:
+                    try:
+                        undone_seqs.add(int(seq))
+                    except (TypeError, ValueError):
+                        pass
+        # 反向定位最近未撤销的加购轮
+        target = None
+        for t in reversed(turns):
+            c = t.get("card") or {}
+            if (c.get("type") == "cart_added"
+                    and t.get("seq") not in undone_seqs):
+                target = (t, c)
+                break
+        if target is None:
+            return {"reply": "没有可撤销的加购——加购后说"
+                             "「撤销」可回退刚才那一步",
+                    "card": None}
+        t, c = target
+        n = int(c.get("quantity") or 1)
+        product = {"productId": c.get("productId"),
+                   "name": c.get("subject") or "商品",
+                   "price": c.get("price")}
+        r = await self._exec_cart_decqty(
+            session, text, qty_override=n,
+            product_override=product)
+        if not r or not r.get("executed"):
+            return {"reply": "撤销没成功——请再说一次"
+                             "「撤销」或稍后重试",
+                    "card": None}
+        # 撤销留痕: undoOfSeq 指向被回滚的加购轮
+        r["card"]["undoOfSeq"] = t.get("seq")
+        r["card"]["undoQty"] = n
+        r["reply"] = (f"已撤销刚才加购的"
+                      f"「{c.get('subject') or '商品'}」×{n}——"
+                      + str(r.get("reply") or ""))
+        return r
+
+    async def audit_member_actions(self, member_id: int,
+                                   limit: int = 20) -> list:
+        """会员级执行留痕(跨会话, v2 B1——executor.audit_actions
+        数据源; GET /sessions/{id}/actions 的会话级口径由
+        路由直接过滤, 此处为全会员视角)"""
+        sessions = await self.repo.scan_sessions(limit=500)
+        out = []
+        for s in sessions:
+            if s.get("memberId") != member_id:
+                continue
+            for t in await self.repo.list_turns(
+                    s.get("sessionId")):
+                if t.get("intent") not in _AUDIT_INTENTS:
+                    continue
+                out.append({
+                    "sessionId": s.get("sessionId"),
+                    "seq": t.get("seq"),
+                    "intent": t.get("intent"),
+                    "subject": (t.get("card") or {}).get(
+                        "subject"),
+                    "quantity": (t.get("card") or {}).get(
+                        "quantity"),
+                    "rawText": t.get("rawText"),
+                    "ts": t.get("ts")})
+        out.sort(key=lambda a: str(a.get("ts") or ""))
+        return out[-limit:]
+
+    async def _audit_recent(self, session: dict) -> dict:
+        """历史回溯("我刚才做了什么"——v2 B1 执行留痕播报)
+
+        聚合 _AUDIT_INTENTS 集合轮次为自然语言摘要; 无操作时
+        温和引导。卡: history_list(items=动作摘要, 前端兜底纯
+        文本播报)。
+        """
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        lines = []
+        items = []
+        for t in turns:
+            intent = t.get("intent")
+            if intent not in _AUDIT_INTENTS:
+                continue
+            c = t.get("card") or {}
+            subject = c.get("subject") or "商品"
+            qty = int(c.get("quantity") or 0)
+            if intent == "cart.add":
+                line = f"加了「{subject}」×{qty or 1}"
+            elif intent == "cart.setqty":
+                line = f"把「{subject}」设为{qty}件"
+            elif intent == "cart.decqty":
+                line = f"减了「{subject}」"
+            elif intent == "cart.undo":
+                line = f"撤销了「{subject}」的加购"
+            elif intent == "cart.submit":
+                line = "提交了结算"
+            elif intent == "trust.convert":
+                line = "做了信用分兑换"
+            else:  # trust.bind
+                line = f"绑定了{subject}"
+            lines.append(line)
+            items.append({"intent": intent,
+                          "subject": subject,
+                          "quantity": qty, "seq": t.get("seq")})
+        if not lines:
+            return {"reply": "这一会儿还没做过什么操作——"
+                             "想买什么直接说, 或说「看新品」"
+                             "让我推荐",
+                    "card": None}
+        # 最近 8 条防播报过长
+        shown = lines[-8:]
+        reply = ("刚才您依次" + "、".join(shown)
+                 + "。需要继续买, 或说「结算」下单")
+        return {"reply": reply,
+                "card": {"type": "history_list",
+                         "items": items[-8:],
+                         "subject": f"最近{len(shown)}步操作"}}
+
+    async def _fix_asr_mishear(self, text: str) -> str:
+        """ASR 误听修正(v2 C: builtin 种子 + Redis 运行时表)
+
+        首次调用把 3 条真机实证硬编码种入运行时表(source=
+        builtin); 此后全量走表——dashboard 增删即时生效。
+        单遍整词替换(修正后不二次应用, 防链式); 命中计数递增。
+        """
+        t = str(text or "")
+        try:
+            fixes = await self.repo.list_asr_fixes()
+            if not fixes:
+                for wrong, right in ASR_MISHEAR_FIXES:
+                    fixes[wrong] = await self.repo.save_asr_fix(
+                        wrong, right, source="builtin")
+        except Exception:  # noqa: BLE001
+            # 表读取失败回退静态表(fail-soft)
+            for wrong, right in ASR_MISHEAR_FIXES:
+                t = t.replace(wrong, right)
+            return t
+        # 误听词按长度降序应用(长词优先, 防短词截断长词)
+        for wrong in sorted(fixes, key=len, reverse=True):
+            rec = fixes[wrong] or {}
+            right = str(rec.get("to") or "")
+            if wrong and right and wrong in t:
+                t = t.replace(wrong, right)
+                try:
+                    await self.repo.hit_asr_fix(wrong)
+                except Exception:  # noqa: BLE001
+                    pass
+        return t
 
     async def _resolve_last_product(
             self, session: dict) -> dict | None:

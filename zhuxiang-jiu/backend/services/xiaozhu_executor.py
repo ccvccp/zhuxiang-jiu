@@ -633,5 +633,10 @@ class XiaozhuExecutor:
 
     async def audit_actions(self, member_id: int,
                             limit: int = 20) -> list:
-        """会员写操作留痕(轮次 intent∈写集合)"""
-        return []
+        """会员写操作留痕(轮次 intent∈_AUDIT_INTENTS 集合)
+
+        v2 B1 实装: 转调服务层聚合(自然语言摘要 + 步骤明细)。
+        """
+        from services.xiaozhu_service import XiaozhuService
+        return await XiaozhuService().audit_member_actions(
+            member_id, limit)

@@ -120,6 +120,16 @@ export const XiaozhuAPI = {
     return request<XzCommandsResp>({ url: '/api/xiaozhu/commands' });
   },
 
+  /** 轮次反馈(v2 A: 👍/👎——落 turn hash, 覆盖式可切换) */
+  turnFeedback(sessionId: number, turnId: string,
+               rating: 'up' | 'down'): Promise<{ success: boolean }> {
+    return request<{ success: boolean }>({
+      url: `/api/xiaozhu/sessions/${sessionId}/turns/${turnId}/feedback`,
+      method: 'POST',
+      data: { rating },
+    });
+  },
+
   /**
    * 语音轮次: 原生录音(mp3 base64)上传 → 后端 ASR(35号链路)
    * → 指令直达。mode='tap'(点击录音——用户主动按下麦克风
@@ -148,8 +158,11 @@ export const XiaozhuAPI = {
    */
   async fetchTtsAudio(text: string): Promise<string> {
     const t = text.slice(0, 200);
+    // v2 G: 语速偏好(慢0.8/标准1/快1.2——本地存储; cogtts
+    // 服务端 speed 实证生效; 缓存文件名含语速维度防串台)
+    const spd = Number(Taro.getStorageSync('xz_tts_speed')) || 1;
     const fs = Taro.getFileSystemManager();
-    const name = `xz_tts_${hashText(t)}.mp3`;
+    const name = `xz_tts_${hashText(t + '|' + spd)}.mp3`;
     const filePath = `${Taro.env.USER_DATA_PATH}/${name}`;
 
     // 本地缓存命中校验(大小>500B 才算有效——防损坏缓存死循环)
@@ -170,7 +183,8 @@ export const XiaozhuAPI = {
         ? { Authorization: `Bearer ${session.accessToken}` } : {}),
     };
     const res = await Taro.request({
-      url: `${API_BASE}/api/xiaozhu/tts?text=${encodeURIComponent(t)}`,
+      url: `${API_BASE}/api/xiaozhu/tts?text=${encodeURIComponent(t)}`
+        + `&speed=${spd}`,
       responseType: 'arraybuffer',
       header,
       timeout: 15000,
