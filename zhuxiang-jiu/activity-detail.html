@@ -198,6 +198,14 @@
         <div class="kv" id="actTime"></div>
         <div class="kv" id="actRegCount"></div>
         <div class="act-no" id="actNo"></div>
+        <!-- 管理深链(仅管理员可见): 直达后台本活动详情行(展开+滚动+高亮) -->
+        <div id="adminEntryRow" style="display:none;margin-top:12px;
+            padding-top:10px;border-top:1px dashed #e0e8e2;">
+            <button class="btn ghost" id="btnAdminDetail">⚙️ 活动详情</button>
+            <span style="font-size:11px;color:#9aa7a0;margin-left:8px">
+                在管理后台中查看本活动（详情 / 统计 / 报名）
+            </span>
+        </div>
     </div>
 
     <!-- 报名/参与区块 -->
@@ -374,6 +382,7 @@
             refreshToken: body.refreshToken || null,
             memberId: body.memberId || null,
             name: body.name || body.nickname || null,
+            role: body.role || 'member',
             savedAt: Date.now(),
         }));
     }
@@ -420,6 +429,27 @@
     }
 
     /* ---------- 顶栏渲染 ---------- */
+
+    /* 会话角色: 新会话直读; 老会话未存 role 时解析 JWT payload 兜底
+       (仅前端展示用途, 真实权限始终由服务端 JWT 校验决定) */
+    function sessionRole(s) {
+        if (s && s.role) { return s.role; }
+        try {
+            var part = String(s.token).split('.')[1]
+                .replace(/-/g, '+').replace(/_/g, '/');
+            var payload = JSON.parse(atob(part));
+            return payload.role || 'member';
+        } catch (e) { return 'member'; }
+    }
+
+    /* 管理深链按钮显隐(仅管理员 + 本页有活动 ID 时显示) */
+    function updateAdminEntry() {
+        var s = session();
+        var isAdmin = !!(s && s.token
+            && sessionRole(s) === 'admin' && state.id != null);
+        $('adminEntryRow').style.display = isAdmin ? '' : 'none';
+    }
+
     function renderAuth() {
         var s = session();
         state.loggedIn = !!(s && s.token);
@@ -432,6 +462,7 @@
             $('authBox').innerHTML =
                 '<button class="btn" onclick="toggleDrawer(true)">登录</button>';
         }
+        updateAdminEntry();
     }
 
     window.toggleDrawer = function (show) {
@@ -868,6 +899,11 @@
         location.href = 'activity.html' + API_QS;
     };
     $('backFooter').href = 'activity.html' + API_QS;
+
+    /* 管理深链: 直达后台并聚焦本活动(展开详情行+滚动+高亮) */
+    $('btnAdminDetail').onclick = function () {
+        location.href = 'activity-dashboard.html?focus=' + state.id;
+    };
 
     var idMatch = location.search.match(/[?&]id=(\d+)/);
     if (!idMatch) {

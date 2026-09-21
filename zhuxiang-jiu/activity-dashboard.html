@@ -179,6 +179,12 @@
         /* 行展开(详情/统计/报名) */
         .row-toggle { cursor: pointer; }
         .row-toggle:hover { background: rgba(74, 124, 89, 0.04); }
+        /* 深链聚焦行高亮闪烁(?focus 滚动定位后 2.4s 渐隐) */
+        @keyframes row-flash-bg {
+            0% { background: #fdf3e3; }
+            100% { background: transparent; }
+        }
+        .row-flash { animation: row-flash-bg 2.2s ease; }
         .exp-arrow { color: var(--color-text-light); font-size: 11px; display: inline-block; width: 12px; }
         tr.detail-row > td { background: var(--color-bg); padding: 0 16px; white-space: normal; }
         .detail-box { padding: 14px 0; display: flex; flex-direction: column; gap: 12px; }
@@ -510,6 +516,8 @@
             activities: [],          // 列表数据(供行展开复用)
             timer: null,
             loginPending: false,     // 登录面板可见时暂停自动刷新
+            focusPending: null,       // 深链待聚焦活动 ID(?focus={id})
+            scrollToId: null,        // 待滚动高亮的行 ID(渲染后消费)
         };
 
         // 字典: 类型/状态/奖品类型/发奖状态
@@ -931,7 +939,8 @@
             var html = '';
             list.forEach(function (a) {
                 var isOpen = !!state.expanded[a.id];
-                html += '<tr class="row-toggle" onclick="toggleDetail(' + a.id + ')">'
+                html += '<tr class="row-toggle" id="actRow' + a.id
+                    + '" onclick="toggleDetail(' + a.id + ')">'
                     + '<td><span class="exp-arrow">' + (isOpen ? '▼' : '▶') + '</span></td>'
                     + '<td class="mono">' + a.id + '</td>'
                     + '<td class="mono">' + esc(a.activityNo || '--') + '</td>'
@@ -1020,6 +1029,31 @@
             renderActivities();
         }
 
+        /* 深链聚焦: ?focus={id} → 展开该活动详情行并滚动高亮
+           (C端活动详情页「活动详情」按钮跳转入口; 一次消费, 刷新列表不重触发) */
+        function applyFocus(list) {
+            if (state.focusPending == null) { return; }
+            var fid = state.focusPending;
+            state.focusPending = null;
+            var hit = (list || []).some(function (a) { return a.id === fid; });
+            if (hit) {
+                state.expanded[fid] = {};
+                state.scrollToId = fid;
+            }
+        }
+
+        function scrollToFocused() {
+            if (state.scrollToId == null) { return; }
+            var fid = state.scrollToId;
+            state.scrollToId = null;
+            var row = $('actRow' + fid);
+            if (row) {
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                row.classList.add('row-flash');
+                setTimeout(function () { row.classList.remove('row-flash'); }, 2400);
+            }
+        }
+
         async function loadActivities() {
             var btn = $('btnRefresh');
             btn.disabled = true; btn.textContent = '刷新中…';
@@ -1028,7 +1062,9 @@
                 if (state.filter) { url += '&status=' + encodeURIComponent(state.filter); }
                 var list = await fetchJson(url);
                 state.activities = list || [];
+                applyFocus(list);
                 renderActivities();
+                scrollToFocused();
                 $('lastUpdate').textContent = '最近更新: ' + new Date().toLocaleTimeString();
             } catch (err) {
                 $('activityBody').innerHTML = '<tr><td colspan="10" style="color:#c33;'
@@ -1299,6 +1335,9 @@
 
         // ---------- 初始化 ----------
         function init() {
+            // 深链聚焦: ?focus={id}(C端详情页「活动详情」按钮跳入)
+            var fm = location.search.match(/[?&]focus=(\d+)/);
+            if (fm) { state.focusPending = Number(fm[1]); }
             $('apiBase').value = apiBase();
             renderStatusPills();
             renderPrizeRows();
