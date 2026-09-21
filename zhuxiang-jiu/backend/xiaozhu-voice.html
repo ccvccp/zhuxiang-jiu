@@ -1211,10 +1211,32 @@ function toggleTts() {
     });
   }
 }
+/* v2 打断策略: 新轮到来/开麦即终止旧轮 TTS——合成请求
+   abort + 播放停止(真机实证连续对话旧轮 TTS 滞后到达,
+   播报商品与当前面板错位; fetch 挂起时也要废弃不能只靠
+   lastSpoken 事后守卫) */
+function stopTtsNow() {
+  try { if (S.ttsAbort) S.ttsAbort.abort(); } catch (e) {}
+  S.ttsAbort = null;
+  try {
+    if (S.ttsSrc) { S.ttsSrc.onended = null; S.ttsSrc.stop(); }
+  } catch (e) {}
+  S.ttsSrc = null;
+  if (window.speechSynthesis) {
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+  }
+  document.querySelectorAll(".bubble.speaking").forEach(
+    function (b) { b.classList.remove("speaking"); });
+  S.ttsPlaying = false;
+}
 /* 服务端 TTS(微信 X5 无系统 TTS——cogtts 合成 WAV,
    Web Audio 播放: X5 拒绝非手势 Audio.play() 且 Audio 元素
    onended 偶发不触发卡死免提——BufferSource 双可靠) */
 function speakCloud(text, bubbleEl) {
+  stopTtsNow(); /* 先打断旧轮(合成中/播放中一律终止) */
+  var ctl = (typeof AbortController !== "undefined")
+    ? new AbortController() : null;
+  S.ttsAbort = ctl;
   S.ttsPlaying = true;
   S.lastSpoken = String(text);
   var el = bubbleEl;
@@ -1233,13 +1255,17 @@ function speakCloud(text, bubbleEl) {
   var packed = (S.packTTS || {})[String(text)];
   var fetched = packed
     ? Promise.resolve(packed)
-    : fetch(ttsUrl(text), { headers: hdrs })
+    : fetch(ttsUrl(text), {
+        headers: hdrs,
+        signal: ctl ? ctl.signal : undefined })
         .then(function (r) {
           if (!r.ok) throw new Error("tts " + r.status);
           return r.arrayBuffer();
         });
   if (!packed) setMicStatus("🎙 语音合成中…（首次约 2 秒，同句即时）");
   fetched.then(function (buf) {
+    /* 被更新的轮取代: 请求结果直接废弃(打断核心) */
+    if (ctl && S.ttsAbort !== ctl) return done();
     if (S.lastSpoken !== String(text)) return done();
     var AC = window.AudioContext
       || window.webkitAudioContext;
@@ -1265,6 +1291,7 @@ function speakCloud(text, bubbleEl) {
     }
     return go();
   }).then(function (decoded) {
+    if (ctl && S.ttsAbort !== ctl) return done();
     if (S.lastSpoken !== String(text)) return done();
     var ctx = S.ttsPlayCtx;
     var src = ctx.createBufferSource();
@@ -1482,6 +1509,9 @@ function fmtSec(s) {
 }
 function cloudStart() {
   if (S.hidden) return; /* 浮层隐藏期不录音(双保险) */
+  /* v2 打断: 开麦即停旧轮播报/合成(用户开口优先于
+     喇叭还嘴——连续对话时旧轮话音立即让位) */
+  if (S.ttsPlaying || S.ttsAbort) stopTtsNow();
   /* 免提续听流复用: 已授权流与上下文存活时直接重挂采集节点
      ——X5/微信重取 getUserMedia 耗时数秒, 每轮重取致句首
      丢字("小竹看新品"→"长期刚见"/唤醒词被裁) */
