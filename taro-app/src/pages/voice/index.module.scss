@@ -1,0 +1,446 @@
+/**
+ * 48号·小竹语音购物 · 样式
+ * 布局: 100vh 固定视口——消息区内部滚动, 语音栏固定底部
+ * 主题: 深绿小竹色(#1d5a39 系), 参照全局 variables
+ */
+@use '@/styles/variables.scss' as *;
+
+.page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f2f6f3;
+  overflow: hidden;
+}
+
+// ============================================
+// 消息流
+// ============================================
+.msgScroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.msgList {
+  padding: $spacing-lg $spacing-lg 0;
+}
+
+.msgRow {
+  display: flex;
+  margin-bottom: $spacing-lg;
+
+  &.msgRight {
+    justify-content: flex-end;
+  }
+}
+
+.msgBubbleWrap {
+  max-width: 86%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.msgRight .msgBubbleWrap {
+  align-items: flex-end;
+}
+
+.msgBubble {
+  padding: 18rpx 26rpx;
+  border-radius: $radius-lg;
+  font-size: $font-size-md;
+  line-height: $line-height-loose;
+  word-break: break-all;
+
+  &.bubbleBot {
+    background: $color-bg-card;
+    color: $color-text-primary;
+    border-top-left-radius: $radius-xs;
+    box-shadow: $shadow-card;
+  }
+
+  &.bubbleUser {
+    background: linear-gradient(135deg, #3a9664, #1d5a39);
+    color: #fff;
+    border-top-right-radius: $radius-xs;
+    box-shadow: 0 4rpx 12rpx rgba(29, 90, 57, 0.25);
+  }
+}
+
+.bottomSpacer {
+  height: 24rpx;
+}
+
+// 前往查看跳转按钮(jump)
+.jumpBtn {
+  margin-top: 12rpx;
+  padding: 8rpx 24rpx;
+  border-radius: $radius-button;
+  background: #c98a2d;
+  color: #fff;
+  font-size: $font-size-sm;
+  box-shadow: 0 2rpx 8rpx rgba(201, 138, 45, 0.35);
+
+  &:active {
+    opacity: 0.8;
+  }
+}
+
+// ============================================
+// 卡片(product_list / cart_added / confirm / order_done)
+// ============================================
+.kcard {
+  margin-top: 12rpx;
+  width: 100%;
+  background: $color-bg-card;
+  border: 1rpx solid rgba(29, 90, 57, 0.1);
+  border-radius: $radius-md;
+  padding: $spacing-md $spacing-md $spacing-sm;
+  box-shadow: $shadow-card;
+}
+
+.kcardTitle {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: #1d5a39;
+  margin-bottom: $spacing-sm;
+}
+
+.kcardTitleWarn {
+  font-size: $font-size-md;
+  font-weight: $font-weight-semibold;
+  color: #b5453c;
+  margin-bottom: $spacing-sm;
+}
+
+.kcardPlain {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.kcardTip {
+  margin-top: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-normal;
+}
+
+// 商品行
+.prow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: 14rpx 4rpx;
+  border-bottom: 1rpx dashed rgba(29, 90, 57, 0.12);
+  font-size: $font-size-md;
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.prowMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.prowName {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  @include text-ellipsis;
+}
+
+.prowSub {
+  margin-top: 4rpx;
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.prowPrice {
+  color: #b5453c;
+  font-weight: $font-weight-semibold;
+  flex-shrink: 0;
+}
+
+// 卡片按钮
+.kcardBtn {
+  margin-top: $spacing-sm;
+  height: $button-height-sm;
+  border-radius: $radius-button;
+  background: linear-gradient(135deg, #3a9664, #1d5a39);
+  color: #fff;
+  font-size: $font-size-md;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.kcardBtnDisabled {
+  opacity: 0.45;
+}
+
+// 高敏确认卡
+.confirmSummary {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  line-height: $line-height-loose;
+  padding: 12rpx 16rpx;
+  background: #fdf6e3;
+  border-radius: $radius-sm;
+}
+
+.confirmPhrase {
+  margin-top: 12rpx;
+  font-size: $font-size-sm;
+  color: #b5453c;
+  font-weight: $font-weight-medium;
+}
+
+// 屏幕确认码展示(高敏卡——完整码显示在用户屏幕)
+.screenCodeRow {
+  margin-top: $spacing-md;
+  padding: 16rpx;
+  border-radius: $radius-sm;
+  background: #1d5a39;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-md;
+}
+
+.screenCodeLabel {
+  font-size: $font-size-xs;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.screenCodeDigits {
+  font-size: 56rpx;
+  font-weight: $font-weight-bold;
+  color: #ffd97a;
+  letter-spacing: 16rpx;
+  font-family: 'Menlo', Consolas, monospace;
+}
+
+.codeRow {
+  margin-top: $spacing-md;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.codeInput {
+  flex: 1;
+  height: $button-height-md;
+  border: 2rpx solid #c98a2d;
+  border-radius: $radius-sm;
+  text-align: center;
+  font-size: 48rpx;
+  font-weight: $font-weight-bold;
+  color: #1d5a39;
+  letter-spacing: 24rpx;
+  background: #fffdf8;
+}
+
+.codePlaceholder {
+  color: rgba(201, 138, 45, 0.4);
+  letter-spacing: 12rpx;
+  font-size: 36rpx;
+  font-weight: normal;
+}
+
+// 订单完成卡
+.orderMeta {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  margin-bottom: 8rpx;
+  word-break: break-all;
+}
+
+.orderAmount {
+  font-size: 40rpx;
+  font-weight: $font-weight-bold;
+  color: #b5453c;
+}
+
+// ============================================
+// 快捷指令 chips
+// ============================================
+.chipBar {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 8rpx $spacing-lg 4rpx;
+}
+
+.chip {
+  display: inline-block;
+  padding: 10rpx 28rpx;
+  margin-right: $spacing-sm;
+  border-radius: $radius-round;
+  background: $color-bg-card;
+  border: 1rpx solid rgba(29, 90, 57, 0.2);
+  font-size: $font-size-sm;
+  color: #1d5a39;
+
+  &:active {
+    background: rgba(29, 90, 57, 0.08);
+    transform: scale(0.96);
+  }
+}
+
+// ============================================
+// 语音栏(底部固定)
+// ============================================
+.voiceBar {
+  flex-shrink: 0;
+  background: $color-bg-card;
+  border-top: 1rpx solid rgba(29, 90, 57, 0.08);
+  padding: $spacing-sm $spacing-lg $spacing-sm;
+  @include fixed-bottom-safe-area;
+}
+
+.phaseRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8rpx;
+}
+
+.phaseText {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  @include text-ellipsis;
+}
+
+.hfOn,
+.hfOff {
+  flex-shrink: 0;
+  margin-left: $spacing-sm;
+  font-size: $font-size-xs;
+  padding: 2rpx 16rpx;
+  border-radius: $radius-round;
+}
+
+.hfOn {
+  color: #1d5a39;
+  background: rgba(29, 90, 57, 0.1);
+}
+
+.hfOff {
+  color: $color-text-tertiary;
+  background: #f0f2f1;
+}
+
+.barMain {
+  display: flex;
+  justify-content: center;
+  padding: 12rpx 0;
+}
+
+// 麦克风大按钮(状态渐变 + 波纹)
+.micBtn {
+  position: relative;
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3a9664, #1d5a39);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8rpx 24rpx rgba(29, 90, 57, 0.35);
+
+  &:active {
+    transform: scale(0.95);
+  }
+
+  &.micListening {
+    background: linear-gradient(135deg, #d0564a, #b5453c);
+    box-shadow: 0 8rpx 24rpx rgba(181, 69, 60, 0.4);
+  }
+
+  &.micBusy {
+    opacity: 0.6;
+  }
+
+  &.micSpeaking {
+    background: linear-gradient(135deg, #d9a34e, #c98a2d);
+    box-shadow: 0 8rpx 24rpx rgba(201, 138, 45, 0.4);
+  }
+}
+
+.micIcon {
+  font-size: 48rpx;
+  color: #fff;
+}
+
+// 录音波纹(外扩动画)
+.micRipple {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 4rpx solid rgba(181, 69, 60, 0.6);
+  animation: ripple 1.6s ease-out infinite;
+}
+
+@keyframes ripple {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+// 文本输入兜底
+.inputBar {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-top: 8rpx;
+}
+
+.input {
+  flex: 1;
+  height: $button-height-md;
+  background: #f2f6f3;
+  border-radius: $radius-button;
+  padding: 0 28rpx;
+  font-size: $font-size-md;
+  color: $color-text-primary;
+}
+
+.placeholder {
+  color: $color-text-tertiary;
+}
+
+.sendBtn {
+  flex-shrink: 0;
+  width: 128rpx;
+  height: $button-height-md;
+  border-radius: $radius-button;
+  background: linear-gradient(135deg, #3a9664, #1d5a39);
+  color: #fff;
+  font-size: $font-size-md;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.sendDisabled {
+  opacity: 0.45;
+}

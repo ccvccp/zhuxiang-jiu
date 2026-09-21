@@ -44,22 +44,32 @@ export default defineAppConfig({
     'pages/blogger/index',
     'pages/xinzhi/index',
     'pages/promo/index',
-    'pages/zy/index',
-    'pages/zf/index',
-    'pages/zw/index',
-    'pages/zt/index',
-    'pages/zd/index',
-    'pages/zk/index',
     'pages/zp/index',
     'pages/qr/index',
-    'pages/av62/index',
-    'pages/member73-trust/index',
-    'pages/member73/index',
-    'pages/nexus74/index',
-    'pages/xx65/index',
-    'pages/attract72/index',
-    'pages/cs-workbench/index',
-    'pages/kb-model/index'
+    'pages/voice/index'
+  ],
+  // 管理端分包(六大 AI 工作台 + 大模型页——主包体积红线:
+  // 全量 61 页 2.37MB 超主包 2MB 上限, 拆 14 页入分包)
+  subPackages: [
+    {
+      root: 'pages-sub',
+      pages: [
+        'zy/index',
+        'zf/index',
+        'zw/index',
+        'zt/index',
+        'zd/index',
+        'zk/index',
+        'av62/index',
+        'member73/index',
+        'member73-trust/index',
+        'nexus74/index',
+        'xx65/index',
+        'attract72/index',
+        'cs-workbench/index',
+        'kb-model/index'
+      ]
+    }
   ],
   window: {
     backgroundTextStyle: 'light',

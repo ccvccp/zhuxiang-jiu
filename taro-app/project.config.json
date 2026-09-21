@@ -3,7 +3,7 @@
   "cloudfunctionRoot": "cloudfunctions/",
   "projectname": "taro_template",
   "description": "taro_template",
-  "appid": "wxafcff83a4c2a2b7f",
+  "appid": "wx6bff7efc025dd0bd",
   "setting": {
     "urlCheck": false,
     "es6": false,
@@ -22,5 +22,6 @@
   "compileType": "miniprogram",
   "simulatorType": "wechat",
   "simulatorPluginLibVersion": {},
-  "condition": {}
+  "condition": {},
+  "isGameTourist": false
 }

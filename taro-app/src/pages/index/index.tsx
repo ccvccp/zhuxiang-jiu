@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Image } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
@@ -310,25 +310,25 @@ const IndexPage: React.FC = () => {
         Taro.navigateTo({ url: '/pages/trust/index' });
         break;
       case 'map':
-        Taro.navigateTo({ url: '/pages/zt/index' });
+        Taro.navigateTo({ url: '/pages-sub/zt/index' });
         break;
       case 'zhidan':
-        Taro.navigateTo({ url: '/pages/zd/index' });
+        Taro.navigateTo({ url: '/pages-sub/zd/index' });
         break;
       case 'zhike':
-        Taro.navigateTo({ url: '/pages/zk/index' });
+        Taro.navigateTo({ url: '/pages-sub/zk/index' });
         break;
       case 'asset':
-        Taro.navigateTo({ url: '/pages/av62/index' });
+        Taro.navigateTo({ url: '/pages-sub/av62/index' });
         break;
       case 'jiaobang':
         Taro.navigateTo({ url: '/pages/help/index' });
         break;
       case 'attract':
-        Taro.navigateTo({ url: '/pages/attract72/index' });
+        Taro.navigateTo({ url: '/pages-sub/attract72/index' });
         break;
       case 'cswork':
-        Taro.navigateTo({ url: '/pages/cs-workbench/index' });
+        Taro.navigateTo({ url: '/pages-sub/cs-workbench/index' });
         break;
     }
   };
@@ -336,6 +336,11 @@ const IndexPage: React.FC = () => {
   // 跳转商品列表
   const goProducts = () => {
     Taro.switchTab({ url: '/pages/products/index' });
+  };
+
+  // 小竹语音购物(48号·悬浮入口)
+  const goVoice = () => {
+    Taro.navigateTo({ url: '/pages/voice/index' });
   };
 
   return (
@@ -589,6 +594,12 @@ const IndexPage: React.FC = () => {
             ))}
           </View>
         </View>
+      </View>
+
+      {/* 小竹语音购物悬浮入口 */}
+      <View className={styles.voiceFab} onClick={goVoice}>
+        <Text className={styles.voiceFabIcon}>🎋</Text>
+        <Text className={styles.voiceFabText}>小竹</Text>
       </View>
     </View>
   );

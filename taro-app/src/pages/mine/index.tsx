@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { View, Text, Button, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
@@ -426,7 +426,7 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
-            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/attract72/index' })}>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/attract72/index' })}>
               <View className={styles.adminEntryIcon}>🧲</View>
               <View className={styles.adminEntryInfo}>
                 <View className={styles.adminEntryName}>AI智能引流</View>
@@ -434,7 +434,7 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
-            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/cs-workbench/index' })}>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/cs-workbench/index' })}>
               <View className={styles.adminEntryIcon}>🎧</View>
               <View className={styles.adminEntryInfo}>
                 <View className={styles.adminEntryName}>人工客服工作台</View>
@@ -442,7 +442,7 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
-            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/kb-model/index' })}>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/kb-model/index' })}>
               <View className={styles.adminEntryIcon}>📚</View>
               <View className={styles.adminEntryInfo}>
                 <View className={styles.adminEntryName}>智能知识库训练模型</View>
@@ -458,7 +458,7 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
-            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/zy/index' })}>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/zy/index' })}>
               <View className={styles.adminEntryIcon}>🧠</View>
               <View className={styles.adminEntryInfo}>
                 <View className={styles.adminEntryName}>智启元AI财务</View>
@@ -466,7 +466,7 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
-            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/zf/index' })}>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/zf/index' })}>
               <View className={styles.adminEntryIcon}>⚖️</View>
               <View className={styles.adminEntryInfo}>
                 <View className={styles.adminEntryName}>智法AI法务</View>
@@ -474,7 +474,7 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
-            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/zw/index' })}>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/zw/index' })}>
               <View className={styles.adminEntryIcon}>🚚</View>
               <View className={styles.adminEntryInfo}>
                 <View className={styles.adminEntryName}>智运AI物流</View>
@@ -482,7 +482,7 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
-            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/zd/index' })}>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/zd/index' })}>
               <View className={styles.adminEntryIcon}>📦</View>
               <View className={styles.adminEntryInfo}>
                 <View className={styles.adminEntryName}>智单AI订单</View>
@@ -498,7 +498,7 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
-            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/zk/index' })}>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/zk/index' })}>
               <View className={styles.adminEntryIcon}>👑</View>
               <View className={styles.adminEntryInfo}>
                 <View className={styles.adminEntryName}>智客AI会员</View>
@@ -522,7 +522,7 @@ const MinePage: React.FC = () => {
               </View>
               <View className={styles.adminEntryArrow}>›</View>
             </View>
-            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/nexus74/index' })}>
+            <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/nexus74/index' })}>
               <View className={styles.adminEntryIcon}>📡</View>
               <View className={styles.adminEntryInfo}>
                 <View className={styles.adminEntryName}>NexusFlow 发布工作台</View>
@@ -544,7 +544,7 @@ const MinePage: React.FC = () => {
         {/* 资产管理 */}
         <View className={styles.section}>
           <View className={styles.sectionTitle}>资产管理</View>
-          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/member73/index' })}>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/member73/index' })}>
             <View className={styles.adminEntryIcon}>🤝</View>
             <View className={styles.adminEntryInfo}>
               <View className={styles.adminEntryName}>会员体验中心</View>
@@ -552,7 +552,7 @@ const MinePage: React.FC = () => {
             </View>
             <View className={styles.adminEntryArrow}>›</View>
           </View>
-          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/xx65/index' })}>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/xx65/index' })}>
             <View className={styles.adminEntryIcon}>🏪</View>
             <View className={styles.adminEntryInfo}>
               <View className={styles.adminEntryName}>智能开店工作台</View>
@@ -719,7 +719,7 @@ const MinePage: React.FC = () => {
             </View>
             <View className={styles.adminEntryArrow}>›</View>
           </View>
-          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/member73-trust/index' })}>
+          <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages-sub/member73-trust/index' })}>
             <View className={styles.adminEntryIcon}>🛡️</View>
             <View className={styles.adminEntryInfo}>
               <View className={styles.adminEntryName}>信任面板</View>

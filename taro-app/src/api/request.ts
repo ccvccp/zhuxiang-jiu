@@ -58,7 +58,7 @@ async function requestWithRetry<T = any>(
       method,
       data,
       header,
-      timeout: 10000,
+      timeout: 20000,
     });
 
     // HTTP 状态码处理
@@ -85,9 +85,19 @@ async function requestWithRetry<T = any>(
     Taro.showToast({ title: errMsg, icon: 'none' });
     throw new Error(errMsg);
   } catch (e: any) {
-    // 网络错误(连接失败/超时)
+    // 网络错误(连接失败/超时/域名校验)——显示真实原因便于真机诊断
     if (e.errMsg && e.errMsg.includes('request:fail')) {
-      Taro.showToast({ title: '网络连接失败,请检查后端是否启动', icon: 'none' });
+      const raw = String(e.errMsg);
+      let tip = '网络连接失败';
+      if (raw.includes('domain list') || raw.includes('not in domain')) {
+        tip = '域名未配置(右上角开发调试开启后重试)';
+      } else if (raw.includes('timeout')) {
+        tip = '请求超时,请检查网络';
+      } else if (raw.includes('ssl') || raw.includes('SSL')) {
+        tip = 'SSL证书异常';
+      }
+      Taro.showToast({ title: tip, icon: 'none', duration: 3000 });
+      console.warn('[request] 网络失败详情:', raw);
     }
     throw e;
   }
