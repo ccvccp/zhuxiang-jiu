@@ -878,7 +878,8 @@ async def asr_fixes_add(
 async def asr_fixes_delete(
         wrong: str,
         x_role: str = Header(default="", alias="X-Role")):
-    """删除误听词条(builtin 来源拒绝删除——真机实证基线)"""
+    """删除误听词条(builtin 真机实证基线 + dialect 方言种子
+    均拒绝删除——P2 方言模块基线)"""
     if x_role != "admin":
         raise HTTPException(status_code=403,
                             detail="需要管理员权限")
@@ -889,10 +890,11 @@ async def asr_fixes_delete(
         repo = Xiaozhu48Repository()
         existing = await repo.list_asr_fixes()
         rec = existing.get(wrong) or {}
-        if rec.get("source") == "builtin":
+        if rec.get("source") in ("builtin", "dialect"):
             raise HTTPException(
                 status_code=409,
-                detail="builtin 词条不可删除(真机实证基线)")
+                detail=f"{rec.get('source')} 词条不可删除"
+                       "(种子基线——可新增同名词覆盖方向)")
         removed = await repo.delete_asr_fix(wrong)
         return {"success": True, "removed": removed}
     except HTTPException:

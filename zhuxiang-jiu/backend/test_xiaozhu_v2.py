@@ -48,10 +48,14 @@ async def run_service():
     check("C1 builtin 种子+应用", out == "小竹，加入购物车",
           f"out={out}")
     fixes = await repo.list_asr_fixes()
-    check("C2 种子 3 条 builtin",
-          len(fixes) == 3 and all(
-              r.get("source") == "builtin" for r in fixes.values()),
-          f"n={len(fixes)}")
+    builtin = [r for r in fixes.values()
+               if r.get("source") == "builtin"]
+    dialect = [r for r in fixes.values()
+               if r.get("source") == "dialect"]
+    check("C2 种子 builtin 3 + dialect 7(P2 方言)",
+          len(builtin) == 3 and len(dialect) == 7,
+          f"n={len(fixes)} builtin={len(builtin)} "
+          f"dialect={len(dialect)}")
     # 命中计数递增
     hit0 = fixes.get("加入国五车", {}).get("hits", 0)
     check("C3 命中计数递增", hit0 >= 1, f"hits={hit0}")

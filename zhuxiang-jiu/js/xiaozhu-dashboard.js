@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿/**
+﻿﻿﻿﻿﻿﻿﻿/**
  * 48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
  * 范式: js/trust-risk-dashboard.js(47号)平移——ES5、localStorage
  * 连接、区块化加载(手动刷新, 不进自动刷新)。
@@ -350,11 +350,11 @@ function renderAsrFixes(fixes) {
         return;
     }
     body.innerHTML = fixes.map(function (f) {
-        var builtin = f.source === 'builtin';
+        var protectedSeed = f.source === 'builtin' || f.source === 'dialect';
         return '<tr><td>' + esc(f.wrong) + '</td><td>' + esc(f.to) +
             '</td><td>' + esc(f.hits || 0) + '</td><td>' +
-            (builtin ? 'builtin' : 'manual') + '</td><td>' +
-            (builtin ? '—'
+            esc(f.source || 'manual') + '</td><td>' +
+            (protectedSeed ? '—'
                 : '<button onclick="delAsrFix(\'' +
                   esc(f.wrong) + '\')" style="padding:2px 8px;' +
                   'border:1px solid #c0392b;border-radius:4px;' +

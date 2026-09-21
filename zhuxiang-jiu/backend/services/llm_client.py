@@ -42,6 +42,8 @@ ASR 双 provider(P0 小竹 Fun-ASR 接入):
     DASHSCOPE_BASE_URL   百炼端点(默认 https://dashscope.aliyuncs.com)
     ASR_HOTWORDS         静态热词种子(逗号分隔品牌词; 动态词
                          由小竹服务层注入产品名+误听修正词)
+    语种: 百炼原生协议不指定 language=自动检测(方言友好——
+    普通话/粤语/四川话/闽南话/吴语等, P2 方言模块基础)
 
 检索重排 Rerank(P3.7):
     KNOWLEDGE_RERANK     开关(默认 off, on 时检索结果经重排模型精排)

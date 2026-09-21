@@ -111,6 +111,19 @@ ASR_MISHEAR_FIXES = (
                         #  — 减量语境失效致清单只增不减)
 )
 
+# P2 方言规范化种子(山东话高频——站点主场景鲁地; 百炼语种自动
+# 检测可转写方言音, 但输出方言字指令链不认识, 整词规范化映射;
+# source=dialect 与 builtin 同受删除保护, dashboard 可观测命中)
+ASR_DIALECT_FIXES = (
+    ("俺", "我"),          # "俺要一瓶"→"我要一瓶"
+    ("俺们", "我们"),      # 长词优先(先于单字"俺"应用)
+    ("哈酒", "喝酒"),      # 山东"喝"读 hā
+    ("恁", "您"),          # 鲁/豫尊称
+    ("木有", "没有"),
+    ("夜来", "昨天"),      # 山东"昨天"("夜来买的酒"→订单查询)
+    ("咋", "怎么"),        # "咋回事"→"怎么回事"
+)
+
 # 肯定应答正则(商品语境): 推荐反问"需要吗?"后用户答
 # "需要/要加两件/买两件/加个购物车/来两件"→加购当前推荐款
 # (真机留痕: 4 个会话 8 轮肯定应答全落 general——对话剧本
@@ -2349,11 +2362,14 @@ class XiaozhuService:
         return words[:120]
 
     async def _fix_asr_mishear(self, text: str) -> str:
-        """ASR 误听修正(v2 C: builtin 种子 + Redis 运行时表)
+        """ASR 误听修正(v2 C + P2 方言规范化: builtin/dialect 种子
+        + Redis 运行时表)
 
-        首次调用把 3 条真机实证硬编码种入运行时表(source=
-        builtin); 此后全量走表——dashboard 增删即时生效。
-        单遍整词替换(修正后不二次应用, 防链式); 命中计数递增。
+        首次调用把真机实证硬编码与方言种子(山东话高频)种入运行时表
+        (source=builtin/dialect); 此后全量走表——dashboard 增删即时
+        生效(种子来源受删除保护)。单遍整词替换(修正后不二次应用,
+        防链式); 命中计数递增。方言批逐条幂等——存量部署升级自动
+        补种, 不覆盖运营已调词条。
         """
         t = str(text or "")
         try:
@@ -2362,9 +2378,13 @@ class XiaozhuService:
                 for wrong, right in ASR_MISHEAR_FIXES:
                     fixes[wrong] = await self.repo.save_asr_fix(
                         wrong, right, source="builtin")
+            for wrong, right in ASR_DIALECT_FIXES:
+                if wrong not in fixes:
+                    fixes[wrong] = await self.repo.save_asr_fix(
+                        wrong, right, source="dialect")
         except Exception:  # noqa: BLE001
-            # 表读取失败回退静态表(fail-soft)
-            for wrong, right in ASR_MISHEAR_FIXES:
+            # 表读取失败回退静态表(fail-soft——builtin+方言双批)
+            for wrong, right in ASR_MISHEAR_FIXES + ASR_DIALECT_FIXES:
                 t = t.replace(wrong, right)
             return t
         # 误听词按长度降序应用(长词优先, 防短词截断长词)
