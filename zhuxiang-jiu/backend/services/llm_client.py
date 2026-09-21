@@ -208,8 +208,88 @@ class LLMProviderClient:
                 logger.warning("llm_chat_failed(回退rule): %s", exc)
                 return None
 
-    def embed(self, texts: list[str]) -> list[list[float]] | None:
-        """批量文本向量化(P3.5), 失败/未配置返回 None(调用方回退 2-gram)
+    def classify_dialog_intent(
+            self, user_text: str,
+            context_desc: str) -> dict | None:
+        """LLM 对话意图分类(智能应答轨——规则 miss 时兜底)
+
+        输入: 用户话语 + 最近对话上下文描述(商品语境/反问)
+        输出: {"intent", "qty", "reply"} 或 None(解析失败回退
+        规则轨 general 兜底)。防幻觉红线: chat 类 reply 由
+        system prompt 禁数字(价格/金额由系统卡片展示)。
+
+        intent 集: affirm(要买/加购) | negate(不要) | next(换
+        一款) | command:<action>(对应规则轨 action) | chat(导
+        购闲聊) | unknown(听不懂)
+        """
+        system = (
+            "你是语音购物助手的意图分类器。根据对话上下文与用户"
+            "话语, 只输出一个 JSON 对象, 不要任何其他文字:\n"
+            '{"intent": "affirm|negate|next|setqty'
+            '|command:<action>|chat|unknown", '
+            '"qty": <1-9整数, 仅affirm/setqty时>, '
+            '"reply": "<仅chat时: 导购回复, 30字内, 口语亲切, '
+            '绝不提价格金额数字>"}\n'
+            "分类规则:\n"
+            "- affirm: 用户同意购买/加购(需要/要/买/来/加 N 件/"
+            "就要这个/就它了)\n"
+            "- negate: 拒绝当前推荐(不要/不喜欢/太贵了换换/算了"
+            "这款)\n"
+            "- next: 换下一款(换一款/还有吗/下一个/再看看)\n"
+            "- setqty: 修正数量为指定总量(只要两件/一共三瓶/"
+            "改为两件/两件就够了——设总数; '来两件/再要两件'"
+            "是追加归 affirm)\n"
+            "- command:<action>: 明确功能指令, action 从这些里选"
+            " product.new|order.query|promo.query|trust.balance"
+            "|xiaozhu.help\n"
+            "- chat: 购物闲聊/咨询(问口感/度数/怎么喝/你是谁/"
+            "你是真人吗/你叫什么)——reply 给出导购回应;\n"
+            "  想结束对话(退出/再见/就到这/不用了谢谢)也归"
+            " chat——reply 引导用户点左上角返回, 表示随时再唤\n"
+            "- unknown: 无法理解\n"
+            "注意: '太贵了'归 negate(拒绝这款); '怎么买'归 "
+            "affirm; 身份类问题(你是谁/真人吗)一律归 chat。\n"
+            "command 仅当话语明确对应那个功能才选——找不到"
+            "匹配就归 chat 或 unknown, 绝不硬选最接近的。\n"
+            "纯语气词(啊/嗯/哦)或听不清的话一律归 unknown。\n"
+            "reply 铁律(导购人设):\n"
+            "1. 称呼用「您」——禁用「亲」(不符合品牌人设);\n"
+            "2. 商品信息(度数/香型/口感/原料/工艺)只能依据"
+            "上下文提供的商品数据回答, 数据里没有的就诚实说"
+            "『这个我帮您确认下』并引导看商品卡——绝不编造,"
+            "绝不输出 XX 等占位符。\n"
+            "礼貌用语(谢谢/多谢/辛苦了/不用了谢谢)是结束语"
+            "不是购买应答——一律归 chat, 客气回应即可。\n"
+            "qty 只依据本轮话语: 明确说了数量才填(如'来两件'填"
+            "2); 模糊表述(几个/多来点)填 2; 未提数量填 1——"
+            "忽略上文出现过的数量。"
+        )
+        user = (str(context_desc or "").strip()
+                + "\n用户说: " + str(user_text or "").strip())
+        raw = self.chat(system, user, temperature=0.1)
+        if not raw:
+            return None
+        try:
+            import re as _re
+            m = _re.search(r"\{.*\}", raw, _re.S)
+            data = json.loads(m.group(0)) if m else None
+            if not isinstance(data, dict) \
+                    or not data.get("intent"):
+                return None
+            qty = data.get("qty")
+            return {
+                "intent": str(data["intent"]).strip(),
+                "qty": (int(qty) if str(qty).isdigit()
+                        and 1 <= int(qty) <= 9 else 1),
+                "reply": (str(data.get("reply") or "")
+                          .strip()[:60] or None),
+            }
+        except Exception as exc:
+            logger.warning("intent_classify_parse_fail: %s", exc)
+            return None
+
+    def embed(self, texts: list[str]) -> list[list[list[float]]] | None:
+        """批量文本向量化(P3.5), 失败返回 None(调用方回退 2-gram)
 
         单批上限 EMBED_BATCH_SIZE, 超出自动分批串行请求;
         任一批失败整体返回 None(部分成功无意义, 全量回退)。
@@ -471,6 +551,49 @@ class LLMProviderClient:
         except Exception as exc:
             logger.warning("llm_tts_failed(跳过播报): %s", exc)
             return None
+
+    def synthesize_mp3(self, text: str) -> bytes | None:
+        """语音合成 MP3(智谱 cogtts 仅支持 wav → lameenc 转码)
+
+        小程序 InnerAudioContext 对 wav 兼容差(Android 无声)
+        ——mp3 双端兼容(小程序原生 / H5 WebAudio decodeAudioData)。
+        lameenc 未安装/转码失败 → 回退 wav(调用方按 wav 处理)。
+        """
+        wav = self.synthesize(text)
+        if not wav:
+            return None
+        return _wav_to_mp3(wav) or wav
+
+
+def _wav_to_mp3(wav_bytes: bytes) -> bytes | None:
+    """WAV(16-bit PCM) → MP3(lameenc 64kbps)
+
+    cogtts wav 为标准 PCM 头; 非 16-bit/解析失败返回 None。
+    """
+    import io
+    import wave
+    try:
+        import lameenc
+    except ImportError:
+        return None
+    try:
+        with wave.open(io.BytesIO(wav_bytes), "rb") as w:
+            nch = w.getnchannels()
+            rate = w.getframerate()
+            width = w.getsampwidth()
+            frames = w.readframes(w.getnframes())
+        if width != 2 or nch not in (1, 2) or not frames:
+            return None
+        enc = lameenc.Encoder()
+        enc.set_channels(nch)
+        enc.set_in_sample_rate(rate)
+        enc.set_bit_rate(64)
+        enc.set_quality(2)
+        mp3 = enc.encode(bytes(frames)) + enc.flush()
+        return bytes(mp3) if len(mp3) > 500 else None
+    except Exception as exc:
+        logger.warning("wav_to_mp3_failed: %s", exc)
+        return None
 
 
 provider_client = LLMProviderClient()

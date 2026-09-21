@@ -109,7 +109,8 @@ class Xiaozhu48Repository:
                     record[k] = float(v) if v != "" else 0.0
                 except (TypeError, ValueError):
                     record[k] = 0.0
-            elif k in ("audioMeta", "card", "payload"):
+            elif k in ("audioMeta", "card", "payload",
+                       "specFilter"):
                 try:
                     record[k] = json.loads(v) if v else {}
                 except (TypeError, ValueError):

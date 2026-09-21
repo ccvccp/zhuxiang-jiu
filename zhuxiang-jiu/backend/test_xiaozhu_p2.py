@@ -6,7 +6,7 @@
 
 覆盖(计划 §六):
     - 沙箱白名单: 三级分级/非白名单越权拒绝
-    - confirmToken 流: 下发(令牌+摘要+codeHint 只泄首位)/
+    - confirmToken 流: 下发(令牌+摘要+screenCode 屏幕完整码)/
       正确码核销执行/错误码重试/超限作废/过期作废/
       重复核销拒绝
     - 高敏 E2E: 绑定后兑换(45号 convert 真实通道——
@@ -133,9 +133,14 @@ class TestConfirmFlow:
                and r.get("confirmToken", "").startswith("cf-")
                and "扣除 100" in r.get("summary", ""),
                str(r.get("summary"))[:60])
-        record("codeHint 只泄首位",
-               "**" in (r.get("card") or {}).get(
-                   "codeHint", ""),
+        record("屏幕码完整下发(screenCode)",
+               str((r.get("card") or {}).get(
+                   "screenCode", "")).isdigit()
+               and len(str((r.get("card") or {}).get(
+                   "screenCode", ""))) == 4
+               and str((r.get("card") or {}).get(
+                   "screenCode")) in (r.get("card")
+                                      or {}).get("codeHint", ""),
                str((r.get("card") or {}).get("codeHint")))
         token = r.get("confirmToken")
         code = _get_code(token)

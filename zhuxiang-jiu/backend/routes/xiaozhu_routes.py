@@ -192,7 +192,9 @@ async def voice_turn(session_id: int, body: dict,
 ):
     """语音轮次: 音频→ASR(35号链路)→唤醒判定→指令直达
 
-    body: {audioBase64(必填), filename?, durationSec?}
+    body: {audioBase64(必填), filename?, durationSec?,
+           mode?='tap'(点击录音——用户主动按下麦克风=明确
+           交互, 免唤醒词; H5 免提后台录音不传)}
     音频即转即删(临时文件在 hub 层删除, 小竹只落元信息)
     """
     member_id = _require_member(x_member_id)
@@ -212,7 +214,9 @@ async def voice_turn(session_id: int, body: dict,
             session_id, audio_bytes, member_id,
             filename=str(body.get("filename")
                          or "audio.webm"),
-            duration_sec=body.get("durationSec"))
+            duration_sec=body.get("durationSec"),
+            wakeup_free=(str(body.get("mode") or "")
+                         == "tap"))
     except Exception as e:
         raise _handle(e) from e
 
@@ -269,9 +273,11 @@ async def get_tts(text: str = "",
                       None, alias="X-Member-Id")):
     """语音合成播报(微信 X5 无系统 TTS 引擎——服务端兜底)
 
-    GET /api/xiaozhu/tts?text=...  → audio/wav 二进制
+    GET /api/xiaozhu/tts?text=...  → audio/mpeg(mp3) 二进制
     鉴权: X-Member-Id(登录会员); Redis 缓存 10 分钟(同文本
     去重防刷——计费友好); 文本限 200 字。
+    小程序 InnerAudioContext 对 wav 兼容差(Android 无声)
+    ——mp3 双端兼容(H5 WebAudio decodeAudioData 同样支持)。
     """
     _require_member_strict(x_member_id)
     t = str(text or "").strip()[:200]
@@ -280,7 +286,8 @@ async def get_tts(text: str = "",
                             detail="text 不能为空")
     import base64 as _b64
     import hashlib as _hl
-    cache_key = ("xiaozhu:tts:"
+    # :mp3 后缀版本隔离(旧缓存为 wav 字节, 不能当 mp3 播)
+    cache_key = ("xiaozhu:tts:mp3:"
                  + _hl.sha256(
                      t.encode("utf-8")).hexdigest()[:24])
     try:
@@ -293,15 +300,19 @@ async def get_tts(text: str = "",
             if hit:
                 return Response(
                     content=_b64.b64decode(hit),
-                    media_type="audio/wav")
+                    media_type="audio/mpeg")
     except Exception as e:
         logger.debug("tts_cache_read_skip: %s", e)
     from services.llm_client import provider_client
-    wav = provider_client.synthesize(t)
-    if not wav:
+    audio = provider_client.synthesize_mp3(t)
+    if not audio:
         raise HTTPException(
             status_code=503,
             detail="语音合成暂不可用(不影响文字交互)")
+    # lameenc 未装/转码失败回退 wav → 按 wav 响应(浏览器可播)
+    is_mp3 = audio[:3] == b"ID3" or audio[0:1] == b"\xff"
+    if not is_mp3:
+        return Response(content=audio, media_type="audio/wav")
     try:
         from repositories.backend import (
             is_redis_mode, get_redis_client,
@@ -309,11 +320,11 @@ async def get_tts(text: str = "",
         if is_redis_mode():
             client = await get_redis_client()
             await client.set(
-                cache_key, _b64.b64encode(wav).decode(),
+                cache_key, _b64.b64encode(audio).decode(),
                 ex=600)
     except Exception as e:
         logger.debug("tts_cache_write_skip: %s", e)
-    return Response(content=wav, media_type="audio/wav")
+    return Response(content=audio, media_type="audio/mpeg")
 
 
 # ============================================================

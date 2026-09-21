@@ -7,7 +7,7 @@
 
 覆盖(计划 §六, 真实容器):
     01 正常业务零影响
-    02 兑换指令→confirmToken 下发(codeHint 只泄首位)
+    02 兑换指令→confirmToken 下发(screenCode 屏幕完整码)
     03 错误码拒绝(重试提示)
     04 正确码核销→45号 convert 真实执行(数字来自返回)
     05 重复核销拒绝(令牌一次性)
@@ -194,9 +194,13 @@ def main():
            and "扣除 100" in body.get("summary", ""),
            str(body.get("summary"))[:60])
     token = body.get("confirmToken")
-    code_hint = (body.get("card") or {}).get("codeHint", "")
-    record("codeHint 只泄首位", "**" in code_hint,
-           str(code_hint))
+    card = body.get("card") or {}
+    code_hint = str(card.get("codeHint", ""))
+    screen_code = str(card.get("screenCode", ""))
+    record("屏幕码完整下发(screenCode)",
+           screen_code.isdigit() and len(screen_code) == 4
+           and screen_code in code_hint,
+           code_hint)
 
     print("\n[03 错误码拒绝]")
     ok, (code, body) = call(

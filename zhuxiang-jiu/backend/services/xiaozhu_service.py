@@ -104,7 +104,255 @@ def mask_pii(text: str) -> str:
 
 
 # ASR 常见误听修正(真机留痕实证的音近变体, 整词替换零误伤)
-ASR_MISHEAR_FIXES = (("请我查看", "前往查看"),)
+ASR_MISHEAR_FIXES = (
+    ("请我查看", "前往查看"),
+    ("加入国五车", "加入购物车"),   # 真机留痕 99:3
+    ("药一", "要一"),   # "要一瓶"误听"药一瓶"(真机 136:10
+                        #  — 减量语境失效致清单只增不减)
+)
+
+# 肯定应答正则(商品语境): 推荐反问"需要吗?"后用户答
+# "需要/要加两件/买两件/加个购物车/来两件"→加购当前推荐款
+# (真机留痕: 4 个会话 8 轮肯定应答全落 general——对话剧本
+# 核心闭环"推荐→反问→应答加购"断裂)
+_AFFIRM_BUY_RE = re.compile(
+    r"^(?:再[来买加]?|需要|要(?:的)?|买|来|加[个入]?购物[车清单]|加)"
+    r"[加买]?"
+    r"[一二两三四五六七八九\d]*"
+    r"(?:件|瓶|个|箱|听|提)?"
+    r"[的呀啊哦!.]?$")
+
+# 纯语气词集(真机实证: confirm 等待中"啊"0.6s 被判 affirm
+# 误加购——单双字语气词不构成任何购买意图)
+_FILLER_CHARS = set("啊嗯哦呃唉呀哈嘛呢吧哎诶欸噢唔哇")
+
+
+def _is_filler(text: str) -> bool:
+    """纯语气词判定: 1-2 字且全为语气字(啊/嗯哦/呃)"""
+    t = str(text or "").strip()
+    return 0 < len(t) <= 2 and all(
+        c in _FILLER_CHARS for c in t)
+
+# 纯礼貌词(真机实证会话 117: 推荐反问"需要吗?"后用户答
+# "谢谢"(结束语)被 LLM 判 affirm 误加购——礼貌用语不是
+# 购买应答)
+_POLITE_ONLY_RE = re.compile(
+    r"^(?:谢谢|多谢|辛苦了|麻烦了|感谢|好的谢谢|"
+    r"谢谢了|不用了)[呀啊哦!.。,!！?？的了]*$")
+
+
+def _is_polite_only(text: str) -> bool:
+    """纯礼貌用语判定: "谢谢/多谢/辛苦了"——结束语非应答"""
+    return bool(_POLITE_ONLY_RE.match(
+        str(text or "").strip()))
+
+
+def _cart_detail(turns: list, pid, name: str,
+                 qty: int, mode: str = "add"
+                 ) -> tuple[int, str]:
+    """清单构成明细(加购轮 reply 与推荐轮 preheat 共用——
+    逐字一致是 TTS 秒播前提)
+
+    真机反馈: 只报"清单4件"不知道构成, 需显示每款几件。
+    setqty 语义: cart_setqty 轮把该款累计重置为 N(其后
+    cart_added 继续累加); mode="set" 本轮为改量(设总量)。
+    Returns: (总件数, "竹香尊享×4、竹香便携×2")
+    """
+    groups: dict = {}
+    for t in (turns or []):
+        c = t.get("card") or {}
+        ctype = c.get("type")
+        if ctype not in ("cart_added", "cart_setqty"):
+            continue
+        key = str(c.get("productId")
+                  or c.get("subject") or "?")
+        g = groups.setdefault(key, {
+            "name": str(c.get("subject") or "商品"),
+            "qty": 0})
+        if ctype == "cart_setqty":
+            g["qty"] = int(c.get("quantity") or 0)
+        else:
+            g["qty"] += int(c.get("quantity") or 1)
+    key = str(pid or name)
+    if mode == "set":
+        groups[key] = {"name": str(name), "qty": int(qty)}
+    elif groups.get(key):
+        groups[key]["qty"] += qty
+    else:
+        groups[key] = {"name": str(name), "qty": qty}
+    count = sum(g["qty"] for g in groups.values()
+                if g["qty"] > 0)
+
+    def _short(n: str) -> str:
+        # 简称: "竹奕·竹香尊享 52° 500ml"→"竹香尊享"
+        return (str(n).split("·")[-1]
+                .split(" ")[0].strip()
+                or str(n)[:6])
+
+    # 减量移除(setqty 0)的款不进明细(0 件组跳过)
+    detail = "、".join(
+        f"{_short(g['name'])}×{g['qty']}"
+        for g in groups.values()
+        if g["qty"] > 0)
+    return count, detail
+
+
+# 清单改量语义(真机实证会话 123: "清单两件"本意为设总量 2,
+# 被误判追加 2 件(1+1+2=4)——改量与追加两轨分离)
+# 量词与 _parse_qty 对齐(件/瓶/箱/个/听/提——酒类常按瓶)
+# search 模式(非句首锚定——"尊享只要一件"商品词前缀);
+# "清单"负向后顾防"加入清单两件"(加购说法)误伤
+_QTY_CN_PAT = r"([一二两三四五六七八九]|\d+)\s*[件瓶箱个听提]"
+_CART_SETQTY_RE = re.compile(
+    r"(?:只要|就要|一共|总共|(?<!加入)清单|数量"
+    r"|改[成为]|调成?|调整?为|设[成为]?)"
+    r"\s*" + _QTY_CN_PAT
+    + r"(?:就行|就好|了|啦|就够了)?"
+    r"[的呀啊哦吧呗。,.!！?？]*$")
+_CART_SETQTY_TAIL_RE = re.compile(
+    r"^" + _QTY_CN_PAT
+    + r"(?:就行|就好|就够了)[的呀啊哦吧呗。,.!！?？]*$")
+# 存在清单时的"我要/就要/给我/需要一瓶"也归改量(真机实证
+# 会话 133: 清单4件后说"我要一瓶"本意是只要1瓶总量——被
+# _AFFIRM_BUY_RE 当追加累加到5件; 改量语义判据: "我要/
+# 就要/给我/需要 + 单数(一件/一瓶/一个)"且会话已有清单
+# → setqty 1; 无清单时仍是追加(首次选择没东西改))
+_CART_SETQTY_IMPLICIT_RE = re.compile(
+    r"^(?:我要|就要|给我|需要|要)([一二两三四五六七八九]|\d+)"
+    r"\s*[件瓶箱个听提]"
+    r"[的儿呀啊哦。,.!！?？]*$")
+# 减量语义(真机实证会话 136: 清单失控 8 件无法自然减回
+# ——"少一件/去掉一瓶/减两件"相对减, 减到 0 移除该款;
+# 数字+量词必选防"多少钱"误伤)
+_CART_DECQTY_RE = re.compile(
+    r"(?:少|去掉|减去?|退掉?|拿掉|划掉)"
+    r"\s*([一二两三四五六七八九]|\d+)\s*"
+    r"[件瓶箱个听提]")
+
+
+def _parse_dec_qty(text: str) -> int | None:
+    """减量语义解析: "少一件/去掉两瓶/减一件"→减 N"""
+    t = str(text or "").strip()
+    m = _CART_DECQTY_RE.search(t)
+    if not m:
+        return None
+    tok = m.group(1)
+    n = (int(tok) if tok.isdigit()
+         else _QTY_MAP.get(tok, 0))
+    return n if 1 <= n <= 9 else None
+
+
+def _parse_set_qty(text: str,
+                   has_cart: bool = False) -> int | None:
+    """改量语义解析: "只要两件/清单两件/改为两瓶/尊享只要
+    一件/两件就行"→设总量; 追加语义("来两件/加入清单两件")
+    不命中。has_cart=True 时隐式单数("我要一瓶/给我一瓶")
+    也归改量(存在清单才这么说话——改量不追加)"""
+    t = str(text or "").strip()
+    for pat in (_CART_SETQTY_RE, _CART_SETQTY_TAIL_RE):
+        m = pat.search(t)
+        if m:
+            tok = m.group(1)
+            n = (int(tok) if tok.isdigit()
+                 else _QTY_MAP.get(tok, 0))
+            return n if 1 <= n <= 9 else None
+    if has_cart:
+        m = _CART_SETQTY_IMPLICIT_RE.match(t)
+        if m:
+            tok = m.group(1)
+            n = (int(tok) if tok.isdigit()
+                 else _QTY_MAP.get(tok, 0))
+            return n if 1 <= n <= 9 else None
+    return None
+
+# 用户取消高敏确认短语(仅 confirm 令牌 pending 时生效——
+# 此前用户只能等 60s 过期, 无反悔路径)
+_CANCEL_CONFIRM_RE = re.compile(
+    r"^(?:取消|不确认|算了|不要了|不提交|取消订单|"
+    r"先不下单|先不买了)[的了呀啊哦。,.!！?？]*$")
+
+# 规格找酒解析(真机实证会话 109: "四十二度的/一斤装的有吗/
+# 52度的朱一九"找酒表达 5 连全断——用户核心购酒意图落
+# general/chat 兜底; 度数(中文/数字)/容量(斤)/系列词规则
+# 直达, 零 LLM 延迟)
+_SPEC_DEG_RE = re.compile(r"(\d{1,2})\s*[度°]")
+_SPEC_CN_DEG_RE = re.compile(
+    r"([一二三四五六七八九])十([一二三四五六七八九]?)度")
+_SPEC_SERIES_WORDS = ("珍藏", "年份", "礼盒", "便携",
+                      "典藏", "经典", "尊享")
+
+
+def _parse_spec(text: str) -> dict | None:
+    """购物规格解析: 度数(42度/四十二度)/容量(一斤/半斤/
+    750ml)/系列词(珍藏/便携…)——命中任一返回过滤条件"""
+    t = str(text or "")
+    spec: dict = {}
+    m = _SPEC_DEG_RE.search(t)
+    if m:
+        d = int(m.group(1))
+        if 20 <= d <= 70:
+            spec["alcohol"] = d
+    else:
+        m = _SPEC_CN_DEG_RE.search(t)
+        if m:
+            d = (_QTY_MAP.get(m.group(1), 1) * 10
+                 + _QTY_MAP.get(m.group(2), 0))
+            if 20 <= d <= 70:
+                spec["alcohol"] = d
+    if re.search(r"一斤半|750\s*ml|七百五十毫升", t,
+                 re.I):
+        spec["volume"] = "750ml"
+    elif re.search(r"一斤|500\s*ml|五百毫升", t,
+                   re.I):
+        spec["volume"] = "500ml"
+    elif re.search(r"半斤|250\s*ml|二百五十毫升", t,
+                   re.I):
+        spec["volume"] = "250ml"
+    for kw in _SPEC_SERIES_WORDS:
+        if kw in t:
+            spec["series_kw"] = kw
+            break
+    return spec or None
+
+
+def _describe_spec(spec: dict) -> str:
+    """规格描述(无货告知用语)"""
+    bits = []
+    if spec.get("alcohol"):
+        bits.append(f"{spec['alcohol']} 度")
+    if spec.get("volume"):
+        bits.append(spec["volume"])
+    if spec.get("series_kw"):
+        bits.append(spec["series_kw"] + "系列")
+    return "、".join(bits) or "符合的款"
+
+
+# 产品属性问句(真机实证会话 113: "酒的度数/香型和度数"被
+# LLM chat 轨瞎答"40度左右"/占位符"XX度"——导购基本素养:
+# 度数/香型/口感/原料/工艺/产地全部来自产品库结构化数据,
+# 防幻觉红线: 属性问答不经过 LLM)
+_PRODUCT_ATTR_PATTERNS = (
+    ("alcohol", r"度数|多少度|几度"),
+    ("aroma", r"香型|什么香|啥香|哪种香"),
+    ("taste", r"口感|味道|好喝|顺口|辣不辣"),
+    ("ingredients", r"原料|成分|什么做的|材料"),
+    ("process", r"工艺|怎么酿|酿造|发酵|古法"),
+    ("origin", r"产地|哪里产|哪儿产|什么地方产"),
+    ("storage", r"怎么存|怎么放|存放|保存"),
+)
+
+
+def _parse_attr_kind(text: str) -> str | None:
+    """属性问句类型判定(问句式——"多少度"; 具体数字"42度"
+    归规格找酒过滤, 两轨互斥)。多属性问句("香型和度数")
+    取话语中最先出现的属性词。"""
+    t = str(text or "")
+    best, best_pos = None, 10 ** 9
+    for kind, pat in _PRODUCT_ATTR_PATTERNS:
+        m = re.search(pat, t)
+        if m and m.start() < best_pos:
+            best, best_pos = kind, m.start()
+    return best
 
 
 def fix_asr_mishear(text: str) -> str:
@@ -167,13 +415,14 @@ def detect_wake(text: str) -> tuple[bool, str]:
             rest = rest[1:].lstrip("，, 。.！!？? \t")
         return True, rest
     # 句中唤醒: "看看新产品。小猪，看看新产品"——开头丢字
-    # 致唤醒词落句中, 从首个唤醒词后截取继续指令匹配
+    # 致唤醒词落句中, 从首个唤醒词后截取继续指令匹配;
+    # "你好小猪"句中唤醒词后为空=纯打招呼 → 返回空指令,
+    # 由上层"在呢!"应答(此前被判未唤醒, 真机体验差)
     for w in sorted(WAKE_WORDS, key=len, reverse=True):
         idx = t.find(w)
         if idx > 0:
             rest = t[idx + len(w):].lstrip("，, 。.！!？? \t")
-            if rest:
-                return True, rest
+            return True, rest
     return False, t
 
 
@@ -210,7 +459,14 @@ COMMANDS = [
         "patterns": ["新上线", "新品", "新产品", "新出的",
                      "新货", "有什么新的", "新款", "新上架",
                      "换一款", "换一个", "还有吗",
-                     "下一款", "下一个"],
+                     "下一款", "下一个",
+                     # 泛找酒表达(真机实证: "咱家的酒/都是有什么
+                     # 好产品"落 LLM chat 泛泛回复——购酒意图
+                     # 应直达推荐列表; "有几款酒"问款数→
+                     # 直达推荐并播报总数)
+                     "咱家", "有什么酒", "有什么产品",
+                     "好产品", "好酒", "哪些产品", "有什么卖的",
+                     "有几款"],
         "examples": ["小竹，看看有什么新上线产品",
                      "小竹，有什么新品适合我"],
     },
@@ -502,11 +758,16 @@ class XiaozhuService:
                            member_id: int,
                            filename: str = "audio.webm",
                            duration_sec: float = None,
+                           wakeup_free: bool = False,
                            ) -> dict:
         """语音轮次全链: ASR(35号复用)→唤醒→指令路由→直达
 
         音频即转即删红线: 转写在 hub 临时文件内完成, 小竹
         只落 audioMeta 元信息(durationSec/sizeBytes)。
+
+        wakeup_free(点击录音模式): 用户主动按下麦克风说话
+        = 明确交互意图(与键盘输入同级), 跳过唤醒词要求;
+        H5 免提后台录音不传此参——反语音霸权红线不变。
 
         Raises:
             KeyError: 会话不存在/已关闭
@@ -518,19 +779,40 @@ class XiaozhuService:
                             if duration_sec else None),
         }
         # ASR 转写(35号链路整段复用: 限流/降级/临时文件即删)
+        import time as _t
+        _asr_t0 = _t.monotonic()
         from services.hub_service import HubService
         asr = await HubService().transcribe_upload(
             audio_bytes, filename=filename,
             member_id=member_id)
+        logger.info("voice48_timing sid=%s asr_ms=%d "
+                    "audio_bytes=%d dur_s=%s",
+                    session_id,
+                    round((_t.monotonic() - _asr_t0) * 1000),
+                    len(audio_bytes or b""),
+                    duration_sec)
         if not asr.get("success"):
             return await self._save_turn(
                 session, "voice", "", "asr_failed",
                 {"reply": asr.get("error", "转写失败"),
                  "fallbackHint": asr.get("fallback_hint")},
                 {"audioMeta": audio_meta})
+        # ASR 空转守卫(真机实证会话 125: 用户 9.3s 语音被
+        # 转成"#"(免提残响/远场音质差), "#"被 LLM 轨在反问
+        # 语境猜成 affirm 误加购——识别失败不进指令/LLM,
+        # 引导重说; 语义前缀守卫由 _handle_text_internal 兜底)
+        _asr_text = str(asr.get("text") or "").strip()
+        if _asr_text in ("#", ""):
+            return await self._save_turn(
+                session, "voice", _asr_text, "asr_failed",
+                {"reply": "没听清——请离麦克风近一点，"
+                          "稍大声再说一遍",
+                 "fallbackHint": "keyboard"},
+                {"audioMeta": audio_meta})
         return await self._handle_text_internal(
             session, asr["text"], channel="voice",
-            audio_meta=audio_meta)
+            audio_meta=audio_meta,
+            wakeup_free=wakeup_free)
 
     async def handle_text(self, session_id: int,
                           text: str) -> dict:
@@ -554,6 +836,7 @@ class XiaozhuService:
                                     text: str,
                                     channel: str,
                                     audio_meta: dict = None,
+                                    wakeup_free: bool = False,
                                     ) -> dict:
         import time
         started = time.monotonic()
@@ -564,7 +847,13 @@ class XiaozhuService:
             text = fix_asr_mishear(text)
 
         # ① 唤醒判定(前缀含近似音容错)
-        woken, command_text = detect_wake(text)
+        # 点击录音模式(wakeup_free): 用户按下麦克风=明确
+        # 交互, 视为已唤醒(小程序 tap 场景——每句叫"小竹"
+        # 累; H5 免提后台录音不传, 反语音霸权红线不变)
+        if wakeup_free:
+            woken, command_text = True, text.strip()
+        else:
+            woken, command_text = detect_wake(text)
 
         # ② 免唤醒窗口(5 分钟内活跃会话直接解析)
         # 前提: 会话中已发生过至少一次唤醒(首轮必须显式
@@ -586,6 +875,12 @@ class XiaozhuService:
         # 唤醒应答: 只叫"小竹"无指令 → "在呢!"(对话存在感
         # ——真机反馈: 叫了没回音不知道听没听到; 短句秒播,
         # 长句合成+下载+播放慢——引导交给界面快捷指令)
+        # 叠词容错: "小猪，小猪"剥离后残余仍是唤醒词(叫两
+        # 声确认听到没有) → 再剥一次, 剥空即纯唤醒
+        if command_text.strip():
+            _w2, _rest2 = detect_wake(command_text)
+            if _w2 and not _rest2.strip():
+                command_text = ""
         if not command_text.strip():
             return await self._save_turn(
                 session, channel, text, "wakeup",
@@ -606,6 +901,14 @@ class XiaozhuService:
         if voice_hit:
             return voice_hit
 
+        # 用户取消高敏确认(仅 pending 时生效——给用户反悔
+        # 路径, 此前只能等 60s 过期; 先于否定/指令路由:
+        # "取消"无商品语境语义, 独立于"不要这款"否定拦截)
+        cancel_hit = await self._try_confirm_cancel(
+            session, command_text)
+        if cancel_hit:
+            return cancel_hit
+
         # ④ 指令路由(绑定快捷指令 → 共创短语 → 规则轨
         #    → LLM 增强轨)
         # P1 绑定指令优先于 pattern 匹配("绑定信值档案 N"
@@ -617,6 +920,51 @@ class XiaozhuService:
             return await self._bind_flow(
                 session, channel, text, trust_id, audio_meta)
         cmd = match_command(resolved)
+        # 规格找酒(自然语言直达): 无显式指令但话语含规格词
+        # (度数/容量/系列)→按规格过滤产品直接推荐(规则轨零
+        # LLM 延迟); 无货温和告知+回退新品(不空手而归)
+        if cmd is None:
+            spec = _parse_spec(command_text)
+            if spec:
+                context = await self.build_context(
+                    session.get("memberId"))
+                hits = await self._filter_spec_products(spec)
+                if hits:
+                    r = await self._exec_product_new(
+                        context, session, command_text,
+                        items=hits)
+                    return await self._save_turn(
+                        session, channel, text, "product.spec",
+                        r, {"audioMeta": audio_meta,
+                            "commandText": command_text,
+                            "track": "spec"})
+                r = await self._exec_product_new(
+                    context, session, command_text)
+                r["reply"] = ("暂时没有"
+                              + _describe_spec(spec)
+                              + "的——先看看新品，"
+                                "或说「换一款」继续挑")
+                return await self._save_turn(
+                    session, channel, text, "product.spec",
+                    r, {"audioMeta": audio_meta,
+                        "commandText": command_text,
+                        "track": "spec"})
+        # 属性问答(导购基本素养): 度数/香型/口感/原料/工艺/
+        # 产地问句——产品库结构化回答(不经过 LLM, 数据全部
+        # 来自执行层); 有最近推荐款答该款, 无语境给全系概览。
+        # 优先级: 压过泛推荐 product.new("咱家的酒都是有多少
+        # 度的"含"咱家"——问度数非找推荐); 让位显式指令
+        # ("口感好的多少钱"归问价格)
+        attr_kind = _parse_attr_kind(command_text)
+        if attr_kind and (cmd is None
+                          or cmd["action"] == "product.new"):
+            r = await self._exec_product_attr(
+                session, attr_kind)
+            return await self._save_turn(
+                session, channel, text, "product.attr",
+                r, {"audioMeta": audio_meta,
+                    "commandText": command_text,
+                    "track": "attr"})
         # 否定语义拦截(先于共创/LLM/兜底): "不要这款"误中
         # "要这款"加购 pattern; 纯否定词("不需要")无 pattern
         # ——商品语境统一转下一款推荐(对话循环: 推荐→不要→
@@ -650,6 +998,92 @@ class XiaozhuService:
                  "card": None},
                 {"audioMeta": audio_meta,
                  "commandText": command_text})
+        # 清单减量拦截("少一件/去掉一瓶/减两件"——相对减,
+        # 减到 0 移除; 真机实证会话 136: 清单失控无法减回。
+        # 先于改量/肯定应答——"少"字话语无指令 pattern 冲突)
+        if (cmd is None
+                or cmd["action"] == "cart.add"):
+            _dq = _parse_dec_qty(command_text)
+            if _dq:
+                r = await self._exec_cart_decqty(
+                    session, command_text,
+                    qty_override=_dq)
+                if r:
+                    return await self._save_turn(
+                        session, channel, text,
+                        "cart.decqty", r,
+                        {"audioMeta": audio_meta,
+                         "commandText": command_text,
+                         "track": "rule"})
+        # 清单改量拦截(先于肯定应答/LLM): "只要两件/清单两件/
+        # 尊享只要一件"=设指定款总量(真机实证被误判追加——改量
+        # 与追加分离; 压过 cart.add 弱 pattern"要一件"抢答)。
+        # 已有清单时隐式单数("我要一瓶/给我一瓶"——真机实证
+        # 会话 133: 清单4件后"我要一瓶"本意总量1瓶, 被追加到5)
+        if (cmd is None
+                or cmd["action"] == "cart.add"):
+            _turns_sq = await self.repo.list_turns(
+                session_id)
+            _has_cart = any(
+                (t.get("card") or {}).get("type")
+                in ("cart_added", "cart_setqty")
+                for t in _turns_sq)
+            _sq = _parse_set_qty(command_text,
+                                 has_cart=_has_cart)
+            if _sq:
+                r = await self._exec_cart_setqty(
+                    session, command_text,
+                    qty_override=_sq)
+                if r:
+                    return await self._save_turn(
+                        session, channel, text, "cart.setqty",
+                        r, {"audioMeta": audio_meta,
+                            "commandText": command_text,
+                            "track": "rule"})
+        # 肯定应答拦截(商品语境): 推荐反问"需要吗?"后用户答
+        # "需要/要加两件/买两件/加个购物车/来两件"——
+        # 加购当前推荐款(数量词解析; 与否定拦截对称,
+        # 对话剧本闭环: 推荐→反问→肯定应答加购)
+        if (cmd is None
+                and _AFFIRM_BUY_RE.match(command_text)):
+            _turns_pre = await self.repo.list_turns(
+                session_id)
+            _has_product = any(
+                (t.get("card") or {}).get("type")
+                in ("product_list", "product_detail")
+                for t in _turns_pre)
+            # 高敏 confirm 屏蔽(与智能轨同口径): 结算发卡
+            # 等待确认短语/屏幕码期间, 应答式加购不执行——
+            # 引导完成或取消, 防清单被确认窗口期误加污染
+            _pending_guard = False
+            if _has_product and session.get("memberId"):
+                try:
+                    from services.xiaozhu_executor import (
+                        get_executor,
+                    )
+                    if get_executor().has_pending_confirm(
+                            session.get("memberId")):
+                        _pending_guard = True
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "voice48_affirm_pending_skip: %s", exc)
+            if _pending_guard:
+                return await self._save_turn(
+                    session, channel, text, "chat",
+                    {"reply": "订单正在等待确认——请说"
+                              "「确认提交订单」并输入屏幕上的"
+                              " 4 位确认码；说「取消」可撤销"
+                              "本次操作",
+                     "card": None},
+                    {"audioMeta": audio_meta,
+                     "commandText": command_text})
+            if _has_product:
+                r = await self._exec_cart_add(
+                    session, command_text)
+                return await self._save_turn(
+                    session, channel, text, "cart.add",
+                    r, {"audioMeta": audio_meta,
+                        "commandText": command_text})
         track = "rule"
         if cmd is None:
             # P3 共创短语匹配(已上架的自定义指令)
@@ -671,6 +1105,18 @@ class XiaozhuService:
                 cmd = next(c for c in COMMANDS
                            if c["action"] == llm_hit["action"])
                 track = "llm"
+        if cmd is None:
+            # 智能应答轨(LLM 对话意图分类——XIAOZHU_LLM_MODE
+            # on 时; 任意自然说法理解: affirm/negate/next/
+            # command/chat; 失败回退规则轨兜底)
+            smart = await self._llm_dialog_intent(
+                session, command_text)
+            if smart is not None:
+                saved_smart = await self._exec_smart_intent(
+                    session, channel, text, command_text,
+                    smart, audio_meta)
+                if saved_smart is not None:
+                    return saved_smart
         if cmd is None:
             # P3 失败挖掘: 兜底轮次归 failure_cases(fail-soft)
             # 负反馈词优先归 negative, 其余归 fallback
@@ -709,7 +1155,242 @@ class XiaozhuService:
         # =off 默认空转——零影响红线)
         await self._voice50_turn_hook(session, channel,
                                        text, cmd, result)
+        logger.info("voice48_timing sid=%s total_ms=%d "
+                    "action=%s track=%s",
+                    session_id,
+                    round((time.monotonic() - started) * 1000),
+                    cmd["action"], track)
         return saved
+
+    # --------------------------------------------------------
+    # 智能应答轨(LLM 对话意图——规则 miss 时自然语言理解)
+    # --------------------------------------------------------
+
+    async def _llm_dialog_intent(self, session: dict,
+                                 command_text: str) -> dict | None:
+        """LLM 对话意图分类(XIAOZHU_LLM_MODE on 或
+        Redis 运行时开关 zhuxiang:xiaozhu:llm_dialog=on 时)
+
+        上下文注入最近 2 轮(反问/商品语境)——分类
+        affirm/negate/next/command/chat/unknown。
+        失败/关闭返回 None(回退规则轨兜底)。
+        """
+        if not _llm_mode_enabled():
+            # 运行时开关(Redis——全站三态灰度范式; 容器
+            # 重建成本高, 按需 SET 即开, DEL 即关)
+            try:
+                from repositories.backend import (
+                    is_redis_mode, get_redis_client,
+                )
+                if not is_redis_mode():
+                    return None
+                client = await get_redis_client()
+                on = await client.get(
+                    "zhuxiang:xiaozhu:llm_dialog")
+                if on not in (b"on", "on"):
+                    return None
+            except Exception:  # noqa: BLE001
+                return None
+        try:
+            turns = await self.repo.list_turns(
+                session["sessionId"])
+            ctx_lines = []
+            for t in (turns or [])[-2:]:
+                card_t = (t.get("card") or {}).get("type")
+                ctx_lines.append(
+                    f"- 用户说: "
+                    f"{str(t.get('rawText') or '')[:30]}"
+                    f" | 小竹回: "
+                    f"{str(t.get('reply') or '')[:40]}"
+                    f"{'(推荐了商品)' if card_t in (
+                        'product_list', 'product_detail')
+                       else ''}")
+            context_desc = ("对话上下文:\n"
+                            + "\n".join(ctx_lines)
+                            if ctx_lines else "新对话")
+            # 导购知识注入: 最近推荐款属性摘要(真机实证 chat 轨
+            # 瞎答度数"40度左右"/占位符"XX度"——LLM 无据可依;
+            # 注入商品数据后 chat 回答有据, 防幻觉红线配套
+            # prompt 约束在 llm_client)
+            try:
+                last = await self._resolve_last_product(
+                    session)
+                if last:
+                    from repositories.product_repository \
+                        import ProductRepository
+                    det = await ProductRepository().get_by_id(
+                        str(last.get("id")
+                            or last.get("productId")
+                            or last.get("product_id") or ""))
+                    if det:
+                        at = det.get("attributes") or {}
+                        context_desc += (
+                            "\n当前推荐商品(用户咨询时只能"
+                            "依据此数据回答): "
+                            + str(det.get("name") or "")
+                            + "，"
+                            + str(at.get("alcohol") or "")
+                            + "，"
+                            + str(at.get("aroma") or "")
+                            + "，口感"
+                            + str(at.get("taste") or "")
+                            + "，"
+                            + str(at.get("process") or "")
+                            + "，产自"
+                            + str(at.get("origin") or ""))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("voice48_attr_ctx_skip: %s", exc)
+            from services.llm_client import provider_client
+            import time as _t
+            _llm_t0 = _t.monotonic()
+            result = provider_client \
+                .classify_dialog_intent(command_text,
+                                        context_desc)
+            logger.info("voice48_timing llm_dialog_ms=%d",
+                        round((_t.monotonic() - _llm_t0)
+                              * 1000))
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_smart_intent_skip: %s", exc)
+            return None
+
+    async def _exec_smart_intent(self, session: dict,
+                                 channel: str, text: str,
+                                 command_text: str,
+                                 smart: dict,
+                                 audio_meta: dict) -> dict | None:
+        """智能意图执行(数字仍由执行层产生——防幻觉红线)
+
+        Returns: 已落轮次的完整响应; None=回退规则轨
+        (unknown/无语境 affirm/LLM 未执行)。
+        """
+        # 语气词护栏(真机实证): confirm 等待中"啊"(0.6s)被
+        # LLM 判 affirm 误加购——单双字纯语气词无购买意图,
+        # 一律改引导不上链执行(加购/换款/指令全拦)
+        if _is_filler(command_text):
+            return await self._save_turn(
+                session, channel, text, "chat",
+                {"reply": "没太听清——需要这款就说「需要」，"
+                          "想换就说「换一款」",
+                 "card": None},
+                {"audioMeta": audio_meta,
+                 "commandText": command_text,
+                 "track": "llm_dialog"})
+        # 礼貌词护栏(真机实证: 推荐反问"需要吗?"后答"谢谢"
+        # 被判 affirm 误加购)——结束语转客气回应, 不执行加购
+        if _is_polite_only(command_text):
+            return await self._save_turn(
+                session, channel, text, "chat",
+                {"reply": "不客气！需要这款就说「需要」，"
+                          "想再看看说「换一款」",
+                 "card": None},
+                {"audioMeta": audio_meta,
+                 "commandText": command_text,
+                 "track": "llm_dialog"})
+        intent = str(smart.get("intent") or "")
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        has_product = any(
+            (t.get("card") or {}).get("type")
+            in ("product_list", "product_detail")
+            for t in turns)
+        if intent == "affirm":
+            # 高敏 confirm 屏蔽(真机实证: 确认码等待中"啊"
+            # 触发加购污染清单)——confirm 令牌 pending 期间
+            # 模糊 affirm 不执行, 只引导确认/取消; 确认短语
+            # 与取消已有专用拦截在前, 走到此即非确认话语
+            member_id = session.get("memberId")
+            if member_id:
+                try:
+                    from services.xiaozhu_executor import (
+                        get_executor,
+                    )
+                    pending = get_executor() \
+                        .has_pending_confirm(member_id)
+                    if pending:
+                        phrase = pending.get(
+                            "consentPhrase") or "确认提交订单"
+                        return await self._save_turn(
+                            session, channel, text, "chat",
+                            {"reply": "订单正在等待确认——请说"
+                                      f"「{phrase}」并输入屏幕上"
+                                      "的 4 位确认码；说「取消」"
+                                      "可撤销本次操作",
+                             "card": None},
+                            {"audioMeta": audio_meta,
+                             "commandText": command_text,
+                             "track": "llm_dialog"})
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "voice48_pending_check_skip: %s", exc)
+            if has_product:
+                r = await self._exec_cart_add(
+                    session, command_text,
+                    qty_override=smart.get("qty"))
+                return await self._save_turn(
+                    session, channel, text, "cart.add", r,
+                    {"audioMeta": audio_meta,
+                     "commandText": command_text,
+                     "track": "llm_dialog"})
+        if intent == "setqty":
+            # 改量(自然说法——"我只要两个就够了"不中正则,
+            # LLM 判 setqty; qty 由 LLM 依据本轮话语填 1-9
+            # ——改的是总量非追加)
+            r = await self._exec_cart_setqty(
+                session, command_text,
+                qty_override=smart.get("qty"))
+            if r:
+                return await self._save_turn(
+                    session, channel, text, "cart.setqty",
+                    r, {"audioMeta": audio_meta,
+                        "commandText": command_text,
+                        "track": "llm_dialog"})
+        if intent == "negate" and has_product:
+            context = await self.build_context(
+                session.get("memberId"))
+            r = await self._exec_product_new(
+                context, session, "换一款")
+            r["reply"] = str(r["reply"]).replace(
+                "好的——我为您推荐下一款",
+                "好的，不要这款——我再为您推荐", 1)
+            return await self._save_turn(
+                session, channel, text, "product.new", r,
+                {"audioMeta": audio_meta,
+                 "commandText": command_text,
+                 "track": "llm_dialog"})
+        if intent == "next":
+            context = await self.build_context(
+                session.get("memberId"))
+            r = await self._exec_product_new(
+                context, session, "换一款")
+            return await self._save_turn(
+                session, channel, text, "product.new", r,
+                {"audioMeta": audio_meta,
+                 "commandText": command_text,
+                 "track": "llm_dialog"})
+        if intent.startswith("command:"):
+            action = intent.split(":", 1)[1]
+            cmd = next((c for c in COMMANDS
+                        if c["action"] == action), None)
+            if cmd:
+                result = await self._execute(
+                    session, cmd, command_text,
+                    member_id_hint=True)
+                return await self._save_turn(
+                    session, channel, text, action, result,
+                    {"audioMeta": audio_meta,
+                     "commandText": command_text,
+                     "track": "llm_dialog"})
+        if intent == "chat" and smart.get("reply"):
+            # 防幻觉红线: LLM reply 禁数字(prompt 约束),
+            # 不产卡片——纯对话存在感
+            return await self._save_turn(
+                session, channel, text, "chat",
+                {"reply": smart["reply"], "card": None},
+                {"audioMeta": audio_meta,
+                 "commandText": command_text,
+                 "track": "llm_dialog"})
+        return None  # unknown/无语境 → 规则轨兜底
 
     async def _voice50_turn_hook(self, session: dict,
                                   channel: str,
@@ -818,7 +1499,7 @@ class XiaozhuService:
                 turns, text)
             # ⑦ 跨文化包容表达(P2——方言/外语识别标记
             #    小众语种数据积累 ×2)
-            if _detect_inclusive(command_text):
+            if _detect_inclusive(text):
                 await svc.record_behavior(
                     member_id, "voice_inclusive",
                     session_id, turn_seq,
@@ -1099,6 +1780,7 @@ class XiaozhuService:
                 "card": {"type": "confirm",
                          "subject": r["summary"],
                          "confirmToken": r["confirmToken"],
+                         "screenCode": r.get("screenCode"),
                          "codeHint": r["codeHint"],
                          "expiresIn": r["expiresIn"],
                          "consentPhrase":
@@ -1193,24 +1875,27 @@ class XiaozhuService:
         return float(m.group(1)) if m else None
 
     async def _exec_cart_add(self, session: dict,
-                            text: str) -> dict:
+                            text: str,
+                            qty_override: int = None) -> dict:
         """P1 语音选品: 指代/关键词→商品→会话购物清单
 
         清单落 cart_added 卡片轮次(零新存储)——结算时
         _resolve_cart_items 聚合全量加购项多件下单。
         会话级非资金动作: 不经沙箱/确认(结算仍是 confirm 面)。
+        qty_override: 智能应答轨 LLM 解析的数量直传。
         """
         # ① 目标解析: 剥指令词后商品词非空→搜索优先;
         #    纯指代(就它了/来一件)→最近商品卡(上游指代
         #    消解已把"这个"展开为商品名, 两条路径一致)
         # 数量词解析: "加购两件儿"→2(留痕实证说两件只加
         # 1 件); 中文数字+件/瓶/箱/个/提, 上限 9 防误加
-        qty = _parse_qty(text)
+        qty = int(qty_override) if qty_override else _parse_qty(text)
         kw = re.sub(
-            r"(加入购物车|加入购物清单|放进?到?购物车|"
+            r"(加入?个?购物[车清单]|放进?到?购物车|"
             r"加购|来[一二两三四五六七八九十\d]*[件个瓶]|"
             r"要[一二两三四五六七八九十\d]*[件个瓶]|"
-            r"买这个|就它了|就要这个|需要)", "",
+            r"买[这个一二两三四五六七八九十\d]*[件个瓶]?|"
+            r"就它了|就要这个|需要)", "",
             str(text or "")).strip()
         kw = _QTY_RE.sub("", kw).strip()  # 剥残余数量词
         kw = kw.rstrip("儿")  # 儿化音尾("两件儿")
@@ -1235,14 +1920,11 @@ class XiaozhuService:
                or product.get("product_id"))
         name = product.get("name") or "商品"
         price = product.get("price")
-        # 清单件数(会话 cart_added 轮次按 quantity 聚合)
+        # 清单构成明细(共用函数——与推荐轮 preheat 逐字一致)
         turns = await self.repo.list_turns(
             session["sessionId"])
-        count = sum(
-            int((t.get("card") or {}).get("quantity") or 1)
-            for t in turns
-            if (t.get("card") or {}).get("type")
-            == "cart_added") + qty
+        count, detail = _cart_detail(
+            turns, pid, name, qty)
         try:
             total = round(float(price) * qty, 2)
             total_s = f"¥{total:g}"
@@ -1250,11 +1932,162 @@ class XiaozhuService:
             total_s = f"¥{price}×{qty}"
         return {
             "reply": f"已加「{name}」×{qty}，{total_s}，"
-                     f"清单{count}件。还要吗？或说「结算」",
+                     f"清单{count}件（{detail}）。"
+                     "还要吗？或说「结算」",
             "card": {"type": "cart_added",
                      "subject": name, "productId": pid,
                      "price": price, "quantity": qty,
-                     "cartCount": count},
+                     "cartCount": count,
+                     "cartDetail": detail},
+            "executed": True}
+
+    async def _exec_cart_setqty(self, session: dict,
+                                text: str,
+                                qty_override: int = None
+                                ) -> dict | None:
+        """清单改量执行器("只要两件/清单两件/便携的改为两瓶"
+        ——设指定款总量, 非追加; 真机实证"清单两件"被误加)
+
+        落 cart_setqty 卡轮次(零新存储——聚合层重置语义:
+        该款累计重置为 N, 其后 cart_added 继续累加)。
+        目标款: 剥改量词后含商品词→搜索指定款("便携的只要
+        两件"); 无商品词→最近推荐款。
+        qty_override: LLM 智能轨 setqty 意图直传(自然说法
+        不中正则——"我只要两个就够了")。
+        """
+        qty = int(qty_override) if qty_override \
+            else _parse_set_qty(text)
+        if not qty:
+            return None
+        # 目标款解析: 剥改量词/量词/语气词→剩余商品词
+        # ("尊享只要一件"→"尊享")
+        kw = re.sub(
+            r"只要|就要|一共|总共|清单|数量"
+            r"|改[成为]|调成?|调整?为|设[成为]?"
+            r"|[一二两三四五六七八九\d]+\s*[件瓶箱个听提]"
+            r"|就行|就好|就够了|了|啦|[的呀啊哦吧呗。,.!！?？"
+            r"|[这那]款?|它",
+            "", str(text or "")).strip()
+        product = None
+        if kw:
+            product = await self._search_first_product(kw)
+        if product is None:
+            product = await self._resolve_last_product(
+                session)
+        if product is None:
+            return {"reply": "先看款再改数量——说「看新品」"
+                              "选中后说「只要两件」",
+                    "card": None, "clarify": "product"}
+        pid = (product.get("id")
+               or product.get("productId")
+               or product.get("product_id"))
+        name = product.get("name") or "商品"
+        price = product.get("price")
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        count, detail = _cart_detail(
+            turns, pid, name, qty, mode="set")
+        return {
+            "reply": f"好的，「{name}」已改为 {qty} 件，"
+                     f"清单{count}件（{detail}）。"
+                     "还要吗？或说「结算」",
+            "card": {"type": "cart_setqty",
+                     "subject": name, "productId": pid,
+                     "price": price, "quantity": qty,
+                     "cartCount": count,
+                     "cartDetail": detail},
+            "executed": True}
+
+    async def _resolve_last_cart_product(
+            self, session: dict) -> dict | None:
+        """最近清单款(倒序最近加购/改量轮的卡)——减量目标"""
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        for t in reversed(turns):
+            card = t.get("card") or {}
+            if card.get("type") in ("cart_added",
+                                    "cart_setqty"):
+                pid = card.get("productId")
+                name = card.get("subject")
+                if pid or name:
+                    return {"id": pid, "productId": pid,
+                            "name": name,
+                            "price": card.get("price")}
+        return None
+
+    async def _exec_cart_decqty(self, session: dict,
+                                text: str,
+                                qty_override: int = None
+                                ) -> dict | None:
+        """清单减量执行器("少一件/去掉一瓶/减两件"——相对减,
+        减到 0 移除该款; 真机实证会话 136: 清单失控无法减回)
+
+        实现为"现量-N 后落 cart_setqty"——复用聚合层语义。
+        目标款: 剥减量词后含商品词→搜索指定款; 无→最近清单款
+        (无清单款时回退最近推荐款)。
+        """
+        n = int(qty_override) if qty_override \
+            else _parse_dec_qty(text)
+        if not n:
+            return None
+        kw = re.sub(
+            r"少|去掉|减去?|退掉?|拿掉|划掉"
+            r"|[一二两三四五六七八九\d]+\s*[件瓶箱个听提]"
+            r"|[的儿呀啊哦吧呗。,.!！?？]|[这那]款?|它",
+            "", str(text or "")).strip()
+        product = None
+        if kw:
+            product = await self._search_first_product(kw)
+        if product is None:
+            product = await self._resolve_last_cart_product(
+                session)
+        if product is None:
+            product = await self._resolve_last_product(
+                session)
+        if product is None:
+            return {"reply": "清单里还没有商品——先说"
+                              "「看新品」选中后说「需要」",
+                    "card": None, "clarify": "product"}
+        pid = (product.get("id")
+               or product.get("productId")
+               or product.get("product_id"))
+        name = product.get("name") or "商品"
+        # 现量(该款累计)
+        turns = await self.repo.list_turns(
+            session["sessionId"])
+        cur = 0
+        for t in turns:
+            c = t.get("card") or {}
+            if c.get("type") not in ("cart_added",
+                                     "cart_setqty"):
+                continue
+            if str(c.get("productId") or "") != str(pid):
+                continue
+            if c.get("type") == "cart_setqty":
+                cur = int(c.get("quantity") or 0)
+            else:
+                cur += int(c.get("quantity") or 1)
+        new = max(cur - n, 0)
+        count, detail = _cart_detail(
+            turns, pid, name, new, mode="set")
+        if new <= 0:
+            reply = (f"好的，「{name}」已从清单去掉，"
+                     f"清单{count}件"
+                     + (f"（{detail}）" if detail else "为空")
+                     + "。还想看看别的吗？")
+        else:
+            reply = (f"好的，「{name}」减了 {n} 件，"
+                     f"还剩 {new} 件，"
+                     f"清单{count}件（{detail}）。"
+                     "还要吗？或说「结算」")
+        return {
+            "reply": reply,
+            "card": {"type": "cart_setqty",
+                     "subject": name, "productId": pid,
+                     "price": product.get("price"),
+                     "quantity": new,
+                     "cartCount": count,
+                     "cartDetail": detail},
             "executed": True}
 
     async def _resolve_last_product(
@@ -1294,22 +2127,48 @@ class XiaozhuService:
 
     async def _resolve_cart_items(self,
                                   session: dict) -> list:
-        """结算对象: P1 聚合会话购物清单(cart_added 轮次
-        全量多件); P0 兼容——无加购轮时取最近商品卡首件"""
+        """结算对象: P1 聚合会话购物清单(cart_added 全量多件;
+        cart_setqty 轮重置该款累计——改量语义参与结算);
+        P0 兼容——无加购轮时取最近商品卡首件"""
         turns = await self.repo.list_turns(
             session["sessionId"])
-        items = []
+        totals: dict = {}
+        info: dict = {}
+        order: list = []
         for t in turns:
             card = t.get("card") or {}
-            if card.get("type") == "cart_added" \
-                    and card.get("productId"):
-                items.append({
-                    "productId": str(card["productId"]),
+            ctype = card.get("type")
+            if ctype not in ("cart_added",
+                             "cart_setqty"):
+                continue
+            pid = str(card.get("productId") or "")
+            if not pid or not card.get("subject"):
+                continue
+            if pid not in info:
+                info[pid] = {
+                    "productId": pid,
                     "name": card.get("subject"),
-                    "price": card.get("price"),
-                    "quantity": int(
-                        card.get("quantity") or 1)})
-        if items:
+                    "price": card.get("price")}
+                order.append(pid)
+            if ctype == "cart_setqty":
+                totals[pid] = int(
+                    card.get("quantity") or 0)
+            else:
+                totals[pid] = (totals.get(pid, 0)
+                               + int(card.get("quantity")
+                                     or 1))
+        items = []
+        for pid in order:
+            q = totals.get(pid, 0)
+            if q <= 0:
+                continue
+            it = dict(info[pid])
+            it["quantity"] = q
+            items.append(it)
+        # 曾有清单轮(order 非空)即使全减空也返回空——真机实证
+        # 减量移除后被 P0 兜底"最近商品卡"硬塞回 1 件; 兜底
+        # 仅限从未加购过的会话("结算这个"结当前款)
+        if items or order:
             return items
         for t in reversed(turns):
             card = t.get("card") or {}
@@ -1415,6 +2274,10 @@ class XiaozhuService:
                           f"——金额 "
                           f"{_amount if _amount is not None
                             else '-'} 元" + broadcast),
+                "card": {"type": "order_done",
+                         "subject": "订单已提交",
+                         "orderId": result.get("orderId"),
+                         "totalPrice": _amount},
                 "result": result, **extra}
         return {"success": bool(result.get("success")),
                 "executed": True,
@@ -1427,14 +2290,195 @@ class XiaozhuService:
     # 执行器(只读直达——全部调既有业务 API)
     # --------------------------------------------------------
 
+    async def _filter_spec_products(self,
+                                     spec: dict) -> list:
+        """按规格过滤在售产品(度数/容量前缀/系列子串)
+
+        同度数多款按销量排序(真机反馈: 42° 多款时应按销量
+        一款一款推荐——销量好的先推; sales_total 降序, 无
+        销量数据排后保持稳定)"""
+        from repositories.product_repository import (
+            ProductRepository,
+        )
+        products = await ProductRepository().list_all()
+        hits = [p for p in products
+                if p.get("status") == "on_sale"]
+        if spec.get("alcohol"):
+            hits = [p for p in hits
+                    if p.get("alcohol") == spec["alcohol"]]
+        if spec.get("volume"):
+            hits = [p for p in hits
+                    if str(p.get("volume")
+                           or "").startswith(spec["volume"])]
+        if spec.get("series_kw"):
+            hits = [p for p in hits
+                    if spec["series_kw"] in str(
+                        p.get("series") or "")]
+
+        def _sales(p):
+            try:
+                return float(p.get("sales_total") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        return sorted(hits, key=_sales, reverse=True)
+
+    async def _exec_product_attr(self, session: dict,
+                                  kind: str) -> dict:
+        """属性问答执行器(产品库结构化数据——防幻觉红线)
+
+        有最近推荐款答该款 attributes; 无语境给全系概览
+        (香型集合+度数档位——真机实证"咱家的酒都是有多少度
+        的"应答此概览)。
+        """
+        # 属性答句模板(kind→(模板, 依赖字段序))
+        tpl = {
+            "alcohol": "「{name}」是{alcohol}，{taste}",
+            "aroma": "「{name}」是{aroma}，{process}",
+            "taste": "「{name}」口感{taste}，{alcohol}",
+            "ingredients": "「{name}」用{ingredients}酿制",
+            "process": "「{name}」采用{process}",
+            "origin": "「{name}」产自{origin}",
+            "storage": "「{name}」建议{storage}",
+        }.get(kind)
+        card = None
+        last = await self._resolve_last_product(session)
+        detail = None
+        if last:
+            from repositories.product_repository import (
+                ProductRepository,
+            )
+            detail = await ProductRepository().get_by_id(
+                str(last.get("id")
+                    or last.get("productId")
+                    or last.get("product_id") or ""))
+        if detail:
+            attrs = detail.get("attributes") or {}
+            vals = {"name": detail.get("name") or "这款酒"}
+            for k in ("alcohol", "aroma", "taste",
+                      "ingredients", "process", "origin",
+                      "storage"):
+                v = attrs.get(k)
+                if not v:
+                    v = detail.get(k)
+                if v:
+                    vals[k] = str(v)
+            reply = ""
+            if tpl:
+                try:
+                    reply = tpl.format(**vals)
+                except KeyError:
+                    # 模板字段部分缺失: 降级拼可用字段
+                    import re as _re
+                    parts = _re.findall(r"\{([a-z]+)\}", tpl)
+                    avail = [f for f in parts
+                             if f in vals and f != "name"]
+                    if avail:
+                        reply = (f"「{vals['name']}」"
+                                 + "，".join(
+                                     str(vals[f])
+                                     for f in avail))
+            if not reply:
+                # 字段缺失兜底: description 或引导
+                d = str(detail.get("description") or "")
+                reply = (f"「{vals['name']}」{d}"
+                         if d else
+                         "这款的具体参数我帮您看下——"
+                         "您也可以说「看详情」打开商品页")
+            card = {"type": "product_detail",
+                    "subject": vals["name"],
+                    "productId": detail.get("product_id")
+                    or detail.get("productId"),
+                    "price": detail.get("price"),
+                    "attributes": attrs}
+            return {"reply": reply, "card": card}
+        # 无商品语境: 全系概览(香型+度数档位)
+        from repositories.product_repository import (
+            ProductRepository,
+        )
+        products = [p for p in
+                    await ProductRepository().list_all()
+                    if p.get("status") == "on_sale"]
+        aromas = sorted({
+            str((p.get("attributes") or {}).get("aroma"))
+            for p in products
+            if (p.get("attributes") or {}).get("aroma")})
+        degs = sorted({
+            p.get("alcohol") for p in products
+            if p.get("alcohol")})
+        deg_s = "/".join(f"{d}°" for d in degs)
+        if kind == "alcohol":
+            reply = (f"咱家在售 {deg_s} 多档度数"
+                     + (f"，都是{'、'.join(aromas)}"
+                        if aromas else "")
+                     + "——说「"
+                     + (f"{degs[0]}度的」"
+                        if degs else "看新品」")
+                     + "直接挑，或「看新品」我推荐")
+        elif kind == "aroma":
+            reply = (f"咱家全系{'、'.join(aromas)}白酒，"
+                     f"度数 {deg_s}——说「多少度」或"
+                     "「看新品」我帮您挑")
+        else:
+            reply = ("您想了解哪款? 先说「看新品」或"
+                     "「42度的」，我再给您报"
+                     + {"taste": "口感", "ingredients":
+                        "原料", "process": "工艺",
+                        "origin": "产地",
+                        "storage": "存放方式"}.get(
+                            kind, "详情"))
+        return {"reply": reply, "card": None}
+
     async def _exec_product_new(self, context: dict = None,
                                session: dict = None,
-                               text: str = "") -> dict:
-        from services.product_service import ProductService
-        r = await ProductService().list_products(
-            filters=None, sort="new", page=1, page_size=8)
-        items = (r.get("products")
-                 or r.get("items") or [])[:8]
+                               text: str = "",
+                               items: list = None) -> dict:
+        # 规格语境延续(真机实证: "42度"后"换一款"推进到 52
+        # 度——过滤集只在单次调用存活, 下一轮重新取新品全量
+        # 语境丢失): 规格查询会话记 specFilter, "换一款"仍在
+        # 该规格过滤集(销量序)内推进; 普通新品查询清语境
+        _spec = _parse_spec(text)
+        _is_next = bool(re.search(
+            r"换一[款个]|还有吗|下一[款个]",
+            str(text or "")))
+        if session is not None:
+            if _spec:
+                session["specFilter"] = _spec
+            elif not (_is_next
+                      and session.get("specFilter")):
+                # 置空而非 pop(Redis hset 不删键——空 dict
+                # 覆盖防旧过滤集残留)
+                session["specFilter"] = {}
+        if items is None:
+            if session is not None \
+                    and session.get("specFilter"):
+                _hits = await self._filter_spec_products(
+                    session["specFilter"])
+                if _hits:
+                    items = _hits
+        if items is None:
+            from services.product_service import ProductService
+            r = await ProductService().list_products(
+                filters=None, sort="new", page=1, page_size=8)
+            items = (r.get("products")
+                     or r.get("items") or [])[:8]
+        # 主图回填(商品面板视觉): list_products 摘要无 images
+        # 字段——从 repo 全量按 id 回填(规格轨 items 已有则跳过)
+        try:
+            from repositories.product_repository import (
+                ProductRepository,
+            )
+            _full = {str(p.get("product_id")): p for p in
+                     await ProductRepository().list_all()}
+            for it in items:
+                fp = _full.get(str(
+                    it.get("product_id")
+                    or it.get("productId")
+                    or it.get("id") or ""))
+                if fp and not it.get("images"):
+                    it["images"] = fp.get("images") or {}
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_img_backfill_skip: %s", exc)
         # P1 角色注入: 偏好重排序(只调序不筛除——防信息茧房)
         prefs = (context or {}).get("preferenceTags") or []
         if prefs and items:
@@ -1453,6 +2497,11 @@ class XiaozhuService:
             "name": p.get("name"),
             "price": p.get("price"),
             "subtitle": p.get("subtitle"),
+            # 主图(商品面板视觉展示——购买氛围; 无图静默缺省)
+            "image": ((p.get("images") or {})
+                      .get("main") or ""),
+            "alcohol": p.get("alcohol"),
+            "volume": p.get("volume"),
         } for p in items]
         subject = (cards[0].get("name")
                    if cards else "新品")
@@ -1485,20 +2534,75 @@ class XiaozhuService:
         if first:
             # 播报短句(合成快/下载小/播放短/残响短——全链
             # 提速; 卖点详情交给屏幕卡片展示)
-            reply = (greet + "好的，"
-                     + ("下一款，" if is_next else "新品，")
+            # 话术前缀按意图: 换款/规格找酒/新品(真机反馈:
+            # 规格轮说"新品"话术乱)
+            _spec = _parse_spec(text)
+            if is_next:
+                _prefix = "下一款，"
+            elif _spec:
+                _prefix = _describe_spec(_spec) + "的，"
+            elif "几款" in str(text or ""):
+                # 款数问句("有几款酒"——真机实证 140:3
+                # 落 general 兜底): 报总数+推最畅销
+                _prefix = (f"共 {len(cards)} 款，"
+                           "先推荐")
+            else:
+                _prefix = "新品，"
+            try:
+                _price_s = f"{float(first.get('price')):g}"
+            except (TypeError, ValueError):
+                _price_s = str(first.get("price"))
+            reply = (greet + "好的，" + _prefix
                      + f"「{first.get('name')}」，"
-                     f"¥{first.get('price')}，需要吗？")
+                     f"¥{_price_s}，需要吗？")
         else:
             reply = greet + "暂时没有查到新品"
+        # TTS 分支预合成文本(前端收到推荐即预下载两分支音频
+        # → 用户答"需要"/"不要这款"时本地缓存命中秒播)
+        preheat = []
+        if first and session is not None:
+            try:
+                pturns = await self.repo.list_turns(
+                    session["sessionId"])
+                name, price = first.get("name"), first.get("price")
+                fid = (first.get("id")
+                       or first.get("productId"))
+                # 与加购轮共用明细函数(逐字一致——秒播前提)
+                pcount, pdetail = _cart_detail(
+                    pturns, fid, name, 1)
+                try:
+                    total_s = f"{float(price):g}"
+                except (TypeError, ValueError):
+                    total_s = f"{price}×1"
+                preheat.append(
+                    f"已加「{name}」×1，¥{total_s}，"
+                    f"清单{pcount}件（{pdetail}）。"
+                    f"还要吗？或说「结算」")
+                nxt = (cards[(cursor + 1) % len(cards)]
+                       if len(cards) > 1 else first)
+                try:
+                    nprice_s = f"{float(nxt.get('price')):g}"
+                except (TypeError, ValueError):
+                    nprice_s = str(nxt.get("price"))
+                # 与否定轮实际 reply 模板一致(缓存命中前提)
+                preheat.append(
+                    greet + "好的，下一款，"
+                    f"「{nxt.get('name')}」，"
+                    f"¥{nprice_s}，需要吗？")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("voice48_preheat_skip: %s", exc)
         return {
             "reply": reply,
             "card": {"type": "product_list",
                      "subject": first.get("name")
                      if first else subject,
-                     "items": cards,
+                     # 一款一款推荐(真机反馈: 同度数多款时不
+                     # 要一次列 n 款——卡片只放当前游标款,
+                     # "换一款"逐款推进; 推进集 cards 全量)
+                     "items": [first] if first else [],
                      "preferenceApplied": prefs},
-            "jump": "/#/pages/products/index?sort=new"}
+            "jump": "/#/pages/products/index?sort=new",
+            "ttsPreheat": preheat}
 
     async def _exec_product_price(self,
                                   text: str) -> dict:
@@ -2120,6 +3224,42 @@ class XiaozhuService:
                          exc)
             return None
 
+    async def _try_confirm_cancel(self, session: dict,
+                                  command_text: str) -> dict | None:
+        """用户取消待确认高敏操作(仅 confirm 令牌 pending
+        时生效——取消即焚令牌, 给用户反悔路径)
+
+        "结算"发卡后 60s 窗口内说"取消/算了/不要了" →
+        撤销待确认操作; 无 pending 返回 None(正常路由)。
+        """
+        try:
+            text = str(command_text or "").strip()
+            if not text or not _CANCEL_CONFIRM_RE.match(text):
+                return None
+            member_id = session.get("memberId")
+            if not member_id:
+                return None
+            from services.xiaozhu_executor import (
+                get_executor,
+            )
+            ex = get_executor()
+            if not ex.has_pending_confirm(member_id):
+                return None
+            cancelled = ex.cancel_confirm(member_id)
+            if not cancelled:
+                return None
+            return await self._save_turn(
+                session, session.get("channel") or "voice",
+                text, "confirm.cancel", {
+                    "reply": "好的，已取消本次操作。想继续看看"
+                             "就再说「看新品」，随时为您服务",
+                    "card": None,
+                }, {"commandText": text})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_confirm_cancel_skip: %s",
+                         exc)
+            return None
+
     async def _llm_match(self, text: str) -> dict | None:
         """LLM 意图增强轨(XIAOZHU_LLM_MODE=on 且规则轨
         未中时; LLM 只从白名单指令集选 action——不产内容)
@@ -2227,9 +3367,10 @@ class XiaozhuService:
             "channel": channel,
             "audioMeta": (extras.get("audioMeta") or {}),
             "rawText": mask_pii(raw_text),
-            "wake": bool(extras.get("commandText")
-                         is not None
-                         or extras.get("wakeHint")),
+            "wake": bool(intent != "not_woken"
+                         and (extras.get("commandText")
+                              is not None
+                              or extras.get("wakeHint"))),
             "intent": intent,
             "action": (result.get("action")
                        if isinstance(result, dict)
@@ -2253,6 +3394,7 @@ class XiaozhuService:
             "autoJump": result.get("autoJump", False),
             "wakeHint": extras.get("wakeHint", False),
             "track": extras.get("track", "rule"),
+            "ttsPreheat": result.get("ttsPreheat"),
             "fallbackHint": (result.get("fallbackHint")
                              or extras.get("fallbackHint")),
             "commandText": extras.get("commandText"),

@@ -252,6 +252,30 @@ body.embed .footer{display:none}
 }
 /* 软键盘弹起态(VV 适配 JS 加 .kb): 释放 safe-area 底部增量防 composer 异常增高 */
 body.kb .composer{padding-bottom:12px}
+/* ===== 商品面板(当前推荐款常驻——图+价+购买按钮) ===== */
+.ppanel{display:flex;gap:10px;align-items:center;background:#fff;
+  border:1px solid var(--bd);border-radius:12px;padding:10px;
+  margin:4px 10px 6px;box-shadow:0 2px 8px rgba(15,76,129,.07);flex-shrink:0}
+.ppanel.hidden{display:none}
+.ppanel .pimg{width:62px;height:62px;border-radius:8px;object-fit:cover;
+  flex-shrink:0;background:#f0f5ef}
+.ppanel .pimg-ph{display:flex;align-items:center;justify-content:center;
+  font-size:26px;color:#9db89d}
+.ppanel .pinfo{flex:1;min-width:0}
+.ppanel .pname{font-weight:600;font-size:13px;color:var(--tx, #333);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ppanel .ptags{margin:3px 0 2px;white-space:nowrap;overflow:hidden}
+.ppanel .ptag{font-size:10px;background:#eef5ee;color:#2d6a2d;
+  border-radius:4px;padding:1px 5px;margin-right:4px;display:inline-block}
+.ppanel .ptag.graytag{background:#f2f2f2;color:#888}
+.ppanel .pprice{color:#b5453c;font-weight:700;font-size:15px}
+.ppanel .pbtns{display:flex;flex-direction:column;gap:5px;flex-shrink:0}
+.ppanel .pbtns .btn{white-space:nowrap;padding:5px 10px;font-size:12px;margin:0}
+@media (max-width:480px){
+  .ppanel .pimg{width:54px;height:54px}
+  .ppanel .pbtns .btn{padding:4px 8px;font-size:11px}
+}
+@media (max-height:560px){ .ppanel{display:none} }
 </style>
 </head>
 <body>
@@ -290,6 +314,10 @@ body.kb .composer{padding-bottom:12px}
   <div class="chat" id="chat"></div>
 
   <div class="chips" id="chips"></div>
+
+  <!-- 商品面板: 当前推荐款常驻展示(图+价+购买按钮)——
+       购物氛围入口, 不埋进聊天气泡 -->
+  <div class="ppanel hidden" id="ppanel"></div>
 
   <div class="composer">
     <button class="downbtn" id="downBtn" title="回到最新" onclick="scrollChat()">↓</button>
@@ -422,7 +450,12 @@ function preheatTTS() {
     var a = getAuth() || {};
     var h = { "X-Member-Id": String(a.uid || "") };
     if (a.token) h["Authorization"] = "Bearer " + a.token;
-    ["在呢！", "好的"].forEach(function (t) {
+    /* 高频固定句全预取(真机实证: 兜底/引导句每轮重复出现
+       ——冷合成 2-4s + 网络往返; 预取后零等待零网络) */
+    ["在呢！", "好的",
+     "这个我还不会——试试「看新品」「问价格」「查信值」「查优惠」或「你能干什么」",
+     "我在——请以「小竹」开头唤我(或先唤醒一次, 5 分钟内可免唤醒)"]
+      .forEach(function (t) {
       fetch("/api/xiaozhu/tts?text="
             + encodeURIComponent(t), { headers: h })
         .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
@@ -568,8 +601,9 @@ function appendBot(reply, card, badgesHtml, extra, jump) {
   d.className = "msg bot" + (extra === "__err__" ? " err" : "");
   var h = '<div class="avatar">竹</div><div class="bubble">' + esc(reply || "");
   if (card) h += renderCard(card);
-  h += '<div class="badges">' + (badgesHtml || "") +
-    '<span class="t">' + nowHM() + "</span></div>";
+  /* 附加提示(唤醒引导/降级说明); 调试徽章与时间戳不渲染
+     ——用户反馈: 技术字段不上界面 */
+  if (badgesHtml) h += '<div class="badges">' + badgesHtml + "</div>";
   h += "</div>";
   d.innerHTML = h;
   c.appendChild(d);
@@ -625,19 +659,18 @@ function removeTyping() {
   if (t) t.parentNode.removeChild(t);
 }
 
-/* 卡片渲染: product_list/product_detail/confirm/confirm_voice/通用 */
+/* 卡片渲染: product_list/product_detail/cart_added/confirm/confirm_voice/通用 */
 function renderCard(card) {
   var t = card.type || "";
+  /* 商品卡不在气泡渲染(用户反馈: 查询/加购信息埋在气泡里弱,
+     购买者看不到操作信息丧失购买欲)——当前款常驻商品面板
+     (ppanel) 展示, 气泡只留语音文字反馈 */
   if (t === "product_list" || t === "product_detail") {
-    var h = '<div class="kcard"><div class="ttl">🎋 ' + esc(card.subject || "商品") +
-      (card.preferenceApplied ? ' <span class="pill gold">按您的偏好排序</span>' : "") + "</div>";
-    (card.items || []).slice(0, 6).forEach(function (p) {
-      h += '<div class="prow"><span class="nm">' + esc(p.name || p.productName || "商品") +
-        '</span><span class="pr">¥' + esc(p.price) +
-        (p.spec ? '<small> · ' + esc(p.spec) + "</small>" : "") + "</span></div>";
-    });
-    h += "</div>";
-    return h;
+    return "";
+  }
+  /* 加购结果同样上面板(清单态)——气泡只留语音文字 */
+  if (t === "cart_added" || t === "cart_setqty") {
+    return "";
   }
   if (t === "confirm") {
     var cells = '<div class="ccells">';
@@ -655,6 +688,14 @@ function renderCard(card) {
     return '<div class="confirmbox"><div class="ct">🎙 语音确认已记录</div>' +
       '<div class="cs">' + esc(card.subject || "语音意图凭证已收到") + '——请在屏幕输入 4 位确认码完成双因子核验。</div></div>';
   }
+  /* 订单完成卡: 简洁用户视图(orderId 收进小字, 不做键值对 dump) */
+  if (t === "order_done") {
+    return '<div class="kcard"><div class="ttl">✅ ' + esc(card.subject || "订单已提交") + "</div>" +
+      (card.totalPrice != null ? '<div class="prow"><span class="nm">实付金额</span><span class="pr">¥' +
+        esc(card.totalPrice) + "</span></div>" : "") +
+      (card.orderId ? '<div class="prow"><span class="nm"><small>单号 ' + esc(card.orderId) +
+        "</small></span></div>" : "") + "</div>";
+  }
   /* 通用卡片: 键值对 */
   var h = '<div class="kcard">';
   var n = 0;
@@ -668,17 +709,79 @@ function renderCard(card) {
   h += "</div>";
   return n ? h : "";
 }
+/* ===== 商品面板: 当前推荐款常驻展示(图+价+购买按钮) =====
+   购物氛围入口——推荐/规格/属性轮同步刷新; 购买操作不埋
+   聊天气泡, 点击按钮等同语音指令(同链执行) */
+function renderPanel(card) {
+  var el = document.getElementById("ppanel");
+  if (!el || !card) { if (el) el.classList.add("hidden"); return; }
+  var t = card.type || "";
+  if (t === "product_list" || t === "product_detail") {
+    /* 当前款: subject 优先(游标推进同步), 无则首件 */
+    var cur = null, items = card.items || [], subj = card.subject || "";
+    for (var i = 0; i < items.length; i++) {
+      if (subj && items[i].name === subj) { cur = items[i]; break; }
+    }
+    if (!cur && items.length) cur = items[0];
+    /* product_detail 卡: 本体即当前款(属性问答卡) */
+    if (!cur && (card.subject || card.price != null)) {
+      cur = { name: card.subject, price: card.price,
+              image: (card.attributes || {}).image };
+    }
+    if (!cur) { el.classList.add("hidden"); return; }
+    var img = cur.image
+      ? '<img class="pimg" src="' + esc(cur.image) + '" alt="" onerror="this.outerHTML=\'<div class=&quot;pimg pimg-ph&quot;>🎋</div>\'">'
+      : '<div class="pimg pimg-ph">🎋</div>';
+    el.innerHTML = img +
+      '<div class="pinfo"><div class="pname">' + esc(cur.name || "商品") + "</div>" +
+      '<div class="ptags">' +
+      (cur.alcohol ? '<span class="ptag">' + esc(cur.alcohol) + "°</span>" : "") +
+      (cur.volume ? '<span class="ptag">' + esc(cur.volume) + "</span>" : "") +
+      (cur.subtitle ? '<span class="ptag graytag">' + esc(cur.subtitle) + "</span>" : "") +
+      "</div>" +
+      (cur.price != null ? '<div class="pprice">¥' + esc(cur.price) + "</div>" : "") +
+      "</div>" +
+      '<div class="pbtns">' +
+      '<button class="btn gold" onclick="sendText(\'需要\')">加入清单</button>' +
+      '<button class="btn" onclick="sendText(\'换一款\')">换一款</button>' +
+      (cur.price != null ? '<button class="btn gold" onclick="sendText(\'结算\')">立即购买</button>' : "") +
+      "</div>";
+    el.classList.remove("hidden");
+    return;
+  }
+  if (t === "cart_added" || t === "cart_setqty") {
+    /* 清单态: 已加/已改款+构成明细+结算入口(真机反馈:
+       "清单4件"不知道怎么来的——明细每款几件) */
+    el.innerHTML =
+      (card.quantity && card.price
+        ? '<div class="pimg pimg-ph">🛒</div>' +
+          '<div class="pinfo"><div class="pname">' + esc(card.subject || "已加入") +
+          (t === "cart_setqty" ? " " : " ×") + esc(card.quantity || 1) + "</div>" +
+          '<div class="ptags"><span class="ptag">清单' + esc(card.cartCount || 1) + "件" +
+          (card.cartDetail ? "：" + esc(card.cartDetail) : "") + "</span></div>" +
+          (card.price != null ? '<div class="pprice">¥' + esc(card.price) + "</div>" : "") +
+          "</div>"
+        : '<div class="pinfo"><div class="pname">清单共 ' + esc(card.cartCount || 1) + " 件</div></div>") +
+      '<div class="pbtns">' +
+      (t === "cart_setqty" || card.quantity > 1
+        ? '<button class="btn" onclick="sendText(\'少一件\')">− 一件</button>' : "") +
+      '<button class="btn" onclick="sendText(\'再来一件\')">+ 一件</button>' +
+      '<button class="btn gold" onclick="sendText(\'结算\')">去结算</button>' +
+      "</div>";
+    el.classList.remove("hidden");
+    return;
+  }
+  /* confirm/order_done 等流程卡: 面板不动(保持上一态) */
+}
 
 /* ===== 轮次响应处理(语音/文本同链) ===== */
 function handleTurn(j, channel) {
   S.turnCount++;
   document.getElementById("tcount").textContent = S.turnCount;
-  var badges = "";
+  /* 调试徽章(intent/track/latency/mode)不再进气泡——
+     用户反馈: 技术字段不展示(顶部 modePill 保留模式态) */
   var tr = j.turn || {};
-  if (tr.intent) badges += '<span class="pill gray">' + esc(tr.intent) + "</span>";
-  if (j.track && j.track !== "rule") badges += '<span class="pill gray">轨:' + esc(j.track) + "</span>";
-  if (tr.latencyMs) badges += '<span class="pill gray">' + esc(tr.latencyMs) + "ms</span>";
-  if (j.xiaoMode) { badges += '<span class="pill">' + esc(j.xiaoMode) + "</span>"; document.getElementById("modePill").textContent = j.xiaoMode; }
+  if (j.xiaoMode) document.getElementById("modePill").textContent = j.xiaoMode;
   var wakeWarn = "";
   if (j.wakeHint) {
     wakeWarn = '<div class="wakewarn">💡 我在——请以「小竹」开头唤我（或先唤醒一次，5 分钟内可免唤醒连续对话）</div>';
@@ -686,8 +789,10 @@ function handleTurn(j, channel) {
   } else if (tr.wake) {
     S.woken = true;
   }
-  var bubble = appendBot(j.reply || "(无应答)", j.card || null, badges + wakeWarn,
+  var bubble = appendBot(j.reply || "(无应答)", j.card || null, wakeWarn || null,
                          null, j.autoJump ? null : (j.jump || null));
+  /* 商品面板同步: 推荐款/清单态常驻展示(购物氛围入口) */
+  try { renderPanel(j.card || null); } catch (e) { /* 面板 fail-soft */ }
   if (j.fallbackHint === "keyboard") {
     appendBot("语音转写未成功——可用下方文字输入继续（同一条链路）。", null, '<span class="pill gray">ASR 降级</span>');
   }
@@ -695,7 +800,43 @@ function handleTurn(j, channel) {
     appendBot("（需要补充信息：请直接回复补全后重试）", null, '<span class="pill gray">clarify</span>');
   }
   updateWakePill();
-  speak(j.reply || "", bubble);
+  /* 兜底轮播报节流(真机实证会话 140: 免提录进旁人对话
+     "微信哦,这个在微信上直接弄…"——每段旁话都播"这个我还
+     不会"轰炸; general 兜底 60s 内只播一次, 其余静默入流) */
+  var isGeneral = ((j.turn || {}).intent) === "general";
+  if (isGeneral) {
+    if (Date.now() - (S.lastGeneralAt || 0) < 60000) {
+      if (bubble) bubble.classList.remove("speaking");
+      S.ttsPlaying = false;
+      scheduleHandfree(300);
+      /* 跳过播报但继续后续处理(jump/交易弹层) */
+    } else {
+      S.lastGeneralAt = Date.now();
+      speak(j.reply || "", bubble);
+    }
+  } else {
+    speak(j.reply || "", bubble);
+  }
+  /* TTS 分支预合成(推荐轮"需要/不要这款"两分支——与实际
+     应答逐字一致, 用户应答时 packTTS 命中零合成秒播;
+     小程序端已接, H5 同链补齐) */
+  if (Array.isArray(j.ttsPreheat) && j.ttsPreheat.length) {
+    try {
+      var a = getAuth() || {};
+      var hh = { "X-Member-Id": String(a.uid || "") };
+      if (a.token) hh["Authorization"] = "Bearer " + a.token;
+      j.ttsPreheat.forEach(function (t) {
+        if (!t || (S.packTTS || {})[t]) return;
+        fetch("/api/xiaozhu/tts?text="
+              + encodeURIComponent(String(t).slice(0, 200)),
+              { headers: hh })
+          .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
+          .then(function (b) {
+            if (b) (S.packTTS = S.packTTS || {})[t] = b;
+          }).catch(function () {});
+      });
+    } catch (e) { /* 预取失败无碍 */ }
+  }
   /* 语音跟随跳转(page.goto): 播报"正在打开"后自动导航
      ——浮层 postMessage 请求父窗口跳, 独立页直接跳
      跳转前保存聊天状态(sessionStorage 同 tab 存活,
@@ -730,6 +871,13 @@ function saveChatState() {
     sessionStorage.setItem("xz.chat",
       document.getElementById("chat").innerHTML);
     sessionStorage.setItem("xz.sid", S.sid || "");
+    /* 商品面板态同步保存(跳转返回恢复当前款+购买按钮) */
+    var pp = document.getElementById("ppanel");
+    if (pp && !pp.classList.contains("hidden")) {
+      sessionStorage.setItem("xz.ppanel", pp.innerHTML);
+    } else {
+      sessionStorage.removeItem("xz.ppanel");
+    }
   } catch (e) { /* 隐私模式等存储失败——跳过恢复 */ }
 }
 function tryRestoreChat() {
@@ -738,6 +886,13 @@ function tryRestoreChat() {
     var html = sessionStorage.getItem("xz.chat");
     if (sid && html) {
       S.sid = sid;
+      /* 面板态恢复(当前款+购买按钮——返回不丢购物上下文) */
+      var phtml = sessionStorage.getItem("xz.ppanel");
+      if (phtml) {
+        var pp = document.getElementById("ppanel");
+        pp.innerHTML = phtml;
+        pp.classList.remove("hidden");
+      }
       document.getElementById("sid").textContent = "#" + sid;
       document.getElementById("chat").innerHTML = html;
       document.getElementById("mic").classList.remove("off");
@@ -789,7 +944,11 @@ function sendVoice(b64, durationSec) {
   setMicStatus("☁ 云端识别中…（音频即转即删）");
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
     method: "POST",
-    body: JSON.stringify({ audioBase64: b64, filename: "audio.wav", durationSec: Math.round(durationSec * 10) / 10 })
+    body: JSON.stringify({ audioBase64: b64, filename: "audio.wav", durationSec: Math.round(durationSec * 10) / 10,
+      /* 手动录音(长按/点击麦克风)=tap 语义: 按下即明确交互,
+         免唤醒直接执行("给我买42度500ml的酒"不再要求叫小竹);
+         免提后台聆听不传——反语音霸权红线不变 */
+      mode: S.handfree ? undefined : "tap" })
   }).then(function (j) {
     setPending(false); removeTyping();
     setMicStatus("云端识别完成");
@@ -800,6 +959,32 @@ function sendVoice(b64, durationSec) {
          不覆盖 speechSynthesis, 留痕实证"还不会"6连回环):
          静默丢弃防"播报→录回→再回复"无限循环 */
       appendUser("(自己播报的回声，已忽略)", "voice");
+      scheduleHandfree(400);
+      return;
+    }
+    /* 连续"#"断路器(真机实证: 免提外放残响触发麦克风自循环
+       9 轮空转"#"——识别失败连发): 连续 2 轮自动暂停免提,
+       明确引导(防自播自录无限循环+误执行) */
+    if (rt === "#") {
+      S.hashStreak = (S.hashStreak || 0) + 1;
+      if (S.hashStreak >= 2 && S.handfree) {
+        S.handfree = false;
+        document.getElementById("hfBtn").textContent = "🎧 免提关";
+        S.hashStreak = 0;
+        showToast("连续识别失败——已暂停免提，请长按麦克风靠近说话");
+        setMicStatus("⌨ 识别不稳——<b>长按麦克风</b>靠近说话，或打字输入");
+        handleTurn(j, "voice");
+        return;
+      }
+    } else {
+      S.hashStreak = 0;
+    }
+    /* 语气词碎片静默(真机实证: "呃"0.7s 断句碎片——用户开口
+       填充词被切; 服务端已引导, 播报反而盖住用户下一句:
+       不入聊天流不播报, 快速续听让用户把整句说完) */
+    if (rt && rt.length <= 2
+        && /^[呃嗯啊哦呀哈唉诶欸噢唔哇\s]+$/.test(rt)
+        && (j.turn || {}).intent === "chat") {
       scheduleHandfree(400);
       return;
     }
@@ -1287,8 +1472,10 @@ function wireCloudCapture() {
         } else if (S.vadSpoke && !vadSilentAt) {
           vadSilentAt = now;
         }
-        if (S.vadSpoke && vadSilentAt && now - vadSilentAt > 500) {
-          cloudStop(); /* 静音0.5s → 自动结束本句并发送(提速) */
+        if (S.vadSpoke && vadSilentAt && now - vadSilentAt > 1200) {
+          cloudStop(); /* 静音1.2s → 自动结束本句(真机实证: 0.5s
+            过急, 说话中途换气/思考停顿被切断——"呃"0.7s/半句
+            1.8s 就发送, 语义碎片无法理解; 听完一句再答) */
           return;
         }
       }

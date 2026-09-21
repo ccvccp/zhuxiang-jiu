@@ -199,12 +199,15 @@ class XiaozhuExecutor:
         voice_hint = (f"。请先清晰说出「{consent_phrase}」"
                       f"(语音确认), 再在屏幕输入 4 位确认码"
                       if consent_phrase else "")
+        # 屏幕码安全模型: 完整码显示在用户屏幕上(与输入框
+        # 同屏)——纯语音通道攻击者不可见(语音念码不算红线
+        # 不变; 此前只泄首位致用户无从获知完整码, 实为缺陷)
         return {
             "confirmRequired": True,
             "confirmToken": token,
             "summary": summary,
-            "codeHint": f"屏幕显示 4 位数字码({code[:1]}**"
-                        f"**)",   # 只泄首位——核验走输入
+            "screenCode": code,   # 屏幕显示码(用户输入凭据)
+            "codeHint": f"屏幕确认码: {code}",
             "expiresIn": CONFIRM_TOKEN_TTL,
             "consentPhrase": consent_phrase,
             "reply": f"高风险操作需屏幕确认: {summary}"
@@ -241,6 +244,44 @@ class XiaozhuExecutor:
                     entry.get("action"), token)
                 return {"token": token,
                         "action": entry.get("action")}
+        return None
+
+    def has_pending_confirm(self, member_id: int) -> dict | None:
+        """会员是否存在未过期待确认高敏令牌
+
+        智能应答轨屏蔽依据: confirm 等待期间模糊应答
+        ("啊"被 LLM 判 affirm)不得触发加购/换款——
+        高敏流程只认确认短语+屏幕码或用户取消。
+        Returns: {"token", "action", "consentPhrase"} 或 None
+        """
+        if not member_id:
+            return None
+        now = _now()
+        for token, entry in self._tokens.items():
+            if entry.get("memberId") != member_id:
+                continue
+            if entry.get("expiresAt", 0) <= now:
+                continue
+            return {"token": token,
+                    "action": entry.get("action"),
+                    "consentPhrase": entry.get(
+                        "consentPhrase") or ""}
+        return None
+
+    def cancel_confirm(self, member_id: int) -> dict | None:
+        """用户主动取消待确认高敏令牌(取消路径——此前只能
+        等 60s 过期, 用户无法反悔; 取消即焚令牌)"""
+        if not member_id:
+            return None
+        for token in list(self._tokens):
+            entry = self._tokens.get(token) or {}
+            if entry.get("memberId") == member_id:
+                self._tokens.pop(token, None)
+                logger.info(
+                    "voice48_confirm_cancelled member=%s "
+                    "action=%s", member_id,
+                    entry.get("action"))
+                return {"action": entry.get("action")}
         return None
 
     @staticmethod
