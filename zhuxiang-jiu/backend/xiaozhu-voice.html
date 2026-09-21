@@ -284,6 +284,12 @@ body.kb .composer{padding-bottom:12px}
   cursor:pointer;line-height:1.5;color:#555}
 .fb:hover{border-color:#355c44}
 .fb.on{background:#355c44;color:#fff;border-color:#355c44}
+/* v2 折叠模式: 对话时收起气泡以上区域, 放大观测面
+   (.wrap flex 列布局, .chat flex:1 自然吃掉释放的高度) */
+body.talking .wrap>h1{font-size:14px;padding:4px 0;margin:0 0 4px}
+body.talking .wrap>h1 small{display:none}
+body.talking .scene{display:none}
+body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
 </style>
 </head>
 <body>
@@ -317,6 +323,7 @@ body.kb .composer{padding-bottom:12px}
     <span class="sp"></span>
     <button class="sbtn" onclick="newSession()">新会话</button>
     <button class="sbtn" onclick="clearSession()">清除记录</button>
+    <button class="sbtn" id="foldBtn" onclick="setFold()">折叠 ▼</button>
   </div>
 
   <div class="chat" id="chat"></div>
@@ -597,7 +604,20 @@ function scrollChat() {
   var c = document.getElementById("chat");
   c.scrollTop = c.scrollHeight;
 }
+/* v2 折叠: 对话时收起气泡以上区域(标题/情景条压缩, 会话条
+   紧凑)——chat flex:1 自然吃掉释放高度; 首条用户消息自动折,
+   手动切换后不再自动改(尊重用户选择) */
+function setFold(force) {
+  var on = (typeof force === "boolean") ? force
+    : !document.body.classList.contains("talking");
+  document.body.classList.toggle("talking", on);
+  var b = document.getElementById("foldBtn");
+  if (b) b.textContent = on ? "展开 ▲" : "折叠 ▼";
+  S.foldTouched = true;
+  scrollChat();
+}
 function appendUser(text, channel) {
+  if (!S.foldTouched) setFold(true); /* 首条消息自动折叠 */
   var c = document.getElementById("chat");
   var d = document.createElement("div");
   d.className = "msg user";
@@ -912,13 +932,25 @@ function handleTurn(j, channel) {
       var a = getAuth() || {};
       var hh = { "X-Member-Id": String(a.uid || "") };
       if (a.token) hh["Authorization"] = "Bearer " + a.token;
-      j.ttsPreheat.forEach(function (t) {
+      /* v2 让道: 预热与当前播报合成争 cogtts 上游队列是真机
+         "播报滞后"根因之一——错峰发起 + 播报中顺延, 优先保
+         当前轮秒播; 预热只服务未来轮, 晚 1-2s 无感 */
+      j.ttsPreheat.forEach(function (t, idx) {
         if (!t || (S.packTTS || {})[t]) return;
-        fetch(ttsUrl(t), { headers: hh })
-          .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
-          .then(function (b) {
-            if (b) (S.packTTS = S.packTTS || {})[t] = b;
-          }).catch(function () {});
+        var tryFetch = function (deferred) {
+          if ((S.packTTS || {})[t]) return; /* 已到手 */
+          if (S.ttsPlaying && !deferred) {
+            setTimeout(function () { tryFetch(true); }, 1600);
+            return;
+          }
+          fetch(ttsUrl(t), { headers: hh })
+            .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
+            .then(function (b) {
+              if (b) (S.packTTS = S.packTTS || {})[t] = b;
+            }).catch(function () {});
+        };
+        setTimeout(function () { tryFetch(false); },
+                   900 + idx * 900);
       });
     } catch (e) { /* 预取失败无碍 */ }
   }
