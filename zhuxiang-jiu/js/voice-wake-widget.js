@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=13>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=14>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=12";
+  var VER = "v=13";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -184,8 +184,22 @@
     panel.classList.remove("open");
     panel.classList.remove("mini");
     notifyFrame("hide");
-    enableWakeQuiet(); /* 关面板 → 重新拿麦克风恢复监听
-                           (权限已记住静默成功; 流已释放不能复用) */
+    /* 关面板 → 恢复监听: 语音页停麦是异步链(postMessage→pause→
+       stopTracks), 立即抢麦撞 X5 独占竞态——延迟+退避自动重试 */
+    scheduleWakeResume(800);
+  }
+  /* 恢复监听调度: 800ms 起, 失败退避重试至多 3 次(1.5s/2.2s),
+     全败才提示+挂交互兜底 */
+  var resumeTimer = null, resumeTries = 0;
+  function scheduleWakeResume(delay) {
+    clearTimeout(resumeTimer);
+    resumeTimer = setTimeout(function () {
+      resumeTries++;
+      enableWakeQuiet(resumeTries >= 3).then(function (ok) {
+        if (ok) { resumeTries = 0; return; }
+        if (resumeTries < 3) { scheduleWakeResume(700 + 700 * resumeTries); }
+      });
+    }, delay);
   }
   function minimizePanel() {
     panel.classList.add("open");
@@ -641,30 +655,35 @@
      与本引擎 getUserMedia 并发会在 X5 独占冲突) */
   if (wakeOn()) {
     b.style.display = "none";
-    setTimeout(enableWakeQuiet, 1200);
+    setTimeout(function () { enableWakeQuiet(true); }, 1200);
   } else {
     b.style.display = "";
   }
 
-  /* 恢复流程: 不弹 confirm, 直接试拿麦克风(权限已记住则静默成功) */
-  async function enableWakeQuiet() {
+  /* 恢复流程: 不弹 confirm, 直接试拿麦克风(权限已记住则静默成功);
+     loud=false 静默(退避重试中), true 时失败才提示+挂交互兜底 */
+  async function enableWakeQuiet(loud) {
     if (!authToken()) {
-      /* 令牌过期/退出登录: 唤醒暂不可用, 球恢复引导 */
-      b.style.display = "";
-      showTip("唤醒待命需要登录——登录后点小竹球恢复唤醒");
-      return;
+      if (loud) {
+        /* 令牌过期/退出登录: 唤醒暂不可用, 球恢复引导 */
+        b.style.display = "";
+        showTip("唤醒待命需要登录——登录后点小竹球恢复唤醒");
+      }
+      return false;
     }
     try {
       eng.stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
       startWake();
+      return true;
     } catch (e) {
-      /* X5 无手势/竞态被拒: 挂一次性交互重试(任意触摸即恢复),
-         不再永久降级为球 */
-      b.style.display = "";
-      showTip("麦克风暂不可用（可能被占用）——点一下屏幕任意处即恢复唤醒");
-      armRetryOnInteract();
+      if (loud) {
+        b.style.display = "";
+        showTip("麦克风暂不可用（可能被占用）——点一下屏幕任意处即恢复唤醒");
+        armRetryOnInteract();
+      }
+      return false;
     }
   }
   /* 一次性交互重试: 用户任意触摸/点击后重新拿麦克风 */
@@ -677,7 +696,7 @@
       document.removeEventListener("touchend", h, true);
       document.removeEventListener("click", h, true);
       b.style.display = "none";
-      enableWakeQuiet();
+      enableWakeQuiet(true);
     };
     document.addEventListener("touchend", h, true);
     document.addEventListener("click", h, true);

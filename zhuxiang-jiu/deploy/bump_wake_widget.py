@@ -1,14 +1,15 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=12 -> v=13: 唤醒链路诊断可见性(熔断/通道错误/转写回显三处
-提示)随 widget VER v=12 双 bump(①index 引用 v=13 刷 widget 本体)
+v=13 -> v=14: 关面板恢复监听竞态修复(延迟+退避自动重试3次,
+静默重试不再误弹提示)随 widget VER v=13 双 bump(①index 引用
+v=14 刷 widget 本体)
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=12"
-NEW = "src=/js/voice-wake-widget.js?v=13"
+OLD = "src=/js/voice-wake-widget.js?v=13"
+NEW = "src=/js/voice-wake-widget.js?v=14"
 
 
 def main():
