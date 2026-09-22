@@ -11,13 +11,17 @@
  *       监听(WS 首条鉴权), 球保留为普通入口
  * 开关: localStorage 'xiaozhu.wake' = on/off; 语音面板内可切换
  *       (同源共享 + postMessage 'xz-wake-on/off' 即时通知)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=1>
- *       (替换 voice-entry-widget.js?v=25)
+ * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
+ *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
+ *       postMessage 'xz-wake-word' 即时重建匹配器)
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=2>
+ *       (替换 voice-entry-widget.js?v=25; widget 内容更新须同步 bump ?v=N)
  */
 (function () {
   "use strict";
-  var VER = "v=1";
+  var VER = "v=2";
   var WAKE_KEY = "xiaozhu.wake";
+  var WORD_KEY = "xiaozhu.wakeword";
 
   /* ---------- 会话令牌(商城 auth_session / 静态页 zhuxiang.auth) ---------- */
   function authToken() {
@@ -176,9 +180,25 @@
 
   /* ---------- 唤醒引擎(VAD + 云端流式 ASR) ---------- */
 
-  /* 唤醒词匹配: 「小竹」两声(中间允许 ≤4 字符填充, 同音容错) */
+  /* 唤醒词匹配器(可配置, 语音面板「⚙️ 唤醒词」设置 → localStorage
+     'xiaozhu.wakeword' + postMessage 'xz-wake-word' 实时重建):
+     - 空(默认): 「小竹」两声(中间 ≤4 字符填充, 同音容错)
+     - 预设「你好小竹」: 单声短语(小竹段保留同音容错)
+     - 自定义 2-8 字: 普通话转写精确匹配(正则元字符转义) */
   var XZ = "(?:小竹|小主|小猪|小朱|小珠|晓竹|小助|小逐|小烛)";
-  var WAKE_RE = new RegExp(XZ + "[\\s\\S]{0,4}?" + XZ);
+  function buildWakeRe() {
+    var w = "";
+    try { w = String(localStorage.getItem(WORD_KEY) || "").trim(); } catch (e) { /* 忽略 */ }
+    if (!w) {
+      return new RegExp(XZ + "[\\s\\S]{0,4}?" + XZ);
+    }
+    if (w === "你好小竹") {
+      return new RegExp("你好[\\s，,、。]?" + XZ);
+    }
+    var esc = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(esc);
+  }
+  var WAKE_RE = buildWakeRe();
   function matchWake(text) {
     return WAKE_RE.test(String(text || ""));
   }
@@ -440,6 +460,13 @@
       if (eng.stream) { try { eng.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* 忽略 */ } }
       eng.stream = null;
       b.style.display = "";
+      return;
+    }
+    if (d.type === "xz-wake-word") {
+      /* 唤醒词已由语音页写入同源 localStorage, 此处重建匹配器
+         (消息仅作即时通知; 词值本身只信 localStorage, 第三方
+         伪造 postMessage 无法注入任意正则) */
+      WAKE_RE = buildWakeRe();
       return;
     }
     if (d.type !== "xz-jump" || !d.href) { return; }

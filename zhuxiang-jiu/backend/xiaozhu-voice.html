@@ -220,6 +220,29 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
       border-radius:8px;font-size:14px;transition:border-color .15s;
       -webkit-appearance:none;appearance:none}
 .trow input:focus{border-color:var(--green);outline:none}
+/* ===== 唤醒词设置浮层(embed 态) ===== */
+.ww-mask{position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:70;
+  display:flex;align-items:center;justify-content:center;padding:20px}
+.ww-card{background:var(--card);border:1px solid var(--bd);border-radius:14px;
+  padding:16px 18px;max-width:420px;width:100%;font-size:13px;color:var(--tx);
+  box-shadow:0 12px 40px rgba(0,0,0,.25);display:flex;flex-direction:column;gap:10px}
+.ww-card b{font-size:15px;color:var(--green-deep)}
+.ww-cur{color:var(--tx2)}
+.ww-cur span{color:var(--green-deep);font-weight:600}
+.ww-presets{display:flex;gap:8px;flex-wrap:wrap}
+.ww-presets button{flex:1;min-width:130px;border:1px solid var(--bd);background:var(--green-soft);
+  color:var(--green-deep);border-radius:10px;padding:8px 10px;font-size:13px;
+  cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:center}
+.ww-presets button span{font-size:11px;color:var(--tx2);font-weight:400}
+.ww-presets button:active{background:var(--green);color:#fff}
+.ww-custom{display:flex;gap:8px}
+.ww-custom input{flex:1;border:1px solid var(--bd);border-radius:10px;
+  padding:8px 12px;font-size:13px;outline:none}
+.ww-custom input:focus{border-color:var(--green)}
+.ww-custom button{border:none;border-radius:10px;background:var(--green);
+  color:#fff;padding:8px 18px;font-size:13px;cursor:pointer}
+.ww-note{font-size:11px;color:var(--tx2);line-height:1.6}
+
 .toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);
       background:rgba(31,45,61,.92);color:#fff;padding:9px 20px;
       border-radius:8px;font-size:13px;display:none;z-index:99;
@@ -339,6 +362,8 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
     <div class="modes">
       <span class="tts" id="wakeBtn" onclick="toggleWake()" style="cursor:pointer;display:none">📣 唤醒开</span>
       <span class="sp" id="wakeSp" style="display:none"></span>
+      <span class="tts" id="wakeWordBtn" onclick="showWakeWordSet()" style="cursor:pointer;display:none" title="唤醒词设置">⚙️ 唤醒词</span>
+      <span class="sp" id="wakeWordSp" style="display:none"></span>
       <span class="tts" id="hfBtn" onclick="toggleHandfree()" style="cursor:pointer">🎧 免提开</span>
       <span class="sp"></span>
       <span class="tts" id="ttsBtn" onclick="toggleTts()" style="cursor:pointer">🔊 播报开</span>
@@ -364,6 +389,23 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- 唤醒词设置浮层(embed 态): 预设 + 自定义 -->
+<div class="ww-mask hidden" id="wwMask" onclick="hideWakeWordSet()">
+  <div class="ww-card" onclick="event.stopPropagation()">
+    <b>⚙️ 唤醒词设置</b>
+    <div class="ww-cur">当前：<span id="wwCur">小竹、小竹（呼唤两声 · 默认）</span></div>
+    <div class="ww-presets">
+      <button type="button" onclick="applyWakeWordPreset('')">小竹、小竹<span>两声 · 同音容错</span></button>
+      <button type="button" onclick="applyWakeWordPreset('你好小竹')">你好小竹<span>单声 · 同音容错</span></button>
+    </div>
+    <div class="ww-custom">
+      <input id="wwInput" maxlength="8" placeholder="自定义 2-8 个汉字">
+      <button type="button" onclick="saveWakeWordCustom()">保存</button>
+    </div>
+    <div class="ww-note">自定义词按普通话转写精确匹配（无同音容错）；输入框清空保存即恢复默认。修改即时生效（「小竹球」唤醒监听无需重启）。</div>
+  </div>
+</div>
 <div class="footer">唤醒词「小竹」· 免唤醒窗口 5 分钟 · 音频即转即删不落库 · 身份证/手机号/卡号自动脱敏<br>
 高敏操作双因子：语音确认 + 屏幕 4 位确认码（语音念码不算）</div>
 </div>
@@ -1514,8 +1556,43 @@ function renderWakeBtn() {
   var on = localStorage.getItem("xiaozhu.wake") === "on";
   el.textContent = on ? "📣 唤醒开" : "📣 唤醒关";
   el.title = on
-    ? "已开启：全站任意页呼唤「小竹、小竹」唤出面板"
+    ? "已开启：全站任意页呼唤唤醒词唤出面板"
     : "已关闭：点此开启全站语音唤醒";
+}
+/* ===== 唤醒词设置(embed 态): 预设 + 自定义 =====
+   存 localStorage 'xiaozhu.wakeword'(与主站 voice-wake-widget
+   同源共享); postMessage 'xz-wake-word' 通知父页引擎即时重建 */
+function showWakeWordSet() {
+  var w = localStorage.getItem("xiaozhu.wakeword") || "";
+  document.getElementById("wwCur").textContent = w
+    ? "「" + w + "」（单声短语 · 精确匹配）"
+    : "小竹、小竹（呼唤两声 · 默认）";
+  document.getElementById("wwInput").value = w;
+  document.getElementById("wwMask").classList.remove("hidden");
+}
+function hideWakeWordSet() {
+  document.getElementById("wwMask").classList.add("hidden");
+}
+function applyWakeWordPreset(w) {
+  saveWakeWord(w);
+}
+function saveWakeWordCustom() {
+  var v = document.getElementById("wwInput").value.trim();
+  if (v && (v.length < 2 || v.length > 8)) {
+    showToast("自定义唤醒词须为 2-8 个字");
+    return;
+  }
+  saveWakeWord(v);
+}
+function saveWakeWord(w) {
+  if (w) { localStorage.setItem("xiaozhu.wakeword", w); }
+  else { localStorage.removeItem("xiaozhu.wakeword"); }
+  try { window.parent.postMessage(
+    { type: "xz-wake-word", word: w || "" }, "*"); } catch (e) {}
+  showWakeWordSet();
+  showToast(w
+    ? "唤醒词已设为「" + w + "」——呼唤试试"
+    : "唤醒词已恢复默认「小竹、小竹」");
 }
 /* ===== 浮层隐藏暂停/重开恢复(跳转/关闭浮层后) =====
    隐藏的 iframe 若继续免提监听: 环境杂音污染会话(# 转写/
@@ -1990,6 +2067,8 @@ document.addEventListener("focusin", function (ev) {
     document.body.classList.add("embed");
     document.getElementById("wakeBtn").style.display = "";
     document.getElementById("wakeSp").style.display = "";
+    document.getElementById("wakeWordBtn").style.display = "";
+    document.getElementById("wakeWordSp").style.display = "";
     renderWakeBtn();
   }
   var auth = getAuth();
