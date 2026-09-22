@@ -1952,6 +1952,35 @@ class XiaozhuService:
                       str(text or ""))
         return float(m.group(1)) if m else None
 
+    async def _pending_confirm_block(
+            self, session: dict) -> "dict | None":
+        """高敏确认窗口清单冻结: pending 期间加购/改量一律拦截
+
+        真机实证: 用户语音念确认码数字被意图层路由成加购
+        (数字剥指令词后为空→"最近商品"兜底+1件)——"说确认
+        结算反而清单又多一件"。affirm 层屏蔽只挡肯定语气,
+        数字/指代走 cart.add 执行层, 在此统一收口;
+        结算确认走核销码或「取消」, 防绕过确认码。
+        """
+        member_id = session.get("memberId")
+        if not member_id:
+            return None
+        try:
+            from services.xiaozhu_executor import (
+                get_executor,
+            )
+            pending = get_executor() \
+                .has_pending_confirm(member_id)
+        except Exception:  # noqa: BLE001
+            return None
+        if not pending:
+            return None
+        phrase = pending.get("consentPhrase") or "确认提交订单"
+        return {"reply": "订单正在等待确认——此期间清单已冻结：请说"
+                        f"「{phrase}」并在屏幕输入 4 位确认码；"
+                        "说「取消」可撤销本次结算",
+                "card": None}
+
     async def _exec_cart_add(self, session: dict,
                             text: str,
                             qty_override: int = None) -> dict:
@@ -1962,6 +1991,9 @@ class XiaozhuService:
         会话级非资金动作: 不经沙箱/确认(结算仍是 confirm 面)。
         qty_override: 智能应答轨 LLM 解析的数量直传。
         """
+        block = await self._pending_confirm_block(session)
+        if block:
+            return block
         # ① 目标解析: 剥指令词后商品词非空→搜索优先;
         #    纯指代(就它了/来一件)→最近商品卡(上游指代
         #    消解已把"这个"展开为商品名, 两条路径一致)
@@ -2033,6 +2065,9 @@ class XiaozhuService:
         qty_override: LLM 智能轨 setqty 意图直传(自然说法
         不中正则——"我只要两个就够了")。
         """
+        block = await self._pending_confirm_block(session)
+        if block:
+            return block
         qty = int(qty_override) if qty_override \
             else _parse_set_qty(text)
         if not qty:
