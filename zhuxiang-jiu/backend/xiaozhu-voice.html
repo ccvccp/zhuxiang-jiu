@@ -1380,8 +1380,9 @@ function doConfirm(btn) {
 
 /* ===== 语音播报 TTS 双轨 =====
    电脑: speechSynthesis(免费即时);
-   微信 X5: 无系统 TTS 引擎(入队无声)——服务端 cogtts
-   合成 WAV 经 Audio 播放(UA 确定性分流) */
+   手机(触屏/微信 X5): 浏览器 TTS 引擎普遍缺失(入队无声)——
+   一律服务端 cogtts 合成经 Web Audio 播放(UA+pointer 确定性分流;
+   真机实证国内手机浏览器 speechSynthesis 无声, 云端为可靠主轨) */
 var IS_WX = /MicroMessenger/i.test(
   navigator.userAgent || "");
 function speak(text, bubbleEl) {
@@ -1390,7 +1391,7 @@ function speak(text, bubbleEl) {
     S.ttsPlaying = false; scheduleHandfree(300);
     return;
   }
-  if (IS_WX) return speakCloud(text, bubbleEl);
+  if (IS_WX || IS_TOUCH) return speakCloud(text, bubbleEl);
   if (!window.speechSynthesis) {
     S.ttsPlaying = false; scheduleHandfree(300);
     return;
