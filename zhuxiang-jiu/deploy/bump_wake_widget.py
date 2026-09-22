@@ -1,14 +1,15 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=16 -> v=17: 识别通道提示截断放宽至 80 字符(配合后端鉴权失败
-结构化日志定位"刷新成功仍失败"根因)随 widget VER v=16 双 bump
+v=17 -> v=18: 段/连接生命周期解耦(X5 握手慢于段长竞态——静音
+时 WS 仍 CONNECTING 被直接拆, auth 从未发出 recv=empty; 静音只
+结束采集, 保活连接回补识别)随 widget VER v=17 双 bump
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=16"
-NEW = "src=/js/voice-wake-widget.js?v=17"
+OLD = "src=/js/voice-wake-widget.js?v=17"
+NEW = "src=/js/voice-wake-widget.js?v=18"
 
 
 def main():

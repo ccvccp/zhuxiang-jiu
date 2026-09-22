@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=17>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=18>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=16";
+  var VER = "v=17";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -524,6 +524,12 @@
           try { eng.ws.send(i16.buffer); } catch (er) { return; }
           eng.ring.splice(0, 3200);
         }
+        /* 段已结束(静音先于握手完成竞态): 回补完直接 finish
+           要 final——否则服务器一直等音频, 兜底超时拆连接 */
+        if (!eng.speaking) {
+          try { eng.ws.send(JSON.stringify({ type: "finish" })); }
+          catch (er) { /* 忽略 */ }
+        }
       } else if (m.type === "partial" && m.text) {
         eng.lastPartial = m.text;
         if (matchWake(m.text)) { onWakeHit(); }
@@ -565,17 +571,22 @@
     }
   }
 
-  /* 人声段结束: finish → 等 final(部分内核立即断) */
+  /* 人声段结束: finish → 等 final(部分内核立即断)。
+     X5 握手慢于段长竞态(真机实证 recv=empty 1006): 安静环境段短,
+     静音时 WS 仍 CONNECTING——原版直接拆连接, 鉴权从未发出,
+     识别不可能发生。静音只结束采集: 保活连接等握手完成后
+     回补环形缓存(唤醒词已在缓存)再识别, 由下方分级超时守卫 */
   function endSegment() {
     eng.speaking = false;
     eng.hiStreak = 0;
     if (eng.ws && eng.ws.readyState === 1) {
       try { eng.ws.send(JSON.stringify({ type: "finish" })); } catch (e) { teardownSeg(); }
-    } else { teardownSeg(); }
-    /* final 由 onmessage 消费; 3s 未回 → 兜底拆除 */
+    } else if (!eng.ws) {
+      teardownSeg();
+    }
     setTimeout(function () {
       if (eng.speaking === false && eng.ws) { teardownSeg(); }
-    }, 3000);
+    }, (eng.ws && eng.ws.readyState === 1) ? 3000 : 6000);
   }
 
   function teardownSeg() {
