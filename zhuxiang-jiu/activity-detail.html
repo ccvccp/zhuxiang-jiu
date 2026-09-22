@@ -48,6 +48,14 @@
     }
     .brand { font-size: 16px; font-weight: 600; letter-spacing: 1px; cursor: pointer; }
     .brand small { font-weight: 400; opacity: .75; font-size: 11px; display: block; letter-spacing: 0; }
+    .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .back-btn {
+        flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
+        border: none; cursor: pointer; background: rgba(255,255,255,.18);
+        color: #fff; font-size: 17px; line-height: 1; font-family: inherit;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .back-btn:active { opacity: .8; }
     .auth-box { text-align: right; }
     .btn {
         border: none; border-radius: 6px; cursor: pointer; font-size: 13px;
@@ -180,9 +188,12 @@
 <body>
 
 <div class="topbar">
-    <div class="brand" id="backBrand">
-        <span style="cursor:pointer">← 活动中心</span>
-        <small>竹香酒 · 官方活动详情</small>
+    <div class="topbar-left">
+        <button class="back-btn" id="backBtn" aria-label="返回活动中心" title="返回活动中心">←</button>
+        <div class="brand" id="backBrand">
+            <span style="cursor:pointer">活动中心</span>
+            <small>竹香酒 · 官方活动详情</small>
+        </div>
     </div>
     <div class="auth-box" id="authBox"></div>
 </div>
@@ -922,10 +933,10 @@
     }
 
     /* ---------- 启动 ---------- */
-    /* 返回列表页(透传本地调试 ?api=) */
-    $('backBrand').onclick = function () {
-        location.href = 'activity.html' + API_QS;
-    };
+    /* 返回列表页(透传本地调试 ?api=): 顶栏圆形返回按钮 + 品牌区可点 */
+    var goList = function () { location.href = 'activity.html' + API_QS; };
+    $('backBtn').onclick = goList;
+    $('backBrand').onclick = goList;
     $('backFooter').href = 'activity.html' + API_QS;
 
     /* 管理深链: 直达后台并聚焦本活动(展开详情行+滚动+高亮) */
