@@ -1,15 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=10 -> v=11: token 续期回写所有存在源(修复"续期成功却再喊不醒"
-源不一致死循环)随 widget VER v=10 双 bump(①index 引用 v=11 刷
-widget 本体; 语音页本轮未动)
+v=11 -> v=12: 未登录(无 refreshToken)WS 失败静默改为明确引导随
+widget VER v=11 双 bump(①index 引用 v=12 刷 widget 本体)
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=10"
-NEW = "src=/js/voice-wake-widget.js?v=11"
+OLD = "src=/js/voice-wake-widget.js?v=11"
+NEW = "src=/js/voice-wake-widget.js?v=12"
 
 
 def main():
