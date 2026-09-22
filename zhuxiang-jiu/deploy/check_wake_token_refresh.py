@@ -37,7 +37,7 @@ checks2 = [
     ("M4 xz-wake-on 不抢麦克风", "if (eng.stream) {\n        startWake();\n      }\n      return;" in v
      and "enableWakeQuiet();\n      }\n      return;" not in v),
     ("M5 xz-wake-off 用 releaseMic", "stopWake();\n      releaseMic();" in v),
-    ("M6 widget VER v=7", 'var VER = "v=7";' in v),
+    ("M6 widget VER v=8", 'var VER = "v=8";' in v),
     ("M7 语音页隐藏无条件释放(pauseVoiceForHidden)",
      "cloudActive = false;\n  hardStopCloud(); /* 无条件硬停+释放麦克风(幂等安全) */" in p
      and "S.hidden = true;\n  clearTimeout(S.hfTimer); /* 停续听排程 */\n  cloudActive = false;" in p),
@@ -45,6 +45,19 @@ checks2 = [
 for n, ok in checks2:
     print(("  PASS " if ok else "  FAIL ") + n)
 fails += [n for n, ok in checks2 if not ok]
+# 启动双发麦克风竞态修复(iframe 初始 hide + 启动延迟 + 交互重试)
+checks3 = [
+    ("S1 iframe onload 初始 hide 通知",
+     'fr.onload = function () {' in v
+     and 'if (!panel.classList.contains("open")) { notifyFrame("hide"); }' in v),
+    ("S2 启动延迟 1.2s", "setTimeout(enableWakeQuiet, 1200);" in v),
+    ("S3 失败交互重试", "function armRetryOnInteract() {" in v
+     and 'document.addEventListener("touchend", h, true);' in v
+     and "麦克风暂不可用（可能被占用）——点一下屏幕任意处即恢复唤醒" in v),
+]
+for n, ok in checks3:
+    print(("  PASS " if ok else "  FAIL ") + n)
+fails += [n for n, ok in checks3 if not ok]
 if fails:
     raise SystemExit("FAILED: %d" % len(fails))
-print("ALL PASS (%d)" % (len(checks) + len(checks2)))
+print("ALL PASS (%d)" % (len(checks) + len(checks2) + len(checks3)))

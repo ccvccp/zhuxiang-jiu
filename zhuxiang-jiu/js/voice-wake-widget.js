@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=8>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=9>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=7";
+  var VER = "v=8";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -148,6 +148,13 @@
   fr.src = "/xiaozhu-voice.html?" + VER + "&embed=1";
   fr.setAttribute("allow", "microphone");
   fr.setAttribute("title", "小竹语音精灵");
+  /* 加载完成即通知隐藏态: display:none iframe 在 X5 不触发
+     visibilitychange, 语音页不知道自己隐藏着——会恢复会话自动
+     开免提拿麦克风, 与唤醒引擎启动 getUserMedia 并发撞车
+     (X5 独占 → "微信正在录音, 你无法录音") */
+  fr.onload = function () {
+    if (!panel.classList.contains("open")) { notifyFrame("hide"); }
+  };
   wrap.appendChild(fr);
   wrap.appendChild(x);
   wrap.appendChild(xe);
@@ -583,10 +590,12 @@
     if (ev.key === "Escape" && panel.classList.contains("open")) { closePanel(); }
   });
 
-  /* ---------- 启动: 已开启唤醒 → 恢复监听(麦克风权限仍在) ---------- */
+  /* ---------- 启动: 已开启唤醒 → 恢复监听(麦克风权限仍在) ----------
+     延迟 1.2s: 错开语音页 iframe 初始恢复会话的窗口(其免提启动
+     与本引擎 getUserMedia 并发会在 X5 独占冲突) */
   if (wakeOn()) {
     b.style.display = "none";
-    enableWakeQuiet();
+    setTimeout(enableWakeQuiet, 1200);
   } else {
     b.style.display = "";
   }
@@ -605,8 +614,26 @@
       });
       startWake();
     } catch (e) {
+      /* X5 无手势/竞态被拒: 挂一次性交互重试(任意触摸即恢复),
+         不再永久降级为球 */
       b.style.display = "";
-      showTip("唤醒待命失败（麦克风不可用）——点击小竹球重新开启或直接打开面板");
+      showTip("麦克风暂不可用（可能被占用）——点一下屏幕任意处即恢复唤醒");
+      armRetryOnInteract();
     }
+  }
+  /* 一次性交互重试: 用户任意触摸/点击后重新拿麦克风 */
+  function armRetryOnInteract() {
+    if (eng.stream || !wakeOn()) { return; }
+    var done = false;
+    var h = function () {
+      if (done || eng.stream || !wakeOn()) { return; }
+      done = true;
+      document.removeEventListener("touchend", h, true);
+      document.removeEventListener("click", h, true);
+      b.style.display = "none";
+      enableWakeQuiet();
+    };
+    document.addEventListener("touchend", h, true);
+    document.addEventListener("click", h, true);
   }
 })();
