@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=16>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=17>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=15";
+  var VER = "v=16";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -538,7 +538,7 @@
         teardownSeg();
       } else if (m.type === "error") {
         /* 通道错误可见(token 问题走下方续期自愈) */
-        diagTip("识别通道: " + String(m.error || "?").slice(0, 48), 15);
+        diagTip("识别通道: " + String(m.error || "?").slice(0, 80), 15);
         /* token 可能过期: 单飞刷新一次, 下一段自愈(过期瞬间喊
            一次没反应, 紧接着再喊即恢复) */
         tryRefreshToken();

@@ -276,6 +276,8 @@ async def ws_asr(ws: WebSocket):
         (任何失败 H5 回退整段上传轨)
     """
     await ws.accept()
+    raw = None
+    auth = None
     try:
         # ① 首条消息鉴权(JWT 中间件不拦 WS——type=websocket)
         raw = await asyncio.wait_for(
@@ -287,6 +289,15 @@ async def ws_asr(ws: WebSocket):
         if not member:
             raise ValueError("会员不存在")
     except Exception as e:
+        # 结构化留痕: 鉴权失败原因可观测(真机排查——刷新成功但
+        # WS 持续失败时, 无日志只能盲猜; token 只记前缀防泄露)
+        try:
+            _tk = str((auth or {}).get("token") or "")[:16]
+        except Exception:  # noqa: BLE001
+            _tk = ""
+        logger.warning(
+            "ws_asr_auth_failed err=%s token_prefix=%s "
+            "recv=%s", e, _tk, "json" if raw else "empty")
         with contextlib.suppress(Exception):
             await ws.send_json({"type": "error",
                                 "error": f"鉴权失败: {e}"})

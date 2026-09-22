@@ -1,15 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=15 -> v=16: 关面板恢复链手势过期修复(closePanel 手势栈内先试,
-退避重试扩至 5 次, suspended 挂激活时明确提示)随 widget VER v=15
-双 bump(①index 引用 v=16 刷 widget 本体)
+v=16 -> v=17: 识别通道提示截断放宽至 80 字符(配合后端鉴权失败
+结构化日志定位"刷新成功仍失败"根因)随 widget VER v=16 双 bump
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=15"
-NEW = "src=/js/voice-wake-widget.js?v=16"
+OLD = "src=/js/voice-wake-widget.js?v=16"
+NEW = "src=/js/voice-wake-widget.js?v=17"
 
 
 def main():
