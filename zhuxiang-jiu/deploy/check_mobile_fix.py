@@ -46,6 +46,11 @@ checks += [
      "$('backBtn').onclick = goList" in det and "$('backBrand').onclick = goList" in det),
     ("D7 id 正则兼容 ?v=2&id=", "/[?&]id=(\\d+)/".replace("\\\\", "\\") in det
      or re.search(r"/\[\?&\]id=\(\\d\+\)/", det) is not None),
+    ("D8 详情页表格+头卡窄屏(后台方案推广)",
+     ".dtable { font-size: 11px; }" in det
+     and ".dtable th { padding: 4px 6px; white-space: nowrap; }" in det
+     and ".head-card h1 { font-size: 16px; }" in det
+     and "overflow-x:auto" in det),  # 擂台榜容器横滑
 ]
 fails = [n for n, ok in checks if not ok]
 print("scripts: list=%d detail=%d" % (scripts(lst, "lst"), scripts(det, "det")))

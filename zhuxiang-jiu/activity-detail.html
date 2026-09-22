@@ -145,11 +145,17 @@
     .prize-row .name { font-weight: 600; color: #2c3e33; }
     .prize-row .meta { font-size: 11px; color: #8a978f;
         font-family: Consolas, monospace; }
-    /* 窄屏(手机): 奖品信息行占满首行, 状态/按钮组换行, 防挤压错位 */
+    /* 窄屏(手机): 奖品信息行占满首行, 状态/按钮组换行, 防挤压错位;
+       表格缩字号(擂台榜等, 外层已横滑); 详情头卡压缩 */
     @media (max-width: 480px) {
         .prize-row { flex-wrap: wrap; row-gap: 6px; }
         .prize-row .info { flex: 1 1 100%; }
         .reg-status-row { flex-wrap: wrap; row-gap: 6px; }
+        .dtable { font-size: 11px; }
+        .dtable th { padding: 4px 6px; white-space: nowrap; }
+        .dtable td { padding: 4px 6px; }
+        .head-card { padding: 12px; }
+        .head-card h1 { font-size: 16px; }
     }
 
     /* 空态/加载态/错误 */
