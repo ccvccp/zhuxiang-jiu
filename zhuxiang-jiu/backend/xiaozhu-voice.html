@@ -516,7 +516,13 @@ var S = { sid: null, turnCount: 0, woken: false, pending: false,
           mode: "cloud", micState: "idle", tts: true,
           handfree: true, ttsPlaying: false, vadSpoke: false,
           hidden: false, lastSpoken: "",
-          ttsCtx: null, ttsSrc: null, packTTS: null };
+          ttsCtx: null, ttsSrc: null, packTTS: null,
+          /* v3 TTS 分句流水线: chunks 按序号存已解码块,
+             nextIdx 队首接力; gapSrc 首包过渡音(正文到即让位);
+             ctl 为本轮身份——旧轮回调一律身份比对作废 */
+          ttsCtl: null, ttsChunks: null, ttsNextIdx: 0,
+          ttsCur: null, ttsGapSrc: null,
+          streamPartial: "", latMarks: null };
 
 /* ===== 主流程 ===== */
 function showLogin() {
@@ -947,6 +953,8 @@ function attachFeedback(bubble, turnId) {
 
 /* ===== 轮次响应处理(语音/文本同链) ===== */
 function handleTurn(j, channel) {
+  /* v3 延迟埋点: 响应到达时刻 */
+  if (S.latMarks) S.latMarks.resp = Date.now();
   S.turnCount++;
   document.getElementById("tcount").textContent = S.turnCount;
   /* 调试徽章(intent/track/latency/mode)不再进气泡——
@@ -1125,6 +1133,8 @@ function sendText(text) {
   }).catch(function (e) { setPending(false); removeTyping(); turnError(e); });
 }
 function sendVoice(b64, durationSec) {
+  /* v3 延迟埋点: 提交时刻(整段上传轨) */
+  if (S.latMarks) S.latMarks.submit = Date.now();
   if (!S.sid) { showToast("会话未开启"); return; }
   setPending(true);
   setMicStatus("☁ 云端识别中…（音频即转即删）");
@@ -1140,6 +1150,8 @@ function sendVoice(b64, durationSec) {
 /* P1 流式轨提交: 转写已在流式会话完成(说完了就出字),
    只 POST 最终文本+流式统计——跳过重复转写与音频上传 */
 function postVoiceTranscript(text, durationSec) {
+  /* v3 延迟埋点: 提交时刻 */
+  if (S.latMarks) S.latMarks.submit = Date.now();
   setPending(true);
   showTyping();
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
@@ -1230,6 +1242,7 @@ function streamConnect() {
     try { m = JSON.parse(e.data); } catch (ex) { return; }
     if (m.type === "partial" && m.text) {
       /* 边说边出字: 麦克风状态区实时显示中间结果(自纠错) */
+      S.streamPartial = m.text; /* 语义感知 VAD 读最新转写尾字 */
       setMicStatus('🗣 <b class="rec">' + m.text + "</b>");
     } else if (m.type === "final") {
       var cb = stFinalCb; stFinalCb = null;
@@ -1444,23 +1457,163 @@ function stopTtsNow() {
     if (S.ttsSrc) { S.ttsSrc.onended = null; S.ttsSrc.stop(); }
   } catch (e) {}
   S.ttsSrc = null;
+  /* v3 流水线清理: 在途块合成被 abort 打断, 当前块停播,
+     待播队列与过渡音一并清空(旧轮任何回调不再推进队列) */
+  try {
+    if (S.ttsCur) { S.ttsCur.onended = null; S.ttsCur.stop(); }
+  } catch (e) {}
+  S.ttsCur = null;
+  try {
+    if (S.ttsGapSrc) { S.ttsGapSrc.onended = null; S.ttsGapSrc.stop(); }
+  } catch (e) {}
+  S.ttsGapSrc = null;
+  S.ttsChunks = null; S.ttsCtl = null; S.ttsNextIdx = 0;
   if (window.speechSynthesis) {
     try { window.speechSynthesis.cancel(); } catch (e) {}
   }
-  document.querySelectorAll(".bubble.speaking").forEach(
-    function (b) { b.classList.remove("speaking"); });
+  document.querySelectorAll(".bubble.speaking").forEach(function (b) {
+    b.classList.remove("speaking");
+  });
   S.ttsPlaying = false;
 }
 /* 服务端 TTS(微信 X5 无系统 TTS——cogtts 合成 WAV,
    Web Audio 播放: X5 拒绝非手势 Audio.play() 且 Audio 元素
-   onended 偶发不触发卡死免提——BufferSource 双可靠) */
+   onended 偶发不触发卡死免提——BufferSource 双可靠)
+   v3 分句流水线(低延迟对话): 整句合成 2-3s 是"说完到听到"
+   最大头——长回复按句切分错峰并行合成, 首子句到达即播,
+   其余播放中合成排队接力, 体感等待从"全文合成完"压到
+   "首子句合成完"(约砍一半); 队列按序号接力(乱序不串句),
+   失败块占位跳过(不播但推进防卡死), 旧轮回调一律 ctl
+   身份比对作废, 短句/缓存命中走单块路径零回归 */
+function splitSpeech(text) {
+  var t = String(text || "").trim();
+  if (!t) return [];
+  if (t.length <= 24) return [t]; /* 短回复整句更快(大多数轮) */
+  var parts = [], cur = "";
+  for (var i = 0; i < t.length; i++) {
+    var ch = t.charAt(i);
+    cur += ch;
+    if ("。！？；;，,".indexOf(ch) >= 0) {
+      /* 首块取到首个标点即成块(首包最小); <6 字并入下句
+         (cogtts 极短文本合成不稳) */
+      if (cur.trim().length >= 6) {
+        parts.push(cur.trim()); cur = "";
+      }
+    } else if (cur.length >= 22) {
+      parts.push(cur); cur = ""; /* 无标点长串硬切 */
+    }
+  }
+  if (cur.trim()) parts.push(cur.trim());
+  return parts.length ? parts : [t];
+}
+function ttsPlayCtx() {
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  /* 播放 ctx 优先复用录音 audioCtx(用户手势+麦克风授权
+     后创建, 免提流复用常驻 running——X5 无手势新建 ctx
+     会 suspended 且 resume 被拒, 与 Audio.play() 同困) */
+  var ctx = (typeof audioCtx !== "undefined" && audioCtx
+             && audioCtx.state !== "closed")
+    ? audioCtx
+    : (S.ttsCtx && S.ttsCtx.state !== "closed"
+       ? S.ttsCtx : null);
+  if (!ctx) { S.ttsCtx = new AC(); ctx = S.ttsCtx; }
+  S.ttsPlayCtx = ctx;
+  return ctx;
+}
+function ttsDecode(ctx, buf) {
+  var go = function () {
+    return new Promise(function (res, rej) {
+      ctx.decodeAudioData(buf, res, rej);
+    });
+  };
+  return (ctx.state === "suspended"
+    ? ctx.resume().then(go, go) : go())
+    .catch(function () { return null; });
+}
+/* 块入队: 序号保序; 失败块传 null 占位(跳过不播不卡队列) */
+function ttsEnqueue(decoded, idx, finalDone, ctl) {
+  if (S.ttsAbort !== ctl || !S.ttsChunks) return;
+  S.ttsChunks[idx] = { d: decoded, done: finalDone };
+  pumpTts(ctl);
+}
+/* 队首接力: 只播 nextIdx 连续就绪块; 当前块 onended 推进,
+   下一块未到则空转退出, 到达时再泵 */
+function pumpTts(ctl) {
+  try {
+    if (S.ttsAbort !== ctl || !S.ttsChunks || S.ttsCur) return;
+    var item = S.ttsChunks[S.ttsNextIdx];
+    /* 失败块连跳(某句合成失败对话继续) */
+    while (item && !item.d) {
+      var wasLast = !!item.done;
+      delete S.ttsChunks[S.ttsNextIdx];
+      S.ttsNextIdx++;
+      if (wasLast) { S.ttsChunks = null; return item.done(); }
+      item = S.ttsChunks[S.ttsNextIdx];
+    }
+    if (!item) return;
+    var ctx = S.ttsPlayCtx || ttsPlayCtx();
+    if (!ctx) return;
+    var src = ctx.createBufferSource();
+    src.buffer = item.d;
+    src.connect(ctx.destination);
+    S.ttsSrc = src; S.ttsCur = src;
+    /* 首块出声: 气泡高亮 + 延迟报告 + 过渡音让位 */
+    if (S.ttsNextIdx === 0) {
+      if (S.ttsBubble) S.ttsBubble.classList.add("speaking");
+      if (S.latMarks) S.latMarks.play = Date.now();
+      latReport();
+      if (S.ttsGapSrc) {
+        try {
+          S.ttsGapSrc.onended = null; S.ttsGapSrc.stop();
+        } catch (e) {}
+        S.ttsGapSrc = null;
+      }
+    }
+    src.onended = function () {
+      if (S.ttsCur !== src) return;
+      S.ttsCur = null;
+      delete S.ttsChunks[S.ttsNextIdx];
+      S.ttsNextIdx++;
+      if (item.done) { S.ttsChunks = null; item.done(); }
+      else pumpTts(ctl);
+    };
+    src.onerror = src.onended;
+    src.start();
+    /* 兜底: 块时长+3s 强制推进(防 onended 丢失卡死队列) */
+    setTimeout(function () {
+      if (S.ttsCur === src) { try { src.stop(); } catch (e) {} }
+    }, item.d.duration * 1000 + 3000);
+  } catch (e) { /* ctx 失效等: 对齐旧版失败恢复 */
+    S.ttsCur = null; S.ttsPlaying = false;
+    scheduleHandfree(600);
+  }
+}
+/* v3 全链路延迟埋点: vad断句→提交→响应→首块出声 四段
+   [LAT] 结构化输出(PC 调试/真机远程指导)——卡在哪段
+   一目了然(VAD等待/识别+规则/TTS合成) */
+function latReport() {
+  var m = S.latMarks || {};
+  var seg = function (a, b) {
+    return (m[a] && m[b]) ? String(m[b] - m[a]) : "?";
+  };
+  try {
+    console.info("[LAT] vad→submit " + seg("vad", "submit")
+      + "ms | submit→resp " + seg("submit", "resp")
+      + "ms | resp→play " + seg("resp", "play")
+      + "ms | total " + seg("vad", "play") + "ms");
+  } catch (e) { /* 静默环境忽略 */ }
+}
 function speakCloud(text, bubbleEl) {
   stopTtsNow(); /* 先打断旧轮(合成中/播放中一律终止) */
   var ctl = (typeof AbortController !== "undefined")
     ? new AbortController() : null;
-  S.ttsAbort = ctl;
+  S.ttsAbort = ctl; S.ttsCtl = ctl;
   S.ttsPlaying = true;
   S.lastSpoken = String(text);
+  S.ttsBubble = bubbleEl || null;
+  S.ttsChunks = {}; S.ttsNextIdx = 0;
+  var all = String(text);
   var el = bubbleEl;
   var done = function () {
     if (el) el.classList.remove("speaking");
@@ -1473,64 +1626,75 @@ function speakCloud(text, bubbleEl) {
   var hdrs = { "X-Member-Id": String(auth.uid || "") };
   if (auth.token) hdrs["Authorization"] = "Bearer " + auth.token;
   /* 高频短句内存直播(preheatTTS 预取——"在呢!"零网络
-     零合成, 唤醒应答只剩 ASR 延迟) */
-  var packed = (S.packTTS || {})[String(text)];
-  var fetched = packed
-    ? Promise.resolve(packed)
-    : fetch(ttsUrl(text), {
-        headers: hdrs,
-        signal: ctl ? ctl.signal : undefined })
-        .then(function (r) {
-          if (!r.ok) throw new Error("tts " + r.status);
-          return r.arrayBuffer();
-        });
-  if (!packed) setMicStatus("🎙 语音合成中…（首次约 2 秒，同句即时）");
-  fetched.then(function (buf) {
-    /* 被更新的轮取代: 请求结果直接废弃(打断核心) */
-    if (ctl && S.ttsAbort !== ctl) return done();
-    if (S.lastSpoken !== String(text)) return done();
-    var AC = window.AudioContext
-      || window.webkitAudioContext;
-    if (!AC) throw new Error("no webaudio");
-    /* 播放 ctx 优先复用录音 audioCtx(用户手势+麦克风授权
-       后创建, 免提流复用常驻 running——X5 无手势新建 ctx
-       会 suspended 且 resume 被拒, 与 Audio.play() 同困) */
-    var ctx = (typeof audioCtx !== "undefined"
-               && audioCtx
-               && audioCtx.state !== "closed")
-      ? audioCtx
-      : (S.ttsCtx && S.ttsCtx.state !== "closed"
-         ? S.ttsCtx : null);
-    if (!ctx) { S.ttsCtx = new AC(); ctx = S.ttsCtx; }
-    S.ttsPlayCtx = ctx;
-    var go = function () {
-      return new Promise(function (res, rej) {
-        ctx.decodeAudioData(buf, res, rej);
+     零合成, 唤醒应答只剩 ASR 延迟); 命中或 ≤24 字短句
+     走单块路径(整句, 大多数轮零回归) */
+  var packed = (S.packTTS || {})[all];
+  var chunks = packed ? [all] : splitSpeech(all);
+  if (!packed) {
+    setMicStatus("🎙 语音合成中…（首次约 1 秒，同句即时）");
+  }
+  var ctx = ttsPlayCtx();
+  if (!ctx) { /* 无 WebAudio: 文字已展示, 恢复聆听兜底 */
+    S.ttsPlaying = false; scheduleHandfree(300); return;
+  }
+  if (chunks.length > 1) {
+    /* 首包过渡音: 多块流水线才播预缓存「好的」抢跑, 为
+       首子句合成买 ~0.5s 体感; 正文首块出声即让位 */
+    var gapBuf = (S.packTTS || {})["好的"];
+    if (gapBuf) {
+      ttsDecode(ctx, gapBuf).then(function (d) {
+        if (!d || S.ttsAbort !== ctl || S.ttsCur) return;
+        var g = ctx.createBufferSource();
+        g.buffer = d; g.connect(ctx.destination);
+        S.ttsGapSrc = g;
+        g.onended = function () {
+          if (S.ttsGapSrc === g) S.ttsGapSrc = null;
+        };
+        g.start();
       });
-    };
-    if (ctx.state === "suspended") {
-      return ctx.resume().then(go, go);
     }
-    return go();
-  }).then(function (decoded) {
-    if (ctl && S.ttsAbort !== ctl) return done();
-    if (S.lastSpoken !== String(text)) return done();
-    var ctx = S.ttsPlayCtx;
-    var src = ctx.createBufferSource();
-    src.buffer = decoded;
-    src.connect(ctx.destination);
-    S.ttsSrc = src;
-    if (el) el.classList.add("speaking");
-    src.onended = done;
-    src.onerror = done;
-    src.start();
-    /* 兜底: 时长+3s 强制恢复(防 onended 丢失卡死免提) */
+  }
+  chunks.forEach(function (c, idx) {
     setTimeout(function () {
-      if (S.ttsPlaying) done();
-    }, decoded.duration * 1000 + 3000);
-  }).catch(function () {
-    S.ttsPlaying = false; scheduleHandfree(600);
+      if (S.ttsAbort !== ctl) return; /* 旧轮: 后续块不再发 */
+      var pre = (S.packTTS || {})[c];
+      var pr = pre ? Promise.resolve(pre)
+        : fetch(ttsUrl(c), {
+            headers: hdrs,
+            signal: ctl ? ctl.signal : undefined })
+            .then(function (r) {
+              if (!r.ok) throw new Error("tts " + r.status);
+              return r.arrayBuffer();
+            });
+      pr.then(function (buf) {
+        if (S.ttsAbort !== ctl) return;
+        if (!buf) {
+          return ttsEnqueue(null, idx,
+            idx === chunks.length - 1 ? done : null, ctl);
+        }
+        return ttsDecode(ctx, buf).then(function (d) {
+          if (S.ttsAbort !== ctl) return;
+          ttsEnqueue(d, idx,
+            idx === chunks.length - 1 ? done : null, ctl);
+        });
+      }).catch(function () {
+        if (S.ttsAbort !== ctl) return;
+        ttsEnqueue(null, idx,
+          idx === chunks.length - 1 ? done : null, ctl);
+      });
+    }, idx * 120); /* 错峰 120ms: 真机实证 cogtts 上游
+                      队列并发争用致播报滞后 */
   });
+  /* 轮级兜底: 全文估时+8s(覆盖块级推进间隙与 fetch 黑洞),
+     仍在播则强制收尾(防卡死免提) */
+  var estMs = Math.min(30000, 2000 + all.length * 300) + 8000;
+  setTimeout(function () {
+    if (S.ttsAbort === ctl && S.ttsPlaying) {
+      S.ttsChunks = null;
+      stopTtsNow();
+      done();
+    }
+  }, estMs);
 }
 
 /* ===== 免提连续对话: 自动聆听→VAD静音断句→发送→播报完续听 ===== */
@@ -1940,20 +2104,27 @@ function wireCloudCapture() {
         Math.max(0.12, Math.min(1, rms * 3.4)).toFixed(3));
       /* --- 免提 VAD 断句(宽限期 0.055 高阈值滤 TTS 残响) --- */
       if (S.handfree) {
-        var now = Date.now();
-        var thr = (now - vadOpenAt < 1500) ? 0.055 : 0.035;
-        if (rms > thr) {
-          S.vadSpoke = true; vadSilentAt = 0;
-        } else if (S.vadSpoke && !vadSilentAt) {
-          vadSilentAt = now;
+          var now = Date.now();
+          var thr = (now - vadOpenAt < 1500) ? 0.055 : 0.035;
+          if (rms > thr) {
+            S.vadSpoke = true; vadSilentAt = 0;
+          } else if (S.vadSpoke && !vadSilentAt) {
+            vadSilentAt = now;
+          }
+          /* v3 语义感知尾点: 静音 600ms 后查最新 partial 尾字
+             ——疑问语气词(吗/呢/吧/?)是明确完句信号, 提前断
+             省 600ms 尾部等待; 命令式("来两件竹香春")不提前
+             (截断执行错指令事大)。保守启发式, 不部署模型;
+             基线 1200ms 是真机实证抗换气停顿的限值 */
+          if (S.vadSpoke && vadSilentAt) {
+            var endsAsk = /[吗呢吧？?]$/.test(
+              String(S.streamPartial || "").trim());
+            if (now - vadSilentAt > (endsAsk ? 600 : 1200)) {
+              cloudStop();
+              return;
+            }
+          }
         }
-        if (S.vadSpoke && vadSilentAt && now - vadSilentAt > 1200) {
-          cloudStop(); /* 静音1.2s → 自动结束本句(真机实证: 0.5s
-            过急, 说话中途换气/思考停顿被切断——"呃"0.7s/半句
-            1.8s 就发送, 语义碎片无法理解; 听完一句再答) */
-          return;
-        }
-      }
     })();
     recStart = Date.now();
     cloudActive = true;
@@ -1981,6 +2152,9 @@ function wireCloudCapture() {
     }, 500);
 }
 function cloudStop() {
+  /* v3 延迟埋点: VAD 断句时刻(全链路计时起点) */
+  S.latMarks = { vad: Date.now() };
+  S.streamPartial = "";
   if (recTimer) { clearInterval(recTimer); recTimer = null; }
   if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }
   analyser = null;
