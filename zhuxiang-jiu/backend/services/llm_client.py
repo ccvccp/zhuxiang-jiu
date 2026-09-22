@@ -66,11 +66,30 @@ ASR 双 provider(P0 小竹 Fun-ASR 接入):
 import json
 import logging
 import os
+import struct
 import urllib.request
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "15"))
+
+
+def _wav_intact(data: bytes) -> bool:
+    """WAV 完整性校验: RIFF 头 + 声明长度与实际一致
+
+    故障注入实证(cut 毒, verify_tts_fault.py): cogtts 流被
+    中途截断的 92KB 坏 WAV 仍过 len>500 校验被透传——坏数据
+    只能靠前端 decodeAudioData 失败兜底(整句路径静默不播)。
+    源头拦截: 截断流的 RIFF size 声明 > 实际长度, 直接判废。
+    """
+    if (not isinstance(data, bytes) or len(data) < 44
+            or data[:4] != b"RIFF" or data[8:12] != b"WAVE"):
+        return False
+    try:
+        riff_sz = struct.unpack("<I", data[4:8])[0]
+    except struct.error:
+        return False
+    return riff_sz + 8 <= len(data)
 
 # 视觉理解超时秒(图片/视频理解显著慢于纯文本, 单独放宽)
 _VISION_TIMEOUT = int(os.environ.get("LLM_VISION_TIMEOUT", "60"))
@@ -715,10 +734,13 @@ class LLMProviderClient:
                 ctype = resp.headers.get("Content-Type", "")
             if (ctype.startswith("audio/")
                     and isinstance(data, bytes)
-                    and len(data) > 500):
+                    and len(data) > 500
+                    and _wav_intact(data)):
                 return data
-            logger.warning("llm_tts_bad_response ct=%s len=%s",
-                           ctype, len(data) if data else 0)
+            logger.warning("llm_tts_bad_response ct=%s len=%s "
+                           "intact=%s",
+                           ctype, len(data) if data else 0,
+                           _wav_intact(data) if data else None)
             return None
         except Exception as exc:
             logger.warning("llm_tts_failed(跳过播报): %s", exc)
