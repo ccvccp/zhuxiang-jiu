@@ -1,14 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=1 -> v=2: 唤醒词可配置(⚙️ 设置 + buildWakeRe 重建)
+v=2 -> v=3: 自定义唤醒词同音容错(拼音表双轨匹配)
 widget 内容更新须同步 bump ?v=N 破 /js/ immutable 缓存。
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=1"
-NEW = "src=/js/voice-wake-widget.js?v=2"
+OLD = "src=/js/voice-wake-widget.js?v=2"
+NEW = "src=/js/voice-wake-widget.js?v=3"
 
 
 def main():

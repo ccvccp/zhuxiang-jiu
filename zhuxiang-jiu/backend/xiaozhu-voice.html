@@ -403,7 +403,7 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
       <input id="wwInput" maxlength="8" placeholder="自定义 2-8 个汉字">
       <button type="button" onclick="saveWakeWordCustom()">保存</button>
     </div>
-    <div class="ww-note">自定义词按普通话转写精确匹配（无同音容错）；输入框清空保存即恢复默认。修改即时生效（「小竹球」唤醒监听无需重启）。</div>
+    <div class="ww-note">自定义词同样支持同音容错（按普通话拼音匹配，如「精灵」被听成「京玲」也能唤醒）；输入框清空保存即恢复默认。修改即时生效（「小竹球」唤醒监听无需重启）。</div>
   </div>
 </div>
 <div class="footer">唤醒词「小竹」· 免唤醒窗口 5 分钟 · 音频即转即删不落库 · 身份证/手机号/卡号自动脱敏<br>
@@ -1565,7 +1565,7 @@ function renderWakeBtn() {
 function showWakeWordSet() {
   var w = localStorage.getItem("xiaozhu.wakeword") || "";
   document.getElementById("wwCur").textContent = w
-    ? "「" + w + "」（单声短语 · 精确匹配）"
+    ? "「" + w + "」（单声短语 · 同音容错）"
     : "小竹、小竹（呼唤两声 · 默认）";
   document.getElementById("wwInput").value = w;
   document.getElementById("wwMask").classList.remove("hidden");
