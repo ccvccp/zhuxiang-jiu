@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=6>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=7>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=5";
+  var VER = "v=6";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -37,6 +37,58 @@
       if (d && d.accessToken) { return d.accessToken; }
     } catch (e) { /* 忽略 */ }
     return "";
+  }
+
+  /* ---------- token 过期自愈(WS 鉴权 error 时单飞刷新一次) ----------
+     accessToken 仅 2h: 面板 apiFetch 有 401 自愈, 但唤醒走 WS 静默
+     失败——过期后喊不醒且无提示。此处对齐 apiFetch 的 refresh 链:
+     从读取的同一源取 refreshToken 刷新回写, 下一段自然用新 token;
+     单飞防并发, 失败 60s 退避防空烧(refreshToken 7 天也过期时)。 */
+  var refBusy = false, refFailAt = 0;
+  function tryRefreshToken() {
+    var now = Date.now();
+    if (refBusy || now - refFailAt < 60000) { return; }
+    var src = "", rt = "";
+    try {
+      var s = JSON.parse(localStorage.getItem("zhuxiang.auth") || "null");
+      if (s && s.token && s.refreshToken) {
+        src = "zhuxiang.auth"; rt = s.refreshToken;
+      }
+    } catch (e) { /* 忽略 */ }
+    if (!src) {
+      try {
+        var w = JSON.parse(localStorage.getItem("auth_session") || "null");
+        var d = (w && w.data) ? w.data : w;
+        if (d && d.accessToken && d.refreshToken) {
+          src = "auth_session"; rt = d.refreshToken;
+        }
+      } catch (e) { /* 忽略 */ }
+    }
+    if (!src) { refFailAt = now; return; }
+    refBusy = true;
+    fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: rt })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      refBusy = false;
+      var nt = j && (j.accessToken || (j.data && j.data.accessToken));
+      if (!nt) { refFailAt = Date.now(); return; }
+      try {
+        if (src === "zhuxiang.auth") {
+          var s2 = JSON.parse(localStorage.getItem("zhuxiang.auth") || "{}");
+          s2.token = nt;
+          if (j.refreshToken) { s2.refreshToken = j.refreshToken; }
+          localStorage.setItem("zhuxiang.auth", JSON.stringify(s2));
+        } else {
+          var w2 = JSON.parse(localStorage.getItem("auth_session") || "{}");
+          var d2 = (w2 && w2.data) ? w2.data : w2;
+          d2.accessToken = nt;
+          if (j.refreshToken) { d2.refreshToken = j.refreshToken; }
+          localStorage.setItem("auth_session", JSON.stringify(w2));
+        }
+      } catch (e) { /* 写失败忽略 */ }
+    }).catch(function () { refBusy = false; refFailAt = Date.now(); });
   }
 
   /* ---------- 样式与面板(与原 voice-entry 同构: 球+iframe 浮层) ---------- */
@@ -403,6 +455,9 @@
         if (matchWake(m.text || eng.lastPartial)) { onWakeHit(); }
         teardownSeg();
       } else if (m.type === "error") {
+        /* token 可能过期: 单飞刷新一次, 下一段自愈(过期瞬间喊
+           一次没反应, 紧接着再喊即恢复) */
+        tryRefreshToken();
         teardownSeg();
       }
     };
