@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=9>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=10>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=8";
+  var VER = "v=9";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -88,6 +88,7 @@
           localStorage.setItem("auth_session", JSON.stringify(w2));
         }
       } catch (e) { /* 写失败忽略 */ }
+      showTip("登录已自动续期——再喊一声「小竹、小竹」即唤醒");
     }).catch(function () { refBusy = false; refFailAt = Date.now(); });
   }
 
@@ -359,6 +360,23 @@
     eng.on = true;
     eng.speaking = false;
     eng.hiStreak = 0; eng.loStreak = 0;
+    /* X5: 无手势(页面加载自动恢复监听)创建的 ctx 处于 suspended——
+       音频图不跑, VAD 失效(麦克风已允许但喊了没反应); 权限弹窗的
+       点击不算页面手势。挂一次性交互 resume(任意触摸即活) */
+    if (eng.ctx.state === "suspended") { armCtxResume(); }
+  }
+  var ctxResumeHandler = null;
+  function armCtxResume() {
+    if (ctxResumeHandler || !eng.ctx) { return; }
+    ctxResumeHandler = function () {
+      document.removeEventListener("touchend", ctxResumeHandler, true);
+      document.removeEventListener("click", ctxResumeHandler, true);
+      ctxResumeHandler = null;
+      try { if (eng.ctx && eng.ctx.state === "suspended") { eng.ctx.resume(); } }
+      catch (e) { /* 忽略 */ }
+    };
+    document.addEventListener("touchend", ctxResumeHandler, true);
+    document.addEventListener("click", ctxResumeHandler, true);
   }
 
   function stopWake() {

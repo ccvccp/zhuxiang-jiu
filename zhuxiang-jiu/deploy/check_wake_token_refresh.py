@@ -37,7 +37,7 @@ checks2 = [
     ("M4 xz-wake-on 不抢麦克风", "if (eng.stream) {\n        startWake();\n      }\n      return;" in v
      and "enableWakeQuiet();\n      }\n      return;" not in v),
     ("M5 xz-wake-off 用 releaseMic", "stopWake();\n      releaseMic();" in v),
-    ("M6 widget VER v=8", 'var VER = "v=8";' in v),
+    ("M6 widget VER v=9", 'var VER = "v=9";' in v),
     ("M7 语音页隐藏无条件释放(pauseVoiceForHidden)",
      "cloudActive = false;\n  hardStopCloud(); /* 无条件硬停+释放麦克风(幂等安全) */" in p
      and "S.hidden = true;\n  clearTimeout(S.hfTimer); /* 停续听排程 */\n  cloudActive = false;" in p),
@@ -54,6 +54,11 @@ checks3 = [
     ("S3 失败交互重试", "function armRetryOnInteract() {" in v
      and 'document.addEventListener("touchend", h, true);' in v
      and "麦克风暂不可用（可能被占用）——点一下屏幕任意处即恢复唤醒" in v),
+    ("S4 suspended ctx 交互 resume",
+     'if (eng.ctx.state === "suspended") { armCtxResume(); }' in v
+     and "function armCtxResume() {" in v),
+    ("S5 续期提示再喊一次",
+     'showTip("登录已自动续期——再喊一声「小竹、小竹」即唤醒");' in v),
 ]
 for n, ok in checks3:
     print(("  PASS " if ok else "  FAIL ") + n)
