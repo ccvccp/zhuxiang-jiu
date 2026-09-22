@@ -43,6 +43,14 @@
     .brand { font-size: 17px; font-weight: 600; letter-spacing: 1px; }
     .brand small { font-weight: 400; opacity: .75; font-size: 11px; display: block; letter-spacing: 0; }
     .brand .seal { color: #e6cf9f; }
+    .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .back-btn {
+        flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
+        border: none; cursor: pointer; background: rgba(255,255,255,.18);
+        color: #fff; font-size: 17px; line-height: 1; font-family: inherit;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .back-btn:active { opacity: .8; }
     .auth-box { text-align: right; }
     .btn {
         border: none; border-radius: 6px; cursor: pointer; font-size: 13px;
@@ -171,7 +179,10 @@
 <body>
 
 <div class="topbar">
-    <div class="brand">活动中心 <span class="seal">ActivityHub</span><small>竹香酒 · 官方活动 · 报名抽奖擂台赛</small></div>
+    <div class="topbar-left">
+        <button class="back-btn" onclick="goBack()" aria-label="返回" title="返回">←</button>
+        <div class="brand">活动中心 <span class="seal">ActivityHub</span><small>竹香酒 · 官方活动 · 报名抽奖擂台赛</small></div>
+    </div>
     <div class="auth-box" id="authBox"></div>
 </div>
 
@@ -272,6 +283,17 @@
     }
 
     function $(id) { return document.getElementById(id); }
+
+    /* 返回: 同源来路(商城"我的"页/zyh 卡/footer 链接)原路返回;
+       直达/外源(新开标签/扫码)无来路, 兜底跳商城首页 */
+    window.goBack = function () {
+        var ref = document.referrer || '';
+        if (ref.indexOf(location.origin) === 0 && history.length > 1) {
+            history.back();
+        } else {
+            location.href = '/';
+        }
+    };
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
