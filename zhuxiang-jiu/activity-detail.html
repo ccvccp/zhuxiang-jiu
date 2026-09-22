@@ -145,6 +145,12 @@
     .prize-row .name { font-weight: 600; color: #2c3e33; }
     .prize-row .meta { font-size: 11px; color: #8a978f;
         font-family: Consolas, monospace; }
+    /* 窄屏(手机): 奖品信息行占满首行, 状态/按钮组换行, 防挤压错位 */
+    @media (max-width: 480px) {
+        .prize-row { flex-wrap: wrap; row-gap: 6px; }
+        .prize-row .info { flex: 1 1 100%; }
+        .reg-status-row { flex-wrap: wrap; row-gap: 6px; }
+    }
 
     /* 空态/加载态/错误 */
     .empty {
@@ -279,7 +285,7 @@
 
     <footer>
         活动解释权归竹香酒官方所有 · 中奖自动发放(积分/优惠券)或线下邮寄<br>
-        <a href="activity.html" id="backFooter">🎁 返回活动中心</a> ·
+        <a href="activity.html?v=2" id="backFooter">🎁 返回活动中心</a> ·
         <a href="zyh.html">🎋 竹酒知识问答</a> ·
         <a href="synapse.html">🧵 品牌内容织造</a> ·
         <a href="activity-dashboard.html">⚙️ 活动管理后台</a><br>
@@ -556,7 +562,7 @@
             if (!res.ok || !body || !body.success) {
                 $('errBox').innerHTML = '<div class="err-card">活动加载失败: '
                     + esc(errMsg(body, 'HTTP ' + res.status))
-                    + '<br><a href="activity.html" style="color:#355c44">← 返回活动中心</a></div>';
+                    + '<br><a href="activity.html?v=2" style="color:#355c44">← 返回活动中心</a></div>';
                 return;
             }
             state.act = body.data;
@@ -933,11 +939,12 @@
     }
 
     /* ---------- 启动 ---------- */
-    /* 返回列表页(透传本地调试 ?api=): 顶栏圆形返回按钮 + 品牌区可点 */
-    var goList = function () { location.href = 'activity.html' + API_QS; };
+    /* 返回列表页(透传本地调试 ?api=): 顶栏圆形返回按钮 + 品牌区可点
+       ?v=2 破手机旧缓存(nginx no-cache 生效前的启发式缓存条目) */
+    var goList = function () { location.href = 'activity.html?v=2' + API_QS; };
     $('backBtn').onclick = goList;
     $('backBrand').onclick = goList;
-    $('backFooter').href = 'activity.html' + API_QS;
+    $('backFooter').href = 'activity.html?v=2' + API_QS;
 
     /* 管理深链: 直达后台并聚焦本活动(展开详情行+滚动+高亮) */
     $('btnAdminDetail').onclick = function () {
@@ -947,7 +954,7 @@
     var idMatch = location.search.match(/[?&]id=(\d+)/);
     if (!idMatch) {
         $('errBox').innerHTML = '<div class="err-card">缺少活动 ID——请从 '
-            + '<a href="activity.html" style="color:#355c44">活动中心</a> 进入</div>';
+            + '<a href="activity.html?v=2" style="color:#355c44">活动中心</a> 进入</div>';
     } else {
         state.id = Number(idMatch[1]);
         renderAuth();

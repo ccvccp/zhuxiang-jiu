@@ -140,6 +140,11 @@
         border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
     }
     .btn-mini:active { background: #fdf1ef; }
+    /* 窄屏(手机): 报名信息行占满首行, 状态/按钮组换行, 防挤压错位 */
+    @media (max-width: 480px) {
+        .reg-row { flex-wrap: wrap; row-gap: 6px; }
+        .reg-row .info { flex: 1 1 100%; }
+    }
 
     /* 空态/加载态 */
     .empty {
@@ -543,7 +548,7 @@
             for (var j = 0; j < state.myRegs.length; j++) {
                 if (state.myRegs[j].activityId === a.id) { registered = true; break; }
             }
-            html += '<div class="act-card" onclick="location.href=\'activity-detail.html?id='
+            html += '<div class="act-card" onclick="location.href=\'activity-detail.html?v=2&id='
                 + a.id + API_QS + '\'">'
                 + '<div class="act-head"><div class="act-name">'
                 + esc(a.name) + '</div>' + statusBadge(a.status) + '</div>'
@@ -610,7 +615,7 @@
                       + ',\'' + esc(r.activityName).replace(/'/g, '&#39;') + '\')">取消报名</button>'
                     : '')
                 + '<button class="btn-mini" style="border-color:#4a7c59;color:#4a7c59" '
-                + 'onclick="location.href=\'activity-detail.html?id=' + r.activityId + API_QS + '\'">详情</button>'
+                + 'onclick="location.href=\'activity-detail.html?v=2&id=' + r.activityId + API_QS + '\'">详情</button>'
                 + '</div>';
         }
         card.innerHTML = html;
