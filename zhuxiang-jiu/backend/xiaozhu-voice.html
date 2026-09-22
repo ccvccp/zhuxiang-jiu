@@ -1199,18 +1199,32 @@ function streamConnect() {
   /* 每轮新建(简单可靠); 失败一次本轮+后续自动回退整段上传轨 */
   stAccum = new Float32Array(0); stBytes = 0; stPhase = 0; stSent = 0;
   stFinalCb = null;
+  /* 兜底清理上一条未收尾连接(快速开合面板/免提短轮重连时,
+     旧 WS 可能仍在 CONNECTING——不清理则旧实例迟到的
+     onopen/onclose 与新轮交叉; 竞态根修见下方实例守卫) */
+  streamTeardown();
+  var ws;
   try {
     var proto = location.protocol === "https:" ? "wss://" : "ws://";
-    stWS = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
-    stWS.binaryType = "arraybuffer";
+    ws = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
+    ws.binaryType = "arraybuffer";
   } catch (e) { stWS = null; return; }
+  stWS = ws;
   var failTimer = setTimeout(function () {
-    if (stWS && stWS.readyState !== 1) { stOn = false; streamTeardown(); }
+    if (stWS === ws && ws.readyState !== 1) { stOn = false; streamTeardown(); }
   }, 5000);
-  stWS.onopen = function () {
-    stWS.send(JSON.stringify({ type: "auth", token: (getAuth() || {}).token || "" }));
+  /* 实例绑定守卫: 事件处理器只信事件所属实例(不读全局 stWS)——
+     teardown 置 null/新轮覆盖后, 迟到事件按孤儿处理:
+     onopen 孤儿→直接关闭; onclose 孤儿→不动本轮 stFinalCb
+     (原实现读全局 stWS, 面板快速开合时产生 null.send TypeError) */
+  ws.onopen = function () {
+    if (stWS !== ws) { try { ws.close(); } catch (e) {} return; }
+    try {
+      ws.send(JSON.stringify({ type: "auth", token: (getAuth() || {}).token || "" }));
+    } catch (e) { /* CONNECTING 发送等异常由 onclose 兜底 */ }
   };
-  stWS.onmessage = function (e) {
+  ws.onmessage = function (e) {
+    if (stWS !== ws) return; /* 孤儿连接消息忽略 */
     if (typeof e.data !== "string") return;
     var m;
     try { m = JSON.parse(e.data); } catch (ex) { return; }
@@ -1227,12 +1241,15 @@ function streamConnect() {
       }
     }
   };
-  stWS.onclose = function () {
+  ws.onclose = function () {
     clearTimeout(failTimer);
-    if (stFinalCb) { var cb = stFinalCb; stFinalCb = null; cb(""); }
-    if (stWS) stWS = null;
+    if (stWS === ws) {
+      stWS = null;
+      if (stFinalCb) { var cb = stFinalCb; stFinalCb = null; cb(""); }
+    }
+    /* 孤儿 close: 本轮另有连接, 不触碰本轮状态 */
   };
-  stWS.onerror = function () { /* onclose 兜底处理 */ };
+  ws.onerror = function () { /* onclose 兜底处理 */ };
 }
 function streamTeardown() {
   if (stWS) { try { stWS.close(); } catch (e) {} stWS = null; }
@@ -1668,6 +1685,10 @@ function hardStopCloud() {
   if (recTimer) { clearInterval(recTimer); recTimer = null; }
   if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }
   analyser = null;
+  /* 流式连接同步关闭: 面板隐藏/免提关停时丢弃未完成段——
+     不清理则 CONNECTING/OPEN 连接泄漏至服务端超时,
+     且迟到的 onopen 无守卫可撞(双保险) */
+  streamTeardown();
   var waveEl = document.getElementById("wave");
   waveEl.classList.remove("live");
   waveEl.style.removeProperty("--amp");
