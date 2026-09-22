@@ -13,10 +13,12 @@ checks = [
     ("W3 refresh 端点+双源", "/api/auth/refresh" in w
      and 'localStorage.getItem("zhuxiang.auth"' in w
      and 'localStorage.getItem("auth_session"' in w),
-    ("W4 双源回写", 'localStorage.setItem("zhuxiang.auth"' in w
-     and 'localStorage.setItem("auth_session"' in w),
+    ("W4 双源回写(所有存在源)",
+     'if (localStorage.getItem("zhuxiang.auth")) {' in w
+     and 'if (localStorage.getItem("auth_session")) {' in w
+     and '"续期成功却再喊不醒"死循环' in w),
     ("W5 WS error 挂自愈", "tryRefreshToken();\n        teardownSeg();" in w),
-    ("W6 token 自愈在(上轮回归)", "function tryRefreshToken() {" in w),
+    ("W6 成功后 30s 退避", "refOkAt < 30000" in w),
     ("W7 回归: 唤醒匹配器", "buildWakeMatcher" in w),
     ("W8 回归: postMessage 协议", "xz-wake-on" in w and "xz-wake-word" in w),
 ]
@@ -37,7 +39,7 @@ checks2 = [
     ("M4 xz-wake-on 不抢麦克风", "if (eng.stream) {\n        startWake();\n      }\n      return;" in v
      and "enableWakeQuiet();\n      }\n      return;" not in v),
     ("M5 xz-wake-off 用 releaseMic", "stopWake();\n      releaseMic();" in v),
-    ("M6 widget VER v=9", 'var VER = "v=9";' in v),
+    ("M6 widget VER v=10", 'var VER = "v=10";' in v),
     ("M7 语音页隐藏无条件释放(pauseVoiceForHidden)",
      "cloudActive = false;\n  hardStopCloud(); /* 无条件硬停+释放麦克风(幂等安全) */" in p
      and "S.hidden = true;\n  clearTimeout(S.hfTimer); /* 停续听排程 */\n  cloudActive = false;" in p),

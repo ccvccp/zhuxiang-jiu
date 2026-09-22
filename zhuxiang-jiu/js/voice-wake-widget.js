@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=10>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=11>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=9";
+  var VER = "v=10";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -44,10 +44,10 @@
      失败——过期后喊不醒且无提示。此处对齐 apiFetch 的 refresh 链:
      从读取的同一源取 refreshToken 刷新回写, 下一段自然用新 token;
      单飞防并发, 失败 60s 退避防空烧(refreshToken 7 天也过期时)。 */
-  var refBusy = false, refFailAt = 0;
+  var refBusy = false, refFailAt = 0, refOkAt = 0;
   function tryRefreshToken() {
     var now = Date.now();
-    if (refBusy || now - refFailAt < 60000) { return; }
+    if (refBusy || now - refFailAt < 60000 || now - refOkAt < 30000) { return; }
     var src = "", rt = "";
     try {
       var s = JSON.parse(localStorage.getItem("zhuxiang.auth") || "null");
@@ -74,13 +74,17 @@
       refBusy = false;
       var nt = j && (j.accessToken || (j.data && j.data.accessToken));
       if (!nt) { refFailAt = Date.now(); return; }
+      /* 回写所有存在的源: authToken() 优先读 zhuxiang.auth——若旧
+         token 在该源而无 refreshToken, 刷新走 auth_session 只回写
+         它, 新 token 永不生效("续期成功却再喊不醒"死循环) */
       try {
-        if (src === "zhuxiang.auth") {
+        if (localStorage.getItem("zhuxiang.auth")) {
           var s2 = JSON.parse(localStorage.getItem("zhuxiang.auth") || "{}");
           s2.token = nt;
           if (j.refreshToken) { s2.refreshToken = j.refreshToken; }
           localStorage.setItem("zhuxiang.auth", JSON.stringify(s2));
-        } else {
+        }
+        if (localStorage.getItem("auth_session")) {
           var w2 = JSON.parse(localStorage.getItem("auth_session") || "{}");
           var d2 = (w2 && w2.data) ? w2.data : w2;
           d2.accessToken = nt;
@@ -88,6 +92,7 @@
           localStorage.setItem("auth_session", JSON.stringify(w2));
         }
       } catch (e) { /* 写失败忽略 */ }
+      refOkAt = Date.now();
       showTip("登录已自动续期——再喊一声「小竹、小竹」即唤醒");
     }).catch(function () { refBusy = false; refFailAt = Date.now(); });
   }
