@@ -337,6 +337,8 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
   <div class="composer">
     <button class="downbtn" id="downBtn" title="回到最新" onclick="scrollChat()">↓</button>
     <div class="modes">
+      <span class="tts" id="wakeBtn" onclick="toggleWake()" style="cursor:pointer;display:none">📣 唤醒开</span>
+      <span class="sp" id="wakeSp" style="display:none"></span>
       <span class="tts" id="hfBtn" onclick="toggleHandfree()" style="cursor:pointer">🎧 免提开</span>
       <span class="sp"></span>
       <span class="tts" id="ttsBtn" onclick="toggleTts()" style="cursor:pointer">🔊 播报开</span>
@@ -370,7 +372,27 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
 /* ===== 精简 JWT 链(login → localStorage → apiFetch 401 自愈) ===== */
 var AUTH_KEY = "zhuxiang.auth";
 function getAuth() {
-  try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch (e) { return null; }
+  try {
+    var s = JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
+    if (s && s.token) { return s; }
+  } catch (e) { return null; }
+  /* 商城(Taro H5) auth_session 兜底: 全站浮层 iframe 内
+     商城用户免二次登录(唤醒/点球直达会话) */
+  try {
+    var w = JSON.parse(localStorage.getItem("auth_session") || "null");
+    var d = (w && w.data) ? w.data : w;
+    if (d && d.accessToken) {
+      return {
+        token: d.accessToken,
+        refreshToken: d.refreshToken || null,
+        memberId: d.memberId != null ? d.memberId : null,
+        name: d.nickname || null,
+        phone: d.phone || null,
+        savedAt: Date.now(),
+      };
+    }
+  } catch (e) { /* 忽略解析失败 */ }
+  return null;
 }
 function setAuth(a) { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); }
 function clearAuth() { localStorage.removeItem(AUTH_KEY); }
@@ -1472,6 +1494,29 @@ function toggleHandfree() {
                           : "⏺ 点击麦克风开始录音 · 再点一次结束发送");
   }
 }
+/* ===== 冷唤醒开关(embed 模式): 全站呼唤「小竹、小竹」唤出面板 =====
+   状态写 localStorage 'xiaozhu.wake'(与主站 voice-wake-widget 同源
+   共享); postMessage xz-wake-on/off 即时通知父页启停监听 */
+function toggleWake() {
+  var next = (localStorage.getItem("xiaozhu.wake") === "on")
+    ? "off" : "on";
+  localStorage.setItem("xiaozhu.wake", next);
+  renderWakeBtn();
+  try { window.parent.postMessage(
+    { type: next === "on" ? "xz-wake-on" : "xz-wake-off" }, "*"); } catch (e) {}
+  showToast(next === "on"
+    ? "唤醒已开启——全站任意页呼唤「小竹、小竹」唤出语音精灵"
+    : "唤醒已关闭——小竹球回归，点击可手动打开");
+}
+function renderWakeBtn() {
+  var el = document.getElementById("wakeBtn");
+  if (!el) return;
+  var on = localStorage.getItem("xiaozhu.wake") === "on";
+  el.textContent = on ? "📣 唤醒开" : "📣 唤醒关";
+  el.title = on
+    ? "已开启：全站任意页呼唤「小竹、小竹」唤出面板"
+    : "已关闭：点此开启全站语音唤醒";
+}
 /* ===== 浮层隐藏暂停/重开恢复(跳转/关闭浮层后) =====
    隐藏的 iframe 若继续免提监听: 环境杂音污染会话(# 转写/
    旁人对话误触发) + 空烧每日额度 + 隐藏页 TTS 占音频焦点
@@ -1939,9 +1984,13 @@ document.addEventListener("focusin", function (ev) {
   /* 默认云端识别(自有智谱ASR链路, 国内可用);
      浏览器识别依赖厂商云端服务(Chrome→Google), 国内网络普遍不可达, 降级为用户主动选择 */
   setMode("cloud");
-  /* embed 模式(全站浮层 iframe): 隐藏页脚声明, jump 导航父窗口(主站) */
+  /* embed 模式(全站浮层 iframe): 隐藏页脚声明, jump 导航父窗口(主站);
+     唤醒开关仅 embed 态可见(冷唤醒为父页 widget 消费, 独立页无意义) */
   if (/[?&]embed=1/.test(location.search)) {
     document.body.classList.add("embed");
+    document.getElementById("wakeBtn").style.display = "";
+    document.getElementById("wakeSp").style.display = "";
+    renderWakeBtn();
   }
   var auth = getAuth();
   if (auth && auth.token) enterMain(); else showLogin();
