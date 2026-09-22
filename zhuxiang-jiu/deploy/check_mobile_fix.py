@@ -51,6 +51,11 @@ checks += [
      and ".dtable th { padding: 4px 6px; white-space: nowrap; }" in det
      and ".head-card h1 { font-size: 16px; }" in det
      and "overflow-x:auto" in det),  # 擂台榜容器横滑
+    ("L6 列表页后台入口 v2 x2",
+     lst.count("activity-dashboard.html?v=2") == 2),
+    ("D9 详情页后台入口 v2 x2(footer+深链)",
+     det.count("activity-dashboard.html?v=2") == 2),
+    ("D10 深链 focus 兼容", "?v=2&focus=" in det),
 ]
 fails = [n for n, ok in checks if not ok]
 print("scripts: list=%d detail=%d" % (scripts(lst, "lst"), scripts(det, "det")))

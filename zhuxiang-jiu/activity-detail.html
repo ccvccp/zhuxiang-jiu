@@ -294,7 +294,7 @@
         <a href="activity.html?v=2" id="backFooter">🎁 返回活动中心</a> ·
         <a href="zyh.html">🎋 竹酒知识问答</a> ·
         <a href="synapse.html">🧵 品牌内容织造</a> ·
-        <a href="activity-dashboard.html">⚙️ 活动管理后台</a><br>
+        <a href="activity-dashboard.html?v=2">⚙️ 活动管理后台</a><br>
         健康警示：过量饮酒有害健康 · 未成年人禁止饮酒
     </footer>
 </div>
@@ -952,9 +952,10 @@
     $('backBrand').onclick = goList;
     $('backFooter').href = 'activity.html?v=2' + API_QS;
 
-    /* 管理深链: 直达后台并聚焦本活动(展开详情行+滚动+高亮) */
+    /* 管理深链: 直达后台并聚焦本活动(展开详情行+滚动+高亮);
+       ?v=2 破后台页旧缓存(no-cache 生效前的启发式缓存条目) */
     $('btnAdminDetail').onclick = function () {
-        location.href = 'activity-dashboard.html?focus=' + state.id;
+        location.href = 'activity-dashboard.html?v=2&focus=' + state.id;
     };
 
     var idMatch = location.search.match(/[?&]id=(\d+)/);
