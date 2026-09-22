@@ -1854,6 +1854,27 @@ function cloudStart() {
   }).then(function (stream) {
     recStream = stream;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    /* 唤醒(语音触发, 无手势)打开面板时 ctx 为 suspended——音频图
+       不跑, ASR 收不到有效帧 -> 连续识别失败触发"#"断路(误报
+       "靠近话筒"提示)。挂一次性交互 resume, 引导用户点一下屏幕 */
+    if (audioCtx.state === "suspended") {
+      var vRh = function () {
+        document.removeEventListener("touchend", vRh, true);
+        document.removeEventListener("click", vRh, true);
+        try {
+          if (audioCtx && audioCtx.state === "suspended") {
+            audioCtx.resume();
+          }
+        } catch (e) { /* 忽略 */ }
+        setMicStatus(S.handfree
+          ? "🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送"
+          : "🎧 已就绪——点「🎧 免提开」继续，或长按麦克风说话");
+      };
+      document.addEventListener("touchend", vRh, true);
+      document.addEventListener("click", vRh, true);
+      setMicStatus("👆 <b>点一下屏幕</b>开始语音聆听（首次需激活音频）");
+      showToast("点一下屏幕任意处即开始语音对话");
+    }
     wireCloudCapture();
   }).catch(function (e) {
     /* 错误友好化: 不直显英文错误码(真机反馈"具体报错"

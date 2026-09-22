@@ -1,15 +1,15 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=13 -> v=14: 关面板恢复监听竞态修复(延迟+退避自动重试3次,
-静默重试不再误弹提示)随 widget VER v=13 双 bump(①index 引用
-v=14 刷 widget 本体)
+v=14 -> v=15: 语音页免提 audioContext suspended(无手势唤醒)交互
+resume 修复随 widget VER v=14 双 bump(①index 引用 v=15 刷 widget
+本体; ②VER v=14 破 iframe 语音页缓存)
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=13"
-NEW = "src=/js/voice-wake-widget.js?v=14"
+OLD = "src=/js/voice-wake-widget.js?v=14"
+NEW = "src=/js/voice-wake-widget.js?v=15"
 
 
 def main():

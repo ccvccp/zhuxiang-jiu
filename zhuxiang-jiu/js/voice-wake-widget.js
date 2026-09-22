@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=14>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=15>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=13";
+  var VER = "v=14";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
