@@ -1,15 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=19 -> v=20: X5 哑流修复(AEC 统一关——on/off 流交替触发音频路由
-错乱致后续流静音; final 空转写提示"没听清"可见化)随 widget
-VER v=19 双 bump
+v=20 -> v=21: AHM 音频健康监测(链路感知驱动——零值帧哑流检出/
+硬复位一次/30s 退避告警/复发检测)随 widget VER v=20 双 bump
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=19"
-NEW = "src=/js/voice-wake-widget.js?v=20"
+OLD = "src=/js/voice-wake-widget.js?v=20"
+NEW = "src=/js/voice-wake-widget.js?v=21"
 
 
 def main():

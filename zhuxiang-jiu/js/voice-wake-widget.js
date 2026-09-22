@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=20>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=21>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=19";
+  var VER = "v=20";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -354,6 +354,11 @@
     feed: null,         /* 16k Int16 待发队列 */
     lastPartial: "", pendingFinal: false,
     segTimes: [],       /* 分钟频率熔断 */
+    /* AHM 音频健康度(Audio Health Monitor): X5 哑流检测——
+       链路感知驱动: 判断唤醒词之前先判断音频流是否活着 */
+    zeroFrames: 0,     /* 连续全零帧计数(真静音有非零底噪, 哑流是精确 0) */
+    ahmDead: false,    /* 哑流已判定(防重复告警) */
+    ahmResetAt: 0,     /* 上次哑流硬复位时刻(30s 退避防循环) */
   };
   var RING_MAX = 16000 * 1.5;   /* 环形缓存 1.5s@16k */
   var TH_ON = 0.012;            /* 起 VAD 门限(RMS) */
@@ -446,9 +451,25 @@
   function onAudioFrame(ev) {
     if (!eng.on) { return; }
     var f32 = ev.inputBuffer.getChannelData(0);
-    var sum = 0;
-    for (var i = 0; i < f32.length; i++) { sum += f32[i] * f32[i]; }
+    var sum = 0, zeros = 0;
+    for (var i = 0; i < f32.length; i++) {
+      var v = f32[i];
+      sum += v * v;
+      if (v < 1e-5 && v > -1e-5) { zeros++; }
+    }
     var rms = Math.sqrt(sum / f32.length);
+    /* AHM 零值帧检测: 真静音含非零底噪, 哑流(X5 路由错乱)是
+       精确 0 填充——连续全零帧 ≥6(约 500ms)判定链路死亡 */
+    if (zeros >= f32.length) {
+      eng.zeroFrames++;
+      if (eng.zeroFrames >= 6 && !eng.ahmDead) {
+        eng.ahmDead = true;
+        ahmRecover();
+      }
+    } else {
+      eng.zeroFrames = 0;
+      eng.ahmDead = false;  /* 链路恢复(重置后新流正常) */
+    }
 
     /* 重采样 48k→16k(线性, 与语音页 streamFeed 同法) */
     var ratio = (eng.ctx.sampleRate || 48000) / 16000;
@@ -476,6 +497,26 @@
         if ((eng.loStreak >= 12 && dur > 900) || dur > 6000) { endSegment(); }
       } else { eng.loStreak = 0; }
     }
+  }
+
+  /* AHM 哑流自动恢复: 硬复位(释放哑流重新获取)一次;
+     30s 内复发(重置后仍哑, X5 路由坏到底) → 明确告警不循环 */
+  function ahmRecover() {
+    try { console.info("[AHM] silent stream detected"
+      + " - hard mic reset"); } catch (e) { /* 忽略 */ }
+    var now = Date.now();
+    if (now - eng.ahmResetAt < 30000) {
+      try { console.info("[AHM] persists after reset"); } catch (e) {}
+      showTip("麦克风音频链路异常——请刷新页面恢复语音唤醒", 6000);
+      return;
+    }
+    eng.ahmResetAt = now;
+    eng.zeroFrames = 0;   /* 每轮复位重新判定: 新流再哑满 6 帧
+                             二次进入 → 30s 退避内 → 告警不循环 */
+    eng.ahmDead = false;
+    stopWake();
+    releaseMic();
+    enableWakeQuiet(true);
   }
 
   function pushRing(samples) {
@@ -547,7 +588,10 @@
           /* 未命中唤醒词: 回显转写内容——ASR 实际听到什么可见 */
           diagTip("听到「" + String(ft).slice(0, 24) + "」未含唤醒词", 10);
         } else {
-          /* 空转写(哑流/声音太小): 可见化——哑流根因是 X5 路由 */
+          /* 空转写提示的 VAD 前置: 本段由 VAD 人声触发(TH_ON 起
+             段)——有声音输入但识别不出才提示; 安静无段不提示
+             (防骚扰, AHM 文档口径)。哑流场景 VAD 不起段, 由
+             AHM 零值检测负责可见化 */
           diagTip("没听清——请再喊一声「小竹、小竹」", 8);
         }
         teardownSeg();
