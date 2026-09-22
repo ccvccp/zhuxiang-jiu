@@ -3,7 +3,10 @@
 鉴权:
     - 用户端(6接口): X-Member-Id 头标识当前会员(报名/取消/抽奖
       要求头与 body.userId 一致——仅本人可操作)
-    - 管理端(8接口): X-Role: admin 头(创建/编辑/状态流转/审核/管理端列表等)
+    - 管理端(8接口): 管理员(role=admin) 或 持有活动后台授权
+      (权限模块 /api/perm/* 的 activity.operate/approve/manage
+      任一生效且已签责任书的授权——管理员可授权后台角色
+      设计发布活动, 权责共存/限时/审计留痕)
     - 抽奖发奖(6, P1-12): 奖品池配置/查询公示(公开)/抽奖/我的奖品/
       实物发货登记(admin)/签收确认(中奖人)/管理端发奖记录列表
 
@@ -40,9 +43,44 @@ def _require_member_id(x_member_id: str | None) -> str:
     return x_member_id
 
 
-def _require_admin(x_role: str | None):
-    if x_role != "admin":
-        raise HTTPException(status_code=403, detail="需要管理员权限")
+# 活动后台授权链: 权限模块 activity 域操作级及以上任一生效授权
+# (含已签责任书校验)即可管理活动模块——管理员授权后台角色
+# 设计发布活动; 授权/吊销本身仍走权限模块(仅超管)
+ACTIVITY_ADMIN_NODE_CODES = (
+    "activity.operate", "activity.approve", "activity.manage",
+)
+
+
+async def _has_activity_grant(member_id: int) -> bool:
+    """会员是否持有活动后台授权(生效+未过期+已签责任书)
+
+    走 perm 静默持有校验(has_any_grant)——网关级探测不触发
+    deny_access 审计与 AI 越权升级, 防逐码尝试误伤冻结授权。
+    """
+    from services.perm_service import PermService
+
+    try:
+        return await PermService().has_any_grant(
+            member_id, ACTIVITY_ADMIN_NODE_CODES)
+    except Exception:
+        return False
+
+
+async def _require_activity_admin(x_role: str | None,
+                                  x_member_id: str | None):
+    """活动管理鉴权: 管理员直通, 或活动后台授权链"""
+    if x_role == "admin":
+        return
+    if x_member_id:
+        try:
+            mid = int(x_member_id)
+        except (TypeError, ValueError):
+            mid = 0
+        if mid and await _has_activity_grant(mid):
+            return
+    raise HTTPException(
+        status_code=403,
+        detail="需要管理员权限或活动后台授权(activity.operate及以上)")
 
 
 def _map_key_error(exc: KeyError) -> HTTPException:
@@ -176,9 +214,10 @@ async def list_registrations(
     activity_id: int,
     limit: int = Query(100, ge=1, le=500, description="查询条数"),
     x_role: str = Header(None, alias="X-Role"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """查询活动报名列表(管理员)"""
-    _require_admin(x_role)
+    """查询活动报名列表(管理员/活动后台授权)"""
+    await _require_activity_admin(x_role, x_member_id)
     try:
         result = await _service.repo.list_registrations(activity_id, limit)
         return {"success": True, "data": result, "count": len(result)}
@@ -275,9 +314,10 @@ async def submit_arena_score(
 async def create_activity(
     data: CreateActivityRequest,
     x_role: str = Header(None, alias="X-Role"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """创建活动(初始状态: 草稿)"""
-    _require_admin(x_role)
+    """创建活动(初始状态: 草稿; 管理员/活动后台授权)"""
+    await _require_activity_admin(x_role, x_member_id)
     try:
         result = await _service.create_activity(
             name=data.name,
@@ -301,9 +341,10 @@ async def update_activity(
     activity_id: int,
     data: UpdateActivityRequest,
     x_role: str = Header(None, alias="X-Role"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
     """编辑活动(仅草稿可编辑; 部分更新, 未传字段保持原值)"""
-    _require_admin(x_role)
+    await _require_activity_admin(x_role, x_member_id)
     try:
         result = await _service.update_activity(
             activity_id=activity_id,
@@ -319,9 +360,10 @@ async def list_admin_activities(
     status: str = Query(None, description="按状态筛选"),
     limit: int = Query(50, ge=1, le=200, description="查询条数"),
     x_role: str = Header(None, alias="X-Role"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """管理端查询活动列表(含草稿)"""
-    _require_admin(x_role)
+    """管理端查询活动列表(含草稿; 管理员/活动后台授权)"""
+    await _require_activity_admin(x_role, x_member_id)
     try:
         result = await _service.list_admin_activities(status=status, limit=limit)
         return {"success": True, "data": result, "count": len(result)}
@@ -334,9 +376,10 @@ async def transition_status(
     activity_id: int,
     data: TransitionStatusRequest,
     x_role: str = Header(None, alias="X-Role"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """活动状态流转(草稿→报名中→进行中→已结束)"""
-    _require_admin(x_role)
+    """活动状态流转(草稿→报名中→进行中→已结束; 管理员/活动后台授权)"""
+    await _require_activity_admin(x_role, x_member_id)
     try:
         result = await _service.transition_status(
             activity_id=activity_id,
@@ -353,9 +396,10 @@ async def audit_activity(
     activity_id: int,
     data: AuditActivityRequest,
     x_role: str = Header(None, alias="X-Role"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """活动审核(草稿→报名中 or 拒绝)"""
-    _require_admin(x_role)
+    """活动审核(草稿→报名中 or 拒绝; 管理员/活动后台授权)"""
+    await _require_activity_admin(x_role, x_member_id)
     try:
         result = await _service.audit_activity(
             activity_id=activity_id,
@@ -404,9 +448,10 @@ async def configure_prizes(
     activity_id: int,
     data: ConfigurePrizesRequest,
     x_role: str = Header(None, alias="X-Role"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
     """配置抽奖奖品池(管理端, 概率总和≤100%, 单奖≤¥5000 合规红线)"""
-    _require_admin(x_role)
+    await _require_activity_admin(x_role, x_member_id)
     try:
         result = await _service.configure_prizes(
             activity_id, [p.dict() for p in data.prizes])
@@ -459,9 +504,10 @@ async def list_admin_prize_records(
     status: str = Query(None, description="按状态筛选: pending/issued/shipped/signed/expired"),
     limit: int = Query(100, ge=1, le=500, description="查询条数"),
     x_role: str = Header(None, alias="X-Role"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """管理端查询全量发奖记录(发货登记面板, 默认查全部)"""
-    _require_admin(x_role)
+    """管理端查询全量发奖记录(发货登记面板, 默认查全部; 管理员/活动后台授权)"""
+    await _require_activity_admin(x_role, x_member_id)
     try:
         result = await _service.list_prize_records(status=status, limit=limit)
         return {"success": True, "data": result, "count": len(result)}
@@ -474,9 +520,10 @@ async def deliver_prize(
     record_no: str,
     data: DeliverPrizeRequest,
     x_role: str = Header(None, alias="X-Role"),
+    x_member_id: str = Header(None, alias="X-Member-Id"),
 ):
-    """实物奖品发货登记(待发放 → 已发货)"""
-    _require_admin(x_role)
+    """实物奖品发货登记(待发放 → 已发货; 管理员/活动后台授权)"""
+    await _require_activity_admin(x_role, x_member_id)
     try:
         result = await _service.deliver_prize(record_no, data.waybillNo)
         return {"success": True, "data": result}

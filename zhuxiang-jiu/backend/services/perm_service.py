@@ -350,6 +350,26 @@ class PermService:
                                    -x.get("grantId", 0)))
         return result
 
+    async def has_any_grant(self, member_id: int,
+                            node_codes: "list[str] | tuple[str, ...]") -> bool:
+        """静默持有校验(生效+未过期+已签责任书; 无审计副作用)
+
+        供跨模块鉴权网关使用(如活动后台 activity_routes): 与
+        check_permission 同语义, 但不留痕/不触发 AI 越权升级——
+        网关级探测逐码尝试会放大 deny 计数(3 码即触顶冻结),
+        属误伤而非真实越权, 故网关走静默通道。
+        """
+        for code in node_codes:
+            node = await self.repo.get_node_by_code(code)
+            if not node:
+                continue
+            grants = await self.repo.list_grants(
+                member_id=member_id, node_code=code, status="active")
+            for g in grants:
+                if g.get("dutySigned") and not self._is_expired(g):
+                    return True
+        return False
+
     async def sign_duty(self, member_id: int, grant_id: int) -> dict:
         """签署责任书(权责共存: 未签署则权限校验阻断)
 

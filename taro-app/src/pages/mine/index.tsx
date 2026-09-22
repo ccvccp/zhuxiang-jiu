@@ -605,6 +605,22 @@ const MinePage: React.FC = () => {
         {/* 经营活动 */}
         <View className={styles.section}>
           <View className={styles.sectionTitle}>经营活动</View>
+          <View className={styles.adminEntry} onClick={() => {
+            // H5 → 静态活动中心(全功能: 报名/抽奖/奖品池/擂台赛, 复用本会话);
+            // 小程序 → 原生活动页
+            if (process.env.TARO_ENV === 'h5') {
+              window.location.href = '/activity.html';
+            } else {
+              Taro.navigateTo({ url: '/pages/activity/index' });
+            }
+          }}>
+            <View className={styles.adminEntryIcon}>🎁</View>
+            <View className={styles.adminEntryInfo}>
+              <View className={styles.adminEntryName}>活动中心</View>
+              <View className={styles.adminEntryDesc}>报名 · 抽奖 · 擂台赛 · 查我的报名</View>
+            </View>
+            <View className={styles.adminEntryArrow}>›</View>
+          </View>
           <View className={styles.adminEntry} onClick={() => Taro.navigateTo({ url: '/pages/citystore/index' })}>
             <View className={styles.adminEntryIcon}>🏙️</View>
             <View className={styles.adminEntryInfo}>

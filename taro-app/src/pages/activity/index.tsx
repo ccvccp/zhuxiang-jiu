@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 活动中心 · 活动列表/报名/取消
  * 数据来源: 后端 /api/activity/*(报名状态后端化, 跨设备同步)
  */
@@ -138,7 +138,7 @@ const ActivityPage: React.FC = () => {
   if (loading) {
     return (
       <View className={styles.page}>
-        <NavBar title="拼团活动" />
+        <NavBar title="活动中心" />
         <View className={styles.empty}>
           <View className={styles.emptyIcon}>🎁</View>
           <View className={styles.emptyText}>加载中...</View>
@@ -149,7 +149,7 @@ const ActivityPage: React.FC = () => {
 
   return (
     <View className={styles.page}>
-        <NavBar title="拼团活动" />
+        <NavBar title="活动中心" />
       {/* 概览头部 */}
       <View className={styles.heroCard}>
         <View className={styles.heroTitle}>活动中心</View>

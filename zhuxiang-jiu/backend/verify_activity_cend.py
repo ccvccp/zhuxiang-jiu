@@ -182,6 +182,80 @@ def main():
     rec("5b 擂台榜展示", st == 200 and lb["count"] == 1
         and lb["data"][0]["score"] == 88.5)
 
+    # ===== 6. 授权链(管理员授权后台角色设计发布活动) =====
+    # 被授权人: 独立运营会员(幂等: 已注册则直接登录)
+    mgr_phone = "13900009001"
+    call("POST", "/api/auth/register",
+         {"phone": mgr_phone, "password": "test123456",
+          "nickname": "活动运营官", "ageConfirmed": True},
+         {"Content-Type": "application/json"})
+    st, mlogin = call("POST", "/api/auth/login",
+                     {"phone": mgr_phone, "password": "test123456"},
+                     {"Content-Type": "application/json"})
+    MGR = {"Authorization": "Bearer " + mlogin.get("accessToken", ""),
+           "Content-Type": "application/json"}
+    mgr_id = mlogin.get("memberId")
+    rec("6a 运营会员登录", st == 200 and mgr_id is not None)
+
+    # 未授权 → 管理端点 403
+    st, _ = call("POST", "/api/activity/admin/create",
+                 {"name": "运营官测试活动", "type": "promotion"}, MGR)
+    rec("6b 未授权创建403", st == 403)
+
+    # 管理员(13800000002)授权 activity.operate
+    st, adm_login = call("POST", "/api/auth/login",
+                         {"phone": "13800000002", "password": "test123456"},
+                         {"Content-Type": "application/json"})
+    ADM = {"Authorization": "Bearer " + adm_login.get("accessToken", ""),
+           "Content-Type": "application/json"}
+    st, g = call("POST", "/api/perm/grants",
+                 {"memberId": mgr_id, "nodeCode": "activity.operate",
+                  "durationDays": 30}, ADM)
+    gid = g.get("grantId") or (g.get("data") or {}).get("grantId")
+    rec("6c 管理员授予活动后台权限", st == 200 and gid
+        and g.get("dutySigned") is False)
+    if not gid:
+        # 幂等: 已有生效授权 → 查列表取回
+        st, gl = call("GET", "/api/perm/admin/grants", None, ADM)
+        for gg in gl.get("grants", []):
+            if (gg.get("memberId") == mgr_id
+                    and gg.get("nodeCode") == "activity.operate"
+                    and gg.get("status") == "active"):
+                gid = gg.get("grantId")
+                rec("6c-2 已有授权复用", True)
+                break
+
+    # 未签责任书 → 403
+    st, _ = call("POST", "/api/activity/admin/create",
+                 {"name": "运营官测试活动", "type": "promotion"}, MGR)
+    rec("6d 未签责任书403", st == 403)
+
+    # 签署责任书 → 可创建+发布
+    st, ds = call("POST", f"/api/perm/grants/{gid}/duty-sign", None, MGR)
+    rec("6e 签署责任书", st == 200)
+    if st != 200:
+        print(f"    [debug] duty-sign gid={gid} mgr={mgr_id} "
+              f"resp={json.dumps(ds, ensure_ascii=False)[:200]}")
+    st, mc = call("POST", "/api/activity/admin/create",
+                  {"name": "运营官发布·双节品鉴专场", "type": "interactive",
+                   "description": "授权运营官设计发布的测试活动。",
+                   "startTime": "2026-10-01T00:00", "endTime": "2026-10-07T23:59"},
+                  MGR)
+    mgr_act_id = mc.get("data", {}).get("id")
+    rec("6f 授权后可创建", st == 200 and mgr_act_id is not None)
+    st, ma = call("POST", f"/api/activity/admin/audit/{mgr_act_id}",
+                  {"approve": True, "auditor": mgr_id}, MGR)
+    rec("6g 授权后可发布", st == 200 and ma["data"]["status"] == "registering")
+    st, ml = call("GET", "/api/activity/admin/list?limit=100", None, MGR)
+    rec("6h 授权后可看管理列表", st == 200 and ml.get("count", 0) >= 4)
+
+    # 吊销 → 403
+    st, _ = call("DELETE", f"/api/perm/grants/{gid}", None, ADM)
+    rec("6i 管理员吊销授权", st == 200)
+    st, _ = call("POST", "/api/activity/admin/create",
+                 {"name": "运营官测试活动2", "type": "promotion"}, MGR)
+    rec("6j 吊销后403", st == 403)
+
     # ===== 结果 =====
     print("=" * 60)
     print("活动中心 C端全流程验证")

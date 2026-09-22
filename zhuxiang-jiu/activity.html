@@ -321,10 +321,29 @@
         myRegs: [],       // 我的报名(登录后)
     };
 
-    /* ---------- 会话(精简 JWT 链——同 zjian/synapse) ---------- */
+    /* ---------- 会话(精简 JWT 链——本页登录优先, 兜底复用商城登录态) ---------- */
+    /* 商城(Taro H5) auth_session 含 memberId/nickname/role/accessToken,
+       「我的→活动中心」跳入的商城用户免二次登录 */
     function session() {
-        try { return JSON.parse(localStorage.getItem(AUTH_KEY)) || null; }
-        catch (e) { return null; }
+        try {
+            var s = JSON.parse(localStorage.getItem(AUTH_KEY)) || null;
+            if (s && s.token) { return s; }
+        } catch (e) { /* 忽略解析失败 */ }
+        try {
+            var w = JSON.parse(localStorage.getItem('auth_session') || 'null');
+            var d = (w && w.data) ? w.data : w;
+            if (d && d.accessToken && d.memberId != null) {
+                return {
+                    token: d.accessToken,
+                    refreshToken: d.refreshToken || null,
+                    memberId: d.memberId,
+                    name: d.nickname || null,
+                    role: d.role || 'member',
+                    _src: 'mall',
+                };
+            }
+        } catch (e) { /* 忽略解析失败 */ }
+        return null;
     }
     function saveSession(body) {
         localStorage.setItem(AUTH_KEY, JSON.stringify({
@@ -336,7 +355,16 @@
             savedAt: Date.now(),
         }));
     }
-    function clearSession() { localStorage.removeItem(AUTH_KEY); }
+    function clearSession() {
+        /* 商城会话来源 → 同步清商城登录(全量退出语义);
+           本页会话来源 → 仅清本页 */
+        var cur = null;
+        try { cur = JSON.parse(localStorage.getItem(AUTH_KEY)) || null; } catch (e) { /* 忽略 */ }
+        localStorage.removeItem(AUTH_KEY);
+        if (!cur) {
+            try { localStorage.removeItem('auth_session'); } catch (e) { /* 忽略 */ }
+        }
+    }
 
     async function apiFetch(path, options) {
         var s = session();

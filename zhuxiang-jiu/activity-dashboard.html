@@ -474,6 +474,60 @@
             </div>
         </section>
 
+        <section class="dash-section" id="grantSection" style="display:none;">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>⑥ 活动后台授权（授权后台角色设计发布活动）</b>
+                    <div class="head-actions">
+                        <button class="dash-btn ghost" onclick="loadPermGrants()">刷新</button>
+                    </div>
+                </div>
+                <div class="act-form">
+                    <div class="form-grid">
+                        <div>
+                            <label>被授权会员 ID</label>
+                            <input type="number" id="grantMemberId" placeholder="如 3">
+                        </div>
+                        <div>
+                            <label>权限级别</label>
+                            <select id="grantNodeCode">
+                                <option value="activity.operate">活动后台·操作（设计/发布/运营）</option>
+                                <option value="activity.approve">活动后台·审批</option>
+                                <option value="activity.manage">活动后台·管理</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>期限（天, 1-90）</label>
+                            <input type="number" id="grantDays" value="30">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button class="dash-btn" onclick="assignGrant()">授予</button>
+                        <span class="form-hint">被授权人须在商城「我的 → 权限中心」签署责任书后生效（权责共存 · 限时 · 审计留痕）</span>
+                    </div>
+                </div>
+                <div class="dash-info" id="grantBanner"></div>
+                <div class="matrix-wrap">
+                    <table class="matrix">
+                        <thead>
+                            <tr>
+                                <th>授权ID</th><th>会员</th><th>权限</th><th>来源</th>
+                                <th>责任书</th><th>状态</th><th>到期</th><th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="grantBody">
+                            <tr><td colspan="8" style="color:#999;font-size:12px;padding:16px;">加载中…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="note-bar">
+                    权限体系: 网站权限中心「活动后台」域(operate/approve/manage)——
+                    生效且已签责任书即可管理本模块全部后台功能(创建/审核/流转/奖品池/发货);
+                    授权到期自动失效, 越权行为 AI 监控留痕。
+                </div>
+            </div>
+        </section>
+
         <footer class="dash-footer">
             数据源: 09号活动管理模块 <code>activity_routes</code>(20 端点)。
             鉴权: <code>strict</code>(生产) 内置登录面板——手机号+密码换 JWT;
@@ -671,6 +725,7 @@
             if (!box) { return; }
             box.innerHTML = '';
             var info = readStoredInfo();
+            updateGrantSection();  // ⑥ 授权区块随登录态显隐(仅 admin)
             if (!info) { return; }
             var wrap = document.createElement('span');
             wrap.style.cssText = 'display:inline-flex;align-items:center;gap:8px;'
@@ -719,6 +774,115 @@
             el.textContent = msg;
             el.style.display = 'block';
             setTimeout(function () { el.style.display = 'none'; }, 5000);
+        }
+
+        // ---------- ⑥ 活动后台授权(权限模块 /api/perm/*) ----------
+        /* perm 接口返回体无 success 字段({grants:[...]}直出), 与
+           fetchJson 协议不同——独立辅助器 */
+        async function permFetch(path, options) {
+            var opts = Object.assign({}, options || {});
+            opts.headers = Object.assign({}, apiHeaders(),
+                (options || {}).headers || {});
+            var res = await fetch(apiBase() + path, opts);
+            if (res.status === 401) {
+                showLoginCard();
+                throw new Error('未登录或登录已过期');
+            }
+            var body = null;
+            try { body = await res.json(); } catch (e) { /* 非 JSON */ }
+            if (!res.ok) {
+                throw new Error((body && (body.error || body.detail
+                    || body.message)) || ('HTTP ' + res.status));
+            }
+            return body;
+        }
+
+        var GRANT_STATUS_LABELS = {
+            active: ['生效', 'green'], frozen: ['冻结', 'red'],
+            revoked: ['已吊销', 'weak'], expired: ['已到期', 'gold'],
+        };
+
+        function updateGrantSection() {
+            var info = readStoredInfo();
+            var isAdmin = !!(info && info.token && info.role === 'admin');
+            $('grantSection').style.display = isAdmin ? '' : 'none';
+            if (isAdmin) { loadPermGrants(); }
+        }
+
+        async function loadPermGrants() {
+            var body = $('grantBody');
+            try {
+                var res = await permFetch('/api/perm/admin/grants');
+                var grants = (res && res.grants) || [];
+                var acts = grants.filter(function (g) {
+                    return String(g.nodeCode || '').indexOf('activity.') === 0;
+                });
+                if (!acts.length) {
+                    body.innerHTML = '<tr><td colspan="8" style="color:#999;'
+                        + 'font-size:12px;padding:16px;">暂无活动后台授权——用上方表单授予第一个。</td></tr>';
+                    return;
+                }
+                body.innerHTML = acts.map(function (g) {
+                    var pair = GRANT_STATUS_LABELS[g.status] || [g.status, 'weak'];
+                    var revocable = g.status === 'active' || g.status === 'frozen';
+                    return '<tr>'
+                        + '<td class="mono">' + esc(g.grantId) + '</td>'
+                        + '<td>' + esc((g.memberNickname || g.nickname || '')
+                            + (g.memberId != null ? ' (#' + g.memberId + ')' : '')) + '</td>'
+                        + '<td>' + esc(g.nodeName || g.nodeCode) + '</td>'
+                        + '<td>' + esc(g.source === 'assign' ? '直授' : '申请') + '</td>'
+                        + '<td>' + (g.dutySigned
+                            ? '<span class="badge green">已签</span>'
+                            : '<span class="badge yellow">待签</span>') + '</td>'
+                        + '<td><span class="badge ' + pair[1] + '">' + pair[0] + '</span></td>'
+                        + '<td>' + esc(fmtTime(g.expiresAt)) + '</td>'
+                        + '<td>' + (revocable
+                            ? '<button class="btn-mini danger" onclick="revokeGrant('
+                              + g.grantId + ')">吊销</button>'
+                            : '--') + '</td>'
+                        + '</tr>';
+                }).join('');
+            } catch (err) {
+                body.innerHTML = '<tr><td colspan="8" style="color:#c33;'
+                    + 'font-size:12px;padding:16px;">加载失败: '
+                    + esc(err.message) + '</td></tr>';
+            }
+        }
+
+        async function assignGrant() {
+            var memberId = Number($('grantMemberId').value);
+            var nodeCode = $('grantNodeCode').value;
+            var days = Number($('grantDays').value) || 30;
+            if (!memberId || memberId < 1) {
+                showBanner('grantBanner', '请填写有效的被授权会员 ID');
+                return;
+            }
+            try {
+                await permFetch('/api/perm/grants', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        memberId: memberId, nodeCode: nodeCode,
+                        durationDays: days,
+                    }),
+                });
+                showBanner('grantBanner', '已授予(' + nodeCode + ', ' + days
+                    + ' 天)——提醒被授权人在商城「我的→权限中心」签署责任书后生效');
+                loadPermGrants();
+            } catch (err) {
+                showBanner('grantBanner', '授予失败: ' + (err.message || err));
+            }
+        }
+
+        async function revokeGrant(grantId) {
+            if (!confirm('确认吊销授权 #' + grantId + '？')) { return; }
+            try {
+                await permFetch('/api/perm/grants/' + grantId, { method: 'DELETE' });
+                showBanner('grantBanner', '已吊销授权 #' + grantId);
+                loadPermGrants();
+            } catch (err) {
+                showBanner('grantBanner', '吊销失败: ' + (err.message || err));
+            }
         }
 
         function fail(context, err) {
@@ -1366,6 +1530,9 @@
         window.loadPrizeRecords = loadPrizeRecords;
         window.deliverPrize = deliverPrize;
         window.doLogin = doLogin;
+        window.loadPermGrants = loadPermGrants;
+        window.assignGrant = assignGrant;
+        window.revokeGrant = revokeGrant;
 
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', init);

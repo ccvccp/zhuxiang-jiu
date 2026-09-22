@@ -38,12 +38,15 @@ PRODUCTION_STAGES = {
 
 # 网站权限中心(网站后台管理域——主要分配后台权限,
 # nodeId 33-52 追加于末尾, 不影响既有编号)
+# 09号·活动中心授权(2026-09-22): 追加 activity 域(nodeId 53-56),
+# 管理员可授权后台角色设计发布活动(activity_routes 消费)
 SITE_STAGES = {
     "order": "订单后台",
     "member": "会员后台",
     "content": "内容后台",
     "data": "数据后台",
     "system": "系统后台",
+    "activity": "活动后台",
 }
 
 # 合并视图(兼容既有 import)
