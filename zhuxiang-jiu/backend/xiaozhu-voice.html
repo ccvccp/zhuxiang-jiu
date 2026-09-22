@@ -365,8 +365,8 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
     <div class="modes">
       <span class="tts" id="wakeBtn" onclick="toggleWake()" style="cursor:pointer;display:none">📣 唤醒开</span>
       <span class="sp" id="wakeSp" style="display:none"></span>
-      <span class="tts" id="wakeWordBtn" onclick="showWakeWordSet()" style="cursor:pointer;display:none" title="唤醒词设置">⚙️ 唤醒词</span>
-      <span class="sp" id="wakeWordSp" style="display:none"></span>
+      <span class="tts" id="wakeWordBtn" onclick="showWakeWordSet()" style="cursor:pointer" title="唤醒词设置">⚙️ 唤醒词</span>
+      <span class="sp" id="wakeWordSp"></span>
       <span class="tts" id="hfBtn" onclick="toggleHandfree()" style="cursor:pointer">🎧 免提开</span>
       <span class="sp"></span>
       <span class="tts" id="ttsBtn" onclick="toggleTts()" style="cursor:pointer">🔊 播报开</span>
@@ -393,7 +393,7 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
 
 <div class="toast" id="toast"></div>
 
-<!-- 唤醒词设置浮层(embed 态): 预设 + 自定义 -->
+<!-- 唤醒词设置浮层(embed 面板与独立页通用): 预设 + 自定义 -->
 <div class="ww-mask hidden" id="wwMask" onclick="hideWakeWordSet()">
   <div class="ww-card" onclick="event.stopPropagation()">
     <b>⚙️ 唤醒词设置</b>
@@ -408,7 +408,7 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
       <button type="button" onclick="saveWakeWordCustom()">保存</button>
     </div>
     <div class="ww-preview" id="wwPreview"></div>
-    <div class="ww-note">自定义词自动补全「小竹」前缀（输入「精灵」= 呼唤「小竹精灵」），并支持同音容错（按普通话拼音匹配，「精灵」被听成「京玲」也能唤醒）；清空输入保存即恢复默认。修改即时生效（「小竹球」唤醒监听无需重启）。</div>
+    <div class="ww-note">自定义词自动补全「小竹」前缀（输入「精灵」= 呼唤「小竹精灵」），并支持同音容错（按普通话拼音匹配，「精灵」被听成「京玲」也能唤醒）；清空输入保存即恢复默认。面板内修改即时生效（「小竹球」唤醒监听无需重启）；独立页修改保存后，下次打开主站任意页生效。</div>
   </div>
 </div>
 <div class="footer">唤醒词「小竹」· 免唤醒窗口 5 分钟 · 音频即转即删不落库 · 身份证/手机号/卡号自动脱敏<br>
@@ -1581,9 +1581,10 @@ function renderWakeBtn() {
     ? "已开启：全站任意页呼唤唤醒词唤出面板"
     : "已关闭：点此开启全站语音唤醒";
 }
-/* ===== 唤醒词设置(embed 态): 预设 + 自定义 =====
+/* ===== 唤醒词设置(embed 面板与独立页通用): 预设 + 自定义 =====
    存 localStorage 'xiaozhu.wakeword'(与主站 voice-wake-widget
-   同源共享); postMessage 'xz-wake-word' 通知父页引擎即时重建 */
+   同源共享); embed 面板内 postMessage 'xz-wake-word' 通知父页
+   引擎即时重建; 独立页无父页监听, 主站下次加载生效 */
 function showWakeWordSet() {
   var w = localStorage.getItem("xiaozhu.wakeword") || "";
   document.getElementById("wwCur").textContent = w
@@ -1637,11 +1638,12 @@ function saveWakeWordCustom() {
 function saveWakeWord(w) {
   if (w) { localStorage.setItem("xiaozhu.wakeword", w); }
   else { localStorage.removeItem("xiaozhu.wakeword"); }
-  try { window.parent.postMessage(
-    { type: "xz-wake-word", word: w || "" }, "*"); } catch (e) {}
+  var embed = document.body.classList.contains("embed");
+  if (embed) { try { window.parent.postMessage(
+    { type: "xz-wake-word", word: w || "" }, "*"); } catch (e) {} }
   showWakeWordSet();
   showToast(w
-    ? "唤醒词已设为「" + w + "」——呼唤试试"
+    ? "唤醒词已设为「" + w + "」" + (embed ? "——呼唤试试" : "——在主站任意页呼唤即可唤出")
     : "唤醒词已恢复默认「小竹、小竹」");
 }
 /* ===== 浮层隐藏暂停/重开恢复(跳转/关闭浮层后) =====
@@ -2116,13 +2118,13 @@ document.addEventListener("focusin", function (ev) {
      浏览器识别依赖厂商云端服务(Chrome→Google), 国内网络普遍不可达, 降级为用户主动选择 */
   setMode("cloud");
   /* embed 模式(全站浮层 iframe): 隐藏页脚声明, jump 导航父窗口(主站);
-     唤醒开关仅 embed 态可见(冷唤醒为父页 widget 消费, 独立页无意义) */
+     唤醒开关仅 embed 态可见(冷唤醒为父页 widget 消费, 独立页无意义);
+     ⚙️ 唤醒词设置全态可见(独立页保存亦写同源 localStorage,
+     主站 widget 下次加载时生效) */
   if (/[?&]embed=1/.test(location.search)) {
     document.body.classList.add("embed");
     document.getElementById("wakeBtn").style.display = "";
     document.getElementById("wakeSp").style.display = "";
-    document.getElementById("wakeWordBtn").style.display = "";
-    document.getElementById("wakeWordSp").style.display = "";
     renderWakeBtn();
   }
   var auth = getAuth();
