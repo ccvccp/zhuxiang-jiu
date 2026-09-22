@@ -1650,11 +1650,14 @@ function saveWakeWord(w) {
 /* ===== 浮层隐藏暂停/重开恢复(跳转/关闭浮层后) =====
    隐藏的 iframe 若继续免提监听: 环境杂音污染会话(# 转写/
    旁人对话误触发) + 空烧每日额度 + 隐藏页 TTS 占音频焦点
-   干扰后续录音——隐藏即暂停, 重开自动恢复聆听 */
+   干扰后续录音——隐藏即暂停, 重开自动恢复聆听;
+   且必须无条件释放麦克风(X5 独占: 浮层隐藏即交接给父页
+   唤醒引擎——免提待续听态流仍开, 不停则父页拿不到麦克风) */
 function pauseVoiceForHidden() {
   S.hidden = true;
   clearTimeout(S.hfTimer); /* 停续听排程 */
-  if (cloudActive) { cloudActive = false; hardStopCloud(); } /* 丢弃未完成段 */
+  cloudActive = false;
+  hardStopCloud(); /* 无条件硬停+释放麦克风(幂等安全) */
   if (window.speechSynthesis) {
     try { window.speechSynthesis.cancel(); } catch (e) {}
   }

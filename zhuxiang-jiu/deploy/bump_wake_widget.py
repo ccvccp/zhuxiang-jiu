@@ -1,15 +1,15 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=6 -> v=7: widget WS 鉴权 token 过期自愈随 widget 内容更新
-双 bump(①index 引用 v=7 刷 widget 本体 /js/ immutable; 语音页
-本轮未动, VER 仅为统一链路)
+v=7 -> v=8: X5 麦克风独占死锁修复(面板/唤醒引擎麦克风交接)
+随 widget VER v=7 双 bump(①index 引用 v=8 刷 widget 本体; ②
+VER v=7 破 iframe 语音页缓存——语音页 pauseVoiceForHidden 同步改)
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=6"
-NEW = "src=/js/voice-wake-widget.js?v=7"
+OLD = "src=/js/voice-wake-widget.js?v=7"
+NEW = "src=/js/voice-wake-widget.js?v=8"
 
 
 def main():

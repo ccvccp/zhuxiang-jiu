@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=7>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=8>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=6";
+  var VER = "v=7";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -159,12 +159,15 @@
     panel.classList.remove("mini");
     notifyFrame("show");
     stopWake(); /* 面板打开期间暂停唤醒监听(面板内即语音会话) */
+    releaseMic(); /* X5 麦克风独占: 面板免提要录音, 必须先释放唤醒流
+                     (否则面板 getUserMedia 被堵——"微信正在录音"死锁) */
   }
   function closePanel() {
     panel.classList.remove("open");
     panel.classList.remove("mini");
     notifyFrame("hide");
-    startWake(); /* 关面板 → 恢复唤醒监听 */
+    enableWakeQuiet(); /* 关面板 → 重新拿麦克风恢复监听
+                           (权限已记住静默成功; 流已释放不能复用) */
   }
   function minimizePanel() {
     panel.classList.add("open");
@@ -360,6 +363,15 @@
     try { if (eng.ctx) { eng.ctx.close(); } } catch (e) { /* 忽略 */ }
     eng.ctx = null; eng.analyser = null; eng.proc = null;
   }
+  /* 彻底释放麦克风流(X5 独占: 面板与唤醒必须交接, 不能并存持有) */
+  function releaseMic() {
+    try {
+      if (eng.stream) {
+        eng.stream.getTracks().forEach(function (t) { t.stop(); });
+      }
+    } catch (e) { /* 忽略 */ }
+    eng.stream = null;
+  }
 
   /* 每音频帧: RMS 能量 VAD + 重采样 16k 入环形缓存/推流 */
   function onAudioFrame(ev) {
@@ -536,21 +548,19 @@
     if (!d || !d.type) { return; }
     if (d.type === "xz-panel-maximize") { maximizePanel(); return; }
     if (d.type === "xz-wake-on") {
-      /* 面板内开启唤醒: 球隐藏 + 取麦克风 + 引擎待命
-         (面板打开期间监听暂停, 关闭面板后自动恢复) */
+      /* 面板内开启唤醒: 球隐藏; 面板正开着(可能录音), X5 麦克风
+         独占——不立即重新 getUserMedia, 关面板时 closePanel→
+         enableWakeQuiet 自动恢复监听 */
       b.style.display = "none";
       if (eng.stream) {
         startWake();
-      } else {
-        enableWakeQuiet();
       }
       return;
     }
     if (d.type === "xz-wake-off") {
       localStorage.setItem(WAKE_KEY, "off");
       stopWake();
-      if (eng.stream) { try { eng.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* 忽略 */ } }
-      eng.stream = null;
+      releaseMic();
       b.style.display = "";
       return;
     }
