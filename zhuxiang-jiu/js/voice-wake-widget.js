@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=15>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=16>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=14";
+  var VER = "v=15";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -184,20 +184,23 @@
     panel.classList.remove("open");
     panel.classList.remove("mini");
     notifyFrame("hide");
-    /* 关面板 → 恢复监听: 语音页停麦是异步链(postMessage→pause→
-       stopTracks), 立即抢麦撞 X5 独占竞态——延迟+退避自动重试 */
-    scheduleWakeResume(800);
+    /* 关面板 → 恢复监听: 手势栈内先试(X5: setTimeout 后手势过期,
+       延迟创建的 AudioContext 是 suspended——喊了没反应); 语音页
+       停麦是异步链, 立即拿可能撞独占——失败再延迟+退避重试 */
+    enableWakeQuiet(false).then(function (ok) {
+      if (!ok) { resumeTries = 0; scheduleWakeResume(800); }
+    });
   }
-  /* 恢复监听调度: 800ms 起, 失败退避重试至多 3 次(1.5s/2.2s),
-     全败才提示+挂交互兜底 */
+  /* 恢复监听调度: 800ms 起, 失败退避重试至多 5 次(~11s 窗口,
+     覆盖 X5 慢释放), 全败才提示+挂交互兜底 */
   var resumeTimer = null, resumeTries = 0;
   function scheduleWakeResume(delay) {
     clearTimeout(resumeTimer);
     resumeTimer = setTimeout(function () {
       resumeTries++;
-      enableWakeQuiet(resumeTries >= 3).then(function (ok) {
+      enableWakeQuiet(resumeTries >= 5).then(function (ok) {
         if (ok) { resumeTries = 0; return; }
-        if (resumeTries < 3) { scheduleWakeResume(700 + 700 * resumeTries); }
+        if (resumeTries < 5) { scheduleWakeResume(700 + 700 * resumeTries); }
       });
     }, delay);
   }
@@ -410,6 +413,8 @@
     };
     document.addEventListener("touchend", ctxResumeHandler, true);
     document.addEventListener("click", ctxResumeHandler, true);
+    /* 无提示的静默等待 = 用户不知要点——明确引导 */
+    showTip("👆 点一下屏幕激活唤醒监听", 5000);
   }
 
   function stopWake() {
