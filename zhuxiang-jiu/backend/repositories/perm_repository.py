@@ -160,6 +160,10 @@ _SEED_NODES = _build_seed_nodes()
 # Redis 种子同步进程级标记(漂移修复幂等跑一次)
 _NODES_SYNCED = False
 
+# 布尔字段(Redis 模式 _serialize 存 1/0, 反序列化须还原 bool——
+# 否则 "0" 字符串 truthy, dutySigned 未签校验在 Redis 模式失效)
+_BOOL_FIELDS = ("dutySigned",)
+
 _INT_FIELDS = ("nodeId", "roleId", "grantId", "requestId", "logId",
                "memberId", "grantedBy", "applicantId", "durationDays",
                "currentStep", "createdBy", "riskScore",
@@ -229,7 +233,9 @@ class PermRepository:
     def _deserialize(data: dict) -> dict:
         record = {}
         for k, v in data.items():
-            if k in _INT_FIELDS:
+            if k in _BOOL_FIELDS:
+                record[k] = str(v) == "1"
+            elif k in _INT_FIELDS:
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):
