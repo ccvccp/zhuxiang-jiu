@@ -56,7 +56,21 @@ checks += [
     ("D9 详情页后台入口 v2 x2(footer+深链)",
      det.count("activity-dashboard.html?v=2") == 2),
     ("D10 深链 focus 兼容", "?v=2&focus=" in det),
+    ("L7 列表页 brand 防竖排", "flex: 1; min-width: 0;" in lst
+     and "防登录区挤压" in lst),
+    ("D11 详情页 brand 防竖排", "flex: 1; min-width: 0;" in det
+     and "防登录区挤压" in det),
 ]
+# 后台页: banner-info 根治竖排
+dsh = load("activity-dashboard.html")
+checks += [
+    ("A1 后台 banner-info 防竖排",
+     ".banner-info { flex: 1; min-width: 0; }" in dsh
+     and ".banner-info { flex: 1 1 100%; }" in dsh
+     and 'class="banner-info"' in dsh
+     and 'style="flex:1;"' not in dsh),
+]
+scripts(dsh, "dsh2")
 fails = [n for n, ok in checks if not ok]
 print("scripts: list=%d detail=%d" % (scripts(lst, "lst"), scripts(det, "det")))
 for n, ok in checks:

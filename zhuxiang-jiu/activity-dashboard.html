@@ -64,6 +64,9 @@
             white-space: nowrap; transition: var(--transition);
         }
         .banner-link:hover { background: rgba(255, 255, 255, 0.15); }
+        /* 页头信息块(flex:1 收缩陷阱): min-width:0 防内容被挤到一字宽
+           (登录徽章同栏挤压时中文逐字换行呈"竖排") */
+        .banner-info { flex: 1; min-width: 0; }
         /* 顶栏圆形返回按钮(同 C 端活动页视觉; 独立类——banner-link 在 640px 下隐藏, 本按钮保留) */
         .back-btn {
             flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%;
@@ -256,6 +259,7 @@
             .dash-banner h1 { font-size: 19px; }
             .dash-banner p { font-size: 11.5px; line-height: 1.55; margin-top: 5px; }
             .dash-banner .container { flex-wrap: wrap; }
+            .banner-info { flex: 1 1 100%; }  /* 信息块独占首行, 徽章换行, 根治竖排 */
             .ov-cells { grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 10px 12px; }
             .sub-table { font-size: 11px; }
             .sub-table th { padding: 4px 6px; white-space: nowrap; }
@@ -269,7 +273,7 @@
     <header class="dash-banner">
         <div class="container" style="display:flex;align-items:center;gap:12px;">
             <button class="back-btn" onclick="goBack()" aria-label="返回" title="返回活动中心">←</button>
-            <div style="flex:1;">
+            <div class="banner-info">
                 <h1>活动中心 · 管理后台</h1>
                 <p>09号活动管理模块 · 8类活动(促销/抽奖/竞赛/擂台赛/互动/拼团/秒杀/预售) · 发布与全生命周期管理 · 抽奖奖品池与发奖发货</p>
             </div>
