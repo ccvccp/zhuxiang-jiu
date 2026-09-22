@@ -241,6 +241,9 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
 .ww-custom input:focus{border-color:var(--green)}
 .ww-custom button{border:none;border-radius:10px;background:var(--green);
   color:#fff;padding:8px 18px;font-size:13px;cursor:pointer}
+.ww-preview{font-size:12px;color:var(--green-deep);background:var(--green-soft);
+  border-radius:8px;padding:7px 10px;display:none}
+.ww-preview.show{display:block}
 .ww-note{font-size:11px;color:var(--tx2);line-height:1.6}
 
 .toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);
@@ -400,10 +403,12 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
       <button type="button" onclick="applyWakeWordPreset('你好小竹')">你好小竹<span>单声 · 同音容错</span></button>
     </div>
     <div class="ww-custom">
-      <input id="wwInput" maxlength="8" placeholder="自定义 2-8 个汉字">
+      <input id="wwInput" maxlength="8" placeholder="自定义核心词（自动补全「小竹」前缀）"
+             oninput="renderWwPreview()">
       <button type="button" onclick="saveWakeWordCustom()">保存</button>
     </div>
-    <div class="ww-note">自定义词同样支持同音容错（按普通话拼音匹配，如「精灵」被听成「京玲」也能唤醒）；输入框清空保存即恢复默认。修改即时生效（「小竹球」唤醒监听无需重启）。</div>
+    <div class="ww-preview" id="wwPreview"></div>
+    <div class="ww-note">自定义词自动补全「小竹」前缀（输入「精灵」= 呼唤「小竹精灵」），并支持同音容错（按普通话拼音匹配，「精灵」被听成「京玲」也能唤醒）；清空输入保存即恢复默认。修改即时生效（「小竹球」唤醒监听无需重启）。</div>
   </div>
 </div>
 <div class="footer">唤醒词「小竹」· 免唤醒窗口 5 分钟 · 音频即转即删不落库 · 身份证/手机号/卡号自动脱敏<br>
@@ -1569,6 +1574,7 @@ function showWakeWordSet() {
     : "小竹、小竹（呼唤两声 · 默认）";
   document.getElementById("wwInput").value = w;
   document.getElementById("wwMask").classList.remove("hidden");
+  renderWwPreview();
 }
 function hideWakeWordSet() {
   document.getElementById("wwMask").classList.add("hidden");
@@ -1576,13 +1582,40 @@ function hideWakeWordSet() {
 function applyWakeWordPreset(w) {
   saveWakeWord(w);
 }
+/* 「小竹」前缀自动补全: 不带前缀的自定义词保存时自动补全
+   (已带则原样); 补全后超 8 字返回 null(超长) */
+function normalizeCustomWord(v) {
+  v = String(v || "").trim();
+  if (!v) { return ""; }
+  if (v.indexOf("小竹") === 0) { return v; }
+  if (v.length + 2 > 8) { return null; }
+  return "小竹" + v;
+}
+/* 输入实时预览: 补全后的最终唤醒词/超长提示 */
+function renderWwPreview() {
+  var el = document.getElementById("wwPreview");
+  var v = document.getElementById("wwInput").value.trim();
+  if (!v) { el.className = "ww-preview"; el.textContent = ""; return; }
+  var n = normalizeCustomWord(v);
+  el.className = "ww-preview show";
+  if (n === null) {
+    el.style.background = "#fdecea";
+    el.style.color = "#b5453c";
+    el.textContent = "「" + v + "」加上「小竹」前缀后超 8 字，请缩短核心词";
+  } else {
+    el.style.background = "";
+    el.style.color = "";
+    el.textContent = "保存后呼唤：「" + n + "」"
+      + (v.indexOf("小竹") === 0 ? "" : "（已自动补全「小竹」前缀）");
+  }
+}
 function saveWakeWordCustom() {
   var v = document.getElementById("wwInput").value.trim();
-  if (v && (v.length < 2 || v.length > 8)) {
-    showToast("自定义唤醒词须为 2-8 个字");
-    return;
-  }
-  saveWakeWord(v);
+  if (!v) { saveWakeWord(""); return; } /* 清空保存 = 恢复默认 */
+  if (v.length < 2) { showToast("自定义核心词至少 2 个字"); return; }
+  var n = normalizeCustomWord(v);
+  if (n === null) { showToast("加上「小竹」前缀后超 8 字，请缩短核心词"); return; }
+  saveWakeWord(n);
 }
 function saveWakeWord(w) {
   if (w) { localStorage.setItem("xiaozhu.wakeword", w); }
