@@ -1,15 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=17 -> v=18: 段/连接生命周期解耦(X5 握手慢于段长竞态——静音
-时 WS 仍 CONNECTING 被直接拆, auth 从未发出 recv=empty; 静音只
-结束采集, 保活连接回补识别)随 widget VER v=17 双 bump
+v=18 -> v=19: 连测熔断误伤修复(段计数关面板清零 + 上限 6→10 +
+提示改唤醒频率保护口径)随 widget VER v=18 双 bump
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=17"
-NEW = "src=/js/voice-wake-widget.js?v=18"
+OLD = "src=/js/voice-wake-widget.js?v=18"
+NEW = "src=/js/voice-wake-widget.js?v=19"
 
 
 def main():

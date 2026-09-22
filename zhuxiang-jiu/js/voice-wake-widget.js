@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=18>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=19>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=17";
+  var VER = "v=18";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -184,6 +184,9 @@
     panel.classList.remove("open");
     panel.classList.remove("mini");
     notifyFrame("hide");
+    /* 面板会话结束 = 唤醒新起点: 清分钟段计数(用户连测唤醒
+       易耗尽额度, 关面板后静默熔断——提示还被限频吞掉) */
+    eng.segTimes = [];
     /* 关面板 → 恢复监听: 手势栈内先试(X5: setTimeout 后手势过期,
        延迟创建的 AudioContext 是 suspended——喊了没反应); 语音页
        停麦是异步链, 立即拿可能撞独占——失败再延迟+退避重试 */
@@ -486,9 +489,9 @@
     eng.segTimes = eng.segTimes.filter(function (t) {
       return now - t < 60000;
     });
-    if (eng.segTimes.length >= 6) { /* 噪音环境熔断: 本分钟段数封顶 */
+    if (eng.segTimes.length >= 10) { /* 噪音/连测熔断: 本分钟段数封顶 */
       eng.hiStreak = 0;
-      diagTip("环境嘈杂已触发频率保护——稍候 1 分钟再唤醒", 60);
+      diagTip("唤醒频率保护——稍候约 1 分钟再试（连接数限额）", 30);
       return;
     }
     eng.segTimes.push(now);
