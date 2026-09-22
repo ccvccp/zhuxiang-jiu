@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=19>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=20>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=18";
+  var VER = "v=19";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -369,7 +369,10 @@
     try {
       eng.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true, noiseSuppression: true,
+          /* AEC 统一关(与语音面板一致): X5 上 AEC on/off 流交替
+             触发音频路由错乱——后续流静音(真机实证: 鉴权成功
+             推流但 ASR 无转写, 唤醒无声无息) */
+          echoCancellation: false, noiseSuppression: true,
           autoGainControl: true,
         },
       });
@@ -543,6 +546,9 @@
         } else if (ft) {
           /* 未命中唤醒词: 回显转写内容——ASR 实际听到什么可见 */
           diagTip("听到「" + String(ft).slice(0, 24) + "」未含唤醒词", 10);
+        } else {
+          /* 空转写(哑流/声音太小): 可见化——哑流根因是 X5 路由 */
+          diagTip("没听清——请再喊一声「小竹、小竹」", 8);
         }
         teardownSeg();
       } else if (m.type === "error") {
@@ -692,7 +698,7 @@
     }
     try {
       eng.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true },
       });
       startWake();
       return true;
