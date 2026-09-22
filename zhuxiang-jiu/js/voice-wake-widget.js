@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=12>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=13>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=11";
+  var VER = "v=12";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -236,6 +236,15 @@
     tip.textContent = msg;
     tip.classList.add("show");
     setTimeout(function () { tip.classList.remove("show"); }, ms || 4000);
+  }
+  /* 诊断提示(限频防刷屏): 熔断/通道错误/转写未匹配 —— 让用户能
+     看见唤醒链路断在哪一环, 而非静默失败 */
+  var diagLastAt = 0, diagLastMsg = "";
+  function diagTip(msg, gapSec) {
+    var now = Date.now();
+    if (msg === diagLastMsg && now - diagLastAt < (gapSec || 10) * 1000) { return; }
+    diagLastAt = now; diagLastMsg = msg;
+    showTip(msg, 2600);
   }
 
   function wakeOn() {
@@ -460,6 +469,7 @@
     });
     if (eng.segTimes.length >= 6) { /* 噪音环境熔断: 本分钟段数封顶 */
       eng.hiStreak = 0;
+      diagTip("环境嘈杂已触发频率保护——稍候 1 分钟再唤醒", 60);
       return;
     }
     eng.segTimes.push(now);
@@ -499,9 +509,17 @@
         eng.lastPartial = m.text;
         if (matchWake(m.text)) { onWakeHit(); }
       } else if (m.type === "final") {
-        if (matchWake(m.text || eng.lastPartial)) { onWakeHit(); }
+        var ft = m.text || eng.lastPartial || "";
+        if (matchWake(ft)) {
+          onWakeHit();
+        } else if (ft) {
+          /* 未命中唤醒词: 回显转写内容——ASR 实际听到什么可见 */
+          diagTip("听到「" + String(ft).slice(0, 24) + "」未含唤醒词", 10);
+        }
         teardownSeg();
       } else if (m.type === "error") {
+        /* 通道错误可见(token 问题走下方续期自愈) */
+        diagTip("识别通道: " + String(m.error || "?").slice(0, 48), 15);
         /* token 可能过期: 单飞刷新一次, 下一段自愈(过期瞬间喊
            一次没反应, 紧接着再喊即恢复) */
         tryRefreshToken();

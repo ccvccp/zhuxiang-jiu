@@ -1,14 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=11 -> v=12: 未登录(无 refreshToken)WS 失败静默改为明确引导随
-widget VER v=11 双 bump(①index 引用 v=12 刷 widget 本体)
+v=12 -> v=13: 唤醒链路诊断可见性(熔断/通道错误/转写回显三处
+提示)随 widget VER v=12 双 bump(①index 引用 v=13 刷 widget 本体)
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=11"
-NEW = "src=/js/voice-wake-widget.js?v=12"
+OLD = "src=/js/voice-wake-widget.js?v=12"
+NEW = "src=/js/voice-wake-widget.js?v=13"
 
 
 def main():
