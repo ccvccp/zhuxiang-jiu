@@ -59,17 +59,15 @@ def verify(mods):
 
 
 def keep_samples(pure):
-    """留存损坏样本副本(前 3 个)——官方回访索要真实损坏文件时直取。
-
-    样本以原始路径结构存 docs/evidence_samples/<轮次时间>/ 下,
-    只存纯 BOM 污染文件(验证过的), 还原前复制。
-    """
+    """留存损坏样本副本(层数最高的 3 个)——官方回访索要真实损坏
+    文件时直取; 层数最高者证据价值最大(轮次次数直读)。"""
     import shutil
     stamp = time.strftime("%Y%m%d_%H%M")
     base = os.path.join(ROOT, "zhuxiang-jiu", "docs",
                         "evidence_samples", stamp)
+    ranked = sorted(pure, key=bom_layers, reverse=True)
     kept = 0
-    for f in pure[:3]:
+    for f in ranked[:3]:
         src = os.path.join(ROOT, f)
         dst = os.path.join(base, f.replace("/", "__"))
         try:
@@ -79,7 +77,11 @@ def keep_samples(pure):
         except OSError:
             pass
     if kept:
-        print(f"已留存 {kept} 个损坏样本 → docs/evidence_samples/{stamp}/")
+        tops = ", ".join(f"{f.split('__')[-1] if '__' in f else f}"
+                         f"({bom_layers(f)}层)"
+                         for f in ranked[:kept])
+        print(f"已留存 {kept} 个损坏样本 → docs/evidence_samples/"
+              f"{stamp}/  [{tops}]")
 
 
 def main():
