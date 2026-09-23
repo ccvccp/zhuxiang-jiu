@@ -14,14 +14,14 @@
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
  *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
- * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=22>
+ * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=24>
  *       (替换 voice-entry-widget.js?v=25; 双 bump 规约: ①widget 内容
  *       更新须 bump index 引用 ?v=N(/js/ immutable); ②语音页内容
  *       更新须同步 bump 本 VER(iframe src 破语音页缓存))
  */
 (function () {
   "use strict";
-  var VER = "v=21";
+  var VER = "v=22";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -561,6 +561,7 @@
     eng.segStart = now;
     eng.loStreak = 0;
     eng.lastPartial = "";
+    eng.gain = 1; /* V3.1 软增益段首重置(防增益残留炸下段) */
     var proto = location.protocol === "https:" ? "wss://" : "ws://";
     try {
       eng.ws = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
@@ -628,8 +629,24 @@
 
   /* 推流: 攒 200ms(3200 样本@16k)帧发送(对齐百炼约束) */
   function segFeed(samples16k) {
+    /* V3.1 低能量自适应软增益: X5 路由增益档不稳(实测同会话帧
+       rms 差 20 倍), 低能量轮百炼识别崩(final=None/#)。段内
+       rms<目标(0.10)则线性放大(限幅 12x, 只升不降, 段首重置,
+       静音帧不调)——源头补足, 与 autoGainControl 失效解耦 */
+    var sq = 0;
     for (var i = 0; i < samples16k.length; i++) {
-      var s = Math.max(-1, Math.min(1, samples16k[i]));
+      sq += samples16k[i] * samples16k[i];
+    }
+    var rms = Math.sqrt(sq / samples16k.length);
+    if (rms > 0.004) {
+      var want = 0.10 / rms;
+      if (want > (eng.gain || 1)) {
+        eng.gain = Math.min(12, want);
+      }
+    }
+    var g = eng.gain || 1;
+    for (var i = 0; i < samples16k.length; i++) {
+      var s = Math.max(-1, Math.min(1, samples16k[i] * g));
       eng.ring.push(s < 0 ? s * 32768 : s * 32767);
     }
     while (eng.ring.length > RING_MAX * 2) { eng.ring.splice(0, eng.ring.length - RING_MAX * 2); }

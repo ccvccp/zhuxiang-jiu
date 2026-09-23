@@ -1267,9 +1267,25 @@ function streamConnect() {
 function streamTeardown() {
   if (stWS) { try { stWS.close(); } catch (e) {} stWS = null; }
 }
-/* 采集块(源采样率)→线性重采样 16k→攒 200ms 帧→Int16 发送 */
+/* 采集块(源采样率)→线性重采样 16k→攒 200ms 帧→Int16 发送
+   v3.1 低能量自适应软增益(X5 路由增益档不稳, 实测同会话帧 rms
+   差 20 倍, 低能量轮百炼识别崩 None/#): 段内 rms<目标(0.10)线性
+   放大, 限幅 12x 只升不降, cloudStart 重置, 静音帧不调——
+   与 widget segFeed 同款策略(治"没听清"与唤醒不中的音频层根因) */
 function streamFeed(f32) {
   if (!stWS || stWS.readyState !== 1) return;
+  var sq = 0;
+  for (var i = 0; i < f32.length; i++) { sq += f32[i] * f32[i]; }
+  var rms = Math.sqrt(sq / f32.length);
+  if (rms > 0.004) {
+    var want = 0.10 / rms;
+    if (want > (S.gain || 1)) { S.gain = Math.min(12, want); }
+  }
+  if ((S.gain || 1) !== 1) {
+    for (i = 0; i < f32.length; i++) {
+      f32[i] = Math.max(-1, Math.min(1, f32[i] * S.gain));
+    }
+  }
   var srcRate = audioCtx.sampleRate, dstRate = 16000;
   var ratio = srcRate / dstRate;
   var out = [];
@@ -2068,6 +2084,7 @@ function wireCloudCapture() {
     srcNode = audioCtx.createMediaStreamSource(recStream);
     procNode = audioCtx.createScriptProcessor(4096, 1, 1);
     pcmChunks = [];
+    S.gain = 1; /* v3.1 软增益会话首重置(防残留放大) */
     procNode.onaudioprocess = function (e) {
       var f32 = new Float32Array(e.inputBuffer.getChannelData(0));
       pcmChunks.push(f32);

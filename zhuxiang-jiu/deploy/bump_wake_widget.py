@@ -1,14 +1,15 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=22 -> v=23: 唤醒引擎故障兜底——球常显(ballMini: 开启唤醒后
-缩小半透明小点, 点击直达面板, 不再 display:none 死锁 UX)
+v=23 -> v=24: V3.1 低能量自适应软增益(widget segFeed)随语音页
+streamFeed 同款增益(VER v=22 双 bump)——治 X5 增益档不稳导致的
+唤醒不中与"没听清"
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=22"
-NEW = "src=/js/voice-wake-widget.js?v=23"
+OLD = "src=/js/voice-wake-widget.js?v=23"
+NEW = "src=/js/voice-wake-widget.js?v=24"
 
 
 def main():
