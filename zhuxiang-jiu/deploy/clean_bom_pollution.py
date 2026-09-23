@@ -58,6 +58,30 @@ def verify(mods):
     return pure, risky
 
 
+def keep_samples(pure):
+    """留存损坏样本副本(前 3 个)——官方回访索要真实损坏文件时直取。
+
+    样本以原始路径结构存 docs/evidence_samples/<轮次时间>/ 下,
+    只存纯 BOM 污染文件(验证过的), 还原前复制。
+    """
+    import shutil
+    stamp = time.strftime("%Y%m%d_%H%M")
+    base = os.path.join(ROOT, "zhuxiang-jiu", "docs",
+                        "evidence_samples", stamp)
+    kept = 0
+    for f in pure[:3]:
+        src = os.path.join(ROOT, f)
+        dst = os.path.join(base, f.replace("/", "__"))
+        try:
+            os.makedirs(base, exist_ok=True)
+            shutil.copy2(src, dst)
+            kept += 1
+        except OSError:
+            pass
+    if kept:
+        print(f"已留存 {kept} 个损坏样本 → docs/evidence_samples/{stamp}/")
+
+
 def main():
     dry = "--dry-run" in sys.argv
     mods = collect()
@@ -80,6 +104,7 @@ def main():
     if dry:
         print("[dry-run] 未做任何修改; 去掉 --dry-run 执行还原")
         return
+    keep_samples(pure)  # 还原前留存损坏样本(官方回访取证)
     for i in range(0, len(pure), 30):
         subprocess.run(
             ["git", "-C", ROOT, "checkout", "--"] + pure[i:i + 30],
