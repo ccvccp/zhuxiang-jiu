@@ -186,6 +186,11 @@ def tts_cache_key(text: str, voice: str, speed: float) -> str:
     ).hexdigest()[:24])
 
 
+# 播报情绪语调系数(与前端 moodSpeed 同值锚定——跨端常量
+# 无法共享, 两处注释互指; P2·O2: 预合成按 mood 系数入键,
+# care/steady 轮(识别失败/用户负面/高敏确认)亦享受秒播)
+MOOD_SPEED = {"care": 0.92, "steady": 0.95, "cheerful": 1.02}
+
 # 分句切分字符集(与前端 splitSpeech 逐字一致——P1.5 服务端
 # 预合成首子句必须与前端请求的块文本逐字节相同, 否则键不命中)
 _SPLIT_CHARS = "。！？；;，,—"

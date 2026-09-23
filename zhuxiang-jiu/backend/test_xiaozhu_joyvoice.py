@@ -276,6 +276,11 @@ async def main():
     _key_ok = jv.tts_cache_key("好的——我为您推荐竹香经典 52度。",
                                os.environ.get("TTS_VOICE",
                                               "tongtong"), 1.0)
+    # 消化此前轮次([01]-[13])积压的 fire-forget 预合成 task
+    # (无 Redis patch 窗口内早退), 防其混入本矩阵断言——
+    # 生产中乱序写入无害(Redis set 幂等), 仅测试编排问题
+    await asyncio.sleep(0.05)
+    fake.set_calls.clear()
     # a. 总开关 off → 零合成零写入
     os.environ["XIAOZHU_TTS_PREHEAT"] = "off"
     with patch("repositories.backend.is_redis_mode",
@@ -288,36 +293,72 @@ async def main():
     record("开关off→不合成不写缓存",
            not ms.called and not fake.set_calls)
     os.environ["XIAOZHU_TTS_PREHEAT"] = "on"
-    # b. mood 非空(care 键不匹配) → 跳过
+    # b. P2·O2: care 轮按 0.92 系数键写入(与前端 moodSpeed 对齐)
     with patch("repositories.backend.is_redis_mode",
                return_value=True), \
          patch("repositories.backend.get_redis_client",
                return_value=fake), \
          patch("services.llm_client.provider_client"
-               ".synthesize_mp3") as ms:
+               ".synthesize_mp3",
+               MagicMock(return_value=b"ID3FAKE")) as ms:
         await svc._preheat_tts_first_chunk(
             dict(_turn_ok, mood="care"))
-    record("mood非空→跳过(语速键不匹配)", not ms.called)
-    # c. not_woken 轮 → 跳过(preheat 首块已覆盖)
+    _key_care = jv.tts_cache_key("好的——我为您推荐竹香经典 52度。",
+                                 os.environ.get("TTS_VOICE",
+                                                "tongtong"), 0.92)
+    record("care轮→0.92系数键写入(前端同口径命中)",
+           ms.called and _key_care in fake.set_calls,
+           f"key={fake.set_calls}")
+    fake.store.pop(_key_care, None)
+    # b2. steady 轮按 0.95 系数键写入
     with patch("repositories.backend.is_redis_mode",
                return_value=True), \
          patch("repositories.backend.get_redis_client",
                return_value=fake), \
          patch("services.llm_client.provider_client"
-               ".synthesize_mp3") as ms:
+               ".synthesize_mp3",
+               MagicMock(return_value=b"ID3FAKE")) as ms:
         await svc._preheat_tts_first_chunk(
-            dict(_turn_ok, intent="not_woken"))
-    record("not_woken→跳过", not ms.called)
-    # d. 键已存在 → 不重复烧额度
-    fake.store[_key_ok] = "x"
+            dict(_turn_ok, mood="steady"))
+    _key_st = jv.tts_cache_key("好的——我为您推荐竹香经典 52度。",
+                               os.environ.get("TTS_VOICE",
+                                              "tongtong"), 0.95)
+    record("steady轮→0.95系数键写入",
+           ms.called and _key_st in fake.set_calls,
+           f"key={fake.set_calls}")
+    fake.store.pop(_key_st, None)
+    # c. not_woken 轮亦预合成(O2 增益: 恒定首块"我在——"秒播)
     with patch("repositories.backend.is_redis_mode",
                return_value=True), \
          patch("repositories.backend.get_redis_client",
                return_value=fake), \
          patch("services.llm_client.provider_client"
-               ".synthesize_mp3") as ms:
+               ".synthesize_mp3",
+               MagicMock(return_value=b"ID3FAKE")) as ms:
+        await svc._preheat_tts_first_chunk(
+            dict(_turn_ok, intent="not_woken",
+                 reply="我在——请以「小竹」开头唤我。"))
+    _key_nw = jv.tts_cache_key("我在——请以「小竹」开头唤我。",
+                               os.environ.get("TTS_VOICE",
+                                              "tongtong"), 1.0)
+    record("not_woken→默认键覆盖(恒定首块秒播)",
+           ms.called and _key_nw in fake.set_calls,
+           f"key={fake.set_calls}")
+    fake.store.pop(_key_nw, None)
+    # d. 键已存在 → 不重复写入该键(幂等; 乱序 task 亦写其他键,
+    #    故按"本键未重写"切片断言)
+    fake.store[_key_ok] = "x"
+    _n0 = len(fake.set_calls)
+    with patch("repositories.backend.is_redis_mode",
+               return_value=True), \
+         patch("repositories.backend.get_redis_client",
+               return_value=fake), \
+         patch("services.llm_client.provider_client"
+               ".synthesize_mp3"):
         await svc._preheat_tts_first_chunk(dict(_turn_ok))
-    record("键已存在→不重合成", not ms.called)
+    record("键已存在→不重写该键(幂等)",
+           _key_ok not in fake.set_calls[_n0:],
+           f"new={fake.set_calls[_n0:]}")
     fake.store.pop(_key_ok, None)
     # e. 正常路径: 合成 + 写入同构键
     with patch("repositories.backend.is_redis_mode",
@@ -329,7 +370,7 @@ async def main():
                MagicMock(return_value=b"ID3FAKE")) as ms:
         await svc._preheat_tts_first_chunk(dict(_turn_ok))
     record("正常→合成首块并写缓存(键同构)",
-           ms.called and fake.set_calls == [_key_ok],
+           ms.called and _key_ok in fake.set_calls,
            f"key={fake.set_calls}")
     # f. _save_turn fire-forget 全链挂点(响应不阻塞)
     fake2 = _FakeRedis()

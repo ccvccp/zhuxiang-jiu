@@ -3907,21 +3907,25 @@ class XiaozhuService:
         写入与 /tts 路由同构的 Redis 缓存键——前端 resp 后
         请求 TTS 命中缓存秒回, resp→play 压至 decode+起播
         (~0.1-0.3s)。与前端 preheatTTS 高频句互补: preheat
-        覆盖恒定句("好的——"/"在呢!"), 本预合成覆盖本轮
-        动态首块(推荐/加购等执行轮 reply)。
+        覆盖恒定句("好的——"/"在呢!"/"我在——"), 本预合成
+        覆盖本轮动态首块(推荐/加购/确认等轮 reply)。
+        P2·O2: mood 系数入键(care 0.92/steady 0.95, 与前端
+        moodSpeed 同值)——care/steady 轮(识别失败/用户负面/
+        高敏确认)从"永不命中走流式"变为秒播; not_woken 轮
+        首块"我在——"恒定, preheat 键命中即 skip 零浪费,
+        首次白合成一次换后续全命中(无损增益)。
         条件红线(一律跳过, 绝不白烧额度):
-        - XIAOZHU_TTS_PREHEAT=off 总开关
-        - not_woken 轮(前端不播报)/mood 非空轮(care 语速
-          0.92 键不匹配)/reply 空
+        - XIAOZHU_TTS_PREHEAT=off 总开关 / reply 空
         - 非 Redis 模式(无缓存面)/键已存在(preheat 已写过)
+        注: 键按默认语速(1.0)×mood 系数写——改过本地语速
+        偏好的用户键不匹配, 回退流式(可接受少数)。
         """
         try:
             from services import joyvoice_service as _jv
             if not _jv.tts_preheat_enabled():
                 return
             reply = str(turn.get("reply") or "").strip()
-            if (turn.get("intent") == "not_woken"
-                    or turn.get("mood") or not reply):
+            if not reply:
                 return
             from repositories.backend import (
                 is_redis_mode, get_redis_client,
@@ -3930,7 +3934,9 @@ class XiaozhuService:
                 return
             text = _jv.split_speech(reply)[0]
             voice = os.environ.get("TTS_VOICE", "tongtong")
-            key = _jv.tts_cache_key(text, voice, 1.0)
+            speed = _jv.MOOD_SPEED.get(
+                turn.get("mood") or "", 1.0)
+            key = _jv.tts_cache_key(text, voice, speed)
             client = await get_redis_client()
             if await client.get(key):
                 return
