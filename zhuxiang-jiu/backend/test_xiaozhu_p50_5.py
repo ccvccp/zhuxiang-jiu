@@ -332,7 +332,7 @@ class TestDashboardZone:
         record("voice50 分区 fail-soft",
                "voice50" in (board2.get("zoneErrors")
                              or [])
-               and len(board2.get("zones") or {}) == 8,
+               and len(board2.get("zones") or {}) == 10,
                str(board2.get("zoneErrors")))
 
 

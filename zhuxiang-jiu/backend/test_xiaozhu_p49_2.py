@@ -233,18 +233,22 @@ class TestGatewayBudget:
         v = await XiaozhuPrivacyService().budget_view(74)
         record("高敏挑战扣减 0.08",
                v["usedToday"] == 0.08)
-        # 写: cart.submit 扣减 0.05
+        # 写: cart.submit 扣减(断言随行为同步: cart.submit 已
+        # 由"写执行 0.05"升级为 TIER_SENSITIVE 0.08——真机
+        # "口误下单"事故后的高敏双因子升级, 挑战流同扣)
         await gw.call_tool(session, "cart.submit",
                           {"items": [{"skuId": "A1",
                                       "qty": 1}]})
         v = await XiaozhuPrivacyService().budget_view(74)
-        record("写执行扣减 0.05",
-               v["usedToday"] == 0.13)
+        record("cart.submit 高敏挑战扣减 0.08",
+               v["usedToday"] == 0.16,
+               f"actual={v['usedToday']}")
         # 只读: 零成本不扣减
         await gw.call_tool(session, "product.new", {})
         v = await XiaozhuPrivacyService().budget_view(74)
         record("只读零成本不扣减",
-               v["usedToday"] == 0.13)
+               v["usedToday"] == 0.16,
+               f"actual={v['usedToday']}")
         # 超限 → fallback: 直写账户将当日累计顶满
         from repositories.xiaozhu_repository import (
             Xiaozhu48Repository,

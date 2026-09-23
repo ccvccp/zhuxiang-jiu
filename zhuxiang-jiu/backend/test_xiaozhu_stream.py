@@ -195,6 +195,10 @@ async def run_session_tests():
 class FakeSession:
     """WS 路由集测替身(计数进类属性)"""
     fed_total = 0
+    # ws_asr_final 观测日志无条件访问 session.failed——
+    # 缺属性 AttributeError 杀死路由致 TestClient 永久挂
+    # (挂起根因); 真实 AsrStreamSession 有此属性
+    failed = None
 
     def __init__(self, send_json):
         self._send_json = send_json

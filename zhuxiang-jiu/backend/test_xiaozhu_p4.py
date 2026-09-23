@@ -1,4 +1,4 @@
-﻿"""48号·小竹智能语音中枢 P4 专项测试
+"""48号·小竹智能语音中枢 P4 专项测试
 (语音中枢看板与收官)
 
 运行方式:
@@ -113,7 +113,7 @@ class TestDashboardZones:
                set(b["zones"].keys()) == {
                    "usage", "commands", "confirm",
                    "points", "cocreate", "fairness",
-                   "fc", "voice50"}
+                   "fc", "voice50", "feedback", "asrfixes"}
                and b["zoneErrors"] == [],
                str(list(b["zones"].keys())))
         record("红线常驻",
@@ -331,7 +331,7 @@ class TestHttp:
                and set(body.get("zones") or {}) == {
                    "usage", "commands", "confirm",
                    "points", "cocreate", "fairness",
-                   "fc", "voice50"},
+                   "fc", "voice50", "feedback", "asrfixes"},
                str(resp.status_code))
         record("看板 fail-soft 字段齐备",
                "zoneErrors" in body

@@ -323,11 +323,17 @@ class TestPreference:
         base_names = [i.get("name") for i in
                       (r["card"] or {}).get("items") or []]
         # 直接验证重排序纯逻辑(订单偏好经 build_context)
+        # 修: "一款一款推荐"游标轮换使两次查询返回不同款——
+        # 断言改传固定 items 排除轮换干扰, 只验证排序本身
         from services.xiaozhu_service import XiaozhuService
         svc = XiaozhuService()
         ctx = {"preferenceTags": ["珍藏"],
                "levelTitle": "竹林会员"}
-        out = await svc._exec_product_new(ctx)
+        first = await svc._exec_product_new(ctx)
+        items0 = (first["card"] or {}).get("items") or []
+        base_names = [i.get("name") for i in items0]
+        out = await svc._exec_product_new(
+            ctx, items=[dict(i) for i in items0])
         ranked = [i.get("name") for i in
                   (out["card"] or {}).get("items") or []]
         record("重排序只调序不筛除",

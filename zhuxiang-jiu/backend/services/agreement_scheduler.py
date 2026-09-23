@@ -82,6 +82,12 @@ async def run_guard_patrol() -> dict:
         limit=_PATROL_LIST_CAP))
     consents = (await repo.list_consents(
         limit=_PATROL_LIST_CAP))
+    # fail-soft 过滤: 生产曾见列表混入非 dict 行(int)致
+    # 巡检崩(guard_patrol_fail 'int' object has no attribute
+    # 'get')——巡检跳过坏行不阻断(巡检本义即采样聚合)
+    agreements = [a for a in agreements if isinstance(a, dict)]
+    protocols = [p for p in protocols if isinstance(p, dict)]
+    consents = [c for c in consents if isinstance(c, dict)]
 
     # 条款停用率: 已决 = published + inactive
     # (流程态 draft/reviewing 不进分母)
