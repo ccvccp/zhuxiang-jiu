@@ -67,11 +67,54 @@ import json
 import logging
 import os
 import struct
+import threading
 import urllib.request
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "15"))
+
+# ============================================================
+# P2·H2 完善: 智谱 keep-alive 连接池(后端→智谱链路)
+# ============================================================
+# 背景: synthesize/synthesize_stream 每请求新建 TCP+TLS,
+# 实测 conn_ms 21~103ms——TTS 热路径重复支付。threading.
+# local 每池线程复用一条连接(HTTP/1.1 keep-alive, 响应全量
+# 读完后可复用), 断连(keep-alive 超时/服务端关闭)由调用方
+# 单次重建重试兜底。真 HTTP/2 需第三方 h2/httpx 库——违反
+# 纯标准库红线, keep-alive 达成同一目标(消除重复握手)。
+_TLS_POOL = threading.local()
+
+
+def _keepalive_conn(scheme: str, host: str, port: int):
+    """取本线程智谱连接(复用或新建)
+
+    Returns: (conn, fresh)——fresh=True 表示本次新建
+    (调用方据此计 conn_ms 握手耗时; 复用时该段为 0)
+    """
+    key = (scheme, host, port)
+    if getattr(_TLS_POOL, "key", None) != key:
+        _TLS_POOL.key = key
+        _TLS_POOL.conn = None
+    conn = getattr(_TLS_POOL, "conn", None)
+    fresh = conn is None
+    if fresh:
+        import http.client as _hc
+        cls = (_hc.HTTPSConnection
+               if scheme == "https" else _hc.HTTPConnection)
+        conn = cls(host, port, timeout=_TIMEOUT)
+        _TLS_POOL.conn = conn
+    return conn, fresh
+
+
+def _drop_keepalive_conn() -> None:
+    """丢弃本线程连接(断连后由下次 _keepalive_conn 重建)"""
+    conn = getattr(_TLS_POOL, "conn", None)
+    if conn is not None:
+        import contextlib as _cl
+        with _cl.suppress(Exception):
+            conn.close()
+        _TLS_POOL.conn = None
 
 
 def _wav_intact(data: bytes) -> bool:
@@ -734,31 +777,42 @@ class LLMProviderClient:
         # urllib 换 http.client 分段计时(行为等值: 超时/失败
         # 返回 None 语义不变)
         import time as _t
-        import http.client as _hc
         from urllib.parse import urlparse as _up
         u = _up(base_url)
-        _ph = {"req": _t.monotonic()}
-        conn_cls = (_hc.HTTPSConnection
-                    if u.scheme == "https" else _hc.HTTPConnection)
-        conn = conn_cls(u.hostname, u.port
-                        or (443 if u.scheme == "https" else 80),
-                        timeout=_TIMEOUT)
+        _port = u.port or (443 if u.scheme == "https" else 80)
+        data, ctype = None, ""
         try:
-            with llm_timer("synthesize"):
-                conn.connect()
-                _ph["conn"] = _t.monotonic()
-                conn.request(
-                    "POST", (u.path or "/api/paas/v4")
-                    + "/audio/speech", body=payload,
-                    headers={"Content-Type": "application/json",
-                             "Authorization":
-                                 f"Bearer {api_key}"})
-                _ph["sent"] = _t.monotonic()
-                resp = conn.getresponse()
-                _ph["hdr"] = _t.monotonic()
-                data = resp.read()
-                _ph["body"] = _t.monotonic()
-                ctype = resp.getheader("Content-Type", "") or ""
+            # P2·H2: keep-alive 单次重建重试(断连兜底)
+            for _attempt in (1, 2):
+                conn, fresh = _keepalive_conn(
+                    u.scheme, u.hostname, _port)
+                _ph = {"req": _t.monotonic()}
+                try:
+                    with llm_timer("synthesize"):
+                        if fresh:
+                            conn.connect()
+                            _ph["conn"] = _t.monotonic()
+                        else:
+                            _ph["conn"] = _ph["req"]  # 复用≈0
+                        conn.request(
+                            "POST", (u.path or "/api/paas/v4")
+                            + "/audio/speech", body=payload,
+                            headers={
+                                "Content-Type": "application/json",
+                                "Authorization":
+                                    f"Bearer {api_key}"})
+                        _ph["sent"] = _t.monotonic()
+                        resp = conn.getresponse()
+                        _ph["hdr"] = _t.monotonic()
+                        data = resp.read()
+                        _ph["body"] = _t.monotonic()
+                        ctype = resp.getheader(
+                            "Content-Type", "") or ""
+                    break
+                except Exception:
+                    _drop_keepalive_conn()
+                    if _attempt == 2:
+                        raise
             logger.info(
                 "voice78_tts_timing conn_ms=%d up_ms=%d "
                 "acoustic_ms=%d dl_ms=%d total_ms=%d "
@@ -782,10 +836,6 @@ class LLMProviderClient:
         except Exception as exc:
             logger.warning("llm_tts_failed(跳过播报): %s", exc)
             return None
-        finally:
-            import contextlib as _cl
-            with _cl.suppress(Exception):
-                conn.close()
 
     def synthesize_stream(self, text: str, speed: float = None,
                           voice: str = None):
@@ -824,23 +874,33 @@ class LLMProviderClient:
         payload = json.dumps(
             payload_dict, ensure_ascii=False).encode("utf-8")
         import time as _t
-        import http.client as _hc
         from urllib.parse import urlparse as _up
         u = _up(base_url)
-        conn_cls = (_hc.HTTPSConnection
-                    if u.scheme == "https" else _hc.HTTPConnection)
-        conn = conn_cls(u.hostname, u.port
-                        or (443 if u.scheme == "https" else 80),
-                        timeout=_TIMEOUT)
+        _port = u.port or (443 if u.scheme == "https" else 80)
         t0 = _t.monotonic()
         first_ms = None
+        conn = None
+        read_done = False
         try:
-            conn.connect()
-            conn.request(
-                "POST", (u.path or "/api/paas/v4") + "/audio/speech",
-                body=payload,
-                headers={"Content-Type": "application/json",
-                         "Authorization": f"Bearer {api_key}"})
+            for _attempt in (1, 2):
+                conn, fresh = _keepalive_conn(
+                    u.scheme, u.hostname, _port)
+                try:
+                    if fresh:
+                        conn.connect()
+                    conn.request(
+                        "POST",
+                        (u.path or "/api/paas/v4") + "/audio/speech",
+                        body=payload,
+                        headers={
+                            "Content-Type": "application/json",
+                            "Authorization":
+                                f"Bearer {api_key}"})
+                    break
+                except Exception:
+                    _drop_keepalive_conn()
+                    if _attempt == 2:
+                        raise
             resp = conn.getresponse()
             if resp.status != 200:
                 body = resp.read()[:200].decode(
@@ -851,6 +911,7 @@ class LLMProviderClient:
             while True:
                 line = resp.readline()
                 if not line:
+                    read_done = True  # EOF 正常读完可复用
                     break
                 if not line.startswith(b"data:"):
                     continue
@@ -869,14 +930,17 @@ class LLMProviderClient:
                 0, first_ms,
                 round((_t.monotonic() - t0) * 1000), t)
         except Exception as exc:
+            _drop_keepalive_conn()  # 异常连接不可复用
             logger.warning("llm_tts_stream_failed(回退整句): %s",
                            exc)
             yield ('data: {"error": {"message": '
                    f'"stream: {exc}"}}\n\n')
         finally:
-            import contextlib as _cl
-            with _cl.suppress(Exception):
-                conn.close()
+            # keep-alive 正确性红线: 前端 abort(StreamingResponse
+            # 取消迭代)会关闭生成器——响应体未读完的半途连接
+            # 不可复用(下一请求会读到残包), 弃用即丢弃
+            if not read_done:
+                _drop_keepalive_conn()
 
     def synthesize_mp3(self, text: str, speed: float = None,
                        voice: str = None) -> bytes | None:

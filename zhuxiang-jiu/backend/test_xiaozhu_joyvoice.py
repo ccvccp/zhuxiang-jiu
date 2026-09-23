@@ -453,6 +453,7 @@ async def main():
                str(_lines[:1]))
     finally:
         cap.drop()
+        _lc._drop_keepalive_conn()  # P2·H2: mock 连接不入池防串用例
         os.environ.pop("LLM_API_KEY", None)
 
     print("[16 P1·竹语 流式 TTS 首声]")
@@ -563,6 +564,7 @@ async def main():
                str(_tl[:1]))
     finally:
         cap2.drop()
+        _lc._drop_keepalive_conn()  # P2·H2: mock 连接不入池防串用例
         os.environ.pop("LLM_API_KEY", None)
 
     print("[17 P2·H2 观察期 [LAT] 上报与看板聚合]")
@@ -615,6 +617,129 @@ async def main():
         x_member_id="1")
     record("开关 off→skipped 不写", r.get("skipped") == "off")
     os.environ["XIAOZHU_LAT_REPORT"] = "on"
+
+    print("[18 P2·H2 后端→智谱 keep-alive 连接池]")
+    os.environ["LLM_API_KEY"] = "test-key"
+    _pool_made = []
+    _ok_wav = (b"RIFF" + _st.pack("<I", 592) + b"WAVE"
+               + b"\x00" * 588)
+
+    class _PoolResp:
+        def getheader(self, k, d=""):
+            return ("audio/wav"
+                    if k == "Content-Type" else d)
+
+        def read(self):
+            return _ok_wav
+
+        def readline(self):
+            return b""
+
+    class _PoolConn:
+        def __init__(self, *a, **k):
+            _pool_made.append(1)
+
+        def connect(self):
+            pass
+
+        def request(self, *a, **k):
+            pass
+
+        def getresponse(self):
+            return _PoolResp()
+
+        def close(self):
+            pass
+
+    _lc._drop_keepalive_conn()
+    # a. 同线程两次 synthesize 只建一次连接(复用)
+    with patch("http.client.HTTPSConnection", _PoolConn):
+        r1 = _lc.provider_client.synthesize("好的——", 1.0)
+        r2 = _lc.provider_client.synthesize("好的——", 1.0)
+    record("同线程两次合成仅建 1 连接(keep-alive 复用)",
+           r1 == _ok_wav and r2 == _ok_wav
+           and len(_pool_made) == 1,
+           f"made={len(_pool_made)}")
+    _lc._drop_keepalive_conn()
+    # b. 断连自动重建重试一次成功
+    _flaky = {"req": 0}
+
+    class _FlakyConn:
+        def __init__(self, *a, **k):
+            pass
+
+        def connect(self):
+            pass
+
+        def request(self, *a, **k):
+            _flaky["req"] += 1
+            if _flaky["req"] == 1:
+                raise ConnectionError("stale keep-alive")
+
+        def getresponse(self):
+            return _PoolResp()
+
+        def close(self):
+            pass
+
+    with patch("http.client.HTTPSConnection", _FlakyConn):
+        r = _lc.provider_client.synthesize("好的——", 1.0)
+    record("断连自动重建重试一次成功",
+           r == _ok_wav and _flaky["req"] == 2,
+           f"reqs={_flaky['req']}")
+    _lc._drop_keepalive_conn()
+    # c. 无 key 不建连接(提前 return 零开销)
+    _pool_made.clear()
+    os.environ.pop("LLM_API_KEY", None)
+    with patch("http.client.HTTPSConnection", _PoolConn):
+        r = _lc.provider_client.synthesize("你好", 1.0)
+    record("无 key→不建连接", r is None
+           and len(_pool_made) == 0)
+    # d. 流式半途弃用→连接丢弃(keep-alive 正确性红线)
+    os.environ["LLM_API_KEY"] = "test-key"
+
+    class _HalfResp:
+        def getheader(self, k, d=""):
+            return d
+
+        def read(self):
+            return b""
+
+        def readline(self):
+            return (b'data: {"choices":[{"delta":'
+                    b'{"content":"AAAA"}}]}\n')
+
+    class _HalfConn:
+        def __init__(self, *a, **k):
+            _pool_made.append(1)
+
+        def connect(self):
+            pass
+
+        def request(self, *a, **k):
+            pass
+
+        def getresponse(self):
+            return _HalfResp()
+
+        def close(self):
+            pass
+
+    _pool_made.clear()
+    with patch("http.client.HTTPSConnection", _HalfConn):
+        gen = _lc.provider_client.synthesize_stream(
+            "好的——", 1.0)
+        next(gen)          # 消费首块
+        gen.close()        # 模拟前端 abort(半途弃用)
+        # 池应被弃用——下一次请求重建连接
+        _pool_made.clear()
+        with patch("http.client.HTTPSConnection", _PoolConn):
+            r = _lc.provider_client.synthesize("好的——", 1.0)
+    record("流式半途弃用→连接丢弃重建",
+           r == _ok_wav and len(_pool_made) == 1,
+           f"made={len(_pool_made)}")
+    _lc._drop_keepalive_conn()
+    os.environ.pop("LLM_API_KEY", None)
 
     print("=" * 56)
     print(f"通过 {PASS} / 失败 {FAIL}")
