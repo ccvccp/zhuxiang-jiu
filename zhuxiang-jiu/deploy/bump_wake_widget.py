@@ -1,15 +1,13 @@
-"""生产 index.html: voice-wake-widget 版本号 bump(幂等)
+﻿"""生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=32 -> v=33: 78号P2·H2 观察期——[LAT] 四段上报链(开关
-/voices 下发, 带 nextHopProtocol 协议探测) + h2-watch.html
-监控看板; widget VER v=29
+v=33 -> v=34: G3 遗留定案——流式块 return_sample_rate 动态跟随(24kHz 三重印证); widget VER v=30
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=32"
-NEW = "src=/js/voice-wake-widget.js?v=33"
+OLD = "src=/js/voice-wake-widget.js?v=33"
+NEW = "src=/js/voice-wake-widget.js?v=34"
 
 
 def main():

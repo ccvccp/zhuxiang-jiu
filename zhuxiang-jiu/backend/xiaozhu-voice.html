@@ -2019,6 +2019,11 @@ function streamFirstChunk(ctl, ctx, text, mood,
               var obj = JSON.parse(s);
               if (obj.error) { hitErr = true; }
               else {
+                /* G3 遗留定案: 智谱流式块自带 return_sample_rate
+                   自描述(官方实证 24000)——动态跟随防未来变化 */
+                if (obj.return_sample_rate) {
+                  PCM_SR = obj.return_sample_rate;
+                }
                 var ch = (obj.choices || [{}])[0] || {};
                 var d = ch.delta || {};
                 if (d.content) onPiece(d.content);
