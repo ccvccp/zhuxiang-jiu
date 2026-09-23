@@ -9,9 +9,13 @@
 巡检三指标(确定性计算——分母 0 取 0, 冷启动
 不误判; LLM 禁入判定链):
     ASR 失败率 asrFailRate
-        = 轮次 intent=asr_failed / 总轮次
-          (scan_turns 全表只读——语音识别
-           质量代理)
+        = 近7天轮次中 intent=asr_failed 占比
+          (scan_turns 只读——语音识别质量代理;
+           滑动窗口口径: 累计全量口径一次超标永久
+           记忆且暂停期无新轮可稀释——2026-09-23
+           生产实测死锁, 人工resume后下轮巡检即
+           按历史再暂停; 7天窗口让旧失败自然老化,
+           指标反映当期质量)
     风控处置率 adjudicationRate
         = P50 处置台账数 / P50 行为事件数
           (声纹异常与激励操纵命中密度代理)
@@ -55,11 +59,12 @@ async def run_guard_patrol() -> dict:
     + guard_check——可独立调用)
 
     三指标口径:
-        ASR 失败率   = asr_failed 轮次 / 总轮次
+        ASR 失败率   = 近7天 asr_failed 轮次占比
         风控处置率  = P50 处置数 / P50 事件数
         语料拒审率  = rejected 语料 / 总语料
     分母为 0 时指标取 0(冷启动不误判)。
     """
+    from datetime import UTC, datetime, timedelta
     from repositories.xiaozhu_repository import (
         Xiaozhu48Repository,
     )
@@ -72,9 +77,23 @@ async def run_guard_patrol() -> dict:
     repo48 = Xiaozhu48Repository()
     repo50 = Voice50Repository()
 
-    # ① ASR 失败率(全量轮次只读)
-    turns = await repo48.scan_turns(
-        limit=2000)
+    # ① ASR 失败率(近7天滑动窗口——轮次 ts 无时区
+    # 按UTC解析; 无 ts 保守计入)
+    turns = await repo48.scan_turns(limit=2000)
+    cutoff = (datetime.now(UTC)
+              - timedelta(days=7))
+
+    def _in_window(t: dict) -> bool:
+        raw = str(t.get("ts") or "")
+        try:
+            dt = datetime.fromisoformat(raw)
+        except ValueError:
+            return True
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt >= cutoff
+
+    turns = [t for t in turns if _in_window(t)]
     turn_total = len(turns)
     asr_failed = sum(
         1 for t in turns

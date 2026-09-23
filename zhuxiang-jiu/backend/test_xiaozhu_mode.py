@@ -267,10 +267,15 @@ async def run_service():
                ["corpusRejectRate"] == 0
                and p["breached"] is False)
         # 造数: asr_failed 轮次 2/3(0.667>0.10) → 暂停
+        # (ts 用动态当前时间——滑动窗口口径下硬编码
+        #  旧日期会被窗口过滤导致指标恒 0)
+        from datetime import UTC, datetime
         from repositories.xiaozhu_repository import (
             Xiaozhu48Repository,
         )
         repo = Xiaozhu48Repository()
+        now_ts = datetime.now(
+            UTC).isoformat()
         for i, intent in enumerate(
                 ("asr_failed", "asr_failed",
                  "general")):
@@ -278,7 +283,7 @@ async def run_service():
                 "sessionId": 1,
                 "seq": i + 1,
                 "intent": intent,
-                "ts": "2026-09-16T00:00:00",
+                "ts": now_ts,
                 "rawText": "",
                 "reply": "",
                 "channel": "voice",
