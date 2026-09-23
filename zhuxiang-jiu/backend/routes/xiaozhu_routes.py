@@ -318,6 +318,20 @@ async def ws_asr(ws: WebSocket):
     # ③ 热词三源 + 建百炼流式连
     from services.xiaozhu_service import XiaozhuService
     session = AsrStreamSession(ws.send_json)
+    # 诊断落盘(XIAOZHU_WS_DUMP=1): 客户端推流音频存 PCM
+    # (16k16bit mono)→ /tmp/wsdump_*.wav——X5 间歇坏流分析
+    # (V2 健康检测特征设计用; 常态关闭零开销)
+    dump_f = None
+    dump_n = 0
+    if os.environ.get("XIAOZHU_WS_DUMP", "") == "1":
+        import time as _time
+        import wave as _wave
+        _dp = f"/tmp/wsdump_{_time.strftime('%H%M%S')}.wav"
+        dump_f = _wave.open(_dp, "wb")
+        dump_f.setnchannels(1)
+        dump_f.setsampwidth(2)
+        dump_f.setframerate(16000)
+        logger.info("ws_asr_dump open %s", _dp)
     try:
         if not await session.start(
                 await XiaozhuService()._asr_hotwords()):
@@ -333,6 +347,9 @@ async def ws_asr(ws: WebSocket):
             if msg.get("type") == "websocket.disconnect":
                 break
             if msg.get("bytes"):
+                if dump_f:
+                    dump_f.writeframes(msg["bytes"])
+                    dump_n += len(msg["bytes"])
                 await session.feed(msg["bytes"])
                 continue
             text = msg.get("text")
@@ -344,6 +361,11 @@ async def ws_asr(ws: WebSocket):
                 continue
             if m.get("type") == "finish":
                 final = await session.finish()
+                # v3 观测: final 转写留痕(唤醒不中诊断——标点形态/
+                # 空转写/误听形态一日志见; 与轮次 rawText 落库
+                # 同隐私口径)
+                logger.info("ws_asr_final text=%r failed=%r",
+                            final, session.failed)
                 if final is None:
                     await ws.send_json(
                         {"type": "error",
@@ -358,6 +380,9 @@ async def ws_asr(ws: WebSocket):
         logger.warning("ws_asr_error: %s", e)
     finally:
         await session.close()
+        if dump_f:
+            dump_f.close()
+            logger.info("ws_asr_dump closed bytes=%d", dump_n)
 
 
 @router.get("/sessions/{session_id}")

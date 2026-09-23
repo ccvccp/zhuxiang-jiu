@@ -1,14 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=21 -> v=22: 语音页 v3 低延迟对话(TTS 分句流水线/语义感知
-VAD 断句/首包过渡音/[LAT] 延迟埋点)随 widget VER v=21 双 bump
+v=22 -> v=23: 唤醒引擎故障兜底——球常显(ballMini: 开启唤醒后
+缩小半透明小点, 点击直达面板, 不再 display:none 死锁 UX)
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=21"
-NEW = "src=/js/voice-wake-widget.js?v=22"
+OLD = "src=/js/voice-wake-widget.js?v=22"
+NEW = "src=/js/voice-wake-widget.js?v=23"
 
 
 def main():

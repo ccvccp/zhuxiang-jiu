@@ -248,6 +248,23 @@
   fitWide();
   window.addEventListener("resize", fitWide);
 
+  /* 球态: 开启唤醒 → 缩小半透明常显(兜底入口——真机实证 X5 间歇
+     坏流下唤醒引擎可能长期唤不醒, 球若隐藏=用户无路可走死锁 UX;
+     小点常驻不碍观感, 点击直达面板) */
+  function ballMini(on) {
+    if (on) {
+      b.style.width = "40px";
+      b.style.height = "40px";
+      b.style.opacity = ".55";
+      b.title = "点击打开小竹语音面板";
+    } else {
+      b.style.width = "52px";
+      b.style.height = "52px";
+      b.style.opacity = "1";
+      b.title = "";
+    }
+  }
+
   /* 引导提示条 */
   var tip = document.createElement("div");
   tip.id = "xiaozhu-wake-tip";
@@ -276,8 +293,9 @@
     if (panel.classList.contains("mini")) { maximizePanel(); return; }
     if (wakeOn()) { openPanel(); return; }
     var ok = confirm('开启「小竹小竹」语音唤醒？\n\n'
-      + '开启后本页无浮球常驻, 对着麦克风呼唤"小竹、小竹"\n'
-      + '即可唤出语音精灵(需使用麦克风, 仅在检测到人声时上传音频)。');
+      + '开启后对着麦克风呼唤"小竹、小竹"即可唤出语音精灵\n'
+      + '(需使用麦克风, 仅在检测到人声时上传音频);\n'
+      + '小竹球将缩小为小点常驻, 点击它随时可直接打开面板。');
     if (!ok) { openPanel(); return; } /* 不开唤醒 → 当普通入口用 */
     enableWake();
   }
@@ -386,9 +404,9 @@
       return;
     }
     localStorage.setItem(WAKE_KEY, "on");
-    b.style.display = "none";
+    ballMini(true); /* 缩小常显兜底入口(不再隐藏) */
     startWake();
-    showTip("语音唤醒已开启——呼唤「小竹、小竹」试试（面板内可关闭）", 5000);
+    showTip("语音唤醒已开启——呼唤「小竹、小竹」试试（小竹球点击可直接打开面板）", 5000);
   }
 
   function startWake() {
@@ -684,10 +702,10 @@
     if (!d || !d.type) { return; }
     if (d.type === "xz-panel-maximize") { maximizePanel(); return; }
     if (d.type === "xz-wake-on") {
-      /* 面板内开启唤醒: 球隐藏; 面板正开着(可能录音), X5 麦克风
+      /* 面板内开启唤醒: 球缩小常显; 面板正开着(可能录音), X5 麦克风
          独占——不立即重新 getUserMedia, 关面板时 closePanel→
          enableWakeQuiet 自动恢复监听 */
-      b.style.display = "none";
+      ballMini(true);
       if (eng.stream) {
         startWake();
       }
@@ -697,7 +715,7 @@
       localStorage.setItem(WAKE_KEY, "off");
       stopWake();
       releaseMic();
-      b.style.display = "";
+      ballMini(false);
       return;
     }
     if (d.type === "xz-wake-word") {
@@ -723,7 +741,7 @@
      延迟 1.2s: 错开语音页 iframe 初始恢复会话的窗口(其免提启动
      与本引擎 getUserMedia 并发会在 X5 独占冲突) */
   if (wakeOn()) {
-    b.style.display = "none";
+    ballMini(true); /* 已开启: 小点常显兜底(唤醒引擎故障时仍有入口) */
     setTimeout(function () { enableWakeQuiet(true); }, 1200);
   } else {
     b.style.display = "";
