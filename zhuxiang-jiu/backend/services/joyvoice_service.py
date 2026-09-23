@@ -171,6 +171,20 @@ def tts_stream_enabled() -> bool:
     ).strip().lower() in ("on", "1", "true")
 
 
+def lat_report_enabled() -> bool:
+    """P2·H2 观察期 [LAT] 上报开关(默认 off; 生产观察期
+    注入 XIAOZHU_LAT_REPORT=on)
+
+    客户端四段延迟(vad→submit/submit→resp/resp→play/total)
+    服务端不可见(执行仅 18ms)——观察期靠前端 latReport 轻量
+    上报落 Redis 日键(TTL 9 天覆盖观察周), 看板聚合 P50/P90。
+    观察期结束(09-30 G1 完整版出)后关。
+    """
+    return os.environ.get(
+        "XIAOZHU_LAT_REPORT", "off"
+    ).strip().lower() in ("on", "1", "true")
+
+
 def tts_cache_key(text: str, voice: str, speed: float) -> str:
     """TTS Redis 缓存键(text|voice|speed 三维)
 

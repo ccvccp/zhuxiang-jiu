@@ -565,6 +565,57 @@ async def main():
         cap2.drop()
         os.environ.pop("LLM_API_KEY", None)
 
+    print("[17 P2·H2 观察期 [LAT] 上报与看板聚合]")
+    from routes.xiaozhu_routes import (
+        post_lat_report, get_lat_stats,
+    )
+
+    class _LatRedis:
+        def __init__(self):
+            self.h, self.exps = {}, []
+
+        async def hset(self, k, f, v):
+            self.h.setdefault(k, {})[f] = v
+
+        async def expire(self, k, s):
+            self.exps.append((k, s))
+
+        async def hgetall(self, k):
+            return dict(self.h.get(k, {}))
+
+    lat = _LatRedis()
+    os.environ["XIAOZHU_LAT_REPORT"] = "on"
+    with patch("repositories.backend.is_redis_mode",
+               return_value=True), \
+         patch("repositories.backend.get_redis_client",
+               return_value=lat):
+        r = await post_lat_report(
+            {"s1": 10, "s2": 300, "s3": 100, "tt": 410,
+             "proto": "h2", "mood": ""}, x_member_id="1")
+        record("上报写入(success)", r.get("success") is True
+               and len(lat.exps) == 1, str(r))
+        await post_lat_report(
+            {"s1": 586, "s2": 21000, "s3": 82, "tt": 21668,
+             "proto": "h2", "mood": ""}, x_member_id="1")
+        stats = await get_lat_stats(days=1)
+    t = stats.get("total") or {}
+    record("聚合 n=2 + h2 占比 100%",
+           t.get("n") == 2 and t.get("h2pct") == 100.0,
+           str(t)[:120])
+    record("s2 P50/P90 + 异常轮计数(s2>5s)",
+           t.get("s2", {}).get("p50") in (300, 21000)
+           and t.get("slowN") == 1
+           and len(t.get("slow") or []) == 1,
+           str(t.get("s2")) + str(t.get("slowN")))
+    record("TTL 9 天覆盖观察周", lat.exps
+           and lat.exps[0][1] == 9 * 86400)
+    os.environ["XIAOZHU_LAT_REPORT"] = "off"
+    r = await post_lat_report(
+        {"s1": 1, "s2": 1, "s3": 1, "tt": 3},
+        x_member_id="1")
+    record("开关 off→skipped 不写", r.get("skipped") == "off")
+    os.environ["XIAOZHU_LAT_REPORT"] = "on"
+
     print("=" * 56)
     print(f"通过 {PASS} / 失败 {FAIL}")
     sys.exit(1 if FAIL else 0)

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>竹语 H2 观察期监控看板 · 竹香网</title>
+<style>
+:root{--green:#2f7d52;--green-deep:#1d5a39;--green-soft:#e8f4ec;
+      --gold:#c98a2d;--tx:#1f2d3d;--tx2:#6b7a8d;--bd:#dfe7e2;
+      --card:#fff;--bg:#f4f7f5;--red:#b5453c}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+     background:var(--bg);color:var(--tx);padding:16px}
+.wrap{max-width:960px;margin:0 auto}
+h1{font-size:17px;color:var(--green-deep);margin-bottom:4px}
+h1 small{font-size:11px;color:var(--tx2);font-weight:400}
+.note{font-size:12px;color:var(--tx2);margin-bottom:12px;line-height:1.7}
+.card{background:var(--card);border:1px solid var(--bd);
+      border-radius:12px;padding:16px;margin-bottom:12px}
+.hidden{display:none!important}
+input{width:100%;max-width:220px;height:40px;padding:0 12px;
+      border:1px solid var(--bd);border-radius:8px;font-size:14px;
+      margin:6px 8px 6px 0}
+.btn{display:inline-block;padding:9px 16px;border:none;
+     border-radius:8px;background:var(--green);color:#fff;
+     font-size:13px;cursor:pointer;margin-top:4px}
+.btn.ghost{background:var(--green-soft);color:var(--green-deep)}
+h2{font-size:13.5px;color:var(--green-deep);margin-bottom:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{background:var(--green-soft);border-radius:10px;padding:12px}
+.kpi .t{font-size:11px;color:var(--tx2);margin-bottom:6px}
+.kpi .v{font-size:20px;font-weight:700;color:var(--green-deep)}
+.kpi .v small{font-size:11px;font-weight:400;color:var(--tx2)}
+.kpi .sub{font-size:11px;color:var(--tx2);margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{padding:7px 8px;border-bottom:1px dashed var(--bd);
+      text-align:left;white-space:nowrap}
+th{color:var(--tx2);font-weight:600;font-size:11.5px}
+.badge{display:inline-block;padding:1px 9px;border-radius:10px;
+       font-size:11px;font-weight:600;background:var(--green-soft);
+       color:var(--green-deep)}
+.badge.warn{background:#fbeeec;color:var(--red)}
+.badge.gold{background:#f7ecd9;color:var(--gold)}
+.err{color:var(--red);font-size:12.5px;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>竹语 TTS · H2 观察期监控看板
+    <small>78号P2 · HTTP/2 上线观察(09-23~09-30) · 客户端 [LAT] 四段分布</small></h1>
+  <div class="note">数据源: 语音对话真实轮的 [LAT] 客户端埋点上报(Redis 日键, TTL 9 天)。
+    观察: s2(submit→resp) H2 后 P50/P90 稳定性 · s2>5s 异常轮复发 · h2 协议占比。
+    基线对照: H1 时代 s2 2231~2837ms;H2 首日实测 274~393ms。</div>
+
+  <div class="card hidden" id="loginCard">
+    <b style="font-size:13px">登录后查看(JWT 鉴权)</b>
+    <div><input id="phone" placeholder="手机号" maxlength="11" inputmode="numeric">
+      <input id="pwd" type="password" placeholder="密码"></div>
+    <button class="btn" onclick="doLogin()">登录</button>
+    <button class="btn ghost" onclick="quickFill()">体验账号填充</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="card">
+      <h2>总并 P50/P90(近 7 天)</h2>
+      <div class="grid" id="kpis"></div>
+      <div style="margin-top:10px" id="totalMeta"></div>
+    </div>
+    <div class="card">
+      <h2>逐日分布</h2>
+      <div style="overflow-x:auto"><table id="daysT"></table></div>
+    </div>
+    <div class="card">
+      <h2>异常轮(s2 &gt; 5s——H1 时代网络型 vs 服务端波动鉴别)</h2>
+      <div id="slowBox">—</div>
+    </div>
+    <button class="btn ghost" onclick="load()">手动刷新</button>
+    <span style="font-size:11px;color:var(--tx2);margin-left:8px">
+      60s 自动刷新 <input type="checkbox" id="auto" checked onchange="setAuto()"></span>
+  </div>
+</div>
+<script>
+var AUTH_KEY = "zhuxiang.auth";
+function getAuth() {
+  try {
+    var s = JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
+    if (s && s.token) return s;
+  } catch (e) {}
+  return null;
+}
+function quickFill() {
+  document.getElementById("phone").value = "13800000001";
+  document.getElementById("pwd").value = "test123456";
+}
+function doLogin() {
+  fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      phone: document.getElementById("phone").value.trim(),
+      password: document.getElementById("pwd").value })
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    var t = j && (j.accessToken || (j.data && j.data.accessToken));
+    if (!t) {
+      document.getElementById("loginErr").textContent =
+        (j && (j.error || j.detail)) || "登录失败";
+      return;
+    }
+    localStorage.setItem(AUTH_KEY, JSON.stringify({
+      token: t, uid: (j.memberId || (j.data && j.data.memberId) || 0),
+      refreshToken: j.refreshToken || (j.data && j.data.refreshToken) || "" }));
+    enter();
+  }).catch(function () {
+    document.getElementById("loginErr").textContent = "网络异常";
+  });
+}
+function apiFetch(path) {
+  var a = getAuth() || {};
+  var h = { "Content-Type": "application/json",
+            "X-Member-Id": String(a.uid || "") };
+  if (a.token) h["Authorization"] = "Bearer " + a.token;
+  return fetch(path, { headers: h }).then(function (r) {
+    return r.json();
+  });
+}
+function fmtSeg(o, base) {
+  if (!o || o.p50 == null) return "—";
+  var b = base || "";
+  return o.p50 + b + " / " + o.p90 + b;
+}
+function load() {
+  apiFetch("/api/xiaozhu/lat/stats?days=7").then(function (j) {
+    if (!j || j.success === false) return;
+    var t = j.total || {};
+    var segs = [
+      ["s1 · vad→submit", t.s1, "ms"],
+      ["s2 · submit→resp", t.s2, "ms"],
+      ["s3 · resp→play", t.s3, "ms"],
+      ["tt · 端到端首声", t.tt, "ms"]];
+    var html = "";
+    segs.forEach(function (x) {
+      html += '<div class="kpi"><div class="t">' + x[0]
+        + ' P50/P90</div><div class="v">' + fmtSeg(x[1])
+        + '<small>ms</small></div><div class="sub">max '
+        + ((x[1] && x[1].max != null) ? x[1].max : "?")
+        + 'ms</div></div>';
+    });
+    html += '<div class="kpi"><div class="t">h2 协议占比</div>'
+      + '<div class="v">' + (t.h2pct == null ? "—" : t.h2pct
+      + "<small>%</small>") + '</div><div class="sub">nextHopProtocol 探测</div></div>';
+    document.getElementById("kpis").innerHTML = html;
+    document.getElementById("totalMeta").innerHTML =
+      '<span class="badge">样本 n=' + (t.n || 0) + '</span> '
+      + '<span class="badge ' + (t.slowN ? "warn" : "") + '">s2&gt;5s 异常 '
+      + (t.slowN || 0) + ' 轮</span> '
+      + (t.s2 && t.s2.p50 != null && t.s2.p50 < 500
+         ? '<span class="badge gold">H2 收益保持(s2 P50 &lt; 500ms)</span>' : "");
+    var rows = j.days || [];
+    var tbl = "<tr><th>日期</th><th>n</th><th>s1 P50/P90</th>"
+      + "<th>s2 P50/P90</th><th>s3 P50/P90</th><th>tt P50/P90</th>"
+      + "<th>h2%</th><th>异常</th></tr>";
+    rows.forEach(function (d) {
+      tbl += "<tr><td>" + d.day + "</td><td>" + (d.n || 0)
+        + "</td><td>" + fmtSeg(d.s1) + "</td><td>"
+        + fmtSeg(d.s2) + "</td><td>" + fmtSeg(d.s3)
+        + "</td><td>" + fmtSeg(d.tt) + "</td><td>"
+        + (d.h2pct == null ? "—" : d.h2pct) + "</td><td>"
+        + (d.slowN ? '<span class="badge warn">' + d.slowN + "</span>" : "0")
+        + "</td></tr>";
+    });
+    document.getElementById("daysT").innerHTML = tbl;
+    var sl = (t.slow || []);
+    document.getElementById("slowBox").innerHTML = sl.length
+      ? sl.map(function (r) {
+          return '<span class="badge warn">' + (r.ts || "?")
+            + " s2=" + r.s2 + "ms proto=" + (r.proto || "?")
+            + "</span> ";
+        }).join("")
+      : "观察期内暂无 s2>5s 异常轮 ✓";
+  }).catch(function () {});
+}
+var timer = 0;
+function setAuto() {
+  if (timer) { clearInterval(timer); timer = 0; }
+  if (document.getElementById("auto").checked) {
+    timer = setInterval(load, 60000);
+  }
+}
+function enter() {
+  document.getElementById("loginCard").classList.add("hidden");
+  document.getElementById("main").classList.remove("hidden");
+  load(); setAuto();
+}
+if (getAuth()) { enter(); }
+else { document.getElementById("loginCard").classList.remove("hidden"); }
+</script>
+</body>
+</html>

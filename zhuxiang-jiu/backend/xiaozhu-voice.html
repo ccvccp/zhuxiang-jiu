@@ -530,6 +530,8 @@ var S = { sid: null, turnCount: 0, woken: false, pending: false,
           packVoice: null, voiceList: null,
           packDec: null, packDecVoice: null,
           ttsStream: "off",
+          /* P2·H2 观察期: [LAT] 上报开关 + 协议探测 */
+          latReport: "off", proto: "", lastMood: "",
           /* v3 TTS 分句流水线: chunks 按序号存已解码块,
              nextIdx 队首接力; gapSrc 首包过渡音(正文到即让位);
              ctl 为本轮身份——旧轮回调一律身份比对作废 */
@@ -975,9 +977,15 @@ function loadVoices() {
      流式首声或整句双轨 */
   apiFetch("/api/xiaozhu/voices").then(function (j) {
     S.ttsStream = (j && j.ttsStream) || "off";
+    S.latReport = (j && j.latReport) || "off";
+    try {
+      var ne = performance.getEntriesByType("navigation")[0];
+      S.proto = (ne && ne.nextHopProtocol) || "";
+    } catch (e) { S.proto = ""; }
     fill((j && j.success && Array.isArray(j.voices)
           && j.voices.length) ? j.voices : VOICE_FALLBACK);
-  }).catch(function () { S.ttsStream = "off"; fill(VOICE_FALLBACK); });
+  }).catch(function () { S.ttsStream = "off";
+    S.latReport = "off"; fill(VOICE_FALLBACK); });
 }
 /* 预取缓存命中(音色归属校验——切音色后旧缓存不可见) */
 function packedGet(text) {
@@ -1602,6 +1610,7 @@ function doConfirm(btn) {
 var IS_WX = /MicroMessenger/i.test(
   navigator.userAgent || "");
 function speak(text, bubbleEl, mood) {
+  S.lastMood = mood || ""; /* P2: latReport 上报随行 */
   if (!S.tts || !text) {
     /* TTS 关闭时直接恢复免提聆听(无播报间隔) */
     S.ttsPlaying = false; scheduleHandfree(300);
@@ -1839,6 +1848,31 @@ function latReport() {
     if (window.parent && window.parent !== window) {
       window.parent.postMessage(
         { type: "xz-lat", text: line }, "*");
+    }
+    /* P2·H2 观察期: 四段轻量上报(开关 /voices 下发;
+       fire-and-forget 失败静默; vad 缺失轮不上报) */
+    if (S.latReport === "on") {
+      var _n = function (a, b) {
+        return (m[a] && m[b]) ? (m[b] - m[a]) : null;
+      };
+      var _tt = _n("vad", "play");
+      if (_tt != null) {
+        var _a = getAuth() || {};
+        var _hh = { "Content-Type": "application/json",
+                    "X-Member-Id": String(_a.uid || "") };
+        if (_a.token) {
+          _hh["Authorization"] = "Bearer " + _a.token;
+        }
+        fetch("/api/xiaozhu/lat", { method: "POST",
+          headers: _hh,
+          body: JSON.stringify({
+            s1: _n("vad", "submit") || 0,
+            s2: _n("submit", "resp") || 0,
+            s3: _n("resp", "play") || 0,
+            tt: _tt, proto: S.proto || "",
+            mood: S.lastMood || "" })
+        }).catch(function () {});
+      }
     }
   } catch (e) { /* 静默环境忽略 */ }
 }

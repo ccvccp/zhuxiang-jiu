@@ -429,12 +429,130 @@ async def get_voices():
     """
     import os
     from services.joyvoice_service import (
-        JOYVOICE_PROFILES, tts_stream_enabled,
+        JOYVOICE_PROFILES, tts_stream_enabled, lat_report_enabled,
     )
     return {"success": True,
             "voices": [dict(p) for p in JOYVOICE_PROFILES],
             "current": os.environ.get("TTS_VOICE", "tongtong"),
-            "ttsStream": "on" if tts_stream_enabled() else "off"}
+            "ttsStream": "on" if tts_stream_enabled() else "off",
+            "latReport": "on" if lat_report_enabled() else "off"}
+
+
+@router.post("/lat")
+async def post_lat_report(
+        payload: dict = None,
+        x_member_id: str | None = Header(
+            None, alias="X-Member-Id")):
+    """P2·H2 观察期: 客户端 [LAT] 四段延迟上报(轻量)
+
+    POST /api/xiaozhu/lat {"s1","s2","s3","tt","proto","mood"}
+    → Redis 日键 voice78:lat:{YYYYMMDD} hash, TTL 9 天。
+    XIAOZHU_LAT_REPORT=off 时 204 静默(前端读 /voices 提前
+    分流不上报; 204 仅兜底)。鉴权同 /tts(JWT strict)。
+    """
+    from services.joyvoice_service import lat_report_enabled
+    if not lat_report_enabled():
+        return {"success": True, "skipped": "off"}
+    _require_member_strict(x_member_id)
+    p = payload or {}
+    try:
+        s1 = max(0, min(600000, int(p.get("s1") or 0)))
+        s2 = max(0, min(600000, int(p.get("s2") or 0)))
+        s3 = max(0, min(600000, int(p.get("s3") or 0)))
+        tt = max(0, min(600000, int(p.get("tt") or 0)))
+        proto = str(p.get("proto") or "")[:16]
+        mood = str(p.get("mood") or "")[:16]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=409,
+                            detail="字段须为整数")
+    from repositories.backend import (
+        is_redis_mode, get_redis_client,
+    )
+    if not is_redis_mode():
+        return {"success": True, "skipped": "no-redis"}
+    import datetime as _dt
+    import json as _json
+    import uuid as _uuid
+    client = await get_redis_client()
+    day = _dt.date.today().strftime("%Y%m%d")
+    key = f"voice78:lat:{day}"
+    await client.hset(key, _uuid.uuid4().hex[:10], _json.dumps({
+        "s1": s1, "s2": s2, "s3": s3, "tt": tt,
+        "proto": proto, "mood": mood,
+        "ts": _dt.datetime.now().isoformat(timespec="seconds"),
+    }, ensure_ascii=False))
+    await client.expire(key, 9 * 86400)
+    return {"success": True}
+
+
+@router.get("/lat/stats")
+async def get_lat_stats(days: int = 7):
+    """P2·H2 观察期看板数据源: [LAT] 四段聚合(P50/P90)
+
+    GET /api/xiaozhu/lat/stats?days=7 → 逐日+总并: 四段
+    P50/P90/max、样本数、h2 协议占比、异常轮数(s2>5s)。
+    鉴权同 /voices(JWT——看板页登录态拉取)。
+    """
+    import datetime as _dt
+    import json as _json
+    from repositories.backend import (
+        is_redis_mode, get_redis_client,
+    )
+    n = max(1, min(9, days))
+
+    def _pct(xs, p):
+        if not xs:
+            return None
+        xs = sorted(xs)
+        return xs[min(len(xs) - 1,
+                      int(round(p / 100 * (len(xs) - 1))))]
+
+    def _agg(rows):
+        s1 = [r["s1"] for r in rows]
+        s2 = [r["s2"] for r in rows]
+        s3 = [r["s3"] for r in rows]
+        tt = [r["tt"] for r in rows]
+        h2n = sum(1 for r in rows if "h2" in r.get("proto"))
+        slow = [r for r in rows if r["s2"] > 5000]
+        return {
+            "n": len(rows),
+            "s1": {"p50": _pct(s1, 50), "p90": _pct(s1, 90),
+                   "max": max(s1) if s1 else None},
+            "s2": {"p50": _pct(s2, 50), "p90": _pct(s2, 90),
+                   "max": max(s2) if s2 else None},
+            "s3": {"p50": _pct(s3, 50), "p90": _pct(s3, 90),
+                   "max": max(s3) if s3 else None},
+            "tt": {"p50": _pct(tt, 50), "p90": _pct(tt, 90),
+                   "max": max(tt) if tt else None},
+            "h2pct": round(h2n * 100 / len(rows), 1) if rows
+            else None,
+            "slowN": len(slow),
+            "slow": [{"ts": r.get("ts"), "s2": r["s2"],
+                      "proto": r.get("proto")}
+                     for r in slow[-20:]],
+        }
+
+    days_out, all_rows = [], []
+    if is_redis_mode():
+        client = await get_redis_client()
+        today = _dt.date.today()
+        for i in range(n - 1, -1, -1):
+            d = today - _dt.timedelta(days=i)
+            key = f"voice78:lat:{d.strftime('%Y%m%d')}"
+            data = await client.hgetall(key) or {}
+            rows = []
+            for v in data.values():
+                try:
+                    r = _json.loads(v if isinstance(v, str)
+                                    else v.decode())
+                    rows.append(r)
+                except Exception:
+                    continue
+            days_out.append({"day": d.strftime("%m-%d"),
+                             **_agg(rows)})
+            all_rows.extend(rows)
+    return {"success": True, "days": days_out,
+            "total": _agg(all_rows)}
 
 
 @router.get("/tts/stream")
