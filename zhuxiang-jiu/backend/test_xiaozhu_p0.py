@@ -239,7 +239,7 @@ class TestCommands:
         record("帮助直达",
                (r["card"] or {}).get("type") == "help"
                and len((r["card"] or {}).get("items")
-                       or []) == 21,   # 误听修正2指令后 21
+                       or []) == 25,   # 21+酒问话四问
                str((r["card"] or {}).get("items"))[:50])
 
         # 未匹配 → general 兜底(78号P2 新容错文案)
@@ -364,7 +364,7 @@ class TestHttp:
         body = resp.json()
         record("GET commands 200",
                resp.status_code == 200
-               and len(body.get("commands") or []) == 21
+               and len(body.get("commands") or []) == 25
                and body.get("wakeWords") == ["小竹"],
                str(len(body.get("commands") or [])))
 

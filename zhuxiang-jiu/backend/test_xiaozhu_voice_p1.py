@@ -51,11 +51,15 @@ async def main():
 
     print("[01 指令注册]")
     actions = [c["action"] for c in COMMANDS]
-    record("COMMANDS 18 项含 cart.add/order.query/order.pay",
-           len(COMMANDS) == 19
+    record("COMMANDS 25 项含 cart.add/order.query/order.pay"
+           "+酒问话四问",
+           len(COMMANDS) == 25
            and "cart.add" in actions
            and "order.query" in actions
-           and "order.pay" in actions,
+           and "order.pay" in actions
+           and all(a in actions for a in (
+               "wine.verify", "wine.craft",
+               "wine.recommend", "wine.reviews")),
            f"{len(COMMANDS)}|{actions[-3:]}")
 
     svc = XiaozhuService()
@@ -166,9 +170,9 @@ async def main():
     await svc.delete_session(sid6)
 
     print("[08 订单查询(P2 order.query)]")
-    # 18 项指令
-    record("COMMANDS 18 项含 order.query",
-           len(COMMANDS) == 19
+    # 25 项指令
+    record("COMMANDS 25 项含 order.query",
+           len(COMMANDS) == 25
            and "order.query" in [c["action"] for c in COMMANDS],
            str(len(COMMANDS)))
     # 下单后查单: 成单→最近订单卡

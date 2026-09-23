@@ -15,6 +15,10 @@
               nav.page/chat.human/xiaozhu.help
     写(2): trust.bind/cart.submit
     高敏(2): trust.convert/repair.execute
+后续增补: privacy.budget/voice.score/explanation.report(50/49号)
+    + 酒的问话四问 wine.verify/wine.craft/wine.recommend/
+      wine.reviews(全只读——77/75号 gate 继承, 见
+      xiaozhu_wine_service)
 
 设计红线(计划 §八, 48号六条全继承 + 新增三条):
     - 约束内化: 描述即护栏(不靠后端硬拦独自兜底)
@@ -202,6 +206,59 @@ TOOL_REGISTRY = {
         "privacyCost": 0.0,
         "requiresConsent": False,
         "safeMessage": "归因报告暂时读取失败, 请稍后再试。",
+    },
+    "wine.verify": {
+        "operationId": "verify_wine_authenticity",
+        "summary": "验真伪/查质检(77号竹鉴引证)",
+        "description": "【只读】当用户问「这瓶酒是真的吗/"
+                      "有质检报告吗/甲醇多少」时调用, 返回"
+                      "双规格检测报告引证应答。❌ 检测数据"
+                      "仅证明食品安全合规, 不作医疗功效或"
+                      "绝对化宣传(77号合规红线继承); 指标"
+                      "数字必须来自报告典藏。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.01,
+        "requiresConsent": False,
+        "safeMessage": "质检问答暂时不可用, 请稍后再试。",
+    },
+    "wine.craft": {
+        "operationId": "explain_wine_craft",
+        "summary": "讲工艺故事(75号竹韵知识)",
+        "description": "【只读】当用户问「竹香酒是怎么"
+                      "酿出来的/工艺流程」时调用, 返回"
+                      "工艺知识应答(守门 L1-L3 + 溯源"
+                      "引证原样继承)。❌ 工艺断言必含"
+                      "报告引证, 禁止编造工艺细节。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.01,
+        "requiresConsent": False,
+        "safeMessage": "工艺问答暂时不可用, 请稍后再试。",
+    },
+    "wine.recommend": {
+        "operationId": "recommend_wine_by_scene",
+        "summary": "场景荐酒(场景×预算故事化推荐)",
+        "description": "【只读】当用户说「商务宴请推荐/"
+                      "送长辈预算800」时调用, 按场景面"
+                      "与预算匹配产品并给故事化推荐。"
+                      "❌ 价格/度数数字必须来自产品目录, "
+                      "禁止自行估算; 回复须带理性饮酒"
+                      "合规提示。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.01,
+        "requiresConsent": False,
+        "safeMessage": "推荐暂时不可用, 请稍后再试。",
+    },
+    "wine.reviews": {
+        "operationId": "summarize_wine_reviews",
+        "summary": "评论精华(好评率+高频词)",
+        "description": "【只读】当用户问「大家觉得这款酒"
+                      "怎么样/口碑」时调用, 统计好评率"
+                      "与酒友高频词。❌ 统计数字必须来自"
+                      "评价库, 禁止编造评价内容。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.01,
+        "requiresConsent": False,
+        "safeMessage": "口碑暂时读取失败, 请稍后再试。",
     },
     # ---------- 写(2) ----------
     "trust.bind": {

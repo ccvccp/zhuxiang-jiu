@@ -119,6 +119,10 @@ def mood_for_turn(intent: str, card_type: str,
     """
     if intent == "asr_failed" or user_mood == "negative":
         return "care"
+    # 酒的问话·侍酒师语调: 信任/知识问话走稳重档(×0.95)
+    # ——品酒师叙事沉稳有底蕴(泛化真伪/工艺故事两问)
+    if intent in ("wine.verify", "wine.craft"):
+        return "steady"
     if (card_type == "confirm"
             or intent in ("cart.submit", "order.pay")):
         return "steady"

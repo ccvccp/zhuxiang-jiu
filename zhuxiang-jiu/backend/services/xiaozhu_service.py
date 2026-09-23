@@ -639,6 +639,50 @@ COMMANDS = [
                      "我都干了什么", "刚才买什么了"],
         "examples": ["小竹，我刚才做了什么"],
     },
+    {
+        # 酒的问话·P-A 信任链: 真伪/质检问话直达 77号竹鉴
+        # (泛化真伪问→双报告典藏摘要; 指标问→引证应答)
+        "action": "wine.verify",
+        "label": "验真伪/查质检",
+        "patterns": ["是真的吗", "真伪", "真假", "正宗吗",
+                     "正品吗", "是正品", "质检报告",
+                     "检测报告", "质检", "防伪"],
+        "examples": ["小竹，这瓶酒是真的吗",
+                     "小竹，竹香酒有质检报告吗"],
+    },
+    {
+        # 酒的问话·P-A 信任链: 工艺叙事问话直达 75号竹韵
+        # (守门 L1-L3 继承; 短属性问"什么工艺/怎么酿"归
+        # 既有产品属性轨不动——只收叙事句式)
+        "action": "wine.craft",
+        "label": "讲工艺故事",
+        "patterns": ["怎么酿出来", "酿出来的",
+                     "工艺流程", "工艺故事", "讲讲工艺",
+                     "工艺是怎么", "如何酿出来",
+                     "怎么酿造出来", "酿酒文化"],
+        "examples": ["小竹，竹香酒是怎么酿出来的"],
+    },
+    {
+        # 酒的问话·P-B 场景顾问: 场景×预算故事化推荐
+        # (scenes 面匹配, 故事来自产品策展字段——零 LLM)
+        "action": "wine.recommend",
+        "label": "场景荐酒",
+        "patterns": ["推荐", "送长辈", "送礼", "宴请",
+                     "商务", "家宴", "小聚", "聚会",
+                     "收藏", "团购", "预算", "买什么酒",
+                     "选哪款", "帮我挑", "帮我选",
+                     "适合送", "适合喝"],
+        "examples": ["小竹，商务宴请推荐一款",
+                     "小竹，送长辈预算800左右"],
+    },
+    {
+        # 酒的问话·P-D 评论精华: 好评率+高频词统计式提炼
+        "action": "wine.reviews",
+        "label": "大家怎么说",
+        "patterns": ["大家觉得", "评价怎么样", "口碑",
+                     "评论", "好评", "酒友怎么说"],
+        "examples": ["小竹，大家觉得这款酒怎么样"],
+    },
 ]
 
 # 执行留痕回溯口径(v2 B1: "我刚才做了什么"聚合的 intent 集合
@@ -1834,6 +1878,24 @@ class XiaozhuService:
             if action == "voice.score":
                 return await self._exec_voice50_score(
                     member_id)
+            if action in ("wine.verify", "wine.craft",
+                          "wine.recommend",
+                          "wine.reviews"):
+                # 酒的问话(全只读): 信任链/场景顾问/评论
+                # 精华——gate 语义见 xiaozhu_wine_service
+                from services.xiaozhu_wine_service import (
+                    XiaozhuWineService,
+                )
+                _wine = XiaozhuWineService()
+                if action == "wine.verify":
+                    return await _wine.verify(text)
+                if action == "wine.craft":
+                    return await _wine.craft(
+                        text, member_id)
+                if action == "wine.recommend":
+                    return await _wine.recommend(text)
+                return await _wine.reviews(
+                    self._extract_keyword(text))
             if action == "cart.add":
                 return await self._exec_cart_add(
                     session, text)
@@ -1921,8 +1983,13 @@ class XiaozhuService:
             return {"reply": r.get("reply", "已触发冷静期"),
                     "card": None, "cooldown": True}
         if r.get("confirmRequired"):
+            # 酒的问话·P-C 合规红线: 酒类下单确认轮带
+            # 理性饮酒提醒(全目录为酒类——cart.submit 轮)
+            _wine_note = (
+                " 理性饮酒, 未成年人禁止饮酒。"
+                if action == "cart.submit" else "")
             return {
-                "reply": r["reply"],
+                "reply": str(r["reply"]) + _wine_note,
                 "card": {"type": "confirm",
                          "subject": r["summary"],
                          "confirmToken": r["confirmToken"],
