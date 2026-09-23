@@ -111,12 +111,14 @@ def mood_for_turn(intent: str, card_type: str,
     cheerful 明快×1.02 / ""(空) 跟随用户音色默认语速。
 
     红线: 执行轮(加购/结算成功等)返回 ""——数字事实播报
-    不加情绪渲染, 只有兜底/唤醒/高敏确认/用户负面四处落。
+    不加情绪渲染, 只有兜底/高敏确认/用户负面三处落。
+    P1.5·竹语权衡: wakeup("在呢!")降级为 ""——cheerful
+    语速系数 1.02 会改变 TTS 缓存键, 破坏 preheatTTS 预取
+    与服务端预合成的秒播命中(唤醒应答是全站最需秒播的一句,
+    秒播 > 语调微调)。
     """
     if intent == "asr_failed" or user_mood == "negative":
         return "care"
-    if intent == "wakeup":
-        return "cheerful"
     if (card_type == "confirm"
             or intent in ("cart.submit", "order.pay")):
         return "steady"
@@ -144,3 +146,81 @@ def mood_context_line(user_mood: str) -> str:
         "positive": "用户当前情绪: 积极愉快——reply 可自然轻快, "
                     "不刻意讨好",
     }.get(user_mood, "")
+
+
+# ------------------------------------------------------------
+# P1.5·竹语: TTS 首声延迟优化(resp→play 1.1~1.5s 压至亚秒)
+# ------------------------------------------------------------
+
+def tts_preheat_enabled() -> bool:
+    """服务端响应内预合成开关(默认 on; off 一键关闭零影响)"""
+    return os.environ.get(
+        "XIAOZHU_TTS_PREHEAT", "on"
+    ).strip().lower() not in ("off", "0", "false")
+
+
+def tts_cache_key(text: str, voice: str, speed: float) -> str:
+    """TTS Redis 缓存键(text|voice|speed 三维)
+
+    /tts 路由与 78号P1.5 服务端预合成共用本函数——键构造
+    必须逐字节一致, 预合成写入的缓存前端 /tts 才能命中
+    (等值重构自 routes /tts 内联键, 行为零变更)。
+    """
+    import hashlib
+    t = str(text or "").strip()[:200]
+    return ("xiaozhu:tts:mp3:" + hashlib.sha256(
+        (t + "|" + str(voice or "") + "|"
+         + f"{float(speed):g}").encode("utf-8")
+    ).hexdigest()[:24])
+
+
+# 分句切分字符集(与前端 splitSpeech 逐字一致——P1.5 服务端
+# 预合成首子句必须与前端请求的块文本逐字节相同, 否则键不命中)
+_SPLIT_CHARS = "。！？；;，,—"
+_SPLIT_MIN_FIRST = 4   # 首块最小字数(实证"好的——"4字稳)
+_SPLIT_HARD = 14       # 无标点硬切(spike: 27字合成1.95s,
+                       # 14字≈1.1s——首块调小收益近线性)
+
+
+def split_speech(text: str) -> list[str]:
+    """v3 分句流水线的服务端镜像(前端 splitSpeech 逐字一致)
+
+    短回复(≤24字)整句; 长回复按标点切分, 首块最小 4 字
+    ("好的——"恒定前缀——推荐轮 reply 统一带此前缀, preheat
+    预取一次全网零合成秒播); 无标点硬切 14 字。
+    破折号"—"入切分集为 P1.5 增量(spike 实证 4 字带破折号
+    合成稳定)。
+    """
+    t = str(text or "").strip()
+    if not t:
+        return []
+    if len(t) <= 24:
+        return [t]
+    parts: list[str] = []
+    cur = ""
+    for ch in t:
+        cur += ch
+        if ch in _SPLIT_CHARS:
+            if len(cur.strip()) >= _SPLIT_MIN_FIRST:
+                parts.append(cur.strip())
+                cur = ""
+        elif len(cur) >= _SPLIT_HARD:
+            # 硬切回退: 切点回退越过尾部 ASCII 数字/字母段
+            # 及紧贴符号(°×¥)——"52度"不在"5|2"处断裂数字读音;
+            # 空格是自然词边界停在空格处切
+            cut = cur
+            while len(cut) > _SPLIT_MIN_FIRST and (
+                    (cut[-1].isascii()
+                     and cut[-1] not in _SPLIT_CHARS
+                     and cut[-1] != " ")
+                    or cut[-1] in "°×¥"):
+                cut = cut[:-1]
+            if len(cut.strip()) >= _SPLIT_MIN_FIRST:
+                parts.append(cut)
+                cur = cur[len(cut):]
+            else:
+                parts.append(cur)
+                cur = ""
+    if cur.strip():
+        parts.append(cur.strip())
+    return parts or [t]

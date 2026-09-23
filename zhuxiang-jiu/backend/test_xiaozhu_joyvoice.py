@@ -80,9 +80,8 @@ async def main():
     record("asr_failed→care",
            jv.mood_for_turn("asr_failed", "", "neutral")
            == "care")
-    record("wakeup→cheerful",
-           jv.mood_for_turn("wakeup", "", "neutral")
-           == "cheerful")
+    record("wakeup→''(P1.5: cheerful 系数破坏 preheat 秒播)",
+           jv.mood_for_turn("wakeup", "", "neutral") == "")
     record("confirm 卡→steady",
            jv.mood_for_turn("cart.submit", "confirm",
                             "neutral") == "steady")
@@ -211,6 +210,143 @@ async def main():
     record("中性无注入行(零开销)",
            jv.mood_context_line("neutral") == ""
            and jv.mood_context_line("") == "")
+
+    print("[12 P1.5 split_speech 服务端镜像(前端逐字一致)]")
+    record("短回复整句(≤24字)",
+           jv.split_speech("在呢！") == ["在呢！"])
+    record("空文本→空列表", jv.split_speech("") == [])
+    _rec = ("好的——我为您推荐竹奕·竹香经典 52度 500ml，"
+            "您看这款怎么样？需要就说「需要」。")
+    _parts = jv.split_speech(_rec)
+    record("推荐轮首块=「好的——」(恒定前缀秒播)",
+           _parts[0] == "好的——",
+           f"first={_parts[0]!r}")
+    record("数字段完整不断裂(52度整体在一块)",
+           _parts[2] == "52度 500ml，"
+           and _parts[1].rstrip()
+           == "我为您推荐竹奕·竹香经典",
+           f"parts={[p[:14] for p in _parts]}")
+    _cart = ("已加「竹奕·竹香便携 42° 250ml」×1，¥88，"
+             "清单1件（竹香便携×1）。还要吗？或说「结算」")
+    _cart_parts = jv.split_speech(_cart)
+    record("加购轮: 42° 250ml 数字段完整",
+           _cart_parts[0].rstrip()
+           == "已加「竹奕·竹香便携"
+           and _cart_parts[1] == "42° 250ml」×1，",
+           f"first={_cart_parts[0]!r} "
+           f"second={_cart_parts[1]!r}")
+    record("无标点长串硬切14字",
+           all(len(p) <= 15
+               for p in jv.split_speech("一" * 30)),
+           f"lens={[len(p) for p in jv.split_speech('一' * 30)]}")
+
+    print("[13 P1.5 tts_cache_key 与路由键等值]")
+    import hashlib as _hl
+    for t, v, s in [("你好", "tongtong", 1.0),
+                    ("好的——", "", 0.5),
+                    ("已加「竹香便携」×1，", "chuichui", 2.0)]:
+        want = ("xiaozhu:tts:mp3:"
+                + _hl.sha256((t.strip() + "|" + str(v or "")
+                              + "|" + f"{s:g}").encode(
+                                  "utf-8")).hexdigest()[:24])
+        got = jv.tts_cache_key(t, v, s)
+        record(f"键等值({t[:6]}…|{v or '空'}|{s:g})",
+               got == want, f"got={got} want={want}")
+    record("speed 1.0 格式化为 '1'(与前端 query 对齐)",
+           jv.tts_cache_key("你好", "tongtong", 1.0)
+           == jv.tts_cache_key("你好", "tongtong", 1))
+
+    print("[14 P1.5 服务端预合成条件矩阵]")
+    from unittest.mock import patch, MagicMock
+
+    class _FakeRedis:
+        def __init__(self):
+            self.store, self.set_calls = {}, []
+
+        async def get(self, k):
+            return self.store.get(k)
+
+        async def set(self, k, v, ex=None):
+            self.set_calls.append(k)
+            self.store[k] = v
+
+    fake = _FakeRedis()
+    _turn_ok = {"intent": "product.new", "mood": "",
+                "reply": "好的——我为您推荐竹香经典 52度。"}
+    _key_ok = jv.tts_cache_key("好的——我为您推荐竹香经典 52度。",
+                               os.environ.get("TTS_VOICE",
+                                              "tongtong"), 1.0)
+    # a. 总开关 off → 零合成零写入
+    os.environ["XIAOZHU_TTS_PREHEAT"] = "off"
+    with patch("repositories.backend.is_redis_mode",
+               return_value=True), \
+         patch("repositories.backend.get_redis_client",
+               return_value=fake), \
+         patch("services.llm_client.provider_client"
+               ".synthesize_mp3") as ms:
+        await svc._preheat_tts_first_chunk(dict(_turn_ok))
+    record("开关off→不合成不写缓存",
+           not ms.called and not fake.set_calls)
+    os.environ["XIAOZHU_TTS_PREHEAT"] = "on"
+    # b. mood 非空(care 键不匹配) → 跳过
+    with patch("repositories.backend.is_redis_mode",
+               return_value=True), \
+         patch("repositories.backend.get_redis_client",
+               return_value=fake), \
+         patch("services.llm_client.provider_client"
+               ".synthesize_mp3") as ms:
+        await svc._preheat_tts_first_chunk(
+            dict(_turn_ok, mood="care"))
+    record("mood非空→跳过(语速键不匹配)", not ms.called)
+    # c. not_woken 轮 → 跳过(preheat 首块已覆盖)
+    with patch("repositories.backend.is_redis_mode",
+               return_value=True), \
+         patch("repositories.backend.get_redis_client",
+               return_value=fake), \
+         patch("services.llm_client.provider_client"
+               ".synthesize_mp3") as ms:
+        await svc._preheat_tts_first_chunk(
+            dict(_turn_ok, intent="not_woken"))
+    record("not_woken→跳过", not ms.called)
+    # d. 键已存在 → 不重复烧额度
+    fake.store[_key_ok] = "x"
+    with patch("repositories.backend.is_redis_mode",
+               return_value=True), \
+         patch("repositories.backend.get_redis_client",
+               return_value=fake), \
+         patch("services.llm_client.provider_client"
+               ".synthesize_mp3") as ms:
+        await svc._preheat_tts_first_chunk(dict(_turn_ok))
+    record("键已存在→不重合成", not ms.called)
+    fake.store.pop(_key_ok, None)
+    # e. 正常路径: 合成 + 写入同构键
+    with patch("repositories.backend.is_redis_mode",
+               return_value=True), \
+         patch("repositories.backend.get_redis_client",
+               return_value=fake), \
+         patch("services.llm_client.provider_client"
+               ".synthesize_mp3",
+               MagicMock(return_value=b"ID3FAKE")) as ms:
+        await svc._preheat_tts_first_chunk(dict(_turn_ok))
+    record("正常→合成首块并写缓存(键同构)",
+           ms.called and fake.set_calls == [_key_ok],
+           f"key={fake.set_calls}")
+    # f. _save_turn fire-forget 全链挂点(响应不阻塞)
+    fake2 = _FakeRedis()
+    with patch("repositories.backend.is_redis_mode",
+               return_value=True), \
+         patch("repositories.backend.get_redis_client",
+               return_value=fake2), \
+         patch("services.llm_client.provider_client"
+               ".synthesize_mp3",
+               MagicMock(return_value=b"ID3FAKE")):
+        sid = (await svc.open_session(1, "voice"))["sessionId"]
+        await svc.handle_text(sid, "小竹，看新品")
+        await asyncio.sleep(0.4)  # fire-forget 任务+to_thread 窗口
+        record("_save_turn→预合成任务自动触发",
+               len(fake2.set_calls) >= 1,
+               f"sets={len(fake2.set_calls)}")
+        await svc.delete_session(sid)
 
     print("=" * 56)
     print(f"通过 {PASS} / 失败 {FAIL}")

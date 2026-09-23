@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=24";
+  var VER = "v=26";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -727,6 +727,12 @@
     var d = ev && ev.data;
     if (!d || !d.type) { return; }
     if (d.type === "xz-panel-maximize") { maximizePanel(); return; }
+    if (d.type === "xz-lat" && d.text) {
+      /* 78号P1.5: 面板 iframe [LAT] 延迟埋点转发主页面
+         console(iframe console.info 部分采集工具不捕获) */
+      try { console.info("[LAT-embed] " + d.text); } catch (e) {}
+      return;
+    }
     if (d.type === "xz-wake-on") {
       /* 面板内开启唤醒: 球缩小常显; 面板正开着(可能录音), X5 麦克风
          独占——不立即重新 getUserMedia, 关面板时 closePanel→

@@ -3900,6 +3900,54 @@ class XiaozhuService:
                 f"会话 {session_id} 已关闭(请开启新会话)")
         return session
 
+    async def _preheat_tts_first_chunk(self, turn: dict) -> None:
+        """78号P1.5·竹语: 响应内并行预合成首子句(fire-and-forget)
+
+        submit→resp ~2.3s 网络窗口内并行掉 cogtts 首块合成,
+        写入与 /tts 路由同构的 Redis 缓存键——前端 resp 后
+        请求 TTS 命中缓存秒回, resp→play 压至 decode+起播
+        (~0.1-0.3s)。与前端 preheatTTS 高频句互补: preheat
+        覆盖恒定句("好的——"/"在呢!"), 本预合成覆盖本轮
+        动态首块(推荐/加购等执行轮 reply)。
+        条件红线(一律跳过, 绝不白烧额度):
+        - XIAOZHU_TTS_PREHEAT=off 总开关
+        - not_woken 轮(前端不播报)/mood 非空轮(care 语速
+          0.92 键不匹配)/reply 空
+        - 非 Redis 模式(无缓存面)/键已存在(preheat 已写过)
+        """
+        try:
+            from services import joyvoice_service as _jv
+            if not _jv.tts_preheat_enabled():
+                return
+            reply = str(turn.get("reply") or "").strip()
+            if (turn.get("intent") == "not_woken"
+                    or turn.get("mood") or not reply):
+                return
+            from repositories.backend import (
+                is_redis_mode, get_redis_client,
+            )
+            if not is_redis_mode():
+                return
+            text = _jv.split_speech(reply)[0]
+            voice = os.environ.get("TTS_VOICE", "tongtong")
+            key = _jv.tts_cache_key(text, voice, 1.0)
+            client = await get_redis_client()
+            if await client.get(key):
+                return
+            import asyncio as _aio
+            import base64 as _b64
+            from services.llm_client import provider_client
+            audio = await _aio.to_thread(
+                provider_client.synthesize_mp3, text, 1.0)
+            if not audio:
+                return
+            await client.set(
+                key, _b64.b64encode(audio).decode(), ex=600)
+            logger.info("voice78_tts_preheat text=%s bytes=%d",
+                        text[:12], len(audio))
+        except Exception as exc:
+            logger.debug("voice78_tts_preheat_skip: %s", exc)
+
     async def _save_turn(self, session: dict,
                          channel: str, raw_text: str,
                          intent: str, result: dict | None,
@@ -3948,6 +3996,13 @@ class XiaozhuService:
         await self.repo.save_turn(turn)
         session["lastActiveAt"] = ts()
         await self.repo.save_session(session)
+        # 78号P1.5·竹语: fire-and-forget 预合成首子句(不 await
+        # ——不阻塞响应返回; 与响应网络传输并行, 窗口 ~2.3s)
+        try:
+            import asyncio as _aio
+            _aio.create_task(self._preheat_tts_first_chunk(turn))
+        except Exception:
+            pass
         return {
             "success": True,
             "sessionId": session_id,

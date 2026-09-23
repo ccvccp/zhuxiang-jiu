@@ -457,14 +457,12 @@ async def get_tts(text: str = "",
     spd = 0.5 if speed < 0.5 else (
         2.0 if speed > 2.0 else speed)
     import base64 as _b64
-    import hashlib as _hl
-    # :mp3 后缀版本隔离(旧缓存为 wav 字节, 不能当 mp3 播);
-    # v2 G: 键扩维 text|voice|speed(防语速串台)
-    cache_key = ("xiaozhu:tts:mp3:"
-                 + _hl.sha256(
-                     (t + "|" + str(voice or "")
-                      + "|" + f"{spd:g}").encode(
-                          "utf-8")).hexdigest()[:24])
+    # 78号P1.5·竹语: 键构造共享 joyvoice_service.tts_cache_key
+    # (等值重构)——服务端响应内预合成与路由读/写同键, 预合成
+    # 写入的缓存前端请求才能命中; 键仍含 :mp3 版本隔离与
+    # text|voice|speed 三维
+    from services.joyvoice_service import tts_cache_key
+    cache_key = tts_cache_key(t, voice, spd)
     try:
         from repositories.backend import (
             is_redis_mode, get_redis_client,

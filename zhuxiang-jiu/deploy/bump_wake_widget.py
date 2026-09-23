@@ -1,14 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=27 -> v=28: 切音色提示改 toast 浮层(验收实证 setMicStatus
-被紧随的 TTS 合成状态同步覆盖不可见); widget VER 同步 v=24
+v=29 -> v=30: 78号P1.5 补丁——桌面本地 TTS 路径补 [LAT]
+play 打点([LAT-embed] 断链修复); widget VER v=26
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=27"
-NEW = "src=/js/voice-wake-widget.js?v=28"
+OLD = "src=/js/voice-wake-widget.js?v=29"
+NEW = "src=/js/voice-wake-widget.js?v=30"
 
 
 def main():

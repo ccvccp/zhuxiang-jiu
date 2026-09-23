@@ -558,10 +558,11 @@ function preheatTTS() {
     S.packVoice = voiceVal();
     /* 高频固定句全预取(真机实证: 兜底/引导句每轮重复出现
        ——冷合成 2-4s + 网络往返; 预取后零等待零网络);
-       78号: 兜底句与后端 P2 新文案逐字一致(缓存命中秒播) */
-    ["在呢！", "好的",
-     "这个我还在学着呢——您可以试试下面的，或说「你能干什么」看看我都会什么",
-     "我在——请以「小竹」开头唤我(或先唤醒一次, 5 分钟内可免唤醒)"]
+       78号P1.5·竹语: 预取项=分句后的"实际块"(块化后整句
+       永不被请求, 预取整句=白烧额度)——"好的——"为推荐轮
+       恒定首块, "我在——"为未唤醒轮恒定首块; care 语速轮
+       (0.92)键不匹配不预取(60s 节流非关键路径) */
+    ["在呢！", "好的", "好的——", "我在——"]
       .forEach(function (t) {
       var fv = voiceVal(); /* 在途切音色: 存储时校验防串音 */
       fetch(ttsUrl(t), { headers: h })
@@ -1576,7 +1577,12 @@ function speak(text, bubbleEl, mood) {
     };
     S.ttsPlaying = true;
     S.lastSpoken = String(text); /* 回声判定基准(isEchoOfTTS) */
-    u.onstart = function () { if (bubbleEl) bubbleEl.classList.add("speaking"); };
+    u.onstart = function () {
+      if (bubbleEl) bubbleEl.classList.add("speaking");
+      /* 78号P1.5: 本地 TTS 同打 play 点(桌面 [LAT] 断链
+         修复——此前打点只在云端 pumpTts 首块分支) */
+      if (S.latMarks) { S.latMarks.play = Date.now(); latReport(); }
+    };
     u.onend = done;
     u.onerror = done;
     window.speechSynthesis.cancel();
@@ -1650,14 +1656,32 @@ function splitSpeech(text) {
   for (var i = 0; i < t.length; i++) {
     var ch = t.charAt(i);
     cur += ch;
-    if ("。！？；;，,".indexOf(ch) >= 0) {
-      /* 首块取到首个标点即成块(首包最小); <6 字并入下句
-         (cogtts 极短文本合成不稳) */
-      if (cur.trim().length >= 6) {
+    if ("。！？；;，,—".indexOf(ch) >= 0) {
+      /* 78号P1.5·竹语: 破折号入切分集 + 最小块 6→4 字
+         (spike 实证"好的——"4字合成稳定 ~0.7s, 耗时随字数
+         近线性)——首块恒为"好的——"前缀, preheat 预取一次
+         全网零合成秒播; 需与后端 split_speech 逐字一致 */
+      if (cur.trim().length >= 4) {
         parts.push(cur.trim()); cur = "";
       }
-    } else if (cur.length >= 22) {
-      parts.push(cur); cur = ""; /* 无标点长串硬切 */
+    } else if (cur.length >= 14) {
+      /* 无标点长串硬切(22→14: 首块调小); 硬切回退——切点
+         回退越过尾部 ASCII 数字/字母段及紧贴符号(°×¥),
+         "52度"不在"5|2"处断裂数字读音; 空格是自然词边界
+         (与后端 split_speech 逐字一致) */
+      var cut = cur, last = cut.slice(-1);
+      while (cut.length > 4
+             && ((last.charCodeAt(0) < 128
+                  && "。！？；;，,".indexOf(last) < 0
+                  && last !== " ")
+                 || "°×¥".indexOf(last) >= 0)) {
+        cut = cut.slice(0, -1); last = cut.slice(-1);
+      }
+      if (cut.trim().length >= 4) {
+        parts.push(cut); cur = cur.slice(cut.length);
+      } else {
+        parts.push(cur); cur = "";
+      }
     }
   }
   if (cur.trim()) parts.push(cur.trim());
@@ -1755,10 +1779,17 @@ function latReport() {
     return (m[a] && m[b]) ? String(m[b] - m[a]) : "?";
   };
   try {
-    console.info("[LAT] vad→submit " + seg("vad", "submit")
+    var line = "vad→submit " + seg("vad", "submit")
       + "ms | submit→resp " + seg("submit", "resp")
       + "ms | resp→play " + seg("resp", "play")
-      + "ms | total " + seg("vad", "play") + "ms");
+      + "ms | total " + seg("vad", "play") + "ms";
+    console.info("[LAT] " + line);
+    /* 78号P1.5: embed 面板内 console.info 不被部分采集
+       工具捕获——postMessage 抛给主页面转发, 修观测断链 */
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(
+        { type: "xz-lat", text: line }, "*");
+    }
   } catch (e) { /* 静默环境忽略 */ }
 }
 function speakCloud(text, bubbleEl, mood) {
