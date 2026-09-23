@@ -1,15 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=23 -> v=24: V3.1 低能量自适应软增益(widget segFeed)随语音页
-streamFeed 同款增益(VER v=22 双 bump)——治 X5 增益档不稳导致的
-唤醒不中与"没听清"
+v=24 -> v=25: v3.2 连续空转写正确姿势引导(3 连空弹"靠近手机
+正常音量"——实测弱能量段软增益救不了信噪比, 引擎本身正常)
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=23"
-NEW = "src=/js/voice-wake-widget.js?v=24"
+OLD = "src=/js/voice-wake-widget.js?v=24"
+NEW = "src=/js/voice-wake-widget.js?v=25"
 
 
 def main():

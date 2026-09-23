@@ -611,7 +611,18 @@
              段)——有声音输入但识别不出才提示; 安静无段不提示
              (防骚扰, AHM 文档口径)。哑流场景 VAD 不起段, 由
              AHM 零值检测负责可见化 */
-          diagTip("没听清——请再喊一声「小竹、小竹」", 8);
+          /* v3.2 连续空转写计数: 实测唤醒失败轮全是极弱能量段
+             (源 rms 0.005 级, 软增益 12x 亦不救信噪比; 正常
+             音量轮转写完美)——3 连空直接给出正确姿势引导,
+             而不是让用户在"没听清"里打转 */
+          eng.emptyStreak = (eng.emptyStreak || 0) + 1;
+          if (eng.emptyStreak >= 3) {
+            diagTip("连续听不清——请靠近手机(30cm 内)用正常说话音量"
+              + "喊「小竹、小竹」(音量太小识别不了)", 30);
+            eng.emptyStreak = 0;
+          } else {
+            diagTip("没听清——请再喊一声「小竹、小竹」", 8);
+          }
         }
         teardownSeg();
       } else if (m.type === "error") {
@@ -688,6 +699,7 @@
 
   /* ---------- 唤醒命中 ---------- */
   function onWakeHit() {
+    eng.emptyStreak = 0; /* 命中即清连续空计数 */
     teardownSeg();
     wakeBeep();
     openPanel();
