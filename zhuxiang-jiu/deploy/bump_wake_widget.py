@@ -1,15 +1,15 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=30 -> v=31: 78号P1·竹语流式 TTS 首声——/tts/stream SSE
-端点 + 前端首子句 PCM 分片直灌(首声 60~110ms) + 三级回退
-链 + /voices 携带 ttsStream 灰度开关; widget VER v=27
+v=31 -> v=32: 78号P2·O3/O4——decoded 旁路缓存(重复句零
+decode 30~80ms) + 流式慢档垫场音(300ms 无首片起播「好的」,
+体感首声慢档 950→~300ms); widget VER v=28
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=30"
-NEW = "src=/js/voice-wake-widget.js?v=31"
+OLD = "src=/js/voice-wake-widget.js?v=31"
+NEW = "src=/js/voice-wake-widget.js?v=32"
 
 
 def main():

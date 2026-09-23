@@ -525,8 +525,10 @@ var S = { sid: null, turnCount: 0, woken: false, pending: false,
           hidden: false, lastSpoken: "",
           ttsCtx: null, ttsSrc: null, packTTS: null,
           /* 78号P1: 预取缓存音色归属(切音色作废旧缓存);
-             P1·竹语: ttsStream 流式灰度(/voices 下发) */
+             P1·竹语: ttsStream 流式灰度(/voices 下发);
+             P2·O3: decoded 旁路缓存(播过的块零 decode) */
           packVoice: null, voiceList: null,
+          packDec: null, packDecVoice: null,
           ttsStream: "off",
           /* v3 TTS 分句流水线: chunks 按序号存已解码块,
              nextIdx 队首接力; gapSrc 首包过渡音(正文到即让位);
@@ -941,8 +943,10 @@ function setVoice(v) {
   v = v || "tongtong";
   if (v === voiceVal()) return;
   localStorage.setItem("xz.voice", v);
-  /* 音色切换: 旧预取缓存全部作废(防串音)+立即重预热 */
+  /* 音色切换: 旧预取缓存全部作废(防串音)+立即重预热;
+     O3 decoded 旁路缓存一并作废 */
   S.packTTS = {}; S.packVoice = v;
+  S.packDec = {}; S.packDecVoice = v;
   var prof = (S.voiceList || []).filter(function (p) { return p.id === v; })[0];
   var nm = prof ? prof.name : "小竹";
   /* toast 独立浮层: setMicStatus 会被紧随的 TTS 合成状态
@@ -979,6 +983,18 @@ function loadVoices() {
 function packedGet(text) {
   return (S.packVoice === voiceVal() && S.packTTS)
     ? S.packTTS[text] : null;
+}
+/* P2·O3: decoded AudioBuffer 旁路缓存(重复句零 decode 30~80ms)
+   ——播过一次的块(过渡音"好的"/高频句/预合成首块二播)再播
+   直接取已解码缓冲; 音色归属校验同 packedGet 口径(切音色作废) */
+function decGet(text) {
+  return (S.packDecVoice === voiceVal() && S.packDec)
+    ? S.packDec[text] : null;
+}
+function decPut(text, d) {
+  if (!d) return;
+  S.packDecVoice = voiceVal();
+  (S.packDec = S.packDec || {})[text] = d;
 }
 /* 78号P1/P3: 情绪语调系数(care 柔慢/steady 稳/cheerful 明快
    ——与用户语速偏好叠乘, 服务端 clamp 0.5-2.0) */
@@ -1889,7 +1905,14 @@ function streamFirstChunk(ctl, ctx, text, mood,
     } catch (e) { /* 坏片跳过不卡流 */ }
   }
   function fallback() {
-    /* 流式失败 → 首块整句回退(nextIdx 未推进, 队列 0 起接管) */
+    /* 流式失败 → 首块整句回退(nextIdx 未推进, 队列 0 起接管);
+       P2·O3: decGet 旁路命中零 decode */
+    var _d0 = decGet(text);
+    if (_d0) {
+      ttsEnqueue(_d0, 0,
+                 totalChunks === 1 ? done : null, ctl);
+      return;
+    }
     fetch(ttsUrl(text, mood), { headers: h,
       signal: ctl ? ctl.signal : undefined })
       .then(function (r) {
@@ -1898,8 +1921,11 @@ function streamFirstChunk(ctl, ctx, text, mood,
       })
       .then(function (bb) { return ttsDecode(ctx, bb); })
       .then(function (d) {
-        if (S.ttsAbort === ctl) ttsEnqueue(
-          d, 0, totalChunks === 1 ? done : null, ctl);
+        if (S.ttsAbort === ctl) {
+          decPut(text, d);
+          ttsEnqueue(d, 0,
+                     totalChunks === 1 ? done : null, ctl);
+        }
       })
       .catch(function () {
         if (S.ttsAbort === ctl) ttsEnqueue(
@@ -1913,6 +1939,28 @@ function streamFirstChunk(ctl, ctx, text, mood,
     if (firstPlayed) takeOver();
     else fallback(); /* 一个音频片都没有 */
   }
+  /* P2·O4: 慢档垫场——300ms 无首片起播「好的」过渡音买体感
+     (智谱首块日内双档波动, 慢档 750~980ms 时首声垫场提前),
+     首片到达即让位(playNext 首片分支已有 gap 让位) */
+  setTimeout(function () {
+    if (S.ttsAbort !== ctl || firstPlayed) return;
+    var play = function (d) {
+      if (!d || S.ttsAbort !== ctl || firstPlayed) return;
+      var g = ctx.createBufferSource();
+      g.buffer = d; g.connect(ctx.destination);
+      S.ttsGapSrc = g;
+      g.onended = function () {
+        if (S.ttsGapSrc === g) S.ttsGapSrc = null;
+      };
+      g.start();
+    };
+    var gd = decGet("好的");
+    if (gd) { play(gd); return; }
+    var gb = packedGet("好的");
+    if (gb) ttsDecode(ctx, gb).then(function (d) {
+      decPut("好的", d); play(d);
+    });
+  }, 300);
   fetch(ttsStreamUrl(text, mood), { headers: h,
     signal: ctl ? ctl.signal : undefined })
     .then(function (r) {
@@ -1997,19 +2045,29 @@ function speakCloud(text, bubbleEl, mood) {
   }
   if (chunks.length > 1) {
     /* 首包过渡音: 多块流水线才播预缓存「好的」抢跑, 为
-       首子句合成买 ~0.5s 体感; 正文首块出声即让位 */
-    var gapBuf = (S.packTTS || {})["好的"];
-    if (gapBuf) {
-      ttsDecode(ctx, gapBuf).then(function (d) {
-        if (!d || S.ttsAbort !== ctl || S.ttsCur) return;
-        var g = ctx.createBufferSource();
-        g.buffer = d; g.connect(ctx.destination);
-        S.ttsGapSrc = g;
-        g.onended = function () {
-          if (S.ttsGapSrc === g) S.ttsGapSrc = null;
-        };
-        g.start();
-      });
+       首子句合成买 ~0.5s 体感; 正文首块出声即让位;
+       P2·O3: decGet 旁路命中零 decode, 未命中解码后回填 */
+    var gapPlay = function (d) {
+      if (!d || S.ttsAbort !== ctl || S.ttsCur) return;
+      var g = ctx.createBufferSource();
+      g.buffer = d; g.connect(ctx.destination);
+      S.ttsGapSrc = g;
+      g.onended = function () {
+        if (S.ttsGapSrc === g) S.ttsGapSrc = null;
+      };
+      g.start();
+    };
+    var gapDec = decGet("好的");
+    if (gapDec) {
+      gapPlay(gapDec);
+    } else {
+      var gapBuf = (S.packTTS || {})["好的"];
+      if (gapBuf) {
+        ttsDecode(ctx, gapBuf).then(function (d) {
+          decPut("好的", d);
+          gapPlay(d);
+        });
+      }
     }
   }
   /* P1·竹语: 流式首声接管(开关 on + 能力在 + 非缓存命中)
@@ -2040,8 +2098,16 @@ function speakCloud(text, bubbleEl, mood) {
           return ttsEnqueue(null, idx,
             idx === chunks.length - 1 ? done : null, ctl);
         }
+        /* P2·O3: decoded 旁路命中零 decode; 未命中解码后
+           回填(同句二播即零成本) */
+        var _d0 = decGet(c);
+        if (_d0) {
+          return ttsEnqueue(_d0, idx,
+            idx === chunks.length - 1 ? done : null, ctl);
+        }
         return ttsDecode(ctx, buf).then(function (d) {
           if (S.ttsAbort !== ctl) return;
+          decPut(c, d);
           ttsEnqueue(d, idx,
             idx === chunks.length - 1 ? done : null, ctl);
         });
