@@ -506,7 +506,7 @@
         if (eng.hiStreak >= 3) { beginSegment(); }
       } else { eng.hiStreak = 0; }
     } else {
-      segFeed(out);
+      segFeed(); /* v3.3: 纯发送(入队已由上方 pushRing 完成) */
       var now = Date.now();
       var dur = now - eng.segStart;
       if (rms < TH_OFF) {
@@ -538,8 +538,21 @@
   }
 
   function pushRing(samples) {
+    /* V3.1 低能量自适应软增益(此处为唯一入队口——X5 路由增益
+       档不稳, 实测同会话帧 rms 差 20 倍): 段内 rms<目标(0.10)
+       线性放大, 限幅 12x, 只升不降, 段首重置, 静音帧不调 */
+    var sq = 0;
     for (var i = 0; i < samples.length; i++) {
-      var s = Math.max(-1, Math.min(1, samples[i]));
+      sq += samples[i] * samples[i];
+    }
+    var rms = Math.sqrt(sq / samples.length);
+    if (rms > 0.004) {
+      var want = 0.10 / rms;
+      if (want > (eng.gain || 1)) { eng.gain = Math.min(12, want); }
+    }
+    var g = eng.gain || 1;
+    for (var i = 0; i < samples.length; i++) {
+      var s = Math.max(-1, Math.min(1, samples[i] * g));
       eng.ring.push(s < 0 ? s * 32768 : s * 32767);
     }
     while (eng.ring.length > RING_MAX) { eng.ring.splice(0, eng.ring.length - RING_MAX); }
@@ -638,29 +651,12 @@
     eng.ws.onerror = function () { /* onclose 兜底 */ };
   }
 
-  /* 推流: 攒 200ms(3200 样本@16k)帧发送(对齐百炼约束) */
-  function segFeed(samples16k) {
-    /* V3.1 低能量自适应软增益: X5 路由增益档不稳(实测同会话帧
-       rms 差 20 倍), 低能量轮百炼识别崩(final=None/#)。段内
-       rms<目标(0.10)则线性放大(限幅 12x, 只升不降, 段首重置,
-       静音帧不调)——源头补足, 与 autoGainControl 失效解耦 */
-    var sq = 0;
-    for (var i = 0; i < samples16k.length; i++) {
-      sq += samples16k[i] * samples16k[i];
-    }
-    var rms = Math.sqrt(sq / samples16k.length);
-    if (rms > 0.004) {
-      var want = 0.10 / rms;
-      if (want > (eng.gain || 1)) {
-        eng.gain = Math.min(12, want);
-      }
-    }
-    var g = eng.gain || 1;
-    for (var i = 0; i < samples16k.length; i++) {
-      var s = Math.max(-1, Math.min(1, samples16k[i] * g));
-      eng.ring.push(s < 0 ? s * 32768 : s * 32767);
-    }
-    while (eng.ring.length > RING_MAX * 2) { eng.ring.splice(0, eng.ring.length - RING_MAX * 2); }
+  /* 推流(纯发送器): 从 ring 取 200ms(3200 样本@16k)帧发送。
+     v3.3 修复 AHM 版回归——原 segFeed 内部重复 push ring,
+     与 onAudioFrame 的 pushRing 形成"段内双写"(帧 A,A,B,B
+     卡顿复制流), 百炼必崩(final=None)——唤醒自 AHM 上线起
+     全灭的技术根因; 入队唯一入口收敛到 pushRing(含增益) */
+  function segFeed() {
     if (!eng.wsReady) { return; }
     while (eng.ring.length >= 3200) {
       var i16 = new Int16Array(3200);

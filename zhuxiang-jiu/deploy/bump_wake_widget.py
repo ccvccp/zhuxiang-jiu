@@ -1,14 +1,15 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=24 -> v=25: v3.2 连续空转写正确姿势引导(3 连空弹"靠近手机
-正常音量"——实测弱能量段软增益救不了信噪比, 引擎本身正常)
+v=25 -> v=26: v3.3 双写回归修复(AHM 版起 segFeed 与 pushRing
+段内双 push → 帧卡顿复制流 → 百炼必崩, 唤醒全灭的真正根因;
+segFeed 收敛为纯发送器, 增益并入 pushRing 唯一入队口)
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=24"
-NEW = "src=/js/voice-wake-widget.js?v=25"
+OLD = "src=/js/voice-wake-widget.js?v=25"
+NEW = "src=/js/voice-wake-widget.js?v=26"
 
 
 def main():
