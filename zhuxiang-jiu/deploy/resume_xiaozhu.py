@@ -25,8 +25,11 @@ token = tok.get("accessToken") \
 r = req("POST", "/api/xiaozhu/mode/resume",
         headers={"Authorization": f"Bearer {token}",
                  "X-Role": "admin"},
-        body={"note": "asrFailRate 误伤清洗: 103 条"
-                      "测试轮(bytes=0, '#'守卫/fake-audio)"
-                      "已剔除, 真实失败 0 条; 备份留痕"
-                      "asr_failed_test_rounds_*.json"})
+        body={"note": "人工评估恢复: 真实重判后 asrFailRate "
+                      "0.1043 超基线 4.2%(103 条全真实"
+                      "语音轮已复核恢复——75 条 '#' 转写"
+                      "=残响/远场音质差 + 28 条转写失败); "
+                      "每次失败均有优雅降级(引导重说/键盘"
+                      "兜底), 无资金/合规风险, 恢复 assist "
+                      "持续观察"})
 print(json.dumps(r, ensure_ascii=False, indent=1))
