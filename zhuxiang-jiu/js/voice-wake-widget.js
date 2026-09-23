@@ -1,4 +1,4 @@
-/* 小竹语音唤醒(voice-wake) —— 主站(Taro H5)全站语音入口
+﻿/* 小竹语音唤醒(voice-wake) —— 主站(Taro H5)全站语音入口
  *
  * 形态: 常态无浮球——开启唤醒后喊「小竹、小竹」弹出语音面板
  *       (iframe 复用全功能语音页); 未开启时右下角显示引导球,
@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=26";
+  var VER = "v=27";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 

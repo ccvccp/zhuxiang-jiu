@@ -524,8 +524,10 @@ var S = { sid: null, turnCount: 0, woken: false, pending: false,
           handfree: true, ttsPlaying: false, vadSpoke: false,
           hidden: false, lastSpoken: "",
           ttsCtx: null, ttsSrc: null, packTTS: null,
-          /* 78号P1: 预取缓存音色归属(切音色作废旧缓存) */
+          /* 78号P1: 预取缓存音色归属(切音色作废旧缓存);
+             P1·竹语: ttsStream 流式灰度(/voices 下发) */
           packVoice: null, voiceList: null,
+          ttsStream: "off",
           /* v3 TTS 分句流水线: chunks 按序号存已解码块,
              nextIdx 队首接力; gapSrc 首包过渡音(正文到即让位);
              ctl 为本轮身份——旧轮回调一律身份比对作废 */
@@ -964,11 +966,14 @@ function loadVoices() {
     });
   };
   /* apiFetch 同 loadCommands 口径(JWT + 401 自愈——
-     strict 模式 /api/xiaozhu/* 全鉴权) */
+     strict 模式 /api/xiaozhu/* 全鉴权); P1·竹语:
+     ttsStream 流式灰度开关随档案下发, 前端据此走
+     流式首声或整句双轨 */
   apiFetch("/api/xiaozhu/voices").then(function (j) {
+    S.ttsStream = (j && j.ttsStream) || "off";
     fill((j && j.success && Array.isArray(j.voices)
           && j.voices.length) ? j.voices : VOICE_FALLBACK);
-  }).catch(function () { fill(VOICE_FALLBACK); });
+  }).catch(function () { S.ttsStream = "off"; fill(VOICE_FALLBACK); });
 }
 /* 预取缓存命中(音色归属校验——切音色后旧缓存不可见) */
 function packedGet(text) {
@@ -993,6 +998,35 @@ function ttsUrl(text, mood) {
    悦耳两音上行——替代无声等待; TTS 关闭不响, WebAudio
    不可用静默跳过, 1.2s 防抖免连续对话叮叮连环) */
 var chimeAt = 0;
+/* ===== P1·竹语: 流式 TTS 首声(首子句分片直灌, 首声 60~110ms) =====
+   开关由 /voices 下发(S.ttsStream); 能力检测(X5 老内核无
+   ReadableStream 自动降级整句); 采样率 24000(G3 spike 推算,
+   AudioBuffer 按此构造, ctx 播放自动重采样) */
+var STREAM_OK = false;
+try {
+  STREAM_OK = typeof window.ReadableStream === "function"
+    && typeof TextDecoder === "function";
+} catch (e) { STREAM_OK = false; }
+var PCM_SR = 24000;
+function ttsStreamUrl(text, mood) {
+  return "/api/xiaozhu/tts/stream?text=" + encodeURIComponent(
+    String(text).slice(0, 200))
+    + "&speed=" + moodSpeed(mood)
+    + "&voice=" + encodeURIComponent(voiceVal());
+}
+function b64ToBytes(b64) {
+  var bin = atob(b64), n = bin.length, u = new Uint8Array(n);
+  for (var i = 0; i < n; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+function pcmToF32(u) {
+  /* s16le mono → f32(除以 32768 归一) */
+  var n = u.byteLength >> 1;
+  var v = new DataView(u.buffer, u.byteOffset, u.byteLength);
+  var f = new Float32Array(n);
+  for (var i = 0; i < n; i++) f[i] = v.getInt16(i * 2, true) / 32768;
+  return f;
+}
 function playChime() {
   if (!S.tts) return;
   try {
@@ -1792,6 +1826,140 @@ function latReport() {
     }
   } catch (e) { /* 静默环境忽略 */ }
 }
+/* P1·竹语: 首子句流式分片播放(SSE chat delta → PCM16 直灌
+   AudioBuffer 顺序接力播)。衔接: 首片起播即推进现有队列
+   nextIdx=1(余句整句并行合成中); 流读完+片播完 → pumpTts
+   接管余句(空窗期 S.ttsCur 保留占位防抢播)。失败三级回退:
+   流式失败→首块整句 fetch; 整句失败→null 占位(既有兜底) */
+function streamFirstChunk(ctl, ctx, text, mood,
+                          totalChunks, done) {
+  var auth = getAuth() || {};
+  var h = { "X-Member-Id": String(auth.uid || "") };
+  if (auth.token) h["Authorization"] = "Bearer " + auth.token;
+  var firstPlayed = false, streamDone = false;
+  var sq = [], playing = false;
+  var dec = new TextDecoder("utf-8");
+  var buf = "";
+  function takeOver() {
+    S.ttsCur = null;
+    if (totalChunks > 1) pumpTts(ctl); else done();
+  }
+  function playNext() {
+    if (S.ttsAbort !== ctl) return;
+    if (!sq.length) { playing = false; return; }
+    playing = true;
+    var b = sq.shift();
+    var src = ctx.createBufferSource();
+    src.buffer = b;
+    src.connect(ctx.destination);
+    S.ttsSrc = src; S.ttsCur = src;
+    if (!firstPlayed) {
+      firstPlayed = true;
+      if (totalChunks > 1) S.ttsNextIdx = 1; /* 余句让位 */
+      if (S.ttsBubble) S.ttsBubble.classList.add("speaking");
+      if (S.latMarks) S.latMarks.play = Date.now();
+      latReport();
+      if (S.ttsGapSrc) {
+        try { S.ttsGapSrc.onended = null; S.ttsGapSrc.stop(); } catch (e) {}
+        S.ttsGapSrc = null;
+      }
+    }
+    src.onended = function () {
+      if (S.ttsCur !== src) return;
+      if (sq.length) { playNext(); return; }
+      playing = false;
+      if (streamDone) takeOver();
+      /* 流未完: S.ttsCur 保留占位, 下一片 push 唤醒 */
+    };
+    src.onerror = src.onended;
+    src.start();
+    setTimeout(function () {
+      if (S.ttsCur === src) { try { src.stop(); } catch (e) {} }
+    }, b.duration * 1000 + 3000);
+  }
+  function onPiece(b64) {
+    try {
+      var u = b64ToBytes(b64);
+      if (u.byteLength < 2) return;
+      var f = pcmToF32(u);
+      var b = ctx.createBuffer(1, f.length, PCM_SR);
+      b.getChannelData(0).set(f);
+      sq.push(b);
+      if (!playing) playNext();
+    } catch (e) { /* 坏片跳过不卡流 */ }
+  }
+  function fallback() {
+    /* 流式失败 → 首块整句回退(nextIdx 未推进, 队列 0 起接管) */
+    fetch(ttsUrl(text, mood), { headers: h,
+      signal: ctl ? ctl.signal : undefined })
+      .then(function (r) {
+        if (!r.ok) throw new Error("tts " + r.status);
+        return r.arrayBuffer();
+      })
+      .then(function (bb) { return ttsDecode(ctx, bb); })
+      .then(function (d) {
+        if (S.ttsAbort === ctl) ttsEnqueue(
+          d, 0, totalChunks === 1 ? done : null, ctl);
+      })
+      .catch(function () {
+        if (S.ttsAbort === ctl) ttsEnqueue(
+          null, 0, totalChunks === 1 ? done : null, ctl);
+      });
+  }
+  function finishStream() {
+    streamDone = true;
+    if (playing) return; /* 在播: onended 接管 */
+    if (sq.length) { playNext(); return; }
+    if (firstPlayed) takeOver();
+    else fallback(); /* 一个音频片都没有 */
+  }
+  fetch(ttsStreamUrl(text, mood), { headers: h,
+    signal: ctl ? ctl.signal : undefined })
+    .then(function (r) {
+      if (!r.ok || !r.body
+          || typeof r.body.getReader !== "function")
+        throw new Error("stream " + r.status);
+      var rd = r.body.getReader();
+      var pump = function () {
+        return rd.read().then(function (m) {
+          if (S.ttsAbort !== ctl) return;
+          if (m.done) { finishStream(); return; }
+          buf += dec.decode(m.value, { stream: true });
+          var lines = buf.split("\n");
+          buf = lines.pop();
+          for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i];
+            if (ln.indexOf("data: ") !== 0) continue;
+            var s = ln.slice(6).trim();
+            if (!s) continue;
+            var hitErr = false;
+            try {
+              var obj = JSON.parse(s);
+              if (obj.error) { hitErr = true; }
+              else {
+                var ch = (obj.choices || [{}])[0] || {};
+                var d = ch.delta || {};
+                if (d.content) onPiece(d.content);
+              }
+            } catch (e) { /* 忽略半行/坏行 */ }
+            if (hitErr) {
+              try { rd.cancel(); } catch (e) {}
+              if (firstPlayed) finishStream();
+              else fallback();
+              return;
+            }
+          }
+          return pump();
+        });
+      };
+      return pump();
+    })
+    .catch(function () {
+      if (S.ttsAbort !== ctl) return;
+      if (firstPlayed) finishStream();
+      else fallback();
+    });
+}
 function speakCloud(text, bubbleEl, mood) {
   stopTtsNow(); /* 先打断旧轮(合成中/播放中一律终止) */
   var ctl = (typeof AbortController !== "undefined")
@@ -1844,9 +2012,19 @@ function speakCloud(text, bubbleEl, mood) {
       });
     }
   }
+  /* P1·竹语: 流式首声接管(开关 on + 能力在 + 非缓存命中)
+     ——首子句走 SSE 分片直灌(首声 ~60-110ms), 余句仍整句
+     并行错峰(双层结构: 缓存秒播 21ms / 流式兜底) */
+  var streamFirst = (S.ttsStream === "on") && STREAM_OK
+    && !packed && chunks.length >= 1;
+  if (streamFirst) {
+    streamFirstChunk(ctl, ctx, chunks[0], mood,
+                     chunks.length, done);
+  }
   chunks.forEach(function (c, idx) {
     setTimeout(function () {
       if (S.ttsAbort !== ctl) return; /* 旧轮: 后续块不再发 */
+      if (idx === 0 && streamFirst) return; /* 流式负责首块 */
       var pre = packedGet(c);
       var pr = pre ? Promise.resolve(pre)
         : fetch(ttsUrl(c, mood), {

@@ -424,12 +424,55 @@ async def get_voices():
     (生产 spike 2026-09-23 两轮: 未知名 HTTP 400 硬拒绝非静默
     回退, spike_joyvoice_voices.py 留痕); voice 经 /tts?voice=
     透传合成, TTS 缓存键已含音色维度防串台。
+    P1·竹语: ttsStream 字段携带流式灰度开关——前端据此走
+    流式首声(XIAOZHU_TTS_STREAM)或整句双轨。
     """
     import os
-    from services.joyvoice_service import JOYVOICE_PROFILES
+    from services.joyvoice_service import (
+        JOYVOICE_PROFILES, tts_stream_enabled,
+    )
     return {"success": True,
             "voices": [dict(p) for p in JOYVOICE_PROFILES],
-            "current": os.environ.get("TTS_VOICE", "tongtong")}
+            "current": os.environ.get("TTS_VOICE", "tongtong"),
+            "ttsStream": "on" if tts_stream_enabled() else "off"}
+
+
+@router.get("/tts/stream")
+async def get_tts_stream(text: str = "",
+                         speed: float = 1.0,
+                         voice: str = "",
+                         x_member_id: str | None = Header(
+                             None, alias="X-Member-Id")):
+    """P1·竹语: 流式 TTS(SSE 分块转发——首声 60~110ms 级)
+
+    GET /api/xiaozhu/tts/stream?text=...&speed=...&voice=...
+    → text/event-stream(智谱 chat delta 风格 data 行透传:
+      音频在 choices[0].delta.content, base64 pcm)。
+    鉴权/参数域同 /tts(JWT strict + X-Member-Id 注入);
+    XIAOZHU_TTS_STREAM=off 时 403(前端读 /voices 开关
+    提前分流, 403 仅作越权兜底)。
+    G3 spike 实证: 首音频块 32~83ms, 44 字 6 块边合成边发。
+    """
+    from services.joyvoice_service import tts_stream_enabled
+    if not tts_stream_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="流式 TTS 未开启(XIAOZHU_TTS_STREAM)")
+    _require_member_strict(x_member_id)
+    t = str(text or "").strip()[:200]
+    if not t:
+        raise HTTPException(status_code=409,
+                            detail="text 不能为空")
+    spd = 0.5 if speed < 0.5 else (
+        2.0 if speed > 2.0 else speed)
+    from services.llm_client import provider_client
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        provider_client.synthesize_stream(
+            t, spd, (voice or None)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache",
+                 "X-Accel-Buffering": "no"})
 
 
 @router.get("/tts")

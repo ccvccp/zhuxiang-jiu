@@ -787,6 +787,97 @@ class LLMProviderClient:
             with _cl.suppress(Exception):
                 conn.close()
 
+    def synthesize_stream(self, text: str, speed: float = None,
+                          voice: str = None):
+        """流式 TTS 生成器(P1·竹语: yield SSE data 行)
+
+        G3 spike 实证(spike_glm_tts_stream.py): cogtts 直接接受
+        stream:true, chat 风格 SSE——音频在 choices[0].delta.
+        content(base64 pcm), 首音频块 32~83ms, 真分块边合成边发
+        (44 字 6 块)。本生成器透传智谱 data 行(规范化为
+        "data: {json}\n\n"), 调用方(StreamingResponse)零加工;
+        首块/完成打点 voice78_tts_stream_first / voice78_tts_
+        timing stream=1(G3 first_chunk 段补进埋点体系)。
+        失败: yield 单条 {"error": ...} 行(前端识别即回退整句)。
+        """
+        t = str(text or "").strip()
+        if not t:
+            return
+        if "LLM_API_KEY" not in os.environ:
+            yield ('data: {"error": {"message": "tts 未配置"}}\n\n')
+            return
+        api_key = os.environ["LLM_API_KEY"].strip()
+        base_url = os.environ.get(
+            "LLM_BASE_URL",
+            "https://open.bigmodel.cn/api/paas/v4").rstrip("/")
+        payload_dict = {
+            "model": os.environ.get("TTS_MODEL", "cogtts"),
+            "input": t[:200],
+            "voice": voice
+            or os.environ.get("TTS_VOICE", "tongtong"),
+            "response_format": "pcm",
+            "encode_format": "base64",
+            "stream": True}
+        if speed is not None:
+            payload_dict["speed"] = max(
+                0.5, min(2.0, float(speed)))
+        payload = json.dumps(
+            payload_dict, ensure_ascii=False).encode("utf-8")
+        import time as _t
+        import http.client as _hc
+        from urllib.parse import urlparse as _up
+        u = _up(base_url)
+        conn_cls = (_hc.HTTPSConnection
+                    if u.scheme == "https" else _hc.HTTPConnection)
+        conn = conn_cls(u.hostname, u.port
+                        or (443 if u.scheme == "https" else 80),
+                        timeout=_TIMEOUT)
+        t0 = _t.monotonic()
+        first_ms = None
+        try:
+            conn.connect()
+            conn.request(
+                "POST", (u.path or "/api/paas/v4") + "/audio/speech",
+                body=payload,
+                headers={"Content-Type": "application/json",
+                         "Authorization": f"Bearer {api_key}"})
+            resp = conn.getresponse()
+            if resp.status != 200:
+                body = resp.read()[:200].decode(
+                    "utf-8", "ignore")
+                yield ('data: {"error": {"message": '
+                       f'"upstream {resp.status}: {body}"}}\n\n')
+                return
+            while True:
+                line = resp.readline()
+                if not line:
+                    break
+                if not line.startswith(b"data:"):
+                    continue
+                s = line[5:].strip()
+                if not s or s == b"[DONE]":
+                    continue
+                if first_ms is None and b'"content"' in s:
+                    first_ms = round((_t.monotonic() - t0) * 1000)
+                    logger.info(
+                        "voice78_tts_stream_first first_chunk_ms=%d",
+                        first_ms)
+                yield f"data: {s.decode('utf-8', 'ignore')}\n\n"
+            logger.info(
+                "voice78_tts_timing stream=1 conn_ms=%d "
+                "first_chunk_ms=%s total_ms=%d text=%.12s",
+                0, first_ms,
+                round((_t.monotonic() - t0) * 1000), t)
+        except Exception as exc:
+            logger.warning("llm_tts_stream_failed(回退整句): %s",
+                           exc)
+            yield ('data: {"error": {"message": '
+                   f'"stream: {exc}"}}\n\n')
+        finally:
+            import contextlib as _cl
+            with _cl.suppress(Exception):
+                conn.close()
+
     def synthesize_mp3(self, text: str, speed: float = None,
                        voice: str = None) -> bytes | None:
         """语音合成 MP3(智谱 cogtts 仅支持 wav → lameenc 转码)

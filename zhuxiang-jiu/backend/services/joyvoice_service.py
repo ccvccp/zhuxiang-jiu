@@ -159,6 +159,18 @@ def tts_preheat_enabled() -> bool:
     ).strip().lower() not in ("off", "0", "false")
 
 
+def tts_stream_enabled() -> bool:
+    """P1·流式 TTS 灰度开关(默认 off——零影响上线; 生产
+    compose 注入 XIAOZHU_TTS_STREAM=on 启用)
+
+    /voices 响应携带本状态 → 前端据此走流式或整句双轨;
+    /tts/stream 端点 on 时可用, off 时 403(回退链兜底)。
+    """
+    return os.environ.get(
+        "XIAOZHU_TTS_STREAM", "off"
+    ).strip().lower() in ("on", "1", "true")
+
+
 def tts_cache_key(text: str, voice: str, speed: float) -> str:
     """TTS Redis 缓存键(text|voice|speed 三维)
 

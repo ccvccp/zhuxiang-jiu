@@ -414,6 +414,116 @@ async def main():
         cap.drop()
         os.environ.pop("LLM_API_KEY", None)
 
+    print("[16 P1·竹语 流式 TTS 首声]")
+    # a. 开关默认 off / 显式 on
+    os.environ.pop("XIAOZHU_TTS_STREAM", None)
+    record("tts_stream_enabled 默认 off(零影响上线)",
+           jv.tts_stream_enabled() is False)
+    os.environ["XIAOZHU_TTS_STREAM"] = "on"
+    record("显式 on 生效",
+           jv.tts_stream_enabled() is True)
+    # b. /voices 携带灰度开关(前端双轨依据)
+    j = await get_voices()
+    record("voices 带 ttsStream=on",
+           j.get("ttsStream") == "on")
+    # c. 路由: on 态 + mock 生成器 → StreamingResponse SSE
+    from routes.xiaozhu_routes import get_tts_stream
+
+    async def _fake_gen(*a, **k):
+        yield 'data: {"choices":[{"delta":{"content":"AAAA"}}]}\n\n'
+        yield 'data: {"choices":[{"finish_reason":"stop"}]}\n\n'
+
+    with patch("services.llm_client.provider_client"
+               ".synthesize_stream",
+               side_effect=_fake_gen):
+        resp = await get_tts_stream(
+            text="好的——", speed=1.0, voice="",
+            x_member_id="1")
+        record("on 态返回 SSE 流(text/event-stream)",
+               resp.media_type == "text/event-stream")
+        body = b""
+        async for piece in resp.body_iterator:
+            body += piece if isinstance(piece, bytes) \
+                else piece.encode()
+    record("SSE 体透传(delta content + stop 收尾)",
+           b'"content":"AAAA"' in body
+           and b'"finish_reason":"stop"' in body,
+           body[:120])
+    # d. 路由: off 态 → 403(越权兜底; 前端已按 voices 分流)
+    os.environ["XIAOZHU_TTS_STREAM"] = "off"
+    from fastapi import HTTPException as _HE
+    try:
+        await get_tts_stream(text="好的", speed=1.0,
+                             voice="", x_member_id="1")
+        record("off 态 403 拒绝", False, "未抛出")
+    except _HE as exc:
+        record("off 态 403 拒绝", exc.status_code == 403)
+    os.environ["XIAOZHU_TTS_STREAM"] = "on"
+    # e. 路由: 空文本 409
+    try:
+        await get_tts_stream(text="", speed=1.0,
+                             voice="", x_member_id="1")
+        record("空文本 409", False, "未抛出")
+    except _HE as exc:
+        record("空文本 409", exc.status_code == 409)
+    # f. synthesize_stream 生成器: 无 key → 单 error 行
+    os.environ.pop("LLM_API_KEY", None)
+    lines = list(_lc.provider_client.synthesize_stream(
+        "好的", 1.0, None))
+    record("无 key→error 行(前端识别回退)",
+           len(lines) == 1 and '"error"' in lines[0],
+           str(lines)[:100])
+    # g. mock 上游 → SSE 行透传 + first_chunk 埋点
+    os.environ["LLM_API_KEY"] = "test-key"
+    _sse = [b'data: {"choices":[{"delta":{"content":"AAAA"}}]}\n',
+            b'data: {"choices":[{"finish_reason":"stop"}]}\n',
+            b""]
+
+    class _SResp:
+        status = 200
+
+        def getheader(self, k, d=""):
+            return d
+
+        def readline(_self):
+            return _sse.pop(0) if _sse else b""
+
+    class _SConn:
+        def __init__(self, *a, **k):
+            pass
+
+        def connect(self):
+            pass
+
+        def request(self, *a, **k):
+            pass
+
+        def getresponse(self):
+            return _SResp()
+
+        def close(self):
+            pass
+
+    cap2 = _Cap()
+    try:
+        with patch("http.client.HTTPSConnection", _SConn):
+            out = list(_lc.provider_client.synthesize_stream(
+                "好的——", 1.0, None))
+        _tl = [m for m in cap2
+               if "voice78_tts_stream_first" in m]
+        record("SSE 行透传(规范化 data: 前缀+空行)",
+               len(out) == 2
+               and out[0].startswith('data: {"choices"')
+               and out[0].endswith("\n\n")
+               and '"content":"AAAA"' in out[0],
+               str(out)[:150])
+        record("首块埋点(first_chunk_ms)打点",
+               len(_tl) == 1 and "first_chunk_ms=" in _tl[0],
+               str(_tl[:1]))
+    finally:
+        cap2.drop()
+        os.environ.pop("LLM_API_KEY", None)
+
     print("=" * 56)
     print(f"通过 {PASS} / 失败 {FAIL}")
     sys.exit(1 if FAIL else 0)

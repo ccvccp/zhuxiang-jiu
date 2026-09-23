@@ -1,14 +1,15 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=29 -> v=30: 78号P1.5 补丁——桌面本地 TTS 路径补 [LAT]
-play 打点([LAT-embed] 断链修复); widget VER v=26
+v=30 -> v=31: 78号P1·竹语流式 TTS 首声——/tts/stream SSE
+端点 + 前端首子句 PCM 分片直灌(首声 60~110ms) + 三级回退
+链 + /voices 携带 ttsStream 灰度开关; widget VER v=27
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=29"
-NEW = "src=/js/voice-wake-widget.js?v=30"
+OLD = "src=/js/voice-wake-widget.js?v=30"
+NEW = "src=/js/voice-wake-widget.js?v=31"
 
 
 def main():
