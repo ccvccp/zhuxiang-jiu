@@ -29,9 +29,11 @@
 import base64
 import hashlib
 import hmac
+import http.client
 import json
 import logging
 import os
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -40,7 +42,8 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-API_ENDPOINT = "https://dysmsapi.aliyuncs.com/"
+API_HOST = "dysmsapi.aliyuncs.com"
+API_ENDPOINT = f"https://{API_HOST}/"
 API_VERSION = "2017-05-25"
 API_REGION = "cn-hangzhou"
 HTTP_TIMEOUT = 8  # 秒(网关超时; 短信为关键路径但不应久等)
@@ -105,6 +108,89 @@ def _sign(params: dict, access_key_secret: str) -> str:
     return base64.b64encode(digest).decode("utf-8")
 
 
+class _IPHTTPSConnection(http.client.HTTPSConnection):
+    """指定 IP 建连(SNI 保持域名)——跨境 CDN IP 间歇
+    不可达, 轮换兜底用(2026-09-24 实证: hosts 单 IP
+    固定后该 IP 本身也波动)"""
+
+    def __init__(self, host: str, port: int,
+                 ip: str, timeout: float):
+        super().__init__(host, port=port,
+                         timeout=timeout)
+        self._ip = ip
+
+    def connect(self) -> None:
+        sock = socket.create_connection(
+            (self._ip, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(
+            sock, server_hostname=self.host)
+
+
+def _resolve_ips() -> list:
+    """网关全量解析 IP(去重保序; 失败交 [] 走 DNS)"""
+    try:
+        infos = socket.getaddrinfo(
+            API_HOST, 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return []
+    return list(dict.fromkeys(
+        i[4][0] for i in infos))
+
+
+def _post(body: bytes, ip: str | None) -> dict:
+    """POST / 网关(ip 指定走 SNI 直连; None 走 DNS)
+
+    Returns: 解析后的 JSON(含业务错误 4xx 体)
+
+    Raises: SmsError(NetworkError/HTTPxxx 非 JSON 体)
+    """
+    headers = {"Content-Type":
+               "application/x-www-form-urlencoded"
+               ";charset=utf-8"}
+    try:
+        if ip is None:
+            req = urllib.request.Request(
+                API_ENDPOINT, data=body,
+                headers=headers)
+            with urllib.request.urlopen(
+                    req, timeout=HTTP_TIMEOUT) as resp:
+                return json.loads(
+                    resp.read().decode("utf-8"))
+        conn = _IPHTTPSConnection(
+            API_HOST, 443, ip, HTTP_TIMEOUT)
+        try:
+            conn.request("POST", "/", body=body,
+                         headers=headers)
+            resp = conn.getresponse()
+            data = resp.read().decode("utf-8")
+            if resp.status != 200:
+                try:
+                    return json.loads(data)
+                except Exception as jexc:
+                    raise SmsError(
+                        f"HTTP{resp.status}",
+                        "网关错误响应非 JSON: "
+                        + data[:120]) from jexc
+            return json.loads(data)
+        finally:
+            conn.close()
+    except urllib.error.HTTPError as exc:
+        # 4xx 业务错误体同为 JSON(签名/AK 权限等)
+        try:
+            return json.loads(
+                exc.read().decode("utf-8"))
+        except Exception:
+            raise SmsError(
+                f"HTTP{exc.code}",
+                f"网关错误响应非 JSON: {exc}") from exc
+    except (urllib.error.URLError, OSError,
+            TimeoutError) as exc:
+        raise SmsError(
+            "NetworkError",
+            f"短信网关不可达({ip or 'dns'}): "
+            f"{exc}") from exc
+
+
 def _send(phone: str, template_code: str, template_param: dict) -> dict:
     """发送模板短信(同步阻塞; async 调用方用 asyncio.to_thread)
 
@@ -134,23 +220,20 @@ def _send(phone: str, template_code: str, template_param: dict) -> dict:
         params, os.environ["SMS_ALIYUN_ACCESS_KEY_SECRET"])
 
     body = urllib.parse.urlencode(params).encode("utf-8")
-    req = urllib.request.Request(
-        API_ENDPOINT, data=body,
-        headers={"Content-Type":
-                 "application/x-www-form-urlencoded;charset=utf-8"})
-    try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        # 阿里云错误(签名/AK 权限等)走 4xx, 响应体同为 JSON
+    # 多 IP 轮换: 跨境到国内 CDN 各 IP 可达性间歇波动,
+    # NetworkError 时换下一 IP 重试(全败才抛)
+    result, last_net = None, None
+    for ip in (_resolve_ips() or [None]):
         try:
-            result = json.loads(exc.read().decode("utf-8"))
-        except Exception:
-            raise SmsError(f"HTTP{exc.code}",
-                           f"网关错误响应非 JSON: {exc}") from exc
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
-        raise SmsError("NetworkError",
-                       f"短信网关不可达: {exc}") from exc
+            result = _post(body, ip)
+            break
+        except SmsError as exc:
+            if exc.code != "NetworkError":
+                raise
+            last_net = exc
+            logger.debug("sms_ip_failover %s", ip)
+    if result is None:
+        raise last_net
 
     if result.get("Code") != "OK":
         raise SmsError(str(result.get("Code", "Unknown")),
