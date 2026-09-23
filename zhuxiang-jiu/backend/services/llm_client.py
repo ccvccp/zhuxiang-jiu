@@ -725,16 +725,50 @@ class LLMProviderClient:
                 0.5, min(2.0, float(speed)))
         payload = json.dumps(
             payload_dict, ensure_ascii=False).encode("utf-8")
-        request = urllib.request.Request(
-            f"{base_url}/audio/speech", data=payload,
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {api_key}"},
-            method="POST")
+        # 78号P1.6·竹语埋点(《TTS 首声延迟埋点与优化清单》§三
+        # tts_timing 裁剪映射): 本站 cogtts 为非流式 HTTP(非文档
+        # 假设的 WS 流式)——ws_open→conn_ms(DNS+TCP+TLS 握手+
+        # 冷启动); first_audio_chunk/vocoder_done 在非流式下不可
+        # 拆, 合并入 acoustic_ms(服务端 TN/G2P+声学+声码器一锅);
+        # dl_ms=响应体下载; client_play 由前端 [LAT] play 覆盖。
+        # urllib 换 http.client 分段计时(行为等值: 超时/失败
+        # 返回 None 语义不变)
+        import time as _t
+        import http.client as _hc
+        from urllib.parse import urlparse as _up
+        u = _up(base_url)
+        _ph = {"req": _t.monotonic()}
+        conn_cls = (_hc.HTTPSConnection
+                    if u.scheme == "https" else _hc.HTTPConnection)
+        conn = conn_cls(u.hostname, u.port
+                        or (443 if u.scheme == "https" else 80),
+                        timeout=_TIMEOUT)
         try:
-            with llm_timer("synthesize"), urllib.request.urlopen(
-                    request, timeout=_TIMEOUT) as resp:
+            with llm_timer("synthesize"):
+                conn.connect()
+                _ph["conn"] = _t.monotonic()
+                conn.request(
+                    "POST", (u.path or "/api/paas/v4")
+                    + "/audio/speech", body=payload,
+                    headers={"Content-Type": "application/json",
+                             "Authorization":
+                                 f"Bearer {api_key}"})
+                _ph["sent"] = _t.monotonic()
+                resp = conn.getresponse()
+                _ph["hdr"] = _t.monotonic()
                 data = resp.read()
-                ctype = resp.headers.get("Content-Type", "")
+                _ph["body"] = _t.monotonic()
+                ctype = resp.getheader("Content-Type", "") or ""
+            logger.info(
+                "voice78_tts_timing conn_ms=%d up_ms=%d "
+                "acoustic_ms=%d dl_ms=%d total_ms=%d "
+                "bytes=%d text=%.12s",
+                round((_ph["conn"] - _ph["req"]) * 1000),
+                round((_ph["sent"] - _ph["conn"]) * 1000),
+                round((_ph["hdr"] - _ph["sent"]) * 1000),
+                round((_ph["body"] - _ph["hdr"]) * 1000),
+                round((_ph["body"] - _ph["req"]) * 1000),
+                len(data) if data else 0, t)
             if (ctype.startswith("audio/")
                     and isinstance(data, bytes)
                     and len(data) > 500
@@ -748,6 +782,10 @@ class LLMProviderClient:
         except Exception as exc:
             logger.warning("llm_tts_failed(跳过播报): %s", exc)
             return None
+        finally:
+            import contextlib as _cl
+            with _cl.suppress(Exception):
+                conn.close()
 
     def synthesize_mp3(self, text: str, speed: float = None,
                        voice: str = None) -> bytes | None:

@@ -348,6 +348,72 @@ async def main():
                f"sets={len(fake2.set_calls)}")
         await svc.delete_session(sid)
 
+    print("[15 P1.6 tts_timing 六段埋点(非流式 HTTP 裁剪)]")
+    import logging as _lg
+    import struct as _st
+    import services.llm_client as _lc
+
+    class _Cap(list):
+        def __init__(self):
+            super().__init__()
+            self._h = _lg.Handler()
+            self._h.emit = lambda r: self.append(
+                r.getMessage())
+            _lc.logger.addHandler(self._h)
+
+        def drop(self):
+            _lc.logger.removeHandler(self._h)
+
+    # a. 无 key → None 快速返回(不建连不打点)
+    r = _lc.provider_client.synthesize("你好")
+    record("无key→None(不建连零开销)", r is None)
+    # b. mock HTTPSConnection 成功路径 → 分段打点输出
+    os.environ["LLM_API_KEY"] = "test-key"
+    _wav = (b"RIFF" + _st.pack("<I", 592) + b"WAVE"
+            + b"\x00" * 588)
+
+    class _FakeResp:
+        def getheader(self, k, d=""):
+            return ("audio/wav"
+                    if k == "Content-Type" else d)
+
+        def read(self):
+            return _wav
+
+    class _FakeConn:
+        def __init__(self, *a, **k):
+            pass
+
+        def connect(self):
+            pass
+
+        def request(self, *a, **k):
+            pass
+
+        def getresponse(self):
+            return _FakeResp()
+
+        def close(self):
+            pass
+
+    cap = _Cap()
+    try:
+        with patch("http.client.HTTPSConnection", _FakeConn):
+            r = _lc.provider_client.synthesize(
+                "好的——", speed=1.0)
+        _lines = [m for m in cap
+                  if "voice78_tts_timing" in m]
+        record("mock 成功路径返回 WAV", r == _wav)
+        record("分段打点(conn/up/acoustic/dl/total 五段)",
+               len(_lines) == 1
+               and all(k in _lines[0] for k in (
+                   "conn_ms=", "up_ms=", "acoustic_ms=",
+                   "dl_ms=", "total_ms=")),
+               str(_lines[:1]))
+    finally:
+        cap.drop()
+        os.environ.pop("LLM_API_KEY", None)
+
     print("=" * 56)
     print(f"通过 {PASS} / 失败 {FAIL}")
     sys.exit(1 if FAIL else 0)
