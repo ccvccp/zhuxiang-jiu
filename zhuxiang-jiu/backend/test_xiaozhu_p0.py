@@ -239,13 +239,13 @@ class TestCommands:
         record("帮助直达",
                (r["card"] or {}).get("type") == "help"
                and len((r["card"] or {}).get("items")
-                       or []) == 19,   # 三期 order.pay 加入
+                       or []) == 21,   # 误听修正2指令后 21
                str((r["card"] or {}).get("items"))[:50])
 
-        # 未匹配 → general 兜底
+        # 未匹配 → general 兜底(78号P2 新容错文案)
         r = await _text(sid, "小竹，明天天气怎么样")
         record("兜底引导",
-               "还不会" in r["reply"], r["reply"][:40])
+               "还在学着呢" in r["reply"], r["reply"][:40])
 
         # 轮次留痕含 intent/action
         from services.xiaozhu_service import XiaozhuService
@@ -364,7 +364,7 @@ class TestHttp:
         body = resp.json()
         record("GET commands 200",
                resp.status_code == 200
-               and len(body.get("commands") or []) == 19
+               and len(body.get("commands") or []) == 21
                and body.get("wakeWords") == ["小竹"],
                str(len(body.get("commands") or [])))
 

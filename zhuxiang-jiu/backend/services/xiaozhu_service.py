@@ -868,13 +868,24 @@ class XiaozhuService:
         # 转成"#"(免提残响/远场音质差), "#"被 LLM 轨在反问
         # 语境猜成 affirm 误加购——识别失败不进指令/LLM,
         # 引导重说; 语义前缀守卫由 _handle_text_internal 兜底)
+        # 78号P2: 容错话术温暖化("信号有点小差"式) + 选项
+        # 引导 suggest(离回归测试断言"没听清"子串——保留)
         _asr_text = str(asr.get("text") or "").strip()
         if _asr_text in ("#", ""):
+            from services import joyvoice_service as _jv
+            _has_prod = await self._has_product_context(session)
             return await self._save_turn(
                 session, "voice", _asr_text, "asr_failed",
-                {"reply": "没听清——请离麦克风近一点，"
-                          "稍大声再说一遍",
-                 "fallbackHint": "keyboard"},
+                {"reply": ("哎呀，没听清您刚才说的——可能是"
+                           "信号有点小差，离麦克风近一点、"
+                           "慢慢说，我认真听着呢"
+                           if _jv.joyvoice_mode_enabled()
+                           else "没听清——请离麦克风近一点，"
+                                "稍大声再说一遍"),
+                 "fallbackHint": "keyboard",
+                 "suggest": (_jv.fallback_suggests(_has_prod)
+                             if _jv.joyvoice_mode_enabled()
+                             else None)},
                 {"audioMeta": audio_meta})
         return await self._handle_text_internal(
             session, asr["text"], channel="voice",
@@ -898,6 +909,18 @@ class XiaozhuService:
     # --------------------------------------------------------
     # 内部: 文本→唤醒→指令→直达
     # --------------------------------------------------------
+
+    async def _has_product_context(self, session: dict) -> bool:
+        """会话内是否已有商品推荐语境(78号P2 suggest 场景化)"""
+        try:
+            turns = await self.repo.list_turns(
+                session["sessionId"])
+            return any(
+                (t.get("card") or {}).get("type")
+                in ("product_list", "product_detail")
+                for t in (turns or []))
+        except Exception:
+            return False
 
     async def _handle_text_internal(self, session: dict,
                                     text: str,
@@ -934,10 +957,15 @@ class XiaozhuService:
                 command_text = text.strip()
         if not woken:
             # 反语音霸权红线: 未唤醒不执行, 只提示
+            # 78号P2: suggest 自带"小竹"前缀(点哪发哪即唤醒)
+            from services import joyvoice_service as _jv
             return await self._save_turn(
                 session, channel, text, "not_woken",
                 {"reply": "我在——请以「小竹」开头唤我"
-                          "(或先唤醒一次, 5 分钟内可免唤醒)"},
+                          "(或先唤醒一次, 5 分钟内可免唤醒)",
+                 "suggest": (["小竹，看新品", "小竹，查订单"]
+                             if _jv.joyvoice_mode_enabled()
+                             else None)},
                 {"wakeHint": True,
                  "audioMeta": audio_meta})
         # 唤醒应答: 只叫"小竹"无指令 → "在呢!"(对话存在感
@@ -1197,11 +1225,38 @@ class XiaozhuService:
                            NEGATIVE_FEEDBACK_WORDS)
                     else "fallback")
             await self._mine_failure(session, text, kind)
+            # 78号P2/P3: 愉悦容错话术(选项引导 chips) + 情绪
+            # 自适应(负面先关怀/犹豫主动帮挑/中性温和引导);
+            # XIAOZHU_JOYVOICE_MODE=off 一键回归旧文案
+            from services import joyvoice_service as _jv
+            _reply, _suggest = None, None
+            if _jv.joyvoice_mode_enabled():
+                _um = _jv.detect_user_mood(command_text)
+                _has_prod = await self._has_product_context(
+                    session)
+                if _um == "negative":
+                    _reply = ("您别着急，这个问题我记下了——"
+                              "先试试下面的，或打字告诉我"
+                              "您想做什么")
+                    _suggest = _jv.fallback_suggests(_has_prod)
+                elif _um == "hesitant":
+                    _reply = ("挑酒不用纠结——说说您的口味"
+                              "或预算，我帮您拿主意；也可以"
+                              "先看看新品")
+                    _suggest = ["看新品", "42度的", "问价格"]
+                else:
+                    _reply = ("这个我还在学着呢——您可以试试"
+                              "下面的，或说「你能干什么」看看"
+                              "我都会什么")
+                    _suggest = _jv.fallback_suggests(_has_prod)
+            else:
+                _reply = ("这个我还不会——试试「看新品」"
+                          "「问价格」「查信值」「查优惠」或"
+                          "「你能干什么」")
             return await self._save_turn(
                 session, channel, text, "general",
-                {"reply": "这个我还不会——试试「看新品」"
-                          "「问价格」「查信值」「查优惠」或"
-                          "「你能干什么」"},
+                {"reply": _reply,
+                 "suggest": _suggest},
                 {"audioMeta": audio_meta,
                  "commandText": command_text})
         result = await self._execute(
@@ -1278,6 +1333,14 @@ class XiaozhuService:
             context_desc = ("对话上下文:\n"
                             + "\n".join(ctx_lines)
                             if ctx_lines else "新对话")
+            # 78号P3: 用户情绪注入行(负面先关怀/犹豫帮挑/
+            # 积极轻快——LLM chat reply 话术随情绪自适应)
+            from services import joyvoice_service as _jv
+            if _jv.joyvoice_mode_enabled():
+                _mood_line = _jv.mood_context_line(
+                    _jv.detect_user_mood(command_text))
+                if _mood_line:
+                    context_desc += "\n" + _mood_line
             # 导购知识注入: 最近推荐款属性摘要(真机实证 chat 轨
             # 瞎答度数"40度左右"/占位符"XX度"——LLM 无据可依;
             # 注入商品数据后 chat 回答有据, 防幻觉红线配套
@@ -1341,11 +1404,16 @@ class XiaozhuService:
         # LLM 判 affirm 误加购——单双字纯语气词无购买意图,
         # 一律改引导不上链执行(加购/换款/指令全拦)
         if _is_filler(command_text):
+            # 78号P2: 语气词引导配选项 chips(点哪发哪)
+            from services import joyvoice_service as _jv
             return await self._save_turn(
                 session, channel, text, "chat",
                 {"reply": "没太听清——需要这款就说「需要」，"
                           "想换就说「换一款」",
-                 "card": None},
+                 "card": None,
+                 "suggest": (["需要", "换一款", "看新品"]
+                             if _jv.joyvoice_mode_enabled()
+                             else None)},
                 {"audioMeta": audio_meta,
                  "commandText": command_text,
                  "track": "llm_dialog"})
@@ -3840,6 +3908,19 @@ class XiaozhuService:
         session_id = session["sessionId"]
         seq = await self.repo.next_turn_seq(session_id)
         result = result or {}
+        # 78号P1/P3: 情绪标签(userMood 规则识别 + 播报 mood
+        # 路由——off 时双空, 前端零影响)
+        from services import joyvoice_service as _jv
+        if _jv.joyvoice_mode_enabled():
+            _um = _jv.detect_user_mood(raw_text)
+            _mood = _jv.mood_for_turn(
+                intent,
+                (result.get("card") or {}).get("type") or "",
+                _um)
+        else:
+            _um, _mood = "", ""
+        _suggest = (result.get("suggest")
+                    or extras.get("suggest"))
         turn = {
             "turnId": f"t-{uuid.uuid4().hex[:8]}",
             "sessionId": session_id, "seq": seq,
@@ -3858,6 +3939,10 @@ class XiaozhuService:
             "card": result.get("card") or {},
             "jump": result.get("jump"),
             "latencyMs": extras.get("latencyMs") or 0.0,
+            # 78号: 情绪标签 + 选项引导(观测/回放全留痕)
+            "mood": _mood,
+            "userMood": _um,
+            "suggest": _suggest,
             "ts": ts(),
         }
         await self.repo.save_turn(turn)
@@ -3887,4 +3972,9 @@ class XiaozhuService:
             "duplicate": result.get("duplicate", False),
             "cooldown": result.get("cooldown", False),
             "clarify": result.get("clarify"),
+            # 78号·悦声灵犀: 情绪标签(TTS 语调路由) + 选项
+            # 引导 chips(P2 容错"点哪发哪")
+            "mood": _mood,
+            "userMood": _um,
+            "suggest": _suggest,
         }

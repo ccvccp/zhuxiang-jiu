@@ -416,6 +416,22 @@ async def get_commands():
             "wakeFreeWindowSeconds": 300}
 
 
+@router.get("/voices")
+async def get_voices():
+    """78号·悦声灵犀 P1: 音色档案(前端音色选择数据源)
+
+    GET /api/xiaozhu/voices → cogtts 实证可用音色策展档案
+    (生产 spike 2026-09-23 两轮: 未知名 HTTP 400 硬拒绝非静默
+    回退, spike_joyvoice_voices.py 留痕); voice 经 /tts?voice=
+    透传合成, TTS 缓存键已含音色维度防串台。
+    """
+    import os
+    from services.joyvoice_service import JOYVOICE_PROFILES
+    return {"success": True,
+            "voices": [dict(p) for p in JOYVOICE_PROFILES],
+            "current": os.environ.get("TTS_VOICE", "tongtong")}
+
+
 @router.get("/tts")
 async def get_tts(text: str = "",
                   speed: float = 1.0,

@@ -159,6 +159,10 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
       cursor:pointer;white-space:nowrap;transition:all .15s}
 .chip:hover{border-color:var(--green);background:var(--green-soft)}
 .chip:active{transform:scale(.96)}
+/* ---- 78号·悦声灵犀: 兜底轮选项引导 chips(P2 容错"点哪发哪") ---- */
+.srow{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 14px 42px;
+      animation:msgin .25s ease}
+.srow .chip{border-color:#bcd4c5;background:var(--green-soft)}
 /* ---- 输入区(常驻底部) ---- */
 .composer{position:relative;background:var(--card);border:1px solid var(--bd);
       border-radius:12px;padding:12px 16px;
@@ -375,6 +379,9 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
         <select id="speedSel" onchange="setTtsSpeed(this.value)" style="border:none;background:transparent;color:inherit;font-size:12px;cursor:pointer;padding:0">
           <option value="0.8">慢</option><option value="1" selected>标准</option><option value="1.2">快</option>
         </select></span>
+      <span class="sp"></span>
+      <span class="tts" style="cursor:default" title="播报音色（悦声灵犀·多音色人格）">音色
+        <select id="voiceSel" onchange="setVoice(this.value)" style="border:none;background:transparent;color:inherit;font-size:12px;cursor:pointer;padding:0;max-width:72px"></select></span>
     </div>
     <div class="microw">
       <button class="mic" id="mic" onclick="micClick()">🎤</button>
@@ -517,6 +524,8 @@ var S = { sid: null, turnCount: 0, woken: false, pending: false,
           handfree: true, ttsPlaying: false, vadSpoke: false,
           hidden: false, lastSpoken: "",
           ttsCtx: null, ttsSrc: null, packTTS: null,
+          /* 78号P1: 预取缓存音色归属(切音色作废旧缓存) */
+          packVoice: null, voiceList: null,
           /* v3 TTS 分句流水线: chunks 按序号存已解码块,
              nextIdx 队首接力; gapSrc 首包过渡音(正文到即让位);
              ctl 为本轮身份——旧轮回调一律身份比对作废 */
@@ -532,7 +541,7 @@ function showLogin() {
 function enterMain() {
   document.getElementById("loginCard").classList.add("hidden");
   document.getElementById("main").classList.remove("hidden");
-  loadScene(); loadContext(); loadCommands();
+  loadScene(); loadContext(); loadCommands(); loadVoices();
   /* TTS 缓存预热: 唤醒应答/常用短句预合成(微信服务端 TTS
      首次合成 2-4s——预取后唤醒"在呢!"秒回) */
   setTimeout(preheatTTS, 2500);
@@ -545,15 +554,24 @@ function preheatTTS() {
     var a = getAuth() || {};
     var h = { "X-Member-Id": String(a.uid || "") };
     if (a.token) h["Authorization"] = "Bearer " + a.token;
+    /* 音色归属标记(78号P1: 切音色即作废旧缓存防串音) */
+    S.packVoice = voiceVal();
     /* 高频固定句全预取(真机实证: 兜底/引导句每轮重复出现
-       ——冷合成 2-4s + 网络往返; 预取后零等待零网络) */
+       ——冷合成 2-4s + 网络往返; 预取后零等待零网络);
+       78号: 兜底句与后端 P2 新文案逐字一致(缓存命中秒播) */
     ["在呢！", "好的",
-     "这个我还不会——试试「看新品」「问价格」「查信值」「查优惠」或「你能干什么」",
+     "这个我还在学着呢——您可以试试下面的，或说「你能干什么」看看我都会什么",
      "我在——请以「小竹」开头唤我(或先唤醒一次, 5 分钟内可免唤醒)"]
       .forEach(function (t) {
+      var fv = voiceVal(); /* 在途切音色: 存储时校验防串音 */
       fetch(ttsUrl(t), { headers: h })
         .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
-        .then(function (b) { if (b) (S.packTTS = S.packTTS || {})[t] = b; })
+        .then(function (b) {
+          if (b && voiceVal() === fv) {
+            S.packVoice = fv;
+            (S.packTTS = S.packTTS || {})[t] = b;
+          }
+        })
         .catch(function () {});
     });
   } catch (e) { /* 预热失败无碍 */ }
@@ -903,10 +921,95 @@ function setTtsSpeed(v) {
   setMicStatus("语速已设为 " + ({0.8: "慢", 1: "标准", 1.2: "快"}[v] || v)
     + "（下一条播报生效）");
 }
-function ttsUrl(text) {
+/* ===== 78号·悦声灵犀 P1: 音色档案(多音色人格) ===== */
+/* 档案与后端 /api/xiaozhu/voices 同源; 拉取失败回退内置
+   (fail-soft 不阻塞); id 即 cogtts 实证音色名透传合成 */
+var VOICE_FALLBACK = [
+  { id: "tongtong", name: "悦悦", desc: "亲切甜暖 · 默认", tag: "邻家好友" },
+  { id: "xiaochen", name: "小陈", desc: "干练清晰", tag: "专业顾问" },
+  { id: "chuichui", name: "锤锤", desc: "低沉温和", tag: "沉稳暖男" },
+  { id: "female", name: "小灵", desc: "知性柔美", tag: "温柔女声" },
+  { id: "male", name: "竹君", desc: "沉稳大气", tag: "稳重男声" },
+  { id: "luodo", name: "乐乐", desc: "活泼灵动", tag: "活力达人" }];
+function voiceVal() {
+  return localStorage.getItem("xz.voice") || "tongtong";
+}
+function setVoice(v) {
+  v = v || "tongtong";
+  if (v === voiceVal()) return;
+  localStorage.setItem("xz.voice", v);
+  /* 音色切换: 旧预取缓存全部作废(防串音)+立即重预热 */
+  S.packTTS = {}; S.packVoice = v;
+  var prof = (S.voiceList || []).filter(function (p) { return p.id === v; })[0];
+  var nm = prof ? prof.name : "小竹";
+  /* toast 独立浮层: setMicStatus 会被紧随的 TTS 合成状态
+     同步覆盖(验收实证用户不可见) */
+  showToast("音色已切换为「" + nm + "」——听一句");
+  preheatTTS();
+  speakCloud("您好，我是" + nm + "，很高兴为您服务", null);
+}
+function loadVoices() {
+  var fill = function (list) {
+    S.voiceList = list;
+    var sel = document.getElementById("voiceSel");
+    if (!sel) return;
+    sel.innerHTML = "";
+    list.forEach(function (p) {
+      var o = document.createElement("option");
+      o.value = p.id; o.textContent = p.name;
+      o.title = p.desc + " · " + p.tag;
+      if (p.id === voiceVal()) o.selected = true;
+      sel.appendChild(o);
+    });
+  };
+  /* apiFetch 同 loadCommands 口径(JWT + 401 自愈——
+     strict 模式 /api/xiaozhu/* 全鉴权) */
+  apiFetch("/api/xiaozhu/voices").then(function (j) {
+    fill((j && j.success && Array.isArray(j.voices)
+          && j.voices.length) ? j.voices : VOICE_FALLBACK);
+  }).catch(function () { fill(VOICE_FALLBACK); });
+}
+/* 预取缓存命中(音色归属校验——切音色后旧缓存不可见) */
+function packedGet(text) {
+  return (S.packVoice === voiceVal() && S.packTTS)
+    ? S.packTTS[text] : null;
+}
+/* 78号P1/P3: 情绪语调系数(care 柔慢/steady 稳/cheerful 明快
+   ——与用户语速偏好叠乘, 服务端 clamp 0.5-2.0) */
+function moodSpeed(mood) {
+  var f = { care: 0.92, steady: 0.95, cheerful: 1.02 }[mood] || 1;
+  var v = ttsSpeedVal() * f;
+  return Math.max(0.5, Math.min(2.0,
+    Math.round(v * 100) / 100));
+}
+function ttsUrl(text, mood) {
   return "/api/xiaozhu/tts?text=" + encodeURIComponent(
     String(text).slice(0, 200))
-    + "&speed=" + ttsSpeedVal();
+    + "&speed=" + (mood ? moodSpeed(mood) : ttsSpeedVal())
+    + "&voice=" + encodeURIComponent(voiceVal());
+}
+/* 78号P1: 思考微音效(提交语音后等待云端识别/响应时的
+   悦耳两音上行——替代无声等待; TTS 关闭不响, WebAudio
+   不可用静默跳过, 1.2s 防抖免连续对话叮叮连环) */
+var chimeAt = 0;
+function playChime() {
+  if (!S.tts) return;
+  try {
+    if (Date.now() - chimeAt < 1200) return;
+    var ctx = S.ttsPlayCtx || ttsPlayCtx();
+    if (!ctx) return;
+    chimeAt = Date.now();
+    var t0 = ctx.currentTime;
+    [[523.25, 0], [784, 0.13]].forEach(function (p) {
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = p[0];
+      g.gain.setValueAtTime(0, t0 + p[1]);
+      g.gain.linearRampToValueAtTime(0.05, t0 + p[1] + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + p[1] + 0.26);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t0 + p[1]); o.stop(t0 + p[1] + 0.3);
+    });
+  } catch (e) { /* 微音效非关键路径 */ }
 }
 /* v2 A: 气泡反馈条(👍/👎——POST 落 turn hash, 覆盖式可切换;
    失败本地回弹; 仅登录态真实轮) */
@@ -951,6 +1054,29 @@ function attachFeedback(bubble, turnId) {
   bubble.appendChild(bar);
 }
 
+/* ===== 78号P2: 兜底轮选项引导 chips(点哪发哪——sendText 同链) ===== */
+function renderSuggest(bubble, arr) {
+  try {
+    arr = (Array.isArray(arr) ? arr : []).filter(Boolean).slice(0, 4);
+    if (!arr.length) return;
+    var row = document.createElement("div");
+    row.className = "srow";
+    arr.forEach(function (x) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "chip"; b.textContent = x;
+      b.onclick = function () { sendText(x); };
+      row.appendChild(b);
+    });
+    var msg = bubble && bubble.closest ? bubble.closest(".msg") : null;
+    if (msg && msg.parentNode) {
+      msg.parentNode.insertBefore(row, msg.nextSibling);
+    } else {
+      document.getElementById("chat").appendChild(row);
+    }
+    scrollChat();
+  } catch (e) { /* chips fail-soft */ }
+}
+
 /* ===== 轮次响应处理(语音/文本同链) ===== */
 function handleTurn(j, channel) {
   /* v3 延迟埋点: 响应到达时刻 */
@@ -970,6 +1096,10 @@ function handleTurn(j, channel) {
   }
   var bubble = appendBot(j.reply || "(无应答)", j.card || null, wakeWarn || null,
                          null, j.autoJump ? null : (j.jump || null));
+  /* 78号P1/P3: 播报情绪标签(care 柔慢/steady 稳/cheerful
+     明快——TTS 语调路由); P2: 选项引导 chips */
+  var mood = j.mood || "";
+  renderSuggest(bubble, j.suggest);
   /* 商品面板同步: 推荐款/清单态常驻展示(购物氛围入口) */
   try { renderPanel(j.card || null); } catch (e) { /* 面板 fail-soft */ }
   /* v2 A: 轮次反馈条(👍/👎——落 turn hash, 可切换; 仅真实轮) */
@@ -996,10 +1126,10 @@ function handleTurn(j, channel) {
       /* 跳过播报但继续后续处理(jump/交易弹层) */
     } else {
       S.lastGeneralAt = Date.now();
-      speak(j.reply || "", bubble);
+      speak(j.reply || "", bubble, mood);
     }
   } else {
-    speak(j.reply || "", bubble);
+    speak(j.reply || "", bubble, mood);
   }
   /* TTS 分支预合成(推荐轮"需要/不要这款"两分支——与实际
      应答逐字一致, 用户应答时 packTTS 命中零合成秒播;
@@ -1013,17 +1143,21 @@ function handleTurn(j, channel) {
          "播报滞后"根因之一——错峰发起 + 播报中顺延, 优先保
          当前轮秒播; 预热只服务未来轮, 晚 1-2s 无感 */
       j.ttsPreheat.forEach(function (t, idx) {
-        if (!t || (S.packTTS || {})[t]) return;
+        if (!t || packedGet(t)) return;
         var tryFetch = function (deferred) {
-          if ((S.packTTS || {})[t]) return; /* 已到手 */
+          if (packedGet(t)) return; /* 已到手 */
           if (S.ttsPlaying && !deferred) {
             setTimeout(function () { tryFetch(true); }, 1600);
             return;
           }
+          var fv = voiceVal(); /* 在途切音色: 存储时校验防串音 */
           fetch(ttsUrl(t), { headers: hh })
             .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
             .then(function (b) {
-              if (b) (S.packTTS = S.packTTS || {})[t] = b;
+              if (b && voiceVal() === fv) {
+                S.packVoice = fv;
+                (S.packTTS = S.packTTS || {})[t] = b;
+              }
             }).catch(function () {});
         };
         setTimeout(function () { tryFetch(false); },
@@ -1137,6 +1271,7 @@ function sendVoice(b64, durationSec) {
   if (S.latMarks) S.latMarks.submit = Date.now();
   if (!S.sid) { showToast("会话未开启"); return; }
   setPending(true);
+  playChime(); /* 78号P1: 思考微音效(等待不再无声) */
   setMicStatus("☁ 云端识别中…（音频即转即删）");
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
     method: "POST",
@@ -1153,6 +1288,7 @@ function postVoiceTranscript(text, durationSec) {
   /* v3 延迟埋点: 提交时刻 */
   if (S.latMarks) S.latMarks.submit = Date.now();
   setPending(true);
+  playChime(); /* 78号P1: 思考微音效(流式轨同链) */
   showTyping();
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
     method: "POST",
@@ -1414,13 +1550,13 @@ function doConfirm(btn) {
    真机实证国内手机浏览器 speechSynthesis 无声, 云端为可靠主轨) */
 var IS_WX = /MicroMessenger/i.test(
   navigator.userAgent || "");
-function speak(text, bubbleEl) {
+function speak(text, bubbleEl, mood) {
   if (!S.tts || !text) {
     /* TTS 关闭时直接恢复免提聆听(无播报间隔) */
     S.ttsPlaying = false; scheduleHandfree(300);
     return;
   }
-  if (IS_WX || IS_TOUCH) return speakCloud(text, bubbleEl);
+  if (IS_WX || IS_TOUCH) return speakCloud(text, bubbleEl, mood);
   if (!window.speechSynthesis) {
     S.ttsPlaying = false; scheduleHandfree(300);
     return;
@@ -1428,6 +1564,11 @@ function speak(text, bubbleEl) {
   try {
     var u = new SpeechSynthesisUtterance(String(text).slice(0, 200));
     u.lang = "zh-CN"; u.rate = 1.05 * ttsSpeedVal(); /* v2 G: 语速偏好同步缩放 */
+    /* 78号P1/P3: 情绪语调(care 柔慢轻/care steady 沉稳/
+       cheerful 明快亮——本地 TTS 同步情绪路由) */
+    if (mood === "care") { u.rate *= 0.92; u.pitch = 0.95; }
+    else if (mood === "steady") { u.rate *= 0.95; u.pitch = 0.97; }
+    else if (mood === "cheerful") { u.rate *= 1.02; u.pitch = 1.05; }
     var done = function () {
       if (bubbleEl) bubbleEl.classList.remove("speaking");
       S.ttsPlaying = false;
@@ -1620,7 +1761,7 @@ function latReport() {
       + "ms | total " + seg("vad", "play") + "ms");
   } catch (e) { /* 静默环境忽略 */ }
 }
-function speakCloud(text, bubbleEl) {
+function speakCloud(text, bubbleEl, mood) {
   stopTtsNow(); /* 先打断旧轮(合成中/播放中一律终止) */
   var ctl = (typeof AbortController !== "undefined")
     ? new AbortController() : null;
@@ -1630,6 +1771,8 @@ function speakCloud(text, bubbleEl) {
   S.ttsBubble = bubbleEl || null;
   S.ttsChunks = {}; S.ttsNextIdx = 0;
   var all = String(text);
+  /* 78号P1/P3: 情绪语调系数(cogtts speed 叠乘——缓存键
+     随 speed 自动分维不串台; mood 空则用户默认语速) */
   var el = bubbleEl;
   var done = function () {
     if (el) el.classList.remove("speaking");
@@ -1644,7 +1787,7 @@ function speakCloud(text, bubbleEl) {
   /* 高频短句内存直播(preheatTTS 预取——"在呢!"零网络
      零合成, 唤醒应答只剩 ASR 延迟); 命中或 ≤24 字短句
      走单块路径(整句, 大多数轮零回归) */
-  var packed = (S.packTTS || {})[all];
+  var packed = packedGet(all);
   var chunks = packed ? [all] : splitSpeech(all);
   if (!packed) {
     setMicStatus("🎙 语音合成中…（首次约 1 秒，同句即时）");
@@ -1673,9 +1816,9 @@ function speakCloud(text, bubbleEl) {
   chunks.forEach(function (c, idx) {
     setTimeout(function () {
       if (S.ttsAbort !== ctl) return; /* 旧轮: 后续块不再发 */
-      var pre = (S.packTTS || {})[c];
+      var pre = packedGet(c);
       var pr = pre ? Promise.resolve(pre)
-        : fetch(ttsUrl(c), {
+        : fetch(ttsUrl(c, mood), {
             headers: hdrs,
             signal: ctl ? ctl.signal : undefined })
             .then(function (r) {

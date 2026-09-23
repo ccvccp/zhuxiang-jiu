@@ -1,15 +1,14 @@
 """生产 index.html: voice-wake-widget 版本号 bump(幂等)
 
-v=25 -> v=26: v3.3 双写回归修复(AHM 版起 segFeed 与 pushRing
-段内双 push → 帧卡顿复制流 → 百炼必崩, 唤醒全灭的真正根因;
-segFeed 收敛为纯发送器, 增益并入 pushRing 唯一入队口)
+v=27 -> v=28: 切音色提示改 toast 浮层(验收实证 setMicStatus
+被紧随的 TTS 合成状态同步覆盖不可见); widget VER 同步 v=24
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=25"
-NEW = "src=/js/voice-wake-widget.js?v=26"
+OLD = "src=/js/voice-wake-widget.js?v=27"
+NEW = "src=/js/voice-wake-widget.js?v=28"
 
 
 def main():

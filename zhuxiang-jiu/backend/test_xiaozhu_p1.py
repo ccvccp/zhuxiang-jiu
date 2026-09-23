@@ -290,12 +290,13 @@ class TestLLMTrack:
             XiaozhuService, _llm_mode_enabled,
         )
         record("默认off", _llm_mode_enabled() is False)
-        # off 且规则轨未中 → general 兜底(不调 LLM)
+        # off 且规则轨未中 → general 兜底(不调 LLM;
+        # 78号P2 新容错文案——断言随行为同步)
         sid = await _session(16)
         r = await _text(sid, "小竹，帮我看看天气")
         record("off规则轨兜底",
                r.get("track") == "rule"
-               and "还不会" in r["reply"])
+               and "还在学着呢" in r["reply"])
         # 开关 on(未配 key) → 回退规则轨零影响
         os.environ["XIAOZHU_LLM_MODE"] = "on"
         try:
@@ -306,7 +307,7 @@ class TestLLMTrack:
             record("无key回退None", llm_hit is None)
             r = await _text(sid, "小竹，帮我看看天气")
             record("无key回退general",
-                   "还不会" in r["reply"])
+                   "还在学着呢" in r["reply"])
         finally:
             os.environ["XIAOZHU_LLM_MODE"] = "off"
 
