@@ -1,0 +1,46 @@
+=== trap watcher start 09-23 03:00:26 (watch=20 files) ===
+[09-23 03:01:11] !!! 写入事件
+  taro-app/src/pages/activity/index.tsx bom=1 mtime=03:01:11
+  taro-app/src/pages/index/index.tsx bom=1 mtime=03:01:11
+  taro-app/src/pages/mine/index.tsx bom=1 mtime=03:01:11
+  taro-app/test/test-promo.js bom=1 mtime=03:01:11
+  zhuxiang-jiu/backend/prod_groupbuy_e2e.py bom=1 mtime=03:01:11
+  CPU 2s 增量 Top12:
+      2312ms  pid=28328 ?
+      1343ms  pid=21448 ?
+      1313ms  pid=22780 ?
+       345ms  pid=23500 ?
+       218ms  pid=17480 ?
+       141ms  pid=15884 ?
+       125ms  pid=24980 ?
+        93ms  pid=13888 ?
+        77ms  pid=18904 ?
+        63ms  pid=27692 ?
+        47ms  pid=23496 ?
+        32ms  pid=23812 ?
+[09-23 03:01:44] !!! 写入事件
+  zhuxiang-jiu/docs/48号_小竹语音_v3低延迟对话_真机验收记录表.md bom=0 mtime=03:01:43
+[09-23 03:10:26] heartbeat
+[09-23 03:20:26] heartbeat
+[09-23 03:30:26] heartbeat
+[09-23 03:40:26] heartbeat
+[09-23 03:50:27] heartbeat
+[09-23 04:00:27] heartbeat
+[09-23 04:10:27] heartbeat
+[09-23 04:20:27] heartbeat
+[09-23 04:30:28] heartbeat
+[09-23 04:40:28] heartbeat
+[09-23 04:50:28] heartbeat
+[09-23 05:00:28] heartbeat
+[09-23 05:10:28] heartbeat
+[09-23 05:20:28] heartbeat
+[09-23 05:30:29] heartbeat
+[09-23 05:40:29] heartbeat
+[09-23 05:50:29] heartbeat
+[09-23 06:00:29] heartbeat
+[09-23 06:10:30] heartbeat
+[09-23 06:20:30] heartbeat
+[09-23 06:30:30] heartbeat
+[09-23 06:40:30] heartbeat
+[09-23 06:50:30] heartbeat
+=== trap watcher end 09-23 07:00:26 ===
