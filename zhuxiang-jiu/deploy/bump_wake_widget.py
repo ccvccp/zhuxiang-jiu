@@ -63,13 +63,19 @@ v=45 -> v=46: V5.1 弱轮词头捕获——两声词连续成功(小竹小竹
     同位置喊能量波动 5~10 倍): ring 1.5→2.5s 回补更早 +
     TH_ON 0.012→0.009 弱轮更早起段——物理边界前的最后一档
     软件压榨; widget v=41
+v=46 -> v=47: V5.2 空转写健康轮二打(DAVAS 文档「失败轮无缝
+    补救」思想落地)——段音频缓存(与推流逐字节一致)+段源rms
+    累计: final 空且源rms≥0.006(健康轮=百炼偶发抖动非音频
+    问题)自动同段缓存二打一次(用户无感); 弱轮不重试走提示;
+    DAVAS 全貌(Tier探针/降采样/热切换)记为规模化后路线;
+    widget v=42
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=45"
-NEW = "src=/js/voice-wake-widget.js?v=46"
+OLD = "src=/js/voice-wake-widget.js?v=46"
+NEW = "src=/js/voice-wake-widget.js?v=47"
 
 
 def main():

@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=41";
+  var VER = "v=42";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -509,7 +509,7 @@
 
   /* 每音频帧: RMS 能量 VAD + 重采样 16k 入环形缓存/推流 */
   function onAudioFrame(ev) {
-    if (!eng.on) { return; }
+    if (!eng.on || eng.pendingResub) { return; }
     var f32 = ev.inputBuffer.getChannelData(0);
     var sum = 0, zeros = 0;
     for (var i = 0; i < f32.length; i++) {
@@ -617,6 +617,13 @@
         s = -0.8 + (s + 0.8) * 0.15; if (s < -0.95) { s = -0.95; }
       }
       eng.ring.push(s < 0 ? s * 32768 : s * 32767);
+      /* V5.2 段能量累计(源 rms)——空转写轮健康度判定:
+         弱轮(源~0.001)重试无用走提示, 健康轮(源≥0.006)
+         是百炼偶发抖动 → 缓存音频自动二打 */
+      if (eng.speaking) {
+        eng.segRmsSum = (eng.segRmsSum || 0) + rms;
+        eng.segFrames = (eng.segFrames || 0) + 1;
+      }
     }
     while (eng.ring.length > RING_MAX) { eng.ring.splice(0, eng.ring.length - RING_MAX); }
   }
@@ -687,6 +694,20 @@
       } else if (m.type === "ready") {
         eng.wsReady = true;
         clearTimeout(eng.armTimer);
+        /* V5.2 空转写健康轮二打: 推缓存段音频直接 finish */
+        if (eng.pendingResub) {
+          var a = eng.pendingResub;
+          eng.pendingResub = null;
+          for (var ri = 0; ri + 3200 <= a.length; ri += 3200) {
+            var r16 = new Int16Array(3200);
+            for (var rk = 0; rk < 3200; rk++) { r16[rk] = a[ri + rk]; }
+            try { eng.ws.send(r16.buffer); } catch (er) { teardownSeg(); return; }
+          }
+          try {
+            eng.ws.send(JSON.stringify({ type: "finish" }));
+          } catch (er) { /* 忽略 */ }
+          return;
+        }
         /* 回补环形缓存(唤醒词开头不漏)——按百炼帧约束
            分帧发送(3200 样本=200ms=6.4KB, 勿超 16KB/帧) */
         while (eng.ring.length >= 3200) {
@@ -712,6 +733,20 @@
           /* 未命中唤醒词: 回显转写内容——ASR 实际听到什么可见 */
           diagTip("听到「" + String(ft).slice(0, 24) + "」未含唤醒词", 10);
         } else {
+          /* V5.2 空转写健康轮二打: 段能量达标(源 rms≥0.006
+             且段长≥1s)=百炼偶发抖动非音频问题——同段缓存
+             音频自动重识别一次(用户无感, 每段限一次) */
+          var segAvg = (eng.segFrames || 0)
+            ? (eng.segRmsSum / eng.segFrames) : 0;
+          if (!eng.retried && segAvg >= 0.006
+              && eng.segBuf && eng.segBuf.length >= 16000) {
+            eng.retried = true;
+            var keep = eng.segBuf.slice(0);
+            teardownSeg();
+            eng.pendingResub = keep;
+            beginSegment();
+            return;
+          }
           /* 空转写提示的 VAD 前置: 本段由 VAD 人声触发(TH_ON 起
              段)——有声音输入但识别不出才提示; 安静无段不提示
              (防骚扰, AHM 文档口径)。哑流场景 VAD 不起段, 由
@@ -765,6 +800,10 @@
     eng.segStart = now;
     eng.loStreak = 0;
     eng.lastPartial = "";
+    eng.segBuf = [];       /* V5.2 段音频缓存起档 */
+    eng.segRmsSum = 0; eng.segFrames = 0;
+    /* 二打段不重置重试权(pendingResub 在身), 正常段重置 */
+    eng.retried = !!eng.pendingResub;
     /* V3.5 增益跨段保留(取消段首重置): 双向增益自动回中,
        重置=1 反致段首尖峰未收敛即削(18:13 批 dump 实证);
        强弱源切换由限速跟随(1.6x/帧)自愈 */
@@ -816,11 +855,17 @@
      卡顿复制流), 百炼必崩(final=None)——唤醒自 AHM 上线起
      全灭的技术根因; 入队唯一入口收敛到 pushRing(含增益) */
   function segFeed() {
-    if (!eng.wsReady) { return; }
+    if (!eng.wsReady || eng.pendingResub) { return; }
     while (eng.ring.length >= 3200) {
       var i16 = new Int16Array(3200);
       for (var k = 0; k < 3200; k++) { i16[k] = eng.ring[k]; }
       try { eng.ws.send(i16.buffer); } catch (e) { return; }
+      /* V5.2 段音频缓存(与百炼收到的逐字节一致)——
+         空转写健康轮二打用 */
+      if (eng.speaking) {
+        for (var k2 = 0; k2 < 3200; k2++) { eng.segBuf.push(i16[k2]); }
+        if (eng.segBuf.length > 96000) { eng.segBuf.splice(0, eng.segBuf.length - 96000); }
+      }
       eng.ring.splice(0, 3200);
     }
   }
@@ -856,6 +901,7 @@
     }
     eng.ws = null;
     eng.wsReady = false;
+    eng.pendingResub = null;
     if (keep) {
       if (!preWs) { preWs = keep; startPing(); }
       else { try { keep.close(); } catch (e) { /* 池已有弃新 */ } }
