@@ -1317,7 +1317,7 @@ function sendText(text) {
   setPending(true);
   showTyping();
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/text", {
-    method: "POST", body: JSON.stringify({ text: ctxInject(text) })
+    method: "POST", body: JSON.stringify({ text: wakePrefix(ctxInject(text)) })
   }).then(function (j) {
     setPending(false); removeTyping();
     if (!j || j.success === false) { appendBot((j && (j.error || j.detail)) || "指令失败", null, null, "__err__"); return; }
@@ -1350,7 +1350,7 @@ function postVoiceTranscript(text, durationSec) {
   showTyping();
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
     method: "POST",
-    body: JSON.stringify({ textTranscript: ctxInject(text), filename: "audio.wav",
+    body: JSON.stringify({ textTranscript: wakePrefix(ctxInject(text)), filename: "audio.wav",
       durationSec: Math.round(durationSec * 10) / 10,
       streamBytes: stBytes, mode: S.handfree ? undefined : "tap" })
   }).then(handleVoiceResp).catch(function (e) { setPending(false); removeTyping(); setMicStatus("提交失败"); turnError(e); scheduleHandfree(1200); });
@@ -2335,12 +2335,28 @@ function ctxInject(t) {
   if (!/(这个|这款|这瓶|这酒|这件|它)/.test(t)) { return t; }
   return "「" + pageCtx.pname + "」" + t;
 }
+/* 免唤醒前缀补齐: widget 唤醒命中(xz-panel-wake-hit)后窗口
+   首轮自动补「小竹，」——点亮服务端 5 分钟滑动窗(此后由
+   turn.wake 续期, 过期后服务端回 wakeHint 置回 S.woken=false
+   自动停补); 用户侧无感(气泡显示原文) */
+function wakePrefix(t) {
+  if (!S.woken || !t) { return t; }
+  if (/^(小竹|你好小竹)/.test(t)) { return t; }
+  return "小竹，" + t;
+}
 window.addEventListener("message", function (ev) {
   var d = ev && ev.data;
   if (!d || !d.type) return;
   if (d.type === "xz-panel-hide") pauseVoiceForHidden();
   else if (d.type === "xz-panel-show") resumeVoiceFromHidden();
   else if (d.type === "xz-page-ctx") setPageCtx(d.ctx);
+  else if (d.type === "xz-panel-wake-hit") {
+    /* widget 唤醒命中(全站唤醒轨) → 面板免唤醒态: 下轮
+       发送自动补「小竹，」前缀点亮服务端 5 分钟滑动窗
+       (唤醒轨不写面板会话, 不补则被打回「请以小竹开头」) */
+    S.woken = true;
+    updateWakePill();
+  }
 });
 /* 硬停录音且不发送(免提关闭时丢弃当前未完成语音) */
 function hardStopCloud() {

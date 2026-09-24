@@ -80,13 +80,19 @@ v=48 -> v=49: 待命呼吸动画 + 商品页情境提示——小点呼吸
     (localStorage 防重, 不自动录音仅降门槛); 意图锚定已上线
     (3a83b5d)不重做; barge-in 勘察完毕(面板TTS双轨+speak/
     speakCloud+abort 结构)记单独排期真机验证; widget v=44
+v=49 -> v=50: 免唤醒窗口打通——06:54 实证 widget 唤醒命中后
+    20 秒面板说话仍被打回「请以小竹开头」(唤醒走 ws_asr 轨
+    不写面板会话, 服务端 5 分钟窗口未点亮); widget onWakeHit
+    发 xz-panel-wake-hit → 面板置免唤醒态, 发送链自动补
+    「小竹，」前缀点亮窗口(text+流式语音轮两处), 用户侧
+    无感, 过期后服务端 wakeHint 自动停补; widget v=45
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=48"
-NEW = "src=/js/voice-wake-widget.js?v=49"
+OLD = "src=/js/voice-wake-widget.js?v=49"
+NEW = "src=/js/voice-wake-widget.js?v=50"
 
 
 def main():

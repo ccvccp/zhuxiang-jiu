@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=44";
+  var VER = "v=45";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -951,6 +951,14 @@
     teardownSeg();
     wakeBeep();
     openPanel();
+    /* 免唤醒窗口打通: widget 唤醒(ws_asr 轨)不写面板会话——
+       服务端 wake 窗口(5 分钟)未被点亮, 唤醒后面板说话被打回
+       「请以小竹开头」; 通知面板置免唤醒态(下轮自动补
+       「小竹，」前缀点亮窗口), 语义与服务端滑动窗一致 */
+    try {
+      fr.contentWindow.postMessage(
+        { type: "xz-panel-wake-hit" }, "*");
+    } catch (e) { /* iframe 未就绪忽略 */ }
   }
 
   /* 唤醒提示音: WebAudio 生成两声上行「叮-咚」 */
