@@ -49,12 +49,13 @@ _SSL_CTX = ssl.create_default_context()
 # V5 段间预建连接(单 task 用完即弃): 段尾后台把 TLS 握手做完,
 # arm 到达探活(1s)直用——跨境建连移出唤醒关键路径; 每连接
 # 只跑一个 task 就拆(隔离性保留, 百炼掐线规则无从影响——
-# 预建连接空闲死由探活兜底)
-_PRE = {"ws": None}
+# 预建连接空闲死由探活兜底); 深夜时段跨境质量恶化实证
+# (21:59 批 prearm_failed×6)——失败指数退避重试(3/6/9/12s)
+_PRE = {"ws": None, "fails": 0}
 
 
 async def _prearm() -> None:
-    """段尾后台预建连接(armed 态; 失败无害——arm 时现建兜底)"""
+    """段尾后台预建连接(armed 态; 失败退避重试兜底)"""
     if _PRE["ws"] is not None:
         return
     api_key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
@@ -69,8 +70,16 @@ async def _prearm() -> None:
                 "Authorization": f"bearer {api_key}"},
                 ssl=_SSL_CTX),
             timeout=3)
+        _PRE["fails"] = 0
     except Exception as exc:
         logger.info("stream_prearm_failed: %s", exc)
+        _PRE["fails"] = min(_PRE.get("fails", 0) + 1, 4)
+
+        async def _retry_later():
+            await asyncio.sleep(3 * _PRE["fails"])
+            if _PRE["ws"] is None:
+                await _prearm()
+        asyncio.create_task(_retry_later())
 
 # 生效并发 task 数(资源红线——单 worker 事件循环内增减无竞争)
 _ACTIVE = 0
