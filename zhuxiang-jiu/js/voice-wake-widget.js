@@ -1,6 +1,6 @@
-﻿﻿/* 小竹语音唤醒(voice-wake) —— 主站(Taro H5)全站语音入口
+﻿/* 小竹语音唤醒(voice-wake) —— 主站(Taro H5)全站语音入口
  *
- * 形态: 常态无浮球——开启唤醒后喊「小竹、小竹」弹出语音面板
+ * 形态: 常态无浮球——开启唤醒后喊「小竹、小竹」或「你好小竹」弹出语音面板
  *       (iframe 复用全功能语音页); 未开启时右下角显示引导球,
  *       点击开启唤醒(麦克风授权)或直接打开面板手动使用
  * 引擎: 云端流式 ASR 唤醒词检测(/api/xiaozhu/ws/asr, 与语音页
@@ -12,7 +12,7 @@
  * 开关: localStorage 'xiaozhu.wake' = on/off; 语音面板内可切换
  *       (同源共享 + postMessage 'xz-wake-on/off' 即时通知)
  * 唤醒词: localStorage 'xiaozhu.wakeword'(面板「⚙️ 唤醒词」设置;
- *       空默认两声/预设「你好小竹」/自定义 2-8 字精确匹配;
+ *       空或「你好小竹」均双词匹配(两声+单声并存)/自定义 2-8 字精确匹配;
  *       postMessage 'xz-wake-word' 即时重建匹配器)
  * 部署: 生产 index.html 注入 <script defer src=/js/voice-wake-widget.js?v=27>
  *       (78号悦声灵犀 v=23: 语音页音色档案/情绪语调/suggest
@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=30";
+  var VER = "v=31";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -99,7 +99,7 @@
         }
       } catch (e) { /* 写失败忽略 */ }
       refOkAt = Date.now();
-      showTip("登录已自动续期——再喊一声「小竹、小竹」即唤醒");
+      showTip("登录已自动续期——再喊一声「小竹、小竹」或「你好小竹」即唤醒");
     }).catch(function () { refBusy = false; refFailAt = Date.now(); });
   }
 
@@ -293,8 +293,8 @@
   function onBallClick() {
     if (panel.classList.contains("mini")) { maximizePanel(); return; }
     if (wakeOn()) { openPanel(); return; }
-    var ok = confirm('开启「小竹小竹」语音唤醒？\n\n'
-      + '开启后对着麦克风呼唤"小竹、小竹"即可唤出语音精灵\n'
+    var ok = confirm('开启「小竹」语音唤醒？\n\n'
+      + '开启后对着麦克风呼唤"小竹、小竹"或"你好小竹"即可唤出语音精灵\n'
       + '(需使用麦克风, 仅在检测到人声时上传音频);\n'
       + '小竹球将缩小为小点常驻, 点击它随时可直接打开面板。');
     if (!ok) { openPanel(); return; } /* 不开唤醒 → 当普通入口用 */
@@ -326,8 +326,9 @@
 
   /* 唤醒词匹配器(可配置, 语音面板「⚙️ 唤醒词」设置 → localStorage
      'xiaozhu.wakeword' + postMessage 'xz-wake-word' 实时重建):
-     - 空(默认): 「小竹」两声(中间 ≤4 字符填充, 同音容错)
-     - 预设「你好小竹」: 单声短语(小竹段保留同音容错)
+     - 空(默认)/存量「你好小竹」: 双唤醒词并存——「小竹」两声
+       (中间 ≤4 字符填充) OR「你好小竹」单声, 任一命中即唤醒,
+       均同音容错(弱音量下两声的第一声易被 ASR 糊掉, 双词兜底)
      - 自定义 2-8 字: 双轨——精确文本(正则元字符转义) OR
        拼音序列包含(GB2312 一级字库同音容错, 音节级匹配) */
   var XZ = "(?:小竹|小主|小猪|小朱|小珠|晓竹|小助|小逐|小烛)";
@@ -339,11 +340,12 @@
   }
   function buildWakeMatcher() {
     var w = getWord();
-    var def = new RegExp(XZ + "[\\s\\S]{0,4}?" + XZ);
-    if (!w) { return { test: function (t) { return def.test(t); } }; }
-    if (w === "你好小竹") {
-      var re = new RegExp("你好[\\s，,、。]?" + XZ);
-      return { test: function (t) { return re.test(t); } };
+    if (!w || w === "你好小竹") {
+      /* 双词并存: 两声 + 单声短语; 旧「你好小竹」预设已并入
+         默认(存量设置自动升级双词, 无需清 localStorage) */
+      var def = new RegExp(XZ + "[\\s\\S]{0,4}?" + XZ);
+      var hi = new RegExp("你好[\\s，,、。]?" + XZ);
+      return { test: function (t) { return def.test(t) || hi.test(t); } };
     }
     /* 自定义: 精确文本 OR 拼音序列(音节级包含, 标点原样保留断界) */
     var esc = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -407,7 +409,7 @@
     localStorage.setItem(WAKE_KEY, "on");
     ballMini(true); /* 缩小常显兜底入口(不再隐藏) */
     startWake();
-    showTip("语音唤醒已开启——呼唤「小竹、小竹」试试（小竹球点击可直接打开面板）", 5000);
+    showTip("语音唤醒已开启——呼唤「小竹、小竹」或「你好小竹」试试（小竹球点击可直接打开面板）", 5000);
   }
 
   function startWake() {
@@ -640,10 +642,10 @@
           eng.emptyStreak = (eng.emptyStreak || 0) + 1;
           if (eng.emptyStreak >= 3) {
             diagTip("连续听不清——请靠近手机(30cm 内)用正常说话音量"
-              + "喊「小竹、小竹」(音量太小识别不了)", 30);
+              + "喊「小竹、小竹」或「你好小竹」(音量太小识别不了)", 30);
             eng.emptyStreak = 0;
           } else {
-            diagTip("没听清——请再喊一声「小竹、小竹」", 8);
+            diagTip("没听清——请再喊一声「小竹、小竹」或「你好小竹」", 8);
           }
         }
         teardownSeg();

@@ -4,13 +4,17 @@ v=33 -> v=34: G3 遗留定案——流式块 return_sample_rate 动态跟随(24k
 v=34 -> v=35: token 预检——beginSegment 开 WS 前检 authToken(),
     登出/换设备 wake 残留时空 token 不再报「识别通道: 鉴权失败」,
     直接提示「请先登录后再唤醒」(省一次 WS 往返)
+v=35 -> v=36: 双唤醒词并存——默认匹配器升级「小竹、小竹」两声
+    OR「你好小竹」单声任一命中即唤醒(弱音量下两声第一声易被
+    ASR 糊掉, 双词兜底); 旧「你好小竹」预设并入默认(存量设置
+    自动升级); 提示文案全量同步; widget VER v=30 -> v=31
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=34"
-NEW = "src=/js/voice-wake-widget.js?v=35"
+OLD = "src=/js/voice-wake-widget.js?v=35"
+NEW = "src=/js/voice-wake-widget.js?v=36"
 
 
 def main():
