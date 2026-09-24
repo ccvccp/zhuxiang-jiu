@@ -315,9 +315,22 @@ async def ws_asr(ws: WebSocket):
         await ws.close()
         return
 
-    # ③ 热词三源 + 建百炼流式连
+    # ③ 热词三源 + 唤醒词注入 + 建百炼流式连
     from services.xiaozhu_service import XiaozhuService
     session = AsrStreamSession(ws.send_json)
+    # 唤醒词热词(auth.wakeword: 空=双预设展开「小竹小竹」/
+    #「你好小竹」/「小竹」; 自定义词原样)——百炼 vocabulary
+    # 权重偏置修正「猪小猪」类小词汇错识(唤醒实测主诉);
+    # 置于表首防 start 内 120 截断, 去重保序
+    _wk = str(auth.get("wakeword") or "").strip()
+    if not _wk or _wk == "你好小竹":
+        _wake_hot = ["小竹小竹", "你好小竹", "小竹"]
+    else:
+        _wake_hot = [_wk]
+    _seen: set[str] = set()
+    _hot = [w for w in (_wake_hot
+                        + await XiaozhuService()._asr_hotwords())
+            if not (w in _seen or _seen.add(w))]
     # 诊断落盘(XIAOZHU_WS_DUMP=1): 客户端推流音频存 PCM
     # (16k16bit mono)→ /tmp/wsdump_*.wav——X5 间歇坏流分析
     # (V2 健康检测特征设计用; 常态关闭零开销)
@@ -333,8 +346,7 @@ async def ws_asr(ws: WebSocket):
         dump_f.setframerate(16000)
         logger.info("ws_asr_dump open %s", _dp)
     try:
-        if not await session.start(
-                await XiaozhuService()._asr_hotwords()):
+        if not await session.start(_hot):
             await ws.send_json({"type": "error",
                                 "error": "流式识别不可用",
                                 "fallback": "upload"})

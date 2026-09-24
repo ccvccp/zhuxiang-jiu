@@ -8,13 +8,18 @@ v=35 -> v=36: 双唤醒词并存——默认匹配器升级「小竹、小竹」
     OR「你好小竹」单声任一命中即唤醒(弱音量下两声第一声易被
     ASR 糊掉, 双词兜底); 旧「你好小竹」预设并入默认(存量设置
     自动升级); 提示文案全量同步; widget VER v=30 -> v=31
+v=36 -> v=37: 唤醒灵敏度治本——客户端拼音兜底+短文本(≤6字)
+    弱匹配(宁误勿漏), auth 上报 wakeword; 服务端唤醒词注入
+    百炼 vocabulary 热词(权重 5 偏置修正「猪小猪」类错识) +
+    v3 final 转写留痕日志(生产首次部署——唤醒失败轮从此可观测);
+    widget VER v=31 -> v=32
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=35"
-NEW = "src=/js/voice-wake-widget.js?v=36"
+OLD = "src=/js/voice-wake-widget.js?v=36"
+NEW = "src=/js/voice-wake-widget.js?v=37"
 
 
 def main():

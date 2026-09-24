@@ -1,4 +1,4 @@
-﻿/* 小竹语音唤醒(voice-wake) —— 主站(Taro H5)全站语音入口
+/* 小竹语音唤醒(voice-wake) —— 主站(Taro H5)全站语音入口
  *
  * 形态: 常态无浮球——开启唤醒后喊「小竹、小竹」或「你好小竹」弹出语音面板
  *       (iframe 复用全功能语音页); 未开启时右下角显示引导球,
@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=31";
+  var VER = "v=32";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -341,11 +341,20 @@
   function buildWakeMatcher() {
     var w = getWord();
     if (!w || w === "你好小竹") {
-      /* 双词并存: 两声 + 单声短语; 旧「你好小竹」预设已并入
-         默认(存量设置自动升级双词, 无需清 localStorage) */
+      /* 双词并存 + 拼音兜底: 两声/单声正则之上, 短文本(≤6 字)
+         拼音含 xiao-zhu 即命中——覆盖 XZ 表外同音(小住/小煮)、
+         首声被吞(「猪小猪」)与裸单声「小竹」; 唤醒场景权衡
+         宁误勿漏(误唤醒=面板弹出可关, 漏唤醒=功能失灵) */
       var def = new RegExp(XZ + "[\\s\\S]{0,4}?" + XZ);
       var hi = new RegExp("你好[\\s，,、。]?" + XZ);
-      return { test: function (t) { return def.test(t) || hi.test(t); } };
+      return { test: function (t) {
+        if (!t) { return false; }
+        if (def.test(t) || hi.test(t)) { return true; }
+        if (t.length > 6) { return false; }
+        return toPinyinSeq(
+          t.replace(/[\s，,、。？！?!.!…·"'’]/g, "")
+        ).indexOf("xiao-zhu") !== -1;
+      } };
     }
     /* 自定义: 精确文本 OR 拼音序列(音节级包含, 标点原样保留断界) */
     var esc = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -597,6 +606,9 @@
     eng.ws.onopen = function () {
       eng.ws.send(JSON.stringify({
         type: "auth", token: authToken(),
+        /* 唤醒词上报: 服务端注入百炼 vocabulary 热词(权重 5
+           强偏向)——修正「猪小猪」类错识; 空=双预设展开 */
+        wakeword: getWord(),
       }));
     };
     eng.ws.onmessage = function (e) {
