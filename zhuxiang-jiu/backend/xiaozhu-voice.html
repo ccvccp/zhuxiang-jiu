@@ -1154,6 +1154,9 @@ function handleTurn(j, channel) {
   }
   var bubble = appendBot(j.reply || "(无应答)", j.card || null, wakeWarn || null,
                          null, j.autoJump ? null : (j.jump || null));
+  /* 自录回环检测用: 最近一条小竹播报文本(postVoiceTranscript
+     比对——短转子串命中=小竹自己的声音被收音) */
+  S.lastBot = String(j.reply || "");
   /* 78号P1/P3: 播报情绪标签(care 柔慢/steady 稳/cheerful
      明快——TTS 语调路由); P2: 选项引导 chips */
   var mood = j.mood || "";
@@ -1343,6 +1346,21 @@ function sendVoice(b64, durationSec) {
 /* P1 流式轨提交: 转写已在流式会话完成(说完了就出字),
    只 POST 最终文本+流式统计——跳过重复转写与音频上传 */
 function postVoiceTranscript(text, durationSec) {
+  /* 唤醒尾音静默窗: 开面板瞬间免提把唤醒词尾音录成一轮
+     (06:59 实证)——免提轮 2s 内静默丢弃, 不污染会话上下文 */
+  if (S.handfree && S.wakeGrace) {
+    var inGrace = Date.now() < S.wakeGrace;
+    S.wakeGrace = 0;
+    if (inGrace) { scheduleHandfree(400); return; }
+  }
+  /* TTS 自录回环: 转写是最近小竹播报的子串(短句)=小竹自己
+     的声音外放被麦克风收回成轮(07:02 实证「好的。」/
+     「还在学着呢。」)——静默丢弃续听, 不进会话 */
+  if (S.handfree && text && S.lastBot
+      && String(S.lastBot).indexOf(String(text)) !== -1
+      && String(text).length <= 8) {
+    scheduleHandfree(400); return;
+  }
   /* v3 延迟埋点: 提交时刻 */
   if (S.latMarks) S.latMarks.submit = Date.now();
   setPending(true);
@@ -2353,8 +2371,12 @@ window.addEventListener("message", function (ev) {
   else if (d.type === "xz-panel-wake-hit") {
     /* widget 唤醒命中(全站唤醒轨) → 面板免唤醒态: 下轮
        发送自动补「小竹，」前缀点亮服务端 5 分钟滑动窗
-       (唤醒轨不写面板会话, 不补则被打回「请以小竹开头」) */
+       (唤醒轨不写面板会话, 不补则被打回「请以小竹开头」);
+       尾音静默窗: 开面板瞬间免提把唤醒词尾音录成一轮
+       (06:59 实证「小竹小竹。」成轮污染上下文)——2s 内
+       免提轮静默丢弃 */
     S.woken = true;
+    S.wakeGrace = Date.now() + 2000;
     updateWakePill();
   }
 });
