@@ -78,6 +78,20 @@ async def _pool_connect():
     asyncio.create_task(_pool_reader())
     return ws
 
+async def _kick_pool() -> None:
+    """坏连接踢池(段失败自愈): run-task 失败/task-started 超时
+    = 连接可能半死(跨境中间设备静默断开, 前几轮实证)——留在
+    池里下一段继续用坏连接继续超时, 循环吃轮次; 踢掉后下一段
+    重建新鲜连接。关闭触发 reader finally: 活跃 task 置失败
+    自愈, 池 tasks 清空——事件驱动非主动清空, 无雪崩。"""
+    import contextlib
+    ws = _POOL["ws"]
+    if ws is not None:
+        _POOL["ws"] = None
+        with contextlib.suppress(Exception):
+            await ws.close()
+        logger.warning("stream_pool_kicked")
+
 
 async def _pool_reader():
     """池连接事件泵: 按 header.task_id 路由到 session
@@ -96,7 +110,9 @@ async def _pool_reader():
             sess = _POOL["tasks"].get(tid)
             if sess is None and not tid and len(_POOL["tasks"]) == 1:
                 # 无 task_id 兜底(真实百炼事件必带; 仅孤 task 时
-                # 直通——mock/协议边缘场景)
+                # 直通——mock/协议边缘场景); 生产出现=协议异常,
+                # 防御日志立即可见(文档采纳: 坏信号须可观测)
+                logger.warning("stream_event_no_task_id")
                 sess = next(iter(_POOL["tasks"].values()))
             if sess is not None:
                 sess._on_event(m)
@@ -188,12 +204,14 @@ class AsrStreamSession:
         except Exception as exc:
             logger.warning("stream_runtask_failed: %s", exc)
             await self.close()
+            await _kick_pool()
             return False
         try:
             await asyncio.wait_for(self._started.wait(), timeout=5)
         except TimeoutError:
             logger.warning("stream_task_start_timeout")
             await self.close()
+            await _kick_pool()
             return False
         return True
 
