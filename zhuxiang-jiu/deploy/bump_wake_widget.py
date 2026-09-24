@@ -69,13 +69,18 @@ v=46 -> v=47: V5.2 空转写健康轮二打(DAVAS 文档「失败轮无缝
     问题)自动同段缓存二打一次(用户无感); 弱轮不重试走提示;
     DAVAS 全貌(Tier探针/降采样/热切换)记为规模化后路线;
     widget v=42
+v=47 -> v=48: V5.3 跨段组合——21:44:05「你好。」实锤: 用户喊
+    「你好小竹」时中间自然停顿>0.9s 被收段切成「你好」+「小竹」
+    两段, 单段全废; 新增呼语挂起(你好|喂|嘿)3s 内紧邻段含
+    小竹组词即组合命中; 同修 V5.2 二打竞态(pendingResub 提前
+    置空致二打期间 VAD 双 arm); widget v=43
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=46"
-NEW = "src=/js/voice-wake-widget.js?v=47"
+OLD = "src=/js/voice-wake-widget.js?v=47"
+NEW = "src=/js/voice-wake-widget.js?v=48"
 
 
 def main():

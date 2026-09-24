@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=42";
+  var VER = "v=43";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -694,10 +694,11 @@
       } else if (m.type === "ready") {
         eng.wsReady = true;
         clearTimeout(eng.armTimer);
-        /* V5.2 空转写健康轮二打: 推缓存段音频直接 finish */
+        /* V5.2 空转写健康轮二打: 推缓存段音频直接 finish
+           (pendingResub 保持到二打 final——中途不置空防
+           VAD 起新段双 arm 竞态) */
         if (eng.pendingResub) {
           var a = eng.pendingResub;
-          eng.pendingResub = null;
           for (var ri = 0; ri + 3200 <= a.length; ri += 3200) {
             var r16 = new Int16Array(3200);
             for (var rk = 0; rk < 3200; rk++) { r16[rk] = a[ri + rk]; }
@@ -726,10 +727,23 @@
         eng.lastPartial = m.text;
         if (matchWake(m.text)) { onWakeHit(); }
       } else if (m.type === "final") {
+        if (eng.pendingResub) { eng.pendingResub = null; }
         var ft = m.text || eng.lastPartial || "";
         if (matchWake(ft)) {
           onWakeHit();
         } else if (ft) {
+          /* V5.3 跨段组合: 「你好」(上段) + 「小竹」(本段
+             ≤3s) = 「你好小竹」——0.9s 收段切开的自然停顿
+             形态(21:44:05「你好。」实锤)不再致命 */
+          if (eng.prevCall && Date.now() - eng.prevCall < 3000
+              && new RegExp(XZ).test(ft)) {
+            eng.prevCall = 0;
+            onWakeHit();
+            return;
+          }
+          if (/^(你好|喂|嘿)[。.!！？?\s]*$/.test(ft)) {
+            eng.prevCall = Date.now();  /* 呼语挂起待组合 */
+          } else { eng.prevCall = 0; }
           /* 未命中唤醒词: 回显转写内容——ASR 实际听到什么可见 */
           diagTip("听到「" + String(ft).slice(0, 24) + "」未含唤醒词", 10);
         } else {
