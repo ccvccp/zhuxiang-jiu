@@ -315,27 +315,27 @@ async def ws_asr(ws: WebSocket):
         await ws.close()
         return
 
-    # ③ 热词三源 + 唤醒词注入 + 建百炼流式连
+    # ③ 热词三源 + 唤醒词注入 + 双协议建流
     from services.xiaozhu_service import XiaozhuService
-    session = AsrStreamSession(ws.send_json)
-    # 唤醒词热词(auth.wakeword: 空=双预设展开「小竹小竹」/
-    #「你好小竹」/「小竹」; 自定义词原样)——百炼 vocabulary
-    # 权重偏置修正「猪小猪」类小词汇错识(唤醒实测主诉);
-    # 置于表首防 start 内 120 截断, 去重保序
-    _wk = str(auth.get("wakeword") or "").strip()
-    if not _wk or _wk == "你好小竹":
-        _wake_hot = ["小竹小竹", "你好小竹", "小竹"]
-    else:
-        _wake_hot = [_wk]
-    _seen: set[str] = set()
-    _hot = [w for w in (_wake_hot
-                        + await XiaozhuService()._asr_hotwords())
-            if not (w in _seen or _seen.add(w))]
+
+    async def _wake_hot(wk_raw) -> list[str]:
+        """唤醒词热词(空=双预设展开; 自定义词原样)——百炼
+        vocabulary 权重偏置修正「猪小猪」类小词汇错识;
+        置于表首防 start 内 120 截断, 去重保序(每次 arm 重算
+        ——唤醒词可变/产品名可变)"""
+        _wk = str(wk_raw or "").strip()
+        _wh = (["小竹小竹", "你好小竹", "小竹"]
+               if (not _wk or _wk == "你好小竹") else [_wk])
+        _seen: set[str] = set()
+        return [w for w in (_wh
+                            + await XiaozhuService()._asr_hotwords())
+                if not (w in _seen or _seen.add(w))]
+
+    session: "AsrStreamSession | None" = None
     # 诊断落盘(XIAOZHU_WS_DUMP=1): 客户端推流音频存 PCM
     # (16k16bit mono)→ /tmp/wsdump_*.wav——X5 间歇坏流分析
     # (V2 健康检测特征设计用; 常态关闭零开销)
     dump_f = None
-    dump_n = 0
     if os.environ.get("XIAOZHU_WS_DUMP", "") == "1":
         import time as _time
         import wave as _wave
@@ -346,55 +346,108 @@ async def ws_asr(ws: WebSocket):
         dump_f.setframerate(16000)
         logger.info("ws_asr_dump open %s", _dp)
     try:
-        if not await session.start(_hot):
-            await ws.send_json({"type": "error",
-                                "error": "流式识别不可用",
-                                "fallback": "upload"})
-            await ws.close()
-            return
-        await ws.send_json({"type": "ready"})
-        # ④ 消息泵: 二进制帧→feed / finish→final
-        while True:
-            msg = await ws.receive()
-            if msg.get("type") == "websocket.disconnect":
-                break
-            if msg.get("bytes"):
-                if dump_f:
-                    dump_f.writeframes(msg["bytes"])
-                    dump_n += len(msg["bytes"])
-                await session.feed(msg["bytes"])
-                continue
-            text = msg.get("text")
-            if not text:
-                continue
-            try:
-                m = json.loads(text)
-            except (ValueError, TypeError):
-                continue
-            if m.get("type") == "finish":
-                final = await session.finish()
-                # v3 观测: final 转写留痕(唤醒不中诊断——标点形态/
-                # 空转写/误听形态一日志见; 与轮次 rawText 落库
-                # 同隐私口径)
-                logger.info("ws_asr_final text=%r failed=%r",
-                            final, session.failed)
-                if final is None:
+        if str(auth.get("ver") or "") != "2":
+            # 旧协议(v<=37 缓存客户端): auth → 建流 → ready →
+            # 单段 → final → 断连(原行为原样, 零影响)
+            session = AsrStreamSession(ws.send_json)
+            if not await session.start(
+                    await _wake_hot(auth.get("wakeword"))):
+                await ws.send_json({"type": "error",
+                                    "error": "流式识别不可用",
+                                    "fallback": "upload"})
+                await ws.close()
+                return
+            await ws.send_json({"type": "ready"})
+            await _seg_pump(ws, session, dump_f)
+        else:
+            # v2 预热协议: armed → [arm → 建流 → ready → 段 →
+            # final → 回等 arm]*——连接复用省握手+鉴权(唤醒
+            # 起段直接 arm, ~1s 握手延时不进唤醒关键路径);
+            # ping(客户端 25s 心跳穿 nginx 空闲超时)忽略;
+            # 并发红线不挤: _ACTIVE 只数活跃百炼流, 空闲
+            # 预热连接零百炼资源
+            await ws.send_json({"type": "armed"})
+            while True:
+                arm = None
+                while arm is None:
+                    msg = await ws.receive()
+                    if msg.get("type") == "websocket.disconnect":
+                        return
+                    t = msg.get("text")
+                    if not t:
+                        continue
+                    try:
+                        m = json.loads(t)
+                    except (ValueError, TypeError):
+                        continue
+                    _mt = m.get("type")
+                    if _mt == "ping":
+                        continue
+                    if _mt == "arm":
+                        arm = m
+                session = AsrStreamSession(ws.send_json)
+                if not await session.start(
+                        await _wake_hot(arm.get("wakeword"))):
+                    # 建流失败: 报错回等下一 arm(连接保活,
+                    # 客户端 diagTip 后下一段自动重试)
                     await ws.send_json(
                         {"type": "error",
-                         "error": session.failed
-                         or "流式识别未出结果",
+                         "error": "流式识别不可用",
                          "fallback": "upload"})
-                else:
-                    await ws.send_json({"type": "final",
-                                        "text": final})
-                break
+                    await session.close()
+                    session = None
+                    continue
+                await ws.send_json({"type": "ready"})
+                await _seg_pump(ws, session, dump_f)
+                await session.close()
+                session = None
     except Exception as e:
         logger.warning("ws_asr_error: %s", e)
     finally:
-        await session.close()
+        if session is not None:
+            await session.close()
         if dump_f:
             dump_f.close()
-            logger.info("ws_asr_dump closed bytes=%d", dump_n)
+            logger.info("ws_asr_dump closed")
+
+
+async def _seg_pump(ws, session, dump_f) -> None:
+    """段消息泵: 二进制帧→feed / finish→final(新旧协议共用)"""
+    while True:
+        msg = await ws.receive()
+        if msg.get("type") == "websocket.disconnect":
+            break
+        if msg.get("bytes"):
+            if dump_f:
+                dump_f.writeframes(msg["bytes"])
+            await session.feed(msg["bytes"])
+            continue
+        text = msg.get("text")
+        if not text:
+            continue
+        try:
+            m = json.loads(text)
+        except (ValueError, TypeError):
+            continue
+        if m.get("type") == "ping":
+            continue
+        if m.get("type") == "finish":
+            final = await session.finish()
+            # v3 观测: final 转写留痕(唤醒不中诊断——标点形态/
+            # 空转写/误听形态一日志见; 与轮次 rawText 落库
+            # 同隐私口径)
+            logger.info("ws_asr_final text=%r failed=%r",
+                        final, session.failed)
+            if final is None:
+                await ws.send_json(
+                    {"type": "error",
+                     "error": session.failed
+                     or "流式识别未出结果",
+                     "fallback": "upload"})
+            else:
+                await ws.send_json({"type": "final",
+                                    "text": final})
+            break
 
 
 @router.get("/sessions/{session_id}")

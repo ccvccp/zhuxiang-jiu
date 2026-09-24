@@ -13,13 +13,18 @@ v=36 -> v=37: 唤醒灵敏度治本——客户端拼音兜底+短文本(≤6字
     百炼 vocabulary 热词(权重 5 偏置修正「猪小猪」类错识) +
     v3 final 转写留痕日志(生产首次部署——唤醒失败轮从此可观测);
     widget VER v=31 -> v=32
+v=37 -> v=38: 连接预热 + 意图锚定——V2 预热协议(auth.ver=2 →
+    armed → arm 循环多段复用, 唤醒起段省 ~1s 握手, 25s ping 穿
+    nginx 空闲超时, 段后保活回池; 服务端双协议旧客户端零影响) +
+    商品页上下文锚定(hash→面板预取商品名, 指代词「这个多少钱」
+    前缀注入商品名, 文本轮+流式语音轨); widget VER v=32 -> v=33
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=36"
-NEW = "src=/js/voice-wake-widget.js?v=37"
+OLD = "src=/js/voice-wake-widget.js?v=37"
+NEW = "src=/js/voice-wake-widget.js?v=38"
 
 
 def main():

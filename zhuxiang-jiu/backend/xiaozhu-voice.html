@@ -1317,7 +1317,7 @@ function sendText(text) {
   setPending(true);
   showTyping();
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/text", {
-    method: "POST", body: JSON.stringify({ text: text })
+    method: "POST", body: JSON.stringify({ text: ctxInject(text) })
   }).then(function (j) {
     setPending(false); removeTyping();
     if (!j || j.success === false) { appendBot((j && (j.error || j.detail)) || "指令失败", null, null, "__err__"); return; }
@@ -1350,7 +1350,7 @@ function postVoiceTranscript(text, durationSec) {
   showTyping();
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
     method: "POST",
-    body: JSON.stringify({ textTranscript: text, filename: "audio.wav",
+    body: JSON.stringify({ textTranscript: ctxInject(text), filename: "audio.wav",
       durationSec: Math.round(durationSec * 10) / 10,
       streamBytes: stBytes, mode: S.handfree ? undefined : "tap" })
   }).then(handleVoiceResp).catch(function (e) { setPending(false); removeTyping(); setMicStatus("提交失败"); turnError(e); scheduleHandfree(1200); });
@@ -2317,11 +2317,30 @@ document.addEventListener("visibilitychange", function () {
   else resumeVoiceFromHidden();
 });
 /* 机制②: 父窗口浮层开合通知(兼容不触发 visibilitychange 的内核) */
+/* 意图锚定: 父页(product-detail hash)→商品名预取; 指代词注入
+   (「这个多少钱」→「「竹奕酒·…」多少钱」)——前端文本层
+   指代消解, 现有意图链按商品名解析, 零后端改动 */
+var pageCtx = null; /* {id, pname?} 宿主商品页上下文 */
+function setPageCtx(c) {
+  pageCtx = (c && c.id) ? { id: String(c.id), pname: "" } : null;
+  if (!pageCtx) return;
+  /* 预取商品名(命中指代时零延迟注入; 失败静默不注入) */
+  apiFetch("/api/product/" + pageCtx.id).then(function (j) {
+    var p = (j && j.data) ? j.data : j;
+    if (pageCtx && p && p.name) { pageCtx.pname = String(p.name); }
+  }).catch(function () { /* 静默 */ });
+}
+function ctxInject(t) {
+  if (!pageCtx || !pageCtx.pname || !t) { return t; }
+  if (!/(这个|这款|这瓶|这酒|这件|它)/.test(t)) { return t; }
+  return "「" + pageCtx.pname + "」" + t;
+}
 window.addEventListener("message", function (ev) {
   var d = ev && ev.data;
   if (!d || !d.type) return;
   if (d.type === "xz-panel-hide") pauseVoiceForHidden();
   else if (d.type === "xz-panel-show") resumeVoiceFromHidden();
+  else if (d.type === "xz-page-ctx") setPageCtx(d.ctx);
 });
 /* 硬停录音且不发送(免提关闭时丢弃当前未完成语音) */
 function hardStopCloud() {

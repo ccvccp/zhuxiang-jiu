@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=32";
+  var VER = "v=33";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -177,6 +177,7 @@
     panel.classList.add("open");
     panel.classList.remove("mini");
     notifyFrame("show");
+    pushPageCtx(); /* 意图锚定: 打开即同步宿主页面上下文 */
     stopWake(); /* 面板打开期间暂停唤醒监听(面板内即语音会话) */
     releaseMic(); /* X5 麦克风独占: 面板免提要录音, 必须先释放唤醒流
                      (否则面板 getUserMedia 被堵——"微信正在录音"死锁) */
@@ -220,6 +221,23 @@
       fr.contentWindow.postMessage({ type: "xz-panel-" + state }, "*");
     } catch (e) { /* iframe 未就绪忽略 */ }
   }
+
+  /* ---------- 意图锚定: 宿主商品页上下文 → 面板 ----------
+     Taro hash 路由 #/pages/product-detail/index?id=N →
+     postMessage; 面板预取商品名, 用户说「这个多少钱」类
+     指代词时前缀注入商品名——问答自动关联当前浏览商品 */
+  function pageCtx() {
+    var m = (location.hash || "").match(
+      /product-detail\/index\?id=(\d+)/);
+    return m ? { type: "product", id: m[1] } : null;
+  }
+  function pushPageCtx() {
+    try {
+      fr.contentWindow.postMessage(
+        { type: "xz-page-ctx", ctx: pageCtx() }, "*");
+    } catch (e) { /* iframe 未就绪忽略 */ }
+  }
+  window.addEventListener("hashchange", pushPageCtx);
 
   /* ---------- 引导球(仅唤醒未开启时显示: 开启唤醒/普通入口) ---------- */
   var b = document.createElement("button");
@@ -441,6 +459,7 @@
        音频图不跑, VAD 失效(麦克风已允许但喊了没反应); 权限弹窗的
        点击不算页面手势。挂一次性交互 resume(任意触摸即活) */
     if (eng.ctx.state === "suspended") { armCtxResume(); }
+    preconnect(); /* V2: 唤醒开启即预建 armed 连接 */
   }
   var ctxResumeHandler = null;
   function armCtxResume() {
@@ -462,6 +481,9 @@
     if (!eng.on) { return; }
     eng.on = false;
     teardownSeg();
+    dropPre(); /* 预热池拆(段连接已回池一并拆): 面板期间不留
+                  连接——麦克风交接优先; closePanel 恢复时
+                  startWake 末尾 preconnect() 重建 */
     try { if (eng.proc) { eng.proc.disconnect(); eng.proc.onaudioprocess = null; } } catch (e) { /* 忽略 */ }
     try { if (eng.analyser) { eng.analyser.disconnect(); } } catch (e) { /* 忽略 */ }
     try { if (eng.ctx) { eng.ctx.close(); } } catch (e) { /* 忽略 */ }
@@ -570,54 +592,72 @@
     while (eng.ring.length > RING_MAX) { eng.ring.splice(0, eng.ring.length - RING_MAX); }
   }
 
-  /* 人声段开始: token 预检 → 分钟熔断校验 → 建流(带环形缓存回补) */
-  function beginSegment() {
-    /* token 预检: 登出/换设备后 wake 开关残留 → 空 token 开 WS
-       只换来 confusing 的「识别通道: 鉴权失败」——预检直接给
-       正确指引(省一次 WS 往返); hiStreak 复位防 VAD 连击 */
-    if (!authToken()) {
-      eng.hiStreak = 0;
-      diagTip("请先登录后再唤醒——点小竹球打开面板登录", 15);
-      return;
-    }
-    var now = Date.now();
-    eng.segTimes = eng.segTimes.filter(function (t) {
-      return now - t < 60000;
-    });
-    if (eng.segTimes.length >= 10) { /* 噪音/连测熔断: 本分钟段数封顶 */
-      eng.hiStreak = 0;
-      diagTip("唤醒频率保护——稍候约 1 分钟再试（连接数限额）", 30);
-      return;
-    }
-    eng.segTimes.push(now);
-    eng.speaking = true;
-    eng.segStart = now;
-    eng.loStreak = 0;
-    eng.lastPartial = "";
-    eng.gain = 1; /* V3.1 软增益段首重置(防增益残留炸下段) */
+  /* ---------- V2 连接预热池(握手+鉴权前置) ----------
+     唤醒开启即预建 WS+auth(armed), VAD 起段取池直发 arm——
+     省 ~1s 握手+鉴权往返(跨境 RTT×2); 段后保活回池, 连测
+     唤醒复用 ×N; 25s ping 穿 nginx 空闲超时(默认 60s 拆);
+     唤醒关闭/面板打开即拆(麦克风交接优先, 连接不占百炼流
+     不挤 ASR 并发红线) */
+  var preWs = null, pingTimer = null;
+  function stopPing() {
+    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+  }
+  function startPing() {
+    stopPing();
+    pingTimer = setInterval(function () {
+      if (preWs && preWs.readyState === 1) {
+        try { preWs.send(JSON.stringify({ type: "ping" })); }
+        catch (e) { stopPing(); }
+      } else { stopPing(); }
+    }, 25000);
+  }
+  function dropPre() {
+    stopPing();
+    if (preWs) { try { preWs.close(); } catch (e) { /* 忽略 */ } preWs = null; }
+  }
+  function preconnect() {
+    if (preWs || !wakeOn() || !authToken()) { return; }
     var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    var ws;
     try {
-      eng.ws = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
-      eng.ws.binaryType = "arraybuffer";
-    } catch (e) { teardownSeg(); return; }
-    var failTimer = setTimeout(function () {
-      if (eng.ws && eng.ws.readyState !== 1) { teardownSeg(); }
-    }, 5000);
-    eng.ws.onopen = function () {
-      eng.ws.send(JSON.stringify({
-        type: "auth", token: authToken(),
-        /* 唤醒词上报: 服务端注入百炼 vocabulary 热词(权重 5
-           强偏向)——修正「猪小猪」类错识; 空=双预设展开 */
-        wakeword: getWord(),
-      }));
+      ws = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
+      ws.binaryType = "arraybuffer";
+    } catch (e) { return; }
+    ws._xzV2 = true;
+    ws.onopen = function () {
+      try {
+        ws.send(JSON.stringify({
+          type: "auth", token: authToken(), ver: 2,
+          wakeword: getWord(),
+        }));
+      } catch (e) { try { ws.close(); } catch (e2) { /* 忽略 */ } }
     };
-    eng.ws.onmessage = function (e) {
+    ws.onmessage = segOnMsg(ws);
+    ws.onclose = function () {
+      if (preWs === ws) { preWs = null; stopPing(); }
+      if (eng.ws === ws) { teardownSeg(); }
+    };
+    ws.onerror = function () { /* onclose 兜底 */ };
+  }
+
+  /* 段消息统一处理: armed(段中=发 arm / 待命=入池) → ready
+     (回补环形缓存+竞态 finish) → partial/final(唤醒匹配) →
+     error(续期自愈)——预建与段中连接共用 */
+  function segOnMsg(ws) {
+    return function (e) {
       if (typeof e.data !== "string") { return; }
       var m;
       try { m = JSON.parse(e.data); } catch (ex) { return; }
-      if (m.type === "ready") {
+      if (m.type === "armed") {
+        if (eng.ws === ws) {
+          try { ws.send(JSON.stringify({ type: "arm", wakeword: getWord() })); }
+          catch (ex) { teardownSeg(); }
+        } else if (!preWs) {
+          preWs = ws; startPing();  /* 预热完成入池 */
+        }
+      } else if (m.type === "ready") {
         eng.wsReady = true;
-        clearTimeout(failTimer);
+        clearTimeout(eng.armTimer);
         /* 回补环形缓存(唤醒词开头不漏)——按百炼帧约束
            分帧发送(3200 样本=200ms=6.4KB, 勿超 16KB/帧) */
         while (eng.ring.length >= 3200) {
@@ -670,8 +710,69 @@
         teardownSeg();
       }
     };
-    eng.ws.onclose = function () { clearTimeout(failTimer); teardownSeg(); };
-    eng.ws.onerror = function () { /* onclose 兜底 */ };
+  }
+
+  /* 人声段开始: token 预检 → 分钟熔断 → 取池/临时建(V2 arm) */
+  function beginSegment() {
+    /* token 预检: 登出/换设备后 wake 开关残留 → 空 token 开 WS
+       只换来 confusing 的「识别通道: 鉴权失败」——预检直接给
+       正确指引(省一次 WS 往返); hiStreak 复位防 VAD 连击 */
+    if (!authToken()) {
+      eng.hiStreak = 0;
+      diagTip("请先登录后再唤醒——点小竹球打开面板登录", 15);
+      return;
+    }
+    var now = Date.now();
+    eng.segTimes = eng.segTimes.filter(function (t) {
+      return now - t < 60000;
+    });
+    if (eng.segTimes.length >= 10) { /* 噪音/连测熔断: 本分钟段数封顶 */
+      eng.hiStreak = 0;
+      diagTip("唤醒频率保护——稍候约 1 分钟再试（连接数限额）", 30);
+      return;
+    }
+    eng.segTimes.push(now);
+    eng.speaking = true;
+    eng.segStart = now;
+    eng.loStreak = 0;
+    eng.lastPartial = "";
+    eng.gain = 1; /* V3.1 软增益段首重置(防增益残留炸下段) */
+    var ws = null;
+    if (preWs && preWs.readyState === 1) {
+      ws = preWs; preWs = null; stopPing();  /* 池命中转正 */
+    } else {
+      var proto = location.protocol === "https:" ? "wss://" : "ws://";
+      try {
+        ws = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
+        ws.binaryType = "arraybuffer";
+      } catch (e) { teardownSeg(); return; }
+      ws.onopen = function () {
+        try {
+          ws.send(JSON.stringify({
+            type: "auth", token: authToken(), ver: 2,
+            wakeword: getWord(),
+          }));
+        } catch (e) { teardownSeg(); }
+      };
+    }
+    ws._xzV2 = true;
+    ws.onmessage = segOnMsg(ws);
+    ws.onclose = function () {
+      clearTimeout(eng.armTimer);
+      if (preWs === ws) { preWs = null; stopPing(); }
+      if (eng.ws === ws) { teardownSeg(); }
+    };
+    ws.onerror = function () { /* onclose 兜底 */ };
+    eng.ws = ws;
+    if (ws.readyState === 1) {
+      /* 池连接已 armed: 直接 arm 建百炼流 */
+      try { ws.send(JSON.stringify({ type: "arm", wakeword: getWord() })); }
+      catch (e) { teardownSeg(); return; }
+    }
+    /* 建连/arm → ready 5s 守卫(X5 握手卡死兜底) */
+    eng.armTimer = setTimeout(function () {
+      if (eng.ws === ws && !eng.wsReady) { teardownSeg(); }
+    }, 5000);
   }
 
   /* 推流(纯发送器): 从 ring 取 200ms(3200 样本@16k)帧发送。
@@ -709,9 +810,21 @@
 
   function teardownSeg() {
     eng.speaking = false;
-    eng.wsReady = false;
-    if (eng.ws) { try { eng.ws.close(); } catch (e) { /* 忽略 */ } }
+    clearTimeout(eng.armTimer);
+    var keep = null;
+    if (eng.ws && eng.ws._xzV2 && eng.ws.readyState === 1) {
+      keep = eng.ws; /* V2 段后保活回池: 服务端已回等-arm 态,
+                        下一段发 arm 即用(连测唤醒省 N 次握手);
+                        非池连接(竞态 CONNECTING)照旧拆 */
+    } else if (eng.ws) {
+      try { eng.ws.close(); } catch (e) { /* 忽略 */ }
+    }
     eng.ws = null;
+    eng.wsReady = false;
+    if (keep) {
+      if (!preWs) { preWs = keep; startPing(); }
+      else { try { keep.close(); } catch (e) { /* 池已有弃新 */ } }
+    }
     /* 保留尾部 1.5s 环形缓存供下段回补 */
     while (eng.ring.length > RING_MAX) { eng.ring.splice(0, eng.ring.length - RING_MAX); }
   }
