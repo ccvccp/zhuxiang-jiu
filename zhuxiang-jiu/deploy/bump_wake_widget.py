@@ -43,13 +43,18 @@ v=41 -> v=42: 尖峰压缩收紧——干净重开(AGC off)后 18:13 批
     削顶; V3.5: 压缩参数收紧(0.8 起压×0.15 斜率×0.95 封顶)
     + 增益跨段保留(取消段首重置——重置=1 致段首尖峰未收敛
     即 clamp, 唤醒词声母恰在段首); widget v=37
+v=42 -> v=43: V4.5 建连提速——服务端 SSLContext 模块级复用
+    (TLS 1.3 session ticket: 每段新连接但握手省 1 RTT, 握手
+    凭证复用扬弃连接复用)+建连 3s 快败+段内自动重试一次;
+    客户端 armTimer 5→8s 容忍重试(20:46 批 connect_failed
+    三连的应对); widget v=38
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=41"
-NEW = "src=/js/voice-wake-widget.js?v=42"
+OLD = "src=/js/voice-wake-widget.js?v=42"
+NEW = "src=/js/voice-wake-widget.js?v=43"
 
 
 def main():

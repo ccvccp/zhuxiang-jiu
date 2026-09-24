@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=37";
+  var VER = "v=38";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -792,14 +792,14 @@
       try { ws.send(JSON.stringify({ type: "arm", wakeword: getWord() })); }
       catch (e) { teardownSeg(); return; }
     }
-    /* 建连/arm → ready 5s 守卫(X5 握手卡死兜底): 超时可见化
-       (原静默拆——用户喊了没反应无任何提示是黑箱) */
+    /* 建连/arm → ready 8s 守卫: 服务端段内重试一次(2×3s 建连)
+       需 8s 容忍; 超时可见化(用户喊了没反应无提示是黑箱) */
     eng.armTimer = setTimeout(function () {
       if (eng.ws === ws && !eng.wsReady) {
         teardownSeg();
         diagTip("识别通道没跟上——请再喊一声", 8);
       }
-    }, 5000);
+    }, 8000);
   }
 
   /* 推流(纯发送器): 从 ring 取 200ms(3200 样本@16k)帧发送。

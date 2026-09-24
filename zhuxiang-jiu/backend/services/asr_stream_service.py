@@ -33,11 +33,18 @@ import asyncio
 import json
 import logging
 import os
+import ssl
 import uuid
 
 import websockets
 
 logger = logging.getLogger("asr_stream_service")
+
+# V4.5 握手凭证复用(扬弃 V4 连接复用): 模块级 SSLContext 复用
+# → TLS 1.3 session ticket 缓存——每段仍是全新连接(隔离性),
+# 但后续握手省 1 RTT(跨境 ~250ms)且降低「高频新建 TLS」限频
+# 面(20:46 批 connect_failed 三连的应对)
+_SSL_CTX = ssl.create_default_context()
 
 # 生效并发 task 数(资源红线——单 worker 事件循环内增减无竞争)
 _ACTIVE = 0
@@ -76,10 +83,21 @@ class AsrStreamSession:
         return self._failed
 
     async def start(self, hotwords: list[str]) -> bool:
-        """建百炼连(段内专用) + run-task(含即时热词), 等 task-started
+        """建百炼连(段内专用) + run-task, 失败立即换新连接重试一次
+
+        V4.5: 跨境建连偶发抖动(20:46 批三连)——单次失败重试
+        将失败率平方稀释; 总耗时 2×3s 由客户端 armTimer(8s)
+        容忍, 正常路径不受影响。
 
         Returns: True=就绪可喂音频; False=不可用(调用方回退)
         """
+        if await self._start_once(hotwords):
+            return True
+        logger.warning("stream_start_retry_once")
+        await self.close()
+        return await self._start_once(hotwords)
+
+    async def _start_once(self, hotwords: list[str]) -> bool:
         global _ACTIVE
         api_key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
         if not api_key:
@@ -98,8 +116,9 @@ class AsrStreamSession:
         try:
             self._ws = await asyncio.wait_for(
                 websockets.connect(url, additional_headers={
-                    "Authorization": f"bearer {api_key}"}),
-                timeout=5)
+                    "Authorization": f"bearer {api_key}"},
+                    ssl=_SSL_CTX),
+                timeout=3)
         except Exception as exc:
             logger.warning("stream_connect_failed(回退上传轨): %s", exc)
             return False

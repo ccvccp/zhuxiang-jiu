@@ -95,7 +95,7 @@ async def run_session_tests():
 
     ws = ScriptWS()
 
-    async def fake_connect(url, additional_headers=None):
+    async def fake_connect(url, additional_headers=None, ssl=None):
         connect_args.append((url, additional_headers))
         return ws
 
@@ -163,7 +163,7 @@ async def run_session_tests():
         # task-failed → finish 返回 None(新会话新连接)
         ws2 = ScriptWS()
 
-        async def fake_connect2(url, additional_headers=None):
+        async def fake_connect2(url, additional_headers=None, ssl=None):
             return ws2
         stream_mod.websockets.connect = fake_connect2
         s2 = AsrStreamSession(send_json)
@@ -183,8 +183,8 @@ async def run_session_tests():
         check("A11 task-failed → finish None", final2 is None)
         await s2.close()
 
-        # 连接失败 → False 且不占计数
-        def boom(url, additional_headers=None):
+        # 连接失败 → False 且不占计数(V4.5 重试一次后再失败)
+        def boom(url, additional_headers=None, ssl=None):
             raise RuntimeError("conn-down")
         stream_mod.websockets.connect = boom
         s3 = AsrStreamSession(send_json)
