@@ -1,4 +1,4 @@
-﻿/* 小竹语音唤醒(voice-wake) —— 主站(Taro H5)全站语音入口
+﻿﻿/* 小竹语音唤醒(voice-wake) —— 主站(Taro H5)全站语音入口
  *
  * 形态: 常态无浮球——开启唤醒后喊「小竹、小竹」弹出语音面板
  *       (iframe 复用全功能语音页); 未开启时右下角显示引导球,
@@ -559,8 +559,16 @@
     while (eng.ring.length > RING_MAX) { eng.ring.splice(0, eng.ring.length - RING_MAX); }
   }
 
-  /* 人声段开始: 分钟熔断校验 → 建流(带环形缓存回补) */
+  /* 人声段开始: token 预检 → 分钟熔断校验 → 建流(带环形缓存回补) */
   function beginSegment() {
+    /* token 预检: 登出/换设备后 wake 开关残留 → 空 token 开 WS
+       只换来 confusing 的「识别通道: 鉴权失败」——预检直接给
+       正确指引(省一次 WS 往返); hiStreak 复位防 VAD 连击 */
+    if (!authToken()) {
+      eng.hiStreak = 0;
+      diagTip("请先登录后再唤醒——点小竹球打开面板登录", 15);
+      return;
+    }
     var now = Date.now();
     eng.segTimes = eng.segTimes.filter(function (t) {
       return now - t < 60000;
