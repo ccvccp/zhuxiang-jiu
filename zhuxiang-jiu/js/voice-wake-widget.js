@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=38";
+  var VER = "v=39";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -549,8 +549,10 @@
       var dur = now - eng.segStart;
       if (rms < TH_OFF) {
         eng.loStreak++;
-        /* 静默 1.2s → 收段; 单段 6s 强制收段(防长语音) */
-        if ((eng.loStreak >= 12 && dur > 900) || dur > 6000) { endSegment(); }
+        /* 静默 0.5s → 快收段(V5 提速: 唤醒词 2s 内说完, 无需
+           等 1.2s 确认静默——喊完到识别的总停顿直接砍 0.7s);
+           单段 6s 强制收段(防长语音) */
+        if ((eng.loStreak >= 6 && dur > 500) || dur > 6000) { endSegment(); }
       } else { eng.loStreak = 0; }
     }
   }

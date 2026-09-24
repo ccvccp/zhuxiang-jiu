@@ -48,13 +48,18 @@ v=42 -> v=43: V4.5 建连提速——服务端 SSLContext 模块级复用
     凭证复用扬弃连接复用)+建连 3s 快败+段内自动重试一次;
     客户端 armTimer 5→8s 容忍重试(20:46 批 connect_failed
     三连的应对); widget v=38
+v=43 -> v=44: V5 停顿双砍——用户主诉「喊完到弹出 4~7s」:
+    ①服务端段间预建连接(单 task 用完即弃: 段尾后台 TLS 握手,
+    arm 探活 1s 直用——建连移出唤醒关键路径, 隔离性保留);
+    ②客户端快收段: 静默判段 1.2s→0.5s(唤醒词 2s 内说完);
+    预期端到端停顿降至 ~2s; widget v=39
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=42"
-NEW = "src=/js/voice-wake-widget.js?v=43"
+OLD = "src=/js/voice-wake-widget.js?v=43"
+NEW = "src=/js/voice-wake-widget.js?v=44"
 
 
 def main():

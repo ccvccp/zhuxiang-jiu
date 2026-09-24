@@ -46,6 +46,32 @@ logger = logging.getLogger("asr_stream_service")
 # 面(20:46 批 connect_failed 三连的应对)
 _SSL_CTX = ssl.create_default_context()
 
+# V5 段间预建连接(单 task 用完即弃): 段尾后台把 TLS 握手做完,
+# arm 到达探活(1s)直用——跨境建连移出唤醒关键路径; 每连接
+# 只跑一个 task 就拆(隔离性保留, 百炼掐线规则无从影响——
+# 预建连接空闲死由探活兜底)
+_PRE = {"ws": None}
+
+
+async def _prearm() -> None:
+    """段尾后台预建连接(armed 态; 失败无害——arm 时现建兜底)"""
+    if _PRE["ws"] is not None:
+        return
+    api_key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
+    if not api_key:
+        return
+    url = os.environ.get(
+        "DASHSCOPE_WS_URL",
+        "wss://dashscope.aliyuncs.com/api-ws/v1/inference/")
+    try:
+        _PRE["ws"] = await asyncio.wait_for(
+            websockets.connect(url, additional_headers={
+                "Authorization": f"bearer {api_key}"},
+                ssl=_SSL_CTX),
+            timeout=3)
+    except Exception as exc:
+        logger.info("stream_prearm_failed: %s", exc)
+
 # 生效并发 task 数(资源红线——单 worker 事件循环内增减无竞争)
 _ACTIVE = 0
 
@@ -113,15 +139,32 @@ class AsrStreamSession:
                  if str(w).strip()]
         if words:
             params["vocabulary"] = {w: 5 for w in words[:120]}
-        try:
-            self._ws = await asyncio.wait_for(
-                websockets.connect(url, additional_headers={
-                    "Authorization": f"bearer {api_key}"},
-                    ssl=_SSL_CTX),
-                timeout=3)
-        except Exception as exc:
-            logger.warning("stream_connect_failed(回退上传轨): %s", exc)
-            return False
+        # V5: 取预建连接(段尾已握手)——探活 1s, 死/无则现建
+        ws = _PRE["ws"]
+        _PRE["ws"] = None
+        if ws is not None:
+            try:
+                await asyncio.wait_for(ws.ping(), timeout=1)
+            except AttributeError:
+                pass   # mock 无 ping——直用
+            except Exception:
+                logger.info("stream_prearm_stale")
+                import contextlib
+                with contextlib.suppress(Exception):
+                    await ws.close()
+                ws = None
+        if ws is None:
+            try:
+                ws = await asyncio.wait_for(
+                    websockets.connect(url, additional_headers={
+                        "Authorization": f"bearer {api_key}"},
+                        ssl=_SSL_CTX),
+                    timeout=3)
+            except Exception as exc:
+                logger.warning(
+                    "stream_connect_failed(回退上传轨): %s", exc)
+                return False
+        self._ws = ws
         _ACTIVE += 1
         self._task_id = uuid.uuid4().hex
         try:
@@ -220,3 +263,6 @@ class AsrStreamSession:
                 await self._ws.close()
             self._ws = None
             _ACTIVE = max(0, _ACTIVE - 1)
+            # V5 段尾预建下一条(armed 态 TLS 提前握手,
+            # 下一段 arm 探活直用)
+            asyncio.create_task(_prearm())
