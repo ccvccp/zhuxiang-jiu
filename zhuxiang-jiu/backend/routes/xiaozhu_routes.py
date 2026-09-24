@@ -367,6 +367,7 @@ async def ws_asr(ws: WebSocket):
             # 并发红线不挤: _ACTIVE 只数活跃百炼流, 空闲
             # 预热连接零百炼资源
             await ws.send_json({"type": "armed"})
+            logger.info("ws_asr_v2_armed")  # 埋点: 预热就绪
             while True:
                 arm = None
                 while arm is None:
@@ -385,11 +386,15 @@ async def ws_asr(ws: WebSocket):
                         continue
                     if _mt == "arm":
                         arm = m
+                logger.info("ws_asr_v2_arm wakeword=%r",
+                            arm.get("wakeword"))  # 埋点: 段开始
                 session = AsrStreamSession(ws.send_json)
                 if not await session.start(
                         await _wake_hot(arm.get("wakeword"))):
                     # 建流失败: 报错回等下一 arm(连接保活,
                     # 客户端 diagTip 后下一段自动重试)
+                    logger.warning(
+                        "ws_asr_v2_stream_unavailable")
                     await ws.send_json(
                         {"type": "error",
                          "error": "流式识别不可用",

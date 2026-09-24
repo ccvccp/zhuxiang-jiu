@@ -18,13 +18,21 @@ v=37 -> v=38: 连接预热 + 意图锚定——V2 预热协议(auth.ver=2 →
     nginx 空闲超时, 段后保活回池; 服务端双协议旧客户端零影响) +
     商品页上下文锚定(hash→面板预取商品名, 指代词「这个多少钱」
     前缀注入商品名, 文本轮+流式语音轨); widget VER v=32 -> v=33
+v=37 -> v=38: 连接预热 + 意图锚定——V2 预热协议(auth.ver=2 →
+    armed → arm 循环多段复用, 唤醒起段省 ~1s 握手, 25s ping 穿
+    nginx 空闲超时, 段后保活回池; 服务端双协议旧客户端零影响) +
+    商品页上下文锚定(hash→面板预取商品名, 指代词「这个多少钱」
+    前缀注入商品名, 文本轮+流式语音轨); widget VER v=32 -> v=33
+v=38 -> v=39: v2 协议埋点 + arm 超时可见化——15:40 实测零日志
+    黑箱(ws_asr_v2_armed/arm 埋点补齐), 客户端 5s arm 超时
+    静默拆改提示「识别通道没跟上」; widget VER v=33 -> v=34
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=37"
-NEW = "src=/js/voice-wake-widget.js?v=38"
+OLD = "src=/js/voice-wake-widget.js?v=38"
+NEW = "src=/js/voice-wake-widget.js?v=39"
 
 
 def main():

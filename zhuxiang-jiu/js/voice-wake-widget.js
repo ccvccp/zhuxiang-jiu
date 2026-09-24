@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=33";
+  var VER = "v=34";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -769,9 +769,13 @@
       try { ws.send(JSON.stringify({ type: "arm", wakeword: getWord() })); }
       catch (e) { teardownSeg(); return; }
     }
-    /* 建连/arm → ready 5s 守卫(X5 握手卡死兜底) */
+    /* 建连/arm → ready 5s 守卫(X5 握手卡死兜底): 超时可见化
+       (原静默拆——用户喊了没反应无任何提示是黑箱) */
     eng.armTimer = setTimeout(function () {
-      if (eng.ws === ws && !eng.wsReady) { teardownSeg(); }
+      if (eng.ws === ws && !eng.wsReady) {
+        teardownSeg();
+        diagTip("识别通道没跟上——请再喊一声", 8);
+      }
     }, 5000);
   }
 
