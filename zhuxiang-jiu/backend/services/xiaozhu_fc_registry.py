@@ -260,6 +260,19 @@ TOOL_REGISTRY = {
         "requiresConsent": False,
         "safeMessage": "口碑暂时读取失败, 请稍后再试。",
     },
+    "map.nearby": {
+        "operationId": "find_nearby_stores",
+        "summary": "附近门店(智图 POI 清单播报)",
+        "description": "【只读】当用户问「附近哪有卖竹香酒"
+                      "的/最近的门店/边吃边买」时调用, "
+                      "从智图 POI 库按类型意图过滤播报"
+                      "门店清单。❌ 店名/营业状态必须来自"
+                      "智图 POI 库, 禁止编造门店。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.01,
+        "requiresConsent": False,
+        "safeMessage": "门店查询暂时不可用, 请稍后再试。",
+    },
     # ---------- 写(2) ----------
     "trust.bind": {
         "operationId": "bind_trust_profile",

@@ -67,7 +67,9 @@ SAFE_READONLY = {"product.new", "product.price",
                  # 酒的问话四问(全只读——77/75号 gate 继承,
                  # 场景/评论零写操作)
                  "wine.verify", "wine.craft",
-                 "wine.recommend", "wine.reviews"}
+                 "wine.recommend", "wine.reviews",
+                 # 智图联动(全只读观测面——POI 清单播报)
+                 "map.nearby"}
 SAFE_WRITE: set[str] = set()        # 一般写: 执行+播报(现空)
 SENSITIVE = {"trust.convert",        # 高敏: confirmToken 流
              "repair.execute",       # 49号P0: 修复执行同高敏流

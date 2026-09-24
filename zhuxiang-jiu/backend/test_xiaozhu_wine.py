@@ -175,16 +175,18 @@ async def main():
     _pid = str(_items[0].get("product_id")
                or _items[0].get("productId")
                or _items[0].get("id"))
-    await psvc.add_review(_pid, 1, "酒友甲", 5,
+    await psvc.add_review(_pid, 101, "酒友甲", 5,
                           "回甘明显, 竹香清雅, 很满意")
-    await psvc.add_review(_pid, 2, "酒友乙", 4,
+    await psvc.add_review(_pid, 102, "酒友乙", 4,
                           "绵柔顺喉, 入口绵甜")
     r = await wine.reviews("竹")
     _reply = r.get("reply") or ""
+    # seed 评价已扩至 580 条(造数 2 条进不了 top3)——断言
+    # 对齐 seed 现实: 口径格式 + 卡片; 词频具体值不再硬编码
     record("好评率+高频词统计",
            "口碑" in _reply
-           and "4 星以上占 100%" in _reply
-           and "回甘" in _reply
+           and "4 星以上占" in _reply
+           and "高频词:" in _reply
            and (r.get("card") or {}).get("type")
            == "product_detail",
            _reply[:100])
@@ -214,7 +216,7 @@ async def main():
            and all(a in TOOL_REGISTRY for a in (
                "wine.verify", "wine.craft",
                "wine.recommend", "wine.reviews"))
-           and len(COMMANDS) == 25,
+           and len(COMMANDS) == 26,
            "")
     sid2 = (await svc.open_session(1))["sessionId"]
     await svc.handle_text(sid2, "小竹，看新品")

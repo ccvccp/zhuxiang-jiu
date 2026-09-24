@@ -683,6 +683,18 @@ COMMANDS = [
                      "评论", "好评", "酒友怎么说"],
         "examples": ["小竹，大家觉得这款酒怎么样"],
     },
+    {
+        # 智图联动·map.nearby: 附近门店问话(全只读观测面,
+        # 旗舰/体验/零售直营 + 餐饮"边吃边买"双意图)
+        "action": "map.nearby",
+        "label": "附近门店",
+        "patterns": ["附近哪有卖", "附近哪里有", "最近的门店",
+                     "附近门店", "哪有门店", "附近能买到",
+                     "附近买.*竹", "附近.*卖.*酒",
+                     "边吃边买", "附近能吃饭", "哪能边吃边喝"],
+        "examples": ["小竹，附近哪有卖竹香酒的",
+                     "小竹，最近的门店在哪"],
+    },
 ]
 
 # 执行留痕回溯口径(v2 B1: "我刚才做了什么"聚合的 intent 集合
@@ -1896,6 +1908,13 @@ class XiaozhuService:
                     return await _wine.recommend(text)
                 return await _wine.reviews(
                     self._extract_keyword(text))
+            if action == "map.nearby":
+                # 智图联动(全只读): 附近门店→POI 清单播报
+                from services.xiaozhu_map_service import (
+                    XiaozhuMapService,
+                )
+                return await XiaozhuMapService().nearby(
+                    text, member_id)
             if action == "cart.add":
                 return await self._exec_cart_add(
                     session, text)
