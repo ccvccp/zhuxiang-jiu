@@ -14,11 +14,13 @@ qwen-audio-3.0-asr-flash-streaming → 中间结果流式推回 H5
       轨同机制, 品牌词/产品名/误听修正词每连接注入
     - 音频二进制帧(16kHz 16bit 单声道 PCM, ≤16KB/帧)
 
-V4 连接池化(2026-09-24 实测驱动): 服务器(新加坡)→百炼(杭州)
-跨境 TLS 握手 1-2s, 唤醒高频连测下 connect_failed 持续爆发
-(「几轮后不能唤醒」主诉)——百炼 WS 长连接常驻池化, task 级
-复用: 段结束只终 task 不关连接, 断线自愈重连; _ACTIVE 语义
-收敛为"活跃百炼 task 数"(并发红线更精确)。
+V4.4 一段一连接(2026-09-24 深夜定案): V4 池化系列(复用/
+轮换/探活)在百炼不透明掐线规则(同连接时而 4 task 时而 2
+task 即 1007; 空闲单方断致 TCP 半开)面前无法收敛——连接
+寿命不可依赖; 回归每段独立连接的确定性形态: arm 处理内
+同步建连(跨境 1~2s, 客户端 armTimer 5s 容忍), 段尾即关,
+零跨段状态(引用漂移/半开/寿命全不存在)。armed 预热
+(浏览器→后端)收益保留——跨境握手只此一段延迟。
 
 设计原则:
     - 纯 websockets 库(容器已装 17.1, 同库承载服务端)
@@ -51,104 +53,17 @@ def active_conns() -> int:
     return _ACTIVE
 
 
-# ---------- V4 百炼连接池(长连接常驻, task 级复用) ----------
-_POOL = {"ws": None, "tasks": {}}
-
-
-async def _pool_connect(probe: bool = False):
-    """取池连接(无/死则重连); probe=True 先协议层探活
-
-    V4.3: 百炼会单方面断开空闲/高龄连接(1007/keepalive 1011
-    双实证), 我方 TCP 半开不自知——run-task 进黑洞吃 5s 超时;
-    probe 用 ws.ping()(协议层, 百炼必回 pong)2s 内暴露死连接,
-    活连接仅增 ~1 RTT。"""
-    if _POOL["ws"] is not None:
-        ws = _POOL["ws"]
-        if probe and hasattr(ws, "ping"):
-            try:
-                await asyncio.wait_for(ws.ping(), timeout=2)
-            except Exception:
-                logger.warning("stream_pool_probe_dead")
-                await _kick_pool()
-        if _POOL["ws"] is not None:
-            return _POOL["ws"]
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
-    if not api_key:
-        return None
-    url = os.environ.get(
-        "DASHSCOPE_WS_URL",
-        "wss://dashscope.aliyuncs.com/api-ws/v1/inference/")
-    try:
-        ws = await asyncio.wait_for(
-            websockets.connect(
-                url, additional_headers={
-                    "Authorization": f"bearer {api_key}"}),
-            timeout=8)
-    except Exception as exc:
-        logger.warning("stream_connect_failed(回退上传轨): %s", exc)
-        return None
-    _POOL["ws"] = ws
-    asyncio.create_task(_pool_reader())
-    return ws
-
-async def _kick_pool() -> None:
-    """坏连接踢池(段失败自愈): run-task 失败/task-started 超时
-    = 连接可能半死(跨境中间设备静默断开, 前几轮实证)——留在
-    池里下一段继续用坏连接继续超时, 循环吃轮次; 踢掉后下一段
-    重建新鲜连接。关闭触发 reader finally: 活跃 task 置失败
-    自愈, 池 tasks 清空——事件驱动非主动清空, 无雪崩。"""
-    import contextlib
-    ws = _POOL["ws"]
-    if ws is not None:
-        _POOL["ws"] = None
-        with contextlib.suppress(Exception):
-            await ws.close()
-        logger.warning("stream_pool_kicked")
-
-
-async def _pool_reader():
-    """池连接事件泵: 按 header.task_id 路由到 session
-
-    连接死亡 → 全部活跃 session 置失败自愈(客户端下一段
-    触发重连), 池置空待下次重连。"""
-    ws = _POOL["ws"]
-    try:
-        async for msg in ws:
-            try:
-                m = json.loads(msg)
-            except (ValueError, TypeError):
-                continue
-            header = m.get("header") or {}
-            tid = header.get("task_id") or ""
-            sess = _POOL["tasks"].get(tid)
-            if sess is None and not tid and len(_POOL["tasks"]) == 1:
-                # 无 task_id 兜底(真实百炼事件必带; 仅孤 task 时
-                # 直通——mock/协议边缘场景); 生产出现=协议异常,
-                # 防御日志立即可见(文档采纳: 坏信号须可观测)
-                logger.warning("stream_event_no_task_id")
-                sess = next(iter(_POOL["tasks"].values()))
-            if sess is not None:
-                sess._on_event(m)
-    except Exception as exc:
-        logger.warning("stream_pool_closed: %s", exc)
-    finally:
-        _POOL["ws"] = None
-        for sess in list(_POOL["tasks"].values()):
-            sess._failed = sess._failed or "pool_closed"
-            sess._done.set()
-        _POOL["tasks"].clear()
-
-
 class AsrStreamSession:
-    """单次流式识别会话(H5 一轮语音 ↔ 百炼一个 task)
+    """单次流式识别会话(H5 一轮语音 ↔ 百炼一个 task ↔ 一条连接)
 
-    V4: 连接从池取(复用长连接), close() 只注销 task 不关连接
-    ——跨境握手 ~1s 不再进入唤醒起段关键路径。"""
+    V4.4: 连接生命周期=task 生命周期(段末 close 连接即拆)——
+    段间零共享状态, 百炼掐线规则不透明也无从影响下一段。"""
 
     def __init__(self, send_json):
         """Args: send_json: async (dict) -> None 回推 H5 的发送器"""
         self._send_json = send_json
-        self._ws = None             # V4.2 建流时绑定的连接引用
+        self._ws = None
+        self._reader = None
         self._task_id = ""
         self._last_text = ""
         self._final = None          # 最终文本(None=未完成)
@@ -160,50 +75,38 @@ class AsrStreamSession:
     def failed(self) -> str:
         return self._failed
 
-    def _on_event(self, m: dict) -> None:
-        """池 reader 按 task_id 路由的百炼事件处理"""
-        ev = (m.get("header") or {}).get("event")
-        if ev == "task-started":
-            self._started.set()
-        elif ev == "result-generated":
-            payload = m.get("payload") or {}
-            sentence = (payload.get("output") or {}).get("sentence") or {}
-            txt = str(sentence.get("text") or "")
-            if txt:
-                self._last_text = txt
-                asyncio.ensure_future(self._send_json(
-                    {"type": "partial", "text": txt}))
-        elif ev == "task-finished":
-            self._final = self._last_text
-            self._done.set()
-        elif ev == "task-failed":
-            self._failed = str(
-                (m.get("header") or {}).get("error_message")
-                or "task-failed")
-            self._done.set()
-
     async def start(self, hotwords: list[str]) -> bool:
-        """池取连接 + run-task(含即时热词), 等 task-started
+        """建百炼连(段内专用) + run-task(含即时热词), 等 task-started
 
         Returns: True=就绪可喂音频; False=不可用(调用方回退)
         """
         global _ACTIVE
-        ws = await _pool_connect(probe=True)
-        if ws is None:
+        api_key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
+        if not api_key:
             return False
         if _ACTIVE >= _max_conns():
             logger.warning("stream_max_conns task=%d", _ACTIVE)
             return False
+        url = os.environ.get(
+            "DASHSCOPE_WS_URL",
+            "wss://dashscope.aliyuncs.com/api-ws/v1/inference/")
         params = {"format": "pcm", "sample_rate": 16000}
         words = [str(w).strip() for w in (hotwords or [])
                  if str(w).strip()]
         if words:
             params["vocabulary"] = {w: 5 for w in words[:120]}
-        self._task_id = uuid.uuid4().hex
-        _ACTIVE += 1
-        _POOL["tasks"][self._task_id] = self
         try:
-            await ws.send(json.dumps({
+            self._ws = await asyncio.wait_for(
+                websockets.connect(url, additional_headers={
+                    "Authorization": f"bearer {api_key}"}),
+                timeout=5)
+        except Exception as exc:
+            logger.warning("stream_connect_failed(回退上传轨): %s", exc)
+            return False
+        _ACTIVE += 1
+        self._task_id = uuid.uuid4().hex
+        try:
+            await self._ws.send(json.dumps({
                 "header": {"action": "run-task",
                            "task_id": self._task_id,
                            "streaming": "duplex"},
@@ -218,38 +121,62 @@ class AsrStreamSession:
         except Exception as exc:
             logger.warning("stream_runtask_failed: %s", exc)
             await self.close()
-            await _kick_pool()
             return False
-        self._ws = ws   # V4.2 绑定: 此后 feed/finish 只走本连接
+        self._reader = asyncio.create_task(self._read_loop())
         try:
             await asyncio.wait_for(self._started.wait(), timeout=5)
         except TimeoutError:
             logger.warning("stream_task_start_timeout")
             await self.close()
-            await _kick_pool()
             return False
         return True
 
-    async def feed(self, pcm: bytes) -> None:
-        """转发音频二进制帧(16k 16bit mono PCM)
+    async def _read_loop(self) -> None:
+        """百炼事件泵: partial 透传 H5, 终态置 _final/_failed"""
+        try:
+            async for msg in self._ws:
+                m = json.loads(msg)
+                ev = (m.get("header") or {}).get("event")
+                if ev == "task-started":
+                    self._started.set()
+                elif ev == "result-generated":
+                    payload = m.get("payload") or {}
+                    sentence = (payload.get("output") or {}
+                                ).get("sentence") or {}
+                    txt = str(sentence.get("text") or "")
+                    if txt:
+                        self._last_text = txt
+                        await self._send_json(
+                            {"type": "partial", "text": txt})
+                elif ev == "task-finished":
+                    self._final = self._last_text
+                    self._done.set()
+                    return
+                elif ev == "task-failed":
+                    self._failed = str(
+                        (m.get("header") or {}).get(
+                            "error_message") or "task-failed")
+                    self._done.set()
+                    return
+        except Exception as exc:
+            if not self._done.is_set():
+                self._failed = str(exc)
+                self._done.set()
 
-        V4.2 引用绑定(18:48 雪崩根治): 只走 self._ws(建流时
-        连接)——原读 _POOL["ws"] 在池被踢/重建后, 旧段 PCM 灌进
-        无 task 上下文的新连接, 百炼 1007 掐线雪崩。"""
-        ws = self._ws
-        if ws is not None and self._started.is_set() and pcm:
+    async def feed(self, pcm: bytes) -> None:
+        """转发音频二进制帧(16k 16bit mono PCM, 段内专用连接)"""
+        if self._ws is not None and self._started.is_set() and pcm:
             try:
-                await ws.send(pcm)
+                await self._ws.send(pcm)
             except Exception as exc:
                 logger.warning("stream_feed_failed: %s", exc)
 
     async def finish(self, timeout: float = 8) -> str | None:
         """finish-task → 等终态, 返回最终文本(失败/空返回 None)"""
-        ws = self._ws
-        if ws is None or not self._started.is_set():
+        if self._ws is None or not self._started.is_set():
             return None
         try:
-            await ws.send(json.dumps({
+            await self._ws.send(json.dumps({
                 "header": {"action": "finish-task",
                            "task_id": self._task_id,
                            "streaming": "duplex"},
@@ -262,26 +189,15 @@ class AsrStreamSession:
         return (self._final or "").strip() or None
 
     async def close(self) -> None:
-        """释放 task(幂等); 连接活则留池复用, 空则后台预热下一条
+        """释放资源(幂等; V4.4 连接=task 生命周期, 段末即拆)"""
+        import contextlib
 
-        V4.1(18:41 连测实证): 百炼 task-finished 后常以 1007
-        掐断连接(2~3 task 必断)——「连接长复用」不可依赖; 段尾
-        (本 close)预热保证 armed 等待期手里始终有一条活连接,
-        arm 到达零握手; 连接活着则跳过预热不重建。无用户时
-        预热连接挂到百炼自然断, 无新预热(close 不再被调),
-        静默终结零风暴。"""
         global _ACTIVE
-        if self._task_id:
-            _POOL["tasks"].pop(self._task_id, None)
-            self._task_id = ""
+        if self._reader is not None and not self._reader.done():
+            self._reader.cancel()
+            self._reader = None
+        if self._ws is not None:
+            with contextlib.suppress(Exception):
+                await self._ws.close()
+            self._ws = None
             _ACTIVE = max(0, _ACTIVE - 1)
-            # V4.3 连接 task 寿命轮换(真实注销才计数——幂等):
-            # 百炼单连接 3~4 task 后 1007 掐断(20:24 批实证)
-            # ——跑满 2 task 段尾主动换新, 赶在百炼嫌弃之前
-            _POOL["served"] = _POOL.get("served", 0) + 1
-            if _POOL["ws"] is not None and _POOL["served"] >= 2:
-                _POOL["served"] = 0
-                await _kick_pool()
-        self._ws = None
-        if _POOL["ws"] is None:
-            asyncio.create_task(_pool_connect())
