@@ -243,9 +243,18 @@ class AsrStreamSession:
         return (self._final or "").strip() or None
 
     async def close(self) -> None:
-        """释放 task(幂等); 池连接保留复用(V4 语义变化)"""
+        """释放 task(幂等); 连接活则留池复用, 空则后台预热下一条
+
+        V4.1(18:41 连测实证): 百炼 task-finished 后常以 1007
+        掐断连接(2~3 task 必断)——「连接长复用」不可依赖; 段尾
+        (本 close)预热保证 armed 等待期手里始终有一条活连接,
+        arm 到达零握手; 连接活着则跳过预热不重建。无用户时
+        预热连接挂到百炼自然断, 无新预热(close 不再被调),
+        静默终结零风暴。"""
         global _ACTIVE
         if self._task_id:
             _POOL["tasks"].pop(self._task_id, None)
             self._task_id = ""
             _ACTIVE = max(0, _ACTIVE - 1)
+        if _POOL["ws"] is None:
+            asyncio.create_task(_pool_connect())
