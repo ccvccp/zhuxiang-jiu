@@ -26,13 +26,19 @@ v=37 -> v=38: 连接预热 + 意图锚定——V2 预热协议(auth.ver=2 →
 v=38 -> v=39: v2 协议埋点 + arm 超时可见化——15:40 实测零日志
     黑箱(ws_asr_v2_armed/arm 埋点补齐), 客户端 5s arm 超时
     静默拆改提示「识别通道没跟上」; widget VER v=33 -> v=34
+v=39 -> v=40: 削顶治本——dump 音频取证勘误「弱音频」误判:
+    peak 全钉 32768 满量程削顶(只升不降增益下 X5 AGC 强帧
+    撞顶), 「小竹小竹」瞬态被砍致 ASR 只出「我/你」碎片;
+    V3.4 双向平滑增益(限速1.6x/帧) + 目标 rms 0.10→0.06 +
+    ±0.95 软压缩; dump 开关 XIAOZHU_WS_DUMP(.env)保持常开
+    供复测取证; widget VER v=34 -> v=35
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=38"
-NEW = "src=/js/voice-wake-widget.js?v=39"
+OLD = "src=/js/voice-wake-widget.js?v=39"
+NEW = "src=/js/voice-wake-widget.js?v=40"
 
 
 def main():

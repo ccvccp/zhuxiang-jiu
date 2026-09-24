@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=34";
+  var VER = "v=35";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -572,21 +572,33 @@
   }
 
   function pushRing(samples) {
-    /* V3.1 低能量自适应软增益(此处为唯一入队口——X5 路由增益
-       档不稳, 实测同会话帧 rms 差 20 倍): 段内 rms<目标(0.10)
-       线性放大, 限幅 12x, 只升不降, 段首重置, 静音帧不调 */
+    /* V3.4 双向增益 + 软限幅(实测 dump 勘误: 非弱音频——peak 全
+       钉 32768 削顶, 「小竹小竹」高频瞬态被砍致 ASR 只出「我/
+       你」碎片): ①每帧独立算目标, 双向平滑跟随(限速 1.6x/帧,
+       下限 0.3 上限 12)——根治"只升不降"下 X5 AGC 强帧撞顶;
+       ②目标 rms 0.10→0.06 留削顶余量; ③±0.95 软压缩防硬削
+       (仅救我方增益削顶; 源自身 AGC 削顶留 getUserMedia 约束
+       后手); 段首重置(beginSegment), 静音帧不调 */
     var sq = 0;
     for (var i = 0; i < samples.length; i++) {
       sq += samples[i] * samples[i];
     }
     var rms = Math.sqrt(sq / samples.length);
-    if (rms > 0.004) {
-      var want = 0.10 / rms;
-      if (want > (eng.gain || 1)) { eng.gain = Math.min(12, want); }
+    if (rms > 0.003) {
+      var want = Math.min(Math.max(0.06 / rms, 0.3), 12);
+      var cur = eng.gain || 1;
+      eng.gain = want > cur
+        ? Math.min(want, cur * 1.6)
+        : Math.max(want, cur / 1.6);
     }
     var g = eng.gain || 1;
     for (var i = 0; i < samples.length; i++) {
-      var s = Math.max(-1, Math.min(1, samples[i] * g));
+      var s = samples[i] * g;
+      if (s > 0.95) {
+        s = 0.95 + (s - 0.95) * 0.3; if (s > 1) { s = 1; }
+      } else if (s < -0.95) {
+        s = -0.95 + (s + 0.95) * 0.3; if (s < -1) { s = -1; }
+      }
       eng.ring.push(s < 0 ? s * 32768 : s * 32767);
     }
     while (eng.ring.length > RING_MAX) { eng.ring.splice(0, eng.ring.length - RING_MAX); }
