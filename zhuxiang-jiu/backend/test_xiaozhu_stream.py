@@ -152,25 +152,23 @@ async def run_session_tests():
                   for m in ws.sent))
         await s.close()
         await s.close()
-        check("A8 close 幂等", ws.closed is True)
+        # V4 池语义: close 只注销 task 幂等, 连接保留复用(不关)
+        check("A8 close 幂等(task 表空+连接保留)",
+              not stream_mod._POOL["tasks"] and ws.closed is False)
         check("A9 连接计数归零", stream_mod.active_conns() == 0,
               f"active={stream_mod.active_conns()}")
 
-        # task-failed → finish 返回 None
-        ws2 = ScriptWS()
-        stream_mod.websockets.connect = fake_connect
+        # task-failed → finish 返回 None(池复用同连接, 零新握手)
         s2 = AsrStreamSession(send_json)
-
-        async def fake_connect2(url, additional_headers=None):
-            return ws2
-        stream_mod.websockets.connect = fake_connect2
-        ws2.push("task-started")
-        check("A10 二次会话 start", await s2.start(["竹香"]) is True)
-        ws2.push("task-failed",
+        ws.push("task-started")
+        check("A10 二次会话 start(池复用)",
+              await s2.start(["竹香"]) is True)
+        check("A10b 无新握手(连接复用)", len(connect_args) == 1)
+        ws.push("task-failed",
                  {"output": {"error": "boom"}})
 
         async def push_failed():
-            ws2.push("task-failed",
+            ws.push("task-failed",
                      {"header": {}})
         pf = asyncio.create_task(push_failed())
         final2 = await s2.finish()
@@ -178,7 +176,9 @@ async def run_session_tests():
         check("A11 task-failed → finish None", final2 is None)
         await s2.close()
 
-        # 连接失败 → False 且不占计数
+        # 连接失败 → False 且不占计数(先清池模拟长连接已死)
+        stream_mod._POOL["ws"] = None
+        stream_mod._POOL["tasks"] = {}
         def boom(url, additional_headers=None):
             raise RuntimeError("conn-down")
         stream_mod.websockets.connect = boom
