@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=35";
+  var VER = "v=36";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -426,7 +426,11 @@
              触发音频路由错乱——后续流静音(真机实证: 鉴权成功
              推流但 ASR 无转写, 唤醒无声无息) */
           echoCancellation: false, noiseSuppression: true,
-          autoGainControl: true,
+          /* AGC 关(17:45-51 两批 dump 实证): X5 系统 AGC 把强
+             音节在采集层拉到 ±1.0 削顶(源方波化, 后端软压缩救
+             不了)——「小竹小竹」瞬态全废只出「爱」碎片; 关后源
+             回归自然动态, 归一化交给 V3.4 双向增益(0.3~12x) */
+          autoGainControl: false,
         },
       });
     } catch (e) {
@@ -943,7 +947,7 @@
     }
     try {
       eng.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true },
+        audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: false },
       });
       startWake();
       return true;

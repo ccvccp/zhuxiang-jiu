@@ -32,13 +32,18 @@ v=39 -> v=40: 削顶治本——dump 音频取证勘误「弱音频」误判:
     V3.4 双向平滑增益(限速1.6x/帧) + 目标 rms 0.10→0.06 +
     ±0.95 软压缩; dump 开关 XIAOZHU_WS_DUMP(.env)保持常开
     供复测取证; widget VER v=34 -> v=35
+v=40 -> v=41: X5 系统 AGC 关闭——17:51 批 dump 实证 V3.4 后
+    部分轮仍 peak=32768(「爱。」轮 175122 与 175134):
+    源在浏览器采集层即被 AGC 拉到 ±1.0 削顶(方波化, 后端
+    软压缩救不了); autoGainControl:false 两处(enableWake/
+    enableWakeQuiet), 归一化交给 V3.4 双向增益; widget v=36
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=39"
-NEW = "src=/js/voice-wake-widget.js?v=40"
+OLD = "src=/js/voice-wake-widget.js?v=40"
+NEW = "src=/js/voice-wake-widget.js?v=41"
 
 
 def main():
