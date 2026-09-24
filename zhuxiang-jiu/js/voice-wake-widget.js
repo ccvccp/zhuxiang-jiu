@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=39";
+  var VER = "v=40";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -549,10 +549,12 @@
       var dur = now - eng.segStart;
       if (rms < TH_OFF) {
         eng.loStreak++;
-        /* 静默 0.5s → 快收段(V5 提速: 唤醒词 2s 内说完, 无需
-           等 1.2s 确认静默——喊完到识别的总停顿直接砍 0.7s);
+        /* 静默 0.9s → 收段(21:12 dump 复盘修正: 0.5s 快收把
+           「小竹-换气-小竹」切成两段, 两声匹配必败+间隙噪音
+           段(rms~100)泛滥; 成功轮段长实证 2.2~4.6s——0.9s 给
+           换气留 0.75s 窗口, 仍比原 1.2s 快 0.3s);
            单段 6s 强制收段(防长语音) */
-        if ((eng.loStreak >= 6 && dur > 500) || dur > 6000) { endSegment(); }
+        if ((eng.loStreak >= 9 && dur > 900) || dur > 6000) { endSegment(); }
       } else { eng.loStreak = 0; }
     }
   }
