@@ -74,13 +74,19 @@ v=47 -> v=48: V5.3 跨段组合——21:44:05「你好。」实锤: 用户喊
     两段, 单段全废; 新增呼语挂起(你好|喂|嘿)3s 内紧邻段含
     小竹组词即组合命中; 同修 V5.2 二打竞态(pendingResub 提前
     置空致二打期间 VAD 双 arm); widget v=43
+v=48 -> v=49: 待命呼吸动画 + 商品页情境提示——小点呼吸
+    (xzPulse 2.4s)示意「监听中」+title 提示语; 商品页停留
+    30s 且滚动过半一次性提示「喊小竹小竹说详细介绍」
+    (localStorage 防重, 不自动录音仅降门槛); 意图锚定已上线
+    (3a83b5d)不重做; barge-in 勘察完毕(面板TTS双轨+speak/
+    speakCloud+abort 结构)记单独排期真机验证; widget v=44
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=47"
-NEW = "src=/js/voice-wake-widget.js?v=48"
+OLD = "src=/js/voice-wake-widget.js?v=48"
+NEW = "src=/js/voice-wake-widget.js?v=49"
 
 
 def main():

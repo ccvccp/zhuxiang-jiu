@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=43";
+  var VER = "v=44";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -137,6 +137,8 @@
     "'Microsoft YaHei',sans-serif;border-radius:10px;padding:10px 12px;",
     "box-shadow:0 4px 16px rgba(0,0,0,.3);display:none}",
     "#xiaozhu-wake-tip.show{display:block}",
+    "@keyframes xzPulse{0%,100%{opacity:.35}50%{opacity:.78}}",
+    "#xiaozhu-entry-ball.xz-breathe{animation:xzPulse 2.4s ease-in-out infinite}",
     "@media(min-width:768px){#xiaozhu-wake-tip{bottom:32px}}"
   ].join("");
   document.head.appendChild(css);
@@ -239,6 +241,23 @@
   }
   window.addEventListener("hashchange", pushPageCtx);
 
+  /* 情境提示(轻量引导, 不自动录音仅降门槛): 商品页停留 30s
+     且滚动过半时一次性提示语音用法; localStorage 防重 */
+  var ctxHintAt = 0, ctxHinted = false;
+  try { ctxHinted = localStorage.getItem("xiaozhu.ctxHint") === "1"; }
+  catch (e) { /* 忽略 */ }
+  setInterval(function () {
+    if (ctxHinted || !wakeOn() || !pageCtx()) { ctxHintAt = 0; return; }
+    if (!ctxHintAt) { ctxHintAt = Date.now(); return; }
+    var deep = window.scrollY + window.innerHeight
+      > document.documentElement.scrollHeight * 0.55;
+    if (deep && Date.now() - ctxHintAt > 30000) {
+      ctxHinted = true;
+      try { localStorage.setItem("xiaozhu.ctxHint", "1"); } catch (e) { }
+      showTip("逛累了？喊「小竹小竹」可以说「详细介绍」听讲解", 5000);
+    }
+  }, 4000);
+
   /* ---------- 引导球(仅唤醒未开启时显示: 开启唤醒/普通入口) ---------- */
   var b = document.createElement("button");
   b.id = "xiaozhu-entry-ball";
@@ -274,12 +293,14 @@
     if (on) {
       b.style.width = "40px";
       b.style.height = "40px";
-      b.style.opacity = ".55";
-      b.title = "点击打开小竹语音面板";
+      b.style.opacity = "";
+      b.classList.add("xz-breathe"); /* 待命呼吸动画: 示意监听中 */
+      b.title = "唤醒待命中——喊「小竹小竹」或「你好小竹」（点击打开语音面板）";
     } else {
       b.style.width = "52px";
       b.style.height = "52px";
       b.style.opacity = "1";
+      b.classList.remove("xz-breathe");
       b.title = "";
     }
   }
