@@ -55,10 +55,23 @@ def active_conns() -> int:
 _POOL = {"ws": None, "tasks": {}}
 
 
-async def _pool_connect():
-    """取池连接(无/死则重连); 失败返回 None(调用方回退)"""
+async def _pool_connect(probe: bool = False):
+    """取池连接(无/死则重连); probe=True 先协议层探活
+
+    V4.3: 百炼会单方面断开空闲/高龄连接(1007/keepalive 1011
+    双实证), 我方 TCP 半开不自知——run-task 进黑洞吃 5s 超时;
+    probe 用 ws.ping()(协议层, 百炼必回 pong)2s 内暴露死连接,
+    活连接仅增 ~1 RTT。"""
     if _POOL["ws"] is not None:
-        return _POOL["ws"]
+        ws = _POOL["ws"]
+        if probe and hasattr(ws, "ping"):
+            try:
+                await asyncio.wait_for(ws.ping(), timeout=2)
+            except Exception:
+                logger.warning("stream_pool_probe_dead")
+                await _kick_pool()
+        if _POOL["ws"] is not None:
+            return _POOL["ws"]
     api_key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
     if not api_key:
         return None
@@ -175,7 +188,7 @@ class AsrStreamSession:
         Returns: True=就绪可喂音频; False=不可用(调用方回退)
         """
         global _ACTIVE
-        ws = await _pool_connect()
+        ws = await _pool_connect(probe=True)
         if ws is None:
             return False
         if _ACTIVE >= _max_conns():
@@ -262,6 +275,13 @@ class AsrStreamSession:
             _POOL["tasks"].pop(self._task_id, None)
             self._task_id = ""
             _ACTIVE = max(0, _ACTIVE - 1)
+            # V4.3 连接 task 寿命轮换(真实注销才计数——幂等):
+            # 百炼单连接 3~4 task 后 1007 掐断(20:24 批实证)
+            # ——跑满 2 task 段尾主动换新, 赶在百炼嫌弃之前
+            _POOL["served"] = _POOL.get("served", 0) + 1
+            if _POOL["ws"] is not None and _POOL["served"] >= 2:
+                _POOL["served"] = 0
+                await _kick_pool()
         self._ws = None
         if _POOL["ws"] is None:
             asyncio.create_task(_pool_connect())

@@ -89,6 +89,10 @@ async def run_session_tests():
     print("[A AsrStreamSession 状态机]")
     pushes = []
     connect_args = []
+    # V4.3: 池状态隔离(H 组路由用例已跑过会累积 served/连接)
+    stream_mod._POOL["ws"] = None
+    stream_mod._POOL["tasks"] = {}
+    stream_mod._POOL["served"] = 0
 
     async def send_json(m):
         pushes.append(m)
@@ -104,10 +108,13 @@ async def run_session_tests():
     try:
         os.environ["DASHSCOPE_API_KEY"] = "sk-test"
         s = AsrStreamSession(send_json)
-        # start: 连上后推 task-started
+        # start: run-task 注册 task 后再推 task-started
+        # (真实百炼事件必在 run-task 之后; mock 先 push 会被
+        #  reader 抢先消费成无主事件丢弃——V4 竞态)
+        ok_t = asyncio.create_task(s.start(["竹香", "竹奕"]))
+        await asyncio.sleep(0.08)   # 让 start 完成 run-task+注册
         ws.push("task-started")
-        ok = await s.start(["竹香", "竹奕"])
-        await asyncio.sleep(0.05)   # 让 reader 消费 started
+        ok = await ok_t
         check("A1 start 成功", ok is True)
         rt = ws.sent[0]
         check("A2 run-task 构造(模型/pcm/热词 vocabulary)",
@@ -160,9 +167,10 @@ async def run_session_tests():
 
         # task-failed → finish 返回 None(池复用同连接, 零新握手)
         s2 = AsrStreamSession(send_json)
+        s2_t = asyncio.create_task(s2.start(["竹香"]))
+        await asyncio.sleep(0.08)   # run-task+注册先行(reader 竞态)
         ws.push("task-started")
-        check("A10 二次会话 start(池复用)",
-              await s2.start(["竹香"]) is True)
+        check("A10 二次会话 start(池复用)", await s2_t is True)
         check("A10b 无新握手(连接复用)", len(connect_args) == 1)
         ws.push("task-failed",
                  {"output": {"error": "boom"}})
