@@ -135,6 +135,7 @@ class AsrStreamSession:
     def __init__(self, send_json):
         """Args: send_json: async (dict) -> None 回推 H5 的发送器"""
         self._send_json = send_json
+        self._ws = None             # V4.2 建流时绑定的连接引用
         self._task_id = ""
         self._last_text = ""
         self._final = None          # 最终文本(None=未完成)
@@ -206,6 +207,7 @@ class AsrStreamSession:
             await self.close()
             await _kick_pool()
             return False
+        self._ws = ws   # V4.2 绑定: 此后 feed/finish 只走本连接
         try:
             await asyncio.wait_for(self._started.wait(), timeout=5)
         except TimeoutError:
@@ -216,8 +218,12 @@ class AsrStreamSession:
         return True
 
     async def feed(self, pcm: bytes) -> None:
-        """转发音频二进制帧(16k 16bit mono PCM, 经池连接)"""
-        ws = _POOL["ws"]
+        """转发音频二进制帧(16k 16bit mono PCM)
+
+        V4.2 引用绑定(18:48 雪崩根治): 只走 self._ws(建流时
+        连接)——原读 _POOL["ws"] 在池被踢/重建后, 旧段 PCM 灌进
+        无 task 上下文的新连接, 百炼 1007 掐线雪崩。"""
+        ws = self._ws
         if ws is not None and self._started.is_set() and pcm:
             try:
                 await ws.send(pcm)
@@ -226,7 +232,7 @@ class AsrStreamSession:
 
     async def finish(self, timeout: float = 8) -> str | None:
         """finish-task → 等终态, 返回最终文本(失败/空返回 None)"""
-        ws = _POOL["ws"]
+        ws = self._ws
         if ws is None or not self._started.is_set():
             return None
         try:
@@ -256,5 +262,6 @@ class AsrStreamSession:
             _POOL["tasks"].pop(self._task_id, None)
             self._task_id = ""
             _ACTIVE = max(0, _ACTIVE - 1)
+        self._ws = None
         if _POOL["ws"] is None:
             asyncio.create_task(_pool_connect())
