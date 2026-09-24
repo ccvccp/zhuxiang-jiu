@@ -56,15 +56,20 @@ v=43 -> v=44: V5 停顿双砍——用户主诉「喊完到弹出 4~7s」:
 v=44 -> v=45: 快收段回调——21:12 dump 复盘: 0.5s 快收把
     「小竹-换气-小竹」切成两段致两声匹配必败+噪音间隙段泛滥;
     成功轮段长实证 2.2~4.6s, 收段等待 0.5→0.9s(换气窗口
-    0.75s, 仍比原 1.2s 快 0.3s); connect_failed 零出现+
+    0.75s, 比原 1.2s 仍快 0.3s); connect_failed 零出现+
     arm→final 1 秒级(V5 预建生效, 建连层收官); widget v=40
+v=45 -> v=46: V5.1 弱轮词头捕获——两声词连续成功(小竹小竹
+    ×4)后, 剩余失败轮全部是弱音频轮(rms 456 vs 成功轮 2396+,
+    同位置喊能量波动 5~10 倍): ring 1.5→2.5s 回补更早 +
+    TH_ON 0.012→0.009 弱轮更早起段——物理边界前的最后一档
+    软件压榨; widget v=41
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=44"
-NEW = "src=/js/voice-wake-widget.js?v=45"
+OLD = "src=/js/voice-wake-widget.js?v=45"
+NEW = "src=/js/voice-wake-widget.js?v=46"
 
 
 def main():

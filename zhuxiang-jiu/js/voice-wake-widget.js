@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=40";
+  var VER = "v=41";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -408,8 +408,12 @@
     ahmDead: false,    /* 哑流已判定(防重复告警) */
     ahmResetAt: 0,     /* 上次哑流硬复位时刻(30s 退避防循环) */
   };
-  var RING_MAX = 16000 * 1.5;   /* 环形缓存 1.5s@16k */
-  var TH_ON = 0.012;            /* 起 VAD 门限(RMS) */
+  /* V5.1 弱轮词头捕获: 失败轮实证 rms 456 vs 成功轮 2396+
+     (同位置喊能量波动 5~10 倍)——弱轮音量缓升过门限, 起段
+     慢词头被截; ring 1.5→2.5s 回补更早, TH_ON 0.012→0.009
+     弱轮更早起段(误起段代价=快收段 1s+段熔断兜底) */
+  var RING_MAX = 16000 * 2.5;   /* 环形缓存 2.5s@16k */
+  var TH_ON = 0.009;            /* 起 VAD 门限(RMS) */
   var TH_OFF = 0.006;           /* 止 VAD 门限 */
   var FRAME = 4096;             /* ScriptProcessor 帧长 */
 
