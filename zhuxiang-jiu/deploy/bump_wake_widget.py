@@ -37,13 +37,19 @@ v=40 -> v=41: X5 系统 AGC 关闭——17:51 批 dump 实证 V3.4 后
     源在浏览器采集层即被 AGC 拉到 ±1.0 削顶(方波化, 后端
     软压缩救不了); autoGainControl:false 两处(enableWake/
     enableWakeQuiet), 归一化交给 V3.4 双向增益; widget v=36
+v=41 -> v=42: 尖峰压缩收紧——干净重开(AGC off)后 18:13 批
+    dump 峰值仍全 32768, X5 无视 autoGainControl 约束实证;
+    但 rms 仅 4000~5600=瞬态尖峰(声母爆破音)打满, 非持续
+    削顶; V3.5: 压缩参数收紧(0.8 起压×0.15 斜率×0.95 封顶)
+    + 增益跨段保留(取消段首重置——重置=1 致段首尖峰未收敛
+    即 clamp, 唤醒词声母恰在段首); widget v=37
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=40"
-NEW = "src=/js/voice-wake-widget.js?v=41"
+OLD = "src=/js/voice-wake-widget.js?v=41"
+NEW = "src=/js/voice-wake-widget.js?v=42"
 
 
 def main():

@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=36";
+  var VER = "v=37";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -598,10 +598,15 @@
     var g = eng.gain || 1;
     for (var i = 0; i < samples.length; i++) {
       var s = samples[i] * g;
-      if (s > 0.95) {
-        s = 0.95 + (s - 0.95) * 0.3; if (s > 1) { s = 1; }
-      } else if (s < -0.95) {
-        s = -0.95 + (s + 0.95) * 0.3; if (s < -1) { s = -1; }
+      /* V3.5 尖峰压缩收紧: 18:13 批 dump 峰值仍 32768——
+         rms 仅 4000~5600 却削顶=瞬态尖峰(声母爆破音)打满,
+         ±0.95 起压太晚(源 Float32 尖峰>1.0, 段首 gain 未
+         收敛即 clamp); 0.8 起压×0.15 斜率×0.95 封顶——
+         1.5 尖峰压到 0.905, 声母瞬态保真不再砍头 */
+      if (s > 0.8) {
+        s = 0.8 + (s - 0.8) * 0.15; if (s > 0.95) { s = 0.95; }
+      } else if (s < -0.8) {
+        s = -0.8 + (s + 0.8) * 0.15; if (s < -0.95) { s = -0.95; }
       }
       eng.ring.push(s < 0 ? s * 32768 : s * 32767);
     }
@@ -752,7 +757,9 @@
     eng.segStart = now;
     eng.loStreak = 0;
     eng.lastPartial = "";
-    eng.gain = 1; /* V3.1 软增益段首重置(防增益残留炸下段) */
+    /* V3.5 增益跨段保留(取消段首重置): 双向增益自动回中,
+       重置=1 反致段首尖峰未收敛即削(18:13 批 dump 实证);
+       强弱源切换由限速跟随(1.6x/帧)自愈 */
     var ws = null;
     if (preWs && preWs.readyState === 1) {
       ws = preWs; preWs = null; stopPing();  /* 池命中转正 */
