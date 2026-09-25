@@ -2712,18 +2712,20 @@ function wireCloudCapture() {
         } else if (S.handfree && S.ttsPlaying && !S.hidden) {
           /* barge-in 一期: 播报中强人声打断(文档"打断权绝对
              归属用户")——段外回声门控的对称面: 回声拦死, 有力
-             插话要能进。双条件防误触: ①绝对门限 0.12(强
-             插话近场叠加显著, TTS chunk 切换跳变/常态回声
-             低于此) ②慢跟踪回声基线 1.8x(外放音量极大时
-             抬高门槛); 快升基线会吸收插话声(B9 用例实证),
-             故基线恒慢速 0.02; 3 帧(≈50ms)连续判定,
-             停播+开麦 <200ms; 误触兜底=打断后识别走
-             selfUtter/空轮防线静默丢弃 */
+             插话要能进。误自打断零容忍(10:20 实证: TTS 外放
+             直达麦克风 rms 实测 0.15+, 0.12 门限致每播必自掐
+             →cloudStart 乱开段三连建连→回声碎片段轰炸"不能
+             流程对话"): ①绝对门限 0.35(近场有力喊话叠加才
+             可达, 外放直达/chunk 跳变不可及) ②慢基线 2.5x
+             (快升吸收插话声实证, 恒慢速 0.02) ③5 帧(≈80ms)
+             连续防瞬态; 诚实边界: 无 AEC 下等音量/轻声插话
+             能量不可区分, 一期只拦显著强插话; 误触兜底=
+             打断后识别走 selfUtter/空轮防线静默丢弃 */
           var _base = S.ttsEchoBase || 0;
           S.ttsEchoBase = _base * 0.98 + rms * 0.02;
-          if (rms > Math.max(0.12, _base * 1.8)) {
+          if (rms > Math.max(0.35, _base * 2.5)) {
             S.bargeStreak = (S.bargeStreak || 0) + 1;
-            if (S.bargeStreak >= 3) {
+            if (S.bargeStreak >= 5) {
               S.bargeStreak = 0;
               /* 先取消本循环再重挂(vtick 内 cloudStart 会重建
                  采集节点+新循环——不取消则双循环泄漏) */

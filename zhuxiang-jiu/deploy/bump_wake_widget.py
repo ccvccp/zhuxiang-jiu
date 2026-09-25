@@ -92,21 +92,26 @@ v=50 -> v=51: 唤醒应答主页面直播——X5 面板 iframe 无用户
     「我在，请吩咐」改 widget 主页面 AudioContext 播(开启
     唤醒的点击手势已解锁)——fetch /api/xiaozhu/tts 即取即播;
     面板撤 speak 改 micStatus 文字反馈免双播; widget v=48
-v=51 -> v=54(三版累积补 bump——主站引用断链修复: v52~54
-    只 bump 了 widget VER 未 bump 此处, 浏览器缓存旧 widget
-    致新面板不可达): v52 selfUtter 12s 时间窗(窗外短句放行
-    防误杀); v53 VAD 断句 cloudActive 门控+增益底噪回收(长
-    播报回声轰炸根因——AEC 关闭下段外 0.035 低阈值误判外放
-    声成轮, 1.5kHz 电子音淹没人声双 provider 识别无词);
-    v54 barge-in 一期(播报中强人声打断: 绝对门限 0.12+慢基
-    线 1.8x 双条件, 3 帧 50ms 停播开麦); widget v=48 -> v=54
+v=51 -> v=54(三版累积补 bump——主站引用断链修复: v52~54 只
+    bump 了 widget VER 未 bump 此处, 浏览器缓存旧 widget 致
+    新面板不可达): v52 selfUtter 12s 时间窗; v53 VAD 断句
+    cloudActive 门控+增益底噪回收(长播报回声轰炸根因);
+    v54 barge-in 一期; widget v=48 -> v=54
+v=54 -> v=55: barge-in 误自打断修复——10:20 实证 TTS 外放
+    直达麦克风 rms 0.15+(dump 象限数据), v54 门限 0.12 低于
+    此 → 每播必自掐 → cloudStart 乱开段三连建连(102014/15/16
+    dump 实证) → 回声碎片段轰炸"不能流程对话"; 门限 0.12→
+    0.35 + 基线 1.8x→2.5x + 3 帧→5 帧(80ms 防瞬态); 诚实
+    边界: 无 AEC 下等音量/轻声插话能量不可区分, 一期只拦
+    显著强插话(B11 用例外放直达 0.15~0.2 持续不自打断);
+    widget v=54 -> v=55
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=51"
-NEW = "src=/js/voice-wake-widget.js?v=54"
+OLD = "src=/js/voice-wake-widget.js?v=54"
+NEW = "src=/js/voice-wake-widget.js?v=55"
 
 
 def main():
