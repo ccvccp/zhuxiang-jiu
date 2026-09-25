@@ -92,13 +92,21 @@ v=50 -> v=51: 唤醒应答主页面直播——X5 面板 iframe 无用户
     「我在，请吩咐」改 widget 主页面 AudioContext 播(开启
     唤醒的点击手势已解锁)——fetch /api/xiaozhu/tts 即取即播;
     面板撤 speak 改 micStatus 文字反馈免双播; widget v=48
+v=51 -> v=54(三版累积补 bump——主站引用断链修复: v52~54
+    只 bump 了 widget VER 未 bump 此处, 浏览器缓存旧 widget
+    致新面板不可达): v52 selfUtter 12s 时间窗(窗外短句放行
+    防误杀); v53 VAD 断句 cloudActive 门控+增益底噪回收(长
+    播报回声轰炸根因——AEC 关闭下段外 0.035 低阈值误判外放
+    声成轮, 1.5kHz 电子音淹没人声双 provider 识别无词);
+    v54 barge-in 一期(播报中强人声打断: 绝对门限 0.12+慢基
+    线 1.8x 双条件, 3 帧 50ms 停播开麦); widget v=48 -> v=54
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=50"
-NEW = "src=/js/voice-wake-widget.js?v=51"
+OLD = "src=/js/voice-wake-widget.js?v=51"
+NEW = "src=/js/voice-wake-widget.js?v=54"
 
 
 def main():
