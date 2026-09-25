@@ -1613,42 +1613,53 @@ function isEchoOfTTS(t) {
   var a = norm(t), b = norm(last);
   return a.length >= 2 && a.length <= 12 && b.indexOf(a) >= 0;
 }
-/* 双轨 barge-in v2 回声判定(播报中切断专用)——比子串判定
-   强两级(11:05 实证子串失效: 外放"竹奕·竹香尊享 24690 元"
-   被 ASR 丢字识回"竹奕，24690"不再是原文子串→混合段
-   "竹奕24690。我在请吩咐"误判新指令→误切断+提交→小竹
-   自言自语"自己强说"):
-   ①切句判定: 按句读拆分逐句回声判定, 所有完整句(≥3 字)
-     皆命中才是回声——混合拼接段(回声A+widget 应答B)整段
-     永非单一子串, 逐句才能全拦;
-   ②子序列判定: 句字符按序出现于播报文本即命中(丢字回声
-     "竹奕24690"是"竹奕竹香尊享24690"的按序子序列)——
-     保守方向: 宁漏切断(播报继续续听补位)不误切断(自言
-     自语); 真指令带播报外新词("介绍""多少钱")必放行;
-   ③selfUtter 集合 12s 窗全遍历(wake 应答等);
-   「小竹」开头由调用方豁免 */
+/* 双轨 barge-in v2 回声判定(播报中切断专用)——三级防御的
+   第一级(LCS 比率, 借鉴语义-时序联合校验文档):
+   ①归一化: 去标点+语气词(啊呢吧嘛哦嗯——ASR 插语气词
+     "竹奕啊24690"不再断链);
+   ②切句判定: 按句读拆分逐句回声判定, 所有完整句(≥3 字)
+     皆命中才是回声——混合拼接段(回声A+widget 应答B)逐句
+     才能全拦(11:05 实证);
+   ③LCS 比率 ≥0.75(以 ASR 句长为分母): 一个判定同时容忍
+     丢字(竹奕24690 ⊂ 竹奕竹香尊享24690)/插字(语气词)/
+     同音替换(珠海24690 LCS≈0.83 vs 竹海至尊24690)——
+     子串(11:05 失效)与子序列(插字/同音失效)的超集;
+   ④selfUtter 集合 12s 窗全遍历(wake 应答等);
+   保守方向: 宁漏切断(播报继续续听补位)不误切断(自言自语);
+   纠正词/「小竹」开头由 bargeShouldCut 强制放行 */
 function bargeIsEcho(t) {
   function norm(s) {
     return String(s).replace(
-      /[\s，。？！、,.?!:：；;「」『』（）()\-—…·]/g, "");
+      /[\s，。？！、,.?!:：；;「」『』（）()\-—…·啊呢吧嘛哦嗯呀啦]/g,
+      "");
   }
-  function subseq(a, b) { /* a 按序子序列于 b */
-    if (!a || !b || a.length > b.length) return false;
-    var i = 0;
-    for (var k = 0; k < b.length && i < a.length; k++) {
-      if (b.charAt(k) === a.charAt(i)) i++;
+  function lcsRatio(a, b) { /* LCS 长度 / a.length */
+    if (!a || !b) return 0;
+    var m = a.length, n = b.length;
+    if (m > 60) m = 60; /* 句级短文本, 上界防御 */
+    var prev = [], cur = [];
+    for (var j = 0; j <= n; j++) { prev[j] = 0; cur[j] = 0; }
+    for (var i = 1; i <= m; i++) {
+      for (var k = 1; k <= n; k++) {
+        cur[k] = (a.charAt(i - 1) === b.charAt(k - 1))
+          ? prev[k - 1] + 1
+          : Math.max(prev[k], cur[k - 1]);
+      }
+      var tmp = prev; prev = cur; cur = tmp;
     }
-    return i >= a.length;
+    return prev[n] / m;
   }
   function echoOne(s) { /* 单句回声判定 */
     var a = norm(s);
     if (a.length < 2) return true; /* 碎片句视为回声 */
-    if (subseq(a, norm(S.lastSpoken || ""))) return true;
+    if (lcsRatio(a, norm(S.lastSpoken || "")) >= 0.75) {
+      return true;
+    }
     var us = S.selfUtter || [], ts = S.selfUtterAt || [];
     var now = Date.now();
     for (var i = 0; i < us.length; i++) {
       if (ts[i] && now - ts[i] > 12000) continue;
-      if (subseq(a, norm(us[i]))) return true;
+      if (lcsRatio(a, norm(us[i])) >= 0.75) return true;
     }
     return false;
   }
@@ -1667,14 +1678,24 @@ function bargeIsEcho(t) {
    播报中(非收段中) + partial 非回声且达最小长度 → 用户
    新任务已下达, 切断合成; 「小竹」开头 ≥2 字即明确新指令
    (即使撞回声词也放行), 其余 ≥3 字; stFinalCb 挂起期间
-   (已切断收段中)不重复判定 */
+   (已切断收段中)不重复判定。
+   纠正元词强制放行(三级防御第二级): "不对/别说了/停"等
+   是用户纠错强意图, 无论与播报相似度多高一律切断——
+   纠正词几乎不出现在商品播报中(误触率极低); 不含"取消/
+   继续"类操作词——引导语播报"您可以说取消"会含操作词,
+   收窄到纠正元词防误触 */
 function bargeShouldCut(t) {
   if (!S.ttsPlaying || stFinalCb) return false;
   var _pt = String(t || "").trim();
   var _isWakeHead = /^(小竹|你好小竹)/.test(_pt);
-  if (_pt.replace(/[，。？！、,.?! ]/g, "").length
-      < (_isWakeHead ? 2 : 3)) return false;
-  return _isWakeHead || !bargeIsEcho(_pt);
+  if (_isWakeHead
+      || /^(不对|不是|别说了|闭嘴|停|等等)/.test(_pt)) {
+    return true;
+  }
+  if (_pt.replace(/[，。？！、,.?! ]/g, "").length < 3) {
+    return false;
+  }
+  return !bargeIsEcho(_pt);
 }
 
 /* ===== 确认码分格输入 + 核销(POST /api/xiaozhu/confirm/{token}) ===== */

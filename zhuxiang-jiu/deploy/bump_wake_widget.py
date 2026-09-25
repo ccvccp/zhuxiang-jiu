@@ -125,13 +125,22 @@ v=56 -> v=57: 双轨回声判定升级切句+子序列——11:05:55 实证
     是"竹奕竹香尊享24690"的按序子序列); 保守方向: 宁漏切断
     (播报继续续听补位)不误切断; 真指令带播报外新词必放行;
     widget v=56 -> v=57
+v=57 -> v=58: 回声判定三级防御(语义-时序联合校验文档借鉴)——
+    子序列对插字/同音替换仍失效("竹奕啊24690"语气词断链/
+    "逐奕24690"竹→逐); ①norm 去语气词(啊呢吧嘛哦嗯呀啦);
+    ②LCS 比率 ≥0.75(ASR 句长分母)替代子序列——丢字/插字/
+    同音三失效模式一个判定全覆盖; ③纠正元词强制放行
+    (不对|不是|别说了|闭嘴|停|等等无视相似度切断——纠错
+    强意图; 不含取消/继续类操作词, 引导语播报"您可以说
+    取消"会误触); 能量灰色带仲裁(第三级)记为规模化后路线;
+    widget v=57 -> v=58
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=56"
-NEW = "src=/js/voice-wake-widget.js?v=57"
+OLD = "src=/js/voice-wake-widget.js?v=57"
+NEW = "src=/js/voice-wake-widget.js?v=58"
 
 
 def main():

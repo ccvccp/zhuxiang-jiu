@@ -122,27 +122,35 @@ function bargeIsEchoOf(t, S) {
   return new Function("S", extractFn("bargeIsEcho")
     + "\nreturn bargeIsEcho;")(S || mkS(true))(t);
 }
-ok("B8 播报内容丢字回声(11:05 实证「竹奕，24690」) 子序列拦",
+ok("B8 播报内容丢字回声(11:05 实证「竹奕，24690」) LCS 拦",
    bargeIsEchoOf("竹奕，24690。") === true);
 ok("B9 混合拼接段(回声+widget 应答 11:05:55 原文) 逐句全拦",
    bargeIsEchoOf("竹奕，24690。我在，请吩咐。") === true);
-ok("B10 selfUtter(wake 应答)12s 窗内拦",
+ok("B10 插语气词回声(「竹奕啊，24690」) 归一化拦",
+   bargeIsEchoOf("竹奕啊，24690。") === true);
+ok("B11 同音替换回声(「逐奕，24690」竹→逐) LCS 拦",
+   bargeIsEchoOf("逐奕，24690。") === true);
+ok("B12 selfUtter(wake 应答)12s 窗内拦",
    bargeIsEchoOf("我在，请吩咐") === true);
-ok("B11 selfUtter 12s 窗外不拦(放行)",
+ok("B13 selfUtter 12s 窗外不拦(放行)",
    (function () {
      var S = mkS(true);
      S.selfUtterAt = [Date.now() - 13000];
      return bargeIsEchoOf("我在，请吩咐", S) === false;
    })());
-ok("B12 用户新指令(带播报外新词)放行切断",
+ok("B14 用户新指令(带播报外新词)放行切断",
    makeBargeJudge(mkS(true))("介绍一款竹奕42度酒") === true);
-ok("B13 「小竹」开头 2 字即切断(明确新指令意图)",
+ok("B15 纠正元词强制放行(「不对，查库存」无视相似度)",
+   makeBargeJudge(mkS(true))("不对，查库存") === true);
+ok("B16 纠正元词「停」单字放行",
+   makeBargeJudge(mkS(true))("停") === true);
+ok("B17 「小竹」开头 2 字即切断(明确新指令意图)",
    makeBargeJudge(mkS(true))("小竹") === true);
-ok("B14 非「小竹」开头 2 字碎片不切断",
+ok("B18 非「小竹」开头 2 字碎片不切断",
    makeBargeJudge(mkS(true))("好的") === false);
-ok("B15 收段中(stFinalCb 挂起)不重复切断",
+ok("B19 收段中(stFinalCb 挂起)不重复切断",
    makeBargeJudge(mkS(true), function () {})("有什么新品") === false);
-ok("B16 非播报中不切断",
+ok("B20 非播报中不切断",
    makeBargeJudge(mkS(false))("有什么新品") === false);
 
 /* ---------- C. 流水线队列(pumpTts/ttsEnqueue/stopTtsNow) ---------- */
