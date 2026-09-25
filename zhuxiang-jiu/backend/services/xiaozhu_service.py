@@ -1525,6 +1525,54 @@ class XiaozhuService:
                             + str(at.get("origin") or ""))
             except Exception as exc:  # noqa: BLE001
                 logger.debug("voice48_attr_ctx_skip: %s", exc)
+            # v85-A 工具样例注入(协同范式模式②: LLM 的
+            # command: 分类从裸猜变有据选择——COMMANDS 的
+            # action+examples 精简清单; 高频子集 12 条防
+            # token 膨胀)
+            try:
+                _cmd_lines = []
+                for _c in COMMANDS:
+                    if _c["action"] in (
+                            "wine.verify", "wine.craft",
+                            "wine.recommend", "wine.reviews",
+                            "product.new", "product.price",
+                            "cart.add", "cart.submit",
+                            "order.query", "map.nearby",
+                            "promo.query", "chat.human"):
+                        _ex = " / ".join(
+                            str(e) for e in
+                            (_c.get("examples") or [])[:1])
+                        _cmd_lines.append(
+                            f"- {_c['action']}"
+                            + (f"「{_ex}」" if _ex else ""))
+                if _cmd_lines:
+                    context_desc += (
+                        "\n可用指令(需执行操作时输出对应 "
+                        "command: 前缀意图, 勿编造指令名):\n"
+                        + "\n".join(_cmd_lines))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("voice48_cmd_ctx_skip: %s", exc)
+            # v85-C 会员偏好记忆(模式③ Agentd 主动检索注入:
+            # 本会话已执行指令聚合——LLM 回答贴合用户意图
+            # 演进; 跨会话版记优化池(repo 聚合查询另行)
+            try:
+                _done = [str(t.get("intent"))
+                         for t in (turns or [])
+                         if (t.get("intent") or "")
+                         not in ("", "chat", "wake",
+                                 "not_woken")]
+                if _done:
+                    context_desc += (
+                        "\n本次会话用户已用指令: "
+                        + "、".join(dict.fromkeys(_done)))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("voice48_pref_ctx_skip: %s", exc)
+            # v85-B traceId 贯穿(可观测性黄金法则: LLM 侧与
+            # Agentd 侧埋点经 trace 关联——sid:轮次, 与
+            # voice48_timing 的 sid 同源可搜)
+            _trace = (f"t{session.get('sessionId')}-"
+                      f"{len(turns or []) + 1}")
+            context_desc += f"\n[trace: {_trace}]"
             from services.llm_client import provider_client
             import time as _t
             _llm_t0 = _t.monotonic()
@@ -1534,9 +1582,10 @@ class XiaozhuService:
             result = await _aio.to_thread(
                 provider_client.classify_dialog_intent,
                 command_text, context_desc)
-            logger.info("voice48_timing llm_dialog_ms=%d",
+            logger.info("voice48_timing llm_dialog_ms=%d "
+                        "trace=%s",
                         round((_t.monotonic() - _llm_t0)
-                              * 1000))
+                              * 1000), _trace)
             return result
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice48_smart_intent_skip: %s", exc)
