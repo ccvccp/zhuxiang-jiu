@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=62";
+  var VER = "v=63";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -946,65 +946,15 @@
   }
 
   /* ---------- 唤醒命中 ---------- */
-  /* 唤醒语音应答: widget 主页面 AudioContext 播 TTS——面板
-     iframe 无用户手势(唤醒靠 postMessage 开), X5 WebAudio
-     ctx 挂起 → speakCloud 静默降级(08:36 实证合成成功
-     163KB 却无声); 主页面 ctx 由「开启唤醒」点击手势解锁 ✓ */
-  var wakeReplyCtx = null;
-  function speakWakeReply() {
-    try {
-      var AC = window.AudioContext
-        || window.webkitAudioContext;
-      if (!AC) { return; }
-      if (!wakeReplyCtx) { wakeReplyCtx = new AC(); }
-      if (wakeReplyCtx.state === "suspended") {
-        wakeReplyCtx.resume();
-      }
-      fetch("/api/xiaozhu/tts?text="
-        + encodeURIComponent("我在，请吩咐"), {
-        headers: { Authorization: "Bearer " + authToken() }
-      }).then(function (r) {
-        if (!r.ok) { throw 0; }
-        return r.arrayBuffer();
-      }).then(function (b) {
-        return wakeReplyCtx.decodeAudioData(b);
-      }).then(function (d) {
-        var s = wakeReplyCtx.createBufferSource();
-        s.buffer = d;
-        s.connect(wakeReplyCtx.destination);
-        /* 二级唤醒回环根修(11:35 实证): 应答开播延迟 0.5~3s
-           (fetch+decode)——面板 2.5s VAD 静默窗常在开播前过期
-           → 应答声进 VAD→回声段「我在，请吩咐。」提交→
-           自言自语; 播放状态跨页同步: start/end postMessage
-           面板, 面板 VAD 静默精确跟随实际播放(end+尾音) */
-        try {
-          fr.contentWindow.postMessage(
-            { type: "xz-wake-audio-start" }, "*");
-        } catch (e) { /* 面板未开忽略 */ }
-        s.onended = function () {
-          try {
-            fr.contentWindow.postMessage(
-              { type: "xz-wake-audio-end" }, "*");
-          } catch (e) { /* 忽略 */ }
-        };
-        /* end 超时兜底: onended 丢失(页面隐藏/ctx 销毁)时
-           面板 VAD 静默 Infinity 卡死——5s 强制补 end */
-        setTimeout(function () {
-          try {
-            fr.contentWindow.postMessage(
-              { type: "xz-wake-audio-end" }, "*");
-          } catch (e) { /* 忽略 */ }
-        }, 5000);
-        s.start();
-      }).catch(function () { /* beep 已响, 静默 */ });
-    } catch (e) { /* 忽略 */ }
-  }
-
   function onWakeHit() {
     eng.emptyStreak = 0; /* 命中即清连续空计数 */
     teardownSeg();
+    /* 静默等待式 S1 就绪态(四态状态机文档): 纯声学就绪音
+       「叮-咚」(WebAudio 合成 ~0.4s 零网络零语义)——语音应答
+       「我在，请吩咐」取消: 四轮回环(11:05/11:16/11:28/11:35)
+       全由它的外放回声触发, 语音内容必可被 ASR 识别成指令,
+       纯声学从根上消灭; 文字反馈由面板 micStatus 承担 */
     wakeBeep();
-    speakWakeReply(); /* 「我在，请吩咐」主页面直播 */
     openPanel();
     /* 免唤醒窗口打通: widget 唤醒(ws_asr 轨)不写面板会话——
        服务端 wake 窗口(5 分钟)未被点亮, 唤醒后面板说话被打回

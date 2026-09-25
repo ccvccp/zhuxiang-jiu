@@ -1539,7 +1539,32 @@ function streamTeardown() {
    放大, 限幅 12x 只升不降, cloudStart 重置, 静音帧不调——
    与 widget segFeed 同款策略(治"没听清"与唤醒不中的音频层根因) */
 function streamFeed(f32) {
-  if (!stWS || stWS.readyState !== 1) return;
+  if (!stWS || stWS.readyState !== 1) {
+    /* 句首保护(四态文档"VAD 触发前 100ms 强制保留"的面板版):
+       建连期(0.5~1s)的帧不丢——攒入 stAccum, ready 后随
+       发送循环顺序补推, "叮咚"后立即开口的句首不再丢字 */
+    if (!stWS) return;
+    var rGain = S.gain || 1;
+    var rSrc = audioCtx ? audioCtx.sampleRate : 48000;
+    var rRatio = rSrc / 16000;
+    var rOut = [];
+    for (var rk = stPhase; rk < f32.length; rk += rRatio) {
+      var ri0 = Math.floor(rk);
+      var rv = f32[ri0] * (1 - (rk - ri0));
+      if (ri0 + 1 < f32.length) {
+        rv += f32[ri0 + 1] * (rk - ri0);
+      }
+      rOut.push(Math.max(-1, Math.min(1, rv * rGain)));
+    }
+    stPhase = rk - f32.length;
+    var rMerged = new Float32Array(stAccum.length + rOut.length);
+    rMerged.set(stAccum);
+    for (var rm = 0; rm < rOut.length; rm++) {
+      rMerged[stAccum.length + rm] = rOut[rm];
+    }
+    stAccum = rMerged;
+    return;
+  }
   var sq = 0;
   for (var i = 0; i < f32.length; i++) { sq += f32[i] * f32[i]; }
   var rms = Math.sqrt(sq / f32.length);
@@ -2544,15 +2569,7 @@ window.addEventListener("message", function (ev) {
   if (d.type === "xz-panel-hide") pauseVoiceForHidden();
   else if (d.type === "xz-panel-show") resumeVoiceFromHidden();
   else if (d.type === "xz-page-ctx") setPageCtx(d.ctx);
-  else if (d.type === "xz-wake-audio-start") {
-    /* widget 应答「我在，请吩咐」开播(11:35 实证开播延迟
-       0.5~3s 常超 2.5s VAD 静默窗): VAD 静默切到"等结束"
-       ——收到 end 前不判定, 覆盖全部播放期 */
-    S.wakeVadMute = Infinity;
-  } else if (d.type === "xz-wake-audio-end") {
-    /* 应答播完: 静默再留 0.8s 尾音余量后恢复判定 */
-    S.wakeVadMute = Date.now() + 800;
-  } else if (d.type === "xz-panel-wake-hit") {
+  else if (d.type === "xz-panel-wake-hit") {
     /* widget 唤醒命中(全站唤醒轨) → 面板免唤醒态: 下轮
        发送自动补「小竹，」前缀点亮服务端 5 分钟滑动窗
        (唤醒轨不写面板会话, 不补则被打回「请以小竹开头」);
@@ -2560,27 +2577,22 @@ window.addEventListener("message", function (ev) {
        (06:59 实证「小竹小竹。」成轮污染上下文)——2s 内
        免提轮静默丢弃 */
     S.woken = true;
-    /* 双窗设计(11:28 回环病理修复):
-       ①wakeVadMute 2.5s: VAD 静默窗——widget 应答「我在，
-       请吩咐」外放直达麦克风 rms 超任何阈值, 此窗内 vtick
-       不判定(不置 vadSpoke 不计时)——防应答声被当"说话"→
-       窗口不关→尾音段提交; 仅覆盖应答播放(1.2s+余量),
-       不吞用户指令头(唤醒→说话节奏 >2s, 听到应答才说);
-       ②wakeGrace 4.5s: 提交丢弃窗——应答尾音断句成段后
-       在此窗内提交的轮静默丢弃(防 grace 过期边缘提交,
-       11:28 实证 4s 差 1~2s) */
-    S.wakeVadMute = Date.now() + 2500;
+    /* 静默等待式 S1(四态状态机): 语音应答已取消(widget 改纯
+       声学「叮-咚」), wakeVadMute 只需盖 beep 尾音(0.4s
+       beep+0.6s 余量)——1s 后用户即可说话, 比 2.5s 提速;
+       wakeGrace 4.5s 提交丢弃窗保留(beep 尾音段+环境声
+       早期提交防线) */
+    S.wakeVadMute = Date.now() + 1000;
     S.wakeGrace = Date.now() + 4500;
     updateWakePill();
-    /* 唤醒应答在 widget 主页面直播(X5 无手势时面板 WebAudio
-       挂起——speak 静默无声); 面板只给文字反馈免双播;
-       记入播报集合——应答外放被麦收回时自录检测可命中
-       (集合防 welcome 轮覆盖) */
+    /* 静默等待式: 语音应答取消(纯声学「叮-咚」), 就绪反馈
+       由 micStatus 文字承担; selfUtter 集合保留(播报轮回声
+       检测用) */
     S.selfUtter = S.selfUtter || [];
     S.selfUtterAt = S.selfUtterAt || [];
-    S.selfUtter.push("我在，请吩咐");
-    S.selfUtterAt.push(Date.now());
-    if (S.sid) { setMicStatus("🎙 我在，请吩咐"); }
+    if (S.sid) {
+      setMicStatus("🎙 听令中——请讲(已醒, 直接说)");
+    }
     /* 二级唤醒: 窗口已关(listenClose 静默回归)或播报进行中
        (打断走唤醒词——widget 流独立常开不受面板窗口影响)
        → 唤醒词即时重开拾音窗口; cloudStart 内置 stopTtsNow
@@ -2920,9 +2932,11 @@ function wireCloudCapture() {
       }
     }, 500);
 }
-/* 二级唤醒窗口判定(抽函数供单测): 无话 8s 关窗 / 说话 30s 上限 */
+/* 二级唤醒窗口判定(抽函数供单测): 无话 5s 关窗(S3 续问窗,
+   四态文档值——高频续问节奏 3~5s, 8s 环境声暴露面偏大) /
+   说话 30s 上限(ASR 单段) */
 function listenWindowOver(sec, vadSpoke) {
-  return sec >= 30 || (!vadSpoke && sec >= 8);
+  return sec >= 30 || (!vadSpoke && sec >= 5);
 }
 /* 二级唤醒窗口关闭: 轻关闭(保留已授权流/上下文——重开免
    getUserMedia 数秒防句首丢字), 拆 WS 停 vtick 停 VAD 判定;

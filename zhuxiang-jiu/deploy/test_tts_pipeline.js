@@ -169,10 +169,10 @@ ok("B22 中文数字形态回声(「四十二度的竹叶酒」vs 42度) 归一�
 console.log("[W] 二级唤醒窗口(不问不答/问即唤醒/答完即退)");
 var lwo = new Function(extractFn("listenWindowOver")
   + "\nreturn listenWindowOver;")();
-ok("W1 窗口 7s 无话 不关(8s 阈值内)",
-   lwo(7, false) === false);
-ok("W2 窗口 8s 无话 关窗回归一级",
-   lwo(8, false) === true);
+ok("W1 窗口 4s 无话 不关(5s 阈值内)",
+   lwo(4, false) === false);
+ok("W2 窗口 5s 无话 关窗回归一级(S3 续问窗)",
+   lwo(5, false) === true);
 ok("W3 已说话 29s 不关(30s 硬上限内)",
    lwo(29, true) === false);
 ok("W4 已说话 30s 关(ASR 单段上限)",

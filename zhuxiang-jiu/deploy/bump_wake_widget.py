@@ -175,13 +175,25 @@ v=61 -> v=62: 应答播放状态跨页同步(11:35 实证 2.5s 静默窗
     now+0.8s 尾音); end 超时兜底 5s(onended 丢失防 Infinity
     卡死); TTS 失败路径由 wake-hit 2.5s 起始窗兜底; widget
     v=61 -> v=62
+v=62 -> v=63: 静默等待式 S1 纯声学就绪(四态状态机文档落地)
+    ——「我在，请吩咐」语音应答彻底取消: 四轮回环(11:05/11:
+    16/11:28/11:35)全由它的外放回声触发, 语音内容必可被
+    ASR 识别成指令(播放同步只是治标); widget 只播纯声学
+    「叮-咚」就绪音(WebAudio 合成 0.4s 零网络零语义——文
+    档"S1 提示音必须纯声学"), 面板 micStatus 文字反馈"听
+    令中"; v62 播放同步机制(xz-wake-audio-start/end)随语音
+    应答退役删除; wakeVadMute 2.5s→1s(只盖 beep 尾音——用
+    户 1s 后即可说话, 无应答等待); S3 续问窗 8s→5s(文档值,
+    环境声暴露面收窄); 句首保护: streamFeed 建连期帧攒入
+    stAccum ready 后补推(文档"首字保护"——"叮咚"后立即
+    开口的头 0.5~1s 不再丢字); widget v=62 -> v=63
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=61"
-NEW = "src=/js/voice-wake-widget.js?v=62"
+OLD = "src=/js/voice-wake-widget.js?v=62"
+NEW = "src=/js/voice-wake-widget.js?v=63"
 
 
 def main():
