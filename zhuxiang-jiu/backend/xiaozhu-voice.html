@@ -1156,10 +1156,13 @@ function handleTurn(j, channel) {
                          null, j.autoJump ? null : (j.jump || null));
   /* 自录回环检测用: 小竹播报集合(最近 3 条)——单值 lastBot
      会被恢复会话/welcome 轮覆盖(wake-hit 应答被收音成轮
-     09:06 实证), 集合任一命中即判自录 */
+     09:06 实证), 集合任一命中即判自录; 平行记时间戳——
+     比对仅限 12s 窗内条目(窗外是用户真实话语, 防误杀) */
   S.selfUtter = S.selfUtter || [];
+  S.selfUtterAt = S.selfUtterAt || [];
   S.selfUtter.push(String(j.reply || ""));
-  if (S.selfUtter.length > 3) { S.selfUtter.shift(); }
+  S.selfUtterAt.push(Date.now());
+  if (S.selfUtter.length > 3) { S.selfUtter.shift(); S.selfUtterAt.shift(); }
   /* 78号P1/P3: 播报情绪标签(care 柔慢/steady 稳/cheerful
      明快——TTS 语调路由); P2: 选项引导 chips */
   var mood = j.mood || "";
@@ -1361,14 +1364,19 @@ function postVoiceTranscript(text, durationSec) {
   /* TTS 自录回环: 转写是最近小竹播报(集合, 最多 3 条——
      welcome/widget 应答/回复轮)的子串=小竹自己的声音外放
      被麦克风收回成轮(07:02「好的。」/09:06「我在，请吩咐。」
-     实证)——静默丢弃续听, 不进会话; 比对去标点 */
+     实证)——静默丢弃续听, 不进会话; 比对去标点。
+     12s 时间窗: 回环只发生在播报外放后 ~10s 内(应答播放
+     2s+收段 6.5s), 窗外短句是用户真实话语(「下一个」类
+     撞历史回复子串的误杀风险)——窗外条目跳过不比对 */
   if (S.handfree && text && S.selfUtter) {
     var _nz = function (s) {
       return String(s).replace(/[，。？！、,.?! ]/g, "");
     };
     var _t2 = _nz(text);
     if (String(text).length <= 10) {
+      var _now = Date.now();
       for (var i = 0; i < S.selfUtter.length; i++) {
+        if (S.selfUtterAt && _now - (S.selfUtterAt[i] || 0) > 12000) { continue; }
         if (_nz(S.selfUtter[i]).indexOf(_t2) !== -1) {
           scheduleHandfree(400); return;
         }
@@ -2399,7 +2407,9 @@ window.addEventListener("message", function (ev) {
        记入播报集合——应答外放被麦收回时自录检测可命中
        (集合防 welcome 轮覆盖) */
     S.selfUtter = S.selfUtter || [];
+    S.selfUtterAt = S.selfUtterAt || [];
     S.selfUtter.push("我在，请吩咐");
+    S.selfUtterAt.push(Date.now());
     if (S.sid) { setMicStatus("🎙 我在，请吩咐"); }
   }
 });
