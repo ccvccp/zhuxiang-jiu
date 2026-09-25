@@ -2846,7 +2846,12 @@ function cloudStart() {
     audio: { echoCancellation: false }
   }).then(function (stream) {
     recStream = stream;
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    /* ctx 复用(20:54 修复对偶): 保留的实例携用户手势解锁态,
+       关窗/开窗循环不再新建(X5 新建必 suspended 需点击) */
+    if (!audioCtx || audioCtx.state === "closed") {
+      audioCtx = new (window.AudioContext
+        || window.webkitAudioContext)();
+    }
     /* 唤醒(语音触发, 无手势)打开面板时 ctx 为 suspended——音频图
        不跑, ASR 收不到有效帧 -> 连续识别失败触发"#"断路(误报
        "靠近话筒"提示)。挂一次性交互 resume, 引导用户点一下屏幕 */
@@ -3068,9 +3073,13 @@ function listenClose() {
     recStream.getTracks().forEach(function (t) { t.stop(); });
     recStream = null;
   }
-  if (audioCtx) {
-    try { audioCtx.close(); } catch (e) {}
-    audioCtx = null;
+  /* audioCtx 保留不 close(20:54 换一款轮实证: 关窗 close
+     ctx 后下轮 TTS 走 ttsPlayCtx 新建→X5 无手势 suspended
+     →回复合成不发声="不能下一轮对话"; ctx 不持麦克风,
+     归还麦克风由 recStream.stop 完成, 保留实例零影响) */
+  if (audioCtx && audioCtx.state === "suspended") {
+    try { audioCtx.resume().catch(function () {}); }
+    catch (e) { /* 忽略 */ }
   }
   setMicStatus("🎙 休息了——喊「小竹小竹」随时叫我");
   /* 通知 widget 麦克风已归还(13:09:47 实证「二次唤醒不了」):

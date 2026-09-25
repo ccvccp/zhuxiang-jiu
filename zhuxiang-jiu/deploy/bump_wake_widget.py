@@ -293,13 +293,21 @@ v=72 -> v=73: 压测首轮自言自语双修(19:15~19:17 日志)——
     已知边界: 环境声以意图动词开头("来一个"类)仍可能触发
     指令轨——免提固有(嘈杂环境建议关免提); widget v=72
     -> v=73
+v=73 -> v=74: 面板 ctx 关闭致关窗后 TTS 无声(20:54 换一款
+    轮实证: 两轮指令均正常执行(查 42 度✓/换一款 product.
+    new✓) 但第二轮回复合成不发声——listenClose 关窗时
+    audioCtx.close() 而 ttsPlayCtx 优先复用它; 修复=
+    listenClose 停流拆链保留 ctx 实例(ctx 不持麦克风,
+    recStream.stop 才是归还, 零影响)+cloudStart 开窗复用,
+    与 v71 widget ctx 复用同范式(面板侧对偶); widget v=73
+    -> v=74
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=72"
-NEW = "src=/js/voice-wake-widget.js?v=73"
+OLD = "src=/js/voice-wake-widget.js?v=73"
+NEW = "src=/js/voice-wake-widget.js?v=74"
 
 
 def main():
