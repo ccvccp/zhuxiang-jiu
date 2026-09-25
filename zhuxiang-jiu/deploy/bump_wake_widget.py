@@ -241,13 +241,23 @@ v=67 -> v=68: 二次唤醒流自愈(13:09:47 实证「二次唤醒不了」
     releaseMic+重取 getUserMedia+startWake, 10s 节流防频繁
     开关对话空转重建); 唤醒监听空窗=重取 1~3s(仅对话结束
     关窗时一次, 可接受); widget v=67 -> v=68
+v=68 -> v=69: 播报误判与唤醒空窗三修——①WS 轨 token 自愈
+    (13:12:24 recv=empty→13:18:42 才被 HTTP 轮触发刷新的 6
+    分钟"后面唤醒不了"根因): 面板 tryPanelRefreshToken 对齐
+    apiFetch 401 链, streamConnect onopen 空 token 先单飞
+    刷新再发; ②应答前缀剥离(13:11/13:17/13:18 三实证混合
+    段): 「我在，请吩咐」外放被收音与指令拼段, 前缀占位污染
+    意图("看一款42度的酒500毫升"被 LLM 误判加购回复"已加")
+    ——postVoiceTranscript 剥离前缀纯指令提交; ③服务端
+    "看一款/看个"入 wine.recommend pattern 表(此前只有
+    选/挑/来句式, "看"落入兜底答非所问); widget v=68 -> v=69
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=67"
-NEW = "src=/js/voice-wake-widget.js?v=68"
+OLD = "src=/js/voice-wake-widget.js?v=68"
+NEW = "src=/js/voice-wake-widget.js?v=69"
 
 
 def main():

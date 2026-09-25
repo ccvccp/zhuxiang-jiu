@@ -449,6 +449,37 @@ function getAuth() {
 }
 function setAuth(a) { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); }
 function clearAuth() { localStorage.removeItem(AUTH_KEY); }
+/* WS 轨 token 自愈(对齐 apiFetch 401→refresh 链): HTTP 轨有
+   自愈, 但 WS auth 发送时刻 token 空/过期只有静默失败
+   (13:12:24 recv=empty→13:18:42 才被 HTTP 轮触发刷新——
+   6 分钟"唤醒不了"); streamConnect 空发前先单飞刷新一次,
+   下段连接即用新 token; 失败不阻断(按原 token 发, 服务端
+   报错由 onmessage error 分支再触发) */
+var panelRefBusy = false;
+function tryPanelRefreshToken() {
+  if (panelRefBusy) { return Promise.reject(new Error("busy")); }
+  var auth = getAuth();
+  if (!auth || !auth.refreshToken) {
+    return Promise.reject(new Error("no-refresh-token"));
+  }
+  panelRefBusy = true;
+  return fetch("/api/auth/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken: auth.refreshToken })
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    panelRefBusy = false;
+    var nt = j && (j.accessToken || (j.data && j.data.accessToken));
+    if (!nt) { return Promise.reject(new Error("refresh-empty")); }
+    setAuth(Object.assign(auth, { token: nt,
+      refreshToken: j.refreshToken || (j.data && j.data.refreshToken)
+      || auth.refreshToken }));
+    return nt;
+  }).catch(function (e) {
+    panelRefBusy = false;
+    return Promise.reject(e);
+  });
+}
 
 function showToast(msg) {
   var t = document.getElementById("toast");
@@ -1394,6 +1425,15 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
       }
     }
   }
+  /* 应答前缀剥离(13:11/13:17/13:18 三实证混合段): 唤醒应答
+     「我在，请吩咐」外放被收音与用户新指令拼成一段——前缀
+     占位污染意图("看一款"被 LLM 误判加购); 剥离后纯指令
+     提交; 剥离后空=整段全回声(走上方静默防线) */
+  var _stripped = String(text)
+    .replace(/^[我在请吩咐，。、\s]+/, "").trim();
+  if (_stripped && _stripped !== text) {
+    text = _stripped;
+  }
   /* v3 延迟埋点: 提交时刻 */
   if (S.latMarks) S.latMarks.submit = Date.now();
   setPending(true);
@@ -1476,9 +1516,20 @@ function streamConnect() {
      (原实现读全局 stWS, 面板快速开合时产生 null.send TypeError) */
   ws.onopen = function () {
     if (stWS !== ws) { try { ws.close(); } catch (e) {} return; }
-    try {
-      ws.send(JSON.stringify({ type: "auth", token: (getAuth() || {}).token || "" }));
-    } catch (e) { /* CONNECTING 发送等异常由 onclose 兜底 */ }
+    var sendAuth = function () {
+      try {
+        ws.send(JSON.stringify({ type: "auth",
+          token: (getAuth() || {}).token || "" }));
+      } catch (e) { /* CONNECTING 发送等异常由 onclose 兜底 */ }
+    };
+    if (!(getAuth() || {}).token) {
+      /* 空 token 先单飞刷新(WS 轨自愈——HTTP 401 链管不到
+         这里, 13:12 空窗 6 分钟实证); 刷新失败仍发(服务端
+         error 分支再触发) */
+      tryPanelRefreshToken().then(sendAuth, sendAuth);
+      return;
+    }
+    sendAuth();
   };
   ws.onmessage = function (e) {
     if (stWS !== ws) return; /* 孤儿连接消息忽略 */
