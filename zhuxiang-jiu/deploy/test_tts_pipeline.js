@@ -104,62 +104,46 @@ ok("B6 无 partial(流式轨未出字) 静音650ms → 不提前",
 ok("B7 段外(播报中回声 rms>阈值) 不断句不提交——回声轰炸根因修复",
    makeVtick("有52度的吗", 650, 0.05, false, false) === 0);
 
-/* ---------- B+. barge-in 播报中强人声打断 ---------- */
-console.log("[B+] barge-in 播报中打断");
-function makeBarge(volSeq) {
-  /* volSeq: 每帧音量数组(驱动逐帧) → {stopped, started} */
-  var S = { handfree: true, vadSpoke: false, streamPartial: "",
-            ttsPlaying: true };
-  var stopped = 0, started = 0;
-  var fn = new Function("analyser", "abuf", "waveEl", "vadOpenAt",
-    "S", "vadSilentAt", "requestAnimationFrame", "cloudStop",
-    "document", "cloudActive", "stopTtsNow", "setMicStatus",
-    "volRaf", "cancelAnimationFrame", "cloudStart",
-    vtickCode);
-  volSeq.forEach(function (v) {
-    var abuf = new Uint8Array(512);
-    for (var i = 0; i < abuf.length; i++) {
-      abuf[i] = Math.max(0, Math.min(255,
-        Math.round(128 + v * 128)));
-    }
-    var analyser = { fftSize: 512,
-      getByteTimeDomainData: function (a) { a.set(abuf); } };
-    fn(analyser, abuf,
-       { classList: { add: function () {}, remove: function () {} },
-         style: { setProperty: function () {} } },
-       Date.now() - 10000, S, 0,
-       function () { return 0; },
-       function () {},
-       { getElementById: function () { return {
-           classList: { add: function () {}, remove: function () {} },
-           style: { setProperty: function () {},
-                    removeProperty: function () {} } }; } },
-       0,                                   /* cloudActive=0 段外 */
-       function () { stopped++; },           /* stopTtsNow */
-       function () {},                       /* setMicStatus */
-       1,                                    /* volRaf */
-       function () {},                       /* cancelAF */
-       function () { started++; });          /* cloudStart */
-  });
-  return { stopped: stopped, started: started };
+/* ---------- B+. 双轨 barge-in v2(文本确认版) ---------- */
+console.log("[B+] barge-in v2 文本判定(bargeIsEcho/bargeShouldCut)");
+var bargeCode = [extractFn("bargeIsEcho"),
+                 extractFn("bargeShouldCut")].join("\n");
+function makeBargeJudge(S, stFinalCb) {
+  return new Function("S", "stFinalCb",
+    bargeCode + "\nreturn bargeShouldCut;")(S, stFinalCb || null);
 }
-ok("B8 播报中回声水平(rms 0.05 恒定 10 帧) 不打断",
-   makeBarge([0.05, 0.05, 0.05, 0.05, 0.05,
-              0.05, 0.05, 0.05, 0.05, 0.05]).stopped === 0);
-ok("B9 播报中有力强插话(回声 0.04 底上叠 0.40×6 帧) 停播+开麦",
+function mkS(ttsPlaying) {
+  return { ttsPlaying: ttsPlaying !== false,
+           lastSpoken: "竹海至尊是42度的竹叶酒，口感绵柔顺喉",
+           selfUtter: ["我在，请吩咐"],
+           selfUtterAt: [Date.now()] };
+}
+ok("B8 播报内容回声子串(任意长度) 拦",
+   bargeIsEchoOf("竹海至尊是42度") === true
+   && bargeIsEchoOf("口感绵柔顺喉") === true);
+function bargeIsEchoOf(t) {
+  return new Function("S", extractFn("bargeIsEcho")
+    + "\nreturn bargeIsEcho;")(mkS(true))(t);
+}
+ok("B9 selfUtter(wake 应答)12s 窗内拦",
+   bargeIsEchoOf("我在，请吩咐") === true);
+ok("B10 selfUtter 12s 窗外不拦(放行)",
    (function () {
-     var r = makeBarge([0.04, 0.04, 0.04, 0.04,
-                        0.40, 0.40, 0.40, 0.40,
-                        0.40, 0.40]);
-     return r.stopped === 1 && r.started === 1;
+     var S = mkS(true);
+     S.selfUtterAt = [Date.now() - 13000];
+     return new Function("S", extractFn("bargeIsEcho")
+       + "\nreturn bargeIsEcho;")(S)("我在，请吩咐") === false;
    })());
-ok("B10 TTS chunk 切换跳变(0.05→0.09 持续) 基线跟随不打断",
-   makeBarge([0.05, 0.05, 0.05, 0.09, 0.09,
-              0.09, 0.09, 0.09, 0.09]).stopped === 0);
-ok("B11 TTS 外放直达麦克风(rms 0.15~0.2 实测水平持续) 不自打断",
-   makeBarge([0.15, 0.15, 0.18, 0.2, 0.18,
-              0.15, 0.2, 0.18, 0.15, 0.15,
-              0.2, 0.18, 0.15, 0.2]).stopped === 0);
+ok("B11 用户新指令(非回声)放行切断",
+   makeBargeJudge(mkS(true))("有什么新品") === true);
+ok("B12 「小竹」开头 2 字即切断(明确新指令意图)",
+   makeBargeJudge(mkS(true))("小竹") === true);
+ok("B13 非「小竹」开头 2 字碎片不切断",
+   makeBargeJudge(mkS(true))("好的") === false);
+ok("B14 收段中(stFinalCb 挂起)不重复切断",
+   makeBargeJudge(mkS(true), function () {})("有什么新品") === false);
+ok("B15 非播报中不切断",
+   makeBargeJudge(mkS(false))("有什么新品") === false);
 
 /* ---------- C. 流水线队列(pumpTts/ttsEnqueue/stopTtsNow) ---------- */
 console.log("[C] TTS 分句流水线队列");

@@ -1358,7 +1358,7 @@ function sendVoice(b64, durationSec) {
 }
 /* P1 流式轨提交: 转写已在流式会话完成(说完了就出字),
    只 POST 最终文本+流式统计——跳过重复转写与音频上传 */
-function postVoiceTranscript(text, durationSec) {
+function postVoiceTranscript(text, durationSec, skipSelfCheck) {
   /* 唤醒尾音静默窗: 开面板瞬间免提把唤醒词尾音录成一轮
      (06:59 实证); 应答「我在，请吩咐」外放回环同理——
      窗口内免提轮持续丢弃(不清窗), 窗口过后自然放行 */
@@ -1374,8 +1374,11 @@ function postVoiceTranscript(text, durationSec) {
      实证)——静默丢弃续听, 不进会话; 比对去标点。
      12s 时间窗: 回环只发生在播报外放后 ~10s 内(应答播放
      2s+收段 6.5s), 窗外短句是用户真实话语(「下一个」类
-     撞历史回复子串的误杀风险)——窗外条目跳过不比对 */
-  if (S.handfree && text && S.selfUtter) {
+     撞历史回复子串的误杀风险)——窗外条目跳过不比对;
+     skipSelfCheck: 双轨 barge-in v2 切断路径专用——
+     bargeIsEcho 已含更强判定(无长度上限+selfUtter 全遍
+     历), 二次检测会误静默 ≤10 字短新指令("换一款") */
+  if (!skipSelfCheck && S.handfree && text && S.selfUtter) {
     var _nz = function (s) {
       return String(s).replace(/[，。？！、,.?! ]/g, "");
     };
@@ -1485,6 +1488,28 @@ function streamConnect() {
       /* 边说边出字: 麦克风状态区实时显示中间结果(自纠错) */
       S.streamPartial = m.text; /* 语义感知 VAD 读最新转写尾字 */
       setMicStatus('🗣 <b class="rec">' + m.text + "</b>");
+      /* 双轨 barge-in v2(文本确认版, 用户设计"问话切断合成
+         ——新任务已下达"): 段后 re-arm 使播报期间服务端持续
+         识别推入帧, partial 实时回流。文本层区分取代能量层
+         (X5 无 AEC 下外放直达 rms 0.15+ 与人声能量不可分,
+         v54 能量版实证每播自掐)。切断后发 finish 收段等
+         完整 final——不吞半句(用户可能还没说完), 提交走
+         正常流; 判定规则见 bargeShouldCut */
+      if (bargeShouldCut(m.text)) {
+        stopTtsNow();
+        setMicStatus("🎙 已暂停播报——新任务收到，请讲完");
+        streamFinish(function (finalText) {
+          if (finalText && finalText.trim()) {
+            /* skipSelfCheck: bargeIsEcho 已含 selfUtter 全
+               遍历+宽松子串(强于 postVoiceTranscript 首段
+               检测)——二次检测会误静默 ≤10 字短新指令 */
+            postVoiceTranscript(finalText.trim(), 1, true);
+            return;
+          }
+          streamTeardown();
+          scheduleHandfree(400);
+        });
+      }
     } else if (m.type === "final") {
       var cb = stFinalCb; stFinalCb = null;
       if (cb) cb(m.text || "");
@@ -1587,6 +1612,41 @@ function isEchoOfTTS(t) {
   };
   var a = norm(t), b = norm(last);
   return a.length >= 2 && a.length <= 12 && b.indexOf(a) >= 0;
+}
+/* 双轨 barge-in v2 回声判定(播报中 final 切断专用——比
+   isEchoOfTTS 强: ①无 12 字上限(播报中回流回声可能是
+   长句片段, 上限会放行漏网) ②selfUtter 集合全遍历
+   (widget「我在，请吩咐」等 lastSpoken 之外的应答也拦);
+   命中即回声, 不切断不提交; 「小竹」开头由调用方豁免 */
+function bargeIsEcho(t) {
+  var norm = function (s) {
+    return String(s).replace(
+      /[\s，。？！、,.?!:：；;「」『』（）()\-—…·]/g, "");
+  };
+  var a = norm(String(t || ""));
+  if (a.length < 2) return true; /* 短碎片视为回声丢弃 */
+  var b = norm(S.lastSpoken || "");
+  if (b && b.indexOf(a) >= 0) return true;
+  var us = S.selfUtter || [], ts = S.selfUtterAt || [];
+  var now = Date.now();
+  for (var i = 0; i < us.length; i++) {
+    if (ts[i] && now - ts[i] > 12000) continue;
+    if (norm(us[i]).indexOf(a) >= 0) return true;
+  }
+  return false;
+}
+/* 双轨 barge-in v2 切断判定(播报中 partial 回流):
+   播报中(非收段中) + partial 非回声且达最小长度 → 用户
+   新任务已下达, 切断合成; 「小竹」开头 ≥2 字即明确新指令
+   (即使撞回声词也放行), 其余 ≥3 字; stFinalCb 挂起期间
+   (已切断收段中)不重复判定 */
+function bargeShouldCut(t) {
+  if (!S.ttsPlaying || stFinalCb) return false;
+  var _pt = String(t || "").trim();
+  var _isWakeHead = /^(小竹|你好小竹)/.test(_pt);
+  if (_pt.replace(/[，。？！、,.?! ]/g, "").length
+      < (_isWakeHead ? 2 : 3)) return false;
+  return _isWakeHead || !bargeIsEcho(_pt);
 }
 
 /* ===== 确认码分格输入 + 核销(POST /api/xiaozhu/confirm/{token}) ===== */
@@ -2669,6 +2729,7 @@ function wireCloudCapture() {
     waveEl.classList.add("live");
     var vadSilentAt = 0;
     S.vadSpoke = false;
+    S.streamPartial = ""; /* 双轨 re-arm 期间回声 partial 清零(防污染 VAD 尾字判定) */
     (function vtick() {
       volRaf = requestAnimationFrame(vtick);
       if (!analyser) return;
@@ -2709,38 +2770,13 @@ function wireCloudCapture() {
               return;
             }
           }
-        } else if (S.handfree && S.ttsPlaying && !S.hidden) {
-          /* barge-in 一期: 播报中强人声打断(文档"打断权绝对
-             归属用户")——段外回声门控的对称面: 回声拦死, 有力
-             插话要能进。误自打断零容忍(10:20 实证: TTS 外放
-             直达麦克风 rms 实测 0.15+, 0.12 门限致每播必自掐
-             →cloudStart 乱开段三连建连→回声碎片段轰炸"不能
-             流程对话"): ①绝对门限 0.35(近场有力喊话叠加才
-             可达, 外放直达/chunk 跳变不可及) ②慢基线 2.5x
-             (快升吸收插话声实证, 恒慢速 0.02) ③5 帧(≈80ms)
-             连续防瞬态; 诚实边界: 无 AEC 下等音量/轻声插话
-             能量不可区分, 一期只拦显著强插话; 误触兜底=
-             打断后识别走 selfUtter/空轮防线静默丢弃 */
-          var _base = S.ttsEchoBase || 0;
-          S.ttsEchoBase = _base * 0.98 + rms * 0.02;
-          if (rms > Math.max(0.35, _base * 2.5)) {
-            S.bargeStreak = (S.bargeStreak || 0) + 1;
-            if (S.bargeStreak >= 5) {
-              S.bargeStreak = 0;
-              /* 先取消本循环再重挂(vtick 内 cloudStart 会重建
-                 采集节点+新循环——不取消则双循环泄漏) */
-              if (volRaf) {
-                cancelAnimationFrame(volRaf); volRaf = 0;
-              }
-              stopTtsNow();
-              setMicStatus("🎙 已暂停播报——请讲");
-              cloudStart();
-              return;
-            }
-          } else {
-            S.bargeStreak = 0;
-          }
         }
+        /* v54/v55 能量版 barge-in 已移除——X5 无 AEC 下外放
+           直达 rms 0.15+ 与人声能量不可分, 门限低了每播自掐
+           (10:20 三连建连实证), 高了拦不住任何插话; 打断
+           判定迁移至文本层双轨(见 streamConnect onmessage
+           final 分支): 播报期间 WS 保活推流持续, 用户新指令
+           final 回流→非回声即切断执行, 回声/碎片忽略 */
     })();
     recStart = Date.now();
     cloudActive = true;
@@ -2811,6 +2847,14 @@ function cloudStop() {
   streamFinish(function (finalText) {
     if (finalText && finalText.trim()) {
       postVoiceTranscript(finalText.trim(), dur);
+      /* 双轨 v2: 段后 re-arm——连接保活+推流持续(采集节点
+         未拆), 播报期间服务端持续识别外放+人声, partial 实
+         时回流走 onmessage 双轨判定(新指令→切断合成),
+         回声 partial 由 bargeIsEcho 拦; V2 协议 arm 探活
+         直用零握手 */
+      try {
+        stWS.send(JSON.stringify({ type: "arm" }));
+      } catch (e) { /* 连接已死由续听 cloudStart 重建 */ }
       return;
     }
     streamTeardown();

@@ -105,13 +105,23 @@ v=54 -> v=55: barge-in 误自打断修复——10:20 实证 TTS 外放
     边界: 无 AEC 下等音量/轻声插话能量不可区分, 一期只拦
     显著强插话(B11 用例外放直达 0.15~0.2 持续不自打断);
     widget v=54 -> v=55
+v=55 -> v=56: 双轨 barge-in v2(文本确认版, 用户设计"问话
+    切断合成——新任务已下达")——能量版(v54/v55)移除: X5 无
+    AEC 下外放直达 rms 0.15+ 与人声能量不可分; v2 架构: 段
+    提交后 re-arm 连接保活+推流持续 → 播报期间服务端持续
+    识别, partial 实时回流 → bargeShouldCut 判定(非回声
+    ≥3 字或「小竹」开头 ≥2 字=新任务)→ 切断合成+finish 收
+    段等完整 final 提交(不吞半句); 回声由 bargeIsEcho 拦
+    (lastSpoken 宽松子串无长度上限+selfUtter 集合 12s 窗
+    全遍历); vtick 段首清 streamPartial 防回声残留污染
+    VAD 尾字; widget v=55 -> v=56
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=54"
-NEW = "src=/js/voice-wake-widget.js?v=55"
+OLD = "src=/js/voice-wake-widget.js?v=55"
+NEW = "src=/js/voice-wake-widget.js?v=56"
 
 
 def main():
