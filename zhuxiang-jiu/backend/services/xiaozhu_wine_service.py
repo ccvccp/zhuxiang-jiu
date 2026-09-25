@@ -247,6 +247,12 @@ class XiaozhuWineService:
                     p.get("price") or 0) - budget))
         # 度数意向非硬墙(02:46 实证 56 度指令全目录热销
         # 返回 42/45 度): ±1 宽容; 全 miss 取度数最接近
+        # v86 修 UnboundLocalError: _abv_sorted 前置初始化
+        # ——原"ina 命中"分支(42 度类)漏赋值, 下方 not
+        # _abv_sorted 读未绑定变量直接炸"数据源波动"
+        # (生产 42 度指令自 v80 起一直失败, verify 只测了
+        # 56 度的 ina 空路径未暴露)
+        _abv_sorted = False
         abv = extract_abv(text)
         if abv and not _named_hit:
             ina = [p for p in pool
@@ -265,9 +271,7 @@ class XiaozhuWineService:
                         abs(float(p.get("alcohol") or 0)
                             - abv),
                         p.get("hot_rank") or 99))
-                _abv_sorted = True
-        else:
-            _abv_sorted = False
+            _abv_sorted = True  # 两分支均已终排序
         if not _abv_sorted:
             pool = sorted(pool, key=lambda p: (
                 p.get("hot_rank") or 99))
