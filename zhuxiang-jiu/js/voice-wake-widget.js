@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=67";
+  var VER = "v=68";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -526,6 +526,28 @@
       }
     } catch (e) { /* 忽略 */ }
     eng.stream = null;
+  }
+  /* 面板归还麦克风后流重建(13:09:47 实证「二次唤醒不了」根因):
+     面板取流期间本引擎旧流被 X5 系统单占 mute, 归还后旧流对象
+     不自愈(识别质量残化只出「小。」碎片)——拆链重取; 10s 节流
+     防频繁开关对话时空转重建 */
+  var lastRebuildAt = 0;
+  async function rebuildWakeStream() {
+    if (!wakeOn()) { return; }
+    var now = Date.now();
+    if (now - lastRebuildAt < 10000) { return; }
+    lastRebuildAt = now;
+    try {
+      stopWake();
+      releaseMic();
+      eng.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false, noiseSuppression: true,
+          autoGainControl: false,
+        },
+      });
+      startWake();
+    } catch (e) { /* 重取失败: 浮球兜底, 用户点击重试 */ }
   }
 
   /* 每音频帧: RMS 能量 VAD + 重采样 16k 入环形缓存/推流 */
@@ -1047,6 +1069,14 @@
   window.addEventListener("message", function (ev) {
     var d = ev && ev.data;
     if (!d || !d.type) { return; }
+    if (d.type === "xz-mic-released") {
+      /* 面板关窗已释放麦克风(v66 listenClose 停流): 本引擎
+        旧流对象在面板取流期间被 X5 系统单占 mute, 归还后
+        不自愈(13:09:47 实证二次唤醒只识出「小。」)——拆
+        旧采集链重取流, 唤醒识别质量恢复 */
+      rebuildWakeStream();
+      return;
+    }
     if (d.type === "xz-panel-maximize") { maximizePanel(); return; }
     if (d.type === "xz-lat" && d.text) {
       /* 78号P1.5: 面板 iframe [LAT] 延迟埋点转发主页面

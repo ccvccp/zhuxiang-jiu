@@ -232,13 +232,22 @@ v=66 -> v=67: 五态闭环文档增量落地——①应答音频预缓存:
     (partial 回流+bargeShouldCut, 延迟=partial 出字 ~1s 非
     文档的 50ms); S4 窗口内 KWS 与面板流麦克风互斥(X5 单占),
     窗口内免唤醒直达已是等效体验; widget v=66 -> v=67
+v=67 -> v=68: 二次唤醒流自愈(13:09:47 实证「二次唤醒不了」
+    根因)——面板关窗停流后 widget 旧流对象在面板取流期间被
+    X5 系统单占 mute, 归还后旧流不自愈(识别质量残化只出
+    「小。」碎片, 多次尝试后 13:11 才完整识别); 修复: ①
+    listenClose 尾部 postMessage xz-mic-released 通知
+    widget; ②widget 收消息 rebuildWakeStream(stopWake+
+    releaseMic+重取 getUserMedia+startWake, 10s 节流防频繁
+    开关对话空转重建); 唤醒监听空窗=重取 1~3s(仅对话结束
+    关窗时一次, 可接受); widget v=67 -> v=68
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=66"
-NEW = "src=/js/voice-wake-widget.js?v=67"
+OLD = "src=/js/voice-wake-widget.js?v=67"
+NEW = "src=/js/voice-wake-widget.js?v=68"
 
 
 def main():

@@ -3000,6 +3000,12 @@ function listenClose() {
     audioCtx = null;
   }
   setMicStatus("🎙 休息了——喊「小竹小竹」随时叫我");
+  /* 通知 widget 麦克风已归还(13:09:47 实证「二次唤醒不了」):
+     面板取流期间 widget 旧流被 X5 单占 mute 不自愈, 归还后
+     widget 需拆链重取流——唤醒识别质量才能恢复 */
+  try {
+    window.parent.postMessage({ type: "xz-mic-released" }, "*");
+  } catch (e) { /* 独立页打开无父页忽略 */ }
 }
 function cloudStop() {
   /* v3 延迟埋点: VAD 断句时刻(全链路计时起点) */
