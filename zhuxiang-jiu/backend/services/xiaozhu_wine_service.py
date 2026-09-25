@@ -203,15 +203,40 @@ class XiaozhuWineService:
                 "产品目录暂时取不到, 请稍后再试。")
         scene = match_scene(text)
         budget = extract_budget(text)
-        pool = [p for p in products
-                if (p.get("status") or "on_sale")
-                == "on_sale"] or products
+        # v81 指名直入: 非场景问句+剥指令词后含明确商品词
+        # ("推荐竹香珍藏")→全站定位该款直接推荐; miss 继续
+        # 场景/度数/预算过滤(泛词"好喝的"零误报)
+        from services.xiaozhu_service import (
+            XiaozhuService,
+        )
+        _kw = XiaozhuService._extract_product_kw(text)
+        _named_hit = False
+        if not scene and len(_kw) >= 2:
+            from services.product_service import (
+                ProductService,
+            )
+            _r = await ProductService().search(
+                _kw, page=1, page_size=1)
+            _hit = ((_r.get("products")
+                     or _r.get("items") or [])[:1]
+                    or [None])[0]
+            if _hit:
+                pool = [_hit]
+                _named_hit = True  # 指名最强信号, 跳过过滤
+            else:
+                pool = [p for p in products
+                        if (p.get("status") or "on_sale")
+                        == "on_sale"] or products
+        else:
+            pool = [p for p in products
+                    if (p.get("status") or "on_sale")
+                    == "on_sale"] or products
         if scene:
             hit = [p for p in pool
                    if scene in (p.get("scenes") or [])]
             # 场景 miss 不空手——回退全目录(热销序)
             pool = hit or pool
-        if budget:
+        if budget and not _named_hit:
             # 预算是意向非硬墙——+20% 宽容; 全 miss 取最近价
             inb = [p for p in pool
                    if float(p.get("price") or 0)
@@ -223,7 +248,7 @@ class XiaozhuWineService:
         # 度数意向非硬墙(02:46 实证 56 度指令全目录热销
         # 返回 42/45 度): ±1 宽容; 全 miss 取度数最接近
         abv = extract_abv(text)
-        if abv:
+        if abv and not _named_hit:
             ina = [p for p in pool
                    if abs(float(p.get("alcohol") or 0)
                           - abv) <= 1]
@@ -260,7 +285,11 @@ class XiaozhuWineService:
         abv_line = f"{abv:g}度附近" if abv else ""
         budget_line = (f"预算 {budget} 元内"
                        if budget else "")
-        reply = (f"{scene_line}{abv_line}{budget_line}挑了两款: "
+        # v81 动态计数(指名直入 1 款/过滤后 1 款不再误称两款)
+        count_line = ("挑了一款"
+                      if len(picks) == 1 else "挑了两款")
+        reply = (f"{scene_line}{abv_line}{budget_line}"
+                 f"{count_line}: "
                  + "; ".join(stories)
                  + "。看中哪款说「来一件」即可。"
                  + WINE_COMPLIANCE_LINE)

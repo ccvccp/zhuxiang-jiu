@@ -1425,6 +1425,70 @@ class XiaozhuService:
                     _jv.detect_user_mood(command_text))
                 if _mood_line:
                     context_desc += "\n" + _mood_line
+            # v81 全站商品定位前置注入: 用户话含商品词→检索
+            # 命中注入该款完整属性(优先于"当前款"); miss 注入
+            # 全站清单事实——LLM 只能据实回答"没有这个商品",
+            # 防编造(此前仅注入当前款 1 款, 提及其他商品无据)
+            try:
+                _kw = self._extract_product_kw(
+                    command_text)
+                if len(_kw) >= 2:
+                    _hit = await self._search_first_product(
+                        _kw)
+                    if _hit:
+                        from repositories \
+                            .product_repository import (
+                                ProductRepository,
+                            )
+                        det = await ProductRepository(
+                        ).get_by_id(
+                            str(_hit.get("id")
+                                or _hit.get("productId")
+                                or _hit.get("product_id")
+                                or ""))
+                        if det:
+                            at = det.get("attributes") or {}
+                            context_desc += (
+                                "\n用户提及商品「"
+                                + str(_kw) + "」已全站检索"
+                                "命中(用户咨询时只能依据此数据"
+                                "回答): "
+                                + str(det.get("name") or "")
+                                + "，"
+                                + str(at.get("alcohol") or "")
+                                + "，"
+                                + str(at.get("aroma") or "")
+                                + "，口感"
+                                + str(at.get("taste") or "")
+                                + "，"
+                                + str(at.get("process") or "")
+                                + "，产自"
+                                + str(at.get("origin") or ""))
+                    else:
+                        # miss: 注入全站清单事实——LLM 据实
+                        # 回答"没有这个商品", 不编造属性
+                        from repositories \
+                            .product_repository import (
+                                ProductRepository,
+                            )
+                        _all = await ProductRepository(
+                        ).list_all()
+                        _names = "; ".join(
+                            str(p.get("name"))
+                            for p in (_all or [])[:8])
+                        context_desc += (
+                            "\n用户提及「" + str(_kw)
+                            + "」未在全站商品名中检索命中"
+                            "(若用户在指名询问某款商品, 如实"
+                            "告知本站暂无这款, 不可编造其属性;"
+                            "若为泛称或品类需求, 依据下方在售"
+                            "清单回答; 全站在售: "
+                            + _names + ")")
+                else:
+                    _hit = None
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("voice48_locate_ctx_skip: %s",
+                             exc)
             # 导购知识注入: 最近推荐款属性摘要(真机实证 chat 轨
             # 瞎答度数"40度左右"/占位符"XX度"——LLM 无据可依;
             # 注入商品数据后 chat 回答有据, 防幻觉红线配套
@@ -2242,10 +2306,21 @@ class XiaozhuService:
         if kw:
             product = await self._search_first_product(kw)
             if product is None:
-                # 指代展开词(完整商品名)搜索 miss →
-                # 上轮商品卡兜底(语义一致: 展开源即上轮卡)
-                product = await self._resolve_last_product(
+                last = await self._resolve_last_product(
                     session)
+                lname = str((last or {}).get("name")
+                            or "")
+                if lname and (len(kw) <= 3
+                              or kw in lname
+                              or lname in kw):
+                    # 指代展开词/短残词("那个52度的")搜索
+                    # miss → 上轮商品卡兜底(语义一致:
+                    # 展开源即上轮卡; 短词检索噪声大)
+                    product = last
+                else:
+                    # v81: 明确商品词 miss 不再兜底加购当前款
+                    # (答非所问误导), 明确回答+在售清单
+                    return await self._product_miss_reply(kw)
         else:
             product = await self._resolve_last_product(
                 session)
@@ -2833,6 +2908,58 @@ class XiaozhuService:
                  or r.get("items") or [])[:1]
         return items[0] if items else None
 
+    @staticmethod
+    async def _product_miss_reply(
+            keyword: str) -> dict:
+        """v81 全站检索 miss 明确回答(回答意图前先全站商品
+        定位——miss 不静默热销兜底, 用户问不存在商品却推了
+        别的=答非所问误导)
+
+        回复附在售清单(前 4 款名称+度数+价格), 引导指名。
+        """
+        from repositories.product_repository import (
+            ProductRepository,
+        )
+        pool = await ProductRepository().list_all()
+        pool = [p for p in pool
+                if (p.get("status") or "on_sale")
+                == "on_sale"] or pool
+        pool = sorted(
+            pool, key=lambda p: p.get("hot_rank") or 99)
+        names = "; ".join(
+            f"「{p.get('name')}」{p.get('alcohol')}度"
+            f"{p.get('price')}元"
+            for p in pool[:4])
+        more = (f" 等 {len(pool)} 款"
+                if len(pool) > 4 else "")
+        return {
+            "reply": f"没有找到「{keyword}」这款酒——"
+                     f"现有在售: {names}{more}。"
+                     "看中哪款直接说名字即可",
+            "card": None,
+        }
+
+    @staticmethod
+    def _extract_product_kw(text: str) -> str:
+        """v81 商品词提取(LLM 轨/推荐轨前置定位用):
+        剥指令动词/疑问语气词后剩余即商品词
+
+        例: "竹香珍藏怎么样"→竹香珍藏;
+        "有没有酱香型的"→酱香型(检索词, miss 即如实告知);
+        纯指令句("看看新品")→空(无商品定位语义)。
+        """
+        t = re.sub(
+            r"(小竹|你好小竹|怎么样|好不好|好不好喝|好吗|"
+            r"多少钱|价格|怎么卖|售价|贵不贵|介绍下?一?下?|"
+            r"推荐[一二两三四五六七八九十\d]*款?|"
+            r"选[一二两三四五六七八九十\d]*款?|"
+            r"挑[一二两三四五六七八九十\d]*款?|"
+            r"来[一二两三四五六七八九十\d]*[件个瓶]|"
+            r"看[一]?看?|有没有|什么|请问|一下|的酒|"
+            r"帮我|帮我查|查一下)",
+            "", str(text or ""))
+        return t.strip()
+
     async def _resolve_cart_items(self,
                                   session: dict) -> list:
         """结算对象: P1 聚合会话购物清单(cart_added 全量多件;
@@ -3321,8 +3448,12 @@ class XiaozhuService:
                              page_size=3)
         items = (r.get("products")
                  or r.get("items") or [])[:3]
+        if not items and keyword:
+            # v81: 指名未中不再静默热销兜底(问不存在的商品
+            # 却推了别的=误导), 明确回答+在售清单
+            return await self._product_miss_reply(keyword)
         if not items:
-            # 搜索未中回退热销(避免空手而归)
+            # 无关键词("多少钱"纯指代上游已消解)回退热销
             hot = await svc.get_hot_products(limit=3)
             items = (hot.get("products")
                      if isinstance(hot, dict) else hot

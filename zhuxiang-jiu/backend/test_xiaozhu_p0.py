@@ -190,12 +190,19 @@ class TestCommands:
                str(r.get("commandText")) + "|"
                + r["reply"][:30])
 
-        # product.price 直接问
-        r = await _text(sid, "小竹，竹韵佳酿多少钱")
+        # product.price 直接问(v81: 真实商品名直达;
+        # 不存在商品明确回答——不再热销兜底误导)
+        r = await _text(sid, "小竹，竹香经典多少钱")
         record("问价格直达",
                "元" in r["reply"]
                and (r["card"] or {}).get("type")
                == "product_detail",
+               r["reply"][:50])
+        r = await _text(sid, "小竹，竹韵佳酿多少钱")
+        record("v81 问价miss明确回答(不热销兜底)",
+               "没有找到" in r["reply"]
+               and "在售" in r["reply"]
+               and not (r["card"] or {}).get("type"),
                r["reply"][:50])
 
         # trust.score / trust.balance → 绑定引导(P0)

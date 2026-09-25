@@ -87,6 +87,32 @@ async def main():
            and extract_abv("500ml") is None
            and extract_abv("预算800元") is None,
            "")
+    print("[A2 v81 商品定位前置]")
+    from services.xiaozhu_service import XiaozhuService
+    from services.xiaozhu_wine_service import (
+        XiaozhuWineService,
+    )
+    _kw1 = XiaozhuService._extract_product_kw("竹香珍藏怎么样")
+    _kw2 = XiaozhuService._extract_product_kw("推荐竹香经典")
+    _kw3 = XiaozhuService._extract_product_kw("小竹看看新品")
+    record("v81 商品词提取(剥指令/疑问词)",
+           _kw1 == "竹香珍藏"
+           and _kw2 == "竹香经典",
+           f"kw1={_kw1!r} kw2={_kw2!r} kw3={_kw3!r}")
+    _miss = await XiaozhuService._product_miss_reply("茅台")
+    record("v81 miss 明确回答(不静默热销)",
+           "没有找到「茅台」" in _miss["reply"]
+           and "在售" in _miss["reply"],
+           _miss["reply"][:60])
+    _named = await XiaozhuWineService().recommend(
+        "推荐竹香经典")
+    _named_items = ((_named.get("card") or {})
+                    .get("items") or [])
+    record("v81 指名直入(推荐竹香经典→1款该款)",
+           len(_named_items) == 1
+           and "竹香经典" in str(
+               (_named_items or [{}])[0].get("name")),
+           f"n={len(_named_items)}")
 
     print("[B 指令路由]")
     record("四问话路由",
