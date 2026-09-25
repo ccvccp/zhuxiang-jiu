@@ -33,6 +33,7 @@
     - 默认零影响: XIAOZHU_LLM_MODE 默认 off(规则轨兜底)
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -1072,6 +1073,21 @@ class XiaozhuService:
                 {"commandText": command_text,
                  "audioMeta": audio_meta})
 
+        # v86-A 空转写/语气词前置防御(语义路由"音频质量预检
+        # 钩子"范式): 纯语气词轮(嗯/啊/咳——环境残声成段)
+        # 不进 rule+LLM 语义解析, 静默请重讲——省一次 LLM
+        # 调用, 2s→毫秒级(07:28:15「嗯」/07:29:26「咳」
+        # 实证语气词轮烧 LLM 才回"没听清"); confirm 拦截
+        # 在上方更早, 到此的语气词必为噪声
+        if _is_filler(command_text):
+            return await self._save_turn(
+                session, channel, text, "chat",
+                {"reply": "没太听清——请再讲一遍完整指令",
+                 "card": None, "silent": True},
+                {"commandText": command_text,
+                 "audioMeta": audio_meta,
+                 "track": "filler"})
+
         # ③ 指代消解(免唤醒连续对话: "这个多少钱")
         turns = await self.repo.list_turns(session_id)
         last = turns[-1] if turns else None
@@ -1347,8 +1363,26 @@ class XiaozhuService:
                  "suggest": _suggest},
                 {"audioMeta": audio_meta,
                  "commandText": command_text})
-        result = await self._execute(
-            session, cmd, resolved, member_id_hint=True)
+        # v86-B 钩子熔断(事件钩子范式"超时熔断"): 800ms 上限
+        # ——DB 慢查询不卡语音主链(高敏沙箱在 _execute 内部
+        # 分流, cart.submit/order.pay 经由 confirm 面已确认,
+        # 熔断风险面=只读钩子; 超时降级话术给用户重试路径)
+        try:
+            result = await asyncio.wait_for(
+                self._execute(
+                    session, cmd, resolved,
+                    member_id_hint=True),
+                timeout=0.8)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "voice48_hook_timeout action=%s", cmd["action"])
+            return await self._save_turn(
+                session, channel, text, cmd["action"],
+                {"reply": "查询慢了点——请再问一次",
+                 "card": None},
+                {"audioMeta": audio_meta,
+                 "commandText": command_text,
+                 "track": "hook_timeout"})
         latency = round((time.monotonic() - started)
                         * 1000, 1)
         saved = await self._save_turn(
@@ -1717,9 +1751,18 @@ class XiaozhuService:
             cmd = next((c for c in COMMANDS
                         if c["action"] == action), None)
             if cmd:
-                result = await self._execute(
-                    session, cmd, command_text,
-                    member_id_hint=True)
+                # v86-B 同款钩子熔断(800ms, 高敏经 confirm 面)
+                try:
+                    result = await asyncio.wait_for(
+                        self._execute(
+                            session, cmd, command_text,
+                            member_id_hint=True),
+                        timeout=0.8)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "voice48_hook_timeout action=%s", action)
+                    result = {"reply": "查询慢了点——请再问一次",
+                              "card": None}
                 return await self._save_turn(
                     session, channel, text, action, result,
                     {"audioMeta": audio_meta,
