@@ -377,13 +377,24 @@ v=80 -> v=83: 全双工范式四件套(文档借鉴: Agentd 状态机标准
     五色徽标(灰待机/绿聆听/黄处理/蓝播报)+pill 配色,
     转换实时可视; 差距矩阵: 环形缓冲 2.5s/打断不断会话/
     KWS 常驻已有且强于文档基线; widget v=80 -> v=83
+v=83 -> v=84: 复测四修(07:25~07:30 实证)——①D "查一款"
+    句式入 wine.recommend pattern(07:26:58「查一款52度的
+    酒」落 LLM 轨 2.6s+上下文拼接污染"竹海至尊您好"+
+    虚假"已加"话术; "查个"不收——"查个订单"会误入荐酒);
+    ②B LLM 轨虚假执行守卫: chat 回复含"已加/已下单/已
+    提交/已结算"一律拦截替换真实状态引导(说已加未加=
+    可信度问题, 07:27:42 应答复读轮实证); ③A 面板哑流
+    自愈: vtick 近零能量(<0.0005, 真麦底噪≥0.002)持续 3s
+    →硬重置重开(30s 退避, 对齐 widget AHM 范式——02:48
+    rms=4 纯静音段+07:25:59 唤醒后说话空转写两轮实证,
+    上轮遗留待修项); widget v=83 -> v=84
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=80"
-NEW = "src=/js/voice-wake-widget.js?v=83"
+OLD = "src=/js/voice-wake-widget.js?v=83"
+NEW = "src=/js/voice-wake-widget.js?v=84"
 
 
 def main():

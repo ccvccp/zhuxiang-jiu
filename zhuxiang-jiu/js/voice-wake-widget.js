@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=83";
+  var VER = "v=84";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 

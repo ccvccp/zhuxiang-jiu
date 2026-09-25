@@ -3095,6 +3095,12 @@ function wireCloudCapture() {
     var vadSilentAt = 0;
     S.vadSpoke = false;
     S.streamPartial = ""; /* 双轨 re-arm 期间回声 partial 清零(防污染 VAD 尾字判定) */
+    /* v83-A 面板哑流自愈(02:48 实证 rms=4 纯静音段/07:25:59
+       唤醒后说话空转写): X5 开窗取流偶发路由错乱拿到哑流
+       (近零能量, 真麦克风必有底噪≥0.002)——开窗聆听中
+       持续 3s 近零=哑流, 硬重置重开一次(30s 退避防循环,
+       对齐 widget AHM 范式) */
+    var panelDeadStreak = 0, panelAhmAt = 0;
     (function vtick() {
       volRaf = requestAnimationFrame(vtick);
       if (!analyser) return;
@@ -3105,6 +3111,23 @@ function wireCloudCapture() {
         sum += d * d;
       }
       var rms = Math.sqrt(sum / abuf.length);
+      if (cloudActive && rms < 0.0005) {
+        panelDeadStreak++;
+        if (panelDeadStreak >= 180
+            && Date.now() - panelAhmAt > 30000) {
+          panelAhmAt = Date.now();
+          panelDeadStreak = 0;
+          try { console.info("[P-AHM] dead stream reset"); }
+          catch (e) {}
+          setMicStatus("🎙 重新校准麦克风…请再讲一遍");
+          setTimeout(function () {
+            if (S.handfree) {
+              listenClose(); cloudStart();
+            }
+          }, 200);
+          return;
+        }
+      } else { panelDeadStreak = 0; }
       waveEl.style.setProperty("--amp",
         Math.max(0.12, Math.min(1, rms * 3.4)).toFixed(3));
       /* --- 免提 VAD 断句(宽限期 0.055 高阈值滤 TTS 残响) ---

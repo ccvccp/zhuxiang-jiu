@@ -675,6 +675,10 @@ COMMANDS = [
                      "选哪款", "帮我挑", "帮我选",
                      "选一款", "挑一款", "来一款", "选个",
                      "挑个", "看一款", "看个",
+                     # v83-D: "查一款"句式(07:26:58 实证落 LLM
+                     # 轨 2.6s+拼接污染+虚假"已加"话术);
+                     # "查个"不收——"查个订单"会误入荐酒
+                     "查一款",
                      "适合送", "适合喝"],
         "examples": ["小竹，商务宴请推荐一款",
                      "小竹，送长辈预算800左右"],
@@ -1720,9 +1724,19 @@ class XiaozhuService:
                          "track": "llm_dialog"})
             # 防幻觉红线: LLM reply 禁数字(prompt 约束),
             # 不产卡片——纯对话存在感
+            # v83-B 虚假执行守卫(07:27:42 实证: 应答复读轮
+            # LLM 回"已加「竹奕…」"但购物清单没有——说已加
+            # 未加=可信度问题; chat 轨无执行权, 执行性话术
+            # 一律拦截替换为真实状态引导)
+            _reply = str(smart["reply"])
+            if re.search(r"已加|已下单|已提交|已结算|"
+                         r"已为您下单|已放进购物车",
+                         _reply):
+                _reply = ("我还没有为您加购——需要就说"
+                          "「来一件」，先看看说「换一款」")
             return await self._save_turn(
                 session, channel, text, "chat",
-                {"reply": smart["reply"], "card": None},
+                {"reply": _reply, "card": None},
                 {"audioMeta": audio_meta,
                  "commandText": command_text,
                  "track": "llm_dialog"})
