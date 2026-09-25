@@ -104,6 +104,58 @@ ok("B6 无 partial(流式轨未出字) 静音650ms → 不提前",
 ok("B7 段外(播报中回声 rms>阈值) 不断句不提交——回声轰炸根因修复",
    makeVtick("有52度的吗", 650, 0.05, false, false) === 0);
 
+/* ---------- B+. barge-in 播报中强人声打断 ---------- */
+console.log("[B+] barge-in 播报中打断");
+function makeBarge(volSeq) {
+  /* volSeq: 每帧音量数组(驱动逐帧) → {stopped, started} */
+  var S = { handfree: true, vadSpoke: false, streamPartial: "",
+            ttsPlaying: true };
+  var stopped = 0, started = 0;
+  var fn = new Function("analyser", "abuf", "waveEl", "vadOpenAt",
+    "S", "vadSilentAt", "requestAnimationFrame", "cloudStop",
+    "document", "cloudActive", "stopTtsNow", "setMicStatus",
+    "volRaf", "cancelAnimationFrame", "cloudStart",
+    vtickCode);
+  volSeq.forEach(function (v) {
+    var abuf = new Uint8Array(512);
+    for (var i = 0; i < abuf.length; i++) {
+      abuf[i] = Math.max(0, Math.min(255,
+        Math.round(128 + v * 128)));
+    }
+    var analyser = { fftSize: 512,
+      getByteTimeDomainData: function (a) { a.set(abuf); } };
+    fn(analyser, abuf,
+       { classList: { add: function () {}, remove: function () {} },
+         style: { setProperty: function () {} } },
+       Date.now() - 10000, S, 0,
+       function () { return 0; },
+       function () {},
+       { getElementById: function () { return {
+           classList: { add: function () {}, remove: function () {} },
+           style: { setProperty: function () {},
+                    removeProperty: function () {} } }; } },
+       0,                                   /* cloudActive=0 段外 */
+       function () { stopped++; },           /* stopTtsNow */
+       function () {},                       /* setMicStatus */
+       1,                                    /* volRaf */
+       function () {},                       /* cancelAF */
+       function () { started++; });          /* cloudStart */
+  });
+  return { stopped: stopped, started: started };
+}
+ok("B8 播报中回声水平(rms 0.05 恒定 10 帧) 不打断",
+   makeBarge([0.05, 0.05, 0.05, 0.05, 0.05,
+              0.05, 0.05, 0.05, 0.05, 0.05]).stopped === 0);
+ok("B9 播报中强插话(回声 0.04 底上叠 0.15×4 帧) 停播+开麦",
+   (function () {
+     var r = makeBarge([0.04, 0.04, 0.04, 0.04,
+                        0.15, 0.15, 0.15, 0.15]);
+     return r.stopped === 1 && r.started === 1;
+   })());
+ok("B10 TTS chunk 切换跳变(0.05→0.09 持续) 基线跟随不打断",
+   makeBarge([0.05, 0.05, 0.05, 0.09, 0.09,
+              0.09, 0.09, 0.09, 0.09]).stopped === 0);
+
 /* ---------- C. 流水线队列(pumpTts/ttsEnqueue/stopTtsNow) ---------- */
 console.log("[C] TTS 分句流水线队列");
 var pipeCode = [extractFn("ttsEnqueue"), extractFn("pumpTts"),
