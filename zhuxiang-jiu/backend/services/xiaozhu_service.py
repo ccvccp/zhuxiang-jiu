@@ -1625,6 +1625,35 @@ class XiaozhuService:
                     {"audioMeta": audio_meta,
                      "commandText": command_text,
                      "track": "llm_dialog"})
+            # 免提环境声含商品词误豁免收紧(19:15:57 实证:
+            # 识别空卡顿期环境声轮 has_product=True 豁免门
+            # 控→chat 回复环境声=自言自语); 区分信号=近 3 轮
+            # 有无真指令——推荐流程中的闲聊互动(近轮有
+            # action)保留回复, 环境声闲聊(近轮只有唤醒/识
+            # 别空轮)静默
+            if (channel == "voice" and not wakeup_free
+                    and has_product
+                    and not re.match(
+                        r"^(小竹|你好小竹)?[，,。、\s]*"
+                        r"(看|来|介绍|查|买|加|推荐|换|帮我"
+                        r"|怎么|多少|为什么|什么|哪|有没有"
+                        r"|要|退|取|订|找)", text or "")):
+                _near = await self.repo.list_turns(
+                    session.get("sessionId"))
+                _recent_cmd = any(
+                    (t.get("intent") or "")
+                    not in ("", "chat", "wake",
+                            "not_woken")
+                    for t in (_near or [])[-3:])
+                if not _recent_cmd:
+                    return await self._save_turn(
+                        session, channel, text, "chat",
+                        {"reply": "（免提只听指令——"
+                                  "点麦克风可随意闲聊）",
+                         "card": None, "silent": True},
+                        {"audioMeta": audio_meta,
+                         "commandText": command_text,
+                         "track": "llm_dialog"})
             # 防幻觉红线: LLM reply 禁数字(prompt 约束),
             # 不产卡片——纯对话存在感
             return await self._save_turn(

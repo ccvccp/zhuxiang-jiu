@@ -281,13 +281,25 @@ v=71 -> v=72: 复测增强文档增量(ctx 回收防御+降级可感知)——
     规模化后路线(当前无日志采集管道, console 留痕起步);
     audioWorklet 迁移/X5 行为测试矩阵记为远期; widget v=71
     -> v=72
+v=72 -> v=73: 压测首轮自言自语双修(19:15~19:17 日志)——
+    ①环境声含商品词误豁免收紧: 识别空卡顿期环境声轮
+    has_product=True 豁免闲聊门控→chat 回复环境声=自言
+    自语; 收紧=免提非 tap 轮+含商品语境+非意图动词开头
+    (看/来/介绍/查/买/加/推荐/换/帮我/怎么/多少/为什么/
+    什么/哪/有没有/要/退/取/订/找)+近 3 轮无真指令→静默
+    轮(推荐流程中的闲聊互动近轮有 action 保留回复);
+    ②TTS 整句回退断连单次重试(19:15:58 实证: 流断与整句
+    回退同秒撞同一坏连接→无声卡顿期环境声成轮雪上加霜);
+    已知边界: 环境声以意图动词开头("来一个"类)仍可能触发
+    指令轨——免提固有(嘈杂环境建议关免提); widget v=72
+    -> v=73
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=71"
-NEW = "src=/js/voice-wake-widget.js?v=72"
+OLD = "src=/js/voice-wake-widget.js?v=72"
+NEW = "src=/js/voice-wake-widget.js?v=73"
 
 
 def main():

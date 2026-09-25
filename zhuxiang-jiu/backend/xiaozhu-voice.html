@@ -2208,24 +2208,35 @@ function streamFirstChunk(ctl, ctx, text, mood,
                  totalChunks === 1 ? done : null, ctl);
       return;
     }
-    fetch(ttsUrl(text, mood), { headers: h,
-      signal: ctl ? ctl.signal : undefined })
-      .then(function (r) {
-        if (!r.ok) throw new Error("tts " + r.status);
-        return r.arrayBuffer();
-      })
-      .then(function (bb) { return ttsDecode(ctx, bb); })
-      .then(function (d) {
-        if (S.ttsAbort === ctl) {
-          decPut(text, d);
-          ttsEnqueue(d, 0,
-                     totalChunks === 1 ? done : null, ctl);
-        }
-      })
-      .catch(function () {
-        if (S.ttsAbort === ctl) ttsEnqueue(
-          null, 0, totalChunks === 1 ? done : null, ctl);
-      });
+    var _tryFetch = function (attempt) {
+      fetch(ttsUrl(text, mood), { headers: h,
+        signal: ctl ? ctl.signal : undefined })
+        .then(function (r) {
+          if (!r.ok) throw new Error("tts " + r.status);
+          return r.arrayBuffer();
+        })
+        .then(function (bb) { return ttsDecode(ctx, bb); })
+        .then(function (d) {
+          if (S.ttsAbort === ctl) {
+            decPut(text, d);
+            ttsEnqueue(d, 0,
+                       totalChunks === 1 ? done : null, ctl);
+          }
+        })
+        .catch(function () {
+          /* 整句断连单次重试(19:15:58 实证: 流断与整句
+             回退同秒撞同一坏连接→无声卡顿期环境声成轮) */
+          if (attempt === 0 && S.ttsAbort === ctl) {
+            setTimeout(function () {
+              if (S.ttsAbort === ctl) _tryFetch(1);
+            }, 400);
+            return;
+          }
+          if (S.ttsAbort === ctl) ttsEnqueue(
+            null, 0, totalChunks === 1 ? done : null, ctl);
+        });
+    };
+    _tryFetch(0);
   }
   function finishStream() {
     streamDone = true;
