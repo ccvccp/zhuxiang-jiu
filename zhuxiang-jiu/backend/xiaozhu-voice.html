@@ -2254,6 +2254,17 @@ function speakCloud(text, bubbleEl, mood) {
   S.lastSpoken = String(text);
   S.ttsBubble = bubbleEl || null;
   S.ttsChunks = {}; S.ttsNextIdx = 0;
+  /* barge-in 播报期识别供能(用户逻辑"语音对话可再次切断
+     播报"): 回复开始即 re-arm——播报期间服务端持续识别,
+     partial 回流走 onmessage 双轨判定(bargeShouldCut: 非回
+     声≥3字/「小竹」≥2字/纠正元词→切断+finish 收段提交);
+     执行期(提交→回复到达)无拾音不 arm——识别仅在播报期
+     (回声判定链 B8~B22 已验证拦回声); 播报完 done→关段,
+     窗口制正常接力 */
+  if (stWS && stWS.readyState === 1) {
+    try { stWS.send(JSON.stringify({ type: "arm" })); }
+    catch (e) { /* 连接死由续听重建 */ }
+  }
   var all = String(text);
   /* 78号P1/P3: 情绪语调系数(cogtts speed 叠乘——缓存键
      随 speed 自动分维不串台; mood 空则用户默认语速) */
@@ -2549,7 +2560,15 @@ window.addEventListener("message", function (ev) {
   if (d.type === "xz-panel-hide") pauseVoiceForHidden();
   else if (d.type === "xz-panel-show") resumeVoiceFromHidden();
   else if (d.type === "xz-page-ctx") setPageCtx(d.ctx);
-  else if (d.type === "xz-panel-wake-hit") {
+  else if (d.type === "xz-wake-audio-start") {
+    /* widget「我在，请吩咐」开播(用户要求恢复语音应答):
+       VAD 静默切"等结束"——收 end 前不判定, 精确覆盖全部
+       播放期(11:35 实证固定窗对不上 0.5~3s 开播延迟) */
+    S.wakeVadMute = Infinity;
+  } else if (d.type === "xz-wake-audio-end") {
+    /* 应答播完: 静默再留 0.8s 尾音余量后恢复判定 */
+    S.wakeVadMute = Date.now() + 800;
+  } else if (d.type === "xz-panel-wake-hit") {
     /* widget 唤醒命中(全站唤醒轨) → 面板免唤醒态: 下轮
        发送自动补「小竹，」前缀点亮服务端 5 分钟滑动窗
        (唤醒轨不写面板会话, 不补则被打回「请以小竹开头」);
@@ -2565,13 +2584,14 @@ window.addEventListener("message", function (ev) {
     S.wakeVadMute = Date.now() + 1000;
     S.wakeGrace = Date.now() + 4500;
     updateWakePill();
-    /* 静默等待式: 语音应答取消(纯声学「叮-咚」), 就绪反馈
-       由 micStatus 文字承担; selfUtter 集合保留(播报轮回声
-       检测用) */
+    /* 语音应答已恢复(用户要求): 应答记入播报集合——外放被
+       麦收回时文本层防线可命中; micStatus 文字同步 */
     S.selfUtter = S.selfUtter || [];
     S.selfUtterAt = S.selfUtterAt || [];
+    S.selfUtter.push("我在，请吩咐");
+    S.selfUtterAt.push(Date.now());
     if (S.sid) {
-      setMicStatus("🎙 听令中——请讲(已醒, 直接说)");
+      setMicStatus("🎙 我在，请吩咐");
     }
     /* 二级唤醒: 窗口已关(listenClose 静默回归)或播报进行中
        (打断走唤醒词——widget 流独立常开不受面板窗口影响)
@@ -2925,10 +2945,12 @@ function wireCloudCapture() {
 function listenWindowOver(sec, vadSpoke) {
   return sec >= 30 || (!vadSpoke && sec >= 5);
 }
-/* 二级唤醒窗口关闭: 轻关闭(保留已授权流/上下文——重开免
-   getUserMedia 数秒防句首丢字), 拆 WS 停 vtick 停 VAD 判定;
-   音频不再进入任何识别(无消费者)——功能等价"关闭拾音";
-   唤醒词(wake-hit)可即时重开; 不 toast 不播报(静默回归) */
+/* 二级唤醒窗口关闭: 全释放(答完即退彻底版)——listenClose
+   轻关闭保留流在 X5 上占死麦克风: widget 唤醒轨取不到音频
+   →面板打开期间"再次唤醒不了"(11:51 实证); 关窗即停流
+   (tracks stop+ctx close)把麦克风还给 widget 轨, 唤醒恢复;
+   代价=重开窗重取 getUserMedia 1~3s(wake-hit 后 micStatus
+   提示"正在开麦"), 唤醒可靠性 >> 句首 1s */
 function listenClose() {
   if (recTimer) { clearInterval(recTimer); recTimer = null; }
   if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }
@@ -2940,6 +2962,16 @@ function listenClose() {
   waveEl.classList.remove("live");
   waveEl.style.removeProperty("--amp");
   setWave(false);
+  if (procNode) { try { procNode.disconnect(); } catch (e) {} }
+  if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
+  if (recStream) {
+    recStream.getTracks().forEach(function (t) { t.stop(); });
+    recStream = null;
+  }
+  if (audioCtx) {
+    try { audioCtx.close(); } catch (e) {}
+    audioCtx = null;
+  }
   setMicStatus("🎙 休息了——喊「小竹小竹」随时叫我");
 }
 function cloudStop() {

@@ -205,13 +205,28 @@ v=64 -> v=65: 句首保护攒帧回退(11:46 起识别全空第二根因)——
     (唤醒词被盖, "第一次唤醒不灵敏")与面板轨 115204 全静音
     ——大概率识别恢复后"没听清"回声链断而消失, 若复测仍现
     再深挖; widget v=64 -> v=65
+v=65 -> v=66: 用户交互逻辑定版改造("唤醒播报→说话切断→
+    执行关录音→播报中可打断→答完关录音→随时再唤醒")——
+    ①「我在，请吩咐」语音应答恢复(用户要求唤醒后有播报):
+    v63 删除过于激进, 三层防线齐备可安全恢复(播放 start/end
+    跨页同步 VAD 静默精确跟随+ wakeGrace 提交丢弃窗 +
+    selfUtter 文本层); ②listenClose 轻关闭改全释放(停流+
+    close ctx): 保留流在 X5 占死麦克风→widget 唤醒轨取不到
+    音频→面板打开期间"再次唤醒不了"(11:51 实证); 关窗把麦
+    克风还给 widget 轨, 代价=重开窗重取流 1~3s(唤醒可靠性
+    >>句首 1s); ③barge-in 恢复(播报期可切断): speakCloud
+    开头 re-arm——回复播报期间服务端持续识别, partial 回流
+    双轨判定(bargeShouldCut: LCS+cn2num+切句链拦回声/「小
+    竹」≥2字/纠正元词放行)切断播报+finish 收段; 执行期
+    (提交→回复到达)不 arm 无拾音(用户要求"执行时关闭录音");
+    widget v=65 -> v=66
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=64"
-NEW = "src=/js/voice-wake-widget.js?v=65"
+OLD = "src=/js/voice-wake-widget.js?v=65"
+NEW = "src=/js/voice-wake-widget.js?v=66"
 
 
 def main():
