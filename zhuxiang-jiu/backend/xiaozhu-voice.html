@@ -1613,27 +1613,55 @@ function isEchoOfTTS(t) {
   var a = norm(t), b = norm(last);
   return a.length >= 2 && a.length <= 12 && b.indexOf(a) >= 0;
 }
-/* 双轨 barge-in v2 回声判定(播报中 final 切断专用——比
-   isEchoOfTTS 强: ①无 12 字上限(播报中回流回声可能是
-   长句片段, 上限会放行漏网) ②selfUtter 集合全遍历
-   (widget「我在，请吩咐」等 lastSpoken 之外的应答也拦);
-   命中即回声, 不切断不提交; 「小竹」开头由调用方豁免 */
+/* 双轨 barge-in v2 回声判定(播报中切断专用)——比子串判定
+   强两级(11:05 实证子串失效: 外放"竹奕·竹香尊享 24690 元"
+   被 ASR 丢字识回"竹奕，24690"不再是原文子串→混合段
+   "竹奕24690。我在请吩咐"误判新指令→误切断+提交→小竹
+   自言自语"自己强说"):
+   ①切句判定: 按句读拆分逐句回声判定, 所有完整句(≥3 字)
+     皆命中才是回声——混合拼接段(回声A+widget 应答B)整段
+     永非单一子串, 逐句才能全拦;
+   ②子序列判定: 句字符按序出现于播报文本即命中(丢字回声
+     "竹奕24690"是"竹奕竹香尊享24690"的按序子序列)——
+     保守方向: 宁漏切断(播报继续续听补位)不误切断(自言
+     自语); 真指令带播报外新词("介绍""多少钱")必放行;
+   ③selfUtter 集合 12s 窗全遍历(wake 应答等);
+   「小竹」开头由调用方豁免 */
 function bargeIsEcho(t) {
-  var norm = function (s) {
+  function norm(s) {
     return String(s).replace(
       /[\s，。？！、,.?!:：；;「」『』（）()\-—…·]/g, "");
-  };
-  var a = norm(String(t || ""));
-  if (a.length < 2) return true; /* 短碎片视为回声丢弃 */
-  var b = norm(S.lastSpoken || "");
-  if (b && b.indexOf(a) >= 0) return true;
-  var us = S.selfUtter || [], ts = S.selfUtterAt || [];
-  var now = Date.now();
-  for (var i = 0; i < us.length; i++) {
-    if (ts[i] && now - ts[i] > 12000) continue;
-    if (norm(us[i]).indexOf(a) >= 0) return true;
   }
-  return false;
+  function subseq(a, b) { /* a 按序子序列于 b */
+    if (!a || !b || a.length > b.length) return false;
+    var i = 0;
+    for (var k = 0; k < b.length && i < a.length; k++) {
+      if (b.charAt(k) === a.charAt(i)) i++;
+    }
+    return i >= a.length;
+  }
+  function echoOne(s) { /* 单句回声判定 */
+    var a = norm(s);
+    if (a.length < 2) return true; /* 碎片句视为回声 */
+    if (subseq(a, norm(S.lastSpoken || ""))) return true;
+    var us = S.selfUtter || [], ts = S.selfUtterAt || [];
+    var now = Date.now();
+    for (var i = 0; i < us.length; i++) {
+      if (ts[i] && now - ts[i] > 12000) continue;
+      if (subseq(a, norm(us[i]))) return true;
+    }
+    return false;
+  }
+  var parts = String(t || "").split(/[，。？！、,.?!；;]+/);
+  var meaningful = [];
+  for (var j = 0; j < parts.length; j++) {
+    if (norm(parts[j]).length >= 3) meaningful.push(parts[j]);
+  }
+  if (!meaningful.length) return true; /* 无完整句=碎片回声 */
+  for (var m = 0; m < meaningful.length; m++) {
+    if (!echoOne(meaningful[m])) return false; /* 新词句=新指令 */
+  }
+  return true;
 }
 /* 双轨 barge-in v2 切断判定(播报中 partial 回流):
    播报中(非收段中) + partial 非回声且达最小长度 → 用户

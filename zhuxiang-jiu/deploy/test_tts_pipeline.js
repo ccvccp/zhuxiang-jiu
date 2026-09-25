@@ -114,35 +114,35 @@ function makeBargeJudge(S, stFinalCb) {
 }
 function mkS(ttsPlaying) {
   return { ttsPlaying: ttsPlaying !== false,
-           lastSpoken: "竹海至尊是42度的竹叶酒，口感绵柔顺喉",
+           lastSpoken: "已加「竹奕·竹香尊享」，售价 24690 元",
            selfUtter: ["我在，请吩咐"],
            selfUtterAt: [Date.now()] };
 }
-ok("B8 播报内容回声子串(任意长度) 拦",
-   bargeIsEchoOf("竹海至尊是42度") === true
-   && bargeIsEchoOf("口感绵柔顺喉") === true);
-function bargeIsEchoOf(t) {
+function bargeIsEchoOf(t, S) {
   return new Function("S", extractFn("bargeIsEcho")
-    + "\nreturn bargeIsEcho;")(mkS(true))(t);
+    + "\nreturn bargeIsEcho;")(S || mkS(true))(t);
 }
-ok("B9 selfUtter(wake 应答)12s 窗内拦",
+ok("B8 播报内容丢字回声(11:05 实证「竹奕，24690」) 子序列拦",
+   bargeIsEchoOf("竹奕，24690。") === true);
+ok("B9 混合拼接段(回声+widget 应答 11:05:55 原文) 逐句全拦",
+   bargeIsEchoOf("竹奕，24690。我在，请吩咐。") === true);
+ok("B10 selfUtter(wake 应答)12s 窗内拦",
    bargeIsEchoOf("我在，请吩咐") === true);
-ok("B10 selfUtter 12s 窗外不拦(放行)",
+ok("B11 selfUtter 12s 窗外不拦(放行)",
    (function () {
      var S = mkS(true);
      S.selfUtterAt = [Date.now() - 13000];
-     return new Function("S", extractFn("bargeIsEcho")
-       + "\nreturn bargeIsEcho;")(S)("我在，请吩咐") === false;
+     return bargeIsEchoOf("我在，请吩咐", S) === false;
    })());
-ok("B11 用户新指令(非回声)放行切断",
-   makeBargeJudge(mkS(true))("有什么新品") === true);
-ok("B12 「小竹」开头 2 字即切断(明确新指令意图)",
+ok("B12 用户新指令(带播报外新词)放行切断",
+   makeBargeJudge(mkS(true))("介绍一款竹奕42度酒") === true);
+ok("B13 「小竹」开头 2 字即切断(明确新指令意图)",
    makeBargeJudge(mkS(true))("小竹") === true);
-ok("B13 非「小竹」开头 2 字碎片不切断",
+ok("B14 非「小竹」开头 2 字碎片不切断",
    makeBargeJudge(mkS(true))("好的") === false);
-ok("B14 收段中(stFinalCb 挂起)不重复切断",
+ok("B15 收段中(stFinalCb 挂起)不重复切断",
    makeBargeJudge(mkS(true), function () {})("有什么新品") === false);
-ok("B15 非播报中不切断",
+ok("B16 非播报中不切断",
    makeBargeJudge(mkS(false))("有什么新品") === false);
 
 /* ---------- C. 流水线队列(pumpTts/ttsEnqueue/stopTtsNow) ---------- */

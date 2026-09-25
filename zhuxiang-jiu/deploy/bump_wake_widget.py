@@ -115,13 +115,23 @@ v=55 -> v=56: 双轨 barge-in v2(文本确认版, 用户设计"问话
     (lastSpoken 宽松子串无长度上限+selfUtter 集合 12s 窗
     全遍历); vtick 段首清 streamPartial 防回声残留污染
     VAD 尾字; widget v=55 -> v=56
+v=56 -> v=57: 双轨回声判定升级切句+子序列——11:05:55 实证
+    子串失效: 外放"竹奕·竹香尊享 24690 元"被 ASR 丢字识回
+    "竹奕，24690", 不再是原文子串; 混合拼接段"竹奕24690。我
+    在请吩咐"(回声+widget 应答)整段永非单一子串 → 误判新指
+    令 → 误切断+提交 → 小竹自言自语"自己强说"。修复: ①按
+    句读拆分逐句判, 完整句(≥3字)皆命中才是回声(混合段全拦);
+    ②子序列判定(字符按序出现即命中——丢字回声"竹奕24690"
+    是"竹奕竹香尊享24690"的按序子序列); 保守方向: 宁漏切断
+    (播报继续续听补位)不误切断; 真指令带播报外新词必放行;
+    widget v=56 -> v=57
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=55"
-NEW = "src=/js/voice-wake-widget.js?v=56"
+OLD = "src=/js/voice-wake-widget.js?v=56"
+NEW = "src=/js/voice-wake-widget.js?v=57"
 
 
 def main():
