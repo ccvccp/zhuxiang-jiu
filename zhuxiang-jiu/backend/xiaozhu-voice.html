@@ -2544,7 +2544,15 @@ window.addEventListener("message", function (ev) {
   if (d.type === "xz-panel-hide") pauseVoiceForHidden();
   else if (d.type === "xz-panel-show") resumeVoiceFromHidden();
   else if (d.type === "xz-page-ctx") setPageCtx(d.ctx);
-  else if (d.type === "xz-panel-wake-hit") {
+  else if (d.type === "xz-wake-audio-start") {
+    /* widget 应答「我在，请吩咐」开播(11:35 实证开播延迟
+       0.5~3s 常超 2.5s VAD 静默窗): VAD 静默切到"等结束"
+       ——收到 end 前不判定, 覆盖全部播放期 */
+    S.wakeVadMute = Infinity;
+  } else if (d.type === "xz-wake-audio-end") {
+    /* 应答播完: 静默再留 0.8s 尾音余量后恢复判定 */
+    S.wakeVadMute = Date.now() + 800;
+  } else if (d.type === "xz-panel-wake-hit") {
     /* widget 唤醒命中(全站唤醒轨) → 面板免唤醒态: 下轮
        发送自动补「小竹，」前缀点亮服务端 5 分钟滑动窗
        (唤醒轨不写面板会话, 不补则被打回「请以小竹开头」);

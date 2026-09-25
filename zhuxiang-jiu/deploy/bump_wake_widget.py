@@ -165,13 +165,23 @@ v=60 -> v=61: 唤醒应答回环双窗修复(11:28 实证"自己说+回答
     vadSpoke; 不吞用户指令头——唤醒→说话节奏 >2s); ②wake
     Grace 4s→4.5s(提交丢弃窗防尾音段边缘提交); widget v=60
     -> v=61
+v=61 -> v=62: 应答播放状态跨页同步(11:35 实证 2.5s 静默窗
+    盲区)——widget「我在，请吩咐」开播延迟 0.5~3s(fetch+
+    decode), 静默窗常在开播前过期→应答声进 VAD→回声段
+    「我在，请吩咐。」(10s 混环境底噪)提交→"这个我还在学
+    着呢"兜底轰炸自言自语; 治本: 不再猜时间窗——widget 播放
+    start/end postMessage 面板(xz-wake-audio-start/end),
+    面板 VAD 静默精确跟随实际播放(start→Infinity, end→
+    now+0.8s 尾音); end 超时兜底 5s(onended 丢失防 Infinity
+    卡死); TTS 失败路径由 wake-hit 2.5s 起始窗兜底; widget
+    v=61 -> v=62
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=60"
-NEW = "src=/js/voice-wake-widget.js?v=61"
+OLD = "src=/js/voice-wake-widget.js?v=61"
+NEW = "src=/js/voice-wake-widget.js?v=62"
 
 
 def main():

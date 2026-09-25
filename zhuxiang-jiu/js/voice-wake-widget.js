@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=61";
+  var VER = "v=62";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -972,6 +972,29 @@
         var s = wakeReplyCtx.createBufferSource();
         s.buffer = d;
         s.connect(wakeReplyCtx.destination);
+        /* 二级唤醒回环根修(11:35 实证): 应答开播延迟 0.5~3s
+           (fetch+decode)——面板 2.5s VAD 静默窗常在开播前过期
+           → 应答声进 VAD→回声段「我在，请吩咐。」提交→
+           自言自语; 播放状态跨页同步: start/end postMessage
+           面板, 面板 VAD 静默精确跟随实际播放(end+尾音) */
+        try {
+          fr.contentWindow.postMessage(
+            { type: "xz-wake-audio-start" }, "*");
+        } catch (e) { /* 面板未开忽略 */ }
+        s.onended = function () {
+          try {
+            fr.contentWindow.postMessage(
+              { type: "xz-wake-audio-end" }, "*");
+          } catch (e) { /* 忽略 */ }
+        };
+        /* end 超时兜底: onended 丢失(页面隐藏/ctx 销毁)时
+           面板 VAD 静默 Infinity 卡死——5s 强制补 end */
+        setTimeout(function () {
+          try {
+            fr.contentWindow.postMessage(
+              { type: "xz-wake-audio-end" }, "*");
+          } catch (e) { /* 忽略 */ }
+        }, 5000);
         s.start();
       }).catch(function () { /* beep 已响, 静默 */ });
     } catch (e) { /* 忽略 */ }
