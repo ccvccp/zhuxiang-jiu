@@ -2378,10 +2378,9 @@ window.addEventListener("message", function (ev) {
     S.woken = true;
     S.wakeGrace = Date.now() + 2000;
     updateWakePill();
-    /* 唤醒应答: 会话已存在时面板无任何播报(感知=「没有
-       应答一直录音」)——补即时短应答, 与 wakeBeep 相呼应;
-       免提自录由回环检测兜底(短子串丢弃) */
-    if (S.sid) { speak("我在，请吩咐", null, "cheerful"); }
+    /* 唤醒应答在 widget 主页面直播(X5 无手势时面板 WebAudio
+       挂起——speak 静默无声); 面板只给文字反馈免双播 */
+    if (S.sid) { setMicStatus("🎙 我在，请吩咐"); }
   }
 });
 /* 硬停录音且不发送(免提关闭时丢弃当前未完成语音) */

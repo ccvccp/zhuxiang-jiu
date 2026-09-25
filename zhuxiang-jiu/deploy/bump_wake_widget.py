@@ -86,13 +86,19 @@ v=49 -> v=50: 免唤醒窗口打通——06:54 实证 widget 唤醒命中后
     发 xz-panel-wake-hit → 面板置免唤醒态, 发送链自动补
     「小竹，」前缀点亮窗口(text+流式语音轮两处), 用户侧
     无感, 过期后服务端 wakeHint 自动停补; widget v=45
+v=50 -> v=51: 唤醒应答主页面直播——X5 面板 iframe 无用户
+    手势(唤醒靠 postMessage 开面板), WebAudio ctx 挂起,
+    speakCloud 合成成功却静默无声(08:36 实证 163KB 无声);
+    「我在，请吩咐」改 widget 主页面 AudioContext 播(开启
+    唤醒的点击手势已解锁)——fetch /api/xiaozhu/tts 即取即播;
+    面板撤 speak 改 micStatus 文字反馈免双播; widget v=48
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=49"
-NEW = "src=/js/voice-wake-widget.js?v=50"
+OLD = "src=/js/voice-wake-widget.js?v=50"
+NEW = "src=/js/voice-wake-widget.js?v=51"
 
 
 def main():

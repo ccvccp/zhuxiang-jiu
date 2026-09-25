@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=47";
+  var VER = "v=48";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -946,10 +946,42 @@
   }
 
   /* ---------- 唤醒命中 ---------- */
+  /* 唤醒语音应答: widget 主页面 AudioContext 播 TTS——面板
+     iframe 无用户手势(唤醒靠 postMessage 开), X5 WebAudio
+     ctx 挂起 → speakCloud 静默降级(08:36 实证合成成功
+     163KB 却无声); 主页面 ctx 由「开启唤醒」点击手势解锁 ✓ */
+  var wakeReplyCtx = null;
+  function speakWakeReply() {
+    try {
+      var AC = window.AudioContext
+        || window.webkitAudioContext;
+      if (!AC) { return; }
+      if (!wakeReplyCtx) { wakeReplyCtx = new AC(); }
+      if (wakeReplyCtx.state === "suspended") {
+        wakeReplyCtx.resume();
+      }
+      fetch("/api/xiaozhu/tts?text="
+        + encodeURIComponent("我在，请吩咐"), {
+        headers: { Authorization: "Bearer " + authToken() }
+      }).then(function (r) {
+        if (!r.ok) { throw 0; }
+        return r.arrayBuffer();
+      }).then(function (b) {
+        return wakeReplyCtx.decodeAudioData(b);
+      }).then(function (d) {
+        var s = wakeReplyCtx.createBufferSource();
+        s.buffer = d;
+        s.connect(wakeReplyCtx.destination);
+        s.start();
+      }).catch(function () { /* beep 已响, 静默 */ });
+    } catch (e) { /* 忽略 */ }
+  }
+
   function onWakeHit() {
     eng.emptyStreak = 0; /* 命中即清连续空计数 */
     teardownSeg();
     wakeBeep();
+    speakWakeReply(); /* 「我在，请吩咐」主页面直播 */
     openPanel();
     /* 免唤醒窗口打通: widget 唤醒(ws_asr 轨)不写面板会话——
        服务端 wake 窗口(5 分钟)未被点亮, 唤醒后面板说话被打回
