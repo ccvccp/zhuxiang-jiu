@@ -494,6 +494,50 @@ async def main():
            f"intent={(r.get('turn') or {}).get('intent')}")
     await svc.delete_session(sid12)
 
+    print("[13 免提无语境闲聊门控(置信度路由·静默轮)]")
+    # 环境人声("大胖敲门/做蛋糕")经 LLM 判 chat 强行闲聊回复
+    # →自言自语体感; 免提无商品语境纯闲聊静默(入流不播报)
+    sid13 = (await svc.open_session(1, "voice"))["sessionId"]
+    _orig13 = svc._llm_dialog_intent
+
+    async def _fake_chat13(session, text):
+        return {"intent": "chat", "reply": "哈哈，聊得开心"}
+
+    svc._llm_dialog_intent = _fake_chat13
+    s13 = await svc.repo.get_session(sid13)
+    # a. 免提轮(voice 非 tap)+chat+无商品语境 → 静默轮
+    r = await svc._handle_text_internal(
+        s13, "小竹，大胖又敲门来了啊", channel="voice")
+    record("免提无语境 chat→静默轮",
+           r.get("silent") is True
+           and "免提只听指令" in str(r.get("reply")),
+           f"silent={r.get('silent')} "
+           f"reply={r.get('reply')!r}")
+    # b. tap 轮(用户主动按麦)闲聊合法——LLM 回复保留
+    r = await svc._handle_text_internal(
+        s13, "小竹，今天聊聊天呗", channel="voice",
+        wakeup_free=True)
+    record("tap 轮 chat 正常回复",
+           not r.get("silent")
+           and "聊得开心" in str(r.get("reply")),
+           f"silent={r.get('silent')}")
+    # c. 商品语境豁免: 推荐流程中的免提闲聊不静默
+    await svc.handle_text(sid13, "小竹，看新品")
+    r = await svc._handle_text_internal(
+        s13, "小竹，哈哈你真有意思", channel="voice")
+    record("商品语境免提 chat 不静默",
+           not r.get("silent")
+           and "聊得开心" in str(r.get("reply")),
+           f"silent={r.get('silent')}")
+    # d. 键盘轮闲聊正常(text 渠道不拦)
+    r = await svc.handle_text(sid13, "小竹，随便聊聊")
+    record("键盘轮 chat 正常回复",
+           not r.get("silent")
+           and "聊得开心" in str(r.get("reply")),
+           f"silent={r.get('silent')}")
+    svc._llm_dialog_intent = _orig13
+    await svc.delete_session(sid13)
+
     print("=" * 56)
     print(f"通过 {PASS} / 失败 {FAIL}")
     sys.exit(1 if FAIL else 0)

@@ -1185,7 +1185,14 @@ function handleTurn(j, channel) {
      "微信哦,这个在微信上直接弄…"——每段旁话都播"这个我还
      不会"轰炸; general 兜底 60s 内只播一次, 其余静默入流) */
   var isGeneral = ((j.turn || {}).intent) === "general";
-  if (isGeneral) {
+  /* 静默轮(免提无语境闲聊门控——服务端 silent 标记):
+     环境人声被收音成轮不播报(防自言自语), 入流留痕
+     续听——结构对齐 general 60s 节流三行 */
+  if (j.silent) {
+    if (bubble) bubble.classList.remove("speaking");
+    S.ttsPlaying = false;
+    scheduleHandfree(300);
+  } else if (isGeneral) {
     if (Date.now() - (S.lastGeneralAt || 0) < 60000) {
       if (bubble) bubble.classList.remove("speaking");
       S.ttsPlaying = false;

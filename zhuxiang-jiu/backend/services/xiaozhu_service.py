@@ -1270,7 +1270,8 @@ class XiaozhuService:
             if smart is not None:
                 saved_smart = await self._exec_smart_intent(
                     session, channel, text, command_text,
-                    smart, audio_meta)
+                    smart, audio_meta,
+                    wakeup_free=wakeup_free)
                 if saved_smart is not None:
                     return saved_smart
         if cmd is None:
@@ -1454,7 +1455,9 @@ class XiaozhuService:
                                  channel: str, text: str,
                                  command_text: str,
                                  smart: dict,
-                                 audio_meta: dict) -> dict | None:
+                                 audio_meta: dict,
+                                 wakeup_free: bool = False,
+                                 ) -> dict | None:
         """智能意图执行(数字仍由执行层产生——防幻觉红线)
 
         Returns: 已落轮次的完整响应; None=回退规则轨
@@ -1583,6 +1586,22 @@ class XiaozhuService:
                      "commandText": command_text,
                      "track": "llm_dialog"})
         if intent == "chat" and smart.get("reply"):
+            # 免提无语境闲聊门控(对话理解逻辑借鉴·置信度路由
+            # 低置信端): 免提后台轮的环境人声(真机实证"大胖
+            # 敲门/做蛋糕"被收音)经 LLM 判 chat 强行闲聊回复
+            # →自言自语体感; 免提聆听只响应明确意图(反语音
+            # 霸权对称面)——无商品语境纯闲聊落静默轮(入流
+            # 留痕不播报); tap 轮(用户主动按麦)闲聊合法保留
+            if (channel == "voice" and not wakeup_free
+                    and not has_product):
+                return await self._save_turn(
+                    session, channel, text, "chat",
+                    {"reply": "（免提只听指令——"
+                              "点麦克风可随意闲聊）",
+                     "card": None, "silent": True},
+                    {"audioMeta": audio_meta,
+                     "commandText": command_text,
+                     "track": "llm_dialog"})
             # 防幻觉红线: LLM reply 禁数字(prompt 约束),
             # 不产卡片——纯对话存在感
             return await self._save_turn(
@@ -4128,4 +4147,6 @@ class XiaozhuService:
             "mood": _mood,
             "userMood": _um,
             "suggest": _suggest,
+            # 静默轮标记(免提无语境闲聊门控)——前端入流不播报
+            "silent": result.get("silent", False),
         }

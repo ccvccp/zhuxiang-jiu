@@ -1,4 +1,4 @@
-﻿"""小竹 v2 优化批次测试(A 反馈评价 / B 撤销与回溯 / C 误听表 / E 上下文5轮)
+"""小竹 v2 优化批次测试(A 反馈评价 / B 撤销与回溯 / C 误听表 / E 上下文5轮)
 
 运行:
     $env:LOCK_MODE="asyncio"; $env:STORE_MODE="asyncio"; $env:AUTH_MODE="compat"
