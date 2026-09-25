@@ -682,6 +682,14 @@ function openSession() {
     /* 会话就绪 → 自动进入免提聆听(直接说话即可; iOS 首次无手势被拒时引导点击) */
     setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
     scheduleHandfree(800);
+    /* v80 member 窗意图直入: 弹面板时无会话的待发文本,
+       会话就绪即提交(免用户重说) */
+    if (S.pendingWakeText) {
+      var _pw = S.pendingWakeText;
+      S.pendingWakeText = null;
+      S.woken = true;
+      sendText(_pw);
+    }
   }).catch(function (e) { showToast(e.message || "会话开启失败"); });
 }
 function newSession() {
@@ -1340,6 +1348,13 @@ function tryRestoreChat() {
       document.getElementById("sid").textContent = "#" + sid;
       document.getElementById("chat").innerHTML = html;
       document.getElementById("mic").classList.remove("off");
+      /* v80 member 窗意图直入: 恢复会话后提交待发文本 */
+      if (S.pendingWakeText) {
+        var _pwr = S.pendingWakeText;
+        S.pendingWakeText = null;
+        S.woken = true;
+        setTimeout(function () { sendText(_pwr); }, 200);
+      }
       appendBot("已恢复对话——继续说即可（语音球全程在线）",
                 null, "会话恢复 #" + sid);
       /* 恢复后滚到底部(最新消息含前往查看按钮) */
@@ -2710,6 +2725,23 @@ window.addEventListener("message", function (ev) {
     if (S.handfree && (S.listenClosed || S.ttsPlaying)
         && !S.pending && !S.hidden && !cloudActive) {
       cloudStart();
+    }
+  } else if (d.type === "xz-panel-wake-text"
+             && d.text) {
+    /* v80 member 窗意图直入: widget 检测到唤醒后 5 分钟内
+       的意图语音(免喊唤醒词)弹面板并把转写直达首轮——
+       免用户重说一遍; 唤醒态同步点亮(下轮免前缀) */
+    S.woken = true;
+    S.wakeGrace = 0;  /* 直入轮非尾音(意图已过 widget 白名单) */
+    updateWakePill();
+    if (S.listenClosed || S.ttsPlaying) {
+      stopTtsNow();
+    }
+    if (!S.sid) {
+      /* 会话未开(面板刚弹): 记待发文本, 会话就绪即提交 */
+      S.pendingWakeText = String(d.text).slice(0, 60);
+    } else {
+      sendText(String(d.text).slice(0, 60));
     }
   }
 });

@@ -348,13 +348,27 @@ v=78 -> v=79: 回退串行链(v78 真机翻车)——fetchChain 回调链
     250→800ms 压在途峰值 ~3(1302 预防: 6 并发才触发), 块级
     400ms 重试保留; 教训入档: X5 回调链式 fetch 不可靠,
     setTimeout 并发调度可靠; widget v=78 -> v=79
+v=79 -> v=80: member 窗内直接说(对话逻辑断层修复, 02:46:51
+    实证「换一款」转写出来无响应)——续问窗 5s 关窗后 widget
+    只认唤醒词, 服务端 member 5 分钟免唤醒窗只对面板开着的
+    轮次生效, 两窗不匹配致用户窗内直接说话无反应; 修复:
+    widget 前端镜像唤醒时刻(localStorage xz.wakeAt, 唤醒
+    命中时写入), 窗内非唤醒词 final 过意图判定(≥4 字+动词
+    白名单看/来/介绍/查/买/加/推荐/换/帮我/怎么/多少/为什么
+    /什么/哪/有没有/要/退/取/订/找+来一件|结算|换一款, 防
+    环境声误触弹面板)+应答自录 3s 防线(playWakeReply 记
+    selfReplyAt) → onWakeHitIntent 免 beep/应答直接弹面板
+    +文本 postMessage xz-panel-wake-text 直达首轮(免用户
+    重说); 面板侧 wake-text 置 woken+打断播报+无会话时
+    pendingWakeText 待会话就绪提交(openSession/restore 两
+    钩); widget v=79 -> v=80
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=78"
-NEW = "src=/js/voice-wake-widget.js?v=79"
+OLD = "src=/js/voice-wake-widget.js?v=79"
+NEW = "src=/js/voice-wake-widget.js?v=80"
 
 
 def main():

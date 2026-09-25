@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=79";
+  var VER = "v=80";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -901,6 +901,14 @@
         if (matchWake(ft)) {
           onWakeHit();
         } else if (ft) {
+          /* v80 member 窗意图直入: 唤醒后 5 分钟内免唤醒词
+             (02:46:51 实证「换一款」转写出来但无响应——续问
+             窗 5s 已关, member 窗与 widget 两窗断层); 意图
+             动词白名单防环境声误触弹面板 */
+          if (memberWindowIntent(ft)) {
+            onWakeHitIntent(ft);
+            return;
+          }
           /* V5.3 跨段组合: 「你好」(上段) + 「小竹」(本段
              ≤3s) = 「你好小竹」——0.9s 收段切开的自然停顿
              形态(21:44:05「你好。」实锤)不再致命 */
@@ -1109,6 +1117,7 @@
     var s = wakeReplyCtx.createBufferSource();
     s.buffer = d;
     s.connect(wakeReplyCtx.destination);
+    selfReplyAt = Date.now();  /* v80 自录防线: 外放时刻 */
     try {
       fr.contentWindow.postMessage(
         { type: "xz-wake-audio-start" }, "*");
@@ -1155,9 +1164,44 @@
     } catch (e) { /* 忽略 */ }
   }
 
+  /* ---------- v80 member 窗内直接说 ----------
+     断层修复(02:46:51 实证): 续问窗 5s 关窗后 widget 只认
+     唤醒词, 服务端 member 5 分钟免唤醒窗只对面板开着的轮次
+     生效——两窗不匹配, 用户窗内直接说话无响应(「换一款」
+     final 转写出来但无轮次提交); 前端镜像唤醒时刻, 窗内
+     意图语音(动词白名单防环境声)免喊唤醒词直接弹面板提交 */
+  var WAKE_AT_KEY = "xz.wakeAt";
+  var selfReplyAt = 0;  /* widget 应答「我在，请吩咐」播放时刻 */
+  var INTENT_HEAD = new RegExp(
+    "^(看|来|介绍|查|买|加|推荐|换|帮我"
+    + "|怎么|多少|为什么|什么|哪|有没有"
+    + "|要|退|取|订|找)");
+  function memberWindowIntent(ft) {
+    var t = String(ft || "").trim();
+    if (t.length < 4 || t.length > 40) { return false; }
+    var wakeAt = 0;
+    try {
+      wakeAt = parseInt(
+        localStorage.getItem(WAKE_AT_KEY) || "0", 10);
+    } catch (e) { /* 忽略 */ }
+    if (!wakeAt || Date.now() - wakeAt > 300000) {
+      return false;  /* 5 分钟窗外(与服务端 member 窗同值) */
+    }
+    /* 应答自录防线: widget 外放「我在，请吩咐」被麦收回
+       (3s 尾音窗)不作为意图语音 */
+    if (selfReplyAt && Date.now() - selfReplyAt < 3000) {
+      return false;
+    }
+    return INTENT_HEAD.test(t)
+      || /来一件|结算|换一款/.test(t);
+  }
+
   function onWakeHit() {
     eng.emptyStreak = 0; /* 命中即清连续空计数 */
     teardownSeg();
+    try {
+      localStorage.setItem(WAKE_AT_KEY, String(Date.now()));
+    } catch (e) { /* 忽略 */ }
     wakeBeep();
     speakWakeReply(); /* 「我在，请吩咐」播报(用户要求) */
     openPanel();
@@ -1168,6 +1212,22 @@
     try {
       fr.contentWindow.postMessage(
         { type: "xz-panel-wake-hit" }, "*");
+    } catch (e) { /* iframe 未就绪忽略 */ }
+  }
+
+  /* v80 member 窗意图直入: 免 beep/应答(用户话语语境已
+     在), 弹面板 + 文本直达首轮——免用户重说一遍 */
+  function onWakeHitIntent(text) {
+    teardownSeg();
+    try {
+      localStorage.setItem(WAKE_AT_KEY, String(Date.now()));
+    } catch (e) { /* 忽略 */ }
+    openPanel();
+    try {
+      fr.contentWindow.postMessage({
+        type: "xz-panel-wake-text",
+        text: String(text).slice(0, 60),
+      }, "*");
     } catch (e) { /* iframe 未就绪忽略 */ }
   }
 
