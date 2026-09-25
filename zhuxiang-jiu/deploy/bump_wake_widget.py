@@ -362,13 +362,28 @@ v=79 -> v=80: member 窗内直接说(对话逻辑断层修复, 02:46:51
     重说); 面板侧 wake-text 置 woken+打断播报+无会话时
     pendingWakeText 待会话就绪提交(openSession/restore 两
     钩); widget v=79 -> v=80
+v=80 -> v=83: 全双工范式四件套(文档借鉴: Agentd 状态机标准
+    范式)——①A 显式状态机(渐进影子模式): SM 五态枚举
+    idle/listening/processing/speaking+smT 原子转换, 7 个
+    转换点镜像(pending/speak_start/tts_done/barge_cut/
+    stop_tts/cloud_start/win_close/pending_wd), 非法转换
+    拦截留痕宽恕放行([SM] ILLEGAL console+postMessage——
+    02:35:14 类竞态丢指令从不可观测变可观测, 观察期后
+    收紧为硬守卫); ②B 打断延迟埋点: bargeShouldCut 命中记
+    cut_after_ms→[LAT-BAR](SLA"智能感核心指标"首次可测,
+    <200ms 口径受百炼 partial 回流延迟约束, 基线先行);
+    ③C PROCESSING 看门狗: pending 15s 网络黑洞→回退聆听
+    +可感知提示(免提卡死死锁防线); ④D 状态指示灯: 状态栏
+    五色徽标(灰待机/绿聆听/黄处理/蓝播报)+pill 配色,
+    转换实时可视; 差距矩阵: 环形缓冲 2.5s/打断不断会话/
+    KWS 常驻已有且强于文档基线; widget v=80 -> v=83
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=79"
-NEW = "src=/js/voice-wake-widget.js?v=80"
+OLD = "src=/js/voice-wake-widget.js?v=80"
+NEW = "src=/js/voice-wake-widget.js?v=83"
 
 
 def main():

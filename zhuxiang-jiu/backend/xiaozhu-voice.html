@@ -55,6 +55,10 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
       color:var(--green-deep)}
 .pill.gray{background:#eef1f4;color:var(--tx2)}
 .pill.gold{background:#f7ecd9;color:var(--gold)}
+/* v82-D 状态机指示灯配色(五态可视) */
+.pill.green{background:#e2f2e8;color:#2c6e49}
+.pill.yellow{background:#f9efd6;color:#8a6d1a}
+.pill.blue{background:#e2ecf7;color:#2c5a8f}
 .pill.wake-on{animation:wakep 2.4s ease-in-out infinite}
 @keyframes wakep{0%,100%{box-shadow:0 0 0 0 rgba(47,125,82,.25)}
       50%{box-shadow:0 0 0 5px rgba(47,125,82,0)}}
@@ -350,6 +354,10 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
     <span>轮次 <b id="tcount">0</b></span>
     <span class="pill gray" id="wakePill">待唤醒</span>
     <span class="pill gray" id="modePill">assist</span>
+    <!-- v82-D 状态机指示灯: 五态实时可视(全双工范式
+         "状态机可视化调试"——转换 console [SM] 留痕同出) -->
+    <span class="pill gray" id="smBadge"
+          title="语音状态机">待机</span>
     <span class="sp"></span>
     <button class="sbtn" onclick="newSession()">新会话</button>
     <button class="sbtn" onclick="clearSession()">清除记录</button>
@@ -1370,9 +1378,78 @@ function turnError(e) {
 }
 
 /* ===== 发送: 文本/云端音频 ===== */
+/* ===== v82 显式状态机(全双工范式原子化——渐进影子模式) =====
+   五态: idle 待机|listening 聆听|processing 处理|speaking 播报
+   渐进落地: 本期只镜像现有标志位不替换逻辑(零回归风险),
+   非法转换拦截仅留痕(宽恕放行)——[SM] 日志积累一轮后下期
+   收紧为硬守卫; 02:35:14 实证竞态丢指令类问题由此可观测 */
+var SM = { state: "idle", lastAt: 0, hist: [] };
+var SM_LEGAL = {
+  idle: ["listening"],
+  listening: ["processing", "idle"],
+  processing: ["speaking", "idle", "listening"],
+  speaking: ["listening", "idle"],
+};
+var SM_BADGE = {
+  idle: ["待机", "gray"],
+  listening: ["聆听", "green"],
+  processing: ["处理", "yellow"],
+  speaking: ["播报", "blue"],
+};
+function smT(to, evt) {
+  var from = SM.state;
+  if (from === to) { return true; }
+  var legal = (SM_LEGAL[from] || [])
+    .indexOf(to) >= 0;
+  if (!legal) {
+    /* 非法转换留痕(竞态可观测——收紧前的观察期数据) */
+    try { console.info("[SM] ILLEGAL " + from
+      + "->" + to + " evt=" + evt); } catch (e) {}
+  }
+  SM.state = to;
+  SM.lastAt = Date.now();
+  SM.hist.push(from + ">" + to + ":" + evt);
+  if (SM.hist.length > 24) { SM.hist.shift(); }
+  try {
+    var b = document.getElementById("smBadge");
+    if (b) {
+      var cfg = SM_BADGE[to] || ["?", "gray"];
+      b.textContent = cfg[0];
+      b.className = "pill " + cfg[1];
+    }
+    if (!legal) {
+      window.parent.postMessage(
+        { type: "xz-lat",
+          text: "[SM] illegal " + from + "->" + to
+          + " " + evt }, "*");
+    }
+  } catch (e) { /* 嵌入态 console 采集不可用忽略 */ }
+  return true;
+}
 function setPending(on) {
   S.pending = on;
-  if (on) { S.pendingAt = Date.now(); } /* 看门狗驻留计时 */
+  if (on) {
+    S.pendingAt = Date.now(); /* 看门狗驻留计时 */
+    smT("processing", "pending");  /* v82 影子镜像 */
+  }
+  /* v82-C PROCESSING 看门狗(全双工范式"每态超时回退"):
+     网络黑洞卡 pending → 15s 回退聆听+可感知提示
+     (免提被卡死=状态机死锁, 用户无提示只能干等) */
+  clearTimeout(setPending._wd);
+  setPending._wd = null;
+  if (on) {
+    setPending._wd = setTimeout(function () {
+      if (S.pending && S.pendingAt
+          && Date.now() - S.pendingAt >= 15000) {
+        setPending(false);
+        removeTyping();
+        appendBot("网络慢了半拍——请再说一遍刚才的指令",
+                  null, null, "__err__");
+        smT("listening", "pending_wd");
+        scheduleHandfree(600);
+      }
+    }, 15000);
+  }
   var b = document.getElementById("sendBtn");
   b.disabled = on;
   b.textContent = on ? "…" : "发送";
@@ -1578,6 +1655,20 @@ function streamConnect() {
          完整 final——不吞半句(用户可能还没说完), 提交走
          正常流; 判定规则见 bargeShouldCut */
       if (bargeShouldCut(m.text)) {
+        /* v82-B 打断延迟埋点(SLA"智能感核心指标"可测):
+           打断发生于播报开始后 Xms——观察期收集基线后
+           定 SLA 阈值(全双工范式 <200ms 口径受百炼 partial
+           回流延迟约束, 实测数据先行) */
+        if (S.ttsStartAt) {
+          var _barMs = Date.now() - S.ttsStartAt;
+          try { console.info("[LAT-BAR] cut_after_ms="
+            + _barMs); } catch (e) {}
+          try { window.parent.postMessage(
+            { type: "xz-lat",
+              text: "barge cut_after_ms=" + _barMs },
+            "*"); } catch (e) {}
+        }
+        smT("listening", "barge_cut");  /* v82 影子镜像 */
         stopTtsNow();
         setMicStatus("🎙 已暂停播报——新任务收到，请讲完");
         streamFinish(function (finalText) {
@@ -1955,6 +2046,7 @@ function toggleTts() {
 function stopTtsNow() {
   try { if (S.ttsAbort) S.ttsAbort.abort(); } catch (e) {}
   S.ttsAbort = null;
+  smT("listening", "stop_tts");  /* v82 影子镜像 */
   try {
     if (S.ttsSrc) { S.ttsSrc.onended = null; S.ttsSrc.stop(); }
   } catch (e) {}
@@ -2357,6 +2449,7 @@ function speakCloud(text, bubbleEl, mood) {
   S.ttsAbort = ctl; S.ttsCtl = ctl;
   S.ttsPlaying = true;
   S.ttsStartAt = Date.now(); /* 看门狗驻留计时 */
+  smT("speaking", "speak_start");  /* v82 影子镜像 */
   S.lastSpoken = String(text);
   S.ttsBubble = bubbleEl || null;
   S.ttsChunks = {}; S.ttsNextIdx = 0;
@@ -2378,6 +2471,7 @@ function speakCloud(text, bubbleEl, mood) {
   var done = function () {
     if (el) el.classList.remove("speaking");
     S.ttsPlaying = false;
+    smT("listening", "tts_done");  /* v82 影子镜像 */
     /* 手机外放 TTS 无 AEC 串扰麦克风(残响)——短句播报
        残响短, 1.5s 恢复聆听(对话节奏提速) */
     scheduleHandfree(1500);
@@ -2886,6 +2980,7 @@ function fmtSec(s) {
 function cloudStart() {
   if (S.hidden) return; /* 浮层隐藏期不录音(双保险) */
   S.listenClosed = false; /* 二级唤醒: 任何开窗路径重置窗口关闭标记 */
+  smT("listening", "cloud_start");  /* v82 影子镜像 */
   /* v2 打断: 开麦即停旧轮播报/合成(用户开口优先于
      喇叭还嘴——连续对话时旧轮话音立即让位) */
   if (S.ttsPlaying || S.ttsAbort) stopTtsNow();
@@ -3130,6 +3225,7 @@ function listenClose() {
   cloudActive = false;
   streamTeardown();
   S.listenClosed = true;
+  smT("idle", "win_close");  /* v82 影子镜像 */
   var waveEl = document.getElementById("wave");
   waveEl.classList.remove("live");
   waveEl.style.removeProperty("--amp");

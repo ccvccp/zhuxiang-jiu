@@ -214,14 +214,16 @@ function makePipe() {
   var doneCalls = [];
   var hf = [];
   var fn = new Function("S", "ctx", "scheduleHandfree",
-    "document", "window", "ttsPlayCtx", "latReport",
+    "document", "window", "ttsPlayCtx", "latReport", "smT",
     pipeCode + "\nreturn { ttsEnqueue: ttsEnqueue, pumpTts: pumpTts, stopTtsNow: stopTtsNow, api: {} };");
   var api = fn(S, { ttsPlayCtx: ctx }, function (d) { hf.push(d); },
     { querySelectorAll: function () { return {
         forEach: function () {} }; } },
     { speechSynthesis: { cancel: function () {} } },
     function () { return ctx; },
-    function () { /* latReport 桩 */ });
+    function () { /* latReport 桩 */ },
+    function () { /* v82 smT 桩(stopTtsNow 影子转换留痕,
+                     沙箱外真实面板有定义) */ });
   /* 队首可控: 每块解码产物为 AudioBuffer 桩 {duration: 2} */
   function buf() { return { duration: 2 }; }
   return {
