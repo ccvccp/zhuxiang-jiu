@@ -345,6 +345,7 @@ async def ws_asr(ws: WebSocket):
         dump_f.setsampwidth(2)
         dump_f.setframerate(16000)
         logger.info("ws_asr_dump open %s", _dp)
+    _ws_mid = int((member or {}).get("memberId") or 0)
     try:
         if str(auth.get("ver") or "") != "2":
             # 旧协议(v<=37 缓存客户端): auth → 建流 → ready →
@@ -358,7 +359,7 @@ async def ws_asr(ws: WebSocket):
                 await ws.close()
                 return
             await ws.send_json({"type": "ready"})
-            await _seg_pump(ws, session, dump_f)
+            await _seg_pump(ws, session, dump_f, _ws_mid)
         else:
             # v2 预热协议: armed → [arm → 建流 → ready → 段 →
             # final → 回等 arm]*——连接复用省握手+鉴权(唤醒
@@ -403,7 +404,7 @@ async def ws_asr(ws: WebSocket):
                     session = None
                     continue
                 await ws.send_json({"type": "ready"})
-                await _seg_pump(ws, session, dump_f)
+                await _seg_pump(ws, session, dump_f, _ws_mid)
                 await session.close()
                 session = None
     except Exception as e:
@@ -416,7 +417,8 @@ async def ws_asr(ws: WebSocket):
             logger.info("ws_asr_dump closed")
 
 
-async def _seg_pump(ws, session, dump_f) -> None:
+async def _seg_pump(ws, session, dump_f,
+                   member_id: int = 0) -> None:
     """段消息泵: 二进制帧→feed / finish→final(新旧协议共用)"""
     while True:
         msg = await ws.receive()
@@ -443,6 +445,21 @@ async def _seg_pump(ws, session, dump_f) -> None:
             # 同隐私口径)
             logger.info("ws_asr_final text=%r failed=%r",
                         final, session.failed)
+            # widget 唤醒词点亮 member 级免唤醒窗(20:26:53
+            # 实证: widget 轨唤醒不提交文本轮, service 的
+            # _LAST_WAKE_AT 永不点亮→唤醒后真指令不带前缀
+            # 被 not_woken 打回; final 含小竹=唤醒意图, 与
+            # detect_wake 文本命中同语义)
+            if final and "小竹" in final and member_id:
+                try:
+                    import time as _t
+                    from services.xiaozhu_service import (
+                        XiaozhuService,
+                    )
+                    XiaozhuService._LAST_WAKE_AT[member_id] = \
+                        _t.time()
+                except Exception:
+                    pass
             if final is None:
                 await ws.send_json(
                     {"type": "error",
