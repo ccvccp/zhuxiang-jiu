@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=75";
+  var VER = "v=76";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -730,6 +730,90 @@
     stopPing();
     if (preWs) { try { preWs.close(); } catch (e) { /* 忽略 */ } preWs = null; }
   }
+
+  /* ---------- V6 连接自愈(息屏/切后台 1006 后回前台) ----------
+     21:31:29 实证: 手机切后台冻结 JS 杀 WS(err=1006
+     ABNORMAL_CLOSURE recv=empty), onclose 只清引用不重建
+     ——回前台后 widget 轨永久哑掉(后续无任何 ws_asr_final,
+     喊唤醒无反应)。自愈双路:
+     1) visibilitychange 回前台: ctx 恢复 + 麦克风流探活
+        + 死连接重建(X5 冻结期三杀: WS/audio 图/流)
+     2) preWs onclose(前台): 带退避自动重建防池空 */
+  var preReconnTimer = null, preReconnTries = 0;
+  function schedulePreReconnect(delay) {
+    /* eng.on 守卫: 面板打开期 stopWake→dropPre 触发的 onclose
+       不重建(麦克风交接优先, 连接不占百炼流) */
+    if (!eng.on || !wakeOn() || !authToken()) { return; }
+    if (document.visibilityState !== "visible") { return; }
+    clearTimeout(preReconnTimer);
+    preReconnTimer = setTimeout(function () {
+      preReconnTimer = null;
+      if (!eng.on || !wakeOn() || !authToken()) { return; }
+      if ((preWs && preWs.readyState === 1)
+          || (eng.ws && eng.ws.readyState <= 1)) {
+        preReconnTries = 0; return; /* 池活/段在建 */
+      }
+      preconnect();
+      /* armed 入池延迟判定: 2s 后仍未活→指数退避再来
+         (1s→2s→4s→8s, 5 次封顶防重连风暴) */
+      setTimeout(function () {
+        if (preWs && preWs.readyState === 1) {
+          preReconnTries = 0; return;
+        }
+        preReconnTries++;
+        if (preReconnTries < 5) {
+          schedulePreReconnect(1000
+            * Math.pow(2, Math.min(preReconnTries - 1, 3)));
+        }
+      }, 2000);
+    }, delay);
+  }
+
+  /* 回前台自愈链: 息屏/切后台期间 X5 冻结三杀——WS 断(1006)/
+     AudioContext suspended(audio 图停, VAD 失效喊无反应——
+     "无任何 ws_asr_final"的直接死因)/麦克风流可能被系统回收
+     (track ended 静音)——逐一探活修复 */
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "visible") { return; }
+    if (!wakeOn() || !eng.on) { return; }
+    /* ① ctx 恢复: 已解锁过的 ctx 回前台多数可直接 resume */
+    try {
+      if (eng.ctx && eng.ctx.state === "suspended") {
+        var p = eng.ctx.resume();
+        if (p && p.catch) { p.catch(function () {}); }
+      }
+    } catch (e) { /* 忽略 */ }
+    /* ② 流探活: track 全 ended → 全链重建(重取流+startWake
+       +preconnect; lastRebuildAt 置 0 绕 10s 节流——
+       回前台场景必须重建) */
+    var streamDead = false;
+    try {
+      var trs = (eng.stream && eng.stream.getTracks()) || [];
+      streamDead = !trs.length || trs.every(function (t) {
+        return t.readyState === "ended";
+      });
+    } catch (e) { /* 忽略 */ }
+    if (streamDead) {
+      lastRebuildAt = 0;
+      rebuildWakeStream();
+      return;
+    }
+    /* ③ 连接探活: 池空且无段连接 → 300ms 快速重建 */
+    if (!(preWs && preWs.readyState === 1)
+        && !(eng.ws && eng.ws.readyState <= 1)) {
+      preReconnTries = 0;
+      schedulePreReconnect(300);
+    }
+    /* ①' ctx 仍挂起(X5 回前台不自动恢复): 600ms 后确认
+       仍 suspended 再挂交互兜底(防误提示) */
+    setTimeout(function () {
+      if (eng.ctx && eng.ctx.state === "suspended"
+          && eng.on && !ctxResumeHandler) {
+        armCtxResume();
+      }
+    }, 600);
+  });
+
   function preconnect() {
     if (preWs || !wakeOn() || !authToken()) { return; }
     var proto = location.protocol === "https:" ? "wss://" : "ws://";
@@ -751,6 +835,10 @@
     ws.onclose = function () {
       if (preWs === ws) { preWs = null; stopPing(); }
       if (eng.ws === ws) { teardownSeg(); }
+      /* 前台断连自动重建(带退避): 网络抖动/nginx 超时拆连接后
+         池空——下一段虽可临时建连, 但 VAD 不起段的哑引擎场景
+         需要连接层主动自愈 */
+      schedulePreReconnect(1000);
     };
     ws.onerror = function () { /* onclose 兜底 */ };
   }

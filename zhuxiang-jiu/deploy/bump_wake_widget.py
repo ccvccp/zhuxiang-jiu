@@ -309,13 +309,23 @@ v=74 -> v=75: REST 提交带 wake 标志点亮 member 窗(21:00:35
     带 wake=1, 服务端 REST 端点据此点亮——不依赖 WS 连接
     健康, 覆盖所有唤醒路径(含断连窗/点浮球手动开窗);
     widget v=74 -> v=75
+v=75 -> v=76: V6 连接自愈(21:31:29 实证切后台冻结杀 WS
+    err=1006 ABNORMAL_CLOSURE recv=empty 后, onclose 只清
+    引用不重建——回前台 widget 轨永久哑掉, 后续无任何
+    ws_asr_final,「二次唤醒还是不能实现」); 双路自愈:
+    ①visibilitychange 回前台三探活: ctx resume(X5 冻结期
+    audio 图停, VAD 失效是"无任何 final"直接死因)+麦克风
+    流 track ended 探活(死则绕 10s 节流全链 rebuildWake
+    Stream)+池连接探活(死则 300ms 快速重建); ②preWs
+    onclose 前台自动重建(eng.on 守卫防面板期误连, 指数
+    退避 1→8s 5 次封顶防风暴); widget v=75 -> v=76
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=74"
-NEW = "src=/js/voice-wake-widget.js?v=75"
+OLD = "src=/js/voice-wake-widget.js?v=75"
+NEW = "src=/js/voice-wake-widget.js?v=76"
 
 
 def main():
