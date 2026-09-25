@@ -2819,6 +2819,13 @@ function cloudStart() {
 }
 /* 采集节点搭建(新流/复用流共用): 源→处理器→波形/免提VAD */
 function wireCloudCapture() {
+    /* 拆旧链(11:46 实证识别全空根因): listenClose 轻关闭
+       保留流但变量被覆盖——旧 procNode/srcNode 节点仍在跑,
+       每次关窗重开(wake-hit/每轮续听)泄漏一条并行采集链,
+       同帧被推 N 份→服务端音频时间轴拉伸 N 倍→ASR 识别
+       崩(11:35 三连 arm=多链同时推流实证); 重挂前必拆 */
+    if (procNode) { try { procNode.disconnect(); } catch (e) {} }
+    if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
     srcNode = audioCtx.createMediaStreamSource(recStream);
     procNode = audioCtx.createScriptProcessor(4096, 1, 1);
     pcmChunks = [];

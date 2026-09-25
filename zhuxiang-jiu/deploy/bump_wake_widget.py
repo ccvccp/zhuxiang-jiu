@@ -187,13 +187,21 @@ v=62 -> v=63: 静默等待式 S1 纯声学就绪(四态状态机文档落地)
     环境声暴露面收窄); 句首保护: streamFeed 建连期帧攒入
     stAccum ready 后补推(文档"首字保护"——"叮咚"后立即
     开口的头 0.5~1s 不再丢字); widget v=62 -> v=63
+v=63 -> v=64: 采集链泄漏修复(11:36 起识别全空根因)——
+    listenClose 轻关闭保留流, wireCloudCapture 重挂时旧
+    procNode/srcNode 未拆(变量覆盖但节点在跑)——每次关窗
+    重开泄漏一条并行采集链, 同帧被推 N 份→服务端音频时间
+    轴拉伸 N 倍→ASR 识别全空(11:35 三连 arm=多链同时推流
+    实证; 用户听到的"自言自语"实为"没听清"回声连环——识别
+    空后唯一对话内容只剩播报回声); wireCloudCapture 重挂
+    前强制 disconnect 旧链; widget v=63 -> v=64
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=62"
-NEW = "src=/js/voice-wake-widget.js?v=63"
+OLD = "src=/js/voice-wake-widget.js?v=63"
+NEW = "src=/js/voice-wake-widget.js?v=64"
 
 
 def main():
