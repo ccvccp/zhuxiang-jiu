@@ -261,13 +261,23 @@ v=69 -> v=70: 重新登录打回+refresh 竞态双修——①member 级
     根因): widget 与面板两套刷新互不知情并发——refresh token
     轮换下互相吊销死循环; localStorage xz.refAt 时间戳共享,
     20s 内有人刷过直接跳过; widget v=69 -> v=70
+v=70 -> v=71: rebuild ctx 挂起根修(13:42 二次唤不醒)——
+    rebuildWakeStream 走 stopWake(close ctx)→startWake 新建
+    ctx, X5 新建 ctx 为 suspended 态需用户手势解锁——用户等
+    唤醒不会点屏幕→引擎挂起→识别全碎片('我'/'呀。'/'产')
+    只面板轨正常('看一款52度的酒' 13:41:15 唯一成功轮);
+    修复: ①stopWake 不再 close ctx(保留已解锁实例), startWake
+    复用已有 ctx(仅首次新建)——rebuild 零手势依赖; ②rebuild
+    重取前 300ms 释放竞态缓冲(面板 tracks.stop() 后 X5 麦克
+    风资源释放有延迟, 立即重取可能拿到哑流); widget v=70
+    -> v=71
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=69"
-NEW = "src=/js/voice-wake-widget.js?v=70"
+OLD = "src=/js/voice-wake-widget.js?v=70"
+NEW = "src=/js/voice-wake-widget.js?v=71"
 
 
 def main():

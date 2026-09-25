@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=70";
+  var VER = "v=71";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -482,7 +482,17 @@
   function startWake() {
     if (!wakeOn() || !eng.stream || eng.on) { return; }
     try {
-      eng.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      /* ctx 复用(13:42 二次唤不醒根修): 新建 ctx 在 X5 为
+         suspended 态需用户手势解锁——rebuildWakeStream 后
+         用户等唤醒不会点屏幕→引擎挂起→识别全碎片; 保留
+         已解锁 ctx 只重挂流, 零手势依赖 */
+      if (!eng.ctx) {
+        eng.ctx = new (window.AudioContext
+          || window.webkitAudioContext)();
+      }
+      if (eng.ctx.state === "suspended") {
+        try { eng.ctx.resume(); } catch (e) { /* 点击兜底 */ }
+      }
     } catch (e) { return; }
     var src = eng.ctx.createMediaStreamSource(eng.stream);
     eng.analyser = eng.ctx.createAnalyser();
@@ -526,8 +536,9 @@
                   startWake 末尾 preconnect() 重建 */
     try { if (eng.proc) { eng.proc.disconnect(); eng.proc.onaudioprocess = null; } } catch (e) { /* 忽略 */ }
     try { if (eng.analyser) { eng.analyser.disconnect(); } } catch (e) { /* 忽略 */ }
-    try { if (eng.ctx) { eng.ctx.close(); } } catch (e) { /* 忽略 */ }
-    eng.ctx = null; eng.analyser = null; eng.proc = null;
+    /* ctx 保留不 close(rebuild 零手势依赖): X5 新建 ctx 为
+       suspended 需点击解锁——已解锁的 ctx 跨 rebuild 复用 */
+    eng.analyser = null; eng.proc = null;
   }
   /* 彻底释放麦克风流(X5 独占: 面板与唤醒必须交接, 不能并存持有) */
   function releaseMic() {
@@ -551,6 +562,11 @@
     try {
       stopWake();
       releaseMic();
+      /* 300ms 释放竞态缓冲: 面板 tracks.stop() 后 X5 麦克风
+         资源释放有延迟, 立即重取可能拿到哑流 */
+      await new Promise(function (res) {
+        setTimeout(res, 300);
+      });
       eng.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false, noiseSuppression: true,
