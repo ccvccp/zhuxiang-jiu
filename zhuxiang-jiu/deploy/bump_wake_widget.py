@@ -271,13 +271,23 @@ v=70 -> v=71: rebuild ctx 挂起根修(13:42 二次唤不醒)——
     重取前 300ms 释放竞态缓冲(面板 tracks.stop() 后 X5 麦克
     风资源释放有延迟, 立即重取可能拿到哑流); widget v=70
     -> v=71
+v=71 -> v=72: 复测增强文档增量(ctx 回收防御+降级可感知)——
+    ①ctx closed 态防御(长时挂起场景: 系统后台回收 ctx 后
+    state=closed, 挂死实例不可复用——startWake 复用检查
+    加 closed, 重建走点击兜底); ②rebuild 失败可感知(降级
+    可感知原则: 静默失败=设备看似正常实则失聪——失败
+    showTip"语音通道重连失败-点小竹球重试"+console 留痕
+    [wake-rebuild] ok/failed); 完整埋点体系(五指标)记为
+    规模化后路线(当前无日志采集管道, console 留痕起步);
+    audioWorklet 迁移/X5 行为测试矩阵记为远期; widget v=71
+    -> v=72
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=70"
-NEW = "src=/js/voice-wake-widget.js?v=71"
+OLD = "src=/js/voice-wake-widget.js?v=71"
+NEW = "src=/js/voice-wake-widget.js?v=72"
 
 
 def main():

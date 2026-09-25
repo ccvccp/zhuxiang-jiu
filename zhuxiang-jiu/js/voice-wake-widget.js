@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=71";
+  var VER = "v=72";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -485,8 +485,9 @@
       /* ctx 复用(13:42 二次唤不醒根修): 新建 ctx 在 X5 为
          suspended 态需用户手势解锁——rebuildWakeStream 后
          用户等唤醒不会点屏幕→引擎挂起→识别全碎片; 保留
-         已解锁 ctx 只重挂流, 零手势依赖 */
-      if (!eng.ctx) {
+         已解锁 ctx 只重挂流, 零手势依赖; closed 态(系统后台
+         回收)例外——挂死实例不可复用, 重建+点击兜底提示 */
+      if (!eng.ctx || eng.ctx.state === "closed") {
         eng.ctx = new (window.AudioContext
           || window.webkitAudioContext)();
       }
@@ -574,7 +575,15 @@
         },
       });
       startWake();
-    } catch (e) { /* 重取失败: 浮球兜底, 用户点击重试 */ }
+      /* 结果留痕(降级可感知原则): 成功/失败 console 可查,
+         失败明确 tip——静默失败=设备看似正常实则失聪 */
+      try { console.info("[wake-rebuild] ok stream=1"); }
+      catch (e) { /* 忽略 */ }
+    } catch (e) {
+      try { console.info("[wake-rebuild] failed: " + (e && e.message)); }
+      catch (e2) { /* 忽略 */ }
+      showTip("语音通道重连失败——点一下小竹球重试唤醒", 6000);
+    }
   }
 
   /* 每音频帧: RMS 能量 VAD + 重采样 16k 入环形缓存/推流 */
