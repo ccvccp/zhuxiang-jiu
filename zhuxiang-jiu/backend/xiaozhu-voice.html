@@ -1154,9 +1154,12 @@ function handleTurn(j, channel) {
   }
   var bubble = appendBot(j.reply || "(无应答)", j.card || null, wakeWarn || null,
                          null, j.autoJump ? null : (j.jump || null));
-  /* 自录回环检测用: 最近一条小竹播报文本(postVoiceTranscript
-     比对——短转子串命中=小竹自己的声音被收音) */
-  S.lastBot = String(j.reply || "");
+  /* 自录回环检测用: 小竹播报集合(最近 3 条)——单值 lastBot
+     会被恢复会话/welcome 轮覆盖(wake-hit 应答被收音成轮
+     09:06 实证), 集合任一命中即判自录 */
+  S.selfUtter = S.selfUtter || [];
+  S.selfUtter.push(String(j.reply || ""));
+  if (S.selfUtter.length > 3) { S.selfUtter.shift(); }
   /* 78号P1/P3: 播报情绪标签(care 柔慢/steady 稳/cheerful
      明快——TTS 语调路由); P2: 选项引导 chips */
   var mood = j.mood || "";
@@ -1355,17 +1358,21 @@ function postVoiceTranscript(text, durationSec) {
     }
     S.wakeGrace = 0;
   }
-  /* TTS 自录回环: 转写是最近小竹播报的子串(短句)=小竹自己
-     的声音外放被麦克风收回成轮(07:02 实证「好的。」/
-     「还在学着呢。」)——静默丢弃续听, 不进会话;
-     比对去标点(转写「我在请吩咐」无逗号 vs 原文带逗号) */
-  if (S.handfree && text && S.lastBot) {
+  /* TTS 自录回环: 转写是最近小竹播报(集合, 最多 3 条——
+     welcome/widget 应答/回复轮)的子串=小竹自己的声音外放
+     被麦克风收回成轮(07:02「好的。」/09:06「我在，请吩咐。」
+     实证)——静默丢弃续听, 不进会话; 比对去标点 */
+  if (S.handfree && text && S.selfUtter) {
     var _nz = function (s) {
       return String(s).replace(/[，。？！、,.?! ]/g, "");
     };
-    if (_nz(S.lastBot).indexOf(_nz(text)) !== -1
-        && String(text).length <= 10) {
-      scheduleHandfree(400); return;
+    var _t2 = _nz(text);
+    if (String(text).length <= 10) {
+      for (var i = 0; i < S.selfUtter.length; i++) {
+        if (_nz(S.selfUtter[i]).indexOf(_t2) !== -1) {
+          scheduleHandfree(400); return;
+        }
+      }
     }
   }
   /* v3 延迟埋点: 提交时刻 */
@@ -2389,8 +2396,10 @@ window.addEventListener("message", function (ev) {
     updateWakePill();
     /* 唤醒应答在 widget 主页面直播(X5 无手势时面板 WebAudio
        挂起——speak 静默无声); 面板只给文字反馈免双播;
-       记入 lastBot——应答外放被麦收回时自录检测可命中 */
-    S.lastBot = "我在，请吩咐";
+       记入播报集合——应答外放被麦收回时自录检测可命中
+       (集合防 welcome 轮覆盖) */
+    S.selfUtter = S.selfUtter || [];
+    S.selfUtter.push("我在，请吩咐");
     if (S.sid) { setMicStatus("🎙 我在，请吩咐"); }
   }
 });
