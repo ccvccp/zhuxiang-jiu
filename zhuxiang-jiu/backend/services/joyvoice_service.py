@@ -258,4 +258,16 @@ def split_speech(text: str) -> list[str]:
                 cur = ""
     if cur.strip():
         parts.append(cur.strip())
-    return parts or [t]
+    if not parts:
+        return [t]
+    # v77 短块合并(与前端 splitSpeech 逐字一致): 切分产出的
+    # ≤6 字短块百炼 TTS 高频拒答(98 字节 JSON 错误体)且块数
+    # 多加剧并发限流——非首块并入前块; 首块保护("好的——"
+    # preheat 秒播链依赖恒定键)
+    merged = [parts[0]]
+    for p in parts[1:]:
+        if len(p.strip()) <= 6:
+            merged[-1] += p
+        else:
+            merged.append(p)
+    return merged

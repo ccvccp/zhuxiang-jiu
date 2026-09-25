@@ -2009,7 +2009,19 @@ function splitSpeech(text) {
     }
   }
   if (cur.trim()) parts.push(cur.trim());
-  return parts.length ? parts : [t];
+  if (!parts.length) return [t];
+  /* v77 短块合并(21:31 日志实证 bad_response 30%): 切分产出的
+     ≤6 字短块(理性饮酒，/满, 醇厚…)百炼 TTS 高频拒答(98 字节
+     JSON 错误体)且块数多加剧并发限流——非首块一律并入前块;
+     首块保护不并("好的——"前缀 preheat 秒播链依赖恒定键);
+     与后端 split_speech 逐字一致 */
+  var merged = [parts[0]];
+  for (var pi = 1; pi < parts.length; pi++) {
+    if (parts[pi].trim().length <= 6) {
+      merged[merged.length - 1] += parts[pi];
+    } else { merged.push(parts[pi]); }
+  }
+  return merged;
 }
 function ttsPlayCtx() {
   var AC = window.AudioContext || window.webkitAudioContext;
@@ -2411,40 +2423,57 @@ function speakCloud(text, bubbleEl, mood) {
       if (S.ttsAbort !== ctl) return; /* 旧轮: 后续块不再发 */
       if (idx === 0 && streamFirst) return; /* 流式负责首块 */
       var pre = packedGet(c);
-      var pr = pre ? Promise.resolve(pre)
-        : fetch(ttsUrl(c, mood), {
-            headers: hdrs,
-            signal: ctl ? ctl.signal : undefined })
+      /* v77 块级单次重试(21:31:06 实证坏块静默丢=播报缺句):
+         catch 直接送 null 完成块——句音消失用户感知"不能完整
+         播报"; 对齐 _tryFetch 整句回退模式 400ms 退避重打 */
+      var tried = false;
+      var fetchChunk = function () {
+        return (pre ? Promise.resolve(pre)
+          : fetch(ttsUrl(c, mood), {
+              headers: hdrs,
+              signal: ctl ? ctl.signal : undefined })
             .then(function (r) {
               if (!r.ok) throw new Error("tts " + r.status);
               return r.arrayBuffer();
-            });
-      pr.then(function (buf) {
-        if (S.ttsAbort !== ctl) return;
-        if (!buf) {
-          return ttsEnqueue(null, idx,
-            idx === chunks.length - 1 ? done : null, ctl);
-        }
-        /* P2·O3: decoded 旁路命中零 decode; 未命中解码后
-           回填(同句二播即零成本) */
-        var _d0 = decGet(c);
-        if (_d0) {
-          return ttsEnqueue(_d0, idx,
-            idx === chunks.length - 1 ? done : null, ctl);
-        }
-        return ttsDecode(ctx, buf).then(function (d) {
+            }));
+      };
+      var run = function () {
+        fetchChunk().then(function (buf) {
           if (S.ttsAbort !== ctl) return;
-          decPut(c, d);
-          ttsEnqueue(d, idx,
+          if (!buf) {
+            return ttsEnqueue(null, idx,
+              idx === chunks.length - 1 ? done : null, ctl);
+          }
+          /* P2·O3: decoded 旁路命中零 decode; 未命中解码后
+             回填(同句二播即零成本) */
+          var _d0 = decGet(c);
+          if (_d0) {
+            return ttsEnqueue(_d0, idx,
+              idx === chunks.length - 1 ? done : null, ctl);
+          }
+          return ttsDecode(ctx, buf).then(function (d) {
+            if (S.ttsAbort !== ctl) return;
+            decPut(c, d);
+            ttsEnqueue(d, idx,
+              idx === chunks.length - 1 ? done : null, ctl);
+          });
+        }).catch(function () {
+          if (S.ttsAbort !== ctl) return;
+          if (!tried) {
+            tried = true;
+            setTimeout(function () {
+              if (S.ttsAbort === ctl) run();
+            }, 400);
+            return;
+          }
+          ttsEnqueue(null, idx,
             idx === chunks.length - 1 ? done : null, ctl);
         });
-      }).catch(function () {
-        if (S.ttsAbort !== ctl) return;
-        ttsEnqueue(null, idx,
-          idx === chunks.length - 1 ? done : null, ctl);
-      });
-    }, idx * 120); /* 错峰 120ms: 真机实证 cogtts 上游
-                      队列并发争用致播报滞后 */
+      };
+      run();
+    }, idx * 250); /* 错峰 250ms: v77(原 120ms 实证 6 块连发
+                      撞百炼 TTS 并发限流, 98 字节错误体集中
+                      在爆发点——21:16 六连/21:31 五连) */
   });
   /* 轮级兜底: 全文估时+8s(覆盖块级推进间隙与 fetch 黑洞),
      仍在播则强制收尾(防卡死免提) */

@@ -6,7 +6,7 @@
  * 引擎: 云端流式 ASR 唤醒词检测(/api/xiaozhu/ws/asr, 与语音页
  *       P1 流式轨同协议: auth→ready→PCM 帧→partial/final)
  *       + VAD 音量门限(静默期不推流不烧额度, ring buffer
- *       防漏唤醒词开头) + 频率熔断(单段 6s 封顶/分钟 6 段)
+ *       防漏唤醒词开头) + 频率熔断(单段 3s 封顶/分钟 10 段)
  * 兼容: 纯标准 JS, PC/微信内置浏览器通用; 游客无 JWT 不启动
  *       监听(WS 首条鉴权), 球保留为普通入口
  * 开关: localStorage 'xiaozhu.wake' = on/off; 语音面板内可切换
@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=76";
+  var VER = "v=77";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -636,8 +636,10 @@
            「小竹-换气-小竹」切成两段, 两声匹配必败+间隙噪音
            段(rms~100)泛滥; 成功轮段长实证 2.2~4.6s——0.9s 给
            换气留 0.75s 窗口, 仍比原 1.2s 快 0.3s);
-           单段 6s 强制收段(防长语音) */
-        if ((eng.loStreak >= 9 && dur > 900) || dur > 6000) { endSegment(); }
+           单段 3s 强制收段(v77: 原 6s——KWS 轨只需唤醒词
+           2s 内说完, 环境视频声持续有声不静默每段烧满 6s,
+           24h 实证 62% 轮是环境声长转写; 3s 封顶砍半额度) */
+        if ((eng.loStreak >= 9 && dur > 900) || dur > 3000) { endSegment(); }
       } else { eng.loStreak = 0; }
     }
   }

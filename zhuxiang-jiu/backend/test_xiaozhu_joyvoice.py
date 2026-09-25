@@ -232,13 +232,23 @@ async def main():
     record("加购轮: 42° 250ml 数字段完整",
            _cart_parts[0].rstrip()
            == "已加「竹奕·竹香便携"
-           and _cart_parts[1] == "42° 250ml」×1，",
+           and _cart_parts[1] == "42° 250ml」×1，¥88，",
            f"first={_cart_parts[0]!r} "
            f"second={_cart_parts[1]!r}")
-    record("无标点长串硬切14字",
-           all(len(p) <= 15
-               for p in jv.split_speech("一" * 30)),
+    record("v77 短块并入前块(¥88，不再独立成块)",
+           all(len(p.strip()) > 6
+               for p in _cart_parts[1:]),
+           f"lens={[len(p) for p in _cart_parts]}")
+    record("v77 首块保护(好的——恒定前缀不并入)",
+           jv.split_speech(_rec)[0] == "好的——")
+    record("无标点长串硬切14字+短尾并入(v77)",
+           [len(p) for p in jv.split_speech("一" * 30)]
+           == [14, 16],
            f"lens={[len(p) for p in jv.split_speech('一' * 30)]}")
+    record("v77 全短块场景(介绍完了。理性饮酒，合并)",
+           jv.split_speech("介绍完了。理性饮酒，")
+           == ["介绍完了。理性饮酒，"],
+           f"got={jv.split_speech('介绍完了。理性饮酒，')}")
 
     print("[13 P1.5 tts_cache_key 与路由键等值]")
     import hashlib as _hl

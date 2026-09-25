@@ -835,9 +835,10 @@ class LLMProviderClient:
                     and _wav_intact(data)):
                 return data
             logger.warning("llm_tts_bad_response ct=%s len=%s "
-                           "intact=%s",
+                           "intact=%s body=%.80s text=%.12s",
                            ctype, len(data) if data else 0,
-                           _wav_intact(data) if data else None)
+                           _wav_intact(data) if data else None,
+                           (data or b"")[:80], t)
             # 偶发切片拒绝(08:20 实证「需要吗？」伴随并发被拒)
             # ——退避一次重试, 仍败才放弃该切片
             if _retry:

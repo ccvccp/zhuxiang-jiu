@@ -319,13 +319,24 @@ v=75 -> v=76: V6 连接自愈(21:31:29 实证切后台冻结杀 WS
     Stream)+池连接探活(死则 300ms 快速重建); ②preWs
     onclose 前台自动重建(eng.on 守卫防面板期误连, 指数
     退避 1→8s 5 次封顶防风暴); widget v=75 -> v=76
+v=76 -> v=77: 千问3-max 全面诊断复查 P0 四项——①TTS
+    短块合并(24h 实证 bad_response 30%=11/36, 98 字节
+    JSON 错误体集中于 6 块连发爆发点=百炼并发限流+短块
+    拒答; 前端 splitSpeech+后端 split_speech 逐字一致加
+    ≤6 字非首块并入前块, 首块保护"好的——"preheat 恒定
+    键); ②块级 fetch 失败 400ms 单次重试(原 catch 直送
+    null=坏块静默丢, 用户感知"不能完整播报"); ③TTS 错峰
+    120→250ms 削并发限流; ④服务端 bad_response 日志加
+    响应体前 80 字留证(确认限流/短句归因); ⑤KWS 段长
+    6s→3s 封顶(24h 实证 62% 轮=环境视频声长转写烧 ASR
+    额度, 唤醒词 2s 内说完); widget v=76 -> v=77
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=75"
-NEW = "src=/js/voice-wake-widget.js?v=76"
+OLD = "src=/js/voice-wake-widget.js?v=76"
+NEW = "src=/js/voice-wake-widget.js?v=77"
 
 
 def main():
