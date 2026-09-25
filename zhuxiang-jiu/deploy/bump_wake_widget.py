@@ -220,13 +220,25 @@ v=65 -> v=66: 用户交互逻辑定版改造("唤醒播报→说话切断→
     竹」≥2字/纠正元词放行)切断播报+finish 收段; 执行期
     (提交→回复到达)不 arm 无拾音(用户要求"执行时关闭录音");
     widget v=65 -> v=66
+v=66 -> v=67: 五态闭环文档增量落地——①应答音频预缓存:
+    首次唤醒 fetch+decode 后存 AudioBuffer, 后续唤醒零网络
+    零合成秒播(开播延迟 0.5~3s→<50ms, 文档"唤醒播报首字
+    延迟≤300ms"达成); ②状态机看门狗(文档"驻留>10s 强制重置
+    S0"): ttsPlaying 挂死>60s 强停/pending 挂死>60s 复位提示
+    重说/wakeVadMute Infinity(播放同步 end 丢失)60s 解除
+    ——防单点故障致面板永久不可用; 文档不采纳项(物理边界
+    记录): S1 VAD 打断与 S3 能量打断在 X5 无 AEC 下外放直达
+    rms 与人声不可分(v54 实证自打断), 打断坚持文本判定路线
+    (partial 回流+bargeShouldCut, 延迟=partial 出字 ~1s 非
+    文档的 50ms); S4 窗口内 KWS 与面板流麦克风互斥(X5 单占),
+    窗口内免唤醒直达已是等效体验; widget v=66 -> v=67
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=65"
-NEW = "src=/js/voice-wake-widget.js?v=66"
+OLD = "src=/js/voice-wake-widget.js?v=66"
+NEW = "src=/js/voice-wake-widget.js?v=67"
 
 
 def main():

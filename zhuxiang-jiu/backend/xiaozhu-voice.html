@@ -1315,6 +1315,7 @@ function turnError(e) {
 /* ===== 发送: 文本/云端音频 ===== */
 function setPending(on) {
   S.pending = on;
+  if (on) { S.pendingAt = Date.now(); } /* 看门狗驻留计时 */
   var b = document.getElementById("sendBtn");
   b.disabled = on;
   b.textContent = on ? "…" : "发送";
@@ -2251,6 +2252,7 @@ function speakCloud(text, bubbleEl, mood) {
     ? new AbortController() : null;
   S.ttsAbort = ctl; S.ttsCtl = ctl;
   S.ttsPlaying = true;
+  S.ttsStartAt = Date.now(); /* 看门狗驻留计时 */
   S.lastSpoken = String(text);
   S.ttsBubble = bubbleEl || null;
   S.ttsChunks = {}; S.ttsNextIdx = 0;
@@ -2951,6 +2953,31 @@ function listenWindowOver(sec, vadSpoke) {
    (tracks stop+ctx close)把麦克风还给 widget 轨, 唤醒恢复;
    代价=重开窗重取 getUserMedia 1~3s(wake-hit 后 micStatus
    提示"正在开麦"), 唤醒可靠性 >> 句首 1s */
+/* 状态机看门狗(五态文档"驻留>10s 强制重置 S0"): 状态异常
+   卡死兜底——ttsPlaying 挂死(播报链异常 done 未回调)/
+   wakeVadMute Infinity 卡死(播放同步 end 消息丢失)/
+   pending 挂死(网络异常)——驻留超时强制复位到待机态,
+   防单点故障致面板永久不可用; 60s 一查, 轻量 */
+setInterval(function () {
+  try {
+    if (S.ttsPlaying && S.ttsStartAt
+        && Date.now() - S.ttsStartAt > 60000) {
+      stopTtsNow();
+    }
+    if (S.pending && S.pendingAt
+        && Date.now() - S.pendingAt > 60000) {
+      S.pending = false;
+      removeTyping();
+      setMicStatus("🎙 处理超时已复位——请再说一次");
+      scheduleHandfree(400);
+    }
+    if (S.wakeVadMute === Infinity) {
+      /* 应答播放同步 start 收到但 end 永远未到(面板重载
+         竞态)——10s 后强制解除静默 */
+      S.wakeVadMute = 0;
+    }
+  } catch (e) { /* 看门狗自身 fail-soft */ }
+}, 60000);
 function listenClose() {
   if (recTimer) { clearInterval(recTimer); recTimer = null; }
   if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }

@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=66";
+  var VER = "v=67";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -953,6 +953,32 @@
      精确跟随实际播放——11:35 实证固定窗对不上开播延迟)+
      面板 wakeGrace 提交丢弃窗+selfUtter 文本层, 三层防御 */
   var wakeReplyCtx = null;
+  var wakeReplyAudio = null; /* 应答音频预缓存(五态文档"消除
+     首字延迟"): 首次唤醒 fetch+decode 后存 AudioBuffer,
+     后续唤醒零网络零合成直接 start——开播延迟 0.5~3s →
+     <50ms, 打断窗口同步(面板 VAD 静默跟随)不受影响 */
+  function playWakeReply(d) {
+    var s = wakeReplyCtx.createBufferSource();
+    s.buffer = d;
+    s.connect(wakeReplyCtx.destination);
+    try {
+      fr.contentWindow.postMessage(
+        { type: "xz-wake-audio-start" }, "*");
+    } catch (e) { /* 面板未开忽略 */ }
+    s.onended = function () {
+      try {
+        fr.contentWindow.postMessage(
+          { type: "xz-wake-audio-end" }, "*");
+      } catch (e) { /* 忽略 */ }
+    };
+    setTimeout(function () { /* onended 丢失兜底 */
+      try {
+        fr.contentWindow.postMessage(
+          { type: "xz-wake-audio-end" }, "*");
+      } catch (e) { /* 忽略 */ }
+    }, 5000);
+    s.start();
+  }
   function speakWakeReply() {
     try {
       var AC = window.AudioContext
@@ -961,6 +987,10 @@
       if (!wakeReplyCtx) { wakeReplyCtx = new AC(); }
       if (wakeReplyCtx.state === "suspended") {
         wakeReplyCtx.resume();
+      }
+      if (wakeReplyAudio) {
+        playWakeReply(wakeReplyAudio);
+        return;
       }
       fetch("/api/xiaozhu/tts?text="
         + encodeURIComponent("我在，请吩咐"), {
@@ -971,26 +1001,8 @@
       }).then(function (b) {
         return wakeReplyCtx.decodeAudioData(b);
       }).then(function (d) {
-        var s = wakeReplyCtx.createBufferSource();
-        s.buffer = d;
-        s.connect(wakeReplyCtx.destination);
-        try {
-          fr.contentWindow.postMessage(
-            { type: "xz-wake-audio-start" }, "*");
-        } catch (e) { /* 面板未开忽略 */ }
-        s.onended = function () {
-          try {
-            fr.contentWindow.postMessage(
-              { type: "xz-wake-audio-end" }, "*");
-          } catch (e) { /* 忽略 */ }
-        };
-        setTimeout(function () { /* onended 丢失兜底 */
-          try {
-            fr.contentWindow.postMessage(
-              { type: "xz-wake-audio-end" }, "*");
-          } catch (e) { /* 忽略 */ }
-        }, 5000);
-        s.start();
+        wakeReplyAudio = d; /* 预缓存: 后续唤醒秒播 */
+        playWakeReply(d);
       }).catch(function () { /* beep 已响, 静默 */ });
     } catch (e) { /* 忽略 */ }
   }
