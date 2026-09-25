@@ -330,13 +330,21 @@ v=76 -> v=77: 千问3-max 全面诊断复查 P0 四项——①TTS
     响应体前 80 字留证(确认限流/短句归因); ⑤KWS 段长
     6s→3s 封顶(24h 实证 62% 轮=环境视频声长转写烧 ASR
     额度, 唤醒词 2s 内说完); widget v=76 -> v=77
+v=77 -> v=78: TTS 合成链式串行(1302 根治)——02:14:07 实证
+    智谱 cogtts 瞬时并发超限秒拒(code 1302, 6 并发 8 次拒绝
+    同秒成败并存=限流非欠费, 2s 后全恢复); v77 块级重试虽兜住
+    (8 次全自愈零缺句)但余波: 恢复期 acoustic 10~14s 排队风暴
+    (02:14:18 实证 14429ms); 串行化=块入队才发下一块(在途≤1,
+    合成 1.3s<播放 1.5s 追得上节奏, 块 i 就绪 1.3(i+1)≤播完
+    1.3+1.5i 恒成立), 智谱侧零排队; v77 短块合并/400ms 重试/
+    KWS 3s 封顶全保留; widget v=77 -> v=78
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=76"
-NEW = "src=/js/voice-wake-widget.js?v=77"
+OLD = "src=/js/voice-wake-widget.js?v=77"
+NEW = "src=/js/voice-wake-widget.js?v=78"
 
 
 def main():
