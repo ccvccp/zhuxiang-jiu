@@ -2418,71 +2418,65 @@ function speakCloud(text, bubbleEl, mood) {
     streamFirstChunk(ctl, ctx, chunks[0], mood,
                      chunks.length, done);
   }
-  /* v78 合成链式串行(1302 根治): 智谱 cogtts 瞬时并发超限秒拒
-     (02:14 实证 6 并发 8 次 1302 拒绝, 同秒成败并存=限流非欠费,
-     2s 后全恢复)——链式一块入队才发下一块, 在途≤1; 合成 1.3s
-     < 播放 1.5s 追得上节奏(块 i 就绪 1.3(i+1) ≤ 播完 1.3+1.5i
-     恒成立), 智谱侧零排队(02:14:18 实证并发风暴致 acoustic
-     14.4s 排队); v77 块级 400ms 重试保留兜底 */
-  var chainNext = streamFirst ? 1 : 0;
-  function fetchChain(idx) {
-    if (idx >= chunks.length || S.ttsAbort !== ctl) return;
-    var c = chunks[idx];
-    var pre = packedGet(c);
-    var tried = false;
-    var fetchChunk = function () {
-      return (pre ? Promise.resolve(pre)
-        : fetch(ttsUrl(c, mood), {
-            headers: hdrs,
-            signal: ctl ? ctl.signal : undefined })
+  /* v79 回退串行链(v78 教训): fetchChain 回调链在 X5 实证
+     每块 fetch 挂起 ~10s(02:34:46/56 nginx GET 晚 10~11s 才
+     到达, 首发丢失静默重试)——播报每块拖 10s+/指令无提交/
+     二次唤醒延迟三症状同源; 回退 v77 forEach 并发(X5 实证
+     fetch 即时发出), 错峰 250→800ms 压在途峰值至 ~3(1302
+     并发限流预防: 6 并发才触发, 3 安全), 块级 400ms 重试保留 */
+  chunks.forEach(function (c, idx) {
+    setTimeout(function () {
+      if (S.ttsAbort !== ctl) return; /* 旧轮: 后续块不再发 */
+      if (idx === 0 && streamFirst) return; /* 流式负责首块 */
+      var pre = packedGet(c);
+      var tried = false;
+      var fetchChunk = function () {
+        return (pre ? Promise.resolve(pre)
+          : fetch(ttsUrl(c, mood), {
+              headers: hdrs,
+              signal: ctl ? ctl.signal : undefined })
             .then(function (r) {
               if (!r.ok) throw new Error("tts " + r.status);
               return r.arrayBuffer();
             }));
-    };
-    var afterEnqueue = function () {
-      fetchChain(idx + 1); /* 块入队后才发下一块(链式) */
-    };
-    var run = function () {
-      fetchChunk().then(function (buf) {
-        if (S.ttsAbort !== ctl) return;
-        if (!buf) {
+      };
+      var run = function () {
+        fetchChunk().then(function (buf) {
+          if (S.ttsAbort !== ctl) return;
+          if (!buf) {
+            return ttsEnqueue(null, idx,
+              idx === chunks.length - 1 ? done : null, ctl);
+          }
+          /* P2·O3: decoded 旁路命中零 decode; 未命中解码后
+             回填(同句二播即零成本) */
+          var _d0 = decGet(c);
+          if (_d0) {
+            return ttsEnqueue(_d0, idx,
+              idx === chunks.length - 1 ? done : null, ctl);
+          }
+          return ttsDecode(ctx, buf).then(function (d) {
+            if (S.ttsAbort !== ctl) return;
+            decPut(c, d);
+            ttsEnqueue(d, idx,
+              idx === chunks.length - 1 ? done : null, ctl);
+          });
+        }).catch(function () {
+          if (S.ttsAbort !== ctl) return;
+          if (!tried) {
+            tried = true;
+            setTimeout(function () {
+              if (S.ttsAbort === ctl) run();
+            }, 400);
+            return;
+          }
           ttsEnqueue(null, idx,
             idx === chunks.length - 1 ? done : null, ctl);
-          return afterEnqueue();
-        }
-        /* P2·O3: decoded 旁路命中零 decode; 未命中解码后
-           回填(同句二播即零成本) */
-        var _d0 = decGet(c);
-        if (_d0) {
-          ttsEnqueue(_d0, idx,
-            idx === chunks.length - 1 ? done : null, ctl);
-          return afterEnqueue();
-        }
-        return ttsDecode(ctx, buf).then(function (d) {
-          if (S.ttsAbort !== ctl) return;
-          decPut(c, d);
-          ttsEnqueue(d, idx,
-            idx === chunks.length - 1 ? done : null, ctl);
-          afterEnqueue();
         });
-      }).catch(function () {
-        if (S.ttsAbort !== ctl) return;
-        if (!tried) {
-          tried = true;
-          setTimeout(function () {
-            if (S.ttsAbort === ctl) run();
-          }, 400);
-          return;
-        }
-        ttsEnqueue(null, idx,
-          idx === chunks.length - 1 ? done : null, ctl);
-        afterEnqueue();
-      });
-    };
-    run();
-  }
-  fetchChain(chainNext);
+      };
+      run();
+    }, idx * 800); /* 错峰 800ms: 峰值在途 ~3 块(<1302 触发
+                      阈值), X5 并发 fetch 实证不挂起 */
+  });
   /* 轮级兜底: 全文估时+8s(覆盖块级推进间隙与 fetch 黑洞),
      仍在播则强制收尾(防卡死免提) */
   var estMs = Math.min(30000, 2000 + all.length * 300) + 8000;

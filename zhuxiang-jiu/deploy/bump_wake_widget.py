@@ -338,13 +338,23 @@ v=77 -> v=78: TTS 合成链式串行(1302 根治)——02:14:07 实证
     合成 1.3s<播放 1.5s 追得上节奏, 块 i 就绪 1.3(i+1)≤播完
     1.3+1.5i 恒成立), 智谱侧零排队; v77 短块合并/400ms 重试/
     KWS 3s 封顶全保留; widget v=77 -> v=78
+v=78 -> v=79: 回退串行链(v78 真机翻车)——fetchChain 回调链
+    在 X5 实证每块 fetch 挂起 ~10s(02:34:46/56 nginx GET 时间
+    戳晚 10~11s, 首发静默丢失+重试; 02:36 轮同模式), 三症状
+    同源: 播报每块拖 10s+("不能正确播报")+播报链悬空期状态机
+    错乱致指令无提交("不能正确选商品", 02:35:14 '选一款56度
+    的酒' final 无轮次)+关窗/续听延后("二次唤醒等待超预期");
+    回退 v77 forEach 并发模式(X5 实证 fetch 即时发出), 错峰
+    250→800ms 压在途峰值 ~3(1302 预防: 6 并发才触发), 块级
+    400ms 重试保留; 教训入档: X5 回调链式 fetch 不可靠,
+    setTimeout 并发调度可靠; widget v=78 -> v=79
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=77"
-NEW = "src=/js/voice-wake-widget.js?v=78"
+OLD = "src=/js/voice-wake-widget.js?v=78"
+NEW = "src=/js/voice-wake-widget.js?v=79"
 
 
 def main():
