@@ -59,9 +59,11 @@ console.log("[B] VAD 语义感知断句");
 var vtickCode = extractVtick();
 var STOP_AT = {}; /* {cloudStop: n} 计数对象由每次 makeVtick 新建 */
 function makeVtick(streamPartial, silentAgoMs, speakVol, vadSpoke,
-                   cloudActive) {
+                   cloudActive, extraS) {
   var S = { handfree: true, vadSpoke: (vadSpoke !== false),
             streamPartial: streamPartial };
+  var k;
+  for (k in (extraS || {})) { S[k] = extraS[k]; }
   var stops = 0;
   var v = speakVol === undefined ? 0.005 : speakVol; /* 默认静音 */
   var abuf = new Uint8Array(512);
@@ -175,6 +177,12 @@ ok("W3 已说话 29s 不关(30s 硬上限内)",
    lwo(29, true) === false);
 ok("W4 已说话 30s 关(ASR 单段上限)",
    lwo(30, true) === true);
+ok("W5 应答 VAD 静默窗内(已说+静音1300) 不断句(11:28 回环修复)",
+   makeVtick("来两件竹香春", 1300, 0.005, true, true,
+             { wakeVadMute: Date.now() + 2500 }) === 0);
+ok("W6 静默窗过期后 正常断句恢复",
+   makeVtick("来两件竹香春", 1300, 0.005, true, true,
+             { wakeVadMute: Date.now() - 100 }) === 1);
 
 /* ---------- C. 流水线队列(pumpTts/ttsEnqueue/stopTtsNow) ---------- */
 console.log("[C] TTS 分句流水线队列");

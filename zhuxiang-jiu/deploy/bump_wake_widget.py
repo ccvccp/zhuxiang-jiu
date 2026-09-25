@@ -152,16 +152,26 @@ v=59 -> v=60: 二级对话唤醒窗口制(用户方案"不问不答, 问即
     ③打断走唤醒词: widget KWS 独立流常开, 播报中喊「小竹
     小竹」→ wake-hit → cloudStart(内置 stopTtsNow 打断)+
     重开窗; ④多轮对话=窗口接力(每轮播报完 done→schedule
-    Handfree 开新窗, 窗口内说话免唤醒直达); 双轨 barge 判
-    定链保留为死代码防御层(留给未来 AEC 方案); widget v=59
+    Handfree 开新窗, 窗口内说话免唤醒直达); 双轨 barge 判定链保留为死代码防御层(留给未来 AEC 方案); widget v=59
     -> v=60
+v=60 -> v=61: 唤醒应答回环双窗修复(11:28 实证"自己说+回答
+    不了"完整病理)——wake-hit 开窗与 widget「我在，请吩咐」
+    直播同时, 应答外放直达麦克风 rms 超任何阈值被 VAD 判
+    "说话"→vadSpoke=true 窗口不关→尾音静音断句提交恰在
+    wakeGrace 4s 边缘外→回声轮连环(4 连短 TTS)→回声轮
+    not_woken 打回重置 woken→用户真话「介绍一款52度的酒」
+    无前缀被打回"请以小竹开头"。修复: 双窗分离——①wakeVad
+    Mute 2.5s(VAD 静默窗: 应答播放期 vtick 不判定不置
+    vadSpoke; 不吞用户指令头——唤醒→说话节奏 >2s); ②wake
+    Grace 4s→4.5s(提交丢弃窗防尾音段边缘提交); widget v=60
+    -> v=61
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=59"
-NEW = "src=/js/voice-wake-widget.js?v=60"
+OLD = "src=/js/voice-wake-widget.js?v=60"
+NEW = "src=/js/voice-wake-widget.js?v=61"
 
 
 def main():

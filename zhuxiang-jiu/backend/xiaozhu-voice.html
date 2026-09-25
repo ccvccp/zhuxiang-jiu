@@ -2552,9 +2552,17 @@ window.addEventListener("message", function (ev) {
        (06:59 实证「小竹小竹。」成轮污染上下文)——2s 内
        免提轮静默丢弃 */
     S.woken = true;
-    /* grace 延长 4s 覆盖应答播放全程(尾音+「我在，请吩咐」
-       外放回环——自言自语实证), 窗口内免提轮持续丢弃 */
-    S.wakeGrace = Date.now() + 4000;
+    /* 双窗设计(11:28 回环病理修复):
+       ①wakeVadMute 2.5s: VAD 静默窗——widget 应答「我在，
+       请吩咐」外放直达麦克风 rms 超任何阈值, 此窗内 vtick
+       不判定(不置 vadSpoke 不计时)——防应答声被当"说话"→
+       窗口不关→尾音段提交; 仅覆盖应答播放(1.2s+余量),
+       不吞用户指令头(唤醒→说话节奏 >2s, 听到应答才说);
+       ②wakeGrace 4.5s: 提交丢弃窗——应答尾音断句成段后
+       在此窗内提交的轮静默丢弃(防 grace 过期边缘提交,
+       11:28 实证 4s 差 1~2s) */
+    S.wakeVadMute = Date.now() + 2500;
+    S.wakeGrace = Date.now() + 4500;
     updateWakePill();
     /* 唤醒应答在 widget 主页面直播(X5 无手势时面板 WebAudio
        挂起——speak 静默无声); 面板只给文字反馈免双播;
@@ -2839,6 +2847,16 @@ function wireCloudCapture() {
          判定无合法提交路径, 一并掐死 */
       if (S.handfree && cloudActive) {
           var now = Date.now();
+          /* 唤醒应答 VAD 静默窗(wakeVadMute): widget「我在，
+             请吩咐」外放直达麦克风 rms 超任何阈值(11:28 实证)
+             ——此窗内跳过一切 VAD 判定(不置 vadSpoke 不静音
+             计时), 否则应答声被当"说话"→窗口不关→尾音断句
+             提交在 wakeGrace 边缘外→回声轮连环+真话轮被
+             not_woken 打回("自己说+回答不了"完整病理);
+             2.5s 仅覆盖应答播放, 不吞用户指令头 */
+          if (S.wakeVadMute && now < S.wakeVadMute) {
+            return;
+          }
           var thr = (now - vadOpenAt < 1500) ? 0.055 : 0.035;
           if (rms > thr) {
             S.vadSpoke = true; vadSilentAt = 0;
