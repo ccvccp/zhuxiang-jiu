@@ -80,6 +80,13 @@ async def main():
            extract_budget("42度") is None
            and extract_budget("来一瓶500ml") is None,
            "")
+    from services.xiaozhu_wine_service import extract_abv
+    record("v80 度数解析(56度/42°/无效域)",
+           extract_abv("选一款56度的酒") == 56
+           and extract_abv("来一件42°的") == 42
+           and extract_abv("500ml") is None
+           and extract_abv("预算800元") is None,
+           "")
 
     print("[B 指令路由]")
     record("四问话路由",

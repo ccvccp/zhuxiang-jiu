@@ -52,6 +52,21 @@ _REVIEW_POSITIVE_WORDS = (
 _NUM_TAIL_EXCLUDE = ("度", "°", "m", "毫升")
 
 
+def extract_abv(text: str) -> float | None:
+    """度数解析(02:46 实证「选一款56度的酒」返回 42/45 度商品
+    ——度数完全被忽略): "56度" "42°" → 度数意向
+
+    有效域 5~70(白酒/果酒域); "500ml"/"预算800元" 不误吞。
+    """
+    t = str(text or "")
+    m = re.search(
+        r"(\d{1,2})(?:\s*[~\-至]\s*\d{1,2})?\s*[度°]", t)
+    if not m:
+        return None
+    v = float(m.group(1))
+    return v if 5 <= v <= 70 else None
+
+
 def match_scene(text: str) -> str | None:
     """问话 → 场景面(未中 None)"""
     t = str(text or "")
@@ -205,8 +220,32 @@ class XiaozhuWineService:
                 pool,
                 key=lambda p: abs(float(
                     p.get("price") or 0) - budget))
-        pool = sorted(pool, key=lambda p: (
-            p.get("hot_rank") or 99))
+        # 度数意向非硬墙(02:46 实证 56 度指令全目录热销
+        # 返回 42/45 度): ±1 宽容; 全 miss 取度数最接近
+        abv = extract_abv(text)
+        if abv:
+            ina = [p for p in pool
+                   if abs(float(p.get("alcohol") or 0)
+                          - abv) <= 1]
+            if ina:
+                pool = sorted(
+                    ina, key=lambda p: (
+                        p.get("hot_rank") or 99))
+            else:
+                # 无命中: 度数接近为主键+热销次键——
+                # 覆盖下方 hot_rank 排序(否则接近序被冲掉)
+                pool = sorted(
+                    pool,
+                    key=lambda p: (
+                        abs(float(p.get("alcohol") or 0)
+                            - abv),
+                        p.get("hot_rank") or 99))
+                _abv_sorted = True
+        else:
+            _abv_sorted = False
+        if not _abv_sorted:
+            pool = sorted(pool, key=lambda p: (
+                p.get("hot_rank") or 99))
         picks = pool[:2]
         stories = []
         for p in picks:
@@ -218,9 +257,10 @@ class XiaozhuWineService:
                 + f", {p.get('alcohol')}度 "
                 f"{p.get('price')} 元")
         scene_line = f"{scene}场景" if scene else "为您"
+        abv_line = f"{abv:g}度附近" if abv else ""
         budget_line = (f"预算 {budget} 元内"
                        if budget else "")
-        reply = (f"{scene_line}{budget_line}挑了两款: "
+        reply = (f"{scene_line}{abv_line}{budget_line}挑了两款: "
                  + "; ".join(stories)
                  + "。看中哪款说「来一件」即可。"
                  + WINE_COMPLIANCE_LINE)

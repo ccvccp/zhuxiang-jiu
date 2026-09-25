@@ -413,7 +413,14 @@ async def ws_asr(ws: WebSocket):
                     session = None
                     continue
                 await ws.send_json({"type": "ready"})
-                await _seg_pump(ws, session, dump_f, _ws_mid)
+                if await _seg_pump(ws, session, dump_f,
+                                   _ws_mid):
+                    # 客户端已断: 直接收尾(02:48:41 实证
+                    # disconnect 双消费——Starlette 断连消息
+                    # 只可 receive 一次, 回外层循环再 receive
+                    # 必抛 "Cannot call receive once a
+                    # disconnect message has been received")
+                    return
                 await session.close()
                 session = None
     except Exception as e:
@@ -427,12 +434,15 @@ async def ws_asr(ws: WebSocket):
 
 
 async def _seg_pump(ws, session, dump_f,
-                   member_id: int = 0) -> None:
-    """段消息泵: 二进制帧→feed / finish→final(新旧协议共用)"""
+                   member_id: int = 0) -> bool:
+    """段消息泵: 二进制帧→feed / finish→final(新旧协议共用)
+
+    返回 True=客户端已断连(外层直接收尾, 勿再 receive——
+    Starlette disconnect 消息只可消费一次)"""
     while True:
         msg = await ws.receive()
         if msg.get("type") == "websocket.disconnect":
-            break
+            return True
         if msg.get("bytes"):
             if dump_f:
                 dump_f.writeframes(msg["bytes"])
@@ -479,6 +489,7 @@ async def _seg_pump(ws, session, dump_f,
                 await ws.send_json({"type": "final",
                                     "text": final})
             break
+    return False  # 正常 finish 收段(客户端仍在)
 
 
 @router.get("/sessions/{session_id}")
