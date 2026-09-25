@@ -1520,7 +1520,15 @@ function streamFeed(f32) {
   var rms = Math.sqrt(sq / f32.length);
   if (rms > 0.004) {
     var want = 0.10 / rms;
-    if (want > (S.gain || 1)) { S.gain = Math.min(12, want); }
+    if (want > (S.gain || 1)) {
+      S.gain = Math.min(12, want);
+    }
+  } else if (rms < 0.002 && (S.gain || 1) > 1) {
+    /* 纯底噪段增益缓收 0.85/帧——只升不降时 12x 挂死,
+       静音期底噪/电子干扰被放大淹没人声(09:34 dump 实证
+       1.5kHz 干扰主导); 语音内波动带(0.004~)不动, 弱人声
+       快升保帧不变 */
+    S.gain = Math.max(1, (S.gain || 1) * 0.85);
   }
   if ((S.gain || 1) !== 1) {
     for (i = 0; i < f32.length; i++) {
@@ -2673,8 +2681,14 @@ function wireCloudCapture() {
       var rms = Math.sqrt(sum / abuf.length);
       waveEl.style.setProperty("--amp",
         Math.max(0.12, Math.min(1, rms * 3.4)).toFixed(3));
-      /* --- 免提 VAD 断句(宽限期 0.055 高阈值滤 TTS 残响) --- */
-      if (S.handfree) {
+      /* --- 免提 VAD 断句(宽限期 0.055 高阈值滤 TTS 残响) ---
+         cloudActive 门控: 段外(播报中/pending 中/未开段)不判
+         不断句——AEC 已关(保 TTS 音量), 长播报(>3s)外放声
+         超过 1.5s 宽限后被 0.035 低阈值误判"说话"→断句提交
+         回声段(1.5kHz 电子音淹没人声, 双 provider 识别无词
+         09:34 实证)→"没听清"又播 4s+→回环轰炸; 段外 VAD
+         判定无合法提交路径, 一并掐死 */
+      if (S.handfree && cloudActive) {
           var now = Date.now();
           var thr = (now - vadOpenAt < 1500) ? 0.055 : 0.035;
           if (rms > thr) {

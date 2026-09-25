@@ -58,7 +58,8 @@ ok("A8 全标点碎片并句不落碎块",
 console.log("[B] VAD 语义感知断句");
 var vtickCode = extractVtick();
 var STOP_AT = {}; /* {cloudStop: n} 计数对象由每次 makeVtick 新建 */
-function makeVtick(streamPartial, silentAgoMs, speakVol, vadSpoke) {
+function makeVtick(streamPartial, silentAgoMs, speakVol, vadSpoke,
+                   cloudActive) {
   var S = { handfree: true, vadSpoke: (vadSpoke !== false),
             streamPartial: streamPartial };
   var stops = 0;
@@ -70,7 +71,7 @@ function makeVtick(streamPartial, silentAgoMs, speakVol, vadSpoke) {
   }
   var fn = new Function("analyser", "abuf", "waveEl", "vadOpenAt",
     "S", "vadSilentAt", "requestAnimationFrame", "cloudStop",
-    "document",
+    "document", "cloudActive",
     vtickCode);
   var analyser = { fftSize: 512,
     getByteTimeDomainData: function (a) { a.set(abuf); } };
@@ -84,7 +85,8 @@ function makeVtick(streamPartial, silentAgoMs, speakVol, vadSpoke) {
      function () { stops++; },         /* cloudStop 计数 */
      { getElementById: function () { return {
          classList: { add: function () {}, remove: function () {} },
-         style: { setProperty: function () {}, removeProperty: function () {} } }; } });
+         style: { setProperty: function () {}, removeProperty: function () {} } }; } },
+     cloudActive === false ? 0 : 1); /* 段外=0(播报回声门控) */
   return stops;
 }
 ok("B1 疑问尾字「吗」静音650ms → 提前断句",
@@ -99,6 +101,8 @@ ok("B5 说话中(音量>阈值) → 重置静音计时不断",
    makeVtick("有52度的吗", 650, 0.05) === 0);
 ok("B6 无 partial(流式轨未出字) 静音650ms → 不提前",
    makeVtick("", 650) === 0);
+ok("B7 段外(播报中回声 rms>阈值) 不断句不提交——回声轰炸根因修复",
+   makeVtick("有52度的吗", 650, 0.05, false, false) === 0);
 
 /* ---------- C. 流水线队列(pumpTts/ttsEnqueue/stopTtsNow) ---------- */
 console.log("[C] TTS 分句流水线队列");
