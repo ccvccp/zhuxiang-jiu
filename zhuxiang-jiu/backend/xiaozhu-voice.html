@@ -2565,6 +2565,14 @@ window.addEventListener("message", function (ev) {
     S.selfUtter.push("我在，请吩咐");
     S.selfUtterAt.push(Date.now());
     if (S.sid) { setMicStatus("🎙 我在，请吩咐"); }
+    /* 二级唤醒: 窗口已关(listenClose 静默回归)或播报进行中
+       (打断走唤醒词——widget 流独立常开不受面板窗口影响)
+       → 唤醒词即时重开拾音窗口; cloudStart 内置 stopTtsNow
+       (v2 打断)处理播报中场景; pending(处理中)不重开 */
+    if (S.handfree && (S.listenClosed || S.ttsPlaying)
+        && !S.pending && !S.hidden && !cloudActive) {
+      cloudStart();
+    }
   }
 });
 /* 硬停录音且不发送(免提关闭时丢弃当前未完成语音) */
@@ -2707,6 +2715,7 @@ function fmtSec(s) {
 }
 function cloudStart() {
   if (S.hidden) return; /* 浮层隐藏期不录音(双保险) */
+  S.listenClosed = false; /* 二级唤醒: 任何开窗路径重置窗口关闭标记 */
   /* v2 打断: 开麦即停旧轮播报/合成(用户开口优先于
      喇叭还嘴——连续对话时旧轮话音立即让位) */
   if (S.ttsPlaying || S.ttsAbort) stopTtsNow();
@@ -2874,13 +2883,37 @@ function wireCloudCapture() {
         appendBot("我在这儿呢，想买点什么直接说～", null,
                   null, null, null);
       }
-      /* 免提上限: 未检测到说话 12s 即重置聆听(降空转等待),
-         已说话 30s 硬上限(智谱 ASR 单段≤30s) */
-      if (S.handfree
-          && (sec >= 30 || (!S.vadSpoke && sec >= 12))) {
-        cloudStop();
+      /* 二级对话唤醒(方案"不问不答, 问即唤醒, 答完即退"):
+         8s 聆听窗口无话 → 静默回归一级(listenClose 拆 WS 停
+         判定, widget KWS 接管——回声/环境声从源头不进系统,
+         自言自语/误切断链路整体退役); 已说话 30s 硬上限
+         (智谱 ASR 单段≤30s) */
+      if (S.handfree && listenWindowOver(sec, S.vadSpoke)) {
+        listenClose();
+        return;
       }
     }, 500);
+}
+/* 二级唤醒窗口判定(抽函数供单测): 无话 8s 关窗 / 说话 30s 上限 */
+function listenWindowOver(sec, vadSpoke) {
+  return sec >= 30 || (!vadSpoke && sec >= 8);
+}
+/* 二级唤醒窗口关闭: 轻关闭(保留已授权流/上下文——重开免
+   getUserMedia 数秒防句首丢字), 拆 WS 停 vtick 停 VAD 判定;
+   音频不再进入任何识别(无消费者)——功能等价"关闭拾音";
+   唤醒词(wake-hit)可即时重开; 不 toast 不播报(静默回归) */
+function listenClose() {
+  if (recTimer) { clearInterval(recTimer); recTimer = null; }
+  if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }
+  analyser = null;
+  cloudActive = false;
+  streamTeardown();
+  S.listenClosed = true;
+  var waveEl = document.getElementById("wave");
+  waveEl.classList.remove("live");
+  waveEl.style.removeProperty("--amp");
+  setWave(false);
+  setMicStatus("🎙 休息了——喊「小竹小竹」随时叫我");
 }
 function cloudStop() {
   /* v3 延迟埋点: VAD 断句时刻(全链路计时起点) */
@@ -2926,14 +2959,10 @@ function cloudStop() {
   streamFinish(function (finalText) {
     if (finalText && finalText.trim()) {
       postVoiceTranscript(finalText.trim(), dur);
-      /* 双轨 v2: 段后 re-arm——连接保活+推流持续(采集节点
-         未拆), 播报期间服务端持续识别外放+人声, partial 实
-         时回流走 onmessage 双轨判定(新指令→切断合成),
-         回声 partial 由 bargeIsEcho 拦; V2 协议 arm 探活
-         直用零握手 */
-      try {
-        stWS.send(JSON.stringify({ type: "arm" }));
-      } catch (e) { /* 连接已死由续听 cloudStart 重建 */ }
+      /* 二级唤醒窗口制: 段提交后不再 re-arm(播报期间不拾音
+         ——v56 双轨供能点移除, 回声 partial 无回流, 播报完
+         整性恢复; 打断走唤醒词: widget KWS 独立流常开,
+         喊「小竹小竹」→ wake-hit → cloudStart 重开窗) */
       return;
     }
     streamTeardown();

@@ -163,6 +163,19 @@ ok("B22 中文数字形态回声(「四十二度的竹叶酒」vs 42度) 归一�
        === true;
    })());
 
+/* ---------- W. 二级对话唤醒窗口判定 ---------- */
+console.log("[W] 二级唤醒窗口(不问不答/问即唤醒/答完即退)");
+var lwo = new Function(extractFn("listenWindowOver")
+  + "\nreturn listenWindowOver;")();
+ok("W1 窗口 7s 无话 不关(8s 阈值内)",
+   lwo(7, false) === false);
+ok("W2 窗口 8s 无话 关窗回归一级",
+   lwo(8, false) === true);
+ok("W3 已说话 29s 不关(30s 硬上限内)",
+   lwo(29, true) === false);
+ok("W4 已说话 30s 关(ASR 单段上限)",
+   lwo(30, true) === true);
+
 /* ---------- C. 流水线队列(pumpTts/ttsEnqueue/stopTtsNow) ---------- */
 console.log("[C] TTS 分句流水线队列");
 var pipeCode = [extractFn("ttsEnqueue"), extractFn("pumpTts"),

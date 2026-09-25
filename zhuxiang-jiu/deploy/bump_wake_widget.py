@@ -141,13 +141,27 @@ v=58 -> v=59: 数字形态归一(11:16 误切断根因)——TTS 文本
     之数字统一上轮漏做; cn2num 中文数字段转阿拉伯(四十二→
     42/两万四千六百九十→24690, 万级简化), norm 内对 ASR
     句与 lastSpoken 双侧统一; widget v=58 -> v=59
+v=59 -> v=60: 二级对话唤醒窗口制(用户方案"不问不答, 问即
+    唤醒, 答完即退")——免提从"全时监听+软件过滤"(回声轰炸/
+    自言自语/误切断全在这条链上打补丁)转为"按需窗口": ①8s
+    聆听窗口无话 → listenClose 轻关闭静默回归一级(保留已
+    授权流防重取 getUserMedia 丢字首, 拆 WS 停 VAD 判定,
+    音频无消费者=功能等价关闭拾音); ②回声/环境声从源头
+    不进系统, 自言自语/误切断链路整体退役(v56 段后 re-arm
+    双轨供能点移除——播报期拾音关闭, 播报完整性恢复);
+    ③打断走唤醒词: widget KWS 独立流常开, 播报中喊「小竹
+    小竹」→ wake-hit → cloudStart(内置 stopTtsNow 打断)+
+    重开窗; ④多轮对话=窗口接力(每轮播报完 done→schedule
+    Handfree 开新窗, 窗口内说话免唤醒直达); 双轨 barge 判
+    定链保留为死代码防御层(留给未来 AEC 方案); widget v=59
+    -> v=60
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=58"
-NEW = "src=/js/voice-wake-widget.js?v=59"
+OLD = "src=/js/voice-wake-widget.js?v=59"
+NEW = "src=/js/voice-wake-widget.js?v=60"
 
 
 def main():
