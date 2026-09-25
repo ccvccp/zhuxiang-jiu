@@ -195,13 +195,23 @@ v=63 -> v=64: 采集链泄漏修复(11:36 起识别全空根因)——
     实证; 用户听到的"自言自语"实为"没听清"回声连环——识别
     空后唯一对话内容只剩播报回声); wireCloudCapture 重挂
     前强制 disconnect 旧链; widget v=63 -> v=64
+v=64 -> v=65: 句首保护攒帧回退(11:46 起识别全空第二根因)——
+    v63 streamFeed 建连期攒帧 ready 后突发推流: 攒 0.5~1s 帧
+    连接就绪瞬间涌入, 百炼收帧速率 N 倍于实时, 流式时间轴
+    崩(11:46 起全空与 v63 部署时间精确吻合; dump 115127 音频
+    健康 rms 1859 但 ASR 空); 建连期帧恢复丢弃(窗口仅
+    0.2~0.5s, "叮咚"后 1s 内开口的头帧损失可接受——识别
+    可靠性优先); 待观察项: widget 轨 115114 强电子音段
+    (唤醒词被盖, "第一次唤醒不灵敏")与面板轨 115204 全静音
+    ——大概率识别恢复后"没听清"回声链断而消失, 若复测仍现
+    再深挖; widget v=64 -> v=65
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=63"
-NEW = "src=/js/voice-wake-widget.js?v=64"
+OLD = "src=/js/voice-wake-widget.js?v=64"
+NEW = "src=/js/voice-wake-widget.js?v=65"
 
 
 def main():

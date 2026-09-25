@@ -1539,32 +1539,12 @@ function streamTeardown() {
    放大, 限幅 12x 只升不降, cloudStart 重置, 静音帧不调——
    与 widget segFeed 同款策略(治"没听清"与唤醒不中的音频层根因) */
 function streamFeed(f32) {
-  if (!stWS || stWS.readyState !== 1) {
-    /* 句首保护(四态文档"VAD 触发前 100ms 强制保留"的面板版):
-       建连期(0.5~1s)的帧不丢——攒入 stAccum, ready 后随
-       发送循环顺序补推, "叮咚"后立即开口的句首不再丢字 */
-    if (!stWS) return;
-    var rGain = S.gain || 1;
-    var rSrc = audioCtx ? audioCtx.sampleRate : 48000;
-    var rRatio = rSrc / 16000;
-    var rOut = [];
-    for (var rk = stPhase; rk < f32.length; rk += rRatio) {
-      var ri0 = Math.floor(rk);
-      var rv = f32[ri0] * (1 - (rk - ri0));
-      if (ri0 + 1 < f32.length) {
-        rv += f32[ri0 + 1] * (rk - ri0);
-      }
-      rOut.push(Math.max(-1, Math.min(1, rv * rGain)));
-    }
-    stPhase = rk - f32.length;
-    var rMerged = new Float32Array(stAccum.length + rOut.length);
-    rMerged.set(stAccum);
-    for (var rm = 0; rm < rOut.length; rm++) {
-      rMerged[stAccum.length + rm] = rOut[rm];
-    }
-    stAccum = rMerged;
-    return;
-  }
+  if (!stWS || stWS.readyState !== 1) return; /* 建连期帧丢弃
+     (v63 句首保护攒帧已回退: ready 后突发推流破坏百炼实时
+     时间轴——建连期攒 0.5~1s 帧 ready 后瞬间涌入, 百炼
+     收帧速率 N 倍于实时, 识别崩(11:46 起全空与 v63 部署
+     时间精确吻合); 丢帧窗口仅连接 0.2~0.5s, "叮咚"后
+     1s 内开口的头帧损失可接受) */
   var sq = 0;
   for (var i = 0; i < f32.length; i++) { sq += f32[i] * f32[i]; }
   var rms = Math.sqrt(sq / f32.length);
