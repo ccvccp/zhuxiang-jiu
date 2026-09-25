@@ -2378,6 +2378,10 @@ window.addEventListener("message", function (ev) {
     S.woken = true;
     S.wakeGrace = Date.now() + 2000;
     updateWakePill();
+    /* 唤醒应答: 会话已存在时面板无任何播报(感知=「没有
+       应答一直录音」)——补即时短应答, 与 wakeBeep 相呼应;
+       免提自录由回环检测兜底(短子串丢弃) */
+    if (S.sid) { speak("我在，请吩咐", null, "cheerful"); }
   }
 });
 /* 硬停录音且不发送(免提关闭时丢弃当前未完成语音) */
