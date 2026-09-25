@@ -301,13 +301,21 @@ v=73 -> v=74: 面板 ctx 关闭致关窗后 TTS 无声(20:54 换一款
     recStream.stop 才是归还, 零影响)+cloudStart 开窗复用,
     与 v71 widget ctx 复用同范式(面板侧对偶); widget v=73
     -> v=74
+v=74 -> v=75: REST 提交带 wake 标志点亮 member 窗(21:00:35
+    实证: 唤醒恰撞 WS token 断连 auth_failed, 唤醒词识别轮
+    没走完 finish→_LAST_WAKE_AT 永不点亮(上轮 ws finish 点
+    亮的盲区)→「查一款42度的酒」not_woken 打回); 面板窗
+    开(S.listenClosed=false)/已唤醒(S.woken)期间提交 body
+    带 wake=1, 服务端 REST 端点据此点亮——不依赖 WS 连接
+    健康, 覆盖所有唤醒路径(含断连窗/点浮球手动开窗);
+    widget v=74 -> v=75
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=73"
-NEW = "src=/js/voice-wake-widget.js?v=74"
+OLD = "src=/js/voice-wake-widget.js?v=74"
+NEW = "src=/js/voice-wake-widget.js?v=75"
 
 
 def main():

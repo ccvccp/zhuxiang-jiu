@@ -229,6 +229,15 @@ async def voice_turn(session_id: int, body: dict,
                 detail="audioBase64 编码非法") from exc
     try:
         from services.xiaozhu_service import XiaozhuService
+        # 前端唤醒标志点亮 member 级免唤醒窗(21:00:35 实证:
+        # 唤醒恰撞 WS token 断连, 唤醒词识别轮没走完 finish,
+        # _LAST_WAKE_AT 永不点亮→真指令 not_woken 打回; 面板
+        # 开窗期提交带 wake=1——不依赖 WS 连接健康, 覆盖所有
+        # 唤醒路径; 点浮球手动开窗同语义(手势=主动交互))
+        if body.get("wake") and member_id:
+            import time as _t
+            XiaozhuService._LAST_WAKE_AT[member_id] = \
+                _t.time()
         return await XiaozhuService().handle_voice(
             session_id, audio_bytes, member_id,
             filename=str(body.get("filename")

@@ -1454,7 +1454,11 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
     method: "POST",
     body: JSON.stringify({ textTranscript: wakePrefix(ctxInject(text)), filename: "audio.wav",
       durationSec: Math.round(durationSec * 10) / 10,
-      streamBytes: stBytes, mode: S.handfree ? undefined : "tap" })
+      streamBytes: stBytes, mode: S.handfree ? undefined : "tap",
+      /* 唤醒标志(21:00:35 实证: 唤醒撞 WS 断连时 member 窗
+         点不亮→真指令 not_woken; 窗开/已唤醒=唤醒后轮次,
+         服务端据此点亮窗, 不依赖 WS 连接健康) */
+      wake: (S.woken || !S.listenClosed) ? 1 : undefined })
   }).then(handleVoiceResp).catch(function (e) { setPending(false); removeTyping(); setMicStatus("提交失败"); turnError(e); scheduleHandfree(1200); });
 }
 /* 语音轮次响应处理(整段轨/流式轨共用) */
