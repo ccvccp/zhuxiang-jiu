@@ -738,7 +738,8 @@ class LLMProviderClient:
         return ranked or None
 
     def synthesize(self, text: str, speed: float = None,
-                   voice: str = None) -> bytes | None:
+                   voice: str = None,
+                   _retry: bool = True) -> bytes | None:
         """语音合成 TTS(智谱 cogtts, WAV 返回)
 
         微信 X5 无系统 TTS 引擎(speechSynthesis 入队无声)
@@ -750,6 +751,11 @@ class LLMProviderClient:
         t = str(text or "").strip()
         if not t:
             return None
+        # TTS 正规化: ¥ 等货币符 cogtts 直接回错误 JSON(08:20 实证
+        # 「¥398，」切片 bad_response → 播报缺块无声)——读法展开
+        t = (t.replace("¥", "元")
+              .replace("＄", "美元")
+              .replace("￥", "元"))
         if "LLM_API_KEY" not in os.environ:
             return None
         from core.metrics import llm_timer
@@ -832,6 +838,13 @@ class LLMProviderClient:
                            "intact=%s",
                            ctype, len(data) if data else 0,
                            _wav_intact(data) if data else None)
+            # 偶发切片拒绝(08:20 实证「需要吗？」伴随并发被拒)
+            # ——退避一次重试, 仍败才放弃该切片
+            if _retry:
+                _drop_keepalive_conn()
+                _t.sleep(0.3)
+                return self.synthesize(text, speed, voice,
+                                        _retry=False)
             return None
         except Exception as exc:
             logger.warning("llm_tts_failed(跳过播报): %s", exc)
