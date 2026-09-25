@@ -1347,19 +1347,26 @@ function sendVoice(b64, durationSec) {
    只 POST 最终文本+流式统计——跳过重复转写与音频上传 */
 function postVoiceTranscript(text, durationSec) {
   /* 唤醒尾音静默窗: 开面板瞬间免提把唤醒词尾音录成一轮
-     (06:59 实证)——免提轮 2s 内静默丢弃, 不污染会话上下文 */
+     (06:59 实证); 应答「我在，请吩咐」外放回环同理——
+     窗口内免提轮持续丢弃(不清窗), 窗口过后自然放行 */
   if (S.handfree && S.wakeGrace) {
-    var inGrace = Date.now() < S.wakeGrace;
+    if (Date.now() < S.wakeGrace) {
+      scheduleHandfree(400); return;
+    }
     S.wakeGrace = 0;
-    if (inGrace) { scheduleHandfree(400); return; }
   }
   /* TTS 自录回环: 转写是最近小竹播报的子串(短句)=小竹自己
      的声音外放被麦克风收回成轮(07:02 实证「好的。」/
-     「还在学着呢。」)——静默丢弃续听, 不进会话 */
-  if (S.handfree && text && S.lastBot
-      && String(S.lastBot).indexOf(String(text)) !== -1
-      && String(text).length <= 8) {
-    scheduleHandfree(400); return;
+     「还在学着呢。」)——静默丢弃续听, 不进会话;
+     比对去标点(转写「我在请吩咐」无逗号 vs 原文带逗号) */
+  if (S.handfree && text && S.lastBot) {
+    var _nz = function (s) {
+      return String(s).replace(/[，。？！、,.?! ]/g, "");
+    };
+    if (_nz(S.lastBot).indexOf(_nz(text)) !== -1
+        && String(text).length <= 10) {
+      scheduleHandfree(400); return;
+    }
   }
   /* v3 延迟埋点: 提交时刻 */
   if (S.latMarks) S.latMarks.submit = Date.now();
@@ -2376,10 +2383,14 @@ window.addEventListener("message", function (ev) {
        (06:59 实证「小竹小竹。」成轮污染上下文)——2s 内
        免提轮静默丢弃 */
     S.woken = true;
-    S.wakeGrace = Date.now() + 2000;
+    /* grace 延长 4s 覆盖应答播放全程(尾音+「我在，请吩咐」
+       外放回环——自言自语实证), 窗口内免提轮持续丢弃 */
+    S.wakeGrace = Date.now() + 4000;
     updateWakePill();
     /* 唤醒应答在 widget 主页面直播(X5 无手势时面板 WebAudio
-       挂起——speak 静默无声); 面板只给文字反馈免双播 */
+       挂起——speak 静默无声); 面板只给文字反馈免双播;
+       记入 lastBot——应答外放被麦收回时自录检测可命中 */
+    S.lastBot = "我在，请吩咐";
     if (S.sid) { setMicStatus("🎙 我在，请吩咐"); }
   }
 });
