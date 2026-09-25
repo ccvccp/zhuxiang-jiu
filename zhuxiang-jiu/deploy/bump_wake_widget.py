@@ -251,13 +251,23 @@ v=68 -> v=69: 播报误判与唤醒空窗三修——①WS 轨 token 自愈
     ——postVoiceTranscript 剥离前缀纯指令提交; ③服务端
     "看一款/看个"入 wine.recommend pattern 表(此前只有
     选/挑/来句式, "看"落入兜底答非所问); widget v=68 -> v=69
+v=69 -> v=70: 重新登录打回+refresh 竞态双修——①member 级
+    免唤醒窗(13:33:47 实证「看一款52度的酒」被打回"请以小
+    竹开头"): token 吊销竞态→重新登录→新会话无唤醒记录+前
+    端唤醒态被登录重置, 5 分钟免唤醒窗按"会话"失效; 唤醒
+    命中记 _LAST_WAKE_AT[memberId], 窗口内指令按"人"放行
+    (跨会话延续, 新 member 首轮仍须显式唤醒红线不变);
+    ②refresh 跨 iframe 竞态锁(13:33:24 "Token 已被吊销"
+    根因): widget 与面板两套刷新互不知情并发——refresh token
+    轮换下互相吊销死循环; localStorage xz.refAt 时间戳共享,
+    20s 内有人刷过直接跳过; widget v=69 -> v=70
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=68"
-NEW = "src=/js/voice-wake-widget.js?v=69"
+OLD = "src=/js/voice-wake-widget.js?v=69"
+NEW = "src=/js/voice-wake-widget.js?v=70"
 
 
 def main():

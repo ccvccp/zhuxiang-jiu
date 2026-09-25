@@ -771,6 +771,11 @@ def match_nav_page(text: str) -> str | None:
 class XiaozhuService:
     """P0 感知层: 会话 + 唤醒 + 指令直达"""
 
+    # member 级免唤醒窗时间戳(memberId→唤醒时刻):
+    # 登录重开/面板重载清会话级唤醒记录后, 窗口(5 分钟)内
+    # 用户指令仍放行——免唤醒语义按"人"而非按"会话"生效
+    _LAST_WAKE_AT: dict = {}
+
     def __init__(self,
                  repo: Xiaozhu48Repository = None):
         self.repo = repo or Xiaozhu48Repository()
@@ -1005,6 +1010,14 @@ class XiaozhuService:
             woken, command_text = True, text.strip()
         else:
             woken, command_text = detect_wake(text)
+        # 唤醒命中记 member 级时间戳(免唤醒窗跨会话延续——
+        # 13:33 实证: token 竞态→重新登录→新会话无唤醒记录,
+        # 窗口内真指令被 not_woken 打回"请以小竹开头")
+        if woken:
+            _mid = session.get("memberId")
+            if _mid:
+                XiaozhuService._LAST_WAKE_AT[_mid] = \
+                    time.time()
 
         # ② 免唤醒窗口(5 分钟内活跃会话直接解析)
         # 前提: 会话中已发生过至少一次唤醒(首轮必须显式
@@ -1013,6 +1026,16 @@ class XiaozhuService:
             self._recent_turns = await self.repo.list_turns(
                 session_id)
             if self._has_woken_before(session):
+                woken = True
+                command_text = text.strip()
+        if not woken:
+            # member 级免唤醒窗(5 分钟): 登录重开/面板重载清了
+            # 前端唤醒态与会话内唤醒记录, 但用户刚唤醒过的
+            # 事实不变——窗口内指令直接放行(与前端 wakePrefix
+            # 补前缀语义对齐: 补前缀本质也是点亮本窗)
+            _mid2 = session.get("memberId")
+            _last2 = XiaozhuService._LAST_WAKE_AT.get(_mid2)
+            if (_last2 and time.time() - _last2 < 300):
                 woken = True
                 command_text = text.strip()
         if not woken:

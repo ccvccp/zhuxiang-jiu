@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=69";
+  var VER = "v=70";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -49,6 +49,15 @@
   function tryRefreshToken() {
     var now = Date.now();
     if (refBusy || now - refFailAt < 60000 || now - refOkAt < 30000) { return; }
+    /* 跨 iframe 竞态锁(13:33:24 "Token 已被吊销"根因): 本引擎
+       与面板 tryPanelRefreshToken 互不知情并发刷新——refresh
+       token 轮换下 A 刷得新 token 吊销旧的, B 用旧 refreshToken
+       再刷失败/拿到互相吊销的 token 死循环; localStorage 时间
+       戳跨 iframe 共享: 20s 内有人刷过直接跳过 */
+    try {
+      var shared = parseInt(localStorage.getItem("xz.refAt") || "0", 10);
+      if (now - shared < 20000) { return; }
+    } catch (e) { /* 忽略 */ }
     var src = "", rt = "";
     try {
       var s = JSON.parse(localStorage.getItem("zhuxiang.auth") || "null");
@@ -72,6 +81,8 @@
       return;
     }
     refBusy = true;
+    try { localStorage.setItem("xz.refAt", String(Date.now())); }
+    catch (e) { /* 忽略 */ }
     fetch("/api/auth/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

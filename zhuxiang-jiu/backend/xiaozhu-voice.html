@@ -458,11 +458,22 @@ function clearAuth() { localStorage.removeItem(AUTH_KEY); }
 var panelRefBusy = false;
 function tryPanelRefreshToken() {
   if (panelRefBusy) { return Promise.reject(new Error("busy")); }
+  /* 跨 iframe 竞态锁(与 widget tryRefreshToken 共享 xz.refAt
+     ——13:33:24 "Token 已被吊销"根因: 双方并发刷新互相吊销);
+     20s 内有人刷过直接跳过 */
+  try {
+    var sharedAt = parseInt(localStorage.getItem("xz.refAt") || "0", 10);
+    if (Date.now() - sharedAt < 20000) {
+      return Promise.reject(new Error("recently-refreshed"));
+    }
+  } catch (e) { /* 忽略 */ }
   var auth = getAuth();
   if (!auth || !auth.refreshToken) {
     return Promise.reject(new Error("no-refresh-token"));
   }
   panelRefBusy = true;
+  try { localStorage.setItem("xz.refAt", String(Date.now())); }
+  catch (e) { /* 忽略 */ }
   return fetch("/api/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
