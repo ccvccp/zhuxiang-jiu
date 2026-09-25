@@ -152,6 +152,16 @@ ok("B19 收段中(stFinalCb 挂起)不重复切断",
    makeBargeJudge(mkS(true), function () {})("有什么新品") === false);
 ok("B20 非播报中不切断",
    makeBargeJudge(mkS(false))("有什么新品") === false);
+ok("B21 中文数字回声(「竹奕，二四六九零」24690 读法) 数字归一拦",
+   bargeIsEchoOf("竹奕，二四六九零。") === true
+   && bargeIsEchoOf("竹奕，两万四千六百九十。") === true);
+ok("B22 中文数字形态回声(「四十二度的竹叶酒」vs 42度) 归一拦",
+   (function () {
+     var S = mkS(true);
+     S.lastSpoken = "竹海至尊是42度的竹叶酒，口感绵柔顺喉";
+     return bargeIsEchoOf("四十二度的竹叶酒，口感绵柔顺喉", S)
+       === true;
+   })());
 
 /* ---------- C. 流水线队列(pumpTts/ttsEnqueue/stopTtsNow) ---------- */
 console.log("[C] TTS 分句流水线队列");

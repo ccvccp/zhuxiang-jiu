@@ -134,13 +134,20 @@ v=57 -> v=58: 回声判定三级防御(语义-时序联合校验文档借鉴)—
     强意图; 不含取消/继续类操作词, 引导语播报"您可以说
     取消"会误触); 能量灰色带仲裁(第三级)记为规模化后路线;
     widget v=57 -> v=58
+v=58 -> v=59: 数字形态归一(11:16 误切断根因)——TTS 文本
+    "42度"被外放后 ASR 识回"四十二度", 中文数字 vs 阿拉伯
+    LCS 对不上(比率骤降<0.75)→回声判定失效→播报被误切+
+    finish 空提交失败无应答("不能完整播报"); 文档归一化清单
+    之数字统一上轮漏做; cn2num 中文数字段转阿拉伯(四十二→
+    42/两万四千六百九十→24690, 万级简化), norm 内对 ASR
+    句与 lastSpoken 双侧统一; widget v=58 -> v=59
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=57"
-NEW = "src=/js/voice-wake-widget.js?v=58"
+OLD = "src=/js/voice-wake-widget.js?v=58"
+NEW = "src=/js/voice-wake-widget.js?v=59"
 
 
 def main():

@@ -1628,10 +1628,40 @@ function isEchoOfTTS(t) {
    保守方向: 宁漏切断(播报继续续听补位)不误切断(自言自语);
    纠正词/「小竹」开头由 bargeShouldCut 强制放行 */
 function bargeIsEcho(t) {
+  function cn2num(seg) { /* 中文数字段→阿拉伯: 四十二→42,
+    二千四百六十→2460(万级简化); TTS 读"42"文本为阿拉伯,
+    ASR 收音识回"四十二"——数字形态差异致 LCS 骤降是
+    11:16 误切断根因, 两边统一阿拉伯 */
+    var d = {零:0,〇:0,一:1,二:2,两:2,三:3,四:4,五:5,
+             六:6,七:7,八:8,九:9};
+    var u = {十:10,百:100,千:1000};
+    var total = 0, num = 0;
+    for (var i = 0; i < seg.length; i++) {
+      var c = seg.charAt(i);
+      if (c === "万") { total = (total + num) * 10000; num = 0; continue; }
+      if (c in u) {
+        if (num === 0 && c === "十") num = 1; /* 十二=12 */
+        total += num * u[c]; num = 0; continue;
+      }
+      num = num * 10 + (d[c] || 0);
+    }
+    return String(total + num);
+  }
   function norm(s) {
-    return String(s).replace(
+    var x = String(s).replace(
       /[\s，。？！、,.?!:：；;「」『』（）()\-—…·啊呢吧嘛哦嗯呀啦]/g,
       "");
+    /* 数字归一化: 连续中文数字段转阿拉伯(与 TTS 文本统一) */
+    var out = "", seg = "";
+    for (var i = 0; i <= x.length; i++) {
+      var c = i < x.length ? x.charAt(i) : "";
+      if ("零〇一二两三四五六七八九十百千万".indexOf(c) >= 0 && c) {
+        seg += c; continue;
+      }
+      if (seg) { out += cn2num(seg); seg = ""; }
+      if (c) out += c;
+    }
+    return out;
   }
   function lcsRatio(a, b) { /* LCS 长度 / a.length */
     if (!a || !b) return 0;
