@@ -28,8 +28,9 @@ def record(name, passed, detail=""):
 BAIDU_BOARD = {"success": True, "data": {"cards": [
     {"component": "tabTextList", "content": [
         {"content": [
+            # 置顶条: isTop=True 且无 index(真实形态实证)
             {"word": "榜首热点", "url": "https://m.baidu.com/s?w=1",
-             "isTop": True, "index": 0},
+             "isTop": True},
             {"word": "第二条热点", "url": "https://m.baidu.com/s?w=2",
              "isTop": False, "index": 1},
             {"word": "榜尾热点", "url": "https://m.baidu.com/s?w=50",
@@ -61,7 +62,7 @@ class TestABaiduBoard:
                items and items[0]["title"] == "榜首热点"
                and items[2]["title"] == "榜尾热点",
                str(items[:1]))
-        record("index 热度估算: 榜首 480 万",
+        record("index 热度估算: 置顶480/次席471/榜尾30",
                items and abs(items[0]["heat"] - 480.0) < 0.1
                and abs(items[1]["heat"] - 471.0) < 0.1
                and abs(items[2]["heat"] - 30.0) < 0.1,

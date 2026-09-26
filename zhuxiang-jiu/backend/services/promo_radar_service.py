@@ -224,9 +224,13 @@ def _parse_hotspot_items(platform: str, body) -> list[dict]:
                 continue
         # 榜单名次热度估算(百度 board 端点无热度字段): 名次即
         # 热度代理——线性映射 480 万(榜首)→30 万(榜尾), 与
-        # HEAT_BASE_WAN=500 万满分口径对齐
+        # HEAT_BASE_WAN=500 万满分口径对齐; 置顶条(isTop 无
+        # index)按榜首估算
         if not heat:
             idx = row.get("index")
+            if not isinstance(idx, (int, float)) \
+                    and row.get("isTop"):
+                idx = 0
             if isinstance(idx, (int, float)):
                 heat = round(
                     max(30.0, 480.0 - 9.0 * float(idx)), 1)
