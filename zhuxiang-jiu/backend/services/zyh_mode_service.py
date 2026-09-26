@@ -35,7 +35,7 @@ full 档 L1 自主域(封闭白名单——73号 L1_AUTONOMY_DOMAINS 范式):
     溯源缺失率 citationMissRate
         = L3 溯源拦截数 / 产出技术断言的应答数
           (SDD §6.1 L3: 工艺断言必含 ZZ26SW1489303A,
-           香型断言必含 ZZ26SW1489404B)
+           香型断言必含 Q/SRQ 0001S-2023)
     (cur-base)/base > 3% → 自动暂停(等效 off, 留痕);
     恢复须人工 resume(决策留痕)。
     小样本保护: 分母不足 10 跳过恶化判定(指标照常留痕)。
