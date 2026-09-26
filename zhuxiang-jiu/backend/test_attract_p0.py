@@ -53,10 +53,14 @@ class TestASitemap:
                "/r/" not in sm,
                f"len={len(sm)}")
         rb = await svc.generate_robots()
-        record("robots: Disallow /r/ + /api/",
+        record("robots: Baiduspider 放行 /r/(P0-a)",
+               "User-agent: Baiduspider" in rb
+               and "Allow: /r/" in rb,
+               repr(rb[:100]))
+        record("robots: 其余爬虫 Disallow /r/+/api/",
                "Disallow: /r/" in rb
                and "Disallow: /api/" in rb,
-               repr(rb[:80]))
+               repr(rb[:100]))
 
 
 class TestBClientIp:

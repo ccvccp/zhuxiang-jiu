@@ -768,9 +768,13 @@ class AttractService:
                 f"{entries}</urlset>")
 
     async def generate_robots(self) -> str:
-        """输出 robots.txt(P0 修复: Disallow /r/ 短链
-        + /api/——已收录短链爬虫逐步停抓, 归因底座去噪)"""
-        return ("User-agent: *\n"
+        """输出 robots.txt(P0-a 精细化: Baiduspider 专属
+        放行 /r/——36 号百度收录推送的唯一真实通道不被
+        误伤; 其余爬虫(PetalBot/SERanking 等刷量者,
+        1667 点击 99.88% 爬虫实证)维持禁抓, 归因底座去噪)"""
+        return ("User-agent: Baiduspider\n"
+                "Allow: /r/\n\n"
+                "User-agent: *\n"
                 "Disallow: /r/\n"
                 "Disallow: /api/\n\n"
                 f"Sitemap: {SITE_BASE_URL}/sitemap.xml\n")
