@@ -680,6 +680,10 @@ COMMANDS = [
                      # 轨 2.6s+拼接污染+虚假"已加"话术);
                      # "查个"不收——"查个订单"会误入荐酒
                      "查一款",
+                     # v92: "看一看"句式(10:01:50 实证
+                     # 「看一看52度的遵义酒」落 LLM 轨——
+                     # 拼接污染+超长文本合成 5s 断续)
+                     "看一看",
                      "适合送", "适合喝"],
         "examples": ["小竹，商务宴请推荐一款",
                      "小竹，送长辈预算800左右"],
@@ -1861,6 +1865,18 @@ class XiaozhuService:
                          _reply):
                 _reply = ("我还没有为您加购——需要就说"
                           "「来一件」，先看看说「换一款」")
+            # v92 LLM 回复长度上限(10:01:57 实证超长文本
+            # acoustic 5s+ 合成断续"不能正常播报"; 80 字
+            # ≈6 块内, 切句流水线队列深度可控) + 拼接污染
+            # 弱化(截断同时截掉上下文照抄的长尾)
+            if len(_reply) > 80:
+                _cut = _reply[:80]
+                _punct = max(_cut.rfind("。"),
+                             _cut.rfind("，"),
+                             _cut.rfind("；"))
+                _reply = (_cut[:_punct + 1] if _punct > 20
+                          else _cut) \
+                    + "——详情说「看新品」"
             return await self._save_turn(
                 session, channel, text, "chat",
                 {"reply": _reply, "card": None},
