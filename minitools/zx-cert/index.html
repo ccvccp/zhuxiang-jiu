@@ -41,6 +41,11 @@
         font-size: 13px; margin-top: 12px; }
   .kv .k { color: #8a978f; white-space: nowrap; }
   .kv .v { color: #2f3e33; font-weight: 600; word-break: break-all; }
+  .btn { display: block; width: 100%; text-align: center; text-decoration: none;
+         border: 1px solid #355c44; border-radius: 18px; padding: 10px 12px;
+         font-size: 13px; background: #355c44; color: #fff; font-weight: 600;
+         margin-top: 12px; -webkit-appearance: none; appearance: none; }
+  .btn:active { opacity: .7; }
   .note { font-size: 11.5px; color: #9aa7a0; margin-top: 12px; line-height: 1.8; }
   .tip { text-align: center; font-size: 11px; color: #9aa7a0;
          padding: 10px 10px 4px; line-height: 1.9;
@@ -79,8 +84,9 @@
       「<b>瑞麒卡通形象图</b>」(品牌IP·小麒)经<b>山东省版权局</b>审核,
       依据《作品自愿登记试行办法》予以登记——品牌形象官方版权确权。
     </div>
-    <img class="cert-img" src="./images/xiaoqi-copyright.jpg"
+    <img class="cert-img" id="cert-img" src="./images/xiaoqi-copyright.jpg"
          alt="瑞麒卡通形象图作品登记证书 鲁作登字-2022-F-10039017">
+    <button type="button" id="save-cert-btn" class="btn">保存证书图片到相册</button>
     <div class="kv">
       <span class="k">登记号</span><span class="v">鲁作登字-2022-F-10039017</span>
       <span class="k">作品名称</span><span class="v">瑞麒卡通形象图</span>
@@ -98,5 +104,6 @@
   </div>
 
 </div>
+<script src="./app.js"></script>
 </body>
 </html>
