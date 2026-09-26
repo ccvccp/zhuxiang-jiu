@@ -276,6 +276,53 @@ class TestFOrderAuto:
             record("无归因会员: 静默跳过", False, str(exc))
 
 
+class TestGLandingFix:
+    async def run(self):
+        print("[G 落地路由错位修复(hash 感知组装)]")
+        from routes.attract_routes import _build_landing
+
+        t = _build_landing(
+            "/pages/register/index", 101, "trust_first")
+        record("注册码: hash 落地+query 在 # 前",
+               t == ("/?clickId=101&v72=trust_first"
+                     "#/pages/login/index"),
+               t)
+        t2 = _build_landing(
+            "/pages/activity/index", 102, "trust_first")
+        record("活动码: 自包含 activity.html 直拼",
+               t2 == "/activity.html?clickId=102"
+                     "&v72=trust_first",
+               t2)
+        t3 = _build_landing("/pages/product/index", 103)
+        record("KOL 码: SPA 商品页(无变体无 v72)",
+               t3 == "/?clickId=103#/pages/products/index",
+               t3)
+        t4 = _build_landing("/custom.html", 104, "benefit_first")
+        record("未知路径: 原样透传(自定义落地前瞻)",
+               t4 == "/custom.html?clickId=104"
+                     "&v72=benefit_first",
+               t4)
+
+        # 集成: ZXBJ 码 resolve_click → 注册落地
+        from services.attract_service import AttractService
+        click = await AttractService().resolve_click(
+            code="ZXBJ-TEST01", utm_source="",
+            utm_medium="", utm_campaign="",
+            ip="203.0.113.9", user_agent=UA,
+            referer="")
+        record("ZXBJ 码: v1.0 落地路径=注册页",
+               click.get("landingPath")
+               == "/pages/register/index",
+               f"lp={click.get('landingPath')}")
+        t5 = _build_landing(
+            click["landingPath"], click["clickId"],
+            "trust_first")
+        record("ZXBJ 码: 组装产物 hash 注册 URL",
+               t5.startswith("/?clickId=")
+               and t5.endswith("#/pages/login/index"),
+               t5)
+
+
 class TestEKillGuard:
     async def run(self):
         print("[E KILL 制动 + fail-soft]")
@@ -314,7 +361,8 @@ async def _count_snapshots() -> int:
 async def main():
     tests = [TestAFp(), TestBClickHook(),
              TestCRegHook(), TestDOrderHook(),
-             TestFOrderAuto(), TestEKillGuard()]
+             TestFOrderAuto(), TestGLandingFix(),
+             TestEKillGuard()]
     for t in tests:
         await t.run()
     print("\n" + "=" * 56)

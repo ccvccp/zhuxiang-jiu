@@ -106,6 +106,43 @@ async def _attract72_on_click(
         return ""
 
 
+# 落地路由修复映射(v1.0 遗留 landingPath → 实际可达 URL)
+# 2026-09-26 浏览器取证: Taro SPA 为 hash 路由, /pages/xxx/index
+# 的 pathname 被路由忽略统一落首页; 注册表单真实位置是
+# login 页"立即注册"子视图, 活动中心是自包含 activity.html
+_LANDING_FIX = {
+    "/pages/register/index": "/#/pages/login/index",
+    "/pages/product/index": "/#/pages/products/index",
+    "/pages/activity/index": "/activity.html",
+}
+
+
+def _build_landing(landing_path: str, click_id: int,
+                   variant: str = "") -> str:
+    """落地 URL 组装(hash 路由感知, 修复路由错位)
+
+    - v1.0 遗留路径经 _LANDING_FIX 映射为实际落地
+      (hash SPA: query 必须在 # 前部——Taro 路由忽略
+      pathname, 但 location.search 对 v72 chunk 与
+      注册 Referer 归因均生效)
+    - 自包含页(activity.html)保持原样直拼
+    - 未知路径原样透传(自定义落地页前瞻兼容)
+    """
+    lp = _LANDING_FIX.get(landing_path, landing_path)
+    if "#" in lp:
+        base, _, frag = lp.partition("#")
+        q = f"clickId={click_id}"
+        if variant:
+            q += f"&v72={variant}"
+        sep = "&" if "?" in base else "?"
+        return f"{base}{sep}{q}#{frag}"
+    sep = "&" if "?" in lp else "?"
+    target = f"{lp}{sep}clickId={click_id}"
+    if variant:
+        target += f"&v72={variant}"
+    return target
+
+
 async def _attract72_on_order(click_id: int) -> None:
     """72 号下单转化回写钩(P4 记忆 converted=True,
     fail-soft)——指纹取自点击时 UA(注册/下单同设备
@@ -255,15 +292,15 @@ async def short_link_redirect(
             utm_text=" ".join(
                 f"{utm_source} {utm_medium} "
                 f"{utm_campaign}".split()))
-        # 前端约定: 落地页携带 clickId 参数, 注册时回传完成归并;
-        # v72=变体决策留痕(前端暂不识别自然忽略, 渲染
-        # 待前端任务接入——先积累 impressions 数据)
-        sep = "&" if "?" in result["landingPath"] else "?"
-        target = (f"{result['landingPath']}{sep}"
-                  f"clickId={result['clickId']}")
-        if variant:
-            target += f"&v72={variant}"
-        return RedirectResponse(url=target, status_code=302)
+        # 前端约定: 落地页携带 clickId 参数, 注册时 Referer
+        # 回传自动归并(auth P0 修复3); v72=变体决策渲染(
+        # activity 内联版 + SPA chunk 双轨已上线);
+        # 落地路由错位修复: v1.0 遗留路径经映射+hash 感知组装
+        return RedirectResponse(
+            url=_build_landing(
+                result["landingPath"],
+                result["clickId"], variant),
+            status_code=302)
     except Exception as e:
         _handle(e)
 
