@@ -88,6 +88,27 @@ class TestV80MemberWindow:
         record("窗内: 无前缀指令放行(不打回)",
                "请以「小竹」开头" not in str(r.get("reply")),
                str(r.get("reply"))[:50])
+        # v87 临界矩阵(千问盲区扫描): 后端判定 <300 严格小于
+        # ——299s 窗内/300s 整打回/301s 打回; 前端 widget 是
+        # >300000(300s 整仍窗内)——前后端 1s 缝隙在此固化
+        # 后端口径, 前端统一记优化池。
+        # 注意: 每档新开干净会话——成功指令轮会落 wake 标记,
+        # 会话级窗(5min 活跃滚动)叠加 member 窗会持续放行,
+        # 干净会话才能单独验证 member 窗硬边界
+        for off, want_in, name in (
+                (299, True, "299s 窗内放行"),
+                (300, False, "300s 整打回(后端<300 严格)"),
+                (301, False, "301s 超窗打回")):
+            XiaozhuService._LAST_WAKE_AT[1] = \
+                time.time() - off
+            sid_c = await _open()
+            r = await _text(sid_c, "看新品")
+            is_back = "请以「小竹」开头" in str(
+                r.get("reply"))
+            record(f"临界: {name}",
+                   is_back != want_in,
+                   f"back={is_back} "
+                   f"reply={str(r.get('reply'))[:30]}")
         XiaozhuService._LAST_WAKE_AT.pop(1, None)
         sid2 = await _open()
         r = await _text(sid2, "看新品")
@@ -95,6 +116,37 @@ class TestV80MemberWindow:
                "小竹" in str(r.get("reply"))
                and "开头" in str(r.get("reply")),
                str(r.get("reply"))[:50])
+
+
+class TestNamedBudget:
+    async def run(self):
+        print("[03b v81 指名×预算复合(边界)]")
+        from services.xiaozhu_wine_service import (
+            XiaozhuWineService,
+        )
+        # 指名最强信号: 指名直入跳过预算过滤(v81 设计语义
+        # 固化)——"推荐竹香年份10年"(888元)带预算100仍直入
+        # 该款, 价格如实播报不换便宜款
+        r = await XiaozhuWineService().recommend(
+            "推荐竹香年份10年预算100以内")
+        items = ((r.get("card") or {})
+                 .get("items") or [])
+        record("指名+预算: 指名直入(年份10年 888 元如实)",
+               len(items) == 1
+               and "年份" in str(
+                   (items or [{}])[0].get("name")),
+               f"n={len(items)} "
+               f"reply={str(r.get('reply'))[:50]}")
+        # 对照: 无指名纯预算 → 过滤生效(便宜款)
+        r = await XiaozhuWineService().recommend(
+            "推荐一款预算100以内的酒")
+        items = ((r.get("card") or {})
+                 .get("items") or [])
+        prices = [float(i.get("price") or 0)
+                  for i in items if i.get("price")]
+        record("纯预算: 过滤生效(款价≤120)",
+               prices and all(p <= 120 for p in prices),
+               f"prices={prices}")
 
 
 class TestV81Locate:
@@ -218,9 +270,10 @@ class TestChecklist:
 
 async def main():
     tests = [TestV80Abv(), TestV80MemberWindow(),
-             TestV81Locate(), TestV83Pattern(),
-             TestV83Guard(), TestV86Filler(),
-             TestV86Timeout(), TestChecklist()]
+             TestNamedBudget(), TestV81Locate(),
+             TestV83Pattern(), TestV83Guard(),
+             TestV86Filler(), TestV86Timeout(),
+             TestChecklist()]
     for t in tests:
         reset_all()
         await t.run()

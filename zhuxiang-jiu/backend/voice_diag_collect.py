@@ -5,11 +5,13 @@
 全量 + 最近语音行), 供大模型诊断与人工复核。
 """
 import json
+import os
 import re
 import subprocess
 
 p = subprocess.run(
-    ["docker", "logs", "zhuxiang-backend-1", "--since", "24h"],
+    ["docker", "logs", "zhuxiang-backend-1", "--since",
+     os.environ.get("DIAG_SINCE", "24h")],
     capture_output=True, text=True, timeout=180)
 log = (p.stdout or "") + "\n" + (p.stderr or "")
 lines = [l for l in log.splitlines() if re.search(
