@@ -402,13 +402,25 @@ v=84 -> v=88: 同音容错+ACK 抢占——①ASR"度"错识"的"
     C++ RT 架构对照结论: 环形缓冲 2.5s/中断令牌 ctl/
     barge-in/FLUSH 四链路 X5 平台均已有等效实现(物理
     边界内不做 RT 重构); widget v=84 -> v=88
+v=88 -> v=90: 碎片防御+LLM 提速+面板残化流自愈——①v89
+    碎片拦截(09:16:19 实证「度的酒。」ASR 吞前半段: rule
+    /spec/attr 全 miss 后 ≤3 字碎片毫秒级请重说不烧 LLM,
+    礼貌词放行, 拦截位置在 rule 后防误伤 3 字指令);
+    ②LLM 轨瘦身+超时(09:16 实证 llm_dialog 2.95~3.27s
+    慢化 30%+——v85 工具清单 12 条详情压一行+wait_for
+    2.5s 超时快失败); ③v90 面板残化流自愈(09:29 实证用户
+    反复喊「小竹小竹」识别为「啊我」「我」「妈妈妈妈」——
+    面板流几轮后残化=v70 widget「旧流不自愈」面板版,
+    v84 哑流自愈只治纯零治不了 rms 健康识别碎): 连续 3
+    轮 final 空/≤2字碎片→硬重置采集链(60s 退避)+
+    「重新校准麦克风」提示; widget v=88 -> v=90
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=84"
-NEW = "src=/js/voice-wake-widget.js?v=88"
+OLD = "src=/js/voice-wake-widget.js?v=88"
+NEW = "src=/js/voice-wake-widget.js?v=90"
 
 
 def main():

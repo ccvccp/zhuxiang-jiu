@@ -1713,6 +1713,30 @@ function streamConnect() {
       }
     } else if (m.type === "final") {
       var cb = stFinalCb; stFinalCb = null;
+      /* v90 面板残化流自愈(09:29 实证: 用户反复喊
+         「小竹小竹」识别为「啊我」「我」「妈妈妈妈」——
+         面板流几轮后残化, v70 widget「旧流不自愈」的面
+         板版; v84 哑流自愈只治纯零能量, 治不了 rms 健康
+         但识别碎的残化流): 连续 3 轮 final 空或 ≤2 字
+         碎片(用户在反复说话但识别崩)→硬重置采集链
+         (listenClose+cloudStart 释放重取), 60s 退避 */
+      var _ft = String(m.text || "").trim();
+      if (!_ft || _ft.length <= 2) {
+        S.asrFragStreak = (S.asrFragStreak || 0) + 1;
+        if (S.asrFragStreak >= 3
+            && Date.now() - (S.asrResetAt || 0) > 60000) {
+          S.asrResetAt = Date.now();
+          S.asrFragStreak = 0;
+          try { console.info("[P-ASR-RESET] fragmented"
+            + " stream reset"); } catch (e) {}
+          setMicStatus("🎙 重新校准麦克风…请再讲一遍");
+          setTimeout(function () {
+            if (S.handfree) {
+              listenClose(); cloudStart();
+            }
+          }, 200);
+        }
+      } else { S.asrFragStreak = 0; }
       if (cb) cb(m.text || "");
     } else if (m.type === "error") {
       stOn = false; streamTeardown();
