@@ -1,5 +1,7 @@
 """36号·抖音 RPA 发布回执登记(内容#30 → mode=rpa+作品URL)
 
+2026-09-27 重发: 旧作 7689909181234629923 内容图带脚本标记且
+平台不支持换图, 已删除; 本登记为无标记重发版。
 运行: python3 register_douyin_receipt.py (生产服务器本机)
 """
 import json
@@ -8,8 +10,8 @@ import urllib.request
 
 BASE = "http://127.0.0.1:8000"
 CID = 30
-NOTE_URL = "https://www.douyin.com/note/7689909181234629923"
-NOTE_ID = "7689909181234629923"
+NOTE_URL = "https://www.douyin.com/note/7689918423987391798"
+NOTE_ID = "7689918423987391798"
 
 
 def call(method, path, token=None, body=None):

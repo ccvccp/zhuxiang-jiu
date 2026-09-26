@@ -17,6 +17,7 @@
 
 import json
 import logging
+import re
 from datetime import datetime, UTC
 
 from repositories.promo_repository import (
@@ -37,7 +38,10 @@ PLATFORM_PROFILES = {
     PROMO_PLATFORM_DOUYIN: {
         "audience": "18-35 大众娱乐人群",
         "tone": "快节奏、剧情钩子、口语化",
-        "format": "15-45s 短视频脚本(钩子-卖点-行动)",
+        # 2026-09-27 修正: 通道实态为 creator.douyin.com 图文笔记,
+        # 不再引导 LLM 写"15-45s 短视频脚本"(分镜时间标记会泄漏
+        # 到公开文案)
+        "format": "图文笔记文案(钩子-卖点-行动自然成文, 无分镜/时间标记)",
     },
     PROMO_PLATFORM_XHS: {
         "audience": "20-40 女性种草人群",
@@ -63,12 +67,12 @@ PLATFORM_PROFILES = {
 
 # 规则模板轨(三级降级兜底, 确定性与 attract GEN_TEMPLATES 同思路)
 _RULE_TEMPLATES = {
+    # 2026-09-27 修正: 原模板为短视频脚本结构(【0-3s 钩子】等分镜
+    # 时间标记泄漏进公开文案)——通道实态为图文笔记, 改为自然成文
     PROMO_PLATFORM_DOUYIN: (
-        "【热点借势】{title}\n"
-        "【0-3s 钩子】最近 \"{title}\" 刷屏了!\n"
-        "【3-10s 卖点】团圆聚会怎么少得了竹香型白酒? 入口绵甜、落口回甘, "
-        "国潮包装宴席倍有面。\n"
-        "【10-15s 行动】点击主页链接, 新客立减!\n"
+        "最近 \"{title}\" 刷屏了! 团圆聚会安排起来~\n"
+        "竹香型白酒: 入口绵甜、落口回甘, 国潮包装宴席倍有面。\n"
+        "点击主页链接, 新客立减!\n"
         "（{disclaimer}，未成年人禁止饮酒，满{age}周岁请适量）"
     ),
     PROMO_PLATFORM_XHS: (
@@ -104,6 +108,18 @@ _RULE_TEMPLATES = {
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+# 脚本结构标记剥离(确定性防线, 2026-09-27): LLM 轨偶发把文案写成
+# 短视频脚本(【0-3s 钩子】/【15-30s 转折】等分镜时间标记泄漏到公开
+# 文案)——图文通道不允许, 双轨统一在产出出口剥除(与封面 emoji 剥除
+# 同思路: 生成侧已改图文口径, 此处兜底 GLM 轨漏网)
+_SCRIPT_MARKER_RE = re.compile(r"【\d+(?:-\d+)?s[^】]*】")
+
+
+def _strip_script_markers(body: str) -> str:
+    """剥离短视频脚本分镜标记(【0-3s 钩子】→空, 标记后句子保留)"""
+    return _SCRIPT_MARKER_RE.sub("", body or "")
 
 
 def _extract_json(text: str) -> dict | None:
@@ -336,7 +352,8 @@ class PromoAgentService:
                 hotspot, platform, analysis, audience,
                 citations=citations)
             checked, step4_track = self.self_check(draft, platform)
-            body = checked.get("revisedBody") or draft.get("body", "")
+            body = _strip_script_markers(
+                checked.get("revisedBody") or draft.get("body", ""))
             results.append({
                 "platform": platform,
                 "title": (draft.get("title") or "").strip(),
