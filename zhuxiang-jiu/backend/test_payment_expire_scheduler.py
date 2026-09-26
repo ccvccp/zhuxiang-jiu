@@ -1,4 +1,4 @@
-﻿"""支付单超时自动关闭调度器测试(05号收款 P2-4)
+"""支付单超时自动关闭调度器测试(05号收款 P2-4)
 
 运行:
     $env:LOCK_MODE="asyncio"; $env:STORE_MODE="asyncio"; $env:AUTH_MODE="compat"

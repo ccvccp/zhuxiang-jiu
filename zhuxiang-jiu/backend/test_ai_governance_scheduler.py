@@ -1,4 +1,4 @@
-﻿"""46号·P6 AI 治理巡检调度器专项测试
+"""46号·P6 AI 治理巡检调度器专项测试
 
 运行方式:
     python test_ai_governance_scheduler.py

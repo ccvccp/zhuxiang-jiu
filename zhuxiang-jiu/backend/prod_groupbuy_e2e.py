@@ -1,4 +1,4 @@
-﻿"""生产 E2E: 团购模块全链实证(member 1 = L5 SVIP)
+"""生产 E2E: 团购模块全链实证(member 1 = L5 SVIP)
 
 链路: products → tiers → calculate(阶梯匹配) → apply(申请, purpose
 带 LT) → detail/list → audit(approved, admin) → cancel(取消, 终态)

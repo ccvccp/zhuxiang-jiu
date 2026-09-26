@@ -1,4 +1,4 @@
-﻿"""64号信值兑换管理 P0 Docker 实机验收
+"""64号信值兑换管理 P0 Docker 实机验收
 
 运行方式:
     python verify_xx64_p0_live.py [基址]

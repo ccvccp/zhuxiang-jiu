@@ -1,4 +1,4 @@
-﻿"""62号AI智能无形资产估值 P4 Docker 实机验收
+"""62号AI智能无形资产估值 P4 Docker 实机验收
 
 运行方式:
     python verify_av62_p4_live.py [基址]
