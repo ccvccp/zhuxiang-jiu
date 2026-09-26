@@ -1299,6 +1299,23 @@ class XiaozhuService:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("voice48_custom_skip: %s", exc)
         if cmd is None:
+            # v89 碎片拦截(09:16:19 实证「度的酒。」——ASR 吞
+            # 前半段的碎片轮): rule/spec/attr/共创全 miss 后
+            # ≤3 字碎片不进 LLM(实测 llm_dialog 2.95s 烧完仍
+            # 回"还在学着"兜底——3s 白等+无用回复双输), 毫秒级
+            # 请重说; 3 字真指令(来一件/看新品)rule 已命中在
+            # 前被此处放行——拦截位置必须在 rule 之后;
+            # 礼貌词("谢谢")放行走 LLM 轨礼貌护栏(不客气)
+            if len(command_text.strip()) <= 3 \
+                    and not _is_polite_only(command_text):
+                return await self._save_turn(
+                    session, channel, text, "chat",
+                    {"reply": "没听清——刚才话头丢了，"
+                              "请再说一遍完整些",
+                     "card": None},
+                    {"commandText": command_text,
+                     "audioMeta": audio_meta,
+                     "track": "fragment"})
             llm_hit = await self._llm_match(resolved)
             if llm_hit:
                 cmd = next(c for c in COMMANDS
@@ -1560,30 +1577,24 @@ class XiaozhuService:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("voice48_attr_ctx_skip: %s", exc)
             # v85-A 工具样例注入(协同范式模式②: LLM 的
-            # command: 分类从裸猜变有据选择——COMMANDS 的
-            # action+examples 精简清单; 高频子集 12 条防
-            # token 膨胀)
+            # command: 分类从裸猜变有据选择); v89 瘦身:
+            # 12 条详情清单压成一行 action 名(09:16 实证
+            # 注入膨胀致 llm_dialog 2.95~3.27s 慢化 30%+,
+            # examples 对分类增益小于 token 成本)
             try:
-                _cmd_lines = []
-                for _c in COMMANDS:
-                    if _c["action"] in (
+                context_desc += (
+                    "\n可用指令(需执行操作时输出对应 "
+                    "command: 前缀意图, 勿编造指令名): "
+                    + "/".join(
+                        c["action"] for c in COMMANDS
+                        if c["action"] in (
                             "wine.verify", "wine.craft",
-                            "wine.recommend", "wine.reviews",
-                            "product.new", "product.price",
-                            "cart.add", "cart.submit",
-                            "order.query", "map.nearby",
-                            "promo.query", "chat.human"):
-                        _ex = " / ".join(
-                            str(e) for e in
-                            (_c.get("examples") or [])[:1])
-                        _cmd_lines.append(
-                            f"- {_c['action']}"
-                            + (f"「{_ex}」" if _ex else ""))
-                if _cmd_lines:
-                    context_desc += (
-                        "\n可用指令(需执行操作时输出对应 "
-                        "command: 前缀意图, 勿编造指令名):\n"
-                        + "\n".join(_cmd_lines))
+                            "wine.recommend",
+                            "wine.reviews", "product.new",
+                            "product.price", "cart.add",
+                            "cart.submit", "order.query",
+                            "map.nearby", "promo.query",
+                            "chat.human")))
             except Exception as exc:  # noqa: BLE001
                 logger.debug("voice48_cmd_ctx_skip: %s", exc)
             # v85-C 会员偏好记忆(模式③ Agentd 主动检索注入:
@@ -1611,11 +1622,22 @@ class XiaozhuService:
             import time as _t
             _llm_t0 = _t.monotonic()
             # v2 并发修复: LLM 分类为同步 urllib——线程池执行,
-            # 不阻塞事件循环(与 ASR/TTS 并行不排队)
+            # 不阻塞事件循环(与 ASR/TTS 并行不排队);
+            # v89 超时上限 2.5s(09:16 实证 llm_dialog 2.95~
+            # 3.27s——慢化超出语音体感预算, 超时快失败回
+            # 规则轨兜底, 好过 3s 白等)
             import asyncio as _aio
-            result = await _aio.to_thread(
-                provider_client.classify_dialog_intent,
-                command_text, context_desc)
+            try:
+                result = await _aio.wait_for(
+                    _aio.to_thread(
+                        provider_client.classify_dialog_intent,
+                        command_text, context_desc),
+                    timeout=2.5)
+            except _aio.TimeoutError:
+                logger.info(
+                    "voice48_llm_dialog_timeout "
+                    "trace=%s", _trace)
+                return None
             logger.info("voice48_timing llm_dialog_ms=%d "
                         "trace=%s",
                         round((_t.monotonic() - _llm_t0)
