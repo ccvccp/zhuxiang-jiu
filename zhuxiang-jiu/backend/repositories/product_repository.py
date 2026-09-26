@@ -104,6 +104,7 @@ PRODUCT_CATEGORIES = [
         "key": "volume",
         "name": "容量",
         "items": [
+            {"code": "100ml", "name": "100ml"},
             {"code": "250ml", "name": "250ml"},
             {"code": "500ml", "name": "500ml"},
             {"code": "500ml×2", "name": "500ml×2"},
@@ -136,7 +137,7 @@ PRODUCT_CATEGORIES = [
 
 
 # ============================================================
-# 11 款产品初始数据(基于设计文档产品线)
+# 12 款产品初始数据(基于设计文档产品线)
 # ============================================================
 
 def _img(prompt: str, size: str = "1024x1024") -> str:
@@ -147,12 +148,21 @@ def _img(prompt: str, size: str = "1024x1024") -> str:
     )
 
 
+# 便携小瓶真实产品图(2026-09-26 目录更新: 上传至 dist/images/products/,
+# 由 nginx 静态直出, 与占位图 URL 机制并存)
+_PROD_IMG_BASE = "https://zxjiu.com/images/products"
+
+
 def _build_product(pid, name, subtitle, series, alcohol, volume, price,
                    original_price, tags, scenes, attributes_extra=None,
                    description="", created_at="", sales_monthly=0,
                    sales_total=0, rating_avg=5.0, rating_count=0,
-                   featured=False, hot_rank=0):
-    """构造单个产品 dict(member_price/svip_price 自动按 9 折/8.5 折计算)"""
+                   featured=False, hot_rank=0, images=None):
+    """构造单个产品 dict(member_price/svip_price 自动按 9 折/8.5 折计算)
+
+    images: 可选覆盖真实产品图({"main": url, "gallery": [url, ...]}),
+    缺省时生成占位图 URL(遵循项目约定的图片 URL 格式)。
+    """
     attrs = {
         "aroma": "竹香型",
         "process": "固态发酵·古法酿造",
@@ -165,6 +175,15 @@ def _build_product(pid, name, subtitle, series, alcohol, volume, price,
     }
     if attributes_extra:
         attrs.update(attributes_extra)
+    if images is None:
+        images = {
+            "main": _img(f"{name} 主图"),
+            "gallery": [
+                _img(f"{name} 细节图1"),
+                _img(f"{name} 细节图2"),
+                _img(f"{name} 包装图"),
+            ],
+        }
     return {
         "product_id": pid,
         "name": name,
@@ -187,21 +206,14 @@ def _build_product(pid, name, subtitle, series, alcohol, volume, price,
         "origin": "山东泰安",
         "featured": featured,
         "hot_rank": hot_rank,
-        "images": {
-            "main": _img(f"{name} 主图"),
-            "gallery": [
-                _img(f"{name} 细节图1"),
-                _img(f"{name} 细节图2"),
-                _img(f"{name} 包装图"),
-            ],
-        },
+        "images": images,
         "attributes": attrs,
         "created_at": created_at,
         "description": description or f"{name}，源自山东泰安，竹香型白酒代表作。",
     }
 
 
-# 初始产品清单(11 款), created_at 用 ISO8601 区分新品排序
+# 初始产品清单(12 款), created_at 用 ISO8601 区分新品排序
 _INITIAL_PRODUCTS = [
     _build_product(
         "ZX42-2026L07", "竹奕·竹香经典 42° 500ml", "经典入门·绵柔顺喉",
@@ -264,14 +276,32 @@ _INITIAL_PRODUCTS = [
         featured=True, hot_rank=4,
     ),
     _build_product(
-        "ZX42-2026B01", "竹奕·竹香便携 42° 250ml", "便携小瓶·随行畅饮",
-        "便携系列", 42, "250ml", 88, 128,
+        "ZX42-2026B01", "竹奕·竹香便携 42° 100ml", "便携小瓶·随行畅饮",
+        "便携系列", 42, "100ml", 88, 128,
         tags=["便携"], scenes=["老友小聚"],
         attributes_extra={"taste": "绵柔顺喉·小瓶便携"},
-        description="42°便携小瓶，随行畅饮，自饮试饮首选。",
+        description="42°便携小瓶100ml，随行畅饮，自饮试饮首选。",
         created_at="2026-08-10T00:00:00+00:00",
         sales_monthly=2400, sales_total=28800, rating_avg=4.6, rating_count=580,
         featured=False, hot_rank=3,
+        images={
+            "main": f"{_PROD_IMG_BASE}/zx42-100ml.jpg",
+            "gallery": [f"{_PROD_IMG_BASE}/zx42-100ml-desc.jpg"],
+        },
+    ),
+    _build_product(
+        "ZX52-2026B01", "竹奕·竹香便携 52° 100ml", "便携小瓶·随行畅饮",
+        "便携系列", 52, "100ml", 98, 138,
+        tags=["便携"], scenes=["老友小聚"],
+        attributes_extra={"taste": "绵柔醇厚·小瓶便携"},
+        description="52°便携小瓶100ml，绵柔醇厚，随行畅饮之选。",
+        created_at="2026-09-26T00:00:00+00:00",
+        sales_monthly=0, sales_total=0, rating_avg=5.0, rating_count=0,
+        featured=False, hot_rank=0,
+        images={
+            "main": f"{_PROD_IMG_BASE}/zx52-100ml.jpg",
+            "gallery": [],
+        },
     ),
     _build_product(
         "ZX50-2026D01", "竹奕·竹香典藏 50° 750ml", "典藏大瓶·宴席首选",
@@ -317,7 +347,7 @@ _INITIAL_PRODUCTS = [
 
 
 def _initial_products() -> list[dict]:
-    """返回 11 款产品数据的深拷贝(避免外部修改污染常量)"""
+    """返回 12 款产品数据的深拷贝(避免外部修改污染常量)"""
     import copy
     return copy.deepcopy(_INITIAL_PRODUCTS)
 

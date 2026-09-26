@@ -20,7 +20,7 @@ def _hash_member_pwd(password: str) -> str:
 
 
 def _build_initial_products() -> dict:
-    """构建 11 款产品初始数据字典(product_id → product)
+    """构建 12 款产品初始数据字典(product_id → product)
 
     与 repositories/product_repository.py 的 _INITIAL_PRODUCTS 数据源一致,
     通过导入复用避免数据重复维护。
@@ -258,10 +258,10 @@ def _build_initial_finance() -> dict:
 
 
 def _build_initial_inventory() -> dict:
-    """构建库存初始数据(11 款产品)
+    """构建库存初始数据(12 款产品)
 
     保留 ZX42-2026L07(500)/ZX42-2026L05(300) 与原值一致以兼容订单测试,
-    其余 9 款产品补充初始库存。
+    其余 10 款产品补充初始库存。
     """
     return {
         "ZX42-2026L07": {"stock": 500, "reserved": 0},
@@ -271,6 +271,7 @@ def _build_initial_inventory() -> dict:
         "ZX53-2026N20": {"stock": 40, "reserved": 0},
         "ZX52-2026L02": {"stock": 150, "reserved": 0},
         "ZX42-2026B01": {"stock": 800, "reserved": 0},
+        "ZX52-2026B01": {"stock": 500, "reserved": 0},
         "ZX50-2026D01": {"stock": 100, "reserved": 0},
         "ZX52-2026X01": {"stock": 300, "reserved": 0},
         "ZX52-2026X02": {"stock": 180, "reserved": 0},
@@ -407,7 +408,7 @@ def _build_initial_supply_chain() -> dict:
                         "status": "empty",
                     })
                     loc_id += 1
-    # 仓储库存: 仓1 放全部 11 款(前 11 个库位), 仓2 放 3 款(供多仓调拨演示)
+    # 仓储库存: 仓1 放全部 12 款(前 12 个库位), 仓2 放 3 款(供多仓调拨演示)
     inv = _build_initial_inventory()
     stock = []
     for idx, pid in enumerate(inv):
@@ -426,7 +427,7 @@ def _build_initial_supply_chain() -> dict:
         ("ZX42-2026L07", 50), ("ZX42-2026B01", 30), ("ZX52-2026X01", 40),
     ]):
         stock.append({
-            "id": 12 + idx, "warehouse_id": 2, "location_id": None,
+            "id": len(inv) + 1 + idx, "warehouse_id": 2, "location_id": None,
             "product_id": pid, "material_id": None, "stock_qty": qty,
             "ai_recommended_safety": 20, "ai_turnover_rate": 2.0,
             "ai_stock_status": "normal", "abc_class": "B",
@@ -519,7 +520,7 @@ _mock_store: dict = {
         },
     },
     "_member_seq": 2,
-    # 产品展示模块(11 款产品 + 评价)
+    # 产品展示模块(12 款产品 + 评价)
     "products": _build_initial_products(),
     "product_reviews": _build_initial_product_reviews(),
     # 供应链四件套扩展域(P4.4)
@@ -584,7 +585,7 @@ def reset_store() -> dict:
             },
         },
         "_member_seq": 2,
-        # 产品展示模块(11 款产品 + 评价)
+        # 产品展示模块(12 款产品 + 评价)
         "products": _build_initial_products(),
         "product_reviews": _build_initial_product_reviews(),
         # 供应链四件套扩展域(P4.4)

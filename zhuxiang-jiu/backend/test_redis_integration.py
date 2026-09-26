@@ -1031,7 +1031,7 @@ class TestSupplyChainRepositoryRedis:
         locations = await sc_repo.load("warehouse_locations")
         assert len(locations) == 180   # 3区×5排×4列×3层
         stock = await sc_repo.load("warehouse_stock")
-        assert len(stock) == 14        # 仓1 全部 11 款 + 仓2 三款
+        assert len(stock) == 15        # 仓1 全部 12 款 + 仓2 三款
         # 抽样: 仓1 的 ZX42-2026L07 库存 500
         s = next(x for x in stock
                 if x["warehouse_id"] == 1 and x["product_id"] == "ZX42-2026L07")

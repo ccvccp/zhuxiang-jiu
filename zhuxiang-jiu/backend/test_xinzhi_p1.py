@@ -219,7 +219,7 @@ class TestConversion:
                and grade_of(100, 1.0, ["x"]) == "L4",
                "matrix")
 
-        # 14) 全量评分(11 款种子商品)
+        # 14) 全量评分(12 款种子商品)
         r = await svc.score_products(1)
         record("评分-全量批次",
                r["scored"] >= 10

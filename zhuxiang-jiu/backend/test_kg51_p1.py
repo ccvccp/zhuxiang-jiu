@@ -305,8 +305,8 @@ class TestAuthoritySource:
                    != "agreement:2" for c in clauses))
         products = await repo.list_entities(
             entity_type="Product", limit=100)
-        record("产品种子全量入库(11 款)",
-               len(products) == 11, str(len(products)))
+        record("产品种子全量入库(12 款)",
+               len(products) == 12, str(len(products)))
         record("权威源 confidence=1.0",
                all(c["confidence"] == 1.0
                    for c in clauses + products))

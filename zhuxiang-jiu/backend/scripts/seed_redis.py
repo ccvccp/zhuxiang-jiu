@@ -265,7 +265,7 @@ def _serialize_product(product: dict) -> dict:
 
 
 async def seed_products(client) -> int:
-    """写入产品主信息(Hash, 11 款产品)
+    """写入产品主信息(Hash, 12 款产品)
 
     Key: zhuxiang:product:{product_id}
     嵌套字段(tags/scenes/attributes/images)以 JSON 字符串存储,
@@ -785,7 +785,7 @@ async def seed(force: bool = False) -> int:
         addrs_n = await seed_member_addresses(client)
         print(f"[OK] 收货地址写入: {addrs_n} 条")
 
-        # 4d. 写入产品主信息(11 款产品)
+        # 4d. 写入产品主信息(12 款产品)
         products_n = await seed_products(client)
         print(f"[OK] 产品写入: {products_n} 条")
 

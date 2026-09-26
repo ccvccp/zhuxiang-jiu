@@ -218,7 +218,7 @@ async def list_products(
     category: str | None = Query(default=None, description="分类(兼容字段, 等同 series)"),
     series: str | None = Query(default=None, description="系列(经典/珍藏/年份/礼盒/便携/典藏/竹香)"),
     alcohol: str | None = Query(default=None, description="度数(42/45/50/52/53)"),
-    volume: str | None = Query(default=None, description="容量(250ml/500ml/500ml×2/750ml)"),
+    volume: str | None = Query(default=None, description="容量(100ml/250ml/500ml/500ml×2/750ml)"),
     price_min: str | None = Query(default=None, description="价格下限(元)"),
     price_max: str | None = Query(default=None, description="价格上限(元)"),
     scene: str | None = Query(default=None, description="场景(商务宴请/高端礼赠/老友小聚/收藏投资/团购定制)"),

@@ -19,7 +19,7 @@
   - 推荐热销/主推/关联(详情内)
   - 评价CRUD + 评分越界 + 内容校验 + 未登录 401
 
-商品: 11 款(经典/珍藏/年份/礼盒/便携/典藏/竹香系列)
+商品: 12 款(经典/珍藏/年份/礼盒/便携/典藏/竹香系列)
 库存: 复用 _mock_store["inventory"](ZX42-2026L07 stock=500)
 
 运行: pytest test_product_routes.py -v
@@ -37,14 +37,15 @@ client = TestClient(app)
 PID_CLASSIC_42 = "ZX42-2026L07"     # 经典系列 42° 500ml  ¥268 stock=500
 PID_CLASSIC_45 = "ZX45-2026L05"     # 经典系列 45° 500ml  ¥368 stock=300
 PID_TREASURE = "ZX53-2026Z01"       # 珍藏系列 53° 500ml  ¥698 stock=200
-PID_PORTABLE = "ZX42-2026B01"       # 便携系列 42° 250ml  ¥88  stock=800
+PID_PORTABLE = "ZX42-2026B01"       # 便携系列 42° 100ml  ¥88  stock=800
+PID_PORTABLE_52 = "ZX52-2026B01"    # 便携系列 52° 100ml  ¥98  stock=500
 PID_BAMBOO_X1 = "ZX52-2026X01"     # 竹香系列 52° 500ml  ¥398 stock=300
 PID_BAMBOO_X3 = "ZX52-2026X03"     # 竹香系列 52° 500ml×2 ¥1888 stock=60
 
 
 @pytest.fixture(autouse=True)
 def _reset_product_store():
-    """每个测试前重置 store 到初始状态(11 款产品 + 2 条种子评价)"""
+    """每个测试前重置 store 到初始状态(12 款产品 + 2 条种子评价)"""
     reset_store()
     yield
 
@@ -81,11 +82,12 @@ class TestProductCategories:
         alcohol = next(c for c in resp.json()["categories"] if c["key"] == "alcohol")
         assert len(alcohol["items"]) == 5
 
-    def test_categories_has_4_volumes(self):
-        """分类树包含 4 个容量"""
+    def test_categories_has_5_volumes(self):
+        """分类树包含 5 个容量(含 100ml)"""
         resp = client.get("/api/product/categories")
         volume = next(c for c in resp.json()["categories"] if c["key"] == "volume")
-        assert len(volume["items"]) == 4
+        assert len(volume["items"]) == 5
+        assert volume["items"][0]["code"] == "100ml"
 
     def test_categories_has_5_price_ranges(self):
         """分类树包含 5 个价格区间"""
@@ -108,16 +110,16 @@ class TestProductList:
     """产品列表(15): 筛选+排序+分页+错误"""
 
     def test_list_default(self):
-        """默认参数: 返回全部 11 款(分页 1/12)"""
+        """默认参数: 返回全部 12 款(分页 1/12)"""
         resp = client.get("/api/product/list")
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
-        assert data["total"] == 11
+        assert data["total"] == 12
         assert data["page"] == 1
         assert data["pageSize"] == 12
         assert data["totalPages"] == 1
-        assert data["count"] == 11
+        assert data["count"] == 12
         assert data["sort"] == "comprehensive"
 
     def test_list_filter_series(self):
@@ -143,11 +145,14 @@ class TestProductList:
             assert p["alcohol"] == 53
 
     def test_list_filter_volume(self):
-        """按容量筛选: 250ml → 1 款(便携)"""
-        resp = client.get("/api/product/list?volume=250ml")
+        """按容量筛选: 100ml → 2 款(便携 42°/52°); 250ml 已下架 → 0 款"""
+        resp = client.get("/api/product/list?volume=100ml")
         data = resp.json()
-        assert data["total"] == 1
-        assert data["products"][0]["product_id"] == PID_PORTABLE
+        assert data["total"] == 2
+        assert {p["product_id"] for p in data["products"]} == {
+            PID_PORTABLE, PID_PORTABLE_52}
+        resp250 = client.get("/api/product/list?volume=250ml")
+        assert resp250.json()["total"] == 0
 
     def test_list_filter_price_min(self):
         """价格下限: >=1000 → 5 款(ZX53N20/礼盒/典藏/竹香尊享大瓶/竹香礼盒)"""
@@ -160,11 +165,11 @@ class TestProductList:
             assert p["price"] >= 1000
 
     def test_list_filter_price_max(self):
-        """价格上限: <=200 → 1 款(便携 88)"""
+        """价格上限: <=200 → 2 款(便携 42° 88 / 便携 52° 98)"""
         resp = client.get("/api/product/list?price_max=200")
         data = resp.json()
-        assert data["total"] == 1
-        assert data["products"][0]["price"] <= 200
+        assert data["total"] == 2
+        assert all(p["price"] <= 200 for p in data["products"])
 
     def test_list_filter_price_range(self):
         """价格区间: 200-500 → 经典42(268)/经典45(368)/便携X1(398)"""
@@ -217,10 +222,10 @@ class TestProductList:
         assert prices == sorted(prices, reverse=True)
 
     def test_list_sort_new(self):
-        """排序 new: 上架时间降序, 顶部应是最新的便携(2026-08-10)"""
+        """排序 new: 上架时间降序, 顶部应是最新的便携 52°(2026-09-26)"""
         resp = client.get("/api/product/list?sort=new")
         data = resp.json()
-        assert data["products"][0]["product_id"] == PID_PORTABLE
+        assert data["products"][0]["product_id"] == PID_PORTABLE_52
 
     def test_list_sort_rating(self):
         """排序 rating: 评分降序"""
@@ -234,21 +239,21 @@ class TestProductList:
         data = resp.json()
         assert data["page"] == 1
         assert data["pageSize"] == 5
-        assert data["total"] == 11
-        assert data["totalPages"] == 3  # ceil(11/5)
+        assert data["total"] == 12
+        assert data["totalPages"] == 3  # ceil(12/5)
         assert data["count"] == 5
 
     def test_list_pagination_last_page(self):
-        """分页: 末页 page=3 (page_size=5) 应返回 1 条"""
+        """分页: 末页 page=3 (page_size=5) 应返回 2 条"""
         resp = client.get("/api/product/list?page=3&page_size=5")
         data = resp.json()
-        assert data["count"] == 1
+        assert data["count"] == 2
 
     def test_list_pagination_empty_page(self):
         """分页: 超出范围页 → 空列表但 total 正确"""
         resp = client.get("/api/product/list?page=99&page_size=10")
         data = resp.json()
-        assert data["total"] == 11
+        assert data["total"] == 12
         assert data["count"] == 0
         assert data["products"] == []
 
@@ -343,10 +348,10 @@ class TestProductSearch:
         assert data["total"] == 3
 
     def test_search_by_brand(self):
-        """按品牌搜索: 竹奕 → 全部 11 款"""
+        """按品牌搜索: 竹奕 → 全部 12 款"""
         resp = client.get("/api/product/search?keyword=竹奕")
         data = resp.json()
-        assert data["total"] == 11
+        assert data["total"] == 12
 
     def test_search_no_match(self):
         """无命中关键词"""
@@ -365,7 +370,7 @@ class TestProductSearch:
         """搜索分页: keyword=竹奕 page_size=5 → totalPages=3"""
         resp = client.get("/api/product/search?keyword=竹奕&page_size=5")
         data = resp.json()
-        assert data["total"] == 11
+        assert data["total"] == 12
         assert data["count"] == 5
         assert data["totalPages"] == 3
         assert data["page"] == 1
@@ -834,7 +839,7 @@ class TestProductIntegration:
         featured = client.get("/api/product/featured?limit=20").json()["products"]
         hot_ids = {p["product_id"] for p in hot}
         featured_ids = {p["product_id"] for p in featured}
-        # 主推 5 款均为热销 11 款的子集
+        # 主推 5 款均为热销 top11 的子集
         assert featured_ids.issubset(hot_ids)
         # 至少有 1 款非主推的热销产品
         assert len(hot_ids - featured_ids) >= 6

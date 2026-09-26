@@ -161,14 +161,14 @@ class TestProductBrowse:
     """产品列表/详情端点测试"""
 
     def test_product_list_success(self):
-        """产品列表: 返回11款产品"""
+        """产品列表: 返回12款产品"""
         resp = client.get("/api/product/list")
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
-        assert data["count"] == 11
-        assert data["total"] == 11
-        assert len(data["products"]) == 11
+        assert data["count"] == 12
+        assert data["total"] == 12
+        assert len(data["products"]) == 12
 
     def test_product_detail_success(self):
         """产品详情: ZX42-2026L07"""
@@ -516,7 +516,7 @@ class TestOrderFlowE2E:
         list_resp = client.get("/api/product/list")
         assert list_resp.status_code == 200
         products = list_resp.json()["products"]
-        assert len(products) == 11
+        assert len(products) == 12
 
         # 3. 查看产品详情
         detail_resp = client.get("/api/product/ZX42-2026L07")
