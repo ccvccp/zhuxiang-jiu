@@ -197,6 +197,53 @@ class TestFCartWithAbv:
                str(r.get("reply"))[:50])
 
 
+class TestKankanPhrases:
+    async def run(self):
+        print("[H 看一看句式(v92 补充)]")
+        from services.xiaozhu_service import (
+            XiaozhuService, match_command,
+        )
+        record("路由: 「看一看52度的酒」→ wine.recommend",
+               (match_command("看一看52度的酒") or {})
+               .get("action") == "wine.recommend", "")
+        record("路由: 「看一看新品」→ product.new(不误入荐酒)",
+               (match_command("看一看新品") or {})
+               .get("action") == "product.new",
+               str((match_command("看一看新品") or {})
+                   .get("action")))
+        r = await _recommend("看一看42度的酒")
+        record("看一看+42度: rule 语义(42 度款)",
+               not _no_data_flap(r)
+               and 42 in _alcohols(r),
+               str(r.get("reply"))[:40])
+        r = await _recommend("看一看竹香经典")
+        items = ((r.get("card") or {}).get("items") or [])
+        record("看一看+指名: 指名直入(词提取剥看一看)",
+               len(items) == 1
+               and "竹香经典" in str(
+                   (items or [{}])[0].get("name")),
+               f"n={len(items)}")
+        r = await _recommend("看一看")
+        record("纯看一看: 泛推荐不误报(无度数无指名)",
+               not _no_data_flap(r)
+               and not "没有找到" in str(r.get("reply")),
+               str(r.get("reply"))[:40])
+        from repositories.store import reset_store
+        reset_store()
+        sid = (await XiaozhuService()
+               .open_session(1))["sessionId"]
+        r = await XiaozhuService().handle_text(
+            sid, "小竹，看一看42度的酒")
+        record("集成: 看一看走 rule 轨(快+规范回复)",
+               "42度" in str(r.get("reply"))
+               and "挑了" in str(r.get("reply")),
+               str(r.get("reply"))[:50])
+        kw = XiaozhuService._extract_product_kw(
+            "看一看竹香珍藏")
+        record("词提取: 看一看剥净(→竹香珍藏)",
+               kw == "竹香珍藏", repr(kw))
+
+
 class TestProdChecklist:
     async def run(self):
         print("[G 生产真机验证清单]")
@@ -212,7 +259,7 @@ async def main():
     tests = [TestAAbvMatrix(), TestBPhrases(),
              TestCMixed(), TestDIntegration(),
              TestEComposite(), TestFCartWithAbv(),
-             TestProdChecklist()]
+             TestKankanPhrases(), TestProdChecklist()]
     for t in tests:
         await t.run()
     print("\n" + "=" * 56)
