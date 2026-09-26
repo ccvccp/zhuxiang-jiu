@@ -377,12 +377,18 @@ class XiaozhuEvolutionService:
             if k == "turn_score":
                 continue  # v92 评分流同表, 不入失败聚类
             by_kind[k] = by_kind.get(k, 0) + 1
-            p = (c.get("rawText") or "")[:40]
+            p = (c.get("rawText") or "").strip()[:40]
+            # v92-P0 数据清洗: 空/'#'-占位(ASR 残渣实证
+            # 213 条)不入聚类——Top 短语真实性=HITL
+            # 决策质量; kind 计数保留全量口径
+            if not p or set(p) <= {"#"}:
+                continue
             phrases[p] = phrases.get(p, 0) + 1
         top = sorted(phrases.items(),
                      key=lambda kv: -kv[1])[:10]
         return {"success": True,
-                "total": len(cases), "byKind": by_kind,
+                "total": sum(by_kind.values()),
+                "byKind": by_kind,
                 "topPhrases": [
                     {"phrase": p, "count": n}
                     for p, n in top],
