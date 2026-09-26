@@ -90,6 +90,23 @@ class TestAAbvMatrix:
                not _no_data_flap(r)
                and got and got[0] == 53,
                f"alcohols={got}")
+        # v87 同音容错(08:51:49 实证「看一款32的。」):
+        # ASR "度"→"的"(du 同音)——"32的"按 32 度理解,
+        # 接近排序 42 首位+度数确认语; 非静默降级热销
+        r = await _recommend("看一款32的。")
+        got = _alcohols(r)
+        record("同音容错: 「32的」→ 32 度(接近排序 42 首位)",
+               not _no_data_flap(r)
+               and got and got[0] == 42
+               and "32" in str(r.get("reply")),
+               f"alcohols={got} "
+               f"reply={str(r.get('reply'))[:40]}")
+        # v87 精确命中措辞: 52 度有货直说"52度"(非"52度附近")
+        r = await _recommend("看一款52度的酒。")
+        record("精确命中措辞: 52度直说(去'附近')",
+               "52度附近" not in str(r.get("reply"))
+               and "52度" in str(r.get("reply")),
+               str(r.get("reply"))[:40])
 
 
 class TestBPhrases:

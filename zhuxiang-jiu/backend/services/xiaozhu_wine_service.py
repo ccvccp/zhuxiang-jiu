@@ -48,8 +48,9 @@ _REVIEW_POSITIVE_WORDS = (
     "醇厚", "好喝", "满意", "清香", "回味", "层次",
 )
 
-# 度数/容量语境排除(预算解析防误吞 "42度/500ml")
-_NUM_TAIL_EXCLUDE = ("度", "°", "m", "毫升")
+# 度数/容量语境排除(预算解析防误吞 "42度/500ml";
+# v87 "的"入列——同音错识"42的"归度数不归预算)
+_NUM_TAIL_EXCLUDE = ("度", "°", "m", "毫升", "的")
 
 
 def extract_abv(text: str) -> float | None:
@@ -57,10 +58,14 @@ def extract_abv(text: str) -> float | None:
     ——度数完全被忽略): "56度" "42°" → 度数意向
 
     有效域 5~70(白酒/果酒域); "500ml"/"预算800元" 不误吞。
+    v87 同音容错(08:51:49 实证「看一款32的。」): ASR 把
+    "度"错识成"的"(du 同音高频)——"32的"按 32 度理解,
+    否则 abv=None 静默降级全热销, 度数确认语消失。
     """
     t = str(text or "")
     m = re.search(
-        r"(\d{1,2})(?:\s*[~\-至]\s*\d{1,2})?\s*[度°]", t)
+        r"(\d{1,2})(?:\s*[~\-至]\s*\d{1,2})?"
+        r"\s*[度°的]", t)
     if not m:
         return None
     v = float(m.group(1))
@@ -253,6 +258,7 @@ class XiaozhuWineService:
         # (生产 42 度指令自 v80 起一直失败, verify 只测了
         # 56 度的 ina 空路径未暴露)
         _abv_sorted = False
+        _abv_exact = False  # v87 精确命中(±1 有货)措辞去"附近"
         abv = extract_abv(text)
         if abv and not _named_hit:
             ina = [p for p in pool
@@ -262,6 +268,7 @@ class XiaozhuWineService:
                 pool = sorted(
                     ina, key=lambda p: (
                         p.get("hot_rank") or 99))
+                _abv_exact = True
             else:
                 # 无命中: 度数接近为主键+热销次键——
                 # 覆盖下方 hot_rank 排序(否则接近序被冲掉)
@@ -286,7 +293,11 @@ class XiaozhuWineService:
                 + f", {p.get('alcohol')}度 "
                 f"{p.get('price')} 元")
         scene_line = f"{scene}场景" if scene else "为您"
-        abv_line = f"{abv:g}度附近" if abv else ""
+        # v87: 精确命中(52度有货)直说"52度"; 无货才"附近"
+        # (56度→53 度场景)——用户精确要求却答"附近"是措辞债
+        abv_line = (
+            f"{abv:g}度" if (abv and _abv_exact)
+            else (f"{abv:g}度附近" if abv else ""))
         budget_line = (f"预算 {budget} 元内"
                        if budget else "")
         # v81 动态计数(指名直入 1 款/过滤后 1 款不再误称两款)

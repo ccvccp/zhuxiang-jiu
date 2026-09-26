@@ -197,7 +197,8 @@ class TestV83Pattern:
         sid = await _open()
         r = await _text(sid, "小竹，查一款42度的酒")
         record("集成: 查一款走 rule 轨(快+规范回复)",
-               "42度附近挑了" in str(r.get("reply")),
+               "42度" in str(r.get("reply"))
+               and "挑了" in str(r.get("reply")),
                f"{str(r.get('reply'))[:50]}")
 
 
