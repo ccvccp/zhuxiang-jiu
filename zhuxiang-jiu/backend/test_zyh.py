@@ -61,6 +61,17 @@ async def test_knowledge():
     record("工艺宪法条目在册", "craft_constitution" in ids)
     record("竹筒酒对立条目在册",
            "competitor_contrast" in ids)
+    # 七菌工艺叙事(2026-09-26 立项: SEED 8→11 条)
+    record("七菌工艺条目在册",
+           "seven_strain_fermentation" in ids)
+    record("羟基预处理条目在册",
+           "hydroxyl_pretreatment" in ids)
+    record("蒸馏陈化条目在册",
+           "precision_distillation_aging" in ids)
+    seven = await svc.get_knowledge("seven_strain_fermentation")
+    record("七菌条目内容锚定专利(L3 溯源)",
+           PATENT_ID in seven["item"]["content"],
+           f"content 前缀: {seven['item']['content'][:20]}")
     # 幂等: 重复播种零新增
     repo = ZyhRepository()
     again = await repo.seed_knowledge(KNOWLEDGE_SEED)
@@ -172,6 +183,26 @@ async def test_retrieval():
     record("原料检索命中",
            r.get("knowledgeId") == "raw_material",
            f"kid={r.get('knowledgeId')}")
+    # 七菌工艺叙事检索(2026-09-26 立项)
+    r = await svc.chat("七菌协同是怎么参与的？")
+    record("七菌专属问句召回+专利溯源",
+           r.get("knowledgeId") == "seven_strain_fermentation"
+           and PATENT_ID in str(r.get("citations")),
+           f"kid={r.get('knowledgeId')}")
+    r = await svc.chat("羟基自由基预处理是什么环节？")
+    record("预处理问句召回+专利溯源",
+           r.get("knowledgeId") == "hydroxyl_pretreatment"
+           and PATENT_ID in str(r.get("citations")),
+           f"kid={r.get('knowledgeId')}")
+    r = await svc.chat("陶坛陈化是怎么回事？")
+    record("蒸馏陈化问句召回+专利溯源",
+           r.get("knowledgeId") == "precision_distillation_aging"
+           and PATENT_ID in str(r.get("citations")),
+           f"kid={r.get('knowledgeId')}")
+    r = await svc.chat("竹奕酒是怎么发酵的有什么菌？")
+    record("泛发酵问句应答含七菌名单",
+           "香栓孔菌" in r.get("content", ""),
+           f"kid={r.get('knowledgeId')}")
     # 兜底(无命中)
     r = await svc.chat("今天天气怎么样啊")
     record("兜底话术(无命中非技术)",
@@ -266,8 +297,13 @@ async def test_mode():
         record("非暂停态 resume 409", False)
     except ValueError:
         record("非暂停态 resume 409", True)
-    # 小样本巡检(technicalAnswer 样本可能已累积——
-    # 断言至少 citationMissRate 依样本判定跳过)
+    # 小样本巡检(确定性口径): 先清零样本统计——此前用例的
+    # chat 调用会让 total/technicalAnswer 越过 _MIN_SAMPLE=10,
+    # 断言沦为"用例数量耦合"(七菌检索用例加入即暴露)
+    from repositories.zyh_repository import ZyhRepository
+    _repo = ZyhRepository()
+    _repo._mem.pop(_repo._k("stats:guard"), None)
+    _repo._mem.pop(_repo._k("stats:cache"), None)
     r = await ms.patrol()
     record("巡检小样本跳过(确定性口径)",
            len(r.get("skippedSmallSample") or []) >= 1,
