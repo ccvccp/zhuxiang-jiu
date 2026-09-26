@@ -374,6 +374,8 @@ class XiaozhuEvolutionService:
         phrases: dict = {}
         for c in cases:
             k = c.get("kind") or "unknown"
+            if k == "turn_score":
+                continue  # v92 评分流同表, 不入失败聚类
             by_kind[k] = by_kind.get(k, 0) + 1
             p = (c.get("rawText") or "")[:40]
             phrases[p] = phrases.get(p, 0) + 1
@@ -386,6 +388,114 @@ class XiaozhuEvolutionService:
                     for p, n in top],
                 "note": "top 短语建议新增指令 pattern"
                         "(人工审核入注册表——46号审批范式)"}
+
+    # --------------------------------------------------------
+    # v92 无感评分 V1(参数挖掘机 P0: 规则版 Reward——
+    # 复合公式 0.4·Task+0.3·Eff+0.3·Smooth−惩罚;
+    # 数据燃料就绪后升级 Bandit 在线优化, 护栏已有:
+    # 回归 9 套+灰度三态)
+    # --------------------------------------------------------
+    SCORE_KIND = "turn_score"
+
+    @staticmethod
+    def score_turn(turn: dict) -> dict:
+        """轮级无感评分(复合 Reward, 查询时零存储可算)"""
+        intent = str(turn.get("intent") or "")
+        track = str(turn.get("track") or "")
+        latency = float(turn.get("latencyMs") or 0)
+        # TaskSuccess 0.4: rule/指令完成=1, chat 理解=0.7,
+        # general/碎片/超时/未唤醒=0
+        task = 1.0
+        if intent in ("general", "not_woken") \
+                or track in ("fragment", "hook_timeout"):
+            task = 0.0
+        elif intent == "chat":
+            task = 0.7
+        # Efficiency 0.3: 3s 归一(3s→0.5 分)
+        eff = 1.0 / (1.0 + latency / 3000.0)
+        # Smoothness 0.3: 单轮扣分(碎片/超时/重复/负反馈)
+        pen = 0.0
+        if track in ("fragment", "hook_timeout"):
+            pen += 0.5
+        elif track == "repeat":
+            pen += 0.3
+        elif track == "negative":
+            pen += 0.7
+        smooth = max(0.0, 1.0 - pen)
+        reward = round(
+            0.4 * task + 0.3 * eff + 0.3 * smooth, 3)
+        return {"reward": reward,
+                "task": task,
+                "eff": round(eff, 3),
+                "smooth": smooth}
+
+    async def record_score(self, session: dict,
+                           turn: dict) -> None:
+        """轮级评分落流(同 failures 表, kind 区分——零
+        schema 改动; fail-soft)"""
+        try:
+            s = self.score_turn(turn)
+            record = {
+                "caseId": await self.repo._next_id(
+                    self.repo.TABLE_FAILURES),
+                "sessionId": session.get("sessionId"),
+                "memberId": session.get("memberId"),
+                "rawText": "",  # 评分流无语句语义
+                "kind": self.SCORE_KIND, "ts": ts(),
+                **s,
+                "intent": str(turn.get("intent") or ""),
+                "track": str(turn.get("track") or ""),
+                "latencyMs": float(
+                    turn.get("latencyMs") or 0),
+            }
+            await self.repo.save_record(
+                self.repo.TABLE_FAILURES, record)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_score_skip: %s", exc)
+
+    async def smoothness_report(
+            self, limit: int = 300) -> dict:
+        """无感日聚合(观测端点——Reward 均值+分项+扣分
+        计数: 参数敏感性报告的数据底座, 打断 SLA 基线
+        由此可收)"""
+        cases = await self.repo.list_records(
+            self.repo.TABLE_FAILURES, limit=limit)
+        scores = [c for c in cases
+                  if c.get("kind") == self.SCORE_KIND]
+        if not scores:
+            return {"success": True, "n": 0,
+                    "note": "暂无评分流(需一轮对话)"}
+        n = len(scores)
+        avg = sum(
+            float(c.get("reward") or 0)
+            for c in scores) / n
+        by_track: dict = {}
+        for c in scores:
+            t = str(c.get("track") or "") or "-"
+            by_track[t] = by_track.get(t, 0) + 1
+        slow = sorted(
+            scores, key=lambda c: -(c.get("latencyMs")
+                                   or 0))[:5]
+        return {
+            "success": True, "n": n,
+            "rewardAvg": round(avg, 3),
+            "taskAvg": round(sum(
+                float(c.get("task") or 0)
+                for c in scores) / n, 3),
+            "effAvg": round(sum(
+                float(c.get("eff") or 0)
+                for c in scores) / n, 3),
+            "smoothAvg": round(sum(
+                float(c.get("smooth") or 0)
+                for c in scores) / n, 3),
+            "byTrack": by_track,
+            "slowest": [
+                {"intent": c.get("intent"),
+                 "track": c.get("track"),
+                 "latencyMs": c.get("latencyMs")}
+                for c in slow],
+            "note": "reward 均值即无感体验基线; "
+                    "byTrack 扣分分布=参数敏感性数据"}
 
     # --------------------------------------------------------
     # ④ 共创指令

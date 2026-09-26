@@ -2075,12 +2075,14 @@ class XiaozhuService:
                     if turns else 0
                 await ev.award_command_done(
                     member_id, session["sessionId"], seq)
-            # 失败挖掘: 负反馈/重复
+            # 失败挖掘: 负反馈/重复/兜底
             kind = await ev.classify_turn(
                 session, raw_text, member_id, result)
             if kind:
                 await ev.record_failure(
                     session, raw_text, kind, member_id)
+            # v92 无感评分落流(P0: 复合 Reward, fail-soft)
+            await ev.record_score(session, result)
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice48_evolve_skip: %s", exc)
 

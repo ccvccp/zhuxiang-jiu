@@ -509,6 +509,23 @@ async def get_evolution_failures(
         raise _handle(e) from e
 
 
+@router.get("/evolution/smoothness")
+async def get_evolution_smoothness(
+        limit: int = 300):
+    """v92 无感评分聚合(观测面——参数挖掘机 P0:
+    复合 Reward 均值/分项/扣分分布, 无感体验基线+
+    参数敏感性数据底座)"""
+    try:
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+        return await XiaozhuEvolutionService(
+        ).smoothness_report(
+            limit=min(max(limit, 10), 1000))
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: int):
     """会话视图(含轮次历史——脱敏后文本)"""
