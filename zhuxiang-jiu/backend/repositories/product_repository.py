@@ -280,7 +280,9 @@ _INITIAL_PRODUCTS = [
         "便携系列", 42, "100ml", 88, 128,
         tags=["便携"], scenes=["老友小聚"],
         attributes_extra={"taste": "绵柔顺喉·小瓶便携"},
-        description="42°便携小瓶100ml，随行畅饮，自饮试饮首选。",
+        description=("42°便携小瓶100ml。整竹入酿——竹笋、鲜竹茎、竹叶，"
+                     "古法酿造配多菌共酿专用酒曲，竹香清雅、绵柔顺喉，"
+                     "随行畅饮、自饮试饮首选。"),
         created_at="2026-08-10T00:00:00+00:00",
         sales_monthly=2400, sales_total=28800, rating_avg=4.6, rating_count=580,
         featured=False, hot_rank=3,
@@ -294,7 +296,9 @@ _INITIAL_PRODUCTS = [
         "便携系列", 52, "100ml", 98, 138,
         tags=["便携"], scenes=["老友小聚"],
         attributes_extra={"taste": "绵柔醇厚·小瓶便携"},
-        description="52°便携小瓶100ml，绵柔醇厚，随行畅饮之选。",
+        description=("52°便携小瓶100ml。整竹入酿——竹笋、鲜竹茎、竹叶，"
+                     "古法酿造配多菌共酿专用酒曲，竹香馥郁、醇厚回甘，"
+                     "随行小聚、馈赠皆宜。"),
         created_at="2026-09-26T00:00:00+00:00",
         sales_monthly=0, sales_total=0, rating_avg=5.0, rating_count=0,
         featured=False, hot_rank=0,

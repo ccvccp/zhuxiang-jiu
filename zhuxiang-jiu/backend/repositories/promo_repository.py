@@ -112,6 +112,12 @@ EFFICACY_CLAIM_WORDS = (
     "消除紧张", "缓解焦虑", "解忧", "消愁", "助眠", "安神",
     "提高体力", "增加体力", "滋补", "保健",
 )
+# 科研机构背书禁令(2026-09-26 品牌方指令: 宣传物料不得出现
+# 「华南理工」——竹子酒资料.pdf 中的高校合作表述不对外使用;
+# 前缀匹配可覆盖"华南理工大学"等变体)
+RESEARCH_BAN_WORDS = (
+    "华南理工",
+)
 # 复用 attract 合规口径: 极限词/警示语/年龄提示/通过线
 from repositories.attract_repository import (  # noqa: E402
     BANNED_WORDS, REQUIRED_DISCLAIMER, REQUIRED_AGE_TIP,

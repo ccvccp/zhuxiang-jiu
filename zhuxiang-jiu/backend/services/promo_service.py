@@ -35,6 +35,7 @@ from repositories.promo_repository import (
     DECISION_AUTO_ENGAGE, DECISION_MANUAL_QUEUE, DECISION_PASS,
     DECISION_AUTO_ENGAGE_SCORE, DECISION_MANUAL_QUEUE_SCORE,
     DRINKING_ACTION_WORDS, AUTHORITY_BACKING_WORDS, EFFICACY_CLAIM_WORDS,
+    RESEARCH_BAN_WORDS,
     BANNED_WORDS, REQUIRED_DISCLAIMER, REQUIRED_AGE_TIP,
     PROMO_COMPLIANCE_PASS_SCORE, PROMO_HITL_FLOOR,
     PROMO_DAILY_CAP, PROMO_HOTSPOT_COOLDOWN_LIMIT,
@@ -193,7 +194,8 @@ class PromoService:
         text = body or ""
         hard_fail = ([w for w in DRINKING_ACTION_WORDS if w in text]
                      + [w for w in AUTHORITY_BACKING_WORDS if w in text]
-                     + [w for w in EFFICACY_CLAIM_WORDS if w in text])
+                     + [w for w in EFFICACY_CLAIM_WORDS if w in text]
+                     + [w for w in RESEARCH_BAN_WORDS if w in text])
         violations = list(hard_fail)
         score = 100
         banned_hits = ([w for w in BANNED_WORDS if w in text]

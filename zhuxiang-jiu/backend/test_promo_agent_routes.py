@@ -137,6 +137,15 @@ class TestComplianceGate:
             record(f"闸门-硬拒·{label}", word in result["hardFail"],
                    f"hardFail={result['hardFail']}")
 
+        # 一审硬规则: 科研机构背书禁令(品牌方指令: 宣传不出现华南理工;
+        # 前缀匹配须覆盖"华南理工大学"全称变体)
+        for word, label in (("华南理工", "高校背书禁令"),
+                            ("华南理工大学", "高校背书全称变体")):
+            body = f"由{word}技术支持。{REQUIRED_DISCLAIMER} {REQUIRED_AGE_TIP}周岁"
+            result = gate(body)
+            record(f"闸门-硬拒·{label}", "华南理工" in result["hardFail"],
+                   f"hardFail={result['hardFail']}")
+
         # 二审评分: 极限词 + 缺项
         result = gate("史上最好喝的酒!")
         record("闸门-极限词+双缺项(<60拒)",
