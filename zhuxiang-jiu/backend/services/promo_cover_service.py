@@ -111,10 +111,14 @@ class PromoCoverService:
         draw.rectangle([72, y, W - 72, y + 6], fill=C_GOLD)
         y += 56
 
-        # 要点句(正文前 60 字, 剥除 emoji, 弱化为副文案)
-        body = _EMOJI_RE.sub(
+        # 要点句(正文前 60 字, 剥除 emoji, 弱化为副文案;
+        # 截断加省略号防突兀)
+        body_raw = _EMOJI_RE.sub(
             "", str(content.get("body") or "")
-            .replace("\n", " "))[:60].strip()
+            .replace("\n", " ")).strip()
+        body = body_raw[:60]
+        if len(body_raw) > 60:
+            body += "…"
         sub_font = _font(40, bold=False)
         for ln in _wrap(draw, body, sub_font, W - 144)[:4]:
             draw.text((72, y), ln, font=sub_font, fill=C_TEXT)

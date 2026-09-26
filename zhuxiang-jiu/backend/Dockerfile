@@ -34,6 +34,8 @@ COPY repositories   /app/repositories
 COPY routes         /app/routes
 COPY services       /app/services
 COPY scripts        /app/scripts
+# 品牌资源(36号封面渲染 Noto Sans SC 开源字体 OFL, ~32MB)
+COPY assets         /app/assets
 # 静态数据资源(时空情景感知: ip2region.xdb 离线 IP 库 ~11MB)
 COPY data           /app/data
 
