@@ -19,7 +19,8 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import (APIRouter, Depends, Header,
+                     HTTPException, Request)
 from pydantic import BaseModel, Field
 
 from core.auth import AuthError, TokenExpiredError
@@ -181,9 +182,50 @@ def _get_token_from_current(member: dict, authorization: str | None) -> str:
 # 公开端点
 # ============================================================
 
+async def _attach_click_attribution(
+        request: Request, result: dict) -> None:
+    """引流注册自动归并(attract P0 修复3, fail-soft)
+
+    2026-09-26 联合检测结论: /api/attract/attach 零调用
+    (前端从未回传)——引流漏斗归因断裂。本修复: /r/{code}
+    302 落地页 URL 携 clickId → 同源注册请求 Referer 携
+    完整 URL → 注册成功后端自动归并(click→traffic lead
+    +promotion 绑定+归因表), 前端零改造。
+    """
+    try:
+        member_id = result.get("memberId")
+        if not member_id:
+            return
+        ref = request.headers.get("referer") or ""
+        if "clickId=" not in ref:
+            return
+        from urllib.parse import parse_qs, urlparse
+        qs = parse_qs(urlparse(ref).query)
+        click_id = (qs.get("clickId") or [None])[0]
+        if not click_id:
+            return
+        from services.attract_service import AttractService
+        merged = await AttractService().attach_registration(
+            click_id=int(click_id),
+            member_id=int(member_id))
+        logger.info(
+            "attract_auto_attached memberId=%s clickId=%s "
+            "attributionId=%s",
+            member_id, click_id,
+            (merged or {}).get("attributionId"))
+    except Exception as exc:  # noqa: BLE001
+        # 归并失败不阻断注册主链(幂等/业务拒绝属正常)
+        logger.info("attract_auto_attach_skip: %s", exc)
+
+
 @router.post("/api/auth/register", tags=["用户认证模块"])
-async def register(data: RegisterRequest):
-    """手机号注册(返回 JWT 双令牌)"""
+async def register(data: RegisterRequest,
+                   request: Request):
+    """手机号注册(返回 JWT 双令牌;
+
+    P0 修复3: Referer 携 clickId 时注册成功后自动完成
+    引流归并——归因链路从前端回传改为后端零侵入闭环)
+    """
     try:
         result = await _service.register(
             phone=data.phone,
@@ -192,6 +234,7 @@ async def register(data: RegisterRequest):
             birthdate=data.birthdate,
             age_confirmed=data.ageConfirmed,
         )
+        await _attach_click_attribution(request, result)
         return result
     except Exception as exc:
         _handle_auth_error(exc)

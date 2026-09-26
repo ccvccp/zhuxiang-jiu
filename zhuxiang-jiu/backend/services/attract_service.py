@@ -743,7 +743,15 @@ class AttractService:
         return await self.repo.save_content(content)
 
     async def generate_sitemap(self) -> str:
-        """输出 sitemap.xml(已发布内容页 + 落地页)"""
+        """输出 sitemap.xml(已发布内容页——P0 修复:
+        短链 /r/* 不入 sitemap)
+
+        2026-09-26 取证: 短链进 sitemap 导致爬虫狂刷
+        (1667 点击 99.88% 为 PetalBot/SERanking 爬虫,
+        referer=sitemap.xml)——短链是给真人渠道(博主贴/
+        海报)分发的追踪码, 不是 SEO 页面; 移除后配合
+        robots Disallow 双保险
+        """
         urls = [f"{SITE_BASE_URL}/", f"{SITE_BASE_URL}/products",
                 f"{SITE_BASE_URL}/about"]
         contents = await self.repo.list_contents(
@@ -752,9 +760,6 @@ class AttractService:
             cid = c.get("contentId")
             if cid:
                 urls.append(f"{SITE_BASE_URL}/article/{cid}")
-        links = await self.repo.list_short_links(active=True, limit=1000)
-        for l in links:
-            urls.append(f"{SITE_BASE_URL}/r/{l['code']}")
         entries = "".join(
             f"  <url><loc>{u}</loc><lastmod>"
             f"{_now_iso()[:10]}</lastmod></url>\n" for u in urls)
@@ -763,9 +768,11 @@ class AttractService:
                 f"{entries}</urlset>")
 
     async def generate_robots(self) -> str:
-        """输出 robots.txt(全站允许 + sitemap指引)"""
+        """输出 robots.txt(P0 修复: Disallow /r/ 短链
+        + /api/——已收录短链爬虫逐步停抓, 归因底座去噪)"""
         return ("User-agent: *\n"
-                "Allow: /\n\n"
+                "Disallow: /r/\n"
+                "Disallow: /api/\n\n"
                 f"Sitemap: {SITE_BASE_URL}/sitemap.xml\n")
 
     # ============================================================

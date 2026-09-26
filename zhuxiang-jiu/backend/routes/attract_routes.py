@@ -46,6 +46,20 @@ def _require_admin(x_role: str | None):
         raise HTTPException(status_code=403, detail="需要管理员权限")
 
 
+def _client_ip(request: Request) -> str:
+    """真实客户端 IP(P0 修复: 2026-09-26 取证 1667 点击
+    IP 全为 172.18.0.1——request.client.host 取的是 nginx
+    反代 TCP 对端; nginx 已透传 X-Forwarded-For
+    (zxjiu.conf 三处), 此处优先取 XFF 首段, 无头回退
+    TCP 对端(本地直连/健康检查场景)"""
+    xff = request.headers.get("x-forwarded-for") or ""
+    first = xff.split(",")[0].strip() if xff else ""
+    if first:
+        return first
+    return (request.client.host
+            if request.client else "")
+
+
 def _handle(exc: Exception):
     if isinstance(exc, KeyError):
         msg = str(exc) if str(exc) else "资源不存在"
@@ -154,7 +168,7 @@ async def short_link_redirect(
         result = await _service.resolve_click(
             code=code, utm_source=utm_source, utm_medium=utm_medium,
             utm_campaign=utm_campaign,
-            ip=request.client.host if request.client else "",
+            ip=_client_ip(request),
             user_agent=request.headers.get("user-agent", ""),
             referer=request.headers.get("referer", ""))
         # 前端约定: 落地页携带 clickId 参数, 注册时回传完成归并
