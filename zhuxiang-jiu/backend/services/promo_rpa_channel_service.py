@@ -67,6 +67,10 @@ class PromoRpaChannelService:
                 "shortCode": c.get("shortCode", ""),
                 "complianceScore": c.get("complianceScore"),
                 "publishedAt": c.get("publishedAt", ""),
+                # 确定性封面卡片(RPA 下载后自动上传——图文
+                # 笔记强制配图的无人干预供给)
+                "coverUrl": (f"/api/promo/rpa/"
+                             f"{c.get('contentId')}/cover.png"),
             })
         return rows
 

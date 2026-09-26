@@ -584,6 +584,28 @@ async def rpa_pending_list(
         _handle(e)
 
 
+@router.get("/api/promo/rpa/{content_id}/cover.png",
+            tags=["AI智能推广模块"])
+async def rpa_cover(content_id: int):
+    """笔记封面品牌卡片(确定性 Pillow 渲染——图文笔记强制
+    要求配图, RPA 下载后自动上传; 公开: 封面即发布内容)"""
+    try:
+        from repositories.promo_repository import (
+            PromoRepository,
+        )
+        from services.promo_cover_service import (
+            PromoCoverService,
+        )
+        content = await PromoRepository().get_content(content_id)
+        if content is None:
+            raise KeyError(f"内容不存在(contentId={content_id})")
+        path = PromoCoverService().ensure_cover(content)
+        from fastapi.responses import FileResponse
+        return FileResponse(str(path), media_type="image/png")
+    except Exception as e:
+        _handle(e)
+
+
 class RpaReceiptRequest(PydBaseModel):
     noteUrl: str = Field("", description="发布成功后的笔记 URL(失败登记可空)")
     noteId: str = Field("", max_length=50, description="笔记 ID(可选)")
