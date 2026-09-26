@@ -143,12 +143,15 @@ def _fetch_real(platform: str) -> list[dict] | None:
     return items
 
 
-# 条目列表字段候选(聚合 API 通行格式: 按序探测第一个列表型字段)
-_ITEM_LIST_KEYS = ("data", "list", "items", "newslist", "result")
+# 条目列表字段候选(聚合 API 通行格式: 按序探测第一个列表型字段;
+# cards=百度 board 公开端点 data.cards 嵌套容器)
+_ITEM_LIST_KEYS = ("data", "list", "items", "newslist",
+                   "result", "cards")
 # 标题/摘要/热度字段别名(各服务命名差异兼容)
 _TITLE_KEYS = ("title", "word", "name", "hotword")
 _SUMMARY_KEYS = ("summary", "desc", "description")
-_HEAT_KEYS = ("hot", "heat", "hotvalue", "num", "score")
+_HEAT_KEYS = ("hot", "heat", "hotvalue", "num", "score",
+              "hotScore")
 # 未知热度/速度/持续时长缺省(评分公式容忍: velocity 0.5 中位,
 # persistence 12h 常规热点水位, 保持与 mock 轨字段口径一致)
 _DEFAULT_VELOCITY = 0.5
@@ -192,6 +195,14 @@ def _parse_hotspot_items(platform: str, body) -> list[dict]:
                 title = value.strip()
                 break
         if not title:
+            # 百度 board 深层容器行(cards[].content[] 无标题,
+            # 内层 content 才是条目): 递归展开后继续
+            for list_field in ("content", "cards", "items"):
+                sub = row.get(list_field)
+                if isinstance(sub, list) and sub:
+                    items.extend(
+                        _parse_hotspot_items(platform, sub))
+                    break
             continue   # 无标题条目无法指纹去重, 跳过
         summary = ""
         for field in _SUMMARY_KEYS:
@@ -211,6 +222,14 @@ def _parse_hotspot_items(platform: str, body) -> list[dict]:
                     break
             except (TypeError, ValueError):
                 continue
+        # 榜单名次热度估算(百度 board 端点无热度字段): 名次即
+        # 热度代理——线性映射 480 万(榜首)→30 万(榜尾), 与
+        # HEAT_BASE_WAN=500 万满分口径对齐
+        if not heat:
+            idx = row.get("index")
+            if isinstance(idx, (int, float)):
+                heat = round(
+                    max(30.0, 480.0 - 9.0 * float(idx)), 1)
         # 原始计数口径(如微博 hot 值)与万级口径差异: >500 视为原始
         # 计数, 归一到万(评分层 HEAT_BASE_WAN=500 万满分)
         if heat > 100_000:
