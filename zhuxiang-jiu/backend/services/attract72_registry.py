@@ -209,6 +209,17 @@ DWELL_BOUNCE_SECONDS = 15.0
 # 不含 PII 铁律)
 FINGERPRINT_LENGTH = 16
 
+
+def fingerprint_of(user_agent: str) -> str:
+    """UA 哈希脱敏指纹(P1 enrich 同算法——
+    v1.0 挂点(auth 注册/attract 下单)与点击
+    侧指纹一致性全靠此唯一实现)"""
+    import hashlib
+    return hashlib.sha256(
+        (user_agent or "").encode(
+            "utf-8", "replace")).hexdigest()[
+        :FINGERPRINT_LENGTH]
+
 # ============================================================
 # P1 外部信号域(感知层——雷达只读消费铁律)
 # ============================================================

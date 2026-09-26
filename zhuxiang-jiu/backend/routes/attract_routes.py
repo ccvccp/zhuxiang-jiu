@@ -26,11 +26,15 @@
     - 海报(2):   poster生成 / posters列表(P2)
 """
 
+import logging
+
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.attract_service import AttractService
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -58,6 +62,78 @@ def _client_ip(request: Request) -> str:
         return first
     return (request.client.host
             if request.client else "")
+
+
+async def _attract72_on_click(
+        click_id: int, code: str,
+        user_agent: str, utm_text: str) -> str:
+    """72 号观测面点击三连钩(P1 接入修复, fail-soft)
+
+    2026-09-26 联合检测结论: 72 号孤岛(intent_snapshots=0,
+    真实流量零触达)——本钩把 v1.0 真实点击流喂给 72 号:
+      ① P1 enrich_click_intent: 意图快照(utm 渠道自述
+         入词表密度)
+      ② P4 decide_landing: 变体决策(impressions 计数)
+      ③ P4 record_visit: 设备记忆累积+反作弊频次隔离
+    观测面快环(off 档常开——72 号自身灰度设计),
+    KILL 秒级制动冻结; 任何异常不阻断 v1.0 主链。
+    Returns: 变体名(空=跳过/异常)
+    """
+    try:
+        from services.attract72_registry import (
+            fingerprint_of, is_kill,
+        )
+        if is_kill():
+            return ""
+        from services.attract72_p1_service import (
+            Attract72P1Service,
+        )
+        from services.attract72_p4_service import (
+            Attract72P4Service,
+        )
+        fp = fingerprint_of(user_agent)
+        await Attract72P1Service().enrich_click_intent(
+            click_id=click_id,
+            user_agent=user_agent,
+            text=utm_text)
+        p4 = Attract72P4Service()
+        landing = await p4.decide_landing(
+            code=code, fingerprint=fp)
+        await p4.record_visit(fingerprint=fp)
+        return str(landing.get("variant") or "")
+    except Exception as exc:  # noqa: BLE001
+        logger.info("attract72_click_hook_skip: %s", exc)
+        return ""
+
+
+async def _attract72_on_order(click_id: int) -> None:
+    """72 号下单转化回写钩(P4 记忆 converted=True,
+    fail-soft)——指纹取自点击时 UA(注册/下单同设备
+    与点击指纹天然一致)"""
+    try:
+        from services.attract72_registry import (
+            fingerprint_of, is_kill,
+        )
+        if is_kill():
+            return
+        from repositories.attract_repository import (
+            AttractRepository,
+        )
+        click = await AttractRepository() \
+            .get_click(click_id)
+        if not click:
+            return
+        fp = fingerprint_of(
+            click.get("userAgent") or "")
+        if not fp:
+            return
+        from services.attract72_p4_service import (
+            Attract72P4Service,
+        )
+        await Attract72P4Service() \
+            .record_visit(fp, converted=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("attract72_order_hook_skip: %s", exc)
 
 
 def _handle(exc: Exception):
@@ -171,9 +247,22 @@ async def short_link_redirect(
             ip=_client_ip(request),
             user_agent=request.headers.get("user-agent", ""),
             referer=request.headers.get("referer", ""))
-        # 前端约定: 落地页携带 clickId 参数, 注册时回传完成归并
+        # P1 修复: 72 号观测面三连钩(意图快照/变体决策/
+        # 设备记忆——孤岛模块首次吃到 v1.0 真实点击流)
+        variant = await _attract72_on_click(
+            click_id=result["clickId"], code=code,
+            user_agent=request.headers.get("user-agent", ""),
+            utm_text=" ".join(
+                f"{utm_source} {utm_medium} "
+                f"{utm_campaign}".split()))
+        # 前端约定: 落地页携带 clickId 参数, 注册时回传完成归并;
+        # v72=变体决策留痕(前端暂不识别自然忽略, 渲染
+        # 待前端任务接入——先积累 impressions 数据)
         sep = "&" if "?" in result["landingPath"] else "?"
-        target = f"{result['landingPath']}{sep}clickId={result['clickId']}"
+        target = (f"{result['landingPath']}{sep}"
+                  f"clickId={result['clickId']}")
+        if variant:
+            target += f"&v72={variant}"
         return RedirectResponse(url=target, status_code=302)
     except Exception as e:
         _handle(e)
@@ -204,6 +293,8 @@ async def attach_order(
         result = await _service.attach_order(
             click_id=data.clickId, order_id=data.orderId,
             order_amount=data.orderAmount, commission=data.commission)
+        # P1 修复: 下单转化回写 72 号 P4 记忆(converted)
+        await _attract72_on_order(data.clickId)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

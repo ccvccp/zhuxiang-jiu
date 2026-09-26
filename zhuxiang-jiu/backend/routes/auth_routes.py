@@ -213,6 +213,21 @@ async def _attach_click_attribution(
             "attributionId=%s",
             member_id, click_id,
             (merged or {}).get("attributionId"))
+        # P1 修复: 注册归属回写 72 号 P4 跨会话记忆
+        # (registered=True 归属标记——指纹与点击时同 UA
+        # 哈希天然一致)
+        from services.attract72_registry import (
+            fingerprint_of, is_kill,
+        )
+        if not is_kill():
+            fp = fingerprint_of(
+                request.headers.get("user-agent", ""))
+            if fp:
+                from services.attract72_p4_service import (
+                    Attract72P4Service,
+                )
+                await Attract72P4Service() \
+                    .record_visit(fp, registered=True)
     except Exception as exc:  # noqa: BLE001
         # 归并失败不阻断注册主链(幂等/业务拒绝属正常)
         logger.info("attract_auto_attach_skip: %s", exc)
