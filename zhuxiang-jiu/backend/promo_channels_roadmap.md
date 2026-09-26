@@ -55,10 +55,38 @@
 
 ```
 合规即时:  微博(token中) + 百度SEO收录(已通)
-RPA 可选:  小红书(图文最匹配) + 视频号(需视频线)
+RPA 已立项: 小红书(图文最匹配——通道已实现, 见第五节 SOP)
 资质后置:  抖音(企业主体) + 公众号(认证服务号, 建议新增)
 永久放弃:  朋友圈
 ```
 
 灰度闸门（日上限 5 + 强制人工 review + 合规过滤）对任何新通道
 自动生效——新增通道只需实现 `publish_to_platform` 统一回执。
+
+## 五、小红书 RPA 发布通道 SOP（已立项落地）
+
+**架构**（promo_rpa_channel_service.py + channel 层分流）：
+发布队列出队时小红书内容挂 `rpa_pending` 回执（不入
+mock_fallback）→ `GET /api/promo/rpa/pending` 列待发布清单
+→ 对话内 browser agent 执行创作者中心发布 →
+`POST /api/promo/rpa/{contentId}/receipt` 登记回执
+（成功=笔记 URL，失败=error 留痕保留重试）。
+
+**操作规程**（对用户说「发布小红书待发内容」触发）：
+1. 拉清单：`GET /api/promo/rpa/pending`（X-Role: admin）
+2. 无内容 → 汇报"无待发布"结束
+3. browser agent 打开 creator.xiaohongshu.com：
+   - 未登录 → 移交用户扫码（首次一次，之后登录态持久）
+   - 已登录 → 继续
+4. 逐条发布：发布页填 **清单原文**（标题/正文/话题——
+   RPA 层不改写文案，合规责任留在三审闸门），图文类型，
+   发布成功后从页面取笔记 URL
+5. 逐条登记回执（成功 noteUrl / 失败 error）
+6. 汇报发布结果（清单→成功 URL/失败原因）
+
+**风控合规**：
+- 只有通过强制人工 review 的内容才可能进入清单（未过审
+  内容在闸门处已被拦）
+- 日上限 5 条由队列闸门保证——RPA 单次会话最多消费当日余量
+- 低频 + browser agent 拟人操作，规避平台反自动化检测
+- 铁律：不做协议逆向；发布文本与过审内容逐字一致

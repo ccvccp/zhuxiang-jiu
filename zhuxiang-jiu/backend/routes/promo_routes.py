@@ -563,6 +563,60 @@ async def report_platform(
         _handle(e)
 
 
+# ============================================================
+# RPA 发布通道(小红书创作者中心浏览器自动化——官方无发布 API)
+# ============================================================
+
+@router.get("/api/promo/rpa/pending", tags=["AI智能推广模块"])
+async def rpa_pending_list(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """RPA 待发布清单(出队后挂 rpa_pending 回执的内容——
+    供浏览器自动化通道逐条消费)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_rpa_channel_service import (
+            PromoRpaChannelService,
+        )
+        rows = await PromoRpaChannelService().list_pending()
+        return {"success": True, "data": rows, "count": len(rows)}
+    except Exception as e:
+        _handle(e)
+
+
+class RpaReceiptRequest(PydBaseModel):
+    noteUrl: str = Field("", description="发布成功后的笔记 URL(失败登记可空)")
+    noteId: str = Field("", max_length=50, description="笔记 ID(可选)")
+    error: str = Field("", max_length=200, description="失败原因(noteUrl 为空时生效)")
+
+
+@router.post("/api/promo/rpa/{content_id}/receipt",
+             tags=["AI智能推广模块"])
+async def rpa_receipt(
+    content_id: int,
+    data: RpaReceiptRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """RPA 发布回执登记(浏览器自动化执行后闭环:
+    noteUrl 有值=发布成功(rpa+URL), 空=失败留痕保留重试)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_rpa_channel_service import (
+            PromoRpaChannelService,
+        )
+        svc = PromoRpaChannelService()
+        if str(data.noteUrl or "").strip():
+            result = await svc.mark_published(
+                content_id, data.noteUrl, data.noteId)
+        else:
+            result = await svc.mark_failed(content_id, data.error)
+        return {"success": True, "data": {
+            "contentId": content_id,
+            "receipt": result.get("receipt")}}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/promo/report/content-group/{group_id}", tags=["AI智能推广模块"])
 async def report_content_group(
     group_id: int,

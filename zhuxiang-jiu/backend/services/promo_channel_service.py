@@ -36,6 +36,12 @@ CHANNEL_MODE_REAL = "real"
 CHANNEL_MODE_MOCK = "mock"
 # 通道未配置/失败回退的 mock 回执标记(可观测降级)
 CHANNEL_MODE_MOCK_FALLBACK = "mock_fallback"
+# RPA 通道平台集(官方无发布 API——小红书创作者中心网页版
+# 浏览器自动化发布, 2026-09-26 立项): 无凭证时回 rpa_pending
+# 回执, 由对话内 browser agent 执行 + 回执登记端点闭环
+CHANNEL_MODE_RPA_PENDING = "rpa_pending"
+CHANNEL_MODE_RPA = "rpa"   # RPA 执行完成态(回执登记成功)
+RPA_PLATFORMS = {"xiaohongshu"}
 
 # ============================================================
 # 平台认证风格(2026-09-02 实测校准)
@@ -205,6 +211,13 @@ class PromoChannelService:
             return mock_receipt
         key = channel_key(platform)
         if not key:
+            if platform in RPA_PLATFORMS:
+                # RPA 通道平台无 API 凭证概念(官方无发布 API)——
+                # 出队后进入 RPA 待发布清单, 浏览器自动化执行
+                mock_receipt["mode"] = CHANNEL_MODE_RPA_PENDING
+                mock_receipt["error"] = (
+                    "待 RPA 通道执行(创作者中心浏览器发布)")
+                return mock_receipt
             # real 模式但该平台未配置凭证 → 可观测回退
             mock_receipt["mode"] = CHANNEL_MODE_MOCK_FALLBACK
             mock_receipt["error"] = (f"通道凭证未配置(PROMO_CHANNEL_"
