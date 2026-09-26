@@ -140,6 +140,15 @@ class PromoCoverService:
         draw.text((72, H - 72), "点击主页链接了解详情",
                   font=foot_font, fill=C_MUTED)
 
+        # IP 形象角标(竹香酒IP·金鹿瑞兽, 右下角品牌资产;
+        # 素材缺失时静默跳过不阻断渲染)
+        ip_path = (Path(__file__).resolve().parent.parent
+                   / "assets" / "ip" / "ip-square.png")
+        if ip_path.exists():
+            badge = Image.open(ip_path).convert("RGBA")
+            badge = badge.resize((160, 160), Image.LANCZOS)
+            img.paste(badge, (W - 72 - 160, H - 72 - 160), badge)
+
         path = self.cover_path(int(content.get("contentId") or 0))
         img.save(path, "PNG")
         logger.info("promo_cover_rendered content=%s -> %s",
