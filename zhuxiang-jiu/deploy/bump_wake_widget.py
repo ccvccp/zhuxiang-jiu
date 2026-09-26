@@ -388,13 +388,27 @@ v=83 -> v=84: 复测四修(07:25~07:30 实证)——①D "查一款"
     →硬重置重开(30s 退避, 对齐 widget AHM 范式——02:48
     rms=4 纯静音段+07:25:59 唤醒后说话空转写两轮实证,
     上轮遗留待修项); widget v=83 -> v=84
+v=84 -> v=88: 同音容错+ACK 抢占——①ASR"度"错识"的"
+    (du 同音, 08:51:49 实证「看一款32的。」) extract_abv
+    后缀 [度°的] 容错+度数确认语恢复(32的→为您32度附近
+    挑了)+_NUM_TAIL_EXCLUDE 加"的"防预算双吞; ②精确命中
+    措辞(52度有货直说"52度"去"附近", 无货才附近); ③指名
+    ×预算 kw 污染修复(_extract_product_kw 剥预算表达);
+    ④member 窗 299/300/301 临界用例固化(后端<300 严格,
+    前端 1s 缝隙记优化池); ⑤ACK 抢占(流式并发范式高优先级
+    即时反馈): setPending 提交即播预缓存「好的」(单块/
+    文本轨全覆盖——此前仅多块流水线 gap), 复用 ttsGapSrc
+    挂载播报首片让位现成+gapPlay S.ttsGapSrc 防重不双播;
+    C++ RT 架构对照结论: 环形缓冲 2.5s/中断令牌 ctl/
+    barge-in/FLUSH 四链路 X5 平台均已有等效实现(物理
+    边界内不做 RT 重构); widget v=84 -> v=88
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=83"
-NEW = "src=/js/voice-wake-widget.js?v=84"
+OLD = "src=/js/voice-wake-widget.js?v=84"
+NEW = "src=/js/voice-wake-widget.js?v=88"
 
 
 def main():

@@ -1431,6 +1431,34 @@ function setPending(on) {
   if (on) {
     S.pendingAt = Date.now(); /* 看门狗驻留计时 */
     smT("processing", "pending");  /* v82 影子镜像 */
+    /* v88 ACK 抢占(流式并发范式"高优先级即时反馈"): 所有
+       轮次提交立即播预缓存「好的」(单块/文本轨全覆盖——
+       此前仅多块流水线 gap 音覆盖), 提交→首声体感 ~100ms;
+       复用 ttsGapSrc 挂载——播报首片让位逻辑现成,
+       speakCloud 的 gap 播放已有 S.ttsGapSrc 防重 */
+    try {
+      if (!S.ttsPlaying) {
+        var ctx = S.ttsPlayCtx || ttsPlayCtx();
+        var playAck = function (d) {
+          if (!d || !S.pending || S.ttsPlaying
+              || S.ttsGapSrc) { return; }
+          var g = ctx.createBufferSource();
+          g.buffer = d;
+          g.connect(ctx.destination);
+          S.ttsGapSrc = g;
+          g.onended = function () {
+            if (S.ttsGapSrc === g) { S.ttsGapSrc = null; }
+          };
+          g.start();
+        };
+        var g0 = decGet("好的");
+        if (g0) { playAck(g0); }
+        else {
+          var gb = packedGet("好的");
+          if (gb) { ttsDecode(ctx, gb).then(playAck); }
+        }
+      }
+    } catch (e) { /* ACK 失败静默不阻断 */ }
   }
   /* v82-C PROCESSING 看门狗(全双工范式"每态超时回退"):
      网络黑洞卡 pending → 15s 回退聆听+可感知提示
@@ -2494,9 +2522,11 @@ function speakCloud(text, bubbleEl, mood) {
   if (chunks.length > 1) {
     /* 首包过渡音: 多块流水线才播预缓存「好的」抢跑, 为
        首子句合成买 ~0.5s 体感; 正文首块出声即让位;
-       P2·O3: decGet 旁路命中零 decode, 未命中解码后回填 */
+       P2·O3: decGet 旁路命中零 decode, 未命中解码后回填;
+       v88 防重: ACK 抢占(setPending)已在播则不双播 */
     var gapPlay = function (d) {
-      if (!d || S.ttsAbort !== ctl || S.ttsCur) return;
+      if (!d || S.ttsAbort !== ctl || S.ttsCur
+          || S.ttsGapSrc) return;
       var g = ctx.createBufferSource();
       g.buffer = d; g.connect(ctx.destination);
       S.ttsGapSrc = g;
