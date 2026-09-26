@@ -244,6 +244,74 @@ class TestKankanPhrases:
                kw == "竹香珍藏", repr(kw))
 
 
+class TestIScoreTelemetry:
+    async def run(self):
+        print("[I 评分埋点摊平(v92-P0b)]")
+        from repositories.store import reset_store
+        from repositories.xiaozhu_repository import (
+            Xiaozhu48Repository,
+        )
+        from services.xiaozhu_service import XiaozhuService
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+
+        async def _last_score():
+            recs = await Xiaozhu48Repository().list_records(
+                Xiaozhu48Repository.TABLE_FAILURES, limit=500)
+            scores = [r for r in recs
+                      if r.get("kind") == "turn_score"]
+            return (scores or [{}])[-1]
+
+        reset_store()
+        sid = (await XiaozhuService()
+               .open_session(1))["sessionId"]
+        await XiaozhuService().handle_text(
+            sid, "小竹，选一款42度的酒")
+        sc = await _last_score()
+        # 注: 本地内存态 rule 轮亦可 <0.05ms(无网络),
+        # latencyMs round 后 0.0 合法——intent 非空 +
+        # track 分轨才是摊平生效证据
+        record("rule 轮: intent 非空(顶层摊平)+track 分轨",
+               str(sc.get("intent") or "") != ""
+               and sc.get("track") == "rule",
+               f"intent={sc.get('intent')} "
+               f"track={sc.get('track')} "
+               f"lat={sc.get('latencyMs')}")
+        await XiaozhuService().handle_text(
+            sid, "小竹，叁仟伍佰佩奇里克")
+        sc = await _last_score()
+        # 注: 本地内存态兜底全 miss 路径可 <0.05ms →
+        # latencyMs round 后 0.0 合法, 不作下限断言
+        record("兜底轮: intent=general+task=0+track 分轨",
+               sc.get("intent") == "general"
+               and sc.get("track") == "general"
+               and float(sc.get("task") or 0) == 0,
+               f"intent={sc.get('intent')} "
+               f"track={sc.get('track')} "
+               f"task={sc.get('task')}")
+        await XiaozhuService().handle_text(
+            sid, "小竹，度的酒")
+        sc = await _last_score()
+        record("碎片轮: track=fragment+smooth=0.5",
+               sc.get("track") == "fragment"
+               and abs(float(sc.get("smooth") or 0)
+                       - 0.5) < 1e-6,
+               f"track={sc.get('track')} "
+               f"smooth={sc.get('smooth')}")
+        s1 = XiaozhuEvolutionService.score_turn(
+            {"intent": "chat", "track": "llm_dialog",
+             "latencyMs": 0})
+        s2 = XiaozhuEvolutionService.score_turn(
+            {"intent": "wine.recommend", "track": "rule",
+             "latencyMs": 3000})
+        record("score_turn: chat=0.7/3s→eff=0.5(纯函数)",
+               abs(s1["task"] - 0.7) < 1e-6
+               and abs(s2["eff"] - 0.5) < 1e-3,
+               f"chat task={s1['task']} "
+               f"eff3s={s2['eff']}")
+
+
 class TestProdChecklist:
     async def run(self):
         print("[G 生产真机验证清单]")
@@ -259,7 +327,8 @@ async def main():
     tests = [TestAAbvMatrix(), TestBPhrases(),
              TestCMixed(), TestDIntegration(),
              TestEComposite(), TestFCartWithAbv(),
-             TestKankanPhrases(), TestProdChecklist()]
+             TestKankanPhrases(), TestIScoreTelemetry(),
+             TestProdChecklist()]
     for t in tests:
         await t.run()
     print("\n" + "=" * 56)

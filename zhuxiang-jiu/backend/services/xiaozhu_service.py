@@ -1324,7 +1324,10 @@ class XiaozhuService:
                      "card": None},
                     {"commandText": command_text,
                      "audioMeta": audio_meta,
-                     "track": "fragment"})
+                     "track": "fragment",
+                     "latencyMs": round(
+                         (time.monotonic() - started)
+                         * 1000, 1)})
                 # v91-A 碎片兜底进失败挖掘(自进化闭环)
                 await self._evolve_turn(
                     session, text, None, saved)
@@ -1346,6 +1349,15 @@ class XiaozhuService:
                     smart, audio_meta,
                     wakeup_free=wakeup_free)
                 if saved_smart is not None:
+                    # v92-P0b chat 轨评分补缺(原直 return 绕过
+                    # _evolve_turn——smart 轮零评分记录, Bandit
+                    # 燃料缺 chat 维度); latency 含 LLM 分类
+                    # 耗时=轮次真实总时延
+                    await self._evolve_turn(
+                        session, text, None, saved_smart,
+                        latency_ms=round(
+                            (time.monotonic() - started)
+                            * 1000, 1))
                     return saved_smart
         if cmd is None:
             # P3 失败挖掘: 兜底轮次归 failure_cases(fail-soft)
@@ -1392,7 +1404,14 @@ class XiaozhuService:
                 {"reply": _reply,
                  "suggest": _suggest},
                 {"audioMeta": audio_meta,
-                 "commandText": command_text})
+                 "commandText": command_text,
+                 # v92-P0b: 显式 track(否则 _save_turn 默认
+                 # 'rule'——兜底轮混入 rule 轨, Bandit 分轨
+                 # 失真)
+                 "track": "general",
+                 "latencyMs": round(
+                     (time.monotonic() - started)
+                     * 1000, 1)})
             # v91-A 兜底轮进失败挖掘(自进化闭环断点——
             # 新意图候选信号, 文档"兜底触发"高权重策略)
             await self._evolve_turn(
@@ -1417,7 +1436,10 @@ class XiaozhuService:
                  "card": None},
                 {"audioMeta": audio_meta,
                  "commandText": command_text,
-                 "track": "hook_timeout"})
+                 "track": "hook_timeout",
+                 "latencyMs": round(
+                     (time.monotonic() - started)
+                     * 1000, 1)})
             # v91-A 超时兜底进失败挖掘(自进化闭环)
             await self._evolve_turn(
                 session, text, None, saved)
@@ -1433,8 +1455,11 @@ class XiaozhuService:
                      "resolved": resolved})
         # P3 进化层接入(fail-soft): 有效指令计分 + 负反馈/
         # 重复失败挖掘——不阻断主链路
+        # v92-P0b: 传 saved(含 turn 嵌套 intent/latencyMs +
+        # 顶层 track)而非执行 result——原 result 无三层
+        # 埋点字段, 评分流恒空格式(生产 byTrack '-' 源头)
         await self._evolve_turn(session, text, cmd,
-                                result)
+                                saved)
         # 50号P0 语音信值积分钩子(fail-soft; VOICE50_MODE
         # =off 默认空转——零影响红线)
         await self._voice50_turn_hook(session, channel,
@@ -2079,7 +2104,8 @@ class XiaozhuService:
 
     async def _evolve_turn(self, session: dict,
                            raw_text: str, cmd: dict,
-                           result: dict) -> None:
+                           result: dict,
+                           latency_ms: float = None) -> None:
         """P3 进化层轮次后处理(积分 + 失败挖掘, fail-soft)"""
         try:
             from services.xiaozhu_evolution_service import (
@@ -2089,7 +2115,13 @@ class XiaozhuService:
             member_id = session.get("memberId")
             # 计分: 指令直达完成(有效行为——反语音霸权:
             # 只对完成行为计分, 不因"用语音"本身)
-            if member_id and not result.get("clarify"):
+            # v92-P0b: 排除兜底/碎片/熔断/闲聊轨(白送积分
+            # 污染信值体系——dump 实证 general 轮 +2)
+            _tr = str((result or {}).get("track") or "")
+            if member_id and not result.get("clarify") \
+                    and _tr not in ("general", "fragment",
+                                    "hook_timeout",
+                                    "llm_dialog"):
                 turns = await self.repo.list_turns(
                     session["sessionId"])
                 seq = turns[-1].get("seq") \
@@ -2103,7 +2135,19 @@ class XiaozhuService:
                 await ev.record_failure(
                     session, raw_text, kind, member_id)
             # v92 无感评分落流(P0: 复合 Reward, fail-soft)
-            await ev.record_score(session, result)
+            # v92-P0b 埋点修复: intent/latencyMs 嵌套于
+            # result["turn"] 而顶层恒空(首份基线 n=4 恒满分
+            # 实证——task 判定失效/eff 虚高), 此处显式摊平;
+            # latency_ms 供 smart 轨注入真实耗时(其 _save_turn
+            # 出口无计时)
+            _t = (result or {}).get("turn") or {}
+            _lat = latency_ms if latency_ms is not None \
+                else (_t.get("latencyMs") or 0.0)
+            await ev.record_score(session, {
+                "intent": _t.get("intent") or "",
+                "track": (result or {}).get("track") or "",
+                "latencyMs": _lat,
+            })
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice48_evolve_skip: %s", exc)
 
