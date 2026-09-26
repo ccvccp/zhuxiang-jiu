@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView } from '@tarojs/components';
+import { View, Text, ScrollView, Image } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
@@ -112,9 +112,13 @@ const ProductDetailPage: React.FC = () => {
     <View className={styles.page}>
         <NavBar title="商品详情" />
       <ScrollView scrollY className={styles.scrollView}>
-        {/* 商品大图区 */}
+        {/* 商品大图区(有真实产品图显图, 无图回落 emoji 占位) */}
         <View className={styles.heroBox}>
-          <View className={styles.heroEmoji}>🍶</View>
+          {product.image ? (
+            <Image className={styles.heroImg} src={product.image} mode="aspectFill" />
+          ) : (
+            <View className={styles.heroEmoji}>🍶</View>
+          )}
           <View className={styles.heroTag}>{product.category}</View>
         </View>
 

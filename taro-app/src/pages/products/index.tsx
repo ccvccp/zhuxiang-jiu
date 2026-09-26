@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, ScrollView, Input } from '@tarojs/components';
+import { View, Text, ScrollView, Input, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import styles from './index.module.scss';
 import CheckoutService from '@/services/checkout-service';
@@ -182,7 +182,11 @@ const ProductsPage: React.FC = () => {
           filtered.map(p => (
             <View key={p.id} className={styles.productCard} onClick={() => handleBuy(p)}>
               <View className={styles.productThumb}>
-                <View className={styles.productEmoji}>🍶</View>
+                {p.image ? (
+                  <Image className={styles.productImg} src={p.image} mode="aspectFill" lazyLoad />
+                ) : (
+                  <View className={styles.productEmoji}>🍶</View>
+                )}
                 <View className={styles.specTag}>{p.spec}</View>
               </View>
               <View className={styles.productInfo}>

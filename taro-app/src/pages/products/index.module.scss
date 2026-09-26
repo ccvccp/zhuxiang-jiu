@@ -178,6 +178,14 @@
   line-height: 1;
 }
 
+// 真实产品图(有图显图, 铺满缩略图位)
+.productImg {
+  width: 100%;
+  height: 100%;
+  border-radius: $radius-md;
+  display: block;
+}
+
 .specTag {
   position: absolute;
   bottom: $spacing-xs;

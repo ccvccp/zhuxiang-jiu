@@ -18,6 +18,7 @@ export interface ProductVO {
   subtitle?: string;
   brand?: string;
   salesMonthly?: number;
+  image?: string;     // 主图 URL(后端 images.main; 便携100ml双款为真实产品图)
 }
 
 /** 商品评价 VO(后端 reviews 存储结构直映射) */
@@ -44,6 +45,8 @@ function mapProduct(p: any): ProductVO {
     subtitle: p.subtitle,
     brand: p.brand,
     salesMonthly: p.sales_monthly,
+    // 列表 summary 带顶层 image 字段; 详情走 images.main
+    image: p.image || (p.images && p.images.main) || '',
   };
 }
 
