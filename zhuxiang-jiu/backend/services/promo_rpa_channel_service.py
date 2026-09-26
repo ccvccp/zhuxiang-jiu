@@ -68,9 +68,9 @@ class PromoRpaChannelService:
                 "complianceScore": c.get("complianceScore"),
                 "publishedAt": c.get("publishedAt", ""),
                 # 确定性封面卡片(RPA 下载后自动上传——图文
-                # 笔记强制配图的无人干预供给; 非 /api 前缀
-                # 公开可达)
-                "coverUrl": (f"/promo-cover/"
+                # 笔记强制配图的无人干预供给; 独立前缀入游客
+                # GET 白名单公开可达)
+                "coverUrl": (f"/api/promo-cover/"
                              f"{c.get('contentId')}.png"),
             })
         return rows

@@ -584,12 +584,12 @@ async def rpa_pending_list(
         _handle(e)
 
 
-@router.get("/promo-cover/{content_id}.png",
+@router.get("/api/promo-cover/{content_id}.png",
             tags=["AI智能推广模块"])
 async def rpa_cover(content_id: int):
     """笔记封面品牌卡片(确定性 Pillow 渲染——图文笔记强制
-    要求配图, RPA 下载后自动上传; 公开: 封面即发布内容;
-    挂非 /api 前缀规避全局鉴权——封面无敏感信息)"""
+    要求配图, RPA 下载后自动上传; 公开: 封面即发布内容——
+    独立前缀入 PUBLIC_GET_PREFIXES 游客白名单)"""
     try:
         from repositories.promo_repository import (
             PromoRepository,

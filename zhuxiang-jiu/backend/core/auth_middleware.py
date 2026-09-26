@@ -106,6 +106,10 @@ PUBLIC_GET_PREFIXES = (
     "/api/activity/list",           # 活动列表
     "/api/activity/stats/",         # 活动统计
     "/api/activity/leaderboard/",   # 擂台榜单
+    "/api/promo-cover/",            # 36号笔记封面品牌卡片(确定性
+                                    # Pillow 渲染——封面即发布
+                                    # 内容, RPA 下载上传; 独立前缀
+                                    # 不触及 admin 清单端点)
     "/api/ads",                     # 广告展示
     "/api/agreements",              # 条款协议查阅
     "/api/groupbuy/products",       # 团购商品
