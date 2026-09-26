@@ -1,4 +1,4 @@
-"""RPA 发布回执登记(contentId 26——首次真实发布闭环)"""
+"""RPA 回执登记(contentId 28——无人干预闭环)"""
 import asyncio
 
 
@@ -8,20 +8,14 @@ async def main():
     )
     svc = PromoRpaChannelService()
     saved = await svc.mark_published(
-        26,
+        28,
         note_url=("https://www.xiaohongshu.com/explore/"
-                  "6ab79ece000000001301aeae"),
-        note_id="6ab79ece000000001301aeae")
+                  "6ab7a9ab000000001500d657"),
+        note_id="6ab7a9ab000000001500d657")
     r = saved.get("receipt") or {}
-    print("登记完成:")
-    print("  mode:", r.get("mode"))
-    print("  url:", r.get("url"))
-    print("  publishId:", r.get("publishId"))
-    print("  rpaCompletedAt:", r.get("rpaCompletedAt"))
-
-    # 清单应归零
+    print("登记: mode=", r.get("mode"), "| url=", r.get("url"))
     rows = await svc.list_pending()
-    print("\nRPA 待发布清单(登记后):", len(rows), "条")
+    print("RPA 清单(登记后):", len(rows), "条")
 
 
 asyncio.run(main())
