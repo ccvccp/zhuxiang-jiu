@@ -1,8 +1,8 @@
-"""36号 RPA 发布通道专项回归(小红书浏览器自动化立项)
+"""36号 RPA 发布通道专项回归(创作者中心浏览器自动化·多平台)
 
-[A] 分流: xiaohongshu real 无 key → rpa_pending 回执
+[A] 分流: xiaohongshu/douyin real 无 key → rpa_pending 回执
     (微博等非 RPA 平台仍 mock_fallback)
-[B] 清单: rpa_pending 内容入待发布视图
+[B] 清单: rpa_pending 内容入待发布视图(多平台 + 平台过滤)
 [C] 登记: 成功(mode=rpa+URL)/失败留痕/幂等与非法态
 
 运行: python test_promo_rpa_channel.py
@@ -34,6 +34,7 @@ class TestASplit:
     async def run(self):
         print("[A RPA 分流(channel 层)]")
         os.environ.pop("PROMO_CHANNEL_XIAOHONGSHU_KEY", None)
+        os.environ.pop("PROMO_CHANNEL_DOUYIN_KEY", None)
         os.environ.pop("PROMO_CHANNEL_WEIBO_KEY", None)
         from services.promo_channel_service import (
             PromoChannelService,
@@ -46,6 +47,13 @@ class TestASplit:
         record("小红书: 无 key → rpa_pending 回执",
                r.get("mode") == "rpa_pending",
                f"mode={r.get('mode')}")
+        r1 = await svc.publish_to_platform({
+            "platform": "douyin",
+            "title": "抖音图文探针", "body": "正文",
+            "hashtags": "#测试#"})
+        record("抖音: 无 key → rpa_pending 回执",
+               r1.get("mode") == "rpa_pending",
+               f"mode={r1.get('mode')}")
         r2 = await svc.publish_to_platform({
             "platform": "weibo",
             "title": "非 RPA 平台", "body": "正文"})
@@ -55,13 +63,14 @@ class TestASplit:
 
 
 async def _mk_rpa_content(content_id=9001,
-                          mode="rpa_pending"):
+                          mode="rpa_pending",
+                          platform="xiaohongshu"):
     from repositories.promo_repository import (
         PromoRepository, CONTENT_STATUS_PUBLISHED,
     )
     repo = PromoRepository()
     return await repo.save_content({
-        "contentId": content_id, "platform": "xiaohongshu",
+        "contentId": content_id, "platform": platform,
         "title": "中秋团圆宴白酒清单",
         "body": "竹香型白酒, 入口绵甜。"
                 "（过量饮酒有害健康，18周岁以下请勿饮酒）",
@@ -70,7 +79,7 @@ async def _mk_rpa_content(content_id=9001,
         "shortCode": "A-RPATEST",
         "complianceScore": 100,
         "publishedAt": "2026-09-26T00:00:00+00:00",
-        "receipt": {"mode": mode, "platform": "xiaohongshu",
+        "receipt": {"mode": mode, "platform": platform,
                     "publishId": "", "exposureEstimate": 0,
                     "error": "待 RPA 通道执行"} if mode else {},
     })
@@ -85,12 +94,20 @@ class TestBPendingList:
         svc = PromoRpaChannelService()
         await _mk_rpa_content(9001, "rpa_pending")
         await _mk_rpa_content(9002, "mock_fallback")
+        await _mk_rpa_content(9006, "rpa_pending",
+                              platform="douyin")
         rows = await svc.list_pending()
         ids = [r["contentId"] for r in rows]
         record("rpa_pending 内容入清单(9001)",
                9001 in ids, f"ids={ids}")
         record("mock_fallback 内容不入清单(9002)",
                9002 not in ids, "")
+        record("抖音 rpa_pending 内容入清单(9006)",
+               9006 in ids, f"ids={ids}")
+        dy = await svc.list_pending(platform="douyin")
+        record("平台过滤: douyin 仅含抖音内容",
+               [r["contentId"] for r in dy] == [9006],
+               f"ids={[r['contentId'] for r in dy]}")
         row = next((r for r in rows
                     if r["contentId"] == 9001), None)
         record("清单字段完整(标题/正文/话题/短码)",

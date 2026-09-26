@@ -564,7 +564,8 @@ async def report_platform(
 
 
 # ============================================================
-# RPA 发布通道(小红书创作者中心浏览器自动化——官方无发布 API)
+# RPA 发布通道(创作者中心浏览器自动化——小红书/抖音图文,
+# 官方均无第三方发布 API; 抖音开放平台视频 API 资质后置)
 # ============================================================
 
 @router.get("/api/promo/rpa/pending", tags=["AI智能推广模块"])
@@ -572,7 +573,7 @@ async def rpa_pending_list(
     x_role: str = Header(None, alias="X-Role"),
 ):
     """RPA 待发布清单(出队后挂 rpa_pending 回执的内容——
-    供浏览器自动化通道逐条消费)"""
+    供浏览器自动化通道逐条消费; xiaohongshu/douyin 多平台)"""
     _require_admin(x_role)
     try:
         from services.promo_rpa_channel_service import (

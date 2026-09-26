@@ -36,12 +36,15 @@ CHANNEL_MODE_REAL = "real"
 CHANNEL_MODE_MOCK = "mock"
 # 通道未配置/失败回退的 mock 回执标记(可观测降级)
 CHANNEL_MODE_MOCK_FALLBACK = "mock_fallback"
-# RPA 通道平台集(官方无发布 API——小红书创作者中心网页版
-# 浏览器自动化发布, 2026-09-26 立项): 无凭证时回 rpa_pending
-# 回执, 由对话内 browser agent 执行 + 回执登记端点闭环
+# RPA 通道平台集(官方无发布 API——创作者中心网页版浏览器
+# 自动化发布, 小红书 2026-09-26 立项 / 抖音图文 2026-09-27
+# 接入): 无凭证时回 rpa_pending 回执, 由对话内 browser agent
+# 执行 + 回执登记端点闭环。抖音开放平台视频发布 API 为
+# 资质就绪后的中期升级(PROMO_CHANNEL_DOUYIN_URL 已可覆盖,
+# 配置凭证后自动切真实轨, 不与本 RPA 路线冲突)
 CHANNEL_MODE_RPA_PENDING = "rpa_pending"
 CHANNEL_MODE_RPA = "rpa"   # RPA 执行完成态(回执登记成功)
-RPA_PLATFORMS = {"xiaohongshu"}
+RPA_PLATFORMS = {"xiaohongshu", "douyin"}
 
 # ============================================================
 # 平台认证风格(2026-09-02 实测校准)
