@@ -31,7 +31,7 @@ os.environ["STORE_MODE"] = "asyncio"
 from repositories.store import reset_store
 from services.zyh_service import (
     ZyhService, KNOWLEDGE_SEED, GRAPH_NODES, GRAPH_EDGES,
-    PATENT_ID, STANDARD_ID,
+    CRAFT_REPORT_ID, STANDARD_ID,
 )
 from services.zyh_mode_service import ZyhModeService
 from repositories.zyh_repository import ZyhRepository
@@ -69,8 +69,8 @@ async def test_knowledge():
     record("蒸馏陈化条目在册",
            "precision_distillation_aging" in ids)
     seven = await svc.get_knowledge("seven_strain_fermentation")
-    record("七菌条目内容锚定专利(L3 溯源)",
-           PATENT_ID in seven["item"]["content"],
+    record("七菌条目内容锚定检测报告(L3 溯源)",
+           CRAFT_REPORT_ID in seven["item"]["content"],
            f"content 前缀: {seven['item']['content'][:20]}")
     # 幂等: 重复播种零新增
     repo = ZyhRepository()
@@ -113,7 +113,7 @@ async def test_guardrails():
     record("L1 旧工艺表述拦截",
            r.get("guardrailsTriggered") is True
            and r.get("guardLayer") == 1
-           and PATENT_ID in str(r.get("citations")),
+           and CRAFT_REPORT_ID in str(r.get("citations")),
            f"layer={r.get('guardLayer')}")
     # L1 医疗
     r = await svc.chat("竹香酒能降血压治病吗？")
@@ -168,7 +168,7 @@ async def test_retrieval():
     r = await svc.chat("竹奕酒是什么工艺怎么酿造的？")
     record("工艺检索命中",
            r.get("knowledgeId") == "craft_constitution"
-           and PATENT_ID in str(r.get("citations")),
+           and CRAFT_REPORT_ID in str(r.get("citations")),
            f"kid={r.get('knowledgeId')}")
     r = await svc.chat("竹香香型是什么定义？")
     record("香型检索命中",
@@ -185,19 +185,19 @@ async def test_retrieval():
            f"kid={r.get('knowledgeId')}")
     # 七菌工艺叙事检索(2026-09-26 立项)
     r = await svc.chat("七菌协同是怎么参与的？")
-    record("七菌专属问句召回+专利溯源",
+    record("七菌专属问句召回+检测报告溯源",
            r.get("knowledgeId") == "seven_strain_fermentation"
-           and PATENT_ID in str(r.get("citations")),
+           and CRAFT_REPORT_ID in str(r.get("citations")),
            f"kid={r.get('knowledgeId')}")
     r = await svc.chat("羟基自由基预处理是什么环节？")
-    record("预处理问句召回+专利溯源",
+    record("预处理问句召回+检测报告溯源",
            r.get("knowledgeId") == "hydroxyl_pretreatment"
-           and PATENT_ID in str(r.get("citations")),
+           and CRAFT_REPORT_ID in str(r.get("citations")),
            f"kid={r.get('knowledgeId')}")
     r = await svc.chat("陶坛陈化是怎么回事？")
-    record("蒸馏陈化问句召回+专利溯源",
+    record("蒸馏陈化问句召回+检测报告溯源",
            r.get("knowledgeId") == "precision_distillation_aging"
-           and PATENT_ID in str(r.get("citations")),
+           and CRAFT_REPORT_ID in str(r.get("citations")),
            f"kid={r.get('knowledgeId')}")
     r = await svc.chat("竹奕酒是怎么发酵的有什么菌？")
     record("泛发酵问句应答含七菌名单",

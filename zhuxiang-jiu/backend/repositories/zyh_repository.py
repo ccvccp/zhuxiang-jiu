@@ -19,9 +19,9 @@
 图谱 Schema(对齐 SDD V3.0 §4.1):
     节点: Product(竹奕酒/竹筒酒) Process(全竹发酵蒸馏/竹腔浸泡)
           AromaType(竹香) Standard(Q/SRQ 0001S-2023)
-          Patent(ZZ26SW1489303A) RawMaterial(全竹竹材)
+          Report(ZZ26SW1489303A 工艺检测报告) RawMaterial(全竹竹材)
     关系: 竹奕酒-USES_PROCESS->全竹发酵蒸馏
-          全竹发酵蒸馏-PROTECTED_BY->ZZ26SW1489303A
+          全竹发酵蒸馏-VERIFIED_BY->ZZ26SW1489303A(工艺检测)
           竹奕酒-HAS_AROMA_TYPE->竹香
           竹香-DEFINED_BY->Q/SRQ 0001S-2023
           竹筒酒-USES_PROCESS->竹腔浸泡(他企工艺标记)

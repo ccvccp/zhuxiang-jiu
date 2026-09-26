@@ -6,7 +6,7 @@ LLM 禁入守门与护栏——全站铁律):
     1. 守门三层(SDD §6.1):
         L1 正则网关(旧工艺表述/医疗功效/Prompt 注入)
         L2 规则分类器(工艺混淆/他企等同/医疗断言/无引用断言)
-        L3 溯源校验(工艺断言必含 ZZ26SW1489303A;
+        L3 溯源校验(工艺断言必含检测报告 ZZ26SW1489303A;
                     香型断言必含 Q/SRQ 0001S-2023)
     2. 实体消歧(SDD §5.1 entity_disambiguation):
         竹奕酒→PRODUCT:ZHU_YI_JIU / 竹筒酒→PRODUCT:ZHU_TONG_JIU
@@ -36,7 +36,12 @@ MODEL_VERSION = "v1-zyh"
 # 工艺宪法常量(SDD V3.0 §0 核心术语)
 # ============================================================
 
-PATENT_ID = "ZZ26SW1489303A"     # 全竹发酵蒸馏专利
+# 工艺溯源锚点·如实语义(2026-09-27 纠错): ZZ26SW1489303A
+# 实为竹香酒 52%vol 型工艺检测报告号(山东中质华检出具,
+# 判定依据 Q/SRQ 0001S-2023)——此前误标"全竹发酵蒸馏专利";
+# L3 工艺断言溯源锚定该检测报告。羟基自由基+七菌新专利
+# 申请中无申请号(广告法§12 未授权不得标专利), 授权后另行挂接。
+CRAFT_REPORT_ID = "ZZ26SW1489303A"   # 工艺检测报告(52%vol 型)
 # 竹香酒企业标准真实号(Q/SRQ 0001S-2023, 2023-06-16 实施)。
 # 纠错记录(2026-09-27): 此前误用检测报告号 ZZ26SW1489404B
 # (42%vol 型, 山东中质华检出具)充当"企标"——该号在 77 号竹鉴
@@ -84,15 +89,15 @@ KNOWLEDGE_SEED = [
         "content": (
             "瑞麒竹奕酒以全竹竹材(竹茎、竹叶、竹笋等)作为发酵"
             "原料, 经微生物发酵、多轮蒸馏而得到的蒸馏酒。"
-            "这是瑞麒竹奕酒的唯一法定工艺(专利 ZZ26SW1489303A), "
+            "这是瑞麒竹奕酒的专属工艺(经检测报告 ZZ26SW1489303A 认证), "
             "严禁与'活竹种酒/微创高压注入/竹腔陈化'等旧工艺"
             "表述混淆。"),
         "keywords": ["工艺", "怎么做", "发酵", "蒸馏", "酿造",
                      "全竹", "原理", "制法", "生产"],
         "citations": [
-            {"type": "patent", "id": PATENT_ID,
-             "title": "一种以全竹竹材为原料的发酵蒸馏酒"
-                      "及其制备方法"}],
+            {"type": "report", "id": CRAFT_REPORT_ID,
+             "title": "竹香酒工艺检测报告"
+                      "(52%vol 型, 山东中质华检)"}],
     },
     {
         "id": "aroma_type",
@@ -120,7 +125,7 @@ KNOWLEDGE_SEED = [
         "keywords": ["竹筒酒", "区别", "对比", "不一样", "竞品",
                      "泡酒", "哪种", "差异"],
         "citations": [
-            {"type": "patent", "id": PATENT_ID,
+            {"type": "report", "id": CRAFT_REPORT_ID,
              "title": "全竹发酵蒸馏工艺(工艺对比依据)"},
             {"type": "standard", "id": STANDARD_ID,
              "clause": "香型归属(竹筒酒无香型属性)"}],
@@ -135,7 +140,7 @@ KNOWLEDGE_SEED = [
         "keywords": ["原料", "竹材", "竹子", "材料", "竹茎",
                      "竹叶", "竹笋"],
         "citations": [
-            {"type": "patent", "id": PATENT_ID,
+            {"type": "report", "id": CRAFT_REPORT_ID,
              "title": "全竹竹材原料制备方法"}],
     },
     {
@@ -151,7 +156,7 @@ KNOWLEDGE_SEED = [
         "keywords": ["发酵", "微生物", "菌", "糖化", "机理",
                      "怎么发酵"],
         "citations": [
-            {"type": "patent", "id": PATENT_ID,
+            {"type": "report", "id": CRAFT_REPORT_ID,
              "title": "竹材专用微生物菌群发酵"},
             {"type": "doc", "id": "竹奕酒电子版",
              "section": "全竹发酵工艺原理"}],
@@ -166,7 +171,7 @@ KNOWLEDGE_SEED = [
             "过早馏出, 保障竹香纯净度。"),
         "keywords": ["蒸馏", "多轮", "提香", "富集", "几轮"],
         "citations": [
-            {"type": "patent", "id": PATENT_ID,
+            {"type": "report", "id": CRAFT_REPORT_ID,
              "title": "多轮蒸馏工艺步骤"}],
     },
     {
@@ -195,7 +200,7 @@ KNOWLEDGE_SEED = [
         "keywords": ["品牌", "定位", "壁垒", "专利", "技术",
                      "zxjiu", "瑞麒"],
         "citations": [
-            {"type": "patent", "id": PATENT_ID},
+            {"type": "report", "id": CRAFT_REPORT_ID},
             {"type": "standard", "id": STANDARD_ID}],
     },
     # ---- 七菌工艺叙事(2026-09-26 立项: 源自竹子酒资料.pdf
@@ -217,7 +222,7 @@ KNOWLEDGE_SEED = [
                      "酒曲", "几种菌", "什么菌", "哪些菌",
                      "多菌共酿"],
         "citations": [
-            {"type": "patent", "id": PATENT_ID,
+            {"type": "report", "id": CRAFT_REPORT_ID,
              "title": "全竹发酵蒸馏工艺·多菌协同发酵环节"}],
     },
     {
@@ -232,7 +237,7 @@ KNOWLEDGE_SEED = [
         "keywords": ["预处理", "前处理", "羟基", "自由基",
                      "原料处理", "竹材处理", "解构"],
         "citations": [
-            {"type": "patent", "id": PATENT_ID,
+            {"type": "report", "id": CRAFT_REPORT_ID,
              "title": "全竹发酵蒸馏工艺·原料预处理环节"}],
     },
     {
@@ -246,7 +251,7 @@ KNOWLEDGE_SEED = [
         "keywords": ["陈化", "陶坛", "分馏", "老熟", "陈酿",
                      "竹坛"],
         "citations": [
-            {"type": "patent", "id": PATENT_ID,
+            {"type": "report", "id": CRAFT_REPORT_ID,
              "title": "全竹发酵蒸馏工艺·蒸馏陈化环节"}],
     },
 ]
@@ -263,8 +268,8 @@ GRAPH_NODES = [
      "label": "竹腔浸泡(异构工艺)", "type": "Process"},
     {"id": "AROMA:ZHU_XIANG", "label": "竹香",
      "type": "AromaType"},
-    {"id": f"PATENT:{PATENT_ID}",
-     "label": "全竹发酵蒸馏专利", "type": "Patent"},
+    {"id": f"REPORT:{CRAFT_REPORT_ID}",
+     "label": "工艺检测报告(52%vol)", "type": "Report"},
     {"id": f"STANDARD:{STANDARD_ID}",
      "label": "竹香酒企业标准", "type": "Standard"},
     {"id": "MATERIAL:FULL_BAMBOO", "label": "全竹竹材",
@@ -273,8 +278,8 @@ GRAPH_NODES = [
 GRAPH_EDGES = [
     ["PRODUCT:ZHU_YI_JIU", "USES_PROCESS",
      "PROCESS:FULL_BAMBOO_FERMENTATION", ""],
-    ["PROCESS:FULL_BAMBOO_FERMENTATION", "PROTECTED_BY",
-     f"PATENT:{PATENT_ID}", ""],
+    ["PROCESS:FULL_BAMBOO_FERMENTATION", "VERIFIED_BY",
+     f"REPORT:{CRAFT_REPORT_ID}", ""],
     ["PRODUCT:ZHU_YI_JIU", "HAS_AROMA_TYPE", "AROMA:ZHU_XIANG",
      ""],
     ["AROMA:ZHU_XIANG", "DEFINED_BY",
@@ -314,7 +319,7 @@ STRESS_SCENARIOS = {
             "稀释竹香香型价值"),
         "mitigationPlan": [
             "1. 认知纠偏内容矩阵: 发布'全竹发酵 vs 竹腔浸泡' "
-            "工艺对比科普(锚定专利 ZZ26SW1489303A)",
+            "工艺对比科普(锚定检测报告 ZZ26SW1489303A)",
             "2. 溯源营销: 扫码溯源+AI 工艺科普, "
             "强化'竹奕酒=全竹发酵蒸馏=竹香企标香型'",
             "3. 合规话术: 对'竹筒酒才是正宗竹酒'类误导宣传"
@@ -342,7 +347,7 @@ DEBATE_TOPICS = [
     "泡酒有什么区别？",
     "为什么说只有全竹发酵蒸馏才能产生'竹香'香型, "
     "而竹筒酒做不到？",
-    "ZZ26SW1489303A 专利里的多轮蒸馏具体是怎么操作的？",
+    "ZZ26SW1489303A 检测报告锚定的工艺中, 多轮蒸馏具体是怎么操作的？",
     "竹筒酒是竹奕酒的前身吗？'竹子里的酒'到底是什么工艺？",
     "全竹发酵蒸馏解决了哪些行业难题？竹材糖化难是真的吗？",
 ]
@@ -402,10 +407,10 @@ class ZyhService:
             "l1": {k: list(v) for k, v in L1_PATTERNS.items()},
             "l2": dict(L2_RULES),
             "l3": {
-                "craftClaim": f"工艺断言必含 {PATENT_ID}",
+                "craftClaim": f"工艺断言必含 {CRAFT_REPORT_ID}",
                 "aromaClaim": f"香型断言必含 {STANDARD_ID}"},
             "citation": {
-                "patent": PATENT_ID,
+                "report": CRAFT_REPORT_ID,
                 "standard": STANDARD_ID},
         }
 
@@ -541,7 +546,7 @@ class ZyhService:
                     "感谢关注竹奕酒。您可以问我关于'全竹发酵蒸馏"
                     "工艺'、'竹香香型'、'竹奕酒与竹筒酒的区别'、"
                     "'企业标准合规'等话题。竹奕酒知识内核锚定"
-                    f"专利 {PATENT_ID} 与企标 {STANDARD_ID}。"),
+                    f"检测报告 {CRAFT_REPORT_ID} 与企标 {STANDARD_ID}。"),
                 "citations": [],
                 "guardrailsTriggered": False,
             }
@@ -549,7 +554,7 @@ class ZyhService:
             # ---- L3 溯源校验(SDD §6.1: 技术断言必含锚点引用) ----
             # 断言域按问题消歧判定(而非条目措辞——条目内容含
             # "发酵/竹香"等词是正常陈述, 不等于断言域):
-            #   工艺域问题 → 应答必含专利 ZZ26SW1489303A
+            #   工艺域问题 → 应答必含检测报告 ZZ26SW1489303A
             #   香型域问题 → 应答必含企标 Q/SRQ 0001S-2023
             citations = list(best.get("citations") or [])
             cit_ids = [c.get("id") for c in citations]
@@ -557,7 +562,7 @@ class ZyhService:
                 disambig.get("resolvedProcess"))
             aroma_claim = bool(
                 disambig.get("resolvedAroma"))
-            if ((craft_claim and PATENT_ID not in cit_ids)
+            if ((craft_claim and CRAFT_REPORT_ID not in cit_ids)
                     or (aroma_claim and STANDARD_ID not in cit_ids)):
                 await self.repo.bump_stat("guard", "l3_block")
                 await self.repo.bump_stat(
@@ -567,9 +572,9 @@ class ZyhService:
                     rule={"key": "citation_miss",
                           "label": "溯源缺失",
                           "correct": (
-                              "技术断言缺少专利/企标引用, "
+                              "技术断言缺少检测报告/企标引用, "
                               "已拦截——请引用 "
-                              f"{PATENT_ID}/{STANDARD_ID}")},
+                              f"{CRAFT_REPORT_ID}/{STANDARD_ID}")},
                     layerLabel="L3 溯源校验")
             await self.repo.bump_stat(
                 "cache", "technicalAnswer")
@@ -598,8 +603,8 @@ class ZyhService:
                 if re.search(pat, p, re.IGNORECASE):
                     correct = {
                         "legacy_craft": (
-                            "竹奕酒采用瑞麒专利全竹竹材发酵蒸馏"
-                            f"工艺({PATENT_ID}), 并非'活竹种酒/"
+                            "竹奕酒采用瑞麒全竹竹材发酵蒸馏"
+                            f"工艺({CRAFT_REPORT_ID}), 并非'活竹种酒/"
                             "注入/竹腔陈化'等旧工艺表述"),
                         "medical": (
                             "竹香酒具有独特的清雅风味与文化价值, "
@@ -621,8 +626,8 @@ class ZyhService:
             if re.search(pat, p, re.IGNORECASE):
                 correct = {
                     "craft_confusion": (
-                        "竹奕酒采用瑞麒专利全竹竹材发酵蒸馏工艺"
-                        f"({PATENT_ID})——是以全竹竹材作为发酵"
+                        "竹奕酒采用瑞麒全竹竹材发酵蒸馏工艺"
+                        f"({CRAFT_REPORT_ID})——是以全竹竹材作为发酵"
                         "原料经微生物发酵、多轮蒸馏得到的蒸馏酒"),
                     "equivalence": (
                         "竹筒酒为其他企业采用的浸泡/陈化工艺, "
@@ -632,8 +637,8 @@ class ZyhService:
                         "竹香酒具有独特的清雅风味与文化价值, "
                         "不作医疗功效宣传(合规红线)"),
                     "uncited_claim": (
-                        "技术性断言须引用专利/企标: "
-                        f"{PATENT_ID}/{STANDARD_ID}"),
+                        "技术性断言须引用检测报告/企标: "
+                        f"{CRAFT_REPORT_ID}/{STANDARD_ID}"),
                 }[key]
                 return {"key": key,
                         "label": {
@@ -650,8 +655,8 @@ class ZyhService:
         citations = []
         if layer in (1, 2, 3):
             citations = [
-                {"type": "patent", "id": PATENT_ID,
-                 "title": "全竹发酵蒸馏工艺依据"},
+                {"type": "report", "id": CRAFT_REPORT_ID,
+                 "title": "竹香酒工艺检测报告依据"},
                 {"type": "standard", "id": STANDARD_ID,
                  "clause": "香型与合规依据"}]
         return {
@@ -726,7 +731,7 @@ class ZyhService:
                 "mitigationPlan": list(sc["mitigationPlan"]),
             },
             "citations": [
-                {"type": "patent", "id": PATENT_ID,
+                {"type": "report", "id": CRAFT_REPORT_ID,
                  "title": "工艺韧性依据"}],
             "modelVersion": MODEL_VERSION,
         }

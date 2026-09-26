@@ -34,7 +34,7 @@ full 档 L1 自主域(封闭白名单——73号 L1_AUTONOMY_DOMAINS 范式):
           (竹筒酒≠竹香酒≠竹奕酒认知护城河核心指标)
     溯源缺失率 citationMissRate
         = L3 溯源拦截数 / 产出技术断言的应答数
-          (SDD §6.1 L3: 工艺断言必含 ZZ26SW1489303A,
+          (SDD §6.1 L3: 工艺断言必含检测报告 ZZ26SW1489303A,
            香型断言必含 Q/SRQ 0001S-2023)
     (cur-base)/base > 3% → 自动暂停(等效 off, 留痕);
     恢复须人工 resume(决策留痕)。
