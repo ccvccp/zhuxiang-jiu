@@ -116,8 +116,11 @@ EFFICACY_CLAIM_WORDS = (
 from repositories.attract_repository import (  # noqa: E402
     BANNED_WORDS, REQUIRED_DISCLAIMER, REQUIRED_AGE_TIP,
 )
-# AI 审(二审)通过线(对齐 ad 模块 AI 审核口径)
-PROMO_COMPLIANCE_PASS_SCORE = 80
+import os  # noqa: E402
+# AI 审(二审)通过线(对齐 ad 模块 AI 审核口径;
+# env 可调——P2 灰度期设 101 即全量强制人工 review)
+PROMO_COMPLIANCE_PASS_SCORE = int(
+    os.environ.get("PROMO_COMPLIANCE_PASS_SCORE", "80"))
 # 三审强制人工区间(二审 60-80 分 → HITL)
 PROMO_HITL_FLOOR = 60
 
