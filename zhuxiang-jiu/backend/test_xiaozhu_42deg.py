@@ -312,6 +312,75 @@ class TestIScoreTelemetry:
                f"eff3s={s2['eff']}")
 
 
+class TestJEnNoise:
+    async def run(self):
+        print("[J 英文环境声防御(v92-N1/N2)]")
+        from repositories.store import reset_store
+        from repositories.xiaozhu_repository import (
+            Xiaozhu48Repository,
+        )
+        from services.xiaozhu_service import XiaozhuService
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService, _is_en_noise,
+        )
+
+        # 纯函数判定
+        record("判据: 长句描述(The sound of...)",
+               _is_en_noise(
+                   "The sound of a person walking "
+                   "on gravel") is True, "")
+        record("判据: 拟声短词(Coughing)",
+               _is_en_noise("Coughing") is True, "")
+        record("判据: 非英语碎片(tego.)",
+               _is_en_noise("tego.") is True, "")
+        record("判据: 纯数字不误伤",
+               _is_en_noise("13800000001") is False, "")
+        record("判据: 中文轮不误伤",
+               _is_en_noise("选一款42度的酒") is False, "")
+
+        # 集成: 链路预检 + 评分/归档
+        reset_store()
+        sid = (await XiaozhuService()
+               .open_session(1))["sessionId"]
+        r = await XiaozhuService().handle_text(
+            sid, "小竹，The sound of rain falling")
+        record("集成: 英文轮预检拦截(en_noise 轨)",
+               r.get("track") == "en_noise"
+               and "没听清" in str(r.get("reply")),
+               f"track={r.get('track')} "
+               f"reply={str(r.get('reply'))[:40]}")
+        recs = await Xiaozhu48Repository().list_records(
+            Xiaozhu48Repository.TABLE_FAILURES,
+            limit=500)
+        scores = [c for c in recs
+                  if c.get("kind") == "turn_score"]
+        sc = (scores or [{}])[-1]
+        record("评分: en_noise 轮 task=0+smooth 不罚",
+               sc.get("track") == "en_noise"
+               and float(sc.get("task") or 0) == 0
+               and abs(float(sc.get("smooth") or 0)
+                       - 1.0) < 1e-6,
+               f"track={sc.get('track')} "
+               f"task={sc.get('task')} "
+               f"smooth={sc.get('smooth')}")
+        kinds = [c for c in recs
+                 if c.get("kind") == "en_noise"]
+        record("归档: en_noise kind 落库可观测",
+               len(kinds) == 1,
+               f"n={len(kinds)}")
+
+        # N1: failures_view 聚类过滤英文
+        v = await XiaozhuEvolutionService(
+            repo=Xiaozhu48Repository()
+        ).failures_view(limit=500)
+        en_leak = [p for p in v.get("topPhrases")
+                   or []
+                   if _is_en_noise(p.get("phrase"))]
+        record("N1: Top 聚类无英文噪声",
+               not en_leak,
+               f"leak={en_leak[:2]}")
+
+
 class TestProdChecklist:
     async def run(self):
         print("[G 生产真机验证清单]")
@@ -328,7 +397,7 @@ async def main():
              TestCMixed(), TestDIntegration(),
              TestEComposite(), TestFCartWithAbv(),
              TestKankanPhrases(), TestIScoreTelemetry(),
-             TestProdChecklist()]
+             TestJEnNoise(), TestProdChecklist()]
     for t in tests:
         await t.run()
     print("\n" + "=" * 56)

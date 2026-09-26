@@ -1308,6 +1308,34 @@ class XiaozhuService:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("voice48_custom_skip: %s", exc)
         if cmd is None:
+            # v92-N2 英文环境声幻觉预检(百炼 ASR 对非语音
+            # 输入的描述性输出——"The sound of..."/"Coughing"
+            # 12 条实证, session59 与空转写同风暴): 此类轮
+            # >3 字穿透碎片拦截白烧 ~2s LLM 分类再落兜底
+            # 播报——真机表现"环境声触发多余播报"; 预检毫秒
+            # 级轻回复, track=en_noise 评分 task=0(正确防御
+            # 不罚 smooth), 归档 en_noise kind 可观测 ASR
+            # 幻觉频率
+            from services.xiaozhu_evolution_service import (
+                _is_en_noise,
+            )
+            if _is_en_noise(command_text):
+                saved = await self._save_turn(
+                    session, channel, text, "chat",
+                    {"reply": "没听清——像是周围的声音，"
+                              "有需要请直接跟我说",
+                     "card": None},
+                    {"commandText": command_text,
+                     "audioMeta": audio_meta,
+                     "track": "en_noise",
+                     "latencyMs": round(
+                         (time.monotonic() - started)
+                         * 1000, 1)})
+                await self._mine_failure(
+                    session, text, "en_noise")
+                await self._evolve_turn(
+                    session, text, None, saved)
+                return saved
             # v89 碎片拦截(09:16:19 实证「度的酒。」——ASR 吞
             # 前半段的碎片轮): rule/spec/attr/共创全 miss 后
             # ≤3 字碎片不进 LLM(实测 llm_dialog 2.95s 烧完仍
@@ -2121,7 +2149,8 @@ class XiaozhuService:
             if member_id and not result.get("clarify") \
                     and _tr not in ("general", "fragment",
                                     "hook_timeout",
-                                    "llm_dialog"):
+                                    "llm_dialog",
+                                    "en_noise"):
                 turns = await self.repo.list_turns(
                     session["sessionId"])
                 seq = turns[-1].get("seq") \

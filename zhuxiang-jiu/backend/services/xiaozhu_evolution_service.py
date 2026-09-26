@@ -26,6 +26,7 @@
 
 import logging
 import os
+import re
 
 from core.helpers import ts
 
@@ -34,6 +35,23 @@ from repositories.xiaozhu_repository import (
 )
 
 logger = logging.getLogger("xiaozhu_evolution")
+
+
+def _is_en_noise(text: str) -> bool:
+    """英文环境声幻觉判定(v92-N2: 百炼 ASR 对非语音输入
+    的描述性输出——"The sound of..."/"Coughing" 12 条实证)
+
+    判据: 无中文且英文字母占比>0.5; 数字/标点轮不误伤
+    ("13800000001"→False); 英文真话语(背景音)同拦——
+    按噪声处理可接受(HITL N2 决议, 勿做语义区分)
+    """
+    t = str(text or "").strip()
+    if not t:
+        return False
+    if re.search(r"[\u4e00-\u9fff]", t):
+        return False
+    en = len(re.findall(r"[A-Za-z]", t))
+    return en / max(len(t), 1) > 0.5
 
 # 计分规则(计划 §七 ①)
 POINTS_COMMAND_DONE = 2        # 指令直达完成
@@ -381,7 +399,10 @@ class XiaozhuEvolutionService:
             # v92-P0 数据清洗: 空/'#'-占位(ASR 残渣实证
             # 213 条)不入聚类——Top 短语真实性=HITL
             # 决策质量; kind 计数保留全量口径
-            if not p or set(p) <= {"#"}:
+            # v92-N1: 英文环境声幻觉(百炼 ASR 12 条实证)
+            # 同不入聚类
+            if not p or set(p) <= {"#"} \
+                    or _is_en_noise(p):
                 continue
             phrases[p] = phrases.get(p, 0) + 1
         top = sorted(phrases.items(),
@@ -410,10 +431,13 @@ class XiaozhuEvolutionService:
         track = str(turn.get("track") or "")
         latency = float(turn.get("latencyMs") or 0)
         # TaskSuccess 0.4: rule/指令完成=1, chat 理解=0.7,
-        # general/碎片/超时/未唤醒=0
+        # general/碎片/超时/未唤醒/英文环境声=0
+        # (v92-N2: en_noise 无任务可完成——环境声非用户
+        # 意图; 正确防御不罚 smooth=流畅度无关)
         task = 1.0
         if intent in ("general", "not_woken") \
-                or track in ("fragment", "hook_timeout"):
+                or track in ("fragment", "hook_timeout",
+                             "en_noise"):
             task = 0.0
         elif intent == "chat":
             task = 0.7
