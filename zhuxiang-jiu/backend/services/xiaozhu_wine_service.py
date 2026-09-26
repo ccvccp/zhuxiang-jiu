@@ -285,13 +285,16 @@ class XiaozhuWineService:
         picks = pool[:2]
         stories = []
         for p in picks:
-            taste = ((p.get("attributes") or {})
-                     .get("taste") or "")
+            # v91-B 播报瘦身(09:42:59 实证"断续缺流畅":
+            # 双款全展开 subtitle+taste 切出 10 块, 块合成
+            # 1.1~3.7s 抖动致播放追不上合成; 每款收敛为
+            # 名称+度数+价格+卖点短句(subtitle 截断),
+            # 10 块→6 块内, 总播报 15s→~8s)
             stories.append(
-                f"「{p.get('name')}」{p.get('subtitle')}"
-                + (f", {taste}" if taste else "")
-                + f", {p.get('alcohol')}度 "
-                f"{p.get('price')} 元")
+                f"「{p.get('name')}」"
+                f"{p.get('alcohol')}度 "
+                f"{p.get('price')}元, "
+                + str(p.get("subtitle") or "")[:12])
         scene_line = f"{scene}场景" if scene else "为您"
         # v87: 精确命中(52度有货)直说"52度"; 无货才"附近"
         # (56度→53 度场景)——用户精确要求却答"附近"是措辞债
