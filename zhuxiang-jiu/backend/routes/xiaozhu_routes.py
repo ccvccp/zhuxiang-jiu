@@ -492,6 +492,23 @@ async def _seg_pump(ws, session, dump_f,
     return False  # 正常 finish 收段(客户端仍在)
 
 
+@router.get("/evolution/failures")
+async def get_evolution_failures(
+        limit: int = 100):
+    """v91-B 失败案例聚类视图(观测面——Bad Case 周报:
+    general/fragment/hook_timeout 兜底轮=新意图候选,
+    top 未命中语句 → 建议新增指令 pattern, HITL 把
+    "大海捞针"变"选择题")"""
+    try:
+        from services.xiaozhu_evolution_service import (
+            XiaozhuEvolutionService,
+        )
+        return await XiaozhuEvolutionService(
+        ).failures_view(limit=min(max(limit, 1), 500))
+    except Exception as e:
+        raise _handle(e) from e
+
+
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: int):
     """会话视图(含轮次历史——脱敏后文本)"""

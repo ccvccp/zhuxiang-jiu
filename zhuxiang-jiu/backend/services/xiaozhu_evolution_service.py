@@ -345,6 +345,18 @@ class XiaozhuEvolutionService:
         if any(w in text
                for w in NEGATIVE_FEEDBACK_WORDS):
             return "negative"
+        # v91-A 兜底轮挖掘(自进化闭环断点修复——注释自始
+        # 声明"兜底(general)"但实现漏了): general(全 miss
+        # "还在学着")/fragment(吞字碎片)/hook_timeout(钩子
+        # 熔断)轨=用户想表达但系统不懂的新意图候选(文档
+        # "兜底触发"高权重信号), 进 failures_view 聚合 →
+        # top 未命中语句 → 建议新增指令 pattern;
+        # chat 轨正常闲聊回复不算(LLM 已理解)
+        _intent = str((result or {}).get("intent") or "")
+        _track = str((result or {}).get("track") or "")
+        if _intent == "general" or _track in (
+                "fragment", "hook_timeout"):
+            return "fallback"
         turns = await self.repo.list_turns(
             session["sessionId"])
         recent = [t.get("rawText") for t in turns[-3:]]

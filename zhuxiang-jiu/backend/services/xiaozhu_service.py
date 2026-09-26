@@ -1308,7 +1308,7 @@ class XiaozhuService:
             # 礼貌词("谢谢")放行走 LLM 轨礼貌护栏(不客气)
             if len(command_text.strip()) <= 3 \
                     and not _is_polite_only(command_text):
-                return await self._save_turn(
+                saved = await self._save_turn(
                     session, channel, text, "chat",
                     {"reply": "没听清——刚才话头丢了，"
                               "请再说一遍完整些",
@@ -1316,6 +1316,10 @@ class XiaozhuService:
                     {"commandText": command_text,
                      "audioMeta": audio_meta,
                      "track": "fragment"})
+                # v91-A 碎片兜底进失败挖掘(自进化闭环)
+                await self._evolve_turn(
+                    session, text, None, saved)
+                return saved
             llm_hit = await self._llm_match(resolved)
             if llm_hit:
                 cmd = next(c for c in COMMANDS
@@ -1374,12 +1378,17 @@ class XiaozhuService:
                 _reply = ("这个我还不会——试试「看新品」"
                           "「问价格」「查信值」「查优惠」或"
                           "「你能干什么」")
-            return await self._save_turn(
+            saved = await self._save_turn(
                 session, channel, text, "general",
                 {"reply": _reply,
                  "suggest": _suggest},
                 {"audioMeta": audio_meta,
                  "commandText": command_text})
+            # v91-A 兜底轮进失败挖掘(自进化闭环断点——
+            # 新意图候选信号, 文档"兜底触发"高权重策略)
+            await self._evolve_turn(
+                session, text, None, saved)
+            return saved
         # v86-B 钩子熔断(事件钩子范式"超时熔断"): 800ms 上限
         # ——DB 慢查询不卡语音主链(高敏沙箱在 _execute 内部
         # 分流, cart.submit/order.pay 经由 confirm 面已确认,
@@ -1393,13 +1402,17 @@ class XiaozhuService:
         except asyncio.TimeoutError:
             logger.warning(
                 "voice48_hook_timeout action=%s", cmd["action"])
-            return await self._save_turn(
+            saved = await self._save_turn(
                 session, channel, text, cmd["action"],
                 {"reply": "查询慢了点——请再问一次",
                  "card": None},
                 {"audioMeta": audio_meta,
                  "commandText": command_text,
                  "track": "hook_timeout"})
+            # v91-A 超时兜底进失败挖掘(自进化闭环)
+            await self._evolve_turn(
+                session, text, None, saved)
+            return saved
         latency = round((time.monotonic() - started)
                         * 1000, 1)
         saved = await self._save_turn(
