@@ -10,10 +10,14 @@
     - 权限校验 → 401/403
 """
 
+import logging
+
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from services import ai_feedback_hooks as ai_hooks
 from services.order_service import OrderService
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/order", tags=["订单服务"])
@@ -48,6 +52,41 @@ def _handle(exc):
 # ============================================================
 # 用户端接口
 # ============================================================
+
+async def _attract_auto_order(member_id: int, order_id: str,
+                              result: dict) -> None:
+    """引流下单转化自动回写(P1 闭环最后一环, fail-soft)
+
+    注册归并(auth P0 修复3)后归因表已有 memberId→clickId
+    映射——下单成功按 memberId 反查归因自动回写订单,
+    前端零改造(attach-order 端点保留双轨; 幂等冲突
+    "已回写订单" ValueError 本钩吞掉)。
+    """
+    try:
+        from services.attract_service import AttractService
+        attrs = await AttractService() \
+            .list_attributions(member_id=member_id)
+        if not attrs:
+            return
+        click_id = attrs[0].get("clickId")
+        if not click_id:
+            return
+        pd = (result or {}).get("priceDetail") or {}
+        amount = float(pd.get("actualAmount")
+                       or pd.get("goodsTotal") or 0)
+        await AttractService().attach_order(
+            click_id=int(click_id), order_id=str(order_id),
+            order_amount=amount, commission=0.0)
+        # 72 号 P4 记忆 conversions 回写(同链复用)
+        from routes.attract_routes import _attract72_on_order
+        await _attract72_on_order(int(click_id))
+        logger.info("attract_auto_order member=%s order=%s "
+                    "click=%s amount=%.2f",
+                    member_id, order_id, click_id, amount)
+    except Exception as exc:  # noqa: BLE001
+        # 幂等拒绝/无归因会员(自然流量)均静默
+        logger.info("attract_auto_order_skip: %s", exc)
+
 
 @router.post("/create")
 async def create_order(
@@ -92,6 +131,9 @@ async def create_order(
                 order_id, member_id, body.get("items", []),
                 address=body.get("address"),
                 remark=str(body.get("remark") or ""))
+            # P1 引流闭环: 下单转化自动回写归因+72号
+            await _attract_auto_order(
+                member_id, order_id, result)
         return result
     except Exception as e:
         raise _handle(e) from e

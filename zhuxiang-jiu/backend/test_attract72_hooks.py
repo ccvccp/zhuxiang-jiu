@@ -208,6 +208,74 @@ class TestDOrderHook:
                f"conversions={m and m.get('conversions')}")
 
 
+class TestFOrderAuto:
+    async def run(self):
+        print("[F 下单自动回写闭环(P1 最后一环)]")
+        from routes.order_routes import (
+            _attract_auto_order,
+        )
+        from repositories.attract_repository import (
+            AttractRepository,
+        )
+        # 造 click + 归因(member 777)
+        click_id, _ = await _mk_click()
+        repo = AttractRepository()
+        await repo.save_attribution({
+            "clickId": click_id, "code": "A-P1TEST",
+            "channel": "direct", "memberId": 777,
+            "registeredAt": "", "orderId": "",
+            "orderAmount": 0.0, "commission": 0.0})
+
+        await _attract_auto_order(
+            777, "ORD-T1",
+            {"priceDetail": {"actualAmount": 268.0}})
+        attr = await repo.get_attribution(click_id)
+        record("回写: 归因表 orderId+金额落库",
+               attr is not None
+               and attr.get("orderId") == "ORD-T1"
+               and abs(float(
+                   attr.get("orderAmount") or 0)
+                   - 268.0) < 1e-6,
+               f"attr={attr}")
+
+        from repositories.attract72_repository import (
+            Attract72Repository,
+        )
+        from services.attract72_registry import (
+            fingerprint_of,
+        )
+        mems = await Attract72Repository()._list(
+            Attract72Repository.TABLE_MEMORY, limit=100)
+        fp = fingerprint_of(UA)
+        m = next((x for x in mems
+                  if x.get("deviceFingerprint") == fp),
+                 None)
+        record("回写: 72号 conversions+1",
+               m is not None
+               and int(m.get("conversions") or 0) >= 1,
+               f"conversions={m and m.get('conversions')}")
+
+        # 幂等: 二次回写吞掉(已回写订单 ValueError)
+        try:
+            await _attract_auto_order(
+                777, "ORD-T2",
+                {"priceDetail": {"actualAmount": 100}})
+            attr2 = await repo.get_attribution(click_id)
+            record("幂等: 二次回写不覆盖",
+                   attr2.get("orderId") == "ORD-T1",
+                   f"orderId={attr2.get('orderId')}")
+        except Exception as exc:
+            record("幂等: 二次回写不覆盖", False, str(exc))
+
+        # 无归因会员: 静默
+        try:
+            await _attract_auto_order(
+                888, "ORD-T3", {"priceDetail": {}})
+            record("无归因会员: 静默跳过", True, "")
+        except Exception as exc:
+            record("无归因会员: 静默跳过", False, str(exc))
+
+
 class TestEKillGuard:
     async def run(self):
         print("[E KILL 制动 + fail-soft]")
@@ -246,7 +314,7 @@ async def _count_snapshots() -> int:
 async def main():
     tests = [TestAFp(), TestBClickHook(),
              TestCRegHook(), TestDOrderHook(),
-             TestEKillGuard()]
+             TestFOrderAuto(), TestEKillGuard()]
     for t in tests:
         await t.run()
     print("\n" + "=" * 56)
