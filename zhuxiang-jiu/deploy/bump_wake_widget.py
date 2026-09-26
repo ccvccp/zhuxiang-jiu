@@ -414,13 +414,18 @@ v=88 -> v=90: 碎片防御+LLM 提速+面板残化流自愈——①v89
     v84 哑流自愈只治纯零治不了 rms 健康识别碎): 连续 3
     轮 final 空/≤2字碎片→硬重置采集链(60s 退避)+
     「重新校准麦克风」提示; widget v=88 -> v=90
+v=90 -> v=91: v91-C member 窗长度下限 4→3(「换一款」
+    3 字被挡——"换一款不能执行"实证; 2 字以下仍拦,
+    3 字需再过动词白名单误触面可控); 服务端 v91 同批:
+    自进化闭环(兜底轮进失败挖掘+failures 端点)+
+    推荐播报瘦身(10块15s断续→6块8s); widget v=90 -> v=91
 """
 import io
 import os
 
 INDEX = os.environ.get("WAKE_INDEX", "/var/www/zxjiu/dist/index.html")
-OLD = "src=/js/voice-wake-widget.js?v=88"
-NEW = "src=/js/voice-wake-widget.js?v=90"
+OLD = "src=/js/voice-wake-widget.js?v=90"
+NEW = "src=/js/voice-wake-widget.js?v=91"
 
 
 def main():

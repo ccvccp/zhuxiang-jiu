@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=90";
+  var VER = "v=91";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -1178,7 +1178,10 @@
     + "|要|退|取|订|找)");
   function memberWindowIntent(ft) {
     var t = String(ft || "").trim();
-    if (t.length < 4 || t.length > 40) { return false; }
+    /* v91-C: 下限 4→3("换一款"3 字被挡——换一款不能执行
+       实证); 2 字以下仍拦(嗯/啊环境声), 3 字需再过动词
+       白名单(换/来一件开头), 误触面可控 */
+    if (t.length < 3 || t.length > 40) { return false; }
     var wakeAt = 0;
     try {
       wakeAt = parseInt(
