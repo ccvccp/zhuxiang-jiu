@@ -38,13 +38,16 @@ CHANNEL_MODE_MOCK = "mock"
 CHANNEL_MODE_MOCK_FALLBACK = "mock_fallback"
 # RPA 通道平台集(官方无发布 API——创作者中心网页版浏览器
 # 自动化发布, 小红书 2026-09-26 立项 / 抖音图文 2026-09-27
-# 接入): 无凭证时回 rpa_pending 回执, 由对话内 browser agent
-# 执行 + 回执登记端点闭环。抖音开放平台视频发布 API 为
-# 资质就绪后的中期升级(PROMO_CHANNEL_DOUYIN_URL 已可覆盖,
-# 配置凭证后自动切真实轨, 不与本 RPA 路线冲突)
+# 接入 / 微博 2026-09-27 接入): 无凭证时回 rpa_pending 回执,
+# 由对话内 browser agent 执行 + 回执登记端点闭环。
+# 微博 RPA 形态特殊: 非浏览器自动化, 走本机官方 weibo-cli
+# (statuses update/upload_url_text, 网关 token 由 CLI 自管)。
+# 前向兼容: 元禾企业认证通过后建应用配 PROMO_CHANNEL_WEIBO_KEY
+# (长命 OAuth token), key 存在时自动切经典 API 轨, RPA 分支
+# 天然让位(仅无 key 时走 rpa_pending)
 CHANNEL_MODE_RPA_PENDING = "rpa_pending"
 CHANNEL_MODE_RPA = "rpa"   # RPA 执行完成态(回执登记成功)
-RPA_PLATFORMS = {"xiaohongshu", "douyin"}
+RPA_PLATFORMS = {"xiaohongshu", "douyin", "weibo"}
 
 # ============================================================
 # 平台认证风格(2026-09-02 实测校准)

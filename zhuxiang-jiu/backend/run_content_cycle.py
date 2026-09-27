@@ -14,7 +14,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BASE = "http://127.0.0.1:8000"
-PLATFORMS = ["douyin", "xiaohongshu"]
+PLATFORMS = ["weibo"]
 REVIEWER = "queue-cycle-0927"
 
 

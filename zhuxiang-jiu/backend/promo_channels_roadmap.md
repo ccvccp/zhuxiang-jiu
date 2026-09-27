@@ -62,9 +62,9 @@
 ## 四、36 号当前发布矩阵终态
 
 ```
-合规即时:  微博(token中) + 百度SEO收录(已通)
-RPA 已落地: 小红书(图文, 第五节) + 抖音(图文, 第六节, 2026-09-27)
-资质后置:  抖音开放平台视频API(企业主体升级项) + 公众号(认证服务号, 建议新增)
+合规即时:  百度SEO收录(已通)
+RPA 已落地: 小红书(图文, 第五节) + 抖音(图文, 第六节) + 微博(CLI桥, 第七节, 2026-09-27)
+资质后置:  微博企业认证建应用(方案C全自动升级) + 抖音开放平台视频API + 公众号(认证服务号, 建议新增)
 永久放弃:  朋友圈
 ```
 
@@ -147,3 +147,47 @@ token 访问，或直接用 App 查看确认。
 企业资质就绪后可申请开放平台视频发布 API，配置
 `PROMO_CHANNEL_DOUYIN_KEY/URL` 后自动切真实 API 轨（代码
 端点已预留），届时视频内容生产线为前提。
+
+## 七、微博 CLI 桥 RPA 发布通道 SOP（2026-09-27 落地）
+
+**架构**：微博并入 RPA_PLATFORMS（无 key → rpa_pending），但
+执行形态与前两平台不同——非浏览器自动化，走**本机官方
+weibo-cli**（@weibo-ai/weibo-cli，npm 发行）。CLI 网关 token
+由其 keychain 自管轮换（直连 c.api.weibo.com 不可行，21332
+实证）。发布主体：微博账号「姜大漂亮姐姐」（UID
+7200614644，正式服务 23000C 余额，写限 60 次/小时）。
+
+**本机运行环境**（发布机 = 开发机）：
+- 便携 node v20：`d:\网站架构设计\nodejs\node-v20.18.2-win-x64`
+- CLI 凭据：keychain，`USERPROFILE` 重定向至
+  `d:\网站架构设计\.weibo-home`（沙箱内可写）
+- 每次调用前置：`$env:Path="...node-v20...;$env:Path"`；
+  `$env:USERPROFILE="d:\网站架构设计\.weibo-home"`
+
+**操作规程**（对用户说「发布微博待发内容」触发）：
+1. 拉清单：`GET /api/promo/rpa/pending`（X-Role: admin），
+   取 `platform=weibo` 条目
+2. 无内容 → 汇报"无待发布"结束
+3. 封面下载：`https://zxjiu.com/api/promo-cover/{id}.png`
+   → 本地临时文件
+4. 发布（图文，共 20C）：
+   - `weibo statuses upload_pic --pic <本地文件>` → 取 pic_id（5C）
+   - `weibo statuses upload_url_text --pic_id <pic_id>
+     --status "<清单原文>" --mblog_statement 1`（15C）→ 取 idstr
+   - **`--mblog_statement 1` 必带**（AI 生成内容平台合规打标，
+     36 号内容为 GLM/rule 生成；缺失责任自负——平台原文）
+   - 纯文本降级：`weibo statuses update --status "<文案>"
+     --mblog_statement 1`（15C）
+5. 回执登记：`register_rpa_receipt.py <cid>
+   https://m.weibo.cn/status/<idstr> <idstr>`（m.weibo.cn
+   接受十进制 id，免 base62 换算）
+6. 汇报发布结果
+
+**风控合规**：同第五节（强制人工 review + 日上限 5）；
+AI 打标为微博侧硬要求；`visible=0` 默认公开。
+
+**前向兼容（方案 C 升级路径）**：元禾企业认证通过后建
+网页应用配 `PROMO_CHANNEL_WEIBO_KEY`（长命 OAuth token）→
+key 存在时自动切经典 share.json API 轨（代码已就绪），
+RPA 分支天然让位。认证材料：公司名称/营业执照号/法人
+身份证正反面/营业执照副本（控制台 identity/edit 提交）。
