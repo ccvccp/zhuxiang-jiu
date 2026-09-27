@@ -14,7 +14,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BASE = "http://127.0.0.1:8000"
-PLATFORMS = ["weibo"]
+PLATFORMS = ["wechat_channels"]
 REVIEWER = "queue-cycle-0927"
 
 
@@ -74,7 +74,7 @@ def main():
                      token)
     hotspots = body.get("data") or []
     print(f"engaged 热点: {len(hotspots)} 个")
-    for hs in (hotspots[:8] if not contents else []):
+    for hs in (hotspots[:20] if not contents else []):
         st, body = call("POST", "/api/promo/contents/generate", token,
                         {"hotspotId": hs["hotspotId"],
                          "platforms": PLATFORMS}, timeout=300)

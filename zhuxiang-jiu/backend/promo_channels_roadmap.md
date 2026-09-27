@@ -205,9 +205,9 @@ RPA 分支天然让位。认证材料：公司名称/营业执照号/法人
   （4.5s/页 + 0.6s 淡入淡出，yuv420p/faststart）
 - 发布（触发式）：wechat_channels 入 RPA_PLATFORMS（无 key
   → rpa_pending），对用户说「**发布视频号待发内容**」→
-  browser agent 打开 channels.weixin.qq.com（首次用户微信
-  扫码，之后登录态持久）→ 上传 mp4 + 清单原文文案 → 发布
-  → `register_rpa_receipt.py` 登记回执
+  channels.weixin.qq.com 上传 mp4 + 清单原文文案 → 发布 →
+  `register_rpa_receipt.py` 登记回执（登录形态见下方首发
+  实证——自动化浏览器被微信风控拦，当前为用户手动发布）
 
 **操作规程**：
 1. 拉清单取 platform=wechat_channels 条目
@@ -219,6 +219,16 @@ RPA 分支天然让位。认证材料：公司名称/营业执照号/法人
    DataTransfer 注入或本机临时 http 服务供浏览器拉取——
    agent 端既有先例技术）
 5. 回执登记（成功作品 URL / 失败 error 留痕重试）
+
+**登录坑位与首发实证（2026-09-27）**：微信对自动化浏览器
+（CDP）扫码登录风控拦截——手机端确认成功（收到登录通知），
+网页端不落登录态、二维码循环刷新死锁；同账号用户自有
+Chrome 秒登录。首发由用户在自己浏览器手动完成（对话供给
+mp4 路径 + 逐字文案 + 表单指引：短标题用过审标题截取、
+合集首条跳过、AI 声明若表单提供须勾选），回执照常登记闭环。
+后续 RPA 化前置条件 = 自动化浏览器登录态移植（cookie 导入
+profile 或非 CDP 浏览器方案）。作品 URL 形态：
+`https://weixin.qq.com/sph/<id>`（#39 = AonC54eLb）。
 
 **风控合规**：同第五节；页4 合规页强制健康警示三行；AI 生成
 内容若平台提供打标选项须勾选。
