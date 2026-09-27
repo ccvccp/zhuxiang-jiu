@@ -494,140 +494,324 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     process.exit(0);
   }
 
-  if (CFG.action === 'getlink') {
-    const captured = [];
-    page.on('response', async (r) => {
-      try {
-        const u = r.url();
-        if (u.includes('cgi-bin') || u.includes('finder')) {
-          const body = await r.text().catch(() => '');
-          if (body) captured.push({ u: u.slice(0, 150), body: body.slice(0, 150000) });
-        }
-      } catch (e) {}
-    });
-    await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded' });
-    await sleep(6000);
+  if (CFG.action === 'fixclick') {
+    const gotoList = async () => {
+      try { await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded', timeout: 30000 }); return true; }
+      catch (e) { LOG('goto err: ' + String(e.message).slice(0, 60)); return false; }
+    };
+    if (!await gotoList()) { await sleep(2500); await gotoList(); }
+    await sleep(4000);
+    if (page.url().includes('login.html')) {
+      LOG('SESSION_EXPIRED — 请扫码');
+      const dl = Date.now() + 10 * 60000;
+      while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
+      if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      await sleep(2000);
+      if (!await gotoList()) { await sleep(2500); await gotoList(); }
+      await sleep(5000);
+    }
+    let f = page.frames().find(x => x.url().includes('/micro/content/post'));
+    if (!f) { LOG('NO_LIST_FRAME'); await browser.close(); process.exit(3); }
+    await page.bringToFront();
     try {
       const ctx = browser.defaultBrowserContext();
       await ctx.overridePermissions('https://channels.weixin.qq.com', ['clipboard-read', 'clipboard-write']);
       LOG('clipboard perms granted');
     } catch (e) { LOG('perm err ' + e.message); }
-    const f = page.frames().find(x => x.url().includes('/micro/content/post')) || page.frames()[page.frames().length - 1];
-    LOG('list frame: ' + f.url().slice(0, 80));
-    const info = await f.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll('[class*=post-item], [class*=post-list] > *, li'));
-      const texts = Array.from(document.querySelectorAll('div,span,a,button')).map(e => (e.innerText || '').trim()).filter(t => t && t.length < 15);
-      return { cards: cards.length, uniqTexts: Array.from(new Set(texts)).slice(0, 40) };
-    });
-    LOG('list info cards=' + info.cards);
-    LOG('texts: ' + JSON.stringify(info.uniqTexts));
-    await page.bringToFront();
-    let link = '';
-    let shared = false;
-    // 真实鼠标: 移到卡片中心(CSS :hover 需真实事件) → 菜单出现 → 真实点击复制视频链接
-    try {
-      const ifrRect = await page.evaluate(() => {
-        const ifr = document.querySelector('iframe');
-        if (!ifr) return null;
-        const r = ifr.getBoundingClientRect();
-        return { x: r.x, y: r.y };
+
+    // CDP 真实点击: force=0.5 让 pointerdown.pressure 与人手一致 (Vue 压力校验)
+    const cdp = await page.createCDPSession();
+    const cdpClick = async (x, y) => {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', pointerType: 'mouse' });
+      await sleep(150);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+      await sleep(90);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+    };
+    const framePt = async (sel) => f.evaluate((s) => {
+      const texts = Array.from(document.querySelectorAll('div,span,a,button')).filter(e => e.children.length === 0 && (e.innerText || '').trim() === s);
+      const visTexts = texts.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.x >= 0 && r.x < window.innerWidth - 5 && r.y >= 0 && r.y < window.innerHeight - 5; });
+      if (!visTexts.length) return null;
+      const text = visTexts[0];
+      // item 容器 = 文本元素向上找 class 含 item 的层
+      let item = text;
+      for (let i = 0; i < 4 && item.parentElement; i++) { item = item.parentElement; if (/item/i.test(String(item.className))) break; }
+      // 图标 = 容器内空文本且有尺寸的子元素 (处理器所在, 文字标签是死目标)
+      const icons = Array.from(item.querySelectorAll('*')).filter(e => {
+        const r = e.getBoundingClientRect();
+        return r.width > 4 && r.height > 4 && !(e.innerText || '').trim();
       });
-      const cardRect = await f.evaluate(() => {
-        const leaf = Array.from(document.querySelectorAll('div,span')).find(e => e.children.length === 0 && (e.innerText || '').startsWith('中秋团圆宴白酒清单火了'));
-        if (!leaf) return null;
-        let card = leaf;
-        for (let i = 0; i < 6 && card.parentElement; i++) {
-          card = card.parentElement;
-          const r = card.getBoundingClientRect();
-          if (r.width > 200 && r.height > 50) break;
-        }
-        const r = card.getBoundingClientRect();
-        return { x: r.x, y: r.y, w: r.width, h: r.height };
-      });
-      LOG('iframe: ' + JSON.stringify(ifrRect) + ' card: ' + JSON.stringify(cardRect));
-      if (ifrRect && cardRect) {
-        // 全局找「可见的」分享按钮 (第一张卡的操作排最前) → 真实点击开对话框
-        const shareRect = await f.evaluate(() => {
-          const cands = Array.from(document.querySelectorAll('div,span,a,button')).filter(e => e.children.length === 0 && (e.innerText || '').trim() === '分享');
-          const vis = cands.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
-          if (!vis.length) return null;
-          const r = vis[0].getBoundingClientRect();
-          return { x: r.x, y: r.y, w: r.width, h: r.height };
-        });
-        LOG('share btn rect: ' + JSON.stringify(shareRect));
-        if (shareRect) {
-          shared = true;
-          const sx = ifrRect.x + shareRect.x + shareRect.w / 2;
-          const sy = ifrRect.y + shareRect.y + shareRect.h / 2;
-          await page.mouse.move(sx, sy, { steps: 3 });
-          await sleep(200);
-          await page.mouse.click(sx, sy);
-          LOG('real click 分享 at ' + Math.round(sx) + ',' + Math.round(sy));
-          await sleep(4000);
-          await page.screenshot({ path: 'share_open.png' });
-          LOG('shot share_open.png');
-          // 对话框内找可见的 复制视频链接 → 真实点击
-          const copyRect = await f.evaluate(() => {
-            const els = Array.from(document.querySelectorAll('div,span,a,button')).filter(e => (e.innerText || '').trim() === '复制视频链接');
-            const vis = els.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
-            if (!vis.length) return null;
-            const r = vis[0].getBoundingClientRect();
-            return { x: r.x, y: r.y, w: r.width, h: r.height };
-          });
-          LOG('copy btn rect: ' + JSON.stringify(copyRect));
-          if (copyRect) {
-            const cx = ifrRect.x + copyRect.x + copyRect.w / 2;
-            const cy = ifrRect.y + copyRect.y + copyRect.h / 2;
-            await page.mouse.move(cx, cy, { steps: 3 });
-            await sleep(200);
-            await page.mouse.click(cx, cy);
-            LOG('real click 复制视频链接 at ' + Math.round(cx) + ',' + Math.round(cy));
-            await sleep(2500);
-            try { link = await page.evaluate(() => navigator.clipboard.readText()); } catch (e) { }
-            LOG('clipboard: ' + String(link).slice(0, 150));
-            if (!/^https?:/.test(String(link))) link = '';
-          }
-        }
-      }
-    } catch (e) { LOG('mouse flow err: ' + e.message); }
-    // 2) QR 兜底 (排除转圈图标, 含 canvas)
-    if (!link) {
-      await sleep(4000);
-      const qr = await f.evaluate(() => {
-        const SPINNER = 'iVBORw0KGgoAAAANSUhEUgAAAKAAAACgCAMAAAC8EZcf';
-        const imgs = Array.from(document.images).filter(i => i.src && i.src.startsWith('data:image/png;base64,') && !i.src.includes(SPINNER) && i.width >= 100);
-        if (imgs.length) return imgs[0].src;
-        const cvs = Array.from(document.querySelectorAll('canvas')).filter(c => c.width >= 100 && c.height >= 100);
-        if (cvs.length) { try { return cvs[0].toDataURL('image/png'); } catch (e) { } }
-        return '';
-      });
-      LOG('qr fallback length: ' + qr.length);
-      if (qr) {
-        const buf = Buffer.from(qr.split(',')[1], 'base64');
-        fs.writeFileSync('qr.png', buf);
-        LOG('qr.png saved ' + buf.length + ' bytes');
-        try {
-          const { Jimp } = require('jimp');
-          const jsQR = require('jsqr');
-          const image = await Jimp.read(buf);
-          const res = jsQR(image.bitmap.data, image.bitmap.width, image.bitmap.height);
-          if (res && res.data) { link = res.data; LOG('decoded link: ' + link); }
-          else LOG('qr decode failed (jsqr)');
-        } catch (e) { LOG('jsqr err: ' + e.message); }
+      const r = (icons[0] || item).getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), icons: icons.length };
+    }, sel);
+
+    // 验证1: 修改描述和封面 (开编辑器)
+    let pt = await framePt('修改描述和封面');
+    LOG('edit btn pt: ' + JSON.stringify(pt));
+    if (pt) {
+      await cdpClick(pt.x, pt.y);
+      LOG('cdpClick(force=0.5) 修改描述和封面');
+      await sleep(3500);
+      const u = page.url();
+      LOG('编辑器 url=' + u.slice(0, 110));
+      await page.screenshot({ path: 'fixclick_1.png' });
+      // 编辑器已整页导航打开(coverEdit), 验证成功 — 回列表继续验证分享
+      await gotoList();
+      await sleep(5000);
+    }
+
+    // 验证2: 分享 → 复制视频链接 → 剪贴板
+    f = page.frames().find(x => x.url().includes('/micro/content/post')) || f;
+    pt = await framePt('分享');
+    LOG('share btn pt: ' + JSON.stringify(pt));
+    if (pt) {
+      await cdpClick(pt.x, pt.y);
+      LOG('cdpClick 分享');
+      await sleep(3000);
+      await page.screenshot({ path: 'fixclick_2_share.png' });
+      f = page.frames().find(x => x.url().includes('/micro/content/post')) || f;
+      const cp = await framePt('复制视频链接');
+      LOG('copy btn pt: ' + JSON.stringify(cp));
+      if (cp) {
+        await cdpClick(cp.x, cp.y);
+        LOG('cdpClick 复制视频链接');
+        await sleep(2500);
+        let link = '';
+        try { link = await page.evaluate(() => navigator.clipboard.readText()); } catch (e) { LOG('clipboard err ' + e.message); }
+        LOG('CLIPBOARD LINK: ' + String(link).slice(0, 150));
+        fs.writeFileSync('fixclick_link.txt', String(link));
       }
     }
-    // 3) 网络捕获全量正则 + 落盘
-    if (!link) {
-      const bodies = captured.map(c => c.body).join('\n');
-      const m = bodies.match(/https?:\/\/[^"'\\\s]*sph[^"'\\\s]*/) || bodies.match(/https?:\\?\/\\?\/[^"'\\\s]*sph[^"'\\\s]*/);
-      if (m) { link = m[0].replace(/\\\//g, '/'); LOG('link from network: ' + link); }
-    }
-    fs.writeFileSync('captured_full.json', JSON.stringify(captured));
-    LOG('captured ' + captured.length + ' responses (captured_full.json)');
-    fs.writeFileSync('link_result.json', JSON.stringify({ shared, link: String(link) }, null, 2));
-    LOG('GETLINK_DONE');
+    LOG('FIXCLICK_DONE');
     await browser.close();
     process.exit(0);
+  }
+
+  if (CFG.action === 'evtspy') {
+    const gotoList = async () => {
+      try { await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded', timeout: 30000 }); return true; }
+      catch (e) { LOG('goto err: ' + String(e.message).slice(0, 60)); return false; }
+    };
+    if (!await gotoList()) { await sleep(2500); await gotoList(); }
+    await sleep(4000);
+    if (page.url().includes('login.html')) {
+      LOG('SESSION_EXPIRED — 请扫码');
+      const dl = Date.now() + 10 * 60000;
+      while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
+      if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      await sleep(2000);
+      if (!await gotoList()) { await sleep(2500); await gotoList(); }
+      await sleep(5000);
+    }
+    let f = page.frames().find(x => x.url().includes('/micro/content/post'));
+    if (!f) { LOG('NO_LIST_FRAME'); await browser.close(); process.exit(3); }
+    await page.bringToFront();
+
+    // 0. Vue 标记探测
+    const vue = await f.evaluate(() => {
+      const el = Array.from(document.querySelectorAll('div,span,a,button')).find(e => (e.innerText || '').trim() === '修改描述和封面');
+      if (!el) return 'no-el';
+      let n = el; const marks = [];
+      for (let k = 0; k < 8 && n; k++) {
+        const vk = Object.keys(n).find(key => /vue|__v_/i.test(key));
+        if (vk) marks.push({ k, vk, tag: n.tagName });
+        n = n.parentElement;
+      }
+      return marks;
+    });
+    LOG('vue marks: ' + JSON.stringify(vue));
+
+    // 1. 装全事件间谍 (element/body/document × capture/bubble × 事件类型)
+    const installSpy = () => f.evaluate(() => {
+      window.__evt = [];
+      const el = Array.from(document.querySelectorAll('div,span,a,button')).find(e => (e.innerText || '').trim() === '修改描述和封面');
+      if (!el) return false;
+      const rec = (phase) => (e) => {
+        window.__evt.push(phase + '|' + e.type + '|tgt=' + (e.target.tagName || '') + ':' + String(e.target.innerText || '').trim().slice(0, 8) + '|trusted=' + e.isTrusted + (e.type.startsWith('pointer') ? '|pp=' + e.pressure + ',pt=' + e.pointerType + ',pr=' + e.isPrimary : '') + (e.type === 'click' || e.type.startsWith('mouse') ? '|btn=' + e.button + ',cx=' + Math.round(e.clientX) + ',cy=' + Math.round(e.clientY) : ''));
+      };
+      const nodes = [
+        ['el', el], ['parent', el.parentElement], ['gparent', el.parentElement ? el.parentElement.parentElement : null],
+        ['body', document.body], ['doc', document]
+      ];
+      const types = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'mouseover', 'mouseenter'];
+      for (const [name, node] of nodes) {
+        if (!node) continue;
+        for (const t of types) {
+          try { node.addEventListener(t, rec(name + ':' + t + ':B'), false); } catch (e) {}
+          try { node.addEventListener(t, rec(name + ':' + t + ':C'), true); } catch (e) {}
+        }
+      }
+      const r = el.getBoundingClientRect();
+      window.__elpt = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      return true;
+    });
+    LOG('spy installed: ' + await installSpy());
+
+    // 2. bot 真实点击
+    const pt = await f.evaluate(() => window.__elpt);
+    LOG('bot click at ' + Math.round(pt.x) + ',' + Math.round(pt.y));
+    await page.mouse.move(pt.x, pt.y, { steps: 8 });
+    await sleep(600);
+    await page.mouse.click(pt.x, pt.y);
+    await sleep(2500);
+    const botLog = await f.evaluate(() => window.__evt);
+    fs.writeFileSync('evtspy_bot.json', JSON.stringify(botLog, null, 1));
+    LOG('BOT EVENTS (' + botLog.length + '): ' + JSON.stringify(botLog.slice(0, 20)));
+    await page.screenshot({ path: 'evtspy_bot.png' });
+
+    // 3. 请用户点击同一按钮, 对比
+    await f.evaluate(() => { window.__evt = []; });
+    LOG('=== 请你在 Chrome 窗口里用鼠标点一下「修改描述和封面」(90秒) ===');
+    const dl = Date.now() + 90000;
+    let userOpened = false;
+    while (Date.now() < dl) {
+      await sleep(2000);
+      const n = await f.evaluate(() => window.__evt.length).catch(() => 0);
+      if (n > 0) { userOpened = true; break; }
+    }
+    await sleep(3000);
+    const userLog = await f.evaluate(() => window.__evt).catch(() => []);
+    fs.writeFileSync('evtspy_user.json', JSON.stringify(userLog, null, 1));
+    LOG('USER EVENTS (' + userLog.length + '): ' + JSON.stringify(userLog.slice(0, 30)));
+    await page.screenshot({ path: 'evtspy_user.png' });
+    LOG('EVTSPY_DONE');
+    await browser.close();
+    process.exit(0);
+  }
+
+  if (CFG.action === 'rsprops') {
+    const gotoList = async () => {
+      try { await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded', timeout: 30000 }); return true; }
+      catch (e) { LOG('goto err: ' + String(e.message).slice(0, 60)); return false; }
+    };
+    if (!await gotoList()) { await sleep(2500); await gotoList(); }
+    await sleep(4000);
+    if (page.url().includes('login.html')) {
+      LOG('SESSION_EXPIRED — 请扫码');
+      const dl = Date.now() + 10 * 60000;
+      while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
+      if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      await sleep(2000);
+      if (!await gotoList()) { await sleep(2500); await gotoList(); }
+      await sleep(5000);
+    }
+    let f = page.frames().find(x => x.url().includes('/micro/content/post'));
+    if (!f) { LOG('NO_LIST_FRAME'); await browser.close(); process.exit(3); }
+    await page.bringToFront();
+
+    // 1. React props 全画像: 修改描述和封面 祖先链上哪层挂了什么 handler
+    const probe = await f.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('div,span,a,button')).filter(e => (e.innerText || '').trim() === '修改描述和封面');
+      return all.slice(0, 2).map((el, idx) => {
+        let n = el; const levels = [];
+        for (let k = 0; k < 8 && n; k++) {
+          const pk = Object.keys(n).find(key => key.startsWith('__reactProps$'));
+          if (pk) {
+            const props = n[pk] || {};
+            const hs = Object.keys(props).filter(h => /^on[A-Z]/.test(h));
+            levels.push({ k, tag: n.tagName, cls: String(n.className).slice(0, 36), handlers: hs });
+          }
+          n = n.parentElement;
+        }
+        return { idx, levels };
+      });
+    });
+    LOG('react props map: ' + JSON.stringify(probe));
+    fs.writeFileSync('rsprops.json', JSON.stringify(probe, null, 2));
+
+    // 2. 直接调用最近带 onClick 的祖先 handler (绕过事件系统)
+    const invoked = await f.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('div,span,a,button')).filter(e => (e.innerText || '').trim() === '修改描述和封面');
+      if (!all.length) return 'no-element';
+      const el = all[0];
+      let n = el;
+      for (let k = 0; k < 10 && n; k++) {
+        const pk = Object.keys(n).find(key => key.startsWith('__reactProps$'));
+        if (pk && n[pk] && typeof n[pk].onClick === 'function') {
+          const fake = { preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}, target: n, currentTarget: n, type: 'click', isTrusted: true, clientX: 0, clientY: 0 };
+          try { n[pk].onClick(fake); return 'invoked@' + k + ':' + String(n.className).slice(0, 30); }
+          catch (e) { return 'invoke-err:' + String(e.message).slice(0, 60); }
+        }
+        n = n.parentElement;
+      }
+      return 'no-onClick-found';
+    });
+    LOG('direct invoke: ' + invoked);
+    await sleep(4000);
+    await page.screenshot({ path: 'rsprops_1.png' });
+    LOG('url now: ' + page.url());
+    f = page.frames().find(x => x.url().includes('/micro/content/post')) || f;
+    const opened = await f.evaluate(() => (document.body.innerText || '').includes('原视频信息')).catch(() => false);
+    LOG('editor opened: ' + opened);
+    LOG('RSPROPS_DONE');
+    await browser.close();
+    process.exit(0);
+  }
+
+  if (CFG.action === 'getlink') {
+    try {
+      await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } catch (e) { await sleep(2500); await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded' }).catch(() => {}); }
+    await sleep(4000);
+    if (page.url().includes('login.html')) {
+      LOG('SESSION_EXPIRED — 请扫码');
+      const dl = Date.now() + 10 * 60000;
+      while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
+      if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      await sleep(2000);
+      await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await sleep(5000);
+    }
+    let f = page.frames().find(x => x.url().includes('/micro/content/post'));
+    if (!f) { LOG('NO_LIST_FRAME'); await browser.close(); process.exit(3); }
+    await page.bringToFront();
+    try {
+      const ctx = browser.defaultBrowserContext();
+      await ctx.overridePermissions('https://channels.weixin.qq.com', ['clipboard-read', 'clipboard-write']);
+    } catch (e) { }
+    // 铁律: Vue opr 菜单处理器绑在图标(空文本子元素)上, 文字标签是死目标; CDP force=0.5 压力对齐人手
+    const cdp = await page.createCDPSession();
+    const cdpClick = async (x, y) => {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', pointerType: 'mouse' });
+      await sleep(150);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+      await sleep(90);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+    };
+    const framePt = async (sel, idx) => f.evaluate((s, i) => {
+      const texts = Array.from(document.querySelectorAll('div,span,a,button')).filter(e => e.children.length === 0 && (e.innerText || '').trim() === s);
+      const visTexts = texts.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.x >= 0 && r.x < window.innerWidth - 5 && r.y >= 0 && r.y < window.innerHeight - 5; });
+      if (!visTexts.length) return null;
+      const text = visTexts[Math.min(i, visTexts.length - 1)];
+      let item = text;
+      for (let k = 0; k < 4 && item.parentElement; k++) { item = item.parentElement; if (/item/i.test(String(item.className))) break; }
+      const icons = Array.from(item.querySelectorAll('*')).filter(e => { const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4 && !(e.innerText || '').trim(); });
+      const r = (icons[0] || item).getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    }, sel, idx || 0);
+    const cardIdx = CFG.cardIndex || 0;
+    const pt = await framePt('分享', cardIdx);
+    LOG('share pt (card ' + cardIdx + '): ' + JSON.stringify(pt));
+    let link = '';
+    if (pt) {
+      await cdpClick(pt.x, pt.y);
+      LOG('cdpClick 分享');
+      await sleep(3000);
+      const cp = await framePt('复制视频链接', 0);
+      LOG('copy pt: ' + JSON.stringify(cp));
+      if (cp) {
+        await cdpClick(cp.x, cp.y);
+        LOG('cdpClick 复制视频链接');
+        await sleep(2500);
+        try { link = await page.evaluate(() => navigator.clipboard.readText()); } catch (e) { }
+        if (!/^https?:/.test(String(link))) link = '';
+      }
+    }
+    LOG('LINK: ' + link);
+    fs.writeFileSync('link_result.json', JSON.stringify({ link }, null, 2));
+    LOG('GETLINK_DONE');
+    await browser.close();
+    process.exit(link ? 0 : 7);
   }
 
   LOG('unknown action');

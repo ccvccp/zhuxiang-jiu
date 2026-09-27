@@ -260,10 +260,19 @@ AonC54eLb，再拷贝即变新 ID）——链接非稳定主键，回执以发�
 拷贝为准；④ 列表 XHR `post_list` 响应含 objectId/exportId/
 objectNonce 等全部帖子元数据（响应捕获钩子须在 goto 前注册）。
 
-**getlink 待硬化（已知缺口）**：分享对话框「复制视频链接」
-点击未打通（卡片操作区按钮疑似需真实 hover 行唤出，合成与坐标
-点击均未开对话框）——后续路径：真实 hover 卡片行 / React fiber
-props 直读 / 手机预览 QR 解码。当前以用户手动拷贝 sph 链接收尾。
+**trusted click 之谜告破 + getlink 全自动（2026-09-27 深夜）**：
+卡片操作项（修改描述和封面/分享/删除）处理器绑在**图标**（item
+容器内空文本子元素）上，**文字标签是死兄弟节点**——按文字中心
+点击全部无效（事件到达但无处理器响应）。正解两件套：① framePt
+定位 item 容器内空文本子元素（图标）取坐标；② CDP
+`Input.dispatchMouseEvent` 带 `force: 0.5`（人手 pointerdown
+pressure=0.5，CDP 默认 0）。铁律更新：evtspy 实证（bot 事件
+target=文字 DIV vs 用户 target=图标 DIV）；列表页为 Vue 2
+（`__vue__` 标记），无 `__reactProps$`。**getlink 已全自动**：
+分享→复制视频链接→剪贴板读取 sph 链接（config.cardIndex 选卡，
+实证秒回）。另白捡：编辑器可直接 URL 进入
+`/platform/post/coverEdit?objectId=<exportId>`（post_list 响应
+含 exportId，无需任何点击）。
 
 **升级路径**：视频产线产物同时适配抖音（视频形态更长效），
 后续「发布抖音待发内容」可复用 mp4 走视频发布页。
