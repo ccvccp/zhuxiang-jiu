@@ -79,9 +79,10 @@ PROMO_PLATFORM_XHS = "xiaohongshu"
 PROMO_PLATFORM_MOMENTS = "wechat_moments"
 PROMO_PLATFORM_WEIBO = "weibo"              # 微博(话题借势, P1)
 PROMO_PLATFORM_CHANNELS = "wechat_channels"  # 视频号(熟龄信任, P1)
+PROMO_PLATFORM_WECHAT_MP = "wechat_mp"      # 微信公众号(认证服务号群发, 2026-09-27 接入)
 PROMO_PLATFORMS = (PROMO_PLATFORM_DOUYIN, PROMO_PLATFORM_XHS,
                    PROMO_PLATFORM_MOMENTS, PROMO_PLATFORM_WEIBO,
-                   PROMO_PLATFORM_CHANNELS)
+                   PROMO_PLATFORM_CHANNELS, PROMO_PLATFORM_WECHAT_MP)
 
 # 内容状态机(三审闸门 + 发布队列)
 CONTENT_STATUS_PENDING = "pending"      # 待人工审核(一审二审已过)
@@ -151,6 +152,7 @@ GOLDEN_WINDOWS = {
     PROMO_PLATFORM_MOMENTS: ((19, 22),),
     PROMO_PLATFORM_WEIBO: ((12, 14), (21, 23)),      # P1: 微博(午休+晚间热榜峰)
     PROMO_PLATFORM_CHANNELS: ((18, 21),),            # P1: 视频号(晚饭后熟龄活跃)
+    PROMO_PLATFORM_WECHAT_MP: ((8, 9), (20, 21)),    # 公众号(晨间通勤+晚八点推送峰)
 }
 
 # Agent 模型档位与三级降级(设计文档 §3.4)
@@ -161,12 +163,14 @@ PROMO_LLM_FALLBACK_MODEL = "glm-4-flash"
 PROMO_CHANNEL_MODE = os.environ.get("PROMO_CHANNEL_MODE", "mock")
 
 # 发布通道凭证环境变量(未配置该平台回退确定性 mock 回执)
+# wechat_mp 凭证格式: appid|secret(stable_token 换取 access_token)
 PROMO_CHANNEL_API_KEY_ENV = {
     PROMO_PLATFORM_DOUYIN: "PROMO_CHANNEL_DOUYIN_KEY",
     PROMO_PLATFORM_XHS: "PROMO_CHANNEL_XHS_KEY",
     PROMO_PLATFORM_MOMENTS: "PROMO_CHANNEL_MOMENTS_KEY",
     PROMO_PLATFORM_WEIBO: "PROMO_CHANNEL_WEIBO_KEY",
     PROMO_PLATFORM_CHANNELS: "PROMO_CHANNEL_CHANNELS_KEY",
+    PROMO_PLATFORM_WECHAT_MP: "PROMO_CHANNEL_WECHAT_MP_KEY",
 }
 
 # P2: 百度普通收录推送(SITEMAP ping / urls 主动推送)
@@ -223,6 +227,14 @@ DEFAULT_AUDIENCE_PROFILES = {
         "scenes": ("节庆送礼", "家宴", "商务宴请"),
         "productTones": ("高端礼盒", "陈酿", "礼盒"),
     },
+    PROMO_PLATFORM_WECHAT_MP: {
+        "platform": PROMO_PLATFORM_WECHAT_MP,
+        "audience": "关注公众号的订阅用户(30+ 白酒消费与礼赠决策人群)",
+        "tone": "深度、可信、编辑感(官方推送语境)",
+        "format": "标题≤64字 + 分段正文 + 摘要",
+        "scenes": ("节庆推送", "会员活动", "品牌故事"),
+        "productTones": ("高端礼盒", "陈酿", "收藏款"),
+    },
 }
 
 # 内容角度 → 平台亲和度(三维匹配第一维; 0-1)
@@ -248,6 +260,11 @@ ANGLE_PLATFORM_AFFINITY = {
         "节庆": 0.9, "送礼": 0.9, "家宴": 0.9, "商务": 0.85,
         "文化": 0.75, "婚宴": 0.65, "场景": 0.6, "优惠": 0.55,
         "日常": 0.5, "工艺": 0.55,
+    },
+    PROMO_PLATFORM_WECHAT_MP: {
+        "节庆": 0.9, "送礼": 0.85, "文化": 0.85, "工艺": 0.8,
+        "商务": 0.8, "家宴": 0.75, "婚宴": 0.6, "场景": 0.55,
+        "日常": 0.4, "优惠": 0.5, "热点": 0.4, "话题": 0.4,
     },
 }
 

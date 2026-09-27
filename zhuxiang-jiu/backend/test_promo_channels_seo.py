@@ -134,7 +134,10 @@ class TestMockReceipt:
 class TestRealFallback:
     async def run(self):
         svc = PromoChannelService()
-        content = {"contentId": 7, "platform": "weibo",
+        # 2026-09-27 修正: weibo 已入 RPA_PLATFORMS(无 key →
+        # rpa_pending), mock_fallback 语义改用非 RPA 平台
+        # wechat_moments 检验
+        content = {"contentId": 7, "platform": "wechat_moments",
                    "title": "t", "body": "b"}
 
         # real 模式但未配置凭证 → mock_fallback + error 说明
@@ -148,7 +151,7 @@ class TestRealFallback:
             record("回退-回执仍含publishId", bool(receipt["publishId"]))
 
             # 配置凭证但平台 API 调用失败(注入异常) → mock_fallback
-            os.environ["PROMO_CHANNEL_WEIBO_KEY"] = "k"
+            os.environ["PROMO_CHANNEL_MOMENTS_KEY"] = "k"
             original = svc._publish_real
             async def _boom(*a, **k):
                 raise RuntimeError("平台接口超时")
@@ -161,10 +164,11 @@ class TestRealFallback:
                        and "平台接口超时" in receipt2["error"],
                        f"实际{receipt2}")
                 record("回退-产出不中断",
-                       receipt2["publishId"] == "PUB-weibo-7")
+                       receipt2["publishId"]
+                       == "PUB-wechat_moments-7")
             finally:
                 svc._publish_real = original
-            os.environ.pop("PROMO_CHANNEL_WEIBO_KEY", None)
+            os.environ.pop("PROMO_CHANNEL_MOMENTS_KEY", None)
         finally:
             os.environ["PROMO_CHANNEL_MODE"] = "mock"
 

@@ -5,6 +5,12 @@
       PROMO_CHANNEL_{PLATFORM}_KEY 配置时走平台开放 API 发布;
       未配置/调用失败回退确定性 mock 回执(mode=mock_fallback),
       产出永不中断(Mock-first, 同 P1-2 OAuth / P1-3 实名惯例)
+    - 微信公众号专用轨(2026-09-27 接入, wechat_mp): 认证服务号
+      官方群发 API(素材上传+草稿+群发, 完全合规)——多步协议
+      stable_token(Redis 缓存) → 封面 add_material(multipart)
+      → draft/add → mass/preview|sendall, 月度配额闸门
+      (认证服务号自然月 4 次); 凭证 PROMO_CHANNEL_WECHAT_MP_KEY
+      格式 appid|secret
     - 百度普通收录推送: BAIDU_PUSH_SITE/TOKEN 配置时 POST
       data.zz.baidu.com/urls 主动推送; 未配置走确定性 mock 回执
     - 推送幂等: 同 URL 当日不重推(dateKey 维度去重)
@@ -15,9 +21,11 @@
 """
 
 import contextlib
+import html as html_lib
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.request
 import urllib.parse
@@ -26,8 +34,10 @@ from datetime import datetime, UTC
 from repositories.promo_repository import (
     PromoRepository,
     PROMO_PLATFORMS, PROMO_CHANNEL_API_KEY_ENV,
+    PROMO_PLATFORM_WECHAT_MP,
     SEO_PUSH_STATUS_OK, SEO_PUSH_STATUS_FAILED,
 )
+from repositories.backend import is_redis_mode, get_redis_client, _k
 from repositories.attract_repository import SITE_BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -67,6 +77,10 @@ PLATFORM_AUTH_STYLES = {
     # 证明端点与协议正确, 配 access_token 表单字段即可用
     "weibo": AUTH_STYLE_FORM,
     "wechat_channels": AUTH_STYLE_QUERY,
+    # 公众号: access_token 查询参数(微信系惯例)——但凭证为
+    # appid|secret, 须先经 stable_token 换取(专用轨, 不走通用
+    # _publish_real 单端点范式)
+    "wechat_mp": AUTH_STYLE_QUERY,
 }
 
 # 真实平台开放 API 端点映射(默认值; 可经 PROMO_CHANNEL_{X}_URL 覆盖)
@@ -78,12 +92,16 @@ PLATFORM_AUTH_STYLES = {
 #     视频发布接口(OAuth 头鉴权)或自建代理
 #   - xiaohongshu/wechat_moments/wechat_channels: 无公开第三方发布
 #     API, 默认值为占位, 资质就绪后经 _URL 环境变量校准
+#   - wechat_mp(2026-09-27): 官方群发 API 域(api.weixin.qq.com)，
+#     值为 API base(stable_token/material/draft/mass 多端点拼前缀，
+#     PROMO_CHANNEL_WECHAT_MP_URL 可整体切换代理)
 PLATFORM_API_ENDPOINTS = {
     "douyin": "https://open.douyin.com/api/promotion/v1/content/publish",
     "xiaohongshu": "https://edith.xiaohongshu.com/api/sns/web/v1/note/publish",
     "wechat_moments": "https://api.weixin.qq.com/cgi-bin/moments/publish",
     "weibo": "https://api.weibo.com/2/statuses/share.json",
     "wechat_channels": "https://api.weixin.qq.com/cgi-bin/channels/publish",
+    "wechat_mp": "https://api.weixin.qq.com",
 }
 
 # 各平台发布回执 ID 字段别名(响应解析兼容)
@@ -173,6 +191,81 @@ def baidu_push_config() -> tuple[str, str]:
     return site, token
 
 
+# ============================================================
+# 微信公众号群发 API 通道(wechat_mp, 2026-09-27 接入)
+# ============================================================
+# 认证服务号官方群发 API——完全合规免费, 自然月群发配额 4 次
+# (与发布队列日上限 PROMO_DAILY_CAP 相互独立的第二道闸门)。
+# 协议四步: stable_token(缓存) → 封面 add_material(永久素材)
+# → draft/add(草稿) → mass/preview|sendall(预览|群发)。
+WECHAT_MP_SEND_MODE_PREVIEW = "preview"   # 预览(指定 openid 试收, 不计配额)
+WECHAT_MP_SEND_MODE_SEND = "send"         # 正式群发(全体关注者, 计月度配额)
+# 认证服务号自然月群发上限(平台硬限 4 次/月)
+WECHAT_MP_MONTHLY_CAP_DEFAULT = 4
+# access_token Redis 缓存键(有效期约 7200s, 提前 200s 失效)
+_WECHAT_MP_TOKEN_KEY = _k("promo", "wechat_mp", "token")
+# 内存回退态(STORE_MODE=asyncio 单测环境): token 缓存 + 月度配额计数
+_WECHAT_MP_MEM: dict = {"token": "", "tokenExpiresAt": 0.0, "quota": {}}
+
+
+def wechat_mp_send_mode() -> str:
+    """公众号发送形态: preview(默认, 试收验证) / send(正式群发)
+
+    安全默认 preview——凭证到位后先给运营者 openid 试收,
+    人工确认版式后再切 send 正式群发。
+    """
+    mode = (os.environ.get("PROMO_WECHAT_MP_SEND_MODE", "")
+            or WECHAT_MP_SEND_MODE_PREVIEW).strip().lower()
+    return (mode if mode in (WECHAT_MP_SEND_MODE_PREVIEW,
+                             WECHAT_MP_SEND_MODE_SEND)
+            else WECHAT_MP_SEND_MODE_PREVIEW)
+
+
+def wechat_mp_monthly_cap() -> int:
+    """月度群发配额上限(默认 4=认证服务号平台硬限)"""
+    try:
+        return max(1, int(os.environ.get("PROMO_WECHAT_MP_MONTHLY_CAP",
+                                        WECHAT_MP_MONTHLY_CAP_DEFAULT)))
+    except ValueError:
+        return WECHAT_MP_MONTHLY_CAP_DEFAULT
+
+
+def _wechat_mp_month_key() -> str:
+    """自然月键(配额按月结算)"""
+    return datetime.now(UTC).strftime("%Y%m")
+
+
+def _wechat_mp_errtext(body) -> str:
+    """公众号 errcode 业务错提取(微信惯例: HTTP 200 + errcode)
+
+    40164=出口 IP 不在白名单——access_token 硬要求: 生产出口
+    47.236.61.117 须加入 mp.weixin.qq.com 设置与开发→基本配置→
+    IP 白名单, 否则 stable_token 直接被拒。
+    """
+    if not isinstance(body, dict):
+        return ""
+    code = body.get("errcode")
+    if code in (None, 0):
+        return ""
+    msg = str(body.get("errmsg", ""))[:160]
+    if code == 40164:
+        return (f"errcode=40164 {msg}；请将生产出口IP "
+                f"47.236.61.117 加入公众号IP白名单"
+                f"(设置与开发→基本配置→IP白名单)")
+    return f"errcode={code} {msg}"
+
+
+def _wechat_mp_article_html(content: dict) -> str:
+    """正文 → 公众号图文 HTML(段落 <p> + 话题尾注; 转义防注入)"""
+    body = content.get("body", "") or ""
+    paras = [html_lib.escape(p.strip())
+             for p in body.splitlines() if p.strip()]
+    tags = (content.get("hashtags", "") or "").strip()
+    if tags:
+        paras.append(html_lib.escape(tags))
+    return "".join(f"<p>{p}</p>" for p in paras) or "<p></p>"
+
+
 class PromoChannelService:
     """发布通道(真实平台 API + mock 回退)与百度 SEO 提交"""
 
@@ -233,8 +326,13 @@ class PromoChannelService:
                                      f"{platform.upper()}_KEY)")
             return mock_receipt
         try:
+            if platform == PROMO_PLATFORM_WECHAT_MP:
+                # 公众号专用轨: 多步协议(token→素材→草稿→群发),
+                # 不走通用单端点 _publish_real 范式
+                return await self._publish_wechat_mp(
+                    key, content, mock_receipt)
             return await self._publish_real(platform, key, content,
-                                            mock_receipt)
+                                             mock_receipt)
         except Exception as exc:
             logger.warning("promo_channel_real_failed platform=%s: %s",
                            platform, exc)
@@ -303,6 +401,249 @@ class PromoChannelService:
             "exposureEstimate": mock_receipt["exposureEstimate"],
             "error": "",
         }
+
+    # ============================================================
+    # 微信公众号群发 API 专用轨(wechat_mp, 2026-09-27)
+    # ============================================================
+
+    async def _publish_wechat_mp(self, key: str, content: dict,
+                                 mock_receipt: dict) -> dict:
+        """公众号群发四步协议: token→封面素材→草稿→preview|sendall
+
+        凭证格式 appid|secret; 发送形态 PROMO_WECHAT_MP_SEND_MODE:
+            preview(默认) → mass/preview 发给指定 openid 试收,
+                不计月度配额(上线前版式验证)
+            send → mass/sendall 全体群发, 认证服务号自然月硬限
+                4 次(独立月度配额闸门, 与发布队列日上限并行)
+        """
+        parts = [p.strip() for p in (key or "").split("|") if p.strip()]
+        if len(parts) != 2:
+            raise ValueError("公众号凭证格式应为 appid|secret"
+                            "(PROMO_CHANNEL_WECHAT_MP_KEY)")
+        app_id, secret = parts
+        send_mode = wechat_mp_send_mode()
+        # 前置校验(fail-fast, 不打平台 API): preview 需试收 openid,
+        # send 需月度配额余量
+        if send_mode == WECHAT_MP_SEND_MODE_PREVIEW:
+            openid = (os.environ.get(
+                "PROMO_WECHAT_MP_PREVIEW_OPENID", "")
+                or "").strip()
+            if not openid:
+                raise ValueError(
+                    "preview 形态需配置试收 openid(PROMO_WECHAT_MP_"
+                    "PREVIEW_OPENID, 运营者微信关注公众号后后台可见)")
+        else:
+            await self._wechat_mp_quota_guard()
+        token = await self._wechat_mp_token(app_id, secret)
+        # 1) 封面(品牌卡片, /api/promo-cover 确定性渲染)
+        cover_png = self._wechat_mp_cover_bytes(content)
+        thumb_media_id = self._wechat_mp_add_material(
+            token, cover_png,
+            f"promo_cover_{content.get('contentId', 0)}.png")
+        # 2) 草稿(图文消息)
+        draft_media_id = self._wechat_mp_draft_add(
+            token, content, thumb_media_id)
+        # 3) 发送(preview 试收不计配额 / sendall 群发计配额)
+        if send_mode == WECHAT_MP_SEND_MODE_PREVIEW:
+            msg_id = self._wechat_mp_mass_preview(
+                token, draft_media_id, openid)
+        else:
+            msg_id = self._wechat_mp_mass_sendall(token, draft_media_id)
+            await self._wechat_mp_quota_consume()
+        return {
+            "mode": CHANNEL_MODE_REAL,
+            "platform": PROMO_PLATFORM_WECHAT_MP,
+            "publishId": str(msg_id or ""),
+            "exposureEstimate": mock_receipt["exposureEstimate"],
+            "error": "",
+            "sendMode": send_mode,
+            "mediaId": draft_media_id,
+        }
+
+    async def _wechat_mp_token(self, app_id: str,
+                               secret: str) -> str:
+        """stable_token 换取 access_token(Redis 缓存 ~2h, 内存回退)
+
+        凭据轮换免人工: stable_token 长命(相对经典 getaccess_token
+        可控刷新), 缓存提前 200s 失效防边界 40125/40001。
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            cached = await client.get(_WECHAT_MP_TOKEN_KEY)
+            if cached:
+                return str(cached)
+        elif (_WECHAT_MP_MEM["token"]
+                and _WECHAT_MP_MEM["tokenExpiresAt"] > time.time()):
+            return _WECHAT_MP_MEM["token"]
+        base = platform_endpoint(PROMO_PLATFORM_WECHAT_MP)
+        payload = json.dumps({
+            "grant_type": "client_credential",
+            "appid": app_id, "secret": secret,
+        }, ensure_ascii=False).encode("utf-8")
+        body = self._wechat_mp_post_json(
+            f"{base}/cgi-bin/stable_token", payload)
+        token = str(body.get("access_token") or "")
+        if not token:
+            raise ValueError("公众号 stable_token 响应缺少 "
+                            f"access_token: {str(body)[:120]}")
+        ttl = max(60, int(body.get("expires_in", 7200) or 7200) - 200)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_WECHAT_MP_TOKEN_KEY, token, ex=ttl)
+        else:
+            _WECHAT_MP_MEM["token"] = token
+            _WECHAT_MP_MEM["tokenExpiresAt"] = time.time() + ttl
+        return token
+
+    def _wechat_mp_cover_bytes(self, content: dict) -> bytes:
+        """品牌卡片封面下载(PromoCoverService 确定性渲染端点)"""
+        cid = content.get("contentId", 0)
+        request = urllib.request.Request(
+            f"{SITE_BASE_URL}/api/promo-cover/{cid}.png")
+        try:
+            with urllib.request.urlopen(request,
+                                        timeout=_HTTP_TIMEOUT) as resp:
+                data = resp.read()
+        except urllib.error.HTTPError as exc:
+            raise ValueError(
+                f"封面下载失败({_http_error_detail(exc)})") from exc
+        if not data.startswith(b"\x89PNG"):
+            raise ValueError(f"封面响应非PNG(contentId={cid})")
+        return data
+
+    def _wechat_mp_add_material(self, token: str, png: bytes,
+                               filename: str) -> str:
+        """永久图片素材上传(add_material, multipart) → media_id"""
+        base = platform_endpoint(PROMO_PLATFORM_WECHAT_MP)
+        url = f"{base}/cgi-bin/material/add_material"
+        boundary = "zhuxiang-promo-20260927"
+        head = (f"--{boundary}\r\n"
+                'Content-Disposition: form-data; name="media"; '
+                f'filename="{filename}"; filetype="image/png"\r\n'
+                "Content-Type: image/png\r\n\r\n").encode("utf-8")
+        tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        request = urllib.request.Request(
+            f"{url}?type=IMAGE&access_token="
+            f"{urllib.parse.quote(token)}",
+            data=head + png + tail,
+            headers={"Content-Type":
+                     f"multipart/form-data; boundary={boundary}"},
+            method="POST")
+        body = self._wechat_mp_read(request)
+        media_id = str(body.get("media_id") or "")
+        if not media_id:
+            raise ValueError(f"封面素材上传响应缺少 media_id: "
+                             f"{str(body)[:120]}")
+        return media_id
+
+    def _wechat_mp_draft_add(self, token: str, content: dict,
+                             thumb_media_id: str) -> str:
+        """图文草稿新建(draft/add) → media_id"""
+        base = platform_endpoint(PROMO_PLATFORM_WECHAT_MP)
+        plain = " ".join(x for x in (content.get("body", ""),
+                                     content.get("hashtags", "")) if x)
+        source_url = (f"{SITE_BASE_URL}/r/{content['shortCode']}"
+                      if content.get("shortCode") else "")
+        payload = json.dumps({"articles": [{
+            "title": (content.get("title", "") or "")[:64],
+            "author": "竹香酒业",
+            "digest": plain[:120],
+            "thumb_media_id": thumb_media_id,
+            "content": _wechat_mp_article_html(content),
+            "content_source_url": source_url,
+            "need_open_comment": 0,
+            "only_fans_can_comment": 0,
+        }]}, ensure_ascii=False).encode("utf-8")
+        body = self._wechat_mp_post_json(
+            f"{base}/cgi-bin/draft/add", payload, token=token)
+        media_id = str(body.get("media_id") or "")
+        if not media_id:
+            raise ValueError(f"草稿创建响应缺少 media_id: "
+                             f"{str(body)[:120]}")
+        return media_id
+
+    def _wechat_mp_mass_preview(self, token: str, media_id: str,
+                                openid: str) -> str:
+        """预览(mass/preview): 指定 openid 试收, 不计月度配额"""
+        base = platform_endpoint(PROMO_PLATFORM_WECHAT_MP)
+        payload = json.dumps({
+            "touser": openid,
+            "mpnews": {"media_id": media_id},
+            "msgtype": "mpnews",
+        }, ensure_ascii=False).encode("utf-8")
+        body = self._wechat_mp_post_json(
+            f"{base}/cgi-bin/message/mass/preview", payload, token=token)
+        return str(body.get("msg_id") or "")
+
+    def _wechat_mp_mass_sendall(self, token: str,
+                                media_id: str) -> str:
+        """正式群发(mass/sendall): 全体关注者(认证服务号)"""
+        base = platform_endpoint(PROMO_PLATFORM_WECHAT_MP)
+        payload = json.dumps({
+            "filter": {"is_to_all": True},
+            "mpnews": {"media_id": media_id},
+            "msgtype": "mpnews",
+        }, ensure_ascii=False).encode("utf-8")
+        body = self._wechat_mp_post_json(
+            f"{base}/cgi-bin/message/mass/sendall", payload, token=token)
+        return str(body.get("msg_id") or "")
+
+    def _wechat_mp_post_json(self, url: str, data: bytes,
+                             token: str = "") -> dict:
+        """公众号 API POST(JSON)——access_token 查询参数 + errcode 检查"""
+        if token:
+            sep = "&" if "?" in url else "?"
+            url = (f"{url}{sep}access_token="
+                   f"{urllib.parse.quote(token)}")
+        request = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json"}, method="POST")
+        return self._wechat_mp_read(request)
+
+    def _wechat_mp_read(self, request) -> dict:
+        """公众号 API 响应统一读取(HTTP 错 + errcode 业务错)"""
+        try:
+            with urllib.request.urlopen(request,
+                                        timeout=_HTTP_TIMEOUT) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise ValueError(
+                f"公众号API拒绝({_http_error_detail(exc)})") from exc
+        err = _wechat_mp_errtext(body)
+        if err:
+            raise ValueError(f"公众号API拒绝({err})")
+        return body
+
+    async def _wechat_mp_quota_used(self) -> int:
+        """本月已群发次数(Redis 计数, 内存回退)"""
+        month = _wechat_mp_month_key()
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(
+                _k("promo", "wechat_mp", "quota", month))
+            return int(raw or 0)
+        return int(_WECHAT_MP_MEM["quota"].get(month, 0))
+
+    async def _wechat_mp_quota_guard(self) -> None:
+        """月度配额闸门(send 前置; 认证服务号自然月 4 次)"""
+        used = await self._wechat_mp_quota_used()
+        cap = wechat_mp_monthly_cap()
+        if used >= cap:
+            raise ValueError(
+                f"本月公众号群发配额已用尽({used}/{cap}, 认证服务号"
+                "自然月硬限)——次月自动恢复")
+
+    async def _wechat_mp_quota_consume(self) -> None:
+        """群发成功后配额计数 +1(月键 TTL 40 天防泄漏)"""
+        month = _wechat_mp_month_key()
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("promo", "wechat_mp", "quota", month)
+            await client.incr(key)
+            await client.expire(key, 40 * 24 * 3600)
+        else:
+            _WECHAT_MP_MEM["quota"][month] = (
+                _WECHAT_MP_MEM["quota"].get(month, 0) + 1)
 
     @staticmethod
     def _json_payload(content: dict) -> bytes:

@@ -24,6 +24,7 @@ from repositories.promo_repository import (
     PROMO_LLM_MODEL, PROMO_LLM_FALLBACK_MODEL,
     PROMO_PLATFORM_DOUYIN, PROMO_PLATFORM_XHS, PROMO_PLATFORM_MOMENTS,
     PROMO_PLATFORM_WEIBO, PROMO_PLATFORM_CHANNELS,
+    PROMO_PLATFORM_WECHAT_MP,
     REQUIRED_DISCLAIMER, REQUIRED_AGE_TIP,
 )
 
@@ -63,6 +64,13 @@ PLATFORM_PROFILES = {
         "tone": "信任、情怀、真实克制",
         "format": "图文短句 + 封面文案(公众号生态)",
     },
+    # 公众号群发(2026-09-27 接入): 深度图文形态, 标题≤64
+    # 正文自动转 HTML 段落(段落换行成文, 勿用分镜/脚本标记)
+    PROMO_PLATFORM_WECHAT_MP: {
+        "audience": "关注公众号的订阅用户(30+ 白酒消费与礼赠决策人群)",
+        "tone": "深度、可信、编辑感(官方推送语境)",
+        "format": "标题≤64字 + 分段正文(每段1-3句自然成文) + 摘要",
+    },
 }
 
 # 规则模板轨(三级降级兜底, 确定性与 attract GEN_TEMPLATES 同思路)
@@ -101,6 +109,16 @@ _RULE_TEMPLATES = {
         "竹香型白酒, 入口绵甜、落口回甘。\n"
         "好酒不必贵, 家宴礼赠都拿得出手。\n\n"
         "详情见主页, 欢迎评论区交流。\n"
+        "（{disclaimer}，{age}周岁以下请勿饮酒）"
+    ),
+    # 公众号群发轨(2026-09-27): 分段正文(换行→HTML 段落),
+    # 口径同官方推送语境, 合规尾巴与全站一致
+    PROMO_PLATFORM_WECHAT_MP: (
+        "{title}：团圆宴的用酒答案\n\n"
+        "竹香型白酒, 竹香清雅、入口绵甜、落口回甘。\n\n"
+        "家宴摆上一瓶, 氛围和面子都在线; 礼赠长辈, "
+        "实用又体面。\n\n"
+        "点击文末链接, 查看当季推荐。\n"
         "（{disclaimer}，{age}周岁以下请勿饮酒）"
     ),
 }
