@@ -63,7 +63,8 @@
 
 ```
 合规即时:  百度SEO收录(已通)
-RPA 已落地: 小红书(图文, 第五节) + 抖音(图文, 第六节) + 微博(CLI桥, 第七节, 2026-09-27)
+RPA 已落地: 小红书(图文, 第五节) + 抖音(图文, 第六节) + 微博(CLI桥, 第七节)
+           + 视频号(视频产线RPA, 第八节, 2026-09-27)
 资质后置:  微博企业认证建应用(方案C全自动升级) + 抖音开放平台视频API + 公众号(认证服务号, 建议新增)
 永久放弃:  朋友圈
 ```
@@ -191,3 +192,36 @@ AI 打标为微博侧硬要求；`visible=0` 默认公开。
 key 存在时自动切经典 share.json API 轨（代码已就绪），
 RPA 分支天然让位。认证材料：公司名称/营业执照号/法人
 身份证正反面/营业执照副本（控制台 identity/edit 提交）。
+
+## 八、视频号视频生产线 RPA 发布通道 SOP（2026-09-27 立项）
+
+**架构**：视频号无官方视频发布 API（开放能力仅橱窗/留资/
+直播数据）——上游**视频产线** + 下游**网页版 RPA** 两段式：
+- 产线（开发机跑）：`build_promo_video.py <contentId>` →
+  生产拉内容 → 四页品牌卡渲染（封面/卖点/行动/合规，
+  1080×1440 竖版，PromoCoverService 同源色板字体+IP 角标）
+  → 本机便携 ffmpeg（`d:\网站架构设计\ffmpeg\`，
+  `FFMPEG_PATH` 可覆盖）xfade 合成 16.2s 无声轮播
+  （4.5s/页 + 0.6s 淡入淡出，yuv420p/faststart）
+- 发布（触发式）：wechat_channels 入 RPA_PLATFORMS（无 key
+  → rpa_pending），对用户说「**发布视频号待发内容**」→
+  browser agent 打开 channels.weixin.qq.com（首次用户微信
+  扫码，之后登录态持久）→ 上传 mp4 + 清单原文文案 → 发布
+  → `register_rpa_receipt.py` 登记回执
+
+**操作规程**：
+1. 拉清单取 platform=wechat_channels 条目
+2. 无内容 → 「继续」跑内容周期生成 wechat_channels 平台内容
+   过审入队（规则模板：图文短句+封面文案口径）
+3. `python build_promo_video.py <cid>`（backend 目录）产出
+   `promo_videos/promo_video_<cid>.mp4`（页卡+视频一并产出）
+4. browser agent 发布（上传视频文件用分块 base64→File→
+   DataTransfer 注入或本机临时 http 服务供浏览器拉取——
+   agent 端既有先例技术）
+5. 回执登记（成功作品 URL / 失败 error 留痕重试）
+
+**风控合规**：同第五节；页4 合规页强制健康警示三行；AI 生成
+内容若平台提供打标选项须勾选。
+
+**升级路径**：视频产线产物同时适配抖音（视频形态更长效），
+后续「发布抖音待发内容」可复用 mp4 走视频发布页。

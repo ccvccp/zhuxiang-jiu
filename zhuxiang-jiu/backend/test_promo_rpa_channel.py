@@ -1,8 +1,9 @@
 """36号 RPA 发布通道专项回归(创作者中心浏览器自动化·多平台)
 
-[A] 分流: xiaohongshu/douyin/weibo real 无 key → rpa_pending 回执
-    (朋友圈等非 RPA 平台仍 mock_fallback; weibo 为 CLI 桥 RPA,
-     2026-09-27 接入, 企业认证配 key 后自动切经典 API 轨)
+[A] 分流: xiaohongshu/douyin/weibo/wechat_channels real 无 key
+    → rpa_pending 回执(朋友圈等非 RPA 平台仍 mock_fallback;
+    weibo 为 CLI 桥 RPA、wechat_channels 为视频产线 RPA,
+    2026-09-27 接入; weibo 企业认证配 key 后自动切经典 API 轨)
 [B] 清单: rpa_pending 内容入待发布视图(多平台 + 平台过滤)
 [C] 登记: 成功(mode=rpa+URL)/失败留痕/幂等与非法态
 
@@ -63,11 +64,18 @@ class TestASplit:
                f"mode={r2.get('mode')}")
         # 非 RPA 平台仍走 mock_fallback
         r3 = await svc.publish_to_platform({
+            "platform": "wechat_channels",
+            "title": "视频号探针", "body": "正文"})
+        record("视频号: 无 key → rpa_pending 回执(视频产线 RPA)",
+               r3.get("mode") == "rpa_pending",
+               f"mode={r3.get('mode')}")
+        # 非 RPA 平台仍走 mock_fallback
+        r4 = await svc.publish_to_platform({
             "platform": "wechat_moments",
             "title": "非 RPA 平台", "body": "正文"})
         record("朋友圈: 无 key 仍 mock_fallback(不进 RPA)",
-               r3.get("mode") == "mock_fallback",
-               f"mode={r3.get('mode')}")
+               r4.get("mode") == "mock_fallback",
+               f"mode={r4.get('mode')}")
 
 
 async def _mk_rpa_content(content_id=9001,
