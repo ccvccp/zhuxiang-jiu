@@ -260,6 +260,11 @@ services:
       # 43号 P3-3 GeoIP 离线库(宿主机 ./data/GeoLite2-City.mmdb,
       # MaxMind 免费下载; 缺失时 geo 功能静默关闭零影响)
       - ./data:/app/data:ro
+      # 36号 微博热搜真实源(2026-09-27): 宿主 node+weibo-cli 只读
+      # 挂载(容器内 node 直启 CLI 入口), 凭据目录可读写(CLI 自管
+      # token 轮换); WEIBO_RADAR_ENABLED 成本闸默认关
+      - /opt/node-v20.18.2-linux-x64:/opt/node:ro
+      - /root/.weibo-cli:/root/.weibo-cli
     # 内存限制: 给 backend 充足空间(pip install + uvicorn 启动峰值约 400MB)
     # mem_limit: 容器内存硬上限(cgroup)
     # memswap_limit: 内存 + swap 上限(允许借用 swap 缓冲峰值)

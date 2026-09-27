@@ -13,6 +13,7 @@
     - 蹭点决策由 promo_service 编排(本模块只管"发现与评分")
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ from datetime import datetime, UTC
 from repositories.promo_repository import (
     PromoRepository,
     HOTSPOT_PLATFORMS, HOTSPOT_API_KEY_ENV,
+    HOTSPOT_PLATFORM_WEIBO,
     HOTSPOT_STATUS_ACTIVE, HOTSPOT_STATUS_DISCARDED,
     BRAND_RELEVANCE_WORDS, RISK_BLOCK_WORDS,
     hotspot_fingerprint,
@@ -250,6 +252,174 @@ def _parse_hotspot_items(platform: str, body) -> list[dict]:
     return items
 
 
+# ============================================================
+# 微博热搜真实源(2026-09-27 接入, CLI 桥——成本敏感 450C/次)
+# ============================================================
+# 三重闸: ①WEIBO_RADAR_ENABLED=1 显式开启(默认关, 防误烧 C)
+# ②redis TTL 锁 WEIBO_RADAR_INTERVAL_HOURS(默认 24h → 450C/日)
+# ③任一环节失败回退 None → 确定性 mock(产出不中断, Mock-first)
+# 形态: 容器内经 compose volume 挂载宿主 node+CLI(/opt/node 只读)
+# 与 CLI 凭据(/root/.weibo-cli 可读写——CLI 需自管 token 轮换),
+# subprocess 调官方 weibo-cli 的 search hot_word/biz(微博热搜主榜)
+WEIBO_RADAR_ENABLED_ENV = "WEIBO_RADAR_ENABLED"
+WEIBO_RADAR_INTERVAL_ENV = "WEIBO_RADAR_INTERVAL_HOURS"
+_WEIBO_RADAR_LOCK_KEY = "zhuxiang:promo:weibo_radar:lock"
+# 推送板缓存(2026-09-27 实证: 生产服务器为新加坡 IP, 微博 CLI
+# 网关对业务接口 IP_GEO_DENIED 仅限中国大陆——本机(国内 IP)拉
+# 热搜后推送到本缓存, 雷达扫描免费读板; TTL 48h 过期回落 CLI/mock)
+_WEIBO_BOARD_KEY = "zhuxiang:promo:weibo_hot_board"
+_WEIBO_BOARD_TTL_HOURS = 48
+_WEIBO_CLI_NODE = "/opt/node/bin/node"
+# npm 全局包位于 {prefix}/lib/node_modules(Linux 口径)
+_WEIBO_CLI_ENTRY = ("/opt/node/lib/node_modules/@weibo-ai/weibo-cli/"
+                    "dist/index.js")
+_WEIBO_HOT_COUNT = 20
+_WEIBO_FLAG_MARK = {1: "新", 2: "热", 4: "爆", 16: "沸"}
+
+
+async def _run_weibo_cli(args: list[str],
+                         timeout: float = 30.0) -> str:
+    """容器内调宿主挂载的 weibo-cli(官方 npm 包, node 直启入口)
+
+    Raises:
+        RuntimeError: CLI 非零退出/超时(调用方回退 mock)
+    """
+    proc = await asyncio.create_subprocess_exec(
+        _WEIBO_CLI_NODE, _WEIBO_CLI_ENTRY, *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE)
+    out, err = await asyncio.wait_for(proc.communicate(), timeout)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"weibo-cli exit={proc.returncode}: "
+            f"{err.decode('utf-8', 'replace')[:200]}")
+    return out.decode("utf-8", "replace")
+
+
+def _weibo_items_from_board(rows) -> list[dict]:
+    """微博热搜榜单行 → 雷达条目(推送板与 CLI 输出同构复用)"""
+    items = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        word = str(row.get("word") or "").strip()
+        if not word:
+            continue
+        try:
+            num = float(row.get("num") or 0)
+        except (TypeError, ValueError):
+            num = 0
+        heat = (round(num / 10_000, 1) if num > 10_000
+                else max(1.0, num))
+        # flag 口径: wiki 示例为字符串("2"), 实际亦有 int——归一后查标记
+        try:
+            flag = int(row.get("flag") or 0)
+        except (TypeError, ValueError):
+            flag = 0
+        mark = _WEIBO_FLAG_MARK.get(flag, "")
+        summary = (f"[微博热搜] {word}"
+                   + (f"（{mark}）" if mark else ""))
+        items.append({
+            "platform": HOTSPOT_PLATFORM_WEIBO,
+            "title": word,
+            "summary": summary,
+            "heat": heat,
+            "velocity": _DEFAULT_VELOCITY,
+            "persistenceHours": _DEFAULT_PERSISTENCE,
+            "riskWord": None,
+        })
+    return items
+
+
+async def save_weibo_board(rows) -> tuple[int, int]:
+    """本机(国内 IP)推送的微博热搜板入缓存(雷达扫描免费消费)
+
+    Returns:
+        (stored_count, ttl_seconds)
+    Raises:
+        ValueError: 无可解析条目 / 非 redis 存储模式
+    """
+    items = _weibo_items_from_board(rows)
+    if not items:
+        raise ValueError("微博热搜板无可解析条目(word 字段缺失)")
+    from repositories.backend import (is_redis_mode,
+                                      get_redis_client)
+    if not is_redis_mode():
+        raise ValueError("推送板需 redis 存储模式")
+    client = await get_redis_client()
+    ttl = _WEIBO_BOARD_TTL_HOURS * 3600
+    await client.set(_WEIBO_BOARD_KEY,
+                     json.dumps(items, ensure_ascii=False), ex=ttl)
+    logger.info("weibo_board_pushed items=%s ttl=%ss", len(items), ttl)
+    return len(items), ttl
+
+
+async def _read_weibo_board() -> list[dict] | None:
+    """读取推送板缓存(TTL 内免费; 过期/缺失/异常 → None)"""
+    try:
+        from repositories.backend import (is_redis_mode,
+                                          get_redis_client)
+        if not is_redis_mode():
+            return None
+        client = await get_redis_client()
+        raw = await client.get(_WEIBO_BOARD_KEY)
+        if not raw:
+            return None
+        items = json.loads(raw)
+        return items if isinstance(items, list) and items else None
+    except Exception as exc:
+        logger.warning("weibo_board_read_failed: %s", exc)
+        return None
+
+
+async def _fetch_weibo_real() -> list[dict] | None:
+    """微博热搜主榜真实源(优先推送板免费读; CLI 直调 450C/次;
+    失败/未启用/间隔未到 → None)
+
+    优先级: ①本机推送的 redis 热搜板(国内 IP 拉取, 0C) ②容器内
+    CLI 直调(需中国大陆 IP, 生产新加坡 IP 实证 IP_GEO_DENIED)
+    ③None → 确定性 mock。
+    榜单口径: data[].word=热搜词 / num=搜索热度(原始计数, 统一
+    归一万级对齐 HEAT_BASE_WAN=500 万满分) / flag=1新2热4爆16沸。
+    """
+    if os.environ.get(WEIBO_RADAR_ENABLED_ENV, "").strip() != "1":
+        return None
+    # ① 推送板(免费, TTL 内每轮扫描都可消费; 指纹去重防重复入库)
+    board = await _read_weibo_board()
+    if board:
+        return board
+    # 成本闸: redis TTL 锁——间隔内只真调一次(非 redis 模式跳过
+    # 此闸, 由测试环境 monkeypatch CLI 保证零消耗)
+    try:
+        from repositories.backend import (is_redis_mode,
+                                          get_redis_client)
+        if is_redis_mode():
+            hours = float(os.environ.get(
+                WEIBO_RADAR_INTERVAL_ENV, "24") or "24")
+            client = await get_redis_client()
+            got = await client.set(_WEIBO_RADAR_LOCK_KEY, "1",
+                                   nx=True, ex=int(hours * 3600))
+            if not got:
+                return None   # 间隔内已扫过, 本轮回退 mock
+    except Exception as exc:
+        # 锁异常(如 redis 抖动)→ 保守放弃本轮真调, 不烧 C
+        logger.warning("weibo_radar_lock_failed(保守回退): %s", exc)
+        return None
+    try:
+        raw = await _run_weibo_cli(
+            ["search", "hot_word/biz", "--count",
+             str(_WEIBO_HOT_COUNT), "--output", "json"])
+        body = json.loads(raw)
+    except Exception as exc:
+        logger.warning("weibo_radar_cli_failed: %s", exc)
+        return None
+    rows = body.get("data") if isinstance(body, dict) else body
+    if not isinstance(rows, list) or not rows:
+        logger.warning("weibo_radar_empty: 响应无可解析条目")
+        return None
+    return _weibo_items_from_board(rows) or None
+
+
 class PromoRadarService:
     """热点雷达: 发现 → 评分 → 风险否决 → 去重入库"""
 
@@ -353,7 +523,13 @@ class PromoRadarService:
             logger.warning("radar_extra_risk_words_failed(回退静态): %s",
                            exc)
         for platform in targets:
-            items = _fetch_real(platform)
+            items = None
+            if platform == HOTSPOT_PLATFORM_WEIBO:
+                # 微博真实源走 CLI 桥(成本闸内), 未启用/未到间隔/
+                # 失败均回 None → 继续走聚合/mock 链
+                items = await _fetch_weibo_real()
+            if items is None:
+                items = _fetch_real(platform)
             if items is None:
                 items = _mock_fetch(platform)
             for item in items:

@@ -152,6 +152,31 @@ async def get_hotspot(
         _handle(e)
 
 
+class WeiboBoardRequest(PydBaseModel):
+    """微博热搜板推送(本机国内 IP 拉取后推送给雷达消费)"""
+    data: list = Field(None, description="热榜条目(CLI search hot_word/biz 的 data 数组)")
+    items: list = Field(None, description="同 data(别名兼容)")
+
+
+@router.post("/api/promo/radar/weibo-board", tags=["AI智能推广模块"])
+async def push_weibo_board(
+    data: WeiboBoardRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """微博热搜板推送入库(生产服务器为海外 IP, 微博 CLI 业务接口
+    仅限中国大陆——由国内 IP 机器拉取热榜后推送本端点, 雷达扫描
+    免费消费, 48h TTL 过期回落 CLI/mock)"""
+    _require_admin(x_role)
+    try:
+        from services.promo_radar_service import save_weibo_board
+        rows = data.data or data.items or []
+        stored, ttl = await save_weibo_board(rows)
+        return {"success": True, "data": {
+            "stored": stored, "ttlSeconds": ttl}}
+    except Exception as e:
+        _handle(e)
+
+
 @router.get("/api/promo/decisions", tags=["AI智能推广模块"])
 async def list_decisions(
     x_role: str = Header(None, alias="X-Role"),
