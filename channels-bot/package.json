@@ -1,0 +1,17 @@
+{
+  "name": "channels-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "jimp": "^1.6.1",
+    "jsqr": "^1.4.0",
+    "puppeteer-core": "^24.43.1"
+  }
+}

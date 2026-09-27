@@ -1,0 +1,11 @@
+node_modules/
+chrome-profile/
+*.png
+bot.log
+captured_full.json
+captured.json
+login_state.json
+link_result.json
+probe_result.json
+probe_frames.json
+detail_text.txt

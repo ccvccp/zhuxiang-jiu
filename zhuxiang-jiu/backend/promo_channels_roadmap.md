@@ -234,5 +234,36 @@ profile 或非 CDP 浏览器方案）。作品 URL 形态：
 **风控合规**：同第五节；页4 合规页强制健康警示三行；AI 生成
 内容若平台提供打标选项须勾选。
 
+**RPA v2 全自动发布闭环（2026-09-27 晚，专用 Chrome pipe 通道）**：
+内嵌 Electron 浏览器被微信服务端指纹校验定性不可信（UA 含
+TraeCN/Electron；会话移植 cookie+localStorage 全套仍被拒）；
+`--remote-debugging-port=9222` 的真 Chrome 扫码同样循环被拒（登录
+环节疑似探测本机调试端口）。**破局 = 独立 profile 真 Chrome +
+CDP pipe 传输（`--remote-debugging-pipe`，无 TCP 端口）+
+ignoreDefaultArgs 去 --enable-automation**——用户扫码一次，登录
+态持久于 `d:\网站架构设计\channels-bot\chrome-profile`，之后发布
+零人工。发布 bot：`channels-bot/bot.js`（puppeteer-core，pipe 启动
+→ 等登录→进 /platform/post/create→表单在 iframe
+/micro/content/post/create 内：evaluateHandle 取上传 input→
+uploadFile→等「删除」出现→contenteditable focus+keyboard.type
+填描述→短标题 input→视频标注选「含AI生成内容」→点「发表」→
+跳转 post/list 即成功）。#41 全自动发布实证（文案逐字一致，
+readCount>0）。回执照常 `register_rpa_receipt.py <cid> <sph> <id>`。
+
+**技术铁律（bot.js 实证沉淀）**：① puppeteer `frame.$` 在该
+iframe 持旧 document 引用（evaluate 可见而 $ 查空）——元素一律
+`evaluateHandle` 获取；② 合成 `.click()` 不触发 CSS `:hover`、
+不授予剪贴板激活——悬停类 UI 需 `page.mouse` 真实坐标（iframe
+偏移+元素 rect 叠加），剪贴板写入需真实鼠标事件+`bringToFront`
++`overridePermissions`；③ sph 短链每次复制重新生成（#39=
+AonC54eLb，再拷贝即变新 ID）——链接非稳定主键，回执以发布时
+拷贝为准；④ 列表 XHR `post_list` 响应含 objectId/exportId/
+objectNonce 等全部帖子元数据（响应捕获钩子须在 goto 前注册）。
+
+**getlink 待硬化（已知缺口）**：分享对话框「复制视频链接」
+点击未打通（卡片操作区按钮疑似需真实 hover 行唤出，合成与坐标
+点击均未开对话框）——后续路径：真实 hover 卡片行 / React fiber
+props 直读 / 手机预览 QR 解码。当前以用户手动拷贝 sph 链接收尾。
+
 **升级路径**：视频产线产物同时适配抖音（视频形态更长效），
 后续「发布抖音待发内容」可复用 mp4 走视频发布页。
