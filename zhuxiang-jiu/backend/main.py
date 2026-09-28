@@ -632,6 +632,12 @@ async def _on_startup():
     from services.member_level_scheduler import (
         start_scheduler as start_member_level_expire)
     start_member_level_expire()
+    # 72号·AI智能自动引流: 健康度日度调度(三指标快照,
+    # 越界自动冻结; 观测面动作, 红队/升档评估保持手动SOP;
+    # ATTRACT72_HEALTH_AUTO=on 开启, 默认 off)
+    from services.attract72_scheduler import (
+        start_scheduler as start_attract72_health)
+    start_attract72_health()
 
 
 @app.on_event("shutdown")
@@ -709,6 +715,10 @@ async def _on_shutdown():
     from services.member_level_scheduler import (
         stop_scheduler as stop_member_level_expire)
     stop_member_level_expire()
+    # 72号·AI智能自动引流: 健康度日度调度器
+    from services.attract72_scheduler import (
+        stop_scheduler as stop_attract72_health)
+    stop_attract72_health()
     await close_redis_client()
     logger.info("清理完成")
 

@@ -73,7 +73,17 @@ async def main():
     from fastapi.testclient import TestClient
     from main import app
     client = TestClient(app)
-    ADMIN = {"X-Role": "admin"}
+    # 46+1 安全修复(2026-09-28): 身份头只能来自 token——
+    # auth_middleware inject_identity 用 token 真实身份覆盖
+    # 客户端 X-Role(无 Bearer 时直接剥) → 纯 X-Role 或普通
+    # member 冒充均无法通过 _require_admin; 测试改走真实
+    # 认证轨: 注册 admin 角色(register 支持 role 参数)→
+    # Bearer(72 号路由读到注入后的真值)
+    from services.auth_service import AuthService
+    _tok = (await AuthService().register(
+        phone="13800000999", password="test123456",
+        role="admin")).get("accessToken", "")
+    ADMIN = {"Authorization": "Bearer " + _tok}
     BASE = "/api/attract72"
 
     from core.helpers import ts
