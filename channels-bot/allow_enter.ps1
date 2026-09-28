@@ -28,6 +28,9 @@ public class TE {
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr h, ref POINT p);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
   [StructLayout(LayoutKind.Sequential)] public struct POINTER_INFO {
@@ -157,7 +160,35 @@ while ((Get-Date) -lt $deadline) {
         & $WL "touch round $i not effective, retry..."
       }
     } else {
-      & $WL 'no touch hardware -> keyboard Enter fallback'
+      & $WL 'no touch hardware -> PostMessage full-sequence first, then Enter fallback'
+      # ── 通道1: PostMessage 完整真实输入序列 ──
+      # 铁律: WH_MOUSE_LL 低层钩子只能看到输入系统流(SendInput/mouse_event 带 LLMHF_INJECTED),
+      #       PostMessage 不经过输入流→钩子看不到; 但孤立 DOWN/UP 会被 Qt 输入链丢弃语义——
+      #       必须完整模拟: 光标移动到位 + WM_MOUSEMOVE(hover) + DOWN + UP
+      for ($i = 1; $i -le 3; $i++) {
+        $cpt = New-Object TE+POINT
+        $cpt.X = $cx; $cpt.Y = $cy
+        [TE]::ScreenToClient($hwnd, [ref]$cpt) | Out-Null
+        $lp = [IntPtr](($cpt.Y -shl 16) -bor ($cpt.X -band 0xFFFF))
+        # 光标真实移动到位(Qt 可能校验 GetCursorPos 与消息坐标一致性)
+        [TE]::SetCursorPos($cx, $cy) | Out-Null
+        Start-Sleep -Milliseconds 80
+        # hover 进入: WM_MOUSEMOVE 前导 ×2 (完整输入链)
+        [TE]::PostMessage($hwnd, 0x200, [IntPtr]::Zero, $lp) | Out-Null
+        Start-Sleep -Milliseconds 40
+        [TE]::PostMessage($hwnd, 0x200, [IntPtr]::Zero, $lp) | Out-Null
+        Start-Sleep -Milliseconds 30
+        # DOWN(MK_LBUTTON) → 90ms → UP
+        [TE]::PostMessage($hwnd, 0x201, [IntPtr]0x1, $lp) | Out-Null
+        Start-Sleep -Milliseconds 90
+        [TE]::PostMessage($hwnd, 0x202, [IntPtr]::Zero, $lp) | Out-Null
+        & $WL "postmsg round $i client=($($cpt.X),$($cpt.Y))"
+        Start-Sleep -Milliseconds 2500
+        $after = [TE]::SnapQt()
+        if (-not ($after | Where-Object { $_ -eq ($popup -join '|') })) { & $WL "POSTMSG_OK (round $i)"; exit 0 }
+        & $WL "postmsg round $i not effective, retry..."
+      }
+      # ── 通道2: 键盘 Enter 回退 ──
       for ($i = 1; $i -le 3; $i++) {
         # Alt trick 解锁前台权 (后台 spawn 进程无前台权, SetForegroundWindow 静默失败)
         [TE]::keybd_event(0x12, 0x38, 0, [UIntPtr]::Zero)
