@@ -82,7 +82,12 @@ class AgreementRepository:
 
     async def _redis_next_id(self, entity: str) -> int:
         client = await get_redis_client()
-        return await client.incr(_k("agreement", entity, "seq"))
+        # P0: seq 键必须独立域(agreement:seq:*)——原 _k(agreement, entity, seq)
+        # 与数据键 agreement:{entity}:{id} 同域, keys 通配扫描会把
+        # seq 键(json 值为 int)混进列表, json.loads 后 .get 直接崩
+        # (生产实证: agreement_guard_patrol_fail 'int' object has no
+        # attribute 'get')
+        return await client.incr(_k("agreement", "seq", entity))
 
     # ============================================================
     # 条款 CRUD
@@ -284,7 +289,14 @@ class AgreementRepository:
         for key in keys:
             data = await client.get(key)
             if data:
-                a = json.loads(data)
+                try:
+                    a = json.loads(data)
+                except (TypeError, ValueError):
+                    continue
+                # P0 防御: 键空间混入非 dict 行(seq 计数器/坏数据)时
+                # 跳过不崩(fail-soft——巡检/公示链路不因单键阻断)
+                if not isinstance(a, dict):
+                    continue
                 if status and a.get("status") != status:
                     continue
                 if atype and a.get("type") != atype:
@@ -316,7 +328,13 @@ class AgreementRepository:
             for cid in ids:
                 data = await client.get(_k("agreement", "consent", cid))
                 if data:
-                    c = json.loads(data)
+                    try:
+                        c = json.loads(data)
+                    except (TypeError, ValueError):
+                        continue
+                    # P0 防御: 同 _redis_list_agreements(键空间污染 fail-soft)
+                    if not isinstance(c, dict):
+                        continue
                     if agreement_id and c.get("agreementId") != agreement_id:
                         continue
                     consents.append(c)
@@ -326,7 +344,12 @@ class AgreementRepository:
             for key in keys:
                 data = await client.get(key)
                 if data:
-                    c = json.loads(data)
+                    try:
+                        c = json.loads(data)
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(c, dict):
+                        continue
                     if agreement_id and c.get("agreementId") != agreement_id:
                         continue
                     consents.append(c)
@@ -351,7 +374,16 @@ class AgreementRepository:
                                      limit: int = 100) -> list[dict]:
         client = await get_redis_client()
         all_protocols = await client.hgetall(_k("agreement", "protocols"))
-        protocols = [json.loads(v) for v in all_protocols.values()]
+        protocols = []
+        for v in all_protocols.values():
+            try:
+                p = json.loads(v)
+            except (TypeError, ValueError):
+                continue
+            # P0 防御: 同 _redis_list_agreements(键空间污染 fail-soft)
+            if not isinstance(p, dict):
+                continue
+            protocols.append(p)
         if role:
             protocols = [p for p in protocols if p.get("role") == role]
         if status:
