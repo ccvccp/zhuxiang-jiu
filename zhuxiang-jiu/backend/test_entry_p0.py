@@ -166,7 +166,9 @@ async def main():
            f"实际{ai['action']}")
 
     # 降级铁律: 评分器异常 → step_up(注入失败)
-    async def _boom_score(ctx):
+    # (patch 实例方法须带 self——entry_service 调 AuthRiskScorer().score(ctx)
+    #  类属性 patch 单参会 TypeError 走 fail-soft 降级, 断言碰巧仍绿但语义错)
+    async def _boom_score(self, ctx):
         raise RuntimeError("评分器崩了")
     original = AuthRiskScorer.score
     AuthRiskScorer.score = _boom_score
@@ -369,13 +371,24 @@ async def main():
     from main import app
     client = TestClient(app)
 
+    # 46+1 安全修复(2026-09-28): 身份头只能来自 token——无 Bearer 的
+    # X-Member-Id/X-Role 均被剥 → 登录态/admin 断言改真实认证轨 Bearer
+    from services.auth_service import AuthService
+    _tok1 = (await AuthService().login(
+        phone=phone1, password="Test1234!"))["accessToken"]
+    _adm = await AuthService().register(
+        phone=f"136{_phone_seq[0] + 1:08d}",
+        password="Test1234!", role="admin",
+        age_confirmed=True)
+    _adm_tok = _adm["accessToken"]
+
     r = client.get("/api/entry/recognize?fingerprint=ua%3DHTTP")
     record("HTTP recognize白名单公开",
            r.status_code == 200 and r.json()["success"] is True,
            f"实际{r.status_code}")
 
     r = client.get("/api/entry/devices",
-                   headers={"X-Member-Id": str(mid1)})
+                   headers={"Authorization": "Bearer " + _tok1})
     record("HTTP设备清单200", r.status_code == 200,
            f"实际{r.status_code}")
 
@@ -387,7 +400,7 @@ async def main():
     record("HTTP看板无角色403", r.status_code == 403,
            f"实际{r.status_code}")
     r = client.get("/api/entry/report/overview",
-                   headers={"X-Role": "admin"})
+                   headers={"Authorization": "Bearer " + _adm_tok})
     record("HTTP看板admin200", r.status_code == 200,
            f"实际{r.status_code}")
 

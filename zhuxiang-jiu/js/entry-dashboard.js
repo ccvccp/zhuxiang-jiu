@@ -7,7 +7,12 @@
 
 var API_BASE_KEY = 'entryDash.apiBase';
 var state = {
-    apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+    /* 非本地域名默认同域(2026-09-29 生产部署零配置——看板与
+     * entry-login.js 同款约定, apiBase 输入框覆盖仍最高优先) */
+    apiBase: localStorage.getItem(API_BASE_KEY)
+        || (location.hostname === 'localhost'
+            || location.hostname === '127.0.0.1'
+            ? 'http://localhost:8000' : ''),
     timer: null,
 };
 

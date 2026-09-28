@@ -30,6 +30,11 @@ var Entry = {
     /* ---------- API 基址(复用 auth.js 配置) ---------- */
     api: function () {
         if (window.Auth && Auth.apiBase) return Auth.apiBase;
+        /* 公开入口零配置铁律(2026-09-29 生产部署): login.html 是公开
+         * 用户总入口, 不可依赖运营者 localStorage 预配置(auth.js 亦未导出
+         * apiBase)——非本地域名默认同域相对路径, 开箱即用 */
+        if (location.hostname !== 'localhost'
+                && location.hostname !== '127.0.0.1') return '';
         return (localStorage.getItem('zhuxiang.apiBase')
                 || 'http://localhost:8000');
     },

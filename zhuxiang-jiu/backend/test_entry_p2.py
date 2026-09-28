@@ -68,7 +68,13 @@ async def main():
     from fastapi.testclient import TestClient
     from main import app
     client = TestClient(app)
-    admin_h = {"X-Role": "admin"}
+    # 46+1 安全修复(2026-09-28): 身份头只能来自 token——无 Bearer 的
+    # X-Role 被剥 → admin 断言改真实认证轨 Bearer
+    from services.auth_service import AuthService
+    _adm = await AuthService().register(
+        phone="13499999999", password="Test1234!",
+        role="admin", age_confirmed=True)
+    admin_h = {"Authorization": "Bearer " + _adm["accessToken"]}
 
     r = client.get("/api/entry/events", headers=admin_h)
     record("events admin 200", r.status_code == 200,

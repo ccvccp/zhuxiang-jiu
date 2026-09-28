@@ -281,8 +281,15 @@ async def main():
     from fastapi.testclient import TestClient
     from main import app
     client = TestClient(app)
-    headers = {"X-Member-Id": str(mid)}
-    admin_h = {"X-Role": "admin"}
+    # 46+1 安全修复(2026-09-28): 身份头只能来自 token——无 Bearer 的
+    # X-Member-Id/X-Role 均被剥 → 登录态/admin 断言改真实认证轨 Bearer
+    from services.auth_service import AuthService
+    headers = {"Authorization": "Bearer " + (await AuthService().login(
+        phone=phone, password="Test1234!"))["accessToken"]}
+    _adm = await AuthService().register(
+        phone=f"13599999999", password="Test1234!",
+        role="admin", age_confirmed=True)
+    admin_h = {"Authorization": "Bearer " + _adm["accessToken"]}
 
     r = client.post("/api/entry/bio/enroll",
                     json={"bioType": "fingerprint",
@@ -291,11 +298,14 @@ async def main():
            f"实际{r.status_code}")
 
     # 新会员(凭证未满)验证 enroll 登录态链路
-    mid_fresh, _ = await _add_member()
+    mid_fresh, phone_fresh = await _add_member()
     r = client.post("/api/entry/bio/enroll",
                     json={"bioType": "fingerprint",
                           "deviceId": "DV_HTTP"},
-                    headers={"X-Member-Id": str(mid_fresh)})
+                    headers={"Authorization":
+                             "Bearer " + (await AuthService().login(
+                                 phone=phone_fresh,
+                                 password="Test1234!"))["accessToken"]})
     record("HTTP enroll登录态200", r.status_code == 200,
            f"实际{r.status_code}")
 
