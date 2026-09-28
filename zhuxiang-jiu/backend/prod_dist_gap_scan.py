@@ -31,7 +31,7 @@ PUBLIC_EXACT = {
     "/api/entry/qr/create", "/api/entry/qr/scan",
     "/api/entry/qr/exchange", "/api/entry/qr/cancel",
     "/api/entry/registration-merge", "/api/entry/bio/challenge",
-    "/api/entry/bio/verify",
+    "/api/entry/bio/verify", "/api/entry/bio/cloud-verify",
     "/api/payment/callback/pay", "/api/payment/callback/refund",
     "/api/payment/callback/payout", "/api/logistics/callback/track",
     "/api/decision/health", "/api/monitor/health",

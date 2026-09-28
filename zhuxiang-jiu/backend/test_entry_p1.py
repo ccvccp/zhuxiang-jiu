@@ -184,6 +184,94 @@ async def main():
         os.environ["ENTRY_BIO_MODE"] = "mock"
 
     # ========================================================
+    # 1.5 刷脸云端辅助核验轨(设计 §2.3 P1 承诺, 2026-09-29 补齐)
+    # ========================================================
+    print("\n========== 1.5 云端辅助核验轨 ==========")
+
+    # 凭证上限已满(5)——复用既有 face 凭证 + 吊销一个 face 腾位
+    creds = await svc.bio_list(mid)
+    face_rec = next(c for c in creds
+                    if c.get("bioType") == "face"
+                    and c.get("status") == "active")
+    spare = [c for c in creds if c.get("bioType") == "face"
+             and c.get("status") == "active"
+             and c.get("credentialId") != face_rec.get("credentialId")]
+    if spare:
+        await svc.bio_revoke(mid, spare[0]["credentialId"])
+    dv_cloud = str(face_rec.get("deviceId", ""))
+    face_cred = {"credentialId": face_rec["credentialId"]}
+
+    # LLM off(本套件环境) → vision 返回 None → 降级回落设备轨
+    ch_c = await svc.bio_challenge(face_cred["credentialId"])
+    a_c = hashlib.sha256(
+        (ch_c["assertionChallenge"] + dv_cloud).encode()).hexdigest()[:32]
+    r_c = await svc.bio_cloud_verify(face_cred["credentialId"],
+                                     a_c, "FAKEIMGDATA" * 8,
+                                     ip="127.0.0.1")
+    record("cloud-verify LLM off 降级回落设备轨",
+           r_c["status"] in ("authenticated", "step_up_required")
+           and r_c["faceCloudReport"].get("degraded") is True,
+           f"实际{r_c.get('faceCloudReport')}")
+
+    # 指纹凭证调云端轨 → 409
+    e_fp = await svc.bio_enroll(mid, "fingerprint", f"{dv}_FP")
+    fp_cred = await svc.bio_bind(
+        mid, "fingerprint", f"{dv}_FP", e_fp["enrollChallenge"],
+        hashlib.sha256(b"fp-cloud-pk").hexdigest()[:32])
+    ch_f = await svc.bio_challenge(fp_cred["credentialId"])
+    a_f = hashlib.sha256(
+        (ch_f["assertionChallenge"] + f"{dv}_FP").encode()
+    ).hexdigest()[:32]
+    ok, msg = await _expect(
+        ValueError, svc.bio_cloud_verify(
+            fp_cred["credentialId"], a_f, "FAKEIMGDATA" * 8))
+    record("非刷脸凭证调云端轨409", ok, msg)
+
+    # vision mock 判"非活体人脸" → 拒绝签发(防伪造帧)
+    from services import llm_client as _llm
+    _orig_vision = _llm.provider_client.vision
+    try:
+        _llm.provider_client.vision = (
+            lambda p, u, m: '{"face": false, "liveness": false}')
+        ch_r = await svc.bio_challenge(face_cred["credentialId"])
+        a_r = hashlib.sha256(
+            (ch_r["assertionChallenge"] + dv_cloud).encode()
+        ).hexdigest()[:32]
+        ok, msg = await _expect(
+            ValueError, svc.bio_cloud_verify(
+                face_cred["credentialId"], a_r, "FAKEIMGDATA" * 8))
+        record("vision判非活体人脸拒绝签发", ok, msg)
+
+        # vision mock 判通过 → 双过签发 + report.verdict=pass
+        _llm.provider_client.vision = (
+            lambda p, u, m: '{"face": true, "liveness": true}')
+        ch_p = await svc.bio_challenge(face_cred["credentialId"])
+        a_p = hashlib.sha256(
+            (ch_p["assertionChallenge"] + dv_cloud).encode()
+        ).hexdigest()[:32]
+        r_p = await svc.bio_cloud_verify(face_cred["credentialId"],
+                                         a_p, "FAKEIMGDATA" * 8,
+                                         ip="127.0.0.1")
+        record("vision判通过双过签发",
+               r_p["status"] in ("authenticated", "step_up_required")
+               and r_p["faceCloudReport"].get("verdict") == "pass"
+               and r_p["faceCloudReport"].get("degraded") is False,
+               f"实际{r_p.get('faceCloudReport')}")
+    finally:
+        _llm.provider_client.vision = _orig_vision
+
+    # 挑战一次性消费(云端轨同样)
+    ch_o = await svc.bio_challenge(face_cred["credentialId"])
+    a_o = hashlib.sha256(
+        (ch_o["assertionChallenge"] + dv_cloud).encode()).hexdigest()[:32]
+    await svc.bio_cloud_verify(face_cred["credentialId"], a_o,
+                               "FAKEIMGDATA" * 8, ip="127.0.0.1")
+    ok, msg = await _expect(
+        ValueError, svc.bio_cloud_verify(
+            face_cred["credentialId"], a_o, "FAKEIMGDATA" * 8))
+    record("云端轨挑战一次性消费", ok, msg)
+
+    # ========================================================
     # 2. 决策回流(第 21 档案 auth_risk)
     # ========================================================
     print("\n========== 2. 决策回流 ==========")

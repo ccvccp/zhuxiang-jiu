@@ -111,6 +111,13 @@ class BioVerifyRequest(PydBaseModel):
     assertionHash: str = Field(..., min_length=8, max_length=64)
 
 
+class BioCloudVerifyRequest(PydBaseModel):
+    """刷脸云端辅助核验(设计 §2.3: 自拍帧 base64, 仅存判定报告)"""
+    credentialId: str = Field(..., min_length=4, max_length=40)
+    assertionHash: str = Field(..., min_length=8, max_length=64)
+    imageB64: str = Field(..., min_length=32, max_length=2_000_000)
+
+
 class DecisionReviewRequest(PydBaseModel):
     verdict: str = Field(..., description="confirm|false_block|false_allow")
 
@@ -352,6 +359,23 @@ async def bio_verify(
     try:
         result = await _service.bio_verify(
             data.credentialId, data.assertionHash,
+            ip=x_forwarded_for.split(",")[0].strip())
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/entry/bio/cloud-verify",
+             tags=["AI智能网站入口管理模块"])
+async def bio_cloud_verify(
+    data: BioCloudVerifyRequest,
+    x_forwarded_for: str = Header("", alias="X-Forwarded-For"),
+):
+    """刷脸云端辅助核验(设备轨验签+vision 判照双过;
+    LLM 未配置/异常降级回落设备轨——38号审图降级惯例)"""
+    try:
+        result = await _service.bio_cloud_verify(
+            data.credentialId, data.assertionHash, data.imageB64,
             ip=x_forwarded_for.split(",")[0].strip())
         return {"success": True, "data": result}
     except Exception as e:

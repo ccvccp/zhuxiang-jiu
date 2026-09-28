@@ -81,6 +81,9 @@ PUBLIC_EXACT = {
     # 39号 P1: 生物凭证挑战/验证(登录前, 凭一次性 challenge)
     "/api/entry/bio/challenge",
     "/api/entry/bio/verify",
+    # 39号刷脸云端辅助核验轨(2026-09-29 补齐: 凭一次性
+    # challenge+vision 判照, 人脸图不落库)
+    "/api/entry/bio/cloud-verify",
     # 第三方服务器回调(微信/支付宝/物流平台服务器发起, 无本站 JWT;
     # 安全性由各回调自有验签保障: 微信APIv3 / 支付宝RSA2 /
     # 物流渠道签名, 详见 payment_routes._verify_callback 族)

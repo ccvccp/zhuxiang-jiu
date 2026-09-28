@@ -590,17 +590,16 @@ class EntryService:
                 "challengeTtl": 60,
                 "bioType": record.get("bioType")}
 
-    async def bio_verify(self, credential_id: str,
-                         assertion_hash: str,
-                         ip: str = "") -> dict:
-        """验证断言 → 风控决策 → allow 签发令牌
+    async def _bio_assert_pass(self, credential_id: str,
+                              assertion_hash: str) -> dict:
+        """生物凭证验签公共段(bio_verify/bio_cloud_verify 共用)
 
-        Mock 轨: assertion 由 challenge+deviceId 确定性派生
-        (sha256 前 32 位), 测试可复现。
+        含: 凭证存在/active 校验 + strict 拒 mock + 挑战时效(60s)
+        + 断言匹配(challenge+deviceId 确定性派生, Mock 轨可复现)。
 
         Raises:
             KeyError: 凭证不存在
-            ValueError: 断言不匹配/挑战过期/风控拦截/strict 拒 mock
+            ValueError: 凭证吊销/strict 拒 mock/无挑战/过期/断言失败
         """
         import os as _os
         strict = (_os.environ.get("ENTRY_BIO_MODE", "mock")
@@ -616,7 +615,6 @@ class EntryService:
         challenge = record.get("lastChallenge") or ""
         if not challenge:
             raise ValueError("无待验证挑战(请先 bio/challenge)")
-        # 挑战时效(60s)
         challenged_at = str(record.get("lastChallengeAt") or "")
         if challenged_at:
             try:
@@ -634,6 +632,22 @@ class EntryService:
             .encode()).hexdigest()[:32]
         if assertion_hash != expected:
             raise ValueError("断言校验失败(设备端验证未通过)")
+        return record
+
+    async def bio_verify(self, credential_id: str,
+                         assertion_hash: str,
+                         ip: str = "") -> dict:
+        """验证断言 → 风控决策 → allow 签发令牌
+
+        Mock 轨: assertion 由 challenge+deviceId 确定性派生
+        (sha256 前 32 位), 测试可复现。
+
+        Raises:
+            KeyError: 凭证不存在
+            ValueError: 断言不匹配/挑战过期/风控拦截/strict 拒 mock
+        """
+        record = await self._bio_assert_pass(credential_id,
+                                             assertion_hash)
         member_id = int(record.get("memberId") or 0)
         if not member_id:
             raise ValueError("凭证缺少归属会员")
@@ -658,6 +672,86 @@ class EntryService:
                     "memberId": member_id, "decision": decision}
         return {"status": "step_up_required", "memberId": member_id,
                 "decision": decision}
+
+    async def bio_cloud_verify(self, credential_id: str,
+                               assertion_hash: str,
+                               image_b64: str,
+                               ip: str = "") -> dict:
+        """刷脸云端辅助核验轨(设计 §2.3 P1 承诺, 2026-09-29 补齐)
+
+        双段协议: 设备本地识别(主轨验签同 bio_verify 确定性派生)
+        + 云端 vision() 辅助核验(GLM-4V 判"清晰人脸照+活体迹象")
+        ——双过签发。
+        降级铁律(对齐 38号审图惯例): LLM 未配置/调用异常 → 回落
+        设备轨结果(faceCloudReport.degraded 留痕); 判定"非清晰
+        活体人脸" → 拒绝签发(防设备端伪造帧——云端核验的意义)。
+        合规红线: 自拍帧 base64 经 data URL 直传 vision, 仅判定
+        报告落 faceCloudReport, 人脸图永不落库/落日志。
+        """
+        record = await self._bio_assert_pass(credential_id,
+                                             assertion_hash)
+        if record.get("bioType") != MODE_FACE:
+            raise ValueError(
+                "云端核验轨仅支持刷脸凭证"
+                f"(当前{record.get('bioType')})")
+        member_id = int(record.get("memberId") or 0)
+        if not member_id:
+            raise ValueError("凭证缺少归属会员")
+        decision = await self.guard(
+            member_id, record.get("bioType", ""),
+            fingerprint="", ip=ip)
+        if decision["action"] == GUARD_BLOCK:
+            raise ValueError(
+                f"生物登录被风控拦截(风险分{decision['riskScore']})")
+        # ---- 云端辅助核验(vision 判照; 失败/未配置降级回落设备轨) ----
+        report = {"verdict": "fallback", "degraded": True,
+                  "source": "no_image"}
+        img = (image_b64 or "").strip()
+        if img:
+            try:
+                from services.llm_client import provider_client
+                desc = provider_client.vision(
+                    "核验这张刷脸登录自拍帧, 仅以 JSON 回答: "
+                    "{\"face\": <true|false 是否清晰人脸照>, "
+                    "\"liveness\": <true|false 是否活体迹象"
+                    "(动作/眨眼/张嘴/手持当日字条)>}",
+                    f"data:image/jpeg;base64,{img}", "face")
+                if not desc:
+                    report = {"verdict": "fallback", "degraded": True,
+                              "source": "vision_unavailable"}
+                else:
+                    compact = desc.replace(" ", "").lower()
+                    face_ok = ('"face":true' in compact
+                               or "清晰人脸" in desc)
+                    live_ok = ('"liveness":true' in compact
+                               or "活体" in desc)
+                    report = {
+                        "verdict": "pass" if (face_ok and live_ok)
+                                   else "reject",
+                        "degraded": False, "source": "vision",
+                        "face": face_ok, "liveness": live_ok}
+            except Exception as exc:
+                logger.warning(
+                    "entry_face_cloud_vision_failsoft: %s", exc)
+                report = {"verdict": "fallback", "degraded": True,
+                          "source": "vision_error"}
+            if report.get("verdict") == "reject":
+                raise ValueError("云端核验未通过: 非清晰活体人脸照")
+        await self._record_event(member_id, record.get("bioType", ""),
+                                 True, decision["riskScore"],
+                                 record.get("deviceId", ""),
+                                 note="bio_cloud_verify")
+        from services.auth_service import AuthService
+        tokens = await AuthService()._login_by_member_id(member_id)
+        # 挑战一次性消费
+        await self.repo.save_bio({
+            **record, "lastChallenge": ""})
+        if decision["action"] == GUARD_ALLOW:
+            return {"status": "authenticated", "tokens": tokens,
+                    "memberId": member_id, "decision": decision,
+                    "faceCloudReport": report}
+        return {"status": "step_up_required", "memberId": member_id,
+                "decision": decision, "faceCloudReport": report}
 
     async def bio_list(self, member_id: int) -> list[dict]:
         return await self.repo.list_bio(member_id=member_id,
