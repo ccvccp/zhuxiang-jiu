@@ -82,6 +82,42 @@ if (-not $procs) { & $WL 'NO_WEIXIN_PROC'; exit 3 }
 $digcheck = [TE]::GetSystemMetrics(94)
 & $WL "SM_DIGITIZER=$digcheck (0=无触摸硬件→键盘Enter回退, >0=触摸注入带压力512)"
 
+# ── 通道0: Arduino USB HID 硬件点击 (最高优先, Pointer框架+LLMHF双锁全过) ──
+# 铁律: 32U4 开串口触发板子复位→握手前须等 2.2s; 握手 P/PONG 验证是我们的固件而非误认串口
+$script:arSerial = $null
+function ArInit() {
+  $ports = [System.IO.Ports.SerialPort]::GetPortNames()
+  foreach ($pn in $ports) {
+    try {
+      $sp = New-Object System.IO.Ports.SerialPort($pn, 115200)
+      $sp.ReadTimeout = 1800
+      $sp.Open()
+      Start-Sleep -Milliseconds 2200   # 32U4 CDC 复位窗口
+      $sp.DiscardInBuffer()
+      $sp.WriteLine('P')
+      $resp = ''
+      try { $resp = $sp.ReadLine().Trim() } catch {}
+      if ($resp -eq 'PONG') { $script:arSerial = $sp; & $WL "arduino ok @ $pn (PONG)"; return $true }
+      $sp.Close()
+    } catch {}
+  }
+  return $false
+}
+function ArClick($cx, $cy) {
+  if (-not $script:arSerial) { return 'NO_SERIAL' }
+  try {
+    [TE]::SetCursorPos($cx, $cy) | Out-Null   # 软件定位光标(位置无标志问题, 硬件在其上点击)
+    Start-Sleep -Milliseconds 120
+    $script:arSerial.DiscardInBuffer()
+    $script:arSerial.WriteLine('H')
+    $r = ''
+    try { $r = $script:arSerial.ReadLine().Trim() } catch {}
+    return $r
+  } catch { return 'SER_ERR' }
+}
+$arReady = ArInit
+& $WL "arduino channel ready=$arReady"
+
 # 阶段0: 等 bot 信号 flag
 $flagPath = Join-Path $PSScriptRoot 'allow_signal.flag'
 $flagDeadline = (Get-Date).AddSeconds($MaxWait)
@@ -144,12 +180,21 @@ while ((Get-Date) -lt $deadline) {
     $wh2 = $popup[2].Split(',')
     # 「允许」按钮中心 = 弹窗左上角 + (101, 230) (截图+像素双校准)
     $cx = [int]$wh2[0] + 101; $cy = [int]$wh2[1] + 230
-    # 触摸硬件探测: InjectTouchInput 需 digitizer(无触摸屏机器 err=87 物理不可用)
-    $digitizer = $digcheck
-    & $WL "popup: $($popup[1]) rect=$($popup[2]) digitizer=$digitizer -> allow at $cx,$cy"
+    & $WL "popup: $($popup[1]) rect=$($popup[2]) arduino=$arReady digitizer=$digcheck -> allow at $cx,$cy"
     Start-Sleep -Milliseconds 2500
+    # ── 通道0: Arduino HID 硬件点击 (USB 输入无 LLMHF, 系统转 WM_POINTERDOWN, 双锁全过) ──
+    if ($arReady) {
+      for ($i = 1; $i -le 3; $i++) {
+        $res = ArClick $cx $cy
+        & $WL "arduino round $i resp=$res"
+        Start-Sleep -Milliseconds 2500
+        $after = [TE]::SnapQt()
+        if (-not ($after | Where-Object { $_ -eq ($popup -join '|') })) { & $WL "ARDUINO_OK (round $i)"; exit 0 }
+        & $WL "arduino round $i not effective, retry..."
+      }
+    }
     $done = $false
-    if ($digitizer -gt 0) {
+    if ($digcheck -gt 0) {
       # 触摸点击 3 轮 (带压力 512 = 0.5 归一, 对齐 CDP force=0.5)
       for ($i = 1; $i -le 3; $i++) {
         $res = TouchClick $cx $cy 512
