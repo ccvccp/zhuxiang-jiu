@@ -9,3 +9,7 @@ link_result.json
 probe_result.json
 probe_frames.json
 detail_text.txt
+# 抖音通道运行产物(2026-09-28; bot 代码/配置入库, 产物留档不入库)
+douyin-profile/
+douyin_bot.log
+douyin_*.json
