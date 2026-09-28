@@ -205,6 +205,20 @@ def inject_identity(scope: dict, member: dict) -> None:
     scope["headers"] = headers
 
 
+def _strip_identity_headers(scope: dict) -> None:
+    """剥离客户端伪造的身份头(compat 无 token 放行时调用)
+
+    身份头只能来自中间件校验通过后的 inject_identity——
+    无 token 即 guest, 客户端直传 X-Role: admin 不构成身份。
+    旧客户端头信任须显式设 AUTH_COMPAT_TRUST_HEADERS=1(应急回滚用)。
+    """
+    scope["headers"] = [
+        (key, value)
+        for key, value in scope.get("headers", [])
+        if key.decode("latin-1").lower() not in ("x-member-id", "x-role")
+    ]
+
+
 async def _send_json_error(send, status: int, detail: str):
     """以 JSON 响应终止请求(格式与 FastAPI HTTPException 一致)
 
@@ -273,6 +287,12 @@ class JWTAuthMiddleware:
             await _send_json_error(
                 send, 401, "未登录: 请提供 Authorization: Bearer <token>")
             return
+        else:
+            # compat 无 token 放行: 默认剥离伪造身份头(防 X-Role: admin 越权);
+            # 旧头信任须显式 AUTH_COMPAT_TRUST_HEADERS=1(应急回滚/测试用)
+            _trust = os.environ.get("AUTH_COMPAT_TRUST_HEADERS", "")
+            if _trust.lower() not in ("1", "true", "yes"):
+                _strip_identity_headers(scope)
 
         await self.app(scope, receive, send)
 

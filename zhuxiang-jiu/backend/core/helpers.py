@@ -11,6 +11,17 @@ def ts() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def round_half_up(value, digits: int = 2) -> float:
+    """金额四舍五入(商业口径 ROUND_HALF_UP)
+
+    Python 内置 round 是银行家舍入(half-to-even): round(2.675, 2)
+    得 2.67, 半分边界会少收——金额计算统一走本函数。
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+    q = Decimal("1").scaleb(-digits)
+    return float(Decimal(str(value)).quantize(q, rounding=ROUND_HALF_UP))
+
+
 def bc_hash() -> str:
     """区块链存证哈希(Mock)
 

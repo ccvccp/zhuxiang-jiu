@@ -53,6 +53,8 @@ class CheckoutSubmitRequest(PydBaseModel):
     """订单结算请求(对齐 checkout-service.js: items+会员等级+积分+券+支付+区域)
 
     兼容旧字段 consignee/payment(透传存单)。
+    memberId 可选: 传入则积分账户按会员隔离(生产语义); 未传回退
+    等级共享池(前端 mock 契约兼容)。
     """
     items: list[Any] = Field(default_factory=list)
     memberLevel: str = Field("L1", description="会员等级 L1-L5")
@@ -60,6 +62,7 @@ class CheckoutSubmitRequest(PydBaseModel):
     couponCode: str | None = Field(None, description="优惠券码")
     paymentMethod: str = Field("wechat", description="支付方式")
     region: str | None = Field(None, description="收货区域(发货方路由)")
+    memberId: int | None = Field(None, description="会员ID(可选, 积分按会员隔离)")
     consignee: Any = None
     payment: Any = None
     class Config:
@@ -162,7 +165,7 @@ async def checkout_submit(req: CheckoutSubmitRequest):
         req.items, consignee=req.consignee, payment=req.payment,
         member_level=req.memberLevel, points=req.points,
         coupon_code=req.couponCode, payment_method=req.paymentMethod,
-        region=req.region,
+        region=req.region, member_id=req.memberId,
     )
 
 

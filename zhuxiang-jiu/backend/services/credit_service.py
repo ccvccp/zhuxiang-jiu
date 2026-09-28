@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 
 from core.locks import get_lock
 from core.helpers import ts
+from services.tx_utils import gen_no
 from repositories.credit_repository import (
     CreditRepository,
     # 信用等级
@@ -1125,7 +1126,8 @@ class CreditService:
             # gate_key_no(=orderNo)贯穿决策快照与订单创建——回流配对键一致
             ai_review_required = False
             if not order_no:
-                order_no = (f"PL{int(datetime.fromisoformat(now_iso).timestamp() * 1000)}")
+                # 单号防撞: 纯毫秒时间戳同毫秒并发必撞(gen_no=毫秒+自增序号)
+                order_no = gen_no("PL")
             try:
                 from services.ai_enforcement_credit import (
                     enrich_credit_risk, enforce_paylater,
@@ -1361,7 +1363,7 @@ class CreditService:
                + timedelta(days=interest_free)).isoformat()
         return {
             "userId": user_id,
-            "orderNo": order_no or f"PL{int(datetime.fromisoformat(now_iso).timestamp() * 1000)}",
+            "orderNo": order_no or gen_no("PL"),
             "accountType": account_type,
             "source": source,
             "amount": round(float(amount), 2),

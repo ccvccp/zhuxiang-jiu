@@ -273,9 +273,11 @@ class OrderRepository:
 
     async def _redis_list_by_status(self, status: str) -> list[dict]:
         client = await get_redis_client()
-        keys = await client.keys(_k("order", "*"))
+        # SCAN 增量迭代替代 KEYS(KEYS 单线程阻塞 Redis); 结果按
+        # createdAt 升序——超时调度器按序取前 BATCH_LIMIT 条时旧单
+        # 优先处理, 无序返回时旧超时单可能持续饥饿
         result = []
-        for key in keys:
+        async for key in client.scan_iter(match=_k("order", "*")):
             if ":user:" in key:
                 continue
             raw = await client.get(key)
@@ -283,6 +285,7 @@ class OrderRepository:
                 order = json.loads(raw)
                 if order.get("status") == status:
                     result.append(order)
+        result.sort(key=lambda o: o.get("createdAt", ""))
         return result
 
     async def _redis_save(self, order_id: str, order_data: dict) -> dict:

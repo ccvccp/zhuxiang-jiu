@@ -22,6 +22,7 @@ from datetime import datetime, timezone, timedelta, UTC
 
 from core.helpers import ts
 from core.locks import get_lock
+from services.tx_utils import gen_no
 from repositories.member_repository import MemberRepository
 from repositories.wallet_repository import (
     WalletRepository,
@@ -442,7 +443,8 @@ class WalletService:
         )
         if pay_method is None:
             pay_method = default_pay_method(pay_channel)
-        order_id = f"WD-{user_id}-{int(datetime.now(UTC).timestamp() * 1000)}"
+        # 单号防撞: 纯毫秒时间戳同毫秒并发必撞(gen_no=毫秒+进程内自增序号)
+        order_id = gen_no(f"WD-{user_id}-")
         return await PaymentService().create_pay(
             user_id=user_id,
             order_id=order_id,
@@ -618,8 +620,19 @@ class WalletService:
                 raise ValueError(f"余额不足: 当前 ¥{balance:.2f}, 需 ¥{amount:.2f}")
 
             # 1. 冻结金额(从 balance 扣减, 加到 frozenAmount)
+            # 两步非原子: 第二步失败时反向补偿第一步, 防止"余额已扣冻结未加"
             await self.wallet_repo.add_balance(user_id, -amount)
-            await self.wallet_repo.add_frozen(user_id, amount)
+            try:
+                await self.wallet_repo.add_frozen(user_id, amount)
+            except Exception:
+                logger.exception("提现冻结第二步失败, 补偿回滚余额扣减: "
+                                 "user=%r amount=%.2f", user_id, amount)
+                try:
+                    await self.wallet_repo.add_balance(user_id, amount)
+                except Exception:
+                    logger.exception("提现冻结补偿回滚失败(需人工核对): "
+                                     "user=%r amount=%.2f", user_id, amount)
+                raise
 
             # 2. 生成提现单(决策门预生成则复用, 保证快照配对键一致)
             if not withdraw_no:
@@ -726,16 +739,15 @@ class WalletService:
         from repositories.compliance_repository import REPORT_TYPE_LARGE_AMOUNT
 
         # 日累计: 聚合当日该用户全部提现流水(含本次, 步骤 3 已落库)
-        today_prefix = datetime.now(UTC).date().isoformat()
+        # P2: 走仓储无截断聚合方法(旧实现 limit=500 截断, 高频用户
+        # 漏算反洗钱日累计); 日期口径统一上海时区(业务时区)
+        from zoneinfo import ZoneInfo
+        today_prefix = datetime.now(
+            ZoneInfo("Asia/Shanghai")).date().isoformat()
         daily_total = amount
         try:
-            txs = await self.wallet_repo.list_transactions(
-                user_id, tx_type="withdraw", limit=500)
-            for tx in txs:
-                created = str(tx.get("createdAt", ""))
-                # ISO8601 UTC, 日期前缀匹配当日
-                if created.startswith(today_prefix):
-                    daily_total += float(tx.get("amount", 0))
+            daily_total += await self.wallet_repo.sum_daily_withdrawals(
+                user_id, today_prefix)
         except Exception as exc:
             logger.warning("daily_withdraw_aggregation_failed err=%s", exc)
             daily_total = amount
@@ -794,8 +806,19 @@ class WalletService:
             async with get_lock(f"wallet:{user_id}"):
                 if decision == "rejected":
                     # 释放冻结: frozenAmount - amount, balance + amount
+                    # 两步非原子: 第二步失败时反向补偿第一步, 防止"冻结已减余额未加"
                     await self.wallet_repo.reduce_frozen(user_id, amount)
-                    await self.wallet_repo.add_balance(user_id, amount)
+                    try:
+                        await self.wallet_repo.add_balance(user_id, amount)
+                    except Exception:
+                        logger.exception("拒单释放第二步失败, 补偿回滚冻结扣减: "
+                                         "user=%r amount=%.2f", user_id, amount)
+                        try:
+                            await self.wallet_repo.add_frozen(user_id, amount)
+                        except Exception:
+                            logger.exception("拒单释放补偿回滚失败(需人工核对): "
+                                             "user=%r amount=%.2f", user_id, amount)
+                        raise
                     new_status = "rejected"
                     log_msg = f"提现被拒, 释放冻结 ¥{amount:.2f}"
                 else:
@@ -842,14 +865,25 @@ class WalletService:
             actual = float(wd["actualAmount"])
 
             async with get_lock(f"wallet:{user_id}"):
-                # 释放冻结(资金已出账)
+                # 释放冻结(资金已出账); 两步非原子, 第二步失败时
+                # 反向补偿第一步, 防止"冻结已减累计未加"
                 await self.wallet_repo.reduce_frozen(user_id, amount)
-                # 累计提现累加
-                account = await self.wallet_repo.get_account(user_id)
-                await self.wallet_repo.update_account_fields(user_id, {
-                    "totalWithdraw": float(account.get("totalWithdraw", 0)) + amount,
-                    "updatedAt": ts(),
-                })
+                try:
+                    # 累计提现累加
+                    account = await self.wallet_repo.get_account(user_id)
+                    await self.wallet_repo.update_account_fields(user_id, {
+                        "totalWithdraw": float(account.get("totalWithdraw", 0)) + amount,
+                        "updatedAt": ts(),
+                    })
+                except Exception:
+                    logger.exception("打款记账第二步失败, 补偿回滚冻结释放: "
+                                     "user=%r amount=%.2f", user_id, amount)
+                    try:
+                        await self.wallet_repo.add_frozen(user_id, amount)
+                    except Exception:
+                        logger.exception("打款记账补偿回滚失败(需人工核对): "
+                                         "user=%r amount=%.2f", user_id, amount)
+                    raise
                 # 提现单状态更新
                 await self.wallet_repo.update_withdrawal_fields(withdraw_no, {
                     "status": "paid",
@@ -1304,68 +1338,116 @@ class WalletService:
             interest = float(deposit["expectedInterest"])
 
             async with get_lock(f"wallet:{user_id}"):
-                # 1. 本金 + 余额收益入账
-                new_balance = await self.wallet_repo.add_balance(user_id, amount + interest)
-                # 2. 累计收益累加
+                # 五步连写非原子(Redis 模式下每步独立网络命令):
+                # 逐项记录已执行步骤, 失败逆序回滚, 防止"本金已入账定期未结"等中间态
                 account = await self.wallet_repo.get_account(user_id)
-                await self.wallet_repo.update_account_fields(user_id, {
-                    "totalInterest": float(account.get("totalInterest", 0)) + interest,
-                    "updatedAt": ts(),
-                })
+                prev_interest = float(account.get("totalInterest", 0))
+                prev_reward_total = float(account.get("totalReward", 0))
+                executed: list[str] = []
+                try:
+                    # 1. 本金 + 余额收益入账
+                    new_balance = await self.wallet_repo.add_balance(
+                        user_id, amount + interest)
+                    executed.append("balance")
 
-                # 3. 定期状态更新
-                await self.wallet_repo.update_deposit_fields(deposit_no, {
-                    "status": "settled",
-                    "settledAt": ts(),
-                    "settledInterest": interest,
-                    "updatedAt": ts(),
-                })
-
-                # 4. 奖品转可领取
-                reward_name = deposit.get("rewardType", "")
-                reward_value = float(deposit.get("rewardValue", 0))
-                reward_no = ""
-                if reward_name and reward_value > 0:
-                    reward_no = await self.wallet_repo.next_reward_no()
-                    claim_deadline = _now_shanghai() + timedelta(days=REWARD_CLAIM_DAYS)
-                    await self.wallet_repo.save_reward({
-                        "rewardNo": reward_no,
-                        "userId": user_id,
-                        "depositNo": deposit_no,
-                        "rewardName": reward_name,
-                        "rewardItems": [],
-                        "rewardValue": reward_value,
-                        "addressId": 0,
-                        "waybillNo": "",
-                        "status": "claimable",
-                        "claimDeadline": claim_deadline.isoformat(),
-                        "claimedAt": "",
-                        "shippedAt": "",
-                        "signedAt": "",
-                        "createdAt": ts(),
+                    # 2. 累计收益累加
+                    await self.wallet_repo.update_account_fields(user_id, {
+                        "totalInterest": prev_interest + interest,
                         "updatedAt": ts(),
                     })
-                    await self.wallet_repo.update_account_fields(user_id, {
-                        "totalReward": float(account.get("totalReward", 0)) + reward_value,
-                    })
+                    executed.append("interest")
 
-                # 5. 交易流水(本金入账)
-                tx_no = await self.wallet_repo.next_tx_no()
-                await self.wallet_repo.save_transaction({
-                    "txNo": tx_no,
-                    "userId": user_id,
-                    "type": "interest",
-                    "direction": "IN",
-                    "amount": amount + interest,
-                    "balanceAfter": new_balance,
-                    "payChannel": "",
-                    "orderId": "",
-                    "depositNo": deposit_no,
-                    "withdrawNo": "",
-                    "status": "success",
-                    "description": f"定期到期取出 ¥{amount:.2f} + 收益 ¥{interest:.2f}",
-                    "createdAt": ts(),
-                })
+                    # 3. 定期状态更新
+                    await self.wallet_repo.update_deposit_fields(deposit_no, {
+                        "status": "settled",
+                        "settledAt": ts(),
+                        "settledInterest": interest,
+                        "updatedAt": ts(),
+                    })
+                    executed.append("deposit")
+
+                    # 4. 奖品转可领取
+                    reward_name = deposit.get("rewardType", "")
+                    reward_value = float(deposit.get("rewardValue", 0))
+                    reward_no = ""
+                    if reward_name and reward_value > 0:
+                        reward_no = await self.wallet_repo.next_reward_no()
+                        claim_deadline = _now_shanghai() + timedelta(days=REWARD_CLAIM_DAYS)
+                        await self.wallet_repo.save_reward({
+                            "rewardNo": reward_no,
+                            "userId": user_id,
+                            "depositNo": deposit_no,
+                            "rewardName": reward_name,
+                            "rewardItems": [],
+                            "rewardValue": reward_value,
+                            "addressId": 0,
+                            "waybillNo": "",
+                            "status": "claimable",
+                            "claimDeadline": claim_deadline.isoformat(),
+                            "claimedAt": "",
+                            "shippedAt": "",
+                            "signedAt": "",
+                            "createdAt": ts(),
+                            "updatedAt": ts(),
+                        })
+                        executed.append("reward_record")
+                        await self.wallet_repo.update_account_fields(user_id, {
+                            "totalReward": prev_reward_total + reward_value,
+                        })
+                        executed.append("reward_total")
+
+                    # 5. 交易流水(本金入账)
+                    tx_no = await self.wallet_repo.next_tx_no()
+                    await self.wallet_repo.save_transaction({
+                        "txNo": tx_no,
+                        "userId": user_id,
+                        "type": "interest",
+                        "direction": "IN",
+                        "amount": amount + interest,
+                        "balanceAfter": new_balance,
+                        "payChannel": "",
+                        "orderId": "",
+                        "depositNo": deposit_no,
+                        "withdrawNo": "",
+                        "status": "success",
+                        "description": f"定期到期取出 ¥{amount:.2f} + 收益 ¥{interest:.2f}",
+                        "createdAt": ts(),
+                    })
+                except Exception:
+                    logger.exception(
+                        "定期结清失败, 逆序回滚已执行步骤: "
+                        "user=%r dp=%s steps=%s", user_id, deposit_no, executed)
+                    for step in reversed(executed):
+                        try:
+                            if step == "balance":
+                                await self.wallet_repo.add_balance(
+                                    user_id, -(amount + interest))
+                            elif step == "interest":
+                                await self.wallet_repo.update_account_fields(user_id, {
+                                    "totalInterest": prev_interest,
+                                    "updatedAt": ts(),
+                                })
+                            elif step == "deposit":
+                                # 回滚为结清前状态(active/matured)
+                                await self.wallet_repo.update_deposit_fields(deposit_no, {
+                                    "status": deposit["status"],
+                                    "updatedAt": ts(),
+                                })
+                            elif step == "reward_total":
+                                await self.wallet_repo.update_account_fields(user_id, {
+                                    "totalReward": prev_reward_total,
+                                })
+                            elif step == "reward_record":
+                                # 作废奖品(移出可领集合)
+                                await self.wallet_repo.update_reward_fields(reward_no, {
+                                    "status": "cancelled",
+                                    "updatedAt": ts(),
+                                })
+                        except Exception:
+                            logger.exception("定期结清回滚步骤失败(需人工核对): "
+                                             "user=%r dp=%s step=%s",
+                                             user_id, deposit_no, step)
+                    raise
 
             logs = [
                 {"step": "定期到期", "level": "INFO",

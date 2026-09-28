@@ -41,7 +41,9 @@ async def general_exception_handler(request: Request, exc: Exception):
         status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "success": False,
-            "error": f"DECISION_010: {exc}",
+            # P0 安全: 不回传 str(exc)——异常消息常含 Redis 连接串/SQL 片段
+            # 等内部信息(侦察价值), 详情只留服务端日志
+            "error": "DECISION_010: 服务器内部错误",
             "errorCode": "DECISION_010",
             "path": path,
         },

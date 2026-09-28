@@ -18,8 +18,10 @@ from contextlib import AbstractAsyncContextManager
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
-_LOCK_TTL = 10.0            # 锁 TTL(秒), 超时自动释放防死锁
-_LOCK_BLOCK_TIMEOUT = 30.0  # 等待获取锁的最长时间
+_LOCK_TTL = 10.0            # 锁 TTL(秒), 超时自动释放防死锁(watchdog 自动续期)
+# 等待获取锁的最长时间: 须覆盖最慢持锁方(wechat_mp 发布 5 次串行
+# HTTP ×10s ≈ 50s), 30s 会让并发的手动触发/入队在等待期抛 LockError
+_LOCK_BLOCK_TIMEOUT = 90.0
 _ASYNC_LOCKS_MAX_SIZE = 512  # asyncio 锁缓存上限, 防止无界增长导致内存泄漏
 
 _async_locks: dict[str, asyncio.Lock] = {}
@@ -81,7 +83,8 @@ class _RedisLockWrapper:
     async def __aexit__(self, exc_type, exc, tb):
         if self._lock is not None:
             try:
-                if self._lock.owned():
+                # owned() 是协程方法, 必须 await——否则返回协程对象恒真
+                if await self._lock.owned():
                     await self._lock.release()
             except Exception as e:
                 logger.warning("释放 Redis 锁失败(key=%s): %s", self.key, e)

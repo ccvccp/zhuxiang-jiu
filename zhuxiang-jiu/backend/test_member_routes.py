@@ -346,7 +346,8 @@ class TestMemberPoints:
     def test_deduct_points_success(self):
         """积分抵扣(P1-20: 代理积分模块, FIFO 消耗)"""
         _migrate_legacy_points()
-        resp = client.post("/api/member/points/deduct", json={"points": 100},
+        resp = client.post("/api/member/points/deduct",
+                           json={"points": 100, "order_amount": 1000},
                            headers={"X-Member-Id": "1"})
         assert resp.status_code == 200
         data = resp.json()
@@ -357,10 +358,19 @@ class TestMemberPoints:
     def test_deduct_points_insufficient(self):
         """积分不足: 409"""
         _migrate_legacy_points()
-        resp = client.post("/api/member/points/deduct", json={"points": 1000},
+        resp = client.post("/api/member/points/deduct",
+                           json={"points": 1000, "order_amount": 10000},
                            headers={"X-Member-Id": "1"})
         assert resp.status_code == 409
         assert "不足" in resp.json()["error"]
+
+    def test_deduct_points_no_order_amount(self):
+        """缺少订单金额基准: 409(安全修复——无基准抵扣曾可绕过 30% 上限)"""
+        _migrate_legacy_points()
+        resp = client.post("/api/member/points/deduct", json={"points": 100},
+                           headers={"X-Member-Id": "1"})
+        assert resp.status_code == 409
+        assert "缺少订单金额基准" in resp.json()["error"]
 
     def test_deduct_points_not_multiple(self):
         """非 100 倍数: 409"""

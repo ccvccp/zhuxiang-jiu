@@ -193,6 +193,32 @@ class AuthRepository:
         day_map[phone] = day_map.get(phone, 0) + 1
         return day_map[phone]
 
+    async def bump_sms_fail_count(self, phone: str) -> int:
+        """校验失败计数+1, 返回累计失败次数
+
+        P0 安全: 6 位码空间 10^6, 无限重试可在 TTL 内暴力命中——
+        达到上限(3 次)后由调用方作废验证码强制重新获取。
+        TTL 与验证码对齐(300s), 新验证码发送时清零。
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("auth", "sms", "fails", phone)
+            n = await client.incr(key)
+            if n == 1:
+                await client.expire(key, 300)
+            return n
+        fails = self.store.setdefault("auth_sms_fails", {})
+        fails[phone] = fails.get(phone, 0) + 1
+        return fails[phone]
+
+    async def reset_sms_fail_count(self, phone: str) -> None:
+        """清除失败计数(发送新验证码/校验通过时)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.delete(_k("auth", "sms", "fails", phone))
+            return
+        self.store.get("auth_sms_fails", {}).pop(phone, None)
+
     # ---------- 三方账号绑定(P1-2, 设计文档 5.2/5.3: 一手机号可绑多平台) ----------
 
     async def save_oauth_binding(self, platform: str, openid: str,

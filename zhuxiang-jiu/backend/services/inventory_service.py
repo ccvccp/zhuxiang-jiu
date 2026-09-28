@@ -81,15 +81,23 @@ class InventoryService:
         alerts_triggered = 0
         try:
             # Pass1: 全量校验(无副作用)
+            # 同商品多行须按聚合需求校验: 逐行独立校验时各行均 ≤ 库存,
+            # 但合并需求可能超库存, 导致 Pass2 从第二行起触发仓储层"库存不足"
             stage = "阶段3-库存扣减"
+            demand: dict = {}   # productId → 合并需求量(同商品多行累加)
+            names: dict = {}    # productId → 展示名(取首个匹配行)
             for item in items:
-                product = await self.inventory_repo.get(item["id"])
+                pid = item["id"]
+                demand[pid] = demand.get(pid, 0) + item["qty"]
+                names.setdefault(pid, item.get("name"))
+            for pid, need_qty in demand.items():
+                product = await self.inventory_repo.get(pid)
                 if not product:
-                    raise StageError(stage, f"商品不存在: id={item['id']}")
-                if product["stock"] < item["qty"]:
+                    raise StageError(stage, f"商品不存在: id={pid}")
+                if product["stock"] < need_qty:
                     raise StageError(
-                        stage, f"库存不足: {item.get('name') or item['id']} "
-                        f"需要{item['qty']}现有{product['stock']}")
+                        stage, f"库存不足: {names.get(pid) or pid} "
+                        f"需要{need_qty}现有{product['stock']}")
             # Pass2: 逐行扣减(校验已过, 防御性补偿)
             for item in items:
                 before = await self.inventory_repo.get_stock(item["id"])
@@ -121,11 +129,15 @@ class InventoryService:
             for alert in alerts:
                 await self.sc_repo.append("stock_alerts", alert)
             log.info("阶段4-提交事务", f"库存扣减完成: {total_qty} 件 / {len(lines)} 行 / 预警 {alerts_triggered}")
-        except StageError as err:
+        except (StageError, ValueError) as err:
             # 补偿回滚: 逆序恢复已扣行
+            # (ValueError: 仓储层防御性二次校验失败等场景, 一并入补偿覆盖)
             for pid, before in reversed(executed):
                 await self.inventory_repo.set_stock(pid, before)
             log.error("回滚", f"事务已回滚(补偿恢复 {len(executed)} 行)")
+            if not isinstance(err, StageError):
+                # 仓储层 ValueError 统一包装为阶段错误, 保留 failedStage 契约
+                err = StageError(stage, str(err))
             return result_failure(err, log)
 
         return self._with_single_compat({
@@ -167,6 +179,7 @@ class InventoryService:
             log.info("阶段2-开启事务", "库存回补事务已开启")
             flows: list[dict] = []
             lines: list[dict] = []
+            executed = []   # 已回补行(补偿回滚用)
             total_qty = 0
             stage = "阶段3-库存回补"
             try:
@@ -176,6 +189,7 @@ class InventoryService:
                         raise StageError(stage, f"商品不存在: id={item['id']}")
                     before = product["stock"]
                     await self.inventory_repo.restock(item["id"], item["qty"])
+                    executed.append((item["id"], before))
                     after = before + item["qty"]
                     total_qty += item["qty"]
                     lines.append({"id": item["id"], "name": item.get("name"),
@@ -190,8 +204,14 @@ class InventoryService:
                 for flow in flows:
                     await self.sc_repo.append("inventory_logs", flow)
                 log.info("阶段4-提交事务", f"库存回补完成: {total_qty} 件 / {len(lines)} 行")
-            except StageError as err:
-                log.error("回滚", "事务已回滚(补偿)")
+            except (StageError, ValueError) as err:
+                # 补偿回滚: 逆序恢复已回补行(原实现只打日志无恢复动作,
+                # 中途失败导致库存虚增; 比照 deduct_lines 补真实回滚)
+                for pid, before in reversed(executed):
+                    await self.inventory_repo.set_stock(pid, before)
+                log.error("回滚", f"事务已回滚(补偿恢复 {len(executed)} 行)")
+                if not isinstance(err, StageError):
+                    err = StageError(stage, str(err))
                 return result_failure(err, log)
 
             return self._with_single_compat({

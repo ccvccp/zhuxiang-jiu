@@ -20,9 +20,10 @@
 """
 
 from datetime import datetime
+import itertools
 import logging
 
-from core.helpers import ts
+from core.helpers import ts, round_half_up
 from core.locks import get_lock
 from core.age_gate import is_adult, MINOR_REJECT_MSG, AGE_CONFIRM_REQUIRED_MSG
 from repositories.inventory_repository import InventoryRepository
@@ -107,17 +108,23 @@ def _validate_items(items: list) -> None:
             ) from None
 
 
+# B7: 进程内自增序列(订单号防碰撞)——旧实现"秒级时间戳+随机数"撞号时
+# 仓储层 dict 赋值/set 会静默覆盖已有订单; 改为毫秒时间戳+单调自增序列,
+# 同进程内保证唯一, 跨进程由毫秒时间戳分隔
+_ORDER_ID_SEQ = itertools.count()
+_TRADE_NO_SEQ = itertools.count()
+
+
 def _gen_order_id() -> str:
-    """生成订单号: RT + 时间戳 + 随机数"""
-    now = datetime.now()
-    import random
-    return f"RT{now.strftime('%Y%m%d%H%M%S')}{random.randint(1000, 9999)}"
+    """生成订单号: RT + 毫秒时间戳 + 进程内自增序列(防随机碰撞)"""
+    return (f"RT{int(datetime.now().timestamp() * 1000)}"
+            f"{next(_ORDER_ID_SEQ):04d}")
 
 
 def _gen_trade_no() -> str:
-    """生成支付交易单号"""
-    import random
-    return f"420{datetime.now().strftime('%Y%m%d%H%M%S')}{random.randint(100, 999)}"
+    """生成支付交易单号: 420 + 毫秒时间戳 + 进程内自增序列(防随机碰撞)"""
+    return (f"420{int(datetime.now().timestamp() * 1000)}"
+            f"{next(_TRADE_NO_SEQ):04d}")
 
 
 class OrderService:
@@ -175,14 +182,14 @@ class OrderService:
         # 5. 运费(满 99 免运费)
         shipping_fee = 0 if after_points >= SHIPPING_FREE_THRESHOLD else SHIPPING_FEE
 
-        # 6. 实付金额
-        actual_amount = round(after_points + shipping_fee, 2)
+        # 6. 实付金额(P2: round_half_up 商业舍入, 内置 round 半分边界少收)
+        actual_amount = round_half_up(after_points + shipping_fee)
 
         return {
-            "goodsTotal": round(goods_total, 2),
-            "memberDiscount": round(member_discount, 2),
-            "couponDiscount": round(coupon_discount, 2),
-            "pointsDiscount": round(points_discount, 2),
+            "goodsTotal": round_half_up(goods_total),
+            "memberDiscount": round_half_up(member_discount),
+            "couponDiscount": round_half_up(coupon_discount),
+            "pointsDiscount": round_half_up(points_discount),
             "shippingFee": shipping_fee,
             "actualAmount": actual_amount,
             "discountRate": discount_rate,
@@ -462,6 +469,22 @@ class OrderService:
             now = ts()
             actual_amount = order["priceDetail"]["actualAmount"]
 
+            # P2 顺序加固: 先落 PAID(资金主流程), 返分后置 best-effort——
+            # 原顺序返分在前, save 失败后重试 pay 会重复加成长值/积分;
+            # 现在首次 save 即置终态, 重试被上方状态校验挡住, 只可能
+            # 少发返分(可人工补), 不可能重复多发
+            order["status"] = PAID
+            order["payment"] = {
+                "method": payment_method,
+                "tradeNo": _gen_trade_no(),
+                "paidAt": now,
+            }
+            order["consumedPoints"] = 0
+            order["timeline"].append({"status": PAID, "time": now, "action": "支付成功"})
+            order["updatedAt"] = now
+            await self.order_repo.save(order_id, order)
+            logs.append({"step": "支付成功", "level": "INFO", "msg": f"支付方式 {payment_method}"})
+
             # 会员消费(成长值走 member 表, 返分走积分模块账本 P1-19)
             # 成长值 = 实付金额(整数); 返分 = 实付 × 1.5 × 等级倍数(D-5 决策口径)
             consume_amount = int(actual_amount)
@@ -472,42 +495,42 @@ class OrderService:
                     # 成长值+保级周期+自动升级(member_service 统一口径,
                     # 修复订单支付只加成长值不升等级不累计保级消费的缺口)
                     from services.member_service import MemberService
-                    consume_r = await MemberService().record_order_consume(
-                        order["memberId"], consume_amount)
-                    new_growth = consume_r["growthValue"]
-                    # 消费返分 best-effort: 触达日/月/单笔上限不阻断支付主流程
-                    # (本单返分按支付前等级倍数; 升级自下一单生效)
                     try:
-                        earn_result = await PointsService().earn_order_points(
-                            user_id=order["memberId"], order_id=order_id,
-                            order_amount=actual_amount,
-                            member_level=consume_r["fromLevel"])
-                        earned_points = earn_result.get("earnedPoints", 0)
-                    except ValueError as exc:
-                        logger.warning("order_earn_points_skipped order=%s "
-                                       "err=%s", order_id, exc)
-                        logs.append({"step": "返分受限", "level": "WARN",
-                                     "msg": f"消费返分未发放: {exc}"})
-                    logs.append({"step": "会员消费", "level": "INFO",
-                                 "msg": f"+{consume_amount} 成长值(累计 {new_growth}), "
-                                        f"+{earned_points} 竹叶"})
-                    if consume_r.get("leveledUp"):
-                        logs.append({"step": "等级提升", "level": "WARN",
-                                     "msg": f"升级为 {consume_r['levelName']}"
-                                            "(下一单享新等级权益)"})
-
-            # 更新订单
-            order["status"] = PAID
-            order["payment"] = {
-                "method": payment_method,
-                "tradeNo": _gen_trade_no(),
-                "paidAt": now,
-            }
-            order["consumedPoints"] = earned_points
-            order["timeline"].append({"status": PAID, "time": now, "action": "支付成功"})
-            order["updatedAt"] = now
-            await self.order_repo.save(order_id, order)
-            logs.append({"step": "支付成功", "level": "INFO", "msg": f"支付方式 {payment_method}"})
+                        consume_r = await MemberService().record_order_consume(
+                            order["memberId"], consume_amount)
+                        new_growth = consume_r["growthValue"]
+                        # 消费返分 best-effort: 触达日/月/单笔上限不阻断支付主流程
+                        # (本单返分按支付前等级倍数; 升级自下一单生效)
+                        try:
+                            earn_result = await PointsService().earn_order_points(
+                                user_id=order["memberId"], order_id=order_id,
+                                order_amount=actual_amount,
+                                member_level=consume_r["fromLevel"])
+                            earned_points = earn_result.get("earnedPoints", 0)
+                        except ValueError as exc:
+                            logger.warning("order_earn_points_skipped order=%s "
+                                           "err=%s", order_id, exc)
+                            logs.append({"step": "返分受限", "level": "WARN",
+                                         "msg": f"消费返分未发放: {exc}"})
+                        logs.append({"step": "会员消费", "level": "INFO",
+                                     "msg": f"+{consume_amount} 成长值(累计 {new_growth}), "
+                                            f"+{earned_points} 竹叶"})
+                        if consume_r.get("leveledUp"):
+                            logs.append({"step": "等级提升", "level": "WARN",
+                                         "msg": f"升级为 {consume_r['levelName']}"
+                                                "(下一单享新等级权益)"})
+                    except Exception as exc:
+                        logger.error("order_consume_earn_failed order=%s: %s",
+                                     order_id, exc)
+                        logs.append({"step": "消费记账失败", "level": "ERROR",
+                                     "msg": "成长值/返分未发放(可人工补), 订单已支付"})
+                    if earned_points:
+                        order["consumedPoints"] = earned_points
+                        try:
+                            await self.order_repo.save(order_id, order)
+                        except Exception as exc:
+                            logger.error("order_consumed_points_save_failed "
+                                         "order=%s: %s", order_id, exc)
 
             return {
                 "success": True,

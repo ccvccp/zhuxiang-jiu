@@ -23,6 +23,7 @@
 
 import logging
 from datetime import datetime, UTC, timedelta
+from zoneinfo import ZoneInfo
 
 from core.locks import get_lock
 from repositories.promo_repository import (
@@ -45,7 +46,9 @@ from services.promo_radar_service import PromoRadarService
 from services.promo_agent_service import PromoAgentService
 from services.promo_audience_service import PromoAudienceService
 from services.promo_authority_service import PromoAuthorityService
-from services.promo_channel_service import PromoChannelService
+from services.promo_channel_service import (
+    PromoChannelService, CHANNEL_MODE_UNKNOWN, CHANNEL_MODE_MOCK_FALLBACK,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -430,8 +433,13 @@ class PromoService:
         return scheduled.astimezone(UTC).isoformat()
 
     async def _daily_total(self) -> int:
-        """当日已发布 + 已入队总数(单日上限口径)"""
-        date_key = datetime.now(UTC).strftime("%Y%m%d")
+        """当日已发布 + 已入队总数(单日上限口径)
+
+        日配额键按北京时间自然日结算(运营时区; UTC 会在 0-8 点
+        错位到前一日, 与出队计数口径 promo:daily:* 保持一致)。
+        """
+        date_key = datetime.now(
+            ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
         published = await self.repo.get_daily_published(date_key)
         queued = 0
         for entry in await self.repo.list_publish_queue(limit=1000):
@@ -489,14 +497,31 @@ class PromoService:
                 if content is None or content["status"] != CONTENT_STATUS_QUEUED:
                     await self.repo.dequeue_publish(entry["contentId"])
                     continue
-                date_key = now.strftime("%Y%m%d")
-                await self.repo.incr_daily_published(date_key)
+                # 日配额键按北京时间自然日(与 _daily_total 口径一致;
+                # now 保持 UTC——上方 due 比较依赖)
+                date_key = datetime.now(
+                    ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
                 await self.repo.dequeue_publish(entry["contentId"])
                 hotspot = await self.repo.get_hotspot(
                     content.get("hotspotId", 0)) or {}
-                # P2: 发布通道统一出回执(mock / real / mock_fallback)
+                # P2: 发布通道统一出回执(mock / real / 回退 / unknown)
                 receipt = await self.channel.publish_to_platform(
                     content, hotspot)
+                if receipt.get("mode") == CHANNEL_MODE_UNKNOWN:
+                    # 群发结果未知(网络超时, 微信侧可能已发送):
+                    # 不误标 published(自动重试会双发烧配额), 回执
+                    # 留痕冻结在 queued 态(已出队防重发), 待人工在
+                    # 公众号后台核对后处置
+                    logger.warning(
+                        "promo_publish_unknown_result contentId=%s: %s",
+                        content.get("contentId"), receipt.get("error"))
+                    content.update({"receipt": receipt})
+                    await self.repo.save_content(content)
+                    continue
+                # 日配额计数后移到通道调用之后: 发布成功(含 mock 开发态)
+                # 才计入当日配额, 失败回退(mock_fallback)不占额度
+                if receipt.get("mode") != CHANNEL_MODE_MOCK_FALLBACK:
+                    await self.repo.incr_daily_published(date_key)
                 content.update({
                     "status": CONTENT_STATUS_PUBLISHED,
                     "publishedAt": _now_iso(),

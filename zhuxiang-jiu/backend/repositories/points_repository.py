@@ -155,6 +155,20 @@ class PointsRepository:
             return await self._redis_list_logs(user_id, source, log_type, limit)
         return self._mem_list_logs(user_id, source, log_type, limit)
 
+    async def sum_earned_logs(self, user_id: int, source: str,
+                              date_prefix: str) -> int:
+        """按来源+日期前缀聚合正向流水积分和(上限校验用)
+
+        与 list_logs 不同, 本方法遍历该用户全部流水, 不受条数截断,
+        修复"月超 100 笔后旧流水漏算导致月上限失效"的问题。
+
+        Args:
+            date_prefix: ISO 日期前缀("2026-09-28" 当日 / "2026-09" 当月)
+        """
+        if is_redis_mode():
+            return await self._redis_sum_earned_logs(user_id, source, date_prefix)
+        return self._mem_sum_earned_logs(user_id, source, date_prefix)
+
     async def update_log_status(self, log_id: int, status: int) -> None:
         """更新流水状态"""
         if is_redis_mode():
@@ -289,6 +303,23 @@ class PointsRepository:
             logs = [l for l in logs if l.get("type") == log_type]
         logs.sort(key=lambda l: l.get("createdAt", ""), reverse=True)
         return logs[:limit]
+
+    def _mem_sum_earned_logs(self, user_id: int, source: str,
+                             date_prefix: str) -> int:
+        self._ensure_store()
+        log_ids = self.store["points_logs_by_user"].get(user_id, [])
+        total = 0
+        for lid in log_ids:
+            log = self.store["points_logs"].get(lid)
+            if not log:
+                continue
+            if source and log.get("source") != source:
+                continue
+            if not log.get("createdAt", "").startswith(date_prefix):
+                continue
+            if log.get("points", 0) > 0:
+                total += log["points"]
+        return total
 
     def _mem_update_log_status(self, log_id: int, status: int) -> None:
         self._ensure_store()
@@ -437,6 +468,25 @@ class PointsRepository:
                     continue
                 logs.append(log)
         return logs[:limit]
+
+    async def _redis_sum_earned_logs(self, user_id: int, source: str,
+                                     date_prefix: str) -> int:
+        client = await get_redis_client()
+        # 按需扫描该用户全部流水(与 _redis_list_logs 同风格, 无条数截断)
+        log_ids = await client.lrange(_k("points", "logs_by_user", user_id), 0, -1)
+        total = 0
+        for lid in log_ids:
+            data = await client.get(_k("points", "log", lid))
+            if not data:
+                continue
+            log = json.loads(data)
+            if source and log.get("source") != source:
+                continue
+            if not log.get("createdAt", "").startswith(date_prefix):
+                continue
+            if log.get("points", 0) > 0:
+                total += log["points"]
+        return total
 
     async def _redis_update_log_status(self, log_id: int, status: int) -> None:
         client = await get_redis_client()

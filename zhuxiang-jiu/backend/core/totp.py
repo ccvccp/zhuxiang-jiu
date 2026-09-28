@@ -44,17 +44,35 @@ def totp_at(secret: str, timestamp: float = None) -> str:
     return str(code).zfill(DIGITS)
 
 
-def verify_totp(secret: str, code: str) -> bool:
-    """校验 TOTP 验证码(恒定时间比较, 允许 ±1 时间窗漂移)"""
+def verify_totp_counter(secret: str, code: str,
+                        last_used_counter: int | None = None) -> int | None:
+    """校验并返回命中的时间窗计数器(未命中返回 None)
+
+    重放防护(RFC 6238 §5.2): 命中的 counter 必须 > last_used_counter,
+    同一验证码在窗口期内(30-90s)不可重复使用——钓鱼/中间人截获的
+    一次性码无法二次消费。调用方应把返回的 counter 持久化为新的
+    last_used_counter。
+    """
     if not secret or not code or not str(code).isdigit() \
             or len(str(code)) != DIGITS:
-        return False
+        return None
     now = int(time.time())
     for drift in range(-DRIFT_WINDOW, DRIFT_WINDOW + 1):
+        counter = int((now + drift * TIME_STEP) // TIME_STEP)
+        if last_used_counter is not None and counter <= last_used_counter:
+            continue  # 已消费过的窗口, 拒绝重放
         expected = totp_at(secret, now + drift * TIME_STEP)
         if hmac.compare_digest(expected, str(code)):
-            return True
-    return False
+            return counter
+    return None
+
+
+def verify_totp(secret: str, code: str) -> bool:
+    """校验 TOTP 验证码(恒定时间比较, 允许 ±1 时间窗漂移)
+
+    兼容旧接口; 需要重放防护的场景请用 verify_totp_counter。
+    """
+    return verify_totp_counter(secret, code) is not None
 
 
 def provisioning_uri(secret: str, account: str,

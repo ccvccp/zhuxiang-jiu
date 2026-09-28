@@ -35,6 +35,7 @@ import os
 import secrets
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 import httpx
 from cryptography.hazmat.primitives import hashes, serialization
@@ -251,8 +252,10 @@ class AlipayGateway:
                 "out_trade_no": out_trade_no, "total_amount": amount,
                 "subject": subject, "product_code": "QUICK_WAP_WAY",
             }, notify_url)
-            pay_url = ALIPAY_GATEWAY + "?" + "&".join(
-                f"{k}={params[k]}" for k in sorted(params))
+            # B10: sign 为 base64(含 + / =), 必须经 urlencode 编码,
+            # 裸拼 query 会被渠道按分隔符截断导致验签失败
+            pay_url = ALIPAY_GATEWAY + "?" + urlencode(
+                {k: params[k] for k in sorted(params)})
             return {"prepay": {"gateway": "alipay", "method": "wap"},
                     "payParams": {"payUrl": pay_url}}
         if method == "page":
@@ -260,8 +263,9 @@ class AlipayGateway:
                 "out_trade_no": out_trade_no, "total_amount": amount,
                 "subject": subject, "product_code": "FAST_INSTANT_TRADE_PAY",
             }, notify_url)
-            pay_url = ALIPAY_GATEWAY + "?" + "&".join(
-                f"{k}={params[k]}" for k in sorted(params))
+            # B10: 同上, 参数需 URL 编码后拼接
+            pay_url = ALIPAY_GATEWAY + "?" + urlencode(
+                {k: params[k] for k in sorted(params)})
             return {"prepay": {"gateway": "alipay", "method": "page"},
                     "payParams": {"payUrl": pay_url}}
         if method == "qr":

@@ -465,6 +465,42 @@ class PaymentService:
                               **gw.get("payParams", {})}
         return result
 
+    async def _release_callback_lock_quietly(self,
+                                             channel_trade_no: str) -> None:
+        """释放回调幂等锁(失败仅告警, 不影响回调本身的失败返回)"""
+        try:
+            await self.repo.release_callback_lock(channel_trade_no)
+        except Exception as exc:
+            logger.warning(
+                "payment_callback_lock_release_failed channelTradeNo=%s: %s",
+                channel_trade_no, exc)
+
+    @staticmethod
+    def _callback_amount_matches(order: dict, callback_content: dict) -> bool:
+        """回调金额与支付单金额一致性校验(B9-2: closed 补开的安全门)
+
+        金额字段按渠道载荷形状识别:
+            - 微信 V3: amount.total(分, dict)
+            - 支付宝: total_amount(元)
+            - mock 归一化: amount(元, 数值)
+        载荷无金额字段 → 无法证明一致, 返回 False(拒绝补开)。
+        """
+        content = callback_content or {}
+        amount = None
+        try:
+            if isinstance(content.get("amount"), dict):
+                total = content["amount"].get("total")
+                amount = int(total) / 100.0 if total is not None else None
+            elif isinstance(content.get("amount"), (int, float)):
+                amount = float(content["amount"])
+            elif content.get("total_amount") not in (None, ""):
+                amount = float(content["total_amount"])
+        except (TypeError, ValueError):
+            return False
+        if amount is None:
+            return False
+        return abs(amount - float(order.get("actualAmount") or 0)) <= 0.005
+
     async def pay_callback(self, channel_trade_no: str, callback_content: dict,
                             pay_no: str = None) -> dict:
         """支付回调处理(幂等: 重复回调返回成功, 不重复入账)
@@ -489,6 +525,19 @@ class PaymentService:
                 "msg": "回调已处理过, 幂等返回",
             }
 
+        # B9-1: 处理失败(异常冒泡)时释放幂等锁——否则 24h 内渠道重试
+        # 全被"幂等成功"假应答吞掉, 无法重新进入处理
+        try:
+            return await self._process_pay_callback(
+                channel_trade_no, callback_content, pay_no)
+        except Exception:
+            await self._release_callback_lock_quietly(channel_trade_no)
+            raise
+
+    async def _process_pay_callback(self, channel_trade_no: str,
+                                    callback_content: dict,
+                                    pay_no: str = None) -> dict:
+        """回调主处理(已持幂等锁; 失败路径须自行释放幂等锁)"""
         # 定位支付单
         if pay_no:
             order = await self.repo.get_order(pay_no)
@@ -497,6 +546,8 @@ class PaymentService:
         if not order:
             logger.warning("payment_callback_order_not_found channelTradeNo=%s",
                             channel_trade_no)
+            # B9-1: 定位失败释放幂等锁, 渠道重推可重新进入
+            await self._release_callback_lock_quietly(channel_trade_no)
             return {
                 "success": False,
                 "payNo": "",
@@ -512,6 +563,8 @@ class PaymentService:
             # 锁内重新读取支付单, 获取最新状态
             order = await self.repo.get_order(pay_no)
             if not order:
+                # B9-1: 幂等锁同步释放, 允许渠道重试
+                await self._release_callback_lock_quietly(channel_trade_no)
                 return {
                     "success": False,
                     "payNo": pay_no,
@@ -524,14 +577,26 @@ class PaymentService:
                 return {"success": True, "payNo": pay_no, "idempotent": True,
                         "msg": "支付单已支付, 幂等返回"}
             if order["status"] != PAY_STATUS_PAYING:
-                logger.warning("payment_callback_status_invalid payNo=%s status=%s",
-                                pay_no, order["status"])
-                return {
-                    "success": False,
-                    "payNo": pay_no,
-                    "idempotent": False,
-                    "msg": f"支付单状态非法(当前: {PAY_STATUS_NAMES.get(order['status'])})",
-                }
+                # B9-2: 支付单已被关闭, 但渠道回调(金额一致)表明用户
+                # 实际已付款 → 重开为 paid 并 WARN 留痕, 避免资金状态
+                # 与渠道不一致丢单(close_pay 关闭前 PAID 校验由同锁保证)
+                if order["status"] == PAY_STATUS_CLOSED and \
+                        self._callback_amount_matches(order, callback_content):
+                    logger.warning(
+                        "payment_reopen_closed payNo=%s channelTradeNo=%s "
+                        "amount=%.2f(关闭后收到金额一致回调, 重开为已支付)",
+                        pay_no, channel_trade_no, order["actualAmount"])
+                else:
+                    logger.warning("payment_callback_status_invalid payNo=%s status=%s",
+                                    pay_no, order["status"])
+                    # B9-1: 状态非法释放幂等锁, 渠道重推可重新进入
+                    await self._release_callback_lock_quietly(channel_trade_no)
+                    return {
+                        "success": False,
+                        "payNo": pay_no,
+                        "idempotent": False,
+                        "msg": f"支付单状态非法(当前: {PAY_STATUS_NAMES.get(order['status'])})",
+                    }
 
             await self.repo.update_order_fields(pay_no, {
                 "status": PAY_STATUS_PAID,
@@ -1003,69 +1068,72 @@ class PaymentService:
         if pay_channel not in ("bank_transfer", "alipay_transfer", "wechat_transfer"):
             raise ValueError(f"付款渠道非法: {pay_channel}")
 
-        # 幂等校验
-        existing = await self.repo.find_by_source(source_id, payout_type)
-        if existing:
-            raise ValueError(
-                f"来源单据 {source_id} 已存在付款单 {existing['payoutNo']}"
-                f"(状态: {PAYOUT_STATUS_NAMES.get(existing.get('status'))})"
-            )
+        # B8: 幂等校验+创建全程持来源锁——原 find_by_source 在锁外,
+        # 并发两请求同时查到无 existing 会为同一来源创建两笔付款单(重复打款)
+        async with get_lock(f"payment:payout:source:{payout_type}:{source_id}"):
+            # 幂等校验
+            existing = await self.repo.find_by_source(source_id, payout_type)
+            if existing:
+                raise ValueError(
+                    f"来源单据 {source_id} 已存在付款单 {existing['payoutNo']}"
+                    f"(状态: {PAYOUT_STATUS_NAMES.get(existing.get('status'))})"
+                )
 
-        payout_no = await self.repo.next_payout_no()
-        actual_amount = round(amount - tax_amount, 2)
-        payout_data = {
-            "payoutNo": payout_no,
-            "payoutType": payout_type,
-            "sourceId": source_id,
-            "payeeName": payee_name,
-            "payeeAccount": payee_account,
-            "payeeBank": payee_bank,
-            "payeePhone": payee_phone,
-            "amount": amount,
-            "taxAmount": tax_amount,
-            "actualAmount": actual_amount,
-            "payChannel": pay_channel,
-            "channelPayoutNo": "",
-            "status": PAYOUT_STATUS_PENDING,
-            "auditor": "",
-            "auditRemark": "",
-            "auditTime": "",
-            "payTime": "",
-            "failReason": "",
-            "voucherUrl": "",
-            "retryCount": 0,
-            "createdAt": ts(),
-        }
-        await self.repo.save_payout(payout_data)
-        logger.info("payout_created payoutNo=%s type=%s source=%s amount=%.2f",
-                    payout_no, payout_type, source_id, amount)
+            payout_no = await self.repo.next_payout_no()
+            actual_amount = round(amount - tax_amount, 2)
+            payout_data = {
+                "payoutNo": payout_no,
+                "payoutType": payout_type,
+                "sourceId": source_id,
+                "payeeName": payee_name,
+                "payeeAccount": payee_account,
+                "payeeBank": payee_bank,
+                "payeePhone": payee_phone,
+                "amount": amount,
+                "taxAmount": tax_amount,
+                "actualAmount": actual_amount,
+                "payChannel": pay_channel,
+                "channelPayoutNo": "",
+                "status": PAYOUT_STATUS_PENDING,
+                "auditor": "",
+                "auditRemark": "",
+                "auditTime": "",
+                "payTime": "",
+                "failReason": "",
+                "voucherUrl": "",
+                "retryCount": 0,
+                "createdAt": ts(),
+            }
+            await self.repo.save_payout(payout_data)
+            logger.info("payout_created payoutNo=%s type=%s source=%s amount=%.2f",
+                        payout_no, payout_type, source_id, amount)
 
-        # 小额自动通过审核(< ¥5000)
-        if amount < PAYOUT_AUTO_APPROVE_THRESHOLD:
-            await self.repo.update_payout_fields(payout_no, {
-                "status": PAYOUT_STATUS_APPROVED,
-                "auditor": "auto",
-                "auditRemark": "小额自动通过",
-                "auditTime": ts(),
-            })
-            logger.info("payout_auto_approved payoutNo=%s amount=%.2f",
-                        payout_no, amount)
+            # 小额自动通过审核(< ¥5000)
+            if amount < PAYOUT_AUTO_APPROVE_THRESHOLD:
+                await self.repo.update_payout_fields(payout_no, {
+                    "status": PAYOUT_STATUS_APPROVED,
+                    "auditor": "auto",
+                    "auditRemark": "小额自动通过",
+                    "auditTime": ts(),
+                })
+                logger.info("payout_auto_approved payoutNo=%s amount=%.2f",
+                            payout_no, amount)
 
-        return {
-            "success": True,
-            "payoutNo": payout_no,
-            "sourceId": source_id,
-            "amount": amount,
-            "taxAmount": tax_amount,
-            "actualAmount": actual_amount,
-            "payeeAccountMasked": _mask_account(payee_account),
-            "status": PAYOUT_STATUS_APPROVED if amount < PAYOUT_AUTO_APPROVE_THRESHOLD
-                       else PAYOUT_STATUS_PENDING,
-            "statusName": PAYOUT_STATUS_NAMES[
-                PAYOUT_STATUS_APPROVED if amount < PAYOUT_AUTO_APPROVE_THRESHOLD
-                else PAYOUT_STATUS_PENDING
-            ],
-        }
+            return {
+                "success": True,
+                "payoutNo": payout_no,
+                "sourceId": source_id,
+                "amount": amount,
+                "taxAmount": tax_amount,
+                "actualAmount": actual_amount,
+                "payeeAccountMasked": _mask_account(payee_account),
+                "status": PAYOUT_STATUS_APPROVED if amount < PAYOUT_AUTO_APPROVE_THRESHOLD
+                           else PAYOUT_STATUS_PENDING,
+                "statusName": PAYOUT_STATUS_NAMES[
+                    PAYOUT_STATUS_APPROVED if amount < PAYOUT_AUTO_APPROVE_THRESHOLD
+                    else PAYOUT_STATUS_PENDING
+                ],
+            }
 
     async def audit_payout(self, payout_no: str, decision: str,
                               auditor: str = "admin",

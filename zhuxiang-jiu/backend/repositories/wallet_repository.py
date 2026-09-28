@@ -280,6 +280,53 @@ class WalletRepository:
             return await self._redis_list_transactions(user_id, tx_type, status, limit)
         return self._mem_list_transactions(user_id, tx_type, status, limit)
 
+    @staticmethod
+    def _tx_created_on_shanghai_date(tx: dict, date_prefix: str) -> bool:
+        """事务 createdAt(ISO) 转上海时区后与日期前缀比对"""
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        created = str(tx.get("createdAt", ""))
+        try:
+            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo("Asia/Shanghai")) \
+            .date().isoformat() == date_prefix
+
+    async def sum_daily_withdrawals(self, user_id, date_prefix: str) -> float:
+        """当日提现总额聚合(双模式, 无条数截断)
+
+        P2: 替代 list_transactions(limit=500) 截断求和——高频用户
+        >500 条后旧流水漏算, 反洗钱日累计阈值(¥20万)漏报。
+        日期口径: createdAt 统一转上海时区(业务时区)后与
+        date_prefix(上海日期 isoformat)比对。
+        """
+        total = 0.0
+        if is_redis_mode():
+            client = await get_redis_client()
+            tx_nos = await client.smembers(
+                _k("wallet", "tx", "index", user_id))
+            for tn in tx_nos:
+                data = await client.get(_k("wallet", "tx", tn))
+                if not data:
+                    continue
+                tx = json.loads(data)
+                if tx.get("type") == "withdraw" \
+                        and self._tx_created_on_shanghai_date(tx, date_prefix):
+                    total += float(tx.get("amount", 0))
+            return total
+        index_set = self.store.get("_wallet_tx_index", {}).get(user_id, set())
+        for tx_no in index_set:
+            tx = self.store["wallet_transactions"].get(tx_no)
+            if not tx:
+                continue
+            if tx.get("type") == "withdraw" \
+                    and self._tx_created_on_shanghai_date(tx, date_prefix):
+                total += float(tx.get("amount", 0))
+        return total
+
     async def update_transaction_fields(self, tx_no: str, fields: dict) -> dict:
         """部分字段更新(如 status: processing → success)
 
@@ -830,7 +877,10 @@ class WalletRepository:
     async def _redis_add_balance(self, user_id, amount: float) -> float:
         """余额累加(Redis 浮点 HINCRBYFLOAT 原子操作)
 
-        amount < 0 时需先读后写校验(余额不足抛 ValueError), 用 Lua 保证原子性
+        注意(P2 修正): amount < 0 时是 hget 检查 + hincrbyfloat 写入
+        两步 check-then-act, 并非原子——必须由调用方在 wallet:{userId}
+        锁内调用(服务层已持锁); 仓储是公共接口, 无锁并发调用时两步间
+        可插入其他扣减导致负余额穿透。
         """
         client = await get_redis_client()
         key = _k("wallet", user_id)

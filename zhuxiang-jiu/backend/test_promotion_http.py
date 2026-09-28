@@ -20,6 +20,8 @@ import sys
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ.setdefault("AUTH_MODE", "compat")
+# 钱包决策门(默认 off 会 409 拦 wallet/open, 本测试验证的是推广链而非灰度)
+os.environ.setdefault("WALLET_MODE", "assist")
 
 from fastapi.testclient import TestClient
 
@@ -52,9 +54,16 @@ ADMIN = {"X-Role": "admin"}
 
 
 def _mk_members() -> dict:
-    """构造测试会员(成长值 600, 满足钱包开户等级要求), 返回 {角色: 会员ID}"""
+    """构造测试会员(成长值 600, 满足钱包开户等级要求), 返回 {角色: 会员ID}
+
+    created_at 必须补: 推广绑定走「新人注册原则」(注册 24h 内才计业绩),
+    仓储 _mem_create 原样存入不自动补时戳, 缺失会被判为老会员 →
+    关系 status=invalid → directCount=0 → 奖励/领酒全链连锁失败。
+    """
     async def _create_all():
+        from datetime import datetime, timezone
         repo = MemberRepository()
+        now_iso = datetime.now(timezone.utc).isoformat()
         mapping = {}
         for key, phone in (("A", "13900000001"), ("B1", "13900000011"),
                            ("B2", "13900000012"), ("C1", "13900000021"),
@@ -64,6 +73,7 @@ def _mk_members() -> dict:
                 "phone": phone, "nickname": f"测试{key}",
                 "password": "x" * 64, "status": 1, "role": "member",
                 "level": 3, "growth_value": 600, "points": 0,
+                "created_at": now_iso,
             })
             mapping[key] = m["id"]
         return mapping
@@ -84,8 +94,8 @@ def main():
     r = client.get("/api/promotion/admin/settings", headers=ADMIN)
     s = r.json().get("settings", {})
     record("01_admin_read_default_settings",
-           r.status_code == 200 and s.get("level1Threshold") == 100
-           and abs(s.get("level1RewardAmount", 0) - 50) < 0.001
+           r.status_code == 200 and s.get("level1Threshold") == 10
+           and abs(s.get("level1RewardAmount", 0) - 20.0) < 0.001
            and abs(s.get("wineMinPrice", 0) - 200) < 0.001,
            f"status={r.status_code}, settings={s}")
 
@@ -213,8 +223,10 @@ def main():
     r = client.get("/api/promotion/my/rewards", headers=hdr(M["A"]))
     rewards = r.json().get("rewards", [])
     types = {x.get("rewardType") for x in rewards}
-    record("17_a_rewards_wallet_and_wine_qualify",
-           r.status_code == 200 and types == {"wallet", "wine_qualify"},
+    # 现行语义: L1/L2 达标均自动发钱包现金(wallet/wallet_l2),
+    # wine_qualify 为管理员手动补发(见下方 20b)
+    record("17_a_rewards_wallet_l1_and_l2",
+           r.status_code == 200 and types == {"wallet", "wallet_l2"},
            f"status={r.status_code}, types={types}")
 
     r = client.get("/api/promotion/my/team", headers=hdr(M["A"]))
@@ -226,13 +238,19 @@ def main():
 
     r = client.get("/api/promotion/my/stats", headers=hdr(M["A"]))
     st = r.json()
-    record("19_stats_wine_qualify_available",
-           st.get("qualifiedSubCount") == 2 and st.get("wineQualifyAvailable") == 1,
+    record("19_stats_l2_qualified",
+           st.get("qualifiedSubCount") == 2,
            f"stats={st}")
 
     # --------------------------------------------------------
-    # 6. 领取奖励酒
+    # 6. 领取奖励酒(需管理员先补发 wine_qualify——现行语义)
     # --------------------------------------------------------
+    r = client.post("/api/promotion/admin/rewards/grant", headers=ADMIN,
+                    json={"memberId": M["A"], "rewardType": "wine_qualify",
+                          "amount": 0, "detail": "二级裂变达标补发资格"})
+    record("20b_admin_grant_wine_qualify",
+           r.status_code == 200, f"status={r.status_code}, body={r.json()}")
+
     r = client.get("/api/promotion/products/eligible")
     pool = r.json().get("products", [])
     record("20_eligible_pool_min_price",
@@ -275,9 +293,10 @@ def main():
     r = client.post("/api/promotion/reward/purchase", headers=hdr(M["A"]),
                     json={"productId": "ZX42-2026B01", "quantity": 1})  # ¥88 便携款
     pur = r.json()
+    # 奖励余额 = L1 10 + L2 15 + 管理员补发 100 - 购 88 = 37
     record("25_reward_purchase_success",
            r.status_code == 200 and abs(pur.get("amount", 0) - 88) < 0.001
-           and abs(pur.get("rewardBalanceAfter", -1) - 22) < 0.001,
+           and abs(pur.get("rewardBalanceAfter", -1) - 37) < 0.001,
            f"status={r.status_code}, body={pur}")
 
     r = client.post("/api/promotion/reward/purchase", headers=hdr(M["A"]),

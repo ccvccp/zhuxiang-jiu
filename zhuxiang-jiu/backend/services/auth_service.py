@@ -252,8 +252,11 @@ class AuthService:
         if count > self.SMS_DAILY_LIMIT:
             raise ValueError(f"当日发送次数已达上限({self.SMS_DAILY_LIMIT} 次)")
 
-        code = f"{random.randint(0, 999999):06d}"
+        # P2: 验证码属安全敏感值, 用 CSPRNG(Mersenne Twister 可预测)
+        code = f"{secrets.randbelow(1_000_000):06d}"
         await self.auth_repo.save_sms_code(phone, code, self.SMS_CODE_TTL)
+        # 新验证码下发, 失败计数清零(给用户全新的 3 次机会)
+        await self.auth_repo.reset_sms_fail_count(phone)
         # 短信通道: 阿里云凭据齐备(SMS_ALIYUN_* 四环境变量)走真实通道
         # (to_thread 包装同步 urllib, 不阻塞事件循环);
         # 未配置回退日志模拟通道(本地开发零影响)
@@ -290,8 +293,16 @@ class AuthService:
         if not saved:
             raise ValueError("验证码不存在或已过期, 请重新获取")
         if saved != code:
+            # P0 安全: 失败计数防暴力枚举(6 位码空间 10^6,
+            # 无限重试可在 TTL 内命中)——连续 3 次失败作废验证码
+            fails = await self.auth_repo.bump_sms_fail_count(phone)
+            if fails >= 3:
+                await self.auth_repo.delete_sms_code(phone)
+                await self.auth_repo.reset_sms_fail_count(phone)
+                raise ValueError("验证码错误次数过多, 已作废, 请重新获取")
             raise ValueError("验证码错误")
         await self.auth_repo.delete_sms_code(phone)
+        await self.auth_repo.reset_sms_fail_count(phone)
         return {"success": True, "phone": phone, "verified": True}
 
     async def login_by_sms(self, phone: str, code: str) -> dict:
@@ -658,21 +669,25 @@ class AuthService:
         """
         payload = decode_token(refresh_token, expected_type="refresh")
 
-        if await self.auth_repo.is_blacklisted(payload["jti"]):
-            raise AuthError("Refresh Token 已被吊销")
+        # P0: 同一 refresh 并发两次会双双通过黑名单检查、各签一对新令牌
+        # (共 4 个有效 token)——重放防护失效。锁住检查+吊销+签发全程。
+        async with get_lock(f"auth:refresh:{payload['jti']}"):
+            if await self.auth_repo.is_blacklisted(payload["jti"]):
+                raise AuthError("Refresh Token 已被吊销")
 
-        member = await self.member_repo.get_by_id(payload["sub"])
-        if not member:
-            raise KeyError(f"会员不存在(id={payload['sub']})")
-        if member.get("status", 1) == 0:
-            raise AuthError("账号已被禁用")
+            member = await self.member_repo.get_by_id(payload["sub"])
+            if not member:
+                raise KeyError(f"会员不存在(id={payload['sub']})")
+            if member.get("status", 1) == 0:
+                raise AuthError("账号已被禁用")
 
-        # 轮换: 旧 refresh 吊销
-        await self.auth_repo.add_to_blacklist(payload["jti"], payload["exp"])
+            # 轮换: 旧 refresh 吊销
+            await self.auth_repo.add_to_blacklist(
+                payload["jti"], payload["exp"])
 
-        role = member.get("role", ROLE_MEMBER)
-        tokens = create_token_pair(member["id"], role)
-        await self._record_jtis(member["id"], tokens)
+            role = member.get("role", ROLE_MEMBER)
+            tokens = create_token_pair(member["id"], role)
+            await self._record_jtis(member["id"], tokens)
 
         logger.info("auth_token_refreshed member_id=%r", member["id"])
         return {"success": True, "memberId": member["id"], "role": role, **tokens}

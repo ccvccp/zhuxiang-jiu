@@ -333,6 +333,18 @@ class PaymentRepository:
         return self._mem_acquire_callback_lock(
             "_payment_callback_locks", channel_trade_no)
 
+    async def release_callback_lock(self, channel_trade_no: str) -> None:
+        """释放回调幂等锁(处理失败时调用, 允许渠道重试重新进入)
+
+        与 acquire_callback_lock 对应: 内存模式移除集合成员,
+        Redis 模式删除 SETNX key(不必等 TTL 自然过期)。
+        """
+        if is_redis_mode():
+            return await self._redis_release_callback_lock(
+                "callback:lock", channel_trade_no)
+        return self._mem_release_callback_lock(
+            "_payment_callback_locks", channel_trade_no)
+
     async def acquire_refund_callback_lock(self, channel_refund_no: str,
                                            ttl_seconds: int = 86400) -> bool:
         """退款回调幂等锁(防止退款回调重复处理)"""
@@ -594,6 +606,13 @@ class PaymentRepository:
             return False
         lock_set.add(lock_id)
         return True
+
+    def _mem_release_callback_lock(self, lock_set_key: str,
+                                   lock_id: str) -> None:
+        """释放幂等锁(内存模式: 集合移除, 丢弃不存在的成员不报错)"""
+        self._ensure_store()
+        lock_set = self.store.setdefault(lock_set_key, set())
+        lock_set.discard(lock_id)
 
     # ---------- 退款记录(内存) ----------
 
@@ -874,6 +893,12 @@ class PaymentRepository:
         # SET NX EX: 首次设置成功返回 True, 已存在返回 None
         acquired = await client.set(key, "1", nx=True, ex=ttl)
         return bool(acquired)
+
+    async def _redis_release_callback_lock(self, lock_prefix: str,
+                                            lock_id: str) -> None:
+        """释放幂等锁(Redis 模式: 删除 SETNX key)"""
+        client = await get_redis_client()
+        await client.delete(_k("payment", lock_prefix, lock_id))
 
     # ---------- 退款记录(Redis) ----------
 

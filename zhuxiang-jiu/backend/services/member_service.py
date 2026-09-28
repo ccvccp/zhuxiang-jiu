@@ -26,6 +26,7 @@ from datetime import datetime, UTC
 from core.locks import get_lock
 from core.age_gate import is_adult
 from repositories.member_repository import MemberRepository
+from services.tx_utils import gen_no
 from repositories.points_repository import SOURCE_LOGIN, SOURCE_REGISTER
 from services.points_service import PointsService
 
@@ -611,7 +612,8 @@ class MemberService:
         )
         if pay_method is None:
             pay_method = default_pay_method(pay_channel)
-        order_id = f"SVIP-{member_id}-{int(datetime.now(UTC).timestamp() * 1000)}"
+        # 单号防撞: 纯毫秒时间戳同毫秒并发必撞(gen_no=毫秒+进程内自增序号)
+        order_id = gen_no(f"SVIP-{member_id}-")
         return await PaymentService().create_pay(
             user_id=member_id,
             order_id=order_id,
@@ -830,11 +832,11 @@ class MemberService:
         """积分抵扣(P1-20: 代理积分模块 deduct_points, FIFO 消耗+30% 上限)
 
         规则: 100 竹叶 = ¥1, 抵扣上限为订单金额的 30%
-        (order_amount 缺省时视为无上限基准, 仅校验余额与整数倍)
+        (order_amount 未提供/为 0 时直接拒绝, 防止无基准绕过 30% 上限)
 
         Raises:
             KeyError: 会员不存在
-            ValueError: 积分不足 / 超过抵扣上限 / 参数非法
+            ValueError: 缺少订单金额基准 / 积分不足 / 超过抵扣上限 / 参数非法
         """
         if points <= 0:
             raise ValueError("抵扣积分必须大于 0")
@@ -845,16 +847,17 @@ class MemberService:
         if not member:
             raise KeyError(f"会员 {member_id} 不存在")
 
+        # 安全修复: 原逻辑 order_amount 缺省时用 points/30 伪造基准,
+        # 使抵扣额恒等于上限, 30% 上限校验形同虚设; 现无基准直接拒绝
+        if not order_amount or order_amount <= 0:
+            raise ValueError("缺少订单金额基准, 禁止无基准抵扣")
+
         deduct_amount = points / POINTS_TO_YUAN  # 抵扣金额
-        if order_amount > 0:
-            max_deduct = order_amount * 0.3  # 上限 30%
-            if deduct_amount > max_deduct:
-                raise ValueError(
-                    f"抵扣金额 ¥{deduct_amount:.2f} 超过上限 ¥{max_deduct:.2f}(订单 30%)"
-                )
-        else:
-            # 无订单基准时仅按积分数抵扣: 用恰好等于上限的基准金额绕过 30% 校验
-            order_amount = points / 30
+        max_deduct = order_amount * 0.3  # 上限 30%
+        if deduct_amount > max_deduct:
+            raise ValueError(
+                f"抵扣金额 ¥{deduct_amount:.2f} 超过上限 ¥{max_deduct:.2f}(订单 30%)"
+            )
 
         result = await PointsService().deduct_points(
             user_id=member_id, order_id=f"MD{datetime.now().strftime('%Y%m%d%H%M%S%f')}",

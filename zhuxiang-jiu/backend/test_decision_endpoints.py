@@ -1233,7 +1233,8 @@ class TestCrossCutting:
         body = json.loads(response.body.decode("utf-8"))
         assert body["success"] is False
         assert "DECISION_010" in body["error"]
-        assert "模拟内部错误" in body["error"]
+        # P0 安全: 异常详情(可能含 Redis 连接串/SQL 片段)不得回传客户端
+        assert "模拟内部错误" not in body["error"]
         assert body["errorCode"] == DecisionErrorCode.e010.value
 
 

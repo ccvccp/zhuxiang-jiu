@@ -28,14 +28,18 @@ from repositories.payment_repository import (
     RECON_STATUS_DIFF, RECON_STATUS_INVESTIGATING, RECON_STATUS_MATCHED,
     RECON_STATUS_RESOLVED,
 )
-from repositories.store import _mock_store
+from repositories.store import reset_store
 from services.payment_service import PaymentService
 
 
 def _reset_store():
-    """清空内存存储, 保证测试隔离"""
-    for k in list(_mock_store.keys()):
-        _mock_store.pop(k, None)
+    """重置内存存储到初始种子(保证测试隔离)
+
+    原实现清空全部键且不恢复种子——同进程跑其他测试时(如依赖
+    agents/members 种子的 test_business_routes)会被拖挂 KeyError;
+    改为 reset_store() 重建完整初始态, 对本文件语义无损。
+    """
+    reset_store()
 
 
 async def _create_paid_order_for_recon(svc, pay_no, channel_trade_no, channel, amount):

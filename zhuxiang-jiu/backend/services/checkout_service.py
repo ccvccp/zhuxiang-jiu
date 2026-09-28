@@ -57,17 +57,23 @@ class CheckoutConfig:
 
 
 def _round2(v: float) -> float:
-    return round(v * 100) / 100
+    """金额舍入(P2: 商业口径 ROUND_HALF_UP——内置 round 是银行家
+    舍入, 半分边界(round(2.5)=2)会少收)"""
+    from core.helpers import round_half_up
+    return round_half_up(v)
 
 
-def calculate_order_price(main_price: float, total_qty: int,
+def calculate_order_price(goods_total: float,
                           member_level: str, points: int,
                           coupon_value: float) -> dict:
     """P3 零售多维叠加价格计算(对齐 js/order-pricing.js calculateOrderPrice)
 
     顺序: 会员折扣 → 满减 → 优惠券 → 积分抵扣(≤原价30%) → 运费
+
+    B6: goods_total 由调用方逐行累加(Σ 单价×数量), 修正旧实现
+    "首行单价 × 总数量"导致的多商品订单计价错误。
     """
-    original_total = _round2(main_price * total_qty)
+    original_total = _round2(goods_total)
     # 3a 会员折扣
     member_rate = CheckoutConfig.MEMBER_DISCOUNT.get(member_level, 1.00)
     member_discount = _round2(original_total * (1 - member_rate))
@@ -113,12 +119,29 @@ class CheckoutService:
         self.sc_repo = sc_repo
         self.shipping = shipping_service
 
+    @staticmethod
+    def _points_domain(member_id, member_level: str) -> str:
+        """积分账户域键(P2 渐进迁移)
+
+        传 memberId → 按会员隔离(生产语义, 转生产必须传);
+        未传 → 回退等级键, 对齐前端 checkout-service.js 的 mock 契约
+        (演示链路: 同等级共享积分池——接生产积分模块前必须迁移完毕)。
+        """
+        if member_id:
+            return f"member:{member_id}"
+        return member_level or "default"
+
     async def submit(self, items: list, consignee=None, payment=None,
                      member_level: str = "L1", points: int = 0,
                      coupon_code: str | None = None,
                      payment_method: str = "wechat",
-                     region: str | None = None) -> dict:
-        """订单结算提交(9 阶段事务, 对齐前端契约)"""
+                     region: str | None = None,
+                     member_id: int | None = None) -> dict:
+        """订单结算提交(9 阶段事务, 对齐前端契约)
+
+        member_id 可选: 传入则积分账户按会员隔离(生产语义);
+        未传回退等级共享池(前端 mock 契约兼容)。
+        """
         log = TxLog()
 
         # ---- preflight(锁外只读) ----
@@ -126,40 +149,52 @@ class CheckoutService:
         if not items:
             log.error("阶段1-购物车校验", "购物车为空,中止流程")
             return result_abort("购物车为空", log)
-        main_item = items[0]
         total_qty = sum(int(i.get("qty") or i.get("quantity") or 0) for i in items)
-        main_price = float(main_item.get("price") or 0)
+        # B6: 多商品计价逐行累加(Σ 单价×数量), 修正旧实现
+        # "首行单价 × 总数量"导致的多行订单金额错误
+        goods_total = _round2(sum(
+            float(i.get("price") or 0)
+            * int(i.get("qty") or i.get("quantity") or 0)
+            for i in items))
         # 优惠券折扣识别(无效券不拦截, 留给阶段5抛错回滚)
         coupon_value = 0.0
         if coupon_code:
             coupon = await self.sc_repo.hget("checkout_coupons", coupon_code)
             if coupon and coupon.get("status") == "未使用":
-                coupon_value = _round2(main_price * total_qty * coupon["discount"])
+                # B6: 券面值同样按逐行累加口径计算
+                coupon_value = _round2(goods_total * coupon["discount"])
                 log.info("阶段1-优惠券校验", f"优惠券折扣已识别: {coupon_code}")
             else:
                 log.warn("阶段1-优惠券校验", f"优惠券未找到或已使用, 阶段5将抛错: {coupon_code}")
-        price = calculate_order_price(main_price, total_qty, member_level,
+        price = calculate_order_price(goods_total, member_level,
                                       points, coupon_value)
         log.info("阶段1-价格计算",
                  f"原价 {price['originalTotal']} / 折扣 {price['totalDiscount']}"
                  f" / 运费 {price['shipping']} / 实付 {price['finalAmount']}")
 
         # ---- 多锁升序获取(order/coupon/points) ----
+        points_domain = self._points_domain(member_id, member_level)
         lock_keys = ["order:next"]
         if coupon_code:
             lock_keys.append(f"coupon:{coupon_code}")
         if points and points > 0:
-            lock_keys.append(f"points:{member_level or 'default'}")
+            lock_keys.append(f"points:{points_domain}")
         async with acquire_locks(lock_keys):
             return await self._submit_locked(
                 items, consignee, payment, member_level, points,
                 coupon_code, coupon_value, payment_method, region,
-                price, total_qty, log)
+                price, total_qty, log, points_domain)
 
     async def _submit_locked(self, items, consignee, payment, member_level,
                              points, coupon_code, coupon_value, payment_method,
-                             region, price, total_qty, log) -> dict:
-        """锁内执行 9 阶段(失败逆序补偿)"""
+                             region, price, total_qty, log,
+                             points_domain: str | None = None) -> dict:
+        """锁内执行 9 阶段(失败逆序补偿)
+
+        points_domain: 积分账户域键(member:{id} 或等级键, 见 _points_domain)
+        """
+        if points_domain is None:
+            points_domain = member_level or "default"
         log.info("阶段2-开启事务", "订单结算事务已开启")
         # 补偿栈: (描述, 恢复协程)
         rollbacks: list[tuple[str, object]] = []
@@ -201,25 +236,34 @@ class CheckoutService:
             }
             log.enter("阶段3-订单创建")
 
-            # ---- 阶段4: 库存扣减(先全量校验再执行) ----
-            for item in items:
-                pid = item.get("id") or item.get("productId")
-                product = await self.inventory_repo.get(pid)
-                qty = int(item.get("qty") or item.get("quantity") or 0)
-                if not product:
-                    raise StageError("阶段4-库存扣减", f"商品不存在: id={pid}")
-                if product["stock"] < qty:
-                    raise StageError(
-                        "阶段4-库存扣减",
-                        f"库存不足: {item.get('name') or pid} 需要{qty}现有{product['stock']}")
-            for item in items:
-                pid = item.get("id") or item.get("productId")
-                qty = int(item.get("qty") or item.get("quantity") or 0)
-                before = await self.inventory_repo.get_stock(pid)
-                await self.inventory_repo.deduct(pid, qty)
-                rollbacks.append((
-                    f"恢复库存 {pid}",
-                    self.inventory_repo.set_stock(pid, before)))
+            # ---- 阶段4: 库存扣减(先全量校验再执行, 持 stock:{pid} 锁) ----
+            # B4: 锁列表补加 stock:{productId}(按 pid 升序获取防死锁),
+            # 与 order_service.create 的 stock 锁互斥——否则两链并发
+            # 同一商品时双双通过校验各扣一次导致超卖
+            stock_keys = sorted({
+                f"stock:{item.get('id') or item.get('productId')}"
+                for item in items})
+            async with acquire_locks(stock_keys):
+                for item in items:
+                    pid = item.get("id") or item.get("productId")
+                    product = await self.inventory_repo.get(pid)
+                    qty = int(item.get("qty") or item.get("quantity") or 0)
+                    if not product:
+                        raise StageError("阶段4-库存扣减",
+                                         f"商品不存在: id={pid}")
+                    if product["stock"] < qty:
+                        raise StageError(
+                            "阶段4-库存扣减",
+                            f"库存不足: {item.get('name') or pid} 需要{qty}现有{product['stock']}")
+                for item in items:
+                    pid = item.get("id") or item.get("productId")
+                    qty = int(item.get("qty") or item.get("quantity") or 0)
+                    await self.inventory_repo.deduct(pid, qty)
+                    # B4: 补偿改增量恢复(restock)——set_stock 快照回写
+                    # 会覆盖并发扣减结果, 造成库存漂移
+                    rollbacks.append((
+                        f"恢复库存 {pid}",
+                        self.inventory_repo.restock(pid, qty)))
             log.info("阶段4-库存扣减", f"库存已扣减 {len(items)} 行")
             log.enter("阶段4-库存扣减")
 
@@ -241,16 +285,16 @@ class CheckoutService:
             # ---- 阶段6: 积分扣减 ----
             if points and points > 0:
                 balance = await self.sc_repo.hget_int(
-                    "checkout_points", member_level, 0)
+                    "checkout_points", points_domain, 0)
                 if balance < points:
                     raise StageError(
                         "阶段6-积分扣减", f"积分不足: 需要{points}现有{balance}")
                 await self.sc_repo.hset(
-                    "checkout_points", member_level, balance - points)
+                    "checkout_points", points_domain, balance - points)
                 points_used = points
                 rollbacks.append((
-                    f"恢复积分 {member_level}",
-                    self.sc_repo.hset("checkout_points", member_level, balance)))
+                    f"恢复积分 {points_domain}",
+                    self.sc_repo.hset("checkout_points", points_domain, balance)))
                 log.info("阶段6-积分扣减", f"已扣减 {points}(剩余 {balance - points})")
             log.enter("阶段6-积分扣减")
 
@@ -262,12 +306,12 @@ class CheckoutService:
             points_earned = int(base_earn * boost)
             if points_earned > 0:
                 balance = await self.sc_repo.hget_int(
-                    "checkout_points", member_level, 0)
+                    "checkout_points", points_domain, 0)
                 await self.sc_repo.hset(
-                    "checkout_points", member_level, balance + points_earned)
+                    "checkout_points", points_domain, balance + points_earned)
                 rollbacks.append((
-                    f"回退入账积分 {member_level}",
-                    self.sc_repo.hset("checkout_points", member_level, balance)))
+                    f"回退入账积分 {points_domain}",
+                    self.sc_repo.hset("checkout_points", points_domain, balance)))
             if order_record is not None:
                 order_record["points_used"] = points_used
                 order_record["points_earned"] = points_earned
@@ -328,6 +372,23 @@ class CheckoutService:
                 except Exception as exc:   # 补偿失败不阻断后续回滚
                     logger.warning("checkout_rollback_failed: %s", exc)
             return result_failure(err, log)
+        except Exception as err:
+            # B5: 非 StageError 异常(Redis 故障/落库失败等)同样逆序补偿,
+            # 否则已扣库存/已核销券/已扣积分悬空不回滚
+            logger.exception("checkout_unexpected_error: %s", err)
+            log.error("回滚", f"非预期异常, 事务已回滚: {err}")
+            for _, rollback in reversed(rollbacks):
+                try:
+                    await rollback
+                except Exception as exc:   # 补偿失败不阻断后续回滚
+                    logger.warning("checkout_rollback_failed: %s", exc)
+            return {
+                "success": False,
+                "error": str(err),
+                "failedStage": (log.executed_stages or ["事务"])[-1],
+                "executedStages": log.executed_stages,
+                "logs": log.logs,
+            }
 
         return result_success({
             "orderNo": order_no,

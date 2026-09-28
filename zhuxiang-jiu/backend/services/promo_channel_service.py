@@ -20,6 +20,7 @@
     - attract: sitemap URL 结构复用({SITE_BASE_URL}/r/{code})
 """
 
+import asyncio
 import contextlib
 import html as html_lib
 import json
@@ -30,6 +31,7 @@ import urllib.error
 import urllib.request
 import urllib.parse
 from datetime import datetime, UTC
+from zoneinfo import ZoneInfo
 
 from repositories.promo_repository import (
     PromoRepository,
@@ -46,6 +48,10 @@ CHANNEL_MODE_REAL = "real"
 CHANNEL_MODE_MOCK = "mock"
 # 通道未配置/失败回退的 mock 回执标记(可观测降级)
 CHANNEL_MODE_MOCK_FALLBACK = "mock_fallback"
+# 网络类异常(超时/连接中断)导致平台侧结果无法判定的回执标记:
+# 既不计失败回退(平台侧可能已执行成功, 自动重试会双发),
+# 也不标成功(可能没发出去)——冻结待人工核对
+CHANNEL_MODE_UNKNOWN = "unknown"
 # RPA 通道平台集(官方无发布 API——创作者中心网页版浏览器
 # 自动化发布, 小红书 2026-09-26 立项 / 抖音图文 2026-09-27
 # 接入 / 微博 CLI 桥 2026-09-27 接入 / 视频号 2026-09-27 接入):
@@ -206,6 +212,17 @@ WECHAT_MP_MONTHLY_CAP_DEFAULT = 4
 _WECHAT_MP_TOKEN_KEY = _k("promo", "wechat_mp", "token")
 # 内存回退态(STORE_MODE=asyncio 单测环境): token 缓存 + 月度配额计数
 _WECHAT_MP_MEM: dict = {"token": "", "tokenExpiresAt": 0.0, "quota": {}}
+# 微信 access_token 失效类 errcode(凭证被官方提前刷新/多实例竞争):
+# 命中即删缓存重取 token 重试一次, 而非最长 7000s 持续失败
+_WECHAT_MP_TOKEN_INVALID_ERRCODES = (40001, 42001)
+
+
+class WechatMpAPIError(ValueError):
+    """公众号 API 业务错(errcode 随异常携带, 供 token 失效自愈判别)"""
+
+    def __init__(self, errtext: str, errcode: int = 0):
+        super().__init__(errtext)
+        self.errcode = errcode
 
 
 def wechat_mp_send_mode() -> str:
@@ -231,16 +248,21 @@ def wechat_mp_monthly_cap() -> int:
 
 
 def _wechat_mp_month_key() -> str:
-    """自然月键(配额按月结算)"""
-    return datetime.now(UTC).strftime("%Y%m")
+    """自然月键(配额按月结算)
+
+    微信配额按北京时间自然月结算——用 UTC 会在每月 1 日
+    00:00-08:00 错位到上月, 导致配额提前耗尽/延迟恢复。
+    """
+    return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m")
 
 
 def _wechat_mp_errtext(body) -> str:
     """公众号 errcode 业务错提取(微信惯例: HTTP 200 + errcode)
 
-    40164=出口 IP 不在白名单——access_token 硬要求: 生产出口
-    47.236.61.117 须加入 mp.weixin.qq.com 设置与开发→基本配置→
-    IP 白名单, 否则 stable_token 直接被拒。
+    40164=出口 IP 不在白名单——access_token 硬要求: 生产出口 IP 须加入
+    mp.weixin.qq.com 设置与开发→基本配置→IP 白名单, 否则 stable_token
+    直接被拒。出口 IP 从 PROMO_WECHAT_MP_EGRESS_IP 环境变量读取
+    (不硬编码: 随回执落库, 写死会外泄基础设施信息且 IP 变更后误导)。
     """
     if not isinstance(body, dict):
         return ""
@@ -249,8 +271,10 @@ def _wechat_mp_errtext(body) -> str:
         return ""
     msg = str(body.get("errmsg", ""))[:160]
     if code == 40164:
-        return (f"errcode=40164 {msg}；请将生产出口IP "
-                f"47.236.61.117 加入公众号IP白名单"
+        egress_ip = os.environ.get("PROMO_WECHAT_MP_EGRESS_IP", "")
+        ip_hint = (f"出口IP {egress_ip} " if egress_ip else "服务器出口IP ")
+        return (f"errcode=40164 {msg}；请将生产{ip_hint}"
+                f"加入公众号IP白名单"
                 f"(设置与开发→基本配置→IP白名单)")
     return f"errcode={code} {msg}"
 
@@ -383,10 +407,15 @@ class PromoChannelService:
                        "access-token": key}
         request = urllib.request.Request(
             url, data=data, headers=headers, method="POST")
-        try:
+
+        def _read():
+            # C2: 同步 urlopen 包进 to_thread, 避免阻塞事件循环
             with urllib.request.urlopen(request,
                                         timeout=_HTTP_TIMEOUT) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+                return json.loads(resp.read().decode("utf-8"))
+
+        try:
+            body = await asyncio.to_thread(_read)
         except urllib.error.HTTPError as exc:
             raise ValueError(
                 f"平台API拒绝({_http_error_detail(exc)})") from exc
@@ -434,22 +463,68 @@ class PromoChannelService:
                     "PREVIEW_OPENID, 运营者微信关注公众号后后台可见)")
         else:
             await self._wechat_mp_quota_guard()
-        token = await self._wechat_mp_token(app_id, secret)
-        # 1) 封面(品牌卡片, /api/promo-cover 确定性渲染)
-        cover_png = self._wechat_mp_cover_bytes(content)
-        thumb_media_id = self._wechat_mp_add_material(
-            token, cover_png,
-            f"promo_cover_{content.get('contentId', 0)}.png")
-        # 2) 草稿(图文消息)
-        draft_media_id = self._wechat_mp_draft_add(
-            token, content, thumb_media_id)
-        # 3) 发送(preview 试收不计配额 / sendall 群发计配额)
-        if send_mode == WECHAT_MP_SEND_MODE_PREVIEW:
-            msg_id = self._wechat_mp_mass_preview(
-                token, draft_media_id, openid)
-        else:
-            msg_id = self._wechat_mp_mass_sendall(token, draft_media_id)
-            await self._wechat_mp_quota_consume()
+        # token 先行获取(协议顺序 token→封面; 同时预热缓存, 后续
+        # 各步骤经 _wechat_mp_call 从缓存取, 正常链路不再二次请求)
+        await self._wechat_mp_token(app_id, secret)
+        # 已创建的微信侧资源 ID(C6: 失败路径回执携带, 供人工清理
+        # /复用重发——素材与草稿不随失败自动回收)
+        thumb_media_id = ""
+        draft_media_id = ""
+        try:
+            # 1) 封面(品牌卡片, /api/promo-cover 确定性渲染)
+            cover_png = await self._wechat_mp_cover_bytes(content)
+            thumb_media_id = await self._wechat_mp_call(
+                app_id, secret, self._wechat_mp_add_material,
+                cover_png,
+                f"promo_cover_{content.get('contentId', 0)}.png")
+            # 2) 草稿(图文消息)
+            draft_media_id = await self._wechat_mp_call(
+                app_id, secret, self._wechat_mp_draft_add,
+                content, thumb_media_id)
+            # 3) 发送(preview 试收不计配额 / sendall 群发计配额)
+            if send_mode == WECHAT_MP_SEND_MODE_PREVIEW:
+                msg_id = await self._wechat_mp_call(
+                    app_id, secret, self._wechat_mp_mass_preview,
+                    draft_media_id, openid)
+            else:
+                try:
+                    msg_id = await self._wechat_mp_call(
+                        app_id, secret, self._wechat_mp_mass_sendall,
+                        draft_media_id)
+                except (urllib.error.URLError, TimeoutError) as exc:
+                    # C3: 网络类异常(超时/连接中断; HTTPError 已在
+                    # _wechat_mp_read 内转业务错不会到此)——微信侧
+                    # 可能已群发成功, 结果未知: 不走失败回退(自动
+                    # 重试会双发烧配额), 也不标成功, 留证据待人工
+                    # 在公众号后台核对; 配额不计数(不重复扣减)
+                    logger.warning(
+                        "wechat_mp_sendall_unknown_result: %s", exc)
+                    return {
+                        "mode": CHANNEL_MODE_UNKNOWN,
+                        "platform": PROMO_PLATFORM_WECHAT_MP,
+                        "publishId": "",
+                        "exposureEstimate":
+                            mock_receipt["exposureEstimate"],
+                        "error": (f"群发结果未知(网络异常: {exc}), "
+                                  "需人工在公众号后台核对"),
+                        "sendMode": send_mode,
+                        "mediaId": draft_media_id,
+                        "thumbMediaId": thumb_media_id,
+                    }
+                await self._wechat_mp_quota_consume()
+        except Exception as exc:
+            # C6: 失败回执携带已创建的素材/草稿 media_id——微信后台
+            # 已残留孤儿资源, 供人工清理或复用重发(成功路径之外
+            # 唯一的 ID 留痕)
+            logger.warning("promo_channel_real_failed platform=%s: %s",
+                           PROMO_PLATFORM_WECHAT_MP, exc)
+            mock_receipt["mode"] = CHANNEL_MODE_MOCK_FALLBACK
+            mock_receipt["error"] = str(exc)[:200]
+            if thumb_media_id:
+                mock_receipt["thumbMediaId"] = thumb_media_id
+            if draft_media_id:
+                mock_receipt["mediaId"] = draft_media_id
+            return mock_receipt
         return {
             "mode": CHANNEL_MODE_REAL,
             "platform": PROMO_PLATFORM_WECHAT_MP,
@@ -480,7 +555,7 @@ class PromoChannelService:
             "grant_type": "client_credential",
             "appid": app_id, "secret": secret,
         }, ensure_ascii=False).encode("utf-8")
-        body = self._wechat_mp_post_json(
+        body = await self._wechat_mp_post_json(
             f"{base}/cgi-bin/stable_token", payload)
         token = str(body.get("access_token") or "")
         if not token:
@@ -495,15 +570,20 @@ class PromoChannelService:
             _WECHAT_MP_MEM["tokenExpiresAt"] = time.time() + ttl
         return token
 
-    def _wechat_mp_cover_bytes(self, content: dict) -> bytes:
+    async def _wechat_mp_cover_bytes(self, content: dict) -> bytes:
         """品牌卡片封面下载(PromoCoverService 确定性渲染端点)"""
         cid = content.get("contentId", 0)
         request = urllib.request.Request(
             f"{SITE_BASE_URL}/api/promo-cover/{cid}.png")
-        try:
+
+        def _download():
+            # C2: 同步下载包进 to_thread, 避免阻塞事件循环
             with urllib.request.urlopen(request,
                                         timeout=_HTTP_TIMEOUT) as resp:
-                data = resp.read()
+                return resp.read()
+
+        try:
+            data = await asyncio.to_thread(_download)
         except urllib.error.HTTPError as exc:
             raise ValueError(
                 f"封面下载失败({_http_error_detail(exc)})") from exc
@@ -511,8 +591,8 @@ class PromoChannelService:
             raise ValueError(f"封面响应非PNG(contentId={cid})")
         return data
 
-    def _wechat_mp_add_material(self, token: str, png: bytes,
-                               filename: str) -> str:
+    async def _wechat_mp_add_material(self, token: str, png: bytes,
+                                      filename: str) -> str:
         """永久图片素材上传(add_material, multipart) → media_id"""
         base = platform_endpoint(PROMO_PLATFORM_WECHAT_MP)
         url = f"{base}/cgi-bin/material/add_material"
@@ -529,15 +609,15 @@ class PromoChannelService:
             headers={"Content-Type":
                      f"multipart/form-data; boundary={boundary}"},
             method="POST")
-        body = self._wechat_mp_read(request)
+        body = await self._wechat_mp_read(request)
         media_id = str(body.get("media_id") or "")
         if not media_id:
             raise ValueError(f"封面素材上传响应缺少 media_id: "
                              f"{str(body)[:120]}")
         return media_id
 
-    def _wechat_mp_draft_add(self, token: str, content: dict,
-                             thumb_media_id: str) -> str:
+    async def _wechat_mp_draft_add(self, token: str, content: dict,
+                                   thumb_media_id: str) -> str:
         """图文草稿新建(draft/add) → media_id"""
         base = platform_endpoint(PROMO_PLATFORM_WECHAT_MP)
         plain = " ".join(x for x in (content.get("body", ""),
@@ -554,7 +634,7 @@ class PromoChannelService:
             "need_open_comment": 0,
             "only_fans_can_comment": 0,
         }]}, ensure_ascii=False).encode("utf-8")
-        body = self._wechat_mp_post_json(
+        body = await self._wechat_mp_post_json(
             f"{base}/cgi-bin/draft/add", payload, token=token)
         media_id = str(body.get("media_id") or "")
         if not media_id:
@@ -562,8 +642,8 @@ class PromoChannelService:
                              f"{str(body)[:120]}")
         return media_id
 
-    def _wechat_mp_mass_preview(self, token: str, media_id: str,
-                                openid: str) -> str:
+    async def _wechat_mp_mass_preview(self, token: str, media_id: str,
+                                      openid: str) -> str:
         """预览(mass/preview): 指定 openid 试收, 不计月度配额"""
         base = platform_endpoint(PROMO_PLATFORM_WECHAT_MP)
         payload = json.dumps({
@@ -571,12 +651,12 @@ class PromoChannelService:
             "mpnews": {"media_id": media_id},
             "msgtype": "mpnews",
         }, ensure_ascii=False).encode("utf-8")
-        body = self._wechat_mp_post_json(
+        body = await self._wechat_mp_post_json(
             f"{base}/cgi-bin/message/mass/preview", payload, token=token)
         return str(body.get("msg_id") or "")
 
-    def _wechat_mp_mass_sendall(self, token: str,
-                                media_id: str) -> str:
+    async def _wechat_mp_mass_sendall(self, token: str,
+                                      media_id: str) -> str:
         """正式群发(mass/sendall): 全体关注者(认证服务号)"""
         base = platform_endpoint(PROMO_PLATFORM_WECHAT_MP)
         payload = json.dumps({
@@ -584,12 +664,12 @@ class PromoChannelService:
             "mpnews": {"media_id": media_id},
             "msgtype": "mpnews",
         }, ensure_ascii=False).encode("utf-8")
-        body = self._wechat_mp_post_json(
+        body = await self._wechat_mp_post_json(
             f"{base}/cgi-bin/message/mass/sendall", payload, token=token)
         return str(body.get("msg_id") or "")
 
-    def _wechat_mp_post_json(self, url: str, data: bytes,
-                             token: str = "") -> dict:
+    async def _wechat_mp_post_json(self, url: str, data: bytes,
+                                   token: str = "") -> dict:
         """公众号 API POST(JSON)——access_token 查询参数 + errcode 检查"""
         if token:
             sep = "&" if "?" in url else "?"
@@ -598,21 +678,61 @@ class PromoChannelService:
         request = urllib.request.Request(
             url, data=data,
             headers={"Content-Type": "application/json"}, method="POST")
-        return self._wechat_mp_read(request)
+        return await self._wechat_mp_read(request)
 
-    def _wechat_mp_read(self, request) -> dict:
+    async def _wechat_mp_read(self, request) -> dict:
         """公众号 API 响应统一读取(HTTP 错 + errcode 业务错)"""
-        try:
+
+        def _read():
+            # C2: 同步 urlopen 包进 to_thread, 避免单次发布最多
+            # 5 次串行 HTTP ×10s 超时挂起全站事件循环
             with urllib.request.urlopen(request,
                                         timeout=_HTTP_TIMEOUT) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+                return json.loads(resp.read().decode("utf-8"))
+
+        try:
+            body = await asyncio.to_thread(_read)
         except urllib.error.HTTPError as exc:
             raise ValueError(
                 f"公众号API拒绝({_http_error_detail(exc)})") from exc
         err = _wechat_mp_errtext(body)
         if err:
-            raise ValueError(f"公众号API拒绝({err})")
+            # C4: errcode 随异常携带, 供 _wechat_mp_call 判定
+            # 40001/42001 token 失效自愈
+            code = (body.get("errcode")
+                    if isinstance(body, dict) else 0) or 0
+            raise WechatMpAPIError(f"公众号API拒绝({err})",
+                                   errcode=int(code))
         return body
+
+    async def _wechat_mp_invalidate_token(self) -> None:
+        """删除 token 缓存(40001/42001 自愈第一步: 强制重取)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.delete(_WECHAT_MP_TOKEN_KEY)
+        else:
+            _WECHAT_MP_MEM["token"] = ""
+            _WECHAT_MP_MEM["tokenExpiresAt"] = 0.0
+
+    async def _wechat_mp_call(self, app_id: str, secret: str,
+                              fn, *args):
+        """带 token 的业务调用包装(token 失效自愈, C4)
+
+        token 被微信提前失效(官方强刷/多实例换 token 竞争)时, 缓存
+        命中最长 7000s 持续报 40001/42001——捕获后删缓存重取 token
+        并重试一次原请求; 仍失败才抛错。
+        """
+        token = await self._wechat_mp_token(app_id, secret)
+        try:
+            return await fn(token, *args)
+        except WechatMpAPIError as exc:
+            if exc.errcode not in _WECHAT_MP_TOKEN_INVALID_ERRCODES:
+                raise
+            logger.warning("wechat_mp_token_invalid(errcode=%s), 删缓存"
+                           "重取后重试一次", exc.errcode)
+            await self._wechat_mp_invalidate_token()
+            token = await self._wechat_mp_token(app_id, secret)
+            return await fn(token, *args)
 
     async def _wechat_mp_quota_used(self) -> int:
         """本月已群发次数(Redis 计数, 内存回退)"""
@@ -706,10 +826,15 @@ class PromoChannelService:
         request = urllib.request.Request(
             f"{BAIDU_PUSH_ENDPOINT}?{query}", data=data,
             headers={"Content-Type": "text/plain"}, method="POST")
-        try:
+
+        def _read():
+            # C2: 同步 urlopen 包进 to_thread, 避免阻塞事件循环
             with urllib.request.urlopen(request,
                                         timeout=_HTTP_TIMEOUT) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+                return json.loads(resp.read().decode("utf-8"))
+
+        try:
+            body = await asyncio.to_thread(_read)
         except urllib.error.HTTPError as exc:
             raise ValueError(
                 f"百度推送被拒({_http_error_detail(exc)})") from exc

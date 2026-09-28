@@ -214,21 +214,19 @@ class PointsService:
             if capped_by_order:
                 earned_points = PER_ORDER_EARN_LIMIT
 
-            # 检查每日/每月上限
+            # 检查每日/每月上限(仓储聚合统计, 不受流水条数截断:
+            # 原 limit=100 截断使月超 100 笔后旧流水漏算, 月上限形同虚设)
             today = date.today()
             today_str = today.isoformat()
             month_str = today.strftime("%Y-%m")
 
-            today_logs = await self.repo.list_logs(user_id, source=SOURCE_ORDER, limit=100)
-            today_earned = sum(l["points"] for l in today_logs
-                               if l.get("createdAt", "").startswith(today_str)
-                               and l["points"] > 0)
+            today_earned = await self.repo.sum_earned_logs(
+                user_id, SOURCE_ORDER, today_str)
             if today_earned + earned_points > DAILY_EARN_LIMIT:
                 raise ValueError(f"今日消费返分已达上限({DAILY_EARN_LIMIT}竹叶)")
 
-            month_earned = sum(l["points"] for l in today_logs
-                               if l.get("createdAt", "").startswith(month_str)
-                               and l["points"] > 0)
+            month_earned = await self.repo.sum_earned_logs(
+                user_id, SOURCE_ORDER, month_str)
             if month_earned + earned_points > MONTHLY_EARN_LIMIT:
                 raise ValueError(f"本月消费返分已达上限({MONTHLY_EARN_LIMIT}竹叶)")
 
@@ -538,22 +536,25 @@ class PointsService:
 
             # 扣减账户余额 + 写入流水
             for user_id, points in user_points.items():
-                account = await self.repo.get_account(user_id)
-                if account:
-                    account["totalPoints"] = max(0, account.get("totalPoints", 0) - points)
-                    await self.repo.save_account(account)
+                # NOTE: 须持用户账户锁——save_account 是读改写全量覆盖,
+                # 与用户并发抵扣/返分(持 points:account:{uid} 锁)互斥, 防止丢失更新
+                async with get_lock(f"points:account:{user_id}"):
+                    account = await self.repo.get_account(user_id)
+                    if account:
+                        account["totalPoints"] = max(0, account.get("totalPoints", 0) - points)
+                        await self.repo.save_account(account)
 
-                    await self.repo.add_log({
-                        "userId": user_id,
-                        "type": LOG_TYPE_SPEND,
-                        "source": SOURCE_EXPIRE,
-                        "points": -points,
-                        "balance": account["totalPoints"],
-                        "refId": None,
-                        "refDesc": f"积分过期({points}竹叶)",
-                        "expireAt": None,
-                        "status": LOG_STATUS_EXPIRED,
-                    })
+                        await self.repo.add_log({
+                            "userId": user_id,
+                            "type": LOG_TYPE_SPEND,
+                            "source": SOURCE_EXPIRE,
+                            "points": -points,
+                            "balance": account["totalPoints"],
+                            "refId": None,
+                            "refDesc": f"积分过期({points}竹叶)",
+                            "expireAt": None,
+                            "status": LOG_STATUS_EXPIRED,
+                        })
 
             return {
                 "expiredCount": expired_count,

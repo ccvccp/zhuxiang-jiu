@@ -509,7 +509,7 @@ class TestMemberServiceRedis:
     async def test_deduct_points_insufficient(self, seeded_redis, member_service):
         """积分不足: ValueError"""
         with pytest.raises(ValueError, match="积分不足"):
-            await member_service.deduct_points(1, 500)  # 当前 100
+            await member_service.deduct_points(1, 500, order_amount=10000)  # 当前 100
 
     async def test_add_address(self, seeded_redis, member_service):
         """新增地址(含默认清除)"""

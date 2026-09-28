@@ -3,7 +3,8 @@
 对齐前端 toolkit 事务语义(快照回滚的补偿式等价实现):
     - TxLog: 阶段日志({step, level, msg}, 前端 UpgradeLogger 形状)
     - acquire_locks: 多锁按 key 升序获取(防死锁, 前端 Mutex.withLocks 语义)
-    - Transaction: 攒批提交 + 阶段补偿回滚(先校验后执行, 失败逆序恢复)
+    - StageError/result_failure: 阶段失败信号与失败响应包装
+      (攒批提交+补偿回滚由调用方事务实现, 本模块无 Transaction 类)
 
 响应契约(对齐前端 mock):
     成功: {success: true, ..., logs, asyncOps}
@@ -12,8 +13,14 @@
 """
 
 import contextlib
+import threading
+import time
 
 from core.locks import get_lock
+
+# 发号计数器: 进程内单调递增(线程安全), 与毫秒时间戳组合保证单号唯一
+_seq_lock = threading.Lock()
+_seq = 0
 
 
 class TxLog:
@@ -87,10 +94,17 @@ def result_failure(err: StageError, log: TxLog) -> dict:
 
 
 def gen_no(prefix: str) -> str:
-    """生成单号: {prefix}{毫秒时间戳}-{3位随机}"""
-    import random
-    import time
-    return f"{prefix}{int(time.time() * 1000)}-{random.randint(0, 999):03d}"
+    """生成单号: {prefix}{毫秒时间戳}-{3位起进程内自增序号}
+
+    原实现为 3 位随机段, 同毫秒并发生成有 1/1000 碰撞概率(订单号/
+    出入库单号等十余处在用); 现改为进程内单调递增计数器, 时间戳+
+    序号组合在进程内保证不碰撞(重启后靠时间戳前移隔离, 保持同步签名)。
+    """
+    global _seq
+    with _seq_lock:
+        _seq += 1
+        seq = _seq
+    return f"{prefix}{int(time.time() * 1000)}-{seq:03d}"
 
 
 def now_iso() -> str:

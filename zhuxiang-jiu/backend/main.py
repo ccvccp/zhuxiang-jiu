@@ -22,7 +22,7 @@ import logging
 import os
 import time
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -737,13 +737,20 @@ async def health_check():
 # ============================================================
 
 @app.get("/metrics", tags=["系统"])
-async def metrics_endpoint():
+async def metrics_endpoint(token: str = ""):
     """应用指标暴露(Prometheus 文本格式, 纯标准库采集)
 
     指标: HTTP(QPS/延迟/状态码) + LLM(调用成功率/延迟/回退)
     + RAG 缓存命中。供既有 Prometheus 栈(见 docker-compose.monitoring)
     抓取: job 配置 targets 指向本端点即可, 无需额外 exporter。
+
+    P2 安全: 指标含全业务路径/QPS/错误率/LLM 调用量(侦察价值),
+    生产建议设 METRICS_TOKEN 环境变量启用 token 防护(抓取侧拼
+    ?token=xxx); 未设置时保持公开(本地开发零影响)。
     """
+    expected = os.environ.get("METRICS_TOKEN", "")
+    if expected and token != expected:
+        raise HTTPException(status_code=403, detail="metrics token 无效")
     from core.metrics import metrics_text
     from fastapi.responses import PlainTextResponse
     return PlainTextResponse(metrics_text(), media_type="text/plain")

@@ -19,13 +19,14 @@
     - ValueError → 409(业务冲突: 用户名重复/状态非法等)
 """
 
+import logging
 import re
 import secrets
 from datetime import datetime, timedelta
 
 from core.locks import get_lock
 from core.totp import (
-    generate_secret, verify_totp, provisioning_uri,
+    generate_secret, verify_totp, verify_totp_counter, provisioning_uri,
 )
 from repositories.admin_repository import (
     AdminRepository,
@@ -36,6 +37,8 @@ from repositories.admin_repository import (
     CONFIG_STATUS_ACTIVE, LOGIN_FAIL_LIMIT, LOGIN_LOCK_MINUTES,
     SESSION_TIMEOUT_MINUTES,
 )
+
+logger = logging.getLogger("admin_service")
 
 
 # ============================================================
@@ -415,6 +418,9 @@ class AdminService:
             if not verify_totp(user["totpSecret"], totp_code):
                 raise ValueError("动态口令错误或已过期")
             user["twoFactorEnabled"] = True
+            # 记录已消费窗口, 防止同一验证码开启后立刻重放登录
+            user["totpLastCounter"] = verify_totp_counter(user["totpSecret"],
+                                                          totp_code)
             user["updatedAt"] = datetime.utcnow().isoformat()
             await self.repo.save_user(user)
             return {"userId": user_id, "twoFactorEnabled": True}
@@ -430,10 +436,27 @@ class AdminService:
         if session is None or not session.get("pendingTwoFactor"):
             raise KeyError("会话不存在或不在双因素待验证状态")
         user = await self.repo.get_user(session["userId"])
-        if user is None or not verify_totp(user.get("totpSecret", ""),
-                                           totp_code):
+        # P0 安全: 重放防护(已消费窗口拒绝) + 暴力防护(5 次失败销毁会话)
+        matched = None
+        if user is not None:
+            matched = verify_totp_counter(
+                user.get("totpSecret", ""), totp_code,
+                last_used_counter=user.get("totpLastCounter"))
+        if user is None or matched is None:
+            fails = int(session.get("twoFactorFails", 0)) + 1
+            session["twoFactorFails"] = fails
+            if fails >= 5:
+                await self.repo.delete_session(token)
+                logger.warning("admin_2fa_bruteforce_session_destroyed")
+                raise ValueError("动态口令错误次数过多, 会话已失效, 请重新登录")
+            await self.repo.save_session(session)
             raise ValueError("动态口令错误或已过期")
+        # 记录已消费窗口, 同一验证码不可重放
+        user["totpLastCounter"] = matched
+        user["updatedAt"] = datetime.utcnow().isoformat()
+        await self.repo.save_user(user)
         session.pop("pendingTwoFactor", None)
+        session.pop("twoFactorFails", None)
         await self.repo.save_session(session)
         # 回填完整会话字段(pending 会话与正常会话结构一致, 仅移除标记)
         await self.repo.add_log({

@@ -16,3 +16,7 @@ import os
 # 否则这两个模块在 import 时会读取到 redis 默认值
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+
+# compat 模式测试依赖旧头(X-Role: admin 直调模块管理端点),
+# 显式开启头信任(生产默认剥离伪造身份头, 见 auth_middleware)
+os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")
