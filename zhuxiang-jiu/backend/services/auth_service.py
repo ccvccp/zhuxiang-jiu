@@ -268,9 +268,10 @@ class AuthService:
                 raise ValueError(
                     f"短信发送失败: {exc.message}") from exc
         else:
-            logger.info("sms_code_sent phone=%s code=%s ttl=%ds"
+            # P0 安全: 验证码不写日志(模拟通道也不行——日志泄露即账号接管)
+            logger.info("sms_code_sent phone=%s ttl=%ds"
                         "(当日第 %d 次, 模拟通道)",
-                        phone, code, self.SMS_CODE_TTL, count)
+                        phone, self.SMS_CODE_TTL, count)
         return {"success": True, "phone": phone,
                 "expireSeconds": self.SMS_CODE_TTL,
                 "msg": "验证码已发送, 请查收短信"}

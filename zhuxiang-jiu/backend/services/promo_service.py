@@ -479,8 +479,10 @@ class PromoService:
                 scheduled = entry.get("scheduledAt", "")
                 try:
                     due = datetime.fromisoformat(scheduled) <= now
-                except ValueError:
-                    due = True   # 非法时间立即出队(脏数据治理)
+                except (ValueError, TypeError):
+                    # P0: naive 时间串与 aware now 比较抛 TypeError——
+                    # 不捕获会让该条目变成毒丸, 卡死其后所有内容的发布
+                    due = True   # 非法/无时区时间立即出队(脏数据治理)
                 if not due:
                     continue
                 content = await self.repo.get_content(entry["contentId"])

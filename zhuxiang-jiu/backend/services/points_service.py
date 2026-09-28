@@ -149,13 +149,17 @@ class PointsService:
             signin_id = await self.repo.add_signin(signin_record)
 
             # 发放积分
-            await self._earn_points(
-                user_id=user_id,
-                points=points_earned,
-                source=SOURCE_CHECKIN,
-                ref_id=date_str,
-                ref_desc=f"每日签到(连续第{continuous_days}天)",
-            )
+            # P0: 账户写入必须在 points:account 锁内——与抵扣/返分/退款
+            # 互斥。否则并发的抵扣(读到旧快照→await→覆盖写)会把签到
+            # 加分整体吞掉, 用户资产凭空消失
+            async with get_lock(f"points:account:{user_id}"):
+                await self._earn_points(
+                    user_id=user_id,
+                    points=points_earned,
+                    source=SOURCE_CHECKIN,
+                    ref_id=date_str,
+                    ref_desc=f"每日签到(连续第{continuous_days}天)",
+                )
 
             return {
                 "signinId": signin_id,

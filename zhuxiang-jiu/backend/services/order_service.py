@@ -261,86 +261,102 @@ class OrderService:
 
             # 2. 校验商品 & 预扣库存
             resolved_items = []
-            for item in items:
-                pid = item["productId"]
-                qty = int(item["quantity"])
-                if qty <= 0:
-                    raise ValueError(f"商品 {pid} 数量须为正整数")
+            deducted = []  # 已预扣清单(后续任一步骤失败时逆序回补)
+            try:
+                for item in items:
+                    pid = item["productId"]
+                    qty = int(item["quantity"])
+                    if qty <= 0:
+                        raise ValueError(f"商品 {pid} 数量须为正整数")
 
-                async with get_lock(f"stock:{pid}"):
-                    product = await self.inventory_repo.get(pid)
-                    if not product:
-                        raise ValueError(f"商品 {pid} 不存在")
-                    if product["stock"] < qty:
-                        raise ValueError(
-                            f"库存不足: {pid} 当前 {product['stock']}, 需 {qty}"
-                        )
-                    # 预扣库存(直接扣减, 取消时回补)
-                    new_stock = await self.inventory_repo.deduct(pid, qty)
-                    logs.append({"step": "库存预扣", "level": "INFO",
-                                 "msg": f"{pid} ×{qty}, 剩余 {new_stock}"})
+                    async with get_lock(f"stock:{pid}"):
+                        product = await self.inventory_repo.get(pid)
+                        if not product:
+                            raise ValueError(f"商品 {pid} 不存在")
+                        if product["stock"] < qty:
+                            raise ValueError(
+                                f"库存不足: {pid} 当前 {product['stock']}, 需 {qty}"
+                            )
+                        # 预扣库存(直接扣减, 取消时回补)
+                        new_stock = await self.inventory_repo.deduct(pid, qty)
+                        logs.append({"step": "库存预扣", "level": "INFO",
+                                     "msg": f"{pid} ×{qty}, 剩余 {new_stock}"})
+                    deducted.append((pid, qty))
 
-                resolved_items.append({
-                    "productId": pid,
-                    "productName": item.get("productName", pid),
-                    "quantity": qty,
-                    "unitPrice": float(item["unitPrice"]),
-                    "subtotal": round(float(item["unitPrice"]) * qty, 2),
-                })
+                    resolved_items.append({
+                        "productId": pid,
+                        "productName": item.get("productName", pid),
+                        "quantity": qty,
+                        "unitPrice": float(item["unitPrice"]),
+                        "subtotal": round(float(item["unitPrice"]) * qty, 2),
+                    })
 
-            # 3. 价格计算
-            price_detail = self._calc_price(resolved_items, member_level, use_points)
-            logs.append({"step": "价格计算", "level": "INFO",
-                         "msg": f"商品 ¥{price_detail['goodsTotal']}, 实付 ¥{price_detail['actualAmount']}"})
+                # 3. 价格计算
+                price_detail = self._calc_price(resolved_items, member_level, use_points)
+                logs.append({"step": "价格计算", "level": "INFO",
+                             "msg": f"商品 ¥{price_detail['goodsTotal']}, 实付 ¥{price_detail['actualAmount']}"})
 
-            # 5. 生成订单号(先于积分抵扣, 抵扣流水需引用订单号)
-            order_id = _gen_order_id()
-            logs.append({"step": "创建订单", "level": "INFO", "msg": f"订单号 {order_id}"})
+                # 5. 生成订单号(先于积分抵扣, 抵扣流水需引用订单号)
+                order_id = _gen_order_id()
+                logs.append({"step": "创建订单", "level": "INFO", "msg": f"订单号 {order_id}"})
 
-            # 4. 积分抵扣(P1-19: 统一走积分模块账本, 含 100 起用/整数倍/30% 上限校验)
-            if use_points > 0:
-                if use_points % POINTS_PER_YUAN != 0:
-                    raise ValueError(f"积分须为 {POINTS_PER_YUAN} 的整数倍")
-                # 抵扣上限基准 = 会员折后+券后金额(与 _calc_price 口径一致)
-                deduct_base = (price_detail["goodsTotal"]
-                               + price_detail["memberDiscount"]
-                               + price_detail["couponDiscount"])
-                deduct_result = await PointsService().deduct_points(
-                    user_id=member_id, order_id=order_id,
-                    order_amount=deduct_base, deduct_points=use_points)
-                points_value = use_points / POINTS_PER_YUAN
-                logs.append({"step": "积分抵扣", "level": "INFO",
-                              "msg": f"扣除 {use_points} 竹叶(¥{points_value:.2f}), "
-                                     f"剩余 {deduct_result.get('balance')}"})
+                # 4. 积分抵扣(P1-19: 统一走积分模块账本, 含 100 起用/整数倍/30% 上限校验)
+                if use_points > 0:
+                    if use_points % POINTS_PER_YUAN != 0:
+                        raise ValueError(f"积分须为 {POINTS_PER_YUAN} 的整数倍")
+                    # 抵扣上限基准 = 会员折后+券后金额(与 _calc_price 口径一致)
+                    deduct_base = (price_detail["goodsTotal"]
+                                   + price_detail["memberDiscount"]
+                                   + price_detail["couponDiscount"])
+                    deduct_result = await PointsService().deduct_points(
+                        user_id=member_id, order_id=order_id,
+                        order_amount=deduct_base, deduct_points=use_points)
+                    points_value = use_points / POINTS_PER_YUAN
+                    logs.append({"step": "积分抵扣", "level": "INFO",
+                                  "msg": f"扣除 {use_points} 竹叶(¥{points_value:.2f}), "
+                                         f"剩余 {deduct_result.get('balance')}"})
 
-            # 6. 保存订单
-            now = ts()
-            order = {
-                "orderId": order_id,
-                "memberId": member_id,
-                "orderType": "RT",
-                "status": PENDING,
-                "items": resolved_items,
-                "priceDetail": price_detail,
-                "address": address,
-                "remark": remark,
-                "logistics": {"carrier": "", "waybillNo": "",
-                              "shippedAt": "", "signedAt": ""},
-                "payment": {"method": "", "tradeNo": "", "paidAt": ""},
-                "review": {"rating": 0, "content": "", "reviewedAt": ""},
-                "refund": {"reason": "", "refundedAt": "", "refundedAmount": 0},
-                "usedPoints": use_points,
-                "consumedPoints": 0,  # 支付后赠送的积分(退款时扣回)
-                "timeline": [{"status": PENDING, "time": now,
-                              "action": "创建订单"}],
-                # 城市归属(时空情景感知 P1: 收货地址优先/IP 兜底,
-                # 命中市级网店即代理权益归属; 不落库 IP 原文)
-                "cityOwnership": await self._resolve_ownership(
-                    address, caller_ip),
-                "createdAt": now,
-                "updatedAt": now,
-            }
-            await self.order_repo.create(order)
+                # 6. 保存订单
+                now = ts()
+                order = {
+                    "orderId": order_id,
+                    "memberId": member_id,
+                    "orderType": "RT",
+                    "status": PENDING,
+                    "items": resolved_items,
+                    "priceDetail": price_detail,
+                    "address": address,
+                    "remark": remark,
+                    "logistics": {"carrier": "", "waybillNo": "",
+                                  "shippedAt": "", "signedAt": ""},
+                    "payment": {"method": "", "tradeNo": "", "paidAt": ""},
+                    "review": {"rating": 0, "content": "", "reviewedAt": ""},
+                    "refund": {"reason": "", "refundedAt": "", "refundedAmount": 0},
+                    "usedPoints": use_points,
+                    "consumedPoints": 0,  # 支付后赠送的积分(退款时扣回)
+                    "timeline": [{"status": PENDING, "time": now,
+                                  "action": "创建订单"}],
+                    # 城市归属(时空情景感知 P1: 收货地址优先/IP 兜底,
+                    # 命中市级网店即代理权益归属; 不落库 IP 原文)
+                    "cityOwnership": await self._resolve_ownership(
+                        address, caller_ip),
+                    "createdAt": now,
+                    "updatedAt": now,
+                }
+                await self.order_repo.create(order)
+            except Exception:
+                # P0 补偿: 下单失败(积分不足/落库失败等)逆序回补已预扣库存,
+                # 否则库存永久丢失
+                for pid, qty in reversed(deducted):
+                    try:
+                        async with get_lock(f"stock:{pid}"):
+                            await self.inventory_repo.restock(pid, qty)
+                        logs.append({"step": "库存回补", "level": "WARN",
+                                     "msg": f"{pid} ×{qty} (下单失败补偿)"})
+                    except Exception as rollback_exc:
+                        logger.error("stock_rollback_failed pid=%s qty=%s: %s",
+                                     pid, qty, rollback_exc)
+                raise
 
             return {
                 "success": True,

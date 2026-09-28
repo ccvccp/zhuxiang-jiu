@@ -265,13 +265,16 @@ class FlashSaleService:
         await self.flash_repo.update_session_fields(session_id, fields)
 
         # 联动取消待支付订单(逐单走锁内回补)
+        # P0: 每个商品的取消必须持 flash:item 锁——_cancel_order_internal
+        # 的 soldCount 读-改-写与并发抢购(持锁)互斥, 否则互相覆盖
         cancelled = 0
         for item in await self.flash_repo.list_items_by_session(session_id):
-            pending = await self.flash_repo.list_orders_by_item(
-                item["itemId"], statuses=(ORDER_STATUS_PENDING,))
-            for order in pending:
-                await self._cancel_order_internal(order, "场次取消")
-                cancelled += 1
+            async with get_lock(f"flash:item:{item['itemId']}"):
+                pending = await self.flash_repo.list_orders_by_item(
+                    item["itemId"], statuses=(ORDER_STATUS_PENDING,))
+                for order in pending:
+                    await self._cancel_order_internal(order, "场次取消")
+                    cancelled += 1
         session.update(fields)
         logger.info("flash_session_cancelled session=%s cancelledOrders=%d",
                     session_id, cancelled)
@@ -461,14 +464,22 @@ class FlashSaleService:
         if not is_admin and member_id is not None \
                 and int(order.get("memberId", 0)) != int(member_id):
             raise ValueError("无权支付他人订单")
-        if order.get("status") != ORDER_STATUS_PENDING:
-            raise ValueError(f"订单状态为「{order.get('status')}」, 不可支付")
-        fields = {"status": ORDER_STATUS_PAID,
-                  "paidAt": _now_iso(), "updatedAt": _now_iso()}
-        await self.flash_repo.update_order_fields(order_no, fields)
-        order.update(fields)
-        logger.info("flash_order_paid order=%s", order_no)
-        return dict(order)
+
+        # P0: 锁内重读+重校验——与取消任务(持 flash:item 锁)互斥,
+        # 防止"读到 PENDING→订单被取消并回补库存→覆盖写 PAID"的
+        # 竞态导致超卖+已取消订单复活
+        async with get_lock(f"flash:item:{order['itemId']}"):
+            fresh = await self.flash_repo.get_order(order_no)
+            if not fresh:
+                raise KeyError(f"秒杀订单 {order_no} 不存在")
+            if fresh.get("status") != ORDER_STATUS_PENDING:
+                raise ValueError(f"订单状态为「{fresh.get('status')}」, 不可支付")
+            fields = {"status": ORDER_STATUS_PAID,
+                      "paidAt": _now_iso(), "updatedAt": _now_iso()}
+            await self.flash_repo.update_order_fields(order_no, fields)
+            fresh.update(fields)
+            logger.info("flash_order_paid order=%s", order_no)
+            return dict(fresh)
 
     async def cancel_order(self, order_no: str, member_id: int | None = None,
                            is_admin: bool = False) -> dict:

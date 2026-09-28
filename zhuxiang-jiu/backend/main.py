@@ -437,6 +437,20 @@ app.mount("/media", StaticFiles(directory=_MEDIA_ROOT), name="media")
 @app.on_event("startup")
 async def _on_startup():
     """应用启动时拉起后台调度任务(幂等, 环境开关可控)"""
+    # P0 安全加固: JWT 密钥防线——strict 生产模式下禁止静默回退公开默认值。
+    # 默认值硬编码在 core/auth.py 源码里, 未注入 JWT_SECRET 时任何人
+    # 都能用它伪造含 role=admin 的合法令牌穿透鉴权。
+    from core.auth import DEFAULT_JWT_SECRET
+    from core.auth_middleware import get_auth_mode
+    _jwt_secret = os.environ.get("JWT_SECRET", "")
+    if get_auth_mode() == "strict" and (
+            not _jwt_secret or _jwt_secret == DEFAULT_JWT_SECRET):
+        raise RuntimeError(
+            "JWT_SECRET 未注入或仍为公开默认值: strict 模式拒绝启动 "
+            "(生产必须在 /opt/zhuxiang/.env 配置强随机密钥, "
+            "如 openssl rand -hex 32)")
+    if not _jwt_secret or _jwt_secret == DEFAULT_JWT_SECRET:
+        logger.warning("JWT_SECRET 未设置, 回退开发默认密钥(仅限开发环境)")
     # P4.1 部署加固: LLM 各轨开关状态日志(密钥遗漏/静默回退即时可见)
     from services.llm_client import log_feature_status
     log_feature_status()
