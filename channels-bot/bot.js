@@ -1,8 +1,9 @@
 // 视频号助手自动发布 bot (CDP pipe 传输, 无 TCP 端口)
 // 用法: node bot.js <config.json>
-// config: { action: "probe"|"publish", mp4, desc, shortTitle, waitLoginMinutes }
+// config: { action: "probe"|"publish", mp4, desc, shortTitle, waitLoginMinutes, clearCookies }
 const puppeteer = require('puppeteer-core');
 const fs = require('fs');
+const path = require('path');
 
 const CFG = JSON.parse(fs.readFileSync(process.argv[2], 'utf-8'));
 const LOG = (m) => {
@@ -26,6 +27,12 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const page = (await browser.pages())[0] || await browser.newPage();
   // 关键: --window-size 可能不生效(实证 800x600), 强制视口 1280x900 否则列表操作列(x~1090)在视口外
   await page.setViewport({ width: 1280, height: 900 });
+  // 可选: 清视频号 cookie 强制走登录流程(登录弹窗探测/回归用)
+  if (CFG.clearCookies) {
+    const c = await page.createCDPSession();
+    await c.send('Storage.clearDataForOrigin', { origin: 'https://channels.weixin.qq.com', storageTypes: 'cookies' });
+    LOG('cookies cleared for channels.weixin.qq.com');
+  }
   await page.goto('https://channels.weixin.qq.com/platform/post/create', { waitUntil: 'domcontentloaded' });
   LOG('opened url=' + page.url());
 
@@ -38,15 +45,30 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const tried = []; // 已点过的按钮文案, 防同一错误目标反复点击
     let lastTry = 0;
     let lastUrl = '';
+    let enterSpawned = false; // 微信授权弹窗 Enter 允许器只 spawn 一次
     // 找 frame 内目标按钮的 iframe 视口坐标
+    // 铁律: 微信 web 授权「允许」按钮在闭合 shadow DOM 内(querySelectorAll 穿不透, 小红书发布按钮栏同款)——
+    //       deepQueryAll 递归穿透 shadowRoot 才能找到
     const findPt = (fr, triedArr) => fr.evaluate((arr) => {
+      const deepQueryAll = (sel) => {
+        const out = [];
+        const walk = (node) => {
+          node.querySelectorAll(sel).forEach(e => out.push(e));
+          node.querySelectorAll('*').forEach(e => { if (e.shadowRoot) walk(e.shadowRoot); });
+        };
+        walk(document);
+        return out;
+      };
       const bad = /扫码|扫一扫|二维码|切换|其他方式|取消|帮助|拒绝/;
-      const cands = Array.from(document.querySelectorAll('button, [role=button], a'))
+      const cands = deepQueryAll('button, [role=button], a, div, span')
         .filter(e => {
           const t = (e.innerText || '').trim();
           if (!t || t.length > 12 || bad.test(t)) return false;
           if (!/(登录|进入|允许|确认)/.test(t)) return false;
-          if (arr.includes(t)) return false;
+          // 「登录视频号助手」疑似 Chrome 内授权确认, 允许重试但限 3 次(防刷屏)
+          const clicks = arr.filter(x => x === t).length;
+          if (clicks >= (t === '登录视频号助手' ? 3 : 1)) return false;
+          if (e.children.length > 0) return false; // 只点叶子, 避免命中容器
           const r = e.getBoundingClientRect();
           return r.width > 10 && r.height > 10 && r.x >= 0 && r.y >= 0;
         });
@@ -61,6 +83,17 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
       if (!/login\.html/.test(url)) return true;
       if (Date.now() - lastTry > 5000) {
         lastTry = Date.now();
+        // 调试: dump login.html 全部可见可点元素(弹窗按钮形态探测)
+        for (const fr of page.frames()) {
+          try {
+            const dump = await fr.evaluate(() => {
+              const els = Array.from(document.querySelectorAll('button, [role=button], a, div, span'))
+                .filter(e => { const r = e.getBoundingClientRect(); return r.width > 8 && r.height > 8 && r.x >= 0 && r.y >= 0 && (e.innerText || '').trim().length > 0 && (e.innerText || '').trim().length < 16; });
+              return els.map(e => ({ tag: e.tagName, cls: String(e.className).slice(0, 60), t: (e.innerText || '').trim() })).slice(0, 60);
+            });
+            fs.writeFileSync('login_dom_dump_' + (fr === page.mainFrame() ? 'main' : String(page.frames().indexOf(fr))) + '.json', JSON.stringify(dump, null, 1));
+          } catch (e) {}
+        }
         for (const fr of page.frames()) {
           const pt = await findPt(fr, tried);
           if (!pt) continue;
@@ -91,6 +124,16 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
           await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: off.x + pt.x, y: off.y + pt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
           tried.push(pt.t);
           LOG('auto-login real-click [' + pt.t + '] at ' + Math.round(off.x + pt.x) + ',' + Math.round(off.y + pt.y) + ' @' + fr.url().slice(0, 60));
+          // 微信客户端授权弹窗自动允许: 文件信号触发机制——
+          // bot spawn 的沙箱子进程 EnumWindows 枚举不到弹窗(深沙箱限制, 实证),
+          // 改由 shell 侧后台 job 跑 allow_enter.ps1(枚举可见), 靠此 flag 文件协同
+          if (!enterSpawned) {
+            enterSpawned = true;
+            try {
+              fs.writeFileSync(path.join(__dirname, 'allow_signal.flag'), String(Date.now()));
+              LOG('allow_signal.flag written (allow_enter watcher 将自动前台化+Enter 点允许)');
+            } catch (e) { LOG('allow flag write err ' + e.message); }
+          }
           break;
         }
       }

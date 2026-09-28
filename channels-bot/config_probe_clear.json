@@ -1,0 +1,5 @@
+{
+  "action": "probe",
+  "waitLoginMinutes": 8,
+  "clearCookies": true
+}
