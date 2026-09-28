@@ -29,19 +29,80 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await page.goto('https://channels.weixin.qq.com/platform/post/create', { waitUntil: 'domcontentloaded' });
   LOG('opened url=' + page.url());
 
-  // ---- 阶段1: 等待扫码登录 (URL 离开 login.html) ----
+  // ---- 登录保障 (2026-09-28 优化: 设备已绑定微信, 登录页可一键点击免扫码; 失败回退等扫码) ----
+  // 铁律: qrconnect iframe 按钮合成 click 无效(trusted click, 同列表页 Vue 压力校验)——
+  //       必须 CDP Input.dispatchMouseEvent 真实点击(force=0.5 对齐人手 pointerdown 压力),
+  //       iframe 内坐标需叠加主页面 iframe 偏移
+  const ensureLogin = async (page, waitMs) => {
+    const deadline = Date.now() + waitMs;
+    const tried = []; // 已点过的按钮文案, 防同一错误目标反复点击
+    let lastTry = 0;
+    let lastUrl = '';
+    // 找 frame 内目标按钮的 iframe 视口坐标
+    const findPt = (fr, triedArr) => fr.evaluate((arr) => {
+      const bad = /扫码|扫一扫|二维码|切换|其他方式|取消|帮助|拒绝/;
+      const cands = Array.from(document.querySelectorAll('button, [role=button], a'))
+        .filter(e => {
+          const t = (e.innerText || '').trim();
+          if (!t || t.length > 12 || bad.test(t)) return false;
+          if (!/(登录|进入|允许|确认)/.test(t)) return false;
+          if (arr.includes(t)) return false;
+          const r = e.getBoundingClientRect();
+          return r.width > 10 && r.height > 10 && r.x >= 0 && r.y >= 0;
+        });
+      if (!cands.length) return null;
+      const el = cands[0];
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, t: (el.innerText || '').trim() };
+    }, triedArr).catch(() => null);
+    while (Date.now() < deadline) {
+      const url = page.url();
+      if (url !== lastUrl) { LOG('url -> ' + url); lastUrl = url; }
+      if (!/login\.html/.test(url)) return true;
+      if (Date.now() - lastTry > 5000) {
+        lastTry = Date.now();
+        for (const fr of page.frames()) {
+          const pt = await findPt(fr, tried);
+          if (!pt) continue;
+          // iframe 偏移: 子 frame 坐标需叠加主页面对应 iframe rect; 主 frame 无偏移
+          let off = { x: 0, y: 0 };
+          if (fr !== page.mainFrame()) {
+            off = await page.evaluate(() => {
+              const ifr = Array.from(document.querySelectorAll('iframe'))
+                .find(i => /open\.weixin|qrconnect|login/.test(i.src || ''));
+              if (!ifr) return null;
+              const r = ifr.getBoundingClientRect();
+              return { x: r.x, y: r.y };
+            }).catch(() => null);
+            if (!off) continue;
+          }
+          // 双保险: 先合成 click 再 CDP 真实点击 (force=0.5 对齐人手压力)
+          try {
+            await fr.evaluate((p) => {
+              const hit = document.elementFromPoint(p.x, p.y);
+              if (hit) hit.click();
+            }, pt).catch(() => {});
+          } catch (e) {}
+          const cdp = await page.createCDPSession();
+          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: off.x + pt.x, y: off.y + pt.y, button: 'none', pointerType: 'mouse' });
+          await sleep(150);
+          await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: off.x + pt.x, y: off.y + pt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+          await sleep(90);
+          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: off.x + pt.x, y: off.y + pt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+          tried.push(pt.t);
+          LOG('auto-login real-click [' + pt.t + '] at ' + Math.round(off.x + pt.x) + ',' + Math.round(off.y + pt.y) + ' @' + fr.url().slice(0, 60));
+          break;
+        }
+      }
+      await sleep(2500);
+    }
+    return !/login\.html/.test(page.url());
+  };
+
+  // ---- 阶段1: 登录 (一键点击优先, 兜底等扫码) ----
   await sleep(6000); // 客户端 auth 检查有延迟重定向, 先沉降防假阳性
-  const deadline = Date.now() + (CFG.waitLoginMinutes || 8) * 60000;
-  let logged = false;
-  let lastUrl = '';
-  while (Date.now() < deadline) {
-    const url = page.url();
-    if (url !== lastUrl) { LOG('url -> ' + url); lastUrl = url; }
-    if (!/login\.html/.test(url)) { logged = true; break; }
-    await sleep(3000);
-  }
-  if (!logged) {
-    LOG('LOGIN_TIMEOUT: 二维码未被确认(或仍在循环), 详见窗口');
+  if (!(await ensureLogin(page, (CFG.waitLoginMinutes || 8) * 60000))) {
+    LOG('LOGIN_TIMEOUT: 一键登录未出现且二维码未被确认, 详见窗口');
     fs.writeFileSync('login_state.json', JSON.stringify({ ok: false }));
     await browser.close();
     process.exit(2);
@@ -55,12 +116,10 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await page.goto('https://channels.weixin.qq.com/platform/post/create', { waitUntil: 'domcontentloaded' });
   await sleep(8000);
   LOG('publish page url=' + page.url());
-  // 会话过期: 弹回 login.html → 等扫码
+  // 会话过期: 弹回 login.html → 一键登录优先, 兜底等扫码
   if (page.url().includes('login.html')) {
-    LOG('SESSION_EXPIRED — 请扫码');
-    const dl = Date.now() + 10 * 60000;
-    while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
-    if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+    LOG('SESSION_EXPIRED — 尝试一键登录(免扫码), 兜底等扫码确认');
+    if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
     LOG('re-logged in');
     await page.goto('https://channels.weixin.qq.com/platform/post/create', { waitUntil: 'domcontentloaded' });
     await sleep(6000);
@@ -309,12 +368,10 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     };
     if (!await gotoList()) { await sleep(2500); await gotoList(); }
     await sleep(4000);
-    // 会话过期: 弹回 login.html → 等用户扫码 (最长10分钟)
+    // 会话过期: 弹回 login.html → 一键登录优先, 兜底等扫码
     if (page.url().includes('login.html')) {
-      LOG('SESSION_EXPIRED — Chrome 窗口已出二维码, 请扫码');
-      const dl = Date.now() + 10 * 60000;
-      while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
-      if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      LOG('SESSION_EXPIRED — 尝试一键登录(免扫码), 兜底等扫码确认');
+      if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
       LOG('re-logged in');
       await sleep(2000);
       await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded' });
@@ -502,10 +559,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     if (!await gotoList()) { await sleep(2500); await gotoList(); }
     await sleep(4000);
     if (page.url().includes('login.html')) {
-      LOG('SESSION_EXPIRED — 请扫码');
-      const dl = Date.now() + 10 * 60000;
-      while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
-      if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      LOG('SESSION_EXPIRED — 尝试一键登录(免扫码), 兜底等扫码确认');
+      if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
       await sleep(2000);
       if (!await gotoList()) { await sleep(2500); await gotoList(); }
       await sleep(5000);
@@ -595,10 +650,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     if (!await gotoList()) { await sleep(2500); await gotoList(); }
     await sleep(4000);
     if (page.url().includes('login.html')) {
-      LOG('SESSION_EXPIRED — 请扫码');
-      const dl = Date.now() + 10 * 60000;
-      while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
-      if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      LOG('SESSION_EXPIRED — 尝试一键登录(免扫码), 兜底等扫码确认');
+      if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
       await sleep(2000);
       if (!await gotoList()) { await sleep(2500); await gotoList(); }
       await sleep(5000);
@@ -687,10 +740,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     if (!await gotoList()) { await sleep(2500); await gotoList(); }
     await sleep(4000);
     if (page.url().includes('login.html')) {
-      LOG('SESSION_EXPIRED — 请扫码');
-      const dl = Date.now() + 10 * 60000;
-      while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
-      if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      LOG('SESSION_EXPIRED — 尝试一键登录(免扫码), 兜底等扫码确认');
+      if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
       await sleep(2000);
       if (!await gotoList()) { await sleep(2500); await gotoList(); }
       await sleep(5000);
@@ -754,10 +805,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     } catch (e) { await sleep(2500); await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded' }).catch(() => {}); }
     await sleep(4000);
     if (page.url().includes('login.html')) {
-      LOG('SESSION_EXPIRED — 请扫码');
-      const dl = Date.now() + 10 * 60000;
-      while (Date.now() < dl && page.url().includes('login.html')) await sleep(3000);
-      if (page.url().includes('login.html')) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      LOG('SESSION_EXPIRED — 尝试一键登录(免扫码), 兜底等扫码确认');
+      if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
       await sleep(2000);
       await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded' }).catch(() => {});
       await sleep(5000);
