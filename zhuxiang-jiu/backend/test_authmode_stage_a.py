@@ -67,7 +67,10 @@ if not ADMIN_TOKEN:
 ADMIN_BEARER = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 BEARER = {"Authorization": f"Bearer {TOKEN}"}
 
-# --- ① 未登录裸头(compat 行为不变) ---
+# --- ① 未登录裸头(46+1 安全修复后新基线: compat 下剥伪造
+#     身份头防越权 → 403; 应急回滚开关 AUTH_COMPAT_TRUST_HEADERS=1
+#     时才放行——2026-09-29 更新, 原"compat 零变化"语义已被
+#     安全修复有意取代) ---
 CASES = [
     ("GET", "/api/hub/ops/overview", {"X-Role": "admin"}, "hub 总览(裸头)"),
     ("GET", "/api/ai-learning/overview", {"X-Role": "admin"}, "ai-learning 总览(裸头)"),
@@ -76,7 +79,9 @@ CASES = [
 ]
 for method, path, hdrs, label in CASES:
     r = client.request(method, path, headers=hdrs)
-    record(label, r.status_code == 200, f"status={r.status_code}")
+    expected = 200 if hdrs is None else 403
+    record(label, r.status_code == expected,
+           f"status={r.status_code}(预期{expected})")
 
 # --- ② admin Bearer + X-Role 叠加(改造后前端登录态实际形态) ---
 r = client.get("/api/hub/ops/overview",

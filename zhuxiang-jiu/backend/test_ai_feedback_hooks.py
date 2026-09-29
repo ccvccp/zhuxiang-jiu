@@ -343,10 +343,13 @@ async def main():
         ov = await overview()
         auth_entry = next((s for s in ov.get("scorers", [])
                            if s.get("scorerId") == "auth_risk"), {})
+        # scorerCount 56 为该测试编写时基线——注册表随新模块
+        # 档案演进增长(>= 兼容; autoFeedback24h 同轮次可累积 >1)
         record("27_overview_reports_auto_feedback",
-               ov.get("scorerCount") == 56
+               ov.get("scorerCount", 0) >= 56
                and auth_entry.get("autoFeedback24h", 0) >= 1
                and isinstance(ov.get("scheduler", {}).get("runs"), int),
+               f"scorers={ov.get('scorerCount')} "
                f"auto24h={auth_entry.get('autoFeedback24h')}")
 
     # ========================================================
