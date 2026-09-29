@@ -87,6 +87,11 @@ PUBLIC_EXACT = {
     # 39号 §2.5 角色落地页(登录成功后消费; 无敏感数据——
     # chips/streak 欢迎语, 前端同时携带 Bearer)
     "/api/entry/landing",
+    # 39号 WebAuthn 真实轨登录通道(2026-09-30 P2 落地: 挑战/断言
+    # 自带 CTAP2 密码学验证——fido2 验签即身份证明, 无需 JWT;
+    # 注册两端点仍须登录态)
+    "/api/entry/webauthn/login/begin",
+    "/api/entry/webauthn/login/complete",
     # 第三方服务器回调(微信/支付宝/物流平台服务器发起, 无本站 JWT;
     # 安全性由各回调自有验签保障: 微信APIv3 / 支付宝RSA2 /
     # 物流渠道签名, 详见 payment_routes._verify_callback 族)

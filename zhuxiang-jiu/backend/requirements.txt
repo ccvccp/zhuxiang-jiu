@@ -9,3 +9,4 @@ httpx>=0.27.0
 lameenc>=1.7.0
 Pillow>=10.0.0
 
+fido2>=2.2  # 39号 WebAuthn 真实轨(2026-09-30): Fido2Server 注册/断言验签

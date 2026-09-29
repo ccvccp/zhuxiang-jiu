@@ -46,6 +46,12 @@ IP_REPUTATION_TABLE = {
 IP_RISK_TYPES = ("clean", "proxy", "vpn", "tor", "blacklist")
 
 
+def _os_env(key: str, default: str = "") -> str:
+    """环境变量读取(WebAuthn 轨开关等)"""
+    import os
+    return (os.environ.get(key, default) or default).strip()
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -668,6 +674,20 @@ class EntryService:
         member_id = int(record.get("memberId") or 0)
         if not member_id:
             raise ValueError("凭证缺少归属会员")
+        return await self._bio_login_finalize(
+            record, ip=ip, note="bio_verify")
+
+    async def _bio_login_finalize(self, record: dict,
+                                  ip: str = "",
+                                  note: str = "bio") -> dict:
+        """生物登录公共后链(验签通过后: 风控 → 事件 → 令牌 → 挑战消费)
+
+        bio_verify / webauthn_login_complete 共用(2026-09-29 WebAuthn
+        真实轨抽取——前段验签各轨自理, 后链语义统一)。
+        """
+        member_id = int(record.get("memberId") or 0)
+        if not member_id:
+            raise ValueError("凭证缺少归属会员")
         # 风控决策(设备为绑定设备 → device_match=0)
         decision = await self.guard(
             member_id, record.get("bioType", MODE_FINGERPRINT),
@@ -678,7 +698,7 @@ class EntryService:
         await self._record_event(member_id, record.get("bioType", ""),
                                  True, decision["riskScore"],
                                  record.get("deviceId", ""),
-                                 note="bio_verify")
+                                 note=note)
         from services.auth_service import AuthService
         tokens = await AuthService()._login_by_member_id(member_id)
         # 挑战一次性消费
@@ -797,6 +817,123 @@ class EntryService:
                    "revokedAt": _now_iso()}
         await self.repo.save_bio(updated)
         return updated
+
+    # ============================================================
+    # WebAuthn 真实轨(P2 预留落地, 2026-09-30)——设计 §1.2
+    # "真实 WebAuthn/ctap": mock 轨零改动叠加, 协议层在
+    # entry_webauthn_service(python-fido2), 凭证同落 bio 表
+    # ============================================================
+
+    async def webauthn_register_begin(self,
+                                      member_id: int) -> dict:
+        """发起 WebAuthn 注册(限数铁律同 bio_enroll: active ≤ 5)
+
+        Raises:
+            ValueError: 凭证数超限/开关 off
+        """
+        if _os_env("ENTRY_WEBAUTHN_MODE", "off") != "real":
+            raise ValueError(
+                "WebAuthn 真实轨未开启(ENTRY_WEBAUTHN_MODE=off)")
+        existing = await self.repo.list_bio(member_id=member_id,
+                                            limit=100)
+        active = [b for b in existing
+                  if b.get("status") == "active"]
+        if len(active) >= 5:
+            raise ValueError("生物凭证数已达上限(5), 请先删除旧凭证")
+        from services.entry_webauthn_service import (
+            EntryWebauthnService)
+        return await EntryWebauthnService().register_begin(
+            member_id)
+
+    async def webauthn_register_complete(self, member_id: int,
+                                          response: dict,
+                                          credential_name: str = ""
+                                          ) -> dict:
+        """完成注册: fido2 验证 attestation → 凭证落 bio 表
+
+        Raises:
+            ValueError: 无挑战/attestation 失败/凭证重复/开关 off
+        """
+        if _os_env("ENTRY_WEBAUTHN_MODE", "off") != "real":
+            raise ValueError(
+                "WebAuthn 真实轨未开启(ENTRY_WEBAUTHN_MODE=off)")
+        from services.entry_webauthn_service import (
+            EntryWebauthnService)
+        material = await EntryWebauthnService(
+        ).register_complete(member_id, response)
+        existing = await self.repo.list_bio(member_id=member_id,
+                                            limit=100)
+        if any(b.get("publicKeyHash")
+               == material["credentialIdHash"]
+               for b in existing):
+            raise ValueError("该凭证已绑定(勿重复绑定)")
+        record = {
+            "credentialId": material["credentialId"],
+            "memberId": member_id,
+            "bioType": MODE_FINGERPRINT,
+            "deviceId": "webauthn:platform",
+            "publicKeyHash": material["credentialIdHash"],
+            "webauthnAttested": material["webauthnAttested"],
+            "signCount": material["signCount"],
+            "name": credential_name or "WebAuthn 凭证"
+                                      f"{material['credentialId'][-4:]}",
+            "status": "active",
+            "mode": "webauthn",   # 真实轨标记(strict 模式放行)
+            "enrolledAt": _now_iso(),
+        }
+        await self.repo.save_bio(record)
+        return record
+
+    async def webauthn_login_begin(self,
+                                    credential_id: str) -> dict:
+        """发起 WebAuthn 登录挑战
+
+        Raises:
+            KeyError: 凭证不存在
+            ValueError: 吊销/开关 off/非 webauthn 轨
+        """
+        if _os_env("ENTRY_WEBAUTHN_MODE", "off") != "real":
+            raise ValueError(
+                "WebAuthn 真实轨未开启(ENTRY_WEBAUTHN_MODE=off)")
+        record = await self.repo.get_bio(credential_id)
+        if record is None:
+            raise KeyError(
+                f"生物凭证不存在(credentialId={credential_id})")
+        if record.get("status") != "active":
+            raise ValueError(
+                f"凭证已吊销(当前{record.get('status')})")
+        from services.entry_webauthn_service import (
+            EntryWebauthnService)
+        return await EntryWebauthnService().login_begin(record)
+
+    async def webauthn_login_complete(self, credential_id: str,
+                                      response: dict,
+                                      ip: str = "") -> dict:
+        """完成登录: fido2 真实验签(origin/rpIdHash/克隆检测)
+        → 公共后链(风控/事件/令牌)同 bio_verify
+
+        Raises:
+            KeyError: 凭证不存在
+            ValueError: 吊销/验签失败/风控拦截/开关 off
+        """
+        if _os_env("ENTRY_WEBAUTHN_MODE", "off") != "real":
+            raise ValueError(
+                "WebAuthn 真实轨未开启(ENTRY_WEBAUTHN_MODE=off)")
+        record = await self.repo.get_bio(credential_id)
+        if record is None:
+            raise KeyError(
+                f"生物凭证不存在(credentialId={credential_id})")
+        if record.get("status") != "active":
+            raise ValueError(
+                f"凭证已吊销(当前{record.get('status')})")
+        from services.entry_webauthn_service import (
+            EntryWebauthnService)
+        result = await EntryWebauthnService().login_complete(
+            record, response)
+        # sign_count 递增留痕(克隆检测证据链)
+        record["signCount"] = int(record.get("signCount") or 0) + 1
+        return await self._bio_login_finalize(
+            record, ip=ip, note="webauthn_verify")
 
     # ============================================================
     # 决策反馈回流(P1, 设计文档 §2.4: 误拦/漏放 → ai_learning)

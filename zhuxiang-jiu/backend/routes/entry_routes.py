@@ -446,6 +446,94 @@ async def bio_revoke(
 
 
 # ============================================================
+# WebAuthn 真实轨(P2 预留落地, 2026-09-30)——设计 §1.2
+# 注册须登录态; 登录 begin/complete 公开(无登录态用户的登录通道)
+# ============================================================
+
+class WebauthnRegisterBeginRequest(PydBaseModel):
+    """注册挑战发起(登录态; 平台认证器本地验证, 无原始数据上送)"""
+
+
+class WebauthnRegisterCompleteRequest(PydBaseModel):
+    """注册完成: 浏览器 PublicKeyCredential JSON(结构宽松透传)"""
+    response: dict = Field(description=(
+        "navigator.credentials.create() 的 toJSON() 结果"
+        "(clientDataJSON/attestationObject 等 base64url 字段)"))
+    credentialName: str = ""
+
+
+class WebauthnLoginBeginRequest(PydBaseModel):
+    credentialId: str = Field(description="WebAuthn 凭证 ID")
+
+
+class WebauthnLoginCompleteRequest(PydBaseModel):
+    """登录完成: 浏览器 PublicKeyCredential JSON(结构宽松透传)"""
+    credentialId: str = Field(description="WebAuthn 凭证 ID")
+    response: dict = Field(description=(
+        "navigator.credentials.get() 的 toJSON() 结果"
+        "(clientDataJSON/authenticatorData/signature 等 base64url 字段)"))
+
+
+@router.post("/api/entry/webauthn/register/begin",
+             tags=["AI智能网站入口管理模块"])
+async def webauthn_register_begin(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """发起 WebAuthn 注册挑战(ENTRY_WEBAUTHN_MODE=real 才开放)"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.webauthn_register_begin(member_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/entry/webauthn/register/complete",
+             tags=["AI智能网站入口管理模块"])
+async def webauthn_register_complete(
+    data: WebauthnRegisterCompleteRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """完成 WebAuthn 注册: fido2 验证 attestation → 凭证落 bio 表"""
+    member_id = _require_member(x_member_id)
+    try:
+        result = await _service.webauthn_register_complete(
+            member_id, data.response,
+            credential_name=data.credentialName)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/entry/webauthn/login/begin",
+             tags=["AI智能网站入口管理模块"])
+async def webauthn_login_begin(
+    data: WebauthnLoginBeginRequest,
+):
+    """发起 WebAuthn 登录挑战(公开——无登录态用户的登录通道)"""
+    try:
+        result = await _service.webauthn_login_begin(
+            data.credentialId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/entry/webauthn/login/complete",
+             tags=["AI智能网站入口管理模块"])
+async def webauthn_login_complete(
+    data: WebauthnLoginCompleteRequest,
+):
+    """完成 WebAuthn 登录: fido2 真实验签 → 令牌签发(公开)"""
+    try:
+        result = await _service.webauthn_login_complete(
+            data.credentialId, data.response)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
 # 决策复核回流 + 角色落地页(P1)
 # ============================================================
 
