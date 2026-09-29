@@ -86,6 +86,71 @@ async def run_service():
           and bool(r["ticket"]) and r["expireSeconds"] == 600)
     ticket = r["ticket"]
 
+    # ============================================================
+    # 2.5 真实换取轨(2026-09-29 资质就绪位): 配置 APPID/SECRET +
+    # mock urlopen → 平台真实 API 路径换取 openid(微信一步/QQ 两步
+    # JSONP 剥壳); 集成链路(真实 openid 走绑定流); 未配置回落派生
+    # ============================================================
+    import urllib.request as _ur
+
+    class _FakeResp:
+        def __init__(self, body):
+            self._b = body.encode()
+
+        def read(self):
+            return self._b
+
+    def _fake_open(url, timeout=8):
+        u = str(url)
+        if "sns/oauth2/access_token" in u:
+            return _FakeResp(
+                '{"openid":"oREALWX123","access_token":"t"}')
+        if "oauth2.0/token" in u:
+            return _FakeResp(
+                "access_token=TOK123&expires_in=7776000")
+        if "oauth2.0/me" in u:
+            return _FakeResp(
+                'callback( {"client_id":"x",'
+                '"openid":"oREALQQ456"} );')
+        return _FakeResp("{}")
+
+    _orig_open = _ur.urlopen
+    os.environ["OAUTH_WECHAT_APPID"] = "wx-test"
+    os.environ["OAUTH_WECHAT_SECRET"] = "s-test"
+    os.environ["OAUTH_QQ_APPID"] = "qq-test"
+    os.environ["OAUTH_QQ_SECRET"] = "s-test"
+    try:
+        _ur.urlopen = _fake_open
+        wx_openid = await svc._oauth_exchange_real(
+            "wechat", "CODE_REAL_1")
+        check("微信真实换取: openid 直取",
+              wx_openid == "oREALWX123",
+              f"实际{wx_openid}")
+        qq_openid = await svc._oauth_exchange_real(
+            "qq", "CODE_REAL_2")
+        check("QQ真实换取: 两步+JSONP剥壳",
+              qq_openid == "oREALQQ456",
+              f"实际{qq_openid}")
+        # 集成: 真实 openid 的未绑定回调走票据流
+        r = await svc.oauth_callback("wechat", "CODE_REAL_1")
+        check("真实轨集成: 未绑定→bindRequired",
+              r["status"] == "bindRequired" and bool(r["ticket"]),
+              f"实际{r.get('status')}")
+        # 网络异常 → fail-soft 回落派生(Mock-first 不中断)
+        def _boom_open(url, timeout=8):
+            raise OSError("network down")
+        _ur.urlopen = _boom_open
+        r2 = await svc.oauth_callback("qq", "CODE_REAL_2")
+        check("换取网络异常回落派生不中断",
+              r2["status"] == "bindRequired"
+              and bool(r2["ticket"]),
+              f"实际{r2.get('status')}")
+    finally:
+        _ur.urlopen = _orig_open
+        for k in ("OAUTH_WECHAT_APPID", "OAUTH_WECHAT_SECRET",
+                  "OAUTH_QQ_APPID", "OAUTH_QQ_SECRET"):
+            os.environ.pop(k, None)
+
     # 票据无效
     try:
         await svc.bind_phone("bad_ticket_12345", PHONE, "000000")

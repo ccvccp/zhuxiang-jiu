@@ -382,6 +382,57 @@ class AuthService:
                 "authorizeUrl": url, "state": state,
                 "appidConfigured": bool(appid)}
 
+    async def _oauth_exchange_real(self, platform: str,
+                                   code: str) -> str:
+        """真实 code→openid 换取(资质就绪配置后启用)
+
+        微信网站应用: GET sns/oauth2/access_token(code→access_token
+        +openid 一步); QQ 互联: token→me 两步(JSONP 剥壳); 支付宝
+        需 RSA2 签名体系暂不支持(配置存在也回落, 待资质落地接入)。
+        未配置/网络失败/响应缺 openid 均返回空串(回落派生)。
+        """
+        appid = self._oauth_appid(platform)
+        secret = os.environ.get(
+            f"OAUTH_{platform.upper()}_SECRET", "")
+        if not (appid and secret):
+            return ""
+        import json as _json
+        import urllib.request as _rq
+        try:
+            if platform == "wechat":
+                url = ("https://api.weixin.qq.com/sns/oauth2/"
+                       f"access_token?appid={appid}"
+                       f"&secret={secret}&code={code}"
+                       "&grant_type=authorization_code")
+                data = _json.loads(_rq.urlopen(
+                    url, timeout=8).read().decode())
+                return str(data.get("openid") or "")
+            if platform == "qq":
+                tok_url = ("https://graph.qq.com/oauth2.0/token"
+                           "?grant_type=authorization_code"
+                           f"&client_id={appid}"
+                           f"&client_secret={secret}&code={code}")
+                tok_raw = _rq.urlopen(
+                    tok_url, timeout=8).read().decode()
+                token = ""
+                for part in tok_raw.split("&"):
+                    if part.startswith("access_token="):
+                        token = part.split("=", 1)[1]
+                if not token:
+                    return ""
+                me_raw = _rq.urlopen(
+                    f"https://graph.qq.com/oauth2.0/me"
+                    f"?access_token={token}",
+                    timeout=8).read().decode()
+                me = _json.loads(me_raw.replace(
+                    "callback(", "").rstrip(");").strip() or "{}")
+                return str(me.get("openid") or "")
+        except Exception as exc:
+            logger.warning(
+                "oauth_exchange_real_failsoft platform=%s: %s",
+                platform, exc)
+        return ""
+
     async def oauth_callback(self, platform: str, code: str) -> dict:
         """三方授权回调: code 换 openid → 已绑定直接登录 / 未绑定发临时票据
 
@@ -397,11 +448,21 @@ class AuthService:
         if not code:
             raise ValueError("授权 code 不能为空")
 
-        # 模拟通道: code → openid(确定性派生, 平台未接入)
-        openid = f"{platform}_{hashlib.sha256(code.encode()).hexdigest()[:24]}"
+        # 真实换取轨(2026-09-29 资质就绪位): 配置 OAUTH_{X}_APPID/
+        # SECRET 后走平台真实 API 换 openid(微信网站应用/QQ 互联
+        # GET 无签名; 支付宝需 RSA2 签名体系, 资质落地时再接入);
+        # 未配置/网络失败/响应缺 openid 均回落确定性派生
+        # (Mock-first 产出不中断铁律)
+        openid = await self._oauth_exchange_real(platform, code)
         nickname = f"{platform}用户"
-        logger.info("oauth_callback platform=%s code=%s openid=%s(模拟通道)",
-                    platform, code, openid)
+        if openid:
+            logger.info("oauth_callback platform=%s openid=%s(真实通道)",
+                        platform, openid)
+        else:
+            # 模拟通道: code → openid(确定性派生, 平台未配置)
+            openid = f"{platform}_{hashlib.sha256(code.encode()).hexdigest()[:24]}"
+            logger.info("oauth_callback platform=%s code=%s openid=%s(模拟通道)",
+                        platform, code, openid)
 
         binding = await self.auth_repo.get_oauth_binding(platform, openid)
         if binding:
