@@ -32,8 +32,10 @@ import logging
 
 from services.sv73_script_service import (
     Sv73ScriptService, current_mode, DEFAULT_CATEGORY,
+    DEFAULT_TEMPLATE,
 )
 from services.sv73_render_service import Sv73RenderService
+from services.sv73_match_service import Sv73MatchService
 from services.promo_service import PromoService
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,9 @@ logger = logging.getLogger(__name__)
 # 发布平台(36号 RPA_PLATFORMS 成员; 视频号=网页版 RPA 实证通道)
 SV73_PLATFORMS = ("wechat_channels", "douyin")
 DEFAULT_PLATFORM = "wechat_channels"
+
+# 品类自动档(P1: category="auto" 经匹配引擎推荐)
+CATEGORY_AUTO = "auto"
 
 
 def _now_iso() -> str:
@@ -131,18 +136,26 @@ class Sv73PipelineService:
     async def run(self, hotspot: dict,
                   category: str = DEFAULT_CATEGORY,
                   platform: str = DEFAULT_PLATFORM,
-                  persona: str = "zhuxiaomei") -> dict:
+                  persona: str = "zhuxiaomei",
+                  template: str = DEFAULT_TEMPLATE) -> dict:
         """一键全链: 剧本→渲染→合成→content 登记(幂等)
 
+        category="auto"(P1): 经匹配引擎推荐主推品类(确定性规则)。
         Returns:
-            {mode, storyboard, render, content, published 链路指引}
+            {mode, match, storyboard, render, content, nextSteps}
         """
         if platform not in SV73_PLATFORMS:
             raise ValueError(f"不支持的平台: {platform}")
 
-        # 1. 分镜剧本(LLM 轨/Mock-first, 前置闸门)
+        # 0. 品类匹配(P1: auto 档——确定性规则, LLM 禁入)
+        match_result = None
+        if category == CATEGORY_AUTO:
+            match_result = await Sv73MatchService().match(hotspot)
+            category = match_result["topSeries"]
+
+        # 1. 分镜剧本(LLM 轨/Mock-first, 前置闸门, 模板驱动)
         storyboard = await self.script.generate(
-            hotspot, category, persona)
+            hotspot, category, persona, template)
 
         # 2+3. 渲染+合成(Pillow/ffmpeg 实机, 阻塞调用转线程)
         built = await asyncio.to_thread(
@@ -163,6 +176,7 @@ class Sv73PipelineService:
             content.get("contentId"), reused, current_mode())
         return {
             "mode": current_mode(),
+            "match": match_result,
             "storyboard": storyboard,
             "render": built,
             "content": {

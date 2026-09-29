@@ -24,6 +24,8 @@ from services.sv73_pipeline_service import (
     DEFAULT_PLATFORM,
     SV73_PLATFORMS,
 )
+from services.sv73_script_service import DEFAULT_TEMPLATE, TEMPLATES
+from services.sv73_match_service import Sv73MatchService
 
 router = APIRouter(
     prefix="/api/sv73",
@@ -38,14 +40,19 @@ class ScriptGenerateRequest(BaseModel):
     hotspot: dict = Field(..., description="36号雷达热点记录")
     category: str = Field("竹香型白酒", description="网站主推品类")
     persona: str = Field("zhuxiaomei", description="IP 人设注册表键")
+    template: str = Field(DEFAULT_TEMPLATE,
+                          description="视频模板(vertical/landscape/fast)")
 
 
 class PipelineRunRequest(BaseModel):
     hotspot: dict = Field(..., description="36号雷达热点记录")
-    category: str = Field("竹香型白酒", description="网站主推品类")
+    category: str = Field("竹香型白酒",
+                          description="主推品类; auto=匹配引擎推荐(P1)")
     platform: str = Field(DEFAULT_PLATFORM,
                           description="发布平台(wechat_channels/douyin)")
     persona: str = Field("zhuxiaomei", description="IP 人设注册表键")
+    template: str = Field(DEFAULT_TEMPLATE,
+                         description="视频模板(vertical/landscape/fast)")
 
 
 def _require_admin(x_role: str | None) -> None:
@@ -74,10 +81,20 @@ async def generate_script(payload: ScriptGenerateRequest,
     _mode_guard()
     try:
         sb = await _service.generate(
-            payload.hotspot, payload.category, payload.persona)
+            payload.hotspot, payload.category, payload.persona,
+            payload.template)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     return {"code": 0, "data": sb}
+
+
+@router.post("/match")
+async def match_series(payload: ScriptGenerateRequest,
+                       x_role: str | None = Header(None)):
+    """热点×品类匹配(观测面: 纯确定性查询, off 常开)"""
+    _require_admin(x_role)
+    result = await Sv73MatchService().match(payload.hotspot)
+    return {"code": 0, "data": result}
 
 
 @router.get("/script/{script_id}")
@@ -113,7 +130,7 @@ async def run_pipeline(payload: PipelineRunRequest,
     try:
         result = await _pipeline.run(
             payload.hotspot, payload.category, payload.platform,
-            payload.persona)
+            payload.persona, payload.template)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     return {"code": 0, "data": result}

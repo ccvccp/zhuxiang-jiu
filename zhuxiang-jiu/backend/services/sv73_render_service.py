@@ -33,8 +33,7 @@ from services.promo_cover_service import (
     _font, _wrap,
 )
 from services.promo_video_service import (
-    PAGE_W, PAGE_H, _IP_ASSET, _ffmpeg_bin, _clean,
-    PromoVideoService,
+    _IP_ASSET, _ffmpeg_bin, _clean, PromoVideoService,
 )
 from services.sv73_script_service import IP_PERSONAS, SCENE_FADE
 
@@ -59,6 +58,10 @@ ROLE_LABELS = {
     "compliance": "健康提示",
 }
 
+# P1-2 BGM 情绪档 → TTS 语速(48号 joyvoice MOOD_SPEED 同值锚定:
+# care 0.92 / steady 0.95 / cheerful 1.02——跨端常量互指)
+BGM_MOOD_SPEED = {"warm": 0.92, "steady": 0.95, "cheerful": 1.02}
+
 
 def tts_mode() -> bool:
     """SV73_TTS_MODE(默认 off——铁律)"""
@@ -78,23 +81,39 @@ class Sv73RenderService:
 
     # ---------- 页面渲染(大字卡) ----------
 
-    def _render_scene(self, sc: dict):
-        """单镜 → 1080×1440 PNG 页(品牌头+大字+高亮金+IP 角标)"""
+    def _render_scene(self, sc: dict, tpl: dict):
+        """单镜 → PNG 页(品牌头+大字+高亮金+IP 角标)
+
+        布局全按 storyboard.template 尺寸参数化(P1 三模板);
+        品牌头为 36号 _new_page 同款样式自绘(36号方法写死竖版
+        常量, 横版由 73号 自绘——色板/字体资产仍同源复用)
+        """
         from PIL import Image, ImageDraw
-        img = Image.new("RGB", (PAGE_W, PAGE_H), C_BG)
+        w, h = tpl["pageW"], tpl["pageH"]
+        img = Image.new("RGB", (w, h), C_BG)
         draw = ImageDraw.Draw(img)
-        self._base._new_page(img, draw)
-        self._base._page_label(draw, ROLE_LABELS.get(
-            sc["role"], "竹香酒"))
+        # 品牌头(36号 _new_page 同款: 竹绿带+金线+品牌字+底金条)
+        draw.rectangle([0, 0, w, 240], fill=C_GREEN_DARK)
+        draw.rectangle([0, 240, w, 256], fill=C_GOLD)
+        draw.text((72, 60), "竹香酒", font=_font(84),
+                  fill=(255, 255, 255))
+        draw.text((340, 130), "ZXJIU · 竹香型白酒官方",
+                  font=_font(34, bold=False),
+                  fill=(230, 207, 159))
+        draw.rectangle([0, h - 8, w, h], fill=C_GOLD)
+        # 页角色标签(36号 _page_label 同款)
+        draw.text((72, 330), ROLE_LABELS.get(sc["role"], "竹香酒"),
+                  font=_font(40), fill=C_GOLD)
+        draw.rectangle([72, 392, w - 72, 396], fill=C_GREEN)
 
         role = sc["role"]
         if role == "compliance":
             # 合规尾镜: 三行警示居中(36号 _page_compliance 同款)
             warn_font = _font(56)
             lines = ("理性饮酒", "未成年人禁止饮酒", "过量饮酒有害健康")
-            y = 520
+            y = int(h * 0.36)
             for ln in lines:
-                draw.text((PAGE_W // 2 - len(ln) * 56 // 2, y),
+                draw.text((w // 2 - len(ln) * 56 // 2, y),
                           ln, font=warn_font, fill=C_TEXT)
                 y += 120
         else:
@@ -102,40 +121,41 @@ class Sv73RenderService:
             text = _clean(sc["text"]) or "竹香酒"
             highlight = "".join(sc.get("highlightWords") or [])
             big_font = _font(88)
-            x, y = 72, 520
+            x, y = 72, int(h * 0.36)
             for ch in text[:12]:
                 fill = C_GOLD if (highlight and ch in highlight
                                   ) else C_GREEN_DARK
                 draw.text((x, y), ch, font=big_font, fill=fill)
                 x += 88
-                if x > PAGE_W - 88 - 72:   # 单行 11 字换行
+                if x > w - 88 - 72:   # 行宽自适应(横版一行更多字)
                     x, y = 72, y + 118
         if role == "action":
             # 行动页: CTA 按钮同款(36号 _page_action)
-            btn_font = _font(40)
+            y_btn = int(h * 0.55)
             draw.rounded_rectangle(
-                [72, 800, PAGE_W - 72, 900], radius=50,
+                [72, y_btn, w - 72, y_btn + 100], radius=50,
                 fill=C_GREEN_DARK)
-            draw.text((270, 830), "新客立减 · 详情见主页",
-                      font=btn_font, fill=(255, 255, 255))
+            draw.text((270, y_btn + 30), "新客立减 · 详情见主页",
+                      font=_font(40), fill=(255, 255, 255))
 
-        # 配音词小字(底部提示, 与画面字幕分层):
-        # - y=1100 避开 IP 角标带(y 1144-1344); 宽度限左区
-        #   718px(x 72-790)防压右下角标
+        # 配音词小字(底部提示):
+        # - y/h≈0.76 避开 IP 角标带; 宽度限左区 2/3 防压右下角标
         # - compliance(与三行警示重复)/action(与 CTA 按钮重复)跳过
         if role not in ("compliance", "action"):
             vo_font = _font(34, bold=False)
             vo = _clean(sc.get("voiceover"))[:26]
-            for ln in _wrap(draw, vo, vo_font, 718)[:1]:
-                draw.text((72, 1100), ln, font=vo_font, fill=C_MUTED)
+            for ln in _wrap(draw, vo, vo_font, int(w * 0.66))[:1]:
+                draw.text((72, int(h * 0.76)), ln,
+                          font=vo_font, fill=C_MUTED)
 
         # IP 角标: storyboard ipOverlay 驱动(锚点注册表口径)
         overlay = sc.get("ipOverlay") or {}
-        self._paste_ip(img, overlay.get("anchor", "bottom-right"),
+        self._paste_ip(img, w, h,
+                       overlay.get("anchor", "bottom-right"),
                        int(overlay.get("size", 200)))
         return img
 
-    def _paste_ip(self, img, anchor: str, size: int):
+    def _paste_ip(self, img, w: int, h: int, anchor: str, size: int):
         """IP 角标贴图(bottom-right 复用 36号 _ip_badge 口径;
         bottom-center 对齐 36号行动页手动口径)"""
         from PIL import Image
@@ -144,18 +164,19 @@ class Sv73RenderService:
         badge = (Image.open(_IP_ASSET).convert("RGBA")
                  .resize((size, size), Image.LANCZOS))
         if anchor == "bottom-center":
-            img.paste(badge, (PAGE_W // 2 - size // 2, 1010), badge)
+            img.paste(badge, (w // 2 - size // 2,
+                              int(h * 0.70)), badge)
         else:
-            img.paste(badge, (PAGE_W - 72 - size,
-                              PAGE_H - 96 - size), badge)
+            img.paste(badge, (w - 72 - size, h - 96 - size), badge)
 
     def render_pages(self, storyboard: dict) -> list[Path]:
-        """storyboard.scenes → 4 页 PNG(封面→卖点→行动→合规)"""
+        """storyboard.scenes → PNG 页×N(封面→…→合规, 模板驱动)"""
         SV73_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
         sid = storyboard["scriptId"]
+        tpl = storyboard["template"]
         pages = []
         for i, sc in enumerate(storyboard["scenes"], 1):
-            img = self._render_scene(sc)
+            img = self._render_scene(sc, tpl)
             path = SV73_VIDEO_DIR / f"{sid}_p{i}.png"
             img.save(path, "PNG")
             pages.append(path)
@@ -176,6 +197,8 @@ class Sv73RenderService:
             raise ValueError("无页面可合成")
         duration = storyboard["scenes"][0]["duration"]
         fade = SCENE_FADE   # 注册表单一来源(totalDuration 公式同源)
+        tpl = storyboard["template"]
+        page_w, page_h = tpl["pageW"], tpl["pageH"]
         out_mp4 = Path(out_mp4)
         out_mp4.parent.mkdir(parents=True, exist_ok=True)
 
@@ -193,7 +216,7 @@ class Sv73RenderService:
                 f"[{i}:v]zoompan="
                 f"z='1+{ZOOM_MAX - 1:.2f}*on/{frames - 1}'"
                 f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-                f":d=1:s={PAGE_W}x{PAGE_H}:fps={INPUT_FPS}[z{i}]")
+                f":d=1:s={page_w}x{page_h}:fps={INPUT_FPS}[z{i}]")
         prev = "[z0]"
         offset = duration - fade
         for i in range(1, len(page_paths)):
@@ -220,14 +243,18 @@ class Sv73RenderService:
     # ---------- TTS 配音轨(可选, 48号小竹语音) ----------
 
     def _tts_audio(self, storyboard: dict) -> Path | None:
-        """全量 voiceover → WAV(SV73_TTS_MODE=on 时;
-        失败 fail-soft 返回 None——无声同 36号)"""
+        """全量 voiceover → WAV(SV73_TTS_MODE=on 时; P1-2 语速
+        随 BGM 情绪档——48号 MOOD_SPEED 同值锚定; 失败 fail-soft
+        返回 None——无声同 36号)"""
         from services.llm_client import provider_client
         text = "。".join(sc["voiceover"]
                          for sc in storyboard["scenes"])
+        speed = BGM_MOOD_SPEED.get(
+            storyboard["bgm"]["mood"], 1.0)
         try:
             wav = provider_client.synthesize(
-                text, voice=IP_VOICE.get(storyboard["persona"]))
+                text, speed=speed,
+                voice=IP_VOICE.get(storyboard["persona"]))
         except Exception as exc:
             logger.warning("sv73_tts_failed: %s", exc)
             return None

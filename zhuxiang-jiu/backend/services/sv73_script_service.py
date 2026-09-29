@@ -74,9 +74,34 @@ SCENE_ROLES = ("cover", "selling", "proof", "action", "compliance")
 # (_page_cover/_page_selling/_page_action/_page_compliance 枚举序)
 DEFAULT_SCENE_PLAN = ("cover", "selling", "action", "compliance")
 
-SCENE_DURATION = 4.5    # 每镜时长(3-5s 档位固定值)
+SCENE_DURATION = 4.5    # 每镜时长(3-5s 档位固定值; vertical 模板值)
 SCENE_FADE = 0.6        # xfade 过渡(对齐 36号生产线 FADE_SECONDS)
 TOTAL_DURATION_BOUNDS = (15.0, 25.0)  # 规划验收口径
+
+# ---- P1 视频模板库(竖版/横版/快节奏) ----
+# scenePlan: 镜头序列; sceneDuration: 每镜秒; 总时长=n*d-(n-1)*fade
+#   vertical(默认, P0 现状): 4 镜 16.2s 3:4 竖版(抖音/视频号)
+#   landscape: 4 镜 16.2s 16:9 横版(B 站/网页横幅)
+#   fast: 5 镜(增 proof 背书镜)×3.6s=15.6s 快节奏卡点
+TEMPLATES = {
+    "vertical": {
+        "pageW": 1080, "pageH": 1440,
+        "scenePlan": ("cover", "selling", "action", "compliance"),
+        "sceneDuration": 4.5,
+    },
+    "landscape": {
+        "pageW": 1920, "pageH": 1080,
+        "scenePlan": ("cover", "selling", "action", "compliance"),
+        "sceneDuration": 4.5,
+    },
+    "fast": {
+        "pageW": 1080, "pageH": 1440,
+        "scenePlan": ("cover", "selling", "proof", "action",
+                      "compliance"),
+        "sceneDuration": 3.6,
+    },
+}
+DEFAULT_TEMPLATE = "vertical"
 TEXT_MAX_CHARS = 12     # 每镜卡片文案上限
 VOICEOVER_MAX_CHARS = 40
 HIGHLIGHT_MAX_WORDS = 2
@@ -157,8 +182,8 @@ _SCRIPT_ID_RE = re.compile(r"sv73_[0-9a-f]{12}")
 
 STORYBOARD_TOP_KEYS = (
     "scriptId", "modelVersion", "mode", "track", "persona",
-    "hotspot", "category", "bgm", "scenes", "totalDuration",
-    "compliance", "generatedAt",
+    "hotspot", "category", "template", "bgm", "scenes",
+    "totalDuration", "compliance", "generatedAt",
 )
 SCENE_KEYS = (
     "index", "role", "text", "voiceover",
@@ -177,14 +202,24 @@ def assert_schema(sb: dict) -> None:
     assert sb["mode"] in MODE_VALUES
     assert sb["track"] in (TRACK_PRIMARY, TRACK_FALLBACK, TRACK_RULE)
     assert sb["persona"] in IP_PERSONAS
+    # 模板段(P1): 注册表快照——plan/duration/页面尺寸全由模板决定
+    tpl = sb["template"]
+    assert set(tpl.keys()) == {
+        "name", "pageW", "pageH", "sceneDuration", "fade"}
+    assert tpl["name"] in TEMPLATES, f"未注册模板: {tpl['name']}"
+    reg = TEMPLATES[tpl["name"]]
+    assert tpl["pageW"] == reg["pageW"]
+    assert tpl["pageH"] == reg["pageH"]
+    assert tpl["sceneDuration"] == reg["sceneDuration"]
+    assert tpl["fade"] == SCENE_FADE
     assert isinstance(sb["scenes"], list) and len(sb["scenes"]) == len(
-        DEFAULT_SCENE_PLAN), "镜头数必须注册表决定"
+        reg["scenePlan"]), "镜头数必须模板注册表决定"
     for i, sc in enumerate(sb["scenes"]):
         assert tuple(sc.keys()) == SCENE_KEYS, f"镜头{i}键集封闭失配"
         assert sc["index"] == i
-        assert sc["role"] == DEFAULT_SCENE_PLAN[i], (
-            f"镜头{i}角色序列必须注册表决定: {sc['role']}")
-        assert sc["duration"] == SCENE_DURATION
+        assert sc["role"] == reg["scenePlan"][i], (
+            f"镜头{i}角色序列必须模板注册表决定: {sc['role']}")
+        assert sc["duration"] == reg["sceneDuration"]
         assert 0 < len(sc["text"]) <= TEXT_MAX_CHARS
         assert 0 < len(sc["voiceover"]) <= VOICEOVER_MAX_CHARS
         assert len(sc["highlightWords"]) <= HIGHLIGHT_MAX_WORDS
@@ -194,7 +229,8 @@ def assert_schema(sb: dict) -> None:
         assert sc["ipOverlay"]["size"] == IP_OVERLAY_ANCHORS[
             sc["ipOverlay"]["anchor"]]["size"]
     n = len(sb["scenes"])
-    expected_total = round(n * SCENE_DURATION - (n - 1) * SCENE_FADE, 2)
+    expected_total = round(
+        n * reg["sceneDuration"] - (n - 1) * SCENE_FADE, 2)
     assert abs(sb["totalDuration"] - expected_total) < 0.01
     assert (TOTAL_DURATION_BOUNDS[0] <= sb["totalDuration"]
             <= TOTAL_DURATION_BOUNDS[1]), "总时长须在 15-25s 验收区间"
@@ -320,10 +356,11 @@ class Sv73ScriptService:
     # ---------- 场景组装(注册表重建) ----------
 
     def _build_scenes(self, category: str, hotword: str,
-                      llm_texts: dict | None) -> list[dict]:
-        """镜头组装: 结构/数字全注册表, 文案缺位回落 mock 模板"""
+                      llm_texts: dict | None,
+                      plan: tuple, duration: float) -> list[dict]:
+        """镜头组装: 结构/数字全模板注册表, 文案缺位回落 mock 模板"""
         scenes = []
-        for i, role in enumerate(DEFAULT_SCENE_PLAN):
+        for i, role in enumerate(plan):
             mock = {
                 "text": _clip(
                     MOCK_SCENE_TEXTS[role].format(
@@ -359,7 +396,7 @@ class Sv73ScriptService:
                 "text": chosen["text"],
                 "voiceover": chosen["voiceover"],
                 "highlightWords": chosen["highlightWords"],
-                "duration": SCENE_DURATION,
+                "duration": duration,
                 "ipOverlay": _ip_overlay(role),
             })
         return scenes
@@ -380,12 +417,14 @@ class Sv73ScriptService:
     # ---------- scriptId 确定性派生 ----------
 
     @staticmethod
-    def _script_id(hotspot: dict, category: str, persona: str) -> str:
-        """确定性派生(同热点同品类同人设 → 同 id, 落盘幂等覆盖)"""
+    def _script_id(hotspot: dict, category: str, persona: str,
+                   template: str) -> str:
+        """确定性派生(同热点同品类同人设同模板 → 同 id, 落盘幂等覆盖)"""
         fp = str(hotspot.get("fingerprint")
                  or hashlib.sha256(str(hotspot.get("title") or "").encode(
                      "utf-8")).hexdigest()[:16])
-        raw = f"{fp}|{category}|{persona}|{'|'.join(DEFAULT_SCENE_PLAN)}"
+        raw = (f"{fp}|{category}|{persona}|{template}"
+               f"|{'|'.join(TEMPLATES[template]['scenePlan'])}")
         return "sv73_" + hashlib.sha256(
             raw.encode("utf-8")).hexdigest()[:12]
 
@@ -393,30 +432,38 @@ class Sv73ScriptService:
 
     async def generate(self, hotspot: dict,
                        category: str = DEFAULT_CATEGORY,
-                       persona: str = DEFAULT_PERSONA) -> dict:
-        """热点+品类 → storyboard JSON(注册表约束+合规前置+落盘)"""
+                       persona: str = DEFAULT_PERSONA,
+                       template: str = DEFAULT_TEMPLATE) -> dict:
+        """热点+品类 → storyboard JSON(模板注册表约束+合规前置+落盘)"""
         if persona not in IP_PERSONAS:
             raise ValueError(f"未注册人设: {persona}")
+        if template not in TEMPLATES:
+            raise ValueError(f"未注册模板: {template}")
         category = _clip(category, CATEGORY_MAX_CHARS) or DEFAULT_CATEGORY
         hotword = _hotword(hotspot)
         persona_def = IP_PERSONAS[persona]
+        plan = TEMPLATES[template]["scenePlan"]
+        duration = TEMPLATES[template]["sceneDuration"]
 
         llm_texts, track = self._llm_scene_texts(
             hotspot, category, persona_def)
-        scenes = self._build_scenes(category, hotword, llm_texts)
+        scenes = self._build_scenes(
+            category, hotword, llm_texts, plan, duration)
 
         # 三审闸门前置: hardFail 整体回落 rule 模板轨
         compliance = self._compliance(scenes)
         if compliance["hardFail"] and track != TRACK_RULE:
             logger.warning("sv73_llm_hard_fail: %s -> rule 模板回落",
                            compliance["hardFail"])
-            scenes = self._build_scenes(category, hotword, None)
+            scenes = self._build_scenes(
+                category, hotword, None, plan, duration)
             track = TRACK_RULE
             compliance = self._compliance(scenes)
 
         n = len(scenes)
         sb = {
-            "scriptId": self._script_id(hotspot, category, persona),
+            "scriptId": self._script_id(
+                hotspot, category, persona, template),
             "modelVersion": MODEL_VERSION,
             "mode": current_mode(),
             "track": track,
@@ -428,11 +475,18 @@ class Sv73ScriptService:
                 "score": hotspot.get("score", 0),
             },
             "category": category,
+            "template": {
+                "name": template,
+                "pageW": TEMPLATES[template]["pageW"],
+                "pageH": TEMPLATES[template]["pageH"],
+                "sceneDuration": duration,
+                "fade": SCENE_FADE,
+            },
             "bgm": {"mood": DEFAULT_BGM_MOOD,
                     **BGM_MOODS[DEFAULT_BGM_MOOD]},
             "scenes": scenes,
             "totalDuration": round(
-                n * SCENE_DURATION - (n - 1) * SCENE_FADE, 2),
+                n * duration - (n - 1) * SCENE_FADE, 2),
             "compliance": compliance,
             "generatedAt": _now(),
         }
