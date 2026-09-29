@@ -64,14 +64,63 @@ function toast(title, body) {
   } catch (e) { LOG('toast err ' + e.message); }
 }
 
-function loadState() {
+const loadState = () => {
   try { return JSON.parse(fs.readFileSync(STATUS, 'utf8')); } catch (e) {}
   return { name: NAME, alive: null, lastResult: '', lastRunAt: '', lastOkAt: '', lastReason: '', consecutiveLoggedOut: 0, consecutiveInfra: 0, nextRunAt: '', history: [] };
-}
+};
 const saveState = (s) => fs.writeFileSync(STATUS, JSON.stringify(s, null, 2));
+
+// ---- profile 登录态快照(2026-09-29 兜底件: 一键恢复链不可用时先试快照) ----
+// Chrome v127+ 布局: Cookie 在 Default/Network/ 下; 快照=登录态全量最小集
+// (Cookies + Trust Tokens + Device Bound Sessions + Local Storage), 不含
+// Preferences/缓存(与登录态无关, 体积大)。同机同 profile 恢复无指纹突变。
+// 铁律: 快照只在 probe ok 后写(健康态), 恢复只在掉线轮 spawn bot 前做
+// (Chrome 未运行, SQLite/leveldb 无锁); 临时目录写完 rename 保原子性。
+const SNAP_FILES = [
+  'Default/Network/Cookies',
+  'Default/Network/Trust Tokens',
+  'Default/Network/Device Bound Sessions',
+  'Default/Local Storage',
+];
+const SNAP_DIR = path.join(__dirname, 'snapshots', NAME);
+function backupSnapshot() {
+  const profile = path.join(__dirname, CFG.profileDir);
+  const tmp = SNAP_DIR + '.tmp';
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.mkdirSync(tmp, { recursive: true });
+  for (const rel of SNAP_FILES) {
+    const src = path.join(profile, rel);
+    if (!fs.existsSync(src)) continue;
+    const dst = path.join(tmp, rel);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    if (fs.lstatSync(src).isDirectory()) fs.cpSync(src, dst, { recursive: true });
+    else fs.copyFileSync(src, dst);
+  }
+  fs.rmSync(SNAP_DIR, { recursive: true, force: true });
+  fs.renameSync(tmp, SNAP_DIR);
+  LOG(`snapshot saved → snapshots/${NAME}/`);
+}
+function restoreSnapshot() {
+  if (!fs.existsSync(SNAP_DIR)) { LOG('snapshot: 无快照可恢复(跳过)'); return; }
+  const profile = path.join(__dirname, CFG.profileDir);
+  for (const rel of SNAP_FILES) {
+    const src = path.join(SNAP_DIR, rel);
+    if (!fs.existsSync(src)) continue;
+    const dst = path.join(profile, rel);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.rmSync(dst, { recursive: true, force: true });
+    fs.cpSync(src, dst, { recursive: true });
+  }
+  LOG('snapshot restored (掉线轮 spawn 前恢复, probe 将验证其有效性)');
+}
 
 // ---- 一轮保活: 先挂 allow_enter watcher(等 bot 的 flag), 再 spawn bot probe ----
 async function runOnce(state) {
+  // 快照兜底: 上轮掉线且存在健康快照 → spawn 前恢复(Chrome 未运行无锁,
+  // 本轮 probe 即有效性验证; 无效则走一键登录/告警原链路不受影响)
+  if (CFG.snapshot && state.lastResult === 'logged_out') {
+    try { restoreSnapshot(); } catch (e) { LOG('snapshot restore err ' + e.message); }
+  }
   if (CFG.allowEnter) {
     const maxWait = WAIT_LOGIN_MIN * 60 + 180;
     try {
@@ -128,6 +177,10 @@ async function runOnce(state) {
     if (state.consecutiveInfra === 2) toast(`${NAME}-bot 保活连续异常`, 'probe 连续 2 次基础设施错误, 详见 keepalive 日志');
   }
   state.lastResult = kind; state.lastRunAt = at; state.lastReason = reason;
+  // 快照备份: 仅健康态(Chrome 已关, Cookie/leveldb 无锁)
+  if (kind === 'ok' && CFG.snapshot) {
+    try { backupSnapshot(); } catch (e) { LOG('snapshot backup err ' + e.message); }
+  }
   state.history.unshift({ at, kind, exit: typeof exit === 'number' ? exit : String(exit), reason });
   state.history = state.history.slice(0, 20);
   LOG(`round result: ${kind}${reason ? ' — ' + reason : ''} (consec loggedOut=${state.consecutiveLoggedOut} infra=${state.consecutiveInfra})`);

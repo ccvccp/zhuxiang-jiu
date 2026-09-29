@@ -2,6 +2,8 @@
   "name": "channels",
   "botScript": "bot.js",
   "loginStateFile": "login_state.json",
+  "profileDir": "chrome-profile",
+  "snapshot": true,
   "botAction": "probe",
   "waitLoginMinutes": 3,
   "allowEnter": true,
