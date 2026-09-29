@@ -1,0 +1,9 @@
+{
+  "name": "douyin",
+  "botScript": "douyin-bot.js",
+  "loginStateFile": "douyin_login_state.json",
+  "botAction": "probe",
+  "waitLoginMinutes": 2,
+  "allowEnter": false,
+  "intervalHours": 24
+}

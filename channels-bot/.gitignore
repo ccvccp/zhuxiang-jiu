@@ -13,3 +13,8 @@ detail_text.txt
 douyin-profile/
 douyin_bot.log
 douyin_*.json
+# 保活调度器运行产物(2026-09-29; keepalive 代码/配置入库, 产物不入库)
+keepalive_*.log
+keepalive_*.json
+keepalive_*.lock
+config_ka_run_*.json

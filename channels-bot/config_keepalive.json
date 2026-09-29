@@ -1,0 +1,9 @@
+{
+  "name": "channels",
+  "botScript": "bot.js",
+  "loginStateFile": "login_state.json",
+  "botAction": "probe",
+  "waitLoginMinutes": 3,
+  "allowEnter": true,
+  "intervalHours": 24
+}
