@@ -643,12 +643,22 @@ async def _on_startup():
         start_scheduler as start_attract72_health)
     start_attract72_health()
 
+    # 66号·AI智能工程师: P5a 监控维护自动化(巡检 5min+对账 T+1,
+    # XX66_SCAN_AUTO/XX66_RECON_AUTO 默认 off; 执行还须
+    # XX66_MODE∈(shadow,assist)——决策面 off 语义同口径跳过)
+    from services.xx66_scheduler import (
+        start_scan_scheduler, start_recon_scheduler)
+    start_scan_scheduler()
+    start_recon_scheduler()
+
 
 @app.on_event("shutdown")
 async def _on_shutdown():
     """应用关闭时清理资源(Redis 连接), 避免连接泄漏"""
     logger.info("应用关闭中, 清理 Redis 连接...")
     # 停止后台调度任务
+    from services.xx66_scheduler import stop_schedulers as stop_xx66_schedulers
+    stop_xx66_schedulers()
     from services.ai_learning_scheduler import stop_scheduler as stop_ai_learning
     from services.order_timeout_scheduler import stop_scheduler as stop_order_timeout
     stop_ai_learning()

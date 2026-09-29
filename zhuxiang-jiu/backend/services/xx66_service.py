@@ -267,7 +267,8 @@ class Xx66Service:
 
     async def _zone_trust(self) -> dict:
         """信值区: 47号中枢总览(tier 分布/三联动)
-        对账结果 P3 交付——P0 占位 not_implemented"""
+        + P3 对账引擎回填(P5a: 最近轮次只读——呈现不改判定,
+          danger 不改 zone score, 监控口径最小变更)"""
         from services.trust_hub_service import TrustHubService
         hub = await TrustHubService().hub_overview()
         tiers = (hub.get("zones") or {}).get("tiers") or {}
@@ -279,13 +280,31 @@ class Xx66Service:
                        if total_profiles else 0.0)
         yellow = (total_profiles >= TRUST_MIN_SAMPLES
                   and watch_ratio > TRUST_WATCH_RATIO_YELLOW)
+        # P5a-2: 对账状态回填(最近轮次只读; 引擎故障 fail-soft)
+        try:
+            recon = await self.repo.latest_recon()
+        except Exception:
+            recon = None
+        if recon is None:
+            recon_status = "no_baseline"
+            recon_note = ("对账基线未建(POST /api/xx66/reconcile/run"
+                         " 或 XX66_RECON_AUTO 调度)")
+            recon_run_id = None
+        else:
+            danger_count = int(recon.get("dangerCount") or 0)
+            recon_status = "danger" if danger_count else "clean"
+            recon_run_id = recon.get("runId")
+            recon_note = (f"最近轮次 {recon_run_id}"
+                          f" @ {recon.get('ranAt', '')}"
+                          f"(danger={danger_count})")
         return {
             "score": _zone_score(yellow, False),
             "totalProfiles": total_profiles,
             "watchedRestricted": watched,
             "watchRatio": round(watch_ratio, 3),
-            "reconStatus": "not_implemented",
-            "note": "对账引擎 P3 交付(四不变式+T+1 调度)",
+            "reconStatus": recon_status,
+            "reconRunId": recon_run_id,
+            "note": recon_note,
         }
 
     # --------------------------------------------------------

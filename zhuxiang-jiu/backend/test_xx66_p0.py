@@ -274,9 +274,12 @@ class TestRegistry:
             SCORER_REGISTRY, DECISION_THRESHOLDS,
             default_weights,
         )
-        record("评分器总数 56",
-               len(SCORER_REGISTRY) == 56,
-               str(len(SCORER_REGISTRY)))
+        # 演进兼容(2026-09-30): 注册表已从 56 增长至 68——硬编码
+        # 断言过时碎裂, 改动态下限口径(66号入册后只增不减)
+        n_scorers = len(SCORER_REGISTRY)
+        record("评分器总数>=56(演进兼容)",
+               n_scorers >= 56,
+               str(n_scorers))
         meta = SCORER_REGISTRY.get("engineer_service")
         record("engineer_service 入册",
                meta is not None)
@@ -305,12 +308,14 @@ class TestRegistry:
         # 学习域全景含 66号
         from services.ai_learning_service import panorama
         p = await panorama()
-        record("panorama 计数 56",
-               p["scorerCount"] == 56)
+        record("panorama 计数=注册表(演进兼容)",
+               p["scorerCount"] == n_scorers,
+               f'{p["scorerCount"]} == {n_scorers}')
         record("panorama 批次分布含 40",
                "40" in p["batchDistribution"])
         record("panorama 模式守恒",
-               sum(p["modeDistribution"].values()) == 56)
+               sum(p["modeDistribution"].values())
+               == p["scorerCount"])
 
 
 class TestVitals:
@@ -386,14 +391,18 @@ class TestVitals:
         record("AI 区含 hub 状态",
                ai.get("hubStatus") in (
                    "healthy", "degraded"))
-        record("AI 区含评分器计数",
-               ai.get("scorerCount") == 56)
+        from services.ai_learning_service import (
+            SCORER_REGISTRY as _REG,
+        )
+        record("AI 区含评分器计数(演进兼容)",
+               ai.get("scorerCount") == len(_REG),
+               str(ai.get("scorerCount")))
 
-        # trust 区: 空态绿+对账占位
+        # trust 区: 空态绿+对账回填(P5a: P3 引擎接入——
+        # 空态无轮次 no_baseline, 不再是 P0 占位 not_implemented)
         trust = v6["zones"]["trust"]
-        record("trust 区对账 P3 占位",
-               trust.get("reconStatus")
-               == "not_implemented")
+        record("trust 区对账回填 no_baseline",
+               trust.get("reconStatus") == "no_baseline")
         record("trust 区样本计数",
                isinstance(trust.get("totalProfiles"), int))
 

@@ -232,6 +232,11 @@ services:
       - XX66_MODE=${XX66_MODE:-off}
     # LLM 辅助轨(P1 情绪识别/归因描述——仅产标签不产数字, 默认 off)
       - XX66_LLM_MODE=${XX66_LLM_MODE:-off}
+      # P5a 监控维护自动化(默认 off; 执行还须 XX66_MODE∈(shadow,assist))
+      # 巡检: 周期 5min(vitals 聚合+落快照+黄红区起 27号链纯记录);
+      # 对账: 周期 T+1 日度(四不变式只读校验, danger 只生成建议书)
+      - XX66_SCAN_AUTO=${XX66_SCAN_AUTO:-off}
+      - XX66_RECON_AUTO=${XX66_RECON_AUTO:-off}
       # ---- 73号sv 短视频智能模型(P0: 分镜剧本引擎, 默认 off——存量链路零影响) ----
       # shadow=生成留痕(不进发布链); real=开放生成(P0e 编排层串联发布后生效);
       #     off=决策面 generate 409(观测面 scripts 清单不受影响)

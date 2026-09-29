@@ -203,8 +203,9 @@ class TestDryRun:
         )
         svc = Xx66HealService()
 
-        p1 = svc._dry_run(["restart_task"],
-                          "app-web-1")
+        # P5a: _dry_run 已改 async(信值域对账预检挂钩)
+        p1 = await svc._dry_run(["restart_task"],
+                                "app-web-1")
         record("白名单内预演通过",
                p1["passable"] is True)
         detail = p1["details"][0]
@@ -215,21 +216,18 @@ class TestDryRun:
                detail["trustDomainDryRun"]
                == "skipped")
 
-        p2 = svc._dry_run(["restart_task"], "db-primary")
-        record("信值域预检 P3 占位",
-               p2["trustDomainTouched"] is False
-               or p2["details"][0]
-               ["trustDomainDryRun"]
-               == "not_implemented")
+        p2 = await svc._dry_run(["restart_task"], "db-primary")
+        record("非信值域目标不触碰预检",
+               p2["trustDomainTouched"] is False)
 
-        p3 = svc._dry_run(["trust_modify"],
-                          "app-1")
+        p3 = await svc._dry_run(["trust_modify"],
+                                "app-1")
         record("白名单外动作不通过",
                p3["passable"] is False)
         record("白名单外降级建议书",
                "白名单外" in p3["details"][0]
                ["reason"])
-        p4 = svc._dry_run(["notify_only"], "app-1")
+        p4 = await svc._dry_run(["notify_only"], "app-1")
         record("notify_only 零影响可过",
                p4["passable"] is True)
 

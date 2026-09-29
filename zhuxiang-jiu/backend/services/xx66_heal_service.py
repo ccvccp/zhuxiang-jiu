@@ -318,11 +318,15 @@ class Xx66HealService:
     # 变更风险预演(沙箱三步——纯内存/只读)
     # --------------------------------------------------------
 
-    def _dry_run(self, actions: list,
-                 target: str) -> dict:
+    async def _dry_run(self, actions: list,
+                       target: str) -> dict:
         """预演三步: 影响面推演+信值预检+可逆性校验
 
         预演失败 → passable=False(阻断 assist 执行)。
+        P5a-3: 信值域预检挂钩(P3 对账引擎只读)——
+        trust_touch 时读最近对账轮次: danger 差异态未处置
+        → 预检不过(自愈动作可能放大差异, 降级建议书);
+        clean/无基线 → 过(呈现预检状态)。
         """
         details = []
         passable = True
@@ -330,6 +334,21 @@ class Xx66HealService:
             str(target or "").startswith(p)
             or p in str(target or "")
             for p in TRUST_DOMAIN_PREFIXES)
+        # P5a-3 信值域对账预检(只读; 引擎故障 fail-soft 放行呈现)
+        if trust_touch:
+            try:
+                recon = await self.repo.latest_recon()
+            except Exception:
+                recon = None
+            if recon is None:
+                trust_dry = "no_baseline"
+            elif int(recon.get("dangerCount") or 0) > 0:
+                trust_dry = "danger"
+                passable = False   # 差异态未处置——降级建议书
+            else:
+                trust_dry = "clean"
+        else:
+            trust_dry = "skipped"
         for act in actions:
             spec = ACTION_WHITELIST.get(act)
             if spec is None:
@@ -348,10 +367,11 @@ class Xx66HealService:
                 "affectedTables": spec["affectedTables"],
                 "reversible": spec["reversible"],
                 "idempotent": spec["idempotent"],
-                "trustDomainDryRun":
-                    "not_implemented"
-                    if trust_touch else "skipped",
+                "trustDomainDryRun": trust_dry,
             }
+            if trust_dry == "danger":
+                entry["reason"] = ("信值域对账差异态未处置"
+                                   "——降级建议书")
             # 可逆性校验: 不可逆且非幂等 → 降级建议书
             if not spec["reversible"] \
                     and not spec["idempotent"]:
@@ -435,7 +455,7 @@ class Xx66HealService:
                 "plannedBy": "xx66"})
 
         # ② 白名单校验 + 预演
-        preview = self._dry_run(
+        preview = await self._dry_run(
             rule["candidateActions"], fault_source)
         whitelisted = all(
             d.get("whitelisted") for d in
