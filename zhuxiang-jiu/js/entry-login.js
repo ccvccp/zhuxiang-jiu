@@ -329,49 +329,88 @@ async function qrStart() {
 
 function qrStartPoll() {
     qrStopPoll();
+    /* §2.2 P2 预留落地(2026-09-29): WebSocket 推送优先(确认即返
+     * ≤0.5s, 较 2s 轮询快 4 倍; 消息体与轮询同构无缝切换);
+     * 握手失败/断线回落 2s 轮询(降级有兜底铁律——X5 等内嵌
+     * 内核 WS 不可靠) */
+    if (window.WebSocket && Entry.currentQrId) {
+        try {
+            var base = Entry.api().replace(/^http/, 'ws');
+            var ws = new WebSocket(base + '/api/entry/qr/'
+                                   + Entry.currentQrId + '/ws');
+            Entry.qrWs = ws;
+            ws.onmessage = function (ev) {
+                var st;
+                try { st = JSON.parse(ev.data); } catch (e) { return; }
+                qrHandleStatus(st);
+            };
+            ws.onclose = ws.onerror = function () {
+                if (Entry.qrWs === ws) {
+                    Entry.qrWs = null;
+                    qrStartTimer();   /* 回落轮询(降级有兜底) */
+                }
+            };
+            return;
+        } catch (e) { /* WS 构造失败(极端环境) → 轮询兜底 */ }
+    }
+    qrStartTimer();
+}
+
+function qrStartTimer() {
     Entry.pollTimer = setInterval(async function () {
         if (!Entry.currentQrId) { qrStopPoll(); return; }
         var st = await Entry.qrStatus(Entry.currentQrId);
         if (!st) return;
-        if (st.status === 'pending') return;
-        if (st.status === 'scanned') {
-            qrSetStatus('<b>已扫码</b> — 请在手机端点击确认');
-            return;
-        }
-        if (st.status === 'confirmed') {
-            // 演示口径: 本页代表手机端确认(真实场景由手机端调用)
-            var conf = await Entry.qrConfirm(Entry.currentQrId);
-            if (conf && conf.loginTicket) {
-                var ex = await Entry.qrExchange(Entry.currentQrId,
-                                                conf.loginTicket);
-                if (ex.success) {
-                    qrStopPoll();
-                    entryAfterLogin(ex.data.tokens, ex.data.memberId,
-                                    'member');
-                    return;
-                }
-            }
-            qrSetStatus('已确认, 等待票据兑换…');
-            return;
-        }
-        if (st.status === 'expired') {
-            qrStopPoll();
-            qrSetStatus('二维码已过期, 请重新生成');
-            qrResetButtons();
-            return;
-        }
-        if (st.status === 'cancelled') {
-            qrStopPoll();
-            qrSetStatus('已取消');
-            qrResetButtons();
-        }
+        qrHandleStatus(st);
     }, 2000);
+}
+
+/* QR 状态机(WS 推送与轮询共用——协议兼容的核心) */
+async function qrHandleStatus(st) {
+    if (!st || !st.status) return;
+    if (st.status === 'pending') return;
+    if (st.status === 'scanned') {
+        qrSetStatus('<b>已扫码</b> — 请在手机端点击确认');
+        return;
+    }
+    if (st.status === 'confirmed') {
+        // 演示口径: 本页代表手机端确认(真实场景由手机端调用)
+        var conf = await Entry.qrConfirm(Entry.currentQrId);
+        if (conf && conf.loginTicket) {
+            var ex = await Entry.qrExchange(Entry.currentQrId,
+                                            conf.loginTicket);
+            if (ex.success) {
+                qrStopPoll();
+                entryAfterLogin(ex.data.tokens, ex.data.memberId,
+                                'member');
+                return;
+            }
+        }
+        qrSetStatus('已确认, 等待票据兑换…');
+        return;
+    }
+    if (st.status === 'expired') {
+        qrStopPoll();
+        qrSetStatus('二维码已过期, 请重新生成');
+        qrResetButtons();
+        return;
+    }
+    if (st.status === 'cancelled') {
+        qrStopPoll();
+        qrSetStatus('已取消');
+        qrResetButtons();
+    }
 }
 
 function qrStopPoll() {
     if (Entry.pollTimer) {
         clearInterval(Entry.pollTimer);
         Entry.pollTimer = null;
+    }
+    if (Entry.qrWs) {
+        try { Entry.qrWs.onclose = Entry.qrWs.onerror = null;
+              Entry.qrWs.close(); } catch (e) {}
+        Entry.qrWs = null;
     }
 }
 

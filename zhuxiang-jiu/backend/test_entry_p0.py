@@ -462,6 +462,38 @@ async def main():
     record("HTTP未知会话404", r.status_code == 404,
            f"实际{r.status_code}")
 
+    # ========================================================
+    # 7.5 QR WebSocket 推送(§2.2 P2 预留落地, 2026-09-29)
+    # ========================================================
+    print("\n========== 7.5 QR WebSocket ==========")
+
+    with client.websocket_connect(
+            f"/api/entry/qr/{qr_http['qrId']}/ws") as ws:
+        first = ws.receive_json()
+        record("WS 首推 pending(消息体与轮询同构)",
+               first.get("status") == QR_PENDING
+               and first.get("seq") is not None
+               and "qrId" in first and "expiresAt" in first,
+               f"实际{first}")
+
+    # 服务层改状态后重连验证推送(规避 TestClient WS 上下文中
+    # 发 HTTP 的 portal 模型限制——服务层直调与 WS 分离验证)
+    await svc.qr_scan(qr_http["qrId"], mock_member_id=mid1)
+    with client.websocket_connect(
+            f"/api/entry/qr/{qr_http['qrId']}/ws") as ws:
+        scanned = ws.receive_json()
+        record("WS 扫码后首推 scanned(seq 递增)",
+               scanned.get("status") == "scanned",
+               f"实际{scanned.get('status')}")
+    await svc.qr_cancel(qr_http["qrId"])
+    with client.websocket_connect(
+            f"/api/entry/qr/{qr_http['qrId']}/ws") as ws:
+        cancelled = ws.receive_json()
+        # 终态推送后服务端主动关闭
+        record("WS 终态推送 cancelled",
+               cancelled.get("status") == "cancelled",
+               f"实际{cancelled.get('status')}")
+
     print("\n" + "=" * 62)
     for line in RESULTS:
         print(line)

@@ -10,7 +10,8 @@
     - ValueError → 409(状态非法/凭证错误/风控拦截)
 """
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import (APIRouter, Header, HTTPException, Query,
+                     WebSocket)
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.entry_service import EntryService
@@ -253,6 +254,39 @@ async def qr_cancel(qr_id: str):
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
+
+
+@router.websocket("/api/entry/qr/{qr_id}/ws")
+async def qr_status_ws(websocket: WebSocket, qr_id: str):
+    """QR 状态 WebSocket 推送(§2.2 P2 预留落地, 2026-09-29)
+
+    协议兼容: 推送消息体与 GET qr/{id}/status 同构
+    (qrId/status/seq/expiresAt)——前端可无缝切换;
+    服务端 0.5s 检测 seq/状态变化推送(确认即返 ≤0.5s,
+    较 2s 轮询快 4 倍); 终态(expired/cancelled/used)推送后
+    主动关闭; 客户端握手失败/断线由前端回落轮询
+    (降级有兜底铁律——X5 等内嵌内核 WS 不可靠)。
+    """
+    import asyncio as _asyncio
+    await websocket.accept()
+    last_seq = None
+    try:
+        while True:
+            try:
+                st = await _service.qr_status(qr_id)
+            except KeyError:
+                await websocket.close(code=4404)
+                return
+            if last_seq is None or st.get("seq") != last_seq:
+                await websocket.send_json(st)
+                last_seq = st.get("seq")
+            if st.get("status") in ("expired", "cancelled",
+                                    "used"):
+                await websocket.close()
+                return
+            await _asyncio.sleep(0.5)
+    except Exception:
+        pass  # 客户端断开/网络异常——静默收尾(前端已回落轮询)
 
 
 # ============================================================
