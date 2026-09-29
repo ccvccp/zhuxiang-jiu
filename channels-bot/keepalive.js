@@ -139,7 +139,13 @@ async function runOnce(state) {
   const state = loadState();
   while (true) {
     const t0 = Date.now();
-    await runOnce(state);
+    // 异常自愈: 单轮任何未预期错误不杀常驻进程(计入状态, 下轮重试)
+    try {
+      await runOnce(state);
+    } catch (e) {
+      LOG(`round crashed: ${e && e.message || e}`);
+      state.lastResult = 'infra'; state.lastRunAt = fmt(Date.now()); state.lastReason = 'uncaught: ' + String(e && e.message || e);
+    }
     state.nextRunAt = fmt(Date.now() + INTERVAL_MS);
     saveState(state);
     LOG(`round finished in ${Math.round((Date.now() - t0) / 1000)}s, next run ${state.nextRunAt}`);
