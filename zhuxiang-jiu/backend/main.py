@@ -388,6 +388,10 @@ register_attract72_routes(app)
 from routes.member73_routes import register_member73_routes
 register_member73_routes(app)
 
+# 短视频智能模型(73号sv P0 分镜剧本引擎)
+from routes.sv73_routes import register_sv73_routes
+register_sv73_routes(app)
+
 # NexusFlow智枢·流 AI智能全域发布大模型(74号 P1 规则中枢)
 from routes.nexus74_routes import register_nexus74_routes
 register_nexus74_routes(app)
