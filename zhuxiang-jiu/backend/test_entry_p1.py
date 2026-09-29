@@ -125,16 +125,29 @@ async def main():
     record("凭证上限5个409", ok, msg)
 
     # challenge → verify(Mock 确定性派生)
-    ch = await svc.bio_challenge(cred["credentialId"])
-    assertion = hashlib.sha256(
-        (ch["assertionChallenge"] + dv).encode()).hexdigest()[:32]
-    result = await svc.bio_verify(cred["credentialId"], assertion,
-                                  ip="127.0.0.1")
-    record("verify断言通过签发令牌",
-           result["status"] in ("authenticated",
-                                "step_up_required")
-           and (result.get("tokens") or {}).get("accessToken"),
-           f"实际{result.get('status')}")
+    # (mock 评分器恒 allow——真实评分器 time_pattern 因子按时段
+    #  在 allow 线 25 附近抖动: 07:16 过/08:42 挂的非确定性实证,
+    #  本断言语义="断言通过→签发令牌", mock 保证确定性)
+    from services.ai_scoring_auth_service import AuthRiskScorer
+
+    async def _allow_score(self, ctx):
+        return {"success": True, "score": 10.0, "action": "allow",
+                "factors": [], "hardBlocked": False}
+    _orig_av = AuthRiskScorer.score
+    AuthRiskScorer.score = _allow_score
+    try:
+        ch = await svc.bio_challenge(cred["credentialId"])
+        assertion = hashlib.sha256(
+            (ch["assertionChallenge"] + dv).encode()).hexdigest()[:32]
+        result = await svc.bio_verify(cred["credentialId"], assertion,
+                                      ip="127.0.0.1")
+        record("verify断言通过签发令牌",
+               result["status"] in ("authenticated",
+                                    "step_up_required")
+               and (result.get("tokens") or {}).get("accessToken"),
+               f"实际{result.get('status')}")
+    finally:
+        AuthRiskScorer.score = _orig_av
 
     # 挑战一次性(已消费)
     ok, msg = await _expect(

@@ -262,12 +262,29 @@ class EntryService:
         if decision["action"] == GUARD_ALLOW:
             return {"status": "authenticated", "tokens": result,
                     "memberId": member_id, "decision": decision}
-        # step_up / challenge: 返回待二次(不签发令牌)
+        # challenge 分级实化(§1.3 动作映射第三级, 2026-09-29):
+        # 有刷脸凭证必须刷脸核身(不给短信捷径——50-70 风险挡
+        # 伪造, bio/challenge+verify 核验通过即签发); 无刷脸凭证
+        # 降级短信兜底(降级有兜底铁律, 与 step_up 同轨)
+        if decision["action"] == GUARD_CHALLENGE:
+            face_ready = any(
+                c.get("bioType") == MODE_FACE
+                and c.get("status") == "active"
+                for c in await self.bio_list(member_id))
+            if face_ready:
+                return {"status": "challenge_required",
+                        "challengeMode": "face",
+                        "memberId": member_id,
+                        "decision": decision,
+                        "challengeHint": ("风险等级较高, 需刷脸"
+                                          "核身后签发")}
+        # step_up / challenge(无刷脸凭证降级): 返回待二次(不签发令牌)
         return {"status": "step_up_required",
                 "memberId": member_id, "decision": decision,
                 "stepUpHint": ("短信验证码二次核验" if
                                decision["action"] == GUARD_STEP_UP
-                               else "强核验(安全问题/刷脸)")}
+                               else "短信验证码二次核验(未绑定"
+                                    "刷脸凭证, 强核验降级兜底)")}
 
     async def step_up_verify(self, member_id: int, phone: str,
                              sms_code: str, fingerprint: str = "",
@@ -667,7 +684,10 @@ class EntryService:
         # 挑战一次性消费
         await self.repo.save_bio({
             **record, "lastChallenge": ""})
-        if decision["action"] == GUARD_ALLOW:
+        # 生物核验=challenge 级强核验的答案(§1.3 第三级实化,
+        # 2026-09-29): 通过生物凭证验证本身即完成核身, challenge
+        # 动作同样签发(仅 BLOCK 拦截)
+        if decision["action"] in (GUARD_ALLOW, GUARD_CHALLENGE):
             return {"status": "authenticated", "tokens": tokens,
                     "memberId": member_id, "decision": decision}
         return {"status": "step_up_required", "memberId": member_id,
@@ -746,7 +766,9 @@ class EntryService:
         # 挑战一次性消费
         await self.repo.save_bio({
             **record, "lastChallenge": ""})
-        if decision["action"] == GUARD_ALLOW:
+        # 生物核验=challenge 级强核验的答案(§1.3 第三级实化):
+        # 双段核验通过即完成核身, challenge 动作同样签发
+        if decision["action"] in (GUARD_ALLOW, GUARD_CHALLENGE):
             return {"status": "authenticated", "tokens": tokens,
                     "memberId": member_id, "decision": decision,
                     "faceCloudReport": report}

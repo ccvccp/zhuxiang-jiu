@@ -182,6 +182,51 @@ async def main():
     finally:
         AuthRiskScorer.score = original
 
+    # challenge 分级实化(§1.3 第三级, 2026-09-29): 50-70 风险——
+    # 有刷脸凭证→必须核身(challenge_required 不给短信捷径);
+    # 无→短信降级兜底; bio verify 核验=challenge 答案(通过即签发)
+    import hashlib
+    async def _challenge_score(self, ctx):
+        return {"success": True, "score": 60.0,
+                "action": "challenge", "factors": [],
+                "hardBlocked": False}
+    _orig_cs = AuthRiskScorer.score
+    AuthRiskScorer.score = _challenge_score
+    try:
+        # 场景A(无刷脸凭证): challenge → 降级短信 step_up
+        r_ch = await svc.login(mode="password", fingerprint=fp_a,
+                               ip="127.0.0.5", phone=phone1,
+                               password="Test1234!")
+        record("challenge无刷脸凭证降级短信",
+               r_ch["status"] == "step_up_required",
+               f"实际{r_ch.get('status')}")
+
+        # 场景B(绑刷脸凭证): challenge → challenge_required(face)
+        e_fc = await svc.bio_enroll(mid1, "face", "DVC1")
+        cred_fc = await svc.bio_bind(
+            mid1, "face", "DVC1", e_fc["enrollChallenge"],
+            hashlib.sha256(b"fc-pk").hexdigest()[:32])
+        r_ch2 = await svc.login(mode="password", fingerprint=fp_a,
+                                ip="127.0.0.5", phone=phone1,
+                                password="Test1234!")
+        record("challenge有刷脸凭证必须核身",
+               r_ch2["status"] == "challenge_required"
+               and r_ch2.get("challengeMode") == "face",
+               f"实际{r_ch2.get('status')}/{r_ch2.get('challengeMode')}")
+
+        # 场景C: challenge 动作下刷脸核身完成即签发
+        ch_f1 = await svc.bio_challenge(cred_fc["credentialId"])
+        a_f1 = hashlib.sha256(
+            (ch_f1["assertionChallenge"] + "DVC1").encode()
+        ).hexdigest()[:32]
+        v_ch = await svc.bio_verify(cred_fc["credentialId"], a_f1,
+                                    ip="127.0.0.5")
+        record("challenge级刷脸核身完成即签发",
+               v_ch["status"] == "authenticated",
+               f"实际{v_ch.get('status')}")
+    finally:
+        AuthRiskScorer.score = _orig_cs
+
     # ========================================================
     # 3. 统一登录
     # ========================================================

@@ -254,6 +254,16 @@ async function doMemberLogin(e) {
         entryAfterLogin(r.tokens, r.memberId, 'member');
         return;
     }
+    if (r.status === 'challenge_required'
+        && r.challengeMode === 'face') {
+        // §1.3 第三级强核验: 有刷脸凭证必须核身(不给短信捷径);
+        // PC 端无生物传感器 UI → 引导手机端完成(降级有兜底铁律)
+        showError('当前登录风险等级较高, 该账号已绑定刷脸凭证, '
+                  + '需完成刷脸核身后才能登录。请改用手机端'
+                  + '(商城「我的-账号安全」内刷脸登录), '
+                  + '或前往手机端解绑刷脸凭证后使用短信核验。');
+        return;
+    }
     if (r.status === 'step_up_required') {
         // AI 风控轻量二次(短信): 先发码 → 再收码 → 核验
         // (既有缺陷修复 2026-09-29 浏览器实测发现: 原实现 prompt
