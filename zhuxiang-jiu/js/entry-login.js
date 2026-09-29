@@ -414,6 +414,198 @@ function qrStopPoll() {
     }
 }
 
+/* ============================================================
+ * WebAuthn 指纹登录(39号 P2 真实轨前端接入, 2026-09-30)
+ * 平台认证器本地验证生物特征, 原始生物数据永不上送;
+ * 凭证 ID 存本机 localStorage(每设备各自绑定);
+ * 浏览器不可用/非安全上下文时整个 Tab 隐藏零影响。
+ * ============================================================ */
+var WA_CRED_KEY = 'zhuxiang.webauthnCred';
+
+function waB64uToBuf(s) {
+    s = String(s).replace(/-/g, '+').replace(/_/g, '/');
+    var bin = atob(s + '='.repeat((4 - s.length % 4) % 4));
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) { arr[i] = bin.charCodeAt(i); }
+    return arr.buffer;
+}
+function waBufToB64u(buf) {
+    var arr = new Uint8Array(buf), s = '';
+    for (var i = 0; i < arr.length; i++) { s += String.fromCharCode(arr[i]); }
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function waAvailable() {
+    return typeof window.PublicKeyCredential !== 'undefined'
+        && (window.isSecureContext === true
+            || location.hostname === 'localhost'
+            || location.hostname === '127.0.0.1');
+}
+
+async function waPost(path, body, token, memberId) {
+    var h = { 'Content-Type': 'application/json' };
+    if (token) { h['Authorization'] = 'Bearer ' + token; }
+    if (memberId) { h['X-Member-Id'] = String(memberId); }
+    var r = await fetch(Entry.api() + path, {
+        method: 'POST', headers: h,
+        body: JSON.stringify(body || {}) });
+    var data = null;
+    try { data = await r.json(); } catch (e) {}
+    if (!r.ok) {
+        throw new Error((data
+                         && (data.detail || data.error))
+                        || ('HTTP ' + r.status));
+    }
+    return (data && data.data) || data;
+}
+
+/** 登录: 本机凭证 → 挑战 → 平台认证器 → 真实验签 → 会话 */
+async function doWebauthnLogin(e) {
+    if (e) { e.preventDefault(); }
+    hideError();
+    var credId = localStorage.getItem(WA_CRED_KEY);
+    if (!credId) {
+        showError('本机尚未绑定指纹——请在下方验证身份完成绑定');
+        return;
+    }
+    var btn = document.getElementById('waLoginBtn');
+    btn.disabled = true;
+    btn.textContent = '请触摸传感器…';
+    try {
+        var begin = await waPost(
+            '/api/entry/webauthn/login/begin',
+            { credentialId: credId });
+        var pk = begin.publicKey || {};
+        var cred = await navigator.credentials.get({
+            publicKey: {
+                challenge: waB64uToBuf(pk.challenge),
+                rpId: pk.rpId,
+                allowCredentials: (pk.allowCredentials || [])
+                    .map(function (c) {
+                        return { type: c.type,
+                                 id: waB64uToBuf(c.id) }; }),
+                userVerification: pk.userVerification || 'preferred',
+                timeout: pk.timeout || 60000,
+            } });
+        var res = await waPost(
+            '/api/entry/webauthn/login/complete',
+            { credentialId: credId,
+              response: {
+                  id: cred.id, rawId: waBufToB64u(cred.rawId),
+                  type: cred.type,
+                  response: {
+                      clientDataJSON: waBufToB64u(
+                          cred.response.clientDataJSON),
+                      authenticatorData: waBufToB64u(
+                          cred.response.authenticatorData),
+                      signature: waBufToB64u(
+                          cred.response.signature),
+                      userHandle: cred.response.userHandle
+                          ? waBufToB64u(cred.response.userHandle)
+                          : null,
+                  } } });
+        if (res.status !== 'authenticated' || !res.tokens) {
+            throw new Error((res.decision
+                             && res.decision.reason)
+                            || '风控要求补充验证');
+        }
+        await entryAfterLogin(res.tokens, res.memberId, 'member');
+    } catch (err) {
+        showError('指纹登录失败: ' + (err && err.message
+                                      ? err.message : err));
+        btn.disabled = false;
+        btn.textContent = '🫆 触摸指纹登录';
+    }
+}
+
+/** 绑定: 密码验证身份 → 注册挑战 → 平台认证器 → 本机留凭证 ID */
+async function doWebauthnBind(e) {
+    if (e) { e.preventDefault(); }
+    hideError();
+    var phone = (document.getElementById('wa-phone').value || '')
+        .trim();
+    var pwd = document.getElementById('wa-password').value || '';
+    if (!/^1[3-9]\d{9}$/.test(phone) || !pwd) {
+        showError('请填写手机号与密码以验证身份');
+        return;
+    }
+    var btn = document.getElementById('waBindBtn');
+    btn.disabled = true;
+    btn.textContent = '验证中…';
+    try {
+        /* ① 密码登录拿真实身份(风控自适应同主登录轨) */
+        var r = await Entry.login({
+            mode: 'password', phone: phone, password: pwd });
+        if (r.status !== 'authenticated' || !r.tokens
+            || !r.memberId) {
+            throw new Error('密码验证未通过'
+                            + (r.error ? ': ' + r.error : ''));
+        }
+        var token = r.tokens.accessToken;
+        btn.textContent = '请触摸传感器绑定…';
+        /* ② 注册挑战 + 平台认证器创建凭证 */
+        var begin = await waPost(
+            '/api/entry/webauthn/register/begin', {},
+            token, r.memberId);
+        var pk = begin.publicKey || {};
+        var cred = await navigator.credentials.create({
+            publicKey: {
+                challenge: waB64uToBuf(pk.challenge),
+                rp: pk.rp || {},
+                user: pk.user || {},
+                pubKeyCredParams: pk.pubKeyCredParams || [],
+                authenticatorSelection: pk.authenticatorSelection
+                    || { authenticatorAttachment: 'platform',
+                         userVerification: 'preferred' },
+                timeout: pk.timeout || 60000,
+                attestation: pk.attestation || 'none',
+            } });
+        /* ③ 注册完成(凭证落服务端 bio 表) + 本机留 ID */
+        var rec = await waPost(
+            '/api/entry/webauthn/register/complete',
+            { response: {
+                  id: cred.id, rawId: waBufToB64u(cred.rawId),
+                  type: cred.type,
+                  response: {
+                      clientDataJSON: waBufToB64u(
+                          cred.response.clientDataJSON),
+                      attestationObject: waBufToB64u(
+                          cred.response.attestationObject),
+                  } } },
+            token, r.memberId);
+        localStorage.setItem(WA_CRED_KEY, rec.credentialId);
+        document.getElementById('waBindArea').style.display = 'none';
+        document.getElementById('waStatus').innerHTML =
+            '✅ 本机指纹绑定成功， 下次可直接触摸登录';
+        btn.disabled = false;
+        btn.textContent = '验证并绑定本机指纹';
+        /* 绑定即已完成身份验证——顺延进入会话(与密码登录一致) */
+        await entryAfterLogin(r.tokens, r.memberId, 'member');
+    } catch (err) {
+        showError('绑定失败: ' + (err && err.message
+                                   ? err.message : err));
+        btn.disabled = false;
+        btn.textContent = '验证并绑定本机指纹';
+    }
+}
+
+/* 可用性引导: 指纹 Tab 仅在浏览器支持 + 安全上下文时显示;
+ * ENTRY_WEBAUTHN_MODE 未开启时端点 409, 提示语义自然呈现 */
+(function waBootstrap() {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', waBootstrap);
+        return;
+    }
+    if (!waAvailable()) { return; }
+    var tab = document.getElementById('waTab');
+    if (!tab) { return; }
+    tab.style.display = '';
+    if (localStorage.getItem(WA_CRED_KEY)) {
+        var area = document.getElementById('waBindArea');
+        if (area) { area.style.display = 'none'; }
+    }
+})();
+
 function qrResetButtons() {
     document.getElementById('qrGen').style.display = 'block';
     document.getElementById('qrCancel').style.display = 'none';
