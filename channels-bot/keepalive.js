@@ -135,6 +135,7 @@ async function runOnce(state) {
 
 (async () => {
   if (!acquireLock()) process.exit(3);
+  const WAKE = path.join(__dirname, `keepalive_${NAME}.wake`);
   LOG(`keepalive start: name=${NAME} bot=${CFG.botScript} interval=${(INTERVAL_MS / 3600000)}h allowEnter=${!!CFG.allowEnter}`);
   const state = loadState();
   while (true) {
@@ -149,6 +150,14 @@ async function runOnce(state) {
     state.nextRunAt = fmt(Date.now() + INTERVAL_MS);
     saveState(state);
     LOG(`round finished in ${Math.round((Date.now() - t0) / 1000)}s, next run ${state.nextRunAt}`);
-    await sleep(INTERVAL_MS);
+    // wake-able sleep: publish_guard 发布前写 wake 文件可催立即跑一轮
+    // (掉线恢复不必等满 24h; 30s 分片轮询, 文件即信号一次性消费)
+    const deadline = Date.now() + INTERVAL_MS;
+    while (Date.now() < deadline) {
+      let woken = false;
+      try { woken = fs.existsSync(WAKE); if (woken) fs.unlinkSync(WAKE); } catch (e) {}
+      if (woken) { LOG('wake signal — running next round immediately'); break; }
+      await sleep(30000);
+    }
   }
 })();

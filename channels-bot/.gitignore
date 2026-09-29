@@ -17,4 +17,5 @@ douyin_*.json
 keepalive_*.log
 keepalive_*.json
 keepalive_*.lock
+keepalive_*.wake
 config_ka_run_*.json
