@@ -74,6 +74,25 @@ var Entry = {
         return body.data || {};
     },
 
+    /* 角色落地数据(§2.5: 连登激励+角色 chips——登录成功后消费;
+     * 携带 accessToken(Bearer——生产 strict 下 landing 个性化
+     * streak 数据按已登录口径; 白名单兜底公开); 拉取失败返回
+     * null 由调用方 fail-soft 直跳) */
+    landing: async function (role, memberId, accessToken) {
+        try {
+            var headers = accessToken
+                ? { 'Authorization': 'Bearer ' + accessToken } : {};
+            var resp = await fetch(
+                this.api() + '/api/entry/landing?role='
+                + encodeURIComponent(role || 'member')
+                + '&memberId='
+                + encodeURIComponent(memberId || ''),
+                { headers: headers });
+            var body = await resp.json();
+            return (body || {}).data || null;
+        } catch (e) { return null; }
+    },
+
     /* step_up 二次验证(短信) */
     stepUp: async function (memberId, phone, smsCode) {
         var resp = await fetch(this.api() + '/api/entry/step-up/verify', {
@@ -179,13 +198,17 @@ function hideError() {
     document.getElementById('errorBanner').style.display = 'none';
 }
 
-/** 登录成功: 会话写入 localStorage(与 auth.js 结构一致)后回跳 */
-function entryAfterLogin(tokens, memberId) {
+/** 登录成功: 会话写入 localStorage(与 auth.js 结构一致)后
+ * 角色爽人落地(设计 §2.5, 2026-09-29 补): 拉取 landing
+ * (连登激励+角色 chips)→欢迎横幅→按角色分流(member 回商城
+ * 用户中心, 运营角色保持知识看板口径); landing 失败 fail-soft
+ * 直跳不阻断(此前所有角色一律落知识看板=运营工具页硬伤) */
+async function entryAfterLogin(tokens, memberId, role) {
     var session = {
         token: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         memberId: memberId,
-        role: tokens.role || 'member',
+        role: role || 'member',
         expiresAt: Date.now() + (tokens.expiresIn || 7200) * 1000,
     };
     localStorage.setItem('zhuxiang.auth', JSON.stringify(session));
@@ -196,7 +219,24 @@ function entryAfterLogin(tokens, memberId) {
         location.href = back;
         return;
     }
-    location.href = 'knowledge-dashboard.html';
+    role = role || 'member';
+    var ld = await Entry.landing(role, memberId,
+                                 tokens.accessToken);
+    var greet = document.getElementById('greetBanner');
+    if (greet && ld) {
+        var reward = (ld.streakMilestone
+                      && ld.streakMilestone.day > 0)
+            ? '(' + ld.streakMilestone.hint + ')'
+            : '';
+        greet.textContent = (ld.greeting || '登录成功')
+            + (reward ? ' ' + reward : '');
+        greet.style.display = 'block';
+    }
+    var target = (role === 'member')
+        ? '/#/pages/mine/index'        /* §2.5 会员回商城用户中心 */
+        : 'knowledge-dashboard.html';  /* 运营角色保持看板口径 */
+    setTimeout(function () { location.href = target; },
+               ld ? 1600 : 0);
 }
 
 /* ---------- 密码登录(39号统一端点 + step_up 分支) ---------- */
@@ -211,18 +251,25 @@ async function doMemberLogin(e) {
                                 password: password });
     btn.disabled = false; btn.textContent = '登 录';
     if (r.status === 'authenticated') {
-        entryAfterLogin(r.tokens, r.memberId);
+        entryAfterLogin(r.tokens, r.memberId, 'member');
         return;
     }
     if (r.status === 'step_up_required') {
-        // AI 风控轻量二次(短信): 引导输入验证码
+        // AI 风控轻量二次(短信): 先发码 → 再收码 → 核验
+        // (既有缺陷修复 2026-09-29 浏览器实测发现: 原实现 prompt
+        //  在 sendSms 之前——用户被索要尚未发送的验证码, 必然失败)
+        var smsOk = await Entry.sendSms(phone);
+        if (!smsOk) {
+            showError('验证码发送失败, 请稍后重试或改用扫码登录');
+            return;
+        }
         var code = prompt('AI 风控提示: 该登录需要短信二次核验。\n'
-                          + '已向 ' + phone + ' 发送验证码(演示通道见后端日志), 请输入:');
+                          + '验证码已发送至 ' + phone + ', 请输入:');
         if (!code) { showError('已取消二次验证'); return; }
-        await Entry.sendSms(phone);
         var s = await Entry.stepUp(r.memberId, phone, code);
         if (s.success) {
-            entryAfterLogin(s.data.tokens, s.data.memberId);
+            entryAfterLogin(s.data.tokens, s.data.memberId,
+                            'member');
         } else {
             showError('二次验证失败: ' + (s.error || '验证码错误'));
         }
@@ -289,7 +336,8 @@ function qrStartPoll() {
                                                 conf.loginTicket);
                 if (ex.success) {
                     qrStopPoll();
-                    entryAfterLogin(ex.data.tokens, ex.data.memberId);
+                    entryAfterLogin(ex.data.tokens, ex.data.memberId,
+                                    'member');
                     return;
                 }
             }
@@ -347,13 +395,14 @@ async function doAdminLogin(e) {
     btn.disabled = false; btn.textContent = '管理员登录';
     if (r.success) { entryAfterLogin(
         { accessToken: r.token || '', refreshToken: '',
-          expiresIn: 7200 }, r.memberId || 2); return; }
+          expiresIn: 7200 }, r.memberId || 2, 'admin'); return; }
     showError('管理员登录失败: ' + r.error);
 }
 
 /* ---------- 初始化 ---------- */
 (function init() {
-    // 已登录直接回跳(与旧版口径一致)
+    // 已登录直接回跳(§2.5 角色分流: member 回商城用户中心,
+    // 运营角色回知识看板——旧版一律送知识看板, member 落 404 硬伤)
     try {
         var auth = JSON.parse(localStorage.getItem('zhuxiang.auth') || 'null');
         if (auth && auth.token && Date.now() < (auth.expiresAt || 0)) {
@@ -362,7 +411,9 @@ async function doAdminLogin(e) {
             if (back && !back.startsWith('/') && back.indexOf(':') < 0) {
                 location.href = back;
             } else {
-                location.href = 'knowledge-dashboard.html';
+                location.href = (auth.role === 'member')
+                    ? '/#/pages/mine/index'
+                    : 'knowledge-dashboard.html';
             }
             return;
         }

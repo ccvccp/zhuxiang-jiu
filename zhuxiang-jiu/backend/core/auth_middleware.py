@@ -84,6 +84,9 @@ PUBLIC_EXACT = {
     # 39号刷脸云端辅助核验轨(2026-09-29 补齐: 凭一次性
     # challenge+vision 判照, 人脸图不落库)
     "/api/entry/bio/cloud-verify",
+    # 39号 §2.5 角色落地页(登录成功后消费; 无敏感数据——
+    # chips/streak 欢迎语, 前端同时携带 Bearer)
+    "/api/entry/landing",
     # 第三方服务器回调(微信/支付宝/物流平台服务器发起, 无本站 JWT;
     # 安全性由各回调自有验签保障: 微信APIv3 / 支付宝RSA2 /
     # 物流渠道签名, 详见 payment_routes._verify_callback 族)
