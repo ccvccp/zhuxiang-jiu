@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<!--
+    71号·AI智能支付端口大模型 v1.0 · 端口运营工作台(前端管理台)
+    页面: ai-payport-dashboard.html(配套脚本 js/payport-dashboard.js)
+    依赖: css/style.css / js/auth.js
+    后端: 71号 pay71_routes(默认 http://localhost:8000, admin Bearer)
+    三区(交付总结§八后续路线1——观测/红队/治理):
+        ①端口池总览(ports+panorama) ②模型状态 ③字典四联
+        (自愈/调配/预判/对账) ④红队防御区(免疫视图/历史/触发)
+        ⑤治理区(进化治理视图/审计链路图)
+    开关语义: 观测面 off 不受影响; 决策面 off 409(页面按钮
+        触发时以提示展示); 保护面(orchestrate/probe/monitor)永续
+-->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竹香酒官网 · AI 智能支付端口 · 运营工作台</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .dash-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 36px 0; text-align: center;
+        }
+        .dash-banner h1 { font-size: 26px; margin: 0; }
+        .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
+        .dash-section { padding: 18px 0 6px; }
+        .dash-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+        }
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; }
+        .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
+        .dash-toolbar input[type="text"] {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+        }
+        .dash-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+        }
+        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
+        .dash-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .dash-info {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
+        }
+        .card-head {
+            display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+            padding: 12px 16px; border-bottom: 1px solid var(--color-border);
+        }
+        .card-head b { font-size: 14px; }
+        .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+        .zone-tag {
+            display: inline-block; font-size: 11px; border-radius: 999px;
+            padding: 2px 10px; background: #eef2fb; color: #3b5998;
+        }
+        .zone-tag.red { background: #fdecea; color: #c0392b; }
+        .zone-tag.gov { background: #f2eaf9; color: #7b3fa0; }
+
+        .kv-wrap { padding: 6px 16px 12px; }
+        .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; padding: 8px 0 4px; }
+        .kv-cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 8px 10px; }
+        .kv-cell b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; word-break: break-all; }
+        .kv-cell span { font-size: 11px; color: var(--color-text-light); }
+        .kv-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+        .kv-table th, .kv-table td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--color-border); }
+        .kv-table th { color: var(--color-text-light); font-weight: 600; font-size: 12px; }
+        pre.raw-json {
+            background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            padding: 10px 12px; font-size: 12px; font-family: Consolas, monospace;
+            overflow-x: auto; max-height: 300px; margin: 8px 0 4px; white-space: pre-wrap; word-break: break-all;
+        }
+        .badge { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 11px; white-space: nowrap; }
+        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.yellow { background: #fdf3e3; color: #a06b00; }
+        .badge.red { background: #fdecea; color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: #999; }
+        .btn-mini {
+            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px; cursor: pointer;
+        }
+        .btn-mini:hover { background: rgba(74,124,89,.08); }
+        .btn-mini.danger { border-color: var(--color-danger); color: var(--color-danger); }
+        .dash-empty { text-align: center; color: var(--color-text-light); padding: 32px 0; font-size: 14px; }
+        .note-bar { padding: 10px 16px; font-size: 11px; color: var(--color-text-light); line-height: 1.7; border-top: 1px solid var(--color-border); }
+        .dash-footer { padding: 22px 0 34px; font-size: 12px; color: var(--color-text-light); line-height: 1.8; }
+    </style>
+</head>
+<body>
+    <div class="dash-banner">
+        <div class="container">
+            <h1>AI 智能支付端口 · 运营工作台</h1>
+            <p>71号端口大模型 —— 端口池治理 / 资金流编排 / 红队免疫 / 三层进化</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="dash-toolbar">
+            <label>后端地址</label>
+            <input type="text" id="apiBaseInput" placeholder="默认同域(本地 http://localhost:8000)">
+            <button class="dash-btn" id="btnLoadAll">加载全部</button>
+            <button class="dash-btn ghost" id="btnLogin">管理员登录</button>
+            <span class="dash-last-update" id="lastUpdate">未加载</span>
+        </div>
+        <div class="dash-error" id="errorBanner"></div>
+        <div class="dash-info" id="infoBanner"></div>
+
+        <!-- ① 观测区: 端口池总览 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>① 端口池总览</b><span class="zone-tag">观测区</span>
+                    <span class="head-actions"><button class="btn-mini" data-sec="ports">刷新</button></span>
+                </div>
+                <div class="kv-wrap" id="secPorts"><div class="dash-empty">未加载</div></div>
+                <div class="note-bar">观测面 off 不受影响; 端口态 healthy/degraded/broken 三态, 折减系数 1.0/0.5/0.0 单调递减</div>
+            </div>
+        </div>
+
+        <!-- ② 观测区: 健康全景 + 模型状态 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>② 健康全景 / 模型状态</b><span class="zone-tag">观测区</span>
+                    <span class="head-actions"><button class="btn-mini" data-sec="model">刷新</button></span>
+                </div>
+                <div class="kv-wrap" id="secModel"><div class="dash-empty">未加载</div></div>
+                <div class="note-bar">panorama 只读聚合 69号支付大模型健康态(永不写 69号表); model/status 观测面与 MODE 无关</div>
+            </div>
+        </div>
+
+        <!-- ③ 观测区: 字典四联 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>③ 端口域字典(自愈/调配/预判/对账)</b><span class="zone-tag">观测区</span>
+                    <span class="head-actions"><button class="btn-mini" data-sec="dicts">刷新</button></span>
+                </div>
+                <div class="kv-wrap" id="secDicts"><div class="dash-empty">未加载</div></div>
+                <div class="note-bar">前兆信号四类权重和=1.0; 四维调配权重和=1.0; 大额拆分阈值 ¥5000 对齐 69号 AMOUNT_BANDS</div>
+            </div>
+        </div>
+
+        <!-- ④ 红队防御区 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>④ 红队防御 / 安全免疫</b><span class="zone-tag red">红队区</span>
+                    <span class="head-actions">
+                        <button class="btn-mini danger" id="btnRedteam">触发红队四向量</button>
+                        <button class="btn-mini" data-sec="immunity">刷新</button>
+                    </span>
+                </div>
+                <div class="kv-wrap" id="secImmunity"><div class="dash-empty">未加载</div></div>
+                <div class="note-bar">RT-01 伪造回执 / RT-02 重放洪泛 / RT-03 绕过熔断 / RT-04 调配投毒——全确定性防御; 触发需 PAY71_MODE=shadow/assist(off 态 409 属正常); 冻结自动+解冻人工专属(PAY71_IMMUNITY=1)</div>
+            </div>
+        </div>
+
+        <!-- ⑤ 治理区 -->
+        <div class="dash-section">
+            <div class="dash-card">
+                <div class="card-head">
+                    <b>⑤ 三层进化治理 / 审计透明</b><span class="zone-tag gov">治理区</span>
+                    <span class="head-actions"><button class="btn-mini" data-sec="gov">刷新</button></span>
+                </div>
+                <div class="kv-wrap" id="secGov"><div class="dash-empty">未加载</div></div>
+                <div class="note-bar">进化分级 L0/L1/L2(46号审批纯调用); KILL 双保险(PAY71_KILL=1 进程级 + /evolution/kill 数据面); 冻结联动 P7 四守卫; 证据链 sha256 哈希锚定、篡改可检出</div>
+            </div>
+        </div>
+
+        <div class="dash-footer">
+            71号·AI智能支付端口大模型 v1.0 前端工作台 —— 叠加式升级, 69/60/55/47/52号零改动铁律;
+            73 端点(观测面 ~30 / 决策面 off 409 / 保护面永续); 建议灰度顺序: off(零影响) → shadow(影子) → assist(辅助)。
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/payport-dashboard.js"></script>
+</body>
+</html>
