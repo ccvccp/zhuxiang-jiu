@@ -1,4 +1,4 @@
-"""60号AI智能支付管理 P2 Docker 实机验收
+﻿"""60号AI智能支付管理 P2 Docker 实机验收
 
 运行方式:
     # 容器以 assist 态启动(会员 confirm 面
@@ -32,7 +32,39 @@ BASE = (sys.argv[1] if len(sys.argv) > 1
 PASS = 0
 FAIL = 0
 RESULTS = []
-ADMIN = {"X-Role": "admin"}
+def _admin_token() -> str:
+    """46+1 安全修复(2026-09-28): 裸头 X-Role 被 auth_middleware
+    剥除 → admin Bearer 走容器内服务层注册轨(HTTP register 无
+    role 字段防提权, 同 54号实机验收容器管道范式); 容器 Redis
+    持久已注册自动回退 login 轨(×2 轮幂等)。"""
+    pipe = (
+        "import asyncio\n"
+        "async def m():\n"
+        "    from services.auth_service import AuthService\n"
+        "    try:\n"
+        "        r = await AuthService().register(\n"
+        "            phone='13800000601',\n"
+        "            password='test123456',\n"
+        "            role='admin')\n"
+        "    except ValueError:\n"
+        "        r = await AuthService().login(\n"
+        "            '13800000601', 'test123456')\n"
+        "    print(r.get('accessToken', ''))\n"
+        "asyncio.run(m())\n"
+    )
+    out = subprocess.run(
+        ["docker", "exec", "zhuxiang-jiu-backend-1",
+         "python", "-c", pipe],
+        capture_output=True, text=True, timeout=60)
+    lines = [l for l in (out.stdout or "").splitlines()
+             if l.strip()]
+    if not lines:
+        raise RuntimeError(
+            "admin token 获取失败: " + (out.stderr or "")[:200])
+    return lines[-1].strip()
+
+
+ADMIN = {"Authorization": "Bearer " + _admin_token()}
 
 CONTAINER = "zhuxiang-jiu-backend-1"
 REDIS = "zhuxiang-jiu-redis-1"
@@ -83,7 +115,7 @@ def redis_del_keys(pattern: str) -> None:
 
 
 def clear_pay60(round_no: int) -> None:
-    redis_del_keys("zhuxiang:pay60:*")
+    redis_del_keys("zhuxiang:pay60*")
     redis_del_keys("zhuxiang:ai_governance:*")
 
 
@@ -149,7 +181,10 @@ PIPELINE = (
     "            'channelReceipt', {})\n"
     "        .get('channel'))\n"
     # ② strong 档(大额)
-    "    p2 = await seed(11, 6000.0)\n"
+    # 999 无 47号画像 → fail-soft standard → 大额>5000 判 strong
+    # (2026-09-29 深挖: 会员 11 画像已演进为 restricted, 隐式依赖
+    #  被打破致 block——换无画像会员显式控制 tier 回落)
+    "    p2 = await seed(999, 6000.0)\n"
     "    v2 = await svc.verify(p2)\n"
     "    out['strong_tier'] = (\n"
     "        v2['riskTier'])\n"

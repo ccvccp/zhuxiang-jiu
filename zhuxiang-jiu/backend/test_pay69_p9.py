@@ -57,7 +57,13 @@ async def main():
     from fastapi.testclient import TestClient
     from main import app
     client = TestClient(app)
-    ADMIN = {"X-Role": "admin"}
+    # 46+1 安全修复(2026-09-28): 裸头 X-Role 被 auth_middleware 剥除,
+    # admin 端点 403——迁移真实 Bearer 轨(register role=admin)
+    from services.auth_service import AuthService
+    _tok = (await AuthService().register(
+        phone="13800000690", password="test123456",
+        role="admin")).get("accessToken", "")
+    ADMIN = {"Authorization": "Bearer " + _tok}
     BASE = "/api/pay69"
 
     from services import pay69_registry as reg

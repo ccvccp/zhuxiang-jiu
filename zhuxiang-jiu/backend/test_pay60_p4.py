@@ -369,7 +369,12 @@ class TestHttp:
         from fastapi.testclient import TestClient
         from main import app
         client = TestClient(app)
-        admin = {"X-Role": "admin"}
+        # 46+1 安全修复(2026-09-28): 裸头 X-Role 被剥 → 真实 Bearer 轨
+        from services.auth_service import AuthService
+        _tok = (await AuthService().register(
+            phone="13800000600", password="test123456",
+            role="admin")).get("accessToken", "")
+        admin = {"Authorization": "Bearer " + _tok}
 
         # 造数据
         await seed_order(
@@ -485,11 +490,12 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
+        # 档案数演进兼容(下界语义防回归)
         record("第35档案在册",
                "payment_orchestration"
                in SCORER_REGISTRY
                and len(SCORER_REGISTRY)
-               == 39,
+               >= 39,
                str(len(
                    SCORER_REGISTRY)))
 

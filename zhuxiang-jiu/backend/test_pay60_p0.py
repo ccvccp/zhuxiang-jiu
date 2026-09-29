@@ -852,11 +852,13 @@ class TestConstitution:
         from services.ai_learning_service import (
             SCORER_REGISTRY,
         )
+        # 44号档案数演进兼容(46+1 后续模块入册增长,
+        # 下界语义防回归——同 ai_feedback_hooks 范式)
         record("44号 37 档案(61号入册)",
                "payment_orchestration"
                in SCORER_REGISTRY
                and len(SCORER_REGISTRY)
-               == 39
+               >= 39
                and SCORER_REGISTRY[
                    "payment_"
                    "orchestration"]

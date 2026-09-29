@@ -1,4 +1,4 @@
-"""60号AI智能支付管理 P1 Docker 实机验收
+﻿"""60号AI智能支付管理 P1 Docker 实机验收
 
 运行方式:
     # 容器以 shadow 态启动(HTTP 决策面
@@ -33,7 +33,39 @@ BASE = (sys.argv[1] if len(sys.argv) > 1
 PASS = 0
 FAIL = 0
 RESULTS = []
-ADMIN = {"X-Role": "admin"}
+def _admin_token() -> str:
+    """46+1 安全修复(2026-09-28): 裸头 X-Role 被 auth_middleware
+    剥除 → admin Bearer 走容器内服务层注册轨(HTTP register 无
+    role 字段防提权, 同 54号实机验收容器管道范式); 容器 Redis
+    持久已注册自动回退 login 轨(×2 轮幂等)。"""
+    pipe = (
+        "import asyncio\n"
+        "async def m():\n"
+        "    from services.auth_service import AuthService\n"
+        "    try:\n"
+        "        r = await AuthService().register(\n"
+        "            phone='13800000601',\n"
+        "            password='test123456',\n"
+        "            role='admin')\n"
+        "    except ValueError:\n"
+        "        r = await AuthService().login(\n"
+        "            '13800000601', 'test123456')\n"
+        "    print(r.get('accessToken', ''))\n"
+        "asyncio.run(m())\n"
+    )
+    out = subprocess.run(
+        ["docker", "exec", "zhuxiang-jiu-backend-1",
+         "python", "-c", pipe],
+        capture_output=True, text=True, timeout=60)
+    lines = [l for l in (out.stdout or "").splitlines()
+             if l.strip()]
+    if not lines:
+        raise RuntimeError(
+            "admin token 获取失败: " + (out.stderr or "")[:200])
+    return lines[-1].strip()
+
+
+ADMIN = {"Authorization": "Bearer " + _admin_token()}
 
 CONTAINER = "zhuxiang-jiu-backend-1"
 REDIS = "zhuxiang-jiu-redis-1"
@@ -84,7 +116,7 @@ def redis_del_keys(pattern: str) -> None:
 
 
 def clear_pay60(round_no: int) -> None:
-    redis_del_keys("zhuxiang:pay60:*")
+    redis_del_keys("zhuxiang:pay60*")
 
 
 # 容器内管道(纯 ASCII)
@@ -127,7 +159,7 @@ PIPELINE = (
     "        r2['methods'][0])\n"
     # ③ 渲染(高信值续费)
     "    r3 = await svc.render_checkout(\n"
-    "        10, 'renewal', 'member')\n"
+    "        999, 'renewal', 'member')\n"
     "    out['renew_defaults'] = (\n"
     "        r3['defaults'])\n"
     # ④ 恢复链(种 failed 态)
@@ -170,7 +202,10 @@ PIPELINE = (
     # ⑦ checkout 留痕
     "    recs = await repo.list_checkouts(\n"
     "        member_id=10)\n"
-    "    out['checkout_n'] = len(recs)\n"
+    "    recs2 = await repo.list_checkouts(\n"
+    "        member_id=999)\n"
+    "    out['checkout_n'] = (\n"
+    "        len(recs) + len(recs2))\n"
     # ⑧ off 铁律(服务级)
     "    os.environ['PAY60_MODE'] = 'off'\n"
     "    off_reject = False\n"
@@ -230,7 +265,10 @@ def run_round(round_no: int) -> None:
            r.get("senior_first")
            == "child_pay",
            str(r.get("senior_first")))
-    record("续费非 trusted(无默认)",
+    # 999 无 47号画像 → _member_tier fail-soft 回落 standard →
+    # renewal 非 trusted 无默认勾选(原断言意图; 会员 10 画像已有
+    # trusted 环境态, 隐式依赖被演进打破——2026-09-29 深挖修正)
+    record("续费无画像会员(回落 standard 无默认)",
            r.get("renew_defaults") == {},
            str(r.get("renew_defaults")))
     record("恢复建议集(4 有序)",
