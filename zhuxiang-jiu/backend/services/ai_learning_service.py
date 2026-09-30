@@ -177,6 +177,8 @@ SCORER_REGISTRY = {
     "bamboo_verify": {"label": "竹鉴BambooVerify质检引证评分", "module": "77竹鉴BambooVerify大模型", "batch": 51},
     # ---- 第五十二批(48号·小竹智能语音大模型三期: 语音支付风险评分) ----
     "voicepay_risk": {"label": "小竹语音支付风险评分", "module": "48小竹智能语音大模型", "batch": 52},
+    # ---- 第五十三批(73号sv·短视频智能模型 P2: 分镜风格评分——数据闭环) ----
+    "sv73_storyboard": {"label": "智能分镜风格评分", "module": "73号sv短视频智能模型", "batch": 53},
 }
 
 # 治理档案型评分器(46号审批总线档案, 不参与 Hedge 学习周期)。
@@ -366,6 +368,9 @@ DECISION_THRESHOLDS = {
                       (0.0, "urgent")],
     "bamboo_verify": [(80.0, "observe"), (60.0, "optimize"),
                       (0.0, "urgent")],
+    # 73号sv·分镜风格三级(数据闭环: 优先排期/常规/降权观察)
+    "sv73_storyboard": [(60.0, "high"), (30.0, "medium"),
+                        (0.0, "low")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -500,6 +505,7 @@ def default_weights(scorer_id: str) -> dict:
             SelfHealingScorer,
         )
         from services.xx66_scorer import EngineerServiceScorer
+        from services.sv73_scorer import Sv73StoryboardScorer
         _SCORER_CLASSES = {
             "order_risk": OrderRiskScorer,
             "payment_routing": PaymentRoutingScorer,
@@ -542,6 +548,7 @@ def default_weights(scorer_id: str) -> dict:
             "ops_alert": OpsAlertScorer,
             "self_healing": SelfHealingScorer,
             "engineer_service": EngineerServiceScorer,
+            "sv73_storyboard": Sv73StoryboardScorer,
         }
     except ImportError as exc:  # pragma: no cover - 环境异常兜底
         raise KeyError(f"评分器模块不可用: {exc}") from exc

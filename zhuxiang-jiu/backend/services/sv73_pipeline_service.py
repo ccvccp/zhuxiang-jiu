@@ -90,7 +90,8 @@ class Sv73PipelineService:
         return None
 
     async def _register_content(self, hotspot: dict, storyboard: dict,
-                                built: dict, platform: str) -> dict:
+                                built: dict, platform: str,
+                                match_result: dict = None) -> dict:
         """产物登记 36号 content(状态判定与 36号生成即预审同口径:
         hardFail/低于人工线 → rejected; 否则 pending 待人工 review)"""
         from repositories.promo_repository import (
@@ -125,7 +126,8 @@ class Sv73PipelineService:
             "scheduledAt": "",
             "publishedAt": "",
             "createdAt": _now_iso(),
-            # 73号 扩展段(产物关联——36号 save_content 整 dict 落库容忍)
+            # 73号 扩展段(产物关联——36号 save_content 整 dict 落库容忍;
+            # P2 数据闭环快照: 风格六因子决策时留痕, 供回流构造)
             "sv73": {
                 "storyboardId": storyboard["scriptId"],
                 "video": built["video"],
@@ -136,6 +138,13 @@ class Sv73PipelineService:
                 "bgmMood": storyboard["bgm"]["mood"],
                 "persona": storyboard["persona"],
                 "shadow": mode == "shadow",
+                # P2 闭环快照(风格因子源)
+                "template": storyboard["template"]["name"],
+                "complianceScore": gate["score"],
+                "matchTop": ((match_result or {})
+                             .get("topSeries", "")),
+                "matchFallback": bool(
+                    (match_result or {}).get("fallback")),
             },
         }
         # real 态 + 过闸 → 建归因短码(36号 best-effort 同款);
@@ -201,7 +210,8 @@ class Sv73PipelineService:
         reused = content is not None
         if not reused:
             content = await self._register_content(
-                hotspot, storyboard, built, platform)
+                hotspot, storyboard, built, platform,
+                match_result)
 
         logger.info(
             "sv73_pipeline_done script=%s video=%s content=%s"

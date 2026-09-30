@@ -26,6 +26,7 @@ from services.sv73_pipeline_service import (
 )
 from services.sv73_script_service import DEFAULT_TEMPLATE, TEMPLATES
 from services.sv73_match_service import Sv73MatchService
+from services.sv73_p2_service import Sv73P2Service
 
 router = APIRouter(
     prefix="/api/sv73",
@@ -64,6 +65,13 @@ class RenderAttachRequest(BaseModel):
     pages: list = Field(default_factory=list, description="PNG 页路径")
     audioTrack: str = Field("", description="TTS 音频路径(可空)")
     sizeBytes: int = Field(0, description="mp4 字节数")
+
+
+class LearningFeedbackRequest(BaseModel):
+    contentId: int = Field(..., description="已发布的 sv73 content")
+    clicks: int = Field(None, description="引流点击(缺省 attract 归因聚合)")
+    registrations: int = Field(None, description="注册数(可选)")
+    orders: int = Field(None, description="订单数(可选)")
 
 
 def _require_admin(x_role: str | None) -> None:
@@ -168,6 +176,35 @@ async def attach_render(payload: RenderAttachRequest,
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     return {"code": 0, "data": result}
+
+
+@router.post("/learning/feedback")
+async def submit_learning_feedback(
+        payload: LearningFeedbackRequest,
+        x_role: str | None = Header(None)):
+    """发布效果回流(决策面): content published + 引流指标 →
+    44号 sv73_storyboard 风格六因子反馈(幂等 learningFed)"""
+    _require_admin(x_role)
+    _mode_guard()
+    try:
+        result = await Sv73P2Service().submit_learning_feedback(
+            payload.contentId, payload.clicks,
+            payload.registrations, payload.orders)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return {"code": 0, "data": result}
+
+
+@router.get("/learning/status")
+async def learning_status(x_role: str | None = Header(None)):
+    """学习状态观测(观测面: 44号 sv73_storyboard 档案只读,
+    off 常开——注册表/默认权重/冠军权重/pending 计数)"""
+    _require_admin(x_role)
+    return {"code": 0,
+            "data": await Sv73P2Service().learning_status()}
 
 
 def register_sv73_routes(app):
