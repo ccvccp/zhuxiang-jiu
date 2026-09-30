@@ -511,9 +511,49 @@ class Xx66HealService:
                 "xx66_heal_gate_failsoft: %s", exc)
 
         # ③ 路由: 白名单外 / shadow 态 / 预演不过
-        #    → 建议书留痕(P4 接 46号 submit_change)
+        #    → 建议书落表 + 46号 submit_change 真审批轨(P5c)
         if not whitelisted or mode != "assist" \
                 or not preview["passable"]:
+            book_id = await self.repo.next_advice_id()
+            change_id = 0
+            try:
+                from services.xx66_recon_service import (
+                    GOV46_SCORER,
+                )
+                from services.ai_governance_service import (
+                    AiGovernanceService,
+                )
+                gov = AiGovernanceService()
+                await gov.sync_registry()
+                result = await gov.submit_change(
+                    scorer_id=GOV46_SCORER, kind="config",
+                    payload={"adviceId": book_id,
+                             "kind": "heal_advice",
+                             "recoveryId": recovery_id,
+                             "actions":
+                                 rule["candidateActions"],
+                             "rootCause": rule["rootCause"]},
+                    reason=f"[66号自愈建议] recovery="
+                           f"{recovery_id}"
+                           f" {rule['rootCause']}"[:500],
+                    requested_by="xx66-heal")
+                change_id = int(result.get("changeId") or 0)
+            except Exception as exc:
+                # 46号 提交冲突(同档案 pending)不阻断建议书
+                # 留痕——changeId=0 表征未接轨, 裁决在途后重试
+                logger.warning(
+                    "xx66_heal_gov46_submit_failsoft: %s", exc)
+            book = {
+                "adviceId": book_id,
+                "kind": "heal_advice",
+                "recoveryId": recovery_id,
+                "actions": rule["candidateActions"],
+                "preview": preview,
+                "changeId": change_id,
+                "status": "proposed",
+                "proposedAt": ts(),
+            }
+            await self.repo.save_advice_book(book)
             out = {
                 "success": True, "recoveryId": recovery_id,
                 "route": "advice_book",
@@ -521,10 +561,15 @@ class Xx66HealService:
                 "rootCause": rule["rootCause"],
                 "confidence": rule["confidence"],
                 "adviceBook": {
+                    "adviceId": book_id,
                     "actions": rule["candidateActions"],
                     "preview": preview,
-                    "delivery": "P4 接 46号 submit_change"
-                                "(建议书审批轨)",
+                    "changeId": change_id,
+                    "delivery": "46号 submit_change 真轨"
+                                "(approve 后人工执行)"
+                                if change_id else
+                                "46号 提交未成(在途裁决后"
+                                "重试; 建议书已留痕)",
                 },
                 "ticketHandoff": {"required": True},
                 "note": "白名单外/shadow 态/预演不过——"
@@ -532,6 +577,8 @@ class Xx66HealService:
             }
             await self._log("heal_advice_book", payload={
                 "recoveryId": recovery_id,
+                "adviceId": book_id,
+                "changeId": change_id,
                 "actions": rule["candidateActions"],
                 "passable": preview["passable"],
                 "mode": mode})

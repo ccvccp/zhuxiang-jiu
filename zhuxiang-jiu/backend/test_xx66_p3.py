@@ -47,6 +47,23 @@ def reset_all():
     _reset()
 
 
+async def settle_gov46(result):
+    """P5c 同步: propose 后立即裁决 46号(同档案单 pending
+    互斥——串行提议+裁决保持反欺诈多笔历史可测)"""
+    from services.ai_governance_service import (
+        AiGovernanceService,
+    )
+    cid = int((result.get("adviceBook") or {})
+              .get("changeId") or 0)
+    if cid:
+        try:
+            await AiGovernanceService().review_change(
+                cid, approve=True, reviewed_by="admin",
+                review_note="P3 串行裁决(反欺诈多笔历史)")
+        except ValueError:
+            pass   # reviewedBy 已留痕即裁决(radar 范式)
+
+
 async def seed_profile(trust_id, score=500.0):
     from repositories.trust_value_repository import (
         TrustValue45Repository,
@@ -248,6 +265,20 @@ class TestReversal:
         record("未审批拒绝执行", unapproved)
 
         # 审批后执行——45号 issue 锚定
+        # P5c 同步: 状态桥已切 46号真轨——approve 经
+        # review_change(reviewedBy 留痕)后本地推进
+        from services.ai_governance_service import (
+            AiGovernanceService,
+        )
+        try:
+            await AiGovernanceService().review_change(
+                int(ab["changeId"]), approve=True,
+                reviewed_by="admin",
+                review_note="P3 冲正用例真轨审批")
+        except ValueError:
+            # config 执行器不支持自动执行——
+            # reviewedBy 留痕即裁决(radar 范式)
+            pass
         await repo.update_advice_status(
             ab["adviceId"], "approved")
         applied = await svc.apply_reversal(
@@ -427,6 +458,7 @@ class TestFraudGates:
             record("46号审批轨声明",
                    "46号" in r1["adviceBook"]
                    ["delivery"])
+            await settle_gov46(r1)
 
             # 幂等重放拒
             try:
@@ -455,21 +487,24 @@ class TestFraudGates:
                            ["fraudFlags"]))
             record("观察档不拒之门外",
                    r2["success"] is True)
+            await settle_gov46(r2)
 
             # 连环申请(7 日≥3 次——3 次历史后
             # 第 4 次申请触发人工终审)
             for i in (3, 4, 5):
-                await svc.propose_compensation(
-                    "trust_misdeduct", {
-                        "entityId": "ent-3",
-                        "incidentId": f"INC-{i}",
-                        "lossAmount": 5.0})
+                await settle_gov46(
+                    await svc.propose_compensation(
+                        "trust_misdeduct", {
+                            "entityId": "ent-3",
+                            "incidentId": f"INC-{i}",
+                            "lossAmount": 5.0}))
             r_serial = await \
                 svc.propose_compensation(
                     "trust_misdeduct", {
                         "entityId": "ent-3",
                         "incidentId": "INC-6",
                         "lossAmount": 5.0})
+            await settle_gov46(r_serial)
             record("连环申请人工终审",
                    r_serial["manualReview"] is True
                    and any("serial" in f
@@ -482,11 +517,12 @@ class TestFraudGates:
             # 月实体封顶(200 TV——DSL 单案截 50, 累计
             # 4×50=200 后第 5 笔触发 200+50>200)
             for i in (1, 2, 3, 4):
-                await svc.propose_compensation(
-                    "trust_misdeduct", {
-                        "entityId": "ent-4",
-                        "incidentId": f"INC-BIG{i}",
-                        "lossAmount": 100.0})
+                await settle_gov46(
+                    await svc.propose_compensation(
+                        "trust_misdeduct", {
+                            "entityId": "ent-4",
+                            "incidentId": f"INC-BIG{i}",
+                            "lossAmount": 100.0}))
             try:
                 await svc.propose_compensation(
                     "trust_misdeduct", {

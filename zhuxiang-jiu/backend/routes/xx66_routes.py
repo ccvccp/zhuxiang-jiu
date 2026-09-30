@@ -537,32 +537,85 @@ async def xx66_compensation_detail(
 @router.post("/advice/{advice_id}/approve")
 async def xx66_advice_approve(
     advice_id: int,
+    approve: bool = True,
+    review_note: str = "",
     x_role: str = Header(default="", alias="X-Role"),
 ):
-    """建议书审批状态桥(46号 approve 效果对接点——
-    P3 以状态 approved 表征审批通过; P4 切换为
-    46号 submit_change 真轨; 不可逆状态推进)"""
+    """建议书审批 46号真轨(P5c: 状态桥→review_change 真审批)
+
+    radar confirm_task 范式: config 执行器不支持自动执行时
+    以 46号 reviewedBy 留痕为裁决准据(approve 轨兜 ValueError
+    后校验留痕); approve=False 为驳回轨(本地 rejected,
+    46号同步 rejected 留痕); 不可逆状态推进。
+    """
     _require_admin(x_role)
     from repositories.xx66_repository import (
         Xx66Repository,
     )
 
     async def _bridge():
-        book = await Xx66Repository() \
-            .get_advice_book(advice_id)
+        repo = Xx66Repository()
+        book = await repo.get_advice_book(advice_id)
         if book is None:
             raise KeyError(f"建议书 {advice_id} 不存在")
-        if book.get("status") in ("executed",):
+        if book.get("status") in ("executed", "approved",
+                                 "rejected"):
             raise ValueError(
-                f"建议书已执行(状态 {book['status']}"
+                f"建议书已裁决/执行(状态 {book['status']}"
                 f" 不可逆)")
-        await Xx66Repository() \
-            .update_advice_status(advice_id, "approved")
+        change_id = int(book.get("changeId") or 0)
+        if not change_id:
+            raise ValueError(
+                "建议书无 46号 changeId(P5c 前存量桥"
+                "——须重新提议走真轨)")
+        from services.ai_governance_service import (
+            AiGovernanceService,
+        )
+        gov = AiGovernanceService()
+        if not approve:
+            await gov.review_change(
+                change_id, approve=False,
+                reviewed_by="admin",
+                review_note=review_note)
+            await repo.update_advice_status(
+                advice_id, "rejected")
+            return {"success": True,
+                    "adviceId": advice_id,
+                    "changeId": change_id,
+                    "status": "rejected",
+                    "note": "46号 驳回留痕(本地 rejected)",
+                    "approvedAt": ts()}
+        reviewed_ok = False
+        try:
+            await gov.review_change(
+                change_id, approve=True,
+                reviewed_by="admin",
+                review_note=review_note)
+            reviewed_ok = True
+        except ValueError:
+            # config 执行器不支持自动执行——46号 reviewedBy
+            # 已留痕即人工裁决完成(radar 范式)
+            from repositories.ai_governance_repository import (
+                AiGovernance46Repository,
+            )
+            change = await AiGovernance46Repository(
+            ).get_change(change_id)
+            if change is not None \
+                    and change.get("reviewedBy"):
+                reviewed_ok = True
+        if not reviewed_ok:
+            raise ValueError(
+                f"46号裁决未留痕(changeId={change_id})"
+                "——本地不推进 approved")
+        await repo.update_advice_status(
+            advice_id, "approved")
         return {"success": True,
                 "adviceId": advice_id,
+                "changeId": change_id,
                 "status": "approved",
-                "note": "46号 approve 效果桥——P4 切换"
-                        "submit_change 真轨",
+                "note": "46号 真轨 approve"
+                        "(reviewedBy 留痕)——apply 前置"
+                        "双重校验生效",
                 "approvedAt": ts()}
     try:
         return await _bridge()

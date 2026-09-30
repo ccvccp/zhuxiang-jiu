@@ -117,7 +117,8 @@ class Xx66Repository:
                      "memberId", "predictionId", "logId",
                      "runId", "adviceId",
                      "compensationId", "caseId",
-                     "recurrence", "hitCount"):
+                     "recurrence", "hitCount",
+                     "changeId"):
                 try:
                     record[k] = int(v)
                 except (TypeError, ValueError):

@@ -63,6 +63,10 @@ RECON_EPSILON = 0.01
 
 DSL_VERSION = "1.0"
 
+# P5c 46号审批真轨档案(66号 engineer_service 在 44号注册表
+# 入册名; 提交前经 sync_registry 同步至 46号注册表)
+GOV46_SCORER = "engineer_service"
+
 COMPENSATION_RULES = {
     "trust_misdeduct": {
         "label": "信值误扣补偿",
@@ -415,9 +419,34 @@ class Xx66ReconService:
     # 冲正轨(propose → 46号审批 → apply)
     # --------------------------------------------------------
 
+    async def _submit_gov46(self, payload: dict,
+                           reason: str,
+                           requested_by: str) -> int:
+        """提交 46号 submit_change 真轨(P5c: 状态桥→真审批链)
+
+        72号范式: 先 sync_registry(幂等, 44号档案→46号注册表)
+        再提交; 同档案 pending 互斥由 46号 语义透传(在途变更
+        裁决后再提)。Returns: changeId
+        """
+        from services.ai_governance_service import (
+            AiGovernanceService,
+        )
+        gov = AiGovernanceService()
+        await gov.sync_registry()
+        result = await gov.submit_change(
+            scorer_id=GOV46_SCORER, kind="config",
+            payload=payload,
+            reason=str(reason or "")[:500],
+            requested_by=requested_by)
+        return int(result.get("changeId") or 0)
+
     async def propose_reversal(self, run_id: int,
                                trust_id: int) -> dict:
-        """生成冲正建议书(基于对账差异——只读推导)"""
+        """生成冲正建议书(基于对账差异——只读推导)
+
+        P5c: 建议书同步提交 46号 submit_change 真审批轨
+        (changeId 回填; apply 前须 46号 reviewedBy 留痕)。
+        """
         run = await self.repo.get_recon(run_id)
         if run is None:
             raise KeyError(f"对账轮次 {run_id} 不存在")
@@ -433,21 +462,32 @@ class Xx66ReconService:
         direction = ("issue" if diff > 0 else "burn")
         amount = round(abs(diff), 2)
         book_id = await self.repo.next_advice_id()
+        change_id = await self._submit_gov46(
+            {"adviceId": book_id, "kind": "reversal",
+             "runId": run_id, "trustId": trust_id,
+             "direction": direction, "amount": amount},
+            reason=f"[66号冲正] run={run_id}"
+                   f" trust={trust_id} {direction}"
+                   f" {amount}(I1 差值锚定)",
+            requested_by="xx66-recon")
         book = {
             "adviceId": book_id, "kind": "reversal",
             "runId": run_id, "trustId": trust_id,
             "direction": direction, "amount": amount,
             "reserveRef": f"reconcile:{run_id}",
             "status": "proposed",
-            "delivery": "P4 接 46号 submit_change"
-                        "(审批后 apply_reversal 余额校正)",
+            "changeId": change_id,
+            "delivery": "46号 submit_change 真轨"
+                        "(approve 留痕后 apply_reversal"
+                        " 余额校正)",
             "proposedAt": ts(),
         }
         await self.repo.save_advice_book(book)
         return {
             "success": True, "adviceBook": book,
-            "note": "冲正建议书——46号 approve 后"
-                    "apply_reversal 按锚定发行执行",
+            "note": "冲正建议书——46号 真轨 approve"
+                    "(reviewedBy 留痕)后 apply_reversal"
+                    " 按锚定发行执行",
             "proposedAt": ts(),
         }
 
@@ -469,6 +509,24 @@ class Xx66ReconService:
             raise ValueError(
                 "建议书未经 46号 approve——禁止执行"
                 "(惩罚与给付永不自动红线)")
+        # P5c 真轨双重校验(63号 calibrate_apply 范式):
+        # 本地 approved 之外还须 46号 reviewedBy 留痕
+        # ——防旧状态桥/直改库旁路
+        change_id = int(book.get("changeId") or 0)
+        if change_id:
+            from repositories.ai_governance_repository import (
+                AiGovernance46Repository,
+            )
+            change = await AiGovernance46Repository(
+            ).get_change(change_id)
+            if change is None or not change.get("reviewedBy"):
+                raise ValueError(
+                    f"46号变更 {change_id} 未经人工裁决"
+                    "(真轨校验——禁止旁路执行)")
+        else:
+            raise ValueError(
+                "建议书无 46号 changeId(P5c 真轨前置"
+                "——存量桥建议书须重新提议)")
         if book.get("kind") != "reversal":
             raise ValueError("非冲正类建议书")
         if book.get("direction") != "issue":
@@ -623,6 +681,18 @@ class Xx66ReconService:
 
         manual_review = bool(flags)
         book_id = await self.repo.next_advice_id()
+        # P5c: 同步提交 46号 真审批轨(manual_review 态亦走
+        # 46号——强制人工终审正是审批中枢语义)
+        change_id = await self._submit_gov46(
+            {"adviceId": book_id,
+             "kind": "compensation",
+             "ruleId": rule_id, "entityId": entity,
+             "amount": ev["compensation"],
+             "manualReview": bool(manual_review)},
+            reason=f"[66号补偿] rule={rule_id}"
+                   f" entity={entity}"
+                   f" {ev['compensation']}(DSL 评估)",
+            requested_by="xx66-recon")
         book = {
             "adviceId": book_id,
             "kind": "compensation",
@@ -633,9 +703,10 @@ class Xx66ReconService:
             "fraudFlags": flags,
             "status": ("manual_review" if manual_review
                        else "proposed"),
-            "delivery": "46号 submit_change→approve"
-                        "→45号 deposit(reserve_ref="
-                        "comp:{adviceId})",
+            "changeId": change_id,
+            "delivery": "46号 submit_change 真轨"
+                        "→approve→45号 deposit"
+                        "(reserve_ref=comp:{adviceId})",
             "proposedAt": ts(),
         }
         await self.repo.save_advice_book(book)
