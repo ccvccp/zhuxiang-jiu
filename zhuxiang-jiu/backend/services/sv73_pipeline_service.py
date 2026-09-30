@@ -41,9 +41,24 @@ from services.promo_service import PromoService
 
 logger = logging.getLogger(__name__)
 
-# 发布平台(36号 RPA_PLATFORMS 成员; 视频号=网页版 RPA 实证通道)
-SV73_PLATFORMS = ("wechat_channels", "douyin")
+# 发布平台(36号 RPA_PLATFORMS 成员; 2026-09-30 P2 平台扩展
+# 四平台全开——36号 rpa_pending 清单/回执闭环平台无关)
+SV73_PLATFORMS = ("wechat_channels", "douyin",
+                  "xiaohongshu", "weibo")
 DEFAULT_PLATFORM = "wechat_channels"
+
+# 平台内容形态注册表(发布执行层口径)
+#   video: mp4 直传(bot 实证: channels/douyin; xhs 视频笔记
+#          ——发布流待登录态联调, 形态支持)
+#   card : 平台无视频通道——降级图文卡(封面 PNG+文案);
+#          weibo-cli C 系无视频命令(2026-09-27 实证), 走
+#          36号 coverUrl 封面 + upload_pic/upload_url_text 三步
+SV73_PLATFORM_FORMS = {
+    "wechat_channels": "video",
+    "douyin": "video",
+    "xiaohongshu": "video",
+    "weibo": "card",
+}
 
 # 品类自动档(P1: category="auto" 经匹配引擎推荐)
 CATEGORY_AUTO = "auto"
@@ -230,15 +245,33 @@ class Sv73PipelineService:
                 "sv73": content.get("sv73", {}),
             },
             "reused": reused,
-            "nextSteps": (
-                "content 待 36号人工三审: POST /api/promo/contents/"
+            "platformForm": SV73_PLATFORM_FORMS.get(
+                platform, "video"),
+            "nextSteps": self._next_steps(content, platform),
+        }
+
+    @staticmethod
+    def _next_steps(content: dict, platform: str) -> str:
+        """发布链指引(按平台形态注入执行层口径)"""
+        if content.get("status") != "pending":
+            return (f"content 状态 {content.get('status')}"
+                    "(发布链未开——三审闸门不动)")
+        form = SV73_PLATFORM_FORMS.get(platform, "video")
+        base = ("content 待 36号人工三审: POST /api/promo/contents/"
                 f"{content.get('contentId')}/review → approve 后 "
                 "publish_content → process_publish_queue 挂 "
-                "rpa_pending(channels/douyin-bot RPA 发布)"
-                if content.get("status") == "pending" else
-                f"content 状态 {content.get('status')}"
-                "(发布链未开——三审闸门不动)"),
-        }
+                "rpa_pending")
+        if form == "card":
+            return (base
+                    + f"(微博 card 形态: weibo-cli C 系无视频"
+                      "命令——36号 coverUrl 封面下载 + "
+                      "upload_pic/upload_url_text 三步图文卡, "
+                      "--mblog_statement 1 必带)")
+        if platform == "xiaohongshu":
+            return (base
+                    + "(xhs-bot.js 视频笔记——发布流 DOM 待"
+                      "登录态联调)")
+        return base + f"(channels/douyin-bot RPA {form} 直传)"
 
     # ---------- 产物挂载(分段语义: 开发机渲染 → 元数据回填) ----------
 

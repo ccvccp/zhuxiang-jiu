@@ -50,7 +50,9 @@ class PipelineRunRequest(BaseModel):
     category: str = Field("竹香型白酒",
                           description="主推品类; auto=匹配引擎推荐(P1)")
     platform: str = Field(DEFAULT_PLATFORM,
-                          description="发布平台(wechat_channels/douyin)")
+                          description="发布平台(wechat_channels/douyin/"
+                                      "xiaohongshu/weibo; weibo 为 card "
+                                      "图文卡降级形态)")
     persona: str = Field("zhuxiaomei", description="IP 人设注册表键")
     template: str = Field(DEFAULT_TEMPLATE,
                          description="视频模板(vertical/landscape/fast)")

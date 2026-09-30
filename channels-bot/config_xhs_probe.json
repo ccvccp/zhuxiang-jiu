@@ -1,0 +1,4 @@
+{
+  "action": "probe",
+  "waitLoginMinutes": 8
+}

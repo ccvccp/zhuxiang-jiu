@@ -262,9 +262,11 @@ def test_r6_rpa_pending_full_chain(monkeypatch):
 
 
 def test_r7_platform_whitelist():
+    # 平台扩展后白名单=四平台(wechat_channels/douyin/xhs/weibo);
+    # 真未知平台仍拒(weibo 已合法——见 test_sv73_platform.py)
     with pytest.raises(ValueError):
         _run(Sv73PipelineService().run(
-            dict(HOTSPOT), platform="weibo"))
+            dict(HOTSPOT), platform="bilibili"))
 
 
 # ------------------------------------------------------------

@@ -1,0 +1,7 @@
+{
+  "action": "publish",
+  "mp4": "D:/网站架构设计/zhuxiang-jiu/backend/sv73_videos/REPLACE_SCRIPTID.mp4",
+  "title": "替换为清单标题",
+  "desc": "替换为清单正文+话题(每条 # 开头)",
+  "waitLoginMinutes": 8
+}
