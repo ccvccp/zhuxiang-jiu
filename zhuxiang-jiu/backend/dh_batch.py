@@ -77,10 +77,14 @@ ADH = {
 }
 # 口播基准图: 本地(随代码版本) → 每次跑批前自动上传远端(md5 校验)
 DH_IMAGE_LOCAL = Path(__file__).resolve().parent / "assets" / "ip" / "zhuxiaomei_front.jpg"
-DH_IMAGE_REMOTE = "/root/autodl-tmp/assets/ip/zhuxiaomei_front.jpg"
-REMOTE_ROOT = "/root/autodl-tmp/_prodyvid"
-REMOTE_SVC = ("/root/autodl-tmp/services/"
-              "sv73_digital_human_service.py")
+DH_IMAGE_REMOTE = "/root/assets/ip/zhuxiaomei_front.jpg"
+# 远端布局(2026-10-01 Pro 迁移: SadTalker 挪入系统盘随镜像, 数据盘
+# /root/autodl-tmp 不再依赖——Pro create 全新实例无数据盘)
+DH_SADTALKER_DIR = "/root/SadTalker"
+REMOTE_ROOT = "/root/_prodyvid"
+DH_SVC_LOCAL = (Path(__file__).resolve().parent / "services"
+                / "sv73_digital_human_service.py")
+REMOTE_SVC = "/root/services/sv73_digital_human_service.py"
 
 
 # ---------- 生产管道 ----------
@@ -141,14 +145,16 @@ def http(method, path, body=None, token=""):
 
 # ---------- 算力机 SSH ----------
 
-def ssh_connect(tries=30, wait=10):
+def ssh_connect(tries=30, wait=10, overrides=None):
     last = ""
+    conn = dict(ADH, **(overrides or {}))
     for _ in range(tries):
         try:
             c = paramiko.SSHClient()
             c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            c.connect(ADH["host"], port=ADH["port"], username=ADH["user"],
-                      password=ADH["password"],
+            c.connect(conn["host"], port=int(conn["port"]),
+                      username=conn["user"],
+                      password=conn["password"],
                       look_for_keys=False, allow_agent=False, timeout=15)
             return c
         except Exception as e:  # noqa: BLE001
@@ -241,7 +247,7 @@ from pathlib import Path
 os.environ['SV73_VIDEO_DIR'] = '{REMOTE_ROOT}'
 os.environ['SV73_DH_IMAGE'] = '{DH_IMAGE_REMOTE}'
 os.environ['SV73_DH_MODE'] = 'real'
-os.environ['SV73_SADTALKER_DIR'] = '/root/autodl-tmp/SadTalker'
+os.environ['SV73_SADTALKER_DIR'] = '{DH_SADTALKER_DIR}'
 spec = importlib.util.spec_from_file_location("dh", "{REMOTE_SVC}")
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
@@ -305,6 +311,9 @@ def main() -> int:
                     help="跑完不自动关机(默认关)")
     ap.add_argument("--min-balance", type=float, default=10.0,
                     help="余额止损阈值(¥, 默认 10; 低于即退出不跑)")
+    ap.add_argument("--pro", default="",
+                    help="容器实例Pro uuid——snapshot 动态取 SSH 连接,"
+                         "跑批后 API power_off(普通实例缺省走 ADH env)")
     args = ap.parse_args()
     sids = [s.strip() for s in
             (args.sids or args.sid or "").split(",") if s.strip()]
@@ -332,19 +341,39 @@ def main() -> int:
         if "POWER_ON OK" not in r.stdout:
             return 1
 
+    # SSH 连接: --pro=API snapshot 动态取(Pro 实例每次 create 连接信息
+    # 都变) / 缺省=普通实例 ADH env 硬编码
+    overrides = None
+    if args.pro:
+        print(f"[Pro] snapshot 动态连接 ({args.pro[:12]}...) ...")
+        from adh_power import call as adl_call
+        b = adl_call("GET", "/api/v1/dev/instance/pro/snapshot",
+                     {"instance_uuid": args.pro})
+        d = b.get("data") or {}
+        if b.get("code") != "Success" or not d.get("proxy_host"):
+            print("  snapshot 失败:", json.dumps(b, ensure_ascii=False)[:200])
+            return 1
+        overrides = {"host": d["proxy_host"],
+                     "port": int(d.get("ssh_port") or 0),
+                     "user": "root",
+                     "password": d.get("root_password", "")}
+        print(f"  {overrides['host']}:{overrides['port']}")
     print("[SSH] 就绪轮询 ...")
-    ssh = ssh_connect()
+    ssh = ssh_connect(overrides=overrides)
 
     print("[KEY] 生产凭证管道 ...")
     token = prod_token()
     key = prod_llm_key()
 
-    print("[基准图] 竹小妹定版图上传(随代码版本, md5 校验) ...")
-    if not DH_IMAGE_LOCAL.is_file():
-        print(f"  缺基准图: {DH_IMAGE_LOCAL}")
+    # 素材/服务文件上传(随代码版本——Pro 全新实例不依赖旧数据盘)
+    print("[基准图] 竹小妹定版图上传(md5 校验) ...")
+    if not DH_IMAGE_LOCAL.is_file() or not DH_SVC_LOCAL.is_file():
+        print(f"  缺素材: {DH_IMAGE_LOCAL} / {DH_SVC_LOCAL}")
         return 1
-    run(ssh, "mkdir -p /root/autodl-tmp/assets/ip")
+    run(ssh, f"mkdir -p {DH_IMAGE_REMOTE.rsplit('/', 1)[0]}"
+             f" {REMOTE_ROOT} {REMOTE_SVC.rsplit('/', 1)[0]}")
     push(ssh, DH_IMAGE_LOCAL, DH_IMAGE_REMOTE)
+    push(ssh, DH_SVC_LOCAL, REMOTE_SVC)
 
     ok = fail = 0
     for sid in sids:
@@ -355,13 +384,21 @@ def main() -> int:
 
     print(f"== 批量完成: {ok} ok / {fail} fail ==")
     if not args.no_shutdown:
-        print("[关机] 容器内 shutdown(官方指令, 停止计费) ...")
-        try:
-            ssh.exec_command("shutdown")
-            time.sleep(3)
-        finally:
+        if args.pro:
+            print("[关机] Pro API power_off ...")
+            from adh_power import call as adl_call
             ssh.close()
-        print("    已下发关机——控制台核对状态")
+            b = adl_call("POST", "/api/v1/dev/instance/pro/power_off",
+                         {"instance_uuid": args.pro})
+            print("    power_off:", b.get("code"), b.get("msg", ""))
+        else:
+            print("[关机] 容器内 shutdown(官方指令, 停止计费) ...")
+            try:
+                ssh.exec_command("shutdown")
+                time.sleep(3)
+            finally:
+                ssh.close()
+            print("    已下发关机——控制台核对状态")
     else:
         ssh.close()
     return 0 if fail == 0 else 1

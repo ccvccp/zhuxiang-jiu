@@ -1,6 +1,12 @@
 """AutoDL 实例 API 开关机工具(数字人 GPU 轨自动编排配套)
 
-用法: python adh_power.py <on|off|status|list|balance> [--uuid <uuid>]
+用法: python adh_power.py <on|off|status|list|balance|images|create|snapshot>
+      on/off/status [--uuid <uuid>]          实例电源(Pro 形态)
+      balance                               余额(¥, 通用)
+      images                                私有镜像列表(image_uuid)
+      create --image <uuid> [--gpu 5090-p] [--disk 0] [--name x]
+                                            创建 Pro 实例(私有镜像启动)
+      snapshot --uuid <uuid>                SSH 连接信息(dh_batch --pro 用)
 Token: ADH_API_TOKEN env 或 ADH_TOKEN_FILE env 指向的文件(单行)
 实例 UUID: ADH_INSTANCE_UUID env 或 --uuid(缺省走 list 探测唯一实例)
 
@@ -45,6 +51,15 @@ def _uuid(argv: list) -> str:
     u = os.environ.get("ADH_INSTANCE_UUID", "").strip()
     if u:
         return u
+    return ""
+
+
+def _opt(argv: list, flag: str) -> str:
+    """命令行 --flag value 取值(缺省空串)"""
+    if flag in argv:
+        i = argv.index(flag)
+        if i + 1 < len(argv):
+            return argv[i + 1]
     return ""
 
 
@@ -114,6 +129,60 @@ def main() -> int:
         spent = int(d.get("accumulate") or 0) / 1000
         print(f"余额 ¥{yuan:.2f}(累计消费 ¥{spent:.2f})")
         return 0 if b.get("code") == "Success" else 1
+
+    if action == "images":
+        # 私有镜像列表(保存镜像后查 image_uuid)
+        b = call("POST", "/api/v1/dev/image/private/list",
+                 {"page_index": 1, "page_size": 20})
+        items = ((b.get("data") or {}).get("list")
+                 if isinstance(b.get("data"), dict) else []) or []
+        for it in items:
+            print(f"{it.get('image_uuid')}  {it.get('image_name')}")
+        if not items:
+            print("(空——先在控制台『保存镜像』)", json.dumps(
+                b, ensure_ascii=False)[:200])
+        return 0
+
+    if action == "create":
+        # Pro 实例创建(5090-p + 私有镜像——2026-10-01 迁移实施)
+        img = _opt(argv, "--image")
+        if not img:
+            print("create 须 --image <私有镜像UUID>(images 命令查)")
+            return 2
+        body = {
+            "req_gpu_amount": 1,
+            "expand_system_disk_by_gb": int(_opt(argv, "--disk") or "0"),
+            "gpu_spec_uuid": _opt(argv, "--gpu") or "5090-p",
+            "image_uuid": img,
+            "cuda_v_from": 128,   # 镜像含 torch cu128——主机驱动须 ≥12.8
+            "instance_name": _opt(argv, "--name") or "zhuxiang-dh",
+        }
+        b = call("POST", "/api/v1/dev/instance/pro/create", body)
+        d = b.get("data")
+        print("create:", b.get("code"), d, b.get("msg", ""))
+        if b.get("code") == "Success" and d:
+            print("CREATED", d)   # 实例 uuid——后续 on/snapshot/off 用
+        return 0 if b.get("code") == "Success" else 1
+
+    if action == "snapshot":
+        # 实例详情(SSH 地址/端口/密码——dh_batch --pro 动态连接用)
+        u = _uuid(argv)
+        if not u:
+            print("snapshot 须 --uuid 或 ADH_INSTANCE_UUID")
+            return 2
+        b = call("GET", "/api/v1/dev/instance/pro/snapshot",
+                 {"instance_uuid": u})
+        d = b.get("data") or {}
+        if b.get("code") != "Success":
+            print("snapshot 失败:", json.dumps(b, ensure_ascii=False)[:200])
+            return 1
+        print("ssh:", d.get("ssh_command"))
+        print("SNAPSHOT_JSON", json.dumps(
+            {"host": d.get("proxy_host"), "port": d.get("ssh_port"),
+             "password": d.get("root_password"),
+             "status_note": d.get("usage_info", {}).get("valid")},
+            ensure_ascii=False))
+        return 0
 
     u = _resolve_uuid(argv)
 

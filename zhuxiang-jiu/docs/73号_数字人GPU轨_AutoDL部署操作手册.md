@@ -151,9 +151,17 @@ pro/*); **网页控制台租的普通实例(本项目 5090D)不在 API 体系**(
 空实证)。故:
 - **当前半自动**(普通实例): 控制台人工开机(约 10 秒)→ dh_batch
   全自动跑批+自动关机; `wallet/balance` 余额止损检查 Token 即用
-- **全自动路径**(P2 规模化项, 触发条件同 §四周产 >20 条): 保存
-  自定义镜像(SadTalker 全环境入系统盘)→ 迁"容器实例 Pro"形态
-  (5090-p 规格)→ adh_power create/on + 跑批 + power_off 全 API 无人值守
+- **Pro 全自动迁移(2026-10-01 实施受阻实录)**:
+  - ✓ 环境固化: SadTalker 挪入系统盘(/root/SadTalker 2.5G, torch
+    cu128 冒烟过), 关机态保存镜像 **zhuxiang-dh-sadtalker**
+    (image-c255400f08)——环境随时可复现(普通实例换镜像/Pro create)
+  - ✓ 工具就绪: adh_power 新增 images/create/snapshot; dh_batch
+    `--pro <uuid>` 模式(snapshot 动态 SSH+服务/图自上传+API 关机)
+  - ✗ **create 被平台拒**: 全规格(5090-p/4090D/v-48g/h800)×
+    公共/私有镜像均报"无当前资源访问权限"(读接口全通——判定账号
+    级 Pro 功能未开放, 非代码/规格问题)。**待 AutoDL 客服确认
+    开通**; 开通后 `adh_power.py create --image image-c255400f08
+    --gpu 5090-p --disk 10` 即起全环境实例, dh_batch --pro 全链
 
 **adh_power.py**(AutoDL 官方开放 API 工具):
 - `python adh_power.py balance|list|status|on|off` —— api.autodl.com,
