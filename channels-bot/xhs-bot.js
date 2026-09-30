@@ -523,47 +523,14 @@ const XHS_MANAGE = 'https://creator.xiaohongshu.com/new/manage';
       // 删记录, 彻底绕过 UI 层与安全盾。
       // 结构(12:58 diag 实证): draft-database-v1 四 store
       // (article/audio/image/video-draft), keyPath=draftId;
-      // match 为空=全删, 非空=只删 JSON 含 match 的记录
+      // match 为空=全删, 非空=只删 JSON 含 match 的记录。
+      // 逻辑抽至 xhs_draft_db.js(与 node:test 单测共用同一份
+      // 函数体, 测试不漂移)
+      const { deleteDraftsInPage } = require('./xhs_draft_db');
       const matchTitle = String(CFG.match || '');
-      const delResult = await page.evaluate((m) => new Promise((resolve) => {
-        const req = indexedDB.open('draft-database-v1');
-        req.onsuccess = () => {
-          const db = req.result;
-          const storeNames = Array.from(db.objectStoreNames);
-          const out = { deleted: 0, perStore: {} };
-          let pending = storeNames.length;
-          if (!pending) { db.close(); return resolve(out); }
-          const finish = () => {
-            if (--pending === 0) { db.close(); resolve(out); }
-          };
-          for (const name of storeNames) {
-            const tx = db.transaction(name, 'readwrite');
-            const st = tx.objectStore(name);
-            out.perStore[name] = { before: 0, deleted: 0 };
-            const c = st.count();
-            c.onsuccess = () => {
-              out.perStore[name].before = c.result;
-              const cur = st.openCursor();
-              cur.onsuccess = () => {
-                const cursor = cur.result;
-                if (cursor) {
-                  const raw = JSON.stringify(cursor.value || {});
-                  if (!m || raw.includes(m)) {
-                    cursor.delete();
-                    out.deleted++;
-                    out.perStore[name].deleted++;
-                  }
-                  cursor.continue();
-                }
-              };
-              tx.oncomplete = finish;
-              tx.onerror = finish;
-            };
-            c.onerror = finish;
-          }
-        };
-        req.onerror = () => resolve({ err: String(req.error) });
-      }), matchTitle).catch((e) => ({ err: String(e) }));
+      const delResult = await page.evaluate(
+        deleteDraftsInPage, matchTitle
+      ).catch((e) => ({ err: String(e) }));
       LOG('DB_DELETE: ' + JSON.stringify(delResult).slice(0, 400));
       // 弹窗内验证(顶部入口计数是快照不可靠, 以重开弹窗列表为准)
       await sleep(2000);
