@@ -3,14 +3,23 @@
 // 端口, 剥 --enable-automation 拟真) + 独立 xhs-profile 持久登录态。
 // 与 channels/douyin 通道完全隔离(独立 profile/日志/产物前缀)。
 //
-// ⚠️ 发布流 DOM 状态: xhs 创作者中心发布页未实机校准(36号 SOP
-// 实证过图文口径, 发布按钮在闭合 shadow DOM)——publish 流按通用
-// 结构编写 + 全程 dump/截图兜底, 首次联调按留档校准选择器。
-// probe/manage 两 action 已可直接使用(登录态检测/作品列表)。
+// ⚠️ 发布流联调实证(2026-09-30, 19 轮定稿):
+//   · probe / manage / draft 三 action 实证可用(publish 全自动
+//     受限见下)
+//   · 新上传流底部操作栏是「暂存离开」+「定时发布」(红主钮),
+//     无「发布」钮; 定时弹窗仅时间选项无立即发布(全自动待校准)
+//   · 转码窗口期: 视频上传完成≠可发布, xhs 需服务端转码,
+//     转码未完成时点发布会被静默转存草稿——发布流收敛为:
+//     publish(上传+填写) → 「暂存离开」 → draft 流(草稿箱
+//     编辑页底部直接有红「发布」钮, 点击即成功, 第 19 轮实证)
+//   · 草稿箱入口: 登录后首页, 与红「发布笔记」按钮同一条线
+//   · manage: 旧 /manage 与 /new/manage 均 404——须首页侧边栏
+//     「笔记管理」菜单导航进入(点击式)
+//   · 发布成功特征: URL 跳 publish/success(第 19 轮 bot 捕捉)
 //
 // 用法: node xhs-bot.js <config.json>
-// config: { action: "probe"|"publish"|"manage",
-//           mp4, title, desc, waitLoginMinutes }
+// config: { action: "probe"|"publish"|"manage"|"draft",
+//           mp4, title, desc, waitLoginMinutes, manualWaitMinutes }
 const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 
@@ -25,7 +34,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const XHS_HOME = 'https://creator.xiaohongshu.com/';
 // 视频笔记发布页(probe 阶段现场校准)
 const XHS_UPLOAD = 'https://creator.xiaohongshu.com/publish/publish?source=official';
-const XHS_MANAGE = 'https://creator.xiaohongshu.com/manage';
+// 笔记管理页(联调第 19 轮实证: 旧 /manage 已 404, 改版规律 /new/*)
+const XHS_MANAGE = 'https://creator.xiaohongshu.com/new/manage';
 
 (async () => {
   const browser = await puppeteer.launch({
@@ -123,20 +133,61 @@ const XHS_MANAGE = 'https://creator.xiaohongshu.com/manage';
   }
 
   if (CFG.action === 'manage') {
-    await page.goto(XHS_MANAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    // 联调第 19 轮实证: 旧 /manage 与 /new/manage 均 404——改版后
+    // 须从首页侧边栏「笔记管理」菜单导航进入(点击式, 非 URL 直达)
+    const clickManageMenu = () => page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('a, [role=menuitem], li, span, div'));
+      const hit = els.find(e => (e.innerText || '').trim() === '笔记管理');
+      if (hit) hit.click();
+      return !!hit;
+    }).catch((e) => { LOG('click 笔记管理 err: ' + e.message); return false; });
+    if (!(await clickManageMenu())) {
+      LOG('MANAGE_MENU_NOT_FOUND — dump 留档');
+      await dumpFrames('manage_nomenu');
+    }
     await sleep(8000);
     if (loginPageLike(page.url(), '')) {
       if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
-      await page.goto(XHS_MANAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await clickManageMenu();
       await sleep(8000);
     }
     await page.screenshot({ path: 'xhs_manage_1.png' });
     const items = await page.evaluate(() =>
-      (document.body.innerText || '').slice(0, 1500)).catch(() => '');
+      (document.body.innerText || '').slice(0, 2000)).catch(() => '');
     fs.writeFileSync('xhs_manage_items.txt', items);
-    LOG('MANAGE_DONE (xhs_manage_items.txt)');
+    LOG('MANAGE_DONE url=' + page.url().slice(0, 100) + ' (xhs_manage_items.txt)');
     await browser.close();
     process.exit(0);
+  }
+
+  if (CFG.action === 'draft') {
+    // 联调第 19 轮: 草稿恢复流——18 轮实证根因: 上传完成≠可发布,
+    // xhs 视频需服务端转码, 转码窗口期点「发布」会被静默转存草稿。
+    // 此 action 打开首页停住: 人工从左侧「草稿箱」进编辑页点发布
+    // (此时转码已完成), bot 轮询成功特征收口(同一 tab 内操作)
+    LOG('=== 请人工操作: 左侧「草稿箱」→ 草稿「编辑」→ 点红「发布」 ===');
+    let ok = false;
+    let finalUrl = page.url();
+    const deadline = Date.now() + (CFG.manualWaitMinutes || 10) * 60000;
+    while (Date.now() < deadline) {
+      await sleep(3000);
+      finalUrl = page.url();
+      const t = await page.evaluate(
+        () => (document.body.innerText || '').slice(0, 600)
+      ).catch(() => '');
+      if (/发布成功|正在发布|审核中|定时成功|定时发布成功/.test(t) || /\/manage/.test(finalUrl)) {
+        ok = true;
+        break;
+      }
+    }
+    await page.screenshot({ path: ok ? 'xhs_publish_ok.png' : 'xhs_draft_after.png' });
+    fs.writeFileSync('xhs_publish_result.json', JSON.stringify({
+      ok, url: finalUrl, at: Date.now(),
+      note: ok ? 'draft-recovery publish' : 'draft 流人工操作未完成',
+    }, null, 2));
+    LOG((ok ? 'PUBLISH_OK' : 'PUBLISH_UNVERIFIED') + ' url=' + finalUrl.slice(0, 100));
+    await browser.close();
+    process.exit(ok ? 0 : 6);
   }
 
   if (CFG.action === 'publish') {
@@ -194,47 +245,93 @@ const XHS_MANAGE = 'https://creator.xiaohongshu.com/manage';
     if (CFG.title) await fillEditor(CFG.title, 0);
     if (CFG.desc) await fillEditor(CFG.desc, 1);
     await sleep(1500);
+    // 关闭话题推荐下拉浮层(联调实证 2026-09-30: 正文输入后
+    // 「#xx」话题建议浮层 z-index 高, 会盖住底部操作栏致
+    // elementFromPoint 命中浮层——ESC 失焦关闭后再定位)
+    await page.keyboard.press('Escape').catch(() => {});
+    await sleep(800);
     await page.screenshot({ path: 'xhs_publish_1_filled.png' });
-    // 4. 点发布(含闭合 shadow DOM 穿透备选——36号 roadmap 实证坑)
-    const publishPt = await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button, [role=button], div[class*=publish], span[class*=publish]'));
-      const hit = btns.find(e => /^发\s*布$|发布笔记/.test((e.innerText || '').trim()));
-      if (hit) { const r = hit.getBoundingClientRect(); if (r.width > 0) { hit.scrollIntoView({ block: 'center' }); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; } }
-      // shadow 穿透: 遍历所有 shadowRoot 查发布按钮
-      const dig = (root) => {
-        for (const el of root.querySelectorAll('*')) {
-          if (el.shadowRoot) { const r = dig(el.shadowRoot); if (r) return r; }
-          if (/^发\s*布$/.test((el.innerText || el.textContent || '').trim().slice(0, 8))) {
-            const r = el.getBoundingClientRect();
-            if (r.width > 0) { el.scrollIntoView({ block: 'center' }); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }
+    // 底部操作栏裁剪放大(联调: 红色「发布」按钮坐标定位源)
+    await page.screenshot({
+      path: 'xhs_publish_bottom.png',
+      clip: { x: 800, y: 700, width: 480, height: 200 },
+    });
+    // 4. 点发布(联调实证 2026-09-30, 八轮迭代定稿):
+    //    · 真根因: fillEditor 点击正文后页面滚至编辑区, 底部
+    //      操作栏(文档流末尾, 非 fixed)滚出视口——此前所有
+    //      elementFromPoint/扫描命中的都是正文元素
+    //    · 修法: 滚到文档底 → 视口内 elementFromPoint 扫描
+    //    · 侧边栏「发布笔记」(x~104)勿碰, 主区 x>300
+    let publishPt = null;
+    for (let attempt = 0; attempt < 2 && !publishPt; attempt++) {
+      publishPt = await page.evaluate(() => {
+        const zh = (s) =>
+          (s || '').replace(/[^\u4e00-\u9fa5]/g, '');
+        for (let y = 90; y < 895; y += 8) {
+          for (let x = 320; x < 1275; x += 12) {
+            const el = document.elementFromPoint(x, y);
+            if (!el) continue;
+            const z = zh(el.textContent);
+            // 联调第 19 轮终极实证: xhs 视频笔记发布页底部主按钮
+            // 文案是「定时发布」(红), 并非「发布」——此前 16 轮
+            // 扫描 miss 的真正根因; 「暂存离开」白钮不含发布不误匹配
+            if (z === '发布' || z === '发布笔记' || z === '定时发布') {
+              return { x, y };
+            }
           }
         }
         return null;
-      };
-      return dig(document);
-    }).catch(() => null);
-    if (!publishPt) {
-      LOG('PUBLISH_BTN_NOT_FOUND — dump 留档供选择器校准');
-      await dumpFrames('publish_nobtn');
-      await page.screenshot({ path: 'xhs_publish_fail_3.png' });
-      await browser.close();
-      process.exit(5);
+      }).catch(() => null);
+      if (!publishPt) await sleep(2000);
     }
-    LOG('publish btn pt: ' + JSON.stringify(publishPt));
-    await page.evaluate((p) => { const hit = document.elementFromPoint(p.x, p.y); if (hit) hit.click(); }, publishPt).catch(() => {});
-    await sleep(2500);
-    // CDP 真实点击兜底(合成点击无反应时)
-    const cdp = await page.createCDPSession();
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: publishPt.x, y: publishPt.y, button: 'none', pointerType: 'mouse' });
-    await sleep(150);
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: publishPt.x, y: publishPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
-    await sleep(90);
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: publishPt.x, y: publishPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+    if (!publishPt) {
+      // 联调第 18 轮定稿: 坐标兜底乱点已废弃——实证曾误触
+      // 重置类操作致表单清空回上传初始态(红「上传视频」入口)。
+      // 人工模式 miss 即停, 交人工点「发布」; DPR 留证仅作缩放排查
+      const dpr = await page.evaluate(
+        () => window.devicePixelRatio).catch(() => 0);
+      LOG('scan miss — DPR=' + dpr
+        + ' 跳过自动点击, 人机协作等待人工点「发布」');
+    } else {
+      LOG('publish btn pt: ' + JSON.stringify(publishPt));
+      // 滚动后再拍底部裁剪验证(按钮入视口)
+      await page.screenshot({
+        path: 'xhs_publish_bottom.png',
+        clip: { x: 800, y: 680, width: 480, height: 220 },
+      });
+      // 合成点击(仅真实命中时)
+      await page.evaluate((p) => { const hit = document.elementFromPoint(p.x, p.y); if (hit) hit.click(); }, publishPt).catch(() => {});
+      await sleep(2500);
+      // CDP 真实点击兜底(合成点击无反应时)
+      const cdp = await page.createCDPSession();
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: publishPt.x, y: publishPt.y, button: 'none', pointerType: 'mouse' });
+      await sleep(150);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: publishPt.x, y: publishPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+      await sleep(90);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: publishPt.x, y: publishPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+    }
     await sleep(8000);
-    // 5. 成功特征(跳管理页/成功提示)
-    const finalUrl = page.url();
-    const finalText = await page.evaluate(() => (document.body.innerText || '').slice(0, 600)).catch(() => '');
-    const ok = /manage|发布成功/.test(finalUrl + finalText);
+    // 5. 人工确认等待(联调第 17 轮定稿: 自动化定位 16 轮未果——
+    //    切人机协作, 对齐 36号"对话内 browser agent"SOP 原始
+    //    语义: bot 上传+填写后停住, 人工点「发布」, bot 检测
+    //    URL 跳转/成功提示后继续)
+    let ok = false;
+    let finalUrl = page.url();
+    const MANUAL_WAIT = (CFG.manualWaitMinutes || 6) * 60000;
+    LOG('=== 请在 Chrome 窗口人工点击红色「发布」按钮 (等待 '
+      + Math.round(MANUAL_WAIT / 60000) + ' 分钟) ===');
+    const manualDeadline = Date.now() + MANUAL_WAIT;
+    while (Date.now() < manualDeadline) {
+      await sleep(3000);
+      finalUrl = page.url();
+      const t = await page.evaluate(
+        () => (document.body.innerText || '').slice(0, 600)
+      ).catch(() => '');
+      if (/manage|发布成功|正在发布/.test(finalUrl + t)) {
+        ok = true;
+        break;
+      }
+    }
     await page.screenshot({ path: ok ? 'xhs_publish_ok.png' : 'xhs_publish_after.png' });
     fs.writeFileSync('xhs_publish_result.json', JSON.stringify({
       ok, url: finalUrl, at: Date.now(), note: ok ? '' : 'DOM 未校准——按 xhs_publish_after.png / xhs_probe_*.json 留档校准选择器',

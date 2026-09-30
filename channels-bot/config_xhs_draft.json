@@ -1,0 +1,5 @@
+{
+  "action": "draft",
+  "waitLoginMinutes": 5,
+  "manualWaitMinutes": 10
+}

@@ -20,3 +20,9 @@ keepalive_*.lock
 keepalive_*.wake
 config_ka_run_*.json
 snapshots/
+# 小红书通道运行产物(2026-09-30; bot 代码/配置入库, 产物留档不入库;
+# xhs-profile 含登录态严禁入库)
+xhs-profile/
+xhs_bot.log
+xhs_*.json
+xhs_manage_items.txt
