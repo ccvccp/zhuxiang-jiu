@@ -11,7 +11,8 @@
     SV73_TTS_MODE=on          78号竹语 TTS(口播音轨源)
     SV73_DH_MODE=real         数字人推理开(本脚本核心)
     SV73_SADTALKER_DIR=...    SadTalker 仓库根(2026-09-30 实证部署:
-                              numpy 1.23.4 + torch 2.7.1+cu128 + sed 补丁)
+                              numpy 2.5.3 + torch 2.7.1+cu128 +
+                              ravel/ffmpeg 补丁, 见手册 §二)
     SV73_DH_IMAGE=...         口播基准图(P1 占位: 金鹿 IP 图)
     SV73_DH_CMD=...           推理命令模板(四占位符, 可覆盖)
 
@@ -24,7 +25,8 @@
 
 方案修正(2026-09-30 GPU 机实证): 原评估 LivePortrait main 无
 audio-driven——按 docx 方案 B 列名的 SadTalker 落地(5090D 出片
-实证)。命令模板含产物时间戳目录对齐段, 走 bash -c。
+实证)。产物落 result_dir 根级 {timestamp}.mp4, 模板尾部 find 按
+修改时间取最新对齐 {out}, 走 bash -c。
 """
 
 import argparse
@@ -103,7 +105,7 @@ def _call(method, url, body=None, token=""):
 def main():
     ap = argparse.ArgumentParser(
         description="73号 数字人 GPU 轨算力机一键脚本"
-                    "(拉 storyboard→TTS→LivePortrait→attach)")
+                    "(拉 storyboard→TTS→SadTalker→attach)")
     ap.add_argument("scriptId",
                     help="剧本号(dh_oral 模板, 如 sv73_xxx)")
     ap.add_argument("--api", default="https://zxjiu.com",
@@ -156,8 +158,8 @@ def main():
     pages = render.render_pages(storyboard)
     print(f"  wav={audio} pages={len(pages)}")
 
-    # ②c LivePortrait GPU 推理(基准图+音频→口播 mp4)
-    print("[3/4] LivePortrait GPU 推理 ...")
+    # ②c SadTalker GPU 推理(基准图+音频→口播 mp4)
+    print("[3/4] SadTalker GPU 推理 ...")
     from services.sv73_digital_human_service import (
         Sv73DigitalHumanService, dh_mode)
     print(f"  SV73_DH_MODE={dh_mode()}")
@@ -170,7 +172,7 @@ def main():
         print(f"  推理失败(按 stderr 尾校准 SV73_DH_CMD): {e}")
         return 1
     video = Path(built["video"])
-    if built["engine"] == "liveportrait" and not video.is_file():
+    if built["engine"] != "mock" and not video.is_file():
         print("  失败: 推理产物缺失")
         return 1
     print(f"  mp4={built['video']} engine={built['engine']}"

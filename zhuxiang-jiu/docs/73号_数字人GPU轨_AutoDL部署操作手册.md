@@ -105,6 +105,30 @@ SV73_DH_MODE=mock  python build_dh_dev.py <scriptId>   # 干跑(生产 token)
 SV73_DH_MODE=real  python build_dh_dev.py <scriptId>   # 5090D 实弹(生产 token)
 ```
 
+### 生产全链首跑实录(2026-10-01, 拆链编排——build_dh_dev 四步分解)
+
+> GPU 机 import 巨网(render_service→36号 promo 链)不可控, 按分段铁律
+> 拆链: 本地编排(登记/TTS/attach) + 算力机只跑 GPU 推理(服务级形态)。
+
+0. **生产镜像更新**(前置): 生产容器代码旧无 dh_oral(pipeline/run 409)——
+   diff 5e05da4..055924d 取 5 文件(scp services/sv73_{script,pipeline,
+   render,digital_human}_service.py + Dockerfile)→ `docker compose up -d
+   --build backend`(备份 .bak-dh101 回滚通道; ffmpeg 层生效 ✓)
+1. **生产 pipeline/run**(template=dh_oral): `sv73_878abd957729`
+   (glm-4-flash 真实轨, 15s/1 镜, contentId=43 shadow/pending 三审闸门)
+2. **本地 TTS**(78号竹语): LLM_API_KEY 经 SSH 容器管道注入本进程
+   (printenv, 不落盘)→ `sv73_878abd957729_tts.wav`(703KB)
+3. **算力机推理**(real E2E): 基准图+wav 分块 base64+md5 双端校验上传 →
+   importlib 独立加载服务 → 5090D → `{sid}_dh.mp4`(**14.6s/800x1200/
+   25fps/3.4MB**——与 15s 注册时长对齐)→ 分块下载回本地
+4. **attach 回填**: POST /api/sv73/render/attach → **HTTP 200**,
+   contentId=43, renderSource=devmachine ✓(后续 36号人工三审→publish)
+
+**基准图铁律实证**: 金鹿 IP 角标(瑞兽图形)**无人脸**——SadTalker
+landmark 前置即败(`can not detect the landmark`)。数字人基准图必须为
+**含清晰人脸的正面照**; 竹小妹正式基准图定版前, P1 占位用 SadTalker
+官方示例真人图(full_body_1.png)。
+
 ## 四、成本控制规范
 
 | 场景 | 操作 |
@@ -126,5 +150,9 @@ SV73_DH_MODE=real  python build_dh_dev.py <scriptId>   # 5090D 实弹(生产 tok
 - [x] 单条 GPU 成本核: 全链实测 ~2.5-4 分钟/条(含模型加载 60-90s)×
       ￥1.88-2.88/时 ≈ **￥0.08-0.19/条**; 批量摊薄加载后 <￥0.1/条——
       远低于 ≤￥1/条红线, 方案 §五 ROI 触发器成立
-- [ ] build_dh_dev.py 生产全链首跑(待生产 SV73_TOKEN——TTS 走 78号竹语)
-- [ ] 关机规范执行(服务级验证已毕, 随时可关)
+- [x] 生产全链首跑(拆链编排): 生产镜像更新(5 文件+compose rebuild)
+      → pipeline/run `sv73_878abd957729`(glm-4-flash 轨) → 竹语 TTS
+      → 5090D 推理(14.6s mp4/3.4MB) → **attach 200 contentId=43** ✓
+- [ ] 竹小妹正式基准图定版(金鹿角标无人脸实证——须含清晰人脸正面照;
+      定版前占位 SadTalker 示例真人图)
+- [ ] 关机规范执行(服务级+生产全链已毕, 随时可关)
