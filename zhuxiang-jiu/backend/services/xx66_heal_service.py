@@ -297,6 +297,27 @@ class Xx66HealService:
         llm_desc = await self._llm_cause_desc(
             rule["rootCause"], fault_type, fault_source)
 
+        # P5b: 相似案例参考(P4 案例库接入——advisoryOnly:
+        # 仅参考呈现, 不改 rootCause/candidateActions 判定;
+        # 案例库故障 fail-soft 不阻断根因; 双未命中由 P4
+        # 既有语义回写 57号知识缺口)
+        similar_cases = None
+        try:
+            from services.xx66_knowledge_service import (
+                Xx66KnowledgeService,
+            )
+            search = await Xx66KnowledgeService().search_cases(
+                f'{rule["rootCause"]} {fault_source}',
+                top_k=3)
+            similar_cases = {
+                "hitCount": search.get("hitCount", 0),
+                "gapRecorded": search.get("gapRecorded",
+                                          False),
+                "hits": search.get("hits", []),
+            }
+        except Exception as exc:
+            logger.warning("xx66_case_search_failsoft: %s", exc)
+
         result = {
             "success": True, "recoveryId": recovery_id,
             "faultType": fault_type,
@@ -306,6 +327,7 @@ class Xx66HealService:
             "candidateActions": rule["candidateActions"],
             "llmDescription": llm_desc,
             "descSource": ("llm" if llm_desc else "rule"),
+            "similarCases": similar_cases,
             "diagnosedAt": ts(),
         }
         await self._log("diagnose", payload={
