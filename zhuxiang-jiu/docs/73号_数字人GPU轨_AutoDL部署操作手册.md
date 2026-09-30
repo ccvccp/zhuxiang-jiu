@@ -138,6 +138,27 @@ landmark 前置即败(`can not detect the landmark`)。数字人基准图必须�
 | 长期不用 | 关机(数据盘保留, 15 天不关机才释放) |
 | 规模化 | 周产 >20 条再评估包周(方案 §五规模门) |
 
+## 四点五、自动开/关机编排(2026-10-01 无人值守批量实录)
+
+**adh_power.py**(AutoDL 官方开放 API 开关机):
+- `python adh_power.py list|status|on|off` —— api.autodl.com,
+  开发者 Token(控制台→设置→开发者Token, **长期有效**, 与网页 session
+  无关)注入 `ADH_API_TOKEN` env; 实例 UUID 由 list 探测(唯一实例自动选)
+- `on` 内置轮询(5s×24 → running); 自动关机兜底通道: 容器内
+  `shutdown`(官方指令, dh_batch 默认走此——参数化 API 关机亦可)
+
+**dh_batch.py**(批量编排器, build_dh_dev 拆链四步正式化):
+```bash
+python dh_batch.py --boot --sids sv73_a,sv73_b   # 开机→跑批→自动关机
+python dh_batch.py --sid sv73_x --no-shutdown    # 单条, 不关机
+```
+- 单条流程: 拉 storyboard → 本地竹语 TTS(key 经生产容器管道注入,
+  不落盘) → 分块上传(md5 双端校验) → 远端 5090D E2E(importlib
+  独立加载) → 分块下载 → attach 生产
+- 实测: 单条全流程 **~3.5 分钟**(TTS 6s+上传 15s+推理 90s+下载 20s),
+  attach 200 ×2(contentId 43/44); 成本 ¥0.1-0.19/条
+- 批量摊薄(模型常驻/推理进程池)留 P2——当前 ≤¥1/条红线已达标
+
 ## 五、验收清单(2026-09-30/10-01 实录勾选)
 
 - [x] AutoDL 实例开通(RTX 5090D, 余额 ￥100)
@@ -153,6 +174,7 @@ landmark 前置即败(`can not detect the landmark`)。数字人基准图必须�
 - [x] 生产全链首跑(拆链编排): 生产镜像更新(5 文件+compose rebuild)
       → pipeline/run `sv73_878abd957729`(glm-4-flash 轨) → 竹语 TTS
       → 5090D 推理(14.6s mp4/3.4MB) → **attach 200 contentId=43** ✓
+- [x] 关机规范执行(2026-10-01 容器内 shutdown 官方指令——dh_batch
+      默认收尾同款; 开机自动化 adh_power.py 待开发者 Token 实测)
 - [ ] 竹小妹正式基准图定版(金鹿角标无人脸实证——须含清晰人脸正面照;
-      定版前占位 SadTalker 示例真人图)
-- [ ] 关机规范执行(服务级+生产全链已毕, 随时可关)
+      定版前占位 SadTalker 示例真人图; 定版后 SV73_DH_IMAGE 一配置即可)
