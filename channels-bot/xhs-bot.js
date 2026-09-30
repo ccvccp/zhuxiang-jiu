@@ -161,6 +161,212 @@ const XHS_MANAGE = 'https://creator.xiaohongshu.com/new/manage';
     process.exit(0);
   }
 
+  if (CFG.action === 'drafts_clean') {
+    // 草稿箱清理(2026-09-30 20 轮联调残留 29 条): 三模式——
+    //   · cleanMode:'list'(默认) 只进草稿箱 dump 清单不删;
+    //     加 manualWaitMinutes 则停住人工删除(实证有效路径:
+    //     65 秒手动连删 28 条, 无确认弹窗, 20:43 清零)
+    //   · cleanMode:'delete' CDP 逐条删除——实证对「删除」钮
+    //     坐标点击无效(发布钮 CDP 有效/删除钮无效, 差异未解;
+    //     44 轮 probe 确认命中 SPAN 删除钮本体但列表不减),
+    //     保留代码供后续事件序列探索
+    //   · 顶部「草稿箱(N)」入口计数是快照不实时刷新, 以弹窗内
+    //     列表/轮询计数为准
+    await page.goto(XHS_UPLOAD, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await sleep(5000);
+    if (!(await ensureLogin(page, 5 * 60000))) {
+      LOG('RELOGIN_TIMEOUT');
+      await browser.close();
+      process.exit(2);
+    }
+    // 点「草稿箱(N)」入口(发布页顶部, 与红「发布笔记」同条线)——
+    // 取文本匹配的最深叶子点击(外层容器不触发导航, 12:28 轮实证)
+    let opened = await page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('div, button, span, a'))
+        .filter((e) => /^草稿箱\(\d+\)$/.test((e.innerText || '').trim()));
+      const el = els[els.length - 1];
+      if (el) { el.click(); return true; }
+      return false;
+    }).catch(() => false);
+    LOG('drafts entry clicked: ' + opened);
+    // 等草稿列表特征(body 含「保存于」), 未出现则重试点击(最多 5 轮)
+    let listReady = false;
+    for (let i = 0; i < 5 && !listReady; i++) {
+      await sleep(3000);
+      const bodyHas = await page.evaluate(() =>
+        /保存于/.test((document.body.innerText || '').slice(0, 3000))
+      ).catch(() => false);
+      if (bodyHas) { listReady = true; break; }
+      opened = await page.evaluate(() => {
+        const els = Array.from(document.querySelectorAll('div, button, span, a'))
+          .filter((e) => /^草稿箱\(\d+\)$/.test((e.innerText || '').trim()));
+        const el = els[els.length - 1];
+        if (el) { el.click(); return true; }
+        return false;
+      }).catch(() => false);
+      LOG('drafts list not ready, re-click: ' + opened);
+    }
+    LOG('drafts list ready: ' + listReady);
+    await page.screenshot({ path: 'xhs_drafts_1.png' });
+    // dump 草稿列表条目: 标题 + 各按钮形态(探测删除入口)
+    const list = await page.evaluate(() => {
+      const items = [];
+      const cards = Array.from(document.querySelectorAll('*'))
+        .filter((e) => {
+          const r = e.getBoundingClientRect();
+          return r.width > 200 && r.height > 60 && r.x > 250 && r.y > 60;
+        });
+      // 以可见文本含「编辑」的叶子向上取卡片级容器
+      for (const c of cards) {
+        const txt = (c.innerText || '').trim();
+        if (!txt || txt.length > 300) continue;
+        if (/编辑/.test(txt)) {
+          items.push({
+            cls: String(c.className).slice(0, 50),
+            text: txt.slice(0, 120).replace(/\n/g, ' | '),
+            buttons: Array.from(c.querySelectorAll('button, [role=button], span, div'))
+              .map((b) => (b.innerText || '').trim().slice(0, 10))
+              .filter(Boolean).slice(0, 10),
+          });
+        }
+      }
+      return items.slice(0, 40);
+    }).catch((e) => [{ err: String(e) }]);
+    fs.writeFileSync('xhs_drafts_list.json', JSON.stringify(list, null, 2));
+    LOG('DRAFTS_LISTED ' + list.length + ' 条 (xhs_drafts_list.json / xhs_drafts_1.png)');
+    if (CFG.manualWaitMinutes) {
+      // 人工观察模式: 停住等人工在草稿箱弹窗手动操作(删除点击
+      // 行为实证), 每 5s 轮询计数留痕
+      LOG('=== 请人工在 Chrome 草稿箱弹窗手动点「删除」(观察行为) ===');
+      const dl = Date.now() + CFG.manualWaitMinutes * 60000;
+      while (Date.now() < dl) {
+        await sleep(5000);
+        const cnt = await page.evaluate(() => {
+          const el = Array.from(document.querySelectorAll('*'))
+            .find((e) => /^草稿箱\(\d+\)$/.test((e.innerText || '').trim()));
+          return el ? el.innerText.trim() : '弹窗内(n/a)';
+        }).catch(() => 'n/a');
+        LOG('drafts count: ' + cnt);
+      }
+      await page.screenshot({ path: 'xhs_drafts_manual_after.png' });
+      await browser.close();
+      process.exit(0);
+    }
+    if (CFG.cleanMode === 'delete') {
+      // 逐条删除: 只删 innerText 含 CFG.match 的 draft-item(联调
+      // 专属标题, 29 条实证全匹配)——xhs 校验 isTrusted, el.click()
+      // 合成点击无效(12:32 轮 45 次"删除"草稿箱纹丝不动实证);
+      // 全程 CDP Input.dispatchMouseEvent 真实点击(force=0.5)
+      const cdp = await page.createCDPSession();
+      const cdpClick = async (x, y) => {
+        await cdp.send('Input.dispatchMouseEvent',
+          { type: 'mouseMoved', x, y, button: 'none', pointerType: 'mouse' });
+        await sleep(120);
+        await cdp.send('Input.dispatchMouseEvent',
+          { type: 'mousePressed', x, y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+        await sleep(80);
+        await cdp.send('Input.dispatchMouseEvent',
+          { type: 'mouseReleased', x, y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+      };
+      const matchTitle = String(CFG.match || '国庆家宴白酒怎么选');
+      // 打开草稿浮层(body 含「保存于」即开)——实证: 删除一条后
+      // 浮层会关闭, 每轮删除前都要重开(顶部计数是快照不刷新)
+      const openDrafts = async () => {
+        for (let i = 0; i < 4; i++) {
+          const bodyHas = await page.evaluate(() =>
+            /保存于/.test((document.body.innerText || '').slice(0, 3000))
+          ).catch(() => false);
+          if (bodyHas) return true;
+          await page.evaluate(() => {
+            const els = Array.from(document.querySelectorAll('div, button, span, a'))
+              .filter((e) => /^草稿箱\(\d+\)$/.test((e.innerText || '').trim()));
+            const el = els[els.length - 1];
+            if (el) el.click();
+          }).catch(() => {});
+          await sleep(2500);
+        }
+        return false;
+      };
+      let deleted = 0;
+      await cdp.send('DOM.enable').catch(() => {});
+      for (let i = 0; i < 45; i++) {
+        if (!(await openDrafts())) {
+          LOG('drafts list unreachable, stop');
+          break;
+        }
+        // CDP pierce 定位列表首条「删除」钮(渲染引擎权威 boxModel
+        // 坐标, 发布钮已实证; y 最小=列表第一条)——DOM rect 定位
+        // 视觉合理但 CDP 点击 44 轮无效, 疑坐标/遮挡错位
+        let pt = null;
+        try {
+          const { nodes } = await cdp.send('DOM.getFlattenedDocument',
+            { depth: -1, pierce: true });
+          const delNodes = nodes.filter((n) =>
+            n.nodeType === 3 && (n.nodeValue || '').trim() === '删除');
+          let best = null;
+          for (const t of delNodes) {
+            const parent = nodes.find((n) => n.nodeId === t.parentId);
+            if (!parent) continue;
+            const bm = await cdp.send('DOM.getBoxModel',
+              { nodeId: parent.nodeId }).catch(() => null);
+            if (!bm || !bm.model) continue;
+            const c = bm.model.content;
+            const x = (c[0] + c[4]) / 2;
+            const y = (c[1] + c[5]) / 2;
+            if (x > 900 && x < 1280 && y > 100 && y < 880) {
+              if (!best || y < best.y) best = { x, y };
+            }
+          }
+          if (best) pt = { x: Math.round(best.x), y: Math.round(best.y) };
+        } catch (e) { LOG('pierce err: ' + e.message); }
+        if (!pt) {
+          // 兜底: DOM rect 定位
+          pt = await page.evaluate(async (m) => {
+            const cards = Array.from(document.querySelectorAll('*'))
+              .filter((e) => /draft-item/.test(String(e.className)))
+              .filter((e) => (e.innerText || '').includes(m));
+            const card = cards[0];
+            if (!card) return null;
+            const dels = Array.from(card.querySelectorAll('*'))
+              .filter((e) =>
+                (e.innerText || '').trim() === '删除' && e.children.length === 0);
+            const el = dels[dels.length - 1];
+            if (!el) return null;
+            el.scrollIntoView({ block: 'center' });
+            await new Promise((r) => setTimeout(r, 300));
+            const r2 = el.getBoundingClientRect();
+            return { x: Math.round(r2.x + r2.width / 2), y: Math.round(r2.y + r2.height / 2) };
+          }, matchTitle).catch(() => null);
+        }
+        if (!pt) { LOG('no matching draft left, stop'); break; }
+        // 诊断: 点击坐标上的 elementFromPoint 是什么
+        const probe = await page.evaluate((p) => {
+          const el = document.elementFromPoint(p.x, p.y);
+          return el ? {
+            tag: el.tagName,
+            cls: String(el.className).slice(0, 40),
+            txt: (el.innerText || '').trim().slice(0, 10),
+          } : null;
+        }, pt).catch(() => null);
+        LOG('deleting #' + (deleted + 1) + ' pt=' + pt.x + ',' + pt.y
+          + ' probe=' + JSON.stringify(probe));
+        await cdpClick(pt.x, pt.y);
+        await sleep(1200);
+        deleted++;
+      }
+      LOG('DELETED ' + deleted + ' 条');
+      const after = await page.evaluate(() => {
+        const el = Array.from(document.querySelectorAll('*'))
+          .find((e) => /^草稿箱\(\d+\)$/.test((e.innerText || '').trim()));
+        return el ? el.innerText.trim() : 'n/a';
+      }).catch(() => 'n/a');
+      LOG('drafts after clean: ' + after);
+      await page.screenshot({ path: 'xhs_drafts_after.png' });
+    }
+    await browser.close();
+    process.exit(0);
+  }
+
   if (CFG.action === 'draft') {
     // 联调第 19 轮: 草稿恢复流——18 轮实证根因: 上传完成≠可发布,
     // xhs 视频需服务端转码, 转码窗口期点「发布」会被静默转存草稿。

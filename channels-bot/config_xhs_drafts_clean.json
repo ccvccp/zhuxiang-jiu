@@ -1,0 +1,6 @@
+{
+  "action": "drafts_clean",
+  "cleanMode": "list",
+  "manualWaitMinutes": 5,
+  "waitLoginMinutes": 5
+}
