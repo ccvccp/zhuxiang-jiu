@@ -1,25 +1,35 @@
-"""73号(sv)·数字人口播服务(LivePortrait GPU 轨) v1.0
+"""73号(sv)·数字人口播服务(SadTalker GPU 轨) v1.1
 
 数字人 GPU 轨 P1(2026-09-30 立项, 见 docs/73号_数字人GPU轨_P1启动
-评估方案.md): dh_oral 模板(单镜 15s)的视频主轨——LivePortrait v1.5
-audio-driven 驱动 IP 基准图 → 口播口型 mp4。
+评估方案.md): dh_oral 模板(单镜 15s)的视频主轨——SadTalker 音频驱动
+静态 IP 基准图 → 口播口型 mp4。
+
+方案修正(2026-09-30 GPU 机实证): 原评估文档首选 LivePortrait——
+实测官方 main 无 audio-driven 口型(仅视频驱动, README 生态区指向
+AVTR-1/ditto); 按 docx 方案 B 原文列名的 SadTalker(单图+音频→
+口播)落地, AutoDL RTX 5090D 出片实证。
 
 架构对齐(零新语义):
   · 分段铁律: SV73_DH_MODE(默认 off)同 SV73_RENDER_MODE——生产
     pipeline 只跑"剧本+登记", GPU 推理留在算力机(AutoDL 按量),
     产物经 build_dh_dev.py → /api/sv73/render/attach 回填
-    (attach 幂等, renderSource=devmachine 语义复用)
   · 音轨复用: 78号竹语 TTS(Sv73RenderService._tts_audio 产物
     {scriptId}_tts.wav), 本服务只做"图+音频→口播"一步
   · 合规前置: 口播文案的 compliance_gate 在剧本层已过
-    (MOCK dh_oral voiceover 尾部固定携带警示语)
 
 基准图(P1 PoC 占位): assets/ip/ip-square.png(70号金鹿瑞兽角标
 ——链路先行验证; 正式竹小妹人物基准图待定版, SV73_DH_IMAGE 可配)。
 
-LivePortrait 命令(v1.5 audio-driven 口径, 未实机校准项全部
-可配——21 轮联调教训): SV73_DH_CMD 覆盖默认命令模板, 占位符
-{image}/{audio}/{out} 由本服务注入。
+SadTalker 命令(未实机校准项全部可配——21 轮联调教训):
+SV73_DH_CMD 覆盖默认命令模板, 占位符 {image}/{audio}/{outdir}/{out}
+由本服务注入; 产物须对齐 {out}(={scriptId}_dh.mp4)——默认模板用
+ls -td 取最新时间戳目录再 cp。环境就绪(GPU 机 2026-09-30 部署实录):
+  · torch 2.7.1+cu128(Blackwell sm_120 必需——cu118/cu126 均报
+    no kernel image; 上交镜像 pytorch-wheels/cu128 全 URL 方案)
+  · numpy 2.5.3 + float() 严格化 ravel 补丁(face3d/util/preprocess.py
+    三处 + utils/preprocess.py 一处——numpy 2.x 只许 0 维数组 float())
+  · basicsr sed 补丁(functional_tensor→functional, torchvision 0.22 坑)
+  · ffmpeg: imageio-ffmpeg 二进制软链 /usr/local/bin/ffmpeg(moviepy 收尾)
 """
 
 import os
@@ -41,16 +51,24 @@ DH_IMAGE = Path(os.environ.get(
     str(Path(__file__).resolve().parent.parent
         / "assets" / "ip" / "ip-square.png")))
 
-# LivePortrait 仓库根(SV73_DH_MODE=real 的算力机必配)
-LIVEPORTRAIT_DIR = os.environ.get("SV73_LIVEPORTRAIT_DIR", "")
+# SadTalker 仓库根(SV73_DH_MODE=real 的算力机必配)
+SADTALKER_DIR = os.environ.get("SV73_SADTALKER_DIR", "")
 
-# 推理命令模板(v1.5 audio-driven 口径; {image}/{audio}/{out} 注入)
-# 未实机校准——首次 GPU 机联调按留档校准(SV73_DH_CMD 全量可配)
+# 推理命令模板(SadTalker 口径, 2026-09-30 5090D 出片实证;
+# {image}/{audio}/{outdir}/{out} 注入)——产物落点两形态(result_dir
+# 根级 {timestamp}.mp4 为主, 预处理时间戳目录内亦有同名族——real
+# 实弹实证根级为最终版), 模板尾部 find -printf 按修改时间取最新
+# mp4 cp 对齐 {out}(时间排序天然防 result_dir 复用时旧产物污染);
+# 命令走 bash -c
 DEFAULT_DH_CMD = (
-    "python inference.py -s {image} -a {audio} "
-    "--flag_lip_zeros --flag_pasteback --output_dir {outdir}")
+    "/root/miniconda3/envs/py312/bin/python inference.py "
+    "--driven_audio {audio} --source_image {image} "
+    "--result_dir {outdir} --still --preprocess full && "
+    "latest=$(find {outdir} -maxdepth 2 -name '*.mp4' "
+    "-printf '%T@\\t%p\\n' | sort -rn | head -1 | cut -f2) && "
+    "cp \"$latest\" {out}")
 
-# GPU 推理超时(A10 单条 15s 口播量级; 留裕量防慢实例)
+# GPU 推理超时(单条 15s 口播 5090D 实测约 1-3 分钟; 留裕量防慢实例)
 DH_TIMEOUT_SECONDS = 900
 
 
@@ -59,7 +77,7 @@ def dh_mode(mode: str | None = None) -> str:
 
     off  : 本服务不可用(生产/零 GPU 环境真实态)
     mock : 确定性演练——不调 GPU, 产出注册式元数据(链路/测试用)
-    real : 真实 LivePortrait 推理(算力机: SV73_LIVEPORTRAIT_DIR
+    real : 真实 SadTalker 推理(算力机: SV73_SADTALKER_DIR
            必配, 否则 ValueError fail-hard)
     显式 mode 参数覆盖 env(单次控制; 同 render_mode_enabled 惯例)。
     """
@@ -76,7 +94,7 @@ class Sv73DigitalHumanService:
 
         Raises:
             ValueError: 模板非 dh_oral / 音频缺失 / mode=off /
-                        mode=real 未配 SV73_LIVEPORTRAIT_DIR
+                        mode=real 未配 SV73_SADTALKER_DIR
         """
         tpl = (storyboard.get("template") or {}).get("name")
         if tpl != "dh_oral":
@@ -96,18 +114,18 @@ class Sv73DigitalHumanService:
         if not DH_IMAGE.is_file():
             raise ValueError(f"口播基准图缺失: {DH_IMAGE}")
         out_mp4 = SV73_VIDEO_DIR / f"{sid}_dh.mp4"
-        engine = "liveportrait"
+        engine = "sadtalker"
         if mode == "mock":
             # 确定性演练: 登记式元数据, 不调 GPU(时长/引擎为真值口径)
             engine = "mock"
             logger.info("sv73_dh_mock script=%s image=%s", sid, DH_IMAGE)
             return self._result(storyboard, out_mp4, tts_wav,
                                 engine=engine, size_bytes=0)
-        # mode=real: LivePortrait 推理
-        if not LIVEPORTRAIT_DIR:
+        # mode=real: SadTalker GPU 推理
+        if not SADTALKER_DIR:
             raise ValueError(
-                "SV73_DH_MODE=real 须配 SV73_LIVEPORTRAIT_DIR"
-                "(LivePortrait 仓库根, 算力机)")
+                "SV73_DH_MODE=real 须配 SV73_SADTALKER_DIR"
+                "(SadTalker 仓库根, 算力机)")
         cmd_tpl = os.environ.get("SV73_DH_CMD", DEFAULT_DH_CMD)
         out_dir = SV73_VIDEO_DIR
         cmd = (cmd_tpl
@@ -116,12 +134,14 @@ class Sv73DigitalHumanService:
                .replace("{outdir}", shlex.quote(str(out_dir)))
                .replace("{out}", shlex.quote(str(out_mp4))))
         logger.info("sv73_dh_infer script=%s cmd=%s", sid, cmd)
+        # bash -c: 模板含 $()/管道(产物时间戳目录对齐), shlex.split
+        # 会拆坏 bash 语法
         result = subprocess.run(
-            shlex.split(cmd), cwd=LIVEPORTRAIT_DIR,
+            ["bash", "-c", cmd], cwd=SADTALKER_DIR,
             capture_output=True, timeout=DH_TIMEOUT_SECONDS)
         if result.returncode != 0 or not out_mp4.is_file():
             raise RuntimeError(
-                f"LivePortrait 推理失败(exit={result.returncode}): "
+                f"SadTalker 推理失败(exit={result.returncode}): "
                 f"{result.stderr.decode('utf-8', 'replace')[-400:]}")
         return self._result(storyboard, out_mp4, tts_wav,
                             engine=engine,
@@ -138,6 +158,6 @@ class Sv73DigitalHumanService:
             "audioTrack": str(audio),
             "sizeBytes": int(size_bytes),
             "durationSeconds": storyboard["totalDuration"],
-            "engine": engine,     # liveportrait|mock
+            "engine": engine,     # sadtalker|mock
             "dhImage": str(DH_IMAGE),
         }

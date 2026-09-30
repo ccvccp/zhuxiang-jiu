@@ -14,9 +14,10 @@ LABEL org.opencontainers.image.version="1.1"
 
 WORKDIR /app
 
-# 安装系统依赖(curl 用于健康检查)
+# 安装系统依赖(curl 用于健康检查; ffmpeg 用于 73号短视频
+# 渲染合成 zoompan/xfade/TTS mux——生产灰度 2026-09-30 补)
 RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends -qq curl && \
+    apt-get install -y --no-install-recommends -qq curl ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
 # ---- 层 1: 仅复制依赖清单(改动最少, 最大化缓存命中) ----

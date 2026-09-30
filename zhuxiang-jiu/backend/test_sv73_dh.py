@@ -148,10 +148,11 @@ def test_t4_dh_mock_build(monkeypatch):
 
 
 def test_t5_dh_cmd_placeholders():
-    """推理命令模板占位符防漂移(三占位齐全——build 注入契约)"""
+    """推理命令模板占位符防漂移(四占位齐全——build 注入契约)"""
     assert "{image}" in DEFAULT_DH_CMD
     assert "{audio}" in DEFAULT_DH_CMD
     assert "{outdir}" in DEFAULT_DH_CMD
+    assert "{out}" in DEFAULT_DH_CMD
 
 
 def test_t6_next_steps_dh_oral(monkeypatch):

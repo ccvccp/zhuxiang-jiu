@@ -1,158 +1,130 @@
-# 73号·数字人 GPU 轨——AutoDL 实例开通与 LivePortrait 部署操作手册
+# 73号·数字人 GPU 轨——AutoDL 实例开通与 SadTalker 部署操作手册
 
 > 2026-09-30 | 配套: `docs/73号_数字人GPU轨_P1启动评估方案.md` + `backend/build_dh_dev.py`
-> 适用: 首次 GPU 机开通到跑通第一条 dh_oral 口播视频的全流程
+> **方案修正实录**: 原定 LivePortrait——GPU 机实证官方 main 无 audio-driven 口型
+> (仅视频驱动); 按 docx 方案 B 原文列名的 **SadTalker**(单图+音频→口播)落地,
+> RTX 5090D 出片实证。本文全程为 2026-09-30 实际部署实录。
 
 ## 〇、前置条件与总览
 
-- AutoDL 账号（手机号注册 + 实名认证）+ 预算 **50 元级**（方案第八节）
-- 链路总览: AutoDL 有卡实例 ← LivePortrait 权重/环境 ← 项目代码(backend) ←
-  `build_dh_dev.py`(拉生产 storyboard → 78号 TTS → LivePortrait → attach)
-- 成本口径: 无卡模式装环境(约 0.1 元/时) / A10 有卡推理(约 2-3 元/时,
-  15s 口播单条约 5-10 分钟 ≈ **0.5 元/条**)
+- AutoDL 账号(手机号注册+实名认证) + 预算 **50 元级**(实测充 100 元)
+- 链路: AutoDL 实例(RTX 5090D) ← SadTalker+权重 ← backend 代码 ←
+  build_dh_dev.py(拉生产 storyboard→TTS→SadTalker→attach)
+- 成本实录: 5090D **￥1.88-2.88/时**; torch 2.7.1+cu128(Blackwell 必需,
+  旧 torch 2.1.2 报 sm_120 no kernel image)
 
-## 一、AutoDL 实例开通
+## 一、AutoDL 实例开通(2026-09-30 实录)
 
-### 1. 注册与认证
-1. 浏览器打开 `autodl.com` → 手机号注册（或微信扫码）
-2. 控制台右上角「实名认证」→ 按提示完成（个人认证即可, 平台合规要求）
-
-### 2. 充值
-- 控制台「充值」→ 微信/支付宝 → **建议首充 50-100 元**（按量, 无月租压力）
-
-### 3. 租用实例（关键参数）
-「算力市场」选实例:
-
-| 项 | 推荐值 | 说明 |
+### 关键参数(与原方案差异)
+| 项 | 实录值 | 说明 |
 |---|---|---|
-| GPU | **NVIDIA A10 24G** | 方案指定；缺货时可选 **RTX 4090 24G**（推理性能更佳, 同价档） |
-| 地域 | 西北/华北任一 A10 有货区 | 按实时库存 |
-| 镜像 | **PyTorch 2.1+ / CUDA 12.1 / Python 3.10** | LivePortrait 官方要求 PyTorch≥2.0；镜像自带免装 |
-| 系统盘 | 默认 50G | LivePortrait 权重约 10G+ 环境 10G, 够用 |
-| 计费 | **按量计费** | 不要选包周/包月（规模门未过, 见方案 §五） |
+| GPU | **RTX 5090D 32G**(西北B区) | A10 平台无货——AutoDL 以消费卡为主; 4090D 有货但抢手 |
+| 镜像 | PyTorch 2.1.2/CUDA 11.8(Python 3.10) | ⚠ **5090D(Blackwell sm_120) 必须升级 torch 2.7.1+cu128** |
+| 计费 | 按量 ￥1.88-2.88/时 | 微信注册需绑手机号; 实名+充值后可租 |
 
-> ⚠ 铁律: **先「无卡模式开机」装环境**（约 0.1 元/时）, 环境就绪后关机,
-> 真要推理时再「有卡模式开机」——按量计费下无卡调试是最省姿势。
+### 人机协作分工(网页防自动化)
+- 自动化可做: 页面导航/状态读取/实例监控
+- **必须人工**: 注册验证码/实名信息/支付扫码/**租实例**(平台组件防
+  自动化点击, 同 xhs 安全盾性质)——交接完成
 
-### 4. 连接实例
-AutoDL 控制台「容器服务」→ 复制 SSH 登录指令（形如
-`ssh -p 30xxx root@region-x.autodl.com`）, 本地终端直连;
-或用平台网页版 JupyterLab/Shell。
+## 二、SadTalker 环境部署(2026-09-30 实录)
 
-## 二、LivePortrait 环境部署（无卡模式下进行）
-
-### 1. 下载源码（学术加速）
+### 1. 源码与权重
 ```bash
-# AutoDL 学术加速(GitHub 直连慢)
-source /etc/network_turbo
-git clone https://github.com/KwaiVGI/LivePortrait.git
-cd LivePortrait
-unset /etc/network_turbo   # clone 完关闭加速(防 pip 走代理)
+source /etc/network_turbo   # AutoDL 学术加速(GitHub/HF 直连基本不可用)
+cd /root/autodl-tmp
+git clone --depth 1 https://github.com/OpenTalker/SadTalker.git
+cd SadTalker && bash scripts/download_models.sh   # ~4G, 250MB/s 飞快
 ```
 
-### 2. 安装依赖（镜像自带 PyTorch, 只补外围）
+### 2. Python 3.12 环境(项目代码 3.12 惯例——两个 3.10 坑)
+- 坑 1: `from datetime import UTC`(3.11+) → **conda 建 py312 env**,
+  或 3.10 打 sitecustomize 垫片(临时)
+- 坑 2: f-string 跨行(PEP 701, 3.12 语法) → 3.10 直接 SyntaxError
+- 结论: `conda create -n py312 python=3.12` + 全套装到该环境
+
+### 3. torch 升级(Blackwell sm_120 必需——四坑实录)
 ```bash
-pip install -r requirements.txt
-# 慢可换源: pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+# ✅ 最终成功方案: 上交镜像整体替换 pypi 索引(pep503 完整索引,
+#    torch/torchvision/torchaudio + nvidia-* 依赖全有 cp312 wheel)
+P=/root/miniconda3/envs/py312/bin
+$P/pip uninstall -y torch torchvision torchaudio -q
+$P/pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 \
+  --index-url https://mirror.sjtu.edu.cn/pytorch-wheels/cu128/
 ```
+| 踩坑顺序(2026-09-30 实录) | 结果 |
+|---|---|
+| 镜像自带 torch 2.1.2+cu118 | `no kernel image`(无 sm_120) |
+| pypi 官方 torch 2.7.1(默认 cu126 build) | 同样 `no kernel image`——pypi 无 +cu128 |
+| 官方 download.pytorch.org | 龟速(24kB/s); 开学术加速后 403 被拒 |
+| 清华 pytorch-wheels/cu128 + `-f` find-links | **404 无此目录**, `-i` pypi 竞争下仍装成 cu126(假成功——`pip list` 看版本号带 +cu128 才可信, `torch.version.cuda` 须 12.8) |
+| 上交 `--index-url` 整体替换 | **成功**: `torch 2.7.1+cu128` + 5090D matmul OK |
 
-### 3. 下载权重（HF 国内镜像——直连 HuggingFace 基本不可用）
+验证(必须三件套全过): `torch.version.cuda == '12.8'` +
+`get_device_capability() == (12, 0)` + GPU matmul 无 `no kernel image`。
+
+### 4. 依赖坑链实录(numpy 2.x × SadTalker 老代码)
+| 坑 | 修法 |
+|---|---|
+| `np.VisibleDeprecationWarning` 移除 | sed → `DeprecationWarning` |
+| `np.float` 别名移除 | sed → `float` |
+| numpy 2.x `float(数组)` 严格化(只许 0 维) | **ravel 补丁 4 处**: `float(X)` → `float(np.ravel(X)[0])`——face3d/util/preprocess.py L46/L48/L101 + utils/preprocess.py L148(hsplit 切片) |
+| basicsr sdist 拉 tb-nightly 失败 | `pip install basicsr --no-deps`(wheel 本体无此依赖) |
+| basicsr × torchvision 0.22 `functional_tensor` | sed → `torchvision.transforms.functional` |
+| facexlib/gfpgan 依赖链 | `--no-deps` 装+复制法跨环境 |
+| py312 二进制包不可从 3.10 复制(cp310 ABI) | `pip install opencv-python-headless "moviepy<2" scipy librosa soundfile pydub safetensors scikit-image PyYAML matplotlib imageio-ffmpeg tqdm kornia einops yacs face-alignment transformers`(moviepy 锁 <2 保 `moviepy.editor` 老 API) |
+| `sh: ffmpeg: not found`(moviepy 收尾) | `ln -sf $(python -c "import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())") /usr/local/bin/ffmpeg` |
+| 产物落点认知修正 | 最终 mp4 落 **result_dir 根级** `{timestamp}.mp4`(预处理时间戳目录另建, mp4 亦存一份)——服务模板用 `find {outdir} -maxdepth 2 -name '*.mp4' -printf '%T@\t%p\n' | sort -rn | head -1` 取最新对齐 `{out}`(时间排序防复用污染) |
+
+## 三、项目对接(build_dh_dev.py 链路)
+
+### 环境变量(算力机)
 ```bash
-# v1.5.1 版本(含 audio-driven 口型模块; 权重结构与 tag 以官方 README 为准)
-export HF_ENDPOINT=https://hf-mirror.com
-pip install -U huggingface_hub
-huggingface-cli download KwaiVGI/LivePortrait --local-dir pretrained_weights
-```
-- 权重约 10G, 放 `LivePortrait/pretrained_weights/`
-- **audio-driven 需 v1.5 及以上的额外音频模块权重**——若上述仓库缺
-  v1.5 音频权重, 按官方 README「v1.5」小节补齐（以官方说明为准）
-
-### 4. 首跑官方 demo 验证（无卡模式可跑 CPU 慢验, 建议直接有卡验）
-```bash
-# 视频驱动(基础验证)
-python inference.py -s assets/examples/source/s6.jpg \
-  -d assets/examples/driving/d6.mp4
-# 音频驱动口播(v1.5 口径——正式目标链路)
-python inference.py -s assets/examples/source/s6.png \
-  -a assets/examples/driving/s6.wav --flag_lip_zeros
-```
-产物在 `./animations/` 目录——两条命令都出片即环境就绪。
-
-## 三、项目对接（build_dh_dev.py 链路）
-
-### 1. 上传项目代码（backend 目录）
-```bash
-# 本地执行(Windows): 只传渲染/数字人链路所需文件, 精简上传
-scp -r d:/网站架构设计/zhuxiang-jiu/backend root@region-x.autodl.com:/root/
-```
-（或 `git clone` 仓库到实例——二选一; backend 全量不大, scp 即可）
-
-### 2. 安装后端最小依赖
-build_dh_dev 链路 import: sv73_script/render/digital_human/pipeline →
-llm_client(78号 TTS HTTP) → 需:
-```bash
-pip install httpx pydantic -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
-（跑 `python build_dh_dev.py --help` 报 ModuleNotFoundError 什么补什么,
-  无需全量 requirements.txt）
-
-### 3. 环境变量配置（写入 ~/.bashrc 或执行时注入）
-```bash
-export SV73_DH_MODE=real                          # 数字人推理开
-export SV73_LIVEPORTRAIT_DIR=/root/LivePortrait    # 仓库根
-export SV73_TTS_MODE=on                            # 78号竹语音轨
-export SV73_DH_IMAGE=/root/backend/assets/ip/ip-square.png   # P1 占位基准图
-export SV73_TOKEN=<生产 accessToken>                # 或运行时 SSH 管道自动取
-# export SV73_DH_CMD="..."                         # 命令校准后按需覆盖
-```
-
-### 4. 分两步验收（同 21 轮联调范式——先干跑再实弹）
-```bash
-cd /root/backend
-# 第一步: mock 干跑(不调 GPU, 验证"拉 storyboard→TTS→链路通")
-export SV73_DH_MODE=mock
-python build_dh_dev.py sv73_<剧本号>
-# 第二步: real 实弹(有卡模式开机后)
 export SV73_DH_MODE=real
-python build_dh_dev.py sv73_<剧本号>
+export SV73_SADTALKER_DIR=/root/autodl-tmp/SadTalker
+export SV73_TTS_MODE=on
+export SV73_DH_IMAGE=<口播基准图>(P1 占位: 金鹿 IP 图)
+export SV73_TOKEN=<生产 accessToken>(或 SSH 管道自动取)
 ```
 
-### 5. 推理命令校准（21 轮联调教训——stderr 留档校准）
-`SV73_DH_MODE=real` 首跑若失败, 脚本会打印 LivePortrait stderr 尾
-400 字——按报错校准命令模板并覆盖:
+### 代码上传(两通道实录)
+- 单文件: exec+base64(`adh_upload.py`——SFTP 子系统受限不可用)
+- 全目录: tar.gz→base64→分块 printf 拼接(`adh_put.py`, **必须 md5 双端校验**)
+
+### 验收实录(2026-09-30/10-01, 服务级先行)
+- **服务级 mock 干跑**: importlib 独立加载 `services/sv73_digital_human_service.py`(纯标准库, 绕开 services/__init__.py 巨网)——off 铁律拦截 ✓ + mock 登记产物 `{scriptId}_dh.mp4` 对齐 ✓
+- **服务级 real 实弹**: `SV73_DH_MODE=real` + `SV73_SADTALKER_DIR` →
+  subprocess `bash -c`(py312 python + inference.py) → 5090D 全链
+  (mel 84/84→audio2exp 9/9→Face Renderer 42/42→seamlessClone 84/84)→
+  产物 `DHREAL002_dh.mp4`(778KB, 800x1200/25fps)——**服务全链 E2E PASS**
+- **build_dh_dev.py 全链**: 需生产 `SV73_TOKEN`(TTS 走 78号竹语)——
+  留待生产凭证就绪时首跑; 服务级已验证的即其视频主轨子集
+
 ```bash
-export SV73_DH_CMD="python inference.py -s {image} -a {audio} \
-  --flag_lip_zeros --output_dir {outdir}"
+SV73_DH_MODE=mock  python build_dh_dev.py <scriptId>   # 干跑(生产 token)
+SV73_DH_MODE=real  python build_dh_dev.py <scriptId>   # 5090D 实弹(生产 token)
 ```
-占位符契约(改模板必留): `{image}`=基准图, `{audio}`=TTS wav,
-`{outdir}`=产物目录, 产物须落在 `<SV73_VIDEO_DIR>/<scriptId>_dh.mp4`
-（推理实际输出文件名不同时, 在命令里加 `--flag_...`/mv 后缀对齐,
-或调整 SV73_DH_CMD 使产物名匹配）。
 
 ## 四、成本控制规范
 
 | 场景 | 操作 |
 |---|---|
-| 装环境/改代码/看日志 | **无卡模式开机**（约 0.1 元/时） |
-| 推理出片 | 有卡模式开机 → 跑完**立即关机** |
-| 长期不用 | 关机即可（数据盘保留, 下次秒开; 关机不计费, 只收少量盘费） |
-| 规模化信号 | 周产量 > 20 条 → 评估包周/包月（方案 §五规模门, 78号同款算式） |
+| 装环境/改代码 | 无卡模式开机(约 0.1 元/时) |
+| 推理出片 | 有卡开机→跑完立即关机 |
+| 长期不用 | 关机(数据盘保留, 15 天不关机才释放) |
+| 规模化 | 周产 >20 条再评估包周(方案 §五规模门) |
 
-## 五、常见问题
+## 五、验收清单(2026-09-30/10-01 实录勾选)
 
-1. **HuggingFace 下载失败/极慢** → 必须带 `HF_ENDPOINT=https://hf-mirror.com`
-2. **GitHub clone 慢** → `source /etc/network_turbo`（AutoDL 学术加速, 用完 unset）
-3. **显存不足（CUDA OOM）** → A10 24G 正常不会; 若用小卡, 推理参数降分辨率（官方 README 显存段）
-4. **推理超时** → 默认 `DH_TIMEOUT_SECONDS=900`; 慢实例可 env 调大
-5. **attach 回填 401** → token 过期: 重新 SSH 管道取或手动 export SV73_TOKEN
-6. **口型不同步/质量差** → 属模型/素材调优项, 不阻塞链路; 正式竹小妹
-   基准图定版后（正面/半身/稳定光照）重验
-
-## 六、验收清单
-
-- [ ] AutoDL 实例开通 + 充值（首月 50 元级预算上限）
-- [ ] LivePortrait 两条 demo 命令出片（视频驱动 + 音频驱动）
-- [ ] `build_dh_dev.py` mock 干跑通过（attach 回填成功）
-- [ ] `SV73_DH_MODE=real` 实弹一条 dh_oral 口播 mp4（含 attach + 36号 content 可见）
-- [ ] 单条 GPU 成本核（目标 ≤ 1 元/条, 方案 §五成本门）
-- [ ] 关机规范执行（跑完即关, 下次无卡维护）
+- [x] AutoDL 实例开通(RTX 5090D, 余额 ￥100)
+- [x] SadTalker demo 出片(5090D, bus_chinese.wav 实证)
+- [x] torch 2.7.1+cu128 GPU kernel 实测(matmul OK——上交镜像方案)
+- [x] 全量 backend 上传(md5 校验一致)
+- [x] 服务级 mock 干跑通过(off 铁律拦截 + mock 登记对齐)
+- [x] SV73_DH_MODE=real 实弹 dh_oral 口播 mp4(DHREAL002_dh.mp4,
+      778KB/800x1200/25fps——服务全链 E2E PASS)
+- [x] 单条 GPU 成本核: 全链实测 ~2.5-4 分钟/条(含模型加载 60-90s)×
+      ￥1.88-2.88/时 ≈ **￥0.08-0.19/条**; 批量摊薄加载后 <￥0.1/条——
+      远低于 ≤￥1/条红线, 方案 §五 ROI 触发器成立
+- [ ] build_dh_dev.py 生产全链首跑(待生产 SV73_TOKEN——TTS 走 78号竹语)
+- [ ] 关机规范执行(服务级验证已毕, 随时可关)

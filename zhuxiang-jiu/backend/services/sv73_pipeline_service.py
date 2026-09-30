@@ -271,7 +271,7 @@ class Sv73PipelineService:
         if sv73.get("template") == "dh_oral":
             base = (base + "(数字人 GPU 轨 dh_oral: 口播 mp4 由算力机 "
                     "build_dh_dev.py 渲染——SV73_DH_MODE=real + "
-                    "SV73_LIVEPORTRAIT_DIR, 经 render/attach 回填; "
+                    "SV73_SADTALKER_DIR, 经 render/attach 回填; "
                     "影子对照: 与零 GPU 轨同剧对比完播率)")
         if platform == "xiaohongshu":
             return base + (

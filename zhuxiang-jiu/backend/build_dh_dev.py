@@ -1,6 +1,6 @@
 """73号(sv)·数字人 GPU 轨算力机一键脚本(dh_oral 模板分段链路配套)
 
-用法(算力机: AutoDL A10 等, SV73_LIVEPORTRAIT_DIR 必配):
+用法(算力机: AutoDL RTX 5090D 等, SV73_SADTALKER_DIR 必配):
     python build_dh_dev.py <scriptId>
         [--api https://zxjiu.com]
         [--host root@47.236.61.117]
@@ -10,19 +10,21 @@
 环境(SV73_DH_MODE=real 时):
     SV73_TTS_MODE=on          78号竹语 TTS(口播音轨源)
     SV73_DH_MODE=real         数字人推理开(本脚本核心)
-    SV73_LIVEPORTRAIT_DIR=... LivePortrait 仓库根
+    SV73_SADTALKER_DIR=...    SadTalker 仓库根(2026-09-30 实证部署:
+                              numpy 1.23.4 + torch 2.7.1+cu128 + sed 补丁)
     SV73_DH_IMAGE=...         口播基准图(P1 占位: 金鹿 IP 图)
-    SV73_DH_CMD=...           推理命令模板(未实机校准项, 可覆盖)
+    SV73_DH_CMD=...           推理命令模板(四占位符, 可覆盖)
 
 流程(对齐 build_sv73_dev.py 分段范式):
     ①(已完成)生产 pipeline/run: 热点→匹配→剧本(dh_oral)→登记
-    ②本脚本: 拉生产 storyboard → TTS 音频 → LivePortrait 推理
+    ②本脚本: 拉生产 storyboard → TTS 音频 → SadTalker 推理
     ③本脚本: POST /api/sv73/render/attach 挂载产物元数据
     ④(后续)36号人工三审 → approve → publish → rpa_pending
     ⑤(后续)四平台 bot RPA 发布(算力机/开发机本地取 mp4)
 
-首次 GPU 机联调注意(21 轮联调教训): LivePortrait 命令未实机
-校准——按留档(推理失败 stderr 尾 400 字)校准 SV73_DH_CMD。
+方案修正(2026-09-30 GPU 机实证): 原评估 LivePortrait main 无
+audio-driven——按 docx 方案 B 列名的 SadTalker 落地(5090D 出片
+实证)。命令模板含产物时间戳目录对齐段, 走 bash -c。
 """
 
 import argparse
