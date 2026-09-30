@@ -53,6 +53,17 @@ class PipelineRunRequest(BaseModel):
     persona: str = Field("zhuxiaomei", description="IP 人设注册表键")
     template: str = Field(DEFAULT_TEMPLATE,
                          description="视频模板(vertical/landscape/fast)")
+    render_mode: str = Field("",
+                             description="渲染步(空=SV73_RENDER_MODE 默认"
+                                         " off 跳过; on=全链渲染)")
+
+
+class RenderAttachRequest(BaseModel):
+    scriptId: str = Field(..., description="剧本号(pipeline 产出)")
+    video: str = Field(..., description="开发机本地 mp4 路径")
+    pages: list = Field(default_factory=list, description="PNG 页路径")
+    audioTrack: str = Field("", description="TTS 音频路径(可空)")
+    sizeBytes: int = Field(0, description="mp4 字节数")
 
 
 def _require_admin(x_role: str | None) -> None:
@@ -130,7 +141,30 @@ async def run_pipeline(payload: PipelineRunRequest,
     try:
         result = await _pipeline.run(
             payload.hotspot, payload.category, payload.platform,
-            payload.persona, payload.template)
+            payload.persona, payload.template,
+            payload.render_mode or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return {"code": 0, "data": result}
+
+
+@router.post("/render/attach")
+async def attach_render(payload: RenderAttachRequest,
+                        x_role: str | None = Header(None)):
+    """开发机渲染产物挂载(决策面): 元数据回填 content.sv73
+
+    分段语义(生产灰度实证后): 生产小机 ffmpeg 超时——渲染留
+    开发机, mp4 为开发机本地路径(RPA 发布本在开发机执行)。
+    """
+    _require_admin(x_role)
+    _mode_guard()
+    try:
+        result = await _pipeline.attach_render(
+            payload.scriptId, payload.video, payload.pages,
+            payload.audioTrack, payload.sizeBytes)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc)) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     return {"code": 0, "data": result}

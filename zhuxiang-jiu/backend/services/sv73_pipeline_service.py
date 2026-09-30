@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from services.sv73_script_service import (
     Sv73ScriptService, current_mode, DEFAULT_CATEGORY,
@@ -46,6 +47,21 @@ DEFAULT_PLATFORM = "wechat_channels"
 
 # 品类自动档(P1: category="auto" 经匹配引擎推荐)
 CATEGORY_AUTO = "auto"
+
+
+def render_mode_enabled(mode: str | None = None) -> bool:
+    """渲染步开关(SV73_RENDER_MODE, 默认 off——铁律)
+
+    生产灰度实证(2026-09-30): 2 核小机 ffmpeg zoompan 合成
+    300s 超时(load 峰值 75 压死 sshd)——渲染+合成对齐 36号
+    产线定位**留在开发机跑**; 生产 pipeline 只跑"剧本+登记",
+    mp4 由开发机渲染后经 /api/sv73/render/attach 挂载元数据
+    (RPA 发布本就在开发机执行, 文件无需上生产)。
+    显式 mode 参数覆盖 env(单次控制; 测试/开发机全链用)。
+    """
+    m = (mode if mode is not None
+         else os.environ.get("SV73_RENDER_MODE", "off"))
+    return str(m).strip().lower() in ("on", "1", "true")
 
 
 def _now_iso() -> str:
@@ -137,10 +153,14 @@ class Sv73PipelineService:
                   category: str = DEFAULT_CATEGORY,
                   platform: str = DEFAULT_PLATFORM,
                   persona: str = "zhuxiaomei",
-                  template: str = DEFAULT_TEMPLATE) -> dict:
-        """一键全链: 剧本→渲染→合成→content 登记(幂等)
+                  template: str = DEFAULT_TEMPLATE,
+                  render_mode: str | None = None) -> dict:
+        """一键全链: 剧本→(渲染)→content 登记(幂等)
 
         category="auto"(P1): 经匹配引擎推荐主推品类(确定性规则)。
+        render_mode(分段语义): None=读 SV73_RENDER_MODE(默认
+        off——生产只跑"剧本+登记", 渲染留开发机); "on"=全链
+        (开发机/强机); "off"=显式跳过。
         Returns:
             {mode, match, storyboard, render, content, nextSteps}
         """
@@ -157,9 +177,23 @@ class Sv73PipelineService:
         storyboard = await self.script.generate(
             hotspot, category, persona, template)
 
-        # 2+3. 渲染+合成(Pillow/ffmpeg 实机, 阻塞调用转线程)
-        built = await asyncio.to_thread(
-            self.render.build, storyboard)
+        # 2+3. 渲染+合成(分段: render off 跳过——生产小机
+        #      ffmpeg 300s 超时实证, 对齐 36号"渲染在开发机")
+        if render_mode_enabled(render_mode):
+            built = await asyncio.to_thread(
+                self.render.build, storyboard)
+        else:
+            built = {
+                "scriptId": storyboard["scriptId"],
+                "skipped": True,
+                "pages": [], "video": "", "audioTrack": "",
+                "sizeBytes": 0,
+                "durationSeconds":
+                    storyboard["totalDuration"],
+                "note": ("渲染步跳过(SV73_RENDER_MODE=off)——"
+                         "开发机渲染后 POST /api/sv73/render/"
+                         "attach 挂载产物元数据"),
+            }
 
         # 4. content 登记(幂等: 同 storyboardId 复用)
         content = await self._find_content_by_script(
@@ -194,4 +228,48 @@ class Sv73PipelineService:
                 if content.get("status") == "pending" else
                 f"content 状态 {content.get('status')}"
                 "(发布链未开——三审闸门不动)"),
+        }
+
+    # ---------- 产物挂载(分段语义: 开发机渲染 → 元数据回填) ----------
+
+    async def attach_render(self, script_id: str,
+                            video: str,
+                            pages: list | None = None,
+                            audio_track: str = "",
+                            size_bytes: int = 0) -> dict:
+        """开发机渲染产物挂载(幂等: 覆盖回填 content.sv73)
+
+        分段链路: 生产 run(渲染跳过) → 开发机取 storyboard 渲染
+        (build) → 本端点回填产物元数据。video 为**开发机本地路径**
+        (RPA 发布本就在开发机执行, 文件无需上生产)。
+        """
+        content = await self._find_content_by_script(script_id)
+        if content is None:
+            raise KeyError(
+                f"scriptId={script_id} 无登记 content"
+                "(先 pipeline/run)")
+        if not str(video or "").strip():
+            raise ValueError("video 路径不可为空")
+        sv = dict(content.get("sv73") or {})
+        sv.update({
+            "storyboardId": script_id,
+            "video": str(video),
+            "pages": list(pages or []),
+            "audioTrack": str(audio_track or ""),
+            "sizeBytes": int(size_bytes or 0),
+            "renderSource": "devmachine",
+            "attachedAt": _now_iso(),
+        })
+        content["sv73"] = sv
+        await self.repo.save_content(content)
+        logger.info("sv73_render_attached script=%s content=%s "
+                    "video=%s", script_id,
+                    content.get("contentId"), video)
+        return {
+            "success": True,
+            "scriptId": script_id,
+            "contentId": content.get("contentId"),
+            "sv73": sv,
+            "note": "开发机产物元数据已挂载(RPA 发布在开发机"
+                    "本地取文件)",
         }

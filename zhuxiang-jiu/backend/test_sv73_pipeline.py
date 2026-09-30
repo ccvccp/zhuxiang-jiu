@@ -86,7 +86,11 @@ def _make_storyboard():
 
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
-    """落盘隔离 + LLM 确定性 + real 态"""
+    """落盘隔离 + LLM 确定性 + real 态 + 全链渲染
+
+    本套件验证全链实机(R1-R8 断言 mp4 产物)——渲染步显式
+    on(分段语义默认 off 由 test_sv73_split.py 覆盖)。
+    """
     monkeypatch.setattr(sv73mod, "_STORYBOARD_DIR", tmp_path / "sb")
     monkeypatch.setattr(sv73ren, "SV73_VIDEO_DIR", tmp_path / "vd")
     monkeypatch.setattr(
@@ -94,6 +98,7 @@ def _isolated(monkeypatch, tmp_path):
         lambda self, s, u: (None, TRACK_RULE))
     monkeypatch.setenv("SV73_MODE", "real")
     monkeypatch.setenv("SV73_TTS_MODE", "off")
+    monkeypatch.setenv("SV73_RENDER_MODE", "on")
     yield
 
 
@@ -172,10 +177,10 @@ def test_r4_pipeline_idempotent():
     assert b["reused"] is True
     assert (a["content"]["contentId"]
             == b["content"]["contentId"])
-    # 产物关联齐备
+    # 产物关联齐备(video 非空防呆——Path('')≡'.' 会静默放过)
     sv = b["content"]["sv73"]
     assert sv["storyboardId"] == b["render"]["scriptId"]
-    assert Path(sv["video"]).exists()
+    assert sv["video"] and Path(sv["video"]).exists()
     assert sv["totalDuration"] == 16.2
 
 
@@ -239,7 +244,8 @@ def test_r6_rpa_pending_full_chain(monkeypatch):
     assert hit["receipt"]["mode"] == "rpa_pending"
     assert hit["status"] == "published"
     # 73号 产物关联随 content 全链保留(mp4 供 RPA 发布消费)
-    assert Path(hit["sv73"]["video"]).exists()
+    assert hit["sv73"]["video"] \
+        and Path(hit["sv73"]["video"]).exists()
     assert hit["sv73"]["storyboardId"] == result["render"]["scriptId"]
     # list_pending 观测面可见(36号 RPA 待发清单惯例)
     from services.promo_rpa_channel_service import (

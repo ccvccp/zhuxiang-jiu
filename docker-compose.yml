@@ -243,6 +243,9 @@ services:
       - SV73_MODE=${SV73_MODE:-off}
       # TTS 配音轨(48号小竹语音; off=无声轮播同 36号, 失败 fail-soft 无声)
       - SV73_TTS_MODE=${SV73_TTS_MODE:-off}
+      # 渲染步(生产小机 ffmpeg 300s 超时实证 2026-09-30——off=分段: 生产只跑
+      # 剧本+登记, mp4 开发机渲染后 /api/sv73/render/attach 挂载; on=全链)
+      - SV73_RENDER_MODE=${SV73_RENDER_MODE:-off}
       # ---- 68号 信值·臻选购物平台(P0-P5: 决策面三级灰度, 默认 off——存量购物/互助链路零影响) ----
       # shadow=观察学习期(决策放行+留痕标记); assist=辅助生产期(决策生效);
       #     off=决策面 409(观测面 radar/score/price/feedback/neighbor/carbon/
