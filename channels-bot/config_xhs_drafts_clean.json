@@ -1,6 +1,6 @@
 {
   "action": "drafts_clean",
-  "cleanMode": "list",
-  "manualWaitMinutes": 5,
+  "cleanMode": "delete",
+  "match": "",
   "waitLoginMinutes": 5
 }
