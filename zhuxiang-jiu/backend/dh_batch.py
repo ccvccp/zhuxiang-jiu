@@ -24,8 +24,10 @@
                          余额止损检查(wallet/balance, 未配则跳过);
                          --boot 开机仅适用"容器实例 Pro"形态(普通实例
                          控制台人工开机, adh_power.py 形态实证)
-  SV73_DH_IMAGE_REMOTE   远端口播基准图绝对路径(默认 SadTalker 示例
-                         真人图——金鹿角标无人脸实证, 竹小妹定版前占位)
+  SV73_DH_IMAGE_REMOTE   远端口播基准图绝对路径(默认
+                         /root/autodl-tmp/assets/ip/zhuxiaomei_front.jpg
+                         ——竹小妹定版图 2026-10-01, 每次跑批自动从
+                         本地 assets/ip/zhuxiaomei_front.jpg 上传校验)
   SV73_API               生产 API 基址(默认 https://zxjiu.com)
 """
 
@@ -73,8 +75,9 @@ ADH = {
     "host": "connect.weste.seetacloud.com",
     "port": 37632, "user": "root", "password": "dtFrMiCbH2qM",
 }
-DH_IMAGE_REMOTE = ("/root/autodl-tmp/SadTalker/examples/"
-                   "source_image/full_body_1.png")
+# 口播基准图: 本地(随代码版本) → 每次跑批前自动上传远端(md5 校验)
+DH_IMAGE_LOCAL = Path(__file__).resolve().parent / "assets" / "ip" / "zhuxiaomei_front.jpg"
+DH_IMAGE_REMOTE = "/root/autodl-tmp/assets/ip/zhuxiaomei_front.jpg"
 REMOTE_ROOT = "/root/autodl-tmp/_prodyvid"
 REMOTE_SVC = ("/root/autodl-tmp/services/"
               "sv73_digital_human_service.py")
@@ -335,6 +338,13 @@ def main() -> int:
     print("[KEY] 生产凭证管道 ...")
     token = prod_token()
     key = prod_llm_key()
+
+    print("[基准图] 竹小妹定版图上传(随代码版本, md5 校验) ...")
+    if not DH_IMAGE_LOCAL.is_file():
+        print(f"  缺基准图: {DH_IMAGE_LOCAL}")
+        return 1
+    run(ssh, "mkdir -p /root/autodl-tmp/assets/ip")
+    push(ssh, DH_IMAGE_LOCAL, DH_IMAGE_REMOTE)
 
     ok = fail = 0
     for sid in sids:

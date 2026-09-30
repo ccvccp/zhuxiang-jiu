@@ -126,8 +126,12 @@ SV73_DH_MODE=real  python build_dh_dev.py <scriptId>   # 5090D 实弹(生产 tok
 
 **基准图铁律实证**: 金鹿 IP 角标(瑞兽图形)**无人脸**——SadTalker
 landmark 前置即败(`can not detect the landmark`)。数字人基准图必须为
-**含清晰人脸的正面照**; 竹小妹正式基准图定版前, P1 占位用 SadTalker
-官方示例真人图(full_body_1.png)。
+**含清晰人脸的正面照**。
+
+**竹小妹基准图定版(2026-10-01)**: `assets/ip/zhuxiaomei_front.jpg`
+(853×1515 正面照)——服务默认 `DH_IMAGE` 换代, dh_batch 每次跑批前
+自动上传校验(图随代码版本走); GPU 侧 landmark 实测随下次跑批首验
+(失败路径明确报错, 不烧盲跑)。
 
 ## 四、成本控制规范
 
@@ -188,5 +192,6 @@ python dh_batch.py --sid sv73_x --no-shutdown --min-balance 10
       → 5090D 推理(14.6s mp4/3.4MB) → **attach 200 contentId=43** ✓
 - [x] 关机规范执行(2026-10-01 容器内 shutdown 官方指令——dh_batch
       默认收尾同款; 开机自动化 adh_power.py 待开发者 Token 实测)
-- [ ] 竹小妹正式基准图定版(金鹿角标无人脸实证——须含清晰人脸正面照;
-      定版前占位 SadTalker 示例真人图; 定版后 SV73_DH_IMAGE 一配置即可)
+- [x] 竹小妹正式基准图定版(2026-10-01: assets/ip/zhuxiaomei_front.jpg
+      853×1515 正面照——服务默认换代+dh_batch 跑批自动上传校验;
+      GPU landmark 实测随下次跑批首验)
