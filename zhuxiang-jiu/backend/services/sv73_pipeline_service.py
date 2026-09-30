@@ -252,7 +252,7 @@ class Sv73PipelineService:
 
     @staticmethod
     def _next_steps(content: dict, platform: str) -> str:
-        """发布链指引(按平台形态注入执行层口径)"""
+        """发布链指引(按平台形态+渲染轨注入执行层口径)"""
         if content.get("status") != "pending":
             return (f"content 状态 {content.get('status')}"
                     "(发布链未开——三审闸门不动)")
@@ -267,10 +267,17 @@ class Sv73PipelineService:
                       "命令——36号 coverUrl 封面下载 + "
                       "upload_pic/upload_url_text 三步图文卡, "
                       "--mblog_statement 1 必带)")
+        sv73 = content.get("sv73") or {}
+        if sv73.get("template") == "dh_oral":
+            base = (base + "(数字人 GPU 轨 dh_oral: 口播 mp4 由算力机 "
+                    "build_dh_dev.py 渲染——SV73_DH_MODE=real + "
+                    "SV73_LIVEPORTRAIT_DIR, 经 render/attach 回填; "
+                    "影子对照: 与零 GPU 轨同剧对比完播率)")
         if platform == "xiaohongshu":
-            return (base
-                    + "(xhs-bot.js 视频笔记——发布流 DOM 待"
-                      "登录态联调)")
+            return base + (
+                "(xhs-bot.js 视频笔记——21 轮全自动闭环: 转码绿标"
+                "等待+CDP pierce 穿透 shadow 定位发布钮+published=true"
+                "特征收口)")
         return base + f"(channels/douyin-bot RPA {form} 直传)"
 
     # ---------- 产物挂载(分段语义: 开发机渲染 → 元数据回填) ----------

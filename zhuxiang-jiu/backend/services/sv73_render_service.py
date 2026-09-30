@@ -56,6 +56,7 @@ ROLE_LABELS = {
     "proof": "信任背书",
     "action": "立即行动",
     "compliance": "健康提示",
+    "dh_oral": "竹小妹口播",   # 数字人轨 P1: PNG 主题卡标签
 }
 
 # P1-2 BGM 情绪档 → TTS 语速(48号 joyvoice MOOD_SPEED 同值锚定:

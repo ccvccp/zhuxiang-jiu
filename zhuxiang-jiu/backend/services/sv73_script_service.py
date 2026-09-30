@@ -78,11 +78,15 @@ SCENE_DURATION = 4.5    # 每镜时长(3-5s 档位固定值; vertical 模板值)
 SCENE_FADE = 0.6        # xfade 过渡(对齐 36号生产线 FADE_SECONDS)
 TOTAL_DURATION_BOUNDS = (15.0, 25.0)  # 规划验收口径
 
-# ---- P1 视频模板库(竖版/横版/快节奏) ----
+# ---- P1 视频模板库(竖版/横版/快节奏/数字人口播) ----
 # scenePlan: 镜头序列; sceneDuration: 每镜秒; 总时长=n*d-(n-1)*fade
 #   vertical(默认, P0 现状): 4 镜 16.2s 3:4 竖版(抖音/视频号)
 #   landscape: 4 镜 16.2s 16:9 横版(B 站/网页横幅)
 #   fast: 5 镜(增 proof 背书镜)×3.6s=15.6s 快节奏卡点
+#   dh_oral: 数字人口播单镜 15s(2026-09-30 GPU 轨 P1)——视频主轨
+#     = LivePortrait 驱动 IP 基准图+口型(sv73_digital_human_service,
+#     GPU 机执行, 同 SV73_RENDER_MODE 分段语义), PNG 卡为封面/角标
+#     素材; 影子对照: 与零 GPU 轨(vertical 等)同剧双出对比完播率
 TEMPLATES = {
     "vertical": {
         "pageW": 1080, "pageH": 1440,
@@ -99,6 +103,11 @@ TEMPLATES = {
         "scenePlan": ("cover", "selling", "proof", "action",
                       "compliance"),
         "sceneDuration": 3.6,
+    },
+    "dh_oral": {
+        "pageW": 1080, "pageH": 1440,
+        "scenePlan": ("dh_oral",),
+        "sceneDuration": 15.0,
     },
 }
 DEFAULT_TEMPLATE = "vertical"
@@ -147,12 +156,15 @@ DEFAULT_PERSONA = "zhuxiaomei"
 DEFAULT_CATEGORY = "竹香型白酒"
 
 # Mock-first 确定性模板(热点词×镜头角色; LLM off/失败兜底)
+# dh_oral 角色(数字人口播): voiceover 即口播全文(≤40 字≈15s),
+#   text 为叠加主题卡文案, highlightWords 为口播关键词
 MOCK_SCENE_TEXTS = {
     "cover": "都在聊{hotword}",
     "selling": "竹香工艺藏进{category}",
     "proof": "老窖池的底气",
     "action": "主页了解好酒",
     "compliance": COMPLIANCE_TEXT,
+    "dh_oral": "竹小妹说{hotword}",
 }
 MOCK_SCENE_VOICEOVERS = {
     "cover": "家人们, 最近{hotword}好火, 竹小妹也来聊聊。",
@@ -160,6 +172,9 @@ MOCK_SCENE_VOICEOVERS = {
     "proof": "老窖池的底气, 是时间给的味道。",
     "action": "想了解的家人, 点主页看看呀。",
     "compliance": COMPLIANCE_VOICEOVER,
+    "dh_oral": (
+        "家人们, {hotword}好火, 竹香酒好喝不上头。"
+        "理性饮酒, 未满18岁请勿饮酒。"),
 }
 MOCK_HIGHLIGHTS = {
     "cover": ["{hotword}"],
@@ -167,6 +182,7 @@ MOCK_HIGHLIGHTS = {
     "proof": ["老窖池"],
     "action": ["主页"],
     "compliance": [],
+    "dh_oral": ["{hotword}", "竹香工艺"],
 }
 
 # 落盘目录(仿 36号生产线 VIDEO_DIR 惯例)
