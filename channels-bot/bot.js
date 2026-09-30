@@ -372,36 +372,68 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     await sleep(1500);
     await page.screenshot({ path: 'publish_2_filled.png' });
 
-    // 5. 点发表
+    // 5. 点发表: 合成 click + CDP 真实点击兜底(xhs 21 轮机制迁移)——
+    //    iframe 内按钮取视口坐标(getBoundingClientRect 跨 frame
+    //    一致), CDP Input 按视口坐标分发可达 iframe, force=0.5
+    //    压力校验(微信系 pointer 压力校验实证)
     let clicked = false;
+    let postPt = null;
     try {
       form = getForm() || form;
-      clicked = await form.evaluate(() => {
+      postPt = await form.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('button, [role=button]'));
         const b = btns.find(x => (x.innerText || '').trim() === '发表');
-        if (b) { b.click(); return true; }
-        return false;
+        if (!b) return null;
+        const r = b.getBoundingClientRect();
+        b.click();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
       });
+      clicked = !!postPt;
     } catch (e) { LOG('publish click err: ' + e.message); }
-    LOG('click 发表: ' + clicked);
+    LOG('click 发表: ' + clicked
+      + (postPt ? ' at ' + Math.round(postPt.x) + ',' + Math.round(postPt.y) : ''));
+    if (postPt) {
+      await sleep(2500);
+      const cdp = await page.createCDPSession();
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: postPt.x, y: postPt.y, button: 'none', pointerType: 'mouse' });
+      await sleep(150);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: postPt.x, y: postPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+      await sleep(90);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: postPt.x, y: postPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+      LOG('CDP 真实点击兜底已发');
+    }
 
-    // 6. 等结果
-    await sleep(15000);
-    await page.screenshot({ path: 'publish_3_after.png' });
-    form = getForm() || form;
+    // 6. 成功特征轮询收口(xhs 21 轮机制迁移, 替换固定 sleep 15s):
+    //    发表后表单 iframe 消失(frame gone, 历史实证)/文本特征——
+    //    每 3s 一次最多 90s, 命中早退; 超时留档人审
+    let published = false;
     let afterBody = '';
-    try {
-      afterBody = await form.evaluate(() => (document.body.innerText || '').slice(0, 500));
-    } catch (e) { afterBody = 'frame gone: ' + e.message; }
-    const afterUrl = page.url();
-    LOG('after url=' + afterUrl);
+    let mainBody = '';
+    let afterUrl = page.url();
+    const pubDeadline = Date.now() + 90 * 1000;
+    while (Date.now() < pubDeadline) {
+      await sleep(3000);
+      afterUrl = page.url();
+      const f = getForm();
+      try {
+        afterBody = f
+          ? await f.evaluate(() => (document.body.innerText || '').slice(0, 500))
+          : 'frame gone';
+      } catch (e) { afterBody = 'frame gone: ' + e.message; }
+      try { mainBody = await page.evaluate(() => (document.body.innerText || '').slice(0, 400)); } catch (e) {}
+      const frameGone = !f || String(afterBody).startsWith('frame gone');
+      const hit = frameGone
+        || /发表成功|已发表|审核中/.test(afterBody + mainBody);
+      if (hit) { published = true; break; }
+    }
+    await page.screenshot({ path: 'publish_3_after.png' });
+    LOG((published ? 'PUBLISH_OK' : 'PUBLISH_UNVERIFIED') + ' url=' + afterUrl);
     LOG('after body: ' + afterBody.slice(0, 300));
-    const mainBody = await page.evaluate(() => (document.body.innerText || '').slice(0, 400));
     LOG('main body: ' + mainBody.slice(0, 200));
-    fs.writeFileSync('publish_result.json', JSON.stringify({ clicked, uploadDone, afterUrl, afterBody, mainBody }, null, 2));
+    fs.writeFileSync('publish_result.json', JSON.stringify({ clicked, published, uploadDone, afterUrl, afterBody, mainBody }, null, 2));
     LOG('PUBLISH_RUN_DONE');
     await browser.close();
-    process.exit(0);
+    process.exit(published ? 0 : 6);
   }
 
   if (CFG.action === 'annotate') {

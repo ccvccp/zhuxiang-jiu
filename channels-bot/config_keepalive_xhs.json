@@ -1,0 +1,11 @@
+{
+  "name": "xhs",
+  "botScript": "xhs-bot.js",
+  "loginStateFile": "xhs_login_state.json",
+  "profileDir": "xhs-profile",
+  "snapshot": true,
+  "botAction": "probe",
+  "waitLoginMinutes": 3,
+  "allowEnter": false,
+  "intervalHours": 24
+}

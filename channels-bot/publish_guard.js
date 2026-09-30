@@ -23,8 +23,8 @@ const WAIT_MIN = (() => {
 const CMD_SEP = process.argv.indexOf('--');
 const PUBLISH_CMD = CMD_SEP > 0 ? process.argv.slice(CMD_SEP + 1) : null;
 
-if (!/^(channels|douyin)$/.test(NAME || '')) {
-  console.error('用法: node publish_guard.js <channels|douyin> [--wait-min N] [-- 发布命令]');
+if (!/^(channels|douyin|xhs)$/.test(NAME || '')) {
+  console.error('用法: node publish_guard.js <channels|douyin|xhs> [--wait-min N] [-- 发布命令]');
   process.exit(3);
 }
 

@@ -382,6 +382,17 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
         if (ok) {
           clicked = true;
           LOG('click 发布 (合成, 按钮 enabled) at ' + Math.round(btnPt.x) + ',' + Math.round(btnPt.y));
+          // CDP 真实点击兜底(xhs 21 轮机制迁移: 合成 click 可能被
+          // 平台拦, CDP Input 为输入层真实事件 isTrusted=true,
+          // force=0.5 压力校验——视频号/抖音列表页同款已实证)
+          await sleep(2500);
+          const cdp = await page.createCDPSession();
+          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: btnPt.x, y: btnPt.y, button: 'none', pointerType: 'mouse' });
+          await sleep(150);
+          await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+          await sleep(90);
+          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+          LOG('CDP 真实点击兜底已发');
         }
       } catch (e) { LOG('publish click err: ' + e.message); await sleep(5000); }
     }
@@ -391,18 +402,29 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
       await page.screenshot({ path: 'douyin_err_no_btn.png' });
     }
 
-    // 5. 等结果 (URL 跳内容管理页 / 成功 toast; 特征待实证校准)
-    await sleep(15000);
-    await page.screenshot({ path: 'douyin_publish_3_after.png' });
-    const afterUrl = page.url();
+    // 5. 成功特征轮询收口(xhs 21 轮机制迁移, 替换固定 sleep 15s):
+    //    URL 离开 upload/video 跳内容管理页 / 文本含 发布成功/审核中
+    //    —— 每 3s 一次最多 90s, 命中早退; 超时留档人审(特征实证校准项)
+    let published = false;
+    let afterUrl = page.url();
     let afterBody = '';
-    try { afterBody = await page.evaluate(() => (document.body.innerText || '').slice(0, 500)); } catch (e) {}
-    LOG('after url=' + afterUrl);
+    const pubDeadline = Date.now() + 90 * 1000;
+    while (Date.now() < pubDeadline) {
+      await sleep(3000);
+      afterUrl = page.url();
+      try { afterBody = await page.evaluate(() => (document.body.innerText || '').slice(0, 500)); } catch (e) {}
+      const leftUpload = /upload\/video/.test(afterUrl);
+      const hit = (!leftUpload && /creator\.douyin\.com/.test(afterUrl))
+        || /发布成功|审核中|已成功发布/.test(afterBody);
+      if (hit) { published = true; break; }
+    }
+    await page.screenshot({ path: 'douyin_publish_3_after.png' });
+    LOG((published ? 'PUBLISH_OK' : 'PUBLISH_UNVERIFIED') + ' url=' + afterUrl);
     LOG('after body: ' + afterBody.slice(0, 300));
-    fs.writeFileSync('douyin_publish_result.json', JSON.stringify({ clicked, descFilled, afterUrl, afterBody, mp4: CFG.mp4 }, null, 2));
+    fs.writeFileSync('douyin_publish_result.json', JSON.stringify({ clicked, descFilled, published, afterUrl, afterBody, mp4: CFG.mp4 }, null, 2));
     LOG('PUBLISH_RUN_DONE');
     await browser.close();
-    process.exit(0);
+    process.exit(published ? 0 : 6);
   }
 
   LOG('unknown action');
