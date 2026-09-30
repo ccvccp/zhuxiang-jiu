@@ -1,10 +1,11 @@
 """AutoDL 实例 API 开关机工具(数字人 GPU 轨自动编排配套)
 
-用法: python adh_power.py <on|off|status|list> [--uuid <instance_uuid>]
+用法: python adh_power.py <on|off|status|list|balance> [--uuid <uuid>]
 Token: ADH_API_TOKEN env 或 ADH_TOKEN_FILE env 指向的文件(单行)
 实例 UUID: ADH_INSTANCE_UUID env 或 --uuid(缺省走 list 探测唯一实例)
 
-API(官方开放 API, 2026-10-01 实证可用):
+API(官方开放 API, 2026-10-01 实证):
+  POST /api/v1/dev/wallet/balance        账户余额(¥=assets/1000)
   GET  /api/v1/dev/instance/pro/status   {instance_uuid}
   POST /api/v1/dev/instance/pro/list     实例列表(列 uuid/GPU/状态)
   POST /api/v1/dev/instance/pro/power_on {instance_uuid, payload:"gpu"}
@@ -12,7 +13,11 @@ API(官方开放 API, 2026-10-01 实证可用):
 鉴权: Authorization: <token> ——开发者 Token(控制台→设置→开发者Token,
 长期有效, 与网页 session 无关——第三方 autodl-cli 同机制)。
 
-自动关机兜底通道: 容器内 `shutdown`(官方指令, adh_run.py 通道可执行)。
+⚠ 形态实证(2026-10-01): 开发者 API 实例面仅覆盖"容器实例 Pro"
+(autodl-cli 开源全端点=/api/v1/dev/instance/pro/*); 网页控制台租的
+普通实例(本项目 5090D)不在 API 体系(pro/list 空实证)——普通实例
+开机走控制台人工(约 10 秒)或 P2 迁移 Pro 形态; 关机不受限(容器内
+shutdown 官方指令, dh_batch 收尾默认执行)。balance 对两种形态通用。
 """
 
 import json
@@ -100,6 +105,15 @@ def main() -> int:
         if not items:
             print(json.dumps(b, ensure_ascii=False)[:300])
         return 0
+
+    if action == "balance":
+        # 账户余额(¥=assets/1000)——dh_batch 跑批前置止损检查
+        b = call("POST", "/api/v1/dev/wallet/balance", {})
+        d = b.get("data") or {}
+        yuan = int(d.get("assets") or 0) / 1000
+        spent = int(d.get("accumulate") or 0) / 1000
+        print(f"余额 ¥{yuan:.2f}(累计消费 ¥{spent:.2f})")
+        return 0 if b.get("code") == "Success" else 1
 
     u = _resolve_uuid(argv)
 

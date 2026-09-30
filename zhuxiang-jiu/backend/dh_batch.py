@@ -20,7 +20,10 @@
 
 配置 env:
   ADH_HOST/ADH_PORT/ADH_USER/ADH_PASSWORD   算力机 SSH(同 adh_run)
-  ADH_API_TOKEN(+ADH_INSTANCE_UUID)         AutoDL 开发者 Token(开机用)
+  ADH_API_TOKEN / ADH_TOKEN_FILE            AutoDL 开发者 Token——
+                         余额止损检查(wallet/balance, 未配则跳过);
+                         --boot 开机仅适用"容器实例 Pro"形态(普通实例
+                         控制台人工开机, adh_power.py 形态实证)
   SV73_DH_IMAGE_REMOTE   远端口播基准图绝对路径(默认 SadTalker 示例
                          真人图——金鹿角标无人脸实证, 竹小妹定版前占位)
   SV73_API               生产 API 基址(默认 https://zxjiu.com)
@@ -41,6 +44,30 @@ import paramiko
 PROD_HOST = "root@47.236.61.117"
 PROD_CONTAINER = "zhuxiang-backend-1"
 API = "https://zxjiu.com"
+ADL_API = "https://api.autodl.com"
+
+
+def wallet_balance() -> float | None:
+    """AutoDL 余额(¥)——Token 未配/查询失败返回 None(跳过检查)"""
+    import os
+    tok = os.environ.get("ADH_API_TOKEN", "").strip()
+    f = os.environ.get("ADH_TOKEN_FILE", "").strip()
+    if not tok and f and os.path.isfile(f):
+        tok = open(f, encoding="utf-8").read().strip()
+    if not tok:
+        return None
+    req = urllib.request.Request(
+        ADL_API + "/api/v1/dev/wallet/balance", data=b"{}",
+        method="POST",
+        headers={"Authorization": tok,
+                 "Content-Type": "application/json"})
+    try:
+        b = json.loads(urllib.request.urlopen(req, timeout=20).read())
+        if b.get("code") == "Success":
+            return int((b.get("data") or {}).get("assets") or 0) / 1000
+    except Exception:  # noqa: BLE001
+        return None
+    return None
 
 ADH = {
     "host": "connect.weste.seetacloud.com",
@@ -268,15 +295,31 @@ def main() -> int:
     ap.add_argument("--sid", help="单条剧本号")
     ap.add_argument("--sids", help="逗号分隔多条")
     ap.add_argument("--boot", action="store_true",
-                    help="先 AutoDL API 开机(需 ADH_API_TOKEN)")
+                    help="先 AutoDL API 开机(需 ADH_API_TOKEN; 普通实例"
+                         "不在 API 体系——控制台人工开机, 见 adh_power.py"
+                         "形态实证)")
     ap.add_argument("--no-shutdown", action="store_true",
                     help="跑完不自动关机(默认关)")
+    ap.add_argument("--min-balance", type=float, default=10.0,
+                    help="余额止损阈值(¥, 默认 10; 低于即退出不跑)")
     args = ap.parse_args()
     sids = [s.strip() for s in
             (args.sids or args.sid or "").split(",") if s.strip()]
     if not sids:
         print(__doc__)
         return 2
+
+    # 余额止损(2026-10-01 实证 wallet/balance; Token 未配则跳过)
+    bal = wallet_balance()
+    if bal is not None:
+        print(f"[余额] ¥{bal:.2f}", end="")
+        if bal < args.min_balance:
+            print(f" < 阈值 ¥{args.min_balance:.2f}——止损退出"
+                  "(AutoDL 控制台充值后再跑)")
+            return 1
+        print(f"(阈值 ¥{args.min_balance:.2f}) ✓")
+    else:
+        print("[余额] ADH_API_TOKEN 未配置, 跳过检查")
 
     if args.boot:
         print("[0/5] AutoDL API 开机 ...")

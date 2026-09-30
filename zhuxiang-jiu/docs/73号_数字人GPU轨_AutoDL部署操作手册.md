@@ -140,24 +140,36 @@ landmark 前置即败(`can not detect the landmark`)。数字人基准图必须�
 
 ## 四点五、自动开/关机编排(2026-10-01 无人值守批量实录)
 
-**adh_power.py**(AutoDL 官方开放 API 开关机):
-- `python adh_power.py list|status|on|off` —— api.autodl.com,
-  开发者 Token(控制台→设置→开发者Token, **长期有效**, 与网页 session
-  无关)注入 `ADH_API_TOKEN` env; 实例 UUID 由 list 探测(唯一实例自动选)
-- `on` 内置轮询(5s×24 → running); 自动关机兜底通道: 容器内
-  `shutdown`(官方指令, dh_batch 默认走此——参数化 API 关机亦可)
+**API 形态实证(2026-10-01)**: AutoDL 开发者 API(api.autodl.com +
+开发者 Token, 控制台→设置→开发者Token, 长期有效)实例面**仅覆盖
+"容器实例 Pro"**(autodl-cli 开源项目全端点 = /api/v1/dev/instance/
+pro/*); **网页控制台租的普通实例(本项目 5090D)不在 API 体系**(pro/list
+空实证)。故:
+- **当前半自动**(普通实例): 控制台人工开机(约 10 秒)→ dh_batch
+  全自动跑批+自动关机; `wallet/balance` 余额止损检查 Token 即用
+- **全自动路径**(P2 规模化项, 触发条件同 §四周产 >20 条): 保存
+  自定义镜像(SadTalker 全环境入系统盘)→ 迁"容器实例 Pro"形态
+  (5090-p 规格)→ adh_power create/on + 跑批 + power_off 全 API 无人值守
+
+**adh_power.py**(AutoDL 官方开放 API 工具):
+- `python adh_power.py balance|list|status|on|off` —— api.autodl.com,
+  Token 注入 `ADH_API_TOKEN` env 或 `ADH_TOKEN_FILE` 指向文件
+  (本地 `.adh_token`, 已入 .gitignore); balance 为通用(两种形态)
+- 余额实证: **¥126.60**(累计消费 **¥23.40** = 2026-09-30 开通至今
+  全部 GPU 成本——部署+两次实弹+生产全链, 远优于预算)
 
 **dh_batch.py**(批量编排器, build_dh_dev 拆链四步正式化):
 ```bash
-python dh_batch.py --boot --sids sv73_a,sv73_b   # 开机→跑批→自动关机
-python dh_batch.py --sid sv73_x --no-shutdown    # 单条, 不关机
+python dh_batch.py --sids sv73_a,sv73_b    # 控制台开机后: 跑批→自动关机
+python dh_batch.py --sid sv73_x --no-shutdown --min-balance 10
 ```
+- **跑批前置余额止损**(wallet/balance, Token 未配则跳过): 余额 <
+  阈值(默认 ¥10)即退出不跑——防中途欠费断机
 - 单条流程: 拉 storyboard → 本地竹语 TTS(key 经生产容器管道注入,
   不落盘) → 分块上传(md5 双端校验) → 远端 5090D E2E(importlib
-  独立加载) → 分块下载 → attach 生产
-- 实测: 单条全流程 **~3.5 分钟**(TTS 6s+上传 15s+推理 90s+下载 20s),
-  attach 200 ×2(contentId 43/44); 成本 ¥0.1-0.19/条
-- 批量摊薄(模型常驻/推理进程池)留 P2——当前 ≤¥1/条红线已达标
+  独立加载) → 分块下载 → attach 生产 → 收尾 shutdown(官方指令)
+- 实测: 单条全流程 **~3.5 分钟**, attach 200 ×2(contentId 43/44);
+  成本 ¥0.1-0.19/条; 批量摊薄(模型常驻)留 P2
 
 ## 五、验收清单(2026-09-30/10-01 实录勾选)
 
