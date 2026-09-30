@@ -3,19 +3,20 @@
 // 端口, 剥 --enable-automation 拟真) + 独立 xhs-profile 持久登录态。
 // 与 channels/douyin 通道完全隔离(独立 profile/日志/产物前缀)。
 //
-// ⚠️ 发布流联调实证(2026-09-30, 19 轮定稿):
-//   · probe / manage / draft 三 action 实证可用(publish 全自动
-//     受限见下)
-//   · 新上传流底部操作栏是「暂存离开」+「定时发布」(红主钮),
-//     无「发布」钮; 定时弹窗仅时间选项无立即发布(全自动待校准)
-//   · 转码窗口期: 视频上传完成≠可发布, xhs 需服务端转码,
-//     转码未完成时点发布会被静默转存草稿——发布流收敛为:
-//     publish(上传+填写) → 「暂存离开」 → draft 流(草稿箱
-//     编辑页底部直接有红「发布」钮, 点击即成功, 第 19 轮实证)
-//   · 草稿箱入口: 登录后首页, 与红「发布笔记」按钮同一条线
+// ⚠️ 发布流联调实证(2026-09-30, 20 轮全自动闭环定稿):
+//   · probe / manage / draft / publish 四 action 实证可用;
+//     publish 全自动闭环已打通(上传+填写+转码等待+CDP 穿透
+//     定位+双击+成功检测, 无人介入)
+//   · 操作栏(暂存离开/发布)在 closed shadow DOM——DOM 遍历
+//     不可达, 走 CDP getFlattenedDocument(pierce) 穿透定位
+//   · 转码窗口期: 视频上传完成≠可发布, 「检测为高清视频」
+//     绿标=转码完成特征(前置等待), 未完成时点发布会被静默
+//     转存草稿(draft 流为草稿恢复路径)
+//   · 「定时发布」是开关(更多设置区, 1h~14d), 默认 OFF——
+//     点「发布」= 立即发布, 全自动无需碰定时开关
+//   · 发布成功特征: URL 带 published=true / 跳 manage
 //   · manage: 旧 /manage 与 /new/manage 均 404——须首页侧边栏
 //     「笔记管理」菜单导航进入(点击式)
-//   · 发布成功特征: URL 跳 publish/success(第 19 轮 bot 捕捉)
 //
 // 用法: node xhs-bot.js <config.json>
 // config: { action: "probe"|"publish"|"manage"|"draft",
@@ -175,7 +176,7 @@ const XHS_MANAGE = 'https://creator.xiaohongshu.com/new/manage';
       const t = await page.evaluate(
         () => (document.body.innerText || '').slice(0, 600)
       ).catch(() => '');
-      if (/发布成功|正在发布|审核中|定时成功|定时发布成功/.test(t) || /\/manage/.test(finalUrl)) {
+      if (/发布成功|正在发布|审核中|定时成功|定时发布成功/.test(t) || /\/manage|published=true/.test(finalUrl)) {
         ok = true;
         break;
       }
@@ -256,32 +257,74 @@ const XHS_MANAGE = 'https://creator.xiaohongshu.com/new/manage';
       path: 'xhs_publish_bottom.png',
       clip: { x: 800, y: 700, width: 480, height: 200 },
     });
-    // 4. 点发布(联调实证 2026-09-30, 八轮迭代定稿):
-    //    · 真根因: fillEditor 点击正文后页面滚至编辑区, 底部
-    //      操作栏(文档流末尾, 非 fixed)滚出视口——此前所有
-    //      elementFromPoint/扫描命中的都是正文元素
-    //    · 修法: 滚到文档底 → 视口内 elementFromPoint 扫描
-    //    · 侧边栏「发布笔记」(x~104)勿碰, 主区 x>300
+    // 3.5 转码完成等待(第 20 轮实证): 上传完成≠可发布——19 轮
+    //     实证转码窗口期点「发布」被静默转存草稿; 「检测为高清
+    //     视频」绿标 = 服务端转码完成特征, 出现后才允许点发布
+    let transcoded = false;
+    for (let i = 0; i < 60; i++) {
+      const txt = await page.evaluate(
+        () => (document.body.innerText || '').slice(0, 2000)
+      ).catch(() => '');
+      if (/检测为高清视频|高清视频/.test(txt)) { transcoded = true; break; }
+      await sleep(5000);
+    }
+    LOG('transcode signal(高清绿标): ' + transcoded);
+    // 4. 点发布(第 20 轮全自动闭环定稿): 四大实证——
+    //    · 底部操作栏(暂存离开/发布)整个在 closed shadow DOM 内:
+    //      querySelectorAll/getComputedStyle 全不可达——16 轮
+    //      elementFromPoint 文本扫描 + 4 轮 DOM 文本/颜色遍历
+    //      全 miss 的终极根因(截图可见而 DOM 不可达)
+    //    · 修法: CDP DOM.getFlattenedDocument(pierce) ——DevTools
+    //      官方穿透协议: text node「发布」→ 父按钮 getBoxModel
+    //      → 视口坐标(本轮实证 (700,855) 命中)
+    //    · 先 scrollIntoView 定时开关(常规 DOM 可达)带操作栏入
+    //      视口; 「定时发布」是开关非按钮(1h~14d), 默认 OFF,
+    //      点「发布」= 立即发布(开关不碰)
+    //    · 成功特征: URL 带 published=true(20:20 实跑实证, CDP
+    //      双击生效笔记已发布; 此前正则缺此模式致成功未识别)
     let publishPt = null;
     for (let attempt = 0; attempt < 2 && !publishPt; attempt++) {
-      publishPt = await page.evaluate(() => {
-        const zh = (s) =>
-          (s || '').replace(/[^\u4e00-\u9fa5]/g, '');
-        for (let y = 90; y < 895; y += 8) {
-          for (let x = 320; x < 1275; x += 12) {
-            const el = document.elementFromPoint(x, y);
-            if (!el) continue;
-            const z = zh(el.textContent);
-            // 联调第 19 轮终极实证: xhs 视频笔记发布页底部主按钮
-            // 文案是「定时发布」(红), 并非「发布」——此前 16 轮
-            // 扫描 miss 的真正根因; 「暂存离开」白钮不含发布不误匹配
-            if (z === '发布' || z === '发布笔记' || z === '定时发布') {
-              return { x, y };
-            }
+      // 穿透通道(第 20 轮终因实证): 操作栏(暂存离开/发布)整个
+      // 在 closed shadow DOM 内——querySelectorAll/getComputedStyle
+      // 均不可达, 截图可见而 DOM 全遍历 miss; CDP
+      // DOM.getFlattenedDocument(pierce) 是 DevTools 官方穿透
+      // 通道: text node「发布」→ 父按钮 getBoxModel → 视口坐标
+      try {
+        // 先滚到「定时发布」开关(常规 DOM 可达, 操作栏紧邻其后)
+        // 使 shadow 内操作栏入视口(boxModel 视口外则点击无效)
+        await page.evaluate(() => {
+          const el = document.querySelector('.post-time-wrapper')
+            || document.querySelector('.custom-switch-wrapper');
+          if (el) el.scrollIntoView({ block: 'center' });
+        }).catch(() => {});
+        await sleep(800);
+        const cdp = await page.createCDPSession();
+        await cdp.send('DOM.enable');
+        const { nodes } = await cdp.send('DOM.getFlattenedDocument',
+          { depth: -1, pierce: true });
+        const hits = nodes.filter((n) =>
+          n.nodeType === 3
+          && (n.nodeValue || '').trim() === '发布');
+        for (const t of hits) {
+          const parent = nodes.find((n) => n.nodeId === t.parentId);
+          if (!parent) continue;
+          const bm = await cdp.send('DOM.getBoxModel',
+            { nodeId: parent.nodeId }).catch(() => null);
+          if (!bm || !bm.model) continue;
+          const c = bm.model.content;
+          const x = (c[0] + c[4]) / 2;
+          const y = (c[1] + c[5]) / 2;
+          // x>300 排侧边栏「发布笔记」; 视口内校验
+          if (x > 300 && y > 0 && y < 890) {
+            publishPt = {
+              x: Math.round(x), y: Math.round(y),
+              label: '发布(cdp-pierce)',
+            };
+            break;
           }
         }
-        return null;
-      }).catch(() => null);
+        await cdp.detach();
+      } catch (e) { LOG('cdp pierce err: ' + e.message); }
       if (!publishPt) await sleep(2000);
     }
     if (!publishPt) {
@@ -310,6 +353,44 @@ const XHS_MANAGE = 'https://creator.xiaohongshu.com/new/manage';
       await sleep(90);
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: publishPt.x, y: publishPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
     }
+    // 4.5 dry-run 模式(第 20 轮): 全自动发布前的无副作用验证——
+    //     上传+填写+等转码+扫描全链真实执行, 命中「发布」钮即停
+    //     (不点击不发布), 留档命中坐标与截图供人审
+    if (CFG.probeSchedule) {
+      // 底部区域全量取证(y>500): 无论命中与否, dump 全部元素
+      // tag/位置/背景/定位/文本——发布钮 DOM 形态一次看全
+      const areaDump = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('div, button, span, a'))
+          .map((e) => {
+            const r = e.getBoundingClientRect();
+            if (r.y < 500 || r.width < 30 || r.height < 14) return null;
+            const s = getComputedStyle(e);
+            return {
+              tag: e.tagName,
+              cls: String(e.className).slice(0, 50),
+              x: Math.round(r.x), y: Math.round(r.y),
+              w: Math.round(r.width), h: Math.round(r.height),
+              pos: s.position,
+              bg: (s.backgroundColor || '').slice(0, 40),
+              bgImg: (s.backgroundImage || '').slice(0, 70),
+              text: (e.innerText || '').trim().slice(0, 10),
+            };
+          }).filter(Boolean).slice(-60)
+      ).catch((e) => [{ err: String(e) }]);
+      fs.writeFileSync('xhs_area_dump.json',
+        JSON.stringify(areaDump, null, 2));
+      await page.screenshot({ path: 'xhs_probe_hit.png' });
+      fs.writeFileSync('xhs_probe_hit.json', JSON.stringify({
+        hit: publishPt,
+        transcoded,
+        at: Date.now(),
+      }, null, 2));
+      LOG('DRYRUN_DONE hit=' + JSON.stringify(publishPt)
+        + ' transcoded=' + transcoded
+        + ' — 未点击未发布 (xhs_probe_hit.png/json + xhs_area_dump.json)');
+      await browser.close();
+      process.exit(0);
+    }
     await sleep(8000);
     // 5. 人工确认等待(联调第 17 轮定稿: 自动化定位 16 轮未果——
     //    切人机协作, 对齐 36号"对话内 browser agent"SOP 原始
@@ -327,7 +408,7 @@ const XHS_MANAGE = 'https://creator.xiaohongshu.com/new/manage';
       const t = await page.evaluate(
         () => (document.body.innerText || '').slice(0, 600)
       ).catch(() => '');
-      if (/manage|发布成功|正在发布/.test(finalUrl + t)) {
+      if (/manage|发布成功|正在发布|published=true/.test(finalUrl + t)) {
         ok = true;
         break;
       }
