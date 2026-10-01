@@ -441,6 +441,92 @@ def detect_wake(text: str) -> tuple[bool, str]:
     return False, t
 
 
+# ---------- 48号 P1: 概率型唤醒评分(连续分值数据基础) ----------
+# 证伪关闭档候选 1 落地: 为唤醒置信度 EMA 平滑与误唤醒观测
+# 提供"对象"(连续分值)——分级评分表 + 句中位置衰减 + 未注册
+# u 韵音观察面(留痕不唤醒, 误唤醒观测关键样本)。
+
+# 分级评分表(七近似音按音近程度分级; 与 WAKE_WORDS 同源)
+WAKE_SCORE_TABLE = {"小竹": 1.0, "小竹竹": 0.9, "晓竹": 0.9,
+                    "小朱": 0.8, "小珠": 0.8, "小猪": 0.8,
+                    "小主": 0.7}
+WAKE_THRESHOLD_DEFAULT = 0.7   # on 态判定线(0.7=弱近似最低档,
+#                              # 与旧 WAKE_WORDS 命中面完全等价)
+
+# "小X"未注册音韵母比对小表(纯标准库预置——u 韵家族拦截面,
+# 如"小住/小助"; 观察留痕不唤醒)
+_WAKE_RHYME_U = ("住", "助", "著", "筑", "铸", "诛", "蛛",
+                 "逐", "烛", "瞩", "嘱", "贮")
+
+
+def wake_score_mode() -> bool:
+    """XIAOZHU_WAKE_SCORE_MODE(off 默认): 评分计算+留痕,
+    判定走旧轨——零行为差异; on 后按阈值分值判定"""
+    return os.environ.get(
+        "XIAOZHU_WAKE_SCORE_MODE", "off").lower() in (
+        "on", "1", "true")
+
+
+def wake_threshold() -> float:
+    try:
+        return max(0.5, min(1.0, float(os.environ.get(
+            "XIAOZHU_WAKE_THRESHOLD",
+            str(WAKE_THRESHOLD_DEFAULT)))))
+    except ValueError:
+        return WAKE_THRESHOLD_DEFAULT
+
+
+def wake_score(text: str) -> float:
+    """唤醒连续分值 0-1(确定性规则产分, 纯标准库)
+
+    分级: 精确 1.0 / 强近似 0.9 / 同韵 0.8 / 弱近似 0.7;
+    句中命中按位置衰减(前 1/3 ×0.75, 中后 ×0.65——越靠后
+    越可能闲聊误触); "小X"未注册 u 韵音 0.55(观察留痕不唤醒)。
+    """
+    t = str(text or "").strip()
+    if not t:
+        return 0.0
+    for w in sorted(WAKE_SCORE_TABLE, key=len, reverse=True):
+        if t.startswith(w):
+            return WAKE_SCORE_TABLE[w]
+    for w in sorted(WAKE_SCORE_TABLE, key=len, reverse=True):
+        idx = t.find(w)
+        if idx > 0:
+            ratio = idx / max(len(t), 1)
+            base = WAKE_SCORE_TABLE[w]
+            return round(
+                base * (0.75 if ratio < 0.34 else 0.65), 3)
+    if len(t) >= 2 and t[0] == "小" and t[1] in _WAKE_RHYME_U:
+        return 0.55
+    return 0.0
+
+
+def detect_wake_v2(text: str) -> tuple[bool, str, float]:
+    """唤醒判定 v2(P1): (woken, command, wakeScore)
+
+    判定口径:
+        - WAKE_SCORE_MODE=off(默认): 判定走旧 detect_wake
+          (零行为差异), score 仅计算返回供留痕
+        - on: score >= wake_threshold() 分值判定(0.7 默认线=
+          旧表命中面完全等价; 未注册 u 韵 0.55 不唤醒=旧表外
+          本就不唤醒); 指令剥离复用旧语义
+    fail-soft: 评分异常回退旧判定。
+    """
+    try:
+        score = wake_score(text)
+        if not wake_score_mode():
+            woken, cmd = detect_wake(text)
+            return woken, cmd, score
+        woken = score >= wake_threshold()
+        if not woken:
+            return False, str(text or "").strip(), score
+        _, cmd = detect_wake(text)   # 表内命中→旧剥离语义
+        return True, cmd, score
+    except Exception:  # noqa: BLE101
+        woken, cmd = detect_wake(text)
+        return woken, cmd, 0.0   # 评分崩溃: 旧轨兜底, score 置 0
+
+
 def _resolve_reference(text: str,
                        last_turn: dict | None) -> str:
     """指代消解: 语句以指代词开头时拼接上一轮对象名
@@ -1022,8 +1108,11 @@ class XiaozhuService:
         # 累; H5 免提后台录音不传, 反语音霸权红线不变)
         if wakeup_free:
             woken, command_text = True, text.strip()
+            _wake_score = 1.0   # 显式交互(点击=确定唤醒)
         else:
-            woken, command_text = detect_wake(text)
+            # 48号 P1: 概率型唤醒评分(off 默认判定走旧轨,
+            # score 计算留痕——EMA 平滑/误唤醒观测数据基础)
+            woken, command_text, _wake_score = detect_wake_v2(text)
         # 唤醒命中记 member 级时间戳(免唤醒窗跨会话延续——
         # 13:33 实证: token 竞态→重新登录→新会话无唤醒记录,
         # 窗口内真指令被 not_woken 打回"请以小竹开头")
@@ -1064,6 +1153,7 @@ class XiaozhuService:
                              if _jv.joyvoice_mode_enabled()
                              else None)},
                 {"wakeHint": True,
+                 "wakeScore": round(_wake_score, 3),
                  "audioMeta": audio_meta})
         # 唤醒应答: 只叫"小竹"无指令 → "在呢!"(对话存在感
         # ——真机反馈: 叫了没回音不知道听没听到; 短句秒播,
@@ -1080,6 +1170,7 @@ class XiaozhuService:
                 {"reply": "在呢！",
                  "card": None},
                 {"commandText": command_text,
+                 "wakeScore": round(_wake_score, 3),
                  "audioMeta": audio_meta})
 
         # v86-A 空转写/语气词前置防御(语义路由"音频质量预检
