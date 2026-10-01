@@ -26,8 +26,9 @@
                          控制台人工开机, adh_power.py 形态实证)
   SV73_DH_IMAGE_REMOTE   远端口播基准图绝对路径(默认
                          /root/autodl-tmp/assets/ip/zhuxiaomei_front.jpg
-                         ——竹小妹定版图 2026-10-01, 每次跑批自动从
-                         本地 assets/ip/zhuxiaomei_front.jpg 上传校验)
+                         ——口播基准图 2026-10-02 换版(竹林美女解说
+                         竹奕酒), 每次跑批自动从本地
+                         assets/ip/zhuxiaomei_front.jpg 上传校验)
   SV73_API               生产 API 基址(默认 https://zxjiu.com)
 """
 
@@ -231,14 +232,20 @@ def _h264ize(mp4: Path) -> int:
     """SadTalker 出片转 H264 标准竖屏——两个发布坑一次修复
     (2026-10-01 xhs 发布失败实证):
     ① mp4v→avc1: OpenCV VideoWriter 默认 mpeg4 Part 2, xhs 转码器不认
-    ② 非标分辨率→720x1280: 竹小妹图 852x1514 竖屏非标, "高清绿标"
+    ② 非标分辨率→720x1280: 基准图竖屏非标(2026-10-01 竹小妹
+       852x1514 → 2026-10-02 换版竹林美女 1344x1792), "高清绿标"
        5 分钟不出(转码器只标清标准分辨率)——bot 降级人工模式;
-       scale 标准竖屏后绿标恢复, 全自动闭环不再依赖人工点发布
+       转标准竖屏后绿标恢复, 全自动闭环不再依赖人工点发布。
+       cover 口径(2026-10-02 修正): 换版图 3:4 与 9:16 差 33%,
+       直缩会横向压扁变形——scale 铺满+居中 crop 裁左右,
+       人物居中构图主体无损
     同名覆盖, 返回转码后字节数"""
     import subprocess as sp
     tmp = mp4.with_suffix(".h264.mp4")
     r = sp.run([_ffmpeg_bin(), "-y", "-i", str(mp4),
-                "-vf", "scale=720:1280",  # 宽高比 426:757 vs 9:16 差 0.4%, 直缩
+                "-vf", ("scale=720:1280:"
+                        "force_original_aspect_ratio=increase,"
+                        "crop=720:1280"),  # cover: 等比铺满+居中裁
                 "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                 "-pix_fmt", "yuv420p", "-c:a", "aac",
                 "-movflags", "+faststart", str(tmp)],

@@ -17,9 +17,10 @@ AVTR-1/ditto); 按 docx 方案 B 原文列名的 SadTalker(单图+音频→
     {scriptId}_tts.wav), 本服务只做"图+音频→口播"一步
   · 合规前置: 口播文案的 compliance_gate 在剧本层已过
 
-基准图(2026-10-01 定版): assets/ip/zhuxiaomei_front.jpg(竹小妹
-正面照 853×1515——金鹿角标无人脸 landmark 失败实证后正式定版,
-SV73_DH_IMAGE 可配; GPU 侧 landmark 实测随下次跑批首验)。
+基准图(2026-10-02 换版): assets/ip/zhuxiaomei_front.jpg(竹林
+美女解说竹奕酒版 1344×1792——正面人脸 landmark 达标; 2026-10-01
+竹小妹正面照 853×1515 定版的接续换版, 旧版 git 历史可回溯,
+SV73_DH_IMAGE 可配; GPU 侧 landmark 随下次跑批首验)。
 
 SadTalker 命令(未实机校准项全部可配——21 轮联调教训):
 SV73_DH_CMD 覆盖默认命令模板, 占位符 {image}/{audio}/{outdir}/{out}
@@ -46,7 +47,7 @@ SV73_VIDEO_DIR = Path(os.environ.get(
     "SV73_VIDEO_DIR",
     str(Path(__file__).resolve().parent.parent / "sv73_videos")))
 
-# 口播基准图(竹小妹正面照——2026-10-01 定版; SV73_DH_IMAGE 可配)
+# 口播基准图(竹林美女解说竹奕酒——2026-10-02 换版; SV73_DH_IMAGE 可配)
 DH_IMAGE = Path(os.environ.get(
     "SV73_DH_IMAGE",
     str(Path(__file__).resolve().parent.parent
