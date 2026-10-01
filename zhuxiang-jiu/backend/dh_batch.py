@@ -214,6 +214,42 @@ def pull(ssh, remote: str, local: Path):
 
 # ---------- 单条全链 ----------
 
+def _ffmpeg_bin() -> str:
+    """ffmpeg 路径(PATH 优先, 项目自带兜底)——发布转码用"""
+    import shutil
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    for cand in (r"D:\网站架构设计\ffmpeg\ffmpeg.exe",
+                 "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"):
+        if os.path.isfile(cand):
+            return cand
+    raise RuntimeError("ffmpeg not found(PATH/项目自带均缺)")
+
+
+def _h264ize(mp4: Path) -> int:
+    """SadTalker 出片转 H264 标准竖屏——两个发布坑一次修复
+    (2026-10-01 xhs 发布失败实证):
+    ① mp4v→avc1: OpenCV VideoWriter 默认 mpeg4 Part 2, xhs 转码器不认
+    ② 非标分辨率→720x1280: 竹小妹图 852x1514 竖屏非标, "高清绿标"
+       5 分钟不出(转码器只标清标准分辨率)——bot 降级人工模式;
+       scale 标准竖屏后绿标恢复, 全自动闭环不再依赖人工点发布
+    同名覆盖, 返回转码后字节数"""
+    import subprocess as sp
+    tmp = mp4.with_suffix(".h264.mp4")
+    r = sp.run([_ffmpeg_bin(), "-y", "-i", str(mp4),
+                "-vf", "scale=720:1280",  # 宽高比 426:757 vs 9:16 差 0.4%, 直缩
+                "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                "-pix_fmt", "yuv420p", "-c:a", "aac",
+                "-movflags", "+faststart", str(tmp)],
+               capture_output=True, timeout=300)
+    if r.returncode != 0 or not tmp.is_file():
+        raise RuntimeError("H264 转码失败: "
+                           + r.stderr.decode("utf-8", "replace")[-200:])
+    tmp.replace(mp4)
+    return mp4.stat().st_size
+
+
 def build_one(ssh, sid: str, token: str, key: str) -> bool:
     print(f"  == {sid} ==")
     # ① 拉 storyboard
@@ -278,6 +314,10 @@ print('E2E PASS')
         return False
     local_mp4 = Path(f"sv73_videos/{sid}_dh.mp4")
     size = pull(ssh, f"{REMOTE_ROOT}/{sid}_dh.mp4", local_mp4)
+    # 平台兼容转码(mp4v→H264, xhs 转码器不认 mpeg4 Part 2——发布
+    # 失败实证修复); attach 产物即转码版
+    size = _h264ize(local_mp4)
+    print(f"    h264: {size}B")
     # 产物回地清理(Pro 系统盘仅 ~40G: mp4 时间戳文件+中间帧是大头,
     # 下载校验过即远端全清——本地 mp4/wav 是权威产物)
     run(ssh, f"rm -f {REMOTE_ROOT}/*.mp4 {REMOTE_ROOT}/{sid}_tts.wav"
