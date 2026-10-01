@@ -111,6 +111,14 @@ class UpdateSettingsRequest(PydBaseModel):
         None, ge=1, description="观察期天数(v2-E3, 默认7)")
     escrowUnlockOrder: bool | None = Field(
         None, description="首笔订单可解冻(v2-E3, 默认true)")
+    referralTierElite: int | None = Field(
+        None, ge=0, description="精英档月引进数阈值(v2-E4, 0=关阶梯, 默认50)")
+    referralTierKing: int | None = Field(
+        None, ge=0, description="王者档月引进数阈值(v2-E4, 默认200)")
+    referralTierElitePts: int | None = Field(
+        None, ge=0, description="精英档每引进积分(v2-E4, 默认400)")
+    referralTierKingPts: int | None = Field(
+        None, ge=0, description="王者档每引进积分(v2-E4, 默认500)")
 
 
 class GrantRewardRequest(PydBaseModel):

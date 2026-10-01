@@ -239,6 +239,38 @@ async def check_host_health() -> dict:
             "message": "; ".join(m for _, m in findings)[:200]}
 
 
+async def check_growth_anomalies() -> dict:
+    """80号 v2-E4: 绑定速率异常(刷单侧写)——24h 新增关系按推荐人聚合
+
+    绝对阈值(v2 方案 §2.2, EMA 基线列后续增强): 单推荐人 24h 内
+    新增绑定 > 50 → WARN(疑似) / > 100 → FAIL(团伙嫌疑)。
+    单项 fail-soft; 留痕即证(告警闭环由巡检总线继承)。
+    """
+    from datetime import timedelta
+    from repositories.promotion_repository import PromotionRepository
+    try:
+        relations = await PromotionRepository().list_relations(limit=5000)
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(hours=24)).isoformat()
+        per_inviter: dict[str, int] = {}
+        for r in relations or []:
+            if str(r.get("createdAt") or "") >= cutoff:
+                key = str(r.get("inviterMemberId") or "?")
+                per_inviter[key] = per_inviter.get(key, 0) + 1
+        suspects = [(k, n) for k, n in per_inviter.items() if n > 50]
+        if not suspects:
+            return {"state": "PASS", "count": len(per_inviter),
+                    "message": f"绑定速率正常(24h 活跃推荐人 {len(per_inviter)})"}
+        worst = "FAIL" if any(n > 100 for _, n in suspects) else "WARN"
+        top = sorted(suspects, key=lambda x: -x[1])[:3]
+        return {"state": worst, "count": len(suspects),
+                "message": "; ".join(
+                    f"推荐人{k} 24h 新增{n}" for k, n in top)[:200]}
+    except Exception as exc:  # noqa: BLE001
+        return {"state": "FAIL", "count": 0,
+                "message": f"绑定速率检查异常: {exc}"[:200]}
+
+
 # 巡检清单注册表(增项在此追加——名称即 rule 名, 告警去重键)
 PATROL_ITEMS = [
     ("redis_health", "Redis 体检", check_redis_health),
@@ -248,6 +280,7 @@ PATROL_ITEMS = [
     ("intel_degraded", "情报订阅", check_intel_degraded),
     ("publish_queue_stuck", "发布队列", check_publish_queue_stuck),
     ("host_health", "主机级监控", check_host_health),
+    ("growth_anomalies", "绑定速率异常(80号)", check_growth_anomalies),
 ]
 
 

@@ -54,6 +54,10 @@ DEFAULT_SETTINGS = {
     "referralEscrowEnabled": False,  # v2-E3引进积分延迟结算(默认关)
     "escrowDays": 7,              # v2-E3观察期天数(≥1)
     "escrowUnlockOrder": True,    # v2-E3首笔订单可解冻
+    "referralTierElite": 50,      # v2-E4精英档月引进数阈值(0=关阶梯)
+    "referralTierKing": 200,      # v2-E4王者档月引进数阈值
+    "referralTierElitePts": 400,  # v2-E4精英档每分
+    "referralTierKingPts": 500,   # v2-E4王者档每分
     "updatedAt": "",
     "updatedBy": "",
 }

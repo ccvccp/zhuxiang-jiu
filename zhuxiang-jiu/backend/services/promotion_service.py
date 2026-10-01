@@ -296,6 +296,24 @@ class PromotionService:
             if points <= 0:
                 return None
 
+            # v2-E4 阶梯: 当月引进数达档 → 档位分值覆盖
+            # (referralTierElite=0 关阶梯回基础分; 月口径=绑定 createdAt
+            #  本地月份前缀, 跨月自然清零)
+            tier_elite = int(settings.get("referralTierElite", 50) or 0)
+            if tier_elite > 0:
+                month_prefix = datetime.now().strftime("%Y-%m")
+                team = await self.promo_repo.list_team(inviter_id)
+                month_count = len([
+                    r for r in team
+                    if str(r.get("createdAt", "")).startswith(month_prefix)])
+                tier_king = int(settings.get("referralTierKing", 200) or 0)
+                if tier_king > 0 and month_count >= tier_king:
+                    points = int(
+                        settings.get("referralTierKingPts", 500) or points)
+                elif month_count >= tier_elite:
+                    points = int(
+                        settings.get("referralTierElitePts", 400) or points)
+
             from services.points_service import PointsService
             marker = f"{self.REFERRAL_POINTS_SOURCE}:{invitee_member_id}"
             points_svc = PointsService()
@@ -734,7 +752,9 @@ class PromotionService:
                    "pointsPerReferral", "sharePointsPerAction",
                    "shareDailyLimit", "welcomeNewcomerPoints",
                    "deviceGateEnabled", "referralEscrowEnabled",
-                   "escrowDays", "escrowUnlockOrder")
+                   "escrowDays", "escrowUnlockOrder",
+                   "referralTierElite", "referralTierKing",
+                   "referralTierElitePts", "referralTierKingPts")
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             raise ValueError(f"无可更新字段, 支持: {', '.join(allowed)}")
@@ -772,6 +792,26 @@ class PromotionService:
         if "escrowUnlockOrder" in updates:
             updates["escrowUnlockOrder"] = bool(
                 updates["escrowUnlockOrder"])
+        if "referralTierElite" in updates:
+            v = int(updates["referralTierElite"])
+            if v < 0:
+                raise ValueError("精英档阈值(80号E4)须 ≥ 0(0=关阶梯)")
+            updates["referralTierElite"] = v
+        if "referralTierKing" in updates:
+            v = int(updates["referralTierKing"])
+            if v < 0:
+                raise ValueError("王者档阈值(80号E4)须 ≥ 0")
+            updates["referralTierKing"] = v
+        if "referralTierElitePts" in updates:
+            v = int(updates["referralTierElitePts"])
+            if v < 0:
+                raise ValueError("精英档积分(80号E4)须 ≥ 0")
+            updates["referralTierElitePts"] = v
+        if "referralTierKingPts" in updates:
+            v = int(updates["referralTierKingPts"])
+            if v < 0:
+                raise ValueError("王者档积分(80号E4)须 ≥ 0")
+            updates["referralTierKingPts"] = v
 
         if "level1Threshold" in updates:
             v = int(updates["level1Threshold"])
