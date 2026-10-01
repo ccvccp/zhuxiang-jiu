@@ -1,0 +1,33 @@
+# ============================================================
+# 74号·IBMS 主机级监控采集器栈(生产裁剪版, 2026-10-01)
+# 用途: 服务器 /opt/zhuxiang 下拉起 node-exporter + cAdvisor
+#       两个轻采集器(~65MB)——IBMS 巡检总线 host_health 检查项
+#       直接 curl :9100/:8080 metrics 端点解析(不装 Prometheus/
+#       Grafana——1.6G 小机内存预算内; 留 P2 服务器升配时引入)
+# 注意: 与主 compose 独立 project(ibms-monitor)——容器名/网络不
+#       与 zhuxiang-backend/redis 冲突; 端口仅本机用途(不对外)
+# ============================================================
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: ibms-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    volumes:
+      - /:/host:ro
+    ports:
+      - "127.0.0.1:9100:9100"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: ibms-cadvisor
+    restart: unless-stopped
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    ports:
+      - "127.0.0.1:8080:8080"

@@ -162,6 +162,83 @@ async def check_publish_queue_stuck() -> dict:
             "message": f"队列正常(到期积压 {len(stuck)} 条)"}
 
 
+# 主机级采集器端点(ibms-monitoring.yml 两个轻采集器, 127.0.0.1 绑定)
+NODE_EXPORTER_URL = os.environ.get(
+    "IBMS_NODE_EXPORTER_URL", "http://127.0.0.1:9100/metrics")
+CADVISOR_URL = os.environ.get(
+    "IBMS_CADVISOR_URL", "http://127.0.0.1:8080/metrics")
+# 主机级阈值: 磁盘可用/内存可用/load(74号 P1——"黄金时段波动"留 P2
+# 动态基线, v1 静态阈值先兜底)
+DISK_CRIT_RATIO, DISK_WARN_RATIO = 0.05, 0.15
+MEM_WARN_BYTES = 300 * 1024 * 1024
+
+
+def _parse_metric(text: str, name: str, mount: str = None):
+    """node-exporter 文本解析: 取首个匹配值(带可选 {mountpoint=} 标签)"""
+    for line in text.splitlines():
+        if not line.startswith(name + " ") and not line.startswith(
+                name + "{"):
+            continue
+        if mount and f'mountpoint="{mount}"' not in line:
+            continue
+        try:
+            return float(line.rsplit(" ", 1)[-1])
+        except ValueError:
+            continue
+    return None
+
+
+async def check_host_health() -> dict:
+    """主机级监控(74号缺口 1 落地形态——1.6G 小机不装 Prometheus,
+    IBMS 巡检直采 node-exporter :9100/ cAdvisor :8080)
+
+    覆盖: 根分区磁盘水位 / 内存可用 / load1 vs 核数;
+    采集器不可达(node-exporter 未起)→ FAIL(ibms-monitoring.yml 掉了)。
+    """
+    import urllib.request
+    try:
+        with urllib.request.urlopen(NODE_EXPORTER_URL, timeout=5) as r:
+            text = r.read().decode("utf-8", "replace")
+    except Exception as exc:
+        return {"state": "FAIL", "count": 0,
+                "message": f"node-exporter 不可达({exc})——"
+                           "ibms-monitoring.yml 采集器未跑?"}
+    findings = []
+    # 磁盘根分区
+    avail = _parse_metric(text, "node_filesystem_avail_bytes", "/")
+    total = _parse_metric(text, "node_filesystem_size_bytes", "/")
+    if avail is not None and total:
+        ratio = avail / total
+        if ratio < DISK_CRIT_RATIO:
+            findings.append(("FAIL", f"根分区仅剩 {ratio:.0%}(<5%)"))
+        elif ratio < DISK_WARN_RATIO:
+            findings.append(("WARN", f"根分区剩 {ratio:.0%}(<15%)"))
+    # 内存
+    mem_avail = _parse_metric(text, "node_memory_MemAvailable_bytes")
+    if mem_avail is not None and mem_avail < MEM_WARN_BYTES:
+        findings.append(("WARN", f"内存可用 {mem_avail/1048576:.0f}MB"
+                                 "(<300MB)"))
+    # load
+    load1 = _parse_metric(text, "node_load1")
+    cpu_count = sum(1 for line in text.splitlines()
+                    if line.startswith("node_cpu_seconds_total{")
+                    and 'mode="idle"' in line) or 2
+    if load1 is not None and load1 > cpu_count * 2:
+        findings.append(("WARN", f"load1={load1:.1f} > {cpu_count*2}"
+                                 "(核数×2)"))
+    if not findings:
+        disk_pct = (f"{avail/total:.0%} 可用"
+                   if avail is not None and total else "未知")
+        mem_pct = (f"{mem_avail/1048576:.0f}MB 可用"
+                   if mem_avail is not None else "")
+        return {"state": "PASS", "count": 0,
+                "message": f"主机健康(磁盘 {disk_pct}, 内存 {mem_pct},"
+                           f" load1={load1:.1f})"}
+    worst = "FAIL" if any(s == "FAIL" for s, _ in findings) else "WARN"
+    return {"state": worst, "count": len(findings),
+            "message": "; ".join(m for _, m in findings)[:200]}
+
+
 # 巡检清单注册表(增项在此追加——名称即 rule 名, 告警去重键)
 PATROL_ITEMS = [
     ("redis_health", "Redis 体检", check_redis_health),
@@ -170,6 +247,7 @@ PATROL_ITEMS = [
     ("scheduler_anomalies", "调度器基线", check_scheduler_anomalies),
     ("intel_degraded", "情报订阅", check_intel_degraded),
     ("publish_queue_stuck", "发布队列", check_publish_queue_stuck),
+    ("host_health", "主机级监控", check_host_health),
 ]
 
 

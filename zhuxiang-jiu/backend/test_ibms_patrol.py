@@ -201,6 +201,56 @@ async def test_t7_diagnose_llm_structured(monkeypatch):
     assert result["fallback"] is None
 
 
+# ---------- T9 host_health 主机级(74号缺口 1 巡检直采形态) ----------
+
+NODE_FAKE = """
+node_filesystem_avail_bytes{mountpoint="/",device="/dev/vda3"} 1.7e10
+node_filesystem_size_bytes{mountpoint="/",device="/dev/vda3"} 4.0e10
+node_memory_MemAvailable_bytes 5.8e8
+node_load1 0.35
+node_cpu_seconds_total{cpu="0",mode="idle"} 100
+node_cpu_seconds_total{cpu="1",mode="idle"} 100
+""".strip()
+
+
+@pytest.mark.asyncio
+async def test_t9_host_health_pass(monkeypatch):
+    def fake_open(url, timeout=0):
+        class R:
+            def read(self):
+                return NODE_FAKE.encode()
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+        return R()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_open)
+    r = await ibms.check_host_health()
+    assert r["state"] == "PASS"
+    assert "磁盘" in r["message"] and "内存" in r["message"]
+
+
+@pytest.mark.asyncio
+async def test_t9_host_health_disk_warn_and_exporter_down(monkeypatch):
+    def boom(url, timeout=0):
+        raise OSError("connection refused")
+
+    # 采集器不可达 → FAIL(ibms-monitoring.yml 掉了的自证)
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    r = await ibms.check_host_health()
+    assert r["state"] == "FAIL"
+    assert "不可达" in r["message"]
+
+
+def test_t9_metric_parser():
+    assert ibms._parse_metric(NODE_FAKE, "node_load1") == 0.35
+    assert ibms._parse_metric(
+        NODE_FAKE, "node_filesystem_avail_bytes", "/") == 1.7e10
+    assert ibms._parse_metric(NODE_FAKE, "node_filesystem_avail_bytes",
+                              "/other") is None
+
+
 # ---------- T8 路由守卫 ----------
 
 def test_t8_routes():
