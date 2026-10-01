@@ -16,10 +16,15 @@
     08 隐私红线(PII mask 落库 + 一键清除级联)
     09 鉴权与业务回归
 
-每轮验收前清理 zhuxiang:voice48:* 残留, ×2 轮幂等验证。
+每轮验收前清理 zhuxiang:voice48:* 残留, ×2 轮幂等验证
+(2026-10-01 起全量清理改为显式开启: VOICE48_FULL_WIPE=1——
+生产 voice48 已承载真实观测/业务数据, P3-1 唤醒分值轮次
+watch_xiaozhu_wake.py 的判定数据源, 默认只靠脚本自身
+§08 会话级 DELETE 级联自清, 不再全量 wipe)。
 """
 import base64
 import json
+import os
 import subprocess
 import sys
 import urllib.error
@@ -46,14 +51,26 @@ def record(name, passed, detail=""):
 
 
 def clear_voice48() -> None:
+    """全量清理 voice48 键空间(破坏性——默认关闭)
+
+    容器名 2026-10-01 修正: zhuxiang-jiu-redis-1(旧年代
+    遗留名, 静默 no-op)→zhuxiang-redis-1(生产实际)。修正
+    即生效, 故同步加防护门: 生产 voice48 已承载 P3-1 唤醒
+    分值观察轮次/信值绑定/积分账本等真实数据, 全量 wipe
+    仅一次性环境经 VOICE48_FULL_WIPE=1 显式开放。
+    """
+    if os.environ.get("VOICE48_FULL_WIPE") != "1":
+        print("[WARN] VOICE48_FULL_WIPE!=1, 跳过 voice48 全量"
+              "清理(保护生产观测数据); 一次性环境可显式开启")
+        return
     out = subprocess.run(
-        ["docker", "exec", "zhuxiang-jiu-redis-1", "redis-cli",
+        ["docker", "exec", "zhuxiang-redis-1", "redis-cli",
          "--scan", "--pattern", "zhuxiang:voice48:*"],
         capture_output=True, text=True)
     keys = [k for k in (out.stdout or "").split() if k]
     for i in range(0, len(keys), 200):
         subprocess.run(
-            ["docker", "exec", "zhuxiang-jiu-redis-1",
+            ["docker", "exec", "zhuxiang-redis-1",
              "redis-cli", "DEL", *keys[i:i + 200]],
             capture_output=True, text=True)
 
@@ -103,8 +120,8 @@ def main():
            str(body)[:70])
     ok, (code, body) = call("GET", "/api/xiaozhu/commands")
     cmds = body.get("commands") or []
-    record("指令集自描述(14 条)",
-           code == 200 and len(cmds) == 14
+    record("指令集自描述(28 条)",
+           code == 200 and len(cmds) == 28
            and body.get("wakeWords") == ["小竹"],
            str(len(cmds)))
 
@@ -142,7 +159,7 @@ def main():
                 or "优惠" in body.get("reply", "")),
            body.get("reply", "")[:40])
 
-    print("\n[05 八指令逐一实测]")
+    print("\n[05 六指令逐一实测]")
     for text, check in (
             ("小竹，竹香酒多少钱",
              lambda b: "元" in b.get("reply", "")),
