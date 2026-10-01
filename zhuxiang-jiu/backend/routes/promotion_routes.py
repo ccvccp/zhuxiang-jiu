@@ -112,6 +112,15 @@ class GrantRewardRequest(PydBaseModel):
     detail: str = Field("管理端手动补发", description="备注")
 
 
+class RevokePointsRequest(PydBaseModel):
+    memberId: int = Field(..., gt=0, description="被追回会员ID")
+    points: int = Field(..., gt=0, description="追回积分数(正数)")
+    refId: str = Field(..., min_length=4, max_length=60,
+                       description="同源幂等标记(如 traffic79:456——与原发放流水 refId 一致)")
+    reason: str = Field("管理端追回", max_length=120, description="追回原因(工单号等)")
+    confirm: bool = Field(False, description="二次确认, 须显式传 true")
+
+
 # ============================================================
 # 用户端: 专属推广码
 # ============================================================
@@ -407,6 +416,32 @@ async def admin_ship_wine(
     _require_admin(x_role)
     try:
         result = await _service.admin_ship_wine(claim_id)
+        return {"success": True, **result}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/promotion/admin/points/revoke",
+             tags=["推广码矩阵模块"])
+async def admin_revoke_points(
+    data: RevokePointsRequest,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """积分追回(79/80号 v2-E1: 刷单/客诉补偿回收)
+
+    负流水+账户扣减, 不透支(余额不足扣至 0, 欠口记流水说明);
+    同源幂等: refId 与原发放流水一致, 重复追回 409。
+    须显式二次确认(confirm=true)。
+    """
+    _require_admin(x_role)
+    if not data.confirm:
+        raise HTTPException(status_code=409,
+                             detail="危险操作: 须显式传 confirm=true 二次确认")
+    try:
+        from services.points_service import PointsService
+        result = await PointsService().revoke_points(
+            user_id=data.memberId, points=data.points,
+            ref_id=data.refId, ref_desc=data.reason)
         return {"success": True, **result}
     except Exception as exc:
         _handle(exc)

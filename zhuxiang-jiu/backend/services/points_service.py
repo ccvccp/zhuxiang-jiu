@@ -594,6 +594,57 @@ class PointsService:
                 "balance": account.get("totalPoints", 0) if account else points,
             }
 
+    # ---------- 79/80号 v2-E1: 管理端追回(刷单/客诉补偿回收) ----------
+
+    REVOKE_SOURCE = "admin_revoke"
+
+    async def revoke_points(self, user_id: int, points: int,
+                            ref_id: str = "", ref_desc: str = "") -> dict:
+        """管理端积分追回(负流水+账户扣减; 不透支, 余额不足扣至 0 记欠口)
+
+        幂等: (userId, source=admin_revoke, refId) 唯一——同源重复追回 409。
+        与 earn_points 对称: 账户锁内写; 追回为管理操作, 不做 FIFO 批次
+        消耗/抵现上限/AI 门(语义不同, 余额快照对齐即可)。
+
+        Raises:
+            ValueError: 追回积分须为正 / 已追回过(refId 同源)
+        """
+        if points <= 0:
+            raise ValueError("追回积分须为正数")
+        async with get_lock(f"points:account:{user_id}"):
+            if ref_id:
+                existing = await self.repo.list_logs(
+                    user_id, source=self.REVOKE_SOURCE, limit=100)
+                if any(l.get("refId") == ref_id for l in existing):
+                    raise ValueError(
+                        f"该笔已追回过(refId={ref_id}), 重复追回被拒绝")
+            account = await self.repo.get_or_create_account(user_id)
+            balance = account.get("totalPoints", 0)
+            actual = min(balance, points)
+            shortfall = points - actual
+            account["totalPoints"] = balance - actual
+            await self.repo.save_account(account)
+            log_id = await self.repo.add_log({
+                "userId": user_id,
+                "type": LOG_TYPE_SPEND,
+                "source": self.REVOKE_SOURCE,
+                "points": -actual,
+                "balance": account["totalPoints"],
+                "refId": ref_id,
+                "refDesc": (ref_desc or "管理端追回") + (
+                    f"(余额不足, 实扣{actual}, 欠口{shortfall}不入负)"
+                    if shortfall > 0 else ""),
+                "expireAt": None,
+                "status": "available",
+            })
+            return {
+                "logId": log_id,
+                "requested": points,
+                "revoked": actual,
+                "shortfall": shortfall,
+                "balance": account["totalPoints"],
+            }
+
     async def migrate_legacy_points(self, member_id: int,
                                     legacy_points: int) -> dict:
         """member 表遗留积分一次性迁移到积分账本(P1-19)
