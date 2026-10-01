@@ -16,6 +16,7 @@ import {
   TeamMemberVO,
   RewardVO,
 } from '@/api/promotion';
+import { Growth80API } from '@/api/growth80';
 
 // 渠道显示名
 const CHANNEL_NAME: Record<string, string> = {
@@ -182,13 +183,23 @@ const PromotionPage: React.FC = () => {
     });
   };
 
-  // 复制指定码的分享文案(79号漏斗明细行)
-  const handleCopyTipOf = (tip: string) => {
+  // 复制指定码的分享文案(79号漏斗明细行; 80号顺带分享计分)
+  const handleCopyTipOf = async (tip: string, code: string) => {
     if (!tip) return;
     Taro.setClipboardData({
       data: tip,
       success: () => Taro.showToast({ title: '分享文案已复制', icon: 'success' }),
     });
+    // 80号: 分享动作计分(fail-soft——计分失败不影响复制)
+    try {
+      const r = await Growth80API.reportShare('promo_code', code);
+      if (r.counted) {
+        setTimeout(() => {
+          Taro.showToast({ title: `分享 +${r.points} 积分`, icon: 'none' });
+        }, 700);
+        loadData();
+      }
+    } catch (_) { /* best-effort */ }
   };
 
   // 一级奖励进度
@@ -320,7 +331,7 @@ const PromotionPage: React.FC = () => {
                 </View>
                 <View
                   className={styles.funnelRowBtn}
-                  onClick={() => handleCopyTipOf(c.shareTip)}
+                  onClick={() => handleCopyTipOf(c.shareTip, c.code)}
                 >
                   复制文案
                 </View>

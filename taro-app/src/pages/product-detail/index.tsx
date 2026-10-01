@@ -5,6 +5,7 @@ import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import CheckoutService from '@/services/checkout-service';
 import { ProductAPI, ProductVO, ReviewVO } from '@/api/product';
+import { Growth80API } from '@/api/growth80';
 import { PRODUCT_DEFAULTS, SERVICE_PHONE } from '@/config';
 
 // 兜底: API 失败时用 mock 数据
@@ -90,6 +91,29 @@ const ProductDetailPage: React.FC = () => {
 
   const handleContact = () => {
     Taro.showToast({ title: `客服热线: ${SERVICE_PHONE}`, icon: 'none' });
+  };
+
+  // 80号: 分享得积分(复制产品链接 + 事件上报计分, fail-soft)
+  const handleShareScore = async () => {
+    if (!product) return;
+    const link = `${window.location?.origin || ''}/#/pages/product-detail/index?id=${product.id}`;
+    Taro.setClipboardData({
+      data: `${product.name} 竹香好酒 → ${link}`,
+      success: () => Taro.showToast({ title: '链接已复制, 快去分享吧', icon: 'success' }),
+    });
+    try {
+      const r = await Growth80API.reportShare('product', String(product.id));
+      if (r.counted) {
+        setTimeout(() => {
+          Taro.showToast({ title: `分享 +${r.points} 积分`, icon: 'none' });
+        }, 700);
+      } else if (r.reason) {
+        const reason: string = r.reason;
+        setTimeout(() => {
+          Taro.showToast({ title: reason, icon: 'none' });
+        }, 700);
+      }
+    } catch (_) { /* 计分失败不影响复制 */ }
   };
 
   if (loading || !product) {
@@ -224,6 +248,11 @@ const ProductDetailPage: React.FC = () => {
         <View className={styles.actionIcon} onClick={handleContact}>
           <View className={styles.iconEmoji}>📞</View>
           <View className={styles.iconText}>客服</View>
+        </View>
+        {/* 80号: 分享得积分(复制产品链接+计分, 日限内每次 N 分) */}
+        <View className={styles.actionIcon} onClick={handleShareScore}>
+          <View className={styles.iconEmoji}>📤</View>
+          <View className={styles.iconText}>分享得积分</View>
         </View>
         <View className={styles.qtyBox}>
           <View className={styles.qtyBtn} onClick={handleQtyMinus}>-</View>

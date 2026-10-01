@@ -47,6 +47,9 @@ DEFAULT_SETTINGS = {
     "wineMinPrice": 200.0,        # 奖励酒最低价
     "eligibleProductIds": None,   # 活动酒池(None=自动取价格>=wineMinPrice的产品)
     "pointsPerReferral": 300,     # 79号会员流量智能: 每引进1注册会员积分(0=关)
+    "sharePointsPerAction": 20,   # 80号增长: 每次分享计分(0=关)
+    "shareDailyLimit": 5,         # 80号增长: 分享计分日上限(次/日)
+    "welcomeNewcomerPoints": 100, # 80号增长: 被邀新人礼积分(0=关)
     "updatedAt": "",
     "updatedBy": "",
 }

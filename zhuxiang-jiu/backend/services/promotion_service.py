@@ -268,6 +268,10 @@ class PromotionService:
             logger.info("promo_referral_points inviter=%s invitee=%s "
                         "points=%s", inviter_id, invitee_member_id, points)
 
+            # 80号缺口2: 被邀新人礼(与引荐分同事务, fail-soft)
+            from services.growth80_service import Growth80Service
+            await Growth80Service().award_newcomer(invitee_member_id)
+
             # 站内信通知(fail-soft——通知失败不影响已发积分)
             try:
                 from repositories.message_repository import (
@@ -625,7 +629,8 @@ class PromotionService:
         allowed = ("enabled", "level1Threshold", "level1RewardAmount",
                    "level2SubPromoterCount", "level2SubThreshold",
                    "level2RewardAmount", "wineMinPrice", "eligibleProductIds",
-                   "pointsPerReferral")
+                   "pointsPerReferral", "sharePointsPerAction",
+                   "shareDailyLimit", "welcomeNewcomerPoints")
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             raise ValueError(f"无可更新字段, 支持: {', '.join(allowed)}")
@@ -635,6 +640,21 @@ class PromotionService:
             if v < 0:
                 raise ValueError("引进积分(79号)须 ≥ 0(0=关闭)")
             updates["pointsPerReferral"] = v
+        if "sharePointsPerAction" in updates:
+            v = int(updates["sharePointsPerAction"])
+            if v < 0:
+                raise ValueError("分享计分(80号)须 ≥ 0(0=关闭)")
+            updates["sharePointsPerAction"] = v
+        if "shareDailyLimit" in updates:
+            v = int(updates["shareDailyLimit"])
+            if v < 0:
+                raise ValueError("分享日上限(80号)须 ≥ 0")
+            updates["shareDailyLimit"] = v
+        if "welcomeNewcomerPoints" in updates:
+            v = int(updates["welcomeNewcomerPoints"])
+            if v < 0:
+                raise ValueError("新人礼积分(80号)须 ≥ 0(0=关闭)")
+            updates["welcomeNewcomerPoints"] = v
 
         if "level1Threshold" in updates:
             v = int(updates["level1Threshold"])

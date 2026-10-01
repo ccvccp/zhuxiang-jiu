@@ -73,6 +73,8 @@ from routes import (
     register_maintenance_routes,
     # 智能后台管理模型(74号·IBMS 巡检总线+LLM 诊断)
     register_ibms_routes,
+    # 全域会员智能增长(80号·分享积分轨+新人礼)
+    register_growth80_routes,
     # 用户认证模块
     register_auth_routes,
     # 推广码矩阵模块
@@ -269,6 +271,7 @@ register_venue_routes(app)
 register_monitor_routes(app)
 register_maintenance_routes(app)
 register_ibms_routes(app)
+register_growth80_routes(app)
 register_auth_routes(app)
 register_promotion_routes(app)
 register_pocket_routes(app)

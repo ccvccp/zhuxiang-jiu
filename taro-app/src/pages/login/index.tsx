@@ -88,6 +88,29 @@ const LoginPage: React.FC = () => {
     })();
   }, []);
 
+  // ---------- 80号渠道个性化欢迎(短码落地 ch 参数) ----------
+  // hash SPA: query 在 # 前部(_build_landing 组装约定)——按来源
+  // 展示个性化欢迎文案, 并预开注册模式(拉新转化最短路径)
+  const [welcomeTip, setWelcomeTip] = useState('');
+  useEffect(() => {
+    try {
+      const search = (typeof window !== 'undefined'
+        && window.location?.search) || '';
+      const ch = new URLSearchParams(search).get('ch') || '';
+      if (!ch) return;
+      const tips: Record<string, string> = {
+        douyin: '刷到视频的朋友你好呀！注册即得 100 积分新人礼',
+        kuaishou: '来自快手的朋友你好呀！注册即得 100 积分新人礼',
+        bilibili: '来自B站的朋友你好呀！注册即得 100 积分新人礼',
+        xiaohongshu: '种草成功！注册即得 100 积分新人礼',
+        wechat: '好友分享而来？注册即得 100 积分新人礼',
+        wechat_miniprogram: '好友分享而来？注册即得 100 积分新人礼',
+      };
+      setWelcomeTip(tips[ch] || '注册即得 100 积分新人礼');
+      setRegisterMode(true);
+    } catch (_) { /* 参数解析失败不阻断 */ }
+  }, []);
+
   // 短信冷却倒计时
   useEffect(() => {
     if (smsCooldown <= 0) return;
@@ -347,6 +370,10 @@ const LoginPage: React.FC = () => {
   return (
     <View className={styles.page}>
       <NavBar title="AI 智能入口" />
+      {/* 80号: 渠道个性化欢迎(短码落地 ch 参数) */}
+      {welcomeTip && (
+        <View className={styles.welcomeBanner}>🎉 {welcomeTip}</View>
+      )}
       {/* 品牌头 */}
       <View className={styles.brand}>
         <View className={styles.brandIcon}>🍶</View>

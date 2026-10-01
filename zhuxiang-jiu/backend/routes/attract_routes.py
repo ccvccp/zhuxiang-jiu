@@ -118,7 +118,7 @@ _LANDING_FIX = {
 
 
 def _build_landing(landing_path: str, click_id: int,
-                   variant: str = "") -> str:
+                   variant: str = "", channel: str = "") -> str:
     """落地 URL 组装(hash 路由感知, 修复路由错位)
 
     - v1.0 遗留路径经 _LANDING_FIX 映射为实际落地
@@ -127,6 +127,8 @@ def _build_landing(landing_path: str, click_id: int,
       注册 Referer 归因均生效)
     - 自包含页(activity.html)保持原样直拼
     - 未知路径原样透传(自定义落地页前瞻兼容)
+    - 80号缺口3: ch=渠道参数——落地页按来源个性化欢迎
+      文案+预开注册模式(转化优化)
     """
     lp = _LANDING_FIX.get(landing_path, landing_path)
     if "#" in lp:
@@ -134,12 +136,16 @@ def _build_landing(landing_path: str, click_id: int,
         q = f"clickId={click_id}"
         if variant:
             q += f"&v72={variant}"
+        if channel:
+            q += f"&ch={channel}"
         sep = "&" if "?" in base else "?"
         return f"{base}{sep}{q}#{frag}"
     sep = "&" if "?" in lp else "?"
     target = f"{lp}{sep}clickId={click_id}"
     if variant:
         target += f"&v72={variant}"
+    if channel:
+        target += f"&ch={channel}"
     return target
 
 
@@ -299,7 +305,8 @@ async def short_link_redirect(
         return RedirectResponse(
             url=_build_landing(
                 result["landingPath"],
-                result["clickId"], variant),
+                result["clickId"], variant,
+                channel=result.get("channel", "")),
             status_code=302)
     except Exception as e:
         _handle(e)

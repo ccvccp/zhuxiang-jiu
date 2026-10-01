@@ -61,6 +61,8 @@ from routes.ai_learning_routes import register_ai_learning_routes
 from routes.pocket_routes import register_pocket_routes
 # 网站图标智能管理模块
 from routes.site_theme_routes import register_site_theme_routes
+# 全域会员智能增长(80号·分享积分轨+新人礼)
+from routes.growth80_routes import register_growth80_routes
 # 权限AI智能管理模块
 from routes.perm_routes import register_perm_routes
 # 产品溯源管理模块
@@ -158,6 +160,7 @@ __all__ = [
     "register_ai_learning_routes",
     "register_pocket_routes",
     "register_site_theme_routes",
+    "register_growth80_routes",
     "register_perm_routes",
     "register_trace_prod_routes",
     "register_ticket_routes",
