@@ -35,6 +35,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -318,8 +319,9 @@ def main() -> int:
     ap.add_argument("--min-balance", type=float, default=10.0,
                     help="余额止损阈值(¥, 默认 10; 低于即退出不跑)")
     ap.add_argument("--pro", default="",
-                    help="容器实例Pro uuid——snapshot 动态取 SSH 连接,"
-                         "跑批后 API power_off(普通实例缺省走 ADH env)")
+                    help="容器实例Pro uuid(缺省读 ADH_INSTANCE_UUID env——"
+                         "create 成功时 setx 自动持久化)——snapshot 动态"
+                         "取 SSH 连接, 跑批后 API power_off")
     args = ap.parse_args()
     sids = [s.strip() for s in
             (args.sids or args.sid or "").split(",") if s.strip()]
@@ -350,11 +352,12 @@ def main() -> int:
     # SSH 连接: --pro=API snapshot 动态取(Pro 实例每次 create 连接信息
     # 都变) / 缺省=普通实例 ADH env 硬编码
     overrides = None
-    if args.pro:
-        print(f"[Pro] snapshot 动态连接 ({args.pro[:12]}...) ...")
+    pro_uuid = args.pro or os.environ.get("ADH_INSTANCE_UUID", "").strip()
+    if pro_uuid:
+        print(f"[Pro] snapshot 动态连接 ({pro_uuid[:12]}...) ...")
         from adh_power import call as adl_call
         b = adl_call("GET", "/api/v1/dev/instance/pro/snapshot",
-                     {"instance_uuid": args.pro})
+                     {"instance_uuid": pro_uuid})
         d = b.get("data") or {}
         if b.get("code") != "Success" or not d.get("proxy_host"):
             print("  snapshot 失败:", json.dumps(b, ensure_ascii=False)[:200])
@@ -390,12 +393,12 @@ def main() -> int:
 
     print(f"== 批量完成: {ok} ok / {fail} fail ==")
     if not args.no_shutdown:
-        if args.pro:
+        if pro_uuid:
             print("[关机] Pro API power_off ...")
             from adh_power import call as adl_call
             ssh.close()
             b = adl_call("POST", "/api/v1/dev/instance/pro/power_off",
-                         {"instance_uuid": args.pro})
+                         {"instance_uuid": pro_uuid})
             print("    power_off:", b.get("code"), b.get("msg", ""))
         else:
             print("[关机] 容器内 shutdown(官方指令, 停止计费) ...")

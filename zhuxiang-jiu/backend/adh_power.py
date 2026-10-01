@@ -28,6 +28,7 @@ shutdown 官方指令, dh_batch 收尾默认执行)。balance 对两种形态通
 
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -162,6 +163,13 @@ def main() -> int:
         print("create:", b.get("code"), d, b.get("msg", ""))
         if b.get("code") == "Success" and d:
             print("CREATED", d)   # 实例 uuid——后续 on/snapshot/off 用
+            # 持久化用户级 env(Windows setx): on/off/status 与
+            # dh_batch --pro 免敲 uuid; 新开终端生效
+            if sys.platform == "win32":
+                subprocess.run(["setx", "ADH_INSTANCE_UUID", str(d)],
+                               capture_output=True)
+            else:
+                print(f"export ADH_INSTANCE_UUID={d}")
         return 0 if b.get("code") == "Success" else 1
 
     if action == "snapshot":

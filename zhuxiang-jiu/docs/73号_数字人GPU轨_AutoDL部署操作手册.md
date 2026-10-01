@@ -163,6 +163,34 @@ pro/*); **网页控制台租的普通实例(本项目 5090D)不在 API 体系**(
     开通**; 开通后 `adh_power.py create --image image-c255400f08
     --gpu 5090-p --disk 10` 即起全环境实例, dh_batch --pro 全链
 
+**客服工单存档(2026-10-01 提交)**: 主题「容器实例 Pro API create
+报『无当前资源访问权限』——请确认开通条件」; 关键报文:
+```
+POST api.autodl.com/api/v1/dev/instance/pro/create
+Body: {req_gpu_amount:1, expand_system_disk_by_gb:10,
+       gpu_spec_uuid:"5090-p", image_uuid:"image-c255400f08",
+       cuda_v_from:128, data_center_list:["westDC3"]}
+→ {"code":"BadRequest","msg":"无当前资源访问权限",
+   "request_id":"438ab0123d8f818a62bdcd06f04214f7"}
+对照(同 Token 全 200 Success): wallet/balance ¥126.60 ·
+image/private/list(镜像正常) · instance/pro/list(空)
+另一次 request_id: eec4a3098fe86ab1165b30eeac1f1253
+```
+客服入口: docs 首页客服微信二维码(扫码添加)。
+
+**Pro 开通后一键 SOP**(全链就绪, 零代码改动):
+```bash
+# 1. 创建(create 成功自动 setx ADH_INSTANCE_UUID——后续免敲 uuid)
+python adh_power.py create --image image-c255400f08 --gpu 5090-p --disk 10
+# 2. 跑批(余额止损→snapshot 动态SSH→素材/服务自上传→GPU→attach
+#    →产物回地清理→API power_off)
+python dh_batch.py --sids sv73_a,sv73_b --pro
+# 3. 日常电源(免 uuid)
+python adh_power.py status|on|off
+# 4. 长期不用: python adh_power.py off (Pro 关机仍计存储费
+#    ¥0.1/日+扩容; 60 天连续关机释放)
+```
+
 **adh_power.py**(AutoDL 官方开放 API 工具):
 - `python adh_power.py balance|list|status|on|off` —— api.autodl.com,
   Token 注入 `ADH_API_TOKEN` env 或 `ADH_TOKEN_FILE` 指向文件
