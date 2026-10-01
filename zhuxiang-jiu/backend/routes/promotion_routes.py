@@ -95,6 +95,8 @@ class UpdateSettingsRequest(PydBaseModel):
     wineMinPrice: float | None = Field(None, ge=0, description="奖励酒最低价")
     eligibleProductIds: list | None = Field(
         None, description="活动酒池产品ID数组(null=自动按价格筛选)")
+    pointsPerReferral: int | None = Field(
+        None, ge=0, description="引进注册会员积分(79号, 0=关闭, 默认300)")
 
 
 class GrantRewardRequest(PydBaseModel):
@@ -165,6 +167,19 @@ async def get_my_stats(
     try:
         stats = await _service.get_my_stats(member_id)
         return {"success": True, **stats}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/promotion/my/funnel", tags=["推广码矩阵模块"])
+async def get_my_funnel(
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+):
+    """我的引流漏斗(79号会员流量智能): 各推广码点击数/注册数/积分汇总"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        funnel = await _service.get_my_funnel(member_id)
+        return {"success": True, **funnel}
     except Exception as exc:
         _handle(exc)
 

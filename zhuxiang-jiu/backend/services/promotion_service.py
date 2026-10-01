@@ -6,6 +6,8 @@
     二级(裂变奖): 直推下线中每有 level2SubPromoterCount(默认6)人
         各自完成推广 level2SubThreshold(默认5)人
         → 发放 level2RewardAmount(默认¥15)钱包奖励余额(仅可购物不可提现)
+    积分轨(79号会员流量智能模块, 与钱包轨并行): 每引进 1 注册会员
+        → 即时发放 pointsPerReferral(默认300)积分(0=关)
 
 防刷: 一人仅可绑定一次 / 禁自绑 / 祖先链防环 / 撤销码失效 / 无效关系不计业绩
 """
@@ -174,6 +176,10 @@ class PromotionService:
             await self.promo_repo.incr_code_bound(code_record["code"])
 
             if is_new:
+                # 79号会员流量智能: 每引进 1 注册会员即时积分奖励
+                # (与下方钱包轨并行, fail-soft 不阻断绑定主流程)
+                await self._award_referral_points(
+                    inviter_id, invitee_member_id)
                 # 触发上级奖励检查(直推达标 → 上线裂变达标), 最多上溯 2 级
                 triggered = [inviter_id]
                 parent = await self.promo_repo.get_relation(inviter_id)
@@ -221,6 +227,74 @@ class PromotionService:
             # 类型归一比较(同自绑拦截: hash 存储为字符串)
             if str(current) == str(invitee_member_id):
                 raise ValueError("绑定失败: 推广关系成环")
+
+    # ============================================================
+    # 79号会员流量智能模块: 引进注册积分轨(与钱包轨并行)
+    # ============================================================
+
+    REFERRAL_POINTS_SOURCE = "traffic79"
+
+    async def _award_referral_points(self, inviter_id: int,
+                                     invitee_member_id: int) -> dict | None:
+        """每引进 1 注册会员即时发积分 + 站内信(79号 P1)
+
+        规则: pointsPerReferral(默认 300, 0=关)——绑定计业绩(counted=True)
+        时向引荐人即时发放, 与 _check_rewards 钱包轨并行互不影响。
+        幂等: refId=traffic79:{invitee_id} 流水标记(bind_relation 一人
+        一绑锁 + 流水查重双保险); fail-soft(异常不阻断绑定主流程)。
+        """
+        try:
+            settings = await self.promo_repo.get_settings()
+            if not settings.get("enabled", True):
+                return None
+            points = int(settings.get("pointsPerReferral", 300) or 0)
+            if points <= 0:
+                return None
+
+            from services.points_service import PointsService
+            marker = f"{self.REFERRAL_POINTS_SOURCE}:{invitee_member_id}"
+            points_svc = PointsService()
+            existing = await points_svc.repo.list_logs(
+                inviter_id, source=self.REFERRAL_POINTS_SOURCE, limit=200)
+            if any(l.get("refId") == marker for l in existing):
+                return None   # 该 invitee 已发放(幂等)
+
+            result = await points_svc.earn_points(
+                inviter_id, points,
+                source=self.REFERRAL_POINTS_SOURCE,
+                ref_id=marker,
+                ref_desc=(f"引进注册会员奖励(会员 {invitee_member_id},"
+                          f" 79号会员流量智能模块)"))
+            logger.info("promo_referral_points inviter=%s invitee=%s "
+                        "points=%s", inviter_id, invitee_member_id, points)
+
+            # 站内信通知(fail-soft——通知失败不影响已发积分)
+            try:
+                from repositories.message_repository import (
+                    CHANNEL_INMAIL, CATEGORY_MEMBER,
+                )
+                from services.message_service import MessageService
+                await MessageService().send_message(
+                    user_id=inviter_id,
+                    channel=CHANNEL_INMAIL,
+                    title="会员推荐奖励到账",
+                    content=(f"您推荐的会员已成功注册，+{points} 积分已到账。"
+                             f"继续分享您的推广码，"
+                             f"每引进一位好友注册即得积分！"),
+                    category=CATEGORY_MEMBER,
+                )
+            except Exception as notify_err:
+                logger.warning("promo_referral_notify_failed inviter=%s: %s",
+                               inviter_id, notify_err)
+
+            return {"points": points,
+                    "logId": result.get("logId"),
+                    "balance": result.get("balance")}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("promo_referral_points_failed inviter=%s "
+                           "invitee=%s: %s",
+                           inviter_id, invitee_member_id, exc)
+            return None
 
     # ============================================================
     # 核心: 矩阵奖励检查(绑定触发)
@@ -294,6 +368,61 @@ class PromotionService:
     # ============================================================
     # 用户端: 推广统计/团队/奖励
     # ============================================================
+
+    async def get_my_funnel(self, member_id: int) -> dict:
+        """我的引流漏斗(79号会员流量智能模块)
+
+        各推广码点击数(attract 短码点击链)/注册数(归因表)/积分奖励
+        (traffic79 流水)汇总——会员个人维度的引流转化数据面。
+        """
+        from repositories.attract_repository import AttractRepository
+        from services.points_service import PointsService
+
+        codes = await self.list_my_codes(member_id)
+        attract_repo = AttractRepository()
+
+        # 注册数: 按我的码集合匹配归因(不按 promoterId——生产 Redis
+        # 存量 ownerMemberId 为字符串, int 过滤恒 False 类型坑, 实证)
+        my_codes = {c["code"] for c in codes}
+        attrs = await attract_repo.list_attributions(limit=2000)
+        reg_by_code: dict[str, int] = {}
+        for a in attrs:
+            key = str(a.get("code", ""))
+            if key in my_codes:
+                reg_by_code[key] = reg_by_code.get(key, 0) + 1
+
+        code_rows = []
+        total_clicks = total_registered = 0
+        for c in codes:
+            code = c["code"]
+            clicks = await attract_repo.list_clicks(code=code, limit=1000)
+            registered = reg_by_code.get(code, 0)
+            code_rows.append({
+                "code": code,
+                "channel": c.get("channel", "direct"),
+                "shareTip": c.get("shareTip", ""),
+                "clicks": len(clicks),
+                "registered": registered,
+            })
+            total_clicks += len(clicks)
+            total_registered += registered
+
+        points_logs = await PointsService().repo.list_logs(
+            member_id, source=self.REFERRAL_POINTS_SOURCE, limit=200)
+        points_earned = sum(int(l.get("points", 0)) or 0
+                            for l in points_logs)
+
+        return {
+            "codes": code_rows,
+            "totals": {
+                "codes": len(code_rows),
+                "clicks": total_clicks,
+                "registered": total_registered,
+                "pointsEarned": points_earned,
+                "conversionRate": (round(total_registered / total_clicks, 4)
+                                   if total_clicks else 0.0),
+            },
+        }
 
     async def get_my_stats(self, member_id: int) -> dict:
         """我的推广统计: 下线数/达标下线数/奖励/奖励余额"""
@@ -495,10 +624,17 @@ class PromotionService:
         """
         allowed = ("enabled", "level1Threshold", "level1RewardAmount",
                    "level2SubPromoterCount", "level2SubThreshold",
-                   "level2RewardAmount", "wineMinPrice", "eligibleProductIds")
+                   "level2RewardAmount", "wineMinPrice", "eligibleProductIds",
+                   "pointsPerReferral")
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             raise ValueError(f"无可更新字段, 支持: {', '.join(allowed)}")
+
+        if "pointsPerReferral" in updates:
+            v = int(updates["pointsPerReferral"])
+            if v < 0:
+                raise ValueError("引进积分(79号)须 ≥ 0(0=关闭)")
+            updates["pointsPerReferral"] = v
 
         if "level1Threshold" in updates:
             v = int(updates["level1Threshold"])

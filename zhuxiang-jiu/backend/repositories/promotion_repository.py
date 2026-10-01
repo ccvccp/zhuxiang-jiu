@@ -46,6 +46,7 @@ DEFAULT_SETTINGS = {
     "level2RewardAmount": 15.0,   # 二级奖励金额(元/轮)
     "wineMinPrice": 200.0,        # 奖励酒最低价
     "eligibleProductIds": None,   # 活动酒池(None=自动取价格>=wineMinPrice的产品)
+    "pointsPerReferral": 300,     # 79号会员流量智能: 每引进1注册会员积分(0=关)
     "updatedAt": "",
     "updatedBy": "",
 }
@@ -450,7 +451,12 @@ class PromotionRepository:
     # ============================================================
 
     async def get_settings(self) -> dict:
-        """读取参数配置(不存在时用默认值初始化)"""
+        """读取参数配置(不存在时用默认值初始化)
+
+        存量缺字段回填默认: 旧版已初始化的 settings(如 79号上线前)
+        无 pointsPerReferral 等新字段——合并 DEFAULT_SETTINGS 补默认,
+        存量值优先(管理端可见可改; update_settings 写入后以存量为准)。
+        """
         if is_redis_mode():
             client = await get_redis_client()
             data = await client.hgetall(_k("promotion", "settings"))
@@ -459,12 +465,16 @@ class PromotionRepository:
                 await client.hset(_k("promotion", "settings"),
                                   mapping=self._serialize_settings(settings))
                 return settings
-            return self._deserialize_settings(data)
+            merged = dict(DEFAULT_SETTINGS)
+            merged.update(self._deserialize_settings(data))
+            return merged
         self._ensure_store()
         settings = self.store["promotion_settings"]
         if not settings:
             settings.update(dict(DEFAULT_SETTINGS))
-        return dict(settings)
+        merged = dict(DEFAULT_SETTINGS)
+        merged.update(settings)
+        return merged
 
     async def update_settings(self, fields: dict) -> dict:
         """合并更新参数配置"""
