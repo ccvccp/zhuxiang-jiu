@@ -799,6 +799,26 @@ COMMANDS = [
         "examples": ["小竹，附近哪有卖竹香酒的",
                      "小竹，最近的门店在哪"],
     },
+    {
+        # 48号 P2: 代理政策要点(具体优先于泛化——注册序 first-match,
+        # 置 agent.apply 前, 防"代理"泛化子串截胡)
+        "action": "agent.faq",
+        "label": "代理政策要点",
+        "patterns": ["代理返利", "返利层级", "代理等级",
+                     "代理门槛", "代理有什么好处"],
+        "examples": ["小竹，代理返利怎么算"],
+    },
+    {
+        # 48号 P2: 招商代理意图(建议评审缺口——rule 轨最小面)
+        "action": "agent.apply",
+        "label": "招商代理",
+        "patterns": ["我想做代理", "想做代理", "做代理", "代理",
+                     "招商", "加盟", "想加盟", "怎么加盟",
+                     "怎么代理", "代理政策", "招商政策",
+                     "代理申请", "渠道合作", "代理条件"],
+        "examples": ["小竹，我想做代理", "小竹，招商政策是什么",
+                     "小竹，怎么加盟"],
+    },
 ]
 
 # 执行留痕回溯口径(v2 B1: "我刚才做了什么"聚合的 intent 集合
@@ -852,6 +872,9 @@ NAV_PAGES = {
     "AI中枢": "/#/pages/index/index",
     "治理看板": "/#/pages/index/index",
     "知识库": "/#/pages/index/index",
+    "招商": "/#/pages/agent-center/index",
+    "代理": "/#/pages/agent-center/index",
+    "代理中心": "/#/pages/agent-center/index",
 }
 
 
@@ -2344,6 +2367,8 @@ class XiaozhuService:
                 return self._exec_nav(text)
             if action == "promo.query":
                 return await self._exec_promo()
+            if action in ("agent.apply", "agent.faq"):
+                return await self._exec_agent_apply()
             if action == "order.query":
                 return await self._exec_order_query(
                     session, member_id)
@@ -4223,6 +4248,37 @@ class XiaozhuService:
                           "status": a.get("status")}
                          for a in active]},
             "jump": None,
+        }
+
+    async def _exec_agent_apply(self) -> dict:
+        """招商代理意图(48号 P2 建议评审缺口——rule 轨最小面)
+
+        话术三要点: 品牌扶持/返利层级(引官方接口档位, 不编造
+        数字, fail-soft)/申请方式(卡片联动代理中心)。
+        agent.apply 与 agent.faq 共用(政策要点同源话术)。
+        """
+        levels_note = "多级返利体系"
+        try:
+            from services.agent_service import AgentService
+            levels = await AgentService().get_levels()
+            if isinstance(levels, list) and levels:
+                names = [str(l.get("name")
+                             or l.get("levelName") or "").strip()
+                         for l in levels[:3]]
+                names = [n for n in names if n]
+                if names:
+                    levels_note = "返利档位: " + "/".join(names)
+        except Exception:  # noqa: BLE101
+            pass   # fail-soft——官方档位不可达时用通用口径
+        return {
+            "reply": f"竹香酒诚邀代理伙伴——自营品牌、县区代理"
+                     f"体系、{levels_note}。可说「打开代理中心」"
+                     f"查看详情并提交申请, 或说「转人工」由顾问"
+                     f"为您对接。",
+            "card": {"type": "agent_apply",
+                     "subject": "招商代理",
+                     "note": levels_note},
+            "jump": "/#/pages/agent-center/index",
         }
 
     def _exec_human(self) -> dict:
