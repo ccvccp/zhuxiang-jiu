@@ -164,18 +164,53 @@ class PromotionService:
             # 新人注册原则: 仅新注册会员(24h内)绑定计入业绩并触发奖励
             is_new = self._is_new_member(invitee)
 
+            # v2-E2 设备指纹闸: 弱指纹设备聚集降权(只降权不封号铁律)
+            # ——deviceGateEnabled 默认关(灰度), ≥3 关联会员的设备
+            # 新绑定不计业绩不发分(绑定本身照常); ≥6 追加管理员告警
+            device_dup = False
+            if is_new:
+                try:
+                    settings = await self.promo_repo.get_settings()
+                    if settings.get("deviceGateEnabled"):
+                        device_id = await self.promo_repo.get_member_device(
+                            invitee_member_id)
+                        if device_id:
+                            n = await self.promo_repo.count_device_members(
+                                device_id)
+                            if n >= self.DEVICE_DUP_THRESHOLD:
+                                device_dup = True
+                                logger.info(
+                                    "promo_device_gate invitee=%s device=%s "
+                                    "cluster=%s(counted→False)",
+                                    invitee_member_id, device_id, n)
+                            if n >= self.DEVICE_ALERT_THRESHOLD:
+                                try:
+                                    from services.security_alert_service \
+                                        import SecurityAlertService
+                                    await SecurityAlertService() \
+                                        .notify_growth_alerts(
+                                            invitee_member_id, device_id, n)
+                                except Exception as alert_err:
+                                    logger.warning(
+                                        "device_gate_alert_skip: %s",
+                                        alert_err)
+                except Exception as gate_err:  # noqa: BLE001
+                    logger.warning("promo_device_gate_skip: %s", gate_err)
+
+            counted = is_new and not device_dup
+
             relation = {
                 "inviteeMemberId": invitee_member_id,
                 "inviterMemberId": inviter_id,
                 "code": code_record["code"],
                 "channel": code_record.get("channel", "direct"),
-                "status": "valid" if is_new else "invalid",
+                "status": "valid" if counted else "invalid",
                 "createdAt": self._now(),
             }
             await self.promo_repo.save_relation(relation)
             await self.promo_repo.incr_code_bound(code_record["code"])
 
-            if is_new:
+            if counted:
                 # 79号会员流量智能: 每引进 1 注册会员即时积分奖励
                 # (与下方钱包轨并行, fail-soft 不阻断绑定主流程)
                 await self._award_referral_points(
@@ -193,12 +228,19 @@ class PromotionService:
                 "inviteeMemberId": invitee_member_id,
                 "inviterMemberId": inviter_id,
                 "code": code_record["code"],
-                "counted": is_new,
-                "countedNote": "" if is_new
-                else "老会员绑定不计入推广业绩(新人注册原则)",
+                "counted": counted,
+                "countedNote": (
+                    "" if counted
+                    else ("设备指纹聚集降权(同设备多号, v2-E2 设备闸)"
+                          if device_dup
+                          else "老会员绑定不计入推广业绩(新人注册原则)")),
             }
 
     _NEW_MEMBER_WINDOW = timedelta(hours=24)
+
+    # v2-E2 设备指纹闸阈值(弱指纹仅降权不封号铁律)
+    DEVICE_DUP_THRESHOLD = 3      # 同设备关联 ≥3 会员 → 新绑定不计业绩
+    DEVICE_ALERT_THRESHOLD = 6     # 同设备关联 ≥6 会员 → 追加管理员告警
 
     @classmethod
     def _is_new_member(cls, invitee: dict) -> bool:
@@ -630,7 +672,8 @@ class PromotionService:
                    "level2SubPromoterCount", "level2SubThreshold",
                    "level2RewardAmount", "wineMinPrice", "eligibleProductIds",
                    "pointsPerReferral", "sharePointsPerAction",
-                   "shareDailyLimit", "welcomeNewcomerPoints")
+                   "shareDailyLimit", "welcomeNewcomerPoints",
+                   "deviceGateEnabled")
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             raise ValueError(f"无可更新字段, 支持: {', '.join(allowed)}")
@@ -655,6 +698,8 @@ class PromotionService:
             if v < 0:
                 raise ValueError("新人礼积分(80号)须 ≥ 0(0=关闭)")
             updates["welcomeNewcomerPoints"] = v
+        if "deviceGateEnabled" in updates:
+            updates["deviceGateEnabled"] = bool(updates["deviceGateEnabled"])
 
         if "level1Threshold" in updates:
             v = int(updates["level1Threshold"])

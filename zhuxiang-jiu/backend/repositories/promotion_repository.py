@@ -50,6 +50,7 @@ DEFAULT_SETTINGS = {
     "sharePointsPerAction": 20,   # 80号增长: 每次分享计分(0=关)
     "shareDailyLimit": 5,         # 80号增长: 分享计分日上限(次/日)
     "welcomeNewcomerPoints": 100, # 80号增长: 被邀新人礼积分(0=关)
+    "deviceGateEnabled": False,   # v2-E2设备指纹闸(默认关——灰度惯例)
     "updatedAt": "",
     "updatedBy": "",
 }
@@ -448,6 +449,52 @@ class PromotionRepository:
             raise KeyError(claim_id)
         claim.update(fields)
         return claim
+
+    # ============================================================
+    # 设备指纹映射(v2-E2 设备闸: 注册挂接 + 闸门计数)
+    # ============================================================
+
+    async def record_member_device(self, member_id: int,
+                                   device_id: str) -> None:
+        """注册链记录 member→device 映射(幂等; fail-soft 由调用方)
+
+        - set member_fp:{deviceId} → [memberId...](设备维度聚集计数)
+        - string member_fp_last:{memberId} → deviceId(按人反查)
+        """
+        if not device_id:
+            return
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.sadd(_k("promotion", "member_fp", device_id),
+                               member_id)
+            await client.set(_k("promotion", "member_fp_last",
+                                member_id), device_id)
+            return
+        self._ensure_store()
+        fp_map = self.store.setdefault("member_fp", {})
+        fp_map.setdefault(device_id, set()).add(member_id)
+        self.store.setdefault("member_fp_last", {})[member_id] = device_id
+
+    async def get_member_device(self, member_id: int) -> str | None:
+        """按人反查注册设备"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            device = await client.get(_k("promotion", "member_fp_last",
+                                         member_id))
+            return device
+        self._ensure_store()
+        return self.store.get("member_fp_last", {}).get(member_id)
+
+    async def count_device_members(self, device_id: str) -> int:
+        """设备维度聚集计数(该设备注册过的会员数)"""
+        if not device_id:
+            return 0
+        if is_redis_mode():
+            client = await get_redis_client()
+            return int(await client.scard(
+                _k("promotion", "member_fp", device_id)))
+        self._ensure_store()
+        return len(self.store.get("member_fp", {}).get(device_id, set()))
 
     # ============================================================
     # 参数配置(单例)

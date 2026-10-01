@@ -233,6 +233,30 @@ async def _attach_click_attribution(
         logger.info("attract_auto_attach_skip: %s", exc)
 
 
+async def _record_member_device(request: Request, result: dict) -> None:
+    """v2-E2: 注册成功记录 member→device 映射(设备指纹闸数据源, fail-soft)
+
+    device_id 用 attract72 fingerprint_of(UA) 同源口径(16 位脱敏
+    哈希——与点击/归并链指纹一致, 弱特征仅降权不封号铁律)。
+    """
+    try:
+        member_id = result.get("memberId")
+        if not member_id:
+            return
+        from services.attract72_registry import fingerprint_of
+        device_id = fingerprint_of(
+            request.headers.get("user-agent", ""))
+        if not device_id:
+            return
+        from repositories.promotion_repository import (
+            PromotionRepository,
+        )
+        await PromotionRepository().record_member_device(
+            int(member_id), device_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("member_device_record_skip: %s", exc)
+
+
 @router.post("/api/auth/register", tags=["用户认证模块"])
 async def register(data: RegisterRequest,
                    request: Request):
@@ -240,6 +264,7 @@ async def register(data: RegisterRequest,
 
     P0 修复3: Referer 携 clickId 时注册成功后自动完成
     引流归并——归因链路从前端回传改为后端零侵入闭环)
+    v2-E2: 注册成功记录 member→device 映射(设备指纹闸数据源)
     """
     try:
         result = await _service.register(
@@ -250,6 +275,7 @@ async def register(data: RegisterRequest,
             age_confirmed=data.ageConfirmed,
         )
         await _attach_click_attribution(request, result)
+        await _record_member_device(request, result)
         return result
     except Exception as exc:
         _handle_auth_error(exc)

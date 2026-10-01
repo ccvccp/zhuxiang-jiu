@@ -48,7 +48,8 @@ DEGRADED_THRESHOLD = 3
 
 # 信号分组展示名(面板/站内信分组渲染)
 SIGNAL_NAMES = {"redis": "Redis 体检", "intel": "情报订阅",
-                "scheduler": "调度器", "ibms": "智能后台巡检(74号)"}
+                "scheduler": "调度器", "ibms": "智能后台巡检(74号)",
+                "growth80": "会员增长防刷(80号)"}
 
 
 class SecurityAlertService:
@@ -197,6 +198,26 @@ class SecurityAlertService:
                 "message": str(r.get("message") or "")[:200],
             })
         return await self._dispatch(alerts, force)
+
+    async def notify_growth_alerts(self, member_id: int,
+                                   device_id: str, count: int,
+                                   extra: str = "") -> dict:
+        """v2-E2 设备指纹聚集告警(80号增长防刷, fail-soft 由调用方)
+
+        同一弱指纹设备关联会员数 ≥ 告警阈值(6)时触发——rule 级 24h
+        去重共享 _dispatch(同设备不重复轰炸管理员)。
+        """
+        alerts = [{
+            "signal": "growth80",
+            "level": "critical",
+            "rule": f"device_cluster:{device_id}",
+            "message": (
+                f"设备指纹聚集: 同设备已关联 {count} 个会员"
+                f"(最新注册 member={member_id})——疑似批量注册, "
+                f"该设备新绑定已降权不计业绩, 请人工核查。{extra}"
+            )[:200],
+        }]
+        return await self._dispatch(alerts, False)
 
     # --------------------------------------------------------
     # 共享分发(过滤→去重→聚合单封→触达)

@@ -103,6 +103,8 @@ class UpdateSettingsRequest(PydBaseModel):
         None, ge=0, description="分享计分日上限(80号, 默认5次/日)")
     welcomeNewcomerPoints: int | None = Field(
         None, ge=0, description="被邀新人礼积分(80号, 0=关闭, 默认100)")
+    deviceGateEnabled: bool | None = Field(
+        None, description="设备指纹闸(v2-E2, 同设备≥3号注册新绑定不计业绩, 默认关闭)")
 
 
 class GrantRewardRequest(PydBaseModel):
