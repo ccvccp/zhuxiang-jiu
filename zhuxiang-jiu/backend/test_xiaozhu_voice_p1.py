@@ -51,9 +51,9 @@ async def main():
 
     print("[01 指令注册]")
     actions = [c["action"] for c in COMMANDS]
-    record("COMMANDS 25 项含 cart.add/order.query/order.pay"
+    record("COMMANDS 28 项含 cart.add/order.query/order.pay"
            "+酒问话四问",
-           len(COMMANDS) == 25
+           len(COMMANDS) == 28
            and "cart.add" in actions
            and "order.query" in actions
            and "order.pay" in actions
@@ -170,9 +170,9 @@ async def main():
     await svc.delete_session(sid6)
 
     print("[08 订单查询(P2 order.query)]")
-    # 25 项指令
-    record("COMMANDS 25 项含 order.query",
-           len(COMMANDS) == 25
+    # 28 项指令(21+酒四问+map.nearby+招商2)
+    record("COMMANDS 28 项含 order.query",
+           len(COMMANDS) == 28
            and "order.query" in [c["action"] for c in COMMANDS],
            str(len(COMMANDS)))
     # 下单后查单: 成单→最近订单卡
