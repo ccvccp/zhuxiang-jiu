@@ -277,6 +277,12 @@ print('E2E PASS')
         return False
     local_mp4 = Path(f"sv73_videos/{sid}_dh.mp4")
     size = pull(ssh, f"{REMOTE_ROOT}/{sid}_dh.mp4", local_mp4)
+    # 产物回地清理(Pro 系统盘仅 ~40G: mp4 时间戳文件+中间帧是大头,
+    # 下载校验过即远端全清——本地 mp4/wav 是权威产物)
+    run(ssh, f"rm -f {REMOTE_ROOT}/*.mp4 {REMOTE_ROOT}/{sid}_tts.wav"
+             f" {REMOTE_ROOT}/{sid}_sb.json")
+    run(ssh, f"find {REMOTE_ROOT} -mindepth 1 -maxdepth 1 -type d"
+             f" -empty -delete")
 
     # ④ attach
     pages = Sv73RenderService().render_pages(sb)
