@@ -60,11 +60,15 @@ def hrm_mode(mode: str | None = None) -> str:
 # 组件 1: 模块资源台账(P1 静态注册; P2 Tier1 扩容见 §1.3)
 # ============================================================
 
-# 已接入 acquire_slot 闸门的批任务调度器(P1 试点 3 + P2 Tier1 8)
+# 已接入 acquire_slot 闸门的批任务调度器
+# (P1 试点 3 + P2 Tier1 学习回流 8 + P2 Tier2 结算/雷达 9)
 BATCH_GATED = (
     "knowledge_quality", "ai_learning", "growth80_escrow",
     "ride_learning", "login54_learn", "qr55_learn", "aiup56_learn",
     "kb57_learn", "ii58_learn", "ab63_learn", "dm61_learn",
+    "alliance_settle", "voice50_settle", "pay60_learn", "av62_learn",
+    "citystore_assessment", "promo_radar", "promo_evolution",
+    "blogger_radar", "blogger_learning",
 )
 
 MODULE_REGISTRY: dict = {
@@ -132,19 +136,46 @@ MODULE_REGISTRY: dict = {
     "dm61_learn": {
         "name": "61号升级决策 RLHF 回流", "priority": "batch",
         "scheduler": "DM61_LEARN_MODE", "gated": True},
-    # ---- batch(未接入, 台账登记——P2 Tier2/3 候选, 各批次接入时置 gated) ----
-    "promo_radar": {
-        "name": "36号热点雷达/进化回归", "priority": "batch",
-        "gated": False, "note": "Tier2 接入"},
-    "blogger_radar": {
-        "name": "40号博主雷达/回流", "priority": "batch",
-        "gated": False, "note": "Tier2 接入"},
+    # ---- batch: 可错峰(P2 Tier2 结算/考核/雷达 9 已接, 幂等实证) ----
     "alliance_settle": {
         "name": "37号同盟 T+1 结算", "priority": "batch",
-        "gated": False, "note": "Tier2 接入(暂缓=延迟一日)"},
+        "scheduler": "ALLIANCE_SETTLE_AUTO", "gated": True,
+        "note": "逐单 settled 标记幂等, 暂缓=延迟一日"},
     "voice50_settle": {
         "name": "50号语音积分 T+1 结算", "priority": "batch",
-        "gated": False, "note": "Tier2 接入(暂缓=延迟一日)"},
+        "scheduler": "VOICE50_SETTLE_MODE", "gated": True,
+        "note": "pending 翻转幂等, 暂缓=延迟一日"},
+    "pay60_learn": {
+        "name": "60号支付对账 T+1", "priority": "batch",
+        "scheduler": "PAY60_LEARN_MODE", "gated": True,
+        "note": "对账差异只读检测, 暂缓=延迟一日"},
+    "av62_learn": {
+        "name": "62号无形资产衰减结算", "priority": "batch",
+        "scheduler": "AV62_LEARN_MODE", "gated": True,
+        "note": "assessId 1:1 幂等, 暂缓=延迟一日"},
+    "citystore_assessment": {
+        "name": "城市门店月度考核+保证金结算", "priority": "batch",
+        "scheduler": "CITYSTORE_ASSESSMENT_AUTO", "gated": True,
+        "note": "整轮闸门, 次轮重试"},
+    "promo_radar": {
+        "name": "36号热点雷达", "priority": "batch",
+        "scheduler": "PROMO_RADAR_AUTO", "gated": True},
+    "promo_evolution": {
+        "name": "36号进化回归", "priority": "batch",
+        "scheduler": "PROMO_EVOLUTION_AUTO", "gated": True},
+    "blogger_radar": {
+        "name": "40号作品雷达(含 auto_follow)", "priority": "batch",
+        "scheduler": "BLOGGER_RADAR_AUTO", "gated": True,
+        "note": "整轮闸门"},
+    "blogger_learning": {
+        "name": "40号学习回流(含评论归因)", "priority": "batch",
+        "scheduler": "BLOGGER_LEARNING_AUTO", "gated": True,
+        "note": "整轮闸门"},
+    # ---- batch(未接入, 台账登记——P2 Tier3 候选, 接入时置 gated) ----
+    "security_ueba": {
+        "name": "43号 UEBA 基线日度重建", "priority": "batch",
+        "scheduler": "SECURITY_SCHEDULER_MODE", "gated": False,
+        "note": "Tier3 接入"},
 }
 
 
@@ -285,16 +316,18 @@ async def acquire_slot(module_id: str) -> bool:
         return True
 
 
-async def run_gated(module_id: str, run) -> None:
+async def run_gated(module_id: str, run):
     """接入面统一入口(81号 P2 §1.2): 暂缓即跳过本轮, 下轮重试
 
-    供有独立 run 函数的调度器一行接入:
+    供有独立 run 函数/bound method 的调度器一行接入:
         await run_gated("xxx_learn", run_scheduled_tasks)
     内联循环调度器(如 ride_learning)用 acquire_slot 样板, 语义同源。
+    Returns:
+        run() 的返回值; 暂缓本轮返回 None(调用方按需 if result 保护)
     """
     if not await acquire_slot(module_id):
-        return
-    await run()
+        return None
+    return await run()
 
 
 # ============================================================

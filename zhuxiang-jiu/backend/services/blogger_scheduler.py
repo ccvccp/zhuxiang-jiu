@@ -61,6 +61,11 @@ async def _radar_loop() -> None:
     logger.info("blogger_radar_scheduler started interval=%ss", interval)
     while True:
         await asyncio.sleep(interval)
+        # 81号 HRM 批任务闸门(amber/red 暂缓下轮重试; off/shadow 恒
+        # 放行——P2 Tier2 接入, 覆盖 scan+auto_follow 整轮)
+        from services.hrm81_service import acquire_slot
+        if not await acquire_slot("blogger_radar"):
+            continue
         try:
             from services.blogger_service import BloggerService
             service = BloggerService()
@@ -115,6 +120,11 @@ async def _learning_loop() -> None:
     last_weekly = 0.0
     while True:
         await asyncio.sleep(interval)
+        # 81号 HRM 批任务闸门(amber/red 暂缓下轮重试; off/shadow 恒
+        # 放行——P2 Tier2 接入, 覆盖回流+评论归因+学习整轮)
+        from services.hrm81_service import acquire_slot
+        if not await acquire_slot("blogger_learning"):
+            continue
         try:
             from services.blogger_service import BloggerService
             service = BloggerService()

@@ -69,7 +69,10 @@ async def _scheduler_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            await run_scheduled_settlement()
+            # 81号 HRM 批任务闸门(off/shadow 恒放行——P2 Tier2 接入;
+            # pending 结算后翻转幂等, 暂缓=延迟一日)
+            from services.hrm81_service import run_gated
+            await run_gated("voice50_settle", run_scheduled_settlement)
         except Exception as exc:  # noqa: BLE001
             logger.warning("T+1 结算调度异常(继续运行): %s",
                            exc)

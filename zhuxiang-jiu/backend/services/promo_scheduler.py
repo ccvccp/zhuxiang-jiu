@@ -61,10 +61,13 @@ async def _radar_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
+            # 81号 HRM 批任务闸门(off/shadow 恒放行——P2 Tier2 接入)
+            from services.hrm81_service import run_gated
             from services.promo_service import PromoService
-            result = await PromoService().scan()
-            logger.info("promo_radar_scheduled new=%s discarded=%s",
-                        result.get("new"), result.get("discarded"))
+            result = await run_gated("promo_radar", PromoService().scan)
+            if result:
+                logger.info("promo_radar_scheduled new=%s discarded=%s",
+                            result.get("new"), result.get("discarded"))
         except Exception as exc:
             logger.warning("雷达调度异常(继续运行): %s", exc)
 
@@ -90,11 +93,16 @@ async def _evolution_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
+            # 81号 HRM 批任务闸门(off/shadow 恒放行——P2 Tier2 接入)
+            from services.hrm81_service import run_gated
             from services.promo_evolution_service import PromoEvolutionService
-            result = await PromoEvolutionService().evolve_hotspot_weights()
-            logger.info("promo_evolution_scheduled adjustments=%s avgRoi=%s",
-                        len(result.get("adjustments", [])),
-                        result.get("avgRoi"))
+            result = await run_gated(
+                "promo_evolution",
+                PromoEvolutionService().evolve_hotspot_weights)
+            if result:
+                logger.info("promo_evolution_scheduled adjustments=%s avgRoi=%s",
+                            len(result.get("adjustments", [])),
+                            result.get("avgRoi"))
         except Exception as exc:
             logger.warning("进化回归调度异常(继续运行): %s", exc)
 

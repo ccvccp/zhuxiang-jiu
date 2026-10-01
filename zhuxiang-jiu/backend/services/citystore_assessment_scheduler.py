@@ -216,6 +216,11 @@ async def _scheduler_loop() -> None:
     logger.info("citystore_assessment_scheduler started interval=%ss", interval)
     while True:
         await asyncio.sleep(interval)
+        # 81号 HRM 批任务闸门(amber/red 暂缓下轮重试;
+        # off/shadow 恒放行——P2 Tier2 接入, 覆盖考核+保证金结算整轮)
+        from services.hrm81_service import acquire_slot
+        if not await acquire_slot("citystore_assessment"):
+            continue
         try:
             await run_monthly_assessment()
         except Exception as exc:

@@ -61,20 +61,23 @@ def test_t1_registry():
     s = hrm.registry_summary()
     assert s["total"] == len(hrm.MODULE_REGISTRY)
     assert s["critical"] >= 4 and s["batch"] >= 3
-    # P2 Tier1 接入面: P1 试点 3 + 学习回流 8
+    # P2 接入面: P1 试点 3 + Tier1 学习回流 8 + Tier2 结算/雷达 9
     assert set(hrm.BATCH_GATED) == {
         "knowledge_quality", "ai_learning", "growth80_escrow",
         "ride_learning", "login54_learn", "qr55_learn",
         "aiup56_learn", "kb57_learn", "ii58_learn", "ab63_learn",
-        "dm61_learn"}
+        "dm61_learn", "alliance_settle", "voice50_settle",
+        "pay60_learn", "av62_learn", "citystore_assessment",
+        "promo_radar", "promo_evolution", "blogger_radar",
+        "blogger_learning"}
     for m in ("trade_main", "guard_family", "order_timeout",
               "payment_expire"):
         assert hrm.MODULE_REGISTRY[m]["priority"] == "critical"
     for m in hrm.BATCH_GATED:
         assert hrm.MODULE_REGISTRY[m]["priority"] == "batch"
         assert hrm.MODULE_REGISTRY[m].get("gated") is True
-    # Tier2 登记未接入: gated=False(接入时翻位)
-    assert hrm.MODULE_REGISTRY["promo_radar"]["gated"] is False
+    # Tier3 登记未接入: gated=False(接入时翻位)
+    assert hrm.MODULE_REGISTRY["security_ueba"]["gated"] is False
 
 
 # ============================================================
@@ -351,9 +354,9 @@ def test_t8_run_gated(monkeypatch):
         _set_water("red")
         await hrm.run_gated("not_registered_x", fn)
         assert calls == [1, 1, 1]
-        # Tier2 登记未接入项(gated=False): amber 也不拦——
+        # Tier3 登记未接入项(gated=False): amber 也不拦——
         # 闸门只约束显式接入者(amber 演练实证修正)
         _set_water("amber")
-        assert await hrm.acquire_slot("promo_radar") is True
+        assert await hrm.acquire_slot("security_ueba") is True
 
     asyncio.run(run())

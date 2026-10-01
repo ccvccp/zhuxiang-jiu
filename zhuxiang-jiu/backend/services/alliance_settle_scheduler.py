@@ -41,9 +41,13 @@ async def _scheduler_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
+            # 81号 HRM 批任务闸门(off/shadow 恒放行——P2 Tier2 接入;
+            # 逐单 settled 标记幂等, 暂缓=延迟一日)
+            from services.hrm81_service import run_gated
             from services.alliance_service import AllianceService
-            result = await AllianceService().run_scheduled_settlement()
-            if result.get("settled"):
+            result = await run_gated(
+                "alliance_settle", AllianceService().run_scheduled_settlement)
+            if result and result.get("settled"):
                 logger.info("alliance_settle_scheduled count=%s",
                             len(result["settled"]))
         except Exception as exc:
