@@ -4655,6 +4655,16 @@ class XiaozhuService:
             _um, _mood = "", ""
         _suggest = (result.get("suggest")
                     or extras.get("suggest"))
+        # 48号P3-1/P3-2: 唤醒分值落 turn 留痕(extras 透传
+        # 优先——not_woken/wakeup 轮携带 detect_wake_v2 实算
+        # 值; 其余轮同函数现算, 确定性回放; fail-soft 兜底
+        # 0.0 不阻落轮——P1 原设计 extras 已带但未落库, 本批补)
+        try:
+            _ws = (extras.get("wakeScore")
+                   if extras.get("wakeScore") is not None
+                   else wake_score(raw_text))
+        except Exception:
+            _ws = 0.0
         turn = {
             "turnId": f"t-{uuid.uuid4().hex[:8]}",
             "sessionId": session_id, "seq": seq,
@@ -4673,6 +4683,7 @@ class XiaozhuService:
             "card": result.get("card") or {},
             "jump": result.get("jump"),
             "latencyMs": extras.get("latencyMs") or 0.0,
+            "wakeScore": round(_ws, 3),
             # 78号: 情绪标签 + 选项引导(观测/回放全留痕)
             "mood": _mood,
             "userMood": _um,

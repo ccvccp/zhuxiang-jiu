@@ -14,6 +14,10 @@
        阈值 env 可调
     T5 旧签名锁: detect_wake 原语义零破坏(53号调用点保障)
     T6 fail-soft: 评分异常回退旧判定
+    T7 分值落库: turn 持久化 wakeScore(extras 透传优先/
+       其余轮现算回填/fail-soft 兜底/反序列化往返)
+       ——P3-1 判定矩阵数据源, P1 原设计 extras 已带
+       但 _save_turn 未落库, 本批补
 """
 
 import os
@@ -117,3 +121,46 @@ def test_t6_fail_soft(monkeypatch):
     monkeypatch.setattr(xz, "wake_score", _boom)
     woken, cmd, score = detect_wake_v2("小竹，看新品")
     assert woken is True and cmd == "看新品"   # 旧轨兜底
+
+
+async def test_t7_wakescore_persisted(monkeypatch):
+    """T7 分值落库: _save_turn 持久化 wakeScore"""
+    from repositories.xiaozhu_repository import (
+        Xiaozhu48Repository,
+    )
+    from services.xiaozhu_service import XiaozhuService
+
+    svc = XiaozhuService()
+    repo = Xiaozhu48Repository()
+    s = await svc.open_session(701, "text")
+    sid = s["sessionId"]
+    session = await repo.get_session(sid)
+
+    # ① extras 透传优先: not_woken 轮携带 v2 实算值
+    r1 = await svc._save_turn(
+        session, "voice", "小住一下", "not_woken",
+        {"reply": "我在"}, {"wakeScore": 0.55})
+    assert r1["turn"]["wakeScore"] == 0.55
+    # ② 其余轮现算回填: 命令轮同函数确定性回放
+    r2 = await svc._save_turn(
+        session, "voice", "小猪看新品", "product.new",
+        {"reply": "好"}, {})
+    assert r2["turn"]["wakeScore"] == 0.8
+    # ③ fail-soft: 评分异常不阻落轮, 兜底 0.0
+    import services.xiaozhu_service as xz
+
+    def _boom(_):
+        raise RuntimeError("score crash")
+
+    monkeypatch.setattr(xz, "wake_score", _boom)
+    r3 = await svc._save_turn(
+        session, "voice", "小竹，看新品", "chat",
+        {"reply": "ok"}, {})
+    assert r3["turn"]["wakeScore"] == 0.0
+    monkeypatch.undo()
+    # ④ 持久化往返: list_turns 取回 float(反序列化口径)
+    turns = await repo.list_turns(sid)
+    scores = {t["seq"]: t.get("wakeScore") for t in turns}
+    assert scores[r1["turn"]["seq"]] == 0.55
+    assert scores[r2["turn"]["seq"]] == 0.8
+    assert scores[r3["turn"]["seq"]] == 0.0

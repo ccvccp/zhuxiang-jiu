@@ -66,7 +66,7 @@ class Xiaozhu48Repository:
                    "sessionId")
     _FLOAT_FIELDS = ("latencyMs", "points", "balance",
                      "privacyCost", "dailyBudget",
-                     "usedToday")
+                     "usedToday", "wakeScore")
 
     def __init__(self):
         self.store = get_in_memory_store()
