@@ -130,8 +130,11 @@ async def main():
 asyncio.run(main())
 ```
 
-- **期望**: `MODE=shadow EMA=off AUTO=on`; scheduler_running=True;
-  最新留痕时间距现在 <10 分钟(300s 周期)
+- **期望**: `MODE=shadow EMA=off AUTO=on`; 最新留痕时间距现在
+  <10 分钟(300s 周期, **核心判据**)
+- **实施注(2026-10-01 执行实录)**: `scheduler_running` 在
+  docker exec 独立进程**恒 False**(模块级变量不跨进程, 首轮执行
+  实证)——该值仅生产进程内有效, exec 检查以**留痕新鲜度**为准
 - **异常处置**: 留痕停摆 → `docker logs` 查 hrm81_scheduler 异常
 
 ### 6. 回退路径演练就绪(开启前确认, 不实际执行)
@@ -195,7 +198,7 @@ Get-Content .\verify_hrm81_ema_live.py -Raw |
 
 | 日期 | samples | 桶 valid | emaWould 占比 | 异常 | 结论 |
 |---|---|---|---|---|---|
-| 10-01 | 1 | 0/24 | - | - | 采样起步 |
+| 10-01 | 1 | 0/24 | - | §二-5 检查方法坑(scheduler_running exec 恒 False, 已修正清单) | 采样起步; 六项检查命令全通; 前提 1/2 未满足, 继续积累至 ~10-08 重跑 |
 | ... | | | | | |
 
 ---
