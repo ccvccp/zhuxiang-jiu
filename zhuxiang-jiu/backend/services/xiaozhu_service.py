@@ -476,6 +476,24 @@ def wake_threshold() -> float:
         return WAKE_THRESHOLD_DEFAULT
 
 
+# ---- 48号 P3-2: 唤醒分值 EMA 平滑(小方案 §二/§三) ----
+# 81号 定向变体: 同源 α/只紧不松/kill switch/留痕, 三改=
+# 单桶(轮稀疏无分时规律)+仅近似音带进链(防零分污染)+
+# 高置信直通带(防误杀真唤醒)。
+_WAKE_EMA_ALPHA = 0.1          # 81号 同源
+_WAKE_EMA_WARM_ROUNDS = 10     # 冷启动: member 级进链轮次
+_WAKE_EMA_DIRECT = 0.9         # 直通带(≥0.9 绕过 EMA)
+_WAKE_EMA_FLOOR = 0.55         # 进链下界(u 韵/近似音带)
+
+
+def wake_ema_mode() -> bool:
+    """XIAOZHU_WAKE_EMA(off 默认): 链仍静默更新+shadow 留痕
+    (emaWould*)——81号 amber 占比同款观测口径, 10-15 判定数据源;
+    on 后 0.7-0.89 临界带双过真拦截(回滚=off 零差异)"""
+    return os.environ.get(
+        "XIAOZHU_WAKE_EMA", "off").lower() in ("on", "1", "true")
+
+
 def wake_score(text: str) -> float:
     """唤醒连续分值 0-1(确定性规则产分, 纯标准库)
 
@@ -1110,6 +1128,35 @@ class XiaozhuService:
         except Exception:
             return False
 
+    async def _wake_ema_chain(self, member_id, raw: float) -> dict | None:
+        """唤醒 EMA 链读+更新(48号 P3-2 §二)
+
+        仅 raw≥_WAKE_EMA_FLOOR 进链(防零分污染——海量 0.0 分
+        not_woken 轮进链则链恒死零双过全灭); 返回 warm 链
+        {value,count} 或 None(冷启动/无 member/异常——判定
+        降级为 raw 单过, fail-soft)。
+        """
+        try:
+            chain = await self.repo.get_wake_ema(member_id)
+            count = int((chain or {}).get("count") or 0)
+            if raw >= _WAKE_EMA_FLOOR:
+                prev = float((chain or {}).get("value") or 0)
+                value = round(_WAKE_EMA_ALPHA * float(raw)
+                              + (1 - _WAKE_EMA_ALPHA) * prev, 3)
+                count += 1
+                await self.repo.set_wake_ema(member_id, {
+                    "value": value, "count": count,
+                    "updatedAt": ts(),
+                })
+            if count >= _WAKE_EMA_WARM_ROUNDS:
+                return {"value": float((chain or {}).get("value") or 0)
+                        if raw < _WAKE_EMA_FLOOR
+                        else value,
+                        "count": count}
+            return None
+        except Exception:
+            return None
+
     async def _handle_text_internal(self, session: dict,
                                     text: str,
                                     channel: str,
@@ -1136,6 +1183,41 @@ class XiaozhuService:
             # 48号 P1: 概率型唤醒评分(off 默认判定走旧轨,
             # score 计算留痕——EMA 平滑/误唤醒观测数据基础)
             woken, command_text, _wake_score = detect_wake_v2(text)
+        # 48号 P3-2: 唤醒 EMA 平滑挂接(方案 §二)
+        # 链更新 any-mode(近似音带才进链); on 态临界带双过,
+        # off 态 shadow 预演留痕 emaWould*(不拦截)——81号
+        # amber 占比同款观测口径, 10-15 判定数据源
+        self._wake_track = "rule"
+        self._wake_ema_val = None
+        _mid_e = session.get("memberId")
+        if (_mid_e and not wakeup_free
+                and _wake_score >= _WAKE_EMA_FLOOR):
+            _chain = await self._wake_ema_chain(_mid_e, _wake_score)
+            _thr = wake_threshold()
+            if (_chain is not None
+                    and _WAKE_EMA_DIRECT > _wake_score >= _thr):
+                _ema_v = float(_chain.get("value") or 0)
+                self._wake_ema_val = round(_ema_v, 3)
+                _ema_ok = _ema_v >= _thr
+                if wake_ema_mode():
+                    # on 态: 双过 AND(只紧不松——EMA 只增约束)
+                    if _ema_ok:
+                        self._wake_track = "emaPass"
+                    else:
+                        woken = False
+                        command_text = text
+                        self._wake_track = "emaBlock"
+                else:
+                    # off 态: shadow 预演(不拦截, 仅留痕)
+                    self._wake_track = ("emaWouldPass" if _ema_ok
+                                         else "emaWouldBlock")
+            elif (wake_ema_mode() and woken
+                    and _wake_score >= _WAKE_EMA_DIRECT
+                    and _chain is not None):
+                # on 态直通带: 真唤醒零伤害(高置信绕过 EMA)
+                self._wake_track = "emaDirect"
+                self._wake_ema_val = round(
+                    float(_chain.get("value") or 0), 3)
         # 唤醒命中记 member 级时间戳(免唤醒窗跨会话延续——
         # 13:33 实证: token 竞态→重新登录→新会话无唤醒记录,
         # 窗口内真指令被 not_woken 打回"请以小竹开头")
@@ -4684,6 +4766,10 @@ class XiaozhuService:
             "jump": result.get("jump"),
             "latencyMs": extras.get("latencyMs") or 0.0,
             "wakeScore": round(_ws, 3),
+            # 48号 P3-2: EMA 轨留痕(rule 默认/emaPass/emaBlock/
+            # emaDirect/emaWouldPass/emaWouldBlock——81号 tracks 同款)
+            "wakeTrack": getattr(self, "_wake_track", "rule"),
+            "wakeEma": getattr(self, "_wake_ema_val", None),
             # 78号: 情绪标签 + 选项引导(观测/回放全留痕)
             "mood": _mood,
             "userMood": _um,

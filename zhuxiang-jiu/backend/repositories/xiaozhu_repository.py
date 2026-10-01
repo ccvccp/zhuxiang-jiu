@@ -60,13 +60,16 @@ class Xiaozhu48Repository:
     TABLE_PROACTIVE = "voice48_proactive"
     TABLE_FC_AUDIT = "voice48_fc_audit"
     TABLE_PRIVACY = "voice48_privacy_budget"
+    # 48号 P3-2: 唤醒分值 EMA 链(memberId 自然键, 单 hash——
+    # 无 seq 发号器/索引键, 不触混型铁律)
+    TABLE_WAKE_EMA = "voice48_wake_ema"
 
     _INT_FIELDS = ("memberId", "seq", "trustId", "ledgerId",
                    "caseId", "cmdId", "taskId", "fcId",
                    "sessionId")
     _FLOAT_FIELDS = ("latencyMs", "points", "balance",
                      "privacyCost", "dailyBudget",
-                     "usedToday", "wakeScore")
+                     "usedToday", "wakeScore", "wakeEma")
 
     def __init__(self):
         self.store = get_in_memory_store()
@@ -78,7 +81,8 @@ class Xiaozhu48Repository:
                   self.TABLE_FAILURES, self.TABLE_CUSTOM,
                   self.TABLE_PROACTIVE,
                   self.TABLE_FC_AUDIT,
-                  self.TABLE_PRIVACY):
+                  self.TABLE_PRIVACY,
+                  self.TABLE_WAKE_EMA):
             self.store.setdefault(t, {})
 
     @staticmethod
@@ -318,6 +322,42 @@ class Xiaozhu48Repository:
                   if t.get("sessionId") == session_id]
         result.sort(key=lambda t: (t.get("seq") or 0))
         return result[:limit]
+
+    # --------------------------------------------------------
+    # 唤醒分值 EMA 链(48号 P3-2: memberId 自然键单 hash
+    # {value, count, updatedAt}——value 为近似音带 raw 的
+    # EMA 值, count 为进链轮次, 冷启动判定用)
+    # --------------------------------------------------------
+
+    async def get_wake_ema(self, member_id) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k(
+                "voice48", self.TABLE_WAKE_EMA, member_id))
+            if not data:
+                return None
+            try:
+                return {"value": float(data.get("value") or 0),
+                        "count": int(data.get("count") or 0),
+                        "updatedAt": data.get("updatedAt") or ""}
+            except (TypeError, ValueError):
+                return None
+        self._ensure_store()
+        rec = self.store[self.TABLE_WAKE_EMA].get(member_id)
+        return dict(rec) if rec else None
+
+    async def set_wake_ema(self, member_id, fields: dict) -> None:
+        rec = {"value": round(float(fields.get("value") or 0), 3),
+               "count": int(fields.get("count") or 0),
+               "updatedAt": str(fields.get("updatedAt") or "")}
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.hset(
+                _k("voice48", self.TABLE_WAKE_EMA, member_id),
+                mapping=rec)
+            return
+        self._ensure_store()
+        self.store[self.TABLE_WAKE_EMA][member_id] = rec
 
     async def save_turn_feedback(self, session_id: int, seq: int,
                                  rating: str) -> None:

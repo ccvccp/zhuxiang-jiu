@@ -229,6 +229,38 @@ async def main():
         action = "继续观察"
     print(f"    [{action}] {verdict}")
 
+    # ---------------- W5 EMA 观测(P3-2) ----------------
+    # 链覆盖(turns 阈值前的 turns 已收集) + track 分布 +
+    # shadow 拦截面(emaWouldBlock 占比=81号 amber 占比同款口径,
+    # 10-15 EMA on 评估的数据源)
+    from collections import Counter as _C
+    n_ema_keys = 0
+    n_warm = 0
+    if is_redis_mode():
+        async for k in client.scan_iter(
+                match=_k("voice48", repo.TABLE_WAKE_EMA, "*"),
+                count=200):
+            n_ema_keys += 1
+            d = await client.hgetall(k)
+            try:
+                if int((d or {}).get("count") or 0) >= 10:
+                    n_warm += 1
+            except (TypeError, ValueError):
+                pass
+    tracks = _C(str(t.get("wakeTrack") or "rule") for t in turns)
+    would = sum(tracks.get(k, 0) for k in
+                ("emaWouldBlock", "emaWouldPass"))
+    w_block_pct = (tracks.get("emaWouldBlock", 0) / would * 100
+                   if would else 0.0)
+    print(f"\n[W5 EMA 观测(P3-2)] 链覆盖={n_ema_keys} members"
+          f"(warm≥10轮: {n_warm})")
+    print(f"    track 分布: {dict(tracks)}")
+    if would:
+        print(f"    shadow 临界带={would} 轮, emaWouldBlock="
+              f"{tracks.get('emaWouldBlock', 0)}({w_block_pct:.0f}%)"
+              "——即'EMA on 后会拦'的预估面"
+              + ("(<5% 可评估 on)" if w_block_pct < 5 else ""))
+
     # ---------------- 观察记录行(复制入 P3 计划留痕) --------
     today = datetime.now(UTC).strftime("%m-%d")
     print(f"\n观察记录: | {today} | turns={n} | "
