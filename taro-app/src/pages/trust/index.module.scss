@@ -393,3 +393,21 @@
   font-size: $font-size-sm;
   box-sizing: border-box;
 }
+
+/* 45号 P6-D2: 修复行为选择行(可点选, 选中高亮) */
+.recommendItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  background: $color-bg-page;
+  border: 1rpx solid transparent;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+}
+
+.recommendActive {
+  border-color: #2f7b3f;
+  background: rgba(47, 123, 63, 0.08);
+}

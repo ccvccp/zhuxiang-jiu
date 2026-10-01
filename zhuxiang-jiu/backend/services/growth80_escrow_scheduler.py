@@ -84,6 +84,19 @@ async def run_escrow_settlement(force: bool = False) -> dict:
                         "reason": "观察期满未活跃",
                     })
                     forfeited += 1
+                    # 45号 P6-D3: 作废信号入分(推荐人 platform_conduct,
+                    # shadow 留痕不改分; fail-soft)
+                    try:
+                        from services.trust_p6_service import (
+                            ingest_signal,
+                        )
+                        await ingest_signal(
+                            int(fresh["userId"]),
+                            "escrow_forfeit",
+                            summary="引进的会员观察期满未活跃作废"
+                                   f"(escrow {fresh['escrowId']})")
+                    except Exception:  # noqa: BLE101
+                        pass
         except Exception as exc:  # noqa: BLE001
             scanned -= 1
             logger.warning("escrow_settle_skip id=%s: %s",

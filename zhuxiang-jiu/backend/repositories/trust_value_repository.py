@@ -117,6 +117,15 @@ class TrustValue45Repository:
                     record[k] = json.loads(v) if v else []
                 except (TypeError, ValueError):
                     record[k] = []
+            elif k in ("p6", "p6ShadowSignals"):
+                # 45号 P6: 档位权益 settings(dict)/信号 shadow
+                # 留痕(list)——Redis hash 字段 JSON 容器往返
+                # (生产容器内直验发现 append 崩于 str, 补协议分支)
+                try:
+                    record[k] = json.loads(v) if v else (
+                        {} if k == "p6" else [])
+                except (TypeError, ValueError):
+                    record[k] = {} if k == "p6" else []
             else:
                 record[k] = v
         return record

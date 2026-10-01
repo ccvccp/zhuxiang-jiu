@@ -281,6 +281,13 @@ class TrustAssetService:
             raise ValueError(
                 "熔断态资产冻结(不可兑换)——修复通道见 "
                 "/api/trust/repairs/{trustId}/plan")
+        # 45号 P6-D3: 低信值限制矩阵(settings 默认关;
+        # critical 冻结兑换/strained 上限×0.5——fail-soft)
+        from services.trust_p6_service import restrict_check
+        verdict = await restrict_check(trust_id, "redeem")
+        if verdict.get("restricted"):
+            raise ValueError(verdict.get("reason")
+                             or "信值档位不足, 兑换受限")
         amount = round(float(amount), 2)
         if amount <= 0:
             raise ValueError("兑换额需为正")

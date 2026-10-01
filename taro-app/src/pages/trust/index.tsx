@@ -11,7 +11,7 @@ import styles from './index.module.scss';
 import NavBar from '@/components/NavBar';
 import {
   Xx64API, PointsPreviewVO, PlanVO, QuotaVO,
-  Xx64MyOrderVO, Xx64AppealResultVO,
+  Xx64MyOrderVO, Xx64AppealResultVO, ViolationPlanVO, RepairResultVO,
   ORDER_STATUS_NAME, APPEAL_STATUS_NAME,
   getCachedTrustId, myTrustId,
 } from '@/api/xx64';
@@ -19,6 +19,23 @@ import { PointsAPI } from '@/api/points';
 import { requireLogin } from '@/services/auth-service';
 
 type Panel = null | 'exchange' | 'plan' | 'create';
+
+/** 九因子中文名(45号 P6-D2 修复区展示) */
+const FACTOR_NAME: Record<string, string> = {
+  legal_record: '法律记录',
+  regulatory: '监管合规',
+  asset_integrity: '资产诚信',
+  platform_conduct: '平台行为',
+  community_standing: '社区声望',
+  ethics_evidence: '伦理证据',
+  contribution_net: '净贡献',
+  impact_radius: '影响半径',
+  longtail_good: '长尾善行',
+};
+
+/** 修复时效倍数(γ 当前 / γ 30天≈0.0498——"现在修复 ≈ 30 天后 N 倍") */
+const gammaMultiple = (gammaNow: number): number =>
+  Math.max(1, Math.round(gammaNow / 0.0498));
 
 /** 申诉终态(可再次申诉) */
 const APPEAL_TERMINAL = ['approved', 'rejected', 'expired'];
@@ -54,6 +71,13 @@ const TrustPage: React.FC = () => {
   const [appealReason, setAppealReason] = useState('');
   const [appealBusy, setAppealBusy] = useState(false);
   const [appealResult, setAppealResult] = useState<Xx64AppealResultVO | null>(null);
+  // 信值修复(45号 P6-D2: 违规即列即建议)
+  const [violations, setViolations] = useState<ViolationPlanVO[]>([]);
+  const [repairViolation, setRepairViolation] = useState<ViolationPlanVO | null>(null);
+  const [repairKind, setRepairKind] = useState('');
+  const [repairEvidence, setRepairEvidence] = useState('');
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairResult, setRepairResult] = useState<RepairResultVO | null>(null);
 
   const loadOrders = useCallback(async () => {
     const os = await Xx64API.myOrders(20).catch(() => [] as Xx64MyOrderVO[]);
@@ -67,10 +91,11 @@ const TrustPage: React.FC = () => {
       if (pts) setPoints(pts.totalPoints ?? 0);
       loadOrders();
       if (id) {
-        const [bal, prev, qt] = await Promise.all([
+        const [bal, prev, qt, rp] = await Promise.all([
           Xx64API.trustBalance(id).catch(() => null),
           Xx64API.pointsPreview(id).catch(() => null),
           Xx64API.quota(id).catch(() => null),
+          Xx64API.repairPlan(id).catch(() => null),
         ]);
         // 档案不存在: 清缓存进建档态
         if (!bal) {
@@ -81,6 +106,8 @@ const TrustPage: React.FC = () => {
           setBalance(bal);
           setPreview(prev);
           setQuota(qt);
+          // P6-D2: 修复计划(无违规=空 → 前端健康态)
+          setViolations(rp?.violations || []);
         }
       }
     } finally {
@@ -229,6 +256,117 @@ const TrustPage: React.FC = () => {
       setAppealBusy(false);
     }
   };
+
+  // ============ 信值修复(45号 P6-D2: 违规即列即建议) ============
+  const openRepair = (v: ViolationPlanVO) => {
+    setRepairViolation(v);
+    setRepairKind(v.recommendedRepairs[0]?.kind || '');
+    setRepairEvidence('');
+    setRepairResult(null);
+  };
+
+  const closeRepair = () => {
+    setRepairViolation(null);
+    setRepairKind('');
+    setRepairEvidence('');
+    setRepairResult(null);
+    loadData(trustId);   // 刷新违规列表与档案分
+  };
+
+  const handleRepairSubmit = async () => {
+    if (repairBusy || !repairViolation) return;
+    if (!repairKind) {
+      Taro.showToast({ title: '请选择修复行为', icon: 'none' });
+      return;
+    }
+    const evidence = repairEvidence.trim();
+    if (!evidence || evidence.length > 300) {
+      Taro.showToast({ title: '请填写修复证据(1-300 字)', icon: 'none' });
+      return;
+    }
+    setRepairBusy(true);
+    try {
+      const r = await Xx64API.submitRepair(
+        repairViolation.violationEventId,
+        [{ kind: repairKind, value: 60, evidence }]);
+      setRepairResult(r);
+      Taro.showToast({ title: '修复已提交验真', icon: 'success' });
+    } catch (e: any) {
+      const msg = String(e?.message || e?.errMsg || '');
+      Taro.showModal({
+        title: '修复未提交',
+        content: msg.includes('409') || msg.includes('off')
+          ? '修复通道暂未开放, 敬请期待。'
+          : (msg || '请稍后重试'),
+        showCancel: false,
+      });
+    } finally {
+      setRepairBusy(false);
+    }
+  };
+
+  // ============ 修复面板(45号 P6-D2) ============
+  const renderRepairPanel = () => repairViolation && (
+    <View className={styles.mask} onClick={() => { if (!repairBusy) closeRepair(); }}>
+      <View className={styles.panel} onClick={e => e.stopPropagation()}>
+        <View className={styles.panelTitle}>信值修复 · 即时通道</View>
+        {repairResult ? (
+          <>
+            <View className={styles.planResult}>
+              <View className={styles.planRow}>
+                <Text className={styles.planLabel}>修复回分</Text>
+                <Text className={styles.planValue}>+{repairResult.gain}</Text>
+              </View>
+              <View className={styles.planRow}>
+                <Text className={styles.planLabel}>实际入分(天花板内)</Text>
+                <Text className={styles.planValue}>{repairResult.applied}</Text>
+              </View>
+            </View>
+            <View className={styles.panelNote}>
+              {repairResult.note || '修复已验真入分。追不回的部分即违规代价——持续正向行为继续积累信值。'}
+            </View>
+            <View className={styles.panelBtn} onClick={closeRepair}>知道了</View>
+          </>
+        ) : (
+          <>
+            <View className={styles.panelRate}>
+              {FACTOR_NAME[repairViolation.violationFactor] || repairViolation.violationFactor}违规 {repairViolation.violationDelta} 分
+              · 单次修复上限 {Math.round(repairViolation.alpha * 100)}%
+            </View>
+            <View className={styles.panelRate}>
+              ⏱ 现在修复效率约为 30 天后的 {gammaMultiple(repairViolation.gammaNow)} 倍(高效激励窗口)
+            </View>
+            {repairViolation.recommendedRepairs.map(r => (
+              <View
+                key={r.kind}
+                className={`${styles.recommendItem} ${repairKind === r.kind ? styles.recommendActive : ''}`}
+                onClick={() => setRepairKind(r.kind)}
+              >
+                <Text>{r.targeted ? '🎯' : '○'} {r.label}</Text>
+                <Text className={styles.appealMeta}>
+                  关联度 β×{r.beta}{r.targeted ? ' · 针对性' : ''}
+                </Text>
+              </View>
+            ))}
+            <Textarea
+              className={styles.appealTextarea}
+              value={repairEvidence}
+              onInput={e => setRepairEvidence(e.detail.value)}
+              maxlength={300}
+              placeholder="修复证据(1-300 字): 活动凭证/完成说明等"
+              placeholderClass={styles.placeholder}
+            />
+            <View className={styles.panelNote}>
+              {repairEvidence.length}/300 · 表演式修复(摆拍/代打卡)会被验真管线拦截
+            </View>
+            <View className={styles.panelBtn} onClick={handleRepairSubmit}>
+              {repairBusy ? '提交中...' : '提交修复证据'}
+            </View>
+          </>
+        )}
+      </View>
+    </View>
+  );
 
   // ============ 建档面板 ============
   const renderCreatePanel = () => (
@@ -411,6 +549,33 @@ const TrustPage: React.FC = () => {
               </View>
             </View>
 
+            {/* 信值修复卡(45号 P6-D2: 违规即列即建议) */}
+            <View className={styles.card}>
+              <View className={styles.cardTitle}>信值修复</View>
+              {violations.length === 0 ? (
+                <View className={styles.empty}>
+                  <View className={styles.emptyIcon}>🌿</View>
+                  <View className={styles.emptyText}>信值良好, 无需修复</View>
+                  <View className={styles.emptySub}>持续正向行为可积累信值资产</View>
+                </View>
+              ) : violations.map(v => (
+                <View key={v.violationEventId} className={styles.orderCard}>
+                  <View className={styles.orderHead}>
+                    <Text className={styles.orderIdText}>
+                      {FACTOR_NAME[v.violationFactor] || v.violationFactor}违规 {v.violationDelta} 分
+                    </Text>
+                    <Text className={styles.appealMeta}>{v.daysSince} 天前</Text>
+                  </View>
+                  <View className={styles.appealRow}>
+                    <Text className={styles.appealMeta}>
+                      ⏱ 高效窗口: 现在修复约为 30 天后的 {gammaMultiple(v.gammaNow)} 倍
+                    </Text>
+                    <Text className={styles.appealBtn} onClick={() => openRepair(v)}>修复路径</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
             {/* 积分信息卡 */}
             <View className={styles.card}>
               <View className={styles.cardTitle}>积分余额</View>
@@ -519,6 +684,8 @@ const TrustPage: React.FC = () => {
           <View className={styles.noteLine}>· 支付刚性结构: 信值最多抵扣 30%, 现金至少 70%</View>
           <View className={styles.noteLine}>· 1 信值 = 1 元购买力, 可兑换商品/服务(不可兑现)</View>
           <View className={styles.noteLine}>· 兑换限额: 单次余额 20% / 30 日窗口余额 40%</View>
+          <View className={styles.noteLine}>· 信值修复: 违规确认即开通道, 无等待期——修复回分受上限保护</View>
+          <View className={styles.noteLine}>· 修复三规则: 针对性行为关联度高(β) · 24h 内效率约为 30 天后 18 倍(γ) · 永追不回的部分即代价(α)</View>
           <View className={styles.noteLine}>· 申诉通道永不关闭: 确定性重算仅展示, 终审人工(48h 内), 翻转可获补偿</View>
         </View>
         <View className={styles.bottomSpacer} />
@@ -527,6 +694,7 @@ const TrustPage: React.FC = () => {
       {panel === 'exchange' && renderExchangePanel()}
       {panel === 'plan' && renderPlanPanel()}
       {appealOrder && renderAppealPanel()}
+      {repairViolation && renderRepairPanel()}
     </View>
   );
 };

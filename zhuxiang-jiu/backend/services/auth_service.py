@@ -154,6 +154,11 @@ class AuthService:
             member_id = member["id"]
             tokens = create_token_pair(member_id, role)
             await self._record_jtis(member_id, tokens)
+            # P6-D1(45号): 注册即开通信值(条款同意即开通,
+            # trustId=memberId 同值建档; fail-soft 不阻断注册)
+            await self._auto_open_trust(member_id,
+                                        member_data["nickname"],
+                                        bool(age_confirmed))
 
             logger.info("auth_register_success member_id=%r phone=%s", member_id, phone)
             return {
@@ -215,6 +220,57 @@ class AuthService:
             "role": role,
             **tokens,
         }
+
+    async def _auto_open_trust(self, member_id: int, name: str,
+                               agreed: bool) -> None:
+        """45号 P6-D1: 注册即开通信值(trustId=memberId 同值)
+
+        占位证件号 "member:{id}" 建档(证件摘要缺失不挡开通),
+        实名后经 bind_real_digest 升级; 条款同意留痕事件。
+        fail-soft: 建档异常不阻断注册(前端保留补建档入口)。
+        """
+        try:
+            from services.trust_scoring_service import (
+                TrustProfileService,
+            )
+            svc = TrustProfileService()
+            try:
+                await svc.create_role(
+                    "person", name or f"会员{member_id}",
+                    f"member:{member_id}", trust_id=member_id)
+            except ValueError:
+                return   # 已建档(幂等)——重复注册/补建档场景
+            if agreed:
+                # 条款同意留痕(delta=0 纯事件, 不影响因子基线)
+                await svc.record_event(
+                    member_id, "L2", "platform_conduct", 0,
+                    source="p6_terms_consent",
+                    summary="注册同意信值条款, 信值账户开通")
+        except Exception as exc:
+            logger.warning("trust_auto_open_skip member=%s: %s",
+                           member_id, exc)
+
+    async def _bind_trust_real_digest(self, member_id: int,
+                                      id_card: str) -> None:
+        """45号 P6-D1: 实名升级信值档案唯一键(fail-soft)
+
+        占位摘要 → 真证件摘要; 证件冲突(一人一证跨档案)留待人工
+        申诉, 不阻断实名主流程。
+        """
+        try:
+            from services.trust_scoring_service import (
+                TrustProfileService,
+            )
+            result = await TrustProfileService().bind_real_digest(
+                member_id, id_card)
+            if result and result.get("status") == "conflict":
+                logger.warning(
+                    "trust_real_digest_conflict member=%s vs 档案%s"
+                    "(留待人工申诉)", member_id,
+                    result.get("conflictTrustId"))
+        except Exception as exc:
+            logger.warning("trust_real_bind_skip member=%s: %s",
+                           member_id, exc)
 
     async def _record_auth_event(self, member_id: int,
                                  success: bool) -> None:
@@ -655,6 +711,9 @@ class AuthService:
             "realName": real_name,
             "ageVerified": True,
         })
+        # P6-D1(45号): 实名升级信值档案唯一键(占位→真证件摘要,
+        # fail-soft 不阻断实名主流程)
+        await self._bind_trust_real_digest(member_id, id_card)
 
         logger.info("realname_submit_success member_id=%r channel=%s",
                     member_id, channel)

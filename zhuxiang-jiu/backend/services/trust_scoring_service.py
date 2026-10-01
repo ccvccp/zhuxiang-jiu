@@ -232,11 +232,17 @@ class TrustProfileService:
         self.repo = repo
 
     async def create_role(self, role: str, name: str,
-                          id_number: str) -> dict:
+                          id_number: str,
+                          trust_id: int | None = None) -> dict:
         """自助建档(证件明文仅本次使用, 落盘仅 SHA-256 摘要)
 
+        P6-D1: trust_id 显式传入 = 注册即开通同值建档
+        (trustId=memberId 铁律落地); 缺省走自增(存量自助建档
+        兼容)。注册链占位证件号 "member:{id}"——证件摘要缺失
+        不挡开通, 实名后经 bind_real_digest 升级。
+
         Raises:
-            ValueError: 参数非法/重复建档
+            ValueError: 参数非法/重复建档/trustId 已被占用
         """
         role = (role or "").strip().lower()
         if role not in ROLE_VALUES:
@@ -248,6 +254,14 @@ class TrustProfileService:
         id_number = (id_number or "").strip()
         if not id_number or len(id_number) > 32:
             raise ValueError("证件号必填(1-32 字符)")
+        if trust_id is not None:
+            trust_id = int(trust_id)
+            if trust_id <= 0:
+                raise ValueError("trustId 须为正整数")
+            occupied = await self.repo.get_profile(trust_id)
+            if occupied is not None:
+                raise ValueError(
+                    f"trustId={trust_id} 已建档(同值建档幂等冲突)")
 
         digest = id_digest(id_number)
         existing = await self.repo.find_by_digest(digest)
@@ -256,7 +270,8 @@ class TrustProfileService:
                 f"该证件已建档(trustId={existing['trustId']}"
                 f", 重复建档请走档案查询)")
 
-        trust_id = await self.repo.next_trust_id()
+        if trust_id is None:
+            trust_id = await self.repo.next_trust_id()
         record = {
             "trustId": trust_id, "role": role, "name": name,
             "idDigest": digest,
@@ -273,6 +288,46 @@ class TrustProfileService:
                     "score=%s", trust_id, role,
                     scored.get("score"))
         return scored
+
+    async def bind_real_digest(self, trust_id: int,
+                               id_number: str) -> dict | None:
+        """实名升级: 占位摘要 → 真证件摘要(P6-D1)
+
+        注册即开通的档案以 "member:{id}" 占位摘要建档; 实名认证
+        通过后由 auth 链调用本方法把唯一键升级为真证件摘要——
+        档案/分数/事件全量保留, 仅摘要替换并留痕。
+
+        Returns:
+            {status: bound|conflict|missing, ...}; missing(未注册
+            建档的存量会员)静默 None 由调用方建档兜底
+        Raises:
+            ValueError: 证件号格式非法
+        """
+        id_number = (id_number or "").strip()
+        if not id_number or len(id_number) > 32:
+            raise ValueError("证件号必填(1-32 字符)")
+        rec = await self.repo.get_profile(trust_id)
+        if rec is None:
+            return None   # 存量会员未自动建档——调用方可先建档再升级
+        digest = id_digest(id_number)
+        if rec.get("idDigest") == digest:
+            return {"status": "bound", "trustId": trust_id,
+                    "already": True}
+        conflict = await self.repo.find_by_digest(digest)
+        if conflict is not None and conflict["trustId"] != trust_id:
+            # 一人一证: 真证件已绑定其他档案——保留占位摘要, 人工申诉裁决
+            return {"status": "conflict", "trustId": trust_id,
+                    "conflictTrustId": conflict["trustId"]}
+        rec["idDigest"] = digest
+        rec["updatedAt"] = ts()
+        await self.repo.save_profile(rec)
+        await self.record_event(
+            trust_id, "L2", "platform_conduct", 0,
+            source="p6_realname_upgrade",
+            summary="实名认证通过, 信值档案唯一键升级为证件摘要")
+        logger.info("trust45_real_digest_bound trustId=%s", trust_id)
+        return {"status": "bound", "trustId": trust_id,
+                "already": False}
 
     async def get_profile(self, trust_id: int) -> dict:
         """档案视图(分层明细 + 熔断态 + 最近事件)

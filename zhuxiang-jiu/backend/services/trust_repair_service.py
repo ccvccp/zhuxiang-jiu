@@ -273,6 +273,10 @@ class TrustRepairService:
         if alpha <= 0:
             raise ValueError(
                 "永久熔断(criminal)不可修复——修复通道关闭")
+        # 45号 P6-D4: 高信值修复费率(healthy 档 α×1.2 上浮,
+        # settings 默认关 → 1.0 零差异; fail-soft)
+        from services.trust_p6_service import repair_alpha_factor
+        alpha = round(alpha * await repair_alpha_factor(trust_id), 3)
 
         # 定位违规事件
         violation = await self._find_event(violation_event_id)

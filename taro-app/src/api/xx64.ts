@@ -30,6 +30,43 @@ export function myTrustId(): number {
   return Number(getMemberId()) || 0;
 }
 
+// ============ 45号 P6-D2: 信值修复通道(引擎在, 开门) ============
+
+/** 单条修复建议(β 加权降序, targeted=针对性) */
+export interface RepairItemVO {
+  kind: string;
+  beta: number;
+  label: string;
+  targeted: boolean;
+}
+
+/** 违规修复路径(45号 P2 "立地成佛"算法会员可视面) */
+export interface ViolationPlanVO {
+  violationEventId: number;
+  violationFactor: string;
+  violationLayer: string;
+  severity: string;
+  violationDelta: number;
+  daysSince: number;
+  gammaNow: number;      // 时效系数 γ=e^(-λt), 24h 内修复效率最高
+  alpha: number;        // 修复上限(天花板, 熔断档收紧)
+  recommendedRepairs: RepairItemVO[];
+}
+
+export interface RepairPlanVO {
+  trustId: number;
+  violations: ViolationPlanVO[];
+}
+
+/** 提交修复结果 */
+export interface RepairResultVO {
+  repairId: number;
+  gain: number;         // 修复回分
+  applied: number;      // 实际入分(受天花板)
+  verified: number;
+  note?: string;
+}
+
 /** 本地缓存的信值档案 ID(建档后由服务端分配, 跨会话持久) */
 const TRUST_ID_KEY = 'trust_id_cache';
 export function getCachedTrustId(): number | null {
@@ -308,6 +345,53 @@ export const Xx64API = {
       headers: memberHeaders(),
       data: { orderId, reason, submittedBy: 'member' },
     });
+  },
+
+  /** 信值修复计划(45号 P6-D2: 违规即列 β 加权最优清单; 无违规=空健康态) */
+  async repairPlan(trustId: number): Promise<RepairPlanVO> {
+    const res = await request<any>({
+      url: `/api/trust/repairs/${trustId}/plan`,
+    });
+    const d = res.data || res;
+    return {
+      trustId: Number(d.trustId ?? trustId),
+      violations: (d.violations || d.plans || []).map((v: any) => ({
+        violationEventId: Number(v.violationEventId ?? 0),
+        violationFactor: String(v.violationFactor || ''),
+        violationLayer: String(v.violationLayer || ''),
+        severity: String(v.severity || 'general'),
+        violationDelta: Number(v.violationDelta ?? 0),
+        daysSince: Number(v.daysSince ?? 0),
+        gammaNow: Number(v.gammaNow ?? 0),
+        alpha: Number(v.alpha ?? 1),
+        recommendedRepairs: (v.recommendedRepairs || []).map((r: any) => ({
+          kind: String(r.kind || ''),
+          beta: Number(r.beta ?? 0),
+          label: String(r.label || r.kind || ''),
+          targeted: !!r.targeted,
+        })),
+      })),
+    };
+  },
+
+  /** 提交修复证据包(45号 P2 验真→修复值→天花板→入分) */
+  async submitRepair(
+    violationEventId: number,
+    repairs: Array<{ kind: string; value: number; evidence: string }>,
+  ): Promise<RepairResultVO> {
+    const res = await request<any>({
+      url: '/api/trust/repairs',
+      method: 'POST',
+      data: { trustId: myTrustId(), violationEventId, repairs },
+    });
+    const d = res.data || res;
+    return {
+      repairId: Number(d.repairId ?? 0),
+      gain: Number(d.gain ?? 0),
+      applied: Number(d.applied ?? d.appliedScore ?? 0),
+      verified: Number(d.verified ?? 0),
+      note: String(d.note || ''),
+    };
   },
 
   /** 我的订单+申诉状态联查(观测面; 申诉入口数据源) */

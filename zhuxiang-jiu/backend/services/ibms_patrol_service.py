@@ -281,6 +281,15 @@ async def check_growth_anomalies() -> dict:
                     "message": f"绑定速率正常(24h 活跃推荐人 {len(per_inviter)})"}
         worst = "FAIL" if any(n > 100 for _, n, _ in suspects) else "WARN"
         top = sorted(suspects, key=lambda x: -x[1])[:3]
+        # 45号 P6-D3: 异常推荐人信号入分(shadow 留痕不改分; fail-soft)
+        for k, n, _why in top:
+            try:
+                from services.trust_p6_service import ingest_signal
+                await ingest_signal(
+                    int(k), "growth_anomaly",
+                    summary=f"绑定速率异常: 24h 新增 {n}")
+            except Exception:  # noqa: BLE101
+                pass
         return {"state": worst, "count": len(suspects),
                 "message": "; ".join(
                     f"推荐人{k} 24h 新增{n}({why})"
