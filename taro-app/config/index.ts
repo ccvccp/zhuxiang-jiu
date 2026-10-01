@@ -21,7 +21,16 @@ export default defineConfig<'webpack5'>(async (merge, { command, mode }) => {
     plugins: ['@tarojs/plugin-html'],
     defineConstants: {},
     copy: {
-      patterns: [],
+      // 站点手工资产随构建出包(2026-10-01 17:06 裸 dist 部署清掉
+      // 语音悬浮球/IP 情景卡等手工入口事故后迁入)——public/ 下资产
+      // 原样拷入 dist 根: 7 独立页面(xiaozhu-voice 语音主页/scene
+      // IP 情景/synapse/zjian/zyh/margin×2)+ js/voice-entry-widget
+      // (v35 悬浮球)+ js/scene-widget(IP 情景卡); 入口注入见
+      // src/index.html 模板。仅 H5 拷贝(weapp 包体 2MB 限不带)
+      patterns: (process.env.TARO_ENV || 'h5') === 'h5'
+        ? [{ from: 'public/',
+            to: (process.env.TARO_OUTPUT_DIR || 'dist') + '/' }]
+        : [],
       options: {},
     },
     framework: 'react',
