@@ -276,8 +276,12 @@ class PaymentRepository:
         async for key in client.scan_iter(
                 match=_k("payment", "order", "*"), count=200):
             key = key.decode() if isinstance(key, bytes) else key
-            if ":index:" in key:
-                continue  # 用户/订单索引集合键, 非支付单哈希
+            if ":index:" in key or ":seq:" in key:
+                # 索引 set 键/发号器 string 键, 非支付单哈希——
+                # 混型键 hgetall 报 WRONGTYPE(2026-10-01 生产实证:
+                # order:seq:PAY{date} 令超时调度器整轮失败, 同款
+                # 病根见 voice48 turns 扫描器修复批次)
+                continue
             data = await client.hgetall(key)
             if not data:
                 continue
@@ -1333,8 +1337,9 @@ class PaymentRepository:
         else:
             items = []
             async for key in client.scan_iter(match=_k("payment", "recon", "*")):
-                # 排除索引和锁键
-                if "index:" in key or "diff:pending" in key or ":lock:" in key:
+                # 排除索引/锁/发号器键(混型键 get/hgetall 报 WRONGTYPE)
+                if ("index:" in key or ":seq:" in key
+                        or "diff:pending" in key or ":lock:" in key):
                     continue
                 data = await client.get(key)
                 if data:
@@ -1641,7 +1646,7 @@ class PaymentRepository:
             items = [self._deserialize_channel(d) for d in datas if d]
         else:
             async for key in client.scan_iter(match=_k("payment", "channel:*")):
-                if "index:" in key:
+                if "index:" in key or ":seq:" in key:
                     continue
                 data = await client.hgetall(key)
                 if data:
@@ -1689,7 +1694,7 @@ class PaymentRepository:
         client = await get_redis_client()
         count = 0
         async for key in client.scan_iter(match=_k("payment", "channel:*")):
-            if "index:" in key:
+            if "index:" in key or ":seq:" in key:
                 continue
             await client.hset(key, "dailyAmount", 0.0)
             await client.hset(key, "dailyCount", 0)
@@ -1700,7 +1705,7 @@ class PaymentRepository:
         client = await get_redis_client()
         count = 0
         async for key in client.scan_iter(match=_k("payment", "channel:*")):
-            if "index:" in key:
+            if "index:" in key or ":seq:" in key:
                 continue
             await client.hset(key, "monthlyAmount", 0.0)
             await client.hset(key, "dailyAmount", 0.0)
