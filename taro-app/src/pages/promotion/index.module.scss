@@ -208,6 +208,95 @@
 }
 
 // ============================================
+// 引流漏斗(79号会员流量智能)
+// ============================================
+.funnelCard {
+  background: $color-bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  box-shadow: $shadow-card;
+}
+
+.funnelTopRow {
+  display: flex;
+  align-items: center;
+  background: $color-bg-hover;
+  border-radius: $radius-md;
+  padding: $spacing-md 0;
+  margin-bottom: $spacing-sm;
+}
+
+.funnelTopItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.funnelTopValue {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-primary;
+  margin-bottom: 4rpx;
+}
+
+.funnelTopLabel {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.funnelTopDivider {
+  width: 2rpx;
+  height: 48rpx;
+  background: $color-divider;
+}
+
+.funnelNote {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  line-height: $line-height-normal;
+  padding: 0 $spacing-xs $spacing-md;
+}
+
+.funnelRow {
+  display: flex;
+  align-items: center;
+  padding: $spacing-md 0;
+  border-bottom: 2rpx solid $color-divider;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.funnelRowInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.funnelRowCode {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: 4rpx;
+}
+
+.funnelRowMeta {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+}
+
+.funnelRowBtn {
+  flex-shrink: 0;
+  margin-left: $spacing-sm;
+  padding: 10rpx 24rpx;
+  font-size: $font-size-xs;
+  color: $color-primary;
+  border: 2rpx solid $color-primary;
+  border-radius: $radius-round;
+}
+
+// ============================================
 // 奖励进度
 // ============================================
 .progressCard {

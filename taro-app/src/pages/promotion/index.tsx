@@ -11,6 +11,7 @@ import { qrMatrix, renderQrMatrix, qrMatrixToDataUrl } from '@/utils/qrcode';
 import {
   PromoAPI,
   PromotionStatsVO,
+  PromotionFunnelVO,
   PromoCodeVO,
   TeamMemberVO,
   RewardVO,
@@ -36,10 +37,17 @@ const EMPTY_STATS: PromotionStatsVO = {
   rewardBalance: 0, wineQualifyAvailable: 0, walletRewardCycles: 0,
 };
 
+// 空漏斗兜底(79号会员流量智能)
+const EMPTY_FUNNEL: PromotionFunnelVO = {
+  codes: [],
+  totals: { codes: 0, clicks: 0, registered: 0, pointsEarned: 0, conversionRate: 0 },
+};
+
 const IS_H5 = process.env.TARO_ENV === 'h5';
 
 const PromotionPage: React.FC = () => {
   const [stats, setStats] = useState<PromotionStatsVO>(EMPTY_STATS);
+  const [funnel, setFunnel] = useState<PromotionFunnelVO>(EMPTY_FUNNEL);
   const [promoCode, setPromoCode] = useState<string>('');
   const [shareTip, setShareTip] = useState<string>('');
   const [team, setTeam] = useState<TeamMemberVO[]>([]);
@@ -52,13 +60,15 @@ const PromotionPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [s, codes, t, r] = await Promise.all([
+      const [s, codes, f, t, r] = await Promise.all([
         PromoAPI.stats().catch(() => EMPTY_STATS),
         PromoAPI.myCodes().catch((): PromoCodeVO[] => []),
+        PromoAPI.myFunnel().catch(() => EMPTY_FUNNEL),
         PromoAPI.myTeam().catch((): TeamMemberVO[] => []),
         PromoAPI.myRewards().catch((): RewardVO[] => []),
       ]);
       setStats(s);
+      setFunnel(f);
       setTeam(t);
       setRewards(r);
       // 已有微信小程序渠道码则直接展示
@@ -172,6 +182,15 @@ const PromotionPage: React.FC = () => {
     });
   };
 
+  // 复制指定码的分享文案(79号漏斗明细行)
+  const handleCopyTipOf = (tip: string) => {
+    if (!tip) return;
+    Taro.setClipboardData({
+      data: tip,
+      success: () => Taro.showToast({ title: '分享文案已复制', icon: 'success' }),
+    });
+  };
+
   // 一级奖励进度
   const l1Progress = Math.min(100, Math.round((stats.directCount / stats.level1Threshold) * 100));
   // 二级奖励进度(达标下线数/所需下线数)
@@ -251,6 +270,62 @@ const PromotionPage: React.FC = () => {
             <View className={styles.claimBtn} onClick={handleClaimCode}>
               {claiming ? '领取中...' : '领取推广二维码'}
             </View>
+          </View>
+        )}
+      </View>
+
+      {/* 引流漏斗(79号会员流量智能) */}
+      <View className={styles.section}>
+        <View className={styles.sectionTitle}>我的引流漏斗</View>
+        {funnel.totals.codes === 0 ? (
+          <View className={styles.empty}>
+            <View className={styles.emptyIcon}>📈</View>
+            <View className={styles.emptyText}>领取推广码后, 这里展示点击/注册/积分数据</View>
+          </View>
+        ) : (
+          <View className={styles.funnelCard}>
+            <View className={styles.funnelTopRow}>
+              <View className={styles.funnelTopItem}>
+                <View className={styles.funnelTopValue}>{funnel.totals.clicks}</View>
+                <View className={styles.funnelTopLabel}>短码点击</View>
+              </View>
+              <View className={styles.funnelTopDivider} />
+              <View className={styles.funnelTopItem}>
+                <View className={styles.funnelTopValue}>{funnel.totals.registered}</View>
+                <View className={styles.funnelTopLabel}>注册好友</View>
+              </View>
+              <View className={styles.funnelTopDivider} />
+              <View className={styles.funnelTopItem}>
+                <View className={styles.funnelTopValue}>
+                  {Math.round(funnel.totals.conversionRate * 100)}%
+                </View>
+                <View className={styles.funnelTopLabel}>转化率</View>
+              </View>
+              <View className={styles.funnelTopDivider} />
+              <View className={styles.funnelTopItem}>
+                <View className={styles.funnelTopValue}>{funnel.totals.pointsEarned}</View>
+                <View className={styles.funnelTopLabel}>推荐积分</View>
+              </View>
+            </View>
+            <View className={styles.funnelNote}>
+              每引进 1 位好友注册, 300 积分即时到账(与购物现金奖励并行)
+            </View>
+            {funnel.codes.map(c => (
+              <View key={c.code} className={styles.funnelRow}>
+                <View className={styles.funnelRowInfo}>
+                  <View className={styles.funnelRowCode}>{c.code}</View>
+                  <View className={styles.funnelRowMeta}>
+                    {CHANNEL_NAME[c.channel] || c.channel} · 点击 {c.clicks} · 注册 {c.registered}
+                  </View>
+                </View>
+                <View
+                  className={styles.funnelRowBtn}
+                  onClick={() => handleCopyTipOf(c.shareTip)}
+                >
+                  复制文案
+                </View>
+              </View>
+            ))}
           </View>
         )}
       </View>
@@ -360,12 +435,15 @@ const PromotionPage: React.FC = () => {
           <View className={styles.ruleItem}>1. 领取专属推广二维码,保存或分享至微信/抖音等平台</View>
           <View className={styles.ruleItem}>2. 好友扫码识别推广码,注册绑定成为你的下线(仅新注册用户计入奖励)</View>
           <View className={styles.ruleItem}>
-            3. 直推满 {stats.level1Threshold} 人:每轮获得 ¥{stats.level1RewardAmount} 购物现金奖励
+            3. 每引进 1 位好友注册:即时获得 300 积分(可抵现消费,站内信自动通知)
           </View>
           <View className={styles.ruleItem}>
-            4. 下线中 {stats.level2SubPromoterCount} 人各自推广满 {stats.level2SubThreshold} 人:每轮获得 ¥{stats.level2RewardAmount} 购物现金奖励
+            4. 直推满 {stats.level1Threshold} 人:每轮获得 ¥{stats.level1RewardAmount} 购物现金奖励
           </View>
-          <View className={styles.ruleItem}>5. 所得奖励仅可购买本站产品使用,不可提现</View>
+          <View className={styles.ruleItem}>
+            5. 下线中 {stats.level2SubPromoterCount} 人各自推广满 {stats.level2SubThreshold} 人:每轮获得 ¥{stats.level2RewardAmount} 购物现金奖励
+          </View>
+          <View className={styles.ruleItem}>6. 所得奖励仅可购买本站产品使用,不可提现</View>
         </View>
       </View>
     </View>

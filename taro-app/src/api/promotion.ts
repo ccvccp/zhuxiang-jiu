@@ -78,6 +78,24 @@ export interface PromoCodeVO {
   boundCount: number;
 }
 
+/** 引流漏斗(79号会员流量智能): 各码点击/注册/积分汇总 */
+export interface PromotionFunnelVO {
+  codes: Array<{
+    code: string;
+    channel: string;
+    shareTip: string;
+    clicks: number;
+    registered: number;
+  }>;
+  totals: {
+    codes: number;
+    clicks: number;
+    registered: number;
+    pointsEarned: number;
+    conversionRate: number;   // 0-1
+  };
+}
+
 /** 奖励记录 */
 export interface RewardVO {
   rewardType: string;   // wallet / wine_qualify
@@ -130,6 +148,29 @@ export const PromoAPI = {
       // "0" 为 truthy, `|| 0` 失效且类型不诚实
       boundCount: Number(c.boundCount ?? 0) || 0,
     }));
+  },
+
+  /** 我的引流漏斗(79号会员流量智能): 点击/注册/积分/转化率 */
+  async myFunnel(): Promise<PromotionFunnelVO> {
+    const res = await request<any>({ url: '/api/promotion/my/funnel' });
+    const codes = (res.codes || []).map((c: any) => ({
+      code: c.code || '',
+      channel: c.channel || 'direct',
+      shareTip: c.shareTip || '',
+      clicks: Number(c.clicks ?? 0) || 0,
+      registered: Number(c.registered ?? 0) || 0,
+    }));
+    const t = res.totals || {};
+    return {
+      codes,
+      totals: {
+        codes: Number(t.codes ?? 0) || 0,
+        clicks: Number(t.clicks ?? 0) || 0,
+        registered: Number(t.registered ?? 0) || 0,
+        pointsEarned: Number(t.pointsEarned ?? 0) || 0,
+        conversionRate: Number(t.conversionRate ?? 0) || 0,
+      },
+    };
   },
 
   /** 我的团队 */
