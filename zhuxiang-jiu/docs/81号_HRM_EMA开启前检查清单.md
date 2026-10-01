@@ -156,6 +156,17 @@ cd /opt/zhuxiang && docker compose up -d backend
 
 ## 四、开启后验证(四项)
 
+**一键验证**: `backend/verify_hrm81_ema_live.py`(V1-V6 自动化:
+开关/观测面/生效线合成展示/emaWould 消失/闸门回归/只紧不松实证,
+逐项 PASS/FAIL + 总结)——
+
+```powershell
+Get-Content .\verify_hrm81_ema_live.py -Raw |
+    ssh root@47.236.61.117 "docker exec -i zhuxiang-backend-1 python -"
+```
+
+逐项口径(与脚本 V1-V6 对应):
+
 | # | 验证 | 命令要点 | 期望 |
 |---|---|---|---|
 | 1 | 开关生效 | §二-5 脚本 | `EMA: on` |
