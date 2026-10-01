@@ -226,19 +226,181 @@ def _collect_host_metrics() -> dict:
             "load1": load1, "cpuCount": cpu_count}
 
 
-def _judge_level(m: dict) -> tuple[str, list[str]]:
-    """指标 → 三档语义(v1 静态阈值; 采集缺失字段不判)"""
+# ---------- P2 §二: 阈值 EMA 化(只紧不松双轨) ----------
+
+WATER_SAMPLES_KEEP = 720   # 小时采样 30 天(30×24, ~100KB)
+EMA_ALPHA = 0.1             # 分时 EMA 平滑系数(黄金时段 EMA 同范式)
+EMA_COLD_DAYS = 7           # 冷启动: 桶内样本覆盖 ≥7 个不同日基线才有效
+MEM_EMA_AMBER_RATIO, MEM_EMA_RED_RATIO = 0.65, 0.45
+LOAD_EMA_AMBER_RATIO = 3.0
+DISK_TREND_WINDOW_DAYS = 7  # 磁盘趋势外推回归窗口
+
+
+def ema_enabled() -> bool:
+    """HRM81_EMA kill switch(off 默认——任一时刻回退纯静态零行为差异)"""
+    return os.environ.get("HRM81_EMA", "off").strip().lower() == "on"
+
+
+def _hour_key(ts: str) -> str:
+    """小时去重键(ISO ts 前 13 位: YYYY-MM-DDTHH)"""
+    return str(ts)[:13]
+
+
+async def record_water_sample(metrics: dict, ts: str = None) -> bool:
+    """水位小时去重采样(同小时只记首条; 封顶 720 裁最旧)
+
+    数据积累不受 HRM81_EMA 开关影响(观察期照采, 开启即有数可用)。
+    Returns:
+        是否落了新样本(同小时去重 False)
+    """
+    ts = ts or datetime.now(timezone.utc).isoformat()
+    sample = {"ts": ts, "memMB": metrics.get("memAvailableMB"),
+              "diskRatio": metrics.get("diskAvailRatio"),
+              "load1": metrics.get("load1")}
+    if is_redis_mode():
+        from repositories.backend import get_redis_client, _k
+        client = await get_redis_client()
+        key = _k("hrm81", "water", "samples")
+        last = await client.lindex(key, -1)
+        if last and _hour_key(
+                json.loads(last).get("ts", "")) == _hour_key(ts):
+            return False
+        await client.rpush(key, json.dumps(sample, ensure_ascii=False))
+        await client.ltrim(key, -WATER_SAMPLES_KEEP, -1)
+        return True
+    store = get_in_memory_store()
+    bucket = store.setdefault("_hrm81_water_samples", [])
+    if bucket and _hour_key(
+            json.loads(bucket[-1]).get("ts", "")) == _hour_key(ts):
+        return False
+    bucket.append(json.dumps(sample, ensure_ascii=False))
+    if len(bucket) > WATER_SAMPLES_KEEP:
+        del bucket[:-WATER_SAMPLES_KEEP]
+    return True
+
+
+async def list_water_samples(limit: int = WATER_SAMPLES_KEEP) -> list[dict]:
+    """采样序列(旧→新)"""
+    if is_redis_mode():
+        from repositories.backend import get_redis_client, _k
+        client = await get_redis_client()
+        rows = await client.lrange(_k("hrm81", "water", "samples"),
+                                   -limit, -1)
+        return [json.loads(r) for r in rows]
+    store = get_in_memory_store()
+    bucket = store.setdefault("_hrm81_water_samples", [])
+    return [json.loads(r) for r in list(bucket)[-limit:]]
+
+
+def _build_ema_baselines(samples: list[dict]) -> dict:
+    """分时 EMA 基线(黄金时段 EMA 同范式): 24 小时桶按时间序 EMA(α=0.1)
+
+    冷启动铁律: 桶内样本覆盖 <EMA_COLD_DAYS 个不同日 → valid=False
+    (基线不足走静态轨, P1 行为不变)。
+    Returns:
+        {hour: {memEMA, loadEMA, days, valid}}
+    """
+    buckets: dict[int, list] = {}
+    for s in samples:
+        try:
+            hour = int(str(s.get("ts"))[11:13])
+        except (ValueError, IndexError):
+            continue
+        buckets.setdefault(hour, []).append(s)
+    baselines = {}
+    for hour, rows in buckets.items():
+        days = {str(r.get("ts"))[:10] for r in rows}
+        mem_ema = load_ema = None
+        for r in sorted(rows, key=lambda x: str(x.get("ts"))):
+            mem, load1 = r.get("memMB"), r.get("load1")
+            if mem is not None:
+                mem_ema = mem if mem_ema is None else (
+                    EMA_ALPHA * mem + (1 - EMA_ALPHA) * mem_ema)
+            if load1 is not None:
+                load_ema = load1 if load_ema is None else (
+                    EMA_ALPHA * load1 + (1 - EMA_ALPHA) * load_ema)
+        baselines[hour] = {
+            "memEMA": round(mem_ema, 1) if mem_ema is not None else None,
+            "loadEMA": round(load_ema, 2) if load_ema is not None else None,
+            "days": len(days),
+            "valid": len(days) >= EMA_COLD_DAYS
+            and mem_ema is not None}
+    return baselines
+
+
+def _disk_trend_days(samples: list[dict]) -> float | None:
+    """磁盘趋势外推: 近 7 日 diskRatio 日末值线性回归 → 距 amber 线
+    剩余天数(磁盘单调递增不做 EMA, 计划 §2.3)
+
+    样本不足 3 日 / 可用率未在下降 → None(不预警)。
+    """
+    by_day: dict[str, float] = {}
+    for s in samples:   # 旧→新迭代, 同日末值覆盖
+        ratio = s.get("diskRatio")
+        day = str(s.get("ts"))[:10]
+        if ratio is not None and day:
+            by_day[day] = ratio
+    days = sorted(by_day.items())[-DISK_TREND_WINDOW_DAYS:]
+    if len(days) < 3:
+        return None
+    xs = list(range(len(days)))
+    ys = [v for _, v in days]
+    n = len(xs)
+    mean_x, mean_y = sum(xs) / n, sum(ys) / n
+    denom = sum((x - mean_x) ** 2 for x in xs)
+    if not denom:
+        return None
+    slope = (sum((x - mean_x) * (y - mean_y)
+                 for x, y in zip(xs, ys)) / denom)
+    if slope >= 0:
+        return None
+    remain = ys[-1] - DISK_AMBER_RATIO
+    return round(remain / -slope, 1) if remain > 0 else 0.0
+
+
+def _judge_level(m: dict, baselines: dict = None,
+                 ema_on: bool = False,
+                 hour: int = None) -> tuple[str, list[str], dict]:
+    """指标 → 三档语义; 静态轨(v1) + EMA 双轨(P2 §2.2 只紧不松)
+
+    EMA 线 = max(静态线, 基线小时 EMA × ratio)——动态轨只能收紧
+    不能放松: 低基线(慢性紧张)阈值仍为静态线, 消解"EMA 随慢性泄漏
+    基线下漂"的自适应陷阱; 高基线时期提前预警错峰。
+    Returns:
+        (level, reasons, tracks{mem,disk,load: static|ema})
+    """
     reasons = []
+    tracks = {"mem": "static", "disk": "static", "load": "static"}
     level = "green"
+
+    if hour is None:
+        hour = int(datetime.now(timezone.utc).strftime("%H"))
+    b = (baselines or {}).get(hour) or {}
+
+    # 内存(EMA 双轨: amber/red 两线各自 max 合成)
     mem = m.get("memAvailableMB")
+    amber_line = MEM_AMBER_BYTES // 1048576
+    red_line = MEM_RED_BYTES // 1048576
+    if ema_on and b.get("valid") and b.get("memEMA"):
+        if b["memEMA"] * MEM_EMA_AMBER_RATIO > amber_line:
+            amber_line = round(b["memEMA"] * MEM_EMA_AMBER_RATIO)
+            tracks["mem"] = "ema"
+        if b["memEMA"] * MEM_EMA_RED_RATIO > red_line:
+            red_line = round(b["memEMA"] * MEM_EMA_RED_RATIO)
     if mem is not None:
-        if mem < (MEM_RED_BYTES // 1048576):
+        if mem < red_line:
             level = "red"
-            reasons.append(f"内存可用 {mem}MB(<250MB)")
-        elif mem < (MEM_AMBER_BYTES // 1048576):
+            reasons.append(
+                f"内存可用 {mem}MB(<{red_line}MB"
+                f"{' EMA线' if tracks['mem'] == 'ema' else ''})")
+        elif mem < amber_line:
             if level != "red":
                 level = "amber"
-            reasons.append(f"内存可用 {mem}MB(<450MB)")
+            reasons.append(
+                f"内存可用 {mem}MB(<{amber_line}MB"
+                f"{' EMA线' if tracks['mem'] == 'ema' else ''})")
+
+    # 磁盘(静态——磁盘单调递增, EMA 无意义; 趋势外推另行)
     disk = m.get("diskAvailRatio")
     if disk is not None:
         if disk < DISK_RED_RATIO:
@@ -248,19 +410,34 @@ def _judge_level(m: dict) -> tuple[str, list[str]]:
             if level != "red":
                 level = "amber"
             reasons.append(f"磁盘可用 {disk:.0%}(<20%)")
+
+    # load(amber-only; EMA 线 = max(核数×2, 基线×3))
     load1, cpus = m.get("load1"), m.get("cpuCount")
-    if load1 is not None and cpus and load1 > cpus * 2:
-        if level != "red":
-            level = "amber"
-        reasons.append(f"load1={load1:.1f} > 核数×{cpus}")
-    return level, reasons
+    if load1 is not None and cpus:
+        load_line = cpus * 2
+        if ema_on and b.get("valid") and b.get("loadEMA") \
+                and b["loadEMA"] * LOAD_EMA_AMBER_RATIO > load_line:
+            load_line = round(b["loadEMA"] * LOAD_EMA_AMBER_RATIO, 1)
+            tracks["load"] = "ema"
+        if load1 > load_line:
+            if level != "red":
+                level = "amber"
+            reasons.append(
+                f"load1={load1:.1f} > {load_line}"
+                f"{'(EMA线)' if tracks['load'] == 'ema' else ''}")
+    return level, reasons, tracks
 
 
 async def assess_water_level(refresh: bool = False) -> dict:
     """水位评估(60s 缓存; 采集失败 → unknown fail-open 不误伤)
 
+    P2: 采集后先落小时采样(数据积累), 再构建分时 EMA 基线参与判定
+    (HRM81_EMA=off 时纯静态零行为差异, 基线有效仍记 emaWould 供
+    shadow 双记观察); 采样/基线异常 fail-soft 走静态轨。
+
     Returns:
-        {level: green|amber|red|unknown, metrics, reasons, assessedAt}
+        {level, metrics, reasons, tracks, diskDaysRemaining,
+         emaWould?, error?, assessedAt}
     """
     now = time.time()
     if (not refresh and _level_cache["value"] is not None
@@ -268,18 +445,53 @@ async def assess_water_level(refresh: bool = False) -> dict:
         return _level_cache["value"]
     try:
         metrics = _collect_host_metrics()
-        level, reasons = _judge_level(metrics)
+        baselines = None
+        disk_days = None
+        try:
+            await record_water_sample(metrics)
+            samples = await list_water_samples()
+            baselines = _build_ema_baselines(samples)
+            disk_days = _disk_trend_days(samples)
+        except Exception as exc:  # noqa: BLE101
+            logger.warning("hrm81_ema_layer_skip: %s", exc)
+        level, reasons, tracks = _judge_level(
+            metrics, baselines, ema_enabled())
         result = {"level": level, "metrics": metrics,
-                  "reasons": reasons,
+                  "reasons": reasons, "tracks": tracks,
+                  "diskDaysRemaining": disk_days,
                   "assessedAt": datetime.now(timezone.utc).isoformat()}
+        # 双记观察(§2.4): EMA off 但基线有效 → 记"若开 EMA 会判的档"
+        if not ema_enabled() and baselines:
+            ema_level = _judge_level(
+                metrics, baselines, True)[0]
+            if ema_level != level:
+                result["emaWould"] = ema_level
     except Exception as exc:  # noqa: BLE001
         # fail-open: 采集不可达不拦截批任务(74号 host_health 会 FAIL 告警)
         result = {"level": "unknown", "metrics": {}, "reasons": [],
+                  "tracks": {}, "diskDaysRemaining": None,
                   "error": str(exc)[:120],
                   "assessedAt": datetime.now(timezone.utc).isoformat()}
         logger.warning("hrm81_collect_failed(fail-open): %s", exc)
     _level_cache.update({"at": now, "value": result})
     return result
+
+
+async def ema_status() -> dict:
+    """EMA 观测面段(§2.4): 开关/样本量/当前小时桶基线/磁盘外推"""
+    try:
+        samples = await list_water_samples()
+        baselines = _build_ema_baselines(samples)
+        hour = int(datetime.now(timezone.utc).strftime("%H"))
+        b = baselines.get(hour) or {}
+        return {"enabled": ema_enabled(),
+                "samples": len(samples),
+                "coldStartDays": EMA_COLD_DAYS,
+                "hourBaseline": b or None,
+                "diskDaysRemaining": _disk_trend_days(samples)}
+    except Exception as exc:  # noqa: BLE101
+        return {"enabled": ema_enabled(), "samples": 0,
+                "error": str(exc)[:120]}
 
 
 # ============================================================
@@ -368,7 +580,12 @@ async def run_hrm_decision(mode: str | None = None) -> dict:
         "metrics": state.get("metrics"), "reasons": state["reasons"],
         "actions": actions if m == "on" else [],
         "actionsShadowed": actions if m == "shadow" else [],
+        # P2 EMA 双记(§2.4): 命中轨道 + 磁盘外推 + emaWould(off 时观察)
+        "tracks": state.get("tracks") or {},
+        "diskDaysRemaining": state.get("diskDaysRemaining"),
     }
+    if state.get("emaWould"):
+        decision["emaWould"] = state["emaWould"]
 
     if m == "on" and level == "red":
         try:

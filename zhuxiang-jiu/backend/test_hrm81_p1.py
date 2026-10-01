@@ -14,6 +14,11 @@
     T6 路由门槛: 决策面 off 409 / 观测面无门槛
     T7 接入面零破坏: green/unknown 水位下 11 项闸门调度器全放行
     T8 run_gated: 暂缓跳过本轮不调 fn / 放行调用 / shadow 恒放行
+    T9 采样(B1): 同小时去重 / 720 封顶裁最旧
+    T10 冷启动(B2): <7 不同日基线 invalid, 判定与静态全等
+    T11 只紧不松(B3): 高基线收紧早警 / 低基线永不放松
+    T12 kill switch(B4): HRM81_EMA off 零行为差异+emaWould 双记
+    T13 磁盘外推(B5): 线性下降→剩余天数 / 不足或平坦→None
 """
 
 import asyncio
@@ -360,3 +365,113 @@ def test_t8_run_gated(monkeypatch):
         assert await hrm.acquire_slot("security_ueba") is True
 
     asyncio.run(run())
+
+
+# ============================================================
+# T9-T13 阈值 EMA 化(P2 §二: 采样/冷启动/只紧不松/开关/磁盘外推)
+# ============================================================
+
+def test_t9_sample_dedup_and_cap():
+    """T9(B1): 同小时只记一条; 720 封顶裁最旧"""
+
+    async def run():
+        m = {"memAvailableMB": 600, "diskAvailRatio": 0.4, "load1": 0.5}
+        assert await hrm.record_water_sample(
+            m, "2026-10-01T07:00:00+00:00") is True
+        assert await hrm.record_water_sample(
+            m, "2026-10-01T07:30:00+00:00") is False   # 同小时去重
+        assert await hrm.record_water_sample(
+            m, "2026-10-01T08:00:00+00:00") is True
+        assert len(await hrm.list_water_samples()) == 2
+        # 灌 768 条(32 日×24 时) → 封顶 720
+        for d in range(32):
+            for h in range(24):
+                await hrm.record_water_sample(
+                    m, f"2026-09-{d + 1:02d}T{h:02d}:00:00+00:00")
+        samples = await hrm.list_water_samples()
+        assert len(samples) == hrm.WATER_SAMPLES_KEEP
+        # 768-720=48 条被裁 = 前两整天, 最旧剩 09-03
+        assert samples[0]["ts"].startswith("2026-09-03")
+
+    asyncio.run(run())
+
+
+def test_t10_cold_start_static():
+    """T10(B2): 桶内 <7 不同日 → 基线 invalid, EMA on 判定与静态全等"""
+    samples = [{"ts": f"2026-09-{d:02d}T07:00:00+00:00",
+                "memMB": 900, "load1": 0.5} for d in (1, 2, 3)]
+    b = hrm._build_ema_baselines(samples)
+    assert b[7]["days"] == 3 and b[7]["valid"] is False
+    m = {"memAvailableMB": 500, "diskAvailRatio": 0.5,
+         "load1": 0.5, "cpuCount": 2}
+    lv_off = hrm._judge_level(m, b, False, hour=7)
+    lv_on = hrm._judge_level(m, b, True, hour=7)
+    assert lv_off[0] == lv_on[0] == "green"     # 500>450 静态 green
+    assert lv_on[2]["mem"] == "static"          # 冷启动不参与
+
+
+def test_t11_tighten_not_loosen():
+    """T11(B3): 高基线收紧早警 / 低基线永不放松(自适应陷阱消解)"""
+    m = {"memAvailableMB": 500, "diskAvailRatio": 0.5,
+         "load1": 0.5, "cpuCount": 2}
+    # 高基线 900(≥7 日, EMA 收敛 900): amber 线 max(450, 585)=585
+    # → 500 amber 提前预警(静态判 green)
+    hi = [{"ts": f"2026-09-{d:02d}T07:00:00+00:00", "memMB": 900}
+          for d in range(1, 8)]
+    b_hi = hrm._build_ema_baselines(hi)
+    assert b_hi[7]["valid"] is True
+    assert b_hi[7]["memEMA"] == 900.0
+    lv, _, tracks = hrm._judge_level(m, b_hi, True, hour=7)
+    assert lv == "amber" and tracks["mem"] == "ema"
+    # 低基线 300(慢性紧张): EMA 线 195 < 450 → max 取静态 450
+    # → 500 仍 green(只紧不松铁律)
+    lo = [{"ts": f"2026-09-{d:02d}T07:00:00+00:00", "memMB": 300}
+          for d in range(1, 8)]
+    b_lo = hrm._build_ema_baselines(lo)
+    lv2, _, tracks2 = hrm._judge_level(m, b_lo, True, hour=7)
+    assert lv2 == "green" and tracks2["mem"] == "static"
+
+
+def test_t12_ema_kill_switch(monkeypatch):
+    """T12(B4): HRM81_EMA=off 行为与静态全等 + emaWould 双记;
+    on 后基线参与判定"""
+    monkeypatch.delenv("HRM81_EMA", raising=False)
+    assert hrm.ema_enabled() is False
+    from datetime import UTC, datetime
+    hour_now = datetime.now(UTC).strftime("%H")
+    monkeypatch.setattr(
+        hrm, "_collect_host_metrics",
+        lambda: {"memAvailableMB": 500, "diskAvailRatio": 0.5,
+                 "load1": 0.5, "cpuCount": 2})
+
+    async def run():
+        # 灌 7 日高基线(当前小时桶)
+        for d in range(1, 8):
+            await hrm.record_water_sample(
+                {"memAvailableMB": 900, "diskAvailRatio": 0.5,
+                 "load1": 0.5},
+                f"2026-09-{d:02d}T{hour_now}:00:00+00:00")
+        r = await hrm.assess_water_level(refresh=True)
+        assert r["level"] == "green"           # off: 静态轨零行为差异
+        assert r.get("emaWould") == "amber"     # 双记观察(§2.4)
+        assert r["tracks"]["mem"] == "static"
+        # kill switch on: 基线参与, 500 < 585 → amber
+        monkeypatch.setenv("HRM81_EMA", "on")
+        hrm._level_cache.update({"at": 0, "value": None})
+        r2 = await hrm.assess_water_level(refresh=True)
+        assert r2["level"] == "amber"
+        assert r2["tracks"]["mem"] == "ema"
+        assert "emaWould" not in r2
+
+    asyncio.run(run())
+
+
+def test_t13_disk_trend():
+    """T13(B5): 4 日线性下降(0.02/日) → 距 20% 线 7.0 天;
+    不足 3 日 / 不降 → None"""
+    samples = [{"ts": f"2026-09-{d:02d}T07:00:00+00:00",
+                "diskRatio": 0.40 - 0.02 * d} for d in range(4)]
+    assert hrm._disk_trend_days(samples) == 7.0
+    assert hrm._disk_trend_days(samples[:2]) is None
+    flat = [{"ts": s["ts"], "diskRatio": 0.40} for s in samples]
+    assert hrm._disk_trend_days(flat) is None

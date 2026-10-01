@@ -43,6 +43,8 @@ async def hrm_status(x_role: str = Header(None, alias="X-Role")):
                 "running": scheduler_running(),
                 "intervalSeconds": scheduler_interval_seconds(),
             },
+            # P2 §2.4: EMA 观测面段(基线覆盖/当前小时桶/磁盘外推)
+            "ema": await hrm.ema_status(),
             "llmThrottleRemainingSeconds":
                 round(llm_throttle_remaining(), 1),
         },
