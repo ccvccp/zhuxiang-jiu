@@ -52,7 +52,10 @@ async def main():
            "唤" not in str(r.get("reply") or ""))
 
     print("[03 非tap渠道唤醒红线不变]")
-    s3 = await svc.open_session(1, "voice")
+    # 免唤醒窗为 member 级跨会话(5 分钟)——member 1 在 [01]
+    # 已唤醒(叠词在呢), 窗内换会话也直解析; 红线验证须换
+    # "从未唤醒"的第二成员(同 verify_xiaozhu_p0_live §06)
+    s3 = await svc.open_session(2, "voice")
     r = await svc.handle_text(s3["sessionId"], "看新品")
     t = r.get("turn") or {}
     record("未唤醒仍拦截(not_woken)", t.get("intent") == "not_woken",
