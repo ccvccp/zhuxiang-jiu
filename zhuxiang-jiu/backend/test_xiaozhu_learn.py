@@ -54,11 +54,24 @@ async def run_tests():
     svc = XiaozhuService()
     repo = Xiaozhu48Repository()
     client = TestClient(app)
+    # 46+1 后 compat 剥裸身份头 → feedback 401/管理面 403
+    # ——改真实认证轨(72号P6 同款 Bearer): 会员/管理员各
+    # 注册一个, 会话归属用注册返回的 memberId
+    from services.auth_service import AuthService
+    _areg = await AuthService().register(
+        phone="13800000999", password="test123456",
+        role="admin")
+    admin = {"Authorization":
+             "Bearer " + _areg["accessToken"]}
+    _mreg = await AuthService().register(
+        phone="13800000988", password="test123456")
+    mid = int(_mreg["memberId"])
+    hm = {"Authorization": "Bearer " + _mreg["accessToken"]}
 
     # 造一轮含误听词的语音轮(流式轨 textTranscript)
-    sid = (await svc.open_session(3001, "voice"))["sessionId"]
+    sid = (await svc.open_session(mid, "voice"))["sessionId"]
     r = client.post(f"/api/xiaozhu/sessions/{sid}/voice",
-                    headers={"X-Member-Id": "3001"},
+                    headers=hm,
                     json={"textTranscript": "小竹，加入国五车",
                           "durationSec": 2.0, "streamBytes": 64000})
     j = r.json()
@@ -71,7 +84,7 @@ async def run_tests():
     # L1 👎 入队(HTTP feedback → 队列, 含上下文)
     r = client.post(
         f"/api/xiaozhu/sessions/{sid}/turns/{turn_id}/feedback",
-        headers={"X-Member-Id": "3001"},
+        headers=hm,
         json={"rating": "down"})
     check("L1 👎 反馈 200", r.status_code == 200, str(r.status_code))
     queue = await repo.list_learn_queue("pending")
@@ -84,7 +97,7 @@ async def run_tests():
           f"key={key} keys={list(queue)[:3]}")
 
     # L2 同轮再 down 防重
-    await svc.learn_enqueue({"sessionId": sid, "memberId": 3001},
+    await svc.learn_enqueue({"sessionId": sid, "memberId": mid},
                             {"sessionId": sid, "seq": seq,
                              "turnId": turn_id, "rawText": "x",
                              "intent": "chat", "reply": "y",
@@ -98,7 +111,7 @@ async def run_tests():
     # L3 👍 不入队
     r = client.post(
         f"/api/xiaozhu/sessions/{sid}/turns/{turn_id}/feedback",
-        headers={"X-Member-Id": "3001"},
+        headers=hm,
         json={"rating": "up"})
     queue3 = await repo.list_learn_queue()
     check("L3 👍 不产生新条目", len(queue3) == len(queue2),
@@ -106,7 +119,7 @@ async def run_tests():
 
     # L4 列表+统计(HTTP)
     r = client.get("/api/xiaozhu/dashboard/learn-queue",
-                   headers={"X-Role": "admin"})
+                   headers=admin)
     j = r.json()
     check("L4 队列统计",
           r.status_code == 200
@@ -135,7 +148,7 @@ async def run_tests():
     # L6 采纳闭环(新误听词——非内置词演示闭环)
     # 先造一轮带新误听词的轮次
     r = client.post(f"/api/xiaozhu/sessions/{sid}/voice",
-                    headers={"X-Member-Id": "3001"},
+                    headers=hm,
                     json={"textTranscript": "小竹，来一平竹香",
                           "durationSec": 2.0, "streamBytes": 64000})
     j = r.json()
@@ -143,12 +156,12 @@ async def run_tests():
     client.post(
         f"/api/xiaozhu/sessions/{sid}/turns/{turn2.get('turnId')}"
         "/feedback",
-        headers={"X-Member-Id": "3001"},
+        headers=hm,
         json={"rating": "down"})
     key2 = f"{sid}:{turn2.get('seq')}"
     r = client.post(
         f"/api/xiaozhu/dashboard/learn-queue/{key2}/adopt",
-        headers={"X-Role": "admin"},
+        headers=admin,
         json={"wrong": "一平", "right": "一瓶"})
     j = r.json()
     check("L6 采纳 200(词条落表)",
@@ -161,7 +174,7 @@ async def run_tests():
           str(fixes.get("一平")))
     # 闭环: 下轮同误听文本 → 修正即时生效
     r = client.post(f"/api/xiaozhu/sessions/{sid}/voice",
-                    headers={"X-Member-Id": "3001"},
+                    headers=hm,
                     json={"textTranscript": "小竹，来一平竹香",
                           "durationSec": 2.0, "streamBytes": 64000})
     j = r.json()
@@ -175,7 +188,7 @@ async def run_tests():
     # L7 忽略
     r = client.post(
         f"/api/xiaozhu/dashboard/learn-queue/{key}/dismiss",
-        headers={"X-Role": "admin"})
+        headers=admin)
     check("L7 忽略 200", r.status_code == 200, str(r.status_code))
     entry = (await repo.list_learn_queue()).get(key) or {}
     check("L7b 状态 dismissed",
@@ -186,7 +199,7 @@ async def run_tests():
 
     r = client.delete(
         "/api/xiaozhu/dashboard/asr-fixes?wrong=" + quote("一平"),
-        headers={"X-Role": "admin"})
+        headers=admin)
     check("L8 learn 词条可删 200",
           r.status_code == 200, str(r.status_code))
 

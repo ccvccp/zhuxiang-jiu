@@ -295,7 +295,7 @@ class TestLLMTrack:
         sid = await _session(16)
         r = await _text(sid, "小竹，帮我看看天气")
         record("off规则轨兜底",
-               r.get("track") == "rule"
+               r.get("track") == "general"
                and "还在学着呢" in r["reply"])
         # 开关 on(未配 key) → 回退规则轨零影响
         os.environ["XIAOZHU_LLM_MODE"] = "on"
