@@ -51,6 +51,9 @@ DEFAULT_SETTINGS = {
     "shareDailyLimit": 5,         # 80号增长: 分享计分日上限(次/日)
     "welcomeNewcomerPoints": 100, # 80号增长: 被邀新人礼积分(0=关)
     "deviceGateEnabled": False,   # v2-E2设备指纹闸(默认关——灰度惯例)
+    "referralEscrowEnabled": False,  # v2-E3引进积分延迟结算(默认关)
+    "escrowDays": 7,              # v2-E3观察期天数(≥1)
+    "escrowUnlockOrder": True,    # v2-E3首笔订单可解冻
     "updatedAt": "",
     "updatedBy": "",
 }
@@ -89,6 +92,11 @@ class PromotionRepository:
         if is_redis_mode():
             return await self._redis_next_id("claim")
         return self._mem_next_id("_promotion_claim_seq")
+
+    async def next_escrow_id(self) -> int:
+        if is_redis_mode():
+            return await self._redis_next_id("escrow")
+        return self._mem_next_id("_promotion_escrow_seq")
 
     def _mem_next_id(self, seq_key: str) -> int:
         self._ensure_store()
@@ -449,6 +457,123 @@ class PromotionRepository:
             raise KeyError(claim_id)
         claim.update(fields)
         return claim
+
+    # ============================================================
+    # Escrow 延迟结算(v2-E3: traffic79 观察期)
+    # ============================================================
+
+    async def save_escrow(self, escrow: dict) -> dict:
+        """新建 escrow 记录(escrowId 由 service 经 next_id 分配)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("promotion", "escrow", escrow["escrowId"])
+            await client.hset(key, mapping={
+                k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+                for k, v in escrow.items()})
+            # 索引: 按人列表 + refId 唯一索引(幂等查重)
+            await client.lpush(
+                _k("promotion", "escrow_by_user", escrow["userId"]),
+                escrow["escrowId"])
+            await client.set(_k("promotion", "escrow_by_ref",
+                                escrow["refId"]), escrow["escrowId"])
+            return escrow
+        self._ensure_store()
+        self.store.setdefault("promotion_escrows", {})[escrow["escrowId"]] = escrow
+        self.store.setdefault("promotion_escrow_by_user", {}) \
+            .setdefault(escrow["userId"], []).insert(0, escrow["escrowId"])
+        self.store.setdefault("promotion_escrow_by_ref", {})[escrow["refId"]] = escrow["escrowId"]
+        return escrow
+
+    async def get_escrow(self, escrow_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.hgetall(_k("promotion", "escrow", escrow_id))
+            if not data:
+                return None
+            return {k: (json.loads(v) if v.startswith(("[", "{")) else v)
+                    for k, v in data.items()}
+        self._ensure_store()
+        return self.store.get("promotion_escrows", {}).get(escrow_id)
+
+    async def get_escrow_by_refid(self, ref_id: str) -> dict | None:
+        """refId 唯一索引查(发放幂等: 已有 pending/unlocked/forfeited
+        均不重复建)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            escrow_id = await client.get(
+                _k("promotion", "escrow_by_ref", ref_id))
+            if not escrow_id:
+                return None
+            return await self.get_escrow(int(escrow_id))
+        self._ensure_store()
+        escrow_id = self.store.get("promotion_escrow_by_ref", {}).get(ref_id)
+        if escrow_id is None:
+            return None
+        return self.store.get("promotion_escrows", {}).get(escrow_id)
+
+    async def list_escrows(self, state: str = None, user_id=None,
+                           limit: int = 500) -> list[dict]:
+        """escrow 列表(调度器扫 pending / admin 审计 / 会员查观察中)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if user_id is not None:
+                ids = await client.lrange(
+                    _k("promotion", "escrow_by_user", user_id), 0, -1)
+                records = [r for r in
+                           (await self.get_escrow(int(i)) for i in ids) if r]
+            else:
+                keys = await client.keys(_k("promotion", "escrow", "*"))
+                records = []
+                for key in keys:
+                    if str(key).endswith(":seq"):
+                        continue
+                    data = await client.hgetall(key)
+                    if data:
+                        records.append({
+                            k: (json.loads(v)
+                                if v.startswith(("[", "{")) else v)
+                            for k, v in data.items()})
+        else:
+            self._ensure_store()
+            all_records = list(
+                self.store.get("promotion_escrows", {}).values())
+            if user_id is not None:
+                records = [r for r in all_records
+                           if r.get("userId") == user_id]
+            else:
+                records = all_records
+        if state:
+            records = [r for r in records if r.get("state") == state]
+        return sorted(records, key=lambda r: r.get("createdAt", ""),
+                      reverse=True)[:limit]
+
+    async def update_escrow(self, escrow_id: int, fields: dict) -> dict:
+        """部分字段更新(结算状态机 pending→unlocked/forfeited)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("promotion", "escrow", escrow_id)
+            await client.hset(key, mapping={
+                k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+                for k, v in fields.items()})
+            data = await client.hgetall(key)
+            return {k: (json.loads(v) if v.startswith(("[", "{")) else v)
+                    for k, v in data.items()}
+        self._ensure_store()
+        record = self.store.get("promotion_escrows", {}).get(escrow_id)
+        if not record:
+            raise KeyError(escrow_id)
+        record.update(fields)
+        return record
+
+    async def escrow_stats(self) -> dict:
+        """状态计数(观测/熔断解冻率)"""
+        records = await self.list_escrows(limit=10000)
+        stats = {"pending": 0, "unlocked": 0, "forfeited": 0}
+        for r in records:
+            s = r.get("state", "pending")
+            if s in stats:
+                stats[s] += 1
+        return stats
 
     # ============================================================
     # 设备指纹映射(v2-E2 设备闸: 注册挂接 + 闸门计数)

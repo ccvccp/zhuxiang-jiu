@@ -540,6 +540,13 @@ async def _on_startup():
     #  双闸: 调度挂载+MODE 门槛, 分段铁律见 ibms_patrol_scheduler)
     from services.ibms_patrol_scheduler import start_scheduler as start_ibms_patrol
     start_ibms_patrol()
+    # 80号 v2-E3·Escrow 延迟结算调度器(GROWTH_ESCROW_AUTO=off 可关闭,
+    # 默认 off——与 referralEscrowEnabled 双闸, 存量 pending 可经
+    # admin/escrows/settle 手动结算)
+    from services.growth80_escrow_scheduler import (
+        start_scheduler as start_growth80_escrow,
+    )
+    start_growth80_escrow()
     # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
     from services.blogger_scheduler import (
         start_radar_scheduler as start_blogger_radar,

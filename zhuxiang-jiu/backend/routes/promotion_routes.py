@@ -105,6 +105,12 @@ class UpdateSettingsRequest(PydBaseModel):
         None, ge=0, description="被邀新人礼积分(80号, 0=关闭, 默认100)")
     deviceGateEnabled: bool | None = Field(
         None, description="设备指纹闸(v2-E2, 同设备≥3号注册新绑定不计业绩, 默认关闭)")
+    referralEscrowEnabled: bool | None = Field(
+        None, description="引进积分延迟结算(v2-E3, 7天观察期后活跃发放, 默认关闭)")
+    escrowDays: int | None = Field(
+        None, ge=1, description="观察期天数(v2-E3, 默认7)")
+    escrowUnlockOrder: bool | None = Field(
+        None, description="首笔订单可解冻(v2-E3, 默认true)")
 
 
 class GrantRewardRequest(PydBaseModel):
@@ -445,6 +451,61 @@ async def admin_revoke_points(
             user_id=data.memberId, points=data.points,
             ref_id=data.refId, ref_desc=data.reason)
         return {"success": True, **result}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.get("/api/promotion/admin/escrows", tags=["推广码矩阵模块"])
+async def admin_list_escrows(
+    x_role: str | None = Header(None, alias="X-Role"),
+    state: str = Query(None, description="pending/unlocked/forfeited"),
+    memberId: int = Query(None, description="按会员筛选"),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """Escrow 观察期记录列表+统计(v2-E3 观测面)"""
+    _require_admin(x_role)
+    try:
+        escrows = await _service.promo_repo.list_escrows(
+            state=state, user_id=memberId, limit=limit)
+        stats = await _service.promo_repo.escrow_stats()
+        return {"success": True, "escrows": escrows, "stats": stats,
+                "count": len(escrows)}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/promotion/admin/escrows/settle", tags=["推广码矩阵模块"])
+async def admin_settle_escrows(
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """手动触发 escrow 结算(调度器兜底; 幂等——只结算到期 pending)"""
+    _require_admin(x_role)
+    try:
+        from services.growth80_escrow_scheduler import run_escrow_settlement
+        result = await run_escrow_settlement(force=True)
+        return {"success": True, **result}
+    except Exception as exc:
+        _handle(exc)
+
+
+@router.post("/api/promotion/admin/escrows/{escrow_id}/force-unlock",
+             tags=["推广码矩阵模块"])
+async def admin_force_unlock_escrow(
+    escrow_id: int,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """强制解冻单条 escrow(误作废申诉; 谨慎项——直接发放)"""
+    _require_admin(x_role)
+    try:
+        from services.growth80_escrow_scheduler import _unlock
+        escrow = await _service.promo_repo.get_escrow(escrow_id)
+        if not escrow:
+            raise KeyError(f"escrow 不存在(id={escrow_id})")
+        if escrow.get("state") != "pending":
+            raise ValueError(
+                f"仅 pending 可强制解冻(当前 {escrow.get('state')})")
+        await _unlock(_service.promo_repo, escrow, "管理端强制解冻")
+        return {"success": True, "escrowId": escrow_id, "state": "unlocked"}
     except Exception as exc:
         _handle(exc)
 

@@ -278,12 +278,15 @@ class PromotionService:
 
     async def _award_referral_points(self, inviter_id: int,
                                      invitee_member_id: int) -> dict | None:
-        """每引进 1 注册会员即时发积分 + 站内信(79号 P1)
+        """每引进 1 注册会员发积分 + 站内信(79号 P1 / v2-E3 延迟轨)
 
         规则: pointsPerReferral(默认 300, 0=关)——绑定计业绩(counted=True)
-        时向引荐人即时发放, 与 _check_rewards 钱包轨并行互不影响。
-        幂等: refId=traffic79:{invitee_id} 流水标记(bind_relation 一人
-        一绑锁 + 流水查重双保险); fail-soft(异常不阻断绑定主流程)。
+        时触发, 与 _check_rewards 钱包轨并行互不影响。
+        v2-E3: referralEscrowEnabled=True → 延迟发放(写 escrow 记录,
+        观察期 escrowDays 后活跃达标才发); False(默认) → 现行即时。
+        幂等(双域): points 流水 refId=traffic79:{invitee} +
+        escrow 表同 refId——开关切换不产生双发。
+        fail-soft(异常不阻断绑定主流程)。
         """
         try:
             settings = await self.promo_repo.get_settings()
@@ -299,8 +302,58 @@ class PromotionService:
             existing = await points_svc.repo.list_logs(
                 inviter_id, source=self.REFERRAL_POINTS_SOURCE, limit=200)
             if any(l.get("refId") == marker for l in existing):
-                return None   # 该 invitee 已发放(幂等)
+                return None   # 该 invitee 已发放(即时轨幂等)
+            escrow_existing = await self.promo_repo.get_escrow_by_refid(
+                marker)
+            if escrow_existing:
+                return None   # 该 invitee 已建 escrow(延迟轨幂等)
 
+            # ---- v2-E3 延迟结算轨: 写 escrow 不发分 ----
+            if settings.get("referralEscrowEnabled"):
+                days = max(1, int(settings.get("escrowDays", 7) or 7))
+                deadline = (datetime.now(UTC)
+                            + timedelta(days=days)).isoformat()
+                escrow = {
+                    "escrowId": await self.promo_repo.next_escrow_id(),
+                    "userId": inviter_id,
+                    "source": self.REFERRAL_POINTS_SOURCE,
+                    "refId": marker,
+                    "points": points,
+                    "state": "pending",
+                    "deadline": deadline,
+                    "createdAt": self._now(),
+                    "settledAt": "",
+                    "reason": "",
+                }
+                await self.promo_repo.save_escrow(escrow)
+                logger.info("promo_referral_escrow inviter=%s invitee=%s "
+                            "points=%s deadline=%s",
+                            inviter_id, invitee_member_id, points, deadline)
+                # 80号缺口2: 被邀新人礼(与引荐分同事务, fail-soft)
+                from services.growth80_service import Growth80Service
+                await Growth80Service().award_newcomer(invitee_member_id)
+                # 观察期站内信(预期管理)
+                try:
+                    from repositories.message_repository import (
+                        CHANNEL_INMAIL, CATEGORY_MEMBER,
+                    )
+                    from services.message_service import MessageService
+                    await MessageService().send_message(
+                        user_id=inviter_id,
+                        channel=CHANNEL_INMAIL,
+                        title="推荐奖励进入观察期",
+                        content=(f"您推荐的会员已成功注册，+{points} 积分"
+                                 f"将在 {days} 天活跃观察期后到账。"),
+                        category=CATEGORY_MEMBER,
+                    )
+                except Exception as notify_err:
+                    logger.warning(
+                        "promo_escrow_notify_failed inviter=%s: %s",
+                        inviter_id, notify_err)
+                return {"escrow": True, "points": points,
+                        "deadline": deadline, "escrowId": escrow["escrowId"]}
+
+            # ---- 现行即时轨 ----
             result = await points_svc.earn_points(
                 inviter_id, points,
                 source=self.REFERRAL_POINTS_SOURCE,
@@ -458,6 +511,12 @@ class PromotionService:
         points_earned = sum(int(l.get("points", 0)) or 0
                             for l in points_logs)
 
+        # v2-E3: 观察中额度(escrow pending 求和, 会员可见预期)
+        pending_points = sum(
+            int(e.get("points", 0) or 0)
+            for e in await self.promo_repo.list_escrows(
+                state="pending", user_id=member_id, limit=200))
+
         return {
             "codes": code_rows,
             "totals": {
@@ -465,6 +524,7 @@ class PromotionService:
                 "clicks": total_clicks,
                 "registered": total_registered,
                 "pointsEarned": points_earned,
+                "pendingPoints": pending_points,
                 "conversionRate": (round(total_registered / total_clicks, 4)
                                    if total_clicks else 0.0),
             },
@@ -673,7 +733,8 @@ class PromotionService:
                    "level2RewardAmount", "wineMinPrice", "eligibleProductIds",
                    "pointsPerReferral", "sharePointsPerAction",
                    "shareDailyLimit", "welcomeNewcomerPoints",
-                   "deviceGateEnabled")
+                   "deviceGateEnabled", "referralEscrowEnabled",
+                   "escrowDays", "escrowUnlockOrder")
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             raise ValueError(f"无可更新字段, 支持: {', '.join(allowed)}")
@@ -700,6 +761,17 @@ class PromotionService:
             updates["welcomeNewcomerPoints"] = v
         if "deviceGateEnabled" in updates:
             updates["deviceGateEnabled"] = bool(updates["deviceGateEnabled"])
+        if "referralEscrowEnabled" in updates:
+            updates["referralEscrowEnabled"] = bool(
+                updates["referralEscrowEnabled"])
+        if "escrowDays" in updates:
+            v = int(updates["escrowDays"])
+            if v < 1:
+                raise ValueError("观察期天数(80号E3)须 ≥ 1")
+            updates["escrowDays"] = v
+        if "escrowUnlockOrder" in updates:
+            updates["escrowUnlockOrder"] = bool(
+                updates["escrowUnlockOrder"])
 
         if "level1Threshold" in updates:
             v = int(updates["level1Threshold"])
