@@ -148,6 +148,7 @@ class AuthService:
                 "ageVerified": age_verified,
                 "created_at": _now_iso(),
                 "last_login_at": _now_iso(),
+                "login_count": 0,   # P2-b: 登录精确计数(E3 解冻判定)
             }
             member = await self.member_repo.create(member_data)
             member_id = member["id"]
@@ -196,7 +197,9 @@ class AuthService:
 
         role = member.get("role", ROLE_MEMBER)
         await self.member_repo.update_fields(
-            member["id"], {"last_login_at": _now_iso()}
+            member["id"], {"last_login_at": _now_iso(),
+                           "login_count":
+                               int(member.get("login_count", 0) or 0) + 1}
         )
         tokens = create_token_pair(member["id"], role)
         await self._record_jtis(member["id"], tokens)
@@ -322,7 +325,9 @@ class AuthService:
 
         role = member.get("role", ROLE_MEMBER)
         await self.member_repo.update_fields(
-            member["id"], {"last_login_at": _now_iso()}
+            member["id"], {"last_login_at": _now_iso(),
+                           "login_count":
+                               int(member.get("login_count", 0) or 0) + 1}
         )
         tokens = create_token_pair(member["id"], role)
         await self._record_jtis(member["id"], tokens)
@@ -528,6 +533,7 @@ class AuthService:
                 "ageVerified": False,
                 "created_at": _now_iso(),
                 "last_login_at": _now_iso(),
+                "login_count": 0,   # P2-b: 登录精确计数
             }
             member = await self.member_repo.create(member_data)
             member_id = member["id"]
@@ -701,7 +707,9 @@ class AuthService:
             raise ValueError("账号已被禁用,请联系客服")
         role = member.get("role", ROLE_MEMBER)
         await self.member_repo.update_fields(
-            member["id"], {"last_login_at": _now_iso()})
+            member["id"], {"last_login_at": _now_iso(),
+                           "login_count":
+                               int(member.get("login_count", 0) or 0) + 1})
         tokens = create_token_pair(member["id"], role)
         await self._record_jtis(member["id"], tokens)
         result = {

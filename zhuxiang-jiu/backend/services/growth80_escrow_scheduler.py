@@ -121,7 +121,7 @@ async def _invitee_active(escrow: dict, settings: dict) -> tuple[bool, str]:
         except Exception as exc:  # noqa: BLE001
             logger.warning("escrow_order_check_skip: %s", exc)
 
-    # 注册后回访(last_login_at > escrow.createdAt)
+    # 注册后回访(last_login_at > escrow.createdAt) / 登录精确计数
     try:
         from repositories.member_repository import MemberRepository
         member = await MemberRepository().get_by_id(invitee_id)
@@ -129,6 +129,10 @@ async def _invitee_active(escrow: dict, settings: dict) -> tuple[bool, str]:
         created = str(escrow.get("createdAt") or "")
         if last_login and created and last_login > created:
             return True, "注册后回访"
+        # P2-b: 登录精确计数 ≥3 次(旧会员无字段则本条不适用)
+        login_count = int((member or {}).get("login_count", 0) or 0)
+        if login_count >= 3:
+            return True, f"登录{login_count}次"
     except Exception as exc:  # noqa: BLE001
         logger.warning("escrow_revisit_check_skip: %s", exc)
     return False, ""

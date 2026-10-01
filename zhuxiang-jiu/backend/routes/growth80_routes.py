@@ -52,6 +52,29 @@ async def share_today(
                                 .today_share_count(member_id))}
 
 
+class ShareCopyRequest(BaseModel):
+    itemType: str = Field("product", max_length=20,
+                          description="分享内容类型: product/promo_code/content")
+    itemId: str = Field("", max_length=40, description="内容标识(产品ID/推广码等)")
+    channel: str = Field("direct", max_length=24,
+                         description="分享平台: wechat_miniprogram/douyin/kuaishou/"
+                                     "xiaohongshu/bilibili/taobao/direct")
+
+
+@router.post("/api/growth80/share/copy", tags=["全域会员智能增长(80号)"])
+async def share_copy(
+    body: ShareCopyRequest,
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+):
+    """LLM 动态引流文案(P2-a: 按平台+内容生成, 缓存 24h,
+    LLM 失败回退静态模板; 只读不涉积分)"""
+    member_id = _require_member_id(x_member_id)
+    result = await Growth80Service().generate_share_copy(
+        member_id, item_type=body.itemType, item_id=body.itemId,
+        channel=body.channel)
+    return {"success": True, **result}
+
+
 def register_growth80_routes(app):
     """路由注册(routes/__init__ register 函数族惯例)"""
     app.include_router(router)

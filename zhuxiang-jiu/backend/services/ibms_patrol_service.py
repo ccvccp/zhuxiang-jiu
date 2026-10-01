@@ -240,32 +240,51 @@ async def check_host_health() -> dict:
 
 
 async def check_growth_anomalies() -> dict:
-    """80号 v2-E4: 绑定速率异常(刷单侧写)——24h 新增关系按推荐人聚合
+    """80号 v2-E4/P2-c: 绑定速率异常(刷单侧写)——24h 新增关系按推荐人聚合
 
-    绝对阈值(v2 方案 §2.2, EMA 基线列后续增强): 单推荐人 24h 内
-    新增绑定 > 50 → WARN(疑似) / > 100 → FAIL(团伙嫌疑)。
+    双通道判定(v2 方案 §2.2):
+        - 绝对阈值(E4): 单推荐人 24h 新增绑定 > 50 → WARN(疑似) /
+          > 100 → FAIL(团伙嫌疑)
+        - EMA 基线(P2-c): 24h 新增 > 20 且 > 前 7 天日均×10 →
+          WARN(突爆发侧写)。基线窗口为 [24h 前, 8 天前); 7 天历史
+          不足 3 条只走绝对阈值——新推荐人正常首波分享不误报。
     单项 fail-soft; 留痕即证(告警闭环由巡检总线继承)。
     """
     from datetime import timedelta
     from repositories.promotion_repository import PromotionRepository
     try:
         relations = await PromotionRepository().list_relations(limit=5000)
-        cutoff = (datetime.now(timezone.utc)
-                  - timedelta(hours=24)).isoformat()
+        now = datetime.now(timezone.utc)
+        cutoff_24h = (now - timedelta(hours=24)).isoformat()
+        cutoff_8d = (now - timedelta(days=8)).isoformat()
         per_inviter: dict[str, int] = {}
+        baseline_week: dict[str, int] = {}
         for r in relations or []:
-            if str(r.get("createdAt") or "") >= cutoff:
-                key = str(r.get("inviterMemberId") or "?")
+            created = str(r.get("createdAt") or "")
+            key = str(r.get("inviterMemberId") or "?")
+            if created >= cutoff_24h:
                 per_inviter[key] = per_inviter.get(key, 0) + 1
-        suspects = [(k, n) for k, n in per_inviter.items() if n > 50]
+            elif created >= cutoff_8d:
+                baseline_week[key] = baseline_week.get(key, 0) + 1
+        suspects = []
+        for k, n in per_inviter.items():
+            if n > 50:
+                suspects.append((k, n, "绝对阈值"))
+                continue
+            week_total = baseline_week.get(k, 0)
+            if n > 20 and week_total >= 3 \
+                    and n > (week_total / 7) * 10:
+                suspects.append(
+                    (k, n, f"EMA突增(7天日均{week_total / 7:.1f})"))
         if not suspects:
             return {"state": "PASS", "count": len(per_inviter),
                     "message": f"绑定速率正常(24h 活跃推荐人 {len(per_inviter)})"}
-        worst = "FAIL" if any(n > 100 for _, n in suspects) else "WARN"
+        worst = "FAIL" if any(n > 100 for _, n, _ in suspects) else "WARN"
         top = sorted(suspects, key=lambda x: -x[1])[:3]
         return {"state": worst, "count": len(suspects),
                 "message": "; ".join(
-                    f"推荐人{k} 24h 新增{n}" for k, n in top)[:200]}
+                    f"推荐人{k} 24h 新增{n}({why})"
+                    for k, n, why in top)[:200]}
     except Exception as exc:  # noqa: BLE001
         return {"state": "FAIL", "count": 0,
                 "message": f"绑定速率检查异常: {exc}"[:200]}

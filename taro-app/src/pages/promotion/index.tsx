@@ -46,6 +46,17 @@ const EMPTY_FUNNEL: PromotionFunnelVO = {
 
 const IS_H5 = process.env.TARO_ENV === 'h5';
 
+// P2-a: LLM 动态文案(fail-soft——失败/为空回退静态模板)
+const fetchShareCopy = async (
+  itemType: string, itemId: string, channel: string, fallback: string,
+): Promise<string> => {
+  try {
+    const r = await Growth80API.shareCopy(itemType, itemId, channel);
+    if (r.copy) return r.copy;
+  } catch (_) { /* best-effort 降级静态 */ }
+  return fallback;
+};
+
 const PromotionPage: React.FC = () => {
   const [stats, setStats] = useState<PromotionStatsVO>(EMPTY_STATS);
   const [funnel, setFunnel] = useState<PromotionFunnelVO>(EMPTY_FUNNEL);
@@ -175,19 +186,23 @@ const PromotionPage: React.FC = () => {
   };
 
   // 复制分享文案
-  const handleCopyShare = () => {
+  const handleCopyShare = async () => {
     if (!shareTip) return;
+    // P2-a: LLM 动态文案优先(缓存 24h), 失败回退静态模板
+    const text = await fetchShareCopy('promo_code', promoCode, 'wechat_miniprogram', shareTip);
     Taro.setClipboardData({
-      data: shareTip,
+      data: text,
       success: () => Taro.showToast({ title: '分享文案已复制', icon: 'success' }),
     });
   };
 
   // 复制指定码的分享文案(79号漏斗明细行; 80号顺带分享计分)
-  const handleCopyTipOf = async (tip: string, code: string) => {
+  const handleCopyTipOf = async (tip: string, code: string, channel: string) => {
     if (!tip) return;
+    // P2-a: LLM 动态文案优先(按该码的平台), 失败回退静态模板
+    const text = await fetchShareCopy('promo_code', code, channel || 'direct', tip);
     Taro.setClipboardData({
-      data: tip,
+      data: text,
       success: () => Taro.showToast({ title: '分享文案已复制', icon: 'success' }),
     });
     // 80号: 分享动作计分(fail-soft——计分失败不影响复制)
@@ -331,7 +346,7 @@ const PromotionPage: React.FC = () => {
                 </View>
                 <View
                   className={styles.funnelRowBtn}
-                  onClick={() => handleCopyTipOf(c.shareTip, c.code)}
+                  onClick={() => handleCopyTipOf(c.shareTip, c.code, c.channel)}
                 >
                   复制文案
                 </View>

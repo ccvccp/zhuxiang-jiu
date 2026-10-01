@@ -18,6 +18,12 @@ export interface ShareTodayVO {
   pointsPerAction: number;
 }
 
+export interface ShareCopyVO {
+  copy: string;           // 文案内容
+  engine: string;         // llm(动态) | static(静态模板)
+  cached: boolean;        // 是否命中 24h 缓存
+}
+
 export const Growth80API = {
   /** 分享事件上报(itemType: product/promo_code/content) */
   async reportShare(itemType: string, itemId: string): Promise<ShareReportVO> {
@@ -42,6 +48,20 @@ export const Growth80API = {
       dailyLimit: Number(res.dailyLimit ?? 5) || 0,
       remaining: Number(res.remaining ?? 0) || 0,
       pointsPerAction: Number(res.pointsPerAction ?? 0) || 0,
+    };
+  },
+
+  /** LLM 动态引流文案(P2-a: 按平台生成, 缓存 24h, 失败回退静态模板) */
+  async shareCopy(itemType: string, itemId: string, channel: string): Promise<ShareCopyVO> {
+    const res = await request<any>({
+      url: '/api/growth80/share/copy',
+      method: 'POST',
+      data: { itemType, itemId, channel },
+    });
+    return {
+      copy: res.copy || '',
+      engine: res.engine || 'static',
+      cached: !!res.cached,
     };
   },
 };
