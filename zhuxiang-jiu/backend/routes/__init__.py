@@ -43,6 +43,8 @@ from routes.maintenance_routes import register_maintenance_routes
 from routes.monitor_routes import register_monitor_routes
 # 智能后台管理模型(74号·IBMS 巡检总线+LLM 诊断)
 from routes.ibms_routes import register_ibms_routes
+# 硬件资源智能模型(81号·HRM 水位三档+批任务闸门+容量建议书)
+from routes.hrm81_routes import register_hrm81_routes
 # 用户认证模块
 from routes.auth_routes import register_auth_routes
 # 限时秒杀模块
@@ -151,6 +153,7 @@ __all__ = [
     "register_monitor_routes",
     "register_maintenance_routes",
     "register_ibms_routes",
+    "register_hrm81_routes",
     "register_auth_routes",
     "register_promotion_routes",
     "register_flashsale_routes",

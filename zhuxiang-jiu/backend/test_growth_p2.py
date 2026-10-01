@@ -149,19 +149,23 @@ def test_t5_escrow_login_count_gate():
     """T5 E3 判定: login_count≥3 达标; <3 不达标(回访口不触发)"""
 
     async def run():
-        old = (datetime.now(UTC) - timedelta(days=10)).isoformat()
+        # escrow 创建于注册一天后——last_login(注册日) 必然早于
+        # createdAt, "注册后回访"分支稳定不走(防 datetime.now 微秒
+        # 竞态 flaky, 只验 login_count 口径)
+        escrow_created = (datetime.now(UTC)
+                          - timedelta(days=9)).isoformat()
         settings = {"escrowUnlockOrder": True}
 
         m3 = await _mk_member("13900000902", login_count=3)
         ok, why = await _invitee_active(
             {"refId": f"traffic79:{m3['id']}", "userId": 88001,
-             "createdAt": old}, settings)
+             "createdAt": escrow_created}, settings)
         assert ok is True and "登录3次" in why
 
         m2 = await _mk_member("13900000903", login_count=2)
         ok2, why2 = await _invitee_active(
             {"refId": f"traffic79:{m2['id']}", "userId": 88001,
-             "createdAt": old}, settings)
+             "createdAt": escrow_created}, settings)
         assert ok2 is False
 
     asyncio.run(run())

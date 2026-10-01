@@ -68,11 +68,29 @@ import logging
 import os
 import struct
 import threading
+import time
 import urllib.request
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "15"))
+
+# 81号 HRM red 档: LLM 全局降频窗口(进程内, 重启清零可接受)
+# fail-soft 语义: 节流窗口内 chat 返回 None → 调用方按既有惯例
+# 回退 rule 轨/静态模板(growth80 文案降级静态、74号诊断降级摘要已实证)
+_llm_throttle_until = 0.0
+
+
+def set_llm_throttle(seconds: float) -> None:
+    """81号 HRM red 档专用: 设置全局降频窗口(秒)"""
+    global _llm_throttle_until
+    _llm_throttle_until = time.time() + max(0.0, float(seconds))
+    logger.info("llm_throttle_set seconds=%s(81号 HRM red)", seconds)
+
+
+def llm_throttle_remaining() -> float:
+    """当前节流剩余秒数(观测面)"""
+    return max(0.0, _llm_throttle_until - time.time())
 
 # ============================================================
 # P2·H2 完善: 智谱 keep-alive 连接池(后端→智谱链路)
@@ -280,6 +298,9 @@ class LLMProviderClient:
             模型回复文本; 未配置 key、请求失败、响应异常均返回 None。
         """
         if not llm_enabled():
+            return None
+        if time.time() < _llm_throttle_until:
+            logger.info("llm_chat_throttled(81号 HRM red 降频窗口)")
             return None
         from core.metrics import llm_timer
         with llm_timer("chat"):

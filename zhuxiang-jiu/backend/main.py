@@ -73,6 +73,8 @@ from routes import (
     register_maintenance_routes,
     # 智能后台管理模型(74号·IBMS 巡检总线+LLM 诊断)
     register_ibms_routes,
+    # 硬件资源智能模型(81号·HRM 水位三档+批任务闸门+容量建议书)
+    register_hrm81_routes,
     # 全域会员智能增长(80号·分享积分轨+新人礼)
     register_growth80_routes,
     # 用户认证模块
@@ -271,6 +273,7 @@ register_venue_routes(app)
 register_monitor_routes(app)
 register_maintenance_routes(app)
 register_ibms_routes(app)
+register_hrm81_routes(app)
 register_growth80_routes(app)
 register_auth_routes(app)
 register_promotion_routes(app)
@@ -547,6 +550,11 @@ async def _on_startup():
         start_scheduler as start_growth80_escrow,
     )
     start_growth80_escrow()
+    # 硬件资源智能模型(81号·HRM): 水位周期评估+批任务闸门决策
+    # (HRM81_AUTO=off 可关闭, 默认 off——与 HRM81_MODE 双闸,
+    # 分段铁律见 hrm81_scheduler)
+    from services.hrm81_scheduler import start_scheduler as start_hrm81
+    start_hrm81()
     # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
     from services.blogger_scheduler import (
         start_radar_scheduler as start_blogger_radar,
