@@ -4,14 +4,16 @@
     $env:LOCK_MODE="asyncio"; $env:STORE_MODE="asyncio"
     python -m pytest test_hrm81_p1.py -q
 
-覆盖(81号方案 §四六步对应):
-    T1 台账: critical/batch 分层, 试点 3 个已接入, guard 永不让路
+覆盖(81号方案 §四六步对应 + P2 Tier1 §1):
+    T1 台账: critical/batch 分层, 接入面 11 项(P1 试点 3+P2 Tier1 8),
+       guard 永不让路, Tier2 未接项 gated=False
     T2 水位三档: 各指标判定 + 采集失败 unknown fail-open
     T3 acquire_slot: off/shadow 恒放行 + on 三态 + critical 豁免
     T4 LLM 节流: red 窗口内 chat 返回 None(不触网) + 窗口恢复
     T5 决策引擎: shadow 只留痕 / on+red 动作+留痕 / 熔断回 shadow
     T6 路由门槛: 决策面 off 409 / 观测面无门槛
-    T7 试点零破坏: green 水位三试点调度器均放行
+    T7 接入面零破坏: green/unknown 水位下 11 项闸门调度器全放行
+    T8 run_gated: 暂缓跳过本轮不调 fn / 放行调用 / shadow 恒放行
 """
 
 import asyncio
@@ -59,14 +61,20 @@ def test_t1_registry():
     s = hrm.registry_summary()
     assert s["total"] == len(hrm.MODULE_REGISTRY)
     assert s["critical"] >= 4 and s["batch"] >= 3
-    assert set(hrm.BATCH_PILOT) == {
-        "knowledge_quality", "ai_learning", "growth80_escrow"}
+    # P2 Tier1 接入面: P1 试点 3 + 学习回流 8
+    assert set(hrm.BATCH_GATED) == {
+        "knowledge_quality", "ai_learning", "growth80_escrow",
+        "ride_learning", "login54_learn", "qr55_learn",
+        "aiup56_learn", "kb57_learn", "ii58_learn", "ab63_learn",
+        "dm61_learn"}
     for m in ("trade_main", "guard_family", "order_timeout",
               "payment_expire"):
         assert hrm.MODULE_REGISTRY[m]["priority"] == "critical"
-    for m in hrm.BATCH_PILOT:
+    for m in hrm.BATCH_GATED:
         assert hrm.MODULE_REGISTRY[m]["priority"] == "batch"
         assert hrm.MODULE_REGISTRY[m].get("gated") is True
+    # Tier2 登记未接入: gated=False(接入时翻位)
+    assert hrm.MODULE_REGISTRY["promo_radar"]["gated"] is False
 
 
 # ============================================================
@@ -291,21 +299,61 @@ def test_t6_routes():
 
 
 # ============================================================
-# T7 试点零破坏
+# T7 接入面零破坏
 # ============================================================
 
-def test_t7_pilot_green_pass():
-    """T7: green/unknown 水位下三试点全放行(零破坏实证)"""
+def test_t7_gated_green_pass():
+    """T7: green/unknown 水位下 11 项闸门调度器全放行(零破坏实证)"""
 
     async def run():
         for level in ("green", "unknown"):
             _set_water(level)
-            for m in hrm.BATCH_PILOT:
+            for m in hrm.BATCH_GATED:
                 # on 模式下 green/unknown 均放行
                 os.environ["HRM81_MODE"] = "on"
                 try:
                     assert await hrm.acquire_slot(m) is True
                 finally:
                     os.environ.pop("HRM81_MODE", None)
+
+    asyncio.run(run())
+
+
+# ============================================================
+# T8 run_gated 统一入口(P2 Tier1)
+# ============================================================
+
+def test_t8_run_gated(monkeypatch):
+    """T8: on+amber 暂缓跳过本轮不调 fn; on+green 调用;
+    shadow+red 恒放行(干跑语义)"""
+    calls = []
+
+    async def fn():
+        calls.append(1)
+
+    async def run():
+        # on + green: 调用 fn
+        monkeypatch.setenv("HRM81_MODE", "on")
+        _set_water("green")
+        await hrm.run_gated("dm61_learn", fn)
+        assert calls == [1]
+        # on + amber: 暂缓, 不调 fn(下轮重试)
+        _set_water("amber")
+        await hrm.run_gated("dm61_learn", fn)
+        assert calls == [1]
+        # shadow + red: 恒放行(闸门只在 on 真拦截)
+        monkeypatch.setenv("HRM81_MODE", "shadow")
+        _set_water("red")
+        await hrm.run_gated("dm61_learn", fn)
+        assert calls == [1, 1]
+        # 未注册 module: 恒放行(最小惊讶)
+        monkeypatch.setenv("HRM81_MODE", "on")
+        _set_water("red")
+        await hrm.run_gated("not_registered_x", fn)
+        assert calls == [1, 1, 1]
+        # Tier2 登记未接入项(gated=False): amber 也不拦——
+        # 闸门只约束显式接入者(amber 演练实证修正)
+        _set_water("amber")
+        assert await hrm.acquire_slot("promo_radar") is True
 
     asyncio.run(run())

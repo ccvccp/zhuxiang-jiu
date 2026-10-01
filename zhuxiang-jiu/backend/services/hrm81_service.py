@@ -57,11 +57,15 @@ def hrm_mode(mode: str | None = None) -> str:
 
 
 # ============================================================
-# 组件 1: 模块资源台账(P1 静态注册, 接入面扩容留 P2)
+# 组件 1: 模块资源台账(P1 静态注册; P2 Tier1 扩容见 §1.3)
 # ============================================================
 
-# P1 试点接入 acquire_slot 的批任务调度器(跑批前查闸门)
-BATCH_PILOT = ("knowledge_quality", "ai_learning", "growth80_escrow")
+# 已接入 acquire_slot 闸门的批任务调度器(P1 试点 3 + P2 Tier1 8)
+BATCH_GATED = (
+    "knowledge_quality", "ai_learning", "growth80_escrow",
+    "ride_learning", "login54_learn", "qr55_learn", "aiup56_learn",
+    "kb57_learn", "ii58_learn", "ab63_learn", "dm61_learn",
+)
 
 MODULE_REGISTRY: dict = {
     # ---- critical: 任何水位不让路(保护豁免铁律) ----
@@ -93,7 +97,7 @@ MODULE_REGISTRY: dict = {
                       "resources": ["llm"], "note": "降级静态已实证"},
     "ibms_diagnose": {"name": "74号 LLM 诊断", "priority": "normal",
                       "resources": ["llm"], "note": "降级原始摘要"},
-    # ---- batch: 可错峰(闸门对象; P1 三试点已接入) ----
+    # ---- batch: 可错峰(闸门对象; P1 试点 3 + P2 Tier1 学习回流 8 已接) ----
     "knowledge_quality": {
         "name": "知识库质量进化", "priority": "batch",
         "scheduler": "KNOWLEDGE_QUALITY_AUTO", "gated": True},
@@ -104,19 +108,43 @@ MODULE_REGISTRY: dict = {
         "name": "80号 Escrow 结算", "priority": "batch",
         "scheduler": "GROWTH_ESCROW_AUTO", "gated": True,
         "note": "暂缓只延迟观察期结算, 存量可手动 force"},
-    # ---- batch(未接入, 台账登记——接入面扩容留 P2) ----
-    "learning_family": {
-        "name": "学习回流族(50-63号)", "priority": "batch",
-        "gated": False, "note": "默认 off, P2 接入"},
+    "ride_learning": {
+        "name": "41号代驾学习回流", "priority": "batch",
+        "scheduler": "RIDE_LEARNING_AUTO", "gated": True},
+    "login54_learn": {
+        "name": "54号登录决策回流 T+1", "priority": "batch",
+        "scheduler": "LOGIN54_LEARN_MODE", "gated": True},
+    "qr55_learn": {
+        "name": "55号二维码回流+清扫", "priority": "batch",
+        "scheduler": "QR55_LEARN_MODE", "gated": True},
+    "aiup56_learn": {
+        "name": "56号升级决策回流", "priority": "batch",
+        "scheduler": "AIUP56_LEARN_MODE", "gated": True},
+    "kb57_learn": {
+        "name": "57号知识库回流", "priority": "batch",
+        "scheduler": "KB57_LEARN_MODE", "gated": True},
+    "ii58_learn": {
+        "name": "58号意图识别回流", "priority": "batch",
+        "scheduler": "II58_LEARN_MODE", "gated": True},
+    "ab63_learn": {
+        "name": "63号后台管理回流+培训", "priority": "batch",
+        "scheduler": "AB63_LEARN_MODE", "gated": True},
+    "dm61_learn": {
+        "name": "61号升级决策 RLHF 回流", "priority": "batch",
+        "scheduler": "DM61_LEARN_MODE", "gated": True},
+    # ---- batch(未接入, 台账登记——P2 Tier2/3 候选, 各批次接入时置 gated) ----
     "promo_radar": {
-        "name": "推广雷达/发布出队", "priority": "batch",
-        "gated": False, "note": "黄金时段语义, P2 接入"},
+        "name": "36号热点雷达/进化回归", "priority": "batch",
+        "gated": False, "note": "Tier2 接入"},
     "blogger_radar": {
-        "name": "40号博主雷达", "priority": "batch",
-        "gated": False, "note": "P2 接入"},
+        "name": "40号博主雷达/回流", "priority": "batch",
+        "gated": False, "note": "Tier2 接入"},
     "alliance_settle": {
         "name": "37号同盟 T+1 结算", "priority": "batch",
-        "gated": False, "note": "P2 接入"},
+        "gated": False, "note": "Tier2 接入(暂缓=延迟一日)"},
+    "voice50_settle": {
+        "name": "50号语音积分 T+1 结算", "priority": "batch",
+        "gated": False, "note": "Tier2 接入(暂缓=延迟一日)"},
 }
 
 
@@ -130,7 +158,9 @@ def registry_summary() -> dict:
         "normal": sum(1 for e in entries
                       if e["priority"] == "normal"),
         "batch": sum(1 for e in entries if e["priority"] == "batch"),
-        "batchGated": list(BATCH_PILOT),
+        "batchGated": [k for k, v in MODULE_REGISTRY.items()
+                       if v["priority"] == "batch"
+                       and v.get("gated")],
     }
 
 
@@ -230,16 +260,18 @@ async def acquire_slot(module_id: str) -> bool:
 
     语义:
         - mode != on  → 恒放行(shadow 干跑; 留痕由决策引擎周期统一记)
-        - 未注册/非 batch → 放行(最小惊讶, 闸门只约束显式注册的 batch)
+        - 未注册/未接入(gated!=True) → 放行(闸门只约束显式接入的
+          batch 调度器——Tier2/3 登记项接入前不受约束, 防台账与
+          循环两侧不一致时误伤; amber 演练实证修正)
         - on + green/unknown → 放行
-        - on + amber/red → batch 类暂缓(False, 下轮重试幂等安全)
+        - on + amber/red → 已接入 batch 暂缓(False, 下轮重试幂等安全)
         - 评估自身异常 → 放行(闸门坏了不卡业务)
     """
     try:
         if hrm_mode() != "on":
             return True
         entry = MODULE_REGISTRY.get(module_id) or {}
-        if entry.get("priority") != "batch":
+        if entry.get("gated") is not True:
             return True
         level = (await assess_water_level()).get("level")
         if level in ("amber", "red"):
@@ -251,6 +283,18 @@ async def acquire_slot(module_id: str) -> bool:
         logger.warning("hrm81_slot_error(fail-open) module=%s: %s",
                        module_id, exc)
         return True
+
+
+async def run_gated(module_id: str, run) -> None:
+    """接入面统一入口(81号 P2 §1.2): 暂缓即跳过本轮, 下轮重试
+
+    供有独立 run 函数的调度器一行接入:
+        await run_gated("xxx_learn", run_scheduled_tasks)
+    内联循环调度器(如 ride_learning)用 acquire_slot 样板, 语义同源。
+    """
+    if not await acquire_slot(module_id):
+        return
+    await run()
 
 
 # ============================================================

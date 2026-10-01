@@ -96,12 +96,9 @@ async def _scheduler_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            # 81号 HRM 批任务闸门(amber/red 暂缓下轮重试;
-            # off/shadow 恒放行——P1 试点接入)
-            from services.hrm81_service import acquire_slot
-            if not await acquire_slot("ai_learning"):
-                continue
-            await run_scheduled_learning()
+            # 81号 HRM 批任务闸门(off/shadow 恒放行; P2 收敛 run_gated)
+            from services.hrm81_service import run_gated
+            await run_gated("ai_learning", run_scheduled_learning)
         except Exception as exc:
             logger.warning("调度扫描异常(继续运行): %s", exc)
 

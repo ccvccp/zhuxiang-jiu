@@ -40,6 +40,11 @@ async def _learning_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
+            # 81号 HRM 批任务闸门(amber/red 暂缓下轮重试;
+            # off/shadow 恒放行——P2 Tier1 接入, 内联循环样板)
+            from services.hrm81_service import acquire_slot
+            if not await acquire_slot("ride_learning"):
+                continue
             from services.ride_dispatch_service import RideDispatchService
             from services.driver_gate_service import DriverGateService
             from services.ride_review_service import RideReviewService

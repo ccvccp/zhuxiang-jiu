@@ -87,12 +87,9 @@ async def _scheduler_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            # 81号 HRM 批任务闸门(amber/red 暂缓下轮重试;
-            # off/shadow 恒放行——P1 试点接入)
-            from services.hrm81_service import acquire_slot
-            if not await acquire_slot("knowledge_quality"):
-                continue
-            await run_quality_scan()
+            # 81号 HRM 批任务闸门(off/shadow 恒放行; P2 收敛 run_gated)
+            from services.hrm81_service import run_gated
+            await run_gated("knowledge_quality", run_quality_scan)
         except Exception as exc:
             logger.warning("知识质量扫描异常(继续运行): %s", exc)
 

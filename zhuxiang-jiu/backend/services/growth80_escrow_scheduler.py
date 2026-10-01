@@ -228,13 +228,11 @@ async def _scheduler_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            # 81号 HRM 批任务闸门(amber/red 暂缓下轮重试——暂缓只
-            # 延迟观察期结算, 存量可经 admin/escrows/settle 手动;
-            # off/shadow 恒放行——P1 试点接入)
-            from services.hrm81_service import acquire_slot
-            if not await acquire_slot("growth80_escrow"):
-                continue
-            await run_escrow_settlement()
+            # 81号 HRM 批任务闸门(暂缓只延迟观察期结算, 存量可经
+            # admin/escrows/settle 手动; off/shadow 恒放行;
+            # P2 收敛 run_gated)
+            from services.hrm81_service import run_gated
+            await run_gated("growth80_escrow", run_escrow_settlement)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Escrow 结算异常(继续运行): %s", exc)
 
