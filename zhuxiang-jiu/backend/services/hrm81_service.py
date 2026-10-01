@@ -61,7 +61,8 @@ def hrm_mode(mode: str | None = None) -> str:
 # ============================================================
 
 # 已接入 acquire_slot 闸门的批任务调度器
-# (P1 试点 3 + P2 Tier1 学习回流 8 + P2 Tier2 结算/雷达 9)
+# (P1 试点 3 + P2 Tier1 学习回流 8 + P2 Tier2 结算/雷达 9
+#  + P2 Tier3 治理观测 5)
 BATCH_GATED = (
     "knowledge_quality", "ai_learning", "growth80_escrow",
     "ride_learning", "login54_learn", "qr55_learn", "aiup56_learn",
@@ -69,6 +70,8 @@ BATCH_GATED = (
     "alliance_settle", "voice50_settle", "pay60_learn", "av62_learn",
     "citystore_assessment", "promo_radar", "promo_evolution",
     "blogger_radar", "blogger_learning",
+    "security_ueba", "kg51_inspect", "us52_alert", "xx66_recon",
+    "xiaozhu_weekly",
 )
 
 MODULE_REGISTRY: dict = {
@@ -171,11 +174,36 @@ MODULE_REGISTRY: dict = {
         "name": "40号学习回流(含评论归因)", "priority": "batch",
         "scheduler": "BLOGGER_LEARNING_AUTO", "gated": True,
         "note": "整轮闸门"},
-    # ---- batch(未接入, 台账登记——P2 Tier3 候选, 接入时置 gated) ----
+    # ---- batch: P2 Tier3 治理观测 5 已接(逐项确认零行为影响) ----
     "security_ueba": {
-        "name": "43号 UEBA 基线日度重建", "priority": "batch",
-        "scheduler": "SECURITY_SCHEDULER_MODE", "gated": False,
-        "note": "Tier3 接入"},
+        "name": "43号 UEBA 基线重建+空窗评估", "priority": "batch",
+        "scheduler": "SECURITY_SCHEDULER_MODE", "gated": True,
+        "note": "纯分析, 暂缓=次日重试"},
+    "kg51_inspect": {
+        "name": "51号图谱三指标日巡快照", "priority": "batch",
+        "scheduler": "KG_INSPECT_MODE", "gated": True,
+        "note": "只读观测"},
+    "us52_alert": {
+        "name": "52号语音可用性漂移告警(分析型)", "priority": "batch",
+        "scheduler": "US52_ALERT_MODE", "gated": True,
+        "note": "实时告警走 74号 IBMS 不受影响"},
+    "xx66_recon": {
+        "name": "66号对账 T+1 检测", "priority": "batch",
+        "scheduler": "XX66_RECON_AUTO", "gated": True,
+        "note": "只读观测(xx66_scan 5min 保护巡检不接)"},
+    "xiaozhu_weekly": {
+        "name": "小竹语音周报", "priority": "batch",
+        "scheduler": "XXIAOZHU_WEEKLY_AUTO", "gated": True,
+        "note": "小时级循环, 下轮重试"},
+    # ---- Tier3 移出登记(逐项确认发现有动作语义, 留 P3 复核) ----
+    "ai_gov_health": {
+        "name": "46号档案健康日巡+新告警触达", "priority": "batch",
+        "scheduler": "AI_GOV_SCHEDULER_MODE", "gated": False,
+        "note": "移出: 告警触达有实效语义, 延迟即行为影响"},
+    "attract72_health": {
+        "name": "72号引流健康快照+越界自动冻结", "priority": "batch",
+        "scheduler": "ATTRACT72_HEALTH_AUTO", "gated": False,
+        "note": "移出: 自动冻结为保护动作, 延迟即保护延迟"},
 }
 
 

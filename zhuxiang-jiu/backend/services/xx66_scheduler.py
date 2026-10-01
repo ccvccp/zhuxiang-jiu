@@ -88,11 +88,16 @@ async def _recon_loop() -> None:
             logger.debug("xx66_recon_skipped (XX66_MODE=off)")
             continue
         try:
+            # 81号 HRM 批任务闸门(off/shadow 恒放行——P2 Tier3 接入;
+            # 对账检测只读观测, 暂缓=次日重试)
+            from services.hrm81_service import run_gated
             from services.xx66_recon_service import (
                 Xx66ReconService,
             )
-            result = await Xx66ReconService().run_recon()
-            logger.info("xx66_recon_scheduled run=%s danger=%s",
+            result = await run_gated(
+                "xx66_recon", Xx66ReconService().run_recon)
+            if result:
+                logger.info("xx66_recon_scheduled run=%s danger=%s",
                         result.get("runId"),
                         result.get("dangerCount"))
         except Exception as exc:

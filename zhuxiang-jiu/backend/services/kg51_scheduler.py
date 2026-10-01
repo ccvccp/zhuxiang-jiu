@@ -83,7 +83,10 @@ async def _scheduler_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            await run_scheduled_inspection()
+            # 81号 HRM 批任务闸门(off/shadow 恒放行——P2 Tier3 接入;
+            # 三指标快照只读观测, 暂缓=次日重试)
+            from services.hrm81_service import run_gated
+            await run_gated("kg51_inspect", run_scheduled_inspection)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "图谱巡检调度异常(继续运行): %s", exc)

@@ -233,7 +233,10 @@ async def _weekly_loop() -> None:
     """周报检查循环(每小时看一眼, 整轮异常不退出)"""
     while True:
         try:
-            await _weekly_maybe_run()
+            # 81号 HRM 批任务闸门(off/shadow 恒放行——P2 Tier3 接入;
+            # 周报生成+站内信, 暂缓=下轮(小时级)重试)
+            from services.hrm81_service import run_gated
+            await run_gated("xiaozhu_weekly", _weekly_maybe_run)
         except Exception as exc:
             logger.error("xiaozhu_weekly_loop_fail: %s", exc)
         await asyncio.sleep(3600)

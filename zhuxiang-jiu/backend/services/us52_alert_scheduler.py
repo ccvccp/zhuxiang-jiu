@@ -125,7 +125,10 @@ async def _scheduler_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            await run_scheduled_alert_scan()
+            # 81号 HRM 批任务闸门(off/shadow 恒放行——P2 Tier3 接入;
+            # 漂移告警为分析型日度批产物, 实时告警走 74号 IBMS 不受影响)
+            from services.hrm81_service import run_gated
+            await run_gated("us52_alert", run_scheduled_alert_scan)
         except Exception as exc:  # noqa: BLE001
             logger.warning("告警调度异常(继续运行): %s", exc)
 

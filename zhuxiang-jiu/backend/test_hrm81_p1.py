@@ -66,7 +66,8 @@ def test_t1_registry():
     s = hrm.registry_summary()
     assert s["total"] == len(hrm.MODULE_REGISTRY)
     assert s["critical"] >= 4 and s["batch"] >= 3
-    # P2 接入面: P1 试点 3 + Tier1 学习回流 8 + Tier2 结算/雷达 9
+    # P2 接入面: 试点 3 + Tier1 学习回流 8 + Tier2 结算/雷达 9
+    #            + Tier3 治理观测 5
     assert set(hrm.BATCH_GATED) == {
         "knowledge_quality", "ai_learning", "growth80_escrow",
         "ride_learning", "login54_learn", "qr55_learn",
@@ -74,15 +75,17 @@ def test_t1_registry():
         "dm61_learn", "alliance_settle", "voice50_settle",
         "pay60_learn", "av62_learn", "citystore_assessment",
         "promo_radar", "promo_evolution", "blogger_radar",
-        "blogger_learning"}
+        "blogger_learning", "security_ueba", "kg51_inspect",
+        "us52_alert", "xx66_recon", "xiaozhu_weekly"}
     for m in ("trade_main", "guard_family", "order_timeout",
               "payment_expire"):
         assert hrm.MODULE_REGISTRY[m]["priority"] == "critical"
     for m in hrm.BATCH_GATED:
         assert hrm.MODULE_REGISTRY[m]["priority"] == "batch"
         assert hrm.MODULE_REGISTRY[m].get("gated") is True
-    # Tier3 登记未接入: gated=False(接入时翻位)
-    assert hrm.MODULE_REGISTRY["security_ueba"]["gated"] is False
+    # Tier3 移出登记(动作语义项): gated=False 留 P3 复核
+    assert hrm.MODULE_REGISTRY["ai_gov_health"]["gated"] is False
+    assert hrm.MODULE_REGISTRY["attract72_health"]["gated"] is False
 
 
 # ============================================================
@@ -359,10 +362,10 @@ def test_t8_run_gated(monkeypatch):
         _set_water("red")
         await hrm.run_gated("not_registered_x", fn)
         assert calls == [1, 1, 1]
-        # Tier3 登记未接入项(gated=False): amber 也不拦——
+        # Tier3 移出项(gated=False): amber 也不拦——
         # 闸门只约束显式接入者(amber 演练实证修正)
         _set_water("amber")
-        assert await hrm.acquire_slot("security_ueba") is True
+        assert await hrm.acquire_slot("ai_gov_health") is True
 
     asyncio.run(run())
 

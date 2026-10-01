@@ -207,7 +207,10 @@ async def _scheduler_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            await run_scheduled_security_tasks()
+            # 81号 HRM 批任务闸门(off/shadow 恒放行——P2 Tier3 接入;
+            # UEBA 重建+空窗评估纯分析, 暂缓=次日重试)
+            from services.hrm81_service import run_gated
+            await run_gated("security_ueba", run_scheduled_security_tasks)
         except Exception as exc:
             logger.warning("安全调度异常(继续运行): %s", exc)
 
