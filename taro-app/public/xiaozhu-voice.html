@@ -9,11 +9,12 @@
       --gold:#c98a2d;--tx:#1f2d3d;--tx2:#6b7a8d;--bd:#dfe7e2;
       --card:#fff;--bg:#f4f7f5;--red:#b5453c}
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%}
+html{height:100%;overflow-y:auto}
+body{height:100%}
 body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:
      var(--bg);color:var(--tx);display:flex;flex-direction:column;
      align-items:center;transition:background .6s ease;
-     height:100vh;height:100dvh;overflow:hidden;padding:12px 12px 0}
+     min-height:100vh;min-height:100dvh;padding:12px 12px 0}
 body[data-bg="sunny"]{background:linear-gradient(165deg,#fdf6e3,#eaf4ec)}
 body[data-bg="rainy"]{background:linear-gradient(165deg,#dfe7ef,#c9d6e2)}
 body[data-bg="snowy"]{background:linear-gradient(165deg,#eef4fa,#dbe7f0)}
@@ -186,8 +187,12 @@ h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-to
       color:var(--tx2);cursor:pointer;transition:all .15s}
 .seg button.on{background:var(--green);color:#fff}
 .modes .sp{flex:1}
+/* X5 窄屏(<368px 溢出阈值)顶栏换行防溢出; 胶囊允许收缩防
+   select 原生控件渲染更宽出框(荣耀 360px 临界实证) */
+.modes{flex-wrap:wrap}
 .tts{font-size:12px;color:var(--tx2);cursor:pointer;user-select:none;
-      padding:4px 8px;border-radius:6px}
+      padding:4px 8px;border-radius:6px;min-width:0;max-width:44vw;
+      overflow:hidden}
 .tts:hover{background:var(--green-soft)}
 .microw{display:flex;align-items:center;gap:14px}
 .mic{width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;
