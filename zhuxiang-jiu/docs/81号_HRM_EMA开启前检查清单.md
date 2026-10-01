@@ -153,6 +153,14 @@ cd /opt/zhuxiang && docker compose up -d backend
 > 推荐节奏: 先在 **shadow 下开 EMA**(零拦截风险, 观察判定线变化
 > 1-3 天)→ 确认 tracks/level 合理 → 再评估 HRM81_MODE=on(闸门
 > 真实拦截届时才受动态线影响)。两开关解耦, 逐级放量。
+>
+> **观察期监控**(开启后每日跑或随时):
+> `backend/watch_hrm81_ema.py` 六节报告(采样健康/基线覆盖/决策
+> 统计/紧张时段画像/偏离度外推/自动三档结论建议)——
+> `Get-Content .\watch_hrm81_ema.py -Raw | ssh root@47.236.61.117
+> "docker exec -i zhuxiang-backend-1 python -"`
+> 判据同 §二-4: amber 占比 ≤5% 可评估转 on / 5-30% 继续观察 /
+> >30% 或 red 暂缓。
 
 ## 四、开启后验证(四项)
 

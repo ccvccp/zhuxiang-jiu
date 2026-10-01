@@ -34,8 +34,9 @@ from repositories.backend import get_in_memory_store, is_redis_mode
 
 logger = logging.getLogger(__name__)
 
-# 决策留痕轮数(防无限膨胀, 同 IBMS HISTORY_KEEP 惯例)
-DECISIONS_KEEP = 50
+# 决策留痕轮数(300s 周期下 600 轮≈2 天——观察期监控统计窗口,
+# ~300KB 小机可承受; 同 IBMS HISTORY_KEEP 防膨胀惯例)
+DECISIONS_KEEP = 600
 # 水位缓存 TTL 秒(acquire_slot 高频查询不打采集端点)
 LEVEL_CACHE_TTL = 60
 # 熔断线: on 模式动作后水位仍 red 的连续轮数(方案 §五)
