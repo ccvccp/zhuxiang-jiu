@@ -1,0 +1,352 @@
+<!--
+    48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
+    页面: xiaozhu-dashboard.html(配套脚本 js/xiaozhu-dashboard.js)
+    依赖: css/style.css(主题变量) / 后端 48号 xiaozhu_routes
+    后端: 默认 http://localhost:8000(实机直达 http://127.0.0.2:8000)
+    数据源: GET /api/xiaozhu/dashboard(七区块聚合, 手动刷新;
+            X-Role: admin)
+    区块: ①使用总览(会话/指令量/直达率/语音占比)
+          ②指令命中(action 排行+兜底率) ③高敏操作台账
+          ④积分账本(发放/兑换/余额) ⑤共创队列(审核+失败聚类)
+          ⑥治理桥接(等级直达率→46号公平性)
+          ⑦FC 分区(49号P4: 调用量/失败降级/预算消耗/
+            token 拒绝分布 + 红队复跑)
+    红线: 反语音霸权——不用语音不扣分; 高敏不可纯语音;
+          FC 防御不在模型层终止
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>48号·小竹语音中枢看板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#5b8a72,#3d6650);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #3d6650;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-btn.small{padding:3px 10px;font-size:11px}
+    .dash-btn.approve{background:#2f9e44}
+    .dash-btn.reject{background:#c0392b}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-info{background:#efe;border:1px solid #9c9;color:#393;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:8px}
+    .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
+        padding:8px 10px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .v{font-size:17px;font-weight:600}
+    .ov-cell .v.red{color:#c0392b}
+    .ov-cell .v.green{color:#2f9e44}
+    .ov-cell .v.blue{color:#24619c}
+    .ov-cell .v.yellow{color:#a37400}
+    .ov-cell .v.gray{color:#6b7280}
+    table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
+    .dash-table th{text-align:left;padding:6px 8px;background:
+        var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
+        var(--color-border,#ddd);white-space:nowrap}
+    .dash-table td{padding:5px 8px;border-bottom:1px solid
+        var(--color-border,#eee);vertical-align:top}
+    .kind-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600;background:#eef3fb;color:#24619c}
+    .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
+        padding:8px 12px;border-radius:5px;margin-bottom:14px;
+        font-size:11px}
+    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    .sig-chip{display:inline-block;padding:2px 8px;border-radius:9px;
+        font-size:11px;margin:2px;background:#f0f0f0;color:#555}
+    .zone-error{color:#c0392b;font-size:12px;padding:8px}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>48号·小竹语音中枢看板</h1>
+    <p>感知 · 认知 · 执行 · 进化 · 治理（P0-P4 全量 + 49号P4 FC 分区）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="http://localhost:8000"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
+                <button class="dash-btn ghost" onclick="runFairnessBridge()">
+                    公平性桥接</button>
+                <button class="dash-btn ghost" onclick="runRedteam()">
+                    红队复跑</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div id="infoBar" class="dash-info"></div>
+            <div class="redline-bar">
+                ⚠️ 治理红线：语音仅<b>可选入口</b>（不用不扣分不降权）；高敏不可纯语音
+                （confirmToken 屏幕码）；积分独立账本（入信值走 45号 deposit 验真）；
+                共创只映射白名单 action；桥接无个人标识字段。
+            </div>
+        </div>
+    </div>
+
+    <!-- ① 使用总览 + ③ 高敏台账 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 使用总览（会话 / 指令量 / 直达率 / 语音占比）｜③ 高敏操作台账</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovUsage" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="usageNote"></div>
+                </div>
+                <div>
+                    <div id="ovConfirm" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="confirmNote"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ② 指令命中 + ④ 积分账本 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② 指令命中排行（兜底率=意图质量北斗星）｜④ 积分账本</h3></div>
+            <div style="display:grid;grid-template-columns:3fr 2fr;gap:16px">
+                <div>
+                    <div id="ovCommands" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="max-height:200px;overflow:auto;margin-top:8px">
+                        <table class="dash-table">
+                            <thead><tr>
+                                <th>#</th><th>action</th><th>命中</th>
+                            </tr></thead>
+                            <tbody id="cmdRanking"><tr><td colspan="3"
+                                class="dash-empty">暂无指令命中</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div>
+                    <div id="ovPoints" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="pointsChips"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑤ 共创队列 + ⑥ 治理桥接 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑤ 共创队列（审核 + 失败聚类）｜⑥ 治理桥接（等级直达率）</h3></div>
+            <div style="display:grid;grid-template-columns:3fr 2fr;gap:16px">
+                <div>
+                    <div id="ovCocreate" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="max-height:180px;overflow:auto;margin-top:8px">
+                        <table class="dash-table">
+                            <thead><tr>
+                                <th>cmdId</th><th>短语</th><th>action</th>
+                                <th>操作</th>
+                            </tr></thead>
+                            <tbody id="pendingList"><tr><td colspan="4"
+                                class="dash-empty">暂无待审共创指令</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="failureChips"></div>
+                </div>
+                <div>
+                    <div id="ovFairness" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="max-height:150px;overflow:auto;margin-top:8px">
+                        <table class="dash-table">
+                            <thead><tr>
+                                <th>分组</th><th>轮次</th><th>直达率</th>
+                            </tr></thead>
+                            <tbody id="fairnessList"><tr><td colspan="3"
+                                class="dash-empty">暂无等级分组</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="fairnessNote"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑦ FC 分区(49号P4 可信函数调用) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑦ FC 可信函数调用（49号P4：调用量 / 失败降级 / 预算消耗 / token 拒绝分布）</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovFc" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="fcNote"></div>
+                </div>
+                <div>
+                    <div style="max-height:200px;overflow:auto">
+                        <table class="dash-table">
+                            <thead><tr>
+                                <th>token 拒绝类型</th><th>计数</th>
+                            </tr></thead>
+                            <tbody id="rejectList"><tr><td colspan="2"
+                                class="dash-empty">暂无拒绝记录</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="fcToolChips"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑧ 支付安全观测(三期 L1-L3 shadow 观察期) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑧ 支付安全观测（三期 L1-L3：档位 / 拦截分布 / L3 提级 / shadow 放行 / 成单）</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovVoicepay" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="vpRules"></div>
+                </div>
+                <div>
+                    <div style="max-height:220px;overflow:auto">
+                        <table class="dash-table">
+                            <thead><tr>
+                                <th>时间</th><th>会员</th><th>决策</th>
+                                <th>L2分</th><th>L3</th><th>备注</th>
+                            </tr></thead>
+                            <tbody id="vpLog"><tr><td colspan="6"
+                                class="dash-empty">暂无风控留痕</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑨ 反馈评价(v2 A 👍/👎 落痕) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑨ 反馈评价（v2：👍/👎 落痕 / 负反馈 top intent / 最近负反馈轮）</h3></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                    <div id="ovFeedback" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888"
+                        id="feedbackNote"></div>
+                </div>
+                <div>
+                    <div style="max-height:220px;overflow:auto">
+                        <table class="dash-table">
+                            <thead><tr>
+                                <th>seq</th><th>intent</th><th>用户说</th>
+                                <th>小竹回</th><th>反馈时间</th>
+                            </tr></thead>
+                            <tbody id="negList"><tr><td colspan="5"
+                                class="dash-empty">暂无负反馈</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑩ ASR 误听自学习(v2 C 运营) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑩ ASR 误听自学习（词条运营：真机留痕 → 修正词 即时生效；builtin 不可删）</h3></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;align-items:center">
+                <input id="fixWrong" placeholder="误听词(如: 加入国五车)"
+                    style="padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;width:180px">
+                <span style="color:#888">→</span>
+                <input id="fixRight" placeholder="修正词(如: 加入购物车)"
+                    style="padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;width:180px">
+                <button onclick="addAsrFix()"
+                    style="padding:6px 14px;border:none;border-radius:5px;background:#355c44;color:#fff;font-size:12px;cursor:pointer">添加词条</button>
+                <span style="font-size:11px;color:#888">负反馈轮的"用户说"即 ASR 原文——肉眼断定误听后在此加词条</span>
+            </div>
+            <div style="max-height:240px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>误听词</th><th>修正词</th><th>命中</th>
+                        <th>来源</th><th>操作</th>
+                    </tr></thead>
+                    <tbody id="asrFixBody"><tr><td colspan="5"
+                        class="dash-empty">暂无词条</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑪ 学习进化(P3: 👎→队列→建议→采纳→词条生效) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑪ 学习进化（P3：👎 自动入队 →
+                AI 建议/人工判定 → 采纳即词条+热词双生效）</h3></div>
+            <div style="display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:11px;color:#888">
+                <span id="learnStats">加载中…</span>
+                <span id="learnLlmState"></span>
+                <select id="learnFilter" onchange="loadLearnQueue()"
+                    style="padding:4px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px">
+                    <option value="pending">待处理</option>
+                    <option value="adopted">已采纳</option>
+                    <option value="dismissed">已忽略</option>
+                    <option value="all">全部</option>
+                </select>
+            </div>
+            <div style="max-height:280px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>时间</th><th>用户说(ASR原文)</th><th>小竹理解</th>
+                        <th>回复摘要</th><th>AI建议/采纳</th><th>操作</th>
+                    </tr></thead>
+                    <tbody id="learnQueueBody"><tr><td colspan="6"
+                        class="dash-empty">暂无学习条目——用户点👎后自动入队</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⑫ 语音数据周报(P4) -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑫ 语音数据周报（P4：近 7 天聚合 · 周一自动站内信 ·
+                学习进化效果观测）</h3></div>
+            <div style="display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:11px;color:#888">
+                <button onclick="loadWeekly()"
+                    style="padding:5px 14px;border:none;border-radius:5px;background:#355c44;color:#fff;font-size:11px;cursor:pointer">生成周报</button>
+                <span id="weeklyMeta"></span>
+            </div>
+            <div id="weeklyBody" style="padding:0 14px 12px"><div class="dash-empty">点击"生成周报"查看近 7 天语音数据</div></div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
+        管理端 X-Role: admin · 计划: docs/48号_小竹智能语音中枢实施计划.md
+    </div>
+</div>
+
+<script src="js/auth.js"></script>
+<script src="js/xiaozhu-dashboard.js"></script>
+</body>
+</html>

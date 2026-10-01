@@ -22,11 +22,13 @@ export default defineConfig<'webpack5'>(async (merge, { command, mode }) => {
     defineConstants: {},
     copy: {
       // 站点手工资产随构建出包(2026-10-01 17:06 裸 dist 部署清掉
-      // 语音悬浮球/IP 情景卡等手工入口事故后迁入)——public/ 下资产
-      // 原样拷入 dist 根: 7 独立页面(xiaozhu-voice 语音主页/scene
-      // IP 情景/synapse/zjian/zyh/margin×2)+ js/voice-entry-widget
-      // (v35 悬浮球)+ js/scene-widget(IP 情景卡); 入口注入见
-      // src/index.html 模板。仅 H5 拷贝(weapp 包体 2MB 限不带)
+      // 语音唤醒/IP 情景卡等手工入口事故后迁入)——public/ 下资产
+      // 原样拷入 dist 根: 独立页面(xiaozhu-voice 语音主页/scene/
+      // synapse/zjian/zyh/margin×2/39号 login 族/活动族/module-test
+      // 等)+ js/voice-wake-widget(v92 语音入口)+ js/scene-widget
+      // (IP 情景卡)+ js/v72-variant(72号 变体渲染)+ 业务 JS 族
+      // + images/videos/docs 媒体; 入口注入见 src/index.html 模板
+      // (对齐事故前线上态 dist.bak-t79)。仅 H5(weapp 包体限不带)
       patterns: (process.env.TARO_ENV || 'h5') === 'h5'
         ? [{ from: 'public/',
             to: (process.env.TARO_OUTPUT_DIR || 'dist') + '/' }]

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<!--
+    39号·AI智能网站入口管理模块 v1.0 · AI 智能入口页
+    升级自原 login.html(保留会员密码/管理员两 Tab 与既有跳转口径)
+    新增: ①AI 预判(设备识别+推荐登录方式+问候) ②扫码登录 Tab(QR 轮询协议)
+          ③step_up 轻量二次层(风控自适应) ④设备指纹 JS(弱特征拼接)
+    后端: 39号 entry_routes(默认 http://localhost:8000)
+-->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 智能入口 · 登录 - 竹香酒管理平台</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .login-banner {
+            background: linear-gradient(135deg, #355c44, #4a7c59);
+            color: #fff; padding: 30px 0; text-align: center;
+        }
+        .login-banner h1 { font-size: 24px; margin: 0; }
+        .login-banner p { margin: 6px 0 0; opacity: .85; font-size: 13px; }
+
+        .login-section { padding: 28px 0 10px; }
+        .login-card {
+            background: var(--color-bg-card); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+            max-width: 420px; margin: 0 auto; padding: 26px 28px;
+        }
+        .login-tabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
+        .login-tab {
+            flex: 1; text-align: center; padding: 9px 0; font-size: 14px;
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            cursor: pointer; color: var(--color-text-light); transition: var(--transition);
+            background: var(--color-bg); min-width: 88px;
+        }
+        .login-tab.active {
+            background: var(--color-primary); color: #fff;
+            border-color: var(--color-primary); font-weight: 700;
+        }
+        .login-form { display: none; flex-direction: column; gap: 14px; }
+        .login-form.active { display: flex; }
+        .form-item label {
+            display: block; font-size: 12px; color: var(--color-text-light);
+            margin-bottom: 5px;
+        }
+        .form-item input {
+            width: 100%; box-sizing: border-box; padding: 9px 12px;
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            font-size: 14px; background: #fff;
+        }
+        .form-item input:focus { outline: none; border-color: var(--color-primary); }
+        .login-btn {
+            border: none; border-radius: var(--radius-sm); cursor: pointer;
+            padding: 11px 0; font-size: 14px; width: 100%;
+            background: var(--color-primary); color: #fff; transition: var(--transition);
+        }
+        .login-btn:hover { background: var(--color-primary-dark); }
+        .login-btn:disabled { opacity: .55; cursor: not-allowed; }
+        .login-error {
+            display: none; background: #fdecea; color: var(--color-danger);
+            border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
+            padding: 9px 12px; font-size: 13px; word-break: break-all;
+        }
+        .entry-greet {
+            display: none; background: #e8f4ec; color: #2e8b57;
+            border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
+            padding: 9px 12px; font-size: 13px; margin-bottom: 14px;
+        }
+        .login-tip {
+            font-size: 12px; color: var(--color-text-light); line-height: 1.8;
+            border-top: 1px dashed var(--color-border); padding-top: 12px; margin-top: 4px;
+        }
+        .login-tip code {
+            background: var(--color-bg); border: 1px solid var(--color-border);
+            border-radius: 3px; padding: 1px 5px; font-size: 11px;
+        }
+        .login-foot { padding: 18px 0 30px; text-align: center; }
+        .login-foot a { color: var(--color-primary); font-size: 13px; text-decoration: none; }
+
+        /* 扫码登录(39号) */
+        .qr-box { text-align: center; padding: 6px 0 2px; }
+        .qr-canvas {
+            border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+            background: #fff; padding: 8px; width: 168px; height: 168px;
+            box-sizing: border-box;
+        }
+        .qr-status { font-size: 13px; color: var(--color-text-light); margin-top: 10px; line-height: 1.7; }
+        .qr-status b { color: var(--color-primary); }
+        .qr-actions { display: flex; gap: 8px; margin-top: 10px; }
+        .qr-actions button {
+            flex: 1; border: 1px solid var(--color-border); background: #fff;
+            color: var(--color-text-light); border-radius: var(--radius-sm);
+            padding: 7px 0; font-size: 12px; cursor: pointer;
+        }
+        .qr-actions button:hover { border-color: var(--color-primary); color: var(--color-primary); }
+    </style>
+</head>
+<body>
+    <header class="login-banner">
+        <div class="container">
+            <h1>竹香酒 · AI 智能入口</h1>
+            <p>39号模块 · AI 识别设备与风险(低风险无感放行 / 中风险轻量二次) · 扫码 / 密码 / 短信多通道</p>
+        </div>
+    </header>
+
+    <main class="container login-section">
+        <div class="login-card">
+            <div class="entry-greet" id="greetBanner"></div>
+            <div class="login-tabs">
+                <div class="login-tab active" data-tab="member" onclick="switchTab('member')">👤 密码登录</div>
+                <div class="login-tab" data-tab="qr" onclick="switchTab('qr')">📱 扫码登录</div>
+                <div class="login-tab" data-tab="webauthn" id="waTab"
+                     style="display:none" onclick="switchTab('webauthn')">🫆 指纹登录</div>
+                <div class="login-tab" data-tab="admin" onclick="switchTab('admin')">🛡️ 管理员</div>
+            </div>
+            <div class="login-error" id="errorBanner"></div>
+
+            <!-- WebAuthn 指纹登录(39号 P2 真实轨, 平台认证器本地验证
+                 原始生物数据不上送; JS 检测可用才显示) -->
+            <div class="login-form" id="form-webauthn">
+                <div class="form-item" style="text-align:center">
+                    <div id="waStatus" style="font-size:13px;color:#888;line-height:1.7;margin-bottom:14px">
+                        用本机指纹 / 面容完成登录（平台认证器本地验证）<br>
+                        <small>本机未绑定时先在下方完成一次密码登录即可自动绑定</small>
+                    </div>
+                    <button type="button" class="login-btn" id="waLoginBtn"
+                            onclick="doWebauthnLogin(event)">🫆 触摸指纹登录</button>
+                </div>
+                <div id="waBindArea">
+                    <div class="form-item">
+                        <label>首次使用——先验证身份以绑定本机指纹</label>
+                    </div>
+                    <div class="form-item">
+                        <label>手机号</label>
+                        <input type="tel" id="wa-phone" placeholder="13800000002"
+                               pattern="1[3-9]\d{9}" title="请输入 11 位手机号">
+                    </div>
+                    <div class="form-item">
+                        <label>密码</label>
+                        <input type="password" id="wa-password" placeholder="请输入密码">
+                    </div>
+                    <button type="button" class="login-btn" id="waBindBtn"
+                            style="background:#fff;color:#4a7c59;border:1px solid #4a7c59"
+                            onclick="doWebauthnBind(event)">验证并绑定本机指纹</button>
+                </div>
+            </div>
+
+            <!-- 会员密码登录(39号统一入口端点: 风控自适应) -->
+            <form class="login-form active" id="form-member" onsubmit="doMemberLogin(event)">
+                <div class="form-item">
+                    <label>手机号</label>
+                    <input type="tel" id="m-phone" placeholder="13800000002" required
+                           pattern="1[3-9]\d{9}" title="请输入 11 位手机号">
+                </div>
+                <div class="form-item">
+                    <label>密码</label>
+                    <input type="password" id="m-password" placeholder="请输入密码" required>
+                </div>
+                <button type="submit" class="login-btn" id="m-submit">登 录</button>
+            </form>
+
+            <!-- 扫码登录(39号 QR 轮询协议) -->
+            <div class="login-form" id="form-qr">
+                <div class="qr-box">
+                    <canvas id="qrCanvas" class="qr-canvas" width="152" height="152"></canvas>
+                    <div class="qr-status" id="qrStatus">点击下方"生成二维码"，用<b>已登录的手机端</b>扫码确认</div>
+                    <div class="qr-actions">
+                        <button type="button" id="qrGen" onclick="qrStart()">生成二维码</button>
+                        <button type="button" id="qrCancel" onclick="qrCancel()" style="display:none;">取消</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 管理员登录表单(保持既有两段式) -->
+            <form class="login-form" id="form-admin" onsubmit="doAdminLogin(event)">
+                <div class="form-item">
+                    <label>管理员用户名</label>
+                    <input type="text" id="a-username" placeholder="admin" required>
+                </div>
+                <div class="form-item">
+                    <label>密码</label>
+                    <input type="password" id="a-password" placeholder="请输入管理员密码" required>
+                </div>
+                <div class="form-item">
+                    <label>动态口令（已开启 2FA 时填写，否则留空）</label>
+                    <input type="text" id="a-totp" placeholder="6 位数字（可选）" maxlength="6">
+                </div>
+                <div class="form-item">
+                    <label>绑定会员手机号（换发统一 JWT，留空则用用户名尝试）</label>
+                    <input type="tel" id="a-phone" placeholder="13800000002">
+                </div>
+                <button type="submit" class="login-btn" id="a-submit">管理员登录</button>
+            </form>
+
+            <div class="login-tip">
+                <b>说明</b>：39号 AI 智能入口——登录经 AI 风控自适应（常用设备直发令牌，
+                新设备/风险升高自动短信二次核验）；扫码登录用手机端已登录态确认，
+                60 秒一次性票据换发统一 JWT。本地演示账号：会员 <code>13800000001 / test123456</code>，
+                管理员角色会员 <code>13800000002 / test123456</code>。
+            </div>
+        </div>
+    </main>
+
+    <footer class="login-foot">
+        <a href="index.html">← 返回官网首页</a>
+    </footer>
+
+    <script src="js/auth.js"></script>
+    <script src="js/entry-login.js"></script>
+</body>
+</html>

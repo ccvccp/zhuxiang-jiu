@@ -28,8 +28,11 @@
   <body>
     <div id="app"></div>
     <!-- 站点手工资产入口(2026-10-01 裸 dist 部署清掉语音/IP 情景入口
-         事故后迁入构建流程: 资产本体在 public/, 经 config copy 出包) -->
+         事故后迁入构建流程: 资产本体在 public/, 经 config copy 出包;
+         注入清单对齐事故前线上态 dist.bak-t79: 语音唤醒 v92 +
+         IP 情景卡 + 72号 变体渲染) -->
     <script defer src="/js/scene-widget.js"></script>
-    <script defer src="/js/voice-entry-widget.js?v=35"></script>
+    <script defer src="/js/voice-wake-widget.js?v=92"></script>
+    <script defer src="/js/v72-variant.js?v=1"></script>
   </body>
 </html>
