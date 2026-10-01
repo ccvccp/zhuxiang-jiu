@@ -49,12 +49,26 @@ async def run_tests():
     repo = Xiaozhu48Repository()
     weekly = XiaozhuWeeklyService()
     client = TestClient(app)
+    # 46+1 后 compat 无 token 也剥 X-Role(管理面 403)
+    # ——改真实认证轨(72号P6 同款): register admin 取 Bearer
+    from services.auth_service import AuthService
+    _tok = (await AuthService().register(
+        phone="13800000999", password="test123456",
+        role="admin")).get("accessToken", "")
+    admin = {"Authorization": "Bearer " + _tok}
 
     # 造数据: 两轮语音(1 正常 cart.add + 1 asr_failed) + 👎 +
     # learn 词条命中
-    sid = (await svc.open_session(3001, "voice"))["sessionId"]
+    # feedback 端点 _require_member_strict——46+1 剥裸头后 401,
+    # 造数据同走 Bearer 轨: 注册会员, 会话归属用注入的真实
+    # memberId(与 feedback 归属校验一致)
+    _reg = await AuthService().register(
+        phone="13800000988", password="test123456")
+    mid = int(_reg["memberId"])
+    hm = {"Authorization": "Bearer " + _reg["accessToken"]}
+    sid = (await svc.open_session(mid, "voice"))["sessionId"]
     r = client.post(f"/api/xiaozhu/sessions/{sid}/voice",
-                    headers={"X-Member-Id": "3001"},
+                    headers=hm,
                     json={"textTranscript": "小竹，加入国五车",
                           "durationSec": 2.0, "streamBytes": 64000})
     j = r.json()
@@ -62,11 +76,11 @@ async def run_tests():
     client.post(
         f"/api/xiaozhu/sessions/{sid}/turns/{turn.get('turnId')}"
         "/feedback",
-        headers={"X-Member-Id": "3001"}, json={"rating": "down"})
+        headers=hm, json={"rating": "down"})
     # asr_failed 轮(空文本走守卫? 直接造: textTranscript=""),
     # 更直接: 转写失败轮由 handle_voice 空转写守卫产生
     client.post(f"/api/xiaozhu/sessions/{sid}/voice",
-                headers={"X-Member-Id": "3001"},
+                headers=hm,
                 json={"textTranscript": "#",
                       "durationSec": 1.0, "streamBytes": 32000})
     # learn 词条 + 命中
@@ -132,7 +146,7 @@ async def run_tests():
     # W4 HTTP 端点: 现算(不动快照) + snapshot=1
     before = await repo.load_weekly_snapshot()
     r = client.get("/api/xiaozhu/dashboard/voice-weekly",
-                   headers={"X-Role": "admin"})
+                   headers=admin)
     j = r.json()
     check("W4 现算端点",
           r.status_code == 200 and j["generated"] is True
@@ -142,7 +156,7 @@ async def run_tests():
     check("W4b 现算不动快照", before == after, "snapshot mutated")
     r = client.get(
         "/api/xiaozhu/dashboard/voice-weekly?snapshot=1",
-        headers={"X-Role": "admin"})
+        headers=admin)
     j = r.json()
     check("W4c snapshot=1 返回快照",
           r.status_code == 200 and j["generated"] is False

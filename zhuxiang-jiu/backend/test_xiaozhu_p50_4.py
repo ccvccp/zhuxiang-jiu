@@ -359,8 +359,20 @@ class TestEndpoints:
         from fastapi.testclient import TestClient
         from main import app
         client = TestClient(app)
-        admin = {"X-Role": "admin"}
-        h = {"X-Member-Id": "9701"}
+        # 46+1 后 compat 剥裸身份头 → 管理面 403/用户面 401
+        # ——改真实认证轨(72号P6 同款 Bearer; reset_all
+        # 之后注册免被清库)
+        from services.auth_service import AuthService
+        _areg = await AuthService().register(
+            phone="13800000999", password="test123456",
+            role="admin")
+        admin = {"Authorization":
+                 "Bearer " + _areg["accessToken"]}
+        _mreg = await AuthService().register(
+            phone="13800000988", password="test123456")
+        mid = int(_mreg["memberId"])
+        h = {"Authorization":
+             "Bearer " + _mreg["accessToken"]}
         # 攻击词(409——问答拒绝)
         resp = client.post(
             "/api/xiaozhu/voice50/qa",
@@ -380,12 +392,16 @@ class TestEndpoints:
         record("POST appeal 200",
                resp.status_code == 200
                and resp.json().get("slaHours") == 48)
-        # 非本人
+        # 非本人(第二会员 Bearer)
+        _o = await AuthService().register(
+            phone="13800000987", password="test123456")
+        other = {"Authorization":
+                 "Bearer " + _o["accessToken"]}
         resp = client.post(
             f"/api/xiaozhu/voice50/adjudications/"
             f"{adj_id}/appeal",
             json={"note": "别人的"},
-            headers={"X-Member-Id": "9999"})
+            headers=other)
         record("非本人 appeal 409",
                resp.status_code == 409)
         # 复核

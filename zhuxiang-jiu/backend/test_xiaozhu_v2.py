@@ -151,19 +151,37 @@ def run_http():
     from fastapi.testclient import TestClient
     from main import app
     client = TestClient(app)
-    H = {"X-Member-Id": str(MEMBER)}
-    HJ = {**H, "Content-Type": "application/json"}
 
+    # 46+1 后 compat 剥裸身份头 → 用户面 401/管理面 403——
+    # HTTP 段整体改真实认证轨(72号P6 同款 Bearer): 会话
+    # 归属=注册返回的 memberId(与服务层种数据一致)
     async def _prep():
         reset_store()
+        from services.auth_service import AuthService
+        reg = await AuthService().register(
+            phone="13800000988", password="test123456")
+        reg2 = await AuthService().register(
+            phone="13800000987", password="test123456")
+        areg = await AuthService().register(
+            phone="13800000999", password="test123456",
+            role="admin")
+        mid = int(reg["memberId"])
+        H = {"Authorization":
+             "Bearer " + reg["accessToken"]}
+        HJ = {**H, "Content-Type": "application/json"}
+        # 跨会员冒充者(第二会员 Bearer)
+        OTHER = {"Authorization":
+                 "Bearer " + reg2["accessToken"]}
+        ADMIN = {"Authorization":
+                 "Bearer " + areg["accessToken"]}
         from services.xiaozhu_service import XiaozhuService
         svc = XiaozhuService()
-        s = await svc.open_session(MEMBER, "text")
+        s = await svc.open_session(mid, "text")
         # 重播 builtin 种子(reset_store 清了误听表)
         await svc._fix_asr_mishear("加入国五车")
-        return s["sessionId"], svc
+        return s["sessionId"], H, HJ, OTHER, ADMIN
 
-    sid, svc = asyncio.run(_prep())
+    sid, H, HJ, OTHER, ADMIN = asyncio.run(_prep())
 
     # A/B 全链(HTTP)
     r = client.post(f"/api/xiaozhu/sessions/{sid}/text",
@@ -185,8 +203,7 @@ def run_http():
     r = client.post(
         f"/api/xiaozhu/sessions/{sid}/turns/{turn2['turnId']}"
         "/feedback", json={"rating": "up"},
-        headers={"X-Member-Id": str(MEMBER + 1),
-                 "Content-Type": "application/json"})
+        headers=OTHER)
     check("A HTTP: 跨会员 403", r.status_code == 403,
           f"{r.status_code}")
     # up → down 覆盖幂等
@@ -225,7 +242,7 @@ def run_http():
 
     # dashboard 反馈+误听区块
     r = client.get("/api/xiaozhu/dashboard",
-                   headers={"X-Role": "admin"})
+                   headers=ADMIN)
     zones = (r.json() or {}).get("zones") or {}
     fb = zones.get("feedback") or {}
     check("看板: feedback 区块计数",
@@ -240,7 +257,7 @@ def run_http():
                     json={"wrong": "甲词", "right": "乙词"})
     check("C HTTP: 无 admin 403", r.status_code == 403)
     # 添加
-    A = {"X-Role": "admin", "Content-Type": "application/json"}
+    A = {**ADMIN, "Content-Type": "application/json"}
     r = client.post("/api/xiaozhu/dashboard/asr-fixes",
                     json={"wrong": "芝华仕", "right": "竹香式"},
                     headers=A)
@@ -257,13 +274,13 @@ def run_http():
         "/api/xiaozhu/dashboard/asr-fixes?wrong="
         + __import__("urllib.parse", fromlist=["quote"]).quote(
             "加入国五车"),
-        headers={"X-Role": "admin"})
+        headers=ADMIN)
     check("C HTTP: builtin 删除 409", r.status_code == 409)
     # 动态删除成功
     r = client.request(
         "DELETE",
         "/api/xiaozhu/dashboard/asr-fixes?wrong=芝华仕",
-        headers={"X-Role": "admin"})
+        headers=ADMIN)
     check("C HTTP: 动态删除 200", r.status_code == 200)
 
 

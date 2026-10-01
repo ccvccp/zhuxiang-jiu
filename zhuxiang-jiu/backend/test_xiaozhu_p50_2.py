@@ -455,7 +455,14 @@ class TestEndpoints:
         from fastapi.testclient import TestClient
         from main import app
         client = TestClient(app)
-        admin = {"X-Role": "admin"}
+        # 46+1 后 compat 剥裸 X-Role(管理面 403)——改真实
+        # 认证轨(72号P6 同款 Bearer)
+        from services.auth_service import AuthService
+        _areg = await AuthService().register(
+            phone="13800000999", password="test123456",
+            role="admin")
+        admin = {"Authorization":
+                 "Bearer " + _areg["accessToken"]}
         # settle(空 body——无事件)
         resp = client.post(
             "/api/xiaozhu/voice50/settle",

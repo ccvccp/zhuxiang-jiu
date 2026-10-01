@@ -115,11 +115,18 @@ async def run_tests():
     from fastapi.testclient import TestClient
     from main import app
     client = TestClient(app)
+    # 46+1 安全修复后 compat 无 token 也剥 X-Role(管理面 403)
+    # ——改走真实认证轨(72号P6 同款): register admin 取 Bearer
+    from services.auth_service import AuthService
+    _tok = (await AuthService().register(
+        phone="13800000999", password="test123456",
+        role="admin")).get("accessToken", "")
+    admin = {"Authorization": "Bearer " + _tok}
     await repo.save_asr_fix("加入国五车", "加入购物车",
                             source="builtin")
     r = client.delete(
         "/api/xiaozhu/dashboard/asr-fixes?wrong=" + quote("哈酒"),
-        headers={"X-Role": "admin"})
+        headers=admin)
     body = r.json()
     check("D6 dialect 词条删除保护 409",
           r.status_code == 409 and "dialect" in str(
@@ -128,12 +135,12 @@ async def run_tests():
     r = client.delete(
         "/api/xiaozhu/dashboard/asr-fixes?wrong="
         + quote("加入国五车"),
-        headers={"X-Role": "admin"})
+        headers=admin)
     check("D6b builtin 词条删除保护仍 409",
           r.status_code == 409, f"code={r.status_code}")
     r = client.delete(
         "/api/xiaozhu/dashboard/asr-fixes?wrong=" + quote("运营词"),
-        headers={"X-Role": "admin"})
+        headers=admin)
     check("D6c manual 词条删除仍放行",
           r.status_code == 200, f"code={r.status_code}")
 

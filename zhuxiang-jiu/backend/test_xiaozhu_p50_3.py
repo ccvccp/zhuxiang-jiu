@@ -421,8 +421,19 @@ class TestEndpoints:
         from fastapi.testclient import TestClient
         from main import app
         client = TestClient(app)
-        admin = {"X-Role": "admin"}
-        h = {"X-Member-Id": "8901"}
+        # 46+1 后 compat 剥裸身份头 → 管理面 403/用户面 401
+        # ——改真实认证轨(72号P6 同款 Bearer; reset_all 后
+        # 注册, 会员零记录 → 计分/达标断言口径不变)
+        from services.auth_service import AuthService
+        _areg = await AuthService().register(
+            phone="13800000999", password="test123456",
+            role="admin")
+        admin = {"Authorization":
+                 "Bearer " + _areg["accessToken"]}
+        _mreg = await AuthService().register(
+            phone="13800000988", password="test123456")
+        h = {"Authorization":
+             "Bearer " + _mreg["accessToken"]}
         # evidence
         resp = client.post(
             "/api/xiaozhu/voice50/evidence",

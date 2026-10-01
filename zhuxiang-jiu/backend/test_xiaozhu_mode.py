@@ -309,9 +309,6 @@ async def run_http():
     import httpx
     from main import app
 
-    admin = {"X-Role": "admin"}
-    member = {"X-Member-Id": "1"}
-
     # 24 决策面请求(off 下全 409; 门控在装饰器层)
     def decision_requests():
         return [
@@ -376,6 +373,19 @@ async def run_http():
     with _EnvGuard("off"):
         from repositories.store import reset_store
         reset_store()
+        # 46+1 后 compat 无 token 也剥身份头 → 管理面 403/
+        # 用户面 401——带头请求改真实认证轨(72号P6 同款
+        # Bearer; 须在 reset_store 后注册, 免被清库)
+        from services.auth_service import AuthService
+        _areg = await AuthService().register(
+            phone="13800000999", password="test123456",
+            role="admin")
+        admin = {"Authorization":
+                 "Bearer " + _areg["accessToken"]}
+        _mreg = await AuthService().register(
+            phone="13800000988", password="test123456")
+        member = {"Authorization":
+                  "Bearer " + _mreg["accessToken"]}
         _refresh_legacy({"override": "",
                          "paused": False})
         async with httpx.AsyncClient(
