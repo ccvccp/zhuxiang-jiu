@@ -71,6 +71,8 @@ from routes import (
     register_venue_routes,
     register_monitor_routes,
     register_maintenance_routes,
+    # 智能后台管理模型(74号·IBMS 巡检总线+LLM 诊断)
+    register_ibms_routes,
     # 用户认证模块
     register_auth_routes,
     # 推广码矩阵模块
@@ -266,6 +268,7 @@ register_admin_routes(app)
 register_venue_routes(app)
 register_monitor_routes(app)
 register_maintenance_routes(app)
+register_ibms_routes(app)
 register_auth_routes(app)
 register_promotion_routes(app)
 register_pocket_routes(app)
@@ -529,6 +532,11 @@ async def _on_startup():
     # (HELP_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
     from services.help_scheduler import start_guard_loop as start_help_guard
     start_help_guard()
+    # 智能后台管理模型(74号·IBMS): 巡检总线定时编排
+    # (IBMS_PATROL_AUTO=off 可关闭, 默认 off——与 IBMS_PATROL_MODE
+    #  双闸: 调度挂载+MODE 门槛, 分段铁律见 ibms_patrol_scheduler)
+    from services.ibms_patrol_scheduler import start_scheduler as start_ibms_patrol
+    start_ibms_patrol()
     # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
     from services.blogger_scheduler import (
         start_radar_scheduler as start_blogger_radar,

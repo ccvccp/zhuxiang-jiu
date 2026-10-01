@@ -48,7 +48,7 @@ DEGRADED_THRESHOLD = 3
 
 # 信号分组展示名(面板/站内信分组渲染)
 SIGNAL_NAMES = {"redis": "Redis 体检", "intel": "情报订阅",
-                "scheduler": "调度器"}
+                "scheduler": "调度器", "ibms": "智能后台巡检(74号)"}
 
 
 class SecurityAlertService:
@@ -170,6 +170,33 @@ class SecurityAlertService:
         alerts, collected_at = await self._collect_redis_alerts()
         return await self._dispatch(alerts, force,
                                      collected_at=collected_at)
+
+    async def notify_ibms_alerts(self, results: list,
+                                 force: bool = False) -> dict:
+        """74号 IBMS 巡检告警触达(2026-10-01 告警闭环接线)
+
+        巡检总线(ibms_patrol_service.run_patrol)产出的非 PASS 项 →
+        alerts 格式(signal="ibms") → 共享 _dispatch(过滤/去重/聚合/
+        触达全套继承)。WARN 不触达(ALERT_LEVELS=critical/warn——
+        warn 级才进; 巡检三态映射: FAIL→critical / WARN→warn)。
+
+        Args:
+            results: run_patrol 的 results 列表
+                     [{name, state: PASS|WARN|FAIL, level, rule, message}]
+            force: 跳过 24h 去重(手动巡检可传)
+        """
+        alerts = []
+        for r in results or []:
+            state = str(r.get("state") or "").upper()
+            if state == "PASS":
+                continue
+            alerts.append({
+                "signal": "ibms",
+                "level": ("critical" if state == "FAIL" else "warn"),
+                "rule": str(r.get("rule") or r.get("name") or "ibms"),
+                "message": str(r.get("message") or "")[:200],
+            })
+        return await self._dispatch(alerts, force)
 
     # --------------------------------------------------------
     # 共享分发(过滤→去重→聚合单封→触达)
