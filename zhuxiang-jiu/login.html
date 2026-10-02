@@ -50,11 +50,15 @@
         }
         .form-item input:focus { outline: none; border-color: var(--color-primary); }
         /* 18 岁合规声明勾选框(注册页签): 排除文本框统一样式
-         * (width:100%/padding 会把 checkbox 撑成空盒, 勾选态不可见) */
+         * (width:100%/padding 会把 checkbox 撑成空盒, 勾选态不可见);
+         * 18px 触屏友好, label 整行可点(移动端大热区) */
         .form-item input[type="checkbox"] {
-            width: 16px; height: 16px; margin: 0; padding: 0;
+            width: 18px; height: 18px; margin: 0; padding: 0;
             flex: none; cursor: pointer;
             accent-color: var(--color-primary);
+        }
+        .form-item.adult-row label {
+            flex: 1; cursor: pointer; -webkit-tap-highlight-color: transparent;
         }
         .login-btn {
             border: none; border-radius: var(--radius-sm); cursor: pointer;
@@ -190,9 +194,9 @@
                     <label>出生日期（可选，用于成年硬校验）</label>
                     <input type="date" id="r-birthdate">
                 </div>
-                <div class="form-item" style="display:flex;align-items:center;gap:8px;">
+                <div class="form-item adult-row" style="display:flex;align-items:center;gap:8px;">
                     <input type="checkbox" id="r-adult" required>
-                    <label for="r-adult" style="margin:0;cursor:pointer;">我确认已年满 18 周岁（酒类商品合规要求）</label>
+                    <label for="r-adult">我确认已年满 18 周岁（酒类商品合规要求）</label>
                 </div>
                 <button type="submit" class="login-btn" id="r-submit">注 册</button>
                 <div style="text-align:center;font-size:13px;color:#888;">
