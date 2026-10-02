@@ -74,6 +74,23 @@ var Entry = {
         return body.data || {};
     },
 
+    /* ---------- 会员注册(公开; 注册即登录, 后端直发双令牌) ---------- */
+    register: async function (payload) {
+        var resp = await fetch(this.api() + '/api/entry/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        var body = await resp.json().catch(function () { return {}; });
+        if (!resp.ok) {
+            /* 全局异常格式 {"success":false,"error":msg}(core/errors) */
+            return { success: false,
+                     error: (body || {}).error
+                            || (body || {}).detail || resp.status };
+        }
+        return body.data || {};
+    },
+
     /* 角色落地数据(§2.5: 连登激励+角色 chips——登录成功后消费;
      * 携带 accessToken(Bearer——生产 strict 下 landing 个性化
      * streak 数据按已登录口径; 白名单兜底公开); 拉取失败返回
@@ -286,6 +303,32 @@ async function doMemberLogin(e) {
         return;
     }
     showError('登录失败: ' + (r.error || '未知错误'));
+}
+
+/* ---------- 会员注册(注册即登录, 复用登录后分流) ---------- */
+async function doRegister(e) {
+    e.preventDefault();
+    hideError();
+    var btn = document.getElementById('r-submit');
+    btn.disabled = true; btn.textContent = '注册中…';
+    var payload = {
+        phone: document.getElementById('r-phone').value.trim(),
+        password: document.getElementById('r-password').value,
+        nickname: document.getElementById('r-nickname').value.trim(),
+        birthdate: document.getElementById('r-birthdate').value,
+        ageConfirmed: document.getElementById('r-adult').checked,
+    };
+    var r = await Entry.register(payload);
+    if (r.success && r.accessToken) {
+        btn.textContent = '注册成功 ✓';
+        /* 注册即登录: 服务层直发双令牌, 会员角色直接走 §2.5 落地分流 */
+        entryAfterLogin(
+            { accessToken: r.accessToken, refreshToken: r.refreshToken,
+              expiresIn: r.expiresIn }, r.memberId, 'member');
+        return;
+    }
+    btn.disabled = false; btn.textContent = '注 册';
+    showError('注册失败: ' + (r.error || '请检查填写内容'));
 }
 
 /* ---------- 扫码登录 ---------- */

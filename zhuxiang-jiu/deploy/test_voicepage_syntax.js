@@ -3,8 +3,20 @@
 var fs = require("fs");
 var cp = require("child_process");
 
-var src = fs.readFileSync(
-  "d:/网站架构设计/zhuxiang-jiu/backend/xiaozhu-voice.html", "utf8");
+/* 765cc6e 资产迁移(2026-10-01): 语音页 backend/ → taro-app/public/,
+ * 新位置优先, 旧位置兜底(混合检出环境) */
+function findVoicePage() {
+  var cands = [
+    "d:/网站架构设计/taro-app/public/xiaozhu-voice.html",
+    "d:/网站架构设计/zhuxiang-jiu/backend/xiaozhu-voice.html",
+  ];
+  for (var i = 0; i < cands.length; i++) {
+    try { fs.accessSync(cands[i]); return cands[i]; } catch (e) {}
+  }
+  console.error("VOICE PAGE NOT FOUND: " + cands.join(" | "));
+  process.exit(1);
+}
+var src = fs.readFileSync(findVoicePage(), "utf8");
 var blocks = [];
 var re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
 var m;

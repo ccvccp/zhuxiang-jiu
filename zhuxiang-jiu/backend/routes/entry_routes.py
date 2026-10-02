@@ -57,6 +57,18 @@ class LoginRequest(PydBaseModel):
                              description="设备弱特征指纹(客户端拼接)")
 
 
+class RegisterRequest(PydBaseModel):
+    phone: str = Field(..., min_length=11, max_length=11)
+    password: str = Field(..., min_length=6, max_length=64)
+    nickname: str = Field("", max_length=30,
+                          description="昵称(空则自动生成 竹香用户+尾号)")
+    birthdate: str = Field("", max_length=10,
+                           description="出生日期 YYYY-MM-DD(可选; "
+                                       "提供则硬校验已满 18 周岁)")
+    ageConfirmed: bool = Field(False,
+                               description="已满 18 周岁声明(酒类合规)")
+
+
 class StepUpRequest(PydBaseModel):
     memberId: int = Field(..., ge=1)
     phone: str = Field(..., min_length=11, max_length=11)
@@ -152,6 +164,27 @@ async def login(
             ip=x_forwarded_for.split(",")[0].strip(),
             phone=data.phone, password=data.password,
             sms_code=data.smsCode)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/entry/register", tags=["AI智能网站入口管理模块"])
+async def register(data: RegisterRequest):
+    """会员注册(公开) → 注册即登录(双令牌直发)
+
+    - role 服务端固定 member——公开面不可造管理员/运营角色
+    - 酒类合规(P0-1): birthdate 提供时硬校验成年(未成年 409);
+      ageConfirmed 为成年声明标记, 落库供下单年龄门复用
+    - 45号: 注册即开通信值(fail-soft, 服务层内嵌)
+    """
+    from services.auth_service import AuthService
+    try:
+        result = await AuthService().register(
+            phone=data.phone, password=data.password,
+            nickname=data.nickname or None,
+            birthdate=data.birthdate or None,
+            age_confirmed=data.ageConfirmed)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

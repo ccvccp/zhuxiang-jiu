@@ -4,7 +4,7 @@
    桩注入: AudioContext/BufferSource/fetch/rAF/计时可控 */
 var fs = require("fs");
 var src = fs.readFileSync(
-  "d:/网站架构设计/zhuxiang-jiu/backend/xiaozhu-voice.html", "utf8");
+  "d:/网站架构设计/taro-app/public/xiaozhu-voice.html", "utf8");
 
 function extractFn(name) {
   var m = src.match(new RegExp(

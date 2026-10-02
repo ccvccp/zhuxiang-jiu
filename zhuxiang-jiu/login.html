@@ -108,6 +108,7 @@
             <div class="entry-greet" id="greetBanner"></div>
             <div class="login-tabs">
                 <div class="login-tab active" data-tab="member" onclick="switchTab('member')">👤 密码登录</div>
+                <div class="login-tab" data-tab="reg" onclick="switchTab('reg')">✨ 注册会员</div>
                 <div class="login-tab" data-tab="qr" onclick="switchTab('qr')">📱 扫码登录</div>
                 <div class="login-tab" data-tab="webauthn" id="waTab"
                      style="display:none" onclick="switchTab('webauthn')">🫆 指纹登录</div>
@@ -157,6 +158,40 @@
                     <input type="password" id="m-password" placeholder="请输入密码" required>
                 </div>
                 <button type="submit" class="login-btn" id="m-submit">登 录</button>
+                <div style="text-align:center;font-size:13px;color:#4a7c59;">
+                    还没有账号？<a href="javascript:void(0)" onclick="switchTab('reg')"
+                        style="color:#4a7c59;font-weight:bold;">立即注册</a>
+                </div>
+            </form>
+
+            <!-- 会员注册(公开注册面: 注册即登录, 酒类合规 18 岁声明) -->
+            <form class="login-form" id="form-reg" onsubmit="doRegister(event)">
+                <div class="form-item">
+                    <label>手机号</label>
+                    <input type="tel" id="r-phone" placeholder="请输入 11 位手机号" required
+                           pattern="1[3-9]\d{9}" title="请输入 11 位手机号">
+                </div>
+                <div class="form-item">
+                    <label>设置密码</label>
+                    <input type="password" id="r-password" placeholder="至少 6 位" required minlength="6">
+                </div>
+                <div class="form-item">
+                    <label>昵称（可选）</label>
+                    <input type="text" id="r-nickname" maxlength="30" placeholder="不填自动生成">
+                </div>
+                <div class="form-item">
+                    <label>出生日期（可选，用于成年硬校验）</label>
+                    <input type="date" id="r-birthdate">
+                </div>
+                <div class="form-item" style="display:flex;align-items:center;gap:8px;">
+                    <input type="checkbox" id="r-adult" required style="width:auto;margin:0;">
+                    <label for="r-adult" style="margin:0;cursor:pointer;">我确认已年满 18 周岁（酒类商品合规要求）</label>
+                </div>
+                <button type="submit" class="login-btn" id="r-submit">注 册</button>
+                <div style="text-align:center;font-size:13px;color:#888;">
+                    注册即登录 · 已有账号 <a href="javascript:void(0)" onclick="switchTab('member')"
+                        style="color:#4a7c59;font-weight:bold;">去登录</a>
+                </div>
             </form>
 
             <!-- 扫码登录(39号 QR 轮询协议) -->

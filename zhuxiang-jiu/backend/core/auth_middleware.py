@@ -68,10 +68,11 @@ PUBLIC_EXACT = {
     "/api/member/login/bonus",
     # 后台管理登录
     "/api/admin/login",
-    # AI智能网站入口管理模块(39号): 入口预判/统一登录/step_up/
-    # 扫码全协议/注册归并(登录前的入口面, 全公开)
+    # AI智能网站入口管理模块(39号): 入口预判/统一登录/注册/
+    # step_up/扫码全协议/注册归并(登录注册前的入口面, 全公开)
     "/api/entry/recognize",
     "/api/entry/login",
+    "/api/entry/register",
     "/api/entry/step-up/verify",
     "/api/entry/qr/create",
     "/api/entry/qr/scan",

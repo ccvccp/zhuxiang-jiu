@@ -33,7 +33,7 @@ SITE = Path(__file__).resolve().parent.parent          # zhuxiang-jiu 正源
 PUBLIC = SITE.parent / "taro-app" / "public"            # 构建链镜像
 STAGING = SITE / "deploy" / "staging" / "official-site"  # scp 文件集
 
-V = "20261003"  # 缓存版本号(首页创新布局批次: 公告条/金刚区/会员卡/榜单/信任条)
+V = "20261004"  # 缓存版本号(金刚区图片图标批次)
 
 # 部署页面(核心购物/资讯闭环 + 同盟商城入口)
 PAGES = [
@@ -50,12 +50,18 @@ PAGES = [
     "alliance-mall.html",      # 37号同盟商城 C 端购物页(2026-10-02 新增)
 ]
 
-# 资产(三件套 + 同盟页专属 js)
+# 资产(三件套 + 同盟页专属 js + 登录注册页 js)
 ASSETS = [
     "css/style.css",
     "js/main.js",
     "js/alliance-dashboard.js",
     "js/chat-widget.js",
+    "js/entry-login.js",
+]
+
+# 二进制资产(整目录镜像: 金刚区图标等生成图片)
+BINARY_DIRS = [
+    "images/icons",
 ]
 
 
@@ -123,6 +129,21 @@ def main():
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(text, encoding="utf-8", newline="\n")
         print(f"  [产] {rel}  -> staging + public")
+
+    # ---- 二进制目录同步(图片等, 原样字节拷贝) ----
+    import shutil as _sh
+    for bdir in BINARY_DIRS:
+        src = SITE / bdir
+        if not src.is_dir():
+            print(f"  [warn] {bdir}/ 不存在——跳过")
+            continue
+        for dest_root in (STAGING / bdir, PUBLIC / bdir):
+            dest_root.mkdir(parents=True, exist_ok=True)
+            for f in src.iterdir():
+                if f.is_file():
+                    _sh.copy2(f, dest_root / f.name)
+        n = len(list(src.iterdir()))
+        print(f"  [产] {bdir}/ {n} 文件 -> staging + public")
 
     print("=" * 60)
     print(f"完成: staging={STAGING}")
