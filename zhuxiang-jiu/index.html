@@ -56,6 +56,21 @@
         </div>
     </section>
 
+    <!-- 同盟臻选商城(37号同盟商品公开浏览, 空/失败时区块整体隐藏) -->
+    <section class="section" style="background:#f8f6f1;display:none;" id="allianceSection">
+        <div class="container">
+            <div class="section-title">
+                <h2>同盟<span>臻选</span></h2>
+                <p>三源好物 · 溯源甄选 · 同盟商城</p>
+                <div class="deco-line"></div>
+            </div>
+            <div class="product-grid" id="allianceProducts"></div>
+            <div style="text-align:center;margin-top:40px;">
+                <a href="ai-alliance-dashboard.html" class="btn btn-outline btn-lg">进入同盟商城 →</a>
+            </div>
+        </div>
+    </section>
+
     <!-- 品牌故事 -->
     <section class="brand-story">
         <div class="container">
@@ -130,6 +145,44 @@
                     <div class="news-desc">${n.desc}</div>
                 </div>
             </div>`).join('');
+
+        // 同盟臻选商城（37号公开商品实时渲染；空/异常区块隐藏防空白）
+        (async () => {
+            const CAT = {
+                water: ['💧', '好水'], tea: ['🍵', '好茶'], wine: ['🍶', '好酒'],
+                dish: ['🍲', '好菜'], meat: ['🍖', '肉类'], fish: ['🐟', '鱼类'],
+            };
+            try {
+                const r = await fetch('/api/alliance/products?status=active');
+                if (!r.ok) return;
+                const b = await r.json();
+                const items = (b.data || []).slice(0, 8);
+                if (!items.length) return;
+                document.getElementById('allianceProducts').innerHTML = items.map(p => {
+                    const cat = CAT[p.category] || ['🎁', '臻选'];
+                    const traced = p.trace && p.trace.traceVerified;
+                    const merchant = p.merchantName || ('商户 #' + p.merchantId);
+                    const desc = (p.description || '').slice(0, 40);
+                    return `
+                    <div class="product-card alliance-card" onclick="location.href='ai-alliance-dashboard.html'">
+                        <div class="product-img alliance-img">
+                            ${traced ? '<span class="product-tag featured">✓ 已溯源</span>' : ''}
+                            <span class="alliance-cat-icon">${cat[0]}</span>
+                        </div>
+                        <div class="product-info">
+                            <div class="product-category">${merchant} · ${cat[1]}</div>
+                            <div class="product-name">${p.name}</div>
+                            <div class="product-desc">${desc}</div>
+                            <div class="product-bottom">
+                                <div class="product-price">¥${p.price}<small> · 余 ${p.stock} 件</small></div>
+                                <span class="alliance-sku">${p.sku}</span>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+                document.getElementById('allianceSection').style.display = '';
+            } catch (e) { /* 静默隐藏 */ }
+        })();
     </script>
 </body>
 </html>

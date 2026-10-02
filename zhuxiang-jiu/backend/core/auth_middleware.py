@@ -152,6 +152,9 @@ PUBLIC_GET_PREFIXES = (
     "/api/activity/lottery/",     # 奖品池概率公示 GET(合规要求:
                                     # §3.3.3 游客可查; POST /draw
                                     # 抽奖不受 GET 前缀影响)
+    "/api/alliance/products",     # 37号同盟商品公开浏览 GET(首页同盟
+                                    # 臻选商城区块游客可见; POST 上下架
+                                    # 决策面仍鉴权——仅 GET 公开)
 )
 
 # 公开 GET 正则(动态路径, 无法用前缀表达)

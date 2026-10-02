@@ -357,11 +357,16 @@ async def list_products(
     status: str = Query(None, description="状态筛选(active 默认公开)"),
     merchantId: int = Query(None, description="商户筛选"),
 ):
-    """同盟商品列表(公开浏览)"""
+    """同盟商品列表(公开浏览; 补商户名联查供首页臻选展示)"""
     try:
         result = await _service.list_products(
             merchant_id=merchantId, category=category,
             status=status or "active")
+        # 公开展示补商户名(仅此公开端点联查, 管理面/服务层口径不变)
+        for p in result:
+            m = await _service.repo.get_merchant(
+                p.get("merchantId"))
+            p["merchantName"] = (m or {}).get("shopName", "")
         return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)
