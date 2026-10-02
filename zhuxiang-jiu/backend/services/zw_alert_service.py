@@ -69,8 +69,10 @@ class ZwAlertService:
     async def _consumer_alerts(self) -> list[dict]:
         """消费者: 延误致歉+券补偿 / 签收后品鉴内容推送建议"""
         alerts = []
+        # 2026-10-03 修复: delay_warnings 返回键为 warnings(原取
+        # "delays" 恒空——消费者延误致歉告警永不生成)
         delays = (await self.track.delay_warnings(limit=100)) \
-            .get("delays", [])
+            .get("warnings", [])
         for d in delays[:5]:          # 最多 5 条防刷屏
             waybill = d.get("waybillNo", "")
             alerts.append(await self._save_alert(

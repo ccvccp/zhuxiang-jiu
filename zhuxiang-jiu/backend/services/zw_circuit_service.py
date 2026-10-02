@@ -77,8 +77,14 @@ class ZwCircuitService:
             if status in ("booked", "picked", "transporting",
                           "delivering"):
                 s["nonFinal"] += 1
+            # 中转时效口径: 已签收单的下单→签收时长(2026-10-03 修复:
+            # 原实现在"在途单"里找签收时间——在途单永无签收时间,
+            # durations 恒空致时效指标永不参与熔断判定; 且字段
+            # 兼容 signedTime——状态机真实签收写的是 signedTime)
+            if status == "signed":
                 created = str(o.get("createdAt", "") or "")
-                signed_at = str(o.get("signedAt", "") or "")
+                signed_at = str(o.get("signedAt", "")
+                                or o.get("signedTime", "") or "")
                 if created and signed_at:
                     from datetime import datetime
                     try:
