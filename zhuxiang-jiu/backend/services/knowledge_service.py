@@ -1804,6 +1804,56 @@ class KnowledgeService:
                 "totalChunks": len(chunks), "ingested": ingested,
                 "skipped": skipped, "entryIds": entry_ids}
 
+    async def auto_publish_crawl_entries(
+            self, min_score: int = 80) -> dict:
+        """自动抓取通道发布闭环(2026-10-03: D-16 渐进信任死锁修复)
+
+        背景: 渐进信任自动过审要求来源"最近5条人工审核全过"连胜
+        ——爬虫来源永远无人审核, 自动过审永不满足, crawl/document
+        条目全部滞留候选池(生产实证: 288 条中仅 36 manual 可检索)。
+
+        本方法对 crawl/document 来源候选条目走完整治理流程:
+            - pending 且合规分>=80(高于人工线 70, 与 D-16 自动线
+              一致)→ review→publish(合规筛查不降级)
+            - approved(已过审, 渐进信任或人工推进)→ 直接 publish
+        分数不足留候选池待人工。
+
+        Returns:
+            {"published": n, "skipped": n, "publishedIds": [..]}
+        """
+        published, skipped = 0, 0
+        published_ids: list[int] = []
+        entries = await self.repo.list_entries(limit=SEARCH_SCAN_LIMIT)
+        for e in entries:
+            if e["status"] == ENTRY_STATUS_APPROVED:
+                if e.get("source") not in (SOURCE_CRAWL,
+                                           SOURCE_DOCUMENT):
+                    continue
+            elif e["status"] == ENTRY_STATUS_PENDING:
+                if e.get("source") not in (SOURCE_CRAWL,
+                                           SOURCE_DOCUMENT):
+                    continue
+                if int(e.get("complianceScore", 0)) < min_score:
+                    skipped += 1
+                    continue
+            else:
+                continue
+            try:
+                if e["status"] == ENTRY_STATUS_PENDING:
+                    await self.review_entry(e["id"], approve=True,
+                                            reviewer_id=0)
+                await self.publish_entry(e["id"], publisher_id=0)
+            except ValueError:
+                skipped += 1
+                continue
+            published += 1
+            published_ids.append(e["id"])
+        result = {"published": published, "skipped": skipped,
+                  "publishedIds": published_ids}
+        logger.info("抓取通道自动发布: %s 条(留候选 %s)",
+                    published, skipped)
+        return result
+
     # llm 轨抓取清洗 prompt: 去噪保真(不改写事实)
     _CRAWL_CLEAN_PROMPT = (
         "你是网页正文提取助手。给定网页粗文本, 请提取其中的实质"

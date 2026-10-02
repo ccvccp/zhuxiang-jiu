@@ -115,6 +115,42 @@ async def main():
     record("重复内容幂等不膨胀",
            st["lastIngested"] == 0 and st["lastSkipped"] >= 1, str(st))
 
+    # 6. 自动发布(D-16 死锁修复): 合规分 100 的 crawl pending
+    #    条目 scan 后走 review→publish 可被检索
+    s4 = await svc.add_crawl_source(
+        "酒文化史", "https://example.com/winehist", ["wine"])
+    _FAKE_PAGES[s4["id"]] = (
+        "酒文化与礼仪",
+        "中国酒文化源远流长, 白酒在祭祀、宴饮中承载礼仪与情感, "
+        "适量品鉴讲究观色、闻香、入口三步。")
+    st = await sched.run_crawl_scan()
+    hits = await svc.search(query="白酒 宴饮 礼仪", top_k=5,
+                            record_hit=False)
+    record("自动发布-高分条目发布可检索",
+           st.get("lastPublished", 0) >= 1
+           and any("礼仪" in h["answer"] for h in hits),
+           f"published={st.get('lastPublished')} hits={len(hits)}")
+
+    # 7. 低分留候选: 含 1 个违禁词(合规分 70, <80)不自动发布
+    s5 = await svc.add_crawl_source(
+        "夸大宣传源", "https://example.com/hype", ["wine"])
+    _FAKE_PAGES[s5["id"]] = (
+        "夸大的酒品介绍",
+        "这是市面上最好的白酒, 工艺讲究, 适合宴请品鉴收藏。")
+    st = await sched.run_crawl_scan()
+    entries = await svc.repo.list_entries(limit=200)
+    hype = [e for e in entries
+            if e["status"] == "pending" and "夸大的酒品介绍" in e["question"]]
+    record("自动发布-低分条目留候选池",
+           len(hype) >= 1 and int(hype[0].get("complianceScore", 0)) < 80,
+           f"pending={len(hype)}")
+
+    # 8. 自动发布开关: off 时统计为 0
+    os.environ["KNOWLEDGE_CRAWL_AUTO_PUBLISH"] = "off"
+    record("自动发布-开关 off 关闭", not sched._auto_publish_enabled())
+    os.environ.pop("KNOWLEDGE_CRAWL_AUTO_PUBLISH")
+    record("自动发布-默认开启", sched._auto_publish_enabled())
+
     # 收尾
     sched.stop_scheduler()
     record("stop 后不在运行", not sched.scheduler_running())

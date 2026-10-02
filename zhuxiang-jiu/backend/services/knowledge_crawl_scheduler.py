@@ -69,6 +69,17 @@ def _provider() -> str:
         "KNOWLEDGE_CRAWL_LLM", "off").strip().lower() == "on" else "rule"
 
 
+def _auto_publish_enabled() -> bool:
+    """抓取通道自动发布开关(KNOWLEDGE_CRAWL_AUTO_PUBLISH=off 关闭)
+
+    开启时每轮抓取末尾把合规分>=80 的 crawl/document pending
+    条目走 review→publish(D-16 渐进信任对无人审核的爬虫源死锁,
+    2026-10-03 生产实证抓取条目全部滞留候选池)。
+    """
+    return os.environ.get(
+        "KNOWLEDGE_CRAWL_AUTO_PUBLISH", "on").strip().lower() != "off"
+
+
 async def _load_stats() -> dict | None:
     if is_redis_mode():
         client = await get_redis_client()
@@ -115,6 +126,18 @@ async def run_crawl_scan() -> dict:
             await asyncio.sleep(_SOURCE_GAP_SECONDS)
 
     stats = await _load_stats() or {"runs": 0}
+    # 抓取通道自动发布(D-16 死锁修复): 合规分>=80 的 crawl/document
+    # pending 条目走 review→publish, 使抓取知识可被 RAG 检索
+    published = skipped_pub = 0
+    if _auto_publish_enabled():
+        try:
+            pub = await svc.auto_publish_crawl_entries()
+            published = pub.get("published", 0)
+            skipped_pub = pub.get("skipped", 0)
+            logger.info("knowledge_crawl_autopublish published=%s "
+                        "held=%s", published, skipped_pub)
+        except Exception as exc:
+            logger.warning("抓取通道自动发布异常(不影响抓取轮): %s", exc)
     stats = {
         "runs": int(stats.get("runs", 0)) + 1,
         "lastRunAt": ts(),
@@ -123,6 +146,8 @@ async def run_crawl_scan() -> dict:
         "lastSourceCount": len(active),
         "lastIngested": sum(r["ingested"] for r in results),
         "lastSkipped": sum(r["skipped"] for r in results),
+        "lastPublished": published,
+        "lastPublishHeld": skipped_pub,
         "lastResults": results[-20:],
         "updatedAt": datetime.now(UTC).isoformat(),
     }
