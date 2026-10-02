@@ -238,14 +238,20 @@ def _h264ize(mp4: Path) -> int:
        转标准竖屏后绿标恢复, 全自动闭环不再依赖人工点发布。
        cover 口径(2026-10-02 修正): 换版图 3:4 与 9:16 差 33%,
        直缩会横向压扁变形——scale 铺满+居中 crop 裁左右,
-       人物居中构图主体无损
+       人物居中构图主体无损。
+       ⚠ 2026-10-02 发布实证补充: xhs 平台「检测为高清视频」绿标
+       仅 ≥1080P 片出现——720x1280 触发「视频分辨率较低」黄色警告
+       (xhs_publish_1_filled.png 截图实证), 5 分钟绿标轮询必然 miss
+       (发布本身安全, bot 已同批校准警告特征); 高清根治=输出升
+       1080x1920(基准图 1344 宽>1080 原生满足, cover 上采样
+       1.071x)——本参数 2026-10-02 已切换, 下批出片生效
     同名覆盖, 返回转码后字节数"""
     import subprocess as sp
     tmp = mp4.with_suffix(".h264.mp4")
     r = sp.run([_ffmpeg_bin(), "-y", "-i", str(mp4),
-                "-vf", ("scale=720:1280:"
+                "-vf", ("scale=1080:1920:"
                         "force_original_aspect_ratio=increase,"
-                        "crop=720:1280"),  # cover: 等比铺满+居中裁
+                        "crop=1080:1920"),  # cover: 等比铺满+居中裁
                 "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                 "-pix_fmt", "yuv420p", "-c:a", "aac",
                 "-movflags", "+faststart", str(tmp)],

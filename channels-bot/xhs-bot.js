@@ -654,15 +654,22 @@ const XHS_MANAGE = 'https://creator.xiaohongshu.com/new/manage';
     // 3.5 转码完成等待(第 20 轮实证): 上传完成≠可发布——19 轮
     //     实证转码窗口期点「发布」被静默转存草稿; 「检测为高清
     //     视频」绿标 = 服务端转码完成特征, 出现后才允许点发布
+    //     2026-10-02 校准(本次发布实证): 绿标仅 ≥1080P 片出现——
+    //     720x1280 口径片永远显示「视频分辨率较低」黄色警告而非
+    //     绿标(截图 xhs_publish_1_filled.png 实证), 5 分钟轮询必然
+    //     false; 将分辨率警告纳入完成特征(平台已给出分析建议 =
+    //     处理完毕信号)。720 标准片在 5 分钟窗口后自动点发布安全
+    //     (published=true + 笔记管理已发布实证); 非标分辨率片仍走
+    //     19 轮转存草稿风险面——根治出片升 1080P 见 dh_batch 注释
     let transcoded = false;
     for (let i = 0; i < 60; i++) {
       const txt = await page.evaluate(
         () => (document.body.innerText || '').slice(0, 2000)
       ).catch(() => '');
-      if (/检测为高清视频|高清视频/.test(txt)) { transcoded = true; break; }
+      if (/检测为高清视频|高清视频|视频分辨率较低|分辨率较低/.test(txt)) { transcoded = true; break; }
       await sleep(5000);
     }
-    LOG('transcode signal(高清绿标): ' + transcoded);
+    LOG('transcode signal(高清绿标/分辨率警告): ' + transcoded);
     // 4. 点发布(第 20 轮全自动闭环定稿): 四大实证——
     //    · 底部操作栏(暂存离开/发布)整个在 closed shadow DOM 内:
     //      querySelectorAll/getComputedStyle 全不可达——16 轮
