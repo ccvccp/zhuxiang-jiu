@@ -803,6 +803,167 @@ input, textarea, select {
     white-space: nowrap;
 }
 
+/* 今日甄选倒计时(秒杀节奏徽章) */
+.alliance-count {
+    display: inline-block;
+    font-size: 13px;
+    color: #b0521f;
+    background: #fdf1e7;
+    border: 1px solid #f3d9c3;
+    border-radius: 999px;
+    padding: 4px 14px;
+    margin-top: 10px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 1px;
+}
+
+/* ---------- 首页创新布局(京东/小程序模式借鉴 2026-10) ---------- */
+
+/* 公告/活动条(顶部单点营销) */
+.notice-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: linear-gradient(90deg, #fdf6ec, #faeee6);
+    border-bottom: 1px solid #f3e3d3;
+    padding: 9px 16px;
+    font-size: 13px;
+    color: #8a5a2b;
+}
+.notice-bar .notice-icon { font-size: 15px; }
+.notice-bar .notice-text {
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    transition: opacity .25s;
+}
+.notice-bar .notice-link {
+    color: #b0521f;
+    font-weight: bold;
+    text-decoration: none;
+    white-space: nowrap;
+    font-size: 12px;
+}
+
+/* 会员权益卡(PLUS 式横幅) */
+.member-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    background: linear-gradient(120deg, #2f4f3e, #4a7c59 60%, #6b9a7c);
+    border-radius: 16px;
+    padding: 18px 24px;
+    color: #fff;
+    box-shadow: 0 8px 22px rgba(53, 92, 68, 0.28);
+}
+.member-banner .member-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+.member-banner .member-badge {
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    border-radius: 999px;
+    padding: 4px 14px;
+    font-size: 13px;
+    letter-spacing: 2px;
+    white-space: nowrap;
+}
+.member-banner .member-text {
+    font-size: 14px;
+    letter-spacing: 1px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.member-banner .btn-member {
+    background: #f5d78e;
+    color: #5a3d12;
+    font-weight: bold;
+    border-radius: 999px;
+    padding: 9px 22px;
+    font-size: 13px;
+    text-decoration: none;
+    white-space: nowrap;
+    letter-spacing: 1px;
+    transition: transform .2s, box-shadow .2s;
+}
+.member-banner .btn-member:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.2);
+}
+
+/* 热销榜角标(竹奕佳酿 TOP1-3) */
+.hot-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 5;
+    background: linear-gradient(135deg, #e8b04b, #d4882e);
+    color: #fff;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 10px 10px 10px 2px;
+    padding: 4px 10px;
+    box-shadow: 0 3px 8px rgba(212, 136, 46, 0.4);
+}
+.hot-badge-1 {
+    background: linear-gradient(135deg, #e86a4b, #c93a2e);
+    box-shadow: 0 3px 8px rgba(201, 58, 46, 0.45);
+}
+
+/* 信任条(四枚信任背书) */
+.trust-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+}
+.trust-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #faf9f6;
+    border: 1px solid #edeadf;
+    border-radius: 14px;
+    padding: 14px 16px;
+}
+.trust-item .t-ico {
+    flex: none;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: #eef3ea;
+    color: #4a7c59;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 17px;
+    font-weight: bold;
+}
+.trust-item b {
+    display: block;
+    font-size: 14px;
+    color: #2d3a32;
+}
+.trust-item small {
+    display: block;
+    font-size: 12px;
+    color: #97a49a;
+    margin-top: 2px;
+}
+
+@media (max-width: 768px) {
+    .trust-strip { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .trust-item { padding: 12px; }
+    .member-banner { flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px; }
+    .notice-bar { font-size: 12px; }
+    .alliance-count { font-size: 12px; padding: 3px 10px; }
+}
+
 /* ---------- 品牌故事区 ---------- */
 .brand-story {
     background: linear-gradient(135deg, #f8f6f0, #eef3e8);

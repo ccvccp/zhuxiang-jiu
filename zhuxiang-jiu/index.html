@@ -16,6 +16,13 @@
 <body>
     <div id="header"></div>
 
+    <!-- 公告/活动条(小程序 3 秒决策模式: 单点营销, 对接活动中心) -->
+    <div class="notice-bar" id="noticeBar" style="display:none;">
+        <span class="notice-icon">🎁</span>
+        <span class="notice-text" id="noticeText"></span>
+        <a href="activity.html" class="notice-link">活动中心 →</a>
+    </div>
+
     <!-- 主视觉 Banner -->
     <section class="hero">
         <div class="hero-bg"></div>
@@ -27,17 +34,30 @@
             <p>首创全竹发酵，创新定义中国竹香酒。取武夷山新鲜楠竹笋及全竹为原料，汲取徂徕山"竹溪六逸"富硒泉水，融汇现代生物科技与千年古法，滴滴醇香，醒酒快、无酒气、不头疼。</p>
             <div class="hero-buttons">
                 <a href="products.html" class="btn btn-gold btn-lg">探索竹奕系列</a>
-                <a href="news.html" class="btn btn-outline btn-lg" style="color:#fff;border-color:#fff;">品牌故事</a>
+                <a href="alliance-mall.html" class="btn btn-outline btn-lg" style="color:#fff;border-color:#fff;">甄选直达</a>
             </div>
             <!-- 酒类广告合规：健康警示语 -->
             <p style="margin-top:24px;color:rgba(255,255,255,0.75);font-size:12px;letter-spacing:1px;">⚠️ 过量饮酒有害健康 · 未成年人禁止购买和饮用酒类 · 饮酒后请勿驾车</p>
         </div>
     </section>
 
-    <!-- 服务入口 -->
+    <!-- 金刚区 8 宫格(京东模式: 小图标大间距, 逛/购/玩/服务四类动线) -->
     <section class="section">
         <div class="container">
             <div class="service-entries" id="serviceEntries"></div>
+        </div>
+    </section>
+
+    <!-- 会员权益卡(京东 PLUS 模式: 柔性转化, 对接会员体系/登录) -->
+    <section class="section" style="padding:0 0 24px;">
+        <div class="container">
+            <div class="member-banner" id="memberBanner">
+                <div class="member-info">
+                    <span class="member-badge">竹香会员</span>
+                    <span class="member-text" id="memberText">登录领新客礼遇 · 会员专享价</span>
+                </div>
+                <a href="login.html" class="btn-member" id="memberBtn">立即登录</a>
+            </div>
         </div>
     </section>
 
@@ -48,6 +68,7 @@
             <div class="section-title">
                 <h2>同盟<span>臻选</span></h2>
                 <p>三源好物 · 溯源甄选 · 同盟商城</p>
+                <span class="alliance-count" id="allianceCount" style="display:none;"></span>
                 <div class="deco-line"></div>
             </div>
             <div class="product-grid" id="allianceProducts"></div>
@@ -68,6 +89,18 @@
             <div class="product-grid" id="hotProducts"></div>
             <div style="text-align:center;margin-top:40px;">
                 <a href="products.html" class="btn btn-outline btn-lg">查看全部产品 →</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- 信任条(小程序模式: 信任背书前置, 对接溯源/竹鉴/客服体系) -->
+    <section class="section" style="background:#fff;padding:10px 0 56px;">
+        <div class="container">
+            <div class="trust-strip">
+                <div class="trust-item"><span class="t-ico">✓</span><div><b>批批溯源</b><small>每瓶可查批次码</small></div></div>
+                <div class="trust-item"><span class="t-ico">🛡</span><div><b>官方质检</b><small>竹鉴报告可验</small></div></div>
+                <div class="trust-item"><span class="t-ico">🚚</span><div><b>全国配送</b><small>正品全程护送</small></div></div>
+                <div class="trust-item"><span class="t-ico">♥</span><div><b>坏单包赔</b><small>破损秒退不扯皮</small></div></div>
             </div>
         </div>
     </section>
@@ -109,20 +142,72 @@
 
     <script src="js/data.js"></script>
     <script src="js/main.js"></script>
+    <script src="js/auth.js"></script>
     <script>
         initPage('home');
 
-        // 服务入口
-        document.getElementById('serviceEntries').innerHTML = SERVICE_ENTRIES.map(s => `
-            <div class="service-entry" onclick="location.href='service.html'">
-                <div class="icon">${s.icon}</div>
-                <h3>${s.title}</h3>
-                <p>${s.desc}</p>
+        // 公告/活动条（轮播 4s/条，对接活动中心）
+        (function () {
+            const NOTICES = [
+                '开窖特惠进行中 · 竹奕佳酿限时臻选价',
+                '同盟臻选 · 八家源头好物新店齐开',
+                '扫码验真 · 每瓶竹奕酒均可溯源查验',
+            ];
+            const bar = document.getElementById('noticeBar');
+            const txt = document.getElementById('noticeText');
+            let i = 0;
+            txt.textContent = NOTICES[0];
+            bar.style.display = '';
+            setInterval(() => {
+                i = (i + 1) % NOTICES.length;
+                txt.style.opacity = '0';
+                setTimeout(() => { txt.textContent = NOTICES[i]; txt.style.opacity = ''; }, 250);
+            }, 4000);
+        })();
+
+        // 金刚区 8 宫格（逛/购/玩/服务 四类动线，各自直达）
+        const KINGKONG = [
+            { icon: '🍶', title: '全部产品', desc: '竹奕全系', url: 'products.html' },
+            { icon: '🏛', title: '同盟臻选', desc: '源头好物', url: 'alliance-mall.html' },
+            { icon: '🎁', title: '活动中心', desc: '福利进行中', url: 'activity.html' },
+            { icon: '🔍', title: '溯源查询', desc: '批次验真', url: 'zjian.html' },
+            { icon: '👤', title: '会员中心', desc: '专享权益', url: 'login.html' },
+            { icon: '🛒', title: '购物车', desc: '已选好物', url: 'cart.html' },
+            { icon: '💬', title: '客户服务', desc: '在线支持', url: 'service.html' },
+            { icon: '📰', title: '品牌资讯', desc: '新闻动态', url: 'news.html' },
+        ];
+        document.getElementById('serviceEntries').innerHTML = KINGKONG.map(k => `
+            <div class="service-entry" onclick="location.href='${k.url}'">
+                <div class="icon">${k.icon}</div>
+                <h3>${k.title}</h3>
+                <p>${k.desc}</p>
             </div>`).join('');
 
-        // 主打产品推荐（竹香型优先，取前4个）
+        // 会员权益卡（已登录显示身份，未登录引导）
+        (function () {
+            try {
+                if (window.Auth && Auth.isLoggedIn()) {
+                    const info = Auth.getInfo();
+                    document.getElementById('memberText').textContent =
+                        `${info.nickname || '竹香会员'} · 欢迎回来，会员专享价已生效`;
+                    document.getElementById('memberBtn').textContent = '我的权益';
+                }
+            } catch (e) { /* 未登录态保持默认文案 */ }
+        })();
+
+        // 主打产品推荐（竹香型优先，取前4个；热销 TOP1-3 角标）
         const featured = PRODUCTS.filter(p => p.tag === '主打').concat(PRODUCTS.filter(p => p.tag !== '主打'));
         document.getElementById('hotProducts').innerHTML = featured.slice(0, 4).map(renderProductCard).join('');
+        ['TOP1', 'TOP2', 'TOP3'].forEach((r, idx) => {
+            const card = document.querySelectorAll('#hotProducts .product-card')[idx];
+            if (card) {
+                card.style.position = 'relative';
+                const b = document.createElement('span');
+                b.className = 'hot-badge' + (idx === 0 ? ' hot-badge-1' : '');
+                b.textContent = '热销 ' + r;
+                card.appendChild(b);
+            }
+        });
 
         // 品牌特色
         document.getElementById('brandFeatures').innerHTML = BRAND_FEATURES.map(f => `
@@ -183,6 +268,19 @@
                     </div>`;
                 }).join('');
                 document.getElementById('allianceSection').style.display = '';
+                // 今日甄选倒计时(京东秒杀模式: 每日 24:00 更新的节奏感)
+                const cnt = document.getElementById('allianceCount');
+                const tick = () => {
+                    const now = new Date();
+                    const end = new Date(now); end.setHours(24, 0, 0, 0);
+                    const s = Math.max(0, Math.floor((end - now) / 1000));
+                    const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+                    const mm = String(Math.floor(s % 3600 / 60)).padStart(2, '0');
+                    const ss = String(s % 60).padStart(2, '0');
+                    cnt.textContent = `⏱ 今日甄选 ${hh}:${mm}:${ss}`;
+                };
+                cnt.style.display = '';
+                tick(); setInterval(tick, 1000);
             } catch (e) { /* 静默隐藏 */ }
         })();
     </script>

@@ -33,7 +33,7 @@ SITE = Path(__file__).resolve().parent.parent          # zhuxiang-jiu 正源
 PUBLIC = SITE.parent / "taro-app" / "public"            # 构建链镜像
 STAGING = SITE / "deploy" / "staging" / "official-site"  # scp 文件集
 
-V = "20261002"  # 缓存版本号(同盟臻选上线批次)
+V = "20261003"  # 缓存版本号(首页创新布局批次: 公告条/金刚区/会员卡/榜单/信任条)
 
 # 部署页面(核心购物/资讯闭环 + 同盟商城入口)
 PAGES = [
