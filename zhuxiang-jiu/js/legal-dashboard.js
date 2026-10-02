@@ -8,8 +8,10 @@
 'use strict';
 
 var API_BASE_KEY = 'legalDash.apiBase';
-var state = { apiBase: localStorage.getItem(API_BASE_KEY)
-              || 'http://localhost:8000' };
+/* 默认同源(生产 nginx 已反代 /api/ → 8000): 空=相对路径走当前域名。
+   显式填 http://localhost:8000 仅限本地开发(生产 https 页面发
+   http 请求会被浏览器按混合内容拦截)。 */
+var state = { apiBase: localStorage.getItem(API_BASE_KEY) || '' };
 /* 鉴权: 登录后叠加 Authorization Bearer, 未登录保留 compat 头 */
 function adminHeaders() {
     var h = { 'X-Role': 'admin', 'Content-Type': 'application/json' };
@@ -33,6 +35,10 @@ async function fetchJson(url, options, label) {
         var body = {};
         try { body = JSON.parse(text); } catch (e) { body = { raw: text }; }
         if (!resp.ok) {
+            if (resp.status === 401) {
+                throw new Error(label + '：请先以管理员账号登录'
+                    + '（登录页登录后回到本页刷新）');
+            }
             var detail = (body && (body.detail || body.error)) || resp.status;
             throw new Error(label + ' HTTP ' + resp.status + ': ' + detail);
         }
@@ -60,7 +66,7 @@ function markUpdate() {
 function saveConn() {
     var el = document.getElementById('apiBase');
     state.apiBase = el.value.trim().replace(/\/+$/, '');
-    if (!state.apiBase) { state.apiBase = 'http://localhost:8000'; }
+    /* 允许空值=同源(生产默认); 仅本地开发显式填 localhost */
     el.value = state.apiBase;
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     loadAll();
@@ -93,7 +99,7 @@ async function loadStatus() {
             { k: '判例数', v: d.precedents != null ? d.precedents : '-' },
         ]);
         document.getElementById('statusNote').textContent =
-            esc(d.note || '') + (d.updatedAt ? ' · ' + d.updatedAt : '');
+            (d.note || '') + (d.updatedAt ? ' · ' + d.updatedAt : '');
     } catch (e) { showError(String(e.message || e)); }
 }
 
@@ -130,8 +136,7 @@ async function loadTwin() {
         var h = d.twinHealth != null ? d.twinHealth : '-';
         cells('ovTwin', [{ k: '孪生健康分', v: h,
                            cls: h >= 80 ? 'green' : (h >= 60 ? 'yellow' : 'red') }]);
-        document.getElementById('twinNote').textContent =
-            esc(d.note || '');
+        document.getElementById('twinNote').textContent = d.note || '';
     } catch (e) { showError(String(e.message || e)); }
 }
 
@@ -165,13 +170,16 @@ async function loadAudits() {
     } catch (e) { showError(String(e.message || e)); }
 }
 
-/* ④ 协议签署统计 */
+/* ④ 协议签署统计(stats 失败时降级: 公开列表仍渲染) */
 async function loadAgreements() {
+    var st = {};
     try {
         var statBody = await fetchJson(
             api('/api/agreements/stats/overview'),
             { headers: adminHeaders() }, '协议统计');
-        var st = statBody.data || statBody || {};
+        st = statBody.data || {};
+    } catch (e) { showError(String(e.message || e)); }
+    try {
         var listBody = await fetchJson(
             api('/api/agreements'),
             { headers: adminHeaders() }, '协议列表');

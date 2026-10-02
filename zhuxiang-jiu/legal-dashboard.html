@@ -79,7 +79,7 @@
         <div class="dash-card">
             <div class="dash-toolbar">
                 <label>后端 <input id="apiBase" size="24"
-                    placeholder="http://localhost:8000"></label>
+                    placeholder="留空=同源(生产默认) / http://localhost:8000(本地)"></label>
                 <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
                 <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
                 <span id="lastUpdate" style="font-size:11px;color:#999"></span>
@@ -160,8 +160,8 @@
     </div>
 
     <div class="note-bar">
-        后端默认 http://localhost:8000(实机直达 http://127.0.0.2:8000) ·
-        管理端 X-Role: admin · 法律知识库: 知识看板(knowledge-dashboard.html) legal 域
+        后端留空=同源(生产 nginx 反代 /api/) · 本地开发填 http://localhost:8000 ·
+        管理端 X-Role: admin(须先登录) · 法律知识库: 知识看板(knowledge-dashboard.html) legal 域
     </div>
 </div>
 
