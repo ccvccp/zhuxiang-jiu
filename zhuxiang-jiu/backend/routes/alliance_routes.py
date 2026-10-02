@@ -182,14 +182,29 @@ class QuoteRequest(PydBaseModel):
 # ============================================================
 
 @router.post("/api/alliance/apply", tags=["AI智能网站同盟模块"])
-async def apply(data: ApplyRequest):
-    """超级会员入盟申请(自动 AI 预审: ≥80快车道/60-79人工审/<60拒)"""
+async def apply(
+    data: ApplyRequest,
+    x_forwarded_for: str = Header("", alias="X-Forwarded-For"),
+):
+    """超级会员入盟申请(自动 AI 预审: ≥80快车道/60-79人工审/<60拒)
+
+    智法(2026-10-03): 提交入盟即签署 merchant 必签入驻协议
+    (fail-soft 不阻断申请)
+    """
     try:
         await _require_decision_mode()
         result = await _service.apply(
             member_id=data.memberId, category=data.category,
             shop_name=data.shopName, credentials=data.credentials,
             referrer_member_id=data.referrerMemberId)
+        # 智法: 商户入驻协议签署留痕(申请提交即视为同意条款)
+        try:
+            from services.agreement_service import AgreementService
+            await AgreementService().consent_role_required(
+                data.memberId, "merchant",
+                ip=x_forwarded_for.split(",")[0].strip())
+        except Exception:
+            pass  # 协议模块内部已 fail-soft, 此处兜底
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

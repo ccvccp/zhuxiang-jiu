@@ -190,6 +190,22 @@ async def process_checks(x_role: str = Header(None, alias="X-Role"),
         _handle(e)
 
 
+@router.get("/api/legal/commerce/price-audits",
+            tags=["智法AI智能法务大模型"])
+async def price_audits(x_role: str = Header(None, alias="X-Role"),
+                       limit: int = Query(50, ge=1, le=200)):
+    """价格审计记录列表(2026-10-03: 秒杀加品自动审计留痕)"""
+    _require_admin(x_role)
+    try:
+        rows = await _store.list("price_audits", limit=limit)
+        rows = sorted(rows, key=lambda r: r.get("auditedAt", ""),
+                      reverse=True)
+        return {"success": True, "data": rows[:limit],
+                "count": len(rows)}
+    except Exception as e:
+        _handle(e)
+
+
 @router.post("/api/legal/production/passport",
              tags=["智法AI智能法务大模型"])
 async def passport_issue(data: PassportRequest,

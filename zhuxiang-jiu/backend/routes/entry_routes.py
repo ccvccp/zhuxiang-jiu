@@ -170,13 +170,18 @@ async def login(
 
 
 @router.post("/api/entry/register", tags=["AI智能网站入口管理模块"])
-async def register(data: RegisterRequest):
+async def register(
+    data: RegisterRequest,
+    x_forwarded_for: str = Header("", alias="X-Forwarded-For"),
+):
     """会员注册(公开) → 注册即登录(双令牌直发)
 
     - role 服务端固定 member——公开面不可造管理员/运营角色
     - 酒类合规(P0-1): birthdate 提供时硬校验成年(未成年 409);
       ageConfirmed 为成年声明标记, 落库供下单年龄门复用
     - 45号: 注册即开通信值(fail-soft, 服务层内嵌)
+    - 智法(2026-10-03): 注册勾选行为自动落 member 必签协议
+      同意记录(fail-soft 不阻断注册)
     """
     from services.auth_service import AuthService
     try:
@@ -185,6 +190,14 @@ async def register(data: RegisterRequest):
             nickname=data.nickname or None,
             birthdate=data.birthdate or None,
             age_confirmed=data.ageConfirmed)
+        # 智法: 会员必签协议签署留痕(勾选已在前端完成)
+        try:
+            from services.agreement_service import AgreementService
+            await AgreementService().consent_role_required(
+                result["memberId"], "member",
+                ip=x_forwarded_for.split(",")[0].strip())
+        except Exception:
+            pass  # 协议模块内部已 fail-soft, 此处兜底
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

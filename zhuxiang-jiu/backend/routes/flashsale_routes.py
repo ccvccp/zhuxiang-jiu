@@ -268,13 +268,35 @@ async def update_session(session_id: str, data: UpdateSessionRequest,
 @router.post("/api/flash/admin/sessions/{session_id}/items", tags=["限时秒杀模块"])
 async def add_item(session_id: str, data: AddItemRequest,
                    x_role: str | None = Header(None, alias="X-Role")):
-    """添加秒杀商品(仅草稿场次)"""
+    """添加秒杀商品(仅草稿场次)
+
+    智法(2026-10-03): 秒杀价录入即自动价格合规审计(先涨后降/
+    划线价依据检测, fail-soft 留痕备查, 不自动拦截——处置永不
+    自动, 检出风险由人工裁决)。
+    """
     _require_admin(x_role)
     try:
         item = await _service.add_item(session_id, data.productId,
                                        data.flashPrice, data.flashStock,
                                        data.limitPerMember)
-        return _ok(item=item)
+        # 智法: 价格审计留痕(审计失败不影响加品)
+        audit_summary = None
+        try:
+            from services.zf_commerce_service import ZfCommerceService
+            orig = float(item.get("originalPrice", 0) or 0)
+            audit = await ZfCommerceService().price_audit(
+                product_id=str(data.productId),
+                price_history=[{"day": "snapshot", "dealPrice": orig}],
+                current={"original": orig, "strikethrough": orig,
+                         "coupon": data.flashPrice, "member": 0})
+            audit_summary = {
+                "auditId": audit["auditId"],
+                "compliant": audit["compliant"],
+                "findings": [f["name"] for f in audit["findings"]],
+            }
+        except Exception:
+            pass
+        return _ok(item=item, priceAudit=audit_summary)
     except Exception as exc:
         _handle(exc)
 

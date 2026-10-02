@@ -20,11 +20,15 @@
 
 from core.locks import get_lock
 from core.helpers import ts
+import logging
+
 from repositories.agreement_repository import (
     AgreementRepository,
     # 条款类型
     AGREEMENT_STATUS_DRAFT, AGREEMENT_STATUS_PUBLISHED, SIGN_METHOD_CHECKBOX, PROTOCOL_STATUS_ACTIVE,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -383,6 +387,40 @@ class AgreementService:
                               limit: int = 100) -> list[dict]:
         """查询角色协议列表"""
         return await self.repo.list_protocols(role, status, limit)
+
+    async def consent_role_required(self, user_id: int, role: str,
+                                     ip: str = "",
+                                     sign_method: str =
+                                     SIGN_METHOD_CHECKBOX) -> list[dict]:
+        """签署角色全部必签协议(2026-10-03 智法: 注册/入驻自动留痕)
+
+        对该角色 status=active 且 required=true 的协议逐个落
+        同意记录(勾选行为已在业务流程发生, 此处补签署留痕);
+        单份失败不阻断(fail-soft), 记 warning 供对账。
+
+        Returns:
+            已签署的 consent 记录列表
+        """
+        signed = []
+        try:
+            protocols = await self.repo.list_protocols(
+                role, PROTOCOL_STATUS_ACTIVE, 100)
+        except Exception as exc:
+            logger.warning("角色协议查询失败(role=%s): %s", role, exc)
+            return signed
+        for p in protocols:
+            if not p.get("required"):
+                continue
+            try:
+                c = await self.consent(
+                    user_id, p["agreementId"],
+                    sign_method=sign_method, ip=ip)
+                signed.append(c)
+            except Exception as exc:
+                logger.warning(
+                    "协议签署留痕失败(userId=%s role=%s agreement=%s):"
+                    " %s", user_id, role, p.get("agreementNo"), exc)
+        return signed
 
     async def update_protocol(self, protocol_id: int,
                                 updates: dict) -> dict:
