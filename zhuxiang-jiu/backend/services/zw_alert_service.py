@@ -81,7 +81,7 @@ class ZwAlertService:
                  "suggest": f"赠送 ¥{COMPENSATION_COUPON} 无门槛券(人工"
                             "确认后发放)",
                  "learningSignal": "券核销率/复购率(回流观测)"}))
-        signed = [o for o in await self.fabric.repo.list_orders(limit=500)
+        signed = [o for o in await self.fabric.repo.list_orders(limit=None)
                   if o.get("status") == "signed"]
         for _ in signed[:3]:          # 签收后关怀建议(最多3条)
             alerts.append(await self._save_alert(
@@ -125,7 +125,7 @@ class ZwAlertService:
 
     async def _warehouse_alert(self) -> list[dict]:
         """仓储: 发货量预测 vs 仓容 → 爆仓预警+加急提货单"""
-        orders = await self.fabric.repo.list_orders(limit=500)
+        orders = await self.fabric.repo.list_orders(limit=None)
         by_day: dict[str, int] = {}
         for o in orders:
             day = str(o.get("createdAt", "") or "")[:10]
@@ -177,7 +177,7 @@ class ZwAlertService:
         claims = await self.store.list("claims")
         damage_claims = [c for c in claims
                          if c.get("claimType") == "damage"]
-        orders = await self.fabric.repo.list_orders(limit=500)
+        orders = await self.fabric.repo.list_orders(limit=None)
         signed = sum(1 for o in orders if o.get("status") == "signed")
         if not signed:
             return []

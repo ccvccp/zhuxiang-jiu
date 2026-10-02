@@ -89,7 +89,7 @@ class ZwBindingService:
             (订单 createdAt 日期分布, 确定性)
         分摊口径: 按近 14 日渠道订单占比分摊; 预约量 = 预测×安全系数1.2。
         """
-        orders = await self.repo.list_orders(limit=500)
+        orders = await self.repo.list_orders(limit=None)
         today = datetime.now(UTC).date()
         by_day: dict[str, int] = {}
         by_carrier: dict[str, int] = {}
@@ -166,7 +166,7 @@ class ZwBindingService:
             if not v or len(str(v)) > 60:
                 raise ValueError(f"{label}无效(1-60字符)")
         order = None
-        for o in await self.repo.list_orders(limit=500):
+        for o in await self.repo.list_orders(limit=None):
             if o.get("waybillNo") == waybill_no \
                     or o.get("orderId") == order_id:
                 order = o
@@ -211,7 +211,7 @@ class ZwBindingService:
             raise KeyError("验真失败: 码未绑定(谨防假冒, 可联系客服核验)")
 
         order = None
-        for o in await self.repo.list_orders(limit=500):
+        for o in await self.repo.list_orders(limit=None):
             if o.get("waybillNo") == binding["waybillNo"]:
                 order = o
                 break
@@ -257,7 +257,7 @@ class ZwBindingService:
                              "unopened/opened/damaged)")
         path = REVERSE_PATHS[condition]
         order = None
-        for o in await self.repo.list_orders(limit=500):
+        for o in await self.repo.list_orders(limit=None):
             if o.get("orderId") == order_id:
                 order = o
                 break

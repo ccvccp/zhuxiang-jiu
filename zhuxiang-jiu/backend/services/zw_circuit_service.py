@@ -56,7 +56,7 @@ class ZwCircuitService:
         from repositories.logistics_repository import (
             LogisticsRepository, CARRIER_NAMES)
         repo = LogisticsRepository()
-        orders = await repo.list_orders(limit=500)
+        orders = await repo.list_orders(limit=None)
         anomalies = await self.track.detect_anomalies(limit=500)
 
         stats: dict[str, dict] = {}

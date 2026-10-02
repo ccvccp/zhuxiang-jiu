@@ -49,7 +49,7 @@ class ZwAnalysisService:
         - 月度趋势: 按月聚合 totalFee
         - 优化建议: 均费最高物流商 → 议价建议(建议书)
         """
-        orders = await self.fabric.repo.list_orders(limit=500)
+        orders = await self.fabric.repo.list_orders(limit=None)
         by_carrier: dict[str, dict] = defaultdict(
             lambda: {"count": 0, "totalFee": 0.0})
         by_month: dict[str, float] = defaultdict(float)
@@ -105,7 +105,7 @@ class ZwAnalysisService:
         """
         if not 1 <= horizon <= 6:
             raise ValueError("预测期数须在 [1, 6]")
-        orders = await self.fabric.repo.list_orders(limit=500)
+        orders = await self.fabric.repo.list_orders(limit=None)
         by_month: dict[str, int] = defaultdict(int)
         for o in orders:
             month = str(o.get("createdAt", "") or "")[:7]

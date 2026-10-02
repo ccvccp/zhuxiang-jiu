@@ -280,8 +280,12 @@ class LogisticsRepository:
         return await self.get_order(waybill_no)
 
     async def list_orders(self, carrier: str = None, status: str = None,
-                           order_type: str = None, limit: int = 50) -> list:
-        """物流订单列表(支持筛选)"""
+                           order_type: str = None, limit: int | None = 50) -> list:
+        """物流订单列表(支持筛选)
+
+        limit=None 表示全量(2026-10-03: 引擎聚合语义为全量统计,
+        原 limit 截断+无排序在超量后会静默漏算任意 N 条)。
+        """
         if is_redis_mode():
             client = await get_redis_client()
             # 按状态集合查询(若指定), 否则扫描所有
@@ -301,7 +305,7 @@ class LogisticsRepository:
                     if len(parts) >= 4 and parts[3] != "index":
                         waybill_nos.append(parts[3])
             items = []
-            for wn in waybill_nos[:limit]:
+            for wn in (waybill_nos[:limit] if limit else waybill_nos):
                 order = await self.get_order(wn)
                 if not order:
                     continue
@@ -319,7 +323,7 @@ class LogisticsRepository:
             items = [o for o in items if o.get("status") == status]
         if order_type:
             items = [o for o in items if o.get("orderType") == order_type]
-        return items[:limit]
+        return items[:limit] if limit else items
 
     async def update_order_fields(self, waybill_no: str, fields: dict) -> dict:
         """更新物流订单字段(部分更新)

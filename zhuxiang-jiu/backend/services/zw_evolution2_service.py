@@ -145,7 +145,7 @@ class ZwEvolution2Service:
     async def anomaly_patterns(self) -> dict:
         """历史异常聚类: (渠道×类型) 计数排序 → 高频模式 + 预防建议"""
         anomalies = await self.track.detect_anomalies(limit=500)
-        orders = await self.fabric.repo.list_orders(limit=500)
+        orders = await self.fabric.repo.list_orders(limit=None)
         total = len(orders) or 1
 
         buckets: dict[str, dict] = {}
@@ -209,7 +209,7 @@ class ZwEvolution2Service:
 
         单均碳排(kg) = 重量(kg)/1000 × 距离代理(km) × 渠道因子
         """
-        orders = await self.fabric.repo.list_orders(limit=500)
+        orders = await self.fabric.repo.list_orders(limit=None)
         rows, total_kg = [], 0.0
         by_carrier: dict[str, dict] = {}
         for o in orders:

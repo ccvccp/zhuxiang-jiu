@@ -142,7 +142,7 @@ class ZwFabricService:
         - 成本域: 总运费/均单成本
         - 风险域: 失败/退回数
         """
-        orders = await self.repo.list_orders(limit=500)
+        orders = await self.repo.list_orders(limit=None)
         total = len(orders)
         signed = [o for o in orders if o.get("status") == "signed"]
         failed = [o for o in orders
@@ -201,7 +201,7 @@ class ZwFabricService:
         与 signedTime(状态机 update_status 真实写入)——此前真实
         签收单全部漏计时效样本, 均时效仅来自演示数据。
         """
-        orders = await self.repo.list_orders(limit=500)
+        orders = await self.repo.list_orders(limit=None)
         cutoff = datetime.now(UTC) - timedelta(days=30)
         stats: dict[str, dict] = {}
         for o in orders:

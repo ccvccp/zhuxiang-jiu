@@ -144,7 +144,9 @@ class ZwTrackService:
         """
         from repositories.logistics_repository import LogisticsRepository
         repo = LogisticsRepository()
-        orders = await repo.list_orders(limit=limit)
+        # 全量扫描(2026-10-03: 原 limit 入参被误用作订单扫描上限——
+        # 单量增长后漏扫; limit 语义应为"最多报告条数")
+        orders = await repo.list_orders(limit=None)
         now = datetime.now(UTC)
         alerts = []
 
@@ -196,11 +198,11 @@ class ZwTrackService:
                     "action": "升级工单+人工介入",
                 })
 
-        # 4) 运输停滞(48h 无轨迹更新)——需查最近轨迹
+        # 4) 运输停滞(48h 无轨迹更新)——需查最近轨迹(全量扫描)
         in_transit = [o for o in orders
                       if o.get("status") in ("picked", "transporting",
                                              "delivering")]
-        for order in in_transit[:limit]:
+        for order in in_transit:
             waybill = order.get("waybillNo", "")
             carrier = order.get("carrier", "")
             tracks = await repo.list_tracks(waybill, limit=1)
@@ -224,7 +226,7 @@ class ZwTrackService:
             for a in alerts:
                 a["disposition"] = "预警+工单建议, 处置须人工(永不自动)"
                 a["detectedAt"] = _now_iso()
-        return alerts
+        return alerts[:limit]
 
     # ============================================================
     # 延误预警视图(异常子集+ETA 联动)
