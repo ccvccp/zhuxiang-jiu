@@ -244,6 +244,36 @@ async def list_merchants(
         _handle(e)
 
 
+@router.get("/api/alliance/shops", tags=["AI智能网站同盟模块"])
+async def list_shops():
+    """C端同盟商城商户目录(公开——商城门面: 店徽/店名/评分/在售数)
+
+    与管理面 /merchants 口径隔离: 仅营业态商户(active 转正 +
+    probation 试用营业——signed 未激活不出), 仅安全字段
+    (memberId/资质凭证等敏感项不出); 在售数按 active 商品聚合。
+    """
+    try:
+        merchants = await _service.list_merchants(status="active")
+        merchants += await _service.list_merchants(status="probation")
+        products = await _service.list_products(status="active")
+        counts: dict = {}
+        for p in products:
+            mid = p.get("merchantId")
+            counts[mid] = counts.get(mid, 0) + 1
+        shops = [{
+            "merchantId": m.get("merchantId"),
+            "shopName": m.get("shopName", ""),
+            "category": m.get("category", ""),
+            "grade": m.get("grade", "C"),
+            "ratingAvg": m.get("ratingAvg", 0.0),
+            "ratingCount": m.get("ratingCount", 0),
+            "productCount": counts.get(m.get("merchantId"), 0),
+        } for m in merchants]
+        return {"success": True, "data": shops, "count": len(shops)}
+    except Exception as e:
+        _handle(e)
+
+
 @router.post("/api/alliance/merchants/{merchant_id}/activate",
              tags=["AI智能网站同盟模块"])
 async def activate_merchant(

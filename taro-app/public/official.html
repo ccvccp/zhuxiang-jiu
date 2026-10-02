@@ -52,7 +52,7 @@
             </div>
             <div class="product-grid" id="allianceProducts"></div>
             <div style="text-align:center;margin-top:40px;">
-                <a href="ai-alliance-dashboard.html" class="btn btn-outline btn-lg">进入同盟商城 →</a>
+                <a href="alliance-mall.html" class="btn btn-outline btn-lg">进入同盟商城 →</a>
             </div>
         </div>
     </section>
@@ -166,7 +166,7 @@
                     const merchant = p.merchantName || ('商户 #' + p.merchantId);
                     const desc = (p.description || '').slice(0, 40);
                     return `
-                    <div class="product-card alliance-card" onclick="location.href='ai-alliance-dashboard.html'">
+                    <div class="product-card alliance-card" onclick="location.href='alliance-mall.html#shop=' + p.merchantId">
                         <div class="product-img alliance-img">
                             ${traced ? '<span class="product-tag featured">✓ 已溯源</span>' : ''}
                             <span class="alliance-cat-icon">${cat[0]}</span>

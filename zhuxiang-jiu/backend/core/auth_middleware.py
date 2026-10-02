@@ -155,6 +155,10 @@ PUBLIC_GET_PREFIXES = (
     "/api/alliance/products",     # 37号同盟商品公开浏览 GET(首页同盟
                                     # 臻选商城区块游客可见; POST 上下架
                                     # 决策面仍鉴权——仅 GET 公开)
+    "/api/alliance/shops",        # 37号同盟商城 C 端商户目录 GET
+                                    # (alliance-mall.html 门面: 店徽/
+                                    # 店名/评分; 安全字段白名单口径,
+                                    # 与管理面 /merchants 隔离)
 )
 
 # 公开 GET 正则(动态路径, 无法用前缀表达)

@@ -46,7 +46,8 @@ PAGES = [
     "news.html",
     "news-detail.html",
     "login.html",              # dist 已上线, 仅内链替换(最小改动)
-    "ai-alliance-dashboard.html",  # 37号同盟商城入口(本次上线目标)
+    "ai-alliance-dashboard.html",  # 37号同盟管理看板(B 端后台)
+    "alliance-mall.html",      # 37号同盟商城 C 端购物页(2026-10-02 新增)
 ]
 
 # 资产(三件套 + 同盟页专属 js)
