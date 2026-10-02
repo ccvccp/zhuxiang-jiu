@@ -331,6 +331,24 @@ async def list_claims(x_role: str = Header(None, alias="X-Role"),
         _handle(e)
 
 
+@router.get("/api/logistics-ai/risk/assesses",
+            tags=["智运AI智能物流大模型"])
+async def list_risk_assesses(
+        x_role: str = Header(None, alias="X-Role"),
+        limit: int = Query(50, ge=1, le=200)):
+    """发货风控评分留痕列表(2026-10-03: 发货流自动前置评分)"""
+    _require_admin(x_role)
+    try:
+        # _ZwStore.list 无 limit 参——全量取后排序切片
+        rows = await _store.list("risk_assess")
+        rows = sorted(rows, key=lambda r: r.get("assessedAt", ""),
+                      reverse=True)
+        return {"success": True, "data": rows[:limit],
+                "count": len(rows)}
+    except Exception as e:
+        _handle(e)
+
+
 # ============================================================
 # P3: 分析与进化(admin)
 # ============================================================

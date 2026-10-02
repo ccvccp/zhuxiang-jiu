@@ -171,6 +171,24 @@
         </div>
     </div>
 
+    <!-- ⑦ 发货风控前置评分 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑦ 发货风控前置评分（四防：破损×0.35+丢失×0.25+延误×0.40——发货自动留痕）</h3></div>
+            <div style="max-height:240px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>评分号</th><th>综合分</th><th>等级</th>
+                        <th>防破损</th><th>防丢失</th><th>防延误</th>
+                        <th>缓解建议</th><th>时间</th>
+                    </tr></thead>
+                    <tbody id="riskList"><tr><td colspan="8"
+                        class="dash-empty">加载中…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div class="note-bar">
         后端留空=同源(生产 nginx 反代 /api/) · 本地开发填 http://localhost:8000 ·
         管理端 X-Role: admin(须先登录) · 商城物流查询: logistics.html

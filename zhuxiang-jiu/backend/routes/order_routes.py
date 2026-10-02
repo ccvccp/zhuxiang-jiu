@@ -49,6 +49,37 @@ def _handle(exc):
     raise HTTPException(status_code=500, detail=str(exc))
 
 
+async def _sync_logistics_signed(order_id: str) -> bool:
+    """智运(2026-10-03): 确认收货同步物流单签收(fail-soft, 幂等)
+
+    按 orderId 找未关闭物流单, 状态逐级推进到 signed
+    (picked→transporting→delivering→signed, 每级补轨迹),
+    用户视角轨迹完整收尾; 数据织物签收率/时效聚合真实化。
+    终态单/无物流单返回 False。
+    """
+    try:
+        from services.logistics_service import LogisticsService
+        svc = LogisticsService()
+        lo = await svc.get_order_by_order_id(order_id)
+        if not lo or lo.get("status") in ("signed", "returned"):
+            return False
+        waybill = lo["waybillNo"]
+        steps = (("picked", "快递员已揽收包裹"),
+                 ("transporting", "包裹运输中"),
+                 ("delivering", "包裹派送中"),
+                 ("signed", "用户确认收货"))
+        for status, desc in steps:
+            try:
+                await svc.add_track_callback(
+                    waybill, desc, status, desc,
+                    lo.get("city", ""), operator="member")
+            except (KeyError, ValueError):
+                continue  # 已过该状态/状态机拒绝 → 推进下一级
+        return True
+    except Exception:
+        return False
+
+
 # ============================================================
 # 用户端接口
 # ============================================================
@@ -242,10 +273,16 @@ async def confirm_order(
     order_id: str,
     x_member_id: str = Header(default="", alias="X-Member-Id"),
 ):
-    """确认收货 SHIPPED → RECEIVED"""
+    """确认收货 SHIPPED → RECEIVED
+
+    智运(2026-10-03): 同步物流单签收(轨迹收尾, 数据织物签收率/
+    时效聚合真实化, fail-soft 幂等)。
+    """
     _require_member(x_member_id)
     try:
-        return await _service.confirm(order_id)
+        result = await _service.confirm(order_id)
+        await _sync_logistics_signed(order_id)
+        return result
     except Exception as e:
         raise _handle(e) from e
 
@@ -346,8 +383,9 @@ async def ship_order(
         # v7.6 自动反馈: 物流路由观察评分(推荐承运商 vs 实际承运商)
         await ai_hooks.on_shipped(order_id, carrier)
 
-        # 智运: ① 路由建议书 + ② 建物流单(真实运单号贯通)
-        logistics_ai = {"advice": None, "waybill": None}
+        # 智运: ① 路由建议书 + ② 建物流单(真实运单号贯通) + ③ 风控前置
+        logistics_ai = {"advice": None, "waybill": None,
+                        "riskAssess": None}
         try:
             addr = {}
             try:
@@ -381,6 +419,17 @@ async def ship_order(
                     "combinedScore": d.get("combinedScore"),
                     "reason": d.get("ruleReason"),
                     "note": "推荐建议, 实际承运商由管理员确认"}
+                # 四防风控前置评分(酒类易碎/偏远/高货值——缓解
+                # 建议书: 木架/保价等, 留痕备查不拦截)
+                from services.zw_risk_service import ZwRiskService
+                risk = await ZwRiskService().risk_assess(
+                    order_type="retail", weight=weight,
+                    piece_count=pieces, insured_value=insured,
+                    receiver_province=receiver.get("province", ""))
+                logistics_ai["riskAssess"] = {
+                    "riskScore": risk.get("riskScore"),
+                    "riskLevel": risk.get("riskLevel"),
+                    "suggestions": risk.get("suggestions", [])}
             except Exception:
                 pass  # off/异常 → 无建议
             try:
@@ -488,10 +537,15 @@ async def timeout_confirm(
     order_id: str,
     x_role: str = Header(default="", alias="X-Role"),
 ):
-    """超时自动确认收货 SHIPPED → RECEIVED(管理员)"""
+    """超时自动确认收货 SHIPPED → RECEIVED(管理员)
+
+    智运(2026-10-03): 同步物流单签收(fail-soft 幂等)。
+    """
     _require_admin(x_role)
     try:
-        return await _service.timeout_confirm(order_id)
+        result = await _service.timeout_confirm(order_id)
+        await _sync_logistics_signed(order_id)
+        return result
     except Exception as e:
         raise _handle(e) from e
 

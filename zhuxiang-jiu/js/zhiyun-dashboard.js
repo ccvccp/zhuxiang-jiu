@@ -277,11 +277,46 @@ async function loadCost() {
     } catch (e) { showError(String(e.message || e)); }
 }
 
+/* ⑦ 发货风控前置评分留痕(实测字段: riskId/riskScore/riskLevel/
+ *    damageScore/lossScore/delayScore/suggestions/assessedAt) */
+async function loadRisks() {
+    try {
+        var body = await fetchJson(api('/api/logistics-ai/risk/assesses'),
+                                   { headers: adminHeaders() }, '风控评分');
+        var rows = body.data || [];
+        var el = document.getElementById('riskList');
+        if (!rows.length) {
+            el.innerHTML = '<tr><td colspan="8" class="dash-empty">' +
+                '暂无风控评分(发货时自动四防前置评分)</td></tr>';
+            return;
+        }
+        var LEVEL = { extreme: ['极高', 'risk-pill'],
+                      high: ['高', 'risk-pill'],
+                      medium: ['中', 'warn-pill'],
+                      low: ['低', 'ok-pill'] };
+        el.innerHTML = rows.map(function (r) {
+            var lv = LEVEL[r.riskLevel] || [r.riskLevel || '-', 'gray-pill'];
+            var scoreCls = r.riskScore >= 60 ? 'red'
+                : (r.riskScore >= 40 ? '' : 'green');
+            return '<tr><td>#' + esc(r.riskId) + '</td>' +
+                '<td class="' + scoreCls + '"><b>' + esc(r.riskScore)
+                + '</b></td>' +
+                '<td><span class="' + lv[1] + '">' + lv[0] + '</span></td>' +
+                '<td>' + esc(r.damageScore) + '</td>' +
+                '<td>' + esc(r.lossScore) + '</td>' +
+                '<td>' + esc(r.delayScore) + '</td>' +
+                '<td>' + esc((r.suggestions || []).join('；')
+                             .slice(0, 40)) + '</td>' +
+                '<td>' + when(r.assessedAt) + '</td></tr>';
+        }).join('');
+    } catch (e) { showError(String(e.message || e)); }
+}
+
 async function loadAll() {
     document.getElementById('apiBase').value = state.apiBase;
     await Promise.all([
         loadStatus(), loadCarriers(), loadDecisions(),
-        loadAnomalies(), loadClaims(), loadCost(),
+        loadAnomalies(), loadClaims(), loadCost(), loadRisks(),
     ]);
     markUpdate();
 }
