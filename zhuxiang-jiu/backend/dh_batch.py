@@ -1,9 +1,9 @@
 """73号(sv)·数字人 GPU 轨批量编排器(生产拆链正式化, 2026-10-01 实录)
 
-用法: python dh_batch.py --sids sv73_xxx[,sv73_yyy] [--boot] [--shutdown]
+用法: python dh_batch.py --sids sv73_xxx[,sv73_yyy] [--boot] [--no-shutdown]
       python dh_batch.py --sid sv73_xxx                      # 单条
-      python dh_batch.py --boot --sids s1,s2                 # 自动开机+跑批(默认保持在线)
-      python dh_batch.py --sids s1,s2 --shutdown             # 跑批后关机(按量回退形态)
+      python dh_batch.py --boot --sids s1,s2                 # 自动开机+跑批+自动关机
+      python dh_batch.py --boot --pro --sids s1,s2           # Pro 实例全自动(API 开关机)
 
 链路(build_dh_dev 四步的拆链形态——GPU 机 import 巨网不可控的分段铁律):
   0.(--boot) AutoDL API 开机(adh_power on) → 轮询 SSH 就绪
@@ -13,10 +13,9 @@
      独立加载 sv73_digital_human_service → 5090D → {sid}_dh.mp4
      → 分块下载回本地)
   4. attach 生产回填(POST /api/sv73/render/attach)
-  5.(--shutdown) 远端 shutdown 关机(AutoDL 官方指令)——默认保持在线:
-    2026-10-02 实例转包月, 关机不退费不省钱, 且普通实例 API 开不了
-    机(须控制台人工)——保持在线省开机环节; 包月到期回按量再加
-    --shutdown 恢复省费形态
+  5.(默认) 远端 shutdown 自动关机(普通实例容器指令 / Pro 实例 API
+    power_off)——按量计费形态下保持在线=持续扣费, 跑完即关;
+    --no-shutdown 仅限同会话连续补批(用完手动关机止费)
 
 成本口径(2026-10-01 实录): 全链 ~3-4 分钟/条(含模型加载 60-90s),
 ￥1.88-2.88/时 → ￥0.1-0.19/条; 批量摊薄加载属 P2 优化(服务常驻),
@@ -371,10 +370,10 @@ def main() -> int:
                     help="先 AutoDL API 开机(需 ADH_API_TOKEN; 普通实例"
                          "不在 API 体系——控制台人工开机, 见 adh_power.py"
                          "形态实证)")
-    ap.add_argument("--shutdown", action="store_true",
-                    help="跑完自动关机(默认不关——2026-10-02 实例转"
-                         "包月: 关机不退费, 普通实例须控制台人工开机,"
-                         "保持在线; 包月到期回按量再加此参省费)")
+    ap.add_argument("--no-shutdown", action="store_true",
+                    help="跑完不自动关机(默认关——按量计费形态, 保持在线"
+                         "=持续扣费; 仅同一会话连续补批时用, 用完记得"
+                         "手动关机止费)")
     ap.add_argument("--min-balance", type=float, default=10.0,
                     help="余额止损阈值(¥, 默认 10; 低于即退出不跑)")
     ap.add_argument("--pro", default="",
@@ -451,7 +450,7 @@ def main() -> int:
             fail += 1
 
     print(f"== 批量完成: {ok} ok / {fail} fail ==")
-    if args.shutdown:
+    if not args.no_shutdown:
         if pro_uuid:
             print("[关机] Pro API power_off ...")
             from adh_power import call as adl_call
