@@ -104,12 +104,18 @@ async function loadStatus() {
             { k: '均签收时效', v: d.avgSignHours != null
                                    ? d.avgSignHours + 'h' : '-' },
         ];
-        if (m.guardPaused) {
+        /* 实测 status_view 字段为 paused(非 guardPaused); 暂停须醒目 */
+        if (m.paused) {
             cells6.push({ k: '护栏', v: '已暂停', cls: 'red' });
+            cells6.push({ k: '暂停原因', v: '见下', cls: 'red' });
         }
         cells('ovStatus', cells6);
+        var noteText = (d.note || '');
+        if (m.paused && m.pausedReason) {
+            noteText = '⚠️ 护栏暂停: ' + m.pausedReason + ' | ' + noteText;
+        }
         document.getElementById('statusNote').textContent =
-            (d.note || '') + (d.updatedAt ? ' · ' + d.updatedAt : '');
+            noteText + (d.updatedAt ? ' · ' + d.updatedAt : '');
     } catch (e) { showError(String(e.message || e)); }
 }
 
@@ -125,7 +131,9 @@ async function loadCarriers() {
         var hb = await fetchJson(api('/api/logistics-ai/route/health'),
                                  { headers: adminHeaders() }, '健康度');
         var hd = hb.data || {};
-        healths = hd.reports || (Array.isArray(hd) ? hd : []);
+        /* 实测结构: 顶层 {carriers:[...], thresholds, note, monitoredAt} */
+        healths = hd.carriers || hd.reports
+                  || (Array.isArray(hd) ? hd : []);
     } catch (e) { showError(String(e.message || e)); }
     var hmap = {};
     healths.forEach(function (h) { hmap[h.carrier] = h; });
@@ -223,42 +231,44 @@ async function loadClaims() {
                 '暂无理赔工单</td></tr>';
             return;
         }
+        /* 实测字段: claimTypeName(中文名)/status/description(无 suggestion) */
         el.innerHTML = rows.map(function (c) {
-            return '<tr><td>#' + esc(c.claimId != null ? c.claimId
-                                                       : c.id) + '</td>' +
-                '<td>' + esc(c.claimType || c.type) + '</td>' +
+            var no = c.claimNo || ('#' + (c.claimId != null ? c.claimId
+                                                          : c.id));
+            return '<tr><td>' + esc(no) + '</td>' +
+                '<td>' + esc(c.claimTypeName || c.claimType || c.type)
+                + '</td>' +
                 '<td>¥' + esc(c.claimAmount != null ? c.claimAmount
                                                     : c.amount) + '</td>' +
-                '<td>' + esc((c.suggestion || c.note || '')
-                             .slice(0, 30)) + '</td></tr>';
+                '<td>' + esc((c.status || '') + (c.description
+                             ? ' · ' + c.description : '')) + '</td></tr>';
         }).join('');
     } catch (e) { showError(String(e.message || e)); }
 }
 
-/* ⑥ 成本分析 */
+/* ⑥ 成本分析(实测: {totalFee, byCarrier, byMonth, suggestions, note}) */
 async function loadCost() {
     try {
         var body = await fetchJson(api('/api/logistics-ai/analysis/cost'),
                                    { headers: adminHeaders() }, '成本分析');
         var d = body.data || {};
-        var scalar = {};
-        Object.keys(d).forEach(function (k) {
-            var v = d[k];
-            if (typeof v === 'number' || typeof v === 'string') {
-                scalar[k] = v;
-            }
-        });
-        var items = Object.keys(scalar).slice(0, 6).map(function (k) {
-            return { k: k, v: String(scalar[k]).slice(0, 20) };
-        });
-        if (!items.length) {
-            items = [{ k: '成本分析', v: '见详情(议价建议)' }];
-        }
-        cells('ovCost', items);
-        var sug = d.negotiationSuggestions || d.suggestions
-            || d.suggestion || d.note;
+        cells('ovCost', [
+            { k: '物流总成本', v: '¥' + (d.totalFee != null ? d.totalFee
+                                                           : '-') },
+            { k: '承运商数', v: d.byCarrier
+                                ? Object.keys(d.byCarrier).length : '-' },
+            { k: '议价建议', v: (d.suggestions || []).length + ' 条',
+              cls: 'blue' },
+        ]);
+        var sug = d.suggestions || [];
+        var sugText = sug.length
+            ? sug.map(function (s) {
+                return typeof s === 'string' ? s : (s.suggestion || s.text
+                                                     || JSON.stringify(s));
+            }).join('；')
+            : (d.note || '');
         document.getElementById('costNote').textContent =
-            sug ? String(sug).slice(0, 160) : '';
+            String(sugText).slice(0, 200);
     } catch (e) { showError(String(e.message || e)); }
 }
 
