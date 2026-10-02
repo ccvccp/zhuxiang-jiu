@@ -9,7 +9,7 @@
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +155,12 @@ class ZwFabricService:
         avg_fee = _round2(total_fee / total) if total else 0.0
 
         # 时效(下单→签收, 小时; 无签收时间跳过)
+        # 2026-10-03: 兼容 signedAt(演示种子)/signedTime(状态机)
         durations = []
         for o in signed:
             created = str(o.get("createdAt", "") or "")
-            signed_at = str(o.get("signedAt", "") or "")
+            signed_at = str(o.get("signedAt", "")
+                            or o.get("signedTime", "") or "")
             if created and signed_at:
                 try:
                     c = datetime.fromisoformat(created)
@@ -192,9 +194,15 @@ class ZwFabricService:
         """按物流商聚合表现(质量评分数据源)
 
         Returns: {carrier: {total, signed, failed, signRate,
-                            avgSignHours, totalFee, avgFee}}
+                            avgSignHours(全期), recentSignHours(近30天),
+                            recentSample, totalFee, avgFee}}
+
+        2026-10-03 引擎断层修复: 签收时间兼容 signedAt(演示种子)
+        与 signedTime(状态机 update_status 真实写入)——此前真实
+        签收单全部漏计时效样本, 均时效仅来自演示数据。
         """
         orders = await self.repo.list_orders(limit=500)
+        cutoff = datetime.now(UTC) - timedelta(days=30)
         stats: dict[str, dict] = {}
         for o in orders:
             carrier = str(o.get("carrier", "") or "")
@@ -202,13 +210,15 @@ class ZwFabricService:
                 continue
             s = stats.setdefault(carrier, {
                 "total": 0, "signed": 0, "failed": 0,
-                "durations": [], "totalFee": 0.0})
+                "durations": [], "recent": [], "totalFee": 0.0})
             s["total"] += 1
             status = o.get("status")
             if status == "signed":
                 s["signed"] += 1
                 created = str(o.get("createdAt", "") or "")
-                signed_at = str(o.get("signedAt", "") or "")
+                # 兼容两种签收时间字段(状态机写 signedTime)
+                signed_at = str(o.get("signedAt", "")
+                                or o.get("signedTime", "") or "")
                 if created and signed_at:
                     try:
                         c = datetime.fromisoformat(created)
@@ -216,6 +226,10 @@ class ZwFabricService:
                         hours = (st - c).total_seconds() / 3600
                         if hours > 0:
                             s["durations"].append(hours)
+                            # 近 30 天签收的样本(按签收时间)
+                            if st.replace(
+                                    tzinfo=st.tzinfo or UTC) >= cutoff:
+                                s["recent"].append(hours)
                     except (ValueError, TypeError):
                         pass
             elif status in ("failed", "returned"):
@@ -232,6 +246,10 @@ class ZwFabricService:
                 "avgSignHours": _round2(sum(s["durations"])
                                         / len(s["durations"]))
                 if s["durations"] else 0.0,
+                "recentSignHours": _round2(sum(s["recent"])
+                                           / len(s["recent"]))
+                if s["recent"] else 0.0,
+                "recentSample": len(s["recent"]),
                 "totalFee": _round2(s["totalFee"]),
                 "avgFee": _round2(s["totalFee"] / s["total"])
                 if s["total"] else 0.0,

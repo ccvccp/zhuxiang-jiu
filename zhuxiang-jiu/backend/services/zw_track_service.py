@@ -71,7 +71,8 @@ class ZwTrackService:
                 "carrier": order.get("carrier", ""),
                 "status": "signed",
                 "remainingHours": 0.0,
-                "eta": order.get("signedAt", ""),
+                "eta": order.get("signedAt", "")
+                       or order.get("signedTime", ""),
                 "explain": "已签收",
             }
 
@@ -79,11 +80,26 @@ class ZwTrackService:
         carrier = str(order.get("carrier", "") or "")
         p = performance.get(carrier, {})
         avg_hours = p.get("avgSignHours") or 0.0
+        recent_hours = p.get("recentSignHours") or 0.0
+        # 2026-10-03 进化闭环落点: 消费 etaWeight 反馈参数——
+        # 加权时效 = 近30天均时效×etaWeight + 全期×(1-etaWeight)
+        # (etaWeight>0.6 更信近期→预测灵敏; <0.6 更信全期→稳健)
+        params = await self.store.get_params() or {}
+        eta_weight = float(params.get("etaWeight", 0.6) or 0.6)
         if avg_hours <= 0:
             # 冷启动保守基准
             service = str(order.get("serviceType", "") or "")
             avg_hours = 48.0 if service == "express" else 72.0
             basis = "冷启动保守基准(无历史样本)"
+            weighted = avg_hours
+        elif recent_hours > 0 and eta_weight != 0.6:
+            weighted = _round2(recent_hours * eta_weight
+                               + avg_hours * (1 - eta_weight))
+            basis = (f"{carrier} 加权均时效 {weighted}h"
+                     f"(近30天 {recent_hours}h×{eta_weight} + "
+                     f"全期 {avg_hours}h×{round(1 - eta_weight, 2)}, "
+                     "etaWeight 进化参数)")
+            avg_hours = weighted
         else:
             basis = f"{carrier} 历史均时效 {avg_hours}h"
 
