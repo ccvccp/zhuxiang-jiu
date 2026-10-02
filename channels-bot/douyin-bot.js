@@ -425,14 +425,28 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
     // 5. 成功特征轮询收口(xhs 21 轮机制迁移, 替换固定 sleep 15s):
     //    URL 离开 upload/video 跳内容管理页 / 文本含 发布成功/审核中
     //    —— 每 3s 一次最多 90s, 命中早退; 超时留档人审(特征实证校准项)
+    //    2026-10-02 偶发验证兜底: 发布点击后可能触发安全验证(新登录
+    //    态首条实证: 短信验证码弹层, 人工完成后页面跳 manage)——
+    //    轮询中检测验证特征时醒目提示 + 窗口延长至 5 分钟人工完成,
+    //    完成后按原成功特征正常收口; 全程零验证时窗口不变(90s)
     let published = false;
     let afterUrl = page.url();
     let afterBody = '';
+    let verifyAnnounced = false;
+    let verifyDeadline = 0;
     const pubDeadline = Date.now() + 90 * 1000;
-    while (Date.now() < pubDeadline) {
+    while (Date.now() < (verifyDeadline || pubDeadline)) {
       await sleep(3000);
       afterUrl = page.url();
       try { afterBody = await page.evaluate(() => (document.body.innerText || '').slice(0, 500)); } catch (e) {}
+      const verifyHit = /安全验证|验证码|拖动滑块|完成拼图|完成验证/.test(afterBody);
+      if (verifyHit && !verifyAnnounced) {
+        verifyAnnounced = true;
+        verifyDeadline = Date.now() + 5 * 60000;
+        LOG('=== 检测到安全验证弹层, 请在 Chrome 窗口人工完成 (等待至多 5 分钟) ===');
+        await page.screenshot({ path: 'douyin_verify_wait.png' });
+        continue;
+      }
       const leftUpload = /upload\/video/.test(afterUrl);
       // 2026-10-02 误判实证修正: content/post/video 是发布表单页
       // (点早/无效点击的复现形态), 旧特征「离开 upload 即成功」把它
