@@ -171,6 +171,7 @@ async function loadDecisions() {
     try {
         var body = await fetchJson(api('/api/logistics-ai/route/decisions'),
                                    { headers: adminHeaders() }, '路由留痕');
+        /* 服务层返回已按 id 倒序(最新在前)——不再二次反转 */
         var rows = body.data || [];
         var el = document.getElementById('decisionList');
         if (!rows.length) {
@@ -178,7 +179,7 @@ async function loadDecisions() {
                 '暂无决策留痕(发货时自动生成路由建议书)</td></tr>';
             return;
         }
-        el.innerHTML = rows.slice().reverse().map(function (r) {
+        el.innerHTML = rows.map(function (r) {
             var d = r.decision || {};
             return '<tr><td>#' + esc(r.decisionId) + '</td>' +
                 '<td><b>' + esc(d.carrierName || d.carrier) + '</b></td>' +
@@ -232,16 +233,20 @@ async function loadClaims() {
             return;
         }
         /* 实测字段: claimTypeName(中文名)/status/description(无 suggestion) */
+        var STATUS_CN = { pending_review: '待审核',
+                          approved: '已核准', rejected: '已驳回',
+                          paid: '已赔付', closed: '已关闭' };
         el.innerHTML = rows.map(function (c) {
             var no = c.claimNo || ('#' + (c.claimId != null ? c.claimId
-                                                          : c.id));
+                                                           : c.id));
+            var st = STATUS_CN[c.status] || c.status || '';
             return '<tr><td>' + esc(no) + '</td>' +
                 '<td>' + esc(c.claimTypeName || c.claimType || c.type)
                 + '</td>' +
                 '<td>¥' + esc(c.claimAmount != null ? c.claimAmount
                                                     : c.amount) + '</td>' +
-                '<td>' + esc((c.status || '') + (c.description
-                             ? ' · ' + c.description : '')) + '</td></tr>';
+                '<td>' + esc(st + (c.description
+                              ? ' · ' + c.description : '')) + '</td></tr>';
         }).join('');
     } catch (e) { showError(String(e.message || e)); }
 }
