@@ -42,7 +42,7 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
   // (douyin-profile 持久化后后续免扫); bot 只轮询登录特征, 不自动点击
   const loginPageLike = (url, text) =>
     /\/login|passport\.|sso\.douyin/.test(url) ||
-    /扫码登录|扫码进入|登录抖音/.test(text || '');
+    /扫码登录|扫码进入|登录抖音|验证码登录|密码登录|我是创作者|我是MCN机构/.test(text || '');
   const ensureLogin = async (page, waitMs) => {
     const deadline = Date.now() + waitMs;
     let lastUrl = '';
@@ -355,6 +355,21 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
     await sleep(1500);
     await page.screenshot({ path: 'douyin_publish_1_filled.png' });
 
+    // 3.0 上传完成等待(2026-10-02 三轮发布失败实证修正): 「按钮
+    //     enabled=上传+处理完成」铁律已失效(页面改版——enabled 上传
+    //     中即可见, 10 秒点发布静默无效, manage 作品列表实证零新增)
+    //     ——固定 60s 处理下限 + 每 15s 记录页面文本(校准素材),
+    //     期满再进按钮流
+    const upStart = Date.now();
+    while (Date.now() - upStart < 60000) {
+      const el = Math.round((Date.now() - upStart) / 1000);
+      let txt = '';
+      try { txt = await page.evaluate(() => (document.body.innerText || '').slice(0, 120)); } catch (e) {}
+      if (el % 15 === 0) LOG('wait upload/process ' + el + 's body=[' + txt.slice(0, 60).replace(/\n/g, ' ') + ']');
+      await sleep(5000);
+    }
+    LOG('upload wait done (>=60s), enter publish-btn flow');
+
     // 3. 等发布按钮就绪并点击 (enabled = 上传+处理完成唯一真值; 最多等 5 分钟)
     let clicked = false;
     for (let i = 0; i < 60 && !clicked; i++) {
@@ -363,8 +378,13 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
           const btns = Array.from(document.querySelectorAll('button, [role=button]'));
           const b = btns.find(x => (x.innerText || '').trim() === '发布' && !x.disabled);
           if (!b) return null;
+          // 2026-10-02 视口外点击无效实证修正: 按钮 rect y=1378 >
+          // 视口 900(表单长页底部), 合成 b.click() 与 CDP 坐标点击
+          // 全部打空(xhs-bot 21 轮同款坑——先 scrollIntoView 滚入
+          // 视口再取新坐标; 滚后 rect 立即更新)
+          b.scrollIntoView({ block: 'center' });
           const r = b.getBoundingClientRect();
-          if (!(r.width > 0)) return null;
+          if (!(r.width > 0) || r.y < 0 || r.y > 890) return null;
           return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
         });
         if (!btnPt) {
@@ -414,7 +434,11 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
       afterUrl = page.url();
       try { afterBody = await page.evaluate(() => (document.body.innerText || '').slice(0, 500)); } catch (e) {}
       const leftUpload = /upload\/video/.test(afterUrl);
-      const hit = (!leftUpload && /creator\.douyin\.com/.test(afterUrl))
+      // 2026-10-02 误判实证修正: content/post/video 是发布表单页
+      // (点早/无效点击的复现形态), 旧特征「离开 upload 即成功」把它
+      // 当成功——排除之; 成功真值 = 内容管理页或成功 toast 文本
+      const hit = (!leftUpload && !/post\/video/.test(afterUrl)
+                   && /creator\.douyin\.com/.test(afterUrl))
         || /发布成功|审核中|已成功发布/.test(afterBody);
       if (hit) { published = true; break; }
     }
