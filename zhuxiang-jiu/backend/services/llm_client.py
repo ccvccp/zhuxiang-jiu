@@ -854,7 +854,10 @@ class LLMProviderClient:
                     and isinstance(data, bytes)
                     and len(data) > 500
                     and _wav_intact(data)):
-                return data
+                # 2026-10-02 返回口统一清洗: cogtts 前导嘟嘟指纹剥除
+                # (小竹 /tts 播报经 synthesize_mp3 同源受累——上游一处
+                # 修复覆盖全部整句轨调用方; 不匹配零损伤)
+                return _strip_beep_lead_wav(data)
             logger.warning("llm_tts_bad_response ct=%s len=%s "
                            "intact=%s body=%.80s text=%.12s",
                            ctype, len(data) if data else 0,
@@ -884,6 +887,13 @@ class LLMProviderClient:
         首块/完成打点 voice78_tts_stream_first / voice78_tts_
         timing stream=1(G3 first_chunk 段补进埋点体系)。
         失败: yield 单条 {"error": ...} 行(前端识别即回退整句)。
+
+        ⚠ 前导嘟嘟(2026-10-02 实测留档): 流式 PCM 同样带 cogtts
+        前导——形态与整句不同(0-0.35s 宽带脉冲×4-5 + 0.35-2.2s
+        合成噪声, 真语音 ~2.2s 起; _tts_stream.wav 频谱实证);
+        生产 XIAOZHU_TTS_STREAM 默认 off(播报走整句 /tts——已
+        返回口清洗), 本轨暂不透——开启流式前须补首块缓冲清洗
+        (能量检测: 末段长低能后的首个高能帧=语音起点)。
         """
         t = str(text or "").strip()
         if not t:
@@ -990,6 +1000,86 @@ class LLMProviderClient:
         if not wav:
             return None
         return _wav_to_mp3(wav) or wav
+
+
+# cogtts 前导嘟嘟指纹(2026-10-02 三层实证: 频谱/分帧能量/对照实验;
+# sv73 出片+小竹 /tts 播报同源缺陷——整句 synthesize 返回 wav 前
+# 1.78s 为固定 beep 脉冲序列, 与文本/语速/开头词无关, 8 样本指纹
+# 逐帧一致; 详见 sv73_render_service._strip_beep_lead 同款注释):
+_BEEP_FP = (
+    1252, 1264, 1264, 1264, 1264, 1264, 108, 0, 0, 0, 0, 0,
+    0, 0, 878, 1264, 1264, 1264, 1264, 1264, 1264, 1264,
+    1264, 1264, 1264, 1264, 1264, 1264, 1264, 1264, 1264,
+    1264, 900, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 878,
+    1264, 1264, 1264, 1264, 1264, 900, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 1252, 1264, 1264, 1264, 1264, 1264, 108,
+)
+
+
+def _strip_beep_lead_wav(wav_bytes: bytes) -> bytes:
+    """剥除 cogtts 固定前导嘟嘟指纹段(synthesize 返回口统一清洗)
+
+    整句轨全量行为(小竹 /api/xiaozhu/tts 播报经 synthesize_mp3
+    →synthesize 同源受累; sv73 _tts_audio 亦同); 指纹不匹配(智谱
+    改前导/正常音频)零损伤跳过; 89 帧指纹 mean_diff<120 命中即
+    剥除前 1.78s+重写 RIFF/data 长度(病样本实测 57)。
+    sv73_render_service._strip_beep_lead 为本函数同款下游幂等
+    防御副本(上游已剥后指纹必然 miss)。
+    """
+    import array as _array
+    import struct as _struct
+    if len(wav_bytes) < 200 or wav_bytes[:4] != b"RIFF":
+        return wav_bytes
+    try:
+        sr = _struct.unpack("<I", wav_bytes[24:28])[0]
+        pos = 12
+        data_off = data_sz = None
+        while pos + 8 <= len(wav_bytes):
+            cid = wav_bytes[pos:pos + 4]
+            sz = _struct.unpack(
+                "<I", wav_bytes[pos + 4:pos + 8])[0]
+            if cid == b"data":
+                data_off, data_sz = pos + 8, sz
+                break
+            pos += 8 + sz + (sz & 1)
+        if data_off is None or sr <= 0:
+            return wav_bytes
+        frame = int(sr * 0.02)
+        need = len(_BEEP_FP)
+        raw = wav_bytes[data_off:
+                        data_off + frame * (need + 2) * 2]
+        samples = _array.array("h", raw)
+        if len(samples) < frame * need:
+            return wav_bytes
+        rms = []
+        for i in range(need + 2):
+            chunk = samples[i * frame:(i + 1) * frame]
+            acc = 0
+            for s in chunk:
+                acc += s * s
+            rms.append((acc / len(chunk)) ** 0.5)
+        mean_diff = sum(
+            abs(a - b) for a, b in zip(rms, _BEEP_FP)) / need
+        if mean_diff > 120:
+            return wav_bytes     # 指纹不匹配: 零损伤跳过
+        strip_bytes = int(1.78 * sr) * 2
+        if data_sz <= strip_bytes:
+            return wav_bytes
+        new_data = wav_bytes[data_off + strip_bytes:
+                             data_off + data_sz]
+        out = bytearray(wav_bytes[:data_off])
+        out[4:8] = _struct.pack(
+            "<I", data_off + len(new_data) - 8)
+        out[data_off - 4:data_off] = _struct.pack(
+            "<I", len(new_data))
+        out += new_data
+        logger.info("tts_beep_lead_stripped bytes=%d "
+                    "mean_diff=%.1f", strip_bytes, mean_diff)
+        return bytes(out)
+    except Exception as exc:      # noqa: BLE001
+        logger.warning("tts_beep_strip_failed: %s", exc)
+        return wav_bytes
 
 
 def _wav_to_mp3(wav_bytes: bytes) -> bytes | None:
