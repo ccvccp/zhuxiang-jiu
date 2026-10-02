@@ -159,8 +159,9 @@ async function loadCarriers() {
             '<td class="' + scoreCls + '"><b>' + esc(s.score) + '</b></td>' +
             '<td>' + esc(s.sample) + (s.coldStart ? '(冷启动)' : '') + '</td>' +
             '<td>' + pct(s.signRate) + '</td>' +
-            '<td>' + esc(s.avgSignHours) + 'h</td>' +
-            '<td>¥' + esc(s.avgFee) + '</td>' +
+            '<td>' + (s.avgSignHours > 0 ? esc(s.avgSignHours) + 'h'
+                                        : '-') + '</td>' +
+            '<td>' + (s.avgFee > 0 ? '¥' + esc(s.avgFee) : '-') + '</td>' +
             '<td>' + hp + '</td>' +
             '<td>' + esc(h.explain || s.explain || '') + '</td></tr>';
     }).join('');
@@ -312,11 +313,44 @@ async function loadRisks() {
     } catch (e) { showError(String(e.message || e)); }
 }
 
+/* ⑧ 渠道熔断状态(P4b circuit——2026-10-03 补: 引擎有状态机
+ *    而看板原无观测面; GET circuit/status 顶层 {carriers, thresholds}) */
+async function loadCircuit() {
+    try {
+        var body = await fetchJson(api('/api/logistics-ai/circuit/status'),
+                                   { headers: adminHeaders() }, '熔断状态');
+        var d = body.data || {};
+        var rows = d.carriers || [];
+        var el = document.getElementById('circuitList');
+        if (!rows.length) {
+            el.innerHTML = '<tr><td colspan="5" class="dash-empty">' +
+                '暂无渠道数据</td></tr>';
+            return;
+        }
+        var STATE = { open: ['熔断', 'risk-pill'],
+                      half_open: ['半开', 'warn-pill'],
+                      closed: ['健康', 'ok-pill'],
+                      unknown: ['样本不足', 'gray-pill'] };
+        el.innerHTML = rows.map(function (c) {
+            var st = STATE[c.state] || [c.state || '-', 'gray-pill'];
+            return '<tr><td><b>' + esc(c.carrierName || c.carrier)
+                + '</b></td>' +
+                '<td><span class="' + st[1] + '">' + st[0] + '</span></td>' +
+                '<td>' + (c.pickupRate != null
+                          ? pct(c.pickupRate) : '-') + '</td>' +
+                '<td>' + (c.avgTransitHours > 0
+                          ? esc(c.avgTransitHours) + 'h' : '-') + '</td>' +
+                '<td>' + esc(c.sample) + '</td></tr>';
+        }).join('');
+    } catch (e) { showError(String(e.message || e)); }
+}
+
 async function loadAll() {
     document.getElementById('apiBase').value = state.apiBase;
     await Promise.all([
         loadStatus(), loadCarriers(), loadDecisions(),
         loadAnomalies(), loadClaims(), loadCost(), loadRisks(),
+        loadCircuit(),
     ]);
     markUpdate();
 }

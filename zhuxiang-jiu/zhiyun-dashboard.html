@@ -189,6 +189,23 @@
         </div>
     </div>
 
+    <!-- ⑧ 渠道熔断状态 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑧ 渠道熔断状态（揽收率/中转时效/异常率三指标——跌破阈值熔断，样本不足诚实降级）</h3></div>
+            <div style="max-height:220px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>渠道</th><th>状态</th><th>揽收率</th>
+                        <th>中转时效</th><th>样本</th>
+                    </tr></thead>
+                    <tbody id="circuitList"><tr><td colspan="5"
+                        class="dash-empty">加载中…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div class="note-bar">
         后端留空=同源(生产 nginx 反代 /api/) · 本地开发填 http://localhost:8000 ·
         管理端 X-Role: admin(须先登录) · 商城物流查询: logistics.html
