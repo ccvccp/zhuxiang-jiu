@@ -306,7 +306,8 @@ class LogisticsService:
                             insured_value: float = 0.0,
                             settle_mode: str = "monthly",
                             extra_fee: float = 0.0,
-                            discount: float = 1.0) -> dict:
+                            discount: float = 1.0,
+                            waybill_no: str = "") -> dict:
         """物流下单(幂等: 同一 orderId 只能有一个未关闭运单)
 
         Args:
@@ -323,6 +324,9 @@ class LogisticsService:
             settle_mode: 结算模式 monthly/cash/prepaid
             extra_fee: 附加费
             discount: 折扣率(0.6-1.0)
+            waybill_no: 外部运单号(2026-10-03 智运发货流接入——
+                管理员发货手填的真实物流商运单号, 传入则优先使用,
+                留空维持模拟生成; 基础 18 端点不传零影响)
 
         Raises:
             ValueError: 参数非法 / 已有未关闭运单
@@ -373,8 +377,10 @@ class LogisticsService:
 
             # 生成运单号(实际由物流商返回, 此处模拟)
             # 加入随机后缀确保唯一性(避免同毫秒同订单生成相同运单号)
-            import secrets
-            waybill_no = f"{carrier}{ts().replace('-', '').replace(':', '').replace(' ', '')}{order_id[-4:]}{secrets.token_hex(3)}"
+            # 2026-10-03: 外部运单号优先(发货流接入, 真实运单号贯通轨迹)
+            if not waybill_no:
+                import secrets
+                waybill_no = f"{carrier}{ts().replace('-', '').replace(':', '').replace(' ', '')}{order_id[-4:]}{secrets.token_hex(3)}"
 
             order_data = {
                 "waybillNo": waybill_no,

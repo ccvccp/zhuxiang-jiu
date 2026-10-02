@@ -1,0 +1,183 @@
+<!--
+    智运·AI智能物流大模型看板
+    页面: zhiyun-dashboard.html(配套脚本 js/zhiyun-dashboard.js)
+    依赖: css/style.css / 后端 zw_routes(44 端点; X-Role: admin)
+    数据源: GET /api/logistics-ai/{mode,status,route/carrier-scores,
+            route/health,route/decisions,track/anomalies,track/delays,
+            risk/claims,analysis/cost}
+    区块: ①模式态+总览 ②承运商评分+健康度 ③路由决策留痕
+          ④异常/延误预警 ⑤理赔工单 ⑥成本分析
+    红线: 切换/理赔/处置全为建议书——永不自动执行
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智运·AI智能物流大模型看板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#1f4e5f,#12303c);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #12303c;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:8px}
+    .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
+        padding:8px 10px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .v{font-size:17px;font-weight:600}
+    .ov-cell .v.red{color:#c0392b}
+    .ov-cell .v.green{color:#2f9e44}
+    .ov-cell .v.blue{color:#24619c}
+    .ov-cell .v.yellow{color:#a37400}
+    table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
+    .dash-table th{text-align:left;padding:6px 8px;background:
+        var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
+        var(--color-border,#ddd);white-space:nowrap}
+    .dash-table td{padding:5px 8px;border-bottom:1px solid
+        var(--color-border,#eee);vertical-align:top}
+    .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
+        padding:8px 12px;border-radius:5px;margin-bottom:14px;
+        font-size:11px}
+    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    .ok-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600;background:#e9f7ee;color:#2f9e44}
+    .warn-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600;background:#fff7e0;color:#a37400}
+    .risk-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600;background:#fdeaea;color:#c0392b}
+    .gray-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600;background:#eee;color:#888}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>智运·AI智能物流大模型看板</h1>
+    <p>智能路由 · 轨迹智能 · 风控回执 · 分析进化 · 语义调配 · 渠道熔断（发货流已接入）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="留空=同源(生产默认) / http://localhost:8000(本地)"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div class="redline-bar">
+                ⚠️ 治理红线：承运商切换 / 理赔审批 / 异常处置全为<b>建议书模式</b>——
+                永不自动执行，须人工裁决；全链确定性规则（LLM 禁入判定链）。
+            </div>
+        </div>
+    </div>
+
+    <!-- ① 模式态 + 总览 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 模式态 + 大模型总览（数据织物聚合）</h3></div>
+            <div id="ovStatus" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+            <div style="margin-top:8px;font-size:11px;color:#888" id="statusNote"></div>
+        </div>
+    </div>
+
+    <!-- ② 承运商评分 + 健康度 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② 物流商质量评分（签收率40+时效30+费率30）｜容灾健康度</h3></div>
+            <div style="max-height:280px;overflow:auto">
+                <table class="dash-table">
+                    <thead><tr>
+                        <th>承运商</th><th>综合分</th><th>样本</th>
+                        <th>签收率</th><th>均时效</th><th>均费</th>
+                        <th>健康度</th><th>说明</th>
+                    </tr></thead>
+                    <tbody id="carrierList"><tr><td colspan="8"
+                        class="dash-empty">加载中…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ③ 路由决策留痕 + ⑥ 成本分析 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>③ 路由决策留痕（规则×0.6 + 质量×0.4）｜⑥ 成本分析</h3></div>
+            <div style="display:grid;grid-template-columns:3fr 2fr;gap:16px">
+                <div style="max-height:240px;overflow:auto">
+                    <table class="dash-table">
+                        <thead><tr>
+                            <th>决策号</th><th>推荐</th><th>综合分</th>
+                            <th>理由</th><th>时间</th>
+                        </tr></thead>
+                        <tbody id="decisionList"><tr><td colspan="5"
+                            class="dash-empty">加载中…</td></tr></tbody>
+                    </table>
+                </div>
+                <div>
+                    <div id="ovCost" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+                    <div style="margin-top:8px;font-size:11px;color:#888" id="costNote"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ④ 异常/延误预警 + ⑤ 理赔 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>④ 异常四检测器 + 延误预警｜⑤ 理赔工单（建议书）</h3></div>
+            <div style="display:grid;grid-template-columns:3fr 2fr;gap:16px">
+                <div style="max-height:240px;overflow:auto">
+                    <table class="dash-table">
+                        <thead><tr>
+                            <th>运单</th><th>承运商</th><th>类型</th>
+                            <th>级别</th><th>明细</th><th>处置建议</th>
+                        </tr></thead>
+                        <tbody id="anomalyList"><tr><td colspan="6"
+                            class="dash-empty">加载中…</td></tr></tbody>
+                    </table>
+                </div>
+                <div style="max-height:240px;overflow:auto">
+                    <table class="dash-table">
+                        <thead><tr>
+                            <th>理赔号</th><th>类型</th><th>金额</th><th>建议</th>
+                        </tr></thead>
+                        <tbody id="claimList"><tr><td colspan="4"
+                            class="dash-empty">加载中…</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="note-bar">
+        后端留空=同源(生产 nginx 反代 /api/) · 本地开发填 http://localhost:8000 ·
+        管理端 X-Role: admin(须先登录) · 商城物流查询: logistics.html
+    </div>
+</div>
+
+<script src="js/auth.js"></script>
+<script src="js/zhiyun-dashboard.js"></script>
+</body>
+</html>

@@ -327,7 +327,15 @@ async def ship_order(
     body: dict,
     x_role: str = Header(default="", alias="X-Role"),
 ):
-    """发货 PAID → SHIPPED(管理员)"""
+    """发货 PAID → SHIPPED(管理员)
+
+    智运(2026-10-03)发货流接入物流大模型(fail-soft, 全部不阻断):
+        ① 路由建议书: route_decide 推荐承运商(决策留痕, 不改变
+           管理员手填承运商; 尊重 ZW_MODE 决策面门控)
+        ② 写入物流模块: 以真实运单号建物流单进状态机, 数据织物
+           聚合真实业务流(承运商非白名单 SF/JD/YT/DB/LLL 则跳过)
+    响应附 logisticsAI 字段(建议+同步结果)。
+    """
     _require_admin(x_role)
     carrier = body.get("carrier", "")
     waybill_no = body.get("waybillNo", "")
@@ -337,6 +345,61 @@ async def ship_order(
         result = await _service.ship(order_id, carrier, waybill_no)
         # v7.6 自动反馈: 物流路由观察评分(推荐承运商 vs 实际承运商)
         await ai_hooks.on_shipped(order_id, carrier)
+
+        # 智运: ① 路由建议书 + ② 建物流单(真实运单号贯通)
+        logistics_ai = {"advice": None, "waybill": None}
+        try:
+            addr = {}
+            try:
+                order = await _service.get_by_id(order_id)
+                addr = (order or {}).get("address") or {}
+            except Exception:
+                pass
+            weight = float(body.get("weight", 1.0) or 1.0)
+            pieces = int(body.get("pieceCount", 1) or 1)
+            insured = float(body.get("insuredValue", 0) or 0)
+            sender = {"name": "竹香九商城",
+                      "phone": "4000000000",
+                      "address": "山东泰安"}
+            receiver = {"name": addr.get("name", ""),
+                        "phone": addr.get("phone", ""),
+                        "address": addr.get("detail", ""),
+                        "province": addr.get("province", ""),
+                        "city": addr.get("city", "")}
+            try:
+                from services.zw_mode_service import ZwModeService
+                await ZwModeService().require_decision_mode()
+                from services.zw_route_service import ZwRouteService
+                rec = await ZwRouteService().route_decide(
+                    order_type="retail", weight=weight,
+                    piece_count=pieces, insured_value=insured,
+                    sender=sender, receiver=receiver)
+                d = rec.get("decision", {})
+                logistics_ai["advice"] = {
+                    "carrier": d.get("carrier"),
+                    "carrierName": d.get("carrierName"),
+                    "combinedScore": d.get("combinedScore"),
+                    "reason": d.get("ruleReason"),
+                    "note": "推荐建议, 实际承运商由管理员确认"}
+            except Exception:
+                pass  # off/异常 → 无建议
+            try:
+                from services.logistics_service import LogisticsService
+                lo = await LogisticsService().create_order(
+                    order_id=order_id, order_type="retail",
+                    carrier=carrier, service_type="standard",
+                    sender=sender, receiver=receiver,
+                    weight=weight, piece_count=pieces,
+                    insured_value=insured, waybill_no=waybill_no)
+                logistics_ai["waybill"] = {
+                    "waybillNo": lo.get("waybillNo"),
+                    "status": lo.get("status"),
+                    "totalFee": lo.get("totalFee")}
+            except Exception:
+                pass  # 幂等(已有运单)/白名单外承运商 → 跳过
+        except Exception:
+            pass
+        result["logisticsAI"] = logistics_ai
         return result
     except Exception as e:
         raise _handle(e) from e

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<!--
+    商城·物流查询页(用户侧)
+    页面: logistics.html(独立轻量页, 商城登录用户)
+    数据源: GET /api/logistics/order/{waybillNo}(运单摘要)
+            GET /api/logistics/order/{waybillNo}/tracks(轨迹)
+    说明: 运单号来自订单发货通知/订单详情; 未登录引导 login.html
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>物流查询 · 竹香九商城</title>
+<style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+        background:#f5f3ee;color:#333;min-height:100vh}
+    .page{max-width:640px;margin:0 auto;padding:16px 16px 40px}
+    .hero{background:linear-gradient(135deg,#1f4e5f,#12303c);color:#fff;
+        border-radius:14px;padding:22px 20px;margin-bottom:16px}
+    .hero h1{font-size:19px;margin-bottom:6px}
+    .hero p{font-size:12px;opacity:.85}
+    .search-box{display:flex;gap:8px;margin-bottom:16px}
+    .search-box input{flex:1;padding:13px 14px;border:1px solid #ddd;
+        border-radius:10px;font-size:14px;outline:none}
+    .search-box input:focus{border-color:#1f4e5f}
+    .search-box button{padding:0 22px;border:none;border-radius:10px;
+        background:#1f4e5f;color:#fff;font-size:14px;cursor:pointer}
+    .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;
+        box-shadow:0 1px 4px rgba(0,0,0,.05)}
+    .card h3{font-size:14px;margin-bottom:12px;color:#1f4e5f}
+    .kv{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:13px}
+    .kv .k{color:#999;font-size:11px;margin-bottom:2px}
+    .kv .v{font-weight:600;word-break:break-all}
+    .pill{display:inline-block;padding:1px 10px;border-radius:10px;
+        font-size:11px;font-weight:600}
+    .pill.ok{background:#e9f7ee;color:#2f9e44}
+    .pill.warn{background:#fff7e0;color:#a37400}
+    .pill.gray{background:#f0f0f0;color:#888}
+    .timeline{list-style:none}
+    .timeline li{position:relative;padding:0 0 18px 26px;
+        border-left:2px solid #e4dfd4;margin-left:8px}
+    .timeline li:last-child{border-left-color:transparent;padding-bottom:0}
+    .timeline li::before{content:'';position:absolute;left:-7px;top:2px;
+        width:12px;height:12px;border-radius:50%;background:#c9c2b2;
+        border:2px solid #fff}
+    .timeline li.now::before{background:#2f9e44}
+    .timeline .t{font-size:11px;color:#999;margin-bottom:2px}
+    .timeline .d{font-size:13px;font-weight:600}
+    .timeline .loc{font-size:11px;color:#888}
+    .empty{text-align:center;color:#aaa;font-size:13px;padding:30px 0}
+    .err{background:#fee;border:1px solid #f99;color:#c33;border-radius:8px;
+        padding:10px 12px;font-size:12px;margin-bottom:12px;display:none}
+    .tip{font-size:11px;color:#aaa;text-align:center;padding:10px 0}
+    .back{display:block;text-align:center;font-size:13px;color:#1f4e5f;
+        text-decoration:none;padding:12px}
+</style>
+</head>
+<body>
+<div class="page">
+    <div class="hero">
+        <h1>📦 物流查询</h1>
+        <p>输入运单号, 查看包裹运输轨迹与配送状态</p>
+    </div>
+    <div id="errBar" class="err"></div>
+    <div class="search-box">
+        <input id="waybillNo" placeholder="输入运单号"
+               onkeydown="if(event.key==='Enter')doQuery()">
+        <button onclick="doQuery()">查询</button>
+    </div>
+
+    <div id="summaryBox" style="display:none" class="card">
+        <h3>运单信息</h3>
+        <div class="kv" id="sumKv"></div>
+    </div>
+
+    <div id="trackBox" style="display:none" class="card">
+        <h3>物流轨迹</h3>
+        <ul class="timeline" id="trackList"></ul>
+    </div>
+
+    <div id="emptyBox" class="card"><div class="empty">
+        查询运单号即可查看物流轨迹<br><br>
+        运单号可在发货通知短信或订单详情中查看
+    </div></div>
+
+    <div class="tip">竹香九商城 · 智运AI物流提供智能轨迹服务</div>
+    <a class="back" href="index.html">← 返回商城首页</a>
+</div>
+
+<script src="js/auth.js"></script>
+<script>
+'use strict';
+var $ = function (id) { return document.getElementById(id); };
+var STATUS_CN = {
+    pending: ['待下单', 'gray'], booked: ['已下单', 'gray'],
+    picked: ['已揽收', 'warn'], transporting: ['运输中', 'warn'],
+    delivering: ['派送中', 'warn'], signed: ['已签收', 'ok'],
+    failed: ['投递失败', 'warn'], returned: ['已退回', 'gray'],
+};
+
+function showError(msg) {
+    var el = $('errBar');
+    el.textContent = msg; el.style.display = 'block';
+    setTimeout(function () { el.style.display = 'none'; }, 6000);
+}
+
+function api(path, headers) {
+    return fetch(path, { headers: headers || {} }).then(function (r) {
+        return r.json().then(function (b) {
+            if (!r.ok) {
+                var detail = (b && (b.detail || b.error)) || ('HTTP ' + r.status);
+                throw new Error(detail);
+            }
+            return b;
+        });
+    });
+}
+
+function authHeaders() {
+    if (!window.Auth || !Auth.isLoggedIn()) return {};
+    var h = Auth.apiHeaders() || {};
+    h['Content-Type'] = 'application/json';
+    return h;
+}
+
+async function doQuery() {
+    var wb = $('waybillNo').value.trim();
+    if (!wb) { showError('请输入运单号'); return; }
+    var headers = authHeaders();
+    if (!headers.Authorization) {
+        showError('请先登录后查询物流(点击右下角/我的-登录)');
+    }
+    $('emptyBox').style.display = 'none';
+    $('summaryBox').style.display = 'none';
+    $('trackBox').style.display = 'none';
+    try {
+        var body = await api('/api/logistics/order/' + encodeURIComponent(wb),
+                             headers);
+        renderSummary(body.data || body);
+        var tb = await api('/api/logistics/order/'
+                           + encodeURIComponent(wb) + '/tracks', headers);
+        renderTracks(tb.data || []);
+    } catch (e) {
+        showError(String(e.message || e));
+        $('emptyBox').style.display = '';
+    }
+}
+
+function renderSummary(o) {
+    var st = STATUS_CN[o.status] || [o.status, 'gray'];
+    var kv = [
+        ['运单号', o.waybillNo], ['状态', ''],
+        ['承运商', o.carrierName || o.carrier],
+        ['服务类型', o.serviceType || '-'],
+        ['收件人', (o.receiverName || '-') + '（'
+            + (o.receiverPhone || '-') + '）'],
+        ['收件地址', o.receiverAddress || '-'],
+        ['件数', o.pieceCount || '-'], ['重量', (o.weight || '-') + ' kg'],
+    ];
+    $('sumKv').innerHTML = kv.map(function (x) {
+        var v = x[1] === '' ? '<span class="pill ' + st[1] + '">' + st[0]
+            + '</span>' : String(x[1] == null ? '-' : x[1]);
+        return '<div><div class="k">' + x[0] + '</div><div class="v">' + v
+            + '</div></div>';
+    }).join('');
+    $('summaryBox').style.display = '';
+}
+
+function renderTracks(rows) {
+    var list = (rows || []).slice().reverse();  /* 倒序→正序展示 */
+    if (!list.length) {
+        $('trackBox').style.display = '';
+        $('trackList').innerHTML = '<div class="empty">暂无轨迹信息, 请稍后再查</div>';
+        return;
+    }
+    $('trackList').innerHTML = list.map(function (t, i) {
+        var time = String(t.trackTime || '').replace('T', ' ').slice(0, 16);
+        return '<li' + (i === list.length - 1 ? ' class="now"' : '') + '>'
+            + '<div class="t">' + time + '</div>'
+            + '<div class="d">' + (t.description || t.trackStatus || '') + '</div>'
+            + (t.location ? '<div class="loc">' + t.location + '</div>' : '')
+            + '</li>';
+    }).join('');
+    $('trackBox').style.display = '';
+}
+</script>
+</body>
+</html>
