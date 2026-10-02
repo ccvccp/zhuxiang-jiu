@@ -771,6 +771,38 @@ input, textarea, select {
     background: var(--color-primary-dark);
 }
 
+/* ---------- 同盟臻选商城(37号同盟商品) ---------- */
+.alliance-card {
+    border: 1px solid rgba(74, 124, 89, 0.12);
+}
+
+/* 类目视觉区: 柔竹绿渐变底(区别于自营酒瓶造型), emoji 大图标居中 */
+.alliance-img {
+    background: linear-gradient(135deg, #eef3ea, #dce8d8);
+}
+
+.alliance-cat-icon {
+    display: inline-block;
+    font-size: 84px;
+    line-height: 1;
+    filter: drop-shadow(0 10px 18px rgba(58, 92, 74, 0.28));
+    transition: var(--transition);
+}
+
+.alliance-card:hover .alliance-cat-icon {
+    transform: scale(1.1);
+}
+
+/* 商品条码小字(卡片右下, 溢出省略) */
+.alliance-sku {
+    font-size: 12px;
+    color: var(--color-text-light);
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ---------- 品牌故事区 ---------- */
 .brand-story {
     background: linear-gradient(135deg, #f8f6f0, #eef3e8);

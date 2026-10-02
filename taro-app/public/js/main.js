@@ -75,7 +75,7 @@ function showToast(msg) {
 // ---------- 渲染头部导航 ----------
 function renderHeader(active = '') {
     const navItems = [
-        { name: '首页', url: 'index.html', key: 'home' },
+        { name: '首页', url: 'official.html', key: 'home' },
         { name: '酒类介绍', url: 'products.html', key: 'products' },
         { name: '酒类销售', url: 'cart.html', key: 'shop' },
         { name: '客户服务', url: 'service.html', key: 'service' },
@@ -92,7 +92,7 @@ function renderHeader(active = '') {
     </div>
     <header class="header">
         <div class="container header-inner">
-            <a href="index.html" class="logo">
+            <a href="official.html" class="logo">
                 <span class="logo-icon">竹</span>
                 <span class="logo-text">竹香酒<small>ZHUXIANG JIU</small></span>
             </a>
