@@ -49,13 +49,25 @@
             font-size: 14px; background: #fff;
         }
         .form-item input:focus { outline: none; border-color: var(--color-primary); }
-        /* 18 岁合规声明勾选框(注册页签): 排除文本框统一样式
-         * (width:100%/padding 会把 checkbox 撑成空盒, 勾选态不可见);
-         * 18px 触屏友好, label 整行可点(移动端大热区) */
+        /* 18 岁合规声明勾选框(注册页签): 纯 CSS 自绘(不依赖原生
+         * appearance/accent-color——部分移动 webview 勾选态渲染
+         * 不可见, 用户实测无 ☑); 空=绿框白底, 选中=绿底白✓ */
         .form-item input[type="checkbox"] {
-            width: 18px; height: 18px; margin: 0; padding: 0;
-            flex: none; cursor: pointer;
-            accent-color: var(--color-primary);
+            appearance: none; -webkit-appearance: none;
+            width: 20px; height: 20px; margin: 0; padding: 0;
+            flex: none; position: relative; cursor: pointer;
+            border: 2px solid var(--color-primary);
+            border-radius: 5px; background: #fff;
+            transition: background .15s, border-color .15s;
+        }
+        .form-item input[type="checkbox"]:checked {
+            background: var(--color-primary);
+        }
+        .form-item input[type="checkbox"]:checked::after {
+            content: '✓';
+            position: absolute; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-size: 14px; font-weight: bold; line-height: 1;
         }
         .form-item.adult-row label {
             flex: 1; cursor: pointer; -webkit-tap-highlight-color: transparent;
