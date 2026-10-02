@@ -480,6 +480,11 @@ async def _on_startup():
     from services.knowledge_quality_scheduler import (
         start_scheduler as start_knowledge_quality)
     start_knowledge_quality()
+    # 知识库自动抓取调度(2026-10-02 补齐"自动智能获取"链路,
+    # KNOWLEDGE_CRAWL_AUTO=off 可关闭; 种子源白名单制)
+    from services.knowledge_crawl_scheduler import (
+        start_scheduler as start_knowledge_crawl)
+    start_knowledge_crawl()
     # 城市门店月度考核(P1-10, CITYSTORE_ASSESSMENT_AUTO=off 可关闭)
     from services.citystore_assessment_scheduler import (
         start_scheduler as start_citystore_assessment)
@@ -693,6 +698,10 @@ async def _on_shutdown():
     from services.knowledge_quality_scheduler import (
         stop_scheduler as stop_knowledge_quality)
     stop_knowledge_quality()
+    # 知识库自动抓取调度
+    from services.knowledge_crawl_scheduler import (
+        stop_scheduler as stop_knowledge_crawl)
+    stop_knowledge_crawl()
     # 城市门店月度考核
     from services.citystore_assessment_scheduler import (
         stop_scheduler as stop_citystore_assessment)

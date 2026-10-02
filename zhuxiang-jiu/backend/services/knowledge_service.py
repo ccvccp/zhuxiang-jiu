@@ -1845,10 +1845,19 @@ class KnowledgeService:
         if source is None:
             raise KeyError(f"种子源不存在(id={source_id})")
         import urllib.request
+        from urllib.parse import quote
         try:
+            # IRI→URI: 中文路径 URL(如维基百科 /wiki/白酒)须百分号
+            # 编码, 否则 http.client 以 ascii 编码请求行即炸
+            # (2026-10-02 生产首轮实证; safe 含 % 防二次编码)
             req = urllib.request.Request(
-                source["url"],
-                headers={"User-Agent": "ZhuxiangKnowledgeBot/1.0"})
+                quote(source["url"], safe=":/?&#=%"),
+                headers={
+                    # Wikimedia UA 政策: 机器人须带可联系信息, 裸
+                    # "Bot/1.0" 会被 403 Too Many Reqs(2026-10-02
+                    # 生产实证; 带联系信息后同 IP 直接过)
+                    "User-Agent": "ZhuxiangKnowledgeBot/1.0 "
+                                  "(+https://zxjiu.com)"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 raw = resp.read().decode("utf-8", errors="ignore")
         except Exception as exc:
