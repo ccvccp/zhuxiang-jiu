@@ -63,6 +63,22 @@ ROLE_LABELS = {
 # care 0.92 / steady 0.95 / cheerful 1.02——跨端常量互指)
 BGM_MOOD_SPEED = {"warm": 0.92, "steady": 0.95, "cheerful": 1.02}
 
+# cogtts 前导嘟嘟指纹(2026-10-02 实证: synthesize 返回 wav 前
+# 1.78s 为固定 beep 脉冲序列——恒定振幅帧串(RMS≈1264)+孤立静音
+# 间隔, 与文本/语速/开头词无关(b_noopen 变体逐帧一致); 数字人
+# 出片以全段 wav 驱动口型 → 「嘴动无配音/嘟嘟后才出配音」缺陷
+# 的根因。指纹法精确匹配(8 样本 mean_diff=0), 不匹配(智谱改
+# 前导/正常音频)安全跳过零损伤。20ms 帧 RMS 序列(帧 0-88):
+_BEEP_FP = (
+    1252, 1264, 1264, 1264, 1264, 1264, 108, 0, 0, 0, 0, 0,
+    0, 0, 878, 1264, 1264, 1264, 1264, 1264, 1264, 1264,
+    1264, 1264, 1264, 1264, 1264, 1264, 1264, 1264, 1264,
+    1264, 900, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 878,
+    1264, 1264, 1264, 1264, 1264, 900, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 1252, 1264, 1264, 1264, 1264, 1264, 108,
+)
+
 
 def tts_mode() -> bool:
     """SV73_TTS_MODE(默认 off——铁律)"""
@@ -243,10 +259,81 @@ class Sv73RenderService:
 
     # ---------- TTS 配音轨(可选, 48号小竹语音) ----------
 
+    @staticmethod
+    def _strip_beep_lead(wav_bytes: bytes) -> bytes:
+        """剥除 cogtts 固定前导嘟嘟指纹段(2026-10-02 三片+旧片+
+        复现 8 样本实证; 指纹不匹配安全跳过零损伤)
+
+        嘟嘟=恒定振幅帧串+孤立静音(频谱: 200-400Hz 窄带脉冲),
+        SadTalker 全段驱动 → 嘴动无配音缺陷; 剥除点=指纹尾
+        1.78s(88 帧), 其后过渡微弱段一并带过。
+        """
+        import array as _array
+        import struct as _struct
+        if len(wav_bytes) < 200 or wav_bytes[:4] != b"RIFF":
+            return wav_bytes
+        try:
+            sr = _struct.unpack(
+                "<I", wav_bytes[24:28])[0]
+            pos = 12
+            data_off = data_sz = None
+            while pos + 8 <= len(wav_bytes):
+                cid = wav_bytes[pos:pos + 4]
+                sz = _struct.unpack(
+                    "<I", wav_bytes[pos + 4:pos + 8])[0]
+                if cid == b"data":
+                    data_off, data_sz = pos + 8, sz
+                    break
+                pos += 8 + sz + (sz & 1)
+            if data_off is None or sr <= 0:
+                return wav_bytes
+            frame = int(sr * 0.02)
+            need = len(_BEEP_FP)
+            raw = wav_bytes[data_off:
+                            data_off + frame * (need + 2) * 2]
+            samples = _array.array("h", raw)
+            if len(samples) < frame * need:
+                return wav_bytes
+            rms = []
+            for i in range(need + 2):
+                chunk = samples[i * frame:(i + 1) * frame]
+                acc = 0
+                for s in chunk:
+                    acc += s * s
+                rms.append((acc / len(chunk)) ** 0.5)
+            mean_diff = sum(
+                abs(a - b) for a, b in zip(rms, _BEEP_FP)
+            ) / need
+            if mean_diff > 120:
+                return wav_bytes     # 指纹不匹配: 零损伤跳过
+            # (阈值 120: 8 病样本+短文本复现实测 57; 正常语音
+            #  波动模式与固定 beep 序列 mean_diff 在数百级——
+            #  实证长/短文本均命中同指纹, cogtts 整句接口全量行为)
+            strip_bytes = int(1.78 * sr) * 2
+            if data_sz <= strip_bytes:
+                return wav_bytes
+            new_data = wav_bytes[data_off + strip_bytes:
+                                 data_off + data_sz]
+            head = wav_bytes[:data_off]
+            out = bytearray(head)
+            out[4:8] = _struct.pack(
+                "<I", len(head) + len(new_data) - 8)
+            # data 块长度字段(块头 +4)
+            out[data_off - 4:data_off] = _struct.pack(
+                "<I", len(new_data))
+            out += new_data
+            logger.info("sv73_tts_beep_stripped bytes=%d "
+                        "mean_diff=%.1f", strip_bytes,
+                        mean_diff)
+            return bytes(out)
+        except Exception as exc:      # noqa: BLE001
+            logger.warning("sv73_tts_strip_failed: %s", exc)
+            return wav_bytes
+
     def _tts_audio(self, storyboard: dict) -> Path | None:
         """全量 voiceover → WAV(SV73_TTS_MODE=on 时; P1-2 语速
         随 BGM 情绪档——48号 MOOD_SPEED 同值锚定; 失败 fail-soft
-        返回 None——无声同 36号)"""
+        返回 None——无声同 36号; cogtts 前导嘟嘟指纹剥除)"""
         from services.llm_client import provider_client
         text = "。".join(sc["voiceover"]
                          for sc in storyboard["scenes"])
@@ -261,6 +348,7 @@ class Sv73RenderService:
             return None
         if not wav:
             return None
+        wav = self._strip_beep_lead(wav)
         path = SV73_VIDEO_DIR / f"{storyboard['scriptId']}_tts.wav"
         path.write_bytes(wav)
         return path
