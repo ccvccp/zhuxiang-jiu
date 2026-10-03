@@ -13,7 +13,9 @@ import sys
 PASS = 0
 FAIL = 0
 RESULTS = []
-ADMIN = {"X-Role": "admin"}
+# 真 Bearer 轨(Bearer 第四批迁移): 模块级同步铸造, 与生产同构
+ADMIN = {"Authorization":
+         "Bearer " + test_support.mint_token(role="admin")}
 
 
 def check(name, cond, detail=""):

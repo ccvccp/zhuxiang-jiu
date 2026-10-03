@@ -14,7 +14,10 @@ PASS = 0
 FAIL = 0
 RESULTS = []
 
-ADMIN = {"X-Role": "admin"}
+# 真 Bearer 轨(Bearer 第四批迁移): 模块级同步铸造(zhidan 首批
+# 模式), 中间件验签注入 x-role=admin, 与生产同构
+ADMIN = {"Authorization":
+         "Bearer " + test_support.mint_token(role="admin")}
 
 
 def check(name, cond, detail=""):
