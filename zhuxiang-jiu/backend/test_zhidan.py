@@ -25,6 +25,8 @@ os.environ["STORE_MODE"] = "asyncio"
 os.environ["AUTH_MODE"] = "compat"
 os.environ["ZD_MODE"] = "assist"   # 三态灰度(升级后决策面需开档)
 
+import test_support  # noqa: F401 (直跑自举: 头信任, 防 X-Role 被中间件剥离 403)
+
 from repositories.store import _mock_store
 
 PASS = 0

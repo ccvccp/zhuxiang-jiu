@@ -28,6 +28,8 @@ os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ["AUTH_MODE"] = "compat"
 
+import test_support  # noqa: F401 (直跑自举: 头信任, 防 X-Role 被中间件剥离 403)
+
 from services.zw_mode_service import (
     ZwModeService, MODE_VALUES,
 )
