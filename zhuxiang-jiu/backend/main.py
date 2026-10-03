@@ -584,13 +584,19 @@ async def _on_startup():
     from services.hrm81_scheduler import start_scheduler as start_hrm81
     start_hrm81()
     # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
+    # + 雷达2.0采集评分/引擎学习回流(2026-10-03 检查升级补齐,
+    #   BLOGGER_RADAR2_AUTO/BLOGGER_ENGINE_LEARNING_AUTO=off 可关闭)
     from services.blogger_scheduler import (
         start_radar_scheduler as start_blogger_radar,
         start_publish_scheduler as start_blogger_publish,
-        start_learning_scheduler as start_blogger_learning)
+        start_learning_scheduler as start_blogger_learning,
+        start_radar2_scheduler as start_blogger_radar2,
+        start_engine_learning_scheduler as start_blogger_el)
     start_blogger_radar()
     start_blogger_publish()
     start_blogger_learning()
+    start_blogger_radar2()
+    start_blogger_el()
     # 41号·AI智能代驾: 学习回流(RIDE_LEARNING_AUTO=off 可关闭)
     from services.ride_scheduler import start_learning_scheduler as start_ride_learning
     start_ride_learning()
