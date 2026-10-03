@@ -302,6 +302,45 @@ async def main():
            cmd2 is not None and cmd2["action"] == "order.query",
            str(cmd2 and cmd2.get("action")))
 
+    # ---- P3: 混合意图拆分 ----
+    from services.zs_search_service import split_sub_intents
+    subs = split_sub_intents("竹奕酒多少钱，顺便看看我的订单发货了吗",
+                             "product")
+    record("P3拆分-副意图检测(order)",
+           subs and subs[0][0] == "order", str(subs))
+    record("P3拆分-单意图不拆",
+           split_sub_intents("竹奕酒多少钱", "product") == [], "")
+    record("P3拆分-短片段不拆",
+           split_sub_intents("竹奕酒，哈", "product") == [], "")
+    # 主链: 混合句双路合并回答(游客 order 副路给登录引导)
+    rmix = await svc.query("竹奕酒多少钱，顺便看看我的订单发货了吗",
+                           member_id=0, role="guest")
+    record("P3拆分-主意图仍product",
+           rmix["intent"] == "product", str(rmix.get("intent")))
+    record("P3拆分-副问摘要合并回答",
+           "订单服务" in rmix["answer"] and "登录" in rmix["answer"],
+           str(rmix["answer"])[:100])
+    dmix = next(d for d in await svc.decisions(limit=200)
+                if d.get("query") == "竹奕酒多少钱,顺便看看我的订单"
+                                     "发货了吗")   # NFKC 全角逗号已归一
+    record("P3拆分-留痕subIntents",
+           (dmix.get("subIntents") or [{}])[0].get("intent")
+           == "order", str(dmix.get("subIntents")))
+    record("P3拆分-副卡标记进结果",
+           any(r.get("subIntent") == "order"
+               for r in rmix.get("results", [])),
+           str(len(rmix.get("results", []))))
+    # 护栏: 合规整句拦截优先(混合句含违规词不拆不放行)
+    rblk = await svc.query("竹奕酒多少钱，这酒能治病吗",
+                           member_id=0, role="guest")
+    record("P3拆分-合规整句拦截优先",
+           rblk["intent"] == "blocked", str(rblk.get("intent")))
+    # 护栏: 上限2路(三意图混合只拆1个副意图)
+    subs3 = split_sub_intents(
+        "竹奕酒多少钱，看看我的订单，会员积分还有多少", "product")
+    record("P3拆分-子查询上限(仅1副意图)", len(subs3) == 1,
+           str(subs3))
+
     # ---- 留痕与观测 ----
     ds = await svc.decisions(limit=10)
     record("留痕-决策落库", len(ds) >= 5

@@ -30,7 +30,7 @@ from core.locks import get_lock
 
 logger = logging.getLogger("zs_search_service")
 
-MODEL_VERSION = "v1.2-zhisou-p2"
+MODEL_VERSION = "v1.3-zhisou-p3"
 
 
 # ============================================================
@@ -107,6 +107,38 @@ ACTION_BOOST_STEP = 0.03
 
 # 兜底置信线(最高意图得分 < 此值 → chat)
 INTENT_CONFIDENCE_LINE = 2.0
+
+# P3 混合意图拆分: 子查询上限(总路数 = 主1 + 副1 = 2, 防时延放大)
+SUB_INTENT_MAX = 1
+# 分句分隔符(中文标点 + 半角)
+_SENT_SPLIT = re.compile(r"[，。！？；、,;?!]")
+
+
+def split_sub_intents(text: str, main_intent: str) -> list[tuple]:
+    """混合意图拆分(P3): 标点分句 → 独立分类 → 副意图片段
+
+    - 仅取与主意图不同且达置信线的片段(防低置信误拆)
+    - 上限 SUB_INTENT_MAX(总 2 路防时延放大)
+    - 合规前置在主链 L2 已整句拦截, 此处不会收到违规文本
+    - 短片段(<2字)不参与(防"顺便"类碎片误判)
+    """
+    frags = [f.strip() for f in _SENT_SPLIT.split(text)
+             if len(f.strip()) >= 2]
+    subs: list[tuple] = []
+    seen = {main_intent}
+    for frag in frags:
+        c = classify_intent(frag)
+        it = c["intent"]
+        if it in ("chat", "blocked") or it in seen:
+            continue
+        best = c["candidates"][0][1] if c["candidates"] else 0
+        if best < INTENT_CONFIDENCE_LINE:
+            continue
+        subs.append((it, frag))
+        seen.add(it)
+        if len(subs) >= SUB_INTENT_MAX:
+            break
+    return subs
 
 # 意图业务权重(L4 业务分项; 商品/品牌高价值意图加权)
 INTENT_BONUS = {"product": 1.0, "brand": 0.8, "agent": 0.9,
@@ -785,10 +817,35 @@ class ZsSearchService:
             else:
                 answer = ("暂未检索到直接相关的站内信息; "
                           "您可以换个说法, 或转人工客服为您服务")
+        # P3 混合意图: 副问摘要追加(主问优先, 副问补充——一句话
+        # 多问不再只答主意图)
+        sub_cards = [c for c in ranked if c.get("subIntentName")]
+        if sub_cards:
+            sc = sub_cards[0]
+            answer += (f" 另外, 关于您的{sc['subIntentName']}问题: "
+                       f"{sc['title']} —— {str(sc['snippet'])[:48]}")
         return {"answer": answer, "actions": actions[:4],
                 "sources": [c["source"] for c in ranked[:3]]}
 
     # ---------- 主入口 ----------
+
+    # ---------- L3 多路检索调度(P3 抽公共方法供主/副意图复用) ----------
+
+    async def _gather(self, intent: str, text: str, slots: dict,
+                      member_id: int, role: str,
+                      ktext: str = "") -> list[dict]:
+        """按意图走对应检索路(R1-R5)"""
+        routes = INTENT_ROUTES.get(intent, ("knowledge",))
+        out: list[dict] = []
+        if "product" in routes:
+            out += await self._route_product(slots, text)
+        if "equity" in routes:
+            out += await self._route_equity(member_id, role)
+        if "order" in routes:
+            out += await self._route_order(member_id, slots)
+        if "knowledge" in routes:
+            out += await self._route_knowledge(ktext or text)
+        return out
 
     async def query(self, text: str, member_id: int = 0,
                     role: str = "guest") -> dict:
@@ -864,18 +921,41 @@ class ZsSearchService:
         # LLM 改写问句检索——embedding 语义召回对口语更友好)
         routes = INTENT_ROUTES.get(clf["intent"], ("knowledge",))
         candidates: list[dict] = []
-        if "product" in routes:
-            candidates += await self._route_product(slots, text)
-        if "equity" in routes:
-            candidates += await self._route_equity(member_id, role)
-        if "order" in routes:
-            candidates += await self._route_order(member_id, slots)
-        if "knowledge" in routes:
-            ktext = text
-            if llm_assist and llm_assist.get("adopted") \
-                    and llm_assist.get("query"):
-                ktext = llm_assist["query"]
-            candidates += await self._route_knowledge(ktext)
+        ktext = text
+        if llm_assist and llm_assist.get("adopted") \
+                and llm_assist.get("query"):
+            ktext = llm_assist["query"]
+        for r in ("product", "equity", "order", "knowledge"):
+            if r in routes:
+                if r == "product":
+                    candidates += await self._route_product(slots, text)
+                elif r == "equity":
+                    candidates += await self._route_equity(member_id,
+                                                          role)
+                elif r == "order":
+                    candidates += await self._route_order(member_id,
+                                                         slots)
+                else:
+                    candidates += await self._route_knowledge(ktext)
+
+        # P3 混合意图拆分: 主意图高置信时检测副意图片段, 副路
+        # 结果标记 subIntent 进融合(主问优先, 副问补充; 上限2路)
+        sub_intents: list[dict] = []
+        if clf["intent"] != "chat" and not llm_assist:
+            for s_intent, s_text in split_sub_intents(text,
+                                                      clf["intent"]):
+                s_slots = extract_slots(s_text, s_intent)
+                s_cards = await self._gather(
+                    s_intent, s_text, s_slots, member_id, role)
+                for c in s_cards:
+                    c["subIntent"] = s_intent
+                    c["subIntentName"] = INTENT_NAMES.get(s_intent,
+                                                          s_intent)
+                candidates += s_cards
+                sub_intents.append({"intent": s_intent, "text": s_text,
+                                    "resultCount": len(s_cards)})
+        if sub_intents:
+            decision["subIntents"] = sub_intents
 
         # L4 融合重排(业务分项挂 routeBoost 进化参数)
         ranked = self._fuse(clf["intent"], role, candidates,
