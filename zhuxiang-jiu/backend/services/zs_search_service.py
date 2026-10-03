@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import unicodedata
 
 from core.helpers import ts
 from core.locks import get_lock
@@ -203,12 +204,31 @@ def classify_intent(text: str) -> dict:
             "candidates": ranked[:3]}
 
 
+# 否定前缀词(四轮审查补: "不要送礼的"类否定语义——被否定的
+# 场景/商品词不应进槽位误导检索)
+_NEG_PREFIXES = ("不想要", "不想", "不喜欢", "不要", "别买", "别提")
+
+
+def _is_negated(text: str, word: str) -> bool:
+    """词前紧邻否定前缀 → True(确定性子串序检查, 间隔≤1字)"""
+    pos = text.find(word)
+    if pos <= 0:
+        return False
+    for neg in _NEG_PREFIXES:
+        npos = text.rfind(neg, 0, pos)
+        if npos >= 0 and pos - (npos + len(neg)) <= 1:
+            return True
+    return False
+
+
 def extract_slots(text: str, intent: str) -> dict:
     """槽位提取(MVP: 价格区间/场景/商品词; 三轮审查补全规划第三节)
 
     2026-10-03 三轮审查: 补 orderNo/waybillNo/level/province——
     订单号(RT+毫秒+序号)/快递运单号(承运商前缀)/会员等级/省份,
     供 R4 精确单查询与 R2 等级问答消费。
+    2026-10-03 四轮审查: 否定语义剔除(被"不要/不想要"紧邻修饰的
+    场景/商品词不进槽位)。
     """
     slots: dict = {}
     m = re.search(r"(\d+)\s*[-~到至]\s*(\d+)\s*元", text)
@@ -221,11 +241,14 @@ def extract_slots(text: str, intent: str) -> dict:
     for scene, words in (("送礼", ("送礼", "礼品", "礼盒")),
                          ("宴请", ("宴请", "请客", "商务")),
                          ("收藏", ("收藏", "陈酿", "老酒"))):
-        if any(w in text for w in words):
+        hit = next((w for w in words if w in text
+                    and not _is_negated(text, w)), None)
+        if hit:
             slots.setdefault("scene", scene)
             break
     product_words = [w for w in ("竹奕", "竹香", "42度", "52度",
-                                 "礼盒") if w in text]
+                                 "礼盒") if w in text
+                     and not _is_negated(text, w)]
     if product_words:
         slots["productWords"] = product_words
     # ---- 三轮审查补全(规划第三节槽位表) ----
@@ -777,6 +800,9 @@ class ZsSearchService:
         text = (text or "").strip()
         if not text:
             raise ValueError("搜索内容不能为空")
+        # 四轮审查补: NFKC 归一化——全角字母/数字(Ｌ３/ＲＴ１２３)
+        # 归一半角, 槽位正则与锚点判定统一口径(留痕存归一化文本)
+        text = unicodedata.normalize("NFKC", text)
         if len(text) > 200:
             text = text[:200]
 
