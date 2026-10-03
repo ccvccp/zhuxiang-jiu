@@ -602,6 +602,11 @@ async def _on_startup():
     from services.flashsale_scheduler import (
         start_scheduler as start_flashsale_expire)
     start_flashsale_expire()
+    # 顺手赚钱: 日度巡检(POCKET_SCAN_AUTO=off 可关闭; 2026-10-04
+    # 检查升级补齐——原纯请求驱动零调度, 存续奖到期无人知晓)
+    from services.pocket_scheduler import (
+        start_scheduler as start_pocket_scan)
+    start_pocket_scan()
     # 41号·AI智能代驾: 学习回流(RIDE_LEARNING_AUTO=off 可关闭)
     from services.ride_scheduler import start_learning_scheduler as start_ride_learning
     start_ride_learning()

@@ -341,20 +341,27 @@ class PocketService:
                           if float(c.get("rewardAmount", 0)) > 0]
         total_checkin_reward = sum(
             float(c.get("rewardAmount", 0)) for c in valid_checkins)
-        ready_month = sum(
-            1 for s in sites
+        ready_sites = [
+            s for s in sites
             if self._active_days(s) >= duration_days
             and not s.get("monthRewardClaimed")
-            and s.get("status") == "active")
+            and s.get("status") == "active"]
+        # 2026-10-04 口径修正: 原统一按车贴价(30)预估——混合海报
+        # 点位时高估; 改按点位实际物料类型(SCENES 映射)求和
+        poster_price = float(settings.get("monthRewardPoster", 20.0))
+        sticker_price = float(settings.get("monthRewardSticker", 30.0))
+        ready_amount = sum(
+            sticker_price if SCENES.get(s.get("scene", "")) == "sticker"
+            else poster_price
+            for s in ready_sites)
         return {
             "activeSiteCount": sum(1 for s in sites
                                    if s.get("status") == "active"),
             "totalSiteCount": len(sites),
             "totalCheckinCount": len(valid_checkins),
             "totalCheckinReward": round(total_checkin_reward, 2),
-            "monthRewardReadyCount": ready_month,
-            "monthRewardReadyAmount": round(ready_month * (
-                settings.get("monthRewardSticker", 30.0)), 2),
+            "monthRewardReadyCount": len(ready_sites),
+            "monthRewardReadyAmount": round(ready_amount, 2),
             "checkinReward": settings.get("checkinReward", 2.0),
             "monthRewardPoster": settings.get("monthRewardPoster", 20.0),
             "monthRewardSticker": settings.get("monthRewardSticker", 30.0),

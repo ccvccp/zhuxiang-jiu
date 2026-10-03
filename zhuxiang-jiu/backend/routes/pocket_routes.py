@@ -229,6 +229,24 @@ async def admin_list_sites(
         member_id=member_id, scene=scene, status=status, limit=limit)}
 
 
+@router.get("/api/pocket/admin/overview", tags=["顺手赚钱模块"])
+async def admin_overview(
+    refresh: int = Query(0, ge=0, le=1,
+                         description="1=触发即时巡检(默认读最近)"),
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """运营总览(2026-10-04 检查升级: 观测面聚合——点位分布/
+    到期未领(奖励沉默风险)/沉默点位/发放对账; 纯观测不改资金)"""
+    _require_admin(x_role)
+    try:
+        from services import pocket_scheduler as sched
+        if refresh or not sched.last_scan():
+            return await sched.run_scan()
+        return sched.last_scan()
+    except Exception as exc:
+        _handle(exc)
+
+
 @router.post("/api/pocket/admin/sites/{site_id}/invalidate",
              tags=["顺手赚钱模块"])
 async def admin_invalidate_site(
