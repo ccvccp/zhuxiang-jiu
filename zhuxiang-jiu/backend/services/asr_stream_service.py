@@ -235,12 +235,20 @@ class AsrStreamSession:
                 self._done.set()
 
     async def feed(self, pcm: bytes) -> None:
-        """转发音频二进制帧(16k 16bit mono PCM, 段内专用连接)"""
+        """转发音频二进制帧(16k 16bit mono PCM, 段内专用连接)
+
+        2026-10-03 晚高峰回归加固: 发送失败(1007 断连/超时)时
+        置 _failed 并拆除连接——原先只 warning 吞掉, 段中死连接
+        要拖到 finish 的 8s done 超时才暴露, H5 回退整段轨的
+        error 事件晚到; 快速置败让 finish 立即走 fallback。"""
         if self._ws is not None and self._started.is_set() and pcm:
             try:
                 await self._ws.send(pcm)
             except Exception as exc:
                 logger.warning("stream_feed_failed: %s", exc)
+                if not self._done.is_set():
+                    self._failed = str(exc)
+                    self._done.set()
 
     async def finish(self, timeout: float = 8) -> str | None:
         """finish-task → 等终态, 返回最终文本(失败/空返回 None)"""

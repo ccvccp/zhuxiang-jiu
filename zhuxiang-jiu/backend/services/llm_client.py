@@ -609,8 +609,15 @@ class LLMProviderClient:
                      "Authorization": f"Bearer {api_key}"},
             method="POST")
         try:
+            # ASR 专用短超时(2026-10-03 晚高峰回归修复):
+            # 原用全局 _TIMEOUT——LLM_TIMEOUT 15→60(E2E 修复)把
+            # aliyun 轨失败到降级智谱的窗口从 15s 拖到 60s, 跨境
+            # 晚高峰劣化期用户等满 60s 无响应; ASR 属用户交互快
+            # 调用, 超时独立于长文生成链(15s 内不成即降级)
+            _asr_to = int(os.environ.get(
+                "ASR_HTTP_TIMEOUT", "15"))
             with llm_timer("transcribe"), urllib.request.urlopen(
-                    request, timeout=_TIMEOUT) as resp:
+                    request, timeout=max(5, _asr_to)) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
             logger.warning("aliyun_asr_failed(回退zhipu): %s", exc)
