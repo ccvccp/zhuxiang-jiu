@@ -1,7 +1,7 @@
 /**
  * 顺手赚钱 · 张贴广告物料打卡获利
  * 数据来源: 后端 /api/pocket/*
- * 玩法: 张贴海报/车贴 → 每日打卡(AI评估¥2/次) → 满30天领存续奖(海报¥20/车贴¥30)
+ * 玩法: 张贴海报/车贴 → 每日打卡(AI评估¥2/次) → 满30天打卡自动加存续奖(海报¥20/车贴¥30, 也可手动领取)
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Input } from '@tarojs/components';
@@ -234,10 +234,17 @@ const PocketPage: React.FC = () => {
     }
   };
 
-  // 每日打卡(现场拍照 → 指纹 → 打卡一步完成)
+  // 每日打卡(现场拍照 → 指纹 → 打卡一步完成; 方案 D: 满月
+  // 打卡自动连带存续奖, toast 联动提示)
   const handleCheckin = (site: PocketSiteVO) => takePhoto(async hash => {
-    await PocketAPI.checkin(site.siteId, hash);
-    Taro.showToast({ title: `打卡成功 +¥${stats.checkinReward}`, icon: 'success' });
+    const res: any = await PocketAPI.checkin(site.siteId, hash);
+    const month = res?.monthReward;
+    Taro.showToast({
+      title: month
+        ? `打卡+¥${stats.checkinReward} 存续奖+¥${month.amount}`
+        : `打卡成功 +¥${stats.checkinReward}`,
+      icon: 'success',
+    });
     loadData();
   });
 
@@ -378,7 +385,7 @@ const PocketPage: React.FC = () => {
             <View className={styles.siteActions}>
               {s.status === 'active' && (
                 <View className={styles.checkinBtn} onClick={() => handleCheckin(s)}>
-                  每日打卡 +¥{stats.checkinReward}
+                  每日打卡 +¥{stats.checkinReward}{s.monthRewardReady ? ` 连带存续奖` : ''}
                 </View>
               )}
               {s.monthRewardReady && (

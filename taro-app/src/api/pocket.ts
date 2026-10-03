@@ -149,13 +149,17 @@ export const PocketAPI = {
   },
 
   /** 点位每日打卡(photoHash=现场拍照指纹) */
-  async checkin(siteId: number, photoHash: string): Promise<{ success: boolean }> {
+  async checkin(siteId: number, photoHash: string): Promise<{
+    success: boolean;
+    monthReward?: { amount: number; days: number; note: string } | null;
+  }> {
     const res = await request<any>({
       url: `/api/pocket/site/${siteId}/checkin`,
       method: 'POST',
       data: { photoUrl: photoHash },
     });
-    return { success: !!res.success };
+    // 方案 D: 透传满月打卡自动领结果(monthReward 可能为 null)
+    return { success: !!res.success, monthReward: res.monthReward ?? null };
   },
 
   /** 领取满月存续奖 */

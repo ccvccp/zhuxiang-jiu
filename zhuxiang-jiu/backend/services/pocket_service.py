@@ -222,11 +222,71 @@ class PocketService:
                 # 发奖失败回滚: 恢复打卡前状态(当日可重拍补卡)
                 await self.pocket_repo.update_site(site_id, prev_fields)
                 raise
-            return {"success": True, "checkin": checkin}
+            # 方案 D(2026-10-04 拍板): 满月打卡即领——第 30 天起
+            # 任意一次有效打卡自动并入存续奖(发放瞬间有当日现场
+            # 照片, 防刷不降反升); fail-soft: 自动领失败不回滚打卡
+            month_reward = await self._try_auto_month_reward(
+                member_id, site_id, settings)
+            return {"success": True, "checkin": checkin,
+                    "monthReward": month_reward}
 
     # ============================================================
     # 用户端: 满月存续奖
     # ============================================================
+
+    async def _try_auto_month_reward(self, member_id: int,
+                                     site_id: int,
+                                     settings: dict) -> dict | None:
+        """满月打卡自动领(方案 D, 2026-10-04 拍板实施)
+
+        与手动 claim_month_reward 共用 pocket:month:{site_id} 锁
+        (锁序: 会员锁→月锁单向嵌套, 无死锁环)——锁内重读点位
+        防手动/自动并发双发。fail-soft: 任何异常返回 None,
+        不影响已成功的打卡。
+
+        Returns: 发放结果 dict; None=未满足条件/已领/失败
+        """
+        try:
+            async with get_lock(f"pocket:month:{site_id}"):
+                site = await self.pocket_repo.get_site(site_id)
+                if not site or site.get("memberId") != member_id:
+                    return None
+                if site.get("monthRewardClaimed"):
+                    return None
+                if site.get("status") != "active":
+                    return None
+                duration_days = int(
+                    settings.get("durationDays", 30))
+                days = self._active_days(site)
+                if days < duration_days:
+                    return None
+                amount = float(
+                    settings.get("monthRewardSticker", 30.0)
+                    if site.get("posterType") == "sticker"
+                    else settings.get("monthRewardPoster", 20.0))
+                label = ("车贴" if site.get("posterType") == "sticker"
+                         else "海报")
+                result = await self.wallet_service.deposit_reward(
+                    member_id, amount,
+                    description=(f"顺手赚钱存续奖励({label}满"
+                                 f"{duration_days}天·打卡自动)"))
+                await self.pocket_repo.update_site(site_id, {
+                    "monthRewardClaimed": True})
+                logger.info(
+                    "pocket_month_reward_auto member=%s site=%s "
+                    "amount=%.2f days=%s",
+                    member_id, site_id, amount, days)
+                return {
+                    "amount": amount,
+                    "txNo": result.get("txNo"),
+                    "days": days,
+                    "note": "满月存续奖已随打卡自动入账",
+                }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "pocket_month_reward_auto_skip site=%s: %s",
+                site_id, exc)
+            return None
 
     async def claim_month_reward(self, member_id: int, site_id: int) -> dict:
         """领取满月存续奖(海报 ¥20 / 车贴 ¥30, 每点位限 1 次)
@@ -392,6 +452,12 @@ class PocketService:
             "scanRewardTip": "物料印你的 ZXBJ 推广码, "
                              "新人扫码注册奖励同「扫码赚钱」(新人注册原则)",
             "rewardNote": "所有奖励入余额, 仅可购买本站商品, 不可提现",
+            # 方案 D(2026-10-04): 满月打卡即领口径公示
+            "monthRewardMode": "auto_on_checkin",
+            "monthRewardTip": (f"在贴满 {settings.get('durationDays', 30)} "
+                               "天后的任意一次有效打卡, 存续奖自动随打卡"
+                               "入账(无需手动领取); 也可在点位页手动领取;"
+                               "撤销点位未领视为放弃"),
         }
 
     # ============================================================
