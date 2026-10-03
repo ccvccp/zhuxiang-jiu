@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<!--
+    智搜·AI智能搜索引擎(全站统一智能入口 MVP)
+    页面: search.html(独立轻量页; 游客可用, 登录后角色化答案)
+    数据源: POST /api/search-ai/query(意图识别→合规→双路检索)
+    规划: docs/智搜AI智能搜索引擎大模型_创新规划方案.md
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 智能搜索 · 竹香九商城</title>
+<style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+        background:#f5f3ee;color:#333;min-height:100vh}
+    .page{max-width:680px;margin:0 auto;padding:16px 16px 48px}
+    .hero{background:linear-gradient(135deg,#2d2340,#4a3b5c);color:#fff;
+        border-radius:14px;padding:26px 20px;margin-bottom:16px;text-align:center}
+    .hero h1{font-size:20px;margin-bottom:6px}
+    .hero p{font-size:12px;opacity:.85}
+    .search-box{display:flex;gap:8px;margin-bottom:8px}
+    .search-box input{flex:1;padding:14px 16px;border:none;border-radius:12px;
+        font-size:15px;outline:none;background:#fff;color:#333}
+    .search-box button{padding:0 24px;border:none;border-radius:12px;
+        background:#f0c75e;color:#2d2340;font-size:15px;font-weight:600;
+        cursor:pointer}
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+    .chips button{padding:6px 12px;border:1px solid #ddd;background:#fff;
+        border-radius:999px;font-size:12px;color:#555;cursor:pointer}
+    .blocked{background:#fdeaea;border:1px solid #e8a0a0;color:#b3554d;
+        border-radius:12px;padding:14px 16px;font-size:13px;margin-bottom:12px}
+    .answer-card{background:#fff;border-radius:12px;padding:16px;
+        margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+    .meta{display:flex;align-items:center;gap:8px;margin-bottom:10px;
+        flex-wrap:wrap}
+    .intent-pill{display:inline-block;padding:2px 12px;border-radius:999px;
+        font-size:11px;font-weight:600}
+    .intent-pill.blue{background:#eef3fb;color:#24619c}
+    .intent-pill.red{background:#fdeaea;color:#b3554d}
+    .conf{font-size:11px;color:#999}
+    .answer{font-size:14px;line-height:1.7}
+    .slots{font-size:11px;color:#888;margin-top:8px}
+    .results{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+    .result{background:#f7f6f2;border-radius:8px;padding:10px 12px}
+    .result .r-title{font-size:13px;font-weight:600;margin-bottom:3px}
+    .result .r-snip{font-size:12px;color:#777;line-height:1.5}
+    .result .r-meta{font-size:10px;color:#aaa;margin-top:4px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    .actions a{display:inline-block;padding:7px 14px;border-radius:8px;
+        background:#2d2340;color:#fff;font-size:12px;text-decoration:none}
+    .actions a.ghost{background:#efece5;color:#555}
+    .empty{text-align:center;color:#aaa;font-size:13px;padding:36px 0}
+    .tip{font-size:11px;color:#aaa;text-align:center;margin-top:12px}
+    .back{display:block;text-align:center;font-size:13px;color:#4a3b5c;
+        text-decoration:none;padding:12px}
+</style>
+</head>
+<body>
+<div class="page">
+    <div class="hero">
+        <h1>🔍 AI 智能搜索</h1>
+        <p>说人话就行 —— 智搜判断您想找商品、权益、政策还是订单</p>
+    </div>
+
+    <div class="search-box">
+        <input id="q" placeholder="试试: 竹奕酒多少钱 / 会员有什么权益 / 麒麟是什么"
+               onkeydown="if(event.key==='Enter')doSearch()">
+        <button onclick="doSearch()">搜索</button>
+    </div>
+    <div class="chips">
+        <button onclick="quick('竹奕酒多少钱一瓶')">💰 商品价格</button>
+        <button onclick="quick('会员有什么权益')">👑 会员权益</button>
+        <button onclick="quick('我想做代理怎么申请')">🤝 招商代理</button>
+        <button onclick="quick('麒麟和瑞麒是什么')">🦌 品牌故事</button>
+        <button onclick="quick('我的订单发货了吗')">📦 订单物流</button>
+    </div>
+
+    <div id="out"><div class="empty">输入自然语言, 智搜为您理解并检索全站</div></div>
+
+    <div class="tip">智搜·AI智能搜索引擎大模型 MVP · 合规护栏全程护航</div>
+    <a class="back" href="index.html">← 返回商城首页</a>
+</div>
+
+<script src="js/auth.js"></script>
+<script>
+'use strict';
+var $ = function (id) { return document.getElementById(id); };
+
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                 '"': '&quot;', "'": '&#39;' }[c];
+    });
+}
+
+function headers() {
+    var h = { 'Content-Type': 'application/json' };
+    if (window.Auth && Auth.isLoggedIn()) {
+        Object.assign(h, Auth.apiHeaders() || {});
+    }
+    return h;
+}
+
+function quick(text) { $('q').value = text; doSearch(); }
+
+async function doSearch() {
+    var text = $('q').value.trim();
+    if (!text) return;
+    $('out').innerHTML = '<div class="empty">智搜理解中…</div>';
+    try {
+        var resp = await fetch('/api/search-ai/query', {
+            method: 'POST', headers: headers(),
+            body: JSON.stringify({ text: text }),
+        });
+        var body = await resp.json();
+        if (!resp.ok || !body.success) {
+            throw new Error((body && (body.detail || body.error))
+                            || ('HTTP ' + resp.status));
+        }
+        render(text, body.data || {});
+    } catch (e) {
+        $('out').innerHTML = '<div class="empty">'
+            + esc(String(e.message || e)) + '</div>';
+    }
+}
+
+function render(text, d) {
+    var html = '';
+    if (d.intent === 'blocked') {
+        html += '<div class="blocked">⚠️ 合规提示: '
+            + esc(d.answer) + '</div>';
+        $('out').innerHTML = html;
+        return;
+    }
+    html += '<div class="answer-card">';
+    html += '<div class="meta"><span class="intent-pill blue">'
+        + esc(d.intentName || d.intent) + '</span>'
+        + '<span class="conf">置信度 '
+        + Math.round((d.confidence || 0) * 100) + '%</span></div>';
+    html += '<div class="answer">' + esc(d.answer) + '</div>';
+    if (d.slots && Object.keys(d.slots).length) {
+        html += '<div class="slots">识别: '
+            + esc(JSON.stringify(d.slots)) + '</div>';
+    }
+    var results = d.results || [];
+    if (results.length) {
+        html += '<div class="results">';
+        results.slice(0, 3).forEach(function (r) {
+            html += '<div class="result"><div class="r-title">'
+                + esc(r.title) + '</div><div class="r-snip">'
+                + esc(r.snippet) + '</div><div class="r-meta">'
+                + esc(r.kind) + ' · ' + esc(r.source)
+                + ' · 相关度 ' + Math.round((r.relevance || 0) * 100)
+                + '%</div></div>';
+        });
+        html += '</div>';
+    }
+    var actions = d.actions || [];
+    if (actions.length) {
+        html += '<div class="actions">';
+        actions.forEach(function (a, i) {
+            var cls = i === 0 ? '' : ' ghost';
+            var url = String(a.url || '');
+            var attr = url.indexOf('javascript') === 0
+                ? 'onclick="alert(\'请通过在线客服转人工\')" href="javascript:void(0)"'
+                : 'href="' + esc(url) + '"';
+            html += '<a class="' + cls.trim() + '" ' + attr + '>'
+                + esc(a.label) + '</a>';
+        });
+        html += '</div>';
+    }
+    html += '</div>';
+    $('out').innerHTML = html;
+}
+</script>
+</body>
+</html>

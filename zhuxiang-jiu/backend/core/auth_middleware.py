@@ -108,6 +108,9 @@ PUBLIC_EXACT = {
     # 区划册只读; 时空情景感知 scene.html 切换城市同源)
     "/api/citystore/cities/available",
     "/api/citystore/districts/available",
+    # 智搜·AI智能搜索引擎(全站统一智能入口: 游客可用; 登录态经
+    # 中间件注入头增强角色化答案, 观测/控制面仍由路由层 admin 拦)
+    "/api/search-ai/query",
 }
 
 # 公开前缀(仅 GET): 游客浏览类接口
