@@ -429,6 +429,42 @@ async def main():
            "zs.search" in _insp.getsource(
                _pc.classify_dialog_intent), "")
 
+    # ---- 全站智能体规划 GAP-1~3 ----
+    # GAP-1 输出端守门: 极限词净化(确定性替换, 事实数据保留)
+    from services.zs_search_service import guard_output
+    safe, hits = guard_output("全网最好的竹香酒, 疗效显著")
+    record("GAP1-输出净化(极限词+医疗)",
+           "最好" not in safe and "疗效" not in safe
+           and sorted(hits) == sorted(["最好", "疗效"]),
+           f"{safe}|{hits}")
+    safe2, hits2 = guard_output("竹奕酒 ¥88 有货")
+    record("GAP1-正常输出零误伤", safe2 == "竹奕酒 ¥88 有货"
+           and hits2 == [], f"{safe2}|{hits2}")
+
+    # GAP-2a 招商区域保护: agent × province 槽位 → 区域卡
+    rprov = await svc.query("做山东的代理怎么申请", role="guest")
+    record("GAP2a-区域保护卡(省份联动)",
+           any(r.get("route") == "region"
+               and "山东" in r.get("title", "")
+               for r in rprov.get("results", [])),
+           str([r.get("route") for r in rprov.get("results", [])]))
+    # GAP-3a 餐饮导流: 宴请场景 → 智图 dining POI 卡
+    # (场景槽位送礼组先于宴请组, 用纯宴请句式触发)
+    rdin = await svc.query("商务宴请用什么酒", role="guest")
+    record("GAP3a-宴请餐饮导流卡",
+           any(r.get("route") == "dining"
+               for r in rdin.get("results", [])),
+           str([r.get("route") for r in rdin.get("results", [])]))
+    # GAP-3b 坏案例聚类: useless 反馈聚合
+    rb1 = await svc.query("竹香酒怎么样", role="guest")
+    await svc.submit_feedback(rb1["decisionId"], "useless")
+    bc = await svc.bad_cases()
+    record("GAP3b-坏案例聚类(意图+查询)",
+           bc.get("total", 0) >= 1
+           and isinstance(bc.get("byIntent"), dict)
+           and isinstance(bc.get("topQueries"), list),
+           str(bc)[:100])
+
     # ---- 留痕与观测 ----
     ds = await svc.decisions(limit=10)
     record("留痕-决策落库", len(ds) >= 5

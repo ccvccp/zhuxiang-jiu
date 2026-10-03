@@ -300,11 +300,49 @@ async function loadDecisions() {
     }
 }
 
+/* ⑥ 坏案例聚类(Evolution 观测面, 全站智能体规划 GAP-3b) */
+async function loadBadCases() {
+    var el = document.getElementById('bcBox');
+    try {
+        var b = await fetchJson(api('/api/search-ai/bad-cases'),
+            { headers: adminHeaders() }, '坏案例');
+        var d = b.data || {};
+        var html = '';
+        if (!d.total) {
+            html = '<div class="dash-empty">暂无"没用"反馈——'
+                + '用户在搜索页点「没用」即产生坏案例样本</div>';
+        } else {
+            var intents = Object.entries(d.byIntent || {})
+                .sort(function (a, c) { return c[1] - a[1]; });
+            html += '<div style="font-size:12px;color:#555;'
+                + 'margin-bottom:6px"><b>按意图分布</b>(共 '
+                + d.total + ' 条 useless): '
+                + intents.map(function (r) {
+                    return esc(r[0]) + ' ' + r[1];
+                }).join(' · ') + '</div>';
+            var qs = d.topQueries || [];
+            if (qs.length) {
+                html += '<table class="dash-table"><tr><th>高频问法'
+                    + '</th><th>次数</th></tr>';
+                qs.forEach(function (q) {
+                    html += '<tr><td>' + esc(q.query) + '</td><td>'
+                        + q.count + '</td></tr>';
+                });
+                html += '</table>';
+            }
+        }
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<div class="dash-empty">加载失败</div>';
+        showError(e.message);
+    }
+}
+
 async function loadAll() {
     markUpdate();
     await Promise.all([
         loadStatus(), loadIntents(), loadEvolution(),
-        loadFeedbacks(), loadDecisions(),
+        loadFeedbacks(), loadDecisions(), loadBadCases(),
     ]);
 }
 

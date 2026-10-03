@@ -180,6 +180,18 @@ async def feedbacks(x_role: str = Header(None, alias="X-Role"),
         _handle(e)
 
 
+@router.get("/api/search-ai/bad-cases",
+            tags=["智搜AI智能搜索引擎大模型"])
+async def bad_cases(x_role: str = Header(None, alias="X-Role")):
+    """坏案例聚类(全站智能体规划 GAP-3b): useless 反馈→意图分布
+    + 高频查询 top10——Evolution Engine 观测面"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data": await _service.bad_cases()}
+    except Exception as e:
+        _handle(e)
+
+
 # ============================================================
 # 控制面(admin; 轻量三态——env + 运行时 override)
 # ============================================================

@@ -30,7 +30,7 @@ from core.locks import get_lock
 
 logger = logging.getLogger("zs_search_service")
 
-MODEL_VERSION = "v1.4-zhisou-anchor"
+MODEL_VERSION = "v1.5-zhisou-agent"
 
 
 # ============================================================
@@ -189,6 +189,31 @@ COMPLIANCE_RULES = (
 # 极限词(广告法; 引用自 attract 词库口径)
 BANNED_EXTREME = ("最好", "最佳", "第一", "顶级", "极品", "绝无仅有",
                   "百分百", "全网最低")
+
+# Guardrail 输出端守门(全站智能体规划 GAP-1): 极限词+医疗暗示的
+# 中性替换表——answer/结果卡输出前净化(输入端 L2 之外的第二道闸,
+# 只改话术不改事实数据: 价格/单号/库存数字保留)
+OUTPUT_REPLACEMENTS = {
+    "最好": "很好", "最佳": "优选", "第一": "领先",
+    "顶级": "高端", "极品": "上品", "绝无仅有": "少见",
+    "百分百": "全部", "全网最低": "很实惠",
+    "治病": "健康问题请遵医嘱", "疗效": "健康问题请遵医嘱",
+    "保健功效": "相关内容无法提供", "药用": "",
+    "养生治百病": "", "延年益寿": "",
+}
+
+
+def guard_output(text: str) -> tuple[str, list[str]]:
+    """输出端守门(确定性, LLM 禁入): 命中→中性替换
+
+    Returns:
+        (净化后文本, 命中词清单)——未命中返回 (原文, [])
+    """
+    hits = [w for w in OUTPUT_REPLACEMENTS if w in text]
+    safe = text
+    for w in hits:
+        safe = safe.replace(w, OUTPUT_REPLACEMENTS[w])
+    return safe, hits
 
 
 def compliance_gate(text: str) -> dict | None:
@@ -473,11 +498,17 @@ class ZsSearchService:
         try:
             r = await ProductService().search(keyword, page=1,
                                               page_size=4)
+            # GAP-2c 导购 Agent 补全: 库存状态展示(有货/紧张/补货中)
+            def _stock_tip(stock) -> str:
+                s = int(stock or 0)
+                return "有货" if s > 10 else ("库存紧张" if s > 0
+                                             else "补货中")
             return [
                 {"route": "product", "kind": "商品",
                  "title": p.get("name", ""),
-                 "snippet": (f"¥{p.get('price', '-')}"
-                             f" | {str(p.get('description', ''))[:36]}"),
+                 "snippet": (f"¥{p.get('price', '-')} | "
+                             f"{_stock_tip(p.get('stock'))} | "
+                             f"{str(p.get('description', ''))[:28]}"),
                  "source": f"商品库#{p.get('productId', p.get('id'))}",
                  "action": {"label": "查看商品",
                             "url": "products.html"},
@@ -524,9 +555,19 @@ class ZsSearchService:
                     acct = await PointsService().get_account(member_id)
                     points = (acct.get("points")
                               or acct.get("balance") or 0)
+                    # GAP-2b 会员 Agent 补全: 将过期积分提醒
+                    # (100 竹叶=1 元, 过期作废——权益管家职责)
+                    exp = await PointsService().get_expiring_points(
+                        member_id, days=30)
+                    if exp.get("expiringPoints"):
+                        points_note = (f" | {exp['expiringPoints']}"
+                                       " 竹叶 30 天内到期")
+                    else:
+                        points_note = ""
                 except Exception as exc:
                     logger.warning("zs_route_equity_points_failed: %s",
                                    exc)
+                    points_note = ""
                 keep = lv.get("keepLevel", {}) or {}
                 growth = lv.get("growthValue", 0)
                 snippet = (f"{lv['levelName']} | 竹叶 {points}"
@@ -538,6 +579,7 @@ class ZsSearchService:
                 if keep.get("requirement"):
                     snippet += (f" | 保级进度 "
                                 f"{keep.get('progressPercent', 0)}%")
+                snippet += points_note
                 return [{"route": "equity", "kind": "权益",
                          "title": f"我的会员权益 · {lv['levelName']}",
                          "snippet": snippet,
@@ -708,6 +750,92 @@ class ZsSearchService:
         except Exception:
             return ""
 
+    # ---------- 全站智能体规划 GAP-2/3 业务联动路 ----------
+
+    async def _route_region_quota(self, province: str) -> list[dict]:
+        """招商 Agent 区域保护联动(GAP-2a): 省份→可开网店城市
+
+        province 槽位(三轮已提取)消费方——citystore 独占制区域数据:
+        {count 可开 / totalCount 共 / occupiedCount 已独占}。
+        """
+        if not province:
+            return []
+        try:
+            from services.citystore_regions import all_cities
+            from services.citystore_service import CityStoreService
+            # 槽位提取"山东", 区划册省名"山东省"——前缀匹配
+            code = next((c.get("provinceCode") for c in all_cities()
+                         if str(c.get("provinceName", ""))
+                         .startswith(province)), "")
+            if not code:
+                return []
+            r = await CityStoreService().list_available_cities(code)
+            avail = r.get("count", 0)
+            total = r.get("totalCount", 0)
+            occ = r.get("occupiedCount", 0)
+            return [{"route": "region", "kind": "区域",
+                     "title": f"{province}区县网店·区域保护",
+                     "snippet": (f"可开 {avail} 城(共 {total}, 已独占"
+                                 f" {occ}) | 一区一店先到先得, "
+                                 "区域保护防同区竞争"),
+                     "source": "城市网店#区域保护",
+                     "action": {"label": "咨询招商顾问(转人工客服)",
+                                "url": "javascript:void(0)"},
+                     "relevance": 0.92}]
+        except Exception as exc:
+            logger.warning("zs_region_quota_failed: %s", exc)
+            return []
+
+    async def _route_dining(self) -> list[dict]:
+        """餐饮合作导流(GAP-3a, 订餐 Agent 业务裁剪版): 宴请场景
+        × 智图 dining POI——只导流不下单(全站无餐饮外卖业务)"""
+        try:
+            from services.zt_fabric_service import ZtFabricService
+            pois = await ZtFabricService().list_pois(
+                poi_type="dining")
+            if not pois:
+                return []
+            n = len(pois)
+            names = "、".join(str(p.get("name", ""))[:8]
+                              for p in pois[:2])
+            return [{"route": "dining", "kind": "餐饮",
+                     "title": f"宴请配酒·餐饮合作门店({n} 家)",
+                     "snippet": (f"{names} 等 {n} 家餐饮合作门店——"
+                                 "到店用酒可经渠道配供, 商务宴请"
+                                 "整桌解决方案"),
+                     "source": "智图#dining",
+                     "action": {"label": "联系餐饮合作顾问(转人工)",
+                                "url": "javascript:void(0)"},
+                     "relevance": 0.85}]
+        except Exception as exc:
+            logger.warning("zs_route_dining_failed: %s", exc)
+            return []
+
+    async def bad_cases(self) -> dict:
+        """坏案例聚类(GAP-3b): useless 反馈→意图分布+高频查询
+
+        Evolution Engine 观测面——运营可见"哪些问法总答不好"。
+        """
+        fbs = await self.store.list("feedbacks", 200)
+        neg = [f for f in fbs if f.get("verdict") == "useless"]
+        decisions = {d.get("decisionId"): d
+                     for d in await self.store.list("decisions", 200)}
+        by_intent: dict = {}
+        by_query: dict = {}
+        for f in neg:
+            d = decisions.get(f.get("decisionId")) or {}
+            it = f.get("intent") or d.get("intent") or "unknown"
+            by_intent[it] = by_intent.get(it, 0) + 1
+            q = str(d.get("query", ""))[:24]
+            if q:
+                by_query[q] = by_query.get(q, 0) + 1
+        top = sorted(by_query.items(), key=lambda x: -x[1])[:10]
+        return {"total": len(neg),
+                "byIntent": by_intent,
+                "topQueries": [{"query": q, "count": c}
+                               for q, c in top],
+                "note": "useless 反馈聚类(Evolution 观测面)"}
+
     # ---------- P2 LLM 意图兜底 + 查询改写 ----------
 
     async def _llm_assist(self, text: str) -> dict | None:
@@ -837,8 +965,12 @@ class ZsSearchService:
             sc = sub_cards[0]
             answer += (f" 另外, 关于您的{sc['subIntentName']}问题: "
                        f"{sc['title']} —— {str(sc['snippet'])[:48]}")
+        # GAP-1 输出端守门: answer 净化(极限词/医疗暗示→中性替换,
+        # 只改话术不改事实数据; 命中清单随 composed 返还主链留痕)
+        answer, guard_hits = guard_output(answer)
         return {"answer": answer, "actions": actions[:4],
-                "sources": [c["source"] for c in ranked[:3]]}
+                "sources": [c["source"] for c in ranked[:3]],
+                "outputGuardHits": guard_hits}
 
     # ---------- 主入口 ----------
 
@@ -957,6 +1089,14 @@ class ZsSearchService:
                 else:
                     candidates += await self._route_knowledge(ktext)
 
+        # 全站智能体规划 GAP-2a/3a 业务联动路:
+        # 招商×省份槽位→区域保护卡; 宴请场景×智图→餐饮导流卡
+        if clf["intent"] == "agent" and slots.get("province"):
+            candidates += await self._route_region_quota(
+                slots["province"])
+        if clf["intent"] == "product" and slots.get("scene") == "宴请":
+            candidates += await self._route_dining()
+
         # P3 混合意图拆分: 主意图高置信时检测副意图片段, 副路
         # 结果标记 subIntent 进融合(主问优先, 副问补充; 上限2路)
         sub_intents: list[dict] = []
@@ -983,6 +1123,20 @@ class ZsSearchService:
 
         # L5 生成
         composed = self._compose(clf["intent"], role, slots, ranked)
+
+        # GAP-1 输出端守门(结果卡净化 + 留痕 + 计数):
+        # answer 已在 _compose 净化; 此处净化结果卡 title/snippet,
+        # 命中留痕 outputGuard(可审计), 计数进观测面
+        guard_hits = composed.pop("outputGuardHits", [])
+        for c in ranked:
+            c["title"], t_hits = guard_output(str(c.get("title", "")))
+            c["snippet"], s_hits = guard_output(
+                str(c.get("snippet", "")))
+            guard_hits += t_hits + s_hits
+        if guard_hits:
+            decision["outputGuard"] = {"hits": guard_hits[:6],
+                                       "action": "sanitized"}
+            await self.store.hincr("output_guard_stats", "sanitized")
 
         decision.update({"outcome": "answered",
                          "topScore": ranked[0]["score"]
