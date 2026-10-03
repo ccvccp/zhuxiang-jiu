@@ -40,6 +40,10 @@ RESULTS = []
 
 _ENV_KEYS = ["ZW_MODE"]
 
+# 真 Bearer 轨(AUTH-TEST-01 P1 第二批迁移): main() 铸 token 填充
+# (mint_token 内部 asyncio.run, 不可在 run_http 异步上下文中调用)
+ADMIN_BEARER: dict = {}
+
 
 def record(name, passed, detail=""):
     global PASS, FAIL
@@ -218,7 +222,7 @@ async def run_http():
 
     # 17 决策面请求(off 下全 409; 载荷须过 pydantic——门控在装饰器层)
     def decision_requests():
-        admin = {"X-Role": "admin"}
+        admin = ADMIN_BEARER
         return [
             ("POST", "/api/logistics-ai/route/decide",
              {"orderType": "retail", "weight": 1,
@@ -280,12 +284,12 @@ async def run_http():
 
             # 7. off: 观测面仍 200
             r = await client.get("/api/logistics-ai/status",
-                                headers={"X-Role": "admin"})
+                                headers=ADMIN_BEARER)
             record("观测面: status off 仍 200",
                    r.status_code == 200
                    and r.json().get("success") is True)
             r = await client.get("/api/logistics-ai/route/health",
-                                headers={"X-Role": "admin"})
+                                headers=ADMIN_BEARER)
             record("观测面: route/health off 仍 200",
                    r.status_code == 200)
             r = await client.get("/api/logistics-ai/mode")
@@ -306,7 +310,7 @@ async def run_http():
         with _EnvGuard("shadow"):
             r = await client.post(
                 "/api/logistics-ai/route/decide",
-                headers={"X-Role": "admin"},
+                headers=ADMIN_BEARER,
                 json={"orderType": "retail", "weight": 1,
                       "pieceCount": 1,
                       "sender": {"name": "s", "phone": "1",
@@ -321,7 +325,7 @@ async def run_http():
         with _EnvGuard("assist"):
             r = await client.post(
                 "/api/logistics-ai/route/decide",
-                headers={"X-Role": "admin"},
+                headers=ADMIN_BEARER,
                 json={"orderType": "retail", "weight": 1,
                       "pieceCount": 1})
             record("assist: 路由决策放行+标记",
@@ -375,6 +379,8 @@ async def run_http():
 
 def main():
     asyncio.run(run_service())
+    ADMIN_BEARER["Authorization"] = "Bearer " + test_support.mint_token(
+        role="admin")   # run_service 后铸(该段清库), 仍在异步上下文外
     asyncio.run(run_http())
     print("\n".join(RESULTS))
     print("-" * 64)

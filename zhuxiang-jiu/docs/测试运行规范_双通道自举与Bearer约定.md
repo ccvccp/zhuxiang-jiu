@@ -43,13 +43,17 @@
 铸 token：`mint_token("admin")` / `mint_token("member")`
 （默认号段 13800000901/902，register→login 幂等）。
 
-**Bearer 迁移两个易踩点（首批迁移实证 2026-10-03）**：
+**Bearer 迁移三个易踩点（首批/第二批迁移实证 2026-10-03）**：
 1. **空库断言互斥**——断言"库为空/会员数 0"的阶段不能用 Bearer
    （真实会员行必然计入），该阶段回退裸头轨（三轨并存的本意）
 2. **计数敏感测试**——新增铸 token 会员会扰动全站计数断言；
    应提权**种子内既有会员**（`role="admin"` + `create_token(mid,
    role="admin")`，参照 test_zhike.seed_admin_bearer），
    且凡 `reset_store()/clear_all()` 清库点之后需重铸
+3. **异步上下文禁铸造**——mint_token 内部 asyncio.run，不可在
+   async 函数内调用（嵌套禁止）；多段测试（服务层段清库）应在
+   清库段之后、下一 asyncio.run 之前于同步 main() 中铸造
+   （参照 test_zw_mode.main）
 
 ## 四、新测试文件模板
 
