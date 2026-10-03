@@ -216,6 +216,15 @@ async def main():
            str(len(fbs)))
 
     # ---- P2: LLM 意图兜底 + 查询改写(fail-soft) ----
+    async def _reset_evo():
+        """段间隔离: 进化参数回基线(锚点调权后参数跨段污染判定)"""
+        for w in list((await svc.anchor_params()).keys()):
+            await svc.store.set_param("anchor_boost", w, 1.0)
+        await svc.store.set_param("intent_weight", "value", 0.6)
+        for k in list((await svc.evolution_params()).keys()):
+            await svc.store.set_param("route_boost", k, 1.0)
+
+    await _reset_evo()
     from services import llm_client as _llm_mod
     _orig_chat = _llm_mod.provider_client.chat
     _llm_mod.provider_client.chat = (
@@ -340,6 +349,46 @@ async def main():
         "竹奕酒多少钱，看看我的订单，会员积分还有多少", "product")
     record("P3拆分-子查询上限(仅1副意图)", len(subs3) == 1,
            str(subs3))
+
+    # ---- 锚点自动调权(反馈驱动意图锚点词进化) ----
+    await _reset_evo()
+    from services.zs_search_service import (
+        classify_intent as _clf, ANCHOR_BOOST_BOUNDS as _AB,
+    )
+    # 无参数=全基线(行为与历史一致)
+    record("锚点-无参数基线一致",
+           _clf("竹奕酒多少钱一瓶")["intent"] == "product", "")
+    # 反馈调权: 命中词 ±0.1 + 留痕
+    ra2 = await svc.query("竹香酒怎么样", role="guest")
+    fba = await svc.submit_feedback(ra2["decisionId"], "useful")
+    tun = fba.get("anchorTuning") or []
+    record("锚点-有用升权(+0.1留痕)",
+           any(t.get("word") == "竹香" and t.get("after") == 1.1
+               for t in tun), str(tun))
+    # 调权生效: boost 传入后判定得分变化(竹香 2→2.2)
+    ab = await svc.anchor_params()
+    record("锚点-参数落库", ab.get("竹香") == 1.1, str(ab))
+    c_ab = _clf("竹香", {"竹香": 1.5})
+    record("锚点-boost参与得分", c_ab["candidates"][0][1] == 3.0,
+           str(c_ab["candidates"]))
+    # clamp: 连续 useless 到下界 0.5
+    for _ in range(10):
+        rx = await svc.query("竹香酒推荐", role="guest")
+        await svc.submit_feedback(rx["decisionId"], "useless")
+    record("锚点-clamp下界0.5",
+           (await svc.anchor_params()).get("竹香") == 0.5,
+           str(await svc.anchor_params()))
+    # 红线: LLM 兜底决策不调锚点(hits=llm_fallback)
+    from services import llm_client as _lm2
+    _orig2 = _lm2.provider_client.chat
+    _lm2.provider_client.chat = (
+        lambda *a, **k: '{"intent":"product","query":"送礼 酒"}')
+    rl = await svc.query("帮我挑个送领导的口粮酒", role="guest")
+    fbl = await svc.submit_feedback(rl["decisionId"], "useful")
+    record("锚点-红线(LLM兜底不调锚点)",
+           "anchorTuning" not in fbl, str(fbl)[:100])
+    _lm2.provider_client.chat = _orig2
+    await _reset_evo()      # 锚点段收尾归零(防污染观测段)
 
     # ---- 留痕与观测 ----
     ds = await svc.decisions(limit=10)

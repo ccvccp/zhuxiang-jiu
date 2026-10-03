@@ -30,7 +30,7 @@ from core.locks import get_lock
 
 logger = logging.getLogger("zs_search_service")
 
-MODEL_VERSION = "v1.3-zhisou-p3"
+MODEL_VERSION = "v1.4-zhisou-anchor"
 
 
 # ============================================================
@@ -105,6 +105,14 @@ INTENT_WEIGHT_DEFAULT = 0.6
 # P2 隐式转化回流: 动作卡点击 → 正样本 +0.03(小于显式 0.05)
 ACTION_BOOST_STEP = 0.03
 
+# 锚点自动调权(反馈驱动意图锚点词权重进化):
+#   anchor_boost{word}: 命中词的权重乘数, clamp [0.5, 3.0]
+#   显式反馈 useful → 命中锚点词 +0.1 / useless → -0.1
+#   红线: 强操作词加成/置信线等结构性参数恒定不进化;
+#         LLM 兜底决策(hits=llm_fallback)与合规拦截不调锚点
+ANCHOR_BOOST_BOUNDS = (0.5, 3.0)
+ANCHOR_BOOST_STEP = 0.1
+
 # 兜底置信线(最高意图得分 < 此值 → chat)
 INTENT_CONFIDENCE_LINE = 2.0
 
@@ -114,7 +122,8 @@ SUB_INTENT_MAX = 1
 _SENT_SPLIT = re.compile(r"[，。！？；、,;?!]")
 
 
-def split_sub_intents(text: str, main_intent: str) -> list[tuple]:
+def split_sub_intents(text: str, main_intent: str,
+                      anchor_boost: dict | None = None) -> list[tuple]:
     """混合意图拆分(P3): 标点分句 → 独立分类 → 副意图片段
 
     - 仅取与主意图不同且达置信线的片段(防低置信误拆)
@@ -127,7 +136,7 @@ def split_sub_intents(text: str, main_intent: str) -> list[tuple]:
     subs: list[tuple] = []
     seen = {main_intent}
     for frag in frags:
-        c = classify_intent(frag)
+        c = classify_intent(frag, anchor_boost)
         it = c["intent"]
         if it in ("chat", "blocked") or it in seen:
             continue
@@ -197,20 +206,24 @@ def compliance_gate(text: str) -> dict | None:
 # 意图分类与槽位提取(确定性)
 # ============================================================
 
-def classify_intent(text: str) -> dict:
+def classify_intent(text: str,
+                    anchor_boost: dict | None = None) -> dict:
     """规则锚点意图分类(得分制; 平分按锚点顺序稳定取胜)
 
     2026-10-03 边界审查修复: 命中强操作词时 help/order 得分+1——
     "竹香酒怎么下单"类输入商品词(3分)不再压过操作意图(2+1=3 平分
     后操作意图因锚点顺序稳定取胜), 语义上用户在问流程而非找商品。
+    锚点自动调权: anchor_boost{word} 乘基线权重(无参数=全基线,
+    行为与历史版本完全一致); 强操作词加成为结构性参数不参与。
     """
+    boost = anchor_boost or {}
     scores: dict[str, int] = {}
     hits: dict[str, list[str]] = {}
     for intent, anchors in INTENT_ANCHORS.items():
         s, h = 0, []
         for word, weight in anchors:
             if word in text:
-                s += weight
+                s += weight * boost.get(word, 1.0)
                 h.append(word)
         if intent in ("help", "order") and any(
                 w in text for w in STRONG_OPERATION_WORDS):
@@ -884,7 +897,9 @@ class ZsSearchService:
                         decision.get("decisionId")}
 
         # L1 意图 + 槽位(候选 top3 入留痕——规划承诺的审计完整性)
-        clf = classify_intent(text)
+        # 锚点自动调权: 每次查询实时读进化参数(稀疏 Hash, 仅被调词)
+        anchor_boost = await self.anchor_params()
+        clf = classify_intent(text, anchor_boost)
         slots = extract_slots(text, clf["intent"])
 
         # P2 LLM 意图兜底+查询改写(规则低置信→chat 时触发; fail-soft)
@@ -912,6 +927,7 @@ class ZsSearchService:
         decision.update({"intent": clf["intent"],
                          "confidence": clf["confidence"],
                          "slots": slots,
+                         "hits": clf.get("hits", []),
                          "llmAssist": llm_assist,
                          "intentCandidates": [
                              {"intent": i, "score": s}
@@ -943,7 +959,8 @@ class ZsSearchService:
         sub_intents: list[dict] = []
         if clf["intent"] != "chat" and not llm_assist:
             for s_intent, s_text in split_sub_intents(text,
-                                                      clf["intent"]):
+                                                      clf["intent"],
+                                                      anchor_boost):
                 s_slots = extract_slots(s_text, s_intent)
                 s_cards = await self._gather(
                     s_intent, s_text, s_slots, member_id, role)
@@ -989,6 +1006,32 @@ class ZsSearchService:
     async def evolution_params(self) -> dict:
         """进化参数观测(routeBoost; admin 观测面消费)"""
         return await self.store.get_params("route_boost")
+
+    async def anchor_params(self) -> dict:
+        """锚点调权参数观测(稀疏 Hash, 仅被反馈调过的词)"""
+        return await self.store.get_params("anchor_boost")
+
+    async def _tune_anchors(self, hits: list, verdict: str) -> list[dict]:
+        """锚点自动调权: 命中词 ±0.1 clamp[0.5,3.0](留痕 before/after)
+
+        - 仅规则轨决策(hits 为锚点词; llm_fallback 除外)
+        - 红线: 强操作词加成/置信线等结构性参数恒定, 不在此调
+        """
+        tuning: list[dict] = []
+        if not hits or hits == ["llm_fallback"]:
+            return tuning
+        params = await self.anchor_params()
+        delta = (ANCHOR_BOOST_STEP if verdict == "useful"
+                 else -ANCHOR_BOOST_STEP)
+        for word in hits[:6]:        # 上限防极端长句
+            before = params.get(word, 1.0)
+            after = round(min(ANCHOR_BOOST_BOUNDS[1],
+                              max(ANCHOR_BOOST_BOUNDS[0],
+                                  before + delta)), 3)
+            await self.store.set_param("anchor_boost", word, after)
+            tuning.append({"word": word, "before": before,
+                           "after": after})
+        return tuning
 
     async def submit_feedback(self, decision_id: int, verdict: str,
                               member_id: int = 0,
@@ -1056,6 +1099,12 @@ class ZsSearchService:
             record.update({"evolved": True,
                            "routeBoostBefore": before,
                            "routeBoostAfter": after})
+            # 锚点自动调权: 命中词随判定对错 ±0.1(与 routeBoost
+            # 同闸——防刷分/红线逻辑复用)
+            tuning = await self._tune_anchors(
+                target.get("hits") or [], verdict)
+            if tuning:
+                record["anchorTuning"] = tuning
         else:
             record.update({"evolved": False,
                            "note": "chat 兜底意图不在进化范围"})
@@ -1128,6 +1177,7 @@ class ZsSearchService:
                 "feedbackUsefulRate": (round(useful / fb_total, 3)
                                        if fb_total else 0),
                 "routeBoost": await self.evolution_params(),
+                "anchorBoost": await self.anchor_params(),
                 "intentWeight": await self.intent_weight(),
                 "llmAssist": {"triggers": llm_assist,
                               "adopted": llm_stats.get("adopted", 0),

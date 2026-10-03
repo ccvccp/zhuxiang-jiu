@@ -191,10 +191,32 @@ async function loadEvolution() {
             + '≥0.6 采纳 LLM 兜底意图): <span class="'
             + (iw >= 0.6 ? 'ok-pill' : 'warn-pill') + '">' + iw.toFixed(3)
             + '</span></div>';
-        html += '<div style="font-size:12px;color:#555">'
+        html += '<div style="font-size:12px;color:#555;margin:12px 0 6px">'
             + '<b>LLM 兜底统计</b>: 触发 ' + (llm.triggers || 0)
             + ' 次 · 采纳 ' + (llm.adopted || 0) + ' 次 · 采纳率 '
             + pct(llm.adoptRate) + '(规则低置信才触发, fail-soft)</div>';
+
+        /* 锚点自动调权(反馈驱动意图锚点词权重进化) */
+        var anchors = s.anchorBoost || {};
+        var akeys = Object.keys(anchors).sort();
+        html += '<div style="font-size:12px;color:#555;margin:12px 0 6px">'
+            + '<b>anchorBoost</b>(锚点自动调权, clamp [0.5, 3.0]; '
+            + '反馈命中词 ±0.1——意图判定从反馈学习): '
+            + (akeys.length ? akeys.length + ' 词已调' : '暂无调整(全 1.0 基线)')
+            + '</div>';
+        akeys.slice(0, 12).forEach(function (k) {
+            var v = anchors[k];
+            var w = Math.max(2, Math.round((v - 0.5) / 2.5 * 100));
+            var cls = v > 1 ? 'ok-pill' : (v < 1 ? 'risk-pill'
+                : 'gray-pill');
+            html += '<div class="bar-row"><span class="bar-label">'
+                + esc(k) + '</span><div class="bar-track"><div'
+                + ' class="bar-fill" style="width:' + w + '%"></div>'
+                + '</div><span class="bar-val">×' + v.toFixed(2)
+                + '</span><span class="' + cls + '">'
+                + (v > 1 ? '升权' : (v < 1 ? '降权' : '基线'))
+                + '</span></div>';
+        });
         el.innerHTML = html;
     } catch (e) {
         el.innerHTML = '<div class="dash-empty">加载失败</div>';
