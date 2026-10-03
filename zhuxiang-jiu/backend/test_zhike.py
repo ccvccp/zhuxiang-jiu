@@ -45,7 +45,20 @@ def check(name, cond, detail=""):
         RESULTS.append(f"  [FAIL] {name} {detail}")
 
 
-ADMIN = {"X-Role": "admin"}
+# 鉴权: 真 Bearer 轨(AUTH-TEST-01 P1 迁移)。token 在 main() 的
+# seed_all() 之后铸——seed_all 内 reset_store() 会清掉模块期铸的会员
+ADMIN = {}
+
+
+def seed_admin_bearer():
+    """种子内会员 1 提权铸 Bearer(stage_a 范式)——不新增会员,
+    保持会员数断言口径(28 流失/全量画像等)。
+    空库阶段互斥: 空库断言 memberTotal==0 而 Bearer 需真实会员行,
+    故 run_empty 回退裸头轨(测试规范三轨并存)。"""
+    _mock_store["members"][1]["role"] = "admin"
+    from core.auth import create_token
+    ADMIN.clear()
+    ADMIN["Authorization"] = "Bearer " + create_token(1, role="admin")
 
 
 def reset_zk():
@@ -175,6 +188,8 @@ def clear_all():
 
 def run_empty(client):
     clear_all()
+    ADMIN.clear()
+    ADMIN["X-Role"] = "admin"   # 空库阶段: 裸头轨(库须为空, 见上)
     r = client.get("/api/member-ai/overview", headers=ADMIN)
     b = r.json()["data"]
     check("空库-总览诚实零值", r.status_code == 200
@@ -559,6 +574,7 @@ def main():
 
     run_empty(client)
     seed_all()
+    seed_admin_bearer()   # 种子阶段切 Bearer 轨(提权会员 1)
     run_p0(client)
     run_p1(client)
     run_p2(client)

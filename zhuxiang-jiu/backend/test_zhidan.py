@@ -44,7 +44,10 @@ def check(name, cond, detail=""):
         RESULTS.append(f"  [FAIL] {name} {detail}")
 
 
-ADMIN = {"X-Role": "admin"}
+# 鉴权: 真 Bearer 轨(AUTH-TEST-01 P1 迁移——中间件验签注入
+# x-role=admin, 路由层鉴权全链与生产同构)
+ADMIN = {"Authorization":
+         "Bearer " + test_support.mint_token(role="admin")}
 BASE = "/api/order-ai"
 
 # 商品种子(P1 单价 268 / P2 单价 168)
