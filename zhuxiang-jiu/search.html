@@ -50,6 +50,13 @@
     .actions a{display:inline-block;padding:7px 14px;border-radius:8px;
         background:#2d2340;color:#fff;font-size:12px;text-decoration:none}
     .actions a.ghost{background:#efece5;color:#555}
+    .fb{display:flex;align-items:center;gap:10px;margin-top:14px;
+        padding-top:12px;border-top:1px dashed #e5e0d5;font-size:12px;
+        color:#999}
+    .fb button{padding:5px 12px;border:1px solid #ddd;background:#fff;
+        border-radius:999px;font-size:12px;color:#555;cursor:pointer}
+    .fb button:disabled{color:#bbb;border-color:#eee;cursor:default}
+    .fb .done{color:#8aa86b}
     .empty{text-align:center;color:#aaa;font-size:13px;padding:36px 0}
     .tip{font-size:11px;color:#aaa;text-align:center;margin-top:12px}
     .back{display:block;text-align:center;font-size:13px;color:#4a3b5c;
@@ -170,8 +177,41 @@ function render(text, d) {
         });
         html += '</div>';
     }
+    if (d.decisionId) {
+        html += '<div class="fb"><span>这个回答对您有帮助吗?</span>'
+            + '<button id="fb-useful" onclick="sendFb('
+            + d.decisionId + ',\'useful\')">👍 有用</button>'
+            + '<button id="fb-useless" onclick="sendFb('
+            + d.decisionId + ',\'useless\')">👎 没用</button>'
+            + '<span class="done" id="fb-done" style="display:none">'
+            + '已收到, 感谢反馈 — 智搜会持续学习进化</span></div>';
+    }
     html += '</div>';
     $('out').innerHTML = html;
+}
+
+async function sendFb(decisionId, verdict) {
+    var ok = $('fb-done'), u = $('fb-useful'), n = $('fb-useless');
+    if (u) u.disabled = true;
+    if (n) n.disabled = true;
+    try {
+        var resp = await fetch('/api/search-ai/feedback', {
+            method: 'POST', headers: headers(),
+            body: JSON.stringify({
+                decisionId: decisionId, verdict: verdict }),
+        });
+        var body = await resp.json();
+        if (!resp.ok || !body.success) {
+            throw new Error((body && (body.detail || body.error))
+                            || ('HTTP ' + resp.status));
+        }
+        if (ok) ok.style.display = 'inline';
+    } catch (e) {
+        if (u) u.disabled = false;
+        if (n) n.disabled = false;
+        if (ok) { ok.style.display = 'inline';
+                  ok.textContent = '反馈提交失败, 稍后再试'; }
+    }
 }
 </script>
 </body>

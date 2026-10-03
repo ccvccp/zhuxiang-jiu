@@ -1,12 +1,14 @@
 """智搜·AI智能搜索引擎大模型 路由(zs_routes)
 
 端点:
-    决策面(1, 公开+可选登录头增强角色):
+    决策面(2, 公开+可选登录头增强角色):
         POST /api/search-ai/query        统一搜索入口
-    观测面(4, admin):
+        POST /api/search-ai/feedback     显式反馈进化闭环(P1)
+    观测面(5, admin):
         GET  /api/search-ai/status       大模型总览
         GET  /api/search-ai/intent-stats 意图分布
         GET  /api/search-ai/decisions    决策留痕
+        GET  /api/search-ai/feedbacks    反馈留痕+进化参数(P1)
     控制面(2, admin):
         GET  /api/search-ai/mode         三态灰度总览
         POST /api/search-ai/mode/override 运行时切档(留痕)
@@ -42,6 +44,11 @@ class QueryRequest(BaseModel):
                       description="自然语言搜索内容")
 
 
+class FeedbackRequest(BaseModel):
+    decisionId: int = Field(..., description="被反馈的决策 ID")
+    verdict: str = Field(..., description="useful(有用)/useless(没用)")
+
+
 # ============================================================
 # 决策面(公开; 登录态经中间件注入 x-member-id/x-role 增强)
 # ============================================================
@@ -69,6 +76,28 @@ async def query(
             role=x_role or "guest")
         result["zsMode"] = mode["mode"]
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/search-ai/feedback", tags=["智搜AI智能搜索引擎大模型"])
+async def feedback(
+    data: FeedbackRequest,
+    x_member_id: str = Header("", alias="X-Member-Id"),
+):
+    """显式反馈进化闭环(P1)
+
+    回答下方「有用/没用」→ routeBoost ±0.05(clamp [0.8,1.2]);
+    合规拦截决策不参与进化(红线); 调整留痕可回滚。
+    """
+    try:
+        try:
+            mid = int(x_member_id) if x_member_id else 0
+        except ValueError:
+            mid = 0
+        record = await _service.submit_feedback(
+            data.decisionId, data.verdict, member_id=mid)
+        return {"success": True, "data": record}
     except Exception as e:
         _handle(e)
 
@@ -109,6 +138,22 @@ async def decisions(x_role: str = Header(None, alias="X-Role"),
     try:
         rows = await _service.decisions(limit=min(limit, 200))
         return {"success": True, "data": rows, "count": len(rows)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/search-ai/feedbacks",
+            tags=["智搜AI智能搜索引擎大模型"])
+async def feedbacks(x_role: str = Header(None, alias="X-Role"),
+                    limit: int = 50):
+    """反馈留痕 + routeBoost 进化参数(P1 观测面)"""
+    _require_admin(x_role)
+    try:
+        rows = await _service.feedbacks(limit=min(limit, 200))
+        return {"success": True,
+                "data": {"feedbacks": rows, "count": len(rows),
+                         "routeBoost": await _service.evolution_params()},
+                "modelVersion": MODEL_VERSION}
     except Exception as e:
         _handle(e)
 

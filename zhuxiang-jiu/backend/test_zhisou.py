@@ -117,6 +117,70 @@ async def main():
            rg["answer"] != rm["answer"],
            f"g={rg['answer'][:30]} m={rm['answer'][:30]}")
 
+    # ---- P1: R2 权益路(会员模型结构化查询) ----
+    from services.member_service import MemberService
+    reg = await MemberService().register("13800009999", "Zs#Test2026",
+                                         nickname="智搜测试")
+    mid = reg.get("memberId") or reg.get("member_id")
+    re = await svc.query("会员有什么权益", member_id=mid, role="member")
+    record("P1权益-会员个人化(等级名)",
+           "竹芽会员" in re["answer"] and "成长值" in re["answer"],
+           str(re["answer"])[:80])
+    record("P1权益-会员来源(会员模型)",
+           any("会员模型#member" in s for s in re.get("sources", [])),
+           str(re.get("sources")))
+    record("P1权益-游客体系介绍(注册引导)",
+           "注册" in rg["answer"] and "L1" in rg["answer"],
+           str(rg["answer"])[:80])
+
+    # ---- P1: R4 订单路(鉴权联动) ----
+    ro_g = await svc.query("我的订单发货了吗", member_id=0,
+                           role="guest")
+    record("P1订单-游客登录引导(不查订单)",
+           "登录" in ro_g["answer"]
+           and any("auth" in s for s in ro_g.get("sources", [])),
+           str(ro_g["answer"])[:80])
+    ro_m = await svc.query("我的订单发货了吗", member_id=mid,
+                           role="member")
+    record("P1订单-会员无订单口径",
+           "暂无订单" in ro_m["answer"], str(ro_m["answer"])[:80])
+
+    # ---- P1: 显式反馈进化闭环 ----
+    rq = await svc.query("竹香酒怎么样", role="guest")
+    record("P1反馈-决策ID返回",
+           isinstance(rq.get("decisionId"), int), str(rq)[:60])
+    fb = await svc.submit_feedback(rq["decisionId"], "useful")
+    record("P1反馈-有用进化(+0.05)",
+           fb.get("evolved") is True
+           and fb.get("routeBoostAfter") == 1.05, str(fb))
+    fb = await svc.submit_feedback(rq["decisionId"], "useless")
+    record("P1反馈-没用回调(-0.05)",
+           fb.get("evolved") is True
+           and fb.get("routeBoostAfter") == 1.0, str(fb))
+    rb = await svc.query("酒能治病吗")
+    fb = await svc.submit_feedback(rb["decisionId"], "useful")
+    record("P1反馈-红线(合规拦截不进化)",
+           fb.get("evolved") is False, str(fb))
+    for _ in range(12):
+        await svc.submit_feedback(rq["decisionId"], "useless")
+    params = await svc.evolution_params()
+    record("P1反馈-clamp安全阀(下界0.8)",
+           params.get("product") == 0.8, str(params))
+    try:
+        await svc.submit_feedback(rq["decisionId"], "bad")
+        record("P1反馈-非法verdict拒绝", False, "未抛出")
+    except ValueError:
+        record("P1反馈-非法verdict拒绝(409口径)", True)
+    try:
+        await svc.submit_feedback(999999, "useful")
+        record("P1反馈-决策不存在404", False, "未抛出")
+    except KeyError:
+        record("P1反馈-决策不存在(404口径)", True)
+    fbs = await svc.feedbacks(limit=20)
+    record("P1反馈-留痕可审计",
+           len(fbs) >= 5 and all("verdict" in f for f in fbs[:3]),
+           str(len(fbs)))
+
     # ---- 留痕与观测 ----
     ds = await svc.decisions(limit=10)
     record("留痕-决策落库", len(ds) >= 5

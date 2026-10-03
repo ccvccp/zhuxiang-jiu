@@ -2,17 +2,19 @@
 
 规划: docs/智搜AI智能搜索引擎大模型_创新规划方案.md (MVP)
 
-五层(MVP 落地范围):
+五层(MVP + P1 落地范围):
     L1 意图层: 角色判定(中间件注入头) + 7 意图规则锚点分类 + 槽位
     L2 合规前置: 未成年购酒/医疗功效/代理收益承诺/极限词(硬规则)
-    L3 多路检索: R1 商品(product_service) + R5 知识(knowledge_service)
+    L3 多路检索: R1 商品 + R2 权益(会员模型, P1) + R4 订单(鉴权
+        联动本人订单+智运轨迹, P1) + R5 知识(knowledge_service)
     L4 融合重排: 确定性打分(相关0.5+角色0.2+业务0.2+合规0.1)
-    L5 生成: 结构化回答(来源引用) + 动作卡片
+        业务分项挂 routeBoost 进化参数(P1 显式反馈闭环)
+    L5 生成: 结构化回答(来源引用) + 动作卡片 + 反馈入口
 
 铁律(对齐全站六模型范式):
     - 全链确定性(MVP 无 LLM), 意图低置信走兜底不武断
     - 合规层命中即拦截, 权重永不参与进化
-    - 决策留痕(意图/槽位/检索路/重排 top3)可审计
+    - 决策留痕(意图/槽位/检索路/重排 top3/反馈)可审计
     - 三态灰度: ZS_MODE off/shadow/assist(决策面门控)
 """
 
@@ -26,7 +28,7 @@ from core.locks import get_lock
 
 logger = logging.getLogger("zs_search_service")
 
-MODEL_VERSION = "v1-zhisou-mvp"
+MODEL_VERSION = "v1.1-zhisou-p1"
 
 
 # ============================================================
@@ -68,16 +70,23 @@ INTENT_NAMES = {
     "attract": "活动引流", "chat": "闲聊兜底",
 }
 
-INTENT_ROUTES = {   # MVP 检索路映射
+INTENT_ROUTES = {   # 检索路映射(P1: 权益/订单接入结构化路)
     "product": ("product", "knowledge"),
     "brand": ("knowledge",),
     "help": ("knowledge",),
-    "equity": ("knowledge",),
+    "equity": ("equity", "knowledge"),
     "agent": ("knowledge",),
     "attract": ("knowledge",),
-    "order": ("knowledge",),
+    "order": ("order", "knowledge"),
     "chat": ("knowledge",),
 }
+
+# P1 进化参数(显式反馈闭环; 对齐规划第六节)
+#   routeBoost{intent}: 各意图检索路历史反馈加成, clamp [0.8, 1.2]
+#   红线: 只乘 L4 业务分项(0.2 权重), 合规分项(0.1)永不参与进化;
+#         intentWeight(规则/LLM 采纳权重)留 P2 LLM 兜底时启用
+ROUTE_BOOST_BOUNDS = (0.8, 1.2)
+ROUTE_BOOST_STEP = 0.05
 
 # 兜底置信线(最高意图得分 < 此值 → chat)
 INTENT_CONFIDENCE_LINE = 2.0
@@ -269,6 +278,23 @@ class _ZsStore:
             return {k.decode(): int(v) for k, v in raw.items()}
         return dict(self._mem.get("zs_" + key, {}))
 
+    async def get_params(self, key: str) -> dict:
+        """进化参数读取(float Hash: route_boost 等)"""
+        if self._is_redis():
+            client = await self._get_redis()
+            raw = await client.hgetall("zhuxiang:zs:" + key)
+            return {k.decode(): float(v) for k, v in raw.items()}
+        return {k: float(v) for k, v in
+                self._mem.get("zs_" + key, {}).items()}
+
+    async def set_param(self, key: str, field: str,
+                        value: float) -> None:
+        if self._is_redis():
+            client = await self._get_redis()
+            await client.hset("zhuxiang:zs:" + key, field, value)
+        else:
+            self._mem.setdefault("zs_" + key, {})[field] = value
+
 
 # ============================================================
 # 三态灰度(轻量版: env + 运行时 override; MVP 不建独立护栏)
@@ -362,22 +388,159 @@ class ZsSearchService:
             logger.warning("zs_route_knowledge_failed: %s", exc)
             return []
 
+    async def _route_equity(self, member_id: int,
+                            role: str) -> list[dict]:
+        """R2 权益路(P1): 会员模型结构化查询, 角色×意图二维路由
+
+        - 会员(member_id>0): 个人化——当前等级权益+积分余额+升级
+          路径+保级进度(消费 P1-4 口径)
+        - 游客: 会员体系介绍(等级阶梯)+注册引导
+        """
+        if member_id:
+            try:
+                from services.member_service import MemberService
+                lv = await MemberService().get_level(member_id)
+                points = 0
+                try:
+                    from services.points_service import PointsService
+                    acct = await PointsService().get_account(member_id)
+                    points = (acct.get("points")
+                              or acct.get("balance") or 0)
+                except Exception as exc:
+                    logger.warning("zs_route_equity_points_failed: %s",
+                                   exc)
+                keep = lv.get("keepLevel", {}) or {}
+                growth = lv.get("growthValue", 0)
+                snippet = (f"{lv['levelName']} | 竹叶 {points}"
+                           f" | 成长值 {growth}")
+                nxt = lv.get("nextLevelGrowth") or 0
+                if nxt:
+                    snippet += (f"(距下一级还差"
+                                f"{max(0, nxt - growth)}成长值)")
+                if keep.get("requirement"):
+                    snippet += (f" | 保级进度 "
+                                f"{keep.get('progressPercent', 0)}%")
+                return [{"route": "equity", "kind": "权益",
+                         "title": f"我的会员权益 · {lv['levelName']}",
+                         "snippet": snippet,
+                         "source": f"会员模型#member:{member_id}",
+                         "action": {"label": "去商城攒成长值",
+                                    "url": "alliance-mall.html"},
+                         "relevance": 0.95}]
+            except Exception as exc:
+                logger.warning("zs_route_equity_failed: %s", exc)
+        # 游客(或会员查询失败回落): 会员体系介绍
+        try:
+            from services.member_service import LEVEL_NAMES
+            ladder = " / ".join(f"L{k} {v}" for k, v
+                                in sorted(LEVEL_NAMES.items()))
+        except Exception:
+            ladder = "L1 竹芽 / L2 竹叶 / L3 竹林 / L4 竹海VIP / L5 SVIP"
+        return [{"route": "equity", "kind": "权益",
+                 "title": "竹香会员体系(L1-L5)",
+                 "snippet": (f"{ladder}; 注册即得 100 竹叶积分, "
+                             "消费攒成长值自动升级, 等级越高会员价越优"),
+                 "source": "会员模型#levels",
+                 "action": {"label": "注册享会员权益",
+                            "url": "login.html"},
+                 "relevance": 0.9}]
+
+    async def _route_order(self, member_id: int) -> list[dict]:
+        """R4 订单路(P1): 鉴权联动本人订单 + 智运轨迹摘要
+
+        - 未登录: 登录引导卡(不查任何订单数据——隐私安全)
+        - 登录: get_my_orders 按 member_id 过滤(本人校验天然成立),
+          取最近 2 单; 已发货单挂最新轨迹节点(智运联动)
+        """
+        if not member_id:
+            return [{"route": "order", "kind": "订单",
+                     "title": "登录后可查询您的订单与物流",
+                     "snippet": ("订单信息涉及隐私, 请先登录后再查询"
+                                 "发货状态与物流轨迹"),
+                     "source": "订单系统#auth",
+                     "action": {"label": "去登录",
+                                "url": "login.html"},
+                     "relevance": 0.95}]
+        try:
+            from services.order_service import OrderService
+            mine = await OrderService().get_my_orders(member_id)
+            orders = (mine.get("orders") or [])[:2]
+            if not orders:
+                return [{"route": "order", "kind": "订单",
+                         "title": "您暂无订单",
+                         "snippet": ("逛商城选一款竹香酒吧, 下单后可"
+                                     "在此跟踪发货与物流轨迹"),
+                         "source": f"订单系统#member:{member_id}",
+                         "action": {"label": "去选购",
+                                    "url": "alliance-mall.html"},
+                         "relevance": 0.9}]
+            cards: list[dict] = []
+            for o in orders:
+                oid = o.get("orderId") or o.get("id") or ""
+                snippet = (f"{o.get('statusName') or o.get('status', '-')}"
+                           f" | ¥{o.get('totalAmount', '-')}"
+                           f" | {str(o.get('createdAt', ''))[:10]}")
+                tip = await self._order_track_tip(str(oid))
+                if tip:
+                    snippet += f" | {tip}"
+                cards.append({"route": "order", "kind": "订单",
+                              "title": f"订单 {oid}",
+                              "snippet": snippet,
+                              "source": "订单系统+智运",
+                              "action": {"label": "查物流轨迹",
+                                         "url": "logistics.html"},
+                              "relevance": 0.95})
+            return cards
+        except Exception as exc:
+            logger.warning("zs_route_order_failed: %s", exc)
+            return []
+
+    async def _order_track_tip(self, order_id: str) -> str:
+        """订单最新轨迹摘要(智运联动; 无物流单返回空)"""
+        if not order_id or order_id == "None":
+            return ""
+        try:
+            from services.logistics_service import LogisticsService
+            lsvc = LogisticsService()
+            lo = await lsvc.get_order_by_order_id(order_id)
+            if not lo:
+                return ""
+            wn = lo.get("waybillNo", "")
+            tracks = await lsvc.list_tracks(wn, 1) or []
+            if tracks:
+                t = tracks[0]
+                desc = (t.get("description")
+                        or t.get("trackStatus") or "更新")
+                loc = t.get("location", "")
+                return (f"最新轨迹: {desc}"
+                        + (f"({loc})" if loc else ""))
+            return f"运单 {wn} 已创建"
+        except Exception:
+            return ""
+
     # ---------- L4 融合 ----------
 
     @staticmethod
-    def _fuse(intent: str, role: str,
-              candidates: list[dict]) -> list[dict]:
-        """确定性融合: 相关0.5 + 角色0.2 + 业务0.2 + 合规0.1"""
+    def _fuse(intent: str, role: str, candidates: list[dict],
+              route_boost: dict | None = None) -> list[dict]:
+        """确定性融合: 相关0.5 + 角色0.2 + 业务0.2 + 合规0.1
+
+        P1: 业务分项挂 routeBoost[intent] 进化参数(显式反馈闭环);
+        合规分项(0.1)恒定——红线: 合规权重永不参与进化。
+        """
         bonus = INTENT_BONUS.get(intent, 0.2)
+        boost_param = (route_boost or {}).get(intent, 1.0)
         logged = role not in ("guest", "", None)
 
         def _score(c: dict) -> float:
             s = c.get("relevance", 0) * 0.5
             s += (0.2 if logged else 0.05)          # 角色匹配
-            s += 0.2 * bonus * (1.0 if c["route"] in
-                                INTENT_ROUTES.get(intent, ("knowledge",))
-                                else 0.4)
-            s += 0.1                                  # 合规项(已过闸)
+            s += 0.2 * bonus * boost_param * (1.0 if c["route"] in
+                                              INTENT_ROUTES.get(
+                                                  intent,
+                                                  ("knowledge",))
+                                              else 0.4)
+            s += 0.1                                  # 合规项(恒定)
             return round(s, 3)
 
         for c in candidates:
@@ -474,16 +637,21 @@ class ZsSearchService:
                              {"intent": i, "score": s}
                              for i, s in clf["candidates"]]})
 
-        # L3 双路检索
+        # L3 多路检索(P1: 权益/订单结构化路接入)
         routes = INTENT_ROUTES.get(clf["intent"], ("knowledge",))
         candidates: list[dict] = []
         if "product" in routes:
             candidates += await self._route_product(slots, text)
+        if "equity" in routes:
+            candidates += await self._route_equity(member_id, role)
+        if "order" in routes:
+            candidates += await self._route_order(member_id)
         if "knowledge" in routes:
             candidates += await self._route_knowledge(text)
 
-        # L4 融合重排
-        ranked = self._fuse(clf["intent"], role, candidates)
+        # L4 融合重排(业务分项挂 routeBoost 进化参数)
+        ranked = self._fuse(clf["intent"], role, candidates,
+                            await self.evolution_params())
 
         # L5 生成
         composed = self._compose(clf["intent"], role, slots, ranked)
@@ -500,12 +668,71 @@ class ZsSearchService:
                 "confidence": clf["confidence"],
                 "slots": slots,
                 "results": ranked,
+                "decisionId": decision.get("decisionId"),
                 **composed}
 
     async def _save_decision(self, d: dict) -> None:
         did = await self.store.next_id("decision")
         d["decisionId"] = did
         await self.store.save("decisions", did, d)
+
+    # ---------- P1 显式反馈进化闭环 ----------
+
+    async def evolution_params(self) -> dict:
+        """进化参数观测(routeBoost; admin 观测面消费)"""
+        return await self.store.get_params("route_boost")
+
+    async def submit_feedback(self, decision_id: int, verdict: str,
+                              member_id: int = 0) -> dict:
+        """显式反馈(P1): useful/useless → routeBoost ±0.05
+
+        - clamp [0.8, 1.2] 安全阀; 参数调整留痕可回滚
+        - 红线: 合规拦截决策与 chat 兜底不参与进化
+        - 决策不存在 → KeyError(404 口径)
+
+        Raises:
+            KeyError: 决策不存在
+            ValueError: verdict 非法
+        """
+        verdict = (verdict or "").strip().lower()
+        if verdict not in ("useful", "useless"):
+            raise ValueError("verdict 须为 useful(有用)/useless(没用)")
+        rows = await self.store.list("decisions", 200)
+        target = next((d for d in rows
+                       if d.get("decisionId") == decision_id), None)
+        if not target:
+            raise KeyError(f"决策 {decision_id} 不存在或已过期")
+        intent = target.get("intent", "")
+        record = {"feedbackId": await self.store.next_id("feedback"),
+                  "decisionId": decision_id,
+                  "verdict": verdict,
+                  "memberId": member_id or target.get("memberId", 0),
+                  "intent": intent, "createdAt": ts()}
+        if target.get("outcome") == "blocked" or intent in ("blocked", ""):
+            record.update({"evolved": False,
+                           "note": "合规拦截决策不参与进化(硬规则恒定)"})
+        elif intent in INTENT_BONUS and intent != "chat":
+            before = (await self.evolution_params()).get(intent, 1.0)
+            delta = (ROUTE_BOOST_STEP if verdict == "useful"
+                     else -ROUTE_BOOST_STEP)
+            after = round(min(ROUTE_BOOST_BOUNDS[1],
+                              max(ROUTE_BOOST_BOUNDS[0],
+                                  before + delta)), 3)
+            await self.store.set_param("route_boost", intent, after)
+            record.update({"evolved": True,
+                           "routeBoostBefore": before,
+                           "routeBoostAfter": after})
+        else:
+            record.update({"evolved": False,
+                           "note": "chat 兜底意图不在进化范围"})
+        await self.store.save("feedbacks", record["feedbackId"], record)
+        await self.store.hincr("feedback_stats", verdict)
+        return record
+
+    async def feedbacks(self, limit: int = 50) -> list[dict]:
+        rows = await self.store.list("feedbacks", limit)
+        return sorted(rows, key=lambda r: r.get("createdAt", ""),
+                      reverse=True)[:limit]
 
     # ---------- 观测面 ----------
 
@@ -525,14 +752,22 @@ class ZsSearchService:
         mode = await current_mode()
         stats = await self.store.hgetall("intent_stats")
         decisions = await self.store.list("decisions", 200)
+        feedbacks = await self.store.list("feedbacks", 200)
+        fb_stats = await self.store.hgetall("feedback_stats")
         blocked = stats.get("blocked", 0)
         total = sum(stats.values())
+        useful = fb_stats.get("useful", 0)
+        fb_total = useful + fb_stats.get("useless", 0)
         return {"module": "智搜·AI智能搜索引擎大模型",
                 "mode": mode["mode"],
                 "queries": total,
                 "blockedRate": round(blocked / total, 3) if total else 0,
                 "intents": len([k for k in stats if k != "blocked"]),
                 "decisions": len(decisions),
-                "note": "MVP: 规则意图层+双路检索; 决策留痕可审计",
+                "feedbacks": len(feedbacks),
+                "feedbackUsefulRate": (round(useful / fb_total, 3)
+                                       if fb_total else 0),
+                "routeBoost": await self.evolution_params(),
+                "note": "P1: 规则意图层+四路检索+显式反馈进化闭环",
                 "modelVersion": MODEL_VERSION,
                 "updatedAt": ts()}
