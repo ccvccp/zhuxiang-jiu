@@ -136,6 +136,66 @@ def channel_key(platform: str) -> str:
     return os.environ.get(env, "").strip()
 
 
+# ============================================================
+# 运行时 KEY 热配层(2026-10-03 偏差②升级)
+# real 模式缺 KEY 走 mock_fallback 的根因是"KEY 只能经 .env +
+# 容器重建配置"。本层: Redis 键 promo:channel_key:{platform}
+# 优先于 env——资质就绪后 admin 端点热配即生效, 免改 env 免重建。
+# ============================================================
+
+def mask_key(key: str) -> str:
+    """凭证掩码(仅尾 4 位可见, 永不回传全值)"""
+    key = str(key or "").strip()
+    return ("****" + key[-4:]) if key else ""
+
+
+async def _load_runtime_key(platform: str) -> str:
+    """运行时热配 KEY(内存模式走 _mock_store)"""
+    try:
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = (await client.get(
+                _k("promo", "channel_key", platform)) or b"")
+            return (raw.decode()
+                    if isinstance(raw, bytes) else str(raw)).strip()
+        from repositories.store import _mock_store
+        d = _mock_store.get("_promo_channel_keys") or {}
+        return str(d.get(platform, "") or "").strip()
+    except Exception:
+        return ""
+
+
+async def set_runtime_key(platform: str, key: str) -> None:
+    """设置运行时凭证(空串=清除回落 env)"""
+    key = str(key or "").strip()
+    if is_redis_mode():
+        client = await get_redis_client()
+        if key:
+            await client.set(
+                _k("promo", "channel_key", platform), key)
+        else:
+            await client.delete(
+                _k("promo", "channel_key", platform))
+        return
+    from repositories.store import _mock_store
+    d = _mock_store.setdefault("_promo_channel_keys", {})
+    if key:
+        d[platform] = key
+    else:
+        d.pop(platform, None)
+
+
+async def clear_runtime_key(platform: str) -> None:
+    """清除运行时凭证(回落 env)"""
+    await set_runtime_key(platform, "")
+
+
+async def channel_key_async(platform: str) -> str:
+    """凭证解析(运行时热配 > env)——发布主链入口"""
+    runtime = await _load_runtime_key(platform)
+    return runtime or channel_key(platform)
+
+
 def platform_endpoint(platform: str) -> str:
     """平台发布端点解析(运行时动态读)
 
@@ -301,7 +361,7 @@ class PromoChannelService:
     # ============================================================
 
     def channel_status(self) -> list[dict]:
-        """各平台通道配置状态(看板/排障)"""
+        """各平台通道配置状态(看板/排障; env 视角, 兼容既有调用方)"""
         rows = []
         for platform in PROMO_PLATFORMS:
             key = channel_key(platform)
@@ -317,6 +377,47 @@ class PromoChannelService:
                 "endpoint": platform_endpoint(platform),
             })
         return rows
+
+    async def channel_keys_view(self) -> dict:
+        """凭证全量视图(热配层视角, 2026-10-03 偏差②升级)
+
+        看板/运维面: 每平台 keySource(runtime 热配/env/empty) +
+        掩码 + 生效模式 + RPA 通道标记; real 模式下缺失清单汇总。
+        """
+        mode = channel_mode()
+        rows, missing_api = [], []
+        for platform in PROMO_PLATFORMS:
+            runtime = await _load_runtime_key(platform)
+            env_key = channel_key(platform)
+            key = runtime or env_key
+            source = ("runtime" if runtime
+                      else ("env" if env_key else "empty"))
+            if mode == CHANNEL_MODE_REAL and not key \
+                    and platform not in RPA_PLATFORMS:
+                missing_api.append(platform)
+            effective = (CHANNEL_MODE_REAL if
+                         mode == CHANNEL_MODE_REAL and key
+                         else (CHANNEL_MODE_RPA_PENDING if
+                               mode == CHANNEL_MODE_REAL
+                               and platform in RPA_PLATFORMS
+                               else CHANNEL_MODE_MOCK))
+            rows.append({
+                "platform": platform,
+                "mode": mode,
+                "keySource": source,
+                "keyMasked": mask_key(runtime or env_key),
+                "effectiveMode": effective,
+                "rpaEligible": platform in RPA_PLATFORMS,
+                "endpoint": platform_endpoint(platform),
+            })
+        return {
+            "mode": mode,
+            "platforms": rows,
+            "missingApiKeys": missing_api,
+            "note": "KEY 支持运行时热配(runtime > env)——"
+                    "资质就绪后 PUT /channels/keys/{platform} "
+                    "即时生效, 免改 env 免重建容器",
+        }
 
     # ============================================================
     # 发布(mock 确定性回执 / real 平台 API / 失败回退)
@@ -335,7 +436,8 @@ class PromoChannelService:
         mock_receipt = self._mock_receipt(platform, content, heat)
         if channel_mode() != CHANNEL_MODE_REAL:
             return mock_receipt
-        key = channel_key(platform)
+        # 凭证解析走热配层(运行时 > env, 2026-10-03 偏差②升级)
+        key = await channel_key_async(platform)
         if not key:
             if platform in RPA_PLATFORMS:
                 # RPA 通道平台无 API 凭证概念(官方无发布 API)——

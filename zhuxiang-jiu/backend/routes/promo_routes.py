@@ -504,13 +504,85 @@ async def learning_status(
 
 @router.get("/api/promo/channels/status", tags=["AI智能推广模块"])
 async def channels_status(
-    x_role: str = Header(None, alias="X-Role"),
+        x_role: str = Header(None, alias="X-Role"),
 ):
     """各平台发布通道配置状态(总模式/凭证配置/生效模式/端点)"""
     _require_admin(x_role)
     try:
         result = _service.channel.channel_status()
         return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+# ---- 凭证热配三端点(2026-10-03 偏差②升级: 运行时 KEY 层) ----
+
+@router.get("/api/promo/channels/keys", tags=["AI智能推广模块"])
+async def channels_keys(
+        x_role: str = Header(None, alias="X-Role"),
+):
+    """平台凭证全量视图(热配层: keySource/掩码/生效模式/缺失清单)
+
+    安全: 凭证永不回传全值(仅尾 4 位掩码)。
+    """
+    _require_admin(x_role)
+    try:
+        result = await _service.channel.channel_keys_view()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.put("/api/promo/channels/keys/{platform}",
+            tags=["AI智能推广模块"])
+async def channels_key_set(
+        platform: str,
+        body: dict,
+        x_role: str = Header(None, alias="X-Role"),
+):
+    """运行时热配平台凭证(资质就绪即配即生效, 免改 env 免重建)
+
+    body: {"key": "<平台凭证>"}; 空串=清除回落 env。
+    """
+    _require_admin(x_role)
+    from repositories.promo_repository import PROMO_PLATFORMS
+    from services.promo_channel_service import set_runtime_key
+    if platform not in PROMO_PLATFORMS:
+        raise HTTPException(status_code=404,
+                            detail=f"平台域外({platform})")
+    if not isinstance(body, dict) or "key" not in body:
+        raise HTTPException(status_code=409,
+                            detail="请求体需为对象且含 key 字段")
+    try:
+        await set_runtime_key(platform,
+                              str(body.get("key") or ""))
+        result = await _service.channel.channel_keys_view()
+        row = next((p for p in result["platforms"]
+                    if p["platform"] == platform), {})
+        return {"success": True, "data": row}
+    except Exception as e:
+        _handle(e)
+
+
+@router.delete("/api/promo/channels/keys/{platform}",
+               tags=["AI智能推广模块"])
+async def channels_key_clear(
+        platform: str,
+        x_role: str = Header(None, alias="X-Role"),
+):
+    """清除运行时热配凭证(回落 env 配置)"""
+    _require_admin(x_role)
+    from repositories.promo_repository import PROMO_PLATFORMS
+    from services.promo_channel_service import clear_runtime_key
+    if platform not in PROMO_PLATFORMS:
+        raise HTTPException(status_code=404,
+                            detail=f"平台域外({platform})")
+    try:
+        await clear_runtime_key(platform)
+        result = await _service.channel.channel_keys_view()
+        row = next((p for p in result["platforms"]
+                    if p["platform"] == platform), {})
+        return {"success": True, "data": row}
     except Exception as e:
         _handle(e)
 
