@@ -9,8 +9,9 @@
 'use strict';
 
 var API_BASE_KEY = 'trustDash.apiBase';
-var state = { apiBase: localStorage.getItem(API_BASE_KEY)
-              || 'http://localhost:8000' };
+// 同源默认(生产 https 页直连 localhost 属混合内容被拦——2026-10-03
+// 检查升级修正, 与其余七看板对齐; 本地调试可手填 http://localhost:8000)
+var state = { apiBase: localStorage.getItem(API_BASE_KEY) || '' };
 
 function api(path) { return state.apiBase + path; }
 
@@ -62,7 +63,7 @@ function markUpdate() {
 function saveConn() {
     var el = document.getElementById('apiBase');
     state.apiBase = el.value.trim().replace(/\/+$/, '');
-    if (!state.apiBase) { state.apiBase = 'http://localhost:8000'; }
+    if (!state.apiBase) { state.apiBase = ''; }   // 同源默认
     el.value = state.apiBase;
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     loadAll();

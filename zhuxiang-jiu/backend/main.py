@@ -542,6 +542,10 @@ async def _on_startup():
     # (QR70_SCAN_AUTO=on 且 QR70_MODE != off 时启动, 引擎活化)
     from services.qr70_scan_scheduler import start_scan_loop as start_qr70_scan
     start_qr70_scan()
+    # 信值大模型(45/68号): 每日申诉反馈回流/学习批处理/主体分布扫描
+    # (TRUST45_SCAN_AUTO=on 且 TRUST45_MODE != off 时启动, 引擎活化)
+    from services.trust45_scan_scheduler import start_scan_loop as start_trust45_scan
+    start_trust45_scan()
     # 智图·AI智能地图大模型: 护栏指标自动巡检
     # (ZT_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
     from services.zt_map_scheduler import start_guard_loop as start_zt_map_guard
