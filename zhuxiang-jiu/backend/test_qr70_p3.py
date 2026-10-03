@@ -27,6 +27,8 @@
 
 import asyncio
 import os
+
+import test_support  # noqa: F401 (直跑自举: 头信任, 防 X-Role 被剥 403)
 import sys
 from datetime import datetime, timedelta
 

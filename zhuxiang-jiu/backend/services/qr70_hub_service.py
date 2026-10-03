@@ -138,6 +138,30 @@ class Qr70HubService:
             raise ValueError(
                 f"参数白名单外: {sorted(unknown)}"
                 f"(允许: {sorted(allowed)})")
+        # ---- shadow 影子期(2026-10-03 四件套升级): 只留痕不执行——
+        # 不调 55 号签名、不写码实例表(原宣称语义落地, dryRun 返回) ----
+        from services.qr70_mode_service import is_shadow
+        if await is_shadow():
+            await self.repo.save_event({
+                "type": "code_shadow_generated",
+                "codeId": code_id,
+                "memberId": int(member_id or 0),
+                "detail": {
+                    "kind": meta["kind"], "scene": scene,
+                    "params": params, "dryRun": True,
+                },
+                "at": ts(),
+            })
+            return {
+                "dryRun": True,
+                "codeId": code_id, "kind": meta["kind"],
+                "scene": scene,
+                "memberId": int(member_id or 0),
+                "params": params, "status": "shadow",
+                "note": "shadow 影子期: 只留痕未生成真实码",
+                "modelVersion": MODEL_VERSION,
+                "mode": "shadow",
+            }
         from services.qr55_crypto import (
             generate_code,
         )
@@ -177,7 +201,9 @@ class Qr70HubService:
         })
         record = dict(record)
         record["modelVersion"] = MODEL_VERSION
-        record["mode"] = current_mode()
+        from services.qr70_mode_service import (
+            current_mode as _mode_service_mode)
+        record["mode"] = (await _mode_service_mode())["mode"]
         record["consumePolicy"] = meta[
             "consumePolicy"]
         return record
@@ -206,6 +232,28 @@ class Qr70HubService:
             verify_code,
         )
         verdict = verify_code(str(code or ""))
+        # ---- shadow 影子期: 验签只读照做, 状态机不变更
+        # (不迁移状态/不同步过期, 只留痕 dryRun 返回) ----
+        from services.qr70_mode_service import is_shadow
+        if await is_shadow():
+            await self.repo.save_event({
+                "type": "code_shadow_redeem",
+                "codeId": "",
+                "memberId": int(operator_id or 0),
+                "detail": {
+                    "verifyStatus": verdict.get("status"),
+                    "dryRun": True,
+                },
+                "at": ts(),
+            })
+            return {
+                "dryRun": True,
+                "redeemed": False,
+                "verifyStatus": verdict.get("status"),
+                "reason": verdict.get("reason", ""),
+                "note": "shadow 影子期: 只留痕未执行核销",
+                "modelVersion": MODEL_VERSION,
+            }
         if verdict.get("status") != "ok":
             # 过期/篡改——同步实例状态留痕
             # (nonce 从码尾段提取——69号 P5

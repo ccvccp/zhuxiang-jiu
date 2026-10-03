@@ -616,12 +616,58 @@ class OrderService:
             order["updatedAt"] = now
             await self.order_repo.save(order_id, order)
 
+            # ---- 智码·发货交接码建议书挂接(2026-10-03 四件套升级) ----
+            # fail-soft: 智码侧任何异常不阻断发货主流程;
+            # off 不附(挂接面随决策面关闭); shadow 附 dryRun;
+            # 建议永不自动执行(码供仓配扫码核销, 不改订单状态)
+            ship_assist = None
+            try:
+                from services.qr70_mode_service import (
+                    current_mode as _qr70_mode,
+                )
+                _m = (await _qr70_mode())["mode"]
+                if _m != "off":
+                    from services.qr70_shipping_service import (
+                        Qr70ShippingService,
+                    )
+                    skus = [str(it.get("productName", ""))
+                            .strip()
+                            for it in order.get("items", [])]
+                    skus = [s for s in skus if s][:8]
+                    addr = order.get("address") or {}
+                    province = (addr.get("province")
+                                or addr.get("provinceName")
+                                or "")
+                    _issued = await Qr70ShippingService().issue(
+                        wave_no=f"SO-{order_id}",
+                        order_id=str(order_id),
+                        sku_names=skus,
+                        destination_province=str(province),
+                        carrier=str(carrier or ""),
+                    )
+                    if isinstance(_issued, dict):
+                        ship_assist = {
+                            "note": "发货交接码建议书(智码70号——"
+                                    "供仓配扫码核销, 永不自动执行)",
+                            "code": _issued.get("code", ""),
+                            "nonce": _issued.get("nonce", ""),
+                            "layoutBadges": _issued.get(
+                                "layoutBadges", []),
+                            "confusionPairs": _issued.get(
+                                "confusionPairs", []),
+                            "dryRun": _issued.get("dryRun", False),
+                        }
+            except Exception as exc:
+                ship_assist = {"note": "智码挂接跳过(fail-soft): "
+                                + str(exc)[:80]}
+
             return {
                 "success": True,
                 "orderId": order_id,
                 "status": SHIPPED,
                 "statusName": STATUS_CN[SHIPPED],
                 "logistics": order["logistics"],
+                "shipAssist": ship_assist,
                 "logs": [{"step": "发货", "level": "INFO",
                           "msg": f"{carrier} {waybill_no}"}],
             }

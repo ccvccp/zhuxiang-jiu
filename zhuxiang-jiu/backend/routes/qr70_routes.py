@@ -26,7 +26,8 @@
     - KeyError → 404 / ValueError → 409
 """
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import (APIRouter, Header, HTTPException,
+                     Query)
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/qr70",
@@ -54,16 +55,16 @@ def _map(exc: Exception) -> HTTPException:
                          detail=str(exc))
 
 
-def _require_decision_mode() -> None:
-    """决策面前置(off=409)"""
-    from services.qr70_registry import (
-        current_mode,
+async def _require_decision_mode() -> None:
+    """决策面前置(off=409; override 感知——2026-10-03
+    四件套升级改走 qr70_mode_service 读取链)"""
+    from services.qr70_mode_service import (
+        require_decision_mode,
     )
-    if current_mode() == "off":
-        raise HTTPException(
-            status_code=409,
-            detail="QR70_MODE=off(默认 off——"
-                  "决策面关闭, 观测面不受影响)")
+    try:
+        await require_decision_mode()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 # ============================================================
@@ -173,7 +174,7 @@ async def codes_generate(
     """六类码统一生成(55号 qr55_crypto
     签名链——决策面 off 409)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_hub_service import (
         Qr70HubService,
     )
@@ -193,7 +194,7 @@ async def codes_redeem(
     """六类码统一核销(verify 四态+消费
     策略状态机——决策面 off 409)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_hub_service import (
         Qr70HubService,
     )
@@ -341,7 +342,7 @@ async def trace_bottle_generate(
     """签名化瓶码生成(55号签名链绑定
     22号 BLC——决策面 off 409)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_trace_service import (
         Qr70TraceService,
     )
@@ -471,7 +472,7 @@ async def auth_begin(
     面——决策面 off 409; 39/48/69号
     零改动)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_auth_service import (
         Qr70AuthService,
     )
@@ -584,7 +585,7 @@ async def receiving_issue(
     """签收码签发(绑定订单归属人——
     决策面 off 409; 仅 SHIPPED 可签)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_receiving_service import (
         Qr70ReceivingService,
     )
@@ -702,7 +703,7 @@ async def shipping_issue(
     """交接码签发(版式规则表确定性+
     易混色带——决策面 off 409)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_shipping_service import (
         Qr70ShippingService,
     )
@@ -825,7 +826,7 @@ async def manage_issue(
     """办事台码签发(session 策略
     ——决策面 off 409)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_manage_service import (
         Qr70ManageService,
     )
@@ -933,7 +934,7 @@ async def collect_issue(
     大额挑战标记——决策面 off 409;
     商户主动铁律)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_collect_service import (
         Qr70CollectService,
     )
@@ -1074,7 +1075,7 @@ async def joy_hypothesis_propose(
     决策面 off 409; 愉悦度=奖励
     信号非决策主体)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_joy_service import (
         Qr70JoyService,
     )
@@ -1096,7 +1097,7 @@ async def joy_hypothesis_submit(
     """假设提交 46号审批总线(纯调用
     submit_change——46号零改动)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_joy_service import (
         Qr70JoyService,
     )
@@ -1158,7 +1159,7 @@ async def joy_params_create(
     """创建参数版本草案(46号审批通过
     后——决策面 off 409)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_joy_service import (
         Qr70JoyService,
     )
@@ -1180,7 +1181,7 @@ async def joy_params_publish(
     """版本发布(draft→shadow/active
     ——决策面 off 409; active 互斥)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_joy_service import (
         Qr70JoyService,
     )
@@ -1200,7 +1201,7 @@ async def joy_params_rollback(
     """版本回滚(active→retired
     ——决策面 off 409)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_joy_service import (
         Qr70JoyService,
     )
@@ -1379,7 +1380,7 @@ async def immunity_redteam(
     """红队四向量执行(决策面 off 409
     ——确定性服务层直击)"""
     _require_admin(x_role)
-    _require_decision_mode()
+    await _require_decision_mode()
     from services.qr70_immunity_service import (
         Qr70ImmunityService,
     )
@@ -1403,6 +1404,44 @@ async def immunity_redteam_runs(
     )
     return await Qr70ImmunityService()\
         .dashboard()
+
+
+# ============================================================
+# 控制面(2026-10-03 四件套升级: 灰度/调度运维端点)
+# ============================================================
+
+@router.get("/mode")
+async def mode_view(x_role: str | None = Header(
+        None, alias="X-Role")):
+    """三态总览(override > env > off)"""
+    _require_admin(x_role)
+    from services.qr70_mode_service import current_mode
+    return {"success": True,
+            "data": await current_mode()}
+
+
+@router.post("/mode/override")
+async def mode_override(
+        mode: str = Query("", description=
+        "off/shadow/assist, 空串清除回落 env"),
+        x_role: str | None = Header(None, alias="X-Role")):
+    """运行时切档(留痕 qr70_events)"""
+    _require_admin(x_role)
+    from services.qr70_mode_service import set_override
+    try:
+        data = await set_override(mode.strip())
+    except ValueError as exc:
+        raise _map(exc)
+    return {"success": True, "data": data}
+
+
+@router.post("/scan/run")
+async def scan_run(x_role: str | None = Header(
+        None, alias="X-Role")):
+    """手动触发每日扫描(调度器同款, 留痕 daily_scan)"""
+    _require_admin(x_role)
+    from services.qr70_scan_scheduler import run_scan
+    return {"success": True, "data": await run_scan()}
 
 
 def register_qr70_routes(app) -> None:

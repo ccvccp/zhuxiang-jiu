@@ -538,6 +538,10 @@ async def _on_startup():
     # (ZK_SCAN_AUTO=on 且 ZK_MODE != off 时启动, 引擎活化)
     from services.zk_scan_scheduler import start_scan_loop as start_zk_scan
     start_zk_scan()
+    # 智码·AI智能二维码大模型: 每日愉悦度健康/免疫监控/码域快照扫描
+    # (QR70_SCAN_AUTO=on 且 QR70_MODE != off 时启动, 引擎活化)
+    from services.qr70_scan_scheduler import start_scan_loop as start_qr70_scan
+    start_qr70_scan()
     # 智图·AI智能地图大模型: 护栏指标自动巡检
     # (ZT_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
     from services.zt_map_scheduler import start_guard_loop as start_zt_map_guard
