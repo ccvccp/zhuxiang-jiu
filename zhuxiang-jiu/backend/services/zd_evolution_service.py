@@ -81,6 +81,19 @@ class ZdEvolutionService:
             "note": note or "",
             "feedbackAt": _now_iso(),
         }
+        # 三态语义: shadow(影子观测期) → 反馈只留痕, 进化冻结
+        # (观测期数据不污染 etaRecentWeight; 对齐智搜/智启元口径)
+        try:
+            from services.zd_mode_service import is_shadow
+            if await is_shadow():
+                record["evolved"] = False
+                record["note"] = (record["note"] + " | "
+                                  "shadow 观测期进化冻结").strip(" |")
+                await self.store.save("feedbacks",
+                                      record["feedbackId"], record)
+                return record
+        except Exception:
+            pass
         # 仅预测类(eta_forecast)裁决驱动参数进化
         if target_type == "eta_forecast":
             params = await self.get_params()

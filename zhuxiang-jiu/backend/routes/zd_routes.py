@@ -297,9 +297,14 @@ async def zd_anomalies(x_role: str = Header(None, alias="X-Role"),
 @router.post("/api/order-ai/feedback", tags=["智单AI智能订单大模型"])
 async def zd_feedback(data: FeedbackRequest,
                       x_role: str = Header(None, alias="X-Role")):
-    """反馈闭环(adopted/corrected/rejected → 参数权重学习)"""
+    """反馈闭环(adopted/corrected/rejected → 参数权重学习)
+
+    三态门控: ZD_MODE=off → 409; shadow → 只留痕进化冻结。
+    """
     _require_admin(x_role)
     try:
+        from services.zd_mode_service import require_decision_mode
+        await require_decision_mode()
         result = await _evo.feedback(
             target_type=data.targetType, verdict=data.verdict,
             note=data.note)
@@ -360,6 +365,44 @@ async def zd_memos(x_role: str = Header(None, alias="X-Role"),
     try:
         rows = await _evo.memos(limit=limit)
         return {"success": True, "data": rows, "count": len(rows)}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 三态灰度 + 扫描调度(引擎活化, 对齐七模型范式)
+# ============================================================
+
+@router.get("/api/order-ai/mode", tags=["智单AI智能订单大模型"])
+async def zd_mode(x_role: str = Header(None, alias="X-Role")):
+    """三态灰度总览(off/shadow/assist)"""
+    _require_admin(x_role)
+    from services.zd_mode_service import current_mode
+    return {"success": True, "data": await current_mode()}
+
+
+@router.post("/api/order-ai/mode/override",
+             tags=["智单AI智能订单大模型"])
+async def zd_mode_override(
+    mode: str = "",
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """运行时切档(空串清除回落 env; 留痕进 feedbacks 表)"""
+    _require_admin(x_role)
+    try:
+        from services.zd_mode_service import set_override
+        return {"success": True, "data": await set_override(mode)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/order-ai/scan/run", tags=["智单AI智能订单大模型"])
+async def zd_scan_run(x_role: str = Header(None, alias="X-Role")):
+    """手动触发单轮扫描(四维体检+异常订单+三检测器, 各自留痕)"""
+    _require_admin(x_role)
+    try:
+        from services.zd_scan_scheduler import run_scan
+        return {"success": True, "data": await run_scan()}
     except Exception as e:
         _handle(e)
 

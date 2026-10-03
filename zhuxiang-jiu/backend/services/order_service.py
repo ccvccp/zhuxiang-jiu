@@ -756,6 +756,22 @@ class OrderService:
             now = ts()
             order["status"] = RETURNING
             order["refund"]["reason"] = reason
+            # 智单联动(P 升级): 退款申请自动附风险建议书(fail-soft,
+            # 建议永不自动——仅供审核人工参考, 随订单持久化)
+            risk_assist = None
+            try:
+                from services.zd_risk_service import ZdRiskService
+                risk_assist = await ZdRiskService().refund_score(
+                    order_id)
+            except Exception:
+                risk_assist = None
+            if risk_assist:
+                order["refund"]["riskAssist"] = {
+                    "score": risk_assist.get("score"),
+                    "level": risk_assist.get("level"),
+                    "suggestion": risk_assist.get("suggestion"),
+                    "assistedAt": now,
+                }
             # 售后审核记录(对齐文档 order_aftersales: 待审核/已同意/已拒绝)
             order["refund"]["audit"] = {
                 "status": "pending",
@@ -769,7 +785,7 @@ class OrderService:
             order["updatedAt"] = now
             await self.order_repo.save(order_id, order)
 
-            return {
+            result = {
                 "success": True,
                 "orderId": order_id,
                 "status": RETURNING,
@@ -778,6 +794,14 @@ class OrderService:
                 "logs": [{"step": "申请退货", "level": "WARN",
                           "msg": f"原因: {reason}(进入退款审核流)"}],
             }
+            if risk_assist:
+                result["riskAssist"] = {
+                    "score": risk_assist.get("score"),
+                    "level": risk_assist.get("level"),
+                    "suggestion": risk_assist.get("suggestion"),
+                    "note": "智单风险建议书(仅供参考, 永不自动)",
+                }
+            return result
 
     async def audit_refund(self, order_id: str, approve: bool,
                             auditor: str = "", audit_remark: str = "") -> dict:

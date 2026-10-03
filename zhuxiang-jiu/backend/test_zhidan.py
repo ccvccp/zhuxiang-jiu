@@ -23,6 +23,7 @@ import sys
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ["AUTH_MODE"] = "compat"
+os.environ["ZD_MODE"] = "assist"   # 三态灰度(升级后决策面需开档)
 
 from repositories.store import _mock_store
 
