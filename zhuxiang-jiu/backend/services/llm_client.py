@@ -287,12 +287,16 @@ class LLMProviderClient:
 
     def chat(self, system: str, user: str,
              temperature: float = 0.3,
-             model: str = "") -> str | None:
+             model: str = "",
+             timeout: int = 0) -> str | None:
         """单轮对话补全, 失败/未配置返回 None(调用方回退 rule)
 
         Args:
             model: 指定模型档位(空则用 LLM_MODEL 默认档)。
                 36号智能推广模块传 LLM_MODEL_PROMO(glm-5.3 Agent 链)。
+            timeout: 单次调用读超时秒数(0=全局 LLM_TIMEOUT)。
+                长文生成链(如 glm-5.3 Agent 四步)可用专用超时
+                (LLM_TIMEOUT_PROMO), 不影响用户侧快调用回退节奏。
 
         Returns:
             模型回复文本; 未配置 key、请求失败、响应异常均返回 None。
@@ -324,7 +328,8 @@ class LLMProviderClient:
                 method="POST")
             try:
                 with urllib.request.urlopen(
-                        request, timeout=_TIMEOUT) as resp:
+                        request,
+                        timeout=timeout or _TIMEOUT) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
                 content = (body.get("choices") or [{}])[0].get(
                     "message", {}).get("content")

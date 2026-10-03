@@ -165,13 +165,22 @@ class PromoAgentService:
     def _chat_json(self, system: str, user: str) -> tuple[dict | None, str]:
         """单步 Agent 调用: 主档→备档→失败(调用方走规则轨)
 
+        超时: 链专用 LLM_TIMEOUT_PROMO(默认 120s)——glm-5.3 长文
+        生成实测 37s+ 且波动大(2026-10-03 E2E: 15/60s 均超时回退
+        rule), 用户侧快调用仍走全局 LLM_TIMEOUT 不受影响。
+
         Returns:
             (解析后的 JSON dict 或 None, 实际走轨标签)
         """
+        import os as _os
+        chain_timeout = int(
+            _os.environ.get("LLM_TIMEOUT_PROMO", "120"))
         from services.llm_client import provider_client
         for model in (TRACK_PRIMARY, TRACK_FALLBACK):
             try:
-                reply = provider_client.chat(system, user, model=model)
+                reply = provider_client.chat(
+                    system, user, model=model,
+                    timeout=chain_timeout)
             except Exception as exc:   # 网络异常等 → 试下一档
                 logger.warning("promo_agent_chat_error model=%s: %s",
                                model, exc)
