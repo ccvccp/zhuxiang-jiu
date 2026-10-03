@@ -139,6 +139,27 @@ async def main():
            health.get("verdict") in
            ("healthy", "degraded", "frozen"))
 
+    # ---------- 启动即首轮(2026-10-03 修正回归) ----------
+    print("[启动即首轮]")
+
+    # test 12: start 后无需等一轮——task 启动立即执行首轮
+    # 并落 meta_health 台账(原"先 sleep 后执行"在频繁重建下
+    # 永不执行, 生产 meta_health=0 佐证)
+    from repositories.attract72_repository import (
+        Attract72Repository,
+    )
+    repo = Attract72Repository()
+    before = len(await repo.list_health())
+    os.environ["ATTRACT72_HEALTH_AUTO"] = "on"
+    sched.start_scheduler()
+    await asyncio.sleep(0.5)  # 让 task 首轮跑完
+    after = len(await repo.list_health())
+    record("test_12_start_runs_first_round_immediately",
+           after > before,
+           f"before={before} after={after}")
+    sched.stop_scheduler()
+    os.environ.pop("ATTRACT72_HEALTH_AUTO", None)
+
     # 汇总
     print()
     print("-" * 60)

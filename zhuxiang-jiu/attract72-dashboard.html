@@ -1,0 +1,172 @@
+<!--
+    智流·AI智能自动引流大模型看板(72号)
+    页面: attract72-dashboard.html(配套脚本 js/attract72-dashboard.js)
+    依赖: css/style.css / 后端 attract72_routes(49 端点; X-Role: admin)
+          + v1.0 attract_routes(归因底座观测)
+    数据源: GET /api/attract72/{model/status,personas,landing/variants,
+            hotspot/decisions,meta/health,redteam,evolution/log}
+            + GET /api/attract/{report/funnel,clicks,attributions}
+    区块: ①模式+模型状态 ②v1.0 归因漏斗(流量底座)
+          ③P1 渠道画像 ④P4 落地变体 ⑤P5 热点决策
+          ⑥P6 健康度/红队/进化日志
+    红线: 智能层全为观测/建议——落地变体渲染 fail-soft;
+          转档(off/shadow/assist/full)全人工二次确认;
+          热点卡位执行永远显式动作
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智流·AI智能自动引流大模型看板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#3a1f5c,#7a3fb8);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #3a1f5c;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:8px}
+    .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
+        padding:8px 10px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .v{font-size:17px;font-weight:600}
+    .ov-cell .v.red{color:#c0392b}
+    .ov-cell .v.green{color:#2f9e44}
+    .ov-cell .v.blue{color:#24619c}
+    .ov-cell .v.yellow{color:#a37400}
+    table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
+    .dash-table th{text-align:left;padding:6px 8px;background:
+        var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
+        var(--color-border,#ddd);white-space:nowrap}
+    .dash-table td{padding:5px 8px;border-bottom:1px solid
+        var(--color-border,#eee);vertical-align:top;word-break:break-all}
+    .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
+        padding:8px 12px;border-radius:5px;margin-bottom:14px;
+        font-size:11px}
+    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    .mode-pill{font-size:11px;padding:3px 10px;border-radius:10px;
+        background:#eef;border:1px solid #ccd}
+    .mode-pill.ok{background:#e6f7ee;border-color:#9ad;border-color:#7c6;color:#166}
+    .mode-pill.warn{background:#fff8e6;color:#973;border:1px solid #eca}
+    .mode-pill.risk{background:#fee;color:#a33;border:1px solid #f99}
+</style>
+</head>
+<body>
+<div class="dash-banner">
+    <h1>智流 · AI智能自动引流大模型看板（72号）</h1>
+    <p>因果认知中枢：v1.0 归因底座 × P1 画像感知 × P4 动态落地 × P5 热点卡位 × P6 元认知治理</p>
+</div>
+<div class="redline-bar">
+    红线：智能层全为观测与建议——落地变体渲染 fail-soft（不阻断主链）；
+    转档四档全人工二次确认；热点卡位执行永远显式动作；KILL 秒级制动。
+</div>
+
+<div class="dash-toolbar" style="margin-bottom:12px">
+    <input id="apiBase" placeholder="后端地址(默认同源, 本地调试可填)"
+           style="width:280px">
+    <button class="dash-btn" onclick="saveConn()">连接</button>
+    <button class="dash-btn ghost" onclick="loadAll()">刷新</button>
+    <span id="modePill" class="mode-pill">MODE=…</span>
+    <span id="lastUpdate" style="font-size:11px;color:#999;margin-left:8px"></span>
+</div>
+<div id="errBar" class="dash-error"></div>
+
+<!-- ① 模式 + 模型状态 -->
+<div class="dash-section">
+  <div class="dash-card">
+    <div class="card-head"><h3>① 模式与模型状态</h3></div>
+    <div id="ovStatus" class="ov-cells"></div>
+  </div>
+</div>
+
+<!-- ② v1.0 归因底座 -->
+<div class="dash-section">
+  <div class="dash-card">
+    <div class="card-head"><h3>② v1.0 归因底座（漏斗 + 最近点击/归因）</h3></div>
+    <div id="ovFunnel" class="ov-cells" style="margin-bottom:10px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div style="font-size:12px;color:#666;margin-bottom:6px">最近点击</div>
+        <div id="tblClicks"></div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#666;margin-bottom:6px">最近归因</div>
+        <div id="tblAttrs"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ③ P1 渠道画像 -->
+<div class="dash-section">
+  <div class="dash-card">
+    <div class="card-head"><h3>③ P1 渠道人格画像（品鉴/分享/优惠/新晋）</h3></div>
+    <div id="tblPersonas"></div>
+  </div>
+</div>
+
+<!-- ④ P4 落地变体 -->
+<div class="dash-section">
+  <div class="dash-card">
+    <div class="card-head"><h3>④ P4 落地变体（trust_first / benefit_first / default）</h3></div>
+    <div id="tblVariants"></div>
+  </div>
+</div>
+
+<!-- ⑤ P5 热点决策 -->
+<div class="dash-section">
+  <div class="dash-card">
+    <div class="card-head"><h3>⑤ P5 热点卡位决策（chase / observe / reject）</h3></div>
+    <div id="tblHotspots"></div>
+  </div>
+</div>
+
+<!-- ⑥ P6 元认知 -->
+<div class="dash-section">
+  <div class="dash-card">
+    <div class="card-head"><h3>⑥ P6 元认知（健康度 / 红队 / 进化日志）</h3>
+      <div class="dash-toolbar">
+        <button class="dash-btn ghost" onclick="loadHealth(true)">触发健康检查</button>
+      </div>
+    </div>
+    <div id="ovHealth" class="ov-cells" style="margin-bottom:10px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div style="font-size:12px;color:#666;margin-bottom:6px">红队记录</div>
+        <div id="tblRedteam"></div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:#666;margin-bottom:6px">进化日志</div>
+        <div id="tblEvo"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note-bar">
+    72号四层：归因底座(v1.0) → 感知(P1) → 因果(P2) → 预算(P3) → 落地(P4) → 卡位(P5) → 元认知(P6)
+    · 智能层数据依赖真实流量积累
+</div>
+
+<script src="js/auth.js?v=1"></script>
+<script src="js/attract72-dashboard.js?v=1"></script>
+</body>
+</html>

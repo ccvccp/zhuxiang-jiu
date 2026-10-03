@@ -4,11 +4,14 @@
     健康度三指标检查无专属调度器——上次检查 2026-09-14,
     15 天零活动(insufficient 数据老化) → 日度调度化。
 
-范式: kg51_scheduler(51号日度巡检)平移:
+范式: kg51_scheduler(51号日度巡检)平移 + 2026-10-03 检查修正:
     - ATTRACT72_HEALTH_AUTO 默认 off(off=零 task 零影响)
     - ATTRACT72_HEALTH_INTERVAL 默认 86400s(下限 300s
       防忙循环)
-    - 先 sleep 后执行(首轮延迟一轮)
+    - 启动即首轮(2026-10-03 修正: 原"先 sleep 后执行"在
+      频繁容器重建下永不执行——生产 HEALTH_AUTO=on 数日
+      meta_health 仍 0 条佐证; 对齐五模型调度器"重建即
+      即时轮"范式)
     - fail-soft 循环异常继续运行
     - check_health 自落 meta_health 台账(checkId 累计),
       调度层仅日志留痕——健康检查属观测面动作(制动/
@@ -57,12 +60,14 @@ async def run_scheduled_health() -> dict:
 async def _scheduler_loop() -> None:
     interval = scheduler_interval_seconds()
     while True:
-        await asyncio.sleep(interval)
+        # 先执行后 sleep: 重建即首轮(空库 insufficient 不误冻,
+        # P6 既有语义; 首轮留痕也让健康台账随部署刷新)
         try:
             await run_scheduled_health()
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "引流健康度调度异常(继续运行): %s", exc)
+        await asyncio.sleep(interval)
 
 
 _scheduler_task: asyncio.Task | None = None
