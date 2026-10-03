@@ -41,9 +41,15 @@ INTENT_ANCHORS: dict[str, tuple[tuple[str, int], ...]] = {
                 ("礼盒", 2), ("库存", 2), ("推荐", 1), ("酒", 1),
                 ("竹奕", 2), ("竹香", 2), ("哪个好", 1), ("套餐", 1)),
     "equity": (("会员", 2), ("权益", 2), ("积分", 2), ("等级", 1),
-               ("升级", 1), ("折扣", 1), ("优惠价", 1)),
+               ("升级", 1), ("折扣", 1), ("优惠价", 1),
+               # 2026-10-03 三轮审查补: 自我指代查询(规划验收场景
+               # "查我的等级"类——"等级"共享词 1 分低于置信线漏判)
+               ("我的等级", 2), ("我的成长值", 2)),
     "agent": (("代理", 2), ("加盟", 2), ("招商", 2), ("开店", 2),
-              ("网店", 2), ("保证金", 2), ("区域", 1), ("政策", 1)),
+              ("网店", 2), ("保证金", 2), ("区域", 1), ("政策", 1),
+              # 2026-10-03 三轮审查补: 规划第一节验收场景
+              # "我的政策"(已认证代理个性化)——原仅"政策"1分漏判
+              ("我的政策", 2), ("专属政策", 2), ("我的返利", 2)),
     # 2026-10-03 边界审查修复: 拆掉单字"退"(子串误命中且"退货/
     # 退款"高频场景只得1分低于置信线漏到chat); 补退换/售后
     "order": (("订单", 2), ("发货", 2), ("物流", 2), ("运单", 2),
@@ -198,7 +204,12 @@ def classify_intent(text: str) -> dict:
 
 
 def extract_slots(text: str, intent: str) -> dict:
-    """槽位提取(MVP: 价格区间/场景/商品词)"""
+    """槽位提取(MVP: 价格区间/场景/商品词; 三轮审查补全规划第三节)
+
+    2026-10-03 三轮审查: 补 orderNo/waybillNo/level/province——
+    订单号(RT+毫秒+序号)/快递运单号(承运商前缀)/会员等级/省份,
+    供 R4 精确单查询与 R2 等级问答消费。
+    """
     slots: dict = {}
     m = re.search(r"(\d+)\s*[-~到至]\s*(\d+)\s*元", text)
     if m:
@@ -217,6 +228,29 @@ def extract_slots(text: str, intent: str) -> dict:
                                  "礼盒") if w in text]
     if product_words:
         slots["productWords"] = product_words
+    # ---- 三轮审查补全(规划第三节槽位表) ----
+    # 注: 中文也是 \w, \b 在中文字符与字母间不成立——用 lookaround
+    utext = text.upper()
+    # 订单号: 站内 RT+毫秒+序号(前非字母防 START 误提)
+    m = re.search(r"(?<![A-Z])(RT\d{10,})(?!\d)", utext)
+    if m:
+        slots["orderNo"] = m.group(1)
+    # 运单号: 承运商前缀(顺丰/林连连/EMS/四通一达)
+    m = re.search(r"(?<![A-Z])((?:SF|LLL|EMS|YTO|ZTO|STO|YD|JT)"
+                  r"\d{8,})(?!\d)", utext)
+    if m:
+        slots["waybillNo"] = m.group(1)
+    # 会员等级: L1-L5(前后非字母数字防 L35/SSL3 误提)
+    m = re.search(r"(?<![A-Z0-9])L([1-5])(?![0-9])", utext)
+    if m:
+        slots["level"] = int(m.group(1))
+    # 省份(31 直辖市/省/自治区简称全称)
+    m = re.search("(北京|上海|天津|重庆|河北|山西|辽宁|吉林|黑龙江|"
+                  "江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|"
+                  "海南|四川|贵州|云南|陕西|甘肃|青海|台湾|内蒙古|"
+                  "广西|西藏|宁夏|新疆|港澳)", text)
+    if m:
+        slots["province"] = m.group(1)
     return slots
 
 
@@ -461,12 +495,14 @@ class ZsSearchService:
                             "url": "login.html"},
                  "relevance": 0.9}]
 
-    async def _route_order(self, member_id: int) -> list[dict]:
-        """R4 订单路(P1): 鉴权联动本人订单 + 智运轨迹摘要
+    async def _route_order(self, member_id: int,
+                           slots: dict | None = None) -> list[dict]:
+        """R4 订单路(P1+P2三轮): 鉴权联动本人订单 + 智运轨迹摘要
 
         - 未登录: 登录引导卡(不查任何订单数据——隐私安全)
         - 登录: get_my_orders 按 member_id 过滤(本人校验天然成立),
           取最近 2 单; 已发货单挂最新轨迹节点(智运联动)
+        - 三轮审查补: 带订单号/运单号槽位 → 精确查该单(本人校验)
         """
         if not member_id:
             return [{"route": "order", "kind": "订单",
@@ -477,6 +513,14 @@ class ZsSearchService:
                      "action": {"label": "去登录",
                                 "url": "login.html"},
                      "relevance": 0.95}]
+        # 精确单查询(订单号/运单号槽位; 非本人单不放行细节)
+        slots = slots or {}
+        if slots.get("orderNo") or slots.get("waybillNo"):
+            card = await self._route_order_precise(
+                member_id, slots.get("orderNo", ""),
+                slots.get("waybillNo", ""))
+            if card:
+                return [card]
         try:
             from services.order_service import OrderService
             mine = await OrderService().get_my_orders(member_id)
@@ -510,6 +554,68 @@ class ZsSearchService:
         except Exception as exc:
             logger.warning("zs_route_order_failed: %s", exc)
             return []
+
+    async def _route_order_precise(self, member_id: int, order_no: str,
+                                   waybill_no: str) -> dict | None:
+        """精确单查询(三轮审查补): 订单号/运单号 → 该单摘要
+
+        本人校验: 订单 memberId 不符 → 明确回未找到(不放行他人单);
+        运单号反查订单再校验。无匹配返回 None(回落最近订单列表)。
+        """
+        try:
+            from services.order_service import OrderService
+            from services.logistics_service import LogisticsService
+            order = None
+            if order_no:
+                try:
+                    order = (await OrderService()
+                             .get_by_id(order_no)).get("order")
+                except KeyError:
+                    order = None
+            elif waybill_no:
+                try:
+                    lo = await LogisticsService().get_order(waybill_no)
+                    if lo:
+                        order = (await OrderService().get_by_id(
+                            lo.get("orderId", ""))).get("order")
+                except (KeyError, Exception):
+                    order = None
+            if not order:
+                return {"route": "order", "kind": "订单",
+                        "title": f"未找到单号 {order_no or waybill_no}",
+                        "snippet": ("请核对订单号/运单号是否正确; "
+                                    "也可在订单列表查看全部订单"),
+                        "source": "订单系统#precise",
+                        "action": {"label": "查物流轨迹",
+                                   "url": "logistics.html"},
+                        "relevance": 0.9}
+            if order.get("memberId") != member_id:
+                # 非本人单: 不放行任何细节(隐私红线)
+                return {"route": "order", "kind": "订单",
+                        "title": "未找到您的该订单",
+                        "snippet": "该单号不存在或非您本人订单, "
+                                   "请核对后重试",
+                        "source": "订单系统#authz",
+                        "action": {"label": "查物流轨迹",
+                                   "url": "logistics.html"},
+                        "relevance": 0.9}
+            oid = order.get("orderId", "")
+            snippet = (f"{order.get('statusName') or order.get('status')}"
+                       f" | ¥{order.get('totalAmount', '-')}"
+                       f" | {str(order.get('createdAt', ''))[:10]}")
+            tip = await self._order_track_tip(str(oid))
+            if tip:
+                snippet += f" | {tip}"
+            return {"route": "order", "kind": "订单",
+                    "title": f"订单 {oid}",
+                    "snippet": snippet,
+                    "source": "订单系统+智运",
+                    "action": {"label": "查物流轨迹",
+                               "url": "logistics.html"},
+                    "relevance": 0.97}
+        except Exception as exc:
+            logger.warning("zs_route_order_precise_failed: %s", exc)
+            return None
 
     async def _order_track_tip(self, order_id: str) -> str:
         """订单最新轨迹摘要(智运联动; 无物流单返回空)"""
@@ -547,6 +653,10 @@ class ZsSearchService:
         """
         if os.environ.get("ZS_LLM_ASSIST", "on").strip().lower() \
                 in ("off", "0", "false"):
+            return None
+        # 2026-10-03 三轮审查补: 有效字符闸——纯符号/表情查询不烧
+        # LLM(此前"？？？。。。"也触发真实调用, 4 例浪费 4 次)
+        if not re.search(r"[\u4e00-\u9fa5A-Za-z0-9]", text):
             return None
         try:
             from services.llm_client import provider_client
@@ -733,7 +843,7 @@ class ZsSearchService:
         if "equity" in routes:
             candidates += await self._route_equity(member_id, role)
         if "order" in routes:
-            candidates += await self._route_order(member_id)
+            candidates += await self._route_order(member_id, slots)
         if "knowledge" in routes:
             ktext = text
             if llm_assist and llm_assist.get("adopted") \

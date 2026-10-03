@@ -81,6 +81,20 @@ async def main():
     record("槽位-价格区间", s.get("priceRange") == [200, 500], str(s))
     record("槽位-场景送礼", s.get("scene") == "送礼", str(s))
     record("槽位-商品词", "竹香" in s.get("productWords", []), str(s))
+    # 三轮审查补全: 单号/等级/省份槽位(lookaround 边界, 中文非 \b)
+    s = extract_slots("订单RT17580000000001发货了吗", "order")
+    record("槽位-订单号", s.get("orderNo") == "RT17580000000001",
+           str(s))
+    s = extract_slots("运单SF1234567890到哪了", "order")
+    record("槽位-运单号", s.get("waybillNo") == "SF1234567890",
+           str(s))
+    record("槽位-等级(L3)", extract_slots(
+        "我是L3会员有什么权益", "equity").get("level") == 3, "")
+    record("槽位-等级防误提(SSL3不提)",
+           "level" not in extract_slots("SSL3证书怎么样", "chat"),
+           str(extract_slots("SSL3证书怎么样", "chat")))
+    record("槽位-省份", extract_slots(
+        "做山东的代理怎么申请", "agent").get("province") == "山东", "")
 
     # ---- L2 合规 ----
     b = compliance_gate("未成年人能买酒吗")
@@ -144,6 +158,19 @@ async def main():
                            role="member")
     record("P1订单-会员无订单口径",
            "暂无订单" in ro_m["answer"], str(ro_m["answer"])[:80])
+
+    # 三轮审查补: 自我指代查询规则直判(规划验收场景)
+    record("P3意图-我的政策(agent)",
+           (await svc.query("我的政策", member_id=mid,
+                            role="member"))["intent"] == "agent", "")
+    record("P3意图-我的等级(equity)",
+           (await svc.query("我的等级", member_id=mid,
+                            role="member"))["intent"] == "equity", "")
+    # 精确单查询: 不存在单号 → 未找到口径(回落最近订单前的明确回复)
+    ro_p = await svc.query("订单RT99999999999999999发货了吗",
+                           member_id=mid, role="member")
+    record("P3订单-精确单未找到口径",
+           "未找到" in ro_p["answer"], str(ro_p["answer"])[:80])
 
     # ---- P1: 显式反馈进化闭环 ----
     rq = await svc.query("竹香酒怎么样", role="guest")
