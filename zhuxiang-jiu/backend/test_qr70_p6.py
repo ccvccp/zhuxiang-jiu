@@ -66,7 +66,10 @@ async def main():
     from fastapi.testclient import TestClient
     from main import app
     client = TestClient(app)
-    ADMIN = {"X-Role": "admin"}
+    # 真 Bearer 轨(Bearer 迁移批次): async 上下文用异步版铸造,
+    # 中间件验签注入 x-role=admin, 与生产同构(裸头 X-Role 为存量通道)
+    ADMIN = {"Authorization":
+             "Bearer " + await test_support.mint_token_async(role="admin")}
     BASE = "/api/qr70"
 
     print("[01 版式规则与字典封闭]")
