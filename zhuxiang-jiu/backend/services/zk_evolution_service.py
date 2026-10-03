@@ -104,6 +104,25 @@ class ZkEvolutionService:
             raise ValueError(f"裁决无效({verdict}: "
                              f"adopted/corrected/rejected)")
 
+        # 三态语义: shadow(影子观测期) → 反馈只留痕, 进化冻结
+        # (观测期数据不污染 ltvRetainFactor; 对齐智搜/智启元/智单)
+        try:
+            from services.zk_mode_service import is_shadow
+            if await is_shadow():
+                record = {
+                    "feedbackId": await self.store.next_id(
+                        "zk_feedbacks"),
+                    "targetType": target_type, "verdict": verdict,
+                    "note": (note or "") + " | shadow 观测期进化冻结",
+                    "evolved": False,
+                    "feedbackAt": _now_iso(),
+                }
+                await self.store.save("zk_feedbacks",
+                                      record["feedbackId"], record)
+                return record
+        except Exception:
+            pass
+
         params = await self.store.get("zk_params", "params") or {}
         before = float(params.get(
             "ltvRetainFactor",

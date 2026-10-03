@@ -736,7 +736,26 @@ class MemberService:
                     "periodConsume": round(period + amount, 2),
                 })
 
-            return {
+            # 智客联动(P 升级): 升级时自动附新等级权益建议书
+            # (fail-soft, 建议永不自动——随返回供会员端/运营参考)
+            upgrade_benefits = None
+            if new_level > old_level:
+                try:
+                    from services.zk_operation_service import (
+                        ZkOperationService,
+                    )
+                    bm = await ZkOperationService().benefit_match(
+                        member_id)
+                    upgrade_benefits = {
+                        "levelName": bm.get("levelName")
+                        or LEVEL_NAMES[new_level],
+                        "benefits": (bm.get("benefits") or [])[:6],
+                        "note": "智守权益建议书(仅供参考, 永不自动)",
+                    }
+                except Exception:
+                    upgrade_benefits = None
+
+            result = {
                 "success": True,
                 "memberId": member_id,
                 "amount": amount,
@@ -748,6 +767,9 @@ class MemberService:
                 "leveledUp": new_level > old_level,
                 "logs": logs,
             }
+            if upgrade_benefits:
+                result["upgradeBenefits"] = upgrade_benefits
+            return result
 
     async def record_order_consume(self, member_id, amount: float) -> dict:
         """订单支付消费入账(成长值 + 保级周期 + 自动升级判定)

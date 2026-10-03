@@ -1,0 +1,168 @@
+<!--
+    智客·AI智能会员大模型看板
+    页面: zhike-dashboard.html(配套脚本 js/zhike-dashboard.js)
+    依赖: css/style.css / 后端 zk_routes(23 端点; X-Role: admin)
+    数据源: GET /api/member-ai/{mode,overview,churns,wakeups,detect,
+            params,feedbacks,portraits}
+    区块: ①模式+总览 ②会员总览 ③流失预警 ④唤醒建议
+          ⑤三检测器 ⑥进化闭环 ⑦画像快照 ⑧反馈流
+    红线: 唤醒/权益建议全为建议书——永不自动发送
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智客·AI智能会员大模型看板</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+    .dash-banner{
+        background:linear-gradient(135deg,#4a1d5c,#7a3d94);
+        color:#fff;padding:18px 24px;border-radius:10px;margin-bottom:16px;
+    }
+    .dash-banner h1{font-size:20px;margin:0 0 4px}
+    .dash-banner p{font-size:12px;margin:0;opacity:.85}
+    .dash-section{margin-bottom:18px}
+    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
+        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .card-head{display:flex;justify-content:space-between;align-items:
+        center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+    .card-head h3{font-size:15px;margin:0}
+    .dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .dash-toolbar input{padding:6px 8px;border:1px
+        solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
+    .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
+        #4a1d5c;color:#fff;cursor:pointer;font-size:12px}
+    .dash-btn.ghost{background:#6b7280}
+    .dash-error{background:#fee;border:1px solid #f99;color:#c33;
+        padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
+        font-size:12px}
+    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
+        minmax(140px,1fr));gap:8px}
+    .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
+        padding:8px 10px}
+    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .v{font-size:17px;font-weight:600}
+    .ov-cell .v.red{color:#c0392b}
+    .ov-cell .v.green{color:#2f9e44}
+    .ov-cell .v.blue{color:#24619c}
+    .ov-cell .v.yellow{color:#a37400}
+    table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
+    .dash-table th{text-align:left;padding:6px 8px;background:
+        var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
+        var(--color-border,#ddd);white-space:nowrap}
+    .dash-table td{padding:5px 8px;border-bottom:1px solid
+        var(--color-border,#eee);vertical-align:top}
+    .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
+        padding:8px 12px;border-radius:5px;margin-bottom:14px;
+        font-size:11px}
+    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    .ok-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600;background:#e9f7ee;color:#2f9e44}
+    .warn-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600;background:#fff7e0;color:#a37400}
+    .risk-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600;background:#fdeaea;color:#c0392b}
+    .gray-pill{display:inline-block;padding:1px 8px;border-radius:8px;
+        font-size:11px;font-weight:600;background:#eee;color:#888}
+</style>
+</head>
+<body>
+<header class="dash-banner">
+    <h1>智客·AI智能会员大模型看板</h1>
+    <p>数据织物 · 洞察画像 · 留存预警 · 权益运营 · 进化闭环（引擎已活化：每日流失/唤醒扫描值守 + 升级自动附权益建议书）</p>
+</header>
+
+<div class="container">
+
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="dash-toolbar">
+                <label>后端 <input id="apiBase" size="24"
+                    placeholder="留空=同源(生产默认) / http://localhost:8000(本地)"></label>
+                <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
+                <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
+                <button class="dash-btn" onclick="runScan()">立即扫描</button>
+                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+            </div>
+            <div id="errBar" class="dash-error"></div>
+            <div class="redline-bar">
+                ⚠️ 治理红线：唤醒方案 / 权益匹配 / 升降级建议全为<b>建议书模式</b>——
+                永不自动发送或执行，须运营人工裁决；升级自动附的权益建议书仅供参考。
+            </div>
+        </div>
+    </div>
+
+    <!-- ① 模式 + 总览 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>① 模式态 + 大模型总览</h3>
+                <span id="modePill" class="gray-pill">…</span></div>
+            <div id="ovStatus" class="ov-cells"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ② 会员总览 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>② 会员总览（等级分布 / 消费）</h3></div>
+            <div id="overviewBox"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ③ 流失预警 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>③ 流失预警（三信号：登录/消费/等级）</h3></div>
+            <div id="churnBox"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ④ 唤醒建议 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>④ 沉睡唤醒建议（深/中/轻三级）</h3></div>
+            <div id="wakeupBox"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ⑤ 三检测器 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑤ 三检测器（消费 spike / 积分 drop / 注册 surge）</h3></div>
+            <div id="detectBox"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ⑥ 进化闭环 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑥ 进化闭环（ltvRetainFactor）</h3></div>
+            <div id="evoBox"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ⑦ 画像快照 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑦ RFM 画像快照（近 10 条）</h3></div>
+            <div id="portraitBox"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <!-- ⑧ 反馈流 -->
+    <div class="dash-section">
+        <div class="dash-card">
+            <div class="card-head"><h3>⑧ 反馈留痕流</h3></div>
+            <div id="fbBox"><div class="dash-empty">加载中…</div></div>
+        </div>
+    </div>
+
+    <div class="note-bar">智客·AI智能会员大模型看板 · 数据源 /api/member-ai/*（admin）·
+        建议 = 建议书，永不自动发送</div>
+</div>
+
+<script src="js/auth.js"></script>
+<script src="js/zhike-dashboard.js"></script>
+</body>
+</html>
