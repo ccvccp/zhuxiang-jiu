@@ -111,6 +111,22 @@ function headers() {
 
 function quick(text) { $('q').value = text; doSearch(); }
 
+/* P2 隐式转化回流: 动作卡点击 → sendBeacon(不阻塞页面跳转) */
+function trackAction(decisionId, label) {
+    try {
+        var payload = JSON.stringify({
+            decisionId: decisionId, actionLabel: String(label || '') });
+        if (navigator.sendBeacon) {
+            navigator.sendBeacon('/api/search-ai/action-click',
+                new Blob([payload], { type: 'application/json' }));
+        } else {
+            fetch('/api/search-ai/action-click', {
+                method: 'POST', headers: headers(), body: payload,
+                keepalive: true });
+        }
+    } catch (e) { /* 埋点失败不影响跳转 */ }
+}
+
 async function doSearch() {
     var text = $('q').value.trim();
     if (!text) return;
@@ -169,9 +185,18 @@ function render(text, d) {
         actions.forEach(function (a, i) {
             var cls = i === 0 ? '' : ' ghost';
             var url = String(a.url || '');
-            var attr = url.indexOf('javascript') === 0
-                ? 'onclick="alert(\'请通过在线客服转人工\')" href="javascript:void(0)"'
-                : 'href="' + esc(url) + '"';
+            var isJs = url.indexOf('javascript') === 0;
+            /* P2 隐式转化回流: 点击即正样本(sendBeacon 不阻塞跳转) */
+            var track = d.decisionId
+                ? "trackAction(" + d.decisionId + ",'"
+                  + String(a.label).replace(/[\\'"]/g, '') + "')"
+                : '';
+            var clickJs = isJs
+                ? "alert('请通过在线客服转人工');" + track
+                : track;
+            var attr = 'href="' + (isJs ? 'javascript:void(0)'
+                                       : esc(url)) + '"';
+            if (clickJs) attr += ' onclick="' + esc(clickJs) + '"';
             html += '<a class="' + cls.trim() + '" ' + attr + '>'
                 + esc(a.label) + '</a>';
         });

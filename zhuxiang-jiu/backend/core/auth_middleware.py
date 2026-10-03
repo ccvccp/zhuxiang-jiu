@@ -114,6 +114,8 @@ PUBLIC_EXACT = {
     # 智搜显式反馈(P1): 游客也可反馈; 绑定 decisionId, 合规拦截
     # 决策不参与进化(服务层红线), 无越权面
     "/api/search-ai/feedback",
+    # 智搜隐式转化回流(P2): 动作卡点击正样本, 红线同上
+    "/api/search-ai/action-click",
 }
 
 # 公开前缀(仅 GET): 游客浏览类接口

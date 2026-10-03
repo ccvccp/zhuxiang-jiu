@@ -49,6 +49,12 @@ class FeedbackRequest(BaseModel):
     verdict: str = Field(..., description="useful(有用)/useless(没用)")
 
 
+class ActionClickRequest(BaseModel):
+    decisionId: int = Field(..., description="来源决策 ID")
+    actionLabel: str = Field("", max_length=40,
+                             description="被点击的动作卡标签")
+
+
 # ============================================================
 # 决策面(公开; 登录态经中间件注入 x-member-id/x-role 增强)
 # ============================================================
@@ -97,6 +103,22 @@ async def feedback(
             mid = 0
         record = await _service.submit_feedback(
             data.decisionId, data.verdict, member_id=mid)
+        return {"success": True, "data": record}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/search-ai/action-click",
+             tags=["智搜AI智能搜索引擎大模型"])
+async def action_click(data: ActionClickRequest):
+    """隐式转化回流(P2)
+
+    回答内动作卡片点击(跳商品/留资/查订单) → 转化正样本,
+    routeBoost +0.03; 合规拦截决策不参与进化(红线同显式反馈)。
+    """
+    try:
+        record = await _service.record_action_click(
+            data.decisionId, action_label=data.actionLabel)
         return {"success": True, "data": record}
     except Exception as e:
         _handle(e)

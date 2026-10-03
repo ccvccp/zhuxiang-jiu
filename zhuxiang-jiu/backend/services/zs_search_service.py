@@ -19,6 +19,7 @@
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -28,7 +29,7 @@ from core.locks import get_lock
 
 logger = logging.getLogger("zs_search_service")
 
-MODEL_VERSION = "v1.1-zhisou-p1"
+MODEL_VERSION = "v1.2-zhisou-p2"
 
 
 # ============================================================
@@ -83,10 +84,19 @@ INTENT_ROUTES = {   # 检索路映射(P1: 权益/订单接入结构化路)
 
 # P1 进化参数(显式反馈闭环; 对齐规划第六节)
 #   routeBoost{intent}: 各意图检索路历史反馈加成, clamp [0.8, 1.2]
-#   红线: 只乘 L4 业务分项(0.2 权重), 合规分项(0.1)永不参与进化;
-#         intentWeight(规则/LLM 采纳权重)留 P2 LLM 兜底时启用
+#   红线: 只乘 L4 业务分项(0.2 权重), 合规分项(0.1)永不参与进化
 ROUTE_BOOST_BOUNDS = (0.8, 1.2)
 ROUTE_BOOST_STEP = 0.05
+
+# P2 进化参数: intentWeight——LLM 兜底轨的采纳权重, clamp [0.4, 0.8]
+#   >= 0.6 采纳 LLM 兜底意图; < 0.6 仅留痕审计不采纳(信规则统计)
+#   由 LLM 兜底决策的显式反馈驱动(useful +0.02 / useless -0.02)
+INTENT_WEIGHT_BOUNDS = (0.4, 0.8)
+INTENT_WEIGHT_STEP = 0.02
+INTENT_WEIGHT_DEFAULT = 0.6
+
+# P2 隐式转化回流: 动作卡点击 → 正样本 +0.03(小于显式 0.05)
+ACTION_BOOST_STEP = 0.03
 
 # 兜底置信线(最高意图得分 < 此值 → chat)
 INTENT_CONFIDENCE_LINE = 2.0
@@ -214,6 +224,11 @@ def extract_slots(text: str, intent: str) -> dict:
 # 共享留痕存储(对齐 _ZwStore 范式)
 # ============================================================
 
+def _redis_key_str(x) -> str:
+    """Redis 键兼容(bytes 客户端 / decode_responses 客户端)"""
+    return x.decode() if isinstance(x, bytes) else str(x)
+
+
 class _ZsStore:
     """智搜共享表存储(内存/Redis 双模式)"""
 
@@ -275,7 +290,8 @@ class _ZsStore:
         if self._is_redis():
             client = await self._get_redis()
             raw = await client.hgetall("zhuxiang:zs:" + key)
-            return {k.decode(): int(v) for k, v in raw.items()}
+            # 生产客户端 decode_responses=True 返回 str——两种兼容
+            return {_redis_key_str(k): int(v) for k, v in raw.items()}
         return dict(self._mem.get("zs_" + key, {}))
 
     async def get_params(self, key: str) -> dict:
@@ -283,7 +299,7 @@ class _ZsStore:
         if self._is_redis():
             client = await self._get_redis()
             raw = await client.hgetall("zhuxiang:zs:" + key)
-            return {k.decode(): float(v) for k, v in raw.items()}
+            return {_redis_key_str(k): float(v) for k, v in raw.items()}
         return {k: float(v) for k, v in
                 self._mem.get("zs_" + key, {}).items()}
 
@@ -309,8 +325,8 @@ async def current_mode() -> dict:
     override = ""
     if is_redis_mode():
         client = await get_redis_client()
-        override = (await client.get("zhuxiang:zs:mode_override")
-                    or b"").decode()
+        raw = await client.get("zhuxiang:zs:mode_override") or b""
+        override = _redis_key_str(raw)
     mode = override if override in ("off", "shadow", "assist") \
         else _mode_env()
     return {"mode": mode, "source": "override" if override else "env",
@@ -518,6 +534,53 @@ class ZsSearchService:
         except Exception:
             return ""
 
+    # ---------- P2 LLM 意图兜底 + 查询改写 ----------
+
+    async def _llm_assist(self, text: str) -> dict | None:
+        """LLM 意图兜底 + 查询改写(P2; 规则低置信触发, fail-soft)
+
+        单次调用同时产出 {"intent", "query"}:
+        - intent: 7 意图之一(规则锚点未命中的口语表达兜底)
+        - query: 口语改写为站内检索友好问句(知识路 embedding
+          召回增强——规划"向量改写复用知识库 embedding")
+        - None: 未配置/节流/请求失败/解析失败 → 回规则轨 chat
+        """
+        if os.environ.get("ZS_LLM_ASSIST", "on").strip().lower() \
+                in ("off", "0", "false"):
+            return None
+        try:
+            from services.llm_client import provider_client
+            system = (
+                "你是竹香酒庄站内搜索引擎的意图判定器。将用户输入"
+                "分类为以下之一: product(商品购买) equity(会员权益)"
+                " agent(招商代理) order(订单物流) help(平台帮助)"
+                " brand(品牌咨询) attract(活动优惠) chat(闲聊无关)。"
+                "同时把口语化输入改写为适合站内搜索的规范问句"
+                "(保留商品名/品牌名/关键限定词)。"
+                '只输出 JSON, 格式 {"intent":"...","query":"..."}')
+            raw = await asyncio.to_thread(
+                provider_client.chat, system, text, 0.1)
+            if not raw:
+                return None
+            m = re.search(r"\{[^{}]*\}", raw)
+            if not m:
+                return None
+            data = json.loads(m.group())
+            intent = str(data.get("intent", "")).strip()
+            query = str(data.get("query", "")).strip()[:120]
+            if intent not in INTENT_ANCHORS:
+                return None
+            return {"intent": intent,
+                    "query": query if query else text}
+        except Exception as exc:
+            logger.warning("zs_llm_assist_failed: %s", exc)
+            return None
+
+    async def intent_weight(self) -> float:
+        """LLM 兜底采纳权重观测(默认 0.6)"""
+        params = await self.store.get_params("intent_weight")
+        return params.get("value", INTENT_WEIGHT_DEFAULT)
+
     # ---------- L4 融合 ----------
 
     @staticmethod
@@ -630,14 +693,35 @@ class ZsSearchService:
         # L1 意图 + 槽位(候选 top3 入留痕——规划承诺的审计完整性)
         clf = classify_intent(text)
         slots = extract_slots(text, clf["intent"])
+
+        # P2 LLM 意图兜底+查询改写(规则低置信→chat 时触发; fail-soft)
+        # 采纳受 intentWeight 进化闸: >=0.6 采纳, <0.6 仅留痕审计
+        llm_assist = None
+        if clf["intent"] == "chat":
+            llm_assist = await self._llm_assist(text)
+            if llm_assist:
+                weight = await self.intent_weight()
+                adopted = weight >= INTENT_WEIGHT_DEFAULT
+                llm_assist["adopted"] = adopted
+                await self.store.hincr("llm_stats", "assist")
+                if adopted:
+                    await self.store.hincr("llm_stats", "adopted")
+                    clf = {"intent": llm_assist["intent"],
+                           "confidence": 0.55,
+                           "hits": ["llm_fallback"],
+                           "candidates": []}
+                    slots = extract_slots(text, clf["intent"])
+
         decision.update({"intent": clf["intent"],
                          "confidence": clf["confidence"],
                          "slots": slots,
+                         "llmAssist": llm_assist,
                          "intentCandidates": [
                              {"intent": i, "score": s}
                              for i, s in clf["candidates"]]})
 
-        # L3 多路检索(P1: 权益/订单结构化路接入)
+        # L3 多路检索(P1: 权益/订单结构化路接入; P2: 知识路用
+        # LLM 改写问句检索——embedding 语义召回对口语更友好)
         routes = INTENT_ROUTES.get(clf["intent"], ("knowledge",))
         candidates: list[dict] = []
         if "product" in routes:
@@ -647,7 +731,11 @@ class ZsSearchService:
         if "order" in routes:
             candidates += await self._route_order(member_id)
         if "knowledge" in routes:
-            candidates += await self._route_knowledge(text)
+            ktext = text
+            if llm_assist and llm_assist.get("adopted") \
+                    and llm_assist.get("query"):
+                ktext = llm_assist["query"]
+            candidates += await self._route_knowledge(ktext)
 
         # L4 融合重排(业务分项挂 routeBoost 进化参数)
         ranked = self._fuse(clf["intent"], role, candidates,
@@ -683,12 +771,16 @@ class ZsSearchService:
         return await self.store.get_params("route_boost")
 
     async def submit_feedback(self, decision_id: int, verdict: str,
-                              member_id: int = 0) -> dict:
-        """显式反馈(P1): useful/useless → routeBoost ±0.05
+                              member_id: int = 0,
+                              source: str = "explicit",
+                              action_label: str = "") -> dict:
+        """显式反馈(P1) + 隐式转化回流(P2): → 进化参数
 
-        - clamp [0.8, 1.2] 安全阀; 参数调整留痕可回滚
+        - 显式(explicit): useful/useless → routeBoost ±0.05
+        - 隐式(action): 动作卡点击 → routeBoost +0.03(正样本)
+        - P2: LLM 兜底决策(llmAssist) → intentWeight ±0.02
+        - clamp 安全阀; 参数调整留痕可回滚
         - 红线: 合规拦截决策与 chat 兜底不参与进化
-        - 决策不存在 → KeyError(404 口径)
 
         Raises:
             KeyError: 决策不存在
@@ -706,15 +798,23 @@ class ZsSearchService:
         record = {"feedbackId": await self.store.next_id("feedback"),
                   "decisionId": decision_id,
                   "verdict": verdict,
+                  "source": source if source in ("explicit",
+                                                 "action") else
+                  "explicit",
+                  "actionLabel": (action_label or "")[:40],
                   "memberId": member_id or target.get("memberId", 0),
                   "intent": intent, "createdAt": ts()}
-        if target.get("outcome") == "blocked" or intent in ("blocked", ""):
+        evolvable = (intent in INTENT_BONUS and intent != "chat"
+                     and target.get("outcome") != "blocked")
+        if target.get("outcome") == "blocked" or intent in ("blocked",
+                                                            ""):
             record.update({"evolved": False,
                            "note": "合规拦截决策不参与进化(硬规则恒定)"})
-        elif intent in INTENT_BONUS and intent != "chat":
+        elif evolvable:
             before = (await self.evolution_params()).get(intent, 1.0)
-            delta = (ROUTE_BOOST_STEP if verdict == "useful"
-                     else -ROUTE_BOOST_STEP)
+            step = (ROUTE_BOOST_STEP if source == "explicit"
+                    else ACTION_BOOST_STEP)
+            delta = step if verdict == "useful" else -step
             after = round(min(ROUTE_BOOST_BOUNDS[1],
                               max(ROUTE_BOOST_BOUNDS[0],
                                   before + delta)), 3)
@@ -725,9 +825,33 @@ class ZsSearchService:
         else:
             record.update({"evolved": False,
                            "note": "chat 兜底意图不在进化范围"})
+        # P2: LLM 兜底决策的反馈 → intentWeight 进化(clamp [0.4,0.8])
+        # useful=LLM 判对了(信 LLM +) / useless=LLM 误判(信规则 -)
+        if target.get("llmAssist"):
+            iw_before = await self.intent_weight()
+            iw_delta = (INTENT_WEIGHT_STEP if verdict == "useful"
+                        else -INTENT_WEIGHT_STEP)
+            iw_after = round(min(INTENT_WEIGHT_BOUNDS[1],
+                                 max(INTENT_WEIGHT_BOUNDS[0],
+                                     iw_before + iw_delta)), 3)
+            await self.store.set_param("intent_weight", "value",
+                                       iw_after)
+            record.update({"intentWeightBefore": iw_before,
+                           "intentWeightAfter": iw_after})
         await self.store.save("feedbacks", record["feedbackId"], record)
         await self.store.hincr("feedback_stats", verdict)
         return record
+
+    async def record_action_click(self, decision_id: int,
+                                  action_label: str = "") -> dict:
+        """P2 隐式转化回流: 动作卡点击 → 正样本进化
+
+        规划第六节: 回答内动作卡片点击(跳商品/留资) → 转化正样本。
+        复用 submit_feedback(source="action"), 步长 0.03。
+        """
+        return await self.submit_feedback(
+            decision_id, "useful", source="action",
+            action_label=action_label)
 
     async def feedbacks(self, limit: int = 50) -> list[dict]:
         rows = await self.store.list("feedbacks", limit)
@@ -754,10 +878,12 @@ class ZsSearchService:
         decisions = await self.store.list("decisions", 200)
         feedbacks = await self.store.list("feedbacks", 200)
         fb_stats = await self.store.hgetall("feedback_stats")
+        llm_stats = await self.store.hgetall("llm_stats")
         blocked = stats.get("blocked", 0)
         total = sum(stats.values())
         useful = fb_stats.get("useful", 0)
         fb_total = useful + fb_stats.get("useless", 0)
+        llm_assist = llm_stats.get("assist", 0)
         return {"module": "智搜·AI智能搜索引擎大模型",
                 "mode": mode["mode"],
                 "queries": total,
@@ -768,6 +894,13 @@ class ZsSearchService:
                 "feedbackUsefulRate": (round(useful / fb_total, 3)
                                        if fb_total else 0),
                 "routeBoost": await self.evolution_params(),
-                "note": "P1: 规则意图层+四路检索+显式反馈进化闭环",
+                "intentWeight": await self.intent_weight(),
+                "llmAssist": {"triggers": llm_assist,
+                              "adopted": llm_stats.get("adopted", 0),
+                              "adoptRate": (round(
+                                  llm_stats.get("adopted", 0)
+                                  / llm_assist, 3)
+                                  if llm_assist else 0)},
+                "note": "P2: 四路检索+LLM意图兜底/改写+显式/隐式反馈进化",
                 "modelVersion": MODEL_VERSION,
                 "updatedAt": ts()}

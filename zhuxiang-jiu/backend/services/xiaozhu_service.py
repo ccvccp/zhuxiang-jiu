@@ -750,6 +750,19 @@ COMMANDS = [
         "examples": ["小竹，我刚才做了什么"],
     },
     {
+        # 智搜联动·zs.search(P2): 全站统一智能入口——复杂口语
+        # 查询走智搜意图引擎(意图/合规/四路检索/角色化答案)。
+        # 置 wine 组前: 显式"搜"句式优先于泛化场景词("帮我搜
+        # 适合送礼的酒"不再被 wine.recommend 的"送礼"截胡——
+        # 用户明说"搜"时统一入口接管)
+        "action": "zs.search",
+        "label": "智搜一下",
+        "patterns": ["搜一下", "搜一搜", "帮我搜", "智能搜索",
+                     "搜索一下", "用智搜"],
+        "examples": ["小竹，帮我搜适合送礼的竹香酒",
+                     "小竹，搜一下麒麟是什么"],
+    },
+    {
         # 酒的问话·P-A 信任链: 真伪/质检问话直达 77号竹鉴
         # (泛化真伪问→双报告典藏摘要; 指标问→引证应答)
         "action": "wine.verify",
@@ -2489,6 +2502,10 @@ class XiaozhuService:
                 )
                 return await XiaozhuMapService().nearby(
                     text, member_id)
+            if action == "zs.search":
+                # 智搜联动(全只读): 统一意图引擎问答(P2)
+                return await self._exec_zs_search(
+                    text, member_id)
             if action == "cart.add":
                 return await self._exec_cart_add(
                     session, text)
@@ -2507,6 +2524,34 @@ class XiaozhuService:
                             "(数据源波动), 请稍后再试或"
                             "转人工", "card": None}
         return {"reply": "未知指令", "card": None}
+
+    async def _exec_zs_search(self, text: str,
+                              member_id) -> dict:
+        """智搜联动(P2): 语音文本走全站统一意图引擎
+
+        复用 ZsSearchService.query(意图/合规/四路检索/角色化);
+        ZS_MODE=off 时 query 抛 ValueError → 播报关闭话术(降级)。
+        """
+        try:
+            from services.zs_search_service import (
+                ZsSearchService,
+            )
+            r = await ZsSearchService().query(
+                text, member_id=member_id or 0)
+            reply = r.get("answer", "")
+            if r.get("intent") == "blocked":
+                reply = f"合规提示: {reply}"
+            actions = r.get("actions") or []
+            if actions:
+                labels = "、".join(a.get("label", "")
+                                  for a in actions[:2])
+                reply += f"(可操作: {labels}; 也可说转人工)"
+            return {"reply": reply or "暂未检索到相关信息",
+                    "card": None}
+        except ValueError:
+            return {"reply": "智搜当前处于关闭状态, "
+                            "可稍后再试或转人工客服",
+                    "card": None}
 
     async def _exec_sandbox(self, session: dict,
                             action: str, text: str,

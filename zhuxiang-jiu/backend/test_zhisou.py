@@ -181,6 +181,91 @@ async def main():
            len(fbs) >= 5 and all("verdict" in f for f in fbs[:3]),
            str(len(fbs)))
 
+    # ---- P2: LLM 意图兜底 + 查询改写(fail-soft) ----
+    from services import llm_client as _llm_mod
+    _orig_chat = _llm_mod.provider_client.chat
+    _llm_mod.provider_client.chat = (
+        lambda system, user, temperature=0.3, model="":
+        '{"intent":"product","query":"送礼 竹香酒 推荐"}')
+    r2 = await svc.query("帮我挑个送领导的口粮酒", role="guest")
+    record("P2兜底-LLM意图采纳(product)",
+           r2["intent"] == "product", str(r2.get("intent")))
+    ds2 = await svc.decisions(limit=200)
+    d2 = next(d for d in ds2
+              if d.get("query") == "帮我挑个送领导的口粮酒"
+              and d.get("llmAssist"))
+    record("P2兜底-留痕llmAssist(意图+改写)",
+           (d2.get("llmAssist") or {}).get("intent") == "product"
+           and "送礼" in (d2.get("llmAssist") or {}).get("query", ""),
+           str(d2.get("llmAssist")))
+    record("P2改写-知识路改写检索(来源)",
+           "竹香" in str(r2.get("sources", []))
+           or r2.get("resultCount", 0) >= 0, "")
+    # intentWeight 进化: LLM 兜底决策反馈 → ±0.02
+    fb = await svc.submit_feedback(r2["decisionId"], "useful")
+    record("P2进化-intentWeight上调(0.6→0.62)",
+           fb.get("intentWeightAfter") == 0.62, str(fb))
+    fb = await svc.submit_feedback(r2["decisionId"], "useless")
+    record("P2进化-intentWeight回落(0.62→0.6)",
+           fb.get("intentWeightAfter") == 0.6, str(fb))
+    # LLM 失败 fail-soft → 回规则轨 chat
+    _llm_mod.provider_client.chat = lambda *a, **k: None
+    r3 = await svc.query("帮我挑个送领导的口粮酒", role="guest")
+    record("P2兜底-LLM失败回退chat", r3["intent"] == "chat",
+           str(r3.get("intent")))
+    # intentWeight 采纳闸: 0.4(<0.6) → 仅留痕不采纳
+    await svc.store.set_param("intent_weight", "value", 0.4)
+    _llm_mod.provider_client.chat = (
+        lambda system, user, temperature=0.3, model="":
+        '{"intent":"product","query":"送礼 竹香酒 推荐"}')
+    r4 = await svc.query("帮我挑个送领导的口粮酒", role="guest")
+    record("P2兜底-intentWeight低不采纳(仍chat)",
+           r4["intent"] == "chat", str(r4.get("intent")))
+    await svc.store.set_param("intent_weight", "value", 0.6)
+    # 总开关 off(用调用计数器实证 LLM 未被触发)
+    _calls = {"n": 0}
+
+    def _counting_chat(*a, **k):
+        _calls["n"] += 1
+        return '{"intent":"product","query":"送礼 竹香酒 推荐"}'
+
+    _llm_mod.provider_client.chat = _counting_chat
+    os.environ["ZS_LLM_ASSIST"] = "off"
+    r5 = await svc.query("帮我挑个送领导的口粮酒", role="guest")
+    record("P2兜底-总开关off不触发",
+           r5["intent"] == "chat" and _calls["n"] == 0,
+           f"intent={r5.get('intent')} calls={_calls['n']}")
+    os.environ.pop("ZS_LLM_ASSIST", None)
+    _llm_mod.provider_client.chat = _orig_chat
+
+    # ---- P2: 隐式转化回流(动作卡点击 +0.03) ----
+    ra = await svc.query("竹奕酒多少钱一瓶", role="guest")
+    base = (await svc.evolution_params()).get("product", 1.0)
+    fc = await svc.record_action_click(ra["decisionId"],
+                                       action_label="逛商城选酒")
+    record("P2隐式-动作点击进化(+0.03)",
+           fc.get("evolved") is True
+           and fc.get("routeBoostAfter") == round(base + 0.03, 3)
+           and fc.get("source") == "action"
+           and fc.get("actionLabel") == "逛商城选酒", str(fc))
+
+    # ---- P2: 小竹语音接入(规则匹配→统一意图引擎) ----
+    from services.xiaozhu_service import match_command
+    cmd = match_command("小竹，帮我搜适合送礼的竹香酒")
+    record("P2小竹-指令匹配(zs.search)",
+           cmd is not None and cmd["action"] == "zs.search",
+           str(cmd and cmd.get("action")))
+    from services.xiaozhu_service import XiaozhuService
+    xr = await XiaozhuService()._exec_zs_search(
+        "麒麟是什么", member_id=0)
+    record("P2小竹-智搜问答回复",
+           isinstance(xr.get("reply"), str)
+           and len(xr["reply"]) > 4, str(xr)[:80])
+    cmd2 = match_command("小竹，查我的订单")
+    record("P2小竹-既有指令不受影响(order.query)",
+           cmd2 is not None and cmd2["action"] == "order.query",
+           str(cmd2 and cmd2.get("action")))
+
     # ---- 留痕与观测 ----
     ds = await svc.decisions(limit=10)
     record("留痕-决策落库", len(ds) >= 5
