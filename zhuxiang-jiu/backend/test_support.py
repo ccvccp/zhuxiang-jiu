@@ -30,3 +30,38 @@ os.environ.setdefault("STORE_MODE", "asyncio")
 # compat 模式测试依赖旧头(X-Role: admin 直调模块管理端点);
 # 生产默认剥离伪造身份头(见 core/auth_middleware.py)
 os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")
+
+
+def mint_token(role: str = "member", phone: str = None) -> str:
+    """铸测试 JWT(AUTH-TEST-01 P1: 真 Bearer 测试轨)
+
+    服务层直调 AuthService(register → 已注册则 login), 内存模式
+    专用; 本地版参照 verify_sv73_prod.admin_token 容器版范式。
+
+    新增 HTTP 测试约定: 一律 Bearer(mint_token), 不再新增裸头
+    X-Role 依赖——测试面与生产面同构。
+
+    Args:
+        role: "admin" / "member"(默认角色号段 901/902, 可自定义 phone)
+        phone: 自定义手机号(默认按角色取)
+
+    Returns:
+        accessToken 字符串(失败 assert 中止)
+    """
+    import asyncio
+
+    if phone is None:
+        phone = "13800000901" if role == "admin" else "13800000902"
+
+    async def _mint():
+        from services.auth_service import AuthService
+        try:
+            r = await AuthService().register(
+                phone=phone, password="test123456", role=role)
+        except ValueError:  # 已注册(重复调用幂等, 走 login 通道)
+            r = await AuthService().login(phone, "test123456")
+        return r.get("accessToken", "")
+
+    token = asyncio.run(_mint())
+    assert token, f"mint_token({role}) 失败"
+    return token
