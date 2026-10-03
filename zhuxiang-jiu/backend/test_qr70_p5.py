@@ -452,8 +452,12 @@ async def main():
     print("[09 QC 33号零改动]")
 
     nodes = await perm.list_nodes()
-    record("33号权限树独立可用(32 点)",
-           len(nodes) == 32)
+    # 断言口径修正(2026-10-03): 权限树已演进为双中心 56 点种子
+    # (历史"32 点"为单中心旧口径)——改为与种子一致性断言,
+    # 权限树后续演进免维护
+    from repositories.perm_repository import _SEED_NODES
+    record(f"33号权限树独立可用({len(nodes)} 点, 与种子一致)",
+           len(nodes) == len(_SEED_NODES))
     check = await perm.check_permission(
         staff, "storage.operate")
     record("33号 check_permission 独立",

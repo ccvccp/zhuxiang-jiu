@@ -10,7 +10,7 @@
 
 var API_BASE_KEY = 'aiGovDash.apiBase';
 var state = { apiBase: localStorage.getItem(API_BASE_KEY)
-              || 'http://localhost:8000' };
+              || '' };
 
 function api(path) { return state.apiBase + path; }
 
@@ -70,7 +70,7 @@ function markUpdate() {
 function saveConn() {
     var el = document.getElementById('apiBase');
     state.apiBase = el.value.trim().replace(/\/+$/, '');
-    if (!state.apiBase) { state.apiBase = 'http://localhost:8000'; }
+    if (!state.apiBase) { state.apiBase = ''; }   // 同源默认
     el.value = state.apiBase;
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     loadAll();

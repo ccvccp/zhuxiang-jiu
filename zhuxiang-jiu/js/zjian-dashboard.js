@@ -18,7 +18,7 @@
         return localStorage.getItem(KEY)
             || localStorage.getItem('knowledgeDash.apiBase')
             || localStorage.getItem('aiLearningDash.apiBase')
-            || 'http://localhost:8000';
+            || '';
     }
 
     function err(msg) {

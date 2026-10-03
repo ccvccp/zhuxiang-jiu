@@ -59,7 +59,7 @@ var ChatWidget = (function () {
 
     function apiBase() {
         if (!state.apiBase) {
-            state.apiBase = localStorage.getItem(LS_API) || 'http://localhost:8000';
+            state.apiBase = localStorage.getItem(LS_API) || '';
         }
         return state.apiBase;
     }

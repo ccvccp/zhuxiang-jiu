@@ -10,7 +10,7 @@
 'use strict';
 
 var API_BASE_KEY = 'apiDash.apiBase';
-var state = { apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000' };
+var state = { apiBase: localStorage.getItem(API_BASE_KEY) || '' };
 
 /* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式), 未登录保留 compat 兼容头 */
 function headers() {
@@ -69,7 +69,7 @@ function markUpdate() {
 function saveConn() {
     var el = document.getElementById('apiBase');
     state.apiBase = el.value.trim().replace(/\/+$/, '');
-    if (!state.apiBase) { state.apiBase = 'http://localhost:8000'; }
+    if (!state.apiBase) { state.apiBase = ''; }   // 同源默认
     el.value = state.apiBase;
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     loadRegistry();

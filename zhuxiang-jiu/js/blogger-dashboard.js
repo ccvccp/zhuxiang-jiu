@@ -7,7 +7,7 @@
 
 var API_BASE_KEY = 'bloggerDash.apiBase';
 var state = {
-    apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+    apiBase: localStorage.getItem(API_BASE_KEY) || '',
     memberId: localStorage.getItem('bloggerDash.memberId') || '2',
     role: localStorage.getItem('bloggerDash.role') || 'admin',
     timer: null,

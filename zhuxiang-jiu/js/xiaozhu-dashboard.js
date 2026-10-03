@@ -1,4 +1,4 @@
-﻿/**
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿/**
  * 48号·小竹智能语音中枢看板(P0-P4 六区块 + 49号P4 FC 分区)
  * 范式: js/trust-risk-dashboard.js(47号)平移——ES5、localStorage
  * 连接、区块化加载(手动刷新, 不进自动刷新)。
@@ -10,7 +10,7 @@
 
 var API_BASE_KEY = 'xiaozhuDash.apiBase';
 var state = { apiBase: localStorage.getItem(API_BASE_KEY)
-              || 'http://localhost:8000' };
+              || '' };
 /* P5.2 鉴权: 登录后叠加 Authorization Bearer(strict 模式), 未登录保留 compat 兼容头 */
 function adminHeaders() {
     var h = { 'X-Role': 'admin', 'Content-Type': 'application/json' };
@@ -68,7 +68,7 @@ function markUpdate() {
 function saveConn() {
     var el = document.getElementById('apiBase');
     state.apiBase = el.value.trim().replace(/\/+$/, '');
-    if (!state.apiBase) { state.apiBase = 'http://localhost:8000'; }
+    if (!state.apiBase) { state.apiBase = ''; }   // 同源默认
     el.value = state.apiBase;
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     loadAll();

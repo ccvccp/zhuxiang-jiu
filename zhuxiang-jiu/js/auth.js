@@ -71,9 +71,11 @@ var Auth = (function () {
     // ---------- API ----------
     function apiBase() {
         // 与管理页共用 apiBase 约定: knowledgeDash.apiBase / aiLearningDash.apiBase
+        // 2026-10-03 系统债扫除: 兜底改同源空串(生产 https 页
+        // localhost 兜底属混合内容必坏; 本地开发经 localStorage 配置)
         return localStorage.getItem('knowledgeDash.apiBase')
             || localStorage.getItem('aiLearningDash.apiBase')
-            || 'http://localhost:8000';
+            || '';
     }
 
     /** 登录成功后持久化会话 */

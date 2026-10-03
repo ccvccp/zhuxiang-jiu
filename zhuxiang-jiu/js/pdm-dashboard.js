@@ -7,7 +7,7 @@
 
 var API_BASE_KEY = 'pdmDash.apiBase';
 var state = {
-    apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+    apiBase: localStorage.getItem(API_BASE_KEY) || '',
     memberId: localStorage.getItem('pdmDash.memberId') || '2',
     role: localStorage.getItem('pdmDash.role') || 'admin',
     products: [],

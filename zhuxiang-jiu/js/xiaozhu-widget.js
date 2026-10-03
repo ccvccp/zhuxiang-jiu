@@ -11,7 +11,7 @@
 
 var XIAOZHU_STATE = {
     apiBase: localStorage.getItem('xiaozhu.apiBase')
-             || 'http://localhost:8000',
+             || '',
     memberId: localStorage.getItem('xiaozhu.memberId') || '',
     sessionId: null,
     busy: false,

@@ -10,7 +10,7 @@
 
 var API_BASE_KEY = 'securityDash.apiBase';
 var state = {
-    apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+    apiBase: localStorage.getItem(API_BASE_KEY) || '',
     posture: null,
     events: [],
     lastDetail: ''
@@ -75,7 +75,7 @@ function pct(v) { return ((v || 0) * 100).toFixed(1) + '%'; }
 function saveConn() {
     var el = document.getElementById('apiBase');
     state.apiBase = el.value.trim().replace(/\/+$/, '');
-    if (!state.apiBase) { state.apiBase = 'http://localhost:8000'; }
+    if (!state.apiBase) { state.apiBase = ''; }   // 同源默认
     el.value = state.apiBase;
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     refreshData();

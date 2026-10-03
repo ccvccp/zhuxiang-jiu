@@ -5,7 +5,7 @@
  */
 var API_BASE_KEY = 'assetDash.apiBase';
 var state = {
-    apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+    apiBase: localStorage.getItem(API_BASE_KEY) || '',
     registryDomains: [],
 };
 
@@ -54,7 +54,7 @@ var TIER_L = { high: '高', medium: '中', low: '低' };
 
 function saveConn() {
     state.apiBase = document.getElementById('apiBase').value.trim()
-        || 'http://localhost:8000';
+        || '';
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     refreshData();
 }

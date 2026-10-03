@@ -4,7 +4,7 @@
 var API_BASE_KEY = 'rideDash.apiBase';
 var MEMBER_KEY = 'rideDash.memberId';
 var state = {
-    apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+    apiBase: localStorage.getItem(API_BASE_KEY) || '',
     memberId: localStorage.getItem(MEMBER_KEY) || '1',
     timer: null,
 };
@@ -70,7 +70,7 @@ var RISK_ST = { resolved: true };
 /* ---------- 连接 ---------- */
 function saveConn() {
     state.apiBase = document.getElementById('apiBase').value.trim()
-        || 'http://localhost:8000';
+        || '';
     state.memberId = document.getElementById('memberId').value.trim() || '1';
     localStorage.setItem(API_BASE_KEY, state.apiBase);
     localStorage.setItem(MEMBER_KEY, state.memberId);

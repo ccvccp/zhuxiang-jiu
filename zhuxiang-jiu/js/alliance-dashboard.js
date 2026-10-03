@@ -36,7 +36,7 @@
 /* ========= 全局状态 ========= */
 var API_BASE_KEY = 'allianceDash.apiBase';   // 后端地址持久化键(本页独立)
 var state = {
-    apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+    apiBase: localStorage.getItem(API_BASE_KEY) || '',
     autoTimer: null,       // 30s 自动刷新句柄
     AUTO_MS: 30000,
     categories: [],        // 类目字典(下拉数据源)
