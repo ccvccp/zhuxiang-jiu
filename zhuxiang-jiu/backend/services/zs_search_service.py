@@ -30,7 +30,47 @@ from core.locks import get_lock
 
 logger = logging.getLogger("zs_search_service")
 
-MODEL_VERSION = "v1.5-zhisou-agent"
+MODEL_VERSION = "v1.6-zhisou-ab"
+
+# ============================================================
+# A/B 话术框架(全站智能体规划 GAP-3c; 实施方案 docs/智搜AB话术框架实施方案.md)
+#   分流: decisionId 奇偶确定性(50/50, 可复现, 与会员等级无关)
+#   红线: 合规拦截话术永不参与; shadow 不计入统计; 防刷分闸复用
+#   晋升: 建议书模式——样本≥30 且优出≥20% 出建议, admin 手动确认
+# ============================================================
+
+AB_POOL = ("equity", "agent", "product")
+AB_MIN_SAMPLES = 30
+AB_PROMOTE_EDGE = 0.2
+
+# 话术变体库(占位文案——待运营确认修订; A=供应链/积分体系强调,
+# B=营销赋能/利益点强调, 对齐方案原文示例)
+VARIANT_LIB: dict[str, dict] = {
+    "agent": {
+        "A": {"guest": "为您找到招商政策摘要——源头酒厂直供供应链, "
+                       "意向合作可提交留资",
+              "member": "为您找到招商政策——供应链直供+区域保护, "
+                        "认证代理可在会员中心查看专属政策"},
+        "B": {"guest": "为您找到招商政策摘要——全域营销赋能扶持, "
+                       "意向合作可提交留资",
+              "member": "为您找到招商政策——营销赋能+培训体系, "
+                        "认证代理可在会员中心查看专属政策"},
+    },
+    "equity": {
+        "A": {"guest": "注册成为会员即可享受积分、会员价与生日礼等权益",
+              "member": "为您查询当前会员等级对应的权益与升级路径"},
+        "B": {"guest": "加入竹香会员——消费攒竹叶当钱花, 新人注册 "
+                       "立得 100 竹叶",
+              "member": "您的会员权益已就绪——等级越高会员价越优, "
+                        "查看升级路径"},
+    },
+    "product": {
+        "A": {"guest": "为您找到商品购买信息",
+              "member": "为您找到商品购买信息"},
+        "B": {"guest": "为您挑选了以下好酒",
+              "member": "为您挑选了以下好酒"},
+    },
+}
 
 
 # ============================================================
@@ -431,12 +471,21 @@ class _ZsStore:
                 self._mem.get("zs_" + key, {}).items()}
 
     async def set_param(self, key: str, field: str,
-                        value: float) -> None:
+                        value) -> None:
         if self._is_redis():
             client = await self._get_redis()
             await client.hset("zhuxiang:zs:" + key, field, value)
         else:
             self._mem.setdefault("zs_" + key, {})[field] = value
+
+    async def get_params_raw(self, key: str) -> dict:
+        """字符串参数读取(ab_active 等非数值 Hash)"""
+        if self._is_redis():
+            client = await self._get_redis()
+            raw = await client.hgetall("zhuxiang:zs:" + key)
+            return {_redis_key_str(k): _redis_key_str(v)
+                    for k, v in raw.items()}
+        return dict(self._mem.get("zs_" + key, {}))
 
 
 # ============================================================
@@ -836,6 +885,81 @@ class ZsSearchService:
                                for q, c in top],
                 "note": "useless 反馈聚类(Evolution 观测面)"}
 
+    # ---------- A/B 话术框架(§三: 评估/晋升/留痕) ----------
+
+    async def ab_stats(self) -> dict:
+        """A/B 实验指标对照 + 晋升建议(实时惰性计算, 无定时任务)
+
+        晋升建议触发(双条件): 两变体反馈样本均 ≥ AB_MIN_SAMPLES
+        且一版有用率相对优出 ≥ AB_PROMOTE_EDGE——建议书模式,
+        admin 手动确认(六模型"永不自动"红线)。
+        """
+        raw = await self.store.hgetall("ab_stats")
+        active = await self.store.get_params_raw("ab_active")
+        experiments: dict = {}
+        for intent in AB_POOL:
+            row = {"status": ("promoted:" + active[intent]
+                              if active.get(intent) in ("A", "B")
+                              else "experiment"),
+                   "variants": {}}
+            for v in ("A", "B"):
+                u = raw.get(f"{intent}:{v}:useful", 0)
+                n = raw.get(f"{intent}:{v}:useless", 0)
+                a = raw.get(f"{intent}:{v}:action", 0)
+                s = raw.get(f"{intent}:{v}:served", 0)
+                row["variants"][v] = {
+                    "served": s, "useful": u, "useless": n,
+                    "action": a, "samples": u + n,
+                    "usefulRate": (round(u / (u + n), 3)
+                                   if u + n else 0),
+                    "actionRate": round(a / s, 3) if s else 0}
+            va, vb = row["variants"]["A"], row["variants"]["B"]
+            if (va["samples"] >= AB_MIN_SAMPLES
+                    and vb["samples"] >= AB_MIN_SAMPLES):
+                hi, lo = ((va, vb) if va["usefulRate"]
+                          >= vb["usefulRate"] else (vb, va))
+                edge = ((hi["usefulRate"] - lo["usefulRate"])
+                        / lo["usefulRate"]
+                        if lo["usefulRate"] > 0 else 1.0)
+                if edge >= AB_PROMOTE_EDGE:
+                    row["promoteSuggestion"] = {
+                        "toVariant": ("A" if hi is va else "B"),
+                        "edge": round(edge, 3),
+                        "note": "样本与优出双达标, 建议人工确认晋升"}
+            experiments[intent] = row
+        return {"pool": list(AB_POOL), "experiments": experiments,
+                "thresholds": {"minSamples": AB_MIN_SAMPLES,
+                               "promoteEdge": AB_PROMOTE_EDGE},
+                "note": "A/B 话术实验(建议书模式——晋升须 admin 确认)"}
+
+    async def ab_promote(self, intent: str,
+                         to_variant: str) -> dict:
+        """确认晋升/重置实验(admin 手动裁决; 留痕可回滚)
+
+        Args:
+            to_variant: "A"/"B" 晋升定版; "" 重置回实验态(新一轮)
+        """
+        if intent not in AB_POOL:
+            raise ValueError(f"意图 {intent} 不在实验池 {AB_POOL}")
+        if to_variant not in ("A", "B", ""):
+            raise ValueError('to_variant 须为 "A"/"B"/""(重置)')
+        before = (await self.store.get_params_raw("ab_active")
+                  ).get(intent, "")
+        await self.store.set_param("ab_active", intent, to_variant)
+        rec = {"id": await self.store.next_id("ab_decision"),
+               "intent": intent,
+               "action": ("promote" if to_variant else "reset"),
+               "before": before or "experiment",
+               "after": to_variant or "experiment",
+               "createdAt": ts()}
+        await self.store.save("ab_decisions", rec["id"], rec)
+        return rec
+
+    async def ab_decisions(self, limit: int = 50) -> list[dict]:
+        rows = await self.store.list("ab_decisions", limit)
+        return sorted(rows, key=lambda r: r.get("createdAt", ""),
+                      reverse=True)[:limit]
+
     # ---------- P2 LLM 意图兜底 + 查询改写 ----------
 
     async def _llm_assist(self, text: str) -> dict | None:
@@ -920,8 +1044,12 @@ class ZsSearchService:
 
     @staticmethod
     def _compose(intent: str, role: str, slots: dict,
-                 ranked: list[dict]) -> dict:
-        """结构化回答(确定性模板, 带来源引用)"""
+                 ranked: list[dict],
+                 variant_lead: str = "") -> dict:
+        """结构化回答(确定性模板, 带来源引用)
+
+        variant_lead: A/B 实验话术(非空优先于 ROLE_VARIANTS)。
+        """
         actions: list[dict] = []
         if intent == "product":
             actions.append({"label": "逛商城选酒",
@@ -941,7 +1069,7 @@ class ZsSearchService:
 
         if ranked:
             top = ranked[0]
-            lead = ROLE_VARIANTS.get(intent, {}).get(
+            lead = variant_lead or ROLE_VARIANTS.get(intent, {}).get(
                 "guest" if role in ("guest", "", None) else "member",
                 f"为您找到{INTENT_NAMES.get(intent, '相关')}信息")
             answer = f"{lead}: {top['title']} —— {top['snippet']}"
@@ -950,7 +1078,8 @@ class ZsSearchService:
                            f"(来源: {top['source']})")
         else:
             # 未命中但意图有角色话术 → 角色化引导(比泛泛兜底友好)
-            fallback_lead = ROLE_VARIANTS.get(intent, {}).get(
+            fallback_lead = variant_lead or ROLE_VARIANTS.get(
+                intent, {}).get(
                 "guest" if role in ("guest", "", None) else "member")
             if fallback_lead:
                 answer = (f"{fallback_lead}; "
@@ -1014,6 +1143,8 @@ class ZsSearchService:
                     # 标记——观测期决策可区分于生产档)
                     "mode": (await current_mode())["mode"],
                     "queriedAt": ts()}
+        # decisionId 提前生成(A/B 分流依赖奇偶; 尾部 save 覆盖完整决策)
+        decision["decisionId"] = await self.store.next_id("decision")
 
         # L2 合规前置(最高优先)
         blocked = compliance_gate(text)
@@ -1021,7 +1152,8 @@ class ZsSearchService:
             decision.update({"intent": "blocked",
                              "compliance": blocked["rule"],
                              "outcome": "blocked"})
-            await self._save_decision(decision)
+            await self.store.save("decisions",
+                                  decision["decisionId"], decision)
             await self.store.hincr("intent_stats", "blocked")
             return {"intent": "blocked",
                     "intentName": "合规拦截",
@@ -1067,6 +1199,30 @@ class ZsSearchService:
                          "intentCandidates": [
                              {"intent": i, "score": s}
                              for i, s in clf["candidates"]]})
+
+        # A/B 话术实验(实施方案 §二): 确定性分流/定版读取
+        # - 实验态(ab_active 无该意图): decisionId 奇偶分 A/B + served 计数
+        # - 定版态(已晋升): 全走优胜版, variant="P" 不计入实验对照
+        variant = None
+        variant_lead = ""
+        if clf["intent"] in AB_POOL:
+            rkey = ("guest" if role in ("guest", "", None)
+                    else "member")
+            act = (await self.store.get_params_raw("ab_active")
+                   ).get(clf["intent"])
+            if act in ("A", "B"):
+                variant = "P"
+                variant_lead = (VARIANT_LIB[clf["intent"]][act]
+                                .get(rkey, ""))
+            else:
+                variant = ("A" if decision["decisionId"] % 2 == 0
+                           else "B")
+                variant_lead = (VARIANT_LIB[clf["intent"]][variant]
+                                .get(rkey, ""))
+                await self.store.hincr(
+                    "ab_stats",
+                    f"{clf['intent']}:{variant}:served")
+        decision["variant"] = variant
 
         # L3 多路检索(P1: 权益/订单结构化路接入; P2: 知识路用
         # LLM 改写问句检索——embedding 语义召回对口语更友好)
@@ -1121,8 +1277,9 @@ class ZsSearchService:
         ranked = self._fuse(clf["intent"], role, candidates,
                             await self.evolution_params())
 
-        # L5 生成
-        composed = self._compose(clf["intent"], role, slots, ranked)
+        # L5 生成(A/B 实验话术优先; 未命中回退 ROLE_VARIANTS 单版)
+        composed = self._compose(clf["intent"], role, slots, ranked,
+                                 variant_lead=variant_lead)
 
         # GAP-1 输出端守门(结果卡净化 + 留痕 + 计数):
         # answer 已在 _compose 净化; 此处净化结果卡 title/snippet,
@@ -1142,7 +1299,8 @@ class ZsSearchService:
                          "topScore": ranked[0]["score"]
                          if ranked else 0.0,
                          "resultCount": len(ranked)})
-        await self._save_decision(decision)
+        await self.store.save("decisions", decision["decisionId"],
+                              decision)
         await self.store.hincr("intent_stats", clf["intent"])
 
         return {"intent": clf["intent"],
@@ -1152,11 +1310,6 @@ class ZsSearchService:
                 "results": ranked,
                 "decisionId": decision.get("decisionId"),
                 **composed}
-
-    async def _save_decision(self, d: dict) -> None:
-        did = await self.store.next_id("decision")
-        d["decisionId"] = did
-        await self.store.save("decisions", did, d)
 
     # ---------- P1 显式反馈进化闭环 ----------
 
@@ -1248,6 +1401,14 @@ class ZsSearchService:
                                   record)
             await self.store.hincr("feedback_stats", verdict)
             return record
+        # A/B 双轨计数(§二: 显式反馈计 useful/useless, 动作卡点击
+        # 计 action; shadow 已前置 return 不计入; 重复反馈不重复计)
+        if target.get("variant") in ("A", "B"):
+            ab_metric = ("action" if src == "action" else verdict)
+            await self.store.hincr(
+                "ab_stats",
+                f"{target.get('intent')}:{target['variant']}:"
+                f"{ab_metric}")
         evolvable = (intent in INTENT_BONUS and intent != "chat"
                      and target.get("outcome") != "blocked")
         if target.get("outcome") == "blocked" or intent in ("blocked",

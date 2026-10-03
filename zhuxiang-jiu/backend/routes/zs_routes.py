@@ -193,6 +193,54 @@ async def bad_cases(x_role: str = Header(None, alias="X-Role")):
 
 
 # ============================================================
+# A/B 话术框架(实施方案 §三; 观测 2 + 控制 1)
+# ============================================================
+
+@router.get("/api/search-ai/ab-stats",
+            tags=["智搜AI智能搜索引擎大模型"])
+async def ab_stats(x_role: str = Header(None, alias="X-Role")):
+    """A/B 实验指标对照 + 晋升建议(建议书模式——满足条件出建议,
+    晋升须 admin 手动确认, 永不自动)"""
+    _require_admin(x_role)
+    try:
+        return {"success": True, "data": await _service.ab_stats()}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/search-ai/ab-decisions",
+            tags=["智搜AI智能搜索引擎大模型"])
+async def ab_decisions(x_role: str = Header(None, alias="X-Role"),
+                       limit: int = 50):
+    """A/B 晋升/重置操作留痕(可审计可回滚)"""
+    _require_admin(x_role)
+    try:
+        rows = await _service.ab_decisions(limit=min(limit, 200))
+        return {"success": True, "data": rows, "count": len(rows)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/search-ai/ab/promote",
+             tags=["智搜AI智能搜索引擎大模型"])
+async def ab_promote(
+    intent: str = "",
+    to_variant: str = "",
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """确认晋升/重置实验(admin 手动裁决)
+
+    to_variant: "A"/"B" 晋升定版; "" 重置回实验态(新一轮)。
+    """
+    _require_admin(x_role)
+    try:
+        rec = await _service.ab_promote(intent, to_variant)
+        return {"success": True, "data": rec}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
 # 控制面(admin; 轻量三态——env + 运行时 override)
 # ============================================================
 

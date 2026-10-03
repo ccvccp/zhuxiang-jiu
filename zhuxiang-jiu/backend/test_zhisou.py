@@ -120,10 +120,14 @@ async def main():
 
     r1 = await svc.query("竹香酒怎么样", role="guest")
     r2 = await svc.query("竹香酒怎么样", role="guest")
-    record("主链-确定性(同输入同输出)",
-           r1["answer"] == r2["answer"]
-           and [x.get("score") for x in r1.get("results", [])]
-           == [x.get("score") for x in r2.get("results", [])])
+    # A/B 实验后"同输入同输出"语义更新: answer 含实验话术(A/B 分流
+    # 正是让同输入出不同 lead——实验设计预期); 确定性下沉到结果集
+    record("主链-结果集确定性(同输入同排序)",
+           [x.get("score") for x in r1.get("results", [])]
+           == [x.get("score") for x in r2.get("results", [])]
+           and r1["intent"] == r2["intent"]
+           and r1["slots"] == r2["slots"],
+           f"{r1['answer'][:20]} | {r2['answer'][:20]}")
 
     rg = await svc.query("会员有什么权益", role="guest")
     rm = await svc.query("会员有什么权益", role="member")
@@ -464,6 +468,73 @@ async def main():
            and isinstance(bc.get("byIntent"), dict)
            and isinstance(bc.get("topQueries"), list),
            str(bc)[:100])
+
+    # ---- A/B 话术框架(实施方案 §五验收场景) ----
+    await _reset_evo()
+    # 分流确定性: 同意图两次 query → variant 奇偶交替 + served 计数
+    ra_1 = await svc.query("我想做代理怎么申请", role="guest")
+    ra_2 = await svc.query("招商政策是什么", role="guest")
+    vs = {ra_1.get("decisionId") and 0}  # noop 兼容行
+    d1 = next(d for d in await svc.decisions(limit=200)
+              if d.get("decisionId") == ra_1["decisionId"])
+    d2 = next(d for d in await svc.decisions(limit=200)
+              if d.get("decisionId") == ra_2["decisionId"])
+    record("AB-分流奇偶交替(A/B各一)",
+           {d1.get("variant"), d2.get("variant")} == {"A", "B"},
+           f"{d1.get('variant')}/{d2.get('variant')}")
+    record("AB-话术版本差异(lead 不同)",
+           ra_1["answer"][:14] != ra_2["answer"][:14],
+           f"{ra_1['answer'][:16]} | {ra_2['answer'][:16]}")
+    raw_ab = await svc.store.hgetall("ab_stats")
+    record("AB-served计数",
+           raw_ab.get("agent:A:served", 0) >= 1
+           and raw_ab.get("agent:B:served", 0) >= 1, str(raw_ab))
+    # 反馈双轨计数: A 版 useful
+    v1 = d1.get("variant")
+    await svc.submit_feedback(ra_1["decisionId"], "useful")
+    raw_ab = await svc.store.hgetall("ab_stats")
+    record("AB-反馈计数(useful)",
+           raw_ab.get(f"agent:{v1}:useful", 0) == 1, str(raw_ab))
+    # 晋升建议: 手工灌样本(双条件达标)
+    for _ in range(29):
+        await svc.store.hincr("ab_stats", f"agent:{v1}:useful", 1)
+    other = "B" if v1 == "A" else "A"
+    for _ in range(30):
+        await svc.store.hincr("ab_stats", f"agent:{other}:useless", 1)
+    stats = await svc.ab_stats()
+    sug = (stats.get("experiments", {}).get("agent", {})
+           .get("promoteSuggestion", {}))
+    record("AB-晋升建议触发(优出版本)",
+           sug.get("toVariant") == v1 and sug.get("edge", 0) >= 0.2,
+           str(sug))
+    # 晋升定版: admin 确认 → 后续全走优胜版(variant=P)
+    rec = await svc.ab_promote("agent", v1)
+    record("AB-晋升留痕(action/before/after)",
+           rec.get("action") == "promote"
+           and rec.get("after") == v1, str(rec))
+    ra_3 = await svc.query("我想做代理怎么申请", role="guest")
+    d3 = next(d for d in await svc.decisions(limit=200)
+              if d.get("decisionId") == ra_3["decisionId"])
+    record("AB-定版后全走优胜版(variant=P)",
+           d3.get("variant") == "P"
+           and ra_3["answer"].startswith(ra_1["answer"][:12]),
+           f"variant={d3.get('variant')}")
+    # 重置回实验态
+    await svc.ab_promote("agent", "")
+    ra_4 = await svc.query("怎么加盟", role="guest")
+    d4 = next(d for d in await svc.decisions(limit=200)
+              if d.get("decisionId") == ra_4["decisionId"])
+    record("AB-重置恢复分流",
+           d4.get("variant") in ("A", "B"), str(d4.get("variant")))
+    # 红线: 合规拦截决策无 variant
+    rbk = await svc.query("小孩能喝酒吗", role="guest")
+    dbk = next(d for d in await svc.decisions(limit=200)
+               if d.get("decisionId") == rbk["decisionId"])
+    record("AB-红线(合规拦截不参与)", dbk.get("variant") is None,
+           str(dbk.get("variant")))
+    # 清理实验参数(防污染观测段)
+    for k in list((await svc.store.hgetall("ab_stats")).keys()):
+        pass    # 计数为累计值, 保留(观测段不断言 ab)
 
     # ---- 留痕与观测 ----
     ds = await svc.decisions(limit=10)

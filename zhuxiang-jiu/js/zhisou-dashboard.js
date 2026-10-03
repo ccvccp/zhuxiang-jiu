@@ -338,11 +338,86 @@ async function loadBadCases() {
     }
 }
 
+/* ⑦ A/B 话术实验(建议书模式——晋升须人工确认) */
+async function loadAB() {
+    var el = document.getElementById('abBox');
+    try {
+        var b = await fetchJson(api('/api/search-ai/ab-stats'),
+            { headers: adminHeaders() }, 'A/B 实验');
+        var d = b.data || {};
+        var html = '<div style="font-size:12px;color:#555;'
+            + 'margin-bottom:8px">阈值: 每版样本 ≥ '
+            + ((d.thresholds || {}).minSamples || 30)
+            + ' 且有用率优出 ≥ '
+            + ((((d.thresholds || {}).promoteEdge || 0.2) * 100)
+                .toFixed(0)) + '% → 出晋升建议, admin 确认后定版'
+            + '(永不自动)</div>';
+        var exps = d.experiments || {};
+        var keys = Object.keys(exps);
+        if (!keys.length) {
+            html += '<div class="dash-empty">无实验意图</div>';
+        }
+        keys.forEach(function (k) {
+            var row = exps[k];
+            var status = String(row.status || '').startsWith('promoted')
+                ? '<span class="ok-pill">' + esc(row.status)
+                  + '</span>'
+                : '<span class="warn-pill">experiment</span>';
+            html += '<div style="border-top:1px dashed #eee;'
+                + 'padding:8px 0"><b>' + esc(k) + '</b> ' + status;
+            ['A', 'B'].forEach(function (v) {
+                var x = (row.variants || {})[v] || {};
+                html += '<div class="bar-row"><span class="bar-label">'
+                    + '版本' + v + '</span><div class="bar-track">'
+                    + '<div class="bar-fill" style="width:'
+                    + Math.round((x.usefulRate || 0) * 100)
+                    + '%"></div></div><span class="bar-val">'
+                    + '有用率 ' + ((x.usefulRate || 0) * 100)
+                    .toFixed(0) + '%</span><span class="gray-pill">'
+                    + '样本 ' + (x.samples || 0) + ' / 曝光 '
+                    + (x.served || 0) + ' / 点击 ' + (x.action || 0)
+                    + '</span></div>';
+            });
+            if (row.promoteSuggestion) {
+                var sg = row.promoteSuggestion;
+                html += '<div style="margin:6px 0"><span class='
+                    + '"ok-pill">建议晋升 → 版本'
+                    + esc(sg.toVariant) + '(优出 '
+                    + ((sg.edge || 0) * 100).toFixed(0) + '%)</span> '
+                    + '<button class="dash-btn" onclick="promoteAB(\''
+                    + esc(k) + '\',\'' + esc(sg.toVariant)
+                    + '\')">确认晋升</button></div>';
+            }
+            html += '</div>';
+        });
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<div class="dash-empty">加载失败</div>';
+        showError(e.message);
+    }
+}
+
+async function promoteAB(intent, toVariant) {
+    if (!confirm('确认将 ' + intent + ' 话术定版为版本 ' + toVariant
+        + '？(后续该意图全部走此版, 可重置回实验)')) {
+        return;
+    }
+    try {
+        await fetchJson(api('/api/search-ai/ab/promote?intent='
+            + encodeURIComponent(intent) + '&to_variant='
+            + encodeURIComponent(toVariant)),
+            { method: 'POST', headers: adminHeaders() }, '晋升确认');
+        loadAB();
+    } catch (e) {
+        showError(e.message);
+    }
+}
+
 async function loadAll() {
     markUpdate();
     await Promise.all([
         loadStatus(), loadIntents(), loadEvolution(),
-        loadFeedbacks(), loadDecisions(), loadBadCases(),
+        loadFeedbacks(), loadDecisions(), loadBadCases(), loadAB(),
     ]);
 }
 
