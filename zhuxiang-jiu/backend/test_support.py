@@ -65,3 +65,25 @@ def mint_token(role: str = "member", phone: str = None) -> str:
     token = asyncio.run(_mint())
     assert token, f"mint_token({role}) 失败"
     return token
+
+
+async def mint_token_async(role: str = "member", phone: str = None) -> str:
+    """mint_token 的异步版(Bearer 第三批 qr70 迁移引入)
+
+    同构 mint_token(register→已注册则 login), 供 async 测试上下文
+    直 await 使用——mint_token 内部 asyncio.run, 在异步事件循环内
+    调用会抛 "cannot be called from a running event loop"(规范踩点:
+    异步禁铸造), 故提供本姊妹函数。
+    """
+    if phone is None:
+        phone = "13800000901" if role == "admin" else "13800000902"
+
+    from services.auth_service import AuthService
+    try:
+        r = await AuthService().register(
+            phone=phone, password="test123456", role=role)
+    except ValueError:  # 已注册(幂等, 走 login 通道)
+        r = await AuthService().login(phone, "test123456")
+    token = r.get("accessToken", "")
+    assert token, f"mint_token_async({role}) 失败"
+    return token
