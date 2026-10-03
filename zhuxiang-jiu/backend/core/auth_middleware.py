@@ -100,7 +100,11 @@ PUBLIC_EXACT = {
     "/api/payment/callback/refund",   # 退款回调
     "/api/payment/callback/payout",   # 付款回调
     "/api/logistics/callback/track",  # 物流轨迹回调
-    # 健康检查(Docker healthcheck / K8s 探针)
+    # 健康检查探针: decision/health 为真存活探针(路由无门控, 匿名 200)
+    # 注意: monitor/maintenance 两端点系"AI监控/维护模块"的管理员业务
+    # 端点撞名 health(路由层 _require_admin)——PUBLIC_EXACT 仅免登录
+    # 不豁免角色, 匿名 403 属预期; 外部探针请一律用 decision/health
+    # (2026-10-03 首夜巡检澄清项, 勿误判为故障)
     "/api/decision/health",
     "/api/monitor/health",
     "/api/maintenance/health",

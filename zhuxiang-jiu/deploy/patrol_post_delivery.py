@@ -9,6 +9,7 @@
 """
 import json
 import subprocess
+import urllib.error
 import urllib.request
 
 BASE = "https://zxjiu.com"
@@ -43,13 +44,24 @@ def post_json(path, payload, timeout=30):
 
 def main():
     # --- 1. 健康端点 ---
-    for p in ("/api/monitor/health", "/api/decision/health",
-              "/api/maintenance/health"):
+    # decision/health 为真探针(200); monitor/maintenance 系管理员
+    # 业务端点撞名(匿名 403 属预期, 见 auth_middleware PUBLIC_EXACT 注)
+    try:
+        code, body = get("/api/decision/health")
+        check("健康-/api/decision/health(真探针)", code == 200,
+              f"code={code}")
+    except Exception as e:
+        check("健康-/api/decision/health(真探针)", False, e)
+    for p in ("/api/monitor/health", "/api/maintenance/health"):
         try:
-            code, body = get(p)
-            check(f"健康-{p}", code == 200, f"code={code}")
+            code, _ = get(p)
+            check(f"撞名-{p}(admin业务端点, 预期403)", code == 403,
+                  f"code={code}")
+        except urllib.error.HTTPError as e:
+            check(f"撞名-{p}(admin业务端点, 预期403)", e.code == 403,
+                  f"code={e.code}")
         except Exception as e:
-            check(f"健康-{p}", False, e)
+            check(f"撞名-{p}(admin业务端点, 预期403)", False, e)
 
     # --- 2. 智搜冒烟 ---
     try:
