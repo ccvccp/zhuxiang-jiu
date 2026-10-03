@@ -47,8 +47,10 @@
 
 /* ========= 全局状态 ========= */
 var API_BASE_KEY = 'promoDash.apiBase';   // 与热点雷达页共用后端地址
+// 同源默认(生产 https 页直连 localhost 属混合内容被拦——2026-10-03
+// 检查升级修正; 本地调试可手填 http://localhost:8000)
 var state = {
-    apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+    apiBase: localStorage.getItem(API_BASE_KEY) || '',
     contents: [],          // 当前筛选下的内容列表
     expanded: {},          // 展开行: {contentId: true}
     engagedSig: null,      // 已跟进热点下拉选项签名(无变化不重绘, 保持下拉展开态; null=首次)

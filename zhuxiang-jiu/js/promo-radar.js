@@ -16,8 +16,10 @@
 
 /* ========= 全局状态 ========= */
 var API_BASE_KEY = 'promoDash.apiBase';   // 与内容工厂页共用后端地址
+// 同源默认(生产 https 页直连 localhost 属混合内容被拦——2026-10-03
+// 检查升级修正; 本地调试可手填 http://localhost:8000)
 var state = {
-    apiBase: localStorage.getItem(API_BASE_KEY) || 'http://localhost:8000',
+    apiBase: localStorage.getItem(API_BASE_KEY) || '',
     scanResult: null,      // 最近一次扫描结果(scanned/new/discarded/skipped)
     autoTimer: null,       // 自动刷新句柄
     AUTO_MS: 30000,
