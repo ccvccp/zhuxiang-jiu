@@ -390,6 +390,45 @@ async def main():
     _lm2.provider_client.chat = _orig2
     await _reset_evo()      # 锚点段收尾归零(防污染观测段)
 
+    # ---- shadow 档完整语义(三态留痕 + 进化冻结) ----
+    os.environ["ZS_MODE"] = "shadow"
+    rs = await svc.query("竹香酒怎么样", role="guest")
+    record("shadow-查询正常返回建议",
+           rs["intent"] == "product", str(rs.get("intent")))
+    dsh = next(d for d in await svc.decisions(limit=200)
+               if d.get("query") == "竹香酒怎么样"
+               and d.get("mode") == "shadow")
+    record("shadow-留痕模式标记", dsh.get("mode") == "shadow",
+           str(dsh.get("mode")))
+    before_rb = (await svc.evolution_params()).get("product", 1.0)
+    before_ab = (await svc.anchor_params()).get("竹香", 1.0)
+    fsh = await svc.submit_feedback(rs["decisionId"], "useful")
+    record("shadow-反馈进化冻结",
+           fsh.get("evolved") is False
+           and "冻结" in str(fsh.get("note", ""))
+           and (await svc.evolution_params()).get("product",
+                                                  before_rb) == before_rb
+           and (await svc.anchor_params()).get("竹香",
+                                               before_ab) == before_ab,
+           str(fsh)[:100])
+    os.environ["ZS_MODE"] = "assist"
+    rrec = await svc.query("竹香酒推荐", role="guest")
+    frec = await svc.submit_feedback(rrec["decisionId"], "useful")
+    record("shadow-assist档进化恢复",
+           frec.get("evolved") is True, str(frec)[:80])
+
+    # ---- 小竹 FC 注册表同步(规则轨之外 LLM/FC 轨可达) ----
+    from services.xiaozhu_fc_registry import TOOL_REGISTRY
+    record("FC注册-zs.search(只读)",
+           TOOL_REGISTRY.get("zs.search", {}).get("tier")
+           == "readonly", str(TOOL_REGISTRY.get("zs.search")
+                              and TOOL_REGISTRY["zs.search"]["tier"]))
+    from services.llm_client import provider_client as _pc
+    import inspect as _insp
+    record("FC注册-LLM command 白名单含 zs.search",
+           "zs.search" in _insp.getsource(
+               _pc.classify_dialog_intent), "")
+
     # ---- 留痕与观测 ----
     ds = await svc.decisions(limit=10)
     record("留痕-决策落库", len(ds) >= 5

@@ -69,7 +69,10 @@ SAFE_READONLY = {"product.new", "product.price",
                  "wine.verify", "wine.craft",
                  "wine.recommend", "wine.reviews",
                  # 智图联动(全只读观测面——POI 清单播报)
-                 "map.nearby"}
+                 "map.nearby",
+                 # 智搜联动(全只读——统一意图引擎问答,
+                 # 规则轨 _execute 直达, 沙箱口径对齐)
+                 "zs.search"}
 SAFE_WRITE: set[str] = set()        # 一般写: 执行+播报(现空)
 SENSITIVE = {"trust.convert",        # 高敏: confirmToken 流
              "repair.execute",       # 49号P0: 修复执行同高敏流

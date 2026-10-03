@@ -369,7 +369,7 @@ class LLMProviderClient:
             "是追加归 affirm)\n"
             "- command:<action>: 明确功能指令, action 从这些里选"
             " product.new|order.query|promo.query|trust.balance"
-            "|xiaozhu.help\n"
+            "|xiaozhu.help|zs.search\n"
             "- chat: 购物闲聊/咨询(问口感/度数/怎么喝/你是谁/"
             "你是真人吗/你叫什么)——reply 给出导购回应;\n"
             "  想结束对话(退出/再见/就到这/不用了谢谢)也归"

@@ -878,6 +878,9 @@ class ZsSearchService:
 
         decision = {"query": text, "memberId": member_id,
                     "role": role or "guest",
+                    # 三态留痕(规划第七节: shadow 返回建议+留痕
+                    # 标记——观测期决策可区分于生产档)
+                    "mode": (await current_mode())["mode"],
                     "queriedAt": ts()}
 
         # L2 合规前置(最高优先)
@@ -1073,6 +1076,16 @@ class ZsSearchService:
                   "actionLabel": (action_label or "")[:40],
                   "memberId": member_id or target.get("memberId", 0),
                   "intent": intent, "createdAt": ts()}
+        # 三态语义: shadow(影子观测期) → 反馈只留痕, 进化冻结
+        # (观测期数据不污染 routeBoost/intentWeight/anchorBoost)
+        if (await current_mode())["mode"] == "shadow":
+            record.update({"evolved": False,
+                           "note": "shadow 观测期进化冻结"
+                                   "(反馈仅留痕)"})
+            await self.store.save("feedbacks", record["feedbackId"],
+                                  record)
+            await self.store.hincr("feedback_stats", verdict)
+            return record
         if prior:
             record.update({"evolved": False,
                            "note": "同决策同来源已进化过, 重复反馈"

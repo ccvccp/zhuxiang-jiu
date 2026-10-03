@@ -273,6 +273,22 @@ TOOL_REGISTRY = {
         "requiresConsent": False,
         "safeMessage": "门店查询暂时不可用, 请稍后再试。",
     },
+    # 智搜联动(P2): 全站统一智能入口——复杂口语查询走智搜
+    # 意图引擎(意图/合规/四路检索/角色化答案), 全只读
+    "zs.search": {
+        "operationId": "zs_unified_search",
+        "summary": "智搜一下(全站统一智能搜索问答)",
+        "description": "【只读】当用户说「搜一下/帮我搜/"
+                      "智能搜索」或提出复合口语查询时调用, "
+                      "走智搜意图引擎返回结构化答案与动作"
+                      "卡片。❌ 答案必须来自智搜检索路返回, "
+                      "禁止编造商品价格/订单状态; 合规拦截"
+                      "话术原样播报不得改写。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.01,
+        "requiresConsent": False,
+        "safeMessage": "智搜暂时不可用, 请稍后再试。",
+    },
     # ---------- 写(2) ----------
     "trust.bind": {
         "operationId": "bind_trust_profile",
