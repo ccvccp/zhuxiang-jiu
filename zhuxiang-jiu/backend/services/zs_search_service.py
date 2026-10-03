@@ -706,10 +706,14 @@ class ZsSearchService:
                 await self.store.hincr("llm_stats", "assist")
                 if adopted:
                     await self.store.hincr("llm_stats", "adopted")
+                    # 2026-10-03 边界审查修复: 保留规则层候选进留痕
+                    # (此前 candidates 置空导致审计断档——看不到规则
+                    # 层原判定与竞争意图)
+                    rule_candidates = clf["candidates"]
                     clf = {"intent": llm_assist["intent"],
                            "confidence": 0.55,
                            "hits": ["llm_fallback"],
-                           "candidates": []}
+                           "candidates": rule_candidates}
                     slots = extract_slots(text, clf["intent"])
 
         decision.update({"intent": clf["intent"],
@@ -795,15 +799,29 @@ class ZsSearchService:
         if not target:
             raise KeyError(f"决策 {decision_id} 不存在或已过期")
         intent = target.get("intent", "")
+        # 2026-10-03 边界审查修复: 同决策同来源只进化一次——
+        # 此前同 decisionId 可无限反馈刷 routeBoost(5 次 +0.25
+        # 到 clamp 顶), 重复反馈改为只留痕不再调参(防滥用)
+        src = source if source in ("explicit", "action") else "explicit"
+        prior = [f for f in await self.store.list("feedbacks", 200)
+                 if f.get("decisionId") == decision_id
+                 and f.get("source") == src
+                 and f.get("evolved") is True]
         record = {"feedbackId": await self.store.next_id("feedback"),
                   "decisionId": decision_id,
                   "verdict": verdict,
-                  "source": source if source in ("explicit",
-                                                 "action") else
-                  "explicit",
+                  "source": src,
                   "actionLabel": (action_label or "")[:40],
                   "memberId": member_id or target.get("memberId", 0),
                   "intent": intent, "createdAt": ts()}
+        if prior:
+            record.update({"evolved": False,
+                           "note": "同决策同来源已进化过, 重复反馈"
+                                   "仅留痕(防刷分)"})
+            await self.store.save("feedbacks", record["feedbackId"],
+                                  record)
+            await self.store.hincr("feedback_stats", verdict)
+            return record
         evolvable = (intent in INTENT_BONUS and intent != "chat"
                      and target.get("outcome") != "blocked")
         if target.get("outcome") == "blocked" or intent in ("blocked",

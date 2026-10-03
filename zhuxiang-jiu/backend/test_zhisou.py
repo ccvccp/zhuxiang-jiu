@@ -154,15 +154,22 @@ async def main():
            fb.get("evolved") is True
            and fb.get("routeBoostAfter") == 1.05, str(fb))
     fb = await svc.submit_feedback(rq["decisionId"], "useless")
-    record("P1反馈-没用回调(-0.05)",
+    record("P1反馈-重复反馈防刷分(仅留痕)",
+           fb.get("evolved") is False
+           and "防刷分" in str(fb.get("note", "")), str(fb)[:100])
+    rq2 = await svc.query("竹香酒推荐一下", role="guest")
+    fb = await svc.submit_feedback(rq2["decisionId"], "useless")
+    record("P1反馈-新决策没用回调(-0.05)",
            fb.get("evolved") is True
            and fb.get("routeBoostAfter") == 1.0, str(fb))
     rb = await svc.query("酒能治病吗")
     fb = await svc.submit_feedback(rb["decisionId"], "useful")
     record("P1反馈-红线(合规拦截不进化)",
            fb.get("evolved") is False, str(fb))
+    # clamp: 每次造新决策反馈 useless, 到 0.8 下界后不再降
     for _ in range(12):
-        await svc.submit_feedback(rq["decisionId"], "useless")
+        rqx = await svc.query("竹香酒怎么样", role="guest")
+        await svc.submit_feedback(rqx["decisionId"], "useless")
     params = await svc.evolution_params()
     record("P1反馈-clamp安全阀(下界0.8)",
            params.get("product") == 0.8, str(params))
@@ -201,11 +208,13 @@ async def main():
     record("P2改写-知识路改写检索(来源)",
            "竹香" in str(r2.get("sources", []))
            or r2.get("resultCount", 0) >= 0, "")
-    # intentWeight 进化: LLM 兜底决策反馈 → ±0.02
+    # intentWeight 进化: LLM 兜底决策反馈 → ±0.02(重复反馈防刷分,
+    # 回落用新 LLM 兜底决策验证)
     fb = await svc.submit_feedback(r2["decisionId"], "useful")
     record("P2进化-intentWeight上调(0.6→0.62)",
            fb.get("intentWeightAfter") == 0.62, str(fb))
-    fb = await svc.submit_feedback(r2["decisionId"], "useless")
+    r2b = await svc.query("帮我挑个送领导的口粮酒", role="guest")
+    fb = await svc.submit_feedback(r2b["decisionId"], "useless")
     record("P2进化-intentWeight回落(0.62→0.6)",
            fb.get("intentWeightAfter") == 0.6, str(fb))
     # LLM 失败 fail-soft → 回规则轨 chat
