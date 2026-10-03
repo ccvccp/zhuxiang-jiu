@@ -41,16 +41,26 @@ INTENT_ANCHORS: dict[str, tuple[tuple[str, int], ...]] = {
                ("升级", 1), ("折扣", 1), ("优惠价", 1)),
     "agent": (("代理", 2), ("加盟", 2), ("招商", 2), ("开店", 2),
               ("网店", 2), ("保证金", 2), ("区域", 1), ("政策", 1)),
+    # 2026-10-03 边界审查修复: 拆掉单字"退"(子串误命中且"退货/
+    # 退款"高频场景只得1分低于置信线漏到chat); 补退换/售后
     "order": (("订单", 2), ("发货", 2), ("物流", 2), ("运单", 2),
-              ("退", 1), ("换货", 2), ("发票", 2), ("到哪了", 2)),
+              ("退货", 2), ("退款", 2), ("退换", 2), ("售后", 2),
+              ("换货", 2), ("发票", 2), ("到哪了", 2)),
+    # 2026-10-03 补: 付款场景(货到付款等)
     "help": (("注册", 2), ("登录", 2), ("下单", 2), ("支付", 2),
-             ("账户", 2), ("怎么买", 2), ("密码", 2)),
+             ("付款", 2), ("账户", 2), ("怎么买", 2), ("密码", 2)),
     "brand": (("品牌", 2), ("故事", 2), ("工艺", 2), ("麒麟", 2),
               ("瑞麒", 2), ("瑞麟", 2), ("竹文化", 2), ("历史", 1),
               ("富硒", 1), ("徂徕山", 2)),
     "attract": (("活动", 2), ("秒杀", 2), ("拼团", 2), ("满减", 2),
                 ("优惠", 1), ("促销", 2)),
 }
+
+# 强操作词(help/order 意图): 用户明确询问操作流程时, 即使句中
+# 带商品名(如"竹香酒怎么下单"), 操作意图也应优先于名词性商品词
+STRONG_OPERATION_WORDS = (
+    "下单", "注册", "登录", "支付", "付款", "退货", "退款",
+    "退换", "怎么买", "换货", "发票",)
 
 INTENT_NAMES = {
     "product": "商品购买", "equity": "会员权益", "agent": "招商代理",
@@ -94,7 +104,10 @@ ROLE_VARIANTS = {
 # ============================================================
 
 COMPLIANCE_RULES = (
-    ("minor", ("未成年", "未成年人", "小孩买酒", "儿童"),
+    # 2026-10-03 边界审查修复: "小孩能喝酒吗"漏拦——原"小孩买酒"
+    # 四字连才命中; 拆词"小孩"/"少年儿童"独立命中
+    ("minor", ("未成年", "未成年人", "小孩", "儿童", "少年儿童",
+               "几岁能喝", "多少岁可以喝"),
      "依据《未成年人保护法》, 平台不向未成年人销售酒类商品, "
      "亦不提供购买引导"),
     ("medical", ("治病", "治疗", "疗效", "药效", "保健功效", "解酒",
@@ -127,7 +140,12 @@ def compliance_gate(text: str) -> dict | None:
 # ============================================================
 
 def classify_intent(text: str) -> dict:
-    """规则锚点意图分类(得分制; 平分按锚点顺序稳定取胜)"""
+    """规则锚点意图分类(得分制; 平分按锚点顺序稳定取胜)
+
+    2026-10-03 边界审查修复: 命中强操作词时 help/order 得分+1——
+    "竹香酒怎么下单"类输入商品词(3分)不再压过操作意图(2+1=3 平分
+    后操作意图因锚点顺序稳定取胜), 语义上用户在问流程而非找商品。
+    """
     scores: dict[str, int] = {}
     hits: dict[str, list[str]] = {}
     for intent, anchors in INTENT_ANCHORS.items():
@@ -136,6 +154,9 @@ def classify_intent(text: str) -> dict:
             if word in text:
                 s += weight
                 h.append(word)
+        if intent in ("help", "order") and any(
+                w in text for w in STRONG_OPERATION_WORDS):
+            s += 1
         if s > 0:
             scores[intent] = s
             hits[intent] = h
@@ -443,12 +464,15 @@ class ZsSearchService:
                     "compliance": blocked, "decisionId":
                         decision.get("decisionId")}
 
-        # L1 意图 + 槽位
+        # L1 意图 + 槽位(候选 top3 入留痕——规划承诺的审计完整性)
         clf = classify_intent(text)
         slots = extract_slots(text, clf["intent"])
         decision.update({"intent": clf["intent"],
                          "confidence": clf["confidence"],
-                         "slots": slots})
+                         "slots": slots,
+                         "intentCandidates": [
+                             {"intent": i, "score": s}
+                             for i, s in clf["candidates"]]})
 
         # L3 双路检索
         routes = INTENT_ROUTES.get(clf["intent"], ("knowledge",))
