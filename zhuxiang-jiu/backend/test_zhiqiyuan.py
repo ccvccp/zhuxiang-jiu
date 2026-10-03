@@ -392,12 +392,63 @@ async def main():
     for suite in (TestFabric(), TestQA(), TestForecast(),
                   TestTax(), TestEvolution()):
         await suite.run()
+    await test_mode_and_scheduler()
     print("-" * 60)
     for line in RESULTS:
         print(line)
     print("-" * 60)
     print(f"通过: {PASS} / {PASS + FAIL}")
     return FAIL == 0
+
+
+async def test_mode_and_scheduler():
+    """三态灰度 + 扫描调度器(引擎活化升级用例)"""
+    from services.zy_mode_service import (
+        current_mode, require_decision_mode,
+    )
+    from services.zy_evolution_service import ZyEvolutionService
+    from services.zy_scan_scheduler import run_scan
+
+    # off 默认 → 决策面 409 口径
+    os.environ.pop("ZY_MODE", None)
+    m = await current_mode()
+    record("模式-默认off", m["mode"] == "off" and m["source"] == "env",
+           str(m))
+    try:
+        await require_decision_mode()
+        record("模式-off决策面409", False, "未抛出")
+    except ValueError:
+        record("模式-off决策面409", True)
+
+    # shadow → 分析可用 + 进化冻结(feedback 只留痕)
+    os.environ["ZY_MODE"] = "shadow"
+    ev = ZyEvolutionService()
+    p_before = (await ev.get_forecast_params())["trendWeight"]
+    rec = await ev.feedback("forecast", "adopted", "观测期反馈")
+    p_after = (await ev.get_forecast_params())["trendWeight"]
+    record("模式-shadow进化冻结",
+           rec.get("evolved") is False
+           and p_after == p_before
+           and "冻结" in str(rec.get("note", "")), str(rec)[:80])
+
+    # assist → 进化恢复
+    os.environ["ZY_MODE"] = "assist"
+    rec = await ev.feedback("forecast", "adopted", "生产反馈")
+    record("模式-assist进化恢复", rec.get("trendWeightAfter")
+           is not None and rec.get("evolved") is None
+           or rec.get("trendDelta") == 0.1, str(rec)[:80])
+
+    # 调度器: 单轮扫描留痕
+    scan = await run_scan()
+    record("调度-扫描成功",
+           scan.get("success") is True
+           and "anomalyCount" in scan and "scannedAt" in scan,
+           str(scan)[:80])
+    logs = await ev.logs(engine="scheduler")
+    record("调度-扫描留痕(scheduler)",
+           len(logs) >= 1 and logs[0]["action"] == "daily_scan",
+           str(logs[:1]))
+    os.environ.pop("ZY_MODE", None)
 
 
 if __name__ == "__main__":

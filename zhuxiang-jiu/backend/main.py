@@ -526,6 +526,10 @@ async def _on_startup():
     # (CREDIT_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
     from services.credit_scheduler import start_guard_loop as start_credit_guard
     start_credit_guard()
+    # 智启元·AI智能财务大模型: 每日异常/资金/税务风险扫描
+    # (ZY_SCAN_AUTO=on 且 ZY_MODE != off 时启动, 引擎活化)
+    from services.zy_scan_scheduler import start_scan_loop as start_zy_scan
+    start_zy_scan()
     # 智图·AI智能地图大模型: 护栏指标自动巡检
     # (ZT_GUARD_AUTO=off 可关闭, 默认 on——护栏是保护机制)
     from services.zt_map_scheduler import start_guard_loop as start_zt_map_guard

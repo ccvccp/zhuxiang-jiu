@@ -73,6 +73,21 @@ class ZyEvolutionService:
             "correction": correction or {},
             "createdAt": _now_iso(),
         }
+        # 三态语义: shadow(影子观测期) → 反馈只留痕, 进化冻结
+        # (观测期数据不污染 trendWeight; 对齐智搜 shadow 口径)
+        try:
+            from services.zy_mode_service import is_shadow
+            if await is_shadow():
+                record["evolved"] = False
+                record["note"] = (record["note"] + " | "
+                                  "shadow 观测期进化冻结").strip(" |")
+                await self.repo.save_feedback(record)
+                await self._log("feedback", verdict, {
+                    "targetType": target_type, "trendDelta": 0.0,
+                    "frozen": True})
+                return record
+        except Exception as _exc:            # 模式读取失败不阻断
+            pass
         # 仅预测类裁决驱动参数进化
         trend_delta = 0.0
         if target_type == "forecast" and verdict != "corrected":

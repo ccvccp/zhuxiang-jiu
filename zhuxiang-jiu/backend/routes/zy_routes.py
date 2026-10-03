@@ -250,9 +250,11 @@ async def tax_policies(
 @router.post("/api/zy/tax/policies", tags=["智启元AI智能财务大模型"])
 async def tax_policy_add(data: PolicyAddRequest,
                          x_role: str = Header(None, alias="X-Role")):
-    """新增优惠政策(人工维护库, 生效期标记)"""
+    """新增优惠政策(人工维护库, 生效期标记; 决策面——off 409)"""
     _require_admin(x_role)
     try:
+        from services.zy_mode_service import require_decision_mode
+        await require_decision_mode()
         from services.zy_tax_service import _PolicyStore
         store = _PolicyStore()
         policy_id = await store.next_policy_id()
@@ -289,9 +291,14 @@ async def tax_risk_heatmap(x_role: str = Header(None, alias="X-Role")):
              tags=["智启元AI智能财务大模型"])
 async def evolution_feedback(data: FeedbackRequest,
                             x_role: str = Header(None, alias="X-Role")):
-    """反馈闭环(采纳/修正/拒绝→预测参数确定性调优, 安全阀内)"""
+    """反馈闭环(采纳/修正/拒绝→预测参数确定性调优, 安全阀内)
+
+    三态门控: ZY_MODE=off → 409; shadow → 只留痕进化冻结。
+    """
     _require_admin(x_role)
     try:
+        from services.zy_mode_service import require_decision_mode
+        await require_decision_mode()
         result = await _evolution.feedback(
             target_type=data.targetType, verdict=data.verdict,
             note=data.note, correction=data.correction)
@@ -403,7 +410,47 @@ async def status(x_role: str = Header(None, alias="X-Role")):
     _require_admin(x_role)
     try:
         result = await _evolution.status()
+        from services.zy_mode_service import current_mode
+        result["mode"] = (await current_mode())["mode"]
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 三态灰度 + 扫描调度(引擎活化, 对齐六模型范式)
+# ============================================================
+
+@router.get("/api/zy/mode", tags=["智启元AI智能财务大模型"])
+async def mode_status(x_role: str = Header(None, alias="X-Role")):
+    """三态灰度总览(off/shadow/assist)"""
+    _require_admin(x_role)
+    from services.zy_mode_service import current_mode
+    return {"success": True, "data": await current_mode()}
+
+
+@router.post("/api/zy/mode/override", tags=["智启元AI智能财务大模型"])
+async def mode_override(
+    mode: str = "",
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """运行时切档(空串清除回落 env; 留痕进 zy_logs)"""
+    _require_admin(x_role)
+    try:
+        from services.zy_mode_service import set_override
+        data = await set_override(mode)
+        return {"success": True, "data": data}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/zy/scan/run", tags=["智启元AI智能财务大模型"])
+async def scan_run(x_role: str = Header(None, alias="X-Role")):
+    """手动触发单轮扫描(异常三检测+资金缺口+税务风险, 留痕)"""
+    _require_admin(x_role)
+    try:
+        from services.zy_scan_scheduler import run_scan
+        return {"success": True, "data": await run_scan()}
     except Exception as e:
         _handle(e)
 
