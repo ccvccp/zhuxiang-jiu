@@ -597,6 +597,11 @@ async def _on_startup():
     start_blogger_learning()
     start_blogger_radar2()
     start_blogger_el()
+    # 限时秒杀: 支付超时批量取消+回补(FLASHSALE_EXPIRE_AUTO=off
+    # 可关闭; 2026-10-04 检查升级补齐——原仅手动端点无心跳)
+    from services.flashsale_scheduler import (
+        start_scheduler as start_flashsale_expire)
+    start_flashsale_expire()
     # 41号·AI智能代驾: 学习回流(RIDE_LEARNING_AUTO=off 可关闭)
     from services.ride_scheduler import start_learning_scheduler as start_ride_learning
     start_ride_learning()

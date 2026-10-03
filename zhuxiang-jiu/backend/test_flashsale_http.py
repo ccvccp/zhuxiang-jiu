@@ -23,6 +23,9 @@ from datetime import datetime, timedelta, timezone, UTC
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ.setdefault("AUTH_MODE", "compat")
+# 头信任自举(2026-10-04 补): 原依赖 shell 前置 env, 裸头 X-Role
+# 被 compat 默认剥离 403——对齐 test_support 约定, 测试自包含
+os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")
 
 import httpx
 from fastapi.testclient import TestClient

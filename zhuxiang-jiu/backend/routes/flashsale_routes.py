@@ -276,19 +276,46 @@ async def add_item(session_id: str, data: AddItemRequest,
     """
     _require_admin(x_role)
     try:
+        # 产品真实价格字段(审计输入; 失败回退空——fail-soft)
+        product_price_fields = {}
+        try:
+            from repositories.product_repository import (
+                ProductRepository,
+            )
+            _p = await ProductRepository().get_by_id(data.productId)
+            product_price_fields = _p or {}
+        except Exception:
+            product_price_fields = {}
         item = await _service.add_item(session_id, data.productId,
                                        data.flashPrice, data.flashStock,
                                        data.limitPerMember)
         # 智法: 价格审计留痕(审计失败不影响加品)
+        # 2026-10-04 检查升级: 输入真实化——原单点快照(price_history
+        # 仅原价一点/strikethrough=原价/member=0)使三项检测全部失效
+        # (涨幅 0%/划线比 1.0/会员价 0 永不触发); 改双点序列(售价
+        # +真实会员价)与真实划线价(original_price)/会员价(member_price),
+        # 三项检测(先涨后降/划线无依据/会员价虚标)均可真实触发
         audit_summary = None
         try:
             from services.zf_commerce_service import ZfCommerceService
             orig = float(item.get("originalPrice", 0) or 0)
+            member_price = float(product_price_fields.get(
+                "member_price", 0) or 0)
+            strikethrough = float(product_price_fields.get(
+                "original_price", 0) or orig)
+            history = [
+                {"day": "deal", "dealPrice": orig},
+            ]
+            if member_price > 0:
+                history.append(
+                    {"day": "member", "dealPrice": member_price})
             audit = await ZfCommerceService().price_audit(
                 product_id=str(data.productId),
-                price_history=[{"day": "snapshot", "dealPrice": orig}],
-                current={"original": orig, "strikethrough": orig,
-                         "coupon": data.flashPrice, "member": 0})
+                price_history=history,
+                current={"original": orig,
+                         "strikethrough": strikethrough,
+                         "coupon": data.flashPrice,
+                         "member": member_price})
             audit_summary = {
                 "auditId": audit["auditId"],
                 "compliant": audit["compliant"],
