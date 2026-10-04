@@ -140,11 +140,34 @@ class LocalGuardrail:
                                 or DEFAULT_REPLACEMAP)
         self._responses = dict(responses
                                or DEFAULT_BLOCK_RESPONSES)
-        # 白名单豁免: 敏感词→[豁免模式](运营后台维护,
-        # 命中后上下文含豁免模式则放行——误杀治理)
-        self._allowlist: dict[str, list[str]] = {
-            str(w): list(ps) for w, ps in
-            (allowlist or {}).items()}
+        # 白名单豁免: 敏感词→豁免模式(运营后台维护, 命中
+        # 后上下文含豁免模式则放行——误杀治理)。
+        # 双结构: CONTAINS(字符串, 变体穿透)+REGEX(预编译)
+        self._allow_contains: dict[str, list[str]] = {}
+        self._allow_regex: dict[str, list[re.Pattern]] = {}
+        for w, patts in (allowlist or {}).items():
+            for p in patts:
+                if isinstance(p, dict):
+                    # 发布快照新格式 {p, t}
+                    if p.get("t") == "REGEX":
+                        try:
+                            self._allow_regex\
+                                .setdefault(str(w), [])\
+                                .append(re.compile(
+                                    str(p.get("p", "")),
+                                    re.IGNORECASE))
+                        except re.error:
+                            logger.warning(
+                                "allowlist_regex_skip %s",
+                                p.get("p"))
+                    else:
+                        self._allow_contains\
+                            .setdefault(str(w), [])\
+                            .append(str(p.get("p", "")))
+                else:
+                    # 旧格式纯字符串(全按 CONTAINS)
+                    self._allow_contains\
+                        .setdefault(str(w), []).append(str(p))
         # 词→分类倒排(拦截命中时归因分类)
         self._word_cat: dict[str, str] = {}
         for cat, words in self._blocklist.items():
@@ -210,23 +233,25 @@ class LocalGuardrail:
     def _is_allowed(self, word: str,
                     original: str,
                     cleaned: str) -> bool:
-        """白名单豁免: 命中词的豁免模式出现在原文或清洗
-        文本中即放行(豁免词本身也做变体穿透——豁免模式
-        清洗后比对, "第 一 家 店"同样豁免)"""
-        patts = self._allowlist.get(word)
-        if not patts:
-            return False
-        for p in patts:
-            p_clean = _STRIP_RE.sub(
-                "", str(p)).lower()
+        """白名单豁免(双模式):
+        CONTAINS——豁免模式出现在原文或清洗文本中即放行
+        (豁免词本身也做变体穿透, "第 一 家 店"同样豁免);
+        REGEX——预编译正则 search 原文(运营自定义上下文模式,
+        如"第[一二三]家店"一族一次配齐)"""
+        for p in self._allow_contains.get(word, ()):
+            p_clean = _STRIP_RE.sub("", p).lower()
             if (p in original
                     or (p_clean and p_clean in cleaned)):
+                return True
+        for pat in self._allow_regex.get(word, ()):
+            if pat.search(original):
                 return True
         return False
 
     # ------------------------------------------------------------
-    # 命中日志(fire-and-forget——仅拦截/替换发生时; 无事件
-    # 循环的纯同步调用场景静默跳过, 如单元测试)
+    # 命中日志(AsyncHitLogger 内存队列——put_nowait 非阻塞,
+    # 后台定时/定量批量刷盘; 命中风暴时 QueueFull 丢弃背压,
+    # 主链路 <1ms 不受日志面影响)
     # ------------------------------------------------------------
 
     def _log_hit(self, *, direction: str,
@@ -247,21 +272,7 @@ class LocalGuardrail:
                 "1**********", str(original)[:500]),
             "processedText": str(processed)[:500],
         }
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        loop.create_task(self._write_hit(record))
-
-    @staticmethod
-    async def _write_hit(record: dict) -> None:
-        try:
-            from repositories.guardrail_repository \
-                import get_guardrail_repo
-            await get_guardrail_repo().log_hit(record)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "guardrail_hit_log_skip: %s", exc)
+        _hit_logger.log(record)
 
     # ------------------------------------------------------------
     # 对外接口
@@ -368,13 +379,16 @@ class LocalGuardrail:
             self._responses = fresh._responses
             self._word_cat = fresh._word_cat
             self._dfa = fresh._dfa
-            self._allowlist = fresh._allowlist
+            self._allow_contains = fresh._allow_contains
+            self._allow_regex = fresh._allow_regex
             self._rules_version = version
             logger.info(
                 "voice48_guardrail_rules_reloaded "
-                "version=%s block_words=%s allow_words=%s",
+                "version=%s block_words=%s "
+                "allow_contains=%s allow_regex=%s",
                 version, len(self._word_cat),
-                len(self._allowlist))
+                len(self._allow_contains),
+                len(self._allow_regex))
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -454,3 +468,112 @@ def start_guardrail_listener() -> None:
     _reload_task = asyncio.get_event_loop()\
         .create_task(_reload_loop())
     logger.info("guardrail_listener_started")
+
+
+# ------------------------------------------------------------
+# AsyncHitLogger——命中日志高性能异步写入器
+# (用户方案二期: 内存队列+批量刷盘; 主链路 put_nowait
+#  非阻塞 <1ms, 后台定时 2s/定量 200 条批量落库, 命中
+#  风暴时 QueueFull 丢弃背压保主业务)
+# ------------------------------------------------------------
+
+class AsyncHitLogger:
+    """内存队列 + 定时/定量批量刷盘(Redis pipeline 批量
+    或内存批量; 优雅停机 flush 残留)"""
+
+    def __init__(self, batch_size: int = 200,
+                 flush_interval: float = 2.0,
+                 maxsize: int = 10000):
+        self._queue: asyncio.Queue = asyncio.Queue(
+            maxsize=maxsize)
+        self._batch_size = batch_size
+        self._flush_interval = flush_interval
+        self._dropped = 0
+        self._worker: asyncio.Task | None = None
+
+    # -- 主链路接口(同步非阻塞) --------------------------
+
+    def log(self, record: dict) -> None:
+        """非阻塞入队; 队列满(命中风暴)丢弃并计数告警"""
+        try:
+            self._queue.put_nowait(record)
+        except asyncio.QueueFull:
+            self._dropped += 1
+            if self._dropped % 100 == 1:
+                logger.warning(
+                    "guardrail_hit_queue_full dropped=%s",
+                    self._dropped)
+
+    # -- 刷盘 --------------------------------------------
+
+    async def flush(self) -> int:
+        """批量落库(定量取一批; 返回写入条数)"""
+        batch: list[dict] = []
+        while len(batch) < self._batch_size:
+            try:
+                batch.append(
+                    self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        if not batch:
+            return 0
+        try:
+            from repositories.guardrail_repository \
+                import get_guardrail_repo
+            await get_guardrail_repo()\
+                .log_hits_batch(batch)
+            return len(batch)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "guardrail_hit_flush_fail n=%s: %s",
+                len(batch), exc)
+            return 0
+
+    async def _flush_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self._flush_interval)
+            try:
+                await self.flush()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "guardrail_hit_worker_fail: %s", exc)
+
+    # -- 生命周期 ----------------------------------------
+
+    def start(self) -> None:
+        if self._worker is not None \
+                and not self._worker.done():
+            return
+        self._worker = asyncio.get_event_loop()\
+            .create_task(self._flush_loop())
+        logger.info("guardrail_hit_logger_started "
+                    "batch=%s interval=%ss",
+                    self._batch_size,
+                    self._flush_interval)
+
+    async def stop(self) -> int:
+        """优雅停机: 停 worker + 刷入残留"""
+        if self._worker is not None:
+            self._worker.cancel()
+            try:
+                await self._worker
+            except (asyncio.CancelledError,
+                    Exception):  # noqa: BLE001
+                pass
+            self._worker = None
+        return await self.flush()
+
+
+# 模块级单例(_log_hit 调用方零感知)
+_hit_logger = AsyncHitLogger()
+
+
+def get_hit_logger() -> AsyncHitLogger:
+    return _hit_logger
+
+
+async def flush_hits() -> int:
+    """手动刷盘(测试/巡检用——即时落库不等工作周期)"""
+    return await _hit_logger.flush()

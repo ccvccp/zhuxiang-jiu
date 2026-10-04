@@ -628,8 +628,10 @@ async def _on_startup():
     except Exception as _exc:  # noqa: BLE001
         print(f"[startup] guardrail seed skip: {_exc}")
     from services.local_guardrail_service import (
-        start_guardrail_listener)
+        start_guardrail_listener, get_hit_logger)
     start_guardrail_listener()
+    # 命中日志批量刷盘 worker(内存队列→定时/定量 pipeline 批量)
+    get_hit_logger().start()
     # 41号·AI智能代驾: 学习回流(RIDE_LEARNING_AUTO=off 可关闭)
     from services.ride_scheduler import start_learning_scheduler as start_ride_learning
     start_ride_learning()
@@ -752,6 +754,15 @@ async def _on_shutdown():
     # 停止后台调度任务
     from services.xx66_scheduler import stop_schedulers as stop_xx66_schedulers
     stop_xx66_schedulers()
+    # 小竹合规引擎: 命中日志优雅刷盘(队列残留落库再退出)
+    from services.local_guardrail_service import (
+        get_hit_logger as _get_hit_logger)
+    try:
+        flushed = await _get_hit_logger().stop()
+        logger.info(
+            "guardrail hit logger flushed=%s", flushed)
+    except Exception as _exc:  # noqa: BLE001
+        logger.warning("hit logger stop: %s", _exc)
     from services.ai_learning_scheduler import stop_scheduler as stop_ai_learning
     from services.order_timeout_scheduler import stop_scheduler as stop_order_timeout
     stop_ai_learning()

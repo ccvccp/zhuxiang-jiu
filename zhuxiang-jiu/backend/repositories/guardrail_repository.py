@@ -137,9 +137,17 @@ class GuardrailRepository:
         return bool(self.store[table].pop(rid, None))
 
     async def _scan(self, table: str,
-                    limit: int = 200) -> list[dict]:
+                    limit: int = 200,
+                    key_is_int: bool = True
+                    ) -> list[dict]:
         """全表扫描(表规模百级——分类/规则/白名单天然小;
-        hit_log 查询走 list_hits 专用路径)"""
+        hit_log 查询走 list_hits 专用路径)。
+
+        key_is_int: 表主键形态——gr_rule/gr_allowlist/
+        gr_hit_log 为自增 int; gr_category 为 category_code
+        字符串(修复: 字符串键曾因 isdigit 过滤恒空, 致
+        ensure_seeded 幂等检查失效重复灌入)。
+        """
         if is_redis_mode():
             client = await get_redis_client()
             keys = []
@@ -147,8 +155,11 @@ class GuardrailRepository:
                     match=_k("guardrail", table, "*"),
                     count=500):
                 s = str(k).rsplit(":", 1)[-1]
-                if s.isdigit():
-                    keys.append(int(s))
+                if s == "seq":
+                    continue
+                if key_is_int and not s.isdigit():
+                    continue
+                keys.append(int(s) if key_is_int else s)
             keys = sorted(keys)[:limit]
             out = []
             for rid in keys:
@@ -157,7 +168,11 @@ class GuardrailRepository:
                     out.append(rec)
             return out
         self._ensure_store()
-        ids = sorted(self.store[table].keys())[:limit]
+        if key_is_int:
+            ids = sorted(self.store[table].keys())[:limit]
+        else:
+            ids = sorted(
+                self.store[table].keys())[:limit]
         return [dict(self.store[table][i]) for i in ids]
 
     # ========================================================
@@ -165,7 +180,8 @@ class GuardrailRepository:
     # ========================================================
 
     async def list_categories(self) -> list[dict]:
-        rows = await self._scan(self.TABLE_CATEGORY)
+        rows = await self._scan(
+            self.TABLE_CATEGORY, key_is_int=False)
         return sorted(rows, key=lambda r: (
             r.get("sortOrder", 0), r.get("id", 0)))
 
@@ -313,6 +329,79 @@ class GuardrailRepository:
         }
         return await self._put(self.TABLE_HIT_LOG, record)
 
+    async def log_hits_batch(self,
+                             records: list[dict]) -> int:
+        """批量写入(AsyncHitLogger 刷盘路径——Redis 模式
+        pipeline 一次提交, 比逐条 hset 快一个数量级; 内存
+        模式批量 dict 赋值)"""
+        now = ts()
+        if is_redis_mode():
+            client = await get_redis_client()
+            pipe = client.pipeline(transaction=False)
+            for rec in records:
+                rid = await client.incr(
+                    _k("guardrail",
+                       self.TABLE_HIT_LOG, "seq"))
+                row = {
+                    "id": rid,
+                    "traceId": rec.get("traceId", ""),
+                    "sessionId":
+                        rec.get("sessionId", ""),
+                    "memberId":
+                        int(rec.get("memberId") or 0),
+                    "direction":
+                        rec.get("direction", "INPUT"),
+                    "ruleId":
+                        int(rec.get("ruleId") or 0),
+                    "ruleWord": rec.get("ruleWord", ""),
+                    "category": rec.get("category", ""),
+                    "ruleType":
+                        rec.get("ruleType", "BLOCK"),
+                    "originalText":
+                        rec.get("originalText", ""),
+                    "processedText":
+                        rec.get("processedText", ""),
+                    "hitTime":
+                        rec.get("hitTime") or now,
+                    "feedbackStatus": 0,
+                    "feedbackBy": "",
+                    "feedbackTime": "",
+                }
+                pipe.hset(
+                    _k("guardrail", self.TABLE_HIT_LOG,
+                       rid),
+                    mapping=self._serialize(row))
+            await pipe.execute()
+            return len(records)
+        self._ensure_store()
+        bucket = self.store[self.TABLE_HIT_LOG]
+        next_id = (max(bucket.keys()) + 1) \
+            if bucket else 1
+        for i, rec in enumerate(records):
+            bucket[next_id + i] = {
+                "id": next_id + i,
+                "traceId": rec.get("traceId", ""),
+                "sessionId": rec.get("sessionId", ""),
+                "memberId":
+                    int(rec.get("memberId") or 0),
+                "direction":
+                    rec.get("direction", "INPUT"),
+                "ruleId": int(rec.get("ruleId") or 0),
+                "ruleWord": rec.get("ruleWord", ""),
+                "category": rec.get("category", ""),
+                "ruleType":
+                    rec.get("ruleType", "BLOCK"),
+                "originalText":
+                    rec.get("originalText", ""),
+                "processedText":
+                    rec.get("processedText", ""),
+                "hitTime": rec.get("hitTime") or now,
+                "feedbackStatus": 0,
+                "feedbackBy": "",
+                "feedbackTime": "",
+            }
+        return len(records)
+
     async def get_hit(self, hit_id: int) -> dict | None:
         return await self._get(self.TABLE_HIT_LOG, hit_id)
 
@@ -381,14 +470,19 @@ class GuardrailRepository:
         allow_rules: dict[int, str] = {
             r["id"]: r.get("patternValue", "")
             for r in rules}
-        allowlist: dict[str, list[str]] = {}
+        allowlist: dict[str, list[dict]] = {}
         for al in await self.list_allowlist():
             if al.get("status") != 1:
                 continue
             word = allow_rules.get(al.get("ruleId"))
             if word:
+                # 快照格式 {p: 模式, t: CONTAINS|REGEX}——
+                # 引擎按 t 分派(contains 变体穿透/regex 预编译)
                 allowlist.setdefault(
-                    word, []).append(al["allowPattern"])
+                    word, []).append({
+                        "p": al["allowPattern"],
+                        "t": al.get("matchType")
+                        or "CONTAINS"})
 
         if is_redis_mode():
             client = await get_redis_client()

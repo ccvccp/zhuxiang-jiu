@@ -24,6 +24,9 @@ import os
 import sys
 
 os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")
+# 容器自测自举: 生产 env 注入 AUTH_MODE=strict 时头鉴权被拒,
+# 测试态强制 compat(X-Role: admin 直调管理端点)
+os.environ["AUTH_MODE"] = "compat"
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 
@@ -92,17 +95,22 @@ async def main():
 
     # ========================================================
     # [03] 命中日志(INPUT 拦截/OUTPUT 替换留痕)
+    # (AsyncHitLogger 队列——flush_hits 手动刷盘即时落库)
     # ========================================================
     print("[03 命中日志]")
     from repositories.guardrail_repository import (
         get_guardrail_repo,
+    )
+    from services.local_guardrail_service import (
+        flush_hits,
     )
     repo = get_guardrail_repo()
     r = builtin.check_input(
         "未成年买酒手机13800001234",
         {"sessionId": "s-test", "memberId": 7})
     check("拦截 context 调用", r["blocked"])
-    await asyncio.sleep(0.05)  # fire-and-forget 落地
+    n = await flush_hits()
+    check("flush_hits 批量落库", n >= 1, f"got {n}")
     hits = await repo.list_hits(direction="INPUT")
     check("INPUT 留痕存在",
           len(hits) >= 1, f"got {len(hits)}")
@@ -117,7 +125,7 @@ async def main():
     builtin.filter_output(
         "全网最便宜的顶级好酒",
         {"sessionId": "s-test", "memberId": 7})
-    await asyncio.sleep(0.05)
+    await flush_hits()
     ohits = await repo.list_hits(direction="OUTPUT")
     check("OUTPUT 替换留痕", len(ohits) >= 1,
           f"got {len(ohits)}")
@@ -304,6 +312,59 @@ async def main():
             rsp.json()["data"]]
     check("删除后列表无该词",
           "路由测试词" not in vals)
+
+    # ========================================================
+    # [06] AsyncHitLogger 高性能方案(队列/背压/优雅停)
+    #      + 白名单 REGEX 型豁免
+    # ========================================================
+    print("[06 队列刷盘+REGEX豁免]")
+    from services.local_guardrail_service import (
+        AsyncHitLogger, get_hit_logger,
+    )
+
+    # REGEX 豁免(引擎构造验证——发布快照 {p,t} 新格式)
+    gr_rx = LocalGuardrail(
+        blocklist={"general_compliance": ("第一",)},
+        allowlist={"第一": [
+            {"p": "第[一二三]家店", "t": "REGEX"}]},
+        responses={},
+    )
+    r = gr_rx.check_input("我们是第二家店")
+    check("REGEX 豁免: 第二家店放行",
+          not r["blocked"])
+    r = gr_rx.check_input("销量第一哦")
+    check("REGEX 不匹配照拦", r["blocked"])
+    gr_ci = LocalGuardrail(
+        blocklist={"general_compliance": ("第一",)},
+        allowlist={"第一": ["第一家店"]},  # 旧格式兼容
+        responses={},
+    )
+    r = gr_ci.check_input("本地第一家店")
+    check("旧格式(纯字符串)豁免兼容",
+          not r["blocked"])
+
+    # 队列背压(QueueFull 丢弃不抛)
+    storm = AsyncHitLogger(maxsize=2, batch_size=50)
+    for i in range(10):
+        storm.log({"ruleWord": f"词{i}",
+                   "direction": "INPUT",
+                   "memberId": 0})
+    check("队列满丢弃不抛异常", storm._dropped >= 1)
+
+    # 定量批量 + 优雅停机刷盘
+    # (队列是全局单例——含 [05] sandbox 2 条+REGEX 拦 1 条
+    #  等此前残留, 断言以"含本轮 5 条"为准)
+    lg = get_hit_logger()
+    before = len(await repo.list_hits(limit=500))
+    for i in range(5):
+        builtin.check_input(f"拼酒测试{i}")
+    flushed = await lg.stop()  # 停 worker+刷残留
+    after = len(await repo.list_hits(limit=500))
+    check("stop 优雅刷盘(队列残留全落库)",
+          flushed >= 5
+          and after - before == flushed,
+          f"flushed={flushed} delta={after - before}")
+    lg.start()  # 恢复 worker(后续测试可用)
 
     # ========================================================
     print(f"\n===== 结果: {PASS} 通过 / {FAIL} 失败 =====")
