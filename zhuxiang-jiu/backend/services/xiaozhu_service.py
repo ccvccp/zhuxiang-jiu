@@ -1326,6 +1326,28 @@ class XiaozhuService:
         if cancel_hit:
             return cancel_hit
 
+        # 2026-10-04 本地合规引擎输入端(DFA O(N), <1ms——
+        # 酒类/招商五类拦截词前置过滤, 命中即分类话术返回,
+        # 省 rule+LLM 全链路; 语义型边缘案例仍由 LLM 分类轨
+        # system prompt 约束兜底——本地挡明确违规分层铁律)
+        from services.local_guardrail_service import (
+            get_guardrail,
+        )
+        _gr = get_guardrail().check_input(resolved)
+        if _gr["blocked"]:
+            return await self._save_turn(
+                session, channel, text, "blocked",
+                {"reply": _gr["response"],
+                 "card": None},
+                {"commandText": command_text,
+                 "audioMeta": audio_meta,
+                 "track": "guardrail",
+                 "guardrailCategory":
+                     _gr["category"],
+                 "latencyMs": round(
+                     (time.monotonic() - started)
+                     * 1000, 1)})
+
         # ④ 指令路由(绑定快捷指令 → 共创短语 → 规则轨
         #    → LLM 增强轨)
         # P1 绑定指令优先于 pattern 匹配("绑定信值档案 N"
@@ -2190,6 +2212,14 @@ class XiaozhuService:
                 _reply = (_cut[:_punct + 1] if _punct > 20
                           else _cut) \
                     + "——详情说「看新品」"
+            # 2026-10-04 本地合规引擎输出端(二级替换——
+            # 广告法绝对化/价格敏感/加盟夸大词替换合规话术,
+            # 不阻断; DFA 词表 replace, reply ≤80 字影响面小)
+            from services.local_guardrail_service import (
+                get_guardrail,
+            )
+            _reply = get_guardrail() \
+                .filter_output(_reply)
             return await self._save_turn(
                 session, channel, text, "chat",
                 {"reply": _reply, "card": None},
