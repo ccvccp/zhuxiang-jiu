@@ -394,13 +394,20 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
       + (postPt ? ' at ' + Math.round(postPt.x) + ',' + Math.round(postPt.y) : ''));
     if (postPt) {
       await sleep(2500);
-      const cdp = await page.createCDPSession();
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: postPt.x, y: postPt.y, button: 'none', pointerType: 'mouse' });
-      await sleep(150);
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: postPt.x, y: postPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
-      await sleep(90);
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: postPt.x, y: postPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
-      LOG('CDP 真实点击兜底已发');
+      // 双击防双发(2026-10-04 实证: 17:23+17:31 两条同内容——合成 click
+      // 与 CDP 兜底都生效): 兜底前先验发表特征, 已生效则跳过
+      const formGone = !page.frames().some(fr => fr === form);
+      if (formGone) {
+        LOG('合成点击已生效(表单 frame 消失) — 跳过 CDP 兜底防双发');
+      } else {
+        const cdp = await page.createCDPSession();
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: postPt.x, y: postPt.y, button: 'none', pointerType: 'mouse' });
+        await sleep(150);
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: postPt.x, y: postPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+        await sleep(90);
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: postPt.x, y: postPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+        LOG('CDP 真实点击兜底已发');
+      }
     }
 
     // 6. 成功特征轮询收口(xhs 21 轮机制迁移, 替换固定 sleep 15s):
