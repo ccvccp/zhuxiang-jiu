@@ -89,7 +89,7 @@ async def run_service():
         import services.llm_client as _lc
         captured = {}
 
-        def _fake(text, ctx):
+        def _fake(text, ctx, command_actions=""):
             captured["ctx"] = ctx
             return None
 

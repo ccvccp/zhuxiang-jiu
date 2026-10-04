@@ -1569,11 +1569,11 @@ class XiaozhuService:
                 await self._evolve_turn(
                     session, text, None, saved)
                 return saved
-            llm_hit = await self._llm_match(resolved)
-            if llm_hit:
-                cmd = next(c for c in COMMANDS
-                           if c["action"] == llm_hit["action"])
-                track = "llm"
+            # 2026-10-04 延迟优化: 前置 _llm_match 独立 LLM 路由
+            # 调用删除——与 _llm_dialog_intent 合并为单次分类
+            # (classify 的 command:<action> 白名单已扩全量,
+            # 双串行 LLM 往返减单次, 最坏省 ~3s; 同时消灭
+            # _llm_match 同步裸调阻塞事件循环的隐患)
         if cmd is None:
             # 智能应答轨(LLM 对话意图分类——XIAOZHU_LLM_MODE
             # on 时; 任意自然说法理解: affirm/negate/next/
@@ -1738,6 +1738,31 @@ class XiaozhuService:
             except Exception:  # noqa: BLE001
                 return None
         try:
+            # 2026-10-04 延迟优化②: 意图缓存(command/chat 类
+            # 上下文无关结果 Redis 300s——高频同文本(FAQ 式
+            # "你能干什么")命中跳过整段 LLM 往返; affirm/
+            # negate/next/setqty 上下文敏感不缓存)
+            _cache_key = None
+            try:
+                import hashlib as _hl
+                from repositories.backend import (
+                    is_redis_mode as _is_rm,
+                    get_redis_client as _get_rc,
+                )
+                if _is_rm():
+                    _rc = await _get_rc()
+                    _cache_key = ("zhuxiang:xiaozhu:intent:"
+                                  + _hl.sha256(command_text
+                                               .encode("utf-8")
+                                               ).hexdigest()[:24])
+                    _cached = await _rc.get(_cache_key)
+                    if _cached:
+                        import json as _cjson
+                        logger.info(
+                            "voice48_llm_intent_cache_hit")
+                        return _cjson.loads(_cached)
+            except Exception:  # noqa: BLE001
+                _cache_key = None
             turns = await self.repo.list_turns(
                 session["sessionId"])
             ctx_lines = []
@@ -1915,7 +1940,11 @@ class XiaozhuService:
                 result = await _aio.wait_for(
                     _aio.to_thread(
                         provider_client.classify_dialog_intent,
-                        command_text, context_desc),
+                        command_text, context_desc,
+                        # 2026-10-04 合并优化: 全量指令白名单
+                        # 注入(command:<action> 承接原 _llm_match
+                        # 路由职能——单次 LLM 完成路由+分类)
+                        "|".join(COMMAND_ACTIONS)),
                     timeout=2.5)
             except _aio.TimeoutError:
                 logger.info(
@@ -1926,6 +1955,23 @@ class XiaozhuService:
                         "trace=%s",
                         round((_t.monotonic() - _llm_t0)
                               * 1000), _trace)
+            # 2026-10-04 延迟优化②: 上下文无关意图写缓存
+            # (command/chat/unknown——同文本 300s 内秒回;
+            # affirm/negate/next/setqty 依赖对话状态不缓存)
+            if _cache_key and result:
+                _intent = str(result.get("intent") or "")
+                if _intent.startswith("command:") \
+                        or _intent in ("chat", "unknown"):
+                    try:
+                        import json as _wjson
+                        await _rc.set(
+                            _cache_key,
+                            _wjson.dumps(
+                                result,
+                                ensure_ascii=False),
+                            ex=300)
+                    except Exception:  # noqa: BLE001
+                        pass
             return result
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice48_smart_intent_skip: %s", exc)
@@ -4613,47 +4659,6 @@ class XiaozhuService:
             logger.debug("voice48_confirm_cancel_skip: %s",
                          exc)
             return None
-
-    async def _llm_match(self, text: str) -> dict | None:
-        """LLM 意图增强轨(XIAOZHU_LLM_MODE=on 且规则轨
-        未中时; LLM 只从白名单指令集选 action——不产内容)
-
-        49号P0 升级: System Prompt 注入工具注册表 v2 描述
-        (禁令❌+隐私成本🔒内嵌——约束内化铁律), 替代裸
-        目录拼接; 输出契约不变(白名单 action 或 null)。
-
-        Returns: {"action", "track": "llm"} 或 None(回退规则轨)
-        """
-        if not _llm_mode_enabled():
-            return None
-        try:
-            from services.llm_client import (
-                provider_client, llm_enabled,
-            )
-            if not llm_enabled():
-                return None
-            # 49号P0: 工具描述注入(约束内化——模型在推理
-            # 阶段即感知禁令与隐私成本)
-            from services.xiaozhu_fc_registry import (
-                build_tool_prompt,
-            )
-            reply = provider_client().chat(
-                system="你是语音指令路由器(可信函数调用)。"
-                       + build_tool_prompt(),
-                user=f"用户指令: {text}")
-            if not reply:
-                return None
-            import json as _json
-            m = re.search(r"\{.*\}", reply, re.S)
-            if not m:
-                return None
-            data = _json.loads(m.group())
-            action = data.get("action")
-            if action in COMMAND_ACTIONS:
-                return {"action": action, "track": "llm"}
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("voice48_llm_track_skip: %s", exc)
-        return None
 
     async def get_context_view(self,
                                member_id: int) -> dict:

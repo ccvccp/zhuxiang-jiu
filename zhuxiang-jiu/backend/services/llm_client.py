@@ -288,7 +288,8 @@ class LLMProviderClient:
     def chat(self, system: str, user: str,
              temperature: float = 0.3,
              model: str = "",
-             timeout: int = 0) -> str | None:
+             timeout: int = 0,
+             profile: str = "") -> str | None:
         """单轮对话补全, 失败/未配置返回 None(调用方回退 rule)
 
         Args:
@@ -297,6 +298,8 @@ class LLMProviderClient:
             timeout: 单次调用读超时秒数(0=全局 LLM_TIMEOUT)。
                 长文生成链(如 glm-5.3 Agent 四步)可用专用超时
                 (LLM_TIMEOUT_PROMO), 不影响用户侧快调用回退节奏。
+            profile: 独立档位("xiaozhu"=小竹意图分类快速档,
+                XIAOZHU_LLM_BASE_URL/MODEL/API_KEY; 空=全局档)。
 
         Returns:
             模型回复文本; 未配置 key、请求失败、响应异常均返回 None。
@@ -313,6 +316,20 @@ class LLMProviderClient:
                 "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
             ).rstrip("/")
             model = model or os.environ.get("LLM_MODEL", "glm-4-flash")
+            # 小竹独立档(2026-10-04 延迟优化): profile="xiaozhu"
+            # 时切快速模型(如 DashScope qwen-turbo
+            # compatible-mode); 未配置回退全局档——模型分层路由
+            if profile == "xiaozhu":
+                xz_base = os.environ.get(
+                    "XIAOZHU_LLM_BASE_URL", "").strip()
+                if xz_base:
+                    base_url = xz_base.rstrip("/")
+                    model = (os.environ.get(
+                        "XIAOZHU_LLM_MODEL", "").strip()
+                        or model)
+                    api_key = (os.environ.get(
+                        "XIAOZHU_LLM_API_KEY", "").strip()
+                        or api_key)
             payload = json.dumps({
                 "model": model,
                 "messages": [
@@ -343,7 +360,8 @@ class LLMProviderClient:
 
     def classify_dialog_intent(
             self, user_text: str,
-            context_desc: str) -> dict | None:
+            context_desc: str,
+            command_actions: str = "") -> dict | None:
         """LLM 对话意图分类(智能应答轨——规则 miss 时兜底)
 
         输入: 用户话语 + 最近对话上下文描述(商品语境/反问)
@@ -354,7 +372,15 @@ class LLMProviderClient:
         intent 集: affirm(要买/加购) | negate(不要) | next(换
         一款) | command:<action>(对应规则轨 action) | chat(导
         购闲聊) | unknown(听不懂)
+
+        2026-10-04 延迟优化合并: command_actions 传入全量
+        指令白名单(替代前置 _llm_match 独立 LLM 路由调用
+        ——双串行减单次); 走 profile="xiaozhu" 快速档。
         """
+        actions_line = (command_actions.strip()
+                        or "product.new|order.query|"
+                           "promo.query|trust.balance"
+                           "|xiaozhu.help|zs.search")
         system = (
             "你是语音购物助手的意图分类器。根据对话上下文与用户"
             "话语, 只输出一个 JSON 对象, 不要任何其他文字:\n"
@@ -373,8 +399,7 @@ class LLMProviderClient:
             "改为两件/两件就够了——设总数; '来两件/再要两件'"
             "是追加归 affirm)\n"
             "- command:<action>: 明确功能指令, action 从这些里选"
-            " product.new|order.query|promo.query|trust.balance"
-            "|xiaozhu.help|zs.search\n"
+            f" {actions_line}\n"
             "- chat: 购物闲聊/咨询(问口感/度数/怎么喝/你是谁/"
             "你是真人吗/你叫什么)——reply 给出导购回应;\n"
             "  想结束对话(退出/再见/就到这/不用了谢谢)也归"
@@ -402,7 +427,8 @@ class LLMProviderClient:
         )
         user = (str(context_desc or "").strip()
                 + "\n用户说: " + str(user_text or "").strip())
-        raw = self.chat(system, user, temperature=0.1)
+        raw = self.chat(system, user, temperature=0.1,
+                        profile="xiaozhu")
         if not raw:
             return None
         try:

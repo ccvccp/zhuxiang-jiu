@@ -91,13 +91,13 @@ class TestRegistry:
         )
         record("22 工具齐备(50号P0 voice.score"
                "+酒问话四问+map.nearby)",
-               len(TOOL_REGISTRY) == 22,
+               len(TOOL_REGISTRY) == 23,
                str(len(TOOL_REGISTRY)))
         from collections import Counter
         tiers = dict(Counter(
             t["tier"] for t in TOOL_REGISTRY.values()))
-        record("三级分布(19只读/0写/3高敏)",
-               tiers == {TIER_READONLY: 19,
+        record("三级分布(20只读/0写/3高敏)",
+               tiers == {TIER_READONLY: 20,
                          TIER_SENSITIVE: 3}, str(tiers))
 
         # 沙箱对齐自检(模块导入已校验——再显式断言)
@@ -172,7 +172,7 @@ class TestRegistry:
         # prompt 注入块(约束内化)
         prompt = build_tool_prompt()
         record("prompt 含全部工具",
-               prompt.count("action=") == 22
+               prompt.count("action=") == 23
                and "privacy_cost=0.08" in prompt)
         record("prompt 含使用规则",
                "requiresConsent" in prompt
@@ -416,35 +416,44 @@ class TestLlmInjection:
             build_tool_prompt,
         )
         build_tool_prompt()
-        # 猴子补 llm_client 捕获 system prompt
+        # 2026-10-04 合并优化: _llm_match 已并入
+        # classify_dialog_intent——验证全量指令白名单
+        # 动态注入 system prompt(路由职能承接)
         import services.llm_client as lc
         captured = {}
 
-        class FakeClient:
-            def chat(self, system="", user=""):
+        class FakeClient(lc.LLMProviderClient):
+            def chat(self, system="", user="",
+                     temperature=0.3, model="",
+                     timeout=0, profile=""):
                 captured["system"] = system
-                return '{"action": null}'
+                return ('{"intent": "command:'
+                        'trust.balance", "qty": 1}')
 
         orig = lc.provider_client
         orig_enabled = lc.llm_enabled
-        lc.provider_client = lambda: FakeClient()
+        fake = FakeClient()
+        lc.provider_client = fake
         lc.llm_enabled = lambda: True
         try:
             import os as _os
             _os.environ["XIAOZHU_LLM_MODE"] = "on"
-            from services.xiaozhu_service import (
-                XiaozhuService,
-            )
-            r = await XiaozhuService()._llm_match(
-                "随便一句测试")
-            record("LLM 轨输出契约不变",
-                   r is None or "action" in r)
-            record("工具描述注入 System Prompt",
-                   "convert_credit_to_trust"
-                   in captured.get("system", "")
-                   and "privacy_cost" in captured.get(
+            r = lc.provider_client \
+                .classify_dialog_intent(
+                "查一下信值",
+                "新对话",
+                "product.new|order.query|"
+                "trust.balance|trust.convert")
+            record("合并分类输出契约",
+                   r is None or (
+                       isinstance(r, dict)
+                       and "intent" in r))
+            record("全量指令白名单注入 Prompt",
+                   "trust.convert" in captured.get(
+                       "system", "")
+                   and "product.new" in captured.get(
                        "system", ""),
-                   captured.get("system", "")[:60])
+                   captured.get("system", "")[:80])
         finally:
             lc.provider_client = orig
             lc.llm_enabled = orig_enabled

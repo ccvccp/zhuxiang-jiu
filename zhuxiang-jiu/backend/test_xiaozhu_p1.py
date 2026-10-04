@@ -302,9 +302,16 @@ class TestLLMTrack:
         try:
             record("on开关生效",
                    _llm_mode_enabled() is True)
-            llm_hit = await XiaozhuService()._llm_match(
-                "看看有什么新品")
-            record("无key回退None", llm_hit is None)
+            # 2026-10-04 合并优化: _llm_match 已并入
+            # classify_dialog_intent(白名单注入);
+            # 无 key 时分类返回 None → 回退规则轨
+            from services.llm_client import (
+                provider_client,
+            )
+            cl = provider_client.classify_dialog_intent(
+                "看看有什么新品", "新对话",
+                "product.new|order.query")
+            record("无key分类回退None", cl is None)
             r = await _text(sid, "小竹，帮我看看天气")
             record("无key回退general",
                    "还在学着呢" in r["reply"])
