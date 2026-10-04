@@ -27,6 +27,7 @@ version=1)并写热更新键——运营后台开箱即用。
 
 import json
 import logging
+import os
 
 from core.helpers import ts
 
@@ -40,6 +41,18 @@ logger = logging.getLogger("guardrail_repo")
 RULES_KEY = "zhuxiang:xiaozhu:guardrail:rules"
 PUBLISHED_KEY = "zhuxiang:guardrail:published"
 UPDATE_CHANNEL = "zhuxiang:guardrail:update"
+
+
+def _hit_ttl() -> int:
+    """命中日志键 TTL 秒数(GUARDRAIL_HIT_TTL_DAYS, 默认 180 天
+    审计保留; 0=永不过期)。演进路线图映射: Redis 键过期承担
+    ClickHouse 方案中 TTL 子句的职能——防日志无限膨胀。"""
+    try:
+        days = int(os.environ.get(
+            "GUARDRAIL_HIT_TTL_DAYS", "180"))
+    except ValueError:
+        days = 180
+    return days * 86400 if days > 0 else 0
 
 
 class GuardrailRepository:
@@ -327,7 +340,23 @@ class GuardrailRepository:
             "feedbackBy": "",
             "feedbackTime": "",
         }
-        return await self._put(self.TABLE_HIT_LOG, record)
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("guardrail",
+                     self.TABLE_HIT_LOG, rid)
+            ttl = _hit_ttl()
+            if ttl:
+                await client.hset(
+                    key,
+                    mapping=self._serialize(record))
+                await client.expire(key, ttl)
+            else:
+                await client.hset(
+                    key,
+                    mapping=self._serialize(record))
+            return record
+        return await self._put(self.TABLE_HIT_LOG,
+                               record)
 
     async def log_hits_batch(self,
                              records: list[dict]) -> int:
@@ -337,6 +366,7 @@ class GuardrailRepository:
         now = ts()
         if is_redis_mode():
             client = await get_redis_client()
+            ttl = _hit_ttl()
             pipe = client.pipeline(transaction=False)
             for rec in records:
                 rid = await client.incr(
@@ -367,10 +397,13 @@ class GuardrailRepository:
                     "feedbackBy": "",
                     "feedbackTime": "",
                 }
+                key = _k("guardrail",
+                         self.TABLE_HIT_LOG, rid)
                 pipe.hset(
-                    _k("guardrail", self.TABLE_HIT_LOG,
-                       rid),
+                    key,
                     mapping=self._serialize(row))
+                if ttl:
+                    pipe.expire(key, ttl)
             await pipe.execute()
             return len(records)
         self._ensure_store()

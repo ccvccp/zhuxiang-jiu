@@ -351,6 +351,26 @@ async def main():
                    "memberId": 0})
     check("队列满丢弃不抛异常", storm._dropped >= 1)
 
+    # TTL 治理(GUARDRAIL_HIT_TTL_DAYS: 默认 180 天/
+    # 0 关闭/非法值回退默认——Redis-only 行为取策略函数)
+    from repositories.guardrail_repository import (
+        _hit_ttl,
+    )
+    os.environ.pop("GUARDRAIL_HIT_TTL_DAYS", None)
+    default_ttl = _hit_ttl()
+    check("TTL 默认 180 天",
+          default_ttl == 180 * 86400,
+          f"got {default_ttl}")
+    os.environ["GUARDRAIL_HIT_TTL_DAYS"] = "0"
+    check("TTL=0 永不过期", _hit_ttl() == 0)
+    os.environ["GUARDRAIL_HIT_TTL_DAYS"] = "abc"
+    check("TTL 非法值回退默认",
+          _hit_ttl() == 180 * 86400)
+    os.environ["GUARDRAIL_HIT_TTL_DAYS"] = "90"
+    check("TTL 自定义 90 天",
+          _hit_ttl() == 90 * 86400)
+    os.environ.pop("GUARDRAIL_HIT_TTL_DAYS", None)
+
     # 定量批量 + 优雅停机刷盘
     # (队列是全局单例——含 [05] sandbox 2 条+REGEX 拦 1 条
     #  等此前残留, 断言以"含本轮 5 条"为准)
