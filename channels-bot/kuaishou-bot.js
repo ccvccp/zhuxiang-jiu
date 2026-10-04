@@ -21,9 +21,11 @@ const LOG = (m) => {
 };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// [CAL] 快手创作者平台入口——首页确定性高, 发布页路径待 probe 修正
+// 发布页实证(2026-10-05 probe3): header「发布作品」点击 →
+// cp.kuaishou.com/article/publish/video, input[type=file]×1 主文档
 const KS_HOME = 'https://cp.kuaishou.com/';
-const KS_PUBLISH_URL = process.env.KS_PUBLISH_URL || KS_HOME;
+const KS_PUBLISH_URL = process.env.KS_PUBLISH_URL
+  || 'https://cp.kuaishou.com/article/publish/video';
 
 (async () => {
   const browser = await puppeteer.launch({
@@ -140,52 +142,89 @@ const KS_PUBLISH_URL = process.env.KS_PUBLISH_URL || KS_HOME;
     LOG('desc typed via keyboard (上传中并行填写)');
   } catch (e) { LOG('desc type err: ' + e.message); }
 
-  // 3. AIGC 声明([CAL] 控件形态; 快手 AIGC 标识义务, 找不到仅告警)
+  // 3. AIGC 声明(2026-10-05 probe4 实证: 发布设置面板在首屏, AIGC
+  //    控件在页面底部"更多设置"——先滚到底再扫; 找不到仅告警不阻断)
   try {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await sleep(1500);
     const labeled = await page.evaluate(() => {
       const els = Array.from(document.querySelectorAll(
-        'label, span, div[role=checkbox], [class*=checkbox], [class*=switch]'));
-      const t = els.find(el => /AI.{0,4}生成|人工智能|AIGC/.test(
-        (el.innerText || el.getAttribute('aria-label') || '')));
-      if (t) { t.click(); return (t.innerText || '').slice(0, 30); }
+        'label, span, div[role=checkbox], [class*=checkbox], [class*=switch], span, div'));
+      const t = els.find(el => el.children.length <= 1
+        && /AI.{0,4}生成|人工智能|AIGC/.test(
+          (el.innerText || el.getAttribute('aria-label') || '')));
+      if (t) {
+        const target = t.children.length === 0 ? t : t;
+        target.scrollIntoView({ block: 'center' });
+        target.click();
+        return (t.innerText || '').slice(0, 30);
+      }
       return '';
     });
     LOG(labeled ? 'AIGC 声明已点: [' + labeled + ']'
-                : 'WARN AIGC声明控件未找到 — [CAL] 待现场校准(不阻断)');
+                : 'WARN AIGC声明控件未找到(滚底后) — 待人工定位(不阻断)');
+    await page.evaluate(() => window.scrollTo(0, 0));
   } catch (e) { LOG('AIGC label err: ' + e.message); }
 
-  // 4. 等上传完成(60s 下限) → 发布按钮(滚入视口+防双发 guard)
+  // 4. 等上传完成(60s 下限) → 发布按钮(probe4 实证: 为 DIV 叶子
+  //    精确文案「发布」, 非 button 标签; 「发布作品/立即发布」为
+  //    干扰项须精确匹配; 滚入视口+防双发 guard)
   for (let i = 0; i < 12; i++) { await sleep(5000); }
   LOG('upload wait done (>=60s), enter publish-btn flow');
+  const findPubBtn = () => page.evaluate(() => {
+    const els = Array.from(document.querySelectorAll(
+      'button, [role=button], div, span, a'))
+      .filter(el => el.children.length === 0
+                    && (el.innerText || '').trim() === '发布');
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && r.y >= 0 && r.y <= 890) {
+        el.scrollIntoView({ block: 'center' });
+        const r2 = el.getBoundingClientRect();
+        // 灰置判定: opacity/pointer-events 粗筛
+        const st = getComputedStyle(el);
+        if (st.opacity !== '0' && st.pointerEvents !== 'none') {
+          return { x: r2.x + r2.width / 2, y: r2.y + r2.height / 2 };
+        }
+      }
+    }
+    return null;
+  });
   let clicked = false;
   for (let i = 0; i < 60 && !clicked; i++) {
     try {
-      const btnPt = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button, [role=button]'));
-        const b = btns.find(x => /^(发布|发表)$/.test((x.innerText || '').trim()) && !x.disabled);
-        if (!b) return null;
-        b.scrollIntoView({ block: 'center' });
-        const r = b.getBoundingClientRect();
-        if (!(r.width > 0) || r.y < 0 || r.y > 890) return null;
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-      });
+      const btnPt = await findPubBtn();
       if (!btnPt) { if (i % 4 === 0) LOG('wait publish-btn poll ' + (i * 5) + 's'); await sleep(5000); continue; }
       const ok = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button, [role=button]'));
-        const b = btns.find(x => /^(发布|发表)$/.test((x.innerText || '').trim()) && !x.disabled);
-        if (!b) return false;
-        b.click();
-        return true;
+        const els = Array.from(document.querySelectorAll(
+          'button, [role=button], div, span, a'))
+          .filter(el => el.children.length === 0
+                        && (el.innerText || '').trim() === '发布');
+        for (const el of els) {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.y >= 0 && r.y <= 890) { el.click(); return true; }
+        }
+        return false;
       });
       if (ok) {
         clicked = true;
         LOG('click 发布 (合成) at ' + Math.round(btnPt.x) + ',' + Math.round(btnPt.y));
         await sleep(2500);
-        // 防双发 guard(双平台实证范式): 合成点击已生效(URL 离开发布页)
-        // 则跳过 CDP 兜底
-        const left = !/publish|upload/.test(page.url());
-        if (left) {
-          LOG('合成点击已生效(URL 已离开发布页) — 跳过 CDP 兜底防双发');
+        // 防双发 guard(快手形态): 发布生效特征 = 成功文本出现 或
+        // URL 离开发布页 或 发布按钮消失; 未证生效才 CDP 兜底
+        const gone = await page.evaluate(() => {
+          const t = (document.body.innerText || '');
+          if (/发布成功|审核中|已提交/.test(t)) return 'success-text';
+          const els = Array.from(document.querySelectorAll(
+            'button, [role=button], div, span, a'))
+            .filter(el => el.children.length === 0
+                          && (el.innerText || '').trim() === '发布'
+                          && el.getBoundingClientRect().width > 0);
+          return els.length ? '' : 'btn-gone';
+        });
+        const urlLeft = !/publish\/video/.test(page.url());
+        if (gone || urlLeft) {
+          LOG('合成点击已生效(' + (gone || 'url-left') + ') — 跳过 CDP 兜底防双发');
         } else {
           const cdp = await page.createCDPSession();
           await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: btnPt.x, y: btnPt.y, button: 'none', pointerType: 'mouse' });
