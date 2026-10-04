@@ -632,6 +632,17 @@ async def _on_startup():
     start_guardrail_listener()
     # 命中日志批量刷盘 worker(内存队列→定时/定量 pipeline 批量)
     get_hit_logger().start()
+    # 阶段 1.5 资产(默认 off): Stream 消费者——多实例/kill -9
+    # 零丢失; GUARDRAIL_STREAM_MODE=on 启用(见演进路线图)
+    import os as _os
+    if _os.environ.get(
+            "GUARDRAIL_STREAM_MODE", "off"
+    ).lower() in ("1", "on", "true"):
+        from services.guardrail_stream_consumer \
+            import HitLogStreamConsumer
+        _stream_consumer = HitLogStreamConsumer()
+        await _stream_consumer.start()
+        print("[startup] guardrail stream consumer ON")
     # 41号·AI智能代驾: 学习回流(RIDE_LEARNING_AUTO=off 可关闭)
     from services.ride_scheduler import start_learning_scheduler as start_ride_learning
     start_ride_learning()

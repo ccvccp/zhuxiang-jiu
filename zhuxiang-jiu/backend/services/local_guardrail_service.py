@@ -494,7 +494,38 @@ class AsyncHitLogger:
     # -- 主链路接口(同步非阻塞) --------------------------
 
     def log(self, record: dict) -> None:
-        """非阻塞入队; 队列满(命中风暴)丢弃并计数告警"""
+        """非阻塞记录命中。
+
+        出口分流(GUARDRAIL_STREAM_MODE):
+            off → 内存队列(现状路径, put_nowait <1ms)
+            on  → Redis Stream XADD(阶段 1.5——多实例/
+                  kill -9 零丢失; fire-and-forget task,
+                  失败回落内存队列)
+        队列满(命中风暴)丢弃并计数告警。
+        """
+        from services.guardrail_stream_consumer \
+            import stream_mode_on
+        if stream_mode_on():
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._xadd_or_queue(record))
+                return
+            except RuntimeError:
+                pass  # 无循环(纯同步测试)→走内存队列
+        self._enqueue(record)
+
+    async def _xadd_or_queue(self, record: dict):
+        """Stream 模式出口: XADD 失败回落内存队列"""
+        try:
+            from services.\
+                guardrail_stream_consumer \
+                import xadd_hit
+            await xadd_hit(record)
+        except Exception:  # noqa: BLE001
+            self._enqueue(record)
+
+    def _enqueue(self, record: dict) -> None:
         try:
             self._queue.put_nowait(record)
         except asyncio.QueueFull:

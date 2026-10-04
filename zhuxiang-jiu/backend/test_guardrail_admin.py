@@ -471,6 +471,41 @@ async def main():
           n_retry >= 1, f"got {n_retry}")
 
     # ========================================================
+    # [08] Redis Stream 消费者模板(阶段 1.5 资产, 默认 off)
+    # ========================================================
+    print("[08 Stream 模板]")
+    from services.guardrail_stream_consumer import (
+        stream_mode_on, HitLogStreamConsumer,
+        STREAM_KEY, DEAD_LETTER_MAX_RETRY,
+        CONSUMER_NAME,
+    )
+    os.environ.pop("GUARDRAIL_STREAM_MODE", None)
+    check("Stream 模式默认 off",
+          stream_mode_on() is False)
+    os.environ["GUARDRAIL_STREAM_MODE"] = "on"
+    check("Stream 开关识别 on",
+          stream_mode_on() is True)
+    os.environ["GUARDRAIL_STREAM_MODE"] = "off"
+    check("Stream 开关识别 off",
+          stream_mode_on() is False)
+    os.environ.pop("GUARDRAIL_STREAM_MODE", None)
+    check("消费者名动态生成(hostname+pid)",
+          "-" in CONSUMER_NAME
+          and CONSUMER_NAME != "consumer-node-01")
+    check("死信阈值配置(默认 5)",
+          DEAD_LETTER_MAX_RETRY == 5)
+    check("Stream 键前缀合规",
+          STREAM_KEY.startswith("zhuxiang:"))
+    # off 模式下引擎 log() 仍走内存队列(分流不劫持现状路径)
+    import services.local_guardrail_service as _lgs
+    lg2 = _lgs.get_hit_logger()
+    before_q = lg2._queue.qsize()
+    builtin.check_input("拼酒stream探针")
+    check("off 模式命中仍入内存队列",
+          lg2._queue.qsize() == before_q + 1)
+    await _flush_hits()
+
+    # ========================================================
     print(f"\n===== 结果: {PASS} 通过 / {FAIL} 失败 =====")
     return FAIL == 0
 
