@@ -77,8 +77,8 @@ def wallet_balance() -> float | None:
     return None
 
 ADH = {
-    "host": "connect.weste.seetacloud.com",
-    "port": 37632, "user": "root", "password": "dtFrMiCbH2qM",
+    "host": "connect.westd.seetacloud.com",
+    "port": 15639, "user": "root", "password": "oKvKX3BbXI7A",
 }
 # 口播基准图: 本地(随代码版本) → 每次跑批前自动上传远端(md5 校验)
 DH_IMAGE_LOCAL = Path(__file__).resolve().parent / "assets" / "ip" / "zhuxiaomei_front.jpg"

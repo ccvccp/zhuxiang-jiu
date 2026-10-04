@@ -3,9 +3,10 @@
   "botScript": "xhs-bot.js",
   "loginStateFile": "xhs_login_state.json",
   "profileDir": "xhs-profile",
-  "snapshot": true,
+  "snapshot": false,
   "botAction": "probe",
   "waitLoginMinutes": 3,
   "allowEnter": false,
-  "intervalHours": 24
+  "intervalHours": 24,
+  "runOnce": true
 }
